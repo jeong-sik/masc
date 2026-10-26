@@ -1,0 +1,407 @@
+[2026-10-26 21:36:06] [INFO] [MCP] Tag registry initialized: 182 tools registered
+[2026-10-26 21:36:06] [INFO] [MCP] Tag registry initialized: 182 tools registered
+[2026-10-26 21:36:07] [INFO] [Server] [Startup] retained checkpoint sweep: removed=0 bytes=0 live_references=0 failures=0
+[2026-10-26 21:36:07] [WARN] [Dashboard] dashboard source identity unavailable — inspect /health dashboard_surface.recovery
+[2026-10-26 21:36:07] [INFO] [Server] [auto 127.0.0.1:59031] HTTP auto-detect mode: HTTP/1.1 + HTTP/2 h2c on same port
+[2026-10-26 21:36:07] [INFO] [Server] Llm_metric_bridge installed (masc_llm_provider_http_status_total, inference-events JSONL)
+[2026-10-26 21:36:07] [INFO] [Server] Backend_mutex_metrics installed (masc_backend_mutex_* metrics)
+[2026-10-26 21:36:07] [INFO] [Server] Fd_accountant OS resource observers installed
+[2026-10-26 21:36:07] [INFO] [Server] Runtime_log_sink installed (agent core -> MASC structured log)
+[2026-10-26 21:36:07] [INFO] [Server] preserved existing base-path config root without refilling operator-owned entries: /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schedule-restart-_l_miift/.masc/config
+[2026-10-26 21:36:07] [INFO] [Server] builtin Skills up to date: browser-lanes, browser-live-follow-read, browser-navigate-read, diagram-in-chat, evidence-review, frontend-change, lane-addon-author, observe-act-verify, prior-art, root-cause-first, run-and-read, skill-authoring, verify-before-claiming-done, work-intake
+[2026-10-26 21:36:07] [INFO] [Misc] model_catalog: no explicit catalog path resolved; using agent_core ambient model catalog
+[2026-10-26 21:36:07] [INFO] [Runtime] resolved runtime config: {"stream_idle_timeout_sec":{"value":600.0,"source":"failsafe_floor"},"first_event_timeout_sec":{"value":600.0,"source":"failsafe_floor"},"body_timeout_override_sec":{"value":null,"source":"default"},"provider_call_deadline_sec":{"value":900.0,"source":"failsafe_floor"}}
+[2026-10-26 21:36:07] [INFO] [Runtime] keeper stream idle timeout resolved: 600.0s (source: failsafe_floor)
+[2026-10-26 21:36:07] [INFO] [Runtime] keeper first-event (TTFT/prefill) timeout resolved: 600.0s (source: failsafe_floor)
+[2026-10-26 21:36:07] [INFO] [Runtime] keeper provider-call no-progress threshold resolved: 900.0s (source: failsafe_floor)
+[2026-10-26 21:36:07] [INFO] [Backend] Board: JSONL default backend
+[2026-10-26 21:36:07] [INFO] [Board] Board flusher actor started
+[2026-10-26 21:36:07] [INFO] [Board] JSONL backend initialized
+[2026-10-26 21:36:07] [INFO] [Server] Runtime default initialized: ollama_cloud.deepseek-v4.1-flash
+[2026-10-26 21:36:07] [INFO] [Server] Skill snapshot ready: skills=0 rejections=0 (file: /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schedule-restart-_l_miift/.masc/config/runtime.toml) snapshot_revision=8e15d0bed0019dc32671f5de52f034346d0aef4dcaa4940bdf52c38a3a2d95b2 catalog_revision=fc45c6d6f22eab75095461324a27dc01e4d5e43668e92a27c41bcb4f564fcc0d
+[2026-10-26 21:36:07] [INFO] [Server] exact_output: lane "verifier_exact" cannot judge: exact-output lane "verifier_exact" is not configured
+[2026-10-26 21:36:07] [WARN] [Server] exact_output: librarian is degraded until [runtime.exact_output_lanes.librarian_exact] is configured with AGENT_CORE target refs
+[2026-10-26 21:36:07] [WARN] [Server] exact_output: completion authority is degraded until [runtime.exact_output_lanes.verifier_exact] is configured with AGENT_CORE target refs
+[2026-10-26 21:36:07] [WARN] [Server] exact_output: the Stagehand browser lane is degraded until [runtime.exact_output_lanes.browser_stagehand_exact] is configured with AGENT_CORE target refs
+[2026-10-26 21:36:07] [INFO] [Misc] exact_output: immutable resolver-and-lane registry published from AGENT_CORE embedded catalog with 1 runtime binding(s) as targets
+[2026-10-26 21:36:07] [INFO] [Server] State created (runtime state) in 0.1s
+[2026-10-26 21:36:07] [INFO] [Server] publication recovery owner discovery settled
+[2026-10-26 21:36:07] [INFO] [Server] startup Admin credential ready for admin (source=minted)
+[2026-10-26 21:36:07] [INFO] [Server] startup internal keeper MCP token synced via MASC_INTERNAL_MCP_TOKEN (source=generated)
+[2026-10-26 21:36:07] [INFO] [Server] startup skipped credential sync for 1 non-bootable keeper(s): [imp=declarative_autoboot_disabled]
+[2026-10-26 21:36:07] [INFO] [Keeper] keeper_owner: installed 0 single-owner actor(s) before persistence recovery
+[2026-10-26 21:36:07] [INFO] [Server] keeper_persistence_prepare: stage=shutdown elapsed_seconds=0.000082 examined=0 failures=0
+[2026-10-26 21:36:07] [INFO] [Server] keeper_persistence_prepare: stage=store_reconcile elapsed_seconds=0.000431 examined=0 failures=0
+[2026-10-26 21:36:07] [INFO] [Keeper] boot reconcile: examined=0 readable=0 quarantined=0 failed=0
+[2026-10-26 21:36:07] [INFO] [Server] keeper_persistence_prepare: stage=transcript_tail elapsed_seconds=0.000087 examined=0 failures=0
+[2026-10-26 21:36:07] [INFO] [Server] Runtime_params restored from /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schedule-restart-_l_miift
+[2026-10-26 21:36:07] [INFO] [Server] Bootstrap completed in 0.1s
+[2026-10-26 21:36:07] [INFO] [Server] Native execution runtime created (14 codec domains)
+[2026-10-26 21:36:07] [INFO] [Server] Domain_pool created (14 shared domains, 1 independent snapshot codec domain) for dashboard/keeper compute
+[2026-10-26 21:36:07] [INFO] [ServerBootstrap] resolved: source=local_masc path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schedule-restart-_l_miift/.masc/config
+[2026-10-26 21:36:07] [INFO] [Server] boot stage=resolved elapsed_ms=0.0 total_ms=0.0
+[2026-10-26 21:36:07] [INFO] [Server] boot stage=prompt_assets.begin elapsed_ms=0.0 total_ms=0.0
+[2026-10-26 21:36:07] [INFO] [Server] boot stage=prompt_assets.end elapsed_ms=59.8 total_ms=59.8
+[2026-10-26 21:36:07] [INFO] [Server] boot stage=tool_assets.begin elapsed_ms=0.0 total_ms=59.8
+[2026-10-26 21:36:07] [INFO] [Server] boot stage=tool_assets.end elapsed_ms=53.7 total_ms=113.5
+[2026-10-26 21:36:07] [INFO] [Server] boot stage=mcp_assets.begin elapsed_ms=0.0 total_ms=113.5
+[2026-10-26 21:36:07] [INFO] [Server] boot stage=mcp_assets.end elapsed_ms=1.3 total_ms=114.8
+[2026-10-26 21:36:07] [INFO] [Server] boot stage=embedded_validation.begin elapsed_ms=0.1 total_ms=114.9
+[2026-10-26 21:36:07] [INFO] [Server] boot stage=embedded_validation.end elapsed_ms=38.7 total_ms=153.6
+[2026-10-26 21:36:07] [INFO] [Server] boot stage=prompt_registry.begin elapsed_ms=0.1 total_ms=153.7
+[2026-10-26 21:36:07] [INFO] [Server] boot stage=prompt_registry.end elapsed_ms=2.3 total_ms=156.0
+[2026-10-26 21:36:07] [INFO] [Server] boot stage=gate_persistence.begin elapsed_ms=0.0 total_ms=156.0
+[2026-10-26 21:36:07] [INFO] [Server] keeper_gate: installed durable queue base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schedule-restart-_l_miift pending=0 replayed=0 replay_failed=0 retired=0
+[2026-10-26 21:36:07] [INFO] [Server] keeper_gate: recovered Auto Judge work requested=0 started=0 finalized=0 skipped=0 failed=0
+[2026-10-26 21:36:07] [INFO] [Server] boot stage=gate_persistence.end elapsed_ms=0.2 total_ms=156.2
+[2026-10-26 21:36:07] [INFO] [Server] boot stage=mcp_sessions.begin elapsed_ms=0.0 total_ms=156.2
+[2026-10-26 21:36:07] [INFO] [Server] boot stage=mcp_sessions.end elapsed_ms=0.1 total_ms=156.3
+[2026-10-26 21:36:07] [INFO] [Server] boot stage=lazy_tasks.begin elapsed_ms=0.2 total_ms=156.5
+[2026-10-26 21:36:07] [INFO] [Server] lazy_task_group: starting initialize (1 tasks)
+[2026-10-26 21:36:07] [INFO] [Server] lazy_task: starting restore_sessions
+[2026-10-26 21:36:07] [INFO] [Server] boot stage=lazy_tasks.end elapsed_ms=0.1 total_ms=156.5
+[2026-10-26 21:36:07] [INFO] [Server] boot stage=keeper_persistence.begin elapsed_ms=0.0 total_ms=156.5
+[2026-10-26 21:36:07] [INFO] [Server] lazy_task: finished restore_sessions
+[2026-10-26 21:36:07] [INFO] [Server] lazy_task_group: finished initialize
+[2026-10-26 21:36:07] [INFO] [Keeper] autoboot: disabled via MASC_KEEPER_AUTONOMOUS_ENABLED=false
+[2026-10-26 21:36:07] [INFO] [Discord] discord_presence_bridge: starting (poll interval 30s)
+[2026-10-26 21:36:07] [INFO] [startup] subsystems: keeper loops started
+[2026-10-26 21:36:07] [INFO] [Server] boot stage=keeper_persistence.end elapsed_ms=0.7 total_ms=157.2
+[2026-10-26 21:36:07] [INFO] [Server] boot stage=owner_publication.begin elapsed_ms=0.0 total_ms=157.2
+[2026-10-26 21:36:07] [INFO] [Server] boot stage=owner_publication.end elapsed_ms=0.5 total_ms=157.7
+[2026-10-26 21:36:07] [INFO] [Server] boot stage=listener_wait.begin elapsed_ms=36.1 total_ms=193.8
+[2026-10-26 21:36:07] [INFO] [Server] boot stage=listener_wait.end elapsed_ms=0.0 total_ms=193.8
+[2026-10-26 21:36:07] [INFO] [Server] scheduler lag probe started on the main domain: interval=100ms window=60s
+[2026-10-26 21:36:07] [INFO] [Dashboard] starting full_health_snapshot refresh loop
+[2026-10-26 21:36:07] [INFO] [Server] boot stage=post_ready_lanes.begin elapsed_ms=0.3 total_ms=194.1
+[2026-10-26 21:36:07] [INFO] [Misc] candle: off (no candle.toml)
+[2026-10-26 21:36:07] [INFO] [Server] startup maintenance: starting jsonl_prune
+[2026-10-26 21:36:07] [INFO] [Server] startup maintenance: starting microvm_guest_sweep
+[2026-10-26 21:36:07] [INFO] [Keeper] autoboot: durable Librarian catch-up submitted for 0 unlaunched keeper(s) []
+[2026-10-26 21:36:07] [INFO] [Server] host_fd_pressure_poller: started path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schedule-restart-_l_miift/.masc/masc-host-pressure.state source=default interval=1.0s
+[2026-10-26 21:36:07] [INFO] [Metrics] tool_metrics_persist: hydrated 0 record(s), pruned=0 record(s)
+[2026-10-26 21:36:07] [INFO] [Misc] keeper_tool_call_log: async flush fiber started (interval=0.5s, capacity=4096)
+[2026-10-26 21:36:07] [INFO] [Keeper] transition_audit: async flush fiber started (interval=0.5s, capacity=4096)
+[2026-10-26 21:36:07] [INFO] [Server] OTEL_EXPORTER_OTLP_ENDPOINT not set; AGENT_CORE telemetry export disabled
+[2026-10-26 21:36:07] [INFO] [Server] boot stage=post_ready_lanes.end elapsed_ms=95.2 total_ms=289.3
+[2026-10-26 21:36:07] [INFO] [Server] boot stage=discord_gateway.begin elapsed_ms=0.1 total_ms=289.4
+[2026-10-26 21:36:07] [WARN] [Server] RFC-0203: DISCORD_BOT_TOKEN is unset; in-process Discord gateway not started
+[2026-10-26 21:36:07] [INFO] [Server] boot stage=discord_gateway.end elapsed_ms=1.2 total_ms=290.6
+[2026-10-26 21:36:07] [INFO] [Server] boot stage=slack_gateway.begin elapsed_ms=0.1 total_ms=290.6
+[2026-10-26 21:36:07] [INFO] [Server] keeper transition outbox startup discovered=0 processed=0 deferred=0 converged=0 no_pending=0 claim_busy=0 shutdown_reserved=0 failures=0
+[2026-10-26 21:36:07] [INFO] [Server] workspace curator pass restores {"pass_id":"01a17836-0240-7000-be80-0642b5d8b5d8","base_path":"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schedule-restart-_l_miift","restores":[{"domain":"classification","phase":"discovery","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"classification","phase":"observer","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"classification","phase":"successor","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"classification","phase":"primary","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"briefing","phase":"discovery","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"briefing","phase":"observer","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"briefing","phase":"successor","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"briefing","phase":"primary","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"outside_domain","phase":"discovery","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"outside_domain","phase":"observer","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"outside_domain","phase":"successor","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"outside_domain","phase":"primary","calls":0,"errors":0,"raised":0,"cancelled":0}]}
+[2026-10-26 21:36:07] [WARN] [Server] RFC-0317: SLACK_APP_TOKEN is unset; in-process Slack gateway not started
+[2026-10-26 21:36:07] [INFO] [Server] boot stage=slack_gateway.end elapsed_ms=0.8 total_ms=291.4
+[2026-10-26 21:36:07] [INFO] [Server] boot stage=slack_poll.begin elapsed_ms=0.0 total_ms=291.4
+[2026-10-26 21:36:07] [WARN] [Server] slack-lane: SLACK_BOT_TOKEN is unset; poll lane not started
+[2026-10-26 21:36:07] [INFO] [Server] boot stage=slack_poll.end elapsed_ms=0.0 total_ms=291.4
+[2026-10-26 21:36:07] [INFO] [Server] boot stage=imessage_gateway.begin elapsed_ms=0.0 total_ms=291.4
+[2026-10-26 21:36:07] [WARN] [Server] imessage: in-process gateway not started (chat.db at /Users/dancer/Library/Messages/chat.db is not readable: grant Full Disk Access in System Settings > Privacy & Security > Full Disk Access)
+[2026-10-26 21:36:07] [INFO] [Server] boot stage=imessage_gateway.end elapsed_ms=0.1 total_ms=291.5
+MASC MCP Server listening on http://127.0.0.1:59031
+   Base path: /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schedule-restart-_l_miift
+   MASC dir: /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schedule-restart-_l_miift/.masc
+[2026-10-26 21:36:07] [INFO] [Server] boot stage=telegram_gateway.begin elapsed_ms=0.0 total_ms=291.6
+[2026-10-26 21:36:07] [INFO] [Server] boot stage=telegram_gateway.end elapsed_ms=0.1 total_ms=291.6
+   Process cwd: /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schedule-restart-_l_miift
+   MASC_BASE_PATH(env): /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schedule-restart-_l_miift
+   Base path source: explicit_cli
+   GET  /mcp → SSE stream (notifications)
+   POST /mcp → JSON-RPC (Accept: application/json, text/event-stream)
+   DELETE /mcp → Session termination
+[2026-10-26 21:36:07] [INFO] [Server] boot stage=listening_banner.begin elapsed_ms=0.0 total_ms=291.6
+   POST /graphql → GraphQL (read-only)
+   GET  /api/v1/activity/events → Activity replay API
+   GET  /api/v1/activity/graph → Activity graph snapshot
+   GET  /health → Health check
+   GET  /ws → same-origin WebSocket upgrade or discovery
+[2026-10-26 21:36:07] [INFO] [Server] boot stage=listening_banner.end elapsed_ms=0.1 total_ms=291.7
+[2026-10-26 21:36:07] [INFO] [Server] gRPC transport disabled (set MASC_GRPC_ENABLED=1 to enable)
+[2026-10-26 21:36:07] [INFO] [Dashboard] starting execution refresh loop
+[2026-10-26 21:36:07] [INFO] [Dashboard] starting transport_health refresh loop
+[2026-10-26 21:36:07] [INFO] [Dashboard] starting execution_trust refresh loop
+[2026-10-26 21:36:07] [INFO] [Dashboard] starting mission refresh loop
+[2026-10-26 21:36:07] [INFO] [Dashboard] starting operator_snapshot refresh loop
+[2026-10-26 21:36:07] [INFO] [Dashboard] starting operator_digest refresh loop
+[2026-10-26 21:36:07] [INFO] [Dashboard] transport_health warm cache done (0.0s)
+[2026-10-26 21:36:07] [INFO] [Dashboard] board surface pre-warmed (0.6ms)
+[2026-10-26 21:36:07] [INFO] [Dashboard] planning surface pre-warmed (1.0ms)
+[2026-10-26 21:36:07] [INFO] [Dashboard] config surface pre-warmed (1.2ms)
+[2026-10-26 21:36:07] [INFO] [Dashboard] execution_trust warm cache done (0.0s)
+[2026-10-26 21:36:07] [INFO] [Dashboard] keeper-memory-health surface pre-warmed (2.8ms)
+[2026-10-26 21:36:07] [INFO] [Dashboard] execution warm cache done (0.0s)
+[2026-10-26 21:36:07] [INFO] [Server] startup maintenance: finished jsonl_prune elapsed_s=0.105
+[2026-10-26 21:36:07] [INFO] [Dashboard] light shell cache pre-warmed (9.8ms)
+[2026-10-26 21:36:07] [INFO] [MCP] tools/call: masc_keeper_up (id=2, session=mcp_VZ9tVOQ_5Ck_20xz)
+[2026-10-26 21:36:07] [INFO] [Session] [AgentRegistry] New identity: schedule-audit-admin (session=b853810a, mcp=mcp_VZ9tVOQ_5Ck_20xz)
+[2026-10-26 21:36:07] [INFO] [Dashboard] shell cache pre-warmed (11.7ms)
+[2026-10-26 21:36:07] [INFO] [Dashboard] all primary dashboard surfaces pre-warmed in parallel (11.8ms total)
+[2026-10-26 21:36:07] [INFO] [Session] Session registered: schedule-audit-admin (total: 1)
+[2026-10-26 21:36:07] [INFO] [Keeper] create_keeper: starting for name=audit-restart-a
+[2026-10-26 21:36:08] [INFO] [Keeper] create_keeper: starting keepalive for name=audit-restart-a
+[2026-10-26 21:36:08] [INFO] [Keeper] registry: registering keeper name=audit-restart-a base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schedule-restart-_l_miift phase=offline
+[2026-10-26 21:36:08] [INFO] [Keeper] registry: phase transition name=audit-restart-a old=offline new=running event=fiber_started
+[2026-10-26 21:36:08] [WARN] [Keeper/audit-restart-a] durable Librarian range not consumed: Original history publication is blocked: Original history Addon is not attached; source remains unconsumed
+[2026-10-26 21:36:08] [INFO] [Keeper] board_attention_worker_start keeper=audit-restart-a epoch=board-attention-worker-ba50e593-6cf6-4ea0-8406-883600c3c185
+[2026-10-26 21:36:08] [INFO] [Keeper] create_keeper: completed for name=audit-restart-a trace_id=trace-1793018167984-00000
+[2026-10-26 21:36:08] [INFO] [Keeper] board cursor initialized at empty current head for audit-restart-a: (1793018168.055371, no post)
+[2026-10-26 21:36:08] [INFO] [Keeper] board_attention_worker_drain keeper=audit-restart-a outcome=drained judgments=0 steps=0
+[2026-10-26 21:36:08] [INFO] [MCP] masc_keeper_up -> {"runtime_class":"keeper","name":"audit-restart-a","agent_name":"audit-restart-a...
+[2026-10-26 21:36:08] [INFO] [MCP] tools/call completed: masc_keeper_up (outcome=ok)
+[2026-10-26 21:36:08] [INFO] [Keeper] directive: pausing keeper audit-restart-a
+[2026-10-26 21:36:08] [INFO] [Keeper] registry: phase transition name=audit-restart-a old=running new=paused event=operator_pause
+[2026-10-26 21:36:08] [INFO] [Keeper] registry: lifecycle name=audit-restart-a phase=paused event=paused detail=operator request
+[2026-10-26 21:36:08] [INFO] [MCP] tools/call: masc_schedule_create (id=3, session=mcp_VZ9tVOQ_5Ck_20xz)
+[2026-10-26 21:36:08] [INFO] [Dashboard] patched keeper-dependent dashboard caches (1 lifecycle event(s))
+[2026-10-26 21:36:08] [INFO] [MCP] masc_schedule_create -> {"schedule_instance_id":"01a17836-0334-7000-be3d-f847f122f3aa","schedule_id":"au...
+[2026-10-26 21:36:08] [INFO] [MCP] tools/call completed: masc_schedule_create (outcome=ok)
+[2026-10-26 21:36:08] [INFO] [MCP] tools/call: masc_schedule_note_add (id=4, session=mcp_VZ9tVOQ_5Ck_20xz)
+[2026-10-26 21:36:08] [INFO] [MCP] masc_schedule_note_add -> {"status":"ok","note":{"note_id":"3","schedule_id":"audit-retained-expiring","au...
+[2026-10-26 21:36:08] [INFO] [MCP] tools/call completed: masc_schedule_note_add (outcome=ok)
+[2026-10-26 21:36:08] [INFO] [MCP] tools/call: masc_schedule_get (id=5, session=mcp_VZ9tVOQ_5Ck_20xz)
+[2026-10-26 21:36:08] [INFO] [MCP] masc_schedule_get -> {"schedule_instance_id":"01a17836-0334-7000-be3d-f847f122f3aa","schedule_id":"au...
+[2026-10-26 21:36:08] [INFO] [MCP] tools/call completed: masc_schedule_get (outcome=ok)
+[2026-10-26 21:36:08] [INFO] [MCP] tools/call: masc_schedule_get (id=6, session=mcp_VZ9tVOQ_5Ck_20xz)
+[2026-10-26 21:36:08] [INFO] [MCP] masc_schedule_get -> {"schedule_instance_id":"01a17836-0334-7000-be3d-f847f122f3aa","schedule_id":"au...
+[2026-10-26 21:36:08] [INFO] [MCP] tools/call completed: masc_schedule_get (outcome=ok)
+[2026-10-26 21:36:08] [INFO] [Dashboard] full_health_snapshot warm cache done (0.0s)
+[2026-10-26 21:36:08] [INFO] [MCP] tools/call: masc_schedule_get (id=7, session=mcp_VZ9tVOQ_5Ck_20xz)
+[2026-10-26 21:36:08] [INFO] [MCP] masc_schedule_get -> {"schedule_instance_id":"01a17836-0334-7000-be3d-f847f122f3aa","schedule_id":"au...
+[2026-10-26 21:36:08] [INFO] [MCP] tools/call completed: masc_schedule_get (outcome=ok)
+[2026-10-26 21:36:08] [INFO] [MCP] tools/call: masc_schedule_get (id=8, session=mcp_VZ9tVOQ_5Ck_20xz)
+[2026-10-26 21:36:08] [INFO] [MCP] masc_schedule_get -> {"schedule_instance_id":"01a17836-0334-7000-be3d-f847f122f3aa","schedule_id":"au...
+[2026-10-26 21:36:08] [INFO] [MCP] tools/call completed: masc_schedule_get (outcome=ok)
+[2026-10-26 21:36:09] [INFO] [MCP] tools/call: masc_schedule_get (id=9, session=mcp_VZ9tVOQ_5Ck_20xz)
+[2026-10-26 21:36:09] [INFO] [MCP] masc_schedule_get -> {"schedule_instance_id":"01a17836-0334-7000-be3d-f847f122f3aa","schedule_id":"au...
+[2026-10-26 21:36:09] [INFO] [MCP] tools/call completed: masc_schedule_get (outcome=ok)
+[2026-10-26 21:36:09] [INFO] [MCP] tools/call: masc_schedule_get (id=10, session=mcp_VZ9tVOQ_5Ck_20xz)
+[2026-10-26 21:36:09] [INFO] [MCP] masc_schedule_get -> {"schedule_instance_id":"01a17836-0334-7000-be3d-f847f122f3aa","schedule_id":"au...
+[2026-10-26 21:36:09] [INFO] [MCP] tools/call completed: masc_schedule_get (outcome=ok)
+[2026-10-26 21:36:09] [INFO] [MCP] tools/call: masc_schedule_get (id=11, session=mcp_VZ9tVOQ_5Ck_20xz)
+[2026-10-26 21:36:09] [INFO] [MCP] masc_schedule_get -> {"schedule_instance_id":"01a17836-0334-7000-be3d-f847f122f3aa","schedule_id":"au...
+[2026-10-26 21:36:09] [INFO] [MCP] tools/call completed: masc_schedule_get (outcome=ok)
+[2026-10-26 21:36:09] [INFO] [MCP] tools/call: masc_schedule_get (id=12, session=mcp_VZ9tVOQ_5Ck_20xz)
+[2026-10-26 21:36:09] [INFO] [MCP] masc_schedule_get -> {"schedule_instance_id":"01a17836-0334-7000-be3d-f847f122f3aa","schedule_id":"au...
+[2026-10-26 21:36:09] [INFO] [MCP] tools/call completed: masc_schedule_get (outcome=ok)
+[2026-10-26 21:36:09] [INFO] [MCP] tools/call: masc_schedule_get (id=13, session=mcp_VZ9tVOQ_5Ck_20xz)
+[2026-10-26 21:36:09] [INFO] [MCP] masc_schedule_get -> {"schedule_instance_id":"01a17836-0334-7000-be3d-f847f122f3aa","schedule_id":"au...
+[2026-10-26 21:36:09] [INFO] [MCP] tools/call completed: masc_schedule_get (outcome=ok)
+[2026-10-26 21:36:10] [INFO] [Keeper] schedule stimulus retained without owner activation schedule_id=audit-retained-expiring keeper=audit-restart-a reason=lifecycle_denied detail=paused
+[2026-10-26 21:36:10] [INFO] [Server] schedule_runner: occurrence=a25840c772c6bbb55d706014489562c41dd996483df28147af1b3b9424df6d17 schedule_id=audit-retained-expiring dispatch=succeeded
+[2026-10-26 21:36:10] [INFO] [Server] schedule_runner: due_changed=1 emitted=1 rescheduled=0 dispatched=1
+[2026-10-26 21:36:10] [INFO] [MCP] tools/call: masc_schedule_get (id=14, session=mcp_VZ9tVOQ_5Ck_20xz)
+[2026-10-26 21:36:10] [INFO] [MCP] masc_schedule_get -> {"schedule_instance_id":"01a17836-0334-7000-be3d-f847f122f3aa","schedule_id":"au...
+[2026-10-26 21:36:10] [INFO] [MCP] tools/call completed: masc_schedule_get (outcome=ok)
+[2026-10-26 21:36:10] [INFO] [MCP] tools/call: masc_schedule_create (id=15, session=mcp_VZ9tVOQ_5Ck_20xz)
+[2026-10-26 21:36:10] [INFO] [MCP] masc_schedule_create -> {"schedule_instance_id":"01a17836-0b26-7000-8b0d-7307adcd51df","schedule_id":"au...
+[2026-10-26 21:36:10] [INFO] [MCP] tools/call completed: masc_schedule_create (outcome=ok)
+[2026-10-26 21:36:10] [INFO] [MCP] tools/call: masc_schedule_create (id=16, session=mcp_VZ9tVOQ_5Ck_20xz)
+[2026-10-26 21:36:10] [INFO] [MCP] masc_schedule_create -> {"schedule_instance_id":"01a17836-0b36-7000-9b34-963dd22b1164","schedule_id":"au...
+[2026-10-26 21:36:10] [INFO] [MCP] tools/call completed: masc_schedule_create (outcome=ok)
+[2026-10-26 21:36:10] [INFO] [Server] [MASC] Received SIGTERM, shutting down gracefully (timeout=10s, hard_exit=124)...
+[2026-10-26 21:36:10] [INFO] [Server] [Shutdown] Phase 1/4 NOTIFY: sent to 0 SSE clients (0.00s) [active conn: 0, ws: 0]
+[2026-10-26 21:36:10] [INFO] [Server] [Shutdown] Phase 2/4 HOOKS: starting (timeout=3.0s)
+[2026-10-26 21:36:10] [INFO] [Server] Stopping Keeper owners and workspace observation...
+[2026-10-26 21:36:10] [INFO] [Server] [Shutdown] Keeper owners and workspace observation stopped (0.00s)
+[2026-10-26 21:36:10] [INFO] [Server] Closed 0 SSE clients (0.00s) [remaining conn: 0]
+[2026-10-26 21:36:10] [INFO] [Server] Closed 0 WebSocket sessions (0.00s) [remaining ws: 0]
+[2026-10-26 21:36:10] [INFO] [Server] [Shutdown] registered hooks completed (0.00s)
+[2026-10-26 21:36:10] [INFO] [Server] [Shutdown] hooks total: 0.00s
+[2026-10-26 21:36:10] [INFO] [Server] [Shutdown] Phase 2/4 HOOKS: done (0.00s, total=0.2s) [active conn: 0, ws: 0]
+[2026-10-26 21:36:10] [INFO] [Server] [Shutdown] Phase 3/4 BOARD: flush starting (timeout=2.0s)
+[2026-10-26 21:36:10] [INFO] [Server] [Shutdown] Phase 3/4 BOARD: done (0.00s, total=0.2s) [active conn: 0, ws: 0]
+[2026-10-26 21:36:10] [INFO] [Server] [Shutdown] Phase 4/4 CANCEL: server cancel (total=0.2s) [active conn: 0, ws: 0]
+[2026-10-26 21:36:10] [INFO] [Server] [auto 127.0.0.1:59031] stats: h2=0 h1=30
+[2026-10-26 21:36:10] [INFO] [Server] MASC MCP: Closed 0 SSE connections
+[2026-10-26 21:36:10] [INFO] [Server] MASC MCP: Server stopped, waiting for background fibers... [active conn: 0, ws: 0]
+[2026-10-26 21:36:10] [WARN] [Keeper/audit-restart-a] scheduled source consumer release failed: Keeper owner inventory is stopping
+[2026-10-26 21:36:10] [INFO] [Server] host_fd_pressure_poller: cancelled, exiting cleanly
+[2026-10-26 21:36:10] [INFO] [Keeper] registry: phase transition name=audit-restart-a old=paused new=draining event=stop_requested
+[2026-10-26 21:36:10] [INFO] [Keeper] registry: lifecycle name=audit-restart-a phase=draining event=draining detail=
+[2026-10-26 21:36:10] [INFO] [Keeper] registry: phase transition name=audit-restart-a old=draining new=stopped event=drain_complete
+[2026-10-26 21:36:10] [INFO] [Keeper] registry: lifecycle name=audit-restart-a phase=stopped event=stopped detail=drain_complete
+[2026-10-26 21:36:38] [INFO] [MCP] Tag registry initialized: 182 tools registered
+[2026-10-26 21:36:39] [INFO] [MCP] Tag registry initialized: 182 tools registered
+[2026-10-26 21:36:39] [INFO] [Log] Restored 206 log entries from disk
+[2026-10-26 21:36:39] [INFO] [Server] [Startup] retained checkpoint sweep: removed=0 bytes=0 live_references=1 failures=0
+[2026-10-26 21:36:40] [INFO] [Runtime] removed stale dump 20010.events (pid 20010 no longer exists)
+[2026-10-26 21:36:40] [WARN] [Dashboard] dashboard source identity unavailable — inspect /health dashboard_surface.recovery
+[2026-10-26 21:36:40] [INFO] [Server] Llm_metric_bridge installed (masc_llm_provider_http_status_total, inference-events JSONL)
+[2026-10-26 21:36:40] [INFO] [Server] Backend_mutex_metrics installed (masc_backend_mutex_* metrics)
+[2026-10-26 21:36:40] [INFO] [Server] Fd_accountant OS resource observers installed
+[2026-10-26 21:36:40] [INFO] [Server] Runtime_log_sink installed (agent core -> MASC structured log)
+[2026-10-26 21:36:40] [INFO] [Server] [auto 127.0.0.1:59031] HTTP auto-detect mode: HTTP/1.1 + HTTP/2 h2c on same port
+[2026-10-26 21:36:40] [INFO] [Server] preserved existing base-path config root without refilling operator-owned entries: /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schedule-restart-_l_miift/.masc/config
+[2026-10-26 21:36:40] [INFO] [Server] builtin Skills up to date: browser-lanes, browser-live-follow-read, browser-navigate-read, diagram-in-chat, evidence-review, frontend-change, lane-addon-author, observe-act-verify, prior-art, root-cause-first, run-and-read, skill-authoring, verify-before-claiming-done, work-intake
+[2026-10-26 21:36:40] [INFO] [Misc] model_catalog: no explicit catalog path resolved; using agent_core ambient model catalog
+[2026-10-26 21:36:40] [INFO] [Runtime] resolved runtime config: {"stream_idle_timeout_sec":{"value":600.0,"source":"failsafe_floor"},"first_event_timeout_sec":{"value":600.0,"source":"failsafe_floor"},"body_timeout_override_sec":{"value":null,"source":"default"},"provider_call_deadline_sec":{"value":900.0,"source":"failsafe_floor"}}
+[2026-10-26 21:36:40] [INFO] [Runtime] keeper stream idle timeout resolved: 600.0s (source: failsafe_floor)
+[2026-10-26 21:36:40] [INFO] [Runtime] keeper first-event (TTFT/prefill) timeout resolved: 600.0s (source: failsafe_floor)
+[2026-10-26 21:36:40] [INFO] [Runtime] keeper provider-call no-progress threshold resolved: 900.0s (source: failsafe_floor)
+[2026-10-26 21:36:40] [INFO] [Backend] Board: JSONL default backend
+[2026-10-26 21:36:40] [INFO] [Board] Board flusher actor started
+[2026-10-26 21:36:40] [INFO] [Board] JSONL backend initialized
+[2026-10-26 21:36:40] [INFO] [Server] Runtime default initialized: ollama_cloud.deepseek-v4.1-flash
+[2026-10-26 21:36:40] [INFO] [Server] Skill snapshot ready: skills=0 rejections=0 (file: /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schedule-restart-_l_miift/.masc/config/runtime.toml) snapshot_revision=8e15d0bed0019dc32671f5de52f034346d0aef4dcaa4940bdf52c38a3a2d95b2 catalog_revision=fc45c6d6f22eab75095461324a27dc01e4d5e43668e92a27c41bcb4f564fcc0d
+[2026-10-26 21:36:40] [INFO] [Server] exact_output: lane "verifier_exact" cannot judge: exact-output lane "verifier_exact" is not configured
+[2026-10-26 21:36:40] [WARN] [Server] exact_output: librarian is degraded until [runtime.exact_output_lanes.librarian_exact] is configured with AGENT_CORE target refs
+[2026-10-26 21:36:40] [WARN] [Server] exact_output: completion authority is degraded until [runtime.exact_output_lanes.verifier_exact] is configured with AGENT_CORE target refs
+[2026-10-26 21:36:40] [WARN] [Server] exact_output: the Stagehand browser lane is degraded until [runtime.exact_output_lanes.browser_stagehand_exact] is configured with AGENT_CORE target refs
+[2026-10-26 21:36:40] [INFO] [Misc] exact_output: immutable resolver-and-lane registry published from AGENT_CORE embedded catalog with 1 runtime binding(s) as targets
+[2026-10-26 21:36:40] [INFO] [Server] State created (runtime state) in 0.2s
+[2026-10-26 21:36:40] [INFO] [Server] publication recovery owner discovery settled
+[2026-10-26 21:36:40] [INFO] [Server] startup Admin credential ready for admin (source=stored)
+[2026-10-26 21:36:40] [INFO] [Server] startup internal keeper MCP token synced via MASC_INTERNAL_MCP_TOKEN (source=generated)
+[2026-10-26 21:36:40] [INFO] [Server] startup skipped credential sync for 2 non-bootable keeper(s): [audit-restart-a=paused, imp=declarative_autoboot_disabled]
+[2026-10-26 21:36:40] [INFO] [Keeper] keeper_owner: installed 1 single-owner actor(s) before persistence recovery
+[2026-10-26 21:36:40] [INFO] [Server] keeper_persistence_prepare: stage=shutdown elapsed_seconds=0.000298 examined=0 failures=0
+[2026-10-26 21:36:40] [INFO] [Server] keeper_persistence_prepare: stage=store_reconcile elapsed_seconds=0.020193 examined=2 failures=0
+[2026-10-26 21:36:40] [INFO] [Keeper] boot reconcile: examined=2 readable=2 quarantined=0 failed=0
+[2026-10-26 21:36:40] [INFO] [Server] keeper_persistence_prepare: stage=transcript_tail elapsed_seconds=0.002985 examined=1 failures=0
+[2026-10-26 21:36:40] [INFO] [Server] Runtime_params restored from /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schedule-restart-_l_miift
+[2026-10-26 21:36:40] [INFO] [Server] Bootstrap completed in 0.4s
+[2026-10-26 21:36:40] [INFO] [Server] Native execution runtime created (14 codec domains)
+[2026-10-26 21:36:40] [INFO] [Server] Domain_pool created (14 shared domains, 1 independent snapshot codec domain) for dashboard/keeper compute
+[2026-10-26 21:36:40] [INFO] [ServerBootstrap] resolved: source=local_masc path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schedule-restart-_l_miift/.masc/config
+[2026-10-26 21:36:40] [INFO] [Server] boot stage=resolved elapsed_ms=0.0 total_ms=0.0
+[2026-10-26 21:36:40] [INFO] [Server] boot stage=prompt_assets.begin elapsed_ms=0.1 total_ms=0.1
+[2026-10-26 21:36:40] [INFO] [Server] boot stage=prompt_assets.end elapsed_ms=12.9 total_ms=13.0
+[2026-10-26 21:36:40] [INFO] [Server] boot stage=tool_assets.begin elapsed_ms=22.1 total_ms=35.1
+[2026-10-26 21:36:40] [INFO] [Server] boot stage=tool_assets.end elapsed_ms=71.9 total_ms=107.1
+[2026-10-26 21:36:40] [INFO] [Server] boot stage=mcp_assets.begin elapsed_ms=35.1 total_ms=142.2
+[2026-10-26 21:36:40] [INFO] [Server] boot stage=mcp_assets.end elapsed_ms=1.6 total_ms=143.8
+[2026-10-26 21:36:40] [INFO] [Server] boot stage=embedded_validation.begin elapsed_ms=5.0 total_ms=148.8
+[2026-10-26 21:36:40] [INFO] [Server] boot stage=embedded_validation.end elapsed_ms=18.2 total_ms=167.1
+[2026-10-26 21:36:40] [INFO] [Server] boot stage=prompt_registry.begin elapsed_ms=36.7 total_ms=203.8
+[2026-10-26 21:36:40] [INFO] [Server] boot stage=prompt_registry.end elapsed_ms=3.2 total_ms=207.0
+[2026-10-26 21:36:40] [INFO] [Server] boot stage=gate_persistence.begin elapsed_ms=1.8 total_ms=208.8
+[2026-10-26 21:36:40] [INFO] [Server] keeper_gate: installed durable queue base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schedule-restart-_l_miift pending=0 replayed=0 replay_failed=0 retired=0
+[2026-10-26 21:36:40] [INFO] [Server] keeper_gate: recovered Auto Judge work requested=0 started=0 finalized=0 skipped=0 failed=0
+[2026-10-26 21:36:40] [INFO] [Server] boot stage=gate_persistence.end elapsed_ms=0.2 total_ms=209.0
+[2026-10-26 21:36:40] [INFO] [Server] boot stage=mcp_sessions.begin elapsed_ms=0.0 total_ms=209.1
+[2026-10-26 21:36:40] [INFO] [Server] boot stage=mcp_sessions.end elapsed_ms=0.2 total_ms=209.2
+[2026-10-26 21:36:40] [INFO] [Server] boot stage=lazy_tasks.begin elapsed_ms=0.0 total_ms=209.2
+[2026-10-26 21:36:40] [INFO] [Server] lazy_task_group: starting initialize (1 tasks)
+[2026-10-26 21:36:40] [INFO] [Server] lazy_task: starting restore_sessions
+[2026-10-26 21:36:40] [INFO] [Server] boot stage=lazy_tasks.end elapsed_ms=0.0 total_ms=209.3
+[2026-10-26 21:36:40] [INFO] [Server] boot stage=keeper_persistence.begin elapsed_ms=0.0 total_ms=209.3
+[2026-10-26 21:36:40] [INFO] [Keeper] autoboot: disabled via MASC_KEEPER_AUTONOMOUS_ENABLED=false
+[2026-10-26 21:36:40] [INFO] [Discord] discord_presence_bridge: starting (poll interval 30s)
+[2026-10-26 21:36:40] [INFO] [startup] subsystems: keeper loops started
+[2026-10-26 21:36:40] [INFO] [Server] boot stage=keeper_persistence.end elapsed_ms=2.7 total_ms=212.0
+[2026-10-26 21:36:40] [INFO] [Server] boot stage=owner_publication.begin elapsed_ms=0.0 total_ms=212.0
+[2026-10-26 21:36:40] [INFO] [Server] boot stage=owner_publication.end elapsed_ms=0.1 total_ms=212.1
+[2026-10-26 21:36:40] [INFO] [Server] boot stage=listener_wait.begin elapsed_ms=0.0 total_ms=212.1
+[2026-10-26 21:36:40] [INFO] [Server] boot stage=listener_wait.end elapsed_ms=0.0 total_ms=212.1
+[2026-10-26 21:36:40] [INFO] [Server] scheduler lag probe started on the main domain: interval=100ms window=60s
+[2026-10-26 21:36:40] [INFO] [Dashboard] starting full_health_snapshot refresh loop
+[2026-10-26 21:36:40] [INFO] [Server] boot stage=post_ready_lanes.begin elapsed_ms=0.1 total_ms=212.2
+[2026-10-26 21:36:40] [INFO] [Misc] candle: off (no candle.toml)
+[2026-10-26 21:36:40] [INFO] [Server] startup maintenance: starting jsonl_prune
+[2026-10-26 21:36:40] [INFO] [Server] startup maintenance: starting microvm_guest_sweep
+[2026-10-26 21:36:40] [INFO] [Keeper] autoboot: durable Librarian catch-up submitted for 1 unlaunched keeper(s) [audit-restart-a]
+[2026-10-26 21:36:40] [INFO] [Server] lazy_task: finished restore_sessions
+[2026-10-26 21:36:40] [INFO] [Server] lazy_task_group: finished initialize
+[2026-10-26 21:36:40] [INFO] [Server] host_fd_pressure_poller: started path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schedule-restart-_l_miift/.masc/masc-host-pressure.state source=default interval=1.0s
+[2026-10-26 21:36:40] [INFO] [Metrics] tool_metrics_persist: hydrated 15 record(s), pruned=0 record(s)
+[2026-10-26 21:36:40] [INFO] [Misc] keeper_tool_call_log: async flush fiber started (interval=0.5s, capacity=4096)
+[2026-10-26 21:36:40] [INFO] [Keeper] transition_audit: async flush fiber started (interval=0.5s, capacity=4096)
+[2026-10-26 21:36:40] [INFO] [Server] workspace curator pass restores {"pass_id":"01a17836-837b-7000-a2ff-7f712a0993ed","base_path":"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schedule-restart-_l_miift","restores":[{"domain":"classification","phase":"discovery","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"classification","phase":"observer","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"classification","phase":"successor","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"classification","phase":"primary","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"briefing","phase":"discovery","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"briefing","phase":"observer","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"briefing","phase":"successor","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"briefing","phase":"primary","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"outside_domain","phase":"discovery","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"outside_domain","phase":"observer","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"outside_domain","phase":"successor","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"outside_domain","phase":"primary","calls":0,"errors":0,"raised":0,"cancelled":0}]}
+[2026-10-26 21:36:40] [WARN] [Keeper/audit-restart-a] durable Librarian range not consumed: Original history publication is blocked: Original history Addon is not attached; source remains unconsumed
+[2026-10-26 21:36:40] [INFO] [Server] OTEL_EXPORTER_OTLP_ENDPOINT not set; AGENT_CORE telemetry export disabled
+[2026-10-26 21:36:40] [INFO] [Server] boot stage=post_ready_lanes.end elapsed_ms=10.6 total_ms=222.8
+[2026-10-26 21:36:40] [INFO] [Server] boot stage=discord_gateway.begin elapsed_ms=0.1 total_ms=222.9
+[2026-10-26 21:36:40] [WARN] [Server] RFC-0203: DISCORD_BOT_TOKEN is unset; in-process Discord gateway not started
+[2026-10-26 21:36:40] [INFO] [Server] boot stage=discord_gateway.end elapsed_ms=0.8 total_ms=223.7
+[2026-10-26 21:36:40] [INFO] [Server] boot stage=slack_gateway.begin elapsed_ms=0.0 total_ms=223.7
+[2026-10-26 21:36:40] [WARN] [Server] RFC-0317: SLACK_APP_TOKEN is unset; in-process Slack gateway not started
+[2026-10-26 21:36:40] [INFO] [Server] boot stage=slack_gateway.end elapsed_ms=0.6 total_ms=224.3
+[2026-10-26 21:36:40] [INFO] [Server] boot stage=slack_poll.begin elapsed_ms=0.0 total_ms=224.3
+[2026-10-26 21:36:40] [WARN] [Server] slack-lane: SLACK_BOT_TOKEN is unset; poll lane not started
+[2026-10-26 21:36:40] [INFO] [Server] boot stage=slack_poll.end elapsed_ms=0.0 total_ms=224.4
+[2026-10-26 21:36:40] [INFO] [Server] boot stage=imessage_gateway.begin elapsed_ms=0.0 total_ms=224.4
+MASC MCP Server listening on http://127.0.0.1:59031
+   Base path: /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schedule-restart-_l_miift
+   MASC dir: /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schedule-restart-_l_miift/.masc
+   Process cwd: /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schedule-restart-_l_miift
+   MASC_BASE_PATH(env): /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schedule-restart-_l_miift
+   Base path source: explicit_cli
+   GET  /mcp → SSE stream (notifications)
+   POST /mcp → JSON-RPC (Accept: application/json, text/event-stream)
+   DELETE /mcp → Session termination
+   POST /graphql → GraphQL (read-only)
+   GET  /api/v1/activity/events → Activity replay API
+   GET  /api/v1/activity/graph → Activity graph snapshot
+   GET  /health → Health check
+   GET  /ws → same-origin WebSocket upgrade or discovery
+[2026-10-26 21:36:40] [WARN] [Server] imessage: in-process gateway not started (chat.db at /Users/dancer/Library/Messages/chat.db is not readable: grant Full Disk Access in System Settings > Privacy & Security > Full Disk Access)
+[2026-10-26 21:36:40] [INFO] [Server] boot stage=imessage_gateway.end elapsed_ms=0.1 total_ms=224.5
+[2026-10-26 21:36:40] [INFO] [Server] boot stage=telegram_gateway.begin elapsed_ms=0.0 total_ms=224.5
+[2026-10-26 21:36:40] [INFO] [Server] boot stage=telegram_gateway.end elapsed_ms=0.0 total_ms=224.5
+[2026-10-26 21:36:40] [INFO] [Server] boot stage=listening_banner.begin elapsed_ms=0.0 total_ms=224.5
+[2026-10-26 21:36:40] [INFO] [Server] boot stage=listening_banner.end elapsed_ms=0.1 total_ms=224.6
+[2026-10-26 21:36:40] [INFO] [Server] gRPC transport disabled (set MASC_GRPC_ENABLED=1 to enable)
+[2026-10-26 21:36:40] [INFO] [Dashboard] starting execution refresh loop
+[2026-10-26 21:36:40] [INFO] [Dashboard] starting transport_health refresh loop
+[2026-10-26 21:36:40] [INFO] [Dashboard] starting execution_trust refresh loop
+[2026-10-26 21:36:40] [INFO] [Dashboard] starting mission refresh loop
+[2026-10-26 21:36:40] [INFO] [Dashboard] starting operator_snapshot refresh loop
+[2026-10-26 21:36:40] [INFO] [Dashboard] starting operator_digest refresh loop
+[2026-10-26 21:36:40] [INFO] [Server] keeper transition outbox startup discovered=1 processed=1 deferred=0 converged=0 no_pending=1 claim_busy=0 shutdown_reserved=0 failures=0
+[2026-10-26 21:36:40] [INFO] [Dashboard] transport_health warm cache done (0.0s)
+[2026-10-26 21:36:40] [INFO] [Dashboard] board surface pre-warmed (0.7ms)
+[2026-10-26 21:36:40] [INFO] [Dashboard] config surface pre-warmed (0.9ms)
+[2026-10-26 21:36:40] [INFO] [Dashboard] planning surface pre-warmed (1.1ms)
+[2026-10-26 21:36:40] [INFO] [Dashboard] execution_trust warm cache done (0.0s)
+[2026-10-26 21:36:40] [INFO] [Dashboard] keeper-memory-health surface pre-warmed (2.5ms)
+[2026-10-26 21:36:40] [INFO] [Dashboard] execution warm cache done (0.0s)
+[2026-10-26 21:36:40] [INFO] [Server] startup maintenance: finished jsonl_prune elapsed_s=0.017
+[2026-10-26 21:36:40] [INFO] [Dashboard] light shell cache pre-warmed (12.0ms)
+[2026-10-26 21:36:40] [INFO] [Dashboard] shell cache pre-warmed (16.8ms)
+[2026-10-26 21:36:40] [INFO] [Dashboard] all primary dashboard surfaces pre-warmed in parallel (16.9ms total)
+[2026-10-26 21:36:41] [INFO] [Keeper] schedule stimulus retained without owner activation schedule_id=audit-missed-interval keeper=audit-restart-a reason=lifecycle_denied detail=paused
+[2026-10-26 21:36:41] [WARN] [Server] keeper volume filesystem unread keeper=audit-restart-a volume=masc-keeper-work-audit-restart-a: volume inspect refused: exit=1: Error: volume not found: masc-keeper-work-audit-restart-a
+[2026-10-26 21:36:41] [WARN] [Server] keeper volume filesystem unread keeper=audit-restart-a volume=masc-keeper-build-audit-restart-a: volume inspect refused: exit=1: Error: volume not found: masc-keeper-build-audit-restart-a
+[2026-10-26 21:36:41] [INFO] [Server] schedule_runner: occurrence=f145fc196c83002d1ee9b30b3268a83322f9d2a89ca48183feabe763c607a328 schedule_id=audit-missed-interval dispatch=succeeded
+[2026-10-26 21:36:41] [INFO] [Server] schedule_runner: due_changed=3 emitted=1 rescheduled=0 dispatched=1
+[2026-10-26 21:36:41] [INFO] [MCP] tools/call: masc_schedule_get (id=18, session=mcp_VZ9te2I_5WY_1cAV)
+[2026-10-26 21:36:41] [INFO] [Session] [AgentRegistry] New identity: schedule-audit-admin (session=98dc5824, mcp=mcp_VZ9te2I_5WY_1cAV)
+[2026-10-26 21:36:41] [INFO] [Session] Session registered: schedule-audit-admin (total: 1)
+[2026-10-26 21:36:41] [INFO] [MCP] masc_schedule_get -> {"schedule_instance_id":"01a17836-0334-7000-be3d-f847f122f3aa","schedule_id":"au...
+[2026-10-26 21:36:41] [INFO] [MCP] tools/call completed: masc_schedule_get (outcome=ok)
+[2026-10-26 21:36:41] [INFO] [MCP] tools/call: masc_schedule_get (id=19, session=mcp_VZ9te2I_5WY_1cAV)
+[2026-10-26 21:36:41] [INFO] [MCP] masc_schedule_get -> {"schedule_instance_id":"01a17836-0b26-7000-8b0d-7307adcd51df","schedule_id":"au...
+[2026-10-26 21:36:41] [INFO] [MCP] tools/call completed: masc_schedule_get (outcome=ok)
+[2026-10-26 21:36:41] [INFO] [MCP] tools/call: masc_schedule_get (id=20, session=mcp_VZ9te2I_5WY_1cAV)
+[2026-10-26 21:36:41] [INFO] [MCP] masc_schedule_get -> {"schedule_instance_id":"01a17836-0b36-7000-9b34-963dd22b1164","schedule_id":"au...
+[2026-10-26 21:36:41] [INFO] [MCP] tools/call completed: masc_schedule_get (outcome=ok)
+[2026-10-26 21:36:41] [INFO] [MCP] tools/call: masc_schedule_notes_list (id=21, session=mcp_VZ9te2I_5WY_1cAV)
+[2026-10-26 21:36:41] [INFO] [MCP] masc_schedule_notes_list -> {"status":"ok","schedule_id":"audit-retained-expiring","limit":50,"notes":[{"not...
+[2026-10-26 21:36:41] [INFO] [MCP] tools/call completed: masc_schedule_notes_list (outcome=ok)
+[2026-10-26 21:36:41] [INFO] [MCP] tools/call: masc_keeper_status (id=22, session=mcp_VZ9te2I_5WY_1cAV)
+[2026-10-26 21:36:41] [INFO] [Dashboard] full_health_snapshot warm cache done (0.0s)
+[2026-10-26 21:36:43] [INFO] [Server] schedule_runner: occurrence=d85a5163f26a5fa8f039a3f3994da961776287266339b692a18ca80049f5c3b0 schedule_id=audit-missed-interval held: its target has not consumed the previous occurrence yet
+[2026-10-26 21:37:10] [WARN] [Keeper] microvm abandoned guest inventory failed backend=apple_container status=exit=1: Error: failed to list containers (cause: "internalError: "XPC timeout for request to com.apple.container.apiserver/containerList"")\x0A
+[2026-10-26 21:37:10] [INFO] [Server] startup maintenance: finished microvm_guest_sweep elapsed_s=29.399
+[2026-10-26 21:37:10] [INFO] [MCP] masc_keeper_status -> {"runtime_class":"keeper","name":"audit-restart-a","meta":{"schema":"masc.keeper...
+[2026-10-26 21:37:10] [INFO] [MCP] tools/call completed: masc_keeper_status (outcome=ok)
+[2026-10-26 21:37:10] [INFO] [Server] [MASC] Received SIGTERM, shutting down gracefully (timeout=10s, hard_exit=124)...
+[2026-10-26 21:37:10] [INFO] [Server] [Shutdown] Phase 1/4 NOTIFY: sent to 0 SSE clients (0.00s) [active conn: 0, ws: 0]
+[2026-10-26 21:37:10] [INFO] [Server] [Shutdown] Phase 2/4 HOOKS: starting (timeout=3.0s)
+[2026-10-26 21:37:10] [INFO] [Server] Stopping Keeper owners and workspace observation...
+[2026-10-26 21:37:10] [INFO] [Server] [Shutdown] Keeper owners and workspace observation stopped (0.00s)
+[2026-10-26 21:37:10] [INFO] [Server] Closed 0 SSE clients (0.00s) [remaining conn: 0]
+[2026-10-26 21:37:10] [INFO] [Server] Closed 0 WebSocket sessions (0.00s) [remaining ws: 0]
+[2026-10-26 21:37:10] [INFO] [Server] [Shutdown] registered hooks completed (0.00s)
+[2026-10-26 21:37:10] [INFO] [Server] [Shutdown] hooks total: 0.00s
+[2026-10-26 21:37:10] [INFO] [Pulse] stopped after 2 beats
+[2026-10-26 21:37:10] [INFO] [Server] [Shutdown] Phase 2/4 HOOKS: done (0.00s, total=0.2s) [active conn: 0, ws: 0]
+[2026-10-26 21:37:10] [INFO] [Server] [Shutdown] Phase 3/4 BOARD: flush starting (timeout=2.0s)
+[2026-10-26 21:37:10] [INFO] [Server] [Shutdown] Phase 3/4 BOARD: done (0.00s, total=0.2s) [active conn: 0, ws: 0]
+[2026-10-26 21:37:10] [INFO] [Server] [Shutdown] Phase 4/4 CANCEL: server cancel (total=0.2s) [active conn: 0, ws: 0]
+[2026-10-26 21:37:10] [INFO] [Server] [auto 127.0.0.1:59031] stats: h2=0 h1=14
+[2026-10-26 21:37:10] [INFO] [Server] MASC MCP: Closed 0 SSE connections
+[2026-10-26 21:37:10] [INFO] [Server] MASC MCP: Server stopped, waiting for background fibers... [active conn: 0, ws: 0]
+[2026-10-26 21:37:10] [INFO] [Server] host_fd_pressure_poller: cancelled, exiting cleanly
+[2026-10-26 21:37:10] [INFO] [Server] MASC MCP: Background fibers finished, shutdown complete.
+[2026-10-26 21:37:10] [INFO] [Server] MASC MCP: Shutdown complete.

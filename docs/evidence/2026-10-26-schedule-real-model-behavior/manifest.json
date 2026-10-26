@@ -1,0 +1,137 @@
+{
+  "schema": "schedule-real-model-evidence.v1",
+  "selection": "Owned synthetic workspace captures only. No HTTP headers or credential values were recorded. Live turn control/interrupt tokens are omitted in selected JSON. Owner snapshot keeps paused state and selected meta identity/counters; requests, exact queue/reaction evidence and tool calls are retained.",
+  "runs": {
+    "real-deepseek-1": {
+      "binary_commit": "1ce158d50d3eb48648e6deea7f668172f914fea3",
+      "runtime_id": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+      "successful_note_add_calls": [
+        "execution-node-b1a8622bce8a74268b1ebc9b7c56acb7"
+      ],
+      "refused_note_add_calls": [],
+      "result": "one exact note effect plus exact completed/ACK observed",
+      "producer_exit_code": 0
+    },
+    "real-glm-1": {
+      "binary_commit": "1ce158d50d3eb48648e6deea7f668172f914fea3",
+      "runtime_id": "glm-coding.glm-5-3",
+      "successful_note_add_calls": [
+        "execution-node-5c11ac23c324690b0de96157dbe647f1"
+      ],
+      "refused_note_add_calls": [
+        "execution-node-3731f6bbcbd2d472ed9aebd9c1274edf",
+        "execution-node-fc6d7c33e1589fab0a89cb3c7731c64b",
+        "execution-node-45be0bc3fbaf48fc6d90a13fba0dec12"
+      ],
+      "result": "one exact note effect plus exact completed/ACK observed",
+      "producer_exit_code": 0
+    },
+    "real-busy-deepseek-1": {
+      "binary_commit": "6a2d8dd6171e1d732ca15f918fb084e462e4d371",
+      "runtime_id": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+      "successful_note_add_calls": [
+        "execution-node-fc6efe76d6627020e6b9144edccff10b"
+      ],
+      "refused_note_add_calls": [],
+      "result": "counterexample",
+      "producer_exit_code": null
+    }
+  },
+  "files": {
+    "real-deepseek-1/tool-calls.json": "da9d368187cbf62be71889c081bc027362b4032f3499cb64bf59e17738df1522",
+    "real-deepseek-1/probe-used.py": "8c9bb67f7bfbd7acd924d0c072024b1f2eb4a7b9495ff6d1874b97b93263dc6b",
+    "real-deepseek-1/provenance.json": "b1f5a7caa9eee6d15c32112eade5920b4f55be7231a6affdf67cabbe37f07b3c",
+    "real-deepseek-1/created.json": "bf1c3c891e9d94720973023d479ec95e60c03fc67ff5d04fe99897256cddf0d7",
+    "real-deepseek-1/process-ended.json": "35b66f23a6b590bf8a5fc9342225b0dd9ba7329ef2bc9cad8ef0bd2f2ecdd38e",
+    "real-deepseek-1/server-selected.txt": "ca8f08639f88d88d935cbbee7ea76ba2e9604c5aec629581f49fa00658a5e314",
+    "real-deepseek-1/checks.json": "5cdb2db4757a170b652d89c6b592dd791b5c42a2b25cd49f3446b00df05729b9",
+    "real-deepseek-1/runtime-config.toml": "a9b31400b54e4b27f50029caa1c190ac3423f2e337e2fe84aba8c98951d80f83",
+    "real-deepseek-1/process.json": "e6a66b9a6b17349ccb238bafa2a65a57ac9e90016dc346017bd956d39b1d383b",
+    "real-deepseek-1/last-observation-selected.json": "35cdc6a56ff9161d1d73412697a4593a158c422f39178963961acf41f147586e",
+    "real-glm-1/tool-calls.json": "7325f91713d71082f344c725fe5eaf5ada091db49a6dbbb70fdc75a0e6be170e",
+    "real-glm-1/probe-used.py": "1d06506c34156d3a291dd83659741e49e7027c1570ef698118802ea1b28baf9a",
+    "real-glm-1/provenance.json": "454c63011787decee6ec6fa68ba82c3087c5b26fed8f8e6cba46b7de07d54763",
+    "real-glm-1/created.json": "b4cc7461c0c9d80c330d343fad2d531278874360029530c517320a0bd2022880",
+    "real-glm-1/process-ended.json": "9366079bd3ed8cfb23376cca227588e07bba1ca00ee4bfdb121a19f9c0768f8d",
+    "real-glm-1/server-selected.txt": "1260e0c68d1123d295adf60d21281f4568a5639cec8406e8bd08e0ff29f08bc1",
+    "real-glm-1/checks.json": "14dc2c9466acf6c1a4e1bd52abf367508f90afc4a98a97b613b7c17f77eeef08",
+    "real-glm-1/runtime-config.toml": "30304a0a7271b87bffa997f5a95dcff2c9206cd535dec1d85e71db4b4b1eb8ab",
+    "real-glm-1/process.json": "8903afe7a17838e9898f841a4907d6a3900ecbc0db045c74e6a509d2f52467cf",
+    "real-glm-1/last-observation-selected.json": "73fab0323ea7480f2259952db01b654577fd9b5a17207be6618836765d567b89",
+    "real-busy-deepseek-1/tool-calls.json": "32d4cdd286d4a677286735ef3e7e7b99d7d5ab4d1612b25f6c389930aac0f277",
+    "real-busy-deepseek-1/probe-used.py": "ac02099f5f7e71ccf60443721b237798750af38516d132bcc79d7afaaa2b5f49",
+    "real-busy-deepseek-1/provenance.json": "b3a19e85b86da9a6bba8c846c82565e2c8a24fe050226bcfe293708ec902da20",
+    "real-busy-deepseek-1/created.json": "a58f787d0bab7e093a92b8c94b552ba810ad440e858f2ed32a49d87692157c2b",
+    "real-busy-deepseek-1/shutdown-observed.json": "aeac8bb25eb1a5d96a4d193dd65a38c24c77fa1b2b2cb1e71a44a48c44759b52",
+    "real-busy-deepseek-1/server-selected.txt": "0f5482d453e4c8e9967e000ab70cb57a5639af3a85a47a815ff4b883facb6871",
+    "real-busy-deepseek-1/observation-error-process.json": "3d5965052d713c00b8528ce0f7a2bc02b46d52ecb3159ef74bc2596b063b3cca",
+    "real-busy-deepseek-1/checks.json": "e118814d582b0b52c564f8818f43527130a38ed9820da4d8d573165fa687216d",
+    "real-busy-deepseek-1/overlap.json": "59ad03743ea6b2c5fc32c5df1b7bdfe15452a544275cf652a558fe6bdd58d7b5",
+    "real-busy-deepseek-1/runtime-config.toml": "a9b31400b54e4b27f50029caa1c190ac3423f2e337e2fe84aba8c98951d80f83",
+    "real-busy-deepseek-1/finding.json": "2a423bdfc672c8ae690ccf4bb8e25f6f591ec6964a6a59d0455ee1cb3029e6e3",
+    "real-busy-deepseek-1/process.json": "9a9de8fc5111f4869dd89f206924afd39205a5d5009a51ddd279fabe53080328",
+    "real-busy-deepseek-1/first-busy.json": "1516b61c6e9848ce8087b15beadb67e41f72e713aab7e1e49fab0dd0a9cb3990",
+    "real-busy-deepseek-1/last-observation-selected.json": "d34047f98013bbed4905bc150ee050f1c1c9e54b59a61f966334efc6bd32576d",
+    "real-busy-deepseek-1/observer-stop.json": "f3534386d87034d652fce27bf01fee421450e038ef85f51d70bdfe772da73a8e",
+    "real-busy-deepseek-1/reaction-ledger.jsonl": "bde65e114660ad434c63f09756a8e0d6e50337be9e147268f72f5690da291be8"
+  },
+  "original_sha256": {
+    "real-deepseek-1/provenance.json": "b1f5a7caa9eee6d15c32112eade5920b4f55be7231a6affdf67cabbe37f07b3c",
+    "real-deepseek-1/created.json": "bf1c3c891e9d94720973023d479ec95e60c03fc67ff5d04fe99897256cddf0d7",
+    "real-deepseek-1/checks.json": "6f3597b3d9899bb4664d4b8b66308f48d0e1ff3ec86a637381aa8096ab34eff1",
+    "real-deepseek-1/runtime-config.toml": "a9b31400b54e4b27f50029caa1c190ac3423f2e337e2fe84aba8c98951d80f83",
+    "real-deepseek-1/tool-calls.json": "e637dd3bc4811771debbcc524d9597d26628c6c2c443b838ce4adf8e904dd9c8",
+    "real-deepseek-1/probe-used.py": "8c9bb67f7bfbd7acd924d0c072024b1f2eb4a7b9495ff6d1874b97b93263dc6b",
+    "real-deepseek-1/process.json": "e6a66b9a6b17349ccb238bafa2a65a57ac9e90016dc346017bd956d39b1d383b",
+    "real-deepseek-1/process-ended.json": "35b66f23a6b590bf8a5fc9342225b0dd9ba7329ef2bc9cad8ef0bd2f2ecdd38e",
+    "real-deepseek-1/last-observation.json": "e076846ab4954895664a273e0020b2ac7dfc1f9620799565d856b029032a04ac",
+    "real-deepseek-1/server.log": "b7221d9f08bdebd0afe2723384c0a68d165b722f699b9a41c2353ce365ffb462",
+    "real-glm-1/provenance.json": "454c63011787decee6ec6fa68ba82c3087c5b26fed8f8e6cba46b7de07d54763",
+    "real-glm-1/created.json": "b4cc7461c0c9d80c330d343fad2d531278874360029530c517320a0bd2022880",
+    "real-glm-1/checks.json": "f1a8e00700d2086e60fda23696d23fdbb78f45ad26c9a87afdecf5e060baaf61",
+    "real-glm-1/runtime-config.toml": "30304a0a7271b87bffa997f5a95dcff2c9206cd535dec1d85e71db4b4b1eb8ab",
+    "real-glm-1/tool-calls.json": "364d692cf5fc58e065c0edd3ce0f43b571d21fe5542fb634f710038ac68eeb7e",
+    "real-glm-1/probe-used.py": "1d06506c34156d3a291dd83659741e49e7027c1570ef698118802ea1b28baf9a",
+    "real-glm-1/process.json": "8903afe7a17838e9898f841a4907d6a3900ecbc0db045c74e6a509d2f52467cf",
+    "real-glm-1/process-ended.json": "9366079bd3ed8cfb23376cca227588e07bba1ca00ee4bfdb121a19f9c0768f8d",
+    "real-glm-1/last-observation.json": "958360ec60b8dc1ab21ea467b56d0f0c103cd5559a6b7663cec50757e26267fd",
+    "real-glm-1/server.log": "70974650da2209cc1dcc50b6129c4d1f909aa4651ba15ce4b8f526197727e85d",
+    "real-busy-deepseek-1/provenance.json": "b3a19e85b86da9a6bba8c846c82565e2c8a24fe050226bcfe293708ec902da20",
+    "real-busy-deepseek-1/created.json": "a58f787d0bab7e093a92b8c94b552ba810ad440e858f2ed32a49d87692157c2b",
+    "real-busy-deepseek-1/checks.json": "2e5c51df0cc75f9bdb85af0dedadba310eba45e6daee842e80c6695c9363dc89",
+    "real-busy-deepseek-1/runtime-config.toml": "a9b31400b54e4b27f50029caa1c190ac3423f2e337e2fe84aba8c98951d80f83",
+    "real-busy-deepseek-1/tool-calls.json": "9daf2efdfb229554ecdcebea80c25a56a8f85657bcae37a9c0353525ca58d381",
+    "real-busy-deepseek-1/probe-used.py": "ac02099f5f7e71ccf60443721b237798750af38516d132bcc79d7afaaa2b5f49",
+    "real-busy-deepseek-1/process.json": "9a9de8fc5111f4869dd89f206924afd39205a5d5009a51ddd279fabe53080328",
+    "real-busy-deepseek-1/first-busy.json": "377acd8f3fcc17f83fb09da7bb3a1eb47dd5fa467c148bcb54860edaa9b56c1c",
+    "real-busy-deepseek-1/overlap.json": "46f70485d5fddd2801c07401caad4fef37ea4d232b452e177c033b2bb1aa8392",
+    "real-busy-deepseek-1/finding.json": "af8a19c76c43076f9efa469d8875222dee9103ab9c58030f73ab2a8da349fbca",
+    "real-busy-deepseek-1/observer-stop.json": "f3534386d87034d652fce27bf01fee421450e038ef85f51d70bdfe772da73a8e",
+    "real-busy-deepseek-1/observation-error-process.json": "3d5965052d713c00b8528ce0f7a2bc02b46d52ecb3159ef74bc2596b063b3cca",
+    "real-busy-deepseek-1/shutdown-observed.json": "3792689bda070dbea1e10ea7fe24f3cdfa21522a62ac436518842c6c58ec3338",
+    "real-busy-deepseek-1/last-observation.json": "3fb1a43a17d07f6d0b580b891e15586a2f12f3951a20c96a089c7099872386be",
+    "real-busy-deepseek-1/server.log": "acd7ee84b8e72f2e8dd5f204b6c620ecac9324f722fd8ff1200737cd4c0cdebc",
+    "real-busy-deepseek-1/reaction-ledger.jsonl": "bde65e114660ad434c63f09756a8e0d6e50337be9e147268f72f5690da291be8"
+  },
+  "derivations": {
+    "real-deepseek-1/last-observation-selected.json": "Original snapshot with live control/interrupt tokens omitted and owner restricted to paused plus meta name/trace_id/total_turns/last_turn_ts/last_runtime_attempt. All history/note fields unchanged.",
+    "real-deepseek-1/server-selected.txt": "Only this owned Keeper tool_call lines, scheduled yield decision lines and shutdown-complete lines, in original order; trailing line whitespace trimmed. Full-log digest recorded separately.",
+    "real-glm-1/last-observation-selected.json": "Original snapshot with live control/interrupt tokens omitted and owner restricted to paused plus meta name/trace_id/total_turns/last_turn_ts/last_runtime_attempt. All history/note fields unchanged.",
+    "real-glm-1/server-selected.txt": "Only this owned Keeper tool_call lines, scheduled yield decision lines and shutdown-complete lines, in original order; trailing line whitespace trimmed. Full-log digest recorded separately.",
+    "real-busy-deepseek-1/checks.json": "Only original check name and passed fields; detailed repeated snapshots omitted and retained in the dedicated observation/provenance/finding captures. Original raw digest recorded separately.",
+    "real-busy-deepseek-1/first-busy.json": "Original JSON with only chat_control_token and interrupt_token object fields removed recursively.",
+    "real-busy-deepseek-1/overlap.json": "Original JSON with only chat_control_token and interrupt_token object fields removed recursively.",
+    "real-busy-deepseek-1/finding.json": "Original derived finding with live control/interrupt tokens omitted, and its stale manually written scope commit corrected from 1ce to the executable self-observed binary_commit in provenance.json. All observed queue/reaction/note fields unchanged. Original digest retained separately.",
+    "real-busy-deepseek-1/shutdown-observed.json": "Original JSON with only chat_control_token and interrupt_token object fields removed recursively.",
+    "real-busy-deepseek-1/last-observation-selected.json": "Original snapshot with live control/interrupt tokens omitted and owner restricted to paused plus meta name/trace_id/total_turns/last_turn_ts/last_runtime_attempt. All history/note fields unchanged.",
+    "real-busy-deepseek-1/server-selected.txt": "Only owned Keeper tool_call, scheduled yield decision, resume checkpoint_turn_count and shutdown-complete lines, in original order; trailing line whitespace trimmed. Full-log digest recorded separately.",
+    "real-deepseek-1/checks.json": "Only original check name and passed fields; detailed repeated snapshots omitted and retained in the dedicated observation/provenance/finding captures. Original raw digest recorded separately.",
+    "real-deepseek-1/tool-calls.json": "Only HTTP status, response keeper/count/source/producer/health/coverage_gaps and receipt ts/record_kind/keeper/agent_name/tool/input/output/execution_id/model/runtime_profile plus runtime_contract keeper_name/trace_id/session_id/keeper_turn_id. Tool inputs/outputs unchanged. Original raw digest recorded separately.",
+    "real-glm-1/checks.json": "Only original check name and passed fields; detailed repeated snapshots omitted and retained in the dedicated observation/provenance/finding captures. Original raw digest recorded separately.",
+    "real-glm-1/tool-calls.json": "Only HTTP status, response keeper/count/source/producer/health/coverage_gaps and receipt ts/record_kind/keeper/agent_name/tool/input/output/execution_id/model/runtime_profile plus runtime_contract keeper_name/trace_id/session_id/keeper_turn_id. Tool inputs/outputs unchanged. Original raw digest recorded separately.",
+    "real-busy-deepseek-1/tool-calls.json": "Only HTTP status, response keeper/count/source/producer/health/coverage_gaps and receipt ts/record_kind/keeper/agent_name/tool/input/output/execution_id/model/runtime_profile plus runtime_contract keeper_name/trace_id/session_id/keeper_turn_id. Tool inputs/outputs unchanged. Original raw digest recorded separately."
+  },
+  "original_sources": {
+    "real-busy-deepseek-1/reaction-ledger.jsonl": "real-busy-deepseek-1/workspace/.masc/keepers/audit-live-deepseek/reaction-ledger/v7/2026-10/26.jsonl"
+  }
+}

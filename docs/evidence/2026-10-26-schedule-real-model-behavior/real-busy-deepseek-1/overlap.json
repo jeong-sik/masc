@@ -1,0 +1,438 @@
+{
+  "first": {
+    "history": {
+      "schema": "masc.dashboard.scheduled_automation.lookup.v1",
+      "source": "schedule_store",
+      "generated_at": "2026-10-26T13:17:49Z",
+      "status": "found",
+      "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262",
+      "request": {
+        "schedule_instance_id": "01a1785c-16bc-7000-9383-31a8ff7bf361",
+        "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262",
+        "status": "succeeded",
+        "source": "operator_request",
+        "requested_by": {
+          "id": "schedule-audit-observer",
+          "kind": "automated_actor",
+          "display_name": null
+        },
+        "scheduled_by": {
+          "id": "schedule-audit-observer",
+          "kind": "automated_actor",
+          "display_name": null
+        },
+        "requested_at": 1793020663.483936,
+        "requested_at_iso": "2026-10-26T13:17:43Z",
+        "due_at": 1793020665.483936,
+        "due_at_iso": "2026-10-26T13:17:45Z",
+        "next_due_at": null,
+        "next_due_at_iso": null,
+        "expires_at": null,
+        "expires_at_iso": null,
+        "recurrence": {
+          "kind": "one_shot"
+        },
+        "recurrence_kind": "one_shot",
+        "recurrence_summary": "one_shot",
+        "payload_digest": "0ece90ce6ac124f949a1e3083f7366ce7bd9268889e38a39aced907e2157d197",
+        "payload": {
+          "kind": "masc.keeper_wake",
+          "body": {
+            "result_delivery": {
+              "policy": "none"
+            },
+            "keeper_name": "audit-live-deepseek",
+            "message": "Scheduled verification: append exactly one durable note to schedule_id \"audit-real-model-098cc5076f9b489ebaa5d6a740d6b262\" with body \"SCHEDULE_EFFECT_a24ca95cd85f4d8ebffe0321ee185ee5\" using masc_schedule_note_add. Read back that same schedule note, then finish. Do not post elsewhere or create work. If another authorized scheduled request arrives, retain both requests and perform each exact note once."
+          }
+        },
+        "payload_kind": "masc.keeper_wake",
+        "payload_support": "supported",
+        "payload_dispatch_tool": "masc.keeper_wake",
+        "payload_target": "keeper:audit-live-deepseek",
+        "payload_keeper_name": "audit-live-deepseek",
+        "payload_summary": "Scheduled verification: append exactly one durable note to schedule_id \"audit-real-model-098cc5076f9b489ebaa5d6a740d6b262\" with body \"SCHEDULE_EFFECT_a24ca95...",
+        "last_wake": {
+          "schedule_instance_id": "01a1785c-16bc-7000-9383-31a8ff7bf361",
+          "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262",
+          "started_at": 1793020666.357948,
+          "finished_at": 1793020666.36972,
+          "due_at": 1793020665.483936,
+          "payload_digest": "0ece90ce6ac124f949a1e3083f7366ce7bd9268889e38a39aced907e2157d197",
+          "status": "succeeded",
+          "detail": {
+            "kind": "masc.keeper_wake.enqueued",
+            "queue": "keeper_event_queue",
+            "stimulus": "schedule_due",
+            "stimulus_id": "c14f1b18e012ea104a0661752729960fd1b51a0c8532c8a54757ea7e649373d7",
+            "keeper_name": "audit-live-deepseek",
+            "schedule_instance_id": "01a1785c-16bc-7000-9383-31a8ff7bf361",
+            "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262",
+            "urgency": "normal",
+            "post_id": "c14f1b18e012ea104a0661752729960fd1b51a0c8532c8a54757ea7e649373d7",
+            "result_delivery_policy": "none",
+            "occurrence_status": "awaiting_ack",
+            "activation_status": "signaled",
+            "activation_reason": null,
+            "activation_detail": null,
+            "reaction_ledger_status": "recorded",
+            "reaction_ledger_error": null
+          },
+          "error": null,
+          "started_at_iso": "2026-10-26T13:17:46Z",
+          "finished_at_iso": "2026-10-26T13:17:46Z"
+        },
+        "dispatch_receipt": {
+          "projection_status": "recognized",
+          "kind": "masc.keeper_wake.enqueued",
+          "queue": "keeper_event_queue",
+          "stimulus": "schedule_due",
+          "stimulus_id": "c14f1b18e012ea104a0661752729960fd1b51a0c8532c8a54757ea7e649373d7",
+          "keeper_name": "audit-live-deepseek",
+          "schedule_instance_id": "01a1785c-16bc-7000-9383-31a8ff7bf361",
+          "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262",
+          "urgency": "normal",
+          "post_id": "c14f1b18e012ea104a0661752729960fd1b51a0c8532c8a54757ea7e649373d7",
+          "result_delivery_policy": "none",
+          "occurrence_status": "awaiting_ack",
+          "activation_status": "signaled",
+          "activation_reason": null,
+          "activation_detail": null,
+          "reaction_ledger_status": "recorded",
+          "reaction_ledger_error": null
+        },
+        "keeper_queue_evidence": {
+          "projection_status": "matched_pending",
+          "source": "durable_event_queue_snapshot",
+          "queue": "keeper_event_queue",
+          "stimulus": "schedule_due",
+          "keeper_name": "audit-live-deepseek",
+          "schedule_instance_id": "01a1785c-16bc-7000-9383-31a8ff7bf361",
+          "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262",
+          "post_id": "c14f1b18e012ea104a0661752729960fd1b51a0c8532c8a54757ea7e649373d7",
+          "wake_due_at": 1793020665.483936,
+          "wake_due_at_iso": "2026-10-26T13:17:45Z",
+          "wake_payload_digest": "0ece90ce6ac124f949a1e3083f7366ce7bd9268889e38a39aced907e2157d197",
+          "schedule_status": "succeeded",
+          "pending_count": 2,
+          "read_errors": [],
+          "resolved_owner": "audit-live-deepseek",
+          "matched_bucket": "pending",
+          "matched_post_id": "c14f1b18e012ea104a0661752729960fd1b51a0c8532c8a54757ea7e649373d7",
+          "matched_payload_kind": "schedule_due",
+          "matched_arrived_at": 1793020666.348629,
+          "matched_arrived_at_iso": "2026-10-26T13:17:46Z",
+          "matched_schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262",
+          "matched_schedule_instance_id": "01a1785c-16bc-7000-9383-31a8ff7bf361",
+          "matched_due_at": 1793020665.483936,
+          "matched_due_at_iso": "2026-10-26T13:17:45Z",
+          "matched_payload_digest": "0ece90ce6ac124f949a1e3083f7366ce7bd9268889e38a39aced907e2157d197",
+          "matched_age_seconds": 3.4059789180755615
+        },
+        "keeper_reaction_evidence": {
+          "projection_status": "matched_turn_started",
+          "source": "keeper_reaction_ledger",
+          "keeper_name": "audit-live-deepseek",
+          "schedule_instance_id": "01a1785c-16bc-7000-9383-31a8ff7bf361",
+          "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262",
+          "post_id": "c14f1b18e012ea104a0661752729960fd1b51a0c8532c8a54757ea7e649373d7",
+          "stimulus": "schedule_due",
+          "reaction_kind": "turn_started",
+          "stimulus_kind": "schedule_due",
+          "stimulus_id": "c14f1b18e012ea104a0661752729960fd1b51a0c8532c8a54757ea7e649373d7",
+          "stimulus_seen": true,
+          "turn_started_seen": true,
+          "turn_finished_seen": false,
+          "event_queue_ack_seen": false,
+          "event_queue_cancelled_seen": false,
+          "matched_record_count": 2,
+          "quarantined_record_count": 0,
+          "stimulus_recorded_at": 1793020666.369035,
+          "stimulus_recorded_at_iso": "2026-10-26T13:17:46Z",
+          "turn_finished_recorded_at": null,
+          "turn_finished_recorded_at_iso": null,
+          "turn_started_recorded_at": 1793020666.488602,
+          "turn_started_recorded_at_iso": "2026-10-26T13:17:46Z",
+          "event_queue_ack_recorded_at": null,
+          "event_queue_ack_recorded_at_iso": null,
+          "event_queue_cancelled_recorded_at": null,
+          "event_queue_cancelled_recorded_at_iso": null,
+          "latest_recorded_at": 1793020666.488602,
+          "latest_recorded_at_iso": "2026-10-26T13:17:46Z"
+        },
+        "runner_hold": null
+      },
+      "wakes": [
+        {
+          "schedule_instance_id": "01a1785c-16bc-7000-9383-31a8ff7bf361",
+          "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262",
+          "started_at": 1793020666.357948,
+          "finished_at": 1793020666.36972,
+          "due_at": 1793020665.483936,
+          "payload_digest": "0ece90ce6ac124f949a1e3083f7366ce7bd9268889e38a39aced907e2157d197",
+          "status": "succeeded",
+          "detail": {
+            "kind": "masc.keeper_wake.enqueued",
+            "queue": "keeper_event_queue",
+            "stimulus": "schedule_due",
+            "stimulus_id": "c14f1b18e012ea104a0661752729960fd1b51a0c8532c8a54757ea7e649373d7",
+            "keeper_name": "audit-live-deepseek",
+            "schedule_instance_id": "01a1785c-16bc-7000-9383-31a8ff7bf361",
+            "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262",
+            "urgency": "normal",
+            "post_id": "c14f1b18e012ea104a0661752729960fd1b51a0c8532c8a54757ea7e649373d7",
+            "result_delivery_policy": "none",
+            "occurrence_status": "awaiting_ack",
+            "activation_status": "signaled",
+            "activation_reason": null,
+            "activation_detail": null,
+            "reaction_ledger_status": "recorded",
+            "reaction_ledger_error": null
+          },
+          "error": null,
+          "started_at_iso": "2026-10-26T13:17:46Z",
+          "finished_at_iso": "2026-10-26T13:17:46Z"
+        }
+      ],
+      "wake_count": 1,
+      "wake_retention_per_schedule": 32
+    },
+    "notes": {
+      "status": "ok",
+      "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262",
+      "limit": 50,
+      "notes": []
+    }
+  },
+  "second": {
+    "history": {
+      "schema": "masc.dashboard.scheduled_automation.lookup.v1",
+      "source": "schedule_store",
+      "generated_at": "2026-10-26T13:17:49Z",
+      "status": "found",
+      "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second",
+      "request": {
+        "schedule_instance_id": "01a1785c-22f2-7000-8c71-3ee04a1a38f2",
+        "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second",
+        "status": "succeeded",
+        "source": "operator_request",
+        "requested_by": {
+          "id": "schedule-audit-observer",
+          "kind": "automated_actor",
+          "display_name": null
+        },
+        "scheduled_by": {
+          "id": "schedule-audit-observer",
+          "kind": "automated_actor",
+          "display_name": null
+        },
+        "requested_at": 1793020666.61034,
+        "requested_at_iso": "2026-10-26T13:17:46Z",
+        "due_at": 1793020668.61034,
+        "due_at_iso": "2026-10-26T13:17:48Z",
+        "next_due_at": null,
+        "next_due_at_iso": null,
+        "expires_at": null,
+        "expires_at_iso": null,
+        "recurrence": {
+          "kind": "one_shot"
+        },
+        "recurrence_kind": "one_shot",
+        "recurrence_summary": "one_shot",
+        "payload_digest": "36edcbdbed3116ac98076cc004c4714fa186b78a7a07c35f286a04b24b12ddfb",
+        "payload": {
+          "kind": "masc.keeper_wake",
+          "body": {
+            "result_delivery": {
+              "policy": "none"
+            },
+            "keeper_name": "audit-live-deepseek",
+            "message": "Scheduled verification: append exactly one durable note to schedule_id \"audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second\" with body \"SCHEDULE_EFFECT_a24ca95cd85f4d8ebffe0321ee185ee5_SECOND\" using masc_schedule_note_add. Read back that same schedule note, then finish. Do not post elsewhere or create work. If another authorized scheduled request arrives, retain both requests and perform each exact note once."
+          }
+        },
+        "payload_kind": "masc.keeper_wake",
+        "payload_support": "supported",
+        "payload_dispatch_tool": "masc.keeper_wake",
+        "payload_target": "keeper:audit-live-deepseek",
+        "payload_keeper_name": "audit-live-deepseek",
+        "payload_summary": "Scheduled verification: append exactly one durable note to schedule_id \"audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second\" with body \"SCHEDULE_EFFECT_...",
+        "last_wake": {
+          "schedule_instance_id": "01a1785c-22f2-7000-8c71-3ee04a1a38f2",
+          "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second",
+          "started_at": 1793020669.475385,
+          "finished_at": 1793020669.487687,
+          "due_at": 1793020668.61034,
+          "payload_digest": "36edcbdbed3116ac98076cc004c4714fa186b78a7a07c35f286a04b24b12ddfb",
+          "status": "succeeded",
+          "detail": {
+            "kind": "masc.keeper_wake.enqueued",
+            "queue": "keeper_event_queue",
+            "stimulus": "schedule_due",
+            "stimulus_id": "b372c3361d1c3d7390e993d8ab189c92555db3e969338c0ef605628698b373be",
+            "keeper_name": "audit-live-deepseek",
+            "schedule_instance_id": "01a1785c-22f2-7000-8c71-3ee04a1a38f2",
+            "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second",
+            "urgency": "normal",
+            "post_id": "b372c3361d1c3d7390e993d8ab189c92555db3e969338c0ef605628698b373be",
+            "result_delivery_policy": "none",
+            "occurrence_status": "awaiting_ack",
+            "activation_status": "signaled",
+            "activation_reason": null,
+            "activation_detail": null,
+            "reaction_ledger_status": "recorded",
+            "reaction_ledger_error": null
+          },
+          "error": null,
+          "started_at_iso": "2026-10-26T13:17:49Z",
+          "finished_at_iso": "2026-10-26T13:17:49Z"
+        },
+        "dispatch_receipt": {
+          "projection_status": "recognized",
+          "kind": "masc.keeper_wake.enqueued",
+          "queue": "keeper_event_queue",
+          "stimulus": "schedule_due",
+          "stimulus_id": "b372c3361d1c3d7390e993d8ab189c92555db3e969338c0ef605628698b373be",
+          "keeper_name": "audit-live-deepseek",
+          "schedule_instance_id": "01a1785c-22f2-7000-8c71-3ee04a1a38f2",
+          "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second",
+          "urgency": "normal",
+          "post_id": "b372c3361d1c3d7390e993d8ab189c92555db3e969338c0ef605628698b373be",
+          "result_delivery_policy": "none",
+          "occurrence_status": "awaiting_ack",
+          "activation_status": "signaled",
+          "activation_reason": null,
+          "activation_detail": null,
+          "reaction_ledger_status": "recorded",
+          "reaction_ledger_error": null
+        },
+        "keeper_queue_evidence": {
+          "projection_status": "matched_pending",
+          "source": "durable_event_queue_snapshot",
+          "queue": "keeper_event_queue",
+          "stimulus": "schedule_due",
+          "keeper_name": "audit-live-deepseek",
+          "schedule_instance_id": "01a1785c-22f2-7000-8c71-3ee04a1a38f2",
+          "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second",
+          "post_id": "b372c3361d1c3d7390e993d8ab189c92555db3e969338c0ef605628698b373be",
+          "wake_due_at": 1793020668.61034,
+          "wake_due_at_iso": "2026-10-26T13:17:48Z",
+          "wake_payload_digest": "36edcbdbed3116ac98076cc004c4714fa186b78a7a07c35f286a04b24b12ddfb",
+          "schedule_status": "succeeded",
+          "pending_count": 2,
+          "read_errors": [],
+          "resolved_owner": "audit-live-deepseek",
+          "matched_bucket": "pending",
+          "matched_post_id": "b372c3361d1c3d7390e993d8ab189c92555db3e969338c0ef605628698b373be",
+          "matched_payload_kind": "schedule_due",
+          "matched_arrived_at": 1793020669.384855,
+          "matched_arrived_at_iso": "2026-10-26T13:17:49Z",
+          "matched_schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second",
+          "matched_schedule_instance_id": "01a1785c-22f2-7000-8c71-3ee04a1a38f2",
+          "matched_due_at": 1793020668.61034,
+          "matched_due_at_iso": "2026-10-26T13:17:48Z",
+          "matched_payload_digest": "36edcbdbed3116ac98076cc004c4714fa186b78a7a07c35f286a04b24b12ddfb",
+          "matched_age_seconds": 0.45449185371398926
+        },
+        "keeper_reaction_evidence": {
+          "projection_status": "matched_stimulus",
+          "source": "keeper_reaction_ledger",
+          "keeper_name": "audit-live-deepseek",
+          "schedule_instance_id": "01a1785c-22f2-7000-8c71-3ee04a1a38f2",
+          "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second",
+          "post_id": "b372c3361d1c3d7390e993d8ab189c92555db3e969338c0ef605628698b373be",
+          "stimulus": "schedule_due",
+          "reaction_kind": "turn_started",
+          "stimulus_kind": "schedule_due",
+          "stimulus_id": "b372c3361d1c3d7390e993d8ab189c92555db3e969338c0ef605628698b373be",
+          "stimulus_seen": true,
+          "turn_started_seen": false,
+          "turn_finished_seen": false,
+          "event_queue_ack_seen": false,
+          "event_queue_cancelled_seen": false,
+          "matched_record_count": 1,
+          "quarantined_record_count": 0,
+          "stimulus_recorded_at": 1793020669.487521,
+          "stimulus_recorded_at_iso": "2026-10-26T13:17:49Z",
+          "turn_finished_recorded_at": null,
+          "turn_finished_recorded_at_iso": null,
+          "turn_started_recorded_at": null,
+          "turn_started_recorded_at_iso": null,
+          "event_queue_ack_recorded_at": null,
+          "event_queue_ack_recorded_at_iso": null,
+          "event_queue_cancelled_recorded_at": null,
+          "event_queue_cancelled_recorded_at_iso": null,
+          "latest_recorded_at": 1793020669.487521,
+          "latest_recorded_at_iso": "2026-10-26T13:17:49Z"
+        },
+        "runner_hold": null
+      },
+      "wakes": [
+        {
+          "schedule_instance_id": "01a1785c-22f2-7000-8c71-3ee04a1a38f2",
+          "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second",
+          "started_at": 1793020669.475385,
+          "finished_at": 1793020669.487687,
+          "due_at": 1793020668.61034,
+          "payload_digest": "36edcbdbed3116ac98076cc004c4714fa186b78a7a07c35f286a04b24b12ddfb",
+          "status": "succeeded",
+          "detail": {
+            "kind": "masc.keeper_wake.enqueued",
+            "queue": "keeper_event_queue",
+            "stimulus": "schedule_due",
+            "stimulus_id": "b372c3361d1c3d7390e993d8ab189c92555db3e969338c0ef605628698b373be",
+            "keeper_name": "audit-live-deepseek",
+            "schedule_instance_id": "01a1785c-22f2-7000-8c71-3ee04a1a38f2",
+            "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second",
+            "urgency": "normal",
+            "post_id": "b372c3361d1c3d7390e993d8ab189c92555db3e969338c0ef605628698b373be",
+            "result_delivery_policy": "none",
+            "occurrence_status": "awaiting_ack",
+            "activation_status": "signaled",
+            "activation_reason": null,
+            "activation_detail": null,
+            "reaction_ledger_status": "recorded",
+            "reaction_ledger_error": null
+          },
+          "error": null,
+          "started_at_iso": "2026-10-26T13:17:49Z",
+          "finished_at_iso": "2026-10-26T13:17:49Z"
+        }
+      ],
+      "wake_count": 1,
+      "wake_retention_per_schedule": 32
+    },
+    "notes": {
+      "status": "ok",
+      "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second",
+      "limit": 50,
+      "notes": []
+    }
+  },
+  "turns": {
+    "schema": "masc.keeper_turns.v1",
+    "keepers": [
+      {
+        "status": "ok",
+        "keeper_name": "audit-live-deepseek",
+        "turn": {
+          "lane": "autonomous",
+          "turn_ref": "trace-1793020663392-00000#1",
+          "started_at_unix": 1793020666.486767,
+          "preview": {
+            "status_text": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash \u00b7 tool activity observed \u00b7 last observed tool: keeper_tool_search",
+            "activity": "tool",
+            "text_tail": "I'll read the schedule, then append the exact note once.",
+            "text_position": {
+              "generation": 2,
+              "start_byte": 0
+            },
+            "last_tool": "keeper_tool_search",
+            "updated_at_unix": 1793020668.756086,
+            "preparation": null,
+            "preparation_timeline": null,
+            "execution_scope": null
+          }
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "observed_at_utc": "2026-10-26T12:25:55.344165+00:00",
+  "operation": {
+    "schema": "masc.keeper_chat_operation.v1",
+    "operation_id": "schedule-backend-resume-0c7be315f4334255b271e1195ca530d0",
+    "state": "Failed",
+    "completed_at": 1793017516.972277,
+    "failure_kind": "Interrupted_by_restart",
+    "failure_detail": "The operation was interrupted by a runtime restart."
+  }
+}

@@ -1,0 +1,10 @@
+[2026-10-26 22:10:19] [INFO] [Keeper] keeper:audit-live-deepseek tool_call tool=keeper_tool_search source=tools/keeper_tool_search.toml params=[names] input_shape=[names=array:2] outcome=ok out_len=207
+[2026-10-26 22:10:22] [INFO] [Keeper] keeper:audit-live-deepseek tool_call tool=keeper_tool_search source=tools/keeper_tool_search.toml params=[names] input_shape=[names=array:2] outcome=ok out_len=224
+[2026-10-26 22:10:23] [INFO] [Keeper] keeper:audit-live-deepseek tool_call tool=masc_schedule_list source=tools/masc_schedule_list.toml params=[owner,status] input_shape=[owner=string:3,status=string:6] outcome=ok out_len=73
+[2026-10-26 22:10:23] [INFO] [Keeper] keeper:audit-live-deepseek tool_call tool=masc_schedule_list source=tools/masc_schedule_list.toml params=[owner] input_shape=[owner=string:3] outcome=ok out_len=512
+[2026-10-26 22:10:29] [INFO] [Keeper] keeper:audit-live-deepseek tool_call tool=masc_schedule_get source=tools/masc_schedule_get.toml params=[schedule_id] input_shape=[schedule_id=string:49] outcome=ok out_len=2656
+[2026-10-26 22:10:31] [INFO] [Keeper] keeper:audit-live-deepseek tool_call tool=masc_schedule_notes_list source=tools/masc_schedule_notes_list.toml params=[schedule_id] input_shape=[schedule_id=string:49] outcome=ok out_len=103
+[2026-10-26 22:10:32] [INFO] [Keeper] keeper:audit-live-deepseek tool_call tool=masc_schedule_note_add source=tools/masc_schedule_note_add.toml params=[schedule_id,body] input_shape=[body=string:48,schedule_id=string:49] outcome=ok out_len=274
+[2026-10-26 22:10:33] [INFO] [Keeper] keeper:audit-live-deepseek tool_call tool=masc_schedule_notes_list source=tools/masc_schedule_notes_list.toml params=[schedule_id] input_shape=[schedule_id=string:49] outcome=ok out_len=339
+[2026-10-26 22:10:40] [INFO] [Server] MASC MCP: Background fibers finished, shutdown complete.
+[2026-10-26 22:10:40] [INFO] [Server] MASC MCP: Shutdown complete.

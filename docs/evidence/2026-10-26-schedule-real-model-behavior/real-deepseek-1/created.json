@@ -1,0 +1,46 @@
+{
+  "schedule_instance_id": "01a17855-4150-7000-956c-197b4b9cccfd",
+  "schedule_id": "audit-real-model-a8874716581642c28c5a63582eb06fce",
+  "requested_by": {
+    "id": "schedule-audit-observer",
+    "kind": "automated_actor",
+    "display_name": null
+  },
+  "scheduled_by": {
+    "id": "schedule-audit-observer",
+    "kind": "automated_actor",
+    "display_name": null
+  },
+  "requested_at": 1793020215.63171,
+  "due_at": 1793020217.63171,
+  "expires_at": null,
+  "payload": {
+    "kind": "masc.keeper_wake",
+    "body": {
+      "result_delivery": {
+        "policy": "none"
+      },
+      "keeper_name": "audit-live-deepseek",
+      "message": "This is a one-time scheduled-job verification. Call masc_schedule_note_add exactly once with schedule_id \"audit-real-model-a8874716581642c28c5a63582eb06fce\" and body \"SCHEDULE_EFFECT_0ff1970d479444c0907c3ed8324530e2\". Do not merely print the marker. Read back the note with masc_schedule_notes_list for this schedule_id, then finish with a brief confirmation. Do not use any other mutating tool or create another schedule."
+    }
+  },
+  "status": "scheduled",
+  "source": "operator_request",
+  "recurrence": {
+    "kind": "one_shot"
+  },
+  "cancellation": null,
+  "due_at_iso": "2026-10-26T13:10:17Z",
+  "next_due_at": 1793020217.63171,
+  "next_due_at_iso": "2026-10-26T13:10:17Z",
+  "requested_at_iso": "2026-10-26T13:10:15Z",
+  "recurrence_kind": "one_shot",
+  "recurrence_summary": "one_shot",
+  "payload_digest": "4c3eb63f3a134c970190bc12f3410293128a090d45190b91a3e1b40fc410c8a3",
+  "payload_kind": "masc.keeper_wake",
+  "payload_support": "supported",
+  "payload_dispatch_tool": "masc.keeper_wake",
+  "payload_target": "keeper:audit-live-deepseek",
+  "payload_summary": "This is a one-time scheduled-job verification. Call masc_schedule_note_add exactly once with schedule_id \"audit-real-model-a8874716581642c28c5a63582eb06fce\" ...",
+  "last_wake": null
+}

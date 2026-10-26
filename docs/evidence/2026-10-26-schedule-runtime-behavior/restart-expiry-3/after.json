@@ -1,0 +1,865 @@
+{
+  "accepted": {
+    "schedule_instance_id": "01a17836-0334-7000-be3d-f847f122f3aa",
+    "schedule_id": "audit-retained-expiring",
+    "requested_by": {
+      "id": "schedule-audit-admin",
+      "kind": "automated_actor",
+      "display_name": null
+    },
+    "scheduled_by": {
+      "id": "schedule-audit-admin",
+      "kind": "automated_actor",
+      "display_name": null
+    },
+    "requested_at": 1793018168.11566,
+    "due_at": 1793021769.11566,
+    "expires_at": 1793018198.112855,
+    "payload": {
+      "kind": "masc.keeper_wake",
+      "body": {
+        "result_delivery": {
+          "policy": "none"
+        },
+        "keeper_name": "audit-restart-a",
+        "message": "Retain this accepted input after definition expiry."
+      }
+    },
+    "status": "expired",
+    "source": "operator_request",
+    "recurrence": {
+      "kind": "interval",
+      "interval_sec": 3600
+    },
+    "cancellation": null,
+    "due_at_iso": "2026-10-26T13:36:09Z",
+    "next_due_at": null,
+    "next_due_at_iso": null,
+    "requested_at_iso": "2026-10-26T12:36:08Z",
+    "recurrence_kind": "interval",
+    "recurrence_summary": "every 3600s",
+    "payload_digest": "83f74d384c883c9c151412674861b10afd90532455be730593589f2323630efc",
+    "payload_kind": "masc.keeper_wake",
+    "payload_support": "supported",
+    "payload_dispatch_tool": "masc.keeper_wake",
+    "payload_target": "keeper:audit-restart-a",
+    "payload_summary": "Retain this accepted input after definition expiry.",
+    "last_wake": {
+      "schedule_instance_id": "01a17836-0334-7000-be3d-f847f122f3aa",
+      "schedule_id": "audit-retained-expiring",
+      "started_at": 1793018169.995028,
+      "finished_at": 1793018170.004781,
+      "due_at": 1793018169.11566,
+      "payload_digest": "83f74d384c883c9c151412674861b10afd90532455be730593589f2323630efc",
+      "status": "succeeded",
+      "detail": {
+        "kind": "masc.keeper_wake.enqueued",
+        "queue": "keeper_event_queue",
+        "stimulus": "schedule_due",
+        "stimulus_id": "a25840c772c6bbb55d706014489562c41dd996483df28147af1b3b9424df6d17",
+        "keeper_name": "audit-restart-a",
+        "schedule_instance_id": "01a17836-0334-7000-be3d-f847f122f3aa",
+        "schedule_id": "audit-retained-expiring",
+        "urgency": "normal",
+        "post_id": "a25840c772c6bbb55d706014489562c41dd996483df28147af1b3b9424df6d17",
+        "result_delivery_policy": "none",
+        "occurrence_status": "awaiting_ack",
+        "activation_status": "deferred",
+        "activation_reason": "lifecycle_denied",
+        "activation_detail": "paused",
+        "reaction_ledger_status": "recorded",
+        "reaction_ledger_error": null
+      },
+      "error": null
+    }
+  },
+  "never": {
+    "schedule_instance_id": "01a17836-0b26-7000-8b0d-7307adcd51df",
+    "schedule_id": "audit-expire-before-acceptance",
+    "requested_by": {
+      "id": "schedule-audit-admin",
+      "kind": "automated_actor",
+      "display_name": null
+    },
+    "scheduled_by": {
+      "id": "schedule-audit-admin",
+      "kind": "automated_actor",
+      "display_name": null
+    },
+    "requested_at": 1793018170.15033,
+    "due_at": 1793018190.15033,
+    "expires_at": 1793018195.1471171,
+    "payload": {
+      "kind": "masc.keeper_wake",
+      "body": {
+        "result_delivery": {
+          "policy": "none"
+        },
+        "keeper_name": "audit-restart-a",
+        "message": "Must expire while the scheduler is down."
+      }
+    },
+    "status": "expired",
+    "source": "operator_request",
+    "recurrence": {
+      "kind": "one_shot"
+    },
+    "cancellation": null,
+    "due_at_iso": "2026-10-26T12:36:30Z",
+    "next_due_at": null,
+    "next_due_at_iso": null,
+    "requested_at_iso": "2026-10-26T12:36:10Z",
+    "recurrence_kind": "one_shot",
+    "recurrence_summary": "one_shot",
+    "payload_digest": "e8686ac34b41b1d3c9cf18d0fe3186a685062a0a1053a8a9088c092742012807",
+    "payload_kind": "masc.keeper_wake",
+    "payload_support": "supported",
+    "payload_dispatch_tool": "masc.keeper_wake",
+    "payload_target": "keeper:audit-restart-a",
+    "payload_summary": "Must expire while the scheduler is down.",
+    "last_wake": null
+  },
+  "missed": {
+    "schedule_instance_id": "01a17836-0b36-7000-9b34-963dd22b1164",
+    "schedule_id": "audit-missed-interval",
+    "requested_by": {
+      "id": "schedule-audit-admin",
+      "kind": "automated_actor",
+      "display_name": null
+    },
+    "scheduled_by": {
+      "id": "schedule-audit-admin",
+      "kind": "automated_actor",
+      "display_name": null
+    },
+    "requested_at": 1793018170.166463,
+    "due_at": 1793018202.166463,
+    "expires_at": null,
+    "payload": {
+      "kind": "masc.keeper_wake",
+      "body": {
+        "result_delivery": {
+          "policy": "none"
+        },
+        "keeper_name": "audit-restart-a",
+        "message": "Miss multiple interval due times while scheduler is down."
+      }
+    },
+    "status": "scheduled",
+    "source": "operator_request",
+    "recurrence": {
+      "kind": "interval",
+      "interval_sec": 2
+    },
+    "cancellation": null,
+    "due_at_iso": "2026-10-26T12:36:42Z",
+    "next_due_at": 1793018202.166463,
+    "next_due_at_iso": "2026-10-26T12:36:42Z",
+    "requested_at_iso": "2026-10-26T12:36:10Z",
+    "recurrence_kind": "interval",
+    "recurrence_summary": "every 2s",
+    "payload_digest": "4ee261db4f0f6ff179bd3f0eb8e15cf32b63085471d1ff86c0e2f4d059854d40",
+    "payload_kind": "masc.keeper_wake",
+    "payload_support": "supported",
+    "payload_dispatch_tool": "masc.keeper_wake",
+    "payload_target": "keeper:audit-restart-a",
+    "payload_summary": "Miss multiple interval due times while scheduler is down.",
+    "last_wake": {
+      "schedule_instance_id": "01a17836-0b36-7000-9b34-963dd22b1164",
+      "schedule_id": "audit-missed-interval",
+      "started_at": 1793018200.985214,
+      "finished_at": 1793018201.005645,
+      "due_at": 1793018190.166463,
+      "payload_digest": "4ee261db4f0f6ff179bd3f0eb8e15cf32b63085471d1ff86c0e2f4d059854d40",
+      "status": "succeeded",
+      "detail": {
+        "kind": "masc.keeper_wake.enqueued",
+        "queue": "keeper_event_queue",
+        "stimulus": "schedule_due",
+        "stimulus_id": "f145fc196c83002d1ee9b30b3268a83322f9d2a89ca48183feabe763c607a328",
+        "keeper_name": "audit-restart-a",
+        "schedule_instance_id": "01a17836-0b36-7000-9b34-963dd22b1164",
+        "schedule_id": "audit-missed-interval",
+        "urgency": "normal",
+        "post_id": "f145fc196c83002d1ee9b30b3268a83322f9d2a89ca48183feabe763c607a328",
+        "result_delivery_policy": "none",
+        "occurrence_status": "awaiting_ack",
+        "activation_status": "deferred",
+        "activation_reason": "lifecycle_denied",
+        "activation_detail": "paused",
+        "reaction_ledger_status": "recorded",
+        "reaction_ledger_error": null
+      },
+      "error": null
+    }
+  },
+  "inventory": {
+    "schema": "masc.dashboard.keeper_waiting_inventory.v4",
+    "source": "server_keeper_waiting_inventory",
+    "generated_at": "2026-10-26T12:36:41Z",
+    "supported_states": [
+      "idle",
+      "busy",
+      "waiting",
+      "deferred"
+    ],
+    "keeper_count_known": true,
+    "keeper_count": 1,
+    "waiting_keeper_count": 1,
+    "row_count": 3,
+    "global_row_count": 0,
+    "total_row_count": 3,
+    "oldest_since": 1793018169.986868,
+    "oldest_since_iso": "2026-10-26T12:36:09Z",
+    "oldest_age_seconds": 31.310829162597656,
+    "global_pending_confirm_count_known": true,
+    "global_pending_confirm_count": 0,
+    "pending_approval_state": {
+      "state": "ready"
+    },
+    "source_counts": {
+      "event_queue_pending": 2,
+      "schedule_waiting": 1
+    },
+    "rows": [
+      {
+        "keeper_name": "audit-restart-a",
+        "source": "event_queue_pending",
+        "waiting_on": "schedule_due",
+        "what": "\uc608\uc57d \uc2e4\ud589 \uc2dc\uac01 \ub3c4\ub798 \u00b7 audit-retained-expiring",
+        "wake_producer": "schedule_runner",
+        "since": 1793018169.986868,
+        "since_iso": "2026-10-26T12:36:09Z",
+        "due_at": null,
+        "due_at_iso": null,
+        "next_action": "keeper_drain_event_queue",
+        "detail": {
+          "queue_index": 0,
+          "post_id": "a25840c772c6bbb55d706014489562c41dd996483df28147af1b3b9424df6d17",
+          "source_ref": "33863933cdec5c2afcbf76f73732215e99db53a090475b9dd271ef53f074bfc7",
+          "source_incarnation": "0",
+          "urgency": "normal",
+          "arrived_at_unix": 1793018169.986868,
+          "payload_kind": "schedule_due"
+        }
+      },
+      {
+        "keeper_name": "audit-restart-a",
+        "source": "event_queue_pending",
+        "waiting_on": "schedule_due",
+        "what": "\uc608\uc57d \uc2e4\ud589 \uc2dc\uac01 \ub3c4\ub798 \u00b7 audit-missed-interval",
+        "wake_producer": "schedule_runner",
+        "since": 1793018200.979614,
+        "since_iso": "2026-10-26T12:36:40Z",
+        "due_at": null,
+        "due_at_iso": null,
+        "next_action": "keeper_drain_event_queue",
+        "detail": {
+          "queue_index": 1,
+          "post_id": "f145fc196c83002d1ee9b30b3268a83322f9d2a89ca48183feabe763c607a328",
+          "source_ref": "61c62eb84072bd742a64017542b8e4d8e85071510f939c45642818bf598f862d",
+          "source_incarnation": "1",
+          "urgency": "normal",
+          "arrived_at_unix": 1793018200.979614,
+          "payload_kind": "schedule_due"
+        }
+      },
+      {
+        "keeper_name": "audit-restart-a",
+        "source": "schedule_waiting",
+        "waiting_on": "masc.keeper_wake",
+        "what": "\uc608\uc57d \uc2e4\ud589 \u00b7 audit-missed-interval",
+        "wake_producer": "schedule_runner",
+        "since": 1793018170.166463,
+        "since_iso": "2026-10-26T12:36:10Z",
+        "due_at": 1793018202.166463,
+        "due_at_iso": "2026-10-26T12:36:42Z",
+        "next_action": "wait_until_due",
+        "detail": {
+          "schedule_instance_id": "01a17836-0b36-7000-9b34-963dd22b1164",
+          "schedule_id": "audit-missed-interval",
+          "keeper_participants": [
+            "schedule-audit-admin",
+            "audit-restart-a"
+          ],
+          "status": "scheduled",
+          "payload_digest": "4ee261db4f0f6ff179bd3f0eb8e15cf32b63085471d1ff86c0e2f4d059854d40",
+          "payload_kind": "masc.keeper_wake"
+        }
+      }
+    ],
+    "keepers": [
+      {
+        "keeper_name": "audit-restart-a",
+        "paused": true,
+        "state": "waiting",
+        "waiting_on": [
+          {
+            "keeper_name": "audit-restart-a",
+            "source": "event_queue_pending",
+            "waiting_on": "schedule_due",
+            "what": "\uc608\uc57d \uc2e4\ud589 \uc2dc\uac01 \ub3c4\ub798 \u00b7 audit-retained-expiring",
+            "wake_producer": "schedule_runner",
+            "since": 1793018169.986868,
+            "since_iso": "2026-10-26T12:36:09Z",
+            "due_at": null,
+            "due_at_iso": null,
+            "next_action": "keeper_drain_event_queue",
+            "detail": {
+              "queue_index": 0,
+              "post_id": "a25840c772c6bbb55d706014489562c41dd996483df28147af1b3b9424df6d17",
+              "source_ref": "33863933cdec5c2afcbf76f73732215e99db53a090475b9dd271ef53f074bfc7",
+              "source_incarnation": "0",
+              "urgency": "normal",
+              "arrived_at_unix": 1793018169.986868,
+              "payload_kind": "schedule_due"
+            }
+          },
+          {
+            "keeper_name": "audit-restart-a",
+            "source": "event_queue_pending",
+            "waiting_on": "schedule_due",
+            "what": "\uc608\uc57d \uc2e4\ud589 \uc2dc\uac01 \ub3c4\ub798 \u00b7 audit-missed-interval",
+            "wake_producer": "schedule_runner",
+            "since": 1793018200.979614,
+            "since_iso": "2026-10-26T12:36:40Z",
+            "due_at": null,
+            "due_at_iso": null,
+            "next_action": "keeper_drain_event_queue",
+            "detail": {
+              "queue_index": 1,
+              "post_id": "f145fc196c83002d1ee9b30b3268a83322f9d2a89ca48183feabe763c607a328",
+              "source_ref": "61c62eb84072bd742a64017542b8e4d8e85071510f939c45642818bf598f862d",
+              "source_incarnation": "1",
+              "urgency": "normal",
+              "arrived_at_unix": 1793018200.979614,
+              "payload_kind": "schedule_due"
+            }
+          },
+          {
+            "keeper_name": "audit-restart-a",
+            "source": "schedule_waiting",
+            "waiting_on": "masc.keeper_wake",
+            "what": "\uc608\uc57d \uc2e4\ud589 \u00b7 audit-missed-interval",
+            "wake_producer": "schedule_runner",
+            "since": 1793018170.166463,
+            "since_iso": "2026-10-26T12:36:10Z",
+            "due_at": 1793018202.166463,
+            "due_at_iso": "2026-10-26T12:36:42Z",
+            "next_action": "wait_until_due",
+            "detail": {
+              "schedule_instance_id": "01a17836-0b36-7000-9b34-963dd22b1164",
+              "schedule_id": "audit-missed-interval",
+              "keeper_participants": [
+                "schedule-audit-admin",
+                "audit-restart-a"
+              ],
+              "status": "scheduled",
+              "payload_digest": "4ee261db4f0f6ff179bd3f0eb8e15cf32b63085471d1ff86c0e2f4d059854d40",
+              "payload_kind": "masc.keeper_wake"
+            }
+          }
+        ],
+        "waiting_count": 3,
+        "sources": {
+          "event_queue_pending": 2,
+          "schedule_waiting": 1
+        },
+        "since": 1793018169.986868,
+        "since_iso": "2026-10-26T12:36:09Z",
+        "due_at": 1793018202.166463,
+        "due_at_iso": "2026-10-26T12:36:42Z",
+        "source_next_actions": {
+          "event_queue_pending": [
+            "keeper_drain_event_queue"
+          ],
+          "schedule_waiting": [
+            "wait_until_due"
+          ]
+        },
+        "current_execution": null
+      }
+    ],
+    "global_waiting_on": []
+  },
+  "notes": {
+    "status": "ok",
+    "schedule_id": "audit-retained-expiring",
+    "limit": 50,
+    "notes": [
+      {
+        "note_id": "3",
+        "schedule_id": "audit-retained-expiring",
+        "author_id": "schedule-audit-admin",
+        "author_kind": "automated_actor",
+        "created_at": 1793018168.139889,
+        "body": "durable note across server restart"
+      }
+    ]
+  },
+  "histories": {
+    "audit-retained-expiring": {
+      "schema": "masc.dashboard.scheduled_automation.lookup.v1",
+      "source": "schedule_store",
+      "generated_at": "2026-10-26T12:36:41Z",
+      "status": "found",
+      "schedule_id": "audit-retained-expiring",
+      "request": {
+        "schedule_instance_id": "01a17836-0334-7000-be3d-f847f122f3aa",
+        "schedule_id": "audit-retained-expiring",
+        "status": "expired",
+        "source": "operator_request",
+        "requested_by": {
+          "id": "schedule-audit-admin",
+          "kind": "automated_actor",
+          "display_name": null
+        },
+        "scheduled_by": {
+          "id": "schedule-audit-admin",
+          "kind": "automated_actor",
+          "display_name": null
+        },
+        "requested_at": 1793018168.11566,
+        "requested_at_iso": "2026-10-26T12:36:08Z",
+        "due_at": 1793021769.11566,
+        "due_at_iso": "2026-10-26T13:36:09Z",
+        "next_due_at": null,
+        "next_due_at_iso": null,
+        "expires_at": 1793018198.112855,
+        "expires_at_iso": "2026-10-26T12:36:38Z",
+        "recurrence": {
+          "kind": "interval",
+          "interval_sec": 3600
+        },
+        "recurrence_kind": "interval",
+        "recurrence_summary": "every 3600s",
+        "payload_digest": "83f74d384c883c9c151412674861b10afd90532455be730593589f2323630efc",
+        "payload": {
+          "kind": "masc.keeper_wake",
+          "body": {
+            "result_delivery": {
+              "policy": "none"
+            },
+            "keeper_name": "audit-restart-a",
+            "message": "Retain this accepted input after definition expiry."
+          }
+        },
+        "payload_kind": "masc.keeper_wake",
+        "payload_support": "supported",
+        "payload_dispatch_tool": "masc.keeper_wake",
+        "payload_target": "keeper:audit-restart-a",
+        "payload_keeper_name": "audit-restart-a",
+        "payload_summary": "Retain this accepted input after definition expiry.",
+        "last_wake": {
+          "schedule_instance_id": "01a17836-0334-7000-be3d-f847f122f3aa",
+          "schedule_id": "audit-retained-expiring",
+          "started_at": 1793018169.995028,
+          "finished_at": 1793018170.004781,
+          "due_at": 1793018169.11566,
+          "payload_digest": "83f74d384c883c9c151412674861b10afd90532455be730593589f2323630efc",
+          "status": "succeeded",
+          "detail": {
+            "kind": "masc.keeper_wake.enqueued",
+            "queue": "keeper_event_queue",
+            "stimulus": "schedule_due",
+            "stimulus_id": "a25840c772c6bbb55d706014489562c41dd996483df28147af1b3b9424df6d17",
+            "keeper_name": "audit-restart-a",
+            "schedule_instance_id": "01a17836-0334-7000-be3d-f847f122f3aa",
+            "schedule_id": "audit-retained-expiring",
+            "urgency": "normal",
+            "post_id": "a25840c772c6bbb55d706014489562c41dd996483df28147af1b3b9424df6d17",
+            "result_delivery_policy": "none",
+            "occurrence_status": "awaiting_ack",
+            "activation_status": "deferred",
+            "activation_reason": "lifecycle_denied",
+            "activation_detail": "paused",
+            "reaction_ledger_status": "recorded",
+            "reaction_ledger_error": null
+          },
+          "error": null,
+          "started_at_iso": "2026-10-26T12:36:09Z",
+          "finished_at_iso": "2026-10-26T12:36:10Z"
+        },
+        "dispatch_receipt": {
+          "projection_status": "recognized",
+          "kind": "masc.keeper_wake.enqueued",
+          "queue": "keeper_event_queue",
+          "stimulus": "schedule_due",
+          "stimulus_id": "a25840c772c6bbb55d706014489562c41dd996483df28147af1b3b9424df6d17",
+          "keeper_name": "audit-restart-a",
+          "schedule_instance_id": "01a17836-0334-7000-be3d-f847f122f3aa",
+          "schedule_id": "audit-retained-expiring",
+          "urgency": "normal",
+          "post_id": "a25840c772c6bbb55d706014489562c41dd996483df28147af1b3b9424df6d17",
+          "result_delivery_policy": "none",
+          "occurrence_status": "awaiting_ack",
+          "activation_status": "deferred",
+          "activation_reason": "lifecycle_denied",
+          "activation_detail": "paused",
+          "reaction_ledger_status": "recorded",
+          "reaction_ledger_error": null
+        },
+        "keeper_queue_evidence": {
+          "projection_status": "matched_pending",
+          "source": "durable_event_queue_snapshot",
+          "queue": "keeper_event_queue",
+          "stimulus": "schedule_due",
+          "keeper_name": "audit-restart-a",
+          "schedule_instance_id": "01a17836-0334-7000-be3d-f847f122f3aa",
+          "schedule_id": "audit-retained-expiring",
+          "post_id": "a25840c772c6bbb55d706014489562c41dd996483df28147af1b3b9424df6d17",
+          "wake_due_at": 1793018169.11566,
+          "wake_due_at_iso": "2026-10-26T12:36:09Z",
+          "wake_payload_digest": "83f74d384c883c9c151412674861b10afd90532455be730593589f2323630efc",
+          "schedule_status": "expired",
+          "pending_count": 2,
+          "read_errors": [],
+          "resolved_owner": "audit-restart-a",
+          "matched_bucket": "pending",
+          "matched_post_id": "a25840c772c6bbb55d706014489562c41dd996483df28147af1b3b9424df6d17",
+          "matched_payload_kind": "schedule_due",
+          "matched_arrived_at": 1793018169.986868,
+          "matched_arrived_at_iso": "2026-10-26T12:36:09Z",
+          "matched_schedule_id": "audit-retained-expiring",
+          "matched_schedule_instance_id": "01a17836-0334-7000-be3d-f847f122f3aa",
+          "matched_due_at": 1793018169.11566,
+          "matched_due_at_iso": "2026-10-26T12:36:09Z",
+          "matched_payload_digest": "83f74d384c883c9c151412674861b10afd90532455be730593589f2323630efc",
+          "matched_age_seconds": 31.320370197296143
+        },
+        "keeper_reaction_evidence": {
+          "projection_status": "matched_stimulus",
+          "source": "keeper_reaction_ledger",
+          "keeper_name": "audit-restart-a",
+          "schedule_instance_id": "01a17836-0334-7000-be3d-f847f122f3aa",
+          "schedule_id": "audit-retained-expiring",
+          "post_id": "a25840c772c6bbb55d706014489562c41dd996483df28147af1b3b9424df6d17",
+          "stimulus": "schedule_due",
+          "reaction_kind": "turn_started",
+          "stimulus_kind": "schedule_due",
+          "stimulus_id": "a25840c772c6bbb55d706014489562c41dd996483df28147af1b3b9424df6d17",
+          "stimulus_seen": true,
+          "turn_started_seen": false,
+          "turn_finished_seen": false,
+          "event_queue_ack_seen": false,
+          "event_queue_cancelled_seen": false,
+          "matched_record_count": 1,
+          "quarantined_record_count": 0,
+          "stimulus_recorded_at": 1793018170.003695,
+          "stimulus_recorded_at_iso": "2026-10-26T12:36:10Z",
+          "turn_finished_recorded_at": null,
+          "turn_finished_recorded_at_iso": null,
+          "turn_started_recorded_at": null,
+          "turn_started_recorded_at_iso": null,
+          "event_queue_ack_recorded_at": null,
+          "event_queue_ack_recorded_at_iso": null,
+          "event_queue_cancelled_recorded_at": null,
+          "event_queue_cancelled_recorded_at_iso": null,
+          "latest_recorded_at": 1793018170.003695,
+          "latest_recorded_at_iso": "2026-10-26T12:36:10Z"
+        },
+        "runner_hold": null
+      },
+      "wakes": [
+        {
+          "schedule_instance_id": "01a17836-0334-7000-be3d-f847f122f3aa",
+          "schedule_id": "audit-retained-expiring",
+          "started_at": 1793018169.995028,
+          "finished_at": 1793018170.004781,
+          "due_at": 1793018169.11566,
+          "payload_digest": "83f74d384c883c9c151412674861b10afd90532455be730593589f2323630efc",
+          "status": "succeeded",
+          "detail": {
+            "kind": "masc.keeper_wake.enqueued",
+            "queue": "keeper_event_queue",
+            "stimulus": "schedule_due",
+            "stimulus_id": "a25840c772c6bbb55d706014489562c41dd996483df28147af1b3b9424df6d17",
+            "keeper_name": "audit-restart-a",
+            "schedule_instance_id": "01a17836-0334-7000-be3d-f847f122f3aa",
+            "schedule_id": "audit-retained-expiring",
+            "urgency": "normal",
+            "post_id": "a25840c772c6bbb55d706014489562c41dd996483df28147af1b3b9424df6d17",
+            "result_delivery_policy": "none",
+            "occurrence_status": "awaiting_ack",
+            "activation_status": "deferred",
+            "activation_reason": "lifecycle_denied",
+            "activation_detail": "paused",
+            "reaction_ledger_status": "recorded",
+            "reaction_ledger_error": null
+          },
+          "error": null,
+          "started_at_iso": "2026-10-26T12:36:09Z",
+          "finished_at_iso": "2026-10-26T12:36:10Z"
+        }
+      ],
+      "wake_count": 1,
+      "wake_retention_per_schedule": 32
+    },
+    "audit-expire-before-acceptance": {
+      "schema": "masc.dashboard.scheduled_automation.lookup.v1",
+      "source": "schedule_store",
+      "generated_at": "2026-10-26T12:36:41Z",
+      "status": "found",
+      "schedule_id": "audit-expire-before-acceptance",
+      "request": {
+        "schedule_instance_id": "01a17836-0b26-7000-8b0d-7307adcd51df",
+        "schedule_id": "audit-expire-before-acceptance",
+        "status": "expired",
+        "source": "operator_request",
+        "requested_by": {
+          "id": "schedule-audit-admin",
+          "kind": "automated_actor",
+          "display_name": null
+        },
+        "scheduled_by": {
+          "id": "schedule-audit-admin",
+          "kind": "automated_actor",
+          "display_name": null
+        },
+        "requested_at": 1793018170.15033,
+        "requested_at_iso": "2026-10-26T12:36:10Z",
+        "due_at": 1793018190.15033,
+        "due_at_iso": "2026-10-26T12:36:30Z",
+        "next_due_at": null,
+        "next_due_at_iso": null,
+        "expires_at": 1793018195.1471171,
+        "expires_at_iso": "2026-10-26T12:36:35Z",
+        "recurrence": {
+          "kind": "one_shot"
+        },
+        "recurrence_kind": "one_shot",
+        "recurrence_summary": "one_shot",
+        "payload_digest": "e8686ac34b41b1d3c9cf18d0fe3186a685062a0a1053a8a9088c092742012807",
+        "payload": {
+          "kind": "masc.keeper_wake",
+          "body": {
+            "result_delivery": {
+              "policy": "none"
+            },
+            "keeper_name": "audit-restart-a",
+            "message": "Must expire while the scheduler is down."
+          }
+        },
+        "payload_kind": "masc.keeper_wake",
+        "payload_support": "supported",
+        "payload_dispatch_tool": "masc.keeper_wake",
+        "payload_target": "keeper:audit-restart-a",
+        "payload_keeper_name": "audit-restart-a",
+        "payload_summary": "Must expire while the scheduler is down.",
+        "last_wake": null,
+        "dispatch_receipt": null,
+        "keeper_queue_evidence": null,
+        "keeper_reaction_evidence": null,
+        "runner_hold": null
+      },
+      "wakes": [],
+      "wake_count": 0,
+      "wake_retention_per_schedule": 32
+    },
+    "audit-missed-interval": {
+      "schema": "masc.dashboard.scheduled_automation.lookup.v1",
+      "source": "schedule_store",
+      "generated_at": "2026-10-26T12:36:41Z",
+      "status": "found",
+      "schedule_id": "audit-missed-interval",
+      "request": {
+        "schedule_instance_id": "01a17836-0b36-7000-9b34-963dd22b1164",
+        "schedule_id": "audit-missed-interval",
+        "status": "scheduled",
+        "source": "operator_request",
+        "requested_by": {
+          "id": "schedule-audit-admin",
+          "kind": "automated_actor",
+          "display_name": null
+        },
+        "scheduled_by": {
+          "id": "schedule-audit-admin",
+          "kind": "automated_actor",
+          "display_name": null
+        },
+        "requested_at": 1793018170.166463,
+        "requested_at_iso": "2026-10-26T12:36:10Z",
+        "due_at": 1793018202.166463,
+        "due_at_iso": "2026-10-26T12:36:42Z",
+        "next_due_at": 1793018202.166463,
+        "next_due_at_iso": "2026-10-26T12:36:42Z",
+        "expires_at": null,
+        "expires_at_iso": null,
+        "recurrence": {
+          "kind": "interval",
+          "interval_sec": 2
+        },
+        "recurrence_kind": "interval",
+        "recurrence_summary": "every 2s",
+        "payload_digest": "4ee261db4f0f6ff179bd3f0eb8e15cf32b63085471d1ff86c0e2f4d059854d40",
+        "payload": {
+          "kind": "masc.keeper_wake",
+          "body": {
+            "result_delivery": {
+              "policy": "none"
+            },
+            "keeper_name": "audit-restart-a",
+            "message": "Miss multiple interval due times while scheduler is down."
+          }
+        },
+        "payload_kind": "masc.keeper_wake",
+        "payload_support": "supported",
+        "payload_dispatch_tool": "masc.keeper_wake",
+        "payload_target": "keeper:audit-restart-a",
+        "payload_keeper_name": "audit-restart-a",
+        "payload_summary": "Miss multiple interval due times while scheduler is down.",
+        "last_wake": {
+          "schedule_instance_id": "01a17836-0b36-7000-9b34-963dd22b1164",
+          "schedule_id": "audit-missed-interval",
+          "started_at": 1793018200.985214,
+          "finished_at": 1793018201.005645,
+          "due_at": 1793018190.166463,
+          "payload_digest": "4ee261db4f0f6ff179bd3f0eb8e15cf32b63085471d1ff86c0e2f4d059854d40",
+          "status": "succeeded",
+          "detail": {
+            "kind": "masc.keeper_wake.enqueued",
+            "queue": "keeper_event_queue",
+            "stimulus": "schedule_due",
+            "stimulus_id": "f145fc196c83002d1ee9b30b3268a83322f9d2a89ca48183feabe763c607a328",
+            "keeper_name": "audit-restart-a",
+            "schedule_instance_id": "01a17836-0b36-7000-9b34-963dd22b1164",
+            "schedule_id": "audit-missed-interval",
+            "urgency": "normal",
+            "post_id": "f145fc196c83002d1ee9b30b3268a83322f9d2a89ca48183feabe763c607a328",
+            "result_delivery_policy": "none",
+            "occurrence_status": "awaiting_ack",
+            "activation_status": "deferred",
+            "activation_reason": "lifecycle_denied",
+            "activation_detail": "paused",
+            "reaction_ledger_status": "recorded",
+            "reaction_ledger_error": null
+          },
+          "error": null,
+          "started_at_iso": "2026-10-26T12:36:40Z",
+          "finished_at_iso": "2026-10-26T12:36:41Z"
+        },
+        "dispatch_receipt": {
+          "projection_status": "recognized",
+          "kind": "masc.keeper_wake.enqueued",
+          "queue": "keeper_event_queue",
+          "stimulus": "schedule_due",
+          "stimulus_id": "f145fc196c83002d1ee9b30b3268a83322f9d2a89ca48183feabe763c607a328",
+          "keeper_name": "audit-restart-a",
+          "schedule_instance_id": "01a17836-0b36-7000-9b34-963dd22b1164",
+          "schedule_id": "audit-missed-interval",
+          "urgency": "normal",
+          "post_id": "f145fc196c83002d1ee9b30b3268a83322f9d2a89ca48183feabe763c607a328",
+          "result_delivery_policy": "none",
+          "occurrence_status": "awaiting_ack",
+          "activation_status": "deferred",
+          "activation_reason": "lifecycle_denied",
+          "activation_detail": "paused",
+          "reaction_ledger_status": "recorded",
+          "reaction_ledger_error": null
+        },
+        "keeper_queue_evidence": {
+          "projection_status": "matched_pending",
+          "source": "durable_event_queue_snapshot",
+          "queue": "keeper_event_queue",
+          "stimulus": "schedule_due",
+          "keeper_name": "audit-restart-a",
+          "schedule_instance_id": "01a17836-0b36-7000-9b34-963dd22b1164",
+          "schedule_id": "audit-missed-interval",
+          "post_id": "f145fc196c83002d1ee9b30b3268a83322f9d2a89ca48183feabe763c607a328",
+          "wake_due_at": 1793018190.166463,
+          "wake_due_at_iso": "2026-10-26T12:36:30Z",
+          "wake_payload_digest": "4ee261db4f0f6ff179bd3f0eb8e15cf32b63085471d1ff86c0e2f4d059854d40",
+          "schedule_status": "scheduled",
+          "pending_count": 2,
+          "read_errors": [],
+          "resolved_owner": "audit-restart-a",
+          "matched_bucket": "pending",
+          "matched_post_id": "f145fc196c83002d1ee9b30b3268a83322f9d2a89ca48183feabe763c607a328",
+          "matched_payload_kind": "schedule_due",
+          "matched_arrived_at": 1793018200.979614,
+          "matched_arrived_at_iso": "2026-10-26T12:36:40Z",
+          "matched_schedule_id": "audit-missed-interval",
+          "matched_schedule_instance_id": "01a17836-0b36-7000-9b34-963dd22b1164",
+          "matched_due_at": 1793018190.166463,
+          "matched_due_at_iso": "2026-10-26T12:36:30Z",
+          "matched_payload_digest": "4ee261db4f0f6ff179bd3f0eb8e15cf32b63085471d1ff86c0e2f4d059854d40",
+          "matched_age_seconds": 0.3415369987487793
+        },
+        "keeper_reaction_evidence": {
+          "projection_status": "matched_stimulus",
+          "source": "keeper_reaction_ledger",
+          "keeper_name": "audit-restart-a",
+          "schedule_instance_id": "01a17836-0b36-7000-9b34-963dd22b1164",
+          "schedule_id": "audit-missed-interval",
+          "post_id": "f145fc196c83002d1ee9b30b3268a83322f9d2a89ca48183feabe763c607a328",
+          "stimulus": "schedule_due",
+          "reaction_kind": "turn_started",
+          "stimulus_kind": "schedule_due",
+          "stimulus_id": "f145fc196c83002d1ee9b30b3268a83322f9d2a89ca48183feabe763c607a328",
+          "stimulus_seen": true,
+          "turn_started_seen": false,
+          "turn_finished_seen": false,
+          "event_queue_ack_seen": false,
+          "event_queue_cancelled_seen": false,
+          "matched_record_count": 1,
+          "quarantined_record_count": 0,
+          "stimulus_recorded_at": 1793018201.005458,
+          "stimulus_recorded_at_iso": "2026-10-26T12:36:41Z",
+          "turn_finished_recorded_at": null,
+          "turn_finished_recorded_at_iso": null,
+          "turn_started_recorded_at": null,
+          "turn_started_recorded_at_iso": null,
+          "event_queue_ack_recorded_at": null,
+          "event_queue_ack_recorded_at_iso": null,
+          "event_queue_cancelled_recorded_at": null,
+          "event_queue_cancelled_recorded_at_iso": null,
+          "latest_recorded_at": 1793018201.005458,
+          "latest_recorded_at_iso": "2026-10-26T12:36:41Z"
+        },
+        "runner_hold": null
+      },
+      "wakes": [
+        {
+          "schedule_instance_id": "01a17836-0b36-7000-9b34-963dd22b1164",
+          "schedule_id": "audit-missed-interval",
+          "started_at": 1793018200.985214,
+          "finished_at": 1793018201.005645,
+          "due_at": 1793018190.166463,
+          "payload_digest": "4ee261db4f0f6ff179bd3f0eb8e15cf32b63085471d1ff86c0e2f4d059854d40",
+          "status": "succeeded",
+          "detail": {
+            "kind": "masc.keeper_wake.enqueued",
+            "queue": "keeper_event_queue",
+            "stimulus": "schedule_due",
+            "stimulus_id": "f145fc196c83002d1ee9b30b3268a83322f9d2a89ca48183feabe763c607a328",
+            "keeper_name": "audit-restart-a",
+            "schedule_instance_id": "01a17836-0b36-7000-9b34-963dd22b1164",
+            "schedule_id": "audit-missed-interval",
+            "urgency": "normal",
+            "post_id": "f145fc196c83002d1ee9b30b3268a83322f9d2a89ca48183feabe763c607a328",
+            "result_delivery_policy": "none",
+            "occurrence_status": "awaiting_ack",
+            "activation_status": "deferred",
+            "activation_reason": "lifecycle_denied",
+            "activation_detail": "paused",
+            "reaction_ledger_status": "recorded",
+            "reaction_ledger_error": null
+          },
+          "error": null,
+          "started_at_iso": "2026-10-26T12:36:40Z",
+          "finished_at_iso": "2026-10-26T12:36:41Z"
+        }
+      ],
+      "wake_count": 1,
+      "wake_retention_per_schedule": 32
+    }
+  },
+  "owner": {
+    "paused": true,
+    "meta": {
+      "total_turns": 0,
+      "last_turn_ts": 0.0,
+      "last_runtime_attempt": null
+    }
+  }
+}

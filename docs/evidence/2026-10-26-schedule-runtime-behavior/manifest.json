@@ -1,0 +1,127 @@
+{
+  "schema": "scheduled-job-runtime-audit-evidence.v1",
+  "selection": "Owned synthetic workspace run captures plus selected shared Keeper operation and GitHub CI receipts. MCP entries are unmodified except health omission; owner status is selected fields. Tokens and HTTP auth headers were never recorded.",
+  "runs": {
+    "api-extended-1": {
+      "probe_exit_code_observed": 0,
+      "checks": 33,
+      "passed": 33,
+      "failed": 0,
+      "script": "probe_api_extended.py",
+      "server_exit_code": 0
+    },
+    "retarget-cancel-4": {
+      "probe_exit_code_observed": 1,
+      "checks": 18,
+      "passed": 17,
+      "failed": 1,
+      "script": "probe_retarget_cancel.py",
+      "server_exit_code": 0
+    },
+    "restart-expiry-3": {
+      "checks": 23,
+      "passed": 23,
+      "failed": 0,
+      "probe_exit_code_observed": 0,
+      "script": "probe_restart_expiry.py",
+      "server_exit_codes": [
+        124,
+        0
+      ],
+      "shutdown_limit": "first process exited via installed graceful-shutdown hard-exit guard (124); second process exited 0"
+    }
+  },
+  "files": {
+    "api-extended-1/api-records.json": "cbc3cdb49d1830c9d80d4c069f459595f14cecdfcbaf8396729c27c02711837b",
+    "api-extended-1/checks.json": "565bea8b7f2b512540105b676638a0f694c2474b3d1c9e8829e902411a948828",
+    "api-extended-1/process-ended.json": "4106cb7f2c7ba56756430a7a2bf5a1cfef8ce6568fc8d8880b130d80e84439d5",
+    "api-extended-1/process.json": "6b5a5691f89993d2197578f6f882a98206955bd89be385dbf9b49225f547dbb7",
+    "api-extended-1/provenance.json": "e29c12cb936a2ec8099322b7972b38d6e850936ae67252457fb779a7cc5b6c2a",
+    "probe_api_extended.py": "bb49d520c48c93c16bfbc04dfdf7ef55c4ce446eee75e51709043d3c85a47fcc",
+    "probe_retarget_cancel.py": "1e9dd3af05a6ff47fcf4a0d13ef75ca6a201a36e7696c794f4e9e3a0e174427a",
+    "retarget-cancel-4/api-records.json": "1a692b6b728c9eae4f967b3808ac34babd2243fddfcd67e86e506a585b6e161d",
+    "retarget-cancel-4/checks.json": "a616c2dc64e78a19794eb083a0e3888e70d037e36f9de6bc69e3adf344b7e5bb",
+    "retarget-cancel-4/finding.json": "f1737655ce742115a02add54da777de8f521ec041f748c5251666b7971d94939",
+    "retarget-cancel-4/inventory-after.json": "b827df9023f70d8d4a88fdd01e719143b5d4b835694327ee171fa78740887bce",
+    "retarget-cancel-4/inventory-before.json": "98823bcb068968a6b0fb9d79190a5e8c41be4ded113dc6ed535d3734f2093d22",
+    "retarget-cancel-4/owner-final-status-selected.json": "73da16917203522968c4e2b3b03fbfd37eb946661e8c9ffc30dc12f93485685f",
+    "retarget-cancel-4/process-ended.json": "25858e67235b122d6e71c8bdd952cfeae63c0c9e24750eb9613a094a99bb218b",
+    "retarget-cancel-4/process.json": "6ccae5e5affd85d3ab1dd8afcab43784041d57385702f141bc98f7fa2dcf8c8b",
+    "retarget-cancel-4/provenance.json": "c645d1e08dafbcee23a2a4e9f96c08a7825298ab3c0fd81c2b21504148770cf5",
+    "retarget-cancel-4/schedule-before.json": "ba3558dd7969e9e6d7cb045a2d688911c57d4cd2cdd2434dd511e55e750aa6fe",
+    "backend-operation-terminal.json": "6b8a4a7d2208ce5e1e453dc7e825e7b24138232c327b595d644fd2d36e67da03",
+    "backend-recovery-admission.json": "ed0686ec3a2cd1a2845988fe28ae89182d082dfd96131921e5487cd23d7bb3d0",
+    "backend-recovery-observed.json": "e4000477705716001e220ae91dc5f7869ecd32a150883726c2b66840da12e81f",
+    "restart-expiry-3/before.json": "4b311407b6cf6707a0909316eb6f5793db20ac1de9bb63a0ac976af68fa1355f",
+    "restart-expiry-3/api-records.json": "6fe4753b922b960a3ac862bbb638bd6d90bb81e4bc0ffbe73edb7ea24ea994d8",
+    "restart-expiry-3/provenance.json": "38faaea4bb7aa2f281add1286d98b8bb6abe5cebd6a93b480a5359ee5085a046",
+    "restart-expiry-3/after.json": "5cc3b917431617a9027665415ee8e3bea2b3eab1003f8d9f20f7138fc21bd436",
+    "restart-expiry-3/checks.json": "3cb83dab85483538e9633cfb1f6860ccd7742516ebe95ee54ba6127374e1d07a",
+    "restart-expiry-3/processes.json": "da3dabca8cd47c54156622c6f2e79c04e1549fa773b45d661e818f9352fcedf7",
+    "restart-expiry-3/server.log": "5c01fac906598d7e5594d71466948ce60655578bc05eb00c20b6d2f14c449c44",
+    "probe_restart_expiry.py": "b373bda4ab8da07463561d868171a2ba417eef50646dc6489db1bca0b0d6a2c1",
+    "targeted-ci-request.json": "70a1b14b33694d0d23d5e7f1f153fc774ebfa73dbbd4dc87aff4b5f6a11d823f",
+    "targeted-ci-result.json": "9bfcf5b13a3b1e1bdb86d3f32aed6aba6a6d3186e7edb58c2df012e7b1fabae4",
+    "targeted-ci-failure-excerpt.txt": "42dfb4bbcfbea34fdb6e1d19d2c616b74c61c945e0bb1daaea1c881cec35bdb5",
+    "targeted-ci-after-restack-admission.json": "85766349c30c711e9bd2410cf10d182be7185d4467f10f37562f052ee0da1d0c",
+    "backend-recovery-terminal.json": "a3a7b265070fcaf9cd94faeb091d111b13557d1994847c3a4ad26046ed980621",
+    "targeted-ci-after-restack-result.json": "a8b3608f607e04d89d98acb8168b1bcaaeceb0f7cc2422f910a39323f78bb994",
+    "targeted-ci-after-restack-excerpt.txt": "171cfd8107727cacd0ed40eeee30b22fbc4e00886569dc58cc5af33d9cfbe151",
+    "authority-fix-ci-result.json": "94cb5854ad54e0b18b77f068091bbe6dd93103c40c0ee7c852c5e769dfb59964",
+    "authority-fix-ci-excerpt.txt": "4daa8158b5b9b67b4ba9820d65f384bc8a7e26f014d02e7f161e2329146f936f"
+  },
+  "source_comparison": {
+    "installed_commit": "bc3038a22374705db648bebd7f556223b3e84727",
+    "compared_checkout": "9d451a840ff006e70a684cb36d2c1eb69be3f8aa",
+    "files": {
+      "lib/keeper_schedule_cancel_withdrawal.ml": {
+        "installed_sha256": "dbca270fbf99f3fd96c80d41b1dd62ab5c9192895256489156fc5bfbb9f0262f",
+        "checkout_sha256": "dbca270fbf99f3fd96c80d41b1dd62ab5c9192895256489156fc5bfbb9f0262f",
+        "identical": true
+      },
+      "lib/schedule/schedule_store.ml": {
+        "installed_sha256": "1e9f33d3c91c09c97e223b9902954042653608d3402a71e6f3f6023fc1e4519f",
+        "checkout_sha256": "1e9f33d3c91c09c97e223b9902954042653608d3402a71e6f3f6023fc1e4519f",
+        "identical": true
+      },
+      "lib/tool_schedule.ml": {
+        "installed_sha256": "d5619a45b0396998620717fec05d1c2e4eff1a0fa4935e51267711e48e933588",
+        "checkout_sha256": "d5619a45b0396998620717fec05d1c2e4eff1a0fa4935e51267711e48e933588",
+        "identical": true
+      },
+      "lib/keeper/keeper_registry_event_queue.ml": {
+        "installed_sha256": "b6419e9bfce1ddad9ee8110b852b5f21e9210c7aca452fac7fbe654a59768efb",
+        "checkout_sha256": "b6419e9bfce1ddad9ee8110b852b5f21e9210c7aca452fac7fbe654a59768efb",
+        "identical": true
+      },
+      "lib/keeper_runtime/keeper_event_queue_persistence.ml": {
+        "installed_sha256": "2e5a3653e41f6b2963d5358e4dc646288ecaeb4daf2207d9cfa7669da140d3a9",
+        "checkout_sha256": "2e5a3653e41f6b2963d5358e4dc646288ecaeb4daf2207d9cfa7669da140d3a9",
+        "identical": true
+      },
+      "lib/server_keeper_waiting_inventory.ml": {
+        "installed_sha256": "d1feaf480a8c4e7d7bbaec09bce7934439df1c2dbb063c6b61c90b716c466381",
+        "checkout_sha256": "d1feaf480a8c4e7d7bbaec09bce7934439df1c2dbb063c6b61c90b716c466381",
+        "identical": true
+      },
+      "lib/server/server_schedule_consumers.ml": {
+        "installed_sha256": "1049380c7da869797970a497166857e76f991a75731c0f98a69afd9b2a86eb3e",
+        "checkout_sha256": "1049380c7da869797970a497166857e76f991a75731c0f98a69afd9b2a86eb3e",
+        "identical": true
+      }
+    }
+  },
+  "fixture_sha256": {
+    "scripts/fixtures/release-evidence/runtime.toml": "ccbe65e399f47a3abddbf4299e15dd0fd55001dd785b2e0d75948ad86acf7cfd"
+  },
+  "source_log_digests": {
+    "targeted-test-failure.log": "2a63e5a2000c50f6ccb7d29a4f72842bf043766f0f84970825af3c9753aab175",
+    "ci40325758202/ci-run-tests.log": "a586e98aea99d7aa0e4f0cb77164597861573531955be45044802e5751738d03",
+    "ci40330717541/ci-run-tests.log": "4e9c82fffb21428c4e334ba486c7a6a3a694a43d7264905f7655dc907bdbddd5"
+  },
+  "derivations": {
+    "targeted-ci-failure-excerpt.txt": "Selected diagnostic lines from the full failed-step log, with trailing line whitespace trimmed. Original full-log digest remains separate.",
+    "targeted-ci-after-restack-excerpt.txt": "Only lines beginning [targeted], Testing `, or Test Successful from the full suite-runner artifact log, in original order, with trailing line whitespace trimmed. Full-log and archive digests are separate.",
+    "authority-fix-ci-excerpt.txt": "Only [targeted], Testing ` and Test Successful lines in original order, trailing line whitespace trimmed; full original digest separately recorded."
+  }
+}

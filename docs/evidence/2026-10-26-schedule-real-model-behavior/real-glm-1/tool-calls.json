@@ -1,0 +1,243 @@
+{
+  "status": 200,
+  "response": {
+    "keeper": "audit-live-glm",
+    "count": 11,
+    "source": "tool_call_io",
+    "producer": "keeper_hooks_agent_core.post_tool_use|mcp_server_eio_call_tool.runtime_mcp",
+    "health": "ok",
+    "coverage_gaps": [],
+    "entries": [
+      {
+        "ts": 1793020302.195252,
+        "record_kind": "tool_call",
+        "keeper": "audit-live-glm",
+        "agent_name": "audit-live-glm",
+        "tool": "keeper_tool_search",
+        "input": {
+          "names": [
+            "masc_schedule_note_add",
+            "masc_schedule_notes_list"
+          ]
+        },
+        "output": "now callable:\n- masc_schedule_note_add: Append a durable note to one scheduled request. Notes record why a\n- masc_schedule_notes_list: List the durable notes of one scheduled request, oldest first. Notes are",
+        "execution_id": "execution-node-565843b1ff5fe778c6b7afc40224c657",
+        "model": "runtime",
+        "runtime_profile": "glm-coding.glm-5-3",
+        "runtime_contract": {
+          "keeper_name": "audit-live-glm",
+          "trace_id": "trace-1793020268086-00000",
+          "session_id": "trace-1793020268086-00000",
+          "keeper_turn_id": 1
+        }
+      },
+      {
+        "ts": 1793020310.076116,
+        "record_kind": "tool_call",
+        "keeper": "audit-live-glm",
+        "agent_name": "audit-live-glm",
+        "tool": "keeper_context_status",
+        "input": {},
+        "output": "{\"name\":\"audit-live-glm\",\"trace_id\":\"trace-1793020268086-00000\",\"checkpoint_bytes\":105689,\"message_count\":1,\"sandbox_id\":\"keeper:audit-live-glm\",\"sandbox_backend\":\"microvm\",\"sandbox_profile\":\"microvm\",\"sandbox_network_mode\":\"none\",\"sandbox_lifetime\":\"persistent_backend_task_overlay\",\"sandbox_root\":\".\",\"sandbox_paths\":{\"root\":\".\"},\"sandbox_live\":{\"keeper\":\"audit-live-glm\",\"sandbox_profile\":\"microvm\",\"configured_network_mode\":\"none\",\"configured_image_name\":\"base\",\"configured_image\":\"masc-sandbox:general\",\"configured_image_unresolved\":null,\"effective_mode\":\"microvm_vm_not_running\",\"managed_container_kind\":\"keeper-vm\",\"containers\":[],\"preflight\":null,\"resource_config\":{\"memory\":\"2048m\",\"cpus\":\"4\",\"guest_size_error\":null,\"work_volume_size\":\"256g\",\"pids_limit\":null,\"tmpfs_size\":null},\"volume_filesystem\":[{\"volume\":\"masc-keeper-work-audit-live-glm\",\"observed_at\":null,\"image\":null,\"filesystem\":null,\"observation_failed\":null,\"repair_backup\":null},{\"volume\":\"masc-keeper-build-audit-live-glm\",\"observed_at\":null,\"image\":null,\"filesystem\":null,\"observation_failed\":null,\"repair_backup\":null}],\"paths\":{\"host_workspace\":\"/Users/dancer/me/workspace/yousleepwhen/masc-schedule-runtime-audit/artifacts/scheduled-job-runtime-audit-20261026/real-glm-1/workspace/.masc/playground/audit-live-glm\",\"guest_home\":null,\"guest_workspace\":\"/masc-work/audit-live-glm\",\"guest_config\":\"/tmp/masc-runtime/.masc/config\",\"guest_work_volume\":\"/masc-work\"},\"container_error\":null,\"why_no_container\":\"no visible apple_container microVM guest; a guest is created on this Keeper's first sandboxed tool execution\",\"repository_checkouts\":{\"state\":\"filesystem_unavailable\",\"scan\":{\"state\":\"unavailable\",\"limit\":null,\"detail\":\"workspace root missing: /masc-work/audit-live-glm\",\"scanned_entries\":null},\"observed_at\":\"2026-10-26T13:11:50Z\",\"observed_at_unix\":1793020310.073194,\"entries\":[],\"error\":null}},\"memory_facts_total\":0,\"memory_limits\":{\"scope\":\"ordinary_current\",\"enforcement\":\"advisory\",\"category_cap\":30,\"facts_per_category_cap\":30,\"category_count\":0,\"categories_over_cap\":0,\"categories\":[]},\"source_memory_facts_total\":0,\"source_memory_invalidations_total\":0}",
+        "execution_id": "execution-node-87d0932ff3f59791bfcbed4f488fdea2",
+        "model": "runtime",
+        "runtime_profile": "glm-coding.glm-5-3",
+        "runtime_contract": {
+          "keeper_name": "audit-live-glm",
+          "trace_id": "trace-1793020268086-00000",
+          "session_id": "trace-1793020268086-00000",
+          "keeper_turn_id": 1
+        }
+      },
+      {
+        "ts": 1793020316.097973,
+        "record_kind": "tool_call",
+        "keeper": "audit-live-glm",
+        "agent_name": "audit-live-glm",
+        "tool": "keeper_memory_search",
+        "input": {
+          "query": "schedule_id",
+          "source": "history",
+          "limit": 5
+        },
+        "output": "{\"query\":\"schedule_id\",\"source\":\"history\",\"match_count\":0,\"matches\":[],\"no_match\":true}",
+        "execution_id": "execution-node-0e9a61d5419fdfe4a4586c94f1dcfb62",
+        "model": "runtime",
+        "runtime_profile": "glm-coding.glm-5-3",
+        "runtime_contract": {
+          "keeper_name": "audit-live-glm",
+          "trace_id": "trace-1793020268086-00000",
+          "session_id": "trace-1793020268086-00000",
+          "keeper_turn_id": 1
+        }
+      },
+      {
+        "ts": 1793020331.021054,
+        "record_kind": "tool_call",
+        "keeper": "audit-live-glm",
+        "agent_name": "audit-live-glm",
+        "tool": "masc_schedule_note_add",
+        "input": {
+          "body": "\uc99d\uac70 \ubcf4\uc874 \ub178\ud2b8: 2026-10-26 \uc608\uc57d \uc2e4\ud589\uc5d0\uc11c \uc774 Keeper(audit-live-glm)\uac00 \uad00\uce21\ud55c \ub0b4\uc6a9\uc744 \ub0a8\uae34\ub2e4. \uc608\uc57d \uc2e4\ud589 \uc811\uc218\uc640 \uc790\uc728 \ud134 \uc9c4\uc785\uc740 \ud655\uc778\ub418\uc5c8\uc73c\ub098(checkpoint message_count=1, trace_id=trace-1793020268086-00000), \uc6d0\ubcf8 \uc608\uc57d \uc815\uc758\u00b7schedule_id\u00b7\uba54\uc2dc\uc9c0 \ubcf8\ubb38\uc740 \uc774 \ud134\uc758 \ucee8\ud14d\uc2a4\ud2b8\uc5d0 \ud568\uaed8 \uc804\ub2ec\ub418\uc9c0 \uc54a\uc558\ub2e4. \uba54\ubaa8\ub9ac\u00b7\uae30\ub85d \uac80\uc0c9(schedule_id, history)\uc5d0\uc11c\ub3c4 \ud574\ub2f9 \uc2dd\ubcc4\uc790\ub97c \ucc3e\uc9c0 \ubabb\ud588\ub2e4. \ub3c4\uad6c \ub85c\ub354\ub85c masc_schedule_note_add/masc_schedule_notes_list \uc2a4\ud0a4\ub9c8\ub97c \ud655\ubcf4\ud55c \ub4a4 \uc774 \ub178\ud2b8\ub97c \ub0a8\uae34\ub2e4. \uc0cc\ub4dc\ubc15\uc2a4 \uc0c1\ud0dc: microvm_vm_not_running, \ub124\ud2b8\uc6cc\ud06c none, \uac8c\uc2a4\ud2b8 \uc6cc\ud06c\uc2a4\ud398\uc774\uc2a4 \ub8e8\ud2b8(/masc-work/audit-live-glm) \ud604\uc7ac \uc811\uadfc \ubd88\uac00. \ub2e4\uc74c \ub2e8\uacc4: \uc774 \ub178\ud2b8\uac00 \uc6d0\ub798 \uc608\uc57d(schedule_id)\uc5d0 \ubb36\uc774\uc9c0 \ubabb\ud588\ub2e4\uba74, \uc6d0\ubcf8 \uc608\uc57d ID\ub97c \uc544\ub294 \uc6b4\uc601\uc790\u00b7Keeper\uac00 \uac19\uc740 \uc0ac\uc2e4\uc744 \ud574\ub2f9 \uc608\uc57d\uc758 \ub178\ud2b8\ub85c \uc62e\uaca8\uc57c \ud55c\ub2e4.",
+          "schedule_id": "audit-live-glm"
+        },
+        "output": "{\"message\":\"schedule not found\",\"masc.tool_disposition\":\"failed\",\"failure_class\":\"workflow_rejection\",\"next_move\":\"The current state does not admit this action; it is a rule, not a syntax problem. Read the current state first. The same call succeeds only after the state changes.\",\"data\":{\"status\":\"error\",\"message\":\"schedule not found\"}}",
+        "execution_id": "execution-node-3731f6bbcbd2d472ed9aebd9c1274edf",
+        "model": "runtime",
+        "runtime_profile": "glm-coding.glm-5-3",
+        "runtime_contract": {
+          "keeper_name": "audit-live-glm",
+          "trace_id": "trace-1793020268086-00000",
+          "session_id": "trace-1793020268086-00000",
+          "keeper_turn_id": 1
+        }
+      },
+      {
+        "ts": 1793020342.893588,
+        "record_kind": "tool_call",
+        "keeper": "audit-live-glm",
+        "agent_name": "audit-live-glm",
+        "tool": "masc_schedule_note_add",
+        "input": {
+          "body": "test",
+          "schedule_id": "trace-1793020268086-00000"
+        },
+        "output": "{\"message\":\"schedule not found\",\"masc.tool_disposition\":\"failed\",\"failure_class\":\"workflow_rejection\",\"next_move\":\"The current state does not admit this action; it is a rule, not a syntax problem. Read the current state first. The same call succeeds only after the state changes.\",\"data\":{\"status\":\"error\",\"message\":\"schedule not found\"}}",
+        "execution_id": "execution-node-fc6d7c33e1589fab0a89cb3c7731c64b",
+        "model": "runtime",
+        "runtime_profile": "glm-coding.glm-5-3",
+        "runtime_contract": {
+          "keeper_name": "audit-live-glm",
+          "trace_id": "trace-1793020268086-00000",
+          "session_id": "trace-1793020268086-00000",
+          "keeper_turn_id": 1
+        }
+      },
+      {
+        "ts": 1793020342.9182,
+        "record_kind": "tool_call",
+        "keeper": "audit-live-glm",
+        "agent_name": "audit-live-glm",
+        "tool": "masc_schedule_note_add",
+        "input": {
+          "body": "test",
+          "schedule_id": "scheduled-job-runtime-audit-20261026"
+        },
+        "output": "{\"message\":\"schedule not found\",\"masc.tool_disposition\":\"failed\",\"failure_class\":\"workflow_rejection\",\"next_move\":\"The current state does not admit this action; it is a rule, not a syntax problem. Read the current state first. The same call succeeds only after the state changes.\",\"data\":{\"status\":\"error\",\"message\":\"schedule not found\"}}",
+        "execution_id": "execution-node-45be0bc3fbaf48fc6d90a13fba0dec12",
+        "model": "runtime",
+        "runtime_profile": "glm-coding.glm-5-3",
+        "runtime_contract": {
+          "keeper_name": "audit-live-glm",
+          "trace_id": "trace-1793020268086-00000",
+          "session_id": "trace-1793020268086-00000",
+          "keeper_turn_id": 1
+        }
+      },
+      {
+        "ts": 1793020349.949457,
+        "record_kind": "tool_call",
+        "keeper": "audit-live-glm",
+        "agent_name": "audit-live-glm",
+        "tool": "keeper_tool_search",
+        "input": {
+          "names": [
+            "masc_schedule_list",
+            "masc_schedule_get"
+          ]
+        },
+        "output": "now callable:\n- masc_schedule_get: Read the current durable scheduled request by schedule_id. A recurring request m...\n- masc_schedule_list: List schedule summary rows; masc_schedule_get reads one in full. Rows follow sch...",
+        "execution_id": "execution-node-fc4af8eac5bee7b77ba87408158eb231",
+        "model": "runtime",
+        "runtime_profile": "glm-coding.glm-5-3",
+        "runtime_contract": {
+          "keeper_name": "audit-live-glm",
+          "trace_id": "trace-1793020268086-00000",
+          "session_id": "trace-1793020268086-00000",
+          "keeper_turn_id": 1
+        }
+      },
+      {
+        "ts": 1793020356.645351,
+        "record_kind": "tool_call",
+        "keeper": "audit-live-glm",
+        "agent_name": "audit-live-glm",
+        "tool": "masc_schedule_list",
+        "input": {
+          "owner": "self"
+        },
+        "output": "{\"status\":\"ok\",\"owner\":\"self\",\"owner_name\":\"audit-live-glm\",\"limit\":50,\"schedules\":[{\"schedule_id\":\"audit-real-model-3e3ecd8020e0456899fba70e35b94d40\",\"status\":\"succeeded\",\"due_at_iso\":\"2026-10-26T13:11:10Z\",\"recurrence_summary\":\"one_shot\",\"wake_target\":\"audit-live-glm\",\"scheduled_by\":\"schedule-audit-observer\",\"summary\":\"This is a one-time scheduled-job verification. Call masc_schedule_note_add exactly once with schedule_id \\\"audit-real-model-3e3ecd8020e0456899fba70e35b94d40\\\" ...\",\"last_wake_status\":\"succeeded\"}]}",
+        "execution_id": "execution-node-2eb6054ed36fb9ab420277c710085b41",
+        "model": "runtime",
+        "runtime_profile": "glm-coding.glm-5-3",
+        "runtime_contract": {
+          "keeper_name": "audit-live-glm",
+          "trace_id": "trace-1793020268086-00000",
+          "session_id": "trace-1793020268086-00000",
+          "keeper_turn_id": 1
+        }
+      },
+      {
+        "ts": 1793020365.809718,
+        "record_kind": "tool_call",
+        "keeper": "audit-live-glm",
+        "agent_name": "audit-live-glm",
+        "tool": "masc_schedule_get",
+        "input": {
+          "schedule_id": "audit-real-model-3e3ecd8020e0456899fba70e35b94d40"
+        },
+        "output": "{\"schedule_instance_id\":\"01a17856-0f14-7000-9d56-a92fa3dde399\",\"schedule_id\":\"audit-real-model-3e3ecd8020e0456899fba70e35b94d40\",\"requested_by\":{\"id\":\"schedule-audit-observer\",\"kind\":\"automated_actor\",\"display_name\":null},\"scheduled_by\":{\"id\":\"schedule-audit-observer\",\"kind\":\"automated_actor\",\"display_name\":null},\"requested_at\":1793020268.307649,\"due_at\":1793020270.307649,\"expires_at\":null,\"payload\":{\"kind\":\"masc.keeper_wake\",\"body\":{\"result_delivery\":{\"policy\":\"none\"},\"keeper_name\":\"audit-live-glm\",\"message\":\"This is a one-time scheduled-job verification. Call masc_schedule_note_add exactly once with schedule_id \\\"audit-real-model-3e3ecd8020e0456899fba70e35b94d40\\\" and body \\\"SCHEDULE_EFFECT_5999734c698241be919a03b158a3bdb5\\\". Do not merely print the marker. Read back the note with masc_schedule_notes_list for this schedule_id, then finish with a brief confirmation. Do not use any other mutating tool or create another schedule.\"}},\"status\":\"succeeded\",\"source\":\"operator_request\",\"recurrence\":{\"kind\":\"one_shot\"},\"cancellation\":null,\"due_at_iso\":\"2026-10-26T13:11:10Z\",\"next_due_at\":null,\"next_due_at_iso\":null,\"requested_at_iso\":\"2026-10-26T13:11:08Z\",\"recurrence_kind\":\"one_shot\",\"recurrence_summary\":\"one_shot\",\"payload_digest\":\"e2348a502fa3b8ce0c2f0ba57d39bcdab4eaf4602a6625b06b21620a3cc0653e\",\"payload_kind\":\"masc.keeper_wake\",\"payload_support\":\"supported\",\"payload_dispatch_tool\":\"masc.keeper_wake\",\"payload_target\":\"keeper:audit-live-glm\",\"payload_summary\":\"This is a one-time scheduled-job verification. Call masc_schedule_note_add exactly once with schedule_id \\\"audit-real-model-3e3ecd8020e0456899fba70e35b94d40\\\" ...\",\"last_wake\":{\"schedule_instance_id\":\"01a17856-0f14-7000-9d56-a92fa3dde399\",\"schedule_id\":\"audit-real-model-3e3ecd8020e0456899fba70e35b94d40\",\"started_at\":1793020271.125142,\"finished_at\":1793020271.16523,\"due_at\":1793020270.307649,\"payload_digest\":\"e2348a502fa3b8ce0c2f0ba57d39bcdab4eaf4602a6625b06b21620a3cc0653e\",\"status\":\"succeeded\",\"detail\":{\"kind\":\"masc.keeper_wake.enqueued\",\"queue\":\"keeper_event_queue\",\"stimulus\":\"schedule_due\",\"stimulus_id\":\"e31f33ebe1d9a7403ad11e3f441f31597344a720a49b8c64950bb6ac781060c8\",\"keeper_name\":\"audit-live-glm\",\"schedule_instance_id\":\"01a17856-0f14-7000-9d56-a92fa3dde399\",\"schedule_id\":\"audit-real-model-3e3ecd8020e0456899fba70e35b94d40\",\"urgency\":\"normal\",\"post_id\":\"e31f33ebe1d9a7403ad11e3f441f31597344a720a49b8c64950bb6ac781060c8\",\"result_delivery_policy\":\"none\",\"occurrence_status\":\"awaiting_ack\",\"activation_status\":\"signaled\",\"activation_reason\":null,\"activation_detail\":null,\"reaction_ledger_status\":\"recorded\",\"reaction_ledger_error\":null},\"error\":null}}",
+        "execution_id": "execution-node-f9377c8af418142b3b4f532a8c562de5",
+        "model": "runtime",
+        "runtime_profile": "glm-coding.glm-5-3",
+        "runtime_contract": {
+          "keeper_name": "audit-live-glm",
+          "trace_id": "trace-1793020268086-00000",
+          "session_id": "trace-1793020268086-00000",
+          "keeper_turn_id": 1
+        }
+      },
+      {
+        "ts": 1793020376.583526,
+        "record_kind": "tool_call",
+        "keeper": "audit-live-glm",
+        "agent_name": "audit-live-glm",
+        "tool": "masc_schedule_note_add",
+        "input": {
+          "body": "SCHEDULE_EFFECT_5999734c698241be919a03b158a3bdb5",
+          "schedule_id": "audit-real-model-3e3ecd8020e0456899fba70e35b94d40"
+        },
+        "output": "{\"status\":\"ok\",\"note\":{\"note_id\":\"6\",\"schedule_id\":\"audit-real-model-3e3ecd8020e0456899fba70e35b94d40\",\"author_id\":\"audit-live-glm\",\"author_kind\":\"automated_actor\",\"created_at\":1793020376.57737,\"body\":\"SCHEDULE_EFFECT_5999734c698241be919a03b158a3bdb5\"},\"note_count\":1}",
+        "execution_id": "execution-node-5c11ac23c324690b0de96157dbe647f1",
+        "model": "runtime",
+        "runtime_profile": "glm-coding.glm-5-3",
+        "runtime_contract": {
+          "keeper_name": "audit-live-glm",
+          "trace_id": "trace-1793020268086-00000",
+          "session_id": "trace-1793020268086-00000",
+          "keeper_turn_id": 1
+        }
+      },
+      {
+        "ts": 1793020383.242623,
+        "record_kind": "tool_call",
+        "keeper": "audit-live-glm",
+        "agent_name": "audit-live-glm",
+        "tool": "masc_schedule_notes_list",
+        "input": {
+          "schedule_id": "audit-real-model-3e3ecd8020e0456899fba70e35b94d40"
+        },
+        "output": "{\"status\":\"ok\",\"schedule_id\":\"audit-real-model-3e3ecd8020e0456899fba70e35b94d40\",\"limit\":50,\"notes\":[{\"note_id\":\"6\",\"schedule_id\":\"audit-real-model-3e3ecd8020e0456899fba70e35b94d40\",\"author_id\":\"audit-live-glm\",\"author_kind\":\"automated_actor\",\"created_at\":1793020376.57737,\"body\":\"SCHEDULE_EFFECT_5999734c698241be919a03b158a3bdb5\"}]}",
+        "execution_id": "execution-node-d548b957ba4956702cd24995a21f469c",
+        "model": "runtime",
+        "runtime_profile": "glm-coding.glm-5-3",
+        "runtime_contract": {
+          "keeper_name": "audit-live-glm",
+          "trace_id": "trace-1793020268086-00000",
+          "session_id": "trace-1793020268086-00000",
+          "keeper_turn_id": 1
+        }
+      }
+    ]
+  }
+}

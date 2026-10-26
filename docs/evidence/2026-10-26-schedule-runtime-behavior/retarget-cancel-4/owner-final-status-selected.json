@@ -1,0 +1,37 @@
+{
+  "name": "audit-retarget-a",
+  "paused": true,
+  "keepalive_running": false,
+  "activation_mode": "manual",
+  "runtime": {
+    "paused": true,
+    "keepalive_running": false,
+    "phase": "paused",
+    "shutdown_operation_phase": null,
+    "shutdown_admission_fence": null,
+    "fiber_health": "alive",
+    "last_runtime_attempt": null,
+    "pause_state": "paused",
+    "runtime_blocker_state": "clear",
+    "runtime_blocker_class": null,
+    "runtime_blocker_summary": null,
+    "runtime_blocker_signature": null,
+    "runtime_blocker_facts": null,
+    "needs_attention": true,
+    "attention_reason": "paused",
+    "next_human_action": "resume_or_review",
+    "approval_queue_state": {
+      "state": "ready"
+    },
+    "pending_approval_count": 0,
+    "latched_reason": "operator_paused:actor=grpc_directive"
+  },
+  "meta": {
+    "name": "audit-retarget-a",
+    "trace_id": "trace-1793015952487-00000",
+    "total_turns": 0,
+    "last_turn_ts": 0.0,
+    "last_runtime_attempt": null,
+    "paused": true
+  }
+}

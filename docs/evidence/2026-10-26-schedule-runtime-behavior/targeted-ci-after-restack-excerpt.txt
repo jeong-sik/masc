@@ -1,0 +1,27 @@
+[targeted] EIO_BACKEND=<unset> timeout=600s per suite
+[targeted] dune build test/test_schedule_tool_wiring.exe test/test_schedule_store.exe test/test_schedule_runner.exe test/test_schedule_consumer_dispatch.exe test/test_lane_addon_scheduled_act.exe
+[targeted] test/test_schedule_tool_wiring: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_schedule_tool_wiring: start 2026-10-26T12:56:21Z
+Testing `Schedule_tool_wiring'.
+Test Successful in 0.584s. 52 tests run.
+[targeted] test/test_schedule_tool_wiring: OK in 1s
+[targeted] test/test_schedule_store: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_schedule_store: start 2026-10-26T12:56:22Z
+Testing `Schedule_store'.
+Test Successful in 1.999s. 58 tests run.
+[targeted] test/test_schedule_store: OK in 2s
+[targeted] test/test_schedule_runner: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_schedule_runner: start 2026-10-26T12:56:24Z
+Testing `Schedule_runner'.
+Test Successful in 0.381s. 22 tests run.
+[targeted] test/test_schedule_runner: OK in 0s
+[targeted] test/test_schedule_consumer_dispatch: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_schedule_consumer_dispatch: start 2026-10-26T12:56:24Z
+Testing `Schedule_consumer_dispatch'.
+Test Successful in 2.765s. 56 tests run.
+[targeted] test/test_schedule_consumer_dispatch: OK in 3s
+[targeted] test/test_lane_addon_scheduled_act: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_lane_addon_scheduled_act: start 2026-10-26T12:56:27Z
+Testing `Lane_addon_scheduled_act'.
+Test Successful in 0.212s. 7 tests run.
+[targeted] test/test_lane_addon_scheduled_act: OK in 1s

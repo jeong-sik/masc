@@ -1,0 +1,234 @@
+{
+  "turns": {
+    "schema": "masc.keeper_turns.v1",
+    "keepers": [
+      {
+        "status": "ok",
+        "keeper_name": "audit-live-deepseek",
+        "turn": {
+          "lane": "autonomous",
+          "turn_ref": "trace-1793020663392-00000#1",
+          "started_at_unix": 1793020666.486767,
+          "preview": {
+            "status_text": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash \u00b7 waiting for provider response",
+            "activity": "waiting",
+            "text_tail": "",
+            "text_position": {
+              "generation": 1,
+              "start_byte": 0
+            },
+            "last_tool": null,
+            "updated_at_unix": 1793020666.525846,
+            "preparation": null,
+            "preparation_timeline": null,
+            "execution_scope": null
+          }
+        }
+      }
+    ]
+  },
+  "first": {
+    "history": {
+      "schema": "masc.dashboard.scheduled_automation.lookup.v1",
+      "source": "schedule_store",
+      "generated_at": "2026-10-26T13:17:46Z",
+      "status": "found",
+      "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262",
+      "request": {
+        "schedule_instance_id": "01a1785c-16bc-7000-9383-31a8ff7bf361",
+        "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262",
+        "status": "succeeded",
+        "source": "operator_request",
+        "requested_by": {
+          "id": "schedule-audit-observer",
+          "kind": "automated_actor",
+          "display_name": null
+        },
+        "scheduled_by": {
+          "id": "schedule-audit-observer",
+          "kind": "automated_actor",
+          "display_name": null
+        },
+        "requested_at": 1793020663.483936,
+        "requested_at_iso": "2026-10-26T13:17:43Z",
+        "due_at": 1793020665.483936,
+        "due_at_iso": "2026-10-26T13:17:45Z",
+        "next_due_at": null,
+        "next_due_at_iso": null,
+        "expires_at": null,
+        "expires_at_iso": null,
+        "recurrence": {
+          "kind": "one_shot"
+        },
+        "recurrence_kind": "one_shot",
+        "recurrence_summary": "one_shot",
+        "payload_digest": "0ece90ce6ac124f949a1e3083f7366ce7bd9268889e38a39aced907e2157d197",
+        "payload": {
+          "kind": "masc.keeper_wake",
+          "body": {
+            "result_delivery": {
+              "policy": "none"
+            },
+            "keeper_name": "audit-live-deepseek",
+            "message": "Scheduled verification: append exactly one durable note to schedule_id \"audit-real-model-098cc5076f9b489ebaa5d6a740d6b262\" with body \"SCHEDULE_EFFECT_a24ca95cd85f4d8ebffe0321ee185ee5\" using masc_schedule_note_add. Read back that same schedule note, then finish. Do not post elsewhere or create work. If another authorized scheduled request arrives, retain both requests and perform each exact note once."
+          }
+        },
+        "payload_kind": "masc.keeper_wake",
+        "payload_support": "supported",
+        "payload_dispatch_tool": "masc.keeper_wake",
+        "payload_target": "keeper:audit-live-deepseek",
+        "payload_keeper_name": "audit-live-deepseek",
+        "payload_summary": "Scheduled verification: append exactly one durable note to schedule_id \"audit-real-model-098cc5076f9b489ebaa5d6a740d6b262\" with body \"SCHEDULE_EFFECT_a24ca95...",
+        "last_wake": {
+          "schedule_instance_id": "01a1785c-16bc-7000-9383-31a8ff7bf361",
+          "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262",
+          "started_at": 1793020666.357948,
+          "finished_at": 1793020666.36972,
+          "due_at": 1793020665.483936,
+          "payload_digest": "0ece90ce6ac124f949a1e3083f7366ce7bd9268889e38a39aced907e2157d197",
+          "status": "succeeded",
+          "detail": {
+            "kind": "masc.keeper_wake.enqueued",
+            "queue": "keeper_event_queue",
+            "stimulus": "schedule_due",
+            "stimulus_id": "c14f1b18e012ea104a0661752729960fd1b51a0c8532c8a54757ea7e649373d7",
+            "keeper_name": "audit-live-deepseek",
+            "schedule_instance_id": "01a1785c-16bc-7000-9383-31a8ff7bf361",
+            "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262",
+            "urgency": "normal",
+            "post_id": "c14f1b18e012ea104a0661752729960fd1b51a0c8532c8a54757ea7e649373d7",
+            "result_delivery_policy": "none",
+            "occurrence_status": "awaiting_ack",
+            "activation_status": "signaled",
+            "activation_reason": null,
+            "activation_detail": null,
+            "reaction_ledger_status": "recorded",
+            "reaction_ledger_error": null
+          },
+          "error": null,
+          "started_at_iso": "2026-10-26T13:17:46Z",
+          "finished_at_iso": "2026-10-26T13:17:46Z"
+        },
+        "dispatch_receipt": {
+          "projection_status": "recognized",
+          "kind": "masc.keeper_wake.enqueued",
+          "queue": "keeper_event_queue",
+          "stimulus": "schedule_due",
+          "stimulus_id": "c14f1b18e012ea104a0661752729960fd1b51a0c8532c8a54757ea7e649373d7",
+          "keeper_name": "audit-live-deepseek",
+          "schedule_instance_id": "01a1785c-16bc-7000-9383-31a8ff7bf361",
+          "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262",
+          "urgency": "normal",
+          "post_id": "c14f1b18e012ea104a0661752729960fd1b51a0c8532c8a54757ea7e649373d7",
+          "result_delivery_policy": "none",
+          "occurrence_status": "awaiting_ack",
+          "activation_status": "signaled",
+          "activation_reason": null,
+          "activation_detail": null,
+          "reaction_ledger_status": "recorded",
+          "reaction_ledger_error": null
+        },
+        "keeper_queue_evidence": {
+          "projection_status": "matched_pending",
+          "source": "durable_event_queue_snapshot",
+          "queue": "keeper_event_queue",
+          "stimulus": "schedule_due",
+          "keeper_name": "audit-live-deepseek",
+          "schedule_instance_id": "01a1785c-16bc-7000-9383-31a8ff7bf361",
+          "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262",
+          "post_id": "c14f1b18e012ea104a0661752729960fd1b51a0c8532c8a54757ea7e649373d7",
+          "wake_due_at": 1793020665.483936,
+          "wake_due_at_iso": "2026-10-26T13:17:45Z",
+          "wake_payload_digest": "0ece90ce6ac124f949a1e3083f7366ce7bd9268889e38a39aced907e2157d197",
+          "schedule_status": "succeeded",
+          "pending_count": 1,
+          "read_errors": [],
+          "resolved_owner": "audit-live-deepseek",
+          "matched_bucket": "pending",
+          "matched_post_id": "c14f1b18e012ea104a0661752729960fd1b51a0c8532c8a54757ea7e649373d7",
+          "matched_payload_kind": "schedule_due",
+          "matched_arrived_at": 1793020666.348629,
+          "matched_arrived_at_iso": "2026-10-26T13:17:46Z",
+          "matched_schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262",
+          "matched_schedule_instance_id": "01a1785c-16bc-7000-9383-31a8ff7bf361",
+          "matched_due_at": 1793020665.483936,
+          "matched_due_at_iso": "2026-10-26T13:17:45Z",
+          "matched_payload_digest": "0ece90ce6ac124f949a1e3083f7366ce7bd9268889e38a39aced907e2157d197",
+          "matched_age_seconds": 0.19641900062561035
+        },
+        "keeper_reaction_evidence": {
+          "projection_status": "matched_turn_started",
+          "source": "keeper_reaction_ledger",
+          "keeper_name": "audit-live-deepseek",
+          "schedule_instance_id": "01a1785c-16bc-7000-9383-31a8ff7bf361",
+          "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262",
+          "post_id": "c14f1b18e012ea104a0661752729960fd1b51a0c8532c8a54757ea7e649373d7",
+          "stimulus": "schedule_due",
+          "reaction_kind": "turn_started",
+          "stimulus_kind": "schedule_due",
+          "stimulus_id": "c14f1b18e012ea104a0661752729960fd1b51a0c8532c8a54757ea7e649373d7",
+          "stimulus_seen": true,
+          "turn_started_seen": true,
+          "turn_finished_seen": false,
+          "event_queue_ack_seen": false,
+          "event_queue_cancelled_seen": false,
+          "matched_record_count": 2,
+          "quarantined_record_count": 0,
+          "stimulus_recorded_at": 1793020666.369035,
+          "stimulus_recorded_at_iso": "2026-10-26T13:17:46Z",
+          "turn_finished_recorded_at": null,
+          "turn_finished_recorded_at_iso": null,
+          "turn_started_recorded_at": 1793020666.488602,
+          "turn_started_recorded_at_iso": "2026-10-26T13:17:46Z",
+          "event_queue_ack_recorded_at": null,
+          "event_queue_ack_recorded_at_iso": null,
+          "event_queue_cancelled_recorded_at": null,
+          "event_queue_cancelled_recorded_at_iso": null,
+          "latest_recorded_at": 1793020666.488602,
+          "latest_recorded_at_iso": "2026-10-26T13:17:46Z"
+        },
+        "runner_hold": null
+      },
+      "wakes": [
+        {
+          "schedule_instance_id": "01a1785c-16bc-7000-9383-31a8ff7bf361",
+          "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262",
+          "started_at": 1793020666.357948,
+          "finished_at": 1793020666.36972,
+          "due_at": 1793020665.483936,
+          "payload_digest": "0ece90ce6ac124f949a1e3083f7366ce7bd9268889e38a39aced907e2157d197",
+          "status": "succeeded",
+          "detail": {
+            "kind": "masc.keeper_wake.enqueued",
+            "queue": "keeper_event_queue",
+            "stimulus": "schedule_due",
+            "stimulus_id": "c14f1b18e012ea104a0661752729960fd1b51a0c8532c8a54757ea7e649373d7",
+            "keeper_name": "audit-live-deepseek",
+            "schedule_instance_id": "01a1785c-16bc-7000-9383-31a8ff7bf361",
+            "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262",
+            "urgency": "normal",
+            "post_id": "c14f1b18e012ea104a0661752729960fd1b51a0c8532c8a54757ea7e649373d7",
+            "result_delivery_policy": "none",
+            "occurrence_status": "awaiting_ack",
+            "activation_status": "signaled",
+            "activation_reason": null,
+            "activation_detail": null,
+            "reaction_ledger_status": "recorded",
+            "reaction_ledger_error": null
+          },
+          "error": null,
+          "started_at_iso": "2026-10-26T13:17:46Z",
+          "finished_at_iso": "2026-10-26T13:17:46Z"
+        }
+      ],
+      "wake_count": 1,
+      "wake_retention_per_schedule": 32
+    },
+    "notes": {
+      "status": "ok",
+      "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262",
+      "limit": 50,
+      "notes": []
+    }
+  }
+}

@@ -1,0 +1,2500 @@
+[
+  {
+    "path": "/mcp",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "initialize",
+      "params": {
+        "protocolVersion": "2025-11-25",
+        "capabilities": {},
+        "clientInfo": {
+          "name": "schedule-api-audit",
+          "version": "1"
+        }
+      }
+    },
+    "status": 200,
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.64.0"
+          },
+          "com.github.yousleepwhen.masc/server": {
+            "serverStartedAt": "2026-10-26T12:02:33Z",
+            "serverVersion": "0.64.0",
+            "profile": "full"
+          }
+        },
+        "resultType": "complete",
+        "protocolVersion": "2025-11-25",
+        "serverInfo": {
+          "name": "masc",
+          "title": "MASC MCP Server",
+          "version": "0.64.0",
+          "description": "Multi-agent MCP server exposing MASC workspace state, tools, prompts, and resources.",
+          "websiteUrl": "https://github.com/yousleepwhen/masc",
+          "icons": [
+            {
+              "src": "data:image/svg+xml;utf8,%3Csvg%20xmlns='http:%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width='64'%20height='64'%20viewBox='0%200%2064%2064'%3E%3Crect%20width='64'%20height='64'%20rx='14'%20fill='%237C3AED'%2F%3E%3Ctext%20x='32'%20y='38'%20font-family='Arial,%20sans-serif'%20font-size='22'%20font-weight='700'%20text-anchor='middle'%20fill='%23F5F3FF'%3EMM%3C%2Ftext%3E%3C%2Fsvg%3E",
+              "mimeType": "image/svg+xml",
+              "sizes": [
+                "any"
+              ]
+            }
+          ]
+        },
+        "capabilities": {
+          "tools": {
+            "listChanged": true
+          },
+          "resources": {
+            "subscribe": true,
+            "listChanged": false
+          },
+          "prompts": {
+            "listChanged": false
+          }
+        },
+        "instructions": "MASC (Multi-Agent Shared Context) enables AI agent collaboration.\nPROJECT: Agents sharing the same base path (.masc/ folder) align together.\nREAD: use resources/list + resources/read (status, tasks, who, messages,\nevents, wiki, tool-help-index) for snapshots.\nWRITE: task state changes are CAS-guarded; pass expected_version."
+      }
+    }
+  },
+  {
+    "path": "/mcp",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "method": "tools/call",
+      "params": {
+        "name": "masc_schedule_create",
+        "arguments": {
+          "schedule_id": "audit-seven-tools",
+          "keeper_name": "audit-future-owner",
+          "message": "isolated future request",
+          "due_in_sec": 3600,
+          "allow_unregistered_keeper": true
+        }
+      }
+    },
+    "status": 200,
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.64.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "{\"schedule_instance_id\":\"01a17817-4637-7000-8f69-0b3eee3a13b5\",\"schedule_id\":\"audit-seven-tools\",\"requested_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"scheduled_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"requested_at\":1793016153.655893,\"due_at\":1793019753.655893,\"expires_at\":null,\"payload\":{\"kind\":\"masc.keeper_wake\",\"body\":{\"result_delivery\":{\"policy\":\"none\"},\"keeper_name\":\"audit-future-owner\",\"message\":\"isolated future request\"}},\"status\":\"scheduled\",\"source\":\"operator_request\",\"recurrence\":{\"kind\":\"one_shot\"},\"cancellation\":null,\"due_at_iso\":\"2026-10-26T13:02:33Z\",\"next_due_at\":1793019753.655893,\"next_due_at_iso\":\"2026-10-26T13:02:33Z\",\"requested_at_iso\":\"2026-10-26T12:02:33Z\",\"recurrence_kind\":\"one_shot\",\"recurrence_summary\":\"one_shot\",\"payload_digest\":\"47090fc14ad968a8a0e7a06de099cc274a9ae820c2d24a96adb5dd12da5c3460\",\"payload_kind\":\"masc.keeper_wake\",\"payload_support\":\"supported\",\"payload_dispatch_tool\":\"masc.keeper_wake\",\"payload_target\":\"keeper:audit-future-owner\",\"payload_summary\":\"isolated future request\",\"last_wake\":null}",
+              "status": "ok",
+              "tool": "masc_schedule_create"
+            },
+            "trace_id": "2",
+            "agent_id": "schedule-audit-admin",
+            "tool": "masc_schedule_create",
+            "duration_ms": 35,
+            "attempts": 1,
+            "timestamp": "2026-10-26T12:02:33Z"
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"schedule_instance_id\":\"01a17817-4637-7000-8f69-0b3eee3a13b5\",\"schedule_id\":\"audit-seven-tools\",\"requested_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"scheduled_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"requested_at\":1793016153.655893,\"due_at\":1793019753.655893,\"expires_at\":null,\"payload\":{\"kind\":\"masc.keeper_wake\",\"body\":{\"result_delivery\":{\"policy\":\"none\"},\"keeper_name\":\"audit-future-owner\",\"message\":\"isolated future request\"}},\"status\":\"scheduled\",\"source\":\"operator_request\",\"recurrence\":{\"kind\":\"one_shot\"},\"cancellation\":null,\"due_at_iso\":\"2026-10-26T13:02:33Z\",\"next_due_at\":1793019753.655893,\"next_due_at_iso\":\"2026-10-26T13:02:33Z\",\"requested_at_iso\":\"2026-10-26T12:02:33Z\",\"recurrence_kind\":\"one_shot\",\"recurrence_summary\":\"one_shot\",\"payload_digest\":\"47090fc14ad968a8a0e7a06de099cc274a9ae820c2d24a96adb5dd12da5c3460\",\"payload_kind\":\"masc.keeper_wake\",\"payload_support\":\"supported\",\"payload_dispatch_tool\":\"masc.keeper_wake\",\"payload_target\":\"keeper:audit-future-owner\",\"payload_summary\":\"isolated future request\",\"last_wake\":null}"
+          }
+        ],
+        "isError": false,
+        "structuredContent": {
+          "schedule_instance_id": "01a17817-4637-7000-8f69-0b3eee3a13b5",
+          "schedule_id": "audit-seven-tools",
+          "requested_by": {
+            "id": "schedule-audit-admin",
+            "kind": "automated_actor",
+            "display_name": null
+          },
+          "scheduled_by": {
+            "id": "schedule-audit-admin",
+            "kind": "automated_actor",
+            "display_name": null
+          },
+          "requested_at": 1793016153.655893,
+          "due_at": 1793019753.655893,
+          "expires_at": null,
+          "payload": {
+            "kind": "masc.keeper_wake",
+            "body": {
+              "result_delivery": {
+                "policy": "none"
+              },
+              "keeper_name": "audit-future-owner",
+              "message": "isolated future request"
+            }
+          },
+          "status": "scheduled",
+          "source": "operator_request",
+          "recurrence": {
+            "kind": "one_shot"
+          },
+          "cancellation": null,
+          "due_at_iso": "2026-10-26T13:02:33Z",
+          "next_due_at": 1793019753.655893,
+          "next_due_at_iso": "2026-10-26T13:02:33Z",
+          "requested_at_iso": "2026-10-26T12:02:33Z",
+          "recurrence_kind": "one_shot",
+          "recurrence_summary": "one_shot",
+          "payload_digest": "47090fc14ad968a8a0e7a06de099cc274a9ae820c2d24a96adb5dd12da5c3460",
+          "payload_kind": "masc.keeper_wake",
+          "payload_support": "supported",
+          "payload_dispatch_tool": "masc.keeper_wake",
+          "payload_target": "keeper:audit-future-owner",
+          "payload_summary": "isolated future request",
+          "last_wake": null
+        }
+      }
+    }
+  },
+  {
+    "path": "/mcp",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 3,
+      "method": "tools/call",
+      "params": {
+        "name": "masc_schedule_update",
+        "arguments": {
+          "schedule_id": "audit-seven-tools",
+          "keeper_name": "audit-future-owner",
+          "message": "edited isolated request",
+          "allow_unregistered_keeper": true
+        }
+      }
+    },
+    "status": 200,
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 3,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.64.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "{\"schedule_instance_id\":\"01a17817-4679-7000-87d1-ef0ca69d8205\",\"schedule_id\":\"audit-seven-tools\",\"requested_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"scheduled_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"requested_at\":1793016153.713232,\"due_at\":1793019753.655893,\"expires_at\":null,\"payload\":{\"kind\":\"masc.keeper_wake\",\"body\":{\"result_delivery\":{\"policy\":\"none\"},\"keeper_name\":\"audit-future-owner\",\"message\":\"edited isolated request\"}},\"status\":\"scheduled\",\"source\":\"operator_request\",\"recurrence\":{\"kind\":\"one_shot\"},\"cancellation\":null,\"due_at_iso\":\"2026-10-26T13:02:33Z\",\"next_due_at\":1793019753.655893,\"next_due_at_iso\":\"2026-10-26T13:02:33Z\",\"requested_at_iso\":\"2026-10-26T12:02:33Z\",\"recurrence_kind\":\"one_shot\",\"recurrence_summary\":\"one_shot\",\"payload_digest\":\"3df01b78bd02dcb140a3f8e4187bb7a10954e538b09b1a5c564eebc247cf0aba\",\"payload_kind\":\"masc.keeper_wake\",\"payload_support\":\"supported\",\"payload_dispatch_tool\":\"masc.keeper_wake\",\"payload_target\":\"keeper:audit-future-owner\",\"payload_summary\":\"edited isolated request\",\"last_wake\":null}",
+              "status": "ok",
+              "tool": "masc_schedule_update"
+            },
+            "trace_id": "3",
+            "agent_id": "schedule-audit-admin",
+            "tool": "masc_schedule_update",
+            "duration_ms": 22,
+            "attempts": 1,
+            "timestamp": "2026-10-26T12:02:33Z"
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"schedule_instance_id\":\"01a17817-4679-7000-87d1-ef0ca69d8205\",\"schedule_id\":\"audit-seven-tools\",\"requested_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"scheduled_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"requested_at\":1793016153.713232,\"due_at\":1793019753.655893,\"expires_at\":null,\"payload\":{\"kind\":\"masc.keeper_wake\",\"body\":{\"result_delivery\":{\"policy\":\"none\"},\"keeper_name\":\"audit-future-owner\",\"message\":\"edited isolated request\"}},\"status\":\"scheduled\",\"source\":\"operator_request\",\"recurrence\":{\"kind\":\"one_shot\"},\"cancellation\":null,\"due_at_iso\":\"2026-10-26T13:02:33Z\",\"next_due_at\":1793019753.655893,\"next_due_at_iso\":\"2026-10-26T13:02:33Z\",\"requested_at_iso\":\"2026-10-26T12:02:33Z\",\"recurrence_kind\":\"one_shot\",\"recurrence_summary\":\"one_shot\",\"payload_digest\":\"3df01b78bd02dcb140a3f8e4187bb7a10954e538b09b1a5c564eebc247cf0aba\",\"payload_kind\":\"masc.keeper_wake\",\"payload_support\":\"supported\",\"payload_dispatch_tool\":\"masc.keeper_wake\",\"payload_target\":\"keeper:audit-future-owner\",\"payload_summary\":\"edited isolated request\",\"last_wake\":null}"
+          }
+        ],
+        "isError": false,
+        "structuredContent": {
+          "schedule_instance_id": "01a17817-4679-7000-87d1-ef0ca69d8205",
+          "schedule_id": "audit-seven-tools",
+          "requested_by": {
+            "id": "schedule-audit-admin",
+            "kind": "automated_actor",
+            "display_name": null
+          },
+          "scheduled_by": {
+            "id": "schedule-audit-admin",
+            "kind": "automated_actor",
+            "display_name": null
+          },
+          "requested_at": 1793016153.713232,
+          "due_at": 1793019753.655893,
+          "expires_at": null,
+          "payload": {
+            "kind": "masc.keeper_wake",
+            "body": {
+              "result_delivery": {
+                "policy": "none"
+              },
+              "keeper_name": "audit-future-owner",
+              "message": "edited isolated request"
+            }
+          },
+          "status": "scheduled",
+          "source": "operator_request",
+          "recurrence": {
+            "kind": "one_shot"
+          },
+          "cancellation": null,
+          "due_at_iso": "2026-10-26T13:02:33Z",
+          "next_due_at": 1793019753.655893,
+          "next_due_at_iso": "2026-10-26T13:02:33Z",
+          "requested_at_iso": "2026-10-26T12:02:33Z",
+          "recurrence_kind": "one_shot",
+          "recurrence_summary": "one_shot",
+          "payload_digest": "3df01b78bd02dcb140a3f8e4187bb7a10954e538b09b1a5c564eebc247cf0aba",
+          "payload_kind": "masc.keeper_wake",
+          "payload_support": "supported",
+          "payload_dispatch_tool": "masc.keeper_wake",
+          "payload_target": "keeper:audit-future-owner",
+          "payload_summary": "edited isolated request",
+          "last_wake": null
+        }
+      }
+    }
+  },
+  {
+    "path": "/mcp",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 4,
+      "method": "tools/call",
+      "params": {
+        "name": "masc_schedule_list",
+        "arguments": {
+          "owner": "all",
+          "limit": 50
+        }
+      }
+    },
+    "status": 200,
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 4,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.64.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "{\"status\":\"ok\",\"owner\":\"all\",\"owner_name\":null,\"limit\":50,\"schedules\":[{\"schedule_id\":\"audit-seven-tools\",\"status\":\"scheduled\",\"due_at_iso\":\"2026-10-26T13:02:33Z\",\"recurrence_summary\":\"one_shot\",\"wake_target\":\"audit-future-owner\",\"scheduled_by\":\"schedule-audit-admin\",\"summary\":\"edited isolated request\",\"last_wake_status\":null}]}",
+              "status": "ok",
+              "tool": "masc_schedule_list"
+            },
+            "trace_id": "4",
+            "agent_id": "schedule-audit-admin",
+            "tool": "masc_schedule_list",
+            "duration_ms": 8,
+            "attempts": 1,
+            "timestamp": "2026-10-26T12:02:33Z"
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"status\":\"ok\",\"owner\":\"all\",\"owner_name\":null,\"limit\":50,\"schedules\":[{\"schedule_id\":\"audit-seven-tools\",\"status\":\"scheduled\",\"due_at_iso\":\"2026-10-26T13:02:33Z\",\"recurrence_summary\":\"one_shot\",\"wake_target\":\"audit-future-owner\",\"scheduled_by\":\"schedule-audit-admin\",\"summary\":\"edited isolated request\",\"last_wake_status\":null}]}"
+          }
+        ],
+        "isError": false,
+        "structuredContent": {
+          "status": "ok",
+          "owner": "all",
+          "owner_name": null,
+          "limit": 50,
+          "schedules": [
+            {
+              "schedule_id": "audit-seven-tools",
+              "status": "scheduled",
+              "due_at_iso": "2026-10-26T13:02:33Z",
+              "recurrence_summary": "one_shot",
+              "wake_target": "audit-future-owner",
+              "scheduled_by": "schedule-audit-admin",
+              "summary": "edited isolated request",
+              "last_wake_status": null
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "path": "/mcp",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 5,
+      "method": "tools/call",
+      "params": {
+        "name": "masc_schedule_get",
+        "arguments": {
+          "schedule_id": "audit-seven-tools"
+        }
+      }
+    },
+    "status": 200,
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 5,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.64.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "{\"schedule_instance_id\":\"01a17817-4679-7000-87d1-ef0ca69d8205\",\"schedule_id\":\"audit-seven-tools\",\"requested_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"scheduled_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"requested_at\":1793016153.713232,\"due_at\":1793019753.655893,\"expires_at\":null,\"payload\":{\"kind\":\"masc.keeper_wake\",\"body\":{\"result_delivery\":{\"policy\":\"none\"},\"keeper_name\":\"audit-future-owner\",\"message\":\"edited isolated request\"}},\"status\":\"scheduled\",\"source\":\"operator_request\",\"recurrence\":{\"kind\":\"one_shot\"},\"cancellation\":null,\"due_at_iso\":\"2026-10-26T13:02:33Z\",\"next_due_at\":1793019753.655893,\"next_due_at_iso\":\"2026-10-26T13:02:33Z\",\"requested_at_iso\":\"2026-10-26T12:02:33Z\",\"recurrence_kind\":\"one_shot\",\"recurrence_summary\":\"one_shot\",\"payload_digest\":\"3df01b78bd02dcb140a3f8e4187bb7a10954e538b09b1a5c564eebc247cf0aba\",\"payload_kind\":\"masc.keeper_wake\",\"payload_support\":\"supported\",\"payload_dispatch_tool\":\"masc.keeper_wake\",\"payload_target\":\"keeper:audit-future-owner\",\"payload_summary\":\"edited isolated request\",\"last_wake\":null}",
+              "status": "ok",
+              "tool": "masc_schedule_get"
+            },
+            "trace_id": "5",
+            "agent_id": "schedule-audit-admin",
+            "tool": "masc_schedule_get",
+            "duration_ms": 4,
+            "attempts": 1,
+            "timestamp": "2026-10-26T12:02:33Z"
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"schedule_instance_id\":\"01a17817-4679-7000-87d1-ef0ca69d8205\",\"schedule_id\":\"audit-seven-tools\",\"requested_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"scheduled_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"requested_at\":1793016153.713232,\"due_at\":1793019753.655893,\"expires_at\":null,\"payload\":{\"kind\":\"masc.keeper_wake\",\"body\":{\"result_delivery\":{\"policy\":\"none\"},\"keeper_name\":\"audit-future-owner\",\"message\":\"edited isolated request\"}},\"status\":\"scheduled\",\"source\":\"operator_request\",\"recurrence\":{\"kind\":\"one_shot\"},\"cancellation\":null,\"due_at_iso\":\"2026-10-26T13:02:33Z\",\"next_due_at\":1793019753.655893,\"next_due_at_iso\":\"2026-10-26T13:02:33Z\",\"requested_at_iso\":\"2026-10-26T12:02:33Z\",\"recurrence_kind\":\"one_shot\",\"recurrence_summary\":\"one_shot\",\"payload_digest\":\"3df01b78bd02dcb140a3f8e4187bb7a10954e538b09b1a5c564eebc247cf0aba\",\"payload_kind\":\"masc.keeper_wake\",\"payload_support\":\"supported\",\"payload_dispatch_tool\":\"masc.keeper_wake\",\"payload_target\":\"keeper:audit-future-owner\",\"payload_summary\":\"edited isolated request\",\"last_wake\":null}"
+          }
+        ],
+        "isError": false,
+        "structuredContent": {
+          "schedule_instance_id": "01a17817-4679-7000-87d1-ef0ca69d8205",
+          "schedule_id": "audit-seven-tools",
+          "requested_by": {
+            "id": "schedule-audit-admin",
+            "kind": "automated_actor",
+            "display_name": null
+          },
+          "scheduled_by": {
+            "id": "schedule-audit-admin",
+            "kind": "automated_actor",
+            "display_name": null
+          },
+          "requested_at": 1793016153.713232,
+          "due_at": 1793019753.655893,
+          "expires_at": null,
+          "payload": {
+            "kind": "masc.keeper_wake",
+            "body": {
+              "result_delivery": {
+                "policy": "none"
+              },
+              "keeper_name": "audit-future-owner",
+              "message": "edited isolated request"
+            }
+          },
+          "status": "scheduled",
+          "source": "operator_request",
+          "recurrence": {
+            "kind": "one_shot"
+          },
+          "cancellation": null,
+          "due_at_iso": "2026-10-26T13:02:33Z",
+          "next_due_at": 1793019753.655893,
+          "next_due_at_iso": "2026-10-26T13:02:33Z",
+          "requested_at_iso": "2026-10-26T12:02:33Z",
+          "recurrence_kind": "one_shot",
+          "recurrence_summary": "one_shot",
+          "payload_digest": "3df01b78bd02dcb140a3f8e4187bb7a10954e538b09b1a5c564eebc247cf0aba",
+          "payload_kind": "masc.keeper_wake",
+          "payload_support": "supported",
+          "payload_dispatch_tool": "masc.keeper_wake",
+          "payload_target": "keeper:audit-future-owner",
+          "payload_summary": "edited isolated request",
+          "last_wake": null
+        }
+      }
+    }
+  },
+  {
+    "path": "/mcp",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 6,
+      "method": "tools/call",
+      "params": {
+        "name": "masc_schedule_note_add",
+        "arguments": {
+          "schedule_id": "audit-seven-tools",
+          "body": "first durable note"
+        }
+      }
+    },
+    "status": 200,
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 6,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.64.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "{\"status\":\"ok\",\"note\":{\"note_id\":\"4\",\"schedule_id\":\"audit-seven-tools\",\"author_id\":\"schedule-audit-admin\",\"author_kind\":\"automated_actor\",\"created_at\":1793016153.794169,\"body\":\"first durable note\"},\"note_count\":1}",
+              "status": "ok",
+              "tool": "masc_schedule_note_add"
+            },
+            "trace_id": "6",
+            "agent_id": "schedule-audit-admin",
+            "tool": "masc_schedule_note_add",
+            "duration_ms": 10,
+            "attempts": 1,
+            "timestamp": "2026-10-26T12:02:33Z"
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"status\":\"ok\",\"note\":{\"note_id\":\"4\",\"schedule_id\":\"audit-seven-tools\",\"author_id\":\"schedule-audit-admin\",\"author_kind\":\"automated_actor\",\"created_at\":1793016153.794169,\"body\":\"first durable note\"},\"note_count\":1}"
+          }
+        ],
+        "isError": false,
+        "structuredContent": {
+          "status": "ok",
+          "note": {
+            "note_id": "4",
+            "schedule_id": "audit-seven-tools",
+            "author_id": "schedule-audit-admin",
+            "author_kind": "automated_actor",
+            "created_at": 1793016153.794169,
+            "body": "first durable note"
+          },
+          "note_count": 1
+        }
+      }
+    }
+  },
+  {
+    "path": "/mcp",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 7,
+      "method": "tools/call",
+      "params": {
+        "name": "masc_schedule_note_add",
+        "arguments": {
+          "schedule_id": "audit-seven-tools",
+          "body": "second durable note"
+        }
+      }
+    },
+    "status": 200,
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 7,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.64.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "{\"status\":\"ok\",\"note\":{\"note_id\":\"5\",\"schedule_id\":\"audit-seven-tools\",\"author_id\":\"schedule-audit-admin\",\"author_kind\":\"automated_actor\",\"created_at\":1793016153.812364,\"body\":\"second durable note\"},\"note_count\":2}",
+              "status": "ok",
+              "tool": "masc_schedule_note_add"
+            },
+            "trace_id": "7",
+            "agent_id": "schedule-audit-admin",
+            "tool": "masc_schedule_note_add",
+            "duration_ms": 7,
+            "attempts": 1,
+            "timestamp": "2026-10-26T12:02:33Z"
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"status\":\"ok\",\"note\":{\"note_id\":\"5\",\"schedule_id\":\"audit-seven-tools\",\"author_id\":\"schedule-audit-admin\",\"author_kind\":\"automated_actor\",\"created_at\":1793016153.812364,\"body\":\"second durable note\"},\"note_count\":2}"
+          }
+        ],
+        "isError": false,
+        "structuredContent": {
+          "status": "ok",
+          "note": {
+            "note_id": "5",
+            "schedule_id": "audit-seven-tools",
+            "author_id": "schedule-audit-admin",
+            "author_kind": "automated_actor",
+            "created_at": 1793016153.812364,
+            "body": "second durable note"
+          },
+          "note_count": 2
+        }
+      }
+    }
+  },
+  {
+    "path": "/mcp",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 8,
+      "method": "tools/call",
+      "params": {
+        "name": "masc_schedule_note_add",
+        "arguments": {
+          "schedule_id": "audit-seven-tools",
+          "body": "third durable note"
+        }
+      }
+    },
+    "status": 200,
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 8,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.64.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "{\"status\":\"ok\",\"note\":{\"note_id\":\"6\",\"schedule_id\":\"audit-seven-tools\",\"author_id\":\"schedule-audit-admin\",\"author_kind\":\"automated_actor\",\"created_at\":1793016153.827801,\"body\":\"third durable note\"},\"note_count\":3}",
+              "status": "ok",
+              "tool": "masc_schedule_note_add"
+            },
+            "trace_id": "8",
+            "agent_id": "schedule-audit-admin",
+            "tool": "masc_schedule_note_add",
+            "duration_ms": 7,
+            "attempts": 1,
+            "timestamp": "2026-10-26T12:02:33Z"
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"status\":\"ok\",\"note\":{\"note_id\":\"6\",\"schedule_id\":\"audit-seven-tools\",\"author_id\":\"schedule-audit-admin\",\"author_kind\":\"automated_actor\",\"created_at\":1793016153.827801,\"body\":\"third durable note\"},\"note_count\":3}"
+          }
+        ],
+        "isError": false,
+        "structuredContent": {
+          "status": "ok",
+          "note": {
+            "note_id": "6",
+            "schedule_id": "audit-seven-tools",
+            "author_id": "schedule-audit-admin",
+            "author_kind": "automated_actor",
+            "created_at": 1793016153.827801,
+            "body": "third durable note"
+          },
+          "note_count": 3
+        }
+      }
+    }
+  },
+  {
+    "path": "/mcp",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 9,
+      "method": "tools/call",
+      "params": {
+        "name": "masc_schedule_notes_list",
+        "arguments": {
+          "schedule_id": "audit-seven-tools",
+          "limit": 2
+        }
+      }
+    },
+    "status": 200,
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 9,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.64.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "{\"status\":\"ok\",\"schedule_id\":\"audit-seven-tools\",\"limit\":2,\"notes\":[{\"note_id\":\"5\",\"schedule_id\":\"audit-seven-tools\",\"author_id\":\"schedule-audit-admin\",\"author_kind\":\"automated_actor\",\"created_at\":1793016153.812364,\"body\":\"second durable note\"},{\"note_id\":\"6\",\"schedule_id\":\"audit-seven-tools\",\"author_id\":\"schedule-audit-admin\",\"author_kind\":\"automated_actor\",\"created_at\":1793016153.827801,\"body\":\"third durable note\"}]}",
+              "status": "ok",
+              "tool": "masc_schedule_notes_list"
+            },
+            "trace_id": "9",
+            "agent_id": "schedule-audit-admin",
+            "tool": "masc_schedule_notes_list",
+            "duration_ms": 1,
+            "attempts": 1,
+            "timestamp": "2026-10-26T12:02:33Z"
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"status\":\"ok\",\"schedule_id\":\"audit-seven-tools\",\"limit\":2,\"notes\":[{\"note_id\":\"5\",\"schedule_id\":\"audit-seven-tools\",\"author_id\":\"schedule-audit-admin\",\"author_kind\":\"automated_actor\",\"created_at\":1793016153.812364,\"body\":\"second durable note\"},{\"note_id\":\"6\",\"schedule_id\":\"audit-seven-tools\",\"author_id\":\"schedule-audit-admin\",\"author_kind\":\"automated_actor\",\"created_at\":1793016153.827801,\"body\":\"third durable note\"}]}"
+          }
+        ],
+        "isError": false,
+        "structuredContent": {
+          "status": "ok",
+          "schedule_id": "audit-seven-tools",
+          "limit": 2,
+          "notes": [
+            {
+              "note_id": "5",
+              "schedule_id": "audit-seven-tools",
+              "author_id": "schedule-audit-admin",
+              "author_kind": "automated_actor",
+              "created_at": 1793016153.812364,
+              "body": "second durable note"
+            },
+            {
+              "note_id": "6",
+              "schedule_id": "audit-seven-tools",
+              "author_id": "schedule-audit-admin",
+              "author_kind": "automated_actor",
+              "created_at": 1793016153.827801,
+              "body": "third durable note"
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "path": "/mcp",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 10,
+      "method": "initialize",
+      "params": {
+        "protocolVersion": "2025-11-25",
+        "capabilities": {},
+        "clientInfo": {
+          "name": "schedule-api-audit",
+          "version": "1"
+        }
+      }
+    },
+    "status": 200,
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 10,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.64.0"
+          },
+          "com.github.yousleepwhen.masc/server": {
+            "serverStartedAt": "2026-10-26T12:02:33Z",
+            "serverVersion": "0.64.0",
+            "profile": "full"
+          }
+        },
+        "resultType": "complete",
+        "protocolVersion": "2025-11-25",
+        "serverInfo": {
+          "name": "masc",
+          "title": "MASC MCP Server",
+          "version": "0.64.0",
+          "description": "Multi-agent MCP server exposing MASC workspace state, tools, prompts, and resources.",
+          "websiteUrl": "https://github.com/yousleepwhen/masc",
+          "icons": [
+            {
+              "src": "data:image/svg+xml;utf8,%3Csvg%20xmlns='http:%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width='64'%20height='64'%20viewBox='0%200%2064%2064'%3E%3Crect%20width='64'%20height='64'%20rx='14'%20fill='%237C3AED'%2F%3E%3Ctext%20x='32'%20y='38'%20font-family='Arial,%20sans-serif'%20font-size='22'%20font-weight='700'%20text-anchor='middle'%20fill='%23F5F3FF'%3EMM%3C%2Ftext%3E%3C%2Fsvg%3E",
+              "mimeType": "image/svg+xml",
+              "sizes": [
+                "any"
+              ]
+            }
+          ]
+        },
+        "capabilities": {
+          "tools": {
+            "listChanged": true
+          },
+          "resources": {
+            "subscribe": true,
+            "listChanged": false
+          },
+          "prompts": {
+            "listChanged": false
+          }
+        },
+        "instructions": "MASC (Multi-Agent Shared Context) enables AI agent collaboration.\nPROJECT: Agents sharing the same base path (.masc/ folder) align together.\nREAD: use resources/list + resources/read (status, tasks, who, messages,\nevents, wiki, tool-help-index) for snapshots.\nWRITE: task state changes are CAS-guarded; pass expected_version."
+      }
+    }
+  },
+  {
+    "path": "/mcp",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 11,
+      "method": "tools/call",
+      "params": {
+        "name": "masc_schedule_cancel",
+        "arguments": {
+          "schedule_id": "audit-seven-tools",
+          "reason": "isolated lifecycle done"
+        }
+      }
+    },
+    "status": 200,
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 11,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.64.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "schedule audit-seven-tools was scheduled by schedule-audit-admin and would not wake schedule-audit-worker; a caller changes only the schedules it made or the ones that wake it",
+              "status": "error",
+              "tool": "masc_schedule_cancel"
+            },
+            "trace_id": "11",
+            "agent_id": "schedule-audit-worker",
+            "tool": "masc_schedule_cancel",
+            "duration_ms": 3,
+            "attempts": 1,
+            "timestamp": "2026-10-26T12:02:33Z",
+            "failure_class": "workflow_rejection"
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "schedule audit-seven-tools was scheduled by schedule-audit-admin and would not wake schedule-audit-worker; a caller changes only the schedules it made or the ones that wake it"
+          }
+        ],
+        "isError": true,
+        "structuredContent": {
+          "status": "error",
+          "message": "schedule audit-seven-tools was scheduled by schedule-audit-admin and would not wake schedule-audit-worker; a caller changes only the schedules it made or the ones that wake it",
+          "error_kind": "not_schedule_owner",
+          "schedule_id": "audit-seven-tools",
+          "caller": "schedule-audit-worker",
+          "scheduled_by_id": "schedule-audit-admin",
+          "wake_target": "audit-future-owner"
+        }
+      }
+    }
+  },
+  {
+    "path": "/mcp",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 12,
+      "method": "tools/call",
+      "params": {
+        "name": "masc_schedule_cancel",
+        "arguments": {
+          "schedule_id": "audit-seven-tools",
+          "reason": "isolated lifecycle done"
+        }
+      }
+    },
+    "status": 200,
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 12,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.64.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "{\"status\":\"ok\",\"schedule\":{\"schedule_instance_id\":\"01a17817-4679-7000-87d1-ef0ca69d8205\",\"schedule_id\":\"audit-seven-tools\",\"requested_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"scheduled_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"requested_at\":1793016153.713232,\"due_at\":1793019753.655893,\"expires_at\":null,\"payload\":{\"kind\":\"masc.keeper_wake\",\"body\":{\"result_delivery\":{\"policy\":\"none\"},\"keeper_name\":\"audit-future-owner\",\"message\":\"edited isolated request\"}},\"status\":\"cancelled\",\"source\":\"operator_request\",\"recurrence\":{\"kind\":\"one_shot\"},\"cancellation\":{\"cancelled_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"reason\":\"isolated lifecycle done\"},\"due_at_iso\":\"2026-10-26T13:02:33Z\",\"next_due_at\":null,\"next_due_at_iso\":null,\"requested_at_iso\":\"2026-10-26T12:02:33Z\",\"recurrence_kind\":\"one_shot\",\"recurrence_summary\":\"one_shot\",\"payload_digest\":\"3df01b78bd02dcb140a3f8e4187bb7a10954e538b09b1a5c564eebc247cf0aba\",\"payload_kind\":\"masc.keeper_wake\",\"payload_support\":\"supported\",\"payload_dispatch_tool\":\"masc.keeper_wake\",\"payload_target\":\"keeper:audit-future-owner\",\"payload_summary\":\"edited isolated request\",\"last_wake\":null},\"cancelled_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\"},\"reason\":\"isolated lifecycle done\"}",
+              "status": "ok",
+              "tool": "masc_schedule_cancel"
+            },
+            "trace_id": "12",
+            "agent_id": "schedule-audit-admin",
+            "tool": "masc_schedule_cancel",
+            "duration_ms": 9,
+            "attempts": 1,
+            "timestamp": "2026-10-26T12:02:33Z"
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"status\":\"ok\",\"schedule\":{\"schedule_instance_id\":\"01a17817-4679-7000-87d1-ef0ca69d8205\",\"schedule_id\":\"audit-seven-tools\",\"requested_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"scheduled_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"requested_at\":1793016153.713232,\"due_at\":1793019753.655893,\"expires_at\":null,\"payload\":{\"kind\":\"masc.keeper_wake\",\"body\":{\"result_delivery\":{\"policy\":\"none\"},\"keeper_name\":\"audit-future-owner\",\"message\":\"edited isolated request\"}},\"status\":\"cancelled\",\"source\":\"operator_request\",\"recurrence\":{\"kind\":\"one_shot\"},\"cancellation\":{\"cancelled_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"reason\":\"isolated lifecycle done\"},\"due_at_iso\":\"2026-10-26T13:02:33Z\",\"next_due_at\":null,\"next_due_at_iso\":null,\"requested_at_iso\":\"2026-10-26T12:02:33Z\",\"recurrence_kind\":\"one_shot\",\"recurrence_summary\":\"one_shot\",\"payload_digest\":\"3df01b78bd02dcb140a3f8e4187bb7a10954e538b09b1a5c564eebc247cf0aba\",\"payload_kind\":\"masc.keeper_wake\",\"payload_support\":\"supported\",\"payload_dispatch_tool\":\"masc.keeper_wake\",\"payload_target\":\"keeper:audit-future-owner\",\"payload_summary\":\"edited isolated request\",\"last_wake\":null},\"cancelled_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\"},\"reason\":\"isolated lifecycle done\"}"
+          }
+        ],
+        "isError": false,
+        "structuredContent": {
+          "status": "ok",
+          "schedule": {
+            "schedule_instance_id": "01a17817-4679-7000-87d1-ef0ca69d8205",
+            "schedule_id": "audit-seven-tools",
+            "requested_by": {
+              "id": "schedule-audit-admin",
+              "kind": "automated_actor",
+              "display_name": null
+            },
+            "scheduled_by": {
+              "id": "schedule-audit-admin",
+              "kind": "automated_actor",
+              "display_name": null
+            },
+            "requested_at": 1793016153.713232,
+            "due_at": 1793019753.655893,
+            "expires_at": null,
+            "payload": {
+              "kind": "masc.keeper_wake",
+              "body": {
+                "result_delivery": {
+                  "policy": "none"
+                },
+                "keeper_name": "audit-future-owner",
+                "message": "edited isolated request"
+              }
+            },
+            "status": "cancelled",
+            "source": "operator_request",
+            "recurrence": {
+              "kind": "one_shot"
+            },
+            "cancellation": {
+              "cancelled_by": {
+                "id": "schedule-audit-admin",
+                "kind": "automated_actor",
+                "display_name": null
+              },
+              "reason": "isolated lifecycle done"
+            },
+            "due_at_iso": "2026-10-26T13:02:33Z",
+            "next_due_at": null,
+            "next_due_at_iso": null,
+            "requested_at_iso": "2026-10-26T12:02:33Z",
+            "recurrence_kind": "one_shot",
+            "recurrence_summary": "one_shot",
+            "payload_digest": "3df01b78bd02dcb140a3f8e4187bb7a10954e538b09b1a5c564eebc247cf0aba",
+            "payload_kind": "masc.keeper_wake",
+            "payload_support": "supported",
+            "payload_dispatch_tool": "masc.keeper_wake",
+            "payload_target": "keeper:audit-future-owner",
+            "payload_summary": "edited isolated request",
+            "last_wake": null
+          },
+          "cancelled_by": {
+            "id": "schedule-audit-admin",
+            "kind": "automated_actor"
+          },
+          "reason": "isolated lifecycle done"
+        }
+      }
+    }
+  },
+  {
+    "path": "/mcp",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 13,
+      "method": "tools/call",
+      "params": {
+        "name": "masc_schedule_notes_list",
+        "arguments": {
+          "schedule_id": "audit-seven-tools"
+        }
+      }
+    },
+    "status": 200,
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 13,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.64.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "{\"status\":\"ok\",\"schedule_id\":\"audit-seven-tools\",\"limit\":50,\"notes\":[{\"note_id\":\"4\",\"schedule_id\":\"audit-seven-tools\",\"author_id\":\"schedule-audit-admin\",\"author_kind\":\"automated_actor\",\"created_at\":1793016153.794169,\"body\":\"first durable note\"},{\"note_id\":\"5\",\"schedule_id\":\"audit-seven-tools\",\"author_id\":\"schedule-audit-admin\",\"author_kind\":\"automated_actor\",\"created_at\":1793016153.812364,\"body\":\"second durable note\"},{\"note_id\":\"6\",\"schedule_id\":\"audit-seven-tools\",\"author_id\":\"schedule-audit-admin\",\"author_kind\":\"automated_actor\",\"created_at\":1793016153.827801,\"body\":\"third durable note\"}]}",
+              "status": "ok",
+              "tool": "masc_schedule_notes_list"
+            },
+            "trace_id": "13",
+            "agent_id": "schedule-audit-admin",
+            "tool": "masc_schedule_notes_list",
+            "duration_ms": 2,
+            "attempts": 1,
+            "timestamp": "2026-10-26T12:02:33Z"
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"status\":\"ok\",\"schedule_id\":\"audit-seven-tools\",\"limit\":50,\"notes\":[{\"note_id\":\"4\",\"schedule_id\":\"audit-seven-tools\",\"author_id\":\"schedule-audit-admin\",\"author_kind\":\"automated_actor\",\"created_at\":1793016153.794169,\"body\":\"first durable note\"},{\"note_id\":\"5\",\"schedule_id\":\"audit-seven-tools\",\"author_id\":\"schedule-audit-admin\",\"author_kind\":\"automated_actor\",\"created_at\":1793016153.812364,\"body\":\"second durable note\"},{\"note_id\":\"6\",\"schedule_id\":\"audit-seven-tools\",\"author_id\":\"schedule-audit-admin\",\"author_kind\":\"automated_actor\",\"created_at\":1793016153.827801,\"body\":\"third durable note\"}]}"
+          }
+        ],
+        "isError": false,
+        "structuredContent": {
+          "status": "ok",
+          "schedule_id": "audit-seven-tools",
+          "limit": 50,
+          "notes": [
+            {
+              "note_id": "4",
+              "schedule_id": "audit-seven-tools",
+              "author_id": "schedule-audit-admin",
+              "author_kind": "automated_actor",
+              "created_at": 1793016153.794169,
+              "body": "first durable note"
+            },
+            {
+              "note_id": "5",
+              "schedule_id": "audit-seven-tools",
+              "author_id": "schedule-audit-admin",
+              "author_kind": "automated_actor",
+              "created_at": 1793016153.812364,
+              "body": "second durable note"
+            },
+            {
+              "note_id": "6",
+              "schedule_id": "audit-seven-tools",
+              "author_id": "schedule-audit-admin",
+              "author_kind": "automated_actor",
+              "created_at": 1793016153.827801,
+              "body": "third durable note"
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "path": "/mcp",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 14,
+      "method": "tools/call",
+      "params": {
+        "name": "masc_schedule_update",
+        "arguments": {
+          "schedule_id": "audit-seven-tools",
+          "keeper_name": "audit-future-owner",
+          "message": "forbidden terminal edit",
+          "allow_unregistered_keeper": true
+        }
+      }
+    },
+    "status": 200,
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 14,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.64.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "schedule audit-seven-tools is cancelled; only scheduled or due requests can be modified",
+              "status": "error",
+              "tool": "masc_schedule_update"
+            },
+            "trace_id": "14",
+            "agent_id": "schedule-audit-admin",
+            "tool": "masc_schedule_update",
+            "duration_ms": 4,
+            "attempts": 1,
+            "timestamp": "2026-10-26T12:02:33Z",
+            "failure_class": "workflow_rejection"
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "schedule audit-seven-tools is cancelled; only scheduled or due requests can be modified"
+          }
+        ],
+        "isError": true,
+        "structuredContent": {
+          "status": "error",
+          "message": "schedule audit-seven-tools is cancelled; only scheduled or due requests can be modified",
+          "error_kind": "transition_refused",
+          "schedule_id": "audit-seven-tools",
+          "current_status": "cancelled",
+          "attempted": "modify",
+          "last_wake": null
+        }
+      }
+    }
+  },
+  {
+    "path": "/mcp",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 15,
+      "method": "tools/call",
+      "params": {
+        "name": "masc_schedule_note_add",
+        "arguments": {
+          "schedule_id": "audit-seven-tools",
+          "body": "concurrent creator note"
+        }
+      }
+    },
+    "status": 200,
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 15,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.64.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "{\"status\":\"ok\",\"note\":{\"note_id\":\"8\",\"schedule_id\":\"audit-seven-tools\",\"author_id\":\"schedule-audit-admin\",\"author_kind\":\"automated_actor\",\"created_at\":1793016153.927159,\"body\":\"concurrent creator note\"},\"note_count\":4}",
+              "status": "ok",
+              "tool": "masc_schedule_note_add"
+            },
+            "trace_id": "15",
+            "agent_id": "schedule-audit-admin",
+            "tool": "masc_schedule_note_add",
+            "duration_ms": 11,
+            "attempts": 1,
+            "timestamp": "2026-10-26T12:02:33Z"
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"status\":\"ok\",\"note\":{\"note_id\":\"8\",\"schedule_id\":\"audit-seven-tools\",\"author_id\":\"schedule-audit-admin\",\"author_kind\":\"automated_actor\",\"created_at\":1793016153.927159,\"body\":\"concurrent creator note\"},\"note_count\":4}"
+          }
+        ],
+        "isError": false,
+        "structuredContent": {
+          "status": "ok",
+          "note": {
+            "note_id": "8",
+            "schedule_id": "audit-seven-tools",
+            "author_id": "schedule-audit-admin",
+            "author_kind": "automated_actor",
+            "created_at": 1793016153.927159,
+            "body": "concurrent creator note"
+          },
+          "note_count": 4
+        }
+      }
+    }
+  },
+  {
+    "path": "/mcp",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 16,
+      "method": "tools/call",
+      "params": {
+        "name": "masc_schedule_note_add",
+        "arguments": {
+          "schedule_id": "audit-seven-tools",
+          "body": "concurrent worker note"
+        }
+      }
+    },
+    "status": 200,
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 16,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.64.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "{\"status\":\"ok\",\"note\":{\"note_id\":\"9\",\"schedule_id\":\"audit-seven-tools\",\"author_id\":\"schedule-audit-worker\",\"author_kind\":\"automated_actor\",\"created_at\":1793016153.927362,\"body\":\"concurrent worker note\"},\"note_count\":5}",
+              "status": "ok",
+              "tool": "masc_schedule_note_add"
+            },
+            "trace_id": "16",
+            "agent_id": "schedule-audit-worker",
+            "tool": "masc_schedule_note_add",
+            "duration_ms": 38,
+            "attempts": 1,
+            "timestamp": "2026-10-26T12:02:33Z"
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"status\":\"ok\",\"note\":{\"note_id\":\"9\",\"schedule_id\":\"audit-seven-tools\",\"author_id\":\"schedule-audit-worker\",\"author_kind\":\"automated_actor\",\"created_at\":1793016153.927362,\"body\":\"concurrent worker note\"},\"note_count\":5}"
+          }
+        ],
+        "isError": false,
+        "structuredContent": {
+          "status": "ok",
+          "note": {
+            "note_id": "9",
+            "schedule_id": "audit-seven-tools",
+            "author_id": "schedule-audit-worker",
+            "author_kind": "automated_actor",
+            "created_at": 1793016153.927362,
+            "body": "concurrent worker note"
+          },
+          "note_count": 5
+        }
+      }
+    }
+  },
+  {
+    "path": "/mcp",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 17,
+      "method": "tools/call",
+      "params": {
+        "name": "masc_schedule_notes_list",
+        "arguments": {
+          "schedule_id": "audit-seven-tools"
+        }
+      }
+    },
+    "status": 200,
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 17,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.64.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "{\"status\":\"ok\",\"schedule_id\":\"audit-seven-tools\",\"limit\":50,\"notes\":[{\"note_id\":\"4\",\"schedule_id\":\"audit-seven-tools\",\"author_id\":\"schedule-audit-admin\",\"author_kind\":\"automated_actor\",\"created_at\":1793016153.794169,\"body\":\"first durable note\"},{\"note_id\":\"5\",\"schedule_id\":\"audit-seven-tools\",\"author_id\":\"schedule-audit-admin\",\"author_kind\":\"automated_actor\",\"created_at\":1793016153.812364,\"body\":\"second durable note\"},{\"note_id\":\"6\",\"schedule_id\":\"audit-seven-tools\",\"author_id\":\"schedule-audit-admin\",\"author_kind\":\"automated_actor\",\"created_at\":1793016153.827801,\"body\":\"third durable note\"},{\"note_id\":\"8\",\"schedule_id\":\"audit-seven-tools\",\"author_id\":\"schedule-audit-admin\",\"author_kind\":\"automated_actor\",\"created_at\":1793016153.927159,\"body\":\"concurrent creator note\"},{\"note_id\":\"9\",\"schedule_id\":\"audit-seven-tools\",\"author_id\":\"schedule-audit-worker\",\"author_kind\":\"automated_actor\",\"created_at\":1793016153.927362,\"body\":\"concurrent worker note\"}]}",
+              "status": "ok",
+              "tool": "masc_schedule_notes_list"
+            },
+            "trace_id": "17",
+            "agent_id": "schedule-audit-admin",
+            "tool": "masc_schedule_notes_list",
+            "duration_ms": 3,
+            "attempts": 1,
+            "timestamp": "2026-10-26T12:02:33Z"
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"status\":\"ok\",\"schedule_id\":\"audit-seven-tools\",\"limit\":50,\"notes\":[{\"note_id\":\"4\",\"schedule_id\":\"audit-seven-tools\",\"author_id\":\"schedule-audit-admin\",\"author_kind\":\"automated_actor\",\"created_at\":1793016153.794169,\"body\":\"first durable note\"},{\"note_id\":\"5\",\"schedule_id\":\"audit-seven-tools\",\"author_id\":\"schedule-audit-admin\",\"author_kind\":\"automated_actor\",\"created_at\":1793016153.812364,\"body\":\"second durable note\"},{\"note_id\":\"6\",\"schedule_id\":\"audit-seven-tools\",\"author_id\":\"schedule-audit-admin\",\"author_kind\":\"automated_actor\",\"created_at\":1793016153.827801,\"body\":\"third durable note\"},{\"note_id\":\"8\",\"schedule_id\":\"audit-seven-tools\",\"author_id\":\"schedule-audit-admin\",\"author_kind\":\"automated_actor\",\"created_at\":1793016153.927159,\"body\":\"concurrent creator note\"},{\"note_id\":\"9\",\"schedule_id\":\"audit-seven-tools\",\"author_id\":\"schedule-audit-worker\",\"author_kind\":\"automated_actor\",\"created_at\":1793016153.927362,\"body\":\"concurrent worker note\"}]}"
+          }
+        ],
+        "isError": false,
+        "structuredContent": {
+          "status": "ok",
+          "schedule_id": "audit-seven-tools",
+          "limit": 50,
+          "notes": [
+            {
+              "note_id": "4",
+              "schedule_id": "audit-seven-tools",
+              "author_id": "schedule-audit-admin",
+              "author_kind": "automated_actor",
+              "created_at": 1793016153.794169,
+              "body": "first durable note"
+            },
+            {
+              "note_id": "5",
+              "schedule_id": "audit-seven-tools",
+              "author_id": "schedule-audit-admin",
+              "author_kind": "automated_actor",
+              "created_at": 1793016153.812364,
+              "body": "second durable note"
+            },
+            {
+              "note_id": "6",
+              "schedule_id": "audit-seven-tools",
+              "author_id": "schedule-audit-admin",
+              "author_kind": "automated_actor",
+              "created_at": 1793016153.827801,
+              "body": "third durable note"
+            },
+            {
+              "note_id": "8",
+              "schedule_id": "audit-seven-tools",
+              "author_id": "schedule-audit-admin",
+              "author_kind": "automated_actor",
+              "created_at": 1793016153.927159,
+              "body": "concurrent creator note"
+            },
+            {
+              "note_id": "9",
+              "schedule_id": "audit-seven-tools",
+              "author_id": "schedule-audit-worker",
+              "author_kind": "automated_actor",
+              "created_at": 1793016153.927362,
+              "body": "concurrent worker note"
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "path": "/mcp",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 18,
+      "method": "tools/call",
+      "params": {
+        "name": "masc_schedule_create",
+        "arguments": {
+          "schedule_id": "audit-recipient",
+          "keeper_name": "schedule-audit-worker",
+          "message": "future recipient request",
+          "due_in_sec": 3600,
+          "allow_unregistered_keeper": true
+        }
+      }
+    },
+    "status": 200,
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 18,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.64.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "{\"schedule_instance_id\":\"01a17817-478c-7000-b6fb-52b70a17c743\",\"schedule_id\":\"audit-recipient\",\"requested_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"scheduled_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"requested_at\":1793016153.996331,\"due_at\":1793019753.996331,\"expires_at\":null,\"payload\":{\"kind\":\"masc.keeper_wake\",\"body\":{\"result_delivery\":{\"policy\":\"none\"},\"keeper_name\":\"schedule-audit-worker\",\"message\":\"future recipient request\"}},\"status\":\"scheduled\",\"source\":\"operator_request\",\"recurrence\":{\"kind\":\"one_shot\"},\"cancellation\":null,\"due_at_iso\":\"2026-10-26T13:02:33Z\",\"next_due_at\":1793019753.996331,\"next_due_at_iso\":\"2026-10-26T13:02:33Z\",\"requested_at_iso\":\"2026-10-26T12:02:33Z\",\"recurrence_kind\":\"one_shot\",\"recurrence_summary\":\"one_shot\",\"payload_digest\":\"dcc1034df0f72451cb7262be5c359de9c870ef2ec24bf27aab3f3c03ef902909\",\"payload_kind\":\"masc.keeper_wake\",\"payload_support\":\"supported\",\"payload_dispatch_tool\":\"masc.keeper_wake\",\"payload_target\":\"keeper:schedule-audit-worker\",\"payload_summary\":\"future recipient request\",\"last_wake\":null}",
+              "status": "ok",
+              "tool": "masc_schedule_create"
+            },
+            "trace_id": "18",
+            "agent_id": "schedule-audit-admin",
+            "tool": "masc_schedule_create",
+            "duration_ms": 10,
+            "attempts": 1,
+            "timestamp": "2026-10-26T12:02:34Z"
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"schedule_instance_id\":\"01a17817-478c-7000-b6fb-52b70a17c743\",\"schedule_id\":\"audit-recipient\",\"requested_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"scheduled_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"requested_at\":1793016153.996331,\"due_at\":1793019753.996331,\"expires_at\":null,\"payload\":{\"kind\":\"masc.keeper_wake\",\"body\":{\"result_delivery\":{\"policy\":\"none\"},\"keeper_name\":\"schedule-audit-worker\",\"message\":\"future recipient request\"}},\"status\":\"scheduled\",\"source\":\"operator_request\",\"recurrence\":{\"kind\":\"one_shot\"},\"cancellation\":null,\"due_at_iso\":\"2026-10-26T13:02:33Z\",\"next_due_at\":1793019753.996331,\"next_due_at_iso\":\"2026-10-26T13:02:33Z\",\"requested_at_iso\":\"2026-10-26T12:02:33Z\",\"recurrence_kind\":\"one_shot\",\"recurrence_summary\":\"one_shot\",\"payload_digest\":\"dcc1034df0f72451cb7262be5c359de9c870ef2ec24bf27aab3f3c03ef902909\",\"payload_kind\":\"masc.keeper_wake\",\"payload_support\":\"supported\",\"payload_dispatch_tool\":\"masc.keeper_wake\",\"payload_target\":\"keeper:schedule-audit-worker\",\"payload_summary\":\"future recipient request\",\"last_wake\":null}"
+          }
+        ],
+        "isError": false,
+        "structuredContent": {
+          "schedule_instance_id": "01a17817-478c-7000-b6fb-52b70a17c743",
+          "schedule_id": "audit-recipient",
+          "requested_by": {
+            "id": "schedule-audit-admin",
+            "kind": "automated_actor",
+            "display_name": null
+          },
+          "scheduled_by": {
+            "id": "schedule-audit-admin",
+            "kind": "automated_actor",
+            "display_name": null
+          },
+          "requested_at": 1793016153.996331,
+          "due_at": 1793019753.996331,
+          "expires_at": null,
+          "payload": {
+            "kind": "masc.keeper_wake",
+            "body": {
+              "result_delivery": {
+                "policy": "none"
+              },
+              "keeper_name": "schedule-audit-worker",
+              "message": "future recipient request"
+            }
+          },
+          "status": "scheduled",
+          "source": "operator_request",
+          "recurrence": {
+            "kind": "one_shot"
+          },
+          "cancellation": null,
+          "due_at_iso": "2026-10-26T13:02:33Z",
+          "next_due_at": 1793019753.996331,
+          "next_due_at_iso": "2026-10-26T13:02:33Z",
+          "requested_at_iso": "2026-10-26T12:02:33Z",
+          "recurrence_kind": "one_shot",
+          "recurrence_summary": "one_shot",
+          "payload_digest": "dcc1034df0f72451cb7262be5c359de9c870ef2ec24bf27aab3f3c03ef902909",
+          "payload_kind": "masc.keeper_wake",
+          "payload_support": "supported",
+          "payload_dispatch_tool": "masc.keeper_wake",
+          "payload_target": "keeper:schedule-audit-worker",
+          "payload_summary": "future recipient request",
+          "last_wake": null
+        }
+      }
+    }
+  },
+  {
+    "path": "/mcp",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 19,
+      "method": "tools/call",
+      "params": {
+        "name": "masc_schedule_note_add",
+        "arguments": {
+          "schedule_id": "audit-recipient",
+          "body": "note before replacement"
+        }
+      }
+    },
+    "status": 200,
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 19,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.64.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "{\"status\":\"ok\",\"note\":{\"note_id\":\"11\",\"schedule_id\":\"audit-recipient\",\"author_id\":\"schedule-audit-admin\",\"author_kind\":\"automated_actor\",\"created_at\":1793016154.022371,\"body\":\"note before replacement\"},\"note_count\":1}",
+              "status": "ok",
+              "tool": "masc_schedule_note_add"
+            },
+            "trace_id": "19",
+            "agent_id": "schedule-audit-admin",
+            "tool": "masc_schedule_note_add",
+            "duration_ms": 9,
+            "attempts": 1,
+            "timestamp": "2026-10-26T12:02:34Z"
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"status\":\"ok\",\"note\":{\"note_id\":\"11\",\"schedule_id\":\"audit-recipient\",\"author_id\":\"schedule-audit-admin\",\"author_kind\":\"automated_actor\",\"created_at\":1793016154.022371,\"body\":\"note before replacement\"},\"note_count\":1}"
+          }
+        ],
+        "isError": false,
+        "structuredContent": {
+          "status": "ok",
+          "note": {
+            "note_id": "11",
+            "schedule_id": "audit-recipient",
+            "author_id": "schedule-audit-admin",
+            "author_kind": "automated_actor",
+            "created_at": 1793016154.022371,
+            "body": "note before replacement"
+          },
+          "note_count": 1
+        }
+      }
+    }
+  },
+  {
+    "path": "/mcp",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 20,
+      "method": "tools/call",
+      "params": {
+        "name": "masc_schedule_update",
+        "arguments": {
+          "schedule_id": "audit-recipient",
+          "keeper_name": "schedule-audit-worker",
+          "message": "recipient edits its own wake",
+          "allow_unregistered_keeper": true
+        }
+      }
+    },
+    "status": 200,
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 20,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.64.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "{\"schedule_instance_id\":\"01a17817-47be-7000-949a-635549a396b0\",\"schedule_id\":\"audit-recipient\",\"requested_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"scheduled_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"requested_at\":1793016154.045376,\"due_at\":1793019753.996331,\"expires_at\":null,\"payload\":{\"kind\":\"masc.keeper_wake\",\"body\":{\"result_delivery\":{\"policy\":\"none\"},\"keeper_name\":\"schedule-audit-worker\",\"message\":\"recipient edits its own wake\"}},\"status\":\"scheduled\",\"source\":\"operator_request\",\"recurrence\":{\"kind\":\"one_shot\"},\"cancellation\":null,\"due_at_iso\":\"2026-10-26T13:02:33Z\",\"next_due_at\":1793019753.996331,\"next_due_at_iso\":\"2026-10-26T13:02:33Z\",\"requested_at_iso\":\"2026-10-26T12:02:34Z\",\"recurrence_kind\":\"one_shot\",\"recurrence_summary\":\"one_shot\",\"payload_digest\":\"503b2aa89fb9c757090929be62dbd139fe747f1d2fc093e6d85a48232a1f9696\",\"payload_kind\":\"masc.keeper_wake\",\"payload_support\":\"supported\",\"payload_dispatch_tool\":\"masc.keeper_wake\",\"payload_target\":\"keeper:schedule-audit-worker\",\"payload_summary\":\"recipient edits its own wake\",\"last_wake\":null}",
+              "status": "ok",
+              "tool": "masc_schedule_update"
+            },
+            "trace_id": "20",
+            "agent_id": "schedule-audit-worker",
+            "tool": "masc_schedule_update",
+            "duration_ms": 10,
+            "attempts": 1,
+            "timestamp": "2026-10-26T12:02:34Z"
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"schedule_instance_id\":\"01a17817-47be-7000-949a-635549a396b0\",\"schedule_id\":\"audit-recipient\",\"requested_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"scheduled_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"requested_at\":1793016154.045376,\"due_at\":1793019753.996331,\"expires_at\":null,\"payload\":{\"kind\":\"masc.keeper_wake\",\"body\":{\"result_delivery\":{\"policy\":\"none\"},\"keeper_name\":\"schedule-audit-worker\",\"message\":\"recipient edits its own wake\"}},\"status\":\"scheduled\",\"source\":\"operator_request\",\"recurrence\":{\"kind\":\"one_shot\"},\"cancellation\":null,\"due_at_iso\":\"2026-10-26T13:02:33Z\",\"next_due_at\":1793019753.996331,\"next_due_at_iso\":\"2026-10-26T13:02:33Z\",\"requested_at_iso\":\"2026-10-26T12:02:34Z\",\"recurrence_kind\":\"one_shot\",\"recurrence_summary\":\"one_shot\",\"payload_digest\":\"503b2aa89fb9c757090929be62dbd139fe747f1d2fc093e6d85a48232a1f9696\",\"payload_kind\":\"masc.keeper_wake\",\"payload_support\":\"supported\",\"payload_dispatch_tool\":\"masc.keeper_wake\",\"payload_target\":\"keeper:schedule-audit-worker\",\"payload_summary\":\"recipient edits its own wake\",\"last_wake\":null}"
+          }
+        ],
+        "isError": false,
+        "structuredContent": {
+          "schedule_instance_id": "01a17817-47be-7000-949a-635549a396b0",
+          "schedule_id": "audit-recipient",
+          "requested_by": {
+            "id": "schedule-audit-admin",
+            "kind": "automated_actor",
+            "display_name": null
+          },
+          "scheduled_by": {
+            "id": "schedule-audit-admin",
+            "kind": "automated_actor",
+            "display_name": null
+          },
+          "requested_at": 1793016154.045376,
+          "due_at": 1793019753.996331,
+          "expires_at": null,
+          "payload": {
+            "kind": "masc.keeper_wake",
+            "body": {
+              "result_delivery": {
+                "policy": "none"
+              },
+              "keeper_name": "schedule-audit-worker",
+              "message": "recipient edits its own wake"
+            }
+          },
+          "status": "scheduled",
+          "source": "operator_request",
+          "recurrence": {
+            "kind": "one_shot"
+          },
+          "cancellation": null,
+          "due_at_iso": "2026-10-26T13:02:33Z",
+          "next_due_at": 1793019753.996331,
+          "next_due_at_iso": "2026-10-26T13:02:33Z",
+          "requested_at_iso": "2026-10-26T12:02:34Z",
+          "recurrence_kind": "one_shot",
+          "recurrence_summary": "one_shot",
+          "payload_digest": "503b2aa89fb9c757090929be62dbd139fe747f1d2fc093e6d85a48232a1f9696",
+          "payload_kind": "masc.keeper_wake",
+          "payload_support": "supported",
+          "payload_dispatch_tool": "masc.keeper_wake",
+          "payload_target": "keeper:schedule-audit-worker",
+          "payload_summary": "recipient edits its own wake",
+          "last_wake": null
+        }
+      }
+    }
+  },
+  {
+    "path": "/mcp",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 21,
+      "method": "tools/call",
+      "params": {
+        "name": "masc_schedule_notes_list",
+        "arguments": {
+          "schedule_id": "audit-recipient"
+        }
+      }
+    },
+    "status": 200,
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 21,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.64.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "{\"status\":\"ok\",\"schedule_id\":\"audit-recipient\",\"limit\":50,\"notes\":[{\"note_id\":\"11\",\"schedule_id\":\"audit-recipient\",\"author_id\":\"schedule-audit-admin\",\"author_kind\":\"automated_actor\",\"created_at\":1793016154.022371,\"body\":\"note before replacement\"}]}",
+              "status": "ok",
+              "tool": "masc_schedule_notes_list"
+            },
+            "trace_id": "21",
+            "agent_id": "schedule-audit-admin",
+            "tool": "masc_schedule_notes_list",
+            "duration_ms": 2,
+            "attempts": 1,
+            "timestamp": "2026-10-26T12:02:34Z"
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"status\":\"ok\",\"schedule_id\":\"audit-recipient\",\"limit\":50,\"notes\":[{\"note_id\":\"11\",\"schedule_id\":\"audit-recipient\",\"author_id\":\"schedule-audit-admin\",\"author_kind\":\"automated_actor\",\"created_at\":1793016154.022371,\"body\":\"note before replacement\"}]}"
+          }
+        ],
+        "isError": false,
+        "structuredContent": {
+          "status": "ok",
+          "schedule_id": "audit-recipient",
+          "limit": 50,
+          "notes": [
+            {
+              "note_id": "11",
+              "schedule_id": "audit-recipient",
+              "author_id": "schedule-audit-admin",
+              "author_kind": "automated_actor",
+              "created_at": 1793016154.022371,
+              "body": "note before replacement"
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "path": "/mcp",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 22,
+      "method": "tools/call",
+      "params": {
+        "name": "masc_schedule_update",
+        "arguments": {
+          "schedule_id": "audit-recipient",
+          "keeper_name": "audit-other-recipient",
+          "message": "forbidden recipient retarget",
+          "allow_unregistered_keeper": true
+        }
+      }
+    },
+    "status": 200,
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 22,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.64.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "schedule audit-recipient was scheduled by schedule-audit-admin and would not wake schedule-audit-worker; a caller changes only the schedules it made or the ones that wake it",
+              "status": "error",
+              "tool": "masc_schedule_update"
+            },
+            "trace_id": "22",
+            "agent_id": "schedule-audit-worker",
+            "tool": "masc_schedule_update",
+            "duration_ms": 2,
+            "attempts": 1,
+            "timestamp": "2026-10-26T12:02:34Z",
+            "failure_class": "workflow_rejection"
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "schedule audit-recipient was scheduled by schedule-audit-admin and would not wake schedule-audit-worker; a caller changes only the schedules it made or the ones that wake it"
+          }
+        ],
+        "isError": true,
+        "structuredContent": {
+          "status": "error",
+          "message": "schedule audit-recipient was scheduled by schedule-audit-admin and would not wake schedule-audit-worker; a caller changes only the schedules it made or the ones that wake it",
+          "error_kind": "not_schedule_owner",
+          "schedule_id": "audit-recipient",
+          "caller": "schedule-audit-worker",
+          "scheduled_by_id": "schedule-audit-admin",
+          "wake_target": "audit-other-recipient"
+        }
+      }
+    }
+  },
+  {
+    "path": "/mcp",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 23,
+      "method": "tools/call",
+      "params": {
+        "name": "masc_schedule_cancel",
+        "arguments": {
+          "schedule_id": "audit-recipient",
+          "reason": "recipient cancels its wake"
+        }
+      }
+    },
+    "status": 200,
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 23,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.64.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "{\"status\":\"ok\",\"schedule\":{\"schedule_instance_id\":\"01a17817-47be-7000-949a-635549a396b0\",\"schedule_id\":\"audit-recipient\",\"requested_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"scheduled_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"requested_at\":1793016154.045376,\"due_at\":1793019753.996331,\"expires_at\":null,\"payload\":{\"kind\":\"masc.keeper_wake\",\"body\":{\"result_delivery\":{\"policy\":\"none\"},\"keeper_name\":\"schedule-audit-worker\",\"message\":\"recipient edits its own wake\"}},\"status\":\"cancelled\",\"source\":\"operator_request\",\"recurrence\":{\"kind\":\"one_shot\"},\"cancellation\":{\"cancelled_by\":{\"id\":\"schedule-audit-worker\",\"kind\":\"automated_actor\",\"display_name\":null},\"reason\":\"recipient cancels its wake\"},\"due_at_iso\":\"2026-10-26T13:02:33Z\",\"next_due_at\":null,\"next_due_at_iso\":null,\"requested_at_iso\":\"2026-10-26T12:02:34Z\",\"recurrence_kind\":\"one_shot\",\"recurrence_summary\":\"one_shot\",\"payload_digest\":\"503b2aa89fb9c757090929be62dbd139fe747f1d2fc093e6d85a48232a1f9696\",\"payload_kind\":\"masc.keeper_wake\",\"payload_support\":\"supported\",\"payload_dispatch_tool\":\"masc.keeper_wake\",\"payload_target\":\"keeper:schedule-audit-worker\",\"payload_summary\":\"recipient edits its own wake\",\"last_wake\":null},\"cancelled_by\":{\"id\":\"schedule-audit-worker\",\"kind\":\"automated_actor\"},\"reason\":\"recipient cancels its wake\"}",
+              "status": "ok",
+              "tool": "masc_schedule_cancel"
+            },
+            "trace_id": "23",
+            "agent_id": "schedule-audit-worker",
+            "tool": "masc_schedule_cancel",
+            "duration_ms": 11,
+            "attempts": 1,
+            "timestamp": "2026-10-26T12:02:34Z"
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"status\":\"ok\",\"schedule\":{\"schedule_instance_id\":\"01a17817-47be-7000-949a-635549a396b0\",\"schedule_id\":\"audit-recipient\",\"requested_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"scheduled_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"requested_at\":1793016154.045376,\"due_at\":1793019753.996331,\"expires_at\":null,\"payload\":{\"kind\":\"masc.keeper_wake\",\"body\":{\"result_delivery\":{\"policy\":\"none\"},\"keeper_name\":\"schedule-audit-worker\",\"message\":\"recipient edits its own wake\"}},\"status\":\"cancelled\",\"source\":\"operator_request\",\"recurrence\":{\"kind\":\"one_shot\"},\"cancellation\":{\"cancelled_by\":{\"id\":\"schedule-audit-worker\",\"kind\":\"automated_actor\",\"display_name\":null},\"reason\":\"recipient cancels its wake\"},\"due_at_iso\":\"2026-10-26T13:02:33Z\",\"next_due_at\":null,\"next_due_at_iso\":null,\"requested_at_iso\":\"2026-10-26T12:02:34Z\",\"recurrence_kind\":\"one_shot\",\"recurrence_summary\":\"one_shot\",\"payload_digest\":\"503b2aa89fb9c757090929be62dbd139fe747f1d2fc093e6d85a48232a1f9696\",\"payload_kind\":\"masc.keeper_wake\",\"payload_support\":\"supported\",\"payload_dispatch_tool\":\"masc.keeper_wake\",\"payload_target\":\"keeper:schedule-audit-worker\",\"payload_summary\":\"recipient edits its own wake\",\"last_wake\":null},\"cancelled_by\":{\"id\":\"schedule-audit-worker\",\"kind\":\"automated_actor\"},\"reason\":\"recipient cancels its wake\"}"
+          }
+        ],
+        "isError": false,
+        "structuredContent": {
+          "status": "ok",
+          "schedule": {
+            "schedule_instance_id": "01a17817-47be-7000-949a-635549a396b0",
+            "schedule_id": "audit-recipient",
+            "requested_by": {
+              "id": "schedule-audit-admin",
+              "kind": "automated_actor",
+              "display_name": null
+            },
+            "scheduled_by": {
+              "id": "schedule-audit-admin",
+              "kind": "automated_actor",
+              "display_name": null
+            },
+            "requested_at": 1793016154.045376,
+            "due_at": 1793019753.996331,
+            "expires_at": null,
+            "payload": {
+              "kind": "masc.keeper_wake",
+              "body": {
+                "result_delivery": {
+                  "policy": "none"
+                },
+                "keeper_name": "schedule-audit-worker",
+                "message": "recipient edits its own wake"
+              }
+            },
+            "status": "cancelled",
+            "source": "operator_request",
+            "recurrence": {
+              "kind": "one_shot"
+            },
+            "cancellation": {
+              "cancelled_by": {
+                "id": "schedule-audit-worker",
+                "kind": "automated_actor",
+                "display_name": null
+              },
+              "reason": "recipient cancels its wake"
+            },
+            "due_at_iso": "2026-10-26T13:02:33Z",
+            "next_due_at": null,
+            "next_due_at_iso": null,
+            "requested_at_iso": "2026-10-26T12:02:34Z",
+            "recurrence_kind": "one_shot",
+            "recurrence_summary": "one_shot",
+            "payload_digest": "503b2aa89fb9c757090929be62dbd139fe747f1d2fc093e6d85a48232a1f9696",
+            "payload_kind": "masc.keeper_wake",
+            "payload_support": "supported",
+            "payload_dispatch_tool": "masc.keeper_wake",
+            "payload_target": "keeper:schedule-audit-worker",
+            "payload_summary": "recipient edits its own wake",
+            "last_wake": null
+          },
+          "cancelled_by": {
+            "id": "schedule-audit-worker",
+            "kind": "automated_actor"
+          },
+          "reason": "recipient cancels its wake"
+        }
+      }
+    }
+  },
+  {
+    "path": "/mcp",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 24,
+      "method": "tools/call",
+      "params": {
+        "name": "masc_schedule_create",
+        "arguments": {
+          "schedule_id": "audit-page-1",
+          "keeper_name": "audit-page-owner",
+          "message": "future page request",
+          "due_in_sec": 3600,
+          "allow_unregistered_keeper": true
+        }
+      }
+    },
+    "status": 200,
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 24,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.64.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "{\"schedule_instance_id\":\"01a17817-4814-7000-a8f3-b4ef13e73523\",\"schedule_id\":\"audit-page-1\",\"requested_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"scheduled_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"requested_at\":1793016154.132205,\"due_at\":1793019754.132205,\"expires_at\":null,\"payload\":{\"kind\":\"masc.keeper_wake\",\"body\":{\"result_delivery\":{\"policy\":\"none\"},\"keeper_name\":\"audit-page-owner\",\"message\":\"future page request\"}},\"status\":\"scheduled\",\"source\":\"operator_request\",\"recurrence\":{\"kind\":\"one_shot\"},\"cancellation\":null,\"due_at_iso\":\"2026-10-26T13:02:34Z\",\"next_due_at\":1793019754.132205,\"next_due_at_iso\":\"2026-10-26T13:02:34Z\",\"requested_at_iso\":\"2026-10-26T12:02:34Z\",\"recurrence_kind\":\"one_shot\",\"recurrence_summary\":\"one_shot\",\"payload_digest\":\"1e4dcada5317a2503a319d344f59dcb2fad8ef20a0d28df7ad06972cbfef23fe\",\"payload_kind\":\"masc.keeper_wake\",\"payload_support\":\"supported\",\"payload_dispatch_tool\":\"masc.keeper_wake\",\"payload_target\":\"keeper:audit-page-owner\",\"payload_summary\":\"future page request\",\"last_wake\":null}",
+              "status": "ok",
+              "tool": "masc_schedule_create"
+            },
+            "trace_id": "24",
+            "agent_id": "schedule-audit-admin",
+            "tool": "masc_schedule_create",
+            "duration_ms": 11,
+            "attempts": 1,
+            "timestamp": "2026-10-26T12:02:34Z"
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"schedule_instance_id\":\"01a17817-4814-7000-a8f3-b4ef13e73523\",\"schedule_id\":\"audit-page-1\",\"requested_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"scheduled_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"requested_at\":1793016154.132205,\"due_at\":1793019754.132205,\"expires_at\":null,\"payload\":{\"kind\":\"masc.keeper_wake\",\"body\":{\"result_delivery\":{\"policy\":\"none\"},\"keeper_name\":\"audit-page-owner\",\"message\":\"future page request\"}},\"status\":\"scheduled\",\"source\":\"operator_request\",\"recurrence\":{\"kind\":\"one_shot\"},\"cancellation\":null,\"due_at_iso\":\"2026-10-26T13:02:34Z\",\"next_due_at\":1793019754.132205,\"next_due_at_iso\":\"2026-10-26T13:02:34Z\",\"requested_at_iso\":\"2026-10-26T12:02:34Z\",\"recurrence_kind\":\"one_shot\",\"recurrence_summary\":\"one_shot\",\"payload_digest\":\"1e4dcada5317a2503a319d344f59dcb2fad8ef20a0d28df7ad06972cbfef23fe\",\"payload_kind\":\"masc.keeper_wake\",\"payload_support\":\"supported\",\"payload_dispatch_tool\":\"masc.keeper_wake\",\"payload_target\":\"keeper:audit-page-owner\",\"payload_summary\":\"future page request\",\"last_wake\":null}"
+          }
+        ],
+        "isError": false,
+        "structuredContent": {
+          "schedule_instance_id": "01a17817-4814-7000-a8f3-b4ef13e73523",
+          "schedule_id": "audit-page-1",
+          "requested_by": {
+            "id": "schedule-audit-admin",
+            "kind": "automated_actor",
+            "display_name": null
+          },
+          "scheduled_by": {
+            "id": "schedule-audit-admin",
+            "kind": "automated_actor",
+            "display_name": null
+          },
+          "requested_at": 1793016154.132205,
+          "due_at": 1793019754.132205,
+          "expires_at": null,
+          "payload": {
+            "kind": "masc.keeper_wake",
+            "body": {
+              "result_delivery": {
+                "policy": "none"
+              },
+              "keeper_name": "audit-page-owner",
+              "message": "future page request"
+            }
+          },
+          "status": "scheduled",
+          "source": "operator_request",
+          "recurrence": {
+            "kind": "one_shot"
+          },
+          "cancellation": null,
+          "due_at_iso": "2026-10-26T13:02:34Z",
+          "next_due_at": 1793019754.132205,
+          "next_due_at_iso": "2026-10-26T13:02:34Z",
+          "requested_at_iso": "2026-10-26T12:02:34Z",
+          "recurrence_kind": "one_shot",
+          "recurrence_summary": "one_shot",
+          "payload_digest": "1e4dcada5317a2503a319d344f59dcb2fad8ef20a0d28df7ad06972cbfef23fe",
+          "payload_kind": "masc.keeper_wake",
+          "payload_support": "supported",
+          "payload_dispatch_tool": "masc.keeper_wake",
+          "payload_target": "keeper:audit-page-owner",
+          "payload_summary": "future page request",
+          "last_wake": null
+        }
+      }
+    }
+  },
+  {
+    "path": "/mcp",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 25,
+      "method": "tools/call",
+      "params": {
+        "name": "masc_schedule_create",
+        "arguments": {
+          "schedule_id": "audit-page-2",
+          "keeper_name": "audit-page-owner",
+          "message": "future page request",
+          "due_in_sec": 3600,
+          "allow_unregistered_keeper": true
+        }
+      }
+    },
+    "status": 200,
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 25,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.64.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "{\"schedule_instance_id\":\"01a17817-482d-7000-a244-42e3f09d8d94\",\"schedule_id\":\"audit-page-2\",\"requested_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"scheduled_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"requested_at\":1793016154.157896,\"due_at\":1793019754.157896,\"expires_at\":null,\"payload\":{\"kind\":\"masc.keeper_wake\",\"body\":{\"result_delivery\":{\"policy\":\"none\"},\"keeper_name\":\"audit-page-owner\",\"message\":\"future page request\"}},\"status\":\"scheduled\",\"source\":\"operator_request\",\"recurrence\":{\"kind\":\"one_shot\"},\"cancellation\":null,\"due_at_iso\":\"2026-10-26T13:02:34Z\",\"next_due_at\":1793019754.157896,\"next_due_at_iso\":\"2026-10-26T13:02:34Z\",\"requested_at_iso\":\"2026-10-26T12:02:34Z\",\"recurrence_kind\":\"one_shot\",\"recurrence_summary\":\"one_shot\",\"payload_digest\":\"1e4dcada5317a2503a319d344f59dcb2fad8ef20a0d28df7ad06972cbfef23fe\",\"payload_kind\":\"masc.keeper_wake\",\"payload_support\":\"supported\",\"payload_dispatch_tool\":\"masc.keeper_wake\",\"payload_target\":\"keeper:audit-page-owner\",\"payload_summary\":\"future page request\",\"last_wake\":null}",
+              "status": "ok",
+              "tool": "masc_schedule_create"
+            },
+            "trace_id": "25",
+            "agent_id": "schedule-audit-admin",
+            "tool": "masc_schedule_create",
+            "duration_ms": 9,
+            "attempts": 1,
+            "timestamp": "2026-10-26T12:02:34Z"
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"schedule_instance_id\":\"01a17817-482d-7000-a244-42e3f09d8d94\",\"schedule_id\":\"audit-page-2\",\"requested_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"scheduled_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"requested_at\":1793016154.157896,\"due_at\":1793019754.157896,\"expires_at\":null,\"payload\":{\"kind\":\"masc.keeper_wake\",\"body\":{\"result_delivery\":{\"policy\":\"none\"},\"keeper_name\":\"audit-page-owner\",\"message\":\"future page request\"}},\"status\":\"scheduled\",\"source\":\"operator_request\",\"recurrence\":{\"kind\":\"one_shot\"},\"cancellation\":null,\"due_at_iso\":\"2026-10-26T13:02:34Z\",\"next_due_at\":1793019754.157896,\"next_due_at_iso\":\"2026-10-26T13:02:34Z\",\"requested_at_iso\":\"2026-10-26T12:02:34Z\",\"recurrence_kind\":\"one_shot\",\"recurrence_summary\":\"one_shot\",\"payload_digest\":\"1e4dcada5317a2503a319d344f59dcb2fad8ef20a0d28df7ad06972cbfef23fe\",\"payload_kind\":\"masc.keeper_wake\",\"payload_support\":\"supported\",\"payload_dispatch_tool\":\"masc.keeper_wake\",\"payload_target\":\"keeper:audit-page-owner\",\"payload_summary\":\"future page request\",\"last_wake\":null}"
+          }
+        ],
+        "isError": false,
+        "structuredContent": {
+          "schedule_instance_id": "01a17817-482d-7000-a244-42e3f09d8d94",
+          "schedule_id": "audit-page-2",
+          "requested_by": {
+            "id": "schedule-audit-admin",
+            "kind": "automated_actor",
+            "display_name": null
+          },
+          "scheduled_by": {
+            "id": "schedule-audit-admin",
+            "kind": "automated_actor",
+            "display_name": null
+          },
+          "requested_at": 1793016154.157896,
+          "due_at": 1793019754.157896,
+          "expires_at": null,
+          "payload": {
+            "kind": "masc.keeper_wake",
+            "body": {
+              "result_delivery": {
+                "policy": "none"
+              },
+              "keeper_name": "audit-page-owner",
+              "message": "future page request"
+            }
+          },
+          "status": "scheduled",
+          "source": "operator_request",
+          "recurrence": {
+            "kind": "one_shot"
+          },
+          "cancellation": null,
+          "due_at_iso": "2026-10-26T13:02:34Z",
+          "next_due_at": 1793019754.157896,
+          "next_due_at_iso": "2026-10-26T13:02:34Z",
+          "requested_at_iso": "2026-10-26T12:02:34Z",
+          "recurrence_kind": "one_shot",
+          "recurrence_summary": "one_shot",
+          "payload_digest": "1e4dcada5317a2503a319d344f59dcb2fad8ef20a0d28df7ad06972cbfef23fe",
+          "payload_kind": "masc.keeper_wake",
+          "payload_support": "supported",
+          "payload_dispatch_tool": "masc.keeper_wake",
+          "payload_target": "keeper:audit-page-owner",
+          "payload_summary": "future page request",
+          "last_wake": null
+        }
+      }
+    }
+  },
+  {
+    "path": "/mcp",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 26,
+      "method": "tools/call",
+      "params": {
+        "name": "masc_schedule_create",
+        "arguments": {
+          "schedule_id": "audit-page-3",
+          "keeper_name": "audit-page-owner",
+          "message": "future page request",
+          "due_in_sec": 3600,
+          "allow_unregistered_keeper": true
+        }
+      }
+    },
+    "status": 200,
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 26,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.64.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "{\"schedule_instance_id\":\"01a17817-4841-7000-8685-67df9ac46898\",\"schedule_id\":\"audit-page-3\",\"requested_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"scheduled_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"requested_at\":1793016154.177909,\"due_at\":1793019754.177909,\"expires_at\":null,\"payload\":{\"kind\":\"masc.keeper_wake\",\"body\":{\"result_delivery\":{\"policy\":\"none\"},\"keeper_name\":\"audit-page-owner\",\"message\":\"future page request\"}},\"status\":\"scheduled\",\"source\":\"operator_request\",\"recurrence\":{\"kind\":\"one_shot\"},\"cancellation\":null,\"due_at_iso\":\"2026-10-26T13:02:34Z\",\"next_due_at\":1793019754.177909,\"next_due_at_iso\":\"2026-10-26T13:02:34Z\",\"requested_at_iso\":\"2026-10-26T12:02:34Z\",\"recurrence_kind\":\"one_shot\",\"recurrence_summary\":\"one_shot\",\"payload_digest\":\"1e4dcada5317a2503a319d344f59dcb2fad8ef20a0d28df7ad06972cbfef23fe\",\"payload_kind\":\"masc.keeper_wake\",\"payload_support\":\"supported\",\"payload_dispatch_tool\":\"masc.keeper_wake\",\"payload_target\":\"keeper:audit-page-owner\",\"payload_summary\":\"future page request\",\"last_wake\":null}",
+              "status": "ok",
+              "tool": "masc_schedule_create"
+            },
+            "trace_id": "26",
+            "agent_id": "schedule-audit-admin",
+            "tool": "masc_schedule_create",
+            "duration_ms": 8,
+            "attempts": 1,
+            "timestamp": "2026-10-26T12:02:34Z"
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"schedule_instance_id\":\"01a17817-4841-7000-8685-67df9ac46898\",\"schedule_id\":\"audit-page-3\",\"requested_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"scheduled_by\":{\"id\":\"schedule-audit-admin\",\"kind\":\"automated_actor\",\"display_name\":null},\"requested_at\":1793016154.177909,\"due_at\":1793019754.177909,\"expires_at\":null,\"payload\":{\"kind\":\"masc.keeper_wake\",\"body\":{\"result_delivery\":{\"policy\":\"none\"},\"keeper_name\":\"audit-page-owner\",\"message\":\"future page request\"}},\"status\":\"scheduled\",\"source\":\"operator_request\",\"recurrence\":{\"kind\":\"one_shot\"},\"cancellation\":null,\"due_at_iso\":\"2026-10-26T13:02:34Z\",\"next_due_at\":1793019754.177909,\"next_due_at_iso\":\"2026-10-26T13:02:34Z\",\"requested_at_iso\":\"2026-10-26T12:02:34Z\",\"recurrence_kind\":\"one_shot\",\"recurrence_summary\":\"one_shot\",\"payload_digest\":\"1e4dcada5317a2503a319d344f59dcb2fad8ef20a0d28df7ad06972cbfef23fe\",\"payload_kind\":\"masc.keeper_wake\",\"payload_support\":\"supported\",\"payload_dispatch_tool\":\"masc.keeper_wake\",\"payload_target\":\"keeper:audit-page-owner\",\"payload_summary\":\"future page request\",\"last_wake\":null}"
+          }
+        ],
+        "isError": false,
+        "structuredContent": {
+          "schedule_instance_id": "01a17817-4841-7000-8685-67df9ac46898",
+          "schedule_id": "audit-page-3",
+          "requested_by": {
+            "id": "schedule-audit-admin",
+            "kind": "automated_actor",
+            "display_name": null
+          },
+          "scheduled_by": {
+            "id": "schedule-audit-admin",
+            "kind": "automated_actor",
+            "display_name": null
+          },
+          "requested_at": 1793016154.177909,
+          "due_at": 1793019754.177909,
+          "expires_at": null,
+          "payload": {
+            "kind": "masc.keeper_wake",
+            "body": {
+              "result_delivery": {
+                "policy": "none"
+              },
+              "keeper_name": "audit-page-owner",
+              "message": "future page request"
+            }
+          },
+          "status": "scheduled",
+          "source": "operator_request",
+          "recurrence": {
+            "kind": "one_shot"
+          },
+          "cancellation": null,
+          "due_at_iso": "2026-10-26T13:02:34Z",
+          "next_due_at": 1793019754.177909,
+          "next_due_at_iso": "2026-10-26T13:02:34Z",
+          "requested_at_iso": "2026-10-26T12:02:34Z",
+          "recurrence_kind": "one_shot",
+          "recurrence_summary": "one_shot",
+          "payload_digest": "1e4dcada5317a2503a319d344f59dcb2fad8ef20a0d28df7ad06972cbfef23fe",
+          "payload_kind": "masc.keeper_wake",
+          "payload_support": "supported",
+          "payload_dispatch_tool": "masc.keeper_wake",
+          "payload_target": "keeper:audit-page-owner",
+          "payload_summary": "future page request",
+          "last_wake": null
+        }
+      }
+    }
+  },
+  {
+    "path": "/mcp",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 27,
+      "method": "tools/call",
+      "params": {
+        "name": "masc_schedule_list",
+        "arguments": {
+          "owner": "wake_target",
+          "owner_name": "audit-page-owner",
+          "limit": 1
+        }
+      }
+    },
+    "status": 200,
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 27,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.64.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "{\"status\":\"ok\",\"owner\":\"wake_target\",\"owner_name\":\"audit-page-owner\",\"limit\":1,\"schedules\":[{\"schedule_id\":\"audit-page-1\",\"status\":\"scheduled\",\"due_at_iso\":\"2026-10-26T13:02:34Z\",\"recurrence_summary\":\"one_shot\",\"wake_target\":\"audit-page-owner\",\"scheduled_by\":\"schedule-audit-admin\",\"summary\":\"future page request\",\"last_wake_status\":null}],\"next_cursor\":\"eyJhZnRlciI6ImF1ZGl0LXBhZ2UtMSIsIm93bmVyIjoid2FrZV90YXJnZXQiLCJvd25lcl9uYW1lIjoiYXVkaXQtcGFnZS1vd25lciIsInN0YXR1cyI6bnVsbH0\"}",
+              "status": "ok",
+              "tool": "masc_schedule_list"
+            },
+            "trace_id": "27",
+            "agent_id": "schedule-audit-admin",
+            "tool": "masc_schedule_list",
+            "duration_ms": 2,
+            "attempts": 1,
+            "timestamp": "2026-10-26T12:02:34Z"
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"status\":\"ok\",\"owner\":\"wake_target\",\"owner_name\":\"audit-page-owner\",\"limit\":1,\"schedules\":[{\"schedule_id\":\"audit-page-1\",\"status\":\"scheduled\",\"due_at_iso\":\"2026-10-26T13:02:34Z\",\"recurrence_summary\":\"one_shot\",\"wake_target\":\"audit-page-owner\",\"scheduled_by\":\"schedule-audit-admin\",\"summary\":\"future page request\",\"last_wake_status\":null}],\"next_cursor\":\"eyJhZnRlciI6ImF1ZGl0LXBhZ2UtMSIsIm93bmVyIjoid2FrZV90YXJnZXQiLCJvd25lcl9uYW1lIjoiYXVkaXQtcGFnZS1vd25lciIsInN0YXR1cyI6bnVsbH0\"}"
+          }
+        ],
+        "isError": false,
+        "structuredContent": {
+          "status": "ok",
+          "owner": "wake_target",
+          "owner_name": "audit-page-owner",
+          "limit": 1,
+          "schedules": [
+            {
+              "schedule_id": "audit-page-1",
+              "status": "scheduled",
+              "due_at_iso": "2026-10-26T13:02:34Z",
+              "recurrence_summary": "one_shot",
+              "wake_target": "audit-page-owner",
+              "scheduled_by": "schedule-audit-admin",
+              "summary": "future page request",
+              "last_wake_status": null
+            }
+          ],
+          "next_cursor": "eyJhZnRlciI6ImF1ZGl0LXBhZ2UtMSIsIm93bmVyIjoid2FrZV90YXJnZXQiLCJvd25lcl9uYW1lIjoiYXVkaXQtcGFnZS1vd25lciIsInN0YXR1cyI6bnVsbH0"
+        }
+      }
+    }
+  },
+  {
+    "path": "/mcp",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 28,
+      "method": "tools/call",
+      "params": {
+        "name": "masc_schedule_list",
+        "arguments": {
+          "owner": "wake_target",
+          "owner_name": "audit-page-owner",
+          "limit": 1,
+          "status": "active",
+          "cursor": "eyJhZnRlciI6ImF1ZGl0LXBhZ2UtMSIsIm93bmVyIjoid2FrZV90YXJnZXQiLCJvd25lcl9uYW1lIjoiYXVkaXQtcGFnZS1vd25lciIsInN0YXR1cyI6bnVsbH0"
+        }
+      }
+    },
+    "status": 200,
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 28,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.64.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "this cursor belongs to a listing with owner=wake_target owner_name=audit-page-owner status=any; send those filters with it, or list again without cursor",
+              "status": "error",
+              "tool": "masc_schedule_list"
+            },
+            "trace_id": "28",
+            "agent_id": "schedule-audit-admin",
+            "tool": "masc_schedule_list",
+            "duration_ms": 1,
+            "attempts": 1,
+            "timestamp": "2026-10-26T12:02:34Z",
+            "failure_class": "workflow_rejection"
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "this cursor belongs to a listing with owner=wake_target owner_name=audit-page-owner status=any; send those filters with it, or list again without cursor"
+          }
+        ],
+        "isError": true,
+        "structuredContent": {
+          "status": "error",
+          "message": "this cursor belongs to a listing with owner=wake_target owner_name=audit-page-owner status=any; send those filters with it, or list again without cursor",
+          "error_kind": "cursor_mismatch",
+          "cursor_owner": "wake_target",
+          "cursor_owner_name": "audit-page-owner",
+          "cursor_status": null
+        }
+      }
+    }
+  },
+  {
+    "path": "/mcp",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 29,
+      "method": "tools/call",
+      "params": {
+        "name": "masc_schedule_list",
+        "arguments": {
+          "owner": "wake_target",
+          "owner_name": "audit-page-owner",
+          "limit": 1,
+          "cursor": "eyJhZnRlciI6ImF1ZGl0LXBhZ2UtMSIsIm93bmVyIjoid2FrZV90YXJnZXQiLCJvd25lcl9uYW1lIjoiYXVkaXQtcGFnZS1vd25lciIsInN0YXR1cyI6bnVsbH0"
+        }
+      }
+    },
+    "status": 200,
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 29,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.64.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "{\"status\":\"ok\",\"owner\":\"wake_target\",\"owner_name\":\"audit-page-owner\",\"limit\":1,\"schedules\":[{\"schedule_id\":\"audit-page-2\",\"status\":\"scheduled\",\"due_at_iso\":\"2026-10-26T13:02:34Z\",\"recurrence_summary\":\"one_shot\",\"wake_target\":\"audit-page-owner\",\"scheduled_by\":\"schedule-audit-admin\",\"summary\":\"future page request\",\"last_wake_status\":null}],\"next_cursor\":\"eyJhZnRlciI6ImF1ZGl0LXBhZ2UtMiIsIm93bmVyIjoid2FrZV90YXJnZXQiLCJvd25lcl9uYW1lIjoiYXVkaXQtcGFnZS1vd25lciIsInN0YXR1cyI6bnVsbH0\"}",
+              "status": "ok",
+              "tool": "masc_schedule_list"
+            },
+            "trace_id": "29",
+            "agent_id": "schedule-audit-admin",
+            "tool": "masc_schedule_list",
+            "duration_ms": 1,
+            "attempts": 1,
+            "timestamp": "2026-10-26T12:02:34Z"
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"status\":\"ok\",\"owner\":\"wake_target\",\"owner_name\":\"audit-page-owner\",\"limit\":1,\"schedules\":[{\"schedule_id\":\"audit-page-2\",\"status\":\"scheduled\",\"due_at_iso\":\"2026-10-26T13:02:34Z\",\"recurrence_summary\":\"one_shot\",\"wake_target\":\"audit-page-owner\",\"scheduled_by\":\"schedule-audit-admin\",\"summary\":\"future page request\",\"last_wake_status\":null}],\"next_cursor\":\"eyJhZnRlciI6ImF1ZGl0LXBhZ2UtMiIsIm93bmVyIjoid2FrZV90YXJnZXQiLCJvd25lcl9uYW1lIjoiYXVkaXQtcGFnZS1vd25lciIsInN0YXR1cyI6bnVsbH0\"}"
+          }
+        ],
+        "isError": false,
+        "structuredContent": {
+          "status": "ok",
+          "owner": "wake_target",
+          "owner_name": "audit-page-owner",
+          "limit": 1,
+          "schedules": [
+            {
+              "schedule_id": "audit-page-2",
+              "status": "scheduled",
+              "due_at_iso": "2026-10-26T13:02:34Z",
+              "recurrence_summary": "one_shot",
+              "wake_target": "audit-page-owner",
+              "scheduled_by": "schedule-audit-admin",
+              "summary": "future page request",
+              "last_wake_status": null
+            }
+          ],
+          "next_cursor": "eyJhZnRlciI6ImF1ZGl0LXBhZ2UtMiIsIm93bmVyIjoid2FrZV90YXJnZXQiLCJvd25lcl9uYW1lIjoiYXVkaXQtcGFnZS1vd25lciIsInN0YXR1cyI6bnVsbH0"
+        }
+      }
+    }
+  },
+  {
+    "path": "/mcp",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 30,
+      "method": "tools/call",
+      "params": {
+        "name": "masc_schedule_list",
+        "arguments": {
+          "owner": "wake_target",
+          "owner_name": "audit-page-owner",
+          "limit": 1,
+          "cursor": "eyJhZnRlciI6ImF1ZGl0LXBhZ2UtMiIsIm93bmVyIjoid2FrZV90YXJnZXQiLCJvd25lcl9uYW1lIjoiYXVkaXQtcGFnZS1vd25lciIsInN0YXR1cyI6bnVsbH0"
+        }
+      }
+    },
+    "status": 200,
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 30,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.64.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "{\"status\":\"ok\",\"owner\":\"wake_target\",\"owner_name\":\"audit-page-owner\",\"limit\":1,\"schedules\":[{\"schedule_id\":\"audit-page-3\",\"status\":\"scheduled\",\"due_at_iso\":\"2026-10-26T13:02:34Z\",\"recurrence_summary\":\"one_shot\",\"wake_target\":\"audit-page-owner\",\"scheduled_by\":\"schedule-audit-admin\",\"summary\":\"future page request\",\"last_wake_status\":null}]}",
+              "status": "ok",
+              "tool": "masc_schedule_list"
+            },
+            "trace_id": "30",
+            "agent_id": "schedule-audit-admin",
+            "tool": "masc_schedule_list",
+            "duration_ms": 1,
+            "attempts": 1,
+            "timestamp": "2026-10-26T12:02:34Z"
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"status\":\"ok\",\"owner\":\"wake_target\",\"owner_name\":\"audit-page-owner\",\"limit\":1,\"schedules\":[{\"schedule_id\":\"audit-page-3\",\"status\":\"scheduled\",\"due_at_iso\":\"2026-10-26T13:02:34Z\",\"recurrence_summary\":\"one_shot\",\"wake_target\":\"audit-page-owner\",\"scheduled_by\":\"schedule-audit-admin\",\"summary\":\"future page request\",\"last_wake_status\":null}]}"
+          }
+        ],
+        "isError": false,
+        "structuredContent": {
+          "status": "ok",
+          "owner": "wake_target",
+          "owner_name": "audit-page-owner",
+          "limit": 1,
+          "schedules": [
+            {
+              "schedule_id": "audit-page-3",
+              "status": "scheduled",
+              "due_at_iso": "2026-10-26T13:02:34Z",
+              "recurrence_summary": "one_shot",
+              "wake_target": "audit-page-owner",
+              "scheduled_by": "schedule-audit-admin",
+              "summary": "future page request",
+              "last_wake_status": null
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "path": "/mcp",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 31,
+      "method": "tools/call",
+      "params": {
+        "name": "masc_schedule_create",
+        "arguments": {
+          "schedule_id": "audit-past",
+          "keeper_name": "audit-page-owner",
+          "message": "past request must refuse",
+          "due_at_unix": 1,
+          "allow_unregistered_keeper": true
+        }
+      }
+    },
+    "status": 200,
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 31,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.64.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "due time 1970-01-01T00:00:01Z is before now (2026-10-26T12:02:34Z); a wake is due at or after the current second",
+              "status": "error",
+              "tool": "masc_schedule_create"
+            },
+            "trace_id": "31",
+            "agent_id": "schedule-audit-admin",
+            "tool": "masc_schedule_create",
+            "duration_ms": 1,
+            "attempts": 1,
+            "timestamp": "2026-10-26T12:02:34Z",
+            "failure_class": "workflow_rejection"
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "due time 1970-01-01T00:00:01Z is before now (2026-10-26T12:02:34Z); a wake is due at or after the current second"
+          }
+        ],
+        "isError": true,
+        "structuredContent": {
+          "status": "error",
+          "message": "due time 1970-01-01T00:00:01Z is before now (2026-10-26T12:02:34Z); a wake is due at or after the current second",
+          "error_kind": "due_already_past",
+          "due_at_iso": "1970-01-01T00:00:01Z",
+          "now_iso": "2026-10-26T12:02:34Z"
+        }
+      }
+    }
+  },
+  {
+    "path": "/mcp",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 32,
+      "method": "tools/call",
+      "params": {
+        "name": "masc_keeper_list",
+        "arguments": {
+          "detailed": true,
+          "limit": 100
+        }
+      }
+    },
+    "status": 200,
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 32,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.64.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "{\"count\":0,\"keepers\":[],\"total\":0,\"limit\":100,\"truncated\":false}",
+              "status": "ok",
+              "tool": "masc_keeper_list"
+            },
+            "trace_id": "32",
+            "agent_id": "schedule-audit-admin",
+            "tool": "masc_keeper_list",
+            "duration_ms": 1,
+            "attempts": 1,
+            "timestamp": "2026-10-26T12:02:34Z"
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"count\":0,\"keepers\":[],\"total\":0,\"limit\":100,\"truncated\":false}"
+          }
+        ],
+        "isError": false,
+        "structuredContent": {
+          "count": 0,
+          "keepers": [],
+          "total": 0,
+          "limit": 100,
+          "truncated": false
+        }
+      }
+    }
+  }
+]

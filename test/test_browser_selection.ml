@@ -254,7 +254,55 @@ let test_goal_space_default () =
     check bool "corrupt store never licenses a new assignment" true (Result.is_error (bind second {space with id=52}));
     check bool "corrupt evidence remains" true (Masc.Workspace.read_json_doc config store=Ok (Some corrupt)))
 
+let test_multi_worker_inventory () =
+  let module I=Masc.Browser_connection_inventory in
+  let member=Yojson.Safe.Util.member in
+  let off:Selection.work_browser={activity=Lane.Disabled;registered=false;session=Lane.Browser_closed;locate=false} in
+  let observation instance_id clients : I.observation =
+    {instance_id;published={Masc.Browser_addon_observation.clients;
+      client_rows=List.map (fun client -> Masc.Browser_addon_observation.publish_client client ~space_observation:None) clients;
+      automation=off;stagehand=off}} in
+  let ego={(client "1" Lane.Ego_task_space) with browser=Lane.Ego_lite} and firefox=client "2" Lane.Webdriver_bidi in
+  let first=observation "first" [ego] and second=observation "second" [firefox] in
+  let report ?(issues=[]) observations=I.to_json (I.build ~observations ~issues) in
+  let ids json=member "clients" json |> Yojson.Safe.Util.to_list
+    |> List.map (fun row -> member "clientId" row |> Yojson.Safe.Util.to_string) in
+  let code name json=member "automatic" json |> member name |> member "error" |> member "code" in
+  let both=report [first;second] in
+  check (list string) "separate workers retain both concrete clients"
+    (List.map (fun (info:Lane.client_info) -> Lane.client_id_to_string info.client_id) [ego;firefox]) (ids both);
+  check bool "complete cross-worker observations are distinguished" true (member "inventoryComplete" both=`Bool true);
+  check bool "different logged-in clients require a choice" true (code "browse" both=`String "ambiguous_browsers");
+  check bool "an owned work route never guesses a worker" true (code "work" both=`String "browser_binding_required");
+  let single=report [first;observation "empty" []] in
+  check bool "one cross-worker live candidate retains its UUID" true
+    (member "automatic" single |> member "browse" |> member "data" |> member "clientId"
+      =`String (Lane.client_id_to_string ego.client_id));
+  let issue=I.Source_unready {instance_id="starting";message="worker has not started"} in
+  let partial=report ~issues:[issue] [first] in
+  check (list string) "a failed sibling does not erase valid manual choices" [Lane.client_id_to_string ego.client_id] (ids partial);
+  List.iter (fun name -> check bool "incomplete observations never offer no-browser fallback" true
+    (code name partial=`String "browser_binding_required")) ["browse";"work"];
+  check bool "incomplete report is explicit" true (member "inventoryComplete" partial=`Bool false);
+  let only_failure=report ~issues:[issue] [] in
+  check bool "no readable workers is still incomplete" true
+    (member "inventoryComplete" only_failure=`Bool false && code "browse" only_failure=`String "browser_binding_required");
+  let duplicated=report [first;observation "duplicate" [ego];second] in
+  check (list string) "every duplicate identity is excluded, other choices retained"
+    [Lane.client_id_to_string firefox.client_id] (ids duplicated);
+  let issues=match I.issues_of_json (member "inventoryIssues" duplicated) with
+    | Ok issues -> issues | Error detail -> fail detail in
+  check bool "duplicate issue carries the original owners" true
+    (issues=[I.Duplicate_client {client_id=ego.client_id;instances=["duplicate";"first"]}]);
+  check bool "unready issue wire round trip" true
+    (I.issues_of_json (I.issues_to_json [issue])=Ok [issue]);
+  List.iter (fun value -> check bool "unreadable issue metadata is not valid success" true
+    (Result.is_error (I.issues_of_json value)))
+    [`List [`Assoc ["kind",`String "unknown"]];
+     `List [`Assoc ["kind",`String "unready";"kind",`String "unready";"instanceId",`String "x";"message",`String "bad"]]]
+
 let () = run "browser selection" ["policy",[
+  test_case "multiple worker inventory preserves choices and uncertainty" `Quick test_multi_worker_inventory;
   test_case "Goal Space assignment and reconnect preserve browser identity" `Quick test_goal_space_default;
   test_case "connected login and actual owned sessions" `Quick test_connections_and_sessions;
   test_case "exact browser binding" `Quick test_explicit_binding;

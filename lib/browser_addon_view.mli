@@ -12,3 +12,7 @@ val goto : Browser_addon_host.t -> Yojson.Safe.t -> Tool_result.result
     from this server's disk, not from the Add-on worker. *)
 val clients :
   bidi_host:Browser_bidi_host_status.observation -> Browser_addon_host.t -> Tool_result.result
+val connection_inventory : config:Workspace.config -> access:Lane_addon_sources.access ->
+  bidi_host:Browser_bidi_host_status.observation -> Tool_result.result
+(** All visible browser workers, with individual failures and duplicate IDs
+    reported alongside the remaining validated clients. No Page calls. *)

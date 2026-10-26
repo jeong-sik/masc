@@ -325,7 +325,7 @@ def handle(conn):
         if op=="snapshot" and os.path.exists(lose): os.unlink(lose);lost=True
         if op=="snapshot": result={"reply":"receipt"} if lost or a.mode=="bad_ready" or os.path.exists(os.path.join(a.root,"reject-snapshot-"+a.incarnation)) else {"reply":"snapshot","snapshot":{"command_running":running,"state":"serving","clients":list(clients.values()),"owned_backends":{"automation":{"activity":"disabled","registered":False,"session":"closed","locate":False},"stagehand":{"activity":"disabled","registered":False,"session":"unknown","locate":False}}}}
         elif op=="poll":
-            client=dict(req["client"]);client["interactions"]=[];clients[client["clientId"]]=client
+            client=dict(req["client"]);client["interactions"]=[];client["lastActivities"]=[];client["spaceObservation"]=None;clients[client["clientId"]]=client
             result={"reply":"poll","command":None,"state_id":hashlib.sha256(json.dumps({"command_running":running}).encode()).hexdigest()}
         elif op=="disconnect":
             clients.pop(req["clientId"],None);result={"reply":"receipt"}
@@ -679,6 +679,34 @@ hooks = ["validate_input", "validate_output"]
   let new_client={client with client_id=require (Browser_lane.client_id_of_string "0c000000-0000-4000-8000-000000000002")} in
   check bool "a fresh native connection can reach the replacement" true (poll new_client=Ok None);
   check bool "replacement has received no replayed command" false (Sys.file_exists (issued replacement));
+  (* A second browser worker. The connection inventory reads every visible
+     worker without choosing one, and a stored Goal binding is read from the
+     workspace, so it stays readable after its worker detaches. *)
+  let other_id=attach "normal" in
+  let other=selected other_id in
+  let ego={new_client with
+    client_id=require (Browser_lane.client_id_of_string "0c000000-0000-4000-8000-000000000003");
+    browser=Browser_lane.Ego_lite;transport=Ego_task_space;space=Some {id=51;name="Goal fixture"}} in
+  (match call other (Browser_addon_wire.Poll {client=ego;window_sec=0.001}) with
+   | Ok (Browser_addon_wire.Poll_result _) -> ()
+   | Ok _|Error _ -> fail "fixture client registration failed");
+  let metadata=public Browser_capabilities.Tabs ["mode",`String "connections"] in
+  check bool "connection discovery succeeds across two visible workers" true (Tool_result.is_success metadata);
+  let goal=match Goal_store.upsert_goal config ~title:"Worker-bound browser Goal"
+      ~metric:"verified" ~target_value:"1" () with
+    | Ok (goal,_) -> goal.id | Error error -> fail (Goal_store.write_error_to_string error) in
+  (match Browser_goal_space.bind config ~goal_id:goal ~addon_instance_id:other_id
+      ~space:{id=51;name="Goal fixture"} ~actor:"goal-fixture" with
+   | Ok _ -> () | Error error -> fail (Browser_goal_space.error_message error));
+  ignore (dispatch config R.Detach ["instance_id",`String other_id]);
+  wait clock (fun () -> inspect other_id |> member "phase" |> text "kind"="detached");
+  let goal_status principal=Browser_addon_tools.handle ~config ~access ~principal ~reserved:[]
+    ~keeper_name:None ~tool:Browser_capabilities.Session ~tool_name:"goal-status"
+    ~start_time:(Tool_timing.start ()) (`Assoc ["action",`String "goal_status";"goalId",`String goal]) in
+  check bool "stored Goal status survives its worker's retirement" true
+    (Tool_result.is_success (goal_status Lane_addon_call_context.Operator));
+  check bool "stored Goal status still requires verified authority" true
+    (Tool_result.is_failed (goal_status Lane_addon_call_context.Anonymous));
   let next_pid=inspect replacement |> member "resource" |> member "pid" |> Yojson.Safe.Util.to_int in
   Eio.Fiber.first (fun () -> ignore (call next issue);fail "cancelled issue returned")
     (fun () -> wait clock (fun () -> Sys.file_exists (issued replacement)));

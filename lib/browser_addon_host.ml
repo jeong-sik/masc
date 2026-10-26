@@ -62,18 +62,41 @@ let error_result ~start_time error =
           | Unavailable detail|Activity_unobserved detail -> Tool_result.Dependency_unavailable,detail in
         class_,Tool_result.Proven_pre_effect,detail in
   Tool_result.make_err ~tool_name:Browser_addon_tool.definition.name ~start_time ~class_ ~effect_disposition detail
-let snapshot_of t (served:served) =
-  let* reply=R.call_browser_service ~config:t.config ~access:t.access ~service:served.service
-    ~command:Browser_addon_wire.Snapshot in
+let snapshot_service ~config ~access ~service =
+  let* reply=R.call_browser_service ~config ~access ~service ~command:Browser_addon_wire.Snapshot in
   match reply with
   | Browser_addon_wire.Snapshot_result value -> Ok value
   | Service_refusal {message;disposition=Not_started} -> Error (Browser_addon_client.Unavailable message)
   | Service_refusal {message;disposition=Outcome_unknown} -> Error (Browser_addon_client.Outcome_unknown message)
   | Model_reply _|Extension_reply _|Download_reply _|Receipt|Issue_result _|Poll_result _ -> Error (Browser_addon_client.Outcome_unknown "unexpected browser snapshot reply")
+let snapshot_of t (served:served) = snapshot_service ~config:t.config ~access:t.access ~service:served.service
 let snapshot t ~backend = match for_backend t backend with
   | Ok served -> snapshot_of t served
   | Error failure -> Error (Browser_addon_client.Unavailable (backend_failure_message failure))
 type snapshot_failure = Snapshot_unavailable of string | Snapshot_unreadable of string
+(* Every caller-visible service's snapshot, read without choosing a browser or
+   issuing a command. A worker that does not answer, answers unreadably or is
+   not ready stays in the inventory as an issue instead of being left out. *)
+let connection_inventory ~config ~access =
+  let reading=R.browser_service_reading ~config ~access in
+  match reading.services,reading.unready with
+  | [],[] -> Error (Snapshot_unavailable "no browser Add-on is attached")
+  | (_::_),_|[],(_::_) ->
+    let module I=Browser_connection_inventory in
+    let issues=List.map (fun (unready:Lane_addon_unready.t) ->
+      I.Source_unready {instance_id=unready.instance_id;message=Lane_addon_unready.message unready}) reading.unready in
+    let observations,issues=List.fold_left (fun (observations,issues) (service:R.browser_service) ->
+      match snapshot_service ~config ~access ~service with
+      | Error (Browser_addon_client.Unavailable detail|Outcome_unknown detail) ->
+          Log.Misc.warn "Browser inventory could not read worker %s: %s" service.instance_id detail;
+          observations,I.Source_unavailable {instance_id=service.instance_id;message="worker snapshot could not be read"}::issues
+      | Ok value ->
+        let decoded=let* _=Lane_addon_action.canonical value in Browser_addon_observation.decode_snapshot value in
+        (match decoded with
+         | Error message -> observations,I.Source_unreadable {instance_id=service.instance_id;message}::issues
+         | Ok published -> {I.instance_id=service.instance_id;published}::observations,issues))
+      ([],List.rev issues) reading.services in
+    Ok (I.build ~observations:(List.rev observations) ~issues:(List.rev issues))
 let published_of t served =
   match snapshot_of t served with
   | Error (Browser_addon_client.Unavailable detail|Outcome_unknown detail) -> Error (Snapshot_unavailable detail)

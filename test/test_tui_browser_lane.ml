@@ -11,7 +11,8 @@ let zen = { client_id = "22222222-2222-4222-8222-222222222222"; browser = Zen;
             transport = Browser_lane.Web_extension; space = None; space_observation = None; interactions = []; last_activities = [] }
 let pinned () = choose_client firefox { (create ()) with clients = Some [firefox; zen] }
 (* A connection list that came with no word of the BiDi host. *)
-let found listed = { listed; bidi_host = Host_not_reported; automatic = None }
+let found listed = { listed; bidi_host = Host_not_reported;
+  inventory_report = Inventory_not_reported; automatic = None }
 
 module Record = Masc.Browser_bidi_host_record
 module Status = Masc.Browser_bidi_host_status
@@ -623,12 +624,13 @@ let test_bidi_host_discovery () =
                            Record.Ended ({ host_entry with ended = Some ending }, ending)) in
   expect "the server's report is read with the list"
     (decode_discovery (answer ["bidiHost", Status.report_to_json ended])
-     = Ok { listed = [firefox]; bidi_host = Host_reported ended; automatic=None });
+     = Ok { listed = [firefox]; bidi_host = Host_reported ended;
+         inventory_report=Inventory_not_reported; automatic=None });
   expect "a server that says nothing of the host still lists its connections"
     (decode_discovery (answer []) = Ok (found [firefox])
      && decode_discovery (answer ["bidiHost", `Null]) = Ok (found [firefox]));
   (match decode_discovery (answer ["bidiHost", `Assoc ["state", `String "paused"]]) with
-   | Ok { listed; bidi_host = Host_report_unreadable { message = None; _ }; automatic=_ } ->
+   | Ok { listed; bidi_host = Host_report_unreadable { message = None; _ }; inventory_report=_; automatic=_ } ->
        expect "a report this TUI cannot read does not cost the list" (listed = [firefox])
    | Ok _ | Error _ -> failwith "an unreadable host report was not kept apart from the list");
   (* A server of another build may send a report this one cannot read. The
@@ -637,17 +639,18 @@ let test_bidi_host_discovery () =
      decode_discovery
        (answer ["bidiHost", `Assoc ["state", `String "paused"; "message", `String "The host is paused."]])
    with
-   | Ok { listed = _; bidi_host = Host_report_unreadable { message; _ }; automatic=_ } ->
+   | Ok { listed = _; bidi_host = Host_report_unreadable { message; _ }; inventory_report=_; automatic=_ } ->
        expect "the server's paragraph outlives a report this TUI cannot read"
          (message = Some "The host is paused.")
    | Ok _ | Error _ -> failwith "an unreadable host report lost the server's paragraph");
   (match decode_discovery (answer ["bidiHost", `String "running"]) with
-   | Ok { listed; bidi_host = Host_report_unreadable { message = None; _ }; automatic=_ } ->
+   | Ok { listed; bidi_host = Host_report_unreadable { message = None; _ }; inventory_report=_; automatic=_ } ->
        expect "a report that is no object does not cost the list either" (listed = [firefox])
    | Ok _ | Error _ -> failwith "a host report that is no object was not kept apart from the list");
   let discover t = { t with load = Loading (40, Discover Choose_client) } in
   let reported, _ =
-    accept_clients ~generation:40 (Ok { listed = [firefox]; bidi_host = Host_reported ended; automatic=None })
+    accept_clients ~generation:40 (Ok { listed = [firefox]; bidi_host = Host_reported ended;
+        inventory_report=Inventory_not_reported; automatic=None })
       (discover (create ())) in
   expect "the view holds what the discovery said" (reported.bidi_host = Host_reported ended);
   let again, _ = accept_clients ~generation:40 (Ok (found [firefox])) (discover reported) in
@@ -664,7 +667,8 @@ let test_bidi_host_discovery () =
   let waiting = withdraw_discovery reported in
   expect "a picker waiting on a discovery shows neither of the read before it"
     (waiting.clients = None && bidi_host_rows ~width:74 waiting = []
-     && waiting = { reported with clients = None; bidi_host = Host_not_reported; automatic=None })
+     && waiting = { reported with clients = None; bidi_host = Host_not_reported;
+         inventory_report=Inventory_not_reported; automatic=None })
 
 (* One value per operation constructor. [expected_refresh] names every
    constructor with no catch-all, so a new operation breaks this build until
@@ -839,12 +843,179 @@ let test_automatic_work_requests () =
     (switched.selected_tab=None && switched.selected_client=None && switched.reading=None
      && switched.scene=None && switched.selection=Work_unbound)
 
+let with_inventory_fields extra = function
+  | `Assoc fields ->
+      (match List.assoc_opt "data" fields with
+       | Some (`Assoc data) -> `Assoc (("data",`Assoc (extra @ data))::List.remove_assoc "data" fields)
+       | _ -> failwith "discovery data must be an object")
+  | _ -> failwith "discovery must be an object"
+
+let test_inventory_report_preserves_request_owner () =
+  let module I=Masc.Browser_connection_inventory in
+  let issues=I.[Source_unavailable {instance_id="worker-a";message="connection unavailable"};
+    Source_unreadable {instance_id="worker-b";message="invalid snapshot"};
+    Source_unready {instance_id="worker-c";message="starting"};
+    Duplicate_client {client_id=success (Browser_lane.client_id_of_string zen.client_id);
+      instances=["worker-a";"worker-b"]}] in
+  let refusal=`Assoc ["ok",`Bool false;"error",`Assoc [
+    "code",`String "browser_binding_required";"message",`String "Choose an observed client"]] in
+  let answer=automatic_answer refusal refusal
+    |> with_inventory_fields ["inventoryIssues",I.issues_to_json issues] in
+  let discovered=success (decode_discovery answer) in
+  expect "all typed inventory issues retain the separately valid client rows"
+    (discovered.inventory_report=Inventory_reported issues && discovered.listed=[firefox;zen]);
+  let original={(loaded ()) with load=Loading (77,Read_refresh);refresh_pending=Some 77;
+    scroll=11;url_draft=Some "https://example.org/draft"} in
+  let current=accept_activity (Ok discovered) original in
+  expect "inventory activity cannot consume or retarget the pending page read"
+    (current.inventory_report=Inventory_reported issues && current.clients=Some [firefox;zen]
+      && current.selected_client=original.selected_client && current.selected_tab=original.selected_tab
+      && current.reading=original.reading && current.scene=original.scene
+      && current.load=original.load && current.refresh_pending=original.refresh_pending
+      && current.scroll=original.scroll && current.url_draft=original.url_draft
+      && request_body current=request_body original);
+  let failed=accept_activity (Error "inventory disconnected") current in
+  expect "failed activity retains the last inventory issues and request owner"
+    (failed.inventory_report=current.inventory_report && failed.selected_client=current.selected_client
+      && failed.reading=current.reading && failed.load=current.load);
+  let work=choose_work current in
+  expect "explicit work selection retains the inventory observation it presents"
+    (work.inventory_report=current.inventory_report && work.clients=current.clients);
+  let withdrawn=withdraw_discovery current in
+  expect "withdrawing inventory does not withdraw the selected Page"
+    (withdrawn.inventory_report=Inventory_not_reported && withdrawn.clients=None
+      && withdrawn.selected_client=current.selected_client && withdrawn.selected_tab=current.selected_tab
+      && withdrawn.reading=current.reading && withdrawn.load=current.load);
+  let waiting={original with load=Loading (78,Discover Choose_client)} in
+  let refreshed,read=accept_clients ~generation:78 (Ok discovered) waiting in
+  expect "discovery publishes issues without changing the explicit Page owner"
+    (not read && refreshed.inventory_report=Inventory_reported issues
+      && refreshed.selected_client=waiting.selected_client && refreshed.selected_tab=waiting.selected_tab
+      && refreshed.reading=waiting.reading);
+  let failed,_=accept_clients ~generation:78 (Error "offline")
+    {refreshed with load=Loading (78,Discover Choose_client)} in
+  expect "failed discovery reports no inventory rather than an empty successful report"
+    (failed.inventory_report=Inventory_not_reported && failed.selected_client=refreshed.selected_client
+      && failed.selected_tab=refreshed.selected_tab && failed.reading=refreshed.reading);
+  let unreported=accept_activity (Ok (found [firefox;zen])) current in
+  expect "an absent next report withdraws only the previous inventory report"
+    (unreported.inventory_report=Inventory_not_reported && unreported.reading=current.reading
+      && unreported.load=current.load)
+
+let test_invalid_inventory_never_recommends_a_fallback () =
+  let automatic=automatic_answer unavailable recommended_work in
+  let invalid = function
+    | Some {browse=Error {kind=Invalid_automatic_response;_};
+        work=Error {kind=Invalid_automatic_response;_}} -> true
+    | Some _|None -> false in
+  List.iter (fun extra ->
+    let answer=with_inventory_fields extra automatic in
+    let decoded=success (decode_discovery answer) in
+    expect "unreadable inventory preserves valid rows and refuses both automatic decisions"
+      (decoded.listed=[firefox;zen] && invalid decoded.automatic
+        && (match decoded.inventory_report with Inventory_report_unreadable _ -> true
+          | Inventory_not_reported|Inventory_reported _ -> false));
+    List.iter (fun view ->
+      let refused,read=automatic_discover view answer in
+      expect "unreadable inventory never becomes an owned-browser fallback or open"
+        (not read && refused.source=Live && refused.clients=Some [firefox;zen]
+          && refused.selected_client=None && not refused.pending_open
+          && (match refused.load with Failed _ -> true | Idle|No_browser|Loading _ -> false)))
+      [create ();{(choose_work (create ())) with pending_open=true}])
+    [["inventoryIssues",`Null];["inventoryIssues",`Assoc []];
+     ["inventoryIssues",`List [`Assoc ["kind",`String "future";"instanceId",`String "worker-a";"message",`String "unknown"]]];
+     ["inventoryIssues",`List [`Assoc ["kind",`String "unready";"instanceId",`String "worker-a";
+       "message",`String "one";"message",`String "two"]]];
+     ["inventoryIssues",`List [];"inventoryIssues",`List []]]
+
+let test_inventory_issues_guard_automatic_recommendations () =
+  let module I=Masc.Browser_connection_inventory in
+  let issue=I.Source_unready {instance_id="worker-a";message="starting"} in
+  let reported answer=with_inventory_fields ["inventoryIssues",I.issues_to_json [issue]] answer in
+  let preferred=recommended "live" (Some zen.client_id) "existing_login" in
+  List.iter (fun browse ->
+    let answer=reported (automatic_answer browse recommended_work) in
+    let decoded=success (decode_discovery answer) in
+    let refused,read=automatic_discover (create ()) answer in
+    expect "reported worker issues invalidate a success or no-browser fallback recommendation"
+      (decoded.inventory_report=Inventory_reported [issue]
+        && (match decoded.automatic with
+          | Some {browse=Error {kind=Invalid_automatic_response;_};
+              work=Error {kind=Invalid_automatic_response;_}} -> true
+          | Some _|None -> false)
+        && not read && refused.source=Live && refused.selected_client=None && not refused.pending_open))
+    [preferred;unavailable];
+  let refusal=`Assoc ["ok",`Bool false;"error",`Assoc [
+    "code",`String "browser_binding_required";"message",`String "Original inventory refusal"]] in
+  let decoded=success (decode_discovery (reported (automatic_answer refusal refusal))) in
+  expect "an existing safe server refusal retains its typed reason"
+    (match decoded.automatic with Some {browse=Error {kind=Binding_required;_};
+        work=Error {kind=Binding_required;_}} -> true | Some _|None -> false);
+  let answer=automatic_answer preferred recommended_work in
+  let absent=success (decode_discovery answer) in
+  let complete,read=automatic_discover (create ())
+    (with_inventory_fields ["inventoryIssues",`List []] answer) in
+  expect "missing and explicitly empty inventory reports remain distinct"
+    (absent.inventory_report=Inventory_not_reported && complete.inventory_report=Inventory_reported []);
+  expect "an explicitly empty report preserves the server's normal concrete recommendation"
+    (read && complete.selected_client=Some zen)
+
+let test_inventory_summary_contract () =
+  let module I=Masc.Browser_connection_inventory in
+  let issue=I.Source_unready {instance_id="starting";message="not observed yet"} in
+  let issues=I.issues_to_json [issue] in
+  let answer=automatic_answer unavailable recommended_work in
+  let invalid = function
+    | Some {browse=Error {kind=Invalid_automatic_response;_};
+        work=Error {kind=Invalid_automatic_response;_}} -> true
+    | Some _|None -> false in
+  List.iter (fun fields ->
+    let response=with_inventory_fields fields answer in
+    let decoded=success (decode_discovery response) in
+    expect "an invalid completeness summary preserves rows and refuses both decisions"
+      (decoded.listed=[firefox;zen] && invalid decoded.automatic
+        && match decoded.inventory_report with Inventory_report_unreadable _ -> true
+          | Inventory_not_reported|Inventory_reported _ -> false);
+    List.iter (fun view ->
+      let refused,read=automatic_discover view response in
+      expect "an incomplete or contradictory summary cannot open a fallback browser"
+        (not read && refused.clients=Some [firefox;zen] && refused.source=Live
+          && refused.selected_client=None && not refused.pending_open
+          && match refused.load with Failed _ -> true | Idle|No_browser|Loading _ -> false))
+      [create ();{(choose_work (create ())) with pending_open=true}])
+    [["inventoryComplete",`Bool false];
+     ["inventoryComplete",`Bool false;"inventoryIssues",`List []];
+     ["inventoryComplete",`Bool true];
+     ["inventoryComplete",`Bool true;"inventoryIssues",issues];
+     ["inventoryComplete",`Null;"inventoryIssues",`List []];
+     ["inventoryComplete",`String "false";"inventoryIssues",`List []];
+     ["inventoryComplete",`Bool true;"inventoryComplete",`Bool true;"inventoryIssues",`List []];
+     ["inventoryComplete",`Bool true;"inventoryComplete",`Bool false;"inventoryIssues",`List []]];
+  let partial=with_inventory_fields ["inventoryComplete",`Bool false;"inventoryIssues",issues] answer in
+  let decoded=success (decode_discovery partial) in
+  expect "a valid incomplete report retains its issue and blocks a conflicting fallback"
+    (decoded.inventory_report=Inventory_reported [issue] && invalid decoded.automatic);
+  List.iter (fun view ->
+    let refused,read=automatic_discover view partial in
+    expect "reported incomplete work stays unbound even with an open intent"
+      (not read && refused.selected_client=None && not refused.pending_open && refused.source=Live))
+    [create ();{(choose_work (create ())) with pending_open=true}];
+  let complete,read=automatic_discover (create ())
+    (with_inventory_fields ["inventoryComplete",`Bool true;"inventoryIssues",`List []]
+      (automatic_answer (recommended "live" (Some zen.client_id) "existing_login") recommended_work)) in
+  expect "a consistent complete report preserves the concrete server recommendation"
+    (read && complete.inventory_report=Inventory_reported [] && complete.selected_client=Some zen)
+
 let () =
   List.iter (fun (name, test) -> test (); Printf.printf "PASS %s\n%!" name)
     ["activity refresh preserves pending read", test_activity_refresh_preserves_pending_read;
      "client activity keeps connection", test_client_activity_preserves_connection;
      "automatic browser binding", test_automatic_browser_binding;
      "automatic work requests", test_automatic_work_requests;
+     "inventory issues preserve request ownership", test_inventory_report_preserves_request_owner;
+     "invalid inventory refuses fallback", test_invalid_inventory_never_recommends_a_fallback;
+     "inventory issues guard recommendations", test_inventory_issues_guard_automatic_recommendations;
+     "inventory completeness summary contract", test_inventory_summary_contract;
      "unified browser picker", test_unified_browser_picker;
      "the BiDi host report rides the connection list", test_bidi_host_discovery;
      "raw refresh scroll identity", test_raw_refresh_scroll_identity;

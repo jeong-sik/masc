@@ -327,7 +327,7 @@ let tab_rows t =
     | [] -> `List (List.rev tabs)
     | _ :: _ -> obj ["tabs",`List (List.rev tabs);"complete",`Bool false;"unavailableTabs",`List (List.rev unavailable)])
 
-let unmanaged_refused = "was opened by the operator in the ego task space; this connection reads only the pages the space manages"
+let unmanaged_refused = "is unmanaged in the ego task space; this connection reads only the pages the space manages"
 
 (* The page a step acts on, by label; [`Null] is the space's active tab,
    which the script finds. *)

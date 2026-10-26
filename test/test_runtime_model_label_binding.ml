@@ -596,12 +596,22 @@ let get_sync_deadline_covers_dns_resolution () =
   Eio.Switch.run @@ fun sw ->
   let clock = Eio_mock.Clock.make () in
   Eio_mock.Clock.set_time clock 1000.;
-  let mock_net = Eio_mock.Net.make "stalled-dns" in
   let pending, _ = Eio.Promise.create () in
-  Eio_mock.Net.on_getaddrinfo mock_net [
-    `Run (fun () -> Eio_mock.Clock.advance clock; Eio.Promise.await pending)
-  ];
-  let net = (mock_net :> [`Generic] Eio.Net.ty Eio.Resource.t) in
+  let module Stalled_dns = struct
+    type t = unit
+    type tag = [`Generic | `Unix]
+    let unsupported _ = invalid_arg "stalled DNS fixture supports only getaddrinfo"
+    let listen = unsupported
+    let connect = unsupported
+    let datagram_socket = unsupported
+    let getaddrinfo () ~service:_ _ =
+      Eio_mock.Clock.advance clock;
+      Eio.Promise.await pending
+    let getnameinfo = unsupported
+  end in
+  let net : [`Generic | `Unix] Eio.Net.ty Eio.Resource.t =
+    Eio.Resource.T ((), Eio.Resource.handler
+      (Eio.Resource.bindings (Eio.Net.Pi.network (module Stalled_dns)))) in
   expect_timeout clock (fun () ->
     Http_client.get_sync ~sw ~net ~clock ~timeout_s:4.0
       ~url:"http://stalled-dns.invalid/api/tags" ~headers:[] ())

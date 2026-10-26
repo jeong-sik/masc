@@ -457,10 +457,15 @@ let snapshot t args =
       @ ["snapshot",str text;"truncated",`Bool truncated;"chars",`Int chars]))
   | _ -> Error "ego answered a snapshot without its page, text or length"
 
-(* The downloads the ego process saw start on one page, as Browser_downloads
-   rows. A row is believed only as this module's own wait writes it: its id
-   is a UUID and a completed file is <downloads>/<id>, nowhere else. *)
-let download_row ~root ~tab json : (Browser_downloads.download, string) result =
+(* Native download events and receipted Fetch saves share the file broker,
+   with distinct provenance. A completed file is <downloads>/<UUID> only. *)
+type download_source = Native_download | Native_fetch
+let download_source_name = function Native_download -> "native_download" | Native_fetch -> "fetch"
+let download_row ~root ~tab json =
+  let* source=match field "source" json with
+    | Some (`String "native_download") -> Ok Native_download
+    | Some (`String "fetch") -> Ok Native_fetch
+    | None|Some _ -> Error "ego answered a download without recognized native provenance" in
   match field "id" json, field "url" json, field "suggestedFilename" json, field "state" json,
         field "path" json, field "reason" json with
   | Some (`String id), Some (`String url), Some (`String name), Some (`String state), Some path, Some reason ->
@@ -472,7 +477,7 @@ let download_row ~root ~tab json : (Browser_downloads.download, string) result =
       | "completed", `String _, `Null -> Error "ego answered a download saved outside the connection's download folder"
       | "interrupted", `Null, `String reason -> Ok (Browser_downloads.Interrupted reason)
       | _ -> Error (Printf.sprintf "ego answered a download in an unreadable state %S" state) in
-    Ok {Browser_downloads.id; context = string_of_int tab; url; filename = Some name; status}
+    Ok ({Browser_downloads.id; context = string_of_int tab; url; filename = Some name; status},source)
   | _ -> Error "ego answered a download without its id, URL, name, state, path or reason"
 
 let downloads t args =
@@ -492,8 +497,11 @@ let downloads t args =
       let* row = download_row ~root:t.downloads.root ~tab json in
       Ok (row :: collected)) (Ok []) rows in
   let verify = Browser_bidi_downloads.verify_file ~root:t.downloads.root in
-  let records = List.rev_map
-      (Browser_downloads.published_json ~verify ~publish:t.downloads.publish ~published:t.published) rows in
+  let* records=List.fold_left (fun records (row,source) ->
+    let* records=records in
+    match Browser_downloads.published_json ~verify ~publish:t.downloads.publish ~published:t.published row with
+    | `Assoc fields -> Ok (obj (("source",str (download_source_name source))::fields)::records)
+    | _ -> Error "download publication returned an unreadable row") (Ok []) rows in
   Ok (obj ["tabId",`Int tab;"downloads",`List records;"watchingSince",since])
 
 let png_signature = "\137PNG\r\n\026\n"
@@ -579,7 +587,7 @@ let download_watch = String.concat "\n" [
   "        try { download = await page.waitForEvent(\"download\", {timeout: " ^ string_of_int download_wait_ms ^ "}); }";
   "        catch (error) { break; }";
   "        try {";
-  "          const row = {id: crypto.randomUUID(), label, url: download.url(), suggestedFilename: download.suggestedFilename(), state: \"pending\", path: null, reason: null};";
+  "          const row = {id: crypto.randomUUID(), label, source: \"native_download\", url: download.url(), suggestedFilename: download.suggestedFilename(), state: \"pending\", path: null, reason: null};";
   "          registry.rows.push(row);";
   "          const path = root + \"/\" + row.id;";
   "          download.saveAs(path).then(() => download.failure()).then(";

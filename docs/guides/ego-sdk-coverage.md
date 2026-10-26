@@ -72,7 +72,7 @@ Neither means fully supported.
 | `Page.dismissDialog` | `page.act` dismiss_dialog | Native boolean receipt and per-goal ownership evidence |
 | `Page.evaluate` | Native workflow evaluate, browser expression/call with JSON | Safety-timeout metadata beyond message not retained; installed MASC/Keeper route unverified |
 | `Page.waitForFunction` | Native workflow waitForFunction with JSON and timeout/polling | Predicates count as possible effects; installed MASC/Keeper route unverified |
-| `Page.fetch` | Native workflow fetch with browser options and structured response | `saveAs` requires broker integration; installed MASC/Keeper route unverified |
+| `Page.fetch` | Native workflow fetch with browser options; `saveAs` accepts an artifact filename, maps it to a fresh private path, and returns a download ID for the existing download broker | Actual SDK binary execution, installed MASC/Keeper route and registry recovery across SDK-process replacement remain unverified |
 | `Page.cdp` | Fixed internal history commands only | General Page protocol calls with explicit effect and lifecycle handling |
 | `Page.waitForSelector` | Native workflow waitForSelector | Native states and timeout exposed; installed MASC route unverified |
 | `Page.waitForLoadState` | Native workflow with optional state, timeout/idleMs | Installed MASC/Keeper route unverified |
@@ -116,6 +116,27 @@ Neither means fully supported.
 | `Download.delete` | Internal temporary-file cleanup after save | Explicit deletion of only that handle's temporary files |
 
 ## Current evidence and next work
+
+A native workflow Fetch can request binary output with
+`{"method":"fetch","url":"/api/report.pdf","options":{"saveAs":"report.pdf"}}`.
+The filename is metadata; no directory or host path is accepted. Ego performs
+the browser-context fetch and native save. A validated receipt carries
+`source="fetch"`, `downloadId` and the requested `suggestedFilename`, without
+`savedPath`. Native download-event rows use `source="native_download"` instead.
+The same tab's download reader verifies the saved file, then uses the existing
+worker snapshot/grant and host artifact-publication path. A snapshot marker is
+not a finalized artifact or a host file-read grant.
+
+HTTP error status and completed binary save are separate observations. A later
+workflow step or snapshot failure does not remove an already completed save
+from the living SDK process's registry. Retrieve it without repeating Fetch.
+Failed, malformed or lost save receipts never establish file completion from
+path existence; partial/unknown files are retained. The in-memory registry does
+not provide durable reconciliation across worker/session replacement.
+Standalone tests execute production workflow JavaScript with an SDK stand-in
+and actual temporary bytes, plus the actual request/receipt codecs. These do
+not prove real browser CORS/auth, the full worker/host artifact route or installed
+Keeper/UI behavior.
 
 An [isolated real-model Keeper metadata probe](../evidence/ego-keeper-native-metadata/README.md)
 at source `d840b7978ce01ca0afdb1f4fcdedce0d4596e991` completed one exact-client

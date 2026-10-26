@@ -182,8 +182,14 @@ clipboard restoration, and wait for the result before returning a final snapshot
 ([what it serves](../design/browser-lane.md#what-each-live-connection-serves)).
 Native workflows also expose app-state waits, Page expressions with a JSON
 argument, and browser-context fetch. Page source runs only in the observed Ego
-Page, and these calls count as possible effects. Fetch file output and other
-remaining SDK/Space gaps are listed in the [SDK inventory](ego-sdk-coverage.md).
+Page, and these calls count as possible effects. A Fetch step can set
+`options.saveAs` to a filename such as `report.pdf`. The SDK saves binary bytes
+under a fresh private UUID; the step returns a download ID and requested name.
+Use BrowserRead `mode=downloads` on the same client/tab, then the row's finalized
+artifact reader, to retrieve bytes. Never repeat Fetch to retrieve a completed
+save after a later step or snapshot failed. This inventory lasts only for the
+same SDK process. Remaining SDK/Space gaps are listed in the
+[SDK inventory](ego-sdk-coverage.md).
 
 | The host | First row |
 |---|---|

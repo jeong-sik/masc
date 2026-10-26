@@ -320,7 +320,7 @@ description = "set_zoom only: actual browser zoom factor (0.3–5), requires exa
 [[params]]
 name = "steps"
 type = "array"
-description = "workflow only: native Ego Page calls followed by one final snapshot. Each step uses only its method arguments and native options. click/dblclick/hover/focus take selector; dragAndDrop takes selector,destination; mouse.click/move/wheel take CSS x,y (wheel uses deltas and needs a move/click in this round first); fill takes selector,text; press takes selector,key; selectOption takes selector,selectionJson; goto takes an absolute HTTP(S) url; waitForURL takes a string/glob url; waitForSelector takes selector,state; waitForLoadState state is optional. Keyboard methods take text or key; paste also accepts html. evaluate/waitForFunction take source and optional argumentJson. fetch takes an HTTP(S) or relative url and returns its structured response as the step receipt. url/title/info return native Page state; snapshot returns native text with scope/root/action-mark/stable-locator options; events drains this SDK process's Page event buffer and is a non-replayable effect, not cross-process history. waitForTimeout takes nonnegative milliseconds and is not a page-readiness check. Native options use SDK names and are strictly validated for that method; omission uses SDK defaults. evaluate/keyboard.insertText/keyboard.paste/url/title/info/events/waitForTimeout accept no options. Source runs only in the browser; Page code and fetch may have effects even on failure. A failed pointer click/drag or lost key input result keeps release unconfirmed without synthetic cleanup. Paste can hold ControlOrMeta+V. Answering a dialog does not acknowledge button/key release; automatic continuation after interrupted input is unsupported. An unconfirmed release blocks further input. Choose the next action from current observations; no new judgment inside the call. There is no cumulative step/time limit."
+description = "workflow only: native Ego Page calls followed by one final snapshot. Each step uses only its method arguments and native options. click/dblclick/hover/focus take selector; dragAndDrop takes selector,destination; mouse.click/move/wheel take CSS x,y (wheel uses deltas and needs a move/click in this round first); fill takes selector,text; press takes selector,key; selectOption takes selector,selectionJson; goto takes an absolute HTTP(S) url; waitForURL takes a string/glob url; waitForSelector takes selector,state; waitForLoadState state is optional. Keyboard methods take text or key; paste also accepts html. evaluate/waitForFunction take source and optional argumentJson. fetch takes an HTTP(S) or relative url and returns its structured response as the step receipt. options.saveAs is an artifact filename, never a host path; retrieve the returned downloadId with BrowserRead mode=downloads on the same client/tab without repeating fetch. url/title/info return native Page state; snapshot returns native text with scope/root/action-mark/stable-locator options; events drains this SDK process's Page event buffer and is a non-replayable effect, not cross-process history. waitForTimeout takes nonnegative milliseconds and is not a page-readiness check. Native options use SDK names and are strictly validated for that method; omission uses SDK defaults. evaluate/keyboard.insertText/keyboard.paste/url/title/info/events/waitForTimeout accept no options. Source runs only in the browser; Page code and fetch may have effects even on failure. A failed pointer click/drag or lost key input result keeps release unconfirmed without synthetic cleanup. Paste can hold ControlOrMeta+V. Answering a dialog does not acknowledge button/key release; automatic continuation after interrupted input is unsupported. An unconfirmed release blocks further input. Choose the next action from current observations; no new judgment inside the call. There is no cumulative step/time limit."
 
 [params.items]
 type = "object"
@@ -394,7 +394,7 @@ description = "One JSON-encoded function argument of any JSON type. Omit to eval
 [[params.items.params]]
 name = "options"
 type = "object"
-description = "Native SDK options for the exact method; all time values are milliseconds. Keyboard type/press accept delay only; evaluate/insertText/paste/url/title/info/events/waitForTimeout have no options. Native pointer labels include Keeper ownership. fetch saveAs is refused pending download-broker integration."
+description = "Native SDK options for the exact method; all time values are milliseconds. Keyboard type/press accept delay only; evaluate/insertText/paste/url/title/info/events/waitForTimeout have no options. Native pointer labels include Keeper ownership. fetch saveAs is an artifact filename, never a host path: the SDK writes a fresh private path and returns a downloadId; retrieve its finalized artifact with BrowserRead mode=downloads on the same client/tab."
 additional_properties = false
 
 [[params.items.params.params]]
@@ -528,6 +528,11 @@ name = "headers"
 type = "object"
 description = "HTTP header names with string values."
 additional_properties = true
+
+[[params.items.params.params]]
+name = "saveAs"
+type = "string"
+description = "fetch only: requested artifact filename, with no directories or control characters. Returned downloadId identifies the saved response in the same tab's download reader. suggestedFilename is this requested name, not a server suggestion. HTTP error responses can still save successfully. Never replay fetch to retrieve an existing save."
 
 [[params.items.params.params]]
 name = "body"

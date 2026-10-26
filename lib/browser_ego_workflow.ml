@@ -81,9 +81,45 @@ let script = {js|async function nativeWorkflow(page, args) {
           effect = effectStarted = pageResult = true;
           receipt = await page.waitForFunction(expression, undefined, options); break;
         }
-        case 'fetch':
+        case 'fetch': {
           effect = effectStarted = pageResult = true;
-          receipt = await page.fetch(step.url, options); break;
+          if (options.saveAs === undefined) {
+            receipt = await page.fetch(step.url, options); break;
+          }
+          // saveAs is a requested artifact filename, never a host pathname.
+          // The native SDK writes the bytes; the existing download reader
+          // verifies and brokers only a positively completed save.
+          const id = crypto.randomUUID();
+          const path = args.downloads + '/' + id;
+          const registry = globalThis.mascDownloads ??= {
+            since: new Date().toISOString(), rows: [], watched: new Set()
+          };
+          const row = {id, label: args.label, source: 'fetch', url: step.url,
+            suggestedFilename: options.saveAs, state: 'pending', path: null, reason: null};
+          registry.rows.push(row);
+          try {
+            const saved = await page.fetch(step.url, {...options, saveAs: path});
+            const fields = ['ok', 'status', 'statusText', 'url', 'headers', 'savedPath'];
+            if (saved === null || typeof saved !== 'object' || Array.isArray(saved)
+                || Object.keys(saved).length !== fields.length
+                || !fields.every(key => Object.hasOwn(saved, key))
+                || typeof saved.ok !== 'boolean' || !Number.isSafeInteger(saved.status) || saved.status < 0
+                || typeof saved.statusText !== 'string' || typeof saved.url !== 'string'
+                || saved.headers === null || typeof saved.headers !== 'object' || Array.isArray(saved.headers)
+                || !Object.values(saved.headers).every(value => typeof value === 'string')
+                || saved.savedPath !== path)
+              throw new Error('Ego returned an invalid binary fetch receipt');
+            const {savedPath, ...metadata} = saved;
+            receipt = {...metadata, downloadId: id, suggestedFilename: options.saveAs, source: 'fetch'};
+            row.url = saved.url;
+            row.path = savedPath;
+            row.state = 'completed';
+          } catch (error) {
+            row.state = 'interrupted'; row.reason = String(error?.message ?? error);
+            throw error;
+          }
+          break;
+        }
         case 'url':
           receipt = await page.url();
           if (typeof receipt !== 'string') throw new Error('ego returned a non-text URL');
@@ -170,9 +206,24 @@ let bool key fields = let* value=get key fields in match value with `Bool value 
   | _ -> Error ("workflow receipt has invalid " ^ key)
 let integer key fields = let* value=get key fields in match value with `Int value when value>=0 -> Ok value
   | _ -> Error ("workflow receipt has invalid " ^ key)
-let observation_receipt action value =
+let saved_fetch_receipt filename value =
+  let* fields=object_fields ["ok";"status";"statusText";"url";"headers";"downloadId";"suggestedFilename";"source"] value in
+  let* _=bool "ok" fields in let* _=integer "status" fields in
+  let* _=text "statusText" fields in let* _=text "url" fields in
+  let* headers=get "headers" fields in
+  let* ()=match headers with
+    | `Assoc headers when List.length headers=List.length (List.sort_uniq String.compare (List.map fst headers))
+        && List.for_all (function _,`String _ -> true | _,_ -> false) headers -> Ok ()
+    | _ -> Error "invalid saved fetch headers" in
+  let* id=text "downloadId" fields in
+  let* ()=match Uuidm.of_string id with Some uuid when Uuidm.to_string uuid=id -> Ok ()
+    | None|Some _ -> Error "invalid saved fetch download ID" in
+  let* name=text "suggestedFilename" fields in let* source=text "source" fields in
+  if name=filename && source="fetch" then Ok () else Error "saved fetch provenance does not match its request"
+let observation_receipt (step:Browser_lane.Native_workflow.step) value =
   let module W = Browser_lane.Native_workflow in
-  let valid=match action with
+  let* ()=match W.fetch_save_name step with None -> Ok () | Some filename -> saved_fetch_receipt filename value in
+  let valid=match step.action with
     | W.Url|Title|Snapshot -> (match value with `String _ -> true | _ -> false)
     | Info -> (match value with `Assoc _ -> true | _ -> false)
     | Events -> (match value with `List _ -> true | _ -> false)
@@ -181,7 +232,7 @@ let observation_receipt action value =
     | Fill _|Press _|Focus _|Reload|Keyboard_type _|Keyboard_insert_text _|Keyboard_paste _|Keyboard_press _
     | Select_option _|Goto _|Wait_for_url _|Wait_for_selector _|Wait_for_load_state _
     | Evaluate _|Wait_for_function _|Fetch _ -> true in
-  if valid then Ok () else Error ("invalid native " ^ W.method_name action ^ " observation receipt")
+  if valid then Ok () else Error ("invalid native " ^ W.method_name step.action ^ " observation receipt")
 let decode (request : Browser_lane.Native_workflow.t) receipt =
   let* fields=object_fields ["completed";"effectStarted";"completedEffect";"inputReleased";"failure";"urlBefore";"url";"title";"snapshot";"truncated";"chars"] receipt in
   let* started=bool "effectStarted" fields in let* completed_effect=bool "completedEffect" fields in
@@ -204,7 +255,7 @@ let decode (request : Browser_lane.Native_workflow.t) receipt =
       else match steps with
         | [] -> Error "workflow completed more steps than requested"
         | (step : Browser_lane.Native_workflow.step)::steps ->
-          let* ()=observation_receipt step.action receipt in
+          let* ()=observation_receipt step receipt in
           progress (index+1) (has_effect || Browser_lane.Native_workflow.is_effect step.action) steps rest in
   let* count,has_effect,remaining=progress 0 false request.steps completed in
   let* ()=if completed_effect=has_effect && (not has_effect || started) then Ok ()

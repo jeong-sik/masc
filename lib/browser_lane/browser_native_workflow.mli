@@ -8,7 +8,8 @@ type option_choice = Text of string | Match of option_match
 type selection = Clear | One of option_choice | Many of option_choice list
 type clipboard_content = { text : string; html : string option }
 type page_code = Expression of string | Call of { source : string; argument : Yojson.Safe.t }
-(** Validated SDK options for their exact method, excluding host paths. *)
+(** Validated SDK options for their exact method, excluding caller host paths.
+    Fetch [saveAs] names an artifact file; the worker supplies the private path. *)
 type native_options
 type action =
   | Click of string | Double_click of string | Hover of string
@@ -48,8 +49,11 @@ type t = private { tab_id : int; expected_url : string; steps : step list;
     with [argumentJson], it is called as a function with that parsed JSON value.
     Source is sent only to the SDK's Page expression channel and is never
     evaluated by Node or the host. Page code and fetch count as possible effects,
-    including state-wait predicates. Fetch forwards validated browser options;
-    [saveAs] requires a download-broker path and is refused here.
+    including state-wait predicates. Fetch forwards validated browser options.
+    [saveAs] is a nonempty filename, with no directory separators or control
+    characters. The worker maps it to a fresh private UUID path and returns a
+    download ID. Retrieve its bytes through the same tab's download reader;
+    a completed save in a stopped workflow is not permission to repeat fetch.
     [snapshot] forwards all SDK snapshot options, including subtree root and
     action-mark/stable-locator choices; the workflow still ends with its usual
     final snapshot. [url], [title], [info] and [snapshot] return their native
@@ -60,6 +64,9 @@ type t = private { tab_id : int; expected_url : string; steps : step list;
     There is no MASC step-count or cumulative execution-time limit. *)
 val of_json : Yojson.Safe.t -> (t, string) result
 val to_json : t -> Yojson.Safe.t
+val fetch_save_name : step -> string option
+(** Requested artifact filename for a saving Fetch; [None] for every other
+    step. This is display metadata and never a caller-selected host path. *)
 val is_effect : action -> bool
 (** May leave a pointer button or key held when the SDK result is lost or
     interrupted by a dialog. Paste uses the SDK's ControlOrMeta+V sequence. *)

@@ -1,5 +1,8 @@
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
+const path=require('node:path');
+const crypto=require('node:crypto');
+const os=require('node:os');
 const vm=require('node:vm');
 const test=require('node:test');
 const source=fs.readFileSync(require('node:path').join(__dirname,'../lib/browser_ego_workflow.ml'),'utf8').split('let script = {js|')[1].split('|js}')[0];
@@ -268,6 +271,110 @@ test('native fetch forwards browser options and returns HTTP errors as data',asy
  assert.equal(observed.url,'https://fixture.test/data');assert.equal(observed.options.timeout,400);
  assert.equal(observed.options.body,'한글 😀');assert.deepEqual(observed.options.headers,fetchOptions.headers);
  assert.equal(result.completedEffect,true);
+});
+function savedFetchFixture() {
+ const directory=fs.mkdtempSync(path.join(os.tmpdir(),'masc-fetch-test-'));
+ const context=vm.createContext({crypto});
+ const execute=vm.runInContext('('+source+')',context);
+ const f=fixture();
+ return {...f,directory,context,
+  run:steps=>execute(f.page,{...request(steps),downloads:directory,label:'p1'}),
+  close:()=>fs.rmSync(directory,{recursive:true,force:true})};
+}
+const savedMetadata=(savedPath,extra={})=>({ok:true,status:200,statusText:'OK',
+ url:'https://fixture.test/data',headers:{'content-type':'application/octet-stream'},savedPath,...extra});
+const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+function writeSavedFile(f,savedPath,bytes) {
+ assert.equal(path.dirname(savedPath),f.directory,'SDK writes only inside this test-owned directory');
+ assert.match(path.basename(savedPath),uuid);
+ fs.writeFileSync(savedPath,bytes);
+}
+test('saved native fetch writes binary bytes to a generated path and returns artifact provenance',async()=>{
+ const f=savedFetchFixture();const bytes=Buffer.from([0,255,128,13,10,0,65]);
+ const paths=[];
+ try {
+  for(const metadata of [{ok:true,status:200,statusText:'OK',url:'https://fixture.test/data'},
+    {ok:false,status:404,statusText:'Not Found',url:'https://fixture.test/missing'},
+    {ok:false,status:0,statusText:'',url:''}]) {
+   const name='한글 binary 404.bin';
+   const options={saveAs:name,method:'POST',body:'native body',credentials:'include',mode:'cors',redirect:'follow',timeout:41};
+   let calls=0;
+   f.page.fetch=async(url,actual)=>{
+    calls++;assert.equal(url,'/api/binary');
+    assert.equal(path.dirname(actual.saveAs),f.directory);
+    assert.match(path.basename(actual.saveAs),uuid);
+    assert.notEqual(path.basename(actual.saveAs),name);
+    assert.deepEqual({...actual,saveAs:name},options);
+    paths.push(actual.saveAs);writeSavedFile(f,actual.saveAs,bytes);
+    return savedMetadata(actual.saveAs,metadata);
+   };
+   const result=await f.run([{method:'fetch',url:'/api/binary',options}]);
+   assert.equal(result.failure,null);assert.equal(calls,1);
+   assert.equal(result.effectStarted,true);assert.equal(result.completedEffect,true);
+   const receipt=result.completed[0].receipt;
+   assert.deepEqual(Object.keys(receipt).sort(),['downloadId','headers','ok','source','status','statusText','suggestedFilename','url'].sort());
+   assert.equal(receipt.source,'fetch');assert.equal(receipt.suggestedFilename,name);
+   assert.equal(receipt.status,metadata.status);assert.equal(receipt.ok,metadata.ok);
+   assert.equal(receipt.url,metadata.url);assert.match(receipt.downloadId,uuid);
+   const row=f.context.mascDownloads.rows.at(-1);
+   assert.equal(row.id,receipt.downloadId);assert.equal(path.basename(row.path),row.id);
+   assert.equal(row.label,'p1');assert.equal(row.source,'fetch');assert.equal(row.state,'completed');
+   assert.equal(row.suggestedFilename,name);assert.equal(row.url,metadata.url);assert.equal(row.reason,null);
+   assert.deepEqual(fs.readFileSync(row.path),bytes);
+   assert.equal(options.saveAs,name,'the requested artifact name remains caller data');
+  }
+  assert.equal(new Set(paths).size,3,'each save has a separate generated file');
+  assert.equal(f.context.mascDownloads.rows.length,3);
+ } finally {f.close();}
+});
+test('a failed or forged saved fetch retains its partial file and stops without retry',async()=>{
+ const invalid=[
+  ()=>{throw Error('native fetch response lost');},
+  actual=>savedMetadata(path.join(path.dirname(actual),'foreign.bin')),
+  actual=>{const receipt=savedMetadata(actual);delete receipt.savedPath;return receipt;},
+  actual=>({...savedMetadata(actual),body:'unexpected SDK save metadata'}),
+  actual=>savedMetadata(actual,{ok:'true'}),
+  actual=>savedMetadata(actual,{status:'200'}),
+  actual=>savedMetadata(actual,{statusText:null}),
+  actual=>savedMetadata(actual,{url:null}),
+  actual=>savedMetadata(actual,{headers:{'x-test':3}}),
+ ];
+ for(const answer of invalid) {
+  const f=savedFetchFixture();let calls=0,actualPath;
+  try {
+   f.page.fetch=async(_url,options)=>{calls++;actualPath=options.saveAs;
+    writeSavedFile(f,actualPath,Buffer.from([0,255,1]));return answer(actualPath);};
+   const result=await f.run([{method:'fetch',url:'/api/binary',options:{saveAs:'retained.bin'}},
+    {method:'click',selector:'#must-not-replay'}]);
+   assert.equal(calls,1);assert.equal(result.failure.method,'fetch');
+   assert.equal(result.completed.length,0);assert.equal(result.effectStarted,true);assert.equal(result.completedEffect,false);
+   assert.equal(f.calls.some(call=>call[0]==='click'),false);
+   const row=f.context.mascDownloads.rows[0];
+   assert.equal(row.state,'interrupted');assert.equal(row.path,null);assert.equal(row.source,'fetch');
+   assert.equal(row.label,'p1');assert.equal(row.suggestedFilename,'retained.bin');
+   assert.equal(typeof row.reason,'string');assert.notEqual(row.reason.length,0);
+   assert.deepEqual(fs.readFileSync(actualPath),Buffer.from([0,255,1]));
+  } finally {f.close();}
+ }
+});
+test('a completed saved fetch remains recoverable after a later step or final snapshot fails',async()=>{
+ for(const later of ['step','snapshot']) {
+  const f=savedFetchFixture();let calls=0;
+  try {
+   f.page.fetch=async(_url,options)=>{calls++;writeSavedFile(f,options.saveAs,Buffer.from([1,0,255]));return savedMetadata(options.saveAs);};
+   if(later==='step')f.page.waitForURL=async()=>{throw Error('later wait failed');};
+   else f.page.snapshot=async()=>{throw Error('final snapshot failed');};
+   const steps=[{method:'fetch',url:'/api/binary',options:{saveAs:'complete.bin'}}];
+   if(later==='step')steps.push({method:'waitForURL',url:destination});
+   const result=await f.run(steps);
+   assert.equal(calls,1);assert.equal(result.failure.method,later==='step'?'waitForURL':'snapshot');
+   assert.equal(result.completed.length,1);assert.equal(result.completedEffect,true);
+   const row=f.context.mascDownloads.rows[0];
+   assert.equal(row.id,result.completed[0].receipt.downloadId);assert.equal(row.state,'completed');
+   assert.equal(row.source,'fetch');assert.equal(row.reason,null);
+   assert.deepEqual(fs.readFileSync(row.path),Buffer.from([1,0,255]));
+  } finally {f.close();}
+ }
 });
 test('Page execution and state predicates can have effects before an uncertain failure',async()=>{
  for (const method of ['evaluate','waitForFunction','fetch']) {

@@ -105,6 +105,7 @@ val refresh_llama_endpoints
   -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> endpoints:Discovery.endpoint list
+  -> unit
   -> (Discovery.endpoint_status list, endpoint_refresh_error) result
 
 (** Current active endpoint list (snapshot after last refresh).

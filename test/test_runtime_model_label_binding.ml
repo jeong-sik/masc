@@ -335,7 +335,7 @@ let ollama_auto_does_not_reuse_unauthenticated_cache_for_keyed_binding () =
     let declared = Llm_provider.Discovery.endpoint
       ~protocol:Llm_provider.Discovery.Ollama_native
       ~capabilities:Llm_provider.Capabilities.ollama_capabilities endpoint in
-    ignore (Llm_provider.Provider_registry.refresh_llama_endpoints ~sw ~net ~endpoints:[declared]);
+    ignore (Llm_provider.Provider_registry.refresh_llama_endpoints ~sw ~net ~endpoints:[declared] ());
     ignore (Discovery_cache.get_cached_or_refresh ());
     with_env "MASC_TEST_OLLAMA_KEY" (Some "test-ollama-secret") (fun () ->
       with_catalog ~endpoint (fun () ->
@@ -370,7 +370,7 @@ let ollama_auto_renews_stale_selected_endpoint () =
       let declared = Llm_provider.Discovery.endpoint
         ~protocol:Llm_provider.Discovery.Ollama_native
         ~capabilities:Llm_provider.Capabilities.ollama_capabilities endpoint in
-      ignore (Llm_provider.Provider_registry.refresh_llama_endpoints ~sw ~net ~endpoints:[declared]);
+      ignore (Llm_provider.Provider_registry.refresh_llama_endpoints ~sw ~net ~endpoints:[declared] ());
       ignore (Discovery_cache.get_cached_or_refresh ());
       with_catalog ~endpoint (fun () ->
         let initial = Runtime_model_string.parse_model_string "ollama:auto" in
@@ -408,7 +408,7 @@ let ollama_auto_does_not_reuse_openai_compatible_cache () =
     let declared = Llm_provider.Discovery.endpoint
       ~protocol:Llm_provider.Discovery.Openai_compatible
       ~capabilities:Llm_provider.Capabilities.openai_compat_chat_capabilities endpoint in
-    ignore (Llm_provider.Provider_registry.refresh_llama_endpoints ~sw ~net ~endpoints:[declared]);
+    ignore (Llm_provider.Provider_registry.refresh_llama_endpoints ~sw ~net ~endpoints:[declared] ());
     ignore (Discovery_cache.get_cached_or_refresh ());
     with_catalog ~endpoint (fun () ->
       match Runtime_model_string.parse_model_string "ollama:auto" with
@@ -444,7 +444,7 @@ let ollama_auto_does_not_refresh_other_endpoints () =
       let declared = Llm_provider.Discovery.endpoint
         ~protocol:Llm_provider.Discovery.Ollama_native
         ~capabilities:Llm_provider.Capabilities.ollama_capabilities other_endpoint in
-      ignore (Llm_provider.Provider_registry.refresh_llama_endpoints ~sw ~net ~endpoints:[declared]);
+      ignore (Llm_provider.Provider_registry.refresh_llama_endpoints ~sw ~net ~endpoints:[declared] ());
       other_hits := 0;
       with_catalog ~endpoint (fun () ->
         match Runtime_model_string.parse_model_string "ollama:auto" with
@@ -496,7 +496,7 @@ let ollama_auto_preserves_public_observation_through_global_refresh () =
       let declared = Llm_provider.Discovery.endpoint
         ~protocol:Llm_provider.Discovery.Ollama_native
         ~capabilities:Llm_provider.Capabilities.ollama_capabilities other_endpoint in
-      ignore (Llm_provider.Provider_registry.refresh_llama_endpoints ~sw ~net ~endpoints:[declared]);
+      ignore (Llm_provider.Provider_registry.refresh_llama_endpoints ~sw ~net ~endpoints:[declared] ());
       with_catalog ~endpoint (fun () ->
         (match Runtime_model_string.parse_model_string "ollama:auto" with
          | Some config -> Alcotest.(check string) "cold public discovery resolves its model"
@@ -757,7 +757,7 @@ let global_registry_probe_uses_declared_deadline () =
     (match Eio.Time.with_timeout clock 5. (fun () ->
        Ok (Provider_registry.refresh_llama_endpoints
          ~sw ~net ~clock:(clock :> float Eio.Time.clock_ty Eio.Resource.t)
-         ~endpoints:[declared])) with
+         ~endpoints:[declared] ())) with
      | Ok (Error (Provider_registry.No_healthy_endpoints [ status ])) ->
        Alcotest.(check bool) "declared timeout produces an unhealthy endpoint"
          false status.healthy
@@ -799,7 +799,7 @@ let global_cache_probe_preserves_declared_deadline () =
       ~capabilities:Capabilities.ollama_capabilities endpoint in
     (match Provider_registry.refresh_llama_endpoints
        ~sw ~net ~clock:(clock :> float Eio.Time.clock_ty Eio.Resource.t)
-       ~endpoints:[declared] with
+       ~endpoints:[declared] () with
      | Ok [ status ] ->
        Alcotest.(check bool) "initial registry activation succeeds" true status.healthy
      | Ok _ -> Alcotest.fail "registry returned an unexpected activation count"

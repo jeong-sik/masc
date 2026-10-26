@@ -328,7 +328,7 @@ let discover ?clock ?timeout_s ~headers ~sw ~net ~endpoints () =
        probe_endpoint ~headers ?clock ?timeout_s ~sw ~net declared)
     endpoints
 
-let refresh_and_sync ?clock:_ ~sw ~net ~endpoints =
+let refresh_and_sync ?clock:_ ~sw ~net ~endpoints () =
   let statuses = discover ~headers:[] ~sw ~net ~endpoints () in
   let healthy = List.filter (fun (s : endpoint_status) -> s.healthy) statuses in
   (* llama-server /props reports n_ctx as the per-slot context

@@ -220,4 +220,5 @@ val refresh_and_sync
   -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> endpoints:endpoint list
+  -> unit
   -> endpoint_status list

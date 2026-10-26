@@ -440,7 +440,7 @@ let test_refresh_and_sync_mock_server_updates_indexes () =
         ~capabilities:Capabilities.openai_compat_chat_capabilities
         endpoint
     in
-    let statuses = Discovery.refresh_and_sync ~sw ~net ~endpoints:[ declared ] in
+    let statuses = Discovery.refresh_and_sync ~sw ~net ~endpoints:[ declared ] () in
     match statuses with
     | [ status ] ->
       Alcotest.(check bool) "healthy" true status.healthy;

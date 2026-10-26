@@ -735,6 +735,90 @@ let declared_default_skips_discovery () = with_catalog (fun () ->
     | Some config -> config | None -> Alcotest.fail "declared default was refused" in
   Alcotest.(check string) "declared default wins without discovery" "overlap" config.model_id)
 
+let global_registry_probe_uses_declared_deadline () =
+  let clock = Eio_mock.Clock.make () in
+  Eio_mock.Clock.set_time clock 1000.;
+  let tag_requests = ref 0 in
+  let handler _conn req body =
+    ignore (Eio.Buf_read.(of_flow ~max_size:(1024 * 1024) body |> take_all) : string);
+    match Uri.path (Cohttp.Request.uri req) with
+    | "/api/tags" ->
+      incr tag_requests;
+      Eio_mock.Clock.advance clock;
+      let pending, _ = Eio.Promise.create () in
+      Eio.Promise.await pending
+    | _ -> Cohttp_eio.Server.respond_string ~status:`Not_found ~body:"missing" ()
+  in
+  with_mock_server handler (fun ~sw ~net ~clock:_ ~endpoint ->
+    let declared = Discovery.endpoint
+      ~discovery_timeout_s:4.0
+      ~protocol:Discovery.Ollama_native
+      ~capabilities:Capabilities.ollama_capabilities endpoint in
+    (match Eio.Time.with_timeout clock 5. (fun () ->
+       Ok (Provider_registry.refresh_llama_endpoints
+         ~sw ~net ~clock:(clock :> float Eio.Time.clock_ty Eio.Resource.t)
+         ~endpoints:[declared])) with
+     | Ok (Error (Provider_registry.No_healthy_endpoints [ status ])) ->
+       Alcotest.(check bool) "declared timeout produces an unhealthy endpoint"
+         false status.healthy
+     | Ok (Error Provider_registry.No_endpoints_declared) ->
+       Alcotest.fail "the declared endpoint disappeared"
+     | Ok (Error (Provider_registry.No_healthy_endpoints _)) ->
+       Alcotest.fail "registry returned an unexpected endpoint count"
+     | Ok (Ok _) -> Alcotest.fail "an unanswered registry probe became healthy"
+     | Error `Timeout -> Alcotest.fail "the registry probe escaped its declared deadline");
+    Alcotest.(check (float 0.001)) "registry probe expires at its declared four seconds"
+      1004.0 (Eio.Time.now clock);
+    Alcotest.(check int) "the bounded registry attempt reached the endpoint"
+      1 !tag_requests)
+
+let global_cache_probe_preserves_declared_deadline () =
+  let clock = Eio_mock.Clock.make () in
+  Eio_mock.Clock.set_time clock 1000.;
+  let tag_requests = ref 0 in
+  let handler _conn req body =
+    ignore (Eio.Buf_read.(of_flow ~max_size:(1024 * 1024) body |> take_all) : string);
+    match Uri.path (Cohttp.Request.uri req) with
+    | "/api/tags" ->
+      incr tag_requests;
+      if !tag_requests = 1 then
+        Cohttp_eio.Server.respond_string ~status:`OK
+          ~body:{|{"models":[{"name":"global-model"}]}|} ()
+      else
+        (Eio_mock.Clock.advance clock;
+         let pending, _ = Eio.Promise.create () in
+         Eio.Promise.await pending)
+    | _ -> Cohttp_eio.Server.respond_string ~status:`Not_found ~body:"missing" ()
+  in
+  with_mock_server handler (fun ~sw ~net ~clock:_ ~endpoint ->
+    Discovery_cache.set_env ~sw ~net
+      ~clock:(clock :> float Eio.Time.clock_ty Eio.Resource.t);
+    let declared = Discovery.endpoint
+      ~discovery_timeout_s:4.0
+      ~protocol:Discovery.Ollama_native
+      ~capabilities:Capabilities.ollama_capabilities endpoint in
+    (match Provider_registry.refresh_llama_endpoints
+       ~sw ~net ~clock:(clock :> float Eio.Time.clock_ty Eio.Resource.t)
+       ~endpoints:[declared] with
+     | Ok [ status ] ->
+       Alcotest.(check bool) "initial registry activation succeeds" true status.healthy
+     | Ok _ -> Alcotest.fail "registry returned an unexpected activation count"
+     | Error Provider_registry.No_endpoints_declared ->
+       Alcotest.fail "the declared endpoint disappeared"
+     | Error (Provider_registry.No_healthy_endpoints _) ->
+       Alcotest.fail "the immediate activation probe failed");
+    (match Eio.Time.with_timeout clock 5. (fun () ->
+       Ok (Discovery_cache.get_cached_or_refresh ())) with
+     | Ok [ status ] ->
+       Alcotest.(check bool) "global cache observes the declared timeout"
+         false status.healthy
+     | Ok _ -> Alcotest.fail "global cache returned an unexpected endpoint count"
+     | Error `Timeout -> Alcotest.fail "the global cache escaped its declared deadline");
+    Alcotest.(check (float 0.001)) "global cache expires at its declared four seconds"
+      1004.0 (Eio.Time.now clock);
+    Alcotest.(check int) "activation and bounded refresh both reached the endpoint"
+      2 !tag_requests)
+
 let () = Alcotest.run "runtime model label binding"
   ["provider authority",["identity",`Quick,identity;"context",`Quick,context;"policy and wire",`Quick,policy];
    "custom endpoint",["missing",`Quick,missing_endpoint;"ambient",`Quick,ambient_endpoint;
@@ -762,4 +846,6 @@ let () = Alcotest.run "runtime model label binding"
      "authenticated fresh cache isolation",`Quick,ollama_auto_does_not_reuse_unauthenticated_cache_for_keyed_binding;
      "stale selected endpoint",`Quick,ollama_auto_renews_stale_selected_endpoint;
      "wrong protocol cache",`Quick,ollama_auto_does_not_reuse_openai_compatible_cache;
-     "cold cache endpoint isolation",`Quick,ollama_auto_does_not_refresh_other_endpoints]]
+     "cold cache endpoint isolation",`Quick,ollama_auto_does_not_refresh_other_endpoints;
+     "global registry declared deadline",`Quick,global_registry_probe_uses_declared_deadline;
+     "global cache declared deadline",`Quick,global_cache_probe_preserves_declared_deadline]]

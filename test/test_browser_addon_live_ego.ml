@@ -245,7 +245,7 @@ def run(script,answer):
         if mode=='in-use':answer(error='EGO_TASK_SPACE_NAME_IN_USE: masc')
         else:answer({'spaceId':51,'name':'SDK Space','ownership':'agent'})
     elif step=='tabs.list':
-        answer([{'label':'p1','targetId':'T1','title':'Fixture','url':'https://fixture.test/','active':True,'dialog':None,'dialogUnread':None}])
+        answer([{'label':'p1','targetId':'T1','openedBy':'agent','title':'Fixture','url':'https://fixture.test/','active':True,'dialog':None,'dialogUnread':None}])
     elif step=='page.capture':
         path=pathlib.Path(args['path'])
         path.write_bytes(b'\x89PNG\r\n\x1a\nfixture')

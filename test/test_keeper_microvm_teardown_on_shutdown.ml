@@ -18,20 +18,34 @@ module Runtime = Masc.Keeper_turn_sandbox_runtime
    guest: the host's own CLI, or a host without one, would decide the case
    instead. *)
 let test_removing_an_absent_guest_succeeds () =
-  let base_path = Filename.temp_file "microvm_teardown_" "" in
-  Unix.unlink base_path;
-  Unix.mkdir base_path 0o755;
+  Eio_main.run @@ fun env ->
+  let fs = Eio.Stdenv.fs env in
+  let previous_fs = Fs_compat.get_fs_opt () in
+  let context = Eio_context.snapshot_state () in
+  Fs_compat.set_fs fs;
+  Process_eio.init ~cwd_default:Eio.Path.(fs / Sys.getcwd ())
+    ~proc_mgr:(Eio.Stdenv.process_mgr env) ~clock:(Eio.Stdenv.clock env);
+  Fun.protect ~finally:(fun () ->
+    Process_eio.reset_for_testing ();
+    Eio_context.restore_state context;
+    match previous_fs with Some fs -> Fs_compat.set_fs fs | None -> Fs_compat.clear_fs ())
+  @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.set_switch sw;
+  let base_path = Filename.temp_dir "microvm_teardown_" "" in
   let cli = Filename.concat base_path "container" in
+  let calls_path = Filename.concat base_path "calls" in
   Out_channel.with_open_bin cli (fun channel ->
-    output_string channel
-      "#!/bin/sh\n\
-       case \"$1\" in\n\
-      \  stop|delete) exit 0 ;;\n\
-      \  inspect) echo \"Error: container not found: $2\" >&2; exit 1 ;;\n\
-      \  list) printf '[]\\n' ;;\n\
-      \  *) exit 99 ;;\n\
-       esac\n");
-  Unix.chmod cli 0o755;
+    Printf.fprintf channel {|#!/bin/sh
+printf '%%s\n' "$*" >> %s
+case "$1" in
+  stop|delete) exit 0 ;;
+  inspect) exit 1 ;;
+  list) printf '[]\n' ;;
+  *) exit 99 ;;
+esac
+|} (Filename.quote calls_path));
+  Unix.chmod cli 0o700;
   let previous_path = Sys.getenv "PATH" in
   Unix.putenv "PATH" (base_path ^ ":" ^ previous_path);
   Fun.protect
@@ -40,23 +54,25 @@ let test_removing_an_absent_guest_succeeds () =
       Fs_compat.remove_tree base_path)
     (fun () ->
        let config = Masc.Workspace.default_config base_path in
-       match
-         Runtime.teardown_keeper_sandbox_by_name
-           ~timeout_sec:30.0
-           ~config
-           ~keeper_name:"microvm-teardown-probe-never-started"
-           ~backend:Masc.Keeper_sandbox.Micro_vm
-           (* The runtime is named because teardown refuses an unnamed one:
-              a guest can only be removed with the spelling of the CLI that
-              booted it. *)
-           ~microvm_backend:Masc.Keeper_microvm_backend.Apple_container
-           ()
-       with
-       | Ok () -> ()
-       | Error detail ->
-         Alcotest.failf
-           "removing a guest that was never started must succeed, got: %s"
-           detail)
+       let keeper_name = "microvm-teardown-probe-never-started" in
+       (match Runtime.teardown_keeper_sandbox_by_name ~timeout_sec:30. ~config
+           ~keeper_name ~backend:Masc.Keeper_sandbox.Micro_vm
+           ~microvm_backend:Masc.Keeper_microvm_backend.Apple_container () with
+        | Ok () -> ()
+        | Error detail -> Alcotest.failf
+            "removing a guest that was never started must succeed, got: %s" detail);
+       let calls = In_channel.with_open_bin calls_path In_channel.input_all
+           |> String.split_on_char '\n' |> List.filter (fun call -> call <> "") in
+       Alcotest.(check bool) "actual complete inventory establishes absence" true
+         (List.mem "list --all --format json" calls);
+       List.iter (fun network_mode ->
+         let guest = Runtime.For_testing_microvm.microvm_container_name ~config ~keeper_name ~network_mode in
+         Alcotest.(check bool) ("actual stop reached " ^ guest) true
+           (List.mem ("stop " ^ guest) calls);
+         Alcotest.(check bool) ("actual delete reached " ^ guest) true
+           (List.mem ("delete --force " ^ guest) calls))
+         Keeper_types_profile_sandbox.all_network_modes)
+;;
 
 (* A caller that forgets the runtime gets a refusal, not a guess. Shutdown
    finalization treats a teardown failure as a warning and finishes, so an

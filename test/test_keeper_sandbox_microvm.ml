@@ -2565,7 +2565,7 @@ esac
 (* A trim helper that outlives its removal must not spare the ordinary
    guests: every name is attempted, and the trim error surfaces only when
    all removals succeeded. The helper and the guests are read from the same
-   listing, which names the helper and none of the guests. *)
+   full listing. A guest that refuses deletion remains in that inventory. *)
 let test_teardown_removes_guests_despite_trim_cleanup_error () =
   with_eio_fs @@ fun () ->
   let module Turn = Masc.Keeper_turn_sandbox_runtime in
@@ -2597,7 +2597,12 @@ stuck_guest=%s
 stuck=%s
 printf '%%s\n' "$*" >> "$log"
 case "$*" in
-  "list --all --format json") printf '[{"id":"%%s"}]\n' "$trim" ;;
+  "list --all --format json")
+    if [ -e "$stuck" ]; then
+      printf '[{"id":"%%s"},{"id":"%%s"}]\n' "$trim" "$stuck_guest"
+    else
+      printf '[{"id":"%%s"}]\n' "$trim"
+    fi ;;
   "inspect $stuck_guest")
     if [ -e "$stuck" ]; then printf '[{"status":{"state":"running"}}]\n'; exit 0; else exit 1; fi ;;
   inspect\ *) exit 1 ;;
@@ -2650,7 +2655,11 @@ esac
      Alcotest.(check bool) "guest failure wins over the trim failure" true
        (Astring.String.is_infix ~affix:"microvm_teardown_failed" detail)
    | Ok () -> Alcotest.fail "a stuck guest was reported as removed");
+  Alcotest.(check bool) "stuck guest evidence remains after failed teardown" true
+    (Sys.file_exists stuck);
   let second_calls = calls () in
+  Alcotest.(check bool) "teardown requested full inventory before reporting presence" true
+    (List.mem "list --all --format json" second_calls);
   List.iter
     (fun guest ->
        Alcotest.(check bool) ("teardown still attempts " ^ guest) true

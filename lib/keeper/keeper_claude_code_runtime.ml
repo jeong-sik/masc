@@ -800,6 +800,10 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     let* () = Keeper_official_task_reference.require_preserved
       ~reference:historical_task_message prepared.messages
       |> Result.map_error (config_error ~field:"official_client_session.task_reference") in
+    let* tool_outbox = Keeper_client_tool_outbox.load ~base_path ~keeper_name
+      |> Result.map_error internal_error in
+    let prepared = {prepared with Host.messages = prepared.messages
+      @ Option.to_list (Keeper_client_tool_outbox.context_message tool_outbox)} in
     let* system_messages, history = project_messages prepared.messages in
     let* goal, images =
       match goal_blocks with
@@ -1554,6 +1558,12 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       | Eio.Cancel.Cancelled _ as exn -> settle_cancellation exn
       | exn when Keeper_owner_signals.is_owner_cancel_reason exn ->
         settle_cancellation exn
+    in
+    let turn_result =
+      let* result = turn_result in
+      let* () = Keeper_client_tool_outbox.settle_after_turn tool_outbox ~stop_reason:result.stop_reason
+        |> Result.map_error internal_error in
+      Ok result
     in
     let turn_result =
       match turn_result with

@@ -1100,9 +1100,9 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     (* Ordinary context keeps its existing placement. Receipts that outlived
        a cancelled vendor cell enter both Start and Resume as acknowledged
        developer items, independently of the previous session's survival. *)
-    let* tool_outbox = Keeper_codex_tool_outbox.load ~base_path ~keeper_name
+    let* tool_outbox = Keeper_client_tool_outbox.load ~base_path ~keeper_name
       |> Result.map_error internal_error in
-    let developer_context = Keeper_codex_tool_outbox.developer_context tool_outbox in
+    let developer_context = Keeper_client_tool_outbox.developer_context tool_outbox in
     let terminal_error = ref None in
     (* Reported only after the complete turn/start write. A Resume sent none of
        the conversation; the thread holds it. *)
@@ -1389,7 +1389,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
            session_state := settled;
            on_session_settled settled;
            let* result = projected in
-           let* () = Keeper_codex_tool_outbox.settle_after_turn tool_outbox
+           let* () = Keeper_client_tool_outbox.settle_after_turn tool_outbox
              ~stop_reason:result.stop_reason
              |> Result.map_error internal_error in
            Ok result)
@@ -1501,11 +1501,14 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
          ~history
          ~developer_context
          ~on_undelivered_tool_result:
-           (fun receipt ->
-             let* () = Keeper_codex_tool_outbox.retain ~base_path ~keeper_name receipt in
+           (fun (receipt : Runtime_codex_app_server.undelivered_tool_result) ->
+             let receipt : Keeper_client_tool_outbox.receipt =
+               {thread_id=receipt.thread_id;turn_id=receipt.turn_id;call_id=receipt.call_id;
+                tool_name=receipt.tool_name;arguments=receipt.arguments;response=receipt.response} in
+             let* () = Keeper_client_tool_outbox.retain ~base_path ~keeper_name receipt in
              (* The receipt is committed even if notification cannot commit.
                 Startup and the existing maintenance pulse rediscover it. *)
-             (match Keeper_codex_tool_outbox_wake.notify ~base_path ~keeper_name with
+             (match Keeper_client_tool_outbox_wake.notify ~base_path ~keeper_name with
               | Ok () -> ()
               | Error detail -> Log.Keeper.warn ~keeper_name
                   "retained tool result notification deferred: %s" detail
@@ -1681,7 +1684,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
          | Some (_, Direct_schedule _),
              (Handoff_unrequested | Handoff_rejected) -> Completed { provider_turn_ordinal = turn_count }
        in
-       let* () = Keeper_codex_tool_outbox.settle_after_turn tool_outbox ~stop_reason
+       let* () = Keeper_client_tool_outbox.settle_after_turn tool_outbox ~stop_reason
          |> Result.map_error internal_error in
        let capture, _metrics =
          Runtime_observation.runtime_metrics_for_candidates ~runtime_id ~keeper_name ()

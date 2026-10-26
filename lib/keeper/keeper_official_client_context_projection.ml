@@ -112,6 +112,7 @@ let is_composed_system_context (message : Agent_core.Types.message) =
   (message.origin = Agent_core.Types.System_context)
   || Runtime_model_input_tail_window.is_working_state message
   || Runtime_model_input_tail_window.is_unread_context message
+  || Keeper_client_tool_outbox.is_context_message message
 ;;
 
 let history_role_label = function
@@ -291,6 +292,8 @@ let carried_of_message ~composed_context (message : Agent_core.Types.message) =
   then [ carried_message Session_store.Historical_task_reference message ]
   else if Runtime_model_input_tail_window.is_unread_context message
   then [ carried_message Session_store.Librarian_unread message ]
+  else if Keeper_client_tool_outbox.is_context_message message
+  then [ carried_message Session_store.Tool_result_receipts message ]
   else if Runtime_model_input_tail_window.is_working_state message
   then [ carried_message Session_store.Librarian_working_state message ]
   else if is_composed_system_context message
@@ -376,6 +379,7 @@ let carried_label = function
   | Session_store.Librarian_working_state -> "librarian_working_state"
   | Session_store.Librarian_unread -> "librarian_unread"
   | Session_store.Historical_task_reference -> "historical_task_reference"
+  | Session_store.Tool_result_receipts -> "tool_result_receipts"
 ;;
 
 let carried_sha256_prefix_length = 12
@@ -407,7 +411,7 @@ let is_block item =
      | Session_store.Context_carrier
      | Session_store.Librarian_working_state
      | Session_store.Librarian_unread
-     | Session_store.Historical_task_reference -> false)
+     | Session_store.Historical_task_reference | Session_store.Tool_result_receipts -> false)
 ;;
 
 let block_text item =
@@ -425,7 +429,7 @@ let block_id item = match item.held.Session_store.context with
   | Session_store.Context_section _ | Session_store.Context_section_row _
   | Session_store.Context_carrier
   | Session_store.Librarian_working_state | Session_store.Librarian_unread
-  | Session_store.Historical_task_reference -> None
+  | Session_store.Historical_task_reference | Session_store.Tool_result_receipts -> None
 
 let sections_notice key sections =
   Prompt_registry.render_prompt_template
@@ -494,7 +498,8 @@ let held_row_digests ~held section =
          when held_in = section -> Some row_sha256
        | Session_store.(
            Context_section_row _ | Context_block _ | Context_section _ | Context_carrier
-           | Librarian_working_state | Librarian_unread | Historical_task_reference) -> None)
+           | Librarian_working_state | Librarian_unread | Historical_task_reference
+           | Tool_result_receipts) -> None)
     held
 ;;
 
@@ -736,7 +741,7 @@ let resume_prompt ~goal ~held ?composed_context messages =
             | Librarian_working_context | Operator_note | Skill_compositions)
       | Session_store.Librarian_working_state
       | Session_store.Librarian_unread
-      | Session_store.Historical_task_reference ) -> false
+      | Session_store.Historical_task_reference | Session_store.Tool_result_receipts ) -> false
     | Whole_text, previous_context ->
       (not item.resent_when_held)
       && (match item.held.context, previous_context with
@@ -753,14 +758,14 @@ let resume_prompt ~goal ~held ?composed_context messages =
                | Session_store.Context_carrier
                | Session_store.Librarian_working_state
                | Session_store.Librarian_unread
-               | Session_store.Historical_task_reference ) as current_context)
+               | Session_store.Historical_task_reference | Session_store.Tool_result_receipts ) as current_context)
             , (( Session_store.Context_block _
                | Session_store.Context_section _
                | Session_store.Context_section_row _
                | Session_store.Context_carrier
                | Session_store.Librarian_working_state
                | Session_store.Librarian_unread
-               | Session_store.Historical_task_reference ) as previous_context) ) ->
+               | Session_store.Historical_task_reference | Session_store.Tool_result_receipts ) as previous_context) ) ->
             current_context = previous_context)
   in
   let held_context =

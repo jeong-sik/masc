@@ -3081,13 +3081,54 @@ let test_actual_start_demotes_arguments_but_resume_keeps_them_held () =
     [true;false]
 ;;
 
+let test_original_result_crosses_checkpoint_and_fresh_session () =
+  with_scripted_host (fun ~base_path ->
+    let get = function Ok value -> value | Error detail -> fail detail in
+    let tool = masc_probe_tool (ref `Null) in
+    ignore (settle_first_turn ~base_path ~tool);
+    let receipt : Keeper_client_tool_outbox.receipt =
+      {thread_id="original-codex-thread";turn_id="original-result-turn";call_id="original-call";
+       tool_name="Execute";arguments=`Assoc ["command",`String "original-effect-no-replay"];
+       response=`String "ORIGINAL_CROSS_RUNTIME_RESULT"} in
+    Keeper_client_tool_outbox.retain ~base_path ~keeper_name receipt |> get;
+    let load () = Keeper_client_tool_outbox.load ~base_path ~keeper_name |> get in
+    write_fixture ~base_path (scenario "stop_before_ack");
+    let stopped = run_turn_with ~base_path ~tool
+      ~on_official_client_tool_boundary:(fun () -> Ok (Some
+        (Keeper_official_client_host.Terminal_tool_boundary
+          {tool_name="masc_probe";outcome=Durable_stimulus_deferred}))) () in
+    (match stopped.outcome.result with
+     | Ok {Runtime_agent.stop_reason=Yielded_to_durable_stimulus _;_} -> ()
+     | Ok _ -> fail "the host checkpoint lost its typed cause"
+     | Error error -> fail (Agent_core.Error.to_string error));
+    check bool "Muse resume receives the original other-runtime result" true
+      (String_util.contains_substring (read_text (Filename.concat base_path "resume-prompt.txt"))
+         "ORIGINAL_CROSS_RUNTIME_RESULT");
+    check int "host checkpoint does not ACK original result data" 1
+      (List.length (Keeper_client_tool_outbox.receipt_ids (load ())));
+    Store.clear_then ~base_path ~keeper_name (fun () -> ()) |> get;
+    write_fixture ~base_path [];
+    (match (run_turn_with ~base_path ~tool ()).outcome.result with
+     | Ok {Runtime_agent.stop_reason=Completed _;session_resumed=Some false;_} -> ()
+     | Ok _ -> fail "replacement consumer did not complete a fresh session"
+     | Error error -> fail (Agent_core.Error.to_string error));
+    check bool "replacement Start receives exact original result" true
+      (String_util.contains_substring (read_text (Filename.concat base_path "start-prompt.txt"))
+         "ORIGINAL_CROSS_RUNTIME_RESULT");
+    check int "completed replacement acknowledges the original snapshot" 0
+      (List.length (Keeper_client_tool_outbox.receipt_ids (load ()))))
+;;
+
 let () =
   (* The Muse start prompt uses the shared Antigravity framing assets. Pin
      their source directory so selected cases also run outside Dune. *)
   Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
   run
     "keeper_muse_runtime"
-    [ ( "stream"
+    [ ( "async result outbox"
+      , [test_case "original result crosses checkpoint and fresh-session delivery" `Quick
+           test_original_result_crosses_checkpoint_and_fresh_session])
+    ; ( "stream"
       , [ test_case "native failure reaches its exact stream block" `Quick
             test_native_failure_reaches_the_exact_stream_block
         ; test_case "identity-less native tool leaves no open block" `Quick test_native_tool_without_identity_does_not_open_a_block

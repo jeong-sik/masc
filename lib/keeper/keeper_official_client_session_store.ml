@@ -141,6 +141,7 @@ type carried_context =
   | Context_carrier
   | Librarian_working_state
   | Librarian_unread
+  | Tool_result_receipts
   | Historical_task_reference
 
 type held_context =
@@ -460,7 +461,7 @@ let validate binding =
                      not (String.equal row_sha256 held.sha256)
                    | Context_block _ | Context_section _ | Context_carrier
                    | Librarian_working_state | Librarian_unread
-                   | Historical_task_reference -> false)
+                   | Historical_task_reference | Tool_result_receipts -> false)
                 frontier.held_context
       then Error "held section row is not named by its own digest"
       else if List.length (List.sort_uniq compare held_contexts) <> List.length held_contexts
@@ -757,6 +758,7 @@ let held_context_to_yojson { context; sha256 } =
     | Context_carrier -> [ "context", `String "carrier" ]
     | Librarian_working_state -> [ "context", `String "working_state" ]
     | Librarian_unread -> [ "context", `String "librarian_unread" ]
+    | Tool_result_receipts -> [ "context", `String "tool_result_receipts" ]
     | Historical_task_reference -> [ "context", `String "task_reference" ]
   in
   `Assoc (context_fields @ [ "sha256", `String sha256 ])
@@ -781,6 +783,7 @@ let held_context_of_yojson = function
       | [ "context", `String "carrier"; "sha256", _ ] -> Ok Context_carrier
       | [ "context", `String "working_state"; "sha256", _ ] -> Ok Librarian_working_state
       | [ "context", `String "librarian_unread"; "sha256", _ ] -> Ok Librarian_unread
+      | [ "context", `String "tool_result_receipts"; "sha256", _ ] -> Ok Tool_result_receipts
       | [ "context", `String "task_reference"; "sha256", _ ] -> Ok Historical_task_reference
       | _ -> Error "invalid held context fields"
     in

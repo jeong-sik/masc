@@ -541,6 +541,10 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
         ~model_input_projection:None
         ~hooks:(Some hooks)
     in
+    let* tool_outbox = Keeper_client_tool_outbox.load ~base_path ~keeper_name
+      |> Result.map_error internal_error in
+    let prepared = {prepared with Host.messages = prepared.messages
+      @ Option.to_list (Keeper_client_tool_outbox.context_message tool_outbox)} in
     (* Hooks may replace the system prompt or append an ordinary Nudge. Bind
        the final non-carried composition, and retain the mandatory workspace
        note after a system-prompt override. Hooks run once with the candidate
@@ -1232,6 +1236,12 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
       | Eio.Cancel.Cancelled _ as exn -> settle_cancellation exn
       | exn when Keeper_owner_signals.is_owner_cancel_reason exn ->
         settle_cancellation exn
+    in
+    let turn_result =
+      let* result = turn_result in
+      let* () = Keeper_client_tool_outbox.settle_after_turn tool_outbox ~stop_reason:result.stop_reason
+        |> Result.map_error internal_error in
+      Ok result
     in
     let turn_result =
       match turn_result with

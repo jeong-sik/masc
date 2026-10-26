@@ -1228,15 +1228,15 @@ let test_checkpoint_preserves_receipt_across_session_replacement ~repeated_tool 
   ignore (Keeper_registry.register_offline ~base_path keeper_name meta);
   Fun.protect ~finally:(fun () -> Keeper_registry.For_testing.unregister ~base_path keeper_name)
     (fun () ->
-      let original : Runtime_codex_app_server.undelivered_tool_result =
+      let original : Keeper_client_tool_outbox.receipt =
         {thread_id="previous-session";turn_id="original-turn";call_id="original-call";
          tool_name="Execute";arguments=`Assoc ["command",`String "original-effect-no-replay"];
          response=`String "original-private-result-after-session-replacement"} in
-      Keeper_codex_tool_outbox.retain ~base_path ~keeper_name original |> require;
-      let load () = Keeper_codex_tool_outbox.load ~base_path ~keeper_name |> require in
-      let original_id = match Keeper_codex_tool_outbox.receipt_ids (load ()) with
+      Keeper_client_tool_outbox.retain ~base_path ~keeper_name original |> require;
+      let load () = Keeper_client_tool_outbox.load ~base_path ~keeper_name |> require in
+      let original_id = match Keeper_client_tool_outbox.receipt_ids (load ()) with
         | [id] -> id | _ -> fail "expected the original committed receipt" in
-      Keeper_codex_tool_outbox_wake.notify ~base_path ~keeper_name |> require;
+      Keeper_client_tool_outbox_wake.notify ~base_path ~keeper_name |> require;
       let intake () =
         let env = Option.get (Eio_context.get_env_opt ()) in
         Eio.Switch.run (fun sw ->
@@ -1272,7 +1272,7 @@ let test_checkpoint_preserves_receipt_across_session_replacement ~repeated_tool 
         ~base_path ~keeper_name admitted |> require;
       Keeper_event_queue_persistence.For_testing.reset_snapshot_cache_for_testing ();
       check bool "host checkpoint retains original result bytes" true
-        (Keeper_codex_tool_outbox.contains_receipt (load ()) ~receipt_id:original_id);
+        (Keeper_client_tool_outbox.contains_receipt (load ()) ~receipt_id:original_id);
       Keeper_official_client_session_store.clear_then ~base_path ~keeper_name (fun () -> ()) |> require;
       let replacement = intake () in
       check bool "session replacement does not withdraw original input" true
@@ -1290,7 +1290,7 @@ let test_checkpoint_preserves_receipt_across_session_replacement ~repeated_tool 
         (String_util.contains_substring encoded value))
         ["original-effect-no-replay";"original-private-result-after-session-replacement"];
       check int "completed replacement acknowledges loaded receipts" 0
-        (List.length (Keeper_codex_tool_outbox.receipt_ids (load ())));
+        (List.length (Keeper_client_tool_outbox.receipt_ids (load ())));
       let original_hint = Keeper_registry_event_queue.pending_selections_result ~base_path keeper_name
         |> require |> List.find (fun (s : Keeper_event_queue_state.pending_selection) ->
              s.source.payload=Keeper_event_queue.Tool_result_ready original_id) in

@@ -166,6 +166,7 @@ type carried_context =
   | Context_carrier
   | Librarian_working_state
   | Librarian_unread
+  | Tool_result_receipts
   | Historical_task_reference
 
 (** A carried context the vendor session holds, and the sha256 of the exact

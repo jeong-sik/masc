@@ -850,6 +850,10 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
         ~model_input_projection:None
         ~hooks:(Some hooks)
     in
+    let* tool_outbox = Keeper_client_tool_outbox.load ~base_path ~keeper_name
+      |> Result.map_error internal_error in
+    let prepared = {prepared with Host.messages = prepared.messages
+      @ Option.to_list (Keeper_client_tool_outbox.context_message tool_outbox)} in
     let prepared = { prepared with
       system_prompt = String.concat "\n\n"
         (prepared.system_prompt :: native_posture_note native_posture
@@ -1690,6 +1694,12 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
          | Not_dispatched -> ()
          | Dispatched | Acknowledged -> observe_transport_uncertain ());
         Error (internal_error (runtime_label ^ " turn raised: " ^ Printexc.to_string exn))
+    in
+    let turn_result =
+      let* result = turn_result in
+      let* () = Keeper_client_tool_outbox.settle_after_turn tool_outbox ~stop_reason:result.stop_reason
+        |> Result.map_error internal_error in
+      Ok result
     in
     match turn_result with
     | Ok result -> Ok (Host.finish_raw_success ~keeper_name raw_trace_run result)

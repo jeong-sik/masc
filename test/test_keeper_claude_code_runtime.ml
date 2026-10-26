@@ -6340,6 +6340,46 @@ let test_actual_start_demotes_arguments_but_resume_keeps_them_held () =
     [true;false]
 ;;
 
+let test_original_outbox_result_is_delivered_on_start_and_resume () =
+  let base_path = temp_workspace () in
+  let keeper_name = "claude-fixture" in
+  let store f = Eio_main.run (fun env ->
+    Fs_compat.set_fs env#fs;
+    Fun.protect ~finally:Fs_compat.clear_fs f) in
+  let get = function Ok value -> value | Error detail -> fail detail in
+  let retain turn_id value = store (fun () ->
+    Keeper_client_tool_outbox.retain ~base_path ~keeper_name
+      {thread_id="original-codex-session";turn_id;call_id="original-call";
+       tool_name="Execute";arguments=`String "original-effect-no-replay";response=`String value}
+    |> get) in
+  let count () = store (fun () -> Keeper_client_tool_outbox.load ~base_path ~keeper_name
+    |> get |> Keeper_client_tool_outbox.receipt_ids |> List.length) in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    let system_path = Filename.concat base_path "outbox-start.txt"
+    and prompt_path = Filename.concat base_path "outbox-resume.json" in
+    retain "original-1" "ORIGINAL_RESULT_FOR_CLAUDE_START";
+    with_fixture ~system_marker:system_path
+      [Emit (assistant ~turn_id:"outbox-start" "read original result");
+       Emit (result ~turn_id:"outbox-start" "read original result")]
+      (fun cli_path -> match run_keeper_turn ~base_path ~cli_path ~goal:"Use the original result" () with
+       | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+    check bool "Claude Start receives original cross-runtime result" true
+      (String_util.contains_substring (In_channel.with_open_bin system_path In_channel.input_all)
+         "ORIGINAL_RESULT_FOR_CLAUDE_START");
+    check int "completed Start acknowledges the original result" 0 (count ());
+    retain "original-2" "ORIGINAL_RESULT_FOR_CLAUDE_RESUME";
+    with_fixture ~prompt_marker:prompt_path
+      [Emit (assistant ~turn_id:"outbox-resume" "read newer original result");
+       Emit (result ~turn_id:"outbox-resume" "read newer original result")]
+      (fun cli_path -> match run_keeper_turn ~base_path ~cli_path ~goal:"Use the newer original result" () with
+       | Ok result -> check (option bool) "same consumer session resumes" (Some true) result.session_resumed
+       | Error error -> fail (Agent_core.Error.to_string error));
+    check bool "Claude Resume receives exact newer original result" true
+      (String_util.contains_substring (In_channel.with_open_bin prompt_path In_channel.input_all)
+         "ORIGINAL_RESULT_FOR_CLAUDE_RESUME");
+    check int "completed Resume acknowledges only its loaded result" 0 (count ()))
+;;
+
 let () =
   (* Pin the prompt directory explicitly. Under dune the registry falls back to
      [DUNE_SOURCEROOT], but a test executable run directly has neither that
@@ -6350,7 +6390,9 @@ let () =
   Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
   run
     "keeper_claude_code_runtime"
-    [ ( "native action", [ test_case "partial content boundary identity" `Quick test_partial_content_boundaries_keep_message_and_channel_identity
+    [ ( "async result outbox",[test_case "original result is delivered on Start and Resume" `Quick
+           test_original_outbox_result_is_delivered_on_start_and_resume])
+    ; ( "native action", [ test_case "partial content boundary identity" `Quick test_partial_content_boundaries_keep_message_and_channel_identity
         ; test_case "exact provider identity" `Quick test_native_action_observer_keeps_exact_provider_identity ] )
     ; ( "usage scope"
       , [ test_case "result-only usage keeps client-turn scope" `Quick

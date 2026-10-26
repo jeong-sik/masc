@@ -36,7 +36,7 @@ let decode ~task_id ~verification_id ~index json =
 
 type progress = Not_started | Writing of string | Saved of string
 
-let save ?(with_lock=File_lock_eio.with_durable_lock_observed) ~fs ~registry_root ~directory ~directory_name ~path t =
+let save ?(with_lock=File_lock_eio.with_durable_lock_observed) ~fs ~registry_root ~directory ~directory_name ~path ~progress t =
   let ( let* ) = Result.bind in
   let lock_path = Filename.concat registry_root "tui-evidence-export.lock" in
   try
@@ -61,8 +61,14 @@ let save ?(with_lock=File_lock_eio.with_durable_lock_observed) ~fs ~registry_roo
             in
             match Fs_compat.Publication_recovery.with_lane
               ~registry ~owner:"tui-evidence-export" (fun recovery ->
-                Fs_compat.create_capability_file_exclusive ~recovery ~parent ~target t.contents
-                |> Result.map_error Fs_compat.capability_write_error_to_string)
+                let result =
+                  Fs_compat.create_capability_file_exclusive ~recovery ~parent ~target t.contents
+                  |> Result.map_error Fs_compat.capability_write_error_to_string
+                in
+                (match result with
+                 | Ok () -> Atomic.set progress (Saved path)
+                 | Error _ -> ());
+                result)
             with
             | Error error -> Error (Fs_compat.Publication_recovery.lane_open_error_to_string error)
             | Ok (Fs_compat.Publication_recovery.Lane_released result) -> result
@@ -90,8 +96,9 @@ let export_with ?with_lock ~fs ~registry_root ~directory ~progress ~admitted ~op
   let directory_name = "masc-evidence-" ^ Random_id.uuid_v7 () in
   let path = Filename.concat (Filename.concat directory directory_name) t.name in
   Atomic.set progress (Writing path);
-  let* () = save ?with_lock ~fs ~registry_root ~directory ~directory_name ~path t in
-  Atomic.set progress (Saved path);
+  let result = save ?with_lock ~fs ~registry_root ~directory ~directory_name ~path ~progress t in
+  Eio.Fiber.check ();
+  let* () = result in
   match open_file with
   | None -> Ok path
   | Some open_file ->

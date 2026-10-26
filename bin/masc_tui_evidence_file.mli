@@ -5,7 +5,9 @@ val decode : task_id:string -> verification_id:string -> index:int ->
   Yojson.Safe.t -> (t, string) result
 type progress = Not_started | Writing of string | Saved of string
 (** [Writing path] means the destination is known but a complete write has not
-    been confirmed. [Saved path] survives later viewer failure or cancellation. *)
+    been confirmed. [Saved path] is recorded once the writer confirms complete
+    bytes and parent sync, before lane or external lock release. Later release
+    failure, viewer failure or cancellation retains it. *)
 val export :
   fs:Eio.Fs.dir_ty Eio.Path.t -> registry_root:string -> directory:string ->
   progress:progress Atomic.t -> admitted:(unit -> (unit, string) result) ->

@@ -803,7 +803,7 @@ let lane_connected_window_sec = 120.
 (* A delivered executor-owned request is still using this connection while its
    SDK owns the wait. Queued requests do not prove a client is executing them;
    explicit disconnect always wins, and settlement releases this ownership. *)
-let connected client = Eio.Mutex.use_ro client.mutex (fun () ->
+let connected_unlocked client =
   not client.closed &&
   (match client.liveness with
    | Worker_held -> true
@@ -811,7 +811,8 @@ let connected client = Eio.Mutex.use_ro client.mutex (fun () ->
      not (Monotonic_deadline.passed until)
      || Hashtbl.fold (fun _ phase running -> match phase with
           | Interaction_running -> true | Interaction_queued -> running)
-          client.executor_work false))
+          client.executor_work false)
+let connected client = Eio.Mutex.use_ro client.mutex (fun () -> connected_unlocked client)
 (* A poll or a delivered result shows a polled client is still there. *)
 let refresh_unlocked client = match client.liveness with
   | Polled _ -> client.liveness <- Polled (Monotonic_deadline.after ~seconds:lane_connected_window_sec)
@@ -1087,14 +1088,15 @@ let disconnect_client ~client_id =
     | None -> Error "unknown_client"
     | Some client -> retire_unlocked key client; Ok ())
 (* The worker that runs this connection disconnects it itself when it ends,
-   so the lane stops timing it. A retired or unknown client is not held. *)
+   so the lane stops timing it. Only a client still connected is held: one
+   retired, unknown or past its window is not brought back. *)
 let hold_client ~client_id =
   Eio.Mutex.use_rw ~protect:true clients_mutex (fun () ->
     match Hashtbl.find_opt clients (client_id_to_string client_id) with
     | None -> Error "unknown_client"
     | Some client ->
       Eio.Mutex.use_rw ~protect:true client.mutex (fun () ->
-        if client.closed then Error "client_not_connected"
+        if not (connected_unlocked client) then Error "client_not_connected"
         else (client.liveness <- Worker_held; Ok ())))
 (* A browser whose lease ended after its target was resolved is the same
    selection failure as naming it when it had already gone, so the caller

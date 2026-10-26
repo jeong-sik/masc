@@ -77,22 +77,32 @@ let test_single_and_stale_selection () = with_clients (fun _ connect ->
   check bool "retired native identity cannot re-register" true
     (Lane.take_command ~client_info:old ~window_sec:0.001 = Error Lane.Client_retired))
 (* A connection the worker runs itself is ended by that worker, not by the
-   no-poll window. After the window passed, as it does when the laptop sleeps
-   (Mtime counts sleep on macOS), the next poll retires a polled client and
-   still serves the held one. *)
-let test_worker_held_client_outlives_the_poll_window () = with_clients (fun _ connect ->
+   no-poll window, which counts system sleep on macOS. The worker holds its
+   client while it is connected; after the window passes the next poll
+   retires a polled client and still serves the held one, and neither a poll
+   nor a delivered result turns the held client back into a timed one. *)
+let test_worker_held_client_outlives_the_poll_window () = with_clients (fun sw connect ->
   let polled = connect Lane.Firefox and held = connect Lane.Zen in
   let live (info : Lane.client_info) = match target info.client_id with
     | Lane.Live_client client -> client
     | Lane.Automation | Lane.Stagehand -> fail "expected live target" in
   let polled_client = live polled and held_client = live held in
+  let is_held () = match held_client.liveness with Lane.Worker_held -> true | Lane.Polled _ -> false in
+  check bool "the worker holds its own connected client" true (Lane.hold_client ~client_id:held.client_id = Ok ());
   polled_client.liveness <- Lane.Polled (Monotonic_deadline.after ~seconds:0.);
-  held_client.liveness <- Lane.Polled (Monotonic_deadline.after ~seconds:0.);
-  check bool "the worker holds its own connection" true (Lane.hold_client ~client_id:held.client_id = Ok ());
+  check bool "a client past its window is not held" true
+    (Result.is_error (Lane.hold_client ~client_id:polled.client_id));
   check bool "a polled client whose window passed is retired on its next poll" true
     (Lane.take_command ~client_info:polled ~window_sec:0.001 = Error Lane.Client_retired);
   check bool "the held client's next poll still serves it" true
     (Lane.take_command ~client_info:held ~window_sec:0.001 = Ok None);
+  check bool "and leaves it held" true (is_held ());
+  let result = Eio.Fiber.fork_promise ~sw (fun () -> Lane.issue_for_actor ~actor:None
+    ~target:(target held.client_id) ~verb:Lane.Tabs_list ~timeout_sec:1.) in
+  let command = take held in
+  ignore (Lane.deliver_result ~client_id:held.client_id ~id:command.id ~payload:(payload "held"));
+  answered result "held";
+  check bool "a delivered result leaves it held" true (is_held ());
   check bool "only the held client stays connected" true
     (List.map (fun (client : Lane.client_info) -> client.client_id) (Lane.connected_clients ()) = [held.client_id]);
   check bool "a retired client cannot be held" true

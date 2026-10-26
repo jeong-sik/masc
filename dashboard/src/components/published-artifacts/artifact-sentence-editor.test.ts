@@ -3,7 +3,7 @@ import { useState } from 'preact/hooks'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import * as Y from 'yjs'
-import { ArtifactHtmlEditor } from './artifact-html-editor'
+import { ArtifactSentenceEditor } from './artifact-sentence-editor'
 import { ArtifactLiveSession, draftBase64, draftBytes, type ArtifactLiveState } from '../../lib/artifact-live-session'
 import { seedSharedDocument, sharedSource, sharedState } from '../../lib/artifact-shared-document'
 import { sendArtifactDraftCommand, type ArtifactDraftView } from '../../api/artifact-drafts'
@@ -25,8 +25,9 @@ afterEach(() => {
   }
 })
 
-async function fixture() {
-  const authority = seedSharedDocument('<style>p{color:red}</style>\r\n<p>alpha &amp; 친구 😀</p>')
+async function fixture(format:'html'|'markdown'='html',source='<style>p{color:red}</style>\r\n<p>alpha &amp; 친구 😀</p>') {
+  let activeFormat=format
+  const authority = seedSharedDocument(source)
   const target = { artifact_id: `artifact-${'e'.repeat(32)}`, generation: '019f0000-0000-7000-8000-000000000000' }
   let sequence = 0, receive!: (frame: ArtifactDraftLiveFrame) => void, changed: (state: ArtifactLiveState) => void = () => {}
   const snapshot = (): ArtifactDraftView => ({ content: sharedSource(authority), threads: [], discussion_receipts: [], selection: null, draft: { schema: 'masc.artifact_draft.v2', target,
@@ -46,7 +47,7 @@ async function fixture() {
   const pending = vi.fn()
   function Host() {
     const [state, setState] = useState(session.snapshot); changed = setState
-    return html`<${ArtifactHtmlEditor} session=${session} state=${state} onPending=${pending} />`
+    return html`<${ArtifactSentenceEditor} session=${session} state=${state} format=${activeFormat} onPending=${pending} />`
   }
   let mounted = render(html`<${Host} />`); void session.connect()
   await waitFor(() => expect(session.snapshot.connection).toBe('connected'))
@@ -56,16 +57,50 @@ async function fixture() {
     const token = document.querySelector('script')!.getAttribute('nonce')!
     return { iframe, data: { type: 'masc.artifact.text.selected.v1', token, id: 0 } }
   }
-  const select = () => { const {iframe,data} = message(); fireEvent(window, new MessageEvent('message', {source:iframe.contentWindow, data})) }
+  const select = (id=0) => { const {iframe,data} = message(); fireEvent(window, new MessageEvent('message', {source:iframe.contentWindow, data:{...data,id}})) }
   const remoteInsert = (index: number, text: string) => { authority.getText('content').insert(index,text); sequence++; receive(frame()) }
-  const remount = async (nextWorkspace: ArtifactWorkspace = workspace) => {
+  const remount = async (nextWorkspace: ArtifactWorkspace = workspace,nextFormat=activeFormat) => {
     mounted.unmount(); session.dispose()
+    activeFormat=nextFormat
     session = new ArtifactLiveSession(snapshot(), nextWorkspace, state => changed(state))
     mounted = render(html`<${Host} />`); void session.connect()
     await waitFor(() => expect(session.snapshot.connection).toBe('connected'))
   }
   return { authority, get session() { return session }, workspace, target, pending, message, select, remoteInsert, remount }
 }
+
+it('edits selected Markdown source in the rendered document while preserving a concurrent insertion and surrounding syntax',async()=>{
+  const source='# 제목 😀\r\n\r\n**alpha** &amp; 친구\r\n',f=await fixture('markdown',source)
+  f.select(1)
+  expect((await screen.findByLabelText('선택한 문장') as HTMLTextAreaElement).value).toBe('alpha')
+  fireEvent.input(screen.getByLabelText('선택한 문장'),{target:{value:'[수정한 글](https://example.test)'}})
+  f.remoteInsert(0,'사람이 추가\r\n\r\n')
+  fireEvent.click(screen.getByRole('button',{name:'문장 반영'}))
+  await waitFor(()=>expect(sharedSource(f.authority)).toBe('사람이 추가\r\n\r\n# 제목 😀\r\n\r\n**[수정한 글](https://example.test)** &amp; 친구\r\n'))
+  expect(new DOMParser().parseFromString(f.message().iframe.srcdoc,'text/html').querySelector('strong')?.textContent).toBe('수정한 글')
+  expect(new DOMParser().parseFromString(f.message().iframe.srcdoc,'text/html').querySelector('a[href]')).toBeNull()
+})
+it('opens and edits a BOM-prefixed Markdown document containing emoji at its correct source boundary',async()=>{
+  const f=await fixture('markdown','\uFEFF# 한글 😀\r\n\r\n본문 &amp; 끝')
+  f.select()
+  expect((await screen.findByLabelText('선택한 문장') as HTMLTextAreaElement).value).toBe('한글 😀')
+  fireEvent.input(screen.getByLabelText('선택한 문장'),{target:{value:'바꾼 제목 😀'}})
+  fireEvent.click(screen.getByRole('button',{name:'문장 반영'}))
+  await waitFor(()=>expect(sharedSource(f.authority)).toBe('\uFEFF# 바꾼 제목 😀\r\n\r\n본문 &amp; 끝'))
+})
+it('restores Markdown input explicitly and offers it only for download under a different document format',async()=>{
+  const f=await fixture('markdown','**alpha**\r\n');f.select()
+  fireEvent.input(await screen.findByLabelText('선택한 문장'),{target:{value:'이어 쓰는 글'}})
+  await f.remount()
+  expect(screen.queryByLabelText('선택한 문장')).toBeNull()
+  expect(sendArtifactDraftCommand).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button',{name:'선택 원고와 문장 입력 복구'}))
+  expect((await screen.findByLabelText('선택한 문장') as HTMLTextAreaElement).value).toBe('이어 쓰는 글')
+  await f.remount(f.workspace,'html')
+  expect((screen.getByRole('button',{name:'선택 원고와 문장 입력 복구'}) as HTMLButtonElement).disabled).toBe(true)
+  expect(screen.getByText('문서 형식이 달라 문장을 다운로드할 수만 있습니다.')).toBeTruthy()
+  expect(sharedSource(f.authority)).toBe('**alpha**\r\n')
+})
 
 it('requires both the actual iframe window and its current capability before opening an editable sentence', async () => {
   const f = await fixture(), original = f.message()

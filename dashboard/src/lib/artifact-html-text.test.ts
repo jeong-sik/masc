@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { parse, defaultTreeAdapter as tree, type DefaultTreeAdapterTypes as Nodes } from 'parse5'
-import { artifactHtmlTextEditor, escapeArtifactHtmlText, selectedArtifactHtmlText } from './artifact-html-text'
+import { selectedArtifactText } from './artifact-text-frame'
+import { artifactHtmlTextEditor, escapeArtifactHtmlText } from './artifact-html-text'
 import { replaceSharedSelection, seedSharedDocument, selectSharedSource, sharedSource } from './artifact-shared-document'
 
 function elements(source: string): Nodes.Element[] {
@@ -85,9 +86,9 @@ describe('HTML editing frame authority', () => {
   it('accepts only an existing sentence with the current frame capability', () => {
     const editor = artifactHtmlTextEditor('<p>alpha</p>')
     const message = { type: 'masc.artifact.text.selected.v1', token: editor.token, id: 0 }
-    expect(selectedArtifactHtmlText(editor, message)).toBe(editor.parts[0])
-    for (const bad of [null, {}, {...message, token:'other'}, {...message, id:99}, {...message, id:-1}, {...message, id:0.2}, {...message, id:'0'}, {...message, type:'edit'}]) expect(selectedArtifactHtmlText(editor,bad)).toBeNull()
-    expect(selectedArtifactHtmlText(artifactHtmlTextEditor('<p>alpha</p>'),message)).toBeNull()
+    expect(selectedArtifactText(editor, message)).toBe(editor.parts[0])
+    for (const bad of [null, {}, {...message, token:'other'}, {...message, id:99}, {...message, id:-1}, {...message, id:0.2}, {...message, id:'0'}, {...message, type:'edit'}]) expect(selectedArtifactText(editor,bad)).toBeNull()
+    expect(selectedArtifactText(artifactHtmlTextEditor('<p>alpha</p>'),message)).toBeNull()
   })
   it('makes legacy frameset documents inert and sanitizes template contents too', () => {
     expect(elements(artifactHtmlTextEditor('<html><head></head><frameset><frame src="https://bad.test"></frameset></html>').document).some(node => node.tagName === 'body')).toBe(true)

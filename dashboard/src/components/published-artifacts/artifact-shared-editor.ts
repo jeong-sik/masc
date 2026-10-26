@@ -8,9 +8,10 @@ import { sendArtifactDraftCommand } from '../../api/artifact-drafts'
 import { captureArtifactWorkspace, fetchPublishedArtifact, type ArtifactDocument, type ArtifactPublication } from '../../api/published-artifacts'
 import { artifactDraftRecoveries, discardArtifactDraftRecovery, type ArtifactDraftRecovery } from '../../lib/artifact-draft-recovery'
 import { ArtifactLiveSession, draftBytes, type ArtifactLiveState } from '../../lib/artifact-live-session'
-import { resolveSharedSelection, restoreSharedDocument, sharedSource } from '../../lib/artifact-shared-document'
+import { resolveSharedSelection, restoreSharedDocument, sharedSource, type SharedSelection } from '../../lib/artifact-shared-document'
 import { ArtifactComposer, downloadArtifactDraft, type ArtifactPublicationOutcome, type ArtifactDraftRetention, type ArtifactDraftSnapshot } from './artifact-composer'
 import { ArtifactHtmlEditor } from './artifact-html-editor'
+import { ArtifactDiscussionPanel } from './artifact-discussion-panel'
 
 export type ArtifactSharedCloseResult = { kind: 'keep_open' } | { kind: 'close'; publicationDiscarded: boolean }
 export type ArtifactSharedCloseRequest = () => ArtifactSharedCloseResult
@@ -34,7 +35,7 @@ class PeerCursor extends WidgetType {
     return element
   }
 }
-function SharedCodeEditor({ session, state }: { session: ArtifactLiveSession; state: ArtifactLiveState }) {
+function SharedCodeEditor({ session, state, reveal }: { session: ArtifactLiveSession; state: ArtifactLiveState; reveal: SharedSelection | null }) {
   const host = useRef<HTMLDivElement>(null), editor = useRef<EditorView | null>(null)
   useLayoutEffect(() => {
     const view = new EditorView({ parent: host.current!, state: EditorState.create({
@@ -59,6 +60,10 @@ function SharedCodeEditor({ session, state }: { session: ArtifactLiveSession; st
     editor.current = view
     return () => { editor.current = null; view.destroy(); session.select(null) }
   }, [session])
+  useLayoutEffect(() => {
+    const view = editor.current, range = reveal && resolveSharedSelection(session.doc,reveal)
+    if (view && range) { view.dispatch({ selection: range, scrollIntoView: true }); view.focus() }
+  }, [session,reveal])
   useLayoutEffect(() => {
     const view = editor.current
     if (!view) return
@@ -85,6 +90,8 @@ export function ArtifactSharedEditor({ doc, workspaceRoot, draftRetention, isCur
   const [error, setError] = useState('')
   const [view, setView] = useState<'source' | 'rendered'>(doc.artifact.format === 'html' ? 'rendered' : 'source')
   const [visualPending, setVisualPending] = useState(false)
+  const [discussionPending, setDiscussionPending] = useState(false)
+  const [reveal, setReveal] = useState<SharedSelection | null>(null)
   const resumed = useRef(new Set<string>())
   const [recoveries, setRecoveries] = useState<ArtifactDraftRecovery[]>([])
   const [comparison, setComparison] = useState<{ base: ArtifactDocument; content: string } | null>(null)
@@ -92,13 +99,15 @@ export function ArtifactSharedEditor({ doc, workspaceRoot, draftRetention, isCur
   const publicationForClose = useRef<ArtifactDraftSnapshot | null>(null)
   const sessionForClose = useRef<ArtifactLiveSession | null>(null)
   const visualPendingForClose = useRef(false)
+  const discussionPendingForClose = useRef(false)
   visualPendingForClose.current = visualPending
+  discussionPendingForClose.current = discussionPending
   useLayoutEffect(() => {
     // Both Reader navigation and the editor's outer close use one decision.
     // Read refs synchronously instead of a delayed CRDT-only pending effect.
     const request: ArtifactSharedCloseRequest = () => {
       const copy = publicationForClose.current
-      if ((copy || sessionForClose.current?.snapshot.pending || visualPendingForClose.current)
+      if ((copy || sessionForClose.current?.snapshot.pending || visualPendingForClose.current || discussionPendingForClose.current)
         && !window.confirm('이 창에 아직 저장하지 못한 변경이 있습니다. 원고를 닫을까요?')) return { kind: 'keep_open' }
       if (copy) draftRetention.forget(copy.identity)
       publicationForClose.current = null
@@ -214,9 +223,16 @@ export function ArtifactSharedEditor({ doc, workspaceRoot, draftRetention, isCur
           · ${prefix !== null ? `${prefix.split('\n').length}행 ${prefix.length - prefix.lastIndexOf('\n')}열` : '원고 열람 중'}
           <time class="ml-1 text-[var(--color-fg-muted)]" dateTime=${peer.observed_at}>${new Date(peer.observed_at).toLocaleTimeString()}</time></li>`
       })}</ul>` : null}
-    ${session && state ? view === 'rendered'
-      ? html`<${ArtifactHtmlEditor} session=${session} state=${state} onPending=${setVisualPending} />`
-      : html`<${SharedCodeEditor} session=${session} state=${state} />` : null}
+    ${session && state ? html`<div class="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
+      <div class="flex min-h-0 min-w-0 flex-col">${view === 'rendered'
+        ? html`<${ArtifactHtmlEditor} session=${session} state=${state} onPending=${setVisualPending} />`
+        : html`<${SharedCodeEditor} session=${session} state=${state} reveal=${reveal} />`}</div>
+      <div class="min-h-0 min-w-0 overflow-auto"><${ArtifactDiscussionPanel} session=${session} state=${state} onPending=${setDiscussionPending}
+        onReveal=${(position:SharedSelection)=>{
+          if(visualPending&&!window.confirm('아직 반영하지 않은 문장이 있습니다. 원본에서 댓글 위치를 볼까요?'))return
+          setVisualPending(false);setReveal(position);setView('source')
+        }} /></div>
+    </div>` : null}
     ${publication ? html`<${ArtifactComposer} initial=${publication.snapshot.value} base=${publication.base}
       capturedWorkspace=${session?.workspace} workspaceRoot=${workspaceRoot} isCurrent=${isCurrent} onMutation=${onMutation}
       onDraftChange=${(value: ArtifactDraftSnapshot['value']) => draftRetention.remember({ ...publication.snapshot, value })}

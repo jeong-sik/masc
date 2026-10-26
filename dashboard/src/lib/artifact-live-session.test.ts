@@ -4,8 +4,8 @@ import { ArtifactLiveSession, draftBase64, draftBytes } from './artifact-live-se
 import { seedSharedDocument, sharedState, sharedSource, selectSharedSource } from './artifact-shared-document'
 import { sendArtifactDraftCommand, type ArtifactDraftView } from '../api/artifact-drafts'
 import { streamArtifactDraft, sendArtifactPresence, type ArtifactDraftLiveFrame } from '../api/artifact-draft-live'
-vi.mock('../api/artifact-drafts', () => ({ sendArtifactDraftCommand: vi.fn() }))
-vi.mock('../api/artifact-draft-live', () => ({ streamArtifactDraft: vi.fn(), sendArtifactPresence: vi.fn() }))
+vi.mock('../api/artifact-drafts', async original => ({ ...await original<typeof import('../api/artifact-drafts')>(), sendArtifactDraftCommand: vi.fn() }))
+vi.mock('../api/artifact-draft-live', async original => ({ ...await original<typeof import('../api/artifact-draft-live')>(), streamArtifactDraft: vi.fn(), sendArtifactPresence: vi.fn() }))
 const target = { artifact_id: `artifact-${'a'.repeat(32)}`, generation: '019f0000-0000-7000-8000-000000000000' }
 const workspace = { basePath: '/fixture', mascRoot: '/fixture/.masc' }, initial = '원고 😀\r\n마지막\r\n'
 let authority: Y.Doc, view: ArtifactDraftView, receivers: ((frame: ArtifactDraftLiveFrame) => void)[], sessions: ArtifactLiveSession[]
@@ -100,5 +100,30 @@ describe('live shared drafts', () => {
     let current = true; const a = open(() => current); current = false
     a.doc.getText('content').insert(0, 'local ')
     expect(sendArtifactDraftCommand).not.toHaveBeenCalled(); expect(a.content).toBe(`local ${initial}`); expect(a.snapshot.pending).toBe(true)
+  })
+  it('keeps the comment anchor after blur without advertising a stale editing position', async () => {
+    const a = open()
+    await vi.waitFor(() => expect(sendArtifactPresence).toHaveBeenCalledTimes(1))
+    a.select({ anchor: 0, head: 2 }, 'html_text')
+    await vi.waitFor(() => expect(sendArtifactPresence).toHaveBeenCalledTimes(2))
+    a.select(null)
+    await vi.waitFor(() => expect(sendArtifactPresence).toHaveBeenCalledTimes(3))
+    expect(vi.mocked(sendArtifactPresence).mock.lastCall?.[3]).toEqual({ action: 'position', position: null })
+    authority.getText('content').insert(0, '함께 ')
+    view = { ...snapshot(), draft: { ...snapshot().draft, sequence: 1 } }
+    expect(a.acceptServerView(snapshot())).toBe(true)
+    expect(a.captureSource()).toMatchObject({ quote: '원고', mode: 'html_text' })
+    authority.getText('content').delete(3, 2)
+    view = { ...snapshot(), draft: { ...snapshot().draft, sequence: 2 } }
+    a.acceptServerView(snapshot())
+    expect(() => a.captureSource()).toThrow('선택한 원문이 바뀌었습니다')
+  })
+  it('refuses discussion views from another generation and from a retired authority', () => {
+    let current = true; const a = open(() => current)
+    a.select({ anchor: 0, head: 2 })
+    expect(a.acceptServerView({ ...snapshot(), draft: { ...snapshot().draft, target: { ...target, generation: '019f0000-0000-7000-8000-000000000001' } } })).toBe(false)
+    current = false
+    expect(a.acceptServerView(snapshot())).toBe(false)
+    expect(() => a.captureSource()).toThrow('먼저 선택')
   })
 })

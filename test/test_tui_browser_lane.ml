@@ -161,29 +161,26 @@ let screenshot_response ?(source="live") ?(client=firefox.client_id) ?(tab_id=2)
     "data", `String "UE5H"; "viewport", `Assoc ["documentId",`String "fixture";
       "width",`Int 800;"height",`Int 600;"scrollX",`Int 0;"scrollY",`Int 0]; "elapsed_ms", `Float 13.]]
 
-(* The viewport footer's drag hint is the lane table's answer for the
-   connection the screenshot names: two live screenshots can differ. *)
-let test_screenshot_drag_hint () =
-  let bidi = { firefox with client_id = "33333333-3333-4333-8333-333333333333";
-               transport = Browser_lane.Webdriver_bidi } in
-  let view = { (create ()) with clients = Some [firefox; bidi] } in
+(* Drag admission follows the screenshot's connection, including Ego, rather
+   than the wording used to describe that decision in the footer. *)
+let test_screenshot_drag_support () =
+  let ego = { bidi with client_id = "44444444-4444-4444-8444-444444444444";
+                        transport = Browser_lane.Ego_task_space } in
+  let view = { (create ()) with clients = Some [firefox; bidi; ego] } in
   let shot ?(source="live") client = success (decode_screenshot (screenshot_response ~source ~client ())) in
   expect "an extension screenshot names the connection a drag needs"
-    (screenshot_drag_support view (shot firefox.client_id) = Drag_needs [Browser_lane.Webdriver_bidi]
-     && screenshot_drag_hint view (shot firefox.client_id) = "drag: needs a BiDi connection");
-  expect "a BiDi screenshot takes the drag"
-    (screenshot_drag_hint view (shot bidi.client_id) = "drag: move");
-  expect "the chosen client answers when the list has not been read"
-    (screenshot_drag_hint (choose_client bidi (create ())) (shot bidi.client_id) = "drag: move");
+    (screenshot_drag_support view (shot firefox.client_id)
+     = Drag_needs [Browser_lane.Webdriver_bidi; Browser_lane.Ego_task_space]);
+  List.iter (fun (client : client) ->
+    expect "the screenshot's native connection takes the drag"
+      (screenshot_drag_support view (shot client.client_id) = Drag_served);
+    expect "the chosen client answers when the list has not been read"
+      (screenshot_drag_support (choose_client client (create ())) (shot client.client_id) = Drag_served))
+    [bidi; ego];
   expect "a client the view no longer holds is not given a rule"
     (screenshot_drag_support (create ()) (shot firefox.client_id) = Drag_unknown);
   expect "the server's own browser takes the drag"
-    (screenshot_drag_hint (create ()) (shot ~source:"automation" firefox.client_id) = "drag: move")
-
-(* What an 80-column terminal leaves a Browser Lane row inside the surface
-   frame. The rows below are written to fit it. *)
-let row_cells = Masc_tui_frame.inner_width ~cols:80
-let cells = Masc_tui_message_layout.display_width
+    (screenshot_drag_support (create ()) (shot ~source:"automation" firefox.client_id) = Drag_served)
 let test_pointer_decision () =
   let shot ?(source="live") client = success (decode_screenshot (screenshot_response ~source ~client ())) in
   let drag (shot : screenshot) =
@@ -210,6 +207,14 @@ let test_pointer_decision () =
        sends both shot (click shot) && sends both shot (wheel shot))
        [on_extension; on_bidi]);
   expect "a drag is sent on BiDi" (sends both on_bidi (drag on_bidi));
+  let ego = { bidi with client_id = "44444444-4444-4444-8444-444444444444";
+                        transport = Browser_lane.Ego_task_space } in
+  let ego_view = { (create ()) with clients = Some [firefox; ego] } in
+  let on_ego = shot ego.client_id in
+  expect "a drag is sent on the observed Ego connection"
+    (sends ego_view on_ego (drag on_ego));
+  expect "an Ego connection can serve the drag refused on an extension"
+    (pointer_decision ego_view on_extension (drag on_extension) = Pointer_unserved (unserved true));
   let automation = shot ~source:"automation" firefox.client_id in
   expect "the server's own browser answers for itself" (sends both automation (drag automation));
   expect "a connection the view no longer holds is left to the server"
@@ -778,7 +783,7 @@ let () =
      "client connection ownership", test_client_connection_ownership;
      "picker empty row reads the list", test_picker_empty_row;
      "client inventory contract", test_clients_decode;
-     "screenshot drag hint follows the connection", test_screenshot_drag_hint;
+     "screenshot drag support follows the connection", test_screenshot_drag_support;
      "every pointer gesture is decided before it is sent", test_pointer_decision;
      "a refused gesture stays until the next input", test_unserved_gesture;
      "screenshot ownership, draft and stale tab", test_screenshot_ownership_and_draft;

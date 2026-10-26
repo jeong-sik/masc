@@ -616,6 +616,21 @@ val defer_pending_result :
 (** Durably rotate one exact transiently blocked source to the tail of its
     current urgency lane. *)
 
+type checkpoint_retention_order = Keep_position | Rotate_within_urgency
+
+val retain_checkpoint_batch_result :
+  ?after_commit:(Keeper_event_queue.t -> unit) ->
+  base_path:string -> keeper_name:string ->
+  selections:(Keeper_event_queue_state.pending_selection * checkpoint_retention_order) list ->
+  unit -> ((Keeper_event_queue_state.pending_selection * string) list, string) result
+(** Retain a checkpoint batch in one owner-locked, strictly confirmed snapshot
+    transaction, rotating only the explicitly selected sources within their
+    urgency lanes. Original payload, first admission and execution scope remain
+    bound. Stale selections leave their current source unchanged and appear in
+    the returned failure list; independent valid selections still commit. An
+    outer Error means the batch commit was not confirmed. Old successful
+    selections become stale; no source is acknowledged. *)
+
 type enqueue_stimulus_result =
   | Enqueued
   | Already_present

@@ -1276,8 +1276,9 @@ let test_checkpoint_retention_preserves_unsettled_sources () =
     (* The first yield and a run longer than the former count boundary must
        preserve the same requests. These are fixture observations, not gates. *)
     for cycle = 1 to 12 do
-      Keeper_heartbeat_loop.For_testing.retain_connector_attention_sources
-        ~base_path ~keeper_name (pending ());
+      Keeper_heartbeat_loop.For_testing.retain_checkpoint_continuations
+        ~base_path ~keeper_name (pending ())
+      |> require "retain checkpointed conversation";
       let retained = pending () in
       check (list string) "yield retains every exact input identity"
         (identities original) (identities retained);
@@ -1303,6 +1304,113 @@ let test_checkpoint_retention_preserves_unsettled_sources () =
 
 (* A completed, addressed turn settles the entire admitted batch through the
    existing exact-source terminalization path. *)
+let test_checkpoint_preserves_results_and_services_successors () =
+  with_ctx "result-checkpoint-retention" (fun ~base_path ~keeper_name ~meta ~ctx ->
+    let module Persistence = Keeper_event_queue_persistence in
+    let require label = function
+      | Ok value -> value | Error detail -> failf "%s: %s" label detail in
+    let channel = Keeper_continuation_channel.unrouted "checkpoint fixture" in
+    let source : Keeper_owned_job_identity.source =
+      {task_id=Some "original-task";turn_ref=None;tool_use_id=Some "original-call";
+       trace_id=Some "original-trace";keeper_turn_id=Some 7} in
+    let authority = Masc_domain.System_llm_agent {agent_run_id="original-verifier"} in
+    let payloads =
+      [ Q.Delegate_completed {dc_operation_id="original-delegate";dc_keeper="delegate";
+                              dc_terminal=Delegate_replied "complete original answer"}
+      ; Q.Fusion_completed {run_id="original-fusion";terminal=Fusion_succeeded "original decision";
+                            board_post_id="";channel}
+      ; Q.Composition_completed {cc_request_id="original-composition";cc_tool="keeper_compose_original";
+                                 cc_terminal=Composition_succeeded}
+      ; Q.Tool_result_ready (String.make 64 'a')
+      ; Q.Owned_job_completed {oj_job_id=Keeper_owned_job_identity.Job_id.fresh ();
+                               oj_source=source;oj_channel=channel}
+      ; Q.Addon_operation_changed {ao_origin_id="original-addon";ao_publication_id="original-publication";
+                                   ao_source=source;ao_channel=channel}
+      ; Q.Workspace_message {wmsg_request_id="original-message";wmsg_from="another-keeper"}
+      ; Q.Ask_answered {ask_id="original-ask";channel}
+      ; Q.Completion_authority_rejected {car_task_id="original-task";car_verification_id="rejected";
+                                         car_reason="original reason";car_authority=authority}
+      ; Q.Task_cancelled {tc_task_id="cancelled-task";tc_cancelled_by="original-owner";tc_reason=Some "cancelled"}
+      ; Q.Task_outcome {to_task_id="approved-task";to_verification_id="approved";
+                        to_producer=keeper_name;to_authority=authority} ] in
+    let originals = List.mapi (fun index payload ->
+      {Q.post_id=Printf.sprintf "original-%d" index;urgency=Immediate;arrived_at=1.;payload}) payloads in
+    List.iter (enqueue_exn ~base_path keeper_name) originals;
+    let selections () =
+      Persistence.For_testing.reset_snapshot_cache_for_testing ();
+      Persistence.pending_selections_result ~base_path ~keeper_name |> require "cold queue reload" in
+    let scope = Keeper_chat_operation.Operation_id.of_string "original-consumer"
+      |> require "consumer operation" |> Keeper_execution_scope_id.direct_operation in
+    let admitted = Persistence.bind_pending_repetition_scope_result
+      ~base_path ~keeper_name ~selections:(selections ()) ~scope () |> require "bind original consumer" in
+    let successor : Q.stimulus =
+      {post_id="independent-successor";urgency=Immediate;arrived_at=2.;
+       payload=Delegate_completed {dc_operation_id="independent-operation";dc_keeper="another-delegate";
+                                    dc_terminal=Delegate_replied "independent answer"}} in
+    enqueue_exn ~base_path keeper_name successor;
+    Keeper_heartbeat_loop.For_testing.retain_checkpoint_continuations
+      ~base_path ~keeper_name admitted |> require "checkpoint retains and rotates original results";
+    let retained = selections () in
+    check (list string) "independent successor precedes retained original results"
+      (successor.post_id::List.map (fun (s : Q.stimulus) -> s.post_id) originals)
+      (List.map (fun (s : Keeper_event_queue_state.pending_selection) -> s.source.post_id) retained);
+    List.iter (fun (selection : Keeper_event_queue_state.pending_selection) ->
+      if selection.source.post_id<>successor.post_id then (
+        let original = List.find (fun (s : Q.stimulus) -> s.post_id=selection.source.post_id) originals in
+        check bool "original complete payload and source identity survive cold reload" true
+          (Q.stimulus_identity_equal original selection.source);
+        check bool "original consumer execution scope survives rotation" true
+          (Option.equal Keeper_execution_scope_id.equal (Some scope) selection.repetition_scope);
+        check int "checkpoint retention is durable" 1 selection.checkpoint_retentions;
+        check bool "post-checkpoint ACK policy cannot discard the result" false
+          (Keeper_heartbeat_loop.For_testing.checkpoint_source_may_ack selection.source.payload))) retained;
+    let intake = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+      ~ctx ~meta_after_triage:meta ~pending_board_events:[] in
+    (match Keeper_heartbeat_source_batch.first intake.source_batch with
+     | Some first -> check string "actual next intake services independent successor"
+         successor.post_id first.source.post_id
+     | None -> fail "checkpoint retention blocked the independent successor");
+    let final = List.find
+      (fun (s : Keeper_event_queue_state.pending_selection) -> s.source.post_id=(List.hd originals).post_id)
+      (selections ()) in
+    Keeper_registry_event_queue.terminalize_pending_turn_completed_result
+      ~base_path keeper_name ~applied_at:3. ~selection:final
+    |> require "completed consumer can settle its exact original result" |> ignore;
+    check bool "explicit completion removes only its original result" false
+      (List.exists (fun (s : Keeper_event_queue_state.pending_selection) -> s.source.post_id=final.source.post_id)
+         (selections ())))
+;;
+
+let test_checkpoint_stale_source_does_not_discard_healthy_sibling () =
+  with_ctx "stale-checkpoint-retention" (fun ~base_path ~keeper_name ~meta:_ ~ctx:_ ->
+    let module Persistence = Keeper_event_queue_persistence in
+    let require = function Ok value -> value | Error detail -> fail detail in
+    let make post_id : Q.stimulus =
+      {post_id;urgency=Immediate;arrived_at=1.;
+       payload=Delegate_completed {dc_operation_id=post_id;dc_keeper="delegate";
+                                    dc_terminal=Delegate_replied "original result"}} in
+    List.iter (enqueue_exn ~base_path keeper_name) [make "stale";make "healthy"];
+    let pending () =
+      Persistence.For_testing.reset_snapshot_cache_for_testing ();
+      Persistence.pending_selections_result ~base_path ~keeper_name |> require in
+    let admitted = pending () in
+    let first = List.hd admitted in
+    Persistence.note_checkpoint_retention_result ~base_path ~keeper_name ~selection:first ()
+      |> require |> ignore;
+    enqueue_exn ~base_path keeper_name (make "independent");
+    (match Keeper_heartbeat_loop.For_testing.retain_checkpoint_continuations
+        ~base_path ~keeper_name admitted with
+     | Error _ -> () | Ok () -> fail "stale checkpoint authority was silently accepted");
+    let current = pending () in
+    check (list string) "healthy sibling commits rotation despite stale peer"
+      ["stale";"independent";"healthy"]
+      (List.map (fun (s : Keeper_event_queue_state.pending_selection) -> s.source.post_id) current);
+    List.iter (fun (s : Keeper_event_queue_state.pending_selection) ->
+      let expected = if s.source.post_id="independent" then 0 else 1 in
+      check int "stale source unchanged and healthy retention committed" expected s.checkpoint_retentions)
+      current)
+;;
+
 let test_batch_completion_acks_every_member () =
   with_ctx "connector-batch-completion" (fun ~base_path ~keeper_name ~meta ~ctx ->
     let a1 =
@@ -1731,6 +1839,10 @@ let () =
             test_proactive_yields_only_to_ready_intake
         ; test_case "checkpoint yields preserve requests until exact settlement" `Quick
             test_checkpoint_retention_preserves_unsettled_sources
+        ; test_case "checkpoint retains original results and admits independent successors" `Quick
+            test_checkpoint_preserves_results_and_services_successors
+        ; test_case "stale checkpoint source preserves healthy sibling progress" `Quick
+            test_checkpoint_stale_source_does_not_discard_healthy_sibling
         ; test_case "exact mixed bindings reach dispatch and settlement" `Quick
             test_exact_mixed_bindings_reach_dispatch_and_settlement
         ; test_case

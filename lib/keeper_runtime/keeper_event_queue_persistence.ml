@@ -1366,6 +1366,29 @@ let defer_pending_result
     State.defer_pending ~selection state)
 ;;
 
+type checkpoint_retention_order = Keep_position | Rotate_within_urgency
+
+let retain_checkpoint_batch_result
+      ?(after_commit = fun _ -> ())
+      ~base_path ~keeper_name ~selections () =
+  commit_transform ~strict_snapshot_durability:true
+    ~base_path ~keeper_name ~after_commit (fun state ->
+      let state, failures = List.fold_left
+        (fun (current, failures) (selection, order) ->
+          let result = match State.note_checkpoint_retention ~selection current with
+            | Error _ as error -> error
+            | Ok (retained, (updated, _)) ->
+              match order with
+              | Keep_position -> Ok retained
+              | Rotate_within_urgency ->
+                State.defer_pending ~selection:updated retained |> Result.map fst in
+          match result with
+          | Ok retained -> retained, failures
+          | Error detail -> current, (selection, detail)::failures)
+        (state, []) selections in
+      Ok (state, List.rev failures))
+;;
+
 type enqueue_stimulus_result =
   | Enqueued
   | Already_present

@@ -692,6 +692,16 @@ let defer_pending_result ~base_path name ~selection =
     ()
 ;;
 
+type checkpoint_retention_order = Keeper_event_queue_persistence.checkpoint_retention_order =
+  | Keep_position
+  | Rotate_within_urgency
+
+let retain_checkpoint_batch_result ~base_path name ~selections =
+  Keeper_event_queue_persistence.retain_checkpoint_batch_result
+    ~base_path ~keeper_name:name ~selections
+    ~after_commit:(publish_pending ~base_path name) ()
+;;
+
 let peek_when_result ~base_path name ~now ~ready =
   match Keeper_registry.get ~base_path name with
   | None -> Error (Printf.sprintf "keeper not registered: %s" name)

@@ -420,7 +420,7 @@ let test_export_preserves_destination_and_saved_effects () =
     Alcotest.(check int) "viewer is never replayed" 1 !calls;
     (match Atomic.get progress with
      | File.Saved path -> Alcotest.(check string) "confirmed copy survives viewer failure" content (Eio.Path.load Eio.Path.(env#fs / path))
-     | File.Not_started | File.Writing _ -> Alcotest.fail "saved path was lost");
+     | File.Not_started | File.Writing _ | File.Aborted _ -> Alcotest.fail "saved path was lost");
     let denied=Atomic.make File.Not_started in
     let before=Array.length (Sys.readdir base) in
     ignore (File.export ~fs:env#fs ~registry_root:base ~directory:base ~progress:denied
@@ -432,6 +432,7 @@ let test_export_preserves_destination_and_saved_effects () =
       ~progress:failed ~admitted:(fun () -> Ok ()) ~open_file:None file in
     Alcotest.(check bool) "failed write is not saved" true (Result.is_error result);
     (match Atomic.get failed with
+     | File.Aborted path -> Alcotest.(check bool) "failed destination is still known" false (Filename.is_relative path)
      | File.Writing _ -> Alcotest.fail "failed write still reports active progress"
      | File.Not_started | File.Saved _ -> Alcotest.fail "failed write lost or certified its destination"))
 
@@ -451,6 +452,7 @@ let test_export_lock_refusal_ends_progress () =
       ~admitted:(fun () -> Ok ()) ~open_file:None file in
     Alcotest.(check bool) "lock refusal is not success" true (Result.is_error result);
     match Atomic.get progress with
+    | File.Aborted path -> Alcotest.(check bool) "refused destination is still known" false (Filename.is_relative path)
     | File.Writing _ -> Alcotest.fail "refused lock still reports active progress"
     | File.Not_started | File.Saved _ -> Alcotest.fail "refused lock lost or certified its destination")
 
@@ -465,7 +467,7 @@ let test_export_rechecks_authority_and_propagates_cancellation () =
       ~open_file:(Some (fun _ -> opened:=true;Ok ())) file in
     Alcotest.(check bool) "withdrawn opener refused" true (Result.is_error result);
     Alcotest.(check bool) "no viewer launched after authority withdrawal" false !opened;
-    (match Atomic.get progress with File.Saved _ -> () | File.Not_started | File.Writing _ -> Alcotest.fail "write receipt lost on later withdrawal");
+    (match Atomic.get progress with File.Saved _ -> () | File.Not_started | File.Writing _ | File.Aborted _ -> Alcotest.fail "write receipt lost on later withdrawal");
     let cancelled=Atomic.make File.Not_started in
     (match File.export ~fs:env#fs ~registry_root:base ~directory:base ~progress:cancelled ~admitted:(fun () -> Ok ())
       ~open_file:(Some (fun _ -> raise (Eio.Cancel.Cancelled Exit))) file with
@@ -473,7 +475,7 @@ let test_export_rechecks_authority_and_propagates_cancellation () =
      | exception Eio.Cancel.Cancelled Exit -> ());
     match Atomic.get cancelled with
     | File.Saved path -> Alcotest.(check bool) "cancelled viewer retains confirmed local path" true (Sys.file_exists path)
-    | File.Not_started | File.Writing _ -> Alcotest.fail "cancelled viewer lost confirmed save")
+    | File.Not_started | File.Writing _ | File.Aborted _ -> Alcotest.fail "cancelled viewer lost confirmed save")
 
 let test_export_uses_local_registry_not_shared_temp () =
   with_base_path_env (fun env base ->
@@ -624,7 +626,7 @@ let test_export_cancellation_after_lock_admission_is_not_success () =
          | File.Saved path ->
            Alcotest.(check int) "cancelled export retains the complete saved bytes"
              (4 * 1024 * 1024) (String.length (Eio.Path.load Eio.Path.(env#fs / path)))
-         | File.Not_started | File.Writing _ ->
+         | File.Not_started | File.Writing _ | File.Aborted _ ->
            Alcotest.fail "cancelled export lost its confirmed save")
       | `Returned (Ok path) -> Alcotest.failf "lock-admitted cancellation returned success: %s" path
       | `Returned (Error detail) -> Alcotest.failf "lock-admitted cancellation returned an error: %s" detail
@@ -648,7 +650,7 @@ let test_export_lane_release_failure_preserves_saved () =
      | File.Saved path ->
        Alcotest.(check string) "lane release failure retains complete bytes"
          "lane release bytes" (Eio.Path.load Eio.Path.(env#fs / path))
-     | File.Not_started | File.Writing _ ->
+     | File.Not_started | File.Writing _ | File.Aborted _ ->
        Alcotest.fail "lane release failure lost confirmed save");
     match result with
     | Error _ -> ()
@@ -677,7 +679,7 @@ let test_export_lock_release_failure_preserves_saved () =
      | File.Saved path ->
        Alcotest.(check string) "lock release failure retains complete bytes"
          "lock release bytes" (Eio.Path.load Eio.Path.(env#fs / path))
-     | File.Not_started | File.Writing _ ->
+     | File.Not_started | File.Writing _ | File.Aborted _ ->
        Alcotest.fail "lock release failure lost confirmed save");
     match result with
     | Error _ -> ()

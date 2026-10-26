@@ -19513,12 +19513,13 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
       let location = match progress with
         | Masc_tui_evidence_file.Not_started -> ""
         | Writing path -> " · 저장 시도 경로(완료 미확인): " ^ path
-        | Saved path -> " · 저장한 사본: " ^ path in
+        | Saved path -> " · 저장한 사본: " ^ path
+        | Aborted path -> " · 저장하지 못한 목적지: " ^ path in
       if request.vex_authority = state.workspace_authority
          && request.vex_reading == state.workspace_read_authority then
         (match progress with
          | Masc_tui_evidence_file.Not_started -> ()
-         | Writing _ | Saved _ -> state.verification_evidence_saved <-
+         | Writing _ | Saved _ | Aborted _ -> state.verification_evidence_saved <-
              (request.vex_key, request.vex_index, progress) :: state.verification_evidence_saved);
       (match result with
        | Error detail -> report_action state "error" ("Evidence: " ^ detail ^ location)

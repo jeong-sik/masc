@@ -34,7 +34,7 @@ let decode ~task_id ~verification_id ~index json =
   then Error "The downloaded evidence does not match its recorded size or SHA-256"
   else Ok {name; contents}
 
-type progress = Not_started | Writing of string | Saved of string
+type progress = Not_started | Writing of string | Saved of string | Aborted of string
 
 let save ?(with_lock=File_lock_eio.with_durable_lock_observed) ~fs ~registry_root ~directory ~directory_name ~path ~progress t =
   let ( let* ) = Result.bind in
@@ -97,6 +97,12 @@ let export_with ?with_lock ~fs ~registry_root ~directory ~progress ~admitted ~op
   let path = Filename.concat (Filename.concat directory directory_name) t.name in
   Atomic.set progress (Writing path);
   let result = save ?with_lock ~fs ~registry_root ~directory ~directory_name ~path ~progress t in
+  (match result with
+   | Ok () -> ()
+   | Error _ ->
+     (match Atomic.get progress with
+      | Saved _ -> ()
+      | Not_started | Writing _ | Aborted _ -> Atomic.set progress (Aborted path)));
   Eio.Fiber.check ();
   let* () = result in
   match open_file with

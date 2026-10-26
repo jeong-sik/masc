@@ -308,7 +308,56 @@ let answer_from_publication source ~since = function
        | Some _ | None -> Needs_locked_read)
   | Machine_live_publication.Running _ -> Needs_locked_read
 
-let live_json ~config source ~since =
+(* One machine frame is the same bytes for every watcher until the worker
+   publishes the next observation. Building and compressing those bytes per
+   request made each guest's 300 ms poll re-read, re-serialize and gzip the
+   whole 1.2 MB frame JSON; a frame is now parsed once per published blob and
+   encoded once per observation, then shared. *)
+type live_frame = { etag : string; encoded : Http_response_payload.prepared }
+
+(* What a live read found, before any HTTP encoding: a small answer, or the
+   complete frame of the current observation. *)
+type live_read =
+  | Live_answer of Yojson.Safe.t
+  | Live_full of { blob : Lane_addon_types.evidence; screen : Yojson.Safe.t;
+                   fields : (string * Yojson.Safe.t) list; observation_seq : int; refreshing : bool }
+
+let observed_fields fields ~observation_seq ~refreshing =
+  fields @ [ "observation_seq", `Int observation_seq; "refreshing", `Bool refreshing ]
+
+type frame_cache = {
+  blob : Lane_addon_types.evidence;
+  screen : Yojson.Safe.t;
+  frame : ((int * bool) * live_frame) option;
+}
+
+(* At most one entry per machine: only the frame its worker publishes now is
+   worth keeping. Concurrent misses may both prepare; the last one stays. *)
+let frame_caches : (Machine_lane.t * frame_cache) list Atomic.t = Atomic.make []
+
+let cached_frame machine = List.assoc_opt machine (Atomic.get frame_caches)
+
+let rec remember_frame machine entry =
+  let current = Atomic.get frame_caches in
+  let next = (machine, entry) :: List.remove_assoc machine current in
+  if not (Atomic.compare_and_set frame_caches current next) then remember_frame machine entry
+
+let live_frame ~source ~blob ~screen ~fields ~observation_seq ~refreshing =
+  let key = (observation_seq, refreshing) in
+  let reusable = match cached_frame source with
+    | Some { blob = cached_blob; frame = Some (cached_key, frame); screen = _ }
+      when cached_blob = blob && cached_key = key -> Some frame
+    | Some { frame = Some _; _ } | Some { frame = None; _ } | None -> None in
+  match reusable with
+  | Some frame -> frame
+  | None ->
+      let frame = Domain_pool_ref.submit_cpu_or_inline (fun () ->
+        let body = Yojson.Safe.to_string (`Assoc (observed_fields fields ~observation_seq ~refreshing)) in
+        { etag = Http.Response.weak_etag_value body; encoded = Http_response_payload.prepare body }) in
+      remember_frame source { blob; screen; frame = Some (key, frame) };
+      frame
+
+let live_read ~config source ~since =
   let name = match source with Machine_lane.Msx -> "masc_msx_screen" | Dos -> "masc_dos_screen" in
   let* snapshot = Lane_addon_runtime.observation_for_export ~config
     ~access:Lane_addon_sources.Unauthenticated ~name
@@ -318,13 +367,18 @@ let live_json ~config source ~since =
   | Some snapshot ->
       let references = List.filter_map (fun (row : Lane_addon_types.row) ->
         Option.map (fun value -> row.evidence,value) (List.assoc_opt "machine_live" row.fields)) snapshot.output.rows in
-      let* matches = match references with
+      let* blob, screen = match references with
         | [evidence,value] ->
             let* reference = Lane_addon_types.evidence_of_json value in
             let* () = if List.mem reference evidence then Ok () else Error "machine screen is not declared as row evidence" in
-            let store = Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
-            let* bytes = Eio_unix.run_in_systhread (fun () -> Lane_addon_store.read_blob ~max_bytes:snapshot.max_bytes store reference) in
-            (try Ok [Yojson.Safe.from_string bytes] with Yojson.Json_error detail -> Error detail)
+            (match cached_frame source with
+             | Some cached when cached.blob = reference -> Ok (reference, cached.screen)
+             | Some _ | None ->
+                 let store = Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+                 let* bytes = Eio_unix.run_in_systhread (fun () -> Lane_addon_store.read_blob ~max_bytes:snapshot.max_bytes store reference) in
+                 let* screen = try Ok (Yojson.Safe.from_string bytes) with Yojson.Json_error detail -> Error detail in
+                 remember_frame source { blob = reference; screen; frame = None };
+                 Ok (reference, screen))
         | _ -> Error "worker observation does not provide one machine screen reference" in
       (* Blob I/O yields: an installation can detach or publish a newer frame
          before these bytes return. Only publish the still-current observation. *)
@@ -336,31 +390,38 @@ let live_json ~config source ~since =
             && current.observation_seq = snapshot.observation_seq ->
             Ok (snapshot.refreshing || current.refreshing)
         | _ -> Error "machine observation changed while reading its screen" in
-      (match matches with
-       | [`Assoc fields] when List.assoc_opt "source_kind" fields = Some (`String (screen_source_kind source)) ->
-           let status = List.assoc_opt "state" fields in
-           let* result = match status with
-             | Some (`String "no_machine") -> Ok (`Assoc fields)
-             | Some (`String "changed") ->
-                 (match List.assoc_opt "change_count" fields, List.assoc_opt "incarnation" fields,
-                        List.assoc_opt "screen" fields with
-                  | Some (`Int count), Some (`String incarnation), Some (`Assoc _)
-                    when count >= 0 && incarnation <> "" ->
-                      let publication = if refreshing then
-                        Machine_live_publication.Running {count;incarnation}
-                        else Machine_live_publication.Stable {count;incarnation} in
-                      (match answer_from_publication source ~since publication with
-                       | Needs_locked_read -> Ok (`Assoc fields)
-                       | Answered (`Assoc unchanged) ->
-                           Ok (`Assoc (unchanged @ (match List.assoc_opt "activity" fields with
-                             | None -> [] | Some activity -> ["activity",activity])))
-                       | Answered json -> Ok json)
-                  | _ -> Error "invalid worker machine screen snapshot")
-             | _ -> Error "worker observation must contain a complete machine screen" in
-           (match result with `Assoc fields -> Ok (`Assoc (fields @ [
-             "observation_seq", `Int snapshot.observation_seq; "refreshing", `Bool refreshing]))
-            | _ -> Ok result)
+      let observed fields = Live_answer (`Assoc (observed_fields fields
+        ~observation_seq:snapshot.observation_seq ~refreshing)) in
+      (match screen with
+       | `Assoc fields when List.assoc_opt "source_kind" fields = Some (`String (screen_source_kind source)) ->
+           (match List.assoc_opt "state" fields with
+            | Some (`String "no_machine") -> Ok (observed fields)
+            | Some (`String "changed") ->
+                (match List.assoc_opt "change_count" fields, List.assoc_opt "incarnation" fields,
+                       List.assoc_opt "screen" fields with
+                 | Some (`Int count), Some (`String incarnation), Some (`Assoc _)
+                   when count >= 0 && incarnation <> "" ->
+                     let publication = if refreshing then
+                       Machine_live_publication.Running {count;incarnation}
+                       else Machine_live_publication.Stable {count;incarnation} in
+                     (match answer_from_publication source ~since publication with
+                      | Needs_locked_read ->
+                          Ok (Live_full { blob; screen; fields;
+                                          observation_seq = snapshot.observation_seq; refreshing })
+                      | Answered (`Assoc unchanged) ->
+                          Ok (observed (unchanged @ (match List.assoc_opt "activity" fields with
+                            | None -> [] | Some activity -> ["activity",activity])))
+                      | Answered json -> Ok (Live_answer json))
+                 | _ -> Error "invalid worker machine screen snapshot")
+            | _ -> Error "worker observation must contain a complete machine screen")
        | _ -> Error "worker observation does not provide one matching machine screen")
+
+let live_json ~config source ~since =
+  Result.map (function
+    | Live_answer json -> json
+    | Live_full { fields; observation_seq; refreshing; blob = _; screen = _ } ->
+        `Assoc (observed_fields fields ~observation_seq ~refreshing))
+    (live_read ~config source ~since)
 
 (* An invited Player holds CanPlayMachine and no CanReadState: it watches
    the machine here and reads nothing else. Workers and Admins hold both. *)
@@ -386,6 +447,22 @@ let live_workspace_precondition ~config fields =
           Error (`Conflict, "workspace precondition failed"))
      | _ -> Error (`Bad_request, "expected_base_path and expected_masc_root go together"))
 
+let respond_live_frame request reqd frame =
+  let extra_headers = cors_headers (get_origin request) in
+  let client_tag = Httpun.Headers.get request.Httpun.Request.headers "if-none-match" in
+  let validator = [ "etag", frame.etag
+                  ; "cache-control", Http.Response.json_revalidate_cache_control ] in
+  match client_tag with
+  | Some client_tag when Http.Response.client_tag_matches ~etag:frame.etag ~client_tag ->
+      Http.Response.bytes ~status:`Not_modified ~headers:(extra_headers @ validator)
+        ~content_type:Http.Response.json_content_type "" reqd
+  | Some _ | None ->
+      let body, encoding = Http_response_payload.select_prepared
+        ~accept_encoding:(Httpun.Headers.get request.Httpun.Request.headers "accept-encoding")
+        frame.encoded in
+      Http.Response.bytes ~headers:(extra_headers @ validator @ encoding)
+        ~content_type:Http.Response.json_content_type body reqd
+
 let get_live request reqd =
   with_permission_auth ~permission:Masc_domain.CanPlayMachine (fun state _request reqd ->
     match live_workspace_precondition ~config:(Mcp_server.workspace_config state) (query_fields request) with
@@ -395,9 +472,12 @@ let get_live request reqd =
     match decode_live_query fields with
     | Error detail -> respond request reqd (Error detail)
     | Ok (source, since) ->
-        (match live_json ~config:(Mcp_server.workspace_config state) source ~since with
-         | Ok json -> Http.Response.json_value_on_cpu ~compress:true ~request
+        (match live_read ~config:(Mcp_server.workspace_config state) source ~since with
+         | Ok (Live_answer json) -> Http.Response.json_value_on_cpu ~compress:true ~request
              ~extra_headers:(cors_headers (get_origin request)) json reqd
+         | Ok (Live_full { blob; screen; fields; observation_seq; refreshing }) ->
+             respond_live_frame request reqd
+               (live_frame ~source ~blob ~screen ~fields ~observation_seq ~refreshing)
          | Error detail -> respond_json_value_with_cors ~status:`Service_unavailable request reqd
              (Server_refusal.json ~code:"machine_observation_unavailable" detail)))
     request reqd

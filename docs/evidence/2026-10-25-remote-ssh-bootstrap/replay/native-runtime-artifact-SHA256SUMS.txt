@@ -1,0 +1,14 @@
+5f8b87aff74d3936dfff923ce88f4bff7247073a1c33d2ca5591c16e25149fec  ./dependencies.txt
+99025484944a801769beb1eb054cd138bfae752bc17a3ca53de8b64206a8824a  ./masc-browser-host-macos-arm64
+af7b33ec59d5e73c2998323a1a89afe4e6f3dbc7448fb7765d2c00b481c829d5  ./masc-check-runtime-deployment-preflight-macos-arm64
+6e65630bea3fba7e82c1e052805d26e9a8ac4c572f648bd14628686720634c7f  ./masc-deployment-preflight-helper-macos-arm64
+b1463d327eb76f49cde71871b0da4c9eb8c664215ab5258a4a805ca8c2fd4efd  ./masc-exec-ssh-bootstrap-macos-arm64
+3c5304609b04f85ba6747407a631a8e14730b7da7dd8d79c0be321a23d367f1a  ./masc-macos-arm64
+b932053747ab13d8dbb43d545d240bc84ec5bac891b0f960f96c42070beb3897  ./masc-runtime-macos-arm64.tar.gz
+f25b4ecb4dac5a9bc16c56c6cbdca0b4b6ea00973a4bf751393c9333236cae0f  ./masc-tui-macos-arm64
+6873f426b42fe3d3ba3359f74a16866e6aa5d469b7329139748efe008dffcc5c  ./probe.json
+f9a44d5ae38db2f57e4c89888d0c1ab61209d970bfb01fcf8bb057fff38a1765  ./runtime-provenance.json
+0963c6ddb93cb05b8fb8ff7ae804c0b82decc8d9c0db894d2df69a146930a437  ./server-version.txt
+41ef472ad49c017d7e7afc79d2fa391bd68ff256036062f4fdcc978348939b17  ./ssh-bootstrap-help.txt
+0b56c96e6a489f75f542c93237ebde42d9fdf430f415f1cfa71f63d745eb7a8e  ./tui-build-commit.txt
+0963c6ddb93cb05b8fb8ff7ae804c0b82decc8d9c0db894d2df69a146930a437  ./tui-version.txt

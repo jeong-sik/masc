@@ -1,0 +1,115 @@
+retry: 1500
+
+data: {"type":"CUSTOM","threadId":"default","timestamp":1792939703.343601,"name":"KEEPER_CHAT_OPERATION_ACCEPTED","value":{"operation_id":"kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","state":"Queued","queued_count":1}}
+
+id: 0
+data: {"type":"RUN_STARTED","threadId":"keeper:native-bootstrap-keeper","timestamp":1792939703.345518,"runId":"keeper-operation-run-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7"}
+
+id: 1
+data: {"type":"TEXT_MESSAGE_START","threadId":"keeper:native-bootstrap-keeper","timestamp":1792939703.345723,"runId":"keeper-operation-run-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","messageId":"keeper-operation-message-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","role":"assistant"}
+
+id: 2
+data: {"type":"CUSTOM","threadId":"keeper:native-bootstrap-keeper","timestamp":1792939703.373292,"runId":"keeper-operation-run-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","name":"KEEPER_RUNTIME_ATTEMPT_STARTED","value":{"runtime_id":"ollama_cloud.deepseek-v4.1-flash","attempt_index":0}}
+
+id: 3
+data: {"type":"CUSTOM","threadId":"keeper:native-bootstrap-keeper","timestamp":1792939703.411806,"runId":"keeper-operation-run-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","name":"KEEPER_CONNECTED","value":null}
+
+id: 4
+data: {"type":"CUSTOM","threadId":"keeper:native-bootstrap-keeper","timestamp":1792939703.412156,"runId":"keeper-operation-run-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","name":"KEEPER_STREAM_MESSAGE_START","value":{"stream_scope":0,"provider_message_id":"ssh-fixture-9","model":"deepseek-v4.1-flash","content_generation":0}}
+
+id: 5
+data: {"type":"CUSTOM","threadId":"keeper:native-bootstrap-keeper","timestamp":1792939703.412418,"runId":"keeper-operation-run-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","name":"KEEPER_CONTENT_BLOCK_START","value":{"index":0,"content_type":"tool_use","tool_call_id":"ssh-file-restart-0","tool_call_name":"Read"}}
+
+id: 6
+data: {"type":"TOOL_CALL_START","threadId":"keeper:native-bootstrap-keeper","timestamp":1792939703.412938,"runId":"keeper-operation-run-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","toolCallId":"ssh-file-restart-0","toolCallName":"Read","toolStreamScope":0,"providerMessageId":"ssh-fixture-9","toolCallBlockIndex":0}
+
+id: 7
+data: {"type":"TOOL_CALL_ARGS","threadId":"keeper:native-bootstrap-keeper","timestamp":1792939703.413077,"runId":"keeper-operation-run-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","delta":"{\"file_path\": \"notes.txt\"}","toolCallId":"ssh-file-restart-0","toolStreamScope":0,"providerMessageId":"ssh-fixture-9","toolCallBlockIndex":0}
+
+id: 8
+data: {"type":"CUSTOM","threadId":"keeper:native-bootstrap-keeper","timestamp":1792939703.413312,"runId":"keeper-operation-run-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","name":"KEEPER_CONTENT_BLOCK_STOP","value":{"index":0}}
+
+id: 9
+data: {"type":"TOOL_CALL_END","threadId":"keeper:native-bootstrap-keeper","timestamp":1792939703.413447,"runId":"keeper-operation-run-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","toolCallId":"ssh-file-restart-0","toolStreamScope":0,"providerMessageId":"ssh-fixture-9","toolCallBlockIndex":0}
+
+id: 10
+data: {"type":"CUSTOM","threadId":"keeper:native-bootstrap-keeper","timestamp":1792939703.413617,"runId":"keeper-operation-run-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","name":"KEEPER_STREAM_MESSAGE_DELTA","value":{"stream_scope":0,"content_generation":0,"stop_reason":"tool_use","usage":{"input_tokens":1,"output_tokens":1}}}
+
+id: 11
+data: {"type":"CUSTOM","threadId":"keeper:native-bootstrap-keeper","timestamp":1792939703.413789,"runId":"keeper-operation-run-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","name":"KEEPER_STREAM_MESSAGE_STOP","value":{"content_generation":0,"stream_scope":0}}
+
+id: 12
+data: {"type":"CUSTOM","threadId":"keeper:native-bootstrap-keeper","timestamp":1792939703.530342,"runId":"keeper-operation-run-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","name":"KEEPER_TOOL_RESULT_READY","value":{"toolStreamScope":0,"toolCallBlockIndex":0,"executionId":"exec-1792939703515-0001","providerMessageId":"ssh-fixture-9","toolCallId":"ssh-file-restart-0"}}
+
+id: 13
+data: {"type":"CUSTOM","threadId":"keeper:native-bootstrap-keeper","timestamp":1792939703.560392,"runId":"keeper-operation-run-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","name":"KEEPER_CONNECTED","value":null}
+
+id: 14
+data: {"type":"CUSTOM","threadId":"keeper:native-bootstrap-keeper","timestamp":1792939703.560696,"runId":"keeper-operation-run-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","name":"KEEPER_STREAM_MESSAGE_START","value":{"stream_scope":1,"provider_message_id":"ssh-fixture-10","model":"deepseek-v4.1-flash","content_generation":0}}
+
+id: 15
+data: {"type":"CUSTOM","threadId":"keeper:native-bootstrap-keeper","timestamp":1792939703.560841,"runId":"keeper-operation-run-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","name":"KEEPER_CONTENT_BLOCK_START","value":{"index":0,"content_type":"tool_use","tool_call_id":"ssh-file-restart-1","tool_call_name":"Execute"}}
+
+id: 16
+data: {"type":"TOOL_CALL_START","threadId":"keeper:native-bootstrap-keeper","timestamp":1792939703.561407,"runId":"keeper-operation-run-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","toolCallId":"ssh-file-restart-1","toolCallName":"Execute","toolStreamScope":1,"providerMessageId":"ssh-fixture-10","toolCallBlockIndex":0}
+
+id: 17
+data: {"type":"TOOL_CALL_ARGS","threadId":"keeper:native-bootstrap-keeper","timestamp":1792939703.561651,"runId":"keeper-operation-run-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","delta":"{\"argv\": [\"python3\", \"-c\", \"import hashlib,json,os,subprocess; from pathlib import Path; p=json.loads(Path(\\\"ssh-proof.json\\\").read_bytes()); b=Path(\\\"notes.txt\\\").read_bytes(); assert b==b\\\"after\\\\n\\\"; p.update(notes=b.decode(),sha256=hashlib.sha256(b).hexdigest(),files=sorted(os.listdir(\\\".\\\")),bootstrap_env=os.environ.get(\\\"BOOTSTRAP_PROOF_ENV\\\"),bootstrap_tool=subprocess.check_output([\\\"bootstrap-proof-tool\\\"],text=True).strip(),retained_sha256=hashlib.sha256(Path(\\\"retained file.bin\\\").read_bytes()).hexdigest()); assert p[\\\"bootstrap_env\\\"]==\\\"bootstrap-environment-preserved\\\",p; assert p[\\\"bootstrap_tool\\\"]==\\\"bootstrap-tool-preserved\\\",p; assert p[\\\"retained_sha256\\\"]==\\\"6a075ec6d845b4e325caa9a407d7f68755df8551aefe5a626cf0019b0a629a21\\\",p; print(json.dumps(p))\"]}","toolCallId":"ssh-file-restart-1","toolStreamScope":1,"providerMessageId":"ssh-fixture-10","toolCallBlockIndex":0}
+
+id: 18
+data: {"type":"CUSTOM","threadId":"keeper:native-bootstrap-keeper","timestamp":1792939703.561838,"runId":"keeper-operation-run-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","name":"KEEPER_CONTENT_BLOCK_STOP","value":{"index":0}}
+
+id: 19
+data: {"type":"TOOL_CALL_END","threadId":"keeper:native-bootstrap-keeper","timestamp":1792939703.562008,"runId":"keeper-operation-run-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","toolCallId":"ssh-file-restart-1","toolStreamScope":1,"providerMessageId":"ssh-fixture-10","toolCallBlockIndex":0}
+
+id: 20
+data: {"type":"CUSTOM","threadId":"keeper:native-bootstrap-keeper","timestamp":1792939703.562187,"runId":"keeper-operation-run-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","name":"KEEPER_STREAM_MESSAGE_DELTA","value":{"stream_scope":1,"content_generation":0,"stop_reason":"tool_use","usage":{"input_tokens":1,"output_tokens":1}}}
+
+id: 21
+data: {"type":"CUSTOM","threadId":"keeper:native-bootstrap-keeper","timestamp":1792939703.562291,"runId":"keeper-operation-run-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","name":"KEEPER_STREAM_MESSAGE_STOP","value":{"content_generation":0,"stream_scope":1}}
+
+id: 22
+data: {"type":"CUSTOM","threadId":"keeper:native-bootstrap-keeper","timestamp":1792939703.903591,"runId":"keeper-operation-run-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","name":"KEEPER_TOOL_RESULT_READY","value":{"toolStreamScope":1,"toolCallBlockIndex":0,"executionId":"exec-1792939703903-0002","providerMessageId":"ssh-fixture-10","toolCallId":"ssh-file-restart-1"}}
+
+id: 23
+data: {"type":"CUSTOM","threadId":"keeper:native-bootstrap-keeper","timestamp":1792939703.9301,"runId":"keeper-operation-run-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","name":"KEEPER_CONNECTED","value":null}
+
+id: 24
+data: {"type":"CUSTOM","threadId":"keeper:native-bootstrap-keeper","timestamp":1792939703.930401,"runId":"keeper-operation-run-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","name":"KEEPER_STREAM_MESSAGE_START","value":{"stream_scope":2,"provider_message_id":"ssh-fixture-11","model":"deepseek-v4.1-flash","content_generation":0}}
+
+id: 25
+data: {"type":"CUSTOM","threadId":"keeper:native-bootstrap-keeper","timestamp":1792939703.931033,"runId":"keeper-operation-run-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","name":"KEEPER_CONTENT_BLOCK_START","value":{"index":0,"content_type":"text"}}
+
+id: 26
+data: {"type":"TEXT_MESSAGE_CONTENT","threadId":"keeper:native-bootstrap-keeper","timestamp":1792939703.931238,"runId":"keeper-operation-run-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","messageId":"keeper-operation-message-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","delta":"REMOTE_SSH_RESTART_COMPLETED_b8e1b7b5a00e42b78bce74a41e158ba7","textResponse":{"content_generation":0,"stream_scope":2}}
+
+id: 27
+data: {"type":"CUSTOM","threadId":"keeper:native-bootstrap-keeper","timestamp":1792939703.931438,"runId":"keeper-operation-run-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","name":"KEEPER_MODEL_CONTENT_ACTIVITY","value":{"generation":0,"stream_scope":2,"block_index":0,"channel":"text","state":"observed","provider_message_id":"ssh-fixture-11"}}
+
+id: 28
+data: {"type":"CUSTOM","threadId":"keeper:native-bootstrap-keeper","timestamp":1792939703.931573,"runId":"keeper-operation-run-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","name":"KEEPER_CONTENT_BLOCK_STOP","value":{"index":0}}
+
+id: 29
+data: {"type":"CUSTOM","threadId":"keeper:native-bootstrap-keeper","timestamp":1792939703.931695,"runId":"keeper-operation-run-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","name":"KEEPER_MODEL_CONTENT_ACTIVITY","value":{"generation":0,"stream_scope":2,"block_index":0,"channel":"text","state":"ended","provider_message_id":"ssh-fixture-11"}}
+
+id: 30
+data: {"type":"CUSTOM","threadId":"keeper:native-bootstrap-keeper","timestamp":1792939703.931861,"runId":"keeper-operation-run-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","name":"KEEPER_STREAM_MESSAGE_DELTA","value":{"stream_scope":2,"content_generation":0,"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}}
+
+id: 31
+data: {"type":"CUSTOM","threadId":"keeper:native-bootstrap-keeper","timestamp":1792939703.931985,"runId":"keeper-operation-run-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","name":"KEEPER_STREAM_MESSAGE_STOP","value":{"content_generation":0,"stream_scope":2}}
+
+id: 32
+data: {"type":"CUSTOM","threadId":"keeper:native-bootstrap-keeper","timestamp":1792939703.999373,"runId":"keeper-operation-run-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","name":"KEEPER_TOOL_TRANSCRIPT_COMMITTED","value":{"deliveryKey":{"kind":"operation","operation_id":"kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7"},"executionId":"exec-1792939703515-0001","ordinal":0}}
+
+id: 33
+data: {"type":"CUSTOM","threadId":"keeper:native-bootstrap-keeper","timestamp":1792939703.999479,"runId":"keeper-operation-run-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","name":"KEEPER_TOOL_TRANSCRIPT_COMMITTED","value":{"deliveryKey":{"kind":"operation","operation_id":"kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7"},"executionId":"exec-1792939703903-0002","ordinal":1}}
+
+id: 34
+data: {"type":"CUSTOM","threadId":"keeper:native-bootstrap-keeper","timestamp":1792939703.999777,"runId":"keeper-operation-run-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","name":"KEEPER_REPLY_DETAILS","value":{"reply":"REMOTE_SSH_RESTART_COMPLETED_b8e1b7b5a00e42b78bce74a41e158ba7","turn_outcome":"visible_reply","turn_ref":"trace-1792939687301-00000#2","terminal_stream_scope":2}}
+
+id: 35
+data: {"type":"TEXT_MESSAGE_END","threadId":"keeper:native-bootstrap-keeper","timestamp":1792939703.999887,"runId":"keeper-operation-run-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7","messageId":"keeper-operation-message-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7"}
+
+id: 36
+data: {"type":"RUN_FINISHED","threadId":"keeper:native-bootstrap-keeper","timestamp":1792939704.000007,"runId":"keeper-operation-run-kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7"}
+

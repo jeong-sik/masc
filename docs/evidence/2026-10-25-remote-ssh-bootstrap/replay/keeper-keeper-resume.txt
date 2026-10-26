@@ -1,0 +1,2 @@
+native-bootstrap-keeper: a keeper of that name already existed, so the server applied this declaration to it instead of creating one.
+The sandbox profile and network mode it landed on are not in that answer; read them from the keeper's TOML.

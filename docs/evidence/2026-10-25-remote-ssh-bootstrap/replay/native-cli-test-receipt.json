@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "result": "PASS",
+  "collection": "recorded terminal completion of local unified_exec session 34016; not a new test run",
+  "source_commit": "a7685562be55678229ce29668c624d222cd76d67",
+  "artifact_run": 40201223245,
+  "artifact_id": 12600889724,
+  "helper_sha256": "b1463d327eb76f49cde71871b0da4c9eb8c664215ab5258a4a805ca8c2fd4efd",
+  "tests": 10,
+  "exit_code": 0,
+  "elapsed_seconds": 30.563,
+  "system": "Darwin",
+  "machine": "arm64",
+  "command": [
+    "python3",
+    "test/test_exec_ssh_bootstrap.py",
+    "/tmp/mssh-candidate-runtime-a768556/masc-exec-ssh-bootstrap"
+  ],
+  "test_driver_sha256": "aae6d26a4e3378a51eee00a6727994049791bb5a9eb222d687125d0cfef21be0",
+  "output_tail": "....\n----------------------------------------------------------------------\nRan 10 tests in 30.563s\n\nOK\n",
+  "scope": "actual native CLI with fake SSH transport, including preservation, symlink refusal, same-major config refusal and malformed framed receipt",
+  "real_ssh": false,
+  "keeper": false,
+  "production_install": false,
+  "recorded_at": "2026-10-25T14:46:06.444204+00:00"
+}

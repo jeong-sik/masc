@@ -262,11 +262,15 @@ A push creates a new head, so earlier review does not certify new changes.
 Reviewers clear their own REQUEST_CHANGES when the corrected code resolves their
 findings. A green CI run alone does not resolve a finding.
 After rereview, use `approve-guard.sh --replace-own-cr REVIEW_ID` to replace
-your own latest open request with a current-head approval. Other reviewers'
-open change requests do not prevent recording that independent approval, but
-still block merge admission and source receipts until those reviewers resolve
-them. The guard never dismisses another account's request. Separate comment
-verdicts and all head, diff, identity and Release CI checks continue to apply.
+your own open request with a current-head approval; repeat the option to name
+several requests. Each ID must belong to your authenticated account on that PR.
+Existing CRs and comment verdicts do not prevent recording a new independent
+approval. At merge/receipt consumption, each account's unresolved FAIL/HOLD still
+blocks: a PASS from another account, including the PR author, cannot clear it.
+Keeper names are diagnostic; sharing a GitHub login does not add an independent
+formal reviewer. The guard never dismisses another account's request. All head,
+diff, identity and Release CI checks remain; ordinary source publication does
+not wait for selected CI, while merge admission retains the CI pin check.
 
 The ordinary source-review verdict uses actual values:
 

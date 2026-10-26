@@ -4,7 +4,7 @@ set -euo pipefail
 GH="${GUARD_GH:-gh}"
 here="$(cd "$(dirname "$0")" && pwd)"
 repo=""; pr=""; head=""; body=""; run=""; replace_cr=""
-review_base=""; review_diff=""
+review_base=""; review_diff=""; release_run=""
 check_only=0; merge_check=0; source_receipt=0; receipt_json=0; print_footer=0
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -14,7 +14,10 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --repo) repo="$2"; shift 2;; --pr) pr="$2"; shift 2;;
     --head) head="$2"; shift 2;; --body) body="$2"; shift 2;;
-    --run) run="$2"; shift 2;; --replace-own-cr) replace_cr="$2"; shift 2;;
+    --run) run="$2"; shift 2;;
+    --replace-own-cr)
+      [[ "$2" =~ ^[1-9][0-9]*$ ]] || exit 2
+      replace_cr="${replace_cr:+$replace_cr }$2"; shift 2;;
     --review-base) review_base="$2"; shift 2;; --review-diff) review_diff="$2"; shift 2;;
     --check) check_only=1; shift;; --merge-check) merge_check=1; shift;;
     --source-receipt) source_receipt=1; shift;;
@@ -24,7 +27,7 @@ while [ $# -gt 0 ]; do
 done
 [[ "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ && "$pr" =~ ^[1-9][0-9]*$ && "$head" =~ ^[0-9a-f]{40}$ ]] || exit 2
 [ -z "$run" ] || [[ "$run" =~ ^[1-9][0-9]*$ ]] || exit 2
-[ -z "$replace_cr" ] || [[ "$replace_cr" =~ ^[1-9][0-9]*$ ]] || exit 2
+[ "$merge_check" -eq 0 ] || [ -z "$replace_cr" ] || exit 2
 [ "$((check_only + merge_check + source_receipt + print_footer))" -le 1 ] || exit 2
 [ "$receipt_json" -eq 0 ] || [ "$merge_check" -eq 1 ] || exit 2
 # Source receipts are read-only authority for selecting checks, not merge
@@ -83,7 +86,9 @@ compute_scope() {
 }
 read_current_pr
 [ "$source_receipt" -eq 0 ] || [ "$review_policy" = source ] || refuse "source receipts cannot admit a release"
-current_diff=$(python3 "$here/review-diff.py" --repo "$repo" --base "$pr_base_sha" --head "$head") || refuse "complete review diff unavailable"
+current_diff=$(python3 "$here/review-diff.py" --repo "$repo" --base "$pr_base_sha" --head "$head") || {
+  echo "approve-guard: complete review diff unavailable" >&2; exit 1;
+}
 # Merge admission and release review admission must both establish the
 # policy-specific CI identity before review verdicts are parsed. Release
 # verdicts are bound to this selected run; checking reviews first would leave
@@ -109,22 +114,27 @@ admit_review() {
 }
 review_rows() {
   ci_gh_json "repos/$repo/pulls/$pr/reviews?per_page=100" '.[] | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED") | [.user.login, (.id|tostring), .state] | @tsv' |
-    sort -t "$(printf '\t')" -k1,1 -k2,2nr | awk -F '\t' 'NF && !seen[$1]++'
+    sort -t "$(printf '\t')" -k1,1 -k2,2nr
 }
 check_reviews() {
-  local rows who rid state bound scope_status review_json admit_status
+  local all_rows rows who rid state bound scope_status review_json admit_status replacement_id owned_state
   # A read failure must leave one named line, not a bare exit 1 swallowed by
   # set -e into an unreadable evidence_read_failed (run 39404586810).
-  rows=$(review_rows) || { echo "approve-guard: review rows read failed: repos/$repo/pulls/$pr/reviews" >&2; return 1; }
+  all_rows=$(review_rows) || { echo "approve-guard: review rows read failed: repos/$repo/pulls/$pr/reviews" >&2; return 1; }
+  rows=$(printf '%s\n' "$all_rows" | awk -F '\t' 'NF && !seen[$1]++')
   approvals=""; replaced=""; own_approval=""; refusal_detail=""; refused_scope_reviews=""; pending_requests=""
+  for replacement_id in $replace_cr; do
+    owned_state=$(printf '%s\n' "$all_rows" | awk -F '\t' -v actor="$me" -v rid="$replacement_id" '$1==actor && ("id:" $2)==("id:" rid) {print $3}')
+    [ "$owned_state" = CHANGES_REQUESTED ] || refuse "--replace-own-cr $replacement_id does not name this account's open request on this PR"
+  done
   while IFS=$'\t' read -r who rid state; do
     [ -n "$who" ] || continue
     if [ "$state" = CHANGES_REQUESTED ]; then
       if [ "$merge_check" -eq 1 ] || [ "$source_receipt" -eq 1 ]; then
         refuse "open CHANGES_REQUESTED from $who (review $rid)"
       elif [ "$who" = "$me" ]; then
-        [ "$rid" = "$replace_cr" ] || refuse "open CHANGES_REQUESTED from $who (review $rid); use --replace-own-cr $rid after rereview"
-        replaced="$rid"
+        [ -n "$replace_cr" ] || refuse "open CHANGES_REQUESTED from $who (review $rid); use --replace-own-cr $rid after rereview"
+        replaced="$replace_cr"
       else
         # Recording one independent review must not wait for every other
         # reviewer to withdraw theirs. Consumption still refuses above.
@@ -158,20 +168,22 @@ $(printf '%s\n' "$bound" | sed 's/^/    - /')
       fi
     fi
   done <<<"$rows"
-  [ -z "$replace_cr" ] || [ "$replaced" = "$replace_cr" ] || refuse "--replace-own-cr does not name this account's open request"
+  [ -z "$replace_cr" ] || [ "$replaced" = "$replace_cr" ] || refuse "--replace-own-cr does not name this account's current open request"
 }
 check_verdict() {
-  local value state cited by exclude_review="" approval_reviewer=""
-  # Only check_reviews can supply the authenticated caller's current open CR.
-  # Merge admission and source receipts never consume a replacement exception.
+  local value state cited
+  # This operation records an independent conclusion. Existing decisions are
+  # consumed only for merge/selection; they must not prevent a new verdict.
   if [ "$merge_check" -eq 0 ] && [ "$source_receipt" -eq 0 ]; then
-    exclude_review="$replaced"
-    approval_reviewer="$me"
+    value=$(verdict_for "$pr" "$head" "" "$me") || { echo "approve-guard: verdict read failed before publication: PR $pr head $head" >&2; return 1; }
+    return 0
   fi
-  value=$(verdict_for "$pr" "$head" "$exclude_review" "$approval_reviewer") || { echo "approve-guard: verdict read failed before parsing: PR $pr head $head" >&2; return 1; }
-  read -r state cited by <<<"$value"
+  value=$(verdict_for "$pr" "$head" "" "" json) || { echo "approve-guard: verdict read failed before parsing: PR $pr head $head" >&2; return 1; }
+  state=$(printf '%s' "$value" | jq -r '.state // empty')
+  cited=$(printf '%s' "$value" | jq -r '.run // "-"')
   if [ -n "$state" ] && [ "$state" != PASS ]; then
     [ -n "$approvals" ] || emit_refusal_detail
+    printf '%s' "$value" | jq -r '.blockers[] | "  unresolved \(.state) by \(.actor // "unidentified") at \(.kind):\(.id // "unknown") since \(.decision_at) \(.url // "")"' >&2
     refuse "latest structured verdict is $state"
   fi
   if [ "$state" = PASS ] && [ "$review_policy" = source ] && [ "$cited" != - ]; then
@@ -183,6 +195,10 @@ check_verdict() {
     refuse "release verdict cites run $cited, admitted run is $release_run"
   fi
 }
+check_publication_policy() {
+  read_current_pr || return $?
+  if [ "$review_policy" = release ]; then check_current_ci; fi
+}
 check_reviews
 check_verdict
 if [ "$merge_check" -eq 1 ] || [ "$source_receipt" -eq 1 ]; then
@@ -192,7 +208,7 @@ if [ "$merge_check" -eq 1 ] || [ "$source_receipt" -eq 1 ]; then
   [ -n "$approvals" ] || refuse "approval changed during merge check"
   check_verdict
   final_diff=$(python3 "$here/review-diff.py" --repo "$repo" --base "$pr_base_sha" --head "$head") ||
-    refuse "complete diff unavailable at consumption"
+    { echo "approve-guard: complete diff unavailable at consumption" >&2; exit 1; }
   [ "$current_diff" = "$final_diff" ] || refuse "complete diff moved during consumption"
   read_current_pr
   check_reviews
@@ -203,7 +219,7 @@ if [ "$merge_check" -eq 1 ] || [ "$source_receipt" -eq 1 ]; then
   else echo "MERGE-CHECK PASS #$pr head $head approvals:$approvals"; fi
   exit 0
 fi
-check_current_ci
+check_publication_policy
 [ "$me" != "$pr_author" ] || refuse "the PR author cannot approve their own change"
 if [ "$check_only" -eq 0 ] || [ -n "$review_base" ] || [ -n "$review_diff" ]; then
   [[ "$review_base" =~ ^[0-9a-f]{40}$ && "$review_diff" =~ ^[0-9a-f]{64}$ ]] ||
@@ -233,12 +249,12 @@ if [ "$check_only" -eq 0 ] || [ -n "$body" ]; then
   fi
   [ "$keeper" != "$me" ] || refuse "by must name the reviewing Keeper"
 fi
-check_current_ci
+check_publication_policy
 check_reviews
 check_verdict
 read_current_pr
 final_diff=$(python3 "$here/review-diff.py" --repo "$repo" --base "$pr_base_sha" --head "$head") ||
-  refuse "complete diff unavailable at approval"
+  { echo "approve-guard: complete diff unavailable at approval" >&2; exit 1; }
 [ "$current_diff" = "$final_diff" ] || refuse "complete diff moved during approval"
 # The compare/fetch above can block while the PR is retargeted. Revalidate the
 # producer identity after all network-dependent diff work, before any POST.
@@ -255,7 +271,9 @@ scope=$(compute_scope)
 footer=$(printf '\n\n---\nreview-scope: %s\napprove-guard: head `%s` · %s review' "$scope" "$head" "$review_policy")
 if [ -n "$own_approval" ]; then
   previous_scope=$(ci_gh_object "repos/$repo/pulls/$pr/reviews/$own_approval" '.body | split("\n") | map(select(startswith("review-scope: "))) | if length == 1 then .[0] else "" end')
-  if [ "$previous_scope" = "review-scope: $scope" ]; then
+  own_verdict=$(verdict_for "$pr" "$head" "" "$me") || { echo "approve-guard: own verdict read failed" >&2; exit 1; }
+  read -r own_state _ <<<"$own_verdict"
+  if [ "$previous_scope" = "review-scope: $scope" ] && [ "$own_state" = PASS ]; then
     echo "SKIP #$pr: $me already APPROVED this head and scope (review $own_approval)"
     exit 0
   fi

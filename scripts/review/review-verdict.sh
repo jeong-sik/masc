@@ -1,52 +1,21 @@
-# Shared structured verdict reader. Caller supplies GH and repo; read-only.
-# Newest structured verdict for this head; malformed evidence never grants PASS.
-verdict_for() { # pr head [validated own open change-request review id] [approval reviewer login]
-  local lines exclude_review="${3:-}" approval_reviewer="${4:-}"
+# Shared exact-head decision reader. Caller supplies GH and repo; read-only.
+# The authenticated GitHub author owns each decision, not its `by:` label.
+verdict_for() { # pr head [validated own CR id] [actor filter] [verdict|json]
+  local lines value exclude_review="${3:-}" actor="${4:-}" format="${5:-verdict}"
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 1
   [ -z "$exclude_review" ] || [[ "$exclude_review" =~ ^[1-9][0-9]*$ ]] || {
     echo "approve-guard: invalid replacement review id" >&2; return 1;
   }
-  lines=$( { "$GH" api --paginate "repos/$repo/issues/$1/comments" --jq '.[] | [.created_at, .body, (.author_association // "UNKNOWN"), (.updated_at // .created_at)] | @tsv' &&
-             "$GH" api --paginate "repos/$repo/pulls/$1/reviews" --jq '.[] | [.submitted_at, .body, (.author_association // "UNKNOWN"), "", .state, (.id|tostring), .user.login] | @tsv'; } ) || { echo "approve-guard: verdict read failed: comments/reviews of PR $1" >&2; return 1; }
-  printf '%s\n' "$lines" | awk -F'\t' -v head="$2" -v exclude_review="$exclude_review" -v approval_reviewer="$approval_reviewer" '
-    { # Columns 5/6 exist only for reviews. Column 4 remains comment edit time.
-      # A replacement is validated by approve-guard before every read; it
-      # withdraws only that exact open CR, never a comment or another review.
-      if ($5=="DISMISSED" || (exclude_review!="" && $5=="CHANGES_REQUESTED" && ("id:" $6)==("id:" exclude_review))) next
-      # A different reviewer may record their own conclusion while these CRs
-      # remain open. Merge/receipt/queue callers omit approval_reviewer and
-      # still consume every refusal. COMMENTED verdicts and issue comments
-      # retain their authority in both paths.
-      if (approval_reviewer!="" && $5=="CHANGES_REQUESTED" && $7!="" && $7!=approval_reviewer) next
-      body=$2; sub(/\\n.*/, "", body); sub(/\\r$/, "", body)
-      n=split(body, w, " ")
-      names_head=0; head_fields=0
-      for (i=3; i<n; i++) if (w[i]=="head:") {
-        head_fields++; if (w[i+1]==head) names_head=1
-      }
-      if (w[1]=="verdict:" && names_head) {
-        state=w[2]; run="-"; by="-"
-        if (state=="PASS" || state=="FAIL") {
-          if (body ~ /^verdict: (PASS|FAIL) head: [0-9a-f]+ by: [A-Za-z0-9._-]+$/ &&
-              n==6 && head_fields==1 && w[3]=="head:" && w[4]==head &&
-              w[5]=="by:" && w[6] ~ /^[A-Za-z0-9._-]+$/) { by=w[6] }
-          else if (body ~ /^verdict: (PASS|FAIL) head: [0-9a-f]+ run: [1-9][0-9]* by: [A-Za-z0-9._-]+$/ &&
-              n==8 && head_fields==1 && w[3]=="head:" && w[4]==head &&
-              w[5]=="run:" && w[6] ~ /^[1-9][0-9]*$/ &&
-              w[7]=="by:" && w[8] ~ /^[A-Za-z0-9._-]+$/) { run=w[6]; by=w[8] }
-          else state="INVALID"
-        } else if (state!="HOLD" && state!="COMMENT") state="UNKNOWN"
-        # Positive authority belongs to repository participants. Unknown or
-        # outsider PASS never clears a trusted refusal; refusals stay conservative.
-        if (state=="PASS" && $3!="OWNER" && $3!="MEMBER" && $3!="COLLABORATOR") state="UNTRUSTED"
-        # Editing an old PASS (even its explanation) cannot move it after a
-        # subsequently posted refusal. Edits that revoke or invalidate PASS
-        # still take effect; they may refuse authority, never grant it.
-        decision_time=$1
-        if (state!="PASS" && $4 > decision_time) decision_time=$4
-        # Conflicting decisions in the same API timestamp cannot grant PASS.
-        if (decision_time > t || (decision_time==t && state!="PASS")) {
-          t=decision_time; v=state" "run" "by
-        }
-      } }
-    END { print v }'
+  lines=$( { "$GH" api --paginate "repos/$repo/issues/$1/comments" --jq '.[] | {kind:"comment",record:.} | @json' &&
+             "$GH" api --paginate "repos/$repo/pulls/$1/reviews" --jq '.[] | {kind:"review",record:.} | @json'; } ) || {
+    echo "approve-guard: verdict read failed: comments/reviews of PR $1" >&2; return 1;
+  }
+  local args=(--head "$2" --format "$format")
+  [ -z "$exclude_review" ] || args+=(--exclude-review "$exclude_review")
+  [ -z "$actor" ] || args+=(--actor "$actor")
+  value=$(printf '%s\n' "$lines" | python3 "$script_dir/review-decisions.py" "${args[@]}") || {
+    echo "approve-guard: verdict read failed: invalid decision records for PR $1" >&2; return 1;
+  }
+  printf '%s\n' "$value"
 }

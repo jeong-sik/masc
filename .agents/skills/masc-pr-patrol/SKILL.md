@@ -52,7 +52,10 @@ bash scripts/review/approve-guard.sh --repo "$repo" --pr "$pr" --head "$head" \
 게시에는 `--body`, `--review-base`, `--review-diff` 가 모두 필요하다. 변경 범위가 달라지면 다시 리뷰하고
 증거를 캡처한다. 읽지 않은 변경을 승인하려고 diff 식별자만 갱신하지 않는다.
 
-`approve-guard.sh`는 현재 head와 신뢰할 수 있는 독립 승인, 최신 FAIL/HOLD와 미해결 변경 요청을 확인한다.
+`approve-guard.sh`의 게시 경로는 본인의 독립성·검토한 head/base/diff·본문을 검사한다.
+기존 CR이나 FAIL/HOLD는 새 판정 게시를 막지 않으며, 본인 CR은 `--replace-own-cr ID`로 명시한다(여러 ID는 옵션 반복).
+병합·source receipt 경로는 계정별 미해결 FAIL/HOLD와 변경 요청을 검사한다. 다른 계정의 PASS 댓글로 해제하지 않는다.
+Keeper `by` 이름은 표시 정보이며 같은 GitHub 로그인을 공유하면 독립된 정식 리뷰어로 세지 않는다.
 일반 head에는 Actions API를 읽지 않는다. GitHub 계정 제한 때문에 자기 PR에 공식 APPROVE를 쓸 수 없으면
 독립 리뷰의 결과와 제약을 명시하며 자기 승인을 만들지 않는다.
 

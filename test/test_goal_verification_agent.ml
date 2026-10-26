@@ -1567,6 +1567,215 @@ let pending_request_id config goal_id =
   | Goal_verification.Human_confirmed _ -> fail "expected a pending proof request"
 ;;
 
+let retain_daemon_original config store ~title ~priority =
+  let module Worker = Goal_verifier_worker in
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx title in
+  (match Goal_store.upsert_goal config ~id:goal_id ~priority () with
+   | Ok _ -> () | Error error -> fail (Goal_store.write_error_to_string error));
+  ignore (must_succeed "request daemon verification" (transition ctx goal_id "request_complete"));
+  let authority = match Verification_authority_tools.create_goal_review ~config ~goal_id with
+    | Ok authority -> authority | Error detail -> fail detail in
+  let original = match Goal_verifier_original.prepare ~attempt:0 ~authority with
+    | Ok original -> original | Error detail -> fail detail in
+  let run : Worker.run_identity =
+    {run_id=Random_id.uuid_v7 (); started_at=Time_compat.now ()} in
+  match Worker.retain ~store ~installation_id:Worker.host_installation_id
+      ~package_id:Worker.host_package_id ~run original with
+  | Ok retained -> goal_id, retained
+  | Error error -> fail (Worker.error_to_string error)
+;;
+
+let corrupt_daemon_original store retained =
+  let module Worker = Goal_verifier_worker in
+  let module Original = Goal_verifier_original in
+  let module Owner = Lane_addon_tool_request_owner in
+  let original = Worker.original retained in
+  let subject = Original.subject original in
+  let request_id = Yojson.Safe.to_string
+    (`List [`String subject.goal_id; `String subject.request_id; `Int (Original.attempt original)]) in
+  let scope = "goal-proof-reviews" in
+  let owner = match Owner.load ~store ~scope ~request_id with
+    | Ok (Some owner) -> owner
+    | Ok None -> fail "daemon fixture original is absent"
+    | Error error -> fail (Owner.error_to_string error) in
+  let path = Filename.concat (Lane_addon_store.root store)
+    (Lane_addon_store.tool_request_body_path ~scope ~request_digest:owner.request_digest) in
+  let damaged = "{\"daemon_original_body_damaged\":true}" in
+  (* Corrupt only this retained body's private fixture file. Metadata and
+     Goal/request identity are still the production owner's actual records. *)
+  Out_channel.with_open_bin path (fun out -> output_string out damaged);
+  let check_preserved () =
+    check string "the daemon leaves damaged original bytes untouched" damaged
+      (In_channel.with_open_bin path In_channel.input_all);
+    match Worker.load ~store ~installation_id:Worker.host_installation_id
+        ~package_id:Worker.host_package_id ~goal_id:subject.goal_id
+        ~request_id:subject.request_id ~attempt:(Original.attempt original) with
+    | Error (Worker.Store_unavailable _) -> ()
+    | Error (Worker.Original_invalid _ | Worker.Authority_changed _ | Worker.Execution_pending _)
+    | Ok _ -> fail "the damaged original must remain an explicit storage failure"
+  in
+  check_preserved ();
+  check_preserved
+;;
+
+let daemon_test_clock () =
+  match !workspace_clock with
+  | Some clock -> clock
+  | None -> fail "daemon fixture has no workspace clock"
+;;
+
+let test_daemon_drains_healthy_goal_after_four_damaged_originals () =
+  with_workspace @@ fun config ->
+  let module Worker = Goal_verifier_worker in
+  let module Original = Goal_verifier_original in
+  let module Registry = Goal_verification_run_registry in
+  let store = Lane_addon_store.create
+    ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+  let playground = ensure_producer_playground config "daemon-measurement" in
+  Out_channel.with_open_bin (Filename.concat playground "services.txt")
+    (fun out -> output_string out "verified services: 3\n");
+  (* The current daemon admits four reviews. Fill those positions with real
+     failures; priority, not creation-time ordering, places healthy work fifth. *)
+  let damaged = List.init 4 (fun index ->
+    let goal_id, retained = retain_daemon_original config store
+      ~title:(Printf.sprintf "Damaged original ahead of healthy work %d" index) ~priority:1 in
+    let assert_preserved = corrupt_daemon_original store retained in
+    goal_id, retained, assert_preserved) in
+  let goal_id, healthy = retain_daemon_original config store
+    ~title:"Healthy proof behind damaged originals" ~priority:2 in
+  let original = Worker.original healthy in
+  let subject = Original.subject original in
+  let original_run = Worker.run_identity healthy in
+  (match Goal_store.list_goals_result config ~phase:Goal_phase.Verifying () with
+   | Ok goals ->
+     check (list int) "the four damaged Goals precede healthy work" [1; 1; 1; 1; 2]
+       (List.map (fun (goal : Goal_store.goal) -> goal.priority) goals);
+     check string "healthy Goal is actually the fifth candidate" goal_id
+       (List.nth goals 4).id
+   | Error unavailable -> fail (Goal_store.unavailable_to_string unavailable));
+  let calls = ref 0 in
+  let reviewer =
+    fun ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt
+        ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup ~on_tool_result
+        ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
+      incr calls;
+      check string "only the healthy retained original reaches the reviewer"
+        (Original.prompt original) prompt;
+      let input = `Assoc ["file_path", `String "daemon-measurement/services.txt"] in
+      let result = lookup.AR.dispatch ~name:"tool_read_file" ~args:input in
+      (match lookup_text result with
+       | Ok output -> check bool "the reviewer reads the actual measurement" true
+           (String_util.contains_substring output "verified services: 3")
+       | Error detail -> fail detail);
+      on_tool_result ~input result;
+      let reason = "three actual services verified after the failed candidates" in
+      on_tool_result ~input:(`Assoc ["verdict", `String "APPROVE"; "reason", `String reason])
+        (Tool_result.ok ~tool_name:"report_review_verdict" ~start_time:(Tool_timing.start ()) "recorded");
+      Ok {AR.selected_runtime_id=evaluator_runtime; verdict=Some (AR.Approve reason)} in
+  let registry = Registry.global () in
+  let published, publish = Eio.Promise.create () in
+  let previous_observer = Atomic.get Registry.change_observer_fn in
+  let observe () =
+    match Registry.get registry ~run_id:original_run.run_id with
+    | Some (Registry.Review {status=Registry.Completed {outcome=Registry.Committed; _}; _}) ->
+      ignore (Eio.Promise.try_resolve publish ())
+    | None | Some (Registry.Review _ | Registry.Scan_skipped _) -> () in
+  Fun.protect ~finally:(fun () -> Atomic.set Registry.change_observer_fn previous_observer)
+    (fun () ->
+      Atomic.set Registry.change_observer_fn observe;
+      with_lane_and_reviewer ~slots:(fun () -> Ok ["verifier-a"]) ~reviewer
+        (fun () -> Eio.Switch.run (fun sw ->
+          let clock = daemon_test_clock () in
+          Goal_verification_agent.start ~sw ~clock ~config;
+          (* There is no direct worker/drain call and no extra request or wake.
+             Leaving this switch joins the worker before reading its final ACK. *)
+          match Eio.Time.with_timeout clock hung_review_wait_s
+              (fun () -> Eio.Promise.await published; Ok ()) with
+          | Ok () -> ()
+          | Error `Timeout -> fail
+              "healthy fifth Goal never published after four damaged originals released daemon capacity")));
+  check int "the daemon reviewed only the healthy original once" 1 !calls;
+  check string "healthy proof still requires human confirmation" "awaiting_confirmation"
+    (stored_phase config goal_id);
+  (match (ledger_record config goal_id).completion with
+   | Goal_verification.Proof_proven verdict ->
+     check string "proof preserves its actual request" subject.request_id verdict.request_id;
+     check string "proof preserves its original run" original_run.run_id verdict.verification_run_id
+   | Goal_verification.Completion_idle | Proof_pending _ | Proof_refuted _ | Human_confirmed _ ->
+     fail "healthy Goal has no actual committed proof");
+  let restored = match Worker.load ~store ~installation_id:Worker.host_installation_id
+      ~package_id:Worker.host_package_id ~goal_id ~request_id:subject.request_id ~attempt:0 with
+    | Ok (Some restored) -> restored
+    | Ok None -> fail "healthy original disappeared after daemon publication"
+    | Error error -> fail (Worker.error_to_string error) in
+  let observer = Lane_addon_request_progress.observer (Worker.progress restored) in
+  List.iter (function
+    | Lane_addon_request_receipt.Acknowledged _ -> ()
+    | Unobserved | Pending _ -> fail "daemon publication did not retain its acknowledgement")
+    [observer.registration; observer.completion];
+  List.iter (fun (damaged_goal, retained, assert_preserved) ->
+    assert_preserved ();
+    check string "a damaged Goal remains verifying" "verifying" (stored_phase config damaged_goal);
+    check string "a damaged Goal keeps its original request"
+      (Original.subject (Worker.original retained)).request_id
+      (pending_request_id config damaged_goal);
+    check int "a damaged original never enters the reviewer registry" 0
+      (List.length (reviews_of_goal registry damaged_goal))) damaged
+;;
+
+let test_daemon_announces_an_early_original_failure_once () =
+  with_workspace @@ fun config ->
+  let store = Lane_addon_store.create
+    ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+  let goal_id, retained = retain_daemon_original config store
+    ~title:"Damaged original needs an actionable stall notice" ~priority:1 in
+  let assert_preserved = corrupt_daemon_original store retained in
+  let request_id = pending_request_id config goal_id in
+  let calls = ref [] in
+  let stall_posts () = goal_stall_posts ~goal_id ~request_id in
+  with_lane_and_reviewer ~slots:(fun () -> Ok ["verifier-a"])
+    ~reviewer:(recording_reviewer calls ["verifier-a", Stub_approve "must not be dispatched"])
+    (fun () -> Eio.Switch.run (fun sw ->
+      let clock = daemon_test_clock () in
+      Goal_verification_agent.start ~sw ~clock ~config;
+      (match Eio.Time.with_timeout clock hung_review_wait_s (fun () ->
+         let rec await_notice () =
+           if stall_posts () <> [] then Ok ()
+           else (Eio.Fiber.yield (); await_notice ()) in
+         await_notice ()) with
+       | Ok () -> ()
+       | Error `Timeout -> fail "the daemon never published the original-body failure notice");
+      (match stall_posts () with
+       | [(_, fields)] ->
+         let text name = match List.assoc_opt name fields with
+           | Some (`String value) -> value
+           | Some _ | None -> fail ("original-body stall notice lacks " ^ name) in
+         check string "the notice names the Goal subject" "goal_review" (text "subject");
+         check string "the notice names the original-read gate" "Proof_lookup_unavailable" (text "gate");
+         check bool "the notice retains the storage failure detail" true
+           (String_util.contains_substring (text "detail") "original request body does not match its record's digest");
+         (match List.assoc_opt "disposition" fields with
+          | Some json ->
+            (match Verification_protocol.For_testing.stall_disposition_of_json json with
+             | Some Verification_protocol.No_retry_armed -> ()
+             | Some (Verification_protocol.Retry_scheduled _) | None ->
+               fail "a corrupt body cannot authorize automatic reviewer retry")
+          | None -> fail "original-body notice has no typed disposition")
+       | posts -> fail (Printf.sprintf "expected one original-body notice, got %d" (List.length posts)));
+      (* Repeat the real installed wake callback. The damaged body cannot pass
+         request_retry, so this does not forge a successful user transition. *)
+      (Atomic.get Workspace_hooks.goal_verification_pending_fn) config ~goal_id;
+      for _ = 1 to idle_ticks_after_deferral do Eio.Time.sleep clock idle_tick_s done;
+      check int "another wake does not duplicate the same original-body notice" 1
+        (List.length (stall_posts ()));
+      check int "the damaged original never dispatches a reviewer" 0 (List.length !calls);
+      assert_preserved ();
+      check string "the damaged Goal retains its pending request" request_id
+        (pending_request_id config goal_id)));
+  check string "the damaged Goal still requires repair" "verifying" (stored_phase config goal_id)
+;;
+
 (* A deferral writes no ledger row, so nothing rescans: the Goal would sit in
    Verifying with nobody told. Tick by tick on the real daemon: the boot scan
    defers once and the Board gets one stall notice naming the gate and the
@@ -2284,7 +2493,11 @@ let () =
       , [ test_case "superseded review keeps evaluated original criterion" `Quick
             test_superseded_review_keeps_the_evaluated_original_criterion ] )
     ; ( "drain"
-      , [ test_case "wake after deferred persistence survives active scan" `Quick
+      , [ test_case "daemon drains healthy fifth Goal after four damaged originals" `Quick
+            test_daemon_drains_healthy_goal_after_four_damaged_originals
+        ; test_case "daemon announces an early original failure once" `Quick
+            test_daemon_announces_an_early_original_failure_once
+        ; test_case "wake after deferred persistence survives active scan" `Quick
             (test_wake_after_deferred_persist_survives_active_scan ~same_request:false)
         ; test_case "same-request explicit wake precedes retry timer" `Quick
             (test_wake_after_deferred_persist_survives_active_scan ~same_request:true)

@@ -600,11 +600,9 @@ let expect_timeout clock request =
   | Ok (Ok _) -> Alcotest.fail "the request succeeded without observing its deadline"
   | Error `Timeout -> Alcotest.fail "the request escaped its declared deadline"
 
-let get_sync_deadline_covers_dns_resolution () =
+let expect_stalled_dns_timeout clock request =
   Eio_main.run @@ fun _ ->
   Eio.Switch.run @@ fun sw ->
-  let clock = Eio_mock.Clock.make () in
-  Eio_mock.Clock.set_time clock 1000.;
   let pending, _ = Eio.Promise.create () in
   let module Stalled_dns = struct
     type t = unit
@@ -621,9 +619,28 @@ let get_sync_deadline_covers_dns_resolution () =
   let net : [`Generic | `Unix] Eio.Net.ty Eio.Resource.t =
     Eio.Resource.T ((), Eio.Resource.handler
       (Eio.Resource.bindings (Eio.Net.Pi.network (module Stalled_dns)))) in
-  expect_timeout clock (fun () ->
+  expect_timeout clock (fun () -> request ~sw ~net)
+
+let get_sync_deadline_covers_dns_resolution () =
+  let clock = Eio_mock.Clock.make () in
+  Eio_mock.Clock.set_time clock 1000.;
+  expect_stalled_dns_timeout clock (fun ~sw ~net ->
     Http_client.get_sync ~sw ~net ~clock ~timeout_s:4.0
       ~url:"http://stalled-dns.invalid/api/tags" ~headers:[] ())
+
+let delete_sync_deadline_covers_dns_resolution () =
+  let clock = Eio_mock.Clock.make () in
+  Eio_mock.Clock.set_time clock 1000.;
+  expect_stalled_dns_timeout clock (fun ~sw ~net ->
+    Http_client.delete_sync ~sw ~net ~clock ~timeout_s:4.0
+      ~url:"http://stalled-dns.invalid/api/tags" ~headers:[] ())
+
+let post_sync_deadline_covers_dns_resolution () =
+  let clock = Eio_mock.Clock.make () in
+  Eio_mock.Clock.set_time clock 1000.;
+  expect_stalled_dns_timeout clock (fun ~sw ~net ->
+    Http_client.post_sync ~sw ~net ~clock ~timeout_s:4.0
+      ~url:"http://stalled-dns.invalid/api/tags" ~headers:[] ~body:"{}" ())
 
 let get_sync_deadline_covers_stalled_body () =
   Eio_main.run @@ fun env ->
@@ -734,6 +751,8 @@ let () = Alcotest.run "runtime model label binding"
      "declared probe deadline",`Quick,ollama_auto_probe_uses_declared_deadline;
      "cloud declared discovery",`Quick,ollama_cloud_auto_uses_declared_discovery;
      "DNS deadline",`Quick,get_sync_deadline_covers_dns_resolution;
+     "DELETE DNS deadline",`Quick,delete_sync_deadline_covers_dns_resolution;
+     "POST DNS deadline",`Quick,post_sync_deadline_covers_dns_resolution;
      "stalled body deadline",`Quick,get_sync_deadline_covers_stalled_body;
      "missing probe deadline",`Quick,ollama_auto_without_declared_deadline_does_not_probe;
      "endpoint discovery",`Quick,ollama_auto_uses_binding_endpoint;

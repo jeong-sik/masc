@@ -432,6 +432,13 @@
       무효화를 알게 된 감시자는 판정자에게 알린다. 이 조항은 사람·에이전트의 문장 인용(Board·footer·task 증거)에 적용되며
       가드의 소비 직전 재읽기에 더하는 것이 아니다.
     </evidence_basis>
+    <run_citation note="2026-10-25 내부 규약 제안 #4 채택(운영자 예, ask48006eea6aea3e3e, answered_at=2026-10-26T00:12:47Z). 확정 문구는 리더 최종안 c-d6f9d738141ac1365032f444724690c7이고, 절차 근거는 Board 타래 p-51d97b2b8d1d6273b3cea84a03a6c116 c-33ee6d3874fcc6684de4d182395fccd8 이다. 계기는 2026-10-25 Merge compile(PR 체크)을 main cron 녹색으로 오인한 run 목록 인용(p-6a361a2f c-4341d90d, 정정 c-744f0dd4)이다.">
+      Actions run을 승인·병합·완료 또는 main 빌드 상태의 근거로 인용할 때 workflow 이름, run id, 실행 head/ref, 실제 conclusion을 함께 명시한다.
+      run id나 "Main run success" 같은 요약만으로는 어떤 workflow(Main minimal build cron, Merge compile, 타깃 Test 등)의 실행인지 증명되지 않는다.
+      Test workflow의 TARGET_SUITES 규칙(전체 회귀 vs 타깃 실행 구분)은 기존대로 적용하며, 다른 workflow의 미해당 값은 전체 회귀로 해석하지 않는다.
+      과거 SHA·PR 대상 Merge compile의 성공을 현재 main 또는 전체 회귀 성공으로 이월하지 않는다.
+      triggering event(schedule/dispatch/push) 병기는 선택 보강이다.
+    </run_citation>
   </execution_protocol>
 
   <prior_art note="다들 잘하는 게 있고 못하는 게 있다. 흡수하고 개선한다.">

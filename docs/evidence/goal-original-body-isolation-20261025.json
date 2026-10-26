@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "scope": "controlled production-path foreign original-body fault injection and fresh executable recovery",
+  "selection": {
+    "workflow": "test.yml",
+    "suite": "test_goal_verifier_worker",
+    "minimal": true,
+    "eio_backend": ""
+  },
+  "reviewer": "scripted hook using actual lookup tools; no real-model quality comparison",
+  "interruption": "arranged durable proof-written/publication-unacknowledged boundary; no forced server kill",
+  "inputs": [
+    {
+      "path": "scripts/ci-run-targeted-tests.sh",
+      "candidate_sha256": "7391426895132a2c027aea2d6c85bfcae18a038fd4e9640cc3c0b9fa66a8ca72"
+    },
+    {
+      "path": ".github/workflows/test.yml",
+      "candidate_sha256": "6fb355583ed464aa653687f6882c72d936507654ff25fa6c67a795d02cf0d191"
+    },
+    {
+      "path": "test/test_goal_verifier_worker.ml",
+      "candidate_sha256": "fd30be1fed532b28dd5eb8cacf52416ec57c034d803722ba40fafecdba1f530d"
+    }
+  ],
+  "receipts": [
+    {
+      "role": "baseline",
+      "run": {
+        "id": 40197032656,
+        "head_sha": "774141773f76244ba7ce7adb677960d839ad5f8e",
+        "head_branch": "test/goal-original-body-isolation-20261025",
+        "status": "completed",
+        "conclusion": "failure",
+        "run_attempt": 1,
+        "created_at": "2026-10-25T13:18:49Z",
+        "updated_at": "2026-10-25T13:23:05Z",
+        "html_url": "https://github.com/jeong-sik/masc/actions/runs/40197032656",
+        "event": "workflow_dispatch",
+        "path": ".github/workflows/test.yml"
+      },
+      "job_id": 121180000526,
+      "job_url": "https://github.com/jeong-sik/masc/actions/runs/40197032656/job/121180000526",
+      "decoded_log_sha256": "07ce462f3de055a8e788c0564e4ab32e7477155f32381defd411b2cb26ceb00f",
+      "observed_log_excerpt": [
+        "2026-10-25T13:23:00.4803819Z [targeted] test/test_goal_verifier_worker: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false",
+        "2026-10-25T13:23:00.4826607Z [targeted] test/test_goal_verifier_worker: start 2026-10-25T13:23:00Z",
+        "2026-10-25T13:23:00.8775159Z   [FAIL]        execution          6   actual pending Goal survives foreign o...",
+        "2026-10-25T13:23:00.9500552Z   [FAIL]        execution          7   actual boot publication survives forei...",
+        "2026-10-25T13:23:00.9694170Z   [OK]          execution          8   actual host refuses its own original b...",
+        "2026-10-25T13:23:02.1009316Z │ [FAIL]        execution          6   actual pending Goal survives foreig...  │",
+        "2026-10-25T13:23:02.1010529Z FAIL healthy Goal blocked by foreign body: Add-on request ownership unavailable: original request body does not match its record's digest",
+        "2026-10-25T13:23:02.1022017Z │ [FAIL]        execution          7   actual boot publication survives fo...  │",
+        "2026-10-25T13:23:02.1022692Z FAIL healthy Goal terminal publication is absent",
+        "2026-10-25T13:23:02.1033896Z 2 failures! in 1.552s. 19 tests run.",
+        "2026-10-25T13:23:02.1073094Z [targeted] test/test_goal_verifier_worker: FAIL exit 1 in 2s"
+      ]
+    },
+    {
+      "role": "candidate",
+      "run": {
+        "id": 40197222178,
+        "head_sha": "a5bf5c2ebe3850b928ad90f53f190b9da98ea8a0",
+        "head_branch": "test/goal-body-restart-evidence-20261025",
+        "status": "completed",
+        "conclusion": "success",
+        "run_attempt": 1,
+        "created_at": "2026-10-25T13:21:17Z",
+        "updated_at": "2026-10-25T13:26:21Z",
+        "html_url": "https://github.com/jeong-sik/masc/actions/runs/40197222178",
+        "event": "workflow_dispatch",
+        "path": ".github/workflows/test.yml"
+      },
+      "job_id": 121180569719,
+      "job_url": "https://github.com/jeong-sik/masc/actions/runs/40197222178/job/121180569719",
+      "decoded_log_sha256": "b4c3337397d4279d4ad31684df72f5d789c8e1d6e9ed5f89e30613967df9a5fb",
+      "observed_log_excerpt": [
+        "2026-10-25T13:26:13.6072498Z [targeted] test/test_goal_verifier_worker: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false",
+        "2026-10-25T13:26:13.6097976Z [targeted] test/test_goal_verifier_worker: start 2026-10-25T13:26:13Z",
+        "2026-10-25T13:26:14.1079385Z   [OK]          execution          6   actual pending Goal survives foreign o...",
+        "2026-10-25T13:26:14.2002463Z   [OK]          execution          7   actual boot publication survives forei...",
+        "2026-10-25T13:26:14.3163351Z ASSERT fresh process starts with no published runs",
+        "2026-10-25T13:26:14.3597194Z ASSERT fresh-process recovery makes no model call",
+        "2026-10-25T13:26:14.3613892Z ASSERT fresh-process recovery preserves the complete proof record",
+        "2026-10-25T13:26:14.3639917Z ASSERT durable publication leaves no recovery work",
+        "2026-10-25T13:26:14.3696563Z ASSERT child preserved the parent's complete committed proof",
+        "2026-10-25T13:26:14.3732552Z ASSERT child completion ACK survives registry replay",
+        "2026-10-25T13:26:14.3751182Z   [OK]          execution          8   actual process restart survives foreig...",
+        "2026-10-25T13:26:14.4003335Z   [OK]          execution          9   actual host refuses its own original b...",
+        "2026-10-25T13:26:15.6857329Z Test Successful in 2.002s. 20 tests run.",
+        "2026-10-25T13:26:15.6924458Z [targeted] test/test_goal_verifier_worker: OK in 2s"
+      ]
+    }
+  ],
+  "full_regression": "not executed for this candidate",
+  "installed_runtime": "not tested or deployed"
+}

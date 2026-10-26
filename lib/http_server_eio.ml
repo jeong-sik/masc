@@ -459,6 +459,13 @@ module Response = struct
     | Some client_tag -> client_tag_matches ~etag:(strong_tag_value etag) ~client_tag
     | None -> false
 
+  let not_modified ~headers reqd =
+    safe_respond_with_string reqd
+      (Httpun.Response.create
+         ~headers:(Httpun.Headers.of_list (scoped_headers () @ headers))
+         `Not_modified)
+      ""
+
   let bytes_not_modified ~etag ~cache_control reqd =
     safe_respond_with_string reqd
       (Httpun.Response.create

@@ -1428,14 +1428,19 @@ let serve_page _request reqd =
     (page ~nonce) reqd
 
 (* Seat state comes from the same attached worker that accepts player input.
-   The recoverable judgment is host authority: it reads Keeper phase,
-   credential expiry and play participation under the caller's credential
-   transaction but releases nothing; the next actual move rechecks departure
-   through its own host admission. *)
-let controller_json ~transaction ~config ~now =
-  let empty =
-    [ "machine", `Bool false; "controller", `Null
-    ; "controller_recoverable", `Bool false; "saves_name", `Null ] in
+   The worker is asked before any credential transaction: the call can take
+   seconds, and holding the workspace credential lock across it made every
+   invite issue and revoke wait behind each guest's seat poll. *)
+type seat_observation =
+  | Seat_no_machine
+  | Seat_machine of { controller : string option; saves_name : string option }
+
+let nullable_string = function
+  | `Null -> Ok None
+  | `String value -> Ok (Some value)
+  | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ -> Error ()
+
+let seat_observation ~config =
   match Machine_addon_host.call_shared ~config ~principal:Lane_addon_call_context.Anonymous
       ~name:"masc_dos_screen" ~arguments:(`Assoc []) with
   | Error (Lane_addon_runtime.Unavailable message | Lane_addon_runtime.Outcome_unknown message
@@ -1443,40 +1448,52 @@ let controller_json ~transaction ~config ~now =
       Error message
   | Ok result when result.Mcp_protocol.Mcp_types.is_error = Some true ->
       (match Machine_controller_contract.screen_error_of_meta result._meta with
-       | Some Machine_controller_contract.Screen_no_machine -> Ok empty
+       | Some Machine_controller_contract.Screen_no_machine -> Ok Seat_no_machine
        | Some (Machine_controller_contract.Screen_capture_failed | Machine_controller_contract.Screen_encode_failed) | None ->
            Error (Agent_core.Mcp.text_of_tool_result result))
   | Ok result ->
       (match result.structured_content with
        | Some (`Assoc fields) ->
-           (match List.assoc_opt "controller" fields, List.assoc_opt "saves_name" fields with
-            | Some ((`Null | `String _) as controller), Some ((`Null | `String _) as saves_name) ->
-                let recoverable = match controller with
-                  | `Null -> false
-                  | `String holder ->
-                    Option.is_some
-                      (Keeper_machine_controller_authority.holder_left ~transaction ~config ~now holder) in
-                Ok [ "machine", `Bool true; "controller", controller
-                   ; "controller_recoverable", `Bool recoverable; "saves_name", saves_name ]
-            | _ -> Error "DOS worker returned invalid seat information")
+           (match Option.map nullable_string (List.assoc_opt "controller" fields),
+                  Option.map nullable_string (List.assoc_opt "saves_name" fields) with
+            | Some (Ok controller), Some (Ok saves_name) -> Ok (Seat_machine { controller; saves_name })
+            | (None | Some (Error ())), _ | _, (None | Some (Error ())) ->
+                Error "DOS worker returned invalid seat information")
        | _ -> Error "DOS worker returned no seat information")
 
+let nullable_json = function None -> `Null | Some value -> `String value
+
+(* The recoverable judgment is host authority: it reads Keeper phase,
+   credential expiry and play participation under the caller's credential
+   transaction but releases nothing; the next actual move rechecks departure
+   through its own host admission. *)
+let controller_json ~transaction ~config ~now = function
+  | Seat_no_machine ->
+      [ "machine", `Bool false; "controller", `Null
+      ; "controller_recoverable", `Bool false; "saves_name", `Null ]
+  | Seat_machine { controller; saves_name } ->
+      let recoverable = match controller with
+        | None -> false
+        | Some holder ->
+          Option.is_some (Keeper_machine_controller_authority.holder_left ~transaction ~config ~now holder) in
+      [ "machine", `Bool true; "controller", nullable_json controller
+      ; "controller_recoverable", `Bool recoverable; "saves_name", nullable_json saves_name ]
+
 let seat_response ~config ~name =
-  let snapshot = Auth.with_credential_transaction config.Workspace.base_path (fun transaction ->
-    let now = Time_compat.now () in
-    let ( let* ) = Result.bind in
-    let* participants = Play_seat.hand_to_in_transaction ~transaction config ~now in
-    let* participation = Play_participation.current ~transaction ~base_path:config.base_path ~name in
-    let controller = controller_json ~transaction ~config ~now in
-    Ok (participants, participation, controller))
-    |> Result.map_error Masc_domain.masc_error_to_string |> Result.join in
-  match snapshot with
-  | Error detail ->
-    `Service_unavailable, Server_refusal.json ~code:"keepers_unreadable" detail
-  | Ok (participants, participation, controller) ->
-    (match controller with
-     | Error detail -> `Service_unavailable, Server_refusal.json ~code:"machine_unavailable" detail
-     | Ok controller ->
+  match seat_observation ~config with
+  | Error detail -> `Service_unavailable, Server_refusal.json ~code:"machine_unavailable" detail
+  | Ok observation ->
+    let snapshot = Auth.with_credential_transaction config.Workspace.base_path (fun transaction ->
+      let now = Time_compat.now () in
+      let ( let* ) = Result.bind in
+      let* participants = Play_seat.hand_to_in_transaction ~transaction config ~now in
+      let* participation = Play_participation.current ~transaction ~base_path:config.base_path ~name in
+      Ok (participants, participation, controller_json ~transaction ~config ~now observation))
+      |> Result.map_error Masc_domain.masc_error_to_string |> Result.join in
+    (match snapshot with
+     | Error detail ->
+       `Service_unavailable, Server_refusal.json ~code:"keepers_unreadable" detail
+     | Ok (participants, participation, controller) ->
        `OK
        , `Assoc
            ((("name", `String name) :: controller)

@@ -61,13 +61,14 @@ val microvm_remote_endpoint_of_running :
     [GH_CONFIG_DIR] (and its derived credential config as
     [GIT_CONFIG_GLOBAL] when the keeper has a configured GitHub identity), and
     the config env naming the mounted config. Refused for a non-microvm keeper.
-    Pure. *)
+    Validates the mounted credential snapshot and the process's shared shim
+    readiness. Does not start a guest or prepare build output. *)
 
 val microvm_remote_endpoint :
   ?timeout_sec:float -> t -> (Keeper_sandbox_remote.t, string) result
 (** {!microvm_remote_endpoint_of_running} after ensuring the guest is up. The
-    keeper's root on the work volume is made at boot, so an adopted guest is
-    already an endpoint. *)
+    Apple completes its first process handoff under Keeper lifecycle ownership,
+    including durable identity validation, shim verification and build cleanup. *)
 
 val microvm_attached_endpoint :
   config:Workspace.config ->
@@ -76,8 +77,8 @@ val microvm_attached_endpoint :
   (Keeper_sandbox_remote.t, string) result
 (** The keeper's guest as an endpoint, without a turn. The guest name is a
     function of the keeper and the base path and the guest is keeper-lifetime,
-    so a caller that owns no part of the keeper's lifecycle can still reach
-    one that is up.
+    so a caller without a turn can reach one that is up. Apple briefly borrows
+    Keeper lifecycle ownership to validate the mounted durable identity.
 
     Never starts a guest and never probes for one: a stopped guest fails the
     [container exec] instead, and {!microvm_guest_absence_reason} names that
@@ -388,8 +389,10 @@ val sweep_abandoned_microvm_guests :
   run_argv:(timeout_sec:float -> string list -> Unix.process_status * string) ->
   (Keeper_microvm_backend.t * Keeper_sandbox_microvm.sweep_outcome) list
 (** Collect abandoned guests with exclusive lifecycle inventory ownership
-    from listing through deletion: stable guest names may otherwise be
-    adopted between observing a dead owner and removing it. Ordinary
+    from listing through deletion. Apple preserves current declared guest
+    names regardless of owner PID and revalidates the declaration before each
+    deletion; uncertain inventory or declarations preserve guests. Other
+    backends retain their process ownership rules. Ordinary
     lifecycle operations serialize per Keeper; different Keepers may prepare
     concurrently whenever inventory maintenance is not active. *)
 

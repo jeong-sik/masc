@@ -642,6 +642,7 @@ let decode_memory_health_snapshot json =
       "memory health snapshot"
       [ "schema"
       ; "generated_at"
+      ; "execution"
       ; "keepers"
       ; "totals"
       ; "alert_summary"
@@ -654,6 +655,9 @@ let decode_memory_health_snapshot json =
     then Ok ()
     else Error ("unsupported memory health schema: " ^ schema)
   in
+  (* Availability is a separate diagnostic, not stored-memory evidence. Keep
+     its explicit carrier contract without deriving a readiness verdict. *)
+  let* _execution = required_object_field json "execution" in
   let* mhs_generated_at = Json_util.require_float json "generated_at" in
   let* () =
     if Float.is_finite mhs_generated_at && mhs_generated_at >= 0.0

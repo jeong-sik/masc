@@ -4888,6 +4888,12 @@ let empty_memory_context_cycle =
     "read_position_read_error", `Null; "rewriting_through", `Null;
     "prepared", `Null; "synthesis", `Null; "unread", empty_memory_unread_evidence]
 
+let disabled_memory_execution =
+  let module Execution = Masc.Keeper_memory_execution_availability in
+  Masc.Keeper_librarian_addon.all
+  |> List.map (fun operation -> operation, Execution.Disabled)
+  |> Execution.to_json
+
 let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   let keeper id present failures source_present =
     let ordinary_count value = if present then value else 0 in
@@ -4952,6 +4958,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   let json =
     `Assoc
       [ ("schema", `String "keeper.memory_os.current_health.v8")
+      ; ("execution", disabled_memory_execution)
       ; ("generated_at", `Float 1_775_000_000.0)
       ; ( "keepers"
         , `List
@@ -5459,6 +5466,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
 let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target =
   `Assoc
     [ ("schema", `String "keeper.memory_os.current_health.v8")
+    ; ("execution", disabled_memory_execution)
     ; ("generated_at", `Float 1_775_000_000.0)
     ; ( "keepers"
       , `List
@@ -5591,6 +5599,7 @@ let test_decode_memory_health_reads_the_librarian_position_beside_the_cut () =
   let snapshot_with context_cycle =
     `Assoc
       [ ("schema", `String "keeper.memory_os.current_health.v8")
+      ; ("execution", disabled_memory_execution)
       ; ("generated_at", `Float 1_775_000_000.0)
       ; ( "keepers"
         , `List
@@ -5735,6 +5744,7 @@ let test_decode_memory_health_rejects_stale_schema () =
     `Assoc
       [ "schema", `String "keeper.memory_os.current_health.v1"
       ; "generated_at", `Float 1_775_000_000.0
+      ; "execution", disabled_memory_execution
       ; "keepers", `List []
       ; "totals", `Assoc []
       ; "alert_summary", `Assoc []

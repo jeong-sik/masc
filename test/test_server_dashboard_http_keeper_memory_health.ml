@@ -844,6 +844,22 @@ let test_unread_evidence_is_observed_without_publication () =
   ignore (Current.committed_unread_messages ~keepers_dir ~keeper_id:keeper_name |> require_ok);
   let files = [path;ledger;Current.durable_range_receipt_path ~keepers_dir ~keeper_id:keeper_name] in
   let before = List.map Fs_compat.load_file files in
+  let produced = Health.keeper_memory_health_http_json ~base_path:base in
+  let fields = match produced with
+    | `Assoc fields -> fields
+    | _ -> Alcotest.fail "the production health response must be an object" in
+  let without_execution = List.remove_assoc "execution" fields in
+  List.iter (fun (label, invalid) ->
+    Alcotest.(check bool) label true
+      (Result.is_error (D.decode_memory_health_snapshot invalid)))
+    [ "missing execution refuses the response", `Assoc without_execution
+    ; "duplicate execution refuses the response",
+      `Assoc (("execution", member "execution" produced) :: fields)
+    ; "null execution refuses the response", `Assoc (("execution", `Null) :: without_execution)
+    ; "scalar execution refuses the response", `Assoc (("execution", `String "ok") :: without_execution)
+    ; "array execution refuses the response", `Assoc (("execution", `List []) :: without_execution)
+    ; "unknown root field still refuses the response", `Assoc (("unexpected", `Null) :: fields)
+    ];
   let reading () =
     let json = Health.keeper_memory_health_http_json ~base_path:base in
     let decoded = D.decode_memory_health_snapshot json |> require_ok in

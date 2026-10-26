@@ -56,9 +56,9 @@
       "bytes": 4317,
       "sha256": "964a70c2fca5b62caf30def01142d5da436f94e60c9dd09ea863f35c0655a2ff"
     },
-    "reviewed.diff": {
-      "bytes": 6842,
-      "sha256": "75fa4cdf1d3d30be2487baa56a27442c5efb54a0105fe5de192ae944a1c03432"
+    "reviewed.diff.gz": {
+      "bytes": 2476,
+      "sha256": "85ebc2cb9c91891a41b74f2362d1a638ec7d9e677eeefc7cd1151a761587f3e8"
     },
     "run_probe.py": {
       "bytes": 8432,
@@ -88,5 +88,12 @@
       "manifest_sha256": "676d4d3a6a3db6570c811573846027c56d3b6506d64afdf93acf1e745bf95978",
       "scope": "earlier candidate source/instrumentation; retained locally, not pooled with the final source"
     }
-  ]
+  ],
+  "review_diff_storage": {
+    "original": "reviewed.diff",
+    "retained": "reviewed.diff.gz",
+    "encoding": "gzip",
+    "decompressed_sha256": "75fa4cdf1d3d30be2487baa56a27442c5efb54a0105fe5de192ae944a1c03432",
+    "reason": "Preserve exact raw diff context bytes without treating their context-space rows as source whitespace."
+  }
 }

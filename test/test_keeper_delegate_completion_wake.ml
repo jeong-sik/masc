@@ -17,6 +17,7 @@ module Keeper_meta_store = Masc.Keeper_meta_store
 module Wake = Masc.Keeper_delegate_completion_wake
 module Ops = Masc.Keeper_tool_surface_ops
 module Keeper_registry = Masc.Keeper_registry
+module Queue_registry = Masc.Keeper_registry_event_queue
 module Event_queue = Keeper_event_queue
 module WO = Masc.Keeper_world_observation
 
@@ -531,6 +532,58 @@ let only_a_registered_keeper_is_the_sender () =
         (Option.map Masc.Keeper_identity.Keeper_id.to_string decoded.sender_keeper))
 ;;
 
+(* Exercise the actual durable producer and the queue's selection API. These
+   are backlog sizes, not live Keeper/model cohorts. A pre-existing Immediate
+   source must retain its place while the answer passes earlier ambient work. *)
+let answer_is_selected_before_ambient_backlog () =
+  List.iter (fun backlog ->
+    List.iter (fun terminal ->
+      with_workspace (fun config ->
+        ensure_keeper config ~keeper_name:asker;
+        let base_path = config.Workspace.base_path in
+        let arrived_at = Unix.gettimeofday () in
+        let prior : Event_queue.stimulus =
+          {post_id="prior-immediate";urgency=Immediate;arrived_at;payload=Bootstrap} in
+        let ambient = List.init backlog (fun index ->
+          {Event_queue.post_id=Printf.sprintf "ambient-%d" index;
+           urgency=Normal;arrived_at;
+           payload=Board_signal
+             {kind=Post_created;author="other-keeper";title="ambient";
+              content="unrelated Board activity";hearth=None;updated_at=None}}) in
+        (match Keeper_event_queue_persistence.update_result ~base_path ~keeper_name:asker
+            (fun queue -> List.fold_left Event_queue.enqueue queue (prior::ambient)) with
+         | Ok () -> () | Error detail -> fail detail);
+        deliver_or_fail config ~terminal;
+        let selections = match Queue_registry.pending_selections_result
+            ~base_path asker with
+          | Ok selections -> selections | Error detail -> fail detail in
+        (match selections with
+         | earlier :: answer :: rest ->
+           check string "earlier Immediate source keeps its position" prior.post_id
+             earlier.Keeper_event_queue_state.source.post_id;
+           (match answer.Keeper_event_queue_state.source.payload with
+            | Delegate_completed completion ->
+              check string "selected original operation" operation_id completion.dc_operation_id;
+              check bool "selected original terminal" true (completion.dc_terminal=terminal)
+            | _ -> fail "ambient activity buried the delegation answer");
+           check (list string) "ambient rows retain original arrival order"
+             (List.map (fun (s : Event_queue.stimulus) -> s.post_id) ambient)
+             (List.map (fun (s : Keeper_event_queue_state.pending_selection) -> s.source.post_id) rest)
+         | _ -> fail "durable queue lost the answer or ambient work");
+        let ready (source : Event_queue.stimulus) = source.post_id<>prior.post_id in
+        match Keeper_event_queue_persistence.select_when_result ~base_path ~keeper_name:asker
+            ~now:(Unix.gettimeofday ()) ~ready with
+        | Ok (Some selection) ->
+          (match selection.Keeper_event_queue_state.source.payload with
+           | Delegate_completed completion ->
+             check string "ready selection reaches the original answer" operation_id completion.dc_operation_id
+           | _ -> fail "a ready delegation answer waited behind ambient Board rows")
+        | Ok None -> fail "durable delegation answer was not selectable"
+        | Error detail -> fail detail))
+      [Event_queue.Delegate_replied "original result";Delegate_no_reply;Delegate_failed "original failure"])
+    [10;100;300]
+;;
+
 let () =
   run
     "keeper delegate completion wake"
@@ -538,6 +591,8 @@ let () =
       , [ test_case "the reply reaches the asker" `Quick reply_reaches_the_asker
         ; test_case "a failure reaches the asker" `Quick failure_reaches_the_asker
         ; test_case "the same answer arrives once" `Quick the_same_answer_arrives_once
+        ; test_case "ready answers pass ambient backlogs without reordering earlier urgent work"
+            `Quick answer_is_selected_before_ambient_backlog
         ] )
     ; ( "readability"
       , [ test_case "the turn can read the answer" `Quick the_turn_can_read_the_answer

@@ -35,10 +35,8 @@ let deliver ~not_before ~base_path ~keeper_name ~request_id ~composition_tool ~t
          event as somebody else posting to the Board. A Board post can be read
          later; work the Keeper started and is counting on cannot.
 
-         [Fusion_completed] and [Delegate_completed] are still [Normal] and
-         have the same argument for moving. Not changed here — each is its own
-         call, and one of them wakes a different Keeper than the one that
-         asked. *)
+         [Fusion_completed] and [Delegate_completed] use the same urgency:
+         all three are answers to work the receiving Keeper submitted. *)
     ; urgency = Keeper_event_queue.Immediate
     ; arrived_at = Time_compat.now ()
     ; payload = Keeper_event_queue.Composition_completed completion

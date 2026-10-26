@@ -24,7 +24,10 @@ let deliver ~base_path ~asked_by ~operation_id ~delegate ~terminal =
   let stimulus : Keeper_event_queue.stimulus =
     { Keeper_event_queue.post_id =
         Keeper_event_queue.delegate_completion_post_id completion
-    ; urgency = Keeper_event_queue.Normal
+    (* This answers work the recipient submitted. Like composition/job
+       completion, it must reach intake before unrelated ambient Board rows;
+       stable urgency ordering still preserves earlier Immediate sources. *)
+    ; urgency = Keeper_event_queue.Immediate
     ; arrived_at = Time_compat.now ()
     ; payload = Keeper_event_queue.Delegate_completed completion
     }

@@ -501,7 +501,10 @@ let wake_keeper_on_fusion_completion
   let post_id = Keeper_event_queue.fusion_completion_post_id fusion_completion in
   let stimulus : Keeper_event_queue.stimulus =
     { Keeper_event_queue.post_id
-    ; urgency = Keeper_event_queue.Normal
+    (* A settled answer belongs to the original caller's continuation, just
+       like composition/job completion. Do not bury it behind ambient Board
+       activity; preserve arrival order among existing Immediate sources. *)
+    ; urgency = Keeper_event_queue.Immediate
     ; arrived_at = Time_compat.now ()
     ; payload = Keeper_event_queue.Fusion_completed fusion_completion
     }

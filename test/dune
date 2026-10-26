@@ -6686,3 +6686,5 @@
 (include stanzas/test_startup_listener_authority.inc)
 
 (include stanzas/test_tui_key_ime.inc)
+
+(include stanzas/test_fs_exclusive_create_crash.inc)

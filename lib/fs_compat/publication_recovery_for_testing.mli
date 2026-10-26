@@ -8,6 +8,21 @@ open Fs_compat_internal
 
 include module type of Publication_recovery_access
 
+type discharge_record = Prepared_record | Bound_record
+type discharge_cancellation
+
+val discharge_cancellation
+  : owner:string -> record:discharge_record -> reason:exn
+  -> backtrace:Printexc.raw_backtrace
+  -> (discharge_cancellation,
+      Capability_recovery_obligation.validation_error) result
+
+val with_discharge_cancellation
+  : discharge_cancellation -> (unit -> 'a) -> 'a
+(** Cancel after the real matching record unlink and before directory sync.
+    Scoped to the invoking fiber and exact owner/record kind. No writer or
+    recovery effect can be supplied by the fixture. *)
+
 type lane_scope_release_fault
 
 val lane_scope_release_fault
@@ -46,6 +61,10 @@ type record_area =
   | Active
   | Owned
   | Forensic
+
+val record_names : t -> area:record_area -> (string list, access_error) result
+(** Read the real owner-area directory through the borrowed store capability.
+    No path reconstruction, mutation or record repair is performed. *)
 
 type fixture_error
 

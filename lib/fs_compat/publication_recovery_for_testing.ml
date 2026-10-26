@@ -2,6 +2,22 @@ open Fs_compat_internal
 
 include Publication_recovery_access
 
+type discharge_record =
+  Capability_recovery_obligation.For_testing.discharge_record =
+  | Prepared_record
+  | Bound_record
+
+type discharge_cancellation =
+  Capability_recovery_obligation.For_testing.discharge_cancellation
+
+let discharge_cancellation =
+  Capability_recovery_obligation.For_testing.discharge_cancellation
+;;
+
+let with_discharge_cancellation =
+  Capability_recovery_obligation.For_testing.with_discharge_cancellation
+;;
+
 type lane_scope_release_fault =
   Capability_recovery_obligation.For_testing.lane_scope_release_fault
 
@@ -45,6 +61,17 @@ type record_area =
   | Active
   | Owned
   | Forensic
+
+let record_names access ~area =
+  let area = match area with
+    | Active -> Capability_recovery_obligation.Active
+    | Owned -> Capability_recovery_obligation.Owned
+    | Forensic -> Capability_recovery_obligation.Forensic
+  in
+  with_store access (fun store ->
+    Eio.Path.read_dir
+      (Capability_recovery_obligation.For_testing.area_directory store area))
+;;
 
 type fixture_error = Atomic_write.publication_recovery_fixture_error
 

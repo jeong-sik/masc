@@ -19904,7 +19904,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
              in
              invite.pi_name ^ " · expires " ^ expires_at
              ^ (if invite.pi_expired then " · expired" else "")
-             ^ (if invite.pi_holds_controller then " · controlling" else "")
+             ^ Masc_tui_collab.controller_note invite.pi_controller
            in
            play_notice state ~sink:target ~kind:Notice_reply
              ("Shared DOS play invites:\n" ^ String.concat "\n" (List.map row invites))))

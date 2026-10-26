@@ -8120,11 +8120,16 @@ let decode_oauth_client_saved json =
         (Printf.sprintf "the reply must be an object (received %s)"
            (Json_util.kind_name other))
 
+type play_invite_controller =
+  | Invite_holds_controller
+  | Invite_not_controller
+  | Invite_controller_unobserved
+
 type play_invite_row = {
   pi_name : string;
   pi_expires_at : string option;
   pi_expired : bool;
-  pi_holds_controller : bool;
+  pi_controller : play_invite_controller;
 }
 
 type play_invite_issued = {
@@ -8144,13 +8149,21 @@ let play_object = function
   | `Assoc _ as json -> Ok json
   | _ -> Error "play invite response must be an object"
 
+let decode_play_invite_controller json =
+  let* raw = Json_util.require_string json "controller" in
+  match raw with
+  | "holds" -> Ok Invite_holds_controller
+  | "not_holding" -> Ok Invite_not_controller
+  | "unobserved" -> Ok Invite_controller_unobserved
+  | other -> Error (Printf.sprintf "play invite controller %S is not holds, not_holding or unobserved" other)
+
 let decode_play_invite_row json =
   let* json = play_object json in
   let* pi_name = Json_util.require_string json "name" in
   let* pi_expires_at = required_nullable_string_field json "expires_at" in
   let* pi_expired = required_bool_field json "expired" in
-  let* pi_holds_controller = required_bool_field json "holds_controller" in
-  Ok { pi_name; pi_expires_at; pi_expired; pi_holds_controller }
+  let* pi_controller = decode_play_invite_controller json in
+  Ok { pi_name; pi_expires_at; pi_expired; pi_controller }
 
 let decode_play_invites json =
   let* json = play_object json in

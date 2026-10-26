@@ -17,7 +17,9 @@
     [503 {code: "credentials_unreadable"}], rather than showing old UUID data
     as an active invite. Listing refuses an invalid expiry projection with
     [503 {code: "invalid_credential_expiry"}], rather than inventing an
-    expired invite row.
+    expired invite row. Each listed invite carries [controller]: ["holds"],
+    ["not_holding"], or ["unobserved"] when the DOS controller cannot be
+    asked, as with no machine loaded. That case still lists every invite.
 
     Revoking deletes the [Player] credential and frees the DOS controller the
     name still holds: [200 {name, revoked: true, released_controller}]. A name

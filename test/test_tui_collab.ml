@@ -2,7 +2,8 @@ open Alcotest
 module C = Masc_tui_collab
 
 let row name : Masc.Tui_decode.play_invite_row =
-  {pi_name = name; pi_expires_at = None; pi_expired = false; pi_holds_controller = false}
+  {pi_name = name; pi_expires_at = None; pi_expired = false;
+   pi_controller = Masc.Tui_decode.Invite_not_controller}
 
 let listed view names =
   let view, read = C.loading view in

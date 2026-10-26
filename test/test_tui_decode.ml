@@ -33,10 +33,19 @@ let test_checkpoint_receipt_identity_and_completion () =
 let test_play_invite_responses_preserve_recovery_facts () =
   let json = Yojson.Safe.from_string in
   (match Tui_decode.decode_play_invites
-           (json {|{"invites":[{"name":"old","expires_at":null,"expired":false,"holds_controller":true}]}|}) with
+           (json {|{"invites":[{"name":"old","expires_at":null,"expired":false,"controller":"holds"},
+                               {"name":"new","expires_at":null,"expired":false,"controller":"unobserved"}]}|}) with
    | Ok [{ pi_name = "old"; pi_expires_at = None; pi_expired = false;
-           pi_holds_controller = true }] -> ()
-   | _ -> Alcotest.fail "invite list lost null expiry or controller holder");
+           pi_controller = Tui_decode.Invite_holds_controller };
+         { pi_name = "new"; pi_controller = Tui_decode.Invite_controller_unobserved; _ }] -> ()
+   | _ -> Alcotest.fail "invite list lost null expiry or controller standing");
+  List.iter
+    (fun row ->
+      match Tui_decode.decode_play_invites (json (Printf.sprintf {|{"invites":[%s]}|} row)) with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.failf "an invite row with an unreadable controller was accepted: %s" row)
+    [ {|{"name":"old","expires_at":null,"expired":false,"controller":"maybe"}|}
+    ; {|{"name":"old","expires_at":null,"expired":false}|} ];
   (match Tui_decode.decode_play_invite_revoked
            (json {|{"name":"old","revoked":true,"released_controller":false,"release_error":"disk fault"}|}) with
    | Ok { pir_name = "old"; pir_revoked = true; pir_released_controller = false;

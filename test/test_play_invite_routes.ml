@@ -176,6 +176,19 @@ let test_invite_routes () =
         let player = String.sub link (String.length prefix) (String.length link - String.length prefix) in
         check int "a player cannot issue" 403 (status_of (call ~token:player "POST" invites ~body:issue_body));
         check int "a player cannot list" 403 (status_of (call ~token:player "GET" invites));
+        let listed_controller what =
+          let listed = call ~token:operator "GET" invites in
+          check int (what ^ ": the list answers") 200 (status_of listed);
+          match member "invites" (body_of listed) with
+          | Some (`List [ entry ]) ->
+            check string (what ^ ": listed by name") "minsu" (string_member "name" entry);
+            check bool (what ^ ": not expired") false (bool_member "expired" entry);
+            string_member "controller" entry
+          | _ -> failf "%s: the list is not the one invite" what
+        in
+        (* No DOS machine is loaded, as right after a server restart: the
+           invite stays listed and its controller standing is unknown. *)
+        check string "no machine loaded" "unobserved" (listed_controller "no machine loaded");
         check int "foreign workspace cannot revoke issued credential" 409
           (status_of (call ~token:operator "DELETE"
             (invites ^ "/minsu?expected_base_path=%2Fforeign&expected_masc_root=%2Fforeign%2F.masc")));
@@ -211,14 +224,11 @@ let test_invite_routes () =
                  ~saves_dir:(Filename.concat dir "saves")
                  ~checkpoint_dir:(Filename.concat dir "checkpoints") ~previous_autosave:Dos_lane.Keep_previous_autosave ~program_name:"game.com"
                  ~program_bytes:hello_com ~files:[] ~announce:ignore);
+            check string "a loaded machine nobody controls" "not_holding"
+              (listed_controller "loaded, uncontrolled");
             dos_ok "pass" (Dos_lane.pass ~who:"operator" ~to_:(Some "minsu") ~announce:ignore);
             check (option string) "the invite holds the controller" (Some "minsu") (controller ());
-            (match member "invites" (body_of (call ~token:operator "GET" invites)) with
-             | Some (`List [ entry ]) ->
-               check string "listed by name" "minsu" (string_member "name" entry);
-               check bool "not expired" false (bool_member "expired" entry);
-               check bool "holding the controller" true (bool_member "holds_controller" entry)
-             | _ -> fail "the list is not the one invite");
+            check string "holding the controller" "holds" (listed_controller "passed to the invite");
             let revoked = call ~token:operator "DELETE" (invites ^ "/minsu") in
             check int "the operator revokes" 200 (status_of revoked);
             check bool "and the controller it held is freed" true

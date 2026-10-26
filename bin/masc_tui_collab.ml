@@ -127,6 +127,11 @@ let hints t = match t.form with
   | Confirm_revoke _ -> "Enter:revoke this invite  Esc:cancel"
   | Confirm_resolution _ -> "Enter:I verified the server request finished  Esc:keep blocked"
 
+let controller_note = function
+  | Masc.Tui_decode.Invite_holds_controller -> " · controlling"
+  | Masc.Tui_decode.Invite_not_controller -> ""
+  | Masc.Tui_decode.Invite_controller_unobserved -> " · controller unknown"
+
 let lines ~height t =
   let heading = ["Shared machines · observation does not send game input";
     "m  Watch MSX     d  Watch DOS     g  Choose an MSX game"; ""; "DOS play links · invite a player to the shared game"] in
@@ -156,7 +161,7 @@ let lines ~height t =
         rows |> List.filteri (fun index _ -> index >= first && index < first + available)
         |> List.map (fun row ->
           (if Some row.Masc.Tui_decode.pi_name = t.selected then "› " else "  ") ^ row.pi_name
-          ^ (if row.pi_holds_controller then " · controlling" else "")
+          ^ controller_note row.pi_controller
           ^ (if row.pi_expired then " · expired" else "")
           ^ " · " ^ (match row.pi_expires_at with Some date -> date | None -> "expiry not recorded")) in
   heading @ form @ message @ body @ [""; "Links issued here remain in this TUI session. Enter opens the retained QR/link."]

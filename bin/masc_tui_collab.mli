@@ -36,4 +36,7 @@ val paste : t -> string -> t
     confirmation discard pasted text. Validation remains on Enter. *)
 val key : t -> string -> t * action
 val hints : t -> string
+val controller_note : Masc.Tui_decode.play_invite_controller -> string
+(** The suffix an invite row shows for its standing to the DOS controller,
+    shared by the Collab list and the chat [/play] list. *)
 val lines : height:int -> t -> string list

@@ -129,6 +129,20 @@ let current_controller ~config =
       | Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Rejected message | Unavailable message
         | Activity_disabled message | Activity_unobserved message)) -> Error message
 
+(* How one listed invite stands to the shared DOS controller. The invites are
+   credentials and stay listable when the machine cannot be asked, as right
+   after a restart with no machine loaded; that answer is [Unobserved], never
+   folded into [Not_holding]. *)
+type controller_relation =
+  | Holds
+  | Not_holding
+  | Unobserved
+
+let controller_relation_json = function
+  | Holds -> `String "holds"
+  | Not_holding -> `String "not_holding"
+  | Unobserved -> `String "unobserved"
+
 let list_json ~config =
   match Play_invite.list ~base_path:config.Workspace.base_path ~now:(Time_compat.now ()) with
   | Error (Play_invite.Credentials_unavailable error) ->
@@ -136,9 +150,14 @@ let list_json ~config =
   | Error (Play_invite.Invalid_expiry (Masc_domain.Credential_expiry.Invalid_timestamp stamp)) ->
     `Service_unavailable, Server_refusal.json ~code:"invalid_credential_expiry" ("invalid credential expiry: " ^ stamp)
   | Ok invites ->
-    match current_controller ~config with
-    | Error detail -> `Service_unavailable, Server_refusal.json ~code:"controller_unavailable" detail
-    | Ok controller ->
+    let relation_of =
+      match current_controller ~config with
+      | Ok controller ->
+        fun invite_name -> if controller = Some invite_name then Holds else Not_holding
+      | Error detail ->
+        Log.DosLog.info "play invites listed without a controller observation: %s" detail;
+        fun _ -> Unobserved
+    in
     `OK, `Assoc
     [ ( "invites"
       , `List
@@ -148,7 +167,7 @@ let list_json ~config =
                  [ ("name", `String invite_name)
                  ; ("expires_at", Json_util.string_opt_to_json expires_at)
                  ; ("expired", `Bool expired)
-                 ; ("holds_controller", `Bool (controller = Some invite_name))
+                 ; ("controller", controller_relation_json (relation_of invite_name))
                  ])
              invites))
     ]

@@ -2720,11 +2720,20 @@ val decode_oauth_client_saved : Yojson.Safe.t -> (int, string) result
     status, which the HTTP client has already turned into an error before this
     runs. *)
 
+(** How a listed invite stands to the shared DOS controller.
+    [Invite_controller_unobserved] means the server could not ask the
+    machine, for example because none is loaded. A [controller] value other
+    than the three is a decode error. *)
+type play_invite_controller =
+  | Invite_holds_controller
+  | Invite_not_controller
+  | Invite_controller_unobserved
+
 type play_invite_row = {
   pi_name : string;
   pi_expires_at : string option;
   pi_expired : bool;
-  pi_holds_controller : bool;
+  pi_controller : play_invite_controller;
 }
 
 type play_invite_issued = {

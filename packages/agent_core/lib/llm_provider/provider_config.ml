@@ -473,7 +473,10 @@ let resolve_request_capabilities (config : t) =
       | Kimi -> Capabilities.kimi_capabilities
       | Ollama -> Capabilities.ollama_capabilities
       | Gemini -> Capabilities.gemini_capabilities
-      | OpenAI_compat -> Capabilities.default_capabilities in
+      | OpenAI_compat ->
+        (match config.provider_id with
+         | None -> Capabilities.openai_compat_chat_capabilities
+         | Some _ -> Capabilities.default_capabilities) in
     (* A native wire declares its protocol, not an unknown model's forced-tool
        support. Preserve the existing admission policy in the shared record. *)
     let caps = match config.kind with

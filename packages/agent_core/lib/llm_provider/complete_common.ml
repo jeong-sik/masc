@@ -134,9 +134,9 @@ let%test "capability source is provider default when model is unknown" =
   in
   match resolve_capabilities_for_config config with
   | caps, Provider_default_capability ->
-    caps.supports_tools = Capabilities.default_capabilities.supports_tools
+    caps.supports_tools = Capabilities.openai_compat_chat_capabilities.supports_tools
     && caps.thinking_control_format
-       = Capabilities.default_capabilities.thinking_control_format
+       = Capabilities.openai_compat_chat_capabilities.thinking_control_format
   | _, Model_capability -> false
 ;;
 

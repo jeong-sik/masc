@@ -1031,19 +1031,52 @@ let test_projected_options_match_public_admission () =
     let config = Llm_provider.Provider_config.make ~kind:OpenAI_compat
       ~model_id:"undeclared-request-model" ~base_url:"https://example.invalid" () in
     let caps = Provider_runtime_binding.capabilities_for_provider_config config in
-    Alcotest.(check bool) "undeclared endpoint advertises no schema guarantee" false
+    Alcotest.(check bool) "anonymous chat wire retains its schema protocol" true
       caps.supports_structured_output;
-    Alcotest.(check bool) "undeclared endpoint schema fails full admission" true
-      (Result.is_error (Llm_provider.Complete_common.validate_all
+    Alcotest.(check bool) "anonymous chat schema uses its retained wire protocol" true
+      (Result.is_ok (Llm_provider.Complete_common.validate_all
         {config with response_format=Llm_provider.Types.JsonSchema
           (`Assoc ["type",`String "object"])})))
+;;
+
+let test_anonymous_chat_defaults_do_not_restore_declared_missing_policy () =
+  with_model_catalog "" (fun () ->
+    let config ?provider_id () = Llm_provider.Provider_config.make
+      ~kind:OpenAI_compat ?provider_id ~model_id:"custom-deployment-model"
+      ~base_url:"https://example.invalid/v1" () in
+    let anonymous = config () |> Llm_provider.Provider_config.freeze_for_request in
+    let declared = config ~provider_id:"missing-deployment-policy" ()
+      |> Llm_provider.Provider_config.freeze_for_request in
+    let caps, source = Llm_provider.Provider_config.resolve_request_capabilities anonymous in
+    Alcotest.(check bool) "anonymous wire is a protocol fallback, not a model fact" true
+      (source = Llm_provider.Provider_config.Provider_default_capability);
+    List.iter (fun (name, enabled) -> Alcotest.(check bool) name true enabled)
+      [ "anonymous tools", caps.supports_tools
+      ; "anonymous native streaming", caps.supports_native_streaming
+      ; "anonymous schema protocol", caps.supports_structured_output
+      ; "anonymous image protocol", caps.supports_image_input ];
+    Alcotest.(check bool) "runtime reads the same anonymous request authority" true
+      (Provider_runtime_binding.capabilities_for_provider_config anonymous = caps);
+    let declared_caps = Provider_runtime_binding.capabilities_for_provider_config declared in
+    Alcotest.(check bool) "declared missing policy retains conservative tools" false
+      declared_caps.supports_tools;
+    Alcotest.(check bool) "declared missing policy retains conservative streaming" false
+      declared_caps.supports_native_streaming;
+    Alcotest.(check bool) "declared missing schema policy refuses public admission" true
+      (Result.is_error (Llm_provider.Complete_common.validate_all
+        {declared with response_format=Llm_provider.Types.JsonSchema
+          (`Assoc ["type",`String "object"])}));
+    Alcotest.(check bool) "fallback does not invent model reasoning" false
+      caps.supports_reasoning)
 ;;
 
 let () =
   Alcotest.run
     "Provider_runtime_binding"
     [ ( "policy authority",
-        [ Alcotest.test_case "projected options match public admission" `Quick
+        [ Alcotest.test_case "anonymous chat versus declared missing policy" `Quick
+            test_anonymous_chat_defaults_do_not_restore_declared_missing_policy
+        ; Alcotest.test_case "projected options match public admission" `Quick
             test_projected_options_match_public_admission
         ; Alcotest.test_case "missing model policy survives replacement" `Quick
             test_frozen_absence_survives_model_catalog_replacement

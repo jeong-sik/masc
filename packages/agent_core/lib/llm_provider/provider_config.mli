@@ -374,10 +374,13 @@ type capability_source = Model_capability | Provider_default_capability
 val resolve_request_capabilities : t -> Capabilities.capabilities * capability_source
 (** One capability resolution for request admission, observation and runtime
     projection. Explicit declarations and frozen model policies answer first.
-    Missing model facts use the typed wire's existing request defaults. Unknown
-    OpenAI-compatible endpoints acquire no capability-dependent options;
-    other undeclared native models retain their wire defaults and conservative
-    tool-choice flags. A frozen absence never reopens catalog or registry state. *)
+    Missing model facts use the typed wire's existing request defaults. An
+    anonymous OpenAI-compatible config retains its chat protocol defaults,
+    reported as [Provider_default_capability], without acquiring catalog model
+    facts. An explicitly identified provider with missing policy remains
+    conservative. Other undeclared native models retain their wire defaults
+    and conservative tool-choice flags. A frozen absence never reopens catalog
+    or registry state. *)
 
 
 val freeze_for_request : t -> t

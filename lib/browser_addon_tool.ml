@@ -21,7 +21,7 @@ let output_schema = object_schema ~required:["reply";"answer"] [
     "status",enum ["answered"];
     "payload",object_schema ~open_fields:true ~required:["ok"] [
       "ok",`Assoc ["type",`String "boolean";"const",`Bool true]]]]
-let definition : S.tool = {name="browser_command";
+let definition : S.tool = {name=W.command_tool_name;
   title=Some "Browser";description=Some
     "Run one closed browser command on the browser the host chose: lane, and for live its clientId. The host chooses the browser and states it in the receipt. No JavaScript or debug-protocol escape hatch. Uploads require a host snapshot grant; completed owned downloads are finalized into host artifacts.";
   input_schema;output_schema=Some output_schema;annotations=None;icon=None;execution=None}

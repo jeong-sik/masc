@@ -1,0 +1,35 @@
+{
+  "derivative": true,
+  "method": "Named selected fields only; original complete status and instruction text remain ignored.",
+  "owners": {
+    "audit-retarget-a": {
+      "original_sha256": "3ec8880c244e796c817860f59ff2ffe248703ada357826985affc2a8dfabf614",
+      "original_bytes": 17124,
+      "selection": {
+        "name": "audit-retarget-a",
+        "paused": true,
+        "keepalive_running": false,
+        "activation_mode": "manual"
+      },
+      "selected_meta": {
+        "total_turns": 0,
+        "last_runtime_attempt": null
+      }
+    },
+    "audit-retarget-b": {
+      "original_sha256": "a7d9075380463b5302afe2e41291cdd26fcc0ea5b2282e741d0d42a9981e56d8",
+      "original_bytes": 17125,
+      "selection": {
+        "name": "audit-retarget-b",
+        "paused": true,
+        "keepalive_running": false,
+        "activation_mode": "manual"
+      },
+      "selected_meta": {
+        "total_turns": 0,
+        "last_runtime_attempt": null
+      }
+    }
+  },
+  "selected_meta_scope": "total_turns and last_runtime_attempt only; paused/keepalive fields selected separately."
+}

@@ -1,13 +1,14 @@
 # Schedule recovery and exact-attempt verification
 
-These are two completed, selected Test runs. Their case counts are not added
+These are three completed, selected Test runs. Their case counts are not added
 together as independent end-to-end scenarios; the suites overlap and the heads differ.
-The later pending-settlement runner change is not executed by either run.
+The third run executes the pending-settlement runner change at its own exact head.
 
 | Workflow/run | Executed head/ref | Conclusion | Actual suites/cases |
 | --- | --- | --- | --- |
 | [Test40358821346](https://github.com/jeong-sik/masc/actions/runs/40358821346) | `b07769be553f54d14873c72f9ccd161d4085799e` / `fix/schedule-ledger-commit-result-20261027` | success | Store59 + Consumer58 = 117 PASS; FAIL0/SKIP0 |
 | [Test40365052184](https://github.com/jeong-sik/masc/actions/runs/40365052184) | `fa23bf437c3679bb4b7bd7c47eb592675697e370` / `fix/schedule-attempt-authority-20261027` | success | Domain37 + Store66 + Runner24 + Tool wiring64 + Consumer58 + Dashboard HTTP171 = 420 PASS; FAIL0/SKIP0 |
+| [Test40374192059](https://github.com/jeong-sik/masc/actions/runs/40374192059) | `c52f799e52d3683bd2a4c624f0f6adfe36015ec9` / `fix/schedule-pending-settlement-20261027` | success | Runner30 + Consumer60 + Tool wiring64 + Lane act7 = 161 PASS; FAIL0/SKIP0 |
 
 Each directory contains `result.json` with the workflow identity, exact head/ref,
 conclusion, original archive/member hashes and derivative selection hash.
@@ -44,9 +45,14 @@ remains a separate Actions record and is not rewritten as a successful run.
 The even earlier startup fixture compile failure and its capture clarification
 remain in [the startup bundle](../2026-10-27-schedule-startup-recovery/README.md).
 
-Neither selected run verifies PR46248's later same-process pending-intent loop,
-whole regression, actual process bootstrap, arbitrary-effect exactly-once,
-model/provider failover, production installation or visible TUI behavior.
+The third run executes PR46248's pending-intent loop through production maintenance
+composition, real filesystem publication faults and actual Eio cancellation. Cases
+retain the original Retry/Occurrence/Schedule verdict, recurrence anchor and finish
+stamp; retry settlement without invoking the consumer; admit healthy unrelated
+work; retain progress through typed errors and postprocessing faults; and fence
+newer attempts. These are focused suite executions, not actual server binary fault
+recovery, whole regression, arbitrary-effect exactly-once, model/provider failover,
+production installation or visible TUI behavior.
 
 ## Later pending-loop compilation failure
 
@@ -71,5 +77,7 @@ the warning or assertions. It is committed as `4c94fcce84f59c751ebd4867a2f0dee0e
 refusal and post-tick observation crash semantics. The same four aliases were requested as workflow **Test40374192059**, head
 `c52f799e52d3683bd2a4c624f0f6adfe36015ec9`, ref
 `fix/schedule-pending-settlement-20261027`; [the original request receipt](test40374192059-request.json)
-remains a request-time snapshot. Its conclusion has not been observed here,
-so there is no current-source execution claim.
+remains an unchanged request-time snapshot. The later terminal observation and
+raw-log verification are separately retained in [the result](test40374192059/result.json)
+and [169 selected source lines](test40374192059/selected.json): **161 PASS, FAIL0/SKIP0**.
+Both earlier compile failures remain failures; they executed no suites.

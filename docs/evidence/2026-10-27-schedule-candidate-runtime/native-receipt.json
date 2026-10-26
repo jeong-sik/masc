@@ -1,0 +1,51 @@
+{
+  "source_sha": "c52f799e52d3683bd2a4c624f0f6adfe36015ec9",
+  "workflow_sha": "9377c7f3025d68e3856d2afd3762468dabc77813",
+  "scenario": "addon-lifecycle",
+  "platform": "macos-arm64",
+  "sha256": "43a2c8065892b1518763b6ff6d24a6d777ec0376406afce89dcd43b21ce8da24",
+  "key_reference": {
+    "path": "key-reference.md",
+    "sha256": "002d52f75f51bad5bc3935c03f499c44dc06596800bad5371a625a5bd1629759",
+    "producer": "bin/masc_tui_keys_doc_cli.exe"
+  },
+  "server_sha256": "373ced2eb4897f60d82a0c4b4b7340865e933f0e181a268906ddc595c9034af7",
+  "native_addon_launcher": {
+    "path": "masc-native-addon-launcher",
+    "sha256": "df2c9e37cca5d418e2c6e6f8a4b0f0bce03615e97de74a0758d4d29817bbc30c",
+    "producer": "bin/masc_native_addon_launcher.exe"
+  },
+  "browser_addon_worker": null,
+  "build_targets": [
+    "bin/masc_tui.exe",
+    "bin/masc_tui_keys_doc_cli.exe",
+    "bin/main_eio.exe",
+    "bin/masc_native_addon_launcher.exe",
+    "test/test_tui_lane_addons.exe",
+    "test/test_lane_addon_application.exe"
+  ],
+  "expected_tests": [
+    "test_tui_lane_addons",
+    "test_lane_addon_application"
+  ],
+  "executed_tests": [
+    "test_tui_lane_addons",
+    "test_lane_addon_application"
+  ],
+  "test_results": [
+    {
+      "suite": "test_tui_lane_addons",
+      "suite_exit_code": 0,
+      "log_exit_code": 0
+    },
+    {
+      "suite": "test_lane_addon_application",
+      "suite_exit_code": 0,
+      "log_exit_code": 0
+    }
+  ],
+  "behavior_passed": true,
+  "installed_runtime_verified": false,
+  "visible_ui_verified": false,
+  "packaging": "native executable; see native-dependencies.txt for dynamic libraries"
+}

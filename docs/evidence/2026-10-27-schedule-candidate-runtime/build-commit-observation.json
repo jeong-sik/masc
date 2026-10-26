@@ -1,0 +1,15 @@
+{
+  "observed_at": "2026-10-26T18:32:23.863077+00:00",
+  "executable_sha256": "373ced2eb4897f60d82a0c4b4b7340865e933f0e181a268906ddc595c9034af7",
+  "argv": [
+    "<downloaded artifact>/masc",
+    "build-commit"
+  ],
+  "exit_code": 0,
+  "stdout_utf8": "c52f799e52d3683bd2a4c624f0f6adfe36015ec9\n",
+  "stdout_bytes": 41,
+  "stdout_sha256": "0981b65804d45c4b275a6ec5b10437543b3775e3a301cd1a4e93f8374adeaf91",
+  "stderr_bytes": 82,
+  "stderr_sha256": "bf2e899b193521809ba97570d1785026809569afcdd8c721ed037825d8daf6bc",
+  "scope": "Read-only embedded build identity; does not establish server behavior or installation."
+}

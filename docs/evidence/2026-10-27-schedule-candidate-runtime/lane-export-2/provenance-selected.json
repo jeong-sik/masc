@@ -1,0 +1,127 @@
+{
+  "scope": "isolated candidate; no operating installation claim",
+  "binary_source_commit": "c52f799e52d3683bd2a4c624f0f6adfe36015ec9",
+  "binary_sha256": "373ced2eb4897f60d82a0c4b4b7340865e933f0e181a268906ddc595c9034af7",
+  "expected_binary_sha256": "373ced2eb4897f60d82a0c4b4b7340865e933f0e181a268906ddc595c9034af7",
+  "package_commit": "c52f799e52d3683bd2a4c624f0f6adfe36015ec9",
+  "controller_sha256": "eb216ee3fad0debb6b1c6cd085f38ed2baa98152723c658ce764def4e730cca7",
+  "helper_source_commit": "c52f799e52d3683bd2a4c624f0f6adfe36015ec9",
+  "helper_sha256": "6799826b1d8843e93993a283f98059efd9f9c93787bfae29d823bdcc557b608f",
+  "harness_checkout_head": "1b945757f5499360ebe0f301c2c470a9e4166896",
+  "producer": {
+    "workflow": "Minimal manual checks",
+    "run_id": "40374265429",
+    "execution_head": "9377c7f3025d68e3856d2afd3762468dabc77813",
+    "ref": "main",
+    "source_input": "c52f799e52d3683bd2a4c624f0f6adfe36015ec9",
+    "basis": "supplied; no CI query"
+  },
+  "not_proven": [
+    "installation",
+    "DOS counter",
+    "nonempty journal mutation",
+    "model/quiz generation",
+    "external effect exactly-once",
+    "restart durability",
+    "HTTP race",
+    "whole RBAC/schedule feature"
+  ],
+  "docker_executable": "/Applications/Docker.app/Contents/Resources/bin/docker",
+  "package_files": [
+    {
+      "path": "addons/operator-quiz/Dockerfile",
+      "sha256": "c9502a1ad0861e1e1c8ba54e7b9581cb80d053aa7933d7d52359536f16c194bc",
+      "bytes": 423
+    },
+    {
+      "path": "addons/operator-quiz/README.md",
+      "sha256": "3edd61c52de3f46e157d41dc94571e5ab84e91d322da1be78332ad244d60e11d",
+      "bytes": 1856
+    },
+    {
+      "path": "addons/operator-quiz/lane.toml",
+      "sha256": "d3f7e69fb4aaffe82ce8c8293755b1ad3f3baf53664ed208b3f497441fcb2f50",
+      "bytes": 4519
+    },
+    {
+      "path": "addons/operator-quiz/prompts/author.md",
+      "sha256": "7d6b7b3975ea616b64cb7295ad0e48d29f93de039a5725228256b968e1866209",
+      "bytes": 2725
+    },
+    {
+      "path": "addons/operator-quiz/prompts/grade.md",
+      "sha256": "7aff0ef8c84d0fb19d267802b580986bd6c3bebcd69e1bdd4e3f4c37a8c2991d",
+      "bytes": 1526
+    },
+    {
+      "path": "addons/operator-quiz/quiz_flow.py",
+      "sha256": "5d71e7769bf65161622296c01cfc89e830ca973c42ef84ba3b540ba7ce0ddae9",
+      "bytes": 50715
+    },
+    {
+      "path": "addons/operator-quiz/quiz_grading.py",
+      "sha256": "5be772ae4958683ac22b666867200afb4a403663ff19271d4c9474347077676f",
+      "bytes": 4602
+    },
+    {
+      "path": "addons/operator-quiz/quiz_log.py",
+      "sha256": "58c84e34d958fd6f938a78cf131aaf91d25626bc0647ec0c59a88764b8d9139f",
+      "bytes": 46646
+    },
+    {
+      "path": "addons/operator-quiz/quiz_projection.py",
+      "sha256": "e1a3e766711569f9362733259b05d4a955ccc69156fb6d48aac96402b69a0ba6",
+      "bytes": 12142
+    },
+    {
+      "path": "addons/operator-quiz/schemas/author.json",
+      "sha256": "0bcc0c6c8db4e8101b0277b3b3ba13d3dd62e037d95fd48dbdab407e2d891e51",
+      "bytes": 4221
+    },
+    {
+      "path": "addons/operator-quiz/schemas/grade.json",
+      "sha256": "0e9f010d29b890a81d1c45e2304bd361009d06cb67184ea3da8d467150a05dbe",
+      "bytes": 632
+    },
+    {
+      "path": "addons/operator-quiz/server.py",
+      "sha256": "8c4b3023bd9b35377dc634bcc85140a172a0424b16ba032e5a6392417bcd7fe3",
+      "bytes": 15947
+    }
+  ],
+  "image_reference": "masc-lane-operator-quiz:0.1.0",
+  "image_id": "sha256:69fbf57d7775244ed37ddf88b6d7d4da6329fd25748b8ff5bcf7011ce6ea2a0c",
+  "package_revision": "0.2.1",
+  "runtime_fixture_sha256": "ccbe65e399f47a3abddbf4299e15dd0fd55001dd785b2e0d75948ad86acf7cfd",
+  "observed_build": {
+    "release_version": "0.64.0",
+    "binary_version": "0.64.0",
+    "repo_version": "0.64.0",
+    "commit": "c52f799e52d3683bd2a4c624f0f6adfe36015ec9",
+    "commit_source": "embedded",
+    "binary_commit": "c52f799e52d3683bd2a4c624f0f6adfe36015ec9",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "373ced2eb4897f60d82a0c4b4b7340865e933f0e181a268906ddc595c9034af7",
+    "binary_commit_unix_ts": 1793037407.0,
+    "binary_commit_age_seconds": 2088,
+    "repo_head_commit": "1b945757f54",
+    "repo_head_commit_source": "runtime_repo_head",
+    "repo_head_commit_unix_ts": 1793037973.0,
+    "repo_head_commit_age_seconds": 1522,
+    "runtime_instance_id": "01a1797b-6f5a-7000-b109-713f0ad8751c",
+    "started_at": "2026-10-26T18:31:35Z",
+    "uptime_seconds": 0
+  },
+  "log_absent": true,
+  "exported_bytes": 0,
+  "image_protocol_sha256": "a8a614c64ae672c799201395d24571bbc7c79f3b5c4682fdd3130a7d72bc79fa",
+  "package_protocol_sha256": "a8a614c64ae672c799201395d24571bbc7c79f3b5c4682fdd3130a7d72bc79fa",
+  "is_derivative": true,
+  "derivation": "Observed build absolute host paths removed; other provenance fields preserved.",
+  "original_provenance": {
+    "sha256": "58480bfa7b96274bb3e4d082f1316b790c690f41e9c1ffd59873a06fb8c345e9",
+    "bytes": 5152,
+    "path": "artifacts/schedule-actual-repair-20261027/runs/lane-export-2/http/provenance.json"
+  }
+}

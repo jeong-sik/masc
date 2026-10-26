@@ -1,0 +1,18 @@
+{
+  "event_type": "schedule.due_candidate",
+  "occurrence_id": "cb62caad8be5a6df2884b7517d79d91217c1ef6993f86611373b399641ccb53a",
+  "schedule_instance_id": "01a1797b-794e-7000-8a8b-dc5e95134853",
+  "schedule_id": "audit-export-0cdae5209bc849f89b60733b5cbae929",
+  "emitted_at": 1793039510.885025,
+  "due_at": 1793039498.550488,
+  "payload_digest": "cedbb7f587034a3bdbe20892a06a4db3da21825a597012ae5592ba0006a26c47",
+  "payload": {
+    "kind": "masc.lane_act",
+    "body": {
+      "installation_id": "audit-export-0cdae5209bc849f89b60733b5cbae929",
+      "action": {
+        "kind": "export"
+      }
+    }
+  }
+}

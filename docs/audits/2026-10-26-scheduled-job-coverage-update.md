@@ -25,7 +25,7 @@ API33/F1/restart 상태23은 [실제 API bundle](../evidence/2026-10-26-schedule
 | 행 | 사용자 행동 / 기대 | 실제 근거 | 현재 판정과 남은 한계 |
 |---:|---|---|---|
 | 1 | Keeper에게 단발 메시지를 예약한다 | W3, C3; API33 | 생성·저장·enqueue 및 실제 MCP 생성 통과. 실제 모델 단독 실행은 별도 두 예. |
-| 2 | Lane installation/action을 예약한다 | W24, L0 | Lane 전용 shape·생산 admission/queue 통과. L의 worker는 대체 callback. |
+| 2 | Lane installation/action을 예약한다 | W24, L0 | Lane 전용 shape·생산 admission/queue 통과. L의 worker는 대체 callback. [candidate c52f799 실제 Docker export](../evidence/2026-10-27-schedule-candidate-runtime/README.md#actual-scheduled-lane-export-and-ownership-control)는 occurrence→handoff→original worker confirmed→빈 export bytes/readback 일치. 모든 action 검증은 아님. |
 | 3 | 제목·메시지·대상·알 수 없는 필드를 검증한다 | W17–24, W50, C48 | unknown/혼합 shape·대상·일부 타입 검증 실행. 모든 문자열 경계값 전수 검사는 아님. |
 | 4 | 상대 지연을 생성 시점 기준으로 적용한다 | W44–45 | 생산 tool handler의 dispatch clock 기준 상대 지연·calendar first due 실행. |
 | 5 | 과거·현재 초 경계 예약의 허용 여부가 일관된다 | W32–33, W46, S-state8; API33 | 과거 거절·현재 초·원래 overdue 시각 보존 실행. |
@@ -36,15 +36,15 @@ API33/F1/restart 상태23은 [실제 API bundle](../evidence/2026-10-26-schedule
 | 10 | 시간대를 정한다 | Domain37의 request7–9; W15/W45/S-due4 | Test40365052184에서 fixed-offset 별명·명시 offset 허용과 DST/IANA 거절 정책 실행. DST 전환 지원을 제공한다는 뜻은 아니다. |
 | 11 | runner tick보다 작은 interval을 생성·수정한다 | W43, R-tick14 | create sub-tick 거절과 저장된 값 처리 실행. update 동일 경계 독립 증거는 없음. |
 | 12 | expires_at을 두고 예약한다 | S-due2, S-state16; restart-expiry-3 | 저장소 expiry와 실제 downtime expiry 실행. accepted source는 보존됨. |
-| 13 | operator/creator/recipient가 수정·취소한다 | W37–41, C11; API33 | named 권한·직접 Operator_caller 취소 실행. HTTP credential→Operator 인증은 미검증. |
+| 13 | operator/creator/recipient가 수정·취소한다 | W37–41, C11; API33 | named 권한·직접 Operator_caller 취소 실행. candidate c52f799 실제 HTTP Admin create/cancel human_operator stamp, Worker 타인 control 취소400/not_schedule_owner와 원장 불변 확인. 전체 역할·HTTP race 검증은 아님. |
 | 14 | 호출자가 임의 결과 채널을 주입한다 | W12–13/19, C4 | 신뢰 origin 결속·creator route 보존·queue 전달 실행. 외부 송신은 미검증. |
 | 15 | public id를 유지하며 새 instance로 바꾼다 | W4–7, S-state4–7; API33 | public id 유지·fresh instance 및 terminal 변경 거절 실행. |
 | 16 | 내용만 수정하면서 과거 due 시각을 보존한다 | W8–9/46, S-state8; API33 | due/recurrence/expiry 보존 및 명시 retime 경계 실행. |
 | 17 | 동시 수정·retime가 저장 결과를 잃지 않는다 | W10 | 양쪽 timing 생략 content edit의 결정적 concurrent retime 보존 실행. 전 조합 보장 아님. |
 | 18 | 권한 확인 사이 target이 바뀌면 이전 recipient 변경을 거절한다 | F3 소스 반례; 수리 PR46182 | locked current-row 권한 수리 PR46182의 새 Test124 통과. 공개 update interleaving/locked cancel 거절 포함; 실제 HTTP cancel race·새 binary는 미검증. |
 | 19 | due만 바꿀 때 다른 호출이 갱신한 recurrence를 보존한다 | F4 소스 반례; 수리 PR46193 | 최신 recurrence 보존 수리와 공개 interleaving 2건 포함 Test40332170687의 115 cases 통과. 실제 HTTP race/새 binary 재현은 미검증. |
-| 20 | A에 이미 대기 중인 반복 예약을 B로 바꾸고 취소한다 | retarget-cancel-4; 수리 PR46211 | 실제 F1 반례는 유지. all-owner 철회·transfer fencing 수리의 Test40343103111에서 3 suites 통과(명시 64+12=76 cases + queue executable). 새 binary 반례 재검증·강제 concurrent transfer는 미검증. |
-| 21 | 아직 dispatch되지 않은 Scheduled/Due를 취소한다 | W3, S-lifecycle1, C10–11; API33 | 정의 및 current-target pending 취소 실행. 이전 target/instance 조합은 F1 실패. |
+| 20 | A에 이미 대기 중인 반복 예약을 B로 바꾸고 취소한다 | retarget-cancel-4; 수리 PR46211 | 실제 F1 반례는 유지. all-owner 철회·transfer fencing 수리의 Test40343103111에서 3 suites 통과(명시 64+12=76 cases + queue executable). [candidate c52f799 실제 재검증](../evidence/2026-10-27-schedule-candidate-runtime/README.md)은 동일 A→B 변경·취소 후 양쪽 원 source/pending 없음 확인. paused/zero-turn이며 모델 실행 없음. 강제 concurrent transfer는 미검증. |
+| 21 | 아직 dispatch되지 않은 Scheduled/Due를 취소한다 | W3, S-lifecycle1, C10–11; API33 | 정의 및 current-target pending 취소 실행. 이전 target/instance 조합의 과거 F1 실패와 새 candidate의 제한된 통과는 20행 참조. |
 | 22 | 전달됐지만 아직 턴이 시작되지 않은 단발을 취소한다 | W34 | accepted one-shot Succeeded 뒤 cancel의 typed refusal 실행. 현행 기능 한계 유지. |
 | 23 | 이미 시작한 작업·완료된 effect를 되돌린다 | S-lifecycle2, C12/14–15 | Running 거절·직접 turn-start/terminal 주입 경계 실행. 실제 effect rollback 보장 없음. |
 | 24 | 상태·owner·target·limit/cursor로 페이지를 읽는다 | W35–36/47–50; API33 | owner/status/target/bounds/cursor filtering과 실제 MCP pagination 실행. |
@@ -73,7 +73,7 @@ API33/F1/restart 상태23은 [실제 API bundle](../evidence/2026-10-26-schedule
 | 47 | 이전 owner ACK와 새 owner pending을 구분한다 | C21/33/37; 기존 decoder/재생 | 실제 transfer outbox/projection/cached target 실행. 실제 model-to-model 인계 미검증. |
 | 48 | 재시작 전 Running을 Due로 복원한다 | S-due7–8 | 실제 filesystem Running→Due recovery 함수/idempotence 실행. 새 process bootstrap은 아님. |
 | 49 | 첫 startup recovery 실패 후 같은 process에서 회복한다 | Test40358821346 Consumer의 keeper_wake46–47, 117 PASS; Test40365052184에 같은 source 포함 | genuine Running·실제 publication 실패→첫 recovery 실패→저장 복원→같은 maintenance state의 다음 cadence 성공, 성공 뒤 normal crash가 startup으로 돌아가지 않음 실행. 실제 서버 프로세스 bootstrap/설치 binary는 미검증. |
-| 50 | dispatch 실패 정산 write 실패 뒤 같은 process에서 회복한다 | Test40365052184의 exact attempt/primary fault 회귀; 후속 PR46248 | Store의 실제 primary 실패·같은 capability 재정산은 실행. 보류 intent를 다음 production cadence에 보존/재시도하는 PR46248은 작성·독립 소스 검토 완료, Test40369739062는 head22014660의 직접 Eio 의존 참조로 suite 전 컴파일 실패. head2861571의 Test40371389026도 warning4로 suite 전 실패. 닫힌 오류 분기와 문서 수리 headc52f799의 Test40374192059는 요청됐으며 결과 미관측. 실제 서버 binary 수렴은 미검증. |
+| 50 | dispatch 실패 정산 write 실패 뒤 같은 process에서 회복한다 | Test40365052184의 exact attempt/primary fault 회귀; 후속 PR46248 | Store의 실제 primary 실패·같은 capability 재정산은 실행. 보류 intent를 다음 production cadence에 보존/재시도하는 PR46248은 작성·독립 소스 검토 완료, Test40369739062는 head22014660의 직접 Eio 의존 참조로 suite 전 컴파일 실패. head2861571의 Test40371389026도 warning4로 suite 전 실패. 닫힌 오류 분기와 문서 수리 headc52f799의 [Test40374192059](../evidence/2026-10-27-schedule-settlement-verification/test40374192059/result.json)는 success: Runner30·Consumer60·Tool wiring64·Lane act7, 161 PASS/FAIL0/SKIP0. production maintenance composition에서 intent 보존·같은 process cadence 재정산·health와 오류 경계 검증. 실제 서버 binary fault→수렴은 미검증. |
 | 51 | 손상·stale receipt·결과 불확실을 성공으로 덮지 않는다 | S-corruption2–3/6–9, C23–27/34/38/41/43/47/49 | 손상·write failure·retired/stale/noncanonical receipt 거절 실행. 전체 runtime 장애 복구는 아님. |
 | 52 | 도착한 단발이 dispatch Succeeded여도 계속 보인다 | 기존 chat_schedule_entries 추출 결정 | 새 195개에 해당 TUI suite 없음. 실제 채팅 표시 미검증. |
 | 53 | 선택한 Keeper의 예약만 보인다 | 기존 selection; W35는 backend owner만 | TUI Keeper 전환·generation·shared-read UI 실행 미검증. |
@@ -82,7 +82,7 @@ API33/F1/restart 상태23은 [실제 API bundle](../evidence/2026-10-26-schedule
 | 56 | 오래된 조회를 현재 사실로 오인하지 않는다 | C45–46 | Hold_current→Hold_as_of 결정 및 cache invalidation 실행. 전체 async refresh/화면 미검증. |
 | 57 | overdue 때 사용자에게 알려 준다 | 직접 새 실행 없음 | persistent notice 구현/기존 선택 결정과 별개로 실제 overdue 알림 UX 미검증. OS push/sound 보장 없음. |
 | 58 | 채널/파일에 요청한 실제 결과가 도착한다 | real-deepseek-1/real-glm-1; C4는 route만 | 실제 내부 note 목적지 효과/readback 성공. posting/file/외부 채널은 미검증. |
-| 59 | worker 실행·idempotence·effect unknown을 처리한다 | L0–6 | 생산 queue/receipt와 대체 worker lifecycle/redelivery 실행. 실제 package/container worker/외부 effect 미검증. |
+| 59 | worker 실행·idempotence·effect unknown을 처리한다 | L0–6 | 생산 queue/receipt와 대체 worker lifecycle/redelivery 실행. candidate c52f799 실제 package/Docker worker export와 원 receipt 안정성·빈 blob/volume readback 일치 확인. 실제 worker redelivery·unknown·외부 effect exactly-once는 미검증. |
 
 
 F3 수리는 [PR46182](https://github.com/jeong-sik/masc/pull/46182)의
@@ -104,6 +104,10 @@ workflow **Test40358821346**, head `b07769be553f54d14873c72f9ccd161d4085799e`,
 ref `fix/schedule-ledger-commit-result-20261027`, conclusion **success**의 117 PASS와
 workflow **Test40365052184**, head `fa23bf437c3679bb4b7bd7c47eb592675697e370`,
 ref `fix/schedule-attempt-authority-20261027`, conclusion **success**의 420 PASS를 보존한다.
-두 실행은 중복 suite를 포함하므로 합쳐서 새 시나리오 수로 세지 않는다. 이 근거로
-8–10행의 기존 domain 정책 실행과 49행의 생산 maintenance 조합 복구를 보강했다.
-50행의 후속 pending loop, actual process restart·모델·TUI·설치는 따로 검증해야 한다.
+후속 workflow **Test40374192059**, head `c52f799e52d3683bd2a4c624f0f6adfe36015ec9`,
+ref `fix/schedule-pending-settlement-20261027`, conclusion **success**의 161 PASS는
+50행의 pending loop 생산 composition을 검증한다. 이 실행들은 중복 suite를 포함하므로
+합쳐서 새 시나리오 수로 세지 않는다. 8–10행의 기존 domain 정책과 49행 복구 근거도
+각 실행 head에 한정한다. [동일 candidate 실제 실행](../evidence/2026-10-27-schedule-candidate-runtime/README.md)은
+20행의 제한된 A→B 취소와 2·13·59행의 빈 export/권한 사례를 보강한다.
+actual process fault/recovery·busy 모델·TUI·운영 설치는 별도로 검증해야 한다.

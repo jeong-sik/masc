@@ -1,0 +1,678 @@
+[
+  {
+    "source_line": 8,
+    "text": "Testing `Schedule_runner'."
+  },
+  {
+    "source_line": 23,
+    "text": "  [OK]          tick            0   emits due candidate once."
+  },
+  {
+    "source_line": 31,
+    "text": "  [OK]          tick            1   a tick without a new signal leaves the se..."
+  },
+  {
+    "source_line": 41,
+    "text": "  [OK]          tick            2   prunes the key of a forgotten schedule."
+  },
+  {
+    "source_line": 55,
+    "text": "  [OK]          tick            3   prunes the key of an occurrence the sched..."
+  },
+  {
+    "source_line": 67,
+    "text": "  [OK]          tick            4   prune keeps a key the schedule can still ..."
+  },
+  {
+    "source_line": 75,
+    "text": "  [OK]          tick            5   recovers seen keys from the .last-good mi..."
+  },
+  {
+    "source_line": 82,
+    "text": "  [OK]          tick            6   reports failure when the seen-keys write ..."
+  },
+  {
+    "source_line": 93,
+    "text": "  [OK]          tick            7   dispatches due candidate to success."
+  },
+  {
+    "source_line": 108,
+    "text": "  [OK]          tick            8   stale snapshot cannot start a replacement."
+  },
+  {
+    "source_line": 123,
+    "text": "  [OK]          tick            9   stale snapshot rejection cannot fail a re..."
+  },
+  {
+    "source_line": 133,
+    "text": "  [OK]          tick           10   completes wake on durable acceptance."
+  },
+  {
+    "source_line": 145,
+    "text": "  [OK]          tick           11   marks unsupported candidate failed."
+  },
+  {
+    "source_line": 159,
+    "text": "  [OK]          tick           12   reschedules recurring candidate after sig..."
+  },
+  {
+    "source_line": 171,
+    "text": "  [OK]          tick           13   dispatches recurring candidate to next due."
+  },
+  {
+    "source_line": 193,
+    "text": "  [OK]          tick           14   stamps wakes from the clock and anchors r..."
+  },
+  {
+    "source_line": 204,
+    "text": "  [OK]          tick           15   dispatches every recurring occurrence."
+  },
+  {
+    "source_line": 215,
+    "text": "  [OK]          tick           16   sub-tick interval fires once per tick."
+  },
+  {
+    "source_line": 225,
+    "text": "  [OK]          tick           17   marks terminal dispatch rejection failed."
+  },
+  {
+    "source_line": 265,
+    "text": "  [OK]          tick           18   dispatch failure scope preserves only fut..."
+  },
+  {
+    "source_line": 280,
+    "text": "  [OK]          tick           19   retries same occurrence without blocking ..."
+  },
+  {
+    "source_line": 349,
+    "text": "  [OK]          tick           20   pending settlements replay only the origi..."
+  },
+  {
+    "source_line": 371,
+    "text": "  [OK]          tick           21   new pending returns before later candidat..."
+  },
+  {
+    "source_line": 387,
+    "text": "  [OK]          tick           22   pending stamp and input survive later tic..."
+  },
+  {
+    "source_line": 406,
+    "text": "  [OK]          tick           23   pending authority read error does not blo..."
+  },
+  {
+    "source_line": 422,
+    "text": "  [OK]          tick           24   pending supersession cannot settle a new ..."
+  },
+  {
+    "source_line": 431,
+    "text": "  [OK]          tick           25   pending finish clock propagates actual ca..."
+  },
+  {
+    "source_line": 437,
+    "text": "  [OK]          tick           26   occurrence decode rejects tampered facts."
+  },
+  {
+    "source_line": 451,
+    "text": "  [OK]          tick           27   defers held wake without advancing."
+  },
+  {
+    "source_line": 492,
+    "text": "  [OK]          status          0   tracks liveness snapshot."
+  },
+  {
+    "source_line": 496,
+    "text": "  [OK]          status          1   cross-domain updates are lossless."
+  },
+  {
+    "source_line": 498,
+    "text": "Test Successful in 0.669s. 30 tests run."
+  },
+  {
+    "source_line": 505,
+    "text": "Testing `Schedule_consumer_dispatch'."
+  },
+  {
+    "source_line": 516,
+    "text": "  [OK]          keeper_wake          0   board post schedule is rejected with..."
+  },
+  {
+    "source_line": 540,
+    "text": "  [OK]          keeper_wake          1   absent owner fails one occurrence an..."
+  },
+  {
+    "source_line": 553,
+    "text": "  [OK]          keeper_wake          2   keeper wake for a not-current owner ..."
+  },
+  {
+    "source_line": 619,
+    "text": "  [OK]          keeper_wake          3   keeper wake records wake receipt."
+  },
+  {
+    "source_line": 630,
+    "text": "  [OK]          keeper_wake          4   routed schedule carries occurrence d..."
+  },
+  {
+    "source_line": 644,
+    "text": "  [OK]          keeper_wake          5   a recurring wake supersedes the earl..."
+  },
+  {
+    "source_line": 657,
+    "text": "  [OK]          keeper_wake          6   supersede withdraws the wake a faile..."
+  },
+  {
+    "source_line": 665,
+    "text": "  [OK]          keeper_wake          7   one call cancels every pending occur..."
+  },
+  {
+    "source_line": 675,
+    "text": "  [OK]          keeper_wake          8   reused schedule id does not match pr..."
+  },
+  {
+    "source_line": 681,
+    "text": "  [OK]          keeper_wake          9   keeper purge cancels future schedule..."
+  },
+  {
+    "source_line": 695,
+    "text": "  [OK]          keeper_wake         10   cancelled schedule enqueued wake lea..."
+  },
+  {
+    "source_line": 708,
+    "text": "  [OK]          keeper_wake         11   schedule cancel tool withdraws the q..."
+  },
+  {
+    "source_line": 723,
+    "text": "  [OK]          keeper_wake         12   schedule cancel mid-turn withdraws t..."
+  },
+  {
+    "source_line": 735,
+    "text": "  [OK]          keeper_wake         13   retirement cancel withdraws the wake..."
+  },
+  {
+    "source_line": 744,
+    "text": "  [OK]          keeper_wake         14   dispatch drops a wake withdrawn afte..."
+  },
+  {
+    "source_line": 750,
+    "text": "  [OK]          keeper_wake         15   withdrawal skips an entry a turn set..."
+  },
+  {
+    "source_line": 757,
+    "text": "  [OK]          keeper_wake         16   owner absent pending demand is drain..."
+  },
+  {
+    "source_line": 767,
+    "text": "  [OK]          keeper_wake         17   shutdown fence rejects schedule inta..."
+  },
+  {
+    "source_line": 803,
+    "text": "  [OK]          keeper_wake         18   fenced purge settles on the first ti..."
+  },
+  {
+    "source_line": 817,
+    "text": "  [OK]          keeper_wake         19   delivered purge releases only its ow..."
+  },
+  {
+    "source_line": 826,
+    "text": "  [OK]          keeper_wake         20   shutdown fence covers direct durable..."
+  },
+  {
+    "source_line": 835,
+    "text": "  [OK]          keeper_wake         21   transferred retry uses resolved owne..."
+  },
+  {
+    "source_line": 842,
+    "text": "  [OK]          keeper_wake         22   shutdown join waits for in-flight sc..."
+  },
+  {
+    "source_line": 853,
+    "text": "  [OK]          keeper_wake         23   keeper wake durable state failure re..."
+  },
+  {
+    "source_line": 869,
+    "text": "  [OK]          keeper_wake         24   cancelled occurrence recovery does n..."
+  },
+  {
+    "source_line": 885,
+    "text": "  [OK]          keeper_wake         25   terminal retry repairs missing stimu..."
+  },
+  {
+    "source_line": 892,
+    "text": "  [OK]          keeper_wake         26   terminal retry requires acceptance c..."
+  },
+  {
+    "source_line": 901,
+    "text": "  [OK]          keeper_wake         27   retry before terminal reconciliation..."
+  },
+  {
+    "source_line": 913,
+    "text": "  [OK]          keeper_wake         28   an unstarted owner accepts the occur..."
+  },
+  {
+    "source_line": 929,
+    "text": "  [OK]          keeper_wake         29   an interval wake to an unstarted own..."
+  },
+  {
+    "source_line": 943,
+    "text": "  [OK]          keeper_wake         30   interval wake retries acceptance com..."
+  },
+  {
+    "source_line": 957,
+    "text": "  [OK]          keeper_wake         31   completed interval wake retries acce..."
+  },
+  {
+    "source_line": 968,
+    "text": "  [OK]          keeper_wake         32   due wake bypasses proactive policy."
+  },
+  {
+    "source_line": 978,
+    "text": "  [OK]          keeper_wake         33   dashboard resolver refreshes target ..."
+  },
+  {
+    "source_line": 1001,
+    "text": "  [OK]          keeper_wake         34   dashboard observes committed complet..."
+  },
+  {
+    "source_line": 1018,
+    "text": "  [OK]          keeper_wake         35   dashboard observes committed failure..."
+  },
+  {
+    "source_line": 1035,
+    "text": "  [OK]          keeper_wake         36   dashboard observes committed cancell..."
+  },
+  {
+    "source_line": 1053,
+    "text": "  [OK]          keeper_wake         37   dashboard observes committed transfe..."
+  },
+  {
+    "source_line": 1065,
+    "text": "  [OK]          keeper_wake         38   keeper wake queue evidence rejects s..."
+  },
+  {
+    "source_line": 1077,
+    "text": "  [OK]          keeper_wake         39   dashboard live supported non-termina..."
+  },
+  {
+    "source_line": 1087,
+    "text": "  [OK]          keeper_wake         40   dashboard live supported non-termina..."
+  },
+  {
+    "source_line": 1100,
+    "text": "  [OK]          keeper_wake         41   keeper wake ledger failure is retrya..."
+  },
+  {
+    "source_line": 1112,
+    "text": "  [OK]          keeper_wake         42   unattributed ledger damage does not ..."
+  },
+  {
+    "source_line": 1121,
+    "text": "  [OK]          keeper_wake         43   dashboard keeps unattributed damage ..."
+  },
+  {
+    "source_line": 1133,
+    "text": "  [OK]          keeper_wake         44   dashboard row names the occurrence t..."
+  },
+  {
+    "source_line": 1144,
+    "text": "  [OK]          keeper_wake         45   dashboard hold keeps the time a fail..."
+  },
+  {
+    "source_line": 1188,
+    "text": "  [OK]          keeper_wake         46   startup recovery retries before admi..."
+  },
+  {
+    "source_line": 1220,
+    "text": "  [OK]          keeper_wake         47   successful recovery survives a norma..."
+  },
+  {
+    "source_line": 1257,
+    "text": "  [OK]          keeper_wake         48   maintenance retains failed settlemen..."
+  },
+  {
+    "source_line": 1291,
+    "text": "  [OK]          keeper_wake         49   maintenance retains pending through ..."
+  },
+  {
+    "source_line": 1302,
+    "text": "  [OK]          keeper_wake         50   a runner tick refreshes the cached s..."
+  },
+  {
+    "source_line": 1313,
+    "text": "  [OK]          keeper_wake         51   dashboard projects quarantined and u..."
+  },
+  {
+    "source_line": 1324,
+    "text": "  [OK]          keeper_wake         52   keeper wake rejects invalid keeper n..."
+  },
+  {
+    "source_line": 1325,
+    "text": "  [OK]          keeper_wake         53   keeper wake receipt decoder rejects ..."
+  },
+  {
+    "source_line": 1335,
+    "text": "  [OK]          keeper_wake         54   consumed grant without outcome stays..."
+  },
+  {
+    "source_line": 1347,
+    "text": "  [OK]          keeper_wake         55   consumed grant with outcome retires ..."
+  },
+  {
+    "source_line": 1357,
+    "text": "  [OK]          keeper_wake         56   projection failure keeps spent repla..."
+  },
+  {
+    "source_line": 1369,
+    "text": "  [OK]          keeper_wake         57   rejection projection precedes turn i..."
+  },
+  {
+    "source_line": 1377,
+    "text": "  [OK]          keeper_wake         58   consumed occurrence retry does not e..."
+  },
+  {
+    "source_line": 1387,
+    "text": "  [OK]          keeper_wake         59   unconsumed grant replay stays action..."
+  },
+  {
+    "source_line": 1389,
+    "text": "Test Successful in 3.128s. 60 tests run."
+  },
+  {
+    "source_line": 1396,
+    "text": "Testing `Schedule_tool_wiring'."
+  },
+  {
+    "source_line": 1408,
+    "text": "  [OK]          wiring          0   cancel ledger write failure retains withd..."
+  },
+  {
+    "source_line": 1422,
+    "text": "  [OK]          wiring          1   cancel finds old target and all instances."
+  },
+  {
+    "source_line": 1433,
+    "text": "  [OK]          wiring          2   Keeper-to-Lane cancellation withdraws old..."
+  },
+  {
+    "source_line": 1448,
+    "text": "  [OK]          wiring          3   unfinished transfer refuses cancel then r..."
+  },
+  {
+    "source_line": 1459,
+    "text": "  [OK]          wiring          4   cancel refuses corrupt durable owner."
+  },
+  {
+    "source_line": 1469,
+    "text": "  [OK]          wiring          5   cancel refuses discovery failure."
+  },
+  {
+    "source_line": 1482,
+    "text": "  [OK]          wiring          6   partial cancel preserves durable effects ..."
+  },
+  {
+    "source_line": 1493,
+    "text": "  [OK]          wiring          7   note distinguishes absent schedule from u..."
+  },
+  {
+    "source_line": 1503,
+    "text": "  [OK]          wiring          8   note reports actual primary write failure."
+  },
+  {
+    "source_line": 1535,
+    "text": "  [OK]          wiring          9   flat tool surface."
+  },
+  {
+    "source_line": 1552,
+    "text": "  [OK]          wiring         10   create list get cancel."
+  },
+  {
+    "source_line": 1565,
+    "text": "  [OK]          wiring         11   update keeps public id and replaces insta..."
+  },
+  {
+    "source_line": 1577,
+    "text": "  [OK]          wiring         12   update omitted kind keeps daily."
+  },
+  {
+    "source_line": 1587,
+    "text": "  [OK]          wiring         13   update omitted kind keeps one-shot."
+  },
+  {
+    "source_line": 1599,
+    "text": "  [OK]          wiring         14   update requires id and active row."
+  },
+  {
+    "source_line": 1639,
+    "text": "  [OK]          wiring         15   content edit preserves time and recurrence."
+  },
+  {
+    "source_line": 1652,
+    "text": "  [OK]          wiring         16   content edit keeps the stored expiry."
+  },
+  {
+    "source_line": 1663,
+    "text": "  [OK]          wiring         17   content edit keeps a concurrent retime."
+  },
+  {
+    "source_line": 1679,
+    "text": "  [OK]          wiring         18   due edit keeps a concurrent daily-to-inte..."
+  },
+  {
+    "source_line": 1695,
+    "text": "  [OK]          wiring         19   due edit keeps a concurrent interval-to-o..."
+  },
+  {
+    "source_line": 1702,
+    "text": "  [OK]          wiring         20   results survive the checkpoint encoder."
+  },
+  {
+    "source_line": 1714,
+    "text": "  [OK]          wiring         21   creation boundary owns result delivery de..."
+  },
+  {
+    "source_line": 1724,
+    "text": "  [OK]          wiring         22   update keeps the creator's result delivery."
+  },
+  {
+    "source_line": 1734,
+    "text": "  [OK]          wiring         23   get recurring schedule after accept advance."
+  },
+  {
+    "source_line": 1752,
+    "text": "  [OK]          wiring         24   create accepts explicit ISO-8601 offset."
+  },
+  {
+    "source_line": 1762,
+    "text": "  [OK]          wiring         25   removed convenience input does not synthe..."
+  },
+  {
+    "source_line": 1774,
+    "text": "  [OK]          wiring         26   unregistered wake target rejected."
+  },
+  {
+    "source_line": 1776,
+    "text": "  [OK]          wiring         27   unknown payload kind rejected by the vali..."
+  },
+  {
+    "source_line": 1779,
+    "text": "  [OK]          wiring         28   unknown field rejected before persistence."
+  },
+  {
+    "source_line": 1783,
+    "text": "  [OK]          wiring         29   empty call rejected by name."
+  },
+  {
+    "source_line": 1791,
+    "text": "  [OK]          wiring         30   every declared field still creates."
+  },
+  {
+    "source_line": 1799,
+    "text": "  [OK]          wiring         31   payload contracts are schema only."
+  },
+  {
+    "source_line": 1809,
+    "text": "  [OK]          wiring         32   keeper wake schema validation."
+  },
+  {
+    "source_line": 1827,
+    "text": "  [OK]          wiring         33   lane act schedule is created from its own..."
+  },
+  {
+    "source_line": 1847,
+    "text": "  [OK]          wiring         34   due signal and dashboard projection."
+  },
+  {
+    "source_line": 1856,
+    "text": "  [OK]          wiring         35   schedule store error is explicit."
+  },
+  {
+    "source_line": 1869,
+    "text": "  [OK]          wiring         36   projection reports read failure as unknown."
+  },
+  {
+    "source_line": 1877,
+    "text": "  [OK]          wiring         37   tools response no longer carries the proj..."
+  },
+  {
+    "source_line": 1886,
+    "text": "  [OK]          wiring         38   Keeper wake target validation is fenced."
+  },
+  {
+    "source_line": 1896,
+    "text": "  [OK]          wiring         39   Keeper wake creation respects shutdown fe..."
+  },
+  {
+    "source_line": 1906,
+    "text": "  [OK]          wiring         40   tool response carries structured recurrence."
+  },
+  {
+    "source_line": 1917,
+    "text": "  [OK]          wiring         41   create refuses a due time behind the clock."
+  },
+  {
+    "source_line": 1927,
+    "text": "  [OK]          wiring         42   the current second is not past."
+  },
+  {
+    "source_line": 1939,
+    "text": "  [OK]          wiring         43   cancel refusal says the state and the las..."
+  },
+  {
+    "source_line": 1961,
+    "text": "  [OK]          wiring         44   list reads the owner it is asked for."
+  },
+  {
+    "source_line": 1971,
+    "text": "  [OK]          wiring         45   list pages by schedule_id."
+  },
+  {
+    "source_line": 1985,
+    "text": "  [OK]          wiring         46   an unnamed caller names the actor itself."
+  },
+  {
+    "source_line": 2001,
+    "text": "  [OK]          wiring         47   the recorded actor is the caller, not an ..."
+  },
+  {
+    "source_line": 2014,
+    "text": "  [OK]          wiring         48   a keeper cannot cancel another keeper's s..."
+  },
+  {
+    "source_line": 2026,
+    "text": "  [OK]          wiring         49   an update keeps the row's actors and its ..."
+  },
+  {
+    "source_line": 2042,
+    "text": "  [OK]          wiring         50   recipient edit rechecks the current target."
+  },
+  {
+    "source_line": 2060,
+    "text": "  [OK]          wiring         51   locked cancel refuses a former recipient ..."
+  },
+  {
+    "source_line": 2070,
+    "text": "  [OK]          wiring         52   locked replacement uses the current sched..."
+  },
+  {
+    "source_line": 2086,
+    "text": "  [OK]          wiring         53   a named caller is the actor, not the argu..."
+  },
+  {
+    "source_line": 2101,
+    "text": "  [OK]          wiring         54   a call gives exactly one due input."
+  },
+  {
+    "source_line": 2116,
+    "text": "  [OK]          wiring         55   create refuses an interval below the runn..."
+  },
+  {
+    "source_line": 2125,
+    "text": "  [OK]          wiring         56   due_in_sec counts from the dispatch clock."
+  },
+  {
+    "source_line": 2135,
+    "text": "  [OK]          wiring         57   a calendar first due counts from dispatch..."
+  },
+  {
+    "source_line": 2146,
+    "text": "  [OK]          wiring         58   update refuses a due time moved behind th..."
+  },
+  {
+    "source_line": 2158,
+    "text": "  [OK]          wiring         59   a limit outside its range is refused."
+  },
+  {
+    "source_line": 2175,
+    "text": "  [OK]          wiring         60   a cursor belongs to the filters that issu..."
+  },
+  {
+    "source_line": 2186,
+    "text": "  [OK]          wiring         61   status active lists every status that is ..."
+  },
+  {
+    "source_line": 2198,
+    "text": "  [OK]          wiring         62   a mistyped deciding argument is refused."
+  },
+  {
+    "source_line": 2205,
+    "text": "  [OK]          wiring         63   declared bounds match the handler."
+  },
+  {
+    "source_line": 2207,
+    "text": "Test Successful in 1.106s. 64 tests run."
+  },
+  {
+    "source_line": 2213,
+    "text": "Testing `Lane_addon_scheduled_act'."
+  },
+  {
+    "source_line": 2224,
+    "text": "  [OK]          masc.lane_act          0   a due occurrence hands its action ..."
+  },
+  {
+    "source_line": 2234,
+    "text": "  [OK]          masc.lane_act          1   every due occurrence dispatches, w..."
+  },
+  {
+    "source_line": 2244,
+    "text": "  [OK]          masc.lane_act          2   a worker that exits ends the sched..."
+  },
+  {
+    "source_line": 2259,
+    "text": "  [OK]          masc.lane_act          3   a receipt a dead process left ends..."
+  },
+  {
+    "source_line": 2268,
+    "text": "  [OK]          masc.lane_act          4   a missing declaration or an absent..."
+  },
+  {
+    "source_line": 2276,
+    "text": "  [OK]          masc.lane_act          5   a redelivered occurrence returns t..."
+  },
+  {
+    "source_line": 2284,
+    "text": "  [OK]          masc.lane_act          6   removing a Keeper cancels the Lane..."
+  },
+  {
+    "source_line": 2286,
+    "text": "Test Successful in 0.248s. 7 tests run."
+  }
+]

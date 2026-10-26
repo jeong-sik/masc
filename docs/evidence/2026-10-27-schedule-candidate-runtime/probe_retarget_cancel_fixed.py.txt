@@ -1,0 +1,354 @@
+#!/usr/bin/env python3
+"""F1 positive regression on an explicitly identified isolated native candidate.
+
+Preparation does not run the probe. A run owns only a new temporary workspace,
+loopback listener, synthetic credential and its child server process.
+"""
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import socket
+import subprocess
+import tempfile
+import time
+import urllib.error
+import urllib.request
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--output', type=Path, required=True)
+parser.add_argument('--binary', type=Path, required=True)
+parser.add_argument('--image-reference', required=True)
+parser.add_argument('--source-commit', required=True, help='Expected executed binary_commit, full 40 hex; never inferred from checkout HEAD')
+parser.add_argument('--expected-sha256', required=True)
+parser.add_argument('--producer-workflow', required=True)
+parser.add_argument('--producer-run-id', required=True)
+parser.add_argument('--producer-ref', required=True)
+parser.add_argument('--producer-head', required=True, help='Workflow execution head, full 40 hex; may differ from its source input')
+parser.add_argument('--producer-source-ref', required=True, help='Exact source input supplied to the producer workflow')
+parser.add_argument('--source-check-receipt', type=Path, help='Optional JSON with source_commit and executable_sha256; only these fields and original digest are retained')
+parser.add_argument('--runtime-id', default='ollama_cloud.deepseek-v4.1-flash')
+args = parser.parse_args()
+repo = Path(__file__).resolve().parents[2]
+output = args.output.resolve()
+if not output.is_relative_to(repo / 'artifacts'):
+    parser.error('--output must be a fresh directory under this checkout artifacts/')
+if output.exists() and any(output.iterdir()):
+    parser.error('--output must be empty; existing captures are never overwritten')
+def digest_text(value, length):
+    return len(value) == length and all(c in '0123456789abcdef' for c in value)
+if not digest_text(args.source_commit, 40) or not digest_text(args.producer_head, 40):
+    parser.error('source commit and producer head must be full lowercase 40-hex values')
+if not digest_text(args.expected_sha256, 64):
+    parser.error('--expected-sha256 must be a full lowercase SHA-256')
+output.mkdir(parents=True, exist_ok=True)
+binary = args.binary.resolve(strict=True)
+records = []
+checks = []
+
+
+def save():
+    (output / 'api-records.json').write_text(json.dumps(records, indent=2) + '\n')
+    (output / 'checks.json').write_text(json.dumps(checks, indent=2) + '\n')
+
+
+def check(name, condition, detail=None):
+    checks.append({'name': name, 'passed': bool(condition), 'detail': detail})
+    save()
+    print(('PASS ' if condition else 'FAIL ') + name, flush=True)
+    if not condition:
+        raise RuntimeError(name)
+
+
+def command(argv, env):
+    result = subprocess.run(argv, env=env, capture_output=True, text=True)
+    if result.returncode:
+        raise RuntimeError(str(argv[:2]) + ' failed with exit ' + str(result.returncode) + '; credential-bearing command output was not retained')
+    # login output contains a credential and is intentionally never retained.
+    return result.stdout
+
+
+def request(path, token=None, body=None):
+    headers = {'Content-Type': 'application/json'}
+    if token:
+        headers['Authorization'] = 'Bearer ' + token
+    req = urllib.request.Request(url + path, headers=headers,
+          data=None if body is None else json.dumps(body).encode())
+    try:
+        with urllib.request.urlopen(req, timeout=20) as response:
+            status, data = response.status, json.load(response)
+    except urllib.error.HTTPError as error:
+        status = error.code
+        raw = error.read().decode()
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            data = {'body': raw}
+    records.append({'path': path, 'body': body, 'status': status, 'response': data})
+    save()
+    return status, data
+
+
+sessions = {}
+request_id = 0
+
+
+def mcp_roundtrip(token, payload, session=None):
+    headers = {'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream',
+               'Authorization': 'Bearer ' + token, 'Mcp-Protocol-Version': '2025-11-25'}
+    if session:
+        headers['Mcp-Session-Id'] = session
+    req = urllib.request.Request(url + '/mcp', headers=headers, data=json.dumps(payload).encode())
+    try:
+        response = urllib.request.urlopen(req, timeout=30)
+    except urllib.error.HTTPError as error:
+        response = error
+    with response:
+        raw = response.read().decode()
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            events = [json.loads(line[5:].strip()) for line in raw.splitlines() if line.startswith('data:')]
+            data = next((event for event in events if event.get('id') == payload.get('id')), {'raw': raw})
+        records.append({'path': '/mcp', 'body': payload, 'status': response.status, 'response': data})
+        save()
+        return response.status, data, response.headers.get('Mcp-Session-Id')
+
+
+def tool(name, body, token=None):
+    global request_id
+    selected = admin_token if token is None else token
+    if selected not in sessions:
+        request_id += 1
+        status, result, session = mcp_roundtrip(selected, {'jsonrpc': '2.0', 'id': request_id,
+            'method': 'initialize', 'params': {'protocolVersion': '2025-11-25',
+            'capabilities': {}, 'clientInfo': {'name': 'schedule-api-audit', 'version': '1'}}})
+        if status != 200 or not session or 'error' in result:
+            raise RuntimeError('MCP initialize failed: ' + json.dumps(result))
+        sessions[selected] = session
+    request_id += 1
+    status, result, _ = mcp_roundtrip(selected, {'jsonrpc': '2.0', 'id': request_id,
+        'method': 'tools/call', 'params': {'name': name, 'arguments': body}}, sessions[selected])
+    if 'error' in result:
+        data = {'isError': True, 'data': result['error']}
+    else:
+        reply = result.get('result', {})
+        payload = reply.get('structuredContent')
+        if payload is None:
+            blocks = reply.get('content', [])
+            text = next((block['text'] for block in blocks if block.get('type') == 'text'), '')
+            try:
+                payload = json.loads(text)
+            except json.JSONDecodeError:
+                payload = {'text': text}
+        data = {'isError': reply.get('isError', False), 'data': payload}
+    print(name, status, 'isError=' + str(data['isError']), flush=True)
+    return status, data
+
+
+def unwrap(result):
+    if isinstance(result, dict) and isinstance(result.get('data'), dict):
+        return result['data']
+    if isinstance(result, dict) and isinstance(result.get('message'), str):
+        try:
+            decoded = json.loads(result['message'])
+            return decoded if isinstance(decoded, dict) else result
+        except json.JSONDecodeError:
+            return result
+    return result
+
+
+runtime_fixture_path = 'scripts/fixtures/release-evidence/runtime.toml'
+# The candidate's source determines its fixture; a moving checkout HEAD does not.
+runtime_fixture = subprocess.check_output(['git', '-C', str(repo), 'show',
+    args.source_commit + ':' + runtime_fixture_path])
+source_check = None
+if args.source_check_receipt:
+    raw_receipt = args.source_check_receipt.resolve(strict=True).read_bytes()
+    receipt = json.loads(raw_receipt)
+    source_check = {'original_sha256': hashlib.sha256(raw_receipt).hexdigest(),
+        'original_size_bytes': len(raw_receipt),
+        'selection': {'source_commit': receipt['source_commit'],
+                      'executable_sha256': receipt['executable_sha256']},
+        'transformation': 'Only two identity fields selected; original receipt bytes are not copied.'}
+    if source_check['selection'] != {'source_commit': args.source_commit,
+                                    'executable_sha256': args.expected_sha256}:
+        parser.error('source-check receipt does not match explicit candidate source/hash')
+metadata = {'requested_source': args.source_commit,
+            'requested_source_meaning': 'explicit expected candidate binary_commit, not checkout HEAD',
+            'harness_checkout_head': subprocess.check_output(['git', '-C', str(repo), 'rev-parse', 'HEAD'], text=True).strip(),
+            'controller_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+            'executable_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
+            'expected_executable_sha256': args.expected_sha256,
+            'binary': str(binary), 'scope': 'isolated candidate, not operating installation',
+            'producer': {'workflow': args.producer_workflow, 'run_id': args.producer_run_id,
+                         'execution_head': args.producer_head, 'ref': args.producer_ref,
+                         'source_input': args.producer_source_ref,
+                         'basis': 'caller-provided; this probe never queries CI'},
+            'source_check_receipt': source_check,
+            'runtime_fixture': {'source_commit': args.source_commit, 'path': runtime_fixture_path,
+                                'sha256': hashlib.sha256(runtime_fixture).hexdigest()},
+            'model_provider': 'source-bound dead loopback fixture, autonomous disabled, manual/create_only/paused owners',
+            'actor_scope': 'one named authenticated admin (automated actor), not Operator_caller or named non-admin ownership proof',
+            'not_proven': ['real model execution', 'destination delivery', 'TUI execution', 'fault recovery',
+                           'multi-hop transfer cancellation', 'all possible owners/races', 'production installation']}
+(output / 'provenance.json').write_text(json.dumps(metadata, indent=2) + '\n')
+check('candidate file hash matches explicit expected hash', metadata['executable_sha256'] == args.expected_sha256)
+with tempfile.TemporaryDirectory(prefix='masc-schedule-api-') as directory:
+    base = Path(directory).resolve()
+    env = {key: value for key, value in os.environ.items()
+           if key in ['PATH', 'HOME', 'LANG', 'LC_ALL', 'TMPDIR']}
+    env.update(MASC_BASE_PATH=str(base), MASC_KEEPER_AUTONOMOUS_ENABLED='false')
+    command([str(binary), 'init', '--base-path', str(base)], env)
+    (base / '.masc/config/runtime.toml').write_bytes(runtime_fixture)
+    command([str(binary), 'sandbox-image', 'promote', '--base-path', str(base),
+             '--runtime', 'apple_container', 'base', args.image_reference], env)
+    metadata['existing_image_reference'] = args.image_reference
+    with socket.socket() as sock:
+        sock.bind(('127.0.0.1', 0))
+        port = sock.getsockname()[1]
+    url = 'http://127.0.0.1:' + str(port)
+    for actor, role in [('schedule-audit-admin', 'admin')]:
+        command([str(binary), 'login', '--base-path', str(base), '--host', '127.0.0.1',
+                 '--port', str(port), '--agent', actor, '--role', role,
+                 '--client-env', 'MASC_SCHEDULE_AUDIT_TOKEN', '--no-expiry', '--json'], env)
+    admin_token = (base / '.masc/auth/schedule-audit-admin.token').read_text().strip()
+    server = None
+    with (output / 'server.log').open('w') as log:
+        try:
+            server = subprocess.Popen([str(binary), 'start', '--base-path', str(base),
+                    '--host', '127.0.0.1', '--port', str(port)], env=env, stdout=log, stderr=log, cwd=base)
+            print('Owned isolated server PID', server.pid, 'port', port, flush=True)
+            (output / 'process.json').write_text(json.dumps({'pid': server.pid, 'port': port, 'base_path': str(base)}) + '\n')
+            startup_deadline = time.monotonic() + 90
+            while True:
+                if server.poll() is not None:
+                    raise RuntimeError('isolated server exited before readiness')
+                try:
+                    _, health = request('/health?full=1')
+                    if health.get('startup', {}).get('state_ready'):
+                        break
+                except (urllib.error.URLError, TimeoutError):
+                    pass
+                if time.monotonic() >= startup_deadline:
+                    raise RuntimeError('owned startup observation deadline; see server.log')
+                time.sleep(0.2)
+            metadata['observed_build'] = health['build']
+            metadata['observed_base'] = health['paths']['effective_base_path']
+            metadata['runtime_instance_id'] = health['build']['runtime_instance_id']
+            (output / 'provenance.json').write_text(json.dumps(metadata, indent=2) + '\n')
+            check('isolated effective base path', health['paths']['effective_base_path'] == str(base))
+            check('isolated candidate executable identity', health['build']['executable_sha256'] == args.expected_sha256)
+            check('isolated candidate exact build source', health['build'].get('binary_commit') == args.source_commit, health['build'])
+            names = ['audit-retarget-a', 'audit-retarget-b']
+            for name in names:
+                status, result = tool('masc_keeper_up', {'name': name, 'create_only': True,
+                    'sandbox_profile': 'microvm', 'sandbox_image': 'base',
+                    'microvm_backend': 'apple_container', 'network_mode': 'none',
+                    'activation_mode': 'manual', 'runtime_id': args.runtime_id,
+                    'skills': {'names': []}, 'instructions': 'Manual isolated schedule cancellation probe. Do not start.'})
+                check('manual Keeper registered ' + name, status == 200 and result.get('isError') is False, unwrap(result))
+                status, result = request('/api/v1/keepers/' + name + '/directive', admin_token, {'action': 'pause'})
+                check('explicit pause committed ' + name, status == 200 and result.get('ok') is True, result)
+                status, inventory = request('/api/v1/keepers/' + name + '/waiting-inventory', admin_token)
+                check('authoritative paused owner ' + name, status == 200 and len(inventory.get('keepers', [])) == 1
+                      and inventory['keepers'][0].get('paused') is True, inventory.get('keepers'))
+            status, result = tool('masc_schedule_create', {'schedule_id': 'audit-retarget-cancel',
+                'keeper_name': names[0], 'message': 'Isolated cancelled recurring wake; do not execute.',
+                'due_in_sec': 1, 'recurrence_kind': 'interval', 'recurrence_interval_sec': 3600})
+            check('recurring declaration created', status == 200 and result.get('isError') is False, unwrap(result))
+            original = unwrap(result).get('schedule', unwrap(result))
+            observation_deadline = time.monotonic() + 45
+            while True:
+                if server.poll() is not None:
+                    raise RuntimeError('owned server exited while observing queue')
+                status, inventory = request('/api/v1/keepers/' + names[0] + '/waiting-inventory', admin_token)
+                if status != 200:
+                    raise RuntimeError('waiting inventory HTTP ' + str(status))
+                rows = [row for row in inventory.get('rows', []) if row.get('source') == 'event_queue_pending'
+                        and row.get('detail', {}).get('payload_kind') == 'schedule_due']
+                if rows:
+                    break
+                if time.monotonic() >= observation_deadline:
+                    (output / 'inventory-before-timeout.json').write_text(json.dumps(inventory, indent=2))
+                    raise RuntimeError('owned queue observation deadline, not a cancellation failure')
+                time.sleep(1)
+            check('original exact occurrence is pending at A', len(rows) == 1
+                  and bool(rows[0].get('detail', {}).get('post_id'))
+                  and bool(rows[0].get('detail', {}).get('source_ref'))
+                  and bool(rows[0].get('detail', {}).get('source_incarnation')), rows)
+            before = rows[0]['detail']
+            (output / 'inventory-before.json').write_text(json.dumps(inventory, indent=2))
+            status, result = tool('masc_schedule_get', {'schedule_id': 'audit-retarget-cancel'})
+            before_request = unwrap(result).get('schedule', unwrap(result))
+            check('dispatch succeeded before retarget', status == 200 and result.get('isError') is False
+                  and before_request.get('last_wake', {}).get('status') == 'succeeded'
+                  and before_request.get('last_wake', {}).get('schedule_instance_id') == original.get('schedule_instance_id')
+                  and before_request.get('last_wake', {}).get('detail', {}).get('post_id') == before['post_id'], unwrap(result))
+            (output / 'schedule-before.json').write_text(json.dumps(unwrap(result), indent=2))
+            status, result = tool('masc_schedule_update', {'schedule_id': 'audit-retarget-cancel',
+                'keeper_name': names[1], 'message': 'Retargeted isolated wake; do not execute.'})
+            check('same authenticated admin retarget accepted', status == 200 and result.get('isError') is False, unwrap(result))
+            updated = unwrap(result).get('schedule', unwrap(result))
+            check('retarget replaces instance and changes target', updated.get('schedule_instance_id')
+                  != original.get('schedule_instance_id') and updated.get('payload_target') == 'keeper:' + names[1], updated)
+            status, result = tool('masc_schedule_cancel', {'schedule_id': 'audit-retarget-cancel',
+                'reason': 'Cancel all future work for this isolated request.'})
+            cancelled = unwrap(result).get('schedule', unwrap(result))
+            check('retargeted declaration cancelled successfully', status == 200
+                  and result.get('isError') is False and cancelled.get('status') == 'cancelled', unwrap(result))
+            after = {}
+            for name in names:
+                status, inventory = request('/api/v1/keepers/' + name + '/waiting-inventory', admin_token)
+                check('authoritative post-cancel inventory read ' + name, status == 200, None)
+                after[name] = inventory
+            (output / 'inventory-after.json').write_text(json.dumps(after, indent=2))
+            remaining = [{'owner': name, 'row': row} for name in names
+                         for row in after[name].get('rows', [])
+                         if row.get('source') == 'event_queue_pending'
+                         and row.get('detail', {}).get('post_id') == before['post_id']
+                         and row.get('detail', {}).get('source_ref') == before['source_ref']
+                         and row.get('detail', {}).get('source_incarnation') == before['source_incarnation']]
+            pending_schedule_rows = [{'owner': name, 'row': row} for name in names
+                         for row in after[name].get('rows', [])
+                         if row.get('source') == 'event_queue_pending'
+                         and row.get('detail', {}).get('payload_kind') == 'schedule_due']
+            finding = {'finding': 'F1 repair regression',
+                'positive_oracle': 'successful cancel withdraws the exact previous-instance source from both observed owners',
+                'exact_original_source_absent_after_successful_cancel': not remaining,
+                'all_schedule_due_pending_absent_at_observed_owners': not pending_schedule_rows,
+                'observed_owners': names, 'source_before': before,
+                'remaining_exact_sources': remaining, 'remaining_schedule_due_pending': pending_schedule_rows,
+                'original_instance': original.get('schedule_instance_id'),
+                'cancelled_instance': cancelled.get('schedule_instance_id'),
+                'replay_or_resume_performed': False, 'successful_external_effect_observed': False,
+                'scope_limit': 'one A-to-B retarget followed by cancel, not fleet/transfer/race coverage'}
+            (output / 'finding.json').write_text(json.dumps(finding, indent=2) + '\n')
+            for name in names:
+                check('owner remains explicitly paused after cancellation ' + name,
+                      len(after[name].get('keepers', [])) == 1 and after[name]['keepers'][0].get('paused') is True)
+                status, result = tool('masc_keeper_status', {'name': name, 'fast': True})
+                owner = unwrap(result)
+                (output / ('owner-final-status-' + name + '.json')).write_text(json.dumps(owner, indent=2) + '\n')
+                meta = owner.get('meta', {})
+                check('owner remains manual, paused and zero-turn ' + name,
+                      status == 200 and result.get('isError') is False
+                      and owner.get('activation_mode') == 'manual' and meta.get('paused') is True
+                      and meta.get('total_turns') == 0 and meta.get('last_turn_ts') == 0
+                      and 'last_runtime_attempt' in meta and meta['last_runtime_attempt'] is None, owner)
+            check('successful cancel withdraws the exact original source from A and B', not remaining, finding)
+            check('both isolated owners have no pending schedule_due work', not pending_schedule_rows, finding)
+        finally:
+            if server is not None:
+                forced_kill = False
+                server.terminate()
+                try:
+                    server.wait(timeout=15)
+                except subprocess.TimeoutExpired:
+                    forced_kill = True
+                    server.kill()
+                    server.wait()
+                (output / 'process-ended.json').write_text(json.dumps({'pid': server.pid, 'returncode': server.returncode, 'forced_kill_after_observation_deadline': forced_kill}) + '\n')
+                print('Owned isolated server stopped', server.pid, server.returncode, flush=True)
+            save()

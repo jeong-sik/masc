@@ -611,6 +611,59 @@ let test_export_cancellation_after_lock_admission_is_not_success () =
       | `Returned (Error detail) -> Alcotest.failf "lock-admitted cancellation returned an error: %s" detail
       | `Unexpected exn -> Alcotest.fail (Printexc.to_string exn)))
 
+let test_export_lane_release_failure_preserves_saved () =
+  with_base_path_env (fun env base ->
+    let module File=Masc_tui_evidence_file in
+    let module Recovery_test=Fs_compat_test_support.Publication_recovery_for_testing in
+    let directory=Filename.concat base "lane-release-export" in
+    let registry_root=Filename.concat base "local-masc" in
+    List.iter (fun path -> Unix.mkdir path 0o700) [directory;registry_root];
+    let fault=Recovery_test.lane_scope_release_fault ~owner:"tui-evidence-export"
+      ~exception_:(Failure "injected lane release") |> Result.get_ok in
+    let progress=Atomic.make File.Not_started in
+    let file=download_fixture ~base_path:base "lane release bytes" in
+    let result=Recovery_test.with_lane_scope_release_fault fault (fun () ->
+      File.For_testing.export ~fs:env#fs ~registry_root ~directory ~progress
+        ~admitted:(fun () -> Ok ()) ~open_file:None file) in
+    (match Atomic.get progress with
+     | File.Saved path ->
+       Alcotest.(check string) "lane release failure retains complete bytes"
+         "lane release bytes" (Eio.Path.load Eio.Path.(env#fs / path))
+     | File.Not_started | File.Writing _ ->
+       Alcotest.fail "lane release failure lost confirmed save");
+    match result with
+    | Error _ -> ()
+    | Ok path -> Alcotest.failf "lane release failure returned success: %s" path)
+
+let test_export_lock_release_failure_preserves_saved () =
+  with_base_path_env (fun env base ->
+    let module File=Masc_tui_evidence_file in
+    let directory=Filename.concat base "lock-release-export" in
+    let registry_root=Filename.concat base "local-masc" in
+    List.iter (fun path -> Unix.mkdir path 0o700) [directory;registry_root];
+    let lock_path=Filename.concat registry_root "tui-evidence-export.lock" in
+    let release_failure =
+      { File_lock_eio.lock_path
+      ; phase=File_lock_eio.Release_process_lock
+      ; cause={File_lock_eio.error=Unix.EIO;operation="injected_release_after_body";argument=lock_path}
+      ; cleanup_failure=None } in
+    let with_lock ~lock_path publish =
+      File_lock_eio.For_testing.with_durable_lock_observed_with_release_failure
+        ~release_failure ~lock_path publish in
+    let progress=Atomic.make File.Not_started in
+    let file=download_fixture ~base_path:base "lock release bytes" in
+    let result=File.For_testing.export ~with_lock ~fs:env#fs ~registry_root ~directory ~progress
+      ~admitted:(fun () -> Ok ()) ~open_file:None file in
+    (match Atomic.get progress with
+     | File.Saved path ->
+       Alcotest.(check string) "lock release failure retains complete bytes"
+         "lock release bytes" (Eio.Path.load Eio.Path.(env#fs / path))
+     | File.Not_started | File.Writing _ ->
+       Alcotest.fail "lock release failure lost confirmed save");
+    match result with
+    | Error _ -> ()
+    | Ok path -> Alcotest.failf "lock release failure returned success: %s" path)
+
 let http_get_evidence ~router ?token target =
   let output=Buffer.create 1024 in
   let connection=Httpun.Server_connection.create (fun reqd ->
@@ -707,6 +760,8 @@ let () =
         Alcotest.test_case "local recovery registry ignores shared temp collisions" `Quick test_export_uses_local_registry_not_shared_temp;
         Alcotest.test_case "concurrent exports serialize owner recovery" `Quick test_export_serializes_owner_reconciliation_and_publication;
         Alcotest.test_case "lock-admitted cancellation is not a successful export" `Quick test_export_cancellation_after_lock_admission_is_not_success;
+        Alcotest.test_case "lane release failure preserves confirmed save" `Quick test_export_lane_release_failure_preserves_saved;
+        Alcotest.test_case "lock release failure preserves confirmed save" `Quick test_export_lock_release_failure_preserves_saved;
         Alcotest.test_case "saving creates a private local copy with original bytes" `Quick test_download_saves_a_private_local_copy;
         Alcotest.test_case "long original filenames remain usable" `Quick test_export_preserves_long_original_filename;
         Alcotest.test_case "original text and non-image binary bytes round trip" `Quick test_download_preserves_original_bytes;

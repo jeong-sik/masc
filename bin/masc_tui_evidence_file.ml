@@ -36,7 +36,7 @@ let decode ~task_id ~verification_id ~index json =
 
 type progress = Not_started | Writing of string | Saved of string
 
-let save ~fs ~registry_root ~directory ~directory_name ~path t =
+let save ?(with_lock=File_lock_eio.with_durable_lock_observed) ~fs ~registry_root ~directory ~directory_name ~path t =
   let ( let* ) = Result.bind in
   let lock_path = Filename.concat registry_root "tui-evidence-export.lock" in
   try
@@ -70,7 +70,7 @@ let save ~fs ~registry_root ~directory ~directory_name ~path t =
               let detail = Fs_compat.Publication_recovery.lane_release_failure_to_string release_failure in
               Error (match value with Ok () -> detail | Error primary -> primary ^ "; " ^ detail)
           in
-          match File_lock_eio.with_durable_lock_observed ~lock_path publish with
+          match with_lock ~lock_path publish with
           | File_lock_eio.Lock_not_acquired error ->
             Error (File_lock_eio.durable_lock_error_to_string error)
           | File_lock_eio.Body_completed { value; release_error = None } -> value
@@ -83,14 +83,14 @@ let save ~fs ~registry_root ~directory ~directory_name ~path t =
   | Sys_error detail -> Error (path ^ ": " ^ detail)
   | Unix.Unix_error (code, _, _) -> Error (path ^ ": " ^ Unix.error_message code)
 
-let export ~fs ~registry_root ~directory ~progress ~admitted ~open_file t =
+let export_with ?with_lock ~fs ~registry_root ~directory ~progress ~admitted ~open_file t =
   let ( let* ) = Result.bind in
   let* () = admitted () in
   let directory = if Filename.is_relative directory then Filename.concat (Sys.getcwd ()) directory else directory in
   let directory_name = "masc-evidence-" ^ Random_id.uuid_v7 () in
   let path = Filename.concat (Filename.concat directory directory_name) t.name in
   Atomic.set progress (Writing path);
-  let* () = save ~fs ~registry_root ~directory ~directory_name ~path t in
+  let* () = save ?with_lock ~fs ~registry_root ~directory ~directory_name ~path t in
   Atomic.set progress (Saved path);
   match open_file with
   | None -> Ok path
@@ -98,3 +98,9 @@ let export ~fs ~registry_root ~directory ~progress ~admitted ~open_file t =
     let* () = admitted () in
     let* () = open_file path in
     Ok path
+
+let export = export_with ?with_lock:None
+
+module For_testing = struct
+  let export = export_with
+end

@@ -21,3 +21,12 @@ val export :
     their location. Never retry a write or opener on failure. Preserve the original
     basename inside a unique private directory. The file is a copy, never a
     producer path. *)
+
+module For_testing : sig
+  val export :
+    ?with_lock:(lock_path:string -> (unit -> (unit, string) result) ->
+      (unit, string) result File_lock_eio.durable_lock_observation) ->
+    fs:Eio.Fs.dir_ty Eio.Path.t -> registry_root:string -> directory:string ->
+    progress:progress Atomic.t -> admitted:(unit -> (unit, string) result) ->
+    open_file:(string -> (unit, string) result) option -> t -> (string, string) result
+end

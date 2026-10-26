@@ -9,7 +9,10 @@ import sys
 
 repo = Path(__file__).resolve().parents[1]
 evidence_path = repo / "docs/evidence/fusion-report-20260930/composition.json"
-preview_path = repo / "docs/design/fusion-report-preview.html"
+output_dir = repo / "artifacts/fusion-report-preview"
+output_dir.mkdir(parents=True, exist_ok=True)
+preview_source = repo / "docs/design/fusion-report-preview.html"
+preview_path = output_dir / "fusion-report-preview.html"
 capture = json.loads(evidence_path.read_text())
 detail = capture["capture"]
 detail_bytes = json.dumps(detail, ensure_ascii=False, separators=(",", ":")).encode()
@@ -58,7 +61,7 @@ capture["report_output"] = response["structuredContent"]
 report = next(item for item in capture["report_output"]["rows"] if item["lane_id"] == "fusion/report")
 context = next(item for item in capture["report_output"]["rows"] if item["id"] in report["related_ids"])
 fields = report["fields"]
-document = preview_path.read_text()
+document = preview_source.read_text()
 blocks = [
     ("report-body", html.escape(fields["body"])),
     ("report-lineage", html.escape(json.dumps({
@@ -80,6 +83,6 @@ if 'id="delivery-state"' in document:
     document = re.sub(r'<p id="delivery-state".*?</p>', lambda _match: delivery, document, count=1, flags=re.S)
 else:
     document = document.replace('</pre><details>', '</pre>' + delivery + '<details>', 1)
-evidence_path.write_text(json.dumps(capture, ensure_ascii=False, indent=2) + "\n")
+(output_dir / "composition.json").write_text(json.dumps(capture, ensure_ascii=False, indent=2) + "\n")
 preview_path.write_text(document)
 print("Regenerated fixture composition and report preview from the final stdio worker")

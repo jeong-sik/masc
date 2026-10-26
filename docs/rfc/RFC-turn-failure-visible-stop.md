@@ -181,7 +181,7 @@ streak(#31969)는 그대로 유지된다.
 - #31958 Linux exact-source 관찰: DNS 차단 부팅 턴에서 실패 4건 모두
   `consecutive=1`, phase `failing`으로 기록됐고 면제 로그는 0건이었다. 반복
   누적과 성공 리셋은 #32112 회귀 테스트가 고정한다. 원시 제약과 exact identity는
-  `docs/research/2026-08-31-turn-failure-visible-stop-linux-r1.md`에 남겼다.
+  `docs/evidence/research/2026-08-31-turn-failure-visible-stop-linux-r1.md`에 남겼다.
 - 재시작: 예산 store가 삭제돼 예산 리셋 악용 경로는 없어졌다. 다만 Linux
   관찰에서 persisted streak의 재등록 적용은 확인되지 않았으므로 #31969 복원
   시맨틱은 별도 후속 항목이며, 이 RFC의 구현 완료 주장에 포함하지 않는다.

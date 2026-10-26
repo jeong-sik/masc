@@ -7,7 +7,7 @@ status: Draft
 
 - 상태: Draft
 - 날짜: 2026-08-16
-- 실측 리포트: `reports/kv-cache-runtime-audit-2026-08-16.html`
+- 실측 리포트: `docs/reports/kv-cache-runtime-audit-2026-08-16.html`
 - 원본 증거: `docs/evidence/kv-cache-harness-2026-08-16.jsonl`, `~/me/memory/procedural-memory/2026-08-16-llama-server-kv-preserve-thinking-evidence-record.md`
 - 측정 도구: `scripts/bench-kv-cache.py`
 

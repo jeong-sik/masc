@@ -30,5 +30,5 @@ Changing workspace stops further effects from the old operation; it cannot undo
 an earlier server-side write.
 
 The source and synthetic-HTTP checks are recorded in
-[the B10 evidence](../../dashboard/evidence/2026-10-05-settings-runtime-workspace/README.md).
+[the B10 evidence](../evidence/dashboard/2026-10-05-settings-runtime-workspace/README.md).
 They do not establish deployment or native TUI behavior.

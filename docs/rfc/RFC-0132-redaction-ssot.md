@@ -50,7 +50,7 @@ Author: Agent-LLM-A (cron loop) on behalf of vincent
 Date: 2026-05-19
 
 Plan SSOT cross-reference:
-- `knowledge/research/2026-05-19-reverse-engineering-design-map-gap-tracking.md` Gap 2
+- `docs/research/2026-05-19-reverse-engineering-design-map-gap-tracking.md` Gap 2
 - Bundle research artifact PR #16480 §RFC B candidate
 
 Memory cross-reference:
@@ -312,7 +312,7 @@ None. RFC-0132 is a root fix. No deprecated path is created; no symptom-suppress
 
 ## 9. References
 
-- Plan SSOT: `knowledge/research/2026-05-19-reverse-engineering-design-map-gap-tracking.md` Gap 2
+- Plan SSOT: `docs/research/2026-05-19-reverse-engineering-design-map-gap-tracking.md` Gap 2
 - Bundle: PR #16480 §RFC B candidate
 - Memory: `memory/feedback_runtime_lens_boundary_carve_out.md`
 - Anti-pattern source: `instructions/software-development.md` §AI 코드 생성 안티패턴 §1

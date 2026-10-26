@@ -36,8 +36,10 @@ command output content and result values are unchanged.
   Synthetic observations show off+registered, off+connected, unobserved+registered
   and refreshed on. Mobile has no horizontal overflow. The first fixture lacked
   current Vite/CSS configuration; final captures use the actual dashboard config.
-  Screenshots/result/fixture are in
-  `dashboard/evidence/2026-10-04-browser-lane-activity/`.
+  Retained screenshots/results are in
+  [the capture bundle](../dashboard/2026-10-04-browser-lane-activity/README.md);
+  [the executable fixture](../../../dashboard/fixtures/2026-10-04-browser-lane-activity/browser-fixture.mjs)
+  is separate from captured output.
 - OCaml syntax parsing: **34 changed/new ML/MLI files pass** (`syntax.json`).
   Python scripts/fixture AST, tool TOML decoding and `git diff --check` pass.
 
@@ -61,3 +63,30 @@ execution, review of refreshed lower-stack identities, main integration and
 operator deployment remain. The operator's complete Lane UX improvement goal is
 not complete. Setup-required/unconfigured startup does not install an executor
 later through config resume; paths and that installation require a restart.
+
+## Current locations and recorded capture identity
+
+[manifest.json](manifest.json) is the immutable capture-time path/digest record. Its
+recorded paths describe the original run, rather than this checkout's current
+layout. Use [current-locations.json](current-locations.json) to locate every
+recorded entry after the repository reorganization. The sidecar's `files` keys
+are current repository-relative paths; each entry retains its original
+`recorded_path` and `recorded_sha256`.
+
+`editable_reproduction_source`, `editable_source` and `editable_document` entries
+may have changed since capture. The recorded digest is not a claim about those
+current bytes or evidence of a new run. `retained_capture` entries preserve the
+recorded bytes. No current-file digests are cached in this location index.
+
+The [reproduction source](../../../dashboard/fixtures/2026-10-04-browser-lane-activity/browser-fixture.mjs) is separate from the retained captures.
+
+From the repository root, manually verify this index, the original manifest's
+bytes, every current location and retained capture digest:
+
+```sh
+python3 scripts/check-evidence-locations.py docs/evidence/2026-10-04-browser-lane-activity/current-locations.json
+```
+
+Editable entries are location checks, not current-byte approval. Historical Git
+objects must be available locally; the checker reports an unavailable object as
+a failure instead of treating missing evidence as a pass.

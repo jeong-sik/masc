@@ -9,7 +9,7 @@ status: Draft
 - Author: vincent (+ Claude Opus 4.8)
 - Created: 2026-06-24
 - Related: RFC-0020 (hint signal / data channel separation), RFC-0252 / RFC-0266 (masc_fusion — the existing instance of this pattern), RFC-0286 (exec / keeper boundary ownership), RFC-0287 (ws-direct, MASC-owned stack)
-- Research basis: `knowledge/research/2026-06-24-keeper-background-wait-tool.md`
+- Research basis: `docs/research/2026-06-24-keeper-background-wait-tool.md`
 - Implementation PRs: (Phase 1 = this RFC's PR)
 
 ## 1. Summary

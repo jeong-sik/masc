@@ -2602,7 +2602,7 @@ X-Title = "MASC"
 # Twelve ids probed live on 2026-09-10; every one answered HTTP 200 on a plain
 # completion and eleven of twelve on tool_choice=required (the exception,
 # qwen3.8-max, is declared in the catalog row, not here). Evidence:
-# evidence/task-openrouter-support/PROBE-SUMMARY.md.
+# docs/evidence/task-openrouter-support/PROBE-SUMMARY.md.
 #
 # Each entry declares reasoning-effort because these rows resolve to the
 # reasoning_effort thinking dialect, whose only wire control *is* the effort
@@ -2835,7 +2835,7 @@ reasoning-effort = "high"
 
 # ── OpenRouter free models ───────────────────────────────────────────────────
 # Two selected ids passed basic and tool-call probes. See
-# evidence/task-openrouter-free-models/probe-results.json and gen_rows.py.
+# docs/evidence/task-openrouter-free-models/probe-results.json and gen_rows.py.
 # These are available bindings; lane placement remains operator configuration.
 
 [models.openrouter-free-north-mini-code]

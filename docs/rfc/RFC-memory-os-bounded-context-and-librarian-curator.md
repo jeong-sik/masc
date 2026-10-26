@@ -8,7 +8,7 @@ status: Draft
 - Status: Draft
 - Date: 2026-07-31
 - 관련 이슈: #26527, #26530, #26531, #26532(머지), #26533
-- 관련 문서: `reports/MASC-LIBRARIAN-MEMORY-OS-ADVERSARIAL-AUDIT-2026-07-30.md` (P0-5, P1-1)
+- 관련 문서: `docs/reports/MASC-LIBRARIAN-MEMORY-OS-ADVERSARIAL-AUDIT-2026-07-30.md` (P0-5, P1-1)
 
 ## 1. 배경 — 2026-07-31 사고가 드러낸 구조
 

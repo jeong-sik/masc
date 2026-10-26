@@ -321,5 +321,5 @@ catalog found"*). 즉 §8 이 "회수를 보고 판단하자" 던 왕복 하나�
 ## 9. 근거
 
 - 실측과 외부 대조: `docs/research/2026-09-04-skill-activation-research-r1.md`
-- 근거 기록: `docs/research/2026-09-04-skill-activation-evidence-record.md`
+- 근거 기록: `docs/evidence/research/2026-09-04-skill-activation-evidence-record.md`
 - 이슈: `#32944` (교환), `#32953` (고장난 조합), `#31324` (참조 바이트)

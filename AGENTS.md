@@ -7,6 +7,7 @@
 - System, developer, and explicit user instructions still take precedence. The execution protocol does not relax safety, scope, destructive-action, or evidence-honesty rules.
 - Follow the concrete contributor procedures in `docs/guides/CONTRIBUTOR-WORKFLOW.md` after reading the constitution.
 - Before GitHub PR review or merge, read `docs/guides/NATIVE-GITHUB-STACKS.md`. Inspect REST `stack` metadata; a non-main `baseRefName` alone does not imply a parent-merge blocker.
+- Follow `docs/guides/WORKSPACE-STORAGE.md` when placing research, evidence, reports or generated output.
 - Keep this file as a thin entrypoint. Do not duplicate the full constitution here.
 
 ## Keeper Runtime Boundary

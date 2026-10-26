@@ -13,4 +13,4 @@ pnpm --dir dashboard exec tsc --noEmit --pretty false
 pnpm --dir dashboard exec eslint src/lib/browser-lane-activity.ts src/lib/browser-lane-activity.test.ts
 ```
 
-Raw logs are retained byte-for-byte; checks.json pins source/consumer hashes. The original 15 failing parser cases, 132-test run and nine synthetic Chromium checks remain historical in dashboard/evidence/2026-10-05-browser-toml-reader. Chromium was not rerun. No native, live Browser/backend, full CI, deployment, release or TerminalBench execution is claimed. The separately assigned Browser known-refusal consumer repair is not authored or claimed in this unit.
+Raw logs are retained byte-for-byte; checks.json pins source/consumer hashes. The original 15 failing parser cases, 132-test run and nine synthetic Chromium checks remain historical in docs/evidence/dashboard/2026-10-05-browser-toml-reader. Chromium was not rerun. No native, live Browser/backend, full CI, deployment, release or TerminalBench execution is claimed. The separately assigned Browser known-refusal consumer repair is not authored or claimed in this unit.

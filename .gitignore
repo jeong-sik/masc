@@ -72,14 +72,9 @@ config/keeper.env
 logs/
 audits/*.jsonl
 
-# Campaign and deploy run outputs under reports/.
-# Hand-written audit reports live as single files directly in reports/ and stay
-# tracked; these subdirectories hold per-run captures (raw/, browser/, health
-# snapshots) and reached 126MB across nine runs.
-reports/*/
-reports/e0-campaign-*/
-reports/deploy-*/
-artifacts/
+# Local run output. Retained proof, research and reports belong under docs/.
+# See docs/guides/WORKSPACE-STORAGE.md.
+/artifacts/
 
 # Release-evidence pipeline default output; bundles are regenerated per
 # release (docs/RELEASE-EVIDENCE.md) and must not be committed.

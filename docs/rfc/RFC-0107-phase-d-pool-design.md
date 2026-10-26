@@ -261,7 +261,7 @@ Phase D step 2 가 그 결정 위에 구현.
 
 ## 8. Phase B Prior Art findings — design 정정 (2026-05-17 후속)
 
-Phase B 의 `knowledge/research/2026-05-17-piaf-ocsigen-eio-fd-prior-art.md`
+Phase B 의 `docs/research/2026-05-17-piaf-ocsigen-eio-fd-prior-art.md`
 가 본 design 의 두 가지 가정을 정정한다.
 
 ### 8.1 정정 — piaf 는 multi-host pool *이 아니다*

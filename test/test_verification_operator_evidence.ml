@@ -459,7 +459,7 @@ let test_export_rechecks_authority_and_propagates_cancellation () =
 let http_get_evidence ~router ?token target =
   let output=Buffer.create 1024 in
   let connection=Httpun.Server_connection.create (fun reqd ->
-    Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd) in
+    Masc.Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd) in
   let auth=match token with None -> "" | Some token -> "Authorization: Bearer " ^ token ^ "\r\n" in
   let wire="GET " ^ target ^ " HTTP/1.1\r\nHost: localhost\r\n" ^ auth ^ "\r\n" in
   let input=Bigstringaf.of_string ~off:0 ~len:(String.length wire) wire in
@@ -490,7 +490,7 @@ let test_actual_download_route_and_local_export () =
     let prior=Server_auth.For_testing.snapshot_server_state () in
     Fun.protect ~finally:(fun () -> Server_auth.For_testing.restore_server_state prior) (fun () ->
       Server_auth.publish_server_state state;
-      let router=Server_routes_http_routes_verification.add_routes (Http_server_eio.Router.create ()) in
+      let router=Server_routes_http_routes_verification.add_routes (Masc.Http_server_eio.Router.create ()) in
       let pdf="%PDF-1.7\n" ^ String.make ceiling 'p' in
       let binary=filed_binary ~base_path:base ~request_id:"vr-http-body" ~index:0 ~format:"pdf" pdf in
       let png=png_of_length (ceiling+1) in

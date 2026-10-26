@@ -154,7 +154,7 @@ let test_atomic_replace_effect_uses_lexical_symlink_leaf () =
             (Keeper_alerting_path.path_effect_projection_error_to_string error)
         | Ok projection ->
           let gate_effect =
-            Keeper_alerting_path.atomic_replace_gate_effect projection
+            Keeper_alerting_path.publication_gate_effect projection
           in
           let json = Keeper_alerting_path.path_effect_to_yojson gate_effect in
           check string "Gate operation matches rename semantics"
@@ -213,7 +213,7 @@ let test_missing_parent_effect_is_complete () =
          |> Result.get_ok
        in
        let gate_effect =
-         Keeper_alerting_path.atomic_replace_gate_effect projection
+         Keeper_alerting_path.publication_gate_effect projection
        in
        let missing =
          Keeper_alerting_path.path_effect_to_yojson gate_effect
@@ -307,7 +307,7 @@ let test_patch_source_uses_endpoint_components () =
        in
        let json =
          projection
-         |> Keeper_alerting_path.atomic_replace_gate_effect
+         |> Keeper_alerting_path.publication_gate_effect
          |> Keeper_alerting_path.path_effect_to_yojson
        in
        check string "replacement keeps lexical target" "link.txt"

@@ -46,3 +46,34 @@ CAMLprim value caml_masc_publish_paths(value v_exchange, value v_left, value v_r
   }
   CAMLreturn(Val_unit);
 }
+
+/* Both names are validated single leaves below retained directory descriptors.
+   Never emulate no-replace with a stat followed by a replacing rename. */
+CAMLprim value caml_masc_rename_noreplace_at(value v_source_fd, value v_source,
+                                           value v_target_fd, value v_target)
+{
+  CAMLparam4(v_source_fd, v_source, v_target_fd, v_target);
+  int source_fd = Int_val(v_source_fd), target_fd = Int_val(v_target_fd);
+  char *source = caml_stat_strdup(String_val(v_source));
+  char *target = caml_stat_strdup(String_val(v_target));
+  int result, saved_errno;
+  caml_enter_blocking_section();
+#if defined(__linux__) && defined(SYS_renameat2)
+  result = syscall(SYS_renameat2, source_fd, source, target_fd, target,
+                   RENAME_NOREPLACE);
+#elif defined(__APPLE__)
+  result = renameatx_np(source_fd, source, target_fd, target, RENAME_EXCL);
+#else
+  errno = ENOSYS;
+  result = -1;
+#endif
+  saved_errno = errno;
+  caml_leave_blocking_section();
+  caml_stat_free(source);
+  caml_stat_free(target);
+  if (result == -1) {
+    errno = saved_errno;
+    uerror("rename_noreplace_at", v_target);
+  }
+  CAMLreturn(Val_unit);
+}

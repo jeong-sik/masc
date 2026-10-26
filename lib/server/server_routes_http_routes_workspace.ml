@@ -542,7 +542,7 @@ let save_workspace_file_before_publication ~before_publication
           then Ok () else Error Save_conflict in
         if String.equal current content then Ok expected_revision
         else
-          let* target = Fs_compat.atomic_replace_recovery_target
+          let* target = Fs_compat.capability_publication_target
             ~allowed_root_path:root ~allowed_root_device:opened_root.dev
             ~allowed_root_inode:opened_root.ino
             ~parent_components:(components_under ~base:root (Filename.dirname file.resolved_path))
@@ -1423,7 +1423,7 @@ let add_routes router =
                               (Fs_compat.capability_write_error_to_string error);
                             (match error.target_effect with
                              | Fs_compat.Target_unchanged -> refuse `Internal_server_error "workspace_file_save_failed" "Save failed before publication; retain the draft"
-                             | Fs_compat.Target_created | Fs_compat.Target_created_incomplete
+                             | Fs_compat.Target_created
                              | Fs_compat.Target_replaced | Fs_compat.Target_state_unknown ->
                                refuse `Internal_server_error "workspace_file_save_uncertain" "File may have been saved; retain the draft and reread before another save")))
                 | _ -> invalid ())

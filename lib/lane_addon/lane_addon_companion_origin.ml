@@ -113,6 +113,34 @@ let decode bytes =
 let blocking work = match Fs_compat.execution_context () with
   | Fs_compat.Non_eio -> work ()
   | Fs_compat.Eio_fiber -> Eio_unix.run_in_systhread work
+(* [None] is permitted only before admission, when the stable lock file has
+   not been created yet. This file contains no payload and is never removed. *)
+let owner_lock_identity path = blocking (fun () ->
+  match Unix.lstat path with
+  | stat when stat.Unix.st_kind=Unix.S_REG && stat.st_uid=Unix.getuid ()
+      && stat.st_nlink=1 && stat.st_perm land 0o022=0 -> Ok (Some (stat.st_dev,stat.st_ino))
+  | _ -> Error Unavailable
+  | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok None
+  | exception (Unix.Unix_error _ | Sys_error _) -> Error Unavailable)
+let with_creation_owner ~path work =
+  (* Distinct from the private JSONL transaction's [.lock] inode: closing a
+     second descriptor for that inode would release a process-wide lockf. *)
+  let lock_path=File_lock_eio.lock_file_path (path ^ ".publication-owner") in
+  let* prior=owner_lock_identity lock_path in
+  match File_lock_eio.try_with_durable_lock_observed ~lock_path (fun () ->
+    let* held=owner_lock_identity lock_path in
+    let valid=match prior,held with
+      | None,Some _ -> true | Some before,Some current -> before=current
+      | None,None | Some _,None -> false in
+    if not valid then Error Unavailable else
+    let value=work () in
+    match owner_lock_identity lock_path with
+    | Ok current when current=held -> value
+    | Ok _ | Error _ -> Error Commit_unconfirmed) with
+  | File_lock_eio.Lock_held_elsewhere -> Error Commit_unconfirmed
+  | Lock_attempted (Lock_not_acquired _) -> Error Unavailable
+  | Lock_attempted (Body_completed {value;release_error=None}) -> value
+  | Lock_attempted (Body_completed {release_error=Some _;_}) -> Error Commit_unconfirmed
 let protect work = try work () with
   | Sys_error _ | Unix.Unix_error _ | Eio.Io _ -> Error Unavailable
 let canonical config =
@@ -144,19 +172,18 @@ let outcome = function
   | Private_file_failed_with_cleanup_failure _ -> Error Commit_unconfirmed
 type publication = Newly_created | Already_present
 let existing_leaf (error : Fs_compat.capability_write_error) =
-  error.target_effect=Fs_compat.Target_unchanged && error.cleanup_failures=[]
+  error.operation=Fs_compat.Create_exclusive_operation
+  && error.target_effect=Fs_compat.Target_unchanged && error.cleanup_failures=[]
   && match error.primary_failure with
   | Fs_compat.Write_primary_failure failure ->
-      failure.stage=Fs_compat.Create_target_entry
-      && (match failure.cause with
-          | Fs_compat.Operation_failed failure ->
-              (match failure.exception_ with
-               | Eio.Io (Eio.Fs.E error,_) ->
-                   (match error with
-                    | Eio.Fs.Already_exists _ -> true
-                    | Not_found _ | Permission_denied _ | File_too_large | Not_native _ -> false)
+      (match failure.cause with
+          | Fs_compat.Target_already_exists -> failure.stage=Fs_compat.Inspect_target_entry
+          | Fs_compat.Operation_failed operation_failure ->
+              failure.stage=Fs_compat.Publish_exclusive
+              && (match operation_failure.exception_ with
+               | Unix.Unix_error (Unix.EEXIST,_,_) -> true
                | _ -> false)
-          | Invalid_leaf _ | Invalid_recovery_target _ | Mutation_contended
+          | Invalid_recovery_target _ | Mutation_contended
           | Posix_descriptor_unavailable | Unexpected_resource_kind _
           | Resource_identity_unavailable | Resource_identity_changed
           | Payload_write_failed _ -> false)
@@ -181,11 +208,30 @@ let reserve ~fs ~config ~source ~destination ~arguments = protect (fun () ->
         if opened.dev=Int64.of_int current.Unix.st_dev && opened.ino=Int64.of_int current.st_ino
         then Ok () else Error Unavailable) in
     let* ()=validate_parent () in
-    let* publication=match Fs_compat.create_capability_file_exclusive ~parent
-        ~leaf:(Filename.basename path) ~permissions:0o600 (encode proposed) with
-      | Ok () -> Ok Newly_created
-      | Error error when existing_leaf error -> Ok Already_present
-      | Error _ -> Error Commit_unconfirmed in
+    let* publication=with_creation_owner ~path (fun () ->
+      let* ()=validate_parent () in
+      Eio.Path.with_open_dir
+      Eio.Path.(fs / Common.masc_dir_from_base_path ~base_path) (fun owned_root ->
+      let root_stat=Eio.Path.stat ~follow:true owned_root in
+      let* target=Fs_compat.capability_publication_target
+        ~allowed_root_path:(Common.masc_dir_from_base_path ~base_path)
+        ~allowed_root_device:root_stat.dev ~allowed_root_inode:root_stat.ino
+        ~parent_components:["lane-addons";"companion-invocations"]
+        ~target_leaf:(Filename.basename path) ~permissions:0o600
+        |> Result.map_error (fun _ -> Unavailable) in
+      Eio.Switch.run (fun sw ->
+        let* registry=Fs_compat.Publication_recovery.open_registry ~sw ~fs
+          ~registry_root:owned_root |> Result.map_error (fun _ -> Unavailable) in
+        match Fs_compat.Publication_recovery.with_lane ~registry
+          ~owner:("companion-origin-" ^ id) (fun recovery ->
+            match Fs_compat.create_capability_file_exclusive ~recovery ~parent
+              ~target (encode proposed) with
+            | Ok () -> Ok Newly_created
+            | Error error when existing_leaf error -> Ok Already_present
+            | Error _ -> Error Commit_unconfirmed) with
+        | Error _ -> Error Unavailable
+        | Ok (Fs_compat.Publication_recovery.Lane_released result) -> result
+        | Ok (Fs_compat.Publication_recovery.Lane_release_failed _) -> Error Commit_unconfirmed))) in
     let* ()=validate_parent () in
     Ok publication) in
   Fs_compat.reconcile_private_file_durable_locked_result path (fun bytes ->

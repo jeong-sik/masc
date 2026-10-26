@@ -5,15 +5,15 @@ val replace_capability_file
   :  before_stage:(Fs_compat.capability_write_stage -> unit)
   -> recovery:Fs_compat.Publication_recovery.t
   -> parent:Eio.Fs.dir_ty Eio.Path.t
-  -> target:Fs_compat.atomic_replace_recovery_target
+  -> target:Fs_compat.capability_publication_target
   -> string
   -> (unit, Fs_compat.capability_write_error) result
 
 val create_capability_file_exclusive
   :  before_stage:(Fs_compat.capability_write_stage -> unit)
+  -> recovery:Fs_compat.Publication_recovery.t
   -> parent:Eio.Fs.dir_ty Eio.Path.t
-  -> leaf:string
-  -> permissions:int
+  -> target:Fs_compat.capability_publication_target
   -> string
   -> (unit, Fs_compat.capability_write_error) result
 

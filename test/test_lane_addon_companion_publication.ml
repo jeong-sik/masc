@@ -6,6 +6,7 @@ open Alcotest
 open Masc
 module O=Lane_addon_companion_origin
 module P=Lane_addon_companion_publication
+module Recovery_test=Fs_compat_test_support.Publication_recovery_for_testing
 module D=Keeper_addon_publication
 module Q=Keeper_event_queue
 module R=Keeper_registry_event_queue
@@ -74,13 +75,66 @@ let canonical_retention _env fs config origin =
   let first=retain fs config origin (notice ()) |> pub_ok in
   check bool "origin index returns exact immutable source" true (O.find ~config ~id:origin.id=Ok (Some origin));
   let bytes=read (path origin) in
+  let initial=Unix.lstat (path origin) in
   let again=retain fs config origin (notice ()) |> pub_ok in
   check bool "same publication reconciles original record" true (again=first);
+  let repeated=Unix.lstat (path origin) in
+  check bool "existing publication preserves original inode" true
+    (initial.st_dev=repeated.st_dev && initial.st_ino=repeated.st_ino);
   let changed=notice ~kind:"effect_submitted" ~phase:"fill_submitted" ~submitted:true () in
   check bool "same publication ID refuses changed payload" true (retain fs config origin changed=Error P.Binding_conflict);
   check string "conflict never rewrites original" bytes (read (path origin));
   check bool "original publication strictly reloads" true
     (P.find ~config ~origin_id:origin.id ~publication_id=Ok first)
+let release_failure_on_existing _env fs config origin =
+  let first=retain fs config origin (notice ()) |> pub_ok in
+  let file=path origin in
+  let bytes=read file and initial=Unix.lstat file in
+  let fault=Recovery_test.lane_scope_release_fault
+    ~owner:("companion-publication-" ^ origin.O.id ^ "-" ^ publication_id)
+    ~exception_:(Failure "publication recovery lane release")
+    |> Result.get_ok in
+  let result=Recovery_test.with_lane_scope_release_fault fault (fun () ->
+    retain fs config origin (notice ())) in
+  check bool "existing publication cannot hide recovery lane release failure" true
+    (result=Error P.Commit_unconfirmed);
+  check string "release failure preserves exact publication bytes" bytes (read file);
+  let current=Unix.lstat file in
+  check bool "release failure preserves publication inode" true
+    (initial.st_dev=current.st_dev && initial.st_ino=current.st_ino);
+  check bool "healthy repeat reconciles the immutable publication" true
+    ((retain fs config origin (notice ()) |> pub_ok) = first)
+let live_owner_record _env fs config origin =
+  retain fs config origin (notice ()) |> pub_ok |> ignore;
+  let target=path origin in
+  let owner="companion-publication-" ^ origin.O.id ^ "-" ^ publication_id in
+  let lock_path=File_lock_eio.lock_file_path (target ^ ".publication-owner") in
+  let observation=File_lock_eio.with_durable_lock_observed ~lock_path (fun () ->
+    let private_root=Common.masc_dir_from_base_path ~base_path:origin.base_path in
+    Eio.Path.with_open_dir Eio.Path.(fs / private_root) (fun owned_root ->
+      Eio.Switch.run (fun sw ->
+        let registry=Fs_compat.Publication_recovery.open_registry ~sw ~fs
+          ~registry_root:owned_root |> Result.get_ok in
+        let root_stat=Unix.stat private_root and parent=Unix.stat (Filename.dirname target) in
+        let operation_id=Uuidm.of_string (Random_id.uuid_v7 ()) |> Option.get in
+        Recovery_test.seed_prepared ~registry ~owner ~operation_id
+          ~allowed_root_path:private_root ~allowed_root_device:(Int64.of_int root_stat.st_dev)
+          ~allowed_root_inode:(Int64.of_int root_stat.st_ino)
+          ~parent_components:["lane-addons";"companion-publications";origin.id]
+          ~parent_device:(Int64.of_int parent.st_dev) ~parent_inode:(Int64.of_int parent.st_ino)
+          ~target_leaf:(Filename.basename target) ~permissions:0o600 |> Result.get_ok;
+        let record=List.fold_left Filename.concat private_root
+          ["fs-publication-recovery";"lanes";owner;"active";Uuidm.to_string operation_id] in
+        let bytes=read record and before=Unix.lstat record in
+        check bool "active publication owner refuses retry before recovery readiness" true
+          (retain fs config origin (notice ())=Error P.Commit_unconfirmed);
+        check string "live publication Prepared record stays exact" bytes (read record);
+        let after=Unix.lstat record in
+        check bool "live publication Prepared record keeps its inode" true
+          (before.st_dev=after.st_dev && before.st_ino=after.st_ino)))) in
+  match observation with
+  | File_lock_eio.Body_completed {value=();release_error=None} -> ()
+  | Lock_not_acquired _ | Body_completed {release_error=Some _;_} -> fail "owner fixture lock failed"
 let host_owner_loss _env fs config origin =
   let event=P.owner_lost ~publication_id |> pub_ok in
   check bool "host notice uses a fixed generic unknown output" true
@@ -502,6 +556,10 @@ max_reply_bytes = 65536
       check_retained ();
       check bool "Detach reuses the same settlement without another notice" true (!events=expected))))))
 let ()=run "Original companion publication" ["publication",[
+  test_case "existing publication does not hide recovery release failure" `Quick
+    (with_origin release_failure_on_existing);
+  test_case "live publication owner protects its actual Prepared record" `Quick
+    (with_origin live_owner_record);
   test_case "manual worker exit publishes owner loss without Detach" `Quick (with_origin (runtime_worker_exit Missing_terminal));
   test_case "known terminal suppresses owner loss at worker exit" `Quick (with_origin (runtime_worker_exit Known_terminal));
   test_case "rejected invocation emits no owner loss at worker exit" `Quick (with_origin (runtime_worker_exit Rejected_invocation));

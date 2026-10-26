@@ -43,6 +43,14 @@ val reserve : fs:Eio.Fs.dir_ty Eio.Path.t ->
     [Existing] is read/reconciliation evidence and never permits another grant.
     Only this call's successful durable exclusive creation can return [Fresh].
     Existing empty or incomplete files refuse; they never become fresh again.
+    Publication borrows mandatory recovery under the private MASC root and
+    binds that opened root identity, the relative parent and private target.
+    A known unchanged existing target is reconciled only when write cleanup
+    and recovery-lane release also succeeded; uncertain effects stay refused.
+    A stable per-target owner lock excludes other fibers/processes before
+    recovery readiness and remains held through lane release. Contention
+    refuses without waiting. The existing durable lock defers cancellation
+    after admission until its callback and release have completed.
     A concurrent first writer may still be publishing, in which case strict
     reconciliation refuses instead of waiting or replaying its invocation.
     Setup, locking and strict private-file durability use the existing host

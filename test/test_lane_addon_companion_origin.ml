@@ -3,6 +3,7 @@
 open Alcotest
 open Masc
 module O=Lane_addon_companion_origin
+module Recovery_test=Fs_compat_test_support.Publication_recovery_for_testing
 let ok = function Ok value -> value | Error error -> fail (O.error_to_string error)
 let with_root run =
   let root=Filename.temp_dir "companion-origin-" "" |> Unix.realpath in
@@ -55,11 +56,15 @@ let original_binding fs () = with_root (fun root config ->
   check bool "original conversation is retained" true
     (Keeper_continuation_channel.same_route original.source.channel (channel "original-thread"));
   let file=path root original in
+  let initial=Unix.lstat file in
   let bytes=In_channel.with_open_bin file In_channel.input_all in
   let reordered=`Assoc ["tab_id",`Int 7;"browser_instance_id",`String "original-browser"] in
   check bool "same source/input recovers only an existing binding" true
     (match O.reserve ~fs ~config ~source ~destination ~arguments:reordered |> ok with
      | O.Existing found -> found=original | O.Fresh _ -> false);
+  let repeated=Unix.lstat file in
+  check bool "existing reservation preserves original inode" true
+    (initial.st_dev=repeated.st_dev && initial.st_ino=repeated.st_ino);
   List.iter (fun (source,destination,arguments) ->
     check bool "changed immutable call cannot adopt original authority" true
       (O.reserve ~fs ~config ~source ~destination ~arguments=Error O.Binding_conflict))
@@ -69,6 +74,61 @@ let original_binding fs () = with_root (fun root config ->
      make_source ~thread:"later-thread" (),destination,arguments];
   check string "refusals do not rewrite original evidence" bytes (In_channel.with_open_bin file In_channel.input_all);
   check bool "same source strictly reloads original" true (O.lookup ~config ~source=Ok (Some original)))
+let release_failure_on_existing fs () = with_root (fun root config ->
+  let source=make_source () in
+  let original=O.reserve ~fs ~config ~source ~destination ~arguments |> ok |> retained in
+  let file=path root original in
+  let bytes=In_channel.with_open_bin file In_channel.input_all in
+  let initial=Unix.lstat file in
+  let fault=Recovery_test.lane_scope_release_fault
+    ~owner:("companion-origin-" ^ original.id)
+    ~exception_:(Failure "origin recovery lane release")
+    |> Result.get_ok in
+  let result=Recovery_test.with_lane_scope_release_fault fault (fun () ->
+    O.reserve ~fs ~config ~source ~destination ~arguments) in
+  check bool "existing target cannot hide recovery lane release failure" true
+    (result=Error O.Commit_unconfirmed);
+  check string "release failure preserves exact original bytes" bytes
+    (In_channel.with_open_bin file In_channel.input_all);
+  let current=Unix.lstat file in
+  check bool "release failure preserves original inode" true
+    (initial.st_dev=current.st_dev && initial.st_ino=current.st_ino);
+  check bool "healthy repeat remains an existing reservation" true
+    (match O.reserve ~fs ~config ~source ~destination ~arguments |> ok with
+     | O.Existing found -> found=original | O.Fresh _ -> false))
+let live_owner_record fs () = with_root (fun root config ->
+  let source=make_source () in
+  let original=O.reserve ~fs ~config ~source ~destination ~arguments |> ok |> retained in
+  let target=path root original in
+  let owner="companion-origin-" ^ original.id in
+  let lock_path=File_lock_eio.lock_file_path (target ^ ".publication-owner") in
+  let observation=File_lock_eio.with_durable_lock_observed ~lock_path (fun () ->
+    let private_root=Common.masc_dir_from_base_path ~base_path:root in
+    Eio.Path.with_open_dir Eio.Path.(fs / private_root) (fun owned_root ->
+      Eio.Switch.run (fun sw ->
+        let registry=Fs_compat.Publication_recovery.open_registry ~sw ~fs
+          ~registry_root:owned_root |> Result.get_ok in
+        let root_stat=Unix.stat private_root and parent=Unix.stat (Filename.dirname target) in
+        let operation_id=Uuidm.of_string (Random_id.uuid_v7 ()) |> Option.get in
+        Recovery_test.seed_prepared ~registry ~owner ~operation_id
+          ~allowed_root_path:private_root ~allowed_root_device:(Int64.of_int root_stat.st_dev)
+          ~allowed_root_inode:(Int64.of_int root_stat.st_ino)
+          ~parent_components:["lane-addons";"companion-invocations"]
+          ~parent_device:(Int64.of_int parent.st_dev) ~parent_inode:(Int64.of_int parent.st_ino)
+          ~target_leaf:(Filename.basename target) ~permissions:0o600 |> Result.get_ok;
+        let record=List.fold_left Filename.concat private_root
+          ["fs-publication-recovery";"lanes";owner;"active";Uuidm.to_string operation_id] in
+        let bytes=In_channel.with_open_bin record In_channel.input_all and before=Unix.lstat record in
+        check bool "active origin owner refuses retry before recovery readiness" true
+          (O.reserve ~fs ~config ~source ~destination ~arguments=Error O.Commit_unconfirmed);
+        check string "live Prepared record is not reconciled or rewritten" bytes
+          (In_channel.with_open_bin record In_channel.input_all);
+        let after=Unix.lstat record in
+        check bool "live Prepared record keeps its inode" true
+          (before.st_dev=after.st_dev && before.st_ino=after.st_ino)))) in
+  match observation with
+  | File_lock_eio.Body_completed {value=();release_error=None} -> ()
+  | Lock_not_acquired _ | Body_completed {release_error=Some _;_} -> fail "owner fixture lock failed")
 let malformed_retention fs () = with_root (fun root config ->
   let source=make_source () in
   let record=O.reserve ~fs ~config ~source ~destination ~arguments |> ok |> retained in
@@ -107,9 +167,9 @@ let unsafe_retention fs () = with_root (fun root config ->
   check bool "missing beneath an unowned parent is not absence" true (O.lookup ~config ~source=Error O.Unavailable))
 let concurrent_first_writer () = with_root (fun _root config ->
   let source=make_source () in
-  (* Fork before either process starts an Eio event loop. The exclusive creator
-     may expose an incomplete leaf while the winner is still writing: a loser
-     must return Existing or refuse, and must never receive a second Fresh. *)
+  (* Fork before either process starts an Eio event loop. A loser may encounter
+     an active recovery owner or a committed winner: it must return Existing
+     or refuse, and must never receive a second Fresh. *)
   let reserve () = Eio_main.run (fun env ->
     O.reserve ~fs:(Eio.Stdenv.fs env) ~config ~source ~destination ~arguments) in
   let read_fd,write_fd=Unix.pipe ~cloexec:true () in
@@ -141,6 +201,10 @@ let with_fs run () = Eio_main.run (fun env -> run (Eio.Stdenv.fs env) ())
 let () = run "Original companion invocation" ["origin",[
   test_case "capture original source and reject contradictions" `Quick source_capture;
   test_case "retain once and refuse changed source/input/destination" `Quick (with_fs original_binding);
+  test_case "existing origin does not hide recovery release failure" `Quick
+    (with_fs release_failure_on_existing);
+  test_case "live origin owner protects its actual Prepared record" `Quick
+    (with_fs live_owner_record);
   test_case "empty and corrupt immutable records never authorize replay" `Quick (with_fs malformed_retention);
   test_case "unsafe existing paths are refused" `Quick (with_fs unsafe_retention);
   test_case "cross-process first writer retains one origin" `Quick concurrent_first_writer]]

@@ -110,9 +110,7 @@ let read path =
 let exclusive_save () =
   let root = Filename.temp_file "masc-report-export-" "" in
   Sys.remove root; Unix.mkdir root 0o700;
-  Fun.protect ~finally:(fun () ->
-    Array.iter (fun name -> Sys.remove (Filename.concat root name)) (Sys.readdir root);
-    Unix.rmdir root) (fun () ->
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
     Eio_main.run (fun env ->
       let _, original = document source in
       let path = Filename.concat root "선택한 원문.md" in

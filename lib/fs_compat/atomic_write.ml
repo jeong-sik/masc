@@ -3,10 +3,10 @@
 module Recovery = Capability_recovery_obligation
 module Recovery_access = Publication_recovery_access
 
-type atomic_replace_recovery_target_error =
+type capability_publication_target_error =
   | Recovery_target_validation_failed of Recovery.validation_error
 
-type atomic_replace_recovery_target =
+type capability_publication_target =
   { allowed_root_path : string
   ; allowed_root : Recovery.identity
   ; parent_components : Capability_leaf.t list
@@ -19,12 +19,12 @@ type publication_recovery_record_area =
   | Publication_recovery_owned
   | Publication_recovery_forensic
 
-let atomic_replace_recovery_target_error_to_string = function
+let capability_publication_target_error_to_string = function
   | Recovery_target_validation_failed error ->
     Recovery.validation_error_to_string error
 ;;
 
-let atomic_replace_recovery_target
+let capability_publication_target
       ~allowed_root_path
       ~allowed_root_device
       ~allowed_root_inode
@@ -67,7 +67,6 @@ type capability_write_operation =
   | Create_exclusive_operation
 
 type capability_write_stage =
-  | Validate_leaf
   | Acquire_mutation_lease
   | Acquire_publication_lease
   | Inspect_target_entry
@@ -81,7 +80,6 @@ type capability_write_stage =
   | Preserve_unbound_recovery_obligation
   | Bind_recovery_obligation
   | Create_staging_entry
-  | Create_target_entry
   | Inspect_open_resource
   | Write_payload
   | Apply_permissions
@@ -89,6 +87,7 @@ type capability_write_stage =
   | Close_payload
   | Verify_entry_identity
   | Publish_replace
+  | Publish_exclusive
   | Sync_staging_directory
   | Sync_parent
   | Remove_staging_directory
@@ -137,7 +136,6 @@ let scoped_replace_dispatch () =
 type capability_write_target_effect =
   | Target_unchanged
   | Target_created
-  | Target_created_incomplete
   | Target_replaced
   | Target_state_unknown
 
@@ -153,9 +151,9 @@ type capability_write_payload_failure =
   }
 
 type capability_write_cause =
-  | Invalid_leaf of string
-  | Invalid_recovery_target of atomic_replace_recovery_target_error
+  | Invalid_recovery_target of capability_publication_target_error
   | Mutation_contended
+  | Target_already_exists
   | Posix_descriptor_unavailable
   | Unexpected_resource_kind of Eio.File.Stat.kind
   | Resource_identity_unavailable
@@ -277,7 +275,6 @@ let capability_write_operation_to_string = function
 ;;
 
 let capability_write_stage_to_string = function
-  | Validate_leaf -> "validate_leaf"
   | Acquire_mutation_lease -> "acquire_mutation_lease"
   | Acquire_publication_lease -> "acquire_publication_lease"
   | Inspect_target_entry -> "inspect_target_entry"
@@ -294,7 +291,6 @@ let capability_write_stage_to_string = function
     "preserve_unbound_recovery_obligation"
   | Bind_recovery_obligation -> "bind_recovery_obligation"
   | Create_staging_entry -> "create_staging_entry"
-  | Create_target_entry -> "create_target_entry"
   | Inspect_open_resource -> "inspect_open_resource"
   | Write_payload -> "write_payload"
   | Apply_permissions -> "apply_permissions"
@@ -302,6 +298,7 @@ let capability_write_stage_to_string = function
   | Close_payload -> "close_payload"
   | Verify_entry_identity -> "verify_entry_identity"
   | Publish_replace -> "publish_replace"
+  | Publish_exclusive -> "publish_exclusive"
   | Sync_staging_directory -> "sync_staging_directory"
   | Sync_parent -> "sync_parent"
   | Remove_staging_directory -> "remove_staging_directory"
@@ -322,19 +319,18 @@ let capability_write_stage_to_string = function
 let capability_write_target_effect_to_string = function
   | Target_unchanged -> "target_unchanged"
   | Target_created -> "target_created"
-  | Target_created_incomplete -> "target_created_incomplete"
   | Target_replaced -> "target_replaced"
   | Target_state_unknown -> "target_state_unknown"
 ;;
 
 let capability_write_cause_to_string = function
-  | Invalid_leaf leaf -> Printf.sprintf "invalid leaf component: %S" leaf
   | Invalid_recovery_target error ->
     Printf.sprintf
       "invalid recovery target: %s"
-      (atomic_replace_recovery_target_error_to_string error)
+      (capability_publication_target_error_to_string error)
   | Mutation_contended ->
     "another cooperative writer owns this target or parent publication boundary"
+  | Target_already_exists -> "target already exists"
   | Posix_descriptor_unavailable -> "POSIX descriptor unavailable"
   | Unexpected_resource_kind kind ->
     Format.asprintf "unexpected resource kind: %a" Eio.File.Stat.pp_kind kind
@@ -598,13 +594,6 @@ let identity_of_open_file ~before_stage file =
 
 let capability_staging_payload_leaf = "payload"
 let capability_staging_directory_permissions = 0o700
-
-let validate_leaf ~before_stage leaf =
-  run_stage ~before_stage Validate_leaf (fun () ->
-    match Capability_leaf.of_string leaf with
-    | Some leaf -> leaf
-    | None -> raise_failure Validate_leaf (Invalid_leaf leaf))
-;;
 
 let set_open_file_permissions ~before_stage file permissions =
   run_stage ~before_stage Apply_permissions (fun () ->
@@ -918,8 +907,10 @@ let capability_write_cancellation_context = function
   | reason -> reason, None, []
 ;;
 
+type cancellation_cleanup_completion = Cleanup_completed | Cleanup_interrupted
+
 let cleanup_cancelled_write ~interrupted_recovery ~additional cleanup =
-  try interrupted_recovery, additional @ cleanup () with
+  try interrupted_recovery, additional @ cleanup (), Cleanup_completed with
   | Eio.Cancel.Cancelled cleanup_reason ->
     (* The caller re-raises its original cancellation and backtrace. A second
        cancellation must retain cleanup facts without replacing that authority. *)
@@ -933,7 +924,7 @@ let cleanup_cancelled_write ~interrupted_recovery ~additional cleanup =
       | Some original, Some interruption ->
         Some original, additional @ [ Recovery_cleanup_failure interruption ]
     in
-    interrupted_recovery, additional @ carried_failures
+    interrupted_recovery, additional @ carried_failures, Cleanup_interrupted
 ;;
 
 let reraise_capability_write_cancellation
@@ -1135,7 +1126,33 @@ let cleanup_owned_staging_directory
           backtrace))
 ;;
 
-let replace_capability_file_with
+let publication_operation = function
+  | Recovery.Replace -> Atomic_replace_operation
+  | Recovery.Create_exclusive -> Create_exclusive_operation
+;;
+
+let publication_target_effect = function
+  | Recovery.Replace -> Target_replaced
+  | Recovery.Create_exclusive -> Target_created
+;;
+
+external rename_noreplace_at : Unix.file_descr -> string -> Unix.file_descr -> string -> unit
+  = "caml_masc_rename_noreplace_at"
+
+let publish_exclusive ~sw ~source_directory ~parent ~leaf =
+  let destination_directory = Eio.Path.open_in ~sw Eio.Path.(parent / ".") in
+  match Eio_unix.Resource.fd_opt source_directory,
+        Eio_unix.Resource.fd_opt destination_directory with
+  | Some source_fd, Some destination_fd ->
+    Eio_unix.run_in_systhread ~label:"fs-compat-publish-exclusive" (fun () ->
+      Eio_unix.Fd.use_exn "fs-compat-publish-exclusive-source" source_fd (fun source ->
+        Eio_unix.Fd.use_exn "fs-compat-publish-exclusive-target" destination_fd (fun destination ->
+          rename_noreplace_at source capability_staging_payload_leaf destination leaf)))
+  | None, _ | _, None -> raise_failure Publish_exclusive Posix_descriptor_unavailable
+;;
+
+let publish_capability_file_with
+      ~publication
       ~before_stage
       ~before_publish
       ~recovery
@@ -1143,7 +1160,7 @@ let replace_capability_file_with
       ~target:recovery_target
       content
   =
-  let operation = Atomic_replace_operation in
+  let operation = publication_operation publication in
   let target_effect = ref Target_unchanged in
   let callback_result = ref None in
   try
@@ -1178,6 +1195,11 @@ let replace_capability_file_with
     Eio.Switch.on_release sw (fun () ->
       Capability_mutation_lease.release mutation_lease);
     let initial_target = observe_target_entry ~before_stage target_path in
+    (match publication, initial_target with
+     | Recovery.Create_exclusive, Recovery.Present _ ->
+       raise_failure Inspect_target_entry Target_already_exists
+     | Recovery.Create_exclusive, Recovery.Absent
+     | Recovery.Replace, (Recovery.Absent | Recovery.Present _) -> ());
     if not (same_target_observation preliminary_target initial_target)
     then raise_failure Inspect_target_entry Resource_identity_changed;
     let parent_identity =
@@ -1334,7 +1356,7 @@ let replace_capability_file_with
              ~recovery_phase:Recovery_prepare
              (fun () ->
                 Recovery.prepare
-                  ~publication:Recovery.Replace
+                  ~publication
                   ~store:recovery
                   ~locator
                   ~permissions:recovery_target.permissions)
@@ -1490,21 +1512,40 @@ let replace_capability_file_with
              raise_failure
                Verify_target_binding
                Resource_identity_changed;
-           run_stage ~before_stage Publish_replace (fun () ->
+           let stage = match publication with
+             | Recovery.Replace -> Publish_replace
+             | Recovery.Create_exclusive -> Publish_exclusive in
+           run_stage ~before_stage stage (fun () ->
              before_publish entry;
-             try Eio.Path.rename entry target_path with
+             try
+               (match publication with
+                | Recovery.Replace -> Eio.Path.rename entry target_path
+                | Recovery.Create_exclusive ->
+                  match !staging_directory_file with
+                  | None -> raise_failure stage Resource_identity_unavailable
+                  | Some source_directory ->
+                    publish_exclusive ~sw ~source_directory ~parent
+                      ~leaf:(Capability_leaf.to_string recovery_target.target_leaf))
+             with
              | Eio.Cancel.Cancelled _ as cancellation ->
                let backtrace = Printexc.get_raw_backtrace () in
                target_effect := Target_state_unknown;
                Printexc.raise_with_backtrace cancellation backtrace
              | exception_ ->
                let backtrace = Printexc.get_raw_backtrace () in
-               target_effect := Target_state_unknown;
+               target_effect :=
+                 (match publication with
+                  | Recovery.Replace -> Target_state_unknown
+                  | Recovery.Create_exclusive ->
+                    (match exception_ with
+                     | Unix.Unix_error (code, _, _) when code = Unix.EEXIST ->
+                       Target_unchanged
+                     | _ -> Target_state_unknown));
                reraise_fatal_or_cancelled exception_ backtrace;
                raise
                  (Capability_write_failed
                     ( operation_failure
-                        Publish_replace
+                        stage
                         exception_
                         backtrace
                     , [] )))
@@ -1532,7 +1573,7 @@ let replace_capability_file_with
                 Capability_mutation_lease.release publication_lease)
               publish);
          published := true;
-         target_effect := Target_replaced;
+         target_effect := publication_target_effect publication;
          parent_dirty := true;
          (match !staging_directory_file with
           | None ->
@@ -1577,13 +1618,16 @@ let replace_capability_file_with
        let reason, interrupted_recovery, additional =
          capability_write_cancellation_context reason
        in
-       let interrupted_recovery, cleanup_failures =
+       let interrupted_recovery, cleanup_failures, cleanup_completion =
          cleanup_cancelled_write ~interrupted_recovery ~additional cleanup
        in
        if
          !target_effect = Target_unchanged
          && Option.is_none interrupted_recovery
          && cleanup_failures = []
+         && (match cleanup_completion with
+             | Cleanup_completed -> true
+             | Cleanup_interrupted -> false)
        then Printexc.raise_with_backtrace cancellation backtrace
        else
          Printexc.raise_with_backtrace
@@ -1685,209 +1729,8 @@ let replace_capability_file_with
          })
 ;;
 
-let create_capability_file_exclusive_with
-      ~before_stage
-      ~parent
-      ~leaf
-      ~permissions
-      content
-  =
-  let operation = Create_exclusive_operation in
-  let target_effect = ref Target_unchanged in
-  let callback_result = ref None in
-  try
-    let leaf = validate_leaf ~before_stage leaf in
-    Eio.Switch.run @@ fun sw ->
-    let target = Eio.Path.(parent / Capability_leaf.to_string leaf) in
-    let mutation_lease =
-      run_stage ~before_stage Acquire_mutation_lease (fun () ->
-        let parent_stat = Eio.Path.stat ~follow:true parent in
-        if parent_stat.kind <> `Directory
-        then
-          raise_failure
-            Acquire_mutation_lease
-            (Unexpected_resource_kind parent_stat.kind);
-        match
-          Capability_mutation_lease.try_acquire
-            (Capability_mutation_lease.Absent_target_parent
-               { parent_dev = parent_stat.dev
-               ; parent_ino = parent_stat.ino
-               })
-        with
-        | Some lease -> lease
-        | None -> raise_failure Acquire_mutation_lease Mutation_contended)
-    in
-    Eio.Switch.on_release sw (fun () ->
-      Capability_mutation_lease.release mutation_lease);
-    let open_file = ref None in
-    let identity = ref None in
-    let parent_dirty = ref false in
-    let cleanup () =
-      Eio.Cancel.protect (fun () ->
-        write_cleanup_failures
-          (cleanup_open_file ~before_stage open_file
-           @ cleanup_parent_if_dirty ~before_stage ~sw ~parent parent_dirty))
-    in
-    let error failure additional =
-      let primary_failure = Write_primary_failure failure in
-      let additional = write_cleanup_failures additional in
-      let cleanup_failures =
-        try additional @ cleanup () with
-        | Eio.Cancel.Cancelled reason ->
-          let backtrace = Printexc.get_raw_backtrace () in
-          reraise_capability_write_cancellation
-            ~backtrace
-            ~operation
-            ~target_effect:!target_effect
-            ~interrupted_primary_failure:(Some primary_failure)
-            ~cleanup_failures:additional
-            reason
-      in
-      Error
-        { operation
-        ; target_effect = !target_effect
-        ; primary_failure
-        ; cleanup_failures
-        }
-    in
-    let result =
-      try
-       let file =
-         Eio.Cancel.protect (fun () ->
-           let file =
-             run_stage ~before_stage Create_target_entry (fun () ->
-               Eio.Path.open_out ~sw ~create:(`Exclusive 0o600) target)
-           in
-           open_file := Some file;
-           parent_dirty := true;
-           target_effect := Target_created_incomplete;
-           file)
-       in
-       identity := Some (identity_of_open_file ~before_stage file);
-       write_open_file_payload ~before_stage file content;
-       set_open_file_permissions ~before_stage file permissions;
-       run_stage ~before_stage Sync_payload (fun () -> Eio.File.sync file);
-       close_open_entry ~before_stage open_file;
-       verify_entry_identity
-         ~before_stage
-         ~stage:Verify_entry_identity
-         target
-         identity;
-       target_effect := Target_created;
-       Eio.Cancel.protect (fun () ->
-         sync_parent_capability ~before_stage ~stage:Sync_parent ~sw parent;
-         parent_dirty := false);
-       Eio.Fiber.check ();
-       Ok ()
-     with
-     | Eio.Cancel.Cancelled reason as cancellation ->
-       let backtrace = Printexc.get_raw_backtrace () in
-       let reason, interrupted_recovery, additional =
-         capability_write_cancellation_context reason
-       in
-       let interrupted_recovery, cleanup_failures =
-         cleanup_cancelled_write ~interrupted_recovery ~additional cleanup
-       in
-       if !target_effect = Target_unchanged
-          && Option.is_none interrupted_recovery
-          && cleanup_failures = []
-       then Printexc.raise_with_backtrace cancellation backtrace
-       else
-         Printexc.raise_with_backtrace
-           (Eio.Cancel.Cancelled
-              (Capability_write_cancelled
-                 ( reason
-                 , { operation
-                   ; target_effect = !target_effect
-                   ; interrupted_primary_failure = None
-                   ; interrupted_recovery
-                   ; cleanup_failures
-                   } )))
-           backtrace
-     | Capability_write_failed (failure, additional) ->
-       error failure additional
-     | exception_ ->
-       let backtrace = Printexc.get_raw_backtrace () in
-       reraise_fatal_or_cancelled exception_ backtrace;
-       error
-         (operation_failure Create_target_entry exception_ backtrace)
-         []
-    in
-    callback_result := Some result;
-    Eio.Fiber.check ();
-    result
-  with
-  | Eio.Cancel.Cancelled (Capability_write_cancelled _) as cancellation ->
-    let backtrace = Printexc.get_raw_backtrace () in
-    Printexc.raise_with_backtrace cancellation backtrace
-  | Eio.Cancel.Cancelled reason as cancellation ->
-    let backtrace = Printexc.get_raw_backtrace () in
-    (match !callback_result with
-     | Some (Error error) ->
-       Printexc.raise_with_backtrace
-         (Eio.Cancel.Cancelled
-            (Capability_write_cancelled
-               ( reason
-               , { operation
-                 ; target_effect = !target_effect
-                 ; interrupted_primary_failure = Some error.primary_failure
-                 ; interrupted_recovery = None
-                 ; cleanup_failures = error.cleanup_failures
-                 } )))
-         backtrace
-     | Some (Ok ()) | None ->
-       if !target_effect = Target_unchanged
-       then Printexc.raise_with_backtrace cancellation backtrace
-       else
-         Printexc.raise_with_backtrace
-           (Eio.Cancel.Cancelled
-              (Capability_write_cancelled
-                 ( reason
-                 , { operation
-                   ; target_effect = !target_effect
-                   ; interrupted_primary_failure = None
-                   ; interrupted_recovery = None
-                   ; cleanup_failures = []
-                   } )))
-           backtrace)
-  | Capability_write_failed (failure, cleanup_failures) ->
-    (match !callback_result with
-     | Some (Error error) ->
-       Error
-         { error with
-           cleanup_failures =
-             error.cleanup_failures
-             @ write_cleanup_failures (failure :: cleanup_failures)
-         }
-     | Some (Ok ()) | None ->
-       Error
-         { operation
-         ; target_effect = !target_effect
-         ; primary_failure = Write_primary_failure failure
-         ; cleanup_failures = write_cleanup_failures cleanup_failures
-         })
-  | exception_ ->
-    let backtrace = Printexc.get_raw_backtrace () in
-    reraise_fatal_or_cancelled exception_ backtrace;
-    let release_failure = operation_failure Cleanup_close exception_ backtrace in
-    (match !callback_result with
-     | Some (Error error) ->
-       Error
-         { error with
-           cleanup_failures =
-             error.cleanup_failures
-             @ [ Write_cleanup_failure release_failure ]
-         }
-     | Some (Ok ()) | None ->
-       Error
-         { operation
-         ; target_effect = !target_effect
-         ; primary_failure = Write_primary_failure release_failure
-         ; cleanup_failures = []
-         })
-;;
-
-let replace_capability_file_through_access
+let publish_capability_file_through_access
+      ~publication
       ~before_stage
       ~before_publish
       ~recovery
@@ -1895,13 +1738,14 @@ let replace_capability_file_through_access
       ~target
       content
   =
-  let operation = Atomic_replace_operation in
+  let operation = publication_operation publication in
   let callback_result = ref None in
   try
     match
       Recovery_access.with_store recovery (fun recovery ->
         let result =
-          replace_capability_file_with
+          publish_capability_file_with
+            ~publication
             ~before_stage
             ~before_publish
             ~recovery
@@ -1933,7 +1777,7 @@ let replace_capability_file_through_access
      | Some result ->
        let target_effect, interrupted_primary_failure, cleanup_failures =
          match result with
-         | Ok () -> Target_replaced, None, []
+         | Ok () -> publication_target_effect publication, None, []
          | Error error ->
            ( error.target_effect
            , Some error.primary_failure
@@ -1955,7 +1799,8 @@ let replace_capability_file_through_access
 let replace_capability_file ~recovery ~parent ~target content =
   (* TEL-OK: callback selection is not an action; the write returns typed effect evidence. *)
   let before_stage, before_publish = scoped_replace_dispatch () in
-  replace_capability_file_through_access
+  publish_capability_file_through_access
+    ~publication:Recovery.Replace
     ~before_stage
     ~before_publish
     ~recovery
@@ -1964,13 +1809,12 @@ let replace_capability_file ~recovery ~parent ~target content =
     content
 ;;
 
-let create_capability_file_exclusive ~parent ~leaf ~permissions content =
-  create_capability_file_exclusive_with
+let create_capability_file_exclusive ~recovery ~parent ~target content =
+  publish_capability_file_through_access
+    ~publication:Recovery.Create_exclusive
     ~before_stage:(fun _ -> ())
-    ~parent
-    ~leaf
-    ~permissions
-    content
+    ~before_publish:(fun _ -> ())
+    ~recovery ~parent ~target content
 ;;
 
 let sync_directory_capability_with ~before_stage directory =
@@ -2222,7 +2066,8 @@ module Capability_write_for_testing = struct
         ~target
         content
     =
-    replace_capability_file_through_access
+    publish_capability_file_through_access
+      ~publication:Recovery.Replace
       ~before_stage
       ~before_publish:no_before_publish
       ~recovery
@@ -2231,8 +2076,9 @@ module Capability_write_for_testing = struct
       content
   ;;
 
-  let create_capability_file_exclusive =
-    create_capability_file_exclusive_with
+  let create_capability_file_exclusive ~before_stage ~recovery ~parent ~target content =
+    publish_capability_file_through_access ~publication:Recovery.Create_exclusive
+      ~before_stage ~before_publish:(fun _ -> ()) ~recovery ~parent ~target content
   ;;
 
   let fixture_identity ~device ~inode =

@@ -1554,9 +1554,9 @@ let capability_write_failure_json
     match failure.cause with
     | Fs_compat.Payload_write_failed { bytes_written; _ } ->
       [ "bytes_written", `Int bytes_written ]
-    | ( Fs_compat.Invalid_leaf _
-      | Fs_compat.Invalid_recovery_target _
+    | ( Fs_compat.Invalid_recovery_target _
       | Fs_compat.Mutation_contended
+      | Fs_compat.Target_already_exists
       | Fs_compat.Posix_descriptor_unavailable
       | Fs_compat.Unexpected_resource_kind _
       | Fs_compat.Resource_identity_unavailable
@@ -1641,9 +1641,9 @@ let observe_capability_write_failure_backtrace
       bytes_written
       (Printexc.to_string exception_)
       (Printexc.raw_backtrace_to_string backtrace)
-  | ( Fs_compat.Invalid_leaf _
-    | Fs_compat.Invalid_recovery_target _
+  | ( Fs_compat.Invalid_recovery_target _
     | Fs_compat.Mutation_contended
+      | Fs_compat.Target_already_exists
     | Fs_compat.Posix_descriptor_unavailable
     | Fs_compat.Unexpected_resource_kind _
     | Fs_compat.Resource_identity_unavailable
@@ -2193,7 +2193,6 @@ let publication_execution_of_effect_observation = function
 let publication_effect_observation_of_target_effect = function
   | Fs_compat.Target_unchanged -> Publication_effect_absent
   | ( Fs_compat.Target_created
-    | Fs_compat.Target_created_incomplete
     | Fs_compat.Target_replaced ) ->
     Publication_effect_observed
   | Fs_compat.Target_state_unknown -> Publication_effect_indeterminate
@@ -2602,10 +2601,10 @@ let handle_file_write_content_with_outcome
           |> Result.map_error Keeper_alerting_path.path_effect_projection_error_to_string
         in
         let gate_effect =
-          Keeper_alerting_path.atomic_replace_gate_effect projection
+          Keeper_alerting_path.publication_gate_effect projection
         in
         let recovery_target =
-          Keeper_alerting_path.atomic_replace_recovery_target projection
+          Keeper_alerting_path.capability_publication_target projection
         in
         finish_content_write
           ~confined
@@ -2665,25 +2664,27 @@ let handle_file_write_content_with_outcome
           check_invariant_sandbox_isolation ~turn_sandbox_factory ~confined
         in
         with_write_parents ~operation:Append confined
-        @@ fun ~root_dir ~parent_dir ~parent_components ~missing_parents ~leaf ->
+        @@ fun ~root_dir ~parent_dir ~parent_components ~missing_parents ~leaf:_ ->
         let create_missing_entry () =
           let* parent =
             parent_effect_scope ~parent_dir ~parent_components ~missing_parents
           in
-          let* gate_effect =
+          let* projection =
             Keeper_alerting_path.create_entry_exclusive_effect
               ~parent
               ~result_file_permissions:created_file_permissions
               confined
             |> Result.map_error Keeper_alerting_path.path_effect_projection_error_to_string
           in
+          let gate_effect = Keeper_alerting_path.publication_gate_effect projection in
+          let recovery_target = Keeper_alerting_path.capability_publication_target projection in
           finish_content_write
             ~confined
             ~target
             ~mode:Append
             ~gate_effect
-            (Recovery_independent
-               (fun () ->
+            (Recovery_guarded
+               (fun publication_recovery_access ->
                   with_created_parent_directories
                     ~on_interrupted:
                       (observe_created_directory_commit
@@ -2694,9 +2695,9 @@ let handle_file_write_content_with_outcome
                     missing_parents
                   @@ fun ~created_parents final_parent ->
                   Fs_compat.create_capability_file_exclusive
+                    ~recovery:publication_recovery_access
                     ~parent:final_parent
-                    ~leaf
-                    ~permissions:created_file_permissions
+                    ~target:recovery_target
                     (content ())
                   |> Result.map_error (fun error ->
                     Content_write_capability { error; created_parents })))
@@ -3005,10 +3006,10 @@ let handle_file_write_content_with_outcome
                        Keeper_alerting_path.path_effect_projection_error_to_string
                 in
                 let gate_effect =
-                  Keeper_alerting_path.atomic_replace_gate_effect projection
+                  Keeper_alerting_path.publication_gate_effect projection
                 in
                 let recovery_target =
-                  Keeper_alerting_path.atomic_replace_recovery_target projection
+                  Keeper_alerting_path.capability_publication_target projection
                 in
                 finish_write
                   ~gate_effect

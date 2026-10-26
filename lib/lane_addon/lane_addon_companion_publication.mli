@@ -27,7 +27,13 @@ val retain : fs:Eio.Fs.dir_ty Eio.Path.t -> config:Workspace.config ->
   event:event -> (record,error) result
 (** Commit before queue admission. A repeated ID must match the exact original
     source, schema and canonical output. Existing damaged files refuse without
-    repair. Reconciliation never replays Browser work or creates a new ID. *)
+    repair. Mandatory recovery and the private target projection are bound to
+    the opened MASC root. An unchanged existing target with successful cleanup
+    and lane release may be reconciled; uncertain effects remain unconfirmed.
+    A stable per-target owner lock excludes other fibers/processes before
+    recovery readiness through lane release. Contention refuses without
+    waiting; admitted work uses the durable lock's cancellation protection.
+    Reconciliation never replays Browser work or creates a new ID. *)
 val find : config:Workspace.config -> origin_id:string -> publication_id:string ->
   (record,error) result
 (** Re-read the original source and immutable notice with no provider effects.

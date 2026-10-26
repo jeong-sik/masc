@@ -168,17 +168,23 @@ let test_earlier_open_call_prevents_later_verdict_recovery () = with_fixture (fu
     let ready,signal=Eio.Promise.create () in
     let release,unblock=Eio.Promise.create () in
     let finished,complete=Eio.Promise.create () in
+    let released=ref false in
+    let release_original () = if not !released then (
+      released:=true;Eio.Promise.resolve unblock ()) in
     Eio.Fiber.fork ~sw (fun () ->
       ignore (run_native ~after_scope_ready:(fun () ->
         Eio.Promise.resolve signal ();Eio.Promise.await release)
         env sw ~base_path ~store ~original ~current []);
       Eio.Promise.resolve complete ());
-    Eio.Promise.await ready;
-    ignore (run_native env sw ~base_path ~store ~original ~current [tool_call "later" valid]);
-    (match X.observe ~base_path ~original (O.progress !current) |> get with
-     | Awaiting -> () | Repair_required _ | Verdict _ ->
-       Alcotest.fail "later verdict bypassed the original still-open call");
-    Eio.Promise.resolve unblock ();Eio.Promise.await finished))
+    (* The scope-ready barrier may protect publication from cancellation.
+       Always release the fixture's artificial wait before switch teardown. *)
+    Fun.protect ~finally:release_original (fun () ->
+      Eio.Promise.await ready;
+      ignore (run_native env sw ~base_path ~store ~original ~current [tool_call "later" valid]);
+      (match X.observe ~base_path ~original (O.progress !current) |> get with
+       | Awaiting -> () | Repair_required _ | Verdict _ ->
+         Alcotest.fail "later verdict bypassed the original still-open call");
+      release_original ();Eio.Promise.await finished)))
 
 let () =
   let prompts=Filename.concat (Masc_test_deps.find_project_root ()) "config/prompts" in

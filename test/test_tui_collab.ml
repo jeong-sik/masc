@@ -2,11 +2,12 @@ open Alcotest
 module C = Masc_tui_collab
 
 let row name : Masc.Tui_decode.play_invite_row =
-  {pi_name = name; pi_expires_at = None; pi_expired = false; pi_holds_controller = false}
+  {pi_name = name; pi_expires_at = None; pi_expired = false}
 
 let listed view names =
   let view, read = C.loading view in
-  C.listed view read (Ok (List.map row names))
+  C.listed view read
+    (Ok {Masc.Tui_decode.pis_rows = List.map row names; pis_controller = Masc.Tui_decode.Play_controller_free})
 
 let selected view = match snd (C.key view "enter") with
   | C.Open_link name -> Some name

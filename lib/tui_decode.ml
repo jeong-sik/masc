@@ -8124,7 +8124,17 @@ type play_invite_row = {
   pi_name : string;
   pi_expires_at : string option;
   pi_expired : bool;
-  pi_holds_controller : bool;
+}
+
+type play_controller =
+  | Play_controller_held of string
+  | Play_controller_free
+  | Play_machine_absent
+  | Play_controller_unobserved of string
+
+type play_invites = {
+  pis_rows : play_invite_row list;
+  pis_controller : play_controller;
 }
 
 type play_invite_issued = {
@@ -8149,11 +8159,29 @@ let decode_play_invite_row json =
   let* pi_name = Json_util.require_string json "name" in
   let* pi_expires_at = required_nullable_string_field json "expires_at" in
   let* pi_expired = required_bool_field json "expired" in
-  let* pi_holds_controller = required_bool_field json "holds_controller" in
-  Ok { pi_name; pi_expires_at; pi_expired; pi_holds_controller }
+  Ok { pi_name; pi_expires_at; pi_expired }
+
+let decode_play_controller json =
+  match Json_util.assoc_member_opt "controller" json with
+  | Some (`Assoc _ as controller) ->
+      let* state = Json_util.require_string controller "state" in
+      (match state with
+       | "held" ->
+           let* name = Json_util.require_string controller "name" in
+           Ok (Play_controller_held name)
+       | "free" -> Ok Play_controller_free
+       | "no_machine" -> Ok Play_machine_absent
+       | "unobserved" ->
+           let* reason = Json_util.require_string controller "reason" in
+           Ok (Play_controller_unobserved reason)
+       | other ->
+           Error (Printf.sprintf
+             "play invites controller state %S is not held, free, no_machine or unobserved" other))
+  | Some _ | None -> Error "play invites response has no controller object"
 
 let decode_play_invites json =
   let* json = play_object json in
+  let* pis_controller = decode_play_controller json in
   match Json_util.assoc_member_opt "invites" json with
   | Some (`List rows) ->
       List.fold_left
@@ -8162,7 +8190,7 @@ let decode_play_invites json =
           let* invite = decode_play_invite_row row in
           Ok (invite :: decoded))
         (Ok []) rows
-      |> Result.map List.rev
+      |> Result.map (fun rows -> { pis_rows = List.rev rows; pis_controller })
   | _ -> Error "play invites response has no invites list"
 
 let decode_play_invite_issued json =

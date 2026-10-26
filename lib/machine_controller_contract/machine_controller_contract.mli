@@ -64,3 +64,21 @@ type controller_need =
   | No_controller  (** reads or saves the machine *)
 
 val controller_need : dos_tool -> controller_need
+
+(** {1 Screen errors}
+
+    Why a [masc_dos_screen] call answered with an error. The worker writes it
+    into the failed result's [_meta]; host routes read it from there instead
+    of matching the text. *)
+
+type screen_error =
+  | Screen_no_machine  (** no DOS program is loaded *)
+  | Screen_capture_failed  (** the machine is there but its frame could not be read *)
+  | Screen_encode_failed  (** the frame was read but could not be encoded *)
+
+val screen_error_meta_field : screen_error -> string * Yojson.Safe.t
+(** The [_meta] field the worker adds to a failed screen result. *)
+
+val screen_error_of_meta : Yojson.Safe.t option -> screen_error option
+(** The error a failed screen result's [_meta] names. [None] when the field is
+    missing, is not a string, or names no {!screen_error}. *)

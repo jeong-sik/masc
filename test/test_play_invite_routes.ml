@@ -176,6 +176,28 @@ let test_invite_routes () =
         let player = String.sub link (String.length prefix) (String.length link - String.length prefix) in
         check int "a player cannot issue" 403 (status_of (call ~token:player "POST" invites ~body:issue_body));
         check int "a player cannot list" 403 (status_of (call ~token:player "GET" invites));
+        (* The controller is reported once for the list, as its state and,
+           when someone holds it, their name. *)
+        let listed_controller what =
+          let listed = call ~token:operator "GET" invites in
+          check int (what ^ ": the list answers") 200 (status_of listed);
+          let body = body_of listed in
+          (match member "invites" body with
+           | Some (`List [ entry ]) ->
+             check string (what ^ ": listed by name") "minsu" (string_member "name" entry);
+             check bool (what ^ ": not expired") false (bool_member "expired" entry)
+           | _ -> failf "%s: the list is not the one invite" what);
+          match member "controller" body with
+          | Some controller ->
+            ( string_member "state" controller
+            , match member "name" controller with Some (`String name) -> Some name | _ -> None )
+          | None -> failf "%s: the list carries no controller" what
+        in
+        let controller_state = pair string (option string) in
+        (* No DOS program is loaded, as right after a server restart: the
+           invite stays listed, and nobody holds the controller. *)
+        check controller_state "no machine loaded" ("no_machine", None)
+          (listed_controller "no machine loaded");
         check int "foreign workspace cannot revoke issued credential" 409
           (status_of (call ~token:operator "DELETE"
             (invites ^ "/minsu?expected_base_path=%2Fforeign&expected_masc_root=%2Fforeign%2F.masc")));
@@ -211,14 +233,15 @@ let test_invite_routes () =
                  ~saves_dir:(Filename.concat dir "saves")
                  ~checkpoint_dir:(Filename.concat dir "checkpoints") ~previous_autosave:Dos_lane.Keep_previous_autosave ~program_name:"game.com"
                  ~program_bytes:hello_com ~files:[] ~announce:ignore);
+            check controller_state "loading gives the controller to the loader" ("held", Some "operator")
+              (listed_controller "loaded by the operator");
+            dos_ok "free" (Dos_lane.pass ~who:"operator" ~to_:None ~announce:ignore);
+            check controller_state "a loaded machine nobody controls" ("free", None)
+              (listed_controller "loaded, freed");
             dos_ok "pass" (Dos_lane.pass ~who:"operator" ~to_:(Some "minsu") ~announce:ignore);
             check (option string) "the invite holds the controller" (Some "minsu") (controller ());
-            (match member "invites" (body_of (call ~token:operator "GET" invites)) with
-             | Some (`List [ entry ]) ->
-               check string "listed by name" "minsu" (string_member "name" entry);
-               check bool "not expired" false (bool_member "expired" entry);
-               check bool "holding the controller" true (bool_member "holds_controller" entry)
-             | _ -> fail "the list is not the one invite");
+            check controller_state "holding the controller" ("held", Some "minsu")
+              (listed_controller "passed to the invite");
             let revoked = call ~token:operator "DELETE" (invites ^ "/minsu") in
             check int "the operator revokes" 200 (status_of revoked);
             check bool "and the controller it held is freed" true
@@ -277,7 +300,33 @@ let test_invalid_persisted_invite_is_unavailable () =
       check bool "invalid bearer remains denied" true
         (Result.is_error (Auth.find_static_credential_by_token base_path ~token:player))))
 
+(* With no DOS add-on attached the machine cannot be asked at all. The
+   invites stay listed and the list says why the controller is unknown. *)
+let test_list_without_machine_worker_is_unobserved () =
+  with_dir "play-invite-unobserved-" (fun base_path ->
+    Auth.save_auth_config base_path
+      { Masc_domain.default_auth_config with enabled = true; require_token = true };
+    let operator = token_for base_path ~agent_name:"operator" ~role:Masc_domain.Admin in
+    ignore (token_for base_path ~agent_name:"visitor" ~role:Masc_domain.Player : string);
+    let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+    Eio_main.run (fun env ->
+      Masc_test_deps.init_eio_clock env;
+      Masc.Lane_addon_runtime.For_testing.reset ();
+      let result = dispatch ~state ~meth:"GET" ~target:Routes.invites_path ~token:operator ~body:"" in
+      check int "the list answers without a machine worker" 200 (status_of result);
+      let body = body_of result in
+      (match member "invites" body with
+       | Some (`List [ entry ]) -> check string "the invite is listed" "visitor" (string_member "name" entry)
+       | _ -> fail "the list is not the one invite");
+      match member "controller" body with
+      | Some controller ->
+        check string "the controller is unobserved" "unobserved" (string_member "state" controller);
+        check bool "and the list says why" true (string_member "reason" controller <> "")
+      | None -> fail "the list carries no controller"))
+
 let () =
   run "play-invite-routes"
     [ ("routes", [ test_case "persisted malformed invite returns 503" `Quick test_invalid_persisted_invite_is_unavailable
+      ; test_case "list without a machine worker reports why" `Quick
+          test_list_without_machine_worker_is_unobserved
       ; test_case "issue, list and revoke through the router" `Quick test_invite_routes ]) ]

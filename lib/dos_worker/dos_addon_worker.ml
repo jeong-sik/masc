@@ -136,14 +136,14 @@ let create ~base_path () =
   let screen ~arguments () =
     let tool_name = Controller.dos_tool_name Controller.Dos_screen
     and start_time = Tool_timing.start () in
-    let failure code result =
+    let failure error result =
       let answer = response result in
       let fields = match answer.S._meta with Some (`Assoc fields) -> fields | None | Some _ -> [] in
-      {answer with S._meta = Some (`Assoc (
-        ("io.github.jeong-sik/masc.machine.screenError", `String code) :: fields))} in
+      {answer with S._meta = Some (`Assoc (Controller.screen_error_meta_field error :: fields))} in
     match Machine.capture_png () with
     | Error (Machine.Lane Dos_lane.No_machine) ->
-        failure "no_machine" (Machine.of_lane ~base_path ~tool_name ~start_time (Error Dos_lane.No_machine))
+        failure Controller.Screen_no_machine
+          (Machine.of_lane ~base_path ~tool_name ~start_time (Error Dos_lane.No_machine))
     | Error
         (Machine.Lane
            (( Dos_lane.Activity_disabled
@@ -155,8 +155,10 @@ let create ~base_path () =
             | Dos_lane.Unsaveable _
             | Dos_lane.Checkpoint_refused _
             | Dos_lane.Other_program _
-         | Dos_lane.Would_discard_previous_autosave _ ) as error)) -> failure "capture_failed" (Machine.of_lane ~base_path ~tool_name ~start_time (Error error))
-    | Error (Machine.Encode message) -> failure "encode_failed" (Machine.image_capture_failed ~tool_name ~start_time message)
+         | Dos_lane.Would_discard_previous_autosave _ ) as error)) ->
+        failure Controller.Screen_capture_failed (Machine.of_lane ~base_path ~tool_name ~start_time (Error error))
+    | Error (Machine.Encode message) ->
+        failure Controller.Screen_encode_failed (Machine.image_capture_failed ~tool_name ~start_time message)
     | Ok {observation; width; height; png} ->
         let pad = if not (Tool_args.get_bool arguments "include_pad" false) then [] else
           let value = match observation.Dos_lane.saves_name with

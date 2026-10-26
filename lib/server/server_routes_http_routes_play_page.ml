@@ -1442,10 +1442,10 @@ let controller_json ~transaction ~config ~now =
       | Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Rejected message | Unavailable message | Activity_disabled message | Activity_unobserved message)) ->
       Error message
   | Ok result when result.Mcp_protocol.Mcp_types.is_error = Some true ->
-      (match result._meta with
-       | Some (`Assoc fields) when List.assoc_opt
-           "io.github.jeong-sik/masc.machine.screenError" fields = Some (`String "no_machine") -> Ok empty
-       | _ -> Error (Agent_core.Mcp.text_of_tool_result result))
+      (match Machine_controller_contract.screen_error_of_meta result._meta with
+       | Some Machine_controller_contract.Screen_no_machine -> Ok empty
+       | Some (Machine_controller_contract.Screen_capture_failed | Machine_controller_contract.Screen_encode_failed) | None ->
+           Error (Agent_core.Mcp.text_of_tool_result result))
   | Ok result ->
       (match result.structured_content with
        | Some (`Assoc fields) ->

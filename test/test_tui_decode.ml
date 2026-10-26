@@ -32,11 +32,32 @@ let test_checkpoint_receipt_identity_and_completion () =
 
 let test_play_invite_responses_preserve_recovery_facts () =
   let json = Yojson.Safe.from_string in
-  (match Tui_decode.decode_play_invites
-           (json {|{"invites":[{"name":"old","expires_at":null,"expired":false,"holds_controller":true}]}|}) with
-   | Ok [{ pi_name = "old"; pi_expires_at = None; pi_expired = false;
-           pi_holds_controller = true }] -> ()
+  let invites controller =
+    json (Printf.sprintf
+      {|{"invites":[{"name":"old","expires_at":null,"expired":false}],"controller":%s}|} controller) in
+  (match Tui_decode.decode_play_invites (invites {|{"state":"held","name":"old"}|}) with
+   | Ok { pis_rows = [{ pi_name = "old"; pi_expires_at = None; pi_expired = false }];
+          pis_controller = Tui_decode.Play_controller_held "old" } -> ()
    | _ -> Alcotest.fail "invite list lost null expiry or controller holder");
+  List.iter
+    (fun (controller, expected, what) ->
+      match Tui_decode.decode_play_invites (invites controller) with
+      | Ok { pis_controller; _ } when pis_controller = expected -> ()
+      | Ok _ | Error _ -> Alcotest.failf "%s did not decode: %s" what controller)
+    [ {|{"state":"free"}|}, Tui_decode.Play_controller_free, "a free controller"
+    ; {|{"state":"no_machine"}|}, Tui_decode.Play_machine_absent, "no loaded machine"
+    ; {|{"state":"unobserved","reason":"worker gone"}|},
+      Tui_decode.Play_controller_unobserved "worker gone", "an unobserved controller and its reason" ];
+  List.iter
+    (fun body ->
+      match Tui_decode.decode_play_invites (json body) with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.failf "an invite list with an unreadable controller was accepted: %s" body)
+    [ {|{"invites":[],"controller":{"state":"maybe"}}|}
+    ; {|{"invites":[],"controller":{"state":"held"}}|}
+    ; {|{"invites":[],"controller":{"state":"unobserved"}}|}
+    ; {|{"invites":[],"controller":"free"}|}
+    ; {|{"invites":[]}|} ];
   (match Tui_decode.decode_play_invite_revoked
            (json {|{"name":"old","revoked":true,"released_controller":false,"release_error":"disk fault"}|}) with
    | Ok { pir_name = "old"; pir_revoked = true; pir_released_controller = false;

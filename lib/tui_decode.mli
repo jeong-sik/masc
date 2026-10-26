@@ -2724,7 +2724,21 @@ type play_invite_row = {
   pi_name : string;
   pi_expires_at : string option;
   pi_expired : bool;
-  pi_holds_controller : bool;
+}
+
+(** Who holds the shared DOS controller, reported once for the whole invite
+    list. [Play_machine_absent] means no DOS program is loaded, so nobody
+    holds it. [Play_controller_unobserved] carries the server's reason when
+    the machine could not be asked. Any other [state] is a decode error. *)
+type play_controller =
+  | Play_controller_held of string
+  | Play_controller_free
+  | Play_machine_absent
+  | Play_controller_unobserved of string
+
+type play_invites = {
+  pis_rows : play_invite_row list;
+  pis_controller : play_controller;
 }
 
 type play_invite_issued = {
@@ -2740,7 +2754,7 @@ type play_invite_revoked = {
   pir_release_error : string option;
 }
 
-val decode_play_invites : Yojson.Safe.t -> (play_invite_row list, string) result
+val decode_play_invites : Yojson.Safe.t -> (play_invites, string) result
 val decode_play_invite_issued : Yojson.Safe.t -> (play_invite_issued, string) result
 val decode_play_invite_revoked : Yojson.Safe.t -> (play_invite_revoked, string) result
 val play_invite_absent_body : string -> bool

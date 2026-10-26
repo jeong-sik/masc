@@ -29,13 +29,11 @@ let current_layout ~config =
       | Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Rejected message | Unavailable message | Activity_disabled message | Activity_unobserved message)) ->
       failure `Service_unavailable "machine_unavailable" message
   | Ok result when result.Mcp_protocol.Mcp_types.is_error = Some true ->
-      let code = match result._meta with
-        | Some (`Assoc fields) -> List.assoc_opt "io.github.jeong-sik/masc.machine.screenError" fields
-        | _ -> None in
       let message = Agent_core.Mcp.text_of_tool_result result in
-      (match code with
-       | Some (`String "no_machine") -> failure `Conflict "no_machine" message
-       | _ -> failure `Internal_server_error "screen_failed" message)
+      (match Machine_controller_contract.screen_error_of_meta result._meta with
+       | Some Machine_controller_contract.Screen_no_machine -> failure `Conflict "no_machine" message
+       | Some (Machine_controller_contract.Screen_capture_failed | Machine_controller_contract.Screen_encode_failed) | None ->
+           failure `Internal_server_error "screen_failed" message)
   | Ok result ->
       let pad = match result.structured_content with
         | Some (`Assoc fields) -> List.assoc_opt "pad" fields | _ -> None in

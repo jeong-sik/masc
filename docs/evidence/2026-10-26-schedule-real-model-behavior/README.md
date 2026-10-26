@@ -44,7 +44,7 @@ terminal/note/ledger/receipt evidence, not a fabricated probe exit-1 receipt.
 The manifest hashes every retained input and capture, records original raw
 hashes separately, and describes selected fields and log excerpts. Live turn
 control/interrupt tokens are omitted. Baseline snapshots retain exact queue,
-reaction and note evidence plus selected owner identity/counters. Each
+reaction and note evidence plus selected owner identity/counters. Checks retain names and decisions; repeated detail snapshots are kept only in their dedicated capture. Tool receipts retain exact input/output, execution ID, model binding and turn identity, omitting repeated resource/action-radius descriptions. Original raw digests and selection rules remain in the manifest. Each
 `probe-used.py` is the actual run's reproduction source. The busy script needs
 the missing-effect terminal oracle before reuse. No new attempt is represented
 by these records.

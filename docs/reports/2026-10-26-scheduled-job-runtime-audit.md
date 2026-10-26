@@ -129,7 +129,7 @@ shutdown 성공 수가 아니다. 따라서 이 실행은 guard 종료 뒤의 �
 | continuous busy 중 예약 진입 | 실제 6a2d 실행에서 진입·양보는 관측했으나, 원래 효과 없이 Completed/ACK되는 F6 P1 반례 확인. 아래 참조 |
 | paused/offline → Resume/Boot | paused 보존은 이번에 실행. 재개 후 정확한 발생의 처리·ACK·결과 전달은 미검증 |
 | F2 startup recovery 최초 실패 | 현 소스 후보 유지. 같은 process에서 저장소 회복 후 수렴하는지 주입 실행 필요 |
-| F3 권한 확인과 mutation 사이 경합 | 순차 creator/recipient 검사는 통과. retarget과 취소/수정의 결정적인 경합은 미검증 |
+| F3 권한 확인과 mutation 사이 경합 | 수리 PR46182의 locked 재인가와 공개 update interleaving/locked cancel 거절을 별도 Test124로 실행. 실제 HTTP cancel 경합·수리 binary 실행은 미검증 |
 | F4 due-only 수정과 recurrence 갱신 경합 | 순차 수정과 별개. lock 전 snapshot을 interleave하는 실행 필요 |
 | F5 retry/실패 정산 write 실패 | 현 소스 후보 유지. Running 저장 후 정산 실패·복구·후속 tick 실행 필요 |
 | 실제 모델·계정 전환 | DeepSeek·GLM의 독립 단독 예약은 실제 노트/ACK까지 성공. 원 source/outbox를 유지하는 provider/account failover는 미검증 |
@@ -229,3 +229,13 @@ SIGINT(exit 130)로 끝냈다. producer는 다시 no-live-turn을 읽고 소유�
 provider/account failover, 외부 파일·채널 결과, 실제 sandbox Execute, Lane worker나
 TUI까지 검증했다고 확대하지 않는다. API33·상태23·CI195·단독 모델 두 예·busy 반례는
 서로 다른 범위이며 합산해 사용자 시나리오 통과 수로 만들지 않는다.
+
+F3 권한 수리 [#46182](https://github.com/jeong-sik/masc/pull/46182)는 별도 Test
+[40330717541](https://github.com/jeong-sik/masc/actions/runs/40330717541), head
+`ed79abfd0500cec731168ab2517969ef30db490a`, ref `fix/schedule-mutation-authority-20261026`,
+conclusion **success**다. 실제 4suite artifact의 55/58/9/2=124 cases를 대조했다.
+F4 수리 [#46193](https://github.com/jeong-sik/masc/pull/46193)는 같은 native stack
+#46194의 상위층이며 head `e0be8af8df8d223bbdf052f3372e282d06f58cb2`다.
+해당 head의 별도 두-suite Test40332170687은 접수했으며 이 문서에 완료 성공 근거는 없다.
+F6 수리는 별도 스택에서 진행 중이다. 어느 수리도 이 감사의 실제 installed-binary 재검증으로
+대체해 쓰지 않는다.

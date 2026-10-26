@@ -41,8 +41,8 @@ API33/F1/restart 상태23은 [실제 API bundle](../evidence/2026-10-26-schedule
 | 15 | public id를 유지하며 새 instance로 바꾼다 | W4–7, S-state4–7; API33 | public id 유지·fresh instance 및 terminal 변경 거절 실행. |
 | 16 | 내용만 수정하면서 과거 due 시각을 보존한다 | W8–9/46, S-state8; API33 | due/recurrence/expiry 보존 및 명시 retime 경계 실행. |
 | 17 | 동시 수정·retime가 저장 결과를 잃지 않는다 | W10 | 양쪽 timing 생략 content edit의 결정적 concurrent retime 보존 실행. 전 조합 보장 아님. |
-| 18 | 권한 확인 사이 target이 바뀌면 이전 recipient 변경을 거절한다 | F3 소스 반례; 수리 PR46182 | locked current-row 권한 수리와 회귀 작성. 아직 해당 수리의 실행 성공 증거 없음. |
-| 19 | due만 바꿀 때 다른 호출이 갱신한 recurrence를 보존한다 | F4 소스 반례 | due-only/omitted recurrence가 최신 recurrence를 덮는 경합 유지. W10과 다름. |
+| 18 | 권한 확인 사이 target이 바뀌면 이전 recipient 변경을 거절한다 | F3 소스 반례; 수리 PR46182 | locked current-row 권한 수리 PR46182의 새 Test124 통과. 공개 update interleaving/locked cancel 거절 포함; 실제 HTTP cancel race·새 binary는 미검증. |
+| 19 | due만 바꿀 때 다른 호출이 갱신한 recurrence를 보존한다 | F4 소스 반례; 수리 PR46193 | 최신 recurrence 보존 수리와 공개 interleaving 2건 작성. 새 Test40332170687 접수, 실행 결론 미확인. W10과 다른 조합. |
 | 20 | A에 이미 대기 중인 반복 예약을 B로 바꾸고 취소한다 | retarget-cancel-4 | 실제 F1 실패: 이전 owner pending이 취소 성공 뒤 남음. 수리 미완료. |
 | 21 | 아직 dispatch되지 않은 Scheduled/Due를 취소한다 | W3, S-lifecycle1, C10–11; API33 | 정의 및 current-target pending 취소 실행. 이전 target/instance 조합은 F1 실패. |
 | 22 | 전달됐지만 아직 턴이 시작되지 않은 단발을 취소한다 | W34 | accepted one-shot Succeeded 뒤 cancel의 typed refusal 실행. 현행 기능 한계 유지. |
@@ -86,7 +86,9 @@ API33/F1/restart 상태23은 [실제 API bundle](../evidence/2026-10-26-schedule
 
 
 F3 수리는 [PR46182](https://github.com/jeong-sik/masc/pull/46182)의
-`ed79abfd0500cec731168ab2517969ef30db490a`에 게시됐다. 소스와 문법 검사는
-확인했지만 변경된 회귀의 실행/타입 검증 성공은 아직 근거가 없다.
-별도 요청한 Test `40330717541`은 이 문서 작성 시 접수 상태이며 이 표의 195개와 다른 검사다.
+`ed79abfd0500cec731168ab2517969ef30db490a`에 게시됐다. 소스 검토와 별도 **Test [40330717541](https://github.com/jeong-sik/masc/actions/runs/40330717541)**,
+head `ed79abfd0500cec731168ab2517969ef30db490a`, ref `fix/schedule-mutation-authority-20261026`,
+conclusion **success**를 확인했다. 실제 artifact는 55/58/9/2=124 cases이며
+[완료 영수증](../evidence/2026-10-26-schedule-runtime-behavior/authority-fix-ci-result.json)에 있다.
+이 표의 기존 195개와 다른 코드 head/검사이며 설치·실제 HTTP cancel race 증명은 아니다.
 F4/F6는 별도 수리 중이다. 소스 작성·리뷰·CI·새 binary 설치·실제 반례 재검증을 구분한다.

@@ -90,3 +90,12 @@ compile fix. Neither an admission nor an in-progress run is a completed pass.
 and success summaries in order, trimming trailing line whitespace. The original
 full-log digest and archive digest are recorded separately. This is targeted CI
 evidence for that head, not whole-feature, real-provider, installed-binary or F1 repair proof.
+
+The later F3 ownership repair is a separate code head: **Test** run
+[40330717541](https://github.com/jeong-sik/masc/actions/runs/40330717541),
+head `ed79abfd0500cec731168ab2517969ef30db490a`, ref
+`fix/schedule-mutation-authority-20261026`, conclusion **success**.
+`authority-fix-ci-result.json` and its excerpt bind the actual artifact to
+55/58/9/2 cases (124 total), including the three new ownership regressions.
+The four-suite compile and execution are not installation or an actual HTTP
+cancel read/retarget interleaving proof. Original full-log/artifact digests are separate.

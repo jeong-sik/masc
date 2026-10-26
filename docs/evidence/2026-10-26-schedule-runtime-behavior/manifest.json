@@ -66,7 +66,9 @@
     "targeted-ci-after-restack-admission.json": "85766349c30c711e9bd2410cf10d182be7185d4467f10f37562f052ee0da1d0c",
     "backend-recovery-terminal.json": "a3a7b265070fcaf9cd94faeb091d111b13557d1994847c3a4ad26046ed980621",
     "targeted-ci-after-restack-result.json": "a8b3608f607e04d89d98acb8168b1bcaaeceb0f7cc2422f910a39323f78bb994",
-    "targeted-ci-after-restack-excerpt.txt": "171cfd8107727cacd0ed40eeee30b22fbc4e00886569dc58cc5af33d9cfbe151"
+    "targeted-ci-after-restack-excerpt.txt": "171cfd8107727cacd0ed40eeee30b22fbc4e00886569dc58cc5af33d9cfbe151",
+    "authority-fix-ci-result.json": "94cb5854ad54e0b18b77f068091bbe6dd93103c40c0ee7c852c5e769dfb59964",
+    "authority-fix-ci-excerpt.txt": "4daa8158b5b9b67b4ba9820d65f384bc8a7e26f014d02e7f161e2329146f936f"
   },
   "source_comparison": {
     "installed_commit": "bc3038a22374705db648bebd7f556223b3e84727",
@@ -114,10 +116,12 @@
   },
   "source_log_digests": {
     "targeted-test-failure.log": "2a63e5a2000c50f6ccb7d29a4f72842bf043766f0f84970825af3c9753aab175",
-    "ci40325758202/ci-run-tests.log": "a586e98aea99d7aa0e4f0cb77164597861573531955be45044802e5751738d03"
+    "ci40325758202/ci-run-tests.log": "a586e98aea99d7aa0e4f0cb77164597861573531955be45044802e5751738d03",
+    "ci40330717541/ci-run-tests.log": "4e9c82fffb21428c4e334ba486c7a6a3a694a43d7264905f7655dc907bdbddd5"
   },
   "derivations": {
     "targeted-ci-failure-excerpt.txt": "Selected diagnostic lines from the full failed-step log, with trailing line whitespace trimmed. Original full-log digest remains separate.",
-    "targeted-ci-after-restack-excerpt.txt": "Only lines beginning [targeted], Testing `, or Test Successful from the full suite-runner artifact log, in original order, with trailing line whitespace trimmed. Full-log and archive digests are separate."
+    "targeted-ci-after-restack-excerpt.txt": "Only lines beginning [targeted], Testing `, or Test Successful from the full suite-runner artifact log, in original order, with trailing line whitespace trimmed. Full-log and archive digests are separate.",
+    "authority-fix-ci-excerpt.txt": "Only [targeted], Testing ` and Test Successful lines in original order, trailing line whitespace trimmed; full original digest separately recorded."
   }
 }

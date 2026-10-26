@@ -5,20 +5,14 @@
     "count": 11,
     "source": "tool_call_io",
     "producer": "keeper_hooks_agent_core.post_tool_use|mcp_server_eio_call_tool.runtime_mcp",
-    "durable_store": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-runtime-audit/artifacts/scheduled-job-runtime-audit-20261026/real-glm-1/workspace/.masc/tool_calls",
-    "dashboard_surface": "/api/v1/keepers/:name/tool-calls",
-    "freshness_slo_s": 300.0,
-    "latest_ts_unix": 1793020383.242623,
-    "latest_ts_iso": "2026-10-26T13:13:03Z",
-    "latest_age_s": 11.894002914428711,
     "health": "ok",
-    "stale_reason": null,
     "coverage_gaps": [],
     "entries": [
       {
         "ts": 1793020302.195252,
         "record_kind": "tool_call",
         "keeper": "audit-live-glm",
+        "agent_name": "audit-live-glm",
         "tool": "keeper_tool_search",
         "input": {
           "names": [
@@ -27,187 +21,39 @@
           ]
         },
         "output": "now callable:\n- masc_schedule_note_add: Append a durable note to one scheduled request. Notes record why a\n- masc_schedule_notes_list: List the durable notes of one scheduled request, oldest first. Notes are",
-        "duration_ms": 0.14281272888183594,
+        "execution_id": "execution-node-565843b1ff5fe778c6b7afc40224c657",
+        "model": "runtime",
+        "runtime_profile": "glm-coding.glm-5-3",
         "runtime_contract": {
           "keeper_name": "audit-live-glm",
           "trace_id": "trace-1793020268086-00000",
           "session_id": "trace-1793020268086-00000",
-          "keeper_turn_id": 1,
-          "task_id": null,
-          "goal_ids": [],
-          "sandbox_profile": "microvm",
-          "sandbox_root": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-runtime-audit/artifacts/scheduled-job-runtime-audit-20261026/real-glm-1/workspace/.masc/playground/audit-live-glm/",
-          "sandbox_roots": [
-            ".masc/playground/audit-live-glm/"
-          ],
-          "path_resolution": {
-            "read_implicit_cwd": false,
-            "read_explicit_cwd_supported": true,
-            "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
-            "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
-            "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
-            "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
-          },
-          "network_mode": "none",
-          "runtime_profile": "glm-coding.glm-5-3"
-        },
-        "action_radius": {
-          "tool_name": "keeper_tool_search",
-          "action_key": "keeper_tool_search",
-          "target_kind": "tool",
-          "target_path": null,
-          "sandbox_target": "microvm",
-          "observed_paths": [],
-          "duration_ms": 0.14281272888183594,
-          "error": null
-        },
-        "agent_name": "audit-live-glm",
-        "model": "runtime",
-        "runtime_profile": "glm-coding.glm-5-3",
-        "turn_kind": "autonomous",
-        "lane": "tool_optional",
-        "prompt_fingerprint": "bc9faa9aa81d89abf5572431a78aaf7efd5a83dfaeb5a29bda87c3ee16725615",
-        "execution_id": "execution-node-565843b1ff5fe778c6b7afc40224c657",
-        "tool_observation": {
-          "attribution": {
-            "kind": "pathless"
-          },
-          "turn_ref": "trace-1793020268086-00000#1",
-          "declared_progress": null
-        },
-        "physical_execution_id": "execution-node-565843b1ff5fe778c6b7afc40224c657",
-        "tool_use_id": "call_deab81fe034243239baa2ff2",
-        "planned_index": 0,
-        "batch_index": 0,
-        "batch_size": 1,
-        "execution_mode": "serial",
-        "wire_outcome": "ok",
-        "trace_id": "trace-1793020268086-00000",
-        "session_id": "trace-1793020268086-00000",
-        "turn": 0,
-        "keeper_turn_id": 1,
-        "sandbox_profile": "microvm",
-        "network_mode": "none",
-        "result_bytes": 207,
-        "input_fingerprint": "81d95a9332606e68d5c00ae754a2251fc516564be9685057c272a4c65506ec01",
-        "output_fingerprint": "53e6774201fcdd2102306ead9bf67ce12f9dc2d1b0017123e8d1a701a5e72411",
-        "definition_source": "tools/keeper_tool_search.toml"
+          "keeper_turn_id": 1
+        }
       },
       {
         "ts": 1793020310.076116,
         "record_kind": "tool_call",
         "keeper": "audit-live-glm",
+        "agent_name": "audit-live-glm",
         "tool": "keeper_context_status",
         "input": {},
         "output": "{\"name\":\"audit-live-glm\",\"trace_id\":\"trace-1793020268086-00000\",\"checkpoint_bytes\":105689,\"message_count\":1,\"sandbox_id\":\"keeper:audit-live-glm\",\"sandbox_backend\":\"microvm\",\"sandbox_profile\":\"microvm\",\"sandbox_network_mode\":\"none\",\"sandbox_lifetime\":\"persistent_backend_task_overlay\",\"sandbox_root\":\".\",\"sandbox_paths\":{\"root\":\".\"},\"sandbox_live\":{\"keeper\":\"audit-live-glm\",\"sandbox_profile\":\"microvm\",\"configured_network_mode\":\"none\",\"configured_image_name\":\"base\",\"configured_image\":\"masc-sandbox:general\",\"configured_image_unresolved\":null,\"effective_mode\":\"microvm_vm_not_running\",\"managed_container_kind\":\"keeper-vm\",\"containers\":[],\"preflight\":null,\"resource_config\":{\"memory\":\"2048m\",\"cpus\":\"4\",\"guest_size_error\":null,\"work_volume_size\":\"256g\",\"pids_limit\":null,\"tmpfs_size\":null},\"volume_filesystem\":[{\"volume\":\"masc-keeper-work-audit-live-glm\",\"observed_at\":null,\"image\":null,\"filesystem\":null,\"observation_failed\":null,\"repair_backup\":null},{\"volume\":\"masc-keeper-build-audit-live-glm\",\"observed_at\":null,\"image\":null,\"filesystem\":null,\"observation_failed\":null,\"repair_backup\":null}],\"paths\":{\"host_workspace\":\"/Users/dancer/me/workspace/yousleepwhen/masc-schedule-runtime-audit/artifacts/scheduled-job-runtime-audit-20261026/real-glm-1/workspace/.masc/playground/audit-live-glm\",\"guest_home\":null,\"guest_workspace\":\"/masc-work/audit-live-glm\",\"guest_config\":\"/tmp/masc-runtime/.masc/config\",\"guest_work_volume\":\"/masc-work\"},\"container_error\":null,\"why_no_container\":\"no visible apple_container microVM guest; a guest is created on this Keeper's first sandboxed tool execution\",\"repository_checkouts\":{\"state\":\"filesystem_unavailable\",\"scan\":{\"state\":\"unavailable\",\"limit\":null,\"detail\":\"workspace root missing: /masc-work/audit-live-glm\",\"scanned_entries\":null},\"observed_at\":\"2026-10-26T13:11:50Z\",\"observed_at_unix\":1793020310.073194,\"entries\":[],\"error\":null}},\"memory_facts_total\":0,\"memory_limits\":{\"scope\":\"ordinary_current\",\"enforcement\":\"advisory\",\"category_cap\":30,\"facts_per_category_cap\":30,\"category_count\":0,\"categories_over_cap\":0,\"categories\":[]},\"source_memory_facts_total\":0,\"source_memory_invalidations_total\":0}",
-        "duration_ms": 49.88384246826172,
+        "execution_id": "execution-node-87d0932ff3f59791bfcbed4f488fdea2",
+        "model": "runtime",
+        "runtime_profile": "glm-coding.glm-5-3",
         "runtime_contract": {
           "keeper_name": "audit-live-glm",
           "trace_id": "trace-1793020268086-00000",
           "session_id": "trace-1793020268086-00000",
-          "keeper_turn_id": 1,
-          "task_id": null,
-          "goal_ids": [],
-          "sandbox_profile": "microvm",
-          "sandbox_root": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-runtime-audit/artifacts/scheduled-job-runtime-audit-20261026/real-glm-1/workspace/.masc/playground/audit-live-glm/",
-          "sandbox_roots": [
-            ".masc/playground/audit-live-glm/"
-          ],
-          "path_resolution": {
-            "read_implicit_cwd": false,
-            "read_explicit_cwd_supported": true,
-            "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
-            "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
-            "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
-            "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
-          },
-          "network_mode": "none",
-          "runtime_profile": "glm-coding.glm-5-3"
-        },
-        "action_radius": {
-          "tool_name": "keeper_context_status",
-          "action_key": "keeper_context_status",
-          "target_kind": "tool",
-          "target_path": null,
-          "sandbox_target": "microvm",
-          "observed_paths": [],
-          "duration_ms": 49.88384246826172,
-          "error": null
-        },
-        "route_evidence": {
-          "descriptor_id": "keeper.context.status",
-          "capability_id": "keeper_context_status",
-          "keeper_model_projection": "internal_name",
-          "public_name": "keeper_context_status",
-          "canonical_name": "keeper_context_status",
-          "description": "Check your own persisted checkpoint and session state. Returns: name (your keeper name), checkpoint_bytes, message_count, memory fact counts, sandbox health, and your workspace root plus backend/profile metadata. Context-window occupancy is not currently observed and is not returned. sandbox paths are tool-ready and can be passed directly as path or cwd to keeper tools without prefix. Use when checking checkpoint/session continuity or resolving a path without string-interpolating your own keeper name.",
-          "executor": "in_process",
-          "backend": "ocaml_runtime",
-          "sandbox": "none",
-          "runtime_handler": "tool_context_status",
-          "execution": "concurrent",
-          "tool_kind": "atomic",
-          "composable_output": {
-            "kind": "opaque"
-          },
-          "receipt_labels": {
-            "descriptor_id": "keeper.context.status",
-            "capability_id": "keeper_context_status",
-            "keeper_model_projection": "internal_name",
-            "public_name": "keeper_context_status",
-            "canonical_name": "keeper_context_status",
-            "executor": "in_process",
-            "backend": "ocaml_runtime",
-            "sandbox": "none",
-            "runtime_handler": "tool_context_status",
-            "execution": "concurrent",
-            "composable_output": "opaque",
-            "input_schema_source": "canonical_registry"
-          },
-          "eval_tags": [],
-          "readonly": true,
-          "cwd_scope": null,
-          "polling_read": false,
-          "sandbox_profile": "microvm",
-          "tool_name": "keeper_context_status"
-        },
-        "agent_name": "audit-live-glm",
-        "model": "runtime",
-        "runtime_profile": "glm-coding.glm-5-3",
-        "turn_kind": "autonomous",
-        "lane": "tool_optional",
-        "prompt_fingerprint": "bc9faa9aa81d89abf5572431a78aaf7efd5a83dfaeb5a29bda87c3ee16725615",
-        "execution_id": "execution-node-87d0932ff3f59791bfcbed4f488fdea2",
-        "tool_observation": {
-          "attribution": {
-            "kind": "pathless"
-          },
-          "turn_ref": "trace-1793020268086-00000#1",
-          "declared_progress": null
-        },
-        "physical_execution_id": "execution-node-87d0932ff3f59791bfcbed4f488fdea2",
-        "tool_use_id": "call_4e5fc0edda314a6eb01e9589",
-        "planned_index": 0,
-        "batch_index": 0,
-        "batch_size": 1,
-        "execution_mode": "concurrent",
-        "wire_outcome": "ok",
-        "disposition": "completed",
-        "trace_id": "trace-1793020268086-00000",
-        "session_id": "trace-1793020268086-00000",
-        "turn": 1,
-        "keeper_turn_id": 1,
-        "sandbox_profile": "microvm",
-        "network_mode": "none",
-        "result_bytes": 2144,
-        "input_fingerprint": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-        "output_fingerprint": "2b92f38c51d068f0edf7559dd6346c9ce26246e83cfb42021b92318ac0e04fff",
-        "definition_source": "tools/keeper_context_status.toml"
+          "keeper_turn_id": 1
+        }
       },
       {
         "ts": 1793020316.097973,
         "record_kind": "tool_call",
         "keeper": "audit-live-glm",
+        "agent_name": "audit-live-glm",
         "tool": "keeper_memory_search",
         "input": {
           "query": "schedule_id",
@@ -215,455 +61,84 @@
           "limit": 5
         },
         "output": "{\"query\":\"schedule_id\",\"source\":\"history\",\"match_count\":0,\"matches\":[],\"no_match\":true}",
-        "duration_ms": 28.931140899658203,
+        "execution_id": "execution-node-0e9a61d5419fdfe4a4586c94f1dcfb62",
+        "model": "runtime",
+        "runtime_profile": "glm-coding.glm-5-3",
         "runtime_contract": {
           "keeper_name": "audit-live-glm",
           "trace_id": "trace-1793020268086-00000",
           "session_id": "trace-1793020268086-00000",
-          "keeper_turn_id": 1,
-          "task_id": null,
-          "goal_ids": [],
-          "sandbox_profile": "microvm",
-          "sandbox_root": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-runtime-audit/artifacts/scheduled-job-runtime-audit-20261026/real-glm-1/workspace/.masc/playground/audit-live-glm/",
-          "sandbox_roots": [
-            ".masc/playground/audit-live-glm/"
-          ],
-          "path_resolution": {
-            "read_implicit_cwd": false,
-            "read_explicit_cwd_supported": true,
-            "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
-            "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
-            "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
-            "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
-          },
-          "network_mode": "none",
-          "runtime_profile": "glm-coding.glm-5-3"
-        },
-        "action_radius": {
-          "tool_name": "keeper_memory_search",
-          "action_key": "keeper_memory_search",
-          "target_kind": "tool",
-          "target_path": null,
-          "sandbox_target": "microvm",
-          "observed_paths": [],
-          "duration_ms": 28.931140899658203,
-          "error": null
-        },
-        "route_evidence": {
-          "descriptor_id": "keeper.memory.search",
-          "capability_id": "keeper_memory_search",
-          "keeper_model_projection": "internal_name",
-          "public_name": "keeper_memory_search",
-          "canonical_name": "keeper_memory_search",
-          "description": "Search durable Memory OS facts or raw conversation history, case-insensitively. Short ASCII alphanumeric terms (1-2 characters) match ASCII word boundaries (Korean suffixes remain searchable); other terms retain substring matching. Facts: whole-query matches first in store order, then claims holding any whitespace-separated term (3+ characters match inside words) by BM25. History needs a non-empty query, matched whole or by every term, newest first. The default reads only current facts; source='all' adds absorbed originals, dropped history and conversation history. Source-bound files are revalidated only for query-matching candidates; unrelated claims remain stored and unverified. source_verification.status='incomplete' means matching claims were withheld because their sources could not be verified; it is not proof of no relevant memory. total_candidates counts stored claims, not verified results. Current results are paged: when truncated=true, pass next_cursor as cursor with the same query and source=current to read the rest. A changed current corpus or query rejects the cursor; restart without it. Historical scopes do not accept cursors. Fact results name their store and original basis; current facts include exact memory_id, category and origin (authored is yours to supersede). Use a memory_id as a derived conclusion's premise_id only for store='current_memory_snapshot'. source='absorbed' finds facts merged into a newer claim: into is the claim now holding it; into_current=false if not current. source='dropped' retrieves historical removed claims with reasons from the journal; these are not current facts. Check the reason and original evidence before using or writing a new current claim. Search never restores memory. Pending removal finalization is reported as a read failure until a writer recovers it; older journal gaps may remain.",
-          "executor": "in_process",
-          "backend": "ocaml_runtime",
-          "sandbox": "none",
-          "runtime_handler": "tool_memory_search",
-          "execution": "concurrent",
-          "tool_kind": "atomic",
-          "composable_output": {
-            "kind": "opaque"
-          },
-          "receipt_labels": {
-            "descriptor_id": "keeper.memory.search",
-            "capability_id": "keeper_memory_search",
-            "keeper_model_projection": "internal_name",
-            "public_name": "keeper_memory_search",
-            "canonical_name": "keeper_memory_search",
-            "executor": "in_process",
-            "backend": "ocaml_runtime",
-            "sandbox": "none",
-            "runtime_handler": "tool_memory_search",
-            "execution": "concurrent",
-            "composable_output": "opaque",
-            "input_schema_source": "canonical_registry"
-          },
-          "eval_tags": [],
-          "readonly": true,
-          "cwd_scope": null,
-          "polling_read": false,
-          "tool_name": "keeper_memory_search"
-        },
-        "agent_name": "audit-live-glm",
-        "model": "runtime",
-        "runtime_profile": "glm-coding.glm-5-3",
-        "turn_kind": "autonomous",
-        "lane": "tool_optional",
-        "prompt_fingerprint": "bc9faa9aa81d89abf5572431a78aaf7efd5a83dfaeb5a29bda87c3ee16725615",
-        "execution_id": "execution-node-0e9a61d5419fdfe4a4586c94f1dcfb62",
-        "tool_observation": {
-          "attribution": {
-            "kind": "pathless"
-          },
-          "turn_ref": "trace-1793020268086-00000#1",
-          "declared_progress": null
-        },
-        "physical_execution_id": "execution-node-0e9a61d5419fdfe4a4586c94f1dcfb62",
-        "tool_use_id": "call_908d2707e72e4ac0bf0eb3ea",
-        "planned_index": 0,
-        "batch_index": 0,
-        "batch_size": 1,
-        "execution_mode": "concurrent",
-        "wire_outcome": "ok",
-        "disposition": "completed",
-        "trace_id": "trace-1793020268086-00000",
-        "session_id": "trace-1793020268086-00000",
-        "turn": 2,
-        "keeper_turn_id": 1,
-        "sandbox_profile": "microvm",
-        "network_mode": "none",
-        "result_bytes": 87,
-        "input_fingerprint": "5f76969afe523961937f95c993fc4ec25e6cdbd82d8f22a0c128d993f588fb15",
-        "output_fingerprint": "7b88506466c9971f90c4a98d17f30c7de56b0b1624a3436fa7f8a987f8be58c2",
-        "definition_source": "tools/keeper_memory_search.toml"
+          "keeper_turn_id": 1
+        }
       },
       {
         "ts": 1793020331.021054,
         "record_kind": "tool_call",
         "keeper": "audit-live-glm",
+        "agent_name": "audit-live-glm",
         "tool": "masc_schedule_note_add",
         "input": {
           "body": "\uc99d\uac70 \ubcf4\uc874 \ub178\ud2b8: 2026-10-26 \uc608\uc57d \uc2e4\ud589\uc5d0\uc11c \uc774 Keeper(audit-live-glm)\uac00 \uad00\uce21\ud55c \ub0b4\uc6a9\uc744 \ub0a8\uae34\ub2e4. \uc608\uc57d \uc2e4\ud589 \uc811\uc218\uc640 \uc790\uc728 \ud134 \uc9c4\uc785\uc740 \ud655\uc778\ub418\uc5c8\uc73c\ub098(checkpoint message_count=1, trace_id=trace-1793020268086-00000), \uc6d0\ubcf8 \uc608\uc57d \uc815\uc758\u00b7schedule_id\u00b7\uba54\uc2dc\uc9c0 \ubcf8\ubb38\uc740 \uc774 \ud134\uc758 \ucee8\ud14d\uc2a4\ud2b8\uc5d0 \ud568\uaed8 \uc804\ub2ec\ub418\uc9c0 \uc54a\uc558\ub2e4. \uba54\ubaa8\ub9ac\u00b7\uae30\ub85d \uac80\uc0c9(schedule_id, history)\uc5d0\uc11c\ub3c4 \ud574\ub2f9 \uc2dd\ubcc4\uc790\ub97c \ucc3e\uc9c0 \ubabb\ud588\ub2e4. \ub3c4\uad6c \ub85c\ub354\ub85c masc_schedule_note_add/masc_schedule_notes_list \uc2a4\ud0a4\ub9c8\ub97c \ud655\ubcf4\ud55c \ub4a4 \uc774 \ub178\ud2b8\ub97c \ub0a8\uae34\ub2e4. \uc0cc\ub4dc\ubc15\uc2a4 \uc0c1\ud0dc: microvm_vm_not_running, \ub124\ud2b8\uc6cc\ud06c none, \uac8c\uc2a4\ud2b8 \uc6cc\ud06c\uc2a4\ud398\uc774\uc2a4 \ub8e8\ud2b8(/masc-work/audit-live-glm) \ud604\uc7ac \uc811\uadfc \ubd88\uac00. \ub2e4\uc74c \ub2e8\uacc4: \uc774 \ub178\ud2b8\uac00 \uc6d0\ub798 \uc608\uc57d(schedule_id)\uc5d0 \ubb36\uc774\uc9c0 \ubabb\ud588\ub2e4\uba74, \uc6d0\ubcf8 \uc608\uc57d ID\ub97c \uc544\ub294 \uc6b4\uc601\uc790\u00b7Keeper\uac00 \uac19\uc740 \uc0ac\uc2e4\uc744 \ud574\ub2f9 \uc608\uc57d\uc758 \ub178\ud2b8\ub85c \uc62e\uaca8\uc57c \ud55c\ub2e4.",
           "schedule_id": "audit-live-glm"
         },
         "output": "{\"message\":\"schedule not found\",\"masc.tool_disposition\":\"failed\",\"failure_class\":\"workflow_rejection\",\"next_move\":\"The current state does not admit this action; it is a rule, not a syntax problem. Read the current state first. The same call succeeds only after the state changes.\",\"data\":{\"status\":\"error\",\"message\":\"schedule not found\"}}",
-        "duration_ms": 8.527040481567383,
+        "execution_id": "execution-node-3731f6bbcbd2d472ed9aebd9c1274edf",
+        "model": "runtime",
+        "runtime_profile": "glm-coding.glm-5-3",
         "runtime_contract": {
           "keeper_name": "audit-live-glm",
           "trace_id": "trace-1793020268086-00000",
           "session_id": "trace-1793020268086-00000",
-          "keeper_turn_id": 1,
-          "task_id": null,
-          "goal_ids": [],
-          "sandbox_profile": "microvm",
-          "sandbox_root": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-runtime-audit/artifacts/scheduled-job-runtime-audit-20261026/real-glm-1/workspace/.masc/playground/audit-live-glm/",
-          "sandbox_roots": [
-            ".masc/playground/audit-live-glm/"
-          ],
-          "path_resolution": {
-            "read_implicit_cwd": false,
-            "read_explicit_cwd_supported": true,
-            "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
-            "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
-            "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
-            "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
-          },
-          "network_mode": "none",
-          "runtime_profile": "glm-coding.glm-5-3"
-        },
-        "action_radius": {
-          "tool_name": "masc_schedule_note_add",
-          "action_key": "masc_schedule_note_add",
-          "target_kind": "tool",
-          "target_path": null,
-          "sandbox_target": "microvm",
-          "observed_paths": [],
-          "duration_ms": 8.527040481567383,
-          "error": "{\"message\":\"schedule not found\",\"masc.tool_disposition\":\"failed\",\"failure_class\":\"workflow_rejection\",\"next_move\":\"The current state does not admit this action; it is a rule, not a syntax problem. Read the current state first. The same call succeeds only after the state changes.\",\"data\":{\"status\":\"error\",\"message\":\"schedule not found\"}}"
-        },
-        "route_evidence": {
-          "descriptor_id": "masc.schedule.note_add",
-          "capability_id": "masc_schedule_note_add",
-          "keeper_model_projection": "internal_name",
-          "public_name": "masc_schedule_note_add",
-          "canonical_name": "masc_schedule_note_add",
-          "description": "Append a durable note to one scheduled request. Notes record why a\nschedule exists and what changed and when. Wake metadata includes the message,\nschedule identity, timing and an optional title; it does not include notes.\nWhen execution depends on a note, ensure the schedule's message explicitly\ntells the Keeper to call masc_schedule_notes_list with its schedule ID before\nacting. Use masc_schedule_update while the schedule is editable to add that\ninstruction. Adding a note alone neither changes the message nor signals that\nnotes need reading. Notes are keyed by the stable schedule_id, so replacing a\ndefinition does not orphan them. Notes are append-only, with no edit or removal,\nand survive terminal schedule states. You are recorded as the author.",
-          "executor": "in_process",
-          "backend": "ocaml_runtime",
-          "sandbox": "none",
-          "runtime_handler": "tool_masc_schedule_dispatch",
-          "execution": "serial",
-          "tool_kind": "atomic",
-          "composable_output": {
-            "kind": "opaque"
-          },
-          "receipt_labels": {
-            "descriptor_id": "masc.schedule.note_add",
-            "capability_id": "masc_schedule_note_add",
-            "keeper_model_projection": "internal_name",
-            "public_name": "masc_schedule_note_add",
-            "canonical_name": "masc_schedule_note_add",
-            "executor": "in_process",
-            "backend": "ocaml_runtime",
-            "sandbox": "none",
-            "runtime_handler": "tool_masc_schedule_dispatch",
-            "execution": "serial",
-            "composable_output": "opaque",
-            "input_schema_source": "canonical_registry"
-          },
-          "eval_tags": [],
-          "readonly": false,
-          "cwd_scope": null,
-          "polling_read": false,
-          "tool_name": "masc_schedule_note_add"
-        },
-        "agent_name": "audit-live-glm",
-        "model": "runtime",
-        "runtime_profile": "glm-coding.glm-5-3",
-        "turn_kind": "autonomous",
-        "lane": "tool_optional",
-        "prompt_fingerprint": "bc9faa9aa81d89abf5572431a78aaf7efd5a83dfaeb5a29bda87c3ee16725615",
-        "execution_id": "execution-node-3731f6bbcbd2d472ed9aebd9c1274edf",
-        "tool_observation": {
-          "attribution": {
-            "kind": "pathless"
-          },
-          "turn_ref": "trace-1793020268086-00000#1",
-          "declared_progress": null
-        },
-        "physical_execution_id": "execution-node-3731f6bbcbd2d472ed9aebd9c1274edf",
-        "tool_use_id": "call_60dcd7fbbb684554b53429ed",
-        "planned_index": 0,
-        "batch_index": 0,
-        "batch_size": 1,
-        "execution_mode": "serial",
-        "wire_outcome": "error",
-        "disposition": "failed",
-        "failure_class": "workflow_rejection",
-        "trace_id": "trace-1793020268086-00000",
-        "session_id": "trace-1793020268086-00000",
-        "turn": 3,
-        "keeper_turn_id": 1,
-        "sandbox_profile": "microvm",
-        "network_mode": "none",
-        "result_bytes": 18,
-        "input_fingerprint": "9b67a1fdbb09ee0752390ac5f4ddaa2c139e4589d21110421981ac9ea1113996",
-        "output_fingerprint": "342f5dcb7e8251facb538f885541029067fa30261a2c0593d0ea821f0009e3ce",
-        "definition_source": "tools/masc_schedule_note_add.toml"
+          "keeper_turn_id": 1
+        }
       },
       {
         "ts": 1793020342.893588,
         "record_kind": "tool_call",
         "keeper": "audit-live-glm",
+        "agent_name": "audit-live-glm",
         "tool": "masc_schedule_note_add",
         "input": {
           "body": "test",
           "schedule_id": "trace-1793020268086-00000"
         },
         "output": "{\"message\":\"schedule not found\",\"masc.tool_disposition\":\"failed\",\"failure_class\":\"workflow_rejection\",\"next_move\":\"The current state does not admit this action; it is a rule, not a syntax problem. Read the current state first. The same call succeeds only after the state changes.\",\"data\":{\"status\":\"error\",\"message\":\"schedule not found\"}}",
-        "duration_ms": 1.239776611328125,
+        "execution_id": "execution-node-fc6d7c33e1589fab0a89cb3c7731c64b",
+        "model": "runtime",
+        "runtime_profile": "glm-coding.glm-5-3",
         "runtime_contract": {
           "keeper_name": "audit-live-glm",
           "trace_id": "trace-1793020268086-00000",
           "session_id": "trace-1793020268086-00000",
-          "keeper_turn_id": 1,
-          "task_id": null,
-          "goal_ids": [],
-          "sandbox_profile": "microvm",
-          "sandbox_root": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-runtime-audit/artifacts/scheduled-job-runtime-audit-20261026/real-glm-1/workspace/.masc/playground/audit-live-glm/",
-          "sandbox_roots": [
-            ".masc/playground/audit-live-glm/"
-          ],
-          "path_resolution": {
-            "read_implicit_cwd": false,
-            "read_explicit_cwd_supported": true,
-            "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
-            "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
-            "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
-            "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
-          },
-          "network_mode": "none",
-          "runtime_profile": "glm-coding.glm-5-3"
-        },
-        "action_radius": {
-          "tool_name": "masc_schedule_note_add",
-          "action_key": "masc_schedule_note_add",
-          "target_kind": "tool",
-          "target_path": null,
-          "sandbox_target": "microvm",
-          "observed_paths": [],
-          "duration_ms": 1.239776611328125,
-          "error": "{\"message\":\"schedule not found\",\"masc.tool_disposition\":\"failed\",\"failure_class\":\"workflow_rejection\",\"next_move\":\"The current state does not admit this action; it is a rule, not a syntax problem. Read the current state first. The same call succeeds only after the state changes.\",\"data\":{\"status\":\"error\",\"message\":\"schedule not found\"}}"
-        },
-        "route_evidence": {
-          "descriptor_id": "masc.schedule.note_add",
-          "capability_id": "masc_schedule_note_add",
-          "keeper_model_projection": "internal_name",
-          "public_name": "masc_schedule_note_add",
-          "canonical_name": "masc_schedule_note_add",
-          "description": "Append a durable note to one scheduled request. Notes record why a\nschedule exists and what changed and when. Wake metadata includes the message,\nschedule identity, timing and an optional title; it does not include notes.\nWhen execution depends on a note, ensure the schedule's message explicitly\ntells the Keeper to call masc_schedule_notes_list with its schedule ID before\nacting. Use masc_schedule_update while the schedule is editable to add that\ninstruction. Adding a note alone neither changes the message nor signals that\nnotes need reading. Notes are keyed by the stable schedule_id, so replacing a\ndefinition does not orphan them. Notes are append-only, with no edit or removal,\nand survive terminal schedule states. You are recorded as the author.",
-          "executor": "in_process",
-          "backend": "ocaml_runtime",
-          "sandbox": "none",
-          "runtime_handler": "tool_masc_schedule_dispatch",
-          "execution": "serial",
-          "tool_kind": "atomic",
-          "composable_output": {
-            "kind": "opaque"
-          },
-          "receipt_labels": {
-            "descriptor_id": "masc.schedule.note_add",
-            "capability_id": "masc_schedule_note_add",
-            "keeper_model_projection": "internal_name",
-            "public_name": "masc_schedule_note_add",
-            "canonical_name": "masc_schedule_note_add",
-            "executor": "in_process",
-            "backend": "ocaml_runtime",
-            "sandbox": "none",
-            "runtime_handler": "tool_masc_schedule_dispatch",
-            "execution": "serial",
-            "composable_output": "opaque",
-            "input_schema_source": "canonical_registry"
-          },
-          "eval_tags": [],
-          "readonly": false,
-          "cwd_scope": null,
-          "polling_read": false,
-          "tool_name": "masc_schedule_note_add"
-        },
-        "agent_name": "audit-live-glm",
-        "model": "runtime",
-        "runtime_profile": "glm-coding.glm-5-3",
-        "turn_kind": "autonomous",
-        "lane": "tool_optional",
-        "prompt_fingerprint": "bc9faa9aa81d89abf5572431a78aaf7efd5a83dfaeb5a29bda87c3ee16725615",
-        "execution_id": "execution-node-fc6d7c33e1589fab0a89cb3c7731c64b",
-        "tool_observation": {
-          "attribution": {
-            "kind": "pathless"
-          },
-          "turn_ref": "trace-1793020268086-00000#1",
-          "declared_progress": null
-        },
-        "physical_execution_id": "execution-node-fc6d7c33e1589fab0a89cb3c7731c64b",
-        "tool_use_id": "call_3c4c94033fbf4df9b0bb28cd",
-        "planned_index": 0,
-        "batch_index": 0,
-        "batch_size": 1,
-        "execution_mode": "serial",
-        "wire_outcome": "error",
-        "disposition": "failed",
-        "failure_class": "workflow_rejection",
-        "trace_id": "trace-1793020268086-00000",
-        "session_id": "trace-1793020268086-00000",
-        "turn": 4,
-        "keeper_turn_id": 1,
-        "sandbox_profile": "microvm",
-        "network_mode": "none",
-        "result_bytes": 18,
-        "input_fingerprint": "d60594923f356992f35eaa269782efdb41c39b4d6debf4487c15f0bd37f9f7a5",
-        "output_fingerprint": "342f5dcb7e8251facb538f885541029067fa30261a2c0593d0ea821f0009e3ce",
-        "definition_source": "tools/masc_schedule_note_add.toml"
+          "keeper_turn_id": 1
+        }
       },
       {
         "ts": 1793020342.9182,
         "record_kind": "tool_call",
         "keeper": "audit-live-glm",
+        "agent_name": "audit-live-glm",
         "tool": "masc_schedule_note_add",
         "input": {
           "body": "test",
           "schedule_id": "scheduled-job-runtime-audit-20261026"
         },
         "output": "{\"message\":\"schedule not found\",\"masc.tool_disposition\":\"failed\",\"failure_class\":\"workflow_rejection\",\"next_move\":\"The current state does not admit this action; it is a rule, not a syntax problem. Read the current state first. The same call succeeds only after the state changes.\",\"data\":{\"status\":\"error\",\"message\":\"schedule not found\"}}",
-        "duration_ms": 18.218994140625,
+        "execution_id": "execution-node-45be0bc3fbaf48fc6d90a13fba0dec12",
+        "model": "runtime",
+        "runtime_profile": "glm-coding.glm-5-3",
         "runtime_contract": {
           "keeper_name": "audit-live-glm",
           "trace_id": "trace-1793020268086-00000",
           "session_id": "trace-1793020268086-00000",
-          "keeper_turn_id": 1,
-          "task_id": null,
-          "goal_ids": [],
-          "sandbox_profile": "microvm",
-          "sandbox_root": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-runtime-audit/artifacts/scheduled-job-runtime-audit-20261026/real-glm-1/workspace/.masc/playground/audit-live-glm/",
-          "sandbox_roots": [
-            ".masc/playground/audit-live-glm/"
-          ],
-          "path_resolution": {
-            "read_implicit_cwd": false,
-            "read_explicit_cwd_supported": true,
-            "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
-            "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
-            "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
-            "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
-          },
-          "network_mode": "none",
-          "runtime_profile": "glm-coding.glm-5-3"
-        },
-        "action_radius": {
-          "tool_name": "masc_schedule_note_add",
-          "action_key": "masc_schedule_note_add",
-          "target_kind": "tool",
-          "target_path": null,
-          "sandbox_target": "microvm",
-          "observed_paths": [],
-          "duration_ms": 18.218994140625,
-          "error": "{\"message\":\"schedule not found\",\"masc.tool_disposition\":\"failed\",\"failure_class\":\"workflow_rejection\",\"next_move\":\"The current state does not admit this action; it is a rule, not a syntax problem. Read the current state first. The same call succeeds only after the state changes.\",\"data\":{\"status\":\"error\",\"message\":\"schedule not found\"}}"
-        },
-        "route_evidence": {
-          "descriptor_id": "masc.schedule.note_add",
-          "capability_id": "masc_schedule_note_add",
-          "keeper_model_projection": "internal_name",
-          "public_name": "masc_schedule_note_add",
-          "canonical_name": "masc_schedule_note_add",
-          "description": "Append a durable note to one scheduled request. Notes record why a\nschedule exists and what changed and when. Wake metadata includes the message,\nschedule identity, timing and an optional title; it does not include notes.\nWhen execution depends on a note, ensure the schedule's message explicitly\ntells the Keeper to call masc_schedule_notes_list with its schedule ID before\nacting. Use masc_schedule_update while the schedule is editable to add that\ninstruction. Adding a note alone neither changes the message nor signals that\nnotes need reading. Notes are keyed by the stable schedule_id, so replacing a\ndefinition does not orphan them. Notes are append-only, with no edit or removal,\nand survive terminal schedule states. You are recorded as the author.",
-          "executor": "in_process",
-          "backend": "ocaml_runtime",
-          "sandbox": "none",
-          "runtime_handler": "tool_masc_schedule_dispatch",
-          "execution": "serial",
-          "tool_kind": "atomic",
-          "composable_output": {
-            "kind": "opaque"
-          },
-          "receipt_labels": {
-            "descriptor_id": "masc.schedule.note_add",
-            "capability_id": "masc_schedule_note_add",
-            "keeper_model_projection": "internal_name",
-            "public_name": "masc_schedule_note_add",
-            "canonical_name": "masc_schedule_note_add",
-            "executor": "in_process",
-            "backend": "ocaml_runtime",
-            "sandbox": "none",
-            "runtime_handler": "tool_masc_schedule_dispatch",
-            "execution": "serial",
-            "composable_output": "opaque",
-            "input_schema_source": "canonical_registry"
-          },
-          "eval_tags": [],
-          "readonly": false,
-          "cwd_scope": null,
-          "polling_read": false,
-          "tool_name": "masc_schedule_note_add"
-        },
-        "agent_name": "audit-live-glm",
-        "model": "runtime",
-        "runtime_profile": "glm-coding.glm-5-3",
-        "turn_kind": "autonomous",
-        "lane": "tool_optional",
-        "prompt_fingerprint": "bc9faa9aa81d89abf5572431a78aaf7efd5a83dfaeb5a29bda87c3ee16725615",
-        "execution_id": "execution-node-45be0bc3fbaf48fc6d90a13fba0dec12",
-        "tool_observation": {
-          "attribution": {
-            "kind": "pathless"
-          },
-          "turn_ref": "trace-1793020268086-00000#1",
-          "declared_progress": null
-        },
-        "physical_execution_id": "execution-node-45be0bc3fbaf48fc6d90a13fba0dec12",
-        "tool_use_id": "call_594cc6fae5264a06bc3bcf57",
-        "planned_index": 1,
-        "batch_index": 1,
-        "batch_size": 1,
-        "execution_mode": "serial",
-        "wire_outcome": "error",
-        "disposition": "failed",
-        "failure_class": "workflow_rejection",
-        "trace_id": "trace-1793020268086-00000",
-        "session_id": "trace-1793020268086-00000",
-        "turn": 4,
-        "keeper_turn_id": 1,
-        "sandbox_profile": "microvm",
-        "network_mode": "none",
-        "result_bytes": 18,
-        "input_fingerprint": "c5c41e154009171cbb679b4c4ee65af66463db9171a0890fe8ba20006d305ad8",
-        "output_fingerprint": "342f5dcb7e8251facb538f885541029067fa30261a2c0593d0ea821f0009e3ce",
-        "definition_source": "tools/masc_schedule_note_add.toml"
+          "keeper_turn_id": 1
+        }
       },
       {
         "ts": 1793020349.949457,
         "record_kind": "tool_call",
         "keeper": "audit-live-glm",
+        "agent_name": "audit-live-glm",
         "tool": "keeper_tool_search",
         "input": {
           "names": [
@@ -672,524 +147,96 @@
           ]
         },
         "output": "now callable:\n- masc_schedule_get: Read the current durable scheduled request by schedule_id. A recurring request m...\n- masc_schedule_list: List schedule summary rows; masc_schedule_get reads one in full. Rows follow sch...",
-        "duration_ms": 0.05602836608886719,
+        "execution_id": "execution-node-fc4af8eac5bee7b77ba87408158eb231",
+        "model": "runtime",
+        "runtime_profile": "glm-coding.glm-5-3",
         "runtime_contract": {
           "keeper_name": "audit-live-glm",
           "trace_id": "trace-1793020268086-00000",
           "session_id": "trace-1793020268086-00000",
-          "keeper_turn_id": 1,
-          "task_id": null,
-          "goal_ids": [],
-          "sandbox_profile": "microvm",
-          "sandbox_root": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-runtime-audit/artifacts/scheduled-job-runtime-audit-20261026/real-glm-1/workspace/.masc/playground/audit-live-glm/",
-          "sandbox_roots": [
-            ".masc/playground/audit-live-glm/"
-          ],
-          "path_resolution": {
-            "read_implicit_cwd": false,
-            "read_explicit_cwd_supported": true,
-            "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
-            "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
-            "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
-            "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
-          },
-          "network_mode": "none",
-          "runtime_profile": "glm-coding.glm-5-3"
-        },
-        "action_radius": {
-          "tool_name": "keeper_tool_search",
-          "action_key": "keeper_tool_search",
-          "target_kind": "tool",
-          "target_path": null,
-          "sandbox_target": "microvm",
-          "observed_paths": [],
-          "duration_ms": 0.05602836608886719,
-          "error": null
-        },
-        "agent_name": "audit-live-glm",
-        "model": "runtime",
-        "runtime_profile": "glm-coding.glm-5-3",
-        "turn_kind": "autonomous",
-        "lane": "tool_optional",
-        "prompt_fingerprint": "bc9faa9aa81d89abf5572431a78aaf7efd5a83dfaeb5a29bda87c3ee16725615",
-        "execution_id": "execution-node-fc4af8eac5bee7b77ba87408158eb231",
-        "tool_observation": {
-          "attribution": {
-            "kind": "pathless"
-          },
-          "turn_ref": "trace-1793020268086-00000#1",
-          "declared_progress": null
-        },
-        "physical_execution_id": "execution-node-fc4af8eac5bee7b77ba87408158eb231",
-        "tool_use_id": "call_27f37f73aec94f2c894c0166",
-        "planned_index": 0,
-        "batch_index": 0,
-        "batch_size": 1,
-        "execution_mode": "serial",
-        "wire_outcome": "ok",
-        "trace_id": "trace-1793020268086-00000",
-        "session_id": "trace-1793020268086-00000",
-        "turn": 5,
-        "keeper_turn_id": 1,
-        "sandbox_profile": "microvm",
-        "network_mode": "none",
-        "result_bytes": 224,
-        "input_fingerprint": "d27565f8c5ae778b582b5e0250ea42de3c54dae3a358fc92e102ee67d07e4fdc",
-        "output_fingerprint": "9930dbd9f2b6ee701ecbdb46c88cf08cf6e4183be00915e620dcfa781939673c",
-        "definition_source": "tools/keeper_tool_search.toml"
+          "keeper_turn_id": 1
+        }
       },
       {
         "ts": 1793020356.645351,
         "record_kind": "tool_call",
         "keeper": "audit-live-glm",
+        "agent_name": "audit-live-glm",
         "tool": "masc_schedule_list",
         "input": {
           "owner": "self"
         },
         "output": "{\"status\":\"ok\",\"owner\":\"self\",\"owner_name\":\"audit-live-glm\",\"limit\":50,\"schedules\":[{\"schedule_id\":\"audit-real-model-3e3ecd8020e0456899fba70e35b94d40\",\"status\":\"succeeded\",\"due_at_iso\":\"2026-10-26T13:11:10Z\",\"recurrence_summary\":\"one_shot\",\"wake_target\":\"audit-live-glm\",\"scheduled_by\":\"schedule-audit-observer\",\"summary\":\"This is a one-time scheduled-job verification. Call masc_schedule_note_add exactly once with schedule_id \\\"audit-real-model-3e3ecd8020e0456899fba70e35b94d40\\\" ...\",\"last_wake_status\":\"succeeded\"}]}",
-        "duration_ms": 1.0609626770019531,
+        "execution_id": "execution-node-2eb6054ed36fb9ab420277c710085b41",
+        "model": "runtime",
+        "runtime_profile": "glm-coding.glm-5-3",
         "runtime_contract": {
           "keeper_name": "audit-live-glm",
           "trace_id": "trace-1793020268086-00000",
           "session_id": "trace-1793020268086-00000",
-          "keeper_turn_id": 1,
-          "task_id": null,
-          "goal_ids": [],
-          "sandbox_profile": "microvm",
-          "sandbox_root": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-runtime-audit/artifacts/scheduled-job-runtime-audit-20261026/real-glm-1/workspace/.masc/playground/audit-live-glm/",
-          "sandbox_roots": [
-            ".masc/playground/audit-live-glm/"
-          ],
-          "path_resolution": {
-            "read_implicit_cwd": false,
-            "read_explicit_cwd_supported": true,
-            "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
-            "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
-            "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
-            "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
-          },
-          "network_mode": "none",
-          "runtime_profile": "glm-coding.glm-5-3"
-        },
-        "action_radius": {
-          "tool_name": "masc_schedule_list",
-          "action_key": "masc_schedule_list",
-          "target_kind": "tool",
-          "target_path": null,
-          "sandbox_target": "microvm",
-          "observed_paths": [],
-          "duration_ms": 1.0609626770019531,
-          "error": null
-        },
-        "route_evidence": {
-          "descriptor_id": "masc.schedule.list",
-          "capability_id": "masc_schedule_list",
-          "keeper_model_projection": "internal_name",
-          "public_name": "masc_schedule_list",
-          "canonical_name": "masc_schedule_list",
-          "description": "List schedule summary rows; masc_schedule_get reads one in full. Rows follow schedule_id order: pass next_cursor as cursor, same filters, for the next page.",
-          "executor": "in_process",
-          "backend": "ocaml_runtime",
-          "sandbox": "none",
-          "runtime_handler": "tool_masc_schedule_dispatch",
-          "execution": "concurrent",
-          "tool_kind": "atomic",
-          "composable_output": {
-            "kind": "opaque"
-          },
-          "receipt_labels": {
-            "descriptor_id": "masc.schedule.list",
-            "capability_id": "masc_schedule_list",
-            "keeper_model_projection": "internal_name",
-            "public_name": "masc_schedule_list",
-            "canonical_name": "masc_schedule_list",
-            "executor": "in_process",
-            "backend": "ocaml_runtime",
-            "sandbox": "none",
-            "runtime_handler": "tool_masc_schedule_dispatch",
-            "execution": "concurrent",
-            "composable_output": "opaque",
-            "input_schema_source": "canonical_registry"
-          },
-          "eval_tags": [],
-          "readonly": true,
-          "cwd_scope": null,
-          "polling_read": false,
-          "status": "ok",
-          "tool_name": "masc_schedule_list"
-        },
-        "agent_name": "audit-live-glm",
-        "model": "runtime",
-        "runtime_profile": "glm-coding.glm-5-3",
-        "turn_kind": "autonomous",
-        "lane": "tool_optional",
-        "prompt_fingerprint": "bc9faa9aa81d89abf5572431a78aaf7efd5a83dfaeb5a29bda87c3ee16725615",
-        "execution_id": "execution-node-2eb6054ed36fb9ab420277c710085b41",
-        "tool_observation": {
-          "attribution": {
-            "kind": "pathless"
-          },
-          "turn_ref": "trace-1793020268086-00000#1",
-          "declared_progress": null
-        },
-        "physical_execution_id": "execution-node-2eb6054ed36fb9ab420277c710085b41",
-        "tool_use_id": "call_b8073b9dfe4b47dcbb28bb70",
-        "planned_index": 0,
-        "batch_index": 0,
-        "batch_size": 1,
-        "execution_mode": "concurrent",
-        "wire_outcome": "ok",
-        "disposition": "completed",
-        "trace_id": "trace-1793020268086-00000",
-        "session_id": "trace-1793020268086-00000",
-        "turn": 6,
-        "keeper_turn_id": 1,
-        "sandbox_profile": "microvm",
-        "network_mode": "none",
-        "result_bytes": 520,
-        "input_fingerprint": "7a676760d0dee4f88585313e8d8a4dbfe6c0bcedf31bba4befde272c0aa74bde",
-        "output_fingerprint": "047c5026755fdc69cdd7ed1d7906a20be1137ee7708b2f21d748e0f480ed5323",
-        "definition_source": "tools/masc_schedule_list.toml"
+          "keeper_turn_id": 1
+        }
       },
       {
         "ts": 1793020365.809718,
         "record_kind": "tool_call",
         "keeper": "audit-live-glm",
+        "agent_name": "audit-live-glm",
         "tool": "masc_schedule_get",
         "input": {
           "schedule_id": "audit-real-model-3e3ecd8020e0456899fba70e35b94d40"
         },
         "output": "{\"schedule_instance_id\":\"01a17856-0f14-7000-9d56-a92fa3dde399\",\"schedule_id\":\"audit-real-model-3e3ecd8020e0456899fba70e35b94d40\",\"requested_by\":{\"id\":\"schedule-audit-observer\",\"kind\":\"automated_actor\",\"display_name\":null},\"scheduled_by\":{\"id\":\"schedule-audit-observer\",\"kind\":\"automated_actor\",\"display_name\":null},\"requested_at\":1793020268.307649,\"due_at\":1793020270.307649,\"expires_at\":null,\"payload\":{\"kind\":\"masc.keeper_wake\",\"body\":{\"result_delivery\":{\"policy\":\"none\"},\"keeper_name\":\"audit-live-glm\",\"message\":\"This is a one-time scheduled-job verification. Call masc_schedule_note_add exactly once with schedule_id \\\"audit-real-model-3e3ecd8020e0456899fba70e35b94d40\\\" and body \\\"SCHEDULE_EFFECT_5999734c698241be919a03b158a3bdb5\\\". Do not merely print the marker. Read back the note with masc_schedule_notes_list for this schedule_id, then finish with a brief confirmation. Do not use any other mutating tool or create another schedule.\"}},\"status\":\"succeeded\",\"source\":\"operator_request\",\"recurrence\":{\"kind\":\"one_shot\"},\"cancellation\":null,\"due_at_iso\":\"2026-10-26T13:11:10Z\",\"next_due_at\":null,\"next_due_at_iso\":null,\"requested_at_iso\":\"2026-10-26T13:11:08Z\",\"recurrence_kind\":\"one_shot\",\"recurrence_summary\":\"one_shot\",\"payload_digest\":\"e2348a502fa3b8ce0c2f0ba57d39bcdab4eaf4602a6625b06b21620a3cc0653e\",\"payload_kind\":\"masc.keeper_wake\",\"payload_support\":\"supported\",\"payload_dispatch_tool\":\"masc.keeper_wake\",\"payload_target\":\"keeper:audit-live-glm\",\"payload_summary\":\"This is a one-time scheduled-job verification. Call masc_schedule_note_add exactly once with schedule_id \\\"audit-real-model-3e3ecd8020e0456899fba70e35b94d40\\\" ...\",\"last_wake\":{\"schedule_instance_id\":\"01a17856-0f14-7000-9d56-a92fa3dde399\",\"schedule_id\":\"audit-real-model-3e3ecd8020e0456899fba70e35b94d40\",\"started_at\":1793020271.125142,\"finished_at\":1793020271.16523,\"due_at\":1793020270.307649,\"payload_digest\":\"e2348a502fa3b8ce0c2f0ba57d39bcdab4eaf4602a6625b06b21620a3cc0653e\",\"status\":\"succeeded\",\"detail\":{\"kind\":\"masc.keeper_wake.enqueued\",\"queue\":\"keeper_event_queue\",\"stimulus\":\"schedule_due\",\"stimulus_id\":\"e31f33ebe1d9a7403ad11e3f441f31597344a720a49b8c64950bb6ac781060c8\",\"keeper_name\":\"audit-live-glm\",\"schedule_instance_id\":\"01a17856-0f14-7000-9d56-a92fa3dde399\",\"schedule_id\":\"audit-real-model-3e3ecd8020e0456899fba70e35b94d40\",\"urgency\":\"normal\",\"post_id\":\"e31f33ebe1d9a7403ad11e3f441f31597344a720a49b8c64950bb6ac781060c8\",\"result_delivery_policy\":\"none\",\"occurrence_status\":\"awaiting_ack\",\"activation_status\":\"signaled\",\"activation_reason\":null,\"activation_detail\":null,\"reaction_ledger_status\":\"recorded\",\"reaction_ledger_error\":null},\"error\":null}}",
-        "duration_ms": 1.6009807586669922,
+        "execution_id": "execution-node-f9377c8af418142b3b4f532a8c562de5",
+        "model": "runtime",
+        "runtime_profile": "glm-coding.glm-5-3",
         "runtime_contract": {
           "keeper_name": "audit-live-glm",
           "trace_id": "trace-1793020268086-00000",
           "session_id": "trace-1793020268086-00000",
-          "keeper_turn_id": 1,
-          "task_id": null,
-          "goal_ids": [],
-          "sandbox_profile": "microvm",
-          "sandbox_root": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-runtime-audit/artifacts/scheduled-job-runtime-audit-20261026/real-glm-1/workspace/.masc/playground/audit-live-glm/",
-          "sandbox_roots": [
-            ".masc/playground/audit-live-glm/"
-          ],
-          "path_resolution": {
-            "read_implicit_cwd": false,
-            "read_explicit_cwd_supported": true,
-            "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
-            "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
-            "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
-            "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
-          },
-          "network_mode": "none",
-          "runtime_profile": "glm-coding.glm-5-3"
-        },
-        "action_radius": {
-          "tool_name": "masc_schedule_get",
-          "action_key": "masc_schedule_get",
-          "target_kind": "tool",
-          "target_path": null,
-          "sandbox_target": "microvm",
-          "observed_paths": [],
-          "duration_ms": 1.6009807586669922,
-          "error": null
-        },
-        "route_evidence": {
-          "descriptor_id": "masc.schedule.get",
-          "capability_id": "masc_schedule_get",
-          "keeper_model_projection": "internal_name",
-          "public_name": "masc_schedule_get",
-          "canonical_name": "masc_schedule_get",
-          "description": "Read the current durable scheduled request by schedule_id. A recurring request may already point at its next occurrence.",
-          "executor": "in_process",
-          "backend": "ocaml_runtime",
-          "sandbox": "none",
-          "runtime_handler": "tool_masc_schedule_dispatch",
-          "execution": "concurrent",
-          "tool_kind": "atomic",
-          "composable_output": {
-            "kind": "opaque"
-          },
-          "receipt_labels": {
-            "descriptor_id": "masc.schedule.get",
-            "capability_id": "masc_schedule_get",
-            "keeper_model_projection": "internal_name",
-            "public_name": "masc_schedule_get",
-            "canonical_name": "masc_schedule_get",
-            "executor": "in_process",
-            "backend": "ocaml_runtime",
-            "sandbox": "none",
-            "runtime_handler": "tool_masc_schedule_dispatch",
-            "execution": "concurrent",
-            "composable_output": "opaque",
-            "input_schema_source": "canonical_registry"
-          },
-          "eval_tags": [],
-          "readonly": true,
-          "cwd_scope": null,
-          "polling_read": false,
-          "status": "succeeded",
-          "tool_name": "masc_schedule_get"
-        },
-        "agent_name": "audit-live-glm",
-        "model": "runtime",
-        "runtime_profile": "glm-coding.glm-5-3",
-        "turn_kind": "autonomous",
-        "lane": "tool_optional",
-        "prompt_fingerprint": "bc9faa9aa81d89abf5572431a78aaf7efd5a83dfaeb5a29bda87c3ee16725615",
-        "execution_id": "execution-node-f9377c8af418142b3b4f532a8c562de5",
-        "tool_observation": {
-          "attribution": {
-            "kind": "pathless"
-          },
-          "turn_ref": "trace-1793020268086-00000#1",
-          "declared_progress": null
-        },
-        "physical_execution_id": "execution-node-f9377c8af418142b3b4f532a8c562de5",
-        "tool_use_id": "call_9d8e55afe2214018a9e62f49",
-        "planned_index": 0,
-        "batch_index": 0,
-        "batch_size": 1,
-        "execution_mode": "concurrent",
-        "wire_outcome": "ok",
-        "disposition": "completed",
-        "trace_id": "trace-1793020268086-00000",
-        "session_id": "trace-1793020268086-00000",
-        "turn": 7,
-        "keeper_turn_id": 1,
-        "sandbox_profile": "microvm",
-        "network_mode": "none",
-        "result_bytes": 2643,
-        "input_fingerprint": "e491098b207b24928c254975baa00198f4d7b9231009397f168a7cfc4797e3cd",
-        "output_fingerprint": "6b5fc0835790da9f49a9df367f816cf45de8ed1219368ae43aba040dc46a7866",
-        "definition_source": "tools/masc_schedule_get.toml"
+          "keeper_turn_id": 1
+        }
       },
       {
         "ts": 1793020376.583526,
         "record_kind": "tool_call",
         "keeper": "audit-live-glm",
+        "agent_name": "audit-live-glm",
         "tool": "masc_schedule_note_add",
         "input": {
           "body": "SCHEDULE_EFFECT_5999734c698241be919a03b158a3bdb5",
           "schedule_id": "audit-real-model-3e3ecd8020e0456899fba70e35b94d40"
         },
         "output": "{\"status\":\"ok\",\"note\":{\"note_id\":\"6\",\"schedule_id\":\"audit-real-model-3e3ecd8020e0456899fba70e35b94d40\",\"author_id\":\"audit-live-glm\",\"author_kind\":\"automated_actor\",\"created_at\":1793020376.57737,\"body\":\"SCHEDULE_EFFECT_5999734c698241be919a03b158a3bdb5\"},\"note_count\":1}",
-        "duration_ms": 4.051923751831055,
+        "execution_id": "execution-node-5c11ac23c324690b0de96157dbe647f1",
+        "model": "runtime",
+        "runtime_profile": "glm-coding.glm-5-3",
         "runtime_contract": {
           "keeper_name": "audit-live-glm",
           "trace_id": "trace-1793020268086-00000",
           "session_id": "trace-1793020268086-00000",
-          "keeper_turn_id": 1,
-          "task_id": null,
-          "goal_ids": [],
-          "sandbox_profile": "microvm",
-          "sandbox_root": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-runtime-audit/artifacts/scheduled-job-runtime-audit-20261026/real-glm-1/workspace/.masc/playground/audit-live-glm/",
-          "sandbox_roots": [
-            ".masc/playground/audit-live-glm/"
-          ],
-          "path_resolution": {
-            "read_implicit_cwd": false,
-            "read_explicit_cwd_supported": true,
-            "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
-            "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
-            "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
-            "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
-          },
-          "network_mode": "none",
-          "runtime_profile": "glm-coding.glm-5-3"
-        },
-        "action_radius": {
-          "tool_name": "masc_schedule_note_add",
-          "action_key": "masc_schedule_note_add",
-          "target_kind": "tool",
-          "target_path": null,
-          "sandbox_target": "microvm",
-          "observed_paths": [],
-          "duration_ms": 4.051923751831055,
-          "error": null
-        },
-        "route_evidence": {
-          "descriptor_id": "masc.schedule.note_add",
-          "capability_id": "masc_schedule_note_add",
-          "keeper_model_projection": "internal_name",
-          "public_name": "masc_schedule_note_add",
-          "canonical_name": "masc_schedule_note_add",
-          "description": "Append a durable note to one scheduled request. Notes record why a\nschedule exists and what changed and when. Wake metadata includes the message,\nschedule identity, timing and an optional title; it does not include notes.\nWhen execution depends on a note, ensure the schedule's message explicitly\ntells the Keeper to call masc_schedule_notes_list with its schedule ID before\nacting. Use masc_schedule_update while the schedule is editable to add that\ninstruction. Adding a note alone neither changes the message nor signals that\nnotes need reading. Notes are keyed by the stable schedule_id, so replacing a\ndefinition does not orphan them. Notes are append-only, with no edit or removal,\nand survive terminal schedule states. You are recorded as the author.",
-          "executor": "in_process",
-          "backend": "ocaml_runtime",
-          "sandbox": "none",
-          "runtime_handler": "tool_masc_schedule_dispatch",
-          "execution": "serial",
-          "tool_kind": "atomic",
-          "composable_output": {
-            "kind": "opaque"
-          },
-          "receipt_labels": {
-            "descriptor_id": "masc.schedule.note_add",
-            "capability_id": "masc_schedule_note_add",
-            "keeper_model_projection": "internal_name",
-            "public_name": "masc_schedule_note_add",
-            "canonical_name": "masc_schedule_note_add",
-            "executor": "in_process",
-            "backend": "ocaml_runtime",
-            "sandbox": "none",
-            "runtime_handler": "tool_masc_schedule_dispatch",
-            "execution": "serial",
-            "composable_output": "opaque",
-            "input_schema_source": "canonical_registry"
-          },
-          "eval_tags": [],
-          "readonly": false,
-          "cwd_scope": null,
-          "polling_read": false,
-          "status": "ok",
-          "tool_name": "masc_schedule_note_add"
-        },
-        "agent_name": "audit-live-glm",
-        "model": "runtime",
-        "runtime_profile": "glm-coding.glm-5-3",
-        "turn_kind": "autonomous",
-        "lane": "tool_optional",
-        "prompt_fingerprint": "bc9faa9aa81d89abf5572431a78aaf7efd5a83dfaeb5a29bda87c3ee16725615",
-        "execution_id": "execution-node-5c11ac23c324690b0de96157dbe647f1",
-        "tool_observation": {
-          "attribution": {
-            "kind": "pathless"
-          },
-          "turn_ref": "trace-1793020268086-00000#1",
-          "declared_progress": null
-        },
-        "physical_execution_id": "execution-node-5c11ac23c324690b0de96157dbe647f1",
-        "tool_use_id": "call_d40d4da58e284f6a83723718",
-        "planned_index": 0,
-        "batch_index": 0,
-        "batch_size": 1,
-        "execution_mode": "serial",
-        "wire_outcome": "ok",
-        "disposition": "completed",
-        "trace_id": "trace-1793020268086-00000",
-        "session_id": "trace-1793020268086-00000",
-        "turn": 8,
-        "keeper_turn_id": 1,
-        "sandbox_profile": "microvm",
-        "network_mode": "none",
-        "result_bytes": 268,
-        "input_fingerprint": "19b045e1b11eb58997424ab29bf998c1cf80e0524fe9a603034245ef4dc31b4f",
-        "output_fingerprint": "2bd60cc9fac04fdda68e7ba91fc6937c7c1efcb412aaae3e7a8602a42e4957db",
-        "definition_source": "tools/masc_schedule_note_add.toml"
+          "keeper_turn_id": 1
+        }
       },
       {
         "ts": 1793020383.242623,
         "record_kind": "tool_call",
         "keeper": "audit-live-glm",
+        "agent_name": "audit-live-glm",
         "tool": "masc_schedule_notes_list",
         "input": {
           "schedule_id": "audit-real-model-3e3ecd8020e0456899fba70e35b94d40"
         },
         "output": "{\"status\":\"ok\",\"schedule_id\":\"audit-real-model-3e3ecd8020e0456899fba70e35b94d40\",\"limit\":50,\"notes\":[{\"note_id\":\"6\",\"schedule_id\":\"audit-real-model-3e3ecd8020e0456899fba70e35b94d40\",\"author_id\":\"audit-live-glm\",\"author_kind\":\"automated_actor\",\"created_at\":1793020376.57737,\"body\":\"SCHEDULE_EFFECT_5999734c698241be919a03b158a3bdb5\"}]}",
-        "duration_ms": 0.9999275207519531,
+        "execution_id": "execution-node-d548b957ba4956702cd24995a21f469c",
+        "model": "runtime",
+        "runtime_profile": "glm-coding.glm-5-3",
         "runtime_contract": {
           "keeper_name": "audit-live-glm",
           "trace_id": "trace-1793020268086-00000",
           "session_id": "trace-1793020268086-00000",
-          "keeper_turn_id": 1,
-          "task_id": null,
-          "goal_ids": [],
-          "sandbox_profile": "microvm",
-          "sandbox_root": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-runtime-audit/artifacts/scheduled-job-runtime-audit-20261026/real-glm-1/workspace/.masc/playground/audit-live-glm/",
-          "sandbox_roots": [
-            ".masc/playground/audit-live-glm/"
-          ],
-          "path_resolution": {
-            "read_implicit_cwd": false,
-            "read_explicit_cwd_supported": true,
-            "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
-            "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
-            "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
-            "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
-          },
-          "network_mode": "none",
-          "runtime_profile": "glm-coding.glm-5-3"
-        },
-        "action_radius": {
-          "tool_name": "masc_schedule_notes_list",
-          "action_key": "masc_schedule_notes_list",
-          "target_kind": "tool",
-          "target_path": null,
-          "sandbox_target": "microvm",
-          "observed_paths": [],
-          "duration_ms": 0.9999275207519531,
-          "error": null
-        },
-        "route_evidence": {
-          "descriptor_id": "masc.schedule.notes_list",
-          "capability_id": "masc_schedule_notes_list",
-          "keeper_model_projection": "internal_name",
-          "public_name": "masc_schedule_notes_list",
-          "canonical_name": "masc_schedule_notes_list",
-          "description": "List the durable notes of one scheduled request, oldest first. Notes are\nkeyed by the stable schedule_id and survive definition replacements\n(masc_schedule_update) and terminal schedule states. Use them to read why a\nschedule exists and what changed and when. A wake does not carry the notes, so a\nwoken Keeper reads them here when it needs them.",
-          "executor": "in_process",
-          "backend": "ocaml_runtime",
-          "sandbox": "none",
-          "runtime_handler": "tool_masc_schedule_dispatch",
-          "execution": "concurrent",
-          "tool_kind": "atomic",
-          "composable_output": {
-            "kind": "opaque"
-          },
-          "receipt_labels": {
-            "descriptor_id": "masc.schedule.notes_list",
-            "capability_id": "masc_schedule_notes_list",
-            "keeper_model_projection": "internal_name",
-            "public_name": "masc_schedule_notes_list",
-            "canonical_name": "masc_schedule_notes_list",
-            "executor": "in_process",
-            "backend": "ocaml_runtime",
-            "sandbox": "none",
-            "runtime_handler": "tool_masc_schedule_dispatch",
-            "execution": "concurrent",
-            "composable_output": "opaque",
-            "input_schema_source": "canonical_registry"
-          },
-          "eval_tags": [],
-          "readonly": true,
-          "cwd_scope": null,
-          "polling_read": false,
-          "status": "ok",
-          "tool_name": "masc_schedule_notes_list"
-        },
-        "agent_name": "audit-live-glm",
-        "model": "runtime",
-        "runtime_profile": "glm-coding.glm-5-3",
-        "turn_kind": "autonomous",
-        "lane": "tool_optional",
-        "prompt_fingerprint": "bc9faa9aa81d89abf5572431a78aaf7efd5a83dfaeb5a29bda87c3ee16725615",
-        "execution_id": "execution-node-d548b957ba4956702cd24995a21f469c",
-        "tool_observation": {
-          "attribution": {
-            "kind": "pathless"
-          },
-          "turn_ref": "trace-1793020268086-00000#1",
-          "declared_progress": null
-        },
-        "physical_execution_id": "execution-node-d548b957ba4956702cd24995a21f469c",
-        "tool_use_id": "call_8dd376319ffb45bc87160c49",
-        "planned_index": 0,
-        "batch_index": 0,
-        "batch_size": 1,
-        "execution_mode": "concurrent",
-        "wire_outcome": "ok",
-        "disposition": "completed",
-        "trace_id": "trace-1793020268086-00000",
-        "session_id": "trace-1793020268086-00000",
-        "turn": 9,
-        "keeper_turn_id": 1,
-        "sandbox_profile": "microvm",
-        "network_mode": "none",
-        "result_bytes": 333,
-        "input_fingerprint": "e491098b207b24928c254975baa00198f4d7b9231009397f168a7cfc4797e3cd",
-        "output_fingerprint": "29d4476ee7d5938b320a6c4bacea2d3a4f3b6ef3c3b9dfda8752d362ff32bca5",
-        "definition_source": "tools/masc_schedule_notes_list.toml"
+          "keeper_turn_id": 1
+        }
       }
     ]
   }

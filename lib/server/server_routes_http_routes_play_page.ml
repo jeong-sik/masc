@@ -1442,7 +1442,7 @@ let nullable_string = function
 
 let seat_observation ~config =
   match Machine_addon_host.call_shared ~config ~principal:Lane_addon_call_context.Anonymous
-      ~name:"masc_dos_screen" ~arguments:(`Assoc []) with
+      ~name:"masc_dos_screen" ~arguments:(`Assoc ["include_frame", `Bool false]) with
   | Error (Lane_addon_runtime.Unavailable message | Lane_addon_runtime.Outcome_unknown message
       | Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Rejected message | Unavailable message | Activity_disabled message | Activity_unobserved message)) ->
       Error message

@@ -18,3 +18,9 @@ name = "include_pad"
 type = "boolean"
 default = false
 description = "Include the current program's gamepad layout from worker-owned storage."
+
+[[params]]
+name = "include_frame"
+type = "boolean"
+default = true
+description = "false reads the machine state (controller, saves name, mode) without capturing or encoding the frame."

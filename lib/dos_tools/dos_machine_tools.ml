@@ -1083,15 +1083,21 @@ let image_capture_failed ~tool_name ~start_time message =
 ;;
 
 (* The worker returns PNG bytes beside the captured text observation. *)
-let handle_screen ~tool_name ~start_time ~base_path _args =
-  match capture_png () with
-  | Error (Lane e) -> of_lane ~base_path ~tool_name ~start_time (Error e)
-  | Error (Encode message) -> image_capture_failed ~tool_name ~start_time message
-  | Ok { observation; width; height; png } ->
-    of_lane ~base_path ~tool_name ~start_time
-      ~extra:(png_fields ~width ~height ~png @ [ core_field ])
-      ~png
-      (Ok observation)
+(* [include_frame=false] answers from the machine state alone: a caller that
+   only needs who holds the controller does not pay for a frame capture and
+   PNG encode. *)
+let handle_screen ~tool_name ~start_time ~base_path args =
+  if not (get_bool args "include_frame" true)
+  then of_lane ~base_path ~tool_name ~start_time ~extra:[ core_field ] (off_domain Dos_lane.screen)
+  else
+    match capture_png () with
+    | Error (Lane e) -> of_lane ~base_path ~tool_name ~start_time (Error e)
+    | Error (Encode message) -> image_capture_failed ~tool_name ~start_time message
+    | Ok { observation; width; height; png } ->
+      of_lane ~base_path ~tool_name ~start_time
+        ~extra:(png_fields ~width ~height ~png @ [ core_field ])
+        ~png
+        (Ok observation)
 ;;
 
 (* The existing per-call resource ceiling. Settling observations may stop

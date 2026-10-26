@@ -140,40 +140,49 @@ let create ~base_path () =
       let answer = response result in
       let fields = match answer.S._meta with Some (`Assoc fields) -> fields | None | Some _ -> [] in
       {answer with S._meta = Some (`Assoc (Controller.screen_error_meta_field error :: fields))} in
+    let lane_failure = function
+      | Dos_lane.No_machine ->
+          failure Controller.Screen_no_machine
+            (Machine.of_lane ~base_path ~tool_name ~start_time (Error Dos_lane.No_machine))
+      | ( Dos_lane.Activity_disabled
+        | Dos_lane.Activity_unobserved
+        | Dos_lane.Invalid_request _
+        | Dos_lane.Unreadable _
+        | Dos_lane.Held_by _
+        | Dos_lane.Guest_fault _
+        | Dos_lane.Unsaveable _
+        | Dos_lane.Checkpoint_refused _
+        | Dos_lane.Other_program _
+        | Dos_lane.Would_discard_previous_autosave _ ) as error ->
+          failure Controller.Screen_capture_failed (Machine.of_lane ~base_path ~tool_name ~start_time (Error error)) in
+    let pad observation = if not (Tool_args.get_bool arguments "include_pad" false) then [] else
+      let value = match observation.Dos_lane.saves_name with
+        | None -> `Assoc ["kind", `String "no_machine"]
+        | Some saves_name ->
+            match Machine.off_domain (fun () -> Dos_pad.load ~base_path ~saves_name) with
+            | Ok (Some (source, layout)) -> `Assoc ["kind", `String "ready";
+                "layout", Machine_pad_layout.to_json ~saves_name ~source layout]
+            | Ok None -> `Assoc ["kind", `String "missing"; "saves_name", `String saves_name]
+            | Error message -> `Assoc ["kind", `String "invalid"; "message", `String message] in
+      ["pad", value] in
+    (* [include_frame=false]: the seat and the invite list only need who holds
+       the controller, so they skip the frame capture and PNG encode. *)
+    if not (Tool_args.get_bool arguments "include_frame" true) then
+      match Machine.off_domain Dos_lane.screen with
+      | Error error -> lane_failure error
+      | Ok observation ->
+          response (Machine.of_lane ~base_path ~tool_name ~start_time
+            ~extra:([Machine.core_field] @ pad observation) (Ok observation))
+    else
     match Machine.capture_png () with
-    | Error (Machine.Lane Dos_lane.No_machine) ->
-        failure Controller.Screen_no_machine
-          (Machine.of_lane ~base_path ~tool_name ~start_time (Error Dos_lane.No_machine))
-    | Error
-        (Machine.Lane
-           (( Dos_lane.Activity_disabled
-            | Dos_lane.Activity_unobserved
-            | Dos_lane.Invalid_request _
-            | Dos_lane.Unreadable _
-            | Dos_lane.Held_by _
-            | Dos_lane.Guest_fault _
-            | Dos_lane.Unsaveable _
-            | Dos_lane.Checkpoint_refused _
-            | Dos_lane.Other_program _
-         | Dos_lane.Would_discard_previous_autosave _ ) as error)) ->
-        failure Controller.Screen_capture_failed (Machine.of_lane ~base_path ~tool_name ~start_time (Error error))
+    | Error (Machine.Lane error) -> lane_failure error
     | Error (Machine.Encode message) ->
         failure Controller.Screen_encode_failed (Machine.image_capture_failed ~tool_name ~start_time message)
     | Ok {observation; width; height; png} ->
-        let pad = if not (Tool_args.get_bool arguments "include_pad" false) then [] else
-          let value = match observation.Dos_lane.saves_name with
-            | None -> `Assoc ["kind", `String "no_machine"]
-            | Some saves_name ->
-                match Machine.off_domain (fun () -> Dos_pad.load ~base_path ~saves_name) with
-                | Ok (Some (source, layout)) -> `Assoc ["kind", `String "ready";
-                    "layout", Machine_pad_layout.to_json ~saves_name ~source layout]
-                | Ok None -> `Assoc ["kind", `String "missing"; "saves_name", `String saves_name]
-                | Error message -> `Assoc ["kind", `String "invalid"; "message", `String message] in
-          ["pad", value] in
         response ~extra_content:[S.ImageContent {type_="image"; data=Base64.encode_string png;
           mime_type="image/png"; annotations=None}]
           (Machine.of_lane ~base_path ~tool_name ~start_time
-            ~extra:(Machine.png_fields ~width ~height ~png @ [Machine.core_field] @ pad) (Ok observation)) in
+            ~extra:(Machine.png_fields ~width ~height ~png @ [Machine.core_field] @ pad observation) (Ok observation)) in
   let schemas = schemas () in
   let server = Server.create ~name:"masc-dos-addon" ~version:"0.1.0" () in
   let server = List.fold_left (fun server (_tool, (schema : Masc_domain.tool_schema)) ->

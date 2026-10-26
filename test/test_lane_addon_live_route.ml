@@ -392,7 +392,7 @@ let loopback_request_authority () =
   | Ok authority -> authority
   | Error `Malformed -> fail "failed to construct loopback request authority"
 
-let dispatch_get ~sw ~clock ~state ~authorization ~target =
+let dispatch_get ?(headers = []) ~sw ~clock ~state ~authorization ~target =
   Server_request_authority.with_current (loopback_request_authority ()) (fun () ->
     let router = Routes.add_routes ~sw ~clock (Masc.Http_server_eio.Router.create ()) in
     Server_auth.publish_server_state state;
@@ -406,11 +406,12 @@ let dispatch_get ~sw ~clock ~state ~authorization ~target =
         "GET %s HTTP/1.1\r\n\
          Host: 127.0.0.1:8935\r\n\
          Origin: http://127.0.0.1:8935\r\n\
-         %s\r\n"
+         %s%s\r\n"
         target
         (match authorization with
          | Some token -> Printf.sprintf "Authorization: Bearer %s\r\n" token
          | None -> "")
+        (String.concat "" (List.map (fun (name, value) -> name ^ ": " ^ value ^ "\r\n") headers))
     in
     let bytes = Bigstringaf.of_string ~off:0 ~len:(String.length request_str) request_str in
     ignore (Httpun.Server_connection.read_eof conn bytes ~off:0 ~len:(Bigstringaf.length bytes));
@@ -437,6 +438,23 @@ let status_of_response response =
   match String.split_on_char ' ' response with
   | _ :: status :: _ -> int_of_string status
   | _ -> failf "could not parse response status: %S" response
+
+let header_value name response =
+  let head = match String.index_opt response '\r' with
+    | None -> response
+    | Some _ ->
+        let separator = "\r\n\r\n" in
+        let rec find i =
+          if i + 4 > String.length response then String.length response
+          else if String.sub response i 4 = separator then i
+          else find (i + 1) in
+        String.sub response 0 (find 0) in
+  List.find_map (fun line ->
+    match String.index_opt line ':' with
+    | Some colon when String.lowercase_ascii (String.sub line 0 colon) = name ->
+        Some (String.trim (String.sub line (colon + 1) (String.length line - colon - 1)))
+    | Some _ | None -> None)
+    (String.split_on_char '\n' head)
 
 let body_json response =
   let separator = "\r\n\r\n" in
@@ -509,8 +527,8 @@ let test_live_route () =
         Masc.Lane_addon_runtime.For_testing.reset ();
         let config = Masc.Workspace.default_config base_path in
         let clock = (Eio.Stdenv.clock env :> float Eio.Time.clock_ty Eio.Resource.t) in
-        let get ?(authorization = Some token) target =
-          dispatch_get ~sw ~clock ~state ~authorization ~target
+        let get ?(authorization = Some token) ?headers target =
+          dispatch_get ?headers ~sw ~clock ~state ~authorization ~target
         in
         let with_attached machine f =
           let run ~detach =
@@ -567,6 +585,15 @@ let test_live_route () =
           check int "the pixels are width*height*3 bytes"
             (int_member "width" screen * int_member "height" screen * 3)
             (String.length (Base64.decode_exn (string_member "rgb_base64" screen)));
+          (* Every watcher of one observation gets the one prepared frame. *)
+          let again = get live in
+          check bool "the same observation is the same frame body" true
+            (body_json again = body_json first);
+          let etag = match header_value "etag" first with
+            | Some tag -> tag | None -> fail "a frame carries an entity tag" in
+          check (option string) "and the same entity tag" (Some etag) (header_value "etag" again);
+          check int "a matching If-None-Match answers 304" 304
+            (status_of_response (get ~headers:[ "If-None-Match", etag ] live));
           let files_before = tree base_path in
           let since n = "&since=" ^ string_of_int n ^ "&incarnation=" ^ incarnation in
           let same = get (live ^ since n) in
@@ -585,6 +612,8 @@ let test_live_route () =
           let moved = body_json (get (live ^ since n)) in
           check string "a step makes the old since stale" "changed" (string_member "state" moved);
           check bool "the new count is larger" true (int_member "change_count" moved > n);
+          check bool "a new observation is not served from the old frame" true
+            (int_member "change_count" (body_json (get live)) > n);
           let files_before = tree base_path in
           List.iter
             (fun (target, what) ->

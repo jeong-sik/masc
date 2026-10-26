@@ -937,7 +937,7 @@ let read_exact_file_descriptor ~path fd length =
   | cause -> owned_file_operation_error ~path Read_contents cause
 ;;
 
-let load_owned_regular_file_blocking_with ?owner_uid ?(parent_lstat = Unix.lstat)
+let load_owned_regular_file_blocking_with ?owner_uid ?(single_link = false) ?(parent_lstat = Unix.lstat)
     ~ownership_root ~read_descriptor path =
   let parent = Filename.dirname path in
   let check_owner path (stat : Unix.stats) =
@@ -952,6 +952,13 @@ let load_owned_regular_file_blocking_with ?owner_uid ?(parent_lstat = Unix.lstat
       owned_file_error (Owned_path_writable_by_others
         {path; permissions=stat.st_perm land 0o7777})
     | Ok () -> Ok () in
+  let link_error () =
+    owned_file_error (Owned_file_operation_failed
+      {path;operation=Inspect_descriptor;cause=Sys_error "owned record has multiple hard links"}) in
+  let check_file stat =
+    match check_owner path stat with
+    | Error _ as error -> error
+    | Ok () -> if single_link && stat.Unix.st_nlink<>1 then link_error () else Ok () in
   let inspect_parent () =
     try
       match owner_uid with
@@ -981,7 +988,7 @@ let load_owned_regular_file_blocking_with ?owner_uid ?(parent_lstat = Unix.lstat
     | Eio.Cancel.Cancelled _ as cancellation -> reraise_current cancellation
     | cause -> owned_file_operation_error ~path Inspect_parent cause
   in
-  let inspect_current parent_before descriptor =
+  let inspect_current parent_before fd descriptor =
     match inspect_parent () with
     | Error _ as error -> error
     | Ok None -> Ok false
@@ -994,6 +1001,7 @@ let load_owned_regular_file_blocking_with ?owner_uid ?(parent_lstat = Unix.lstat
            let current = Unix.lstat path in
            Ok
              (current.st_kind = Unix.S_REG
+              && (not single_link || (current.st_nlink=1 && (Unix.fstat fd).st_nlink=1))
               && same_file_identity descriptor current)
          with
          | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
@@ -1015,6 +1023,7 @@ let load_owned_regular_file_blocking_with ?owner_uid ?(parent_lstat = Unix.lstat
      | Ok None -> Ok None
      | Ok (Some stat) when stat.st_kind <> Unix.S_REG ->
        owned_file_error (Path_is_not_regular_file { path; kind = stat.st_kind })
+     | Ok (Some stat) when single_link && stat.st_nlink<>1 -> link_error ()
      | Ok (Some before_open) ->
        let opened =
          try
@@ -1039,10 +1048,10 @@ let load_owned_regular_file_blocking_with ?owner_uid ?(parent_lstat = Unix.lstat
                    || not (same_file_identity before_open descriptor) ->
               owned_file_error (Filesystem_identity_changed { path })
             | descriptor ->
-              (match check_owner path descriptor with
+              (match check_file descriptor with
                | Error _ as error -> error
                | Ok () ->
-              (match inspect_current parent_before descriptor with
+              (match inspect_current parent_before fd descriptor with
                | Error _ as error -> error
                | Ok false ->
                  owned_file_error (Filesystem_identity_changed { path })
@@ -1052,8 +1061,9 @@ let load_owned_regular_file_blocking_with ?owner_uid ?(parent_lstat = Unix.lstat
                   | Ok content ->
                     (match Unix.fstat fd with
                      | after_read when same_file_snapshot descriptor after_read
+                         && (not single_link || after_read.st_nlink=1)
                          && (match owner_uid with None -> true | Some uid -> after_read.st_uid = uid) ->
-                       (match inspect_current parent_before descriptor with
+                       (match inspect_current parent_before fd descriptor with
                         | Error _ as error -> error
                         | Ok true -> Ok (Some content)
                         | Ok false ->
@@ -1086,9 +1096,9 @@ type owned_regular_file_contents =
   ; snapshot : owned_regular_file_snapshot
   }
 
-let load_owned_regular_file_with_snapshot_blocking ?owner_uid ?parent_lstat ~ownership_root path =
+let load_owned_regular_file_with_snapshot_blocking ?owner_uid ?single_link ?parent_lstat ~ownership_root path =
   load_owned_regular_file_blocking_with
-    ?owner_uid ?parent_lstat ~ownership_root
+    ?owner_uid ?single_link ?parent_lstat ~ownership_root
     ~read_descriptor:(fun ~path fd descriptor ->
       match read_exact_file_descriptor ~path fd descriptor.Unix.st_size with
       | Error _ as error -> error
@@ -1100,16 +1110,16 @@ let load_owned_regular_file_with_snapshot_blocking ?owner_uid ?parent_lstat ~own
     path
 ;;
 
-let load_owned_regular_file_with_snapshot ?owner_uid ~ownership_root path =
+let load_owned_regular_file_with_snapshot ?owner_uid ?single_link ~ownership_root path =
   with_fs_or_fallback
     ~path
     ~fallback:(fun () ->
-      load_owned_regular_file_with_snapshot_blocking ?owner_uid ~ownership_root path)
+      load_owned_regular_file_with_snapshot_blocking ?owner_uid ?single_link ~ownership_root path)
     (fun _fs ->
        let result =
          Eio_unix.run_in_systhread ~label:(labelled "fs-compat-load-owned-file" path) (fun () ->
            load_owned_regular_file_with_snapshot_blocking
-             ?owner_uid ~ownership_root
+             ?owner_uid ?single_link ~ownership_root
              path)
        in
        Eio.Fiber.check ();
@@ -1117,8 +1127,8 @@ let load_owned_regular_file_with_snapshot ?owner_uid ~ownership_root path =
 ;;
 
 module Owned_read_for_testing = struct
-  let load_with_snapshot ~parent_lstat ~owner_uid ~ownership_root path =
-    load_owned_regular_file_with_snapshot_blocking ~parent_lstat ~owner_uid ~ownership_root path
+  let load_with_snapshot ?single_link ~parent_lstat ~owner_uid ~ownership_root path =
+    load_owned_regular_file_with_snapshot_blocking ?single_link ~parent_lstat ~owner_uid ~ownership_root path
 end
 
 let load_owned_regular_file ~ownership_root path =

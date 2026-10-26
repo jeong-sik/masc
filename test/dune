@@ -6780,3 +6780,5 @@
  (libraries alcotest masc_tui_render_prim))
 
 (include stanzas/test_endpoint_job_protocol.inc)
+
+(include stanzas/test_endpoint_job_registry.inc)

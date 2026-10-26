@@ -777,6 +777,64 @@ let test_owned_read_checks_uid_in_each_parent_snapshot () =
   | Error error -> fail (Fs_compat.owned_regular_file_read_error_to_string error)
 ;;
 
+let check_owned_read_single_link_and_initial_absence () =
+  with_tmp_dir @@ fun raw_base ->
+  let base = Unix.realpath raw_base in
+  let path = Filename.concat base "original" in
+  let alias = Filename.concat base "alias" in
+  let strict () = Fs_compat.load_owned_regular_file_with_snapshot
+      ~owner_uid:(Unix.geteuid ()) ~single_link:true ~ownership_root:base path in
+  (match strict () with Ok None -> () | _ -> fail "initial missing record lost its absence meaning");
+  Fs_compat.save_file path "original bytes";
+  (match strict () with
+   | Ok (Some value) -> check string "single-link source is readable" "original bytes" value.content
+   | Ok None -> fail "existing single-link source was absent"
+   | Error error -> fail (Fs_compat.owned_regular_file_read_error_to_string error));
+  Unix.link path alias;
+  (match strict () with
+   | Error _ -> ()
+   | Ok None | Ok (Some _) -> fail "strict owned read accepted multiple links");
+  (match Fs_compat.load_owned_regular_file_with_snapshot ~single_link:true ~ownership_root:base path with
+   | Error _ -> ()
+   | Ok None | Ok (Some _) -> fail "single-link policy depended on an owner UID argument");
+  match Fs_compat.load_owned_regular_file_with_snapshot ~ownership_root:base path with
+  | Ok (Some value) -> check string "ordinary reads retain their declared hardlink contract" "original bytes" value.content
+  | Ok None -> fail "ordinary source was absent"
+  | Error error -> fail (Fs_compat.owned_regular_file_read_error_to_string error)
+;;
+
+let test_owned_read_single_link_and_initial_absence ~fs () =
+  Fs_compat.clear_fs ();
+  check_owned_read_single_link_and_initial_absence ();
+  Fs_compat.set_fs fs;
+  Fun.protect ~finally:Fs_compat.clear_fs check_owned_read_single_link_and_initial_absence
+;;
+
+let test_owned_read_keeps_bound_unlink_and_link_failures () =
+  List.iter (fun (boundary,action) -> with_tmp_dir @@ fun raw_base ->
+    let base = Unix.realpath raw_base in
+    let path = Filename.concat base "original" in
+    let alias = Filename.concat base "alias" in
+    Fs_compat.save_file path "original bytes";
+    let inspections = ref 0 in
+    let injected = ref false in
+    let parent_lstat directory =
+      if String.equal directory base then (
+        incr inspections;
+        if !inspections=boundary then (
+          injected:=true;
+          match action with `Unlink -> Unix.unlink path | `Link -> Unix.link path alias));
+      Unix.lstat directory in
+    let result = Fs_compat.Owned_read_for_testing.load_with_snapshot ~single_link:true
+        ~parent_lstat ~owner_uid:(Unix.geteuid ()) ~ownership_root:base path in
+    check bool "actual observed-file race was injected" true !injected;
+    match result with
+    | Error _ -> ()
+    | Ok None -> fail "observed-file failure became initial absence"
+    | Ok (Some _) -> fail "changed link authority returned private bytes")
+    [2,`Unlink;3,`Unlink;2,`Link;3,`Link]
+;;
+
 let test_owned_read_retains_ancestor_identity () =
   with_tmp_dir @@ fun raw_base ->
   let base = Unix.realpath raw_base in
@@ -1217,6 +1275,10 @@ let () =
     ; ( "owned regular file"
       , [ test_case "requested UID checked before and after open/read" `Quick
             test_owned_read_checks_uid_in_each_parent_snapshot
+        ; test_case "strict link policy preserves initial absence and ordinary reads" `Quick
+            (test_owned_read_single_link_and_initial_absence ~fs:(Eio.Stdenv.fs env))
+        ; test_case "observed unlink and hardlink races never become absence" `Quick
+            test_owned_read_keeps_bound_unlink_and_link_failures
         ; test_case "all ancestor identities retained" `Quick test_owned_read_retains_ancestor_identity
         ; test_case "owned optional directory presence and permission contract" `Quick
             test_owned_directory_presence_and_permission_contract

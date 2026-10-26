@@ -265,88 +265,14 @@ let connector_json ?(audit_limit = 10) () =
      :: status_fields (read_status ~audit_limit))
 
 let bind ~channel_id ~keeper_name ~actor_name =
-  let channel_id = String.trim channel_id in
-  let keeper_name = String.trim keeper_name in
-  if String.equal channel_id "" then Error "channel_id is required"
-  else if String.equal keeper_name "" then Error "keeper_name is required"
-  else
-    Store.mutate_bindings binding_store ~decide:(fun original_bindings ->
-      let previous_keeper =
-        match
-          List.find_map
-            (fun (b : binding) ->
-              if String.equal b.channel_id channel_id then Some b.keeper_name
-              else None)
-            original_bindings
-        with
-        | Some keeper_name -> keeper_name
-        | None -> ""
-      in
-      let updated_bindings =
-        (({ channel_id; keeper_name } : binding)
-         :: List.filter
-              (fun (b : binding) ->
-                not (String.equal b.channel_id channel_id))
-              original_bindings)
-        |> List.sort (fun (a : binding) (b : binding) ->
-               String.compare a.channel_id b.channel_id)
-      in
-      let event =
-        Store.
-          { timestamp =
-                (* NDT-OK: binding audit wall-clock is operator-facing
-                   telemetry only. *)
-                Gate_time_util.iso8601_of_unix (Unix.gettimeofday ())
-            ; action = "bind"
-            ; channel_id
-            ; keeper_name
-            ; actor_id = actor_name
-            ; actor_name
-            ; previous_keeper }
-      in
-      Ok (updated_bindings, event, ()))
-    |> Result.map_error Store.mutation_error_to_string
-    |> Result.map (fun () -> status_json ())
+  Store.bind binding_store ~channel_id ~keeper_name ~actor_name
+  |> Result.map_error Store.mutation_error_to_string
+  |> Result.map (fun () -> status_json ())
 
 let unbind_internal ?expected_keeper_name ~channel_id ~actor_name () =
-  let channel_id = String.trim channel_id in
-  if String.equal channel_id "" then Error "channel_id is required"
-  else
-    Store.mutate_bindings binding_store ~decide:(fun original_bindings ->
-      match
-        original_bindings
-        |> List.find_opt (fun (b : binding) ->
-               String.equal b.channel_id channel_id)
-      with
-      | None -> Error "binding not found"
-      | Some (removed : binding)
-        when (match expected_keeper_name with
-              | Some expected -> not (String.equal expected removed.keeper_name)
-              | None -> false) ->
-        Error "binding changed"
-      | Some (removed : binding) ->
-        let updated_bindings =
-          List.filter
-            (fun (b : binding) ->
-              not (String.equal b.channel_id channel_id))
-            original_bindings
-        in
-        let event =
-          Store.
-            { timestamp =
-                  (* NDT-OK: binding audit wall-clock is operator-facing
-                     telemetry only. *)
-                  Gate_time_util.iso8601_of_unix (Unix.gettimeofday ())
-              ; action = "unbind"
-              ; channel_id
-              ; keeper_name = removed.keeper_name
-              ; actor_id = actor_name
-              ; actor_name
-              ; previous_keeper = removed.keeper_name }
-        in
-        Ok (updated_bindings, event, ()))
-    |> Result.map_error Store.mutation_error_to_string
-    |> Result.map (fun () -> status_json ())
+  Store.unbind binding_store ?expected_keeper_name ~channel_id ~actor_name ()
+  |> Result.map_error Store.mutation_error_to_string
+  |> Result.map (fun () -> status_json ())
 
 let unbind ~channel_id ~actor_name =
   unbind_internal ~channel_id ~actor_name ()

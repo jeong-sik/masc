@@ -129,12 +129,8 @@ let test_audit_failure_rolls_back_binding_mutation () =
   in
   seed_bindings dir original;
   let result =
-    Store.mutate_bindings store ~decide:(fun _ ->
-      Ok
-        ( [ ({ channel_id = "channel-2"; keeper_name = "alpha" }
-            : Store.binding) ]
-        , sample_event ~action:"bind" ()
-        , () ))
+    Store.bind store ~channel_id:"channel-2" ~keeper_name:"alpha"
+      ~actor_name:"dashboard"
   in
   (match result with
    | Ok () -> fail "audit directory unexpectedly accepted an append"
@@ -185,15 +181,7 @@ let test_failed_mutation_cannot_erase_concurrent_success () =
   seed_bindings dir
     [ ({ channel_id = "original"; keeper_name = "luna" } : Store.binding) ];
   let bind channel_id keeper_name =
-    Store.mutate_bindings store ~decide:(fun bindings ->
-      let updated =
-        ({ channel_id; keeper_name } : Store.binding)
-        :: List.filter
-             (fun (binding : Store.binding) ->
-               not (String.equal binding.channel_id channel_id))
-             bindings
-      in
-      Ok (updated, sample_event ~action:"bind" (), ()))
+    Store.bind store ~channel_id ~keeper_name ~actor_name:"dashboard"
   in
   let failed = Domain.spawn (fun () -> bind "failed" "alpha") in
   Stdlib.Mutex.lock coordination_mu;

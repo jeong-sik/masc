@@ -434,7 +434,7 @@ To investigate a delayed Job, inspect the exact schedule lookup at
 - `keeper_queue_evidence` binds the current pending/consumed observation to the
   schedule instance, occurrence due time and payload digest.
 - `keeper_reaction_evidence` separates turn start, turn finish and queue ACK.
-- `runner_hold.reason=previous_occurrence_unconsumed` means the previous wake is
+- `runner_hold.reason.kind=previous_occurrence_unconsumed` means the previous wake is
   still unconsumed; later interval firings are held back rather than duplicated.
 
 A healthy heartbeat or runner does not prove that a particular input made

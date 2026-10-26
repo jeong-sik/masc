@@ -307,7 +307,7 @@ Keeper 11개, `.masc` 하나. 그 런타임을 설명할 뿐이고 다른 환경
 - `keeper_queue_evidence`는 현재 대기·소비 관측을 schedule instance,
   해당 실행의 예정 시각과 payload digest에 결속합니다.
 - `keeper_reaction_evidence`는 턴 시작·종료와 큐 ACK를 구분합니다.
-- `runner_hold.reason=previous_occurrence_unconsumed`는 이전 wake가 아직
+- `runner_hold.reason.kind=previous_occurrence_unconsumed`는 이전 wake가 아직
   소비되지 않았다는 뜻입니다. 반복 예약의 다음 실행을 중복 생성하지 않고
   보류합니다.
 

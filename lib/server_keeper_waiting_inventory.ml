@@ -1278,10 +1278,20 @@ let keeper_json_by_name_snapshot snapshot =
 ;;
 
 let keeper_json_by_name config =
-  read_inventory_snapshot
-    ~read_pending:Keeper_approval_queue.list_pending_entries_with_read_errors_for_workspace
-    config
-  |> keeper_json_by_name_snapshot
+  let snapshot =
+    read_inventory_snapshot
+      ~read_pending:Keeper_approval_queue.list_pending_entries_with_read_errors_for_workspace
+      config
+  in
+  let fleet_read_errors =
+    List.filter (fun row -> row.source = Read_error) snapshot.global_rows
+  in
+  let per_keeper =
+    List.map
+      (fun (keeper_name, busy, rows) -> keeper_name, busy, rows @ fleet_read_errors)
+      snapshot.per_keeper
+  in
+  keeper_json_by_name_snapshot { snapshot with per_keeper }
 ;;
 
 let dashboard_json_of_snapshot snapshot =

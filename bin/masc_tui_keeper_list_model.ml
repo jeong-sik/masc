@@ -152,7 +152,6 @@ let primary_activity_of_row row =
   let failed =
     health = Some Masc.Tui_decode.Health_failing
     || activity = Some Masc.Tui_decode.Keeper_activity_attempt_failed
-    || waiting_has_source Waiting_source_read_error items
   in
   if Option.is_some row.approval || waiting_has_source Waiting_source_hitl_pending items then
     Held_call

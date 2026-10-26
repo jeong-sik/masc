@@ -10790,10 +10790,23 @@ let preserve_keeper_list_selection state update =
     Option.iter (keeper_list_select_name state) selected;
   result
 
+let merge_keeper_waiting ~previous ~rows ~waiting =
+  let index rows =
+    List.map (fun (row : Tui_decode.keeper_waiting_row) -> row.kwr_keeper_name, row) rows
+  in
+  let fresh = index waiting and retained = index previous in
+  List.filter_map
+    (fun (turn : Tui_decode.keeper_turn_row) ->
+      match List.assoc_opt turn.ktr_keeper_name fresh with
+      | Some _ as observed -> observed
+      | None -> List.assoc_opt turn.ktr_keeper_name retained)
+    rows
+
 let accept_keeper_turn_observation state ~rows ~waiting ~observed_at =
   preserve_keeper_list_selection state (fun () ->
     state.keeper_turns <- rows;
-    state.keeper_waiting <- waiting;
+    state.keeper_waiting <- merge_keeper_waiting
+      ~previous:state.keeper_waiting ~rows ~waiting;
     state.keeper_turns_observed_at <- Some observed_at;
     state.keeper_turns_error <- None)
 

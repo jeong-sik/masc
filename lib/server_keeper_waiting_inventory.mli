@@ -23,7 +23,11 @@ val keeper_json_by_name : Workspace.config -> (string * Yojson.Safe.t) list
 (** One fleet snapshot's public per-Keeper projections, keyed by Keeper name.
     The rows have the same shape as [dashboard_json]'s [keepers] entries and
     the per-Keeper endpoint, so another public-read projection can join them
-    without recomputing the inventory or inventing a second wire contract. *)
+    without recomputing the inventory or inventing a second wire contract.
+    Fleet-scoped read errors remain visible as [keeper_name:null] waiting items
+    in every returned row; an unreadable source cannot look like ordinary idle.
+    [dashboard_json] keeps its separate global rows and does not duplicate them
+    in fleet-wide counts. *)
 
 type waiting_source =
   | Event_queue_pending

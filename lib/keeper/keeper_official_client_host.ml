@@ -1892,7 +1892,7 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
            | None -> final_result
            | Some observe ->
              let boundary =
-               try observe () with
+               try observe ~tool_name:tool.schema.name with
                | exn -> (* cancel-guard-ok: reraise_if_reserved re-raises Cancelled *)
                  Llm_provider.Reserved_exn.reraise_if_reserved exn;
                  Error (Agent_core.Error.Internal (Printexc.to_string exn))

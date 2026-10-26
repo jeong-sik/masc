@@ -1655,12 +1655,11 @@ let test_official_turn_keeps_tool_result_until_completion () =
              Keeper_tools_agent_core.Terminal_effect_open)
            ~terminal_error ~pre_tool_rejects:(ref [])
            ~on_result_handoff:(fun ~invocation:_ ~content:_ -> handed_off := true)
-           ~on_tool_boundary:(fun () ->
+           ~on_tool_boundary:(fun ~tool_name ->
              check bool "tool result handed off before boundary advice" true
                !handed_off;
              Keeper_agent_run.For_testing.official_client_tool_boundary
-               ~repetition_execution:None
-               ())
+               ~repetition_execution:None ~yield_requested:None ~tool_name)
            ~raw_trace_run:None ()
        in
        let tool =

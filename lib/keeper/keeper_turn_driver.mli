@@ -335,7 +335,7 @@ val run_named :
   ?official_client_composed_context:
     (unit -> Keeper_official_client_host.composed_context option) ->
   ?on_official_client_tool_boundary:
-    (unit -> (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result) ->
+    (tool_name:string -> (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result) ->
   ?on_child_content_observation:
     (attempt:Runtime_native_tasks.attempt -> Keeper_claude_task_binding.child_observation -> unit) ->
   (* Actual sealed Child decision, with frozen materialized dispatch. It is

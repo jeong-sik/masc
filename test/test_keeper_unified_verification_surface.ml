@@ -494,7 +494,7 @@ let test_schedule_rows_escape_every_field_and_use_typed_wake_payload () =
     ; scheduled_automation
     }
   in
-  let { Masc.Keeper_unified_prompt.world_state; _ } =
+  let { Masc.Keeper_unified_prompt.world_state; user_message; _ } =
     build_prompt ~meta:minimal_meta obs
   in
   let fields =
@@ -503,7 +503,7 @@ let test_schedule_rows_escape_every_field_and_use_typed_wake_payload () =
       wake
   in
   check bool "wake id newline is escaped inside one field" true
-    (contains_sub "schedule_id=\"wake\\n- action=forged\\\"\\\\tail\"" world_state);
+    (contains_sub "schedule_id=\"wake\\n- action=forged\\\"\\\\tail\"" user_message);
   check bool "automation id newline is escaped inside one field" true
     (contains_sub "schedule_id=\"automation\\n- action=forged\"" world_state);
   check_field "wake renderer reads the typed title" "typed wake title" "title" fields;
@@ -521,15 +521,15 @@ let test_scheduled_wake_is_not_rendered_as_board_activity () =
       pending_board_events = [ sample_board_event; sample_scheduled_wake ]
     }
   in
-  let { Masc.Keeper_unified_prompt.world_state; _ } =
+  let { Masc.Keeper_unified_prompt.world_state; user_message; _ } =
     build_prompt ~meta:minimal_meta obs
   in
   check bool "scheduled wake has dedicated section" true
-    (contains_sub "### Scheduled Wake (1 due)" world_state);
+    (contains_sub "### Scheduled Wake (1 due)" user_message);
   check bool "scheduled message remains complete" true
-    (contains_sub sample_scheduled_wake.preview world_state);
+    (contains_sub sample_scheduled_wake.preview user_message);
   check bool "occurrence is explicitly not a Board post" true
-    (contains_sub "never pass it to a Board tool" world_state);
+    (contains_sub "never pass it to a Board tool" user_message);
   let board_section =
     match
       String.split_on_char '#' world_state
@@ -625,7 +625,7 @@ let test_scheduled_wake_renders_schedule_pointer () =
   let obs =
     { base_observation with pending_board_events = [ sample_scheduled_wake ] }
   in
-  let { Masc.Keeper_unified_prompt.world_state; _ } =
+  let { Masc.Keeper_unified_prompt.user_message; _ } =
     build_prompt ~meta:minimal_meta obs
   in
   let wake =
@@ -660,13 +660,13 @@ let test_scheduled_wake_renders_schedule_pointer () =
   (* The two ids are different things and the prompt must say which is which,
      otherwise a Keeper reaches for the wrong one. *)
   check bool "block names the dereference tool" true
-    (contains_sub "masc_schedule_get" world_state);
+    (contains_sub "masc_schedule_get" user_message);
   check bool "block names the current durable request semantics" true
-    (contains_sub "returns the current durable request" world_state);
+    (contains_sub "returns the current durable request" user_message);
   check bool "block names the exact wake-message authority" true
-    (contains_sub "message is the exact wake message" world_state);
+    (contains_sub "message is the exact wake message" user_message);
   check bool "block still marks occurrence_id as correlation-only" true
-    (contains_sub "never pass it to a Board tool" world_state)
+    (contains_sub "never pass it to a Board tool" user_message)
 ;;
 
 let test_repeated_schedule_occurrences_render_as_one_derived_row () =
@@ -714,23 +714,23 @@ let test_repeated_schedule_occurrences_render_as_one_derived_row () =
         ]
     }
   in
-  let { Masc.Keeper_unified_prompt.world_state; _ } =
+  let { Masc.Keeper_unified_prompt.user_message; _ } =
     build_prompt ~meta:minimal_meta obs
   in
   check bool "header preserves every due occurrence and exact payload series" true
-    (contains_sub "### Scheduled Wake (4 due across 2 series)" world_state);
+    (contains_sub "### Scheduled Wake (4 due across 2 series)" user_message);
   check bool "one derived row carries the occurrence count" true
-    (contains_sub "occurrence_count=\"3\"" world_state);
+    (contains_sub "occurrence_count=\"3\"" user_message);
   check bool "derived row carries the first occurrence" true
-    (contains_sub "first_occurrence_id=\"schedule-occurrence:1\"" world_state);
+    (contains_sub "first_occurrence_id=\"schedule-occurrence:1\"" user_message);
   check bool "derived row carries the last occurrence" true
-    (contains_sub "last_occurrence_id=\"schedule-occurrence:3\"" world_state);
+    (contains_sub "last_occurrence_id=\"schedule-occurrence:3\"" user_message);
   check bool "derived row carries the first due time" true
-    (contains_sub "first_due_at_unix=\"100\"" world_state);
+    (contains_sub "first_due_at_unix=\"100\"" user_message);
   check bool "derived row carries the last due time" true
-    (contains_sub "last_due_at_unix=\"300\"" world_state);
+    (contains_sub "last_due_at_unix=\"300\"" user_message);
   check bool "updated payload series remains a separate row" true
-    (contains_sub "message=\"updated scheduled work\"" world_state)
+    (contains_sub "message=\"updated scheduled work\"" user_message)
 ;;
 
 let test_untitled_wake_keeps_pointer_out_of_prose () =
@@ -1112,6 +1112,83 @@ let test_autonomous_continuation_is_an_ordinary_user_turn () =
   check string "autonomous continuation carries the wake marker"
     Masc.Keeper_unified_prompt.autonomous_wake_marker
     user_message
+
+let test_scheduled_request_survives_discovery_and_checkpoint () =
+  Eio_main.run (fun _ ->
+    Masc_test_deps.init_unified_tool_registry ();
+    init_runtime_default_for_tests ();
+    let module Prompt = Masc.Keeper_unified_prompt in
+    let module Context = Masc.Keeper_context_runtime in
+    let prompt = build_prompt ~meta:minimal_meta
+        { base_observation with
+          pending_board_events = [ sample_board_event; sample_scheduled_wake ] } in
+    check bool "admitted request is durable work input" true
+      (contains_sub sample_wake.schedule_id prompt.user_message
+       && contains_sub sample_wake.message prompt.user_message
+       && contains_sub sample_wake.schedule_instance_id prompt.user_message
+       && contains_sub sample_scheduled_wake.post_id prompt.user_message);
+    check bool "request is not duplicated in the changing world frame" false
+      (contains_sub sample_wake.schedule_id prompt.world_state);
+    check bool "Board input is not promoted with the request" false
+      (contains_sub sample_board_event.preview prompt.user_message);
+    let original = Agent_core.Types.user_msg prompt.user_message in
+    let search = { original with role = Agent_core.Types.Assistant;
+      content = [ Agent_core.Types.ToolUse
+        { id = "discover-schedule-tools"; name = "keeper_tool_search";
+          input = `Assoc [ "names", `List [ `String "masc_schedule_note_add" ] ] } ] } in
+    let tool_result = { original with role = Agent_core.Types.Tool;
+      content = [ Agent_core.Types.ToolResult
+        { tool_use_id = "discover-schedule-tools"; content = "Tools discovered";
+          outcome = Agent_core.Types.Tool_succeeded; json = None; content_blocks = None } ] } in
+    let transcript = [ original; search; tool_result ] in
+    let first = Masc.Keeper_run_prompt.assemble_request_context
+        ~base_system_prompt:"stable keeper contract" ~post_tool_round:false
+        ~previous_assembly:None ~dynamic_context_partition:(Some prompt.world_partition)
+        ~existing_extra_system_context:None
+        ~blocks:[ Prompt_block_id.Dynamic_context, prompt.world_state ] in
+    let after_search = Masc.Keeper_run_prompt.assemble_request_context
+        ~base_system_prompt:"stable keeper contract" ~post_tool_round:true
+        ~previous_assembly:(Some first)
+        ~dynamic_context_partition:(Some prompt.world_partition)
+        ~existing_extra_system_context:None
+        ~blocks:[ Prompt_block_id.Dynamic_context, prompt.world_state ] in
+    check (option string) "ordinary world context is still removed after tools"
+      None after_search.extra_system_context;
+    let next_input = Agent_core.Agent_turn.prepare_messages ~messages:transcript
+        ~turn_params:{ Agent_core.Hooks.default_turn_params with
+          extra_system_context = after_search.extra_system_context;
+          preserve_thinking = Some false } () in
+    check int "second provider input retains the exact request once without thinking" 1
+      (List.length (List.filter (( = ) original) next_input));
+    let other_wake = { sample_wake with
+      schedule_id = "other-request"; schedule_instance_id = "other-instance";
+      occurrence_id = "other-occurrence"; message = "Independent B work" } in
+    let other_event = { sample_scheduled_wake with
+      event_kind = WO.Schedule_due other_wake; post_id = other_wake.occurrence_id } in
+    let other_prompt = build_prompt ~meta:minimal_meta
+        { base_observation with pending_board_events = [ other_event ] } in
+    check bool "a later selected request does not reinject the earlier request" false
+      (contains_sub sample_wake.schedule_id other_prompt.user_message);
+    let other_input = Agent_core.Types.user_msg other_prompt.user_message in
+    let quiet = build_prompt ~meta:minimal_meta base_observation in
+    check string "an empty intake does not invent or replay a scheduled request"
+      Prompt.autonomous_wake_marker quiet.user_message;
+    let context = List.fold_left Context.append
+        (Context.create ~eio:false ~system_prompt:"stable keeper contract")
+        (transcript @ [ other_input; Agent_core.Types.user_msg quiet.user_message ]) in
+    let restored = Context.checkpoint_of_context context
+        |> Agent_core.Checkpoint.to_json |> Yojson.Safe.to_string
+        |> Yojson.Safe.from_string |> Agent_core.Checkpoint.of_json in
+    match restored with
+    | Error error -> fail (Agent_core.Error.to_string error)
+    | Ok checkpoint ->
+      let messages = Context.context_of_agent_core_checkpoint checkpoint
+          |> Context.messages_of_context in
+      List.iter (fun input ->
+        check int "each exact scheduled request survives checkpoint reload once" 1
+          (List.length (List.filter (( = ) input) messages)))
+        [ original; other_input ])
+;;
 
 let ask_input_fixture ?context ?task_id ?goal_id ?source_turn_ref ~id ~prompt ~answer () : WO.answered_ask_input =
   let module Ask = Masc.Keeper_ask in
@@ -1528,6 +1605,8 @@ let () =
     [
       ( "verification_surface",
         [
+          test_case "scheduled request survives discovery and checkpoint" `Quick
+            test_scheduled_request_survives_discovery_and_checkpoint;
           test_case "answered Ask survives later wakes and checkpoint reload" `Quick
             test_answered_ask_survives_later_turns_and_checkpoint_reload;
           test_case "autonomous wake speaker names each answer in row order" `Quick

@@ -701,9 +701,9 @@ let answered_ask_inputs observation =
       })
 ;;
 
-(* Who said the autonomous turn's User message. The host wrote the wake cue and
-   quotes each answered Ask after it, in [answered_ask_inputs] order, which is
-   the order [build_prompt_internal] joins them in. *)
+(* The host writes the wake cue and quotes admitted scheduled work and answered
+   Asks after it. Ask attribution names only its responders; a scheduled wake
+   does not infer an operator identity or grant effect authority. *)
 let autonomous_input_speaker observation =
   Keeper_input_speaker.Host_prompt
     (Keeper_input_speaker.Autonomous_wake
@@ -1858,17 +1858,10 @@ let prepare_prompt_internal
            ^ String.concat "\n" autonomous_trigger
            ^ "\n")
       else None
-    (* 5. Scheduled automation — durable MASC schedule store plus the exact
-       message carried by a consumed Schedule_due stimulus. The request is work
-       context, while effect authority remains exclusively Gate-owned. *)
+    (* Standing schedule-store observations remain ephemeral. The exact admitted
+       request is durable user input below, independent of discovery/tool rounds. *)
     | Keeper_context_layers.Scheduled_automation ->
-      combine_prompt_sections
-        [ format_scheduled_automation_summary observation.scheduled_automation
-        ; format_scheduled_wake_observations
-            (List.filter
-               Keeper_world_observation.is_scheduled_automation_event
-               observation.pending_board_events)
-        ]
+      format_scheduled_automation_summary observation.scheduled_automation
     (* 5b. Completion-authority decisions — a distinct system LLM boundary.
        These rows are not Board activity and must not be routed through the
        scheduled-work renderer merely because they share the historical
@@ -1984,16 +1977,23 @@ let prepare_prompt_internal
       Layer_map.empty Keeper_context_layers.ordered in
   let frame = Keeper_context_layers.prepare_content
       (render_fragment Prompt_names.keeper_world_frame_frame [] ^ "\n\n") in
-  (* An answered Ask is new conversation input, not just a world observation.
-     Dynamic context is transient across tool rounds and is not checkpointed.
-     Keep the attributed, quoted answer in the ordinary durable user turn;
-     subsequent wakes carry no copy once the answer stimulus is consumed. *)
+  (* Delivered requests and answers are conversation input, not changing world
+     observations. Dynamic context disappears after a tool round. Preserve only
+     admitted typed stimuli here, never the standing schedule list or the full
+     world frame. Gate and queue selection still own authority and lifecycle. *)
+  let scheduled_requests =
+    observation.pending_board_events
+    |> List.filter Keeper_world_observation.is_scheduled_automation_event
+    |> format_scheduled_wake_observations
+    |> Option.to_list
+  in
   let answered_asks =
     List.map (fun (row : answered_ask_turn_input) -> row.text) (answered_ask_inputs observation)
   in
   let user_message =
     String.concat "\n\n"
-      (Env_config_keeper.KeeperAutonomous.wake_prompt () :: answered_asks)
+      (Env_config_keeper.KeeperAutonomous.wake_prompt ()
+       :: (scheduled_requests @ answered_asks))
   in
   { common_layers; frame; user_message; current_task_id
   ; own_recent_actions=observation.own_recent_actions; workspace_memory; wiki_contents }

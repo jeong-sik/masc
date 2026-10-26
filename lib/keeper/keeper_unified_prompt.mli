@@ -1,8 +1,9 @@
 (** Keeper_unified_prompt — Build a single unified prompt from keeper identity
     and world observation.
 
-    Only reactive triggers and resource state are included in the user message;
-    runtime telemetry remains on the decision-audit path.
+    Admitted scheduled requests and answered Asks are durable turn input;
+    changing world observations remain ephemeral and runtime telemetry remains
+    on the decision-audit path.
 
     @since Unified Keeper Loop *)
 
@@ -24,7 +25,10 @@ type turn_prompt_parts = {
   user_message : string;
       (** Current user-turn input. Operator utterances are durable. An
           answered Ask carries its attributed answer here so it survives
-          subsequent tool rounds and checkpoint reloads. An autonomous
+          subsequent tool rounds and checkpoint reloads. An admitted scheduled
+          wake carries its exact quoted request and occurrence identity here
+          for the same reason; this records work input, not effect authority.
+          An autonomous
           continuation uses the fleet wake prompt, which is also
           durable: each cycle is an ordinary next user turn followed by its
           assistant/tool suffix. HITL resolutions are appended by the turn

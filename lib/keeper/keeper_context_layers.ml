@@ -185,7 +185,7 @@ let source_of_name name =
   |> List.find_opt (fun source -> String.equal (source_name source) name)
 
 (* See the mli. The inbox layers carry rows delivered for this turn (pending
-   messages, Board and authority events, the consumed schedule wake) and the
+   messages, Board and authority events, the schedule-store attention rows) and the
    trigger says why this turn ran, so a repeat of their bytes is a new arrival.
    Every other layer projects state that holds until it changes. A whole
    dynamic context the renderer did not partition into layers

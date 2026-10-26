@@ -216,8 +216,9 @@ let observed_differences ~image_difference ~command_difference (plan : t) (facts
     ]
 
 let differences ~image_command (plan : t) (facts : facts) =
-  let expected = Keeper_microvm_image_command.command image_command ~arguments:plan.command in
-  let command_difference = if expected = facts.command then None else Some Command in
+  (* Apple launch overrides the image entrypoint with the plan's executable.
+     Keep image binding checks separate from the exact requested runtime argv. *)
+  let command_difference = if plan.command = facts.command then None else Some Command in
   let image_difference = Keeper_microvm_image_command.validate_binding image_command
       ~reference:plan.image ~identity:facts.image_identity <> Ok () in
   observed_differences ~image_difference ~command_difference plan facts

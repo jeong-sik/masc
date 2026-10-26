@@ -132,6 +132,8 @@ val assess :
     replacement before same-label runtime differences are considered. Unreadable
     facts always refuse. A same-plan readable identity also requires actual image
     metadata bound to that guest's descriptor/platform. Metadata failure refuses
-    without replacing the guest. The explicit command is compared after the
-    image's OCI entrypoint, without changing the requested-plan digest.
+    without replacing the guest. The renderer overrides the image's OCI
+    entrypoint with the requested executable, so runtime argv must equal
+    [plan.command] exactly. Image metadata still binds descriptor/platform;
+    an image's default entrypoint cannot authorize a command prefix.
     [Matches_plan] is a comparison result, not lifecycle authority. *)

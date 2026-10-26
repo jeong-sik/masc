@@ -23,12 +23,28 @@ smoke = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(smoke)
 
 
+def transport_refusal(content):
+    """Require one Execute payload's typed unavailable receipt, never error prose."""
+    try:
+        payload = json.loads(content) if isinstance(content, str) else content
+    except ValueError as error:
+        raise smoke.SmokeError('pin refusal is not a structured Execute payload') from error
+    expected = {'status': 'recorded', 'receipts': [
+        {'status': 'unavailable', 'reason': 'transport_unavailable'}]}
+    if (type(payload) is not dict or payload.get('ok') is not False
+            or payload.get('typed') is not True
+            or payload.get('shim_execution_evidence') != expected):
+        raise smoke.SmokeError('pin replacement lacks typed transport_unavailable Execute evidence')
+    return payload
+
+
 class FilesFixture(smoke.ModelFixture):
     def __init__(self, marker, output):
         super().__init__(marker, output)
         self.final = 'REMOTE_SSH_FILES_COMPLETED_' + marker
         self.results, self.sent, self.step = [], None, 0
         self.phase = 0
+        self.expect_failure = False
         self.filename = 'ssh-proof.json'
         initial = ('import json,os,socket; from pathlib import Path; '
                    'p={"marker":' + repr(marker) + ',"cwd":os.getcwd(),'
@@ -47,16 +63,32 @@ class FilesFixture(smoke.ModelFixture):
             ('Grep', {'path': 'notes.txt', 'pattern': '^after$'}),
             ('Execute', {'argv': ['python3', '-c', final]}),
         ]
+        self.final_step = self.steps[-1]
 
     def resume_after_restart(self):
-        self.phase = 1
+        self.phase = 'restart'
         self.step = 0
         self.sent = None
+        self.expect_failure = False
         self.final = 'REMOTE_SSH_RESTART_COMPLETED_' + self.marker
-        self.steps = [('Read', {'file_path': 'notes.txt'}), self.steps[-1]]
+        self.steps = [('Read', {'file_path': 'notes.txt'}), self.final_step]
+
+    def pin_phase(self, *, denied):
+        self.phase = 'pin-denied' if denied else 'pin-restored'
+        self.step, self.sent = 0, None
+        self.expect_failure = denied
+        self.final = 'REMOTE_SSH_' + self.phase.upper() + '_' + self.marker
+        self.steps = [('Execute', {'argv': ['python3', '-c',
+            'from pathlib import Path; Path("pin-rotation-must-not-exist").write_text("unexpected")']})
+            ] if denied else [self.final_step]
 
     def validate(self, name, content):
         decoded = list(smoke.objects(content))
+        if self.expect_failure:
+            if name != 'Execute':
+                raise smoke.SmokeError('pin refusal must be an Execute result')
+            transport_refusal(content)
+            return
         if any(obj.get('ok') is False or obj.get('is_error') is True for obj in decoded):
             raise smoke.SmokeError(f'{name} returned an explicit failure: {content}')
         if name == 'Execute':
@@ -117,7 +149,8 @@ class FilesFixture(smoke.ModelFixture):
                 if len(results) != 1:
                     raise smoke.SmokeError(f'expected exactly one result for {call_id}')
                 self.validate(name, results[0].get('content'))
-                self.results.append({'call_id': call_id, 'tool': name, 'result': results[0]})
+                self.results.append({'call_id': call_id, 'tool': name, 'result': results[0],
+                                     'expected_failure': self.expect_failure})
                 (self.output / 'tool-results.json').write_text(json.dumps(self.results, indent=2))
                 self.step += 1
                 self.sent = None
@@ -169,14 +202,51 @@ def ledger_proof(base, keeper, fixture, output):
         if len(matches) != 1:
             raise smoke.SmokeError('tool result does not have one canonical ledger row')
         row = matches[0]
+        failure = result.get('expected_failure', False)
         if (row.get('tool') != result['tool'] or row.get('sandbox_profile') != 'remote_ssh'
                 or row.get('wire_outcome') != 'ok' or row.get('disposition') != 'completed'):
-            raise smoke.SmokeError('ledger did not record completed remote SSH tool execution')
-        if result['tool'] == 'Execute' and (row.get('execution_evidence') or {}).get('via') != 'remote_ssh':
-            raise smoke.SmokeError('Execute ledger lacks actual SSH transport evidence')
+            raise smoke.SmokeError('ledger differs from the expected SSH tool outcome')
+        if result['tool'] == 'Execute':
+            evidence = row.get('execution_evidence') or {}
+            if evidence.get('via') != 'remote_ssh':
+                raise smoke.SmokeError('Execute ledger lacks actual SSH transport evidence')
+            if failure:
+                # make_ok completes the tool envelope even when the process
+                # payload reports failure. Match that payload and its receipt.
+                payload = transport_refusal(result['result']['content'])
+                logged = transport_refusal(row.get('output'))
+                if (logged != payload or evidence.get('shim_execution_evidence')
+                        != payload['shim_execution_evidence']):
+                    raise smoke.SmokeError('ledger lacks the same typed transport refusal')
         selected.append(row)
     (output / 'tool-ledger.json').write_text(json.dumps(selected, indent=2))
     return selected
+
+
+def pin_observation(url, token, args, output, phase, *, previous=None, denied=False):
+    snapshot = json.loads(smoke.request(url + '/api/v1/keepers/' + args.keeper + '/config', token))
+    catalog = snapshot.get('remote_ssh_endpoints') or {}
+    endpoints = [endpoint for endpoint in catalog.get('endpoints', [])
+                 if endpoint.get('name') == 'proof']
+    if catalog.get('state') != 'available' or len(endpoints) != 1:
+        raise smoke.SmokeError('pin proof lacks the configured endpoint catalog')
+    endpoint = endpoints[0]
+    if any(endpoint.get(key) != value for key, value in {
+            'host': args.host, 'user': args.user, 'port': args.port,
+            'remote_root': args.remote_root}.items()):
+        raise smoke.SmokeError('pin observation belongs to another endpoint')
+    observation = endpoint.get('observation') or {}
+    dispatch = observation.get('last_dispatch') or {}
+    if (observation.get('lane') != 'remote_ssh' or observation.get('endpoint') != 'proof'
+            or type(dispatch.get('at_unix')) not in (int, float)
+            or (previous is not None and dispatch['at_unix'] <= previous['at_unix'])
+            or (denied and (dispatch.get('outcome') != 'lane_failed'
+                            or dispatch.get('failure') != 'transport_failed'))
+            or (not denied and (dispatch.get('outcome') != 'payload_finished'
+                                or dispatch.get('status') != 'exit=0'))):
+        raise smoke.SmokeError('pin phase lacks a fresh typed SSH dispatch observation')
+    (output / ('endpoint-pin-' + phase + '.json')).write_text(json.dumps(endpoint, indent=2))
+    return dispatch
 
 
 def health_identity(snapshot, base, receipt):
@@ -226,6 +296,13 @@ def run(args):
         if before['uid'] == 0 or before['files']:
             raise smoke.SmokeError('expected a nonroot-owned empty provisioned Keeper workspace')
         smoke.command([binary, 'init', '--base-path', str(base)], env)
+        # Mutate only the test workspace's private copy for rotation probes.
+        # The operator's original trust file is read-only throughout this run.
+        pins = base / '.masc/ssh/proof-known-hosts'
+        pins.parent.mkdir(parents=True, exist_ok=True)
+        original_pins = Path(args.known_hosts).read_bytes()
+        pins.write_bytes(original_pins)
+        pins.chmod(0o600)
         model = fixture.serve()
         config = base / '.masc/config'
         content = (HELPER.parent / 'fixtures/release-evidence/runtime.toml').read_text()
@@ -235,7 +312,7 @@ def run(args):
             key + ' = ' + json.dumps(value) for key, value in {
                 'host': args.host, 'user': args.user, 'port': args.port,
                 'remote_root': args.remote_root, 'identity_file': args.identity,
-                'known_hosts_file': args.known_hosts, 'env_allowlist': [],
+                'known_hosts_file': str(pins), 'env_allowlist': [],
                 'private_home': False}.items()) + '\n'
         (config / 'runtime.toml').write_text(content)
         with socket.socket() as sock:
@@ -280,14 +357,37 @@ def run(args):
             checkpoint, data = smoke.wait_until('canonical final SSH checkpoint',
                 lambda: smoke.checkpoint_proof(base, fixture), server)
             (output / 'checkpoint.json').write_text(json.dumps(data, indent=2))
+            if args.exercise_pin_rotation:
+                prior_dispatch = pin_observation(url, token, args, output, 'before')
+                fixture.pin_phase(denied=True)
+                try:
+                    pins.write_bytes(b'')
+                    smoke.chat_request(url + '/api/v1/keepers/chat/stream', token,
+                        {'name': args.keeper, 'message': 'Attempt the isolated pin-rotation probe.',
+                         'request_id': 'kmsg-pin-denied-' + marker}, output / 'chat-pin-denied.txt')
+                    if fixture.error or fixture.step != len(fixture.steps):
+                        raise smoke.SmokeError(fixture.error or 'pin denial turn did not finish')
+                    denied_dispatch = pin_observation(url, token, args, output, 'denied',
+                                                      previous=prior_dispatch, denied=True)
+                finally:
+                    pins.write_bytes(original_pins)
+                fixture.pin_phase(denied=False)
+                smoke.chat_request(url + '/api/v1/keepers/chat/stream', token,
+                    {'name': args.keeper, 'message': 'Verify file bytes after explicit pin restoration.',
+                     'request_id': 'kmsg-pin-restored-' + marker}, output / 'chat-pin-restored.txt')
+                if fixture.error or fixture.step != len(fixture.steps):
+                    raise smoke.SmokeError(fixture.error or 'pin restoration did not recover')
+                pin_observation(url, token, args, output, 'restored', previous=denied_dispatch)
             reread = ('import hashlib,json,os,socket,sys; from pathlib import Path; '
                       'p=Path(sys.argv[1]); b=(p/"notes.txt").read_bytes(); '
                       'print(json.dumps({"cwd":str(p),"hostname":socket.gethostname(),'
                       '"notes":b.decode(),"sha256":hashlib.sha256(b).hexdigest(),'
+                      '"denied_effect_exists":(p/"pin-rotation-must-not-exist").exists(),'
                       '"initial":json.loads((p/"ssh-proof.json").read_text())}))')
             actual = json.loads(ssh(args, ['python3', '-c', reread, remote]))
             (output / 'endpoint-after.json').write_text(json.dumps(actual, indent=2))
-            if (actual['notes'] != 'after\n' or actual['hostname'] != before['hostname']
+            if (actual['denied_effect_exists'] is not False or actual['notes'] != 'after\n'
+                    or actual['hostname'] != before['hostname']
                     or actual['initial']['marker'] != marker or actual['sha256'] != fixture.proof['sha256']):
                 raise smoke.SmokeError('endpoint bytes or identity differ from Keeper ToolResult')
             smoke.stop_server(server)
@@ -326,6 +426,10 @@ def run(args):
                         'endpoint bytes survive server shutdown',
                         'same manual Keeper explicitly started and resumed after server restart',
                         'canonical ledger records completed SSH tools'])
+            if args.exercise_pin_rotation:
+                receipt['claims'].append('same-path pin replacement denied Execute; explicit restoration recovered')
+            receipt['successful_tools'] = sum(not r['expected_failure'] for r in fixture.results)
+            receipt['expected_refusals'] = sum(r['expected_failure'] for r in fixture.results)
     except (smoke.SmokeError, OSError, ValueError, urllib.error.URLError) as error:
         receipt['error'] = str(error)
     finally:
@@ -345,6 +449,7 @@ def main():
                  'remote-root', 'identity', 'known-hosts'):
         parser.add_argument('--' + name, required=True)
     parser.add_argument('--port', type=int, default=22)
+    parser.add_argument('--exercise-pin-rotation', action='store_true')
     args = parser.parse_args()
     if not args.keeper or any(c not in 'abcdefghijklmnopqrstuvwxyz0123456789-_' for c in args.keeper):
         parser.error('--keeper must be a lowercase safe Keeper name')

@@ -237,8 +237,8 @@ let palette_entries (state : state) =
   @ List.map
       (fun (pane, label) -> ("go System / " ^ label, Palette_config pane))
       config_panes
-  @ [ "language: 한국어 (Korean)", Palette_ui_language Lang_ko
-    ; "language: English (영문)", Palette_ui_language Lang_en
+  @ [ "language: 한국어", Palette_ui_language Lang_ko
+    ; "language: English", Palette_ui_language Lang_en
     ]
   @ ["usage account / all accounts", Palette_usage_scope None]
   @ List.map (fun scope_id ->

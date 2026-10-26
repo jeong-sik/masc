@@ -89,35 +89,35 @@ let render_runtime_params (state : state) =
     | Some row ->
       let open Tui_decode in
       detail_section_lines ~first:true
-        (ui_text state ~ko:"1. 파라미터 설명 · 현재 값 (Description & Current Value)"
+        (ui_text state ~ko:"1. 파라미터 설명 · 현재 값"
            ~en:"1. Description & Current Value")
-      @ field (ui_text state ~ko:"키 (Key)" ~en:"Key") row.rpr_key
-      @ field (ui_text state ~ko:"설명 (Contract)" ~en:"Contract") row.rpr_description
-      @ value_field (ui_text state ~ko:"현재 값 (Current)" ~en:"Current") row.rpr_current_json
-      @ value_field (ui_text state ~ko:"기본값 (Default)" ~en:"Default") row.rpr_default_json
+      @ field (ui_text state ~ko:"키" ~en:"Key") row.rpr_key
+      @ field (ui_text state ~ko:"설명" ~en:"Contract") row.rpr_description
+      @ value_field (ui_text state ~ko:"현재 값" ~en:"Current") row.rpr_current_json
+      @ value_field (ui_text state ~ko:"기본값" ~en:"Default") row.rpr_default_json
       @ detail_section_lines
-          (ui_text state ~ko:"2. 타입 · 허용 범위 및 선택지 (Type & Constraints)"
+          (ui_text state ~ko:"2. 타입 · 허용 범위 및 선택지"
              ~en:"2. Type & Constraints")
-      @ field (ui_text state ~ko:"타입 (Type)" ~en:"Type")
+      @ field (ui_text state ~ko:"타입" ~en:"Type")
           (if String.trim row.rpr_value_type = "" then "typed value" else row.rpr_value_type)
-      @ (match row.rpr_min_json with None -> [] | Some value -> value_field (ui_text state ~ko:"최소값 (Minimum)" ~en:"Minimum") value)
-      @ (match row.rpr_max_json with None -> [] | Some value -> value_field (ui_text state ~ko:"최대값 (Maximum)" ~en:"Maximum") value)
+      @ (match row.rpr_min_json with None -> [] | Some value -> value_field (ui_text state ~ko:"최소값" ~en:"Minimum") value)
+      @ (match row.rpr_max_json with None -> [] | Some value -> value_field (ui_text state ~ko:"최대값" ~en:"Maximum") value)
       @ (row.rpr_choices
          |> List.mapi (fun index choice ->
               value_field (Printf.sprintf "Choice %d" (index + 1))
                 (Yojson.Safe.to_string (`String choice)))
          |> List.concat)
       @ detail_section_lines
-          (ui_text state ~ko:"3. 적용 상태 · 소속 그룹 (Source & Group)"
+          (ui_text state ~ko:"3. 적용 상태 · 소속 그룹"
              ~en:"3. Source & Group")
-      @ field (ui_text state ~ko:"적용 상태 (Source)" ~en:"Source")
+      @ field (ui_text state ~ko:"적용 상태" ~en:"Source")
           (if row.rpr_has_override
-           then ui_text state ~ko:"사용자 오버라이드 (override)" ~en:"override"
-           else ui_text state ~ko:"기본값 (default)" ~en:"default")
+           then ui_text state ~ko:"사용자 오버라이드" ~en:"override"
+           else ui_text state ~ko:"기본값" ~en:"default")
       @ (match row.rpr_surface with
          | None -> []
          | Some surface ->
-           field (ui_text state ~ko:"소속 그룹 (Group)" ~en:"Group")
+           field (ui_text state ~ko:"소속 그룹" ~en:"Group")
              (surface.rps_id ^ " · " ^ surface.rps_description))
   in
   box_line_styled buf cols ~style:(Theme.recede ())
@@ -1083,10 +1083,10 @@ let selected_model_reading (state : state) =
         @ (match state.runtime_config_view with
            | None -> [] | Some reading ->
                [{Masc_tui_detail_reading.heading=
-                   ui_text state ~ko:"1. 설정 출처 · 파일 경로 (Source)" ~en:"1. Source";
+                   ui_text state ~ko:"1. 설정 출처 · 파일 경로" ~en:"1. Source";
                  body=reading.rcv_path}])
         @ [{Masc_tui_detail_reading.heading=
-              ui_text state ~ko:"2. 계정 · 모델 바인딩 및 배정 키퍼 (Account / Model & Keepers)"
+              ui_text state ~ko:"2. 계정 · 모델 바인딩 및 배정 키퍼"
                 ~en:"2. Account / Model & Keepers";
             body=String.concat "\n" (config_models_detail state row)}] in
       Some (Masc_tui_detail_reading.create
@@ -1399,7 +1399,7 @@ let render_runtime_config_status state =
     ~title:
       (screen_title
          (ui_text state
-            ~ko:" MASC 시스템 / 설정 검증 및 적용 상태 (runtime.toml status)"
+            ~ko:" MASC 시스템 / 설정 검증 및 적용 상태"
             ~en:" MASC System / runtime.toml status"))
     ~hints:"j/k:scroll  PgUp/PgDn:page  v/Esc:source  r:reload"
     ~body:(fun ~budget c ->
@@ -1734,7 +1734,7 @@ let render_voice (state : state) =
       (detail_section_lines ~first title)
   in
   voice_section ~first:true
-    (ui_text state ~ko:"1. 음성 엔진 로드 상태 (Voice Engine Status)"
+    (ui_text state ~ko:"1. 음성 엔진 로드 상태"
        ~en:"1. Voice Engine Status");
   (* Two independent reads feed this pane: the public config says what loaded,
      and the setup read says which endpoints are declared. They used to share
@@ -1761,7 +1761,7 @@ let render_voice (state : state) =
          (Option.value (string_of [ "status" ] json)
             ~default:Masc_tui_theme.Glyph.no_value));
   voice_section
-    (ui_text state ~ko:"2. 음성 합성 · 출력 (TTS — Text to Speech)"
+    (ui_text state ~ko:"2. 음성 합성 · 출력 (TTS)"
        ~en:"2. TTS (Text to Speech)");
   from_config (fun json ->
     field "model"
@@ -1770,7 +1770,7 @@ let render_voice (state : state) =
       (Option.value (string_of [ "tts"; "default_voice" ] json) ~default:Masc_tui_theme.Glyph.no_value));
   show_endpoints "tts";
   voice_section
-    (ui_text state ~ko:"3. 음성 인식 · 입력 (STT — Speech to Text)"
+    (ui_text state ~ko:"3. 음성 인식 · 입력 (STT)"
        ~en:"3. STT (Speech to Text)");
   from_config (fun json ->
     field "model"
@@ -1794,7 +1794,7 @@ let render_voice (state : state) =
          "  the endpoint list could not be read";
        voice_body_line buf cols (Printf.sprintf "  %s%s%s" Ansi.dim (Terminal_text.single_line message) Ansi.reset));
   voice_section
-    (ui_text state ~ko:"4. 마이크 입력 장치 · 선언 출처 (Input Device & Config Source)"
+    (ui_text state ~ko:"4. 마이크 입력 장치 · 선언 출처"
        ~en:"4. Input Device & Config Source");
   field "device" (Option.value state.voice_input_device ~default:"unknown");
   voice_body_line buf cols "";

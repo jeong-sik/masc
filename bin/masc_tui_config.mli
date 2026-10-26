@@ -6,6 +6,12 @@ type t = private {
   opening : (opening, string) result;
   last_chat_keeper : (Keeper_id.Keeper_name.t option, string) result;
   theme : string option;
+  language : string option;
+  (** [tui].language: the UI display language as stored, ["ko"] or ["en"].
+      [None] where the file, the table or the key is absent — the caller
+      keeps its default. The typed reading lives with the UI state
+      (ui_language_of_string); an unknown stored value is reported,
+      never forced into a default. *)
   board_sort : string option;
   candle : string option;
   reduce_motion : bool option;
@@ -99,6 +105,24 @@ val set_theme : base_path:string -> string option -> (string list, string) resul
 
     A write whose durability could not be confirmed is [Ok]: the replacement
     is already visible, which is what "stored" means to the next start. *)
+
+(* [tui].language, given an already-parsed runtime.toml document. [None] when
+   the key (or the [tui] table) is absent. Pure, so the caller's file read
+   stays separate from the extraction. The stored spelling is "ko" or "en";
+   anything else reads through as-is and the caller reports it. *)
+val language_of_doc : Keeper_toml_loader.toml_doc -> string option
+
+val text_with_language : string -> language:string -> string
+(** runtime.toml text with [tui].language set to [language]. The [tui] table
+    is created when absent; comments and every other line are kept. Pure;
+    the commit is {!set_language}'s. *)
+
+val set_language : base_path:string -> string -> (unit, string) result
+(** Store the reader's UI language pick in the runtime.toml {!load} reads,
+    so it is still there on the next start. Under Runtime's config write
+    lock, in the same file as {!set_board_sort}. [Error] carries what
+    stopped the write; the language is already applied to the screen by
+    then, so the caller has to say the pick lasts only this session. *)
 
 val reduce_motion_of_doc : Keeper_toml_loader.toml_doc -> bool option
 (** [tui].reduce_motion: show /about's final roster immediately. Absent

@@ -5200,9 +5200,10 @@ let config_panes =
   ]
 
 (** UI display language for top-level navigation, System/Configuration tabs,
-    and categorized detail headers. Defaults to [Lang_ko] and is switchable at
-    runtime via the command palette ([:language]), the System sub-navigation
-    bar, or the Themes pane. *)
+    and categorized detail headers. Each surface shows one language only.
+    Defaults to [Lang_ko], is stored as [tui].language in runtime.toml, and is
+    switchable at runtime via the command palette ([:language]), the System
+    sub-navigation bar, or the Themes pane. *)
 type ui_language =
   | Lang_ko
   | Lang_en
@@ -5221,25 +5222,35 @@ let next_ui_language = function
   | Lang_ko -> Lang_en
   | Lang_en -> Lang_ko
 
-let surface_ring_display_label ~lang ~bilingual (surface : surface) fallback =
+(* The [tui].language spelling in runtime.toml. Unknown values read as [None]
+   rather than as a forced default: the caller says the stored value back so
+   the operator sees their file did not take. *)
+let ui_language_of_string value =
+  match String.lowercase_ascii (String.trim value) with
+  | "ko" -> Some Lang_ko
+  | "en" -> Some Lang_en
+  | _ -> None
+
+let ui_language_to_string = function
+  | Lang_ko -> "ko"
+  | Lang_en -> "en"
+
+let surface_ring_display_label ~lang (surface : surface) fallback =
   match lang with
   | Lang_en -> fallback
   | Lang_ko ->
-      let ko =
-        match surface with
-        | Overview -> "대시보드"
-        | Planning -> "작업"
-        | Keepers _ -> "키퍼"
-        | Metrics -> "사용량"
-        | Board -> "보드"
-        | Repositories -> "워크스페이스"
-        | Config -> "시스템"
-        | Acting | Memory | Lanes | Clients | Approvals | Schedules
-        | Verification | Harness | Fusion | Code | Changes | Connectors
-        | Runtime | Resources | Tools | System_logs ->
-            fallback
-      in
-      if bilingual then ko ^ " " ^ fallback else ko
+      (match surface with
+       | Overview -> "대시보드"
+       | Planning -> "작업"
+       | Keepers _ -> "키퍼"
+       | Metrics -> "사용량"
+       | Board -> "보드"
+       | Repositories -> "워크스페이스"
+       | Config -> "시스템"
+       | Acting | Memory | Lanes | Clients | Approvals | Schedules
+       | Verification | Harness | Fusion | Code | Changes | Connectors
+       | Runtime | Resources | Tools | System_logs ->
+           fallback)
 
 let config_pane_display_label ~lang pane fallback =
   match lang with
@@ -15413,9 +15424,6 @@ let ui_text (state : state) ~ko ~en =
   match state.ui_language with
   | Lang_ko -> ko
   | Lang_en -> en
-
-let toggle_ui_language (state : state) =
-  state.ui_language <- next_ui_language state.ui_language
 
 let withdraw_detail_histories (state : state) =
   clear_task_documents state;

@@ -983,7 +983,7 @@ let planning_detail_lines (state : state) ~confirmation ~cols (goal : planning_g
   let gap = [ { Planning_detail.tone = Quiet; text = "" } ] in
   let metadata =
     section
-      (ui_text state ~ko:"1. 목표 개요 · 단계 및 지표 (Goal Stage & Target)"
+      (ui_text state ~ko:"1. 목표 개요 · 단계 및 지표"
          ~en:"1. Goal Stage & Target")
     @ field "Title" goal.pg_title @ field "Goal" goal.pg_id
     @ field "Stage" (Masc_tui_theme.strip_sgr (planning_stage_rail goal.pg_phase ^ "  " ^ planning_proof_mark goal.pg_proof))
@@ -1002,7 +1002,7 @@ let planning_detail_lines (state : state) ~confirmation ~cols (goal : planning_g
   let linked =
     gap
     @ section
-        (ui_text state ~ko:"2. 연결된 작업 (Linked Tasks)"
+        (ui_text state ~ko:"2. 연결된 작업"
            ~en:"2. Linked Tasks")
     @ match linked_tasks with
     | [] ->
@@ -1042,7 +1042,7 @@ let planning_detail_lines (state : state) ~confirmation ~cols (goal : planning_g
    | `Inspect Masc_tui_fetched.Absent ->
        metadata @ linked @ gap
        @ section
-           (ui_text state ~ko:"3. 검증 판정 · 측정 및 이력 (Verification & Measurement)"
+           (ui_text state ~ko:"3. 검증 판정 · 측정 및 이력"
               ~en:"3. Verification & Measurement")
        @ wrapped_proof
    | `Submitting | `Inspect (Masc_tui_fetched.Ready _ | Loading | Stale _ | Failed _) ->

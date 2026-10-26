@@ -15080,7 +15080,26 @@ let open_lane_inventory_selection state ~mailbox =
    the reader already is, and re-entering would reset its scroll and cursor. A
    ring entry pressed from a surface of its family (Metrics under Overview,
    a Keeper's chat under Keepers) goes to the entry's own surface. *)
-let press_marked_target state ~mailbox (target : press_target) =
+
+(* Apply a UI language pick and store it in the runtime.toml boot reads back
+   from, so the choice survives a restart. Said in the language just picked,
+   including the failure: the new language is already on the screen by then,
+   so silence would let the screen stand as proof it was kept. *)
+let apply_ui_language state ~base_path lang =
+  state.ui_language <- lang;
+  report_action state "info"
+    (ui_text state
+       ~ko:("UI 언어: " ^ ui_language_label lang)
+       ~en:("UI language: " ^ ui_language_label lang));
+  (match Masc_tui_config.set_language ~base_path (ui_language_to_string lang) with
+   | Ok () -> ()
+   | Error message ->
+       report_action state "error"
+         (ui_text state
+            ~ko:("UI 언어를 runtime.toml 에 저장하지 못했습니다. 이번 세션에만 적용됩니다: " ^ message)
+            ~en:("UI language not saved to runtime.toml. This session only: " ^ message)))
+
+let press_marked_target state ~base_path ~mailbox (target : press_target) =
   match target with
   | Press_surface surface ->
       if surface <> state.view then goto_surface state ~mailbox surface
@@ -15100,9 +15119,8 @@ let press_marked_target state ~mailbox (target : press_target) =
   | Press_theme_filter filter ->
       if filter <> state.theme_filter then enter_theme_filter state filter
   | Press_ui_language ->
-      toggle_ui_language state;
-      report_action state "info"
-        ("UI 언어: " ^ ui_language_label state.ui_language)
+      apply_ui_language state ~base_path
+        (next_ui_language state.ui_language)
   | Press_runtime_mode mode ->
       if mode <> state.runtime_mode || state.view <> Runtime then
         enter_runtime_mode state ~mailbox mode
@@ -22827,6 +22845,12 @@ let apply_startup_settings state (tui_settings : Masc_tui_config.t) =
    | Some name when Masc_tui_theme_choice.apply name ->
        state.theme_choice <- Some name
    | Some _ | None -> ());
+  (match tui_settings.language with
+   | None -> ()
+   | Some value ->
+       (match ui_language_of_string value with
+        | Some lang -> state.ui_language <- lang
+        | None -> add_event state "error" ("Unknown saved UI language: " ^ value)));
   (match tui_settings.candle with
    | None -> ()
    | Some value ->
@@ -26047,7 +26071,7 @@ and is loaded on demand through keeper_skill.
                   ~base_path ~mailbox:async_messages ~paste)
        | Some (Mouse_left_release _) when Option.is_some pressed ->
            Option.iter
-             (press_marked_target state ~mailbox:async_messages)
+             (press_marked_target state ~base_path ~mailbox:async_messages)
              pressed
        | Some (Mouse_wheel _) when Option.is_some wheel_reader ->
            Option.iter (apply_clamped_scroll state) wheel_reader
@@ -28665,9 +28689,7 @@ and is loaded on demand through keeper_skill.
                      state.runtime_params_notice <- None;
                      goto_surface state ~mailbox:async_messages Config
                  | Some (_, Masc_tui_palette.Palette_ui_language lang) ->
-                     state.ui_language <- lang;
-                     report_action state "info"
-                       ("UI 언어: " ^ ui_language_label lang)
+                     apply_ui_language state ~base_path lang
                  | Some (_, Masc_tui_palette.Palette_chat keeper_name) ->
                      enter_keeper_chat ~return_to:Keeper_chat_return_list state ~mailbox:async_messages
                        ~keeper_name ~drain_queue:(fun () ->

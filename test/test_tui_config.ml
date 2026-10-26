@@ -732,6 +732,113 @@ let device_store_cases =
             check_opt "theme kept" (Some "gruvbox-dark") read.theme))
   ]
 
+(* The UI display language, [tui].language. Stored as "ko" or "en"; the typed
+   reading lives with the UI state, so this layer reads the raw spelling and
+   lets the caller report an unknown one rather than forcing a default. *)
+let language_of s = Config.language_of_doc (doc_of s)
+
+let language_cases =
+  [ Alcotest.test_case "reads [tui] language" `Quick (fun () ->
+        check_opt "ko" (Some "ko")
+          (language_of "[tui]\nlanguage = \"ko\"\n");
+        check_opt "en" (Some "en")
+          (language_of "[tui]\nlanguage = \"en\"\n"))
+  ; Alcotest.test_case "no [tui] table -> None" `Quick (fun () ->
+        check_opt "none" None
+          (language_of "[turn]\nstream_idle_timeout_sec = 120\n"))
+  ; Alcotest.test_case "[tui] present but no key -> None" `Quick (fun () ->
+        check_opt "none" None (language_of "[tui]\ntheme = \"nord\"\n"))
+  ; Alcotest.test_case "empty file -> None" `Quick (fun () ->
+        check_opt "none" None (language_of ""))
+  ; Alcotest.test_case "an unknown spelling reads through for the caller to report" `Quick
+      (fun () ->
+        check_opt "ja" (Some "ja")
+          (language_of "[tui]\nlanguage = \"ja\"\n"))
+  ; Alcotest.test_case "wrong type -> None, not a crash" `Quick (fun () ->
+        check_opt "bool" None
+          (language_of "[tui]\nlanguage = true\n"))
+  ]
+
+let language_write_cases =
+  [ Alcotest.test_case "a first pick lands where the reader looks" `Quick
+      (fun () ->
+        check_opt "en" (Some "en")
+          (language_of (Config.text_with_language unstored ~language:"en")))
+  ; Alcotest.test_case "a second pick replaces the first" `Quick (fun () ->
+        let twice =
+          Config.text_with_language
+            (Config.text_with_language unstored ~language:"ko")
+            ~language:"en"
+        in
+        check_opt "en" (Some "en") (language_of twice);
+        Alcotest.(check bool) "the earlier pick is gone" false
+          (contains twice "language = \"ko\""))
+  ; Alcotest.test_case "the rest of the file survives a write" `Quick (fun () ->
+        let text = Config.text_with_language unstored ~language:"en" in
+        Alcotest.(check bool) "the hand-written comment is still there" true
+          (contains text "operators edit this file by hand");
+        check_opt "another table still reads" (Some "local.sample")
+          (Toml.toml_string_opt (doc_of text) "runtime.default"))
+  ]
+
+let language_store_cases =
+  [ Alcotest.test_case "a stored pick is there on the next read" `Quick
+      (fun () ->
+        with_storable_base (fun ~base_path ->
+            (match Config.set_language ~base_path "en" with
+             | Ok () -> ()
+             | Error message -> Alcotest.failf "storing the language failed: %s" message);
+            check_opt "en" (Some "en") (Config.load ~base_path).language))
+  ; Alcotest.test_case "a changed pick replaces the stored one" `Quick (fun () ->
+        with_storable_base (fun ~base_path ->
+            (match Config.set_language ~base_path "ko" with
+             | Ok () -> ()
+             | Error message -> Alcotest.failf "storing the language failed: %s" message);
+            (match Config.set_language ~base_path "en" with
+             | Ok () -> ()
+             | Error message -> Alcotest.failf "storing the language failed: %s" message);
+            check_opt "en" (Some "en") (Config.load ~base_path).language))
+  ; Alcotest.test_case "the theme pick survives the language write" `Quick
+      (fun () ->
+        with_storable_base (fun ~base_path ->
+            store_or_fail ~base_path (Some "gruvbox-dark");
+            (match Config.set_language ~base_path "en" with
+             | Ok () -> ()
+             | Error message -> Alcotest.failf "storing the language failed: %s" message);
+            let read = Config.load ~base_path in
+            check_opt "language stored" (Some "en") read.language;
+            check_opt "theme kept" (Some "gruvbox-dark") read.theme))
+  ]
+
+(* The stored spelling's typed reading. Unknown values stay unknown so the
+   caller can say the stored value back instead of silently keeping a
+   default the operator did not ask for. *)
+let language_mapping_cases =
+  let module State = Masc_tui_types in
+  let check_lang = Alcotest.(check (option (testable
+    (fun ppf -> function
+       | State.Lang_ko -> Format.pp_print_string ppf "ko"
+       | State.Lang_en -> Format.pp_print_string ppf "en")
+    ( = )))) in
+  [ Alcotest.test_case "ko and en read as themselves" `Quick (fun () ->
+        check_lang "ko" (Some State.Lang_ko) (State.ui_language_of_string "ko");
+        check_lang "en" (Some State.Lang_en) (State.ui_language_of_string "en"))
+  ; Alcotest.test_case "unknown reads as unknown, not a default" `Quick (fun () ->
+        check_lang "ja" None (State.ui_language_of_string "ja");
+        check_lang "empty" None (State.ui_language_of_string ""))
+  ; Alcotest.test_case "the stored spellings round-trip" `Quick (fun () ->
+        Alcotest.(check string) "ko" "ko"
+          (State.ui_language_to_string State.Lang_ko);
+        Alcotest.(check string) "en" "en"
+          (State.ui_language_to_string State.Lang_en);
+        check_lang "ko round-trips" (Some State.Lang_ko)
+          (State.ui_language_of_string
+             (State.ui_language_to_string State.Lang_ko));
+        check_lang "en round-trips" (Some State.Lang_en)
+          (State.ui_language_of_string
+             (State.ui_language_to_string State.Lang_en)))
+  ]
+
 let () =
   Alcotest.run "tui_config"
     [ ("board_sort", board_sort_cases)
@@ -751,6 +858,10 @@ let () =
     ; ("theme_io", io_cases)
     ; ("text_with_theme", write_cases)
     ; ("set_theme", store_cases)
+    ; ("language_of_doc", language_cases)
+    ; ("text_with_language", language_write_cases)
+    ; ("set_language", language_store_cases)
+    ; ("ui_language_mapping", language_mapping_cases)
     ; ( "commit receipt carries the ignored legacy keys"
       , [ receipt_case "durable save names ignored legacy keys" ~inject:false
         ; receipt_case

@@ -71,7 +71,7 @@ valid on their own.
 Switch selected TUI navigation and System/Configuration labels between Korean
 and English while the TUI is running. From navigation, press `:` to open the
 command palette, type `language` (`:language`), select
-`language: English (영문)` or `language: 한국어 (Korean)`, and press Enter.
+`language: English` or `language: 한국어`, and press Enter.
 Searching for `언어` also finds these choices.
 
 The System sub-navigation bar also offers a clickable `[언어:KO 전환]` /
@@ -83,16 +83,24 @@ or operator credential. This feature requires a TUI build containing the
 language choices; an older executable will not offer them.
 
 This Experimental setting covers the top-level navigation, Configuration tabs,
-and selected System labels and detail headings. It is a partial UI translation:
+and selected System labels and detail headings. Each of those surfaces shows
+one language only. It is a partial UI translation:
 other text can remain Korean, English or bilingual after a switch. Keeper
 messages, original content, command names and configuration keys keep their
-original text. Korean navigation uses bilingual labels when space permits and
-shorter Korean labels on narrower terminals.
+original text.
 
-To turn off English, select `language: 한국어 (Korean)` or click the language
-control again. The choice (`ui_language`) belongs to the current TUI session;
-it is not a saved `runtime.toml` preference. Every new TUI process starts in
-Korean, so restarting also restores the default.
+To turn off English, select `language: 한국어` or click the language
+control again. The choice is stored as `[tui].language` in `runtime.toml`,
+so it is still there on the next start. An absent key starts in Korean,
+and an unknown stored value is named in the event log:
+
+```toml
+[tui]
+language = "en" # or "ko"
+```
+
+If the file cannot be written, the language still applies for this session and
+the event log says which of the two happened.
 
 ## Browser
 

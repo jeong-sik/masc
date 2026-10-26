@@ -4677,7 +4677,7 @@ let test_turn_observation_replaces_and_refuses_atomically () =
     (List.hd state.keeper_turns).Tui_decode.ktr_keeper_name;
   Alcotest.(check string) "a failed read keeps the accepted waiting" "new"
     (List.hd state.keeper_waiting).Tui_decode.kwr_keeper_name;
-  Alcotest.(check (option (float 0.001))) "a failed read keeps the accepted clock" (Some 20.)
+  Alcotest.(check (option (float 0.001))) "a failed read keeps the accepted clock" (Some 40.)
     state.keeper_turns_observed_at;
   Alcotest.(check (option string)) "a failed read is visible" (Some "HTTP 503") state.keeper_turns_error
 

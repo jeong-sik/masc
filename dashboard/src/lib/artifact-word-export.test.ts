@@ -86,3 +86,9 @@ it('keeps a heading with its next paragraph when Word paginates the document',as
   for(const heading of headings)expect(heading.getElementsByTagNameNS(word,'keepNext')).toHaveLength(1)
   for(const paragraph of Array.from(xml.getElementsByTagNameNS(word,'p')).filter(paragraph=>paragraph.getElementsByTagNameNS(word,'pStyle').length===0))expect(paragraph.getElementsByTagNameNS(word,'keepNext')).toHaveLength(0)
 })
+it('preserves definition list term and description block boundaries as separate paragraphs',async()=>{
+  const {xml}=await unpack('<dl><dt>NOT</dt><dd>ABLE</dd></dl>','html')
+  const paragraphs=Array.from(xml.getElementsByTagNameNS(word,'p'),paragraph=>
+    Array.from(paragraph.getElementsByTagNameNS(word,'t'),node=>node.textContent).join(''))
+  expect(paragraphs).toEqual(['NOT','ABLE'])
+})

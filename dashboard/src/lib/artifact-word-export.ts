@@ -13,7 +13,7 @@ import type { ArtifactDocument } from '../api/published-artifacts'
 // A4 portrait, 1 inch margins. OOXML uses twentieths of a point (twips).
 const page={width:11906,height:16838},margin=1440,bodyWidth=page.width-2*margin,bodyHeight=page.height-2*margin
 const headings={h1:HeadingLevel.HEADING_1,h2:HeadingLevel.HEADING_2,h3:HeadingLevel.HEADING_3,h4:HeadingLevel.HEADING_4,h5:HeadingLevel.HEADING_5,h6:HeadingLevel.HEADING_6}
-const containers=new Set(['html','body','main','article','section','header','footer','nav','aside','div','figure','figcaption','details','summary','form','address'])
+const containers=new Set(['html','body','main','article','section','header','footer','nav','aside','div','figure','figcaption','details','summary','form','address','dl','dt','dd'])
 const omitted=new Set(['head','script','style','template','noscript','meta','link','base','title'])
 const dynamic=new Set(['iframe','object','embed','canvas','svg','math','video','audio','button','select','textarea'])
 const attr=(node:Nodes.Element,name:string)=>node.attrs.find(attribute=>attribute.name===name)?.value

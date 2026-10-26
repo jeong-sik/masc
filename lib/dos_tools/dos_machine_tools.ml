@@ -58,7 +58,9 @@ let observation_fields (o : Dos_lane.observation) =
 
 (* What the autosave at the end of a call did. A program that has exited
    wrote none, and the field says nothing rather than "false": the call did
-   not fail to save, there was nothing to save. *)
+   not fail to save, there was nothing to save. "saved": true means the
+   rename reached the OS, not that it is durable: a crash before the
+   directory entry lands can still resurrect the previous checkpoint. *)
 let autosave_fields = function
   | Dos_lane.Not_attempted -> []
   | Dos_lane.Autosaved -> [ ("autosave", `Assoc [ ("saved", `Bool true) ]) ]
@@ -114,7 +116,7 @@ let checkpoint_status_fields (s : Dos_lane.autosave_status) =
   [ ("program", `String s.Dos_lane.program)
   ; ("steps", `Int s.Dos_lane.steps)
   ; ("saved_by", `String s.Dos_lane.saved_by)
-  ; ("saved_at", `String (Time_codec.rfc3339_of_unix s.Dos_lane.saved_at))
+  ; ("mtime", `String (Time_codec.rfc3339_of_unix s.Dos_lane.mtime))
   ]
 ;;
 
@@ -142,6 +144,11 @@ type autosave_slots =
   ; previous : Dos_lane.autosave_lookup
   }
 
+(* An unreadable slot is static: without this gate every No_machine refusal
+   and every program-less load would warn again for the same file. Warn once
+   per base path, slot and reason; a changed file warns again. *)
+let last_unreadable_warn : (string * string * string) option ref = ref None
+
 (* Reads both slots on a system thread: each read decompresses and checksums a
    whole machine body, work that does not belong on the event loop. *)
 let lookup_autosave_slots ~base_path =
@@ -153,7 +160,12 @@ let lookup_autosave_slots ~base_path =
       })
   in
   let warn which = function
-    | Dos_lane.Autosave_unreadable reason -> Log.DosLog.warn "masc_dos %s: %s" which reason
+    | Dos_lane.Autosave_unreadable reason ->
+      let key = (base_path, which, reason) in
+      if !last_unreadable_warn <> Some key then begin
+        last_unreadable_warn := Some key;
+        Log.DosLog.warn "masc_dos %s: %s" which reason
+      end
     | Dos_lane.No_autosave | Dos_lane.Autosave _ -> ()
   in
   warn "autosave" found.current;
@@ -196,8 +208,8 @@ let reject_data_of_fields = function
 
 let describe_held = function
   | Dos_lane.Held s ->
-    Printf.sprintf "%s, %d steps, saved by %s at %s" s.Dos_lane.program s.Dos_lane.steps
-      s.Dos_lane.saved_by (Time_codec.rfc3339_of_unix s.Dos_lane.saved_at)
+    Printf.sprintf "%s, %d steps, saved by %s, file mtime %s" s.Dos_lane.program s.Dos_lane.steps
+      s.Dos_lane.saved_by (Time_codec.rfc3339_of_unix s.Dos_lane.mtime)
   | Dos_lane.Held_unreadable reason -> Printf.sprintf "a file this server cannot read (%s)" reason
 ;;
 
@@ -914,6 +926,14 @@ let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
                (announce ~author:agent_name
                   (Printf.sprintf "%s 님이 %s 을(를) 띄웠습니다" agent_name program_name)))
        in
+       (* The launch line above is queued even when the boot faults: the
+          machine is installed either way. Say the fault too, queued right
+          behind it so the board order matches the machine order. *)
+       (match loaded with
+        | Ok (_, Dos_lane.Boot_faulted _) ->
+          announce ~author:agent_name
+            (Printf.sprintf "%s 님이 띄운 %s 의 부팅에 실패했습니다" agent_name program_name) ()
+        | Ok (_, Dos_lane.Booted _) | Error _ -> ());
        after_announcing
          (of_lane_load ~base_path ~extra:[ core_field ] ~tool_name ~start_time loaded))
 ;;
@@ -1348,7 +1368,7 @@ let listed_json (l : Machine_checkpoint.listed) =
   `Assoc
     ([ slot_field l.slot
      ; ("bytes", `Int l.size)
-     ; ("saved_at", `String (Time_codec.rfc3339_of_unix l.modified))
+     ; ("mtime", `String (Time_codec.rfc3339_of_unix l.modified))
      ]
      @
      match l.header with

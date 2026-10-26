@@ -2290,7 +2290,7 @@ let test_no_machine_names_the_autosave_after_an_eject () =
    what a load would discard, and the only thing left to resume when the
    autosave is gone. *)
 let held_lookup ?(program = "echo.com") steps =
-  Dos_lane.Autosave { Dos_lane.program; steps; saved_by = "liu-bei"; saved_at = 1.0 }
+  Dos_lane.Autosave { Dos_lane.program; steps; saved_by = "liu-bei"; mtime = 1.0 }
 ;;
 
 let discards_of = function

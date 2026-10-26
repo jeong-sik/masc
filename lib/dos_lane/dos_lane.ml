@@ -24,7 +24,7 @@ type observation = {
 
 type entry = { at_step : int; who : string; key_name : string }
 
-type autosave_status = { program : string; steps : int; saved_by : string; saved_at : float }
+type autosave_status = { program : string; steps : int; saved_by : string; mtime : float }
 
 type autosave_lookup =
   | No_autosave
@@ -983,7 +983,7 @@ let lookup_slot ~dir slot =
                { program = m.saved_program
                ; steps = m.saved_steps
                ; saved_by = m.saved_by
-               ; saved_at = st.Unix.st_mtime
+               ; mtime = st.Unix.st_mtime
                })))
 ;;
 

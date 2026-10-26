@@ -925,6 +925,49 @@ let test_accept_running_completes_wake_receipt () =
    | Error err -> fail (store_error_to_string err))
 ;;
 
+let test_accept_running_keeps_backend_commit_when_local_mirror_fails () =
+  with_workspace
+  @@ fun filesystem ->
+  let memory = { filesystem with Workspace_utils.backend =
+    Workspace_utils.Memory (Backend.Memory.create ()) } in
+  let request = insert_ok memory (make_request ~schedule_id:"accepted-with-stale-local-mirror" ()) in
+  ignore (store_ok "mark due" (refresh_due memory ~now:201.0));
+  ignore (store_ok "start due" (start_due_candidate memory ~now:202.0
+    ~schedule_id:request.schedule_id));
+  let local_path = schedules_path memory in
+  let local_before = Fs_compat.load_file local_path in
+  (* The canonical Memory writer commits its backend before trying this local
+     atomic file. A directory rejects that file's rename even for a privileged
+     test process, without blocking the authoritative backend mutation. *)
+  let previous_local = local_path ^ ".before-acceptance" in
+  Unix.rename local_path previous_local;
+  Unix.mkdir local_path 0o755;
+  let detail = `Assoc [ "kind", `String "consumer.accepted" ] in
+  let accepted = accept_running memory ~now:203.0 ~finished_at:204.0
+      ~schedule_id:request.schedule_id ~detail () in
+  check bool "the canonical local mirror target still rejects file replacement" true
+    (Sys.is_directory local_path);
+  check string "the pre-acceptance local mirror bytes are preserved"
+    local_before (Fs_compat.load_file previous_local);
+  (* Memory reads bypass the file-version cache and fetch the authoritative
+     backend while the canonical local mirror target is still unreadable. *)
+  let reread = read_state memory in
+  (match List.find_opt (fun (stored : schedule_request) ->
+       String.equal stored.schedule_id request.schedule_id) reread.schedules with
+   | Some stored -> check_status "backend reread retains completion" Succeeded stored.status
+   | None -> fail "authoritative backend lost its accepted schedule");
+  (match last_wake_for_schedule_instance reread
+      ~schedule_instance_id:request.schedule_instance_id ~schedule_id:request.schedule_id with
+   | Some wake ->
+     check bool "backend wake completed" true (wake.status = Wake_succeeded);
+     check (option (float 0.001)) "original finish time remains committed" (Some 204.0)
+       wake.finished_at;
+     check (option json) "acceptance detail remains committed" (Some detail) wake.detail
+   | None -> fail "backend wake disappeared after acceptance");
+  let stored = store_ok "committed acceptance survives the local mirror failure" accepted in
+  check_status "caller observes committed acceptance" Succeeded stored.status
+;;
+
 let test_fail_due_candidate_records_failed_wake () =
   with_workspace
   @@ fun config ->
@@ -2141,6 +2184,8 @@ let () =
             test_start_and_accept_persist_wake_record;
           test_case "durable acceptance completes wake receipt" `Quick
             test_accept_running_completes_wake_receipt;
+          test_case "accepted backend commit survives local mirror failure" `Quick
+            test_accept_running_keeps_backend_commit_when_local_mirror_fails;
           test_case "startup recovery returns only running schedule to due" `Quick
             test_startup_recovery_returns_only_running_schedule_to_due;
           test_case "startup recovery ignores wall-clock rollback" `Quick

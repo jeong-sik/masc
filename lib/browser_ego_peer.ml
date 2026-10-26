@@ -213,8 +213,9 @@ let ask t ~step ~args body =
   run_step t ~window_s:read_window_s ~step ~args body |> Result.map_error step_failure_message
 
 let open_space ~run ~run_native ~now ~space ~version ~capture_directory ~downloads =
-  let* () = if String.trim space = "" then Error "the ego task space needs a name" else Ok () in
-  let* opened = asked run ~window_s:read_window_s ~step:"space.open" ~space:(str space) ~holder:Either_holds ~args:`Null
+  let* () = Browser_configuration.validate_ego_space space in
+  let reference=match space with Browser_configuration.Named_space name -> str name | Existing_space id -> `Int id in
+  let* opened = asked run ~window_s:read_window_s ~step:"space.open" ~space:reference ~holder:Either_holds ~args:`Null
       "  emit({ok: true, value: {spaceId: task.spaceId, name: task.name, ownership: task.ownership}});"
     |> Result.map_error step_failure_message in
   (* A space the agent handed to the operator is still the agent's: a
@@ -226,6 +227,9 @@ let open_space ~run ~run_native ~now ~space ~version ~capture_directory ~downloa
   let* id=Option.to_result ~none:"ego answered a Space without its ID" (List.assoc_opt "spaceId" fields) in
   let* name=Option.to_result ~none:"ego answered a Space without its name" (List.assoc_opt "name" fields) in
   let* bound_space=Browser_lane.ego_space_of_json (obj ["id",id;"name",name]) in
+  let* ()=match space with
+    | Browser_configuration.Existing_space id when id<>bound_space.id -> Error "ego answered a different Space ID; no replacement or fallback is permitted"
+    | Existing_space _|Named_space _ -> Ok () in
   match List.assoc_opt "ownership" fields with
   | Some (`String ownership) ->
     (match space_owner_of_wire ownership with
@@ -234,7 +238,7 @@ let open_space ~run ~run_native ~now ~space ~version ~capture_directory ~downloa
          uploads = Browser_lane.Upload_lease.create_owner ();
          input_state=Released; pages=[]; next_tab=0; captures=0}
      | Some Operator_owner | None ->
-       Error (Printf.sprintf "ego task space %S belongs to %s, not to an agent" space ownership))
+       Error (Printf.sprintf "ego task space %s belongs to %s, not to an agent" (Yojson.Safe.to_string reference) ownership))
   | _ -> Error "ego answered the task space without its owner"
 
 (* The space's end closes its pages, so the files they were given are no

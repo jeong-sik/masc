@@ -17,7 +17,9 @@ type request =
         (** An absolute path. Without one, the first [ego-browser] that
             answers [--version]
             ({!Browser_runtime_dependencies.candidates}). *)
-  ; space : string option  (** Without one, {!default_space}. *)
+  ; space : string option
+        (** A name when provided. Without one, keep the existing name or
+            numeric ID; a new table uses {!default_space}. *)
   }
 
 (** The task space a new table names. *)

@@ -21,8 +21,9 @@
 
     [live_ego] ([\[browser.live.ego\]], RFC-browser-live-ego §7): the ego
     lite task space the browser Add-on serves as a live connection.
-    [command] is the absolute path of [ego-browser]; [space] names the task
-    space, one per installation. Both are required. *)
+    [command] is the absolute path of [ego-browser]; [space] is a name to
+    create/resume, or an existing numeric Space ID to resume exactly.
+    Both are required. Neither grants takeover or claim authority. *)
 
 type automation = { driver : string; binary : string option }
 [@@deriving show, eq]
@@ -30,7 +31,12 @@ type stagehand = { chrome : string; extension : string; profile : string option 
 [@@deriving show, eq]
 type live_bidi = { firefox : string; profile : string; port : int }
 [@@deriving show, eq]
-type live_ego = { command : string; space : string }
+type ego_space = Named_space of string | Existing_space of int
+[@@deriving show, eq]
+val validate_ego_space : ego_space -> (unit, string) result
+(** Nonblank names and positive JavaScript-safe IDs only. A numeric-looking
+    string remains a name; only a TOML integer selects an existing Space. *)
+type live_ego = { command : string; space : ego_space }
 [@@deriving show, eq]
 type t = {
   automation : automation option;

@@ -1,12 +1,14 @@
 let () =
   let socket = ref None and incarnation = ref None and bound = ref None and automation = ref false and models = ref false
-    and stagehand = ref false and live_bidi = ref false and live_ego_command = ref None and live_ego_space = ref None in
+    and stagehand = ref false and live_bidi = ref false and live_ego_command = ref None and live_ego_space = ref None
+    and live_ego_space_id = ref None in
   Arg.parse [
     "--automation",Arg.Set automation,"Start the host-selected owned Gecko backend";
     "--stagehand",Arg.Set stagehand,"Register the host-selected owned Chrome backend";
     "--live-bidi",Arg.Set live_bidi,"Start the host-selected owned live Firefox connection";
     "--live-ego-command",Arg.String (fun value -> live_ego_command:=Some value),"Serve an ego lite task space with this ego-browser";
     "--live-ego-space",Arg.String (fun value -> live_ego_space:=Some value),"The ego lite task space to serve";
+    "--live-ego-space-id",Arg.Int (fun value -> live_ego_space_id:=Some value),"An existing ego lite Space ID to resume exactly";
     "--models",Arg.Set models,"Attach the host-selected model request broker";
     "--socket",Arg.String (fun value -> socket:=Some value),"Host-selected private Unix socket";
     "--incarnation",Arg.String (fun value -> incarnation:=Some value),"Host-selected worker UUID";
@@ -15,10 +17,15 @@ let () =
   let socket_path,incarnation,max_message_bytes = match !socket,!incarnation,!bound with
     | Some path,Some id,Some bytes -> path,id,bytes
     | _ -> raise (Arg.Bad "--socket, --incarnation and --max-message-bytes are required") in
-  let live_ego = match !live_ego_command,!live_ego_space with
+  let ego_reference=match !live_ego_space,!live_ego_space_id with
+    | Some name,None -> Some (Browser_configuration.Named_space name)
+    | None,Some id -> Some (Browser_configuration.Existing_space id)
+    | None,None -> None
+    | Some _,Some _ -> raise (Arg.Bad "--live-ego-space and --live-ego-space-id are mutually exclusive") in
+  let live_ego = match !live_ego_command,ego_reference with
     | Some command,Some space -> Some {Browser_configuration.command;space}
     | None,None -> None
-    | Some _,None | None,Some _ -> raise (Arg.Bad "--live-ego-command and --live-ego-space are given together") in
+    | Some _,None | None,Some _ -> raise (Arg.Bad "--live-ego-command and one Space reference are given together") in
   Eio_main.run (fun env ->
     Time_compat.set_clock (Eio.Stdenv.clock env);
     Eio.Switch.run (fun sw ->

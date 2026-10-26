@@ -149,6 +149,13 @@ command = "/절대/경로/ego-browser"
 space = "masc-keepers"
 ```
 
+이미 존재하는 같은 Space를 정확히 재개하려면 `space = 32`처럼 TOML 정수를 쓴다.
+`space = "32"`는 이름이다. 정수 ID가 없거나 SDK가 다른 ID를 답하면 연결을 거절하며,
+이름으로 재시도하거나 대체 Space를 만들지 않는다. 사용자 소유 Space를 claim하거나
+인계된 Space를 take over하지도 않는다. 숫자 ID 연결은 현재 한 설치의 연결 설정이며,
+Goal별 Space 자동 생성·저장·재개 관리와는 구분한다. `--ego-space`는 이름을 설정하고,
+그 옵션을 생략한 setup은 기존 숫자 ID를 그대로 보존한다.
+
 - 경로는 코드에 적지 않는다. 운영자가 적는다.
 - `masc browser-lane-setup --mode ego` 가 이 표를 쓴다. `ego-browser` 를 PATH, 그다음 `~/.local/bin`(ego lite 첫 실행이 링크를 두는 곳)에서 찾고, `--version` 이 ego lite 와 Chromium 버전을 답할 때만 쓴다. 답하지 않는 ego 를 적으면 browser Add-on worker 가 뜨지 못해서다.
 - `masc setup` 의 도구 체크리스트(5 · Give imp tools)는 `ego-browser` 가 답할 때 이 명령을 해제된 줄로 보인다. Firefox 가 없어도 보인다. BiDi 줄과 같이 고르면 연결을 지정하지 않은 요청은 모호하다고 거절된다.

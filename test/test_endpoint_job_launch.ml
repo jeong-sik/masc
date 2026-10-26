@@ -56,6 +56,9 @@ let start ?(after_rendezvous=fun () -> ()) ?input ?output ?error_output ~sw ~env
   let stdin=match input with None -> fixture.input | Some fd -> fd in
   let stdout=match output with None -> fixture.output | Some fd -> fd in
   let stderr=match error_output with None -> fixture.output | Some fd -> fd in
+  (* All supplied ends here are dedicated child stdio. Opposite controller
+     Eio ends retain their flags on the POSIX backend. *)
+  List.iter Unix.clear_nonblock [stdin;stdout;stderr];
   L.For_testing.launch_effect_workspace ~after_rendezvous ~sw ~fs:env#fs ~cgroup_parent_path:"/sys/fs/cgroup"
     ~execution:fixture.execution ~stdin ~stdout ~stderr permit |> completed
 let leaf fixture binding name = Filename.concat

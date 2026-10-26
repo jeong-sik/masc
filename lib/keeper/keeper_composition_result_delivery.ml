@@ -58,20 +58,6 @@ let original_recorder binding = binding.activation
 let request_id binding = binding.entry.request_id
 let status_invocation binding = binding.invocation
 let sha256 content = Digestif.SHA256.(digest_string content |> to_hex)
-let equal_invocation left right =
-  String.equal (Invocation.tool_use_id left) (Invocation.tool_use_id right)
-  && Invocation.turn left = Invocation.turn right
-  && Invocation.schedule left = Invocation.schedule right
-  && Invocation.completion left = Invocation.completion right
-
-let invocation_to_json invocation =
-  let schedule = Invocation.schedule invocation in
-  `Assoc ["tool_use_id",`String (Invocation.tool_use_id invocation);
-    "turn",`Int (Invocation.turn invocation);
-    "schedule",`Assoc ["planned_index",`Int schedule.planned_index;
-      "batch_index",`Int schedule.batch_index;"batch_size",`Int schedule.batch_size;
-      "execution_mode",Agent_core.Tool_contract.execution_mode_to_yojson schedule.execution_mode];
-    "completion",Agent_core.Tool_contract.completion_to_yojson (Invocation.completion invocation)]
 
 type continuation_status =
   | Not_a_composition
@@ -138,7 +124,7 @@ let observe_status ~base_path ?invocation entry =
     | Continuation_unavailable error -> `Assoc ["kind",`String "unavailable";
         "detail",`String (error_to_string error)] in
   let fields = fields @ ["continuation",logical] @ Option.to_list (Option.map (fun invocation ->
-    "status_invocation",invocation_to_json invocation) invocation) in
+    "status_invocation",Keeper_skill_async_delivery.invocation_to_json invocation) invocation) in
   let request_payload = `Assoc fields in
   let payload = Keeper_tool_composition_projection.with_tool_kind_field
       Keeper_tool_composition_catalog.status_tool_kind request_payload in
@@ -190,7 +176,7 @@ let resolve ~base_path ~(snapshot : status_snapshot) ~invocation ~(result : Tool
   | Persistence_failed _ | Waiting_for_dependencies _ -> Ok None
   | Done _ ->
     let* () = match snapshot.invocation with
-      | Some captured when equal_invocation captured invocation -> Ok ()
+      | Some captured when Keeper_skill_async_delivery.equal_invocation captured invocation -> Ok ()
       | Some _ | None -> Error (Invalid_result "status snapshot has no exact SDK occurrence") in
     let* logical = match snapshot.continuation with
       | Not_a_composition -> Ok None
@@ -245,7 +231,7 @@ let record_status state ~snapshot ~invocation ~result =
   | None -> Ok ()
   | Some binding ->
     let* () = match previous with
-      | Some known when equal_invocation known.invocation invocation ->
+      | Some known when Keeper_skill_async_delivery.equal_invocation known.invocation invocation ->
         if Async.same_entry_record known.entry binding.entry
            && Journal.same_source known.source binding.source && known.manifest = binding.manifest
            && known.inline_bytes = binding.inline_bytes
@@ -312,7 +298,7 @@ let observe_official_result state ~runtime_id ~invocation ~content ~observe ~on_
   match List.find_opt (fun (binding : binding) -> String.equal (Invocation.tool_use_id binding.invocation)
       (Invocation.tool_use_id invocation)) state.bindings with
   | None -> ()
-  | Some binding when not (equal_invocation binding.invocation invocation) ->
+  | Some binding when not (Keeper_skill_async_delivery.equal_invocation binding.invocation invocation) ->
     on_error (Invocation_collision (Invocation.tool_use_id invocation))
   | Some binding ->
     match presentation binding content with
@@ -337,7 +323,7 @@ let observation_to_json observation =
     "transport_tool_use_id",`String observation.transport_receipt.tool_use_id;
     "transport_bytes",`Int observation.transport_receipt.content_bytes;
     "transport_sha256",`String observation.transport_receipt.content_sha256;
-    "status_invocation",invocation_to_json binding.invocation;
+    "status_invocation",Keeper_skill_async_delivery.invocation_to_json binding.invocation;
     "boundary",(match observation.boundary with
       | Ledger.Model_response {agent_core_turn} -> `Assoc ["kind",`String "model_response";"agent_core_turn",`Int agent_core_turn]
       | Official_client_result_handoff {agent_core_turn} -> `Assoc ["kind",`String "official_client_result_handoff";"agent_core_turn",`Int agent_core_turn]);

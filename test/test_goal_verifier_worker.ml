@@ -705,6 +705,38 @@ let test_actual_pending_goal_survives_foreign_body_corruption () =
         (phase config damaged_subject.goal_id = Goal_phase.Verifying);
       Alcotest.(check int) "later wake does not repeat either original effect" 1 !calls))
 
+let retain_unattributable_metadata store =
+  get (Lane_addon_tool_request_owner.retain ~store ~scope:"goal-proof-reviews"
+    ~request_id:"malformed" ~installation_id:W.host_installation_id
+    ~package_id:W.host_package_id ~tool:"goal_proof_review"
+    ~summary:(`Assoc []) ~request:(`Assoc [])
+    |> Result.map_error Lane_addon_tool_request_owner.error_to_string)
+
+let test_actual_pending_goal_survives_unattributable_foreign_metadata () =
+  with_workspace (fun config store _ ->
+    let _, healthy = host_prepared config store in
+    let healthy_original = W.original healthy in
+    ignore (retain_unattributable_metadata store);
+    let calls = ref 0 in
+    with_reviewer (actual_approve calls) (fun () ->
+      drain config;
+      assert_host_proof_published config store healthy_original;
+      Alcotest.(check int) "foreign malformed metadata does not block a valid original" 1 !calls))
+
+let test_unattributable_metadata_never_starts_new_review () =
+  with_workspace (fun config store _ ->
+    ignore (retain_unattributable_metadata store);
+    let goal_id = pending config in
+    let calls = ref 0 in
+    with_reviewer (actual_approve calls) (fun () ->
+      (match Agent.process_pending_work config {Agent.goal_id} with
+       | Agent.Deferred (Agent.Proof_lookup_unavailable _) -> ()
+       | Agent.Committed | Agent.Superseded | Agent.Deferred _ ->
+         Alcotest.fail "unattributable metadata authorized a fresh review");
+      Alcotest.(check bool) "unknown original remains pending" true
+        (phase config goal_id = Goal_phase.Verifying);
+      Alcotest.(check int) "unknown original never dispatches a reviewer" 0 !calls))
+
 let test_actual_boot_publication_survives_foreign_body_corruption () =
   with_workspace (fun config store _ ->
     let _, damaged = host_prepared config store in
@@ -1153,6 +1185,10 @@ let () = match restart_probe with
   Alcotest.test_case "actual Goal proof commit reply loss and conflict" `Quick test_actual_goal_commit_reply_loss_and_conflict;
   Alcotest.test_case "actual pending Goal survives foreign original body corruption" `Quick
     test_actual_pending_goal_survives_foreign_body_corruption;
+  Alcotest.test_case "actual pending Goal survives unattributable foreign metadata" `Quick
+    test_actual_pending_goal_survives_unattributable_foreign_metadata;
+  Alcotest.test_case "unattributable metadata never starts a new review" `Quick
+    test_unattributable_metadata_never_starts_new_review;
   Alcotest.test_case "actual boot publication survives foreign original body corruption" `Quick
     test_actual_boot_publication_survives_foreign_body_corruption;
   Alcotest.test_case "actual process restart survives foreign original body corruption" `Quick

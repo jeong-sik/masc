@@ -51,23 +51,22 @@ val inventory :
 val inventory_for_goal :
   store:Lane_addon_store.t -> installation_id:string -> package_id:string ->
   goal_id:string -> (retained list, error) result
-(** Strictly discover the existing scope's metadata and canonical subject
-    keys, then restore all requests and attempts belonging to this Goal.
-    Foreign original bodies are not read. Unclassifiable metadata still
-    rejects discovery; any selected original's body, identity or destination
-    failure rejects the Goal result. The owner revalidates before effects. *)
+(** Restore all valid requests and attempts belonging to this Goal after
+    classifying canonical subject keys. Unclassifiable foreign metadata does
+    not block a Goal that has a valid original; it blocks discovery only when
+    no valid original for this Goal exists, so unknown work cannot authorize a
+    fresh dispatch. Any selected original's body, identity or destination
+    failure still rejects the Goal result. *)
 
 val inventory_by_goal :
   store:Lane_addon_store.t -> installation_id:string -> package_id:string ->
-  ((string * (retained list, error) result) list, error) result
-(** A complete metadata observation grouped by Goal for host recovery.
-    Unclassifiable metadata is an outer error. Each Goal observed at the
-    requested destination retains its own full-body success or failure;
-    failures are never silently removed or reported as complete originals.
-    Other destinations' bodies are not read unless their subject shares a
-    Goal selected here, in which case the destination conflict is refused.
-    Goal and record order follow their first metadata occurrence. This is
-    discovery, not a cross-Goal transaction or permission to dispatch. *)
+  (((string * (retained list, error) result) list * (string * error) list), error) result
+(** Group valid originals by Goal and return unattributable metadata separately.
+    The first list preserves Goal/record order and per-Goal full-body outcomes;
+    the second preserves each invalid request ID and its typed error instead of
+    silently dropping it or failing every Goal. Other destinations' bodies are
+    read only when their subject shares a selected Goal, where the destination
+    conflict is refused. Discovery grants no dispatch or cross-Goal authority. *)
 
 val frontier :
   store:Lane_addon_store.t -> installation_id:string -> package_id:string ->

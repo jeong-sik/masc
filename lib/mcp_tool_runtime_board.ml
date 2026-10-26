@@ -220,7 +220,8 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
         let content = Safe_ops.json_string ~default:"" "content" arguments in
         let post_id = created_post_id result_tr in
         if Option.is_none post_id then
-          Log.Misc.error "board_post succeeded but its result data is not a post";
+          Log.Misc.error "board_post by %s succeeded but its result data is not a post: %s"
+            author (Tool_result.message result_tr);
         let notification = `Assoc [
           ("type", `String "masc/board_post");
           ("author", `String author);

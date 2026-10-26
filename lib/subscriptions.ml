@@ -14,7 +14,7 @@ let unwired_warned = Atomic.make false
 
 let set_session_push_fn (fn : Yojson.Safe.t -> int) =
   (match Atomic.exchange session_registry (Some fn) with
-   | Some _ -> Log.Sub.warn "WARNING: session push fn already set, overwriting"
+   | Some _ -> Log.Sub.warn "session push fn already set, overwriting"
    | None -> ());
   (* Reset the one-shot gate so a future explicit unwire would warn again. *)
   Atomic.set unwired_warned false

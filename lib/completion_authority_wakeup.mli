@@ -52,6 +52,9 @@ val release_unroutable_task :
     or the release failed and can succeed later. *)
 
 type recovery_report = { delivered : int; unroutable : int; retained : int }
+(** [delivered] counts obligations queued (or signaled live) and acknowledged,
+    not receipts confirmed by the producer: a live wake may still have failed
+    above it, and the durable queue carries the obligation then. *)
 
 val reconcile_pending :
   config:Workspace_utils_backend_setup.config -> (recovery_report, string) result

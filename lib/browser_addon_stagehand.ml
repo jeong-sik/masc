@@ -305,7 +305,9 @@ let log = function
   | Malformed_cdp_event {method_;detail} -> Log.Server.warn "browser Add-on Chrome %s: %s" method_ detail
   | Unexpected_response {id} -> Log.Server.warn "browser Add-on Chrome unexpected response: %d" id
   | Cancelled_call_answered {method_;rejected} | Abandoned_call_ended {method_;rejected} ->
-    Log.Server.info "browser Add-on Chrome departed caller's %s settled (rejected=%b)" method_ rejected
+    if rejected
+    then Log.Server.warn "browser Add-on Chrome departed caller's %s rejected" method_
+    else Log.Server.info "browser Add-on Chrome departed caller's %s settled" method_
   | Abandoned_call_unanswered {method_;waited_s} ->
     Log.Server.warn "browser Add-on Chrome abandoned %s unanswered after %.0fs" method_ waited_s
   | Extension_log _ -> ()

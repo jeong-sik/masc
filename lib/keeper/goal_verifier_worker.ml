@@ -210,9 +210,9 @@ let invalid_is_unattributable (entry : invalid_subject) =
   | Unattributable -> true
   | Goal_request _ -> false
 
-let invalid_affects_request ~goal_id ~request_id (entry : invalid_subject) =
+let noncanonical_affects_request ~goal_id ~request_id (entry : invalid_subject) =
   match entry.attribution with
-  | Unattributable -> true
+  | Unattributable -> false
   | Goal_request (observed_goal,observed_request) ->
     observed_goal=goal_id && observed_request=request_id
 
@@ -424,7 +424,8 @@ let select_frontier ~automatic ~store ~installation_id ~package_id ~goal_id ~req
   let selected = List.filter (fun ((observed_goal,observed_request),_) ->
     observed_goal=goal_id && observed_request=request_id) discovery.subjects in
   let* () =
-    if selected=[] && List.exists (invalid_affects_request ~goal_id ~request_id) discovery.invalid
+    if List.exists (noncanonical_affects_request ~goal_id ~request_id) discovery.invalid
+       || (selected=[] && List.exists invalid_is_unattributable discovery.invalid)
     then invalid "Goal frontier metadata is unavailable and cannot be attributed"
     else Ok () in
   let* related = load_discovered ~store ~installation_id ~package_id selected in

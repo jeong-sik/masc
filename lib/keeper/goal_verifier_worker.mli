@@ -81,9 +81,10 @@ val frontier :
     prompts. Once the parent has observed a successor, its actual retained
     record and progress are required; a missing or different child is an error,
     never a fresh [Captured] replacement or another unknown dispatch.
-    A noncanonical key for this exact Goal/request refuses a first dispatch;
-    another Goal or request's noncanonical key does not block this one.
-    Unattributable metadata, unknown dispatch, missing links and corrupt
+    A noncanonical key for this exact Goal/request refuses selection even when
+    a canonical original exists; another Goal or request's noncanonical key
+    does not block this one. Unattributable metadata blocks selection only when
+    no canonical original exists. Unknown dispatch, missing links and corrupt
     inventory grant no retry. [None] means no first attempt exists. The host
     serializes this request under its workspace lease through selection,
     retention and run. *)

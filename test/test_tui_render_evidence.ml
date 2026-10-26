@@ -47,7 +47,7 @@ let prepared_pngs sizes =
       List.map
         (function
           | Picture.Binary_item { picture; _ } -> picture
-          | Picture.Text_item _ -> Alcotest.fail "a binary item came back as text")
+          | Picture.Text_item _ | Picture.Source_item _ -> Alcotest.fail "a binary item came back as text")
         prepared
   | Picture.Access_unavailable _ -> Alcotest.fail "available evidence came back unavailable"
 
@@ -71,7 +71,7 @@ let section ?(width = 80) ?(content_height = 40) ?(display = kitty) ?(task_id = 
     | Some (id,Ok value) when String.equal id task_id -> Masc_tui_fetched.Ready value
     | Some (id,Error error) when String.equal id task_id -> Masc_tui_fetched.Failed error
     | Some _ | None -> Masc_tui_fetched.Absent in
-  Section.section ~evidence:observation ~in_flight:false ~workspace_confirmed:true
+  Section.section ~selection:None ~evidence:observation ~in_flight:false ~workspace_confirmed:true
     ~width ~content_height ~display
 
 let texts rows = List.map snd rows

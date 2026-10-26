@@ -83,6 +83,7 @@ type picture =
 
 type item =
   | Text_item of Decode.verification_evidence_item
+  | Source_item of { source : Decode.verification_evidence_item; body : string }
   | Binary_item of {
       reference : string;
       bytes : int;
@@ -182,6 +183,23 @@ let draws_pixels = function
   | View.Pixels _ -> true
   | View.Mosaic | View.No_picture -> false
 
+let board_body content =
+  let field name = function `Assoc fields -> List.assoc_opt name fields | _ -> None in
+  let text name json = match field name json with Some (`String text) -> Some text | _ -> None in
+  let entry json = match text "author" json, text "body" json with
+    | Some author, Some body -> Some (author ^ "\n" ^ body)
+    | _ -> None in
+  match Yojson.Safe.from_string content with
+  | json ->
+    (match field "source" json, field "post" json, field "comments" json with
+     | Some (`String "board"), Some post, Some (`List comments) ->
+       (match text "title" post, entry post, List.map entry comments with
+        | Some title, Some post, comments when List.for_all Option.is_some comments ->
+          Some (String.concat "\n\n" (title :: post :: List.filter_map Fun.id comments))
+        | _ -> None)
+     | _ -> None)
+  | exception Yojson.Json_error _ -> None
+
 let prepare ~display ~convert = function
   | Decode.Evidence_access_unavailable reason -> Access_unavailable reason
   | Decode.Evidence_items items ->
@@ -200,7 +218,11 @@ let prepare ~display ~convert = function
                     { reference = ev_b_reference; bytes = ev_b_bytes; sha256 = ev_b_sha256
                     ; format = ev_b_format; picture }
                   :: acc )
-            | Decode.Ev_collaboration _ | Decode.Ev_note _ | Decode.Ev_artifact _
+            | Decode.Ev_collaboration {ev_content; _} ->
+                free_slots, (match board_body ev_content with
+                  | Some body -> Source_item {source=item;body}
+                  | None -> Text_item item) :: acc
+            | Decode.Ev_note _ | Decode.Ev_artifact _
             | Decode.Ev_artifact_unreadable _ ->
                 free_slots, Text_item item :: acc)
           (Masc_tui_graphics.evidence_images, [])

@@ -4,6 +4,13 @@
 
 ## 원본 비동기 요청 상세
 
+- Task Review는 제출 당시의 증거를 개별 선택해서 읽는다. `e/E`로 이동할 때 전체 증거
+  목록을 접고 현재 항목부터 보이며 `i`로 목록을 펼친다. Board 본문은 worker에서 읽기
+  좋은 텍스트로 준비하되 원본 snapshot과 digest는 별도로 보존한다. `o/s`는 원래
+  workspace·Task·verification·item index에 결속된 저장 사본만 내려받는다. 로컬 쓰기가
+  완료된 경로는 viewer 실패·취소와 별도로 원래 요청의 영수증에 남기고 workspace 철회 때
+  이전 경로를 새 workspace에 표시하지 않는다. 승인·반려는 증거 선택/저장과 독립이다.
+
 - Board의 저장 File/Score는 원래 post·digest·byte length·이름에 묶인 reader로 연다.
   binary GET도 `Masc_tui_workspace_read`의 expected root와 단일 서버 영수증을 확인한다.
   digest/길이를 CPU 경계에서 검증하고 전체 원문을 보관한다. Source가 기본이며 Markdown·HTML은

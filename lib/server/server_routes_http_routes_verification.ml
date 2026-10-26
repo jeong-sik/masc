@@ -79,7 +79,7 @@ let parse_operator_verdict_json = function
   | _ -> Error "request body must be a JSON object"
 ;;
 
-let operator_evidence_json ~config ~operator_id ~task_id ~verification_id =
+let operator_evidence_projection ~item_index ~config ~operator_id ~task_id ~verification_id =
   if task_id="" || task_id<>String.trim task_id || verification_id=""
      || verification_id<>String.trim verification_id
      || Filename.basename verification_id<>verification_id then
@@ -91,11 +91,18 @@ let operator_evidence_json ~config ~operator_id ~task_id ~verification_id =
     let producer=match evidence with
       | Workspace_verification_store.Evidence_available {request;_} -> `String request.worker
       | Evidence_unavailable _ -> `Null in
-    Ok (`Assoc ["task_id",`String task_id;"verification_id",`String verification_id;
+    match item_index with
+    | Some index -> Workspace_verification_operator_evidence.file_to_yojson
+        ~base_path:config.Workspace.base_path ~index evidence
+    | None -> Ok (`Assoc ["task_id",`String task_id;"verification_id",`String verification_id;
       "producer",producer;"authority_kind",`String (Masc_domain.completion_authority_kind authority);
       "authority_actor",`String (Masc_domain.completion_authority_actor authority);
       "evidence",Workspace_verification_operator_evidence.access_to_yojson
         ~base_path:config.Workspace.base_path evidence])
+;;
+
+let operator_evidence_json ~config ~operator_id ~task_id ~verification_id =
+  operator_evidence_projection ~item_index:None ~config ~operator_id ~task_id ~verification_id
 ;;
 
 let commit_operator_verdict ~config ~operator_id request =
@@ -344,8 +351,14 @@ let add_routes router =
                 reqd
                 (error_json "task_id and verification_id query parameters are required")
             | Some task_id,Some verification_id ->
+              let item_index = match Server_utils.query_param req "item_index" with
+                | None -> Ok None
+                | Some raw -> (match int_of_string_opt raw with
+                    | Some index when index >= 0 -> Ok (Some index)
+                    | Some _ | None -> Error "item_index must be a non-negative integer") in
               (match Domain_pool_ref.submit_io_or_inline (fun () ->
-                 operator_evidence_json ~config ~operator_id ~task_id ~verification_id) with
+                 Result.bind item_index (fun item_index ->
+                   operator_evidence_projection ~item_index ~config ~operator_id ~task_id ~verification_id)) with
                | Ok json ->
                  respond_json_value_with_cors
                    request

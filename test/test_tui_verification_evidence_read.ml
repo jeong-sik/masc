@@ -85,7 +85,7 @@ let expect_original verification_id evidence = match evidence with
       | Binary_item {reference;sha256=actual;_} ->
         check string "the exact original evidence reference remains" ("artifact:" ^ verification_id ^ ".png") reference;
         check string "the original content identity remains" sha256 actual
-      | Text_item _ -> fail "original filed image changed kind")
+      | Text_item _ | Source_item _ -> fail "original filed image changed kind")
     | [] | _ :: _ -> fail "original filed evidence membership changed")
   | Access_unavailable _ -> fail "original filed evidence did not remain usable"
 let state base =

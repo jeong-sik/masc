@@ -378,6 +378,35 @@ let filter_by_view ~limit (view : queue_view)
   | Awaiting_operator (Backlog_recovered { live; detail }) ->
     join ~recovery:(Some detail) live
 
+(* Attempt observations are joined after paging, never stored in the immutable
+   request cache. They describe the reviewer, not the Task's terminal state. *)
+let review_observation (listed : listed) =
+  let module R = Verification_run_registry in
+  let state, detail, actor =
+    match R.get (R.global ()) ~verification_id:listed.listed_id with
+    | None -> "unobserved", "", ""
+    | Some run when not (String.equal run.task_id listed.listed_task_id) ->
+      "unobserved", "Review observation belongs to a different Task", ""
+    | Some run ->
+      let state, detail = match run.status with
+        | R.Running -> "running", ""
+        | R.Completed { outcome; _ } ->
+          match outcome with
+          | R.Approved { reason } -> "approved", reason
+          | R.Rejected { reason } -> "rejected", reason
+          | R.Infrastructure_unavailable { detail; _ } -> "unavailable", detail
+          | R.Not_reviewed { detail; _ } -> "not_reviewed", detail
+          | R.Commit_failed { detail } -> "commit_failed", detail
+          | R.Raised { detail } -> "failed", detail
+          | R.Review_cancelled { detail } -> "cancelled", detail
+          | R.Superseded_by { authority } -> "superseded", authority in
+      state, detail, run.authority_actor in
+  let observation = `Assoc ["state", `String state; "detail", `String detail;
+    "actor", `String actor] in
+  match listed.row with
+  | `Assoc fields -> `Assoc (("review_observation", observation) :: fields)
+  | row -> row
+
 let requests_json_of_requests ?task_id ~limit ~offset ~view
     (scan : listed V.scan) : Yojson.Safe.t =
   let filtered = filter_by_task_id scan.V.readable task_id in
@@ -398,7 +427,7 @@ let requests_json_of_requests ?task_id ~limit ~offset ~view
      ; ("truncated", `Bool (total > offset + List.length page))
      ; ( "requests"
        , `List
-           (List.map (fun (listed : listed) -> listed.row) page) )
+           (List.map review_observation page) )
      ]
      @ view_fields
      @ unreadable_fields scan

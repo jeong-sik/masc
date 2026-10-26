@@ -121,3 +121,40 @@ let access_to_yojson ~base_path = function
       ]
   | Store.Evidence_unavailable _ as access -> Store.submitted_evidence_access_to_yojson access
 ;;
+
+let file_to_yojson ~base_path ~index = function
+  | Store.Evidence_unavailable _ -> Error "The retained evidence is unavailable"
+  | Store.Evidence_available { request; items } ->
+    let ( let* ) = Result.bind in
+    let text ~name content =
+      Ok (name, Base64.encode_string content, String.length content,
+        Digestif.SHA256.(to_hex (digest_string content))) in
+    let* name, body_base64, bytes, sha256 =
+      match if index < 0 then None else List.nth_opt items index with
+      | None -> Error "The selected evidence item does not exist"
+      | Some (Store.Evidence_note content) -> text ~name:"note.txt" content
+      | Some (Store.Evidence_collaboration { content; sha256; _ }) ->
+        if not (String.equal sha256 Digestif.SHA256.(to_hex (digest_string content)))
+        then Error "The collaboration snapshot does not match its submitted SHA-256"
+        else text ~name:"source.json" content
+      | Some (Store.Evidence_artifact { truncated = true; _ }) ->
+        Error "Only a truncated text snapshot was retained; a complete file cannot be exported"
+      | Some (Store.Evidence_artifact { content; bytes; _ }) ->
+        if String.length content <> bytes then Error "The text snapshot does not contain the complete recorded file"
+        else text ~name:"artifact.txt" content
+      | Some (Store.Evidence_artifact_binary { reference; bytes; sha256; _ } as item) ->
+        (match Store.read_binary_body_base64 ~base_path item with
+         | Ok body -> Ok (Filename.basename reference, body, bytes, sha256)
+         | Error Store.Not_binary -> Error "The evidence is not a binary file"
+         | Error Store.Body_not_filed -> Error "No copy of this file was retained"
+         | Error (Store.Body_unreadable detail) -> Error ("The retained file cannot be read: " ^ detail)
+         | Error (Store.Body_identity_mismatch _) -> Error "The retained file does not match its submitted size or SHA-256"
+         | Error (Store.Over_delivery_ceiling { bytes; ceiling }) ->
+           Error (Printf.sprintf "This file is %d bytes; the delivery ceiling is %d bytes" bytes ceiling))
+      | Some Store.Evidence_invalid_reference -> Error "The submitted reference is invalid"
+      | Some (Store.Evidence_artifact_unreadable _) -> Error "No readable file snapshot was retained"
+    in
+    Ok (`Assoc [ "task_id", `String request.task_id;
+      "verification_id", `String request.id; "item_index", `Int index;
+      "name", `String name; "body_base64", `String body_base64;
+      "bytes", `Int bytes; "sha256", `String sha256 ])

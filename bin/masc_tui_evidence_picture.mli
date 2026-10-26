@@ -77,6 +77,9 @@ type picture =
 type item =
   | Text_item of Masc.Tui_decode.verification_evidence_item
       (** a note, source, text artifact or unreadable artifact *)
+  | Source_item of { source : Masc.Tui_decode.verification_evidence_item; body : string }
+      (** Readable Board body prepared off the render loop. [source] remains
+          the original immutable snapshot, including its links and digest. *)
   | Binary_item of {
       reference : string;
       bytes : int;

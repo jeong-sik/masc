@@ -567,13 +567,14 @@ let system_log_row ~styles ~level_style ~layout values =
    The last column carries the task's own title, which is what a verification
    request asks for: that this task be verified. *)
 let verification_task_width = 14
-let verification_evidence_width = 9
+let verification_evidence_width = 17
 let verification_minimum_title_width = 16
 
 type verification_row_values = {
   vrow_task : string;
   vrow_submitted_by : string;
   vrow_evidence : string;
+  vrow_review : string;
   vrow_title : string;
 }
 
@@ -581,6 +582,7 @@ let verification_no_values =
   { vrow_task = ""
   ; vrow_submitted_by = ""
   ; vrow_evidence = ""
+  ; vrow_review = ""
   ; vrow_title = ""
   }
 
@@ -588,8 +590,9 @@ let verification_cells ~submitter_width ~title_width values =
   [ Table.cell ~header:"TASK" ~width:verification_task_width values.vrow_task
   ; Table.cell ~header:"SUBMITTED BY" ~width:submitter_width
       values.vrow_submitted_by
-  ; Table.cell ~header:"EVIDENCE" ~width:verification_evidence_width
+  ; Table.cell ~header:"제출 / 요구" ~width:verification_evidence_width
       values.vrow_evidence
+  ; Table.cell ~header:"자동 검증" ~width:16 values.vrow_review
   ; Table.cell ~fold:Table.Fold_tail ~header:"TITLE" ~width:title_width
       values.vrow_title
   ]

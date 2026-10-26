@@ -206,7 +206,7 @@ let pictures_of ~convert items =
       List.map
         (function
           | Picture.Binary_item { picture; _ } -> picture
-          | Picture.Text_item _ -> Alcotest.fail "a binary item came back as text")
+          | Picture.Text_item _ | Picture.Source_item _ -> Alcotest.fail "a binary item came back as text")
         prepared
   | Picture.Access_unavailable _ -> Alcotest.fail "available evidence came back unavailable"
 

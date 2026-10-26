@@ -523,6 +523,10 @@ identity require their own evidence when comparing runs.
 | `Left / Esc` | back to the list |
 | `[ / ]` | while a detail is open, step to the row before or after it |
 | `< / >` | step either list a page at a time; one page holds two hundred rows, so a shorter queue arrives whole |
+| `e / E` | read one submitted evidence item at a time |
+| `i` | 증거 목록 접기/펼치기 |
+| `o` | download the retained copy and open it with a local application |
+| `s` | save this exact evidence item privately on this machine; its local path stays in the detail |
 | `a / x` | a approves the row under the cursor (press twice); x rejects with a reason ($EDITOR form) |
 | `/` | jump the cursor to a matching task id, title, or submitter; the queue answers this, an open detail does not |
 | `n / N` | next / previous match |

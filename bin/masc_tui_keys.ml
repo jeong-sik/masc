@@ -840,6 +840,13 @@ let for_surface = function
          surface exists for. [Masc_tui_footer.never_dropped_keys] pins the
          pair whole; pinning [a] or [x] alone would pin the [a] that creates
          a keeper and the [x] that deletes one. *)
+      ; b Navigate "e / E" "다음 / 이전 증거" ~detail:Detail_only
+          ~help:"read one submitted evidence item at a time"
+      ; b Act "i" "증거 목록 접기/펼치기" ~detail:Detail_only
+      ; b Act "o" "증거 열기" ~detail:Detail_only
+          ~help:"download the retained copy and open it with a local application"
+      ; b Act "s" "증거 사본 저장" ~detail:Detail_only
+          ~help:"save this exact evidence item privately on this machine; its local path stays in the detail"
       ; b Act "a / x" "approve / reject"
           ~help:"a approves the row under the cursor (press twice); x rejects \
                  with a reason ($EDITOR form)"

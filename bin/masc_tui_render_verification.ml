@@ -12,6 +12,29 @@ module Keeper_chat = Masc_tui_keeper_chat_projection
 module Render_schedule = Masc_tui_render_schedule
 module Link = Masc_tui_link
 
+let review_label = function
+  | Review_unobserved -> "실행 미관측"
+  | Review_running _ -> "검증 중"
+  | Review_stopped _ -> "검증 중단"
+  | Review_approved _ -> "승인 판정 기록"
+  | Review_rejected _ -> "반려 판정 기록"
+  | Review_superseded _ -> "다른 판정 적용"
+
+let review_detail = function
+  | Review_unobserved -> "자동 검증의 실행 기록이 아직 관측되지 않았습니다."
+  | Review_running actor -> "자동 검증자가 증거를 확인하고 있습니다: " ^ actor
+  | Review_stopped {cause; detail; actor} ->
+    let reason = match cause with
+      | Review_environment -> "검증 환경에 접근하지 못했습니다."
+      | Review_no_judgment -> "검증자가 판정을 내리지 못했습니다."
+      | Review_commit_failure -> "검증 결과를 Task에 반영하지 못했습니다."
+      | Review_failure -> "검증 실행이 중단되었습니다."
+      | Review_cancelled -> "검증 실행이 취소되었습니다." in
+    reason ^ " " ^ actor ^ " · " ^ detail
+  | Review_approved reason -> "승인 판정이 기록되었습니다. Task 완료 여부는 Task 상태에서 확인합니다. " ^ reason
+  | Review_rejected reason -> "반려 판정이 기록되었습니다. " ^ reason
+  | Review_superseded actor -> "다른 판정이 먼저 적용되었습니다: " ^ actor
+
 (* What is waiting on a verdict.
 
    The columns answer the questions an operator opens this for: which task,
@@ -145,9 +168,9 @@ let render_verification_list (state : state) =
             | Some _ -> "unreadable"
             | None ->
                 if required_count = 0 then
-                  Printf.sprintf "%d" (List.length r.vr_submitted_evidence)
+                  Printf.sprintf "%d개 / 미지정" (List.length r.vr_submitted_evidence)
                 else
-                  Printf.sprintf "%d/%d"
+                  Printf.sprintf "%d개 / %d항목"
                     (List.length r.vr_submitted_evidence) required_count
           in
           (* The task's own title. This column read [next_action] and fell
@@ -170,6 +193,7 @@ let render_verification_list (state : state) =
                 ; vrow_submitted_by =
                     Terminal_text.single_line r.vr_submitted_by
                 ; vrow_evidence = evidence
+                ; vrow_review = review_label r.vr_review
                 ; vrow_title = Terminal_text.single_line asks
                 }
           in
@@ -221,7 +245,7 @@ let render_verification_list (state : state) =
          else ""
        in
        box_line_styled buf cols ~style:(Theme.recede ())
-         (Printf.sprintf "[%s%s%s]" place rows_window more);
+         (Printf.sprintf "[%s%s%s] 자동 검증 대기 · Enter: 증거 확인 · 운영자 승인 가능" place rows_window more);
        (* An empty queue carrying a reason is not an empty queue. *)
        (match snapshot.Masc.Tui_decode.vs_backlog_error with
         | Some detail ->
@@ -287,68 +311,74 @@ let judgement_detail_rows = Masc_tui_render_evidence.wrap_rows
 
 let verification_detail_lines ~width
     (request : Masc.Tui_decode.verification_request) =
-  let field label value =
-    ( Ansi.reset
-    , Printf.sprintf "  %-15s %s" label (Terminal_text.single_line value) )
-  in
-  let wrapped_block label text =
-    (Ansi.bold, "  " ^ label)
-    :: (Message_layout.wrap_body
-          ~max_cells:(max 1 (width - 4))
-          ~sanitize:Keeper_chat.terminal_safe_text text
-        |> List.map (fun line -> Ansi.reset, "    " ^ line))
-  in
-  let item_lines empty_label items =
-    match items with
-    | [] -> [ Ansi.dim, "    (" ^ empty_label ^ ")" ]
-    | _ ->
-        List.concat_map
-          (fun item ->
-             Message_layout.wrap_body ~max_cells:(max 1 (width - 6))
-               ~sanitize:Keeper_chat.terminal_safe_text item
-             |> List.mapi (fun index line ->
-                    Ansi.reset, (if index = 0 then "    - " else "      ") ^ line))
-          items
-  in
-  let evidence_error =
-    match request.vr_evidence_error with
-    | None -> []
-    | Some detail ->
-        (Theme.bad (), "  Evidence projection error")
-        :: (Message_layout.wrap_body
-              ~max_cells:(max 1 (width - 4))
-              ~sanitize:Keeper_chat.terminal_safe_text detail
-            |> List.map (fun line -> Theme.bad (), "    " ^ line))
-        @ [ Ansi.dim, "" ]
-  in
-  detail_section_heading ~first:true
-    "1. 제출된 증거 · 필수 산출물 (Evidence & Artifacts)"
-  @ evidence_error
-  @ [ Ansi.bold
-    , Printf.sprintf "  REQUIRED ARTIFACTS (%d)"
-        (List.length request.vr_required_artifacts)
-    ]
-  @ item_lines "none required" request.vr_required_artifacts
-  @ [ Ansi.dim, ""
-    ; Ansi.bold
-    , Printf.sprintf "  SUBMITTED EVIDENCE (%d)"
-        (List.length request.vr_submitted_evidence)
-    ]
-  @ item_lines "none submitted" request.vr_submitted_evidence
-  @ [ Ansi.dim, ""
-    ; Ansi.bold, "  HOW TO READ THIS"
-    ]
-  @ (Message_layout.wrap_body ~max_cells:(max 1 (width - 4))
-       ~sanitize:Keeper_chat.terminal_safe_text
-       "Required artifacts say what must exist. Submitted evidence says what the verifier can inspect now."
-     |> List.map (fun line -> Ansi.dim, "    " ^ line))
-  @ detail_section_heading "2. 검증 요청 메타데이터 (Request & Task)"
-  @ wrapped_block "Title" request.vr_task_title
-  @ [ field "Task" request.vr_task_id
-    ; field "Submitted by" request.vr_submitted_by
-    ; field "Created" (Terminal_text.short_timestamp request.vr_created_at)
-    ; field "Request" request.vr_request_id
-    ]
+  let wrap style text = Message_layout.wrap_body ~max_cells:(max 1 (width - 4))
+    ~sanitize:Keeper_chat.terminal_safe_text text
+    |> List.map (fun line -> style, "  " ^ line) in
+  wrap Ansi.bold request.vr_task_title
+  @ wrap (match request.vr_review with Review_stopped _ -> Theme.warn () | _ -> Ansi.reset)
+      (review_detail request.vr_review)
+  @ wrap (Theme.recede ()) "작업 → 증거 제출 → 자동 검증 → Task 완료 · 운영자는 직접 승인하거나 반려할 수 있습니다."
+  @ wrap (Theme.recede ()) (Printf.sprintf "제출 증거 %d개 · 요구 증거 %d항목 · 개수는 충족 여부가 아닙니다."
+      (List.length request.vr_submitted_evidence) (List.length request.vr_required_artifacts))
+  @ (match request.vr_evidence_error with None -> [] | Some detail -> wrap (Theme.bad ()) detail)
+
+let verification_contract_lines state ~width (request : Masc.Tui_decode.verification_request) =
+  let wrap text = Message_layout.wrap_body ~max_cells:(max 1 (width - 4))
+    ~sanitize:Keeper_chat.terminal_safe_text text
+    |> List.map (fun line -> Ansi.reset, "  " ^ line) in
+  [Ansi.dim, ""; Ansi.bold, "  완료 조건"]
+  @ List.concat_map (fun text -> wrap ("• " ^ text)) request.vr_completion_contract
+  @ [Ansi.bold, "  요구 증거"]
+  @ (if request.vr_required_artifacts = [] then wrap "별도 요구 목록이 없습니다."
+     else List.concat_map (fun text -> wrap ("• " ^ text)) request.vr_required_artifacts)
+  @ [Ansi.dim, ""; Ansi.bold, "  제출 정보"]
+  @ wrap ("Task: " ^ request.vr_task_id ^ " · 제출자: " ^ request.vr_submitted_by)
+  @ wrap ("제출 시각: " ^ request.vr_created_at)
+  @ wrap ("서버의 저장 기록: " ^
+      (match state.server_identity with
+       | Some identity -> Filename.concat (Canonical_path.to_string identity.sid_masc_root)
+           ("verifications/" ^ request.vr_request_id ^ ".json")
+       | None -> "workspace 미확인 · verifications/" ^ request.vr_request_id ^ ".json"))
+
+let evidence_name = function
+  | Masc_tui_evidence_picture.Source_item {source=Ev_collaboration {ev_reference;_};_} ->
+    "협업 기록 · " ^ ev_reference
+  | Masc_tui_evidence_picture.Source_item {source=_;body=_} -> "협업 기록"
+  | Masc_tui_evidence_picture.Text_item item -> (match item with
+      | Ev_note note -> "메모 · " ^ Terminal_text.single_line note
+      | Ev_collaboration {ev_reference; _} -> "협업 기록 · " ^ ev_reference
+      | Ev_artifact {ev_reference; ev_bytes; ev_truncated; _} ->
+        Printf.sprintf "파일 · %s · %dB%s" ev_reference ev_bytes (if ev_truncated then " · 일부만 저장됨" else "")
+      | Ev_artifact_unreadable {ev_u_reference; ev_u_reason} ->
+        "읽을 수 없음 · " ^ Option.value ev_u_reference ~default:"참조 없음" ^ " · " ^ ev_u_reason
+      | Ev_binary {ev_b_reference; _} -> "파일 · " ^ ev_b_reference)
+  | Masc_tui_evidence_picture.Binary_item {reference; bytes; format; _} ->
+    Printf.sprintf "이미지/바이너리 · %s · %s · %dB" reference format bytes
+
+let verification_evidence_index state request ~width observation =
+  match observation with
+  | Masc_tui_fetched.Ready (Masc_tui_evidence_picture.Items items)
+  | Stale (Masc_tui_evidence_picture.Items items, _) ->
+    let count = List.length items in
+    let index = max 0 (min (count - 1) state.verification_evidence_cursor) in
+    let rows = List.mapi (fun i item ->
+      (if i = index then Theme.category Theme.Slot_1 else Theme.recede ()),
+      Printf.sprintf "  %s %d. %s" (if i = index then "▸" else " ") (i + 1)
+        (fit_width (Terminal_text.single_line (evidence_name item)) (max 1 (width - 9)))) items in
+    let rows = if state.verification_evidence_index_open then rows
+      else Option.to_list (List.nth_opt rows index) in
+    let location = Printf.sprintf
+      "  원본 참조는 Keeper %s의 작업 공간 기준입니다. 여기서는 제출 시 저장한 사본을 읽습니다."
+      request.vr_submitted_by in
+    judgement_detail_rows ~width ([Ansi.bold, Printf.sprintf "  증거 %d / %d · e/E 다음/이전 · i 목록 · o 열기 · s 저장" (if count = 0 then 0 else index + 1) count]
+      @ rows @ [Theme.recede (), location]
+      @ (match state.verification_evidence_saved with
+         | Some (key, saved_index, path) when key.vek_request_id = request.vr_request_id
+             && key.vek_task_id = request.vr_task_id && saved_index = index ->
+           [Ansi.reset, "  이 기기에 저장한 파일: " ^ path]
+         | Some _ | None -> [])), index
+  | Absent | Loading | Failed _ | Ready (Masc_tui_evidence_picture.Access_unavailable _)
+  | Stale (Masc_tui_evidence_picture.Access_unavailable _, _) -> [], 0
 
 let verification_detail_pane (state : state) ~rows ~cols
     ~origin:(origin_row, origin_col) request buf =
@@ -380,11 +410,11 @@ let verification_detail_pane (state : state) ~rows ~cols
           (Terminal_text.single_line request_id))
     | Some _ | None -> None
   in
-  let verdict_action = "  a twice: approve; x: reject with reason" in
+  let verdict_action = "  a 두 번: 운영자 승인 · x: 사유와 함께 반려 · j/k: 스크롤" in
   let verdict_action_rows =
     if Message_layout.display_width verdict_action <= width then
       [ verdict_action ]
-    else [ "  a twice: approve"; "  x: reject with reason" ]
+    else [ "  a 두 번: 운영자 승인"; "  x: 사유와 함께 반려 · j/k: 스크롤" ]
   in
   (* The position and action rows are fixed chrome; subtract exactly what
      this pane draws so the reported window matches the visible body. *)
@@ -403,13 +433,16 @@ let verification_detail_pane (state : state) ~rows ~cols
      pictures of image artifacts, and the typed reason when an artifact could
      not be read — the judge's actual input, drawn beside the verdict keys so
      approval is not blind. *)
+  let key = {vek_request_id=request.Masc.Tui_decode.vr_request_id;vek_task_id=request.vr_task_id} in
+  let observation = Masc_tui_fetched.view_for ~equal:equal_verification_evidence_key state.verification_evidence ~key in
+  let index_rows, selected_index = verification_evidence_index state request ~width observation in
+  let before = before @ index_rows in
   let evidence, pictures =
-    let key = {vek_request_id=request.Masc.Tui_decode.vr_request_id;vek_task_id=request.vr_task_id} in
     let in_flight = Masc_tui_fetched.in_flight state.verification_evidence
       && (match Masc_tui_fetched.current_key state.verification_evidence with
           | Some current -> equal_verification_evidence_key current key | None -> false) in
-    Masc_tui_render_evidence.section
-      ~evidence:(Masc_tui_fetched.view_for ~equal:equal_verification_evidence_key state.verification_evidence ~key)
+    Masc_tui_render_evidence.section ~selection:(Some selected_index)
+      ~evidence:observation
       ~in_flight ~workspace_confirmed:(server_authority_ready state) ~width ~content_height
       ~display:(Masc_tui_portrait_view.current_display ())
   in
@@ -421,7 +454,7 @@ let verification_detail_pane (state : state) ~rows ~cols
     |> judgement_detail_rows ~width
   in
   let evidence_first = List.length before in
-  let lines = before @ evidence @ after in
+  let lines = before @ evidence @ verification_contract_lines state ~width request @ after in
   let max_scroll = max 0 (List.length lines - content_height) in
   let scroll = max 0 (min state.verification_detail_scroll max_scroll) in
   let lines_window = Rows.of_list ~first:scroll ~height:content_height lines in

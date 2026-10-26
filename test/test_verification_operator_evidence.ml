@@ -308,9 +308,81 @@ let test_the_tui_decodes_what_the_server_writes () =
     | Ok _ -> Alcotest.fail "the TUI decoded the items into other shapes"
     | Error detail -> Alcotest.fail detail)
 
+let access items = Store.Evidence_available {
+  request={id="vr-download";task_id="task-download";worker="producer";created_at=1.};items}
+
+let test_download_preserves_original_bytes () =
+  with_base_path (fun base_path ->
+    let pdf = "%PDF-1.7\n\000original binary\255" in
+    let binary = filed_binary ~base_path ~request_id:"vr-download" ~index:1 ~format:"pdf" pdf in
+    let text = "한글\r\nsecond line\r\n" in
+    let items = [Store.Evidence_artifact {reference="artifact:report.txt";
+      content=text;bytes=String.length text;truncated=false};binary] in
+    List.iteri (fun index expected ->
+      match Operator.file_to_yojson ~base_path ~index (access items) with
+      | Error detail -> Alcotest.fail detail
+      | Ok result ->
+        let wire=`Assoc ["ok",`Bool true;"result",result] in
+        match Masc_tui_evidence_file.decode ~task_id:"task-download" ~verification_id:"vr-download" ~index wire with
+        | Error detail -> Alcotest.fail detail
+        | Ok file ->
+          ignore file;
+          let encoded=Yojson.Safe.Util.(member "body_base64" result |> to_string) in
+          Alcotest.(check string) "original bytes" expected (Base64.decode_exn encoded))
+      [text;pdf])
+
+let test_download_saves_a_private_local_copy () =
+  Eio_main.run (fun env ->
+    let directory=Filename.temp_dir "masc-evidence-save-test" "" in
+    Fun.protect ~finally:(fun () -> Masc_test_deps.cleanup_test_workspace directory) (fun () ->
+      let content="original\r\n한글\n" in
+      let result=Operator.file_to_yojson ~base_path:directory ~index:0 (access [Store.Evidence_note content]) in
+      let result=match result with Ok value -> value | Error detail -> Alcotest.fail detail in
+      let file=match Masc_tui_evidence_file.decode ~task_id:"task-download" ~verification_id:"vr-download" ~index:0
+        (`Assoc ["ok",`Bool true;"result",result]) with Ok file -> file | Error detail -> Alcotest.fail detail in
+      match Masc_tui_evidence_file.save ~fs:env#fs ~directory file with
+      | Error detail -> Alcotest.fail detail
+      | Ok path ->
+        Alcotest.(check bool) "absolute path" false (Filename.is_relative path);
+        Alcotest.(check string) "saved bytes" content (Eio.Path.load Eio.Path.(env#fs / path));
+        Alcotest.(check int) "private file" 0o600 (Unix.stat path).Unix.st_perm))
+
+let test_download_refuses_missing_or_partial_items () =
+  with_base_path (fun base_path ->
+    let artifact content bytes truncated = Store.Evidence_artifact {
+      reference="artifact:report.txt";content;bytes;truncated} in
+    let items=[artifact "prefix" 100 true;artifact "prefix" 100 false;
+      Store.Evidence_artifact_unreadable {reference="artifact:missing";reason=Store.Evidence_missing}] in
+    List.iter (fun index ->
+      match Operator.file_to_yojson ~base_path ~index (access items) with
+      | Error _ -> () | Ok _ -> Alcotest.fail "incomplete evidence became a complete file") [-1;0;1;2;3])
+
+let test_download_refuses_wrong_identity_and_corrupt_bytes () =
+  with_base_path (fun base_path ->
+    let result=match Operator.file_to_yojson ~base_path ~index:0 (access [Store.Evidence_note "exact note"]) with
+      | Ok (`Assoc fields) -> fields | Ok _ -> Alcotest.fail "not an object" | Error detail -> Alcotest.fail detail in
+    let refuse fields ~task_id ~verification_id ~index =
+      let wire=`Assoc ["ok",`Bool true;"result",`Assoc fields] in
+      match Masc_tui_evidence_file.decode ~task_id ~verification_id ~index wire with
+      | Error _ -> () | Ok _ -> Alcotest.fail "wrong item or corrupt download accepted" in
+    refuse result ~task_id:"another-task" ~verification_id:"vr-download" ~index:0;
+    refuse result ~task_id:"task-download" ~verification_id:"another-request" ~index:0;
+    refuse result ~task_id:"task-download" ~verification_id:"vr-download" ~index:1;
+    List.iter (fun (key,value) ->
+      refuse ((key,value)::List.remove_assoc key result)
+        ~task_id:"task-download" ~verification_id:"vr-download" ~index:0)
+      ["bytes",`Int 100;"sha256",`String (String.make 64 '0');"name",`String "../outside.txt";
+       "body_base64",`String (Base64.encode_string "other note")])
+
 let () =
   Alcotest.run "Verification operator evidence"
-    [ ( "preview"
+    [ ( "download", [
+        Alcotest.test_case "saving creates a private local copy with original bytes" `Quick test_download_saves_a_private_local_copy;
+        Alcotest.test_case "original text and non-image binary bytes round trip" `Quick test_download_preserves_original_bytes;
+        Alcotest.test_case "partial and missing snapshots cannot be saved as complete files" `Quick test_download_refuses_missing_or_partial_items;
+        Alcotest.test_case "identity and content integrity are required" `Quick test_download_refuses_wrong_identity_and_corrupt_bytes;
+      ] )
+    ; ( "preview"
       , [ Alcotest.test_case "an image under the ceiling is inline" `Quick
             test_an_image_under_the_ceiling_is_inline
         ; Alcotest.test_case "the ceiling is inclusive" `Quick

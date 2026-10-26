@@ -5,7 +5,7 @@ type 'body install = { scripts : bool; lock_source : lock_source; lockfile : loc
 type source_file = { path : string; sha256 : string }
 type build =
   | Browser_modules of
-      { esbuild : string; inputs : string list; warnings : string list; external_resources : string list }
+      { entry_html : string; esbuild : string; inputs : string list; warnings : string list; external_resources : string list }
   | Package_script of { script : string; output_directory : string; entry_html : string }
 type 'body file = { path : string; body : 'body }
 type 'body output = Html of 'body | Site of { entry_html : string; sha256 : string; files : 'body file list }
@@ -70,12 +70,13 @@ let install_to_json ~lock (install : 'a install) =
 let build_of_json json =
   match json with
   | `Assoc fields when value "kind" fields = `String "browser_modules" ->
-    let* fields = object_fields ["kind"; "esbuild"; "inputs"; "warnings"; "external_resources"] json in
+    let* fields = object_fields ["kind"; "entry_html"; "esbuild"; "inputs"; "warnings"; "external_resources"] json in
+    let* entry_html = path "entry_html" fields in
     let* esbuild = nonblank "esbuild" fields in
     let* inputs = strings (value "inputs" fields) in
     let* warnings = strings (value "warnings" fields) in
     let* external_resources = strings (value "external_resources" fields) in
-    Ok (Browser_modules { esbuild; inputs; warnings; external_resources })
+    Ok (Browser_modules { entry_html; esbuild; inputs; warnings; external_resources })
   | _ ->
     let* build = Artifact_project_source.build_of_json json in
     (match build with
@@ -83,9 +84,9 @@ let build_of_json json =
        Ok (Package_script { script; output_directory; entry_html })
      | Artifact_project_source.Browser_modules _ -> Error "missing browser build evidence")
 let build_to_json = function
-  | Browser_modules { esbuild; inputs; warnings; external_resources } ->
+  | Browser_modules { entry_html; esbuild; inputs; warnings; external_resources } ->
     let strings values = `List (List.map (fun text -> `String text) values) in
-    `Assoc ["kind", `String "browser_modules"; "esbuild", `String esbuild;
+    `Assoc ["kind", `String "browser_modules"; "entry_html", `String entry_html; "esbuild", `String esbuild;
             "inputs", strings inputs; "warnings", strings warnings; "external_resources", strings external_resources]
   | Package_script { script; output_directory; entry_html } ->
     Artifact_project_source.build_to_json (Artifact_project_source.Package_script { script; output_directory; entry_html })
@@ -225,9 +226,10 @@ let validate_source ~digest ~source (receipt : 'a receipt) =
     ({ path = file.path; sha256 = file.body.sha256 } : source_file)) source.Artifact_project_source.files in
   let* () = if receipt.source_files = expected then Ok () else Error "build source files differ from source snapshot" in
   let* () = match source.build, receipt.build with
-    | Artifact_project_source.Browser_modules _, Browser_modules _ -> Ok ()
+    | Artifact_project_source.Browser_modules a, Browser_modules b when String.equal a.entry_html b.entry_html -> Ok ()
     | Artifact_project_source.Package_script a, Package_script b
       when a.script = b.script && a.output_directory = b.output_directory && a.entry_html = b.entry_html -> Ok ()
+    | Artifact_project_source.Browser_modules _, Browser_modules _
     | Artifact_project_source.Browser_modules _, Package_script _
     | Artifact_project_source.Package_script _, Browser_modules _
     | Artifact_project_source.Package_script _, Package_script _ -> Error "build selection differs from source snapshot" in

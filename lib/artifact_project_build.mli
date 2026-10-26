@@ -8,7 +8,7 @@ type 'body install =
 type source_file = { path : string; sha256 : string }
 type build =
   | Browser_modules of
-      { esbuild : string; inputs : string list; warnings : string list; external_resources : string list }
+      { entry_html : string; esbuild : string; inputs : string list; warnings : string list; external_resources : string list }
   | Package_script of { script : string; output_directory : string; entry_html : string }
 type 'body file = { path : string; body : 'body }
 type 'body output = Html of 'body | Site of { entry_html : string; sha256 : string; files : 'body file list }

@@ -36,7 +36,7 @@ let install lock_source lockfile content = `Assoc ["mode", `String "ci"; "lock_s
   "scripts", `Bool false; "lockfile", `String lockfile; "lock_content", `String content; "lock_sha256", `String (digest content)]
 let html = `Assoc ["kind", `String "html"; "artifact", `Assoc ["format", `String "html";
   "content", `String index; "sha256", `String (digest index)]]
-let browser_result = `Assoc ["kind", `String "browser_modules"; "esbuild", `String "fixture";
+let browser_result = `Assoc ["kind", `String "browser_modules"; "entry_html", `String "index.html"; "esbuild", `String "fixture";
   "inputs", `List []; "warnings", `List []; "external_resources", `List []]
 let result build output files = `Assoc ["schema", `String "masc.artifact_project_result.v1";
   "runtime", `Assoc ["node", `String "fixture"; "platform", `String "fixture"; "arch", `String "fixture"];
@@ -153,6 +153,27 @@ let test_unsafe_metadata () = with_base (fun base_path ->
   Unix.chmod directory 0o777;
   S.save ~base_path ~source_id:source.id ~author:"keeper" (input (result browser_result html source_files)) |> unavailable;
   Unix.chmod directory 0o700)
+let test_entry_selection () = with_base (fun base_path ->
+  let files = ["package.json", "{}"; "a.html", "<p>A</p>"; "b.html", "<p>B</p>"] in
+  let entry path = replace "entry_html" (`String path) browser in
+  let a = save_source base_path (entry "a.html") files in
+  let b = save_source base_path (entry "b.html") files in
+  let selection = replace "entry_html" (`String "a.html") browser_result in
+  let output = replace "artifact" (`Assoc ["format", `String "html"; "content", `String "<p>A</p>";
+    "sha256", `String (digest "<p>A</p>")]) html in
+  let expected = result selection output files in
+  S.save ~base_path ~source_id:b.id ~author:"keeper" (input expected) |> invalid;
+  Alcotest.(check bool) "cross-entry refusal precedes metadata directory creation" false
+    (Sys.file_exists (Filename.dirname (metadata base_path ("build-" ^ String.make 32 'a'))));
+  let saved = save base_path a expected in
+  check_result expected (S.restore ~base_path ~id:saved.id |> stored);
+  let json = A.to_json saved |> replace "source_id" (`String b.id) in
+  write (metadata base_path saved.id) (Yojson.Safe.to_string json);
+  S.read ~base_path ~id:saved.id |> unavailable;
+  S.restore ~base_path ~id:saved.id |> unavailable;
+  S.read_file ~base_path ~id:saved.id ~path:(Some "b.html") |> unavailable;
+  let absent = result (`Assoc (List.remove_assoc "entry_html" (fields browser_result))) html source_files in
+  match A.input_of_json absent with Error _ -> () | Ok _ -> Alcotest.fail "selected entry is required")
 
 let () = Eio_main.run (fun _ -> match Array.to_list Sys.argv with
   | [_; "--save"; base_path; source_id; input_path] ->
@@ -168,4 +189,5 @@ let () = Eio_main.run (fun _ -> match Array.to_list Sys.argv with
     Alcotest.test_case "supplied lock and shrinkwrap precedence" `Quick test_supplied_lock;
     Alcotest.test_case "closed worker result and payload integrity" `Quick test_strict_results;
     Alcotest.test_case "payload and metadata corruption" `Quick test_corruption;
-    Alcotest.test_case "unsafe metadata paths" `Quick test_unsafe_metadata]])
+    Alcotest.test_case "unsafe metadata paths" `Quick test_unsafe_metadata;
+    Alcotest.test_case "browser entry selection binds save and all readers" `Quick test_entry_selection]])

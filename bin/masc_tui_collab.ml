@@ -134,7 +134,8 @@ let controller_note controller name = match controller with
   | Masc.Tui_decode.Play_machine_absent | Masc.Tui_decode.Play_controller_unobserved _ -> ""
 
 let controller_summary = function
-  | Masc.Tui_decode.Play_controller_held holder -> ["DOS controller: " ^ holder]
+  | Masc.Tui_decode.Play_controller_held holder ->
+      ["DOS controller: " ^ Masc.Tui_terminal_text.sanitize_terminal_text holder]
   | Masc.Tui_decode.Play_controller_free -> []
   | Masc.Tui_decode.Play_machine_absent -> ["No DOS machine is loaded."]
   | Masc.Tui_decode.Play_controller_unobserved reason ->

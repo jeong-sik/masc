@@ -36,7 +36,10 @@
     "retarget-cancel-4/process-ended.json": "25858e67235b122d6e71c8bdd952cfeae63c0c9e24750eb9613a094a99bb218b",
     "retarget-cancel-4/process.json": "6ccae5e5affd85d3ab1dd8afcab43784041d57385702f141bc98f7fa2dcf8c8b",
     "retarget-cancel-4/provenance.json": "c645d1e08dafbcee23a2a4e9f96c08a7825298ab3c0fd81c2b21504148770cf5",
-    "retarget-cancel-4/schedule-before.json": "ba3558dd7969e9e6d7cb045a2d688911c57d4cd2cdd2434dd511e55e750aa6fe"
+    "retarget-cancel-4/schedule-before.json": "ba3558dd7969e9e6d7cb045a2d688911c57d4cd2cdd2434dd511e55e750aa6fe",
+    "backend-operation-terminal.json": "6b8a4a7d2208ce5e1e453dc7e825e7b24138232c327b595d644fd2d36e67da03",
+    "backend-recovery-admission.json": "ed0686ec3a2cd1a2845988fe28ae89182d082dfd96131921e5487cd23d7bb3d0",
+    "backend-recovery-observed.json": "e4000477705716001e220ae91dc5f7869ecd32a150883726c2b66840da12e81f"
   },
   "source_comparison": {
     "installed_commit": "bc3038a22374705db648bebd7f556223b3e84727",

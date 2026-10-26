@@ -48,3 +48,10 @@ inspection additionally verified the correct body/author pairs in this run.
 MCP's named admin credential is an automated actor, so this does not test the
 separate `Operator_caller` branch. No actual TUI, successful model execution,
 destination delivery, failover, Lane worker or storage fault recovery is proved.
+
+`backend-operation-terminal.json` records the earlier selected-suite request's
+actual `Failed / Turn_cancelled` state after a shared server restart.
+`backend-recovery-admission.json` and `backend-recovery-observed.json` record a new
+recovery request admitted and subsequently read back as `Queued`. These are
+selected actual API fields, not suite pass receipts. No completed backend suite
+result is included here.

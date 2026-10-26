@@ -102,9 +102,15 @@ pending 잔류를 관측했다. 미시작·paused 변형의 근거는 **`-4`만*
 | Lane action | 실제 worker/receipt/effect-unknown/redelivery 미검증 |
 | TUI | decoder/선택 결정의 기존 component 근거와 별개로 실제 표시·refresh 동작 미검증 |
 
-선택된 실제 backend suite 다섯 개는 MASC `masc-pro-builder`에 요청한
-`kmsg-0ee5cad6044d0c44843de8a152152104`는 이 보고서 기록 시점의 조회에서 **Running**이었다.
+선택된 실제 backend suite 다섯 개는 MASC `masc-pro-builder`에 요청했다.
+최초 operation `kmsg-0ee5cad6044d0c44843de8a152152104`는 Running으로 관측됐으나,
+공유 서버의 재시작 뒤 12:17 UTC 정확한 REST 조회에서 **Failed / Turn_cancelled**였다.
+이전 실행이 완료됐다는 근거는 없다. 기존 artifact와 살아 있는 process/handle을 먼저
+회수하고 중복 실행 없이 미실행 부분을 이어 달라는 복구 요청
+`schedule-backend-resume-0c7be315f4334255b271e1195ca530d0`를 보냈다.
+12:19 UTC 접수와 12:21 UTC 같은 id 재조회는 **Queued**였다.
+세 상태 영수증은 [동일 evidence 디렉터리](../evidence/2026-10-26-schedule-runtime-behavior/README.md)에 있다.
 요청 범위는 `test_schedule_tool_wiring`, `test_schedule_store`, `test_schedule_runner`,
 `test_schedule_consumer_dispatch`, `test_lane_addon_scheduled_act`다.
-이 상태는 완료된 suite 결과가 아니다. 로컬 Dune/full build·CI watch는 외부 coding
+이 접수는 완료된 suite 결과가 아니다. 로컬 Dune/full build·CI watch는 외부 coding
 session에서 실행하지 않았다. 실제 결과가 오면 head·명령·실행/skip/실패를 별도로 대조한다.

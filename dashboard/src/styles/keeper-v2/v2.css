@@ -280,6 +280,9 @@
 
 @media (min-width: 901px) {
   .v2-nav { min-height: 0; overflow-y: auto; }
+  /* overflow-y:auto computes overflow-x to auto as well, so the rail is a clip
+     box and the -10px active marker would be cut off on desktop. Keep it inside. */
+  .v2-nav .nav-item.on::before { left: 0; }
   .v2-nav > .nav-brand,
   .v2-nav > .nav-item { flex-shrink: 0; }
 }

@@ -56,6 +56,9 @@ type snapshot =
   ; success_count : int
   ; failure_count : int
   ; crash_count : int
+      (** Non-cancellation exceptions in either the tick or its subsequent
+          observation/owner/cache effects. Returned settlement progress remains
+          captured even when those later effects raise. *)
   ; last_tick_started_at : float option
   ; last_tick_finished_at : float option
   ; last_success : last_success option

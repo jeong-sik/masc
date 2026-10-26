@@ -2,6 +2,8 @@
 
 Issue [#46142](https://github.com/jeong-sik/masc/issues/46142), code PR
 [#46146](https://github.com/jeong-sik/masc/pull/46146), MASC Task `task-2716`.
+Evidence PR [#46147](https://github.com/jeong-sik/masc/pull/46147) is the top
+of Native Stack #46148.
 
 ## Observed failure
 

@@ -3,6 +3,8 @@
   "issue": 46142,
   "task_id": "task-2716",
   "code_pr": 46146,
+  "evidence_pr": 46147,
+  "native_stack": 46148,
   "code_head": "03128e8b222b35d70ccb7be33550e24a42c017f2",
   "observed_server_commit": "bc3038a22374705db648bebd7f556223b3e84727",
   "observation": {

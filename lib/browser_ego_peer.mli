@@ -4,8 +4,8 @@
     from one run to the next, a script's variables do not, and the download
     waits a script starts last as long as the ego process. The connection gives
     each page it sees a tab number, by the page's label. It reads only the
-    pages the space manages; a tab the operator opened there is listed and
-    refused before any read. *)
+    pages the space manages; an unmanaged tab the operator opened there is
+    listed and refused before any read, unless explicitly adopted. *)
 
 (** Why a run gave no output to read. [Exited]: it ended with a non-zero
     code; [output] is the end of what it wrote. [Signaled]: a signal ended
@@ -135,7 +135,7 @@ val space : t -> Browser_lane.ego_space
     atomic navigation guard. Ego owns its locator/actionability waits; a method
     failure is uncertain, including a missing or stale target. Re-read a snapshot after page changes or input and on a native
     stale/unknown ref refusal. Selector drags without waypoints use native [dragAndDrop]. A native drag
-    failure attempts mouse-up once; a dialog or missing release proof preserves
+    failure adds no synthetic mouse-up; a dialog or missing release proof preserves
     the same release-uncertain state as raw drag. Coordinate and
     scene drags retain the observed waypoint contract, require zero duration
     and release the button in the same run.
@@ -145,8 +145,15 @@ val space : t -> Browser_lane.ego_space
     use ego's native element resolver, including iframe refs; expectedUrl still
     identifies the top-level page. Explicit input framePath is refused here
     with guidance to snapshot targets; frame-path reads are rejected by the
-    live transport gate before this peer. Verbs this
-    connection does not serve are refused before any effect; selection
+    live transport gate before this peer.
+    [adopt_tab] explicitly gives an observed unmanaged tab to the native Page
+    lifecycle, optionally with [pageLabel] as the SDK's [as] option.
+    [release_tab] unmanages an unknown-origin Page without closing its tab.
+    Both require this agent-controlled Space, preserve origin and tab number,
+    and refuse while input release is uncertain. Reads support an adopted
+    Page; current mutation paths still require agent-created Pages.
+    Lost lifecycle receipts require inventory reconciliation, never replay.
+    Verbs this connection does not serve are refused before any effect; selection
     refuses them earlier ({!Browser_lane.live_transport_serves}). *)
 val dispatch
   :  ?actor:string
@@ -155,7 +162,7 @@ val dispatch
   -> Yojson.Safe.t
   -> (Yojson.Safe.t, Browser_live_peer.failure) result
 
-(** Ends the task space. ego closes the pages it manages and keeps the tabs
-    the operator opened there. Once it has, the upload copies this
+(** Ends the task space with [keep: []]. Ego closes agent-created Pages and
+    preserves unknown-origin managed Pages and unmanaged tabs. Once it has, the upload copies this
     connection held are let go. *)
 val finish : t -> (unit, string) result

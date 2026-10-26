@@ -115,6 +115,19 @@ These tools are composed by the Keeper; handoff does not automatically create
 an Ask, show a window, or verify credentials. The identity receipt and guidance
 are source changes; a real Keeper login handoff remains unverified.
 
+For an observed unmanaged tab in an **agent-controlled** Space, explicit
+`BrowserAct action=adopt_tab` takes that tab's `tabId` and exact `clientId`.
+Optional `pageLabel` is forwarded as the SDK's `as` option; omission lets Ego
+assign the label. The receipt retains the tab number, target and unknown origin.
+Reads can then use that Page. Existing mutations still require agent-created
+Pages; adoption does not change origin or grant those effects.
+`action=release_tab` returns an unknown-origin managed Page without closing its
+browser tab; agent-created Pages must be closed instead. Neither operation takes
+over user control or clears uncertain input release. If a receipt is lost, list
+the same Space's tabs and reconcile its current label before continuing. Never
+replay the lost operation. This is source integration with stand-in forwarding
+checks; real SDK, installed Keeper and UI execution remain unverified.
+
 `evaluate` and `waitForFunction` take browser `source` and optional
 `argumentJson`. The source never executes in the host Node process. Page code,
 including a wait predicate, can have effects before failing. `fetch` accepts

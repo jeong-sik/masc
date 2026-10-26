@@ -23,6 +23,8 @@ type interaction =
   | Back | Forward | Reload | Close_tab
 type control_wait = { interval_ms : float option; timeout_ms : float option }
 type control = Hand_off | Take_over | Wait_for_control of control_wait
+  | Adopt_tab of { tab_id : int; label : string option }
+  | Release_tab of int
 type t = Open_tab of string | Open_window of string | Control of control
   | On_tab of { tab_id : int; frame_path : string list; interaction : interaction }
 let reply_timeout_sec = function
@@ -191,6 +193,17 @@ let parse = function
        let* options=control_wait_of_json (match List.assoc_opt "controlOptions" fields with
          | None -> `Assoc [] | Some value -> value) in
        Ok (Control (Wait_for_control options))
+     | "adopt_tab" | "release_tab" ->
+       let* ()=exact (if action="adopt_tab" then ["tabId";"pageLabel"] else ["tabId"]) in
+       let* tab_id=integer "tabId" in
+       let* ()=if tab_id>=0 then Ok () else Error "tabId must be nonnegative" in
+       if action="release_tab" then Ok (Control (Release_tab tab_id))
+       else
+         let* label=match List.assoc_opt "pageLabel" fields with
+           | None -> Ok None
+           | Some (`String value) when String.trim value<>"" -> Ok (Some value)
+           | Some _ -> Error "pageLabel must be nonempty text" in
+         Ok (Control (Adopt_tab {tab_id;label}))
      | "upload" ->
        let* target = match List.mem_assoc "selector" fields, List.mem_assoc "opener" fields with
          | true, false -> Result.map (fun selector -> File_input selector) (nonempty "selector")
@@ -231,6 +244,9 @@ let to_json = function
   | Control Take_over -> `Assoc ["action",`String "take_over"]
   | Control (Wait_for_control options) -> `Assoc ["action",`String "wait_for_control";
       "controlOptions",control_wait_to_json options]
+  | Control (Adopt_tab {tab_id;label}) -> `Assoc (["action",`String "adopt_tab";"tabId",`Int tab_id]
+      @ Option.to_list (Option.map (fun value -> "pageLabel",`String value) label))
+  | Control (Release_tab tab_id) -> `Assoc ["action",`String "release_tab";"tabId",`Int tab_id]
   | On_tab {tab_id;frame_path;interaction} ->
     let action, args = match interaction with
       | Upload {target;paths} ->

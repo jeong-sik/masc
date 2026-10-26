@@ -572,6 +572,72 @@ let ollama_auto_probe_uses_declared_deadline () =
       Alcotest.(check int) "the bounded discovery attempt really reached the endpoint"
         1 !tag_requests))
 
+let ollama_cloud_auto_uses_declared_discovery () =
+  with_env "MASC_TEST_OLLAMA_KEY" (Some "cloud-test-secret") (fun () ->
+    let discover ~headers:_ ~timeout_s:_ _ = Some "cloud-model" in
+    match Runtime_model_string.parse_model_string ~discover
+      ~api_key_env_overrides:["ollama_cloud", "MASC_TEST_OLLAMA_KEY"] "ollama_cloud:auto" with
+    | Some config ->
+      Alcotest.(check string) "cloud auto keeps its discovered model"
+        "cloud-model" config.Provider_config.model_id;
+      Alcotest.(check (option string)) "cloud auto preserves its provider"
+        (Some "ollama_cloud") config.Provider_config.provider_id
+    | None -> Alcotest.fail "cloud auto was disabled by a missing discovery deadline")
+
+let expect_timeout clock request =
+  match Eio.Time.with_timeout clock 5. (fun () -> Ok (request ())) with
+  | Ok (Error (Http_client.TimeoutError _)) -> ()
+  | Ok (Error _) -> Alcotest.fail "the request failed before its declared deadline"
+  | Ok (Ok _) -> Alcotest.fail "the request succeeded without observing its deadline"
+  | Error `Timeout -> Alcotest.fail "the request escaped its declared deadline"
+
+let get_sync_deadline_covers_dns_resolution () =
+  Eio_main.run @@ fun _ ->
+  Eio.Switch.run @@ fun sw ->
+  let clock = Eio_mock.Clock.make () in
+  Eio_mock.Clock.set_time clock 1000.;
+  let mock_net = Eio_mock.Net.make "stalled-dns" in
+  let pending, _ = Eio.Promise.create () in
+  Eio_mock.Net.on_getaddrinfo mock_net [
+    `Run (fun () -> Eio_mock.Clock.advance clock; Eio.Promise.await pending)
+  ];
+  let net = (mock_net :> [`Generic | `Unix] Eio.Net.ty Eio.Resource.t) in
+  expect_timeout clock (fun () ->
+    Http_client.get_sync ~sw ~net ~clock ~timeout_s:4.0
+      ~url:"http://stalled-dns.invalid/api/tags" ~headers:[] ())
+
+let get_sync_deadline_covers_stalled_body () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio_mock.Clock.make () in
+  Eio_mock.Clock.set_time clock 1000.;
+  try
+    Eio.Switch.run @@ fun sw ->
+    let socket = Eio.Net.listen env#net ~sw ~backlog:128 ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0)) in
+    let port = match Eio.Net.listening_addr socket with
+      | `Tcp (_, port) -> port
+      | `Unix _ -> Alcotest.fail "expected a TCP listener" in
+    Eio.Fiber.fork ~sw (fun () ->
+      let flow, _ = Eio.Net.accept ~sw socket in
+      let reader = Eio.Buf_read.of_flow ~max_size:65536 flow in
+      let rec drain_headers () =
+        match Eio.Buf_read.line reader with
+        | "" -> ()
+        | _ -> drain_headers ()
+      in
+      drain_headers ();
+      Eio.Flow.copy_string
+        "HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: close\r\n\r\n" flow;
+      Eio_mock.Clock.advance clock;
+      let pending, _ = Eio.Promise.create () in
+      Eio.Promise.await pending);
+    let endpoint = Printf.sprintf "http://127.0.0.1:%d/api/tags" port in
+    expect_timeout clock (fun () ->
+      Http_client.get_sync ~sw ~net:env#net ~clock ~timeout_s:4.0
+        ~url:endpoint ~headers:[] ())
+  with
+  | Unix.Unix_error ((Unix.EPERM | Unix.EADDRINUSE), "bind", _) -> Alcotest.skip ()
+
 let ollama_auto_without_declared_deadline_does_not_probe () =
   let tag_requests = ref 0 in
   let handler _conn req body =
@@ -645,6 +711,9 @@ let () = Alcotest.run "runtime model label binding"
      "public cache survives refresh",`Quick,ollama_auto_preserves_public_observation_through_global_refresh;
      "credential-scoped cache",`Quick,ollama_auto_scopes_cached_models_to_the_credential;
      "declared probe deadline",`Quick,ollama_auto_probe_uses_declared_deadline;
+     "cloud declared discovery",`Quick,ollama_cloud_auto_uses_declared_discovery;
+     "DNS deadline",`Quick,get_sync_deadline_covers_dns_resolution;
+     "stalled body deadline",`Quick,get_sync_deadline_covers_stalled_body;
      "missing probe deadline",`Quick,ollama_auto_without_declared_deadline_does_not_probe;
      "endpoint discovery",`Quick,ollama_auto_uses_binding_endpoint;
      "no discovered model",`Quick,ollama_auto_without_discovered_model_stays_refused;

@@ -281,6 +281,10 @@ def run(script,answer):
         time.sleep(0.03)
         answer({'completed':[],'effectStarted':False,'completedEffect':False,'inputReleased':True,'failure':None,
             'urlBefore':'https://fixture.test/','url':'https://fixture.test/','title':'Fixture','snapshot':'root','truncated':False,'chars':4})
+    elif step=='page.activate':
+        answer({'spaceId':51,'label':'p1','targetId':'T1','urlBefore':'https://fixture.test/',
+            'url':'https://fixture.test/','title':'Fixture','active':True,
+            'window':{'windowId':7,'stateBefore':'normal','stateAfter':'normal','restored':False}})
     elif step=='page.pointer':
         page={'answer':json.dumps({'url':'https://fixture.test/','title':'Fixture','scrollX':0,'scrollY':0})}
         (root/'clicked').write_text(json.dumps([args['x'],args['y'],args['button'],args['cursor']]))
@@ -447,8 +451,13 @@ let scenario mode =
             (Yojson.Safe.Util.to_list (Yojson.Safe.from_string (read (Filename.concat root "uploaded")))) in
         check bool "ego was given the worker's copies" true
           (copies <> [source] && List.for_all Sys.file_exists copies);
+        let activated=answered (issue (B.Page_interact {tab_id=1;expected_url=Some "https://fixture.test/";frame_path=[];action=B.Activate_tab})) in
+        let activation_data=Yojson.Safe.Util.member "data" activated in
+        check bool "native activation crosses the worker boundary with its observed window" true
+          Yojson.Safe.Util.(member "active" activation_data = `Bool true
+            && member "stateAfter" (member "window" activation_data) = `String "normal");
         check bool "an input the table refuses never reaches ego" true
-          (match issue (B.Page_interact {tab_id=1;expected_url=Some "https://fixture.test/";frame_path=[];action=B.Activate_tab}) with
+          (match issue (B.Page_interact {tab_id=1;expected_url=Some "https://fixture.test/";frame_path=[];action=B.Set_zoom {factor=1.5}}) with
            | W.Issue_result (Error (B.Transport_unsupported _)) -> true
            | W.Issue_result (Ok _ | Error _) | Snapshot_result _ | Model_reply _|Extension_reply _ | Download_reply _
            | Poll_result _ | Receipt | Service_refusal _ -> false);

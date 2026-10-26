@@ -140,17 +140,33 @@ type 'a launch_outcome =
   | Not_performed of error
   | Performed of { value : 'a; release_error : File_lock_eio.durable_lock_error option }
 
-val with_launch : launch_intent -> (launch_target -> 'a) -> 'a launch_outcome
+val with_launch :
+  sw:Eio.Switch.t -> launch_intent ->
+  (launch_target -> storage:Eio.Fs.dir_ty Eio.Path.t -> 'a) -> 'a launch_outcome
 (** Revalidate the committed original under its job lock, consume the permit
     exactly once, then invoke the bounded launch callback. A cancellation that
     won the same lock returns [Not_performed Launch_cancelled]. Callback exceptions
     and cancellation propagate with the permit spent; they never replay it.
     Cleanup failure preserves the callback's actual result in [Performed].
+    [storage] is an opened capability to that exact original private job
+    directory, checked against its committed device/inode, owner and mode
+    after the permit is consumed and before callback entry. It is owned by
+    [sw], which must be the supervisor's per-job resource lifetime, not a
+    client request or the global registry lifetime. The callback may retain
+    this capability for output/result publication until that switch closes;
+    it must not reopen the job by its pathname. No new launch permission is
+    conferred by retaining storage. A failed open or identity check consumes
+    the permit without invoking the callback; reconcile rather than replay.
     The callback only performs the supervisor's launch rendezvous. It must not
     wait for program completion, hold a global owner lock or reenter a registry
     mutation for this same operation. No PID signalling is authorized here. *)
 
 module For_testing : sig
+  val with_launch :
+    after_original:(unit -> unit) -> sw:Eio.Switch.t -> launch_intent ->
+    (launch_target -> storage:Eio.Fs.dir_ty Eio.Path.t -> 'a) -> 'a launch_outcome
+  (** Interleave a real filesystem change after the committed original was
+      revalidated and the permit consumed, before opening its storage. *)
   val admit :
     after_claim:(unit -> unit) -> after_missing_job:(unit -> unit) ->
     after_job:(unit -> unit) -> after_original:(unit -> unit) ->

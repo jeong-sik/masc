@@ -132,7 +132,7 @@ let test_competing_directory_publication_preserves_original () = fixture (fun ~e
     check int "the winning original directory is never replaced" inode (Unix.lstat (job_path root b)).st_ino;
     check bool "directory contention never grants launch permission" true (R.launch_state outer=R.Not_requested))
 
-let test_launch_confirmation_and_one_use () = fixture (fun ~env:_ ~sw:_ ~root:_ ~registry ~open_root ->
+let test_launch_confirmation_and_one_use () = fixture (fun ~env:_ ~sw ~root:_ ~registry ~open_root ->
   let b=binding (id "05") in let record=admitted registry b in
   check bool "another admission cannot confirm this launch" true
     (R.commit_launch record ~confirmed_admission_id:(id "99") ~launch_id:(id "06")=Error R.Binding_mismatch);
@@ -145,19 +145,19 @@ let test_launch_confirmation_and_one_use () = fixture (fun ~env:_ ~sw:_ ~root:_ 
   check bool "recovered committed intent cannot authorize fresh launch" true
     (R.commit_launch recovered ~confirmed_admission_id:(id "04") ~launch_id:(id "07")=Error R.Launch_already_requested);
   let count=ref 0 in
-  let value=R.with_launch permit (fun target -> incr count;
+  let value=R.with_launch ~sw permit (fun target ~storage:_ -> incr count;
     check bool "callback receives exact original endpoint admission" true
       (target.R.binding=b && target.spec=spec && target.admission_id=id "04" && target.launch_id=id "06");
     check int "the stored execution identity reaches the supervisor boundary" (chosen_payload_uid ()) target.payload_uid;
     "original launch result") |> completed in
   check string "callback result remains authoritative" "original launch result" value;
-  (match R.with_launch permit (fun _ -> incr count) with
+  (match R.with_launch ~sw permit (fun _ ~storage:_ -> incr count) with
    | R.Not_performed R.Launch_intent_spent -> ()
    | R.Not_performed _ | R.Performed _ -> fail "spent permit executed again");
   check int "exactly one actual callback entry" 1 !count)
 
 let test_lost_launch_reply_and_callback_exception () =
-  fixture (fun ~env:_ ~sw:_ ~root:_ ~registry ~open_root ->
+  fixture (fun ~env:_ ~sw ~root:_ ~registry ~open_root ->
     let b=binding (id "05") in let record=admitted registry b in
     (match R.For_testing.commit_launch ~after_publication:(fun () -> raise Interrupted)
         record ~confirmed_admission_id:(id "04") ~launch_id:(id "06") with
@@ -167,12 +167,12 @@ let test_lost_launch_reply_and_callback_exception () =
     check bool "lost reply retains original durable launch intent" true (R.launch_state recovered=R.Requested (id "06"));
     check bool "lost reply is reconciliation, never a new launch permit" true
       (R.commit_launch recovered ~confirmed_admission_id:(id "04") ~launch_id:(id "07")=Error R.Launch_already_requested));
-  fixture (fun ~env:_ ~sw:_ ~root:_ ~registry ~open_root:_ ->
+  fixture (fun ~env:_ ~sw ~root:_ ~registry ~open_root:_ ->
     let permit=admitted registry (binding (id "05")) |> commit in let count=ref 0 in
-    (match R.with_launch permit (fun _ -> incr count;raise Interrupted) with
+    (match R.with_launch ~sw permit (fun _ ~storage:_ -> incr count;raise Interrupted) with
      | exception Interrupted -> ()
      | R.Not_performed _ | R.Performed _ -> fail "launch exception did not propagate");
-    (match R.with_launch permit (fun _ -> incr count) with
+    (match R.with_launch ~sw permit (fun _ ~storage:_ -> incr count) with
      | R.Not_performed R.Launch_intent_spent -> ()
      | R.Not_performed _ | R.Performed _ -> fail "an exception replayed the consumed launch");
     check int "an uncertain callback outcome cannot execute twice" 1 !count)
@@ -185,18 +185,18 @@ let test_busy_owner_does_not_block_other_owner () = fixture (fun ~env ~sw ~root:
     let release ()=if Eio.Promise.peek release_startup=None then Eio.Promise.resolve unblock () in
     Fun.protect ~finally:release (fun () ->
       Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve finish
-        (R.with_launch permit (fun _ -> Eio.Promise.resolve signal ();Eio.Promise.await release_startup;"first")));
+        (R.with_launch ~sw permit (fun _ ~storage:_ -> Eio.Promise.resolve signal ();Eio.Promise.await release_startup;"first")));
       Eio.Promise.await entered;
       check bool "same operation is observed busy without waiting" true (R.load registry ~binding:b=Error R.Busy);
       let other=admitted registry (binding (id "07")) |> commit in
       check string "an independent operation progresses before the first startup releases" "independent"
-        (R.with_launch other (fun _ -> "independent") |> completed);
+        (R.with_launch ~sw other (fun _ ~storage:_ -> "independent") |> completed);
       check bool "first callback is genuinely still active" true (Eio.Promise.peek finished=None);
       release ();
       check string "original callback settles after its own release" "first" (Eio.Promise.await finished |> completed))))
 
 let test_missing_or_corrupt_original_does_not_reconstruct () =
-  List.iter (fun fault -> fixture (fun ~env:_ ~sw:_ ~root ~registry ~open_root:_ ->
+  List.iter (fun fault -> fixture (fun ~env:_ ~sw ~root ~registry ~open_root:_ ->
     let b=binding (id "05") in ignore (admitted registry b);
     let job=job_path root b and claim=claim_path root b in
     (match fault with
@@ -217,7 +217,7 @@ let test_missing_or_corrupt_original_does_not_reconstruct () =
      | `Claim_corrupt | `Job_replaced -> ());
     let healthy=admitted registry (binding (id "07")) |> commit in
     check string "corruption is confined to its original operation" "healthy"
-      (R.with_launch healthy (fun _ -> "healthy") |> completed)))
+      (R.with_launch ~sw healthy (fun _ ~storage:_ -> "healthy") |> completed)))
     [`Job_missing;`Original_missing;`Claim_corrupt;`Job_replaced]
 
 let test_owner_boot_and_execution_identity_cannot_retarget () = fixture (fun ~env:_ ~sw:_ ~root:_ ~registry ~open_root ->
@@ -286,7 +286,7 @@ let test_cancel_before_launch_preserves_original_and_blocks_admission () =
       (R.commit_launch recovered ~confirmed_admission_id:(id "04") ~launch_id:(id "06")=Error R.Launch_cancelled))
 
 let test_cancel_wins_over_an_unconsumed_launch_permit () =
-  fixture (fun ~env:_ ~sw:_ ~root:_ ~registry ~open_root ->
+  fixture (fun ~env:_ ~sw ~root:_ ~registry ~open_root ->
     let b=binding (id "05") in let original=admitted registry b in
     let permit=commit original in
     let cancelled=cancel original in
@@ -294,7 +294,7 @@ let test_cancel_wins_over_an_unconsumed_launch_permit () =
     check bool "the cancelled record preserves the original launch ID" true
       (R.launch_state cancelled=R.Requested (id "06") && R.cancellation_state cancelled=R.Cancellation_requested);
     let count=ref 0 in
-    (match R.with_launch permit (fun _ -> incr count) with
+    (match R.with_launch ~sw permit (fun _ ~storage:_ -> incr count) with
      | R.Not_performed R.Launch_cancelled -> ()
      | R.Not_performed _ | R.Performed _ -> fail "a cancelled issued permit entered its callback");
     check int "no payload startup callback ran" 0 !count;
@@ -331,7 +331,7 @@ let test_cancel_race_with_active_startup_leaves_other_jobs_progressing () =
       let release ()=if Eio.Promise.peek release_startup=None then Eio.Promise.resolve unblock () in
       Fun.protect ~finally:release (fun () ->
         Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve finish
-          (R.with_launch permit (fun _ -> Eio.Promise.resolve signal ();Eio.Promise.await release_startup;"started")));
+          (R.with_launch ~sw permit (fun _ ~storage:_ -> Eio.Promise.resolve signal ();Eio.Promise.await release_startup;"started")));
         Eio.Promise.await entered;
         check bool "cancel does not wait while that startup is active" true
           (R.request_cancel original ~confirmed_admission_id:(id "04")=Error R.Busy);
@@ -346,7 +346,7 @@ let test_cancel_race_with_active_startup_leaves_other_jobs_progressing () =
           (R.cancellation_state cancelled=R.Cancellation_requested && R.launch_state cancelled=R.Requested (id "06")))))
 
 let test_cancel_keeps_boot_and_payload_identity_authority () =
-  fixture (fun ~env:_ ~sw:_ ~root:_ ~registry ~open_root ->
+  fixture (fun ~env:_ ~sw ~root:_ ~registry ~open_root ->
     let b=binding (id "05") in ignore (admitted registry b);
     let rebooted=open_root ~route:{route with boot_id=id "08"} () |> get in
     let old=R.load rebooted ~binding:b |> get in
@@ -360,7 +360,7 @@ let test_cancel_keeps_boot_and_payload_identity_authority () =
     check bool "rejected cancellation leaves the original executable" true
       (R.cancellation_state original=R.No_cancellation);
     check string "the original identity still owns its permitted startup" "original"
-      (R.with_launch (commit original) (fun _ -> "original") |> completed))
+      (R.with_launch ~sw (commit original) (fun _ ~storage:_ -> "original") |> completed))
 
 let test_uncertain_cancel_requires_successful_original_resync () =
   List.iter (fun launch_requested -> fixture (fun ~env:_ ~sw:_ ~root ~registry ~open_root ->
@@ -417,7 +417,7 @@ let test_uncertain_cancel_requires_successful_original_resync () =
       (In_channel.with_open_bin claim In_channel.input_all))) [false;true]
 
 let test_cancel_rejects_rebound_job_and_known_launch_coordinates () =
-  List.iter (fun fault -> fixture (fun ~env:_ ~sw:_ ~root ~registry ~open_root:_ ->
+  List.iter (fun fault -> fixture (fun ~env:_ ~sw ~root ~registry ~open_root:_ ->
     let b=binding (id "05") in let ready=admitted registry b in
     let permit,original=match fault with
       | `Job_rebound -> None,ready
@@ -455,11 +455,69 @@ let test_cancel_rejects_rebound_job_and_known_launch_coordinates () =
       (In_channel.with_open_bin claim In_channel.input_all);
     Option.iter (fun permit ->
       let entered=ref false in
-      (match R.with_launch permit (fun _ -> entered:=true) with
+      (match R.with_launch ~sw permit (fun _ ~storage:_ -> entered:=true) with
        | R.Not_performed R.Stale_record -> ()
        | R.Not_performed _ | R.Performed _ -> fail "rebound original was not rejected before cancellation/launch");
       check bool "no rebound startup callback ran" false !entered) permit))
     [`Job_rebound;`Known_launch_rebound;`Cancelled_launch_rebound;`Cancelled_ready_resurrected]
+
+let test_launch_storage_is_original_and_job_owned () = fixture (fun ~env ~sw:_ ~root ~registry ~open_root:_ ->
+  let b=binding (id "05") in let permit=admitted registry b |> commit in
+  let fd=Eio.Switch.run (fun job_sw ->
+    let storage=R.with_launch ~sw:job_sw permit (fun _ ~storage ->
+      let stat=Eio.Path.stat ~follow:true storage in
+      let target=Fs_compat.capability_publication_target
+        ~allowed_root_path:(job_path root b) ~allowed_root_device:stat.dev ~allowed_root_inode:stat.ino
+        ~parent_components:[] ~target_leaf:"supervisor.json" ~permissions:0o400
+        |> Result.map_error Fs_compat.capability_publication_target_error_to_string |> require in
+      let recovery=Fs_compat.Publication_recovery.open_registry ~sw:job_sw ~fs:env#fs ~registry_root:storage
+        |> Result.map_error Fs_compat.Publication_recovery.registry_error_to_string |> require in
+      let published=Fs_compat.Publication_recovery.with_lane ~registry:recovery ~owner:"supervisor" (fun recovery ->
+        Fs_compat.create_capability_file_exclusive ~recovery ~parent:storage ~target "original rendezvous"
+        |> Result.map_error Fs_compat.capability_write_error_to_string |> require)
+        |> Result.map_error Fs_compat.Publication_recovery.lane_open_error_to_string |> require in
+      (match published with
+       | Lane_released () -> ()
+       | Lane_release_failed {release_failure;_} -> fail
+           (Fs_compat.Publication_recovery.lane_release_failure_to_string release_failure));
+      storage) |> completed in
+    check string "storage survives callback return for output/result publication" "original rendezvous"
+      (Eio.Path.load Eio.Path.(storage / "supervisor.json"));
+    let job=job_path root b in Unix.rename job (job ^ ".evidence");Unix.mkdir job 0o700;
+    Out_channel.with_open_bin (Filename.concat job "supervisor.json") (fun oc -> output_string oc "replacement");
+    check string "opened capability never follows the replacement pathname" "original rendezvous"
+      (Eio.Path.load Eio.Path.(storage / "supervisor.json"));
+    match Eio_unix.Resource.fd_opt (fst storage) with
+    | None -> fail "Unix directory has no owned descriptor"
+    | Some fd -> check bool "job switch still owns its original descriptor" true (Eio_unix.Fd.is_open fd);fd) in
+  check bool "ending the per-job switch actually closes storage" false (Eio_unix.Fd.is_open fd))
+
+let test_launch_rejects_storage_swap_before_effect () = fixture (fun ~env:_ ~sw ~root ~registry ~open_root:_ ->
+  let b=binding (id "05") in let permit=admitted registry b |> commit in
+  let job=job_path root b and entered=ref false in
+  let result=R.For_testing.with_launch ~sw ~after_original:(fun () ->
+      Unix.rename job (job ^ ".evidence");Unix.mkdir job 0o700)
+      permit (fun _ ~storage:_ -> entered:=true) in
+  (match result with
+   | R.Not_performed (R.Corrupt_original _) -> ()
+   | R.Not_performed _ | R.Performed _ -> fail "replacement storage reached launch callback");
+  check bool "no payload or supervisor callback effect ran" false !entered;
+  Unix.rmdir job;Unix.rename (job ^ ".evidence") job;
+  (match R.with_launch ~sw permit (fun _ ~storage:_ -> entered:=true) with
+   | R.Not_performed R.Launch_intent_spent -> ()
+   | R.Not_performed _ | R.Performed _ -> fail "failed storage validation replayed launch permission");
+  check bool "restoring original authority does not unspend permission" false !entered)
+
+let test_cancelled_job_scope_never_enters_launch () = fixture (fun ~env:_ ~sw ~root:_ ~registry ~open_root:_ ->
+  let permit=admitted registry (binding (id "05")) |> commit in let entered=ref false in
+  (match Eio.Switch.run (fun job_sw ->
+     Eio.Switch.fail job_sw Interrupted;
+     ignore (R.with_launch ~sw:job_sw permit (fun _ ~storage:_ -> entered:=true))) with
+   | exception Interrupted -> ()
+   | () -> fail "cancelled supervisor resource scope did not propagate");
+  check bool "cancelled supervisor acquired no launch effect" false !entered;
+  check string "pre-entry cancellation did not consume the original permit" "original"
+    (R.with_launch ~sw permit (fun _ ~storage:_ -> "original") |> completed))
 
 let ()=run "endpoint job registry" ["original durable admission",[
   test_case "original admission is idempotent and survives reopen" `Quick test_original_admission_survives_reopen;
@@ -481,4 +539,7 @@ let ()=run "endpoint job registry" ["original durable admission",[
   test_case "uncertain cancellation needs a successful original claim resync" `Quick test_uncertain_cancel_requires_successful_original_resync;
   test_case "cancel during startup leaves independent jobs progressing" `Quick test_cancel_race_with_active_startup_leaves_other_jobs_progressing;
   test_case "cancel preserves original boot and payload identity authority" `Quick test_cancel_keeps_boot_and_payload_identity_authority;
-  test_case "cancel rejects rebound job and known launch coordinates" `Quick test_cancel_rejects_rebound_job_and_known_launch_coordinates]]
+  test_case "cancel rejects rebound job and known launch coordinates" `Quick test_cancel_rejects_rebound_job_and_known_launch_coordinates;
+  test_case "launch storage pins original publication and per-job lifetime" `Quick test_launch_storage_is_original_and_job_owned;
+  test_case "storage replacement before effect spends permission without launch" `Quick test_launch_rejects_storage_swap_before_effect;
+  test_case "cancelled supervisor scope cannot enter launch" `Quick test_cancelled_job_scope_never_enters_launch]]

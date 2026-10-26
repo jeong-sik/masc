@@ -502,7 +502,26 @@ let commit_launch_with_hook ~after_publication (original : record) ~confirmed_ad
       let* ()=if committed.claim=claim then Ok () else Error Stale_record in
       Ok {original=committed;launch_id;spent=Atomic.make false})
 
-let with_launch (intent : launch_intent) perform =
+let launch_storage ~sw (current : record) =
+  Eio.Switch.check sw;
+  let registry=current.registry and binding=current.claim.binding in
+  let* expected=match current.claim.state with
+    | Launch_requested {job;_} -> Ok job
+    | Preparing | Ready _ | Cancel_requested _ -> Error Stale_record in
+  let* storage=io (fun () ->
+    (Eio.Path.open_dir ~sw Eio.Path.(registry.root_cap / job_leaf binding)
+      :> Eio.Fs.dir_ty Eio.Path.t)) in
+  let* stat=io (fun () -> Eio.Path.stat ~follow:true storage) in
+  let* ()=if stat.kind=`Directory && stat.uid=Int64.of_int registry.controller_uid
+      && stat.perm land 0o7777=0o700 && identity_of_stat stat=expected
+    then Ok () else corrupt "launch storage authority" in
+  let* after=inspect_job registry binding in
+  let* ()=if after=Some expected then validate_root registry else Error Stale_record in
+  Eio.Switch.check sw;
+  Ok storage
+
+let with_launch_with_hook ~after_original ~sw (intent : launch_intent) perform =
+  Eio.Switch.check sw;
   let original=intent.original in let registry=original.registry and binding=original.claim.binding in
   let validation=let* ()=effect_binding registry binding in validate_root registry in
   match validation with
@@ -517,8 +536,11 @@ let with_launch (intent : launch_intent) perform =
       let* ()=if current.claim=original.claim then Ok () else Error Stale_record in
       let* ()=if current.claim.payload_uid=registry.payload_uid then Ok () else Error Execution_identity_changed in
       if not (Atomic.compare_and_set intent.spent false true) then Error Launch_intent_spent
-      else Ok (perform {binding;spec=current.spec;admission_id=current.claim.admission_id;
-        launch_id=intent.launch_id;payload_uid=current.claim.payload_uid})) in
+      else (
+        after_original ();
+        let* storage=launch_storage ~sw current in
+        Ok (perform {binding;spec=current.spec;admission_id=current.claim.admission_id;
+          launch_id=intent.launch_id;payload_uid=current.claim.payload_uid} ~storage))) in
     match attempt with
     | File_lock_eio.Lock_held_elsewhere -> Not_performed Busy
     | Lock_attempted (Lock_not_acquired error) -> Not_performed (Lock_failed error)
@@ -537,7 +559,10 @@ let request_cancel original ~confirmed_admission_id =
 let commit_launch original ~confirmed_admission_id ~launch_id =
   commit_launch_with_hook ~after_publication:(fun () -> ())
     original ~confirmed_admission_id ~launch_id
+let with_launch ~sw intent perform =
+  with_launch_with_hook ~after_original:(fun () -> ()) ~sw intent perform
 module For_testing = struct
+  let with_launch = with_launch_with_hook
   let admit = admit_with_hooks
   let commit_launch = commit_launch_with_hook
   let request_cancel ?(before_resync_parent=fun () -> ()) ~after_publication original ~confirmed_admission_id =

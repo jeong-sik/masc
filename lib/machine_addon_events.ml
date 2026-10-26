@@ -14,7 +14,7 @@ let record batch (result : Mcp_protocol.Mcp_types.tool_result) =
     | Some (`Assoc fields) ->
         (match List.assoc_opt "io.github.jeong-sik/masc.machine.events" fields with
          | Some (`List events) -> List.filter_map (function
-             | `Assoc fields when List.sort String.compare (List.map fst fields) = ["author";"content"] as event ->
+             | (`Assoc fields as event) when List.sort String.compare (List.map fst fields) = ["author";"content"] ->
                  (match List.assoc "content" fields with
                   | `String content -> Some content
                   | _ ->

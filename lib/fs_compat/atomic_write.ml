@@ -14,6 +14,67 @@ type capability_publication_target =
   ; permissions : Recovery.permissions
   }
 
+type directory_file =
+  { leaf : string
+  ; content : string
+  ; permissions : int
+  }
+
+type captured_directory_file =
+  { captured_leaf : Capability_leaf.t
+  ; captured_content : string
+  ; captured_permissions : Recovery.permissions
+  }
+
+type directory_payload = captured_directory_file list
+
+type directory_payload_error =
+  | Invalid_directory_leaf of string
+  | Duplicate_directory_leaf of string
+  | Invalid_directory_file_permissions of { leaf : string; permissions : int }
+
+module Directory_leaf_set = Set.Make (String)
+
+let directory_payload files =
+  let rec capture seen captured = function
+    | [] -> Ok (List.rev captured)
+    | (file : directory_file) :: rest ->
+      if String.contains file.leaf '\000' || not (Capability_leaf.is_valid file.leaf)
+      then Error (Invalid_directory_leaf file.leaf)
+      else if Directory_leaf_set.mem file.leaf seen
+      then Error (Duplicate_directory_leaf file.leaf)
+      else
+        match Recovery.permissions_of_int file.permissions with
+        | Error _ ->
+          Error (Invalid_directory_file_permissions
+                   { leaf = file.leaf; permissions = file.permissions })
+        | Ok permissions ->
+          (match Capability_leaf.of_string file.leaf with
+           | None -> Error (Invalid_directory_leaf file.leaf)
+           | Some leaf ->
+             capture (Directory_leaf_set.add file.leaf seen)
+               ({ captured_leaf = leaf; captured_content = file.content
+                ; captured_permissions = permissions } :: captured) rest)
+  in
+  capture Directory_leaf_set.empty [] files
+;;
+
+let directory_payload_error_to_string = function
+  | Invalid_directory_leaf leaf -> Printf.sprintf "invalid directory leaf %S" leaf
+  | Duplicate_directory_leaf leaf -> Printf.sprintf "duplicate directory leaf %S" leaf
+  | Invalid_directory_file_permissions { leaf; permissions } ->
+    Printf.sprintf "invalid directory file permissions %d for %S" permissions leaf
+;;
+
+type publication_payload =
+  | File_payload of string
+  | Directory_payload of directory_payload
+
+let publication_payload_kind = function
+  | File_payload _ -> `Regular_file
+  | Directory_payload _ -> `Directory
+;;
+
 type publication_recovery_record_area =
   | Publication_recovery_active
   | Publication_recovery_owned
@@ -984,6 +1045,33 @@ let capture_recovery_cleanup ~recovery_phase operation =
       backtrace
 ;;
 
+(* The directory stage stays open until publication. Cleanup can therefore
+   restore a sealed mode without following a replaced lexical directory. Each
+   child is pinned by its creation identity. The common stage cleanup owns the
+   sole rmdir; unknown children retain the durable Bound record on its failure
+   rather than triggering a tree scan. *)
+let remove_owned_directory_children
+      ~before_stage ~entry ~identity ~directory_file ~children =
+  match !directory_file with
+  | None -> raise_failure Cleanup_unlink Resource_identity_unavailable
+  | Some file ->
+    set_open_directory_permissions ~before_stage:(fun _ -> ()) file;
+    List.iter
+      (fun (child, identity) ->
+        verify_entry_identity ~before_stage ~stage:Cleanup_verify_identity
+          child identity)
+      !children;
+    List.iter
+      (fun (child, child_identity) ->
+        run_stage ~before_stage Cleanup_unlink (fun () ->
+          verify_entry_identity ~before_stage:no_replace_stage
+            ~stage:Cleanup_verify_identity child child_identity;
+          Eio.Path.unlink child))
+      !children;
+    verify_path_identity ~before_stage:no_replace_stage
+      ~stage:Cleanup_verify_identity ~expected_kind:`Directory entry identity
+;;
+
 let cleanup_owned_staging_directory
       ~before_stage
       ~sw
@@ -996,6 +1084,9 @@ let cleanup_owned_staging_directory
       ~payload_entry
       ~payload_file
       ~payload_identity
+      ~payload
+      ~payload_directory_file
+      ~directory_children
       ~payload_created
       ~payload_published
       ~parent_dirty
@@ -1015,7 +1106,7 @@ let cleanup_owned_staging_directory
               | Some entry, Some expected ->
                 let actual = Eio.Path.stat ~follow:false entry in
                 if
-                  actual.kind <> `Regular_file
+                  actual.kind <> publication_payload_kind payload
                   || not (same_resource_identity expected actual)
                 then raise_failure Cleanup_verify_identity Resource_identity_changed
               | None, _ | _, None ->
@@ -1032,12 +1123,21 @@ let cleanup_owned_staging_directory
                 match !payload_entry with
                 | None ->
                   raise_failure Cleanup_unlink Resource_identity_unavailable
-                | Some entry -> Eio.Path.unlink entry)
+                | Some entry ->
+                  match payload with
+                  | File_payload _ -> Eio.Path.unlink entry
+                  | Directory_payload _ ->
+                    remove_owned_directory_children ~before_stage ~entry
+                      ~identity:payload_identity
+                      ~directory_file:payload_directory_file
+                      ~children:directory_children)
             in
             add unlink_failures;
             if unlink_failures = [] then payload_created := false;
             unlink_failures = []))
       in
+      add (cleanup_open_resource ~before_stage ~stage:Cleanup_close
+             payload_directory_file);
       let staging_sync_failures =
         if (not !staging_directory_created) || !staging_directory_removed
         then []
@@ -1098,7 +1198,14 @@ let cleanup_owned_staging_directory
               raise_failure
                 Cleanup_remove_staging_directory
                 Resource_identity_unavailable
-            | Some path -> Eio.Path.rmdir path)
+            | Some path ->
+              (match payload with
+               | File_payload _ -> ()
+               | Directory_payload _ ->
+                 verify_path_identity ~before_stage:no_replace_stage
+                   ~stage:Cleanup_verify_staging_directory_identity
+                   ~expected_kind:`Directory path staging_directory_identity);
+              Eio.Path.rmdir path)
         in
         add removal_failures;
         if removal_failures = []
@@ -1139,7 +1246,7 @@ let publication_target_effect = function
 external rename_noreplace_at : Unix.file_descr -> string -> Unix.file_descr -> string -> unit
   = "caml_masc_rename_noreplace_at"
 
-let publish_exclusive ~sw ~source_directory ~parent ~leaf =
+let publish_exclusive ~sw ~source_directory ~source_leaf ~parent ~leaf =
   let destination_directory = Eio.Path.open_in ~sw Eio.Path.(parent / ".") in
   match Eio_unix.Resource.fd_opt source_directory,
         Eio_unix.Resource.fd_opt destination_directory with
@@ -1147,18 +1254,18 @@ let publish_exclusive ~sw ~source_directory ~parent ~leaf =
     Eio_unix.run_in_systhread ~label:"fs-compat-publish-exclusive" (fun () ->
       Eio_unix.Fd.use_exn "fs-compat-publish-exclusive-source" source_fd (fun source ->
         Eio_unix.Fd.use_exn "fs-compat-publish-exclusive-target" destination_fd (fun destination ->
-          rename_noreplace_at source capability_staging_payload_leaf destination leaf)))
+          rename_noreplace_at source source_leaf destination leaf)))
   | None, _ | _, None -> raise_failure Publish_exclusive Posix_descriptor_unavailable
 ;;
 
-let publish_capability_file_with
+let publish_capability_payload_with
       ~publication
       ~before_stage
       ~before_publish
       ~recovery
       ~parent
       ~target:recovery_target
-      content
+      payload
   =
   let operation = publication_operation publication in
   let target_effect = ref Target_unchanged in
@@ -1231,6 +1338,9 @@ let publish_capability_file_with
     let payload_entry = ref None in
     let open_file = ref None in
     let payload_identity = ref None in
+    let payload_directory = ref None in
+    let payload_directory_file = ref None in
+    let directory_children = ref [] in
     let payload_created = ref false in
     let published = ref false in
     let parent_dirty = ref false in
@@ -1254,6 +1364,9 @@ let publish_capability_file_with
             ~payload_entry
             ~payload_file:open_file
             ~payload_identity
+            ~payload
+            ~payload_directory_file
+            ~directory_children
             ~payload_created
             ~payload_published:published
             ~parent_dirty
@@ -1467,37 +1580,85 @@ let publish_capability_file_with
                      created_identity))
        in
        bound := Some bound_obligation;
-       let entry, file =
-         run_stage ~before_stage Create_staging_entry (fun () ->
-           match !staging_directory with
-           | None ->
-             raise_failure
-               Create_staging_entry
-               Resource_identity_unavailable
-           | Some directory ->
-             let entry =
-               Eio.Path.
-                 ( (directory :> Eio.Fs.dir_ty Eio.Path.t)
-                   / capability_staging_payload_leaf )
-             in
-             entry, Eio.Path.open_out ~sw ~create:(`Exclusive 0o600) entry)
+       let entry =
+         match payload with
+         | Directory_payload _ -> path
+         | File_payload _ ->
+           (match !staging_directory with
+            | None -> raise_failure Create_staging_entry Resource_identity_unavailable
+            | Some directory ->
+              Eio.Path.((directory :> Eio.Fs.dir_ty Eio.Path.t)
+                        / capability_staging_payload_leaf))
        in
        payload_entry := Some entry;
-       open_file := Some file;
-       payload_created := true;
-       payload_identity := Some (identity_of_open_file ~before_stage file);
-       write_open_file_payload ~before_stage file content;
-       set_open_file_permissions
-         ~before_stage
-         file
-         (Recovery.permissions_to_int recovery_target.permissions);
-       run_stage ~before_stage Sync_payload (fun () -> Eio.File.sync file);
-       close_open_entry ~before_stage open_file;
+       (match payload with
+        | File_payload content ->
+          let file =
+            run_stage ~before_stage Create_staging_entry (fun () ->
+              Eio.Path.open_out ~sw ~create:(`Exclusive 0o600) entry)
+          in
+          open_file := Some file;
+          payload_created := true;
+          payload_identity := Some (identity_of_open_file ~before_stage file);
+          write_open_file_payload ~before_stage file content;
+          set_open_file_permissions ~before_stage file
+            (Recovery.permissions_to_int recovery_target.permissions);
+          run_stage ~before_stage Sync_payload (fun () -> Eio.File.sync file);
+          close_open_entry ~before_stage open_file
+        | Directory_payload files ->
+          let directory =
+            Eio.Cancel.protect (fun () ->
+              run_stage ~before_stage Create_staging_entry (fun () ->
+                let directory = match !staging_directory with
+                  | Some directory -> directory
+                  | None -> raise_failure Create_staging_entry Resource_identity_unavailable in
+                payload_directory := Some directory;
+                let file = Eio.Path.open_in ~sw Eio.Path.(directory / ".") in
+                payload_directory_file := Some file;
+                let opened = identity_of_open_resource ~before_stage
+                    ~stage:Inspect_open_resource ~expected_kind:`Directory file in
+                if not (Int64.equal opened.dev created_identity.dev
+                        && Int64.equal opened.ino created_identity.ino)
+                then raise_failure Inspect_open_resource Resource_identity_changed;
+                payload_identity := Some opened;
+                payload_created := true;
+                set_open_directory_permissions ~before_stage file;
+                directory))
+          in
+          Eio.Fiber.check ();
+          List.iter
+            (fun captured ->
+              let child = Eio.Path.(directory / Capability_leaf.to_string captured.captured_leaf) in
+              let identity = ref None in
+              let file =
+                Eio.Cancel.protect (fun () ->
+                  run_stage ~before_stage Create_staging_entry (fun () ->
+                    let file = Eio.Path.open_out ~sw ~create:(`Exclusive 0o600) child in
+                    open_file := Some file;
+                    directory_children := (child, identity) :: !directory_children;
+                    identity := Some (identity_of_open_file ~before_stage file);
+                    file))
+              in
+              Eio.Fiber.check ();
+              write_open_file_payload ~before_stage file captured.captured_content;
+              set_open_file_permissions ~before_stage file
+                (Recovery.permissions_to_int captured.captured_permissions);
+              run_stage ~before_stage Sync_payload (fun () -> Eio.File.sync file);
+              close_open_entry ~before_stage open_file;
+              verify_entry_identity ~before_stage ~stage:Verify_entry_identity child identity)
+            files;
+          (match !payload_directory_file with
+           | None -> raise_failure Apply_permissions Resource_identity_unavailable
+           | Some file ->
+             set_open_file_permissions ~before_stage file
+               (Recovery.permissions_to_int recovery_target.permissions);
+             sync_open_directory_file ~before_stage ~stage:Sync_payload file));
        Eio.Fiber.check ();
        Eio.Cancel.protect (fun () ->
-         verify_entry_identity
+         verify_path_identity
            ~before_stage
            ~stage:Verify_entry_identity
+           ~expected_kind:(publication_payload_kind payload)
            entry
            payload_identity;
          let publish () =
@@ -1517,15 +1678,49 @@ let publish_capability_file_with
              | Recovery.Create_exclusive -> Publish_exclusive in
            run_stage ~before_stage stage (fun () ->
              before_publish entry;
+             (match payload with
+              | File_payload _ -> ()
+              | Directory_payload files ->
+                verify_path_identity ~before_stage:no_replace_stage
+                  ~stage:Verify_entry_identity ~expected_kind:`Directory
+                  entry payload_identity;
+                (match !payload_directory, !payload_directory_file with
+                 | Some directory, Some file ->
+                   (* The directory may have any validated final mode, even
+                      000. Verify through the held capability before resealing
+                      and syncing it immediately before the rename. *)
+                   set_open_directory_permissions ~before_stage:no_replace_stage file;
+                   let expected = List.map (fun captured ->
+                     Capability_leaf.to_string captured.captured_leaf) files
+                     |> List.sort String.compare in
+                   let actual = Eio.Path.read_dir directory |> List.sort String.compare in
+                   if expected <> actual
+                   then raise_failure Verify_entry_identity Resource_identity_changed;
+                   List.iter (fun (child, identity) ->
+                     verify_entry_identity ~before_stage:no_replace_stage
+                       ~stage:Verify_entry_identity child identity) !directory_children;
+                   set_open_file_permissions ~before_stage:no_replace_stage file
+                     (Recovery.permissions_to_int recovery_target.permissions);
+                   sync_open_directory_file ~before_stage:no_replace_stage
+                     ~stage:Sync_payload file
+                 | None, _ | _, None ->
+                   raise_failure Verify_entry_identity Resource_identity_unavailable));
              try
                (match publication with
                 | Recovery.Replace -> Eio.Path.rename entry target_path
                 | Recovery.Create_exclusive ->
-                  match !staging_directory_file with
-                  | None -> raise_failure stage Resource_identity_unavailable
-                  | Some source_directory ->
-                    publish_exclusive ~sw ~source_directory ~parent
-                      ~leaf:(Capability_leaf.to_string recovery_target.target_leaf))
+                  let source_directory, source_leaf =
+                    match payload with
+                    | File_payload _ ->
+                      (match !staging_directory_file with
+                       | None -> raise_failure stage Resource_identity_unavailable
+                       | Some directory -> directory, capability_staging_payload_leaf)
+                    | Directory_payload _ ->
+                      Eio.Path.open_in ~sw Eio.Path.(parent / "."),
+                      Recovery.stage_name (Recovery.prepared_operation_id obligation)
+                  in
+                  publish_exclusive ~sw ~source_directory ~source_leaf ~parent
+                    ~leaf:(Capability_leaf.to_string recovery_target.target_leaf))
              with
              | Eio.Cancel.Cancelled _ as cancellation ->
                let backtrace = Printexc.get_raw_backtrace () in
@@ -1575,25 +1770,32 @@ let publish_capability_file_with
          published := true;
          target_effect := publication_target_effect publication;
          parent_dirty := true;
-         (match !staging_directory_file with
-          | None ->
-            raise_failure
-              Sync_staging_directory
-              Resource_identity_unavailable
-          | Some directory_file ->
-            sync_open_directory_file
+         (match payload with
+          | Directory_payload _ -> staging_directory_removed := true
+          | File_payload _ -> ());
+         close_open_resource ~before_stage ~stage:Close_payload payload_directory_file;
+         (match payload with
+          | Directory_payload _ -> ()
+          | File_payload _ ->
+            (match !staging_directory_file with
+             | None ->
+               raise_failure
+                 Sync_staging_directory
+                 Resource_identity_unavailable
+             | Some directory_file ->
+               sync_open_directory_file
+                 ~before_stage
+                 ~stage:Sync_staging_directory
+                 directory_file);
+            verify_path_identity
               ~before_stage
-              ~stage:Sync_staging_directory
-              directory_file);
-         verify_path_identity
-           ~before_stage
-           ~stage:Verify_staging_directory_identity
-           ~expected_kind:`Directory
-           path
-           staging_directory_identity;
-         run_stage ~before_stage Remove_staging_directory (fun () ->
-           Eio.Path.rmdir path);
-         staging_directory_removed := true;
+              ~stage:Verify_staging_directory_identity
+              ~expected_kind:`Directory
+              path
+              staging_directory_identity;
+            run_stage ~before_stage Remove_staging_directory (fun () ->
+              Eio.Path.rmdir path);
+            staging_directory_removed := true);
          close_open_resource
            ~before_stage
            ~stage:Close_staging_directory
@@ -1729,14 +1931,14 @@ let publish_capability_file_with
          })
 ;;
 
-let publish_capability_file_through_access
+let publish_capability_payload_through_access
       ~publication
       ~before_stage
       ~before_publish
       ~recovery
       ~parent
       ~target
-      content
+      payload
   =
   let operation = publication_operation publication in
   let callback_result = ref None in
@@ -1744,14 +1946,14 @@ let publish_capability_file_through_access
     match
       Recovery_access.with_store recovery (fun recovery ->
         let result =
-          publish_capability_file_with
+          publish_capability_payload_with
             ~publication
             ~before_stage
             ~before_publish
             ~recovery
             ~parent
             ~target
-            content
+            payload
         in
         callback_result := Some result;
         Eio.Fiber.check ();
@@ -1799,22 +2001,29 @@ let publish_capability_file_through_access
 let replace_capability_file ~recovery ~parent ~target content =
   (* TEL-OK: callback selection is not an action; the write returns typed effect evidence. *)
   let before_stage, before_publish = scoped_replace_dispatch () in
-  publish_capability_file_through_access
+  publish_capability_payload_through_access
     ~publication:Recovery.Replace
     ~before_stage
     ~before_publish
     ~recovery
     ~parent
     ~target
-    content
+    (File_payload content)
 ;;
 
 let create_capability_file_exclusive ~recovery ~parent ~target content =
-  publish_capability_file_through_access
+  publish_capability_payload_through_access
     ~publication:Recovery.Create_exclusive
     ~before_stage:(fun _ -> ())
     ~before_publish:(fun _ -> ())
-    ~recovery ~parent ~target content
+    ~recovery ~parent ~target (File_payload content)
+;;
+
+let create_capability_directory_exclusive ~recovery ~parent ~target payload =
+  publish_capability_payload_through_access
+    ~publication:Recovery.Create_exclusive
+    ~before_stage:no_replace_stage ~before_publish:no_before_publish
+    ~recovery ~parent ~target (Directory_payload payload)
 ;;
 
 let sync_directory_capability_with ~before_stage directory =
@@ -2066,19 +2275,25 @@ module Capability_write_for_testing = struct
         ~target
         content
     =
-    publish_capability_file_through_access
+    publish_capability_payload_through_access
       ~publication:Recovery.Replace
       ~before_stage
       ~before_publish:no_before_publish
       ~recovery
       ~parent
       ~target
-      content
+      (File_payload content)
   ;;
 
   let create_capability_file_exclusive ~before_stage ~recovery ~parent ~target content =
-    publish_capability_file_through_access ~publication:Recovery.Create_exclusive
-      ~before_stage ~before_publish:(fun _ -> ()) ~recovery ~parent ~target content
+    publish_capability_payload_through_access ~publication:Recovery.Create_exclusive
+      ~before_stage ~before_publish:(fun _ -> ()) ~recovery ~parent ~target (File_payload content)
+  ;;
+
+  let create_capability_directory_exclusive ~before_stage ~recovery ~parent ~target payload =
+    publish_capability_payload_through_access ~publication:Recovery.Create_exclusive
+      ~before_stage ~before_publish:no_before_publish ~recovery ~parent ~target
+      (Directory_payload payload)
   ;;
 
   let fixture_identity ~device ~inode =

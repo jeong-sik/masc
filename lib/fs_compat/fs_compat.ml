@@ -386,6 +386,22 @@ type capability_publication_target = Atomic_write.capability_publication_target
 type capability_publication_target_error =
   Atomic_write.capability_publication_target_error
 
+type directory_file = Atomic_write.directory_file =
+  { leaf : string
+  ; content : string
+  ; permissions : int
+  }
+
+type directory_payload = Atomic_write.directory_payload
+
+type directory_payload_error = Atomic_write.directory_payload_error =
+  | Invalid_directory_leaf of string
+  | Duplicate_directory_leaf of string
+  | Invalid_directory_file_permissions of { leaf : string; permissions : int }
+
+let directory_payload = Atomic_write.directory_payload
+let directory_payload_error_to_string = Atomic_write.directory_payload_error_to_string
+
 module Publication_recovery = struct
   include Publication_recovery_access
 
@@ -576,6 +592,10 @@ let replace_capability_file = Atomic_write.replace_capability_file
 
 let create_capability_file_exclusive =
   Atomic_write.create_capability_file_exclusive
+;;
+
+let create_capability_directory_exclusive =
+  Atomic_write.create_capability_directory_exclusive
 ;;
 
 let capability_write_error_to_string = Atomic_write.capability_write_error_to_string

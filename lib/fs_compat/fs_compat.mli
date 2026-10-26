@@ -572,6 +572,26 @@ end
 type capability_publication_target = Atomic_write.capability_publication_target
 type capability_publication_target_error = Atomic_write.capability_publication_target_error
 
+type directory_file = Atomic_write.directory_file =
+  { leaf : string
+  ; content : string
+  ; permissions : int
+  }
+
+type directory_payload = Atomic_write.directory_payload
+
+type directory_payload_error = Atomic_write.directory_payload_error =
+  | Invalid_directory_leaf of string
+  | Duplicate_directory_leaf of string
+  | Invalid_directory_file_permissions of { leaf : string; permissions : int }
+
+(** Pure capture of unique flat file leaves, exact bytes and validated modes.
+    Empty payloads are valid. Traversal, separators and NUL bytes are refused. *)
+val directory_payload
+  : directory_file list -> (directory_payload, directory_payload_error) result
+
+val directory_payload_error_to_string : directory_payload_error -> string
+
 module Publication_recovery : sig
   type registry = Fs_compat_internal.Publication_recovery_access.registry
   type t = Fs_compat_internal.Publication_recovery_access.t
@@ -850,6 +870,25 @@ val create_capability_file_exclusive
   -> parent:Eio.Fs.dir_ty Eio.Path.t
   -> target:capability_publication_target
   -> string
+  -> (unit, capability_write_error) result
+
+(** Durable exclusive directory publication. The canonical journal stage is the
+    directory payload itself; file publication keeps its nested [stage/payload].
+    A sealed directory is renamed within the same parent, preserving its final
+    mode from first public visibility without changing the recovery record
+    format (which identifies the exact stage and target). Every captured file
+    and the payload directory are synced before the descriptor-relative
+    no-replace rename.
+    Cleanup only removes exact owned entries; sealed directory permissions are
+    restored through a held descriptor. Unknown or replaced entries are retained.
+    Published targets are never removed. [Target_created] after an error means
+    rename completed, not that subsequent parent sync and recovery discharge did.
+    Cancellation preserves the existing file-publication evidence contract. *)
+val create_capability_directory_exclusive
+  :  recovery:Publication_recovery.t
+  -> parent:Eio.Fs.dir_ty Eio.Path.t
+  -> target:capability_publication_target
+  -> directory_payload
   -> (unit, capability_write_error) result
 
 val capability_write_error_to_string : capability_write_error -> string

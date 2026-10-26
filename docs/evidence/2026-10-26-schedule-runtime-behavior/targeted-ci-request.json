@@ -1,0 +1,16 @@
+{
+  "workflow": "Test",
+  "run_id": 40322812745,
+  "head": "932d071e624ce26c075f486a4e07b0fd9ac1d4ed",
+  "ref": "audit/scheduled-job-runtime-20261026",
+  "TARGET_SUITES": [
+    "test_schedule_tool_wiring",
+    "test_schedule_store",
+    "test_schedule_runner",
+    "test_schedule_consumer_dispatch",
+    "test_lane_addon_scheduled_act"
+  ],
+  "minimal": true,
+  "initial_state": "queued",
+  "initial_conclusion": null
+}

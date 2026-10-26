@@ -86,11 +86,40 @@ main에서도 동일하다. source-derived 후보였던 F1은 이 입력에 한�
 둘 다 취소 결함의 증거로 세지 않는다. `-3`은 provider 연결 거절로 실패한 턴 뒤의
 pending 잔류를 관측했다. 미시작·paused 변형의 근거는 **`-4`만**이다.
 
+## 재시작·정의 만료·누락 interval의 실제 실행
+
+추가 `restart-expiry-3`은 설치 바이너리 `1ce158d50d3eb48648e6deea7f668172f914fea3`,
+SHA-256 `b6a50b5e88c4730b029af14cd5a6b7a587f69f9535f90c7101caf9711e8c7312`를
+두 번 기동했다. 앞선 bc3038a 실행으로 이월하지 않는다. 임시 workspace에서 기존
+runner 설정을 1초로 정하고 명시적으로 paused인 Keeper 하나로 **23개 상태 check PASS**였다.
+
+- 같은 base에서 재기동한 뒤 세 예약의 instance와 원 accepted source의
+  post/ref/incarnation, 메모가 유지됐다. owner는 끝까지 paused, turns=0이었다.
+- 두 정의의 expiry가 실제 서버 정지와 재기동 사이에 들어감을 시각으로 검증했다.
+  접수되지 않은 단발은 `Expired`, retained wake count=0이었다.
+- 이미 접수된 반복 예약의 정의도 `Expired`가 됐지만 기존 입력은 그대로 pending,
+  기존 dispatch receipt와 retained wake count=1을 보존했다. 이는 현재 계약의
+  **future intake 만료와 accepted work 보존의 구분**이며 만료 결함으로 분류하지 않는다.
+- 다른 interval은 정지 중 적어도 세 due 시점을 놓쳤다. 재기동 후 pending과 retained
+  wake history가 각각 하나였고, 다음 due는 실제 wake 시작 시각 뒤였다.
+  raw dispatch 시각으로 검산해도 가능한 missed 수가 endpoint의 retained-history
+  ceiling 32보다 작아, 잘린 이력을 한 번의 dispatch로 잘못 읽는 경우는 아니다.
+
+**종료는 완전히 정상적이지 않았다.** 첫 process는 SIGTERM 뒤 설치된 10초 graceful
+shutdown guard로 **exit 124**, 둘째는 exit 0이었다. 23은 위 상태 판정 수이고 clean
+shutdown 성공 수가 아니다. 따라서 이 실행은 guard 종료 뒤의 저장 상태 복원을
+보여 주며, Running lease에 write fault를 주입한 F2/F5 복구를 증명하지 않는다.
+[실제 process 시각·exit code·로그·이력](../evidence/2026-10-26-schedule-runtime-behavior/restart-expiry-3/processes.json)을 보존했다.
+
+초기 `restart-expiry-1`의 17개 검사는 두 process exit 0으로 끝났으나 history count는
+검사하지 않았다. `-2`는 종료가 due보다 늦어 fixture 전제가 실패했다. 준비 시간대를
+늘리고 명시적인 시간·이력 검사를 더한 **`-3`만 이번 추가 보존 bundle의 근거**다.
+
 ## 남은 전체 범위
 
 | 범위 | 현재 증거와 다음 확인 |
 |---|---|
-| recurrence·timezone·cron·윤일 | 기존 domain 28개 실행; 현재 runner/consumer 전체 실행으로 이월하지 않음 |
+| recurrence·timezone·cron·윤일 | domain 28개와 위 짧은 interval downtime 실행; 장기 downtime·daily/cron 통합 실행은 미검증 |
 | continuous busy 중 예약 진입 | #46133–#46135 소스 승인·병합 확인. 이번 바이너리는 그 전 커밋이므로 실제 설치·tool-boundary 양보·소비 완료 미검증 |
 | paused/offline → Resume/Boot | paused 보존은 이번에 실행. 재개 후 정확한 발생의 처리·ACK·결과 전달은 미검증 |
 | F2 startup recovery 최초 실패 | 현 소스 후보 유지. 같은 process에서 저장소 회복 후 수렴하는지 주입 실행 필요 |
@@ -114,3 +143,14 @@ pending 잔류를 관측했다. 미시작·paused 변형의 근거는 **`-4`만*
 `test_schedule_consumer_dispatch`, `test_lane_addon_scheduled_act`다.
 이 접수는 완료된 suite 결과가 아니다. 로컬 Dune/full build·CI watch는 외부 coding
 session에서 실행하지 않았다. 실제 결과가 오면 head·명령·실행/skip/실패를 별도로 대조한다.
+
+후속 조회에서 복구 operation도 **Failed / Interrupted_by_restart**로 끝났다. 같은 검사를
+다시 Keeper에 제출하지 않고, `Test` workflow의 `minimal=true`와 위 다섯 `TARGET_SUITES`만
+명시해 실행했다. [run 40322812745](https://github.com/jeong-sik/masc/actions/runs/40322812745)는
+head `932d071e624ce26c075f486a4e07b0fd9ac1d4ed`, ref `audit/scheduled-job-runtime-20261026`,
+**conclusion=failure**다. 테스트 시작 전 `keeper_unified_turn.ml`의 unused
+`autonomous_yield_request_for_wake` warning 32에서 컴파일이 멈춰 **다섯 suite 모두 미실행**이다.
+이는 일반 API 33 PASS나 추가 상태 23 PASS를 무효화하지 않지만 backend suite 성공
+증거도 아니다. 해당 helper는 main `1ce158d50d3eb48648e6deea7f668172f914fea3`의
+기존 [#46151](https://github.com/jeong-sik/masc/pull/46151)에서 이미 제거됐다.
+감사 PR은 그 수정 위로 restack했으며 별도 중복 수리는 만들지 않았다.

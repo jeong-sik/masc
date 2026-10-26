@@ -17,6 +17,18 @@
       "failed": 1,
       "script": "probe_retarget_cancel.py",
       "server_exit_code": 0
+    },
+    "restart-expiry-3": {
+      "checks": 23,
+      "passed": 23,
+      "failed": 0,
+      "probe_exit_code_observed": 0,
+      "script": "probe_restart_expiry.py",
+      "server_exit_codes": [
+        124,
+        0
+      ],
+      "shutdown_limit": "first process exited via installed graceful-shutdown hard-exit guard (124); second process exited 0"
     }
   },
   "files": {
@@ -39,7 +51,18 @@
     "retarget-cancel-4/schedule-before.json": "ba3558dd7969e9e6d7cb045a2d688911c57d4cd2cdd2434dd511e55e750aa6fe",
     "backend-operation-terminal.json": "6b8a4a7d2208ce5e1e453dc7e825e7b24138232c327b595d644fd2d36e67da03",
     "backend-recovery-admission.json": "ed0686ec3a2cd1a2845988fe28ae89182d082dfd96131921e5487cd23d7bb3d0",
-    "backend-recovery-observed.json": "e4000477705716001e220ae91dc5f7869ecd32a150883726c2b66840da12e81f"
+    "backend-recovery-observed.json": "e4000477705716001e220ae91dc5f7869ecd32a150883726c2b66840da12e81f",
+    "restart-expiry-3/before.json": "4b311407b6cf6707a0909316eb6f5793db20ac1de9bb63a0ac976af68fa1355f",
+    "restart-expiry-3/api-records.json": "6fe4753b922b960a3ac862bbb638bd6d90bb81e4bc0ffbe73edb7ea24ea994d8",
+    "restart-expiry-3/provenance.json": "38faaea4bb7aa2f281add1286d98b8bb6abe5cebd6a93b480a5359ee5085a046",
+    "restart-expiry-3/after.json": "5cc3b917431617a9027665415ee8e3bea2b3eab1003f8d9f20f7138fc21bd436",
+    "restart-expiry-3/checks.json": "3cb83dab85483538e9633cfb1f6860ccd7742516ebe95ee54ba6127374e1d07a",
+    "restart-expiry-3/processes.json": "da3dabca8cd47c54156622c6f2e79c04e1549fa773b45d661e818f9352fcedf7",
+    "restart-expiry-3/server.log": "5c01fac906598d7e5594d71466948ce60655578bc05eb00c20b6d2f14c449c44",
+    "probe_restart_expiry.py": "b373bda4ab8da07463561d868171a2ba417eef50646dc6489db1bca0b0d6a2c1",
+    "targeted-ci-request.json": "70a1b14b33694d0d23d5e7f1f153fc774ebfa73dbbd4dc87aff4b5f6a11d823f",
+    "targeted-ci-result.json": "9bfcf5b13a3b1e1bdb86d3f32aed6aba6a6d3186e7edb58c2df012e7b1fabae4",
+    "targeted-ci-failure-excerpt.txt": "42dfb4bbcfbea34fdb6e1d19d2c616b74c61c945e0bb1daaea1c881cec35bdb5"
   },
   "source_comparison": {
     "installed_commit": "bc3038a22374705db648bebd7f556223b3e84727",
@@ -84,5 +107,11 @@
   },
   "fixture_sha256": {
     "scripts/fixtures/release-evidence/runtime.toml": "ccbe65e399f47a3abddbf4299e15dd0fd55001dd785b2e0d75948ad86acf7cfd"
+  },
+  "source_log_digests": {
+    "targeted-test-failure.log": "2a63e5a2000c50f6ccb7d29a4f72842bf043766f0f84970825af3c9753aab175"
+  },
+  "derivations": {
+    "targeted-ci-failure-excerpt.txt": "Selected diagnostic lines from the full failed-step log, with trailing line whitespace trimmed. Original full-log digest remains separate."
   }
 }

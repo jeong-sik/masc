@@ -8,6 +8,7 @@ it does not overwrite the earlier component evidence.
 |---|---|---|
 | `api-extended-1` | 33 checks pass, exit 0 | Actual MCP calls to all seven schedule tools; two named identities, one parallel note submission, recipient authorization, replacement/cancel note retention, pagination and typed errors |
 | `retarget-cancel-4` | 17 pass / 1 fail, exit 1 | Explicitly paused, zero-turn A retains the exact occurrence after retarget to B and successful cancel |
+| `restart-expiry-3` | 23 state checks pass, probe exit 0; server exits 124 then 0 | Stored instances, accepted source and notes survive expiry/restart; unaccepted expiry emits no wake; missed interval has one retained wake and a later next due |
 
 Both used installed commit `bc3038a22374705db648bebd7f556223b3e84727`,
 executable SHA-256 `833298c99525205f929bab74ee6d45a53601c340bd1b084a2473e183c7663a57`.
@@ -55,3 +56,21 @@ actual `Failed / Turn_cancelled` state after a shared server restart.
 recovery request admitted and subsequently read back as `Queued`. These are
 selected actual API fields, not suite pass receipts. No completed backend suite
 result is included here.
+
+The later `restart-expiry-3` used installed commit
+`1ce158d50d3eb48648e6deea7f668172f914fea3`, executable SHA-256
+`b6a50b5e88c4730b029af14cd5a6b7a587f69f9535f90c7101caf9711e8c7312`.
+It is a distinct execution. The first server reached its installed graceful
+shutdown hard-exit guard (124); the second exited 0. State-check success does
+not certify clean shutdown or Running-lease fault recovery. Its exact-lookup
+responses include wake counts and the retention ceiling, not only queue counts.
+The ceiling oracle uses process start; separate raw dispatch-time inspection
+also confirmed the possible missed count remains below the ceiling in this run.
+Run `probe_restart_expiry.py` with the same explicit binary/image/output arguments
+as the F1 helper, using a new artifacts directory. No real provider is contacted.
+
+`targeted-ci-result.json` records Test run 40322812745, exact head/ref and
+conclusion=failure; the named five suites did not execute because compilation
+failed first. `targeted-ci-failure-excerpt.txt` selects the input list and actual
+compiler diagnostic, with trailing line whitespace trimmed. The full failed-step log's original digest is recorded
+separately in the manifest; the excerpt does not claim to have that digest.

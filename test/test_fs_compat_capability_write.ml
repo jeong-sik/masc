@@ -141,6 +141,30 @@ let create_capability_file_for_testing ~before_stage ~recovery ~allowed_root_pat
   Capability_write_test.create_capability_file_exclusive ~before_stage ~recovery ~parent ~target content
 ;;
 
+let test_standalone_exclusive_publication ~fs () =
+  with_tmp_dir @@ fun directory ->
+  let create leaf content =
+    Fs_compat.create_file_exclusive ~fs ~owner:"standalone-export-test"
+      ~path:(Filename.concat directory leaf) ~permissions:0o600 content
+  in
+  let require_created = function Ok () -> () | Error detail -> fail detail in
+  require_created (create "original" "exact bytes\000\r\n");
+  check string "standalone exact payload" "exact bytes\000\r\n"
+    (read_file (Filename.concat directory "original"));
+  check int "standalone private mode" 0o600
+    ((Unix.stat (Filename.concat directory "original")).Unix.st_perm land 0o777);
+  (match create "original" "overwrite" with
+   | Error _ -> () | Ok () -> fail "standalone export overwrote existing file");
+  Unix.symlink "original" (Filename.concat directory "alias");
+  (match create "alias" "overwrite" with
+   | Error _ -> () | Ok () -> fail "standalone export overwrote a symlink");
+  check string "standalone original survives" "exact bytes\000\r\n"
+    (read_file (Filename.concat directory "original"));
+  require_created (create "next" "same stable lane after reopen");
+  check string "standalone restart uses original owner" "same stable lane after reopen"
+    (read_file (Filename.concat directory "next"))
+;;
+
 let require_write_primary_failure (error : Fs_compat.capability_write_error) =
   match error.primary_failure with
   | Fs_compat.Write_primary_failure failure -> failure
@@ -2455,7 +2479,9 @@ let () =
   run
     "fs_compat capability write"
     [ ( "publication"
-      , [ test_case "atomic replace mode" `Quick
+      , [ test_case "standalone exclusive publication reopens its owner" `Quick
+            (test_standalone_exclusive_publication ~fs)
+        ; test_case "atomic replace mode" `Quick
             (test_atomic_replace_preserves_requested_mode ~fs)
         ; test_case "symlink lexical replace" `Quick
             (test_atomic_replace_replaces_symlink_not_referent ~fs)

@@ -32,10 +32,8 @@ let save ~fs ~path t =
   if String.equal path "" then Error "Enter a destination file path"
   else
     try
-      Eio.Path.with_open_dir Eio.Path.(fs / Filename.dirname path) (fun parent ->
-        Fs_compat.create_capability_file_exclusive ~parent ~leaf:(Filename.basename path)
-          ~permissions:0o600 t.source)
-      |> Result.map_error Fs_compat.capability_write_error_to_string
+      Fs_compat.create_file_exclusive ~fs ~owner:"tui-report-export"
+        ~path ~permissions:0o600 t.source
       |> Result.map (fun () -> Printf.sprintf "Saved %s · %d bytes · sha256 %s · %s"
         (label t) (String.length t.source) t.report.revision.body.sha256 path)
     with

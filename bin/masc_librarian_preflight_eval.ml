@@ -153,10 +153,8 @@ let run () =
     Eio_context.set_mono_clock env#mono_clock; Fs_compat.set_fs env#fs;
     Masc_http_client.with_scoped_pool ~sw ~env (fun () ->
       let encode () = Yojson.Safe.pretty_to_string (report ()) ^ "\n" in
-      let* () = Eio.Path.with_open_dir Eio.Path.(env#fs / Filename.dirname output_path) (fun parent ->
-        Fs_compat.create_capability_file_exclusive ~parent ~leaf:(Filename.basename output_path)
-          ~permissions:0o600 (encode ()))
-        |> Result.map_error Fs_compat.capability_write_error_to_string in
+      let* () = Fs_compat.create_file_exclusive ~fs:env#fs
+        ~owner:"librarian-preflight" ~path:output_path ~permissions:0o600 (encode ()) in
       let save id observation =
         observations := (id, observation) :: List.remove_assoc id !observations;
         Keeper_fs.save_bytes_durable_atomic output_path (encode ())

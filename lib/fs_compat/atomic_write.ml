@@ -907,8 +907,10 @@ let capability_write_cancellation_context = function
   | reason -> reason, None, []
 ;;
 
+type cancellation_cleanup_completion = Cleanup_completed | Cleanup_interrupted
+
 let cleanup_cancelled_write ~interrupted_recovery ~additional cleanup =
-  try interrupted_recovery, additional @ cleanup () with
+  try interrupted_recovery, additional @ cleanup (), Cleanup_completed with
   | Eio.Cancel.Cancelled cleanup_reason ->
     (* The caller re-raises its original cancellation and backtrace. A second
        cancellation must retain cleanup facts without replacing that authority. *)
@@ -922,7 +924,7 @@ let cleanup_cancelled_write ~interrupted_recovery ~additional cleanup =
       | Some original, Some interruption ->
         Some original, additional @ [ Recovery_cleanup_failure interruption ]
     in
-    interrupted_recovery, additional @ carried_failures
+    interrupted_recovery, additional @ carried_failures, Cleanup_interrupted
 ;;
 
 let reraise_capability_write_cancellation
@@ -1536,7 +1538,8 @@ let publish_capability_file_with
                   | Recovery.Replace -> Target_state_unknown
                   | Recovery.Create_exclusive ->
                     (match exception_ with
-                     | Unix.Unix_error (Unix.EEXIST, _, _) -> Target_unchanged
+                     | Unix.Unix_error (code, _, _) when code = Unix.EEXIST ->
+                       Target_unchanged
                      | _ -> Target_state_unknown));
                reraise_fatal_or_cancelled exception_ backtrace;
                raise
@@ -1615,13 +1618,16 @@ let publish_capability_file_with
        let reason, interrupted_recovery, additional =
          capability_write_cancellation_context reason
        in
-       let interrupted_recovery, cleanup_failures =
+       let interrupted_recovery, cleanup_failures, cleanup_completion =
          cleanup_cancelled_write ~interrupted_recovery ~additional cleanup
        in
        if
          !target_effect = Target_unchanged
          && Option.is_none interrupted_recovery
          && cleanup_failures = []
+         && (match cleanup_completion with
+             | Cleanup_completed -> true
+             | Cleanup_interrupted -> false)
        then Printexc.raise_with_backtrace cancellation backtrace
        else
          Printexc.raise_with_backtrace

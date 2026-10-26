@@ -223,10 +223,8 @@ let create_report_bytes ~fs ~output_path bytes =
   try
     let directory = Filename.dirname output_path in
     let (_ : string) = Masc.Keeper_fs.ensure_dir directory in
-    Eio.Path.with_open_dir Eio.Path.(fs / directory) (fun parent ->
-      Fs_compat.create_capability_file_exclusive ~parent
-        ~leaf:(Filename.basename output_path) ~permissions:0o600 bytes)
-    |> Result.map_error Fs_compat.capability_write_error_to_string
+    Fs_compat.create_file_exclusive ~fs ~owner:"librarian-continuity"
+      ~path:output_path ~permissions:0o600 bytes
   with
   | Sys_error detail -> Error detail
   | Eio.Io _ as error -> Error (Printexc.to_string error)

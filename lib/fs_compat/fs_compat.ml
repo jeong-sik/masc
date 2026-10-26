@@ -580,6 +580,37 @@ let create_capability_file_exclusive =
 
 let capability_write_error_to_string = Atomic_write.capability_write_error_to_string
 
+let create_file_exclusive ~fs ~owner ~path ~permissions content =
+  let ( let* ) = Result.bind in
+  let path =
+    if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path
+    else path
+  in
+  Eio.Path.with_open_dir Eio.Path.(fs / Filename.dirname path) (fun parent ->
+    let root = Eio.Path.stat ~follow:true parent in
+    let* target =
+      capability_publication_target
+        ~allowed_root_path:(Filename.dirname path)
+        ~allowed_root_device:root.dev ~allowed_root_inode:root.ino
+        ~parent_components:[] ~target_leaf:(Filename.basename path) ~permissions
+      |> Result.map_error capability_publication_target_error_to_string
+    in
+    Eio.Switch.run @@ fun sw ->
+    let* registry =
+      Publication_recovery.open_registry ~sw ~fs ~registry_root:parent
+      |> Result.map_error Publication_recovery.registry_error_to_string
+    in
+    match Publication_recovery.with_lane ~registry ~owner (fun recovery ->
+      create_capability_file_exclusive ~recovery ~parent ~target content
+      |> Result.map_error capability_write_error_to_string)
+    with
+    | Error error -> Error (Publication_recovery.lane_open_error_to_string error)
+    | Ok (Publication_recovery.Lane_released result) -> result
+    | Ok (Publication_recovery.Lane_release_failed { value; release_failure }) ->
+      let detail = Publication_recovery.lane_release_failure_to_string release_failure in
+      Error (match value with Ok () -> detail | Error primary -> primary ^ "; " ^ detail))
+;;
+
 let capability_write_operation_to_string =
   Atomic_write.capability_write_operation_to_string
 ;;

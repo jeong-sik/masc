@@ -853,6 +853,21 @@ val create_capability_file_exclusive
   -> (unit, capability_write_error) result
 
 val capability_write_error_to_string : capability_write_error -> string
+
+(** Path boundary for standalone file exports. The existing destination parent
+    owns the durable [fs-publication-recovery] registry. [owner] is a stable
+    caller identity reused on restart; recovery precedes publication. This uses
+    the same mandatory recovery access and staged exclusive writer as capability
+    callers. Recovery records are retained on uncertain outcomes, and cancellation
+    propagates. The destination parent is not created by this function. *)
+val create_file_exclusive
+  : fs:Eio.Fs.dir_ty Eio.Path.t
+  -> owner:string
+  -> path:string
+  -> permissions:int
+  -> string
+  -> (unit, string) result
+
 val capability_write_operation_to_string : capability_write_operation -> string
 val capability_write_stage_to_string : capability_write_stage -> string
 

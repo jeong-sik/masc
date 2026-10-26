@@ -12,5 +12,6 @@ val path_input : string -> (string, string) result
     instead of silently changing the destination. Empty text is valid editing. *)
 val save : fs:Eio.Fs.dir_ty Eio.Path.t -> path:string -> t -> (string, string) result
 (** Exclusive creation in an existing directory, mode 0600. Existing files are
-    never replaced. The shared capability writer preserves incomplete effects
-    and reports failures; callers must not automatically retry an uncertain save. *)
+    never replaced. The destination parent retains the shared publication recovery
+    registry under the stable export owner. The shared writer preserves uncertain
+    effects and reports failures; callers must not automatically retry a save. *)

@@ -22,8 +22,9 @@ let error_to_string = function
   | Recovery_failed detail -> "output publication recovery: " ^ detail
 type seal = { byte_length : int64; sha256 : P.Sha256.t }
 type state = Growing of int64 | Sealed of seal | Unavailable of error
+type reader = Captured of Eio.File.ro_ty Eio.Resource.t | Reopened of Fs_compat.owned_reader
 type t = {
-  file : Eio.File.ro_ty Eio.Resource.t;
+  file : reader;
   state : state Atomic.t;
   done_ : (seal,error) result Eio.Promise.t;
   validate_read : (unit -> (unit,error) result) option;
@@ -36,6 +37,23 @@ let buffer_bytes = 65536
 let cpu f = Domain_pool_ref.submit_cpu_or_inline f
 let io f = try Ok (f ()) with
   | Eio.Io _ | Unix.Unix_error _ | Sys_error _ | Invalid_argument _ | End_of_file -> Error Storage_unavailable
+let reader_stat = function
+  | Captured file -> Eio.File.stat file
+  | Reopened file -> Fs_compat.owned_reader_stat file
+let reader_pread_exact reader ~file_offset buffers = match reader with
+  | Captured file -> Eio.File.pread_exact file ~file_offset buffers
+  | Reopened file ->
+    let position=ref (Optint.Int63.to_int64 file_offset) in
+    List.iter (fun buffer ->
+      let rec fill consumed =
+        if consumed<Cstruct.length buffer then (
+          let data=Fs_compat.owned_reader_pread file ~offset:!position ~length:(Cstruct.length buffer-consumed) in
+          let n=String.length data in
+          if n=0 then raise End_of_file;
+          Cstruct.blit_from_string data 0 buffer consumed n;
+          position:=Int64.add !position (Int64.of_int n);
+          fill (consumed+n)) in
+      fill 0) buffers
 let offset value =
   if value<0L || value>Optint.Int63.to_int64 Optint.Int63.max_int then Error Offset_unavailable
   else Ok (Optint.Int63.of_int64 value)
@@ -97,7 +115,7 @@ let start_with_hook ~after_chunk ~on_metadata ~sw ~fs ~owner ~stream ~source =
   let* ()=if valid_file 0L expected && valid_file 0L actual
     then validate_attachment 0L else Error Invalid_storage in
   let done_,resolve=Eio.Promise.create () in
-  let t={file=(file :> Eio.File.ro_ty Eio.Resource.t);state=Atomic.make (Growing 0L);done_;validate_read=None} in
+  let t={file=Captured (file :> Eio.File.ro_ty Eio.Resource.t);state=Atomic.make (Growing 0L);done_;validate_read=None} in
   let finish value =
     Atomic.set t.state (match value with Ok seal -> Sealed seal | Error e -> Unavailable e);
     Eio.Promise.resolve resolve value in
@@ -157,7 +175,7 @@ let read t ~offset:requested ~max_bytes =
   let count=Int64.min (Int64.sub length requested) (Int64.of_int (min buffer_bytes max_bytes)) |> Int64.to_int in
   let* position=offset requested in
   let buffer=Cstruct.create count in
-  let* ()=if count=0 then Ok () else io (fun () -> Eio.File.pread_exact t.file ~file_offset:position [buffer]) in
+  let* ()=if count=0 then Ok () else io (fun () -> reader_pread_exact t.file ~file_offset:position [buffer]) in
   let* _=extent t in
   let* ()=validate () in
   Ok {data=Cstruct.to_string buffer;extent=observed}
@@ -201,7 +219,7 @@ let stable_stat (before : Eio.File.Stat.t) (after : Eio.File.Stat.t) =
   (* Reads may advance atime; every other observed property must remain fixed. *)
   {before with atime=after.atime}=after
 
-let reopen_with_hook ~after_chunk ~sw ~storage ~stream =
+let reopen_with_hook ~after_chunk ~after_stat ~sw ~storage ~stream =
   Eio.Switch.check sw;
   let* known=R.refresh (R.storage_record storage) |> Result.map_error (fun e -> Registry_error e) in
   let* ()=match R.launch_state known with
@@ -219,8 +237,11 @@ let reopen_with_hook ~after_chunk ~sw ~storage ~stream =
     let path=Eio.Path.(directory / leaf) in
     let* before=io (fun () -> Eio.Path.stat ~follow:false path) in
     let* ()=if private_file permission before then Ok () else Error Invalid_storage in
-    let* file=io (fun () -> (Eio.Path.open_in ~sw path :> Eio.File.ro_ty Eio.Resource.t)) in
-    let* held=io (fun () -> Eio.File.stat file) in
+    after_stat ~leaf;
+    let* opened=io (fun () -> Fs_compat.open_owned_reader ~sw ~parent:directory ~leaf) in
+    let* opened=opened |> Result.map_error (fun _ -> Invalid_storage) in
+    let file=Reopened opened in
+    let* held=io (fun () -> reader_stat file) in
     let* canonical=io (fun () -> Eio.Path.stat ~follow:false path) in
     if stable_stat before held && stable_stat before canonical then Ok (file,before)
     else Error Invalid_storage in
@@ -229,7 +250,7 @@ let reopen_with_hook ~after_chunk ~sw ~storage ~stream =
   let* ()=if metadata_length>=0L && metadata_length<=Int64.of_int Sys.max_string_length
     then Ok () else Error Invalid_storage in
   let content=Cstruct.create (Int64.to_int metadata_length) in
-  let* ()=io (fun () -> Eio.File.pread_exact metadata ~file_offset:Optint.Int63.zero [content]) in
+  let* ()=io (fun () -> reader_pread_exact metadata ~file_offset:Optint.Int63.zero [content]) in
   let original=P.original ~binding:(R.binding known) ~admission_id:(R.admission_id known) in
   let* seal,device,inode=cpu (fun () -> decode_seal ~original ~stream (Cstruct.to_string content)) in
   let* file,file_stat=open_private (tag stream ^ ".bin") 0o600 in
@@ -238,9 +259,9 @@ let reopen_with_hook ~after_chunk ~sw ~storage ~stream =
     then Ok () else Error Invalid_storage in
   let validate () =
     let* current_root=io (fun () -> Eio.Path.stat ~follow:false directory) in
-    let* held=io (fun () -> Eio.File.stat file) in
+    let* held=io (fun () -> reader_stat file) in
     let* canonical=io (fun () -> Eio.Path.stat ~follow:false Eio.Path.(directory / (tag stream ^ ".bin"))) in
-    let* held_metadata=io (fun () -> Eio.File.stat metadata) in
+    let* held_metadata=io (fun () -> reader_stat metadata) in
     let* canonical_metadata=io (fun () -> Eio.Path.stat ~follow:false Eio.Path.(directory / (tag stream ^ ".seal.json"))) in
     let* ()=if valid_root current_root && stable_stat file_stat held && stable_stat file_stat canonical
         && stable_stat metadata_stat held_metadata && stable_stat metadata_stat canonical_metadata
@@ -252,7 +273,7 @@ let reopen_with_hook ~after_chunk ~sw ~storage ~stream =
     let count=Int64.min (Int64.of_int buffer_bytes) (Int64.sub seal.byte_length position) |> Int64.to_int in
     let part=Cstruct.sub buffer 0 count in
     let* file_offset=offset position in
-    let* ()=io (fun () -> Eio.File.pread_exact file ~file_offset [part]) in
+    let* ()=io (fun () -> reader_pread_exact file ~file_offset [part]) in
     let bytes=Cstruct.to_string part in
     let context=cpu (fun () -> Digestif.SHA256.feed_string context bytes) in
     after_chunk ();
@@ -266,7 +287,8 @@ let reopen_with_hook ~after_chunk ~sw ~storage ~stream =
   let done_,resolve=Eio.Promise.create () in Eio.Promise.resolve resolve (Ok seal);
   Ok {file;state=Atomic.make (Sealed seal);done_;validate_read=Some validate}
 
-let reopen ~sw ~storage ~stream = reopen_with_hook ~after_chunk:(fun () -> ()) ~sw ~storage ~stream
+let reopen ~sw ~storage ~stream =
+  reopen_with_hook ~after_chunk:(fun () -> ()) ~after_stat:(fun ~leaf:_ -> ()) ~sw ~storage ~stream
 
 module For_testing = struct
   type nonrec metadata_operation = metadata_operation = Open_recovery | Publish of string

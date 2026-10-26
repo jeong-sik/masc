@@ -590,6 +590,7 @@ let sealed_output_hash_observer_cancellation_preserves_original = fixture (fun ~
     (fun () -> try Eio.Switch.run (fun read_sw ->
       let storage=original_storage ~sw:read_sw store binding in
       ignore (O.For_testing.reopen ~sw:read_sw ~storage ~stream:P.Stdout
+        ~after_stat:(fun ~leaf:_ -> ())
         ~after_chunk:(fun () -> Eio.Promise.resolve signal ();Eio.Promise.await blocked) |> output);
       Alcotest.fail "cancelled hash exposed an unchecked sealed reader")
       with Eio.Cancel.Cancelled _ as ex -> cancelled:=true;raise ex)
@@ -611,7 +612,7 @@ let sealed_output_hash_releases_lock_and_preserves_cancel_progress = fixture (fu
   let unblock ()=if Eio.Promise.peek resume=None then Eio.Promise.resolve release () in
   Fun.protect ~finally:unblock (fun () ->
     Eio.Fiber.fork ~sw (fun () ->
-      let result=O.For_testing.reopen ~sw ~storage ~stream:P.Stdout ~after_chunk:(fun () ->
+      let result=O.For_testing.reopen ~sw ~storage ~stream:P.Stdout ~after_stat:(fun ~leaf:_ -> ()) ~after_chunk:(fun () ->
         if !first then (first:=false;Eio.Promise.resolve signal ();Eio.Promise.await resume)) in
       Eio.Promise.resolve finish result);
     Eio.Promise.await entered;
@@ -637,6 +638,28 @@ let sealed_output_range_read_rejects_later_replacement = fixture (fun ~env ~sw ~
   check "range reads refuse a later canonical replacement rather than adopting or silently reading detached evidence"
     (O.read reopened ~offset:0L ~max_bytes:8=Error O.Invalid_storage);
   Alcotest.(check string) "refused read preserves the detached original bytes" "original" (read (spool ^ ".evidence")))
+
+let sealed_output_atomic_open_rejects_raced_special_leaf target change = fixture (fun ~env ~sw ~store fixture ->
+  let binding,_=completed_output ~env ~store fixture "printf original" in
+  let name=match target with `Seal -> "stdout.seal.json" | `Spool -> "stdout.bin" in
+  let path=leaf fixture binding name in
+  let evidence=path ^ ".evidence" and before=read path in
+  let changed=ref false in
+  let storage=original_storage ~sw store binding in
+  let result=O.For_testing.reopen ~sw ~storage ~stream:P.Stdout ~after_chunk:(fun () -> ())
+    ~after_stat:(fun ~leaf -> if leaf=name then (
+      changed:=true;
+      Unix.rename path evidence;
+      match change with `Fifo -> Unix.mkfifo path 0o600 | `Symlink -> Unix.symlink evidence path)) in
+  check "actual regular-file prestat preceded the special-leaf swap" !changed;
+  (match result with Error O.Invalid_storage -> ()
+   | Error _ | Ok _ -> Alcotest.fail "raced special leaf did not produce a typed original-storage refusal");
+  check "refusal preserves the FIFO without any writer or the original symlink"
+    ((Unix.lstat path).st_kind=(match change with `Fifo -> Unix.S_FIFO | `Symlink -> Unix.S_LNK));
+  Alcotest.(check string) "failed atomic open preserves every original evidence byte" before (read evidence);
+  let _,next=prepare store fixture "07" "printf independent; exit 8" in
+  let finished=Eio.Switch.run (fun next_sw -> supervised ~sw:next_sw ~env fixture next |> S.await_settled |> supervise) in
+  exit 8 finished.physical_exit)
 
 let refusal = fixture (fun ~env ~sw ~store fixture ->
   let _,permit=prepare store fixture "05" ": > activated" in
@@ -685,6 +708,10 @@ let () =
       "sealed output recovery rejects changed original evidence",sealed_output_reopen_rejects_changed_evidence;
       "hash observer cancellation preserves the complete original",sealed_output_hash_observer_cancellation_preserves_original;
       "hashing releases original lock and preserves cancel progress",sealed_output_hash_releases_lock_and_preserves_cancel_progress;
-      "reopened range reads reject later canonical replacement",sealed_output_range_read_rejects_later_replacement] in
+      "reopened range reads reject later canonical replacement",sealed_output_range_read_rejects_later_replacement;
+      "seal atomic open rejects post-stat FIFO without a writer",sealed_output_atomic_open_rejects_raced_special_leaf `Seal `Fifo;
+      "seal atomic open rejects post-stat symlink",sealed_output_atomic_open_rejects_raced_special_leaf `Seal `Symlink;
+      "spool atomic open rejects post-stat FIFO without a writer",sealed_output_atomic_open_rejects_raced_special_leaf `Spool `Fifo;
+      "spool atomic open rejects post-stat symlink",sealed_output_atomic_open_rejects_raced_special_leaf `Spool `Symlink] in
   Alcotest.run "Endpoint job launch" ["original supervisor",List.map
     (fun (name,test) -> Alcotest.test_case name `Quick test) cases]

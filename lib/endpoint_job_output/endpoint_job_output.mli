@@ -37,7 +37,8 @@ val reopen :
   sw:Eio.Switch.t -> storage:R.storage -> stream:P.stream -> (t, error) result
 (** Reopen only an already sealed original stream through its verified original
     storage. Strictly validate its private seal, original admission and stream,
-    open the same single-link spool inode, and hash every byte before exposing
+    atomically open no-follow, nonblocking regular seal/spool descriptors,
+    verify the same single-link spool inode, and hash every byte before exposing
     Sealed. Missing/corrupt data never becomes an empty or growing result.
     Reads/hash run outside the registry lock; original authority and canonical
     attachments are revalidated afterward and around subsequent range reads.
@@ -61,8 +62,10 @@ module For_testing : sig
       or EOF sealing. [on_metadata] observes an actual owner-lock acquisition;
       [Acquired] runs inside that lock before the specified Fs operation. *)
   val reopen :
-    after_chunk:(unit -> unit) -> sw:Eio.Switch.t -> storage:R.storage ->
+    after_chunk:(unit -> unit) -> after_stat:(leaf:string -> unit) ->
+    sw:Eio.Switch.t -> storage:R.storage ->
     stream:P.stream -> (t, error) result
   (** Interleave after hashing an actual original spool chunk, outside any
-      registry lock. No injected seal, bytes or original authority. *)
+      registry lock. [after_stat] runs after the actual initial private leaf
+      stat and before atomic opening. No injected seal, bytes or authority. *)
 end

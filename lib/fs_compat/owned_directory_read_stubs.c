@@ -7,11 +7,13 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <caml/alloc.h>
+#include <caml/fail.h>
 #include <caml/memory.h>
 #include <caml/mlvalues.h>
 #include <caml/signals.h>
@@ -91,6 +93,31 @@ CAMLprim value caml_masc_owned_inventory_unlink_checked(value v_parent, value v_
 }
 
 struct inventory_name { char *name; struct inventory_name *next; };
+
+/* Regular descriptors only; the open boundary rejects other kinds. Copy into
+   stable native storage while the runtime lock is released. Never seek the
+   shared descriptor cursor, including for concurrent range readers. */
+CAMLprim value caml_masc_owned_reader_pread(value v_fd, value v_offset, value v_length)
+{
+  CAMLparam3(v_fd, v_offset, v_length);
+  CAMLlocal1(result);
+  int fd = Int_val(v_fd);
+  intnat length = Long_val(v_length);
+  int64_t offset = Int64_val(v_offset);
+  if (length < 0 || offset < 0 || (int64_t)(off_t)offset != offset)
+    caml_invalid_argument("owned reader range");
+  char *buffer = caml_stat_alloc(length > 0 ? (asize_t)length : 1);
+  ssize_t n;
+  int saved_errno;
+  caml_enter_blocking_section();
+  do { n = pread(fd, buffer, (size_t)length, (off_t)offset); } while (n < 0 && errno == EINTR);
+  saved_errno = errno;
+  caml_leave_blocking_section();
+  if (n < 0) { caml_stat_free(buffer); errno = saved_errno; uerror("pread", Nothing); }
+  result = caml_alloc_initialized_string((mlsize_t)n, buffer);
+  caml_stat_free(buffer);
+  CAMLreturn(result);
+}
 
 /* A duplicated descriptor owns the DIR stream, so closedir cannot close the
    caller's descriptor used for fstat and chain validation. */

@@ -11,6 +11,7 @@ import { ArtifactComposer, type ArtifactPublicationOutcome, type ArtifactDraftRe
 import { ArtifactAppView } from './artifact-app-view'
 import { ArtifactWordExport } from './artifact-word-export'
 import { ArtifactPptxExport } from './artifact-pptx-export'
+import { ArtifactPdfExport } from './artifact-pdf-export'
 
 function downloadSource(doc: ArtifactDocument): void {
   const { artifact, content } = doc
@@ -118,6 +119,8 @@ export function ArtifactReader({ doc, fixedRevision, readError, workspaceRoot, d
         <${ArtifactWordExport} key=${JSON.stringify([authRevision,workspaceRoot,artifact.id,artifact.revision,artifact.body._blob.sha256])}
           doc=${doc} authRevision=${authRevision} isCurrent=${isCurrent} disabled=${editing!==null||sharing!==null} />
         <${ArtifactPptxExport} key=${JSON.stringify(['pptx',authRevision,workspaceRoot,artifact.id,artifact.revision,artifact.body._blob.sha256])}
+          doc=${doc} authRevision=${authRevision} isCurrent=${isCurrent} disabled=${editing!==null||sharing!==null} />
+        <${ArtifactPdfExport} key=${JSON.stringify(['pdf',authRevision,workspaceRoot,artifact.id,artifact.revision,artifact.body._blob.sha256])}
           doc=${doc} authRevision=${authRevision} isCurrent=${isCurrent} disabled=${editing!==null||sharing!==null} />
         <p role="status" class="m-0 text-xs">${copyFeedback}</p>
         <details class="text-xs text-[var(--color-fg-secondary)]">

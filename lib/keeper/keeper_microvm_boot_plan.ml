@@ -143,6 +143,7 @@ let invalid_plan_message = function
 type facts =
   { plan_label : string option
   ; image : string
+  ; image_identity : Keeper_microvm_image_command.identity
   ; cpus : int
   ; memory_bytes : int64
   ; user : string
@@ -166,6 +167,7 @@ type difference =
 type refusal =
   | Invalid_requested_plan of invalid_plan list
   | Guest_facts_unreadable of string
+  | Image_command_unavailable of string
   | Runtime_reports_other_than_asked of difference list
 type assessment =
   | Matches_plan
@@ -176,7 +178,7 @@ let contains_pairs expected actual =
   List.for_all (fun (key, value) ->
     List.assoc_opt key actual = Some value) expected
 
-let differences (plan : t) (facts : facts) =
+let observed_differences ~image_difference ~command_difference (plan : t) (facts : facts) =
   (* Compare in MiB rather than multiplying the requested size into int64:
      an operator-sized value must not wrap and match a smaller real guest. *)
   let memory_matches = facts.memory_bytes > 0L
@@ -193,12 +195,12 @@ let differences (plan : t) (facts : facts) =
   in
   let different differs field = if differs then Some field else None in
   List.filter_map Fun.id
-    [ different (plan.image <> facts.image) Image
+    [ different image_difference Image
     ; different (Keeper_microvm_guest_size.cpus_count plan.guest_size.cpus <> facts.cpus
         || not memory_matches) Resources
     ; different (plan.user <> facts.user) User
     ; different (plan.working_directory <> facts.working_directory) Working_directory
-    ; different (plan.command <> facts.command) Command
+    ; command_difference
     ; different (canonical_mounts (expected_mounts plan) <> canonical_mounts facts.mounts) Mounts
     ; different (read_only <> facts.read_only) Root_filesystem
     ; different (List.sort String.compare cap_drop <> List.sort String.compare facts.cap_drop
@@ -208,15 +210,29 @@ let differences (plan : t) (facts : facts) =
     ; different (not (contains_pairs plan.labels facts.labels)) Labels
     ]
 
+let differences ~image_command (plan : t) (facts : facts) =
+  let expected = Keeper_microvm_image_command.command image_command ~arguments:plan.command in
+  let command_difference = if expected = facts.command then None else Some Command in
+  let image_difference = Keeper_microvm_image_command.validate_binding image_command
+      ~reference:plan.image ~identity:facts.image_identity <> Ok () in
+  observed_differences ~image_difference ~command_difference plan facts
+
 type identity_reading = Identity_readable | Identity_unreadable
 
-let assess ~plan ~policy_environment ~identity_reading reading =
+let assess ~plan ~policy_environment ~identity_reading ~image_command reading =
   match validate plan with
   | Error errors -> Refuse (Invalid_requested_plan errors)
   | Ok () -> match reading with
   | Unreadable detail -> Refuse (Guest_facts_unreadable detail)
   | Facts facts ->
-    let differences = differences plan facts in
+    let image_command = Result.bind image_command (fun command ->
+      Keeper_microvm_image_command.validate_binding command ~reference:plan.image ~identity:facts.image_identity
+      |> Result.map_error Keeper_microvm_image_command.error_message
+      |> Result.map (fun () -> command)) in
+    let differences = match image_command with
+      | Ok image_command -> differences ~image_command plan facts
+      | Error _ -> observed_differences ~image_difference:(plan.image <> facts.image)
+          ~command_difference:None plan facts in
     if facts.plan_label <> Some (digest plan) then Replace (Plan_label :: differences)
     else
       let policy_route_holds = match plan.network with
@@ -228,6 +244,9 @@ let assess ~plan ~policy_environment ~identity_reading reading =
       else match identity_reading with
         | Identity_unreadable -> Replace [Identity_snapshot]
         | Identity_readable ->
-          match differences with
-          | [] -> Matches_plan
-          | _ :: _ -> Refuse (Runtime_reports_other_than_asked differences)
+          match image_command with
+          | Error detail -> Refuse (Image_command_unavailable detail)
+          | Ok _ ->
+            match differences with
+            | [] -> Matches_plan
+            | _ :: _ -> Refuse (Runtime_reports_other_than_asked differences)

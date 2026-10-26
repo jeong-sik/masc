@@ -68,6 +68,7 @@ val expected_mounts : t -> guest_mount list
 type facts =
   { plan_label : string option
   ; image : string
+  ; image_identity : Keeper_microvm_image_command.identity
   ; cpus : int
   ; memory_bytes : int64
   ; user : string
@@ -103,6 +104,7 @@ type difference =
 type refusal =
   | Invalid_requested_plan of invalid_plan list
   | Guest_facts_unreadable of string
+  | Image_command_unavailable of string
   | Runtime_reports_other_than_asked of difference list
 
 type assessment =
@@ -112,16 +114,21 @@ type assessment =
 
 type identity_reading = Identity_readable | Identity_unreadable
 
-val differences : t -> facts -> difference list
+val differences : image_command:Keeper_microvm_image_command.t -> t -> facts -> difference list
 (** Compares requested facts, allowing image-provided extra environment
     variables and runtime/transient labels. Never logs credential values. *)
 
 val assess :
   plan:t -> policy_environment:(string * string) list ->
-  identity_reading:identity_reading -> reading -> assessment
+  identity_reading:identity_reading ->
+  image_command:(Keeper_microvm_image_command.t, string) result -> reading -> assessment
 (** An absent/different plan label permits replacement. With the same label,
     unreadable/different runtime facts refuse while preserving the guest.
     A stale policy route permits replacement independently of the stable
     digest. After the label and route checks, an unreadable identity permits
     replacement before same-label runtime differences are considered. Unreadable
-    facts always refuse. [Matches_plan] is a comparison result, not lifecycle authority. *)
+    facts always refuse. A same-plan readable identity also requires actual image
+    metadata bound to that guest's descriptor/platform. Metadata failure refuses
+    without replacing the guest. The explicit command is compared after the
+    image's OCI entrypoint, without changing the requested-plan digest.
+    [Matches_plan] is a comparison result, not lifecycle authority. *)

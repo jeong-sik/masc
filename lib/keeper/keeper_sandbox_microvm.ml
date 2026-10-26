@@ -2399,7 +2399,19 @@ let apple_guest_facts ~container_name raw =
     let* config = object_member "configuration" row in
     let* configured_id = string_member "id" config in
     let* () = if id = container_name && configured_id = container_name then Ok () else invalid "guest identity" in
-    let* image = object_member "image" config >>= string_member "reference" in
+    let* image_fields = object_member "image" config in
+    let* image = string_member "reference" image_fields in
+    let* descriptor_digest = object_member "descriptor" image_fields >>= string_member "digest" in
+    let* platform = object_member "platform" config in
+    let* architecture = string_member "architecture" platform in
+    let* os = string_member "os" platform in
+    let* variant = match List.assoc_opt "variant" platform with
+      | None | Some `Null -> Ok None
+      | Some value -> Result.map Option.some (string "platform variant" value) in
+    let* () = if descriptor_digest = "" || architecture = "" || os = "" || variant = Some ""
+      then invalid "image identity" else Ok () in
+    let image_identity : Keeper_microvm_image_command.identity =
+      {descriptor_digest; platform={architecture; os; variant}} in
     let* resources = object_member "resources" config in
     let* cpus = member "cpus" resources >>= positive_integer "cpus" in
     let* cpus = if cpus <= Int64.of_int max_int then Ok (Int64.to_int cpus) else invalid "cpus" in
@@ -2422,7 +2434,7 @@ let apple_guest_facts ~container_name raw =
       object_fields "network" value >>= string_member "network") in
     let* environment = member "environment" init >>= environment in
     let* labels = member "labels" config >>= string_pairs "labels" in
-    Ok {Plan.plan_label = List.assoc_opt Plan.label_key labels; image; cpus; memory_bytes;
+    Ok {Plan.plan_label = List.assoc_opt Plan.label_key labels; image; image_identity; cpus; memory_bytes;
         user; working_directory; command = executable :: arguments; mounts;
         read_only; cap_drop; cap_add; networks; environment; labels}
   in

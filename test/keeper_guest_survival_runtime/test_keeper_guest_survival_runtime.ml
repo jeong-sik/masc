@@ -24,7 +24,27 @@ let keeper = "guest-survival-fixture"
 let backend = Backend.Apple_container
 let network_mode = Profile.Network_none
 
-let inspect_from_run arguments =
+let image_digest = "sha256:" ^ String.make 64 'a'
+let image_platform = `Assoc ["architecture", `String "arm64"; "os", `String "linux"]
+let image_entrypoint root =
+  let path = Filename.concat root "image-entrypoint" in
+  if Sys.file_exists path then
+    match json path with
+    | `List values -> List.map text values
+    | _ -> fail "fixture image entrypoint must be an argv array"
+  else []
+
+let image_inspect root reference =
+  `List [`Assoc ["id", `String (String.make 64 'a');
+    "configuration", `Assoc ["name", `String reference;
+      "descriptor", `Assoc ["digest", `String image_digest]];
+    "variants", `List [`Assoc ["platform", image_platform;
+      "digest", `String ("sha256:" ^ String.make 64 'b');
+      "config", `Assoc ["architecture", `String "arm64"; "os", `String "linux";
+        "config", `Assoc ["Entrypoint", strings (image_entrypoint root);
+                          "Cmd", strings ["/bin/bash"]]]]]]]
+
+let inspect_from_run root arguments =
   let one = Hashtbl.create 16 and repeated = Hashtbl.create 8 in
   let add key v = Hashtbl.replace repeated key (v :: Option.value ~default:[] (Hashtbl.find_opt repeated key)) in
   let rec flags = function
@@ -36,7 +56,10 @@ let inspect_from_run arguments =
     | image :: command -> image, command
     | [] -> fail "provider did not receive an image"
   in
-  let image, command = flags arguments in
+  let image, explicit_command = flags arguments in
+  (* This is the provider's OCI execution behavior, independently observed
+     from its own image config, rather than the product's expected command. *)
+  let command = image_entrypoint root @ explicit_command in
   let all key = Option.value ~default:[] (Hashtbl.find_opt repeated key) |> List.rev in
   let get key = Hashtbl.find one key in
   let mount kind source destination options = `Assoc
@@ -59,7 +82,10 @@ let inspect_from_run arguments =
   let mounts = List.map host (all "-v") @ List.map volume (all "--volume")
       @ List.map (fun destination -> mount (`Assoc ["tmpfs", `Assoc []]) "tmpfs" destination []) (all "--tmpfs") in
   `Assoc ["id", `String name; "status", `Assoc ["state", `String "running"];
-    "configuration", `Assoc ["id", `String name; "image", `Assoc ["reference", `String image];
+    "configuration", `Assoc ["id", `String name;
+      "image", `Assoc ["reference", `String image;
+        "descriptor", `Assoc ["digest", `String image_digest]];
+      "platform", image_platform;
       "resources", `Assoc ["cpus", `Int (int_of_string (get "--cpus")); "memoryInBytes", `Intlit (Int64.to_string memory_bytes)];
       "initProcess", `Assoc ["user", `Assoc ["raw", `Assoc ["userString", `String (get "--user")]];
         "workingDirectory", `String (get "--workdir"); "executable", `String executable;
@@ -95,7 +121,10 @@ let provider root args =
     if Sys.file_exists (file "inventory-fails-after-run") && guest_rows () <> [] then exit 1;
     if Sys.file_exists (file "list-override") then print_string (read (file "list-override"))
     else answer (`List (guest_rows ()))
-  | "image" :: "inspect" :: _ -> answer (`List [`Assoc ["configuration", `Assoc []]])
+  | "image" :: "inspect" :: reference :: _ ->
+    if Sys.file_exists (file "image-inspect-fails") then exit 1;
+    if Sys.file_exists (file "image-inspect-override") then print_string (read (file "image-inspect-override"))
+    else answer (image_inspect root reference)
   | "volume" :: "inspect" :: name :: _ ->
     if Sys.file_exists (file (name ^ ".img")) then
       answer (`List [`Assoc ["configuration", `Assoc ["name", `String name;
@@ -113,7 +142,7 @@ let provider root args =
     write (file (name ^ ".img")) (Bytes.to_string bytes)
   | "run" :: rest ->
     if not (List.mem "-d" rest) then fail "discard-set volume must never start a helper";
-    save_json (file "guest.json") (inspect_from_run rest)
+    save_json (file "guest.json") (inspect_from_run root rest)
   | "stop" :: _ -> ()
   | "delete" :: rest ->
     (match guest_rows () with
@@ -206,6 +235,10 @@ let calls root = entries root "calls" |> List.map (function
 let count operation root = calls root |> List.filter (function first :: _ -> first = operation | [] -> false) |> List.length
 let boot root = check bool "cold process completed real boot path against provider fixture" true (step root "turn" = Unix.WEXITED 0)
 let snapshot_path root = Keeper_microvm_github_identity.host_path ~base_path:root ~keeper_name:keeper ~backend ~network_mode
+let adoption_read = function
+  | ["image"; "inspect"; "fixture:image"] -> true
+  | ("inspect" | "exec") :: _ -> true
+  | _ -> false
 
 let test_fresh_process_adopts_without_boot_effects () = with_fixture @@ fun root ->
   boot root;
@@ -216,10 +249,85 @@ let test_fresh_process_adopts_without_boot_effects () = with_fixture @@ fun root
   check string "provider guest creation is retained" original (read (Filename.concat root "guest.json"));
   check int "durable snapshot inode retained" inode (Unix.lstat (snapshot_path root)).st_ino;
   let after = calls root |> List.drop (List.length before) in
-  check bool "adoption spends no run/stop/delete/image/volume/network operation" true
-    (List.for_all (function ("inspect" | "exec") :: _ -> true | _ -> false) after);
+  check bool "adoption performs only guest/image observation and exec" true
+    (List.for_all adoption_read after);
   check int "one cold run total" 1 (count "run" root);
   check int "one first-handoff frame per process" 2 (List.length (entries root "requests"))
+
+let wrapped_image root = save_json (Filename.concat root "image-entrypoint")
+    (strings ["opam"; "exec"; "--"])
+
+let test_wrapped_image_adopts_without_relabelling_or_boot_effects () = with_fixture @@ fun root ->
+  wrapped_image root;
+  boot root;
+  let original = read (Filename.concat root "guest.json") in
+  let init = field "configuration" (Yojson.Safe.from_string original) |> field "initProcess" in
+  check string "provider applies its actual image entrypoint" "opam" (text (field "executable" init));
+  check (list string) "image Cmd is replaced by explicit Keeper argv"
+    ["exec"; "--"; "tail"; "-f"; "/dev/null"]
+    (match field "arguments" init with `List values -> List.map text values | _ -> fail "missing init argv");
+  let inode = (Unix.lstat (snapshot_path root)).st_ino in
+  let before = List.length (calls root) in
+  check bool "independent process admits the wrapped command" true (step root "turn" = Unix.WEXITED 0);
+  check string "image entrypoint comparison preserves the guest and its labelled plan"
+    original (read (Filename.concat root "guest.json"));
+  check int "same sealed credential snapshot" inode (Unix.lstat (snapshot_path root)).st_ino;
+  let after = calls root |> List.drop before in
+  check bool "wrapped adoption performs only guest/image observations and exec" true
+    (List.for_all adoption_read after);
+  check int "wrapped guest is never booted twice" 1 (count "run" root);
+  check int "each process still performs its first handoff" 2 (List.length (entries root "requests"))
+
+let replace key value = function
+  | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
+  | _ -> fail "fixture replacement requires an object"
+
+let assert_wrapped_refusals_preserve_guest root original inode before =
+  List.iter (fun () -> check bool "wrapped refusal repeats without replay" true
+    (step root "turn" = Unix.WEXITED 2)) [(); ()];
+  let after = calls root |> List.drop before in
+  let guest = text (field "id" (Yojson.Safe.from_string original)) in
+  check bool "refused wrapped image uses only exact read-only observations" true
+    (List.for_all (function ["inspect"; name] -> name = guest
+      | ["image"; "inspect"; "fixture:image"] -> true | _ -> false) after);
+  check int "each refusal directly re-observes the guest" 2
+    (List.length (List.filter ((=) ["inspect"; guest]) after));
+  check string "refusal preserves exact guest creation and plan bytes"
+    original (read (Filename.concat root "guest.json"));
+  check int "refusal preserves the mounted snapshot inode" inode (Unix.lstat (snapshot_path root)).st_ino;
+  check int "no replacement run after either refusal" 1 (count "run" root)
+
+let test_image_prefix_does_not_permit_command_tampering () =
+  List.iter (fun changed_init -> with_fixture (fun root ->
+    wrapped_image root;
+    boot root;
+    let path = Filename.concat root "guest.json" in
+    let original = read path in
+    let row = Yojson.Safe.from_string original in
+    let config = field "configuration" row in
+    let modified = replace "configuration"
+        (replace "initProcess" (changed_init (field "initProcess" config)) config) row in
+    save_json (Filename.concat root "inspect-override") (`List [modified]);
+    let inode = (Unix.lstat (snapshot_path root)).st_ino in
+    assert_wrapped_refusals_preserve_guest root original inode (List.length (calls root))))
+    [(fun init -> replace "arguments" (strings ["exec"; "--"; "tail"; "-f"; "/foreign/file"]) init)
+    ; (fun init -> replace "executable" (`String "tail")
+        (replace "arguments" (strings ["-f"; "/dev/null"]) init))]
+
+let test_unavailable_image_metadata_preserves_wrapped_guest () =
+  List.iter (fun unavailable -> with_fixture (fun root ->
+    wrapped_image root;
+    boot root;
+    let original = read (Filename.concat root "guest.json") in
+    let inode = (Unix.lstat (snapshot_path root)).st_ino in
+    unavailable root;
+    assert_wrapped_refusals_preserve_guest root original inode (List.length (calls root))))
+    [(fun root -> write (Filename.concat root "image-inspect-override") "not-json")
+    ; (fun root -> save_json (Filename.concat root "image-inspect-override")
+        (`List [`Assoc ["id", `String (String.make 64 'a');
+          "configuration", `Assoc ["name", `String "fixture:image";
+          "descriptor", `Assoc ["digest", `String image_digest]]; "variants", `List []]]))
+    ; (fun root -> write (Filename.concat root "image-inspect-fails") "")]
 
 let test_attached_endpoint_uses_mounted_identity_without_cleanup () = with_fixture @@ fun root ->
   boot root;
@@ -247,9 +355,11 @@ let test_unknown_or_disagreeing_facts_never_churn () =
     List.iter (fun () -> check bool "refusal is repeatable" true (step root "turn" = Unix.WEXITED 2)) [(); ()];
     let after = calls root |> List.drop before in
     let expected = ["inspect"; text (field "id" original)] in
-    check (list (list string)) "both refusals reached the exact guest inspect" [expected; expected] after;
+    let inspections = List.filter (function "inspect" :: _ -> true | _ -> false) after in
+    check (list (list string)) "both refusals reached the exact guest inspect" [expected; expected] inspections;
     check bool "bad facts cause only reads" true
-      (List.for_all (function "inspect" :: _ -> true | _ -> false) after);
+      (List.for_all (function ["image"; "inspect"; "fixture:image"] -> true
+        | "inspect" :: _ -> true | _ -> false) after);
     check bool "original guest survives refusal" true (Sys.file_exists (Filename.concat root "guest.json"))))
     [ (fun row -> `List [match row with `Assoc fields -> `Assoc
         (List.map (fun (key,v) -> if key = "status" then key, `Assoc ["state", `String "unknown"] else key,v) fields)
@@ -342,5 +452,8 @@ let () =
         test_case "attached reader never rereads central identity" `Quick test_attached_reader_does_not_reread_central_identity;
         test_case "identity refresh follows actual guest absence" `Quick test_identity_refresh_replaces_after_actual_absence;
         test_case "fresh process adopts without boot effects" `Quick test_fresh_process_adopts_without_boot_effects;
+        test_case "wrapped image adopts without relabelling or boot effects" `Quick test_wrapped_image_adopts_without_relabelling_or_boot_effects;
+        test_case "image prefix does not permit command tampering" `Quick test_image_prefix_does_not_permit_command_tampering;
+        test_case "unavailable image metadata preserves wrapped guest" `Quick test_unavailable_image_metadata_preserves_wrapped_guest;
         test_case "attached reader never performs handoff cleanup" `Quick test_attached_endpoint_uses_mounted_identity_without_cleanup;
         test_case "uncertain or disagreeing facts preserve guest repeatedly" `Quick test_unknown_or_disagreeing_facts_never_churn]]

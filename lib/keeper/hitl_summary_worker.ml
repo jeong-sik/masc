@@ -194,7 +194,10 @@ let snapshot_resolved_lane ~messages (resolved : Registry.resolved_lane) =
 let prepare_flow
       ~(entry : pending_approval)
   =
-  let context_bundle = Hitl_summary_request.capture_context_bundle ~entry in
+  let* context_bundle =
+    Hitl_summary_request.capture_context_bundle ~entry
+    |> Lane_addon_action.canonical
+  in
   let* system_prompt =
     system_prompt ()
     |> Result.map_error (fun detail ->

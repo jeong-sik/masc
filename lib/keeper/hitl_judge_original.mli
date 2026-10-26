@@ -29,14 +29,17 @@ val messages_of
   -> context_bundle:Yojson.Safe.t
   -> Agent_core.Types.message list
 (** The system message, the output contract and the context bundle, in that
-    order. *)
+    order. The original and worker preparation supply a canonical context
+    bundle so persistence cannot reorder its serialized message bytes. *)
 
 val prepare
   :  entry:Keeper_approval_queue_rules_types.pending_approval
   -> (t, string) result
 (** Capture the original of [entry]'s judgment request. The context bundle is
     acquired first and the prompt after, as the worker does. This does not
-    mutate the approval, bind a lane or call a model. *)
+    mutate the approval, bind a lane or call a model. Context objects and
+    numbers use the original-request store canonical form; invalid JSON is an
+    error, and array order and text bytes remain significant. *)
 
 val approval_id : t -> string
 val input_hash : t -> string
@@ -52,7 +55,9 @@ val to_json : t -> Yojson.Safe.t
 
 val of_json : Yojson.Safe.t -> (t, string) result
 (** Strict inverse of {!to_json}: the schema name, the exact field set and the
-    field types must match. Unknown or missing fields are errors. *)
+    field types must match. Unknown or missing fields are errors. The context
+    bundle is canonicalized with the same rules as {!prepare}; duplicate keys
+    and non-finite numbers are errors. *)
 
 val digest : t -> (string, string) result
 (** SHA-256 of the canonical JSON of {!to_json}. Equal originals have equal

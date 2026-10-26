@@ -1,0 +1,46 @@
+{
+  "schema": "masc.selected-offline-audit-summary.v1",
+  "treatment": "Selected numeric derivative of the full local offline reports, not a copy of their raw input manifests.",
+  "audits": [
+    {
+      "scope": "closed2/30 only",
+      "capture": "artifacts/runs/extreme-perf-20261026/profile-parse-reuse-native-evidence-review-v1",
+      "full_audit_result_sha256": "0901fd7e98dff06484c73cb52fecf62ce5e2ad3cefbb236e46b1fcd1ff5ffe30",
+      "full_report_sha256": "56d2a76cfd7aab50df4a198b561cc916eb995bf2755312742ad1b3d8cdb3f9cc",
+      "verdict": "PASS_CLOSED_2_AND_30_ONLY",
+      "cohorts": 2,
+      "reader_sha256": "be6b0a62cf36d7174f43d2ff282285e8eb151fe8fe25583ee41c8c35c5976f9b",
+      "SQLite_readonly_opens": 96,
+      "distinct_original_backup_databases": 64,
+      "regenerated_derivatives": 10,
+      "main_verifier_input_files": 137,
+      "new_native_HTTP_CI_executions": 0,
+      "limits": [
+        "Only closed2/30 packets; no300 or ABBA result.",
+        "Unchanged official reader definitions are rerun with immutable SQLite and derivative-write redirection; independent checks supplement the same-reader result.",
+        "Audit activity can overlap root's shared-host comparison; the audit time window and CPU cost are recorded.",
+        "Source55a native is not later PR head5428; whole-program quick_stat-derived delta is not parser allocation or instantaneously accurate."
+      ]
+    },
+    {
+      "scope": "closed300 ABBA and6-rowaggregate",
+      "capture": "artifacts/runs/extreme-perf-20261026/profile-parse-reuse-native-evidence-review-v2",
+      "full_audit_result_sha256": "4ed4367d2bf602e14b51c313284a162cc0b229fd29d314214dd86846b38c924d",
+      "full_report_sha256": "0e5d4529306753656d033725208686471c0872f824968e2ce8ccffc24e9803e1",
+      "verdict": "PASS_ALL_FOUR_CLOSED_300_PACKETS_ONLY",
+      "cohorts": 4,
+      "reader_sha256": "be6b0a62cf36d7174f43d2ff282285e8eb151fe8fe25583ee41c8c35c5976f9b",
+      "SQLite_readonly_opens": 3600,
+      "distinct_original_backup_databases": 2400,
+      "regenerated_derivatives": 20,
+      "main_verifier_input_files": 2551,
+      "new_native_HTTP_CI_executions": 0,
+      "limits": [
+        "All four closed300 ABBA packets checked, two cohorts per role; no six-cell aggregate generated or gain/SLO claim.",
+        "Unchanged official reader definitions are rerun with immutable SQLite and derivative-write redirection; independent checks supplement the same-reader result.",
+        "Shared-host sequential fixed ABBA; inventory sweeps/read retries/rate waits/health sampling differ and host load is not controlled.",
+        "Source55a native is not later PR head5428; whole-program quick_stat-derived snapshot delta is not parser allocation or instantaneously accurate."
+      ]
+    }
+  ]
+}

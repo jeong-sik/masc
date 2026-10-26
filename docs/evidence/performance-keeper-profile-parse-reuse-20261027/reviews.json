@@ -1,0 +1,65 @@
+{
+  "schema": "masc.selected-review-bindings.v1",
+  "treatment": "Selected root-authored locator summary, not a byte copy or a new reviewer verdict. Full frozen reports remain in their capture packages.",
+  "records": [
+    {
+      "scope": "current source5428",
+      "capture": "artifacts/runs/extreme-perf-20261026/keeper-profile-parse-reuse-current-head-review-v2/README.md",
+      "sha256": "9472892d08691d4a89f74aee9b45de1ded30df845b4e5833c84532dc22d0eb50",
+      "recorded_opening": [
+        "verdict: PASS_SOURCE_ONLY head: 5428e9a53dca4c41791dc412b952f8cd60466e0f by: /root/concurrent_probe_review",
+        "",
+        "# Current-head source reassessment after the fixture CI repair",
+        ""
+      ]
+    },
+    {
+      "scope": "native plan16fd",
+      "capture": "artifacts/runs/extreme-perf-20261026/native-plan-review-v1/README.md",
+      "sha256": "81f00eb859c8ffdb70594322d258ffa859101ed8805f1944d6687684fdcb4b0d",
+      "recorded_opening": [
+        "# Keeper parse-reuse native measurement plan \u2014 independent review",
+        "",
+        "**PASS_PLAN_ONLY \u2014 P0 0, P1 0, P2 0, P3 0.** Reviewer: `/root/dispatch_profile_response`. This reviews the frozen plan and its source/qualification boundaries. It does not report an executed candidate cohort, a speedup, a CI/full-regression approval or production readiness.",
+        ""
+      ]
+    },
+    {
+      "scope": "original deriver3ecbb CR",
+      "capture": "artifacts/runs/extreme-perf-20261026/native-observations-deriver-review-v1/README.md",
+      "sha256": "f235373b29c653f28e85690f60315aa821b50f860606c855b768e0700edd24cf",
+      "recorded_opening": [
+        "# Source review of the six-cell offline observation deriver",
+        "",
+        "**CHANGE_REQUESTED \u2014 P0 0, P1 0, P2 1.** Verdict applies only to frozen `derive_observations.py` SHA256 **`3ecbbafdc673c076294250a951d2200254390aa923b737830cbfa9fe94fe4c5c`**. The two permitted closed candidate cells (2/30) produce correct nominal arithmetic, but the new GC/timing measurements are not bound to one owned runtime. A pure in-memory counterexample is accepted. Root acknowledged this P2 and assigned a separate repair; that future source is outside this verdict.",
+        ""
+      ]
+    },
+    {
+      "scope": "deriver response d67 implementation,not self approval",
+      "capture": "artifacts/runs/extreme-perf-20261026/native-observations-deriver-response-v2/README.md",
+      "sha256": "ab4452fc3e1b8df1cebb6a91ff4ff71cbfe5a1c8719ece2c4dec98a02619c19e",
+      "recorded_opening": [
+        "# Observation deriver response to P2-1",
+        "",
+        "Status: **IMPLEMENTED \u2014 READY_FOR_INDEPENDENT_REVIEW**. The frozen source review remains `CHANGE_REQUESTED` for old helper SHA-256 `3ecbbafdc673c076294250a951d2200254390aa923b737830cbfa9fe94fe4c5c`. This response does not change that historical finding or approve its own repair.",
+        ""
+      ]
+    },
+    {
+      "scope": "independent repaired deriverd67 PASS",
+      "capture": "artifacts/runs/extreme-perf-20261026/native-observations-deriver-review-v2/README.md",
+      "sha256": "95ca5065fc3073b63c1559e0b560ae410c60b7d037562f9772dfcb1b62690d6a",
+      "recorded_opening": [
+        "# Independent delta review of the observation-deriver repair",
+        "",
+        "**PASS_SOURCE_DELTA \u2014 P0/P1/P2: none found in the repair.** Old helper `3ecbbafdc673c076294250a951d2200254390aa923b737830cbfa9fe94fe4c5c` and its original CR/counterexample remain unchanged. This pass applies only to repaired helper **`d67dab60f7f86e49b94355738999c54860796f150946a0db1963a03632b8b6c8`**. It is a source/offline-analysis review, not native gain, complete six-cell evidence or formal GitHub approval.",
+        ""
+      ]
+    }
+  ],
+  "current_source_head": "5428e9a53dca4c41791dc412b952f8cd60466e0f",
+  "full_source_diff_sha256": "0912108b1d49822e77fb48b30ccd6a089d69aa9cc4fa1eb59b45a7a6de871d2f",
+  "repaired_deriver_sha256": "d67dab60f7f86e49b94355738999c54860796f150946a0db1963a03632b8b6c8",
+  "formal_GitHub_approval": false
+}

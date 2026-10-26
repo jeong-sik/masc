@@ -195,7 +195,7 @@ let compact_transition_wals_unlocked owner =
 
 (* Encoding holds the owner's lock. The snapshot codec uses its own executor,
    which cannot be occupied by a recovery job waiting for this same lock. *)
-let save_snapshot_atomic_with ~strict_parent_sync path state =
+let save_snapshot_atomic_with ?(before_write = fun () -> ()) ~strict_parent_sync path state =
   match
     try Ok (Fs_compat.mkdir_p (Filename.dirname path)) with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -204,6 +204,7 @@ let save_snapshot_atomic_with ~strict_parent_sync path state =
   | Error _ as error -> error
   | Ok () ->
     let content = Keeper_event_queue_snapshot_codec.encode_state state in
+    before_write ();
     if strict_parent_sync
     then Fs_compat.save_file_atomic_strict path content
     else Fs_compat.save_file_atomic path content
@@ -396,9 +397,12 @@ let save_state_unlocked_with ~save_snapshot owner state =
          message)
 ;;
 
-let save_state_unlocked =
+let save_state_unlocked ?(before_write = fun () -> ()) owner state =
   save_state_unlocked_with
-    ~save_snapshot:(save_snapshot_atomic_with ~strict_parent_sync:false)
+    ~save_snapshot:(save_snapshot_atomic_with ~before_write ~strict_parent_sync:false)
+    owner
+    state
+;;
 
 type snapshot_read_error_kind =
   | Invalid_path
@@ -1235,6 +1239,7 @@ let discover_keeper_names_with_durable_state ~base_path =
 ;;
 
 let commit_transform_unlocked
+      ?(before_snapshot_write = fun () -> ())
       ?(confirm_snapshot = save_snapshot_atomic_strict)
       ?(strict_snapshot_durability = false)
       owner
@@ -1267,7 +1272,7 @@ let commit_transform_unlocked
           let save_state =
             if strict_snapshot_durability
             then save_state_unlocked_with ~save_snapshot:confirm_snapshot
-            else save_state_unlocked
+            else save_state_unlocked ~before_write:before_snapshot_write
           in
           (match save_state owner next with
            | Error _ as error -> error
@@ -1294,6 +1299,7 @@ let commit_transform_unlocked
 ;;
 
 let commit_transform
+      ?before_snapshot_write
       ?confirm_snapshot
       ?(strict_snapshot_durability = false)
       ~base_path
@@ -1307,6 +1313,7 @@ let commit_transform
     (try
        Owner_lock.with_durable_lock owner (fun () ->
          commit_transform_unlocked
+           ?before_snapshot_write
            ?confirm_snapshot
            ~strict_snapshot_durability
            owner
@@ -1500,17 +1507,20 @@ let admitted_selection_standing_result ~base_path ~keeper_name ~selection =
   | Ok state -> State.admitted_selection_standing ~selection state
 ;;
 
-let ack_pending_result
+let ack_pending_with ~before_write
       ?(after_commit = fun _ -> ())
       ~base_path
       ~keeper_name
       ~selection
       ()
   =
-  commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
+  commit_transform ~before_snapshot_write:before_write ~base_path ~keeper_name ~after_commit (fun state ->
     match State.ack_pending ~selection state with
     | Error _ as error -> error
     | Ok state -> Ok (state, ()))
+;;
+
+let ack_pending_result = ack_pending_with ~before_write:(fun () -> ())
 ;;
 
 let note_checkpoint_retention_result
@@ -1536,6 +1546,7 @@ let bind_pending_repetition_scope_result
 ;;
 
 let commit_transition_unlocked_with
+      ?(before_wal_write = fun () -> ())
       ~save_checkpoint
       ~compact_wal
       owner
@@ -1593,6 +1604,7 @@ let commit_transition_unlocked_with
          notify_state_change_observer ~keeper_name:(keeper_name_of_owner owner);
          continue_after_commit ()
        in
+       before_wal_write ();
        (match
           Fs_compat.append_private_jsonl_durable_locked_at_end_offset_result
             path
@@ -1743,7 +1755,7 @@ let transfer_pending_accepted_result
             (Printexc.to_string exn)))
 ;;
 
-let ack_pending_source_terminal_result
+let ack_source_terminal_with ~before_write
       ?(after_commit = fun _ -> ())
       ~base_path
       ~keeper_name
@@ -1760,6 +1772,7 @@ let ack_pending_source_terminal_result
          | Error _ as error -> error
          | Ok state ->
            commit_transition_unlocked
+             ~before_wal_write:before_write
              owner
              ~after_commit
              (State.ack_pending_source_terminal
@@ -1775,6 +1788,10 @@ let ack_pending_source_terminal_result
             "event queue pending source-terminal ACK raised keeper=%s: %s"
             (keeper_name_of_owner owner)
             (Printexc.to_string exn)))
+;;
+
+let ack_pending_source_terminal_result =
+  ack_source_terminal_with ~before_write:(fun () -> ())
 ;;
 
 let terminalize_pending_turn_result
@@ -1986,6 +2003,9 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
 ;;
 
 module For_testing = struct
+  let ack_pending_with_before_write = ack_pending_with
+  let ack_source_terminal_with_before_write = ack_source_terminal_with
+
   let move_aside_with_sync ~sync_intent ~base_path ~keeper_name ~rejected_path_of =
     move_aside_with ~after_read:None ~sync_intent ~rename:Fs_compat.rename_noreplace
       ~before_clear:ignore ~base_path ~keeper_name ~rejected_path_of

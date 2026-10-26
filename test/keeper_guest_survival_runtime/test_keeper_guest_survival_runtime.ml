@@ -240,6 +240,8 @@ let test_unknown_or_disagreeing_facts_never_churn () =
     let before = calls root |> List.length in
     List.iter (fun () -> check bool "refusal is repeatable" true (step root "turn" = Unix.WEXITED 2)) [(); ()];
     let after = calls root |> List.drop before in
+    let expected = ["inspect"; text (field "id" original)] in
+    check (list (list string)) "both refusals reached the exact guest inspect" [expected; expected] after;
     check bool "bad facts cause only reads" true
       (List.for_all (function "inspect" :: _ -> true | _ -> false) after);
     check bool "original guest survives refusal" true (Sys.file_exists (Filename.concat root "guest.json"))))
@@ -250,7 +252,13 @@ let test_unknown_or_disagreeing_facts_never_churn () =
         if key = "configuration" then key, (match v with `Assoc config -> `Assoc (List.map (fun (key,v) ->
           if key = "resources" then key, `Assoc ["cpus", `Int 999; "memoryInBytes", `Int 2147483648] else key,v) config) | _ -> v)
         else key,v) fields) | _ -> row])
-    ; (fun _ -> `List [`Assoc ["id", `String "foreign"; "status", `Assoc ["state", `String "stopped"]]]) ]
+    ; (fun row -> `List [match row with `Assoc fields -> `Assoc (List.map (fun (key,v) ->
+        if key = "id" then key, `String "foreign"
+        else if key = "status" then key, `Assoc ["state", `String "stopped"]
+        else if key = "configuration" then key, (match v with `Assoc config ->
+          `Assoc (List.map (fun (key,v) -> if key = "id" then key, `String "foreign" else key,v) config)
+          | _ -> v)
+        else key,v) fields) | _ -> row]) ]
 
 let configure_identity root token =
   let config = Workspace.default_config root in

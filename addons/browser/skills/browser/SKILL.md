@@ -40,8 +40,9 @@ never replay the sequence after uncertain effects.
 
 When the work needs the page's markup, `BrowserRead` `mode = "html"` returns
 the top document's source (`outerHTML`) for an observed `tabId`, without
-`maxChars`. It is never cut: past 1 MiB, `html` is `null` with
-`htmlComplete: false` and `htmlUnavailableReason`.
+`maxChars`. It is never cut: when the JSON reply would pass 1 MiB, `html` is
+`null` with `htmlComplete: false` and
+`htmlUnavailableReason = "document_html_exceeds_1_mib"`.
 A live extension or BiDi connection and automation Firefox serve it; ego and
 Stagehand refuse it before dispatch.
 

@@ -158,7 +158,7 @@ let support backend operation = match backend with
     | Read_html -> (match backend with
       | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko ->
           conditional ~mode:"html" Read
-            [observed;"Explicit tabId, top document only; maxChars does not apply. The source is never cut: over 1 MiB, html is null with htmlComplete false."]
+            [observed;"Explicit tabId, top document only; maxChars does not apply. The source is never cut: when the JSON reply would pass 1 MiB, html is null with htmlComplete false."]
       | Connected Browser_lane.Ego_task_space ->
           Unsupported "An ego connection does not return document source; read text, elements or a snapshot instead."
       | Owned_chromium -> Unsupported "Stagehand does not return document source; read text or elements instead."

@@ -945,16 +945,13 @@ let offload_model_input_cpu f =
    against the window before any atom is considered. *)
 let declared_request_reserve_bytes ~system_prompt ~tools =
   let tool_schema_bytes =
-    List.fold_left
-      (fun acc tool ->
-         let json = Agent_core.Tool.schema_to_json tool in
-         acc
-         + String.length
-             (Agent_core.Base.Schema_observation.encode
-                ~site:Reserve_encode ~schema:tool.Agent_core.Tool.schema
-                (fun () -> Yojson.Safe.to_string json)))
-      0
-      tools
+    Agent_core.Base.Schema_observation.with_site Reserve_encode (fun () ->
+      List.fold_left
+        (fun acc tool ->
+           acc
+           + Agent_core.Tool.wire_bytes_of_schema tool.Agent_core.Tool.schema)
+        0
+        tools)
   in
   let system_prompt_bytes =
     String.length (Yojson.Safe.to_string (`String system_prompt))

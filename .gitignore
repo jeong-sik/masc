@@ -76,6 +76,8 @@ audits/*.jsonl
 # See docs/guides/WORKSPACE-STORAGE.md.
 /artifacts/
 
+# Private release-evidence bundles must not be committed.
+.release-evidence/
 # Written by scripts/exec_corpus_report.py --write; regenerated on demand.
 audits/local-exec-core-inventory.md
 

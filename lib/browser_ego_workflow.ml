@@ -5,8 +5,9 @@ let script = {js|async function nativeWorkflow(page, args) {
   const pageExpression = step => step.argumentJson === undefined ? step.source
     : '(' + step.source + ')(JSON.parse(' + JSON.stringify(step.argumentJson) + '))';
   let effectStarted = false, completedEffect = false;
+  let inputReleased = true, heldButton = null;
   const failure = (index, method, error, extra = {}) => ({
-    completed, effectStarted, completedEffect,
+    completed, effectStarted, completedEffect, inputReleased,
     failure: {index, method, message: String(error?.message ?? error), ...extra}
   });
   let initialUrl;
@@ -16,25 +17,46 @@ let script = {js|async function nativeWorkflow(page, args) {
     return failure(0, 'initialUrl', 'the tab is at ' + initialUrl + ', not at expectedUrl; read it again');
   for (let index = 0; index < args.steps.length; index++) {
     const step = args.steps[index];
-    const options = step.timeoutMs === undefined ? {} : {timeout: step.timeoutMs};
-    let receipt = null, effect = false, pageResult = false;
+    const options = step.options ?? {};
+    const pointerOptions = {...options, label: args.cursor + (options.label ? ' · ' + options.label : '')};
+    heldButton = null;
+    let receipt = null, effect = false, pageResult = false, holdingInput = false;
     try {
       switch (step.method) {
-        case 'click': effect = effectStarted = true; receipt = await page.click(step.selector, {...options, label: args.cursor}); break;
-        case 'dblclick': effect = effectStarted = true; receipt = await page.dblclick(step.selector, {...options, label: args.cursor}); break;
-        case 'hover': effect = effectStarted = true; receipt = await page.hover(step.selector, {...options, label: args.cursor}); break;
+        case 'click':
+          holdingInput = effect = effectStarted = true; inputReleased = false; heldButton = options.button ?? 'left';
+          receipt = await page.click(step.selector, pointerOptions); inputReleased = !receipt?.dialog; break;
+        case 'dblclick':
+          holdingInput = effect = effectStarted = true; inputReleased = false; heldButton = options.button ?? 'left';
+          receipt = await page.dblclick(step.selector, pointerOptions); inputReleased = !receipt?.dialog; break;
+        case 'hover': effect = effectStarted = true; receipt = await page.hover(step.selector, pointerOptions); break;
+        case 'dragAndDrop':
+          holdingInput = effect = effectStarted = true; inputReleased = false; heldButton = options.button ?? 'left';
+          receipt = await page.dragAndDrop(step.selector, step.destination, pointerOptions);
+          inputReleased = !receipt?.dialog; break;
+        case 'mouse.click':
+          holdingInput = effect = effectStarted = true; inputReleased = false; heldButton = options.button ?? 'left';
+          receipt = await page.mouse.click(step.x, step.y, pointerOptions); inputReleased = !receipt?.dialog; break;
+        case 'mouse.move': effect = effectStarted = true; receipt = await page.mouse.move(step.x, step.y, pointerOptions); break;
+        case 'mouse.wheel': effect = effectStarted = true; receipt = await page.mouse.wheel(step.x, step.y, pointerOptions); break;
         case 'fill': effect = effectStarted = true; receipt = await page.fill(step.selector, step.text, options); break;
-        case 'press': effect = effectStarted = true; receipt = await page.press(step.selector, step.key, options); break;
+        case 'press':
+          holdingInput = effect = effectStarted = true; inputReleased = false;
+          receipt = await page.press(step.selector, step.key, options); inputReleased = !receipt?.dialog; break;
         case 'focus': effect = effectStarted = true; receipt = await page.focus(step.selector, options); break;
         case 'reload': effect = effectStarted = true; receipt = await page.reload(options); break;
-        case 'keyboard.type': effect = effectStarted = true; receipt = await page.keyboard.type(step.text); break;
+        case 'keyboard.type':
+          holdingInput = effect = effectStarted = true; inputReleased = false;
+          receipt = await page.keyboard.type(step.text, options); inputReleased = !receipt?.dialog; break;
         case 'keyboard.insertText': effect = effectStarted = true; receipt = await page.keyboard.insertText(step.text); break;
         case 'keyboard.paste':
           effect = effectStarted = true;
           receipt = await page.keyboard.paste(step.html === undefined ? step.text : {text: step.text, html: step.html}); break;
-        case 'keyboard.press': effect = effectStarted = true; receipt = await page.keyboard.press(step.key); break;
+        case 'keyboard.press':
+          holdingInput = effect = effectStarted = true; inputReleased = false;
+          receipt = await page.keyboard.press(step.key, options); inputReleased = !receipt?.dialog; break;
         case 'selectOption': {
-          const selection = step.values === undefined ? {value: step.value} : step.values.map(value => ({value}));
+          const selection = JSON.parse(step.selectionJson);
           effect = effectStarted = true;
           receipt = await page.selectOption(step.selector, selection, options); break;
         }
@@ -50,22 +72,29 @@ let script = {js|async function nativeWorkflow(page, args) {
         case 'waitForFunction': {
           const expression = pageExpression(step);
           effect = effectStarted = pageResult = true;
-          receipt = await page.waitForFunction(expression, undefined,
-            {...options, ...(step.pollingMs === undefined ? {} : {polling:step.pollingMs})}); break;
+          receipt = await page.waitForFunction(expression, undefined, options); break;
         }
         case 'fetch':
           effect = effectStarted = pageResult = true;
-          receipt = await page.fetch(step.url, {...step.fetchOptions, ...options}); break;
+          receipt = await page.fetch(step.url, options); break;
         default: return failure(index, step.method, 'unsupported native Page method');
       }
-    } catch (error) { return failure(index, step.method, error); }
+    } catch (error) {
+      if (!inputReleased && heldButton !== null) {
+        try { await page.mouse.up({button:heldButton}); inputReleased = true; }
+        catch (releaseError) { return failure(index, step.method,
+          String(error?.message ?? error) + '; input release unconfirmed: ' + String(releaseError?.message ?? releaseError)); }
+      }
+      return failure(index, step.method, error);
+    }
     completedEffect ||= effect;
     completed.push({index, method: step.method, receipt: receipt ?? null});
     // Keyboard methods return no action receipt. Their input handlers can still
     // open a dialog, so observe it before dispatching the next operation.
     let dialog = pageResult ? null : receipt?.dialog;
     if (effect && (receipt == null || pageResult)) {
-      try { dialog = (await page.info()).dialog; }
+      if (holdingInput) inputReleased = false;
+      try { dialog = (await page.info()).dialog; if (holdingInput) inputReleased = !dialog; }
       catch (error) { return failure(index + 1, 'observation', error); }
     }
     if (dialog) return failure(index, step.method, 'answer the JavaScript dialog before continuing', {dialog});
@@ -79,14 +108,14 @@ let script = {js|async function nativeWorkflow(page, args) {
         && snapshot.charCodeAt(end - 1) <= 0xDBFF && snapshot.charCodeAt(end) >= 0xDC00
         && snapshot.charCodeAt(end) <= 0xDFFF) end--;
     const url = await page.url(), title = await page.title();
-    return {completed, effectStarted, completedEffect, failure: null, urlBefore: initialUrl, url, title,
+    return {completed, effectStarted, completedEffect, inputReleased, failure: null, urlBefore: initialUrl, url, title,
       snapshot: snapshot.slice(0, end), truncated: end < snapshot.length, chars: snapshot.length};
   } catch (error) { return failure(args.steps.length, 'snapshot', error); }
 }|js}
 
 type outcome = Completed of Yojson.Safe.t
   | Stopped of { receipt : Yojson.Safe.t; message : string;
-      effect_started : bool; completed_effect : bool }
+      effect_started : bool; completed_effect : bool; input_released : bool }
 let ( let* ) = Result.bind
 let object_fields allowed = function
   | `Assoc fields when List.for_all (fun (key,_) -> List.mem key allowed) fields
@@ -100,8 +129,12 @@ let bool key fields = let* value=get key fields in match value with `Bool value 
 let integer key fields = let* value=get key fields in match value with `Int value when value>=0 -> Ok value
   | _ -> Error ("workflow receipt has invalid " ^ key)
 let decode (request : Browser_lane.Native_workflow.t) receipt =
-  let* fields=object_fields ["completed";"effectStarted";"completedEffect";"failure";"urlBefore";"url";"title";"snapshot";"truncated";"chars"] receipt in
+  let* fields=object_fields ["completed";"effectStarted";"completedEffect";"inputReleased";"failure";"urlBefore";"url";"title";"snapshot";"truncated";"chars"] receipt in
   let* started=bool "effectStarted" fields in let* completed_effect=bool "completedEffect" fields in
+  let* input_released=bool "inputReleased" fields in
+  let* ()=if input_released || (started && List.exists (fun (step : Browser_lane.Native_workflow.step) ->
+      Browser_lane.Native_workflow.holds_input step.action) request.steps) then Ok ()
+    else Error "workflow claims a held input without a input-holding effect" in
   let* raw=get "completed" fields in
   let* completed=match raw with `List values -> Ok values | _ -> Error "workflow completed is not an array" in
   let methods=List.map (fun (step : Browser_lane.Native_workflow.step) ->
@@ -123,7 +156,7 @@ let decode (request : Browser_lane.Native_workflow.t) receipt =
   let* failure=get "failure" fields in
   match failure with
   | `Null ->
-    let* ()=if remaining=[] && started=has_effect then Ok () else Error "workflow success omitted requested steps" in
+    let* ()=if remaining=[] && started=has_effect && input_released then Ok () else Error "workflow success omitted requested steps or input release" in
     let* url_before=text "urlBefore" fields in
     let* ()=if url_before=request.expected_url then Ok () else Error "workflow starting URL does not match request" in
     let* _=text "url" fields in let* _=text "title" fields in let* _=text "snapshot" fields in
@@ -146,5 +179,5 @@ let decode (request : Browser_lane.Native_workflow.t) receipt =
         else if index+1=count && List.mem_assoc "dialog" failed then Ok has_effect
         else Error "workflow failure index does not match progress" in
     let* ()=if started=expected_started then Ok () else Error "workflow failed-step effect flag disagrees" in
-    Ok (Stopped {receipt;message;effect_started=started;completed_effect})
+    Ok (Stopped {receipt;message;effect_started=started;completed_effect;input_released})
   | _ -> Error "workflow failure must be null or an object"

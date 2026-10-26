@@ -18,7 +18,9 @@ let sent_of ~window_s script =
     if String.ends_with ~suffix text then String.sub text 0 (String.length text - String.length suffix)
     else failf "%S does not end with %S" text suffix in
   { step = find "// masc-ego: ";
-    args = Yojson.Safe.from_string (trailing (find "const args = ") ";");
+    args = (match Yojson.Safe.from_string (trailing (find "const args = JSON.parse(") ");") with
+      | `String encoded -> Yojson.Safe.from_string encoded
+      | _ -> failwith "the production args envelope must contain a JSON string");
     space = Yojson.Safe.from_string (trailing (find "const task = await taskSpace(") ");"); window_s }
 
 (* ego writes other lines too, such as its update notice; only the marked line is the answer. *)
@@ -643,8 +645,8 @@ let test_chooser_upload_respects_uncertain_pointer_release () =
       asked := sent.step :: !asked;
       match sent.step with
       | "tabs.list" -> answered tabs
-      | "page.drag" -> input_answer ~released:false ~error:(str "pointer release unconfirmed") ()
-      | "page.target_input" -> answered (obj ["error",str "pointer release unconfirmed";"pointerReleased",`Bool false])
+      | "page.drag" -> input_answer ~released:false ~error:(str "input release unconfirmed") ()
+      | "page.target_input" -> answered (obj ["error",str "input release unconfirmed";"pointerReleased",`Bool false])
       | "page.upload" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null])
       | other -> failf "%s unexpectedly dispatched %s" name other) in
     ignore (dispatch peer Live.Tabs_list (obj []));
@@ -656,7 +658,7 @@ let test_chooser_upload_respects_uncertain_pointer_release () =
     check bool (name ^ " blocks chooser upload before its click") true
       (String_util.contains_substring
         (before_effect "chooser upload after uncertain release" (upload (Lane.Action.Chooser_opener "#attach")))
-        "pointer release is unconfirmed");
+        "input release is unconfirmed");
     check int (name ^ " dispatches no chooser SDK script") before (List.length !asked);
     check string (name ^ " permits upload without pointer input") "served"
       (failure_kind (upload (Lane.Action.File_input "#file")));
@@ -786,7 +788,7 @@ let test_the_peer_serves_what_the_lane_table_says () =
         "after",(state ~url:"https://app.slack.com/" ~width:800)])
     | "page.read" | "page.elements" | "page.scene" -> page_answer ~label:"p1" (obj ["url",str "https://app.slack.com/"])
     | "page.native_workflow" -> answered (obj ["completed",`List [];"effectStarted",`Bool false;
-        "completedEffect",`Bool false;"failure",`Null;"urlBefore",str "https://app.slack.com/";"url",str "https://app.slack.com/";"title",str "Slack";
+        "completedEffect",`Bool false;"inputReleased",`Bool true;"failure",`Null;"urlBefore",str "https://app.slack.com/";"url",str "https://app.slack.com/";"title",str "Slack";
         "snapshot",str "root";"truncated",`Bool false;"chars",`Int 4])
     | "page.snapshot" -> answered (obj ["label",str "p1";"url",str "https://app.slack.com/";"title",str "Slack";
         "snapshot",str "root";"truncated",`Bool false;"chars",`Int 4])
@@ -1906,11 +1908,82 @@ let test_the_chooser_script_runs_in_node () =
   check bool "a click that opens no chooser is reported after the click" true
     (String_util.contains_substring (unknown "no chooser" (choose [path])) "opened no file chooser")
 
+let test_native_workflow_json_headers () =
+  let shim = {js|
+const page = {
+  url: async () => 'https://app.slack.com/', title: async () => 'Fixture',
+  info: async () => ({dialog:null}), snapshot: async () => 'root',
+  waitForEvent: () => new Promise(() => {}),
+  fetch: async (url, options) => ({own:Object.hasOwn(options.headers,'__proto__'),
+    value:options.headers.__proto__,plain:Object.getPrototypeOf(options.headers)===Object.prototype})
+};
+const taskSpace = async () => ({ownership:'agent',
+  tabs:async () => [{label:'p1',openedBy:'agent'}],page:() => page});
+|js} in
+  let run ~window_s script = match (sent_of ~window_s script).step with
+    | "space.open" -> answered (obj ["spaceId",`Int 51;"ownership",str "agent"])
+    | "tabs.list" -> answered tabs
+    | "page.native_workflow" -> Ok (in_node (shim ^ script))
+    | other -> failf "unexpected envelope fixture step %s" other in
+  let peer=match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.)
+      ~now ~space:"masc" ~version:"fixture" ~capture_directory:(capture_directory ()) with
+    | Ok value -> value | Error detail -> fail detail in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let args=obj ["tabId",`Int 1;"expectedUrl",str "https://app.slack.com/";"maxChars",`Int 100;
+    "steps",`List [obj ["method",str "fetch";"url",str "/api";
+      "options",obj ["headers",obj ["__proto__",str "keep-me"]]]]] in
+  match dispatch peer Live.Page_native_workflow args with
+  | Error _ -> fail "the actual production envelope lost valid fetch data"
+  | Ok reply ->
+    let receipt=field "receipt" (List.hd (Yojson.Safe.Util.to_list (field "completed" reply))) in
+    check bool "special header remains an own data property" true (field "own" receipt = `Bool true);
+    check string "header bytes are preserved" "keep-me" (text (field "value" receipt));
+    check bool "data never changes the headers prototype" true (field "plain" receipt = `Bool true)
+
+let test_native_workflow_pointer_ownership () =
+  List.iter (fun (method_,fields) -> List.iter (fun mode ->
+    let issued=ref 0 in
+    let peer=opened (fun sent -> match sent.step with
+      | "tabs.list" -> answered tabs
+      | "page.native_workflow" ->
+        incr issued;
+        if !issued=1 then match mode with
+          | `Lost -> Error (Peer.Unobserved "lost native workflow result")
+          | `Unreleased|`Released -> answered (obj ["completed",`List [];"effectStarted",`Bool true;
+              "completedEffect",`Bool false;"inputReleased",`Bool (mode=`Released);
+              "failure",obj ["index",`Int 0;"method",str method_;"message",str "SDK failed"]])
+        else answered (obj ["completed",`List [];"effectStarted",`Bool false;"completedEffect",`Bool false;
+          "inputReleased",`Bool true;"failure",`Null;"urlBefore",str "https://app.slack.com/";
+          "url",str "https://app.slack.com/";"title",str "Slack";"snapshot",str "root";"chars",`Int 4;"truncated",`Bool false])
+      | other -> failf "unexpected workflow fixture step %s" other) in
+    ignore (dispatch peer Live.Tabs_list (obj []));
+    let call steps=dispatch peer Live.Page_native_workflow (obj ["tabId",`Int 1;
+      "expectedUrl",str "https://app.slack.com/";"maxChars",`Int 1000;"steps",`List steps]) in
+    let first=call [obj (("method",str method_)::fields)] in
+    (match first with Error (Live.Outcome_unknown _) -> ()
+     | Ok _|Error (Live.Before_effect _|Live.Partial_failure _) -> fail "lost input result changed its effect classification");
+    (match mode,call [] with
+     | `Released,Ok _ -> check int "confirmed release permits the next original request" 2 !issued
+     | (`Lost|`Unreleased),Error (Live.Before_effect _) ->
+       check int "unknown release never dispatches another workflow" 1 !issued
+     | (`Lost|`Unreleased),Ok _|`Released,Error _|(`Lost|`Unreleased),Error (Live.Partial_failure _|Live.Outcome_unknown _) ->
+       fail "native input ownership did not survive the workflow boundary");
+    ignore (dispatch peer Live.Tabs_list (obj []))) [`Lost;`Unreleased;`Released])
+    ["dragAndDrop",["selector",str "#source";"destination",str "#target"];
+     "click",["selector",str "#source"];
+     "dblclick",["selector",str "#source"];
+     "mouse.click",["x",`Int 10;"y",`Int 20];
+     "press",["selector",str "#editor";"key",str "ControlOrMeta+Enter"];
+     "keyboard.press",["key",str "ControlOrMeta+Enter"];
+     "keyboard.type",["text",str "x"]]
+
 let () =
   run "browser_ego_peer" [
     "ego", [
+      test_case "production workflow envelope preserves special JSON header keys" `Quick test_native_workflow_json_headers;
       test_case "native drag preserves release and failure boundaries" `Quick test_native_drag_and_release;
-      test_case "chooser upload respects uncertain pointer release" `Quick test_chooser_upload_respects_uncertain_pointer_release;
+      test_case "native workflows retain input ownership after a lost result" `Quick test_native_workflow_pointer_ownership;
+      test_case "chooser upload respects uncertain input release" `Quick test_chooser_upload_respects_uncertain_pointer_release;
       test_case "the space opens by name and is held by number" `Quick test_the_space_opens_by_name_and_is_held_by_number;
       test_case "the spaces of a name are listed without opening one" `Quick test_the_spaces_of_a_name_are_listed_without_opening_one;
       test_case "the listing script runs under node" `Quick test_the_listing_script_runs_under_node;

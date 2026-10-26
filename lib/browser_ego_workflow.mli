@@ -5,7 +5,7 @@ val script : string
 
 type outcome = Completed of Yojson.Safe.t
   | Stopped of { receipt : Yojson.Safe.t; message : string;
-      effect_started : bool; completed_effect : bool }
+      effect_started : bool; completed_effect : bool; input_released : bool }
 (** Validates step indices/methods, progress/effect flags and final snapshot
     fields against the exact request. A malformed post-execution reply is
     unknown, never a proof that no effect started. *)

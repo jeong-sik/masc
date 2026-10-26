@@ -21,7 +21,7 @@ try {
  const origin=`http://localhost:${server.address().port}`,url=origin+'/start';
  const request={tabId:1,expectedUrl:url,steps:[
   {method:'fill',selector:'loc=css:#editor',text:'native workflow'},
-  {method:'selectOption',selector:'loc=css:#choice',value:'b'},
+  {method:'selectOption',selector:'loc=css:#choice',selectionJson:JSON.stringify({value:'b'})},
   {method:'click',selector:'loc=css:#submit'},
   {method:'waitForURL',url:origin+'/done?value=native%20workflow&choice=b'},
   {method:'waitForSelector',selector:'loc=css:#done',state:'visible'},
@@ -72,7 +72,7 @@ const refused=await nativeWorkflow(page,{...request,expectedUrl:request.expected
 assert.equal(refused.effectStarted,false);assert.equal(refused.completed.length,0);
 const stopped=await nativeWorkflow(page,{...request,expectedUrl:result.url,steps:[
  {method:'hover',selector:'loc=css:#done'},
- {method:'waitForSelector',selector:'loc=css:#never',state:'visible',timeoutMs:1},
+ {method:'waitForSelector',selector:'loc=css:#never',state:'visible',options:{timeout:1}},
  {method:'goto',url:request.expectedUrl}
 ]});
 assert.equal(stopped.completed.length,1);assert.equal(stopped.completedEffect,true);assert.equal(stopped.failure.index,1);

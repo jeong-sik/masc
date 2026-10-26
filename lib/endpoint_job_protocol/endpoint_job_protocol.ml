@@ -101,7 +101,8 @@ type request =
   | Release of { binding : binding; result_sha256 : Sha256.t }
 
 type exit_status = Exited of int | Signaled of int
-type phase = Queued | Starting | Running | Finished of exit_status
+type non_start = Cancelled_before_activation | Launch_rejected
+type phase = Queued | Starting | Running | Finished of exit_status | Not_started of non_start
 type extent = Growing of int64 | Sealed of { byte_length : int64; sha256 : Sha256.t }
 type refusal =
   | Unsupported | Unauthenticated | Owner_mismatch | Request_conflict
@@ -345,10 +346,20 @@ let read_extent value =
     let* sha256 = digest "extent.sha256" (get f "sha256") in Ok (Sealed {byte_length;sha256})
   | _ -> Error (Tag_unsupported "extent.state")
 
+let non_start_tag = function
+  | Cancelled_before_activation -> "cancelled_before_activation"
+  | Launch_rejected -> "launch_rejected"
+
+let read_non_start = function
+  | "cancelled_before_activation" -> Ok Cancelled_before_activation
+  | "launch_rejected" -> Ok Launch_rejected
+  | _ -> Error (Tag_unsupported "phase.reason")
+
 let phase_json = function
   | Queued -> `Assoc ["state",`String "queued"]
   | Starting -> `Assoc ["state",`String "starting"]
   | Running -> `Assoc ["state",`String "running"]
+  | Not_started reason -> `Assoc ["state",`String "not_started";"reason",`String (non_start_tag reason)]
   | Finished (Exited code) -> `Assoc ["state",`String "exited";"code",count (Int64.of_int code)]
   | Finished (Signaled signal) -> `Assoc ["state",`String "signaled";"signal",count (Int64.of_int signal)]
 let read_phase value =
@@ -362,6 +373,10 @@ let read_phase value =
   | "queued" -> let* _ = object_fields "phase" ~required:["state"] value in Ok Queued
   | "starting" -> let* _ = object_fields "phase" ~required:["state"] value in Ok Starting
   | "running" -> let* _ = object_fields "phase" ~required:["state"] value in Ok Running
+  | "not_started" ->
+    let* f = object_fields "phase" ~required:["state";"reason"] value in
+    let* reason = text "phase.reason" (get f "reason") in
+    let* reason = read_non_start reason in Ok (Not_started reason)
   | "exited" ->
     let* f = object_fields "phase" ~required:["state";"code"] value in
     let* code = nonnegative "phase.code" (get f "code") in
@@ -416,13 +431,18 @@ let read_result value =
     let* sha256 = digest "result.sha256" (get f "sha256") in Ok (Result_ready sha256)
   | _ -> Error (Tag_unsupported "result.state")
 
+let validate_empty_extent = function
+  | Growing bytes -> if bytes=0L then Ok () else invalid "status.not_started_output"
+  | Sealed {byte_length;sha256} ->
+    if byte_length=0L && sha256=hash "" then Ok () else invalid "status.not_started_output"
+
 let validate_response = function
-  | Status {revision;phase;result;stdout;stderr;_} ->
+  | Status {revision;phase;cancel_requested;result;stdout;stderr;_} ->
     let* () = match result with
       | Result_pending -> Ok ()
       | Result_ready _ -> (match phase with
           | Queued | Starting | Running -> invalid "status.result"
-          | Finished _ -> match stdout,stderr with
+          | Finished _ | Not_started _ -> match stdout,stderr with
             | Sealed _,Sealed _ -> Ok ()
             | Growing _,(Growing _ | Sealed _) | Sealed _,Growing _ -> invalid "status.result") in
     if revision<0L then invalid "revision"
@@ -431,6 +451,11 @@ let validate_response = function
       | Finished (Exited code) -> if code>=0 then Ok () else invalid "phase.code"
       | Finished (Signaled signal) -> if signal>0 then Ok () else invalid "phase.signal"
       | Starting | Running -> Ok ()
+      | Not_started reason ->
+          let* () = match reason with
+            | Cancelled_before_activation -> if cancel_requested then Ok () else invalid "status.cancel_requested"
+            | Launch_rejected -> Ok () in
+          let* () = validate_empty_extent stdout in validate_empty_extent stderr
       | Queued -> (match stdout,stderr with
           | Growing 0L,Growing 0L -> Ok ()
           | (Growing _ | Sealed _),(Growing _ | Sealed _) -> invalid "status.queued_output"))

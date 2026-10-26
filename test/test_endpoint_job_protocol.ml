@@ -33,6 +33,14 @@ let responses binding : P.response list =
      result=Result_ready (digest "original result manifest");
      stdout=Sealed {byte_length=4L;sha256=digest "data"};
      stderr=Sealed {byte_length=0L;sha256=digest ""}};
+   Status {binding;revision=2L;phase=Not_started Cancelled_before_activation;
+     cancel_requested=true;result=Result_pending;stdout=Growing 0L;stderr=Growing 0L};
+   Status {binding;revision=3L;phase=Not_started Launch_rejected;
+     cancel_requested=false;result=Result_pending;
+     stdout=Sealed {byte_length=0L;sha256=digest ""};stderr=Growing 0L};
+   Status {binding;revision=4L;phase=Not_started Cancelled_before_activation;
+     cancel_requested=true;result=Result_ready (digest "original non-start result manifest");
+     stdout=Sealed {byte_length=0L;sha256=digest ""};stderr=Sealed {byte_length=0L;sha256=digest ""}};
    Output {binding;revision=3L;stream=Stdout;offset=0L;data="data";
      extent=Sealed {byte_length=4L;sha256=digest "data"}};
    Output {binding;revision=2L;stream=Stderr;offset=9007199254740993L;data="\000\255";
@@ -215,6 +223,54 @@ let test_structural_refusals () =
   check bool "a process exit with incomplete streams cannot certify a releasable result" true
     (Result.is_error (P.response_to_json ready))
 
+let test_non_start_terminal () =
+  let s=spec () |> require in let b=binding s in
+  let empty : P.extent=P.Sealed {byte_length=0L;sha256=digest ""} in
+  let terminal ?(reason=P.Cancelled_before_activation) ?(cancel_requested=true)
+      ?(stdout=empty) ?(stderr=empty) ?(result=P.Result_pending) () : P.response =
+    Status {binding=b;revision=3L;phase=Not_started reason;cancel_requested;result;stdout;stderr} in
+  let request=P.Inspect b in
+  List.iter (fun reason ->
+    let response=terminal ~reason () in
+    let wire=P.response_to_json response |> get in
+    check bool "non-start is terminal without a fabricated exit code" true
+      (P.response_of_json wire=Ok response);
+    check bool "original terminal status remains bound to its request" true
+      (P.check_response ~minimum_revision:3L ~request response=Ok ());
+    let ready=terminal ~reason ~result:(Result_ready (digest "protected non-start result")) () in
+    check bool "durably empty streams and manifest can settle a non-start" true
+      (P.check_response ~minimum_revision:3L ~request ready=Ok ());
+    let pending=terminal ~reason ~stdout:(Growing 0L) () in
+    check bool "empty output may remain unsealed after non-start" true
+      (P.check_response ~minimum_revision:3L ~request pending=Ok ());
+    let wire=match wire with
+      | `Assoc fields -> `Assoc (List.map (fun (key,value) -> key,
+          if key="phase" then `Assoc ["state",`String "not_started";
+                                     "reason",`String "invented_failure"] else value) fields)
+      | _ -> fail "expected status object" in
+    check bool "unknown non-start reason never becomes cancellation or exit" true
+      (Result.is_error (P.response_of_json wire)))
+    P.[Cancelled_before_activation;Launch_rejected];
+  List.iter (fun response ->
+    check bool "non-start cannot invent output or skip cancellation/sealing authority" true
+      (Result.is_error (P.response_to_json response)))
+    [terminal ~cancel_requested:false ();
+     terminal ~stdout:(Growing 1L) ();
+     terminal ~stderr:(Sealed {byte_length=1L;sha256=digest "x"}) ();
+     terminal ~stdout:(Sealed {byte_length=0L;sha256=digest "non-empty bytes"}) ();
+     terminal ~stdout:(Growing 0L) ~result:(Result_ready (digest "unsealed result")) ()];
+  check bool "launch rejection does not fabricate a cancellation intent" true
+    (P.check_response ~minimum_revision:3L ~request
+       (terminal ~reason:Launch_rejected ~cancel_requested:false ())=Ok ());
+  let wire=P.response_to_json (terminal ()) |> get in
+  let extra_exit=match wire with
+    | `Assoc fields -> `Assoc (List.map (fun (key,value) -> key,
+        if key="phase" then `Assoc ["state",`String "not_started";
+           "reason",`String "cancelled_before_activation";"code",`String "125"] else value) fields)
+    | _ -> fail "expected status object" in
+  check bool "bootstrap exit code cannot be smuggled into non-start" true
+    (Result.is_error (P.response_of_json extra_exit))
+
 let () = run "endpoint job protocol"
   ["protected control boundary",[
     test_case "original binary bytes, domains, routes and exact integer offsets" `Quick test_exact_bytes_and_routes;
@@ -223,4 +279,5 @@ let () = run "endpoint job protocol"
     test_case "control responses cannot cross owner, route, boot, call or process authority" `Quick test_response_cannot_retarget_control;
     test_case "output read ranges and complete seals remain exact" `Quick test_output_ranges_and_seals;
     test_case "stale response, operation kind and result release remain distinct" `Quick test_revisions_response_kind_and_release;
-    test_case "invalid exec, version and lifecycle claims refuse explicitly" `Quick test_structural_refusals]]
+    test_case "invalid exec, version and lifecycle claims refuse explicitly" `Quick test_structural_refusals;
+    test_case "non-start settles without fabricated exit, output or result" `Quick test_non_start_terminal]]

@@ -55,6 +55,23 @@ keeper metadata remain ignored. [Invocation reconstruction](execution-reconstruc
 is explicitly post-run: wait_seconds600 is an observer envelope, not a product
 limit; Python version was observed afterward, not captured at process startup.
 
+For COMMENT 5657993607 F1, the original ignored run is
+`artifacts/schedule-actual-repair-20261027/runs/startup-recovery-2/`
+in the evidence checkout. Its `http/startup-failed-health.json`
+(`cb1b70d09952f6c6ed26603778f9f885c4c2c4f7d093105c23559c87de880fce`,
+26681 bytes) contains `schedule_runner.last_error`; the corresponding original
+HTTP body is `http/00067-response.bin`
+(`4b99fd4dc30a4cab7ff173fdac7bd98b2060138186ee008e35c06cdfbec5d4a9`,
+20963 bytes). The first [selected health observation](health-selected.json)
+retains that exact error value. `server-B.log`
+(`9461dcfd063f48dfe4601a2064e776ed4ab3467beb518077520d3ef0028cd879`,
+22440 bytes) records the failure at original line136 and recovery at line150;
+[selected log](server-B-selected.json) retains both lines verbatim. These
+committed selections are derivatives, not copies of the full original files.
+F2 remains unverified: the experiment did not capture the intermediate Due
+state between interrupted Running and the new accepted attempt. No source
+inference closes that observation gap.
+
 ## Limits and setup failure
 
 Running observation and SIGSTOP have a race. This is **not proof that all consumer

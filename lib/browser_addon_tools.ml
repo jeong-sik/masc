@@ -64,7 +64,7 @@ let prepare_read json =
       | Browser_selection.Exact B.Automation_route,_ -> Ok ()
       | Exact (Live_route _),(`Text|`Elements|`Frames) -> Ok ()
       | Exact (Live_route _),(`Dialog|`Html|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Console|`Network|`Cookies) ->
-          Error "a live browser reads text, elements and frames in a frame; a dialog shows on its BrowserTabs row"
+          Error "a live browser reads text, elements and frames in a frame; a dialog shows on its BrowserTabs/masc_browser_tabs row"
       | Automatic,_|Exact Stagehand_route,_ -> Error "frame and dialog reads require an explicit automation or live browser" in
     let* tab_id=tab request in
     let* mode=match mode with
@@ -112,10 +112,11 @@ let prepare_read json =
         | Automatic|Exact (Live_route _|Stagehand_route) -> Error "cookie reads require automation" in
       let* tab_id=tab request in prepared request Raw (B.Page_cookies {tab_id})
   | `Text -> prepared request Raw (B.Page_read {tab_id=request.tab_id;max_chars=Some max_chars})
-  (* The whole source of the top document; a browser that cannot read it
-     refuses at selection. *)
+  (* The source of the top document, never cut: past 1 MiB the reply says
+     htmlComplete false instead. A browser that cannot read it refuses at
+     selection. *)
   | `Html ->
-      let* ()=match cap with None -> Ok () | Some _ -> Error "maxChars applies to text; html returns the whole document source" in
+      let* ()=match cap with None -> Ok () | Some _ -> Error "maxChars applies to text; html returns the document source uncut, or none past 1 MiB" in
       let* tab_id=tab request in prepared request Raw (B.Page_document {tab_id})
   | `Elements -> prepared request elements_projection (B.Page_elements {tab_id=request.tab_id;filter})
   | `Frames|`Dialog -> Error "contextual read requires a frame or dialog mode"
@@ -171,7 +172,7 @@ let prepare ~upload_paths tool json =
         | Browser_selection.Exact B.Stagehand_route -> Ok ()
         | Exact B.Automation_route when B.verb_allowed_on_automation verb -> Ok ()
         | Exact B.Automation_route -> Error "automation supports observe with selected locate Exact Output; act/extract require stagehand"
-        | Automatic|Exact (B.Live_route _) -> Error "BrowserInstruct requires the observed automation or stagehand lane and tabId" in
+        | Automatic|Exact (B.Live_route _) -> Error "BrowserInstruct/masc_browser_instruct requires the observed automation or stagehand lane and tabId" in
       prepared request Raw verb
   | Tabs ->
       let* fields=fields ["lane";"clientId";"tabId";"requiredActions"] json in

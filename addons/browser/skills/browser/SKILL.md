@@ -39,7 +39,9 @@ results require a new decision. Retain `completed` progress on failure and
 never replay the sequence after uncertain effects.
 
 When the work needs the page's markup, `BrowserRead` `mode = "html"` returns
-the top document's whole source for an observed `tabId`, without `maxChars`.
+the top document's source (`outerHTML`) for an observed `tabId`, without
+`maxChars`. It is never cut: past 1 MiB, `html` is `null` with
+`htmlComplete: false` and `htmlUnavailableReason`.
 A live extension or BiDi connection and automation Firefox serve it; ego and
 Stagehand refuse it before dispatch.
 

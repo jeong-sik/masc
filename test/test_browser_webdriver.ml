@@ -1049,6 +1049,52 @@ let test_native_keyboard_and_double_click () = Eio_main.run (fun _ ->
     check int "rejected text sends no native release" 0 !released) ["a\tb";"a\nb";"a\rb";"\xee\x80\x89"])
 
 
+(* A caller's document read names its tab, so the owned browser selects that
+   tab first, as its other reads do; only the idle observer never selects. *)
+let test_requested_document_selects_its_tab () =
+  Eio_main.run (fun _ ->
+    let calls = ref [] in
+    let selected = ref [] in
+    let request ~method_ ~path ~body =
+      calls := (method_, path) :: !calls;
+      match method_, path with
+      | `POST, "/session" -> Ok (`Assoc ["sessionId", `String "owned";
+          "capabilities", `Assoc ["webSocketUrl", `String "ws://localhost:1234/session/owned"]])
+      | `GET, "/session/owned/window/handles" -> Ok (`List [`String "first"; `String "second"])
+      | `GET, "/session/owned/window" -> Ok (`String "first")
+      | `POST, "/session/owned/window" ->
+        (match body with
+         | Some (`Assoc fields) -> (match List.assoc_opt "handle" fields with
+             | Some (`String handle) -> selected := handle :: !selected | Some _ | None -> ())
+         | Some _ | None -> ());
+        Ok `Null
+      | `POST, "/session/owned/frame" -> Ok `Null
+      | `POST, "/session/owned/execute/sync" ->
+        Ok (`Assoc ["url", `String "https://example.org/app"; "title", `String "Document";
+                   "documentId", `String "document"; "html", `String "<html></html>";
+                   "htmlComplete", `Bool true; "observedAt", `Float 1000.])
+      | _ -> fail ("unexpected requested document request: " ^ path) in
+    let driver = Driver.create ~start_downloads ~request () in
+    ignore (Driver.execute driver (Lane.Session_open {headless=None}));
+    let second = match Driver.execute driver Lane.Tabs_list with
+      | Lane.Answered json ->
+        let tabs = Yojson.Safe.Util.(json |> member "data" |> to_list) in
+        (match List.find_opt (fun tab -> Yojson.Safe.Util.(member "active" tab) <> `Bool true) tabs with
+         | Some tab -> Yojson.Safe.Util.(tab |> member "id" |> to_int)
+         | None -> fail "the fixture lists a tab that is not active")
+      | _ -> fail "tabs list failed" in
+    calls := []; selected := [];
+    (match Driver.execute driver (Lane.Page_document {tab_id=second}) with
+     | Lane.Answered json ->
+       check int "the read answers for the tab it named" second
+         Yojson.Safe.Util.(json |> member "data" |> member "tabId" |> to_int)
+     | _ -> fail "a requested document read on another tab must be answered");
+    check (list string) "it selects that tab before reading" ["second"] !selected;
+    check bool "and reads after selecting" true
+      (List.rev !calls |> List.map snd
+       |> List.filter (fun path -> path = "/session/owned/window" || path = "/session/owned/execute/sync")
+       = ["/session/owned/window"; "/session/owned/execute/sync"]))
+
 let test_optional_document_never_selects_or_blocks_owner () =
   Eio_main.run (fun _ ->
     let calls = ref [] in
@@ -1233,6 +1279,7 @@ let () = run "native Firefox lane" ["behavior", [
   test_case "browser zoom is refused without driver input" `Quick test_zoom_requires_extension;
   test_case "native keyboard and double click guarded release" `Quick test_native_keyboard_and_double_click;
   test_case "optional document never selects or blocks owner" `Quick test_optional_document_never_selects_or_blocks_owner;
+  test_case "a requested document selects its tab" `Quick test_requested_document_selects_its_tab;
   test_case "download setup failure rolls back session" `Quick test_download_setup_rollback;
   test_case "semantic clicks use native input" `Quick test_semantic_click_uses_native_pointer_input;
   test_case "set_viewport resizes the window" `Quick test_set_viewport_resizes_the_window;

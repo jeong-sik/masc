@@ -466,6 +466,15 @@ let native_keyboard t session ~args ~action_name sources =
     | `Assoc fields -> Ok (`Assoc (("urlBefore",`String url_before)::("action",`String action_name)::fields))
     | _ -> Error (Protocol "invalid keyboard receipt")
 
+(* The source of the document [session] currently shows, as tab [id]. *)
+let read_document t session id =
+  let* data = script t session
+    (Browser_scene_script.runtime ^ "\n" ^ Browser_lane.Document.runtime
+     ^ "\nreturn browserDocument();") [] in
+  match data with
+  | `Assoc fields -> Ok (`Assoc (("tabId", `Int id)
+      :: ("clientId", `String ("automation:" ^ session.id)) :: fields))
+  | _ -> Error (Protocol "invalid document observation")
 let rec execute_unlocked t = function
   | Browser_lane.Session_open { headless } ->
     (match t.session with
@@ -643,26 +652,12 @@ let rec execute_unlocked t = function
     with_tab t session tab_id (fun () ->
       let* cap = Result.map_error (fun detail -> Protocol detail) (Browser_page_script.text_cap max_chars) in
       script t session Browser_page_script.text [`Int cap])
+  (* A caller's read selects its tab, which also leaves any frame, as the
+     other reads do. The idle observer reads without selecting
+     ([observe_document_if_idle]). *)
   | Browser_lane.Page_document {tab_id=id} ->
-    (* This optional reader must not run [session] recovery, select another
-       window, or reset a frame merely to acquire its observation. *)
-    (match t.session with
-     | None -> Error (Protocol "document observation has no existing browser session")
-     | Some session when session.pointer_state = Release_required ->
-       Error (Protocol "document observation waits for the existing action owner")
-     | Some session ->
-       let* current = call t session `GET "/window" None in
-       (match current with
-        | `String handle when List.assoc_opt handle session.handles = Some id ->
-          let* data = script t session
-            (Browser_scene_script.runtime ^ "\n" ^ Browser_lane.Document.runtime
-             ^ "\nreturn browserDocument();") [] in
-          (match data with
-           | `Assoc fields -> Ok (`Assoc (("tabId", `Int id)
-               :: ("clientId", `String ("automation:" ^ session.id)) :: fields))
-           | _ -> Error (Protocol "invalid document observation"))
-        | `String _ -> Error (Protocol "document observation never switches the owner's current tab")
-        | _ -> Error (Protocol "invalid current browser window")))
+    let* session = session t in
+    with_tab t session (Some id) (fun () -> read_document t session id)
   | Browser_lane.Page_interact { tab_id; frame_path; expected_url; action } ->
     let* session = session t in
     with_tab t session (Some tab_id) (fun () ->
@@ -947,6 +942,19 @@ let observe_document_if_idle t ~tab_id =
     Browser_lane.Refused "optional_document_observation_busy"
   else
     with_registered_session_lock t (fun () ->
-      match execute_unlocked t (Browser_lane.Page_document {tab_id}) with
+      (* This optional reader must not run [session] recovery, select another
+         window, or reset a frame merely to acquire its observation. *)
+      let observed = match t.session with
+        | None -> Error (Protocol "document observation has no existing browser session")
+        | Some session when session.pointer_state = Release_required ->
+          Error (Protocol "document observation waits for the existing action owner")
+        | Some session ->
+          let* current = call t session `GET "/window" None in
+          (match current with
+           | `String handle when List.assoc_opt handle session.handles = Some tab_id ->
+             read_document t session tab_id
+           | `String _ -> Error (Protocol "document observation never switches the owner's current tab")
+           | _ -> Error (Protocol "invalid current browser window")) in
+      match observed with
       | Ok data -> Browser_lane.Answered (`Assoc ["ok", `Bool true; "data", data])
       | Error error -> Browser_lane.Refused (error_message error))

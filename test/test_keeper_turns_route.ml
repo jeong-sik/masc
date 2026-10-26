@@ -252,7 +252,7 @@ let test_waiting_read_errors_stay_public () =
       Alcotest.(check bool) "the injected fleet read error remains public" true
         (List.exists is_injected_error items)
     | Some _ -> Alcotest.fail "waiting_errors must be an array"
-    | None -> Alcotest.fail "the fleet read error was dropped"
+    | None -> Alcotest.fail "the fleet read error was dropped")
 ;;
 
 let test_interrupt_rejects_invalid_or_conflicting_identity () =

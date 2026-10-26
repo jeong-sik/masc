@@ -315,6 +315,28 @@ let test_shim_error () =
     (String.starts_with ~prefix:"remote_ssh_path_jail_violation:" stderr)
 ;;
 
+let test_preflight_failure_provenance () =
+  with_eio @@ fun ~clock:_ ->
+  let base_path = temp_dir () in
+  List.iter
+    (fun (mode, prefix, detail) ->
+      let ssh_bin, _ = make_stub ~dir:base_path ~mode in
+      let state, _ = make_runner ~base_path ~ssh_bin in
+      match Keeper_sandbox_remote.check_workspace_preflight state with
+      | Ok () -> fail (mode ^ " preflight unexpectedly succeeded")
+      | Error error ->
+        check bool (mode ^ " failure category") true
+          (String.starts_with ~prefix error);
+        check bool (mode ^ " original failure retained") true
+          (contains detail error))
+    [ "shim-error", "remote_ssh_preflight_unavailable:",
+      "remote_ssh_path_jail_violation: outside root"
+    ; "ssh255", "remote_ssh_preflight_unavailable:", "connection refused"
+    ; "malformed", "remote_ssh_preflight_unavailable:", "remote_ssh_transport_error:"
+    ; "exit3", "remote_ssh_keeper_root_missing:", "exit=3"
+    ]
+;;
+
 let test_remote_paths_preserved_in_streams () =
   with_eio @@ fun ~clock:_ ->
   let base_path = temp_dir () in
@@ -519,6 +541,8 @@ let () =
           ; test_case "nonallowlisted env fails before spawn" `Quick
               test_nonallowlisted_env_fails_before_spawn
           ; test_case "shim error" `Quick test_shim_error
+          ; test_case "preflight retains transport and payload failures" `Quick
+              test_preflight_failure_provenance
           ; test_case "remote paths preserved in streams" `Quick
               test_remote_paths_preserved_in_streams
           ; test_case "cancellation reaps local ssh" `Quick

@@ -118,12 +118,17 @@ val check_preflight : ?force:bool -> t -> (unit, string) result
 
 val check_endpoint_preflight : t -> (unit, string) result
 (** Uncached endpoint-root half of the OpenSSH preflight. GitHub login uses
-    this before its one fixed Keeper-workspace bootstrap. *)
+    this before its one fixed Keeper-workspace bootstrap. A transport or shim
+    refusal during the framed check remains a preflight-unavailable error;
+    a missing-root error means the remote check actually executed and returned
+    a nonzero status. Probe failures retain their probe diagnostics. *)
 
 val check_workspace_preflight : t -> (unit, string) result
 (** Uncached Keeper-workspace structure check. It verifies only that the
     request root exists, so GitHub login is not blocked by payload tool or disk
-    readiness. Ordinary payloads use the full cached {!check_preflight}. *)
+    readiness. Transport or shim refusals remain preflight-unavailable errors,
+    rather than claiming that the Keeper root is absent. Ordinary payloads use
+    the full cached {!check_preflight}. *)
 
 val invalidate_preflight : t -> unit
 (** Forget this endpoint and Keeper's cached preflight after bootstrap or

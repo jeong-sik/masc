@@ -97,7 +97,7 @@ or proof for the later Page observation extension.
 
 [`page-observations-component-proof.json`](page-observations-component-proof.json)
 records the later URL/title/info/snapshot/events/timeout extension separately.
-The unchanged production workflow codec, emitter and receipt decoder compile
+The production workflow codec, emitter and receipt decoder compile as-is
 standalone with only namespace aliases and pass seven actual OCaml test cases.
 Thirty Node fixture tests exercise the emitted JavaScript, including consumed
 event-buffer uncertainty, malformed observation values and dialog stops. The

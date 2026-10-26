@@ -1,7 +1,7 @@
 (** #27898: same wire/model text, different explicit provider authority. *)
 open Llm_provider
 
-let catalog_text = {|
+let catalog_text_for_endpoint endpoint = Printf.sprintf {|
 [[providers]]
 id = "label-a"
 kind = "openai_compat"
@@ -21,7 +21,7 @@ capabilities_base = "openai_chat"
 [[providers]]
 id = "ollama"
 kind = "ollama"
-base_url = "http://127.0.0.1:11434"
+base_url = "%s"
 request_path = "/api/chat"
 auth = "none"
 capabilities_base = "ollama"
@@ -49,15 +49,16 @@ max_context_tokens = 32768
 supports_tools = true
 supports_tool_choice = true
 supports_required_tool_choice = true
-|}
+|} endpoint
 
-let catalog () = match Model_catalog.of_toml_string ~source:"label binding fixture" catalog_text with
+let catalog endpoint = match Model_catalog.of_toml_string ~source:"label binding fixture"
+  (catalog_text_for_endpoint endpoint) with
   | Ok catalog -> catalog | Error detail -> Alcotest.fail detail
-let with_catalog f =
+let with_catalog ?(endpoint="http://127.0.0.1:11434") f =
   let previous = Model_catalog.global () in
   Fun.protect ~finally:(fun () -> match previous with
     | Some catalog -> Model_catalog.set_global catalog | None -> Model_catalog.clear_global ())
-    (fun () -> Model_catalog.set_global (catalog ()); f ())
+    (fun () -> Model_catalog.set_global (catalog endpoint); f ())
 let config provider = match Runtime_model_string.parse_model_string (provider ^ ":overlap") with
   | Some config -> config | None -> Alcotest.fail "registered model label was refused"
 let caps config = match Provider_config.capabilities_for_config_model config with
@@ -110,6 +111,33 @@ let with_env key value f =
     (fun () ->
       (match value with None -> Unix.unsetenv key | Some value -> Unix.putenv key value);
       f ())
+
+let fresh_port () =
+  let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+  Unix.setsockopt socket Unix.SO_REUSEADDR true;
+  Unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback, 0));
+  let port = match Unix.getsockname socket with
+    | Unix.ADDR_INET (_, port) -> port
+    | _ -> Alcotest.fail "expected TCP socket" in
+  Unix.close socket;
+  port
+
+let with_mock_server handler f =
+  Eio_main.run @@ fun env ->
+  try
+    Eio.Switch.run @@ fun sw ->
+    let port = fresh_port () in
+    let socket = Eio.Net.listen env#net ~sw ~backlog:128 ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, port)) in
+    let server = Cohttp_eio.Server.make ~callback:handler () in
+    Eio.Fiber.fork ~sw (fun () -> Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+    let endpoint = Printf.sprintf "http://127.0.0.1:%d" port in
+    f ~sw ~net:env#net ~endpoint;
+    Eio.Switch.fail sw Exit
+  with
+  | Unix.Unix_error ((Unix.EPERM | Unix.EADDRINUSE), "bind", _) -> Alcotest.skip ()
+  | Exit -> ()
+
 let missing_endpoint () = with_env "CUSTOM_LLM_BASE_URL" None (fun () ->
   Alcotest.(check bool) "custom label cannot borrow discovery endpoint" true
     (Runtime_model_string.parse_model_string "custom:overlap"=None))
@@ -234,6 +262,26 @@ let projected_defaults () = with_catalog (fun () ->
               Alcotest.(check (list string)) "blank explicit pair cannot trigger catalog defaults"
                 [] (Provider_runtime_projection.default_execution_model_strings "fixture"))))))))
 
+let ollama_auto_uses_production_discovery_cache () =
+  let handler _conn req body =
+    ignore (Eio.Buf_read.(of_flow ~max_size:(1024 * 1024) body |> take_all) : string);
+    match Uri.path (Cohttp.Request.uri req) with
+    | "/health" -> Cohttp_eio.Server.respond_string ~status:`OK ~body:"ok" ()
+    | "/api/tags" -> Cohttp_eio.Server.respond_string ~status:`OK
+      ~body:{|{"models":[{"name":"qwen-local"}]}|} ()
+    | "/v1/models" -> Cohttp_eio.Server.respond_string ~status:`OK
+      ~body:{|{"data":[{"id":"qwen-local","owned_by":"ollama"}]}|} ()
+    | _ -> Cohttp_eio.Server.respond_string ~status:`Not_found ~body:"missing" ()
+  in
+  with_mock_server handler (fun ~sw ~net ~endpoint ->
+    Discovery_cache.set_env ~sw ~net;
+    with_catalog ~endpoint (fun () ->
+      match Runtime_model_string.parse_model_string "ollama:auto" with
+      | Some config ->
+        Alcotest.(check string) "production discovery resolves the exact Ollama model"
+          "qwen-local" config.Provider_config.model_id
+      | None -> Alcotest.fail "production discovery cache did not resolve ollama:auto"))
+
 let ollama_auto_uses_binding_endpoint () = with_catalog (fun () ->
   let calls = ref [] in
   let discover endpoint = calls := endpoint :: !calls; Some "qwen-local" in
@@ -265,6 +313,7 @@ let () = Alcotest.run "runtime model label binding"
    "catalog defaults",["missing default",`Quick,no_default;"declared default",`Quick,declared_default;
      "canonical alias",`Quick,alias_default;"supported is not default",`Quick,supported_is_not_default;
      "projection",`Quick,projected_defaults];
-   "ollama auto",["endpoint discovery",`Quick,ollama_auto_uses_binding_endpoint;
+   "ollama auto",["production cache",`Quick,ollama_auto_uses_production_discovery_cache;
+     "endpoint discovery",`Quick,ollama_auto_uses_binding_endpoint;
      "no discovered model",`Quick,ollama_auto_without_discovered_model_stays_refused;
      "declared default skips discovery",`Quick,declared_default_skips_discovery]]

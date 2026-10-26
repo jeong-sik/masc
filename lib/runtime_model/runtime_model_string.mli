@@ -21,7 +21,9 @@ val parse_model_string
     [discover] is consulted only for an Ollama [auto] selection without a
     declared default. It receives that binding's exact base URL, never a
     different provider's endpoint. A declared default never triggers discovery.
-    The default is {!Llm_provider.Discovery.first_discovered_model_id_for_url}.
+    The default is {!Discovery_cache.first_ollama_model_id_for_url}, which reuses
+    a healthy cached model or probes only that exact endpoint in the captured
+    Eio environment.
 
     A registered label carries the canonical binding provider id into the
     returned config. Its context window uses that config's provider/model

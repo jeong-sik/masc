@@ -71,3 +71,31 @@ let get_cached_or_refresh () =
 let cache_age_seconds () =
   let snapshot = (Atomic.get state).cache in
   Time_compat.now () -. snapshot.updated_at
+
+let model_of_status (status : endpoint_info) =
+  if not status.healthy then None
+  else
+    match status.models with
+    | model :: _ -> String_util.trim_nonempty model.id
+    | [] ->
+      (match status.props with
+       | Some props -> String_util.trim_nonempty props.model
+       | None -> None)
+
+let first_ollama_model_id_for_url url =
+  let cached = get_cached_or_refresh () in
+  match List.find_map (fun (status : endpoint_info) ->
+    if status.url = url then model_of_status status else None) cached with
+  | Some _ as model -> model
+  | None ->
+    (match (Atomic.get state).environment with
+     | None -> None
+     | Some { switch; net } ->
+       let declared =
+         Llm_provider.Discovery.endpoint
+           ~protocol:Llm_provider.Discovery.Ollama_native
+           ~capabilities:Llm_provider.Capabilities.ollama_capabilities url
+       in
+       (match Llm_provider.Discovery.discover ~sw:switch ~net ~endpoints:[ declared ] with
+        | [ status ] -> model_of_status status
+        | _ -> None))

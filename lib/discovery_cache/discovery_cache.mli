@@ -50,3 +50,10 @@ val get_cached_or_refresh : unit -> endpoint_info list
 
 val cache_age_seconds : unit -> float
 (** Wall-clock seconds since the last successful refresh. *)
+
+val first_ollama_model_id_for_url : string -> string option
+(** Return the first nonblank model of a healthy Ollama endpoint with this exact URL.
+    Reuse that endpoint's cached model when available; otherwise probe only that
+    endpoint through the captured Eio environment. Never borrow another endpoint's
+    model. [None] means there is no healthy exact endpoint/model or no captured
+    environment in which to probe. *)

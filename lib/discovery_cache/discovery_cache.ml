@@ -11,6 +11,7 @@
 
 type environment = {
   switch : Eio.Switch.t;
+  clock : float Eio.Time.clock_ty Eio.Resource.t;
   net : [`Generic | `Unix] Eio.Net.ty Eio.Resource.t;
 }
 
@@ -49,9 +50,9 @@ let empty_cache = { endpoints = []; models = []; updated_at = 0.0 }
 let state = Atomic.make { environment = None; cache = empty_cache }
 let cache_ttl = 30.0
 
-let set_env ~sw ~(net : [`Generic | `Unix] Eio.Net.ty Eio.Resource.t) =
+let set_env ~sw ~clock ~(net : [`Generic | `Unix] Eio.Net.ty Eio.Resource.t) =
   Atomic_util.update state (fun _ ->
-    { environment = Some { switch = sw; net }; cache = empty_cache })
+    { environment = Some { switch = sw; clock; net }; cache = empty_cache })
 
 let model_of_status (status : endpoint_info) =
   if not status.healthy then None
@@ -104,7 +105,7 @@ let publish_model_observation observed key model_id =
 let refresh_cache () =
   let observed = Atomic.get state in
   match observed.environment with
-  | Some { switch; net } ->
+  | Some { switch; net; clock = _ } ->
     let endpoints =
       Llm_provider.Provider_registry.active_llama_endpoints ()
     in
@@ -139,7 +140,7 @@ let cache_age_seconds () =
   let snapshot = (Atomic.get state).cache in
   Time_compat.now () -. snapshot.updated_at
 
-let first_ollama_model_id_for_url ?(headers=[]) url =
+let first_ollama_model_id_for_url ~timeout_s ?(headers=[]) url =
   let snapshot = Atomic.get state in
   let scope = scope_of_headers headers in
   let key = { url; protocol = Llm_provider.Discovery.Ollama_native; scope } in
@@ -154,13 +155,13 @@ let first_ollama_model_id_for_url ?(headers=[]) url =
   | None ->
     (match snapshot.environment with
      | None -> None
-     | Some { switch; net } ->
+     | Some { switch; clock; net } ->
        let declared =
          Llm_provider.Discovery.endpoint
            ~protocol:Llm_provider.Discovery.Ollama_native
            ~capabilities:Llm_provider.Capabilities.ollama_capabilities url
        in
-       (match Llm_provider.Discovery.discover ~headers ~sw:switch ~net ~endpoints:[ declared ] with
+       (match Llm_provider.Discovery.discover ~headers ~clock ~timeout_s ~sw:switch ~net ~endpoints:[ declared ] with
         | [ status ] ->
           (match model_of_status status with
            | Some model_id ->

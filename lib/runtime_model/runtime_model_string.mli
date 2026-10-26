@@ -9,7 +9,7 @@ val parse_model_string
   -> ?api_key_env_overrides:(string * string) list
   -> ?keep_alive:string
   -> ?num_ctx:int
-  -> ?discover:(headers:(string * string) list -> string -> string option)
+  -> ?discover:(headers:(string * string) list -> timeout_s:float -> string -> string option)
   -> string
   -> Llm_provider.Provider_config.t option
 (** Resolve a model label to a hot-path provider config. [None] when the
@@ -19,11 +19,12 @@ val parse_model_string
     Classification carries the selected binding into config construction.
 
     [discover] is consulted only for an Ollama [auto] selection without a
-    declared default. It receives the selected binding's authentication headers
-    and exact base URL, never another provider's endpoint. A declared default
-    never triggers discovery. The default reuses a fresh cache only for an
-    unauthenticated request. An authenticated request probes only that exact
-    endpoint with its selected headers, never a cache from another credential.
+    declared default and with a declared [discovery_timeout_s]. It receives
+    the selected binding's authentication headers, exact base URL and total
+    HTTP deadline, never another provider's endpoint or an implicit deadline.
+    A declared default or a missing discovery deadline never triggers discovery.
+    The default reuses only fresh observations from the same URL, native protocol
+    and exact header fingerprint scope. Plaintext credentials are not cached.
 
     A registered label carries the canonical binding provider id into the
     returned config. Its context window uses that config's provider/model

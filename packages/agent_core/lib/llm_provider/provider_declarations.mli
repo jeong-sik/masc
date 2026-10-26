@@ -18,6 +18,8 @@ type entry =
   ; request_path : string
   ; authentication : authentication
   ; default_model : string option
+  ; discovery_timeout_s : float option
+    (** Explicit total deadline for one discovery HTTP request. *)
   ; max_context : int option
   ; capabilities : Capabilities.capabilities
   ; credential_scope : string option

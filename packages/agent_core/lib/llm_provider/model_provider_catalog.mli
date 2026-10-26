@@ -9,6 +9,9 @@ type entry =
   ; request_path : string
   ; requires_api_key : bool
   ; default_model : string option
+  ; discovery_timeout_s : float option
+    (** Caller-declared total deadline for one discovery HTTP request.
+        [None] declares no deadline; it never grants an implicit unbounded one. *)
   ; capabilities_base : string option
   ; capabilities_base_by_identity_kind : (Provider_kind.t * string) list
     (** Wire-specific capability bases. Keys must also appear in

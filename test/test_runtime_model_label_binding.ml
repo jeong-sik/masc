@@ -24,6 +24,7 @@ kind = "ollama"
 base_url = "%s"
 request_path = "/api/chat"
 auth = "none"
+discovery_timeout_s = 4.0
 capabilities_base = "ollama"
 [[providers]]
 id = "ollama-keyed"
@@ -31,6 +32,7 @@ kind = "ollama"
 base_url = "%s"
 request_path = "/api/chat"
 auth = "api-key"
+discovery_timeout_s = 4.0
 capabilities_base = "ollama"
 [[models]]
 model_id = "overlap"
@@ -143,7 +145,7 @@ let with_mock_server handler f =
   try
     Eio.Switch.run @@ fun sw ->
     with_mock_server_on ~sw ~net:env#net handler (fun ~endpoint ->
-      f ~sw ~net:env#net ~endpoint;
+      f ~sw ~net:env#net ~clock:env#clock ~endpoint;
       Eio.Switch.fail sw Exit)
   with
   | Unix.Unix_error ((Unix.EPERM | Unix.EADDRINUSE), "bind", _) -> Alcotest.skip ()
@@ -245,7 +247,7 @@ let supported_is_not_default () = with_catalog (fun () ->
       let entry : Provider_catalog.entry =
         {id="label-a";aliases=[];kind=Provider_config.OpenAI_compat;
          base_url="https://a.invalid";request_path="/v1/chat/completions";
-         api_key_env="";auth=Provider_catalog.No_auth;default_model=None;max_context=None;
+         api_key_env="";auth=Provider_catalog.No_auth;default_model=None;discovery_timeout_s=None;max_context=None;
          capabilities={Capabilities.default_capabilities with supported_models=Some ["supported-not-default"]};
          credential_scope=None} in
       let overlay = match Provider_catalog.of_entries [entry] with
@@ -284,8 +286,8 @@ let ollama_auto_uses_production_discovery_cache () =
       ~body:{|{"data":[{"id":"qwen-local","owned_by":"ollama"}]}|} ()
     | _ -> Cohttp_eio.Server.respond_string ~status:`Not_found ~body:"missing" ()
   in
-  with_mock_server handler (fun ~sw ~net ~endpoint ->
-    Discovery_cache.set_env ~sw ~net;
+  with_mock_server handler (fun ~sw ~net ~clock ~endpoint ->
+    Discovery_cache.set_env ~sw ~net ~clock;
     with_catalog ~endpoint (fun () ->
       match Runtime_model_string.parse_model_string "ollama:auto" with
       | Some config ->
@@ -309,8 +311,8 @@ let ollama_auto_sends_resolved_credential () =
       ~body:{|{"data":[{"id":"qwen-keyed","owned_by":"ollama"}]}|} ())
     | _ -> Cohttp_eio.Server.respond_string ~status:`Not_found ~body:"missing" ()
   in
-  with_mock_server handler (fun ~sw ~net ~endpoint ->
-    Discovery_cache.set_env ~sw ~net;
+  with_mock_server handler (fun ~sw ~net ~clock ~endpoint ->
+    Discovery_cache.set_env ~sw ~net ~clock;
     with_env "MASC_TEST_OLLAMA_KEY" (Some "test-ollama-secret") (fun () ->
       with_catalog ~endpoint (fun () ->
         match Runtime_model_string.parse_model_string
@@ -336,8 +338,8 @@ let ollama_auto_does_not_reuse_unauthenticated_cache_for_keyed_binding () =
            ~body:{|{"models":[{"name":"public-model"}]}|} ())
     | _ -> Cohttp_eio.Server.respond_string ~status:`Not_found ~body:"missing" ()
   in
-  with_mock_server handler (fun ~sw ~net ~endpoint ->
-    Discovery_cache.set_env ~sw ~net;
+  with_mock_server handler (fun ~sw ~net ~clock ~endpoint ->
+    Discovery_cache.set_env ~sw ~net ~clock;
     let declared = Llm_provider.Discovery.endpoint
       ~protocol:Llm_provider.Discovery.Ollama_native
       ~capabilities:Llm_provider.Capabilities.ollama_capabilities endpoint in
@@ -367,8 +369,8 @@ let ollama_auto_renews_stale_selected_endpoint () =
       Cohttp_eio.Server.respond_string ~status:`OK ~body ()
     | _ -> Cohttp_eio.Server.respond_string ~status:`Not_found ~body:"missing" ()
   in
-  with_mock_server handler (fun ~sw ~net ~endpoint ->
-    Discovery_cache.set_env ~sw ~net;
+  with_mock_server handler (fun ~sw ~net ~clock ~endpoint ->
+    Discovery_cache.set_env ~sw ~net ~clock;
     let clock = Eio_mock.Clock.make () in
     Eio_mock.Clock.set_time clock 1000.;
     Time_compat.set_clock (clock :> float Eio.Time.clock_ty Eio.Resource.t);
@@ -409,8 +411,8 @@ let ollama_auto_does_not_reuse_openai_compatible_cache () =
         ~body:{|{"models":[{"name":"native-model"}]}|} ()
     | _ -> Cohttp_eio.Server.respond_string ~status:`Not_found ~body:"missing" ()
   in
-  with_mock_server handler (fun ~sw ~net ~endpoint ->
-    Discovery_cache.set_env ~sw ~net;
+  with_mock_server handler (fun ~sw ~net ~clock ~endpoint ->
+    Discovery_cache.set_env ~sw ~net ~clock;
     let declared = Llm_provider.Discovery.endpoint
       ~protocol:Llm_provider.Discovery.Openai_compatible
       ~capabilities:Llm_provider.Capabilities.openai_compat_chat_capabilities endpoint in
@@ -444,8 +446,8 @@ let ollama_auto_does_not_refresh_other_endpoints () =
       ~body:{|{"models":[{"name":"qwen-local"}]}|} ()
     | _ -> Cohttp_eio.Server.respond_string ~status:`Not_found ~body:"missing" ()
   in
-  with_mock_server selected_handler (fun ~sw ~net ~endpoint ->
-    Discovery_cache.set_env ~sw ~net;
+  with_mock_server selected_handler (fun ~sw ~net ~clock ~endpoint ->
+    Discovery_cache.set_env ~sw ~net ~clock;
     with_mock_server_on ~sw ~net other_handler (fun ~endpoint:other_endpoint ->
       let declared = Llm_provider.Discovery.endpoint
         ~protocol:Llm_provider.Discovery.Ollama_native
@@ -471,8 +473,8 @@ let ollama_auto_reuses_cold_public_observation () =
         ~body:{|{"models":[{"name":"public-model"}]}|} ()
     | _ -> Cohttp_eio.Server.respond_string ~status:`Not_found ~body:"missing" ()
   in
-  with_mock_server handler (fun ~sw ~net ~endpoint ->
-    Discovery_cache.set_env ~sw ~net;
+  with_mock_server handler (fun ~sw ~net ~clock ~endpoint ->
+    Discovery_cache.set_env ~sw ~net ~clock;
     with_catalog ~endpoint (fun () ->
       match Runtime_model_string.parse_model_string "ollama:auto",
         Runtime_model_string.parse_model_string "ollama:auto" with
@@ -514,8 +516,8 @@ let ollama_auto_scopes_cached_models_to_the_credential () =
             expected config.Provider_config.model_id
           | None -> Alcotest.fail "authenticated Ollama discovery was refused") [(); ()]))
   in
-  with_mock_server handler (fun ~sw ~net ~endpoint ->
-    Discovery_cache.set_env ~sw ~net;
+  with_mock_server handler (fun ~sw ~net ~clock ~endpoint ->
+    Discovery_cache.set_env ~sw ~net ~clock;
     resolve_twice ~endpoint "test-key-a" "model-a";
     resolve_twice ~endpoint "test-key-b" "model-b";
     Alcotest.(check (list (pair string int))) "each credential probes once, not globally or per call"
@@ -535,8 +537,8 @@ let ollama_auto_probe_uses_declared_deadline () =
       Eio.Promise.await pending
     | _ -> Cohttp_eio.Server.respond_string ~status:`Not_found ~body:"missing" ()
   in
-  with_mock_server handler (fun ~sw ~net ~endpoint ->
-    Discovery_cache.set_env ~sw ~net;
+  with_mock_server handler (fun ~sw ~net ~clock:_ ~endpoint ->
+    Discovery_cache.set_env ~sw ~net ~clock:(clock :> float Eio.Time.clock_ty Eio.Resource.t);
     with_catalog ~endpoint (fun () ->
       (match Eio.Time.with_timeout clock 5. (fun () ->
         Ok (Runtime_model_string.parse_model_string "ollama:auto")) with
@@ -557,8 +559,8 @@ let ollama_auto_without_declared_deadline_does_not_probe () =
         ~body:{|{"models":[{"name":"unbounded-model"}]}|} ()
     | _ -> Cohttp_eio.Server.respond_string ~status:`Not_found ~body:"missing" ()
   in
-  with_mock_server handler (fun ~sw ~net ~endpoint ->
-    Discovery_cache.set_env ~sw ~net;
+  with_mock_server handler (fun ~sw ~net ~clock ~endpoint ->
+    Discovery_cache.set_env ~sw ~net ~clock;
     with_catalog ~endpoint (fun () ->
       let previous = Provider_catalog.global () in
       Fun.protect
@@ -585,7 +587,7 @@ let ollama_auto_without_declared_deadline_does_not_probe () =
 
 let ollama_auto_uses_binding_endpoint () = with_catalog (fun () ->
   let calls = ref [] in
-  let discover ~headers:_ endpoint = calls := endpoint :: !calls; Some "qwen-local" in
+  let discover ~headers:_ ~timeout_s:_ endpoint = calls := endpoint :: !calls; Some "qwen-local" in
   let config = match Runtime_model_string.parse_model_string ~discover "ollama:auto" with
     | Some config -> config | None -> Alcotest.fail "discovered Ollama model was refused" in
   Alcotest.(check string) "auto resolves the model discovered for this binding"
@@ -594,13 +596,13 @@ let ollama_auto_uses_binding_endpoint () = with_catalog (fun () ->
     ["http://127.0.0.1:11434"] !calls)
 let ollama_auto_without_discovered_model_stays_refused () = with_catalog (fun () ->
   let calls = ref [] in
-  let discover ~headers:_ endpoint = calls := endpoint :: !calls; None in
+  let discover ~headers:_ ~timeout_s:_ endpoint = calls := endpoint :: !calls; None in
   Alcotest.(check bool) "missing discovered model does not invent a config" true
     (Runtime_model_string.parse_model_string ~discover "ollama:auto" = None);
   Alcotest.(check (list string)) "absence is checked only at the selected endpoint"
     ["http://127.0.0.1:11434"] !calls)
 let declared_default_skips_discovery () = with_catalog (fun () ->
-  let discover ~headers:_ _ = Alcotest.fail "declared default must not consult discovery" in
+  let discover ~headers:_ ~timeout_s:_ _ = Alcotest.fail "declared default must not consult discovery" in
   let config = match Runtime_model_string.parse_model_string ~discover "label-b:auto" with
     | Some config -> config | None -> Alcotest.fail "declared default was refused" in
   Alcotest.(check string) "declared default wins without discovery" "overlap" config.model_id)

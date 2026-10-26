@@ -55,8 +55,8 @@ let resolve_effective_api_key_env
 let make_binding_config
   ?temperature ?max_tokens ?system_prompt ?(api_key_env_overrides = [])
   ?keep_alive ?num_ctx
-  ?(discover = fun ~headers url ->
-    Discovery_cache.first_ollama_model_id_for_url ~headers url)
+  ?(discover = fun ~headers ~timeout_s url ->
+    Discovery_cache.first_ollama_model_id_for_url ~timeout_s ~headers url)
   ~model_id (binding : Runtime_binding.t)
   =
   let effective_api_key_env =
@@ -73,10 +73,13 @@ let make_binding_config
          | None ->
            (match binding.kind with
             | Ollama ->
-              discover
-                ~headers:(Llm_provider.Provider_config.auth_headers_for_kind_and_key
-                  ~kind:binding.kind ~api_key)
-                binding.base_url
+              (match binding.discovery_timeout_s with
+               | Some timeout_s ->
+                 discover
+                   ~headers:(Llm_provider.Provider_config.auth_headers_for_kind_and_key
+                     ~kind:binding.kind ~api_key)
+                   ~timeout_s binding.base_url
+               | None -> None)
             | Anthropic | Kimi | OpenAI_compat | Gemini | Glm -> None)) in
     match Runtime_binding.to_provider_config ?model binding with
     | Error _ -> None

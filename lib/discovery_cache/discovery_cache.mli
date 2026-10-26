@@ -30,11 +30,12 @@ type endpoint_info = Llm_provider.Discovery.endpoint_status
 
 val set_env :
   sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   unit
-(** Capture the Eio switch and net handle for later HTTP probing.
+(** Capture the Eio switch, clock and net handle for later HTTP probing.
     Called once at server init by [server_runtime_bootstrap]; safe to
-    re-call. Both capabilities are published together, the cache is
+    re-call. All capabilities are published together, the cache is
     invalidated, and an in-flight result from the prior environment cannot
     overwrite the new state. *)
 
@@ -51,11 +52,13 @@ val get_cached_or_refresh : unit -> endpoint_info list
 val cache_age_seconds : unit -> float
 (** Wall-clock seconds since the last successful refresh. *)
 
-val first_ollama_model_id_for_url : ?headers:(string * string) list -> string -> string option
+val first_ollama_model_id_for_url :
+  timeout_s:float -> ?headers:(string * string) list -> string -> string option
 (** Return the first nonblank model of a healthy Ollama endpoint with this exact URL.
     Reuse a fresh positive observation only for the same URL, native protocol and
-    header fingerprint scope. A stale or missing observation probes only that endpoint;
-    successful results are published by compare-and-set if the pre-probe state is still
+    header fingerprint scope. A stale or missing observation probes only that endpoint
+    with the caller-declared total HTTP deadline; no fallback deadline is chosen here.
+    Successful results are published by compare-and-set if the pre-probe state is still
     current. The scope stores a SHA-256 digest of the exact header list, never its
     plaintext. Never borrow another endpoint's model. [None] means there is no healthy
-    exact endpoint/model or no captured environment. *)
+    exact endpoint/model, no captured environment, or the probe exceeded its deadline. *)

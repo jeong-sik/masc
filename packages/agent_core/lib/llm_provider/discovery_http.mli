@@ -19,7 +19,9 @@
     surfaced defensively — discovery hits HTTP endpoints only, so
     CLI-subprocess terminals cannot reach this match. *)
 val get_json
-  :  ?headers:(string * string) list
+  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> ?timeout_s:float
+  -> ?headers:(string * string) list
   -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> string
@@ -29,7 +31,9 @@ val get_json
     transport failures retain explicit error context for endpoint-local
     observability. *)
 val probe_liveness
-  :  ?headers:(string * string) list
+  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> ?timeout_s:float
+  -> ?headers:(string * string) list
   -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> string

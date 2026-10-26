@@ -73,6 +73,7 @@ type provider_entry = Model_provider_catalog.entry =
   ; request_path : string
   ; requires_api_key : bool
   ; default_model : string option
+  ; discovery_timeout_s : float option
   ; capabilities_base : string option
   ; capabilities_base_by_identity_kind : (Provider_kind.t * string) list
   ; supports_parallel_tool_suppression : bool

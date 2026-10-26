@@ -84,9 +84,14 @@ type endpoint_status =
 (** Probe explicitly-declared endpoints and return their current status.
     Non-reachable endpoints are returned with [healthy = false].
     Does not raise for endpoint failures; all probe errors are captured in the
-    corresponding [failures] field. *)
+    corresponding [failures] field. When [timeout_s] is supplied, [clock] is
+    mandatory and bounds each complete HTTP request, including its response body.
+    Omitting [timeout_s] preserves the caller's existing unbounded behavior;
+    AGENT_CORE does not choose a fallback deadline. *)
 val discover
-  :  headers:(string * string) list
+  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> ?timeout_s:float
+  -> headers:(string * string) list
   -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> endpoints:endpoint list

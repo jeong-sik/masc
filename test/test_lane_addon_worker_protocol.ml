@@ -534,6 +534,33 @@ let cancelled_finalizer () = with_finalizer_fixture ~hooks:[] ~invocation:Lane_a
     check int "cancelled finalization keeps the one raw reply" 1 !raw;
     check string "cancelled effect is never replayed" "increment\n" (calls ()))
 
+(* A call cancelled while it waits behind another call for the RPC mutex
+   wrote nothing: the protocol keeps serving and the next call dispatches on
+   the same session. *)
+let queued_cancellation () = with_finalizer_fixture ~hooks:[] ~invocation:Lane_addon_types.Direct
+  (fun protocol calls ->
+    let holding,hold=Eio.Promise.create () and released,release=Eio.Promise.create () in
+    let queued_dispatched=ref false in
+    Eio.Switch.run (fun sw ->
+      let first=Eio.Fiber.fork_promise ~sw (fun () ->
+        Protocol.call_exported_tool ~on_result:(fun _ -> Eio.Promise.resolve hold (); Eio.Promise.await released)
+          protocol ~name:"increment" ~arguments:(`Assoc ["value",`Int 1])) in
+      Eio.Promise.await holding;
+      Eio.Fiber.first
+        (fun () -> ignore (Protocol.call_exported_tool ~on_dispatch:(fun () -> queued_dispatched:=true)
+          protocol ~name:"increment" ~arguments:(`Assoc ["value",`Int 2])))
+        (fun () -> Eio.Fiber.yield (); Eio.Fiber.yield ());
+      check bool "the queued call wrote nothing" false !queued_dispatched;
+      check bool "its cancellation leaves the protocol serving" false (Protocol.revoked protocol);
+      Eio.Promise.resolve release ();
+      check bool "the held call completes" true
+        (match Eio.Promise.await_exn first with Ok _ -> true | Error _ -> false));
+    check bool "the next call dispatches on the same session" true
+      (match Protocol.call_exported_tool protocol ~name:"increment" ~arguments:(`Assoc ["value",`Int 3]) with
+       | Ok _ -> true
+       | Error (Protocol.Invalid_contract _|Protocol_failed _|Host_refusal _|Invalid_observation _|Stopped) -> false);
+    check string "only the held and the next call reached the worker" "increment\nincrement\n" (calls ()))
+
 let actual_onepassword_package () = Eio_main.run (fun env ->
   let fixture_root=Filename.temp_dir "actual-onepassword-package-" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree fixture_root) (fun () ->
@@ -597,6 +624,7 @@ let actual_onepassword_package () = Eio_main.run (fun env ->
 
 let () = run "Addon engine-independent MCP admission"
   ["protocol",[test_case "actual 1Password package initializes through host validators" `Quick actual_onepassword_package;
+    test_case "a call cancelled while queued for the RPC mutex leaves the session serving" `Quick queued_cancellation;
     test_case "actual standalone stdio server preserves admission and hook contracts" `Quick standalone_protocol;
     test_case "private companion context and reserved port" `Quick companion_context_codec;
     test_case "companion grants preserve only validated public replies" `Quick (negotiated_companion "companion");

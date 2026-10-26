@@ -79,7 +79,9 @@ val call_exported_tool : ?on_result:(Mcp_protocol.Mcp_types.tool_result -> unit)
   arguments:Yojson.Safe.t -> (Mcp_protocol.Mcp_types.tool_result, error) result
 (** Call the target through its exact initialized contract, without replay.
     [on_dispatch] runs under the RPC mutex right before each RPC of this call is
-    written; a call that never ran it reached nothing in the worker.
+    written; a call that never ran it reached nothing in the worker, and its
+    cancellation leaves the protocol serving. A call cancelled after it wrote
+    revokes the protocol.
     Ordinary [on_result] sees each original RPC reply under the RPC mutex.
     Companion callbacks see only the validated public projection, with worker
     text and metadata removed. Companion exports require closed output schemas.

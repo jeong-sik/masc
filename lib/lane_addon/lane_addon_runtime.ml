@@ -2529,6 +2529,17 @@ let invoke_companion_export ~sw m ~config ~access ~principal ~companion_publish 
                | Eio.Cancel.Cancelled _ as exn -> C.cancel_invocation grant;raise exn
                | _ -> C.cancel_invocation grant;Error (Lane_addon_call_context.Transport_error "private invocation outcome unknown"))))
 
+(* What a call to an export can do to the worker's last observation, by the
+   worker's own word: [annotations.readOnlyHint] on the tool it listed. The
+   host cannot see worker-owned state, so it takes that word as it takes the
+   worker's rows. A tool that lists no hint may change anything. *)
+type export_effect = Reads_only | May_change
+let export_effect (tool : Mcp_protocol.Mcp_types.tool) =
+  match Option.bind tool.Mcp_protocol.Mcp_types.annotations
+      (fun annotations -> annotations.Mcp_protocol.Mcp_types.read_only_hint) with
+  | Some true -> Reads_only
+  | Some false | None -> May_change
+
 let call_exported_tool_on_owner ~companion_publish ~continuation ~on_complete ~on_result ~authorize ~principal ~config ~access ~reserved ~(export : tool_export) ~arguments =
     Fun.protect ~finally:on_complete (fun () ->
     let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
@@ -2547,8 +2558,14 @@ let call_exported_tool_on_owner ~companion_publish ~continuation ~on_complete ~o
     let* sw = match Eio_context.get_root_switch_opt () with
       | Some sw -> Ok sw | None -> Error (Unavailable "Add-on background owner is unavailable") in
     let worker_backend = backend ~store:m.store ~artifact_store:m.artifact_store () in
-    e.active_tool_calls <- e.active_tool_calls + 1;
-    Fun.protect ~finally:(fun () -> e.active_tool_calls <- e.active_tool_calls - 1) (fun () ->
+    (* A declared read cannot leave the last observation stale, so it neither
+       marks that observation refreshing nor holds back a machine consumer's
+       capture while it runs. Counting it would also strand a consumer refused
+       during the call: only the next committed observation wakes it again. *)
+    let declared = export_effect export.tool in
+    let in_flight = match declared with Reads_only -> 0 | May_change -> 1 in
+    e.active_tool_calls <- e.active_tool_calls + in_flight;
+    Fun.protect ~finally:(fun () -> e.active_tool_calls <- e.active_tool_calls - in_flight) (fun () ->
     try
       let principal = match principal with
         | Some principal -> principal
@@ -2565,12 +2582,17 @@ let call_exported_tool_on_owner ~companion_publish ~continuation ~on_complete ~o
       (* Worker-owned state is not an input source, so source-change hints alone
          cannot reveal a tool's effect. Refresh its observation after a completed
          reply, including a worker error that may have changed machine state.
+         A successful reply from a declared read is the exception: by the
+         worker's word the call changed nothing, so the last observation still
+         stands. An error reply from that tool still refreshes.
          Such a reply can also have admitted a durable host request. Signal the
          same instance's host cycle after RPC serialization has unwound; merely
          observing its rows never lists or dispatches that request. *)
       (match result with
-       | Ok _ -> if not e.stopping then (
-           wake e;
+       | Ok reply -> if not e.stopping then (
+           (match declared, reply.Mcp_protocol.Mcp_types.is_error with
+            | Reads_only, (None | Some false) -> ()
+            | Reads_only, Some true | May_change, (None | Some true | Some false) -> wake e);
            if Option.is_some connection.host then wake_host e)
        | Error (Lane_addon_call_context.Host_refusal _) -> ()
        | Error (Lane_addon_call_context.Transport_error detail) ->

@@ -458,8 +458,29 @@ let test_a_handler_exception_does_not_end_the_worker () =
       (`Assoc ["steps", `Int 10]) in
     check bool "and so does a call that moves the machine" false (stepped.is_error = Some true))
 
+(* The host takes no new observation after a successful call to a tool the
+   worker lists as read-only, so the listing must follow the contract: true
+   for exactly the four reads, false for every call that changes something. *)
+let test_the_listing_declares_the_reads () =
+  let reads tool = match C.call_effect tool with C.Reads_only -> true | C.Changes_state -> false in
+  check (list string) "the contract's reads"
+    ["masc_dos_inventory"; "masc_dos_meta"; "masc_dos_peek"; "masc_dos_screen"]
+    (C.all_of_dos_tool |> List.filter reads |> List.map C.dos_tool_name |> List.sort String.compare);
+  let base_path = Filename.temp_dir "dos-addon-worker-listing-" "" in
+  with_worker ~base_path (fun client ->
+    let tools = unwrap (Client.list_tools_all client) in
+    List.iter (fun tool ->
+      let name = C.dos_tool_name tool in
+      match List.find_opt (fun (listed : S.tool) -> String.equal listed.name name) tools with
+      | None -> fail (name ^ " is not listed")
+      | Some listed ->
+          check (option bool) (name ^ " lists its readOnlyHint") (Some (reads tool))
+            (Option.bind listed.annotations (fun annotations -> annotations.S.read_only_hint)))
+      C.all_of_dos_tool)
+
 let () = run "DOS standalone Add-on worker"
   ["stdio", [test_case "host admission, handoff, recovery and PNG" `Quick test_stdio_controller;
+             test_case "the listing declares the reads" `Quick test_the_listing_declares_the_reads;
              test_case "a handler exception does not end the worker" `Quick
                test_a_handler_exception_does_not_end_the_worker;
              test_case "a core exception while booting is a completed load" `Quick

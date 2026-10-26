@@ -103,6 +103,20 @@ waiting for emulator RPC. It rechecks instance/sequence after I/O. In-flight
 calls and observations mark cached screens as refreshing; unknown tool outcomes
 invalidate the prior stable observation and schedule reconciliation.
 
+A completed call schedules a new observation, because worker-owned state is not
+a host source and the host cannot see what the call changed. An export that the
+worker lists with `annotations.readOnlyHint: true` is the exception: the host
+takes the worker's own word that the call changes nothing. While it runs, that
+call does not mark the cached observation refreshing, and a successful reply
+leaves the observation standing. An error reply from it still schedules one, as
+does any reply from an export that lists no hint. The DOS worker sets the hint
+from `Machine_controller_contract.call_effect`: `masc_dos_screen`,
+`masc_dos_meta`, `masc_dos_inventory` and `masc_dos_peek` only read.
+`masc_dos_save` needs no controller but writes a checkpoint and an activity
+line, so it lists `false`. A worker that lists no hints keeps the old behaviour,
+and an older host ignores the hints, so a worker image and a host need not be
+upgraded together.
+
 Lane inventory reads worker publication separately from host activity settings.
 Unavailable observations are distinct from an unloaded machine. `/msx/activity`
 reads host policy, while worker availability is observed through the worker

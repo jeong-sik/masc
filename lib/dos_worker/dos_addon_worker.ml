@@ -60,10 +60,19 @@ let schemas () = List.map (fun tool ->
     | Ok definition -> tool, definition.Tool_definition_toml.schema
     | Error message -> invalid_arg message) Controller.all_of_dos_tool
 
-let definition (schema : Masc_domain.tool_schema) =
+(* [readOnlyHint] is this worker's word on whether a call changes anything it
+   holds. The host reads it to skip the observation it otherwise takes after a
+   call, so a seat that polls the screen does not copy a frame each time. *)
+let definition tool (schema : Masc_domain.tool_schema) =
   match S.tool_of_yojson (`Assoc ["name", `String schema.name;
     "description", `String schema.description; "inputSchema", schema.input_schema]) with
-  | Ok tool -> tool | Error message -> invalid_arg message
+  | Error message -> invalid_arg message
+  | Ok listed ->
+      let read_only = match Controller.call_effect tool with
+        | Controller.Reads_only -> true
+        | Controller.Changes_state -> false in
+      {listed with S.annotations = Some {S.title = None; read_only_hint = Some read_only;
+        destructive_hint = None; idempotent_hint = None; open_world_hint = None}}
 
 let create ~base_path () =
   let history = Machine_input_history.create ~encode:Dos_lane.entry_json () in
@@ -185,8 +194,8 @@ let create ~base_path () =
             ~extra:(Machine.png_fields ~width ~height ~png @ [Machine.core_field] @ pad observation) (Ok observation)) in
   let schemas = schemas () in
   let server = Server.create ~name:"masc-dos-addon" ~version:"0.1.0" () in
-  let server = List.fold_left (fun server (_tool, (schema : Masc_domain.tool_schema)) ->
-    Server.add_tool (definition schema) (fun _context _name _arguments ->
+  let server = List.fold_left (fun server (tool, (schema : Masc_domain.tool_schema)) ->
+    Server.add_tool (definition tool schema) (fun _context _name _arguments ->
       Ok (response (Tool_result.make_err ~tool_name:schema.name ~start_time:(Tool_timing.start ())
         ~class_:Tool_result.Policy_rejection ~effect_disposition:Tool_result.Proven_pre_effect
         "Machine calls require the host caller-context control port"))) server) server schemas in

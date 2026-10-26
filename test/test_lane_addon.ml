@@ -41,6 +41,7 @@ type fake = {
   export_arguments : Yojson.Safe.t list ref;
   controller : string option ref;
   admissions : Machine_controller_contract.admission option list ref;
+  call_hold : unit Eio.Promise.t option ref;
   start_gate : unit Eio.Promise.t * unit Eio.Promise.u;
   teardown_gate : unit Eio.Promise.t * unit Eio.Promise.u;
   world : Fake.t;
@@ -55,10 +56,19 @@ let fake_output : Types.output = {
                complete=true; detail=None}];
 }
 
+(* The fake worker lists this export with [readOnlyHint] true, as the DOS
+   worker lists masc_dos_screen. *)
+let declared_read = "fixture_read"
+let argument_set name arguments =
+  match arguments with
+  | `Assoc fields -> List.assoc_opt name fields = Some (`Bool true)
+  | _ -> false
+
 let make_backend ?observe_step () =
   let home = Fake.docker "engine-a" in
   let state = { bindings=Hashtbl.create 4; calls=Hashtbl.create 4; stops=Hashtbl.create 4; modes=Hashtbl.create 4;
                 recovery=ref []; principals=ref []; export_arguments=ref []; controller=ref None; admissions=ref [];
+                call_hold=ref None;
                 start_gate = Eio.Promise.create (); teardown_gate = Eio.Promise.create ();
                 world = Fake.create home; home } in
   let proven ~engine work =
@@ -81,8 +91,10 @@ let make_backend ?observe_step () =
             "additionalProperties",`Bool false]
         | _ -> `Assoc ["type",`String "object"] in
       let exported_tools = List.map (fun name ->
-        match Mcp_protocol.Mcp_types.tool_of_yojson (`Assoc ["name",`String name;
-          "inputSchema",input_schema]) with
+        let annotations = if name = declared_read
+          then ["annotations", `Assoc ["readOnlyHint", `Bool true]] else [] in
+        match Mcp_protocol.Mcp_types.tool_of_yojson (`Assoc (["name",`String name;
+          "inputSchema",input_schema] @ annotations)) with
         | Ok tool -> tool | Error message -> fail message) package.exported_tools in
       let connection : Runtime.For_testing.connection = {browser=None;
         await_exit = (fun () -> Eio.Fiber.await_cancel ());
@@ -99,8 +111,12 @@ let make_backend ?observe_step () =
               Hashtbl.replace state.calls (instance_id ^ "/export") 1;
               Eio.Promise.await released
             end;
+            Option.iter Eio.Promise.await !(state.call_hold);
             if package.id = "export-error" then
               Error (Lane_addon_call_context.Transport_error "response lost after possible mutation")
+            else if argument_set "fail" arguments then
+              Ok {(Mcp_protocol.Mcp_types.tool_result_of_text instance_id) with
+                  Mcp_protocol.Mcp_types.is_error = Some true}
             else Ok (Mcp_protocol.Mcp_types.tool_result_of_text instance_id) in
           match authorize with
           | None -> invoke None
@@ -2237,7 +2253,80 @@ let test_machine_notices_keep_effect_order () =
     check (list (pair string string)) "effect order and host authors are preserved"
       ["first-actor","first effect"; "second-actor","second effect"] !published)
 
+(* A worker's own [readOnlyHint] covers its observation. A declared read never
+   marks the last observation refreshing, and a successful one takes no new
+   observation. An error from that read, and any call to an export that
+   declares nothing, still take one. The wakes are counted while the observer
+   is held inside an earlier observation, so each one stays visible as the
+   pending observation or a coalesced wake instead of racing to completion. *)
+let test_a_declared_read_keeps_the_last_observation () =
+  let held_observation = ref None in
+  with_fixture ~observe_step:(fun call -> match !held_observation with
+      | Some (held, gate) when call = held -> Eio.Promise.await gate
+      | Some _ | None -> ())
+    (fun env sw config dir state ->
+  let clock = Eio.Stdenv.clock env in
+  let declared_write = "fixture_write" in
+  let id = attach_exporting config dir "declared-read" [declared_read; declared_write] in
+  let access = Lane_addon_sources.Operator_configuration in
+  let exports () = (unwrap (Runtime.tool_export_reading ~config ~access ~reserved:[])).exports in
+  await clock (fun () -> List.length (exports ()) = 2);
+  let call name arguments =
+    let export = List.find (fun (export : Runtime.tool_export) -> export.tool.name = name) (exports ()) in
+    match Runtime.call_exported_tool ~config ~access ~reserved:[] ~export ~arguments with
+    | Ok reply -> reply
+    | Error _ -> fail (name ^ " was not answered") in
+  let seq () = int "observation_seq" (instance config id) in
+  let refreshing () = match Runtime.observation_for_export ~config ~access ~name:declared_read with
+    | Ok (Some snapshot) -> snapshot.refreshing
+    | Ok None -> fail "the attached export has no observation"
+    | Error refusal -> fail (Runtime.export_refusal_message refusal) in
+  let settled_at expected = await clock (fun () -> seq () = expected && not (refreshing ())) in
+  settled_at 1;
+  let while_held name inside =
+    let hold, release = Eio.Promise.create () in
+    state.call_hold := Some hold;
+    let before = List.length !(state.export_arguments) in
+    let running = Eio.Fiber.fork_promise ~sw (fun () -> call name (`Assoc [])) in
+    await clock (fun () -> List.length !(state.export_arguments) > before);
+    inside ();
+    state.call_hold := None;
+    Eio.Promise.resolve release ();
+    ignore (Eio.Promise.await_exn running : Mcp_protocol.Mcp_types.tool_result) in
+  while_held declared_read (fun () ->
+    check bool "a declared read in flight leaves the observation stable" false (refreshing ()));
+  while_held declared_write (fun () ->
+    check bool "a write in flight marks the observation refreshing" true (refreshing ()));
+  settled_at 2;
+  let gate, open_gate = Eio.Promise.create () in
+  let held = Hashtbl.find state.calls id + 1 in
+  held_observation := Some (held, gate);
+  ignore (unwrap (dispatch config Runtime.Observe ["instance_id", `String id]));
+  await clock (fun () -> Hashtbl.find state.calls id = held);
+  let base = int "coalesced_wakes" (instance config id) in
+  let wakes () =
+    let current = instance config id in
+    (if member "observation_pending" current = `Bool true then 1 else 0)
+    + int "coalesced_wakes" current - base in
+  check Alcotest.int "the held observer owes nothing yet" 0 (wakes ());
+  let read = call declared_read (`Assoc []) in
+  check bool "the declared read succeeds" true (read.Mcp_protocol.Mcp_types.is_error <> Some true);
+  check Alcotest.int "a successful declared read takes no new observation" 0 (wakes ());
+  let failed = call declared_read (`Assoc ["fail", `Bool true]) in
+  check bool "the declared read can answer with an error" true
+    (failed.Mcp_protocol.Mcp_types.is_error = Some true);
+  check Alcotest.int "an error from a declared read still takes one" 1 (wakes ());
+  ignore (call declared_write (`Assoc []) : Mcp_protocol.Mcp_types.tool_result);
+  check Alcotest.int "a call to an export that declares nothing still takes one" 2 (wakes ());
+  held_observation := None;
+  Eio.Promise.resolve open_gate ();
+  settled_at 4;
+  check Alcotest.int "the two owed wakes ran as one observation" (held + 1) (Hashtbl.find state.calls id);
+  detach config id;
+  await_phase clock config id "detached")
+
 let () = run "Lane Add-on runtime" ["optional extension", [
+  test_case "a declared read keeps the last observation" `Quick test_a_declared_read_keeps_the_last_observation;
   test_case "machine notices keep effect order" `Quick test_machine_notices_keep_effect_order;
   test_case "machine source dependencies reject cycles" `Quick test_machine_dependencies_reject_cycles;
   test_case "machine activity applies to worker calls" `Quick test_machine_activity_applies_to_worker_calls;

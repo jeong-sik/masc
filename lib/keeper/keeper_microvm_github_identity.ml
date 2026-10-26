@@ -173,7 +173,25 @@ let read_snapshot ~root ~base_path ~keeper_name ~backend ~network_mode =
           | [] -> Error (Invalid_snapshot "snapshot path is empty")
           | [(leaf, permissions)] ->
             with_child ~parent ~parent_permissions ~leaf ~permissions (fun child _ names ->
-              if List.exists (fun name -> not (List.mem name ["hosts.yml"; "config.yml"; "gitconfig"])) names
+              (* The generic inventory's held stat is captured after its
+                 enumeration. Enumerate again after our metadata baseline so
+                 an entry inserted in that first enumeration/stat gap cannot
+                 escape both the names and final metadata checks. *)
+              let baseline = Fs_compat.owned_inventory_root_stat child in
+              let sync_directory fd =
+                let current = Unix.fstat fd in
+                check_directory ~permissions:0o500 current;
+                if not (same_identity baseline current)
+                   || current.st_ctime <> baseline.st_ctime || current.st_mtime <> baseline.st_mtime
+                   || current.st_size <> baseline.st_size || current.st_nlink <> baseline.st_nlink
+                then raise Snapshot_directory_changed;
+                Unix.fsync fd in
+              let* second = Fs_compat.with_owned_directory_inventory_if_present
+                  ~owner_uid:(Unix.getuid ()) ~inventory_root:child ~sync_directory
+                  (Fs_compat.owned_inventory_root_path child) (fun _ names -> names)
+                |> filesystem_result in
+              if second <> Some names then Error (Invalid_snapshot "snapshot inventory changed")
+              else if List.exists (fun name -> not (List.mem name ["hosts.yml"; "config.yml"; "gitconfig"])) names
               then Error (Invalid_snapshot "unknown snapshot entries")
               else
                 let* files = List.fold_left (fun acc leaf ->

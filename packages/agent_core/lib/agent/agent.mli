@@ -56,6 +56,11 @@ type serialization_executor = Agent_types.serialization_executor = { run : 'a. (
 
 type options = Agent_types.options =
   { provider_config : Llm_provider.Provider_config.t option
+  ; reasoning_source_change : Llm_provider.Reasoning_history_projection.source_change_policy
+    (** Defaults to [Reject_incompatible]. [Exclude_unselected] admits a
+        provider/model change without deleting canonical reasoning. Resume is
+        provisional; dispatch requires each foreign artifact to be outside the
+        target's replay selection. Active mandatory reasoning stays protected. *)
   ; stream_idle_timeout_s : float option
   ; first_event_timeout_s : float option
   ; body_timeout_s : float option
@@ -648,9 +653,12 @@ val run_with_handoffs_blocks
     Agent should retain opt-in provider-fit enforcement, caller-owned
     provider-message projection, and pre-dispatch serialization evidence.
     An exact provider target is frozen after the effective config overlay.
-    Incompatible stored reasoning returns a typed error before construction;
-    no history is projected or dropped. Explicit caller replay exclusion is
-    admitted only when the resolved dialect actually excludes replay. Dispatch
+    Incompatible stored reasoning returns a typed error before construction by
+    default. [options.reasoning_source_change = Exclude_unselected] explicitly
+    provisionally restores valid foreign artifacts while retaining the complete
+    checkpoint. Dispatch excludes only reasoning the target does not select.
+    [preserve_thinking = Some false] alone admits exclusion only when the
+    resolved dialect actually excludes replay. Dispatch
     revalidates the effective messages and target after hooks. Provider-unconfigured
     non-dispatch restoration remains supported. *)
 val resume

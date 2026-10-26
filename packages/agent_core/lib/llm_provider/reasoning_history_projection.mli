@@ -62,9 +62,25 @@ type error =
 
 val error_to_string : error -> string
 
+type source_change_policy =
+  | Reject_incompatible
+  | Exclude_unselected
+(** Caller-owned admission policy. [Exclude_unselected] admits foreign
+    reasoning only when the target dialect does not select it for replay.
+    Missing/corrupt provenance is never admitted by this policy. *)
+
+type continuity_boundary =
+  | Checkpoint_restore
+  | Provider_dispatch
+(** Restoration precedes caller input: opt-in source changes are provisional
+    there. Dispatch checks the final query boundary after input and hooks. *)
+
 type replay_disposition =
   | Preserve_reasoning
   | Caller_excluded_reasoning
+  | Source_change_admitted of reasoning_replay_drop list
+  (** Pending compatibility at restoration; actual wire exclusions at dispatch.
+      Each entry retains its canonical message index and original producer. *)
 
 type replay_continuity_admission =
   { capability : Reasoning_dialect.replay_capability
@@ -72,7 +88,9 @@ type replay_continuity_admission =
   }
 
 val validate_replay_continuity_for_provider_config
-  :  Provider_config.t
+  :  ?source_change_policy:source_change_policy
+  -> ?boundary:continuity_boundary
+  -> Provider_config.t
   -> Types.message list
   -> (replay_continuity_admission, error) result
 (** Validate canonical history and admit its stored reasoning producers before
@@ -80,12 +98,17 @@ val validate_replay_continuity_for_provider_config
     caller input projection. Uses the target's declared rotation rule,
     including every reasoning-bearing message and validated inline Chat carrier
     in mixed-producer history. A
-    target that cannot replay the old source does not silently discard it.
+    target that cannot replay the old source is rejected by default.
+    [Exclude_unselected] returns the incompatible indices/producers in the
+    disposition. At [Checkpoint_restore] this is provisional admission only;
+    at [Provider_dispatch] (the default) each must be outside the target's
+    replay selection. Opaque state and selected foreign reasoning remain errors.
+    The same policy must be supplied at resume and dispatch.
     Explicit [preserve_thinking = Some false] admits caller-owned exclusion only
     when the resolved dialect actually declares [No_replay]. A wire that ignores
     that knob cannot pretend to exclude replay. This decision is independent of
     temporary tool-array suppression. Structure is validated in either case.
-    Returns the resolved capability and the actual exclusion disposition.
+    Returns the resolved capability and the boundary-specific admission disposition.
     Never projects or mutates the history. *)
 
 (** [assistant_has_payload] states whether an Assistant message still has a

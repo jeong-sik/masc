@@ -63,6 +63,11 @@ type serialization_executor = { run : 'a. (unit -> 'a) -> 'a }
 
 type options =
   { provider_config : Llm_provider.Provider_config.t option
+  ; reasoning_source_change : Llm_provider.Reasoning_history_projection.source_change_policy
+    (** Defaults to [Reject_incompatible]. [Exclude_unselected] admits a
+        provider/model change without deleting canonical reasoning. Resume is
+        provisional; dispatch requires each foreign artifact to be outside the
+        target's replay selection. Active mandatory reasoning stays protected. *)
   ; stream_idle_timeout_s : float option
     (** Inter-line idle deadline applied to streaming HTTP responses.
         Threaded through {!Pipeline.stage_route} into

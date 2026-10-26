@@ -125,59 +125,24 @@ let content_has_reasoning =
     | Text _ | ToolUse _ | ToolResult _ | Image _ | Document _ | Audio _ -> false)
 ;;
 
+type source_change_policy =
+  | Reject_incompatible
+  | Exclude_unselected
+
+type continuity_boundary =
+  | Checkpoint_restore
+  | Provider_dispatch
+
 type replay_disposition =
   | Preserve_reasoning
   | Caller_excluded_reasoning
+  | Source_change_admitted of reasoning_replay_drop list
 
 type replay_continuity_admission =
   { capability : Reasoning_dialect.replay_capability
   ; disposition : replay_disposition
   }
 
-let validate_replay_continuity_for_provider_config (config : Provider_config.t) messages =
-  Result.bind (validate_and_classify messages) (fun classified ->
-    match Reasoning_dialect.replay_capability_for_provider_config config with
-    | Error detail -> Error (Invalid_reasoning_target detail)
-    | Ok replay_capability ->
-      let disposition = match config.preserve_thinking with
-        | Some false ->
-          (* A temporary absent tools array must not manufacture an exclusion
-             permission that disappears when a hook supplies tools. *)
-          (match (Reasoning_dialect.for_provider_config config).replay_policy with
-           | No_replay -> Caller_excluded_reasoning
-           | Tool_call_assistant_messages_all_history
-           | Tool_call_assistant_messages_latest_user_turn
-           | All_assistant_messages | Provider_opaque_state -> Preserve_reasoning)
-        | None | Some true -> Preserve_reasoning in
-      let rec check = function
-        | [] -> Ok {capability=replay_capability; disposition}
-        | (message_index, (message : Types.message), classification) :: rest ->
-          let ( let* ) = Result.bind in
-          let* inline_replay = Inline_content_replay.of_metadata
-              ~content:message.content message.metadata
-            |> Result.map_error (fun detail -> Invalid_response_replay {message_index;detail}) in
-          if not (content_has_reasoning message.content || Option.is_some inline_replay)
-          then check rest
-          else match message.role with
-          | System | User | Tool -> Error (Invalid_reasoning_artifact_role {message_index})
-          | Assistant ->
-            (match disposition with
-             | Caller_excluded_reasoning -> check rest
-             | Preserve_reasoning -> match classification with
-             | Types.Reasoning_source.Absent ->
-               Error (Unbound_reasoning_artifact {message_index})
-             | Invalid | Duplicate ->
-               Error (Invalid_reasoning_source {message_index; classification})
-             | Present stored ->
-               if Types.Reasoning_source.rotation_admits
-                   ~rotation_policy:replay_capability.rotation
-                   ~stored ~target:replay_capability.target
-               then check rest
-               else Error (Incompatible_reasoning_artifact
-                 {message_index; stored; target=replay_capability.target}))
-      in
-      check classified)
-;;
 
 let content_has_tool_use =
   List.exists (function
@@ -298,6 +263,80 @@ let replay_selected
       (match latest_user_message_index with
       | Some user_message_index -> message_index > user_message_index
       | None -> false)
+;;
+
+let validate_replay_continuity_for_provider_config
+    ?(source_change_policy = Reject_incompatible)
+    ?(boundary = Provider_dispatch)
+    (config : Provider_config.t) messages =
+  Result.bind (validate_and_classify messages) (fun classified ->
+    match Reasoning_dialect.replay_capability_for_provider_config config with
+    | Error detail -> Error (Invalid_reasoning_target detail)
+    | Ok replay_capability ->
+      let latest_user_message_index = find_latest_user_message_index classified in
+      let target_replay_policy = (Reasoning_dialect.for_provider_config config).replay_policy in
+      (* Temporary tools-array suppression cannot authorize a source loss that
+         would become mandatory when tools are supplied on the next subrequest. *)
+      let selected message_index (message : Types.message) =
+        match target_replay_policy with
+        | Provider_opaque_state -> true
+        | (No_replay | All_assistant_messages
+           | Tool_call_assistant_messages_all_history
+           | Tool_call_assistant_messages_latest_user_turn) as policy ->
+          replay_selected policy ~message_index ~latest_user_message_index
+            ~assistant_had_tool_call:(content_has_tool_use message.content)
+      in
+      let caller_excluded = match config.preserve_thinking with
+        | Some false ->
+          (* A temporary absent tools array must not manufacture an exclusion
+             permission that disappears when a hook supplies tools. *)
+          (match target_replay_policy with
+           | No_replay -> true
+           | Tool_call_assistant_messages_all_history
+           | Tool_call_assistant_messages_latest_user_turn
+           | All_assistant_messages | Provider_opaque_state -> false)
+        | None | Some true -> false in
+      let rec check exclusions = function
+        | [] ->
+          let disposition = match exclusions with
+            | [] -> if caller_excluded then Caller_excluded_reasoning else Preserve_reasoning
+            | _ :: _ -> Source_change_admitted (List.rev exclusions) in
+          Ok {capability=replay_capability; disposition}
+        | (message_index, (message : Types.message), classification) :: rest ->
+          let ( let* ) = Result.bind in
+          let* inline_replay = Inline_content_replay.of_metadata
+              ~content:message.content message.metadata
+            |> Result.map_error (fun detail -> Invalid_response_replay {message_index;detail}) in
+          if not (content_has_reasoning message.content || Option.is_some inline_replay)
+          then check exclusions rest
+          else match message.role with
+          | System | User | Tool -> Error (Invalid_reasoning_artifact_role {message_index})
+          | Assistant ->
+            (if caller_excluded then check exclusions rest
+             else match classification with
+             | Types.Reasoning_source.Absent ->
+               Error (Unbound_reasoning_artifact {message_index})
+             | Invalid | Duplicate ->
+               Error (Invalid_reasoning_source {message_index; classification})
+             | Present stored ->
+               if Types.Reasoning_source.rotation_admits
+                   ~rotation_policy:replay_capability.rotation
+                   ~stored ~target:replay_capability.target
+               then check exclusions rest
+               else match source_change_policy with
+                 | Reject_incompatible -> Error (Incompatible_reasoning_artifact
+                     {message_index; stored; target=replay_capability.target})
+                 | Exclude_unselected ->
+                   let admissible = match boundary with
+                     | Checkpoint_restore -> true
+                     | Provider_dispatch -> not (selected message_index message) in
+                   if admissible then
+                     check ({message_index; reason=Incompatible_reasoning_source stored}
+                       :: exclusions) rest
+                   else Error (Incompatible_reasoning_artifact
+                     {message_index; stored; target=replay_capability.target}))
+      in
+      check [] classified)
 ;;
 
 let project

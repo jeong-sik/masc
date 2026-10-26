@@ -2649,6 +2649,53 @@ let test_runtime_agent_resume_enforces_native_context_fit () =
   in
   check (list string) "resumed request paths" [ "/v1/messages/count_tokens" ] paths
 
+let test_runtime_source_change_preserves_history () =
+  Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+    let net = Eio.Stdenv.net env in
+    let original = Llm_provider.Provider_config.make ~kind:Llm_provider.Provider_config.Glm
+        ~model_id:"glm-5.3-flash" ~base_url:"https://old-provider.example" () in
+    let source = Llm_provider.Reasoning_dialect.reasoning_source_for_provider_config original
+        |> Result.get_ok in
+    let foreign = { (Agent_core.Types.assistant_msg "foreign-visible-answer") with
+      content=[Agent_core.Types.Thinking {content="foreign-private-reasoning";signature=None};
+        Agent_core.Types.Text "foreign-visible-answer"];
+      metadata=Llm_provider.Types.Reasoning_source.metadata source } in
+    let checkpoint = { (context_fit_checkpoint ()) with model=original.model_id;
+      provider_binding=Some source;
+      messages=[Agent_core.Types.user_msg "persisted question";foreign] } in
+    let before = Agent_core.Checkpoint.to_json checkpoint in
+    let caps = Llm_provider.Capabilities.{openai_compat_chat_capabilities with
+      supports_reasoning=true;reasoning_replay_override=Force_latest_user_turn_tool_calls} in
+    let target = Llm_provider.Provider_config.make ~kind:Llm_provider.Provider_config.OpenAI_compat
+        ~model_id:"deepseek-v4.1-flash" ~base_url:"https://target.example"
+        ~model_capabilities_override:caps ~max_tokens:64 () in
+    let config = { (Runtime_agent.default_config ~name:"source-change" ~provider_cfg:target
+        ~system_prompt:"continue" ~tools:[]) with initial_messages=checkpoint.messages } in
+    List.iter (fun resume ->
+      let calls = ref 0 in
+      let response : Agent_core.Types.api_response =
+        {id="continued";model=target.model_id;stop_reason=Agent_core.Types.EndTurn;
+         content=[Agent_core.Types.Text "continued"];usage=None;telemetry=None} in
+      let transport = Llm_provider.Llm_transport.custom {
+        complete_sync=(fun _ -> incr calls;{response=Ok response;latency_ms=None});
+        complete_stream=(fun ?on_telemetry:_ ~on_event:_ _ -> incr calls;Ok response)} in
+      let agent = if resume then
+          let prepared = Runtime_agent_context.prepare_resume ~config ~checkpoint in
+          (match Agent_core.Agent.resume ~net ~checkpoint:prepared.patched_checkpoint
+              ~config:prepared.agent_config ~options:{prepared.options with transport=Some transport} () with
+           | Ok agent -> agent | Error error -> fail (Agent_core.Agent_checkpoint.resume_error_to_string error))
+        else match Runtime_agent_context.builder ~net ~config ~transport () |> Agent_core.Builder.build_safe with
+          | Ok agent -> agent | Error error -> fail (Agent_core.Error.to_string error) in
+      Fun.protect ~finally:(fun () -> Agent_core.Agent.close agent) (fun () ->
+        (match Agent_core.Agent.run ~sw agent "new query" with
+         | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+        check int "runtime source change reaches one completion" 1 !calls;
+        check bool "canonical foreign reasoning retained" true
+          (List.mem foreign (Agent_core.Agent.state agent).messages));
+      check bool "original checkpoint unmodified" true
+        (before=Agent_core.Checkpoint.to_json checkpoint)
+    ) [false;true]))
+
 let projection_messages marker messages =
   let project_block = function
     | Agent_core.Types.Text _ -> Agent_core.Types.Text marker
@@ -3367,6 +3414,10 @@ let () =
             "runtime resume enforces native context fit"
             `Quick
             test_runtime_agent_resume_enforces_native_context_fit
+        ; test_case
+            "fresh and resumed source changes preserve canonical history"
+            `Quick
+            test_runtime_source_change_preserves_history
         ; test_case
             "fresh projection precedes measurement and dispatch"
             `Quick

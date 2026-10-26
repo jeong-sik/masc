@@ -272,6 +272,8 @@ let builder
     |> Agent_core.Builder.with_name config.name
     |> Agent_core.Builder.with_system_prompt config.system_prompt
     |> Agent_core.Builder.with_tools config.tools
+    |> Agent_core.Builder.with_reasoning_source_change
+         Llm_provider.Reasoning_history_projection.Exclude_unselected
     |> Agent_core.Builder.with_context_fit_admission
          (context_fit_admission config.provider_cfg)
   in
@@ -454,6 +456,8 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_core.Checkpoint.t)
     { Agent_core.Agent.default_options with
       hooks = (match config.hooks with Some hooks -> hooks | None -> Agent_core.Hooks.empty)
     ; provider_config = Some config.provider_cfg
+    ; reasoning_source_change =
+        Llm_provider.Reasoning_history_projection.Exclude_unselected
     ; stream_idle_timeout_s = config.stream_idle_timeout_s
     ; first_event_timeout_s = config.first_event_timeout_s
     ; body_timeout_s = config.body_timeout_s

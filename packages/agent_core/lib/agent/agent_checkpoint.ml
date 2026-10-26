@@ -24,6 +24,8 @@ type binding_disposition =
   | Declared_endpoint_rotation
   | Rebound_without_replay_loss
   | Replay_disabled_by_caller
+  | Rebound_pending_dispatch of
+      Llm_provider.Reasoning_history_projection.reasoning_replay_drop list
 
 let binding_disposition_to_string = function
   | Unconfigured_target -> "unconfigured_target"
@@ -32,6 +34,7 @@ let binding_disposition_to_string = function
   | Declared_endpoint_rotation -> "declared_endpoint_rotation"
   | Rebound_without_replay_loss -> "rebound_without_replay_loss"
   | Replay_disabled_by_caller -> "replay_disabled_by_caller"
+  | Rebound_pending_dispatch _ -> "rebound_pending_dispatch"
 ;;
 
 type resume_state =
@@ -43,7 +46,9 @@ type resume_state =
 
 (** Build restored state from a checkpoint.
     Returns state + context; the caller wraps these into Agent.t. *)
-let build_resume ~(checkpoint : Checkpoint.t) ?(eio_context = false) ?config ?provider_config ?context () =
+let build_resume ~(checkpoint : Checkpoint.t)
+    ?(source_change_policy = Llm_provider.Reasoning_history_projection.Reject_incompatible)
+    ?(eio_context = false) ?config ?provider_config ?context () =
   let ( let* ) = Result.bind in
   let* () =
     if checkpoint.version = Checkpoint.checkpoint_version then Ok ()
@@ -81,11 +86,12 @@ let build_resume ~(checkpoint : Checkpoint.t) ?(eio_context = false) ?config ?pr
       let provider = Agent_turn.provider_config_with_agent_config ~config:restored_config provider
         |> Llm_provider.Provider_config.freeze_for_request in
       let* admission = Llm_provider.Reasoning_history_projection.validate_replay_continuity_for_provider_config
-        provider checkpoint.messages
+        ~source_change_policy ~boundary:Checkpoint_restore provider checkpoint.messages
         |> Result.map_error (fun error -> Replay_rejected error) in
       let capability = admission.capability in
       let disposition = match admission.disposition, checkpoint.provider_binding with
         | Llm_provider.Reasoning_history_projection.Caller_excluded_reasoning, _ -> Replay_disabled_by_caller
+        | Source_change_admitted drops, _ -> Rebound_pending_dispatch drops
         | Preserve_reasoning, None -> Unrecorded_producer
         | Preserve_reasoning, Some stored ->
           if Reasoning_source.equal stored capability.target then Identical_source

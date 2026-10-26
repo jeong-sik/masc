@@ -45,7 +45,7 @@ let digest (plan : t) =
     | Network_policy {name} -> strings ["policy"; name]
   in
   let json = `Assoc
-    [ "schema", `String "masc.keeper-boot-plan.v1"
+    [ "schema", `String "masc.keeper-boot-plan.v2"
     ; "image", `String plan.image
     ; "memory_mib", `Int (Keeper_microvm_guest_size.memory_mib plan.guest_size.memory)
     ; "cpus", `Int (Keeper_microvm_guest_size.cpus_count plan.guest_size.cpus)
@@ -68,6 +68,7 @@ let expected_mounts (plan : t) =
   else plan.mounts
 
 type invalid_plan =
+  | Missing_executable
   | Duplicate_environment_key of string
   | Duplicate_label_key of string
   | Duplicate_mount_destination of string
@@ -103,7 +104,10 @@ let plan_errors (plan : t) =
   let destinations = List.map (function
     | Tmpfs {destination} | Host_dir {destination; _}
     | Named_volume {destination; _} -> destination) (expected_mounts plan) in
-  duplicate_errors (fun key -> Duplicate_environment_key key) environment_keys
+  (match plan.command with
+   | [] | "" :: _ -> [Missing_executable]
+   | _ :: _ -> [])
+  @ duplicate_errors (fun key -> Duplicate_environment_key key) environment_keys
   @ duplicate_errors (fun key -> Duplicate_label_key key) label_keys
   @ duplicate_errors (fun destination -> Duplicate_mount_destination destination) destinations
   @ duplicate_errors (fun constraint_ -> Duplicate_constraint constraint_) plan.isolation
@@ -128,6 +132,7 @@ let validate_boot ~plan ~lifecycle_labels ~execution_environment =
          then Some (Execution_environment_collision key) else None) execution_environment)
 
 let invalid_plan_message = function
+  | Missing_executable -> "command requires a nonempty executable"
   | Duplicate_environment_key key -> Printf.sprintf "duplicate environment key %S" key
   | Duplicate_label_key key -> Printf.sprintf "duplicate label key %S" key
   | Duplicate_mount_destination destination -> Printf.sprintf "duplicate mount destination %S" destination

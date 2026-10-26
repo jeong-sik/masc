@@ -166,12 +166,14 @@ let test_boot_projects_the_labelled_plan () =
   check (option string) "requested memory" (Some "2048m") (flag_value "--memory" argv);
   check (option string) "requested CPU" (Some "4") (flag_value "--cpus" argv);
   check (option string) "requested working directory" (Some plan.working_directory) (flag_value "--workdir" argv);
+  check (option string) "requested executable replaces the image entrypoint"
+    (Some "tail") (flag_value "--entrypoint" argv);
   check bool "argv labels the same plan it projects" true
     (List.mem (Plan.label_key ^ "=" ^ Plan.digest plan) argv);
   check bool "snapshot source is the plan's read-only mount" true
     (List.mem "/private-fixture/identity:/guest/identity:ro" argv);
-  check bool "requested command is the final argv" true
-    (List.rev (plan.image :: plan.command) = List.take 4 (List.rev argv))
+  check bool "requested arguments follow the image" true
+    (List.rev [plan.image; "-f"; "/dev/null"] = List.take 3 (List.rev argv))
 
 let test_ephemeral_routes_do_not_change_plan_identity () =
   let inherit_plan = {plan with network = Plan.Network_inherit} in
@@ -231,6 +233,8 @@ let test_renderer_rejects_order_sensitive_duplicates () =
 let test_renderer_rejects_implicit_and_execution_collisions () =
   let reject expected invalid =
     require_invalid_boot expected invalid ~lifecycle_labels:[] ~policy_proxy:None in
+  reject Plan.Missing_executable {plan with command = []};
+  reject Plan.Missing_executable {plan with command = [""]};
   reject (Plan.Duplicate_mount_destination Backend.scratch_guest_root)
     {plan with mounts = Plan.Tmpfs {destination = Backend.scratch_guest_root} :: plan.mounts};
   reject (Plan.Duplicate_constraint Backend.Drop_all_capabilities)

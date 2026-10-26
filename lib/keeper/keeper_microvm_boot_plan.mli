@@ -26,11 +26,14 @@ type t =
   }
 (** [environment] and [labels] contain only stable requested values. DNS,
     policy gateway/port, owner PID and start time belong to boot execution,
-    not to the plan. Credential mount paths are those of the guest snapshot. *)
+    not to the plan. Credential mount paths are those of the guest snapshot.
+    [command] is the exact init process: a nonempty executable followed by its
+    arguments. Boot overrides the image entrypoint with that executable. *)
 
 val label_key : string
 
 type invalid_plan =
+  | Missing_executable
   | Duplicate_environment_key of string
   | Duplicate_label_key of string
   | Duplicate_mount_destination of string

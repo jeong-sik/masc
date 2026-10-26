@@ -2551,9 +2551,9 @@ let test_shutdown_join_waits_for_inflight_schedule_intake () =
       Schedule_store.start_due_candidate
         config
         ~now:201.5
-        ~schedule_id:request.schedule_id
+        ~candidate:request
     with
-    | Ok running -> running
+    | Ok started -> started.request
     | Error error -> fail (Schedule_store.store_error_to_string error)
   in
   let intake_started, intake_started_u = Eio.Promise.create () in
@@ -2804,9 +2804,9 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
           Schedule_store.start_due_candidate
             config
             ~now:201.5
-            ~schedule_id:request.schedule_id
+            ~candidate:request
         with
-        | Ok running -> running
+        | Ok started -> started.request
         | Error err -> fail (Schedule_store.store_error_to_string err)
       in
       Atomic.set entry.fiber_wakeup false;
@@ -3199,9 +3199,9 @@ let test_terminal_retry_requires_acceptance_commit () =
       Schedule_store.start_due_candidate
         config
         ~now:202.0
-        ~schedule_id:request.schedule_id
+        ~candidate:request
     with
-    | Ok running -> running
+    | Ok started -> started.request
     | Error error -> fail (Schedule_store.store_error_to_string error)
   in
   let commit_calls = Atomic.make 0 in

@@ -350,29 +350,204 @@ let test_missing_recurrence_is_rejected () =
   | Ok _ -> fail "missing recurrence must be rejected"
 ;;
 
-let test_wake_record_roundtrip () =
+let wake_record_fixture attempt_identity : wake_record =
   let req = request () in
-  let wake =
-    { schedule_instance_id = req.schedule_instance_id
-    ; schedule_id = req.schedule_id
-    ; started_at = 201.0
-    ; finished_at = Some 202.0
-    ; due_at = req.due_at
-    ; payload_digest = payload_digest req.payload
-    ; status = Wake_succeeded
-    ; detail = Some (`Assoc [ "kind", `String "test.done" ])
-    ; error = None
-    }
-  in
+  { schedule_instance_id = req.schedule_instance_id
+  ; schedule_id = req.schedule_id
+  ; attempt_identity
+  ; settlement_kind = None
+  ; started_at = 201.0
+  ; finished_at = Some 202.0
+  ; due_at = req.due_at
+  ; payload_digest = payload_digest req.payload
+  ; status = Wake_succeeded
+  ; detail = Some (`Assoc [ "kind", `String "test.done" ])
+  ; error = None
+  }
+;;
+
+let wake_json_fields wake =
+  match wake_record_to_yojson wake with
+  | `Assoc fields -> fields
+  | _ -> fail "wake record must encode as an object"
+;;
+
+let decode_wake json =
+  match wake_record_of_yojson json with
+  | Ok wake -> wake
+  | Error error -> fail error
+;;
+
+let test_wake_record_roundtrip () =
+  let attempt_id = fresh_wake_attempt_id () in
+  let encoded_id = wake_attempt_id_to_string attempt_id in
+  (match wake_attempt_id_of_string encoded_id with
+   | Error error -> fail error
+   | Ok parsed ->
+     check string "factory ID is canonical" encoded_id
+       (wake_attempt_id_to_string parsed));
+  let wake = wake_record_fixture (Identified attempt_id) in
+  let attempt_fields = List.filter (fun (key, _) -> String.equal key "attempt_id")
+      (wake_json_fields wake) in
+  check int "one durable attempt ID is encoded" 1 (List.length attempt_fields);
+  (match attempt_fields with
+   | [ _, `String value ] -> check string "encoded attempt ID" encoded_id value
+   | _ -> fail "attempt_id must encode as one string field");
   match wake_record_to_yojson wake |> wake_record_of_yojson with
   | Error msg -> fail msg
   | Ok decoded ->
+    (match decoded.attempt_identity with
+     | Unidentified -> fail "roundtrip lost the persisted attempt identity"
+     | Identified actual ->
+       check string "attempt identity survives roundtrip" encoded_id
+         (wake_attempt_id_to_string actual));
     check string "status" "succeeded"
       (wake_status_to_string decoded.status);
     check (option (float 0.001)) "finished_at" wake.finished_at
       decoded.finished_at;
     check string "payload digest" wake.payload_digest
       decoded.payload_digest
+;;
+
+let test_missing_wake_attempt_id_stays_unidentified () =
+  let wake = wake_record_fixture Unidentified in
+  List.iter
+    (fun status ->
+       let wake = { wake with status;
+         finished_at = (match status with Wake_running -> None
+           | Wake_succeeded | Wake_failed -> Some 202.0) } in
+       let fields = wake_json_fields wake in
+       check bool "unidentified row emits no attempt_id field" false
+         (List.mem_assoc "attempt_id" fields);
+       let historical = `Assoc fields in
+       let first = decode_wake historical in
+       let second = decode_wake historical in
+       let roundtripped = decode_wake (wake_record_to_yojson first) in
+       List.iter
+         (fun decoded ->
+            (match decoded.attempt_identity with
+             | Unidentified -> ()
+             | Identified _ -> fail "reading historical evidence invented an attempt ID");
+            check string "historical row survives without added identity"
+              (Yojson.Safe.to_string historical)
+              (Yojson.Safe.to_string (wake_record_to_yojson decoded)))
+         [ first; second; roundtripped ])
+    [ Wake_running; Wake_succeeded; Wake_failed ]
+;;
+
+let reject_wake_attempt_fields label attempt_fields =
+  let fields = wake_json_fields (wake_record_fixture Unidentified) in
+  match wake_record_of_yojson (`Assoc (attempt_fields @ fields)) with
+  | Error _ -> ()
+  | Ok _ -> fail (label ^ " must not decode as a valid or unidentified attempt")
+;;
+
+let test_wake_attempt_id_rejects_null () =
+  reject_wake_attempt_fields "explicit null" [ "attempt_id", `Null ]
+;;
+
+let test_wake_attempt_id_rejects_invalid_types () =
+  List.iter (fun (label, value) ->
+      reject_wake_attempt_fields label [ "attempt_id", value ])
+    [ "integer", `Int 1; "boolean", `Bool true;
+      "object", `Assoc []; "array", `List [] ]
+;;
+
+let test_wake_attempt_id_rejects_invalid_uuid () =
+  let canonical = "018f8e7e-7b4c-7abc-8def-0123456789ab" in
+  (match wake_attempt_id_of_string canonical with
+   | Ok _ -> ()
+   | Error error -> fail ("invalid canonical UUID control: " ^ error));
+  List.iter (fun (label, value) ->
+      reject_wake_attempt_fields label [ "attempt_id", `String value ])
+    [ "empty UUID", ""; "malformed UUID", "not-an-attempt-id";
+      "UUIDv4", "018f8e7e-7b4c-4abc-8def-0123456789ab";
+      "noncanonical UUID", String.uppercase_ascii canonical ]
+;;
+
+let test_wake_attempt_id_rejects_duplicate_fields () =
+  let first = `String (wake_attempt_id_to_string (fresh_wake_attempt_id ())) in
+  let second = `String (wake_attempt_id_to_string (fresh_wake_attempt_id ())) in
+  List.iter (fun (label, left, right) ->
+      reject_wake_attempt_fields label [ "attempt_id", left; "attempt_id", right ])
+    [ "repeated identical ID", first, first;
+      "conflicting IDs", first, second;
+      "valid ID followed by null", first, `Null;
+      "null followed by valid ID", `Null, first ]
+;;
+
+let test_wake_settlement_kind_roundtrips () =
+  let fixture = wake_record_fixture (Identified (fresh_wake_attempt_id ())) in
+  List.iter
+    (fun (kind, spelling) ->
+       let status = match kind with
+         | Accepted -> Wake_succeeded
+         | Schedule_rejected | Occurrence_rejected | Retryable_failure
+         | Process_interrupted | Unsupported_payload | Cancelled_schedule
+         | Orphaned_attempt -> Wake_failed
+       in
+       let wake = { fixture with status; settlement_kind = Some kind } in
+       let fields = wake_json_fields wake in
+       (match List.assoc_opt "settlement_kind" fields with
+        | Some (`String actual) -> check string "settlement wire spelling" spelling actual
+        | Some _ | None -> fail "settlement kind must encode as a string");
+       let decoded = decode_wake (`Assoc fields) in
+       check bool (spelling ^ " retains its exact verdict") true
+         (decoded.settlement_kind = Some kind))
+    [ Accepted, "accepted";
+      Schedule_rejected, "schedule_rejected";
+      Occurrence_rejected, "occurrence_rejected";
+      Retryable_failure, "retryable_failure";
+      Process_interrupted, "process_interrupted";
+      Unsupported_payload, "unsupported_payload";
+      Cancelled_schedule, "cancelled_schedule";
+      Orphaned_attempt, "orphaned_attempt" ]
+;;
+
+let test_missing_wake_settlement_kind_stays_absent () =
+  List.iter (fun identity ->
+    let fixture = wake_record_fixture identity in
+    List.iter (fun status ->
+      let wake = { fixture with status;
+        finished_at = (match status with Wake_running -> None
+          | Wake_succeeded | Wake_failed -> Some 202.0) } in
+      let fields = wake_json_fields wake in
+      check bool "absent settlement emits no field" false
+        (List.mem_assoc "settlement_kind" fields);
+      let json = `Assoc fields in
+      let first = decode_wake json in
+      List.iter (fun decoded ->
+        check bool "status alone cannot invent a settlement verdict" true
+          (decoded.settlement_kind = None);
+        check bool "roundtrip keeps settlement absent" false
+          (List.mem_assoc "settlement_kind" (wake_json_fields decoded)))
+        [ first; decode_wake json; decode_wake (wake_record_to_yojson first) ])
+      [ Wake_running; Wake_succeeded; Wake_failed ])
+    [ Unidentified; Identified (fresh_wake_attempt_id ()) ]
+;;
+
+let reject_wake_settlement_values label values =
+  let fields = wake_json_fields (wake_record_fixture Unidentified) in
+  let supplied = List.map (fun value -> "settlement_kind", value) values in
+  match wake_record_of_yojson (`Assoc (supplied @ fields)) with
+  | Error _ -> ()
+  | Ok _ -> fail (label ^ " must not decode as a settlement or absent verdict")
+;;
+
+let test_wake_settlement_kind_rejects_invalid_values () =
+  List.iter (fun (label, value) -> reject_wake_settlement_values label [ value ])
+    [ "explicit null", `Null; "unknown kind", `String "unknown";
+      "empty kind", `String ""; "wrong case", `String "Accepted";
+      "integer", `Int 1; "boolean", `Bool true;
+      "object", `Assoc []; "array", `List [] ]
+;;
+
+let test_wake_settlement_kind_rejects_duplicates () =
+  List.iter (fun (label, values) -> reject_wake_settlement_values label values)
+    [ "same verdict twice", [ `String "accepted"; `String "accepted" ];
+      "different rejection scopes", [ `String "schedule_rejected"; `String "occurrence_rejected" ];
+      "valid verdict then null", [ `String "accepted"; `Null ];
+      "null then valid verdict", [ `Null; `String "accepted" ] ]
 ;;
 
 
@@ -499,6 +674,24 @@ let () =
             test_missing_recurrence_is_rejected;
           test_case "wake record roundtrip" `Quick
             test_wake_record_roundtrip;
+          test_case "missing wake attempt ID stays unidentified" `Quick
+            test_missing_wake_attempt_id_stays_unidentified;
+          test_case "wake attempt ID rejects explicit null" `Quick
+            test_wake_attempt_id_rejects_null;
+          test_case "wake attempt ID rejects invalid types" `Quick
+            test_wake_attempt_id_rejects_invalid_types;
+          test_case "wake attempt ID rejects invalid UUIDs" `Quick
+            test_wake_attempt_id_rejects_invalid_uuid;
+          test_case "wake attempt ID rejects duplicate fields" `Quick
+            test_wake_attempt_id_rejects_duplicate_fields;
+          test_case "wake settlement kinds retain their exact verdict" `Quick
+            test_wake_settlement_kind_roundtrips;
+          test_case "missing wake settlement kind stays absent" `Quick
+            test_missing_wake_settlement_kind_stays_absent;
+          test_case "wake settlement kind rejects explicit invalid values" `Quick
+            test_wake_settlement_kind_rejects_invalid_values;
+          test_case "wake settlement kind rejects duplicate fields" `Quick
+            test_wake_settlement_kind_rejects_duplicates;
         ] );
     ]
 ;;

@@ -73,9 +73,26 @@ type wake_status = Schedule_contract_values.wake_status =
   | Wake_succeeded
   | Wake_failed
 
+type wake_attempt_id = string
+
+let fresh_wake_attempt_id = Random_id.uuid_v7
+let wake_attempt_id_of_string raw =
+  Result.bind (Random_id.parse_uuid_v7 raw) (fun canonical ->
+    if String.equal raw canonical then Ok canonical
+    else Error "attempt_id must use canonical UUIDv7 text")
+let wake_attempt_id_to_string id = id
+
+type wake_attempt_identity = Unidentified | Identified of wake_attempt_id
+
+type wake_settlement_kind =
+  | Accepted | Schedule_rejected | Occurrence_rejected | Retryable_failure
+  | Process_interrupted | Unsupported_payload | Cancelled_schedule | Orphaned_attempt
+
 type wake_record =
   { schedule_instance_id : string
   ; schedule_id : string
+  ; attempt_identity : wake_attempt_identity
+  ; settlement_kind : wake_settlement_kind option
   ; started_at : float
   ; finished_at : float option
   ; due_at : float
@@ -789,9 +806,38 @@ let reschedule_after_due_signal ~now (request : schedule_request) =
     None
 ;;
 
+let wake_settlement_kind_to_string = function
+  | Accepted -> "accepted"
+  | Schedule_rejected -> "schedule_rejected"
+  | Occurrence_rejected -> "occurrence_rejected"
+  | Retryable_failure -> "retryable_failure"
+  | Process_interrupted -> "process_interrupted"
+  | Unsupported_payload -> "unsupported_payload"
+  | Cancelled_schedule -> "cancelled_schedule"
+  | Orphaned_attempt -> "orphaned_attempt"
+;;
+
+let wake_settlement_kind_of_string = function
+  | "accepted" -> Ok Accepted
+  | "schedule_rejected" -> Ok Schedule_rejected
+  | "occurrence_rejected" -> Ok Occurrence_rejected
+  | "retryable_failure" -> Ok Retryable_failure
+  | "process_interrupted" -> Ok Process_interrupted
+  | "unsupported_payload" -> Ok Unsupported_payload
+  | "cancelled_schedule" -> Ok Cancelled_schedule
+  | "orphaned_attempt" -> Ok Orphaned_attempt
+  | word -> Error ("unknown wake settlement_kind: " ^ word)
+;;
+
 let wake_record_to_yojson (wake : wake_record) =
   `Assoc
-    [ "schedule_instance_id", `String wake.schedule_instance_id
+    ((match wake.attempt_identity with
+      | Unidentified -> []
+      | Identified id -> [ "attempt_id", `String (wake_attempt_id_to_string id) ])
+     @ (match wake.settlement_kind with
+        | None -> []
+        | Some kind -> [ "settlement_kind", `String (wake_settlement_kind_to_string kind) ])
+     @ [ "schedule_instance_id", `String wake.schedule_instance_id
     ; "schedule_id", `String wake.schedule_id
     ; "started_at", float_to_yojson wake.started_at
     ; "finished_at", option_to_yojson float_to_yojson wake.finished_at
@@ -800,11 +846,26 @@ let wake_record_to_yojson (wake : wake_record) =
     ; "status", `String (wake_status_to_string wake.status)
     ; "detail", option_to_yojson (fun value -> value) wake.detail
     ; "error", option_to_yojson (fun value -> `String value) wake.error
-    ]
+    ])
 ;;
 
 let wake_record_of_yojson = function
   | `Assoc fields ->
+    let* attempt_identity =
+      match List.filter (fun (key, _) -> String.equal key "attempt_id") fields with
+      | [] -> Ok Unidentified
+      | [ (_, `String raw) ] ->
+        wake_attempt_id_of_string raw |> Result.map (fun id -> Identified id)
+      | [ (_, _) ] -> Error "attempt_id must be a canonical UUIDv7 string"
+      | _ :: _ :: _ -> Error "duplicate attempt_id field"
+    in
+    let* settlement_kind =
+      match List.filter (fun (key, _) -> String.equal key "settlement_kind") fields with
+      | [] -> Ok None
+      | [ (_, `String raw) ] -> wake_settlement_kind_of_string raw |> Result.map Option.some
+      | [ (_, _) ] -> Error "settlement_kind must be a known string"
+      | _ :: _ :: _ -> Error "duplicate settlement_kind field"
+    in
     let* schedule_instance_id = string_field "schedule_instance_id" fields in
     let* schedule_id = string_field "schedule_id" fields in
     let* started_at = float_field "started_at" fields in
@@ -832,6 +893,8 @@ let wake_record_of_yojson = function
     Ok
       { schedule_instance_id
       ; schedule_id
+      ; attempt_identity
+      ; settlement_kind
       ; started_at
       ; finished_at
       ; due_at

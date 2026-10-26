@@ -89,6 +89,10 @@ export interface DashboardScheduledAutomationFsm {
 
 export interface DashboardScheduledAutomationWakeReceipt {
   schedule_id: string
+  /** Absent on historical wake rows that predate dispatch-attempt identity. */
+  attempt_id?: string
+  /** Durable settlement decision; absent for an unsettled or historical wake. */
+  settlement_kind?: string
   started_at?: number
   started_at_iso?: string | null
   finished_at?: number | null

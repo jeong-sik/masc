@@ -133,16 +133,22 @@ let render_verification_list (state : state) =
       | None -> box_empty buf cols
       | Some r ->
           let open Masc.Tui_decode in
-          (* Submitted against required. A request that owes three artifacts
-             and has one is the row an operator acts on first, and the pair
-             says that where a single count would not. *)
+          (* Submitted against required -- but the pair only reads when a
+             requirement exists to pair against. Most requests owe no named
+             artifact, and the "/0" half of every such row said only that.
+             Those rows show the submitted count alone; the rows that do owe
+             artifacts are the ones an operator reads first, and they carry
+             the mark below rather than a longer cell. *)
+          let required_count = List.length r.vr_required_artifacts in
           let evidence =
             match r.vr_evidence_error with
             | Some _ -> "unreadable"
             | None ->
-                Printf.sprintf "%d/%d"
-                  (List.length r.vr_submitted_evidence)
-                  (List.length r.vr_required_artifacts)
+                if required_count = 0 then
+                  Printf.sprintf "%d" (List.length r.vr_submitted_evidence)
+                else
+                  Printf.sprintf "%d/%d"
+                    (List.length r.vr_submitted_evidence) required_count
           in
           (* The task's own title. This column read [next_action] and fell
              back to [request_summary], and both are literals in the producer:
@@ -170,10 +176,15 @@ let render_verification_list (state : state) =
           let style =
             (* Evidence that cannot be read is the one row that cannot be
                judged as it stands, so it reads as a problem rather than as a
-               queue entry. *)
+               queue entry. Owing named artifacts is not a health state --
+               nothing about the row is well or unwell -- so its mark is a
+               kind colour, and this queue already draws bad and warn, which
+               leaves the slots. *)
             match r.vr_evidence_error with
             | Some _ -> (Theme.bad ())
-            | None -> Ansi.reset
+            | None ->
+                if required_count > 0 then Theme.category Theme.Slot_1
+                else Ansi.reset
           in
           if idx = state.verification_cursor then box_line_selected buf cols line
           else box_line_styled buf cols ~style line

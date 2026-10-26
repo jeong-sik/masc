@@ -163,12 +163,16 @@ let scenario mode =
                | Issue_result (Ok (B.Answered _|Lane_absent|Refused _|Rejected_before_effect _))
                | Issue_result (Error _) | Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _
                | Poll_result _|Receipt|Service_refusal _ -> false);
+            (* An ended loop also answers the queued caller, with a
+               client_disconnected refusal, so only ok=true shows the
+               connection kept serving. *)
             check bool "the next command is answered on the same connection after the late result" true
-              (match issue () with W.Issue_result (Ok (B.Answered _)) -> true
+              (match issue () with
+               | W.Issue_result (Ok (B.Answered payload)) -> Yojson.Safe.Util.member "ok" payload=`Bool true
                | Issue_result (Ok (B.Lane_absent|Timed_out|Refused _|Rejected_before_effect _))
                | Issue_result (Error _) | Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _
                | Poll_result _|Receipt|Service_refusal _ -> false);
-            check bool "and the late result was answered before it" true
+            check bool "the first command took the fixture's late branch" true
               (Sys.file_exists (Filename.concat root "late-answered"));
             check bool "retirement after a late result joins the original guardian and peer" true
               (dispatch W.Retire=W.Receipt))
@@ -231,8 +235,11 @@ let scenario mode =
         if mode="wrong-pid" || mode="wrong-profile" then (
           check bool "identity mismatch executes no page command" false (List.mem "browsingContext.getTree" calls);
           check bool "unverified endpoint never receives browser.close" false (List.mem "browser.close" calls))
-        else if mode="normal" || mode="late" then check int "original browser is closed once" 1
-          (List.length (List.filter (String.equal "browser.close") calls))
+        else if mode="normal" || mode="late" then (
+          check int "original browser is closed once" 1
+            (List.length (List.filter (String.equal "browser.close") calls));
+          if mode="late" then check int "both commands reached the original Firefox" 2
+            (List.length (List.filter (String.equal "browsingContext.getTree") calls)))
         else if mode="gate" then (
           check bool "no delayed input follows gate release" false (List.mem "browsingContext.getTree" calls);
           check bool "uncertain ownership never replays browser.close" false (List.mem "browser.close" calls)));

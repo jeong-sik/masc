@@ -240,10 +240,10 @@ let run_with ~before_command_validation ~env ~owner ~directory work =
                       |> Result.map_error (fun detail -> Peer.Before_effect detail) in
                     let* verb,args,actor=Browser_live_peer.decode command |> Result.map_error (fun detail -> Peer.Before_effect detail) in
                     Peer.dispatch ?actor ~request_id:command.id peer ~verb args in
-                  (* A refused delivery loses this one result: its caller
-                     stopped waiting and was told the outcome is unknown. It
-                     says nothing about this connection; one that is gone
-                     fails the next poll. *)
+                  (* A refused delivery loses this one result. When its
+                     caller stopped waiting (it was told the command timed
+                     out) the connection is still good; a connection that is
+                     gone fails the next poll. *)
                   (match Browser_addon_owner.deliver_live owner ~client_id ~id:command.id ~payload:(Browser_live_peer.payload result) with
                    | Ok () -> ()
                    | Error detail ->

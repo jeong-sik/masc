@@ -96,3 +96,14 @@ independently by the installation. Turning these optional middleware off does
 not change caller, upload, artifact, document, viewport or cleanup authority.
 Source support and advertised capabilities do not prove that the current page
 accepted an action. Confirm its result on the original connection.
+
+If an Ego result says input release is unconfirmed, keep the original connection
+and do not replay its command. Answer any JavaScript dialog separately. Ask the
+operator to check/reset key and button state in that Space and use this Browser
+installation's private operator controls to confirm completion. The confirmation
+applies only to the pending input generation; `inputReadiness=operator_asserted`
+identifies its source on subsequent receipts. It is not SDK cleanup proof,
+login completion, takeover permission or a model-callable reset action. After a lost
+confirmation reply, inspect the original installation and read its form if the
+same worker is still available. Never apply its old confirmation to a replacement
+connection or replay browser input.

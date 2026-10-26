@@ -232,3 +232,36 @@ binding does not yet create missing Spaces, manage several simultaneous Goal
 Spaces in one worker, reassign/delete bindings, or finish them on Goal completion.
 User-held and delegated Spaces retain their existing admission rules; the stored
 binding is no takeover authorization or proof of visible UI/login completion.
+
+### Operator-confirmed input recovery
+
+The browser installation advertises a private `lane_operator` form using the
+existing Add-on operator controls. A pending input records a fresh generation,
+original issued command ID, tab number, Page label and operation in its original
+Ego peer. The form binds that generation to the currently connected client and
+numeric Space ID; the host's existing private operator endpoint additionally
+requires an operator credential and the original worker incarnation. The port
+cannot be exported as a model tool.
+
+After checking and resetting keys/buttons in that same Space, the operator may
+press “입력 상태 확인·초기화 완료”. This sends no SDK input. It records
+`Operator_reset_asserted`, permits a subsequent distinct command, and retains
+`inputReadiness=operator_asserted` on receipts until a new holding operation
+settles. An input preflight refusal restores the prior provenance. A new input
+uncertainty creates a new generation, so an older confirmation cannot unlock it.
+The form refuses active commands, foreign clients/Spaces and stale generations;
+a duplicate confirmation for the same still-current assertion is idempotent.
+Stale form submissions return a `not_applied` view rather than an MCP error
+that could unnecessarily retire the worker. After a lost reply, inspect the original installation and read its form only
+if that same worker is still available; do not replay browser input. The
+existing generic private-operator transport may retire a worker on an unknown
+reply. This extension does not change that transport or persist pending input
+across worker replacement, and never applies an old assertion to a replacement.
+
+Dialog answers, handoff, takeover and generic “go” do not create this assertion.
+It does not establish original SDK cleanup, visible UI or successful login. The
+existing native producer settlement contract is not strengthened by this local
+admission state: in particular, the known workflow path inferring release from
+Page.info after a void keyboard method remains a separate SDK/evidence gap.
+Real operator recovery and current installed Keeper/UI acceptance still require
+execution evidence.

@@ -90,6 +90,12 @@ let mcp owner =
       | Ok call when call.tool=Browser_addon_tool.definition.name && Option.is_none call.controller ->
           Ok (Browser_addon_tool.invoke ~owner ~principal:call.principal call.arguments)
       | Ok _|Error _ -> Ok (Browser_addon_tool.invoke ~owner ~principal:Lane_addon_call_context.Anonymous (`Assoc [])))
+  |> Server.tool Lane_addon_types.operator_tool
+    ~description:"Private operator input-reset assertion; never export to a model."
+    ~input_schema:Owner.operator_schema (fun _context _name arguments ->
+      match Owner.operator owner (Option.value ~default:(`Assoc []) arguments) with
+      | Error _ -> Error "browser operator controls unavailable"
+      | Ok value -> Ok {S.content=[];is_error=Some false;structured_content=Some value;_meta=None})
   |> Server.tool "lane_observe" ~description:"Read the browser worker's connection and input activity snapshot."
     ~input_schema:schema (fun _context _name _arguments ->
       match Browser_addon_observation.of_snapshot ~observed_at:(Time_compat.now ()) (Owner.snapshot owner) with

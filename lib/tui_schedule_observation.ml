@@ -192,7 +192,7 @@ let decode row_json =
                    | Terminal_conflict -> Ok (Unknown "예약 소비 증거 충돌")
                    | Unobserved | Observed _ ->
                      (match projection with
-                      | "matched_pending" ->
+                      | "matched_pending" | "retained_terminal_wake" ->
                           let* owner = text "resolved_owner" queue in
                           if not (String.equal owner keeper) then matched (Queued_at owner)
                           else (match reaction_observation with
@@ -214,7 +214,7 @@ let decode row_json =
                                       | Queued_at _ | Missing | Turn_started | Turn_ended | Consumed | Cancelled _
                                       | Settling | Transferring | Unknown _) as stage) -> matched stage
                            | Terminal_conflict -> matched (Unknown "예약 소비 증거 충돌"))
-                      | "withdrawn_at_cancel" | "retained_terminal_wake" -> matched (Cancelled None)
+                      | "withdrawn_at_cancel" -> matched (Cancelled None)
                       | "read_error" | "evidence_invalid" | "unrecognized_receipt" ->
                           Ok (Unknown "예약 큐 조회 불가")
                       | _ -> Ok (Unknown "예약 큐 상태 미지원")))

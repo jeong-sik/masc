@@ -19,7 +19,7 @@ selection algorithm or UI wording/layout assertions are used.
 Results in components.log:
 
 - Existing Schedule_domain tests: 28 PASS.
-- Occurrence observation component tests: 11 PASS.
+- Occurrence observation component tests: 12 PASS.
 - Archived, unmodified real backend producer rows: 14 matching decisions.
 - Source-extracted chat selection: 8 PASS.
 
@@ -37,3 +37,9 @@ from installed packages; these are compiler environment warnings, not production
 
 Not proven: whole-program typecheck, current backend suite, actual TUI execution,
 provider/model execution, destination delivery, installed binary or deployment.
+
+A later independent review found that retained_terminal_wake is still pending
+when a declaration is cancelled after ownership transfer. retained-before.log
+records the added case failing (1/12) before the decoder repair; components.log
+records the repaired 12-case run. These are decoder checks, not a backend
+transfer/cancel execution or a real provider failover experiment.

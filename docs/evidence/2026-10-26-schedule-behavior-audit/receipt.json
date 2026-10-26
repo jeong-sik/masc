@@ -1,6 +1,6 @@
 {
   "schema": "schedule-behavior-component-audit.v1",
-  "base_head": "42c4522435df5293ebd9e941dfab97df7e46c608",
+  "base_head": "1f94a288afdfb890f3a4f1e15a031c44261b9c5d",
   "source_state": "Worktree inputs identified by source_sha256; base_head is provenance, not an executed commit.",
   "source_sha256": {
     "lib/crypto_rng/crypto_rng.mli": "531a9b90ebb515b021be8a3dc390137eedbfa4edc752501b275767ba3821466d",
@@ -15,9 +15,9 @@
     "lib/time_codec/time_codec.mli": "ed957d4d881e31c9b1b01ca8f6cc503b88e705ba0e81bafab98b9a3da0b627e9",
     "lib/time_codec/time_codec.ml": "c3a8849c2835a1bf94bd1bbf03104ceb7966c0c40a8dcca178fd75dba565f920",
     "lib/tui_schedule_observation.mli": "5f927663621e0bcf9a1c92d71494f6b02b11c0d46ffdcd22757eb4b23f38d8e7",
-    "lib/tui_schedule_observation.ml": "5e9309b7b1bd1c374597408f0d9597432a727db735fc6b7445020125e0f8af8d",
+    "lib/tui_schedule_observation.ml": "4f6989b1fb62eef9af3694f0c881a30ace8c9cc686ceee83400f21f5f5ade0a4",
     "test/test_schedule_domain.ml": "42b074b4abe399710463a3fa55964e2728b74318902853234dbdeca2cd0a213f",
-    "test/test_tui_schedule_observation.ml": "b13562dc30fad9bff0e2ef083610dc2b47e4729281ae43b5ab9ac5b1abdef5ba",
+    "test/test_tui_schedule_observation.ml": "6730a992abdfe5a9eb22df9f9c99be92cb6c2d6f0a341c3730556981168aad6b",
     "docs/evidence/2026-10-25-schedule-drain-projection/produced-pages.json": "add089963d99cf44cddaa61fa3d55ecc581042429e072fc3f26182ff32111191",
     "bin/masc_tui_types.ml": "8bad505450d275b41dc0cd38388aacc52dc85c9d45211fcd2837540735594ff1",
     "lib/tui_decode.mli": "8d679c704c2057da8778d4fd0ea56ed1daa78c43ab3e4ef16fd72eef1e3a390f",

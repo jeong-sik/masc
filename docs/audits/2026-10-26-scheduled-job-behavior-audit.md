@@ -4,7 +4,7 @@
 
 **예약 Job 전체 행동 PASS 아님.** 기존 스케줄러·durable queue·busy 보존 경로는 이미
 있다. PR #46092는 이를 재구현하지 않고 채팅에서 관측하는 경로를 보완한다.
-그러나 표시 구현 자체에도 감사 중 두 오판과 인계 해석의 누락이 발견됐다.
+그러나 표시 구현 자체에도 감사 중 큐 누락·종단 충돌·취소 후 잔류의 오판과 인계 해석의 누락이 발견됐다.
 해당 해석은 수정했으며, 더 넓은 기능에는 아래 취소·시작 복구 결함 후보와
 실제 실행·결과 전달·전체 TUI 통합 검증 공백이 남는다.
 
@@ -54,6 +54,8 @@
 | 수정 | public id를 유지하며 새 instance로 바꾼다 | store update_request, Scheduled/Due 한정 | 소스; 기존 store/wiring 테스트 있음 |
 | 수정 | 내용만 수정하면서 과거 due 시각을 보존한다 | unchanged timing과 changed timing 별도 판정 | 소스; 기존 테스트 있음 |
 | 수정 | 동시 수정·retime가 저장 결과를 잃지 않는다 | store lock 및 concurrent retime 테스트 | 소스; 이번 미실행 |
+| 동시 권한 | 권한 확인 사이 target이 바뀌면 이전 recipient 변경을 거절한다 | mutation lock 안 재인가/instance CAS가 없음; 후속 적대적 리뷰 F3 | **결함 후보** |
+| 동시 수정 | due만 바꿀 때 다른 호출이 갱신한 recurrence를 보존한다 | omitted recurrence가 lock 전 snapshot에서 복사됨; F4 | **결함 후보** |
 | 수정/취소 | A에 이미 대기 중인 반복 예약을 B로 바꾸고 취소한다 | 이전 owner 철회가 보이지 않음; 아래 F1 | **결함 후보** |
 | 취소 | 아직 dispatch되지 않은 Scheduled/Due를 취소한다 | store 취소 후 current-target pending withdrawal | 소스; paused/cancel/race 테스트 있음 |
 | 취소 | 전달됐지만 아직 턴이 시작되지 않은 단발을 취소한다 | declaration은 이미 Succeeded이므로 schedule_cancel 거절 | **현행 계약의 기능 한계** |
@@ -84,6 +86,7 @@
 | 인계 | 이전 owner ACK와 새 owner pending을 구분한다 | resolved_owner, Queued_at, transfer projection pending | **이번 감사 수정, 실행 + 과거 재생** |
 | 복구 | 재시작 전 Running을 Due로 복원한다 | recover_running_on_startup 정상 경로 | 소스; 기존 store 테스트 있음 |
 | 복구 | 첫 startup recovery 실패 후 같은 process에서 회복한다 | 실패 로그 후 normal ticks; recovery 재시도 없음; 아래 F2 | **결함 후보** |
+| 복구 | dispatch 실패 정산 write 실패 뒤 같은 process에서 회복한다 | Running 복귀 write 실패 후 재정산 경로 없음; F5 | **결함 후보** |
 | 복구 | 손상·stale receipt·결과 불확실을 성공으로 덮지 않는다 | strict decoding, unknown/read_error/settling | decoder 실행 + 과거 재생; backend 전체 미실행 |
 | TUI | 도착한 단발이 dispatch Succeeded여도 계속 보인다 | chat_schedule_entries에 unsettled occurrence 포함 | 실제 source 추출 결정 실행 |
 | TUI | 선택한 Keeper의 예약만 보인다 | target/generation/single-flight read ownership 재사용 | selection 실행; 기존 shared-read 테스트는 이번 미실행 |
@@ -140,7 +143,7 @@ recover_running_on_startup을 한 번 호출하고 Error/exception에도 정상 
 [재현 스크립트와 로그](../evidence/2026-10-26-schedule-behavior-audit/README.md):
 
 1. 실제 Schedule_domain 소스와 기존 테스트 **28 PASS**.
-2. 실제 occurrence decoder **11 PASS**. 수정 전 추가한 두 반례는 **2/9 FAIL**이었다.
+2. 실제 occurrence decoder **12 PASS**. 수정 전 추가한 두 반례는 **2/9 FAIL**이었다.
    exact queue miss와 terminal contradiction 수정 후 transfer owner까지 검사했다.
 3. 과거 실제 백엔드가 생성한 변경 없는 **14개 행**을 새 decoder로 재생해 예상 판정 일치.
 4. 실제 production 선언과 chat_schedule_entries 전체를 추출하여 **8개 selection 결정 PASS**.
@@ -154,6 +157,14 @@ Test workflow run `40179723721`의 56개 선택 consumer 검사에서 나온 행
 로컬 Dune/full build, 현재 head의 backend 통합 suite, 실제 TUI 화면,
 모델·posting tool·목적지 read-back, 설치·재시작·배포는 이번 실행에 포함하지 않았다.
 이전의 제한된 source PASS는 이 전체 기능 판정을 대체하지 않는다.
+
+## 다중 모델·다중 사용자 후속 리뷰
+
+[후속 적대적 리뷰](2026-10-26-schedule-multi-actor-review.md)는 다른 모델로 요청한 독립 리뷰에서
+취소 후 실제 pending인 `retained_terminal_wake`를 Cancelled로 만들던 새 P2를 발견했다.
+실패 1/12를 기록한 뒤 기존 pending/owner 해석을 재사용해 수정했다.
+추가로 F3 권한 TOCTOU, F4 omitted recurrence 경합, F5 dispatch 실패 정산 write 후 Running 잔류의
+기존 백엔드 소스 반례를 기록한다. 이들은 실제 다중 사용자/모델 runtime 재현 결과가 아니다.
 
 ## 전체 행동 PASS를 위해 남은 확인
 

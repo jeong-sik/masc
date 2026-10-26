@@ -1720,7 +1720,9 @@ turn start, turn end, consumption and the durable occurrence result. A turn
 ending does not prove the work completed. A durable completed occurrence confirms
 turn processing, not delivery of the requested result to a channel or file.
 Transferred pending work names the recipient; an exact queue miss stays unconfirmed
-instead of appearing queued. Failure includes its recorded reason;
+instead of appearing queued. Cancelling a declaration does not settle an
+occurrence the server still finds pending, including at a transferred owner.
+Failure includes its recorded reason;
 unknown or conflicting evidence remains unconfirmed. Being busy on another
 request never makes this Job appear started.
 

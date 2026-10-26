@@ -175,6 +175,20 @@ let test_transferred_owner_ack_is_not_recipient_completion () =
   stage (Observation.Queued_at "recipient") transferred;
   stage (Observation.Cancelled (Some "producer evidence")) (terminal "cancelled" transferred)
 
+let test_cancelled_declaration_does_not_settle_retained_work () =
+  let retained = pending ()
+    |> replace "status" (`String "cancelled")
+    |> nested "keeper_queue_evidence"
+      (replace "projection_status" (`String "retained_terminal_wake")) in
+  stage Observation.Queued retained;
+  let transferred = retained
+    |> nested "keeper_queue_evidence" (replace "resolved_owner" (`String "recipient"))
+    |> nested "keeper_reaction_evidence"
+      (replace "event_queue_ack_seen" (`Bool true)) in
+  stage (Observation.Queued_at "recipient") transferred;
+  Alcotest.(check bool) "retained work still needs observation" true
+    (Observation.needs_attention (decoded transferred).stage)
+
 let test_dispatch_failure_retains_reason () =
   stage (Observation.Dispatch_failed (Some "queue write failed"))
     (pending () |> nested "last_wake"
@@ -203,6 +217,7 @@ let () = Alcotest.run "schedule occurrence observation"
       ; Alcotest.test_case "cross-source terminal disagreement" `Quick test_cross_source_terminal_disagreement
       ; Alcotest.test_case "exact queue absence is not pending" `Quick test_queue_absence_is_not_pending_delivery
       ; Alcotest.test_case "transfer ACK belongs to previous owner" `Quick test_transferred_owner_ack_is_not_recipient_completion
+      ; Alcotest.test_case "cancelled definition retains pending work" `Quick test_cancelled_declaration_does_not_settle_retained_work
       ; Alcotest.test_case "dispatch failure and absent occurrence" `Quick test_dispatch_failure_retains_reason
       ; Alcotest.test_case "malformed wire evidence" `Quick test_malformed_evidence_is_refused
       ] ]

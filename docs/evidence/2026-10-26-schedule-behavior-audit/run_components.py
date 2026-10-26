@@ -38,6 +38,7 @@ def run(command, cwd, stdin=None):
     result = subprocess.run(command, cwd=cwd, input=stdin, capture_output=True, text=True)
     logs.append('$ ' + ' '.join(command) + '\n' + result.stdout + result.stderr)
     if result.returncode:
+        (args.output / 'components.log').write_text('\n'.join(logs))
         raise RuntimeError('command failed: ' + ' '.join(command))
     return result.stdout
 

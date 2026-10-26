@@ -1055,18 +1055,37 @@ let policy_network_inspect_argv_for backend ~keeper_name =
    compiled-in 192.168.128.1 would be right until someone had a network
    already on it. *)
 let policy_network_gateway ~inspect =
+  let ( let* ) = Result.bind in
+  let fields name = function
+    | `Assoc fields ->
+      let keys = List.map fst fields in
+      if List.length keys = List.length (List.sort_uniq String.compare keys)
+      then Ok fields
+      else Error ("container network inspect: duplicate " ^ name ^ " key")
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+      Error ("container network inspect: invalid " ^ name)
+  in
+  let decode row =
+    let* row = fields "row" row in
+    match List.assoc_opt "status" row with
+    | Some status ->
+      let* status = fields "status" status in
+      (match List.assoc_opt "ipv4Gateway" status with
+       | Some (`String gateway) ->
+         (match Ipaddr.V4.of_string gateway with
+          | Ok address -> Ok (Ipaddr.V4.to_string address)
+          | Error (`Msg _) -> Error "container network inspect: invalid status.ipv4Gateway")
+       | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _)
+       | None -> Error "container network inspect: status.ipv4Gateway missing or invalid")
+    | None -> Error "container network inspect: status missing"
+  in
   match Yojson.Safe.from_string inspect with
-  | `List (`Assoc fields :: _) | `Assoc fields ->
-    (match List.assoc_opt "status" fields with
-     | Some (`Assoc status) ->
-       (match List.assoc_opt "ipv4Gateway" status with
-        | Some (`String gateway) when String.trim gateway <> "" -> Ok (String.trim gateway)
-        | Some _ | None ->
-          Error "container network inspect: status.ipv4Gateway missing")
-     | Some _ | None -> Error "container network inspect: status missing")
-  | _ -> Error "container network inspect: expected an object or a one-element array"
-  | exception Yojson.Json_error detail ->
-    Error ("container network inspect: unparseable JSON: " ^ detail)
+  | `List [row] -> decode row
+  | `Assoc _ as row -> decode row
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _
+  | `List [] | `List (_ :: _ :: _) ->
+    Error "container network inspect: expected an object or a one-element array"
+  | exception Yojson.Json_error _ -> Error "container network inspect: unparseable JSON"
 ;;
 
 let stop_argv_for backend ~container_name =
@@ -2278,17 +2297,31 @@ let running_of_nerdctl_state_json raw =
 ;;
 
 let running_of_apple_inspect_json raw =
+  let ( let* ) = Result.bind in
+  let fields name = function
+    | `Assoc fields ->
+      let keys = List.map fst fields in
+      if List.length keys = List.length (List.sort_uniq String.compare keys)
+      then Ok fields
+      else Error ("container inspect: duplicate " ^ name ^ " key")
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+      Error ("container inspect: invalid " ^ name)
+  in
   match Yojson.Safe.from_string raw with
-  | `List (`Assoc fields :: _) ->
-    (match List.assoc_opt "status" fields with
-     | Some (`Assoc status) ->
+  | `List [row] ->
+    let* row = fields "row" row in
+    (match List.assoc_opt "status" row with
+     | Some status ->
+       let* status = fields "status" status in
        (match List.assoc_opt "state" status with
-        | Some (`String state) -> Ok (String.equal state "running")
-        | Some _ | None -> Error "container inspect: status.state missing")
-     | Some _ | None -> Error "container inspect: status missing")
-  | _ -> Error "container inspect: unparseable JSON"
-  | exception Yojson.Json_error _ ->
-    Error "container inspect: unparseable JSON"
+        | Some (`String "running") -> Ok true
+        | Some (`String "stopped") -> Ok false
+        | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _)
+        | None -> Error "container inspect: unknown or missing status.state")
+     | None -> Error "container inspect: status missing")
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _
+  | `List [] | `List (_ :: _ :: _) -> Error "container inspect: expected exactly one row"
+  | exception Yojson.Json_error _ -> Error "container inspect: unparseable JSON"
 ;;
 
 (* Apple 1.3.1 inspect configuration. Unknown metadata is left alone;
@@ -2933,46 +2966,6 @@ let list_live_containers_for backend ~base_path ~keeper_name ~timeout_sec =
             (output_for_log ~stdout ~stderr)))
 ;;
 
-let sweep_candidates_of_json ~base_path ~is_pid_alive json =
-  let open Yojson.Safe.Util in
-  let base_path_hash = Keeper_sandbox_runtime.base_path_hash base_path in
-  match json with
-  | `List entries ->
-    List.filter_map
-      (fun entry ->
-         let kind = label_of entry Keeper_sandbox_runtime_setup.sandbox_kind_label_key in
-         let component =
-           label_of entry Keeper_sandbox_runtime_setup.sandbox_component_label_key
-         in
-         let entry_base_path_hash =
-           label_of entry Keeper_sandbox_runtime_setup.sandbox_base_path_hash_label_key
-         in
-         let id =
-           match entry |> member "configuration" |> member "id" with
-           | `String id -> Some id
-           | _ -> None
-         in
-         match component, entry_base_path_hash, kind, id with
-         | ( Some component
-           , Some entry_base_path_hash
-           , Some kind
-           , Some container_id )
-           when String.equal component Keeper_sandbox_runtime_setup.sandbox_component_label_value
-                && String.equal entry_base_path_hash base_path_hash
-                && String.equal kind keeper_vm_container_kind ->
-           let owner_pid =
-             Option.bind (label_of entry Keeper_sandbox_runtime_setup.sandbox_owner_pid_label_key) int_of_string_opt
-           in
-           (match owner_pid with
-            (* No label, or one that does not parse: this build cannot say
-               whose guest it is, so it stays. *)
-            | None -> None
-            | Some pid -> if is_pid_alive pid then None else Some { container_id; keeper_name = label_of entry Keeper_sandbox_runtime_setup.sandbox_keeper_label_key; owner_pid })
-         | _ -> None)
-      entries
-  | _ -> []
-;;
-
 type sweep_outcome =
   { removed : string list
   ; failed : (string * string) list
@@ -2986,17 +2979,11 @@ let sweep_one_backend backend ~base_path ~timeout_sec ~is_pid_alive ~run_argv li
   match run_argv ~timeout_sec listing with
   | Unix.WEXITED 0, out ->
     let candidates =
-      match backend with
-      | Backend.Nerdctl_kata ->
-        (match nerdctl_sweep_candidates_of_json_lines ~base_path ~is_pid_alive out with
-         | Ok candidates -> candidates
-         | Error detail ->
-           Log.Keeper.warn "nerdctl abandoned guest inventory rejected: %s" detail;
-           [])
-      | Backend.Apple_container | Backend.Microsandbox ->
-        (match Yojson.Safe.from_string out with
-         | json -> sweep_candidates_of_json ~base_path ~is_pid_alive json
-         | exception Yojson.Json_error _ -> [])
+      match nerdctl_sweep_candidates_of_json_lines ~base_path ~is_pid_alive out with
+      | Ok candidates -> candidates
+      | Error detail ->
+        Log.Keeper.warn "nerdctl abandoned guest inventory rejected: %s" detail;
+        []
     in
     List.fold_left
       (fun acc candidate ->
@@ -3016,12 +3003,8 @@ let sweep_one_backend backend ~base_path ~timeout_sec ~is_pid_alive ~run_argv li
     { removed = []; failed = [] }
 ;;
 
-(** Remove every abandoned guest, per runtime.
-
-    No keeper is in scope here and none should be: a guest this process did
-    not boot belongs to a keeper this process may not have. What is in scope
-    is the set of runtimes, so each is asked for its own guests with its own
-    argv and removed with its own removal spelling. *)
+(* Apple selection belongs to the complete declaration-aware runtime sweep.
+   Only Nerdctl retains process-bound dead-owner adoption and collection. *)
 let sweep_abandoned_guests
       ~base_path
       ~command_available
@@ -3046,5 +3029,5 @@ let sweep_abandoned_guests
                 ~is_pid_alive
                 ~run_argv
                 listing )))
-    Backend.all
+    [Backend.Nerdctl_kata]
 ;;

@@ -59,7 +59,9 @@ val policy_network_inspect_argv_for :
     subcommands do not agree, and they were measured rather than assumed. *)
 
 val policy_network_gateway : inspect:string -> (string, string) result
-(** The [status.ipv4Gateway] of the inspected network.
+(** The canonical IPv4 [status.ipv4Gateway] of exactly one inspected network.
+    Accepts a single object or one-element array. Duplicate row/status keys,
+    unknown shapes and non-IPv4 gateways refuse without echoing raw input.
 
     Read rather than assumed: container assigns the subnet when the network
     is created, so a compiled-in address would be right only until a host had
@@ -861,8 +863,10 @@ val running_of_inspect_json_for
   -> (bool, string) result
 (** Whether the guest this backend describes is running.
 
-    Each backend owns its own parse: [container inspect] answers a list whose
-    first element nests [status.state], [msb inspect --format json] a flat
+    Each backend owns its own parse: [container inspect] must answer exactly
+    one object with duplicate-free row/status keys and state [running] or
+    [stopped]. Other states are unknown, not stopped.
+    [msb inspect --format json] answers a flat
     object whose [status] is capitalised. A shape the chosen parser does not
     recognise is [Error]. It is never [Ok false] -- read as "not running", an
     unrecognised answer takes a live guest down and boots a second beside
@@ -942,13 +946,6 @@ type sweep_outcome =
   ; failed : (string * string) list
   }
 
-val sweep_candidates_of_json :
-  base_path:string ->
-  is_pid_alive:(int -> bool) -> Yojson.Safe.t -> sweep_candidate list
-(** Guests in a [Labelled_json_array] listing that belong to this base path
-    and whose owning server is gone. A guest whose scope or owner label is
-    missing or unparseable is not a candidate. *)
-
 val nerdctl_live_containers_of_json_lines :
   base_path:string -> keeper_name:string -> string ->
   (Keeper_sandbox_runtime.live_container list, string) result
@@ -969,13 +966,8 @@ val sweep_abandoned_guests :
   is_pid_alive:(int -> bool) ->
   run_argv:(timeout_sec:float -> string list -> Unix.process_status * string) ->
   (Keeper_microvm_backend.t * sweep_outcome) list
-(** Remove every abandoned guest, per runtime, reporting what happened.
-
-    No keeper is in scope here and none should be: a guest this process did
-    not boot belongs to a keeper this process may not have. What is in scope
-    is the set of runtimes, so each is asked for its own guests with its own
-    argv and removed with its own removal spelling. A runtime whose CLI is
-    absent, or whose listing cannot be scoped to a base path, contributes no
-    row -- so an empty list means nothing was swept, not that nothing was
-    found. An unreadable listing removes nothing and contributes an empty
-    outcome. *)
+(** Sweep only the process-bound Nerdctl/Kata backend, retaining its dead-owner
+    rule. Apple guests are selected from current declarations by the runtime's
+    complete inventory sweep and never by an owner PID here. Microsandbox has
+    no established labelled inventory. An absent Nerdctl CLI contributes no row;
+    unreadable inventory removes nothing and contributes an empty outcome. *)

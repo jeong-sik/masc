@@ -111,6 +111,9 @@ The independent [source review](source-review.md) binds the exact final
 three-file implementation/test diff and baseline. It found no P0/P1/P2
 issues. The reviewer did not execute the helper or review these measurement
 results; this is not a formal GitHub approval or a runtime verdict.
+The original diff bytes are stored as `reviewed.diff.gz`; the review's diff
+digest identifies the decompressed bytes. `provenance.json` records that
+mapping and the retained file hashes.
 Parsing and whitespace checks passed. The added full-module discovery
 scenario exercises large still-valid JSON mutations, truncation/growth and
 recovery; its selected CI result must be read separately when available.

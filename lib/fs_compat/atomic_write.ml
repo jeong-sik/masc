@@ -1531,7 +1531,13 @@ let publish_capability_file_with
                Printexc.raise_with_backtrace cancellation backtrace
              | exception_ ->
                let backtrace = Printexc.get_raw_backtrace () in
-               target_effect := Target_state_unknown;
+               target_effect :=
+                 (match publication with
+                  | Recovery.Replace -> Target_state_unknown
+                  | Recovery.Create_exclusive ->
+                    (match exception_ with
+                     | Unix.Unix_error (Unix.EEXIST, _, _) -> Target_unchanged
+                     | _ -> Target_state_unknown));
                reraise_fatal_or_cancelled exception_ backtrace;
                raise
                  (Capability_write_failed

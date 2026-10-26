@@ -319,7 +319,7 @@ let test_refusals_run_no_script () =
   ignore (dispatch peer Live.Tabs_list (obj []));
   ran := [];
   let operator = before_effect "the operator's tab" (dispatch peer Live.Page_read (obj ["tabId",`Int 2])) in
-  check bool "says whose tab it is" true (String_util.contains_substring operator "opened by the operator");
+  check bool "reports unmanaged status without attributing origin" true (String_util.contains_substring operator "is unmanaged");
   check string "an unknown tab" "browser tab is no longer present"
     (before_effect "an unknown tab" (dispatch peer Live.Page_capture (obj ["tabId",`Int 40])));
   ignore (before_effect "the document source" (dispatch peer Live.Page_read (obj ["tabId",`Int 1;"includeHtml",`Bool true])));
@@ -1027,7 +1027,7 @@ let test_a_snapshot_reads_egos_own_tree () =
     | Error (Live.Before_effect detail) -> detail
     | other -> failf "%s was %s" label (failure_kind other) in
   check bool "an operator tab is refused" true
-    (contains (refused "operator tab" (snapshot ~tab_id:2 Lane.Snapshot_viewport)) "opened by the operator");
+    (contains (refused "operator tab" (snapshot ~tab_id:2 Lane.Snapshot_viewport)) "is unmanaged");
   ignore (refused "no tab" (dispatch peer Live.Page_snapshot (obj ["maxChars",`Int 10;"scope",str "viewport"])));
   check bool "a root that is not a ref is refused" true
     (contains (refused "root" (dispatch peer Live.Page_snapshot

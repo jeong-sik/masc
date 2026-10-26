@@ -51,7 +51,7 @@ val run :
     (Keeper_official_client_host.carried_start_front -> transmitted_bytes:int -> unit) ->
   turn_start:Keeper_carried_front.turn_start ->
   ?on_official_client_tool_boundary:
-    (unit -> (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result) ->
+    (tool_name:string -> (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result) ->
   ?on_tool_execution:
     (block_index:int -> tool_call_id:string -> execution_id:Ids.Execution_id.t -> unit) ->
   ?on_official_client_result_handoff:

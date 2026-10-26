@@ -733,7 +733,7 @@ val dynamic_tools :
   terminal_effect_state:(unit -> Keeper_tools_agent_core.terminal_effect_state) ->
   terminal_error:string option ref ->
   pre_tool_rejects:rejected_tool_call list ref ->
-  ?on_tool_boundary:(unit -> (host_stop option, Agent_core.Error.t) result) ->
+  ?on_tool_boundary:(tool_name:string -> (host_stop option, Agent_core.Error.t) result) ->
   ?on_result_handoff:
     (invocation:Agent_core.Tool_contract.Invocation.t -> content:string -> unit) ->
   raw_trace_run:Agent_core.Raw_trace.active_run option ->
@@ -747,7 +747,8 @@ val dynamic_tools :
     an image-bearing result becomes a delivery error before settlement, rather
     than a payload the provider rejects after the tool has already run.
 
-    [on_tool_boundary] runs after tool settlement and result observers, including when
+    [on_tool_boundary ~tool_name] receives the actual settled tool name after tool
+    settlement and result observers, including when
     exact terminal evidence already stops the turn. Its errors are recorded in
     [terminal_error] and close the host loop without inventing a checkpoint.
     An existing terminal result takes priority over a callback stop.

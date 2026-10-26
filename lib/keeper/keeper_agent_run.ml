@@ -256,13 +256,26 @@ let runtime_yield_reason request =
     Runtime_agent.Durable_stimulus_waiting
 ;;
 
-(** The official-client boundary preserves authoritative observation failures.
-    Repeated input/output receipts do not establish absence of world progress. *)
-let official_client_tool_boundary ~repetition_execution () =
+(** Official tools use the settled-result host stop for cooperative handoff.
+    Repetition observation failures retain priority; receipts alone never stop
+    the turn. The host preserves any explicit terminal effect over this yield. *)
+let official_client_tool_boundary ~repetition_execution ~yield_requested ~tool_name =
   match Option.bind repetition_execution Keeper_repetition_scope.Execution.failure with
   | Some error ->
     Error (Agent_core.Error.Internal (Keeper_repetition_snapshot.error_to_string error))
-  | None -> Ok None
+  | None ->
+    match yield_requested with
+    | None -> Ok None
+    | Some requested ->
+      match requested () with
+      | Ok None -> Ok None
+      | Ok (Some { reason = (Operation_queued | Durable_stimulus_waiting _) }) ->
+        Ok
+          (Some
+             (Keeper_official_client_host.Terminal_tool_boundary
+                { tool_name; outcome = Durable_stimulus_deferred }))
+      | Error detail ->
+        Error (Agent_core.Error.Internal ("keeper cooperative-yield snapshot failed: " ^ detail))
 ;;
 
 let keeper_raw_trace_sink
@@ -1464,8 +1477,8 @@ let run_turn
           how the error path below knows the turn ran on an official client. *)
        let last_dispatched_checkpoint_owner = ref None in
        let turn_result =
-         let on_official_client_tool_boundary () =
-           official_client_tool_boundary ~repetition_execution ()
+         let on_official_client_tool_boundary ~tool_name =
+           official_client_tool_boundary ~repetition_execution ~yield_requested ~tool_name
          in
          let cooperative_yield_probe =
            Some

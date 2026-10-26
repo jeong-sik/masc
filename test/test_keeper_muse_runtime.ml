@@ -1723,7 +1723,7 @@ let test_a_stop_before_the_turn_start_answer_settles () =
     let run =
       run_turn_with
         ~on_stream_event:(function Agent_core.Types.MessageStart _ -> Eio.Fiber.yield () | _ -> ())
-        ~on_official_client_tool_boundary:(fun () ->
+        ~on_official_client_tool_boundary:(fun ~tool_name:_ ->
           Ok (Some (Keeper_official_client_host.Repeated_tool_call
             { tool_name = "masc_probe"; repeated_count = 3 })))
         ~base_path
@@ -2584,7 +2584,7 @@ let test_a_host_stopped_turns_context_stays_held_whatever_the_host_counted () =
      | Error error -> fail (Agent_core.Error.to_string error));
     write_fixture ~base_path (scenario "stop_before_ack");
     let stopped = run "RECALL_SENT_BY_THE_STOPPED_TURN"
-        ~on_official_client_tool_boundary:(fun () ->
+        ~on_official_client_tool_boundary:(fun ~tool_name:_ ->
           Ok (Some (Keeper_official_client_host.Repeated_tool_call
             { tool_name = "masc_probe"; repeated_count = 3 }))) in
     (match stopped.outcome.result with
@@ -2703,7 +2703,7 @@ let test_host_stop_resume_admits_either_ending_of_the_stopped_turn () =
     with_scripted_host ~fixture:(scenario "stop_before_ack") (fun ~base_path ->
       let tool = masc_probe_tool (ref `Null) in
       let stopped = run_turn_with ~base_path ~tool
-        ~on_official_client_tool_boundary:(fun () ->
+        ~on_official_client_tool_boundary:(fun ~tool_name:_ ->
           Ok (Some (Keeper_official_client_host.Repeated_tool_call
             { tool_name = "masc_probe"; repeated_count = 3 }))) () in
       (match stopped.outcome.result with

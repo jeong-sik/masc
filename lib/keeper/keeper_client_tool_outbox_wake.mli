@@ -7,14 +7,14 @@ val notify : base_path:string -> keeper_name:string -> (unit, string) result
     with pending/outbox deduplication, then hint the existing live owner.
     Failed provider turns may be notified again while receipts remain unread.
     An absent/paused owner is never started or unpaused. Recovery currently
-    requires a nonempty official-client route: every reachable candidate must
-    deliver original result context. Agent Core, unavailable and unknown routes
+    requires a nonempty resolved route: every reachable candidate must
+    deliver original result context. Unavailable and unknown routes
     retain receipts without initiating model turns that cannot consume them. *)
 
 val route_can_consume : Keeper_meta_contract.keeper_meta -> bool
-(** Every candidate in the current route must resolve to official-client result
+(** Every candidate in the current route must resolve to original-result
     delivery. Quota ordering or fallback may select any declared candidate;
-    checking just the entry cannot establish consumption. Empty, Agent Core,
+    checking just the entry cannot establish consumption. Empty,
     missing or unavailable candidates retain their unread receipts. *)
 
 type t

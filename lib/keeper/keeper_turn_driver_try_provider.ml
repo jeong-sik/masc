@@ -2093,6 +2093,8 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
      saved-tool empty-terminal normalization, never normal success authority.
      A replay that emitted no new AfterTurn leaves it empty and stays failed. *)
   let observed_provider_turn_ordinal = ref None in
+  let saved_provider_turn_ordinal = ref None in
+  let retained_results_projected = ref false in
   let capture_provider_ordinal (config : Runtime_agent.config) =
     let capture = { Agent_core.Hooks.empty with after_turn = Some (function
       | Agent_core.Hooks.AfterTurn { turn; _ } ->
@@ -2122,7 +2124,17 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
     ~decision:(`Assoc [ "resolved_lane", `String resolved_lane ])
     Keeper_runtime_manifest.Provider_lane_resolved;
   let checkpoint_sink =
-    observing_checkpoint_sink ctx.checkpoint_progress ctx.checkpoint_sink
+    fun (snapshot : Agent_core.Agent.checkpoint_snapshot) ->
+      let saved = observing_checkpoint_sink ctx.checkpoint_progress ctx.checkpoint_sink snapshot in
+      (match saved, ctx.checkpoint_sink, snapshot.stage with
+       | Ok (), Some _, Agent_core.Agent.After_assistant_collected ->
+         saved_provider_turn_ordinal := !observed_provider_turn_ordinal
+       | (Ok () | Error _), _,
+         (Agent_core.Agent.After_input_wait_changed | After_tool_results_appended
+         | After_context_injection | After_rejected_response_dropped)
+       | Error _, _, After_assistant_collected
+       | Ok (), None, After_assistant_collected -> ());
+      saved
   in
   (* The attempt's bounded wait for the binding's admission permit, as Agent
      Core writes it: on while the wait is on, then the instant it settled.
@@ -2389,22 +2401,49 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
     | None -> ref None
   in
   let agent_before_attempt = !attempt_agent_ref in
+  let config_result =
+    Result.bind config_result (fun config ->
+      let snapshot = match ctx.request_input with
+        | Completion_review -> Ok None
+        | Keeper_history _ ->
+          Keeper_client_tool_outbox.load ~base_path:ctx.base_path ~keeper_name:ctx.keeper_name
+          |> Result.map Option.some
+          |> Result.map_error (fun detail -> Agent_core.Error.Internal detail) in
+      Result.map (fun snapshot -> config, snapshot) snapshot)
+  in
   match config_result with
   | Error err -> Error err, None, None
-  | Ok config ->
+  | Ok (config, retained_results) ->
     (* Installed here rather than on the record above because the projection
        needs the provider config that record is still producing: it measures
        the history that config's serializer will carry, and asking a config
        that does not exist yet would mean measuring something else. *)
+    let project = bounded_model_input_projection ctx ~state
+        ~agent_cell:attempt_agent_ref ~provider_config:config.Runtime_agent.provider_cfg in
+    let retained_message = Option.bind retained_results Keeper_client_tool_outbox.context_message in
+    let retained_bytes = match retained_message with
+      | None -> 0
+      | Some message -> offload_model_input_cpu (fun () -> measure_message_bytes message) in
     let config =
       { config with
         model_input_projection =
           Some
-            (bounded_model_input_projection
-               ctx
-               ~state
-               ~agent_cell:attempt_agent_ref
-               ~provider_config:config.Runtime_agent.provider_cfg)
+            (fun messages -> Result.map (fun messages ->
+               match retained_message with
+               | None -> messages
+               | Some message ->
+                 retained_results_projected := true;
+                 (* This is mandatory per-request data, not another history
+                    atom. Keep the ledger's tail and attribution honest even
+                    when the caller supplied no custom projection. The bounded
+                    projection resets both observations on every request. *)
+                 state.last_request := Option.map (fun request ->
+                   {request with request={request.request with
+                     tail_bytes=request.request.tail_bytes + retained_bytes}}) !state.last_request;
+                 state.request_range := Option.map (fun range ->
+                   {range with Keeper_continuity_request.custom_projection_changed=true}) !state.request_range;
+                 List.filter (fun message -> not (Keeper_client_tool_outbox.is_context_message message))
+                   messages @ [message]) (project messages))
       }
     in
     (* Explicit stream stall detection is handled by AGENT_CORE's
@@ -2461,6 +2500,8 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
           let prepared = Result.map
             (fun (config, checkpoint, input) ->
               observed_provider_turn_ordinal := None;
+              saved_provider_turn_ordinal := None;
+              retained_results_projected := false;
               capture_provider_ordinal config, checkpoint, input)
             prepared in
           let result = match prepared with
@@ -2609,6 +2650,15 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
         ?agent_ref:ctx.agent_ref
         !attempt_agent_ref
     in
+    (* A replay may complete from an already-terminal checkpoint without
+       sending any new request. An error can also be normalized below from a
+       saved effect. Neither proves that this receipt snapshot was consumed. *)
+    let completed_received_result = match result with
+      | Ok ({ Runtime_agent.stop_reason = Completed {provider_turn_ordinal}; _ }) ->
+        !retained_results_projected
+        && !observed_provider_turn_ordinal = Some provider_turn_ordinal
+        && !saved_provider_turn_ordinal = Some provider_turn_ordinal
+      | Ok _ | Error _ -> false in
     let execution_observation =
       match result with
       | Ok (run_result : Runtime_agent.run_result) -> run_result.runtime_observation
@@ -2671,6 +2721,13 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
     Option.iter (fun emit -> Option.iter emit observation) ctx.on_runtime_observation;
     let result = Result.map (fun (run_result : Runtime_agent.run_result) ->
       { run_result with runtime_observation = observation }) result in
+    let result = Result.bind result (fun run_result ->
+      match retained_results with
+      | Some snapshot when completed_received_result ->
+        Keeper_client_tool_outbox.settle_after_turn snapshot ~stop_reason:run_result.Runtime_agent.stop_reason
+        |> Result.map (fun () -> run_result)
+        |> Result.map_error (fun detail -> Agent_core.Error.Internal detail)
+      | Some _ | None -> Ok run_result) in
     result, checkpoint_after, None
 ;;
 

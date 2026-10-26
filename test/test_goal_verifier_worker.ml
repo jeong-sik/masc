@@ -515,6 +515,162 @@ let actual_review verdict calls =
     Ok {AR.selected_runtime_id="goal-reviewer";evaluator_execution=None; verdict=Some verdict}
 let actual_approve calls = actual_review (AR.Approve "actual target measured") calls
 
+let corrupt_host_original_body store retained =
+  let module Owner = Lane_addon_tool_request_owner in
+  let original = W.original retained in
+  let subject = V.subject original in
+  let owner_key = Yojson.Safe.to_string
+    (`List [`String subject.goal_id; `String subject.request_id; `Int (V.attempt original)]) in
+  let scope = "goal-proof-reviews" in
+  let record = match Owner.load ~store ~scope ~request_id:owner_key with
+    | Ok (Some record) -> record
+    | Ok None -> Alcotest.fail "the original body corruption target is absent"
+    | Error error -> Alcotest.fail (Owner.error_to_string error) in
+  let path = Filename.concat (Lane_addon_store.root store)
+    (Lane_addon_store.tool_request_body_path ~scope ~request_digest:record.request_digest) in
+  let corrupt_bytes = "{\"damaged_original_body\":true}" in
+  (* Only the body of this real retained owner is damaged. Its indexed subject,
+     progress and digest stay intact, as do every other owner's bytes. The
+     workspace and body path come from this test's private store. *)
+  Out_channel.with_open_bin path (fun out -> output_string out corrupt_bytes);
+  let assert_preserved () =
+    Alcotest.(check string) "damaged original bytes remain unchanged" corrupt_bytes
+      (In_channel.with_open_bin path In_channel.input_all);
+    match W.load ~store ~installation_id:W.host_installation_id ~package_id:W.host_package_id
+      ~goal_id:subject.goal_id ~request_id:subject.request_id ~attempt:(V.attempt original) with
+    | Error (W.Store_unavailable _) -> ()
+    | Error (Original_invalid _ | Authority_changed _ | Execution_pending _)
+    | Ok _ -> Alcotest.fail "damaged own original body did not remain a storage failure"
+  in
+  assert_preserved ();
+  assert_preserved
+
+let assert_host_proof_published config store original =
+  let subject = V.subject original in
+  let retained = host_load store original in
+  let receipt = match checked (W.restored_receipt retained) with
+    | Some receipt -> receipt
+    | None -> Alcotest.fail "healthy Goal has no retained judgment" in
+  Alcotest.(check bool) "healthy proof still requires human confirmation" true
+    (phase config subject.goal_id = Goal_phase.Awaiting_confirmation);
+  (match get (Goal_verification.get_record_authoritative config ~goal_id:subject.goal_id) with
+   | Some {completion=Goal_verification.Proof_proven verdict; _} ->
+     Alcotest.(check string) "proof belongs to the original request" subject.request_id verdict.request_id;
+     Alcotest.(check string) "proof belongs to the original run" receipt.run.run_id verdict.verification_run_id
+   | None | Some _ -> Alcotest.fail "healthy Goal has no actual committed proof");
+  (match R.get (R.global ()) ~run_id:receipt.run.run_id with
+   | Some (R.Review {status=R.Completed {outcome=R.Committed; tools; _}; started_at; _}) ->
+     Alcotest.(check bool) "terminal publication keeps the actual original observations" true
+       (tools <> [] && tools = receipt.tools && started_at = receipt.run.started_at)
+   | None | Some (R.Review _ | R.Scan_skipped _) ->
+     Alcotest.fail "healthy Goal terminal publication is absent");
+  (match P.phase (W.progress retained) with
+   | Finished _ -> ()
+   | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+   | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ ->
+     Alcotest.fail "healthy Goal original commit was not confirmed");
+  let observer = P.observer (W.progress retained) in
+  List.iter (function
+    | Lane_addon_request_receipt.Acknowledged _ -> ()
+    | Unobserved | Pending _ -> Alcotest.fail "healthy Goal publication was not acknowledged")
+    [observer.registration; observer.completion]
+
+let test_actual_pending_goal_survives_foreign_body_corruption () =
+  with_workspace (fun config store _ ->
+    let _, damaged = host_prepared config store in
+    let _, healthy = host_prepared config store in
+    let damaged_subject = V.subject (W.original damaged) in
+    let healthy_original = W.original healthy in
+    let healthy_subject = V.subject healthy_original in
+    Alcotest.(check bool) "fixture subjects are independent Goals" false
+      (damaged_subject.goal_id = healthy_subject.goal_id);
+    let assert_damaged = corrupt_host_original_body store damaged in
+    let calls = ref 0 in
+    with_reviewer (actual_approve calls) (fun () ->
+      let outcome = Agent.process_pending_work config {Agent.goal_id=healthy_subject.goal_id} in
+      assert_damaged ();
+      (match outcome with
+       | Agent.Committed -> ()
+       | Superseded -> Alcotest.fail "healthy Goal was superseded by another subject's body failure"
+       | Deferred deferral -> Alcotest.failf "healthy Goal blocked by foreign body: %s"
+           (Agent.deferral_detail deferral));
+      assert_host_proof_published config store healthy_original;
+      Alcotest.(check int) "one actual healthy review reaches publication" 1 !calls;
+      (match Agent.process_pending_work config {Agent.goal_id=damaged_subject.goal_id} with
+       | Deferred (Proof_lookup_unavailable _) -> ()
+       | Deferred _ | Committed | Superseded ->
+         Alcotest.fail "damaged Goal did not retain its explicit original lookup failure");
+      drain config;
+      assert_damaged ();
+      Alcotest.(check bool) "damaged Goal remains pending" true
+        (phase config damaged_subject.goal_id = Goal_phase.Verifying);
+      Alcotest.(check int) "later wake does not repeat either original effect" 1 !calls))
+
+let test_actual_boot_publication_survives_foreign_body_corruption () =
+  with_workspace (fun config store _ ->
+    let _, damaged = host_prepared config store in
+    let authority, healthy = host_prepared config store in
+    let original = W.original healthy in
+    let subject = V.subject original in
+    let calls = ref 0 in
+    with_reviewer (actual_approve calls) (fun () ->
+      let receipt = checked (run store healthy authority) in
+      let verdict : Goal_verification.verdict = {outcome=Goal_verification.Proven;
+        request_id=subject.request_id; criterion=subject.criterion; verification_run_id=receipt.run.run_id;
+        authority=Workspace_goals.verifier_authority; evidence="actual target measured";
+        recorded_at=Masc_domain.now_iso ()} in
+      (* Stop after the real proof write and phase reconciliation, before host
+         commit/publication ACK. B is no longer in the Verifying scan, so only
+         retained-original boot discovery can recover its publication. *)
+      ignore (stored (Goal_store.transact_goal config ~goal_id:subject.goal_id (fun goal ->
+        Result.map (fun record -> goal, record) (Goal_verification.record_proof_verdict
+          ~before_commit:(fun () -> Candle_snapshot.before_proof_commit config goal verdict)
+          config ~goal_id:subject.goal_id verdict))));
+      ignore (stored (Workspace_goals.reconcile_committed_proof config ~goal_id:subject.goal_id));
+      Alcotest.(check bool) "healthy Goal has left the ordinary pending scan" true
+        (phase config subject.goal_id = Goal_phase.Awaiting_confirmation);
+      Alcotest.(check bool) "terminal publication was not fabricated before restart" true
+        (R.get (R.global ()) ~run_id:receipt.run.run_id = None);
+      let assert_damaged = corrupt_host_original_body store damaged in
+      let reopened_store = Lane_addon_store.create ~root:(Lane_addon_store.root store) in
+      let reopened_config = Workspace.default_config config.base_path in
+      (match P.phase (W.progress (host_load reopened_store original)) with
+       | Judged _ -> ()
+       | Captured | Admission_wait _ | Dispatch_pending _ | Committing _ | Commit_unknown _
+       | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ ->
+         Alcotest.fail "restart fixture lost the actual uncommitted judgment");
+      drain reopened_config;
+      drain reopened_config;
+      assert_damaged ();
+      Alcotest.(check int) "boot recovery does not invoke another model" 1 !calls;
+      assert_host_proof_published reopened_config reopened_store original;
+      match get (Goal_verification.get_record_authoritative reopened_config ~goal_id:subject.goal_id) with
+      | Some {completion=Goal_verification.Proof_proven restored; _} ->
+        Alcotest.(check string) "boot recovery preserves the first committed proof timestamp"
+          verdict.recorded_at restored.recorded_at
+      | None | Some _ -> Alcotest.fail "boot recovery lost the actual proof"))
+
+let test_actual_host_refuses_own_body_corruption () =
+  with_workspace (fun config store _ ->
+    let _, retained = host_prepared config store in
+    let subject = V.subject (W.original retained) in
+    let assert_damaged = corrupt_host_original_body store retained in
+    let calls = ref 0 in
+    with_reviewer (actual_approve calls) (fun () ->
+      let outcome = Agent.process_pending_work config {Agent.goal_id=subject.goal_id} in
+      assert_damaged ();
+      (match outcome with
+       | Deferred (Proof_lookup_unavailable _) -> ()
+       | Deferred _ | Committed | Superseded ->
+         Alcotest.fail "own body corruption was treated as permission to verify");
+      Alcotest.(check int) "own corrupt original cannot dispatch the model" 0 !calls;
+      Alcotest.(check bool) "own corrupt original does not advance Goal phase" true
+        (phase config subject.goal_id = Goal_phase.Verifying);
+      match get (Goal_verification.get_record_authoritative config ~goal_id:subject.goal_id) with
+      | Some {completion=Goal_verification.Proof_pending pending; _} ->
+        Alcotest.(check string) "same proof request remains pending" subject.request_id pending.request_id
+      | None | Some _ -> Alcotest.fail "own corrupt original changed the proof request"))
+
 let test_actual_integral_receipt_commits_after_restart () = with_workspace (fun config store _ ->
   let clock = Eio_mock.Clock.make () in
   Eio_mock.Clock.set_time clock 42.;
@@ -880,6 +1036,12 @@ let () = Alcotest.run "retained Goal worker" ["execution", [
   Alcotest.test_case "authority destination and strict inventory" `Quick test_destination_authority_and_inventory;
   Alcotest.test_case "linked frontier restores the original staged run" `Quick test_linked_frontier_and_staged_run_recovery;
   Alcotest.test_case "actual Goal proof commit reply loss and conflict" `Quick test_actual_goal_commit_reply_loss_and_conflict;
+  Alcotest.test_case "actual pending Goal survives foreign original body corruption" `Quick
+    test_actual_pending_goal_survives_foreign_body_corruption;
+  Alcotest.test_case "actual boot publication survives foreign original body corruption" `Quick
+    test_actual_boot_publication_survives_foreign_body_corruption;
+  Alcotest.test_case "actual host refuses its own original body corruption" `Quick
+    test_actual_host_refuses_own_body_corruption;
   Alcotest.test_case "actual integral receipt commits after restart and rejects alteration" `Quick test_actual_integral_receipt_commits_after_restart;
   Alcotest.test_case "actual agent restores before lookup and registry" `Quick test_actual_agent_restores_before_lookup_and_registry;
   Alcotest.test_case "finished publication survives registry retention" `Quick test_finished_publication_survives_registry_retention;

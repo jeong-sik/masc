@@ -1389,7 +1389,8 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
            session_state := settled;
            on_session_settled settled;
            let* result = projected in
-           let* () = Keeper_codex_tool_outbox.acknowledge tool_outbox
+           let* () = Keeper_codex_tool_outbox.settle_after_turn tool_outbox
+             ~stop_reason:result.stop_reason
              |> Result.map_error internal_error in
            Ok result)
       | Ready | Start _ | Active _ | Turn_inflight { turn_id = None; _ }
@@ -1669,7 +1670,18 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
          | Error detail ->
            Error (internal_error ("Codex session settlement failed: " ^ detail))
        in
-       let* () = Keeper_codex_tool_outbox.acknowledge tool_outbox
+       (* Natural vendor completion may only settle a scheduling handoff.
+          Preserve the original receipts until the consumer itself completes. *)
+       let stop_reason : Runtime_agent.stop_reason =
+         match scheduling_turn, turn.scheduling_handoff with
+         | Some (_, Direct_schedule _),
+             (Runtime_codex_app_server.Handoff_pending | Handoff_accepted) ->
+           Yielded_to_operation_queued { turns_used = turn_count; provider_turn_ordinal = turn_count }
+         | (Some (_, Autonomous_schedule) | None), _
+         | Some (_, Direct_schedule _),
+             (Handoff_unrequested | Handoff_rejected) -> Completed { provider_turn_ordinal = turn_count }
+       in
+       let* () = Keeper_codex_tool_outbox.settle_after_turn tool_outbox ~stop_reason
          |> Result.map_error internal_error in
        let capture, _metrics =
          Runtime_observation.runtime_metrics_for_candidates ~runtime_id ~keeper_name ()
@@ -1703,20 +1715,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
          ; run_validation = None
          ; runtime_observation = Some runtime_observation
          ; cooperative_boundary = None
-         ; stop_reason =
-             (* This is after natural vendor completion and durable session
-                settlement. The direct turn owner retains that exact authority
-                before requeueing the original operation, never succeeding it
-                on the scheduling reply. An unacknowledged notice is equally
-                unable to prove original-work completion. Autonomous turns keep
-                their own event-batch completion contract. *)
-             (match scheduling_turn, turn.scheduling_handoff with
-              | Some (_, Direct_schedule _),
-                  (Runtime_codex_app_server.Handoff_pending | Handoff_accepted) ->
-                Yielded_to_operation_queued { turns_used = turn_count; provider_turn_ordinal = turn_count }
-              | (Some (_, Autonomous_schedule) | None), _
-              | Some (_, Direct_schedule _),
-                  (Handoff_unrequested | Handoff_rejected) -> Completed { provider_turn_ordinal = turn_count })
+         ; stop_reason
          })
       with
       (* A stop the owner raised is not an ambiguity: it knows the turn did

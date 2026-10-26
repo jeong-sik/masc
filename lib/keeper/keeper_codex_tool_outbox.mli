@@ -16,7 +16,12 @@ val contains_receipt : snapshot -> receipt_id:string -> bool
 val developer_context : snapshot -> string list
 
 val acknowledge : snapshot -> (unit, string) result
-(** Remove only the exact loaded receipts after a successful vendor or
-    acknowledged host-terminal settlement. Input writes, provider refusals and
-    context-overflow retries do not acknowledge delivery. Newer receipts remain
-    pending. *)
+(** Remove only the exact loaded receipts after the consumer completes.
+    Newer receipts remain pending. Runtime callers use [settle_after_turn] so
+    a successful checkpoint cannot acknowledge unfinished consumption. *)
+
+val settle_after_turn :
+  snapshot -> stop_reason:Runtime_agent_context.stop_reason -> (unit, string) result
+(** Only [Completed] acknowledges the loaded receipts. Every checkpoint,
+    scheduling handoff and input wait preserves their original content across
+    vendor session replacement. Provider failures never call this function. *)

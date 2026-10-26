@@ -21,7 +21,7 @@ let text = Yojson.Safe.Util.to_string
 let items = Yojson.Safe.Util.to_list
 let require = function Ok value -> value | Error detail -> fail detail
 
-let fixture root ~reject_context ~overflow_resume ~hold_first_resume ~compact_resume ~compact_item =
+let fixture root ~reject_context ~overflow_resume ~hold_first_resume ~compact_resume ~compact_item ~checkpoint_tool =
   let capture = Filename.concat root "requests.jsonl" in
   write capture "";
   let command = Filename.concat root "codex-fixture" in
@@ -37,6 +37,7 @@ overflow_resume = %s
 hold_first_resume = %s
 compact_resume = %s
 compact_item = %s
+checkpoint_tool = %s
 turn_id = 'fresh-turn'
 def emit(value):
     print(json.dumps(value), flush=True)
@@ -66,6 +67,11 @@ for line in sys.stdin:
         emit({'id':ident,'result':{'turn':{'id':turn_id}}})
         if hold_this_turn:
             continue
+        if checkpoint_tool and not os.path.exists(capture+'.checkpointed'):
+            with open(capture+'.checkpointed', 'w') as out:
+                out.write('original tool boundary reached')
+            emit({'id':'checkpoint-call','method':'item/tool/call','params':{'threadId':'context-thread','turnId':turn_id,'callId':'checkpoint-call','tool':'CheckpointFixture','namespace':None,'arguments':{}}})
+            continue
         if overflow_resume and turn_id == 'resumed-turn' and not os.path.exists(capture+'.overflowed'):
             with open(capture+'.overflowed', 'w') as out:
                 out.write('rejected before effects')
@@ -89,11 +95,12 @@ for line in sys.stdin:
     (if overflow_resume then "True" else "False")
     (if hold_first_resume then "True" else "False")
     (if compact_resume then "True" else "False")
-    (if compact_item then "True" else "False"));
+    (if compact_item then "True" else "False")
+    (if checkpoint_tool then "True" else "False"));
   Unix.chmod command 0o700;
   command, capture
 
-let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_resume = false) ?(hold_first_resume = false) ?(compact_resume = false) ?(compact_item = false) ?catalog_context_window test =
+let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_resume = false) ?(hold_first_resume = false) ?(compact_resume = false) ?(compact_item = false) ?(checkpoint_tool = false) ?catalog_context_window test =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   let previous_pool = Domain_pool_ref.get () in
   Eio.Switch.on_release sw (fun () ->
@@ -116,7 +123,7 @@ let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_res
     ~base_path:root ~sandbox_profile:None "context-fixture";
   let saved = Runtime.For_testing.snapshot () in
   Eio.Switch.on_release sw (fun () -> Runtime.For_testing.restore saved; Fs_compat.remove_tree root);
-  let command, capture = fixture root ~reject_context ~overflow_resume ~hold_first_resume ~compact_resume ~compact_item in
+  let command, capture = fixture root ~reject_context ~overflow_resume ~hold_first_resume ~compact_resume ~compact_item ~checkpoint_tool in
   let config_path = Filename.concat root "runtime.toml" in
   let write_catalog max_context =
     write config_path (Printf.sprintf {|
@@ -146,7 +153,7 @@ default = "codex.context"
       ?carried_front_seed ?librarian_front ?on_model_input_window_observation
       ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 })
       ?(initial_messages=[Agent_core.Types.user_msg "Previous completed work"])
-      ?official_client_continuation ?on_event
+      ?official_client_continuation ?on_event ?on_official_client_tool_boundary
       ?(goal="Continue from current World State.") ~instructions ~world () =
     let composed_context = ref None in
     let hooks = { Agent_core.Hooks.empty with before_turn_params = Some (function
@@ -167,6 +174,7 @@ default = "codex.context"
       ?carried_front_seed ?librarian_front
       ?on_model_input_window_observation
       ~pre_tool_rejects:(ref []) ~base_path:root ~goal ?official_task_reference ?official_client_continuation
+      ?on_official_client_tool_boundary
       ~goal_blocks:None ~system_prompt:instructions ~tools
       ~initial_messages
       ~model_input_projection ~on_transmitted_model_input:(fun report -> reports := report :: !reports)
@@ -1208,7 +1216,94 @@ let test_argument_projection_keeps_exact_history_prefix_guards () =
   check bool "a mismatched history cannot borrow raw argument authority" true
     (argument_input "old" (read_requests capture)=old)
 
+let test_checkpoint_preserves_receipt_across_session_replacement ~repeated_tool () =
+  with_fixture ~checkpoint_tool:true @@ fun ~run ~capture ~reports:_ ->
+  let base_path = Filename.dirname capture and keeper_name = "context-fixture" in
+  let config = Workspace.default_config base_path in
+  let meta = Masc_test_deps.meta_of_json_fixture (`Assoc ["name", `String keeper_name])
+    |> require |> Keeper_meta_contract.effective_meta_result ~base_path |> require in
+  ignore (Keeper_meta_store.replace_snapshot config meta |> require);
+  ignore (Keeper_registry.register_offline ~base_path keeper_name meta);
+  Fun.protect ~finally:(fun () -> Keeper_registry.For_testing.unregister ~base_path keeper_name)
+    (fun () ->
+      let original : Runtime_codex_app_server.undelivered_tool_result =
+        {thread_id="previous-session";turn_id="original-turn";call_id="original-call";
+         tool_name="Execute";arguments=`Assoc ["command",`String "original-effect-no-replay"];
+         response=`String "original-private-result-after-session-replacement"} in
+      Keeper_codex_tool_outbox.retain ~base_path ~keeper_name original |> require;
+      let load () = Keeper_codex_tool_outbox.load ~base_path ~keeper_name |> require in
+      let original_id = match Keeper_codex_tool_outbox.receipt_ids (load ()) with
+        | [id] -> id | _ -> fail "expected the original committed receipt" in
+      Keeper_codex_tool_outbox_wake.notify ~base_path ~keeper_name |> require;
+      let intake () =
+        let env = Option.get (Eio_context.get_env_opt ()) in
+        Eio.Switch.run (fun sw ->
+          let ctx : _ Keeper_types_profile.context =
+            {config;agent_name="receipt-checkpoint-fixture";sw;clock=env#clock;
+             proc_mgr=None;net=None;
+             publication_recovery_provider=Masc_test_deps.non_runtime_publication_recovery_provider} in
+          Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+            ~ctx ~meta_after_triage:meta ~pending_board_events:[]) in
+      let admitted = (intake ()).source_batch |> Keeper_heartbeat_source_batch.selections in
+      check int "real intake admits the original receipt" 1 (List.length admitted);
+      let calls = ref 0 in
+      let tool = Agent_core.Tool.create ~name:"CheckpointFixture"
+        ~description:"Settle independent work before yielding" ~parameters:[]
+        (fun _ -> incr calls; Ok {Agent_core.Types.content="independent-result";
+                                 content_blocks=None;_meta=None}) in
+      let stop : Keeper_official_client_host.host_stop =
+        if repeated_tool then Repeated_tool_call {tool_name="CheckpointFixture";repeated_count=2}
+        else Terminal_tool_boundary {tool_name="CheckpointFixture";outcome=Durable_stimulus_deferred} in
+      let attempt = run ~tools:[tool]
+        ~on_official_client_tool_boundary:(fun () -> Ok (Some stop))
+        ~instructions:"Read the original result without replaying its effect." ~world:"before checkpoint" () in
+      let result = match attempt.Keeper_codex_runtime.result with
+        | Ok result -> result | Error error -> fail (Agent_core.Error.to_string error) in
+      (match result.stop_reason with
+       | Yielded_to_durable_stimulus _ when not repeated_tool -> ()
+       | Yielded_after_repeated_tool_call _ when repeated_tool -> ()
+       | Completed _ | Yielded_to_operation_queued _ | Yielded_to_durable_stimulus _
+       | Yielded_after_repeated_tool_call _ | Yielded_after_repeated_assistant_text _
+       | InputRequired _ -> fail "the production adapter must project the checkpoint");
+      check int "the independent tool ran once" 1 !calls;
+      Keeper_heartbeat_loop.For_testing.retain_checkpoint_continuations
+        ~base_path ~keeper_name admitted |> require;
+      Keeper_event_queue_persistence.For_testing.reset_snapshot_cache_for_testing ();
+      check bool "host checkpoint retains original result bytes" true
+        (Keeper_codex_tool_outbox.contains_receipt (load ()) ~receipt_id:original_id);
+      Keeper_official_client_session_store.clear_then ~base_path ~keeper_name (fun () -> ()) |> require;
+      let replacement = intake () in
+      check bool "session replacement does not withdraw original input" true
+        (List.exists (fun (s : Keeper_event_queue_state.pending_selection) ->
+           s.source.payload=Keeper_event_queue.Tool_result_ready original_id)
+           (Keeper_heartbeat_source_batch.selections replacement.source_batch));
+      let before = List.length (read_requests capture) in
+      successful (run ~tools:[tool] ~instructions:"Continue from the retained original result."
+        ~world:"replacement session" ());
+      let sent = read_requests capture |> List.filteri (fun i _ -> i >= before) in
+      check bool "replacement starts a fresh vendor session" true
+        (List.exists (fun row -> member "method" row=`String "thread/start") sent);
+      let encoded = Yojson.Safe.to_string (`List sent) in
+      List.iter (fun value -> check bool "fresh consumer receives exact original data" true
+        (String_util.contains_substring encoded value))
+        ["original-effect-no-replay";"original-private-result-after-session-replacement"];
+      check int "completed replacement acknowledges loaded receipts" 0
+        (List.length (Keeper_codex_tool_outbox.receipt_ids (load ())));
+      let original_hint = Keeper_registry_event_queue.pending_selections_result ~base_path keeper_name
+        |> require |> List.find (fun (s : Keeper_event_queue_state.pending_selection) ->
+             s.source.payload=Keeper_event_queue.Tool_result_ready original_id) in
+      (match Keeper_heartbeat_stimulus_intake.reconcile_spent_selection
+         ~config ~keeper_name original_hint |> require with
+       | Tool_result_hint_retired -> ()
+       | Selection_actionable | Spent_grant_replay_acknowledged | Absent_grant_retired _ ->
+         fail "completed receipt consumption must retire its exact hint");
+      check int "replacement never re-executes the original or independent effect" 1 !calls)
+
 let () = run "Keeper current Codex context" ["native requests",[
+  test_case "host checkpoint preserves result through fresh-session intake" `Quick
+    (test_checkpoint_preserves_receipt_across_session_replacement ~repeated_tool:false);
+  test_case "repeated-tool checkpoint preserves result through fresh-session intake" `Quick
+    (test_checkpoint_preserves_receipt_across_session_replacement ~repeated_tool:true);
   test_case "completed arguments cross Start and held Resume" `Quick
     (test_completed_arguments_cross_start_resume_and_reseed ~overflow_resume:false);
   test_case "fresh overflow retry materializes its own Start" `Quick

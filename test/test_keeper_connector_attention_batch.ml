@@ -1321,7 +1321,6 @@ let test_checkpoint_preserves_results_and_services_successors () =
                             board_post_id="";channel}
       ; Q.Composition_completed {cc_request_id="original-composition";cc_tool="keeper_compose_original";
                                  cc_terminal=Composition_succeeded}
-      ; Q.Tool_result_ready (String.make 64 'a')
       ; Q.Owned_job_completed {oj_job_id=Keeper_owned_job_identity.Job_id.fresh ();
                                oj_source=source;oj_channel=channel}
       ; Q.Addon_operation_changed {ao_origin_id="original-addon";ao_publication_id="original-publication";

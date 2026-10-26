@@ -1,0 +1,62 @@
+{
+  "source_sha": "55a0c7482fedece3f114fa8accb64a5084b1a796",
+  "workflow_sha": "6a2d8dd6171e1d732ca15f918fb084e462e4d371",
+  "scenario": "resource-reading",
+  "platform": "macos-arm64",
+  "sha256": "822b6436ea6e7f494b3e56598241a48a322b4dc523703608b9ac5ef1c7742559",
+  "key_reference": {
+    "path": "key-reference.md",
+    "sha256": "002d52f75f51bad5bc3935c03f499c44dc06596800bad5371a625a5bd1629759",
+    "producer": "bin/masc_tui_keys_doc_cli.exe"
+  },
+  "server_sha256": "1d3da00a22f602005622af1f47442e1171f318e09dabc768123b946a4300f0cb",
+  "native_addon_launcher": null,
+  "browser_addon_worker": null,
+  "build_targets": [
+    "bin/masc_tui.exe",
+    "bin/masc_tui_keys_doc_cli.exe",
+    "bin/main_eio.exe",
+    "test/test_tui_published_reports.exe",
+    "test/test_tui_resource_document_search.exe",
+    "test/test_tui_resource_image_admission.exe",
+    "test/test_tui_resource_images.exe"
+  ],
+  "expected_tests": [
+    "test_tui_published_reports",
+    "test_tui_resource_document_search",
+    "test_tui_resource_image_admission",
+    "test_tui_resource_images"
+  ],
+  "executed_tests": [
+    "test_tui_published_reports",
+    "test_tui_resource_document_search",
+    "test_tui_resource_image_admission",
+    "test_tui_resource_images"
+  ],
+  "test_results": [
+    {
+      "suite": "test_tui_published_reports",
+      "suite_exit_code": 0,
+      "log_exit_code": 0
+    },
+    {
+      "suite": "test_tui_resource_document_search",
+      "suite_exit_code": 0,
+      "log_exit_code": 0
+    },
+    {
+      "suite": "test_tui_resource_image_admission",
+      "suite_exit_code": 0,
+      "log_exit_code": 0
+    },
+    {
+      "suite": "test_tui_resource_images",
+      "suite_exit_code": 0,
+      "log_exit_code": 0
+    }
+  ],
+  "behavior_passed": true,
+  "installed_runtime_verified": false,
+  "visible_ui_verified": false,
+  "packaging": "native executable; see native-dependencies.txt for dynamic libraries"
+}

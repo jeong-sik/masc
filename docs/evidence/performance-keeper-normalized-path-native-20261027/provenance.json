@@ -1,0 +1,49 @@
+{
+  "schema": "masc.normalized-path-native-evidence-provenance.v1",
+  "application_sources": {
+    "control": "55a0c7482fedece3f114fa8accb64a5084b1a796",
+    "candidate": "f861e7c628ff5cfd504c7e85120c39a804a99c41"
+  },
+  "builder_source": "6a2d8dd6171e1d732ca15f918fb084e462e4d371",
+  "binary_sha256": {
+    "control": "1d3da00a22f602005622af1f47442e1171f318e09dabc768123b946a4300f0cb",
+    "candidate": "8cf014ab8a9eeb564bd8f0f56d162f77fc619dffe9ea9fb4fdcdd4a6620d1d6f"
+  },
+  "production_diff_sha256": "9857d132b40f4951b95d544bb9666d1266317c580efb66c7958e89b5cf87594a",
+  "changed_production_scope": "env_config_core.ml lexical normal-form classifier and interface documentation only; test/docs differences are outside runtime scope",
+  "runner_sha256": "a6df19e949708fb6b44255e2a0623689c1ba9eb9e203c4a0eaf35f30ee537284",
+  "reader_sha256": "be6b0a62cf36d7174f43d2ff282285e8eb151fe8fe25583ee41c8c35c5976f9b",
+  "fixture_sha256": "ccbe65e399f47a3abddbf4299e15dd0fd55001dd785b2e0d75948ad86acf7cfd",
+  "original_observations_sha256": "cfedfe1febb766ed2b572af5a38423ebdbac2551051dcf6657cf4c00cbf1890e",
+  "retained_observations_sha256": "b8156ac9e2c586d95a965366296432619f8dda6655891b2a4b61e9fee3890f87",
+  "selected_CI": {
+    "workflow": "Test",
+    "run": 40375870009,
+    "head": "f861e7c628ff5cfd504c7e85120c39a804a99c41",
+    "result": "success",
+    "cases": 43,
+    "scope": "minimal/POSIX test_config_dir_resolver; not full regression",
+    "local_evidence_locators": {
+      "boundary": {
+        "capture": "artifacts/runs/extreme-perf-20261026/normalized-path-copy-ci-requests-v1/40375870009.boundary-source-review.json",
+        "sha256": "30840e91d462e789e98aa0585bd6de6e4607b88e18552e5d5bc4d9cbc92f1cda",
+        "bytes": 12150
+      },
+      "log": {
+        "capture": "artifacts/runs/extreme-perf-20261026/normalized-path-copy-ci-requests-v1/test-40375870009.log",
+        "sha256": "7ad5b5515696dad165de4bb94614c369d5b3616bc4c00f78ca5da857bf89db4d",
+        "bytes": 119505
+      },
+      "scope": "Original local completed CI boundary and full log; not copied into this bundle or newly queried."
+    }
+  },
+  "native_candidate_build": {
+    "run": 40375875592,
+    "artifact_id": 12674977446,
+    "archive_sha256": "774c14570d011aee3611f66983623143a6ca5a5bba81578fe57e9cc8b0d61ace",
+    "scope": "four resource-reading suites + isolated actual source/bytes qualification"
+  },
+  "following_Map_layer": "Native8e/e6 Owner-index implementation is excluded from every cohort in this bundle.",
+  "host_scope": "Shared macOS arm64 host, no exclusive CPU/host isolation or stable SLO claim.",
+  "counter_scope": "Whole-program64-bit health Gc.quick_stat snapshot derivative; can lag collection boundaries, not Gc.allocated_bytes()/rate/CPU/RSS or function-exclusive savings."
+}

@@ -1,0 +1,86 @@
+{
+  "schema": "masc.normalized-path-comparison-selection.v1",
+  "recorded_at_utc": "2026-10-26T19:16:45.929440+00:00",
+  "authority": "Root-authored arithmetic/numeric selection from frozen six-row observations and official closed reports; not an independent verdict",
+  "observations_sha256": "cfedfe1febb766ed2b572af5a38423ebdbac2551051dcf6657cf4c00cbf1890e",
+  "means_bytes": {
+    "control": 60031602920,
+    "candidate": 51597816628
+  },
+  "observed_mean_snapshot_reduction_percent_decimal": "14.04891070997908979372626754",
+  "population_300_cells": [
+    {
+      "packet": "path-reuse-55a0c748-300-a1-v3",
+      "role": "control",
+      "source": "55a0c7482fedece3f114fa8accb64a5084b1a796",
+      "snapshot_delta_bytes": 60321033272,
+      "succeeded_operations": 600,
+      "provider_peak": 300,
+      "status_timeouts": 1,
+      "status_success_max_ms": 6494.6825,
+      "http429": 62,
+      "rate_wait_s": 62.380301129,
+      "denied_inventory": {
+        "container_list": 1,
+        "nerdctl_ps": 1,
+        "container_volume_inspect": 600
+      },
+      "report_sha256": "adf6720f97a5de257018d2d0ee61e5b9a41c2382d6113c7f1e3ec80d4b60361b"
+    },
+    {
+      "packet": "path-reuse-f861e7c6-300-b1-v3",
+      "role": "candidate",
+      "source": "f861e7c628ff5cfd504c7e85120c39a804a99c41",
+      "snapshot_delta_bytes": 51786684800,
+      "succeeded_operations": 600,
+      "provider_peak": 300,
+      "status_timeouts": 1,
+      "status_success_max_ms": 8251.759333,
+      "http429": 64,
+      "rate_wait_s": 64.353600539,
+      "denied_inventory": {
+        "container_list": 1,
+        "nerdctl_ps": 1,
+        "container_volume_inspect": 600
+      },
+      "report_sha256": "58604b0347e9a39fa795edb6bb24f1a7dc82aad02274a6eb210c87496524ece8"
+    },
+    {
+      "packet": "path-reuse-f861e7c6-300-b2-v3",
+      "role": "candidate",
+      "source": "f861e7c628ff5cfd504c7e85120c39a804a99c41",
+      "snapshot_delta_bytes": 51408948456,
+      "succeeded_operations": 600,
+      "provider_peak": 300,
+      "status_timeouts": 1,
+      "status_success_max_ms": 11701.120042,
+      "http429": 60,
+      "rate_wait_s": 60.311437749999996,
+      "denied_inventory": {
+        "container_list": 1,
+        "nerdctl_ps": 1,
+        "container_volume_inspect": 600
+      },
+      "report_sha256": "8cc1f21bfc365f9e4a195287155633f72e72961e3d60b2fae5eb2cb495dbecfb"
+    },
+    {
+      "packet": "path-reuse-55a0c748-300-a2-v3",
+      "role": "control",
+      "source": "55a0c7482fedece3f114fa8accb64a5084b1a796",
+      "snapshot_delta_bytes": 59742172568,
+      "succeeded_operations": 600,
+      "provider_peak": 300,
+      "status_timeouts": 1,
+      "status_success_max_ms": 9774.83475,
+      "http429": 61,
+      "rate_wait_s": 61.368930289,
+      "denied_inventory": {
+        "container_list": 1,
+        "nerdctl_ps": 1,
+        "container_volume_inspect": 600
+      },
+      "report_sha256": "fe0628d1d0da8d404a368bee959b82295eb9f6bdbfe913d3dd44220c0c77e21d"
+    }
+  ],
+  "scope": "Two cohorts per role on shared host. Whole-program quick_stat snapshot deltas, not exact allocation/function-exclusive/CPU/RSS/stable latency/SLO. All four status timeouts remain. No 0.1ms completion."
+}

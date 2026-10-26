@@ -28,7 +28,7 @@ jobs:
         run: |
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'source-sha must be 40 lowercase hex characters' >&2; exit 1; }
           case "$PROOF_SCENARIO" in
-            detail-ownership|workspace-files|rich-workspace|rich-chat-workspace|original-tool-result|code-references|resource-reading|addon-lifecycle|source-readers|code-drafts) ;;
+            detail-ownership|workspace-files|rich-workspace|rich-chat-workspace|original-tool-result|code-references|resource-reading|addon-lifecycle|browser-lane|source-readers|code-drafts) ;;
             *) echo 'unsupported native proof scenario' >&2; exit 1 ;;
           esac
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -81,6 +81,12 @@ jobs:
               ;;
             addon-lifecycle)
               targets+=(bin/main_eio.exe bin/masc_native_addon_launcher.exe test/test_tui_lane_addons.exe test/test_lane_addon_application.exe)
+              ;;
+            browser-lane)
+              targets+=(bin/main_eio.exe bin/masc_browser_addon_worker.exe bin/masc_native_addon_launcher.exe
+                test/test_browser_lane.exe test/test_browser_lane_watched_work.exe
+                test/test_browser_addon_observation.exe test/test_browser_addon_tool.exe
+                test/test_browser_ego_peer.exe test/test_browser_native_workflow.exe test/test_tui_browser_lane.exe)
               ;;
             original-tool-result|source-readers)
               targets+=(bin/main_eio.exe test/test_keeper_tool_result_source.exe test/test_tool_output_washing_e2e.exe test/test_server_dashboard_http_keeper_tool_lookup.exe test/test_tui_chat_call_reader.exe)
@@ -142,16 +148,21 @@ jobs:
           cp _build/default/bin/masc_tui.exe proof/masc-tui
           chmod +x proof/masc-tui
           otool -L proof/masc-tui > proof/native-dependencies.txt
-          if [ "$PROOF_SCENARIO" = workspace-files ] || [ "$PROOF_SCENARIO" = rich-workspace ] || [ "$PROOF_SCENARIO" = rich-chat-workspace ] || [ "$PROOF_SCENARIO" = original-tool-result ] || [ "$PROOF_SCENARIO" = code-references ] || [ "$PROOF_SCENARIO" = resource-reading ] || [ "$PROOF_SCENARIO" = addon-lifecycle ] || [ "$PROOF_SCENARIO" = source-readers ] || [ "$PROOF_SCENARIO" = code-drafts ]; then
+          if [ "$PROOF_SCENARIO" = workspace-files ] || [ "$PROOF_SCENARIO" = rich-workspace ] || [ "$PROOF_SCENARIO" = rich-chat-workspace ] || [ "$PROOF_SCENARIO" = original-tool-result ] || [ "$PROOF_SCENARIO" = code-references ] || [ "$PROOF_SCENARIO" = resource-reading ] || [ "$PROOF_SCENARIO" = addon-lifecycle ] || [ "$PROOF_SCENARIO" = browser-lane ] || [ "$PROOF_SCENARIO" = source-readers ] || [ "$PROOF_SCENARIO" = code-drafts ]; then
             test "$(_build/default/bin/main_eio.exe build-commit)" = "$SOURCE_SHA"
             cp _build/default/bin/main_eio.exe proof/masc
             chmod +x proof/masc
             otool -L proof/masc > proof/server-native-dependencies.txt
           fi
-          if [ "$PROOF_SCENARIO" = addon-lifecycle ]; then
+          if [ "$PROOF_SCENARIO" = addon-lifecycle ] || [ "$PROOF_SCENARIO" = browser-lane ]; then
             cp _build/default/bin/masc_native_addon_launcher.exe proof/masc-native-addon-launcher
             chmod +x proof/masc-native-addon-launcher
             otool -L proof/masc-native-addon-launcher > proof/launcher-native-dependencies.txt
+          fi
+          if [ "$PROOF_SCENARIO" = browser-lane ]; then
+            cp _build/default/bin/masc_browser_addon_worker.exe proof/masc-browser-addon-worker
+            chmod +x proof/masc-browser-addon-worker
+            otool -L proof/masc-browser-addon-worker > proof/browser-worker-native-dependencies.txt
           fi
           python3 - <<'PYCODE'
           import hashlib, json, os
@@ -177,12 +188,17 @@ jobs:
                   'sha256': hashlib.sha256(Path('proof/key-reference.md').read_bytes()).hexdigest(),
                   'producer': 'bin/masc_tui_keys_doc_cli.exe',
               },
-              'server_sha256': hashlib.sha256(Path('proof/masc').read_bytes()).hexdigest() if os.environ['PROOF_SCENARIO'] in ('workspace-files', 'rich-workspace', 'rich-chat-workspace', 'original-tool-result', 'code-references', 'resource-reading', 'addon-lifecycle', 'source-readers', 'code-drafts') else None,
+              'server_sha256': hashlib.sha256(Path('proof/masc').read_bytes()).hexdigest() if os.environ['PROOF_SCENARIO'] in ('workspace-files', 'rich-workspace', 'rich-chat-workspace', 'original-tool-result', 'code-references', 'resource-reading', 'addon-lifecycle', 'browser-lane', 'source-readers', 'code-drafts') else None,
               'native_addon_launcher': {
                   'path': 'masc-native-addon-launcher',
                   'sha256': hashlib.sha256(Path('proof/masc-native-addon-launcher').read_bytes()).hexdigest(),
                   'producer': 'bin/masc_native_addon_launcher.exe',
-              } if os.environ['PROOF_SCENARIO'] == 'addon-lifecycle' else None,
+              } if os.environ['PROOF_SCENARIO'] in ('addon-lifecycle', 'browser-lane') else None,
+              'browser_addon_worker': {
+                  'path': 'masc-browser-addon-worker',
+                  'sha256': hashlib.sha256(Path('proof/masc-browser-addon-worker').read_bytes()).hexdigest(),
+                  'producer': 'bin/masc_browser_addon_worker.exe',
+              } if os.environ['PROOF_SCENARIO'] == 'browser-lane' else None,
               'build_targets': targets,
               'expected_tests': expected_tests,
               'executed_tests': executed_tests,

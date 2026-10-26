@@ -81,11 +81,13 @@ val call_exported_tool : ?on_result:(Mcp_protocol.Mcp_types.tool_result -> unit)
     [on_dispatch] runs under the RPC mutex right before each RPC of this call is
     written; a call that never ran it reached nothing in the worker, and its
     cancellation leaves the protocol serving. A call cancelled after it wrote
-    revokes the protocol.
+    revokes the protocol. A mediated call counts as written from its first
+    RPC, the controller snapshot included, so one cancelled while its next
+    RPC waits for the mutex also revokes: more than needed, never less.
     Ordinary [on_result] sees each original RPC reply under the RPC mutex.
     Companion callbacks see only the validated public projection, with worker
     text and metadata removed. Companion exports require closed output schemas.
     After invocation succeeds, [finalize_result] runs once outside that mutex;
     ordinary calls preserve their existing finalization-before-validation order.
     Finalization errors are post-dispatch protocol failures, never replayed.
-    Cancellation revokes admission and propagates to the execution owner. *)
+    Cancellation always propagates to the execution owner. *)

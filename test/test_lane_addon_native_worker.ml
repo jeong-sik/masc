@@ -155,11 +155,13 @@ let queued_cancelled_call () = with_fixture (fun env sw root ->
   let blocked = Eio.Fiber.fork_promise ~sw (fun () ->
     Native.call_exported_tool worker ~name:"increment" ~arguments:(`Assoc ["value",`Int 4])) in
   wait_for clock (marker root "waiting");
-  let queued_dispatched = ref false in
+  let queued_dispatched = ref false and queued_returned = ref false in
   Eio.Fiber.first
     (fun () -> ignore (Native.call_exported_tool ~on_dispatch:(fun () -> queued_dispatched := true)
-      worker ~name:"increment" ~arguments:(`Assoc ["value",`Int 5])))
+      worker ~name:"increment" ~arguments:(`Assoc ["value",`Int 5]));
+      queued_returned := true)
     (fun () -> Eio.Fiber.yield (); Eio.Fiber.yield ());
+  check bool "the queued call was cancelled, not answered" false !queued_returned;
   check bool "the queued call wrote nothing" false !queued_dispatched;
   check bool "its cancellation leaves the native worker serving" true (Native.phase worker = Native.Serving);
   check bool "with its exports" true (Native.exported_tools worker <> []);

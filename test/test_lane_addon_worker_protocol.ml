@@ -540,7 +540,7 @@ let cancelled_finalizer () = with_finalizer_fixture ~hooks:[] ~invocation:Lane_a
 let queued_cancellation () = with_finalizer_fixture ~hooks:[] ~invocation:Lane_addon_types.Direct
   (fun protocol calls ->
     let holding,hold=Eio.Promise.create () and released,release=Eio.Promise.create () in
-    let queued_dispatched=ref false in
+    let queued_dispatched=ref false and queued_returned=ref false in
     Eio.Switch.run (fun sw ->
       let first=Eio.Fiber.fork_promise ~sw (fun () ->
         Protocol.call_exported_tool ~on_result:(fun _ -> Eio.Promise.resolve hold (); Eio.Promise.await released)
@@ -548,8 +548,10 @@ let queued_cancellation () = with_finalizer_fixture ~hooks:[] ~invocation:Lane_a
       Eio.Promise.await holding;
       Eio.Fiber.first
         (fun () -> ignore (Protocol.call_exported_tool ~on_dispatch:(fun () -> queued_dispatched:=true)
-          protocol ~name:"increment" ~arguments:(`Assoc ["value",`Int 2])))
+          protocol ~name:"increment" ~arguments:(`Assoc ["value",`Int 2]));
+          queued_returned:=true)
         (fun () -> Eio.Fiber.yield (); Eio.Fiber.yield ());
+      check bool "the queued call was cancelled, not answered" false !queued_returned;
       check bool "the queued call wrote nothing" false !queued_dispatched;
       check bool "its cancellation leaves the protocol serving" false (Protocol.revoked protocol);
       Eio.Promise.resolve release ();

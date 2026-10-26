@@ -107,7 +107,7 @@ let make_backend ?observe_step () =
           | None -> invoke None
           | Some authorize -> authorize ~release_controller:(fun ~holder:_ ~reason:_ ->
               Error (Lane_addon_call_context.Transport_error "release fixture unavailable"))
-              ~snapshot:(fun () -> Ok !(state.controller)) ~invoke);
+              ~snapshot:(fun () -> on_dispatch (); Ok !(state.controller)) ~invoke);
         operator_schema=(fun () -> None);
       companion_tools=(fun () -> []);
         call_operator=(fun ~admit:_ ~arguments:_ -> Error Lane_addon_worker_protocol.Operator_unavailable);
@@ -2053,12 +2053,14 @@ let test_tool_exports_bind_live_incarnations () = with_fixture (fun env sw confi
       ~on_complete:(fun () -> ()) ~on_result:(fun _ -> ()) ~authorize:(Some held) ~principal:None
       ~config ~access ~reserved:[] ~export:unsent_handle ~arguments:(`Assoc [])))
     (fun () -> Eio.Promise.await mediating);
-  check bool "a call cancelled before it wrote nothing reached the worker" false
+  check bool "a call cancelled before it wrote reached nothing in the worker" false
     (Hashtbl.mem state.calls (unsent ^ "/export"));
   check bool "a call cancelled before it wrote leaves the installation serving" false
     (Hashtbl.mem state.stops unsent);
   check bool "and its export stays callable" true
-    (match exports () with Ok [handle] -> handle = unsent_handle | Ok _ | Error _ -> false);
+    (match exports () with
+     | Ok [handle] -> Lane_addon_tool_export.equal_owner handle.owner unsent_handle.owner
+     | Ok _ | Error _ -> false);
   detach config unsent;
   await_phase clock config unsent "detached";
   let remote = attach_export "export-hang" in

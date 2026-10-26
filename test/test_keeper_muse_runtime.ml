@@ -457,8 +457,14 @@ let test_start_prompt_frames_system_history_and_goal () =
   let system_prompt = "MUSE_SYSTEM_PROMPT" in
   let goal = "MUSE_GOAL" in
   let history = [ user_message "history-one"; user_message "history-two" ] in
-  match Adapter.start_prompt ~system_prompt ~goal history with
-  | Error detail -> fail detail
+  let prepared : Keeper_official_client_host.prepared_turn =
+    { messages = history; system_prompt
+    ; start_context = Keeper_context_submission_link.literal ""
+    ; composed_context = None; tools = []; reasoning_effort = None }
+  in
+  match Keeper_official_client_host.framed_prompt_for_turn
+      ~held:[] ~is_resume:false ~goal prepared with
+  | Error error -> fail (Agent_core.Error.to_string error)
   | Ok prompt ->
     let positions =
       List.map

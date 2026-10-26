@@ -1020,6 +1020,77 @@ let start_range_projection ~input_source ?argument_projection
   Ok selected.selected_messages
 ;;
 
+let carried_history_projection ~input_source
+    ?argument_projection
+    ?on_model_input_window_observation ?carried_front_seed ?librarian_front ?on_carried_front
+    ~turn_start ~keeper_name ~runtime_id source_projection
+  : Agent_core.Agent.model_input_projection
+  =
+  fun history_messages ->
+  let* frozen = match input_source with
+    | Keeper_request_source.Completion_review -> Ok Keeper_turn_driver_try_provider.no_librarian_position
+    | Keeper_request_source.Keeper_history _ -> read_librarian_front librarian_front history_messages in
+  let window = ref None and front = ref None in
+  let* sent = start_range_projection
+      ~input_source
+    ?argument_projection
+    ~measure_message_bytes
+    ~capacity_bytes:max_int ~unbounded_capacity_bytes:max_int ~reserved_bytes:0
+    ?on_model_input_window_observation:(Option.map
+      (fun _ observation -> window := Some observation) on_model_input_window_observation)
+    ?carried_front_seed
+    ~librarian_front:(fun _ -> Ok frozen)
+    ?on_carried_front:(Option.map
+      (fun _ observed ~transmitted_bytes -> front := Some (observed,transmitted_bytes))
+      on_carried_front)
+    ~turn_start ~keeper_name ~runtime_id history_messages in
+  let* sent = project_source
+    ~unread:frozen.Keeper_turn_driver_try_provider.unread source_projection sent in
+  (* A refused custom projection returned no range. Publish the buffered
+     raw-source observations only after the final transmitted copy exists. *)
+  Option.iter (fun (front,transmitted_bytes) ->
+    Option.iter (fun observe -> observe front ~transmitted_bytes) on_carried_front) !front;
+  Option.iter (fun observation ->
+    Option.iter (fun observe -> observe observation) on_model_input_window_observation) !window;
+  Ok sent
+;;
+
+let render_message (message : Agent_core.Types.message) =
+  Ok (history_role_label message.role ^ encode_history_message message)
+;;
+
+let render_messages messages =
+  let rec loop rendered = function
+    | [] -> Ok (String.concat "\n\n" (List.rev rendered))
+    | message :: rest ->
+      let* rendered_message = render_message message in
+      loop (rendered_message :: rendered) rest
+  in
+  loop [] messages
+;;
+
+let required_frame_label = function
+  | Ok label -> label
+  | Error message -> invalid_arg message
+;;
+
+let framed_prompt_for_turn ?composed_context ~held ~is_resume ~goal (prepared : prepared_turn) =
+  if is_resume
+  then Ok (resume_prompt ~goal ~held ?composed_context prepared.messages).prompt
+  else
+    let* history = render_messages prepared.messages in
+    Ok (start_prompt prepared
+      ([ String_util.trim_nonempty prepared.system_prompt
+         |> Option.map (fun value ->
+           required_frame_label (Antigravity_input_frame.system_instructions_label ()) ^ value)
+       ; String_util.trim_nonempty history
+       ; Some (required_frame_label (Antigravity_input_frame.current_goal_label ()) ^ goal)
+       ]
+       |> List.filter_map Fun.id
+       |> String.concat Antigravity_input_frame.section_separator)
+      |> Keeper_context_submission_link.text)
+;;
+
 let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
     ~initial_messages ~model_input_projection ~hooks ~composed_context ~configured_reasoning_effort
     =

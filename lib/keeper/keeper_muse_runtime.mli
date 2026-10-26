@@ -169,13 +169,6 @@ module For_testing : sig
   val recovery_failure_of_runtime_error : ?current:Keeper_official_client_session_store.recovery_failure ->
     Runtime_muse_serve.error -> Keeper_official_client_session_store.recovery_failure
 
-  val start_prompt :
-    system_prompt:string ->
-    goal:string ->
-    Agent_core.Types.message list ->
-    (string, string) result
-  (** The prompt a start turn sends, rendered by the production formatter. *)
-
   val native_posture_note : Runtime_native_tools.posture -> string list
   (** What a start prompt's system section adds after the system prompt to
       tell the model the session's posture. *)

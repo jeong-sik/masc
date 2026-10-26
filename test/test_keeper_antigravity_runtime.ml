@@ -1159,8 +1159,9 @@ let test_spawn_failure_is_pre_dispatch () =
 ;;
 
 (* A blank composed system prompt must be refused before the CLI is spawned.
-   [prompt_for_turn] renders the system-instructions section only when the
-   prompt trims non-empty, so a blank one would open the conversation with the
+   [Keeper_official_client_host.framed_prompt_for_turn] renders the
+   system-instructions section only when the prompt trims non-empty, so a
+   blank one would open the conversation with the
    goal alone under the CLI's own harness prompt while masc's tool surface
    stayed projected. The refusal is checked on the typed [InvalidConfig] field
    rather than a substring of the detail, and against the working CLI fixture:
@@ -1265,7 +1266,7 @@ let plain_user_message text : Agent_core.Types.message =
 let carried_projection ?on_model_input_window_observation ?carried_front_seed ?librarian_front
     ?on_carried_front ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 })
     source =
-  Keeper_antigravity_runtime.For_testing.carried_history_projection ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "alpha" })
+  Keeper_official_client_host.carried_history_projection ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "alpha" })
     ?on_model_input_window_observation
     ?carried_front_seed
     ?librarian_front
@@ -1954,7 +1955,7 @@ end
 
 let test_projection_refusal_emits_no_carried_observations () =
   let projected = ref 0 and observed = ref 0 in
-  let result = Keeper_antigravity_runtime.For_testing.carried_history_projection ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "refusal-fixture" })
+  let result = Keeper_official_client_host.carried_history_projection ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "refusal-fixture" })
     ~on_model_input_window_observation:(fun _ -> incr observed)
     ~on_carried_front:(fun _ ~transmitted_bytes:_ -> incr observed)
     ~librarian_front:Argument_start_fixture.librarian_front

@@ -96,89 +96,6 @@ let home_error_to_core_error error =
     (Runtime_antigravity_home.error_to_string error)
 ;;
 
-let render_message (message : Agent_core.Types.message) =
-  Ok (Host.history_role_label message.role ^ Host.encode_history_message message)
-;;
-
-let render_messages messages =
-  let rec loop rendered = function
-    | [] -> Ok (String.concat "\n\n" (List.rev rendered))
-    | message :: rest ->
-      let* rendered_message = render_message message in
-      loop (rendered_message :: rendered) rest
-  in
-  loop [] messages
-;;
-
-(* A keeper turn cannot start without its labels; the missing asset is a
-   packaging fault, raised where the turn is framed. *)
-let required_label = function
-  | Ok label -> label
-  | Error message -> invalid_arg message
-
-let system_instructions_label () =
-  required_label (Antigravity_input_frame.system_instructions_label ())
-
-let current_goal_label () = required_label (Antigravity_input_frame.current_goal_label ())
-let prompt_section_separator = Antigravity_input_frame.section_separator
-
-(* The carried front is a position in durable checkpoint history, so admit it
-   before the source projection appends its bounded Gate replay reference.
-   The range goes out as composed, as on Claude Code's first attempt, and
-   the CLI compacts its own conversation. The observation is mapped back to
-   the durable history: a source-only atom is transmitted context, but cannot
-   become a front that a later checkpoint history is expected to open. *)
-let carried_history_projection ~input_source
-    ?argument_projection
-    ?on_model_input_window_observation ?carried_front_seed ?librarian_front ?on_carried_front
-    ~turn_start ~keeper_name ~runtime_id source_projection
-  : Agent_core.Agent.model_input_projection
-  =
-  fun history_messages ->
-  let* frozen = match input_source with
-    | Keeper_request_source.Completion_review -> Ok Keeper_turn_driver_try_provider.no_librarian_position
-    | Keeper_request_source.Keeper_history _ -> Host.read_librarian_front librarian_front history_messages in
-  let window = ref None and front = ref None in
-  let* sent = Host.start_range_projection
-      ~input_source
-    ?argument_projection
-    ~measure_message_bytes:Host.measure_message_bytes
-    ~capacity_bytes:max_int ~unbounded_capacity_bytes:max_int ~reserved_bytes:0
-    ?on_model_input_window_observation:(Option.map
-      (fun _ observation -> window := Some observation) on_model_input_window_observation)
-    ?carried_front_seed
-    ~librarian_front:(fun _ -> Ok frozen)
-    ?on_carried_front:(Option.map
-      (fun _ observed ~transmitted_bytes -> front := Some (observed,transmitted_bytes))
-      on_carried_front)
-    ~turn_start ~keeper_name ~runtime_id history_messages in
-  let* sent = Host.project_source
-    ~unread:frozen.Keeper_turn_driver_try_provider.unread source_projection sent in
-  (* A refused custom projection returned no range. Publish the buffered
-     raw-source observations only after the final transmitted copy exists. *)
-  Option.iter (fun (front,transmitted_bytes) ->
-    Option.iter (fun observe -> observe front ~transmitted_bytes) on_carried_front) !front;
-  Option.iter (fun observation ->
-    Option.iter (fun observe -> observe observation) on_model_input_window_observation) !window;
-  Ok sent
-;;
-
-let prompt_for_turn ?composed_context ~held ~is_resume ~goal (prepared : Host.prepared_turn) =
-  if is_resume
-  then Ok (Host.resume_prompt ~goal ~held ?composed_context prepared.messages).Host.prompt
-  else
-    let* history = render_messages prepared.messages in
-    Ok (Host.start_prompt prepared
-      ([ String_util.trim_nonempty prepared.system_prompt
-         |> Option.map (fun value -> system_instructions_label () ^ value)
-      ; String_util.trim_nonempty history
-      ; Some (current_goal_label () ^ goal)
-      ]
-      |> List.filter_map Fun.id
-      |> String.concat prompt_section_separator)
-      |> Keeper_context_submission_link.text)
-;;
-
 (* Antigravity sends a tool's schema to the model only when the MCP config
    marks it [eager]. For a tool without that mark the model has to read a
    schema file first, and a masc home denies [read_file]
@@ -699,7 +616,7 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
            Ok {prepared with messages})
       else
         let project =
-          carried_history_projection ~input_source
+          Host.carried_history_projection ~input_source
             ?argument_projection:(Option.bind argument_source (fun source ->
               Host.argument_projection source ~tools:prepared.tools
                 ~history_prefix:[]))
@@ -725,7 +642,7 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
         in
         Ok { prepared with messages }
     in
-    (* [prompt_for_turn] renders [prepared.system_prompt] as the
+    (* [Host.framed_prompt_for_turn] renders [prepared.system_prompt] as the
        system-instructions section; [Host.prepare_turn] has already refused a
        blank one, so the section is always present on a start (#33165). *)
     (* This is the prepared attribution, not transmission evidence. The
@@ -740,7 +657,7 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
     (* Antigravity exposes no compaction or context-reset witness. A settled
        delivery cannot prove these blocks remain in its current model input,
        so keep the frontier's held set empty and resend on every resume. *)
-    let* prompt = prompt_for_turn ?composed_context ~held:[] ~is_resume ~goal prepared in
+    let* prompt = Host.framed_prompt_for_turn ?composed_context ~held:[] ~is_resume ~goal prepared in
     (* Recording the half this process controls, mirroring the Codex and
        Claude Code composition lines: an oversized prompt was invisible until
        the client's own log showed promptLength=11,386,764 (2026-08-14). *)
@@ -1470,5 +1387,4 @@ module For_testing = struct
     List.rev !emitted
   ;;
 
-  let carried_history_projection = carried_history_projection
 end

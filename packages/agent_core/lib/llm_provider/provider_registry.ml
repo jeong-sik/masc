@@ -36,12 +36,12 @@ let find_capable t pred = all t |> List.filter (fun e -> pred e.capabilities)
 
 (* ── Default registry ─────────────────────────────────── *)
 
-let has_api_key env_name =
-  env_name = ""
-  ||
-  match Cli_common_env.get env_name with
-  | Some value -> String.trim value <> ""
-  | None -> false
+let authentication_available = function
+  | Provider_declarations.No_auth | Caller_api_key -> true
+  | Api_key_env env | Setup_token_env env ->
+    (match Cli_common_env.get env with
+     | Some value -> String.trim value <> ""
+     | None -> false)
 ;;
 
 let path_entries ?path () =
@@ -74,51 +74,6 @@ let command_in_path ?path name =
   |> List.exists (fun dir ->
     command_candidates ~name
     |> List.exists (fun candidate -> is_runnable_path (Filename.concat dir candidate)))
-;;
-
-let catalog_auth_available (entry : Provider_catalog.entry) =
-  match entry.auth with
-  | Provider_catalog.Api_key_env env | Provider_catalog.Setup_token_env env ->
-    has_api_key env
-  | Provider_catalog.No_auth -> true
-;;
-
-let catalog_entry_available = catalog_auth_available
-
-let register_catalog_entry t (entry : Provider_catalog.entry) =
-  let max_context =
-    match entry.max_context with
-    | Some _ as declared -> declared
-    | None -> entry.capabilities.Capabilities.max_context_tokens
-  in
-  let defaults : provider_defaults =
-    { kind = entry.kind
-    ; base_url = entry.base_url
-    ; request_path = entry.request_path
-    ; requires_api_key =
-        (match entry.auth with
-         | Provider_catalog.Api_key_env _ | Provider_catalog.Setup_token_env _ -> true
-         | Provider_catalog.No_auth -> false)
-    }
-  in
-  if String.trim entry.id = ""
-  then invalid_arg "Provider_registry.register_catalog_entry: empty provider id"
-  else
-    register
-      t
-      { name = entry.id
-      ; defaults
-      ; max_context
-      ; capabilities = entry.capabilities
-      ; is_available = (fun () -> catalog_entry_available entry)
-      }
-;;
-
-let overlay_provider_catalog t =
-  match Provider_catalog.global () with
-  | None -> ()
-  | Some catalog ->
-    List.iter (register_catalog_entry t) (Provider_catalog.entries catalog)
 ;;
 
 (** Mutable endpoint list, protected by atomic snapshot swap.
@@ -189,52 +144,20 @@ let refresh_llama_endpoints ~sw ~net ~endpoints =
 (** Current active endpoint list (snapshot). *)
 let active_llama_endpoints () = Array.to_list (Atomic.get llama_endpoints_ref)
 
-let default () =
-  let t = create () in
-  let capabilities_for_registered_label label =
-    match Capabilities.capabilities_for_provider_label label with
-    | Some caps -> caps
-    | None ->
-      invalid_arg
-        (Printf.sprintf
-           "Provider_registry.default: no capabilities for registered provider %S"
-           label)
-  in
-  let register_model_catalog_provider (entry : Model_catalog.provider_entry) =
-    let capability_label =
-      Option.value entry.capabilities_base ~default:entry.id
-      |> String.lowercase_ascii
-      |> String.trim
-    in
-    let caps = capabilities_for_registered_label capability_label in
-    let defaults : provider_defaults =
-      { kind = entry.kind
-      ; base_url = entry.base_url
-      ; request_path = entry.request_path
-      ; requires_api_key = entry.requires_api_key
-      }
-    in
-    register
-      t
-      { name = entry.id
-      ; defaults
-      ; max_context = caps.Capabilities.max_context_tokens
-      ; capabilities = caps
-      ; is_available =
-          (fun () ->
-            (* Availability by environment presence died with the catalog's
-               env names: whether a keyed provider is usable is a deployment
-               credential question, answered where credentials are declared. *)
-            true)
-      }
-  in
-  (match Model_catalog.global () with
-   | None ->
-     invalid_arg "Provider_registry.default: embedded provider catalog is unavailable"
-   | Some catalog ->
-     List.iter register_model_catalog_provider (Model_catalog.provider_entries catalog));
-  overlay_provider_catalog t;
-  t
+let of_declarations declarations =
+  let registry = create () in
+  List.iter (fun (entry : Provider_declarations.entry) ->
+    register registry
+      { name=entry.id;
+        defaults={kind=entry.kind;base_url=entry.base_url;request_path=entry.request_path;
+          requires_api_key=Provider_declarations.requires_api_key entry.authentication};
+        max_context=entry.max_context;capabilities=entry.capabilities;
+        is_available=(fun () -> authentication_available entry.authentication) })
+    (Provider_declarations.entries declarations);
+  registry
+;;
+
+let default () = of_declarations (Provider_declarations.current ())
 ;;
 
 let provider_name_of_config (config : Provider_config.t) =

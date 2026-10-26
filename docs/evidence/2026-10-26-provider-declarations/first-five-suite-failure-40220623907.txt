@@ -1,0 +1,208 @@
+Raw workflow log SHA256: d2428b862e87543e1e7ffcf8f1024caa9743e198ea3bd24171fa945be89a9444
+Source: https://github.com/jeong-sik/masc/actions/runs/40220623907
+
+test suite	Checkout	2026-10-25T18:18:52.0161256Z HEAD is now at 17fabe83 fix(core): preserve declared registry identity while indexing aliases by exact case equality
+test suite	Test	2026-10-25T18:20:28.6919391Z   ^[[32m[OK]^[[0m          ^[[36mcrud^[[0m                      0   empty.
+test suite	Test	2026-10-25T18:20:28.6921497Z   ^[[32m[OK]^[[0m          ^[[36mcrud^[[0m                      1   register and find.
+test suite	Test	2026-10-25T18:20:28.6923527Z   ^[[32m[OK]^[[0m          ^[[36mcrud^[[0m                      2   overwrite.
+test suite	Test	2026-10-25T18:20:28.6925154Z   ^[[32m[OK]^[[0m          ^[[36mcrud^[[0m                      3   unregister.
+test suite	Test	2026-10-25T18:20:28.6962038Z   ^[[32m[OK]^[[0m          ^[[36mcrud^[[0m                      4   concurrent register retains eve...
+test suite	Test	2026-10-25T18:20:28.6965905Z   ^[[32m[OK]^[[0m          ^[[36mendpoint_refresh^[[0m          0   missing declarations rejected.
+test suite	Test	2026-10-25T18:20:28.6967947Z   ^[[32m[OK]^[[0m          ^[[36mavailability^[[0m              0   filter.
+test suite	Test	2026-10-25T18:20:28.6969396Z   ^[[32m[OK]^[[0m          ^[[36mavailability^[[0m              1   command_in_path finds binary.
+test suite	Test	2026-10-25T18:20:28.6971369Z   ^[[32m[OK]^[[0m          ^[[36mavailability^[[0m              2   command_in_path rejects directory.
+test suite	Test	2026-10-25T18:20:28.6973238Z   ^[[32m[OK]^[[0m          ^[[36mavailability^[[0m              3   command_in_path misses unknown ...
+test suite	Test	2026-10-25T18:20:28.6975158Z   ^[[32m[OK]^[[0m          ^[[36mcapabilities^[[0m              0   find with tools.
+test suite	Test	2026-10-25T18:20:28.6977058Z   ^[[32m[OK]^[[0m          ^[[36mcapabilities^[[0m              1   composite predicate.
+test suite	Test	2026-10-25T18:20:28.7223195Z   ^[[31m[FAIL]^[[0m        ^[[36mdefault^[[0m                   0   default provider set.
+test suite	Test	2026-10-25T18:20:28.7226455Z   ^[[32m[OK]^[[0m          ^[[36mdefault^[[0m                   1   correct capabilities.
+test suite	Test	2026-10-25T18:20:28.7230752Z   ^[[32m[OK]^[[0m          ^[[36mdefault^[[0m                   2   ollama_cloud entry.
+test suite	Test	2026-10-25T18:20:28.7233499Z   ^[[32m[OK]^[[0m          ^[[36mdefault^[[0m                   3   deepseek entry.
+test suite	Test	2026-10-25T18:20:28.7237898Z   ^[[32m[OK]^[[0m          ^[[36mdefault^[[0m                   4   mimo entry.
+test suite	Test	2026-10-25T18:20:28.7242154Z   ^[[32m[OK]^[[0m          ^[[36mdefault^[[0m                   5   explicit no-auth rows.
+test suite	Test	2026-10-25T18:20:28.7243353Z   ^[[32m[OK]^[[0m          ^[[36mdefault^[[0m                   6   padded embedded auth declaratio...
+test suite	Test	2026-10-25T18:20:28.7246895Z   ^[[32m[OK]^[[0m          ^[[36mdefault^[[0m                   7   provider_name_of_config project...
+test suite	Test	2026-10-25T18:20:28.7251189Z   ^[[32m[OK]^[[0m          ^[[36mdefault^[[0m                   8   endpoints ignore ambient overri...
+test suite	Test	2026-10-25T18:20:28.7254514Z   ^[[32m[OK]^[[0m          ^[[36mdefault^[[0m                   9   max_context values.
+test suite	Test	2026-10-25T18:20:28.7271918Z   ^[[32m[OK]^[[0m          ^[[36mdefault^[[0m                  10   max_context matches capabilities.
+test suite	Test	2026-10-25T18:20:28.7276554Z   ^[[32m[OK]^[[0m          ^[[36mdefault^[[0m                  11   zai base urls.
+test suite	Test	2026-10-25T18:20:28.7279023Z   ^[[32m[OK]^[[0m          ^[[36mprovider_catalog^[[0m          0   overlay registers exact provide...
+test suite	Test	2026-10-25T18:20:28.7280704Z   ^[[32m[OK]^[[0m          ^[[36mprovider_catalog^[[0m          1   overlay replaces embedded provi...
+test suite	Test	2026-10-25T18:20:28.7283158Z   ^[[32m[OK]^[[0m          ^[[36mprovider_catalog^[[0m          2   overlay preserves exact provide...
+test suite	Test	2026-10-25T18:20:28.7284347Z   ^[[32m[OK]^[[0m          ^[[36mprovider_catalog^[[0m          3   overlay without context keeps N...
+test suite	Test	2026-10-25T18:20:28.7285102Z   ^[[32m[OK]^[[0m          ^[[36mprovider_catalog^[[0m          4   rejects empty provider id.
+test suite	Test	2026-10-25T18:20:28.7285691Z   ^[[32m[OK]^[[0m          ^[[36mprovider_catalog^[[0m          5   rejects removed transport field.
+test suite	Test	2026-10-25T18:20:28.7286258Z   ^[[32m[OK]^[[0m          ^[[36mprovider_catalog^[[0m          6   rejects unknown auth type.
+test suite	Test	2026-10-25T18:20:28.7286846Z   ^[[32m[OK]^[[0m          ^[[36mprovider_catalog^[[0m          7   rejects unknown capabilities_base.
+test suite	Test	2026-10-25T18:20:28.7287430Z   ^[[32m[OK]^[[0m          ^[[36mprovider_catalog^[[0m          8   rejects unknown thinking_contro...
+test suite	Test	2026-10-25T18:20:28.7288014Z   ^[[32m[OK]^[[0m          ^[[36mprovider_catalog^[[0m          9   rejects unknown preserve_thinki...
+test suite	Test	2026-10-25T18:20:28.7290479Z   ^[[32m[OK]^[[0m          ^[[36mprovider_catalog^[[0m         10   accepts explicit thinking_contr...
+test suite	Test	2026-10-25T18:20:28.7291227Z   ^[[32m[OK]^[[0m          ^[[36mprovider_catalog^[[0m         11   rejects duplicate provider id.
+test suite	Test	2026-10-25T18:20:28.7293333Z   ^[[32m[OK]^[[0m          ^[[36mprovider_catalog^[[0m         12   lookup is case-insensitive.
+test suite	Test	2026-10-25T18:20:28.7293921Z   ^[[32m[OK]^[[0m          ^[[36mprovider_catalog^[[0m         13   programmatic catalog rejects in...
+test suite	Test	2026-10-25T18:20:28.7294516Z   ^[[32m[OK]^[[0m          ^[[36mprovider_catalog^[[0m         14   programmatic catalog rejects du...
+test suite	Test	2026-10-25T18:20:28.7295701Z   ^[[32m[OK]^[[0m          ^[[36mprovider_catalog^[[0m         15   aliases are not registry keys.
+test suite	Test	2026-10-25T18:20:28.7296747Z   ^[[32m[OK]^[[0m          ^[[36mprovider_catalog^[[0m         16   load_file and lookup alias.
+test suite	Test	2026-10-25T18:20:28.7297950Z   ^[[32m[OK]^[[0m          ^[[36mprovider_catalog^[[0m         17   api key env gates availability.
+test suite	Test	2026-10-25T18:20:28.7300093Z   ^[[32m[OK]^[[0m          ^[[36mkind_projection^[[0m           0   every kind projects exactly.
+test suite	Test	2026-10-25T18:20:28.7301634Z   ^[[32m[OK]^[[0m          ^[[36mtypes_usage^[[0m               0   zero_api_usage.
+test suite	Test	2026-10-25T18:20:28.7302824Z   ^[[32m[OK]^[[0m          ^[[36mtypes_usage^[[0m               1   usage_of_response some.
+test suite	Test	2026-10-25T18:20:28.7303648Z   ^[[32m[OK]^[[0m          ^[[36mtypes_usage^[[0m               2   usage_of_response none.
+test suite	Test	2026-10-25T18:20:28.7304828Z ^[[2m│ ^[[0m^[[31m[FAIL]^[[0m        ^[[36mdefault^[[0m                   0   default provider set.^[[2m            │^[[0m
+test suite	Test	2026-10-25T18:20:28.7306991Z    Expected: `^[[32m["claude"; "cohere"; "deepseek"; "deepseek-anthropic";
+test suite	Test	2026-10-25T18:20:28.7309700Z    Received: `^[[31m["claude"; "cohere"; "deepseek"; "deepseek-anthropic";
+test suite	Test	2026-10-25T18:20:28.7316715Z ^[[31m1 failure!^[[0m in 0.034s. 46 tests run.
+test suite	Test	2026-10-25T18:20:30.1896953Z   ^[[32m[OK]^[[0m          ^[[36mpolicy authority^[[0m          0   projected options match public ...
+test suite	Test	2026-10-25T18:20:30.1900897Z   ^[[32m[OK]^[[0m          ^[[36mpolicy authority^[[0m          1   missing model policy survives r...
+test suite	Test	2026-10-25T18:20:30.1915902Z   ^[[32m[OK]^[[0m          ^[[36mpolicy authority^[[0m          2   missing provider policy survive...
+test suite	Test	2026-10-25T18:20:30.2143313Z   ^[[32m[OK]^[[0m          ^[[36mpolicy authority^[[0m          3   selected binding carries provid...
+test suite	Test	2026-10-25T18:20:30.2173616Z   ^[[32m[OK]^[[0m          ^[[36mcatalog^[[0m                   0   wire fallback preserves provide...
+test suite	Test	2026-10-25T18:20:30.2397901Z   ^[[32m[OK]^[[0m          ^[[36mcatalog^[[0m                   1   alias default capabilities.
+test suite	Test	2026-10-25T18:20:30.2401806Z   ^[[32m[OK]^[[0m          ^[[36mcatalog^[[0m                   2   to provider config.
+test suite	Test	2026-10-25T18:20:30.2406723Z   ^[[32m[OK]^[[0m          ^[[36mcatalog^[[0m                   3   explicit provider identity sele...
+test suite	Test	2026-10-25T18:20:30.2409392Z   ^[[32m[OK]^[[0m          ^[[36mcatalog^[[0m                   4   endpoint-only config does not s...
+test suite	Test	2026-10-25T18:20:30.2413201Z   ^[[32m[OK]^[[0m          ^[[36mcatalog^[[0m                   5   provider capabilities require s...
+test suite	Test	2026-10-25T18:20:30.2415445Z   ^[[32m[OK]^[[0m          ^[[36mcatalog^[[0m                   6   an uncatalogued model keeps its...
+test suite	Test	2026-10-25T18:20:30.2417803Z   ^[[32m[OK]^[[0m          ^[[36mcatalog^[[0m                   7   shared endpoint is disambiguate...
+test suite	Test	2026-10-25T18:20:30.2419791Z   ^[[32m[OK]^[[0m          ^[[36mcatalog^[[0m                   8   unknown explicit id stays opaque.
+test suite	Test	2026-10-25T18:20:30.2421005Z   ^[[32m[OK]^[[0m          ^[[36mcatalog^[[0m                   9   structured output projects to p...
+test suite	Test	2026-10-25T18:20:30.2423682Z   ^[[32m[OK]^[[0m          ^[[36mcatalog^[[0m                  10   provider-scoped model catalog c...
+test suite	Test	2026-10-25T18:20:30.2427457Z   ^[[32m[OK]^[[0m          ^[[36mcatalog^[[0m                  11   exact provider/model tuple capa...
+test suite	Test	2026-10-25T18:20:30.2429233Z   ^[[32m[OK]^[[0m          ^[[36mcatalog^[[0m                  12   forced tool_choice provider inv...
+test suite	Test	2026-10-25T18:20:30.2659500Z   ^[[32m[OK]^[[0m          ^[[36mcatalog^[[0m                  13   all includes catalog once.
+test suite	Test	2026-10-25T18:20:30.2663929Z   ^[[32m[OK]^[[0m          ^[[36mcatalog^[[0m                  14   auth variants.
+test suite	Test	2026-10-25T18:20:30.2665964Z   ^[[32m[OK]^[[0m          ^[[36mcatalog^[[0m                  15   find empty and unknown.
+test suite	Test	2026-10-25T18:20:30.2667046Z   ^[[32m[OK]^[[0m          ^[[36mcatalog^[[0m                  16   local capabilities not inflated...
+test suite	Test	2026-10-25T18:20:30.2668677Z   ^[[32m[OK]^[[0m          ^[[36mcatalog^[[0m                  17   capabilities host-invariant loc...
+test suite	Test	2026-10-25T18:20:30.2670723Z   ^[[32m[OK]^[[0m          ^[[36mbuiltins^[[0m                  0   builtin requires exact model.
+test suite	Test	2026-10-25T18:20:30.2671859Z   ^[[32m[OK]^[[0m          ^[[36mbuiltins^[[0m                  1   nous binding uses declared defa...
+test suite	Test	2026-10-25T18:20:30.2673790Z   ^[[32m[OK]^[[0m          ^[[36mbuiltins^[[0m                  2   embedded MiMo binding preserves...
+test suite	Test	2026-10-25T18:20:30.2677525Z   ^[[32m[OK]^[[0m          ^[[36mbuiltins^[[0m                  3   non-Claude builtin defaults do ...
+test suite	Test	2026-10-25T18:20:30.2679874Z   ^[[32m[OK]^[[0m          ^[[36mbuiltins^[[0m                  4   builtin selectors are exact.
+test suite	Test	2026-10-25T18:20:30.2680747Z   ^[[32m[OK]^[[0m          ^[[36mbuiltins^[[0m                  5   unregistered OpenAI-compatible ...
+test suite	Test	2026-10-25T18:20:30.2681209Z ^[[32mTest Successful^[[0m in 0.079s. 28 tests run.
+test suite	Test	2026-10-25T18:23:43.3846937Z ASSERT one canonical provider remains
+test suite	Test	2026-10-25T18:23:43.3847408Z ASSERT canonical id
+test suite	Test	2026-10-25T18:23:43.3847790Z ASSERT overlay endpoint
+test suite	Test	2026-10-25T18:23:43.3848228Z ASSERT overlay codec path
+test suite	Test	2026-10-25T18:23:43.3848658Z ASSERT overlay default
+test suite	Test	2026-10-25T18:23:43.3849368Z ASSERT explicit context
+test suite	Test	2026-10-25T18:23:43.3849793Z ASSERT overlay capability
+test suite	Test	2026-10-25T18:23:43.3850249Z ASSERT old seed alias loses authority
+test suite	Test	2026-10-25T18:23:43.3850780Z ASSERT environment auth is explicit data
+test suite	Test	2026-10-25T18:23:43.3851395Z   [OK]          admission          0   exact overlay replacement.
+test suite	Test	2026-10-25T18:23:43.3861491Z ASSERT case-equivalent exact replacement
+test suite	Test	2026-10-25T18:23:43.3862144Z ASSERT declared spelling is retained
+test suite	Test	2026-10-25T18:23:43.3862738Z ASSERT registry retains its exact declared key
+test suite	Test	2026-10-25T18:23:43.3863078Z ASSERT registry invents no lowercase alias
+test suite	Test	2026-10-25T18:23:43.3863419Z ASSERT runtime canonical identity remains normalized
+test suite	Test	2026-10-25T18:23:43.3863831Z   [OK]          admission          1   declared spelling and lookup identity.
+test suite	Test	2026-10-25T18:23:43.3864209Z ASSERT conflicting exact identity
+test suite	Test	2026-10-25T18:23:43.3864493Z ASSERT both declarations retained in error
+test suite	Test	2026-10-25T18:23:43.3864820Z   [OK]          admission          2   alias versus canonical id.
+test suite	Test	2026-10-25T18:23:43.3865172Z ASSERT conflicting exact identity
+test suite	Test	2026-10-25T18:23:43.3865442Z ASSERT both declarations retained in error
+test suite	Test	2026-10-25T18:23:43.3865756Z   [OK]          admission          3   alias versus alias.
+test suite	Test	2026-10-25T18:23:43.3866062Z ASSERT provider error identity
+test suite	Test	2026-10-25T18:23:43.3866331Z ASSERT missing base is not a generic fallback
+test suite	Test	2026-10-25T18:23:43.3866669Z   [OK]          admission          4   missing capability base.
+test suite	Test	2026-10-25T18:23:43.3867092Z   [OK]          admission          5   invalid current declaration has no fal...
+test suite	Test	2026-10-25T18:23:43.3867485Z ASSERT listing uses admitted canonical entries
+test suite	Test	2026-10-25T18:23:43.3868035Z ASSERT captured default survives global replacement
+test suite	Test	2026-10-25T18:23:43.3868363Z ASSERT registry and binding endpoint agree
+test suite	Test	2026-10-25T18:23:43.3868672Z ASSERT registry and binding capability agree
+test suite	Test	2026-10-25T18:23:43.4101188Z ASSERT selected request model uses captured default
+test suite	Test	2026-10-25T18:23:43.4102004Z ASSERT selected request uses captured endpoint
+test suite	Test	2026-10-25T18:23:43.4103099Z ASSERT selected request retains declared policy
+test suite	Test	2026-10-25T18:23:43.4103620Z   [OK]          consumers          0   immutable captured selection.
+test suite	Test	2026-10-25T18:23:43.4104104Z ASSERT blank credential unavailable
+test suite	Test	2026-10-25T18:23:43.4105601Z ASSERT credential is observed at the edge
+test suite	Test	2026-10-25T18:23:43.4106217Z ASSERT binding and registry credential observation agree
+test suite	Test	2026-10-25T18:23:43.4106712Z ASSERT auth requirement remains immutable
+test suite	Test	2026-10-25T18:23:43.4107169Z   [OK]          consumers          1   credential observation.
+test suite	Test	2026-10-25T18:23:43.4107642Z Test Successful in 0.026s. 8 tests run.
+test suite	Test	2026-10-25T18:23:43.5069915Z ASSERT explicit provider survives label resolution
+test suite	Test	2026-10-25T18:23:43.5070608Z ASSERT resolved endpoint remains owned by provider
+test suite	Test	2026-10-25T18:23:43.5071248Z ASSERT explicit provider survives label resolution
+test suite	Test	2026-10-25T18:23:43.5071738Z ASSERT resolved endpoint remains owned by provider
+test suite	Test	2026-10-25T18:23:43.5072194Z   [OK]          provider authority          0   identity.
+test suite	Test	2026-10-25T18:23:43.5073748Z ASSERT context excludes unrelated bare model declaration
+test suite	Test	2026-10-25T18:23:43.5074244Z ASSERT config carries the same resolved window
+test suite	Test	2026-10-25T18:23:43.5074688Z ASSERT context excludes unrelated bare model declaration
+test suite	Test	2026-10-25T18:23:43.5075324Z ASSERT config carries the same resolved window
+test suite	Test	2026-10-25T18:23:43.5076301Z   [OK]          provider authority          1   context.
+test suite	Test	2026-10-25T18:23:43.5077147Z ASSERT A rejects forcing despite the bare row allowing it
+test suite	Test	2026-10-25T18:23:43.5077878Z ASSERT B retains its separate forcing declaration
+test suite	Test	2026-10-25T18:23:43.5078600Z ASSERT endpoint override preserves selected provider
+test suite	Test	2026-10-25T18:23:43.5079292Z ASSERT endpoint override cannot borrow B's policy
+test suite	Test	2026-10-25T18:23:43.5079919Z ASSERT A rejects required choice before dispatch
+test suite	Test	2026-10-25T18:23:43.5080289Z ASSERT B admits required choice
+test suite	Test	2026-10-25T18:23:43.5080622Z ASSERT B forcing reaches final Chat body
+test suite	Test	2026-10-25T18:23:43.5081027Z   [OK]          provider authority          2   policy and wire.
+test suite	Test	2026-10-25T18:23:43.5081488Z ASSERT custom label cannot borrow discovery endpoint
+test suite	Test	2026-10-25T18:23:43.5081903Z   [OK]          custom endpoint             0   missing.
+test suite	Test	2026-10-25T18:23:43.5082320Z ASSERT custom label cannot borrow environment endpoint
+test suite	Test	2026-10-25T18:23:43.5083204Z   [OK]          custom endpoint             1   ambient.
+test suite	Test	2026-10-25T18:23:43.5083919Z ASSERT invalid custom endpoint is refused before request construction
+test suite	Test	2026-10-25T18:23:43.5084521Z ASSERT invalid custom endpoint is refused before request construction
+test suite	Test	2026-10-25T18:23:43.5085086Z ASSERT invalid custom endpoint is refused before request construction
+test suite	Test	2026-10-25T18:23:43.5085556Z ASSERT invalid custom endpoint is refused before request construction
+test suite	Test	2026-10-25T18:23:43.5085952Z   [OK]          custom endpoint             2   invalid.
+test suite	Test	2026-10-25T18:23:43.5086316Z ASSERT custom URL parser must consume the complete endpoint
+test suite	Test	2026-10-25T18:23:43.5086926Z ASSERT custom URL parser must consume the complete endpoint
+test suite	Test	2026-10-25T18:23:43.5087314Z ASSERT custom URL parser must consume the complete endpoint
+test suite	Test	2026-10-25T18:23:43.5087679Z   [OK]          custom endpoint             3   malformed.
+test suite	Test	2026-10-25T18:23:43.5088050Z ASSERT invalid explicit port cannot become the default port
+test suite	Test	2026-10-25T18:23:43.5088441Z ASSERT invalid explicit port cannot become the default port
+test suite	Test	2026-10-25T18:23:43.5088824Z ASSERT invalid explicit port cannot become the default port
+test suite	Test	2026-10-25T18:23:43.5089212Z ASSERT valid authority and path/query bytes remain explicit
+test suite	Test	2026-10-25T18:23:43.5089596Z ASSERT valid authority and path/query bytes remain explicit
+test suite	Test	2026-10-25T18:23:43.5089983Z ASSERT valid authority and path/query bytes remain explicit
+test suite	Test	2026-10-25T18:23:43.5090364Z ASSERT valid authority and path/query bytes remain explicit
+test suite	Test	2026-10-25T18:23:43.5090712Z   [OK]          custom endpoint             4   ports.
+test suite	Test	2026-10-25T18:23:43.5091053Z ASSERT invalid authority suffix cannot become a path
+test suite	Test	2026-10-25T18:23:43.5091399Z ASSERT invalid authority suffix cannot become a path
+test suite	Test	2026-10-25T18:23:43.5091741Z ASSERT invalid authority suffix cannot become a path
+test suite	Test	2026-10-25T18:23:43.5092080Z   [OK]          custom endpoint             5   authority.
+test suite	Test	2026-10-25T18:23:43.5092656Z ASSERT custom classification retains explicit model
+test suite	Test	2026-10-25T18:23:43.5093430Z ASSERT custom classification retains explicit endpoint
+test suite	Test	2026-10-25T18:23:43.5094082Z ASSERT custom config retains explicit endpoint
+test suite	Test	2026-10-25T18:23:43.5094630Z ASSERT custom wire retains explicitly selected model
+test suite	Test	2026-10-25T18:23:43.5094974Z   [OK]          custom endpoint             6   explicit.
+test suite	Test	2026-10-25T18:23:43.5096898Z ASSERT auto without catalog default cannot reach execution
+test suite	Test	2026-10-25T18:23:43.5097309Z   [OK]          catalog defaults            0   missing default.
+test suite	Test	2026-10-25T18:23:43.5097744Z ASSERT catalog default wins independently of derived environment key
+test suite	Test	2026-10-25T18:23:43.5098131Z ASSERT auto retains canonical provider
+test suite	Test	2026-10-25T18:23:43.5098418Z ASSERT auto retains exact model context
+test suite	Test	2026-10-25T18:23:43.5098728Z ASSERT binding construction preserves temperature
+test suite	Test	2026-10-25T18:23:43.5099079Z ASSERT binding construction preserves output limit
+test suite	Test	2026-10-25T18:23:43.5099593Z ASSERT binding construction preserves system prompt
+test suite	Test	2026-10-25T18:23:43.5099943Z ASSERT binding construction preserves keep-alive
+test suite	Test	2026-10-25T18:23:43.5100287Z ASSERT binding construction preserves context option
+test suite	Test	2026-10-25T18:23:43.5100818Z   [OK]          catalog defaults            1   declared default.
+test suite	Test	2026-10-25T18:23:43.5101639Z ASSERT alias resolves declared default
+test suite	Test	2026-10-25T18:23:43.5102195Z ASSERT alias carries canonical binding identity
+test suite	Test	2026-10-25T18:23:43.5102992Z   [OK]          catalog defaults            2   canonical alias.
+test suite	Test	2026-10-25T18:23:43.5106548Z ASSERT supported-model metadata cannot invent an execution default
+test suite	Test	2026-10-25T18:23:43.5106997Z   [OK]          catalog defaults            3   supported is not default.
+test suite	Test	2026-10-25T18:23:43.5107971Z ASSERT projection offers only explicitly declared catalog defaults
+test suite	Test	2026-10-25T18:23:43.5108787Z ASSERT incomplete explicit configuration cannot trigger a fallback
+test suite	Test	2026-10-25T18:23:43.5109249Z ASSERT present blank configuration cannot trigger catalog defaults
+test suite	Test	2026-10-25T18:23:43.5109693Z ASSERT present blank configuration cannot trigger catalog defaults
+test suite	Test	2026-10-25T18:23:43.5110114Z ASSERT present blank configuration cannot trigger catalog defaults
+test suite	Test	2026-10-25T18:23:43.5110556Z ASSERT present blank configuration cannot trigger catalog defaults
+test suite	Test	2026-10-25T18:23:43.5110981Z ASSERT present blank configuration cannot trigger catalog defaults
+test suite	Test	2026-10-25T18:23:43.5111569Z ASSERT present blank configuration cannot trigger catalog defaults
+test suite	Test	2026-10-25T18:23:43.5121165Z ASSERT blank explicit pair cannot trigger catalog defaults
+test suite	Test	2026-10-25T18:23:43.5121874Z   [OK]          catalog defaults            4   projection.
+test suite	Test	2026-10-25T18:23:43.5122708Z Test Successful in 0.030s. 15 tests run.
+test suite	Test	2026-10-25T18:23:43.5826350Z ASSERT available keyed binding qualifies
+test suite	Test	2026-10-25T18:23:43.5826840Z   [OK]          gate          0   keyed available participates.
+test suite	Test	2026-10-25T18:23:43.5827358Z ASSERT unavailable keyed binding does not qualify
+test suite	Test	2026-10-25T18:23:43.5827860Z   [OK]          gate          1   keyed unavailable does not.
+test suite	Test	2026-10-25T18:23:43.5828360Z ASSERT available setup-token binding qualifies
+test suite	Test	2026-10-25T18:23:43.5828869Z ASSERT unavailable setup-token binding does not qualify
+test suite	Test	2026-10-25T18:23:43.5829403Z   [OK]          gate          2   setup token follows availability.
+test suite	Test	2026-10-25T18:23:43.5829946Z ASSERT keyless binding qualifies without availability
+test suite	Test	2026-10-25T18:23:43.5830461Z   [OK]          gate          3   keyless always participates.
+test suite	Test	2026-10-25T18:23:43.5830929Z Test Successful in 0.000s. 4 tests run.

@@ -57,16 +57,18 @@ val find_capable : t -> (Capabilities.capabilities -> bool) -> entry list
 (** Check whether a command is discoverable from PATH without shelling out. *)
 val command_in_path : ?path:string -> string -> bool
 
-(** Default registry populated from the embedded provider catalog.
-    Availability is determined by credential values only.
+val of_declarations : Provider_declarations.t -> t
+(** Project an already admitted immutable provider snapshot. Registry entries
+    retain canonical ids; alias selection belongs to the declaration snapshot. *)
 
-    Entries explicitly installed with {!Provider_catalog.set_global} are
-    overlaid last and may add or replace provider ids without changing agent core
-    code. AGENT_CORE does not discover a provider catalog from the environment.
+val authentication_available : Provider_declarations.authentication -> bool
+(** Credential-availability edge: caller-supplied credentials are checked by
+    the caller, environment-bound credentials are available only when nonblank. *)
 
-    Endpoint, request-path, provider-id, and capability values come only from
-    those declarations. Process environment reads are restricted to credential
-    availability and never reinterpret provider identity. *)
+(** Default registry projected from one immutable admitted declaration snapshot.
+    The embedded catalog and explicit overlay are captured once. No second
+    provider source or endpoint inference is consulted. Invalid declarations
+    raise {!Provider_declarations.Invalid_declarations}; no fallback is loaded. *)
 val default : unit -> t
 
 (** Wire-kind label for a concrete provider config. This exhaustive projection

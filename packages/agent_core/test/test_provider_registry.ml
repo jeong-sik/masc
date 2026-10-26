@@ -266,57 +266,6 @@ let test_find_capable_composite () =
 
 (* ── Default registry ───────────────────────────────── *)
 
-(* Exact provider-name set: additions/removals in models.toml must update this
-   list, and a mismatch reports the differing names instead of a bare count. *)
-let expected_default_provider_names =
-  [ "claude"
-  ; "cohere"
-  ; "deepseek"
-  ; "deepseek-anthropic"
-  ; "deepseek-responses"
-  ; "gemini"
-  ; "gemini-image"
-  ; "gemini-speech"
-  ; "glm"
-  ; "glm-coding"
-  ; "groq"
-  ; "kimi"
-  ; "kimi_coding"
-  ; "mimo"
-  ; "mistral"
-  ; "nous"
-  ; "ollama"
-  ; "ollama_cloud"
-  ; "openai"
-  ; "openai-image"
-  ; "openai-responses"
-  ; "openai-speech"
-  ; "openrouter"
-  ; "siliconflow"
-  ; "xai"
-  ; "zai-image"
-  ]
-;;
-
-let test_default_provider_names () =
-  let reg = Provider_registry.default () in
-  let actual =
-    Provider_registry.all reg
-    |> List.map (fun (e : Provider_registry.entry) -> e.name)
-    |> List.sort String.compare
-  in
-  check
-    (list string)
-    "default provider set"
-    (List.sort String.compare expected_default_provider_names)
-    actual;
-  check
-    bool
-    "alibaba alias absent"
-    false
-    (Option.is_some (Provider_registry.find reg "alibaba"))
-;;
-
 let test_default_capabilities () =
   let reg = Provider_registry.default () in
   (match Provider_registry.find reg "claude" with
@@ -1114,8 +1063,7 @@ let () =
         ; test_case "composite predicate" `Quick test_find_capable_composite
         ] )
     ; ( "default"
-      , [ test_case "default provider set" `Quick test_default_provider_names
-        ; test_case "correct capabilities" `Quick test_default_capabilities
+      , [ test_case "correct capabilities" `Quick test_default_capabilities
         ; test_case "ollama_cloud entry" `Quick test_default_ollama_cloud_entry
         ; test_case "deepseek entry" `Quick test_default_deepseek_entry
         ; test_case "mimo entry" `Quick test_default_mimo_entry

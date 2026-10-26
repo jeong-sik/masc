@@ -757,3 +757,8 @@
  (name test_schema_observation)
  (modules test_schema_observation)
  (libraries agent_core alcotest eio eio_main yojson))
+
+(test
+ (name test_provider_declarations)
+ (modules test_provider_declarations)
+ (libraries agent_core_test_deps llm_provider alcotest yojson unix))

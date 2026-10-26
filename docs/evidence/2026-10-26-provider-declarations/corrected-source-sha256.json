@@ -1,0 +1,29 @@
+{
+  "requested_source": "8e9c17904710dc1ccc7822ac321bb3b62b5e3650",
+  "direct_base": "49d7861c95dff413810fbab99f70b2f3d95637ff",
+  "run": 40221415380,
+  "result": "SUCCESS;101 actual cases PASS",
+  "production_unchanged_from": "17fabe839cc3c0cdbeb7c0094490f228052a3959",
+  "sha256": {
+    "packages/agent_core/lib/llm_provider/provider_declarations.ml": "99ef2663fe30abf769f08d7e301c7bb568ca3cc9c94f16d8101d96878e94932b",
+    "packages/agent_core/lib/llm_provider/provider_declarations.mli": "69d10b3988d2864c83d46d289b9a61c43cd0ff4e36f60e1e6578f089d9db9a14",
+    "packages/agent_core/lib/llm_provider/provider_registry.ml": "78e8fe8692fd308c4e9ca72b93921f5596325674ff515780e901fa0df7cca322",
+    "packages/agent_core/lib/llm_provider/provider_registry.mli": "d56d175aed81d2e644a238906ad7c31d4ad4c8ba673ec8ca4e2b8e1cdccb9e0f",
+    "packages/agent_core/lib/provider_runtime_binding.ml": "82aa4c4ffe0ee27d818c11c2d06e8b8a2f53c0166f0ecf43ede869709aeaf2de",
+    "packages/agent_core/lib/provider_runtime_binding.mli": "9f9771d581beaec4bc8e21ae68bf8d7f738fdfb95ef1c504964b6be3aad65679",
+    "packages/agent_core/test/test_provider_declarations.ml": "0f6b132e742912cd492187a06c4c800869c5c13b7a0cb5d8222f2b87d897f92f",
+    "packages/agent_core/test/test_provider_registry.ml": "a26ff0099d7b66f258b36f9a87e275d4803704158089e27495d1e50b25e34e15",
+    "packages/agent_core/test/test_provider_runtime_binding.ml": "47663185194fc29f6c0d8859e6a538b5d4349c766cc0577a81819e137746ff92",
+    "test/test_runtime_model_label_binding.ml": "52d85136a3e0fdb8252298b1b5e0533b9ae6c289a2dd26991ef6980820fd6847",
+    "test/test_runtime_binding_auth_available.ml": "2a2c17c7ef91673aa41dfce377904ca5573cf26e2adb4893e81770155c18dc91",
+    "packages/agent_core/test/dune": "963059340c6d054044ea5669beff99f02e6d193000250a69021006bd0fffff92",
+    "packages/agent_core/models.toml": "ae9221ea6d4a284fe297ac172ed08f8c5d3db6b4292563ffca9077f24c3a1daa"
+  },
+  "actual_suites": {
+    "provider_registry": 45,
+    "provider_runtime_binding": 28,
+    "provider_declarations": 9,
+    "runtime_model_label_binding": 15,
+    "runtime_binding_auth_available": 4
+  }
+}

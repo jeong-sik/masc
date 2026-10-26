@@ -30,8 +30,15 @@ type t =
   ; credential_scope : string option
   }
 
-(** Return all known runtime bindings from the explicit provider-catalog
-    overlay, embedded AGENT_CORE catalog, and default provider registry. *)
+val all_from_declarations : Llm_provider.Provider_declarations.t -> t list
+(** Project exactly one admitted provider snapshot. Credentials are observed
+    at this edge; model request policy is not resolved by metadata projection. *)
+
+val find_in_declarations : Llm_provider.Provider_declarations.t -> string -> t option
+(** Select id or alias from the same immutable snapshot used for listing. *)
+
+(** Return runtime bindings from one captured declaration snapshot. Invalid
+    declarations raise the typed admission error rather than fallback. *)
 val all : unit -> t list
 
 (** Find a runtime binding by provider id or alias. Lookup is

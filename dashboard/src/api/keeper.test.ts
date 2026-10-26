@@ -684,7 +684,7 @@ describe('listQueuedKeeperChatOperations', () => {
     vi.stubGlobal('fetch', fetchMock)
     const operations = await listQueuedKeeperChatOperations('echo')
     expect(operations.map(operation => operation.sequence)).toEqual(['9007199254740993', '9007199254740994'])
-    expect(fetchMock.mock.calls[1][0]).toContain('after_sequence=9007199254740993')
+    expect(fetchMock.mock.calls.at(1)?.[0]).toContain('after_sequence=9007199254740993')
   })
 
   it('rejects a nonadvancing page instead of looping or publishing partial results', async () => {

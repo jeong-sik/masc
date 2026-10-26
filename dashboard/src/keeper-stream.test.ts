@@ -1894,12 +1894,14 @@ describe('settled operation history', () => {
 
   it.each([false, true])('does not reopen a settled failure after loading history (earlier reply: %s)', (earlierReply) => {
     const operationId = 'settled-failure-from-history'
-    const history = chatHistoryEntriesFromRest('sangsu', [
-      ...(earlierReply ? [{
+    const earlierMessages: Parameters<typeof chatHistoryEntriesFromRest>[1] = earlierReply
+      ? [{
         id: 'earlier-assistant', role: 'assistant', content: 'Reply delivered before host rejection', ts: 1,
         delivery_provenance: operationDeliveryProvenance(operationId, 'terminal_result'),
         delivery_provenance_status: 'valid',
-      }] : []),
+      }] : []
+    const history = chatHistoryEntriesFromRest('sangsu', [
+      ...earlierMessages,
       {
         id: 'settled-failure', role: 'request_failure', content: 'Keeper request failed: host rejection', ts: 2,
         delivery_provenance: {

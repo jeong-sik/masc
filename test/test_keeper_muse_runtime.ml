@@ -657,7 +657,9 @@ if server is not None:
 def call_probe():
     called = post({"jsonrpc": "2.0", "id": "call-1", "method": "tools/call", "params": {
         "name": "masc_probe", "arguments": {"marker": "from-muse"}}}, version)
-    assert called["result"]["content"][0]["text"] == "MASC_TOOL_RESULT", called
+    expected = FIXTURE.get("expected_probe_result", {"content": "MASC_TOOL_RESULT", "is_error": False})
+    assert called["result"]["content"][0]["text"] == expected["content"], called
+    assert called["result"].get("isError", False) == expected["is_error"], called
 
 turn = read()
 assert turn["method"] == "turn/start", turn
@@ -3125,7 +3127,9 @@ let test_original_result_crosses_checkpoint_and_fresh_session () =
 ;;
 
 let test_original_result_retention_failure_cannot_yield () =
-  with_scripted_host ~fixture:(scenario "stop_before_ack") (fun ~base_path ->
+  with_scripted_host ~fixture:(scenario "stop_before_ack" @
+    ["expected_probe_result", `Assoc ["content", `String "ORIGINAL_EFFECT_RESULT"; "is_error", `Bool true]])
+    (fun ~base_path ->
     let get = function Ok value -> value | Error detail -> fail detail in
     let session_path = Store.path ~base_path ~keeper_name |> get in
     let blocked_path = Filename.concat (Filename.dirname session_path) "undelivered-tools" in

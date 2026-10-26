@@ -16,7 +16,10 @@ not require a checkout or a separate cleanup daemon.
 
 Cleanup defers to queued/running chat, unavailable operation stores, active turns
 and shutdown through the existing atomic Maintenance admission. Busy attempts
-can be considered at a later maintenance pulse. A request arriving after
+can be considered at a later maintenance pulse. One root-owned attempt per
+Keeper excludes overlap across pulses; a slow VM does not delay visiting
+unrelated Keepers. Reservations release when callbacks return or unwind, and
+the root switch joins scheduled children. A request arriving after
 admission can still wait for that attempt. Local transport cancellation does
 not prove the original guest process group has stopped; no same-Keeper
 preemption guarantee is made. Existing atomic transactions, including filesystem

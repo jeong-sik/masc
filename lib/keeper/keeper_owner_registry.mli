@@ -59,6 +59,28 @@ val wake_operation_drain
   -> (unit, command_error) result
 (** Notify one Owner that its operation runner dependency is ready. *)
 
+val begin_scheduled_turn_consumer : base_path:string -> keeper_name:string ->
+  (Keeper_owner.scheduled_turn_consumer, command_error) result
+val end_scheduled_turn_consumer : base_path:string -> keeper_name:string ->
+  consumer:Keeper_owner.scheduled_turn_consumer -> (unit, command_error) result
+val observe_scheduled_turn : base_path:string -> keeper_name:string ->
+  Keeper_event_queue_state.pending_selection list ->
+  (Keeper_owner.scheduled_turn_handoff option, command_error) result
+val scheduled_turn_handoff : base_path:string -> keeper_name:string ->
+  (Keeper_owner.scheduled_turn_handoff option, command_error) result
+val request_scheduled_turn :
+  base_path:string -> keeper_name:string -> observed:Keeper_interrupt_token.t ->
+  Keeper_event_queue_state.pending_selection list -> (bool, command_error) result
+val release_scheduled_turn :
+  base_path:string -> keeper_name:string -> handoff:Keeper_owner.scheduled_turn_handoff ->
+  (unit, command_error) result
+val run_scheduled_if_idle :
+  base_path:string -> keeper_name:string ->
+  handoff:Keeper_owner.scheduled_turn_handoff option ->
+  sources:(Keeper_event_queue_state.pending_selection list, string) result ->
+  (Keeper_event_queue_state.pending_selection list -> 'a) ->
+  ([ `Ran of 'a | `Busy of Keeper_owner.autonomous_block | `Interrupted ], command_error) result
+
 val run_autonomous_if_idle
   :  base_path:string
   -> keeper_name:string

@@ -248,8 +248,9 @@ val start
     ({!Keeper_chat_operation_store.take_released_checkpoints}).
 
     [on_turn_slot_released] fires when a turn ends, the slot is still unclaimed
-    after the queued chat operation (if any) has been offered it, and the
-    autonomous lane has been refused the slot since the last notification. The
+    after queued chat has been offered it (unless an exact scheduled handoff
+    reserves that admission), and the autonomous lane has been refused the
+    slot or requested that handoff since the last notification. The
     signal therefore means "the lane that lost the slot can start now", not "a
     turn ended".
 
@@ -306,6 +307,43 @@ val autonomous_block_kind : autonomous_block -> string
 val autonomous_block_to_string : autonomous_block -> string
 val autonomous_block_to_yojson : autonomous_block -> Yojson.Safe.t
 
+type scheduled_turn_consumer
+type scheduled_turn_handoff
+val begin_scheduled_turn_consumer : t -> (scheduled_turn_consumer, error) result
+(** Begin this heartbeat consumer's lifetime. A replacement retires an older
+    consumer and its slot preferences; durable sources remain pending. *)
+val end_scheduled_turn_consumer : t -> consumer:scheduled_turn_consumer -> (unit, error) result
+(** Disable registration and release every preference of exactly this ending
+    consumer atomically with reconsidering chat. A stale ending epoch cannot
+    affect its replacement. *)
+val observe_scheduled_turn : t -> Keeper_event_queue_state.pending_selection list ->
+  (scheduled_turn_handoff option, error) result
+(** Reserve a freshly observed pending cohort behind a busy Direct child,
+    including one that completes without tools. The command does not interrupt
+    the child and returns its scoped handoff before caller cancellation. *)
+val scheduled_turn_handoff : t -> (scheduled_turn_handoff option, error) result
+val request_scheduled_turn :
+  t -> observed:Keeper_interrupt_token.t ->
+  Keeper_event_queue_state.pending_selection list -> (bool, error) result
+(** Request the next autonomous slot for exact scheduled sources from the
+    current child's settled tool boundary. False means that child no longer
+    owns the slot, or admission is paused/shutting down. No source is consumed. *)
+
+val release_scheduled_turn : t -> handoff:scheduled_turn_handoff -> (unit, error) result
+(** Release only this captured child's exact source selections and reconsider
+    queued chat input. A late release cannot erase a later child's handoff or
+    additional selections registered after the snapshot. *)
+
+val run_scheduled_if_idle :
+  t -> handoff:scheduled_turn_handoff option ->
+  sources:(Keeper_event_queue_state.pending_selection list, string) result ->
+  (Keeper_event_queue_state.pending_selection list -> 'a) ->
+  ([ `Ran of 'a | `Busy of autonomous_block | `Interrupted ], error) result
+(** Revalidate a handoff against a newly read exact pending cohort, and admit
+    its surviving members ahead of queued chat once. The callback receives only
+    surviving exact selections; intake revalidates again before dispatch.
+    An empty/stale cohort releases the handoff and restores normal chat order. *)
+
 val run_autonomous_if_idle
   :  t
   -> (unit -> 'a)
@@ -313,7 +351,9 @@ val run_autonomous_if_idle
 (** Mailbox-linearized autonomous admission. The callback runs in the Owner's
     child switch, while the actor remains responsive. An already-started child
     returns [`Busy] without consuming turn input. A Queued chat whose runner is
-    not ready does not block autonomous admission. Owner-directed cancellation
+    not ready does not block autonomous admission. A scheduled handoff remains
+    reserved for {!run_scheduled_if_idle}; this generic observation cannot
+    clear it or take its slot. Owner-directed cancellation
     returns [Error Owner_stopping]; its private child-stop signal never escapes
     this boundary. An operator interrupt of the running turn
     ({!interrupt_turn}) returns [`Interrupted]: the child switch was failed

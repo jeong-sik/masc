@@ -247,6 +247,7 @@ data: [DONE]
     ~base_path keeper_name source |> get Fun.id) (informational_sources ());
   require (queue_count config keeper_name=3) "expected three completion sources";
   let outcome = Keeper_heartbeat_loop.run_keepalive_unified_turn
+      ~scheduled_handoff:None ~on_handoff_observed:ignore
     ~wake:Keeper_world_observation.Attention_wake ~ctx ~registry_entry ~meta_after_triage:meta
     ~pending_board_events:[] ~stop:(Atomic.make false) ~proactive_warmup_elapsed:true
     ~reactive_wake:true ~shared_context:(Agent_core.Context.create ()) ~deferred_runtime_lane:None

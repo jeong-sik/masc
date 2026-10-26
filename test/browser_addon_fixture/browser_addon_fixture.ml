@@ -22,6 +22,9 @@ def control(conn):
         req=json.loads(conn.makefile("rb").readline())
         if req["incarnation"]!=a.incarnation: raise RuntimeError("wrong incarnation")
         op=req["operation"]
+        if op=="retire":
+            conn.sendall((json.dumps({"reply":"receipt"})+"\n").encode())
+            return
         if op in ("download_claim","download_commit","download_release"):
             with open(os.path.join(a.root,"downloads.json")) as src: downloads=json.load(src)
             if req["id"] not in downloads: raise RuntimeError("unknown download grant")
@@ -29,7 +32,7 @@ def control(conn):
             else: result={"reply":"receipt"}
             conn.sendall((json.dumps(result)+"\n").encode())
             return
-        if op!="snapshot": raise RuntimeError("fixture exposes snapshot and download grants only")
+        if op!="snapshot": raise RuntimeError("fixture exposes snapshot, retirement and download grants only")
         with open(os.path.join(a.root,"clients.json")) as src: clients=json.load(src)
         result={"reply":"snapshot","snapshot":{"state":"serving","clients":clients,"owned_backends":{"automation":{"activity":"enabled","registered":True,"session":"closed","locate":False},"stagehand":{"activity":"enabled","registered":True,"session":"unknown","locate":False}}}}
         conn.sendall((json.dumps(result)+"\n").encode())
@@ -128,7 +131,7 @@ let with_worker ?(clients=[]) ?(downloads=[]) ~env ~config ~respond run =
         let tool=Browser_addon_tool.definition in
         write (Filename.concat root "clients.json")
           (Yojson.Safe.to_string (`List (List.map (fun client -> match W.client_to_json client with
-             | `Assoc fields -> `Assoc (("interactions",`List [])::fields)
+             | `Assoc fields -> `Assoc (("interactions",`List [])::("lastActivities",`List [])::fields)
              | value -> value) clients)));
         write (Filename.concat root "downloads.json")
           (Yojson.Safe.to_string (`Assoc downloads));

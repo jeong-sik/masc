@@ -143,6 +143,11 @@ type pending_selection =
     means no clock was recorded. Source timestamps cannot supply it. It remains
     diagnostic only and survives retention, deferral and reprioritization. *)
 
+val equal_pending_selection : pending_selection -> pending_selection -> bool
+(** Exact durable occurrence identity: both [admitted_revision] and
+    {!source_snapshot_ref} agree. Retention counts, repetition scope and the
+    diagnostic admission clock do not change the occurrence identity. *)
+
 type scope_binding_error =
   | Empty_scope_batch
   | Duplicate_scope_selection

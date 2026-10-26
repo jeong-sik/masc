@@ -486,11 +486,21 @@ let write_state config state =
     |> Result.map_error (fun msg -> Persistence_failed ("ledger encoding failed: " ^ msg))
   in
   let written =
-    Workspace_utils.write_encoded_json_result config (schedules_path config) content
+    Workspace_utils.write_encoded_json_commit_result config (schedules_path config) content
   in
   (* Landed or not, the file may no longer be the version that was decoded. *)
   File_version_cache.forget decoded_primary (schedules_path config);
-  let* () = written |> Result.map_error (fun msg -> Persistence_failed msg) in
+  let* commit = written |> Result.map_error (fun msg -> Persistence_failed msg) in
+  (* Memory's backend is authoritative. Its local mirror can fail after that
+     commit; reporting failure then would tell the runner to retry a settlement
+     whose schedule and wake have already changed. *)
+  (match commit.Workspace_utils.mirror_error with
+   | None -> ()
+   | Some msg ->
+     Log.Misc.warn
+       "schedule_store: authoritative ledger committed; local mirror write failed for %s: %s"
+       (schedules_path config)
+       msg);
   (match Workspace_utils.write_encoded_json_result config (recovery_path config) content with
    | Ok () -> ()
    | Error msg ->

@@ -74,10 +74,17 @@ val to_wire_message_default : t -> string
 *)
 
 val allows_null_request_id : t -> bool
-(** Whether a response carrying this code may leave [id] null.  True only
-    for [Parse_error] and [Invalid_request], the two JSON-RPC 2.0 §5 cases
-    where the request id could not be read.  Exhaustive over [t]: adding a
-    code is a compile error here rather than a silent [false]. *)
+(** Whether a response carrying this code may leave [id] null. True for
+    [Parse_error], [Invalid_request] and [Unsupported_protocol_version],
+    whose rejection happens before the request id can be read. Exhaustive
+    over [t]: adding a code requires choosing its request-id policy. *)
+
+val is_http_error_response : Yojson.Safe.t -> bool
+(** Classify a transport error response by its explicit [id = null] and
+    integer [error.code]. The code must be recognized by {!of_wire_code}
+    and allow a null request id according to {!allows_null_request_id}.
+    Missing or malformed fields, a non-null id and unknown codes return
+    [false]. This classification does not validate the rest of the envelope. *)
 
 val to_http_status : t -> Httpun.Status.t
 (** Mapping from error code to HTTP status, colocated with the variant

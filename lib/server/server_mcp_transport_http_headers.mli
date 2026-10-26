@@ -13,14 +13,6 @@ type deps = Server_mcp_transport_http_types.deps
 
 (** {1 JSON-RPC body classification} *)
 
-val is_http_error_response : Yojson.Safe.t -> bool
-(** [is_http_error_response json] returns [true] when [json] is a
-    JSON-RPC 2.0 response object with [id = null] AND [error.code]
-    in [-32700] (Parse error) / [-32600] (Invalid Request).  Used
-    to distinguish "request the server could not parse" from
-    business-logic errors when deciding whether to attach a
-    legacy-accept warning header. *)
-
 val body_jsonrpc_method : string -> (string * bool) option
 (** [body_jsonrpc_method body_str] parses [body_str] as JSON and
     returns [Some (method_, has_id)] when it is an [`Assoc] with a

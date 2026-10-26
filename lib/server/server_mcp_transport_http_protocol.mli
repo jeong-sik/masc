@@ -110,10 +110,6 @@ val protocol_version_from_body : string -> string option
 (** Re-export of
     {!Mcp_transport_protocol.protocol_version_from_body}. *)
 
-val is_http_error_response : Yojson.Safe.t -> bool
-(** Re-export of
-    {!Server_mcp_transport_http_headers.is_http_error_response}. *)
-
 val request_force_json_response : Httpun.Request.t -> bool
 (** Re-export of
     {!Server_mcp_transport_http_headers.request_force_json_response}. *)

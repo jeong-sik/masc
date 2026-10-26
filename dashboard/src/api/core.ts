@@ -602,6 +602,7 @@ async function errorResponseInfoFromResponse(res: Response): Promise<ErrorRespon
       const errorCode =
         authErrorCode
         || (typeof parsed.error_code === 'string' ? parsed.error_code.trim() : '')
+        || (typeof parsed.code === 'string' ? parsed.code.trim() : '')
         || structuredErrorCode
         || (typeof parsed.status === 'string' ? parsed.status.trim() : '')
         || errorDetail

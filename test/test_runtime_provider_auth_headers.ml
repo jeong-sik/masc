@@ -2719,51 +2719,149 @@ let with_native_source_change_server f =
   result, List.rev !requests
 
 let test_runtime_source_change_preserves_history () =
-  Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
-    let net = Eio.Stdenv.net env in
-    let original = Llm_provider.Provider_config.make ~kind:Llm_provider.Provider_config.Glm
-        ~model_id:"glm-5.3-flash" ~base_url:"https://old-provider.example" () in
-    let source = Llm_provider.Reasoning_dialect.reasoning_source_for_provider_config original
-        |> Result.get_ok in
-    let foreign = { (Agent_core.Types.assistant_msg "foreign-visible-answer") with
-      content=[Agent_core.Types.Thinking {content="foreign-private-reasoning";signature=None};
-        Agent_core.Types.Text "foreign-visible-answer"];
-      metadata=Llm_provider.Types.Reasoning_source.metadata source } in
-    let checkpoint = { (context_fit_checkpoint ()) with model=original.model_id;
-      provider_binding=Some source;
-      messages=[Agent_core.Types.user_msg "persisted question";foreign] } in
-    let before = Agent_core.Checkpoint.to_json checkpoint in
-    let caps = Llm_provider.Capabilities.{openai_compat_chat_capabilities with
-      supports_reasoning=true;reasoning_replay_override=Force_latest_user_turn_tool_calls} in
-    let target = Llm_provider.Provider_config.make ~kind:Llm_provider.Provider_config.OpenAI_compat
-        ~model_id:"deepseek-v4.1-flash" ~base_url:"https://target.example"
-        ~model_capabilities_override:caps ~max_tokens:64 () in
-    let config = { (Runtime_agent.default_config ~name:"source-change" ~provider_cfg:target
-        ~system_prompt:"continue" ~tools:[]) with initial_messages=checkpoint.messages } in
+  let module Json = Yojson.Safe.Util in
+  let module Types = Agent_core.Types in
+  let module Provider = Llm_provider.Provider_config in
+  let module Caps = Llm_provider.Capabilities in
+  let source_for config =
+    match Llm_provider.Reasoning_dialect.reasoning_source_for_provider_config config with
+    | Ok source -> source
+    | Error detail -> fail detail in
+  let has_call id message =
+    Json.member "role" message = `String "assistant"
+    && (match Json.member "tool_calls" message with
+        | `List calls -> List.exists (fun call ->
+            Json.member "id" call = `String id
+            && Json.(call |> member "function" |> member "name") = `String "inspect"
+            && Json.(call |> member "function" |> member "arguments") = `String "{}") calls
+        | _ -> false) in
+  let has_result id content message =
+    Json.member "role" message = `String "tool"
+    && Json.member "tool_call_id" message = `String id
+    && Json.member "content" message = `String content in
+  List.iter (fun (model_id, replay_override, replay_fresh_reasoning) ->
     List.iter (fun resume ->
-      let calls = ref 0 in
-      let response : Agent_core.Types.api_response =
-        {id="continued";model=target.model_id;stop_reason=Agent_core.Types.EndTurn;
-         content=[Agent_core.Types.Text "continued"];usage=None;telemetry=None} in
-      let transport = Llm_provider.Llm_transport.custom {
-        complete_sync=(fun _ -> incr calls;{response=Ok response;latency_ms=None});
-        complete_stream=(fun ?on_telemetry:_ ~on_event:_ _ -> incr calls;Ok response)} in
-      let agent = if resume then
-          let prepared = Runtime_agent_context.prepare_resume ~config ~checkpoint in
-          (match Agent_core.Agent.resume ~net ~checkpoint:prepared.patched_checkpoint
-              ~config:prepared.agent_config ~options:{prepared.options with transport=Some transport} () with
-           | Ok agent -> agent | Error error -> fail (Agent_core.Agent_checkpoint.resume_error_to_string error))
-        else match Runtime_agent_context.builder ~net ~config ~transport () |> Agent_core.Builder.build_safe with
-          | Ok agent -> agent | Error error -> fail (Agent_core.Error.to_string error) in
-      Fun.protect ~finally:(fun () -> Agent_core.Agent.close agent) (fun () ->
-        (match Agent_core.Agent.run ~sw agent "new query" with
-         | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
-        check int "runtime source change reaches one completion" 1 !calls;
-        check bool "canonical foreign reasoning retained" true
-          (List.mem foreign (Agent_core.Agent.state agent).messages));
-      check bool "original checkpoint unmodified" true
-        (before=Agent_core.Checkpoint.to_json checkpoint)
-    ) [false;true]))
+      List.iter (fun stream ->
+        let (), requests = with_native_source_change_server
+          @@ fun ~sw ~net ~base_url ->
+          let original = Provider.make ~kind:Provider.Glm
+              ~model_id:"glm-5.3-flash" ~base_url:(base_url ^ "/glm-source")
+              ~model_capabilities_override:
+                { Caps.glm_capabilities with reasoning_replay_override = Force_no_replay }
+              () in
+          let source = source_for original in
+          check bool "persisted GLM source has No_replay" true
+            (source.replay_contract.replay_policy = Llm_provider.Reasoning_replay_contract.No_replay);
+          let foreign =
+            { (Types.assistant_msg "foreign-visible-answer") with
+              content =
+                [ Types.Thinking { content = "foreign-private-reasoning"; signature = None }
+                ; Types.Text "foreign-visible-answer"
+                ; Types.ToolUse { id = "settled-call"; name = "inspect"; input = `Assoc [] } ]
+            ; metadata = Types.Reasoning_source.metadata source } in
+          let settled = Types.tool_result_msg ~tool_use_id:"settled-call"
+              ~content:"settled-result" () in
+          let checkpoint =
+            { (context_fit_checkpoint ()) with model = original.model_id
+            ; provider_binding = Some source
+            ; messages = [ Types.user_msg "persisted question"; foreign; settled ] } in
+          let before = Agent_core.Checkpoint.to_json checkpoint in
+          (* Exercise the durable codec before the MASC resume entry point. *)
+          let checkpoint = match Agent_core.Checkpoint.of_json before with
+            | Ok checkpoint -> checkpoint
+            | Error error -> fail (Agent_core.Error.to_string error) in
+          let caps =
+            { Caps.openai_compat_chat_capabilities with supports_reasoning = true
+            ; reasoning_streaming_format = Delta_reasoning_field "reasoning_content"
+            ; reasoning_replay_override = replay_override } in
+          let target = Provider.make ~kind:Provider.OpenAI_compat ~model_id ~base_url
+              ~request_path:"/v1/chat/completions" ~model_capabilities_override:caps
+              ~max_tokens:64 () in
+          let effects = ref 0 in
+          let tool = Agent_core.Tool.create ~name:"inspect" ~description:"Inspect"
+              ~parameters:[] (fun _ ->
+                incr effects;
+                Ok { Types.content = "fresh-result"; content_blocks = None; _meta = None }) in
+          let config =
+            { (Runtime_agent.default_config ~name:"source-change" ~provider_cfg:target
+                 ~system_prompt:"continue" ~tools:[ tool ]) with
+              initial_messages = checkpoint.messages } in
+          let agent = match
+            (if resume then Runtime_agent.resume_from_checkpoint ~sw ~net ~config ~checkpoint
+             else Runtime_agent.build ~sw ~net ~config) with
+            | Ok agent -> agent
+            | Error error -> fail (Agent_core.Error.to_string error) in
+          Fun.protect ~finally:(fun () -> Agent_core.Agent.close agent) (fun () ->
+            let result = if stream then
+                Agent_core.Agent.run_stream ~sw ~on_event:ignore agent "new query"
+              else Agent_core.Agent.run ~sw agent "new query" in
+            (match result with
+             | Ok response -> check bool "target finishes the fresh tool round" true
+                 (response.stop_reason = Types.EndTurn)
+             | Error error -> fail (Agent_core.Error.to_string error));
+            check int "only the fresh tool executes" 1 !effects;
+            let messages = (Agent_core.Agent.state agent).messages in
+            check bool "canonical foreign history and settled effect remain exact" true
+              (List.take (List.length checkpoint.messages) messages = checkpoint.messages);
+            check bool "target reasoning remains canonical even under No_replay" true
+              (List.exists (fun (message : Types.message) ->
+                List.mem (Types.Thinking
+                  { content = "target-private-reasoning"; signature = None }) message.content)
+                messages);
+            let continued = Agent_core.Agent.checkpoint agent in
+            check bool "continued checkpoint carries the target binding" true
+              (match continued.provider_binding with
+               | Some actual -> Types.Reasoning_source.equal (source_for target) actual
+               | None -> false);
+            check bool "continued checkpoint retains the foreign source artifact" true
+              (List.mem foreign continued.messages));
+          check bool "original checkpoint is unmodified" true
+            (before = Agent_core.Checkpoint.to_json checkpoint)
+        in
+        let first, second = match requests with
+          | [ (first_path, first); (second_path, second) ] ->
+            check (list string) "native requests use Chat Completions"
+              [ "/v1/chat/completions"; "/v1/chat/completions" ] [ first_path; second_path ];
+            first, second
+          | _ -> failf "%s resume=%b stream=%b: expected two native completions, got %d"
+              model_id resume stream (List.length requests) in
+        List.iter (fun body ->
+          check string "target API name reaches actual HTTP body" model_id
+            Json.(body |> member "model" |> to_string);
+          check bool "sync and streaming use their actual native wire modes" stream
+            (Json.member "stream" body = `Bool true);
+          let tools = Json.(body |> member "tools" |> to_list) in
+          check (list string) "configured tool reaches native wire" [ "inspect" ]
+            (List.map (fun tool -> Json.(tool |> member "function" |> member "name" |> to_string)) tools);
+          let messages = Json.(body |> member "messages" |> to_list) in
+          check bool "historical visible answer reaches native wire" true
+            (List.exists (fun message -> Json.member "content" message =
+                `String "foreign-visible-answer") messages);
+          check bool "settled tool call reaches native wire" true
+            (List.exists (has_call "settled-call") messages);
+          check bool "settled tool result reaches native wire" true
+            (List.exists (has_result "settled-call" "settled-result") messages);
+          check bool "foreign reasoning is excluded from every native request" true
+            (List.for_all (fun message -> Json.member "reasoning_content" message <>
+                `String "foreign-private-reasoning") messages)
+        ) [ first; second ];
+        let first_messages = Json.(first |> member "messages" |> to_list) in
+        check bool "old turn reasoning is absent on the initial failover request" true
+          (List.for_all (fun message -> Json.member "reasoning_content" message = `Null)
+             first_messages);
+        let second_messages = Json.(second |> member "messages" |> to_list) in
+        check bool "fresh tool call reaches follow-up HTTP request" true
+          (List.exists (has_call "fresh-call") second_messages);
+        check bool "fresh tool result reaches follow-up HTTP request" true
+          (List.exists (has_result "fresh-call" "fresh-result") second_messages);
+        check bool "target contract controls fresh tool reasoning replay" replay_fresh_reasoning
+          (List.exists (fun message -> has_call "fresh-call" message
+              && Json.member "reasoning_content" message = `String "target-private-reasoning")
+             second_messages)
+      ) [ false; true ]
+    ) [ false; true ]
+  ) [ "deepseek-v4.1-flash", Caps.Force_latest_user_turn_tool_calls, true
+    ; "kimi-k3.1-pro", Caps.Force_no_replay, false ]
 
 let test_runtime_trimmed_reasoning_boundary () =
   let module Types = Agent_core.Types in

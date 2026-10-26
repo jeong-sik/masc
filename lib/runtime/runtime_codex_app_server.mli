@@ -185,6 +185,7 @@ type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result =
   ; content : string
   ; content_blocks : Agent_core.Types.content_block list option
   ; abort_turn : host_stop option
+  ; on_response_sent : (unit -> unit) option
   }
 
 type dynamic_tool = Runtime_official_client_tool.dynamic_tool =

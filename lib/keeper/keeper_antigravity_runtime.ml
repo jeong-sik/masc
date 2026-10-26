@@ -1020,9 +1020,12 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
                     ~finally:(fun () -> stream.on_tool_finished ~call_id)
                     (fun () ->
                       let result = tool.call ~call_id arguments in
+                      let on_response_sent =
+                        Runtime_official_client_tool.response_observer Mcp result in
                       { Runtime_official_client_mcp_http.outcome = tool_result result
                       ; after_response_sent =
                           (fun () ->
+                            Runtime_official_client_tool.notify_response_sent on_response_sent;
                              Option.iter
                                (fun detail ->
                                   if

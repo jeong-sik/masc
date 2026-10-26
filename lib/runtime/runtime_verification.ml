@@ -436,12 +436,12 @@ let measure ~runtime_id ~selected_model ~challenge ~run =
             called := true;
             { success = true
             ; content = Yojson.Safe.to_string (`Assoc [ "challenge", `String challenge ])
-            ; content_blocks = None; abort_turn = None
+            ; content_blocks = None; abort_turn = None; on_response_sent = None
             }
           | _ ->
             { success = false
             ; content = "This tool accepts an empty object only."
-            ; content_blocks = None; abort_turn = None
+            ; content_blocks = None; abort_turn = None; on_response_sent = None
             })
     }
   in

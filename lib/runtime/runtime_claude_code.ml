@@ -237,6 +237,7 @@ type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result =
   ; content : string
   ; content_blocks : Agent_core.Types.content_block list option
   ; abort_turn : host_stop option
+  ; on_response_sent : (unit -> unit) option
   }
 
 type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
@@ -907,6 +908,7 @@ let handle_control_request
       let* message = required_member stage "message" request_fields in
       let tool_specs () = List.map dynamic_tool_spec tools in
       let abort_turn = ref None in
+      let on_response_sent = ref None in
       let call_tool ~name ~call_id ~arguments =
         match find_dynamic_tool tools name with
         | None -> None
@@ -925,10 +927,11 @@ let handle_control_request
                 (Printexc.to_string exn);
               { success = false
               ; content = "MASC tool handler raised"
-              ; content_blocks = None; abort_turn = None
+              ; content_blocks = None; abort_turn = None; on_response_sent = None
               }
           in
           abort_turn := result.abort_turn;
+          on_response_sent := Runtime_official_client_tool.response_observer Mcp result;
           emit_stream_event on_stream_event (Dynamic_tool_finished { call_id });
           Some
             { Runtime_official_client_mcp.success = result.success
@@ -977,6 +980,7 @@ let handle_control_request
           ~tool_effect_attempted:dispatch.tool_called
           (fun () -> send_control_success io ~request_id control_payload)
       in
+      Runtime_official_client_tool.notify_response_sent !on_response_sent;
       (match !abort_turn with
        | None -> Ok ()
        | Some stop -> Error

@@ -747,7 +747,7 @@ let test_dynamic_tool_bytes_counts_every_field () =
     ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
-          { Runtime_claude_code.success = true; content = ""; content_blocks = None; abort_turn = None })
+          { Runtime_claude_code.success = true; content = ""; content_blocks = None; abort_turn = None; on_response_sent = None })
     }
   in
   let schema_bytes = String.length (Yojson.Safe.to_string tool.Runtime_claude_code.input_schema) in
@@ -773,7 +773,7 @@ let test_dynamic_tool_bytes_counts_meta () =
     ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
-          { Runtime_claude_code.success = true; content = ""; content_blocks = None; abort_turn = None })
+          { Runtime_claude_code.success = true; content = ""; content_blocks = None; abort_turn = None; on_response_sent = None })
     }
   in
   let bare = tool Runtime_official_client_tool.On_demand Runtime_official_client_tool.Unbounded in
@@ -1475,7 +1475,7 @@ let probe_tool call_count : Runtime_claude_code.dynamic_tool =
     ; call =
       (fun ~call_id:_ _ ->
         incr call_count;
-        { success = true; content = "MASC_TOOL_RESULT"; content_blocks = None; abort_turn = None })
+        { success = true; content = "MASC_TOOL_RESULT"; content_blocks = None; abort_turn = None; on_response_sent = None })
   }
 ;;
 
@@ -1961,7 +1961,7 @@ let test_dynamic_tool_meta_follows_declared_loading () =
     ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
-          { success = true; content = "unused"; content_blocks = None; abort_turn = None })
+          { success = true; content = "unused"; content_blocks = None; abort_turn = None; on_response_sent = None })
     }
   in
   let meta tool =
@@ -2046,6 +2046,7 @@ let test_tool_result_inline_ceiling_is_lane_specific () =
 ;;
 
 let test_dynamic_tool_abort_stops_the_provider_loop () =
+  let response_writes = ref 0 in
   let tool : Runtime_claude_code.dynamic_tool =
     { name = "masc_probe"
     ; description = "Abort a repeated provider loop"
@@ -2059,6 +2060,7 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
           { success = false
           ; content = "same deterministic failure"
           ; content_blocks = None
+          ; on_response_sent = Some (fun () -> incr response_writes)
           ; abort_turn =
               Some
                 (Repeated_tool_call
@@ -2077,6 +2079,7 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
       | Error
           (Runtime_claude_code.Stopped_by_host
             { stop = Repeated_tool_call { tool_name; repeated_count }; _ }) ->
+        check int "host stop follows complete response write" 1 !response_writes;
         check string "tool" "masc_probe" tool_name;
         check int "repeat count" 3 repeated_count
       | Error error -> fail (Runtime_claude_code.error_to_string error)
@@ -2102,6 +2105,7 @@ let test_host_stop_carries_the_newest_request_input () =
           { success = false
           ; content = "same deterministic failure"
           ; content_blocks = None
+          ; on_response_sent = None
           ; abort_turn =
               Some
                 (Repeated_tool_call
@@ -2136,7 +2140,9 @@ let test_host_stop_carries_the_newest_request_input () =
       | Ok _ -> fail "dynamic tool abort did not stop the Claude turn")
 ;;
 
-let test_dynamic_tool_callback () =
+let test_dynamic_tool_callback ?(content = "MASC_TOOL_RESULT")
+    ?content_blocks ?(expected_writes = 1) ?(observer_raises = false) () =
+  let response_writes = ref 0 in
   let observed_call_id = ref None in
   let observed_input = ref `Null in
   let tool : Runtime_claude_code.dynamic_tool =
@@ -2155,7 +2161,10 @@ let test_dynamic_tool_callback () =
         (fun ~call_id input ->
           observed_call_id := Some call_id;
           observed_input := input;
-          { success = true; content = "MASC_TOOL_RESULT"; content_blocks = None; abort_turn = None })
+          { success = true; content; content_blocks; abort_turn = None;
+            on_response_sent = Some (fun () ->
+              incr response_writes;
+              if observer_raises then invalid_arg "delivery fixture observer failure") })
     }
   in
   with_fixture
@@ -2170,6 +2179,7 @@ let test_dynamic_tool_callback () =
       match run_fixture ~dynamic_tools:[ tool ] path with
       | Error error -> fail (Runtime_claude_code.error_to_string error)
       | Ok turn ->
+        check int "only the exact projectable response records its complete write" expected_writes !response_writes;
         check int "measured calls" 1 turn.dynamic_tool_calls;
         check (option string) "call id" (Some "call-1") !observed_call_id;
         check string
@@ -2177,6 +2187,17 @@ let test_dynamic_tool_callback () =
           {|{"marker":"from-claude"}|}
           (Yojson.Safe.to_string !observed_input))
 ;;
+
+let test_response_observer_requires_original_projection () =
+  let image = Agent_core.Types.Image
+    {media_type = "image/tiff"; data = "AAAA"; source_type = Base64} in
+  List.iter (fun (content, content_blocks, expected_writes) ->
+    test_dynamic_tool_callback ~content ~content_blocks ~expected_writes ())
+    ["invalid\255", [Agent_core.Types.Text "invalid\255"], 0;
+     "unsupported image fallback", [image], 0;
+     "unused fallback\255", [Agent_core.Types.Text "authoritative original"], 1]
+;;
+
 
 let test_partial_text_streams_before_complete_block () =
   let partial event =
@@ -2327,7 +2348,7 @@ let test_stream_events_preserve_text_and_tool_identity () =
     ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
-          { success = true; content = "MASC_TOOL_RESULT"; content_blocks = None; abort_turn = None })
+          { success = true; content = "MASC_TOOL_RESULT"; content_blocks = None; abort_turn = None; on_response_sent = None })
     }
   in
   with_fixture
@@ -3494,7 +3515,7 @@ let test_dynamic_tool_tokenizer_chars_are_validated () =
     ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
-          { success = true; content = "unused"; content_blocks = None; abort_turn = None })
+          { success = true; content = "unused"; content_blocks = None; abort_turn = None; on_response_sent = None })
     }
   in
   let config = Runtime_claude_code.default_config ~cwd:"/tmp" in
@@ -4318,7 +4339,7 @@ let stub_dynamic_tool =
       (fun ~call_id:_ _ ->
         { Runtime_claude_code.success = true
         ; content = "{}"
-        ; content_blocks = None; abort_turn = None
+        ; content_blocks = None; abort_turn = None; on_response_sent = None
         })
   }
 ;;
@@ -4727,8 +4748,18 @@ let () =
             `Quick
             test_api_diagnostic_does_not_replace_measured_model_or_text
         ] )
+    ; ( "response delivery"
+      , [ test_case "ordinary response writes once" `Quick
+            (fun () -> test_dynamic_tool_callback ())
+        ; test_case "projection substitution is not original delivery" `Quick
+            test_response_observer_requires_original_projection
+        ; test_case "observer failure does not undo a written response" `Quick
+            (fun () -> test_dynamic_tool_callback ~observer_raises:true ())
+        ; test_case "host stop follows response write" `Quick
+            test_dynamic_tool_abort_stops_the_provider_loop
+        ] )
     ; ( "mcp"
-      , [ test_case "dynamic tool callback" `Quick test_dynamic_tool_callback
+      , [ test_case "dynamic tool callback" `Quick (fun () -> test_dynamic_tool_callback ())
         ; test_case
             "stream preserves text and tool identity"
             `Quick

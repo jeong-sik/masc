@@ -1261,6 +1261,7 @@ type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result =
   ; content : string
   ; content_blocks : Agent_core.Types.content_block list option
   ; abort_turn : host_stop option
+  ; on_response_sent : (unit -> unit) option
   }
 
 type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
@@ -1760,7 +1761,7 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
             pre_tool_rejects
             := { call_id; tool_name = tool.schema.name; input; detail }
                :: !pre_tool_rejects;
-            { success = false; content = detail; content_blocks = None; abort_turn = None }
+            { success = false; content = detail; content_blocks = None; abort_turn = None; on_response_sent = None }
           | Agent_core.Agent_tool_pre_execution_gate.Reject { stage; detail } ->
             (* A hook that failed, or a decision illegal at this stage. Both
                are turn-level faults rather than something the model can
@@ -1773,7 +1774,7 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
                 detail
             in
             record_terminal_error terminal_error detail;
-            { success = false; content = detail; content_blocks = None; abort_turn = None }
+            { success = false; content = detail; content_blocks = None; abort_turn = None; on_response_sent = None }
           | Agent_core.Agent_tool_pre_execution_gate.Admit ->
             (match
                Agent_core.Agent_tools.find_and_execute_tool
@@ -1801,7 +1802,7 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
                    not (Agent_core.Types.tool_result_outcome_is_error result.outcome)
                ; content = result.content
                ; content_blocks = result.content_blocks
-               ; abort_turn = None
+               ; abort_turn = None; on_response_sent = None
                }
              | Error error ->
                let detail = tool_hook_error_to_string error in
@@ -1812,7 +1813,7 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
                   { success = true
                   ; content =
                       Tool_guidance.to_string Tool_guidance.Post_execution_hook_failed
-                  ; content_blocks = None; abort_turn = None
+                  ; content_blocks = None; abort_turn = None; on_response_sent = None
                   }
                 | Agent_core.Agent_tools.Hook_execution_failed
                     { stage =
@@ -1820,7 +1821,7 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
                         | Pre_tool_use | On_stop | On_error | On_tool_error )
                     ; _
                     } ->
-                  { success = false; content = detail; content_blocks = None; abort_turn = None }))
+                  { success = false; content = detail; content_blocks = None; abort_turn = None; on_response_sent = None }))
         in
         match execute () with
         | result ->
@@ -2066,7 +2067,7 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
               (settle
                  { success = false
                  ; content = "dynamic tool call exited without an authoritative result"
-                 ; content_blocks = None; abort_turn = None
+                 ; content_blocks = None; abort_turn = None; on_response_sent = None
                  }));
           Printexc.raise_with_backtrace exn backtrace)
   }

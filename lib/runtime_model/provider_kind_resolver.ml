@@ -2,11 +2,10 @@
     See .mli for the contract. *)
 
 type resolution =
-  | Registered of {
-      provider_name : string;
-      model_id : string;
-      kind : Llm_provider.Provider_config.provider_kind;
-    }
+  | Registered of
+      { binding : Agent_core.Provider_runtime_binding.t
+      ; model_id : string
+      }
   | Custom_url of { model_id : string; base_url : string }
   | Unknown of string
 
@@ -23,20 +22,6 @@ let resolve (spec : string) : resolution =
      | Ok (model_id, base_url) -> Custom_url { model_id; base_url }
      | Error error -> Unknown (Runtime_model_resolve.custom_model_error_to_string error))
   | Some (provider_name, model_id) ->
-    (* Registry is the SSOT for pinned providers. We never override its
-       [kind] from a substring of [provider_name] or [model_id]. *)
-    let registry = Llm_provider.Provider_registry.default () in
-    match Llm_provider.Provider_registry.find registry provider_name with
-    | Some entry ->
-      Registered
-        {
-          provider_name;
-          model_id;
-          kind = entry.defaults.kind;
-        }
-    | None ->
-      Unknown
-        (Printf.sprintf
-           "unknown provider %S in spec %S; not found in Provider_registry"
-           provider_name spec)
-
+    (match Agent_core.Provider_runtime_binding.find provider_name with
+     | Some binding -> Registered { binding; model_id }
+     | None -> Unknown (Printf.sprintf "unknown provider %S in spec %S" provider_name spec))

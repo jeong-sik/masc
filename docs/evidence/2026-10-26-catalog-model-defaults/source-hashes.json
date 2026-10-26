@@ -1,0 +1,19 @@
+{
+  "tested_source": "935349f22b821d6f23e2212ad787876cfad00e91",
+  "sha256": {
+    "lib/runtime/runtime_agent.ml": "5355dfad781656a52a63ece00d060e92f37703bfa2494ba9f27d47d685dc5d66",
+    "lib/runtime/runtime_transport.ml": "21b1e8826f28f341349b687e536f226e39dfc84c49d3f1da65fa956988fa1367",
+    "lib/runtime_model/provider_kind_resolver.ml": "416734934ff9efc96d33cf325bb720c5623bac4639ddb374615084197d194f8c",
+    "lib/runtime_model/provider_kind_resolver.mli": "8c3306cc33a081113e4a0ee326234f35d1c065038ee1b607cd2589526659b01b",
+    "lib/runtime_model/provider_runtime_projection.ml": "f5a7d6c014444a1e2c0c7d414e8f4ea6097468d1cd387f15c108a457cc5c5e40",
+    "lib/runtime_model/provider_runtime_projection.mli": "113ded03963cc03264fd0d30fa4e5faf400934cda3f2adf7e2725b7fd73bd069",
+    "lib/runtime_model/runtime_model_resolve.ml": "084d700d0adb379a86c27672547b18bd6682157f334b8bd25aec0bb39e2b8c5a",
+    "lib/runtime_model/runtime_model_resolve.mli": "d5adb0a68752fd30744e2564a7af88933509214efeba816a7ce3a697364a7666",
+    "lib/runtime_model/runtime_model_string.ml": "d0cf4eea48b579609ec0348c306a42ce696ef43f38409413468bf862449835bd",
+    "lib/runtime_model/runtime_model_string.mli": "d06ccf165f9ece821525cfec2f9bf55c85e66c82f149180e1f12c7c6cd619c2f",
+    "lib/runtime_model/runtime_provider_binding.ml": "6055aef7d4905567d53da51c627d7e6f476eedd47de96a20937d76ad42fd51ca",
+    "lib/runtime_model/runtime_provider_binding.mli": "ef234fc6115d35d2c52e424829961d09d2554371157f36803cb363ce6624dc58",
+    "test/stanzas/test_runtime_model_label_binding.inc": "1d8b0bf14edc0777c4e598718803d9f6d70f62c0b60efdf8022aa36a5aa0a72f",
+    "test/test_runtime_model_label_binding.ml": "52d85136a3e0fdb8252298b1b5e0533b9ae6c289a2dd26991ef6980820fd6847"
+  }
+}

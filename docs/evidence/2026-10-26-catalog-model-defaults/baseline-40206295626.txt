@@ -1,0 +1,88 @@
+run: https://github.com/jeong-sik/masc/actions/runs/40206295626
+raw_sha256: 0416c952627ebcd5088d0ba268b9cd077203869d6e486b582a3075908a5f335b
+raw_bytes: 126975
+selected_lines: 83
+
+test suite	Checkout	2026-10-25T15:18:37.8496126Z HEAD is now at b34446e3 test(runtime): reproduce ambient and invented auto model selection
+test suite	Test	2026-10-25T15:20:24.5442280Z [targeted] EIO_BACKEND=<unset> timeout=600s per suite
+test suite	Test	2026-10-25T15:20:24.5717377Z [targeted] dune build test/test_runtime_model_label_binding.exe
+test suite	Test	2026-10-25T15:21:07.1802291Z [targeted] test/test_runtime_model_label_binding: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+test suite	Test	2026-10-25T15:21:07.1821921Z [targeted] test/test_runtime_model_label_binding: start 2026-10-25T15:21:07Z
+test suite	Test	2026-10-25T15:21:07.2178549Z ASSERT explicit provider survives label resolution
+test suite	Test	2026-10-25T15:21:07.2179139Z ASSERT resolved endpoint remains owned by provider
+test suite	Test	2026-10-25T15:21:07.2179866Z ASSERT explicit provider survives label resolution
+test suite	Test	2026-10-25T15:21:07.2180185Z ASSERT resolved endpoint remains owned by provider
+test suite	Test	2026-10-25T15:21:07.2188855Z   [OK]          provider authority          0   identity.
+test suite	Test	2026-10-25T15:21:07.2189433Z ASSERT context excludes unrelated bare model declaration
+test suite	Test	2026-10-25T15:21:07.2189809Z ASSERT config carries the same resolved window
+test suite	Test	2026-10-25T15:21:07.2190198Z ASSERT context excludes unrelated bare model declaration
+test suite	Test	2026-10-25T15:21:07.2190678Z ASSERT config carries the same resolved window
+test suite	Test	2026-10-25T15:21:07.2191105Z   [OK]          provider authority          1   context.
+test suite	Test	2026-10-25T15:21:07.2191657Z ASSERT A rejects forcing despite the bare row allowing it
+test suite	Test	2026-10-25T15:21:07.2192201Z ASSERT B retains its separate forcing declaration
+test suite	Test	2026-10-25T15:21:07.2192774Z ASSERT endpoint override preserves selected provider
+test suite	Test	2026-10-25T15:21:07.2193367Z ASSERT endpoint override cannot borrow B's policy
+test suite	Test	2026-10-25T15:21:07.2193953Z ASSERT A rejects required choice before dispatch
+test suite	Test	2026-10-25T15:21:07.2194474Z ASSERT B admits required choice
+test suite	Test	2026-10-25T15:21:07.2194859Z ASSERT B forcing reaches final Chat body
+test suite	Test	2026-10-25T15:21:07.2195252Z   [OK]          provider authority          2   policy and wire.
+test suite	Test	2026-10-25T15:21:07.2195711Z ASSERT custom label cannot borrow discovery endpoint
+test suite	Test	2026-10-25T15:21:07.2196036Z   [OK]          custom endpoint             0   missing.
+test suite	Test	2026-10-25T15:21:07.2196355Z ASSERT custom label cannot borrow environment endpoint
+test suite	Test	2026-10-25T15:21:07.2196674Z   [OK]          custom endpoint             1   ambient.
+test suite	Test	2026-10-25T15:21:07.2197041Z ASSERT invalid custom endpoint is refused before request construction
+test suite	Test	2026-10-25T15:21:07.2197478Z ASSERT invalid custom endpoint is refused before request construction
+test suite	Test	2026-10-25T15:21:07.2197916Z ASSERT invalid custom endpoint is refused before request construction
+test suite	Test	2026-10-25T15:21:07.2198729Z ASSERT invalid custom endpoint is refused before request construction
+test suite	Test	2026-10-25T15:21:07.2199120Z   [OK]          custom endpoint             2   invalid.
+test suite	Test	2026-10-25T15:21:07.2199459Z ASSERT custom URL parser must consume the complete endpoint
+test suite	Test	2026-10-25T15:21:07.2199839Z ASSERT custom URL parser must consume the complete endpoint
+test suite	Test	2026-10-25T15:21:07.2200211Z ASSERT custom URL parser must consume the complete endpoint
+test suite	Test	2026-10-25T15:21:07.2200548Z   [OK]          custom endpoint             3   malformed.
+test suite	Test	2026-10-25T15:21:07.2200890Z ASSERT invalid explicit port cannot become the default port
+test suite	Test	2026-10-25T15:21:07.2201252Z ASSERT invalid explicit port cannot become the default port
+test suite	Test	2026-10-25T15:21:07.2201631Z ASSERT invalid explicit port cannot become the default port
+test suite	Test	2026-10-25T15:21:07.2202004Z ASSERT valid authority and path/query bytes remain explicit
+test suite	Test	2026-10-25T15:21:07.2202382Z ASSERT valid authority and path/query bytes remain explicit
+test suite	Test	2026-10-25T15:21:07.2202749Z ASSERT valid authority and path/query bytes remain explicit
+test suite	Test	2026-10-25T15:21:07.2203124Z ASSERT valid authority and path/query bytes remain explicit
+test suite	Test	2026-10-25T15:21:07.2203462Z   [OK]          custom endpoint             4   ports.
+test suite	Test	2026-10-25T15:21:07.2203780Z ASSERT invalid authority suffix cannot become a path
+test suite	Test	2026-10-25T15:21:07.2204118Z ASSERT invalid authority suffix cannot become a path
+test suite	Test	2026-10-25T15:21:07.2204454Z ASSERT invalid authority suffix cannot become a path
+test suite	Test	2026-10-25T15:21:07.2204773Z   [OK]          custom endpoint             5   authority.
+test suite	Test	2026-10-25T15:21:07.2205093Z ASSERT custom classification retains explicit model
+test suite	Test	2026-10-25T15:21:07.2205433Z ASSERT custom classification retains explicit endpoint
+test suite	Test	2026-10-25T15:21:07.2205765Z ASSERT custom config retains explicit endpoint
+test suite	Test	2026-10-25T15:21:07.2206084Z ASSERT custom wire retains explicitly selected model
+test suite	Test	2026-10-25T15:21:07.2206406Z   [OK]          custom endpoint             6   explicit.
+test suite	Test	2026-10-25T15:21:07.2206743Z ASSERT auto without catalog default cannot reach execution
+test suite	Test	2026-10-25T15:21:07.2221832Z   [FAIL]        catalog defaults            0   missing default.
+test suite	Test	2026-10-25T15:21:07.2222868Z ASSERT catalog default wins independently of derived environment key
+test suite	Test	2026-10-25T15:21:07.2223589Z   [FAIL]        catalog defaults            1   declared default.
+test suite	Test	2026-10-25T15:21:07.2225381Z ASSERT declared runtime label was refused
+test suite	Test	2026-10-25T15:21:07.2225698Z   [FAIL]        catalog defaults            2   canonical alias.
+test suite	Test	2026-10-25T15:21:07.2226091Z ASSERT supported-model metadata cannot invent an execution default
+test suite	Test	2026-10-25T15:21:07.2226508Z   [FAIL]        catalog defaults            3   supported is not default.
+test suite	Test	2026-10-25T15:21:07.2226928Z ASSERT projection offers only explicitly declared catalog defaults
+test suite	Test	2026-10-25T15:21:07.2227311Z   [FAIL]        catalog defaults            4   projection.
+test suite	Test	2026-10-25T15:21:07.2228627Z │ [FAIL]        catalog defaults            0   missing default.               │
+test suite	Test	2026-10-25T15:21:07.2229816Z FAIL auto without catalog default cannot reach execution
+test suite	Test	2026-10-25T15:21:07.2230135Z    Expected: `true'
+test suite	Test	2026-10-25T15:21:07.2230350Z    Received: `false'
+test suite	Test	2026-10-25T15:21:07.2234907Z │ [FAIL]        catalog defaults            1   declared default.              │
+test suite	Test	2026-10-25T15:21:07.2236255Z FAIL catalog default wins independently of derived environment key
+test suite	Test	2026-10-25T15:21:07.2236603Z    Expected: `"overlap"'
+test suite	Test	2026-10-25T15:21:07.2236850Z    Received: `"ambient-model"'
+test suite	Test	2026-10-25T15:21:07.2244764Z │ [FAIL]        catalog defaults            2   canonical alias.               │
+test suite	Test	2026-10-25T15:21:07.2245603Z FAIL declared runtime label was refused
+test suite	Test	2026-10-25T15:21:07.2253240Z │ [FAIL]        catalog defaults            3   supported is not default.      │
+test suite	Test	2026-10-25T15:21:07.2254458Z FAIL supported-model metadata cannot invent an execution default
+test suite	Test	2026-10-25T15:21:07.2254815Z    Expected: `true'
+test suite	Test	2026-10-25T15:21:07.2255024Z    Received: `false'
+test suite	Test	2026-10-25T15:21:07.2260699Z │ [FAIL]        catalog defaults            4   projection.                    │
+test suite	Test	2026-10-25T15:21:07.2261853Z FAIL projection offers only explicitly declared catalog defaults
+test suite	Test	2026-10-25T15:21:07.2262303Z    Expected: `["label-b:overlap"]'
+test suite	Test	2026-10-25T15:21:07.2262584Z    Received: `["label-a:auto"; "label-b:auto"]'
+test suite	Test	2026-10-25T15:21:07.2270610Z 5 failures! in 0.026s. 15 tests run.
+test suite	Test	2026-10-25T15:21:07.2271508Z [targeted] test/test_runtime_model_label_binding: FAIL exit 1 in 0s

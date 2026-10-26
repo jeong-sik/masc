@@ -11,6 +11,8 @@ auth = "none"
 capabilities_base = "openai_chat"
 [[providers]]
 id = "label-b"
+aliases = ["label-b-alias"]
+default_model = "overlap"
 kind = "openai_compat"
 base_url = "https://b.invalid"
 request_path = "/v1/chat/completions"
@@ -94,18 +96,17 @@ let policy () = with_catalog (fun () ->
     Alcotest.(check string) "B forcing reaches final Chat body" "required"
       Yojson.Safe.Util.(Yojson.Safe.from_string request.Complete_common.body |> member "tool_choice" |> to_string))
 
-let with_endpoint_env value f =
-  let key = "CUSTOM_LLM_BASE_URL" in
+let with_env key value f =
   let previous = Sys.getenv_opt key in
   Fun.protect ~finally:(fun () -> match previous with
     | None -> Unix.unsetenv key | Some previous -> Unix.putenv key previous)
     (fun () ->
       (match value with None -> Unix.unsetenv key | Some value -> Unix.putenv key value);
       f ())
-let missing_endpoint () = with_endpoint_env None (fun () ->
+let missing_endpoint () = with_env "CUSTOM_LLM_BASE_URL" None (fun () ->
   Alcotest.(check bool) "custom label cannot borrow discovery endpoint" true
     (Runtime_model_string.parse_model_string "custom:overlap"=None))
-let ambient_endpoint () = with_endpoint_env (Some "https://ambient.invalid") (fun () ->
+let ambient_endpoint () = with_env "CUSTOM_LLM_BASE_URL" (Some "https://ambient.invalid") (fun () ->
   Alcotest.(check bool) "custom label cannot borrow environment endpoint" true
     (Runtime_model_string.parse_model_string "custom:overlap"=None);
   match Provider_kind_resolver.resolve "custom:overlap" with
@@ -142,7 +143,7 @@ let endpoint_ports () =
       endpoint config.Provider_config.base_url)
     ["https://explicit.invalid:00443/v1";"http://[::1]:8080/v1";
      "http://[::1]/v1";"https://user:password@explicit.invalid/v1?q=a%2Fb"]
-let explicit_endpoint () = with_endpoint_env (Some "https://ambient.invalid") (fun () ->
+let explicit_endpoint () = with_env "CUSTOM_LLM_BASE_URL" (Some "https://ambient.invalid") (fun () ->
   let spec = "custom:overlap@https://explicit.invalid/v1" in
   (match Provider_kind_resolver.resolve spec with
    | Custom_url {model_id;base_url} ->
@@ -160,9 +161,78 @@ let explicit_endpoint () = with_endpoint_env (Some "https://ambient.invalid") (f
     Alcotest.(check string) "custom wire retains explicitly selected model" "overlap"
       Yojson.Safe.Util.(Yojson.Safe.from_string request.Complete_common.body |> member "model" |> to_string))
 
+let transport_config label = match Runtime_transport.resolve_provider_config_of_label label with
+  | Ok config -> config | Error _ -> Alcotest.fail "declared runtime label was refused"
+let no_default () = with_catalog (fun () ->
+  Alcotest.(check bool) "auto without catalog default cannot reach execution" true
+    (Result.is_error (Runtime_transport.resolve_provider_config_of_label "label-a:auto")))
+let declared_default () = with_catalog (fun () ->
+  with_env "LABEL_B_DEFAULT_MODEL" (Some "ambient-model") (fun () ->
+    let config = transport_config "label-b:auto" in
+    Alcotest.(check string) "catalog default wins independently of derived environment key" "overlap" config.model_id;
+    Alcotest.(check (option string)) "auto retains canonical provider" (Some "label-b") config.provider_id;
+    Alcotest.(check (option int)) "auto retains exact model context" (Some 32768)
+      (Provider_config.context_window config);
+    let configured = match Runtime_model_string.parse_model_string
+        ~temperature:0.25 ~max_tokens:128 ~system_prompt:"explicit system"
+        ~keep_alive:"5m" ~num_ctx:4096 "label-b:auto" with
+      | Some config -> config | None -> Alcotest.fail "configured default was refused" in
+    Alcotest.(check (option (float 0.001))) "binding construction preserves temperature"
+      (Some 0.25) configured.temperature;
+    Alcotest.(check (option int)) "binding construction preserves output limit"
+      (Some 128) configured.max_tokens;
+    Alcotest.(check (option string)) "binding construction preserves system prompt"
+      (Some "explicit system") configured.system_prompt;
+    Alcotest.(check (option string)) "binding construction preserves keep-alive"
+      (Some "5m") configured.keep_alive;
+    Alcotest.(check (option int)) "binding construction preserves context option"
+      (Some 4096) configured.num_ctx))
+let alias_default () = with_catalog (fun () ->
+  let config = transport_config "label-b-alias:auto" in
+  Alcotest.(check string) "alias resolves declared default" "overlap" config.model_id;
+  Alcotest.(check (option string)) "alias carries canonical binding identity" (Some "label-b") config.provider_id)
+let supported_is_not_default () = with_catalog (fun () ->
+  let previous = Provider_catalog.global () in
+  Fun.protect ~finally:(fun () -> match previous with
+    | Some catalog -> Provider_catalog.set_global catalog | None -> Provider_catalog.clear_global ())
+    (fun () ->
+      let entry : Provider_catalog.entry =
+        {id="label-a";aliases=[];kind=Provider_config.OpenAI_compat;
+         base_url="https://a.invalid";request_path="/v1/chat/completions";
+         api_key_env="";auth=Provider_catalog.No_auth;default_model=None;max_context=None;
+         capabilities={Capabilities.default_capabilities with supported_models=Some ["supported-not-default"]};
+         credential_scope=None} in
+      let overlay = match Provider_catalog.of_entries [entry] with
+        | Ok catalog -> catalog | Error detail -> Alcotest.fail detail in
+      Provider_catalog.set_global overlay;
+      Alcotest.(check bool) "supported-model metadata cannot invent an execution default" true
+        (Result.is_error (Runtime_transport.resolve_provider_config_of_label "label-a:auto"))))
+let projected_defaults () = with_catalog (fun () ->
+  with_env "MASC_DEFAULT_RUNTIME" None (fun () ->
+    with_env "MASC_DEFAULT_PROVIDER" None (fun () ->
+      with_env "MASC_DEFAULT_MODEL" None (fun () ->
+        with_env "LABEL_A_DEFAULT_MODEL" (Some "ambient-model") (fun () ->
+          Alcotest.(check (list string)) "projection offers only explicitly declared catalog defaults"
+            ["label-b:overlap"] (Provider_runtime_projection.default_execution_model_strings "fixture");
+          with_env "MASC_DEFAULT_PROVIDER" (Some "label-a") (fun () ->
+            Alcotest.(check (list string)) "incomplete explicit configuration cannot trigger a fallback"
+              [] (Provider_runtime_projection.default_execution_model_strings "fixture"));
+          List.iter (fun key -> List.iter (fun value ->
+            with_env key (Some value) (fun () ->
+              Alcotest.(check (list string)) "present blank configuration cannot trigger catalog defaults"
+                [] (Provider_runtime_projection.default_execution_model_strings "fixture"))) ["";"  "])
+            ["MASC_DEFAULT_RUNTIME";"MASC_DEFAULT_PROVIDER";"MASC_DEFAULT_MODEL"];
+          with_env "MASC_DEFAULT_PROVIDER" (Some "") (fun () ->
+            with_env "MASC_DEFAULT_MODEL" (Some " ") (fun () ->
+              Alcotest.(check (list string)) "blank explicit pair cannot trigger catalog defaults"
+                [] (Provider_runtime_projection.default_execution_model_strings "fixture"))))))))
+
 let () = Alcotest.run "runtime model label binding"
   ["provider authority",["identity",`Quick,identity;"context",`Quick,context;"policy and wire",`Quick,policy];
    "custom endpoint",["missing",`Quick,missing_endpoint;"ambient",`Quick,ambient_endpoint;
      "invalid",`Quick,invalid_endpoint;"malformed",`Quick,malformed_endpoint;
      "ports",`Quick,endpoint_ports;"authority",`Quick,endpoint_authority;
-     "explicit",`Quick,explicit_endpoint]]
+     "explicit",`Quick,explicit_endpoint];
+   "catalog defaults",["missing default",`Quick,no_default;"declared default",`Quick,declared_default;
+     "canonical alias",`Quick,alias_default;"supported is not default",`Quick,supported_is_not_default;
+     "projection",`Quick,projected_defaults]]

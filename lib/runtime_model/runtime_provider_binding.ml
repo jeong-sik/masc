@@ -52,18 +52,6 @@ let local_runtime_label runtime_id =
   | None -> runtime_id
 ;;
 
-let provider_name_matches_default_local_openai_runtime provider_name =
-  match default_local_openai_runtime_provider_id () with
-  | Some id -> String.equal (normalize_provider_id provider_name) (normalize_provider_id id)
-  | None -> false
-;;
-
-let provider_name_matches_kind_default provider_name kind =
-  String.equal
-    (normalize_provider_id provider_name)
-    (normalize_provider_id (Llm_provider.Provider_config.string_of_provider_kind kind))
-;;
-
 let default_headers_for_kind (kind : Llm_provider.Provider_config.provider_kind) =
   let base = [ ("Content-Type", "application/json") ] in
   match kind with

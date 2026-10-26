@@ -1,0 +1,87 @@
+run: https://github.com/jeong-sik/masc/actions/runs/40206442824
+raw_sha256: f4ac6fe1891f448c382b8520e5a4c6e661c8f6799141277a896783dee5254a93
+raw_bytes: 116055
+selected_lines: 82
+
+test suite	Checkout	2026-10-25T15:20:28.7516869Z HEAD is now at 1e6a019a refactor(runtime): carry catalog bindings through explicit model selection
+test suite	Test	2026-10-25T15:21:42.2578951Z [targeted] EIO_BACKEND=<unset> timeout=600s per suite
+test suite	Test	2026-10-25T15:21:42.3039259Z [targeted] dune build test/test_runtime_model_label_binding.exe test/test_runtime_binding_auth_available.exe
+test suite	Test	2026-10-25T15:24:29.3092692Z [targeted] test/test_runtime_model_label_binding: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+test suite	Test	2026-10-25T15:24:29.3114850Z [targeted] test/test_runtime_model_label_binding: start 2026-10-25T15:24:29Z
+test suite	Test	2026-10-25T15:24:29.3435175Z ASSERT explicit provider survives label resolution
+test suite	Test	2026-10-25T15:24:29.3435503Z ASSERT resolved endpoint remains owned by provider
+test suite	Test	2026-10-25T15:24:29.3435805Z ASSERT explicit provider survives label resolution
+test suite	Test	2026-10-25T15:24:29.3436073Z ASSERT resolved endpoint remains owned by provider
+test suite	Test	2026-10-25T15:24:29.3436517Z   [OK]          provider authority          0   identity.
+test suite	Test	2026-10-25T15:24:29.3437544Z ASSERT context excludes unrelated bare model declaration
+test suite	Test	2026-10-25T15:24:29.3437949Z ASSERT config carries the same resolved window
+test suite	Test	2026-10-25T15:24:29.3438355Z ASSERT context excludes unrelated bare model declaration
+test suite	Test	2026-10-25T15:24:29.3438725Z ASSERT config carries the same resolved window
+test suite	Test	2026-10-25T15:24:29.3439086Z   [OK]          provider authority          1   context.
+test suite	Test	2026-10-25T15:24:29.3441006Z ASSERT A rejects forcing despite the bare row allowing it
+test suite	Test	2026-10-25T15:24:29.3441451Z ASSERT B retains its separate forcing declaration
+test suite	Test	2026-10-25T15:24:29.3441736Z ASSERT endpoint override preserves selected provider
+test suite	Test	2026-10-25T15:24:29.3442009Z ASSERT endpoint override cannot borrow B's policy
+test suite	Test	2026-10-25T15:24:29.3442265Z ASSERT A rejects required choice before dispatch
+test suite	Test	2026-10-25T15:24:29.3442516Z ASSERT B admits required choice
+test suite	Test	2026-10-25T15:24:29.3443375Z ASSERT B forcing reaches final Chat body
+test suite	Test	2026-10-25T15:24:29.3443782Z   [OK]          provider authority          2   policy and wire.
+test suite	Test	2026-10-25T15:24:29.3444237Z ASSERT custom label cannot borrow discovery endpoint
+test suite	Test	2026-10-25T15:24:29.3444648Z   [OK]          custom endpoint             0   missing.
+test suite	Test	2026-10-25T15:24:29.3445072Z ASSERT custom label cannot borrow environment endpoint
+test suite	Test	2026-10-25T15:24:29.3445484Z   [OK]          custom endpoint             1   ambient.
+test suite	Test	2026-10-25T15:24:29.3446006Z ASSERT invalid custom endpoint is refused before request construction
+test suite	Test	2026-10-25T15:24:29.3446598Z ASSERT invalid custom endpoint is refused before request construction
+test suite	Test	2026-10-25T15:24:29.3447028Z ASSERT invalid custom endpoint is refused before request construction
+test suite	Test	2026-10-25T15:24:29.3447365Z ASSERT invalid custom endpoint is refused before request construction
+test suite	Test	2026-10-25T15:24:29.3447654Z   [OK]          custom endpoint             2   invalid.
+test suite	Test	2026-10-25T15:24:29.3448307Z ASSERT custom URL parser must consume the complete endpoint
+test suite	Test	2026-10-25T15:24:29.3448613Z ASSERT custom URL parser must consume the complete endpoint
+test suite	Test	2026-10-25T15:24:29.3448902Z ASSERT custom URL parser must consume the complete endpoint
+test suite	Test	2026-10-25T15:24:29.3449174Z   [OK]          custom endpoint             3   malformed.
+test suite	Test	2026-10-25T15:24:29.3449470Z ASSERT invalid explicit port cannot become the default port
+test suite	Test	2026-10-25T15:24:29.3449777Z ASSERT invalid explicit port cannot become the default port
+test suite	Test	2026-10-25T15:24:29.3450067Z ASSERT invalid explicit port cannot become the default port
+test suite	Test	2026-10-25T15:24:29.3450360Z ASSERT valid authority and path/query bytes remain explicit
+test suite	Test	2026-10-25T15:24:29.3450663Z ASSERT valid authority and path/query bytes remain explicit
+test suite	Test	2026-10-25T15:24:29.3450949Z ASSERT valid authority and path/query bytes remain explicit
+test suite	Test	2026-10-25T15:24:29.3451238Z ASSERT valid authority and path/query bytes remain explicit
+test suite	Test	2026-10-25T15:24:29.3451511Z   [OK]          custom endpoint             4   ports.
+test suite	Test	2026-10-25T15:24:29.3451778Z ASSERT invalid authority suffix cannot become a path
+test suite	Test	2026-10-25T15:24:29.3452185Z ASSERT invalid authority suffix cannot become a path
+test suite	Test	2026-10-25T15:24:29.3452623Z ASSERT invalid authority suffix cannot become a path
+test suite	Test	2026-10-25T15:24:29.3453156Z   [OK]          custom endpoint             5   authority.
+test suite	Test	2026-10-25T15:24:29.3453482Z ASSERT custom classification retains explicit model
+test suite	Test	2026-10-25T15:24:29.3453768Z ASSERT custom classification retains explicit endpoint
+test suite	Test	2026-10-25T15:24:29.3454039Z ASSERT custom config retains explicit endpoint
+test suite	Test	2026-10-25T15:24:29.3454303Z ASSERT custom wire retains explicitly selected model
+test suite	Test	2026-10-25T15:24:29.3454858Z   [OK]          custom endpoint             6   explicit.
+test suite	Test	2026-10-25T15:24:29.3456304Z ASSERT auto without catalog default cannot reach execution
+test suite	Test	2026-10-25T15:24:29.3456610Z   [OK]          catalog defaults            0   missing default.
+test suite	Test	2026-10-25T15:24:29.3457063Z ASSERT catalog default wins independently of derived environment key
+test suite	Test	2026-10-25T15:24:29.3457542Z ASSERT auto retains canonical provider
+test suite	Test	2026-10-25T15:24:29.3457915Z ASSERT auto retains exact model context
+test suite	Test	2026-10-25T15:24:29.3458249Z   [OK]          catalog defaults            1   declared default.
+test suite	Test	2026-10-25T15:24:29.3458512Z ASSERT alias resolves declared default
+test suite	Test	2026-10-25T15:24:29.3458745Z ASSERT alias carries canonical binding identity
+test suite	Test	2026-10-25T15:24:29.3459087Z   [OK]          catalog defaults            2   canonical alias.
+test suite	Test	2026-10-25T15:24:29.3460841Z ASSERT supported-model metadata cannot invent an execution default
+test suite	Test	2026-10-25T15:24:29.3461389Z   [OK]          catalog defaults            3   supported is not default.
+test suite	Test	2026-10-25T15:24:29.3461944Z ASSERT projection offers only explicitly declared catalog defaults
+test suite	Test	2026-10-25T15:24:29.3462506Z ASSERT incomplete explicit configuration cannot trigger a fallback
+test suite	Test	2026-10-25T15:24:29.3471903Z   [OK]          catalog defaults            4   projection.
+test suite	Test	2026-10-25T15:24:29.3472349Z Test Successful in 0.023s. 15 tests run.
+test suite	Test	2026-10-25T15:24:29.3496508Z [targeted] test/test_runtime_model_label_binding: OK in 0s
+test suite	Test	2026-10-25T15:24:29.3948443Z [targeted] test/test_runtime_binding_auth_available: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+test suite	Test	2026-10-25T15:24:29.3969489Z [targeted] test/test_runtime_binding_auth_available: start 2026-10-25T15:24:29Z
+test suite	Test	2026-10-25T15:24:29.4088612Z ASSERT available keyed binding qualifies
+test suite	Test	2026-10-25T15:24:29.4088973Z   [OK]          gate          0   keyed available participates.
+test suite	Test	2026-10-25T15:24:29.4089377Z ASSERT unavailable keyed binding does not qualify
+test suite	Test	2026-10-25T15:24:29.4089767Z   [OK]          gate          1   keyed unavailable does not.
+test suite	Test	2026-10-25T15:24:29.4090162Z ASSERT available setup-token binding qualifies
+test suite	Test	2026-10-25T15:24:29.4090557Z ASSERT unavailable setup-token binding does not qualify
+test suite	Test	2026-10-25T15:24:29.4090966Z   [OK]          gate          2   setup token follows availability.
+test suite	Test	2026-10-25T15:24:29.4091404Z ASSERT keyless binding qualifies without availability
+test suite	Test	2026-10-25T15:24:29.4091823Z   [OK]          gate          3   keyless always participates.
+test suite	Test	2026-10-25T15:24:29.4092193Z Test Successful in 0.000s. 4 tests run.
+test suite	Test	2026-10-25T15:24:29.4116790Z [targeted] test/test_runtime_binding_auth_available: OK in 0s

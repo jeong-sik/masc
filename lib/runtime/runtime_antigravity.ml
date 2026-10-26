@@ -1171,9 +1171,9 @@ let run_spawned ?home_dir ?before_spawn ?on_spawned ?on_prompt_sent ?on_context_
     status, !state, String.trim (Stderr.contents stderr_tail))
 ;;
 
-let run_turn ?(conversation_mode = Start) ?home_dir ?before_spawn ?on_spawned ?on_prompt_sent ?on_context_submission ~mgr ~clock ~cwd
+let run_turn ?(conversation_mode = Start) ?home_dir ?before_spawn ?on_spawned ?on_prompt_sent ?on_context_submission
+    ?(on_terminal_received = fun () -> ()) ~mgr ~clock ~cwd
     ?(on_conversation_ready = fun ~conversation_id:_ -> Ok ()) ?on_stream_event
-    ?(on_terminal_received = fun () -> ())
     config ~prompt =
   let* () =
     match home_dir with

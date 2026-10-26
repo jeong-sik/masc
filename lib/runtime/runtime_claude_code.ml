@@ -3227,8 +3227,8 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
     ?(on_context_submission = fun _ -> ()) ~mgr ~clock ~cwd
     ?(on_session_ready = fun ~session_id:_ -> Ok ())
     ?(on_turn_starting = fun ~session_id:_ -> Ok ())
-    ?(on_terminal_received = fun () -> ())
-    ?(on_turn_started = fun ~session_id:_ ~turn_id:_ -> Ok ()) ?on_stream_event ?on_input_observation config
+    ?(on_turn_started = fun ~session_id:_ ~turn_id:_ -> Ok ())
+    ?(on_terminal_received = fun () -> ()) ?on_stream_event ?on_input_observation config
     ~prompt ~images =
   let result =
     let* () = validate_turn ~dynamic_tools ~session_mode config ~prompt ~images in

@@ -25,6 +25,7 @@ type t =
   ; tools : Tool_set.t
   ; context : Context.t option
   ; provider_config : Llm_provider.Provider_config.t option
+  ; reasoning_source_change : Llm_provider.Reasoning_history_projection.source_change_policy
   ; context_fit_admission : Agent.context_fit_admission
   ; model_input_projection : Agent.model_input_projection option
   ; pre_dispatch_serialization_observer : Agent.pre_dispatch_serialization_observer option
@@ -75,6 +76,7 @@ let create ~net ~model =
   ; tools = Tool_set.empty
   ; context = None
   ; provider_config = None
+  ; reasoning_source_change = Agent.default_options.reasoning_source_change
   ; context_fit_admission = Agent.Body_only
   ; model_input_projection = None
   ; pre_dispatch_serialization_observer = None
@@ -133,6 +135,7 @@ let with_tracer tracer b = { b with tracer }
 let with_raw_trace raw_trace b = { b with raw_trace = Some raw_trace }
 let with_context ctx b = { b with context = Some ctx }
 
+let with_reasoning_source_change policy b = { b with reasoning_source_change = policy }
 let with_provider_config (pc : Llm_provider.Provider_config.t) b =
   { b with
     model = pc.model_id
@@ -229,6 +232,7 @@ let build b =
   in
   let options =
     { Agent_types.provider_config = b.provider_config
+    ; reasoning_source_change = b.reasoning_source_change
     ; stream_idle_timeout_s = b.stream_idle_timeout_s
     ; first_event_timeout_s = b.first_event_timeout_s
     ; body_timeout_s = b.body_timeout_s

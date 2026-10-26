@@ -765,10 +765,18 @@ let resume
   let ( let* ) = Result.bind in
   let* { Agent_checkpoint.state; context = ctx; provider_config; binding_disposition } =
     Agent_checkpoint.build_resume ~checkpoint ~eio_context:true ?config
+      ~source_change_policy:options.reasoning_source_change
       ?provider_config:options.provider_config ?context ()
   in
   Log.debug _log "checkpoint resume admitted"
     [Log.S ("binding_disposition", Agent_checkpoint.binding_disposition_to_string binding_disposition)];
+  (match binding_disposition with
+   | Agent_checkpoint.Rebound_pending_dispatch drops ->
+     Log.info _log "checkpoint source change awaits dispatch admission"
+       [Log.I ("pending_message_count", List.length drops)]
+   | Unconfigured_target | Unrecorded_producer | Identical_source
+   | Declared_endpoint_rotation | Rebound_without_replay_loss
+   | Replay_disabled_by_caller -> ());
   Ok { mu = Eio.Mutex.create ()
   ; state
   ; lifecycle = None

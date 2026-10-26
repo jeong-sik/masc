@@ -39,15 +39,15 @@ let traverse decode = function
     Ok (List.rev reversed)
   | _ -> Error "files must be an array"
 
-let path name fields =
-  let* path = text name fields in
+let relative_path path =
   let components = String.split_on_char '/' path in
   let drive = String.length path >= 2 && path.[1] = ':'
     && (match path.[0] with 'a' .. 'z' | 'A' .. 'Z' -> true | _ -> false) in
-  if drive || String.contains path '\\' || String.contains path '\000'
+  if not (String.is_valid_utf_8 path) || drive || String.contains path '\\' || String.contains path '\000'
      || List.exists (fun part -> part = "" || part = "." || part = "..") components
   then Error "expected a relative project path without traversal"
   else Ok path
+let path name fields = let* path = text name fields in relative_path path
 let source_path fields =
   let* path = path "path" fields in
   if List.exists (fun part -> part = "node_modules" || part = ".git")

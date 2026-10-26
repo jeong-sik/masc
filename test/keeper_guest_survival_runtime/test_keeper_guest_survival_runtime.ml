@@ -315,6 +315,10 @@ let test_uncertain_postboot_retains_guest_and_recovers_without_replay () =
 let test_unreadable_inventory_never_authorizes_a_boot () = with_fixture @@ fun root ->
   write (Filename.concat root "list-override") "[{}]";
   check bool "unknown inventory refuses creation" true (step root "turn" = Unix.WEXITED 2);
+  let config = Workspace.default_config root in
+  let guest = Turn.For_testing_microvm.microvm_container_name ~config ~keeper_name:keeper ~network_mode in
+  check (list (list string)) "failure reached actual complete inventory"
+    [["inspect"; guest]; ["list"; "--all"; "--format"; "json"]] (calls root);
   check int "no run" 0 (count "run" root);
   check int "no stop" 0 (count "stop" root);
   check int "no delete" 0 (count "delete" root);

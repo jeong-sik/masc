@@ -62,6 +62,27 @@ instructions = """
 모르는 키가 있으면 거부합니다. 항목 전체 규칙은
 [`docs/KEEPER-FILE-MODEL.md`](KEEPER-FILE-MODEL.md) 에 있습니다.
 
+### 서버 재시작 뒤 Apple MicroVM 재사용
+
+시작 시 현재 Keeper TOML과 `keeper.name` 별칭에서 계산한 Apple guest는 이전 서버
+PID의 생존 여부와 관계없이 보존합니다. 선언 목록이나 런타임 전체 목록을 읽지 못해도
+VM을 보존합니다. 턴은 실제 부팅 정보와 요청한 plan을 대조하고
+`<base-path>/.masc/microvm/github-identity/apple_container/`의 불변 인증 사본을
+검증한 뒤 실행 중인 guest를 재사용합니다. 사실을 읽을 수 없거나 같은 plan인데 실제
+설정이 다르면 guest를 보존하고 재사용을 거부합니다.
+
+공유 exec shim 설정은 endpoint를 받기 전에 초기화합니다. 설치가 없거나 잘못되면
+오류를 표시합니다. 시작 시 초기화가 실패했다면 설치를 수리한 뒤 서버를 재시작하세요.
+외부 파일 읽기는 마운트된 인증 사본과 shim을 검증하며 VM 시작이나 빌드 삭제를 하지
+않습니다. 서버 프로세스의 첫 소유 턴 접속은 보존 표시가 없는 실제 `_build`를 별도
+디렉토리로 옮긴 뒤 삭제합니다. `.masc-keep-build`가 있으면 해당 출력을 보존합니다.
+
+Sandbox 상태는 work volume의 현재 discard 기본값을 `set`, `absent`, `unreadable`로
+보여 줍니다. 새 부팅은 실제 superblock에서 기본값이 없음을 확인한 경우에만 helper를
+실행합니다. 읽기 실패를 수리 허가로 쓰지 않습니다. build volume은 새 부팅 때 다시
+만들며 Nerdctl/Kata의 프로세스 소유 규칙은 유지합니다.
+[guest 생존 RFC](rfc/RFC-keeper-guest-survives-restart.md)에 결정 배경이 있습니다.
+
 ### `mention_targets` 는 목록이고, 한 칸이 이름 하나입니다
 
 ```toml

@@ -65,6 +65,30 @@ answers to a question you have actually run into.
 Unknown keys fail closed. The full field contract is
 [`docs/KEEPER-FILE-MODEL.md`](KEEPER-FILE-MODEL.md).
 
+### Apple MicroVMs across server restarts
+
+Startup preserves the Apple guest names selected by current Keeper TOMLs,
+including `keeper.name` aliases, regardless of the previous server PID. If the
+roster or full runtime inventory cannot be read, maintenance preserves guests.
+A turn reuses a running guest only after comparing its actual boot facts with
+the requested plan and validating its immutable credential snapshot under
+`<base-path>/.masc/microvm/github-identity/apple_container/`. Unreadable facts
+or disagreement with the same plan refuse reuse and preserve the guest.
+
+The shared exec shim configuration is initialized before endpoint admission.
+A missing or invalid installation is reported; repair it and restart the server
+if startup initialization failed. Attached file reads validate the mounted
+identity and shim without starting a guest or cleaning build output. The first
+owned turn handoff per server process stages unkept real `_build` directories
+before deleting them. `.masc-keep-build` preserves a checkout's output.
+
+Sandbox status exposes the work volume's current discard default as `set`,
+`absent` or `unreadable`. A new boot runs the discard helper only when a fresh
+superblock read proves the default absent; an unreadable value never triggers
+a guessed repair. Build volumes are recreated on a new boot. Nerdctl/Kata
+retains its process ownership rules. See the
+[guest survival RFC](rfc/RFC-keeper-guest-survives-restart.md) for the decisions.
+
 ### `mention_targets` is a list, and each entry is one name
 
 ```toml

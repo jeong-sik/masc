@@ -154,6 +154,31 @@ type tool_identity_state =
   | Unconfigured
   | Configured of string
 
+type captured_tool_identity
+(** Immutable secret-bearing bytes and projections. Do not log or serialize
+    this value. Publishable payload, revision and Docker snapshot derive from
+    the same captured bytes and git configuration. *)
+
+val capture_tool_identity :
+  config:Workspace.config -> keeper_name:string ->
+  (captured_tool_identity, string) result
+(** Read the existing identity without creating a directory or copying files.
+    Missing/unconfigured identities capture an empty payload. *)
+
+val captured_tool_identity_of_files :
+  (string * string) list -> (captured_tool_identity, string) result
+(** Pure validation of an immutable snapshot's complete file set. Empty means
+    Unconfigured. Reject duplicate/unknown files, absent hosts, malformed hosts,
+    and missing or stale derived gitconfig; never print credential bytes. *)
+
+val captured_revision : captured_tool_identity -> string
+val captured_payload : captured_tool_identity -> Fs_compat.directory_payload
+val captured_environment :
+  captured_tool_identity -> keeper_name:string -> container_config_dir:string ->
+  (string * string) list
+(** Derive credential wiring from these bytes rather than rereading live login
+    state. Includes the Keeper's commit names and GH_CONFIG_DIR. *)
+
 type docker_tool_projection =
   { args : string list
   ; environment : (string * string) list

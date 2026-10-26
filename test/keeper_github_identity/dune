@@ -17,6 +17,7 @@
   alcotest
   digestif
   eio
+  eio_main
   masc.exec_ssh_protocol
   masc.fs_compat
   masc.masc_eio_context

@@ -9,7 +9,7 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 ITERATIONS=${1:-10}
 TARGET=${2:-"mitosis"}
-LOG_DIR="logs/feedback-loop"
+LOG_DIR="$REPO_DIR/artifacts/feedback-loop"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 LOG_FILE="${LOG_DIR}/${TARGET}_${TIMESTAMP}.jsonl"
 DUNE_BUILD_TARGET="${MASC_LOCAL_DUNE_TARGET:-bin/main_eio.exe}"

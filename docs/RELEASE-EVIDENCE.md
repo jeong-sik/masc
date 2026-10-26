@@ -64,7 +64,7 @@ scripts/release-binary-smoke.sh _build/default/bin/main_eio.exe
 evidence bundle 생성:
 
 ```bash
-scripts/release-evidence.sh _build/default/bin/main_eio.exe .release-evidence/local-release-evidence.md
+scripts/release-evidence.sh _build/default/bin/main_eio.exe artifacts/release-evidence/local-release-evidence.md
 ```
 
 위 명령은 이미 빌드된 바이너리에 사용합니다. 코딩 에이전트는 로컬 빌드 대신

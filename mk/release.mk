@@ -1,7 +1,7 @@
 .PHONY: release-evidence release viewer-build viewer-serve harness-streamable-http-contract harness-run-local-fresh-boot viewer-local-e2e-check
 
 release-evidence:
-	bash scripts/release-evidence.sh _build/default/bin/main_eio.exe .release-evidence/local-release-evidence.md
+	bash scripts/release-evidence.sh _build/default/bin/main_eio.exe artifacts/release-evidence/local-release-evidence.md
 
 # Build release binary
 release:

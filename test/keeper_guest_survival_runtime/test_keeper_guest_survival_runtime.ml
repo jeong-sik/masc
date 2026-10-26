@@ -141,6 +141,9 @@ let meta () =
   {meta with sandbox_profile=Profile.Micro_vm; microvm_backend=Some backend; network_mode}
 
 let process_step root operation =
+  (* This provider fixture opens no network. Declare its resolver explicitly
+     instead of inheriting a host-only systemd resolver in Linux CI. *)
+  Unix.putenv "MASC_KEEPER_MICROVM_DNS" "192.0.2.53";
   Eio_main.run @@ fun env ->
   let fs = Eio.Stdenv.fs env in
   Fs_compat.set_fs fs;
@@ -224,8 +227,11 @@ let test_attached_endpoint_uses_mounted_identity_without_cleanup () = with_fixtu
   let before = calls root |> List.length in
   check bool "fresh attached process reaches shim" true (step root "attached" = Unix.WEXITED 0);
   let after = calls root |> List.drop before in
-  check bool "attached reader issues only its requested exec" true
-    (List.for_all (function "exec" :: _ -> true | _ -> false) after && List.length after = 1);
+  check bool "attached reader issues only exec calls" true
+    (List.for_all (function "exec" :: _ -> true | _ -> false) after);
+  let probes, payloads = List.partition (List.mem "--probe") after in
+  check int "one actual protocol negotiation" 1 (List.length probes);
+  check int "one actual requested payload dispatch" 1 (List.length payloads);
   check string "attached reader preserves guest" original (read (Filename.concat root "guest.json"));
   let last = List.hd (List.rev (entries root "requests")) in
   check (list string) "reader did not run first-handoff cleanup" ["/bin/true"]

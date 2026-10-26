@@ -242,8 +242,9 @@ let run_with ~before_command_validation ~env ~owner ~directory work =
                     Peer.dispatch ?actor ~request_id:command.id peer ~verb args in
                   (* A refused delivery loses this one result. When its
                      caller stopped waiting (it was told the command timed
-                     out) the connection is still good; a connection that is
-                     gone fails the next poll. *)
+                     out) the connection is still good. A retired client
+                     fails the next poll, and a closed BiDi socket ends this
+                     loop through [ended]. *)
                   (match Browser_addon_owner.deliver_live owner ~client_id ~id:command.id ~payload:(Browser_live_peer.payload result) with
                    | Ok () -> ()
                    | Error detail ->

@@ -152,7 +152,8 @@ let test_command_refusal_reports_fields_without_values () =
   let actual = {(facts ()) with plan_label = Some (Plan.digest plan);
     command = ["opam"; "exec"; "--"; "tail"; "-f"; "/dev/null"];
     environment = ["CREDENTIAL", observed_secret]} in
-  match Plan.assess ~identity_reading:Plan.Identity_readable ~plan ~policy_environment:[] (Plan.Facts actual) with
+  match Plan.assess ~image_command:(Ok image_command)
+      ~identity_reading:Plan.Identity_readable ~plan ~policy_environment:[] (Plan.Facts actual) with
   | Plan.Refuse refusal ->
     let message = Plan.refusal_message refusal in
     check string "diagnostic identifies the actual mismatched fields"
@@ -161,6 +162,11 @@ let test_command_refusal_reports_fields_without_values () =
     List.iter (fun secret -> check bool "diagnostic does not expose credential values" false
       (Astring.String.is_infix ~affix:secret message)) [requested_secret; observed_secret]
   | Plan.Matches_plan | Plan.Replace _ -> fail "same-plan command mismatch must preserve and refuse"
+
+let test_image_command_refusal_preserves_diagnostic () =
+  check string "image metadata failure remains a distinct preservation refusal"
+    "runtime image command unavailable; guest preserved: fixture metadata unavailable"
+    (Plan.refusal_message (Plan.Image_command_unavailable "fixture metadata unavailable"))
 
 let flag_value flag argv =
   let rec find = function
@@ -309,7 +315,8 @@ let () = run "Keeper Apple boot plan"
                  ; test_case "identity and runtime refusal order" `Quick test_identity_refusal_priority
                  ; test_case "unreadable facts preserve guest" `Quick test_unreadable_is_not_replacement
                  ; test_case "every security disagreement is retained" `Quick test_all_runtime_security_disagreements_are_named
-                 ; test_case "command refusal names fields without credentials" `Quick test_command_refusal_reports_fields_without_values]
+                 ; test_case "command refusal names fields without credentials" `Quick test_command_refusal_reports_fields_without_values
+                 ; test_case "image command refusal preserves its diagnostic" `Quick test_image_command_refusal_preserves_diagnostic]
   ; "boot", [test_case "actual Apple argv projects its labelled plan" `Quick test_boot_projects_the_labelled_plan
              ; test_case "ephemeral routing is outside plan identity" `Quick test_ephemeral_routes_do_not_change_plan_identity
              ; test_case "renderer refuses duplicate keys in both orders" `Quick test_renderer_rejects_order_sensitive_duplicates

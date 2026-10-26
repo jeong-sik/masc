@@ -1335,7 +1335,17 @@ let test_checkpoint_preserves_results_and_services_successors () =
       ; Q.Task_outcome {to_task_id="approved-task";to_verification_id="approved";
                         to_producer=keeper_name;to_authority=authority} ] in
     let originals = List.mapi (fun index payload ->
-      {Q.post_id=Printf.sprintf "original-%d" index;urgency=Immediate;arrived_at=1.;payload}) payloads in
+      let post_id = match payload with
+        | Q.Addon_operation_changed change -> Q.addon_operation_change_post_id change
+        | Q.Bootstrap | Q.Board_signal _ | Q.Board_attention _ | Q.Schedule_due _
+        | Q.Connector_attention _ | Q.Hitl_resolved _ | Q.Fusion_completed _
+        | Q.Delegate_completed _ | Q.Composition_completed _ | Q.Tool_result_ready _
+        | Q.Owned_job_completed _ | Q.Workspace_message _ | Q.Ask_answered _
+        | Q.Completion_authority_rejected _ | Q.Task_cancelled _ | Q.Task_outcome _ ->
+          Printf.sprintf "original-%d" index in
+      let source : Q.stimulus = {post_id;urgency=Immediate;arrived_at=1.;payload} in
+      Q.stimulus_to_yojson source |> Q.stimulus_of_yojson
+      |> require "validate original source coordinates before enqueue") payloads in
     List.iter (enqueue_exn ~base_path keeper_name) originals;
     let selections () =
       Persistence.For_testing.reset_snapshot_cache_for_testing ();

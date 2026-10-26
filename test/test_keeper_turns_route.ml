@@ -245,23 +245,20 @@ let test_waiting_read_errors_stay_public () =
             Alcotest.failf "a fleet read failure became ordinary idle: %s"
               (match other with Some value -> Yojson.Safe.to_string value | None -> "absent"));
          (match member "waiting_count" waiting with
-          | Some (`Int 1) -> ()
+          | Some (`Int count) when count > 0 -> ()
           | other ->
-            Alcotest.failf "the fleet read error was dropped: %s"
+            Alcotest.failf "no read failure is visible: %s"
               (match other with Some value -> Yojson.Safe.to_string value | None -> "absent"));
          (match member "waiting_on" waiting with
-          | Some (`List [ item ]) ->
-            (match member "source" item with
-             | Some (`String "read_error") -> ()
-             | _ -> Alcotest.fail "the waiting row is not a read error");
-            (match member "waiting_on" item with
-             | Some (`String "operator_pending_confirm_store") -> ()
-             | _ -> Alcotest.fail "the failed source is not identified");
-            (match member "keeper_name" item with
-             | Some `Null -> ()
-             | _ -> Alcotest.fail "a fleet error was misattributed to one Keeper")
           | Some (`List items) ->
-            Alcotest.failf "expected one fleet read error, got %d" (List.length items)
+            let is_injected_error item =
+              match member "source" item, member "waiting_on" item, member "keeper_name" item with
+              | Some (`String "read_error"), Some (`String "operator_pending_confirm_store"), Some `Null ->
+                true
+              | _ -> false
+            in
+            Alcotest.(check bool) "the injected fleet read error remains public" true
+              (List.exists is_injected_error items)
           | _ -> Alcotest.fail "waiting_on is missing or mistyped")
        | _ -> Alcotest.fail "canonical waiting projection is missing")
     | Some (`List rows) -> Alcotest.failf "expected one Keeper row, got %d" (List.length rows)

@@ -175,7 +175,12 @@ let test_streaming_keeps_async_and_schedule_badges () =
         [ async_request Decode.Async_running "a"
         ; async_request ~ownership:Decode.Async_ownership_unknown Decode.Async_running "b"
         ]
-      ~waiting:(waiting ~items:[waiting_item ~source:Model.Waiting_source_schedule_waiting ()] "row")
+      ~waiting:(waiting
+        ~items:
+          [ waiting_item ~source:Model.Waiting_source_schedule_waiting ()
+          ; waiting_item ~source:Model.Waiting_source_read_error ()
+          ]
+        "row")
       "row"
   in
   Alcotest.(check bool) "the turn remains primary" true
@@ -185,7 +190,9 @@ let test_streaming_keeps_async_and_schedule_badges () =
   Alcotest.(check bool) "both async requests and ownership uncertainty survive" true
     (List.mem (Model.Badge_async { running = 2; ownership_unknown = 1 }) badges);
   Alcotest.(check bool) "the scheduled wake remains a secondary badge" true
-    (List.mem Model.Badge_schedule badges)
+    (List.mem Model.Badge_schedule badges);
+  Alcotest.(check bool) "an observation failure stays a secondary badge" true
+    (List.mem Model.Badge_read_error badges)
 
 let test_delegate_and_verification_remain_distinct_badges () =
   let value =
@@ -220,13 +227,17 @@ let test_confirmation_and_inventory_errors_need_attention () =
   let confirmation =
     row ~waiting:(waiting ~items:[waiting_item ~source:Model.Waiting_source_operator_pending_confirm ()] "row") "confirmation"
   in
-  let failure = row ~waiting:(waiting ~items:[waiting_item ~source:Model.Waiting_source_read_error ()] "row") "failure" in
+  let read_error =
+    row ~waiting:(waiting ~items:[waiting_item ~source:Model.Waiting_source_read_error ()] "row")
+      "read-error"
+  in
   Alcotest.(check bool) "operator confirmation needs a person" true
     (Model.primary_activity_of_row confirmation = Model.Confirmation && Model.group_of_row confirmation = Model.Needs_you);
-  Alcotest.(check bool) "inventory failure needs repair" true
-    (Model.primary_activity_of_row failure = Model.Failure && Model.group_of_row failure = Model.Needs_you);
-  Alcotest.(check bool) "the failure badge remains explicit" true
-    (List.mem Model.Badge_read_error (Model.badges_of_row failure))
+  Alcotest.(check bool) "an inventory read failure does not become a Keeper failure" true
+    (Model.primary_activity_of_row read_error = Model.External_waiting
+     && Model.group_of_row read_error = Model.Waiting);
+  Alcotest.(check bool) "the observation failure badge remains explicit" true
+    (List.mem Model.Badge_read_error (Model.badges_of_row read_error))
 
 let test_async_phases_and_preparing_remain_distinct () =
   let active = row ~turn:preparing "preparing" in

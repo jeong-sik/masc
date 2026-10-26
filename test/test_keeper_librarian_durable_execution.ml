@@ -384,6 +384,16 @@ let no_memory fixture = check (list string) "uncommitted original has no Memory 
 module Gate = Keeper_librarian_durable_gate
 let canonical request=Lane_addon_action.canonical request |> get
 let day_of request_id=Capture.minted_on request_id |> get
+(* The same history request ID minted one UTC day earlier, for a chain whose
+   root and successor fall on different days. *)
+let day_ms=86_400_000L
+let minted_a_day_before request_id =
+  match Yojson.Safe.from_string request_id with
+  | `List [kind;hash;`String nonce] ->
+    let time=Printf.sprintf "%012Lx" (Int64.sub (Random_id.uuid_v7_time_ms nonce |> get) day_ms) in
+    let nonce=String.sub time 0 8 ^ "-" ^ String.sub time 8 4 ^ String.sub nonce 13 (String.length nonce-13) in
+    Yojson.Safe.to_string (`List [kind;hash;`String nonce])
+  | _ -> fail "a history request ID lists its kind, owner hash and nonce"
 (* Every gate record the owner's gate scope holds now. *)
 let gate_records fixture capture =
   let inventory=io (fun () -> Gate.Inventory.read ~store:fixture.store ~owner:(Capture.physical_owner capture)) |> get in
@@ -1010,7 +1020,7 @@ let test_changed_memory_rebases_original_source_without_unknown_retry ?(lose_chi
         |> Result.map_error Source.error_to_string |> get in
       let preparation=Keeper_librarian_runtime.prepare_durable ~now:(Time_compat.now ()) (Source.input rebased) |> get in
       let owner=Capture.physical_owner original in
-      let request_id=Capture.fresh_request_id owner in
+      let request_id=minted_a_day_before (Capture.fresh_request_id owner) in
       let child=io (fun () -> Capture.create
         ~predecessor:{request_id=original_record.request_id;request_digest=original_record.request_digest}
         ~request_id ~owner ~destination:(Capture.destination original) ~source:rebased ~preparation ()) |> get in
@@ -1129,6 +1139,9 @@ let test_changed_memory_rebases_original_source_without_unknown_retry ?(lose_chi
     check (list string) "both executions hold gate records"
       (List.sort String.compare [original_record.request_id;child_record.request_id])
       (List.sort_uniq String.compare (List.map (fun gate -> Gate.parent_execution_id gate |> get) gates));
+    if recover_unacked_child then
+      check bool "the successor was minted on another day than its root" false
+        (String.equal (day_of child_record.request_id) root_day);
     (* The settle moves the successor's history record first. *)
     if interrupt_settle then settle_only fixture ~date:root_day child_record;
     ignore (run_worker fixture);
@@ -1136,6 +1149,9 @@ let test_changed_memory_rebases_original_source_without_unknown_retry ?(lose_chi
     check int "the finished chain leaves the scope" 0 (List.length (observed_originals fixture));
     check bool "the successor settles under its root's day" true (settled_on fixture ~date:root_day child_record);
     check bool "the root settles under its own day" true (settled_on fixture ~date:root_day parent_after);
+    if recover_unacked_child then
+      check bool "nothing settles under the successor's own day" false
+        (settled_on fixture ~date:(day_of child_record.request_id) child_record);
     check bool "both executions' gate records settle under that day" true
       (List.for_all (settled_on fixture ~date:root_day) gates);
     check int "no gate record stays for validation" 0 (List.length (gate_records fixture child)))))
@@ -1173,4 +1189,6 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     (test_changed_memory_rebases_original_source_without_unknown_retry ~recover_unacked_child:true);
   test_case "a chain settle stopped after its successor finishes from the root" `Quick
     (test_changed_memory_rebases_original_source_without_unknown_retry ~interrupt_settle:true);
+  test_case "a chain across two UTC days settles and finishes under its root's day" `Quick
+    (test_changed_memory_rebases_original_source_without_unknown_retry ~recover_unacked_child:true ~interrupt_settle:true);
 ]]

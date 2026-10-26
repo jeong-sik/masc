@@ -229,7 +229,8 @@ let validate_lineage originals =
 (* RFC-librarian-history-settles-finished-originals. A chain settles leaf
    first under the day its root was minted, as Workspace Curator chains do:
    each history record, then the gate records of that execution. Every body
-   names its own request ID, so no other record names a moved body. *)
+   holds its own request ID, so no two records share a body file and a move
+   never takes another record's body. *)
 let settle_record ~store ~date (record:Retained.retained) =
   io (fun () -> Retained.settle ~store ~date (Retained.listed record))
   |> Result.map_error Retained.settle_error_to_string

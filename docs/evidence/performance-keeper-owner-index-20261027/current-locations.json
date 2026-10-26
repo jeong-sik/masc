@@ -56,6 +56,13 @@
       "capture_sha256": "034d40726b8ac10e4ddda8e3a29e3328ceca6eef1ef863a2d3c543c3d2688d7c",
       "retained_sha256": "034d40726b8ac10e4ddda8e3a29e3328ceca6eef1ef863a2d3c543c3d2688d7c",
       "treatment": "Exact selected capture; renamed when indicated by retained path."
+    },
+    {
+      "capture": "artifacts/runs/extreme-perf-20261026/owner-projection-map-ci-response-v1/verification.json",
+      "retained": "ci-response-checks.json",
+      "capture_sha256": "2113ff125b06da0450f9fca28ec9fe5c65d4a2a7dadfc340c1b359faf0d66aca",
+      "retained_sha256": "2113ff125b06da0450f9fca28ec9fe5c65d4a2a7dadfc340c1b359faf0d66aca",
+      "treatment": "Exact new compile-response parsing receipt; original concurrency response capture remains unchanged."
     }
   ],
   "note": "Original commands, filenames and paths stay frozen. Reproduction writes to a fresh artifacts directory."

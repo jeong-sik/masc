@@ -162,6 +162,7 @@ type difference =
   | Plan_label | Image | Resources | User | Working_directory | Command
   | Mounts | Root_filesystem | Capabilities | Network | Environment | Labels
   | Policy_route
+  | Identity_snapshot
 type refusal =
   | Invalid_requested_plan of invalid_plan list
   | Guest_facts_unreadable of string
@@ -207,7 +208,9 @@ let differences (plan : t) (facts : facts) =
     ; different (not (contains_pairs plan.labels facts.labels)) Labels
     ]
 
-let assess ~plan ~policy_environment reading =
+type identity_reading = Identity_readable | Identity_unreadable
+
+let assess ~plan ~policy_environment ~identity_reading reading =
   match validate plan with
   | Error errors -> Refuse (Invalid_requested_plan errors)
   | Ok () -> match reading with
@@ -222,6 +225,9 @@ let assess ~plan ~policy_environment reading =
           policy_environment <> [] && contains_pairs policy_environment facts.environment
       in
       if not policy_route_holds then Replace [Policy_route]
-      else match differences with
-        | [] -> Matches_plan
-        | _ :: _ -> Refuse (Runtime_reports_other_than_asked differences)
+      else match identity_reading with
+        | Identity_unreadable -> Replace [Identity_snapshot]
+        | Identity_readable ->
+          match differences with
+          | [] -> Matches_plan
+          | _ :: _ -> Refuse (Runtime_reports_other_than_asked differences)

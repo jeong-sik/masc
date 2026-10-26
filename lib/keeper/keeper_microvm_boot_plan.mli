@@ -98,6 +98,7 @@ type difference =
   | Environment
   | Labels
   | Policy_route
+  | Identity_snapshot
 
 type refusal =
   | Invalid_requested_plan of invalid_plan list
@@ -109,13 +110,18 @@ type assessment =
   | Replace of difference list
   | Refuse of refusal
 
+type identity_reading = Identity_readable | Identity_unreadable
+
 val differences : t -> facts -> difference list
 (** Compares requested facts, allowing image-provided extra environment
     variables and runtime/transient labels. Never logs credential values. *)
 
 val assess :
-  plan:t -> policy_environment:(string * string) list -> reading -> assessment
+  plan:t -> policy_environment:(string * string) list ->
+  identity_reading:identity_reading -> reading -> assessment
 (** An absent/different plan label permits replacement. With the same label,
     unreadable/different runtime facts refuse while preserving the guest.
     A stale policy route permits replacement independently of the stable
-    digest. [Matches_plan] is a comparison result, not lifecycle authority. *)
+    digest. After the label and route checks, an unreadable identity permits
+    replacement before same-label runtime differences are considered. Unreadable
+    facts always refuse. [Matches_plan] is a comparison result, not lifecycle authority. *)

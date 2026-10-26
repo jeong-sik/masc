@@ -970,7 +970,7 @@ type recall_journal_projection =
   { revisions : Recall_revision_set.t
   ; retired : int Identity_map.t
   ; highest : int
-  ; rewrites_rev : Yojson.Safe.t list
+  ; rewrites_rev : Successor_recall.transition list
   ; invalid : string option
   }
 
@@ -1009,26 +1009,53 @@ let retired_identities (change : change) =
 let project_recall_entry ~oldest projection = function
   | Dated_jsonl.Malformed_json {detail;_} -> {projection with invalid=Some detail}
   | Dated_jsonl.Parsed json ->
-    match Journal_codec.journal_entry_of_json json with
-    | Error detail -> {projection with invalid=Some detail}
-    | Ok (Journal_failed _ | Journal_quarantined _) -> projection
-    | Ok (Journal_committed {revision;change;program;_}) ->
+    match Journal_codec.journal_entry_of_json json, json with
+    | Error detail, _ -> {projection with invalid=Some detail}
+    | Ok (Journal_failed _ | Journal_quarantined _), _ -> projection
+    | Ok (Journal_committed _), (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) ->
+      {projection with invalid=Some "committed journal line is not a JSON object"}
+    | Ok (Journal_committed {revision;recorded_at;source;change;program;_}), `Assoc fields ->
       if revision <= oldest then empty_recall_projection
       else
-        let rewrote = Journal_codec.journal_line_rewrote json in
-        let revisions =
-          if rewrote then Recall_revision_set.add revision projection.revisions
-          else projection.revisions in
-        let rewrites_rev =
-          if rewrote then json :: projection.rewrites_rev else projection.rewrites_rev in
-        let retired = List.fold_left (fun retired identity -> Identity_map.update identity
-            (function None -> Some revision | Some prior -> Some (max prior revision)) retired)
-          projection.retired (retired_identities change) in
-        let retired = Option.fold ~none:retired ~some:(fun proof ->
-          List.fold_left (fun retired identity -> Identity_map.update identity
-            (function None -> Some revision | Some prior -> Some (max prior revision)) retired)
-            retired (Keeper_memory_os_program_publication.touched_ids proof)) program in
-        {projection with revisions;retired;rewrites_rev;highest=max projection.highest revision}
+        match Journal_codec.journal_commit_effect fields, Journal_codec.journal_revision_links fields with
+        | Error detail, _ | _, Error detail -> {projection with invalid=Some detail}
+        | Ok commit_effect, Ok revision_links ->
+          let rewrote = commit_effect = Some Rewritten in
+          let revisions =
+            if rewrote then Recall_revision_set.add revision projection.revisions
+            else projection.revisions in
+          let retired_ids = retired_identities change in
+          let rewrites_rev =
+            if not rewrote then projection.rewrites_rev
+            else
+              let row : Successor_recall.transition =
+                { evidence =
+                    { snapshot_revision = revision
+                    ; recorded_at
+                    ; source
+                    ; commit_effect
+                    ; revision_links
+                    ; removed_memory_ids = List.map memory_id change.removed
+                    ; added_memory_ids = List.map memory_id change.added
+                    }
+                ; removed = change.removed
+                ; program
+                ; recreated_memory_ids =
+                    List.filter
+                      (fun identity ->
+                        List.exists (fun fact -> memory_id fact = identity) change.added)
+                      retired_ids
+                }
+              in
+              row :: projection.rewrites_rev in
+          let retired = List.fold_left (fun retired identity -> Identity_map.update identity
+              (function None -> Some revision | Some prior -> Some (max prior revision)) retired)
+            projection.retired retired_ids in
+          let retired = Option.fold ~none:retired ~some:(fun proof ->
+            List.fold_left (fun retired identity -> Identity_map.update identity
+              (function None -> Some revision | Some prior -> Some (max prior revision)) retired)
+              retired (Keeper_memory_os_program_publication.touched_ids proof)) program in
+          {projection with revisions;retired;rewrites_rev;highest=max projection.highest revision}
 
 let observe_recall_append path (observation : Fs_compat.private_jsonl_append_observation) json =
   match Identity_map.find_opt path (Atomic.get recall_journal_cache) with
@@ -3046,23 +3073,7 @@ let read_recall_transitions ~keepers_dir ~keeper_id ~after_revision ~through_rev
         (* Keep every actual rewrite, including duplicate revisions: the pure
            validator must still distinguish equal replay from conflicting
            transition evidence. Unchanged observations cannot supply edges. *)
-        let rec decode acc = function
-          | [] -> Ok (List.rev acc)
-          | json :: rest ->
-            let* entry = Journal_codec.journal_entry_of_json json in
-            match entry, json with
-            | Journal_committed {revision;recorded_at;source;change;program;_}, `Assoc fields ->
-              let* commit_effect = Journal_codec.journal_commit_effect fields in
-              let* revision_links = Journal_codec.journal_revision_links fields in
-              let row : Successor_recall.transition = {evidence={snapshot_revision=revision;recorded_at;source;commit_effect;
-                revision_links;removed_memory_ids=List.map memory_id change.removed;
-                added_memory_ids=List.map memory_id change.added};removed=change.removed;program;
-                recreated_memory_ids=List.filter (fun identity ->
-                  List.exists (fun fact -> memory_id fact=identity) change.added) (retired_identities change)} in
-              decode (row::acc) rest
-            | (Journal_committed _ | Journal_failed _ | Journal_quarantined _), _ ->
-              Error "cached rewrite is not a committed journal record" in
-        decode [] (List.rev projection.rewrites_rev))
+        Ok (List.rev projection.rewrites_rev))
 ;;
 
 let read_successor_recall_for_keepers_dir ~keepers_dir ~keeper_id =

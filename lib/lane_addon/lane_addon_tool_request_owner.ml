@@ -90,7 +90,7 @@ let request_of_body ~request_digest = function
       else Error "original request body does not match its record's digest" in
     let* json = try Ok (Yojson.Safe.from_string bytes) with Yojson.Json_error detail -> Error detail in
     let* request = Lane_addon_action.canonical json in
-    if String.equal (digest request) request_digest then Ok request
+    if String.equal (Yojson.Safe.to_string request) bytes then Ok request
     else Error "original request body is not canonical"
 (* A record names its request by digest, so equal digests are equal requests;
    comparing them never walks the request itself. *)
@@ -167,15 +167,23 @@ let load_scope ~store ~scope =
       let* original = load_listed ~store record in
       restore (original::found) rest in
   restore [] records
-let discover_all ~store =
-  let* rows = Lane_addon_store.tool_request_owner_inventory_all store |> unavailable in
-  let rec restore records = function
-    | [] -> Ok (List.rev records)
-    | (directory_name,file_name,json)::rest ->
-      let* record = decode_published ~directory_name ~file_name json |> unavailable in
+let fold_all ~store ~init ~f =
+  let* records_rev =
+    Lane_addon_store.fold_tool_request_owner_inventory_all store ~init:[]
+      ~f:(fun records ~directory_name ~file_name json ->
+        let* record = decode_published ~directory_name ~file_name json in
+        Ok (record::records))
+    |> unavailable
+  in
+  let rec restore acc = function
+    | [] -> Ok acc
+    | record::rest ->
       let* original = load_listed ~store record in
-      restore (original::records) rest in
-  restore [] rows
+      restore (f acc original) rest in
+  restore init (List.rev records_rev)
+let discover_all ~store =
+  let* records = fold_all ~store ~init:[] ~f:(fun records original -> original::records) in
+  Ok (List.rev records)
 let prepare_successor ~store ~scope ~request_id ~request =
   let* () = validate_identity ["scope",scope;"request_id",request_id] in
   let* request = Lane_addon_action.canonical request

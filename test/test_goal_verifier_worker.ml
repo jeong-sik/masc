@@ -765,9 +765,9 @@ let retain_unattributable_metadata store =
     ~summary:(`Assoc []) ~request:(`Assoc [])
     |> Result.map_error Lane_addon_tool_request_owner.error_to_string)
 
-let retain_noncanonical_metadata store ~goal_id ~request_id =
+let retain_noncanonical_metadata store ~goal_id ~request_id ?(attempt=0) =
   let noncanonical = Yojson.Safe.to_string
-    (`List [`String goal_id; `String request_id; `Int 0]) ^ " " in
+    (`List [`String goal_id; `String request_id; `Int attempt]) ^ " " in
   get (Lane_addon_tool_request_owner.retain ~store ~scope:"goal-proof-reviews"
     ~request_id:noncanonical ~installation_id:W.host_installation_id
     ~package_id:W.host_package_id ~tool:"goal_proof_review"
@@ -843,6 +843,35 @@ let test_noncanonical_same_request_never_starts_new_review () =
       Alcotest.(check bool) "matching noncanonical original remains pending" true
         (phase config goal_id = Goal_phase.Verifying);
       Alcotest.(check int) "matching noncanonical original never dispatches a reviewer" 0 !calls))
+
+let test_noncanonical_successor_blocks_automatic_retry () =
+  with_workspace (fun config store _ ->
+    let authority, retained = prepared config store in
+    let original = W.original retained in
+    let subject = V.subject original in
+    let calls = ref 0 in
+    with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
+        ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
+        ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
+      incr calls;
+      Error (Agent_core.Error.Api (Agent_core.Error.Retry.RateLimited
+        {retry_after=Some 1.; message="definite temporary refusal"}))) (fun () ->
+      let refusal = checked (run store retained authority) in
+      Alcotest.(check bool) "fixture retains a retryable canonical parent" true
+        (refusal.result.retryable_runtimes <> []);
+      ignore (retain_noncanonical_metadata store ~goal_id:subject.goal_id
+        ~request_id:subject.request_id ~attempt:1);
+      let allocations = ref 0 in
+      let outcome = W.frontier ~store ~installation_id ~package_id
+        ~goal_id:subject.goal_id ~request_id:subject.request_id
+        ~new_run:(fun () ->
+          incr allocations;
+          {run_id="noncanonical-successor-must-not-run/" ^ subject.request_id;
+            started_at=Time_compat.now ()}) in
+      Alcotest.(check int) "noncanonical successor cannot allocate a new run" 0 !allocations;
+      match outcome with
+      | Error (W.Original_invalid _) -> ()
+      | Error _ | Ok _ -> Alcotest.fail "noncanonical successor was replaced by a fresh retry"))
 
 let test_actual_boot_publication_survives_foreign_body_corruption () =
   with_workspace (fun config store _ ->
@@ -1303,6 +1332,8 @@ let () = match restart_probe with
     test_noncanonical_previous_request_does_not_block_new_review;
   Alcotest.test_case "noncanonical matching request never starts a new review" `Quick
     test_noncanonical_same_request_never_starts_new_review;
+  Alcotest.test_case "noncanonical successor blocks automatic retry" `Quick
+    test_noncanonical_successor_blocks_automatic_retry;
   Alcotest.test_case "actual boot publication survives foreign original body corruption" `Quick
     test_actual_boot_publication_survives_foreign_body_corruption;
   Alcotest.test_case "actual process restart survives foreign original body corruption" `Quick

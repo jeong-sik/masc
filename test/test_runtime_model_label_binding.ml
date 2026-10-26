@@ -522,22 +522,23 @@ let ollama_auto_scopes_cached_models_to_the_credential () =
       ["a", 1; "b", 1] (List.sort compare !requests))
 
 let ollama_auto_probe_uses_declared_deadline () =
+  let clock = Eio_mock.Clock.make () in
+  Eio_mock.Clock.set_time clock 1000.;
   let tag_requests = ref 0 in
   let handler _conn req body =
     ignore (Eio.Buf_read.(of_flow ~max_size:(1024 * 1024) body |> take_all) : string);
     match Uri.path (Cohttp.Request.uri req) with
     | "/api/tags" ->
       incr tag_requests;
+      Eio_mock.Clock.set_time clock 1006.;
       let pending, _ = Eio.Promise.create () in
       Eio.Promise.await pending
     | _ -> Cohttp_eio.Server.respond_string ~status:`Not_found ~body:"missing" ()
   in
   with_mock_server handler (fun ~sw ~net ~endpoint ->
-    let clock = Eio_mock.Clock.make () in
-    Eio_mock.Clock.set_time clock 1000.;
     Discovery_cache.set_env ~sw ~net;
     with_catalog ~endpoint (fun () ->
-      (match Eio.Time.with_timeout clock 5. (fun () ->
+      (match Eio.Time.with_timeout clock 10. (fun () ->
         Ok (Runtime_model_string.parse_model_string "ollama:auto")) with
        | Ok None -> ()
        | Ok (Some _) -> Alcotest.fail "an unanswered probe invented a model"

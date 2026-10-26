@@ -68,5 +68,8 @@ existing strict warning4 gate rejected the broad settlement-error pattern.
 warnings; the fix explicitly enumerates the constructors without weakening
 the warning or assertions. It is committed as `4c94fcce84f59c751ebd4867a2f0dee0e3abb188`. Current source
 `c52f799e52d3683bd2a4c624f0f6adfe36015ec9` also clarifies permanent authority
-refusal and post-tick observation crash semantics. A fresh focused run will
-be requested after publication; there is no current-source execution claim.
+refusal and post-tick observation crash semantics. The same four aliases were requested as workflow **Test40374192059**, head
+`c52f799e52d3683bd2a4c624f0f6adfe36015ec9`, ref
+`fix/schedule-pending-settlement-20261027`; [the original request receipt](test40374192059-request.json)
+remains a request-time snapshot. Its conclusion has not been observed here,
+so there is no current-source execution claim.

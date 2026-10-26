@@ -2,7 +2,7 @@ import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import { currentStoredTokenRevision } from '../../api/core'
 import { fetchPublishedArtifact, type PublishedArtifact, type ArtifactDocument } from '../../api/published-artifacts'
-import { artifactHtmlDocument } from './artifact-reader'
+import { artifactPreviewDocument } from '../../lib/artifact-app-frame'
 
 type Preview = { key: string; kind: 'ready'; document: ArtifactDocument }
   | { key: string; kind: 'error'; message: string }
@@ -34,7 +34,7 @@ export function ArtifactPreview({ artifact, authRevision, isCurrent }: {
     <figure class="m-0 border-t border-[var(--color-border-default)]">
       <iframe title=${`${artifact.title} 빠른 미리보기`} sandbox="" referrerPolicy="no-referrer" tabIndex=${-1}
         class="pointer-events-none h-64 w-full border-0 bg-white"
-        srcDoc=${artifactHtmlDocument(current.document.content, false)} />
+        srcDoc=${artifactPreviewDocument(current.document.content)} />
       <figcaption class="p-2 text-xs text-[var(--color-fg-muted)]">HTML · 이미지 포함 미리보기 · 전체 화면에서 상호작용할 수 있습니다.</figcaption>
     </figure>`
 }

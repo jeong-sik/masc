@@ -23,6 +23,7 @@ vi.mock('../../router', async () => {
 })
 vi.mock('../../api/core', () => ({
   get: vi.fn(), post: vi.fn(), currentStoredTokenRevision: vi.fn(() => 0),
+  subscribeStoredTokenChanges:vi.fn(()=>()=>{}),
   ApiRequestError: class extends Error { status = 404 },
 }))
 vi.mock('../../api/token-revision', async () => {
@@ -53,6 +54,8 @@ beforeEach(() => {
   vi.mocked(copyToClipboard).mockResolvedValue(true)
   route.value = { tab: 'workspace', params: { section: 'artifacts' }, postId: null }
   vi.mocked(get).mockImplementation(async path => {
+    if(path==='/health?full=1')return {paths:{effective_base_path:'/workspace',effective_masc_root:'/runtime'}}
+    if(path.startsWith('/api/v1/artifact-app-data/'))return {schema:'masc.artifact_app_data.v1',target:{artifact_id:secondId,revision:2},actor:'human',version:0,data:{},receipts:[]}
     if (path === '/api/v1/published-artifact-checks') return { checks: [], diagnostics: [] }
     if (path === '/api/v1/published-artifacts') return { artifacts: [first, second], diagnostics: [] }
     if (path.includes('?revision=1')) return { ...document, artifact: old, content: '# 이전 원본' }

@@ -8,15 +8,7 @@ import type { ArtifactCheckState } from '../../api/published-artifact-checks'
 import { ArtifactCheckControl, type ArtifactCheckOutcome } from './artifact-check-control'
 import { ArtifactSharedEditor, type ArtifactSharedCloseRequest } from './artifact-shared-editor'
 import { ArtifactComposer, type ArtifactPublicationOutcome, type ArtifactDraftRetention, type ArtifactDraftSnapshot } from './artifact-composer'
-
-// Opaque origin: no allow-same-origin. Keep the CSP first so the body cannot
-// load subresources before the policy applies. Scripts support self-contained
-// interactive reports; no dashboard token or frame messaging bridge is supplied.
-export function artifactHtmlDocument(source: string, interactive = true): string {
-  return '<!doctype html><meta charset="utf-8">'
-    + `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src ${interactive ? "'unsafe-inline'" : "'none'"}; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">`
-    + source
-}
+import { ArtifactAppView } from './artifact-app-view'
 
 function downloadSource(doc: ArtifactDocument): void {
   const { artifact, content } = doc
@@ -47,16 +39,18 @@ export function ArtifactReader({ doc, fixedRevision, readError, workspaceRoot, d
   const [editing, setEditing] = useState<{ document: ArtifactDocument; snapshot: ArtifactDraftSnapshot } | null>(null)
   const [sharing, setSharing] = useState<ArtifactDocument | null>(null)
   const sharedCloseRequest = useRef<ArtifactSharedCloseRequest | null>(null)
+  const appPending=useRef(false)
   const { artifact, content, revisions } = doc
   useLayoutEffect(() => {
     const element = dialog.current!
     element.showModal()
     return () => element.close()
   }, [])
-  const changeRevision = (revision: string) => navigate('workspace', {
+  const leaveApp=(action:()=>void)=>{if(!appPending.current||window.confirm('아직 저장하지 못한 앱 입력이 있습니다. 이 화면을 나갈까요?'))action()}
+  const changeRevision = (revision: string) => leaveApp(()=>navigate('workspace', {
     section: 'artifacts', artifact: artifact.id,
     ...(revision === 'latest' ? {} : { revision }),
-  })
+  }))
   const copyLink = async () => {
     const href = artifactHref(artifact.id, fixedRevision ? artifact.revision : undefined)
     const success = await copyToClipboard(new URL(href, window.location.href).href, dialog.current ?? undefined)
@@ -66,6 +60,7 @@ export function ArtifactReader({ doc, fixedRevision, readError, workspaceRoot, d
   const close = () => {
     if (editing && !discardDraft()) return
     if (sharing && sharedCloseRequest.current?.().kind !== 'close') return
+    if (appPending.current && !window.confirm('아직 저장하지 못한 앱 입력이 있습니다. 문서를 닫을까요?'))return
     if (editing) draftRetention.forget(editing.snapshot.identity)
     onClose()
   }
@@ -86,22 +81,22 @@ export function ArtifactReader({ doc, fixedRevision, readError, workspaceRoot, d
           <div class="flex flex-wrap gap-3 text-xs">
             <button type="button" aria-label="링크 복사" onClick=${copyLink}><span class="sm:hidden">복사</span><span class="hidden sm:inline">링크 복사</span></button>
             <button type="button" aria-label="원본 다운로드" onClick=${() => downloadSource(doc)}><span class="sm:hidden">저장</span><span class="hidden sm:inline">원본 다운로드</span></button>
-            <button type="button" aria-label="문서 편집" disabled=${editing !== null || sharing !== null} onClick=${() => {
+            <button type="button" aria-label="문서 편집" disabled=${editing !== null || sharing !== null} onClick=${() => leaveApp(() => {
               const snapshot: ArtifactDraftSnapshot = { identity: {}, base: { id: artifact.id, revision: artifact.revision }, value: {
                 title: artifact.title, summary: artifact.summary, format: artifact.format,
                 content, task_id: artifact.task_id, goal_id: artifact.goal_id,
               } }
               draftRetention.remember(snapshot)
               setEditing({ document: doc, snapshot })
-            }}>편집</button>
-            <button type="button" disabled=${editing !== null || sharing !== null} onClick=${() => setSharing(doc)}>공동 편집</button>
+            })}>편집</button>
+            <button type="button" disabled=${editing !== null || sharing !== null} onClick=${() => leaveApp(()=>setSharing(doc))}>공동 편집</button>
           </div>
         </div>
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div class="flex items-center gap-3" aria-label="본문 표시 방식">
             <span class="text-xs uppercase text-[var(--color-fg-muted)]">${artifact.format} · v${artifact.revision}</span>
             <button type="button" disabled=${editing !== null || sharing !== null} aria-pressed=${view === 'rendered'} onClick=${() => setView('rendered')}>미리보기</button>
-            <button type="button" disabled=${editing !== null || sharing !== null} aria-pressed=${view === 'source'} onClick=${() => setView('source')}>원본</button>
+            <button type="button" disabled=${editing !== null || sharing !== null} aria-pressed=${view === 'source'} onClick=${() => leaveApp(()=>setView('source'))}>원본</button>
             ${artifact.format === 'markdown' && view === 'rendered' ? html`
               <button type="button" aria-pressed=${width === 'wide'}
                 onClick=${() => setWidth(value => value === 'wide' ? 'reading' : 'wide')}>
@@ -143,8 +138,8 @@ export function ArtifactReader({ doc, fixedRevision, readError, workspaceRoot, d
           ? html`<pre tabIndex=${0} aria-label="문서 원본" class="m-0 flex-1 whitespace-pre-wrap break-words p-6 text-xs">${content}</pre>`
           : artifact.format === 'markdown'
             ? html`<div class=${`mx-auto w-full min-w-0 p-4 sm:p-8 ${width === 'reading' ? 'max-w-[90ch]' : ''}`}><${Markdown} text=${content} /></div>`
-            : html`<iframe title=${artifact.title} sandbox="allow-scripts" referrerPolicy="no-referrer"
-                class="min-h-0 w-full flex-1 border-0 bg-white" srcDoc=${artifactHtmlDocument(content)} />`}
+            : html`<${ArtifactAppView} key=${JSON.stringify([authRevision,workspaceRoot,artifact.id,artifact.revision,artifact.body._blob.sha256])}
+              doc=${doc} workspaceRoot=${workspaceRoot} authRevision=${authRevision} isCurrent=${isCurrent} onPending=${(pending:boolean)=>{appPending.current=pending}} />`}
       </div>
     </article>
     </dialog>

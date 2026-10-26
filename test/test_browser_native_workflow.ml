@@ -154,6 +154,9 @@ let observations () =
     "waitForTimeout",["milliseconds",`Int 0],`Null] in
   List.iter (fun (method_,arguments,receipt) ->
     let expected=request [step method_ arguments] in
+    check bool "an observation cannot claim a press selector preflight" true
+      (Result.is_error (R.decode expected (obj (result ~started:false ~completed_effect:false
+        ~completed:[] ~failure:(failure 0 "inputPreflight")))));
     let consumes_events=method_="events" in
     let row=obj ["index",`Int 0;"method",str method_;"receipt",receipt] in
     (match ok (R.decode expected (obj (snapshot @ result ~started:consumes_events ~completed_effect:consumes_events

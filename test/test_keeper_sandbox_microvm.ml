@@ -3814,6 +3814,156 @@ let test_failed_lifecycle_releases_its_keeper_and_inventory () =
     Lifecycle.with_keeper lifecycle ~keeper_name:"beta" (fun () -> ()))
 ;;
 
+let expect_scope_error label expected actual =
+  Alcotest.(check bool) label true (actual = Error expected)
+;;
+
+let test_borrowed_scope_rejects_wrong_owner_and_expired_use () =
+  let module Lifecycle = Masc.Keeper_microvm_lifecycle in
+  Eio_main.run (fun _ ->
+    let lifecycle = Lifecycle.create () in
+    let foreign = Lifecycle.create () in
+    let rejected_callback_ran = ref false in
+    let rejected () = rejected_callback_ran := true in
+    let scope = Lifecycle.with_keeper_scope lifecycle ~keeper_name:"Alpha" (fun scope ->
+      expect_scope_error "different coordinator cannot borrow" Lifecycle.Other_coordinator
+        (Lifecycle.with_borrowed_scope foreign ~scope ~keeper_name:"alpha" rejected);
+      expect_scope_error "different Keeper cannot borrow" Lifecycle.Other_keeper
+        (Lifecycle.with_borrowed_scope lifecycle ~scope ~keeper_name:"beta" rejected);
+      Alcotest.(check bool) "canonical case alias borrows" true
+        (Lifecycle.with_borrowed_scope lifecycle ~scope ~keeper_name:"alpha" (fun () -> ()) = Ok ());
+      scope) in
+    expect_scope_error "escaped scope cannot start a mutation" Lifecycle.Scope_closed
+      (Lifecycle.with_borrowed_scope lifecycle ~scope ~keeper_name:"Alpha" rejected);
+    Alcotest.(check bool) "rejected callbacks never run" false !rejected_callback_ran;
+    Lifecycle.with_inventory lifecycle (fun () -> ()))
+;;
+
+let test_borrow_drain_retains_keeper_and_inventory ~owner_raises () =
+  let module Lifecycle = Masc.Keeper_microvm_lifecycle in
+  Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
+    let lifecycle = Lifecycle.create () in
+    let scoped, publish_scope = Eio.Promise.create () in
+    let borrowed, mark_borrowed = Eio.Promise.create () in
+    let release, release_borrower = Eio.Promise.create () in
+    let returning, mark_returning = Eio.Promise.create () in
+    let owner_done, mark_owner_done = Eio.Promise.create () in
+    let inventory_done, mark_inventory_done = Eio.Promise.create () in
+    let borrow_finished = ref false in
+    let same_keeper_started = ref false in
+    let inventory_started = ref false in
+    let late_callback_ran = ref false in
+    Eio.Fiber.fork ~sw (fun () ->
+      let raised = try
+        Lifecycle.with_keeper_scope lifecycle ~keeper_name:"Alpha" (fun scope ->
+          Eio.Promise.resolve publish_scope scope;
+          Eio.Fiber.fork ~sw (fun () ->
+            match Lifecycle.with_borrowed_scope lifecycle ~scope ~keeper_name:"alpha" (fun () ->
+              Eio.Promise.resolve mark_borrowed ();
+              Eio.Promise.await release;
+              borrow_finished := true) with
+            | Ok () -> ()
+            | Error _ -> Alcotest.fail "live owner rejected its admitted borrower");
+          Eio.Promise.await borrowed;
+          Eio.Promise.resolve mark_returning ();
+          if owner_raises then raise Exit);
+        false
+      with Exit -> true in
+      Eio.Promise.resolve mark_owner_done raised);
+    Eio.Promise.await returning;
+    let scope = Eio.Promise.await scoped in
+    let closed_result = Lifecycle.with_borrowed_scope lifecycle ~scope ~keeper_name:"alpha"
+      (fun () -> late_callback_ran := true) in
+    Eio.Fiber.fork ~sw (fun () -> Lifecycle.with_keeper lifecycle ~keeper_name:"ALPHA" (fun () ->
+      same_keeper_started := true));
+    Eio.Fiber.fork ~sw (fun () -> Lifecycle.with_inventory lifecycle (fun () ->
+      inventory_started := true;
+      Eio.Promise.resolve mark_inventory_done !borrow_finished));
+    let premature_keeper = !same_keeper_started in
+    let premature_inventory = !inventory_started in
+    Eio.Promise.resolve release_borrower ();
+    let raised = Eio.Promise.await owner_done in
+    let inventory_saw_finished = Eio.Promise.await inventory_done in
+    expect_scope_error "closing rejects a new borrower" Lifecycle.Scope_closed closed_result;
+    Alcotest.(check bool) "closing callback did not run" false !late_callback_ran;
+    Alcotest.(check bool) "same Keeper waits for borrowed work" false premature_keeper;
+    Alcotest.(check bool) "inventory waits for borrowed work" false premature_inventory;
+    Alcotest.(check bool) "inventory sees completed borrowed work" true inventory_saw_finished;
+    Alcotest.(check bool) "owner exception propagates after drain" owner_raises raised;
+    Alcotest.(check bool) "same Keeper is eventually admitted" true !same_keeper_started))
+;;
+
+let test_failed_borrow_releases_without_poisoning_owner () =
+  let module Lifecycle = Masc.Keeper_microvm_lifecycle in
+  Eio_main.run (fun _ ->
+    let lifecycle = Lifecycle.create () in
+    Lifecycle.with_keeper_scope lifecycle ~keeper_name:"alpha" (fun scope ->
+      let raised = try
+        ignore (Lifecycle.with_borrowed_scope lifecycle ~scope ~keeper_name:"alpha" (fun () -> raise Exit));
+        false
+      with Exit -> true in
+      Alcotest.(check bool) "borrower exception propagates" true raised;
+      match Lifecycle.with_borrowed_scope lifecycle ~scope ~keeper_name:"alpha" (fun () -> ()) with
+      | Ok () -> ()
+      | Error _ -> Alcotest.fail "failed borrower poisoned the live owner");
+    Lifecycle.with_keeper lifecycle ~keeper_name:"alpha" (fun () -> ());
+    Lifecycle.with_inventory lifecycle (fun () -> ()))
+;;
+
+let test_cancelled_caller_cannot_admit_borrow () =
+  let module Lifecycle = Masc.Keeper_microvm_lifecycle in
+  Eio_main.run (fun _ ->
+    let lifecycle = Lifecycle.create () in
+    let callback_ran = ref false in
+    Lifecycle.with_keeper_scope lifecycle ~keeper_name:"alpha" (fun scope ->
+      let cancelled = try
+        Eio.Cancel.sub (fun context ->
+          Eio.Cancel.cancel context Exit;
+          ignore (Lifecycle.with_borrowed_scope lifecycle ~scope ~keeper_name:"alpha"
+            (fun () -> callback_ran := true)));
+        false
+      with Eio.Cancel.Cancelled _ -> true in
+      Alcotest.(check bool) "pre-admission cancellation propagates" true cancelled;
+      Alcotest.(check bool) "cancelled caller did not mutate" false !callback_ran);
+    Lifecycle.with_inventory lifecycle (fun () -> ()))
+;;
+
+let test_existing_scope_borrows_while_inventory_waits () =
+  let module Lifecycle = Masc.Keeper_microvm_lifecycle in
+  Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
+    let lifecycle = Lifecycle.create () in
+    let inventory_done, mark_inventory_done = Eio.Promise.create () in
+    let borrowed = ref false in
+    Lifecycle.with_keeper_scope lifecycle ~keeper_name:"alpha" (fun scope ->
+      Eio.Fiber.fork ~sw (fun () -> Lifecycle.with_inventory lifecycle (fun () ->
+        Eio.Promise.resolve mark_inventory_done !borrowed));
+      match Lifecycle.with_borrowed_scope lifecycle ~scope ~keeper_name:"alpha"
+        (fun () -> borrowed := true) with
+      | Ok () -> ()
+      | Error _ -> Alcotest.fail "waiting inventory blocked an already owned workflow");
+    Alcotest.(check bool) "inventory observes the completed owned workflow" true
+      (Eio.Promise.await inventory_done)))
+;;
+
+let test_admitted_borrow_is_cancellation_protected () =
+  let module Lifecycle = Masc.Keeper_microvm_lifecycle in
+  Eio_main.run (fun _ ->
+    let lifecycle = Lifecycle.create () in
+    let completed = ref false in
+    Lifecycle.with_keeper_scope lifecycle ~keeper_name:"alpha" (fun scope ->
+      (try Eio.Cancel.sub (fun context ->
+        ignore (Lifecycle.with_borrowed_scope lifecycle ~scope ~keeper_name:"alpha" (fun () ->
+          Eio.Cancel.cancel context Exit;
+          Eio.Fiber.yield ();
+          completed := true)))
+       with Eio.Cancel.Cancelled _ -> ());
+      Alcotest.(check bool) "admitted borrower finishes across cancellation and yield" true !completed;
+      match Lifecycle.with_borrowed_scope lifecycle ~scope ~keeper_name:"alpha" (fun () -> ()) with
+      | Ok () -> ()
+      | Error _ -> Alcotest.fail "cancellation stranded the live scope");
+    Lifecycle.with_inventory lifecycle (fun () -> ()))
+;;
+
 let () =
   Alcotest.run
     "keeper_sandbox_microvm"
@@ -3827,7 +3977,21 @@ let () =
         ; Alcotest.test_case "cancelled inventory wait reopens admission" `Quick
             test_cancelled_inventory_wait_reopens_keeper_admission
         ; Alcotest.test_case "failed lifecycle releases ownership" `Quick
-            test_failed_lifecycle_releases_its_keeper_and_inventory ])
+            test_failed_lifecycle_releases_its_keeper_and_inventory
+        ; Alcotest.test_case "borrowed scope rejects wrong and expired owners" `Quick
+            test_borrowed_scope_rejects_wrong_owner_and_expired_use
+        ; Alcotest.test_case "borrow drain retains Keeper and inventory ownership" `Quick
+            (test_borrow_drain_retains_keeper_and_inventory ~owner_raises:false)
+        ; Alcotest.test_case "owner failure drains before releasing ownership" `Quick
+            (test_borrow_drain_retains_keeper_and_inventory ~owner_raises:true)
+        ; Alcotest.test_case "failed borrower leaves owner usable" `Quick
+            test_failed_borrow_releases_without_poisoning_owner
+        ; Alcotest.test_case "cancelled caller cannot admit a borrow" `Quick
+            test_cancelled_caller_cannot_admit_borrow
+        ; Alcotest.test_case "existing scope borrows while inventory waits" `Quick
+            test_existing_scope_borrows_while_inventory_waits
+        ; Alcotest.test_case "admitted borrow is protected across cancellation" `Quick
+            test_admitted_borrow_is_cancellation_protected ])
     ; ( "argv"
       , [ Alcotest.test_case "omits flags container rejects" `Quick
             test_omits_flags_container_rejects

@@ -18,6 +18,13 @@ base_url = "https://b.invalid"
 request_path = "/v1/chat/completions"
 auth = "none"
 capabilities_base = "openai_chat"
+[[providers]]
+id = "ollama"
+kind = "ollama"
+base_url = "http://127.0.0.1:11434"
+request_path = "/api/chat"
+auth = "none"
+capabilities_base = "ollama"
 [[models]]
 model_id = "overlap"
 base = "openai_chat"
@@ -227,6 +234,28 @@ let projected_defaults () = with_catalog (fun () ->
               Alcotest.(check (list string)) "blank explicit pair cannot trigger catalog defaults"
                 [] (Provider_runtime_projection.default_execution_model_strings "fixture"))))))))
 
+let ollama_auto_uses_binding_endpoint () = with_catalog (fun () ->
+  let calls = ref [] in
+  let discover endpoint = calls := endpoint :: !calls; Some "qwen-local" in
+  let config = match Runtime_model_string.parse_model_string ~discover "ollama:auto" with
+    | Some config -> config | None -> Alcotest.fail "discovered Ollama model was refused" in
+  Alcotest.(check string) "auto resolves the model discovered for this binding"
+    "qwen-local" config.Provider_config.model_id;
+  Alcotest.(check (list string)) "discovery is scoped to the selected endpoint"
+    ["http://127.0.0.1:11434"] !calls)
+let ollama_auto_without_discovered_model_stays_refused () = with_catalog (fun () ->
+  let calls = ref [] in
+  let discover endpoint = calls := endpoint :: !calls; None in
+  Alcotest.(check bool) "missing discovered model does not invent a config" true
+    (Runtime_model_string.parse_model_string ~discover "ollama:auto" = None);
+  Alcotest.(check (list string)) "absence is checked only at the selected endpoint"
+    ["http://127.0.0.1:11434"] !calls)
+let declared_default_skips_discovery () = with_catalog (fun () ->
+  let discover _ = Alcotest.fail "declared default must not consult discovery" in
+  let config = match Runtime_model_string.parse_model_string ~discover "label-b:auto" with
+    | Some config -> config | None -> Alcotest.fail "declared default was refused" in
+  Alcotest.(check string) "declared default wins without discovery" "overlap" config.model_id)
+
 let () = Alcotest.run "runtime model label binding"
   ["provider authority",["identity",`Quick,identity;"context",`Quick,context;"policy and wire",`Quick,policy];
    "custom endpoint",["missing",`Quick,missing_endpoint;"ambient",`Quick,ambient_endpoint;
@@ -235,4 +264,7 @@ let () = Alcotest.run "runtime model label binding"
      "explicit",`Quick,explicit_endpoint];
    "catalog defaults",["missing default",`Quick,no_default;"declared default",`Quick,declared_default;
      "canonical alias",`Quick,alias_default;"supported is not default",`Quick,supported_is_not_default;
-     "projection",`Quick,projected_defaults]]
+     "projection",`Quick,projected_defaults];
+   "ollama auto",["endpoint discovery",`Quick,ollama_auto_uses_binding_endpoint;
+     "no discovered model",`Quick,ollama_auto_without_discovered_model_stays_refused;
+     "declared default skips discovery",`Quick,declared_default_skips_discovery]]

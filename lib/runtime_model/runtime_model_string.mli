@@ -9,12 +9,19 @@ val parse_model_string
   -> ?api_key_env_overrides:(string * string) list
   -> ?keep_alive:string
   -> ?num_ctx:int
+  -> ?discover:(string -> string option)
   -> string
   -> Llm_provider.Provider_config.t option
 (** Resolve a model label to a hot-path provider config. [None] when the
     provider is unknown/unavailable, the spec is malformed, a keyed binding
-    has no supplied credential, or [auto] has no catalog-declared default.
+    has no supplied credential, or [auto] has neither a catalog-declared
+    default nor an endpoint-scoped Ollama discovery result.
     Classification carries the selected binding into config construction.
+
+    [discover] is consulted only for an Ollama [auto] selection without a
+    declared default. It receives that binding's exact base URL, never a
+    different provider's endpoint. A declared default never triggers discovery.
+    The default is {!Llm_provider.Discovery.first_discovered_model_id_for_url}.
 
     A registered label carries the canonical binding provider id into the
     returned config. Its context window uses that config's provider/model

@@ -1,5 +1,7 @@
 (** Explicit model selector and custom endpoint parsing.
-    Catalog default resolution belongs to AGENT_CORE's selected binding. *)
+    Declared defaults belong to AGENT_CORE's selected binding. The caller may
+    supplement a defaultless Ollama [auto] with discovery scoped to that binding's
+    exact endpoint; no ambient endpoint or other provider's model is inferred. *)
 
 type model_selector =
   | Concrete of string

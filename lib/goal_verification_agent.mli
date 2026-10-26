@@ -37,10 +37,19 @@ val scan_skipped_log_prefix : string
     line count = skipped scan count). The same scan appends one
     {!Goal_verification_run_registry.Scan_skipped} row. *)
 
-val unreconciled_to_yojson : Goal_store.goal -> Yojson.Safe.t
-(** [null], or [{step; detail}] when the latest completed scan could not
-    settle this still-Verifying goal. Recomputed by every scan and never
-    stored, so it names the goals stuck in Verifying now. *)
+val unreconciled_to_yojson :
+  config:Workspace_utils_backend_setup.config ->
+  record:Goal_verification.record option -> Goal_store.goal -> Yojson.Safe.t
+(** [null], or [{step; detail}] for a still-Verifying Goal that the latest
+    scan could not settle or whose original read failed. Original failures
+    are observations bound to this workspace root, Goal criterion and exact
+    pending request; they are never permission to dispatch or retry. [record]
+    is the caller's already loaded authoritative row, or [None] when absent
+    or unavailable (the caller separately renders the ledger error). No ledger
+    or original is loaded here. Successful reads clear only their own
+    observation; a stale completion cannot clear a newer read's failure.
+    Historical publication failures after the Goal leaves Verifying are not
+    represented by this pending-request projection. *)
 
 module For_testing : sig
   val retry_pending : goal_id:string -> bool

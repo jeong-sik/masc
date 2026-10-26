@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "scope": "actual daemon queue drainage and current original-read diagnostics with controlled reviewers",
+  "baseline_selection": {
+    "workflow": "test.yml",
+    "suite": "test_goal_verification_agent",
+    "minimal": true
+  },
+  "candidate_selection": {
+    "workflow": "test.yml",
+    "suite": "test_goal_verification_agent,test_goal_verifier_worker,test_tui_decode",
+    "minimal": true
+  },
+  "suite_counts": {
+    "baseline": {
+      "test_goal_verification_agent": {
+        "passed": 39,
+        "failed": 2
+      }
+    },
+    "candidate": {
+      "test_goal_verification_agent": {
+        "passed": 42,
+        "failed": 0
+      },
+      "test_goal_verifier_worker": {
+        "passed": 20,
+        "failed": 0
+      },
+      "test_tui_decode": {
+        "passed": 378,
+        "failed": 0
+      }
+    }
+  },
+  "initial_compile_blocked_run": {
+    "run_id": 40202466750,
+    "source": "6307e600f3a0a6319eb7ea12c4ebc8f97fd8a11e",
+    "reason": "Unbound module Random_id before test execution"
+  },
+  "inputs": [
+    {
+      "path": "scripts/ci-run-targeted-tests.sh",
+      "candidate_sha256": "7391426895132a2c027aea2d6c85bfcae18a038fd4e9640cc3c0b9fa66a8ca72"
+    },
+    {
+      "path": ".github/workflows/test.yml",
+      "candidate_sha256": "6fb355583ed464aa653687f6882c72d936507654ff25fa6c67a795d02cf0d191"
+    },
+    {
+      "path": "test/deps/dune",
+      "candidate_sha256": "df652264bc356429342d883f05b03f456f3b4d6bb5f655c4510d0e813ebd8d33"
+    },
+    {
+      "path": "test/test_goal_verification_agent.ml",
+      "candidate_sha256": "2e31d7ceccf5437c749639beefa90e59f93a1843d5487a81e743e4d4ba7e99e4"
+    },
+    {
+      "path": "test/test_goal_verifier_worker.ml",
+      "candidate_sha256": "fd30be1fed532b28dd5eb8cacf52416ec57c034d803722ba40fafecdba1f530d"
+    },
+    {
+      "path": "test/test_tui_decode.ml",
+      "candidate_sha256": "54e315a72f456bb4668acefc33f82186d0b6533c0ff46ce107985d2b8a30d931"
+    }
+  ],
+  "receipts": [
+    {
+      "role": "baseline",
+      "run": {
+        "id": 40203843958,
+        "head_sha": "1aa3ad727dd009ebbe7fa21469e7dc256f36fdcd",
+        "head_branch": "test/goal-daemon-progress-20261025",
+        "status": "completed",
+        "conclusion": "failure",
+        "run_attempt": 1,
+        "created_at": "2026-10-25T14:46:55Z",
+        "updated_at": "2026-10-25T14:53:44Z",
+        "html_url": "https://github.com/jeong-sik/masc/actions/runs/40203843958",
+        "event": "workflow_dispatch",
+        "path": ".github/workflows/test.yml"
+      },
+      "job_id": 121200477013,
+      "job_url": "https://github.com/jeong-sik/masc/actions/runs/40203843958/job/121200477013",
+      "decoded_log_sha256": "16a51df90f63690df6bb5317247fec7ff47f5be48d90d785cf954c3e17c6b97e",
+      "observed_log_excerpt": [
+        "2026-10-25T14:51:40.0919213Z [targeted] test/test_goal_verification_agent: start 2026-10-25T14:51:40Z",
+        "2026-10-25T14:53:40.4572948Z FAIL healthy fifth Goal never published after four damaged originals released daemon capacity",
+        "2026-10-25T14:53:40.4594739Z FAIL the daemon never published the original-body failure notice",
+        "2026-10-25T14:53:40.4611854Z 2 failures! in 120.276s. 41 tests run.",
+        "2026-10-25T14:53:40.4653799Z [targeted] test/test_goal_verification_agent: FAIL exit 1 in 120s"
+      ]
+    },
+    {
+      "role": "candidate",
+      "run": {
+        "id": 40204323393,
+        "head_sha": "d6c6a4e9312bc77b276811e0289a3469725eccc9",
+        "head_branch": "fix/goal-original-failure-diagnostics-20261025",
+        "status": "completed",
+        "conclusion": "success",
+        "run_attempt": 1,
+        "created_at": "2026-10-25T14:53:07Z",
+        "updated_at": "2026-10-25T14:58:49Z",
+        "html_url": "https://github.com/jeong-sik/masc/actions/runs/40204323393",
+        "event": "workflow_dispatch",
+        "path": ".github/workflows/test.yml"
+      },
+      "job_id": 121201901763,
+      "job_url": "https://github.com/jeong-sik/masc/actions/runs/40204323393/job/121201901763",
+      "decoded_log_sha256": "f89028c3c2076d8e036bd73f94de62de53a253d0c18a3e6e1c9f72d62a7a0827",
+      "observed_log_excerpt": [
+        "2026-10-25T14:56:59.8854240Z [targeted] test/test_goal_verification_agent: start 2026-10-25T14:56:59Z",
+        "2026-10-25T14:57:00.1894709Z   [OK]          drain                               0   daemon drains healthy...",
+        "2026-10-25T14:57:12.6283355Z ASSERT successful original read clears its diagnostic before reviewer entry",
+        "2026-10-25T14:57:12.6285068Z ASSERT the current planning row is clear while the reviewer is running",
+        "2026-10-25T14:57:12.6631059Z ASSERT the repaired Goal reaches human confirmation",
+        "2026-10-25T14:57:12.6654878Z   [OK]          drain                               1   daemon announces an e...",
+        "2026-10-25T14:57:12.6827915Z ASSERT another workspace does not inherit the original failure",
+        "2026-10-25T14:57:12.6918982Z ASSERT same-criterion replacement does not inherit the old request's diagnostic",
+        "2026-10-25T14:57:12.7166962Z   [OK]          drain                               2   original failure proj...",
+        "2026-10-25T14:58:43.0349089Z Test Successful in 103.088s. 42 tests run.",
+        "2026-10-25T14:58:43.0423317Z [targeted] test/test_goal_verification_agent: OK in 104s",
+        "2026-10-25T14:58:43.0790266Z [targeted] test/test_goal_verifier_worker: start 2026-10-25T14:58:43Z",
+        "2026-10-25T14:58:44.7142930Z Test Successful in 1.538s. 20 tests run.",
+        "2026-10-25T14:58:44.7208557Z [targeted] test/test_goal_verifier_worker: OK in 1s",
+        "2026-10-25T14:58:44.7831374Z [targeted] test/test_tui_decode: start 2026-10-25T14:58:44Z",
+        "2026-10-25T14:58:44.8675504Z Test Successful in 0.019s. 378 tests run.",
+        "2026-10-25T14:58:44.8675907Z [targeted] test/test_tui_decode: OK in 0s"
+      ]
+    }
+  ],
+  "limitations": [
+    "controlled reviewers, not a real-model completion-rate comparison",
+    "actual server payload and TUI decoder, no installed visible display",
+    "duplicate Board notice check observes existing0.2-second idle window",
+    "new observation finish races source-reviewed, not all separately fault-injected",
+    "full regression, merge and installed runtime not executed"
+  ]
+}

@@ -632,16 +632,16 @@ let dashboard_planning_http_json ~(config : Workspace.config) : Yojson.Safe.t =
      "not verified yet". *)
   let records = Goal_verification.load_records_authoritative config in
   let goal_json (goal : Goal_store.goal) =
+    let record = match records with
+      | Error _ -> None
+      | Ok records -> List.find_opt
+          (fun (record : Goal_verification.record) -> String.equal record.goal_id goal.id)
+          records in
     let verification =
       match records with
       | Error detail -> Goal_verification.ledger_error_to_yojson detail
-      | Ok records ->
-        (match
-           List.find_opt
-             (fun (record : Goal_verification.record) ->
-               String.equal record.goal_id goal.id)
-             records
-         with
+      | Ok _ ->
+        (match record with
          | Some record -> record
          | None -> Goal_verification.default_record ~goal_id:goal.id)
         |> Goal_verification.record_to_yojson_for_goal ~goal
@@ -651,7 +651,8 @@ let dashboard_planning_http_json ~(config : Workspace.config) : Yojson.Safe.t =
       `Assoc
         (fields
          @ [ "verification", verification
-           ; "verifier_unreconciled", Goal_verification_agent.unreconciled_to_yojson goal
+           ; "verifier_unreconciled",
+             Goal_verification_agent.unreconciled_to_yojson ~config ~record goal
            ])
     | json -> json
   in

@@ -134,12 +134,13 @@ let verdict ~width tone headline reason =
       | Some reason -> wrapped ~width tone reason)
 
 (* The latest verifier scan could not settle this goal, so the judge's last
-   word is not what holds it: no judge model runs in either step, only goal
-   store and ledger reads and writes. The heading says which step failed;
+   word is not what holds it: no judge model runs in these steps, only
+   original, goal store and ledger access. The heading says which step failed;
    the store's reason wraps under it like a verdict's. *)
 let unreconciled_heading = function
   | Goal_reconcile_step.Reconcile_proof -> "verifier could not apply the committed proof"
   | Goal_reconcile_step.Rearm_proof -> "verifier could not re-arm the request"
+  | Goal_reconcile_step.Read_original -> "verifier could not read the retained request"
 
 (* [c] on a Verifying goal sends [request_complete] again, the explicit retry
    of RFC-0387 §5: under the goal lock it applies a committed proof or

@@ -147,10 +147,10 @@ let collect_pending config : (scan, scan_failure) result =
 (* Derived from the latest completed scan and replaced by the next one; never
    written to a store. A scan the goal store refused leaves it as it was,
    because that scan saw no goal to judge either way. *)
-let last_unreconciled : reconcile_failure list Atomic.t = Atomic.make []
+let last_unreconciled : (string * reconcile_failure list) option Atomic.t = Atomic.make None
 
-let publish_unreconciled failures =
-  Atomic.set last_unreconciled failures;
+let publish_unreconciled config failures =
+  Atomic.set last_unreconciled (Some (Workspace.masc_dir config, failures));
   List.iter
     (fun { failed_goal_id; step; failure } ->
        Log.Misc.error
@@ -159,23 +159,6 @@ let publish_unreconciled failures =
          failed_goal_id
          (Goal_store.write_error_to_string failure))
     failures
-;;
-
-let unreconciled_to_yojson (goal : Goal_store.goal) =
-  match
-    List.find_opt
-      (fun { failed_goal_id; _ } -> String.equal failed_goal_id goal.id)
-      (Atomic.get last_unreconciled)
-  with
-  | None -> `Null
-  (* The operator dropped or reopened it after that scan; the next scan will
-     not list it, and until then the old failure is not this goal's state. *)
-  | Some _ when goal.phase <> Goal_phase.Verifying -> `Null
-  | Some { step; failure; _ } ->
-    `Assoc
-      [ "step", `String (Goal_reconcile_step.to_string step)
-      ; "detail", `String (Goal_store.write_error_to_string failure)
-      ]
 ;;
 
 (* RFC-0444 §2.3 row 7 and criterion 3: one WARN line per skipped scan, and
@@ -212,9 +195,96 @@ let owner_store config = Lane_addon_store.create
 let worker_detail = function
   | Worker.Store_unavailable detail | Original_invalid detail | Authority_changed detail
   | Execution_pending detail -> detail
+
+type original_read_binding = {
+  root : string;
+  goal_id : string;
+  request_id : string;
+  criterion : Goal_store.criterion;
+}
+
+(* A read owns this exact immutable observation object. A newer read replaces
+   it, so a late result cannot clear or overwrite the newer observation. None
+   means no failure has yet been observed for the in-flight read. This is
+   display evidence only; the durable original and Goal ledger own all work. *)
+type original_read_observation = {
+  binding : original_read_binding;
+  failure : Worker.error option;
+}
+
+let original_read_observations : original_read_observation list Atomic.t = Atomic.make []
+
+let same_original_goal left right =
+  String.equal left.root right.root && String.equal left.goal_id right.goal_id
+
+let same_original_binding left right =
+  same_original_goal left right
+  && String.equal left.request_id right.request_id
+  && Goal_store.criterion_equal left.criterion right.criterion
+
+let begin_original_read binding =
+  let rec replace () =
+    let current = Atomic.get original_read_observations in
+    let failure = match List.find_opt (fun observed -> same_original_binding observed.binding binding) current with
+      | Some observed -> observed.failure
+      | None -> None in
+    let observed = {binding; failure} in
+    let next = observed :: List.filter (fun previous -> not (same_original_goal previous.binding binding)) current in
+    if Atomic.compare_and_set original_read_observations current next then observed else replace ()
+  in replace ()
+
+let finish_original_read observed failure =
+  let rec replace () =
+    let current = Atomic.get original_read_observations in
+    if not (List.exists (fun candidate -> candidate == observed) current) then false
+    else
+      let next = List.filter_map (fun candidate ->
+        if candidate == observed then Option.map (fun failure -> {observed with failure=Some failure}) failure
+        else Some candidate) current in
+      if Atomic.compare_and_set original_read_observations current next then true else replace ()
+  in replace ()
+
+let abandon_original_read observed =
+  (* Cancellation/exception is not a successful original read. Preserve a
+     previously observed failure, if any, rather than clearing it as repaired. *)
+  ignore (finish_original_read observed observed.failure)
+
+let retire_original_reads observations =
+  let rec replace () =
+    let current = Atomic.get original_read_observations in
+    let next = List.filter (fun candidate ->
+      not (List.exists (fun observed -> candidate == observed) observations)) current in
+    if not (Atomic.compare_and_set original_read_observations current next) then replace ()
+  in replace ()
+
+let unreconciled_to_yojson ~config ~record (goal : Goal_store.goal) =
+  let render step detail = `Assoc [
+    "step", `String (Goal_reconcile_step.to_string step); "detail", `String detail] in
+  if goal.phase <> Goal_phase.Verifying then `Null
+  else
+    let root = Workspace.masc_dir config in
+    let reconciliation = match Atomic.get last_unreconciled with
+      | Some (observed_root, failures) when String.equal root observed_root ->
+        List.find_opt (fun failure -> String.equal failure.failed_goal_id goal.id) failures
+      | Some _ | None -> None in
+    match reconciliation with
+    | Some {step; failure; _} -> render step (Goal_store.write_error_to_string failure)
+    | None ->
+      match record with
+      | Some {Goal_verification.goal_id; completion=Proof_pending pending; _}
+        when String.equal goal_id goal.id
+          && Goal_store.criterion_equal pending.criterion (Goal_store.criterion_of_goal goal) ->
+        let binding = {root; goal_id; request_id=pending.request_id; criterion=pending.criterion} in
+        (match List.find_opt (fun observed -> same_original_binding observed.binding binding)
+           (Atomic.get original_read_observations) with
+         | Some {failure=Some error; _} -> render Goal_reconcile_step.Read_original (worker_detail error)
+         | Some {failure=None; _} | None -> `Null)
+      | Some {completion=(Completion_idle | Proof_pending _ | Proof_proven _ | Proof_refuted _ | Human_confirmed _); _}
+      | None -> `Null
+
 let originals_for_goal store ~goal_id = Worker.inventory_for_goal ~store ~goal_id
   ~installation_id:Worker.host_installation_id
-  ~package_id:Worker.host_package_id |> Result.map_error worker_detail
+  ~package_id:Worker.host_package_id
 let reload_original store retained =
   let original = Worker.original retained in
   let subject = Original.subject original in
@@ -277,6 +347,33 @@ let announce_deferral ~goal_id ~request_id ~disposition deferral =
 let bind_review = Goal_verification.bind_review
 ;;
 
+let original_read_binding config ~goal_id =
+  match bind_review config ~goal_id with
+  | Ok (_, (request_id, criterion, _)) ->
+    Some {root=Workspace.masc_dir config; goal_id; request_id; criterion}
+  | Error _ -> None
+
+let observe_original_read config ~goal_id read =
+  let observed = Option.map begin_original_read (original_read_binding config ~goal_id) in
+  Fun.protect ~finally:(fun () -> Option.iter abandon_original_read observed) (fun () ->
+    match read () with
+    | Ok _ as result ->
+      Option.iter (fun observed -> ignore (finish_original_read observed None)) observed;
+      result
+    | Error error as result ->
+      Option.iter (fun observed ->
+        (* Keep the failure even if the binding cannot be reread. Unknown
+           authority is not a successful original read. Projection checks the
+           current binding; only its Board notification needs this reread. *)
+        if finish_original_read observed (Some error) then
+          match original_read_binding config ~goal_id with
+          | Some current when same_original_binding observed.binding current ->
+            announce_deferral ~goal_id ~request_id:current.request_id
+              ~disposition:Verification_protocol.No_retry_armed
+              (Proof_lookup_unavailable {detail=worker_detail error})
+          | Some _ | None -> ()) observed;
+      result)
+
 (* A review that raised stalls the request the way a deferral does, under the
    gate the Task verifier uses for the same event. Nothing arms a retry: the
    scheduling owner isolates the exception and the Goal waits in Verifying for
@@ -308,7 +405,7 @@ let announce_raised ~config ~goal_id ~request_id ~evaluator_runtime ~detail =
 let new_run () : Worker.run_identity =
   {run_id=Random_id.uuid_v7 (); started_at=Time_compat.now ()}
 
-let retained_recovery_work config work =
+let retained_recovery_work config (work : pending_work list) =
   let store = owner_store config in
   match Worker.inventory_by_goal ~store ~installation_id:Worker.host_installation_id
     ~package_id:Worker.host_package_id with
@@ -318,25 +415,25 @@ let retained_recovery_work config work =
     Log.Misc.error "goal verifier original metadata unavailable: %s" (worker_detail error);
     work
   | Ok goals ->
-    List.fold_left (fun work (goal_id,originals) ->
+    List.fold_left (fun (work : pending_work list) (goal_id,originals) ->
       match originals with
       | Error error ->
         Log.Misc.error "goal verifier original unavailable goal_id=%s: %s"
           goal_id (worker_detail error);
-        (* The read failed but the Goal still owns its recovery: keep it in
-           the work list so process_pending_work defers it with a retryable
-           per-Goal Proof_lookup_unavailable outcome instead of dropping it. *)
-        if not (List.exists (fun item -> item.goal_id=goal_id) work)
+        (* Keep the owned recovery discoverable. Processing returns a per-Goal
+           Proof_lookup_unavailable deferral; this does not arm a retry or
+           create a pending-request diagnostic for a phase-moved Goal. *)
+        if not (List.exists (fun (item : pending_work) -> item.goal_id=goal_id) work)
         then work @ [{goal_id}] else work
       | Ok rows ->
-        List.fold_left (fun work retained ->
+        List.fold_left (fun (work : pending_work list) retained ->
           let needed = match Host.needs_recovery ~registry:(Registry.global ()) retained with
             | Ok needed -> needed
             | Error error ->
               Log.Misc.error "goal verifier retained observation unavailable goal_id=%s: %s"
                 goal_id (Host.error_to_string error);
               true in
-          if needed && not (List.exists (fun item -> item.goal_id=goal_id) work)
+          if needed && not (List.exists (fun (item : pending_work) -> item.goal_id=goal_id) work)
           then work @ [{goal_id}] else work) work rows) work goals
 ;;
 
@@ -482,8 +579,9 @@ let process_pending_work ?(sw : Eio.Switch.t option = None)
         Ok outcome in
       (match operation () with Ok outcome -> outcome | Error detail -> fail_original detail) in
   try
-    match originals_for_goal store ~goal_id:work.goal_id with
-    | Error detail -> fail_original detail
+    match observe_original_read config ~goal_id:work.goal_id
+      (fun () -> originals_for_goal store ~goal_id:work.goal_id) with
+    | Error error -> fail_original (worker_detail error)
     | Ok rows ->
       let recovered, failure = recover rows in
       (match failure with
@@ -522,12 +620,11 @@ let drain_once ?(sw : Eio.Switch.t option = None) config : (unit, scan_failure) 
     skip_scan unavailable;
     error
   | Ok { collected; unreconciled } ->
-    publish_unreconciled unreconciled;
+    publish_unreconciled config unreconciled;
     List.iter
       (fun item ->
          (* RFC-0387: per-row outcomes are logged at the point of decision
             (commit/defer); the synchronous drain discards them. *)
-         (* fire-and-forget: per-row results are durable in the ledger. *)
          ignore (process_pending_work ~sw config item))
       (retained_recovery_work config collected);
     Ok ()
@@ -750,7 +847,7 @@ let discover_pending (runtime : runtime) =
   match collect_pending runtime.config with
   | Error (Scan_skipped unavailable) -> skip_scan unavailable
   | Ok { collected = work; unreconciled } ->
-    publish_unreconciled unreconciled;
+    publish_unreconciled runtime.config unreconciled;
     let work = retained_recovery_work runtime.config work in
     Eio.Switch.check runtime.sw;
     enqueue_pending runtime work
@@ -883,11 +980,18 @@ let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
     in
     install_callback runtime;
     Eio.Switch.on_release sw (fun () ->
+      let reconciliation = Atomic.get last_unreconciled in
+      let originals = Atomic.get original_read_observations
+        |> List.filter (fun observed -> String.equal observed.binding.root (Workspace.masc_dir config)) in
       if Atomic.compare_and_set active_runtime owner None
       then (
         (* No scan runs after this, so its last list would read as current. *)
         Atomic.set runtime.scheduling {ready=[]; in_flight=[]};
-        Atomic.set last_unreconciled [];
+        (match reconciliation with
+         | Some (root, _) when String.equal root (Workspace.masc_dir config) ->
+           ignore (Atomic.compare_and_set last_unreconciled reconciliation None)
+         | Some _ | None -> ());
+        retire_original_reads originals;
         Atomic.set
           Workspace_hooks.goal_verification_pending_fn
           previous_pending_hook;

@@ -111,15 +111,15 @@ val try_with_durable_lock_observed :
 (** {!with_durable_lock_observed} for a caller that must not wait: one
     attempt at each layer, and [Lock_held_elsewhere] when either is held. *)
 
-val with_liveness_lock_observed :
-  lock_path:string -> (unit -> 'a) -> 'a durable_lock_observation
-(** Hold an existing stable private lock inode while a cancellable owner runs.
-    One nonwaiting acquisition: a conflicting owner returns [Lock_not_acquired].
-    Only acquisition/descriptor release are cancellation-protected. The body
-    stays cancellable, and its original exception survives cleanup errors.
-    Uses open-file-description [flock], independently of POSIX record locks.
-    The caller supplies a canonical path in a host-private directory and never
-    replaces/unlinks the lease inode. Missing authority is never created. *)
+val acquire_liveness_lock :
+  sw:Eio.Switch.t -> lock_path:string -> (unit, durable_lock_error) result
+(** Hold an existing stable private lease inode until [sw]'s release hooks run,
+    after all children and their protected settlement have drained. Acquisition
+    through release registration is cancellation-protected; registration failure
+    closes the descriptor and preserves the original exception. A conflicting
+    owner returns an acquisition error without waiting. The switch owns the
+    opaque descriptor, with idempotent close and no early-release operation.
+    Missing authority is never created or replaced. *)
 
 val try_with_liveness_lock_observed :
   lock_path:string -> (unit -> 'a) -> 'a durable_lock_attempt

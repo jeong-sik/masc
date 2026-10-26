@@ -645,9 +645,32 @@ let try_with_liveness_lock_observed ~lock_path f =
         (durable_lock_error_to_string error);
       Printexc.raise_with_backtrace exn backtrace
 
-let with_liveness_lock_observed ~lock_path f =
-  match try_with_liveness_lock_observed ~lock_path f with
-  | Lock_attempted result -> result
-  | Lock_held_elsewhere -> Lock_not_acquired
-      (durable_lock_error ~lock_path ~phase:Acquire_process_lock
+let acquire_liveness_lock ~sw ~lock_path =
+  Eio.Cancel.protect (fun () ->
+    Eio.Switch.check sw;
+    let acquired =
+      try Ok (run_blocking_lock_op (fun () -> try_open_liveness_raw lock_path)) with
+      | Unix.Unix_error (error, operation, argument) ->
+        Error (durable_lock_error ~lock_path ~phase:Open_lock_file
+          (unix_failure (error, operation, argument))) in
+    match acquired with
+    | Error error -> Error error
+    | Ok None -> Error (durable_lock_error ~lock_path ~phase:Acquire_process_lock
         (unix_failure (Unix.EAGAIN, "flock", lock_path)))
+    | Ok (Some fd) ->
+      let descriptor = Atomic.make (Some fd) in
+      let release () =
+        match Atomic.exchange descriptor None with
+        | None -> ()
+        | Some fd ->
+          (match close_fd_result fd with
+           | Ok () -> ()
+           | Error cause -> Log.Misc.error "liveness lock release failed: %s"
+               (durable_lock_error_to_string
+                 (durable_lock_error ~lock_path ~phase:Release_process_lock cause))) in
+      match Eio.Switch.on_release sw release with
+      | () -> Ok ()
+      | exception exn ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        release ();
+        Printexc.raise_with_backtrace exn backtrace)

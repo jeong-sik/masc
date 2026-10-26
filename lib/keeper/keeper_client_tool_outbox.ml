@@ -48,21 +48,8 @@ let host_producer ~base_path ~keeper_name ~runtime_label ~turn_count =
 let start_host_producer ~sw ~base_path ~keeper_name ~runtime_label ~turn_count =
   Eio.Switch.check sw;
   let* producer = host_producer ~base_path ~keeper_name ~runtime_label ~turn_count in
-  let ready, resolve = Eio.Promise.create () in
-  Eio.Switch.check sw;
-  Eio.Fiber.fork_daemon ~sw (fun () ->
-    Eio.Fiber.yield ();
-    match File_lock_eio.with_liveness_lock_observed ~lock_path:producer.lease_path
-        (fun () -> Eio.Promise.resolve resolve (Ok ()); Eio.Fiber.await_cancel ()) with
-    | File_lock_eio.Lock_not_acquired error ->
-      Eio.Promise.resolve resolve (Error (File_lock_eio.durable_lock_error_to_string error));
-      `Stop_daemon
-    | File_lock_eio.Body_completed {release_error; _} ->
-      Option.iter (fun error -> Log.Keeper.warn ~keeper_name
-        "tool result producer lease release failed: %s"
-        (File_lock_eio.durable_lock_error_to_string error)) release_error;
-      `Stop_daemon);
-  let* () = Eio.Promise.await ready in
+  let* () = File_lock_eio.acquire_liveness_lock ~sw ~lock_path:producer.lease_path
+    |> Result.map_error File_lock_eio.durable_lock_error_to_string in
   Ok producer
 
 let to_json (result : receipt) =

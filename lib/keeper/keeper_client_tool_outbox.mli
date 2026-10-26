@@ -29,7 +29,8 @@ val start_host_producer :
   sw:Eio.Switch.t -> base_path:string -> keeper_name:string ->
   runtime_label:string -> turn_count:int -> (host_producer, string) result
 (** Bind this producer to its real runtime switch. An existing private lease
-    inode is held by a cancellable daemon until the switch finishes draining.
+    inode stays held through child/worker drain and is closed by the switch
+    release hook.
     [load] skips its results while that exact kernel lease is held, including
     from another process. Crash/exit releases the lease without PID guessing,
     TTL or replay. Lease files are retained stable and never enumerated as

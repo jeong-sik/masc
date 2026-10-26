@@ -40,6 +40,8 @@ let test_unsupported_protocol_version_body_shape () =
     C.unsupported_protocol_version_body ~requested:"1900-01-01"
       ~supported:[ "2026-07-28"; "2025-11-25" ]
   in
+  check bool "version rejection before reading the id is an HTTP error" true
+    (C.is_http_error_response (Yojson.Safe.from_string body));
   let fields =
     match Yojson.Safe.from_string body with
     | `Assoc fields -> fields
@@ -159,6 +161,8 @@ let test_sse_register_error_body_uses_jsonrpc_invalid_request () =
     C.jsonrpc_error_body C.Invalid_request ~message:"unknown session stale-mcp"
     |> Yojson.Safe.from_string
   in
+  check bool "invalid request envelope is an HTTP error" true
+    (C.is_http_error_response body);
   check string "jsonrpc" "2.0" (body |> member "jsonrpc" |> to_string);
   check string "id is null" "null" (body |> member "id" |> Yojson.Safe.to_string);
   let error = body |> member "error" in
@@ -212,6 +216,8 @@ let test_error_body_with_id_echoes_the_request_id () =
     C.jsonrpc_error_body_with_id C.Header_mismatch ~id:(`Int 42)
       ~message:"Mcp-Method header value does not match body method"
   in
+  check bool "a rejection answering a readable id is not a null-id error" false
+    (C.is_http_error_response (Yojson.Safe.from_string body));
   Alcotest.(check string)
     "the id the caller read comes back"
     "42"

@@ -3,30 +3,6 @@ module Http_negotiation = Mcp_transport_protocol.Http_negotiation
 
 type deps = Server_mcp_transport_http_types.deps
 
-let is_http_error_response = function
-  | `Assoc fields ->
-      let id_is_null =
-        match List.assoc_opt "id" fields with
-        | Some `Null -> true
-        | _ -> false
-      in
-      let code =
-        match List.assoc_opt "error" fields with
-        | Some (`Assoc err_fields) -> (
-            match List.assoc_opt "code" err_fields with
-            | Some (`Int c) -> Some c
-            | _ -> None)
-        | _ -> None
-      in
-      id_is_null
-      && (match code with
-          | Some c ->
-              (match Mcp_error_code.of_wire_code c with
-               | Some ec -> Mcp_error_code.allows_null_request_id ec
-               | None -> false)
-          | None -> false)
-  | _ -> false
-
 let env_flag name =
   match Sys.getenv_opt name with
   | Some raw -> (

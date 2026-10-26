@@ -89,8 +89,6 @@ let validate_session_known ~session_was_provided ~is_known body_str =
 
 let protocol_version_from_body = Mcp_transport_protocol.protocol_version_from_body
 
-let is_http_error_response = Server_mcp_transport_http_headers.is_http_error_response
-
 let request_force_json_response =
   Server_mcp_transport_http_headers.request_force_json_response
 

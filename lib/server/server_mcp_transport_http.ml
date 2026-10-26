@@ -554,7 +554,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                       Httpun.Response.create ~headers `Accepted
                                     in
                                     safe_respond_with_string reqd response ""
-                                | json when is_http_error_response json ->
+                                | json when Mcp_error_code.is_http_error_response json ->
                                     let body = Yojson.Safe.to_string json in
                                     let headers =
                                       timed_headers
@@ -598,7 +598,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                       Httpun.Response.create ~headers `Accepted
                                     in
                                     safe_respond_with_string reqd response ""
-                                | json when is_http_error_response json ->
+                                | json when Mcp_error_code.is_http_error_response json ->
                                     let body = Yojson.Safe.to_string json in
                                     let headers =
                                       timed_headers

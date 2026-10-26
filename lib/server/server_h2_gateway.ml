@@ -806,7 +806,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                                    | `Null ->
                                        h2_respond_empty h2_reqd ~status:`Accepted
                                          ~extra_headers:mcp_hdrs
-                                   | json when is_http_error_response json ->
+                                   | json when Mcp_error_code.is_http_error_response json ->
                                        h2_respond_json_value h2_reqd json ~status:`Bad_request
                                          ~extra_headers:mcp_hdrs
                                    | json ->

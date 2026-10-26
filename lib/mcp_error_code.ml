@@ -98,6 +98,30 @@ let allows_null_request_id : t -> bool = function
   | Quiet _ -> false
 ;;
 
+let is_http_error_response = function
+  | `Assoc fields ->
+      let id_is_null =
+        match List.assoc_opt "id" fields with
+        | Some `Null -> true
+        | _ -> false
+      in
+      let code =
+        match List.assoc_opt "error" fields with
+        | Some (`Assoc err_fields) ->
+            (match List.assoc_opt "code" err_fields with
+             | Some (`Int c) -> Some c
+             | _ -> None)
+        | _ -> None
+      in
+      id_is_null
+      && (match code with
+          | Some c ->
+              (match of_wire_code c with
+               | Some ec -> allows_null_request_id ec
+               | None -> false)
+          | None -> false)
+  | _ -> false
+
 let to_http_status : t -> Httpun.Status.t = function
   | Parse_error -> `Bad_request
   | Invalid_request -> `Bad_request

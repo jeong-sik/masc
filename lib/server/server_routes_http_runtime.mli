@@ -43,15 +43,6 @@ val json_rpc_error : Mcp_error_code.t -> string -> string
     Message is `String.escaped`-quoted; callers must not pre-
     escape. *)
 
-val is_http_error_response : Yojson.Safe.t -> bool
-(** [is_http_error_response json] returns [true] when [json] is
-    a JSON-RPC 2.0 response with [id = null] AND [error.code]
-    is {!Mcp_error_code.Parse_error} or {!Mcp_error_code.Invalid_request}.
-    Mirrors the predicate in
-    {!Server_mcp_transport_http_headers}; duplicated here
-    because the route layer needs it before the transport
-    headers module is reachable. *)
-
 (** {1 Server uptime} *)
 
 val server_start_time : float

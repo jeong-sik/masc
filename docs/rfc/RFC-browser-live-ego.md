@@ -283,5 +283,32 @@ It does not establish visible UI, user completion or permission for later input.
 The private operator view shows the last cached SDK observation without browser
 I/O. Hand-off, takeover, control waits and failed metadata refreshes invalidate
 that cache. Ordinary connection identity remains the attachment name and fixed
-ID; refreshed native names are separate observations. General connection/TUI
-ownership rendering and actual installed Keeper/UI proof remain follow-up work.
+ID; refreshed native names are separate observations. The ordinary Add-on
+connection row also carries `spaceObservation` (or explicit null) for that exact client and numeric Space. The host validates this field
+before passing the row through. Dashboard connection lists and selected events
+show the raw native value and its own observation time, including retained rows;
+null stays unknown. Refreshing the row reads the cache only; explicit
+`space_status` refreshes the SDK observation. This display does not change
+control or establish current ownership, window visibility or login. TUI ownership
+rendering and actual installed Keeper/UI proof remain follow-up work.
+
+### Explicit native completion
+
+`page.act` action `finish_space` requires the observed live client ID. It calls
+`TaskSpace.finish({keep})` with `keepPages` (distinct permanent labels; default
+empty). Use it once after task success, never for error or user control. The
+response preserves the validated native receipt, including actual closure,
+retained/closed labels and protected unmanaged-tab count. Every former Page label
+ends, including retained Pages; subsequent Page/control work on this peer is
+refused. Only metadata-only `space_status`, browser info and cached completion
+readback remain available. An identical confirmed request returns its cached
+receipt without replay. Lost, invalid or cancelled completion remains uncertain
+and cannot be retried on this peer. A pre-effect refusal/unstarted process permits
+an explicit later attempt. This process-local state does not provide durable
+cross-worker completion reconciliation.
+
+Worker retirement only stops the SDK session. A confirmed closed Space with
+successful upload cleanup permits broker file cleanup; active, delegated,
+retained or uncertain Spaces preserve files and return unconfirmed cleanup.
+Retained files currently require operator-owned reconciliation; there is no
+cross-worker lease reclamation. Automatic Goal completion is not wired here.

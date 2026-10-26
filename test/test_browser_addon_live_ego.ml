@@ -299,7 +299,9 @@ def run(script,answer):
         paths=[pathlib.Path(path) for path in args['paths']]
         (root/'uploaded').write_text(json.dumps([str(path) for path in paths]))
         answer({'error':None,'dialog':None,'tab':{'url':'https://fixture.test/','title':'Fixture'}})
-    elif step=='space.finish':answer(None)
+    elif step=='space.status':answer({'spaceId':51,'name':'Renamed native Space','ownership':'agent'})
+    elif step=='space.finish':answer({'spaceId':51,'closedSpace':True,'keptManagedLabels':[],
+        'closedManagedLabels':['p1','p2'],'preservedUnmanagedCount':0})
     else:answer(error='unexpected step '+step)
 for raw in stream:
     command=json.loads(raw);out=[]
@@ -352,6 +354,17 @@ let scenario mode =
         check bool "native Page context reaches the owned live client" true
           (Yojson.Safe.Util.member "egoPage" tab = `Assoc ["label",`String "p1";
             "targetId",`String "T1";"openedBy",`String "agent"]);
+        let published_space_observation () =
+          let value=match dispatch W.Snapshot with
+            | W.Snapshot_result value -> value
+            | W.Receipt|W.Issue_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Service_refusal _ ->
+                fail "expected worker observation" in
+          let published=ok (Masc.Browser_addon_observation.decode_snapshot value) in
+          match published.client_rows with
+          | [row] -> Yojson.Safe.Util.member "spaceObservation" row
+          | _ -> fail "expected original live client" in
+        check string "attachment SDK ownership is in the ordinary worker snapshot" "agent"
+          Yojson.Safe.Util.(published_space_observation () |> member "ownership" |> to_string);
         let finished () = List.mem "space.finish" (lines (Filename.concat root "steps")) in
         let clock = Eio.Stdenv.clock env in
         if mode = "late" then (
@@ -435,8 +448,18 @@ let scenario mode =
            | W.Issue_result (Error (B.Transport_unsupported _)) -> true
            | W.Issue_result (Ok _ | Error _) | Snapshot_result _ | Model_reply _|Extension_reply _ | Download_reply _
            | Poll_result _ | Receipt | Service_refusal _ -> false);
-        check bool "retirement ends the task space" true (dispatch W.Retire = W.Receipt);
-        check bool "retirement answers after the space ended" true (finished ());
+        ignore (answered (issue (B.Page_act (B.Action.Control B.Action.Space_status))));
+        check string "explicit refresh reaches ordinary connection observations" "Renamed native Space"
+          Yojson.Safe.Util.(published_space_observation () |> member "spaceName" |> to_string);
+        if mode="retained" then (
+          check bool "retirement reports unconfirmed file cleanup" true (retirement_unconfirmed ());
+          check bool "transport retirement never finishes the task" false (finished ()))
+        else (
+          let completed=answered (issue (B.Page_act (B.Action.Control (B.Action.Finish_space [])))) in
+          check bool "explicit completion observes native Space closure" true
+            Yojson.Safe.Util.(completed |> member "data" |> member "nativeReceipt" |> member "closedSpace" |> to_bool);
+          check bool "explicit completion ran" true (finished ());
+          check bool "retirement cleans a confirmed closed Space" true (dispatch W.Retire = W.Receipt));
         check bool "no client is left" true (B.connected_clients () = [])) in
       let failure = try Ego.run ~env ~owner ~downloads:(Broker.downloads_directory ~directory:root) {command; space=Browser_configuration.Named_space "masc"} work; None with
         | Invalid_argument detail | Sys_error detail -> Some detail in

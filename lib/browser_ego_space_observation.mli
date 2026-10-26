@@ -5,3 +5,6 @@ val of_sdk : expected_id:int -> observed_at:float -> Yojson.Safe.t -> (t, string
 (** Requires exactly the native spaceId/name/ownership fields and the original
     numeric ID. Unknown native ownership strings remain data, not decisions. *)
 val to_json : t -> Yojson.Safe.t
+val of_json : expected_id:int -> Yojson.Safe.t -> (t, string) result
+(** Decode a dated worker publication, bound to the original numeric Space.
+    Native ownership remains opaque display data, never control authority. *)

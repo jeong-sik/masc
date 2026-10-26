@@ -3,6 +3,11 @@
 val of_snapshot : observed_at:float -> Yojson.Safe.t ->
   (Lane_addon_types.output, string) result
 
+val publish_client : Browser_lane.client_info ->
+  space_observation:Browser_ego_space_observation.t option -> Yojson.Safe.t
+(** Add the cached SDK observation to the ordinary connection/activity row.
+    No SDK calls. Foreign Space IDs and non-Ego connections publish [null]. *)
+
 (** What a serving browser worker published: its connected clients and
     whether its automation and Stagehand backends are registered. *)
 type published = {

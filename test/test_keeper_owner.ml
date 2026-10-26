@@ -5871,7 +5871,7 @@ let test_scheduled_source_handoff case () =
   let execute ~sw:_ ~keeper_name:_ ~claim =
     let owner = Eio.Promise.await owner_p in
     let operation = Option.get (owner_ok (claim ())) in
-    if Chat_operation.Operation_id.equal operation.operation_id first then (
+    if Chat_operation.Operation_id.equal operation.Chat_operation.operation_id first then (
       incr attempts;
       if !attempts = 1 then (
         record "chat";
@@ -5898,7 +5898,7 @@ let test_scheduled_source_handoff case () =
       else (record "resumed"; Owner.Operation_succeeded { outcome_ref = "resumed" }))
     else (
       check bool "fresh chat retains its original identity" true
-        (Chat_operation.Operation_id.equal operation.operation_id next);
+        (Chat_operation.Operation_id.equal operation.Chat_operation.operation_id next);
       record "fresh";
       Owner.Operation_succeeded { outcome_ref = "fresh" })
   in

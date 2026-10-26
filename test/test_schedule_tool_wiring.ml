@@ -2551,6 +2551,7 @@ let test_cancel_finds_old_target_and_all_instances () =
     ignore (f1_seed config "schedule-keeper" schedule_id (string_of_int n)
             : Keeper_event_queue.stimulus)
   done;
+  let unrelated = f1_seed config "schedule-keeper" "another-public-id" "unrelated" in
   register_wake_target config "replacement-keeper";
   check bool "public retarget succeeds" true
     (Tool_result.is_success (dispatch_exn config Tool_schemas_schedule.Update_request
@@ -2559,7 +2560,9 @@ let test_cancel_finds_old_target_and_all_instances () =
   check bool "old owner is absent from live registry" true
     (Option.is_none (Keeper_registry.get ~base_path:config.Workspace.base_path "schedule-keeper"));
   check bool "public cancellation succeeds" true (Tool_result.is_success (f1_cancel config schedule_id));
-  f1_empty config "schedule-keeper";
+  check bool "only the unrelated public schedule survives" true
+    (f1_state config "schedule-keeper" |> Keeper_event_queue_state.pending
+     |> Keeper_event_queue.to_list = [unrelated]);
   f1_empty config "replacement-keeper";
   check bool "cancelled ledger follows withdrawal" true
     ((stored_schedule config schedule_id).status = Schedule_domain.Cancelled)

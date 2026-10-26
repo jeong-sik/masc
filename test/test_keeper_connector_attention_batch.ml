@@ -1310,9 +1310,11 @@ let test_checkpoint_preserves_results_and_services_successors () =
     let require label = function
       | Ok value -> value | Error detail -> failf "%s: %s" label detail in
     let channel = Keeper_continuation_channel.unrouted "checkpoint fixture" in
+    let trace_id = Random_id.uuid_v7 () in
     let source : Keeper_owned_job_identity.source =
-      {task_id=Some "original-task";turn_ref=None;tool_use_id=Some "original-call";
-       trace_id=Some "original-trace";keeper_turn_id=Some 7} in
+      {task_id=Some "original-task";
+       turn_ref=Some (Ids.Turn_ref.make ~trace_id ~absolute_turn:7);
+       tool_use_id=Some "original-call";trace_id=Some trace_id;keeper_turn_id=Some 7} in
     let authority = Masc_domain.System_llm_agent {agent_run_id="original-verifier"} in
     let payloads =
       [ Q.Delegate_completed {dc_operation_id="original-delegate";dc_keeper="delegate";
@@ -1323,7 +1325,7 @@ let test_checkpoint_preserves_results_and_services_successors () =
                                  cc_terminal=Composition_succeeded}
       ; Q.Owned_job_completed {oj_job_id=Keeper_owned_job_identity.Job_id.fresh ();
                                oj_source=source;oj_channel=channel}
-      ; Q.Addon_operation_changed {ao_origin_id="original-addon";ao_publication_id="original-publication";
+      ; Q.Addon_operation_changed {ao_origin_id=String.make 64 'a';ao_publication_id=Random_id.uuid_v7 ();
                                    ao_source=source;ao_channel=channel}
       ; Q.Workspace_message {wmsg_request_id="original-message";wmsg_from="another-keeper"}
       ; Q.Ask_answered {ask_id="original-ask";channel}

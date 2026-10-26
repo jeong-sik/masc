@@ -52,21 +52,23 @@ val inventory_for_goal :
   store:Lane_addon_store.t -> installation_id:string -> package_id:string ->
   goal_id:string -> (retained list, error) result
 (** Restore all valid requests and attempts belonging to this Goal after
-    classifying canonical subject keys. Unclassifiable foreign metadata does
-    not block a Goal that has a valid original; it blocks discovery only when
-    no valid original for this Goal exists, so unknown work cannot authorize a
-    fresh dispatch. Any selected original's body, identity or destination
-    failure still rejects the Goal result. *)
+    classifying canonical subject keys. A noncanonical key with a parseable
+    Goal/request is never loaded as an original and does not block this recovery
+    inventory; the exact request frontier decides whether it prevents dispatch.
+    Unattributable keys retain the no-original refusal so unknown work cannot
+    authorize a fresh dispatch. Any selected original's body, identity or
+    destination failure still rejects the Goal result. *)
 
 val inventory_by_goal :
   store:Lane_addon_store.t -> installation_id:string -> package_id:string ->
   (((string * (retained list, error) result) list * (string * error) list), error) result
-(** Group valid originals by Goal and return unattributable metadata separately.
+(** Group valid originals by Goal and return rejected metadata separately.
     The first list preserves Goal/record order and per-Goal full-body outcomes;
-    the second preserves each invalid request ID and its typed error instead of
-    silently dropping it or failing every Goal. Other destinations' bodies are
-    read only when their subject shares a selected Goal, where the destination
-    conflict is refused. Discovery grants no dispatch or cross-Goal authority. *)
+    the second preserves every noncanonical or unattributable request ID and
+    its typed error instead of silently dropping it or failing every Goal.
+    Other destinations' bodies are read only when their subject shares a
+    selected Goal, where the destination conflict is refused. Discovery grants
+    no dispatch or cross-Goal authority. *)
 
 val frontier :
   store:Lane_addon_store.t -> installation_id:string -> package_id:string ->
@@ -79,9 +81,12 @@ val frontier :
     prompts. Once the parent has observed a successor, its actual retained
     record and progress are required; a missing or different child is an error,
     never a fresh [Captured] replacement or another unknown dispatch.
-    Unknown dispatch, missing links and corrupt inventory grant no retry.
-    [None] means no first attempt exists. The host serializes this request under
-    its workspace lease through selection, retention and run. *)
+    A noncanonical key for this exact Goal/request refuses a first dispatch;
+    another Goal or request's noncanonical key does not block this one.
+    Unattributable metadata, unknown dispatch, missing links and corrupt
+    inventory grant no retry. [None] means no first attempt exists. The host
+    serializes this request under its workspace lease through selection,
+    retention and run. *)
 
 val request_retry :
   store:Lane_addon_store.t -> installation_id:string -> package_id:string ->

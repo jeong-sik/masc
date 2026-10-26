@@ -828,6 +828,22 @@ let test_noncanonical_previous_request_does_not_block_new_review () =
       expect_noncanonical_neighbor_to_commute config store goal_id;
       Alcotest.(check int) "a previous request's noncanonical key permits one actual review" 1 !calls))
 
+let test_noncanonical_same_request_never_starts_new_review () =
+  with_workspace (fun config store _ ->
+    let goal_id = pending config in
+    let authority = get (A.create_goal_review ~config ~goal_id) in
+    let request_id = (A.goal_review_subject authority).request_id in
+    ignore (retain_noncanonical_metadata store ~goal_id ~request_id);
+    let calls = ref 0 in
+    with_reviewer (actual_approve calls) (fun () ->
+      (match Agent.process_pending_work config {Agent.goal_id} with
+       | Agent.Deferred (Agent.Proof_lookup_unavailable _) -> ()
+       | Agent.Committed | Agent.Superseded | Agent.Deferred _ ->
+         Alcotest.fail "matching noncanonical metadata authorized a fresh review");
+      Alcotest.(check bool) "matching noncanonical original remains pending" true
+        (phase config goal_id = Goal_phase.Verifying);
+      Alcotest.(check int) "matching noncanonical original never dispatches a reviewer" 0 !calls))
+
 let test_actual_boot_publication_survives_foreign_body_corruption () =
   with_workspace (fun config store _ ->
     let _, damaged = host_prepared config store in
@@ -1285,6 +1301,8 @@ let () = match restart_probe with
     test_noncanonical_other_goal_does_not_block_new_review;
   Alcotest.test_case "noncanonical previous request does not block a new review" `Quick
     test_noncanonical_previous_request_does_not_block_new_review;
+  Alcotest.test_case "noncanonical matching request never starts a new review" `Quick
+    test_noncanonical_same_request_never_starts_new_review;
   Alcotest.test_case "actual boot publication survives foreign original body corruption" `Quick
     test_actual_boot_publication_survives_foreign_body_corruption;
   Alcotest.test_case "actual process restart survives foreign original body corruption" `Quick

@@ -91,15 +91,22 @@ let key ~goal_id ~request_id ~attempt =
   if String.trim goal_id = "" || String.trim request_id = "" || attempt < 0 then
     Error "Goal verifier original requires its exact nonblank subject and nonnegative attempt"
   else Ok (Yojson.Safe.to_string (`List [`String goal_id; `String request_id; `Int attempt]))
+type invalid_attribution =
+  | Goal_request of string * string
+  | Unattributable
+
 let subject_of_key encoded =
-  let* json = decode (try Ok (Yojson.Safe.from_string encoded)
-    with Yojson.Json_error detail -> Error detail) in
-  match json with
-  | `List [`String goal_id; `String request_id; `Int attempt] ->
-    let* canonical = decode (key ~goal_id ~request_id ~attempt) in
-    if String.equal canonical encoded then Ok (goal_id,request_id)
-    else invalid "Goal verifier original subject key is not canonical"
-  | _ -> invalid "Goal verifier original subject key is invalid"
+  match (try Ok (Yojson.Safe.from_string encoded)
+    with Yojson.Json_error detail -> Error detail) with
+  | Error detail -> Error (Unattributable, Original_invalid detail)
+  | Ok (`List [`String goal_id; `String request_id; `Int attempt]) ->
+    (match key ~goal_id ~request_id ~attempt with
+     | Ok canonical when String.equal canonical encoded -> Ok (goal_id,request_id)
+     | Ok _ -> Error (Goal_request (goal_id,request_id),
+         Original_invalid "Goal verifier original subject key is not canonical")
+     | Error detail -> Error (Unattributable, Original_invalid detail))
+  | Ok _ -> Error (Unattributable,
+      Original_invalid "Goal verifier original subject key is invalid")
 let original_key original =
   let subject = V.subject original in
   key ~goal_id:subject.goal_id ~request_id:subject.request_id ~attempt:(V.attempt original)
@@ -163,14 +170,19 @@ let inventory ~store ~installation_id ~package_id =
   Ok (List.filter (fun retained -> retained.record.installation_id = installation_id
     && retained.record.package_id = package_id) records)
 
-type subject_discovery =
-  { subjects : ((string * string) * Owner.Record.t) list
-  ; invalid : (string * error) list
+type invalid_subject =
+  { request_id : string
+  ; attribution : invalid_attribution
+  ; error : error
   }
 
-(* The existing owner metadata binds each complete request to a canonical
-   subject key. Valid subjects and unattributable metadata stay separate so a
-   foreign failure cannot poison a valid Goal or authorize a fresh dispatch. *)
+type subject_discovery =
+  { subjects : ((string * string) * Owner.Record.t) list
+  ; invalid : invalid_subject list
+  }
+
+(* Noncanonical keys retain their parsed identity only to bound refusal. They
+   never become readable originals or permission to dispatch another request. *)
 let discover_subjects ~store =
   let* records = Owner.discover ~store ~scope
     |> Result.map_error (fun e -> Store_unavailable (Owner.error_to_string e)) in
@@ -178,8 +190,9 @@ let discover_subjects ~store =
     let* found = state in
     match subject_of_key (Owner.Record.request_id record) with
     | Ok subject -> Ok { found with subjects=(subject,record)::found.subjects }
-    | Error error ->
-      Ok { found with invalid=(Owner.Record.request_id record,error)::found.invalid })
+    | Error (attribution,error) ->
+      let rejected = {request_id=Owner.Record.request_id record;attribution;error} in
+      Ok { found with invalid=rejected::found.invalid })
     (Ok { subjects=[]; invalid=[] }) records in
   Ok { subjects=List.rev discovery.subjects; invalid=List.rev discovery.invalid }
 
@@ -192,6 +205,17 @@ let load_discovered ~store ~installation_id ~package_id records =
     Ok (retained::found)) (Ok []) records in
   Ok (List.rev reversed)
 
+let invalid_is_unattributable (entry : invalid_subject) =
+  match entry.attribution with
+  | Unattributable -> true
+  | Goal_request _ -> false
+
+let invalid_affects_request ~goal_id ~request_id (entry : invalid_subject) =
+  match entry.attribution with
+  | Unattributable -> true
+  | Goal_request (observed_goal,observed_request) ->
+    observed_goal=goal_id && observed_request=request_id
+
 let inventory_for_goal ~store ~installation_id ~package_id ~goal_id =
   if String.trim goal_id = "" then invalid "Goal inventory requires a nonblank Goal ID"
   else
@@ -199,7 +223,7 @@ let inventory_for_goal ~store ~installation_id ~package_id ~goal_id =
     let selected = List.filter (fun ((observed_goal,_),_) -> observed_goal=goal_id)
       discovery.subjects in
     let* () =
-      if selected=[] && discovery.invalid<>[]
+      if selected=[] && List.exists invalid_is_unattributable discovery.invalid
       then invalid "Goal original metadata is unavailable and cannot be attributed"
       else Ok () in
     load_discovered ~store ~installation_id ~package_id selected
@@ -223,7 +247,7 @@ let inventory_by_goal ~store ~installation_id ~package_id =
     if List.exists destination_matches rows then
       Some (goal_id,load_discovered ~store ~installation_id ~package_id rows)
     else None) (List.rev reversed_order) in
-  Ok (groups, discovery.invalid)
+  Ok (groups, List.map (fun entry -> entry.request_id,entry.error) discovery.invalid)
 
 let original (retained : retained) = retained.original
 let run_identity (retained : retained) = retained.run
@@ -400,7 +424,7 @@ let select_frontier ~automatic ~store ~installation_id ~package_id ~goal_id ~req
   let selected = List.filter (fun ((observed_goal,observed_request),_) ->
     observed_goal=goal_id && observed_request=request_id) discovery.subjects in
   let* () =
-    if selected=[] && discovery.invalid<>[]
+    if selected=[] && List.exists (invalid_affects_request ~goal_id ~request_id) discovery.invalid
     then invalid "Goal frontier metadata is unavailable and cannot be attributed"
     else Ok () in
   let* related = load_discovered ~store ~installation_id ~package_id selected in

@@ -85,12 +85,14 @@ let provider root args =
   let guest_rows () = if Sys.file_exists (file "guest.json") then [json (file "guest.json")] else [] in
   match args with
   | "inspect" :: name :: _ ->
+    if Sys.file_exists (file "inspect-fails-after-run") && guest_rows () <> [] then exit 1;
     (match guest_rows () with
      | [row] when field "id" row = `String name ->
        if Sys.file_exists (file "inspect-override") then print_string (read (file "inspect-override"))
        else answer (`List [row])
      | [] | [_] -> exit 1 | _ -> fail "provider invalid rows")
   | ["list"; "--all"; "--format"; "json"] ->
+    if Sys.file_exists (file "inventory-fails-after-run") && guest_rows () <> [] then exit 1;
     if Sys.file_exists (file "list-override") then print_string (read (file "list-override"))
     else answer (`List (guest_rows ()))
   | "image" :: "inspect" :: _ -> answer (`List [`Assoc ["configuration", `Assoc []]])
@@ -288,12 +290,36 @@ let test_endpoint_uses_effective_network_override () = with_fixture @@ fun root 
   check bool "effective snapshot exists" true (Sys.file_exists actual);
   check bool "metadata default cannot select a different snapshot" false (Sys.file_exists (snapshot_path root))
 
+let test_uncertain_postboot_retains_guest_and_recovers_without_replay () =
+  List.iter (fun inventory_fails -> with_fixture (fun root ->
+    write (Filename.concat root "inspect-fails-after-run") "";
+    if inventory_fails then write (Filename.concat root "inventory-fails-after-run") "";
+    check bool "uncertain boot is refused" true (step root "turn" = Unix.WEXITED 2);
+    check bool "possibly mounted immutable snapshot survives" true (Sys.file_exists (snapshot_path root));
+    check bool "possibly running guest survives" true (Sys.file_exists (Filename.concat root "guest.json"));
+    check int "unknown result causes no stop" 0 (count "stop" root);
+    check int "unknown result causes no delete" 0 (count "delete" root);
+    Unix.unlink (Filename.concat root "inspect-fails-after-run");
+    if inventory_fails then Unix.unlink (Filename.concat root "inventory-fails-after-run");
+    check bool "later process adopts after actual facts recover" true (step root "turn" = Unix.WEXITED 0);
+    check int "original run is never replayed" 1 (count "run" root))) [false; true]
+
+let test_unreadable_inventory_never_authorizes_a_boot () = with_fixture @@ fun root ->
+  write (Filename.concat root "list-override") "[{}]";
+  check bool "unknown inventory refuses creation" true (step root "turn" = Unix.WEXITED 2);
+  check int "no run" 0 (count "run" root);
+  check int "no stop" 0 (count "stop" root);
+  check int "no delete" 0 (count "delete" root);
+  check bool "no credential publication" false (Sys.file_exists (snapshot_path root))
+
 let () =
   match Array.to_list Sys.argv with
   | _ :: "--provider" :: root :: arguments -> provider root arguments
   | [_; "--step"; root; operation] -> process_step root operation
   | _ -> run "guest survival runtime against provider process fixture"
       ["process boundaries", [
+        test_case "uncertain postboot recovers without replay" `Quick test_uncertain_postboot_retains_guest_and_recovers_without_replay;
+        test_case "unreadable inventory refuses boot" `Quick test_unreadable_inventory_never_authorizes_a_boot;
         test_case "effective network override selects its mounted identity" `Quick test_endpoint_uses_effective_network_override;
         test_case "attached reader never rereads central identity" `Quick test_attached_reader_does_not_reread_central_identity;
         test_case "identity refresh follows actual guest absence" `Quick test_identity_refresh_replaces_after_actual_absence;

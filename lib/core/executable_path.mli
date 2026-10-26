@@ -4,6 +4,12 @@
     empty PATH entry as the current directory. Callers use them only for
     pre-spawn availability checks; the actual spawn path remains the authority. *)
 
+val regular_file_is_executable : string -> bool
+(** Check the supplied path directly, following symbolic links as [Unix.stat]
+    does. Only a regular file with execute permission returns [true]; a missing
+    or inaccessible path, other file kind, [Unix.Unix_error] or [Sys_error]
+    returns [false]. Does not trim the path or search [PATH]. *)
+
 val search_path_separator : char
 (** Platform search-path separator for [PATH]-style variables. *)
 

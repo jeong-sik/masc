@@ -313,8 +313,8 @@ type companion_admission = {context:Lane_addon_call_context.companion;admit:unit
 let call_exported_tool ?(on_result = fun _ -> ()) ?(on_dispatch = fun () -> ()) ?companion
     ?(finalize_result = fun ~name:_ ~arguments:_ ~principal:_ ~result -> Ok result)
     ?authorize ?(principal = Lane_addon_call_context.Anonymous) t ~name ~arguments =
-  (* A call cancelled while it waits for the RPC mutex or in its mediation
-     wrote nothing, and the session stays as it was. *)
+  (* A call cancelled while it waits for the RPC mutex, or in its mediation
+     before its first RPC, wrote nothing, and the session stays as it was. *)
   let dispatched = ref false in
   let on_dispatch () = dispatched := true; on_dispatch () in
   protect_call ~reached:(fun () -> !dispatched) t (fun () ->

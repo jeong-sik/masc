@@ -2063,6 +2063,26 @@ let test_tool_exports_bind_live_incarnations () = with_fixture (fun env sw confi
      | Ok _ | Error _ -> false);
   detach config unsent;
   await_phase clock config unsent "detached";
+  (* A mediated call counts as written from its first RPC, the controller
+     snapshot, so one cancelled after it stops the installation even though
+     its tool call never went. *)
+  let snapped = attach_export "export-hang" in
+  await clock (fun () -> match exports () with Ok [_] -> true | _ -> false);
+  await clock (fun () -> int "observation_seq" (instance config snapped) > 0);
+  let snapped_handle = List.hd (unwrap (exports ())) in
+  let snapshotted, mark_snapshotted = Eio.Promise.create () in
+  let after_snapshot ~release_controller:_ ~snapshot ~invoke =
+    ignore (snapshot ()); Eio.Promise.resolve mark_snapshotted (); Eio.Promise.await never; invoke None in
+  Eio.Fiber.first
+    (fun () -> ignore (Runtime.call_exported_tool_with_authority ~companion_publish:None ~continuation:None
+      ~on_complete:(fun () -> ()) ~on_result:(fun _ -> ()) ~authorize:(Some after_snapshot) ~principal:None
+      ~config ~access ~reserved:[] ~export:snapped_handle ~arguments:(`Assoc [])))
+    (fun () -> Eio.Promise.await snapshotted);
+  await_phase clock config snapped "detached";
+  check bool "its tool call never reached the worker" false
+    (Hashtbl.mem state.calls (snapped ^ "/export"));
+  check bool "a mediated call cancelled after its snapshot stops the installation" true
+    (Hashtbl.mem state.stops snapped);
   let remote = attach_export "export-hang" in
   await clock (fun () -> match exports () with Ok [_] -> true | _ -> false);
   let remote_handle = List.hd (unwrap (exports ())) in

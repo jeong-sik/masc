@@ -2202,10 +2202,59 @@ let test_profile_discovery_consumes_captured_bytes () =
   write_file path (declaration_with_instructions "first answer");
   let captured = Masc.Keeper_types_profile_toml.read_keeper_toml_content path in
   write_file path (declaration_with_instructions "later answer");
-  match Masc.Keeper_types_profile_toml.discover_keeper_toml_read ~path captured with
-  | KTP.Invalid _ -> fail "captured declaration must load"
+  (match Masc.Keeper_types_profile_toml.inspect_keeper_toml path with
+   | Error _ -> fail "new live declaration must load"
+   | Ok (_, defaults) ->
+     check (option string) "warm the newer live bytes" (Some "later answer") defaults.instructions);
+  (match Masc.Keeper_types_profile_toml.discover_keeper_toml_read ~path captured with
+   | KTP.Invalid _ -> fail "captured declaration must load"
+   | KTP.Loaded { defaults; _ } ->
+     check (option string) "discovery uses captured bytes despite newer cached bytes"
+       (Some "first answer") defaults.instructions);
+  match Masc.Keeper_types_profile_toml.inspect_keeper_toml path with
+  | Error _ -> fail "later path read must still load"
+  | Ok (_, defaults) ->
+    check (option string) "live read rejects an older captured cache entry"
+      (Some "later answer") defaults.instructions
+
+let test_captured_profile_cache_keeps_path_identity () =
+  with_profile_base @@ fun ~base_path:_ ~config_dir:_ ~keepers_dir ->
+  let first = Filename.concat keepers_dir "first-path.toml" in
+  let second = Filename.concat keepers_dir "second-path.toml" in
+  let content = declaration_with_instructions "Answer the question." in
+  (match Masc.Keeper_types_profile_toml.inspect_keeper_toml_content ~path:first content with
+   | Error _ -> fail "first captured declaration must load without a file"
+   | Ok (name, _) -> check string "first fallback name" "first-path" name);
+  match Masc.Keeper_types_profile_toml.discover_keeper_toml_read ~path:second (Ok content) with
+  | KTP.Invalid _ -> fail "second captured declaration must load without a file"
+  | KTP.Loaded { keeper_name; defaults } ->
+    check string "same bytes keep the second path's name" "second-path" keeper_name;
+    check (option string) "same bytes keep the second source path" (Some second) defaults.manifest_path
+
+let test_captured_profile_error_does_not_use_cached_success () =
+  with_profile_base @@ fun ~base_path:_ ~config_dir:_ ~keepers_dir ->
+  let path = Filename.concat keepers_dir "refused.toml" in
+  let content = declaration_with_instructions "Answer the question." in
+  (match Masc.Keeper_types_profile_toml.inspect_keeper_toml_content ~path content with
+   | Ok _ -> ()
+   | Error _ -> fail "warm captured declaration must load");
+  let error : KTP.keeper_toml_load_error =
+    { keeper_path = path; failing_path = path; kind = KTP.Read_error; detail = "captured read refused" }
+  in
+  (match Masc.Keeper_types_profile_toml.discover_keeper_toml_read ~path (Error error) with
+   | KTP.Loaded _ -> fail "captured read failure must not use an earlier successful parse"
+   | KTP.Invalid { keeper_name; error = observed } ->
+     check string "read failure keeps the file name" "refused" keeper_name;
+     check bool "read failure is preserved exactly" true (observed = error));
+  (match Masc.Keeper_types_profile_toml.discover_keeper_toml_read
+           ~path (Ok "[keeper]\ninstructions = [\n") with
+   | KTP.Loaded _ -> fail "invalid captured bytes must not use an earlier successful parse"
+   | KTP.Invalid { error; _ } ->
+     check bool "invalid captured bytes retain Parse_error" true (error.kind = KTP.Parse_error));
+  match Masc.Keeper_types_profile_toml.discover_keeper_toml_read ~path (Ok content) with
+  | KTP.Invalid _ -> fail "a read or parse error must not poison later valid bytes"
   | KTP.Loaded { defaults; _ } ->
-      check (option string) "discovery never reopens the path" (Some "first answer") defaults.instructions
+    check (option string) "valid captured bytes remain usable" (Some "Answer the question.") defaults.instructions
 
 let test_projection_profile_snapshot_sees_listing_changes () =
   with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
@@ -2488,6 +2537,10 @@ let () =
             test_projection_profile_snapshot_sees_atomic_replacement;
           test_case "profile discovery parses the captured bytes" `Quick
             test_profile_discovery_consumes_captured_bytes;
+          test_case "captured profile parsing keeps each source path" `Quick
+            test_captured_profile_cache_keeps_path_identity;
+          test_case "captured read and parse errors reject cached success" `Quick
+            test_captured_profile_error_does_not_use_cached_success;
           test_case "held profile success does not hide unreadability" `Quick
             test_projection_profile_snapshot_rechecks_held_readability;
           test_case "projection snapshot sees added and removed files" `Quick

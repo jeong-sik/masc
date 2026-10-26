@@ -2,6 +2,7 @@ module L = Endpoint_job_launch
 module P = Endpoint_job_protocol
 module R = Endpoint_job_registry
 module G = Endpoint_process_gate
+module O = Endpoint_job_output
 let require = function Ok value -> value | Error e -> Alcotest.fail e
 let get value = value |> Result.map_error L.error_to_string |> require
 let registry value = value |> Result.map_error R.error_to_string |> require
@@ -51,11 +52,12 @@ let completed = function
   | R.Not_performed e -> Alcotest.fail (R.error_to_string e)
   | R.Performed {value;release_error=None} -> get value
   | R.Performed {release_error=Some e;_} -> Alcotest.fail (File_lock_eio.durable_lock_error_to_string e)
-let start ?(after_rendezvous=fun () -> ()) ?input ?output ~sw ~env fixture permit =
+let start ?(after_rendezvous=fun () -> ()) ?input ?output ?error_output ~sw ~env fixture permit =
   let stdin=match input with None -> fixture.input | Some fd -> fd in
   let stdout=match output with None -> fixture.output | Some fd -> fd in
+  let stderr=match error_output with None -> fixture.output | Some fd -> fd in
   L.For_testing.launch_effect_workspace ~after_rendezvous ~sw ~fs:env#fs ~cgroup_parent_path:"/sys/fs/cgroup"
-    ~execution:fixture.execution ~stdin ~stdout ~stderr:fixture.output permit |> completed
+    ~execution:fixture.execution ~stdin ~stdout ~stderr permit |> completed
 let leaf fixture binding name = Filename.concat
   (Filename.concat fixture.registry_path (P.Id.to_string binding.P.operation_id ^ ".job")) name
 let read path = In_channel.with_open_bin path In_channel.input_all
@@ -201,6 +203,101 @@ let unavailable_boundaries () =
      Effect,P.Workspace_process,Some (digest "network policy");
      Effect,P.Isolated_job isolated,None]
 
+let output value = value |> Result.map_error O.error_to_string |> require
+let pipe_launch ?input ~sw ~env fixture permit =
+  let source,writer=Eio_unix.pipe sw in
+  let owner=Eio_unix.Fd.use_exn "original stdout" (Eio_unix.Resource.fd writer)
+    (fun fd -> start ?input ~output:fd ~sw ~env fixture permit) in
+  Eio.Flow.close writer;
+  let captured=O.start ~sw ~fs:env#fs ~owner ~stream:P.Stdout ~source |> output in
+  owner,captured
+let all_output captured (seal : O.seal) =
+  let buffer=Buffer.create 128 in
+  let rec read offset =
+    if offset=seal.byte_length then Buffer.contents buffer else (
+      let part=O.read captured ~offset ~max_bytes:max_int |> output in
+      check "sealed bytes are always retrievable in nonempty transfer chunks" (String.length part.data>0);
+      Buffer.add_string buffer part.data;
+      read (Int64.add offset (Int64.of_int (String.length part.data)))) in
+  read 0L
+
+let complete_binary_output_is_durably_sealed = fixture (fun ~env ~sw:_ ~store fixture -> Eio.Switch.run (fun sw ->
+  let stdout,stdout_writer=Eio_unix.pipe sw and stderr,stderr_writer=Eio_unix.pipe sw in
+  let script="/usr/bin/python3 -c 'import sys;sys.stdout.buffer.write(bytes(range(256))*1025);sys.stderr.buffer.write(bytes([101,0,255]))'" in
+  let binding,permit=prepare store fixture "05" script in
+  let owner=Eio_unix.Fd.use_exn "original stdout" (Eio_unix.Resource.fd stdout_writer) (fun out ->
+    Eio_unix.Fd.use_exn "original stderr" (Eio_unix.Resource.fd stderr_writer) (fun err ->
+      start ~output:out ~error_output:err ~sw ~env fixture permit)) in
+  Eio.Flow.close stdout_writer;Eio.Flow.close stderr_writer;
+  let captured=O.start ~sw ~fs:env#fs ~owner ~stream:P.Stdout ~source:stdout |> output in
+  let errors=O.start ~sw ~fs:env#fs ~owner ~stream:P.Stderr ~source:stderr |> output in
+  let sealed=O.await_sealed captured |> output and error_seal=O.await_sealed errors |> output in
+  exit 0 (L.await_quiescent owner |> get);
+  let expected=String.init (256*1025) (fun i -> Char.chr (i mod 256)) in
+  Alcotest.(check int64) "entire multi-buffer output retained" (Int64.of_int (String.length expected)) sealed.byte_length;
+  check "complete stream digest" (sealed.sha256=digest expected);
+  Alcotest.(check string) "all binary bytes survive bounded range reads" expected (all_output captured sealed);
+  Alcotest.(check string) "stderr is independently sealed with binary bytes" "e\000\255" (all_output errors error_seal);
+  let manifest=Yojson.Safe.from_string (read (leaf fixture binding "stdout.seal.json")) in
+  Alcotest.(check string) "digest manifest is actually on disk" (P.Sha256.to_string sealed.sha256)
+    Yojson.Safe.Util.(manifest |> member "sha256" |> to_string);
+  (match O.start ~sw ~fs:env#fs ~owner ~stream:P.Stdout ~source:(Eio.Flow.string_source "replacement") with
+   | Error (O.Publication_failed _) -> ()
+   | Error _ | Ok _ -> Alcotest.fail "existing spool was adopted or overwritten");
+  Alcotest.(check string) "duplicate capture preserves actual complete original" expected
+    (read (leaf fixture binding "stdout.bin"))))
+
+let output_observer_cancel_preserves_capture_and_child = fixture (fun ~env ~sw:_ ~store fixture ->
+  let input,writer=Unix.pipe ~cloexec:true () in let writer_open=ref true in
+  Fun.protect ~finally:(fun () -> Unix.close input;if !writer_open then Unix.close writer) (fun () ->
+    Eio.Switch.run (fun sw ->
+      let _,permit=prepare store fixture "05" "printf prefix; exec /bin/cat" in
+      let owner,captured=pipe_launch ~input ~sw ~env fixture permit in
+      let entered,signal=Eio.Promise.create () in
+      Eio.Fiber.first
+        (fun () -> Eio.Promise.resolve signal ();ignore (O.await_sealed captured |> output);
+          Alcotest.fail "source with a live child writer was prematurely sealed")
+        (fun () -> Eio.Promise.await entered);
+      (match O.extent captured |> output with
+       | P.Growing _ -> () | P.Sealed _ -> Alcotest.fail "current prefix was misclassified as source EOF");
+      let _,next=prepare store fixture "07" "exit 8" in
+      exit 8 (Eio.Switch.run (fun next_sw -> start ~sw:next_sw ~env fixture next |> L.await_quiescent |> get));
+      let bytes="after-observer-cancel\000\255" in
+      let sent=Eio_unix.run_in_systhread (fun () -> Unix.write_substring writer bytes 0 (String.length bytes)) in
+      Alcotest.(check int) "same original input still works" (String.length bytes) sent;
+      Unix.close writer;writer_open:=false;
+      let seal=O.await_sealed captured |> output in
+      exit 0 (L.await_quiescent owner |> get);
+      Alcotest.(check string) "cancelled observer lost neither original capture nor later bytes"
+        ("prefix" ^ bytes) (all_output captured seal))))
+
+let failed_seal_is_not_completion_and_does_not_block_other_job = fixture (fun ~env ~sw:_ ~store fixture ->
+  Eio.Switch.run (fun sw ->
+    let binding,permit=prepare store fixture "05" "printf original" in
+    let path=leaf fixture binding "stdout.seal.json" in
+    Out_channel.with_open_bin path (fun oc -> output_string oc "preserved conflicting receipt");Unix.chmod path 0o400;
+    let owner,captured=pipe_launch ~sw ~env fixture permit in
+    (match O.await_sealed captured with
+     | Error (O.Publication_failed _) -> ()
+     | Error _ | Ok _ -> Alcotest.fail "failed durable seal became output completion");
+    exit 0 (L.await_quiescent owner |> get);
+    check "a physical process exit does not hide unavailable output" (Result.is_error (O.extent captured));
+    Alcotest.(check string) "actual incomplete output evidence retained" "original" (read (leaf fixture binding "stdout.bin"));
+    Alcotest.(check string) "existing receipt never replaced" "preserved conflicting receipt" (read path);
+    let _,next=prepare store fixture "07" "exit 9" in
+    exit 9 (Eio.Switch.run (fun next_sw -> start ~sw:next_sw ~env fixture next |> L.await_quiescent |> get))))
+
+let output_owner_teardown_settles_external_observers = fixture (fun ~env ~sw:_ ~store fixture ->
+  let input,writer=Unix.pipe ~cloexec:true () in
+  Fun.protect ~finally:(fun () -> Unix.close input;Unix.close writer) (fun () ->
+    let captured=Eio.Switch.run (fun sw ->
+      let _,permit=prepare store fixture "05" "exec /bin/cat" in
+      let _,captured=pipe_launch ~input ~sw ~env fixture permit in captured) in
+    (match O.await_sealed captured with
+     | Error O.Interrupted -> ()
+     | Error _ | Ok _ -> Alcotest.fail "owner teardown left a waiting observer or fabricated a seal");
+    check "interrupted capture remains unavailable" (O.extent captured=Error O.Interrupted)))
+
 let refusal = fixture (fun ~env ~sw ~store fixture ->
   let _,permit=prepare store fixture "05" ": > activated" in
   match L.launch_effect_workspace ~sw ~fs:env#fs ~cgroup_parent_path:"/sys/fs/cgroup"
@@ -228,6 +325,10 @@ let () =
       "publication failure preserves paused owner without replay",publication_failure_retains_paused_owner;
       "busy original startup leaves another actual job executable",busy_startup_leaves_other_job_executable;
       "wait cancellation and original authority before tree kill",wait_and_cancel_require_original_authority;
-      "unavailable boundaries never fall back to workspace execution",unavailable_boundaries] in
+      "unavailable boundaries never fall back to workspace execution",unavailable_boundaries;
+      "complete binary output is durably sealed and not overwritten",complete_binary_output_is_durably_sealed;
+      "output observer cancellation preserves later original bytes",output_observer_cancel_preserves_capture_and_child;
+      "failed seal stays unavailable while another job progresses",failed_seal_is_not_completion_and_does_not_block_other_job;
+      "owner teardown settles external output observers",output_owner_teardown_settles_external_observers] in
   Alcotest.run "Endpoint job launch" ["original supervisor",List.map
     (fun (name,test) -> Alcotest.test_case name `Quick test) cases]

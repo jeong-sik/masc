@@ -9,6 +9,37 @@
     owns the executable/path jail, network/filesystem/namespace policy, original
     registry rendezvous, process-tree containment and durable output/exit receipt.
     Root payloads need a measured namespace boundary in that supervisor. *)
+module Group : sig
+  type t
+  type protection =
+    | Controller_not_root | Invalid_parent | Invalid_name | Unsafe_ancestor
+    | Not_cgroup_v2 | Group_identity_changed | Group_not_private
+  type stage =
+    | Allocate | Open_parent | Create_group | Open_group | Open_events
+    | Create_watch | Read_events | Kill_tree | Remove_group | Close_group | Duplicate_watch
+  type error =
+    | Unsupported | Refused of protection | Syscall_failed of { stage : stage; error : Unix.error }
+    | Protocol_error | Malformed_events | Retiring | Closed
+    | Cleanup_failed of { primary : error option; error : Unix.error }
+  val error_to_string : error -> string
+  exception Release_failed of error
+  val create : sw:Eio.Switch.t -> parent_path:string -> name:string -> (t, error) result
+  (** Create a new root-owned mode0700 cgroup v2 under an explicit protected
+      parent; exclusive creation and pinned kernel/filesystem identity only.
+      No existing group is adopted and no mount/controller setup is implicit. *)
+  val populated : t -> (bool, error) result
+  val kill_tree : t -> (unit, error) result
+  (** Retire new admission before cgroup.kill; a request is not termination. *)
+  val await_empty : t -> (unit, error) result
+  (** Cancellable event wait. Cancelling a waiter preserves the payload.
+      Actual recursive emptiness is not output sealing or payload exit proof. *)
+  val release : t -> (unit, error) result
+  (** Owner teardown requests tree kill, waits for actual recursive emptiness,
+      removes only its original group and closes private descriptors. Original
+      main-process reaping and complete output/result settlement stay separate.
+      This ephemeral handle alone is not durable restart/registry authority. *)
+end
+
 type t
 
 type invalid_input =
@@ -19,10 +50,11 @@ type stage =
   | Allocate | Duplicate_stdio | Open_directory | Create_gate | Mask_signals | Create_child
   | Child_descriptors | Child_close_descriptors | Child_session | Child_directory
   | Child_credentials | Child_capabilities | Child_signals | Child_ready | Child_gate | Child_exec
-  | Control_io | Signal_main | Wait_main | Close_handle | Duplicate_watch
+  | Control_io | Signal_main | Wait_main | Close_handle | Duplicate_watch | Duplicate_group
 
 type error =
   | Unsupported
+  | Group_error of Group.error
   | Invalid_input of invalid_input
   | Syscall_failed of { stage : stage; error : Unix.error }
   | Child_rejected of { stage : stage; error : Unix.error }
@@ -73,6 +105,16 @@ val create :
     switch. Its teardown kills/reaps this original MAIN process using the pidfd;
     it is not a complete process-tree cancellation or output settlement contract.
     Unsupported kernels/platforms refuse instead of using a numeric PID fallback. *)
+
+val create_in_group :
+  group:Group.t -> sw:Eio.Switch.t -> executable:string -> argv:string array -> env:string array ->
+  cwd:string -> payload_uid:int -> payload_gid:int ->
+  stdin:Unix.file_descr -> stdout:Unix.file_descr -> stderr:Unix.file_descr ->
+  (t, error) result
+(** The same original gate, born directly into the original live group using
+    clone3(CLONE_INTO_CGROUP); no PID migration or host/group fallback. Group
+    retirement and this bounded spawn serialize per group, never globally.
+    Caller retains the exact sandbox/credential/path/network authority duties. *)
 
 val observe_boundary : t -> (boundary, error) result
 (** Nonblocking; consumes/caches private child setup/error observations. A

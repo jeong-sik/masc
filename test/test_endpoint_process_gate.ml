@@ -170,6 +170,76 @@ let frozen_inputs = run (fun fixture -> Eio.Switch.run (fun sw ->
     Alcotest.(check string) "worker executes original validated inputs"
       "original-argument\noriginal-environment\n" (file fixture.output_path)))
 
+let get_group = function
+  | Ok value -> value | Error error -> Alcotest.fail (G.Group.error_to_string error)
+let group_name fixture = "masc-gate-" ^ Filename.basename (Filename.dirname fixture.work)
+let spawn_group ~sw ~group fixture ?(input=fixture.input) ?(output=fixture.output) script =
+  G.create_in_group ~group ~sw ~executable:"/bin/sh" ~argv:[|"/bin/sh"; "-c"; script|]
+    ~env:[|"PATH=/usr/bin:/bin"|] ~cwd:fixture.work
+    ~payload_uid:fixture.uid ~payload_gid:fixture.gid
+    ~stdin:input ~stdout:output ~stderr:output
+
+let recursive_tree_and_progress = run (fun fixture ->
+    let reader, writer = Unix.pipe ~cloexec:true () in
+    let output_reader, output_writer = Unix.pipe ~cloexec:true () in
+    let output_open = ref true in
+    Fun.protect ~finally:(fun () ->
+        Unix.close reader; Unix.close writer; Unix.close output_reader;
+        if !output_open then Unix.close output_writer)
+      (fun () -> Eio.Switch.run (fun sw ->
+          let parent_path="/sys/fs/cgroup" and name=group_name fixture in
+          let group=get_group (G.Group.create ~sw ~parent_path ~name) in
+          let script="/bin/sh -c 'printf descendant-ready; exec /bin/cat' <&0 & wait" in
+          let child=get (spawn_group ~sw ~group fixture ~input:reader ~output:output_writer script) in
+          Unix.close output_writer; output_open := false;
+          get (G.await_ready child); get (G.activate child);
+          Eio_unix.await_readable output_reader;
+          let bytes=Bytes.create (String.length "descendant-ready") in
+          let read=Eio_unix.run_in_systhread (fun () -> Unix.read output_reader bytes 0 (Bytes.length bytes)) in
+          Alcotest.(check string) "actual descendant reached payload" "descendant-ready"
+            (Bytes.sub_string bytes 0 read);
+          ignore (get (G.signal_main child G.Kill)); check_exit (-9) (get (G.await_exit child));
+          check "main exit is not recursive emptiness" (get_group (G.Group.populated group));
+          let waiting, started=Eio.Promise.create () in
+          Eio.Fiber.first
+            (fun () -> Eio.Promise.resolve started (); get_group (G.Group.await_empty group);
+              Alcotest.fail "live descendant reported empty")
+            (fun () -> Eio.Promise.await waiting);
+          check "cancelled group waiter preserves descendants" (get_group (G.Group.populated group));
+          let other=get_group (G.Group.create ~sw ~parent_path ~name:(name ^ "-other")) in
+          let second=get (spawn_group ~sw ~group:other fixture "exit 6") in
+          get (G.await_ready second); get (G.activate second);
+          check_exit 6 (get (G.await_exit second)); get_group (G.Group.release other);
+          check "independent group progressed" (get_group (G.Group.populated group));
+          get_group (G.Group.kill_tree group);
+          check "retired original cannot admit another child"
+            (spawn_group ~sw ~group fixture "exit 0" = Error (G.Group_error G.Group.Retiring));
+          get_group (G.Group.await_empty group);
+          Eio_unix.await_readable output_reader;
+          let count=Eio_unix.run_in_systhread (fun () -> Unix.read output_reader bytes 0 (Bytes.length bytes)) in
+          Alcotest.(check int) "tree cancellation releases descendant-held output" 0 count;
+          get_group (G.Group.release group);
+          check "original group removed" (not (Sys.file_exists (Filename.concat parent_path name))))))
+
+let exclusive_group_and_reused_name = run (fun fixture -> Eio.Switch.run (fun sw ->
+    let parent_path="/sys/fs/cgroup" and name=group_name fixture in
+    let original=get_group (G.Group.create ~sw ~parent_path ~name) in
+    check "existing group cannot be adopted" (Result.is_error (G.Group.create ~sw ~parent_path ~name));
+    let first=get (spawn_group ~sw ~group:original fixture ": > activated") in
+    get (G.await_ready first); get_group (G.Group.release original);
+    check_exit (-9) (get (G.await_exit first));
+    check "tree teardown prevented activation" (not (Sys.file_exists fixture.marker));
+    let replacement=get_group (G.Group.create ~sw ~parent_path ~name) in
+    let second=get (spawn_group ~sw ~group:replacement fixture ": > activated") in
+    get (G.await_ready second);
+    get_group (G.Group.kill_tree original);
+    check "old group handle never resolves a reused path" (get_group (G.Group.populated replacement));
+    get (G.activate second); check_exit 0 (get (G.await_exit second));
+    check "new original still executed" (Sys.file_exists fixture.marker));
+    (* The owner's hooks also retire/remove replacement after main reaping. *)
+    check "owner removed replacement group"
+      (not (Sys.file_exists (Filename.concat "/sys/fs/cgroup" (group_name fixture)))))
+
 let invalid_owner = run (fun fixture -> Eio.Switch.run (fun sw ->
     let result = G.create ~sw ~executable:"/bin/sh" ~argv:[|"/bin/sh"|] ~env:[||]
         ~cwd:fixture.work ~payload_uid:0 ~payload_gid:fixture.gid
@@ -235,5 +305,7 @@ let () =
           "failed release signal still closes the handle", signal_failure_still_closes;
           "control failure keeps the reaped status", control_failure_keeps_reaped_status;
           "source mutation cannot replace validated inputs", frozen_inputs;
-          "root payload refusal", invalid_owner] in
+          "root payload refusal", invalid_owner;
+          "recursive tree cancellation and independent progress", recursive_tree_and_progress;
+          "exclusive group and original handle after name reuse", exclusive_group_and_reused_name] in
   Alcotest.run "Endpoint process gate" ["kernel", List.map (fun (name, test) -> Alcotest.test_case name `Quick test) cases]

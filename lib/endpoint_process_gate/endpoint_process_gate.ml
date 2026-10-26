@@ -1,3 +1,5 @@
+module Group = Endpoint_process_group_internal
+
 type invalid_input =
   | Executable | Arguments | Environment | Directory | Payload_uid | Payload_gid
   | Shared_uid | Controller_not_root
@@ -6,10 +8,11 @@ type stage =
   | Allocate | Duplicate_stdio | Open_directory | Create_gate | Mask_signals | Create_child
   | Child_descriptors | Child_close_descriptors | Child_session | Child_directory
   | Child_credentials | Child_capabilities | Child_signals | Child_ready | Child_gate | Child_exec
-  | Control_io | Signal_main | Wait_main | Close_handle | Duplicate_watch
+  | Control_io | Signal_main | Wait_main | Close_handle | Duplicate_watch | Duplicate_group
 
 type error =
   | Unsupported
+  | Group_error of Group.error
   | Invalid_input of invalid_input
   | Syscall_failed of { stage : stage; error : Unix.error }
   | Child_rejected of { stage : stage; error : Unix.error }
@@ -26,6 +29,7 @@ let stage_name = function
   | Child_signals -> "child signals" | Child_ready -> "child ready" | Child_gate -> "child gate"
   | Child_exec -> "child exec" | Control_io -> "control IO" | Signal_main -> "signal main"
   | Wait_main -> "wait main" | Close_handle -> "close handle" | Duplicate_watch -> "duplicate watch"
+  | Duplicate_group -> "duplicate group"
 
 let invalid_name = function
   | Executable -> "executable" | Arguments -> "arguments" | Environment -> "environment"
@@ -34,6 +38,7 @@ let invalid_name = function
 
 let rec error_to_string = function
   | Unsupported -> "original-process gate unsupported"
+  | Group_error error -> "process group: " ^ Group.error_to_string error
   | Invalid_input input -> "invalid " ^ invalid_name input
   | Syscall_failed {stage; error} -> stage_name stage ^ ": " ^ Unix.error_message error
   | Child_rejected {stage; error} -> "child rejected " ^ stage_name stage ^ ": " ^ Unix.error_message error
@@ -64,7 +69,7 @@ type raw
 external linux_build : unit -> bool = "masc_endpoint_gate_linux"
 external spawn_raw :
   string * string array * string array * string * int * int *
-  (Unix.file_descr * Unix.file_descr * Unix.file_descr) -> int * Unix.error option * raw
+  (Unix.file_descr * Unix.file_descr * Unix.file_descr) * Unix.file_descr option -> int * Unix.error option * raw
   = "masc_endpoint_gate_spawn"
 external control_raw : raw -> int * int * Unix.error option = "masc_endpoint_gate_control"
 external decide_raw : raw -> bool -> int * Unix.error option = "masc_endpoint_gate_decide"
@@ -95,7 +100,7 @@ let stage_of_code = function
   | 10 -> Some Child_directory | 11 -> Some Child_credentials | 12 -> Some Child_capabilities
   | 13 -> Some Child_signals | 14 -> Some Child_ready | 15 -> Some Child_gate | 16 -> Some Child_exec
   | 17 -> Some Control_io | 18 -> Some Signal_main | 19 -> Some Wait_main
-  | 20 -> Some Close_handle | 21 -> Some Duplicate_watch | _ -> None
+  | 20 -> Some Close_handle | 21 -> Some Duplicate_watch | 22 -> Some Duplicate_group | _ -> None
 
 (* All calls while locked are nonblocking. In particular, no fiber wait or
    blocking system-thread submission happens while holding this mutex.
@@ -262,10 +267,7 @@ let release = release_with signal_raw
 let valid_string s = not (String.contains s '\000')
 let absolute s = String.length s > 0 && s.[0] = '/' && valid_string s
 
-let create_with_hook ~before_spawn_in_worker ~sw ~executable ~argv ~env ~cwd ~payload_uid ~payload_gid ~stdin ~stdout ~stderr =
-  (* Capture before validation and before the system-thread wait can yield to
-     callers that still own the mutable source arrays. Strings are immutable. *)
-  let argv = Array.copy argv and env = Array.copy env in
+let create_captured ~before_spawn_in_worker ~group_fd ~sw ~executable ~argv ~env ~cwd ~payload_uid ~payload_gid ~stdin ~stdout ~stderr =
   let invalid =
     if not (absolute executable) then Some Executable
     else if Array.length argv = 0 || not (Array.for_all valid_string argv) then Some Arguments
@@ -285,7 +287,7 @@ let create_with_hook ~before_spawn_in_worker ~sw ~executable ~argv ~env ~cwd ~pa
         Eio.Cancel.protect (fun () ->
             let code, error, raw = Eio_unix.run_in_systhread (fun () ->
                 before_spawn_in_worker ();
-                spawn_raw (executable, argv, env, cwd, payload_uid, payload_gid, (stdin, stdout, stderr))) in
+                spawn_raw (executable, argv, env, cwd, payload_uid, payload_gid, (stdin, stdout, stderr), group_fd)) in
             match error with
             | Some error ->
                 if error = Unix.ENOSYS then Error Unsupported else
@@ -305,7 +307,23 @@ let create_with_hook ~before_spawn_in_worker ~sw ~executable ~argv ~env ~cwd ~pa
                 Ok t)
       end
 
+let create_with_hook ~before_spawn_in_worker ~sw ~executable ~argv ~env ~cwd ~payload_uid ~payload_gid ~stdin ~stdout ~stderr =
+  (* Capture before validation and before any worker/group wait can yield to
+     callers that still own mutable source arrays. Strings are immutable. *)
+  let argv = Array.copy argv and env = Array.copy env in
+  create_captured ~before_spawn_in_worker ~group_fd:None ~sw ~executable ~argv ~env ~cwd
+    ~payload_uid ~payload_gid ~stdin ~stdout ~stderr
+
 let create = create_with_hook ~before_spawn_in_worker:(fun () -> ())
+
+let create_in_group ~group ~sw ~executable ~argv ~env ~cwd ~payload_uid ~payload_gid ~stdin ~stdout ~stderr =
+  let argv = Array.copy argv and env = Array.copy env in
+  Eio.Switch.check sw;
+  match Group.with_spawn group (fun group_fd ->
+      create_captured ~before_spawn_in_worker:(fun () -> ()) ~group_fd:(Some group_fd)
+        ~sw ~executable ~argv ~env ~cwd ~payload_uid ~payload_gid ~stdin ~stdout ~stderr) with
+  | Ok result -> result
+  | Error error -> Error (Group_error error)
 
 module For_testing = struct
   let linux_build = linux_build ()

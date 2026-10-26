@@ -139,19 +139,40 @@ let with_workspace f =
   Sys.remove base_path; Sys.mkdir base_path 0o700;
   let path = Keeper_sandbox_config.keeper_toml_path ~base_path ~agent_name:"imp" in
   let rec remove_tree entry =
-    if Sys.is_directory entry then (Array.iter (fun child -> remove_tree (Filename.concat entry child)) (Sys.readdir entry);
-      Sys.rmdir entry) else Sys.remove entry in
+    match (Unix.lstat entry).Unix.st_kind with
+    | Unix.S_DIR ->
+      Array.iter (fun child -> remove_tree (Filename.concat entry child)) (Sys.readdir entry);
+      Sys.rmdir entry
+    | Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK ->
+      Sys.remove entry in
   Fun.protect ~finally:(fun () -> remove_tree base_path) (fun () -> f ~base_path ~path)
-(* F030. inspect's configuration_error used to be one of two constant
-   sentences, so an operator could not tell a missing file from a permission
-   error, nor a broken TOML from a microvm profile without a backend. The
-   declaration now reports a closed kind plus the underlying reason, and the
-   JSON carries both. *)
+(* The catalog distinguishes an absent imp declaration from an existing but
+   unreadable one and from a declaration that cannot be selected. *)
 let test_declaration_reasons () =
   with_workspace (fun ~base_path ~path ->
+    let inspect base_path = S.inspect ~run:(run_fixture []) ~base_path in
+    let check_unconfigured label json =
+      check bool (label ^ " has no selection") true
+        (Yojson.Safe.Util.member "configured_selection" json = `Null);
+      check bool (label ^ " has no configuration error") true
+        (Yojson.Safe.Util.member "configuration_error" json = `Null) in
+    check_unconfigured "no workspace" (inspect None);
+    check bool "missing declaration is absent" true (S.declaration ~base_path = Ok None);
+    check_unconfigured "missing parent directories" (inspect (Some base_path));
+    let parent = Filename.dirname path in
+    mkdir_p (Filename.dirname parent);
+    Out_channel.with_open_text parent (fun out -> output_string out "not a directory");
+    check bool "a non-directory parent is unreadable" true
+      (match S.declaration ~base_path with
+       | Error {kind = S.Declaration_unreadable; _} -> true
+       | Error {kind = S.Declaration_invalid; _} | Ok _ -> false);
+    Sys.remove parent;
+    mkdir_p (Filename.dirname path);
+    check_unconfigured "missing file" (inspect (Some base_path));
+    Unix.symlink "missing-target.toml" path;
     let unreadable = match S.declaration ~base_path with
-      | Ok _ -> fail "missing imp.toml produced a selection" | Error error -> error in
-    check bool "missing file is unreadable" true (unreadable.kind = S.Declaration_unreadable);
+      | Ok _ -> fail "dangling declaration was not reported" | Error error -> error in
+    check bool "dangling declaration is unreadable" true (unreadable.kind = S.Declaration_unreadable);
     check bool "OS message names the file" true
       (let open String in length unreadable.detail > length path
         && starts_with ~prefix:path unreadable.detail);
@@ -160,7 +181,21 @@ let test_declaration_reasons () =
        check bool "kind serialized" true (List.assoc_opt "kind" fields = Some (`String "declaration_unreadable"));
        check bool "detail serialized" true (List.assoc_opt "detail" fields = Some (`String unreadable.detail))
      | _ -> fail "configuration_error is not an object");
-    mkdir_p (Filename.dirname path);
+    check bool "catalog exposes the unreadable declaration" true
+      (Yojson.Safe.Util.member "configuration_error" (inspect (Some base_path))
+       = S.configuration_error_json unreadable);
+    Sys.remove path;
+    Sys.mkdir path 0o700;
+    check bool "a directory at the declaration path is unreadable" true
+      (match S.declaration ~base_path with
+       | Error {kind = S.Declaration_unreadable; _} -> true
+       | Error {kind = S.Declaration_invalid; _} | Ok _ -> false);
+    Sys.rmdir path;
+    Out_channel.with_open_text path (fun out -> output_string out "[keeper\nbroken");
+    check bool "malformed TOML is invalid" true
+      (match S.declaration ~base_path with
+       | Error {kind = S.Declaration_invalid; _} -> true
+       | Error {kind = S.Declaration_unreadable; _} | Ok _ -> false);
     Out_channel.with_open_text path (fun out -> output_string out microvm_without_backend);
     let invalid = match S.declaration ~base_path with
       | Ok _ -> fail "backend-less microvm declaration produced a selection" | Error error -> error in
@@ -169,9 +204,26 @@ let test_declaration_reasons () =
         ~profile:None ~microvm_backend:None ~network_mode:None with
       | Error reason -> reason | Ok _ -> fail "fixture unexpectedly selectable" in
     check string "detail is the selection reason" expected invalid.detail;
+    check bool "catalog exposes the invalid declaration" true
+      (Yojson.Safe.Util.member "configuration_error" (inspect (Some base_path))
+       = S.configuration_error_json invalid);
     Out_channel.with_open_text path (fun out -> output_string out contents);
+    Unix.chmod path 0o000;
+    Fun.protect ~finally:(fun () -> Unix.chmod path 0o600) (fun () ->
+      match Unix.access path [Unix.R_OK] with
+      | () -> () (* An elevated process may still read mode 000. *)
+      | exception Unix.Unix_error (Unix.EACCES, _, _) ->
+        check bool "permission denial remains unreadable" true
+          (match S.declaration ~base_path with
+           | Error {kind = S.Declaration_unreadable; _} -> true
+           | Error {kind = S.Declaration_invalid; _} | Ok _ -> false));
     check bool "readable docker declaration selects" true
-      (match S.declaration ~base_path with Ok selection -> selection.backend = S.Docker | Error _ -> false))
+      (match S.declaration ~base_path with Ok (Some selection) -> selection.backend = S.Docker | Ok None | Error _ -> false);
+    let catalog = inspect (Some base_path) in
+    check bool "catalog reports the docker selection" true
+      (Yojson.Safe.Util.member "backend" (Yojson.Safe.Util.member "configured_selection" catalog) = `String "docker");
+    check bool "valid selection has no configuration error" true
+      (Yojson.Safe.Util.member "configuration_error" catalog = `Null))
 (* The doctor reports what boots. A microvm declaration that names no backend
    takes the host's runtime in boot; [declaration] keeps refusing it because
    setup makes the operator name one. The two agree on every other file. *)
@@ -182,7 +234,7 @@ let test_boot_declaration_follows_the_host_default () =
     check bool "setup's declaration still refuses the unnamed backend" true
       (match S.declaration ~base_path with Error {kind = S.Declaration_invalid; _} -> true | _ -> false);
     (match Masc.Keeper_microvm_backend.default_for_host (), S.boot_declaration ~base_path with
-     | Some Masc.Keeper_microvm_backend.Apple_container, Ok selection ->
+     | Some Masc.Keeper_microvm_backend.Apple_container, Ok (Some selection) ->
        check bool "boot's runtime is selected" true (selection.backend = S.Apple_container)
      | None, Error {kind = S.Declaration_invalid; _} -> ()
      | None, Error {kind = S.Declaration_unreadable; _} -> fail "the fixture file was readable"
@@ -193,14 +245,14 @@ let test_boot_declaration_follows_the_host_default () =
     Out_channel.with_open_text path (fun out -> output_string out named);
     check bool "a named backend is not replaced by the host default" true
       (match S.boot_declaration ~base_path, S.declaration ~base_path with
-       | Ok boot, Ok setup -> boot.backend = S.Nerdctl_kata && setup.backend = S.Nerdctl_kata
+       | Ok (Some boot), Ok (Some setup) -> boot.backend = S.Nerdctl_kata && setup.backend = S.Nerdctl_kata
        | _ -> false);
     Out_channel.with_open_text path (fun out -> output_string out contents);
     check bool "a docker declaration is selected the same way" true
-      (match S.boot_declaration ~base_path with Ok selection -> selection.backend = S.Docker | Error _ -> false);
+      (match S.boot_declaration ~base_path with Ok (Some selection) -> selection.backend = S.Docker | Ok None | Error _ -> false);
     Sys.remove path;
-    check bool "an unreadable file is still unreadable" true
-      (match S.boot_declaration ~base_path with Error {kind = S.Declaration_unreadable; _} -> true | _ -> false))
+    check bool "a missing boot declaration is absent" true
+      (S.boot_declaration ~base_path = Ok None))
 (* Apple Container answers as a running service on a Mac without Rosetta, and
    then cannot start the VM it builds images in: that VM uses Rosetta unless
    [build] rosetta = false. Measured 2026-09-15 on a colleague's Mac: setup

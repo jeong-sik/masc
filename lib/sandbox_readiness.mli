@@ -47,10 +47,11 @@ val kernel_missing_reason : string
 val probe : host:host -> run:runner -> require_rootless:bool -> require_userns:bool -> backend -> entry
 val recommend : host:host -> configured:backend option -> entry list -> backend option
 val catalog_json : host:host -> configured:backend option -> entry list -> Yojson.Safe.t
-val declaration : base_path:string -> (selection, configuration_error) result
-(** Read imp's declared sandbox from the workspace. No request overrides and
-    no host default: a microvm profile without a named backend is invalid. *)
-val boot_declaration : base_path:string -> (selection, configuration_error) result
+val declaration : base_path:string -> (selection option, configuration_error) result
+(** Read imp's declared sandbox from the workspace. [Ok None] means that no
+    imp declaration exists. No request overrides and no host default: a
+    microvm profile without a named backend is invalid. *)
+val boot_declaration : base_path:string -> (selection option, configuration_error) result
 (** The sandbox the server would boot imp with. Same file, same checks as
     [declaration], except that a microvm profile without a named backend takes
     the host's runtime the way boot does
@@ -58,11 +59,12 @@ val boot_declaration : base_path:string -> (selection, configuration_error) resu
     with none, it is invalid for the reason boot refuses with. For reporting
     what boots, not for setup, which makes the operator name the backend. *)
 val configuration_error_json : configuration_error -> Yojson.Safe.t
-val inspect : base_path:string option -> Yojson.Safe.t
+val inspect : run:runner -> base_path:string option -> Yojson.Safe.t
 (** Observe the declared sandbox and host services without changing either.
-    A declaration that cannot be read or selected is returned under
-    [configuration_error] as [configuration_error_json], never as a sentence
-    that hides the reason. *)
+    With no workspace or no imp declaration, both [configured_selection] and
+    [configuration_error] are null. An existing declaration that cannot be
+    read or selected is returned under [configuration_error] as
+    [configuration_error_json]. *)
 val state_message : state -> string
 val system_runner : runner
 val selection_of_contents : path:string -> contents:string ->

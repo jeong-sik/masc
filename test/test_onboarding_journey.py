@@ -444,14 +444,14 @@ class Journey(StepByStep):
 
     def test_configuration_error_shows_kind_and_detail(self):
         catalog = dict(schema='masc.sandbox_readiness.v1', configured_selection=None,
-            configuration_error=dict(kind='declaration_unreadable', detail='/workspace/.masc/config/keepers/imp.toml: No such file or directory'),
+            configuration_error=dict(kind='declaration_unreadable', detail='/workspace/.masc/config/keepers/imp.toml: Permission denied'),
             candidates=[dict(id='docker', state='service_ready', reason='', advanced=False, recommended=True,
                 setup_args=['--sandbox-profile', 'docker'], capabilities=dict(network_modes=['none', 'inherit']))])
         response = subprocess.CompletedProcess([], 0, json.dumps(catalog), '')
         with patch.object(SETUP.subprocess, 'run', return_value=response), \
                 patch.object(SETUP, 'pick', return_value=[0]), contextlib.redirect_stderr(io.StringIO()) as output:
             SETUP.select_sandbox('/bin/masc', '/workspace')
-        self.assertIn('declaration_unreadable: /workspace/.masc/config/keepers/imp.toml: No such file or directory', output.getvalue())
+        self.assertIn('declaration_unreadable: /workspace/.masc/config/keepers/imp.toml: Permission denied', output.getvalue())
 
     def test_pdf_tools_use_existing_setup_selection_and_refresh(self):
         catalog = dict(schema='masc.sandbox_readiness.v1', candidates=[dict(

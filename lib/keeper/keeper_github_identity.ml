@@ -361,6 +361,18 @@ type tool_identity_state =
   | Unconfigured
   | Configured of string
 
+type captured_identity_kind =
+  | Captured_unconfigured
+  | Captured_configured of { source_dir : string option }
+
+type captured_tool_identity =
+  { kind : captured_identity_kind
+  ; files : (string * string) list
+  ; payload : Fs_compat.directory_payload
+  ; revision : string
+  ; git_wiring : bool
+  }
+
 type docker_tool_projection =
   { args : string list
   ; environment : (string * string) list
@@ -565,6 +577,16 @@ let load_optional_config_file config_dir filename =
   | Ok content -> Ok content
 ;;
 
+let configured_revision_of_contents ~hosts ~config =
+  let material = Yojson.Safe.to_string
+      (`Assoc
+        [ "schema", `String "masc.github-tool-identity-revision.v1"
+        ; "hosts.yml", `String hosts
+        ; "config.yml", (match config with None -> `Null | Some value -> `String value)
+        ]) in
+  Digestif.SHA256.(digest_string material |> to_hex)
+;;
+
 let configured_tool_identity_revision config_dir =
   match load_optional_config_file config_dir "hosts.yml" with
   | Error _ as error -> error
@@ -573,18 +595,7 @@ let configured_tool_identity_revision config_dir =
     (match load_optional_config_file config_dir "config.yml" with
      | Error _ as error -> error
      | Ok config ->
-       let material =
-         Yojson.Safe.to_string
-           (`Assoc
-              [ "schema", `String "masc.github-tool-identity-revision.v1"
-              ; "hosts.yml", `String hosts
-              ; ( "config.yml"
-                , match config with
-                  | None -> `Null
-                  | Some value -> `String value )
-              ])
-       in
-       Ok Digestif.SHA256.(digest_string material |> to_hex))
+       Ok (configured_revision_of_contents ~hosts ~config))
 ;;
 
 let current_tool_identity_revision ~config ~keeper_name =
@@ -599,7 +610,7 @@ let snapshot_cleanup snapshot =
   Unix.set_close_on_exec descriptor;
   let created = Unix.fstat descriptor in
   let claimed = Atomic.make false in
-  fun () ->
+  let release () =
     if Atomic.compare_and_set claimed false true
     then
       Fun.protect
@@ -620,45 +631,11 @@ let snapshot_cleanup snapshot =
              (* The non-following tree remover unlinks a replacement entry
                 directly and never traverses a replacement symlink. *)
              Fs_compat.remove_tree snapshot)
-;;
-
-let copy_local_tool_config_snapshot existing =
-  let snapshot = Filename.temp_dir "masc-gh-tool-" "" in
-  Unix.chmod snapshot 0o700;
-  let cleanup = snapshot_cleanup snapshot in
-  let copy_file filename =
-    let source = Filename.concat existing filename in
-    let target = Filename.concat snapshot filename in
-    match Fs_compat.load_owned_regular_file ~ownership_root:existing source with
-    | Error error ->
-      Error (Fs_compat.owned_regular_file_read_error_to_string error)
-    | Ok None -> Ok ()
-    | Ok (Some content) ->
-      (match Fs_compat.save_file_atomic target content with
-       | Error _ as error -> error
-       | Ok () ->
-         Unix.chmod target 0o400;
-         Ok ())
   in
-  match copy_file "hosts.yml" with
-  | Error error ->
-    cleanup ();
-    Error error
-  | Ok () ->
-    (match copy_file "config.yml" with
-     | Error error ->
-       cleanup ();
-       Error error
-     | Ok () ->
-       Unix.chmod snapshot 0o500;
-       Ok (snapshot, cleanup))
-;;
-
-let empty_local_tool_config_snapshot () =
-  let snapshot = Filename.temp_dir "masc-gh-tool-empty-" "" in
-  let cleanup = snapshot_cleanup snapshot in
-  Unix.chmod snapshot 0o500;
-  snapshot, cleanup
+  fun () ->
+    match Fs_compat.execution_context () with
+    | Fs_compat.Non_eio -> release ()
+    | Fs_compat.Eio_fiber -> Eio.Cancel.protect release
 ;;
 
 let git_credential_config_file_name = "gitconfig"
@@ -693,6 +670,127 @@ let hostnames_of_hosts_yml contents =
       if String.equal host "" || String.contains host ' ' || String.contains host '"'
       then None
       else Some host))
+;;
+
+let git_credential_config_contents contents =
+  match hostnames_of_hosts_yml contents with
+  | [] -> None
+  | hosts ->
+    let hosts =
+      if List.exists (String.equal default_hostname) hosts
+         && not (List.exists (String.equal "gist.github.com") hosts)
+      then hosts @ [ "gist.github.com" ] else hosts in
+    Some (String.concat "" (List.map (fun host ->
+      Printf.sprintf
+        "[credential \"https://%s\"]\n\thelper = \n\thelper = !gh auth git-credential\n"
+        host) hosts))
+;;
+
+let make_captured_identity ~kind ~files ~revision ~git_wiring =
+  let payload_files = List.map (fun (leaf, content) ->
+    Fs_compat.{ leaf; content; permissions = 0o400 }) files in
+  match Fs_compat.directory_payload payload_files with
+  | Error error -> Error (Fs_compat.directory_payload_error_to_string error)
+  | Ok payload -> Ok { kind; files; payload; revision; git_wiring }
+;;
+
+let capture_identity_contents ~hosts ~config =
+  let unconfigured () = make_captured_identity ~kind:Captured_unconfigured
+    ~files:[] ~revision:unconfigured_tool_identity_revision ~git_wiring:false in
+  match hosts with
+  | None ->
+    (match config with
+     | None -> unconfigured ()
+     | Some _ -> Error "GitHub identity config.yml has no hosts.yml")
+  | Some hosts ->
+    (match hosts_yaml_has_stored_token hosts with
+     | Error _ as error -> error
+     | Ok false -> unconfigured ()
+     | Ok true ->
+       let gitconfig = git_credential_config_contents hosts in
+       let files = [ "hosts.yml", hosts ]
+         @ (match config with None -> [] | Some content -> [ "config.yml", content ])
+         @ (match gitconfig with None -> [] | Some content -> [ "gitconfig", content ]) in
+       make_captured_identity ~kind:(Captured_configured { source_dir = None }) ~files
+         ~revision:(configured_revision_of_contents ~hosts ~config)
+         ~git_wiring:(Option.is_some gitconfig))
+;;
+
+let capture_tool_identity ~config ~keeper_name =
+  let ( let* ) = Result.bind in
+  let* source = existing_config_dir ~config ~keeper_name in
+  match source with
+  | None -> capture_identity_contents ~hosts:None ~config:None
+  | Some source_dir ->
+    let* hosts = load_optional_config_file source_dir "hosts.yml" in
+    let* config = load_optional_config_file source_dir "config.yml" in
+    (match hosts with
+     | None -> Error "configured GitHub CLI identity has no hosts.yml"
+     | Some _ ->
+       let* captured = capture_identity_contents ~hosts ~config in
+       match captured.kind with
+       | Captured_unconfigured -> Ok captured
+       | Captured_configured _ ->
+         Ok { captured with kind = Captured_configured { source_dir = Some source_dir } })
+;;
+
+let captured_tool_identity_of_files files =
+  let ( let* ) = Result.bind in
+  let rec validate_names seen = function
+    | [] -> Ok ()
+    | (name, _) :: rest ->
+      if List.mem name seen then Error "GitHub identity snapshot has duplicate files"
+      else match name with
+        | "hosts.yml" | "config.yml" | "gitconfig" -> validate_names (name :: seen) rest
+        | _ -> Error "GitHub identity snapshot has an unknown file" in
+  let* () = validate_names [] files in
+  let* captured = capture_identity_contents
+    ~hosts:(List.assoc_opt "hosts.yml" files) ~config:(List.assoc_opt "config.yml" files) in
+  if List.sort compare files <> List.sort compare captured.files
+  then Error "GitHub identity snapshot differs from its canonical captured files"
+  else Ok captured
+;;
+
+let captured_revision (captured : captured_tool_identity) = captured.revision
+let captured_payload (captured : captured_tool_identity) = captured.payload
+
+let captured_environment (captured : captured_tool_identity) ~keeper_name ~container_config_dir =
+  Exec_ssh_protocol.keeper_git_author_env ~keeper_name
+  @ [ "GH_CONFIG_DIR", container_config_dir ]
+  @ git_credential_config_env ~has_git_wiring:captured.git_wiring ~config_dir:container_config_dir
+;;
+
+let local_snapshot_of_capture (captured : captured_tool_identity) =
+  let prefix = match captured.kind with
+    | Captured_unconfigured -> "masc-gh-tool-empty-"
+    | Captured_configured _ -> "masc-gh-tool-" in
+  let snapshot = Filename.temp_dir prefix "" in
+  Unix.chmod snapshot 0o700;
+  let cleanup = snapshot_cleanup snapshot in
+  let rec write = function
+    | [] -> Unix.chmod snapshot 0o500; Ok (snapshot, cleanup)
+    | (leaf, content) :: rest ->
+      let target = Filename.concat snapshot leaf in
+      match Fs_compat.save_file_atomic target content with
+      | Error _ as error -> error
+      | Ok () -> Unix.chmod target 0o400; write rest in
+  let cleanup_then_raise exn backtrace =
+    (try cleanup () with cleanup_exn ->
+       Format.eprintf "GitHub identity snapshot cleanup also failed: %s@."
+         (Printexc.to_string cleanup_exn));
+    Printexc.raise_with_backtrace exn backtrace in
+  match write captured.files with
+  | Ok _ as result -> result
+  | Error error ->
+    (match cleanup () with
+     | () -> Error error
+     | exception (Eio.Cancel.Cancelled _ as exn) ->
+       Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
+     | exception cleanup_exn ->
+       Error (error ^ "; snapshot cleanup also failed: " ^ Printexc.to_string cleanup_exn))
+  | exception (Eio.Cancel.Cancelled _ as exn) ->
+    cleanup_then_raise exn (Printexc.get_raw_backtrace ())
+  | exception exn -> cleanup_then_raise exn (Printexc.get_raw_backtrace ())
 ;;
 
 let has_git_credential_wiring ~config ~keeper_name =
@@ -736,22 +834,9 @@ let write_git_credential_config ~dir_mode_after ~snapshot =
   | Error error -> Error (Fs_compat.owned_regular_file_read_error_to_string error)
   | Ok None -> Ok false
   | Ok (Some contents) ->
-    (match hostnames_of_hosts_yml contents with
-     | [] -> Ok false
-     | hosts ->
-       let stanza host =
-         Printf.sprintf
-           "[credential \"https://%s\"]\n\thelper = \n\thelper = !gh auth git-credential\n"
-           host
-       in
-       (* gh's own setup-git pairs github.com with its gist host. *)
-       let hosts =
-         if List.exists (String.equal default_hostname) hosts
-            && not (List.exists (String.equal "gist.github.com") hosts)
-         then hosts @ [ "gist.github.com" ]
-         else hosts
-       in
-       let content = String.concat "" (List.map stanza hosts) in
+    (match git_credential_config_contents contents with
+     | None -> Ok false
+     | Some content ->
        let target = Filename.concat snapshot git_credential_config_file_name in
        Unix.chmod snapshot 0o700;
        let result =
@@ -822,57 +907,23 @@ let refresh_git_credential_config ~config ~keeper_name =
 ;;
 
 let docker_args_for_tool ~config ~keeper_name ~container_masc_dir =
+  let ( let* ) = Result.bind in
+  let* captured = capture_tool_identity ~config ~keeper_name in
+  let* identity_state = match captured.kind with
+    | Captured_unconfigured -> Ok Unconfigured
+    | Captured_configured { source_dir = Some source_dir } -> Ok (Configured source_dir)
+    | Captured_configured { source_dir = None } -> Error "captured tool identity has no source directory" in
+  let* snapshot, cleanup = local_snapshot_of_capture captured in
+  let container_dir = container_config_dir ~container_masc_dir ~keeper_name in
   let author_env = Exec_ssh_protocol.keeper_git_author_env ~keeper_name in
-  let project ~snapshot ~container_dir ~git_wiring =
-    let environment = author_env @ ["GH_CONFIG_DIR", container_dir]
-      @ git_credential_config_env ~has_git_wiring:git_wiring ~config_dir:container_dir in
-    let args =
-      (author_env @ ["GH_CONFIG_DIR", container_dir]
-       |> List.concat_map (fun (key, value) -> ["--env"; key ^ "=" ^ value]))
-      @ ["-v"; snapshot ^ ":" ^ container_dir ^ ":ro"]
-      @ git_credential_docker_args ~has_git_wiring:git_wiring ~config_dir:container_dir in
-    args, environment
-  in
-  match existing_config_dir ~config ~keeper_name with
-  | Error _ as error -> error
-  | Ok None ->
-    let snapshot, cleanup = empty_local_tool_config_snapshot () in
-    let container_dir = container_config_dir ~container_masc_dir ~keeper_name in
-    let args, environment = project ~snapshot ~container_dir ~git_wiring:false in
-    Ok
-      { args
-      ; environment
-      ; identity_state = Unconfigured
-      ; host_snapshot_dir = snapshot
-      ; revision = unconfigured_tool_identity_revision
-      ; cleanup
-      }
-  | Ok (Some host_dir) ->
-    (match copy_local_tool_config_snapshot host_dir with
-     | Error _ as error -> error
-     | Ok (snapshot, cleanup) ->
-       (match configured_tool_identity_revision snapshot with
-        | Error error ->
-          cleanup ();
-          Error error
-        | Ok revision ->
-          (match write_git_credential_config ~dir_mode_after:0o500 ~snapshot with
-           | Error error ->
-             cleanup ();
-             Error error
-           | Ok has_git_wiring ->
-             let container_dir =
-               container_config_dir ~container_masc_dir ~keeper_name
-             in
-             let args, environment = project ~snapshot ~container_dir ~git_wiring:has_git_wiring in
-             Ok
-               { args
-               ; environment
-               ; identity_state = Configured host_dir
-               ; host_snapshot_dir = snapshot
-               ; revision
-               ; cleanup
-               })))
+  let environment = captured_environment captured ~keeper_name ~container_config_dir:container_dir in
+  let args =
+    (author_env @ [ "GH_CONFIG_DIR", container_dir ]
+     |> List.concat_map (fun (key, value) -> [ "--env"; key ^ "=" ^ value ]))
+    @ [ "-v"; snapshot ^ ":" ^ container_dir ^ ":ro" ]
+    @ git_credential_docker_args ~has_git_wiring:captured.git_wiring ~config_dir:container_dir in
+  Ok { args; environment; identity_state; host_snapshot_dir = snapshot;
+       revision = captured.revision; cleanup }
 ;;
 
 let login_timeout_sec = 600.0

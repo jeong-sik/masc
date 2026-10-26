@@ -575,6 +575,148 @@ let test_tool_projection_uses_safe_existing_identity () =
     (Sys.file_exists docker_snapshot)
 ;;
 
+let with_published_capture ~base_path captured use =
+  let directory = Filename.concat base_path "captured-identity" in
+  Fun.protect
+    ~finally:(fun () -> if Sys.file_exists directory then Unix.chmod directory 0o700)
+    (fun () -> Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+      let fs = Eio.Stdenv.fs env in
+      Eio.Path.with_open_dir Eio.Path.(fs / base_path) (fun parent ->
+        let stat = Eio.Path.stat ~follow:true parent in
+        let target = match Fs_compat.capability_publication_target
+            ~allowed_root_path:(Unix.realpath base_path)
+            ~allowed_root_device:stat.dev ~allowed_root_inode:stat.ino
+            ~parent_components:[] ~target_leaf:"captured-identity" ~permissions:0o500 with
+          | Ok target -> target
+          | Error error -> Alcotest.fail (Fs_compat.capability_publication_target_error_to_string error) in
+        let registry = match Fs_compat.Publication_recovery.open_registry ~sw ~fs ~registry_root:parent with
+          | Ok registry -> registry
+          | Error error -> Alcotest.fail (Fs_compat.Publication_recovery.registry_error_to_string error) in
+        match Fs_compat.Publication_recovery.with_lane ~registry ~owner:"capture-test" (fun recovery ->
+          match Fs_compat.create_capability_directory_exclusive ~recovery ~parent ~target
+              (Github.captured_payload captured) with
+          | Ok () -> use directory
+          | Error error -> Alcotest.fail (Fs_compat.capability_write_error_to_string error)) with
+        | Ok (Fs_compat.Publication_recovery.Lane_released ()) -> ()
+        | Ok (Fs_compat.Publication_recovery.Lane_release_failed _) ->
+          Alcotest.fail "capture publication lane failed to release"
+        | Error error -> Alcotest.fail (Fs_compat.Publication_recovery.lane_open_error_to_string error)))))
+;;
+
+let test_capture_publishes_the_same_bytes_after_login_changes () =
+  with_temp_base @@ fun base_path config ->
+  let keeper_name = "captured-identity" in
+  let host_dir = match Github.ensure_config_dir ~config ~keeper_name with
+    | Ok directory -> directory | Error error -> Alcotest.fail error in
+  let hosts = "github.com:\n  oauth_token: captured-test-token\n" in
+  let settings = "git_protocol: https\r\neditor: cat\r\n" in
+  List.iter (fun (name, bytes) ->
+    let path = Filename.concat host_dir name in
+    write_file path bytes; Unix.chmod path 0o600)
+    ["hosts.yml", hosts; "config.yml", settings];
+  let captured = match Github.capture_tool_identity ~config ~keeper_name with
+    | Ok captured -> captured | Error error -> Alcotest.fail error in
+  let original_revision = match Github.current_tool_identity_revision ~config ~keeper_name with
+    | Ok revision -> revision | Error error -> Alcotest.fail error in
+  Alcotest.(check string) "capture retains the existing revision schema"
+    original_revision (Github.captured_revision captured);
+  let original_environment = Github.captured_environment captured
+    ~keeper_name ~container_config_dir:"/guest/github" in
+  write_file (Filename.concat host_dir "hosts.yml") "example.org:\n  oauth_token: later-test-token\n";
+  write_file (Filename.concat host_dir "config.yml") "git_protocol: ssh\n";
+  with_published_capture ~base_path captured (fun directory ->
+    Alcotest.(check int) "directory is sealed" 0o500 (Unix.stat directory).st_perm;
+    let files = Sys.readdir directory |> Array.to_list |> List.sort String.compare in
+    Alcotest.(check (list string)) "exact canonical file set"
+      ["config.yml"; "gitconfig"; "hosts.yml"] files;
+    List.iter (fun leaf -> Alcotest.(check int) "each file is read-only" 0o400
+      (Unix.stat (Filename.concat directory leaf)).st_perm) files;
+    Alcotest.(check string) "published hosts retain captured bytes" hosts
+      (read_file (Filename.concat directory "hosts.yml"));
+    Alcotest.(check string) "published config retains captured CRLF bytes" settings
+      (read_file (Filename.concat directory "config.yml"));
+    let reloaded = match Github.captured_tool_identity_of_files
+        (List.map (fun leaf -> leaf, read_file (Filename.concat directory leaf)) files) with
+      | Ok captured -> captured | Error error -> Alcotest.fail error in
+    Alcotest.(check string) "reload uses original bytes for revision" original_revision
+      (Github.captured_revision reloaded);
+    Alcotest.(check (list (pair string string))) "guest wiring ignores later central login"
+      original_environment
+      (Github.captured_environment reloaded ~keeper_name ~container_config_dir:"/guest/github");
+    Alcotest.(check (option string)) "captured GitHub wiring is present"
+      (Some "/guest/github/gitconfig")
+      (List.assoc_opt Github.git_config_global_env_name original_environment))
+;;
+
+let test_unconfigured_capture_does_not_provision_identity () =
+  with_temp_base @@ fun base_path config ->
+  let keeper_name = "absent-capture" in
+  let source_dir = Github.config_dir ~config ~keeper_name in
+  let captured = match Github.capture_tool_identity ~config ~keeper_name with
+    | Ok captured -> captured | Error error -> Alcotest.fail error in
+  Alcotest.(check bool) "capture creates no source identity directory" false (Sys.file_exists source_dir);
+  let empty = match Github.captured_tool_identity_of_files [] with
+    | Ok captured -> captured | Error error -> Alcotest.fail error in
+  Alcotest.(check string) "unconfigured revision is stable"
+    (Github.captured_revision empty) (Github.captured_revision captured);
+  with_published_capture ~base_path captured (fun directory ->
+    Alcotest.(check (list string)) "unconfigured published payload is empty" []
+      (Sys.readdir directory |> Array.to_list);
+    Alcotest.(check (option string)) "unconfigured wiring has no git helper" None
+      (Github.captured_environment captured ~keeper_name ~container_config_dir:"/guest/empty"
+       |> List.assoc_opt Github.git_config_global_env_name))
+;;
+
+let test_captured_file_set_rejects_incomplete_or_changed_wiring () =
+  let hosts = "github.com:\n  oauth_token: captured-test-token\n" in
+  List.iter (fun files ->
+    match Github.captured_tool_identity_of_files files with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail "invalid immutable identity file set was accepted")
+    [ ["hosts.yml", hosts]
+    ; ["hosts.yml", hosts; "gitconfig", "stale wiring"]
+    ; ["hosts.yml", hosts; "hosts.yml", hosts]
+    ; ["config.yml", "git_protocol: https\n"]
+    ; ["unexpected", "bytes"]
+    ; ["../hosts.yml", hosts]
+    ; ["hosts.yml", "{}\n"]
+    ; ["hosts.yml", "github.com:\n\toauth_token: test\n"]
+    ]
+;;
+
+let test_snapshot_cleanup_removes_credentials_from_a_cancelled_caller () =
+  with_temp_base @@ fun _ config ->
+  let keeper_name = "cancelled-snapshot" in
+  let host_dir = match Github.ensure_config_dir ~config ~keeper_name with
+    | Ok directory -> directory | Error error -> Alcotest.fail error in
+  let hosts = "github.com:\n  oauth_token: cancelled-test-token\n" in
+  let source = Filename.concat host_dir "hosts.yml" in
+  write_file source hosts;
+  Unix.chmod source 0o600;
+  let projection = match Github.docker_args_for_tool ~config ~keeper_name
+      ~container_masc_dir:"/guest/.masc" with
+    | Ok projection -> projection | Error error -> Alcotest.fail error in
+  Fun.protect ~finally:projection.cleanup (fun () ->
+    Eio_main.run (fun env ->
+      let previous_fs = Fs_compat.get_fs_opt () in
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Fun.protect
+        ~finally:(fun () -> match previous_fs with
+          | None -> Fs_compat.clear_fs () | Some fs -> Fs_compat.set_fs fs)
+        (fun () ->
+          let cancelled = try
+            Eio.Cancel.sub (fun context ->
+              Eio.Cancel.cancel context Exit;
+              projection.cleanup ();
+              Eio.Fiber.check ());
+            false
+          with Eio.Cancel.Cancelled _ -> true in
+          Alcotest.(check bool) "original cancellation remains visible" true cancelled;
+          Alcotest.(check bool) "cancelled release removed the credential snapshot" false
+            (Sys.file_exists projection.host_snapshot_dir);
+          Alcotest.(check string) "cleanup preserved central credentials" hosts (read_file source))))
+;;
+
 let test_tool_projection_rejects_malformed_identity () =
   with_temp_base @@ fun base_path config ->
   let keeper_name = "malformed-identity" in
@@ -909,6 +1051,14 @@ let () =
             "tool projection rejects malformed identity"
             `Quick
             test_tool_projection_rejects_malformed_identity
+        ; Alcotest.test_case "capture publishes original bytes after login changes" `Quick
+            test_capture_publishes_the_same_bytes_after_login_changes
+        ; Alcotest.test_case "unconfigured capture does not provision identity" `Quick
+            test_unconfigured_capture_does_not_provision_identity
+        ; Alcotest.test_case "captured file set rejects incomplete or changed wiring" `Quick
+            test_captured_file_set_rejects_incomplete_or_changed_wiring
+        ; Alcotest.test_case "cancelled caller removes credential snapshot" `Quick
+            test_snapshot_cleanup_removes_credentials_from_a_cancelled_caller
         ; Alcotest.test_case
             "tool projection rejects permissive identity"
             `Quick

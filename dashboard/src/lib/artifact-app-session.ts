@@ -77,7 +77,8 @@ export class ArtifactAppSession {
   private discardAppliedImports(state:AppState):void {
     const remaining=[]
     for(const copy of this.imported){
-      const applied=copy.request?appRequestApplied(state,copy.request):equalJson(copy.data,state.data)
+      const applied=equalJson(copy.data,state.data)
+        &&(copy.request?appRequestApplied(state,copy.request):true)
       if(applied)discardAppInput(copy)
       else remaining.push(copy)
     }

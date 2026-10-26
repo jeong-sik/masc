@@ -2,6 +2,16 @@
 ; suite both assert on (lib/tool_display.ml / dashboard toolDisplayLabel).
 (copy_files# fixtures/tool-display-labels.json)
 
+(rule
+ (alias runtest-test_dune_source_discovery)
+ (deps test_dune_source_discovery.py ../dune)
+ (action
+  (run python3 %{dep:test_dune_source_discovery.py} --root-dune %{dep:../dune})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_dune_source_discovery)))
+
 (test
  (name test_tui_board_reader)
  (modules test_tui_board_reader)

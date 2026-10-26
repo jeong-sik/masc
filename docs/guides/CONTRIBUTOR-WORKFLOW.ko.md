@@ -38,6 +38,9 @@ flowchart LR
   아래층만 고쳐 따로 push하지 않습니다. 충돌은 맨 아래 PR이 아니라 스택 단위로 보고합니다.
 - 동시 작업은 별도 worktree로 격리합니다. Task claim은 담당을 조율하며 파일을 잠그거나
   다른 체크아웃을 수정할 권한을 주지는 않습니다.
+- 생성한 증거와 소스 사본은 `artifacts/` 아래에 둡니다. 루트 Dune 설정은 이 디렉터리를
+  데이터로 취급하여 파일을 보존하면서 복사된 빌드 설정은 평가하지 않습니다.
+  `.gitignore`만으로는 Dune의 소스 탐색을 막을 수 없습니다.
 - GitHub Native Stack은 REST `stack`을 먼저 읽고 [전용 절차](NATIVE-GITHUB-STACKS.md)를 따릅니다.
   맨 위 PR을 병합하여 스택 전체를 한 번에 반영하며, non-main 직접 base만으로 부모 선행 병합이나 수동 retarget을 요구하지 않습니다. 스택의 모든 PR을 검토합니다.
 - README는 제품 소개, CONTRIBUTING은 개발 시작, 매뉴얼은 사용법, 명세는 인터페이스,

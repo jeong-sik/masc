@@ -601,7 +601,7 @@ let get_sync_deadline_covers_dns_resolution () =
   Eio_mock.Net.on_getaddrinfo mock_net [
     `Run (fun () -> Eio_mock.Clock.advance clock; Eio.Promise.await pending)
   ];
-  let net = (mock_net :> [`Generic | `Unix] Eio.Net.ty Eio.Resource.t) in
+  let net = (mock_net :> [`Generic] Eio.Net.ty Eio.Resource.t) in
   expect_timeout clock (fun () ->
     Http_client.get_sync ~sw ~net ~clock ~timeout_s:4.0
       ~url:"http://stalled-dns.invalid/api/tags" ~headers:[] ())

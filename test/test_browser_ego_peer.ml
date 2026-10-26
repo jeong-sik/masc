@@ -2357,21 +2357,43 @@ let test_operator_input_recovery () =
   let answer label = function
     | Ok value -> value
     | Error _ as result -> failf "%s: %s" label (failure_kind result) in
-  let issued=ref 0 and scripts=ref 0 in
+  let issued=ref 0 and scripts=ref 0 and input_commands=ref [] and recovery_peer=ref None in
   let dialog=ego_dialog "alert" "check" in
+  let completed steps ~has_effect ~snapshot = answered (obj [
+    "completed",`List steps;"effectStarted",`Bool has_effect;"completedEffect",`Bool has_effect;
+    "inputReleased",`Bool true;"failure",`Null;"urlBefore",str "https://app.slack.com/";
+    "url",str "https://app.slack.com/";"title",str "Slack";"snapshot",str snapshot;
+    "chars",`Int (String.length snapshot);"truncated",`Bool false]) in
   let peer=opened (fun sent -> incr scripts;match sent.step with
     | "tabs.list" -> answered tabs
     | "page.dialog" -> answered (obj ["dialog",dialog])
     | "page.native_workflow" ->
       incr issued;
-      if !issued=1 then answered (obj [
-        "completed",`List [obj ["index",`Int 0;"method",str "click";"receipt",obj ["dialog",dialog]]];
-        "effectStarted",`Bool true;"completedEffect",`Bool true;"inputReleased",`Bool false;
-        "failure",obj ["index",`Int 0;"method",str "click";"message",str "answer dialog";"dialog",dialog]])
-      else answered (obj ["completed",`List [];"effectStarted",`Bool false;"completedEffect",`Bool false;
-        "inputReleased",`Bool true;"failure",`Null;"urlBefore",str "https://app.slack.com/";
-        "url",str "https://app.slack.com/";"title",str "Slack";"snapshot",str "root";"chars",`Int 4;"truncated",`Bool false])
+      check bool "recovery workflows stay in the original Space/Page" true
+        (sent.space=`Int 51 && field "tabId" sent.args=`Int 1 && field "label" sent.args=str "p1");
+      let steps=Yojson.Safe.Util.to_list (field "steps" sent.args) in
+      (match steps with
+       | [] -> completed [] ~has_effect:false ~snapshot:"root"
+       | [step] when field "method" step=str "click" ->
+         let selector=text (field "selector" step) in
+         let peer=match !recovery_peer with Some peer -> peer | None -> fail "recovery Peer is not bound" in
+         let pending=match Peer.input_status peer with Input.Uncertain pending -> pending
+           | Ready _ -> fail "nonempty workflow did not acquire input ownership" in
+         check bool "the running click holds the original tab's input" true
+           (Peer.input_busy peer && pending.tab_id=1 && pending.page_label="p1"
+             && pending.operation="native_workflow");
+         input_commands := (pending.command_id,selector) :: !input_commands;
+         (match selector with
+          | "#dialog" -> answered (obj [
+              "completed",`List [obj ["index",`Int 0;"method",str "click";"receipt",obj ["dialog",dialog]]];
+              "effectStarted",`Bool true;"completedEffect",`Bool true;"inputReleased",`Bool false;
+              "failure",obj ["index",`Int 0;"method",str "click";"message",str "answer dialog";"dialog",dialog]])
+          | "#continue" -> completed [obj ["index",`Int 0;"method",str "click";"receipt",obj []]]
+              ~has_effect:true ~snapshot:"root\n  button Continue"
+          | _ -> failf "unexpected recovery click %s" selector)
+       | _ -> fail "unexpected recovery workflow steps")
     | other -> failf "unexpected recovery fixture step %s" other) in
+  recovery_peer := Some peer;
   ignore (dispatch peer Live.Tabs_list (obj []));
   let args steps=obj ["tabId",`Int 1;"expectedUrl",str "https://app.slack.com/";"maxChars",`Int 1000;"steps",`List steps] in
   let first=Peer.dispatch ~command_id:"original-input-command" peer ~verb:Live.Page_native_workflow
@@ -2405,7 +2427,20 @@ let test_operator_input_recovery () =
   let resumed=answer "continue after explicit operator assertion" (dispatch peer Live.Page_native_workflow (args [])) in
   check string "resume retains operator provenance, not native release proof" "operator_asserted"
     Yojson.Safe.Util.(resumed |> member "inputReadiness" |> to_string);
-  check int "only original and subsequent distinct workflow were issued" 2 !issued
+  let continued=answer "new click after explicit operator assertion"
+    (Peer.dispatch ~command_id:"continued-input-command" peer ~verb:Live.Page_native_workflow
+      (args [obj ["method",str "click";"selector",str "#continue"]])) in
+  check bool "the new click returns complete native input settlement" true
+    (field "completed" continued=`List [obj ["index",`Int 0;"method",str "click";"receipt",obj []]]
+      && field "effectStarted" continued=`Bool true && field "completedEffect" continued=`Bool true
+      && field "inputReleased" continued=`Bool true && field "failure" continued=`Null
+      && field "snapshot" continued=str "root\n  button Continue");
+  check bool "new input settles instead of retaining the operator assertion as native proof" true
+    (Peer.input_status peer=Input.Ready Input.Command_settled && not (Peer.input_busy peer)
+      && field "inputReadiness" continued=`Null);
+  check (list (pair string string)) "original click is never replayed; the new command clicks once"
+    ["original-input-command","#dialog";"continued-input-command","#continue"] (List.rev !input_commands);
+  check int "only original, empty observation and new input workflows were issued" 3 !issued
 
 let test_native_space_status () =
   let ownership=ref "agentDelegatedToUser" and invalid=ref false and unavailable=ref false in

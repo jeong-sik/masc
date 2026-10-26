@@ -326,7 +326,9 @@ let read_binary_body_for_operator_base64 ~base_path item =
     (match read_binary_body_base64_at_limit ~max_bytes:bytes ~base_path item with
      | Error (Over_delivery_ceiling _) ->
        Error (Body_unreadable "filed body exceeds its recorded size")
-     | result -> result)
+     | Error ((Not_binary | Body_not_filed | Body_unreadable _
+              | Body_identity_mismatch _) as error) -> Error error
+     | Ok body -> Ok body)
   | Evidence_artifact_binary _ -> Error (Body_unreadable "negative recorded file size")
   | Evidence_collaboration _ | Evidence_note _ | Evidence_artifact _
   | Evidence_invalid_reference | Evidence_artifact_unreadable _ -> Error Not_binary

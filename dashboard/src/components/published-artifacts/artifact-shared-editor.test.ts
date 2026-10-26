@@ -1,0 +1,294 @@
+import { html } from 'htm/preact'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import * as Y from 'yjs'
+import { EditorView } from '@codemirror/view'
+import { ArtifactSharedEditor } from './artifact-shared-editor'
+import { ArtifactReader } from './artifact-reader'
+import type { ArtifactDraftSnapshot } from './artifact-composer'
+import { seedSharedDocument, sharedSource, sharedState, selectSharedSource } from '../../lib/artifact-shared-document'
+import { draftBase64, draftBytes } from '../../lib/artifact-live-session'
+import type { ArtifactDraftView } from '../../api/artifact-drafts'
+import { sendArtifactDraftCommand } from '../../api/artifact-drafts'
+import { streamArtifactDraft, sendArtifactPresence, type ArtifactDraftLiveFrame } from '../../api/artifact-draft-live'
+import { captureArtifactWorkspace, fetchPublishedArtifact, publishArtifact, readPublishedDraft, type ArtifactDocument } from '../../api/published-artifacts'
+import { artifactDraftRecoveries, discardArtifactDraftRecovery } from '../../lib/artifact-draft-recovery'
+vi.mock('../../api/published-artifacts', async original => ({ ...await original<typeof import('../../api/published-artifacts')>(),
+  captureArtifactWorkspace: vi.fn(), fetchPublishedArtifact: vi.fn(), publishArtifact: vi.fn(), readPublishedDraft: vi.fn() }))
+vi.mock('../../api/artifact-drafts', async original => ({ ...await original<typeof import('../../api/artifact-drafts')>(), sendArtifactDraftCommand: vi.fn() }))
+vi.mock('../../api/artifact-draft-live', async original => ({ ...await original<typeof import('../../api/artifact-draft-live')>(),
+  streamArtifactDraft: vi.fn(), sendArtifactPresence: vi.fn() }))
+vi.mock('../../router', () => ({ navigate: vi.fn() }))
+vi.mock('../common/markdown', () => ({ Markdown: ({ text }: { text: string }) => html`<div>${text}</div>` }))
+const workspace = { basePath: '/fixture', mascRoot: '/separate-runtime-root' }
+const documents: Y.Doc[] = []
+const retainedDrafts = new Map<object, ArtifactDraftSnapshot>()
+const draftRetention = {
+  remember: (snapshot: ArtifactDraftSnapshot) => retainedDrafts.set(snapshot.identity, snapshot),
+  forget: (identity: object) => retainedDrafts.delete(identity),
+}
+beforeEach(() => {
+  retainedDrafts.clear()
+  vi.mocked(captureArtifactWorkspace).mockReset().mockResolvedValue(workspace)
+  vi.mocked(fetchPublishedArtifact).mockReset(); vi.mocked(publishArtifact).mockReset(); vi.mocked(readPublishedDraft).mockReset()
+  vi.mocked(sendArtifactDraftCommand).mockReset(); vi.mocked(streamArtifactDraft).mockReset()
+  vi.mocked(sendArtifactPresence).mockReset().mockResolvedValue()
+})
+afterEach(() => {
+  cleanup()
+  for (const char of ['a', 'b', 'c']) {
+    for (const record of artifactDraftRecoveries(workspace, `artifact-${char.repeat(32)}`)) discardArtifactDraftRecovery(record.id)
+  }
+  for (const doc of documents.splice(0)) doc.destroy()
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+})
+
+function fixture(char: string) {
+  const authority = seedSharedDocument('shared source\r\n한글 😀\r\n'); documents.push(authority)
+  const target = { artifact_id: `artifact-${char.repeat(32)}`, generation: '019f0000-0000-7000-8000-000000000000' }
+  let sequence = 0
+  const snapshot = (): ArtifactDraftView => ({ content: sharedSource(authority), selection: null, draft: {
+    schema: 'masc.artifact_draft.v1', target, state: draftBase64(sharedState(authority)), base_revision: 1,
+    base_sha256: 'a'.repeat(64), sequence, updated_by: 'human', updated_at: '2026-10-25T13:00:00Z',
+  } })
+  const frame = (): ArtifactDraftLiveFrame => ({ schema: 'masc.artifact_draft_live.v1', target, session_id: 'self', peers: [], document: snapshot() })
+  vi.mocked(streamArtifactDraft).mockImplementation(async (_, __, callback, signal) => {
+    callback(frame())
+    await new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true }))
+  })
+  const merge = (updates: readonly string[]) => { updates.forEach(update => Y.applyUpdate(authority, draftBytes(update))); sequence++; return snapshot() }
+  const artifact = { id: target.artifact_id, revision: 1, title: 'original title', summary: 'original summary', format: 'markdown' as const,
+    author: 'publisher', created_at: '2026-10-25T13:00:00Z', task_id: null, goal_id: null, body: { _blob: { sha256: 'a'.repeat(64) } }, url: '/dashboard' }
+  const doc: ArtifactDocument = { artifact, content: sharedSource(authority), revisions: [artifact] }
+  const mount = (isCurrent = () => true, onPublished = vi.fn()) => render(html`<${ArtifactSharedEditor} draftRetention=${draftRetention} doc=${doc} workspaceRoot="/fixture"
+    isCurrent=${isCurrent} onCloseRequest=${() => {}} onMutation=${() => {}} onPublished=${onPublished} onClose=${() => {}} />`)
+  const editor = async () => EditorView.findFromDOM(await screen.findByRole('textbox', { name: '공동 편집 원고' }))!
+  return { authority, target, snapshot, merge, doc, mount, editor }
+}
+it('binds actual editor transactions to exact CRLF source, handles remote edits and removes departed peer cursors', async () => {
+  const authority = seedSharedDocument('원고 😀\r\n다음\r\n')
+  const target = { artifact_id: `artifact-${'a'.repeat(32)}`, generation: '019f0000-0000-7000-8000-000000000000' }
+  let sequence = 0, receive!: (frame: ArtifactDraftLiveFrame) => void
+  let peers: ArtifactDraftLiveFrame['peers'] = [{ session_id: 'self', actor: 'human', position: null, observed_at: '2026-10-25T13:00:00Z' }]
+  const snapshot = (): ArtifactDraftView => ({ content: sharedSource(authority), selection: null, draft: { schema: 'masc.artifact_draft.v1', target,
+    state: draftBase64(sharedState(authority)), base_revision: 1, base_sha256: 'a'.repeat(64), sequence, updated_by: 'human', updated_at: '2026-10-25T13:00:00Z' } })
+  const frame = () => ({ schema: 'masc.artifact_draft_live.v1' as const, target, session_id: 'self', peers, document: snapshot() })
+  vi.mocked(sendArtifactPresence).mockResolvedValue()
+  vi.mocked(sendArtifactDraftCommand).mockImplementation(async command => {
+    if (command.action === 'merge') { command.updates.forEach(update => Y.applyUpdate(authority, draftBytes(update))); sequence++; receive(frame()) }
+    return snapshot()
+  })
+  vi.mocked(streamArtifactDraft).mockImplementation(async (_, __, callback, signal) => {
+    receive = callback; callback(frame())
+    await new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true }))
+  })
+  const artifact = { id: target.artifact_id, revision: 1, title: '공동 원고', summary: '검증', format: 'markdown' as const, author: 'publisher',
+    created_at: '2026-10-25T13:00:00Z', task_id: null, goal_id: null, body: { _blob: { sha256: 'a'.repeat(64) } }, url: '/dashboard' }
+  render(html`<${ArtifactSharedEditor} draftRetention=${draftRetention} doc=${{ artifact, content: sharedSource(authority), revisions: [artifact] }} workspaceRoot="/fixture"
+    isCurrent=${() => true} onCloseRequest=${() => {}} onMutation=${() => {}} onPublished=${() => {}} onClose=${() => {}} />`)
+  const editable = await screen.findByRole('textbox', { name: '공동 편집 원고' })
+  const editor = EditorView.findFromDOM(editable)!
+  expect(editor.state.doc.toString()).toBe('원고 😀\r\n다음\r\n')
+  editor.dispatch({ changes: { from: 0, insert: '내 글 ' } })
+  await waitFor(() => expect(sharedSource(authority)).toBe('내 글 원고 😀\r\n다음\r\n'))
+  authority.getText('content').insert(authority.getText('content').length, '상대 글\n'); sequence++
+  peers = [...peers, { session_id: 'other', actor: 'keeper-fixture', position: selectSharedSource(authority, { anchor: 0, head: 3 }), observed_at: '2026-10-25T13:01:00Z' }]
+  receive(frame())
+  await waitFor(() => expect(editor.state.doc.toString()).toBe(sharedSource(authority)))
+  await screen.findByLabelText('keeper-fixture의 편집 위치')
+  peers = peers.slice(0, 1); receive(frame())
+  await waitFor(() => expect(screen.queryByLabelText('keeper-fixture의 편집 위치')).toBeNull())
+  cleanup(); authority.destroy()
+})
+
+it('publishes again only after explicit latest-version comparison, preserving its metadata and the original canonical workspace', async () => {
+  const f = fixture('b'), onPublished = vi.fn()
+  let latest = f.doc
+  vi.mocked(sendArtifactDraftCommand).mockImplementation(async command => command.action === 'merge' ? f.merge(command.updates) : f.snapshot())
+  vi.mocked(fetchPublishedArtifact).mockImplementation(async () => latest)
+  vi.mocked(publishArtifact).mockImplementation(async request => {
+    const artifact = { ...latest.artifact, ...request, revision: latest.artifact.revision + 1,
+      task_id: request.task_id ?? null, goal_id: request.goal_id ?? null }
+    latest = { artifact, content: request.content, revisions: [artifact] }
+    return { schema: 'masc.published_artifact.v1', artifact, revision_url: '/dashboard' }
+  })
+  vi.mocked(readPublishedDraft).mockImplementation(async () => latest)
+  f.mount(() => true, onPublished)
+  const editor = await f.editor()
+  await waitFor(() => expect((screen.getByRole('button', { name: '새 버전으로 게시' }) as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(screen.getByRole('button', { name: '새 버전으로 게시' }))
+  const save = await screen.findByRole('button', { name: '새 버전 저장' })
+  await waitFor(() => expect((save as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(save)
+  await waitFor(() => expect(onPublished).toHaveBeenCalledTimes(1))
+  expect(vi.mocked(publishArtifact).mock.calls[0]![0].expected_revision).toBe(1)
+
+  // Another publisher changed both content and metadata after our first post.
+  latest = { ...latest, artifact: { ...latest.artifact, revision: 3, title: 'latest title', summary: 'latest summary',
+    format: 'html', task_id: 'task-latest', goal_id: 'goal-latest' }, content: '<p>external publication</p>' }
+  const frozen = editor.state.doc.toString()
+  vi.mocked(captureArtifactWorkspace).mockResolvedValue({ basePath: '/fixture', mascRoot: '/replacement-runtime-root' })
+  fireEvent.click(screen.getByRole('button', { name: '새 버전으로 게시' }))
+  const comparison = within(await screen.findByRole('region', { name: '최신 게시물과 원고 비교' }))
+  expect(comparison.getByText('<p>external publication</p>')).toBeTruthy()
+  expect(comparison.getByText(frozen, { normalizer: value => value })).toBeTruthy()
+  expect(screen.queryByLabelText('문서 본문')).toBeNull()
+  expect(publishArtifact).toHaveBeenCalledTimes(1)
+  editor.dispatch({ changes: { from: 0, insert: 'later shared edit ' } })
+  await waitFor(() => expect(sharedSource(f.authority)).toBe(`later shared edit ${frozen}`))
+  fireEvent.click(comparison.getByRole('button', { name: '이 원고로 새 버전 준비' }))
+  expect((await screen.findByLabelText('문서 본문') as HTMLTextAreaElement).value).toBe(frozen)
+  expect((screen.getByLabelText('문서 제목') as HTMLInputElement).value).toBe('latest title')
+  expect((screen.getByLabelText('문서 요약') as HTMLInputElement).value).toBe('latest summary')
+  expect((screen.getByLabelText('문서 형식') as HTMLSelectElement).value).toBe('html')
+  const secondSave = screen.getByRole('button', { name: '새 버전 저장' })
+  await waitFor(() => expect((secondSave as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(secondSave)
+  await waitFor(() => expect(onPublished).toHaveBeenCalledTimes(2))
+  expect(vi.mocked(publishArtifact).mock.calls[1]).toEqual([{
+    id: f.target.artifact_id, expected_revision: 3, title: 'latest title', summary: 'latest summary', format: 'html',
+    content: frozen, task_id: 'task-latest', goal_id: 'goal-latest',
+  }, workspace])
+  expect(fetchPublishedArtifact).toHaveBeenLastCalledWith(f.target.artifact_id, undefined, undefined, workspace)
+  expect(captureArtifactWorkspace).toHaveBeenCalledTimes(1)
+  expect(retainedDrafts.size).toBe(0)
+  expect(editor.state.doc.toString()).toBe(`later shared edit ${frozen}`)
+})
+
+it('offers an in-flight owner’s full local draft after remount without replaying it until explicit resume', async () => {
+  const f = fixture('c')
+  let current = true, mergeCount = 0
+  vi.mocked(sendArtifactDraftCommand).mockImplementation(async command => {
+    if (command.action !== 'merge') return f.snapshot()
+    if (++mergeCount === 1) return new Promise<ArtifactDraftView>(() => {})
+    return f.merge(command.updates)
+  })
+  const retired = f.mount(() => current)
+  const editor = await f.editor(), original = editor.state.doc.toString()
+  editor.dispatch({ changes: { from: 0, insert: 'unacknowledged ' } })
+  await waitFor(() => expect(mergeCount).toBe(1))
+  current = false; retired.unmount()
+  const retained = artifactDraftRecoveries(workspace, f.target.artifact_id)
+  expect(retained).toHaveLength(1)
+  expect(retained[0]?.persisted).toBe(true)
+  f.mount()
+  const reopened = await f.editor()
+  await screen.findByText(/복구 원고 ·/)
+  expect(reopened.state.doc.toString()).toBe(original)
+  expect(sharedSource(f.authority)).toBe(original)
+  expect(mergeCount).toBe(1)
+  expect(screen.getByRole('button', { name: '복구 원고 다운로드' })).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: '공유 원고에 합치기' }))
+  await waitFor(() => expect(mergeCount).toBe(2))
+  await waitFor(() => expect(reopened.state.doc.toString()).toBe(`unacknowledged ${original}`))
+  expect(sharedSource(f.authority)).toBe(`unacknowledged ${original}`)
+  await waitFor(() => expect(artifactDraftRecoveries(workspace, f.target.artifact_id)).toHaveLength(0))
+})
+
+it('retains the old durable recovery during an in-flight resume when browser quota blocks the new owner’s copy', async () => {
+  const f = fixture('c')
+  let mergeCount = 0, acknowledge!: () => void
+  vi.mocked(sendArtifactDraftCommand).mockImplementation(async command => {
+    if (command.action !== 'merge') return f.snapshot()
+    if (++mergeCount === 1) return new Promise<ArtifactDraftView>(() => {})
+    return new Promise<ArtifactDraftView>(resolve => { acknowledge = () => resolve(f.merge(command.updates)) })
+  })
+  const retired = f.mount(), editor = await f.editor()
+  editor.dispatch({ changes: { from: 0, insert: 'durable unacknowledged ' } })
+  await waitFor(() => expect(mergeCount).toBe(1))
+  retired.unmount()
+  const old = artifactDraftRecoveries(workspace, f.target.artifact_id)[0]!
+  expect(old.persisted).toBe(true)
+  const storage = localStorage
+  const oldKey = Array.from({ length: storage.length }, (_, index) => storage.key(index)!)
+    .find(key => JSON.parse(storage.getItem(key) ?? 'null')?.id === old.id)!
+  const durable = storage.getItem(oldKey)
+  expect(durable).not.toBeNull()
+  vi.stubGlobal('localStorage', { get length() { return storage.length }, key: storage.key.bind(storage),
+    getItem: storage.getItem.bind(storage), removeItem: storage.removeItem.bind(storage),
+    setItem() { throw new Error('quota exceeded') },
+  })
+  f.mount()
+  const reopened = await f.editor()
+  await screen.findByText(/복구 원고 ·/)
+  expect(mergeCount).toBe(1)
+  fireEvent.click(screen.getByRole('button', { name: '공유 원고에 합치기' }))
+  await waitFor(() => expect(mergeCount).toBe(2))
+  await screen.findByText(/브라우저에 복구 원고를 저장하지 못했습니다/)
+  expect(reopened.state.doc.toString()).toBe(`durable unacknowledged ${f.doc.content}`)
+  expect(storage.getItem(oldKey)).toBe(durable)
+  expect(artifactDraftRecoveries(workspace, f.target.artifact_id).some(record => record.id === old.id && record.persisted)).toBe(true)
+  acknowledge()
+  await waitFor(() => expect(storage.getItem(oldKey)).toBeNull())
+  await waitFor(() => expect(artifactDraftRecoveries(workspace, f.target.artifact_id)).toHaveLength(0))
+})
+
+
+it('retains the publication copy and later edits outside the retired shared editor without writing under replacement authority', async () => {
+  const f = fixture('b')
+  let current = true
+  vi.mocked(sendArtifactDraftCommand).mockResolvedValue(f.snapshot())
+  vi.mocked(fetchPublishedArtifact).mockResolvedValue(f.doc)
+  const view = f.mount(() => current)
+  await f.editor()
+  const prepare = screen.getByRole('button', { name: '새 버전으로 게시' }) as HTMLButtonElement
+  await waitFor(() => expect(prepare.disabled).toBe(false))
+  fireEvent.click(prepare)
+  await screen.findByLabelText('문서 본문')
+  expect(retainedDrafts.size).toBe(1)
+  expect([...retainedDrafts.values()][0]!.base).toEqual({ id: f.target.artifact_id, revision: 1 })
+  const content = '\uFEFF# 게시 전 원고\r\n한글 😀\n'
+  fireEvent.input(screen.getByLabelText('문서 제목'), { target: { value: 'local publication title' } })
+  fireEvent.input(screen.getByLabelText('문서 본문'), { target: { value: content } })
+  const snapshot = [...retainedDrafts.values()][0]!
+  expect(snapshot.value).toEqual({ title: 'local publication title', summary: f.doc.artifact.summary,
+    format: 'markdown', content, task_id: null, goal_id: null })
+  current = false
+  fireEvent.click(screen.getByRole('button', { name: '새 버전 저장' }))
+  expect(publishArtifact).not.toHaveBeenCalled()
+  view.unmount()
+  expect(retainedDrafts.get(snapshot.identity)?.value.content).toBe(content)
+  expect(sharedSource(f.authority)).toBe(f.doc.content)
+})
+
+
+it.each(['editor', 'reader'] as const)('requires an explicit discard decision when %s closes a locally edited publication copy', async close => {
+  const f = fixture('b')
+  vi.mocked(sendArtifactDraftCommand).mockResolvedValue(f.snapshot())
+  vi.mocked(fetchPublishedArtifact).mockResolvedValue(f.doc)
+  const onClose = vi.fn()
+  const view = render(html`<${ArtifactReader} doc=${f.doc} fixedRevision=${false} workspaceRoot="/fixture"
+    draftRetention=${draftRetention} checkState=${{ kind: 'known', check: null }} authRevision=${0}
+    isCurrent=${() => true} onMutation=${() => {}} onPublication=${() => {}} onPublished=${() => {}}
+    onCheckChanged=${() => {}} onClose=${() => { onClose(); view.unmount() }} />`)
+  fireEvent.click(screen.getByRole('button', { name: '공동 편집', exact: true }))
+  await f.editor()
+  const prepare = screen.getByRole('button', { name: '새 버전으로 게시' }) as HTMLButtonElement
+  await waitFor(() => expect(prepare.disabled).toBe(false))
+  fireEvent.click(prepare)
+  const body = await screen.findByLabelText('문서 본문')
+  const content = '\uFEFF# 아직 게시하지 않음\r\n한글 😀\n'
+  fireEvent.input(body, { target: { value: content } })
+  const blobs: Blob[] = []
+  vi.spyOn(URL, 'createObjectURL').mockImplementation(blob => { blobs.push(blob as Blob); return 'blob:local-publication' })
+  vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+  vi.stubGlobal('confirm', vi.fn(() => false))
+  const closeButton = () => screen.getByRole('button', { name: close === 'editor' ? '공동 편집 닫기' : '목록으로', exact: true })
+  fireEvent.click(closeButton())
+  expect(window.confirm).toHaveBeenCalledTimes(1)
+  expect((screen.getByLabelText('문서 본문') as HTMLTextAreaElement).value).toBe(content)
+  expect(retainedDrafts.size).toBe(1)
+  expect(onClose).not.toHaveBeenCalled()
+  const composer = within(screen.getByRole('region', { name: '아티팩트 편집' }))
+  fireEvent.click(composer.getByRole('button', { name: '원고 다운로드' }))
+  expect(new Uint8Array(await blobs[0]!.arrayBuffer())).toEqual(new TextEncoder().encode(content))
+  vi.mocked(window.confirm).mockReturnValue(true)
+  fireEvent.click(closeButton())
+  expect(retainedDrafts.size).toBe(0)
+  expect(screen.queryByLabelText('문서 본문')).toBeNull()
+  expect(onClose).toHaveBeenCalledTimes(close === 'reader' ? 1 : 0)
+  expect(publishArtifact).not.toHaveBeenCalled()
+  expect(sharedSource(f.authority)).toBe(f.doc.content)
+})

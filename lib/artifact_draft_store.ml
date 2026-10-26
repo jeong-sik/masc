@@ -117,7 +117,7 @@ let mutate ?runner ~base_path ~actor (target : Draft.target) transform =
       let* committed = commit ~base_path snapshot draft in
       match committed with `Retry -> attempt () | `Saved -> Ok { draft; content = source.content; selection } in
   attempt ()
-let execute ?runner ~base_path ~actor command = protect (fun () ->
+let execute_command ?runner ~base_path ~actor command = protect (fun () ->
   if String.trim actor = "" || not (String.is_valid_utf_8 actor) then Error (Invalid "actor must be nonblank UTF-8")
   else match command with
   | Draft.Open { artifact_id; revision } -> open_draft ?runner ~base_path ~actor ~artifact_id ~revision ()
@@ -130,4 +130,14 @@ let execute ?runner ~base_path ~actor command = protect (fun () ->
   | Edit { selection; expected; replacement } ->
     mutate ?runner ~base_path ~actor selection.target (fun ?runner draft ->
       let* edited = Engine.edit ?runner ~state:draft.Draft.state ~selection:selection.position ~expected ~replacement () |> transformed in
-      Ok (edited.snapshot, Some ({ Draft.target = selection.target; position = edited.selection }, edited.anchor, edited.head))))
+      Ok (edited.snapshot, Some ({ Draft.target = selection.target; position = edited.selection }, edited.anchor, edited.head)))
+  | Resolve selection ->
+    let* view = read ?runner ~base_path ~artifact_id:selection.target.artifact_id () in
+    let* () = matching selection.target view.draft in
+    let* selected = Engine.resolve ?runner ~state:view.draft.state ~selection:selection.position () |> transformed in
+    Ok { view with selection = Some (selection, selected.anchor, selected.head) })
+
+let execute ?runner ~base_path ~actor command =
+  let result = execute_command ?runner ~base_path ~actor command in
+  (match result with Error _ -> () | Ok view -> Artifact_draft_live.publish ~base_path ~draft:view.draft ~content:view.content);
+  result

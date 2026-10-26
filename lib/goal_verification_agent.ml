@@ -420,10 +420,10 @@ let retained_recovery_work config (work : pending_work list) =
       | Error error ->
         Log.Misc.error "goal verifier original unavailable goal_id=%s: %s"
           goal_id (worker_detail error);
-        (* The read failed but the Goal still owns its recovery: keep it in
-           the work list so process_pending_work defers it with a retryable
-           per-Goal Proof_lookup_unavailable outcome instead of dropping it. *)
-        if not (List.exists (fun item -> item.goal_id=goal_id) work)
+        (* Keep the owned recovery discoverable. Processing returns a per-Goal
+           Proof_lookup_unavailable deferral; this does not arm a retry or
+           create a pending-request diagnostic for a phase-moved Goal. *)
+        if not (List.exists (fun (item : pending_work) -> item.goal_id=goal_id) work)
         then work @ [{goal_id}] else work
       | Ok rows ->
         List.fold_left (fun (work : pending_work list) retained ->
@@ -625,7 +625,6 @@ let drain_once ?(sw : Eio.Switch.t option = None) config : (unit, scan_failure) 
       (fun item ->
          (* RFC-0387: per-row outcomes are logged at the point of decision
             (commit/defer); the synchronous drain discards them. *)
-         (* fire-and-forget: per-row results are durable in the ledger. *)
          ignore (process_pending_work ~sw config item))
       (retained_recovery_work config collected);
     Ok ()

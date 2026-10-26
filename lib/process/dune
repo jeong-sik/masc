@@ -40,4 +40,4 @@
   threads)
  (foreign_stubs
   (language c)
-  (names posix_spawn_stubs process_memory_stubs)))
+  (names posix_spawn_stubs process_memory_stubs file_lock_stubs)))

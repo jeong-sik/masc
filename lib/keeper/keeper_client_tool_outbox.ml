@@ -2,6 +2,7 @@ let ( let* ) = Result.bind
 
 type entry = { path : string; json : Yojson.Safe.t }
 type snapshot = { directory : string; entries : entry list }
+module Producer_map = Map.Make(String)
 
 type receipt =
   { thread_id : string
@@ -12,16 +13,57 @@ type receipt =
   ; response : Yojson.Safe.t
   }
 
-type host_producer = { producer_id : string; runtime_label : string; turn_count : int }
-
-let host_producer ~runtime_label ~turn_count =
-  if String.trim runtime_label = "" then Error "tool result producer label is empty"
-  else if turn_count < 0 then Error "tool result producer turn count is negative"
-  else Ok {producer_id=Random_id.uuid_v7 ();runtime_label;turn_count}
+type host_producer =
+  { producer_id : string; runtime_label : string; turn_count : int
+  ; base_path : string; keeper_name : string; lease_path : string }
 
 let directory ~base_path ~keeper_name =
   let* session_path = Keeper_official_client_session_store.path ~base_path ~keeper_name in
   Ok (Filename.concat (Filename.dirname session_path) "undelivered-tools")
+
+let lease_directory ~base_path ~keeper_name =
+  let* directory = directory ~base_path ~keeper_name in
+  Ok (Filename.concat (Filename.dirname directory) "tool-result-producer-leases")
+
+let canonical_lease_path ~base_path ~keeper_name producer_id =
+  let* directory = lease_directory ~base_path ~keeper_name in
+  try Ok (Filename.concat (Fs_compat.realpath directory) (producer_id ^ ".lock")) with
+  | Unix.Unix_error (error, operation, _) ->
+    Error (operation ^ ": " ^ Unix.error_message error)
+  | Sys_error detail -> Error detail
+
+let host_producer ~base_path ~keeper_name ~runtime_label ~turn_count =
+  if String.trim runtime_label = "" then Error "tool result producer label is empty"
+  else if turn_count < 0 then Error "tool result producer turn count is negative"
+  else
+    let producer_id = Random_id.uuid_v7 () in
+    let* leases = lease_directory ~base_path ~keeper_name in
+    let* () = Keeper_fs.save_bytes_durable_atomic ~ownership_root:base_path
+        ~temp_dir:(Filename.concat (Filename.dirname leases) ".tool-result-lease-staging")
+        (Filename.concat leases (producer_id ^ ".lock")) ""
+      |> Result.map_error Keeper_fs.durable_write_error_to_string in
+    let* lease_path = canonical_lease_path ~base_path ~keeper_name producer_id in
+    Ok {producer_id;runtime_label;turn_count;base_path;keeper_name;lease_path}
+
+let start_host_producer ~sw ~base_path ~keeper_name ~runtime_label ~turn_count =
+  Eio.Switch.check sw;
+  let* producer = host_producer ~base_path ~keeper_name ~runtime_label ~turn_count in
+  let ready, resolve = Eio.Promise.create () in
+  Eio.Switch.check sw;
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Eio.Fiber.yield ();
+    match File_lock_eio.with_liveness_lock_observed ~lock_path:producer.lease_path
+        (fun () -> Eio.Promise.resolve resolve (Ok ()); Eio.Fiber.await_cancel ()) with
+    | File_lock_eio.Lock_not_acquired error ->
+      Eio.Promise.resolve resolve (Error (File_lock_eio.durable_lock_error_to_string error));
+      `Stop_daemon
+    | File_lock_eio.Body_completed {release_error; _} ->
+      Option.iter (fun error -> Log.Keeper.warn ~keeper_name
+        "tool result producer lease release failed: %s"
+        (File_lock_eio.durable_lock_error_to_string error)) release_error;
+      `Stop_daemon);
+  let* () = Eio.Promise.await ready in
+  Ok producer
 
 let to_json (result : receipt) =
   `Assoc ["thread_id", `String result.thread_id; "turn_id", `String result.turn_id;
@@ -88,12 +130,12 @@ let retain_json ~base_path ~keeper_name json =
 let retain ~base_path ~keeper_name result =
   retain_json ~base_path ~keeper_name (to_json result)
 
-let retain_host_result producer ~base_path ~keeper_name ~invocation_index ~call_id ~tool_name ~arguments ~response =
+let retain_host_result producer ~invocation_index ~call_id ~tool_name ~arguments ~response =
   let json = `Assoc ["host_invocation_index",`Int invocation_index;
     "host_producer_id",`String producer.producer_id;
     "runtime_label",`String producer.runtime_label;"host_turn_count",`Int producer.turn_count;
     "call_id",`String call_id;"tool_name",`String tool_name;"arguments",arguments;"response",response] in
-  retain_json ~base_path ~keeper_name json
+  retain_json ~base_path:producer.base_path ~keeper_name:producer.keeper_name json
 
 let load ~base_path ~keeper_name =
   let* directory = directory ~base_path ~keeper_name in
@@ -105,13 +147,39 @@ let load ~base_path ~keeper_name =
       |> Result.map (List.sort String.compare)
       |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string
     | Fs_compat.Other -> Error "tool outbox is not a directory" in
+  let inactive_producers = ref Producer_map.empty in
+  let producer_inactive json =
+    match json with
+    | `Assoc fields ->
+      (match List.assoc_opt "host_producer_id" fields with
+       | None -> Ok true
+       | Some (`String producer_id) ->
+         (match Producer_map.find_opt producer_id !inactive_producers with
+          | Some inactive -> Ok inactive
+          | None ->
+            let* lock_path = canonical_lease_path ~base_path ~keeper_name producer_id in
+            let* inactive = match File_lock_eio.try_with_liveness_lock_observed
+                ~lock_path (fun () -> ()) with
+              | File_lock_eio.Lock_held_elsewhere -> Ok false
+              | Lock_attempted (Lock_not_acquired error) ->
+                Error (File_lock_eio.durable_lock_error_to_string error)
+              | Lock_attempted (Body_completed {release_error=None; _}) -> Ok true
+              | Lock_attempted (Body_completed {release_error=Some error; _}) ->
+                Error (File_lock_eio.durable_lock_error_to_string error) in
+            inactive_producers := Producer_map.add producer_id inactive !inactive_producers;
+            Ok inactive)
+       | Some _ -> Error "invalid host result producer identity")
+    | _ -> Error "tool result receipt must be an object" in
   let* entries = List.fold_left (fun acc name ->
     let* acc = acc in
     let path = Filename.concat directory name in
     let* json = read path in
     match json with
     | None -> Error "tool outbox receipt disappeared during load"
-    | Some json -> let* () = validate path json in Ok ({path; json} :: acc)) (Ok []) names in
+    | Some json ->
+      let* () = validate path json in
+      let* inactive = producer_inactive json in
+      if inactive then Ok ({path; json} :: acc) else Ok acc) (Ok []) names in
   Ok {directory; entries = List.rev entries}
 
 let receipt_ids snapshot =

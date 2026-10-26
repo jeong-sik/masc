@@ -606,3 +606,48 @@ end
 
 (** Number of tracked lock paths (for diagnostics). *)
 let lock_count () = SMap.cardinal (Atomic.get table).entries
+
+
+external try_open_liveness_raw : string -> Unix.file_descr option
+  = "masc_try_open_liveness_lock"
+
+let try_with_liveness_lock_observed ~lock_path f =
+  let execution_context = Eio_guard.execution_context () in
+  (* Protect descriptor acquisition through publication of its ownership to
+     this scope. The caller's body stays cancellable. *)
+  let acquire () =
+    try
+      let fd = run_blocking_lock_op (fun () -> try_open_liveness_raw lock_path) in
+      Ok fd
+    with Unix.Unix_error (error, operation, argument) ->
+      Error (durable_lock_error ~lock_path ~phase:Open_lock_file
+        (unix_failure (error, operation, argument))) in
+  let acquired = protect_cleanup execution_context acquire in
+  match acquired with
+  | Error error -> Lock_attempted (Lock_not_acquired error)
+  | Ok None -> Lock_held_elsewhere
+  | Ok (Some fd) ->
+    let body = match f () with
+      | value -> `Returned value
+      | exception exn -> `Raised (exn, Printexc.get_raw_backtrace ()) in
+    let release = protect_cleanup execution_context (fun () ->
+      (* Closing this open-file description releases only its own flock. *)
+      match close_fd_result fd with
+      | Ok () -> None
+      | Error cause -> Some (durable_lock_error ~lock_path
+          ~phase:Release_process_lock cause)) in
+    match body, release with
+    | `Returned value, release_error ->
+      Lock_attempted (Body_completed {value; release_error})
+    | `Raised (exn, backtrace), None -> Printexc.raise_with_backtrace exn backtrace
+    | `Raised (exn, backtrace), Some error ->
+      Log.Misc.error "liveness lock release failed during owner exception: %s"
+        (durable_lock_error_to_string error);
+      Printexc.raise_with_backtrace exn backtrace
+
+let with_liveness_lock_observed ~lock_path f =
+  match try_with_liveness_lock_observed ~lock_path f with
+  | Lock_attempted result -> result
+  | Lock_held_elsewhere -> Lock_not_acquired
+      (durable_lock_error ~lock_path ~phase:Acquire_process_lock
+        (unix_failure (Unix.EAGAIN, "flock", lock_path)))

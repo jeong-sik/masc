@@ -21,13 +21,28 @@ val retain :
   receipt -> (unit, string) result
 
 type host_producer
-val host_producer : runtime_label:string -> turn_count:int -> (host_producer, string) result
-(** One host-owned dynamic-tool projection, with a fresh source identity.
+val host_producer :
+  base_path:string -> keeper_name:string -> runtime_label:string -> turn_count:int ->
+  (host_producer, string) result
+
+val start_host_producer :
+  sw:Eio.Switch.t -> base_path:string -> keeper_name:string ->
+  runtime_label:string -> turn_count:int -> (host_producer, string) result
+(** Bind this producer to its real runtime switch. An existing private lease
+    inode is held by a cancellable daemon until the switch finishes draining.
+    [load] skips its results while that exact kernel lease is held, including
+    from another process. Crash/exit releases the lease without PID guessing,
+    TTL or replay. Lease files are retained stable and never enumerated as
+    results. Prevalidation must not start a producer. *)
+(** One host-owned dynamic-tool projection with fixed workspace/Keeper
+    authority, a fresh source identity and an existing private lease inode.
+    This standalone producer is inactive; real runtime projections use
+    [start_host_producer].
     Its label and claim ordinal describe the host; neither impersonates vendor
     session/turn coordinates or authorizes tool replay. *)
 
 val retain_host_result :
-  host_producer -> base_path:string -> keeper_name:string ->
+  host_producer ->
   invocation_index:int -> call_id:string -> tool_name:string -> arguments:Yojson.Safe.t ->
   response:Yojson.Safe.t -> (unit, string) result
 (** Retain original returned data before a host stop can discard the provider
@@ -37,6 +52,11 @@ val retain_host_result :
     a client may reuse [call_id] for a later physical invocation. *)
 
 val load : base_path:string -> keeper_name:string -> (snapshot, string) result
+(** Read exact committed results, excluding host producers whose kernel lease
+    is still held. Vendor receipts remain independent. An unavailable/missing
+    host lease is a failure, never an inactive owner or permission to ACK.
+    This does not implement ordinary-result retention or natural completion
+    ACK; those require original capture and a frozen transport frontier. *)
 val receipt_ids : snapshot -> string list
 (** Exact SHA256 identities of the validated committed receipts. Staging files
     and provider execution cell numbers are not receipt identities. *)

@@ -2259,7 +2259,8 @@ let test_operator_input_recovery () =
   ignore (before_effect "dialog answer is not input-reset authority" (dispatch peer Live.Page_native_workflow (args [])));
   let connection:Operator.connection={client_id="original-client";space=Peer.space peer;recovery={
     status=(fun () -> Peer.input_status peer);busy=(fun () -> Peer.input_busy peer);
-    assert_reset=(fun ~generation -> Peer.assert_input_reset peer ~generation)}} in
+    assert_reset=(fun ~generation -> Peer.assert_input_reset peer ~generation);
+    space_observation=(fun () -> Peer.space_observation peer)}} in
   let view=Operator.invoke (Some connection) (obj ["action",str "view";"arguments",obj []]) in
   let action=Yojson.Safe.Util.(view |> member "actions" |> to_list |> List.hd) in
   let fields=Yojson.Safe.Util.(action |> member "arguments") in
@@ -2280,9 +2281,74 @@ let test_operator_input_recovery () =
     Yojson.Safe.Util.(resumed |> member "inputReadiness" |> to_string);
   check int "only original and subsequent distinct workflow were issued" 2 !issued
 
+let test_native_space_status () =
+  let ownership=ref "agentDelegatedToUser" and invalid=ref false and unavailable=ref false in
+  let calls=ref 0 and output=ref "" in
+  let run ~window_s script =
+    let sent=sent_of ~window_s script in
+    match sent.step with
+    | "space.open" -> answered (obj ["spaceId",`Int 51;"name",str "SDK Space";"ownership",str "agent"])
+    | "tabs.list" -> answered tabs
+    | "space.status" ->
+      incr calls;
+      check bool "metadata keeps the original numeric Space" true (sent.space=`Int 51);
+      check (float 0.) "metadata uses the SDK clock" 0. sent.window_s;
+      if !unavailable then Error (Peer.Unobserved "metadata connection lost") else
+      let shim=Printf.sprintf {js|
+const seen=[];
+process.on('exit',()=>console.log('seen '+JSON.stringify(seen)));
+const forbidden=name=>{seen.push(name);throw new Error('unexpected '+name);};
+const takeOverTaskSpace=async()=>forbidden('takeOver');
+const claimTaskSpace=async()=>forbidden('claim');
+const taskSpace=async id=>{seen.push(['taskSpace',id]);return {
+  spaceId:%d,name:'Renamed native Space',ownership:%s,
+  page:()=>forbidden('page'),tabs:async()=>forbidden('tabs'),
+  handOff:async()=>forbidden('handOff'),finish:async()=>forbidden('finish')};};
+|js} (if !invalid then 52 else 51) (Yojson.Safe.to_string (str !ownership)) in
+      output:=in_node (shim ^ script);Ok !output
+    | "space.hand_off" -> answered (obj ["spaceId",`Int 51;"spaceName",str "SDK Space"])
+    | other -> failf "unexpected Space status fixture step %s" other in
+  let peer=match Peer.open_space ~run ~run_native:(run ~window_s:0.) ~now
+    ~space:(Browser_configuration.Existing_space 51) ~version:"fixture"
+    ~capture_directory:(capture_directory ()) ~downloads:no_downloads with
+    | Ok peer -> peer | Error detail -> fail detail in
+  check bool "attachment metadata is retained" true (Option.is_some (Peer.space_observation peer));
+  let status ()=dispatch peer Live.Page_act (obj ["action",str "space_status"]) in
+  let value=match status () with Ok value -> value | Error _ -> fail "delegated metadata query failed" in
+  check string "native owner is returned verbatim" !ownership (text (field "ownership" value));
+  check string "native name can refresh without rebinding" "Renamed native Space" (text (field "spaceName" value));
+  check int "original numeric binding is returned" 51 (Yojson.Safe.Util.to_int (field "spaceId" value));
+  check (float 0.) "metadata receipt is dated" (now ()) (Yojson.Safe.Util.to_float (field "observedAt" value));
+  check string "connection attachment identity remains separate" "SDK Space" (Peer.space peer).name;
+  check bool "query uses only task metadata" true
+    (contains !output "seen [[\"taskSpace\",51]]");
+  let module Operator=Masc.Browser_ego_operator in
+  let connection:Operator.connection={client_id="original-client";space=Peer.space peer;recovery={
+    status=(fun () -> Peer.input_status peer);busy=(fun () -> Peer.input_busy peer);
+    assert_reset=(fun ~generation -> Peer.assert_input_reset peer ~generation);
+    space_observation=(fun () -> Peer.space_observation peer)}} in
+  let before= !calls in
+  let view=Operator.invoke (Some connection) (obj ["action",str "view";"arguments",obj []]) in
+  check bool "operator form shows the actual native observation" true
+    (contains (text (field "message" view)) "agentDelegatedToUser");
+  check int "form reading never dispatches SDK work" before !calls;
+  ownership:="future-native-owner";
+  let value=match status () with Ok value -> value | Error _ -> fail "opaque metadata value refused" in
+  check string "unfamiliar native ownership is data, not a default decision" !ownership (text (field "ownership" value));
+  invalid:=true;
+  ignore (before_effect "foreign Space metadata is refused" (status ()));
+  check bool "failed refresh invalidates the earlier cached observation" true (Option.is_none (Peer.space_observation peer));
+  invalid:=false;unavailable:=true;
+  ignore (before_effect "metadata transport failure sends no Page effect" (status ()));
+  unavailable:=false;
+  ignore (status ());
+  ignore (dispatch peer Live.Page_act (obj ["action",str "hand_off"]));
+  check bool "control changes invalidate cached owner metadata" true (Option.is_none (Peer.space_observation peer))
+
 let () =
   run "browser_ego_peer" [
     "ego", [
+      test_case "Space status reads native metadata without Page or control effects" `Quick test_native_space_status;
       test_case "production workflow envelope preserves special JSON header keys" `Quick test_native_workflow_json_headers;
       test_case "native drag preserves release and failure boundaries" `Quick test_native_drag_and_release;
       test_case "operator input assertion resumes the same peer without replay" `Quick test_operator_input_recovery;

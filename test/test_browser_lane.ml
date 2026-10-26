@@ -516,6 +516,14 @@ let test_space_connection_context () =
      ["browserSpace",json];["clientId",`Null;"browserSpace",json]]
 
 let test_native_control_wait_contract () =
+  let status=Lane.Action.Control Lane.Action.Space_status in
+  check bool "Space metadata has a closed no-argument action" true
+    (Lane.Action.parse (Lane.Action.to_json status)=Ok status);
+  check bool "Space metadata refuses control or tab arguments" true
+    (Result.is_error (Lane.Action.parse (`Assoc ["action",`String "space_status";"tabId",`Int 1])));
+  check bool "Space metadata uses the SDK reply clock" true
+    (Lane.ego_reply_policy (Lane.Page_act status)=Lane.Executor_owned);
+  check string "Space status activity names its metadata operation" "space_status" (Lane.activity_name (Lane.Page_act status));
   let parse fields=Lane.Action.parse (`Assoc (("action",`String "wait_for_control")::fields)) in
   let defaults=Lane.Action.Control (Lane.Action.Wait_for_control {interval_ms=None;timeout_ms=None}) in
   check bool "missing wait options keep SDK defaults" true (parse []=Ok defaults);

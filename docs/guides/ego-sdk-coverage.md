@@ -36,8 +36,8 @@ Neither means fully supported.
 | `claimTaskSpace` | None | Explicit approval and user-owned Space admission |
 | `takeOverTaskSpace` | `page.act` take_over | Explicit operator control boundary, currently only configured Space |
 | `TaskSpace.spaceId` | SDK-observed ID follows client inventory, tool receipts, stored screenshots and the TUI connection identity | Installed-route proof and per-goal Space lifecycle |
-| `TaskSpace.name` | SDK-observed attachment name follows the same context | Current-name refresh, per-goal lifecycle and actual visible UI proof |
-| `TaskSpace.ownership` | Checked before scripts and handoff | Current ownership projection in Keeper and UI observations |
+| `TaskSpace.name` | Attachment name follows connection context; explicit space_status returns the current SDK-observed name for the same numeric ID | Per-goal lifecycle and actual visible UI proof |
+| `TaskSpace.ownership` | Explicit page.act space_status returns native ownership and observation time without Page calls or changing control; private operator form displays the last cached observation | General connection/TUI projection and real installed Keeper/UI proof |
 | `TaskSpace.page` | Permanent label resolution; tab inventory and document-read projection retain the observed label | Lifecycle tools and installed-route proof |
 | `TaskSpace.userPage` | None | Claim/takeover boundary attribution and explicit adoption |
 | `TaskSpace.pages` | Managed pages known through tab enumeration | Direct lifecycle-aware managed inventory |
@@ -172,7 +172,8 @@ authority. The TUI changes are source integration; visible behavior is unverifie
 
 A pending input may be resumed through the private operator confirmation form.
 This records a human check/reset assertion for the exact connected Space and
-pending generation, not an SDK cleanup acknowledgement. It does not fix the
-existing void-keyboard settlement inference, prove login/visible UI, or persist
-pending input through worker replacement. Current exact-source build/test
+pending generation, not an SDK cleanup acknowledgement. It does not provide native release acknowledgement, prove login/visible UI, or
+persist pending input through worker replacement. Receipt-less holding workflows
+stop without inferring release from Page.info; ordinary void typing also requires
+explicit operator recovery. Current exact-source build/test
 receipts must be checked separately from installed Keeper and real SDK proof.

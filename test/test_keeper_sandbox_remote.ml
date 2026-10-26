@@ -630,8 +630,8 @@ let test_the_lane_report_is_what_the_last_dispatch_said () =
 (* The tool's JSON names the operator action from the failure's class. *)
 (* RFC-0427 B-3. The shim names the release it came from, so the keeper reading
    its own lane sees whether the endpoint runs this server's shim. A shim from
-   this release asks nothing of anyone; any other answer, including a shim old
-   enough not to name itself, is the operator's to repair. *)
+   this release asks nothing of anyone. An unequal reported release and a
+   release that cannot be compared are distinct provenance observations. *)
 let test_the_lane_status_names_a_shim_from_another_release () =
   let report probe =
     Keeper_tool_lane_status.json_of_report
@@ -661,9 +661,16 @@ let test_the_lane_status_names_a_shim_from_another_release () =
     (contains "different release"
        (Yojson.Safe.Util.to_string (field "operator_action" older)));
   let unstamped = answered None in
-  check bool "so is a shim that does not name itself" true
-    (contains "different release"
-       (Yojson.Safe.Util.to_string (field "operator_action" unstamped)));
+  check bool "an unreported release has provenance guidance" true
+    (match field "operator_action" unstamped with `String _ -> true | _ -> false);
+  check bool "unknown provenance is distinct from a known mismatch" false
+    (field "operator_action" unstamped = field "operator_action" older);
+  check bool "an unreported release still answered" true
+    (field "state" (field "probe" unstamped) = `String "answered");
+  check int "the negotiated protocol is preserved" 3
+    (Yojson.Safe.Util.to_int (field "protocol_major" (field "probe" unstamped)));
+  check (float 0.0) "unknown provenance retains its observation time" 100.0
+    (Yojson.Safe.Util.to_float (field "observed_at_unix" (field "probe" unstamped)));
   check bool "and its release reads as null" true
     (field "shim_release" (field "probe" unstamped) = `Null)
 

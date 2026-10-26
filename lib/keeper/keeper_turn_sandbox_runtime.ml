@@ -1443,7 +1443,7 @@ let microvm_start_failure_message failure =
 (* The same immutable request drives comparison and Boot argv. Volume names,
    mount sources and stable labels are projections here; provisioning and
    policy route discovery belong to the Boot execution. *)
-let requested_apple_plan (t : t) ~image ~guest_size ~identity_host_dir ~environment =
+let requested_apple_plan (t : t) ~image ~guest_size ~identity_host_dir ~environment ~config_mount =
   let ( let* ) = Result.bind in
   let volume_name result = Result.map_error (fun detail -> Guest_provisions_unavailable detail) result in
   let* work_volume_name = volume_name (Keeper_sandbox_microvm.work_volume_name ~keeper_name:t.meta.name) in
@@ -1452,8 +1452,7 @@ let requested_apple_plan (t : t) ~image ~guest_size ~identity_host_dir ~environm
   let container_masc_dir = Keeper_sandbox_runtime_setup.container_masc_dir ~container_root:t.container_root in
   let identity_destination = Keeper_github_identity.container_config_dir
       ~container_masc_dir ~keeper_name:t.meta.name in
-  let config_mount = match Keeper_sandbox_runtime_setup.config_mount
-      ~base_path:t.config.base_path ~container_root:t.container_root with
+  let config_mount = match config_mount with
     | None -> []
     | Some (source, destination) -> [Plan.Host_dir {source; destination; read_only=true}] in
   let network = match t.network_mode with
@@ -1732,7 +1731,9 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
            | Keeper_microvm_backend.Apple_container ->
              Result.bind
                (requested_apple_plan t ~image ~guest_size
-                  ~identity_host_dir:github_identity.host_dir ~environment:github_identity.environment)
+                  ~identity_host_dir:github_identity.host_dir ~environment:github_identity.environment
+                  ~config_mount:(Keeper_sandbox_runtime_setup.config_mount
+                    ~base_path:t.config.base_path ~container_root:t.container_root))
                (fun plan ->
                  Keeper_sandbox_microvm.apple_turn_start_argv
                    ~container_name ~plan ~lifecycle_labels:(Keeper_sandbox_runtime_setup.lifecycle_labels ())

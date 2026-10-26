@@ -664,6 +664,8 @@ let bootstrap_live_keeper_meta ?lifecycle_token ~(ctx : _ context) (m : keeper_m
 
 (* #8856: hook takes the unified
    [Keeper_lifecycle_events.lifecycle_event] variant. *)
+(* Route through the supervisor publisher: bus-only publish left keepalive
+   events out of the per-keeper audit ring the dashboard reads. *)
 let publish_keeper_lifecycle
       ~(event : Keeper_lifecycle_events.lifecycle_event)
       ~keeper_name
@@ -671,7 +673,7 @@ let publish_keeper_lifecycle
       ()
   : unit
   =
-  Keeper_event_publisher.publish_keeper_lifecycle ~event ~keeper_name ~detail ()
+  Keeper_supervisor_publish_lifecycle.publish_lifecycle ~event keeper_name detail ()
 ;;
 
 (** Phase-event helper: the wire event name IS the phase name. *)
@@ -778,26 +780,28 @@ let record_keeper_stopped
   =
   if resolve_registry_done entry ~source:"keepalive_record_stopped" `Stopped
   then (
-    (match
-       dispatch_event_exact_unit
-         ?lifecycle_token
-         entry
-         Keeper_state_machine.Stop_requested
-     with
-     | false -> ()
-     | true ->
-       (match
-          dispatch_event_exact_unit
-            ?lifecycle_token
-            entry
-            Keeper_state_machine.Drain_complete
-        with
-        | true | false -> ()));
-    publish_keeper_phase_lifecycle
-      ~phase:Keeper_state_machine.Stopped
-      ~keeper_name
-      ~detail
-      ();
+    let stopped =
+      match
+        dispatch_event_exact_unit
+          ?lifecycle_token
+          entry
+          Keeper_state_machine.Stop_requested
+      with
+      | false -> false
+      | true ->
+        dispatch_event_exact_unit
+          ?lifecycle_token
+          entry
+          Keeper_state_machine.Drain_complete
+    in
+    (* A rejected dispatch leaves the FSM short of Stopped; the dispatch
+       already warned, so publish only what the FSM actually holds. *)
+    if stopped then
+      publish_keeper_phase_lifecycle
+        ~phase:Keeper_state_machine.Stopped
+        ~keeper_name
+        ~detail
+        ();
     true)
   else false
 ;;
@@ -828,12 +832,13 @@ let record_keeper_crashed
        |> Keeper_registry.exact_update_succeeded
             entry
             ~site:"record_keeper_crashed.failure_reason");
-    ignore
-      (dispatch_event_exact_unit
-         ?lifecycle_token
-         entry
-         (Keeper_state_machine.Fiber_terminated
-            { outcome; provider_id = None; http_status = None }));
+    let terminated =
+      dispatch_event_exact_unit
+        ?lifecycle_token
+        entry
+        (Keeper_state_machine.Fiber_terminated
+           { outcome; provider_id = None; http_status = None })
+    in
     ignore
       (update_exact (fun current ->
          Keeper_registry_error_tracking.record_crash_entry
@@ -847,11 +852,14 @@ let record_keeper_crashed
      | None -> Keeper_registry_error_recording.record_exact entry reason
      | Some token ->
        Keeper_registry_error_recording.record_exact_for_lifecycle token entry reason);
-    publish_keeper_phase_lifecycle
-      ~phase:Keeper_state_machine.Crashed
-      ~keeper_name
-      ~detail:reason
-      ())
+    (* A rejected dispatch leaves the FSM short of Crashed; the dispatch
+       already warned, so publish only what the FSM actually holds. *)
+    if terminated then
+      publish_keeper_phase_lifecycle
+        ~phase:Keeper_state_machine.Crashed
+        ~keeper_name
+        ~detail:reason
+        ())
 ;;
 
 (* ── Keeper lifecycle start/stop ── *)
@@ -1410,11 +1418,14 @@ let rec start_keepalive
           | [] -> Ok ()
           | errors -> Error (String.concat "; " errors)
         in
-        publish_keeper_started ~live_meta;
         (match
            Keeper_lane.fork_server_owned
              reg.lane
              ~run:(fun lane_sw ->
+        (* Started is published by the forked lane itself: publishing before
+           the fork announced lanes the fork then rejected, contradicting the
+           launch gate that suppresses Started for never-forked lanes. *)
+        publish_keeper_started ~live_meta;
         Eio.Switch.run ~name:("keeper " ^ live_meta.name) @@ fun _ ->
         let ctx = { ctx with sw = lane_sw } in
         (* The sidecars are part of this Keeper lane. They cannot outlive the

@@ -90,7 +90,7 @@ let test_severity_follows_the_outcome () =
   check_level "already absent is Info" Log.Info P.Already_absent;
   check_level "a rejection is Warn" Log.Warn (P.Rejected "paused");
   check_level "a missing dispatch is Warn" Log.Warn P.Dispatch_none;
-  check_level "a persist failure is Warn" Log.Warn (P.Persist_failed "io")
+  check_level "a persist failure is Error" Log.Error (P.Persist_failed "io")
 
 let test_fields_stay_in_order () =
   Alcotest.(check string)

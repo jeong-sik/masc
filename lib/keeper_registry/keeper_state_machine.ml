@@ -123,7 +123,7 @@ let update_conditions (c : conditions) (ev : event) : conditions =
 ;;
 
 (** Compute entry actions for a phase transition.
-    [Publish_lifecycle] is consumed by the registry runtime; the remaining
+    [Log_lifecycle] is consumed by the registry runtime; the remaining
     variants describe work whose effects are owned by their runtime boundary.
 
     Structure (Iteration 2, /loop FSM drift hunt — Phase A-2):
@@ -137,7 +137,7 @@ let update_conditions (c : conditions) (ev : event) : conditions =
     into Restarting from non-Crashed) now return [] from explicit arms
     with comments documenting *why* the no-op is intentional. *)
 let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action list =
-  let lifecycle name detail = Publish_lifecycle { event_name = name; detail } in
+  let lifecycle name detail = Log_lifecycle { event_name = name; detail } in
   match new_phase with
   | Draining -> [ lifecycle "draining" "" ]
   | Stopped ->

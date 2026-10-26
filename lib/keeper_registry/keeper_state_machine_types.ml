@@ -111,9 +111,9 @@ let event_to_string = function
 (* ── Entry Actions ─────────────────────────────────────── *)
 
 (** Runtime contract mirrors [.mli]: the registry executes
-    [Publish_lifecycle] as an observability side effect. *)
+    [Log_lifecycle] as an observability side effect. *)
 type entry_action =
-  | Publish_lifecycle of
+  | Log_lifecycle of
       { event_name : string
       ; detail : string
       }

@@ -59,8 +59,12 @@ over the observed scroll container within this same workflow invocation.
 If a pointer click or drag fails, release stays unconfirmed. The SDK's
 `mouse.up()` can return normally when a dialog interrupted the release, and a
 selector click does not preserve its coordinates in the public mouse handle.
-Native workflows therefore do not synthesize a release from that handle or call its void
-return a release acknowledgement. A lost key press/type/paste response also
+Native workflows and selector `drag_to` therefore do not synthesize a release
+from that handle or call its void return a release acknowledgement. A failed
+selector drag preserves the original SDK failure and blocks further input until
+its unconfirmed input state is resolved. Coordinate-path drag has a separate
+manual-input implementation; this selector repair does not establish its release
+acknowledgement or safe recovery. A lost key press/type/paste response also
 keeps release unconfirmed without guessing a key-up sequence. `keyboard.paste`
 uses the SDK's `ControlOrMeta+V` sequence, so it can leave a modifier held.
 `press` is included because its key sequence may be held if

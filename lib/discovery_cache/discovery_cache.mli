@@ -53,7 +53,8 @@ val cache_age_seconds : unit -> float
 
 val first_ollama_model_id_for_url : ?headers:(string * string) list -> string -> string option
 (** Return the first nonblank model of a healthy Ollama endpoint with this exact URL.
-    Read the current cache without triggering a global refresh; if no healthy exact
-    model is cached, probe only that endpoint through the captured Eio environment.
-    [headers] authenticates the selected probe. Never borrow another endpoint's model.
-    [None] means there is no healthy exact endpoint/model or no captured environment. *)
+    Read a fresh cache snapshot without triggering a global refresh. If the snapshot
+    is stale or has no healthy exact model, probe only that endpoint through the
+    captured Eio environment. [headers] authenticates the selected probe. Never borrow
+    another endpoint's model. [None] means there is no healthy exact endpoint/model
+    or no captured environment. *)

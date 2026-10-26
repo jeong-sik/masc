@@ -9,7 +9,7 @@ val parse_model_string
   -> ?api_key_env_overrides:(string * string) list
   -> ?keep_alive:string
   -> ?num_ctx:int
-  -> ?discover:((string * string) list -> string -> string option)
+  -> ?discover:(headers:(string * string) list -> string -> string option)
   -> string
   -> Llm_provider.Provider_config.t option
 (** Resolve a model label to a hot-path provider config. [None] when the

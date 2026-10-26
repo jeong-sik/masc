@@ -55,7 +55,8 @@ let resolve_effective_api_key_env
 let make_binding_config
   ?temperature ?max_tokens ?system_prompt ?(api_key_env_overrides = [])
   ?keep_alive ?num_ctx
-  ?(discover = Discovery_cache.first_ollama_model_id_for_url)
+  ?(discover = fun ~headers url ->
+    Discovery_cache.first_ollama_model_id_for_url ~headers url)
   ~model_id (binding : Runtime_binding.t)
   =
   let effective_api_key_env =

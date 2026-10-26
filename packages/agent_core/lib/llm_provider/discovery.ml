@@ -145,7 +145,7 @@ let parse_ollama_models tags_json =
   | Some _ -> Error "models must be a JSON list"
 ;;
 
-let probe_ollama_models ~sw ~net base_url =
+let probe_ollama_models ~headers ~sw ~net base_url =
   match get_json ~headers ~sw ~net (base_url ^ "/api/tags") with
   | Error detail -> Error detail
   | Ok tags_json -> parse_ollama_models tags_json
@@ -187,7 +187,7 @@ let probe_endpoint ?(headers=[]) ~sw ~net (declared : endpoint) =
   else (
     match declared.protocol with
     | Ollama_native ->
-      (match probe_ollama_models ~sw ~net base with
+      (match probe_ollama_models ~headers ~sw ~net base with
        | Ok models -> status ~healthy:true ~models ~props:None ~slots:None ~failures:[]
        | Error detail ->
          status

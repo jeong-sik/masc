@@ -129,18 +129,22 @@ let fresh_port () =
   Unix.close socket;
   port
 
+let with_mock_server_on ~sw ~net handler f =
+  let port = fresh_port () in
+  let socket = Eio.Net.listen net ~sw ~backlog:128 ~reuse_addr:true
+    (`Tcp (Eio.Net.Ipaddr.V4.loopback, port)) in
+  let server = Cohttp_eio.Server.make ~callback:handler () in
+  Eio.Fiber.fork ~sw (fun () -> Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+  let endpoint = Printf.sprintf "http://127.0.0.1:%d" port in
+  f ~endpoint
+
 let with_mock_server handler f =
   Eio_main.run @@ fun env ->
   try
     Eio.Switch.run @@ fun sw ->
-    let port = fresh_port () in
-    let socket = Eio.Net.listen env#net ~sw ~backlog:128 ~reuse_addr:true
-      (`Tcp (Eio.Net.Ipaddr.V4.loopback, port)) in
-    let server = Cohttp_eio.Server.make ~callback:handler () in
-    Eio.Fiber.fork ~sw (fun () -> Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
-    let endpoint = Printf.sprintf "http://127.0.0.1:%d" port in
-    f ~sw ~net:env#net ~endpoint;
-    Eio.Switch.fail sw Exit
+    with_mock_server_on ~sw ~net:env#net handler (fun ~endpoint ->
+      f ~sw ~net:env#net ~endpoint;
+      Eio.Switch.fail sw Exit)
   with
   | Unix.Unix_error ((Unix.EPERM | Unix.EADDRINUSE), "bind", _) -> Alcotest.skip ()
   | Exit -> ()
@@ -316,6 +320,47 @@ let ollama_auto_sends_resolved_credential () =
             "qwen-keyed" config.Provider_config.model_id
         | None -> Alcotest.fail "authenticated Ollama discovery was refused")))
 
+let ollama_auto_renews_stale_selected_endpoint () =
+  let model_name = ref "cached-model" in
+  let tag_requests = ref 0 in
+  let handler _conn req body =
+    ignore (Eio.Buf_read.(of_flow ~max_size:(1024 * 1024) body |> take_all) : string);
+    match Uri.path (Cohttp.Request.uri req) with
+    | "/api/tags" ->
+      incr tag_requests;
+      let body = Yojson.Safe.to_string
+        (`Assoc ["models", `List [`Assoc ["name", `String !model_name]]]) in
+      Cohttp_eio.Server.respond_string ~status:`OK ~body ()
+    | _ -> Cohttp_eio.Server.respond_string ~status:`Not_found ~body:"missing" ()
+  in
+  with_mock_server handler (fun ~sw ~net ~endpoint ->
+    Discovery_cache.set_env ~sw ~net;
+    let clock = Eio_mock.Clock.make () in
+    Eio_mock.Clock.set_time clock 1000.;
+    Time_compat.set_clock (clock :> float Eio.Time.clock_ty Eio.Resource.t);
+    Fun.protect ~finally:Time_compat.clear_clock (fun () ->
+      let declared = Llm_provider.Discovery.endpoint
+        ~protocol:Llm_provider.Discovery.Ollama_native
+        ~capabilities:Llm_provider.Capabilities.ollama_capabilities endpoint in
+      ignore (Llm_provider.Provider_registry.refresh_llama_endpoints ~sw ~net ~endpoints:[declared]);
+      ignore (Discovery_cache.get_cached_or_refresh ());
+      with_catalog ~endpoint (fun () ->
+        let initial = Runtime_model_string.parse_model_string "ollama:auto" in
+        (match initial with
+         | Some config -> Alcotest.(check string) "fresh cache supplies its model"
+           "cached-model" config.Provider_config.model_id
+         | None -> Alcotest.fail "production cache did not retain the selected endpoint");
+        let requests_before_expiry = !tag_requests in
+        model_name := "fresh-model";
+        Eio_mock.Clock.set_time clock 1031.;
+        match Runtime_model_string.parse_model_string "ollama:auto" with
+        | Some config ->
+          Alcotest.(check string) "stale cache cannot hide a model change"
+            "fresh-model" config.Provider_config.model_id;
+          Alcotest.(check int) "only the expired selected endpoint is probed again"
+            (requests_before_expiry + 1) !tag_requests
+        | None -> Alcotest.fail "expired Ollama discovery was refused")))
+
 let ollama_auto_does_not_refresh_other_endpoints () =
   let other_hits = ref 0 in
   let other_handler _conn req body =
@@ -337,7 +382,7 @@ let ollama_auto_does_not_refresh_other_endpoints () =
   in
   with_mock_server selected_handler (fun ~sw ~net ~endpoint ->
     Discovery_cache.set_env ~sw ~net;
-    with_mock_server other_handler (fun ~sw:_ ~net:_ ~endpoint:other_endpoint ->
+    with_mock_server_on ~sw ~net other_handler (fun ~endpoint:other_endpoint ->
       let declared = Llm_provider.Discovery.endpoint
         ~protocol:Llm_provider.Discovery.Ollama_native
         ~capabilities:Llm_provider.Capabilities.ollama_capabilities other_endpoint in
@@ -387,4 +432,5 @@ let () = Alcotest.run "runtime model label binding"
      "no discovered model",`Quick,ollama_auto_without_discovered_model_stays_refused;
      "declared default skips discovery",`Quick,declared_default_skips_discovery;
      "authenticated discovery",`Quick,ollama_auto_sends_resolved_credential;
+     "stale selected endpoint",`Quick,ollama_auto_renews_stale_selected_endpoint;
      "cold cache endpoint isolation",`Quick,ollama_auto_does_not_refresh_other_endpoints]]

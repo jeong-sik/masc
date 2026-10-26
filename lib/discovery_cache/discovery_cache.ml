@@ -83,12 +83,19 @@ let model_of_status (status : endpoint_info) =
        | None -> None)
 
 let first_ollama_model_id_for_url ?(headers=[]) url =
-  let cached = (Atomic.get state).cache.endpoints in
-  match List.find_map (fun (status : endpoint_info) ->
-    if status.url = url then model_of_status status else None) cached with
+  let snapshot = Atomic.get state in
+  let cache = snapshot.cache in
+  let fresh = Time_compat.now () -. cache.updated_at <= cache_ttl in
+  let cached =
+    if fresh then
+      List.find_map (fun (status : endpoint_info) ->
+        if status.url = url then model_of_status status else None) cache.endpoints
+    else None
+  in
+  match cached with
   | Some _ as model -> model
   | None ->
-    (match (Atomic.get state).environment with
+    (match snapshot.environment with
      | None -> None
      | Some { switch; net } ->
        let declared =

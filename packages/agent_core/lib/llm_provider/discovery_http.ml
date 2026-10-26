@@ -19,8 +19,8 @@ let get_json ?(headers=[]) ~sw ~net url =
   | Error error -> Error (http_error_detail error)
 ;;
 
-let probe_liveness ~sw ~net url =
-  match Http_client.get_sync ~sw ~net ~url ~headers:[] () with
+let probe_liveness ?(headers=[]) ~sw ~net url =
+  match Http_client.get_sync ~sw ~net ~url ~headers () with
   | Ok { status; _ } when status >= 200 && status < 300 -> Ok ()
   | Ok { status; _ } -> Error (Printf.sprintf "HTTP %d" status)
   | Error error -> Error (http_error_detail error)

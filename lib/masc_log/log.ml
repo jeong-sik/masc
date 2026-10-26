@@ -338,10 +338,9 @@ module Ring = struct
      [LogEntryRawSchema] contract in [dashboard/src/api/schemas/logs.ts]. *)
   let entry_to_json e =
     (* The dashboard schema requires a non-empty keeper_name string, so
-       [None] encodes as "system" and the decoder maps "system" back to
-       [None]: "system" is reserved for system-originated rows (callers
-       with no keeper pass it explicitly) and never names a real keeper,
-       so the conflation loses nothing the wire format could carry. *)
+       [None] encodes as "system". That is also a valid Keeper name: the
+       decoder preserves literal names, and this wire format cannot
+       distinguish those two original option values. *)
     let keeper_name_json = match e.keeper_name with
       | Some s -> `String s
       | None -> `String "system"
@@ -534,7 +533,6 @@ module Ring = struct
         let message = require_string "message" in
         let keeper_name =
           match Yojson.Safe.Util.member "keeper_name" json with
-          | `String "system" -> None
           | `String s -> Some s
           | `Null -> None
           | other ->

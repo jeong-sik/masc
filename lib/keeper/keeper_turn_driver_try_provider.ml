@@ -2684,7 +2684,9 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
         !retained_results_projected
         && !observed_provider_turn_ordinal = Some provider_turn_ordinal
         && !saved_provider_turn_ordinal = Some provider_turn_ordinal
-      | Ok _ | Error _ -> false in
+      | Ok {Runtime_agent.stop_reason=(Yielded_to_operation_queued _ | Yielded_to_durable_stimulus _
+          | Yielded_after_repeated_tool_call _ | Yielded_after_repeated_assistant_text _ | InputRequired _);_}
+      | Error _ -> false in
     let execution_observation =
       match result with
       | Ok (run_result : Runtime_agent.run_result) -> run_result.runtime_observation

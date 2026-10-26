@@ -1,0 +1,14 @@
+Raw workflow log SHA256: 16851fdbb4c36d13746d7132c16372e5c4e4f1310a495410afb8e83be6e8d318
+Source: https://github.com/jeong-sik/masc/actions/runs/40196629463
+
+test suite	Checkout	2026-10-25T13:13:44.7668389Z HEAD is now at 0c2507b8 test(keeper): declare joined replay fixture dependencies
+test suite	Test	2026-10-25T13:17:32.9417863Z ASSERT original owned blocks reached persisted TUI state
+test suite	Test	2026-10-25T13:17:32.9498118Z ASSERT public journal never contains the exact secret
+test suite	Test	2026-10-25T13:17:32.9498764Z ASSERT production journal carries an owned clear for the replaced block
+test suite	Test	2026-10-25T13:17:32.9499590Z ASSERT redacted replacement retains its exact block position
+test suite	Test	2026-10-25T13:17:32.9503256Z   [FAIL]        thinking delivery                 0   redaction journal and c...
+test suite	Test	2026-10-25T13:17:32.9853152Z │ [FAIL]        thinking delivery                 0   redaction journal an...  │
+test suite	Test	2026-10-25T13:17:32.9854084Z File "test/test_tui_keeper_chat_transcript.ml", line 3136, character 8:
+test suite	Test	2026-10-25T13:17:32.9854903Z    Expected: `"replacement [REDACTED] complete\nsibling\n"'
+test suite	Test	2026-10-25T13:17:32.9855281Z    Received: `"sibling\nreplacement [REDACTED] complete\n"'
+test suite	Test	2026-10-25T13:17:32.9872862Z 1 failure! in 0.024s. 108 tests run.

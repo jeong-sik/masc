@@ -54,6 +54,14 @@ The identity was already authorized: password-based first key copying is not
 covered. The native driver checks helper and shim source identities separately;
 the shim is source 327 above, while the helper/server is source a768.
 
+A later first-creation experiment used the same native/artifact pair to prepare
+the previously absent `native-fresh-20261026` workspace, still without GitHub
+credentials. It returned an empty uid-1000 directory with mode 0700. A binary
+marker was then added and a second bootstrap retained its hash and directory
+ownership/mode, with endpoint configuration bytes unchanged. Its driver, two raw
+CLI logs and receipt are retained separately. The recorded helper/shim byte hashes
+match the validated artifacts above. This uses the existing SSH identity too.
+
 After that bootstrap, an actual Keeper used Execute/Write/Read/Edit/Grep over
 the same endpoint. Nine calls completed through eleven scripted model requests.
 Endpoint-side readbacks verified the edited file and retained binary file after

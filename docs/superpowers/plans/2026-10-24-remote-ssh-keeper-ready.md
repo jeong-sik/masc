@@ -15,7 +15,7 @@ endpoint authority; no local/Docker fallback on SSH failure.
 
 | Requirement | Authoritative completion evidence | Progress and remaining evidence |
 | --- | --- | --- |
-| Bootstrap without a GitHub token; preserve work on rerun | Actual CLI creates workspace and reruns with retained file | Actual f9 native creation retained; a768 native old-shim refusal/new-shim upgrade/rerun preserved existing bytes and ownership with no GitHub token. Fresh first-key copying remains unverified |
+| Bootstrap without a GitHub token; preserve work on rerun | Actual CLI creates workspace and reruns with retained file | a768 native fresh workspace creation and repeat passed, in addition to old-shim refusal/new-shim upgrade preserving existing bytes and ownership, without GitHub tokens. Password-based first-key copying remains unverified |
 | Preserve endpoint tool environment on upgrade | Config roundtrip and real endpoint probe using retained path/env_file/scratch root | a768 native bootstrap preserved all three config fields; direct SSH and actual Keeper payloads verified PATH/env_file. Boxed scratch allocation remains separate |
 | Discover registered endpoints and diagnose readiness | Current runtime registry projection; named probe results and UI selection | Actual registry/probe projection and browser endpoint selection measured at a317; native TUI unverified |
 | Change profiles with endpoint/network fields together | Actual TUI/Dashboard request, persisted TOML reread, rejected/uncertain save recovery | Browser endpoint save and TOML readback passed at a317; full profile transition and native TUI unverified |

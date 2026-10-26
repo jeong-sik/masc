@@ -82,6 +82,10 @@ val validate_all : Provider_config.t -> (unit, Http_client.http_error) result
 
 (** {1 Request serialization} *)
 
+val request_tools_present : config:Provider_config.t -> tools:Yojson.Safe.t list -> bool
+(** Whether this codec will actually send tools, after its tool-choice
+    suppression. Shared by replay admission and transmitted-history projection. *)
+
 (** [tools] is the same tool list supplied to serialization. The codec applies
     the same tool-choice suppression before resolving request-local replay. *)
 val transmitted_history

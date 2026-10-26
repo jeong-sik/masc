@@ -304,7 +304,7 @@ let test_latest_user_turn_policy_real_trailing_user_still_resets () =
       (content_has_reasoning assistant.content)
 ;;
 
-let test_carrier_only_history_replays_none () =
+let test_carrier_only_history_preserves_tool_reasoning () =
   let target = source Tool_call_assistant_messages_latest_user_turn in
   let messages =
     [ extra_context_carrier ()
@@ -324,12 +324,12 @@ let test_carrier_only_history_replays_none () =
   | Ok projection ->
     let assistant = List.nth projection.messages 1 in
     check_bool
-      "with no real user turn the policy still replays none"
-      false
+      "a control carrier cannot prove the retained tool exchange is closed"
+      true
       (content_has_reasoning assistant.content)
 ;;
 
-let test_latest_user_turn_policy_without_user_replays_none () =
+let test_latest_user_turn_policy_without_user_preserves_tool_reasoning () =
   let target = source Tool_call_assistant_messages_latest_user_turn in
   let messages =
     [ with_source
@@ -349,8 +349,8 @@ let test_latest_user_turn_policy_without_user_replays_none () =
     let assistant = List.hd projection.messages in
     check_bool "tool call remains" true (content_has_tool_use assistant.content);
     check_bool
-      "unscoped reasoning is removed"
-      false
+      "a missing caller boundary preserves compatible tool reasoning"
+      true
       (content_has_reasoning assistant.content)
 ;;
 
@@ -2632,9 +2632,9 @@ let () =
             `Quick
             test_latest_user_turn_policy_keeps_only_current_tool_reasoning
         ; Alcotest.test_case
-            "latest user turn policy requires a user boundary"
+            "latest user turn policy preserves an exchange without a caller boundary"
             `Quick
-            test_latest_user_turn_policy_without_user_replays_none
+            test_latest_user_turn_policy_without_user_preserves_tool_reasoning
         ; Alcotest.test_case
             "latest user turn policy ignores the extra-context carrier"
             `Quick
@@ -2644,9 +2644,9 @@ let () =
             `Quick
             test_latest_user_turn_policy_real_trailing_user_still_resets
         ; Alcotest.test_case
-            "carrier-only history replays none"
+            "carrier-only history preserves tool reasoning"
             `Quick
-            test_carrier_only_history_replays_none
+            test_carrier_only_history_preserves_tool_reasoning
         ; Alcotest.test_case
             "explicit preserve promotes latest-user policy"
             `Quick

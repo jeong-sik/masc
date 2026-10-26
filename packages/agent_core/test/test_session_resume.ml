@@ -803,6 +803,7 @@ let test_binding_source_change_respects_active_replay () =
   let target = binding_provider ~model:"other-model"
       ~replay:Llm_provider.Capabilities.Force_latest_user_turn_tool_calls "https://target.example" in
   let validate provider history = Binding_projection.validate_replay_continuity_for_provider_config
+      ~boundary:(Provider_dispatch {tools_present=true})
       ~source_change_policy:Binding_projection.Exclude_unselected provider history in
   let rejected = function
     | Error (Binding_projection.Incompatible_reasoning_artifact {message_index=1;_}) -> ()
@@ -831,6 +832,78 @@ let test_binding_source_change_respects_active_replay () =
       (function Types.Thinking _ -> true
         | Text _ | RedactedThinking _ | ReasoningDetails _ | ToolUse _
         | ToolResult _ | Image _ | Document _ | Audio _ -> false) message.content)) 0 projected.messages)
+;;
+
+let test_binding_source_change_uses_effective_request_tools () = with_net (fun net ->
+  Eio.Switch.run (fun sw ->
+    let original=binding_provider ~kind:Binding_provider.Glm ~model:"glm-5.3-flash"
+        "https://original.example" in
+    let target=binding_provider ~model:"deepseek-v4.1-flash"
+        ~replay:Llm_provider.Capabilities.Force_preserve_with_request_tools
+        "https://target.example" in
+    let foreign={ (binding_message (binding_source original)) with
+      content=[Types.Thinking {content="foreign-private-reasoning";signature=None};
+        Types.Text "historical-visible-answer";
+        Types.ToolUse {id="settled";name="inspect";input=`Assoc []}] } in
+    let tool_result=Types.tool_result_msg ~tool_use_id:"settled" ~content:"settled-result" () in
+    let cp=binding_checkpoint original [Types.user_msg "inspect";foreign;tool_result] in
+    let before=Checkpoint.to_json cp in
+    let tool_calls=ref 0 in
+    let tool=Tool.create ~name:"inspect" ~description:"Inspect" ~parameters:[] (fun _ ->
+      incr tool_calls;Ok {Types.content="unexpected re-execution";content_blocks=None;_meta=None}) in
+    List.iter (fun stream ->
+      List.iter (fun (has_tools,initial_choice,hook_choice,blocked) ->
+        let config={ (Types.default_config ~model:target.model_id) with
+          max_tokens=Some 64;tool_choice=initial_choice } in
+        let hooks={Hooks.empty with before_turn_params=Some (function
+          | Hooks.BeforeTurnParams {current_params;_} ->
+            (match hook_choice with
+             | None -> Hooks.Continue
+             | Some choice -> Hooks.AdjustParams {current_params with tool_choice=Some choice})
+          | _ -> Hooks.Continue)} in
+        let requests=ref 0 in
+        let check_request (request:Llm_provider.Llm_transport.completion_request) =
+          incr requests;
+          let artifact=match Llm_provider.Complete_common.serialize_http_request ~stream
+              ~config:request.config ~messages:request.messages ~tools:request.tools with
+            | Ok artifact -> artifact
+            | Error _ -> Alcotest.fail "native request serialization failed" in
+          let json=Yojson.Safe.from_string artifact.body in
+          let open Yojson.Safe.Util in
+          Alcotest.(check bool) "unselected tools absent from actual native wire" true
+            (match member "tools" json with `Null | `List [] -> true | _ -> false);
+          let messages=member "messages" json |> to_list in
+          Alcotest.(check bool) "unselected foreign reasoning never sent" true
+            (List.for_all (fun message -> member "reasoning_content" message=`Null) messages);
+          Alcotest.(check bool) "settled tool result reaches native wire" true
+            (List.exists (fun message -> member "content" message=`String "settled-result") messages)
+        in
+        let response=Provider_mock.text_response "continued" [] in
+        let transport=Llm_provider.Llm_transport.custom {
+          complete_sync=(fun request -> check_request request;{response=Ok response;latency_ms=None});
+          complete_stream=(fun ?on_telemetry:_ ~on_event:_ request -> check_request request;Ok response)} in
+        let options={ (binding_options target) with hooks;transport=Some transport;
+          reasoning_source_change=Binding_projection.Exclude_unselected } in
+        let agent=Agent.resume ~net ~checkpoint:cp ~config ~options
+            ~tools:(if has_tools then [tool] else []) () |> binding_resume_ok in
+        Fun.protect ~finally:(fun () -> Agent.close agent) (fun () ->
+          let outcome=if stream then Agent.run_stream ~sw ~on_event:ignore agent "new query"
+            else Agent.run ~sw agent "new query" in
+          (match blocked,outcome with
+           | true,Error (Error.Config (Error.InvalidConfig {field="reasoning_replay";_})) -> ()
+           | false,Ok _ -> ()
+           | _,Error error -> Alcotest.fail (Error.to_string error)
+           | true,Ok _ -> Alcotest.fail "foreign mandatory replay reached a tool-bearing request");
+          Alcotest.(check int) "only admitted requests reach transport" (if blocked then 0 else 1) !requests;
+          Alcotest.(check bool) "canonical foreign reasoning remains" true
+            (List.mem foreign (Agent.state agent).messages);
+          Alcotest.(check bool) "source checkpoint remains unchanged" true (before=Checkpoint.to_json cp))
+      ) [false,None,None,false;true,None,None,true;
+         true,Some Types.None_,None,false;
+         true,None,Some Types.None_,false;
+         true,Some Types.None_,Some Types.Auto,true]
+    ) [false;true];
+    Alcotest.(check int) "historical tool effects are never replayed" 0 !tool_calls))
 ;;
 
 let test_binding_source_change_rejects_invalid_provenance () = with_net (fun net ->
@@ -866,6 +939,7 @@ let () =
     [ "provider replay binding", [
         test_case "explicit provider/model failover preserves canonical history and tool effects" `Quick test_binding_explicit_source_change;
         test_case "source-change exclusion protects active replay and control boundaries" `Quick test_binding_source_change_respects_active_replay;
+        test_case "source-change admission follows actual tools and hook suppression in both dispatch modes" `Quick test_binding_source_change_uses_effective_request_tools;
         test_case "source-change exclusion still rejects invalid provenance" `Quick test_binding_source_change_rejects_invalid_provenance;
         test_case "same exact binding retains canonical history" `Quick test_binding_exact_resume;
         test_case "provider model and replay contract mismatch" `Quick test_binding_provider_model_and_contract_mismatch;

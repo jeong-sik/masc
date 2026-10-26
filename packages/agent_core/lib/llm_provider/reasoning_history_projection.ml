@@ -131,7 +131,7 @@ type source_change_policy =
 
 type continuity_boundary =
   | Checkpoint_restore
-  | Provider_dispatch
+  | Provider_dispatch of { tools_present : bool }
 
 type replay_disposition =
   | Preserve_reasoning
@@ -262,23 +262,27 @@ let replay_selected
     &&
       (match latest_user_message_index with
       | Some user_message_index -> message_index > user_message_index
-      | None -> false)
+      (* A transmission window may retain the exchange but omit its caller.
+         Missing boundary evidence does not establish a closed exchange. *)
+      | None -> true)
 ;;
 
 let validate_replay_continuity_for_provider_config
     ?(source_change_policy = Reject_incompatible)
-    ?(boundary = Provider_dispatch)
+    ~boundary
     (config : Provider_config.t) messages =
+  let tools_present = match boundary with
+    (* Restoration precedes the request; dispatch resolves its actual tools. *)
+    | Checkpoint_restore -> false
+    | Provider_dispatch { tools_present } -> tools_present in
   Result.bind (validate_and_classify messages) (fun classified ->
-    match Reasoning_dialect.replay_capability_for_provider_config config with
+    match Reasoning_dialect.replay_capability_for_provider_config ~tools_present config with
     | Error detail -> Error (Invalid_reasoning_target detail)
     | Ok replay_capability ->
       let latest_user_message_index = find_latest_user_message_index classified in
       let target_replay_policy = (Reasoning_dialect.for_provider_config config).replay_policy in
-      (* Temporary tools-array suppression cannot authorize a source loss that
-         would become mandatory when tools are supplied on the next subrequest. *)
       let selected message_index (message : Types.message) =
-        match target_replay_policy with
+        match replay_capability.contract.Reasoning_replay_contract.replay_policy with
         | Provider_opaque_state -> true
         | (No_replay | All_assistant_messages
            | Tool_call_assistant_messages_all_history
@@ -329,7 +333,7 @@ let validate_replay_continuity_for_provider_config
                  | Exclude_unselected ->
                    let admissible = match boundary with
                      | Checkpoint_restore -> true
-                     | Provider_dispatch -> not (selected message_index message) in
+                     | Provider_dispatch _ -> not (selected message_index message) in
                    if admissible then
                      check ({message_index; reason=Incompatible_reasoning_source stored}
                        :: exclusions) rest

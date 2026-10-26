@@ -71,9 +71,10 @@ type source_change_policy =
 
 type continuity_boundary =
   | Checkpoint_restore
-  | Provider_dispatch
+  | Provider_dispatch of { tools_present : bool }
 (** Restoration precedes caller input: opt-in source changes are provisional
-    there. Dispatch checks the final query boundary after input and hooks. *)
+    there. Dispatch checks the final query boundary and actual prepared tools
+    after input and hooks. The caller must identify which boundary it owns. *)
 
 type replay_disposition =
   | Preserve_reasoning
@@ -89,7 +90,7 @@ type replay_continuity_admission =
 
 val validate_replay_continuity_for_provider_config
   :  ?source_change_policy:source_change_policy
-  -> ?boundary:continuity_boundary
+  -> boundary:continuity_boundary
   -> Provider_config.t
   -> Types.message list
   -> (replay_continuity_admission, error) result
@@ -101,8 +102,13 @@ val validate_replay_continuity_for_provider_config
     target that cannot replay the old source is rejected by default.
     [Exclude_unselected] returns the incompatible indices/producers in the
     disposition. At [Checkpoint_restore] this is provisional admission only;
-    at [Provider_dispatch] (the default) each must be outside the target's
+    at [Provider_dispatch] each must be outside the target's
     replay selection. Opaque state and selected foreign reasoning remain errors.
+    The dispatch tools fact must match the actual request, including hook edits
+    and temporary tool suppression. It is not inferred from the model catalog.
+    When no caller query survives projection, latest-turn tool exchanges are
+    conservatively selected: absent boundary evidence cannot authorize their
+    exclusion. Compatible reasoning remains replayable under the same rule.
     The same policy must be supplied at resume and dispatch.
     Explicit [preserve_thinking = Some false] admits caller-owned exclusion only
     when the resolved dialect actually declares [No_replay]. A wire that ignores

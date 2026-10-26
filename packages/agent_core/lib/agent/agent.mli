@@ -656,9 +656,10 @@ val run_with_handoffs_blocks
     Incompatible stored reasoning returns a typed error before construction by
     default. [options.reasoning_source_change = Exclude_unselected] explicitly
     provisionally restores valid foreign artifacts while retaining the complete
-    checkpoint. Dispatch excludes only reasoning the target does not select.
-    [preserve_thinking = Some false] alone admits exclusion only when the
-    resolved dialect actually excludes replay. Dispatch
+    checkpoint. Dispatch uses the actual prepared tool presence after codec
+    suppression and excludes only reasoning the target does not select.
+    [preserve_thinking = Some false] alone admits exclusion
+    only when the resolved dialect actually excludes replay. Dispatch
     revalidates the effective messages and target after hooks. Provider-unconfigured
     non-dispatch restoration remains supported. *)
 val resume

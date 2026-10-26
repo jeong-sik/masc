@@ -689,7 +689,7 @@ type anthropic_serialization_policy =
    [Provider_http_codec.t]: a new codec cannot be added without answering this,
    which is the point — a caller that sizes a request against unprojected
    history charges for bytes the wire drops. *)
-let transmitted_history ?(tools = []) ~(config : Provider_config.t) messages =
+let request_tools_present ~(config : Provider_config.t) ~tools =
   let codec = Provider_http_codec.of_config config in
   let effective_tools =
     match codec with
@@ -697,7 +697,12 @@ let transmitted_history ?(tools = []) ~(config : Provider_config.t) messages =
       Backend_openai_request.effective_tools config tools
     | Anthropic_messages | Ollama_chat | Gemini_generate_content -> tools
   in
-  let tools_present = effective_tools <> [] in
+  effective_tools <> []
+;;
+
+let transmitted_history ?(tools = []) ~(config : Provider_config.t) messages =
+  let codec = Provider_http_codec.of_config config in
+  let tools_present = request_tools_present ~config ~tools in
   let projected =
     match codec with
     | Provider_http_codec.Anthropic_messages ->

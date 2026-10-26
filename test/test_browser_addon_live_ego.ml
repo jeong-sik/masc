@@ -299,6 +299,7 @@ def run(script,answer):
         paths=[pathlib.Path(path) for path in args['paths']]
         (root/'uploaded').write_text(json.dumps([str(path) for path in paths]))
         answer({'error':None,'dialog':None,'tab':{'url':'https://fixture.test/','title':'Fixture'}})
+    elif step=='space.status':answer({'spaceId':51,'name':'Renamed native Space','ownership':'agent'})
     elif step=='space.finish':answer({'spaceId':51,'closedSpace':True,'keptManagedLabels':[],
         'closedManagedLabels':['p1','p2'],'preservedUnmanagedCount':0})
     else:answer(error='unexpected step '+step)
@@ -353,6 +354,17 @@ let scenario mode =
         check bool "native Page context reaches the owned live client" true
           (Yojson.Safe.Util.member "egoPage" tab = `Assoc ["label",`String "p1";
             "targetId",`String "T1";"openedBy",`String "agent"]);
+        let published_space_observation () =
+          let value=match dispatch W.Snapshot with
+            | W.Snapshot_result value -> value
+            | W.Receipt|W.Issue_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Service_refusal _ ->
+                fail "expected worker observation" in
+          let published=ok (Masc.Browser_addon_observation.decode_snapshot value) in
+          match published.client_rows with
+          | [row] -> Yojson.Safe.Util.member "spaceObservation" row
+          | _ -> fail "expected original live client" in
+        check string "attachment SDK ownership is in the ordinary worker snapshot" "agent"
+          Yojson.Safe.Util.(published_space_observation () |> member "ownership" |> to_string);
         let finished () = List.mem "space.finish" (lines (Filename.concat root "steps")) in
         let retirement_unconfirmed () = match dispatch W.Retire with
           | W.Service_refusal {disposition=W.Outcome_unknown;_} -> true
@@ -440,6 +452,9 @@ let scenario mode =
            | W.Issue_result (Error (B.Transport_unsupported _)) -> true
            | W.Issue_result (Ok _ | Error _) | Snapshot_result _ | Model_reply _|Extension_reply _ | Download_reply _
            | Poll_result _ | Receipt | Service_refusal _ -> false);
+        ignore (answered (issue (B.Page_act (B.Action.Control B.Action.Space_status))));
+        check string "explicit refresh reaches ordinary connection observations" "Renamed native Space"
+          Yojson.Safe.Util.(published_space_observation () |> member "spaceName" |> to_string);
         if mode="retained" then (
           check bool "retirement reports unconfirmed file cleanup" true (retirement_unconfirmed ());
           check bool "transport retirement never finishes the task" false (finished ()))

@@ -283,8 +283,14 @@ It does not establish visible UI, user completion or permission for later input.
 The private operator view shows the last cached SDK observation without browser
 I/O. Hand-off, takeover, control waits and failed metadata refreshes invalidate
 that cache. Ordinary connection identity remains the attachment name and fixed
-ID; refreshed native names are separate observations. General connection/TUI
-ownership rendering and actual installed Keeper/UI proof remain follow-up work.
+ID; refreshed native names are separate observations. The ordinary Add-on
+connection row also carries `spaceObservation` (or explicit null) for that exact client and numeric Space. The host validates this field
+before passing the row through. Dashboard connection lists and selected events
+show the raw native value and its own observation time, including retained rows;
+null stays unknown. Refreshing the row reads the cache only; explicit
+`space_status` refreshes the SDK observation. This display does not change
+control or establish current ownership, window visibility or login. TUI ownership
+rendering and actual installed Keeper/UI proof remain follow-up work.
 
 ### Explicit native completion
 

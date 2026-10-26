@@ -21,7 +21,7 @@ let work registered = `Assoc ["activity",`String "enabled";"registered",`Bool re
   "session",`String "closed";"locate",`Bool false]
 let client id browser = `Assoc ["clientId",`String id;"browser",`String browser;
   "version",`String "158.0.1";"engineVersion",`String "158.0.1";"transport",`String "web_extension";"space",`Null;
-  "interactions",`List [];"lastActivities",`List []]
+  "interactions",`List [];"lastActivities",`List [];"spaceObservation",`Null]
 let serving clients = `Assoc ["state",`String "serving";"clients",`List clients;
   "owned_backends",`Assoc ["automation",work true;"stagehand",work false]]
 (* The server reads the browser rows of the Lanes list from this cached
@@ -54,7 +54,54 @@ let duplicate_client () =
   let id="01a16363-ef67-7000-ad62-05bcd0320d99" in
   check bool "the same client twice is refused" true
     (Result.is_error (Observation.decode_snapshot (serving [client id "firefox"; client id "firefox"])))
+let sdk_observation id ownership = `Assoc ["spaceId",`Int id;"spaceName",`String "Renamed native Space";
+  "ownership",`String ownership;"observedAt",`Float 42.]
+let ego_client observation = match client "01a16363-ef67-7000-ad62-05bcd0320d99" "ego_lite" with
+  | `Assoc fields -> `Assoc (("transport",`String "ego_task_space")::
+      ("space",`Assoc ["id",`Int 32;"name",`String "Attachment name"])::
+      ("spaceObservation",observation)::List.filter (fun (key,_) -> not (List.mem key ["transport";"space";"spaceObservation"])) fields)
+  | _ -> fail "fixture client is not an object"
+let published_space_observation () =
+  let native=sdk_observation 32 "agentDelegatedToUser" in
+  let output=ok (Observation.of_snapshot ~observed_at:99. (serving [ego_client native])) in
+  let retained=ok (Types.output_of_json (Types.output_to_json output)) in
+  let published=ok (Observation.read retained) in
+  check bool "dated native observation survives publication and host readback" true
+    (List.map (Yojson.Safe.Util.member "spaceObservation") published.client_rows=[native]);
+  check bool "cached observation never replaces attachment identity" true
+    ((List.hd published.clients).space=Some {Browser_lane.id=32;name="Attachment name"});
+  ignore (ok (Observation.decode_snapshot (serving [ego_client (sdk_observation 32 "future-native-owner")])));
+  ignore (ok (Observation.decode_snapshot (serving [ego_client `Null])));
+  let codec=ok (Masc.Browser_ego_space_observation.of_json ~expected_id:32 native) in
+  check bool "published observation codec preserves exact native value" true
+    (Masc.Browser_ego_space_observation.to_json codec=native);
+  List.iter (fun malformed -> check bool "invalid/foreign metadata is refused at host boundary" true
+    (Result.is_error (Observation.decode_snapshot (serving [ego_client malformed]))))
+    [sdk_observation 33 "agent";sdk_observation 32 " ";
+     `Assoc ["spaceId",`Int 32;"spaceName",`String "name";"ownership",`String "agent";"observedAt",`Float nan];
+     `Assoc ["spaceId",`Int 32;"spaceName",`String "name";"ownership",`String "agent";"observedAt",`Int 1;"observedAt",`Int 2]];
+  let forged=match client "01a16363-ef67-7000-ad62-05bcd0320d99" "firefox" with
+    | `Assoc fields -> `Assoc (("spaceObservation",native)::List.remove_assoc "spaceObservation" fields)
+    | _ -> fail "fixture client is not an object" in
+  check bool "non-Ego client cannot carry native Space metadata" true
+    (Result.is_error (Observation.decode_snapshot (serving [forged])))
+let publisher_binds_original_client_space () = Eio_main.run (fun _ ->
+  let native=ok (Masc.Browser_ego_space_observation.of_json ~expected_id:32 (sdk_observation 32 "agentDelegatedToUser")) in
+  let base=ok (Masc.Browser_addon_wire.client_of_json (`Assoc [
+    "clientId",`String "01a16363-ef67-7000-ad62-05bcd0320d99";"browser",`String "ego_lite";
+    "version",`String "0.6.1.11";"engineVersion",`String "chromium";"transport",`String "ego_task_space";
+    "space",`Assoc ["id",`Int 32;"name",`String "Attachment name"]])) in
+  let published client observation = Observation.publish_client client ~space_observation:observation
+    |> Yojson.Safe.Util.member "spaceObservation" in
+  check bool "same-Space cache is published" true (published base (Some native)=sdk_observation 32 "agentDelegatedToUser");
+  check bool "invalidated cache is explicitly unknown" true (published base None=`Null);
+  check bool "foreign numeric ID cannot leak to this client" true
+    (published {base with space=Some {id=33;name="Another"}} (Some native)=`Null);
+  check bool "non-Ego client cannot borrow the cache" true
+    (published {base with browser=Firefox;transport=Web_extension;space=None} (Some native)=`Null))
 let ()=run "browser addon observation" ["publication",[
+  test_case "native Space metadata reaches cached host observations" `Quick published_space_observation;
+  test_case "publisher binds cache to original Space" `Quick publisher_binds_original_client_space;
   test_case "published snapshot reads back" `Quick published_reads_back;
   test_case "namespaced row reads back" `Quick namespaced_row_reads_back;
   test_case "retired worker is not connected" `Quick retired_is_not_connected;

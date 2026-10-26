@@ -1,0 +1,40 @@
+{
+  "is_derivative": true,
+  "method": "Explicit status fields only; original full status/instructions remain ignored",
+  "snapshots": [
+    {
+      "stage": "initial",
+      "source_sha256": "c55d55137e18fac714b722e5e945885c9985206d0a942558ff5f44052b80ae85",
+      "source_bytes": 17120,
+      "selected": {
+        "name": "audit-startup-b",
+        "activation_mode": "manual",
+        "paused": true,
+        "keepalive_running": false,
+        "meta": {
+          "paused": true,
+          "total_turns": 0,
+          "last_turn_ts": 0.0,
+          "last_runtime_attempt": null
+        }
+      }
+    },
+    {
+      "stage": "final",
+      "source_sha256": "70611d37bc1e3980400ecc1a611d4fce771516d8a5439d4eaf68b93b6e96e1db",
+      "source_bytes": 17509,
+      "selected": {
+        "name": "audit-startup-b",
+        "activation_mode": "manual",
+        "paused": true,
+        "keepalive_running": false,
+        "meta": {
+          "paused": true,
+          "total_turns": 0,
+          "last_turn_ts": 0.0,
+          "last_runtime_attempt": null
+        }
+      }
+    }
+  ]
+}

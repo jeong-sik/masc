@@ -1,0 +1,39 @@
+{
+  "is_derivative": true,
+  "reviewed_at": "2026-10-26T19:24:33.774729+00:00",
+  "reviewer": "root",
+  "original_sources": {
+    "http/startup-failed-health.json": {
+      "sha256": "cb1b70d09952f6c6ed26603778f9f885c4c2c4f7d093105c23559c87de880fce",
+      "bytes": 26681
+    },
+    "http/restored-health.json": {
+      "sha256": "626b0603b19a1b92d20d06b26b0f58562e3d766e7bde6d3591a48bd1a081073f",
+      "bytes": 42013
+    },
+    "server-B.log": {
+      "sha256": "9461dcfd063f48dfe4601a2064e776ed4ab3467beb518077520d3ef0028cd879",
+      "bytes": 22440
+    },
+    "stopped-ledger.json": {
+      "sha256": "6b8ea6f236d88ca33bbb5b56a38a022c30d686c2472521e359358efb4b98d1f7",
+      "bytes": 1726
+    },
+    "after-first-death-ledger.json": {
+      "sha256": "6b8ea6f236d88ca33bbb5b56a38a022c30d686c2472521e359358efb4b98d1f7",
+      "bytes": 1726
+    },
+    "startup-failed-ledger.json": {
+      "sha256": "6b8ea6f236d88ca33bbb5b56a38a022c30d686c2472521e359358efb4b98d1f7",
+      "bytes": 1726
+    },
+    "restored-ledger.json": {
+      "sha256": "cf443d884a7e4384b5dff16772aa6b64629f8c3bedab1e1cc502129be52ad9f8",
+      "bytes": 3895
+    }
+  },
+  "cause_observed": "Actual startup recovery reported backend_set(schedules.json) IOError(openat Is a directory at the owned schedules.json.tmp-atomic).",
+  "same_second_runtime_instance": "01a179a8-c42d-7000-9223-d9c4b029a87f",
+  "stopped_death_failed_ledger_bytes_identical": true,
+  "manual_cause_review": "bounded bootstrap recovery observation PASS for binary source c52f799e52d3683bd2a4c624f0f6adfe36015ec9 only; intentional SIGSTOP/expiry/SIGKILL fault. Not independent review, combined D9, arbitrary process-loss outcomes or model/effect proof."
+}

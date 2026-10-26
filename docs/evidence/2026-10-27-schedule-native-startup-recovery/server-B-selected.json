@@ -1,0 +1,17 @@
+{
+  "is_derivative": true,
+  "source_sha256": "9461dcfd063f48dfe4601a2064e776ed4ab3467beb518077520d3ef0028cd879",
+  "source_bytes": 22440,
+  "source_lines": 184,
+  "method": "Python splitlines, 1-based original line numbers, exact selected text without ANSI/path/whitespace modification. All other log lines omitted.",
+  "selected": [
+    {
+      "source_line": 136,
+      "text": "[2026-10-27 04:21:06] [WARN] [Server] schedule_runner: startup recovery failed: schedule persistence failed: backend_set failed for schedules.json: (Backend_types.IOError\\x0A   \"Eio.Io Unix_error (Is a directory, \\\"openat\\\", \\\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-startup-actual-3_guv0tp/.masc/schedules.json.tmp-atomic\\\"),\\n  opening <fs:/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-startup-actual-3_guv0tp/.masc/schedules.json.tmp-atomic>\")"
+    },
+    {
+      "source_line": 150,
+      "text": "[2026-10-27 04:21:21] [WARN] [Server] schedule_runner: recovered 1 interrupted running schedule(s)"
+    }
+  ]
+}

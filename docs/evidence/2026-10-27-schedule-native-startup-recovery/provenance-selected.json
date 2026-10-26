@@ -1,0 +1,34 @@
+{
+  "source_commit": "c52f799e52d3683bd2a4c624f0f6adfe36015ec9",
+  "expected_executable_sha256": "373ced2eb4897f60d82a0c4b4b7340865e933f0e181a268906ddc595c9034af7",
+  "executable_sha256": "373ced2eb4897f60d82a0c4b4b7340865e933f0e181a268906ddc595c9034af7",
+  "controller_sha256": "b55ef2652223b4062188007599f884fb782b2789ffdadab7c173c5940823ba33",
+  "helper_sha256": "6799826b1d8843e93993a283f98059efd9f9c93787bfae29d823bdcc557b608f",
+  "harness_checkout_head": "80c8997a35e036c05dfccb4ef974d10fbf55375f",
+  "producer": {
+    "workflow": "Minimal manual checks",
+    "run_id": "40374265429",
+    "execution_head": "9377c7f3025d68e3856d2afd3762468dabc77813",
+    "ref": "main",
+    "source_input": "c52f799e52d3683bd2a4c624f0f6adfe36015ec9",
+    "basis": "supplied; no CI query"
+  },
+  "scope": "isolated native candidate; one opportunistic kqueue/SIGSTOP trial, not installation",
+  "existing_image_reference": "masc-sandbox:general",
+  "interpretation_limit": "Root must read original startup-failed-health.json last_error and server-B.log to identify startup-recovery staging-write failure before a product PASS interpretation.",
+  "not_proven": [
+    "power-loss durability",
+    "model execution",
+    "arbitrary exactly-once effects",
+    "ordinary uninstrumented crash frequency",
+    "all scheduler races",
+    "whole feature"
+  ],
+  "runtime_fixture_sha256": "ccbe65e399f47a3abddbf4299e15dd0fd55001dd785b2e0d75948ad86acf7cfd",
+  "is_derivative": true,
+  "original_source": {
+    "sha256": "2656b7f1d0fd526a852b3e5f02493d4fbbaac2b5d42bc8c45d0db1dd93ab1cc7",
+    "bytes": 1435
+  },
+  "derivation": "Original provenance fields preserved; add capture identity and explicit derivative annotation. No source, producer or executable identities replaced."
+}

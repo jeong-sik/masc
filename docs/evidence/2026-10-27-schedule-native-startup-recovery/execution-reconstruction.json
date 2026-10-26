@@ -1,0 +1,41 @@
+{
+  "is_derivative": true,
+  "recorded_after_run_at": "2026-10-26T19:28:53.071582+00:00",
+  "argv": [
+    "python3",
+    "artifacts/schedule-actual-repair-20261027/probe_startup_recovery_actual_v2.py",
+    "--binary",
+    "artifacts/schedule-actual-repair-20261027/native40374265429/artifact/masc",
+    "--source-commit",
+    "c52f799e52d3683bd2a4c624f0f6adfe36015ec9",
+    "--expected-sha256",
+    "373ced2eb4897f60d82a0c4b4b7340865e933f0e181a268906ddc595c9034af7",
+    "--image-reference",
+    "masc-sandbox:general",
+    "--producer-workflow",
+    "Minimal manual checks",
+    "--producer-run-id",
+    "40374265429",
+    "--producer-head",
+    "9377c7f3025d68e3856d2afd3762468dabc77813",
+    "--producer-ref",
+    "main",
+    "--producer-source-ref",
+    "c52f799e52d3683bd2a4c624f0f6adfe36015ec9",
+    "--wait-seconds",
+    "600",
+    "--output",
+    "artifacts/schedule-actual-repair-20261027/runs/startup-recovery-2"
+  ],
+  "argv_basis": "Exact invocation from root unified exec tool call; reconstructed after completion, not captured by controller at startup",
+  "wait_seconds": 600,
+  "controller_exit_code": 0,
+  "controller_exit_basis": "Unified exec session50945 terminal exit0",
+  "python_observed_after_run": {
+    "executable": "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "version": "3.14.4 (main, Apr  7 2026, 13:13:20) [Clang 21.0.0 (clang-2100.0.123.102)]",
+    "platform": "macOS-26.6.1-arm64-arm-64bit-Mach-O"
+  },
+  "python_observation_limit": "Post-run observation of the same python3 environment, not a startup interpreter receipt",
+  "source_sha256": "b55ef2652223b4062188007599f884fb782b2789ffdadab7c173c5940823ba33"
+}

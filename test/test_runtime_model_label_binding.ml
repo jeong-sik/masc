@@ -460,6 +460,91 @@ let ollama_auto_does_not_refresh_other_endpoints () =
           Alcotest.(check int) "cold cache does not refresh unrelated endpoints" 0 !other_hits
         | None -> Alcotest.fail "cold-cache Ollama discovery was refused")))
 
+let ollama_auto_reuses_cold_public_observation () =
+  let tag_requests = ref 0 in
+  let handler _conn req body =
+    ignore (Eio.Buf_read.(of_flow ~max_size:(1024 * 1024) body |> take_all) : string);
+    match Uri.path (Cohttp.Request.uri req) with
+    | "/api/tags" ->
+      incr tag_requests;
+      Cohttp_eio.Server.respond_string ~status:`OK
+        ~body:{|{"models":[{"name":"public-model"}]}|} ()
+    | _ -> Cohttp_eio.Server.respond_string ~status:`Not_found ~body:"missing" ()
+  in
+  with_mock_server handler (fun ~sw ~net ~endpoint ->
+    Discovery_cache.set_env ~sw ~net;
+    with_catalog ~endpoint (fun () ->
+      match Runtime_model_string.parse_model_string "ollama:auto",
+        Runtime_model_string.parse_model_string "ollama:auto" with
+      | Some first, Some second ->
+        Alcotest.(check string) "cold probe supplies its own public model"
+          "public-model" first.Provider_config.model_id;
+        Alcotest.(check string) "the same public observation supplies the next resolution"
+          "public-model" second.Provider_config.model_id;
+        Alcotest.(check int) "a fresh cold observation does not probe twice"
+          1 !tag_requests
+      | _ -> Alcotest.fail "public Ollama auto discovery was refused"))
+
+let ollama_auto_scopes_cached_models_to_the_credential () =
+  let requests = ref [] in
+  let record account =
+    let count = Option.value (List.assoc_opt account !requests) ~default:0 + 1 in
+    requests := (account, count) :: List.remove_assoc account !requests;
+    account
+  in
+  let handler _conn req body =
+    ignore (Eio.Buf_read.(of_flow ~max_size:(1024 * 1024) body |> take_all) : string);
+    match Uri.path (Cohttp.Request.uri req) with
+    | "/api/tags" ->
+      let account = match Cohttp.Header.get (Cohttp.Request.headers req) "authorization" with
+        | Some "Bearer test-key-a" -> record "a"
+        | Some "Bearer test-key-b" -> record "b"
+        | _ -> record "unexpected" in
+      Cohttp_eio.Server.respond_string ~status:`OK
+        ~body:(Printf.sprintf "{\"models\":[{\"name\":\"model-%s\"}]}" account) ()
+    | _ -> Cohttp_eio.Server.respond_string ~status:`Not_found ~body:"missing" ()
+  in
+  let resolve_twice ~endpoint key expected =
+    with_env "MASC_TEST_OLLAMA_KEY" (Some key) (fun () ->
+      with_catalog ~endpoint (fun () ->
+        List.iter (fun _ ->
+          match Runtime_model_string.parse_model_string
+            ~api_key_env_overrides:["ollama-keyed", "MASC_TEST_OLLAMA_KEY"] "ollama-keyed:auto" with
+          | Some config -> Alcotest.(check string) "credential owns its discovered model"
+            expected config.Provider_config.model_id
+          | None -> Alcotest.fail "authenticated Ollama discovery was refused") [(); ()]))
+  in
+  with_mock_server handler (fun ~sw ~net ~endpoint ->
+    Discovery_cache.set_env ~sw ~net;
+    resolve_twice ~endpoint "test-key-a" "model-a";
+    resolve_twice ~endpoint "test-key-b" "model-b";
+    Alcotest.(check (list (pair string int))) "each credential probes once, not globally or per call"
+      ["a", 1; "b", 1] (List.sort compare !requests))
+
+let ollama_auto_probe_uses_declared_deadline () =
+  let tag_requests = ref 0 in
+  let handler _conn req body =
+    ignore (Eio.Buf_read.(of_flow ~max_size:(1024 * 1024) body |> take_all) : string);
+    match Uri.path (Cohttp.Request.uri req) with
+    | "/api/tags" ->
+      incr tag_requests;
+      let pending, _ = Eio.Promise.create () in
+      Eio.Promise.await pending
+    | _ -> Cohttp_eio.Server.respond_string ~status:`Not_found ~body:"missing" ()
+  in
+  with_mock_server handler (fun ~sw ~net ~endpoint ->
+    let clock = Eio_mock.Clock.make () in
+    Eio_mock.Clock.set_time clock 1000.;
+    Discovery_cache.set_env ~sw ~net;
+    with_catalog ~endpoint (fun () ->
+      (match Eio.Time.with_timeout clock 5. (fun () ->
+        Runtime_model_string.parse_model_string "ollama:auto") with
+       | Ok None -> ()
+       | Ok (Some _) -> Alcotest.fail "an unanswered probe invented a model"
+       | Error `Timeout -> Alcotest.fail "the Ollama probe escaped its declared deadline");
+      Alcotest.(check int) "the bounded discovery attempt really reached the endpoint"
+        1 !tag_requests))
+
 let ollama_auto_uses_binding_endpoint () = with_catalog (fun () ->
   let calls = ref [] in
   let discover ~headers:_ endpoint = calls := endpoint :: !calls; Some "qwen-local" in
@@ -492,6 +577,9 @@ let () = Alcotest.run "runtime model label binding"
      "canonical alias",`Quick,alias_default;"supported is not default",`Quick,supported_is_not_default;
      "projection",`Quick,projected_defaults];
    "ollama auto",["production cache",`Quick,ollama_auto_uses_production_discovery_cache;
+     "cold public cache",`Quick,ollama_auto_reuses_cold_public_observation;
+     "credential-scoped cache",`Quick,ollama_auto_scopes_cached_models_to_the_credential;
+     "declared probe deadline",`Quick,ollama_auto_probe_uses_declared_deadline;
      "endpoint discovery",`Quick,ollama_auto_uses_binding_endpoint;
      "no discovered model",`Quick,ollama_auto_without_discovered_model_stays_refused;
      "declared default skips discovery",`Quick,declared_default_skips_discovery;

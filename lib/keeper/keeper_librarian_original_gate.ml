@@ -448,6 +448,7 @@ module Inventory = struct
       Ok (Records.add record.request_id record by_id,
         Records.add execution_id (record::siblings) by_execution)) (Ok (Records.empty,Records.empty)) records in
     Ok {store;owner;by_id;by_execution=Records.map List.rev by_execution}
+  let record_count t = Records.cardinal t.by_id
   let validate t ~capture ~(parent : Owner.retained) =
     let store=t.store and owner=t.owner in
     let* () = require (parent.scope=Capture.scope owner && parent.request_id=Capture.request_id capture)

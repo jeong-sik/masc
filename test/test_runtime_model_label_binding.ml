@@ -121,20 +121,12 @@ let with_env key value f =
       (match value with None -> Unix.unsetenv key | Some value -> Unix.putenv key value);
       f ())
 
-let fresh_port () =
-  let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
-  Unix.setsockopt socket Unix.SO_REUSEADDR true;
-  Unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback, 0));
-  let port = match Unix.getsockname socket with
-    | Unix.ADDR_INET (_, port) -> port
-    | _ -> Alcotest.fail "expected TCP socket" in
-  Unix.close socket;
-  port
-
 let with_mock_server_on ~sw ~net handler f =
-  let port = fresh_port () in
   let socket = Eio.Net.listen net ~sw ~backlog:128 ~reuse_addr:true
-    (`Tcp (Eio.Net.Ipaddr.V4.loopback, port)) in
+    (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0)) in
+  let port = match Eio.Net.listening_addr socket with
+    | `Tcp (_, port) -> port
+    | `Unix _ -> Alcotest.fail "expected a TCP listener" in
   let server = Cohttp_eio.Server.make ~callback:handler () in
   Eio.Fiber.fork ~sw (fun () -> Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
   let endpoint = Printf.sprintf "http://127.0.0.1:%d" port in
@@ -487,6 +479,38 @@ let ollama_auto_reuses_cold_public_observation () =
           1 !tag_requests
       | _ -> Alcotest.fail "public Ollama auto discovery was refused"))
 
+let ollama_auto_preserves_public_observation_through_global_refresh () =
+  let selected_tag_requests = ref 0 in
+  let handler model hits _conn req body =
+    ignore (Eio.Buf_read.(of_flow ~max_size:(1024 * 1024) body |> take_all) : string);
+    match Uri.path (Cohttp.Request.uri req) with
+    | "/api/tags" ->
+      incr hits;
+      Cohttp_eio.Server.respond_string ~status:`OK
+        ~body:(Printf.sprintf "{\"models\":[{\"name\":%S}]}" model) ()
+    | _ -> Cohttp_eio.Server.respond_string ~status:`Not_found ~body:"missing" ()
+  in
+  with_mock_server (handler "selected-model" selected_tag_requests) (fun ~sw ~net ~clock ~endpoint ->
+    Discovery_cache.set_env ~sw ~net ~clock;
+    with_mock_server_on ~sw ~net (handler "other-model" (ref 0)) (fun ~endpoint:other_endpoint ->
+      let declared = Llm_provider.Discovery.endpoint
+        ~protocol:Llm_provider.Discovery.Ollama_native
+        ~capabilities:Llm_provider.Capabilities.ollama_capabilities other_endpoint in
+      ignore (Llm_provider.Provider_registry.refresh_llama_endpoints ~sw ~net ~endpoints:[declared]);
+      with_catalog ~endpoint (fun () ->
+        (match Runtime_model_string.parse_model_string "ollama:auto" with
+         | Some config -> Alcotest.(check string) "cold public discovery resolves its model"
+           "selected-model" config.Provider_config.model_id
+         | None -> Alcotest.fail "cold public Ollama discovery was refused");
+        ignore (Discovery_cache.get_cached_or_refresh ());
+        match Runtime_model_string.parse_model_string "ollama:auto" with
+        | Some config ->
+          Alcotest.(check string) "an unrelated refresh preserves the selected public model"
+            "selected-model" config.Provider_config.model_id;
+          Alcotest.(check int) "fresh public observation survives an unrelated refresh"
+            1 !selected_tag_requests
+        | None -> Alcotest.fail "an unrelated refresh discarded the selected public model")))
+
 let ollama_auto_scopes_cached_models_to_the_credential () =
   let requests = ref [] in
   let record account =
@@ -618,6 +642,7 @@ let () = Alcotest.run "runtime model label binding"
      "projection",`Quick,projected_defaults];
    "ollama auto",["production cache",`Quick,ollama_auto_uses_production_discovery_cache;
      "cold public cache",`Quick,ollama_auto_reuses_cold_public_observation;
+     "public cache survives refresh",`Quick,ollama_auto_preserves_public_observation_through_global_refresh;
      "credential-scoped cache",`Quick,ollama_auto_scopes_cached_models_to_the_credential;
      "declared probe deadline",`Quick,ollama_auto_probe_uses_declared_deadline;
      "missing probe deadline",`Quick,ollama_auto_without_declared_deadline_does_not_probe;

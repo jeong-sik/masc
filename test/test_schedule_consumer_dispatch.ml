@@ -3908,19 +3908,186 @@ let test_a_runner_tick_refreshes_the_cached_schedule_list () =
       Server_dashboard_http_core_cache.invalidate_scheduled_automation config;
       Schedule_runner_status.reset_for_test ())
   @@ fun () ->
-  let held =
+  let state =
     Server_bootstrap_maintenance.run_schedule_runner_tick ~clock config
-      ~previously_held:[]
+      ~state:Server_bootstrap_maintenance.initial_schedule_runner_state
   in
   check bool "the first tick dispatches, so the page shows no hold" true
     (cached_hold () = `Null);
   at := 261.0;
   ignore
     (Server_bootstrap_maintenance.run_schedule_runner_tick ~clock config
-       ~previously_held:held
-     : Schedule_runner.held list);
+       ~state
+     : Server_bootstrap_maintenance.schedule_runner_state);
   check bool "the page read after the next tick carries the hold it made" true
     (cached_hold () <> `Null)
+;;
+
+(* These fixtures run the production runner/store/consumer composition. They
+   do not model a process restart or execute a Keeper/model. *)
+let recovery_request config (request : Schedule_domain.schedule_request) =
+  match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+  | Some current -> current
+  | None -> fail "schedule disappeared"
+;;
+
+let pause_recovery_keeper config keeper_name =
+  let meta = persist_keeper_meta config keeper_name in
+  let paused = { meta with
+    Keeper_meta_contract.paused = true;
+    latched_reason = Some (Keeper_latched_reason.Operator_paused
+      { operator_actor = Keeper_latched_reason.operator_actor_grpc_directive }) } in
+  match Keeper_meta_store.replace_snapshot config paused with
+  | Ok () -> () | Error detail -> fail detail
+;;
+
+let seed_unsettled_running config ~keeper_name ~now request =
+  let primary = Filename.concat (Workspace.masc_dir config) "schedules.json" in
+  let staging = primary ^ ".tmp-atomic" in
+  let snapshot = Filename.concat
+      (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path:config.Workspace.base_path)
+         keeper_name) Keeper_event_queue_persistence.snapshot_filename in
+  let entered = ref false in
+  let concrete = Server_schedule_consumers.consumer in
+  let dispatch config ~now signal (running : Schedule_domain.schedule_request) ~commit_acceptance =
+    if String.equal running.schedule_id request.Schedule_domain.schedule_id then (
+      check bool "concrete consumer receives an actually persisted Running row" true
+        ((recovery_request config request).status = Schedule_domain.Running);
+      check bool "consumer request retains its original instance" true
+        (String.equal running.schedule_instance_id request.schedule_instance_id);
+      check bool "one genuine dispatch installs the filesystem faults" false !entered;
+      entered := true;
+      Unix.mkdir staging 0o755;
+      mkdir_p (Filename.dirname snapshot);
+      write_file snapshot "unreadable canonical queue snapshot";
+      check bool "concrete durable queue read fails" true
+        (Result.is_error (Keeper_event_queue_persistence.load_state_result
+          ~base_path:config.Workspace.base_path ~keeper_name)));
+    concrete.dispatch config ~now signal running ~commit_acceptance
+  in
+  let result = match Schedule_runner.tick ~consumer:{ concrete with dispatch }
+      ~clock:(fun () -> now) config ~now ~retention_days:7 with
+    | Ok result -> result
+    | Error error -> fail (Schedule_runner.runner_error_to_string error) in
+  check bool "production dispatch reached the fault boundary" true !entered;
+  let failed = List.find (fun (dispatch : Schedule_runner.dispatch_result) ->
+      String.equal dispatch.schedule_id request.schedule_id) result.dispatches in
+  check bool "concrete failure plus failed settlement is reported" true
+    (failed.status = Schedule_runner.Dispatch_failed && Option.is_some failed.error);
+  check bool "failed real settlement leaves its persisted Running row" true
+    ((recovery_request config request).status = Schedule_domain.Running);
+  (match Schedule_store.last_wake_for_schedule_instance (Schedule_store.read_state config)
+      ~schedule_instance_id:request.schedule_instance_id ~schedule_id:request.schedule_id with
+   | Some wake -> check bool "the actual running wake remains unsettled" true
+       (wake.status = Schedule_contract_values.Wake_running)
+   | None -> fail "real runner did not persist a wake");
+  staging, snapshot
+;;
+
+let recovery_cached_status config =
+  let page = Server_dashboard_http.dashboard_scheduled_automation_http_json ~config in
+  match Tui_decode.decode_schedule_runner_status page with
+  | Ok (Tui_decode.Runner_status status) -> status
+  | Ok (Tui_decode.Runner_unrecognised word) -> fail ("unrecognised runner status: " ^ word)
+  | Error error -> fail error
+;;
+
+let test_startup_recovery_retries_before_admitting_dispatch () =
+  with_workspace @@ fun config ->
+  let now = Unix.gettimeofday () in
+  pause_recovery_keeper config "schedule-keeper";
+  let original = create_keeper_wake_schedule config in
+  let staging, snapshot = seed_unsettled_running config ~keeper_name:"schedule-keeper" ~now original in
+  (* Add another genuinely due candidate before treating this durable ledger
+     as the next runner session's input. Its dispatch must wait for recovery. *)
+  Unix.rmdir staging;
+  pause_recovery_keeper config "recovery-control";
+  let control = create_named_keeper_wake_schedule config
+      ~schedule_id:"recovery-control" ~keeper_name:"recovery-control" in
+  Unix.mkdir staging 0o755;
+  Schedule_runner_status.reset_for_test ();
+  Fun.protect ~finally:(fun () ->
+    Server_dashboard_http_core_cache.invalidate_scheduled_automation config;
+    Schedule_runner_status.reset_for_test ()) @@ fun () ->
+  ignore (recovery_cached_status config);
+  let state = Server_bootstrap_maintenance.run_schedule_runner_tick
+      ~clock:(fun () -> now) config
+      ~state:Server_bootstrap_maintenance.initial_schedule_runner_state in
+  let failed = Schedule_runner_status.snapshot () in
+  check int "recovery I/O failure reaches runner status" 1 failed.failure_count;
+  check int "no ordinary tick succeeds while startup is pending" 0 failed.success_count;
+  check bool "health's runner status is degraded" true
+    (Schedule_runner_status.status ~now failed = Schedule_contract_values.Runner_degraded);
+  check bool "startup failure invalidates the previously cached status" true
+    (recovery_cached_status config = Schedule_contract_values.Runner_degraded);
+  check bool "failed startup does not advance the other due control" true
+    ((recovery_request config control).status = Schedule_domain.Scheduled);
+  check int "failed startup creates no control dispatch receipt" 0
+    (List.length (Schedule_store.wakes_for_schedule_instance (Schedule_store.read_state config)
+       ~schedule_instance_id:control.schedule_instance_id ~schedule_id:control.schedule_id));
+  Unix.rmdir staging;
+  Sys.remove snapshot;
+  let state = Server_bootstrap_maintenance.run_schedule_runner_tick
+      ~clock:(fun () -> now +. 1.) config ~state in
+  List.iter (fun request ->
+    check bool "recovered/control occurrence is accepted after storage restoration" true
+      ((recovery_request config request).status = Schedule_domain.Succeeded)) [original; control];
+  let recovered_wakes = Schedule_store.wakes_for_schedule_instance (Schedule_store.read_state config)
+      ~schedule_instance_id:original.schedule_instance_id ~schedule_id:original.schedule_id in
+  check int "recovery preserves failed history and adds one actual new attempt" 2 (List.length recovered_wakes);
+  check bool "interrupted wake was settled as failure" true
+    (List.exists (fun (wake : Schedule_domain.wake_record) ->
+       wake.status = Schedule_contract_values.Wake_failed) recovered_wakes);
+  check int "successful recovery enables the normal tick" 1
+    (Schedule_runner_status.snapshot ()).success_count;
+  check bool "successful cadence invalidates cached degraded status" true
+    (recovery_cached_status config = Schedule_contract_values.Runner_ok);
+  (* A later Running occurrence belongs to this active loop. Do not recover
+     it again simply because a normal cadence observes it. *)
+  pause_recovery_keeper config "recovery-later";
+  let later = create_named_keeper_wake_schedule config
+      ~schedule_id:"recovery-later" ~keeper_name:"recovery-later" in
+  let staging, snapshot = seed_unsettled_running config ~keeper_name:"recovery-later" ~now later in
+  Unix.rmdir staging; Sys.remove snapshot;
+  ignore (Server_bootstrap_maintenance.run_schedule_runner_tick ~clock:(fun () -> now +. 2.) config ~state);
+  check bool "active cadence cannot reclaim a later live Running occurrence" true
+    ((recovery_request config later).status = Schedule_domain.Running)
+;;
+
+let test_recovery_success_survives_a_normal_tick_crash () =
+  with_workspace @@ fun config ->
+  let now = Unix.gettimeofday () in
+  pause_recovery_keeper config "schedule-keeper";
+  let original = create_keeper_wake_schedule config in
+  let staging, snapshot = seed_unsettled_running config ~keeper_name:"schedule-keeper" ~now original in
+  Unix.rmdir staging; Sys.remove snapshot;
+  Schedule_runner_status.reset_for_test ();
+  Fun.protect ~finally:(fun () ->
+    Server_dashboard_http_core_cache.invalidate_scheduled_automation config;
+    Schedule_runner_status.reset_for_test ()) @@ fun () ->
+  let at_normal_tick = ref true in
+  let clock () =
+    if !at_normal_tick && (recovery_request config original).status = Schedule_domain.Due then (
+      at_normal_tick := false;
+      raise Exit);
+    now
+  in
+  ignore (recovery_cached_status config);
+  let state = Server_bootstrap_maintenance.run_schedule_runner_tick ~clock config
+      ~state:Server_bootstrap_maintenance.initial_schedule_runner_state in
+  check bool "the crash occurs after recovery committed Due" false !at_normal_tick;
+  check int "normal tick crash is visible" 1 (Schedule_runner_status.snapshot ()).crash_count;
+  check bool "crashed tick invalidates cached runner status" true
+    (recovery_cached_status config = Schedule_contract_values.Runner_degraded);
+  pause_recovery_keeper config "after-crash";
+  let later = create_named_keeper_wake_schedule config
+      ~schedule_id:"after-crash" ~keeper_name:"after-crash" in
+  let staging, snapshot = seed_unsettled_running config ~keeper_name:"after-crash" ~now later in
+  Unix.rmdir staging; Sys.remove snapshot;
+  ignore (Server_bootstrap_maintenance.run_schedule_runner_tick
+      ~clock:(fun () -> now +. 1.) config ~state);
+  check bool "normal crash does not return the runner to global startup recovery" true
+    ((recovery_request config later).status = Schedule_domain.Running)
 ;;
 
 let test_dashboard_projects_quarantined_and_unreadable_reaction_evidence () =
@@ -4509,6 +4676,10 @@ let () =
         ; test_case "dashboard hold keeps the time a failed tick did not refresh"
             `Quick
             test_dashboard_hold_keeps_the_time_a_failed_tick_did_not_refresh
+        ; test_case "startup recovery retries before admitting any dispatch" `Quick
+            test_startup_recovery_retries_before_admitting_dispatch
+        ; test_case "successful recovery survives a normal tick crash" `Quick
+            test_recovery_success_survives_a_normal_tick_crash
         ; test_case "a runner tick refreshes the cached schedule list" `Quick
             test_a_runner_tick_refreshes_the_cached_schedule_list
         ; test_case "dashboard projects quarantined and unreadable reaction evidence"

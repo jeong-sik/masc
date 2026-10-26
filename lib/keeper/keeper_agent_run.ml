@@ -164,6 +164,7 @@ type request_attribution =
     (** The lane attempt that assembled this request. A turn that failed over
         settles on a different runtime, and the record keeps both so a reader
         compares instead of assuming. *)
+  ; schema_observation_scope : Agent_core.Base.Schema_observation.scope option
   ; prompt_blocks : Turn_record.prompt_block list
   ; provider_content :
       ( Agent_core.Types.message list
@@ -186,6 +187,7 @@ type request_attribution =
 
 type request_wire_evidence =
   { wire_observation : Turn_record.request_wire_observation
+  ; wire_schema_observation_scope : Agent_core.Base.Schema_observation.scope option
   ; serialized_observation :
       Llm_provider.Request_wire_observer.observation option
   ; wire_projected_messages : Agent_core.Types.message list option
@@ -859,6 +861,17 @@ let run_turn
     | Some scope -> scope
     | None -> Keeper_turn_scope.create ~keeper_turn_id:manifest_keeper_turn_id
   in
+  let schema_execution_scope =
+    if Agent_core.Base.Schema_observation.enabled () then
+      Option.map (fun execution ->
+        Keeper_repetition_scope.Execution.scope execution
+        |> Keeper_execution_scope_id.to_json |> Yojson.Safe.to_string) repetition_execution
+    else None
+  in
+  Agent_core.Base.Schema_observation.with_wake
+    ~keeper:meta.name ~trace_id ~absolute_turn:manifest_keeper_turn_id
+    ~execution_scope:schema_execution_scope
+    ~cause:None @@ fun () ->
   let turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:manifest_keeper_turn_id in
   let turn_start = Mtime_clock.now () in
   let seq_ref = Atomic.make 0 in
@@ -1264,6 +1277,10 @@ let run_turn
        one. *)
     let built_tools = s.Keeper_run_tools.tools in
     let agent_core_tools = s.Keeper_run_tools.agent_core_tools in
+    Agent_core.Base.Schema_observation.surface ~site:Built_surface
+      (fun () -> List.map (fun (tool : Agent_core.Tool.t) -> tool.schema) built_tools);
+    Agent_core.Base.Schema_observation.surface ~site:Agent_core_surface
+      (fun () -> List.map (fun (tool : Agent_core.Tool.t) -> tool.schema) agent_core_tools);
     let loading_plan =
       Keeper_official_client_host.Declared
         { on_demand = s.Keeper_run_tools.on_demand_tool_names
@@ -1401,6 +1418,7 @@ let run_turn
       in
       let attribution : request_attribution =
         { runtime_profile = runtime_id
+        ; schema_observation_scope = Agent_core.Base.Schema_observation.current_scope ()
         ; prompt_blocks = acc.prompt_blocks
         ; provider_content
         ; tools
@@ -1425,6 +1443,7 @@ let run_turn
        [Keeper_alerting_path] and [Keeper_sandbox_containment]; AGENT_CORE receives no
        ambient path capability. *)
     (
+       Agent_core.Base.Schema_observation.with_site Phase0_bytes (fun () ->
        Keeper_agent_run_phase0_telemetry.record
          ~meta
          ~turn_system_prompt
@@ -1437,7 +1456,7 @@ let run_turn
          ~user_message
          ~start_turn_count
          ~max_context
-         ();
+         ());
        (* Section 3: Dispatch — call Keeper_turn_driver.run_named / Agent.run. *)
        let raw_trace = raw_trace_for_dispatch ~config ~meta in
        (* The owner of the last candidate this turn dispatched. A turn that
@@ -1795,6 +1814,7 @@ let run_turn
                               in
                               let attribution : request_attribution =
                                 { runtime_profile = runtime_id
+                                ; schema_observation_scope = Agent_core.Base.Schema_observation.current_scope ()
                                 ; prompt_blocks = acc.prompt_blocks
                                 ; provider_content
                                 ; tools = request_tools
@@ -1806,6 +1826,7 @@ let run_turn
                                  { Turn_record.runtime_profile = runtime_id
                                  ; body_bytes
                                  }
+                             ; wire_schema_observation_scope = Agent_core.Base.Schema_observation.current_scope ()
                              ; serialized_observation = serialized
                              ; wire_projected_messages =
                                  !current_request_projected_messages_ref
@@ -2343,8 +2364,16 @@ let run_turn
                             derived parameters are excluded. *)
                          { Turn_record.name = tool.Agent_core.Tool.schema.name
                          ; schema_bytes =
-                             Agent_core.Base.Tool.wire_bytes_of_schema
-                               tool.Agent_core.Tool.schema
+                             let count () =
+                               Agent_core.Base.Schema_observation.measure
+                                 ~site:Final_attribution_bytes ~schema:tool.Agent_core.Tool.schema
+                                 (fun () -> Agent_core.Base.Tool.wire_bytes_of_schema
+                                   tool.Agent_core.Tool.schema)
+                             in
+                             (match attribution.schema_observation_scope with
+                              | None -> count ()
+                              | Some scope ->
+                                Agent_core.Base.Schema_observation.with_scope scope count)
                          })
                       request_tools))
             in
@@ -2368,10 +2397,16 @@ let run_turn
              | Error _ -> None
              | Ok input_messages ->
                let segments =
-                 Keeper_agent_prompt_metrics.build_ctx_segments
-                   ~prompt_blocks:attribution.prompt_blocks
-                   ~tools:attribution.tools
-                   ~input_messages
+                 let build () =
+                   Agent_core.Base.Schema_observation.with_site Final_attribution_bytes
+                     (fun () -> Keeper_agent_prompt_metrics.build_ctx_segments
+                       ~prompt_blocks:attribution.prompt_blocks
+                       ~tools:attribution.tools
+                       ~input_messages)
+                 in
+                 match attribution.schema_observation_scope with
+                 | None -> build ()
+                 | Some scope -> Agent_core.Base.Schema_observation.with_scope scope build
                in
                Some
                  (List.map
@@ -2422,9 +2457,10 @@ let run_turn
              ; wire_projected_messages = Some messages
              ; wire_system_prompt = Some system_prompt
              ; wire_tools = tools
+             ; wire_schema_observation_scope
              ; _
              } ->
-           Keeper_provider_input_snapshot.write_best_effort
+           let write () = Keeper_provider_input_snapshot.write_best_effort
              ~config
              ~keeper:meta.name
              ~trace_id
@@ -2434,6 +2470,10 @@ let run_turn
              ~system_prompt
              ~messages
              ~tools
+           in
+           (match wire_schema_observation_scope with
+            | None -> write ()
+            | Some scope -> Agent_core.Base.Schema_observation.with_scope scope write)
          | Some { serialized_observation = None; _ }
          | Some { wire_projected_messages = None; _ }
          | Some { wire_system_prompt = None; _ }

@@ -691,6 +691,7 @@ let run_new_turn
       ~turn
       agent
   =
+  Schema_observation.with_provider_turn ~ordinal:turn @@ fun () ->
   (* [turn] is the identity [Pipeline_execution_resume.resolve] produced; it
      owns the complete provider turn. The collect stage advances mutable agent
      state before output/tool dispatch, so no stage reads [state.turn_count]. *)

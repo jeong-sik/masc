@@ -933,7 +933,12 @@ let memoize_message_measurement measure =
    fibers even though no provider call has started yet. The server installs a
    shared CPU-weighted [Domain_pool]; non-Eio/unit callers retain the typed
    inline fallback owned by [Domain_pool_ref]. *)
-let offload_model_input_cpu f = Domain_pool_ref.submit_cpu_or_inline f
+let offload_model_input_cpu f =
+  let work = Agent_core.Base.Schema_observation.capture (fun () ->
+    Agent_core.Base.Schema_observation.measure ~site:Worker_work f)
+  in
+  Agent_core.Base.Schema_observation.measure ~site:Worker_queue_and_await
+    (fun () -> Domain_pool_ref.submit_cpu_or_inline work)
 
 (* The request bytes that are not conversation history, measured with the
    same encoder as the history: tool schemas and the system prompt. Charged
@@ -942,9 +947,12 @@ let declared_request_reserve_bytes ~system_prompt ~tools =
   let tool_schema_bytes =
     List.fold_left
       (fun acc tool ->
+         let json = Agent_core.Tool.schema_to_json tool in
          acc
          + String.length
-             (Yojson.Safe.to_string (Agent_core.Tool.schema_to_json tool)))
+             (Agent_core.Base.Schema_observation.encode
+                ~site:Reserve_encode ~schema:tool.Agent_core.Tool.schema
+                (fun () -> Yojson.Safe.to_string json)))
       0
       tools
   in
@@ -1721,6 +1729,10 @@ let bounded_model_input_projection
     let prefix_tools =
       Keeper_agent_tool_surface.on_the_wire ~agent_cell ~built:ctx.tools
       |> Agent_core.Tool_set.of_list |> Agent_core.Tool_set.to_list
+      |> fun tools ->
+      Agent_core.Base.Schema_observation.surface ~site:Request_surface
+        (fun () -> List.map (fun (tool : Agent_core.Tool.t) -> tool.schema) tools);
+      tools
       |> List.map Agent_core.Tool.schema_to_json
     in
     let ( let* ) = Result.bind in

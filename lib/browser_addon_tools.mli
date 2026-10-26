@@ -7,7 +7,9 @@ val handle :
   principal:Lane_addon_call_context.principal -> reserved:string list ->
   keeper_name:string option -> tool:Browser_capabilities.tool ->
   tool_name:string -> start_time:Tool_timing.started -> Yojson.Safe.t -> Tool_result.result
-(** [keeper_name=None] cannot persist a screenshot for an arbitrary owner.
+(** A Keeper's screenshot is persisted to its workspace. With [keeper_name=None]
+    the checked PNG is an image block of the result; it is never persisted
+    for an arbitrary owner.
     Scene retention and result manifests remain the verified caller's existing
     responsibility. [upload_paths] comes only from the host's staged-file
     authority, never the tool body. The bundled owned-Gecko path copies them into

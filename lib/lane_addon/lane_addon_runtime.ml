@@ -2102,9 +2102,8 @@ let call_operator ~config ~access ~instance_id ~expected_incarnation ~arguments 
 type browser_reading = { services : browser_service list; unready : Lane_addon_unready.t list }
 let browser_reading (reading : live_reading) =
   let services = reading.ready |> List.filter_map (fun ((e : entry), connection) ->
-    match connection.worker.browser with
-    | Some _ -> Some {instance_id=e.instance_id;owner=connection.export_owner}
-    | None -> None) in
+    if serves_public_tools e.package.worker_service then None
+    else Some {instance_id=e.instance_id;owner=connection.export_owner}) in
   let unready = reading.unready |> List.filter (fun (unready : Lane_addon_unready.t) ->
     match unready.service with Browser_service -> true | Mcp_tools -> false) in
   { services; unready }
@@ -2692,13 +2691,13 @@ let browser_service_status ~config ~access ~instance_id = Eio_context.run_on_own
          | Detaching|Detached -> Browser_retired
          | Failed _ ->
              (match e.connection with
-              | Some connection when e.started && Option.is_some connection.worker.browser ->
+              | Some connection when e.started && not (serves_public_tools e.package.worker_service) ->
                   Browser_refresh_needed {instance_id;owner=connection.export_owner}
               | None|Some _ -> Browser_unavailable)
          | Attached|Observing ->
              if not e.started then Browser_unavailable else
              match e.connection with
-             | Some connection when Option.is_some connection.worker.browser ->
+             | Some connection when not (serves_public_tools e.package.worker_service) ->
                  Browser_ready {instance_id;owner=connection.export_owner}
              | None|Some _ -> Browser_unavailable)
     | Some _ -> Browser_unavailable

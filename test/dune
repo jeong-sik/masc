@@ -3368,7 +3368,7 @@
 (test
  (name test_keeper_vision_tool)
  (modules test_keeper_vision_tool)
- (libraries browser_addon_fixture masc_test_deps masc.runtime masc.browser_lane)
+ (libraries browser_addon_fixture masc_test_deps masc.runtime masc.browser_lane masc.lane_addon_call_context)
  (deps ../bin/masc_native_addon_launcher.exe))
 
 (test

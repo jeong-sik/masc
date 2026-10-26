@@ -31,7 +31,7 @@ let absolute_url = function
        | Some ("http"|"https"),Some host when host<>"" -> Ok value
        | (None|Some _),(None|Some _) -> Error "url must be an absolute HTTP(S) URL")
   | None|Some _ -> Error "url is required"
-let prepare_read ~keeper_name json =
+let prepare_read json =
   let* fields=fields ["lane";"clientId";"tabId";"maxChars";"mode";"framePath";
     "scope";"expectedUrl";"navigationSource";"within";"selector";"snapshotScope";"root"] json in
   let* request=surface fields in
@@ -92,7 +92,6 @@ let prepare_read ~keeper_name json =
         | Some _,_ | _,Some _ -> Error "snapshotScope and root are text" in
       let* tab_id=tab request in prepared request Raw (B.Page_snapshot {tab_id;max_chars;scope})
   | `Screenshot ->
-      let* ()=Option.to_result ~none:"screenshot requires an owning Keeper" (Option.map (fun _ -> ()) keeper_name) in
       let* tab_id=tab request in prepared request (Screenshot tab_id) (B.Page_capture {tab_id})
   | `Downloads ->
       (* A live connection that does not list downloads refuses at selection
@@ -115,10 +114,10 @@ let prepare_read ~keeper_name json =
   | `Text -> prepared request Raw (B.Page_read {tab_id=request.tab_id;max_chars=Some max_chars})
   | `Elements -> prepared request elements_projection (B.Page_elements {tab_id=request.tab_id;filter})
   | `Frames|`Dialog -> Error "contextual read requires a frame or dialog mode"
-let prepare ~keeper_name ~upload_paths tool json =
+let prepare ~upload_paths tool json =
   let* _=Lane_addon_action.canonical json in
   match tool with
-  | C.Read -> prepare_read ~keeper_name json
+  | C.Read -> prepare_read json
   | Interact ->
     (match json with
      | `Assoc supplied when List.assoc_opt "action" supplied = Some (`String "workflow") ->
@@ -210,23 +209,32 @@ let project ~base_path ~keeper_name ~started request (receipt:Host.receipt) =
     | `Assoc fields -> Ok (`Assoc (capability_fields @ List.filter
         (fun (key,_) -> not (List.mem key ["browserCapabilities";"requiredActions"])) fields))
     | _ -> Error "browser inventory/session response must be an object" in
+  let data value = Result.map (fun data -> data,None) value in
   match request.projection with
-  | Raw -> Ok (annotate receipt.data)
+  | Raw -> data (Ok (annotate receipt.data))
   | Inventory ->
-      let data=match receipt.data with `List tabs -> `Assoc ["tabs",`List tabs] | value -> value in
-      with_capabilities (annotate data)
-  | Session -> with_capabilities (annotate receipt.data)
-  | Scene scene -> Browser_scene.project scene ~binding:receipt.binding ~started receipt.data
+      let inventory=match receipt.data with `List tabs -> `Assoc ["tabs",`List tabs] | value -> value in
+      data (with_capabilities (annotate inventory))
+  | Session -> data (with_capabilities (annotate receipt.data))
+  | Scene scene -> data (Browser_scene.project scene ~binding:receipt.binding ~started receipt.data)
   | Scoped_elements filter ->
-      let* data=Browser_page_script.check_scoped_elements ~filter receipt.data in
-      Ok (annotate data)
+      data (Result.map annotate (Browser_page_script.check_scoped_elements ~filter receipt.data))
   | Screenshot tab_id ->
-      let* keeper_name=Option.to_result ~none:"screenshot requires an owning Keeper" keeper_name in
-      let* data=Browser_surface.capture_from ~binding:receipt.binding ~tab_id ~started receipt.data in
-      Browser_screenshot.persist ~base_path ~keeper_name data
+      let* capture=Browser_surface.capture_from ~binding:receipt.binding ~tab_id ~started receipt.data in
+      match keeper_name,capture with
+      | Some keeper_name,_ -> data (Browser_screenshot.persist ~base_path ~keeper_name capture)
+      (* A caller with no Keeper workspace gets the checked PNG back as an image
+         block of this result, and the observation fields without its bytes. *)
+      | None,`Assoc fields ->
+          (match List.assoc_opt "data" fields with
+           | Some (`String image) ->
+               Ok (`Assoc (List.filter (fun (key,_) -> key<>"data") fields),
+                 Some [Llm_provider.Types.Image {media_type="image/png";data=image;source_type=Llm_provider.Types.Base64}])
+           | Some _|None -> Error "screenshot lacks its image")
+      | None,_ -> Error "screenshot must be an object"
 let handle ?upload_paths ~config ~access ~principal ~reserved ~keeper_name ~tool ~tool_name ~start_time json =
   let started=Mtime_clock.elapsed_ns () in
-  let result=match prepare ~keeper_name ~upload_paths tool json with
+  let result=match prepare ~upload_paths tool json with
     | Error detail -> Legacy.make_input_err ~tool_name ~start_time detail
     | Ok request ->
         match Host.connect ~config ~access ~principal ~reserved with
@@ -236,7 +244,8 @@ let handle ?upload_paths ~config ~access ~principal ~reserved ~keeper_name ~tool
             | Error result -> result
             | Ok receipt ->
                 (match project ~base_path:config.Workspace.base_path ~keeper_name ~started request receipt with
-                 | Ok data -> Tool_result.make_ok ~tool_name ~start_time ~data ?metadata:receipt.raw_result._meta ()
+                 | Ok (data,content_blocks) ->
+                     Tool_result.make_ok ~tool_name ~start_time ~data ?content_blocks ?metadata:receipt.raw_result._meta ()
                  | Error detail ->
                      let effect_disposition=match request.projection with
                        | Session -> Tool_result.Effect_outcome_unknown

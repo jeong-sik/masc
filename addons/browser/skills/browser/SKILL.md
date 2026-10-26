@@ -23,7 +23,8 @@ page accepted an interaction. An explicitly named live connection must include
 its observed client ID before creating a tab.
 
 When the selected client's transport is `ego_task_space`, start with
-`BrowserRead` `mode = "snapshot"` (`scope = "viewport"`), and reuse its refs or
+`BrowserRead` `mode = "snapshot"` (`snapshotScope = "viewport"`, the default),
+and reuse its refs or
 observed Ego locators for input. Ego owns locator resolution, actionability,
 automatic scrolling and frame/shadow traversal; do not resolve a native target
 to coordinates or add a separate selector wait. After page changes or a stale
@@ -68,8 +69,10 @@ Native hosts connect through the authenticated workspace HTTP bridge; configured
 owned Firefox, Gecko and Chrome backends start inside the attached worker.
 Inspect inventory and configuration issues before choosing a connection.
 
-Uploads use `BrowserAct` `action = "upload"` with the observed lane and `tabId`.
-The host must first authorize and snapshot the requested files through the
+Uploads use `BrowserAct` `action = "upload"` on an owned Gecko tab
+(`lane = "automation"`) or on a live ego connection (`lane = "live"` with its
+observed `clientId`), with the observed `tabId`. Other connections refuse it
+before any effect. The host must first authorize and snapshot the requested files through the
 Keeper's file-read context. A raw path is not that authority. Never invent an
 `uploadId` or reuse a grant from another call.
 

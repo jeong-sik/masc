@@ -425,17 +425,54 @@ let parse
     let max_context_override_res = parse_max_context_override args in
     let remote_endpoint_res = parse_remote_endpoint args in
     let egress_allow_opt_res = parse_present_string_list_opt args "egress_allow" in
+    match parse_microvm_backend_patch args with
+    | Error message -> Error (tool_result_error ~class_:Tool_result.Policy_rejection message)
+    | Ok microvm_backend_patch ->
+    (* A file the strict load refuses is assessed with this call's edits
+       applied: a patch that repairs it proceeds on the merged defaults, so
+       a configuration the current build refuses stays repairable through
+       the API. Fields whose own parse failed are left out of the merge;
+       their errors still surface below, exactly as on a healthy file. *)
+    let merge_remote_endpoint_present, merge_remote_endpoint_opt =
+      match remote_endpoint_res with
+      | Ok value -> value
+      | Error _ -> false, None
+    in
+    let merge_max_context_override_present, merge_max_context_override_opt =
+      match max_context_override_res with
+      | Ok value -> value
+      | Error _ -> false, None
+    in
+    let toml_edits =
+      toml_edits_of_patch
+        { instructions = instructions_arg
+        ; sandbox_profile = sandbox_profile_opt
+        ; network_mode = network_mode_opt
+        ; mention_targets = mention_targets_opt
+        ; board_interests = board_interests_opt
+        ; input_policy = input_policy_opt
+        ; activation_mode = activation_mode_opt
+        ; sandbox_image = sandbox_image_patch
+        ; microvm_backend = microvm_backend_patch
+        ; remote_endpoint_present = merge_remote_endpoint_present
+        ; remote_endpoint = merge_remote_endpoint_opt
+        ; max_context_override_present = merge_max_context_override_present
+        ; max_context_override = merge_max_context_override_opt
+        ; skill_names_present
+        ; skill_names = skill_names_opt
+        ; native_tool_posture_present
+        ; native_tool_posture = native_tool_posture_opt
+        }
+    in
     match
-      load_declarative_materialization_defaults
+      load_declarative_materialization_defaults_or_merged
         ~base_path:ctx.config.base_path
-        name
+        ~name
+        ~toml_edits
     with
     | Error error ->
       Error (tool_result_error ~class_:Tool_result.Policy_rejection (keeper_toml_load_error_to_string error))
     | Ok { profile_defaults; manifest_snapshot = declarative_manifest_snapshot } ->
-    match parse_microvm_backend_patch args with
-    | Error message -> Error (tool_result_error ~class_:Tool_result.Policy_rejection message)
-    | Ok microvm_backend_patch ->
     let profile_defaults =
       match microvm_backend_patch with
       | None -> profile_defaults

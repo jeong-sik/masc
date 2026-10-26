@@ -14,6 +14,9 @@ val selection_of_json : Yojson.Safe.t -> (selection, string) result
 val valid_state : string -> bool
 val selected_text : positioned -> (string, error) result
 val default_runner : ?executable:string -> string -> (Unix.process_status * string, string) result
+(** Runs the transformer with a 30 second wall-clock budget. A transformer
+    that exceeds it surfaces as an [Unavailable] error, not as a document
+    refusal, so the client can retry. *)
 val seed : ?runner:runner -> string -> (snapshot, error) result
 val merge : ?runner:runner -> state:string -> updates:string list -> unit -> (snapshot, error) result
 val select : ?runner:runner -> state:string -> anchor:int -> head:int -> unit -> (positioned, error) result

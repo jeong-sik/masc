@@ -13730,7 +13730,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.verification <- None;
   state.verification_error <- None;
   state.verification_evidence <- Masc_tui_fetched.clear state.verification_evidence;
-  state.verification_evidence_saved <- None;
+  state.verification_evidence_saved <- [];
   state.verification_evidence_request <- None;
   state.verification_inflight <- false;
   state.verification_refresh_after_inflight <- false;
@@ -13887,7 +13887,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.verification_detail_request_id <- None;
   state.verification_detail_scroll <- 0;
   state.verification_evidence <- Masc_tui_fetched.clear state.verification_evidence;
-  state.verification_evidence_saved <- None;
+  state.verification_evidence_saved <- [];
   state.verification_evidence_request <- None;
   state.verification_verdict_armed <- None;
   state.verification_verdict_error <- None;
@@ -19514,7 +19514,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
       if request.vex_authority = state.workspace_authority
          && request.vex_reading == state.workspace_read_authority then
         Option.iter (fun path -> state.verification_evidence_saved <-
-          Some (request.vex_key, request.vex_index, path)) saved;
+          (request.vex_key, request.vex_index, path) :: state.verification_evidence_saved) saved;
       (match result with
        | Error detail -> report_action state "error" ("Evidence: " ^ detail
            ^ (match saved with None -> "" | Some path -> " · 저장한 사본: " ^ path))

@@ -8991,7 +8991,7 @@ type state = {
   mutable verification_evidence_request: verification_evidence_request option;
   mutable verification_evidence_cursor: int;
   mutable verification_evidence_index_open: bool;
-  mutable verification_evidence_saved: (verification_evidence_key * int * string) option;
+  mutable verification_evidence_saved: (verification_evidence_key * int * string) list;
   (* One cache is shared by the calls surface and chat full-detail mode. The
      scope and generation are the authority: cursor position is not, because
      palette/Answering can open a chat without moving the roster cursor. *)
@@ -15830,7 +15830,7 @@ let create_state
   verification_evidence_request = None;
   verification_evidence_cursor = 0;
   verification_evidence_index_open = false;
-  verification_evidence_saved = None;
+  verification_evidence_saved = [];
   keeper_calls = None;
   keeper_calls_error = None;
   keeper_calls_keeper = None;

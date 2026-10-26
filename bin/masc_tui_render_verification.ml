@@ -372,11 +372,11 @@ let verification_evidence_index state request ~width observation =
       request.vr_submitted_by in
     judgement_detail_rows ~width ([Ansi.bold, Printf.sprintf "  증거 %d / %d · e/E 다음/이전 · i 목록 · o 열기 · s 저장" (if count = 0 then 0 else index + 1) count]
       @ rows @ [Theme.recede (), location]
-      @ (match state.verification_evidence_saved with
-         | Some (key, saved_index, path) when key.vek_request_id = request.vr_request_id
-             && key.vek_task_id = request.vr_task_id && saved_index = index ->
-           [Ansi.reset, "  이 기기에 저장한 파일: " ^ path]
-         | Some _ | None -> [])), index
+      @ List.filter_map (fun (key, saved_index, path) ->
+          if key.vek_request_id = request.vr_request_id
+             && key.vek_task_id = request.vr_task_id && saved_index = index
+          then Some (Ansi.reset, "  이 기기에 저장한 파일: " ^ path) else None)
+          state.verification_evidence_saved), index
   | Absent | Loading | Failed _ | Ready (Masc_tui_evidence_picture.Access_unavailable _)
   | Stale (Masc_tui_evidence_picture.Access_unavailable _, _) -> [], 0
 

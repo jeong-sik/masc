@@ -24,18 +24,18 @@ let script = {js|async function nativeWorkflow(page, args) {
       switch (step.method) {
         case 'click':
           holdingInput = effect = effectStarted = true; inputReleased = false;
-          receipt = await page.click(step.selector, pointerOptions); inputReleased = !receipt?.dialog; break;
+          receipt = await page.click(step.selector, pointerOptions); break;
         case 'dblclick':
           holdingInput = effect = effectStarted = true; inputReleased = false;
-          receipt = await page.dblclick(step.selector, pointerOptions); inputReleased = !receipt?.dialog; break;
+          receipt = await page.dblclick(step.selector, pointerOptions); break;
         case 'hover': effect = effectStarted = true; receipt = await page.hover(step.selector, pointerOptions); break;
         case 'dragAndDrop':
           holdingInput = effect = effectStarted = true; inputReleased = false;
           receipt = await page.dragAndDrop(step.selector, step.destination, pointerOptions);
-          inputReleased = !receipt?.dialog; break;
+          break;
         case 'mouse.click':
           holdingInput = effect = effectStarted = true; inputReleased = false;
-          receipt = await page.mouse.click(step.x, step.y, pointerOptions); inputReleased = !receipt?.dialog; break;
+          receipt = await page.mouse.click(step.x, step.y, pointerOptions); break;
         case 'mouse.move': effect = effectStarted = true; receipt = await page.mouse.move(step.x, step.y, pointerOptions); break;
         case 'mouse.wheel': effect = effectStarted = true; receipt = await page.mouse.wheel(step.x, step.y, pointerOptions); break;
         case 'fill': effect = effectStarted = true; receipt = await page.fill(step.selector, step.text, options); break;
@@ -48,20 +48,20 @@ let script = {js|async function nativeWorkflow(page, args) {
             });
           } catch (error) { return failure(index, 'inputPreflight', error); }
           holdingInput = effect = effectStarted = true; inputReleased = false;
-          receipt = await page.press(step.selector, step.key, options); inputReleased = !receipt?.dialog; break;
+          receipt = await page.press(step.selector, step.key, options); break;
         case 'focus': effect = effectStarted = true; receipt = await page.focus(step.selector, options); break;
         case 'reload': effect = effectStarted = true; receipt = await page.reload(options); break;
         case 'keyboard.type':
           holdingInput = effect = effectStarted = true; inputReleased = false;
-          receipt = await page.keyboard.type(step.text, options); inputReleased = !receipt?.dialog; break;
+          receipt = await page.keyboard.type(step.text, options); break;
         case 'keyboard.insertText': effect = effectStarted = true; receipt = await page.keyboard.insertText(step.text); break;
         case 'keyboard.paste':
           holdingInput = effect = effectStarted = true; inputReleased = false;
           receipt = await page.keyboard.paste(step.html === undefined ? step.text : {text: step.text, html: step.html});
-          inputReleased = !receipt?.dialog; break;
+          break;
         case 'keyboard.press':
           holdingInput = effect = effectStarted = true; inputReleased = false;
-          receipt = await page.keyboard.press(step.key, options); inputReleased = !receipt?.dialog; break;
+          receipt = await page.keyboard.press(step.key, options); break;
         case 'selectOption': {
           const selection = JSON.parse(step.selectionJson);
           effect = effectStarted = true;
@@ -116,14 +116,27 @@ let script = {js|async function nativeWorkflow(page, args) {
       // handle. Do not synthesize cleanup or treat that void as release proof.
       return failure(index, step.method, error);
     }
+    if (holdingInput) {
+      // The SDK's raw keyboard.type boundary can swallow a dialog interruption
+      // into normal void. A later info() without a dialog cannot distinguish
+      // that from completed typing, so do not complete this step or continue.
+      if (receipt === null || typeof receipt !== 'object' || Array.isArray(receipt)) {
+        let dialog;
+        try { dialog = (await page.info()).dialog; }
+        catch (error) { return failure(index, step.method, error); }
+        return failure(index, step.method,
+          'Ego returned no native action receipt; input release remains unconfirmed. Inspect this Space and use its private operator input-reset confirmation before another input. Never replay this step.',
+          dialog ? {dialog} : {});
+      }
+      inputReleased = !receipt.dialog;
+    }
     completedEffect ||= effect;
     completed.push({index, method: step.method, receipt: receipt ?? null});
-    // Keyboard methods return no action receipt. Their input handlers can still
-    // open a dialog, so observe it before dispatching the next operation.
+    // Receipt-less non-holding effects can still open a dialog. Observe it
+    // before dispatching another operation; this read never proves key-up.
     let dialog = pageResult ? null : receipt?.dialog;
     if (effect && (receipt == null || pageResult)) {
-      if (holdingInput) inputReleased = false;
-      try { dialog = (await page.info()).dialog; if (holdingInput) inputReleased = !dialog; }
+      try { dialog = (await page.info()).dialog; }
       catch (error) { return failure(index + 1, 'observation', error); }
     }
     if (dialog) return failure(index, step.method, 'answer the JavaScript dialog before continuing', {dialog});

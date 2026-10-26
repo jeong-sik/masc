@@ -171,10 +171,45 @@ test('receipt-less holding input keeps release uncertain on dialog or failed obs
    f.page.info=async()=>{if(observationFails)throw Error('lost observation');return {dialog:{type:'alert',message:'hold'}};};
    const result=await run(f.page,request([{method,selector:'#editor',destination:'#target',key:'Enter',text:'x',x:20,y:30}]));
    assert.equal(result.inputReleased,false,method);
-   assert.equal(result.completed.length,1);assert.equal(result.completedEffect,true);
-   assert.equal(result.failure.method,observationFails?'observation':method);
+   assert.equal(result.completed.length,0);assert.equal(result.completedEffect,false);
+   assert.equal(result.failure.method,method);
   }
  }
+});
+test('void holding input never infers release from a clear or rapidly closed dialog',async()=>{
+ for (const method of ['keyboard.type','keyboard.press','keyboard.paste','press','click','dblclick','mouse.click','dragAndDrop']) {
+  for (const dialogWasClosed of [false,true]) {
+   const f=fixture();let entered=0,later=0,held=false,dialog=null;
+   const input=async()=>{entered++;held=true;if(dialogWasClosed){dialog={type:'alert'};dialog=null;}};
+   f.page.keyboard={type:input,press:input,paste:input};f.page.mouse={click:input};
+   if(!method.includes('.'))f.page[method]=input;
+   f.page.info=async()=>({dialog});
+   f.page.fill=async()=>{later++;};
+   const result=await run(f.page,request([
+    {method,selector:'#editor',destination:'#target',key:'Enter',text:'x',x:20,y:30},
+    {method:'fill',selector:'#next',text:'must not run'},
+   ]));
+   assert.equal(entered,1);assert.equal(held,true);
+   assert.equal(later,0,method+' cannot continue on an absent action receipt');
+   assert.equal(result.inputReleased,false);assert.equal(result.effectStarted,true);
+   assert.equal(result.completedEffect,false);assert.equal(result.completed.length,0);
+   assert.equal(result.failure.index,0);assert.equal(result.failure.method,method);
+   assert.equal(f.calls.some(call=>call[0]==='snapshot'),false);
+  }
+ }
+});
+test('a void holding step retains the earlier completed prefix without replay',async()=>{
+ const f=fixture();let typed=0,later=0;
+ f.page.keyboard={async type(){typed++;}};f.page.click=async()=>{later++;return {};};
+ const result=await run(f.page,request([
+  {method:'fill',selector:'#editor',text:'prefix'},
+  {method:'keyboard.type',text:'may be partial'},
+  {method:'click',selector:'#submit'},
+ ]));
+ assert.equal(typed,1);assert.equal(later,0);
+ assert.equal(result.completed.length,1);assert.equal(result.completed[0].method,'fill');
+ assert.equal(result.completedEffect,true);assert.equal(result.inputReleased,false);
+ assert.equal(result.failure.index,1);assert.equal(result.failure.method,'keyboard.type');
 });
 test('a missing press selector stops before input while a later press failure stays uncertain',async()=>{
  for(const missing of [false,true]) {
@@ -324,13 +359,20 @@ test('native rich input keeps focus, clipboard content and keyboard signatures',
  f.page.keyboard={
   async type(text,options){assert.equal(arguments.length,2);assert.equal(options.delay,4);assert.ok(focused);value+=text;},
   async insertText(text){assert.equal(arguments.length,1);assert.ok(focused);value+=text;},
-  async paste(content){assert.equal(arguments.length,1);assert.ok(focused);value+=content.text;html=content.html;},
-  async press(key,options){assert.equal(arguments.length,2);assert.equal(options.delay,5);assert.equal(key,'ControlOrMeta+A');},
+  async paste(content){assert.equal(arguments.length,1);assert.ok(focused);value+=content.text;html=content.html;return {};},
+  async press(key,options){assert.equal(arguments.length,2);assert.equal(options.delay,5);assert.equal(key,'ControlOrMeta+A');return {};},
  };
  f.page.reload=async(options)=>{assert.equal(options.timeout,7000);return {};};
- const result=await run(f.page,request([
+ const typed=await run(f.page,request([
   {method:'focus',selector:'#editor',options:{timeout:0}},
   {method:'keyboard.type',text:'hello ',options:{delay:4}},
+  {method:'keyboard.insertText',text:'must not run'},
+ ]));
+ assert.equal(typed.failure.method,'keyboard.type');assert.equal(typed.inputReleased,false);
+ assert.equal(typed.completed.length,1);assert.equal(value,'hello ');
+ // A distinct later invocation models only signature forwarding after an
+ // external input reset; it does not exercise or authorize that reset.
+ const result=await run(f.page,request([
   {method:'keyboard.insertText',text:'한글 😀'},
   {method:'keyboard.paste',text:'Name\tStatus',html:'<table><tr><td>Name</td><td>Status</td></tr></table>'},
   {method:'keyboard.press',key:'ControlOrMeta+A',options:{delay:5}},
@@ -338,7 +380,7 @@ test('native rich input keeps focus, clipboard content and keyboard signatures',
  ]));
  assert.equal(result.failure,null);assert.equal(value,'hello 한글 😀Name\tStatus');
  assert.equal(html,'<table><tr><td>Name</td><td>Status</td></tr></table>');
- assert.equal(result.completed.length,6);assert.equal(result.completedEffect,true);
+ assert.equal(result.completed.length,4);assert.equal(result.completedEffect,true);
 });
 test('plain paste preserves empty strings and failed keyboard input is never replayed',async()=>{
  const f=fixture();let pasted;

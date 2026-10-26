@@ -18,6 +18,12 @@ sequence and returns one final snapshot. Split the call when intermediate
 results require a new decision. Retain `completed` progress on failure and
 never replay the sequence after uncertain effects.
 
+The current SDK's `keyboard.type` returns no action receipt, including after
+some dialog interruptions. A native workflow stops at that step, excludes it
+from `completed` and leaves input release unconfirmed even when no dialog is
+visible. Use the private operator recovery described below before a distinct
+next input. Do not repeat typing or silently substitute another input method.
+
 Uploads use `BrowserAct` `action = "upload"` on the live ego connection
 (`lane = "live"` with its observed `clientId`) and the observed `tabId`. The
 host must first authorize and snapshot the requested files through the

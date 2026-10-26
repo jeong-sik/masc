@@ -1,6 +1,6 @@
 {
   "schema": "scheduled-job-runtime-audit-evidence.v1",
-  "selection": "Only owned synthetic workspace data. MCP entries unmodified; health omitted; owner status is selected fields. Tokens and HTTP auth headers were never recorded.",
+  "selection": "Owned synthetic workspace run captures plus selected shared Keeper operation and GitHub CI receipts. MCP entries are unmodified except health omission; owner status is selected fields. Tokens and HTTP auth headers were never recorded.",
   "runs": {
     "api-extended-1": {
       "probe_exit_code_observed": 0,

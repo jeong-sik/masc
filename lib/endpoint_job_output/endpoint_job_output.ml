@@ -290,6 +290,12 @@ let reopen_with_hook ~after_chunk ~after_stat ~sw ~storage ~stream =
 let reopen ~sw ~storage ~stream =
   reopen_with_hook ~after_chunk:(fun () -> ()) ~after_stat:(fun ~leaf:_ -> ()) ~sw ~storage ~stream
 
+let revalidate_sealed t =
+  match Atomic.get t.state,t.validate_read with
+  | Sealed seal,Some validate -> let* ()=validate () in Ok seal
+  | Unavailable e,_ -> Error e
+  | Growing _,_ | Sealed _,None -> Error Invalid_storage
+
 module For_testing = struct
   type nonrec metadata_operation = metadata_operation = Open_recovery | Publish of string
   type nonrec metadata_stage = metadata_stage = Waiting | Acquired

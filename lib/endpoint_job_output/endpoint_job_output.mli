@@ -45,6 +45,11 @@ val reopen :
     No capture, process, signal, publication or launch permission is created.
     [sw] owns this reader's descriptors and must cover result consumption;
     use a separate reader scope rather than the global registry lifetime. *)
+val revalidate_sealed : t -> (seal, error) result
+(** Revalidate a reopened original's held descriptors, canonical seal/spool
+    snapshots and original source authority after the completed full-byte hash.
+    This does not hash again or infer completion from EOF. Captures cannot turn
+    a cached seal into this validation and return [Invalid_storage]. *)
 type chunk = { data : string; extent : P.extent }
 val read : t -> offset:int64 -> max_bytes:int -> (chunk, error) result
 (** Read from the pinned original file descriptor within its observed prefix.

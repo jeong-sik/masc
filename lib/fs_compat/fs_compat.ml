@@ -1734,6 +1734,13 @@ type owned_reader = Eio_unix.Fd.t
 external owned_reader_pread_unix : Unix.file_descr -> int64 -> int -> string
   = "caml_masc_owned_reader_pread"
 
+let owned_reader_root_matches (expected : Eio.File.Stat.t) (stat : Unix.stats) =
+  stat.st_kind=Unix.S_DIR && Int64.of_int stat.st_dev=expected.dev && Int64.of_int stat.st_ino=expected.ino
+  && Int64.of_int stat.st_uid=expected.uid && stat.st_perm land 0o7777=expected.perm land 0o7777
+let owned_reader_parent_unchanged (expected : Eio.File.Stat.t) (current : Eio.File.Stat.t) =
+  current.kind=`Directory && current.dev=expected.dev && current.ino=expected.ino
+  && current.uid=expected.uid && current.perm=expected.perm
+
 let open_owned_reader ~sw ~parent ~leaf =
   Eio.Switch.check sw;
   try
@@ -1745,12 +1752,9 @@ let open_owned_reader ~sw ~parent ~leaf =
         | Error detail -> invalid_arg detail in
       let expected=Eio.Path.stat ~follow:false parent in
       let path=Eio.Path.native_exn parent in
-      let same_root (stat : Unix.stats) = stat.st_kind=Unix.S_DIR
-        && Int64.of_int stat.st_dev=expected.dev && Int64.of_int stat.st_ino=expected.ino
-        && Int64.of_int stat.st_uid=expected.uid && stat.st_perm land 0o7777=expected.perm land 0o7777 in
       let opened=Eio_unix.run_in_systhread ~label:"owned-reader-open" (fun () ->
         with_owned_inventory_root path (fun root ->
-          if not (same_root (owned_inventory_root_stat root))
+          if not (owned_reader_root_matches expected (owned_inventory_root_stat root))
           then owned_file_error (Filesystem_identity_changed {path})
           else with_owned_inventory_regular_file ~owner_uid:(Unix.geteuid ()) root relative
             (fun ~file ~parent:_ ~stat:_ ->
@@ -1759,8 +1763,7 @@ let open_owned_reader ~sw ~parent ~leaf =
       | Error _ as error -> error
       | Ok fd ->
         let current=Eio.Path.stat ~follow:false parent in
-        if current.kind<>`Directory || current.dev<>expected.dev || current.ino<>expected.ino
-            || current.uid<>expected.uid || current.perm<>expected.perm
+        if not (owned_reader_parent_unchanged expected current)
         then owned_file_error (Filesystem_identity_changed {path})
         else (
           Eio.Switch.check sw;
@@ -1791,6 +1794,46 @@ let owned_reader_pread reader ~offset ~length =
   if offset<0L || length<0 || length>Sys.max_string_length then invalid_arg "owned reader range";
   Eio_unix.run_in_systhread ~label:"owned-reader-pread" (fun () ->
     Eio_unix.Fd.use_exn "owned reader pread" reader (fun fd -> owned_reader_pread_unix fd offset length))
+;;
+
+let sync_owned_reader ~parent ~leaf reader =
+  try
+    let result=Eio.Cancel.protect (fun () ->
+      let relative=match owned_relative_path [leaf] with
+        | Ok relative -> relative | Error detail -> invalid_arg detail in
+      let expected=Eio.Path.stat ~follow:false parent in
+      let path=Eio.Path.native_exn parent in
+      let synced=Eio_unix.run_in_systhread ~label:"owned-reader-sync" (fun () ->
+        Eio_unix.Fd.use_exn "owned reader sync" reader (fun held ->
+          let initial=Unix.fstat held in
+          let same (stat : Unix.stats) = same_file_snapshot initial stat
+            && initial.st_uid=stat.st_uid && initial.st_gid=stat.st_gid
+            && initial.st_perm=stat.st_perm && initial.st_nlink=stat.st_nlink
+            && initial.st_rdev=stat.st_rdev in
+          with_owned_inventory_root path (fun root ->
+            if not (owned_reader_root_matches expected (owned_inventory_root_stat root))
+            then owned_file_error (Filesystem_identity_changed {path})
+            else
+              let checked=with_owned_inventory_regular_file ~owner_uid:(Unix.geteuid ()) root relative
+                (fun ~file ~parent ~stat ->
+                  if not (same stat) then owned_file_error (Filesystem_identity_changed {path})
+                  else (
+                    Unix.fsync file;Unix.fsync parent;
+                    if same (Unix.fstat held) then Ok ()
+                    else owned_file_error (Filesystem_identity_changed {path}))) in
+              Result.join checked))) in
+      match synced with
+      | Error _ as error -> error
+      | Ok () ->
+        let current=Eio.Path.stat ~follow:false parent in
+        if owned_reader_parent_unchanged expected current then Ok ()
+        else owned_file_error (Filesystem_identity_changed {path})) in
+    Eio.Fiber.check ();
+    result
+  with
+  | Eio.Cancel.Cancelled _ as cancellation -> reraise_current cancellation
+  | (Eio.Io _ | Unix.Unix_error _ | Sys_error _ | Invalid_argument _) as cause ->
+    owned_file_operation_error ~path:leaf Read_contents cause
 ;;
 
 let owned_inventory_entry_digest root relative =

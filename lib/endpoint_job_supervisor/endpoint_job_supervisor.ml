@@ -102,7 +102,37 @@ let result_content (observation : observation) launch_id =
     "launch_id",`String (P.Id.to_string launch_id);"stdin",stdin;
     "gate",`Assoc ["preparation",preparation;"decision",`String decision;"control",`String control]]))
 
-let publish_result ~before_result_publish ~sw ~fs t settled =
+let verify_receipt ~sw ~storage ~root_stat ~content ~sha256 =
+  let* opened=receipt_io (fun () -> Fs_compat.open_owned_reader ~sw ~parent:storage ~leaf:result_leaf) in
+  let* reader=opened |> Result.map_error (fun _ -> Receipt_storage_unavailable) in
+  let* initial=receipt_io (fun () -> Fs_compat.owned_reader_stat reader) in
+  let* ()=if initial.kind=`Regular_file && initial.nlink=1L && initial.uid=root_stat.Eio.File.Stat.uid
+      && initial.perm land 0o7777=0o400 && Optint.Int63.to_int64 initial.size=Int64.of_int (String.length content)
+    then Ok () else Error Receipt_storage_unavailable in
+  let stable (current : Eio.File.Stat.t) = {initial with atime=current.atime}=current in
+  let validate () =
+    let* root=receipt_io (fun () -> Eio.Path.stat ~follow:false storage) in
+    let* held=receipt_io (fun () -> Fs_compat.owned_reader_stat reader) in
+    let* canonical=receipt_io (fun () -> Eio.Path.stat ~follow:false Eio.Path.(storage / result_leaf)) in
+    if root.kind=`Directory && root.dev=root_stat.dev && root.ino=root_stat.ino
+        && root.uid=root_stat.uid && root.perm land 0o7777=0o700 && stable held && stable canonical
+      then Ok () else Error Receipt_storage_unavailable in
+  let* ()=validate () in
+  let bytes=Buffer.create (String.length content) in
+  let rec read offset =
+    if offset=String.length content then Ok (Buffer.contents bytes) else
+    let* data=receipt_io (fun () -> Fs_compat.owned_reader_pread reader ~offset:(Int64.of_int offset)
+      ~length:(min 65536 (String.length content-offset))) in
+    if String.length data=0 then Error Receipt_storage_unavailable else (Buffer.add_string bytes data;read (offset+String.length data)) in
+  let* actual=read 0 in
+  let hash=cpu (fun () -> Digestif.SHA256.(to_hex (digest_string actual))) in
+  let* ()=if actual=content && hash=P.Sha256.to_string sha256 then Ok () else Error Receipt_storage_unavailable in
+  let* synced=receipt_io (fun () -> Fs_compat.sync_owned_reader ~parent:storage ~leaf:result_leaf reader) in
+  let* ()=synced |> Result.map_error (fun _ -> Receipt_storage_unavailable) in
+  let* ()=validate () in
+  Ok validate
+
+let publish_result ~before_result_publish ~after_result_publish ~sw ~fs t settled =
   let* observation,record=observe_settled t settled in
   let* launch_id=match R.launch_state record with
     | R.Requested launch_id -> Ok launch_id
@@ -119,6 +149,20 @@ let publish_result ~before_result_publish ~sw ~fs t settled =
       ~parent_components:[] ~target_leaf:result_leaf ~permissions:0o400
     |> Result.map_error (fun e -> Recovery_failed (Fs_compat.capability_publication_target_error_to_string e)) in
   before_result_publish ();
+  Eio.Switch.run (fun read_sw ->
+  let reopen stream expected =
+    let* reader=O.reopen ~sw:read_sw ~storage:opened ~stream
+      |> Result.map_error (fun cause -> Output_error {stream;cause}) in
+    let* actual=O.revalidate_sealed reader |> Result.map_error (fun cause -> Output_error {stream;cause}) in
+    if actual=expected then Ok reader else Error (Output_error {stream;cause=O.Invalid_storage}) in
+  let* stdout=reopen P.Stdout settled.stdout in
+  let* stderr=reopen P.Stderr settled.stderr in
+  let validate_outputs () =
+    let validate stream reader expected =
+      let* actual=O.revalidate_sealed reader |> Result.map_error (fun cause -> Output_error {stream;cause}) in
+      if actual=expected then Ok () else Error (Output_error {stream;cause=O.Invalid_storage}) in
+    let* ()=validate P.Stdout stdout settled.stdout in validate P.Stderr stderr settled.stderr in
+  let* ()=validate_outputs () in
   let* ()=L.with_storage_publication t.owner (fun () ->
     let* recovery=Fs_compat.Publication_recovery.open_registry ~sw ~fs ~registry_root:storage
       |> Result.map_error (fun e -> Recovery_failed (Fs_compat.Publication_recovery.registry_error_to_string e)) in
@@ -131,8 +175,12 @@ let publish_result ~before_result_publish ~sw ~fs t settled =
     | Lane_release_failed {value;release_failure} ->
       let detail=Fs_compat.Publication_recovery.lane_release_failure_to_string release_failure in
       Error (Recovery_failed (match value with Ok () -> detail | Error e -> error_to_string e ^ "; " ^ detail))) in
+  after_result_publish ();
+  let* validate_receipt=verify_receipt ~sw:read_sw ~storage ~root_stat ~content ~sha256 in
   let* current=R.refresh record |> Result.map_error (fun e -> Registry_error e) in
-  Ok {sha256;status=status current settled (P.Result_ready sha256);content}
+  let* ()=validate_outputs () in
+  let* ()=validate_receipt () in
+  Ok {sha256;status=status current settled (P.Result_ready sha256);content})
 let cancel t = L.cancel t.owner |> Result.map_error (fun e -> Launch_error e)
 let await_quiescent t = L.await_quiescent t.owner |> Result.map_error (fun e -> Launch_error e)
 let read_output t ~stream ~offset ~max_bytes =
@@ -210,7 +258,7 @@ let start_input ~sw pipes data =
     `Stop_daemon);
   done_
 
-let supervise ~before_result_publish ~sw ~fs pipes owner ~registry_release_error ~pipe_cleanup_errors =
+let supervise ~before_result_publish ~after_result_publish ~sw ~fs pipes owner ~registry_release_error ~pipe_cleanup_errors =
   let capture stream source=O.start ~sw ~fs ~owner ~stream ~source
     |> Result.map_error (fun cause -> Output_error {stream;cause}) in
   let stdout=capture P.Stdout pipes.stdout_source in
@@ -257,7 +305,7 @@ let supervise ~before_result_publish ~sw ~fs pipes owner ~registry_release_error
        finish settled;
        match settled with
        | Error _ -> ()
-       | Ok settled -> finish_result (publish_result ~before_result_publish ~sw ~fs t settled));
+       | Ok settled -> finish_result (publish_result ~before_result_publish ~after_result_publish ~sw ~fs t settled));
      let watch stream capture=daemon (fun () ->
        match capture with
        | Error e -> finish (Error e)
@@ -267,7 +315,7 @@ let supervise ~before_result_publish ~sw ~fs pipes owner ~registry_release_error
      daemon (fun () -> match Eio.Promise.await input with Ok _ -> () | Error e -> finish (Error e)));
   t
 
-let launch_with_hook ~after_spawn ~before_result_publish ~sw ~fs ~cgroup_parent_path ~execution intent =
+let launch_with_hook ~after_spawn ~before_result_publish ~after_result_publish ~sw ~fs ~cgroup_parent_path ~execution intent =
   Eio.Switch.check sw;
   match pipes ~sw with
   | Error error -> Not_performed {error;pipe_cleanup_errors=[]}
@@ -280,11 +328,12 @@ let launch_with_hook ~after_spawn ~before_result_publish ~sw ~fs ~cgroup_parent_
         | Error e -> Error (Launch_error e)
         | Ok owner ->
           after_spawn owner;
-          Ok (supervise ~before_result_publish ~sw ~fs pipes owner ~registry_release_error ~pipe_cleanup_errors) in
+          Ok (supervise ~before_result_publish ~after_result_publish ~sw ~fs pipes owner ~registry_release_error ~pipe_cleanup_errors) in
       Performed {value;registry_release_error;pipe_cleanup_errors}
 
 let launch_effect_workspace ~sw ~fs ~cgroup_parent_path ~execution intent =
-  launch_with_hook ~after_spawn:(fun _ -> ()) ~before_result_publish:(fun () -> ()) ~sw ~fs ~cgroup_parent_path ~execution intent
+  launch_with_hook ~after_spawn:(fun _ -> ()) ~before_result_publish:(fun () -> ())
+    ~after_result_publish:(fun () -> ()) ~sw ~fs ~cgroup_parent_path ~execution intent
 module For_testing = struct
   let launch_effect_workspace = launch_with_hook
 end

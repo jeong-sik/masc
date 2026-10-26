@@ -1,8 +1,8 @@
 (** Per-job endpoint supervision with owned stdio.
     Every child descriptor and capture source is created here for the same
     original launch. Stdin comes from that immutable committed specification.
-    This core still needs an authenticated daemon/host adapter and durable
-    terminal-result publication before protocol result readiness or Release. *)
+    An authenticated daemon/host adapter, restart receipt reconciliation and
+    durable host consumption/Release remain separate obligations. *)
 module P = Endpoint_job_protocol
 module R = Endpoint_job_registry
 module L = Endpoint_job_launch
@@ -82,7 +82,13 @@ val await_result : t -> (result_receipt,error) result
     original admission/known launch, source revision/cancellation and raw gate
     observations in a private immutable receipt using canonical durable
     exclusive publication. Only confirmed publication produces Result_ready
-    with the digest of these exact receipt bytes. The result remains an
+    with the digest of these exact receipt bytes. Both original streams are
+    fully reopened/hashed outside metadata/registry locks and compared with the
+    actual cached seals. Their retained attachments and the exact private
+    receipt bytes/attachment are revalidated after publication before readiness;
+    the exact readback file and its actual parent are fsynced together.
+    These are bounded observations, not protection against later mutation.
+    The result remains an
     uncertain-execution observation, never payload or Task/Goal success.
 
     Observer cancellation leaves publication and the original job alive.
@@ -99,10 +105,13 @@ val await_quiescent : t -> (G.exit_observation,error) result
 module For_testing : sig
   val launch_effect_workspace :
     after_spawn:(L.t -> unit) -> before_result_publish:(unit -> unit) ->
+    after_result_publish:(unit -> unit) ->
     sw:Eio.Switch.t -> fs:Eio.Fs.dir_ty Eio.Path.t ->
     cgroup_parent_path:string -> execution:L.execution -> R.launch_intent -> launch_outcome
   (** [after_spawn]: original owner exists and parent child-ends are closed;
       input/capture workers have not started. [before_result_publish]: actual
       physical/tree/input/output settlement exists, before result publication
-      and outside the owner metadata lock. No alternate spawn/storage/evidence. *)
+      and outside the owner metadata lock. [after_result_publish] runs after the
+      actual durable exclusive commit, before attachment readback/readiness.
+      Both publication hooks run outside the owner metadata lock. *)
 end

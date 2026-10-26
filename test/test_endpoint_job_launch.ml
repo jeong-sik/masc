@@ -449,8 +449,9 @@ let output_owner_teardown_finishes_entered_metadata = fixture (fun ~env ~sw ~sto
       (read (leaf fixture binding "stdout.bin"))))
 
 let supervise value = value |> Result.map_error S.error_to_string |> require
-let supervised ?(after_spawn=fun _ -> ()) ?(before_result_publish=fun () -> ()) ~sw ~env fixture permit =
-  match S.For_testing.launch_effect_workspace ~after_spawn ~before_result_publish ~sw ~fs:env#fs
+let supervised ?(after_spawn=fun _ -> ()) ?(before_result_publish=fun () -> ())
+    ?(after_result_publish=fun () -> ()) ~sw ~env fixture permit =
+  match S.For_testing.launch_effect_workspace ~after_spawn ~before_result_publish ~after_result_publish ~sw ~fs:env#fs
       ~cgroup_parent_path:"/sys/fs/cgroup" ~execution:fixture.execution permit with
   | S.Not_performed {error;_} -> Alcotest.fail (S.error_to_string error)
   | S.Performed {value;registry_release_error=None;pipe_cleanup_errors=[]} -> supervise value
@@ -621,6 +622,67 @@ let result_owner_teardown_settles_external_observers = fixture (fun ~env ~sw:_ ~
   match S.await_result original with
   | Error S.Interrupted | Error (S.Output_error {cause=O.Interrupted;_}) -> ()
   | Error _ | Ok _ -> Alcotest.fail "owner teardown left a result observer waiting or invented readiness")
+
+let result_readiness_requires_current_original_files stage change = fixture (fun ~env ~sw:_ ~store fixture ->
+  Eio.Switch.run (fun sw ->
+    let binding,permit=prepare store fixture "05" "printf original; exit 7" in
+    let spool=leaf fixture binding "stdout.bin" and seal=leaf fixture binding "stdout.seal.json" in
+    let receipt=leaf fixture binding S.result_leaf in
+    let changed=ref false in
+    let mutate () =
+      changed:=true;
+      check "mutation follows actual sealed output bytes" (read spool="original" && Sys.file_exists seal);
+      check "mutation occurs at the selected real result commit boundary"
+        (Sys.file_exists receipt=(match stage with `Before -> false | `After -> true));
+      match change with
+      | `Move_spool -> Unix.rename spool (spool ^ ".evidence")
+      | `Truncate_spool -> Unix.truncate spool 3
+      | `Delete_seal -> Unix.link seal (seal ^ ".evidence");Unix.unlink seal
+      | `Replace_seal -> Unix.rename seal (seal ^ ".evidence");
+        Out_channel.with_open_bin seal (fun oc -> output_string oc "replacement seal");Unix.chmod seal 0o400
+      | `Rebind_stream ->
+        Out_channel.with_open_bin spool (fun oc -> output_string oc "forged!!");
+        let fields=match Yojson.Safe.from_file seal with `Assoc fields -> fields
+          | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Alcotest.fail "actual seal missing" in
+        let fields=List.map (fun (key,value) -> key,if key="sha256" then `String (P.Sha256.to_string (digest "forged!!")) else value) fields in
+        Unix.chmod seal 0o600;Yojson.Safe.to_file seal (`Assoc fields);Unix.chmod seal 0o400
+      | `Delete_receipt -> Unix.link receipt (receipt ^ ".evidence");Unix.unlink receipt
+      | `Replace_receipt -> Unix.rename receipt (receipt ^ ".evidence");
+        Out_channel.with_open_bin receipt (fun oc -> output_string oc "replacement receipt");Unix.chmod receipt 0o400 in
+    let original=supervised ~sw ~env fixture permit
+      ~before_result_publish:(match stage with `Before -> mutate | `After -> fun () -> ())
+      ~after_result_publish:(match stage with `Before -> (fun () -> ()) | `After -> mutate) in
+    let settled=S.await_settled original |> supervise in exit 7 settled.physical_exit;
+    (match change,S.await_result original with
+     | (`Move_spool | `Truncate_spool | `Delete_seal | `Replace_seal | `Rebind_stream),
+       Error (S.Output_error {stream=P.Stdout;cause=(O.Invalid_storage | O.Storage_unavailable)}) -> ()
+     | (`Delete_receipt | `Replace_receipt),Error S.Receipt_storage_unavailable -> ()
+     | _,(Error _ | Ok _) -> Alcotest.fail "changed original output/receipt attachment acquired result readiness");
+    check "actual filesystem mutation was observed" !changed;
+    (match stage with
+     | `Before -> check "failed stream verification never publishes a terminal receipt" (not (Sys.file_exists receipt))
+     | `After ->
+       let retained=match change with `Delete_receipt | `Replace_receipt -> receipt ^ ".evidence"
+         | `Move_spool | `Truncate_spool | `Delete_seal | `Replace_seal | `Rebind_stream -> receipt in
+       let status=P.response_of_json Yojson.Safe.Util.(Yojson.Safe.from_string (read retained) |> member "status")
+         |> Result.map_error P.error_to_string |> require in
+       (match status with
+        | P.Status {result=P.Result_pending;_} -> ()
+        | P.Admitted _ | Status _ | Output _ | Released _ | Refused _ | Held _ ->
+          Alcotest.fail "failed post-commit validation rewrote frozen candidate evidence"));
+    (match change with
+     | `Move_spool -> Alcotest.(check string) "moved original bytes remain evidence" "original" (read (spool ^ ".evidence"))
+     | `Truncate_spool -> Alcotest.(check string) "failed verification does not repair or hide the truncation" "ori" (read spool)
+     | `Delete_seal -> check "missing seal is never recreated" (not (Sys.file_exists seal))
+     | `Replace_seal -> Alcotest.(check string) "replacement seal is never overwritten" "replacement seal" (read seal)
+     | `Rebind_stream -> Alcotest.(check string) "self-consistent rewritten stream is never adopted or repaired" "forged!!" (read spool)
+     | `Delete_receipt -> check "missing receipt is never recreated" (not (Sys.file_exists receipt))
+     | `Replace_receipt -> Alcotest.(check string) "replacement receipt is never overwritten" "replacement receipt" (read receipt));
+    let _,next=prepare store fixture "07" "printf independent; exit 8" in
+    let independent=Eio.Switch.run (fun next_sw -> supervised ~sw:next_sw ~env fixture next |> S.await_result |> supervise) in
+    match independent.status with
+    | P.Status {phase=P.Termination_observed (P.Exited 8);result=P.Result_ready _;_} -> ()
+    | P.Admitted _ | Status _ | Output _ | Released _ | Refused _ | Held _ -> Alcotest.fail "failed original readiness blocked another actual job"))
 
 let completed_output ~env ~store fixture script = Eio.Switch.run (fun sw ->
   let binding,permit=prepare store fixture "05" script in
@@ -813,6 +875,17 @@ let () =
       "spool atomic open rejects post-stat symlink",sealed_output_atomic_open_rejects_raced_special_leaf `Spool `Symlink;
       "failed result publication preserves raw settlement and other progress",result_publication_failure_preserves_raw_settlement;
       "result observer cancellation preserves frozen receipt and source progress",result_observer_cancel_and_source_progress_preserve_publication;
-      "owner teardown settles external terminal result observers",result_owner_teardown_settles_external_observers] in
+      "owner teardown settles external terminal result observers",result_owner_teardown_settles_external_observers;
+      "pre-publish moved spool refuses readiness",result_readiness_requires_current_original_files `Before `Move_spool;
+      "pre-publish truncated spool refuses readiness",result_readiness_requires_current_original_files `Before `Truncate_spool;
+      "pre-publish deleted seal refuses readiness",result_readiness_requires_current_original_files `Before `Delete_seal;
+      "pre-publish replaced seal refuses readiness",result_readiness_requires_current_original_files `Before `Replace_seal;
+      "pre-publish self-consistent stream cannot replace actual cached seal",result_readiness_requires_current_original_files `Before `Rebind_stream;
+      "post-publish moved spool refuses readiness",result_readiness_requires_current_original_files `After `Move_spool;
+      "post-publish truncated spool refuses readiness",result_readiness_requires_current_original_files `After `Truncate_spool;
+      "post-publish deleted seal refuses readiness",result_readiness_requires_current_original_files `After `Delete_seal;
+      "post-publish replaced seal refuses readiness",result_readiness_requires_current_original_files `After `Replace_seal;
+      "post-publish deleted receipt refuses readiness",result_readiness_requires_current_original_files `After `Delete_receipt;
+      "post-publish replaced receipt refuses readiness",result_readiness_requires_current_original_files `After `Replace_receipt] in
   Alcotest.run "Endpoint job launch" ["original supervisor",List.map
     (fun (name,test) -> Alcotest.test_case name `Quick test) cases]

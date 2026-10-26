@@ -10,3 +10,9 @@
  (modules test_published_artifact_checks)
  (libraries masc masc.server masc.masc_core masc.masc_tool_blob_store masc.fs_compat
   alcotest eio eio_main eio.unix unix yojson))
+
+(test
+ (name test_artifact_drafts)
+ (modules test_artifact_drafts)
+ (libraries masc masc.artifact_document_engine masc.masc_process masc.masc_core masc.masc_random_id masc.fs_compat
+  alcotest eio eio_main unix yojson))

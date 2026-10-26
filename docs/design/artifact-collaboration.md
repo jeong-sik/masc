@@ -30,6 +30,18 @@ Keeper는 문서를 읽은 뒤 받은 상대 위치와 읽었던 문장을 함�
 
 독립 경계 검사는 `scripts/dune-local.sh build test/artifact_document_engine/test_artifact_document_engine.exe`로 컴파일합니다. 설치된 실제 변환 프로세스를 포함하려면 실행 파일에 `--transformer /path/to/masc-artifact-document`를 넘깁니다. 인자를 생략하면 요청·응답 경계 검사만 실행합니다.
 
-영속 저장·인증된 HTTP/실시간 전달·Keeper 도구·화면 연결은 후속 작업입니다. 이 층의 테스트 성공은 공동 편집 제품 완료나 운영 설치 증명이 아닙니다.
+### 공유 원고 저장과 API
+
+`Artifact_draft_store`는 `<effective MASC root>/artifact_drafts/<artifact-id>.json`에 Yjs 상태를 저장합니다. 본문은 이 상태에서 읽으며 별도 권위로 중복 저장하지 않습니다. 게시 기준 버전·본문 digest·원고 세대·변경 순번·인증된 수정자는 manifest에 남습니다. 원고가 이미 있으면 `open`은 그 원고를 돌려주며 최신 게시물로 덮어쓰지 않습니다.
+
+기존 owned-path·stable-lock·cursor 조건부 rewrite로 저장합니다. 다른 작성자가 먼저 저장한 것이 확인되면 새 상태에 수정을 다시 계산합니다. 선택한 문장이 달라졌으면 교체를 거절합니다. 저장 여부가 불확실한 경우에는 이 재시도를 하지 않고 원고 세대와 시도한 순번을 반환합니다. 메타데이터 손상이나 안전하지 않은 파일 경로는 새 원고 생성으로 숨기지 않습니다.
+
+`GET /api/v1/artifact-drafts/<artifact-id>`는 저장된 공유 원고를 읽습니다. `POST /api/v1/artifact-drafts`는 닫힌 action 계약으로 `open`·`merge`·`select`·`edit`를 받습니다. 모든 경로는 `CanAdmin` 인증이 필요하며 작업 공간 precondition 헤더도 기존 요청 진입점에서 검사합니다. 클라이언트가 작성자 이름을 지정하는 필드는 없습니다.
+
+`select`는 문서 ID·원고 세대·상대 위치가 묶인 selection을 반환합니다. `edit`는 이 selection과 읽었던 문장을 받아 그 문서에 적용합니다. Yjs의 원고 끝 위치는 다른 문서에서도 해석될 수 있으므로 원시 상대 위치만으로 문서를 선택하지 않습니다. Dashboard API 호출부도 응답의 문서·세대·selection 대상이 일치하는지 검사합니다.
+
+실제 transformer와 영속 저장을 포함한 검사는 `scripts/dune-local.sh build test/test_artifact_drafts.exe` 후 `_build/default/test/test_artifact_drafts.exe --transformer /path/to/masc-artifact-document`로 실행합니다. 인자가 없으면 schema 검사만 실행합니다.
+
+실시간 전달·댓글·Keeper 도구·편집 화면 연결은 후속 작업입니다. 이 층의 테스트 성공은 공동 편집 제품 완료나 운영 설치 증명이 아닙니다.
 
 설계 근거: [Yjs document updates](https://docs.yjs.dev/api/document-updates), [relative positions](https://docs.yjs.dev/api/relative-positions). 공식 문서에서 update의 순서 독립성과 상대 위치 동작을 2026-10-25에 확인했습니다.

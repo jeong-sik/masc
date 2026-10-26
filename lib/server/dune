@@ -18,6 +18,7 @@
   server_schedule_runner_policy)
  (flags :standard -open Masc -w +33)
  (libraries
+  masc.artifact_document_engine
   mcp_protocol
   masc.lane_addon_call_context
   masc.lane_addon_tool_result

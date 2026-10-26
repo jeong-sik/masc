@@ -4,10 +4,12 @@ module C = Masc_tui_collab
 let row name : Masc.Tui_decode.play_invite_row =
   {pi_name = name; pi_expires_at = None; pi_expired = false}
 
+let inventory names : Masc.Tui_decode.play_invites =
+  {pis_rows = List.map row names; pis_controller = Masc.Tui_decode.Play_controller_free}
+
 let listed view names =
   let view, read = C.loading view in
-  C.listed view read
-    (Ok {Masc.Tui_decode.pis_rows = List.map row names; pis_controller = Masc.Tui_decode.Play_controller_free})
+  C.listed view read (Ok (inventory names))
 
 let selected view = match snd (C.key view "enter") with
   | C.Open_link name -> Some name
@@ -24,15 +26,15 @@ let revoke view =
 let test_superseded_inventory () =
   let view, older = C.loading (C.create ()) in
   let view, newer = C.loading view in
-  let view = C.listed view newer (Ok [row "current"]) in
-  let view = C.listed view older (Ok []) in
+  let view = C.listed view newer (Ok (inventory ["current"])) in
+  let view = C.listed view older (Ok (inventory [])) in
   let view = C.listed view older (Error "old failure") in
   check (option string) "late old inventory and failure cannot replace current rows"
     (Some "current") (selected view);
   let reopened, pending = C.loading (C.create ()) in
-  let reopened = C.listed reopened newer (Ok [row "foreign"]) in
+  let reopened = C.listed reopened newer (Ok (inventory ["foreign"])) in
   check (option string) "another view's read cannot populate the reopened view" None (selected reopened);
-  let reopened = C.listed reopened pending (Ok [row "reopened"]) in
+  let reopened = C.listed reopened pending (Ok (inventory ["reopened"])) in
   check (option string) "the reopened view accepts its own read" (Some "reopened") (selected reopened)
 
 let test_removed_selection () =

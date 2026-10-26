@@ -45,7 +45,8 @@ let test_unknown_survives_withdrawal base =
     blocked state (T.Revoke_invite "same");
     let view = C.write_access (C.create ()) (T.play_change_access state) in
     let view, read = C.loading view in
-    let view = C.listed view read (Ok []) in
+    let view = C.listed view read
+        (Ok {Masc.Tui_decode.pis_rows = []; pis_controller = Masc.Tui_decode.Play_controller_free}) in
     let view, _ = C.key view "n" in
     check bool "an empty inventory cannot unlock an unknown write" false (C.text_input_active view);
     unknown state;

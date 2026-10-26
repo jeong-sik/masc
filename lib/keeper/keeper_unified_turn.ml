@@ -505,11 +505,6 @@ let make_autonomous_yield_probe ~sources ~on_attention_read ~wake ~base_path ~ke
       autonomous_yield_request_with_filter ~filter_pending ~base_path ~keeper_name
 ;;
 
-let autonomous_yield_request_for_wake ~wake ~base_path ~keeper_name =
-  make_autonomous_yield_probe ~sources:[] ~on_attention_read:(fun () -> ())
-    ~wake ~base_path ~keeper_name
-;;
-
 module For_testing = struct
   let autonomous_yield_probe ~wake ~base_path ~keeper_name =
     let reads = ref 0 in

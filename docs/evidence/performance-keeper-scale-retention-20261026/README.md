@@ -62,6 +62,9 @@ and maximum **3599.316 ms**. The final scheduler window recorded maximum
 1158.108 ms and one stall. End RSS was 2,097,364,992 bytes. A denied read-only
 volume inventory attempted 600 commands over an 18.040 s timestamp span;
 overlap is not causal attribution. The 0.1 ms goal is **not achieved**.
+Exact-status settlement RPC maximum was **13209.663 ms**, which is distinct
+from durable turn completion. These three native cohorts had no batch members;
+the batch projection evidence above is source and synthetic Python execution.
 
 Runs occurred sequentially on a shared host, once per population. This is
 capacity and evidence qualification, not an attributable performance gain.

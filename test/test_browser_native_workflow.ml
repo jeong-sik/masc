@@ -102,6 +102,13 @@ let progress_and_uncertainty () =
       check bool "started effect" started observed.effect_started;
       check bool "completed effect" completed_effect observed.completed_effect
     | R.Completed _ -> fail "failed sequence was called complete" in
+  let press=step "press" ["selector",str "#editor";"key",str "Enter"] in
+  assert_stopped (request [press])
+    (result ~started:false ~completed_effect:false ~completed:[] ~failure:(failure 0 "inputPreflight"))
+    ~started:false ~completed_effect:false;
+  assert_stopped (request [click;press])
+    (result ~started:true ~completed_effect:true ~completed:[entry 0 "click"] ~failure:(failure 1 "inputPreflight"))
+    ~started:true ~completed_effect:true;
   assert_stopped (request [wait]) (result ~started:false ~completed_effect:false ~completed:[] ~failure:(failure 0 "waitForURL"))
     ~started:false ~completed_effect:false;
   assert_stopped (request [click]) (result ~started:true ~completed_effect:false ~completed:[] ~failure:(failure 0 "click"))
@@ -125,6 +132,7 @@ let malformed_receipts () =
   let expected=request [click;wait] in
   List.iter (fun value -> check bool "incomplete/mismatched execution is not success" true (Result.is_error (R.decode expected value)))
     [`Null;
+     obj (result ~started:false ~completed_effect:false ~completed:[] ~failure:(failure 0 "inputPreflight"));
      obj (result ~started:true ~completed_effect:true ~completed:[entry 0 "click";entry 1 "waitForURL"] ~failure:`Null);
      obj (snapshot @ result ~started:true ~completed_effect:true ~completed:[entry 0 "click"] ~failure:`Null);
      obj (snapshot @ result ~started:true ~completed_effect:true ~completed:[entry 0 "waitForURL";entry 1 "click"] ~failure:`Null);

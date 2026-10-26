@@ -21,7 +21,7 @@ function fixture({fail,dialog,snapshot='native result'}={}) {
   calls.push([method,...args]);if(method===fail)throw Error('native '+method+' failed');
   if(method==='fill')value=args[1];if(method==='goto'||method==='click')url=destination;
   if(method==='waitForURL')assert.equal(url,args[0]);
-  if(method==='waitForSelector')assert.equal(value,'changed');
+  if(method==='waitForSelector'&&args[1]?.state!=='attached')assert.equal(value,'changed');
   return dialog&&method==='click'?{dialog:{type:'alert',message:'hold'}}:method==='selectOption'?['b']:{};
  };
  return {page,calls};
@@ -138,6 +138,26 @@ test('receipt-less holding input keeps release uncertain on dialog or failed obs
    assert.equal(result.completed.length,1);assert.equal(result.completedEffect,true);
    assert.equal(result.failure.method,observationFails?'observation':method);
   }
+ }
+});
+test('a missing press selector stops before input while a later press failure stays uncertain',async()=>{
+ for(const missing of [false,true]) {
+  const f=fixture();let pressed=0,later=0;
+  f.page.waitForSelector=async(selector,options)=>{
+   assert.equal(selector,'#editor');assert.equal(options.state,'attached');
+   assert.equal(options.timeout,37);assert.equal(Object.hasOwn(options,'delay'),false);
+   if(missing)throw Error('selector absent');
+  };
+  f.page.press=async()=>{pressed++;throw Error('press reply lost');};
+  f.page.fill=async()=>{later++;};
+  const result=await run(f.page,request([
+   {method:'press',selector:'#editor',key:'Enter',options:{timeout:37,delay:2}},
+   {method:'fill',selector:'#editor',text:'not sent'},
+  ]));
+  assert.equal(pressed,missing?0:1);assert.equal(later,0);
+  assert.equal(result.failure.method,missing?'inputPreflight':'press');
+  assert.equal(result.effectStarted,!missing);assert.equal(result.inputReleased,missing);
+  assert.equal(result.completed.length,0);
  }
 });
 test('Page code receives JSON in the browser context and never runs as Node source',async()=>{

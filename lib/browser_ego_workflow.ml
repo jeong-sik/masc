@@ -41,6 +41,13 @@ let script = {js|async function nativeWorkflow(page, args) {
         case 'mouse.wheel': effect = effectStarted = true; receipt = await page.mouse.wheel(step.x, step.y, pointerOptions); break;
         case 'fill': effect = effectStarted = true; receipt = await page.fill(step.selector, step.text, options); break;
         case 'press':
+          // This SDK selector wait is read-only. Failure is before this press;
+          // a failure of the later press itself remains uncertain.
+          try {
+            await page.waitForSelector(step.selector, {
+              state: 'attached', ...(options.timeout === undefined ? {} : {timeout: options.timeout})
+            });
+          } catch (error) { return failure(index, 'inputPreflight', error); }
           holdingInput = effect = effectStarted = true; inputReleased = false;
           receipt = await page.press(step.selector, step.key, options); inputReleased = !receipt?.dialog; break;
         case 'focus': effect = effectStarted = true; receipt = await page.focus(step.selector, options); break;
@@ -168,6 +175,18 @@ let decode (request : Browser_lane.Native_workflow.t) receipt =
     let* index=integer "index" failed in let* method_=text "method" failed in let* message=text "message" failed in
     let* expected_started=match method_ with
       | "initialUrl" when index=0 && count=0 -> Ok false
+      | "inputPreflight" when index=count ->
+        (match remaining with
+         | [] -> Error "workflow input preflight is outside the request"
+         | step :: _ ->
+           match step.action with
+           | Browser_lane.Native_workflow.Press _ -> Ok has_effect
+           | Click _ | Double_click _ | Hover _ | Drag_and_drop _ | Mouse_click _
+           | Mouse_move _ | Mouse_wheel _ | Fill _ | Focus _ | Reload
+           | Keyboard_type _ | Keyboard_insert_text _ | Keyboard_paste _ | Keyboard_press _
+           | Select_option _ | Goto _ | Wait_for_url _ | Wait_for_selector _
+           | Wait_for_load_state _ | Evaluate _ | Wait_for_function _ | Fetch _ ->
+             Error "workflow input preflight does not match a pending press")
       | "observation" when index=count && count>0 -> Ok has_effect
       | "snapshot" when index=count && remaining=[] -> Ok has_effect
       | _ ->

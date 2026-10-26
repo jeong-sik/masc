@@ -32,7 +32,8 @@ The async stack is not part of this PR's merge scope.
 
 `ocamlc -stop-after parsing -c <file>` accepted all ten changed OCaml source and
 interface files; `git diff --check` passed. No local Dune build, type check,
-behavioral test, provider invocation or CI run was performed by this repair.
+behavioral test or provider invocation was performed by this repair. The caller
+later requested the focused CI recorded below.
 The working command log is under
 `artifacts/schedule-continuation-fix-20261026/parse-only.log`.
 
@@ -42,7 +43,8 @@ and production checkpoint settlement. They cover checkpoint retention, exact
 successor priority, original request/body re-admission, completed-source removal,
 cold queue reload and cancellation/reinsertion. An existing mixed-source case
 now asserts that independent scheduled occurrences cannot share one terminal
-batch. These fixtures have not yet executed in this repair session.
+batch. The first CI execution and its failure are recorded below; the subsequent test
+corrections have only been parsed, not executed.
 
 Suggested focused targets are `test_keeper_connector_attention_batch`,
 `test_keeper_failed_selection_disposition`, `test_keeper_owner` and
@@ -52,3 +54,37 @@ Real-provider effect-before-yield duplication, successor/original effect
 completion, restart, cancellation and replacement remain runtime validation
 requirements. This repair does not add a general exactly-once tool-effect
 protocol or claim arbitrary requested effects are verified by a turn terminal.
+
+## First focused CI failure and test response
+
+[**Test 40334229000**](https://github.com/jeong-sik/masc/actions/runs/40334229000),
+head `94b2df25abcdfe20c658322f4156ad63f5546c34`, ref
+`fix/schedule-work-continuation-20261026`, completed with **failure**.
+The [retained original metadata, exact selected log lines and digest manifest](ci40334229000/manifest.json)
+preserve the failure; the original full log and archive remain at the recorded
+local capture path. The archive hash matches GitHub's artifact digest and its
+log bytes match the original extracted file.
+
+- Owner suite: compilation stopped at `test_keeper_owner.ml:5874`, unbound
+  `operation_id` record field; no Owner cases executed.
+- Connector batch: 31 passed, 1 failed. New case 0 passed the complete queue
+  checkpoint/successor/original assertions. New case 1 reached reinsertion and
+  failed because the authoritative API correctly returned
+  `event queue pending selection incarnation changed`, rather than withdrawal.
+- Failure-disposition suite: 16 passed. Informational-checkpoint suite: 1 passed.
+  These partial results do not make the overall run successful.
+
+The response adds `Chat_operation.t` to the existing unconstrained Owner fixture
+value. Latest inspected main `1e5ae1f81ea68a69b565ebdee2e5000e69587dc9` still had the same missing annotation;
+related open-PR searches found no separate repair. The continuation fixture now
+checks absent cancellation as `Withdrawn`, exact reinsertion as the specific
+incarnation error, and the replacement's unchanged pending selection and valid
+current dispatch authority. No production guard is relaxed.
+
+Only test sources and this evidence changed after `94b2df...`; `lib/` and `bin/`
+remain byte-identical. The native proof run targeting that earlier source is
+not changed, cancelled or retried by this response. Its product artifact may
+be compared by those unchanged product inputs; it is not a current-head test
+result. Both modified `.ml` files pass syntax parsing and `git diff --check`.
+The corrected tests remain unexecuted here; the caller owns the two-suite CI
+request. No additional CI request or observation was made by this response.

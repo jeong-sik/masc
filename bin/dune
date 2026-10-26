@@ -829,6 +829,16 @@
   masc_tui_roster_pane))
 
 (library
+ (name masc_tui_key_ime)
+ (wrapped false)
+ (modules masc_tui_key_ime)
+ ; The two-set Hangul layout read backwards, for the command dispatch in
+ ; [masc_tui] to read letter shortcuts a Korean input method turned into
+ ; Hangul characters. Depends on nothing: it is one table and the arithmetic
+ ; around it, so it stays loadable from every test.
+ )
+
+(library
  (name masc_tui_keys_doc)
  (wrapped false)
  (modules masc_tui_keys_doc)
@@ -2596,6 +2606,7 @@
   masc_tui_clipboard
   masc_tui_termios
   masc_tui_keys
+  masc_tui_key_ime
   masc_tui_file_icon
   masc_tui_config
   masc_tui_theme

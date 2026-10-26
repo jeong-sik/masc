@@ -81,12 +81,17 @@ let scope_of_headers = function
     in
     Header_fingerprint Digestif.SHA256.(to_hex (digest_string wire))
 
+let same_model_key left right =
+  String.equal left.url right.url
+  && left.protocol = right.protocol
+  && left.scope = right.scope
+
 let publish_model_observation observed key model_id =
   let observed_at = Time_compat.now () in
   let models =
     { key; model_id; observed_at }
     :: List.filter (fun observation ->
-      observation.key <> key && fresh_observation observed_at observation)
+      not (same_model_key observation.key key) && fresh_observation observed_at observation)
       observed.cache.models
   in
   let next = { observed with cache = { observed.cache with models } } in
@@ -141,7 +146,7 @@ let first_ollama_model_id_for_url ?(headers=[]) url =
   let now = Time_compat.now () in
   let cached =
     List.find_map (fun observation ->
-      if observation.key = key && fresh_observation now observation
+      if same_model_key observation.key key && fresh_observation now observation
       then Some observation.model_id else None) snapshot.cache.models
   in
   match cached with

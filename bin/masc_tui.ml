@@ -5732,14 +5732,14 @@ let launch_browser_lane state ~mailbox operation =
         | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _
         | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> launched);
       let host = server_peer_host and port = state.port in
+      (* The mailbox is the effect boundary. Cancellation still belongs to
+         the switch; unexpected transport failures become visible errors. *)
+      let call f =
+        try f () with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
       let perform () =
-        (* The mailbox is the effect boundary. Cancellation still belongs to
-           the switch; unexpected transport failures become visible errors. *)
-        let call f =
-          try f () with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn -> Error (Printexc.to_string exn)
-        in
         match operation with
         | Discover _ -> Browser_lane_clients_loaded
             (generation, call (fun () -> Masc_tui_http.fetch_browser_lane_clients ~host ~port))
@@ -5803,9 +5803,18 @@ let launch_browser_lane state ~mailbox operation =
             (generation, call (fun () -> Masc_tui_http.browser_lane_action ~host ~port ~source:view.source operation))
       in
       (match Eio_context.get_switch_opt () with
-       | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () ->
-           let message = perform () in
-           enqueue_async mailbox (if operation_is_read operation then message else Workspace_operation message); `Stop_daemon)
+       | Some sw ->
+           (* Inventory and page content settle independently. A slow activity
+              read must not delay the page result or change its owner. *)
+           if operation_is_refresh operation && view.source=Live then
+             Eio.Fiber.fork_daemon ~sw (fun () ->
+               Eio.Fiber.yield ();
+               enqueue_async mailbox (Browser_lane_clients_loaded
+                 (generation, call (fun () -> Masc_tui_http.fetch_browser_lane_clients ~host ~port)));
+               `Stop_daemon);
+           Eio.Fiber.fork_daemon ~sw (fun () ->
+             let message = perform () in
+             enqueue_async mailbox (if operation_is_read operation then message else Workspace_operation message); `Stop_daemon)
        | None ->
            state.browser_lane <- Some { view with load = Failed "Eio switch is unavailable" })
   end
@@ -21941,7 +21950,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
       (match state.browser_lane with
        | None -> ()
        | Some view ->
-           let next, read = Browser_lane_view.accept_clients ~generation result view in
+           let next, read = match view.load with
+             | Loading (_, Discover _) -> Browser_lane_view.accept_clients ~generation result view
+             | Idle | No_browser | Loading _ | Failed _ ->
+               (if generation=state.browser_lane_generation
+                then Browser_lane_view.accept_activity result view else view),false in
            let operation = Browser_lane_view.discovery_continuation next in
            state.browser_lane <- Some (if read then Browser_lane_view.finish_discovery next else next);
            if read then launch_browser_lane state ~mailbox operation)

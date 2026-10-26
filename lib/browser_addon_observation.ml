@@ -27,7 +27,17 @@ let decode_snapshot = function
            let rec decode acc = function
              | [] -> Ok (List.rev acc)
              | `Assoc client::rest ->
-                 let* client=Browser_addon_wire.client_of_json (`Assoc (List.remove_assoc "interactions" client)) in
+                 let* ()=if List.sort String.compare (List.map fst client)
+                   =["browser";"clientId";"engineVersion";"interactions";"lastActivities";"transport";"version"]
+                   then Ok () else Error "invalid browser inventory client fields" in
+                 let validate name decode = match List.assoc_opt name client with
+                   | Some (`List values) -> List.fold_left (fun result value ->
+                       let* ()=result in Result.map (fun _ -> ()) (decode value)) (Ok ()) values
+                   | None|Some _ -> Error ("invalid browser " ^ name) in
+                 let* ()=validate "interactions" Browser_lane.interaction_activity_of_json in
+                 let* ()=validate "lastActivities" Browser_lane.settled_activity_of_json in
+                 let* client=Browser_addon_wire.client_of_json (`Assoc
+                   (List.filter (fun (name,_) -> name<>"interactions" && name<>"lastActivities") client)) in
                  if List.exists (fun (known : Browser_lane.client_info) -> known.client_id=client.client_id) acc
                  then Error "duplicate browser inventory client" else decode (client::acc) rest
              | _::_ -> Error "invalid browser inventory client" in

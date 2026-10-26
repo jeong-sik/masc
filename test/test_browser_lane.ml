@@ -429,7 +429,52 @@ let test_agent_activity () = Browser_lane.install_activity_observer (Some (fun _
  assert(Browser_lane.client_interactions client=[]);
  ()
 
+let test_read_activity () =
+ Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled));
+ Eio_main.run @@ fun env -> Time_compat.set_clock (Eio.Stdenv.clock env); Eio.Switch.run @@ fun sw ->
+ let info : Lane.client_info = {client_id=activity_ok (Lane.client_id_of_string "11111111-1111-4111-8111-111111111119");
+   browser=Ego_lite;version="fixture";engine_version="fixture";transport=Ego_task_space} in
+ let client=activity_ok (Lane.register info) in
+ let run actor verb payload =
+   let pending=Eio.Fiber.fork_promise ~sw (fun () -> Lane.issue_for_actor ~actor:(Some actor)
+     ~target:(Live_client client) ~verb ~timeout_sec:20.) in
+   let issued=Option.get (activity_ok (Lane.take_command ~client_info:info ~window_sec:1.)) in
+   (match Lane.client_interactions client with
+    | [work] -> check bool "reads expose their exact caller and optional tab" true
+        (work.actor=Some actor && work.tab_id=Lane.activity_scope verb && work.phase=Lane.Interaction_running)
+    | _ -> fail "read activity missing or duplicated");
+   ignore (activity_ok (Lane.deliver_result ~client_id:info.client_id ~id:issued.id ~payload));
+   ignore (Eio.Promise.await_exn pending);
+   check int "returned reads are no longer running" 0 (List.length (Lane.client_interactions client)) in
+ run "keeper/reader" (Lane.Page_snapshot {tab_id=7;max_chars=1000;scope=Lane.Snapshot_viewport})
+   (`Assoc ["ok",`Bool true;"data",`Assoc []]);
+ run "operator" Lane.Tabs_list (`Assoc ["ok",`Bool true;"data",`List []]);
+ let _,settled=Lane.activity_for info in
+ check int "operator observation does not erase the Keeper's last activity" 2 (List.length settled);
+ let last=List.find (fun (row : Lane.settled_activity) -> row.work.actor=Some "keeper/reader") settled in
+ check bool "snapshot has a settled returned receipt" true
+   (last.work.action="page.snapshot" && last.work.tab_id=Some 7 && last.outcome=Lane.Activity_returned);
+ run "keeper/reader" (Lane.Page_read {tab_id=Some 7;max_chars=Some 1000})
+   (`Assoc ["ok",`Bool false;"error",`String "uncertain"]);
+ let _,settled=Lane.activity_for info in
+ let last=List.find (fun (row : Lane.settled_activity) -> row.work.actor=Some "keeper/reader") settled in
+ check bool "failed observation is not projected as completion" true (last.outcome=Lane.Activity_unknown);
+ check bool "activity wire roundtrips tab-less scope" true
+   (List.for_all (fun row -> Lane.settled_activity_of_json (Lane.settled_activity_json row)=Ok row) settled);
+ let valid=Lane.interaction_activity_json last.work in
+ (match valid with
+  | `Assoc fields -> List.iter (fun invalid ->
+      check bool "malformed activity cannot become an observed caller or phase" true
+        (Result.is_error (Lane.interaction_activity_of_json invalid)))
+      [`Assoc (("actor",`String "spoof")::fields);
+       `Assoc (("phase",`String "finished")::List.remove_assoc "phase" fields);
+       `Assoc (("requestId",`String "")::List.remove_assoc "requestId" fields);
+       `Assoc (("tabId",`Int (-1))::List.remove_assoc "tabId" fields)]
+  | `Null|`Bool _|`Int _|`Intlit _|`Float _|`String _|`List _ -> fail "activity is not an object");
+ ignore (activity_ok (Lane.disconnect_client ~client_id:info.client_id))
+
 let () = run "browser client routing" ["ownership", [
+  test_case "reads retain caller, scope and settled results" `Quick test_read_activity;
   test_case "agent activity follows queue ownership and cleanup" `Quick test_agent_activity;
   test_case "each live transport serves its part of the table" `Quick test_transport_table;
   test_case "unserved live work is refused before queue admission" `Quick test_unserved_work_queues_nothing;

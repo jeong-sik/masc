@@ -131,7 +131,7 @@ let with_worker ?(clients=[]) ?(downloads=[]) ~env ~config ~respond run =
         let tool=Browser_addon_tool.definition in
         write (Filename.concat root "clients.json")
           (Yojson.Safe.to_string (`List (List.map (fun client -> match W.client_to_json client with
-             | `Assoc fields -> `Assoc (("interactions",`List [])::("lastActivities",`List [])::fields)
+             | `Assoc fields -> `Assoc (("interactions",`List [])::("lastActivities",`List [])::("spaceObservation",`Null)::fields)
              | value -> value) clients)));
         write (Filename.concat root "downloads.json")
           (Yojson.Safe.to_string (`Assoc downloads));

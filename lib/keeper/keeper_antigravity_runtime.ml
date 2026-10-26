@@ -1008,8 +1008,6 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
       let cleanup_error = ref None in
       let turn_result =
         Eio.Switch.run (fun sw ->
-          let abort_turn, resolve_abort_turn = Eio.Promise.create () in
-          let abort_turn_resolved = Atomic.make false in
           Eio.Switch.on_release sw (fun () ->
             match Eio.Cancel.protect (fun () -> Runtime_antigravity_home.clear_mcp_config home) with
             | Ok () -> ()
@@ -1021,6 +1019,9 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
               ~secure_random:(Eio.Stdenv.secure_random env)
               ~server_name:"masc"
               ~tool_specs:(fun () -> List.map tool_spec dynamic_tools)
+              ~tool_execution_mode:(fun ~name ~arguments ->
+                find_tool dynamic_tools name |> Option.map (fun (tool : Host.dynamic_tool) ->
+                  tool.execution_mode arguments))
               ~call_tool:(fun ~name ~call_id ~arguments ->
                 find_tool dynamic_tools name
                 |> Option.map (fun (tool : Host.dynamic_tool) ->
@@ -1032,21 +1033,9 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
                       let on_response_sent =
                         Runtime_official_client_tool.response_observer Mcp result in
                       { Runtime_official_client_mcp_http.outcome = tool_result result
-                      ; after_response_sent =
-                          (fun () ->
-                            Runtime_official_client_tool.notify_response_sent on_response_sent;
-                             Option.iter
-                               (fun detail ->
-                                  if
-                                    Atomic.compare_and_set
-                                      abort_turn_resolved
-                                      false
-                                      true
-                                  then
-                                    Eio.Promise.resolve
-                                      resolve_abort_turn
-                                      detail)
-                               result.abort_turn)
+                      ; stop = result.abort_turn
+                      ; after_response_sent = (fun () ->
+                          Runtime_official_client_tool.notify_response_sent on_response_sent)
                       })))
               ()
           in
@@ -1098,7 +1087,7 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
                       ~on_stream_event:stream.on_runtime_event
                       client_config
                       ~prompt))
-              ~watcher:(fun () -> `Abort (Eio.Promise.await abort_turn))
+              ~watcher:(fun () -> `Abort (Runtime_official_client_mcp_http.await_host_stop bridge))
           with
           | `Runtime client_result ->
             client_result

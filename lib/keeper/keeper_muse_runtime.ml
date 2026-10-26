@@ -1380,12 +1380,10 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
     in
     let run_client () =
       Eio.Switch.run (fun sw ->
-        let abort_turn, resolve_abort_turn = Eio.Promise.create () in
-        let abort_turn_resolved = Atomic.make false in
-        let* mcp_servers =
+        let* (mcp_servers, bridge) =
           try Ok (
           match dynamic_tools with
-          | [] -> []
+          | [] -> [], None
           | _ :: _ ->
             let bridge = Mcp_http.start
               ~sw
@@ -1393,6 +1391,9 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
               ~secure_random:(Eio.Stdenv.secure_random env)
               ~server_name:mcp_server_name
               ~tool_specs:(fun () -> List.map tool_spec dynamic_tools)
+              ~tool_execution_mode:(fun ~name ~arguments ->
+                find_tool dynamic_tools name |> Option.map (fun (tool : Host.dynamic_tool) ->
+                  tool.execution_mode arguments))
               ~call_tool:(fun ~name ~call_id ~arguments ->
                 find_tool dynamic_tools name
                 |> Option.map (fun (tool : Host.dynamic_tool) ->
@@ -1404,17 +1405,12 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
                       let on_response_sent =
                         Runtime_official_client_tool.response_observer Mcp result in
                       { Mcp_http.outcome = tool_result result
-                      ; after_response_sent =
-                          (fun () ->
-                            Runtime_official_client_tool.notify_response_sent on_response_sent;
-                            Option.iter
-                              (fun detail ->
-                                 if Atomic.compare_and_set abort_turn_resolved false true
-                                 then Eio.Promise.resolve resolve_abort_turn detail)
-                              result.abort_turn)
+                      ; stop = result.abort_turn
+                      ; after_response_sent = (fun () ->
+                          Runtime_official_client_tool.notify_response_sent on_response_sent)
                       })))
               () in
-            mcp_servers_of_bridge bridge ~served:dynamic_tools
+            mcp_servers_of_bridge bridge ~served:dynamic_tools, Some bridge
           ) with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn when Keeper_owner_signals.is_owner_cancel_reason exn -> raise exn
@@ -1504,9 +1500,12 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
                     ~prompt
                     ~images))
             ~watcher:(fun () ->
-              let stop = Eio.Promise.await abort_turn in
-              Eio.Promise.await turn_acknowledged;
-              `Abort stop)
+              match bridge with
+              | None -> Eio.Fiber.await_cancel ()
+              | Some bridge ->
+                let stop = Mcp_http.await_host_stop bridge in
+                Eio.Promise.await turn_acknowledged;
+                `Abort stop)
         with
         | `Runtime client_result ->
           client_result

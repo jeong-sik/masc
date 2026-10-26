@@ -47,7 +47,7 @@ An explicit observed client can route to its original browser Add-on even when
 several browser workers are visible. The host requires exactly one matching
 worker snapshot; duplicate identities or unreadable candidate snapshots refuse
 selection. A Keeper's stored Goal binding selects its original Add-on and
-numeric Ego Space before initial discovery. Missing bindings never authorize a
+numeric Ego Space before initial discovery. A missing bound connection never authorizes a
 replacement, and `BrowserSession action=goal_status` can still read the stored
 binding after that worker retires. Unspecified discovery across multiple Add-ons
 remains ambiguous; automatic per-Goal Space allocation is not implemented.

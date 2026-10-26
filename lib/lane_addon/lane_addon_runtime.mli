@@ -230,10 +230,11 @@ val call_exported_tool_with_principal : principal:Lane_addon_call_context.princi
     never from caller-supplied tool arguments. [access] still controls visibility. *)
 type browser_service = private {instance_id:string;owner:Lane_addon_tool_export.owner}
 type browser_destination
-(** An original browser service and its exact advertised tool. This private
+(** An original browser service and its fixed
+    {!Browser_addon_wire.command_tool_name} advertised tool. This private
     destination is independent of global tool-name discovery. *)
 val browser_destination : config:Workspace.config -> access:Lane_addon_sources.access ->
-  reserved:string list -> service:browser_service -> name:string ->
+  reserved:string list -> service:browser_service ->
   (browser_destination, tool_call_error) result
 val call_browser_destination : config:Workspace.config -> access:Lane_addon_sources.access ->
   reserved:string list -> principal:Lane_addon_call_context.principal ->

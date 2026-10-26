@@ -59,7 +59,7 @@ let connect ~selection ~config ~access ~principal ~reserved =
            |> Result.map_error (fun error -> R.Unavailable (Browser_goal_space.error_message error)) in
          Ok service
        | []|_::_::_ -> unavailable "the Goal's original browser Add-on is unavailable; no replacement was selected") in
-  let* destination=R.browser_destination ~config ~access ~reserved ~service ~name:Browser_addon_tool.definition.name in
+  let* destination=R.browser_destination ~config ~access ~reserved ~service in
   Ok {config;access;principal;reserved;service;destination}
 let call t ~arguments = R.call_browser_destination ~principal:t.principal ~config:t.config
   ~access:t.access ~reserved:t.reserved ~destination:t.destination ~arguments

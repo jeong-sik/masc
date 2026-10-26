@@ -1,3 +1,0 @@
-### Fixed
-
-- Browser tools and HTTP views can select the original worker by an observed client or stored Goal Space when several browser Add-ons are visible, preserving scoped middleware, authority and no-fallback behavior. Stored Goal status remains readable after worker retirement.

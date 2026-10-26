@@ -2126,10 +2126,10 @@ let browser_service_reading ~config ~access = Eio_context.run_on_owner_domain (f
 let browser_services ~config ~access = (browser_service_reading ~config ~access).services
 let browser_export_reading ~config ~access = Eio_context.run_on_owner_domain (fun () ->
   browser_reading_exports (current_reading ~config ~access))
-let browser_destination ~config ~access ~reserved ~service ~name =
+let browser_destination ~config ~access ~reserved ~service =
   Eio_context.run_on_owner_domain (fun () ->
     let reading=current_reading ~config ~access in
-    match List.filter (fun (export:tool_export) -> export.tool.name=name)
+    match List.filter (fun (export:tool_export) -> export.tool.name=Browser_addon_wire.command_tool_name)
       (scoped_exports ~scope:(Browser_service_exports service) ~reserved reading) with
     | [export] -> Ok {service;export}
     | []|_::_::_ -> Error (Unavailable "the original browser Add-on command is unavailable"))

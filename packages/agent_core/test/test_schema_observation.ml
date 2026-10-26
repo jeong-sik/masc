@@ -269,6 +269,104 @@ let test_capture_across_domain () =
             expect_valid "cross-domain report" report)))))
 ;;
 
+let test_captured_scope_survives_yield_and_sibling () =
+  Eio_main.run (fun env ->
+    let owner = Observation.create ~mode:Timed in
+    let sibling_owner = Observation.create ~mode:Timed in
+    let original = ref 71 and sibling_original = ref 73 in
+    Observation.within owner (fun () ->
+      Observation.with_wake ~keeper:"captured" ~trace_id:"captured-wake"
+        ~absolute_turn:4 ~execution_scope:None ~cause:None (fun () ->
+        let expected = Option.map Observation.scope_to_json (Observation.current_scope ()) in
+        let work = Observation.capture (fun () ->
+          (* These Eio resources belong to the worker, not to the caller domain. *)
+          Eio.Switch.run (fun sw ->
+            let ready, ready_u = Eio.Promise.create () in
+            let release, release_u = Eio.Promise.create () in
+            let sibling = Eio.Fiber.fork_promise ~sw (fun () ->
+              Observation.within sibling_owner (fun () ->
+                Observation.with_wake ~keeper:"sibling" ~trace_id:"sibling-wake"
+                  ~absolute_turn:9 ~execution_scope:None ~cause:None (fun () ->
+                  let sibling_scope = Option.map Observation.scope_to_json (Observation.current_scope ()) in
+                  Eio.Promise.resolve ready_u sibling_scope;
+                  Observation.measure ~site:Phase0_bytes (fun () ->
+                    Eio.Promise.await release;
+                    Eio.Fiber.yield ();
+                    check_bool "sibling keeps its own binding after yielding" true
+                      (Option.map Observation.scope_to_json (Observation.current_scope ()) = sibling_scope);
+                    sibling_original)))) in
+            let sibling_scope = Eio.Promise.await ready in
+            check_bool "a suspended sibling does not replace the captured binding" true
+              (Option.map Observation.scope_to_json (Observation.current_scope ()) = expected);
+            let result = Observation.measure ~site:Worker_work (fun () ->
+              Eio.Promise.resolve release_u ();
+              Eio.Fiber.yield ();
+              check_bool "captured work keeps its binding after yielding" true
+                (Option.map Observation.scope_to_json (Observation.current_scope ()) = expected);
+              original) in
+            check_bool "sibling returns its original result" true
+              (Eio.Promise.await_exn sibling == sibling_original);
+            result, sibling_scope)) in
+        let result, sibling_scope = Observation.measure ~site:Worker_queue_and_await (fun () ->
+          Eio.Domain_manager.run (Eio.Stdenv.domain_mgr env) work) in
+        check_bool "captured work returns its original result" true (result == original);
+        check_bool "the sibling scope is distinct" false (sibling_scope = expected);
+        check_bool "caller binding is restored after worker settlement" true
+          (Option.map Observation.scope_to_json (Observation.current_scope ()) = expected);
+        List.iter (fun (label, observed_owner, scope, finished) ->
+          let report = report_json observed_owner in
+          check_int (label ^ " has no open spans") 0
+            Yojson.Safe.Util.(field "active_spans" report |> to_int);
+          check_bool (label ^ " retains only its original scope") true
+            (List.for_all (fun event -> Some (field "scope" event) = scope) (events report));
+          check_int (label ^ " measured operations finish") finished
+            (List.length (List.filter (fun event -> kind event = `String "span_finished") (events report)));
+          expect_valid (label ^ " yielded report") report)
+          ["captured", owner, expected, 2; "sibling", sibling_owner, sibling_scope, 1]));
+    check_bool "worker bindings do not escape the owning scope" true
+      (Observation.current_scope () = None))
+;;
+
+let test_cancelled_yielded_capture_closes_spans () =
+  Eio_main.run (fun env ->
+    let owner = Observation.create ~mode:Timed in
+    let cleaned = Atomic.make false in
+    Observation.within owner (fun () ->
+      Observation.with_wake ~keeper:"cancelled" ~trace_id:"cancelled-wake"
+        ~absolute_turn:5 ~execution_scope:None ~cause:None (fun () ->
+        let expected = Option.map Observation.scope_to_json (Observation.current_scope ()) in
+        let work = Observation.capture (fun () ->
+          Eio.Cancel.sub (fun cancel ->
+            Eio.Switch.run (fun sw ->
+              let ready, ready_u = Eio.Promise.create () in
+              let cancelled_wait, _ = Eio.Promise.create () in
+              Eio.Fiber.fork ~sw (fun () ->
+                Eio.Promise.await ready;
+                Eio.Cancel.cancel cancel Exit);
+              Observation.measure ~site:Worker_work (fun () ->
+                Fun.protect ~finally:(fun () -> Atomic.set cleaned true) (fun () ->
+                  Eio.Promise.resolve ready_u ();
+                  Eio.Fiber.yield ();
+                  Eio.Promise.await cancelled_wait))))) in
+        (match Observation.measure ~site:Worker_queue_and_await (fun () ->
+           Eio.Domain_manager.run (Eio.Stdenv.domain_mgr env) work) with
+         | () -> Alcotest.fail "worker cancellation was swallowed"
+         | exception Eio.Cancel.Cancelled Exit -> ());
+        check_bool "worker cleanup settled before cancellation returned" true (Atomic.get cleaned);
+        check_bool "cancellation restores caller scope" true
+          (Option.map Observation.scope_to_json (Observation.current_scope ()) = expected)));
+    check_bool "cancelled capture leaves no binding behind" true
+      (Observation.current_scope () = None);
+    let report = report_json owner in
+    let completions = List.filter_map (fun event ->
+      if kind event = `String "span_finished" then Some (field "completion" (payload event))
+      else None) (events report) in
+    check_bool "worker and caller wait both retain cancellation" true
+      (completions = [`String "cancelled"; `String "cancelled"]);
+    check_int "cancelled spans are closed" 0 Yojson.Safe.Util.(field "active_spans" report |> to_int);
+    expect_valid "cancelled yielded capture report" report)
+;;
+
 let[@inline never] observe_ephemeral owner =
   let key = schema () in
   let weak = Weak.create 1 in
@@ -523,6 +621,8 @@ let () =
     ; "identity and lifetime",
       [ Alcotest.test_case "physical identity and ordered inventory" `Quick test_physical_identity_and_inventory
       ; Alcotest.test_case "capture across actual Eio domain" `Quick test_capture_across_domain
+      ; Alcotest.test_case "yielding capture restores sibling fiber scopes" `Quick test_captured_scope_survives_yield_and_sibling
+      ; Alcotest.test_case "cancelled yielded capture closes spans" `Quick test_cancelled_yielded_capture_closes_spans
       ; Alcotest.test_case "report does not retain schemas" `Quick test_report_does_not_retain_schema ]
     ; "codec", [Alcotest.test_case "contradictory evidence rejected" `Quick test_strict_decoder]
     ; "streaming",

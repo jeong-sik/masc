@@ -66,6 +66,9 @@ importers:
       effect:
         specifier: 3.22.1
         version: 3.22.1
+      entities:
+        specifier: 8.1.0
+        version: 8.1.0
       htm:
         specifier: ^3.1.1
         version: 3.1.1
@@ -78,6 +81,9 @@ importers:
       mermaid:
         specifier: ^11.16.1
         version: 11.16.1
+      parse5:
+        specifier: 8.0.1
+        version: 8.0.1
       preact:
         specifier: ^10.29.1
         version: 10.29.1

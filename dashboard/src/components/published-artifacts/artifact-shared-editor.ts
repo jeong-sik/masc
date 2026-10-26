@@ -10,6 +10,7 @@ import { artifactDraftRecoveries, discardArtifactDraftRecovery, type ArtifactDra
 import { ArtifactLiveSession, draftBytes, type ArtifactLiveState } from '../../lib/artifact-live-session'
 import { resolveSharedSelection, restoreSharedDocument, sharedSource } from '../../lib/artifact-shared-document'
 import { ArtifactComposer, downloadArtifactDraft, type ArtifactPublicationOutcome, type ArtifactDraftRetention, type ArtifactDraftSnapshot } from './artifact-composer'
+import { ArtifactHtmlEditor } from './artifact-html-editor'
 
 export type ArtifactSharedCloseResult = { kind: 'keep_open' } | { kind: 'close'; publicationDiscarded: boolean }
 export type ArtifactSharedCloseRequest = () => ArtifactSharedCloseResult
@@ -56,7 +57,7 @@ function SharedCodeEditor({ session, state }: { session: ArtifactLiveSession; st
       ],
     }) })
     editor.current = view
-    return () => { editor.current = null; view.destroy() }
+    return () => { editor.current = null; view.destroy(); session.select(null) }
   }, [session])
   useLayoutEffect(() => {
     const view = editor.current
@@ -82,18 +83,22 @@ export function ArtifactSharedEditor({ doc, workspaceRoot, draftRetention, isCur
   const [session, setSession] = useState<ArtifactLiveSession | null>(null)
   const [state, setState] = useState<ArtifactLiveState | null>(null)
   const [error, setError] = useState('')
+  const [view, setView] = useState<'source' | 'rendered'>(doc.artifact.format === 'html' ? 'rendered' : 'source')
+  const [visualPending, setVisualPending] = useState(false)
   const resumed = useRef(new Set<string>())
   const [recoveries, setRecoveries] = useState<ArtifactDraftRecovery[]>([])
   const [comparison, setComparison] = useState<{ base: ArtifactDocument; content: string } | null>(null)
   const [publication, setPublication] = useState<{ base: ArtifactDocument; content: string; snapshot: ArtifactDraftSnapshot } | null>(null)
   const publicationForClose = useRef<ArtifactDraftSnapshot | null>(null)
   const sessionForClose = useRef<ArtifactLiveSession | null>(null)
+  const visualPendingForClose = useRef(false)
+  visualPendingForClose.current = visualPending
   useLayoutEffect(() => {
     // Both Reader navigation and the editor's outer close use one decision.
     // Read refs synchronously instead of a delayed CRDT-only pending effect.
     const request: ArtifactSharedCloseRequest = () => {
       const copy = publicationForClose.current
-      if ((copy || sessionForClose.current?.snapshot.pending)
+      if ((copy || sessionForClose.current?.snapshot.pending || visualPendingForClose.current)
         && !window.confirm('이 창에 아직 저장하지 못한 변경이 있습니다. 원고를 닫을까요?')) return { kind: 'keep_open' }
       if (copy) draftRetention.forget(copy.identity)
       publicationForClose.current = null
@@ -154,7 +159,7 @@ export function ArtifactSharedEditor({ doc, workspaceRoot, draftRetention, isCur
     } catch (reason) { setError(reason instanceof Error ? reason.message : '복구 원고를 읽지 못했습니다.') }
   }
   const publish = async () => {
-    if (!session || !state || state.pending || state.connection !== 'connected' || !isCurrent()) return
+    if (!session || !state || state.pending || visualPending || state.connection !== 'connected' || !isCurrent()) return
     // Publication is a frozen snapshot; subsequent shared edits stay in the
     // shared draft. Capture the latest publication for comparison and CAS.
     const content = session.content
@@ -168,13 +173,19 @@ export function ArtifactSharedEditor({ doc, workspaceRoot, draftRetention, isCur
   return html`<section aria-label="문서 공동 편집" class="flex min-h-0 flex-1 flex-col gap-3 p-4">
     <div class="flex flex-wrap items-center gap-4">
       <strong>공동 편집</strong>
-      <span role="status">${state?.connection === 'connected' ? (state.pending ? '원고 저장 중…' : '공유 원고 저장됨')
+      <span role="status">${visualPending ? '아직 반영하지 않은 문장이 있습니다' : state?.connection === 'connected' ? (state.pending ? '원고 저장 중…' : '공유 원고 저장됨')
         : state?.connection === 'disconnected' ? '연결 끊김 · 이 창의 원고 유지' : '연결 중…'}</span>
-      ${session ? html`<button type="button" onClick=${() => downloadArtifactDraft(draft(session.content))}>원고 다운로드</button>` : null}
+      ${session ? html`<button type="button" disabled=${visualPending} onClick=${() => downloadArtifactDraft(draft(session.content))}>원고 다운로드</button>` : null}
       ${state?.connection === 'disconnected' ? html`<button type="button" onClick=${() => { void session?.connect() }}>다시 연결</button>` : null}
-      <button type="button" disabled=${!state || state.pending || state.connection !== 'connected' || publication !== null || comparison !== null} onClick=${publish}>새 버전으로 게시</button>
+      <button type="button" disabled=${!state || state.pending || visualPending || state.connection !== 'connected' || publication !== null || comparison !== null} onClick=${publish}>새 버전으로 게시</button>
       <button type="button" onClick=${onClose}>공동 편집 닫기</button>
     </div>
+    ${doc.artifact.format === 'html' ? html`<div class="flex gap-4" aria-label="공동 편집 표시 방식">
+      <button type="button" aria-pressed=${view === 'rendered'} onClick=${() => setView('rendered')}>문장 편집</button>
+      <button type="button" aria-pressed=${view === 'source'} onClick=${() => {
+        if (!visualPending || window.confirm('아직 반영하지 않은 문장이 있습니다. 원본 편집으로 바꿀까요?')) { setVisualPending(false); setView('source') }
+      }}>원본 편집</button>
+    </div>` : null}
     ${state?.pending && !state.recoveryPersisted ? html`<p role="alert">브라우저에 복구 원고를 저장하지 못했습니다. 이 탭을 닫기 전에 원고를 다운로드해 주세요.</p>` : null}
     ${recoveries.map(recovery => html`<details key=${recovery.id} class="border p-3">
       <summary>복구 원고 · ${new Date(recovery.at).toLocaleString()}</summary>
@@ -203,7 +214,9 @@ export function ArtifactSharedEditor({ doc, workspaceRoot, draftRetention, isCur
           · ${prefix !== null ? `${prefix.split('\n').length}행 ${prefix.length - prefix.lastIndexOf('\n')}열` : '원고 열람 중'}
           <time class="ml-1 text-[var(--color-fg-muted)]" dateTime=${peer.observed_at}>${new Date(peer.observed_at).toLocaleTimeString()}</time></li>`
       })}</ul>` : null}
-    ${session && state ? html`<${SharedCodeEditor} session=${session} state=${state} />` : null}
+    ${session && state ? view === 'rendered'
+      ? html`<${ArtifactHtmlEditor} session=${session} state=${state} onPending=${setVisualPending} />`
+      : html`<${SharedCodeEditor} session=${session} state=${state} />` : null}
     ${publication ? html`<${ArtifactComposer} initial=${publication.snapshot.value} base=${publication.base}
       capturedWorkspace=${session?.workspace} workspaceRoot=${workspaceRoot} isCurrent=${isCurrent} onMutation=${onMutation}
       onDraftChange=${(value: ArtifactDraftSnapshot['value']) => draftRetention.remember({ ...publication.snapshot, value })}

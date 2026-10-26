@@ -38,6 +38,7 @@ type progress = Not_started | Writing of string | Saved of string
 
 let save ~fs ~registry_root ~directory ~directory_name ~path t =
   let ( let* ) = Result.bind in
+  let lock_path = Filename.concat registry_root "tui-evidence-export.lock" in
   try
     Eio.Path.with_open_dir Eio.Path.(fs / registry_root) (fun registry_root ->
       Eio.Path.with_open_dir Eio.Path.(fs / directory) (fun export_root ->
@@ -52,20 +53,29 @@ let save ~fs ~registry_root ~directory ~directory_name ~path t =
               ~parent_components:[] ~target_leaf:t.name ~permissions:0o600
             |> Result.map_error Fs_compat.capability_publication_target_error_to_string
           in
-          Eio.Switch.run @@ fun sw ->
-          let* registry =
-            Fs_compat.Publication_recovery.open_registry ~sw ~fs ~registry_root
-            |> Result.map_error Fs_compat.Publication_recovery.registry_error_to_string
+          let publish () =
+            Eio.Switch.run @@ fun sw ->
+            let* registry =
+              Fs_compat.Publication_recovery.open_registry ~sw ~fs ~registry_root
+              |> Result.map_error Fs_compat.Publication_recovery.registry_error_to_string
+            in
+            match Fs_compat.Publication_recovery.with_lane
+              ~registry ~owner:"tui-evidence-export" (fun recovery ->
+                Fs_compat.create_capability_file_exclusive ~recovery ~parent ~target t.contents
+                |> Result.map_error Fs_compat.capability_write_error_to_string)
+            with
+            | Error error -> Error (Fs_compat.Publication_recovery.lane_open_error_to_string error)
+            | Ok (Fs_compat.Publication_recovery.Lane_released result) -> result
+            | Ok (Fs_compat.Publication_recovery.Lane_release_failed { value; release_failure }) ->
+              let detail = Fs_compat.Publication_recovery.lane_release_failure_to_string release_failure in
+              Error (match value with Ok () -> detail | Error primary -> primary ^ "; " ^ detail)
           in
-          match Fs_compat.Publication_recovery.with_lane
-            ~registry ~owner:"tui-evidence-export" (fun recovery ->
-              Fs_compat.create_capability_file_exclusive ~recovery ~parent ~target t.contents
-              |> Result.map_error Fs_compat.capability_write_error_to_string)
-          with
-          | Error error -> Error (Fs_compat.Publication_recovery.lane_open_error_to_string error)
-          | Ok (Fs_compat.Publication_recovery.Lane_released result) -> result
-          | Ok (Fs_compat.Publication_recovery.Lane_release_failed { value; release_failure }) ->
-            let detail = Fs_compat.Publication_recovery.lane_release_failure_to_string release_failure in
+          match File_lock_eio.with_durable_lock_observed ~lock_path publish with
+          | File_lock_eio.Lock_not_acquired error ->
+            Error (File_lock_eio.durable_lock_error_to_string error)
+          | File_lock_eio.Body_completed { value; release_error = None } -> value
+          | File_lock_eio.Body_completed { value; release_error = Some error } ->
+            let detail = File_lock_eio.durable_lock_error_to_string error in
             Error (match value with Ok () -> detail | Error primary -> primary ^ "; " ^ detail))))
     |> Result.map_error (fun error -> path ^ ": " ^ error)
   with

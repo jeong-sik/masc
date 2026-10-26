@@ -13,7 +13,10 @@ val export :
 (** Check workspace admission before the exclusive private write and again
     before opening. [registry_root] is the caller-owned stable local MASC root,
     separate from a shared export directory, so repeated exports retain recovery
-    without sharing a fixed registry across OS users. Publish the destination
+    without sharing a fixed registry across OS users. Concurrent exports sharing
+    that root serialize owner reconciliation and publication through a stable
+    process/filesystem lock. Lock admission is cancellable; admitted publication
+    and lock release settle before cancellation resumes. Publish the destination
     before any write can happen, so incomplete effects and cancellation retain
     their location. Never retry a write or opener on failure. Preserve the original
     basename inside a unique private directory. The file is a copy, never a

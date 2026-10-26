@@ -2932,7 +2932,7 @@
  (name masc_tui_evidence_file)
  (wrapped false)
  (modules masc_tui_evidence_file)
- (libraries masc.fs_compat masc.masc_random_id base64 digestif yojson eio unix))
+ (libraries masc.fs_compat masc.masc_random_id masc_process base64 digestif yojson eio unix))
 
 ;; The "EVIDENCE CONTENT" rows of the awaiting-verification task detail, with
 ;; the area a picture reserves among them. Apart from the pane so the row

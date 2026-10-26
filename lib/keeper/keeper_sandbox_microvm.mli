@@ -329,6 +329,26 @@ val apple_volume_create_argv : volume_name:string -> size:string -> string list
     and [nerdctl volume create] documents no size flag at all.
     {!ensure_work_volume_for} is the entry that answers for all three. *)
 
+type apple_boot_failure =
+  | Apple_invalid_boot_plan of Keeper_microvm_boot_plan.invalid_plan list
+  | Apple_network_unavailable of string
+  | Apple_constraints_unexpressible of constraint_refusal list
+
+val microvm_backend_label_key : string
+
+val apple_turn_start_argv :
+  container_name:string -> plan:Keeper_microvm_boot_plan.t ->
+  lifecycle_labels:(string * string) list -> dns:string option ->
+  policy_proxy:policy_proxy option -> (string list, apple_boot_failure) result
+(** The actual Apple Boot projection. Stable labels and every requested
+    boot field come from [plan]; its canonical digest labels the same argv.
+    DNS and policy route values are execution inputs excluded from the digest.
+    Does not change adoption, identity lifetime, sweep or shim authority. *)
+
+val apple_guest_facts : container_name:string -> string -> Keeper_microvm_boot_plan.reading
+(** Strictly reads one Apple inspect row. Missing/duplicate security fields,
+    unknown mount types and malformed values are [Unreadable], never absence. *)
+
 val work_volume_mount_args : volume_name:string -> string list
 
 val trim_guest_root : string

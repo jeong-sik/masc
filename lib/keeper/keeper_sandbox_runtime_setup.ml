@@ -231,6 +231,28 @@ let sanitize_label_value value =
 
 include Keeper_sandbox_runtime_setup_mount_failure
 
+let ownership_labels ~base_path ~keeper_name ~container_kind =
+  [ sandbox_component_label_key, sandbox_component_label_value
+  ; sandbox_base_path_hash_label_key, base_path_hash base_path
+  ; sandbox_keeper_label_key, sanitize_label_value keeper_name
+  ; sandbox_kind_label_key, sanitize_label_value container_kind
+  ]
+;;
+
+let network_labels network_label =
+  [sandbox_network_label_key, sanitize_label_value network_label]
+;;
+
+let stable_labels ~base_path ~keeper_name ~container_kind ~network_label =
+  ownership_labels ~base_path ~keeper_name ~container_kind @ network_labels network_label
+;;
+
+let lifecycle_labels () =
+  [ sandbox_owner_pid_label_key, string_of_int (current_owner_pid ())
+  ; sandbox_started_at_label_key, Printf.sprintf "%.3f" (Unix.gettimeofday ())
+  ]
+;;
+
 let docker_label_args
       ?ttl_sec
       ~base_path
@@ -240,13 +262,9 @@ let docker_label_args
       ()
   =
   let label key value = [ "--label"; key ^ "=" ^ value ] in
-  label sandbox_component_label_key sandbox_component_label_value
-  @ label sandbox_base_path_hash_label_key (base_path_hash base_path)
-  @ label sandbox_keeper_label_key (sanitize_label_value keeper_name)
-  @ label sandbox_kind_label_key (sanitize_label_value container_kind)
-  @ label sandbox_owner_pid_label_key (string_of_int (current_owner_pid ()))
-  @ label sandbox_started_at_label_key (Printf.sprintf "%.3f" (Unix.gettimeofday ()))
-  @ label sandbox_network_label_key (sanitize_label_value network_label)
+  (ownership_labels ~base_path ~keeper_name ~container_kind
+   @ lifecycle_labels () @ network_labels network_label
+   |> List.concat_map (fun (key, value) -> label key value))
   @
   match ttl_sec with
   | Some value when value > 0.0 ->
@@ -361,13 +379,19 @@ let docker_config_available host_config_root =
   | Sys_error _ -> false
 ;;
 
-let docker_config_mount_args ~base_path ~container_root =
+let config_mount ~base_path ~container_root =
   let host_config_root = docker_config_host_root ~base_path in
   if not (docker_config_available host_config_root)
-  then []
-  else
+  then None
+  else Some (host_config_root, docker_config_container_root ~container_root)
+;;
+
+let docker_config_mount_args ~base_path ~container_root =
+  match config_mount ~base_path ~container_root with
+  | None -> []
+  | Some (source, destination) ->
     [ "-v"
-    ; host_config_root ^ ":" ^ docker_config_container_root ~container_root ^ ":ro"
+    ; source ^ ":" ^ destination ^ ":ro"
     ]
 ;;
 

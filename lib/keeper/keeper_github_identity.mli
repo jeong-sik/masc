@@ -156,6 +156,9 @@ type tool_identity_state =
 
 type docker_tool_projection =
   { args : string list
+  ; environment : (string * string) list
+      (** The same requested environment rendered in [args]; excludes mount
+          syntax so typed guest plans need not reverse-parse CLI tokens. *)
   ; identity_state : tool_identity_state
   ; host_snapshot_dir : string
   ; revision : string

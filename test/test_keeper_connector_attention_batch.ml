@@ -461,6 +461,12 @@ let test_scheduled_continuation_withdrawal_and_reinsertion () =
     Keeper_event_queue_persistence.For_testing.reset_snapshot_cache_for_testing ();
     check int "cold intake does not resurrect cancelled work" 0
       (Batch.count (intake ()).source_batch);
+    let validate batch = Batch.validate ~diagnostic:None
+      ~standing:(fun selection -> Keeper_registry_event_queue.admitted_selection_standing_result
+        ~base_path keeper_name ~selection) batch in
+    let admitted, withdrawn = validate captured |> require in
+    check int "absent cancelled source is no longer admitted" 0 (Batch.count admitted);
+    check int "absent cancelled source is explicitly withdrawn" 1 (List.length withdrawn);
     (* Even byte-identical reinsertion has a new durable incarnation. It must
        not inherit the old turn's exclusion or completion authority. *)
     enqueue_exn ~base_path keeper_name original;
@@ -468,13 +474,22 @@ let test_scheduled_continuation_withdrawal_and_reinsertion () =
       ~excluding:(Batch.pending_at_intake captured) |> require in
     check int "reinserted occurrence is new work for the active turn" 1
       (List.length successors);
-    let admitted, withdrawn = Batch.validate ~diagnostic:None
-      ~standing:(fun selection -> Keeper_registry_event_queue.admitted_selection_standing_result
-        ~base_path keeper_name ~selection) captured |> require in
-    check int "old source cannot settle a replacement" 0 (Batch.count admitted);
-    check int "old incarnation is explicitly withdrawn" 1 (List.length withdrawn);
-    check int "replacement remains available to a new intake" 1
-      (Batch.count (intake ()).source_batch))
+    (match validate captured with
+     | Error detail ->
+       check string "replacement strictly rejects old incarnation authority"
+         "event queue pending selection incarnation changed" detail
+     | Ok _ -> fail "reinserted source accepted old incarnation authority");
+    Keeper_event_queue_persistence.For_testing.reset_snapshot_cache_for_testing ();
+    let current = Keeper_registry_event_queue.pending_selections_result
+      ~base_path keeper_name |> require in
+    check bool "stale validation leaves the exact replacement pending" true
+      (current = successors);
+    let replacement = (intake ()).source_batch in
+    check bool "next intake owns the current replacement incarnation" true
+      (Batch.selections replacement = current);
+    let admitted, withdrawn = validate replacement |> require in
+    check bool "current replacement retains dispatch authority" true
+      (Batch.selections admitted = current && withdrawn = []))
 ;;
 
 let test_unread_connector_sources_survive_other_completed_work ~failure () =

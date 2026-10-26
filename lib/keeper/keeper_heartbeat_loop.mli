@@ -264,6 +264,8 @@ val refresh_failure_reason_after_turn :
     function must not re-add inline admission gates: doing so would reinstate
     the consume-before-gate churn that hoisting the decision removed. *)
 val run_keepalive_unified_turn :
+  scheduled_handoff:Keeper_owner.scheduled_turn_handoff option ->
+  on_handoff_observed:(Keeper_owner.scheduled_turn_handoff option -> unit) ->
   wake:Keeper_world_observation.cycle_wake ->
   ctx:'a context ->
   registry_entry:Keeper_registry.registry_entry ->

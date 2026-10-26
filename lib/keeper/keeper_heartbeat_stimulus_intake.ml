@@ -829,7 +829,8 @@ let same_source_scope left right = match left,right with
       left.ao_origin_id=right.ao_origin_id && left.ao_source=right.ao_source
       && left.ao_channel=right.ao_channel
 
-let heartbeat_event_intake
+let heartbeat_event_intake_with_priority
+      ~priority_sources
       ~ctx
       ~meta_after_triage
       ~pending_board_events
@@ -1226,7 +1227,11 @@ let heartbeat_event_intake
         message;
       [], [], None, Some (None, Pending_selection_failed message)
     | Ok selections ->
-      let batch = ready_batch selections in
+      (* Revalidate against this actual intake snapshot. A withdrawn or reinserted
+         source never borrows the old handoff's admission preference. *)
+      let preferred, rest = List.partition (fun source ->
+        List.exists (Keeper_scheduled_turn_handoff.same_selection source) priority_sources) selections in
+      let batch = ready_batch (preferred @ rest) in
       let observations, selections, withdrawn, error =
         consume_batch batch
       in
@@ -1299,3 +1304,7 @@ let heartbeat_event_intake
   ; event_queue_triggers
   }
 ;;
+
+let heartbeat_event_intake ~ctx ~meta_after_triage ~pending_board_events =
+  heartbeat_event_intake_with_priority ~priority_sources:[]
+    ~ctx ~meta_after_triage ~pending_board_events

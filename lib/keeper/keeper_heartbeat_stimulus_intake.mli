@@ -255,3 +255,13 @@ val heartbeat_event_intake
   -> meta_after_triage:keeper_meta
   -> pending_board_events:Keeper_world_observation.pending_board_event list
   -> heartbeat_event_intake
+
+val heartbeat_event_intake_with_priority
+  :  priority_sources:Keeper_event_queue_state.pending_selection list
+  -> ctx:'a context
+  -> meta_after_triage:keeper_meta
+  -> pending_board_events:Keeper_world_observation.pending_board_event list
+  -> heartbeat_event_intake
+(** The still-pending exact handoff cohort is admitted before ambient sources.
+    Newer incarnations are not matched by post id, and the ordinary intake and
+    dispatch-time validation remain authoritative. *)

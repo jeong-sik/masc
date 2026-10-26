@@ -171,6 +171,35 @@ type operation_runner =
       unit
   }
 
+let same_scheduled_selection (left : Keeper_event_queue_state.pending_selection)
+    (right : Keeper_event_queue_state.pending_selection) =
+  Int64.equal left.admitted_revision right.admitted_revision
+  && String.equal
+       (Keeper_event_queue_state.source_snapshot_ref left.source)
+       (Keeper_event_queue_state.source_snapshot_ref right.source)
+
+let surviving_scheduled_sources ~observed requested =
+  List.filter (fun source -> List.exists (same_scheduled_selection source) observed) requested
+
+type scheduled_turn_consumer = Scheduled_turn_consumer of Keeper_interrupt_token.t
+
+let same_scheduled_consumer (Scheduled_turn_consumer left) (Scheduled_turn_consumer right) =
+  Keeper_interrupt_token.equal left right
+
+type scheduled_turn_handoff =
+  { consumer : scheduled_turn_consumer
+  ; observed_turn : Keeper_interrupt_token.t
+  ; sources : Keeper_event_queue_state.pending_selection list }
+
+let remove_handoff_sources current released =
+  match current with
+  | Some current when same_scheduled_consumer current.consumer released.consumer
+      && Keeper_interrupt_token.equal current.observed_turn released.observed_turn ->
+    let sources = List.filter (fun source ->
+      not (List.exists (same_scheduled_selection source) released.sources)) current.sources in
+    if List.is_empty sources then None else Some { current with sources }
+  | Some _ | None -> current
+
 type 'a autonomous_response =
   | Autonomous_ran of 'a
   | Autonomous_busy of autonomous_block
@@ -340,10 +369,22 @@ type _ command =
       -> (Chat_operation.t, error) result command
   | Observe_runtime_retry_waits : (unit, error) result command
   | Wake_operation_drain : (unit, error) result command
+  | Begin_scheduled_turn_consumer : (scheduled_turn_consumer, error) result command
+  | End_scheduled_turn_consumer : scheduled_turn_consumer -> (unit, error) result command
+  | Request_scheduled_turn :
+      { observed : Keeper_interrupt_token.t
+      ; sources : Keeper_event_queue_state.pending_selection list }
+      -> (bool, error) result command
+  | Observe_scheduled_turn : Keeper_event_queue_state.pending_selection list
+      -> (scheduled_turn_handoff option, error) result command
+  | Scheduled_turn_handoff : (scheduled_turn_handoff option, error) result command
+  | Release_scheduled_turn : scheduled_turn_handoff -> (unit, error) result command
   | Run_if_idle :
       { lane : turn_lane
       ; defer_to_chat : bool
-      ; run : unit -> 'a
+      ; scheduled_sources : (scheduled_turn_handoff option *
+          (Keeper_event_queue_state.pending_selection list, string) result) option
+      ; run : Keeper_event_queue_state.pending_selection list -> 'a
       }
       -> ('a autonomous_response, error) result command
   | Begin_shutdown :
@@ -447,6 +488,8 @@ type t =
   ; stopping_waiters : ((unit, error) result Eio.Promise.u) list ref
   ; shutdown_idle_waiters : ((unit, error) result Eio.Promise.u) list ref
   ; on_turn_slot_released : (unit -> unit) option
+  ; scheduled_consumer : scheduled_turn_consumer option ref
+  ; scheduled_handoff : scheduled_turn_handoff option ref
   ; autonomous_lost_slot : bool ref
         (* Set when the autonomous lane asked for the slot and was refused,
            cleared when the release notification is delivered. Without it the
@@ -579,8 +622,11 @@ let notify_turn_slot_released t =
     if Option.is_none (Atomic.get t.turn_in_flight) && !(t.autonomous_lost_slot)
     then (
       t.autonomous_lost_slot := false;
+      let handoff = !(t.scheduled_handoff) in
       Cancel_safe.observe
         ~on_exn:(fun exn ->
+          Option.iter (fun handoff ->
+            t.scheduled_handoff := remove_handoff_sources !(t.scheduled_handoff) handoff) handoff;
           Log.Keeper.routine
             ~keeper_name:t.keeper_name
             "turn slot release listener raised: %s"
@@ -703,6 +749,9 @@ let answer : type response. response command -> answer = function
   | Claim_next_operation -> In_its_drain_step
   | Succeed_running_operation _ -> In_its_drain_step
   | Observe_runtime_retry_waits | Wake_operation_drain -> In_its_drain_step
+  | Begin_scheduled_turn_consumer | End_scheduled_turn_consumer _
+  | Request_scheduled_turn _ | Release_scheduled_turn _
+  | Observe_scheduled_turn _ | Scheduled_turn_handoff -> In_its_drain_step
   | Run_if_idle _ -> Possibly_when_the_child_finishes
   | Begin_shutdown _ -> In_its_drain_step
   | Rollback_shutdown _ -> In_its_drain_step
@@ -1298,6 +1347,8 @@ let start
     ; operation_error = ref None
     ; child_active = ref false
     ; child_cancel = Atomic.make None
+    ; scheduled_consumer = ref None
+    ; scheduled_handoff = ref None
     ; autonomous_lost_slot = ref false
     ; stopping_waiters = ref []
     ; shutdown_idle_waiters = ref []
@@ -1617,6 +1668,33 @@ let start
           | Native_call_closed_without_disposition ->
             fail_running_operation ~operation_id ~kind ~detail ~outcome_ref)
     in
+    let request_scheduled_handoff state shutdown_operation_id ~observed sources =
+      match !(t.scheduled_consumer), Atomic.get t.turn_in_flight with
+      | Some consumer, Some current when Keeper_interrupt_token.equal current.interrupt_token observed
+          && turn_admission_open state && Option.is_none shutdown_operation_id
+          && not (Keeper_owner_reducer.projection state).stopping
+          && Option.is_some t.on_turn_slot_released ->
+        let sources = List.filter (fun (source : Keeper_event_queue_state.pending_selection) ->
+          match source.source.payload with
+          | Keeper_event_queue.Schedule_due _ -> true
+          | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
+          | Connector_attention _ | Hitl_resolved _ | Ask_answered _
+          | Completion_authority_rejected _ | Task_cancelled _ | Workspace_message _
+          | Delegate_completed _ | Composition_completed _ | Tool_result_ready _
+          | Owned_job_completed _ | Addon_operation_changed _ | Task_outcome _ -> false) sources in
+        if List.is_empty sources then false
+        else (
+          let sources = match !(t.scheduled_handoff) with
+            | Some prior when same_scheduled_consumer prior.consumer consumer
+                && Keeper_interrupt_token.equal prior.observed_turn observed ->
+              prior.sources @ List.filter (fun source ->
+                not (List.exists (same_scheduled_selection source) prior.sources)) sources
+            | Some _ | None -> sources in
+          t.scheduled_handoff := Some { consumer; observed_turn = observed; sources };
+          t.autonomous_lost_slot := true;
+          true)
+      | (Some _ | None), (Some _ | None) -> false
+    in
     let rec start_child_if_needed state shutdown_operation_id =
       match operation_runner with
       | None -> ()
@@ -1626,13 +1704,13 @@ let start
       | Some _ when not (turn_admission_open state) -> ()
       | Some _ when Option.is_some !(t.operation_error) || Option.is_some !(t.metadata_error) -> ()
       | Some runner when not (runner.ready ~keeper_name:t.keeper_name) -> ()
+      | Some _ when Option.is_some !(t.scheduled_handoff) -> ()
       | Some runner ->
         let inventory = Atomic.get t.operation_projection in
-        (* A released slot belongs to claimable direct input first. Repeated
-           autonomous observations of the same busy slot must not change that
-           order, including when the running turn yielded to newer input.
-           [notify_turn_slot_released] wakes the refused autonomous lane once
-           no direct operation claims the slot. *)
+        (* Direct input normally takes a released slot first. An exact
+           scheduled handoff above protects one source admission across the
+           original chat's checkpoint or natural completion. After that
+           admission, normal direct responsiveness resumes. *)
         if
           inventory.has_claimable_queued
           && Option.is_none inventory.running_operation_id
@@ -2594,19 +2672,86 @@ let start
           else (
             Eio.Promise.resolve resolve (Ok ());
             loop state shutdown_operation_id)
-        | Command (Run_if_idle { lane; defer_to_chat; run }, resolve) ->
+        | Command (Begin_scheduled_turn_consumer, resolve) ->
+          let consumer = Scheduled_turn_consumer (Keeper_interrupt_token.fresh ()) in
+          t.scheduled_consumer := Some consumer;
+          t.scheduled_handoff := None;
+          Eio.Promise.resolve resolve (Ok consumer);
+          start_child_if_needed state shutdown_operation_id;
+          loop state shutdown_operation_id
+        | Command (End_scheduled_turn_consumer consumer, resolve) ->
+          (match !(t.scheduled_consumer) with
+           | Some active when same_scheduled_consumer active consumer ->
+             t.scheduled_consumer := None;
+             t.scheduled_handoff := None
+           | Some _ | None -> ());
+          Eio.Promise.resolve resolve (Ok ());
+          start_child_if_needed state shutdown_operation_id;
+          loop state shutdown_operation_id
+        | Command (Request_scheduled_turn { observed; sources }, resolve) ->
+          let accepted = request_scheduled_handoff state shutdown_operation_id ~observed sources in
+          Eio.Promise.resolve resolve (Ok accepted);
+          loop state shutdown_operation_id
+        | Command (Observe_scheduled_turn sources, resolve) ->
+          (* A text-only Direct child also releases a safe slot at its natural
+             terminal. Observe while it is busy so queued chat cannot take that
+             next slot before the heartbeat. Autonomous sources already own
+             their input; only their post-tool probe may request a successor. *)
+          (match Atomic.get t.turn_in_flight with
+           | Some { lane = Chat_operation; interrupt_token; _ } ->
+             ignore (request_scheduled_handoff state shutdown_operation_id
+               ~observed:interrupt_token sources)
+           | Some { lane = Autonomous | Maintenance; _ } | None -> ());
+          Eio.Promise.resolve resolve (Ok !(t.scheduled_handoff));
+          loop state shutdown_operation_id
+        | Command (Scheduled_turn_handoff, resolve) ->
+          Eio.Promise.resolve resolve (Ok !(t.scheduled_handoff));
+          loop state shutdown_operation_id
+        | Command (Release_scheduled_turn handoff, resolve) ->
+          t.scheduled_handoff := remove_handoff_sources !(t.scheduled_handoff) handoff;
+          Eio.Promise.resolve resolve (Ok ());
+          start_child_if_needed state shutdown_operation_id;
+          loop state shutdown_operation_id
+        | Command (Run_if_idle { lane; defer_to_chat; scheduled_sources; run }, resolve) ->
+          let priority_sources, admitted_handoff = match scheduled_sources, !(t.scheduled_handoff) with
+            | Some (Some captured, observation), Some current
+                when same_scheduled_consumer captured.consumer current.consumer
+                  && Keeper_interrupt_token.equal captured.observed_turn current.observed_turn ->
+              let requested = surviving_scheduled_sources ~observed:current.sources captured.sources in
+              let surviving = match observation with
+                | Ok observed -> surviving_scheduled_sources ~observed requested
+                | Error _ -> [] in
+              let stale = List.filter (fun source ->
+                not (List.exists (same_scheduled_selection source) surviving)) requested in
+              t.scheduled_handoff := remove_handoff_sources !(t.scheduled_handoff)
+                { captured with sources = stale };
+              surviving, Some { captured with sources = surviving }
+            | Some (Some _, _), (Some _ | None)
+            | Some (None, _), (Some _ | None)
+            | None, (Some _ | None) -> [], None
+          in
+          let release_refused_handoff () =
+            match scheduled_sources with
+            | Some (Some captured, _) ->
+              t.scheduled_handoff := remove_handoff_sources !(t.scheduled_handoff) captured
+            | Some (None, _) | None -> ()
+          in
           (match shutdown_operation_id with
            | Some operation_id ->
+             release_refused_handoff ();
              Eio.Promise.resolve
                resolve
                (Ok (Autonomous_busy (Shutdown_requested operation_id)))
            | None when (match lane with
                | Autonomous | Chat_operation -> not (turn_admission_open state)
                | Maintenance -> false) ->
+             release_refused_handoff ();
              Eio.Promise.resolve resolve (Ok (Autonomous_busy Admission_paused))
            | None ->
              (match reject_if_stopping state (fun () -> Ok ()) with
-              | Error error -> Eio.Promise.resolve resolve (Error error)
+              | Error error ->
+                release_refused_handoff ();
+                Eio.Promise.resolve resolve (Error error)
               | Ok () ->
                 (match Atomic.get t.turn_in_flight with
                  | Some in_flight ->
@@ -2619,6 +2764,14 @@ let start
                      (Ok (Autonomous_busy (Turn_busy (Some in_flight))))
                  | None ->
                    let run_admitted_turn () =
+                     (* Consume this slot preference, never the event source. The
+                        heartbeat's intake and terminal path still own its ACK. *)
+                     (match lane with
+                      | Autonomous ->
+                        Option.iter (fun admitted ->
+                          t.scheduled_handoff := remove_handoff_sources !(t.scheduled_handoff) admitted)
+                          admitted_handoff
+                      | Chat_operation | Maintenance -> ());
                      (* The Owner keeps its slot until the turn settles. A
                         chat starts after a settled tool boundary yields this
                         turn or the turn completes. *)
@@ -2645,7 +2798,7 @@ let start
                                             Eio.Switch.fail child_sw
                                               Keeper_registry_types.Operator_interrupt)
                                      });
-                                run ()))
+                                run priority_sources))
                          with
                          (* Two different cancellations land here and both
                             belong in [outcome] rather than on the stack.
@@ -2676,6 +2829,8 @@ let start
                             (Autonomous_child_finished { outcome; resolve })))
                    in
                    (match lane with
+                    | Maintenance when Option.is_some !(t.scheduled_handoff) ->
+                      Eio.Promise.resolve resolve (Ok (Autonomous_busy (Turn_busy None)))
                     | Maintenance when defer_to_chat ->
                       ignore (recover_operation_availability t : (unit, error) result);
                       let inventory = Atomic.get t.operation_projection in
@@ -2684,6 +2839,9 @@ let start
                         Eio.Promise.resolve resolve (Ok (Autonomous_busy (Turn_busy None)))
                       else run_admitted_turn ()
                     | Chat_operation | Maintenance -> run_admitted_turn ()
+                    | Autonomous when Option.is_some !(t.scheduled_handoff)
+                        && List.is_empty priority_sources ->
+                      Eio.Promise.resolve resolve (Ok (Autonomous_busy (Turn_busy None)))
                     | Autonomous ->
                       (* Do not take a free slot ahead of a queued chat. No
                          child holds the operation store here, so recover it
@@ -2699,7 +2857,7 @@ let start
                         && not inventory.store_unavailable
                         && Option.is_none inventory.running_operation_id
                       in
-                      if not chat_can_take_slot
+                      if not chat_can_take_slot || not (List.is_empty priority_sources)
                       then run_admitted_turn ()
                       else (
                         start_child_if_needed state shutdown_operation_id;
@@ -2768,6 +2926,16 @@ let start
               Eio.Promise.resolve autonomous_resolve response;
               Ok ()
           in
+          let failed_child = Result.is_error result || match completion with
+            | Operation_child_finished { execution = Operation_failed _; _ }
+            | Autonomous_child_finished { outcome = Error _; _ } -> true
+            | Operation_child_finished { execution = Operation_deferred | Operation_succeeded _; _ }
+            | Autonomous_child_finished { outcome = Ok _; _ } -> false in
+          (match failed_child, Atomic.get t.turn_in_flight, !(t.scheduled_handoff) with
+           | true, Some child, Some handoff
+               when Keeper_interrupt_token.equal child.interrupt_token handoff.observed_turn ->
+             t.scheduled_handoff := None
+           | (true | false), (Some _ | None), (Some _ | None) -> ());
           t.child_active := false;
           publish_turn_in_flight t None;
           Eio.Promise.resolve resolve result;
@@ -2781,6 +2949,9 @@ let start
             shutdown_idle_waiters;
           start_child_if_needed state shutdown_operation_id;
           notify_turn_slot_released t;
+          (* A failing release listener relinquishes its exact handoff above.
+             Reconsider chat here instead of leaving an idle slot reserved. *)
+          start_child_if_needed state shutdown_operation_id;
           loop state shutdown_operation_id
         | Command (Begin_stopping, resolve) ->
           let transition = Keeper_owner_reducer.begin_stopping state in
@@ -2943,8 +3114,19 @@ let succeed_running_operation t ~operation_id ~outcome_ref =
   request t (Succeed_running_operation { operation_id; outcome_ref })
 ;;
 
-let run_autonomous_if_idle t run =
-  match request t (Run_if_idle { lane = Autonomous; defer_to_chat = false; run }) with
+let begin_scheduled_turn_consumer t = request t Begin_scheduled_turn_consumer
+let end_scheduled_turn_consumer t ~consumer = request t (End_scheduled_turn_consumer consumer)
+
+let request_scheduled_turn t ~observed sources =
+  request t (Request_scheduled_turn { observed; sources })
+
+let observe_scheduled_turn t sources = request t (Observe_scheduled_turn sources)
+let scheduled_turn_handoff t = request t Scheduled_turn_handoff
+let release_scheduled_turn t ~handoff = request t (Release_scheduled_turn handoff)
+
+let run_autonomous_request t ~scheduled_sources run =
+  match request t (Run_if_idle
+      { lane = Autonomous; defer_to_chat = false; scheduled_sources; run }) with
   | Error _ as error -> error
   | Ok (Autonomous_ran value) -> Ok (`Ran value)
   | Ok (Autonomous_busy block) -> Ok (`Busy block)
@@ -2977,8 +3159,15 @@ let run_autonomous_if_idle t run =
 
 (* Maintenance is not interruptible ([Interrupt_maintenance_running]), so an
    operator interrupt reaching this lane is not a translated outcome. *)
+let run_scheduled_if_idle t ~handoff ~sources run =
+  run_autonomous_request t ~scheduled_sources:(Some (handoff, sources)) run
+
+let run_autonomous_if_idle t run =
+  run_autonomous_request t ~scheduled_sources:None (fun _ -> run ())
+
 let run_maintenance_if_idle ?(defer_to_chat = false) t run =
-  match request t (Run_if_idle { lane = Maintenance; defer_to_chat; run }) with
+  match request t (Run_if_idle
+      { lane = Maintenance; defer_to_chat; scheduled_sources = None; run = (fun _ -> run ()) }) with
   | Error _ as error -> error
   | Ok (Autonomous_ran value) -> Ok (`Ran value)
   | Ok (Autonomous_busy block) -> Ok (`Busy block)

@@ -563,6 +563,48 @@ let await_idle_after_shutdown ~base_path ~keeper_name =
        Ok ())
 ;;
 
+let begin_scheduled_turn_consumer ~base_path ~keeper_name =
+  match get ~base_path ~keeper_name with
+  | Error error -> Error (Command_lookup_failed error)
+  | Ok owner -> Keeper_owner.begin_scheduled_turn_consumer owner
+      |> Result.map_error (fun error -> Command_rejected error)
+
+let end_scheduled_turn_consumer ~base_path ~keeper_name ~consumer =
+  match get ~base_path ~keeper_name with
+  | Error error -> Error (Command_lookup_failed error)
+  | Ok owner -> Keeper_owner.end_scheduled_turn_consumer owner ~consumer
+      |> Result.map_error (fun error -> Command_rejected error)
+
+let request_scheduled_turn ~base_path ~keeper_name ~observed sources =
+  match get ~base_path ~keeper_name with
+  | Error error -> Error (Command_lookup_failed error)
+  | Ok owner -> Keeper_owner.request_scheduled_turn owner ~observed sources
+      |> Result.map_error (fun error -> Command_rejected error)
+
+let observe_scheduled_turn ~base_path ~keeper_name sources =
+  match get ~base_path ~keeper_name with
+  | Error error -> Error (Command_lookup_failed error)
+  | Ok owner -> Keeper_owner.observe_scheduled_turn owner sources
+      |> Result.map_error (fun error -> Command_rejected error)
+
+let scheduled_turn_handoff ~base_path ~keeper_name =
+  match get ~base_path ~keeper_name with
+  | Error error -> Error (Command_lookup_failed error)
+  | Ok owner -> Keeper_owner.scheduled_turn_handoff owner
+      |> Result.map_error (fun error -> Command_rejected error)
+
+let release_scheduled_turn ~base_path ~keeper_name ~handoff =
+  match get ~base_path ~keeper_name with
+  | Error error -> Error (Command_lookup_failed error)
+  | Ok owner -> Keeper_owner.release_scheduled_turn owner ~handoff
+      |> Result.map_error (fun error -> Command_rejected error)
+
+let run_scheduled_if_idle ~base_path ~keeper_name ~handoff ~sources run =
+  match get ~base_path ~keeper_name with
+  | Error error -> Error (Command_lookup_failed error)
+  | Ok owner -> Keeper_owner.run_scheduled_if_idle owner ~handoff ~sources run
+      |> Result.map_error (fun error -> Command_rejected error)
+
 let run_autonomous_if_idle ~base_path ~keeper_name run =
   match get ~base_path ~keeper_name with
   | Error error -> Error (Command_lookup_failed error)

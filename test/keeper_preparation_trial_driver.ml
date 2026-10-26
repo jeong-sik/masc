@@ -1014,6 +1014,7 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
     Calls.with_commit_observer commit_observer @@ fun () ->
     Keeper_preparation_http_observation.within http_observation @@ fun () ->
     Keeper_heartbeat_loop.run_keepalive_unified_turn
+      ~scheduled_handoff:None ~on_handoff_observed:ignore
       ~wake:Keeper_world_observation.Attention_wake ~ctx ~registry_entry ~meta_after_triage:meta
       ~pending_board_events:[] ~stop:(Atomic.make false) ~proactive_warmup_elapsed:true ~reactive_wake:true
       ~shared_context:(Agent_core.Context.create ()) ~deferred_runtime_lane:None

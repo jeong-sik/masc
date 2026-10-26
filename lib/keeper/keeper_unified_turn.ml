@@ -449,7 +449,7 @@ let connector_attention_waiting ~base_path ~keeper_name =
   connector_attention_waiting_with_filter ~filter_pending ~base_path ~keeper_name
 ;;
 
-let make_autonomous_yield_probe ~on_attention_read ~wake ~base_path ~keeper_name =
+let make_autonomous_yield_probe ~sources ~on_attention_read ~wake ~base_path ~keeper_name =
   let filter_pending =
     make_connector_pointer_filter ~on_attention_read ~base_path ~keeper_name
   in
@@ -463,17 +463,36 @@ let make_autonomous_yield_probe ~on_attention_read ~wake ~base_path ~keeper_name
      terminal. *)
   | Keeper_registry.Woken (_ :: _) ->
     fun () ->
-      (match Keeper_chat_yield_request.request
-               ~turn:Keeper_chat_yield_request.Autonomous ~base_path ~keeper_name with
-       | Error _ as error -> error
-       | Ok (Some _) as request -> request
-       | Ok None ->
-         (match hitl_replay_yield_request ~base_path ~keeper_name with
-          | Error _ as error -> error
-          | Ok (Some _) as request -> request
-          | Ok None ->
-            connector_attention_waiting_with_filter ~filter_pending
-              ~base_path ~keeper_name))
+      let existing_preemptor =
+        match Keeper_chat_yield_request.request
+                ~turn:Keeper_chat_yield_request.Autonomous ~base_path ~keeper_name with
+        | Error _ as error -> error
+        | Ok (Some _) as request -> request
+        | Ok None ->
+          (match hitl_replay_yield_request ~base_path ~keeper_name with
+           | Error _ as error -> error
+           | Ok (Some _) as request -> request
+           | Ok None -> connector_attention_waiting_with_filter ~filter_pending
+               ~base_path ~keeper_name)
+      in
+      match existing_preemptor with
+      | Error _ as error -> error
+      | Ok (Some _) as request -> request
+      | Ok None ->
+        (match Keeper_scheduled_turn_handoff.request
+                 ~excluding:sources ~base_path ~keeper_name with
+         | Error (Keeper_scheduled_turn_handoff.Owner_unavailable error) ->
+           Error (Keeper_owner_registry.command_error_to_string error)
+         | Error (Queue_unavailable detail) ->
+           Log.Keeper.warn ~keeper_name
+             "scheduled handoff unavailable; retaining source turn progress: %s" detail;
+           Ok None
+         | Ok [] -> Ok None
+         | Ok pending ->
+           let queue = List.fold_left (fun queue (source : Keeper_event_queue_state.pending_selection) ->
+             Keeper_event_queue.enqueue queue source.source) Keeper_event_queue.empty pending in
+           Ok (Some Keeper_agent_run.{ reason = Durable_stimulus_waiting
+             (durable_stimulus_summary ~now:(Time_compat.now ()) queue) }))
   | Keeper_registry.Proactive_tick | Keeper_registry.Woken [] ->
     fun () ->
       autonomous_yield_request_with_filter ~filter_pending ~base_path ~keeper_name
@@ -487,7 +506,7 @@ let make_autonomous_yield_probe ~on_attention_read ~wake ~base_path ~keeper_name
 ;;
 
 let autonomous_yield_request_for_wake ~wake ~base_path ~keeper_name =
-  make_autonomous_yield_probe ~on_attention_read:(fun () -> ())
+  make_autonomous_yield_probe ~sources:[] ~on_attention_read:(fun () -> ())
     ~wake ~base_path ~keeper_name
 ;;
 
@@ -495,7 +514,7 @@ module For_testing = struct
   let autonomous_yield_probe ~wake ~base_path ~keeper_name =
     let reads = ref 0 in
     let probe =
-      make_autonomous_yield_probe ~on_attention_read:(fun () -> incr reads)
+      make_autonomous_yield_probe ~sources:[] ~on_attention_read:(fun () -> incr reads)
         ~wake ~base_path ~keeper_name
     in
     probe, (fun () -> !reads)
@@ -1221,7 +1240,10 @@ let run_keeper_cycle
                            ; on_deferred_runtime_consumed
                            }
                            ~yield_requested:
-                             (autonomous_yield_request_for_wake
+                             (make_autonomous_yield_probe
+                                ~sources:(Keeper_heartbeat_source_batch.selections
+                                  (Keeper_heartbeat_source_batch.sources turn_input))
+                                ~on_attention_read:(fun () -> ())
                                 ~wake
                                 ~base_path:config.base_path
                                 ~keeper_name:meta.name)

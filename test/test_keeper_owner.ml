@@ -5825,6 +5825,194 @@ let test_pending_chat_survives_repeated_autonomous_observations () =
   | Error error -> fail (Owner.error_to_string error)
 ;;
 
+type scheduled_handoff_case =
+  | Checkpoint_handoff
+  | Natural_completion_handoff
+  | Withdrawn_handoff
+  | Reinserted_handoff
+  | Unavailable_handoff
+  | Scoped_release_handoff
+  | Failed_chat_handoff
+  | Unconfirmed_checkpoint_handoff
+  | Failed_listener_handoff
+  | Missing_listener_handoff
+  | Paused_handoff
+  | Ended_consumer_handoff
+  | Replaced_consumer_handoff
+
+let scheduled_selection ?(revision = 1L) occurrence : Keeper_event_queue_state.pending_selection =
+  { source = Keeper_event_queue.
+      { post_id = occurrence; urgency = Immediate; arrived_at = 1.
+      ; payload = Schedule_due
+          { occurrence_id = occurrence; schedule_instance_id = "instance-handoff"
+          ; schedule_id = "sched-handoff"; due_at = 1.; payload_digest = "digest"
+          ; title = None; message = "Consume scheduled work"; result_delivery = None } }
+  ; admitted_revision = revision; checkpoint_retentions = 0
+  ; repetition_scope = None; first_admitted_at = Some 1. }
+
+(* Exercise the real Owner mailbox, chat runner, durable checkpoint deferral,
+   release wake and source-admission callback. Queue terminal ACK remains the
+   heartbeat consumer's authority; this test never manufactures one. *)
+let test_scheduled_source_handoff case () =
+  Eio_main.run @@ fun _env -> Eio.Switch.run @@ fun sw ->
+  let first = operation_id "kmsg-scheduled-first" in
+  let next = operation_id "kmsg-scheduled-next" in
+  let selection = scheduled_selection "occurrence-handoff" in
+  let other = scheduled_selection ~revision:2L "occurrence-added" in
+  let owner_p, resolve_owner = Eio.Promise.create () in
+  let started, resolve_started = Eio.Promise.create () in
+  let settled, resolve_settled = Eio.Promise.create () in
+  let release, resolve_release = Eio.Promise.create () in
+  let settled_sent = ref false in
+  let signal_settled () =
+    if not !settled_sent then (settled_sent := true; Eio.Promise.resolve resolve_settled ()) in
+  let attempts = ref 0 and wakes = ref 0 and order = ref [] in
+  let record text = order := !order @ [text] in
+  let execute ~sw:_ ~keeper_name:_ ~claim =
+    let owner = Eio.Promise.await owner_p in
+    let operation = Option.get (owner_ok (claim ())) in
+    if Chat_operation.Operation_id.equal operation.operation_id first then (
+      incr attempts;
+      if !attempts = 1 then (
+        record "chat";
+        Eio.Promise.resolve resolve_started ();
+        Eio.Promise.await release;
+        match case with
+        | Natural_completion_handoff -> Owner.Operation_succeeded { outcome_ref = "text-only" }
+        | Failed_chat_handoff -> Owner.Operation_failed
+            { kind = Chat_operation.Turn_invariant; detail = "failed before checkpoint"; outcome_ref = None }
+        | Unconfirmed_checkpoint_handoff -> Owner.Operation_deferred
+        | Checkpoint_handoff | Withdrawn_handoff | Reinserted_handoff
+        | Unavailable_handoff | Scoped_release_handoff | Failed_listener_handoff
+        | Missing_listener_handoff | Paused_handoff | Ended_consumer_handoff
+        | Replaced_consumer_handoff ->
+          let checkpoint = Keeper_checkpoint_ref.create
+            ~trace_id:(Option.get (Owner.projection owner).meta).runtime.trace_id
+            ~turn_count:1 ~canonical_checkpoint_bytes:"settled original chat boundary"
+            |> Result.get_ok in
+          Owner.defer_direct_checkpoint owner ~operation_id:first
+            ~execution_digest:operation.execution_digest
+            ~checkpoint:(Keeper_semantic_execution.Agent_core checkpoint)
+          |> owner_ok |> ignore;
+          Owner.Operation_deferred)
+      else (record "resumed"; Owner.Operation_succeeded { outcome_ref = "resumed" }))
+    else (
+      check bool "fresh chat retains its original identity" true
+        (Chat_operation.Operation_id.equal operation.operation_id next);
+      record "fresh";
+      Owner.Operation_succeeded { outcome_ref = "fresh" })
+  in
+  let path = Filename.temp_file "keeper-owner-scheduled-handoff-" ".sqlite3" in
+  Unix.unlink path;
+  Eio.Switch.on_release sw (fun () -> if Sys.file_exists path then Unix.unlink path);
+  let listener = match case with
+    | Missing_listener_handoff -> None
+    | Failed_listener_handoff -> Some (fun () -> incr wakes; signal_settled (); failwith "wake unavailable")
+    | Checkpoint_handoff | Natural_completion_handoff | Withdrawn_handoff
+    | Reinserted_handoff | Unavailable_handoff | Scoped_release_handoff
+    | Failed_chat_handoff | Unconfirmed_checkpoint_handoff | Paused_handoff
+    | Ended_consumer_handoff | Replaced_consumer_handoff -> Some (fun () -> incr wakes; signal_settled ())
+  in
+  let owner = Owner.start ~sw
+    ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+    ~operation_store_path:path
+    ~session_root:(Filename.concat (Filename.dirname path) "traces")
+    ~now:(fun () -> 42.)
+    ~operation_runner:(Some Owner.
+      { ready = (fun ~keeper_name:_ -> true); execute
+      ; on_execution_settled = (fun ~keeper_name:_ ~claimed_operation_id ~operations:_ ~execution:_ ->
+          if !attempts = 1 && Option.exists (Chat_operation.Operation_id.equal first) claimed_operation_id
+          then signal_settled ()) })
+    ~on_turn_slot_released:listener ~keeper_name:"scheduled-handoff"
+    ~initial_meta:(Some (make_meta "scheduled-handoff")) |> owner_ok in
+  let consumer = Owner.begin_scheduled_turn_consumer owner |> owner_ok in
+  Eio.Promise.resolve resolve_owner owner;
+  let submit id = Owner.submit_operation owner ~operation_id:id
+    ~source:operation_source ~input:(operation_input "Original chat") |> owner_ok |> ignore in
+  submit first;
+  Eio.Promise.await started;
+  submit next;
+  let observed = observed_token owner in
+  let accepted = match case with
+    | Natural_completion_handoff ->
+      Option.is_some (owner_ok (Owner.observe_scheduled_turn owner [selection]))
+    | Checkpoint_handoff | Withdrawn_handoff | Reinserted_handoff
+    | Unavailable_handoff | Scoped_release_handoff | Failed_chat_handoff
+    | Unconfirmed_checkpoint_handoff | Failed_listener_handoff | Missing_listener_handoff
+    | Paused_handoff | Ended_consumer_handoff | Replaced_consumer_handoff ->
+      owner_ok (Owner.request_scheduled_turn owner ~observed [selection]) in
+  check bool "handoff requires a live release consumer"
+    (case <> Missing_listener_handoff) accepted;
+  let captured = owner_ok (Owner.scheduled_turn_handoff owner) in
+  (match case, captured with
+   | Scoped_release_handoff, Some old ->
+     check bool "additional exact source is reserved" true
+       (owner_ok (Owner.request_scheduled_turn owner ~observed [other]));
+     Owner.release_scheduled_turn owner ~handoff:old |> owner_ok
+   | Ended_consumer_handoff, _ ->
+     ignore (Owner.request_scheduled_turn owner ~observed [other] |> owner_ok);
+     Owner.end_scheduled_turn_consumer owner ~consumer |> owner_ok;
+     check bool "ending the consumer rejects late reservation" false
+       (Owner.request_scheduled_turn owner ~observed [selection] |> owner_ok)
+   | Replaced_consumer_handoff, Some old ->
+     ignore (Owner.begin_scheduled_turn_consumer owner |> owner_ok);
+     check bool "replacement owns new reservations" true
+       (Owner.request_scheduled_turn owner ~observed [selection; other] |> owner_ok);
+     Owner.end_scheduled_turn_consumer owner ~consumer |> owner_ok;
+     Owner.release_scheduled_turn owner ~handoff:old |> owner_ok
+   | Paused_handoff, _ ->
+     Owner.apply_meta owner (Pause
+       { reason = Keeper_latched_reason.Operator_paused { operator_actor = Grpc_directive }
+       ; updated_at = "pause-before-source" }) |> owner_ok |> ignore
+   | _ -> ());
+  let captured = owner_ok (Owner.scheduled_turn_handoff owner) in
+  Eio.Promise.resolve resolve_release ();
+  (* The callback is inside Child_finished. The following mailbox read is a
+     barrier after its settlement, without a timing deadline or polling loop. *)
+  Eio.Promise.await settled;
+  ignore (owner_ok (Owner.scheduled_turn_handoff owner));
+  let should_admit = match case with
+    | Checkpoint_handoff | Natural_completion_handoff | Scoped_release_handoff
+    | Replaced_consumer_handoff -> true
+    | Withdrawn_handoff | Reinserted_handoff | Unavailable_handoff | Failed_chat_handoff
+    | Unconfirmed_checkpoint_handoff | Failed_listener_handoff | Missing_listener_handoff
+    | Paused_handoff | Ended_consumer_handoff -> false in
+  if should_admit then (
+    check (list string) "queued chat cannot reclaim the reserved slot" ["chat"] !order;
+    (match Owner.run_autonomous_if_idle owner (fun () -> fail "generic caller stole the source slot") with
+     | Ok (`Busy _) -> () | _ -> fail "generic observation changed reservation");
+    let fresh = [selection; other] in
+    (match Owner.run_scheduled_if_idle owner ~handoff:captured ~sources:(Ok fresh) (fun sources ->
+       let expected = if case = Scoped_release_handoff then other else selection in
+       check int "only the original surviving cohort is prioritized"
+         (if case = Replaced_consumer_handoff then 2 else 1) (List.length sources);
+       check bool "exact cohort is preserved despite additions" true
+         (Keeper_scheduled_turn_handoff.same_selection expected (List.hd sources));
+       record "source") with
+     | Ok (`Ran ()) -> () | _ -> fail "the source did not receive the next slot");
+    ignore (await_terminal owner next 1_000);
+    ignore (await_terminal owner first 1_000);
+    check (list string) "one source slot then fresh chat and original continuation"
+      (if case = Natural_completion_handoff then ["chat"; "source"; "fresh"]
+       else ["chat"; "source"; "fresh"; "resumed"]) !order;
+    check int "reservation itself delivers the release wake" 1 !wakes;
+    check bool "old child cannot reserve a later slot" false
+      (owner_ok (Owner.request_scheduled_turn owner ~observed [selection])))
+  else (
+    let observation = match case with
+      | Unavailable_handoff -> Error "durable queue read unavailable"
+      | Reinserted_handoff -> Ok [scheduled_selection ~revision:99L "occurrence-handoff"]
+      | Withdrawn_handoff -> Ok []
+      | _ -> Ok [selection] in
+    (match Owner.run_scheduled_if_idle owner ~handoff:captured ~sources:observation (fun sources ->
+       check int "unreserved inputs acquire no source priority" 0 (List.length sources)) with
+     | Ok (`Ran () | `Busy _) -> () | _ -> fail "refused handoff escaped its normal lifecycle");
+    check bool "stale, paused or failed handoff releases its scoped reservation" true
+      (Option.is_none (owner_ok (Owner.scheduled_turn_handoff owner)));
+    check bool "no failed handoff dispatches source work" false (List.mem "source" !order));
+  ignore (Owner.begin_stopping owner |> owner_ok)
+;;
+
 let test_input_writer_is_bound_to_child_and_predecessor () =
   Eio_main.run @@ fun _env -> Eio.Switch.run @@ fun sw ->
   let meta = make_meta "input-writer" in
@@ -5890,7 +6078,34 @@ let test_input_writer_is_bound_to_child_and_predecessor () =
 let () =
   run
     "keeper owner"
-    [ ( "input ownership", [test_case "writer binds child, lane and exact predecessor" `Quick
+    [ ( "scheduled source handoff", [
+        test_case "consumer termination releases additions and rejects late registration" `Quick
+          (test_scheduled_source_handoff Ended_consumer_handoff)
+      ; test_case "old consumer cleanup cannot erase replacement epoch" `Quick
+          (test_scheduled_source_handoff Replaced_consumer_handoff)
+      ; test_case "checkpoint yields to source ahead of queued chat" `Quick
+          (test_scheduled_source_handoff Checkpoint_handoff)
+      ; test_case "text-only chat reserves source at natural completion" `Quick
+          (test_scheduled_source_handoff Natural_completion_handoff)
+      ; test_case "withdrawn source releases handoff" `Quick
+          (test_scheduled_source_handoff Withdrawn_handoff)
+      ; test_case "new source incarnation cannot inherit old reservation" `Quick
+          (test_scheduled_source_handoff Reinserted_handoff)
+      ; test_case "unavailable queue releases source priority" `Quick
+          (test_scheduled_source_handoff Unavailable_handoff)
+      ; test_case "late scoped release preserves newly added source" `Quick
+          (test_scheduled_source_handoff Scoped_release_handoff)
+      ; test_case "failed chat releases source reservation" `Quick
+          (test_scheduled_source_handoff Failed_chat_handoff)
+      ; test_case "unconfirmed checkpoint settlement releases reservation" `Quick
+          (test_scheduled_source_handoff Unconfirmed_checkpoint_handoff)
+      ; test_case "failed release listener restores chat admission" `Quick
+          (test_scheduled_source_handoff Failed_listener_handoff)
+      ; test_case "missing release listener cannot reserve a slot" `Quick
+          (test_scheduled_source_handoff Missing_listener_handoff)
+      ; test_case "pause wins over scheduled reservation" `Quick
+          (test_scheduled_source_handoff Paused_handoff) ] )
+    ; ( "input ownership", [test_case "writer binds child, lane and exact predecessor" `Quick
           test_input_writer_is_bound_to_child_and_predecessor] )
     ; ( "retry_deadline_rearm",
         [ test_case "earlier deadline replaces an armed later wake" `Quick

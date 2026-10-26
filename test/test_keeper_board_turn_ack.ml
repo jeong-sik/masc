@@ -205,6 +205,7 @@ data: [DONE]
     | _ -> failwith "expected one durable Board stimulus" in
   let shared_context = Agent_core.Context.create () in
   let cycle meta = Keeper_heartbeat_loop.run_keepalive_unified_turn
+      ~scheduled_handoff:None ~on_handoff_observed:ignore
     ~wake:Keeper_world_observation.Attention_wake ~ctx ~registry_entry
     ~meta_after_triage:meta
     ~pending_board_events:[] ~stop:(Atomic.make false) ~proactive_warmup_elapsed:true

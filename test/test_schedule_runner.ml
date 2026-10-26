@@ -1336,7 +1336,21 @@ let test_pending_settlements_replay_only_original_store_decision () =
     let staging, first = seed_pending_rejection ~clock:(fun () -> 301.0) config request rejection in
     (match (List.hd first.settlement_errors).failure with
      | Store_settlement_error (Schedule_store.Persistence_failed _) -> ()
-     | Finish_clock_raised _ | Store_settlement_raised _ | Store_settlement_error _ ->
+     | Finish_clock_raised _ | Store_settlement_raised _
+     | Store_settlement_error
+         ( Schedule_store.Schedule_already_exists
+         | Schedule_store.Schedule_not_found
+         | Schedule_store.Not_schedule_owner _
+         | Schedule_store.Invalid_initial_status _
+         | Schedule_store.Transition_refused _
+         | Schedule_store.Changed_due_already_past _
+         | Schedule_store.Interval_below_runner_tick _
+         | Schedule_store.Running_wake_absent _
+         | Schedule_store.Running_wake_settled _
+         | Schedule_store.Schedule_not_due_candidate
+         | Schedule_store.Running_attempt_superseded _
+         | Schedule_store.Running_attempt_unavailable _
+         | Schedule_store.Corrupt_ledger _ ) ->
        fail "fixture did not reach a real primary settlement write failure");
     Unix.rmdir staging;
     let calls = ref [] in
@@ -1421,7 +1435,8 @@ let test_pending_stamp_and_input_survive_later_tick_errors () =
       ~pending_settlements:unstamped.pending_settlements
       ~retention_days:Schedule_store.terminal_schedule_retention_days with
    | Error ({ error = Tick_raised _; _ } as failure) -> failure
-   | Error failure -> fail ("fixture did not reach the pre-start exception: " ^ tick_failure_to_string failure)
+   | Error ({ error = (Service_error _ | Signal_store_error _); _ } as failure) ->
+     fail ("fixture did not reach the pre-start exception: " ^ tick_failure_to_string failure)
    | Ok _ -> fail "pre-start exception did not produce a typed failure envelope" in
   check int "failure envelope retains the newly observed stamp" 1 (List.length failure.pending_settlements);
   check int "failure envelope retains the actual earlier store failure" 1 (List.length failure.settlement_errors);
@@ -1458,7 +1473,21 @@ let test_pending_read_error_does_not_block_unrelated_due_work () =
   check int "unavailable old authority remains pending" 1 (List.length result.pending_settlements);
   (match (List.hd result.settlement_errors).failure with
    | Store_settlement_error (Schedule_store.Running_attempt_unavailable _) -> ()
-   | Finish_clock_raised _ | Store_settlement_raised _ | Store_settlement_error _ ->
+   | Finish_clock_raised _ | Store_settlement_raised _
+   | Store_settlement_error
+       ( Schedule_store.Schedule_already_exists
+       | Schedule_store.Schedule_not_found
+       | Schedule_store.Not_schedule_owner _
+       | Schedule_store.Invalid_initial_status _
+       | Schedule_store.Transition_refused _
+       | Schedule_store.Changed_due_already_past _
+       | Schedule_store.Interval_below_runner_tick _
+       | Schedule_store.Running_wake_absent _
+       | Schedule_store.Running_wake_settled _
+       | Schedule_store.Schedule_not_due_candidate
+       | Schedule_store.Running_attempt_superseded _
+       | Schedule_store.Persistence_failed _
+       | Schedule_store.Corrupt_ledger _ ) ->
      fail "legacy authority failure was hidden or cleared");
   Schedule_runner_status.reset_for_test ();
   Fun.protect ~finally:Schedule_runner_status.reset_for_test @@ fun () ->

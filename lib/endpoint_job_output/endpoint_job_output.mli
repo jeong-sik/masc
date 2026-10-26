@@ -37,10 +37,14 @@ val read : t -> offset:int64 -> max_bytes:int -> (chunk, error) result
     May return less than requested capacity; reads use bounded transfer buffers
     while leaving all bytes retrievable. A growing extent is not completion. *)
 module For_testing : sig
+  type metadata_operation = Open_recovery | Publish of string
+  type metadata_stage = Waiting | Acquired
   val start :
     after_chunk:(unit -> unit) ->
+    on_metadata:(metadata_operation -> metadata_stage -> unit) ->
     sw:Eio.Switch.t -> fs:Eio.Fs.dir_ty Eio.Path.t -> owner:L.t -> stream:P.stream ->
     source:_ Eio.Flow.source -> (t, error) result
   (** [after_chunk] runs after each actual file write and before further capture
-      or EOF sealing, allowing deterministic filesystem interleavings. *)
+      or EOF sealing. [on_metadata] observes an actual owner-lock acquisition;
+      [Acquired] runs inside that lock before the specified Fs operation. *)
 end

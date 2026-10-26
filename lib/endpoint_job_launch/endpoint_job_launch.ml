@@ -21,10 +21,11 @@ let error_to_string = function
 
 type activation = Requested | Held of error
 type t = { target : R.launch_target; group : G.Group.t; child : G.t; activation : activation
-  ; storage : Eio.Fs.dir_ty Eio.Path.t }
+  ; storage : Eio.Fs.dir_ty Eio.Path.t; publication_lock : Eio.Mutex.t }
 let activation t = t.activation
 let original t = P.original ~binding:t.target.binding ~admission_id:t.target.admission_id
 let storage t = t.storage
+let with_storage_publication t f = Eio.Mutex.use_ro t.publication_lock f
 let rendezvous_leaf = "launch-rendezvous.json"
 let activation_leaf = "activation-intent.json"
 
@@ -95,7 +96,7 @@ let launch_with_hook ~after_rendezvous ~sw ~fs ~cgroup_parent_path ~(execution :
       Eio.Switch.check sw;
       G.activate child |> process in
     let activation=match activate () with Ok () -> Requested | Error e -> Held e in
-    Ok {target;group=tree;child;activation;storage})
+    Ok {target;group=tree;child;activation;storage;publication_lock=Eio.Mutex.create ()})
 
 let cancel_with_hook ~after_intent t =
   let* committed=R.request_cancel t.target.original_record ~confirmed_admission_id:t.target.admission_id

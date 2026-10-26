@@ -209,7 +209,8 @@ let pipe_launch ?input ?after_chunk ~sw ~env fixture permit =
   let owner=Eio_unix.Fd.use_exn "original stdout" (Eio_unix.Resource.fd writer)
     (fun fd -> start ?input ~output:fd ~sw ~env fixture permit) in
   Eio.Flow.close writer;
-  let capture=match after_chunk with None -> O.start | Some after_chunk -> O.For_testing.start ~after_chunk in
+  let capture=match after_chunk with None -> O.start | Some after_chunk ->
+    O.For_testing.start ~after_chunk ~on_metadata:(fun _ _ -> ()) in
   let captured=capture ~sw ~fs:env#fs ~owner ~stream:P.Stdout ~source |> output in
   owner,captured
 let all_output captured (seal : O.seal) =
@@ -247,6 +248,66 @@ let complete_binary_output_is_durably_sealed = fixture (fun ~env ~sw:_ ~store fi
    | Error _ | Ok _ -> Alcotest.fail "existing spool was adopted or overwritten");
   Alcotest.(check string) "duplicate capture preserves actual complete original" expected
     (read (leaf fixture binding "stdout.bin"))))
+
+let output_metadata_waits_only_for_its_original_owner = fixture (fun ~env ~sw:_ ~store fixture ->
+  Eio.Switch.run (fun sw ->
+    let stdout,out=Eio_unix.pipe sw and stderr,err=Eio_unix.pipe sw in
+    let _,permit=prepare store fixture "05" "printf stdout; printf stderr >&2" in
+    let owner=Eio_unix.Fd.use_exn "original stdout" (Eio_unix.Resource.fd out) (fun out ->
+      Eio_unix.Fd.use_exn "original stderr" (Eio_unix.Resource.fd err) (fun err ->
+        start ~output:out ~error_output:err ~sw ~env fixture permit)) in
+    Eio.Flow.close out;Eio.Flow.close err;
+    let entered,signal=Eio.Promise.create () and resume,release=Eio.Promise.create () in
+    let unblock ()=if Eio.Promise.peek resume=None then Eio.Promise.resolve release () in
+    Fun.protect ~finally:unblock (fun () ->
+      let captured=O.For_testing.start ~sw ~fs:env#fs ~owner ~stream:P.Stdout ~source:stdout
+        ~after_chunk:(fun () -> ()) ~on_metadata:(fun operation stage ->
+          match operation,stage with
+          | O.For_testing.Publish "stdout.seal.json",O.For_testing.Acquired ->
+            Eio.Promise.resolve signal ();Eio.Promise.await resume
+          | Open_recovery,Waiting | Open_recovery,Acquired | Publish _,Waiting | Publish _,Acquired -> ()) |> output in
+      Eio.Promise.await entered;
+      let exception Cancel_waiter in
+      let waiting,arrived=Eio.Promise.create () in
+      (match Eio.Switch.run (fun waiter_sw ->
+        Eio.Fiber.fork ~sw:waiter_sw (fun () ->
+          ignore (O.For_testing.start ~sw:waiter_sw ~fs:env#fs ~owner ~stream:P.Stderr ~source:stderr
+            ~after_chunk:(fun () -> ()) ~on_metadata:(fun operation stage ->
+              match operation,stage with
+              | O.For_testing.Open_recovery,O.For_testing.Waiting -> Eio.Promise.resolve arrived ()
+              | Open_recovery,Acquired | Publish _,Waiting | Publish _,Acquired -> ()) |> output));
+        Eio.Promise.await waiting;
+        Eio.Switch.fail waiter_sw Cancel_waiter) with
+       | () -> Alcotest.fail "queued metadata cancellation did not propagate"
+       | exception Cancel_waiter -> ());
+      let waiting,arrived=Eio.Promise.create () and errors,finished=Eio.Promise.create () in
+      let acquired=ref false in
+      Eio.Fiber.fork ~sw (fun () ->
+        let errors=O.For_testing.start ~sw ~fs:env#fs ~owner ~stream:P.Stderr ~source:stderr
+          ~after_chunk:(fun () -> ()) ~on_metadata:(fun operation stage ->
+            match operation,stage with
+            | O.For_testing.Open_recovery,O.For_testing.Waiting -> Eio.Promise.resolve arrived ()
+            | Open_recovery,Acquired -> acquired:=true
+            | Publish _,Waiting | Publish _,Acquired -> ()) |> output in
+        Eio.Promise.resolve finished errors);
+      Eio.Promise.await waiting;
+      check "same original stderr reached metadata acquisition and waits for held stdout seal" (not !acquired);
+      check "queued stderr has not returned a false successful capture" (Eio.Promise.peek errors=None);
+      let _,next=prepare store fixture "07" "printf independent" in
+      let next_owner,next_output=pipe_launch ~sw ~env fixture next in
+      let next_seal=O.await_sealed next_output |> output in
+      exit 0 (L.await_quiescent next_owner |> get);
+      Alcotest.(check string) "another actual owner seals output while the first metadata lock is held"
+        "independent" (all_output next_output next_seal);
+      check "another owner's completion never releases the original owner's metadata lock" (not !acquired);
+      unblock ();
+      let errors=Eio.Promise.await errors in
+      let sealed=O.await_sealed captured |> output and error_seal=O.await_sealed errors |> output in
+      exit 0 (L.await_quiescent owner |> get);
+      check "queued stderr progressed after exact original owner released its publication" !acquired;
+      Alcotest.(check string) "stdout retained through controlled metadata overlap" "stdout" (all_output captured sealed);
+      Alcotest.(check string) "stderr retained after cancellation of a previous queued metadata attempt"
+        "stderr" (all_output errors error_seal))))
 
 let output_observer_cancel_preserves_capture_and_child = fixture (fun ~env ~sw:_ ~store fixture ->
   let input,writer=Unix.pipe ~cloexec:true () in let writer_open=ref true in
@@ -366,6 +427,7 @@ let () =
       "wait cancellation and original authority before tree kill",wait_and_cancel_require_original_authority;
       "unavailable boundaries never fall back to workspace execution",unavailable_boundaries;
       "complete binary output is durably sealed and not overwritten",complete_binary_output_is_durably_sealed;
+      "output metadata queues by actual owner and survives waiter cancellation",output_metadata_waits_only_for_its_original_owner;
       "output observer cancellation preserves later original bytes",output_observer_cancel_preserves_capture_and_child;
       "failed seal stays unavailable while another job progresses",failed_seal_is_not_completion_and_does_not_block_other_job;
       "moved and replaced original spool never seals",output_attachment_change_never_seals `Move_and_replace;

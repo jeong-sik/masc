@@ -25,6 +25,8 @@ type t = {
   done_ : (seal,error) result Eio.Promise.t;
 }
 type chunk = { data : string; extent : P.extent }
+type metadata_operation = Open_recovery | Publish of string
+type metadata_stage = Waiting | Acquired
 (* Transfer-buffer size only. Neither total output nor execution is capped. *)
 let buffer_bytes = 65536
 let cpu f = Domain_pool_ref.submit_cpu_or_inline f
@@ -48,26 +50,31 @@ let with_lane registry stream f =
   | Lane_release_failed {value;release_failure} ->
     let detail=Fs_compat.Publication_recovery.lane_release_failure_to_string release_failure in
     Error (Recovery_failed (match value with Ok () -> detail | Error e -> error_to_string e ^ "; " ^ detail))
-let publish registry storage ~root_stat ~root_path stream ~leaf ~permissions content =
+let with_metadata owner on_metadata operation f =
+  on_metadata operation Waiting;
+  L.with_storage_publication owner (fun () -> on_metadata operation Acquired;f ())
+let publish owner on_metadata registry storage ~root_stat ~root_path stream ~leaf ~permissions content =
   let* target=Fs_compat.capability_publication_target ~allowed_root_path:root_path
       ~allowed_root_device:root_stat.Eio.File.Stat.dev ~allowed_root_inode:root_stat.ino
       ~parent_components:[] ~target_leaf:leaf ~permissions
     |> Result.map_error (fun e -> Recovery_failed (Fs_compat.capability_publication_target_error_to_string e)) in
-  with_lane registry stream (fun recovery ->
-    Fs_compat.create_capability_file_exclusive ~recovery ~parent:storage ~target content
-    |> Result.map_error (fun e -> Publication_failed e))
+  with_metadata owner on_metadata (Publish leaf) (fun () ->
+    with_lane registry stream (fun recovery ->
+      Fs_compat.create_capability_file_exclusive ~recovery ~parent:storage ~target content
+      |> Result.map_error (fun e -> Publication_failed e)))
 
-let start_with_hook ~after_chunk ~sw ~fs ~owner ~stream ~source =
+let start_with_hook ~after_chunk ~on_metadata ~sw ~fs ~owner ~stream ~source =
   Eio.Switch.check sw;
   let storage=L.storage owner in
   let* root_stat=io (fun () -> Eio.Path.stat ~follow:true storage) in
   let* ()=if root_stat.kind=`Directory && root_stat.uid=Int64.of_int (Unix.geteuid ())
       && root_stat.perm land 0o7777=0o700 then Ok () else Error Invalid_storage in
   let* root_path=io (fun () -> Eio.Path.native_exn storage) in
-  let* recovery=Fs_compat.Publication_recovery.open_registry ~sw ~fs ~registry_root:storage
-    |> Result.map_error (fun e -> Recovery_failed (Fs_compat.Publication_recovery.registry_error_to_string e)) in
+  let* recovery=with_metadata owner on_metadata Open_recovery (fun () ->
+    Fs_compat.Publication_recovery.open_registry ~sw ~fs ~registry_root:storage
+    |> Result.map_error (fun e -> Recovery_failed (Fs_compat.Publication_recovery.registry_error_to_string e))) in
   let leaf=tag stream ^ ".bin" in
-  let* ()=publish recovery storage ~root_stat ~root_path stream ~leaf ~permissions:0o600 "" in
+  let* ()=publish owner on_metadata recovery storage ~root_stat ~root_path stream ~leaf ~permissions:0o600 "" in
   let* expected=io (fun () -> Eio.Path.stat ~follow:false Eio.Path.(storage / leaf)) in
   let* file=io (fun () -> Eio.Path.open_out ~sw ~create:`Never Eio.Path.(storage / leaf)) in
   let* actual=io (fun () -> Eio.File.stat file) in
@@ -102,7 +109,7 @@ let start_with_hook ~after_chunk ~sw ~fs ~owner ~stream ~source =
       "sha256",`String hash;"file_device",`String (Int64.to_string actual.dev);
       "file_inode",`String (Int64.to_string actual.ino)])) in
     let* ()=validate_attachment byte_length in
-    let* ()=publish recovery storage ~root_stat ~root_path stream
+    let* ()=publish owner on_metadata recovery storage ~root_stat ~root_path stream
       ~leaf:(tag stream ^ ".seal.json") ~permissions:0o400 content in
     let* ()=validate_attachment byte_length in
     Ok {byte_length;sha256} in
@@ -135,9 +142,11 @@ let start_with_hook ~after_chunk ~sw ~fs ~owner ~stream ~source =
   Ok t
 
 let start ~sw ~fs ~owner ~stream ~source =
-  start_with_hook ~after_chunk:(fun () -> ()) ~sw ~fs ~owner ~stream ~source
+  start_with_hook ~after_chunk:(fun () -> ()) ~on_metadata:(fun _ _ -> ()) ~sw ~fs ~owner ~stream ~source
 
 module For_testing = struct
+  type nonrec metadata_operation = metadata_operation = Open_recovery | Publish of string
+  type nonrec metadata_stage = metadata_stage = Waiting | Acquired
   let start = start_with_hook
 end
 

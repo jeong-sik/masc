@@ -2763,8 +2763,8 @@ capabilities_base_by_identity_kind = { openai_compat = "ollama_cloud_v1" }
 base_url = "https://ollama.com"
 request_path = "/api/chat"
 auth = "api-key"
-# Explicit total /api/tags response deadline for this cloud endpoint;
-# generation and exact-output deadlines remain separate.
+# Match the deployment's explicit 600-second Cloud cold-start budget for the
+# complete /api/tags response, independently of generation and Exact-output.
 discovery_timeout_s = 600.0
 capabilities_base = "ollama_cloud"
 

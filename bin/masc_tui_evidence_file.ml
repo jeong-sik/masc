@@ -41,10 +41,9 @@ let save ~fs ~directory ~directory_name ~path t =
     Eio.Path.with_open_dir Eio.Path.(fs / directory) (fun parent ->
       let destination = Eio.Path.(parent / directory_name) in
       Eio.Path.mkdir ~perm:0o700 destination;
-      Eio.Path.with_open_dir destination (fun parent ->
-        Fs_compat.create_capability_file_exclusive ~parent ~leaf:t.name
-          ~permissions:0o600 t.contents))
-    |> Result.map_error (fun error -> path ^ ": " ^ Fs_compat.capability_write_error_to_string error)
+      Fs_compat.create_file_exclusive ~fs ~owner:"tui-evidence-export"
+        ~path ~permissions:0o600 t.contents)
+    |> Result.map_error (fun detail -> path ^ ": " ^ detail)
   with
   | Eio.Io _ as ex -> Error (path ^ ": " ^ Format.asprintf "%a" Eio.Exn.pp ex)
   | Sys_error detail -> Error (path ^ ": " ^ detail)

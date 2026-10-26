@@ -1156,10 +1156,9 @@ let target_input_script = {js|async function nativeTargetInput(page, args) {
     }
   } catch (error) {
     failure = reason(error);
-    if (args.action === "drag_to") {
-      try { await page.mouse.up(); pointerReleased = true; }
-      catch (releaseError) { failure += "; input release is unconfirmed: " + reason(releaseError); }
-    }
+    // The SDK owns this gesture and its release attempts. mouse.up() can
+    // swallow a dialog interruption as void; another release could also
+    // duplicate the SDK's original mouseup. Keep uncertainty on failure.
   }
   return {urlBefore, receipt, error: failure, pointerReleased};
 }|js}

@@ -644,9 +644,11 @@ let get_sync_deadline_covers_stalled_body () =
     let endpoint = Printf.sprintf "http://127.0.0.1:%d/api/tags" port in
     expect_timeout clock (fun () ->
       Http_client.get_sync ~sw ~net:env#net ~clock ~timeout_s:4.0
-        ~url:endpoint ~headers:[] ())
+        ~url:endpoint ~headers:[] ());
+    Eio.Switch.fail sw Exit
   with
   | Unix.Unix_error ((Unix.EPERM | Unix.EADDRINUSE), "bind", _) -> Alcotest.skip ()
+  | Exit -> ()
 
 let ollama_auto_without_declared_deadline_does_not_probe () =
   let tag_requests = ref 0 in

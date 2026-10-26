@@ -57,7 +57,7 @@ let publish registry storage ~root_stat ~root_path stream ~leaf ~permissions con
     Fs_compat.create_capability_file_exclusive ~recovery ~parent:storage ~target content
     |> Result.map_error (fun e -> Publication_failed e))
 
-let start ~sw ~fs ~owner ~stream ~source =
+let start_with_hook ~after_chunk ~sw ~fs ~owner ~stream ~source =
   Eio.Switch.check sw;
   let storage=L.storage owner in
   let* root_stat=io (fun () -> Eio.Path.stat ~follow:true storage) in
@@ -71,23 +71,29 @@ let start ~sw ~fs ~owner ~stream ~source =
   let* expected=io (fun () -> Eio.Path.stat ~follow:false Eio.Path.(storage / leaf)) in
   let* file=io (fun () -> Eio.Path.open_out ~sw ~create:`Never Eio.Path.(storage / leaf)) in
   let* actual=io (fun () -> Eio.File.stat file) in
-  let* ()=if expected.kind=`Regular_file && actual.kind=`Regular_file
-      && expected.dev=actual.dev && expected.ino=actual.ino && actual.nlink=1L
-      && expected.size=Optint.Int63.zero && actual.size=Optint.Int63.zero
-      && actual.uid=root_stat.uid && actual.perm land 0o7777=0o600
-    then Ok () else Error Invalid_storage in
+  let valid_file byte_length (stat : Eio.File.Stat.t) =
+    stat.kind=`Regular_file && stat.dev=actual.dev && stat.ino=actual.ino
+    && stat.nlink=1L && stat.uid=root_stat.uid && stat.perm land 0o7777=0o600
+    && Optint.Int63.to_int64 stat.size=byte_length in
+  let validate_attachment byte_length =
+    let* root=io (fun () -> Eio.Path.stat ~follow:false storage) in
+    let* held=io (fun () -> Eio.File.stat file) in
+    let* canonical=io (fun () -> Eio.Path.stat ~follow:false Eio.Path.(storage / leaf)) in
+    if root.kind=`Directory && root.dev=root_stat.dev && root.ino=root_stat.ino
+        && root.uid=root_stat.uid && root.perm land 0o7777=0o700
+        && valid_file byte_length held && valid_file byte_length canonical
+      then Ok () else Error Invalid_storage in
+  let* ()=if valid_file 0L expected && valid_file 0L actual
+    then validate_attachment 0L else Error Invalid_storage in
   let done_,resolve=Eio.Promise.create () in
   let t={file;state=Atomic.make (Growing 0L);done_} in
   let finish value =
     Atomic.set t.state (match value with Ok seal -> Sealed seal | Error e -> Unavailable e);
     Eio.Promise.resolve resolve value in
   let seal byte_length context =
+    let* ()=validate_attachment byte_length in
     let* ()=io (fun () -> Eio.File.sync file) in
-    let* sealed_stat=io (fun () -> Eio.File.stat file) in
-    let* ()=if sealed_stat.dev=actual.dev && sealed_stat.ino=actual.ino
-        && sealed_stat.nlink=1L && sealed_stat.uid=actual.uid
-        && Optint.Int63.to_int64 sealed_stat.size=byte_length
-      then Ok () else Error Invalid_storage in
+    let* ()=validate_attachment byte_length in
     let* original=P.request_to_json (P.Inspect (L.original owner)) |> Result.map_error (fun e -> Codec_error e) in
     let hash=cpu (fun () -> Digestif.SHA256.(to_hex (get context))) in
     let* sha256=P.Sha256.of_string hash |> Result.map_error (fun _ -> Capture_failed) in
@@ -95,8 +101,10 @@ let start ~sw ~fs ~owner ~stream ~source =
       "stream",`String (tag stream);"byte_length",`String (Int64.to_string byte_length);
       "sha256",`String hash;"file_device",`String (Int64.to_string actual.dev);
       "file_inode",`String (Int64.to_string actual.ino)])) in
+    let* ()=validate_attachment byte_length in
     let* ()=publish recovery storage ~root_stat ~root_path stream
       ~leaf:(tag stream ^ ".seal.json") ~permissions:0o400 content in
+    let* ()=validate_attachment byte_length in
     Ok {byte_length;sha256} in
   let buffer=Cstruct.create buffer_bytes in
   let rec capture byte_length context =
@@ -108,6 +116,7 @@ let start ~sw ~fs ~owner ~stream ~source =
       let* _=offset next in
       let part=Cstruct.sub buffer 0 n in
       Eio.File.pwrite_all file ~file_offset:position [part];
+      after_chunk ();
       let bytes=Cstruct.to_string part in
       let context=cpu (fun () -> Digestif.SHA256.feed_string context bytes) in
       Atomic.set t.state (Growing next);
@@ -124,6 +133,13 @@ let start ~sw ~fs ~owner ~stream ~source =
        let bt=Printexc.get_raw_backtrace () in finish (Error Capture_failed);Printexc.raise_with_backtrace ex bt);
     `Stop_daemon);
   Ok t
+
+let start ~sw ~fs ~owner ~stream ~source =
+  start_with_hook ~after_chunk:(fun () -> ()) ~sw ~fs ~owner ~stream ~source
+
+module For_testing = struct
+  let start = start_with_hook
+end
 
 let read t ~offset:requested ~max_bytes =
   let* observed=extent t in

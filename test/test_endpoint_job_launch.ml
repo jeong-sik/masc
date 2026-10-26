@@ -204,12 +204,13 @@ let unavailable_boundaries () =
      Effect,P.Isolated_job isolated,None]
 
 let output value = value |> Result.map_error O.error_to_string |> require
-let pipe_launch ?input ~sw ~env fixture permit =
+let pipe_launch ?input ?after_chunk ~sw ~env fixture permit =
   let source,writer=Eio_unix.pipe sw in
   let owner=Eio_unix.Fd.use_exn "original stdout" (Eio_unix.Resource.fd writer)
     (fun fd -> start ?input ~output:fd ~sw ~env fixture permit) in
   Eio.Flow.close writer;
-  let captured=O.start ~sw ~fs:env#fs ~owner ~stream:P.Stdout ~source |> output in
+  let capture=match after_chunk with None -> O.start | Some after_chunk -> O.For_testing.start ~after_chunk in
+  let captured=capture ~sw ~fs:env#fs ~owner ~stream:P.Stdout ~source |> output in
   owner,captured
 let all_output captured (seal : O.seal) =
   let buffer=Buffer.create 128 in
@@ -287,6 +288,44 @@ let failed_seal_is_not_completion_and_does_not_block_other_job = fixture (fun ~e
     let _,next=prepare store fixture "07" "exit 9" in
     exit 9 (Eio.Switch.run (fun next_sw -> start ~sw:next_sw ~env fixture next |> L.await_quiescent |> get))))
 
+let output_attachment_change_never_seals change = fixture (fun ~env ~sw:_ ~store fixture ->
+  Eio.Switch.run (fun sw ->
+    let binding,permit=prepare store fixture "05" "printf original" in
+    let spool=leaf fixture binding "stdout.bin" in
+    let moved=Filename.concat fixture.root "moved-original.bin" in
+    let linked=Filename.concat fixture.root "linked-original.bin" in
+    let changed=ref false in
+    let owner,captured=pipe_launch ~sw ~env fixture permit ~after_chunk:(fun () ->
+      if not !changed then (
+        changed:=true;
+        match change with
+        | `Move_and_replace ->
+          Unix.rename spool moved;
+          Out_channel.with_open_bin spool (fun oc -> output_string oc "replacement");Unix.chmod spool 0o600;
+          Alcotest.(check int) "moved original retains one link, so FD-only validation cannot detect detachment"
+            1 (Unix.stat moved).st_nlink
+        | `Symlink_to_original -> Unix.rename spool moved;Unix.symlink moved spool
+        | `Extra_link -> Unix.link spool linked
+        | `Changed_file_mode -> Unix.chmod spool 0o640
+        | `Changed_storage_mode -> Unix.chmod (Filename.dirname spool) 0o750)) in
+    (match O.await_sealed captured with
+     | Error O.Invalid_storage -> ()
+     | Error _ | Ok _ -> Alcotest.fail "changed original output attachment acquired a durable seal");
+    check "filesystem mutation ran after a real captured write" !changed;
+    exit 0 (L.await_quiescent owner |> get);
+    check "changed attachment stays unavailable to extent consumers" (O.extent captured=Error O.Invalid_storage);
+    check "no seal manifest was published beside unverified output" (not (Sys.file_exists (leaf fixture binding "stdout.seal.json")));
+    let original=match change with `Move_and_replace | `Symlink_to_original -> moved
+      | `Extra_link | `Changed_file_mode | `Changed_storage_mode -> spool in
+    Alcotest.(check string) "all original bytes remain as failure evidence" "original" (read original);
+    (match change with
+     | `Move_and_replace -> Alcotest.(check string) "replacement bytes are never overwritten" "replacement" (read spool)
+     | `Symlink_to_original -> Alcotest.(check string) "symlink evidence is never replaced" moved (Unix.readlink spool)
+     | `Extra_link -> Alcotest.(check string) "extra link evidence remains" "original" (read linked)
+     | `Changed_file_mode | `Changed_storage_mode -> ());
+    let _,next=prepare store fixture "07" "exit 9" in
+    exit 9 (Eio.Switch.run (fun next_sw -> start ~sw:next_sw ~env fixture next |> L.await_quiescent |> get))))
+
 let output_owner_teardown_settles_external_observers = fixture (fun ~env ~sw:_ ~store fixture ->
   let input,writer=Unix.pipe ~cloexec:true () in
   Fun.protect ~finally:(fun () -> Unix.close input;Unix.close writer) (fun () ->
@@ -329,6 +368,11 @@ let () =
       "complete binary output is durably sealed and not overwritten",complete_binary_output_is_durably_sealed;
       "output observer cancellation preserves later original bytes",output_observer_cancel_preserves_capture_and_child;
       "failed seal stays unavailable while another job progresses",failed_seal_is_not_completion_and_does_not_block_other_job;
+      "moved and replaced original spool never seals",output_attachment_change_never_seals `Move_and_replace;
+      "symlink to detached original spool never seals",output_attachment_change_never_seals `Symlink_to_original;
+      "multiply linked original spool never seals",output_attachment_change_never_seals `Extra_link;
+      "changed original spool mode never seals",output_attachment_change_never_seals `Changed_file_mode;
+      "changed original storage mode never seals",output_attachment_change_never_seals `Changed_storage_mode;
       "owner teardown settles external output observers",output_owner_teardown_settles_external_observers] in
   Alcotest.run "Endpoint job launch" ["original supervisor",List.map
     (fun (name,test) -> Alcotest.test_case name `Quick test) cases]

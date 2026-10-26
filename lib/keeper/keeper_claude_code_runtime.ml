@@ -912,7 +912,7 @@ let run_without_lifecycle ~result_scope ~official_task_reference ~composed_conte
       }
     in
     let terminal_error = ref None in
-    let* host_dynamic_tools =
+    let* (host_dynamic_tools, _) =
       Host.dynamic_tools
         ~result_scope:None
         ~content_transport:Runtime_official_client_tool.Mcp
@@ -1011,7 +1011,7 @@ let run_without_lifecycle ~result_scope ~official_task_reference ~composed_conte
              effective_reasoning_effort)
         ()
     in
-    let* host_dynamic_tools =
+    let* (host_dynamic_tools, result_producer) =
       Host.dynamic_tools
         ~result_scope:(Some result_scope)
         ~base_path
@@ -1038,6 +1038,12 @@ let run_without_lifecycle ~result_scope ~official_task_reference ~composed_conte
         ~on_result_handoff:on_official_client_result_handoff
         ()
     in
+    let produced_results = ref None in
+    let close_delivery_frontier () =
+      if Option.is_none !produced_results then
+        produced_results := Option.map Keeper_client_tool_outbox.close_delivery_frontier result_producer
+    in
+    let natural_completion = ref false in
     let dynamic_tools =
       List.map (recording_effect_attempt ~effect_disposition) host_dynamic_tools
     in
@@ -1360,6 +1366,7 @@ let run_without_lifecycle ~result_scope ~official_task_reference ~composed_conte
                    ~turn_id
                    ~turn_count
                    ~updated_at:(Time_compat.now ())))
+             ~on_terminal_received:close_delivery_frontier
              ?on_stream_event ~on_input_observation
              client_config
              ~prompt
@@ -1453,6 +1460,7 @@ let run_without_lifecycle ~result_scope ~official_task_reference ~composed_conte
                  error;
            Error (claude_error_to_core_error error)
          | Ok turn ->
+           natural_completion := true;
            recovery_failure := Session_store.Protocol_failed;
            let expected_resumed =
              match session_mode with
@@ -1564,6 +1572,11 @@ let run_without_lifecycle ~result_scope ~official_task_reference ~composed_conte
       let* result = turn_result in
       let* () = Keeper_client_tool_outbox.settle_after_turn tool_outbox ~stop_reason:result.stop_reason
         |> Result.map_error internal_error in
+      let* () = match !natural_completion, !produced_results with
+        | true, Some delivered ->
+          Keeper_client_tool_outbox.settle_after_turn delivered ~stop_reason:result.stop_reason
+          |> Result.map_error internal_error
+        | false, _ | true, None -> Ok () in
       Ok result
     in
     let turn_result =

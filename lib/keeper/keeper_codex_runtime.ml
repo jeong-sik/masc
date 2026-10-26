@@ -1136,7 +1136,7 @@ let run_without_lifecycle ~result_scope ~official_task_reference ~composed_conte
       ; output_schema = None
       }
     in
-    let* host_dynamic_tools =
+    let* (host_dynamic_tools, _) =
       Host.dynamic_tools
         ~result_scope:None
         ~content_transport:Runtime_official_client_tool.Codex
@@ -1224,7 +1224,7 @@ let run_without_lifecycle ~result_scope ~official_task_reference ~composed_conte
                  requested_reasoning_effort)
             ())
     in
-    let* host_dynamic_tools =
+    let* (host_dynamic_tools, result_producer) =
       Host.dynamic_tools
         ~result_scope:(Some result_scope)
         ~base_path
@@ -1250,6 +1250,11 @@ let run_without_lifecycle ~result_scope ~official_task_reference ~composed_conte
         ?on_tool_boundary:on_official_client_tool_boundary
         ~on_result_handoff:on_official_client_result_handoff
         ()
+    in
+    let produced_results = ref None in
+    let close_delivery_frontier () =
+      if Option.is_none !produced_results then
+        produced_results := Option.map Keeper_client_tool_outbox.close_delivery_frontier result_producer
     in
     let dynamic_tools =
       List.map
@@ -1440,6 +1445,7 @@ let run_without_lifecycle ~result_scope ~official_task_reference ~composed_conte
           (match event with
            | Runtime_codex_app_server.Native_tool_started _
            | Native_tool_finished _ -> observe_effect_attempted ()
+           | Tool_delivery_closed _ -> close_delivery_frontier ()
            | Compaction_observed -> settled_held_context := []
            | Usage_reported { frame; _ } ->
              (* The final usage keeps only the newest request. A compaction
@@ -1449,7 +1455,7 @@ let run_without_lifecycle ~result_scope ~official_task_reference ~composed_conte
               | Context_window_filled _ -> settled_held_context := []
               | Counted { last = Request_usage _; _ } -> ())
            | Native_tool_progress _ | Turn_started _ | Text_delta _ | Thinking_delta _ | Text_completed _ | Thinking_completed _ | Dynamic_tool_started _
-           | Dynamic_tool_finished _ | Tool_delivery_closed _ | Elicitation_cancelled _
+           | Dynamic_tool_finished _ | Elicitation_cancelled _
            | Usage_windows_reported _ | Turn_finished _ -> ());
           Option.iter (fun observe -> observe event) observe_stream
         in
@@ -1687,6 +1693,10 @@ let run_without_lifecycle ~result_scope ~official_task_reference ~composed_conte
        in
        let* () = Keeper_client_tool_outbox.settle_after_turn tool_outbox ~stop_reason
          |> Result.map_error internal_error in
+       let* () = match !produced_results with
+         | None -> Ok ()
+         | Some delivered -> Keeper_client_tool_outbox.settle_after_turn delivered ~stop_reason
+           |> Result.map_error internal_error in
        let capture, _metrics =
          Runtime_observation.runtime_metrics_for_candidates ~runtime_id ~keeper_name ()
        in

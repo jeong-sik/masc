@@ -774,7 +774,7 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
              config.effort)
         ()
     in
-    let* dynamic_tools =
+    let* (dynamic_tools, result_producer) =
       Host.dynamic_tools
         ~result_scope:(Some result_scope)
         ~base_path
@@ -804,6 +804,12 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
         Host.finish_raw_error ~keeper_name raw_trace_run error;
         error)
     in
+    let produced_results = ref None in
+    let close_delivery_frontier () =
+      if Option.is_none !produced_results then
+        produced_results := Option.map Keeper_client_tool_outbox.close_delivery_frontier result_producer
+    in
+    let natural_completion = ref false in
     let dynamic_tools =
       List.map (antigravity_dynamic_tool ~observe_effect_attempted) dynamic_tools
     in
@@ -1086,6 +1092,7 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
                         Host.record_context_submission ~keeper_name ~raw_trace_run
                           ~runtime_profile:runtime_id ~client_turn_ordinal:turn_count
                           ~submission:(Runtime_antigravity.context_submission_to_json write) ())
+                      ~on_terminal_received:close_delivery_frontier
                       ~on_stream_event:stream.on_runtime_event
                       client_config
                       ~prompt))
@@ -1137,6 +1144,7 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
            | (Host.Repeated_tool_call _ | Host.Terminal_tool_boundary _), None ->
              settle_host_stop stop)
         | Ok (`Completed turn) ->
+          natural_completion := true;
           recovery_failure := Session_store.Protocol_failed;
           (match turn.trajectory_error with
            | None -> ()
@@ -1247,6 +1255,11 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
       let* result = turn_result in
       let* () = Keeper_client_tool_outbox.settle_after_turn tool_outbox ~stop_reason:result.stop_reason
         |> Result.map_error internal_error in
+      let* () = match !natural_completion, !produced_results with
+        | true, Some delivered ->
+          Keeper_client_tool_outbox.settle_after_turn delivered ~stop_reason:result.stop_reason
+          |> Result.map_error internal_error
+        | false, _ | true, None -> Ok () in
       Ok result
     in
     let turn_result =

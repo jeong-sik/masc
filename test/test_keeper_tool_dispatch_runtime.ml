@@ -6748,7 +6748,7 @@ let test_direct_execute_post_effect_artifact_failure_closes_official_client_loop
                   ~raw_trace_run:None
                   ()
               with
-              | Ok tools -> tools
+              | Ok (tools, _) -> tools
               | Error error -> fail (Agent_core.Error.to_string error)
             in
             let execute =
@@ -6833,7 +6833,7 @@ let test_direct_pre_effect_and_readonly_failures_remain_correction_capable () =
                   ~raw_trace_run:None
                   ()
               with
-              | Ok tools -> tools
+              | Ok (tools, _) -> tools
               | Error error -> fail (Agent_core.Error.to_string error)
             in
             let call name input =
@@ -6937,7 +6937,7 @@ let test_stale_spawn_handles_remain_correction_capable () =
                   ~raw_trace_run:None
                   ()
               with
-              | Ok tools -> tools
+              | Ok (tools, _) -> tools
               | Error error -> fail (Agent_core.Error.to_string error)
             in
             let call name input =
@@ -7524,7 +7524,7 @@ value = {surface="dashboard", content="must not run"}
           ~context:(Some (Agent_core.Context.create_sync ()))
           ~terminal_effect_state:bundle.terminal_effect_state ~terminal_error:(ref None)
           ~raw_trace_run:None () with
-          | Ok tools -> tools | Error error -> fail (Agent_core.Error.to_string error) in
+          | Ok (tools, _) -> tools | Error error -> fail (Agent_core.Error.to_string error) in
         let find name = match List.find_opt
           (fun (tool : Masc.Keeper_official_client_host.dynamic_tool) -> tool.name=name) projected with
           | Some tool -> tool | None -> fail ("missing materialized tool: " ^ name) in
@@ -7645,7 +7645,7 @@ id = "second"
           ~context:(Some (Agent_core.Context.create_sync ()))
           ~terminal_effect_state:bundle.terminal_effect_state ~terminal_error:(ref None)
           ~raw_trace_run:None () with
-          | Ok tools -> tools | Error error -> fail (Agent_core.Error.to_string error) in
+          | Ok (tools, _) -> tools | Error error -> fail (Agent_core.Error.to_string error) in
         let tool = match List.find_opt
           (fun (tool : Masc.Keeper_official_client_host.dynamic_tool) ->
              String.equal tool.name ("keeper_compose_" ^ name)) projected with
@@ -7715,7 +7715,7 @@ let test_terminal_composition_post_effect_failure_closes_official_client_loop ()
                   ~raw_trace_run:None
                   ()
               with
-              | Ok tools -> tools
+              | Ok (tools, _) -> tools
               | Error error -> fail (Agent_core.Error.to_string error)
             in
             let tool =
@@ -7836,7 +7836,7 @@ let test_terminal_composition_literal_input_failure_runs_no_node () =
                   ~raw_trace_run:None
                   ()
               with
-              | Ok tools -> tools
+              | Ok (tools, _) -> tools
               | Error error -> fail (Agent_core.Error.to_string error)
             in
             let tool =
@@ -8008,7 +8008,7 @@ default = "local.sample"
                   ~raw_trace_run:None
                   ()
               with
-              | Ok tools -> tools
+              | Ok (tools, _) -> tools
               | Error error -> fail (Agent_core.Error.to_string error)
             in
             let tool =
@@ -8134,7 +8134,7 @@ let test_terminal_composition_unknown_write_failure_closes_official_client_loop 
                   ~raw_trace_run:None
                   ()
               with
-              | Ok tools -> tools
+              | Ok (tools, _) -> tools
               | Error error -> fail (Agent_core.Error.to_string error)
             in
             let tool =
@@ -8313,7 +8313,7 @@ let test_write_then_unchanged_read_completes () =
                   ~raw_trace_run:None
                   ()
               with
-              | Ok tools -> tools
+              | Ok (tools, _) -> tools
               | Error error -> fail (Agent_core.Error.to_string error)
             in
             let tool =
@@ -10544,7 +10544,7 @@ let test_peer_delegate_schema_reaches_model_wires () =
           ~terminal_effect_state:bundle.terminal_effect_state
           ~terminal_error:(ref None) ~pre_tool_rejects:(ref []) ~raw_trace_run:None () in
       match dynamic with
-      | Ok [dynamic] -> check_schema "official-client dynamic definition" dynamic.input_schema
+      | Ok ([dynamic], _) -> check_schema "official-client dynamic definition" dynamic.input_schema
       | Ok _ -> fail "expected one official-client delegate definition"
       | Error error -> fail (Agent_core.Error.to_string error))
       ["actual Keeper bundle", bundled; "plain MASC bridge", plain])

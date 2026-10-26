@@ -1912,7 +1912,7 @@ let test_official_turn_keeps_tool_result_until_completion () =
        in
        let tool =
          match projected with
-         | Ok [tool] -> tool
+         | Ok ([tool], _) -> tool
          | Ok _ -> fail "expected one official-client tool"
          | Error error -> fail (Agent_core.Error.to_string error)
        in

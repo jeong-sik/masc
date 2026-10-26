@@ -1102,7 +1102,7 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
         ()
     in
     let terminal_error = ref None in
-    let* dynamic_tools =
+    let* (dynamic_tools, result_producer) =
       match
         Host.dynamic_tools
         ~result_scope:(Some result_scope)
@@ -1129,11 +1129,18 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
           ~on_result_handoff:on_official_client_result_handoff
           ()
       with
-      | Ok dynamic_tools -> Ok (List.map (muse_dynamic_tool ~observe_effect_attempted) dynamic_tools)
+      | Ok (dynamic_tools, result_producer) ->
+        Ok (List.map (muse_dynamic_tool ~observe_effect_attempted) dynamic_tools, result_producer)
       | Error error ->
         Host.finish_raw_error ~keeper_name raw_trace_run error;
         Error error
     in
+    let produced_results = ref None in
+    let close_delivery_frontier () =
+      if Option.is_none !produced_results then
+        produced_results := Option.map Keeper_client_tool_outbox.close_delivery_frontier result_producer
+    in
+    let natural_completion = ref false in
     let* claimed_session =
       match
         Session_store.claim_with_context_frontier
@@ -1464,7 +1471,9 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
                         ~submission:(Serve.context_submission_to_json submission) ())
                     ~on_stream_event:(fun event ->
                       (match event with
-                       | Serve.Turn_terminal_received terminal -> provider_terminal := Some terminal
+                       | Serve.Turn_terminal_received terminal ->
+                         close_delivery_frontier ();
+                         provider_terminal := Some terminal
                        (* A host stop settles with the model the calls ran
                           on, as a completed turn does. *)
                        | Serve.Model_call_reported { model; _ } ->
@@ -1593,6 +1602,7 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
            | (Host.Repeated_tool_call _ | Host.Terminal_tool_boundary _), None ->
              settle_host_stop stop)
         | Ok (`Completed (turn : Serve.turn_result)) ->
+          natural_completion := true;
           recovery_failure := Session_store.Protocol_failed;
           let* () =
             record_turn_identity ~session_id:turn.session_id ~turn_id:turn.turn_id
@@ -1705,6 +1715,11 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
       let* result = turn_result in
       let* () = Keeper_client_tool_outbox.settle_after_turn tool_outbox ~stop_reason:result.stop_reason
         |> Result.map_error internal_error in
+      let* () = match !natural_completion, !produced_results with
+        | true, Some delivered ->
+          Keeper_client_tool_outbox.settle_after_turn delivered ~stop_reason:result.stop_reason
+          |> Result.map_error internal_error
+        | false, _ | true, None -> Ok () in
       Ok result
     in
     match turn_result with

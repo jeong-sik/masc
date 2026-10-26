@@ -772,7 +772,7 @@ val dynamic_tools :
     (invocation:Agent_core.Tool_contract.Invocation.t -> content:string -> unit) ->
   raw_trace_run:Agent_core.Raw_trace.active_run option ->
   unit ->
-  (dynamic_tool list, Agent_core.Error.t) result
+  (dynamic_tool list * Keeper_client_tool_outbox.host_producer option, Agent_core.Error.t) result
 (** Project Agent Core tools onto one official-client turn.
 
     [Some result_scope] is the real runtime's enclosing switch. Its producers
@@ -792,11 +792,15 @@ val dynamic_tools :
     exact terminal evidence already stops the turn. Its errors are recorded in
     [terminal_error] and close the host loop without inventing a checkpoint.
     An existing terminal result takes priority over a callback stop.
-    With [base_path], the original result is durably retained under its own
-    host producer identity before a host stop is returned to the transport.
-    Retention failure records [terminal_error], so the runtime cannot settle
-    that stop as successful consumption. Calls without a host stop do not
-    enter this retention path.
+    With [base_path], every original result is durably retained under its
+    host producer identity before post-execution hooks and context injection.
+    The returned producer is [Some] exactly when tools and [base_path] exist;
+    it freezes physical response writes at the client's terminal boundary.
+    The result's [on_response_sent] marks only an unchanged original response.
+    Retention failure records [terminal_error] and a typed terminal failure,
+    so the runtime cannot settle it as successful consumption. Without
+    [base_path] no producer or durable result is created. Prevalidation omits
+    [base_path].
 
     [tool_approval] settles a [pre_tool_use] hook that answers
     [ElicitToolApproval], exactly as it does on AGENT_CORE's own tool loop --

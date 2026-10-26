@@ -152,7 +152,7 @@ let one_dynamic_tool
       ()
   in
   match projected with
-  | Ok [ tool ] -> tool, terminal_error
+  | Ok ([ tool ], _) -> tool, terminal_error
   | Ok _ -> fail "expected one projected dynamic tool"
   | Error error -> fail (Agent_core.Error.to_string error)
 ;;

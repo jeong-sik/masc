@@ -560,6 +560,9 @@ val run_turn :
   ?on_session_ready:(session_id:string -> (unit, string) result) ->
   ?on_turn_starting:(session_id:string -> (unit, string) result) ->
   ?on_turn_started:(session_id:string -> turn_id:string -> (unit, string) result) ->
+  ?on_terminal_received:(unit -> unit) ->
+  (* Called after the result's session/turn identity is validated, before any
+     result observers or state callbacks. It does not certify acceptance. *)
   ?on_stream_event:(stream_event -> unit) ->
   ?on_input_observation:(Runtime_claude_input_attribution.observation -> unit) ->
   (* Optional invocation-local ticket/write/response metadata, separate from

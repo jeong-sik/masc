@@ -206,6 +206,9 @@ val run_turn :
   ?on_spawned:(pid:int -> unit) ->
   ?on_prompt_sent:(unit -> unit) ->
   ?on_context_submission:(Runtime_official_client_write.t -> unit) ->
+  ?on_terminal_received:(unit -> unit) ->
+    (** Pure observer after the matching result is decoded, before stream or
+        usage callbacks and process draining; not a consumption ACK. *)
   mgr:_ Eio.Process.mgr ->
   clock:_ Eio.Time.clock ->
   cwd:Eio.Fs.dir_ty Eio.Path.t ->

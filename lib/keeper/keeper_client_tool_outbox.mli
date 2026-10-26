@@ -24,6 +24,12 @@ type host_producer
 val host_producer :
   base_path:string -> keeper_name:string -> runtime_label:string -> turn_count:int ->
   (host_producer, string) result
+(** One host-owned dynamic-tool projection with fixed workspace/Keeper
+    authority, a fresh source identity and an existing private lease inode.
+    This standalone producer is inactive; real runtime projections use
+    [start_host_producer].
+    Its label and claim ordinal describe the host; neither impersonates vendor
+    session/turn coordinates or authorizes tool replay. *)
 
 val start_host_producer :
   sw:Eio.Switch.t -> base_path:string -> keeper_name:string ->
@@ -35,12 +41,19 @@ val start_host_producer :
     from another process. Crash/exit releases the lease without PID guessing,
     TTL or replay. Lease files are retained stable and never enumerated as
     results. Prevalidation must not start a producer. *)
-(** One host-owned dynamic-tool projection with fixed workspace/Keeper
-    authority, a fresh source identity and an existing private lease inode.
-    This standalone producer is inactive; real runtime projections use
-    [start_host_producer].
-    Its label and claim ordinal describe the host; neither impersonates vendor
-    session/turn coordinates or authorizes tool replay. *)
+
+type host_delivery
+val retain_host_result_with_delivery :
+  host_producer -> invocation_index:int -> call_id:string -> tool_name:string ->
+  arguments:Yojson.Safe.t -> response:Yojson.Safe.t -> (host_delivery, string) result
+(** An opaque token for this exact durably retained physical result. *)
+val mark_response_sent : host_delivery -> unit
+(** Pure per-producer state update, after complete original response write.
+    A closed completion frontier excludes late marks. This never ACKs data. *)
+val close_delivery_frontier : host_producer -> snapshot
+(** Freeze exactly the writes observed before the client's terminal boundary.
+    Idempotent: late writes cannot enter a previously frozen snapshot. Only a
+    natural, accepted Completed turn with durable settlement can ACK it. *)
 
 val retain_host_result :
   host_producer ->
@@ -56,8 +69,7 @@ val load : base_path:string -> keeper_name:string -> (snapshot, string) result
 (** Read exact committed results, excluding host producers whose kernel lease
     is still held. Vendor receipts remain independent. An unavailable/missing
     host lease is a failure, never an inactive owner or permission to ACK.
-    This does not implement ordinary-result retention or natural completion
-    ACK; those require original capture and a frozen transport frontier. *)
+    Loading is independent of the active producer's frozen delivery frontier. *)
 val receipt_ids : snapshot -> string list
 (** Exact SHA256 identities of the validated committed receipts. Staging files
     and provider execution cell numbers are not receipt identities. *)

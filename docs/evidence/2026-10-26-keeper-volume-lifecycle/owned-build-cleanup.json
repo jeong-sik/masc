@@ -1,0 +1,31 @@
+{
+  "schema": "masc.keeper.owned_build_cleanup_check.v1",
+  "command": "python3 test/test_keeper_vm_build_cleanup.py -v",
+  "observed_result": "PASS: 14 discovered, 7 executed successfully, 7 Linux-only skipped",
+  "platform": "Darwin",
+  "python": "3.14.4",
+  "native_dune": "3.24.1",
+  "executed_cases": [
+    "owned managed link removes generated artifact and preserves source/link/lock inode",
+    "foreign/shared/escaping links retained",
+    "symlink target component retained",
+    "source and physical artifact process observations prevent cleanup",
+    "native Dune lock and explicit retention marker each prevent cleanup",
+    "dry-run and unreadable ownership preserve artifacts",
+    "replaced target during traversal preserves original and replacement"
+  ],
+  "process_observation_scope": "Native Dune and real temporary filesystem effects; Linux /proc observations stubbed in the executed managed-target class. Linux process suite skipped on macOS.",
+  "not_executed": [
+    "Linux /proc suite",
+    "exec-shim framed transport suite",
+    "compiled OCaml scheduler scenarios",
+    "actual Apple guest/APFS reclamation",
+    "installed runtime or deployment"
+  ],
+  "earlier_command_error": "python3 -m unittest test.test_keeper_vm_build_cleanup -v did not import this non-package path; corrected direct file invocation above passed.",
+  "source_sha256": {
+    "config/scripts/keeper-build-cleanup.py": "060ac0853050c98eda65dd60b963b88be4222f620ba1b3f4ea2eeb7890a68b95",
+    "test/test_keeper_vm_build_cleanup.py": "22360f4f61458a0b36654365c7158c3c289f67c6d81df7b6d87ecf8249003c26",
+    "test/test_keeper_build_cleanup_transport.py": "27d39b00be04beea836d74fddb379017804e8908bd74e3f624ed85724031cc4e"
+  }
+}

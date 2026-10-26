@@ -3130,7 +3130,8 @@ let cleanup_attached_builds ~(config : Workspace.config) ~(meta : keeper_meta)
                  ~on_receipt:(fun receipt -> observation := receipt) endpoint in
              let outcome = run ~on_stdout_chunk:None ~on_stderr_chunk:None
                  ~stdin_content:(Some stdin_content) ~env:[||] ~cwd:None
-                 ~argv:["python3"; "-"; "--guest-root"; root; "--idle-hours";
+                 ~argv:["python3"; "-"; "--guest-root"; root;
+                        "--build-root"; Keeper_sandbox_microvm.build_volume_guest_root; "--idle-hours";
                         string_of_float (retention_sec /. Masc_time_constants.hour); "--apply"] in
              match outcome, !observation with
              | Masc_exec.Sandbox_target.Ran { status = Unix.WEXITED 0; stdout; _ },

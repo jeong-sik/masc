@@ -59,10 +59,37 @@ def process_paths() -> list[Path]:
     return paths
 
 
-def guest_sweep(root: Path, idle_hours: float, apply: bool) -> dict[str, Any]:
+def owned_build_target(repo: Path, root: Path, build_root: Path) -> Path | None:
+    """Resolve only a real _build or the producer's exact managed link.
+
+    Keeper_microvm_build_plan.build_link_target encodes checkout segments with
+    ':'. A different link, even into the build mount, conveys no ownership.
+    """
+    build = repo / "_build"
+    if not build.is_symlink():
+        return build if build.is_dir() else None
+    relative = repo.relative_to(root)
+    if not relative.parts or any(":" in part for part in relative.parts):
+        return None
+    expected = build_root / ":".join(relative.parts)
+    if Path(os.readlink(build)) != expected or expected.is_symlink():
+        return None
+    if not expected.is_dir() or expected.resolve(strict=True) != expected:
+        return None
+    return expected
+
+
+def guest_sweep(
+    root: Path, idle_hours: float, apply: bool, *, build_root: Path
+) -> dict[str, Any]:
     if not root.is_dir() or root.is_symlink():
         raise ValueError(f"not a real Keeper work directory: {root}")
     root = root.resolve(strict=True)
+    if not build_root.is_dir() or build_root.is_symlink():
+        raise ValueError(f"not a real Keeper build directory: {build_root}")
+    build_root = build_root.resolve(strict=True)
+    if build_root.is_relative_to(root) or root.is_relative_to(build_root):
+        raise ValueError("Keeper work and build roots must be separate")
     dune = shutil.which("dune")
     report: dict[str, Any] = {"root": str(root), "apply": apply, "entries": []}
     before = shutil.disk_usage(root).free
@@ -85,9 +112,15 @@ def guest_sweep(root: Path, idle_hours: float, apply: bool) -> dict[str, Any]:
         repo = build.parent
         entry: dict[str, Any] = {"build": str(build)}
         report["entries"].append(entry)
-        if build.is_symlink() or not (repo / "dune-project").is_file():
+        if not (repo / "dune-project").is_file():
             entry["skip"] = "not a default Dune build directory"
             continue
+        target = owned_build_target(repo, root, build_root)
+        if target is None:
+            entry["skip"] = "not an owned Dune build target"
+            continue
+        identity = target.stat()
+        entry["target"] = str(target)
         if (repo / ".masc-keep-build").exists():
             entry["skip"] = "operator retention marker"
             continue
@@ -104,10 +137,13 @@ def guest_sweep(root: Path, idle_hours: float, apply: bool) -> dict[str, Any]:
             except BlockingIOError:
                 entry["skip"] = "wrapper build lock held"
                 continue
-            if any(path.is_relative_to(repo) for path in process_paths()):
+            if any(
+                path.is_relative_to(repo) or path.is_relative_to(target)
+                for path in process_paths()
+            ):
                 entry["skip"] = "live process uses checkout"
                 continue
-            size, newest = tree_stats(build)
+            size, newest = tree_stats(target)
             entry["allocated_bytes"] = size
             if newest > cutoff:
                 entry["skip"] = "recent build output"
@@ -119,11 +155,21 @@ def guest_sweep(root: Path, idle_hours: float, apply: bool) -> dict[str, Any]:
             # source files. Keep .lock so its inode continues excluding builds.
             targets = [
                 f"_build/{path.name}"
-                for path in build.iterdir()
+                for path in target.iterdir()
                 if path.name != ".lock"
             ]
             if not targets:
                 entry["skip"] = "empty build output"
+                continue
+            # The Owner excludes the product's link writer, and the wrapper
+            # lease excludes cooperating external builds. Revalidate after
+            # traversal as well so an observed replacement never authorizes
+            # cleaning a different target.
+            current = owned_build_target(repo, root, build_root)
+            if current != target or (
+                current.stat().st_dev, current.stat().st_ino
+            ) != (identity.st_dev, identity.st_ino):
+                entry["skip"] = "build target changed during inspection"
                 continue
             # Dune 3.24's targeted clean takes its native, nonblocking flock.
             # Relative --build-dir overrides an inherited DUNE_BUILD_DIR.
@@ -153,7 +199,14 @@ def guest_sweep(root: Path, idle_hours: float, apply: bool) -> dict[str, Any]:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--guest-root", type=Path, required=True)
+    parser.add_argument("--build-root", type=Path, required=True)
     parser.add_argument("--idle-hours", type=float, required=True)
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
-    print(json.dumps(guest_sweep(args.guest_root, args.idle_hours, args.apply)))
+    print(
+        json.dumps(
+            guest_sweep(
+                args.guest_root, args.idle_hours, args.apply, build_root=args.build_root
+            )
+        )
+    )

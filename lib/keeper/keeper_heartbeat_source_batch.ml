@@ -1,16 +1,18 @@
 type t =
-  | Empty
-  | Selected of Keeper_event_queue_state.pending_selection *
-      Keeper_event_queue_state.pending_selection list
+  { admitted : Keeper_event_queue_state.pending_selection list
+  ; pending_at_intake : Keeper_event_queue_state.pending_selection list
+  }
 
-let empty = Empty
-let of_selections = function [] -> Empty | first :: rest -> Selected (first, rest)
-let selections = function Empty -> [] | Selected (first, rest) -> first :: rest
+let empty = { admitted = []; pending_at_intake = [] }
+let of_intake ~pending ~admitted = { admitted; pending_at_intake = pending }
+let of_selections admitted = of_intake ~pending:admitted ~admitted
+let selections batch = batch.admitted
+let pending_at_intake batch = batch.pending_at_intake
 let stimuli batch =
   List.map (fun (selection : Keeper_event_queue_state.pending_selection) -> selection.source)
     (selections batch)
-let count = function Empty -> 0 | Selected (_, rest) -> 1 + List.length rest
-let first = function Empty -> None | Selected (first, _) -> Some first
+let count batch = List.length batch.admitted
+let first batch = List.nth_opt batch.admitted 0
 
 let observed_sources_to_yojson batch =
   `List
@@ -30,9 +32,9 @@ let observed_sources_to_yojson batch =
        (selections batch))
 
 let validate ~diagnostic ~standing batch =
-  let checked = match batch with
-    | Empty -> Option.to_list diagnostic
-    | Selected _ -> selections batch
+  let checked = match batch.admitted with
+    | [] -> Option.to_list diagnostic
+    | _ :: _ -> selections batch
   in
   let rec settle kept withdrawn = function
     | [] -> Ok (List.rev kept, List.rev withdrawn)
@@ -47,18 +49,18 @@ let validate ~diagnostic ~standing batch =
   match settle [] [] checked with
   | Error _ as error -> error
   | Ok (kept, withdrawn) ->
-    (match batch with
-     | Empty -> Ok (Empty, withdrawn)
-     | Selected _ -> Ok (of_selections kept, withdrawn))
+    (match batch.admitted with
+     | [] -> Ok (batch, withdrawn)
+     | _ :: _ -> Ok ({ batch with admitted = kept }, withdrawn))
 
 type turn_input = { batch : t; reactive : bool }
 let for_turn ~reactive batch = { batch; reactive }
 let sources input = input.batch
 let wake input =
-  match input.batch, input.reactive with
-  | Selected _, _ ->
+  match input.batch.admitted, input.reactive with
+  | _ :: _, _ ->
     Keeper_registry.Woken
       (List.map (fun (source : Keeper_event_queue.stimulus) -> source.payload)
          (stimuli input.batch))
-  | Empty, true -> Keeper_registry.Woken []
-  | Empty, false -> Keeper_registry.Proactive_tick
+  | [], true -> Keeper_registry.Woken []
+  | [], false -> Keeper_registry.Proactive_tick

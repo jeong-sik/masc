@@ -317,7 +317,7 @@ let with_ctx keeper_name f =
   f ~base_path ~keeper_name ~meta ~ctx
 ;;
 
-let test_one_intake_admits_every_ready_non_connector_in_queue_order () =
+let test_scheduled_work_is_not_batched_with_other_requests () =
   with_ctx "all-ready-batch" (fun ~base_path ~keeper_name ~meta ~ctx ->
     let board =
       List.init 5 (fun index ->
@@ -346,19 +346,135 @@ let test_one_intake_admits_every_ready_non_connector_in_queue_order () =
         ~meta_after_triage:meta
         ~pending_board_events:[]
     in
-    check int "all nine ready sources are admitted in one turn" 9
+    check int "one scheduled occurrence owns the turn" 1
       (Keeper_heartbeat_source_batch.count intake.source_batch);
     check
       (list string)
-      "admission preserves durable urgency then arrival order"
-      (List.map (fun (source : Q.stimulus) -> source.post_id) sources)
+      "only the first exact scheduled occurrence is admitted"
+      [ (List.hd schedules).post_id ]
       (List.map (fun (source : Q.stimulus) -> source.post_id) (Keeper_heartbeat_source_batch.stimuli intake.source_batch));
-    check int "five Board and three Schedule observations reach the turn" 8
+    check int "only the owning scheduled request reaches the turn" 1
       (List.length intake.pending_board_events);
     check int "intake alone never ACKs actionable sources" 9
       (Keeper_registry_event_queue.snapshot_result ~base_path keeper_name
        |> Result.map Q.length
        |> Result.value ~default:(-1)))
+;;
+
+(* Exercise the actual durable queue, intake, handoff candidate read and
+   checkpoint/terminal settlement boundaries. No provider or model is simulated:
+   these decisions are assertions about source ownership, not tool effects. *)
+let test_scheduled_checkpoint_successor_and_resume () =
+  with_ctx "schedule-continuation" (fun ~base_path ~keeper_name ~meta ~ctx ->
+    let module Batch = Keeper_heartbeat_source_batch in
+    let module Handoff = Keeper_scheduled_turn_handoff in
+    let require = function Ok value -> value | Error detail -> fail detail in
+    let first = scheduled_wake_stimulus ~occurrence:1 ~arrived_at:1. in
+    let second = scheduled_wake_stimulus ~occurrence:2 ~arrived_at:2. in
+    let cold_pending () =
+      Keeper_event_queue_persistence.For_testing.reset_snapshot_cache_for_testing ();
+      Keeper_event_queue_persistence.pending_selections_result ~base_path ~keeper_name
+      |> require in
+    let ids selections = List.map
+      (fun (s : Keeper_event_queue_state.pending_selection) -> s.source.post_id) selections in
+    let intake priority_sources =
+      Keeper_heartbeat_stimulus_intake.heartbeat_event_intake_with_priority
+        ~priority_sources ~ctx ~meta_after_triage:meta ~pending_board_events:[] in
+    let successors batch = Handoff.successors ~base_path ~keeper_name
+      ~excluding:(Batch.pending_at_intake batch) |> require in
+    let complete selection =
+      match Keeper_registry_event_queue.terminalize_pending_turn_completed_result
+        ~base_path keeper_name ~applied_at:100. ~selection |> require with
+      | Keeper_registry_event_queue.Turn_source_acked _ -> true
+      | Turn_selection_withdrawn -> fail "completion lost its exact pending source" in
+    let checkpoint batch =
+      let outcome = Keeper_heartbeat_loop_cycle.Checkpointed
+        { meta; checkpoint_reason = Keeper_unified_turn.Durable_stimulus_arrived
+        ; continuation_route = Keeper_unified_turn.Continuation_no_terminal_effect_receipt } in
+      match Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome (Some outcome) with
+      | Keeper_heartbeat_loop.Batch_ack_attention_only ->
+        check bool "checkpoint leaves scheduled work unfinished" false
+          (Keeper_heartbeat_loop.For_testing.settle_checkpoint_sources
+             ~base_path ~keeper_name ~acknowledge:complete (Batch.selections batch))
+      | Batch_ack_completed | Batch_no_action -> fail "unexpected checkpoint disposition" in
+    enqueue_exn ~base_path keeper_name first;
+    let first_batch = (intake []).source_batch in
+    enqueue_exn ~base_path keeper_name second;
+    let handoff = successors first_batch in
+    check (list string) "a newly arrived schedule receives the next slot"
+      [second.post_id] (ids handoff);
+    checkpoint first_batch;
+    check (list string) "cold durable reload retains both exact requests"
+      [first.post_id; second.post_id] (ids (cold_pending ()));
+    let second_batch = (intake handoff).source_batch in
+    check (list string) "successor owns only its occurrence"
+      [second.post_id] (ids (Batch.selections second_batch));
+    check (list string) "suspended predecessor cannot preempt its successor"
+      [] (ids (successors second_batch));
+    let validated, withdrawn = Batch.validate ~diagnostic:None
+      ~standing:(fun selection -> Keeper_registry_event_queue.admitted_selection_standing_result
+        ~base_path keeper_name ~selection) second_batch |> require in
+    check int "dispatch did not withdraw successor" 0 (List.length withdrawn);
+    check (list string) "dispatch validation retains the intake cohort"
+      [] (ids (successors validated));
+    List.iter (fun selection -> ignore (complete selection)) (Batch.selections validated);
+    check (list string) "successor terminal leaves original work pending"
+      [first.post_id] (ids (cold_pending ()));
+    let resumed = intake [] in
+    check (list string) "next intake reprojects the original exact request"
+      [first.post_id] (ids (Batch.selections resumed.source_batch));
+    (match resumed.pending_board_events with
+     | [{Keeper_world_observation.event_kind = Keeper_world_observation.Schedule_due wake; _}] ->
+       check string "resumed request retains the exact schedule instance"
+         "instance-batch" wake.schedule_instance_id;
+       check string "resumed request retains its original body"
+         "scheduled batch work" wake.message
+     | _ -> fail "resumed work has no exact scheduled prompt observation");
+    check (list string) "completed successor is never reexecuted" []
+      (ids (successors resumed.source_batch));
+    checkpoint resumed.source_batch;
+    check (list string) "another checkpoint cannot complete the original"
+      [first.post_id] (ids (cold_pending ()));
+    List.iter (fun selection -> ignore (complete selection))
+      (Batch.selections (intake []).source_batch);
+    check int "only explicit completion consumes original work" 0
+      (List.length (cold_pending ())))
+;;
+
+let test_scheduled_continuation_withdrawal_and_reinsertion () =
+  with_ctx "schedule-continuation-withdraw" (fun ~base_path ~keeper_name ~meta ~ctx ->
+    let module Batch = Keeper_heartbeat_source_batch in
+    let require = function Ok value -> value | Error detail -> fail detail in
+    let original = scheduled_wake_stimulus ~occurrence:1 ~arrived_at:1. in
+    enqueue_exn ~base_path keeper_name original;
+    let intake () = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+      ~ctx ~meta_after_triage:meta ~pending_board_events:[] in
+    let captured = (intake ()).source_batch in
+    check bool "checkpoint cannot invoke a terminal callback" false
+      (Keeper_heartbeat_loop.For_testing.settle_checkpoint_sources
+         ~base_path ~keeper_name ~acknowledge:(fun _ -> fail "checkpoint ACKed scheduled work")
+         (Batch.selections captured));
+    let cancelled = Keeper_registry_event_queue.cancel_scheduled_wakes_result
+      ~base_path keeper_name ~applied_at:20. ~schedule_ids:["schedule-batch"]
+      ~reason:"owned fixture cancellation" |> require in
+    check int "cancellation withdraws the retained occurrence" 1 cancelled;
+    Keeper_event_queue_persistence.For_testing.reset_snapshot_cache_for_testing ();
+    check int "cold intake does not resurrect cancelled work" 0
+      (Batch.count (intake ()).source_batch);
+    (* Even byte-identical reinsertion has a new durable incarnation. It must
+       not inherit the old turn's exclusion or completion authority. *)
+    enqueue_exn ~base_path keeper_name original;
+    let successors = Keeper_scheduled_turn_handoff.successors ~base_path ~keeper_name
+      ~excluding:(Batch.pending_at_intake captured) |> require in
+    check int "reinserted occurrence is new work for the active turn" 1
+      (List.length successors);
+    let admitted, withdrawn = Batch.validate ~diagnostic:None
+      ~standing:(fun selection -> Keeper_registry_event_queue.admitted_selection_standing_result
+        ~base_path keeper_name ~selection) captured |> require in
+    check int "old source cannot settle a replacement" 0 (Batch.count admitted);
+    check int "old incarnation is explicitly withdrawn" 1 (List.length withdrawn);
+    check int "replacement remains available to a new intake" 1
+      (Batch.count (intake ()).source_batch))
 ;;
 
 let test_unread_connector_sources_survive_other_completed_work ~failure () =
@@ -1276,7 +1392,7 @@ let test_checkpoint_retention_preserves_unsettled_sources () =
     (* The first yield and a run longer than the former count boundary must
        preserve the same requests. These are fixture observations, not gates. *)
     for cycle = 1 to 12 do
-      Keeper_heartbeat_loop.For_testing.retain_connector_attention_sources
+      Keeper_heartbeat_loop.For_testing.retain_checkpoint_sources
         ~base_path ~keeper_name (pending ());
       let retained = pending () in
       check (list string) "yield retains every exact input identity"
@@ -1727,16 +1843,20 @@ let () =
   run
     "keeper_connector_attention_batch"
     [ ( "all-ready Event Queue intake"
-      , [ test_case "proactive yields only to a ready intake" `Quick
+      , [ test_case "scheduled checkpoint yields to successor then resumes exact work" `Quick
+            test_scheduled_checkpoint_successor_and_resume
+        ; test_case "scheduled continuation cancellation and reinsertion remain exact" `Quick
+            test_scheduled_continuation_withdrawal_and_reinsertion
+        ; test_case "proactive yields only to a ready intake" `Quick
             test_proactive_yields_only_to_ready_intake
         ; test_case "checkpoint yields preserve requests until exact settlement" `Quick
             test_checkpoint_retention_preserves_unsettled_sources
         ; test_case "exact mixed bindings reach dispatch and settlement" `Quick
             test_exact_mixed_bindings_reach_dispatch_and_settlement
         ; test_case
-            "admits all ready Board, Schedule, and Bootstrap sources in one turn"
+            "scheduled work owns one occurrence, separate from attention"
             `Quick
-            test_one_intake_admits_every_ready_non_connector_in_queue_order
+            test_scheduled_work_is_not_batched_with_other_requests
         ; test_case
             "admits only one exact HITL resolution per turn"
             `Quick

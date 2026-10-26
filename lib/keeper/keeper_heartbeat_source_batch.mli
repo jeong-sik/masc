@@ -3,6 +3,16 @@
 type t
 val empty : t
 val of_selections : Keeper_event_queue_state.pending_selection list -> t
+val of_intake :
+  pending:Keeper_event_queue_state.pending_selection list ->
+  admitted:Keeper_event_queue_state.pending_selection list -> t
+(** Keep the authoritative intake cohort separate from the admitted work.
+    Unselected pending requests are not completed by this turn. *)
+val pending_at_intake : t -> Keeper_event_queue_state.pending_selection list
+(** Sources already waiting at intake cannot preempt this turn as newly arrived
+    work. In particular a suspended schedule cannot immediately preempt its
+    successor. Exact incarnations are compared; replacement input may yield.
+    This is turn-local arbitration, not a persisted completion/replay decision. *)
 val selections : t -> Keeper_event_queue_state.pending_selection list
 val stimuli : t -> Keeper_event_queue.stimulus list
 val count : t -> int

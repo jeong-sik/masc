@@ -41,11 +41,16 @@ type provider_progress_sample =
             answered; nobody had. *)
   }
 
-(* What this dispatch's checkpoints have recorded so far, strongest last. *)
+(* Classified saved facts for this dispatch; assistant and tool saves remain
+   distinct so response persistence cannot authorize retrying saved effects. *)
 type checkpoint_progress =
   | No_checkpoint_stage
   | Checkpoint_stage_reached
   | Tool_results_saved of { tool_result_saves : int }
+  | Assistant_checkpoint_saved of
+      { assistant_saves : int
+      ; tool_result_saves : int option
+      }
 
 type continuity_point =
   | Without_snapshot
@@ -704,35 +709,22 @@ let complete_saved_tool_terminal ~tool_results_saved_in_attempt
     @return [(result, checkpoint_after, liveness_success_sample)] tuple. The
     sample is not recorded here; the caller records it only after the runtime
     accept predicate accepts the response. *)
-(* Progress only moves forward: a later stage never erases a saved tool
-   result, and a stage reached after one does not lower it. *)
-let progress_advances ~current ~next =
-  match current, next with
-  | No_checkpoint_stage, (Checkpoint_stage_reached | Tool_results_saved _)
-  | Checkpoint_stage_reached, Tool_results_saved _ ->
-    true
-  | No_checkpoint_stage, No_checkpoint_stage
-  | Checkpoint_stage_reached, (No_checkpoint_stage | Checkpoint_stage_reached)
-  | Tool_results_saved _, (No_checkpoint_stage | Checkpoint_stage_reached | Tool_results_saved _) ->
-    false
-;;
-
-let rec advance_checkpoint_progress progress next =
+(* Reaching a later stage never erases classified saved progress. *)
+let rec observe_checkpoint_stage progress (stage : Agent_core.Agent.checkpoint_stage) =
   let current = Atomic.get progress in
-  if progress_advances ~current ~next
-     && not (Atomic.compare_and_set progress current next)
-  then advance_checkpoint_progress progress next
-;;
-
-let observe_checkpoint_stage progress (_ : Agent_core.Agent.checkpoint_stage) =
-  advance_checkpoint_progress progress Checkpoint_stage_reached
+  match current with
+  | Checkpoint_stage_reached | Tool_results_saved _ | Assistant_checkpoint_saved _ -> ()
+  | No_checkpoint_stage ->
+    if not (Atomic.compare_and_set progress current Checkpoint_stage_reached)
+    then observe_checkpoint_stage progress stage
 ;;
 
 (* RFC last-path-resumes-after-progress §3.2: a chat operation resumes from its
    latest saved checkpoint, so only a stage written after tools ran, and
    written to that checkpoint, is progress a resumed attempt does not repeat.
    [After_assistant_collected] is saved before accept judges the answer and
-   keeps a refused one, so counting it would resume into the same refusal.
+   keeps a refused one, so counting it as tool retry progress would resume
+   into the same refusal.
 
    Only the sink's owner may call this. A sink answers [Ok ()] for a write it
    skipped as well as for one it made: the keeper's checkpoint store answers
@@ -744,19 +736,45 @@ let observe_checkpoint_stage progress (_ : Agent_core.Agent.checkpoint_stage) =
 let tool_result_save_count progress =
   match Atomic.get progress with
   | Tool_results_saved { tool_result_saves } -> tool_result_saves
+  | Assistant_checkpoint_saved {tool_result_saves=Some count;_} -> count
+  | Assistant_checkpoint_saved {tool_result_saves=None;_}
   | No_checkpoint_stage | Checkpoint_stage_reached -> 0
+;;
+
+let assistant_checkpoint_save_count progress =
+  match Atomic.get progress with
+  | Assistant_checkpoint_saved {assistant_saves;_} -> assistant_saves
+  | No_checkpoint_stage | Checkpoint_stage_reached | Tool_results_saved _ -> 0
 ;;
 
 let rec record_saved_tool_stage progress ~after_tool_results =
   let current = Atomic.get progress in
   let count = match current with
     | Tool_results_saved { tool_result_saves } -> tool_result_saves
+    | Assistant_checkpoint_saved {tool_result_saves=Some count;_} -> count
+    | Assistant_checkpoint_saved {tool_result_saves=None;_}
     | No_checkpoint_stage | Checkpoint_stage_reached -> 0
   in
-  let next = Tool_results_saved
-      { tool_result_saves = if after_tool_results then count + 1 else count } in
+  let tool_result_saves = if after_tool_results then count + 1 else count in
+  let next = match current with
+    | Assistant_checkpoint_saved {assistant_saves;_} ->
+      Assistant_checkpoint_saved {assistant_saves;tool_result_saves=Some tool_result_saves}
+    | No_checkpoint_stage | Checkpoint_stage_reached | Tool_results_saved _ ->
+      Tool_results_saved {tool_result_saves} in
   if not (Atomic.compare_and_set progress current next)
   then record_saved_tool_stage progress ~after_tool_results
+;;
+
+let rec record_saved_assistant_stage progress =
+  let current = Atomic.get progress in
+  let assistant_saves, tool_result_saves = match current with
+    | No_checkpoint_stage | Checkpoint_stage_reached -> 1, None
+    | Tool_results_saved {tool_result_saves} -> 1, Some tool_result_saves
+    | Assistant_checkpoint_saved {assistant_saves;tool_result_saves} ->
+      assistant_saves + 1, tool_result_saves in
+  let next = Assistant_checkpoint_saved {assistant_saves;tool_result_saves} in
+  if not (Atomic.compare_and_set progress current next)
+  then record_saved_assistant_stage progress
 ;;
 
 let observe_checkpoint_saved progress (stage : Agent_core.Agent.checkpoint_stage) =
@@ -765,7 +783,7 @@ let observe_checkpoint_saved progress (stage : Agent_core.Agent.checkpoint_stage
     record_saved_tool_stage progress ~after_tool_results:true
   | Agent_core.Agent.After_context_injection ->
     record_saved_tool_stage progress ~after_tool_results:false
-  | Agent_core.Agent.After_assistant_collected
+  | Agent_core.Agent.After_assistant_collected -> record_saved_assistant_stage progress
   | Agent_core.Agent.After_input_wait_changed
   | Agent_core.Agent.After_rejected_response_dropped ->
     ()
@@ -788,12 +806,14 @@ let observing_checkpoint_sink progress sink (snapshot : Agent_core.Agent.checkpo
 let same_run_retry_allowed progress =
   match Atomic.get progress with
   | No_checkpoint_stage -> true
-  | Checkpoint_stage_reached | Tool_results_saved _ -> false
+  | Checkpoint_stage_reached | Tool_results_saved _ | Assistant_checkpoint_saved _ -> false
 ;;
 
 let tool_results_saved progress =
   match Atomic.get progress with
   | Tool_results_saved _ -> true
+  | Assistant_checkpoint_saved {tool_result_saves=Some _;_} -> true
+  | Assistant_checkpoint_saved {tool_result_saves=None;_}
   | No_checkpoint_stage | Checkpoint_stage_reached -> false
 ;;
 
@@ -2125,15 +2145,19 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
     Keeper_runtime_manifest.Provider_lane_resolved;
   let checkpoint_sink =
     fun (snapshot : Agent_core.Agent.checkpoint_snapshot) ->
+      let assistant_saves_before = assistant_checkpoint_save_count ctx.checkpoint_progress in
       let saved = observing_checkpoint_sink ctx.checkpoint_progress ctx.checkpoint_sink snapshot in
-      (match saved, ctx.checkpoint_sink, snapshot.stage with
-       | Ok (), Some _, Agent_core.Agent.After_assistant_collected ->
+      (match saved, snapshot.stage with
+       | Ok (), Agent_core.Agent.After_assistant_collected
+         when assistant_checkpoint_save_count ctx.checkpoint_progress > assistant_saves_before ->
+         (* Only the caller's classified Saved branch advances this witness.
+            A stale/no-op sink may also return Ok, but has no saved authority.
+            Pair the save in this exact callback with this SDK invocation's
+            actual AfterTurn ordinal; checkpoint counters are not ordinals. *)
          saved_provider_turn_ordinal := !observed_provider_turn_ordinal
-       | (Ok () | Error _), _,
+       | (Ok () | Error _),
          (Agent_core.Agent.After_input_wait_changed | After_tool_results_appended
-         | After_context_injection | After_rejected_response_dropped)
-       | Error _, _, After_assistant_collected
-       | Ok (), None, After_assistant_collected -> ());
+         | After_context_injection | After_rejected_response_dropped | After_assistant_collected) -> ());
       saved
   in
   (* The attempt's bounded wait for the binding's admission permit, as Agent

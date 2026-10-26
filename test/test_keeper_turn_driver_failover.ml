@@ -5628,6 +5628,8 @@ let progress_label = function
   | Try_provider.No_checkpoint_stage -> "no checkpoint stage"
   | Try_provider.Checkpoint_stage_reached -> "checkpoint stage reached"
   | Try_provider.Tool_results_saved _ -> "tool results saved"
+  | Try_provider.Assistant_checkpoint_saved {tool_result_saves=Some _;_} -> "tool results saved"
+  | Try_provider.Assistant_checkpoint_saved {tool_result_saves=None;_} -> "assistant checkpoint saved"
 ;;
 
 (* RFC last-path-resumes-after-progress §3.2: reaching a stage ends same-run
@@ -5678,11 +5680,9 @@ let test_the_sink_owner_marks_written_tool_results () =
     (fun (stage, counts) ->
        let progress = Atomic.make Try_provider.No_checkpoint_stage in
        Driver.For_testing.observe_checkpoint_saved progress stage;
-       Alcotest.(check string)
+       Alcotest.(check bool)
          (Agent_core.Agent.checkpoint_stage_to_string stage)
-         (progress_label
-            (if counts then Try_provider.Tool_results_saved { tool_result_saves = 0 } else Try_provider.No_checkpoint_stage))
-         (progress_label (Atomic.get progress)))
+         counts (Driver.For_testing.tool_results_saved progress))
     [ Agent_core.Agent.After_tool_results_appended, true
     ; Agent_core.Agent.After_context_injection, true
     ; Agent_core.Agent.After_assistant_collected, false
@@ -5699,7 +5699,16 @@ let test_the_sink_owner_marks_written_tool_results () =
   in
   Alcotest.(check string) "a later answer stage keeps the written tool results"
     (progress_label (Try_provider.Tool_results_saved { tool_result_saves = 1 }))
-    (progress_label (Atomic.get progress))
+    (progress_label (Atomic.get progress));
+  Driver.For_testing.observe_checkpoint_saved progress Agent_core.Agent.After_assistant_collected;
+  Alcotest.(check bool) "a classified assistant save preserves tool retry progress" true
+    (Driver.For_testing.tool_results_saved progress);
+  Driver.For_testing.observe_checkpoint_saved progress Agent_core.Agent.After_context_injection;
+  Alcotest.(check int) "context after an assistant save does not invent a tool-result save" 1
+    (Try_provider.For_testing.tool_result_save_count progress);
+  Driver.For_testing.observe_checkpoint_saved progress Agent_core.Agent.After_tool_results_appended;
+  Alcotest.(check int) "later tool saves still advance their own count" 2
+    (Try_provider.For_testing.tool_result_save_count progress)
 ;;
 
 let bad_gateway =

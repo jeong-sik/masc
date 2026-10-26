@@ -21,8 +21,8 @@ type provider_progress_sample =
             excluding it here leaves nothing unbounded. *)
   }
 
-(** What one dispatch's checkpoints have recorded so far. It only moves
-    forward, in this order.
+(** What one dispatch's checkpoints have recorded so far. Reaching a later
+    stage cannot erase classified saves.
     - [No_checkpoint_stage]: AGENT_CORE has not reached a checkpoint stage, so
       the agent state is as the dispatch began and another candidate may take
       the same run.
@@ -31,13 +31,23 @@ type provider_progress_sample =
     - [Tool_results_saved]: a stage written after tools ran
       ([After_tool_results_appended], [After_context_injection]) was saved. A
       chat operation resumed from its latest checkpoint does not run those
-      tools again (RFC last-path-resumes-after-progress §3.2). *)
+      tools again (RFC last-path-resumes-after-progress §3.2).
+    - [Assistant_checkpoint_saved]: a classified assistant save has occurred;
+      any earlier tool/context progress is preserved separately. *)
 type checkpoint_progress =
   | No_checkpoint_stage
   | Checkpoint_stage_reached
   | Tool_results_saved of { tool_result_saves : int }
       (** Number of actual [After_tool_results_appended] saves. Context-only
           saves establish retry continuity but do not advance this count. *)
+  | Assistant_checkpoint_saved of
+      { assistant_saves : int
+      ; tool_result_saves : int option
+      }
+      (** Classified assistant saves, independent of saved tool progress.
+          [None] means no tool/context checkpoint was saved; [Some 0] means
+          context-only progress. Assistant saves alone cannot authorize a
+          tool-result retry. Counts observe actual saves, never sink returns. *)
 
 type continuity
 (** A snapshot verified against the dispatch's original checkpoint. *)
@@ -484,12 +494,14 @@ val observe_checkpoint_stage :
 
 val observe_checkpoint_saved :
   checkpoint_progress Atomic.t -> Agent_core.Agent.checkpoint_stage -> unit
-(** Marks [Tool_results_saved] for a stage written after tools ran. Only the
+(** Marks tool/context progress or a distinct assistant-save witness. Only the
     owner of the checkpoint sink may call it, and only for a write it made:
     a sink answers [Ok ()] for a write it skipped as well
     ([Keeper_checkpoint_store.Stale_noop], which leaves the canonical
     checkpoint untouched), and a resumed operation would not read the
-    checkpoint that write claimed. *)
+    checkpoint that write claimed. Assistant saves do not establish saved
+    tool results; an attempt observes their growth only inside its own
+    assistant-stage callback, paired with its actual provider turn. *)
 
 val observing_checkpoint_sink :
   checkpoint_progress Atomic.t ->
@@ -503,7 +515,8 @@ val same_run_retry_allowed : checkpoint_progress Atomic.t -> bool
 (** [true] only at [No_checkpoint_stage]. *)
 
 val tool_results_saved : checkpoint_progress Atomic.t -> bool
-(** [true] only at [Tool_results_saved]. *)
+(** [true] only when a tool/context checkpoint was actually saved, including
+    when a later assistant save preserved that fact. *)
 
 type provider_lease_phase =
   | Provider_active_since of float

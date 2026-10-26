@@ -51,7 +51,10 @@ type control = Hand_off | Take_over | Space_status | Finish_space of string list
 (** [Space_status] reads metadata on the exact bound numeric Space, even when
     delegated, without Page calls or changing control. It is not admission.
     [Finish_space keep] explicitly completes a successful task through the SDK,
-    retaining only the requested permanent Page labels. It ends all Page labels.
+    closing only agent-created Pages whose labels are absent from [keep].
+    Unknown-origin managed Pages and unmanaged tabs remain open, even with an
+    empty [keep] list. Completion ends all managed Page labels, including those
+    of retained Pages.
     Connection retirement never implies task completion.
     [Wait_for_control] calls the native SDK within the current agent-owned
     Space. It does not claim or take over a user-held Space, clear uncertain

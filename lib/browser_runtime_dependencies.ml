@@ -46,15 +46,6 @@ type check =
    reported as a failed probe, which is what an unusable program is. *)
 let probe_timeout_sec = 10.
 
-let is_executable_file path =
-  match Unix.stat path with
-  | { Unix.st_kind = Unix.S_REG; _ } ->
-    (match Unix.access path [ Unix.X_OK ] with
-     | () -> true
-     | exception Unix.Unix_error _ -> false)
-  | { Unix.st_kind = Unix.(S_DIR | S_CHR | S_BLK | S_LNK | S_FIFO | S_SOCK); _ } -> false
-  | exception Unix.Unix_error _ -> false
-
 (* The lane takes absolute paths only ([browser.automation] geckodriver and
    binary, [browser.live.bidi] firefox). A program found through a relative
    PATH entry, or given as a relative path, is reported where it is on disk
@@ -79,7 +70,7 @@ let locate command =
   else (
     let found =
       if String.contains command '/'
-      then if is_executable_file command then Some command else None
+      then if Executable_path.regular_file_is_executable command then Some command else None
       else (
         match Sys.getenv_opt "PATH" with
         | None -> None
@@ -88,7 +79,7 @@ let locate command =
           |> List.filter (fun directory -> not (String.equal directory ""))
           |> List.find_map (fun directory ->
             let candidate = Filename.concat directory command in
-            if is_executable_file candidate then Some candidate else None))
+            if Executable_path.regular_file_is_executable candidate then Some candidate else None))
     in
     Option.bind found absolute)
 

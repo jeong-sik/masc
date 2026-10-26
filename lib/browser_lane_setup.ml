@@ -161,15 +161,6 @@ let prepare_directory path =
     if not (Sys.is_directory path) then raise (Sys_error (path ^ " is not a directory"));
     Unix.access path [ Unix.W_OK; Unix.X_OK ])
 
-let is_executable_file path =
-  match Unix.stat path with
-  | { Unix.st_kind = Unix.S_REG; _ } ->
-    (match Unix.access path [ Unix.X_OK ] with
-     | () -> true
-     | exception Unix.Unix_error _ -> false)
-  | { Unix.st_kind = Unix.(S_DIR | S_CHR | S_BLK | S_LNK | S_FIFO | S_SOCK); _ } -> false
-  | exception Unix.Unix_error _ -> false
-
 let real_path path = try Unix.realpath path with Unix.Unix_error _ -> path
 let host_executable_name = "masc-browser-host"
 
@@ -188,7 +179,7 @@ let beside_this_executable () =
     List.find_map
       (fun path ->
          let candidate = Filename.concat (Filename.dirname path) host_executable_name in
-         if is_executable_file candidate then Some candidate else None)
+         if Executable_path.regular_file_is_executable candidate then Some candidate else None)
       [ real_path executable; executable ]
 
 let on_path () =
@@ -199,12 +190,14 @@ let on_path () =
     |> List.filter (fun directory -> not (String.equal directory ""))
     |> List.find_map (fun directory ->
       let candidate = Filename.concat directory host_executable_name in
-      if is_executable_file candidate then Some candidate else None)
+      if Executable_path.regular_file_is_executable candidate then Some candidate else None)
 
 let host_source = function
   | Some path ->
     let resolved = real_path path in
-    if is_executable_file resolved then Ok resolved else Error (Host_binary_not_executable path)
+    if Executable_path.regular_file_is_executable resolved
+    then Ok resolved
+    else Error (Host_binary_not_executable path)
   | None ->
     (match beside_this_executable () with
      | Some path -> Ok (real_path path)

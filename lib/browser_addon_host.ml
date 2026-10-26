@@ -198,9 +198,17 @@ let issue ?goal_space ?upload_paths ?(required_actions=[]) t ~preference verb =
   let fail ?metadata ?(data=`Null) ~class_ ~effect_disposition message =
     Error (Tool_result.make_err ~tool_name:Browser_addon_tool.definition.name ~start_time
       ?metadata ~data ~class_ ~effect_disposition message) in
-  let* ()=match goal_space,preference,verb with
-    | None,_,_ | Some _,Browser_selection.Automatic,(Browser_lane.Tabs_list|Session_open _) -> Ok ()
-    | Some _,_,_ -> fail ~class_:Tool_result.Workflow_rejection
+  let initial=match preference,verb with
+    | Browser_selection.Automatic,(Browser_lane.Tabs_list|Session_open _) -> true
+    | (Automatic|Exact (Live_route _|Automation_route|Stagehand_route)),
+      (Tabs_list|Session_open _|Session_close|Session_status|Page_read _|Page_document _|Page_downloads _
+      |Page_console _|Page_network _|Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _
+      |Page_native_workflow _|Page_interact _|Page_goto _|Page_elements _|Page_act _|Page_context _
+      |Page_instruct _|Page_locate _|Page_extract _) -> false in
+  let* ()=match goal_space with
+    | None -> Ok ()
+    | Some _ when initial -> Ok ()
+    | Some _ -> fail ~class_:Tool_result.Workflow_rejection
         ~effect_disposition:Tool_result.Proven_pre_effect
         "Goal Space defaults apply only to initial automatic discovery or open" in
   let upload=match verb with

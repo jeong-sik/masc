@@ -65,7 +65,8 @@ boundary without launching MASC, or independently audit a completed v3 packet:
 ```sh
 python3 scripts/harness/perf/keeper_scale_fault_probe.py \
   --output /tmp/keeper-evidence-faults.json
-python3 scripts/harness/perf/keeper_scale_packet_audit.py /tmp/keeper-session-new
+python3 scripts/harness/perf/keeper_scale_packet_audit.py /tmp/keeper-session-new \
+  --output /tmp/keeper-session-new-audit
 ```
 
 Before provider release, a single SQLite read transaction per Keeper records
@@ -81,9 +82,15 @@ held observation cost belongs to the experiment, not released throughput.
 
 The fault probe covers duplicate identities/inputs, ownership, missing replies,
 corrupt or changed backups, original payload/digest/batch drift and failure
-preservation of original DB/WAL/log bytes. The independent reader writes derived audit
-reports while preserving raw receipts and the original workload verdict. It
-accepts v3 only; older packets retain their frozen original readers and results.
+preservation of original DB/WAL/log bytes. The independent reader exclusively creates
+its required `--output` directory outside the original packet; existing outputs,
+symlink outputs and paths inside the packet are rejected. All derived reports and
+audit-failure receipts go there, preserving raw receipts and the original workload
+verdict. Full inventory coverage groups still require the exact expected-volume
+Counter. A final unique known-volume subset is reported as incomplete, with its
+observed count and missing volumes; it is not completed coverage or a producer
+sweep ID. The reader accepts v3 only; older packets retain their frozen original
+readers and results.
 
 Report held, released and settled phases separately. Creation-to-completion
 includes deliberate provider hold, admission pacing, queueing and runtime

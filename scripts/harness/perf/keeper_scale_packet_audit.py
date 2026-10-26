@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Audit evidence v3 only; never rewrites original workload receipts/verdicts."""
+import argparse
 import collections
 from contextlib import closing
 import datetime
@@ -8,7 +9,6 @@ import json
 import math
 import pathlib
 import sqlite3
-import sys
 
 
 EVIDENCE_SCHEMA = "masc.keeper-scale-evidence.v3"
@@ -183,7 +183,60 @@ def audit_original_payloads(packet, admitted, snapshots, public, terminal):
     assert seen == set(originals)
 
 
-def audit(packet):
+def classify_inventory(guards, base, expected_volumes):
+    inventory = []
+    unclassified = []
+    for row in guards:
+        argv = row["argv"]
+        assert isinstance(argv, list) and argv and all(isinstance(arg, str) for arg in argv)
+        assert type(row["time_ns"]) is int
+        kind = pathlib.Path(argv[0]).name
+        assert pathlib.Path(argv[0]).parent == pathlib.Path(base) / "deny-guest-commands"
+        if (kind, argv[1:]) == ("container", ["list", "--all", "--format", "json"]):
+            inventory.append(("container_list", row))
+        elif kind == "nerdctl" and len(argv) == 6 and argv[1:5] == ["ps", "-a", "--no-trunc", "--format"]:
+            inventory.append(("nerdctl_ps", row))
+        elif kind == "container" and len(argv) == 4 and argv[1:3] == ["volume", "inspect"] and argv[3] in expected_volumes:
+            inventory.append(("container_volume_inspect", row))
+        else:
+            unclassified.append(row)
+    assert not unclassified, unclassified
+    return inventory, unclassified
+
+
+def inventory_coverage(inventory, expected_volumes, phase_starts):
+    """Observed coverage groups; receipts do not contain producer sweep IDs."""
+    assert expected_volumes
+    inspections = [row for kind, row in inventory if kind == "container_volume_inspect"]
+    sweeps = []
+    for offset in range(0, len(inspections), len(expected_volumes)):
+        selected = inspections[offset:offset + len(expected_volumes)]
+        observed = collections.Counter(row["argv"][3] for row in selected)
+        complete = len(selected) == len(expected_volumes)
+        if complete:
+            assert observed == {name: 1 for name in expected_volumes}
+        else:
+            assert set(observed) <= expected_volumes, "unknown volume in final partial segment"
+            assert all(count == 1 for count in observed.values()), "duplicate volume in final partial segment"
+        by_phase = collections.Counter(next((phase["phase"] for phase in reversed(phase_starts)
+            if "wall_time_ns" in phase and phase["wall_time_ns"] <= row["time_ns"]), "unavailable") for row in selected)
+        sweeps.append({"pass": len(sweeps)+1, "commands": len(selected), "complete": complete,
+            "observed_volume_count": len(observed), "expected_volume_count": len(expected_volumes),
+            "missing_volumes": sorted(expected_volumes - set(observed)),
+            "exact_expected_volume_set": complete,
+            "first_attempt_wall_time_ns": selected[0]["time_ns"], "last_attempt_wall_time_ns": selected[-1]["time_ns"],
+            "attempt_timestamp_span_ms": (selected[-1]["time_ns"]-selected[0]["time_ns"])/1e6,
+            "first_attempt_utc": datetime.datetime.fromtimestamp(selected[0]["time_ns"]/1e9, datetime.timezone.utc).isoformat(),
+            "last_attempt_utc": datetime.datetime.fromtimestamp(selected[-1]["time_ns"]/1e9, datetime.timezone.utc).isoformat(),
+            "commands_by_workload_phase": dict(by_phase)})
+    return {"scope": "Observed coverage groups, not producer sweep IDs. A final unique known-volume subset is incomplete; missing volumes are unobserved coverage, not proven lost log records. Wrappers refuse126 by source authority, not per-attempt exit receipts. Spans include concurrency and scheduling, not isolated subprocess overhead.",
+        "expected_volumes_per_segment": len(expected_volumes), "observed_inspection_commands": len(inspections),
+        "complete_observed_segments": sum(row["complete"] for row in sweeps),
+        "final_partial_segment": sweeps[-1] if sweeps and not sweeps[-1]["complete"] else None,
+        "sweeps": sweeps}
+
+
+def _audit(packet, output):
     identity = read(packet / "identity.json")
     assert identity["evidence_schema"] == EVIDENCE_SCHEMA, "reader requires explicitly versioned v3 evidence"
     assert sha(packet / "masc-installed-copy") == identity["sha256"]
@@ -274,22 +327,8 @@ def audit(packet):
         peak = max(peak, active)
     assert active == 0 and peak == len(names)
     guards = read(packet / "guest-command-attempts.json")
-    inventory = []
-    unclassified = []
     expected_volumes = {"masc-keeper-" + kind + "-" + name for kind in ["work", "build"] for name in names}
-    for row in guards:
-        argv = row["argv"]
-        kind = pathlib.Path(argv[0]).name
-        assert pathlib.Path(argv[0]).parent == pathlib.Path(identity["base"]) / "deny-guest-commands"
-        if (kind, argv[1:]) == ("container", ["list", "--all", "--format", "json"]):
-            inventory.append(("container_list", row))
-        elif kind == "nerdctl" and len(argv) == 6 and argv[1:5] == ["ps", "-a", "--no-trunc", "--format"]:
-            inventory.append(("nerdctl_ps", row))
-        elif kind == "container" and len(argv) == 4 and argv[1:3] == ["volume", "inspect"] and argv[3] in expected_volumes:
-            inventory.append(("container_volume_inspect", row))
-        else:
-            unclassified.append(row)
-    assert not unclassified, unclassified
+    inventory, unclassified = classify_inventory(guards, identity["base"], expected_volumes)
     cleanup = read(packet / "cleanup.json")
     assert cleanup == {"server_returncode": 0, "server_reaped": True, "forced_kill": False,
         "sampler_stopped": True, "model_server_stopped": True, "base_retained": True,
@@ -333,24 +372,10 @@ def audit(packet):
                      "duration_ms": (phase_starts[i + 1]["started_ns"]-row["started_ns"])/1e6}
                     for i, row in enumerate(phase_starts[:-1])]
     release_event = next(row for row in phases if row.get("event") == "provider_release")
-    inspections = [row for kind, row in inventory if kind == "container_volume_inspect"]
-    sweeps = []
-    assert len(inspections) % len(expected_volumes) == 0
-    for i in range(len(inspections)//len(expected_volumes)):
-        selected = inspections[i*len(expected_volumes):(i+1)*len(expected_volumes)]
-        assert collections.Counter(row["argv"][3] for row in selected) == {name: 1 for name in expected_volumes}
-        by_phase = collections.Counter(next((phase["phase"] for phase in reversed(phase_starts)
-            if "wall_time_ns" in phase and phase["wall_time_ns"] <= row["time_ns"]), "unavailable") for row in selected)
-        sweeps.append({"pass": i+1, "commands": len(selected), "exact_expected_volume_set": True,
-            "first_attempt_wall_time_ns": selected[0]["time_ns"], "last_attempt_wall_time_ns": selected[-1]["time_ns"],
-            "attempt_timestamp_span_ms": (selected[-1]["time_ns"]-selected[0]["time_ns"])/1e6,
-            "first_attempt_utc": datetime.datetime.fromtimestamp(selected[0]["time_ns"]/1e9, datetime.timezone.utc).isoformat(),
-            "last_attempt_utc": datetime.datetime.fromtimestamp(selected[-1]["time_ns"]/1e9, datetime.timezone.utc).isoformat(),
-            "commands_by_workload_phase": dict(by_phase)})
-    (packet / "inventory-sweep-audit.json").write_text(json.dumps({
-        "scope": "Read-only post-run classification; original argv/timestamps unchanged. All wrappers refuse126. Spans include concurrency and scheduling, not isolated subprocess overhead.",
-        "sweeps": sweeps, "raw_receipt": "guest-command-attempts.json",
-        "source_binding": {"source_commit": identity["source"], "identity_receipt": "identity.json"}}, indent=2)+"\n")
+    inventory_audit = inventory_coverage(inventory, expected_volumes, phase_starts)
+    (output / "inventory-sweep-audit.json").write_text(json.dumps({**inventory_audit,
+        "raw_receipt": str(packet / "guest-command-attempts.json"),
+        "source_binding": {"source_commit": identity["source"], "identity_receipt": str(packet / "identity.json")}}, indent=2)+"\n")
     if "wall_time_ns" in release_event:
         # This is an approximate cross-clock alignment, not a synchronized trace.
         clock_offset = release_event["wall_time_ns"] - release_event["at_ns"]
@@ -366,8 +391,9 @@ def audit(packet):
                 "status_or_error": request.get("status", request.get("error")),
                 "durable_operation_completion_minus_request_start_ms": public["completed_at"]*1000-(request["start_ns"]+clock_offset)/1e6,
                 "caveat": "Cross-clock alignment uses adjacent wall/perf phase anchor, no exact synchronization guarantee."})
-        (packet / "slow-status-completion-alignment.json").write_text(json.dumps(aligned, indent=2)+"\n")
-    report = {"evidence_schema": EVIDENCE_SCHEMA, "packet": packet.name, "source": identity["source"], "binary_sha256": identity["sha256"],
+        (output / "slow-status-completion-alignment.json").write_text(json.dumps(aligned, indent=2)+"\n")
+    report = {"evidence_schema": EVIDENCE_SCHEMA, "packet": packet.name, "packet_path": str(packet), "audit_output": str(output),
+        "source": identity["source"], "binary_sha256": identity["sha256"],
         "packet_auditor_sha256": sha(pathlib.Path(__file__)),
         "runner_sha256": identity["runner_sha256"], "original_run_failure_preserved": original_failure,
         "post_run_workload_validation": "PASS", "overall_original_run_verdict": "FAIL" if original_failure else "PASS",
@@ -377,7 +403,7 @@ def audit(packet):
         "provider_release_to_response_end_ms": stats((row["end_ns"]-release_ns)/1e6 for row in models),
         "guard_classification_audit": {"all_calls_were_denied_by_wrapper": True,
             "read_only_inventory_by_exact_argv": dict(collections.Counter(kind for kind, _ in inventory)),
-            "unclassified_calls": len(unclassified),
+            "unclassified_calls": len(unclassified), "inventory_coverage": inventory_audit,
             "scope": "Post-run classification only; original guard receipt and verdict unchanged. No daemon/guest executed or inspected."},
         "liveness_wire_ms_by_workload_phase": phase_stats, "mcp_attempts_by_request_phase": phase_requests,
         "read_only_observation_failures": lines(packet / "operation-observation-failures.jsonl"),
@@ -393,18 +419,50 @@ def audit(packet):
             "First turns intentionally held until all owners called provider and both operation sets observed.",
             "Operation lifetimes include hold, queue, scheduler, I/O and runtime work; not CPU-only execution latency.",
             "Shared host, sequential one run per population; no causal scaling attribution.", "No guest, Addon, TUI or browser execution proof."]}
-    (packet / "post-run-audit.json").write_text(json.dumps(report, indent=2) + "\n")
-    (packet / "operation-wall-samples.json").write_text(json.dumps(operations, indent=2) + "\n")
+    (output / "post-run-audit.json").write_text(json.dumps(report, indent=2) + "\n")
+    (output / "operation-wall-samples.json").write_text(json.dumps(operations, indent=2) + "\n")
     outliers = [{"request_log_line": i + 1, **{key: row[key] for key in [
         "start_ns", "end_ns", "phase", "payload", "wire_ms", "wire_bytes", "server_timing"] if key in row}}
         for i, row in sorted(enumerate(requests), key=lambda item: item[1].get("wire_ms", -1), reverse=True)[:20]]
-    (packet / "mcp-wire-outliers.json").write_text(json.dumps(outliers, indent=2) + "\n")
+    (output / "mcp-wire-outliers.json").write_text(json.dumps(outliers, indent=2) + "\n")
     print(json.dumps({key: report[key] for key in ["packet", "overall_original_run_verdict", "post_run_workload_validation", "keepers",
         "public_and_exact_owner_durable_succeeded_operations", "real_model_calls", "max_provider_requests_in_flight", "http_429", "rate_limit_wait_s"]}))
+    return report
+
+
+def audit(packet, output):
+    """Own a fresh external output; preserve originals and any original failure."""
+    packet = pathlib.Path(packet).resolve(strict=True)
+    assert packet.is_dir(), "packet must be a directory"
+    requested = pathlib.Path(output)
+    if requested.name in {"", ".", ".."} or requested.is_symlink():
+        raise ValueError("output must be a fresh directory, not a symlink")
+    output = requested.parent.resolve(strict=True) / requested.name
+    if output.is_symlink() or output.is_relative_to(packet):
+        raise ValueError("output must be outside the original packet and not a symlink")
+    output.mkdir()  # Exclusive creation; existing files/directories are never reused.
+    try:
+        return _audit(packet, output)
+    except BaseException as error:
+        try:
+            (output / "audit-failure.json").write_text(json.dumps({
+                "evidence_schema": EVIDENCE_SCHEMA, "packet": str(packet), "output": str(output),
+                "error_type": type(error).__name__, "error": str(error),
+                "packet_auditor_sha256": sha(pathlib.Path(__file__))}, indent=2) + "\n")
+        except Exception as receipt_error:
+            error.add_note("Could not retain audit-failure.json: " + repr(receipt_error))
+        raise
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("packet", type=pathlib.Path)
+    parser.add_argument("--output", type=pathlib.Path, required=True,
+                        help="fresh external directory for derived records; never an original packet path")
+    args = parser.parse_args(argv)
+    audit(args.packet, args.output)
+    return 0
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        raise SystemExit("usage: keeper_scale_packet_audit.py EVIDENCE_V3_PACKET [PACKET ...]")
-    for name in sys.argv[1:]:
-        audit(pathlib.Path(name).resolve())
+    raise SystemExit(main())

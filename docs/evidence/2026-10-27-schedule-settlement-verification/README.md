@@ -58,4 +58,15 @@ execution**. Its four requested aliases produced no case verdicts: the direct
 retains the exact diagnostic and rendered capture hash. The repair reuses the
 already linked canonical cancellation wrapper in commit
 `2861571c6fa3b6403cf12980feea3a109dabca71`. Test40371389026 was requested at that
-head/ref with the same four aliases; its result has not been observed here.
+head/ref with the same four aliases; its later failure is recorded below.
+
+[Test40371389026](https://github.com/jeong-sik/masc/actions/runs/40371389026),
+workflow **Test**, head `2861571c6fa3b6403cf12980feea3a109dabca71`, the same
+ref/four aliases, also completed **failure before suite execution**. The
+existing strict warning4 gate rejected the broad settlement-error pattern.
+[The exact diagnostic](test40371389026/result.json) preserves both typed-variant
+warnings; the fix explicitly enumerates the constructors without weakening
+the warning or assertions. It is committed as `4c94fcce84f`. Current source
+`c52f799e52d3683bd2a4c624f0f6adfe36015ec9` also clarifies permanent authority
+refusal and post-tick observation crash semantics. A fresh focused run will
+be requested after publication; there is no current-source execution claim.

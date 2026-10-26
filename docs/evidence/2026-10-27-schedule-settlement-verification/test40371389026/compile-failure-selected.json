@@ -1,0 +1,66 @@
+[
+  {
+    "source_line": 52,
+    "text": "test suite\tTest\t2026-10-26T17:47:09.7472517Z File \"lib/schedule/schedule_runner.ml\", lines 523-527, characters 2-98:"
+  },
+  {
+    "source_line": 53,
+    "text": "test suite\tTest\t2026-10-26T17:47:09.7503593Z 523 | ..match result with"
+  },
+  {
+    "source_line": 54,
+    "text": "test suite\tTest\t2026-10-26T17:47:09.7504275Z 524 |   | Ok _ | Error (Store_settlement_error (Schedule_store.Running_attempt_superseded _"
+  },
+  {
+    "source_line": 55,
+    "text": "test suite\tTest\t2026-10-26T17:47:09.7505157Z 525 |                                          | Schedule_store.Schedule_not_found)) -> None, None"
+  },
+  {
+    "source_line": 56,
+    "text": "test suite\tTest\t2026-10-26T17:47:09.7505802Z 526 |   | Error failure -> Some retained,"
+  },
+  {
+    "source_line": 57,
+    "text": "test suite\tTest\t2026-10-26T17:47:09.7506595Z 527 |       Some { occurrence_id = retained.occurrence_id; schedule_id = retained.schedule_id; failure }"
+  },
+  {
+    "source_line": 58,
+    "text": "test suite\tTest\t2026-10-26T17:47:09.7507534Z Error (warning 4 [fragile-match]): this pattern-matching is fragile."
+  },
+  {
+    "source_line": 59,
+    "text": "test suite\tTest\t2026-10-26T17:47:09.7508417Z   It will remain exhaustive when constructors are added to type settlement_failure."
+  },
+  {
+    "source_line": 61,
+    "text": "test suite\tTest\t2026-10-26T17:47:09.7509292Z File \"lib/schedule/schedule_runner.ml\", lines 523-527, characters 2-98:"
+  },
+  {
+    "source_line": 62,
+    "text": "test suite\tTest\t2026-10-26T17:47:09.7509932Z 523 | ..match result with"
+  },
+  {
+    "source_line": 63,
+    "text": "test suite\tTest\t2026-10-26T17:47:09.7510567Z 524 |   | Ok _ | Error (Store_settlement_error (Schedule_store.Running_attempt_superseded _"
+  },
+  {
+    "source_line": 64,
+    "text": "test suite\tTest\t2026-10-26T17:47:09.7511427Z 525 |                                          | Schedule_store.Schedule_not_found)) -> None, None"
+  },
+  {
+    "source_line": 65,
+    "text": "test suite\tTest\t2026-10-26T17:47:09.7512073Z 526 |   | Error failure -> Some retained,"
+  },
+  {
+    "source_line": 66,
+    "text": "test suite\tTest\t2026-10-26T17:47:09.7512852Z 527 |       Some { occurrence_id = retained.occurrence_id; schedule_id = retained.schedule_id; failure }"
+  },
+  {
+    "source_line": 67,
+    "text": "test suite\tTest\t2026-10-26T17:47:09.7513980Z Error (warning 4 [fragile-match]): this pattern-matching is fragile."
+  },
+  {
+    "source_line": 68,
+    "text": "test suite\tTest\t2026-10-26T17:47:09.7514860Z   It will remain exhaustive when constructors are added to type Schedule_store.store_error."
+  }
+]

@@ -30,7 +30,7 @@ let test_the_table_names_a_command_and_a_space () =
       "no space", "[browser.live.ego]\ncommand = \"/opt/ego-browser\"\n",
       "browser.live.ego.space is required when the table is configured";
       "a blank space", "[browser.live.ego]\ncommand = \"/opt/ego-browser\"\nspace = \" \"\n",
-      "browser.live.ego.space must be a non-empty task space name or a positive JavaScript-safe Space ID";
+      "browser.live.ego.space must be a non-empty task space name or a nonnegative JavaScript-safe Space ID";
       "an unknown key", "[browser.live.ego]\ncommand = \"/opt/ego-browser\"\nspace = \"masc\"\nprofile = \"x\"\n",
       "browser.live.ego.profile is not a supported setting" ];
   check (list string) "the worker's arguments" ["--live-ego-command";"/opt/ego-browser";"--live-ego-space";"masc"]
@@ -43,7 +43,7 @@ let test_the_table_names_a_command_and_a_space () =
    | Ok _|Error _ -> fail "numeric Space reference rejected");
   List.iter (fun reference -> check bool "invalid numeric references cannot start the worker" true
     (Result.is_error (configuration ("[browser.live.ego]\ncommand=\"/opt/ego-browser\"\nspace=" ^ reference ^ "\n"))))
-    ["0";"-1";"9007199254740992";"32.0";"true"]
+    ["-1";"9007199254740992";"32.0";"true"]
 
 let failure_name = function
   | Peer.Exited {code; _} -> Printf.sprintf "exited %d" code

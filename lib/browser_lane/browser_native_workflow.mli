@@ -29,6 +29,10 @@ type action =
   | Wait_for_function of page_code
   | Fetch of string
 type step = { action : action; options : native_options option }
+type pointer_button = Left | Middle | Right
+(** The exact button owned by a pointer action; [None] for all other actions. *)
+val pointer_button : step -> pointer_button option
+val pointer_button_name : pointer_button -> string
 type snapshot_scope = Viewport | Full_page
 type t = private { tab_id : int; expected_url : string; steps : step list;
   snapshot_scope : snapshot_scope; max_chars : int }

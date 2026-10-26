@@ -80,3 +80,22 @@ checks. The updated real-browser probe could not run because verification
 Space 27 disappeared before its first page operation. Installed MASC, Keeper
 dispatch and visible UI behavior for this extension remain unverified. See
 [the SDK inventory](ego-sdk-coverage.md) for evidence and remaining capabilities.
+
+### Dialogs and input release
+
+A pointer workflow stopped by a dialog retains the exact tab and native button.
+`accept_dialog` / `dismiss_dialog` on that tab answers the dialog, then sends
+`mouse.up` for that button. Further input is admitted only after that release
+returns and a subsequent observation reports no new dialog. A lost reply, failed
+release, another dialog, or an answer on a different tab leaves input blocked;
+the interrupted action is never replayed.
+
+`keyboard.type`, `keyboard.press`, and selector `press` can leave keys held when
+a dialog interrupts the SDK or the result is lost. `page.info()` observes dialogs
+and page geometry, not held keys. The SDK's `keyboard.up` accepts one native key;
+it does not accept the portable chord supplied to `press`. MASC therefore does
+not split chord strings, guess a key list, or treat dialog closure as a release
+receipt. These cases remain release-uncertain: inspect the same tab and explicitly
+end the owned task space through its normal session lifecycle before a new
+connection. A missing selector rejected by the read-only selector preflight does
+not enter this state; failure after the actual press starts still does.

@@ -122,7 +122,8 @@ let script = {js|async function nativeWorkflow(page, args) {
 
 type outcome = Completed of Yojson.Safe.t
   | Stopped of { receipt : Yojson.Safe.t; message : string;
-      effect_started : bool; completed_effect : bool; input_released : bool }
+      effect_started : bool; completed_effect : bool; input_released : bool;
+      pending_pointer_release : Browser_lane.Native_workflow.pointer_button option }
 let ( let* ) = Result.bind
 let object_fields allowed = function
   | `Assoc fields when List.for_all (fun (key,_) -> List.mem key allowed) fields
@@ -198,5 +199,11 @@ let decode (request : Browser_lane.Native_workflow.t) receipt =
         else if index+1=count && List.mem_assoc "dialog" failed then Ok has_effect
         else Error "workflow failure index does not match progress" in
     let* ()=if started=expected_started then Ok () else Error "workflow failed-step effect flag disagrees" in
-    Ok (Stopped {receipt;message;effect_started=started;completed_effect;input_released})
+    let pending_pointer_release =
+      if input_released || index+1<>count then None
+      else match List.assoc_opt "dialog" failed, List.nth_opt request.steps index with
+        | Some (`Assoc _), Some step -> Browser_lane.Native_workflow.pointer_button step
+        | (None|Some (`Null|`Bool _|`Int _|`Intlit _|`Float _|`String _|`List _)), _
+        | Some (`Assoc _), None -> None in
+    Ok (Stopped {receipt;message;effect_started=started;completed_effect;input_released;pending_pointer_release})
   | _ -> Error "workflow failure must be null or an object"

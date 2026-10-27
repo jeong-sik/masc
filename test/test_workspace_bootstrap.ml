@@ -207,7 +207,7 @@ let create_recoverable_task config =
       ~description:"must remain observable"
   with
   | Ok created -> created.task_id
-  | Error error -> failwith (Workspace_task_create.add_task_error_to_string error)
+  | Error error -> failwith (Workspace.add_task_error_to_string error)
 
 let assert_recovery_remains_observable config ~task_id ~recovery_before =
   let primary = Workspace_utils.backlog_path config in

@@ -190,6 +190,28 @@ let expected_runtime_assignment_revision before =
       | Some runtime_assignment -> Ok runtime_assignment
       | None -> Error "keeper runtime assignment revision was not observed")
 
+type prior_assignment =
+  | Prior_assigned of string
+  | Prior_workspace_default
+
+(* The assignment a write was fenced on, read from the same revision the
+   request carries as [expected_assignment_revision]. A missing config file and
+   a present file with no assignment both leave the Keeper on the workspace
+   default. Anything else the revision says is not guessed at. *)
+let prior_runtime_assignment revision =
+  match member "state" revision with
+  | Some (`String "runtime_config_missing") -> Ok Prior_workspace_default
+  | Some (`String "runtime_config_present") ->
+    (match member_path [ "assignment"; "state" ] revision with
+     | Some (`String "missing") -> Ok Prior_workspace_default
+     | Some (`String "assigned") ->
+       (match member_path [ "assignment"; "runtime_id" ] revision with
+        | Some (`String runtime_id) when String.trim runtime_id <> "" ->
+          Ok (Prior_assigned runtime_id)
+        | Some _ | None -> Error "assigned runtime revision has no runtime_id")
+     | Some _ | None -> Error "runtime assignment revision has no readable assignment state")
+  | Some _ | None -> Error "runtime assignment revision has no readable state"
+
 type runtime_assignment_unchanged = {
   revision : Yojson.Safe.t;
   warnings : Masc_tui_runtime_config_receipt.lock_warning list;

@@ -21849,7 +21849,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         | Assignment_finished (_,outcome) ->
             let origin = if current then "" else " (" ^ request.ras_key.ksk_base_path ^ ")" in
             report_action state (if runtime_assignment_needs_attention outcome then "error" else "system")
-              (request.ras_key.ksk_keeper ^ origin ^ " assignment → " ^ runtime_assignment_choice request
+              (request.ras_key.ksk_keeper ^ origin ^ runtime_assignment_transition status request
                 ^ " · " ^ runtime_assignment_outcome_detail outcome);
             if current then match outcome with
               | Assignment_answered _ | Assignment_conflict _ | Assignment_unconfirmed _ ->

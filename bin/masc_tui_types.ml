@@ -11651,6 +11651,28 @@ let runtime_assignment_phase = function
 
 let runtime_assignment_choice request = Option.value ~default:"workspace default" request.ras_runtime_id
 
+(* The assignment the write was fenced on, known once the current revision has
+   been read. Before that, and when nothing was read, there is no "before" to
+   show. *)
+let runtime_assignment_prior = function
+  | Assignment_posting prepared | Assignment_finished (Some prepared, _) ->
+      Some (Masc_tui_keeper_config.prior_runtime_assignment prepared.rap_expected_revision)
+  | Assignment_checking | Assignment_reading | Assignment_finished (None, _) -> None
+
+let runtime_assignment_prior_text = function
+  | Ok (Masc_tui_keeper_config.Prior_assigned runtime_id) ->
+      Masc.Tui_terminal_text.sanitize_terminal_text runtime_id
+  | Ok Masc_tui_keeper_config.Prior_workspace_default -> "workspace default"
+  | Error _ -> "unreadable"
+
+(* The words after the Keeper name: " assignment: A → B" when the previous
+   assignment is known, " assignment → B" before it has been read. *)
+let runtime_assignment_transition status request =
+  let choice = runtime_assignment_choice request in
+  match runtime_assignment_prior status with
+  | Some prior -> " assignment: " ^ runtime_assignment_prior_text prior ^ " → " ^ choice
+  | None -> " assignment → " ^ choice
+
 let runtime_assignment_outcome_detail = function
   | Assignment_answered (Masc_tui_keeper_config.Assignment_committed receipt) ->
       Masc_tui_runtime_config_receipt.lane_summary receipt
@@ -11674,7 +11696,7 @@ let runtime_assignment_notice state =
   Option.bind (runtime_assignment_target_key state) (fun key ->
     Option.bind (List.find_opt (fun attempt -> keeper_settings_same_origin key attempt.raa_request.ras_key)
       (Runtime_assignment_saves.all state.runtime_assignment_saves)) (fun attempt ->
-      let prefix = key.ksk_keeper ^ " assignment → " ^ runtime_assignment_choice attempt.raa_request ^ " · " in
+      let prefix = key.ksk_keeper ^ runtime_assignment_transition attempt.raa_status attempt.raa_request ^ " · " in
       match attempt.raa_status with
       | Assignment_checking -> Some (prefix ^ "checking original workspace")
       | Assignment_reading -> Some (prefix ^ "reading current assignment revision")
@@ -19478,6 +19500,23 @@ let runtime_picker_items (state : state) : runtime_pick_item list =
 let runtime_pick_item_id = function
   | Pick_lane (lane, _) -> lane.Tui_decode.rrl_id
   | Pick_model model -> model.Tui_decode.ro_id
+
+(* The picker row id that is the Keeper's own explicit assignment. A Keeper on
+   the workspace default has no such row, and an assignment the catalog cannot
+   resolve names nothing the picker lists. *)
+let runtime_pick_current_id (state : state) =
+  match state.runtime_pick_keeper with
+  | None -> None
+  | Some keeper ->
+      (match List.find_opt (fun (a : Tui_decode.runtime_assignment) ->
+               String.equal a.Tui_decode.ra_keeper keeper) state.runtime_assignments with
+       | Some { Tui_decode.ra_source = Tui_decode.Explicit_runtime;
+                ra_resolution = Tui_decode.Runtime_assignment_lane lane_id; _ } -> Some lane_id
+       | Some { Tui_decode.ra_source = Tui_decode.Explicit_runtime;
+                ra_resolution = (Tui_decode.Runtime_assignment_missing
+                                | Tui_decode.Runtime_assignment_unavailable _); _ }
+       | Some { Tui_decode.ra_source = Tui_decode.Default_runtime; _ }
+       | None -> None)
 
 (* Target and route column widths for the runtime picker. Bindings of one
    model that differ only in reasoning effort share provider, model and

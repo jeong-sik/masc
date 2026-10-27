@@ -3660,6 +3660,60 @@ let test_assignment_receipt_keeps_original_choice_after_withdrawal () =
   Alcotest.(check bool) "an interrupted terminal operation cannot start posting again" false
     (publish_runtime_assignment request ~observed_ns:34L (Assignment_posting prepared))
 
+let test_assignment_names_the_prior_runtime_once_it_is_read () =
+  let open Masc_tui_types in
+  let state,keeper = keeper_settings_fixture () in
+  let prior_of status =
+    match runtime_assignment_prior status with
+    | None -> `Unknown
+    | Some (Ok (Masc_tui_keeper_config.Prior_assigned runtime_id)) -> `Assigned runtime_id
+    | Some (Ok Masc_tui_keeper_config.Prior_workspace_default) -> `Default
+    | Some (Error _) -> `Unreadable in
+  let prepared_with revision =
+    {rap_snapshot=(keeper_settings_snapshot ()).kss_observed;rap_expected_revision=revision} in
+  let on_default = match Masc_tui_keeper_config.expected_runtime_assignment_revision
+      (keeper_settings_snapshot ()).kss_observed with
+    | Ok revision -> prepared_with revision | Error detail -> Alcotest.fail detail in
+  let assigned = prepared_with (`Assoc ["state",`String "runtime_config_present";
+    "source_revision",`String (String.make 64 'b');
+    "assignment",`Assoc ["state",`String "assigned";"runtime_id",`String "codex.previous"]]) in
+  let unreadable = prepared_with (`Assoc ["state",`String "runtime_config_present"]) in
+  let attempt = Assignment_not_sent "not dispatched" in
+  Alcotest.(check bool) "nothing is known before the current revision has been read" true
+    (prior_of Assignment_checking = `Unknown && prior_of Assignment_reading = `Unknown);
+  Alcotest.(check bool) "an attempt that read nothing names no previous runtime" true
+    (prior_of (Assignment_finished (None,attempt)) = `Unknown);
+  Alcotest.(check bool) "the revision the write is fenced on is the previous assignment" true
+    (prior_of (Assignment_posting assigned) = `Assigned "codex.previous"
+     && prior_of (Assignment_finished (Some assigned,Assignment_unconfirmed "late")) = `Assigned "codex.previous");
+  Alcotest.(check bool) "a Keeper with no explicit assignment was on the workspace default" true
+    (prior_of (Assignment_posting on_default) = `Default);
+  Alcotest.(check bool) "a revision that names no assignment is reported unreadable, not defaulted" true
+    (prior_of (Assignment_posting unreadable) = `Unreadable);
+  (* The picker marks the Keeper's own explicit assignment and nothing else. *)
+  let assignment source resolution = {Tui_decode.ra_keeper=keeper.k_name;ra_source=source;ra_resolution=resolution} in
+  let current_with assignments =
+    state.runtime_assignments <- assignments;
+    runtime_pick_current_id state in
+  state.runtime_pick_keeper <- Some keeper.k_name;
+  Alcotest.(check (option string)) "explicit lane assignment is the current row"
+    (Some "codex.previous")
+    (current_with [assignment Tui_decode.Explicit_runtime (Tui_decode.Runtime_assignment_lane "codex.previous")]);
+  Alcotest.(check (option string)) "the fleet default marks no row"
+    None
+    (current_with [assignment Tui_decode.Default_runtime (Tui_decode.Runtime_assignment_lane "codex.previous")]);
+  Alcotest.(check (option string)) "an assignment the catalog cannot resolve marks no row"
+    None
+    (current_with [assignment Tui_decode.Explicit_runtime Tui_decode.Runtime_assignment_missing]);
+  Alcotest.(check (option string)) "another Keeper's assignment is not this Keeper's"
+    None
+    (current_with [{Tui_decode.ra_keeper="someone-else";ra_source=Tui_decode.Explicit_runtime;
+      ra_resolution=Tui_decode.Runtime_assignment_lane "codex.previous"}]);
+  state.runtime_pick_keeper <- None;
+  Alcotest.(check (option string)) "no picker, no current row"
+    None
+    (current_with [assignment Tui_decode.Explicit_runtime (Tui_decode.Runtime_assignment_lane "codex.previous")])
+
 let test_assignment_serializes_same_keeper_config_intents () =
   let open Masc_tui_types in
   let state,keeper = keeper_settings_fixture () in
@@ -4778,6 +4832,8 @@ let () =
             test_catalog_withdrawal_folds_demand_into_reconfirmation
         ; Alcotest.test_case "assignment receipt retains original choice after navigation and withdrawal" `Quick
             test_assignment_receipt_keeps_original_choice_after_withdrawal
+        ; Alcotest.test_case "assignment names the previous runtime once it is read" `Quick
+            test_assignment_names_the_prior_runtime_once_it_is_read
         ; Alcotest.test_case "assignment, editor and Sandbox saves serialize per Keeper" `Quick
             test_assignment_serializes_same_keeper_config_intents
         ; Alcotest.test_case "Sandbox shortcut binds only selected profile to observed revision" `Quick

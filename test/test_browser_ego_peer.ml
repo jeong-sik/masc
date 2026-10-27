@@ -1436,15 +1436,29 @@ const taskSpace=async id=>({spaceId:id,name:'SDK Space',ownership:%s,
   let seen ()=match List.find_opt (String.starts_with ~prefix:"seen ") (String.split_on_char '\n' !output) with
     | Some line -> Yojson.Safe.from_string (after ~prefix:"seen " line)
     | None -> fail "native stand-in emitted no calls" in
-  let options=obj ["interval",`Float 0.5;"timeout",`Float 100000.] in
+  let reply_ms=Lane.reply_timeout_sec (Lane.Page_act (Lane.Action.Control
+    (Lane.Action.Wait_for_control {Lane.Action.interval_ms=None;timeout_ms=None}))) *. 1000. in
+  ignore (before_effect "a timeout as long as the Keeper's whole wait is refused"
+    (wait (obj ["timeout",`Float reply_ms])));
+  check int "a refused timeout starts no native wait" 0 !calls;
+  let options=obj ["interval",`Float 0.5;"timeout",`Float 30000.] in
   (match wait options with
    | Ok value -> check bool "wait observation names the same Space" true
        (value=obj ["action",str "wait_for_control";"spaceId",`Int 51;"spaceName",str "SDK Space";"controlAvailable",`Bool true])
    | Error _ -> fail "native control wait failed");
-  check bool "options reach the SDK unchanged" true
-    (seen ()=`List [obj ["interval",`Float 0.5;"timeout",`Int 100000]]);
+  check bool "options inside the window reach the SDK unchanged" true
+    (seen ()=`List [obj ["interval",`Float 0.5;"timeout",`Int 30000]]);
   native_failure:=true;
   ignore (before_effect "SDK wait timeout sends no input" (wait (obj [])));
+  let window_ms=match seen () with
+    | `List [`Assoc ["timeout",`Int ms]] -> ms
+    | other -> failf "an omitted timeout reaches the SDK as one timeout, got %s" (Yojson.Safe.to_string other) in
+  check bool "the omitted timeout fits inside the Keeper's wait" true
+    (window_ms > 0 && float_of_int window_ms < reply_ms);
+  native_failure:=false;
+  (match wait (obj ["timeout",`Int window_ms]) with
+   | Ok _ -> ()
+   | Error _ -> fail "a timeout equal to the reply window is accepted");
   native_failure:=false;ownership:="agentDelegatedToUser";
   ignore (before_effect "a user-held Space cannot be reclaimed by waiting" (wait (obj [])));
   check bool "user-held Space runs no native wait or page call" true (seen ()=`List []);

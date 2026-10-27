@@ -606,8 +606,24 @@ let acquire_base_path_lock ~previous_owner ~run_dir base_path =
     | Refuse_previous_owner ->
       Server_startup_takeover.acquire_base_path_lock ~run_dir base_path
     | Wait_for_previous_owner ->
-      Server_startup_takeover.acquire_base_path_lock_after_owner_exits ~run_dir
-        ~on_wait:(announce_wait_for_previous_owner ~base_path) base_path
+      (match
+         Server_startup_takeover.acquire_base_path_lock_after_owner_exits ~run_dir
+           ~on_wait:(announce_wait_for_previous_owner ~base_path) base_path
+       with
+       | Ok acquired -> acquired
+       | Error (Server_startup_takeover.Another_replacement_waits { waiter; waiter_path }) ->
+         let named =
+           match Server_startup_takeover.base_path_owner_pid waiter with
+           | Some pid -> Printf.sprintf "PID %d" pid
+           | None -> "an unnamed process"
+         in
+         Log.legacy_stderr ~level:Log.Error ~module_name:"Server"
+           (Printf.sprintf
+              "[FATAL] Another replacement (%s, %s) already waits for the previous \
+               owner of %s; it starts once that owner exits. This process waits for \
+               nothing and exits."
+              named (Filename.quote waiter_path) base_path);
+         exit 1)
   in
   match acquired with
   | Server_startup_takeover.Base_path_acquired lease -> lease

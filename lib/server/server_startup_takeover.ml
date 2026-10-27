@@ -891,6 +891,9 @@ let lock_lease_file ~contention fd =
     (try Unix.lockf fd Unix.F_TLOCK 0 with
      | Unix.Unix_error ((Unix.EACCES | Unix.EAGAIN), _, _) ->
        on_wait (base_path_owner_of_recorded (parsed_pid_fd fd));
+       (* [parsed_pid_fd] moved the offset; lockf locks from the offset on,
+          and every other holder locks from byte 0. *)
+       let (_ : int) = Unix.lseek fd 0 Unix.SEEK_SET in
        lockf_until_granted fd)
 ;;
 
@@ -1081,13 +1084,82 @@ let acquire_base_path_lock ~run_dir base_path =
     ~run_dir base_path
 ;;
 
+type base_path_wait_refusal =
+  | Another_replacement_waits of
+      { waiter : base_path_owner
+      ; waiter_path : string
+      }
+
+(* One waiter per workspace. A second waiter would queue behind whichever
+   process the kernel hands the lease to next, so a later replacement could
+   wait for a server nobody asked to stop and then start an older build. The
+   waiter lock lives beside the lease, in the private directory
+   [prepare_base_path_lock] has already validated. *)
+let open_waiter_file prepared =
+  let waiter_path = prepared.path ^ ".waiter" in
+  match
+    Unix.openfile waiter_path [ Unix.O_RDWR; Unix.O_CREAT; Unix.O_CLOEXEC ] 0o600
+  with
+  | exception Unix.Unix_error (error, _, _) ->
+    Error
+      (Lease_io_failed
+         { operation = "open_waiter_file"
+         ; path = waiter_path
+         ; reason = Unix.error_message error
+         })
+  | fd ->
+    let stat = Unix.fstat fd in
+    if stat.st_kind <> Unix.S_REG
+    then (
+      Unix.close fd;
+      Error (Lease_file_non_regular { path = waiter_path; kind = stat.st_kind }))
+    else if stat.st_nlink > 1
+    then (
+      Unix.close fd;
+      Error (Lease_file_multiply_linked { path = waiter_path; links = stat.st_nlink }))
+    else Ok (waiter_path, fd)
+;;
+
 let acquire_base_path_lock_after_owner_exits ~run_dir ~on_wait base_path =
-  acquire_base_path_lock_with
-    ~contention:(Wait_for_release on_wait)
-    ~before_lease_open:(fun () -> ())
-    ~before_commit_identity_check:(fun () -> ())
-    ~before_runtime_identity_check:(fun () -> ())
-    ~run_dir base_path
+  match prepare_base_path_lock ~run_dir base_path with
+  | Error rejection -> Ok (Base_path_rejected rejection)
+  | Ok prepared ->
+    (match open_waiter_file prepared with
+     | Error rejection -> Ok (Base_path_rejected rejection)
+     | Ok (waiter_path, waiter_fd) ->
+       Fun.protect
+         ~finally:(fun () -> try Unix.close waiter_fd with Unix.Unix_error _ -> ())
+         (fun () ->
+           match Unix.lockf waiter_fd Unix.F_TLOCK 0 with
+           | exception Unix.Unix_error ((Unix.EACCES | Unix.EAGAIN), _, _) ->
+             Error
+               (Another_replacement_waits
+                  { waiter = base_path_owner_of_recorded (parsed_pid_fd waiter_fd)
+                  ; waiter_path
+                  })
+           | () ->
+             (match
+                Unix.ftruncate waiter_fd 0;
+                let (_ : int) = Unix.lseek waiter_fd 0 Unix.SEEK_SET in
+                write_all waiter_fd (Printf.sprintf "%d\n" (Unix.getpid ()))
+              with
+              | exception Unix.Unix_error (error, _, _) ->
+                Ok
+                  (Base_path_rejected
+                     (Lease_io_failed
+                        { operation = "record_waiter"
+                        ; path = waiter_path
+                        ; reason = Unix.error_message error
+                        }))
+              | () ->
+                Ok
+                  (acquire_base_path_lock_with
+                     ~contention:(Wait_for_release on_wait)
+                     ~before_lease_open:(fun () -> ())
+                     ~before_commit_identity_check:(fun () -> ())
+                     ~before_runtime_identity_check:(fun () -> ())
+                     ~run_dir
+                     base_path))))
 ;;
 
 module For_testing = struct

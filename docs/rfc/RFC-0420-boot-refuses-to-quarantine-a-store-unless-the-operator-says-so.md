@@ -155,7 +155,7 @@ rename 자체가 실패한 경우(`report.failed`)는 지금처럼 보고서에 
 
 ## 8. 건드리지 않는 것
 
-- `validate-stores` 와 `deploy.sh`.
+- `validate-stores`.
 - 격리의 파일 이름 규칙(`.rejected-<ts>`, 번호 접미사)과 journal 의 `quarantined` 줄.
 - reconcile 이 보지 않는 여섯 store. 그것들은 부팅에서 옮겨진 적이 없다.
 
@@ -163,4 +163,4 @@ rename 자체가 실패한 경우(`report.failed`)는 지금처럼 보고서에 
 
 - #32515 `feat(boot): move aside every store this build cannot decode, once, before keepers start` (623a4b2ca7, 2026-09-02).
 - #33241 코멘트 (2026-09-05): 격리 15건, 복구 절차, 복구 증명.
-- `scripts/deploy.sh` 4단계와 `deployment_preflight_helper validate-stores`.
+- `install-local-build.sh` 와 컨테이너 진입점이 부르는 `deployment_preflight_helper validate-stores`.

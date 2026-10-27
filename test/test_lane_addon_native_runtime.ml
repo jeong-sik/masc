@@ -698,6 +698,28 @@ hooks = ["validate_input", "validate_output"]
   (match Browser_goal_space.bind config ~goal_id:goal ~addon_instance_id:other_id
       ~space:{id=51;name="Goal fixture"} ~actor:"goal-fixture" with
    | Ok _ -> () | Error error -> fail (Browser_goal_space.error_message error));
+  (* A worker whose snapshot keeps failing stays in the inventory as an issue,
+     while its sibling's connections remain listed for an explicit choice. *)
+  let candidate_is_ready ()=match R.browser_service_status ~config ~access ~instance_id:replacement with
+    | R.Browser_ready _->true | Browser_refresh_needed _|Browser_unavailable|Browser_retired->false in
+  let reject_snapshot=Filename.concat root ("reject-snapshot-"^replacement) in
+  write reject_snapshot "persistent";
+  let partial_inventory=public Browser_capabilities.Tabs ["mode",`String "connections"] in
+  check bool "a failed worker still returns the surviving connection inventory" true
+    (Tool_result.is_success partial_inventory);
+  let partial_data=Tool_result.data partial_inventory in
+  check bool "failed observation is reported as incomplete" true (member "inventoryComplete" partial_data=`Bool false);
+  check bool "the failed worker remains an explicit issue" true
+    (partial_data |> member "inventoryIssues" |> Yojson.Safe.Util.to_list
+      |> List.exists (fun row -> member "instanceId" row=`String replacement));
+  check (list string) "readable sibling identity survives failed observation"
+    [Browser_lane.client_id_to_string ego.client_id]
+    (partial_data |> member "clients" |> Yojson.Safe.Util.to_list |> List.map (text "clientId"));
+  check bool "a partial inventory never recommends automatic fallback" true
+    (partial_data |> member "automatic" |> member "browse" |> member "error" |> member "code"=`String "browser_binding_required");
+  Unix.unlink reject_snapshot;
+  ignore (dispatch config R.Observe ["instance_id",`String replacement]);
+  wait clock candidate_is_ready;
   ignore (dispatch config R.Detach ["instance_id",`String other_id]);
   wait clock (fun () -> inspect other_id |> member "phase" |> text "kind"="detached");
   let goal_status principal=Browser_addon_tools.handle ~config ~access ~principal ~reserved:[]

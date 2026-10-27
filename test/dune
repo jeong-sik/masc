@@ -6801,3 +6801,5 @@
 (include stanzas/test_endpoint_job_registry.inc)
 
 (include stanzas/test_domain_budget.inc)
+
+(include stanzas/test_authz_scope.inc)

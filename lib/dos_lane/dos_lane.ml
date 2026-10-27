@@ -1758,6 +1758,7 @@ type resume =
   | Machine_loaded
   | Resumed of observation
   | Not_resumed of error
+  | Resume_raised of string
 
 (* Who did it, on the activity feed: nobody asked for this machine, and no
    Keeper's name is put on what a worker does as it starts. *)
@@ -1770,8 +1771,8 @@ let worker_start = "worker start"
    over everything and a missing mark or file is always a quiet
    [Nothing_to_resume]. The consent argument is never consulted for this slot
    ([check_restore_consent]). The restore runs inside the worker before it
-   serves, so an exception from it is reported as the reason and never ends
-   the worker; cancellation goes on unwinding. *)
+   serves, so an exception from it is reported as [Resume_raised] and never
+   ends the worker; cancellation goes on unwinding. *)
 let resume_autosave ~dir ~ledger_dir ~saves_dir_of =
   let attempt () =
     if locked (fun () -> Option.is_some !state) then Machine_loaded
@@ -1811,15 +1812,16 @@ let resume_autosave ~dir ~ledger_dir ~saves_dir_of =
     match attempt () with
     | resumed -> resumed
     | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
-    | exception exn ->
-      Not_resumed (Unreadable ("restoring the autosave raised " ^ Printexc.to_string exn))
+    | exception exn -> Resume_raised (Printexc.to_string exn)
+  in
+  let failed reason =
+    locked (fun () ->
+      note_activity ~who:worker_start
+        ("restore " ^ Machine_checkpoint.slot_to_string autosave_slot ^ " failed: " ^ reason))
   in
   (match resumed with
-   | Not_resumed error ->
-     locked (fun () ->
-       note_activity ~who:worker_start
-         ("restore " ^ Machine_checkpoint.slot_to_string autosave_slot ^ " failed: "
-          ^ error_to_string error))
+   | Not_resumed error -> failed (error_to_string error)
+   | Resume_raised exn -> failed ("the restore raised " ^ exn)
    | Nothing_to_resume | Machine_loaded | Resumed _ -> ());
   resumed
 ;;

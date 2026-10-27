@@ -1404,14 +1404,16 @@ let resume_autosave ~base_path =
       Dos_lane.resume_autosave ~dir:(checkpoints_dir ~base_path) ~ledger_dir:(dos_dir ~base_path)
         ~saves_dir_of:(saves_dir ~base_path))
   in
+  let failed reason =
+    Atomic.set start_failure (Some { reason; tried = autosave_identity ~base_path });
+    Log.DosLog.warn "masc_dos the autosave was not resumed: %s" reason
+  in
   (match resumed with
    | Dos_lane.Resumed o ->
      Atomic.set start_failure None;
      Log.DosLog.info "masc_dos resumed the autosave at %d steps" o.Dos_lane.steps
-   | Dos_lane.Not_resumed error ->
-     let reason = Dos_lane.error_to_string error in
-     Atomic.set start_failure (Some { reason; tried = autosave_identity ~base_path });
-     Log.DosLog.warn "masc_dos the autosave was not resumed: %s" reason
+   | Dos_lane.Not_resumed error -> failed (Dos_lane.error_to_string error)
+   | Dos_lane.Resume_raised exn -> failed ("the restore raised " ^ exn)
    | Dos_lane.Nothing_to_resume | Dos_lane.Machine_loaded -> Atomic.set start_failure None);
   resumed
 ;;

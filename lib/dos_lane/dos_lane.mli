@@ -658,10 +658,14 @@ type resume =
   | Machine_loaded  (** a machine is already loaded; it is left as it is *)
   | Resumed of observation  (** the autosave is the workspace machine; the controller is free *)
   | Not_resumed of error
-      (** the mark and the autosave are there, and the restore was refused
-          or raised, with the reason: machine activity is off or unobserved,
-          or the file will not read. Nothing is loaded, both autosave files
-          are left as they were, and {!autosave_prev_slot} is not tried. *)
+      (** the mark and the autosave are there, and the restore was refused,
+          with the reason: machine activity is off or unobserved, or the file
+          will not read. Nothing is loaded, both autosave files are left as
+          they were, and {!autosave_prev_slot} is not tried. *)
+  | Resume_raised of string
+      (** the mark and the autosave are there, and the restore raised, with
+          the exception. As with [Not_resumed], nothing is loaded and both
+          autosave files are left as they were. *)
 
 val resume_autosave :
   dir:string -> ledger_dir:string -> saves_dir_of:(string -> string) -> resume
@@ -680,8 +684,8 @@ val resume_autosave :
 
     A resume, and a restore that was refused or raised with the reason, each
     put a line on {!recent_activity}. An exception from the restore, other
-    than cancellation, is reported as [Unreadable] with the exception and does
-    not escape. Nothing is announced. *)
+    than cancellation, is [Resume_raised] and does not escape. Nothing is
+    announced. *)
 
 val ledger : unit -> entry list
 (** Oldest first. Empty when no machine is loaded. *)

@@ -162,11 +162,13 @@ let describe_resume = function
   | Dos_lane.Machine_loaded -> "a machine was already loaded"
   | Dos_lane.Resumed o -> Printf.sprintf "resumed at %d steps" o.Dos_lane.steps
   | Dos_lane.Not_resumed error -> "not resumed: " ^ Dos_lane.error_to_string error
+  | Dos_lane.Resume_raised exn -> "the restore raised " ^ exn
 ;;
 
 let resumed ~name = function
   | Dos_lane.Resumed observation -> observation
-  | (Dos_lane.Nothing_to_resume | Dos_lane.Machine_loaded | Dos_lane.Not_resumed _) as other ->
+  | ( Dos_lane.Nothing_to_resume | Dos_lane.Machine_loaded | Dos_lane.Not_resumed _
+    | Dos_lane.Resume_raised _ ) as other ->
     failf "%s: %s" name (describe_resume other)
 ;;
 
@@ -187,7 +189,8 @@ let holder () =
 let nothing_to_resume ~name fixture =
   (match resume fixture with
    | Dos_lane.Nothing_to_resume -> ()
-   | (Dos_lane.Machine_loaded | Dos_lane.Resumed _ | Dos_lane.Not_resumed _) as other ->
+   | ( Dos_lane.Machine_loaded | Dos_lane.Resumed _ | Dos_lane.Not_resumed _
+     | Dos_lane.Resume_raised _ ) as other ->
      failf "%s: %s" name (describe_resume other));
   check bool (name ^ ": no machine") false (loaded ())
 ;;
@@ -678,7 +681,8 @@ let test_an_unreadable_autosave_is_not_resumed_and_says_why () =
     let reason =
       match resume fixture with
       | Dos_lane.Not_resumed error -> Dos_lane.error_to_string error
-      | (Dos_lane.Nothing_to_resume | Dos_lane.Machine_loaded | Dos_lane.Resumed _) as other ->
+      | ( Dos_lane.Nothing_to_resume | Dos_lane.Machine_loaded | Dos_lane.Resumed _
+        | Dos_lane.Resume_raised _ ) as other ->
         failf "a damaged autosave: %s" (describe_resume other)
     in
     check bool "nothing is loaded" false (loaded ());
@@ -706,9 +710,8 @@ let test_an_exception_while_resuming_is_reported_and_loads_nothing () =
        Dos_lane.resume_autosave ~dir:fixture.checkpoints ~ledger_dir:fixture.directory
          ~saves_dir_of:(fun _ -> failwith "saves directory unavailable")
      with
-     | Dos_lane.Not_resumed (Dos_lane.Unreadable reason) ->
-       check bool "the reason names the exception" true
-         (mentions "saves directory unavailable" reason)
+     | Dos_lane.Resume_raised exn ->
+       check bool "the exception is the reason" true (mentions "saves directory unavailable" exn)
      | (Dos_lane.Nothing_to_resume | Dos_lane.Machine_loaded | Dos_lane.Resumed _
        | Dos_lane.Not_resumed _) as other ->
        failf "a restore that raised: %s" (describe_resume other));
@@ -729,7 +732,8 @@ let test_a_start_leaves_a_loaded_machine_alone () =
     let before = incarnation () in
     (match resume fixture with
      | Dos_lane.Machine_loaded -> ()
-     | (Dos_lane.Nothing_to_resume | Dos_lane.Resumed _ | Dos_lane.Not_resumed _) as other ->
+     | ( Dos_lane.Nothing_to_resume | Dos_lane.Resumed _ | Dos_lane.Not_resumed _
+       | Dos_lane.Resume_raised _ ) as other ->
        failf "a loaded machine: %s" (describe_resume other));
     check string "the same machine" before (incarnation ());
     check (option string) "and its holder" (Some who) (controller ()))

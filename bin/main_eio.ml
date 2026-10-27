@@ -721,6 +721,17 @@ let run_cmd ?schema_observation ?(record_default = false) ~executable_path host 
      List.iter
        (fun failure -> Log.Server.warn "[Startup] retained checkpoint sweep: %s" failure)
        failures);
+  (* The process lease is held and no original-request writer has started. *)
+  (match Masc.Lane_addon_orphan_body_sweep.run_at_startup ~base_path:canonical_base_path with
+   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+   | exception _ ->
+     Log.Server.warn "[Startup] original request body sweep raised; its last effect may be unconfirmed"
+   | Error error ->
+     Log.Server.warn "[Startup] original request body sweep stopped: %s"
+       (Masc.Lane_addon_orphan_body_sweep.error_to_string error)
+   | Ok report ->
+     Log.Server.info "[Startup] original request body sweep: removed=%d protected_digests=%d"
+       report.removed report.protected_digests);
   (* Only the server samples. Sampling starts before [Eio_main.run] so the
      executor pool, which the main domain spawns while sampling, shares the
      profile and the boot-time loads are in the tables. The rate is a tenth

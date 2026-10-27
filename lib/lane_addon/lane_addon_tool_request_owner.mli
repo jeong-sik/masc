@@ -41,6 +41,9 @@ type retained = private {
 }
 val request_digest : Yojson.Safe.t -> (string, string) result
 (** The digest a record names a request by: of its canonical JSON bytes. *)
+val validate_canonical_request_body : string -> (unit, string) result
+(** Check the complete canonical request without loading or granting ownership
+    of a record. The caller separately verifies any claimed digest. *)
 val load : store:Lane_addon_store.t -> scope:string -> request_id:string ->
   (retained option, error) result
 (** Read the record and the complete original canonical request it names
@@ -99,6 +102,10 @@ val check_published :
     and request ID the record names: the complete record, the body
     [read_body] returns for its digest, and its scope directory and filename.
     Reads nothing else and writes nothing. *)
+val decode_published : directory_name:string -> file_name:string -> Yojson.Safe.t ->
+  (Record.t, string) result
+(** Strictly decode a record and verify the scope-directory and request-file
+    identities it names. Does not read its body or authorize any effect. *)
 val retain : store:Lane_addon_store.t -> scope:string -> request_id:string ->
   installation_id:string -> package_id:string -> tool:string -> summary:Yojson.Safe.t ->
   request:Yojson.Safe.t -> (unit, error) result

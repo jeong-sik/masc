@@ -67,6 +67,19 @@ let run_cmd cli_base_path =
   in
   Eio.Switch.on_release sw (fun () ->
     Server_startup_takeover.release_base_path_lease lease);
+  (* Complete any system-thread sweep before cancellation can release the
+     process lease or owner initialization can start original writers. *)
+  Eio.Cancel.protect (fun () ->
+    match Masc.Lane_addon_orphan_body_sweep.run_at_startup ~base_path with
+    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+    | exception _ ->
+      Log.Server.warn "[Startup] original request body sweep raised; its last effect may be unconfirmed"
+    | Error error ->
+      Log.Server.warn "[Startup] original request body sweep stopped: %s"
+        (Masc.Lane_addon_orphan_body_sweep.error_to_string error)
+    | Ok report ->
+      Log.Server.info "[Startup] original request body sweep: removed=%d protected_digests=%d"
+        report.removed report.protected_digests);
   Server_startup_state.reset ();
   Server_startup_state.mark_blocking ();
   let initialized =

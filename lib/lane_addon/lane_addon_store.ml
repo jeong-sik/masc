@@ -634,18 +634,26 @@ let with_tool_request_scope ~namespace ~sync_parent t ~scope fn =
   serialized_tool_request_read t ~scope (fun () -> read_tool_request_scope ~namespace ~sync_parent t ~scope fn)
 let with_tool_request_owner_scope ~sync_parent t ~scope fn =
   with_tool_request_scope ~namespace:tool_request_owners_directory ~sync_parent t ~scope fn
-let read_owned_tool_request_bytes ~sync_file ~sync_parent ~owner_uid held name =
+let read_owned_tool_request_bytes_and_stat ~sync_file ~sync_parent ~owner_uid held name =
   let path = Filename.concat (Fs_compat.owned_inventory_root_path held) name in
   let* relative = Fs_compat.owned_relative_path [name] in
   let* result = Fs_compat.with_owned_inventory_regular_file ~owner_uid held relative
     (fun ~file ~parent ~stat -> protect (fun () ->
       let* bytes = record_bytes file stat.Unix.st_size in
       let* read = settle_verified_record ~sync_file ~sync_parent path file stat bytes parent in
-      changed_during_verification read)) |> owned_result in
+      let* bytes = changed_during_verification read in
+      Ok (bytes,stat))) |> owned_result in
   result
+let read_owned_tool_request_bytes ~sync_file ~sync_parent ~owner_uid held name =
+  read_owned_tool_request_bytes_and_stat ~sync_file ~sync_parent ~owner_uid held name
+  |> Result.map fst
 let read_owned_tool_request ~sync_file ~sync_parent ~owner_uid held name =
   let* bytes = read_owned_tool_request_bytes ~sync_file ~sync_parent ~owner_uid held name in
   protect (fun () -> Ok (Yojson.Safe.from_string bytes))
+let inspect_staged_tool_request ~owner_uid held name =
+  let* relative = Fs_compat.owned_relative_path [name] in
+  Fs_compat.with_owned_inventory_regular_file ~owner_uid held relative
+    (fun ~file ~parent ~stat:_ -> Unix.fsync file; Unix.fsync parent) |> owned_result
 let tool_request_owner_record t ~scope ~request_id =
   let name = digest request_id ^ ".json" in
   let* result = read_tool_request_scope ~namespace:tool_request_owners_directory ~sync_parent:Unix.fsync t ~scope
@@ -772,7 +780,7 @@ let tool_request_owner_inventory_with ~after_listing ~sync_file ~sync_parent t ~
 let tool_request_owner_inventory = tool_request_owner_inventory_with
   ~after_listing:(fun _ -> ()) ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
 
-let fold_tool_request_owner_inventory_all t ~init ~f =
+let fold_tool_request_owner_inventory_all_with ~check_staged ~serialize_scopes t ~init ~f =
   let blocking () = protect (fun () ->
     let* result=Fs_compat.with_owned_inventory_root (Filename.dirname t.root) (fun anchor ->
       let owner_uid=Unix.geteuid () in
@@ -790,7 +798,7 @@ let fold_tool_request_owner_inventory_all t ~init ~f =
               if not (String_util.is_lowercase_sha256_hex directory_name) then
                 Error "unknown directory in original request scope namespace"
               else
-                let* acc=with_tool_request_owner_directory_serialization t ~directory_name (fun () ->
+                let read_scope () =
                 let path=Filename.concat (Fs_compat.owned_inventory_root_path namespace) directory_name in
                 let* observed=Fs_compat.with_owned_directory_inventory_if_present ~owner_uid
                   ~inventory_root:namespace ~sync_directory:Unix.fsync path (fun held files ->
@@ -801,7 +809,9 @@ let fold_tool_request_owner_inventory_all t ~init ~f =
                         if current=files then Ok acc
                         else Error "original request scope changed during inventory"
                       | file_name::tail -> match tool_request_owner_entry file_name with
-                        | Staged_entry -> read acc tail
+                        | Staged_entry ->
+                          let* () = if check_staged then inspect_staged_tool_request ~owner_uid held file_name else Ok () in
+                          read acc tail
                         | Unknown_entry -> Error "unknown entry in original request namespace"
                         | Record_entry ->
                           let* json=read_owned_tool_request ~sync_file:Unix.fsync ~sync_parent:Unix.fsync ~owner_uid held file_name in
@@ -811,7 +821,10 @@ let fold_tool_request_owner_inventory_all t ~init ~f =
                 let* acc=match observed with
                   | None -> Error "listed original request scope disappeared during inventory"
                   | Some result -> result in
-                Ok acc) in
+                Ok acc in
+                let* acc = if serialize_scopes then
+                    with_tool_request_owner_directory_serialization t ~directory_name read_scope
+                  else read_scope () in
                 scopes acc rest in
           scopes init names) |> owned_result in
       Ok observed) |> owned_result in
@@ -823,6 +836,12 @@ let fold_tool_request_owner_inventory_all t ~init ~f =
     let result=Eio_unix.run_in_systhread ~label:"addon-original-request-sweep" blocking in
     Eio.Fiber.check ();result
 
+let fold_tool_request_owner_inventory_all t ~init ~f =
+  fold_tool_request_owner_inventory_all_with ~check_staged:false ~serialize_scopes:true t ~init ~f
+
+let fold_startup_tool_request_owners t ~init ~f =
+  fold_tool_request_owner_inventory_all_with ~check_staged:true ~serialize_scopes:false t ~init ~f
+
 let tool_request_owner_inventory_all t =
   let* rows =
     fold_tool_request_owner_inventory_all t ~init:[]
@@ -830,6 +849,137 @@ let tool_request_owner_inventory_all t =
         Ok ((directory_name,file_name,json)::rows))
   in
   Ok (List.rev rows)
+
+(* These inventories are used only while the caller excludes all original
+   request writers. The complete read finishes before any cleanup effect. *)
+let inventory_directory ~owner_uid ~parent ~path f =
+  let* observed = Fs_compat.with_owned_directory_inventory_if_present ~owner_uid
+    ~inventory_root:parent ~sync_directory:Unix.fsync path (fun held names ->
+      let* value = f held names in
+      let* current = Fs_compat.read_owned_directory ~owner_uid ~inventory_root:held
+        ~ownership_root:path path |> owned_result in
+      if current = names then Ok value else Error "original request inventory changed")
+    |> owned_result in
+  match observed with None -> Ok None | Some result -> Result.map Option.some result
+
+let require_inventory = function
+  | None -> Error "a listed original request directory disappeared"
+  | Some value -> Ok value
+
+let inventory_blocking ~label work =
+  let blocking () = protect work in
+  match Fs_compat.execution_context () with
+  | Fs_compat.Non_eio -> blocking ()
+  | Fs_compat.Eio_fiber ->
+    let result = Eio_unix.run_in_systhread ~label blocking in
+    Eio.Fiber.check (); result
+
+let fold_archived_tool_request_owners t ~init ~f =
+  inventory_blocking ~label:"addon-archived-original-inventory" (fun () ->
+    let* result = Fs_compat.with_owned_inventory_root (Filename.dirname t.root) (fun anchor ->
+      let owner_uid = Unix.geteuid () in
+      let root = Filename.concat (Fs_compat.owned_inventory_root_path anchor) (Filename.basename t.root) in
+      let archive = Filename.concat root tool_request_archive_directory in
+      let result = inventory_directory ~owner_uid ~parent:anchor ~path:archive (fun scopes names ->
+        let rec scan_scopes acc = function
+          | [] -> Ok acc
+          | scope_name :: rest ->
+            if not (String_util.is_lowercase_sha256_hex scope_name) then
+              Error "unknown directory in settled original request namespace"
+            else
+              let path = Filename.concat (Fs_compat.owned_inventory_root_path scopes) scope_name in
+              let* days = inventory_directory ~owner_uid ~parent:scopes ~path (fun scope dates ->
+                let rec scan_days acc = function
+                  | [] -> Ok acc
+                  | date :: tail ->
+                    let* () = settled_day date in
+                    let path = Filename.concat (Fs_compat.owned_inventory_root_path scope) date in
+                    let* day = inventory_directory ~owner_uid ~parent:scope ~path (fun held entries ->
+                      let* () = if List.for_all (fun name -> name = "records" || name = "bodies") entries
+                        then Ok () else Error "unknown directory in settled original request day" in
+                      let* () = if not (List.mem "bodies" entries) then Ok () else
+                        let bodies = Filename.concat (Fs_compat.owned_inventory_root_path held) "bodies" in
+                        let* result = inventory_directory ~owner_uid ~parent:held ~path:bodies (fun _ _ -> Ok ()) in
+                        require_inventory result in
+                      if not (List.mem "records" entries) then Ok acc else
+                      let records = Filename.concat (Fs_compat.owned_inventory_root_path held) "records" in
+                      let* result = inventory_directory ~owner_uid ~parent:held ~path:records (fun files names ->
+                        let rec scan_records acc = function
+                          | [] -> Ok acc
+                          | name :: remaining ->
+                            (match tool_request_owner_entry name with
+                             | Staged_entry ->
+                               let* () = inspect_staged_tool_request ~owner_uid files name in
+                               scan_records acc remaining
+                             | Unknown_entry -> Error "unknown entry in settled original request records"
+                             | Record_entry ->
+                               let* json = read_owned_tool_request ~sync_file:Unix.fsync
+                                 ~sync_parent:Unix.fsync ~owner_uid files name in
+                               let* acc = f acc ~directory_name:scope_name ~file_name:name json in
+                               scan_records acc remaining) in
+                        scan_records acc names) in
+                      require_inventory result) in
+                    let* acc = require_inventory day in
+                    scan_days acc tail in
+                scan_days acc dates) in
+              let* acc = require_inventory days in
+              scan_scopes acc rest in
+        scan_scopes init names) in
+      Ok result) |> owned_result in
+    let* result = result in
+    match result with None -> Ok init | Some value -> Ok value)
+
+type tool_request_body_entry = {
+  scope_directory : string;
+  request_digest : string;
+  snapshot : Unix.stats;
+}
+
+let tool_request_body_inventory_all ~validate t =
+  inventory_blocking ~label:"addon-original-body-inventory" (fun () ->
+    let* result = Fs_compat.with_owned_inventory_root (Filename.dirname t.root) (fun anchor ->
+      let owner_uid = Unix.geteuid () in
+      let root = Filename.concat (Fs_compat.owned_inventory_root_path anchor) (Filename.basename t.root) in
+      let directory = Filename.concat root tool_request_bodies_directory in
+      let result = inventory_directory ~owner_uid ~parent:anchor ~path:directory (fun scopes names ->
+        let rec scan_scopes acc = function
+          | [] -> Ok (List.rev acc)
+          | scope_directory :: rest ->
+            if not (String_util.is_lowercase_sha256_hex scope_directory) then
+              Error "unknown directory in original request body namespace"
+            else
+              let path = Filename.concat (Fs_compat.owned_inventory_root_path scopes) scope_directory in
+              let* scope = inventory_directory ~owner_uid ~parent:scopes ~path (fun held names ->
+                let rec scan_files acc = function
+                  | [] -> Ok acc
+                  | name :: tail when Fs_compat.is_atomic_orphan_name name ->
+                    let* () = inspect_staged_tool_request ~owner_uid held name in
+                    scan_files acc tail
+                  | name :: tail ->
+                    let* request_digest = match Filename.chop_suffix_opt ~suffix:".json" name with
+                      | Some digest when String_util.is_lowercase_sha256_hex digest -> Ok digest
+                      | Some _ | None -> Error "unknown file in original request body namespace" in
+                    let* bytes,snapshot = read_owned_tool_request_bytes_and_stat
+                      ~sync_file:Unix.fsync ~sync_parent:Unix.fsync ~owner_uid held name in
+                    if not (String.equal (digest bytes) request_digest) then
+                      Error "original request body does not match its digest"
+                    else
+                      let* () = validate bytes in
+                      scan_files ({scope_directory;request_digest;snapshot} :: acc) tail in
+                scan_files acc names) in
+              let* acc = require_inventory scope in
+              scan_scopes acc rest in
+        scan_scopes [] names) in
+      Ok result) |> owned_result in
+    let* result = result in
+    match result with None -> Ok [] | Some value -> Ok value)
+
+let remove_inventoried_tool_request_body t entry =
+  inventory_blocking ~label:"addon-original-body-remove" (fun () ->
+    let* relative = Fs_compat.owned_relative_path [Filename.basename t.root;
+      tool_request_bodies_directory;entry.scope_directory;entry.request_digest ^ ".json"] in
+    Fs_compat.with_owned_inventory_root (Filename.dirname t.root) (fun anchor ->
+      Fs_compat.remove_owned_inventory_regular_file ~expected:entry.snapshot anchor relative) |> owned_result)
 
 let host_result_path ~instance_id ~request_id =
   Filename.concat "host-results" (Filename.concat (digest instance_id) (digest request_id ^ ".json"))

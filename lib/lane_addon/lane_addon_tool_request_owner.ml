@@ -83,15 +83,19 @@ let decode ~scope ~request_id json =
   Ok ({Record.scope; request_id; installation_id; package_id; tool; request_digest; summary; progress} : Record.t)
 (* The body a record names: present, its bytes named by that digest, and the
    canonical JSON of the request. *)
+let canonical_request_of_body bytes =
+    let* json = try Ok (Yojson.Safe.from_string bytes) with Yojson.Json_error detail -> Error detail in
+    let* request = Lane_addon_action.canonical json in
+    if String.equal (Yojson.Safe.to_string request) bytes then Ok request
+    else Error "original request body is not canonical"
 let request_of_body ~request_digest = function
   | None -> Error "original request body named by its record is missing"
   | Some bytes ->
     let* () = if String.equal (Lane_addon_store.digest bytes) request_digest then Ok ()
       else Error "original request body does not match its record's digest" in
-    let* json = try Ok (Yojson.Safe.from_string bytes) with Yojson.Json_error detail -> Error detail in
-    let* request = Lane_addon_action.canonical json in
-    if String.equal (Yojson.Safe.to_string request) bytes then Ok request
-    else Error "original request body is not canonical"
+    canonical_request_of_body bytes
+let validate_canonical_request_body bytes =
+  canonical_request_of_body bytes |> Result.map (fun _ -> ())
 (* A record names its request by digest, so equal digests are equal requests;
    comparing them never walks the request itself. *)
 let same_listed (a : Record.t) (b : Record.t) =

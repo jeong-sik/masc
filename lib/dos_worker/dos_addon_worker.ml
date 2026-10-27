@@ -182,8 +182,8 @@ let create ~base_path () =
             | Ok None -> `Assoc ["kind", `String "missing"; "saves_name", `String saves_name]
             | Error message -> `Assoc ["kind", `String "invalid"; "message", `String message] in
       ["pad", value] in
-    (* [include_frame=false]: the seat and the invite list only need who holds
-       the controller, so they skip the frame capture and PNG encode. *)
+    (* [include_frame=false]: the invite list and the pad read need only the
+       controller or the pad, so they skip the frame capture and PNG encode. *)
     if not (Tool_args.get_bool arguments "include_frame" true) then
       match Machine.off_domain Dos_lane.screen with
       | Error error -> lane_failure error

@@ -392,9 +392,10 @@ let loopback_request_authority () =
   | Ok authority -> authority
   | Error `Malformed -> fail "failed to construct loopback request authority"
 
-let dispatch_get ?(headers = []) ~sw ~clock ~state ~authorization target =
+let dispatch_get ?(headers = []) ?(add_routes = fun ~sw ~clock router -> Routes.add_routes ~sw ~clock router)
+    ~sw ~clock ~state ~authorization target =
   Server_request_authority.with_current (loopback_request_authority ()) (fun () ->
-    let router = Routes.add_routes ~sw ~clock (Masc.Http_server_eio.Router.create ()) in
+    let router = add_routes ~sw ~clock (Masc.Http_server_eio.Router.create ()) in
     Server_auth.publish_server_state state;
     let response_buf = Buffer.create 4096 in
     let conn =
@@ -796,6 +797,69 @@ let test_player_watches_live_and_reads_nothing_else () =
               List.iter (fun target -> check int ("a player is refused " ^ target) 403 (status player target))
                 ["/api/v1/lane-addons"; "/api/v1/lane-addons/slice"; "/api/v1/lane-addons/actions"]))))))
 
+(* The play seat answers from the DOS worker's last observation, not from a
+   worker RPC (#46416): an empty worker is no machine, a loaded program names
+   its saves and its loader's controller, and a release shows once the worker
+   observes again. *)
+let test_seat_reads_the_last_dos_observation () =
+  with_dir "play-seat-" (fun base_path ->
+    Auth.save_auth_config base_path
+      { Masc_domain.default_auth_config with enabled = true; require_token = true };
+    let player = match Auth.create_token base_path ~agent_name:"invited-guest" ~role:Masc_domain.Player with
+      | Ok (token, _) -> token
+      | Error err -> failf "create_token failed: %s" (Masc_domain.masc_error_to_string err) in
+    let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+    Eio_main.run (fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Fun.protect ~finally:(fun () -> Fs_compat.clear_fs (); Server_auth.clear_server_state ()) (fun () ->
+        let clock = (Eio.Stdenv.clock env :> float Eio.Time.clock_ty Eio.Resource.t) in
+        Eio.Time.with_timeout_exn clock 30. (fun () ->
+          Eio.Switch.run (fun sw ->
+            Eio_context.with_test_env ~sw ~net:(Eio.Stdenv.net env) ~clock
+              ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
+              Masc.Lane_addon_runtime.For_testing.reset ();
+              let config = Masc.Workspace.default_config base_path in
+              let seat () = dispatch_get ~sw ~clock ~state ~authorization:(Some player)
+                ~add_routes:(fun ~sw:_ ~clock:_ router -> Server_routes_http_routes_play_page.add_routes router)
+                "/api/v1/play/seat" in
+              let snapshot () = Masc.Lane_addon_runtime.observation_for_export ~config
+                ~access:Sources.Unauthenticated ~name:"masc_dos_screen" in
+              let rec await_observed previous = match snapshot () with
+                | Ok (Some observation) when observation.observation_seq > previous && not observation.refreshing -> ()
+                | _ -> Eio.Time.sleep clock 0.001; await_observed previous in
+              let refresh () =
+                let previous = match snapshot () with Ok (Some observation) -> observation.observation_seq | _ -> 0 in
+                let exports = match Masc.Lane_addon_runtime.tool_export_reading ~config
+                    ~access:Sources.Unauthenticated ~reserved:[] with
+                  | Ok reading -> reading.exports | Error detail -> fail detail in
+                let export = List.find (fun (export : Masc.Lane_addon_tool_export.t) ->
+                  export.tool.name = "masc_dos_screen") exports in
+                (match Masc.Lane_addon_runtime.dispatch ~config ~access:Sources.Operator_configuration
+                  ~operation:Masc.Lane_addon_runtime.Observe (`Assoc ["instance_id", `String export.instance_id]) with
+                 | Ok _ -> () | Error error -> fail (Masc.Lane_addon_runtime.error_to_string error));
+                await_observed previous in
+              dos_eject_if_loaded ();
+              check int "a missing DOS worker is unavailable" 503 (status_of_response (seat ()));
+              Machine_worker_fixture.with_dos ~clock ~sw ~base_path (fun ~invoke:_ ~detach ->
+                await_observed 0;
+                let empty = body_json (seat ()) in
+                check bool "an empty worker is no machine" true (member "machine" empty = Some (`Bool false));
+                with_dos (fun ~dir ->
+                  dos_ok "load" (dos_load ~dir hello_com);
+                  refresh ();
+                  let loaded = body_json (seat ()) in
+                  check bool "a loaded program is a machine" true (member "machine" loaded = Some (`Bool true));
+                  check bool "a loaded program names its saves" true
+                    (match member "saves_name" loaded with Some (`String _) -> true | _ -> false);
+                  check bool "the loader holds the controller" true (member "controller" loaded = Some (`String who));
+                  dos_ok "pass" (Dos_lane.pass ~who ~to_:None ~announce:ignore);
+                  check bool "the seat answers the last observation until the worker observes again" true
+                    (member "controller" (body_json (seat ())) = Some (`String who));
+                  refresh ();
+                  check bool "a released controller shows once observed" true
+                    (member "controller" (body_json (seat ())) = Some `Null));
+                detach ())))))))
+
 let () =
   run "lane addon live route"
     [ ( "change counter"
@@ -814,5 +878,7 @@ let () =
       , [ test_case "the query decodes into a typed source" `Quick test_decode_live_query
         ; test_case "auth, unchanged, frame, 400, DOS, and no store writes" `Quick test_live_route
         ; test_case "a player watches live and reads nothing else" `Quick
-            test_player_watches_live_and_reads_nothing_else ] )
+            test_player_watches_live_and_reads_nothing_else
+        ; test_case "the play seat reads the last DOS observation" `Quick
+            test_seat_reads_the_last_dos_observation ] )
     ]

@@ -4717,6 +4717,40 @@ let test_turn_observation_replaces_and_refuses_atomically () =
     state.keeper_turns_observed_at;
   Alcotest.(check (option string)) "a failed read is visible" (Some "HTTP 503") state.keeper_turns_error
 
+let test_empty_fleet_failure_requires_explicit_recovery () =
+  let open Masc_tui_types in
+  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a" ~port:0 ~refresh_interval:0. () in
+  let failure = Tui_decode.Keeper_waiting_invalid "prior fleet failure" in
+  state.keeper_waiting_failure <- Some failure;
+  let projection json =
+    match Tui_decode.decode_keeper_turns_projection json with
+    | Ok projection -> projection
+    | Error detail -> Alcotest.fail detail
+  in
+  let older_server =
+    projection
+      (`Assoc
+        [ "schema", `String "masc.keeper_turns.v1"
+        ; "keepers", `List []
+        ])
+  in
+  accept_keeper_turn_observation state ~rows:older_server.rows
+    ~waiting:older_server.waiting ~observed_at:10.;
+  Alcotest.(check bool) "an unreported empty fleet cannot clear the failure" true
+    (state.keeper_waiting_failure = Some failure);
+  let explicit_recovery =
+    projection
+      (`Assoc
+        [ "schema", `String "masc.keeper_turns.v1"
+        ; "keepers", `List []
+        ; "waiting_errors", `List []
+        ])
+  in
+  accept_keeper_turn_observation state ~rows:explicit_recovery.rows
+    ~waiting:explicit_recovery.waiting ~observed_at:20.;
+  Alcotest.(check bool) "an explicitly healthy empty fleet clears the failure" true
+    (state.keeper_waiting_failure = None)
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
@@ -4962,6 +4996,8 @@ let () =
             test_async_observation_has_an_independent_generation
         ; Alcotest.test_case "turn observations replace and refuse atomically" `Quick
             test_turn_observation_replaces_and_refuses_atomically
+        ; Alcotest.test_case "empty fleet failure needs explicit recovery" `Quick
+            test_empty_fleet_failure_requires_explicit_recovery
         ; Alcotest.test_case "settings and live context use ordered selection" `Quick
             test_settings_and_live_context_use_ordered_selection
         ; Alcotest.test_case "waiting since does not replace a fresher turn" `Quick

@@ -363,7 +363,7 @@ let test_all_scopes_survive_restart_without_metadata () = with_store (fun root s
     ["original-a";"original-b"]
     (List.map (fun (record:Owner.retained) -> record.request_id) records |> List.sort String.compare);
   Alcotest.(check (list (pair string string))) "fold_all visits the exact validated originals across all scopes"
-    [scope,"original-a";"history-physical-owner","original-b"]
+    (List.sort Stdlib.compare [scope,"original-a";"history-physical-owner","original-b"])
     (List.sort Stdlib.compare folded);
   List.iter (fun (record:Owner.retained) ->
     Alcotest.check json "original evidence and destination survive the sweep" request record.request;

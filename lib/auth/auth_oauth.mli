@@ -76,7 +76,7 @@ type client_verification =
       (** A document client on the consent form: nothing was fetched, so no
           code may be issued from this request. *)
 
-type authorization_request = {
+type authorization_request = private {
   client_id : string;
   client_name : string option;
   redirect_uri : string;

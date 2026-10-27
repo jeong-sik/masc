@@ -16,7 +16,10 @@ val html_escape : string -> string
 val render_authorization_form :
   ?error:string -> Auth_oauth.authorization_request -> string
 
-val authorization_form_headers : (string * string) list
+val authorization_form_headers :
+  Auth_oauth.authorization_request -> (string * string) list
+(** Headers for the consent page. Its [form-action] adds the request's
+    callback origin, because the approval redirects there. *)
 
 val ensure_optional_string_subset :
   (string * Yojson.Safe.t) list ->
@@ -43,8 +46,10 @@ val authorize_post :
     (Auth_oauth_client_metadata.document_url -> (string, string) result) ->
   body:string ->
   (authorization_post_outcome, Auth_oauth.error) result
-(** The approval. A document client's document is fetched here, so call it
-    only for a same-origin browser request. *)
+(** The approval or denial. A document client's document is fetched here, so
+    call it only for a same-origin browser request. An approval fetches only
+    after the MASC bearer is accepted; a denial fetches first because it
+    redirects. *)
 
 val register_client :
   base_path:string -> string -> (Auth_oauth.client, Auth_oauth.error) result

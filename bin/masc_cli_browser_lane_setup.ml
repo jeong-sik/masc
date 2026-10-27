@@ -281,9 +281,11 @@ let print_ego ~runtime_config_path plan =
     "Keepers act only on the pages the space opens, with the cookies of your ego lite \
      profile: they can read and post as you on the sites you are logged in to there."
 
-(* Every route runs in the browser Add-on, so every mode declares it. *)
+(* Every route runs in a browser Add-on, one per source, so every mode
+   declares the sources the workspace runs. *)
 let print_addon (installed : Addon_setup.installed) =
-  Printf.printf "Browser Add-on package  %s (%s)\n" installed.package_directory
+  let source = Browser_lane.Backend.to_wire installed.backend in
+  Printf.printf "Browser Add-on package (%s)  %s (%s)\n" source installed.package_directory
     (match installed.files_written, installed.files_removed with
      | 0, [] -> "already this build's"
      | written, [] -> Printf.sprintf "%d files written" written
@@ -292,12 +294,9 @@ let print_addon (installed : Addon_setup.installed) =
   List.iter (Printf.printf "  removed %s\n") installed.files_removed;
   (match installed.declaration with
    | Addon_setup.Created { path } ->
-     Printf.printf "Declared the browser Add-on in %s\n" path;
-     print_endline
-       "The MASC server attaches it when it starts and on its maintenance pass; set \
-        enabled = false there to keep it detached."
+     Printf.printf "Declared the %s browser Add-on in %s\n" source path
    | Addon_setup.Present { path; manifest_path = named; this_build; enabled } ->
-     Printf.printf "The browser Add-on is declared in %s\n" path;
+     Printf.printf "The %s browser Add-on is declared in %s\n" source path;
      if not this_build
      then
        Printf.printf
@@ -313,6 +312,17 @@ let print_addon (installed : Addon_setup.installed) =
       "Not found beside masc or on PATH: %s. scripts/install-local-build.sh installs them \
        beside masc; the server looks for them the same way.\n"
       (String.concat ", " missing)
+
+let print_addons (installed : Addon_setup.installed list) =
+  match installed with
+  | [] -> print_endline "No browser source is configured, so no browser Add-on was declared."
+  | _ :: _ ->
+    List.iter print_addon installed;
+    if List.exists (fun (one : Addon_setup.installed) ->
+        match one.declaration with Addon_setup.Created _ -> true | Addon_setup.Present _ -> false) installed
+    then print_endline
+        "The MASC server attaches a declared Add-on when it starts and on its maintenance pass; \
+         set enabled = false in its declaration to keep it detached."
 
 (* Whether this command runs the browser Add-on step, and what its refusal
    means. --mode addon requires it: a refusal is the command's. Every other
@@ -339,13 +349,35 @@ let addon_plan_status : Addon_setup.error -> int = function
   | Addon_setup.Inventory_unreadable _
   | Addon_setup.Declared_more_than_once _
   | Addon_setup.Declaration_unloadable _
-  | Addon_setup.Declaration_refused _ -> 1
+  | Addon_setup.Declaration_refused _
+  | Addon_setup.Retired_declaration _ -> 1
 
-let plan_addon ~base_path choice =
+(* The browser sources this workspace runs, one package each: those
+   runtime.toml configures, or this run writes the table of, and the
+   external hosts when this run installs a host or one is installed. *)
+let addon_sources ~base_path ~runtime_config_path ~modes =
+  let configuration = Result.to_option (Browser_configuration.of_file runtime_config_path) in
+  let configured read = match configuration with Some c -> Option.is_some (read c) | None -> false in
+  let host_installed = match (observation ~base_path).Launcher.launcher with
+    | Launcher.Follows_workspace -> true
+    | Launcher.Not_installed | Launcher.Undeclared | Launcher.Unreadable
+    | Launcher.Describes_another_launcher -> false in
+  List.filter_map
+    (fun (backend, wanted) -> if wanted then Some backend else None)
+    [ Browser_lane.Backend.Automation,
+      configured (fun (c : Browser_configuration.t) -> c.automation) || List.mem Automation modes
+    ; Browser_lane.Backend.Stagehand, configured (fun (c : Browser_configuration.t) -> c.stagehand)
+    ; Browser_lane.Backend.Owned_firefox,
+      configured (fun (c : Browser_configuration.t) -> c.live_bidi) || List.mem Bidi modes
+    ; Browser_lane.Backend.Ego,
+      configured (fun (c : Browser_configuration.t) -> c.live_ego) || List.mem Ego modes
+    ; Browser_lane.Backend.External_host, installs_host modes || host_installed ]
+
+let plan_addon ~base_path ~runtime_config_path ~modes choice =
   match choice with
   | Skip_addon -> Ok Not_run
   | Require_addon | Offer_addon ->
-    (match Addon_setup.plan ~base_path with
+    (match Addon_setup.plan ~base_path ~sources:(addon_sources ~base_path ~runtime_config_path ~modes) with
      | Ok plan -> Ok (Done plan)
      | Error error ->
        addon_refusal choice error
@@ -386,7 +418,7 @@ let install
      wrote its package ({!Addon_setup.apply}); see [addon_refusal]. *)
   let planned =
     let refused result = Result.map_error (fun message -> 1, message) result in
-    let* addon = plan_addon ~base_path addon_choice in
+    let* addon = plan_addon ~base_path ~runtime_config_path ~modes addon_choice in
     let* extension = refused (extension_route ~modes ~manifest_dir ~host_name) in
     let* bidi = refused (bidi_plan ~modes ~runtime_config_path ~firefox ~profile ~port) in
     let* automation =
@@ -432,7 +464,7 @@ let install
         | Reported message -> print_addon_skipped message
         | Done applied ->
           if Option.is_some installed then print_endline "";
-          print_addon applied);
+          print_addons applied);
        (* The tables are committed one after another. A refusal leaves the
           ones before it written, so they are printed with their next steps
           before the refusal, and a run of the same command keeps them. A

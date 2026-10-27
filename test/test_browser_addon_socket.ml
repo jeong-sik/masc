@@ -6,12 +6,15 @@ let check = Alcotest.check Alcotest.bool
 let rec remove path = match (Unix.lstat path).Unix.st_kind with
   | Unix.S_DIR -> Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path);Unix.rmdir path
   | Unix.S_REG|Unix.S_LNK|Unix.S_CHR|Unix.S_BLK|Unix.S_FIFO|Unix.S_SOCK -> Unix.unlink path
-let with_claim ?(automation=None) ?(models=fun _ -> None) ?(stagehand=fun _ -> None)
+let owned_gecko={Masc.Browser_addon_automation.driver="/usr/bin/geckodriver";binary=None;profiles="/fixture/gecko-profiles"}
+(* Without a [source], the allocation is an external host worker's: it starts
+   no browser and may hold only its socket. *)
+let with_claim ?(source=fun _ -> Socket.External_host) ?(models=fun _ -> None)
     ?(context=Fun.id) work =
   let directory=Filename.temp_file "browser-addon-slot-" "" in
   Unix.unlink directory;Unix.mkdir directory 0o700;
   let instance_id=Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())) in
-  let context=ok (Socket.context ~stagehand:(stagehand directory) ~live_bidi:None ~instance_id ~automation ~models:(models directory)) |> context in
+  let context=ok (Socket.context ~instance_id ~source:(source directory) ~models:(models directory)) |> context in
   let root=match context with `Assoc fields -> (match List.assoc_opt "directory" fields with
     | Some (`String root) -> root | _ -> Alcotest.fail "missing allocation directory")
     | _ -> Alcotest.fail "invalid allocation intent" in
@@ -80,7 +83,7 @@ let model_configuration_cleanup () =
     check "model bootstrap is released with original allocation" false (Sys.file_exists root);
     check "separate model receipts survive resource cleanup" true (Sys.file_exists retained))
 let owned_backend_cleanup () =
-  with_claim ~automation:(Some {Masc.Browser_addon_automation.driver="/usr/bin/geckodriver";binary=None;profiles="/fixture/gecko-profiles"})
+  with_claim ~source:(fun _ -> Socket.Automation owned_gecko)
     (fun admission directory root ->
       ignore (ok (Socket.acquire ~admission ~directory));
       let downloads=Filename.concat root "downloads" in
@@ -95,7 +98,7 @@ let owned_backend_cleanup () =
       released (Socket.cleanup ~admission ~directory);
       check "a settled worker and empty trees release the allocation" false (Sys.file_exists root))
 let interrupted_owned_cleanup () =
-  with_claim ~automation:(Some {Masc.Browser_addon_automation.driver="/usr/bin/geckodriver";binary=None;profiles="/fixture/gecko-profiles"})
+  with_claim ~source:(fun _ -> Socket.Automation owned_gecko)
     (fun admission directory root ->
       ignore (ok (Socket.acquire ~admission ~directory));
       (* A known leaf cannot be removed: fail during deletion, then resume
@@ -109,6 +112,24 @@ let interrupted_owned_cleanup () =
       Unix.rmdir obstruction;
       released (Socket.cleanup ~admission ~directory);
       check "cleanup resumes after a partial deletion" false (Sys.file_exists root))
+(* An allocation holds the resources of its one source. A file another
+   source's browser writes is unknown here, so cleanup keeps the allocation
+   until that file is gone. *)
+let foreign_source_resources () =
+  List.iter (fun (source,foreign) ->
+    with_claim ~source:(fun _ -> source) (fun admission directory root ->
+      ignore (ok (Socket.acquire ~admission ~directory));
+      let path=Filename.concat root foreign in
+      Out_channel.with_open_bin path (fun out -> output_string out "preserve");
+      lease (Lease.retire admission);
+      check "another source's resource retains the allocation" true (Result.is_error (Socket.cleanup ~admission ~directory));
+      check "the other source's resource remains" true (Sys.file_exists path);
+      Unix.unlink path;
+      released (Socket.cleanup ~admission ~directory);
+      check "the allocation of its own source's resources is released" false (Sys.file_exists root)))
+    [Socket.Automation owned_gecko,"stagehand.json";
+     Socket.Ego,"automation.json";
+     Socket.External_host,"live-bidi.json"]
 let acquisition_state directory =
   match List.filter (fun name -> String.starts_with ~prefix:"browser-" name) (Array.to_list (Sys.readdir directory)) with
   | [name] -> (match Yojson.Safe.from_file (Filename.concat directory name) with
@@ -117,7 +138,7 @@ let acquisition_state directory =
       | _ -> Alcotest.fail "acquisition record is not an object")
   | names -> Alcotest.failf "expected one acquisition record, found %d" (List.length names)
 let operator_retains_unconfirmed_allocation () =
-  with_claim ~automation:(Some {Masc.Browser_addon_automation.driver="/usr/bin/geckodriver";binary=None;profiles="/fixture/gecko-profiles"})
+  with_claim ~source:(fun _ -> Socket.Automation owned_gecko)
     (fun admission directory root ->
       ignore (ok (Socket.acquire ~admission ~directory));
       let downloads=Filename.concat root "downloads" in
@@ -138,7 +159,7 @@ let operator_retains_unconfirmed_allocation () =
       check "the operator retains the allocation" true (retain_ok (Socket.retain ~admission ~directory) = Socket.Allocation_retained);
       check "a repeated retain changes nothing" true (Sys.file_exists file && acquisition_state directory = "retained"))
 let retain_refuses_replaced_directory () =
-  with_claim ~automation:(Some {Masc.Browser_addon_automation.driver="/usr/bin/geckodriver";binary=None;profiles="/fixture/gecko-profiles"})
+  with_claim ~source:(fun _ -> Socket.Automation owned_gecko)
     (fun admission directory root ->
       ignore (ok (Socket.acquire ~admission ~directory));
       let original=Filename.concat directory "original" in
@@ -147,7 +168,7 @@ let retain_refuses_replaced_directory () =
       refused "a different directory identity is not retained" (Socket.retain ~admission ~directory);
       check "the refused retain keeps the acquisition" true (acquisition_state directory = "acquired"))
 let retain_reports_a_released_allocation () =
-  with_claim ~automation:(Some {Masc.Browser_addon_automation.driver="/usr/bin/geckodriver";binary=None;profiles="/fixture/gecko-profiles"})
+  with_claim ~source:(fun _ -> Socket.Automation owned_gecko)
     (fun admission directory _root ->
       ignore (ok (Socket.acquire ~admission ~directory));
       lease (Lease.retire admission);
@@ -158,13 +179,13 @@ let retain_reports_a_released_allocation () =
    controller writes; a different shape would make the claim foreign, and the
    last step below would then fail. *)
 let retain_requires_a_settled_child_without_signalling () =
-  let stagehand directory = Some (ok (Masc.Browser_addon_stagehand.configuration
+  let stagehand directory = ok (Masc.Browser_addon_stagehand.configuration
     ~browser:{Browser_configuration.chrome="/fixture/chrome";extension="/fixture/extension";profile=None}
     ~launcher:"/fixture/launcher" ~guardian:"/fixture/guardian"
-    ~claim_directory:(Filename.concat directory "chrome-slot"))) in
-  with_claim ~stagehand (fun admission directory root ->
+    ~claim_directory:(Filename.concat directory "chrome-slot")) in
+  with_claim ~source:(fun directory -> Socket.Stagehand (stagehand directory)) (fun admission directory root ->
     ignore (ok (Socket.acquire ~admission ~directory));
-    let c = Option.get (stagehand directory) in
+    let c = stagehand directory in
     let profile = match Masc.Browser_addon_stagehand.configuration_to_json c with
       | `Assoc fields -> List.assoc "profile" fields | _ -> Alcotest.fail "expected a Chrome configuration object" in
     Unix.mkdir (Filename.concat directory "chrome-slot") 0o700;
@@ -182,7 +203,7 @@ let retain_requires_a_settled_child_without_signalling () =
 let retain_reports_where_a_record_write_failed () =
   let failing stage _path _contents = Error {Fs_compat.path="record";stage;
     exception_=Failure "disk full";backtrace=Printexc.get_callstack 0} in
-  let attempt save = with_claim ~automation:(Some {Masc.Browser_addon_automation.driver="/usr/bin/geckodriver";binary=None;profiles="/fixture/gecko-profiles"})
+  let attempt save = with_claim ~source:(fun _ -> Socket.Automation owned_gecko)
     (fun admission directory _root ->
       ignore (ok (Socket.acquire ~admission ~directory));
       lease (Lease.retire admission);
@@ -201,13 +222,13 @@ let retain_reports_where_a_record_write_failed () =
 (* A Chrome child claim recorded for another allocation is never read as this
    allocation's settlement. *)
 let retain_refuses_a_foreign_child () =
-  let stagehand directory = Some (ok (Masc.Browser_addon_stagehand.configuration
+  let stagehand directory = ok (Masc.Browser_addon_stagehand.configuration
     ~browser:{Browser_configuration.chrome="/fixture/chrome";extension="/fixture/extension";profile=None}
     ~launcher:"/fixture/launcher" ~guardian:"/fixture/guardian"
-    ~claim_directory:(Filename.concat directory "chrome-slot"))) in
-  with_claim ~stagehand (fun admission directory root ->
+    ~claim_directory:(Filename.concat directory "chrome-slot")) in
+  with_claim ~source:(fun directory -> Socket.Stagehand (stagehand directory)) (fun admission directory root ->
     ignore (ok (Socket.acquire ~admission ~directory));
-    let c = Option.get (stagehand directory) in
+    let c = stagehand directory in
     let profile = match Masc.Browser_addon_stagehand.configuration_to_json c with
       | `Assoc fields -> List.assoc "profile" fields | _ -> Alcotest.fail "expected a Chrome configuration object" in
     let slot = Filename.concat directory "chrome-slot" in
@@ -224,13 +245,13 @@ let retain_refuses_a_foreign_child () =
    pass. Retain refuses it without fencing; once a cleanup pass settled the
    child, the retain succeeds. *)
 let retain_waits_for_an_unpublished_child_to_be_fenced () =
-  let stagehand directory = Some (ok (Masc.Browser_addon_stagehand.configuration
+  let stagehand directory = ok (Masc.Browser_addon_stagehand.configuration
     ~browser:{Browser_configuration.chrome="/fixture/chrome";extension="/fixture/extension";profile=None}
     ~launcher:"/fixture/launcher" ~guardian:"/fixture/guardian"
-    ~claim_directory:(Filename.concat directory "chrome-slot"))) in
-  with_claim ~stagehand (fun admission directory root ->
+    ~claim_directory:(Filename.concat directory "chrome-slot")) in
+  with_claim ~source:(fun directory -> Socket.Stagehand (stagehand directory)) (fun admission directory root ->
     ignore (ok (Socket.acquire ~admission ~directory));
-    let c = Option.get (stagehand directory) in
+    let c = stagehand directory in
     let profile = match Masc.Browser_addon_stagehand.configuration_to_json c with
       | `Assoc fields -> List.assoc "profile" fields | _ -> Alcotest.fail "expected a Chrome configuration object" in
     let slot = Filename.concat directory "chrome-slot" in
@@ -248,10 +269,13 @@ let retain_waits_for_an_unpublished_child_to_be_fenced () =
     check "the operator retains the allocation once the child is fenced" true
       (retain_ok (Socket.retain ~admission ~directory) = Socket.Allocation_retained))
 (* A reservation keeps its producer's backend payloads. Settlement must not
-   require interpreting them after an explicit operator handoff. *)
+   require interpreting them after an explicit operator handoff. The owned
+   Gecko configuration below has no profiles folder, so only a reader that
+   interprets it refuses it. *)
 let opaque_backends = function
   | `Assoc fields -> `Assoc (List.map (fun (key,value) -> match key with
-      | "automation" -> key,`Assoc ["driver",`String "/fixture/driver";"binary",`Null]
+      | "source" -> key,`Assoc ["backend",`String "automation";
+          "configuration",`Assoc ["driver",`String "/fixture/driver";"binary",`Null]]
       | "models" -> key,`String "operator-owned payload"
       | _ -> key,value) fields)
   | value -> value
@@ -350,6 +374,7 @@ let () = Alcotest.run "browser addon socket ownership" ["recovery",[
   Alcotest.test_case "model bootstrap cleanup preserves separate receipts" `Quick model_configuration_cleanup;
   Alcotest.test_case "owned backend requires a settled worker and empty resource trees" `Quick owned_backend_cleanup;
   Alcotest.test_case "owned cleanup resumes after interrupted file deletion" `Quick interrupted_owned_cleanup;
+  Alcotest.test_case "another source's resources retain the allocation" `Quick foreign_source_resources;
   Alcotest.test_case "the operator retains an unconfirmed allocation in place" `Quick operator_retains_unconfirmed_allocation;
   Alcotest.test_case "retain refuses a replaced allocation directory" `Quick retain_refuses_replaced_directory;
   Alcotest.test_case "retain reports an allocation already released" `Quick retain_reports_a_released_allocation;

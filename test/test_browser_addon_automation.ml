@@ -103,8 +103,8 @@ let instance ~markers =
   let instance_id=Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())) in
   let profile_root=Filename.temp_dir "browser-owned-profiles-" "" in
   let profiles=ok (Browser_gecko_profile.prepare_instance ~root:profile_root ~instance_id) in
-  let context=ok (Socket.context ~live_bidi:None ~stagehand:None ~instance_id ~models:None
-    ~automation:(Some {Masc.Browser_addon_automation.driver=executable;binary=None;profiles})) in
+  let context=ok (Socket.context ~instance_id ~models:None
+    ~source:(Socket.Automation {Masc.Browser_addon_automation.driver=executable;binary=None;profiles})) in
   let admission=lease (Native_addon_lease.prepare ~directories:[slot] ~instance_id ~cleanup_context:(Some context)) in
   let resource=ok (Socket.acquire ~admission ~directory:slot) in
   {slot;driver_root;profile_root;profiles;instance_id;admission;directory=Filename.dirname (Socket.socket_path resource)}

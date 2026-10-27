@@ -2,10 +2,11 @@ open Alcotest
 module P = Masc.Browser_addon_preflight
 
 (* A workspace with a browser lane host installed and no browser Add-on
-   declaration answers every native host poll with HTTP 503. The deployment
-   refuses it before anything is stopped; the declaration stays the operator's
-   to save. The package is the repository's own, so a package that stops being
-   a browser service fails here. *)
+   declaration serving external hosts answers every native host poll with
+   HTTP 503. The deployment refuses it before anything is stopped; the
+   declaration stays the operator's to save. The package is the repository's
+   own browser-external package, so a package that stops serving external
+   hosts fails here. *)
 
 let write path text =
   let rec make directory =
@@ -47,13 +48,17 @@ let install_host base =
     (Masc.Browser_lane_launcher.declaration_path ~base_path:base)
     (Masc.Browser_lane_launcher.declaration ~launcher_script:script)
 
+(* The id masc browser-lane-setup gives the declaration of that package. *)
+let declaration_id = "browser-external"
+
 let declaration_path base =
-  List.fold_left Filename.concat base [ ".masc"; "config"; "lane-addons"; "browser.toml" ]
+  List.fold_left Filename.concat base
+    [ ".masc"; "config"; "lane-addons"; declaration_id ^ ".toml" ]
 
 let save_declaration ?(extra = "") base =
   write (declaration_path base)
-    (Printf.sprintf "id = \"browser\"\nrun_id = \"browser-work\"\nmanifest_path = %S\n%s\n[binding]\nsources = []\n"
-       (package_path ()) extra)
+    (Printf.sprintf "id = %S\nrun_id = %S\nmanifest_path = %S\n%s\n[binding]\nsources = []\n"
+       declaration_id (declaration_id ^ "-work") (package_path ()) extra)
 
 let missing = function
   | P.Missing { complete; unloaded; _ } -> Some (complete, List.length unloaded)
@@ -78,7 +83,7 @@ let test_declared_browser_addon_passes () =
   install_host base;
   save_declaration base;
   (match P.judge ~base_path:base with
-   | P.Declared { id } -> check string "the declaration's id" "browser" id
+   | P.Declared { id } -> check string "the declaration's id" declaration_id id
    | P.Not_required | P.Missing _ | P.Ambiguous _ -> fail "expected a declared browser Add-on");
   check bool "the deployment may proceed" true (Result.is_ok (P.report (P.judge ~base_path:base)))
 
@@ -92,7 +97,9 @@ let test_a_declaration_that_does_not_load_is_named () =
   with_workspace @@ fun base ->
   install_host base;
   write (declaration_path base)
-    "id = \"browser\"\nrun_id = \"browser-work\"\nmanifest_path = \"/nonexistent/lane.toml\"\n[binding]\nsources = []\n";
+    (Printf.sprintf
+       "id = %S\nrun_id = %S\nmanifest_path = \"/nonexistent/lane.toml\"\n[binding]\nsources = []\n"
+       declaration_id (declaration_id ^ "-work"));
   check bool "the declaration that did not load is listed" true
     (match missing (P.judge ~base_path:base) with Some (_, unloaded) -> unloaded >= 1 | None -> false)
 
@@ -116,7 +123,7 @@ let test_two_enabled_browser_declarations_are_refused () =
        (package_path ()));
   (match P.judge ~base_path:base with
    | P.Ambiguous { ids } ->
-     check (list string) "both declarations are named" [ "browser"; "browser-second" ]
+     check (list string) "both declarations are named" [ declaration_id; "browser-second" ]
        (List.sort String.compare ids)
    | P.Not_required | P.Declared _ | P.Missing _ -> fail "expected an ambiguous verdict");
   check bool "the deployment is refused" true (Result.is_error (P.report (P.judge ~base_path:base)))
@@ -124,18 +131,21 @@ let test_two_enabled_browser_declarations_are_refused () =
 (* A native host's first poll binds to the one Add-on serving external
    hosts, so a declaration of a package that names another source answers
    no host, and one beside it that serves external hosts is the one. *)
+(* An enabled declaration [id] of a package that serves only [source]. *)
+let declare_one_source base id source =
+  let package = List.fold_left Filename.concat base [ "packages"; id; "lane.toml" ] in
+  write package
+    (Printf.sprintf
+       "id = %S\nrevision = \"1\"\ntitle = \"Browser\"\nruntime = \"host_process\"\nservice = \"browser\"\nbrowser_backend = %S\ncommand = [\"masc-browser-addon-worker\"]\ncontributions = [\"observe\"]\n[resources]\nmax_reply_bytes = 4096\n"
+       id source);
+  write
+    (Filename.concat (Filename.dirname (declaration_path base)) (id ^ ".toml"))
+    (Printf.sprintf "id = %S\nrun_id = %S\nmanifest_path = %S\n[binding]\nsources = []\n" id (id ^ "-work") package)
+
 let test_only_declarations_serving_native_hosts_count () =
   with_workspace @@ fun base ->
   install_host base;
-  let declare id source =
-    let package = List.fold_left Filename.concat base [ "packages"; id; "lane.toml" ] in
-    write package
-      (Printf.sprintf
-         "id = %S\nrevision = \"1\"\ntitle = \"Browser\"\nruntime = \"host_process\"\nservice = \"browser\"\nbrowser_backend = %S\ncommand = [\"masc-browser-addon-worker\"]\ncontributions = [\"observe\"]\n[resources]\nmax_reply_bytes = 4096\n"
-         id source);
-    write
-      (Filename.concat (Filename.dirname (declaration_path base)) (id ^ ".toml"))
-      (Printf.sprintf "id = %S\nrun_id = %S\nmanifest_path = %S\n[binding]\nsources = []\n" id (id ^ "-work") package) in
+  let declare = declare_one_source base in
   declare "browser-automation" "automation";
   check bool "a package of another source answers no native host" true
     (match P.judge ~base_path:base with
@@ -144,6 +154,24 @@ let test_only_declarations_serving_native_hosts_count () =
   declare "browser-native" "external_host";
   check bool "the one serving external hosts is the one" true
     (P.judge ~base_path:base = P.Declared { id = "browser-native" })
+
+(* A source two enabled declarations serve is used by neither, so the
+   deployment refuses it whether or not a lane host is installed; one
+   declaration per source passes. *)
+let test_a_source_two_declarations_serve_is_refused () =
+  with_workspace @@ fun base ->
+  declare_one_source base "browser-automation" "automation";
+  declare_one_source base "browser-ego" "ego";
+  check bool "one declaration per source passes" true
+    (P.doubled_sources ~base_path:base = [] && P.report_doubled [] = Ok ());
+  declare_one_source base "browser-automation-second" "automation";
+  check bool "the doubled source is named with its declarations" true
+    (match P.doubled_sources ~base_path:base with
+     | [ { P.source = Browser_lane.Backend.Automation; ids } ] ->
+       List.sort String.compare ids = [ "browser-automation"; "browser-automation-second" ]
+     | _ :: _ | [] -> false);
+  check bool "and the deployment is refused" true
+    (Result.is_error (P.report_doubled (P.doubled_sources ~base_path:base)))
 
 (* The declaration directory is the one the server reconciles. *)
 let test_the_directory_is_the_one_the_server_reads () =
@@ -173,6 +201,8 @@ let () =
             test_two_enabled_browser_declarations_are_refused
         ; test_case "only declarations serving native hosts count" `Quick
             test_only_declarations_serving_native_hosts_count
+        ; test_case "a source two declarations serve is refused" `Quick
+            test_a_source_two_declarations_serve_is_refused
         ; test_case "the directory is the one the server reads" `Quick
             test_the_directory_is_the_one_the_server_reads
         ] )

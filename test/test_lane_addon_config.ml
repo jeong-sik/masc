@@ -850,18 +850,16 @@ contributions = ["observe"]
 max_reply_bytes = 4096
 %s
 |} service extra);Lane_addon_manifest.load ~path in
-  let browser=match load "\"browser\"" "" with Ok package -> package
-    | Error error -> fail (Lane_addon_manifest.error_to_string error) in
-  check bool "browser service is a typed package contract" true
-    (browser.worker_service=Lane_addon_types.Browser_service Lane_addon_types.Every_backend);
-  check bool "browser selection survives revision serialization" true
-    (Yojson.Safe.Util.member "service" (Lane_addon_types.package_to_json browser)=`String "browser");
-  check bool "the package that serves every source writes no source" true
-    (Yojson.Safe.Util.member "browser_backend" (Lane_addon_types.package_to_json browser)=`Null);
+  check bool "a browser package that names no source is refused as a browser_backend error" true
+    (match load "\"browser\"" "" with
+     | Ok _ -> false
+     | Error error -> contains (Lane_addon_manifest.error_to_string error) "browser_backend");
   let ego=match load "\"browser\"\nbrowser_backend = \"ego\"" "" with Ok package -> package
     | Error error -> fail (Lane_addon_manifest.error_to_string error) in
   check bool "a browser package names the one source its worker serves" true
-    (ego.worker_service=Lane_addon_types.Browser_service (Lane_addon_types.One_backend Browser_lane.Backend.Ego));
+    (ego.worker_service=Lane_addon_types.Browser_service Browser_lane.Backend.Ego);
+  check bool "browser selection survives revision serialization" true
+    (Yojson.Safe.Util.member "service" (Lane_addon_types.package_to_json ego)=`String "browser");
   check bool "its source survives revision serialization" true
     (Yojson.Safe.Util.member "browser_backend" (Lane_addon_types.package_to_json ego)=`String "ego");
   List.iter (fun (label, service) -> match load service "" with
@@ -873,7 +871,7 @@ max_reply_bytes = 4096
       "a source on a tools package", "\"tools\"\nbrowser_backend = \"ego\"" ];
   List.iter (fun backend -> check bool (Browser_lane.Backend.to_wire backend ^ " is read as its source") true
     (match load (Printf.sprintf "\"browser\"\nbrowser_backend = %S" (Browser_lane.Backend.to_wire backend)) "" with
-     | Ok package -> package.worker_service=Lane_addon_types.Browser_service (Lane_addon_types.One_backend backend)
+     | Ok package -> package.worker_service=Lane_addon_types.Browser_service backend
      | Error _ -> false)) Browser_lane.Backend.all;
   (* With no service the package serves tools, which name no source. *)
   write path {|id = "browser"
@@ -890,7 +888,7 @@ max_reply_bytes = 4096
     (match Lane_addon_manifest.load ~path with
      | Ok _ -> false
      | Error error -> contains (Lane_addon_manifest.error_to_string error) "browser_backend");
-  let exported=match load "\"browser\"" "[world.tools]\nexport = [\"browser_command\"]\ninvocation = \"host_context\"\nhooks = [\"validate_input\", \"validate_output\"]" with
+  let exported=match load "\"browser\"\nbrowser_backend = \"automation\"" "[world.tools]\nexport = [\"browser_command\"]\ninvocation = \"host_context\"\nhooks = [\"validate_input\", \"validate_output\"]" with
     | Ok package -> package | Error error -> fail (Lane_addon_manifest.error_to_string error) in
   check (list string) "browser exports require host caller context" ["browser_command"] exported.exported_tools;
   check bool "browser selects independent input/output middleware" true
@@ -898,9 +896,11 @@ max_reply_bytes = 4096
      exported.tool_hooks=[Lane_addon_types.Validate_input;Validate_output]);
   List.iter (fun (service,extra) -> check bool "unsupported service contract refused" true
     (Result.is_error (load service extra)))
-    ["\"unknown\"","";"true","";"\"browser\"","[world.state]\nmode = \"persistent\"";
-     "\"browser\"","[interface]\nmodel_access = \"host_sampling\"";
-     "\"browser\"","[world.tools]\nexport = [\"arbitrary_tool\"]"])
+    (* Each browser case names its source, so it is refused for its own
+       reason rather than for naming none. *)
+    ["\"unknown\"","";"true","";"\"browser\"\nbrowser_backend = \"automation\"","[world.state]\nmode = \"persistent\"";
+     "\"browser\"\nbrowser_backend = \"automation\"","[interface]\nmodel_access = \"host_sampling\"";
+     "\"browser\"\nbrowser_backend = \"automation\"","[world.tools]\nexport = [\"arbitrary_tool\"]"])
 
 let tool_exports_are_explicit_and_revisioned () = with_directory (fun _root packages directory ->
   let manifest = install_package packages in
@@ -967,8 +967,8 @@ let ui_category_is_strict_display_metadata () = with_directory (fun _root packag
     (Lane_addon_types.same_execution_package original.package package))
     [{changed with command=["different-worker"]};
      {changed with model_access=Lane_addon_types.Host_sampling};
-     {changed with worker_service=Lane_addon_types.Browser_service Lane_addon_types.Every_backend};
-     {changed with worker_service=Lane_addon_types.Browser_service (Lane_addon_types.One_backend Browser_lane.Backend.Ego)};
+     {changed with worker_service=Lane_addon_types.Browser_service Browser_lane.Backend.Automation};
+     {changed with worker_service=Lane_addon_types.Browser_service Browser_lane.Backend.Ego};
      {changed with tool_hooks=[Lane_addon_types.Validate_input]}];
   List.iter (fun category ->
     write manifest ("ui_category = " ^ category ^ "\n" ^ package ());

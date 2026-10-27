@@ -75,15 +75,19 @@ while True:
       check "strict configuration rejects an extra control field" true
         (let fields=match Chrome.configuration_to_json c with `Assoc fields -> fields | _ -> Alcotest.fail "expected object" in
          Result.is_error (Chrome.configuration_of_json (`Assoc (("profile",`String root)::fields))));
-      let context=ok (Socket.context ~live_bidi:None ~instance_id:incarnation ~automation:None ~models:None ~stagehand:(Some c)) in
+      let context=ok (Socket.context ~instance_id:incarnation ~source:(Socket.Stagehand c) ~models:None) in
       let admission=lease (Lease.prepare ~directories:[Filename.concat root "worker-slot"]
         ~instance_id:incarnation ~cleanup_context:(Some context)) in
       claim:=Some admission;
       let resource=ok (Socket.acquire ~admission ~directory:(Filename.concat root "worker-slot")) in
       let directory=Filename.dirname (Socket.socket_path resource) in
       configuration:=Some c;allocation:=Some directory;
+      let rec backend_argument = function
+        | "--backend" :: wire :: _ -> B.Backend.of_wire wire
+        | _ :: rest -> backend_argument rest
+        | [] -> None in
       check "host acquisition selects the Chrome worker path" true
-        (List.mem "--stagehand" (Socket.arguments resource ~max_message_bytes:1048576));
+        (backend_argument (Socket.arguments resource ~max_message_bytes:1048576) = Some B.Backend.Stagehand);
       let owner=ok (Owner.create ~incarnation) in
       Eio.Switch.on_release sw (fun () -> Owner.revoke owner);
       let send command=Owner.dispatch owner {Wire.incarnation;command} in

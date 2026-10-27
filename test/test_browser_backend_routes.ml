@@ -5,7 +5,6 @@ open Alcotest
 open Masc
 module B = Browser_lane
 module F = Browser_addon_fixture
-module T = Lane_addon_types
 let require = function Ok value -> value | Error detail -> fail detail
 let client n browser transport = {B.client_id=require (B.client_id_of_string
     (Printf.sprintf "0c000000-0000-4000-8000-%012d" n));browser;version="1";engine_version="1";transport}
@@ -14,7 +13,7 @@ let ego=client 2 B.Ego_lite B.Ego_task_space
 let extension=client 3 B.Zen B.Web_extension
 (* A client an automation worker reports; it serves no live source. *)
 let stray=client 4 B.Firefox B.Webdriver_bidi
-let one backend clients={F.serves=T.One_backend backend;clients;exports=true}
+let one backend clients={F.serves=backend;clients;exports=true}
 let tabs=B.Answered (`Assoc ["ok",`Bool true;"data",`Assoc ["tabs",`List []]])
 let run_with workers check_routes =
   let base=Filename.temp_dir "browser-backend-routes-" "" in
@@ -57,12 +56,12 @@ let every_source_reaches_its_own_worker () =
   run_with [one Automation [stray];one Stagehand [];one Owned_firefox [bidi];one Ego [ego];
             one External_host [extension]]
     (fun ~config:_ ~host ~issue ~attached:_ ->
-      reaches "automation reaches the automation worker" ~issue B.Automation_route (T.One_backend Automation);
-      reaches "Stagehand reaches the Stagehand worker" ~issue B.Stagehand_route (T.One_backend Stagehand);
-      reaches "a BiDi client reaches the owned Firefox worker" ~issue (live bidi) (T.One_backend Owned_firefox);
-      reaches "an ego client reaches the ego worker" ~issue (live ego) (T.One_backend Ego);
+      reaches "automation reaches the automation worker" ~issue B.Automation_route B.Backend.Automation;
+      reaches "Stagehand reaches the Stagehand worker" ~issue B.Stagehand_route B.Backend.Stagehand;
+      reaches "a BiDi client reaches the owned Firefox worker" ~issue (live bidi) B.Backend.Owned_firefox;
+      reaches "an ego client reaches the ego worker" ~issue (live ego) B.Backend.Ego;
       reaches "an extension client reaches the external host worker" ~issue (live extension)
-        (T.One_backend External_host);
+        B.Backend.External_host;
       refused "a client a worker of no live source reports is not routed" ~issue (live stray);
       let published=snapshot host in
       check (list string) "the choice lists the clients of the live workers only"
@@ -79,8 +78,8 @@ let a_missing_source_fails_alone () =
     (fun ~config:_ ~host ~issue ~attached:_ ->
       refused "a source no worker serves is refused" ~issue B.Stagehand_route;
       refused "a live client no worker lists is refused" ~issue (live ego);
-      reaches "automation is still served" ~issue B.Automation_route (T.One_backend Automation);
-      reaches "the BiDi client is still served" ~issue (live bidi) (T.One_backend Owned_firefox);
+      reaches "automation is still served" ~issue B.Automation_route B.Backend.Automation;
+      reaches "the BiDi client is still served" ~issue (live bidi) B.Backend.Owned_firefox;
       check bool "the missing source has no snapshot" true
         (Result.is_error (Browser_addon_host.snapshot host ~backend:B.Backend.Stagehand));
       check bool "and is unobserved in the choice" false (snapshot host).stagehand.registered)
@@ -89,8 +88,8 @@ let a_doubled_source_fails_alone () =
   run_with [one Automation [];one Automation [];one Stagehand [];one Ego [ego]]
     (fun ~config:_ ~host ~issue ~attached:_ ->
       refused "a source two workers serve is refused" ~issue B.Automation_route;
-      reaches "Stagehand is still served" ~issue B.Stagehand_route (T.One_backend Stagehand);
-      reaches "the ego client is still served" ~issue (live ego) (T.One_backend Ego);
+      reaches "Stagehand is still served" ~issue B.Stagehand_route B.Backend.Stagehand;
+      reaches "the ego client is still served" ~issue (live ego) B.Backend.Ego;
       check bool "the doubled source has no snapshot" true
         (Result.is_error (Browser_addon_host.snapshot host ~backend:B.Backend.Automation));
       check bool "and is unobserved in the choice" false (snapshot host).automation.registered)
@@ -102,39 +101,29 @@ let a_doubled_live_source_leaves_its_clients_unused () =
     (fun ~config:_ ~host ~issue ~attached:_ ->
       refused "a client of a live source two workers serve is refused for that reason" ~because:doubled_live
         ~issue (live ego);
-      reaches "a client of another live source is served" ~issue (live extension) (T.One_backend External_host);
+      reaches "a client of another live source is served" ~issue (live extension) B.Backend.External_host;
       check (list string) "the choice lists only the usable clients" (ids [extension]) (ids (snapshot host).clients))
-
-(* The package that serves every source beside one that names a source: the
-   named source is doubled, and the sources only the first serves are its. *)
-let a_package_of_every_source_beside_one_of_a_source () =
-  run_with [{F.serves=T.Every_backend;clients=[ego];exports=true};one External_host [extension]]
-    (fun ~config:_ ~host ~issue ~attached:_ ->
-      refused "a client of the package serving every source is refused" ~because:doubled_live ~issue (live ego);
-      refused "and so is one of the package naming the doubled source" ~because:doubled_live ~issue (live extension);
-      reaches "automation, which only the first serves, reaches it" ~issue B.Automation_route T.Every_backend;
-      check (list string) "no live client is usable" [] (ids (snapshot host).clients))
 
 (* A service that advertises no browser command still serves its source:
    it is counted, so the source is not given to another, and a command to it
    is refused before any worker. *)
 let a_service_without_its_command_still_counts () =
-  run_with [{F.serves=T.One_backend Automation;clients=[];exports=false};one Automation [];one Stagehand []]
+  run_with [{F.serves=B.Backend.Automation;clients=[];exports=false};one Automation [];one Stagehand []]
     (fun ~config:_ ~host:_ ~issue ~attached:_ ->
       refused "a source one exporting and one silent service serve is doubled"
         ~because:"more than one attached browser Add-on serves" ~issue B.Automation_route;
-      reaches "the other source is served" ~issue B.Stagehand_route (T.One_backend Stagehand));
-  run_with [{F.serves=T.One_backend Automation;clients=[];exports=false};one Stagehand []]
+      reaches "the other source is served" ~issue B.Stagehand_route B.Backend.Stagehand);
+  run_with [{F.serves=B.Backend.Automation;clients=[];exports=false};one Stagehand []]
     (fun ~config:_ ~host:_ ~issue ~attached:_ ->
       refused "a command to the silent service is refused" ~because:"advertises no browser command"
         ~issue B.Automation_route;
-      reaches "and the other source is served" ~issue B.Stagehand_route (T.One_backend Stagehand))
+      reaches "and the other source is served" ~issue B.Stagehand_route B.Backend.Stagehand)
 
 let a_client_two_workers_list_is_refused () =
   run_with [one Owned_firefox [bidi];one Ego [bidi;ego]]
     (fun ~config:_ ~host:_ ~issue ~attached:_ ->
       refused "a client two workers list is sent to neither" ~issue (live bidi);
-      reaches "a client only one worker lists is served" ~issue (live ego) (T.One_backend Ego))
+      reaches "a client only one worker lists is served" ~issue (live ego) B.Backend.Ego)
 
 (* A native host's first poll goes to the one worker that serves external
    hosts; the other browser workers are not candidates. *)
@@ -145,7 +134,7 @@ let a_first_poll_needs_the_one_external_host_worker () =
   run_with [one Automation [];one Ego [ego];one External_host []] (fun ~config ~host:_ ~issue:_ ~attached ->
     check bool "the poll is answered" true (poll ~config=Ok None);
     List.iter (fun (worker:F.attached) ->
-      let expected=if worker.serves=T.One_backend External_host then [B.client_id_to_string extension.client_id] else [] in
+      let expected=if worker.serves=B.Backend.External_host then [B.client_id_to_string extension.client_id] else [] in
       check (list string) "only the external host worker is polled" expected (worker.polled ())) attached);
   let unavailable name workers expected=run_with workers (fun ~config ~host:_ ~issue:_ ~attached:_ ->
     check bool name true (match poll ~config with
@@ -161,7 +150,6 @@ let () = run "browser backend routes" ["one worker per source",[
   test_case "a missing source fails alone" `Slow a_missing_source_fails_alone;
   test_case "a doubled source fails alone" `Slow a_doubled_source_fails_alone;
   test_case "a doubled live source leaves its clients unused" `Slow a_doubled_live_source_leaves_its_clients_unused;
-  test_case "a package of every source beside one of a source" `Slow a_package_of_every_source_beside_one_of_a_source;
   test_case "a service without its command still counts" `Slow a_service_without_its_command_still_counts;
   test_case "a client two workers list is refused" `Slow a_client_two_workers_list_is_refused;
   test_case "a first native poll needs the one external host worker" `Slow

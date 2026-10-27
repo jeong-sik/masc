@@ -15,9 +15,10 @@
     space ({!Masc.Browser_lane_ego_setup}); it installs no host. It starts no
     browser and loads no extension.
 
-    [--mode addon] writes the browser Add-on package this masc carries to
-    [.masc/packages/browser] and declares it when the workspace has no
-    declaration of it ({!Masc.Browser_addon_setup}). Every other mode does the
+    [--mode addon] writes, for each browser source the workspace runs, the
+    package this masc carries to [.masc/packages/browser-<source>] and
+    declares it when the workspace has no declaration of that source
+    ({!Masc.Browser_addon_setup}). Every other mode does the
     same after its host step, but there a refusal of that step is reported and
     the mode's own steps go on; only [--mode addon] fails on it. [--no-addon]
     skips the step for the other modes and contradicts [--mode addon].

@@ -219,10 +219,11 @@ Marionette 포트에 관한 두 줄(`--marionette-port` 있음·없음)은 2026-
 | `browser-automation` | `automation` | `Automation` | `locate` | 있음 | geckodriver, Gecko 브라우저 |
 | `browser-stagehand` | `stagehand` | `Stagehand` | `stagehand` | 없음 | guardian, Chrome |
 | `browser-firefox` | `owned_firefox` | `Owned_firefox` | 없음 | 없음 | guardian, live Firefox |
-| `browser-ego` | `ego` | `Ego` | 없음 | 없음 | 명령마다 `ego-browser nodejs` 한 번 |
+| `browser-ego` | `ego` | `Ego` | 없음 | 있음 | 명령마다 `ego-browser nodejs` 한 번 |
 | `browser-external` | `external_host` | `External_host` | 없음 | 없음 | 없음. 바깥 native host 의 client 대기열만 가져요 |
 
-- 다섯 다 embedded 패키지예요.
+- 업로드·다운로드 broker 는 automation 과 ego 에 있어요. 두 출처의 브라우저가 업로드 사본을 읽고 다운로드를 남겨요(`browser_addon_uploads.ml` 의 stage, `browser_addon_live_ego.ml` 의 다운로드). 처음 판의 표는 ego 를 "없음"으로 적었는데, 코드와 달라서 S-L3 에서 바로잡았어요.
+- 다섯 다 embedded 패키지예요. 저장소에서는 `addons/browser/<automation|stagehand|firefox|ego|external>/` 에 있어요.
 - manifest 의 `browser_backend` 는 위 다섯 값 중 하나예요. 모르는 값은 manifest 오류예요.
   - 값과 variant 는 `Browser_backend.of_wire`·`to_wire` 로 서로 바꿔요.
   - 파싱 결과는 `worker_service = Mcp_tools | Browser_service of Browser_backend.t` 예요. 지금은 `Browser_service` 하나예요(`lane_addon_types.ml:50`, `lane_addon_manifest.ml:134`).

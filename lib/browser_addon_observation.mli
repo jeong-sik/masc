@@ -25,33 +25,30 @@ val read : Lane_addon_types.output -> (published, string) result
 (** No serving worker published for this source. *)
 val unobserved : Browser_selection.work_browser
 
-(** A worker of these sources serves a live connection. *)
-val serves_live : Lane_addon_types.browser_backends -> bool
+(** A worker of this source serves a live connection. *)
+val serves_live : Browser_lane.Backend.t -> bool
 
-(** Whether more than one worker of [among] serves [backend]. *)
-val served_twice : among:Lane_addon_types.browser_backends list -> Browser_lane.Backend.t -> bool
+(** Whether a worker of [backend] answers for [lane], among the sources of
+    every serving worker [among] (itself included): its source is of that
+    lane and no other worker serves it. What a worker publishes does not say
+    which worker of its source it came from, so a doubled source leaves every
+    worker serving it out of that lane. *)
+val answers_for : among:Browser_lane.Backend.t list -> Browser_lane.Lane_name.t ->
+  Browser_lane.Backend.t -> bool
 
-(** Whether a worker of [backends] answers for [lane], among the sources of
-    every serving worker [among] (itself included): it serves a source of
-    that lane and no source of it that it serves is {!served_twice}. What a
-    worker publishes does not say which source it came from, so a doubled
-    source leaves every worker serving it out of that lane. *)
-val answers_for : among:Lane_addon_types.browser_backends list -> Browser_lane.Lane_name.t ->
-  Lane_addon_types.browser_backends -> bool
-
-(** Whether a worker of [backends] lists clients the host may use: whether
+(** Whether a worker of [backend] lists clients the host may use: whether
     it {!answers_for} the live lane. *)
-val lists_usable_clients : among:Lane_addon_types.browser_backends list -> Lane_addon_types.browser_backends -> bool
+val lists_usable_clients : among:Browser_lane.Backend.t list -> Browser_lane.Backend.t -> bool
 
 (** What several browser workers published, read as one, with each worker's
-    sources: the clients of every worker that {!lists_usable_clients}, and the
+    source: the clients of every worker that {!lists_usable_clients}, and the
     automation and Stagehand reports of the one worker that serves each, when
     exactly one does and it published; otherwise {!unobserved}. A worker that
-    published nothing is [None] and still counts as serving its sources. The
+    published nothing is [None] and still counts as serving its source. The
     host chooses from this, and the lane rows read it. *)
-val merge : among:Lane_addon_types.browser_backends list ->
-  (Lane_addon_types.browser_backends * published option) list -> published
-(** [among] lists the sources of every worker the caller counts as serving,
+val merge : among:Browser_lane.Backend.t list ->
+  (Browser_lane.Backend.t * published option) list -> published
+(** [among] lists the source of every worker the caller counts as serving,
     which may be more than the workers read here; a live source is doubled
     when two of them serve it. The host counts its ready services; presence
-    counts one entry per set of sources it reads. *)
+    counts one entry per source it reads. *)

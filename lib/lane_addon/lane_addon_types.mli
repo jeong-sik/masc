@@ -57,15 +57,9 @@ type model_access = Model_disabled | Host_sampling
 type state_storage = Ephemeral | Persistent
 type tool_invocation = Direct | Host_context
 type tool_hook = Validate_input | Validate_output
-(** The browser sources one browser worker serves. A package that names one
-    source in [browser_backend] serves [One_backend] of it. The [browser]
-    package names none and serves [Every_backend] in one worker, until each
-    source has its own package (RFC browser-backends-end-alone S-L3). *)
-type browser_backends = Every_backend | One_backend of Browser_lane.Backend.t
-
-type worker_service = Mcp_tools | Browser_service of browser_backends
-
-val serves_backend : browser_backends -> Browser_lane.Backend.t -> bool
+(** A browser package's worker serves the one browser source its
+    [browser_backend] names (RFC browser-backends-end-alone). *)
+type worker_service = Mcp_tools | Browser_service of Browser_lane.Backend.t
 
 type request_schema_policy = Package_schema_only | Consumer_request_schema
 type exact_output = { name : string; schema : Yojson.Safe.t; request_schema : request_schema_policy }

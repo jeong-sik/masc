@@ -1,23 +1,24 @@
-(** Declare the browser Lane Add-on for a workspace, from the package this
-    build carries.
+(** Declare the browser Lane Add-ons for a workspace, one per browser source,
+    from the packages this build carries.
 
-    Since the browser Add-on owns every browser route, a native browser
-    host's polls, results and disconnects go to an attached browser Add-on,
-    and a workspace without one has no browser. {!apply} does the two steps
-    that used to be by hand:
+    Each browser source has its own package and worker (RFC
+    browser-backends-end-alone): [browser-automation], [browser-stagehand],
+    [browser-firefox], [browser-ego] and [browser-external]. For each source it
+    is given, {!apply} does the two steps that used to be by hand:
 
     - It writes the package this binary was built with to
-      [<base>/.masc/packages/browser/] and removes the files there that this
-      build does not carry. A later {!apply} from an upgraded build rewrites
-      the files, so the declaration that names them does not change.
-    - When no declaration of that package exists in the workspace's Lane
-      directory, it creates [browser.toml] there. An existing declaration of
-      the package is left as it is, whatever package path it names.
+      [<base>/.masc/packages/browser-<source>/] and removes the files there
+      that this build does not carry. A later {!apply} from an upgraded build
+      rewrites the files, so the declaration that names them does not change.
+    - When no declaration of that source exists in the workspace's Lane
+      directory, it creates [browser-<source>.toml] there. An existing
+      declaration of the source is left as it is, whatever package path it
+      names.
 
     It never attaches or starts anything. The server reads declarations at
     start and on its maintenance pass. An instance attached by hand without a
     declaration is not seen here; with it and a declaration attached, the
-    server refuses host polls as ambiguous. *)
+    server uses neither for that source. *)
 
 type declaration =
   | Created of { path : string }
@@ -27,7 +28,8 @@ type declaration =
           [enabled] is its desired activity. *)
 
 type installed =
-  { package_directory : string
+  { backend : Browser_lane.Backend.t  (** The source this package serves. *)
+  ; package_directory : string
   ; manifest_path : string  (** The package's [lane.toml] in [package_directory]. *)
   ; files_written : int  (** 0 when every file already held these bytes. *)
   ; files_removed : string list
@@ -51,35 +53,43 @@ type error =
   | Config_root_missing of string
       (** The workspace has no config root yet; setup does not create one. *)
   | Inventory_unreadable of { directory : string }
-  | Declared_more_than_once of string list
-      (** Several enabled declarations name the browser package; the server
-          would attach them all and refuse every host poll as ambiguous.
-          Disabled declarations are not counted, as the server does not
-          attach them. *)
+  | Declared_more_than_once of { backend : Browser_lane.Backend.t; paths : string list }
+      (** Several enabled declarations serve [backend]; the server would
+          attach them all and use none of them for it. Disabled declarations
+          are not counted, as the server does not attach them. *)
   | Declaration_unloadable of { path : string; reason : string }
-      (** [browser.toml], or a declaration with the id [browser], does not
-          load even with the package in place. It is left as it is. *)
+      (** [browser-<source>.toml], or a declaration with that package's id,
+          does not load even with the package in place. It is left as it is. *)
   | Declaration_refused of string
+  | Retired_declaration of string
+      (** A declaration of the [browser] package that served every source in
+          one worker, which this build no longer carries. Setup refuses until
+          the operator removes it (hard cut, no conversion). *)
 
 val error_message : error -> string
 
-val package_directory : base_path:string -> string
-(** [<base>/.masc/packages/browser]. *)
+val package_name : Browser_lane.Backend.t -> string
+(** [browser-<source>]: the package id, declaration id and folder name. *)
+
+val package_directory : base_path:string -> Browser_lane.Backend.t -> string
+(** [<base>/.masc/packages/browser-<source>]. *)
 
 type plan
 
-val plan : base_path:string -> (plan, error) result
-(** Read what [apply] needs and refuse, before any write, a relative
-    [base_path], an invalid or missing config root, an unreadable Lane
-    directory, more than one enabled declaration of the browser package and an
+val plan : base_path:string -> sources:Browser_lane.Backend.t list -> (plan, error) result
+(** Read what [apply] needs for each of [sources] and refuse, before any
+    write, a relative [base_path], an invalid or missing config root, an
+    unreadable Lane directory, a declaration of the retired [browser]
+    package, more than one enabled declaration of one of [sources] and an
     embedded package that lists a file without bytes. Nothing is written. *)
 
-val apply : plan -> (installed, error) result
-(** Write the package, then read the Lane directory again and declare the
-    package when no declaration of it loads. The declaration is created only
-    if the file is still absent, through the same writer as the dashboard
-    editor. Refusals here come after the package was written:
-    [Package_unwritable], [Package_unloadable], [Embedded_package_invalid] for
-    a manifest id other than [browser], [Inventory_unreadable],
-    [Declared_more_than_once], [Declaration_unloadable] and
-    [Declaration_refused]. *)
+val apply : plan -> (installed list, error) result
+(** For each source in turn, write its package, then read the Lane directory
+    again and declare it when no declaration of the source loads. The
+    declaration is created only if the file is still absent, through the
+    same writer as the dashboard editor. A refusal leaves the packages before
+    it written and declared. Refusals here come after the package was
+    written: [Package_unwritable], [Package_unloadable],
+    [Embedded_package_invalid] for a manifest that is not the source's
+    package, [Inventory_unreadable], [Declared_more_than_once],
+    [Declaration_unloadable] and [Declaration_refused]. *)

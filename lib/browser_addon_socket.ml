@@ -1,13 +1,27 @@
 let ( let* ) = Result.bind
 module Requirement = Resource_requirement
-type t = {path:string;incarnation:string;automation:bool;models:bool;stagehand:bool;live_bidi:bool;device:int;inode:int}
+(* The one browser source an allocation's worker serves, with the browser it
+   starts. Ego's settings ride the worker's arguments, and an external host
+   worker starts no browser. *)
+type source =
+  | Automation of Browser_addon_automation.configuration
+  | Stagehand of Browser_addon_stagehand.configuration
+  | Owned_firefox of Browser_addon_live_bidi.configuration
+  | Ego
+  | External_host
+let source_backend = function
+  | Automation _ -> Browser_lane.Backend.Automation
+  | Stagehand _ -> Browser_lane.Backend.Stagehand
+  | Owned_firefox _ -> Browser_lane.Backend.Owned_firefox
+  | Ego -> Browser_lane.Backend.Ego
+  | External_host -> Browser_lane.Backend.External_host
+type t = {path:string;incarnation:string;backend:Browser_lane.Backend.t;models:bool;device:int;inode:int}
 type acquisition = Missing | Acquired of int * int | Cleaning of int * int | Retained of int * int | Released
 type settlement = Allocation_released | Allocation_retained
 let socket_path t = t.path
 let arguments t ~max_message_bytes = ["--socket";t.path;"--incarnation";t.incarnation;
-  "--max-message-bytes";string_of_int max_message_bytes] @ (if t.automation then ["--automation"] else [])
-  @ (if t.models then ["--models"] else []) @ (if t.stagehand then ["--stagehand"] else [])
-  @ (if t.live_bidi then ["--live-bidi"] else [])
+  "--max-message-bytes";string_of_int max_message_bytes;"--backend";Browser_lane.Backend.to_wire t.backend]
+  @ (if t.models then ["--models"] else [])
 let protect run = try run () with
   | (Unix.Unix_error _|Sys_error _|Yojson.Json_error _) as exn -> Error (Printexc.to_string exn)
 let sync directory =
@@ -18,16 +32,46 @@ let leaf instance_id =
   | Some uuid when Uuidm.to_string uuid=instance_id ->
     Ok ("mb-" ^ Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet (Uuidm.to_binary_string uuid))
   | None | Some _ -> Error "browser resource requires a canonical worker UUID"
-let context ~instance_id ~automation ~stagehand ~live_bidi ~models = protect (fun () ->
+let source_to_json source =
+  let backend=Browser_lane.Backend.to_wire (source_backend source) in
+  `Assoc (("backend",`String backend) :: match source with
+    | Automation c -> ["configuration",Browser_addon_automation.configuration_to_json c]
+    | Stagehand c -> ["configuration",Browser_addon_stagehand.configuration_to_json c]
+    | Owned_firefox c -> ["configuration",Browser_addon_live_bidi.configuration_to_json c]
+    | Ego | External_host -> [])
+let source_of_json = function
+  | `Assoc fields ->
+    let configuration decode = match List.sort String.compare (List.map fst fields) with
+      | ["backend";"configuration"] -> decode (List.assoc "configuration" fields)
+      | keys -> Error ("browser source descriptor keys must be backend and configuration; they are "
+          ^ String.concat ", " keys) in
+    let alone source = match List.map fst fields with
+      | ["backend"] -> Ok source
+      | keys -> Error ("browser source descriptor of a source without a browser has only backend; it has "
+          ^ String.concat ", " keys) in
+    (match List.assoc_opt "backend" fields with
+     | Some (`String wire) ->
+       (match Browser_lane.Backend.of_wire wire with
+        | Some Browser_lane.Backend.Automation ->
+          let* c=configuration Browser_addon_automation.configuration_of_json in Ok (Automation c)
+        | Some Browser_lane.Backend.Stagehand ->
+          let* c=configuration Browser_addon_stagehand.configuration_of_json in Ok (Stagehand c)
+        | Some Browser_lane.Backend.Owned_firefox ->
+          let* c=configuration Browser_addon_live_bidi.configuration_of_json in Ok (Owned_firefox c)
+        | Some Browser_lane.Backend.Ego -> alone Ego
+        | Some Browser_lane.Backend.External_host -> alone External_host
+        | None -> Error ("browser source descriptor backend must be one of " ^ Browser_lane.Backend.expected))
+     | Some found -> Error ("browser source descriptor backend must be a string; it is " ^ Yojson.Safe.to_string found)
+     | None -> Error "browser source descriptor has no backend")
+  | value -> Error ("browser source descriptor must be an object; it is " ^ Yojson.Safe.to_string value)
+let context ~instance_id ~source ~models = protect (fun () ->
   let* leaf=leaf instance_id in
   let root=Unix.realpath (Filename.get_temp_dir_name ()) in
   Ok (`Assoc ["kind",`String "browser_socket";"directory",`String (Filename.concat root leaf);
-    "stagehand",(match stagehand with None -> `Null | Some c -> Browser_addon_stagehand.configuration_to_json c);
-    "live_bidi",(match live_bidi with None -> `Null | Some c -> Browser_addon_live_bidi.configuration_to_json c);
-    "models",(match models with None -> `Null | Some configuration -> Browser_addon_models.configuration_to_json configuration);
-    "automation",(match automation with None -> `Null | Some configuration -> Browser_addon_automation.configuration_to_json configuration)]))
+    "source",source_to_json source;
+    "models",(match models with None -> `Null | Some configuration -> Browser_addon_models.configuration_to_json configuration)]))
 let cleanup_descriptor_label = "native cleanup descriptor"
-let cleanup_descriptor_keys = ["automation";"directory";"kind";"live_bidi";"models";"stagehand"]
+let cleanup_descriptor_keys = ["directory";"kind";"models";"source"]
 let context_envelope_of_json ~instance_id = function
   | None -> Ok None
   | Some (`Assoc fields) when List.sort String.compare (List.map fst fields)=cleanup_descriptor_keys ->
@@ -49,15 +93,22 @@ let context_envelope_of_json ~instance_id = function
 let optional_configuration decode fields name = match List.assoc name fields with
   | `Null -> Ok None
   | value -> decode value |> Result.map Option.some
-let child_configurations fields =
-  let* stagehand=optional_configuration Browser_addon_stagehand.configuration_of_json fields "stagehand" in
-  let* live_bidi=optional_configuration Browser_addon_live_bidi.configuration_of_json fields "live_bidi" in
-  Ok (stagehand,live_bidi)
+let decode_source fields = source_of_json (List.assoc "source" fields)
+(* Only the source's name, without its configuration: a handoff reads no
+   automation or model payload. *)
+let decode_backend fields = match List.assoc "source" fields with
+  | `Assoc source ->
+    (match List.assoc_opt "backend" source with
+     | Some (`String wire) ->
+       Option.to_result ~none:("browser source descriptor backend must be one of " ^ Browser_lane.Backend.expected)
+         (Browser_lane.Backend.of_wire wire)
+     | Some found -> Error ("browser source descriptor backend must be a string; it is " ^ Yojson.Safe.to_string found)
+     | None -> Error "browser source descriptor has no backend")
+  | value -> Error ("browser source descriptor must be an object; it is " ^ Yojson.Safe.to_string value)
 let decode_context (root,fields) =
-  let* automation=optional_configuration Browser_addon_automation.configuration_of_json fields "automation" in
+  let* source=decode_source fields in
   let* models=optional_configuration Browser_addon_models.configuration_of_json fields "models" in
-  let* stagehand,live_bidi=child_configurations fields in
-  Ok (root,automation,models,stagehand,live_bidi)
+  Ok (root,source,models)
 let context_envelope admission =
   let* context=Native_addon_lease.cleanup_context admission |> Result.map_error Native_addon_lease.error_to_string in
   context_envelope_of_json ~instance_id:(Native_addon_lease.instance_id admission) context
@@ -86,7 +137,7 @@ let acquire ~admission ~directory = protect (fun () ->
     | Native_addon_lease.Awaiting_exec -> Ok ()
     | Live _|Cleanup_pending _|Settled -> Error "browser resource requires an unstarted original admission" in
   let* root=context_path admission in
-  let* root,automation,models,stagehand,live_bidi=Option.to_result ~none:"native reservation has no browser allocation intent" root in
+  let* root,source,models=Option.to_result ~none:"native reservation has no browser allocation intent" root in
   let file=record admission directory in
   let* ()=match Unix.lstat file with
     | _ -> Error "browser socket resource was already acquired"
@@ -95,25 +146,20 @@ let acquire ~admission ~directory = protect (fun () ->
   let info=Unix.lstat root in
   sync root;sync (Filename.dirname root);
   let* ()=Fs_compat.save_file_atomic_strict file (Yojson.Safe.to_string (acquired_json admission root info ~state:"acquired")) in
-  let* ()=match automation with
-    | None -> Ok ()
-    | Some configuration -> Fs_compat.save_file_atomic_strict (Filename.concat root "automation.json")
-        (Yojson.Safe.to_string (Browser_addon_automation.configuration_to_json configuration)) in
+  let* ()=match source with
+    | Automation configuration -> Fs_compat.save_file_atomic_strict (Filename.concat root "automation.json")
+        (Yojson.Safe.to_string (Browser_addon_automation.configuration_to_json configuration))
+    | Stagehand c -> Fs_compat.save_file_atomic_strict (Filename.concat root "stagehand.json")
+        (Yojson.Safe.to_string (Browser_addon_stagehand.configuration_to_json c))
+    | Owned_firefox c -> Fs_compat.save_file_atomic_strict (Filename.concat root "live-bidi.json")
+        (Yojson.Safe.to_string (Browser_addon_live_bidi.configuration_to_json c))
+    | Ego | External_host -> Ok () in
   let* ()=match models with
     | None -> Ok ()
     | Some configuration -> Fs_compat.save_file_atomic_strict (Filename.concat root "models.json")
         (Yojson.Safe.to_string (Browser_addon_models.configuration_to_json configuration)) in
-  let* ()=match stagehand with
-    | None -> Ok ()
-    | Some c -> Fs_compat.save_file_atomic_strict (Filename.concat root "stagehand.json")
-        (Yojson.Safe.to_string (Browser_addon_stagehand.configuration_to_json c)) in
-  let* ()=match live_bidi with
-    | None -> Ok ()
-    | Some c -> Fs_compat.save_file_atomic_strict (Filename.concat root "live-bidi.json")
-        (Yojson.Safe.to_string (Browser_addon_live_bidi.configuration_to_json c)) in
   Ok {path=Filename.concat root "s";incarnation=Native_addon_lease.instance_id admission;
-    automation=Option.is_some automation;models=Option.is_some models;stagehand=Option.is_some stagehand;
-    live_bidi=Option.is_some live_bidi;
+    backend=source_backend source;models=Option.is_some models;
     device=info.st_dev;inode=info.st_ino})
 let with_download_snapshot t (descriptor:Browser_addon_downloads.descriptor) consume = protect (fun () ->
   let allocation=Filename.dirname t.path in
@@ -156,7 +202,10 @@ let rec empty_tree path =
       let* ()=Array.fold_left (fun acc name -> let* ()=acc in empty_tree (Filename.concat path name)) (Ok ()) (Sys.readdir path) in
       Unix.rmdir path;Ok ()
   | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok ()
-let cleanup_contents ~admission ~root ~automation ~models ~stagehand ~live_bidi ~confirmed ~confirm =
+(* What an allocation of [source] may hold besides its socket: the files and
+   folders its browser writes. [None] is an allocation whose acquisition was
+   never confirmed, which may hold only its socket. *)
+let cleanup_contents ~admission ~root ~source ~models ~confirmed ~confirm =
   let read name =
     let* text=Fs_compat.load_owned_regular_file ~ownership_root:root (Filename.concat root name)
       |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string in
@@ -174,38 +223,38 @@ let cleanup_contents ~admission ~root ~automation ~models ~stagehand ~live_bidi 
         if Browser_addon_models.configuration_to_json actual=Browser_addon_models.configuration_to_json configuration
         then Ok () else Error "browser model configuration changed" in
   let names=List.filter (fun name -> name<>"models.json") names in
-  let* ()=match stagehand with
-    | None -> if List.exists (fun name -> List.mem name ["stagehand.json";"chromium.log";"chromium-profiles"]) names
-        then Error "undeclared Chrome resources" else Ok ()
-    | Some configuration ->
+  let only allowed what = if List.for_all (fun name -> List.mem name ("s" :: allowed)) names then Ok ()
+    else Error (what ^ " allocation contains unknown resources") in
+  let* ()=match source with
+    | None -> only [] "browser socket"
+    | Some (Automation configuration) ->
+      let* ()=only ["automation.json";"webdriver.log";"downloads"] "owned browser" in
+      let* ()=if confirmed then Ok () else (
+        let* spec=read "automation.json" in
+        let* actual=Browser_addon_automation.configuration_of_json spec in
+        if actual=configuration then Ok () else Error "owned browser configuration changed") in
+      empty_tree (Filename.concat root "downloads")
+    | Some (Stagehand configuration) ->
+      let* ()=only ["stagehand.json";"chromium.log";"chromium-profiles"] "Chrome" in
       let* ()=if confirmed && not (List.mem "stagehand.json" names) then Ok () else
         let* value=read "stagehand.json" in
         let* actual=Browser_addon_stagehand.configuration_of_json value in
         if Browser_addon_stagehand.configuration_to_json actual=Browser_addon_stagehand.configuration_to_json configuration
         then Ok () else Error "Chrome configuration changed" in
-      Browser_addon_stagehand.cleanup configuration ~incarnation:(Native_addon_lease.instance_id admission) ~directory:root in
-  let names=List.filter (fun name -> not (List.mem name ["stagehand.json";"chromium.log";"chromium-profiles"])) names in
-  let* ()=match live_bidi with
-    | None -> if List.exists (fun name -> List.mem name ["live-bidi.json";"live-firefox.log"]) names
-        then Error "undeclared live BiDi resources" else Ok ()
-    | Some configuration ->
+      Browser_addon_stagehand.cleanup configuration ~incarnation:(Native_addon_lease.instance_id admission) ~directory:root
+    | Some (Owned_firefox configuration) ->
+      let* ()=only ["live-bidi.json";"live-firefox.log"] "live BiDi" in
       let* ()=if confirmed && not (List.mem "live-bidi.json" names) then Ok () else
         let* value=read "live-bidi.json" in
         let* actual=Browser_addon_live_bidi.configuration_of_json value in
         if Browser_addon_live_bidi.configuration_to_json actual=Browser_addon_live_bidi.configuration_to_json configuration
         then Ok () else Error "live BiDi configuration changed" in
-      Browser_addon_live_bidi.cleanup configuration ~incarnation:(Native_addon_lease.instance_id admission) ~directory:root in
-  let names=List.filter (fun name -> not (List.mem name ["live-bidi.json";"live-firefox.log"])) names in
-  let* ()=match automation with
-    | None -> if List.for_all ((=) "s") names then Ok () else Error "browser socket directory contains unknown resources"
-    | Some configuration ->
-      let* ()=if List.for_all (fun name -> List.mem name ["s";"automation.json";"webdriver.log";"downloads"]) names
-        then Ok () else Error "owned browser directory contains unknown resources" in
-      let* ()=if confirmed then Ok () else (
-      let* spec=read "automation.json" in
-      let* actual=Browser_addon_automation.configuration_of_json spec in
-      if actual=configuration then Ok () else Error "owned browser configuration changed") in
-      empty_tree (Filename.concat root "downloads") in
+      Browser_addon_live_bidi.cleanup configuration ~incarnation:(Native_addon_lease.instance_id admission) ~directory:root
+    (* Ego's downloads land in this allocation; its browser is ego lite's own. *)
+    | Some Ego ->
+      let* ()=only ["downloads"] "ego" in
+      empty_tree (Filename.concat root "downloads")
+    | Some External_host -> only [] "external host" in
   let* ()=confirm () in
   List.fold_left (fun acc name -> let* ()=acc in
     let path=Filename.concat root name in
@@ -280,12 +329,11 @@ let check_retained ~instance_id ~slot context = protect (fun () ->
     | Retained _ -> Ok ()
     | Released -> released_directory_absent root
     | Missing|Acquired _|Cleaning _ ->
-    let* _,_automation,_models,stagehand,live_bidi=decode_context (root,fields) in
-    let* ()=match stagehand with None -> Ok () | Some c ->
-      Browser_addon_stagehand.check_retained_child c ~incarnation:instance_id ~directory:root in
-    let* ()=match live_bidi with None -> Ok () | Some c ->
-      Browser_addon_live_bidi.check_retained_child c ~incarnation:instance_id ~directory:root in
-    Ok ())
+    let* _,source,_models=decode_context (root,fields) in
+    match source with
+    | Stagehand c -> Browser_addon_stagehand.check_retained_child c ~incarnation:instance_id ~directory:root
+    | Owned_firefox c -> Browser_addon_live_bidi.check_retained_child c ~incarnation:instance_id ~directory:root
+    | Automation _ | Ego | External_host -> Ok ())
 let cleanup ~admission ~directory = protect (fun () ->
   let* directory=slot admission directory in
   let* status=Native_addon_lease.status admission |> Result.map_error Native_addon_lease.error_to_string in
@@ -305,11 +353,11 @@ let cleanup ~admission ~directory = protect (fun () ->
     | Retained _ -> Ok Allocation_retained
     | Released -> let* ()=released_directory_absent root in Ok Allocation_released
     | Missing|Acquired _|Cleaning _ ->
-    let* _,automation,models,stagehand,live_bidi=decode_context (root,fields) in
-    let* ()=match stagehand with None -> Ok () | Some c ->
-      Browser_addon_stagehand.settle c ~incarnation:(Native_addon_lease.instance_id admission) ~directory:root in
-    let* ()=match live_bidi with None -> Ok () | Some c ->
-      Browser_addon_live_bidi.settle c ~incarnation:(Native_addon_lease.instance_id admission) ~directory:root in
+    let* _,source,models=decode_context (root,fields) in
+    let* ()=match source with
+      | Stagehand c -> Browser_addon_stagehand.settle c ~incarnation:(Native_addon_lease.instance_id admission) ~directory:root
+      | Owned_firefox c -> Browser_addon_live_bidi.settle c ~incarnation:(Native_addon_lease.instance_id admission) ~directory:root
+      | Automation _ | Ego | External_host -> Ok () in
     let* ()=match Unix.lstat root with
       | info ->
         let* ()=private_root root info in
@@ -327,14 +375,16 @@ let cleanup ~admission ~directory = protect (fun () ->
         let confirm ()=if confirmed then Ok () else
           Fs_compat.save_file_atomic_strict file
             (Yojson.Safe.to_string (acquired_json admission root info ~state:"cleaning")) in
-        let automation=match identity with Missing -> None | Acquired _|Cleaning _|Retained _|Released -> automation in
+        let source=match identity with Missing -> None | Acquired _|Cleaning _|Retained _|Released -> Some source in
         let models=match identity with Missing -> None | Acquired _|Cleaning _|Retained _|Released -> models in
-        let stagehand=match identity with Missing -> None | Acquired _|Cleaning _|Retained _|Released -> stagehand in
-        let live_bidi=match identity with Missing -> None | Acquired _|Cleaning _|Retained _|Released -> live_bidi in
-        let* ()=cleanup_contents ~admission ~root ~automation ~models ~stagehand ~live_bidi ~confirmed ~confirm in
+        let* ()=cleanup_contents ~admission ~root ~source ~models ~confirmed ~confirm in
         Unix.rmdir root;Ok ()
       | exception Unix.Unix_error (Unix.ENOENT,_,_) ->
-        (match identity,Option.is_some automation || Option.is_some stagehand || Option.is_some live_bidi with
+        (* A source that starts a browser keeps its resources in the
+           allocation; one acquired and gone was never confirmed released. *)
+        let starts_browser=match source with
+          | Automation _ | Stagehand _ | Owned_firefox _ -> true | Ego | External_host -> false in
+        (match identity,starts_browser with
          | Acquired _,true -> Error "owned browser allocation vanished without confirmed cleanup"
          | (Missing|Cleaning _|Retained _|Released),_ | Acquired _,false -> Ok ()) in
     sync (Filename.dirname root);
@@ -368,11 +418,18 @@ let retain_with ~(save:string -> string -> (unit, Fs_compat.atomic_replace_failu
       let* ()=match identity with
         | Missing -> let* _=decode_context (root,fields) in Ok ()
         | Acquired _|Cleaning _|Retained _|Released -> Ok () in
-      let* stagehand,live_bidi=child_configurations fields in
-      let* ()=match stagehand with None -> Ok () | Some c ->
-        Browser_addon_stagehand.check_settled c ~incarnation ~directory:root in
-      let* ()=match live_bidi with None -> Ok () | Some c ->
-        Browser_addon_live_bidi.check_settled c ~incarnation ~directory:root in
+      (* Only a source with a child claim is decoded, to confirm that claim
+         settled. *)
+      let* backend=decode_backend fields in
+      let* ()=match backend with
+        | Browser_lane.Backend.(Automation|Ego|External_host) -> Ok ()
+        | Browser_lane.Backend.(Stagehand|Owned_firefox) ->
+          let* source=decode_source fields in
+          (match source with
+           | Stagehand c -> Browser_addon_stagehand.check_settled c ~incarnation ~directory:root
+           | Owned_firefox c -> Browser_addon_live_bidi.check_settled c ~incarnation ~directory:root
+           | Automation _ | Ego | External_host ->
+             Error "browser source descriptor names one backend and decodes as another") in
       let retained ~device ~inode = Ok (Write_retained {file;root;device;inode}) in
       match identity,Unix.lstat root with
       | Released,_ -> Ok (Already Allocation_released)

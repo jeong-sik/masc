@@ -40,7 +40,7 @@ let backend_failure_message = function
   | Several_services backend -> Printf.sprintf
       "more than one attached browser Add-on serves %s, so it is not used until one is detached"
       (Browser_lane.Backend.to_wire backend)
-let serves (served:served) backend=Lane_addon_types.serves_backend served.service.backends backend
+let serves (served:served) backend=served.service.backend = backend
 let for_backend t backend=match List.filter (fun served -> serves served backend) t.services with
   | [served] -> Ok served
   | [] -> Error (No_service backend)
@@ -97,7 +97,7 @@ type gathered = {
    a slow worker of another source does not hold the request up. Whether a
    live client is usable is judged among every service. *)
 let gather t ~reach =
-  let among=List.map (fun (served:served) -> served.service.backends) t.services in
+  let among=List.map (fun (served:served) -> served.service.backend) t.services in
   match List.filter reach t.services with
   | [] -> Error (Snapshot_unavailable "no attached browser Add-on serves the requested browser")
   | reached ->
@@ -107,15 +107,15 @@ let gather t ~reach =
   | [],((_,Ok _)::_|[]) -> Error (Snapshot_unavailable "no browser Add-on answered its snapshot")
   | _::_,_ ->
     let published=Browser_addon_observation.merge ~among (List.map (fun ((served:served),answer) ->
-      served.service.backends,Result.to_option answer) answers) in
+      served.service.backend,Result.to_option answer) answers) in
     let live=List.filter_map (fun ((served:served),answer) -> match answer with
       | Ok (listed:Browser_addon_observation.published)
-        when Browser_addon_observation.lists_usable_clients ~among served.service.backends -> Some (served,listed)
+        when Browser_addon_observation.lists_usable_clients ~among served.service.backend -> Some (served,listed)
       | Ok _|Error _ -> None) answers in
     let doubled=List.concat_map (fun ((served:served),answer) -> match answer with
       | Ok (listed:Browser_addon_observation.published)
-        when Browser_addon_observation.serves_live served.service.backends
-          && not (Browser_addon_observation.lists_usable_clients ~among served.service.backends) ->
+        when Browser_addon_observation.serves_live served.service.backend
+          && not (Browser_addon_observation.lists_usable_clients ~among served.service.backend) ->
           List.map (fun (client:Browser_lane.client_info) -> Browser_lane.client_id_to_string client.client_id) listed.clients
       | Ok _|Error _ -> []) answers in
     Ok {published;doubled;
@@ -201,7 +201,7 @@ let resolve ~required_actions t ~preference verb ~start_time =
       let reach=match preference with
         | Browser_selection.Automatic -> (fun _ -> true)
         | Exact (Browser_lane.Live_route _) ->
-            (fun (served:served) -> Browser_addon_observation.serves_live served.service.backends)
+            (fun (served:served) -> Browser_addon_observation.serves_live served.service.backend)
         | Exact Browser_lane.Automation_route -> (fun served -> serves served Browser_lane.Backend.Automation)
         | Exact Browser_lane.Stagehand_route -> (fun served -> serves served Browser_lane.Backend.Stagehand) in
       let* gathered=match gather t ~reach with

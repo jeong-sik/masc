@@ -111,7 +111,7 @@ def main():
     with (output / 'probe.log').open('w') as probe_log, (output / 'geckodriver.log').open('w') as driver_log:
         try:
             probe = subprocess.Popen([
-                str(args.probe.resolve()), '--manifest', str(repo / 'addons/browser/lane.toml'),
+                str(args.probe.resolve()), '--manifest', str(repo / 'addons/browser/external/lane.toml'),
                 '--launcher', str(args.launcher.resolve()), '--guardian', str(args.guardian.resolve()),
                 '--worker', str(args.worker.resolve()), '--native-host', str(args.native_host.resolve()),
                 '--out', str(output),

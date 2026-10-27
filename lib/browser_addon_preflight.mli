@@ -3,7 +3,7 @@
 
     Since #44295 a native browser host's polls go only to an attached browser
     Add-on, and its first poll binds to the one that serves external hosts
-    (no [browser_backend], or [browser_backend = "external_host"]). A server
+    ([browser_backend = "external_host"], the [browser-external] package). A server
     started on a workspace with an installed host and no saved declaration for
     such an Add-on answers every poll with HTTP 503, and so does one with two
     of them, since it cannot choose between them. Declarations of a package
@@ -40,3 +40,16 @@ val judge : base_path:string -> verdict
 (** [Ok] is the one line a deployment that may proceed reports. [Error] is the
     operator-facing refusal for a verdict it must not proceed on. *)
 val report : verdict -> (string, string) result
+
+(** A browser source more than one enabled declaration serves, with those
+    declarations' ids. *)
+type doubled = { source : Browser_lane.Backend.t; ids : string list }
+
+(** Every browser source more than one enabled declaration serves. The host
+    uses no such source, whether or not a lane host is installed. Reads files
+    only, as {!judge} does. *)
+val doubled_sources : base_path:string -> doubled list
+
+(** [Ok] when no source is doubled; otherwise the operator-facing refusal
+    naming each doubled source and its declarations. *)
+val report_doubled : doubled list -> (unit, string) result

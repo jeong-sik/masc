@@ -61,7 +61,7 @@ let for_poll ~config ~client =
       (* A native host's first poll binds it to the one service that serves
          external hosts; the other browser services are not asked. *)
       let* selected=match List.filter (fun (service:R.browser_service) ->
-          Lane_addon_types.serves_backend service.backends Browser_lane.Backend.External_host)
+          service.backend = Browser_lane.Backend.External_host)
           (R.browser_services ~config ~access) with
         | [selected] -> Ok selected
         | [] -> Error (Unavailable No_addon)

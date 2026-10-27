@@ -228,8 +228,9 @@ let operator_retain () = with_fixture (fun clock root config ->
       (Lane_addon_store.digest instance_id) in
     Unix.mkdir slot 0o700;
     let lease result = result |> Result.map_error Native_addon_lease.error_to_string |> require in
-    let context = require (Browser_addon_socket.context ~instance_id ~stagehand:None ~live_bidi:None ~models:None
-      ~automation:(Some {Browser_addon_automation.driver="/fixture/geckodriver";binary=None;profiles="/fixture/gecko-profiles"})) in
+    let context = require (Browser_addon_socket.context ~instance_id ~models:None
+      ~source:(Browser_addon_socket.Automation
+        {Browser_addon_automation.driver="/fixture/geckodriver";binary=None;profiles="/fixture/gecko-profiles"})) in
     let admission = lease (Native_addon_lease.prepare ~directories:[slot] ~instance_id ~cleanup_context:(Some context)) in
     let allocation = require (Browser_addon_socket.acquire ~admission ~directory:slot) in
     let downloads = Filename.concat (Filename.dirname (Browser_addon_socket.socket_path allocation)) "downloads" in
@@ -378,6 +379,7 @@ revision = "fixture-1"
 title = "Browser service fixture"
 runtime = "host_process"
 service = "browser"
+browser_backend = "external_host"
 command = ["python3", %S, %S, %S]
 contributions = ["observe"]
 [resources]
@@ -707,6 +709,7 @@ revision = "fixture-1"
 title = "Browser service fixture"
 runtime = "host_process"
 service = "browser"
+browser_backend = "external_host"
 command = ["python3", %S, %S, "normal"]
 contributions = ["observe"]
 [resources]

@@ -1,9 +1,10 @@
-id = "browser"
+id = "browser-stagehand"
 revision = "0.1.0"
-title = "Browser connections"
+title = "Browser Stagehand (owned Chrome)"
 ui_category = "browser"
 runtime = "host_process"
 service = "browser"
+browser_backend = "stagehand"
 command = ["masc-browser-addon-worker"]
 contributions = ["observe"]
 
@@ -17,9 +18,6 @@ hooks = ["validate_input", "validate_output"]
 
 [world.outputs.connections]
 all_lanes = true
-
-[world.exact_outputs.locate]
-schema = "schemas/locate.json"
 
 [world.exact_outputs.stagehand]
 schema = "schemas/stagehand.json"

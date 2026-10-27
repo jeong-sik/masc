@@ -2283,9 +2283,10 @@ let browser_lane_setup_cmd =
           [ "mode" ]
           ~docv:"MODE"
           ~doc:
-            "How to connect Firefox: addon writes the browser Add-on package this masc \
-             carries to .masc/packages/browser and declares it when no declaration of it \
-             exists, which every other mode also does; extension installs the native host \
+            "How to connect Firefox: addon writes the browser Add-on package of each \
+             browser source the workspace runs to .masc/packages/browser-<source> and \
+             declares it when no declaration of that source exists, which every other \
+             mode also does; extension installs the native host \
              and writes the MASC extension for Firefox to load; bidi installs the host and \
              writes the \
              [browser.live.bidi] table so the MASC server starts a Firefox of its own; \
@@ -2453,11 +2454,14 @@ let browser_lane_setup_cmd =
              "Installing again replaces the host, launcher, manifest and extension files \
               and keeps the workspace's lane token."
          ; `P
-             "Every route runs in the browser Lane Add-on, so every mode also writes the \
-              Add-on package this masc carries to .masc/packages/browser and, when the \
-              workspace has no declaration of it, creates browser.toml in its Lane \
-              directory. An existing declaration is left as it is. The server attaches the \
-              Add-on when it starts and on its maintenance pass. Outside --mode addon a \
+             "Every route runs in a browser Lane Add-on, one per browser source, so every \
+              mode also writes the package of each source the workspace runs to \
+              .masc/packages/browser-<source> and, when the workspace has no declaration of \
+              that source, creates browser-<source>.toml in its Lane directory: automation, \
+              firefox and ego when runtime.toml has their table or the mode writes it, \
+              stagehand when [browser.stagehand] is there, and external when a native host \
+              is installed. An existing declaration is left as it is. The server attaches the \
+              Add-ons when it starts and on its maintenance pass. Outside --mode addon a \
               refusal of that step is reported and the mode goes on; --no-addon skips it."
          ; `P
              "--mode automation writes the geckodriver of the lane that opens a fresh \

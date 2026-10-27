@@ -52,9 +52,9 @@ let authorize ~base_path ~store ~declaration_id ~(package : Lane_addon_types.pac
   | Some retained ->
     (* An original owns this ID. A request it does not match is refused
        without ending the ID, which the original still needs. *)
-    let* workspace = Domain_pool_ref.run_in_pool_systhread (fun () -> Capture.observe_workspace ~base_path)
+    let* workspace = Systhread_host.run (fun () -> Capture.observe_workspace ~base_path)
       |> Result.map_error undecided in
-    let* capture = Domain_pool_ref.run_in_pool_systhread (fun () -> Capture.restore ~workspace
+    let* capture = Systhread_host.run (fun () -> Capture.restore ~workspace
       ~load:(fun ~request_id -> Owner.load ~store ~scope:Capture.scope ~request_id
         |> Result.map_error Owner.error_to_string) retained) |> Result.map_error undecided in
     let destination = Capture.destination capture in

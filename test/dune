@@ -1655,8 +1655,8 @@
  (libraries alcotest masc.masc_core eio eio_main))
 
 (test
- (name test_pool_systhread)
- (modules test_pool_systhread)
+ (name test_systhread_host)
+ (modules test_systhread_host)
  (libraries alcotest masc.masc_core eio eio_main eio.unix unix))
 
 (test

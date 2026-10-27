@@ -44,7 +44,7 @@ let captured_destination (destination : Runtime.tool_request_destination) : Capt
 let capture ~config ~request_id make =
   let reserved=reserved () in
   let* export=resolve ~config ~reserved in
-  let* workspace=Domain_pool_ref.run_in_pool_systhread (fun () -> Capture.observe_workspace ~base_path:config.Workspace.base_path)
+  let* workspace=Systhread_host.run (fun () -> Capture.observe_workspace ~base_path:config.Workspace.base_path)
     |> Result.map_error (fun detail -> Unavailable detail) in
   Runtime.capture_tool_request_owner ~config ~access:Lane_addon_sources.Operator_configuration ~reserved ~export
     ~scope:Capture.scope ~request_id:(Capture.Request_id.to_string request_id)
@@ -55,7 +55,7 @@ let capture ~config ~request_id make =
       let* summary=Capture.summary capture in
       Ok (capture,Capture.to_json capture,Capture.Summary.to_json summary)) |> Result.map_error runtime_error
 let capture_classification ~config ~request_id ~prompt ~ledger ~batch =
-  let* stored_ledger=Domain_pool_ref.run_in_pool_systhread (fun () ->
+  let* stored_ledger=Systhread_host.run (fun () ->
     Workspace_memory_revision.write_ledger ~base_path:config.Workspace.base_path ledger)
     |> Result.map_error (fun error -> Unavailable (Workspace_memory_revision.write_error_to_string error)) in
   capture ~config ~request_id (fun ~workspace ~destination ->
@@ -66,7 +66,7 @@ let capture_classification ~config ~request_id ~prompt ~ledger ~batch =
     let* ()=Binding.check_frame ~max_reply_bytes:destination.max_reply_bytes capture in
     Ok capture)
 let capture_briefing ~config ~prompt ~batch =
-  let* current=Domain_pool_ref.run_in_pool_systhread (fun () ->
+  let* current=Systhread_host.run (fun () ->
     Briefing.load ~directory:(Ledger.directory ~base_path:config.Workspace.base_path))
     |> Result.map_error (fun detail -> Unavailable detail) in
   let* ()=if Yojson.Safe.equal (Briefing.to_json current) (Briefing.to_json (Briefing.prepared_state batch))
@@ -95,22 +95,22 @@ let terminal ~capture ~record final =
   | Exact.Call_final (Exact.Invalid_output _ | Exact.Input_refused _ | Exact.Output_limit_reached _)
   | Exact.Outcome_unknown | Exact.Not_allowed _ | Exact.Request_id_reused -> Ok (Terminal (final,record))
 let restore ~store ~workspace original =
-  Server_workspace_memory_curator_pass.restore ~run:Domain_pool_ref.run_in_pool_systhread (fun () -> Capture.restore ~workspace
+  Server_workspace_memory_curator_pass.restore ~run:Systhread_host.run (fun () -> Capture.restore ~workspace
     ~load:(fun ~request_id -> Owner.load ~store ~scope:Capture.scope ~request_id
       |> Result.map_error Owner.error_to_string) original) |> rejected
 let restore_original ~config ~request_id =
   let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
-  let* original=Domain_pool_ref.run_in_pool_systhread (fun () -> Owner.load ~store ~scope:Capture.scope ~request_id) |> owned in
+  let* original=Systhread_host.run (fun () -> Owner.load ~store ~scope:Capture.scope ~request_id) |> owned in
   let* original=match original with Some original -> Ok original
     | None -> Error (Unavailable "Original Curator capture disappeared") in
-  let* workspace=Domain_pool_ref.run_in_pool_systhread (fun () -> Capture.observe_workspace ~base_path:config.Workspace.base_path)
+  let* workspace=Systhread_host.run (fun () -> Capture.observe_workspace ~base_path:config.Workspace.base_path)
     |> Result.map_error (fun detail -> Unavailable detail) in
   restore ~store ~workspace original
 let resume_with ~store ~base_path ~request_id ~prepare ~call =
-  let* original=Domain_pool_ref.run_in_pool_systhread (fun () -> Owner.load ~store ~scope:Capture.scope ~request_id) |> owned in
+  let* original=Systhread_host.run (fun () -> Owner.load ~store ~scope:Capture.scope ~request_id) |> owned in
   let* original=match original with Some original -> Ok original
     | None -> Error (Unavailable "Original Curator request is absent; resume cannot recreate it") in
-  let* workspace=Domain_pool_ref.run_in_pool_systhread (fun () -> Capture.observe_workspace ~base_path)
+  let* workspace=Systhread_host.run (fun () -> Capture.observe_workspace ~base_path)
     |> Result.map_error (fun detail -> Unavailable detail) in
   let* capture=restore ~store ~workspace original in
   let* request=rejected (Binding.request capture) in
@@ -129,7 +129,7 @@ let resume ~config ~request_id =
     let* export=resolve ~config ~reserved in
     (* Re-retain the exact original capture through the live Runtime owner.
        This checks logical destination without replacing captured revisions. *)
-    let* original=Domain_pool_ref.run_in_pool_systhread (fun () -> Owner.load ~store ~scope:Capture.scope ~request_id) |> owned in
+    let* original=Systhread_host.run (fun () -> Owner.load ~store ~scope:Capture.scope ~request_id) |> owned in
     let* original=match original with Some record -> Ok record
       | None -> Error (Unavailable "Original Curator capture disappeared") in
     let* ()=Runtime.capture_tool_request_owner ~config ~access:Lane_addon_sources.Operator_configuration
@@ -184,12 +184,12 @@ let classification_current ~base_path ~ledger ~selected =
       && List.for_all (fun pending -> List.mem pending current.current_facts) selected)
 let eligible ~base_path ~briefing_contract capture = match Capture.work capture with
   | Capture.Classification {ledger;batch;_} ->
-    Domain_pool_ref.run_in_pool_systhread (fun () -> classification_current ~base_path ~ledger ~selected:batch.selected)
+    Systhread_host.run (fun () -> classification_current ~base_path ~ledger ~selected:batch.selected)
   | Capture.Briefing batch ->
     (* Resolve live authority on the original caller, at this eligibility check.
        The worker receives only a captured contract and performs disk reads. *)
     let contract=briefing_contract () in
-    Domain_pool_ref.run_in_pool_systhread (fun () ->
+    Systhread_host.run (fun () ->
       let* ledger=Ledger.load ~base_path |> Result.map_error (fun detail -> Unavailable detail) in
       Briefing.batch_is_current ~sources:(Ledger.briefing_sources ledger) ~contract batch
       |> rejected)
@@ -203,7 +203,7 @@ let successor_is_current ~config ~capture =
   let base_path=config.Workspace.base_path in
   let briefing_contract ()=Briefing.contract
     ~template:(Prompt_registry.resolve_prompt Prompt_names.workspace_memory_briefing).effective in
-  let* same_before=Domain_pool_ref.run_in_pool_systhread (fun () ->
+  let* same_before=Systhread_host.run (fun () ->
     match Capture.work capture with
       | Capture.Classification {ledger;_} ->
         let* current=Ledger.load ~base_path |> Result.map_error (fun detail -> Unavailable detail) in
@@ -214,10 +214,10 @@ let successor_is_current ~config ~capture =
         Ok (Yojson.Safe.equal (Briefing.to_json current) (Briefing.to_json (Briefing.prepared_state batch)))) in
   if not same_before then Ok false else eligible ~base_path ~briefing_contract capture
 let settle_with ~store ~base_path ~request_id ~briefing_contract ~save =
-  let* original=Domain_pool_ref.run_in_pool_systhread (fun () -> Owner.load ~store ~scope:Capture.scope ~request_id) |> owned in
+  let* original=Systhread_host.run (fun () -> Owner.load ~store ~scope:Capture.scope ~request_id) |> owned in
   let* original=match original with Some record -> Ok record
     | None -> Error (Unavailable "Original Curator commit is absent") in
-  let* workspace=Domain_pool_ref.run_in_pool_systhread (fun () -> Capture.observe_workspace ~base_path)
+  let* workspace=Systhread_host.run (fun () -> Capture.observe_workspace ~base_path)
     |> Result.map_error (fun detail -> Unavailable detail) in
   let* capture=restore ~store ~workspace original in
   let phase=Progress.phase original.progress in
@@ -233,7 +233,7 @@ let settle_with ~store ~base_path ~request_id ~briefing_contract ~save =
     | Some commit -> if Yojson.Safe.equal commit.change.before change.before
         && Yojson.Safe.equal commit.change.after change.after then Ok ()
       else Error (Rejected "Recorded commit differs from its original captured domain states") in
-  let publish original event=Domain_pool_ref.run_in_pool_systhread (fun () -> advance ~store original event) in
+  let publish original event=Systhread_host.run (fun () -> advance ~store original event) in
   let uncertain (original : Owner.retained) detail =
     let evidence=`Assoc ["detail",`String detail] in
     match Progress.phase original.progress with
@@ -243,7 +243,7 @@ let settle_with ~store ~base_path ~request_id ~briefing_contract ~save =
       let* _=publish original (Progress.Commit_uncertain evidence) in Error (Uncertain detail) in
   let observe original event ctor =
     let* published=publish original event in Ok (ctor (record published)) in
-  let fresh ()=Domain_pool_ref.run_in_pool_systhread (fun () -> load_domain ~base_path expected) in
+  let fresh ()=Systhread_host.run (fun () -> load_domain ~base_path expected) in
   let confirm original = match fresh () with
     | Error detail -> uncertain original detail
     | Ok current ->
@@ -251,7 +251,7 @@ let settle_with ~store ~base_path ~request_id ~briefing_contract ~save =
       else if Yojson.Safe.equal current change.before then uncertain original "Domain save returned without a confirmed after-state"
       else observe original (Progress.Commit_conflicted current) (fun r -> Commit_conflict r) in
   let write original =
-    match Domain_pool_ref.run_in_pool_systhread (fun () -> save expected) with
+    match Systhread_host.run (fun () -> save expected) with
     | Error detail -> uncertain original detail
     | Ok () -> confirm original
     | exception ex ->
@@ -309,7 +309,7 @@ let settle ~config ~request_id =
   settle_with ~store ~base_path ~request_id ~briefing_contract ~save:(save_domain ~base_path)
 type successor_result = Indivisible of Owner.retained | Successor_waiting of Owner.retained
   | Successor_ready of {parent:Owner.retained;child:Owner.retained}
-let read_original ~store ~request_id = Domain_pool_ref.run_in_pool_systhread (fun () ->
+let read_original ~store ~request_id = Systhread_host.run (fun () ->
   Owner.load ~store ~scope:Capture.scope ~request_id) |> owned
 (* The parent read again, with the workspace it is restored in and its
    restored capture. *)
@@ -317,7 +317,7 @@ let restore_parent ~store ~base_path ~request_id =
   let* parent = read_original ~store ~request_id in
   let* parent = match parent with Some parent -> Ok parent
     | None -> Error (Unavailable "Original Curator size refusal is absent") in
-  let* workspace = Domain_pool_ref.run_in_pool_systhread (fun () -> Capture.observe_workspace ~base_path)
+  let* workspace = Systhread_host.run (fun () -> Capture.observe_workspace ~base_path)
     |> Result.map_error (fun detail -> Unavailable detail) in
   let* original = restore ~store ~workspace parent in
   Ok (parent,workspace,original)
@@ -356,7 +356,7 @@ let complete_with ~store ~workspace ~original (parent : Owner.retained) =
     let* child = validate_intent refusal intent in
     let* summary = rejected (Capture.summary child) in
     let destination = Capture.destination child in
-    let* () = Domain_pool_ref.run_in_pool_systhread (fun () ->
+    let* () = Systhread_host.run (fun () ->
       Owner.retain ~store ~scope:Capture.scope ~request_id:intent.request_id
         ~installation_id:destination.installation_id ~package_id:destination.package_id
         ~tool:destination.tool ~summary:(Capture.Summary.to_json summary) ~request:(Capture.to_json child))
@@ -370,7 +370,7 @@ let complete_with ~store ~workspace ~original (parent : Owner.retained) =
         && retained.installation_id=destination.installation_id
         && retained.package_id=destination.package_id && retained.tool=destination.tool then Ok ()
       else Error (Rejected "Another child binding cannot acknowledge the original successor") in
-    let* published = Domain_pool_ref.run_in_pool_systhread (fun () ->
+    let* published = Systhread_host.run (fun () ->
       advance ~store parent (Progress.Successor_observed intent.request_id)) in
     finish (record published) intent
   | Progress.Subdivided (refusal,intent) ->
@@ -393,7 +393,7 @@ let narrow_with ~admit ~store ~base_path ~request_id =
        let* request_digest = rejected (Owner.request_digest (Capture.to_json child)) in
        let intent : Progress.successor = {request_id=Capture.Request_id.to_string child_id;request_digest} in
        admit original (fun () ->
-         let* published = Domain_pool_ref.run_in_pool_systhread (fun () ->
+         let* published = Systhread_host.run (fun () ->
            advance ~store parent (Progress.Successor_intended intent)) in
          match published with
          | Acknowledged parent -> Ok (Successor_waiting parent)
@@ -474,7 +474,7 @@ let finish_settling ~store originals =
       let* chain = upward [] original in
       let root = List.nth chain (List.length chain - 1) in
       let* date = rejected (Capture.Request_id.minted_on root.id) in
-      let* child_settled = Domain_pool_ref.run_in_pool_systhread (fun () ->
+      let* child_settled = Systhread_host.run (fun () ->
         Owner.settled ~store ~scope:Capture.scope ~date ~request_id:intent.request_id) |> owned in
       if not child_settled then Ok moved else
       let* () = settle_chain_with ~store root.id (List.map (fun original -> original.record) chain) in
@@ -485,7 +485,7 @@ let finish_settling ~store originals =
 (* Records and their summaries only: no request body is read and no capture
    is restored here. The pass restores only the originals it acts on. *)
 let discover_observed_with ~store ~base_path ~after_inventory =
-  let read () = Domain_pool_ref.run_in_pool_systhread (fun () ->
+  let read () = Systhread_host.run (fun () ->
     let* workspace = Capture.observe_workspace ~base_path |> Result.map_error (fun detail -> Unavailable detail) in
     let inventory = Owner.discover ~store ~scope:Capture.scope in
     after_inventory ();
@@ -502,7 +502,7 @@ let discover_observed_with ~store ~base_path ~after_inventory =
     let* workspace,originals = read () in
     let* moved = finish_settling ~store originals in
     let* workspace,originals = if moved then read () else Ok (workspace,originals) in
-    let* pending = Domain_pool_ref.run_in_pool_systhread (fun () -> Capture.recoverable_successors ~workspace
+    let* pending = Systhread_host.run (fun () -> Capture.recoverable_successors ~workspace
         (List.map (fun original -> original.record,original.summary) originals)) |> rejected in
     Ok (originals,pending) in
   let* originals,pending = scan () in
@@ -541,13 +541,13 @@ module Receipt = Lane_addon_request_receipt
 type observation = {original:Owner.retained;registration:Observation.registration;
   completion:Observation.completion option}
 let prepare_observation_with ~store ~base_path ~request_id ~now =
-  let* original = Domain_pool_ref.run_in_pool_systhread (fun () -> Owner.load ~store ~scope:Capture.scope ~request_id) |> owned in
+  let* original = Systhread_host.run (fun () -> Owner.load ~store ~scope:Capture.scope ~request_id) |> owned in
   let* original = match original with Some original -> Ok original
     | None -> Error (Unavailable "An observer cannot create a missing original Curator request") in
-  let* workspace = Domain_pool_ref.run_in_pool_systhread (fun () -> Capture.observe_workspace ~base_path)
+  let* workspace = Systhread_host.run (fun () -> Capture.observe_workspace ~base_path)
     |> Result.map_error (fun detail -> Unavailable detail) in
   let* capture = restore ~store ~workspace original in
-  let publish original event = Domain_pool_ref.run_in_pool_systhread (fun () -> advance ~store original (Progress.Observer event))
+  let publish original event = Systhread_host.run (fun () -> advance ~store original (Progress.Observer event))
     |> Result.map record in
   let* original,registration = match (Progress.observer original.progress).registration with
     | Receipt.Unobserved ->
@@ -622,7 +622,7 @@ let deliver_observation_with ~store ~base_path ~registry ~request_id ~now =
         | Receipt.Unobserved -> Error (Rejected "Original observer intention vanished")
         | Receipt.Acknowledged _ -> Ok ()
         | Receipt.Pending _ ->
-          Domain_pool_ref.run_in_pool_systhread (fun () -> advance ~store fresh.original
+          Systhread_host.run (fun () -> advance ~store fresh.original
             (Progress.Observer (Receipt.Recorded (stage,expected.Receipt.digest))))
           |> Result.map (fun _ -> ()) in
   let* ()=acknowledge Receipt.Registration registration.receipt |> integrity in

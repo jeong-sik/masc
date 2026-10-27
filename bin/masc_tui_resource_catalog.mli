@@ -9,6 +9,7 @@ type listing = { entries : t list; notes : string list; reports_complete : bool 
 type reading =
   { parts : Masc_tui_mcp.resource_content list
   ; revisions : report list
+  ; shared : bool option
   }
 type scope = All_resources | Published_reports | Markdown_reports | Html_reports
 type layout = Full_width | Side_by_side

@@ -920,6 +920,23 @@ let post_artifact_check ~credential ~expected_workspace ~host ~port ~request =
     ~path:"/api/v1/published-artifact-checks" ~body in
   Masc_tui_artifact_check_action.decode_response request json
 
+let post_artifact_share ~credential ~expected_workspace ~host ~port ~id ~shared =
+  let ( let* ) = Result.bind in
+  let body =
+    `Assoc [expected_workspace_field expected_workspace; "id", `String id; "shared", `Bool shared]
+    |> Yojson.Safe.to_string
+  in
+  let* json = post_json_bound ~credential ~host ~port
+    ~path:"/api/v1/published-artifact-shares" ~body in
+  match json with
+  | `Assoc fields -> (
+      match List.assoc_opt "id" fields, List.assoc_opt "shared" fields with
+      | Some (`String returned_id), Some (`Bool returned_shared)
+        when String.equal returned_id id && Bool.equal returned_shared shared ->
+          Ok returned_shared
+      | _ -> Error "Published artifact share response did not match the requested state")
+  | _ -> Error "Published artifact share response must be a JSON object"
+
 (* Press one or more keys on the shared MSX machine (RFC-0439 §3.3). Returns
    the new frame number on success, or an error string; the caller re-fetches
    the frame to see the result. Auth rides [post_json]'s operator bearer. *)

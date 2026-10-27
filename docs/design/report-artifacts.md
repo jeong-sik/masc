@@ -113,8 +113,12 @@ that a Keeper is currently viewing or editing a document.
   body and available revision metadata. Omitted revision means latest.
 - `POST /api/v1/published-artifacts`: same publication request as the tool;
   author is the authenticated actor, never supplied in JSON.
-- Existing dashboard token authentication and admin permission apply to these
-  workspace report surfaces. Responses are private and uncached.
+- Existing dashboard token authentication and admin permission apply to the
+  catalog list, check state and publication routes. Capability-addressed single
+  artifact reads (`GET /api/v1/published-artifacts/<id>`) allow unauthenticated
+  read-only sharing only when external sharing is enabled for that artifact via
+  `POST /api/v1/published-artifact-shares` (`{"id": "<id>", "shared": true|false}`),
+  while still validating any presented token. Responses are private and uncached.
 - `keeper_artifact_publish`: the same store operation using the Keeper's own
   identity. Publication is non-terminal: the Keeper can continue and report its
   durable link. No automatic duplicate Board/chat post is sent by the tool.

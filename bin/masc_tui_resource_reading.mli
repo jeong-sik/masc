@@ -11,6 +11,7 @@ type t = private {
   presentation : Masc_tui_resource_catalog.presentation;
   metadata_expanded : bool;
   confirmation : Masc_tui_artifact_checks.status option;
+  shared : bool option;
   diagrams : Masc_tui_resource_diagrams.t option;
 }
 val create : entry:Masc_tui_resource_catalog.t ->
@@ -19,6 +20,7 @@ val create : entry:Masc_tui_resource_catalog.t ->
   revisions:Masc_tui_resource_catalog.report list ->
   presentation:Masc_tui_resource_catalog.presentation -> metadata_expanded:bool ->
   confirmation:Masc_tui_artifact_checks.status option ->
+  ?shared:bool option ->
   diagrams:Masc_tui_resource_diagrams.t option -> t
 val searchable : t -> bool
 (** The current reading has admitted contents and no read failure. A retained

@@ -56,6 +56,16 @@ let test_create_and_revise () = with_base (fun base_path ->
   let recovered, _, content = S.read ~base_path ~id:artifact.id ~revision:None |> store_ok in
   Alcotest.(check string) "fresh reader preserves exact source bytes" original content;
   Alcotest.(check string) "identity recovered" artifact.id recovered.id;
+  Alcotest.(check bool) "new artifact is private by default" false
+    (S.is_shared ~base_path ~id:artifact.id |> store_ok);
+  Alcotest.(check bool) "enabling external sharing persists" true
+    (S.set_shared ~base_path ~id:artifact.id ~shared:true |> store_ok);
+  Alcotest.(check bool) "share state recovered" true
+    (S.is_shared ~base_path ~id:artifact.id |> store_ok);
+  Alcotest.(check bool) "revoking external sharing persists" false
+    (S.set_shared ~base_path ~id:artifact.id ~shared:false |> store_ok);
+  Alcotest.(check bool) "revoked share state recovered" false
+    (S.is_shared ~base_path ~id:artifact.id |> store_ok);
   let next = "<!doctype html><html><body><h1>두 번째 보고서</h1></body></html>\n" in
   let _, second = publish ~base_path
     (request ~id:artifact.id ~expected_revision:1 ~format:"html" next) in
@@ -358,9 +368,13 @@ let test_http_publication_errors () =
     (json_member "url" uncertain);
   Alcotest.(check bool) "uncertain response explains reread before retry" true
     (String.trim (json_member "recovery" uncertain |> json_string) <> "");
-  List.iter (fun path -> Alcotest.(check bool) "report routes require private reads" false
+  List.iter (fun path -> Alcotest.(check bool) "report catalog routes require private reads" false
     (Server_auth.is_public_read_path path))
-    ["/api/v1/published-artifacts"; "/api/v1/published-artifacts/" ^ id;
+    ["/api/v1/published-artifacts"; "/api/v1/published-artifacts/";
+     "/api/v1/published-artifacts/not-a-valid-id"; "/api/v1/published-artifact-checks"];
+  List.iter (fun path -> Alcotest.(check bool) "capability-addressed artifact reads are public" true
+    (Server_auth.is_public_read_path path))
+    ["/api/v1/published-artifacts/" ^ id;
      "/api/v1/published-artifacts/" ^ id ^ "?revision=3"]
 
 let () = Eio_main.run (fun _ ->

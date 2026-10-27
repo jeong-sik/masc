@@ -4,7 +4,7 @@ type report = { id : string; revision : Published.revision }
 type key = Mcp_uri of string | Report_revision of report
 type t = Mcp of Masc_tui_mcp.resource | Report of report
 type listing = { entries : t list; notes : string list; reports_complete : bool }
-type reading = { parts : Masc_tui_mcp.resource_content list; revisions : report list }
+type reading = { parts : Masc_tui_mcp.resource_content list; revisions : report list; shared : bool option }
 type scope = All_resources | Published_reports | Markdown_reports | Html_reports
 type layout = Full_width | Side_by_side
 type presentation = Document | Source
@@ -76,7 +76,7 @@ let adjacent_revision direction ~current revisions =
       else find (Some report) rest in
   find None revisions
 
-let mcp_reading parts = { parts; revisions = [] }
+let mcp_reading parts = { parts; revisions = []; shared = None }
 
 let report_path report =
   Printf.sprintf "/api/v1/published-artifacts/%s?revision=%d" report.id report.revision.revision
@@ -135,6 +135,10 @@ let reports_of_json json =
 
 let report_contents expected json =
   let* fields = object_fields json in
+  let* shared = match List.assoc_opt "shared" fields with
+    | None -> Ok None
+    | Some (`Bool value) -> Ok (Some value)
+    | Some _ -> Error "invalid published report share flag" in
   match List.assoc_opt "artifact" fields, List.assoc_opt "content" fields,
         List.assoc_opt "revisions" fields with
   | Some artifact, Some (`String content), Some revisions ->
@@ -150,7 +154,8 @@ let report_contents expected json =
     else Ok { parts = [{ Masc_tui_mcp.rc_uri = Some (metadata (Report expected)).uri
                        ; rc_mime_type = Some expected.revision.body.mime
                        ; rc_kind = Resource_text content }]
-            ; revisions = List.map (fun revision -> { id = expected.id; revision }) history.revisions }
+            ; revisions = List.map (fun revision -> { id = expected.id; revision }) history.revisions
+            ; shared }
   | _ -> Error "invalid published report body"
 
 let walk_note = function

@@ -20,6 +20,7 @@ let error_message = function
 let root ~base_path =
   Filename.concat (Common.masc_dir_from_base_path ~base_path) "published_artifacts"
 let path ~base_path id = Filename.concat (root ~base_path) (id ^ ".json")
+let share_path ~base_path id = Filename.concat (root ~base_path) (id ^ ".share")
 
 let protect f =
   try f () with
@@ -139,5 +140,45 @@ let publish ~base_path ~author (request : request) =
     | File_lock_eio.Body_completed { value; release_error = None } -> value
     | File_lock_eio.Body_completed { value; release_error = Some error } ->
       Log.Misc.error "artifact publication lock release: %s"
+        (File_lock_eio.durable_lock_error_to_string error);
+      value)
+
+let is_shared ~base_path ~id =
+  if not (valid_id id) then Error (Invalid "invalid artifact id")
+  else protect (fun () ->
+    match Fs_compat.load_owned_regular_file_with_snapshot ~owner_uid:(Unix.geteuid ())
+      ~ownership_root:base_path (share_path ~base_path id) with
+    | Error _ -> Error (Unavailable "artifact share state could not be read")
+    | Ok None -> Ok false
+    | Ok (Some { content = text; _ }) when not (String.is_valid_utf_8 text) ->
+      Error (Unavailable "artifact share state is not valid UTF-8")
+    | Ok (Some { content = text; _ }) ->
+      match Yojson.Safe.from_string text with
+      | `Assoc ["id", `String stored_id; "shared", `Bool shared]
+      | `Assoc ["shared", `Bool shared; "id", `String stored_id]
+        when String.equal stored_id id -> Ok shared
+      | _ -> Error (Unavailable "invalid artifact share metadata")
+      | exception Yojson.Json_error message -> Error (Unavailable message))
+
+let set_shared ~base_path ~id ~shared =
+  if not (valid_id id) then Error (Invalid "invalid artifact id")
+  else protect (fun () ->
+    let dir = root ~base_path in
+    let* entries = directory_entries ~base_path in
+    let* () = match entries with None -> Error Missing | Some _ -> Ok () in
+    match File_lock_eio.with_durable_lock_observed
+      ~lock_path:(Filename.concat dir (id ^ ".lock")) (fun () ->
+        let* _artifact = load ~base_path id in
+        let json = `Assoc ["id", `String id; "shared", `Bool shared] in
+        match Keeper_fs.save_json_durable_atomic ~ownership_root:base_path
+          (share_path ~base_path id) json with
+        | Ok () -> Ok shared
+        | Error error ->
+          Error (Unavailable (Keeper_fs.durable_write_error_to_string error))) with
+    | File_lock_eio.Lock_not_acquired error ->
+      Error (Unavailable (File_lock_eio.durable_lock_error_to_string error))
+    | File_lock_eio.Body_completed { value; release_error = None } -> value
+    | File_lock_eio.Body_completed { value; release_error = Some error } ->
+      Log.Misc.error "artifact share lock release: %s"
         (File_lock_eio.durable_lock_error_to_string error);
       value)

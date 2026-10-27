@@ -9,12 +9,13 @@ type t = {
   presentation : Masc_tui_resource_catalog.presentation;
   metadata_expanded : bool;
   confirmation : Masc_tui_artifact_checks.status option;
+  shared : bool option;
   diagrams : Masc_tui_resource_diagrams.t option;
 }
 let create ~entry ~contents ~error ~requested ~image_cursor ~text_cursor
-    ~revisions ~presentation ~metadata_expanded ~confirmation ~diagrams =
+    ~revisions ~presentation ~metadata_expanded ~confirmation ?(shared = None) ~diagrams =
   {entry;contents;error;requested;image_cursor;text_cursor;revisions;presentation;
-   metadata_expanded;confirmation;diagrams}
+   metadata_expanded;confirmation;shared;diagrams}
 let searchable reading = match reading.contents, reading.error with
   | Some _, None -> true
   | (Some _ | None), (Some _ | None) -> false
@@ -31,6 +32,7 @@ let same_reading a b =
   && a.image_cursor=b.image_cursor && a.text_cursor=b.text_cursor
   && a.revisions=b.revisions && a.presentation=b.presentation
   && a.metadata_expanded=b.metadata_expanded && a.confirmation=b.confirmation
+  && a.shared=b.shared
   && Option.equal (==) a.diagrams b.diagrams
 let landing ~cols ~query reading = function
   | Landed original when original.cols=cols && original.query=query

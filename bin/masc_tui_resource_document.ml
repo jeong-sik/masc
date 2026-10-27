@@ -40,7 +40,9 @@ let current (state : state) =
           | (Some _ | None), (Some _ | None), (true | false), (Some _ | None),
             (Catalog.Document | Source) -> None)
         ~confirmation:(match entry with Catalog.Mcp _ -> None
-          | Report report -> Some (resource_check_status state report)))
+          | Report report -> Some (resource_check_status state report))
+        ~shared:(match entry with Catalog.Mcp _ -> None
+          | Report _ -> state.resource_shared))
       (Catalog.entry_for_key entries key))
 
 let text_parts parts =
@@ -134,7 +136,7 @@ type origin = Metadata | Selection | Part_heading of int | Part_body of int
   | Read_status | Progress | Failure of int
 
 let resource_document entry
-    (contents : Masc_tui_mcp.resource_content list option) ~error ~requested ~image_cursor ~text_cursor ~revisions ~presentation ~metadata_expanded ~confirmation =
+    (contents : Masc_tui_mcp.resource_content list option) ~error ~requested ~image_cursor ~text_cursor ~revisions ~presentation ~metadata_expanded ~confirmation ~shared =
   let resource = Catalog.metadata entry in
   let present = function
     | Some text when String.trim text <> "" -> text
@@ -211,7 +213,11 @@ let resource_document entry
   let confirmation = match confirmation with
     | None -> ""
     | Some status -> "\n\n**Confirmation:** " ^ Masc_tui_artifact_checks.description status in
-  (Metadata, Markdown_text (metadata ^ confirmation ^ "\n\n---")) :: body
+  let sharing = match shared with
+    | None -> ""
+    | Some true -> "\n\n**External sharing:** enabled (P: revoke)"
+    | Some false -> "\n\n**External sharing:** private (P: enable)" in
+  (Metadata, Markdown_text (metadata ^ confirmation ^ sharing ^ "\n\n---")) :: body
 
 type diagram = {
   first_row : int;
@@ -237,7 +243,7 @@ let anchored_layout ~cols (reading : t) =
     ~requested:reading.requested ~image_cursor:reading.image_cursor
     ~text_cursor:reading.text_cursor ~revisions:reading.revisions
     ~presentation:reading.presentation ~metadata_expanded:reading.metadata_expanded
-    ~confirmation:reading.confirmation in
+    ~confirmation:reading.confirmation ~shared:reading.shared in
   let pieces = match reading.diagrams with
     | None -> pieces
     | Some diagrams ->

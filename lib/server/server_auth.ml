@@ -1006,6 +1006,19 @@ let check_agent_rate_limit ~quota request reqd =
         Error ()
       end
 
+let is_public_published_artifact_read_path path =
+  let raw_path =
+    match String.index_opt path '?' with
+    | Some i -> String.sub path 0 i
+    | None -> path
+  in
+  let prefix = "/api/v1/published-artifacts/" in
+  let prefix_len = String.length prefix in
+  String.length raw_path > prefix_len
+  && String.starts_with ~prefix raw_path
+  && Published_artifact.valid_id
+       (String.sub raw_path prefix_len (String.length raw_path - prefix_len))
+
 (** Public read access - no auth required (dashboard, health) *)
 let is_public_read_path path =
   String.equal path "/health"
@@ -1049,6 +1062,10 @@ let is_public_read_path path =
      token in its request headers. *)
   || String.starts_with ~prefix:Masc_network_defaults.voice_audio_path_prefix
        path
+  (* Capability-addressed published artifact links: 128-bit random
+     artifact-<32hex> IDs allow external read-only sharing without
+     exposing the catalog listing (/api/v1/published-artifacts). *)
+  || is_public_published_artifact_read_path path
 
 let resolve_agent_name_for_auth ~base_path request ~token :
     (string option, Masc_domain.masc_error) result =

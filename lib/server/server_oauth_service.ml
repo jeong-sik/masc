@@ -182,9 +182,11 @@ let authorize_get ~base_path ~authority ~target =
   authorization_request_of_params ~base_path ~authority params
 ;;
 
-(* RFC 9207 section 2: every authorization response, error responses
-   included, names the issuer so the client can reject a response that a
-   different authorization server produced (mix-up attack). *)
+(* RFC 9207 section 2: every authorization response redirected to the client,
+   errors included, names the issuer so the client can reject a response that
+   a different authorization server produced (mix-up attack). Errors raised
+   after validation by [Auth_oauth.issue_authorization_code] are still
+   answered as JSON, not redirected. *)
 let authorization_response_uri ~issuer authorization_request params =
   let state =
     match authorization_request.Auth_oauth.state with

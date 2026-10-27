@@ -60,9 +60,12 @@ type fixture =
   }
 
 (* A fixture ego-browser that leaves a mark when it runs, so a case can say
-   whether a plan started it, and how. *)
+   whether a plan started it, and how. Asked to run node, it also keeps the
+   flag and the script it was given in [started].script. *)
 let fake_ego ~started ~path ~script =
-  write ~mode:0o755 path (Printf.sprintf "#!/bin/sh\nprintf '%%s\\n' \"$1\" >> '%s'\n%s\n" started script)
+  write ~mode:0o755 path (Printf.sprintf
+    "#!/bin/sh\nprintf '%%s\\n' \"$1\" >> '%s'\n[ \"$1\" = nodejs ] && printf '%%s\\n%%s' \"$2\" \"$3\" > '%s.script'\n%s\n"
+    started started script)
 
 let runs fixture =
   if Sys.file_exists fixture.started
@@ -211,6 +214,8 @@ let test_the_agents_own_space_is_written () =
     with_fixture ~spaces:[ space 42 ownership ] (fun fixture ->
       let plan = plan_ok ~find:(found fixture) (request fixture) in
       check bool ("a new table on a space owned by " ^ ownership) true (E.change plan = E.Created);
+      check string "ego is given the listing script, which opens no space"
+        ("-e\n" ^ Masc.Browser_ego_peer.task_spaces_script) (read (fixture.started ^ ".script"));
       apply_ok plan;
       check string "the default space" E.default_space (configured fixture).space))
     [ "agent"; "agentDelegatedToUser" ]
@@ -231,6 +236,20 @@ let test_spaces_that_cannot_be_read_are_refused () =
     refused "an ego-browser whose listing threw"
       (function E.Spaces_unanswered { detail; _ } -> contains detail "cannot be reached" | _ -> false)
       fixture (request ~command:unreachable fixture) ());
+  with_fixture (fun fixture ->
+    let killed = Filename.concat fixture.root "killed" in
+    fake_ego ~started:fixture.started ~path:killed ~script:(ego_script ~nodejs:"kill -KILL $$");
+    refused "an ego-browser ended by a signal"
+      (function E.Spaces_unanswered _ -> true | _ -> false)
+      fixture (request ~command:killed fixture) ());
+  (* The script answers on success and on a throw alike; ending well with no
+     answer line is an ego-browser that did not run it as masc asked. *)
+  with_fixture (fun fixture ->
+    let mute = Filename.concat fixture.root "mute" in
+    fake_ego ~started:fixture.started ~path:mute ~script:(ego_script ~nodejs:"exit 0");
+    refused "an ego-browser that ends well without an answer"
+      (function E.Spaces_unreadable _ -> true | _ -> false)
+      fixture (request ~command:mute fixture) ());
   with_fixture ~spaces:[ space 36 "team" ] (fun fixture ->
     refused "an owner masc does not know"
       (function E.Spaces_unreadable { detail; _ } -> contains detail "team" | _ -> false)

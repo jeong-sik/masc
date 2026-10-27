@@ -27,7 +27,7 @@ TUI 의 `Pool.request: timeout`(10초)이 계속 난다. 2026-10-27 에 runtime 
 | L1 | domain 예산 하나: 프로그램 전체 domain 수를 `Domain.recommended_domain_count () - 1` 이하로 묶는다 | 링 수(domain 수)가 15 이하. 놀던 domain 이 늦게 온 STW 비율이 절반 이하 |
 | L2 | 런타임을 놓는 해시: sha256 을 core 함수 하나로 모으고, 큰 입력은 런타임을 놓는 경로로 보낸다. 직접 `Digestif.SHA256` 호출을 막는 검사를 둔다 | `Digestif.SHA256` 직접 참조 0. CPU 표본의 `sha256_do_chunk` 몫이 절반 이하. `stw_api_barrier` p99 가 절반 이하 |
 | L3 | 원본을 다시 검증하지 않는다: digest 로 이름 붙은 본문은 처음 읽을 때 한 번만 검증한다 | memprof major 에서 `request_of_body` 몫이 5% 이하. 1초 넘게 양보하지 않는 `addon-original-request-read` fiber 가 0 |
-| L4 | Executor weight 를 job 이 실제로 하는 일에 맞춘다: CPU 일과 블로킹 읽기를 하는 job 은 I/O weight 로 넣지 않고, I/O job 안의 블로킹 호출은 systhread 로 옮긴다 | 같은 domain 수에서 `pool_wait.read` wait·run p90 이 L1 직후보다 낮다 |
+| L4 | Executor weight 를 job 이 실제로 하는 일에 맞춘다: 파싱·해시를 하는 job 은 맨 바깥 제출에서 CPU weight 로 넣고, I/O 만 기다리는 job 에 남은 블로킹 호출은 systhread 로 옮긴다 | 같은 domain 수에서 `pool_wait.background` wait·run p90 이 RFC-0204 L3 직후보다 낮다 |
 
 ## 1. 2026-09-05 RFC 이후 무엇이 바뀌었나
 
@@ -98,7 +98,7 @@ TUI 의 `Pool.request: timeout`(10초)이 계속 난다. 2026-10-27 에 runtime 
 | p90 / p99, `gate/keepers?detailed=true` | 5.8 / 2,738 ms | 19.4 / 231 ms |
 | p90 / p99, `operator` | 18.3 / 870 ms | 30.6 / 1,967 ms |
 
-장벽 대기는 44% 줄고 job 실행은 빨라졌다. 대신 worker 가 14에서 6으로 줄어 p90 이 늘었다. L1 은 같은 15개 안에서 공유 풀에 10개를 주고, L4 는 CPU job 이 한 domain 에 몰리지 않게 한다.
+장벽 대기는 44% 줄고 job 실행은 빨라졌다. 대신 worker 가 14에서 6으로 줄어 p90 이 늘었다. L1 은 같은 15개 안에서 공유 풀에 10개를 준다(RFC-0204 L3 의 읽기 풀이 들어가면 8개). L4 는 CPU job 이 한 domain 에 몰리지 않게 한다.
 
 ### 3.3 장벽에 가장 늦게 온 domain
 
@@ -144,7 +144,8 @@ memprof(`/api/v1/diagnostics/memprof`, 부팅 뒤 10분). 할당 757 GB, major 4
 
 - `Domain_pool` 은 프로그램 전체 예산 `budget = Domain.recommended_domain_count () - 1` 을 정한다. 1을 빼는 것은 메인 domain 이 CPU 일을 하기 때문이다(Eio 문서).
 - 고정 domain(메인, `Systhread_host`, `Keeper_event_queue_snapshot_codec`)을 빼고 남은 수를 풀들이 나눈다. agent_core 실행 풀은 masc 가 이미 가진 예산에서 받는다. 같은 수를 따로 주지 않는다.
-- agent_core 실행 풀을 masc 풀과 합칠지, 작은 별도 풀로 둘지는 L1 PR 에서 정한다. 근거는 `Execution_runtime.stats` 의 `pool_requested` 다. 60초 동안 0.0% 바빴다는 측정이 있어서, 별도로 둔다면 크기 1~2 에서 시작한다.
+- agent_core 실행 풀은 2개짜리 별도 풀로 둔다(#46462). 6개일 때 60초 동안 fiber 를 하나도 돌리지 않았다(§3.3). 합치지 않는 이유는 RFC-0204 §3.5 에 있다. 취소 의미가 다르다.
+- RFC-0204 L3 의 HTTP 읽기 풀(#46374)도 이 예산의 한 줄이다. 2개를 공유 풀 몫에서 뗀다. 16코어에서는 고정 3 + codec 2 + 읽기 2 + 공유 8 = 15 다. 자리가 모자라면 codec 이 먼저 1로, 그다음 읽기 풀이 1로 줄어, 공유 풀이 2개를 지킨다. 같은 운영 창에서 배경 작업은 worker 를 평균 1.6개, 읽기는 0.11개 썼다.
 - `MASC_EXECUTOR_DOMAIN_COUNT` 는 masc 풀 크기를 정하는 값으로 남기고, 예산을 넘는 값은 부팅 때 거부한다. 지금 운영 중인 `=6` 은 L1 이 들어가면 필요 없다.
 
 ### L2 — 런타임을 놓는 해시
@@ -169,17 +170,21 @@ memprof(`/api/v1/diagnostics/memprof`, 부팅 뒤 10분). 할당 757 GB, major 4
 
 - weight 0.05 인 job 이 블로킹 호출을 하면 그 domain 에 함께 받아 둔 job 이 모두 멈춘다. 예: `Dated_jsonl.off_fiber`(`dated_jsonl.ml:555`)는 `submit_io_or_inline` 으로 넣고, 그 안에서 Stdlib 채널로 `seek_in`·`really_input` 을 한 뒤 스캔과 파싱을 한다. 주석도 "the reads are blocking syscalls, the scan and the parse are CPU work" 라고 적는다. `Fs_compat.read_slice`(`fs_compat.ml:2039`)도 호출 domain 에서 `open_in_bin` 한다.
 - eio_posix(`lib_eio_posix/low_level.ml`)는 openat·fstat·readdir·mkdir·unlink·rename 을 systhread(`in_worker_thread`)로 보내지만, 일반 파일 read 는 호출 domain 에서 `Unix.read` 로 바로 한다. 같은 파일 머리 주석이 이것이 "will block the whole domain" 할 수 있다고 적는다.
-- 그래서 할 일은 weight 를 더 낮추는 것이 아니라 둘이다.
-  1. CPU 일(스캔·파싱·해시)을 하는 job 은 `submit_cpu_or_inline`(1.0)으로 넣는다. 그래야 20개가 한 domain 에 몰리지 않는다.
-  2. I/O 를 기다리는 job 안의 블로킹 읽기·`fsync`·인라인 SQLite 는 systhread 로 옮긴다. 그 뒤에만 weight 0.05 가 맞다.
-- 순서는 감사 표의 블로킹 55곳 중 읽기 경로(`Dated_jsonl`, `read_slice`, `fold_appended_lines`)부터다. 이 셋을 쓰는 곳이 가장 많다.
+- Eio `Executor_pool` 문서는 weight 를 "job 이 쓸 것으로 보는 CPU 코어 몫"이라 하고, worker 는 돌고 있는 job 의 weight 합이 1.0 이 될 때까지 새 job 을 시작한다고 적는다. 소스(`executor_pool.ml` `run_worker`)를 보면 worker 는 job 을 fork 하고, 그 job 이 Eio 효과에서 멈출 때 다음 job 을 가져간다. 그래서 weight 는 job 이 멈추는 순간에만 의미가 있다. Stdlib 채널 읽기처럼 Eio 효과가 없는 블로킹은 job 을 멈추지 않으므로 그동안 새 job 도 받지 않는다.
+- 이것 때문에 블로킹 읽기를 systhread 로 옮기는 것만으로는 0.05 job 이 나빠진다. systhread 에서 기다리는 동안 job 이 멈추고, 그 domain 이 job 을 더 받는다. 읽기가 끝나면 받아 둔 job 들의 파싱이 그 domain 하나에서 차례로 돈다. `Fs_compat.file_exists` 처럼 `Eio.Path.stat` 를 거치는 호출도 같은 지점을 만든다.
+- 바깥 job 안에서 부른 제출은 그 자리에서 돈다(`in_worker_context`). 그래서 weight 는 맨 바깥 제출이 정한다. `Dated_jsonl.off_fiber` 하나를 1.0 으로 바꿔도, 그것을 0.05 job 안에서 부르는 `keeper_api` 다섯 곳은 0.05 로 남는다. 몇 곳만 고치면 같은 문제가 다시 생긴다.
+- 그래서 할 일은 둘이고, 순서가 있다.
+  1. 파싱·해시를 하는 job 은 맨 바깥 제출에서 `submit_cpu_or_inline`(1.0)으로 넣는다. 감사 표의 (c)·(d) 중 읽은 뒤 파싱하는 곳(`Dated_jsonl` 을 부르는 job, `read_slice`·`fold_appended_lines` 뒤 파싱하는 job)이 대상이다.
+  2. 그 뒤에도 I/O 만 기다리는 job 에 남은 블로킹 읽기·`fsync`·인라인 SQLite 는 systhread 로 옮긴다. 이 job 들만 weight 0.05 가 맞다.
+- 읽기 풀(RFC-0204 L3)이 먼저 들어간다. 그 뒤에는 공유 풀의 weight 가 배경 작업끼리의 대기에만 영향을 준다. 그래서 L4 의 성공 기준은 `pool_wait.background` 로 잰다.
 
 ## 5. 순서
 
 1. L1 — 코드가 작고, A/B 로 효과를 이미 봤다.
 2. L2 — 기계적이지만 범위가 넓다. #46394 가 `lane_addon_tool_request_owner.ml` 을 바꾸므로, 그 파일의 해시 줄은 #46394 가 들어간 뒤 그 위에서 바꾼다.
 3. L3 — #46394·#46397 배포 뒤 다시 재고, 남은 경로만 고친다.
-4. L4 — L1 뒤 줄이 길어진 만큼을 메운다. 블로킹 감사가 먼저다.
+4. RFC-0204 L3(#46374) — 읽기 풀. L1 예산 위에 쌓는다. 2026-10-27 운영 서버 2분 창에서 읽기 대기 p99 가 1초를 넘어 RFC-0204 §6 의 조건(100 ms)을 넘었다.
+5. L4 — 읽기 풀 뒤에 배경 풀의 대기를 다시 재고, 맨 바깥 제출부터 고친다.
 
 ## 6. 하지 않는 것
 

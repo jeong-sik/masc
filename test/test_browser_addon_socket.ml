@@ -296,6 +296,51 @@ let a_failure_after_the_move_names_the_kept_folder () =
       released (cleanup ~admission ~directory);
       check "the allocation is gone" false (Sys.file_exists root);
       check "the moved file stays" true (Sys.file_exists moved))
+(* An allocation with a Keeper file in both [uploads] and [downloads]. *)
+let with_two_trees work =
+  with_claim ~source:(fun _ -> Socket.Automation owned_gecko) (fun admission directory root ->
+    ignore (ok (Socket.acquire ~admission ~directory));
+    let left tree=
+      let parent=Filename.concat root tree in
+      Unix.mkdir parent 0o700;
+      let file=Filename.concat parent "left" in
+      Out_channel.with_open_bin file (fun out -> output_string out tree);file in
+    let uploads=left "uploads" and downloads=left "downloads" in
+    lease (Lease.retire admission);
+    work admission directory root ~into:(Filename.concat (kept_root directory) (Lease.instance_id admission))
+      ~uploads ~downloads)
+(* Every destination is checked before the first tree moves. *)
+let an_occupied_later_destination_moves_nothing () =
+  with_two_trees (fun admission directory _root ~into ~uploads ~downloads ->
+    Unix.mkdir (kept_root directory) 0o700;Unix.mkdir into 0o700;
+    Unix.mkdir (Filename.concat into "downloads") 0o700;
+    check "the occupied destination leaves the release unconfirmed" true (Result.is_error (cleanup ~admission ~directory));
+    check "the earlier tree did not move" true (Sys.file_exists uploads && Sys.file_exists downloads);
+    check "nothing reached the kept folder" false (Sys.file_exists (Filename.concat into "uploads"));
+    check "the record is still acquired" true (acquisition_state directory = "acquired"))
+(* A rename that fails after an earlier tree moved names the kept folder, and
+   the next pass moves the rest. Renaming a directory to another parent needs
+   write access to it, so a 0500 tree refuses its move. *)
+let a_partial_move_names_the_kept_folder () =
+  if Unix.geteuid () = 0 then Alcotest.skip ();
+  with_two_trees (fun admission directory root ~into ~uploads:_ ~downloads ->
+    let parent=Filename.dirname downloads in
+    Unix.chmod parent 0o500;
+    let first=cleanup ~admission ~directory in
+    Unix.chmod parent 0o700;
+    check "the refused rename names the kept folder" true
+      (match first with
+       | Error detail -> mentions detail into
+       | Ok (Socket.Cleanup_released|Cleanup_kept _|Cleanup_retained) -> false);
+    check "the earlier tree moved" true (Sys.file_exists (Filename.concat (Filename.concat into "uploads") "left"));
+    check "the refused tree stays" true (Sys.file_exists downloads);
+    check "the next pass moves the rest and releases" true
+      (match cleanup ~admission ~directory with
+       | Ok (Socket.Cleanup_kept {files;_}) -> files=1
+       | Ok (Socket.Cleanup_released|Cleanup_retained) | Error _ -> false);
+    check "the rest reached the kept folder" true
+      (Sys.file_exists (Filename.concat (Filename.concat into "downloads") "left"));
+    check "the allocation is gone" false (Sys.file_exists root))
 let operator_retains_unconfirmed_allocation () =
   with_claim ~source:(fun _ -> Socket.Automation owned_gecko)
     (fun admission directory root ->
@@ -541,6 +586,8 @@ let () = Alcotest.run "browser addon socket ownership" ["recovery",[
   Alcotest.test_case "a reachable kept root moves nothing" `Quick a_reachable_kept_root_moves_nothing;
   Alcotest.test_case "a private kept root of another mode is used" `Quick a_private_kept_root_of_another_mode_is_used;
   Alcotest.test_case "a failure after the move names the kept folder" `Quick a_failure_after_the_move_names_the_kept_folder;
+  Alcotest.test_case "an occupied later destination moves nothing" `Quick an_occupied_later_destination_moves_nothing;
+  Alcotest.test_case "a partial move names the kept folder" `Quick a_partial_move_names_the_kept_folder;
   Alcotest.test_case "the operator retains an unconfirmed allocation in place" `Quick operator_retains_unconfirmed_allocation;
   Alcotest.test_case "retain refuses a replaced allocation directory" `Quick retain_refuses_replaced_directory;
   Alcotest.test_case "retain reports an allocation already released" `Quick retain_reports_a_released_allocation;

@@ -46,7 +46,9 @@ type settlement =
 (** What {!cleanup} confirmed about the allocation of a Settled claim. *)
 type cleanup_result =
   | Cleanup_released
-      (** Its known resources were removed, or it never had any. *)
+      (** Its known resources were removed, or it never had any. Files an
+          earlier cleanup moved out before it failed stay in the folder that
+          cleanup's error named. *)
   | Cleanup_kept of { directory : string; files : int }
       (** As [Cleanup_released], after this cleanup moved the [files] files
           the browser left for the Keeper into [directory]. *)
@@ -72,9 +74,10 @@ val cleanup : admission:Native_addon_lease.t -> directory:string -> kept_root:st
     file with more links or another kind of entry in those three trees, a
     [kept_root] on another device than the allocation, or a tree already in
     the instance folder leaves the release unconfirmed with nothing moved.
-    When anything after the first tree moved fails, the error names the
-    instance folder. A later cleanup never reads that folder; it belongs to
-    the operator. *)
+    An [Error] returned after the first tree moved names the instance
+    folder. A later cleanup reads that folder only to move trees an earlier
+    pass left behind; once every tree has moved it never reads it, and the
+    folder belongs to the operator. *)
 type retain_error =
   | Retain_refused of string
       (** The acquisition record was not changed. *)

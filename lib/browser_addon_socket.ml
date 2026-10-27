@@ -250,7 +250,7 @@ let kept_directory_at ~label path =
    names [into], so the unconfirmed cleanup says where they went. *)
 let after_move ~into run =
   protect run |> Result.map_error (fun detail ->
-    Printf.sprintf "%s; the Keeper files of this allocation were already moved to %s" detail into)
+    Printf.sprintf "%s; some or all Keeper files of this allocation were already moved to %s" detail into)
 (* Moves each Keeper file tree of [root] into [into] by rename, so every byte
    is kept and nothing is copied or deleted. A kept root on another device
    than the allocation refuses before [into] is made, and a tree already at
@@ -259,7 +259,7 @@ let after_move ~into run =
 let move_keeper_files ~kept_root ~into ~root (allocation : Unix.stats) =
   let* kept=kept_directory_at ~label:"kept browser files root" kept_root in
   let* ()=if kept.Unix.st_dev=allocation.Unix.st_dev then Ok ()
-    else Error (Printf.sprintf "kept browser files root %s is on another file system than %s" kept_root root) in
+    else Error (Printf.sprintf "kept browser files root %s is on another device than %s" kept_root root) in
   let* _=kept_directory_at ~label:"kept browser files" into in
   let trees=List.filter (fun tree -> match Unix.lstat (Filename.concat root tree) with
       | _ -> true

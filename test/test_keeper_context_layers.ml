@@ -23,6 +23,7 @@ let all_layers =
     L.Autonomous_trigger;
     L.Scheduled_automation;
     L.Completion_authority;
+    L.Admitted_scheduled_input;
     L.Task_cancellations;
     L.Pending_mentions;
     L.Scope_messages;

@@ -1,5 +1,6 @@
 type t =
-  { goal_context : string option
+  { admitted_scheduled_input : string
+  ; goal_context : string option
   ; task_context : string option
   ; remaining_context : string option
   ; workspace_memory : Workspace_memory_ledger.observation
@@ -38,7 +39,7 @@ let direct_turn_task_context
   in
   current ^ held
 
-let prepare ~active_goal_summaries ~current_task ~held_task_skills ~task_skill_surfaces
+let prepare ~turn_ref ~active_goal_summaries ~current_task ~held_task_skills ~task_skill_surfaces
     ~workspace_memory ~wiki_contents ~lane_updates ~approval_authority_text
     ~recent_direct_conversation_text ~worktree_text ~telemetry_feedback_text
     ~turn_instructions_text () =
@@ -49,7 +50,9 @@ let prepare ~active_goal_summaries ~current_task ~held_task_skills ~task_skill_s
       (Option.to_list (Lane_addon_subscription.render lane_updates)
        @ [approval_authority_text; recent_direct_conversation_text; worktree_text;
           telemetry_feedback_text; turn_instructions_text]) in
-  { goal_context; task_context; remaining_context; workspace_memory; wiki_contents }
+  let admitted_scheduled_input = Keeper_unified_prompt_event_fields.format_scheduled_admission
+      ~turn_ref ~admission:Unknown in
+  { admitted_scheduled_input; goal_context; task_context; remaining_context; workspace_memory; wiki_contents }
 
 let project_partition prepared ~workspace_memory_access =
   let dynamic =
@@ -63,12 +66,16 @@ let project_partition prepared ~workspace_memory_access =
      Goal / Task / memory / wiki / Lane-and-conversation order and exact separators. *)
   let remaining = String.concat "\n\n"
       (Option.to_list prepared.task_context @ dynamic @ Option.to_list prepared.remaining_context) in
-  match prepared.goal_context with
-  | None -> Keeper_context_layers.unattributed Direct_turn remaining
-  | Some goals ->
-    Keeper_context_layers.singleton Active_goals goals
-    |> fun rendered -> Keeper_context_layers.append_unattributed rendered Direct_turn
-         (if remaining = "" then "" else "\n\n" ^ remaining)
+  let observations = Keeper_context_layers.assemble ~content_of:(function
+    | Active_goals -> prepared.goal_context
+    | Admitted_scheduled_input -> Some prepared.admitted_scheduled_input
+    | Current_task | Approval_authority | Connected_surfaces | Namespace_state
+    | Workspace_memory | Wiki | Lane_updates | Repository_freshness | Autonomous_trigger
+    | Scheduled_automation | Completion_authority | Task_cancellations | Pending_mentions
+    | Scope_messages | Own_board_posts | Board_activity | Own_recent_actions | Recent_work
+    | Fleet_messages -> None) in
+  Keeper_context_layers.append_unattributed observations Direct_turn
+    (if remaining = "" then "" else "\n\n" ^ remaining)
 
 let project prepared ~workspace_memory_access =
   project_partition prepared ~workspace_memory_access |> Keeper_context_layers.text

@@ -11,6 +11,9 @@ module Json = Yojson.Safe.Util
 
 type source = Current | Revised | Measurement_unavailable | Goal_unavailable | Empty
 
+let scheduled_admission_fixture_ref =
+  Ids.Turn_ref.make ~trace_id:"trace-admission-fixture" ~absolute_turn:1
+
 let contains ~needle text = Astring.String.is_infix ~affix:needle text
 let owner_request = "Create a Task for the remaining result and inspect its evidence."
 let reported_value = "1/2 independently inspected results"
@@ -18,6 +21,7 @@ let model_id = "direct-goal-wire-fixture"
 
 let prepare config =
   Direct.prepare
+    ~turn_ref:scheduled_admission_fixture_ref
     ~active_goal_summaries:(Prompt.active_goal_summaries ~config ~keeper_name:"direct-goal-wire")
     ~current_task:Keeper_world_observation_inputs.No_current_task
     ~held_task_skills:[] ~task_skill_surfaces:[]
@@ -43,7 +47,7 @@ let install_catalog ~sw =
     | Some catalog -> Llm_provider.Model_catalog.set_global catalog
     | None -> Llm_provider.Model_catalog.clear_global ());
   let source = Printf.sprintf
-      "[[models]]\nid_prefix = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 8192\nmax_output_tokens = 128\nsupports_native_streaming = false\n"
+      "[[models]]\nmodel_id = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 8192\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n"
       model_id in
   match Llm_provider.Model_catalog.of_toml_string ~source:"direct-goal-wire" source with
   | Ok catalog -> Llm_provider.Model_catalog.set_global catalog
@@ -162,11 +166,19 @@ let run_case source () =
        (contains ~needle:"goal_store_unavailable:" context);
      check bool "unreadable primary borrows no mirrored Goal" false (contains ~needle:goal.id context)
    | Empty, None, None ->
+     let physical = match assembled.Keeper_context_assembly.system_prompt with
+       | Some issued -> issued | None -> fail "empty Goal System receipt missing" in
+     check string "empty Goal issuer matches the actual receiver bytes" physical.text context;
+     let goal_text = match List.filter (fun (span : Keeper_context_assembly.span) ->
+         span.kind = Keeper_context_assembly.Block Prompt_block_id.Active_goals)
+         physical.partition.spans with
+       | [span] -> String.sub context span.offset span.bytes
+       | _ -> fail "one exact Goal partition required for the empty observation" in
      check bool "receiver sees the authoritative empty Goal snapshot" true
-       (contains ~needle:"### Active Goals (0)" context);
+       (contains ~needle:"### Active Goals (0)" goal_text);
      List.iter (fun needle ->
        check bool "empty Goal snapshot invents no row, criterion or read failure" false
-         (contains ~needle context))
+         (contains ~needle goal_text))
        [ "\n- "; "  Success criterion (stored values;"; "goal_store_unavailable:" ]
    | (Current | Revised | Measurement_unavailable | Goal_unavailable | Empty), _, _ ->
      fail "invalid fixture state");
@@ -199,7 +211,9 @@ let test_goal_survives_read_then_task_creation () =
   install_prompts base_path;
   let goal = create_goal config in
   let measurement = observe config goal in
+  let turn_ref = Ids.Turn_ref.make ~trace_id:"trace-goal-loop-wire" ~absolute_turn:1 in
   let prepared = Direct.prepare
+      ~turn_ref
       ~active_goal_summaries:(Prompt.active_goal_summaries ~config ~keeper_name:"goal-loop-wire")
       ~current_task:Keeper_world_observation_inputs.No_current_task ~held_task_skills:[]
       ~task_skill_surfaces:[] ~workspace_memory:Workspace_memory_ledger.Missing
@@ -338,9 +352,26 @@ let test_goal_survives_read_then_task_creation () =
     (Some "Read the metric, then record the remaining work as a Task.") checkpoint.system_prompt;
   let capture = match Keeper_prompt_capture.read ~config ~keeper:"goal-loop-wire" with
     | Ok capture -> capture | Error error -> fail (Keeper_prompt_capture.read_error_to_string error) in
-  check (list string) "capture attributes base instructions and Goal once each"
-    ["keeper_instructions";"active_goals"]
-    (List.map (fun (block : Keeper_prompt_capture.block) -> Prompt_block_id.to_string block.id) capture.blocks);
+  check int "capture contains exactly the three stable producers" 3 (List.length capture.blocks);
+  List.iter (fun id -> check int ("capture attributes " ^ Prompt_block_id.to_string id ^ " exactly once") 1
+      (List.length (List.filter (fun (block : Keeper_prompt_capture.block) ->
+        Prompt_block_id.equal block.id id) capture.blocks)))
+    [Prompt_block_id.Keeper_instructions; Active_goals; Admitted_scheduled_input];
+  let admission = List.find (fun (block : Keeper_prompt_capture.block) ->
+      Prompt_block_id.equal block.id Admitted_scheduled_input) capture.blocks in
+  let physical = match Option.bind !previous (fun issued -> issued.Keeper_context_assembly.system_prompt) with
+    | Some issued -> issued | None -> fail "captured System issuer missing" in
+  (match List.filter (fun (span : Keeper_context_assembly.span) ->
+      span.kind = Keeper_context_assembly.Block Admitted_scheduled_input) physical.partition.spans with
+   | [span] -> check string "captured admission is the exact issued System span"
+       admission.text (String.sub physical.text span.offset span.bytes)
+   | _ -> fail "one exact issued admission span required");
+  let captured_turn = Ids.Turn_ref.make ~trace_id:capture.trace_id ~absolute_turn:capture.absolute_turn in
+  check bool "capture and direct preparation identify the same actual fixture turn" true
+    (Ids.Turn_ref.equal turn_ref captured_turn);
+  check bool "captured direct admission is explicitly Unknown for the actual captured turn" true
+    (contains ~needle:"availability=\"unknown\"" admission.text
+     && contains ~needle:(Ids.Turn_ref.to_string captured_turn) admission.text);
   check (option string) "post-tool capture has no fabricated extra carrier" None capture.assembled;
   check (option string) "capture records the physical stable system value"
     (Option.map (fun (issued : Keeper_context_assembly.system_prompt) -> issued.text)
@@ -390,7 +421,7 @@ let test_completion_observation_survives_tool_reply approved () =
      backlog_revision=Some 1;running_keeper_fiber_count=0;connected_surfaces=[];
      connected_surface_failures=[];own_recent_board_posts=[];fleet_messages=[];own_recent_actions=Ok []} in
   let turn_decision = Keeper_world_observation.keeper_cycle_decision ~meta observation in
-  let rendered = Prompt.build_prompt ~turn_decision
+  let rendered = Prompt.build_prompt ~turn_ref:scheduled_admission_fixture_ref ~admission:Masc.Keeper_unified_prompt_event_fields.Unknown ~turn_decision
       ~current_task:Keeper_world_observation_inputs.No_current_task ~observation () in
   let previous = ref None in
   let issued_requests = ref [] in

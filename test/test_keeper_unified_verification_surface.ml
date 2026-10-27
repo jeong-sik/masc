@@ -6,6 +6,9 @@ module UM = Masc.Keeper_unified_metrics
 (* Use the same embedded prompt assets as runtime bootstrap, in an isolated
    directory. Catalog initialization resolves a registered directory or the
    Dune source-root fallback; direct execution registers these assets explicitly. *)
+let scheduled_admission_fixture_ref =
+  Ids.Turn_ref.make ~trace_id:"trace-admission-fixture" ~absolute_turn:1
+
 let () =
   let prompts_dir = Filename.temp_dir "verification_surface_prompts_" "" in
   at_exit (fun () -> Fs_compat.remove_tree prompts_dir);
@@ -156,7 +159,7 @@ let build_prompt ?workspace_memory
   let turn_decision =
     Masc.Keeper_world_observation.keeper_cycle_decision ~meta observation
   in
-  Masc.Keeper_unified_prompt.build_prompt
+  Masc.Keeper_unified_prompt.build_prompt ~turn_ref:scheduled_admission_fixture_ref ~admission:Masc.Keeper_unified_prompt_event_fields.Unknown
     ~turn_decision
     ?workspace_memory
     ~current_task

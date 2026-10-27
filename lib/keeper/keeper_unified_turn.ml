@@ -963,6 +963,10 @@ let run_keeper_cycle
                    ~turn_ref:(Some preparation_turn_ref) ~phase:Keeper_turn_preview.Prompt_preparation (fun () ->
                  Eio_guard.with_named_switch "turn:prompt" (fun () ->
                  let prepared = Keeper_unified_prompt.prepare_prompt
+                     ~turn_ref:preparation_turn_ref
+                     ~admission:(Keeper_unified_prompt_event_fields.Known
+                       (Keeper_heartbeat_source_batch.selections
+                         (Keeper_heartbeat_source_batch.sources turn_input)))
                      ~turn_decision
                      ?previous_turn_stop
                      ~current_task

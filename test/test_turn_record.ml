@@ -47,6 +47,7 @@ let test_block_id_post_tool_round_classes () =
     ; (Prompt_block_id.Dynamic_context, false)
     ; (Prompt_block_id.Active_goals, true)
     ; (Prompt_block_id.Completion_authority, true)
+    ; (Prompt_block_id.Admitted_scheduled_input, true)
     ; (Prompt_block_id.Temporal_summary, false)
     ; (Prompt_block_id.Memory_os_recall, false)
     ; (Prompt_block_id.Librarian_working_context, false)

@@ -37,6 +37,24 @@ type runner = window_s:float -> string -> (string, run_failure) result
 (** The prefix of the one line each script writes its answer on. *)
 val result_marker : string
 
+(** How long a run that reads waits, opening and ending the space included. *)
+val read_window_s : float
+
+(** Who holds an ego task space, as ego names it. [Handed_to_operator] is the
+    agent's space that the operator holds until the agent takes it back; a
+    connection opens on it. A space the operator made is
+    [Operator_owner]'s, and a connection never takes it over. *)
+type space_owner = Agent_owner | Handed_to_operator | Operator_owner
+
+(** The script that lists the task spaces called [space], each with its
+    number and owner, without opening a space: opening one by name makes it
+    when it is not there. *)
+val named_spaces_script : space:string -> string
+
+(** Reads what {!named_spaces_script} wrote. An owner ego names that is not a
+    {!space_owner} is an error, not a guess. *)
+val named_spaces : string -> ((int * space_owner) list, string) result
+
 type t
 
 (** Where an agent page's downloads are saved: [root], a folder under the

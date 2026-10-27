@@ -104,7 +104,9 @@ independent of that worker. Rows refresh with the connection list (`r`).
 An ego lite connection also belongs to the attached browser Add-on. On a Mac
 with ego lite installed and its onboarding finished,
 `masc browser-lane-setup --mode ego --base-path <workspace>` finds `ego-browser`,
-checks that it answers, and writes the table into `runtime.toml`. Restart the
+checks that it answers, and writes the table into `runtime.toml`. It refuses a
+space name that a task space you made in ego lite already has, because ego
+would refuse that space to masc; name another with `--ego-space`. Restart the
 server afterwards. `masc setup` offers the same command as an unmarked row of
 its tools checklist when `ego-browser` answers. Written by hand, the table is:
 

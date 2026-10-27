@@ -75,12 +75,17 @@ def fake_firefox(root):
 
 # What ego lite 0.6.0.16 prints for --version once its onboarding is done.
 EGO_VERSION = "ego-browser 0.6.0.16\n  chromium 154.0.8037.44\n  node v24.21.0"
+# The one answer line of the space listing setup runs with `nodejs`: no task
+# space of that name in ego lite yet.
+EGO_NO_SPACES = 'masc-ego-result {"ok":true,"value":[]}'
 
 
 def fake_ego(directory, script=None):
     path = directory / "ego-browser"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("#!/bin/sh\n" + (script or "printf '%s\\n' '" + EGO_VERSION.replace("\n", "' '") + "'") + "\n")
+    answers = ("case \"$1\" in\n  nodejs) printf '%s\\n' '" + EGO_NO_SPACES + "' ;;\n"
+               "  *) printf '%s\\n' '" + EGO_VERSION.replace("\n", "' '") + "' ;;\nesac")
+    path.write_text("#!/bin/sh\n" + (script or answers) + "\n")
     path.chmod(0o755)
     return path
 

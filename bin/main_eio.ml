@@ -2424,6 +2424,7 @@ let browser_lane_setup_cmd =
           ~docv:"NAME"
           ~doc:
             "With --mode ego, the ego lite task space the Add-on serves. By default masc. \
+             A name that a task space you made in ego lite already has is refused. \
              A table that is already there keeps its value unless this is given.")
   in
   let no_addon =

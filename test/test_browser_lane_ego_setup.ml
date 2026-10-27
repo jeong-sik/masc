@@ -55,13 +55,33 @@ let version_lines = "ego-browser 0.6.0.16\n  chromium 154.0.8037.44\n  node v24.
 type fixture =
   { root : string
   ; runtime : string
-  ; ego : string  (** answers --version with both versions *)
-  ; started : string  (** a file each fixture ego-browser touches when it runs *)
+  ; ego : string  (** answers --version with both versions, and lists the fixture's spaces *)
+  ; started : string  (** each fixture ego-browser appends its first argument here when it runs *)
   }
 
 (* A fixture ego-browser that leaves a mark when it runs, so a case can say
-   whether a plan started it. *)
-let fake_ego ~started ~path ~script = write ~mode:0o755 path (Printf.sprintf "#!/bin/sh\ntouch '%s'\n%s\n" started script)
+   whether a plan started it, and how. *)
+let fake_ego ~started ~path ~script =
+  write ~mode:0o755 path (Printf.sprintf "#!/bin/sh\nprintf '%%s\\n' \"$1\" >> '%s'\n%s\n" started script)
+
+let runs fixture =
+  if Sys.file_exists fixture.started
+  then List.filter (fun line -> line <> "") (String.split_on_char '\n' (read fixture.started))
+  else []
+
+let versions_answer =
+  Printf.sprintf "printf '%%s\\n' '%s'" (String.concat "' '" (String.split_on_char '\n' version_lines))
+
+(* ego lite's task spaces of the name setup asks for, as listTaskSpaces names
+   them, on the one answer line the script writes. *)
+let space id ownership = `Assoc [ "spaceId", `Int id; "ownership", `String ownership ]
+let spaces_answer spaces =
+  Printf.sprintf "printf '%%s\\n' '%s'"
+    (Masc.Browser_ego_peer.result_marker
+     ^ Yojson.Safe.to_string (`Assoc [ "ok", `Bool true; "value", `List spaces ]))
+
+(* --version names the versions; nodejs runs the space listing. *)
+let ego_script ~nodejs = Printf.sprintf "case \"$1\" in\n  nodejs) %s ;;\n  *) %s ;;\nesac" nodejs versions_answer
 
 let operator_table ~command =
   Printf.sprintf
@@ -73,11 +93,11 @@ space = "slack" # not the default
 |}
     command
 
-let with_fixture ?(with_table = false) ?config f =
+let with_fixture ?(with_table = false) ?(spaces = []) ?config f =
   with_directory (fun root ->
     let started = Filename.concat root "started" in
     let ego = Filename.concat root "ego-browser" in
-    fake_ego ~started ~path:ego ~script:(Printf.sprintf "printf '%%s\\n' '%s'" (String.concat "' '" (String.split_on_char '\n' version_lines)));
+    fake_ego ~started ~path:ego ~script:(ego_script ~nodejs:(spaces_answer spaces));
     let config =
       match config with
       | Some config -> config
@@ -160,12 +180,62 @@ let test_a_named_key_changes_that_key_and_no_other () =
   with_fixture ~with_table:true (fun fixture ->
     let plan = plan_ok (request ~space:"research" fixture) in
     check bool "only the space" true (E.change plan = E.Updated [ E.Space ]);
-    check bool "the command the table keeps is not started" false (Sys.file_exists fixture.started);
+    check (list string) "the new space is looked up, and the command the table keeps is not asked its versions"
+      [ "nodejs" ] (runs fixture);
     apply_ok plan;
     let table = configured fixture in
     check (pair string string) "the space changed" (fixture.ego, "research") (table.command, table.space);
     check bool "the operator's comment on the command stays" true
       (contains (read fixture.runtime) "# the operator's own link"))
+
+(* --- the space against ego's own --------------------------------------- *)
+
+(* ego refuses a worker that opens, by name, a space the operator made, and
+   the worker then fails to start; setup refuses the name instead. *)
+let test_a_space_the_operator_made_is_refused () =
+  with_fixture ~spaces:[ space 36 "user" ] (fun fixture ->
+    refused "a new table on the operator's space"
+      (function E.Space_held_by_operator { space = "masc"; space_id = 36 } -> true | _ -> false)
+      fixture (request fixture) ~find:(found fixture) ());
+  with_fixture ~with_table:true ~spaces:[ space 36 "user" ] (fun fixture ->
+    refused "a space renamed to the operator's"
+      (function E.Space_held_by_operator { space = "masc"; space_id = 36 } -> true | _ -> false)
+      fixture (request ~space:"masc" fixture) ())
+
+(* The agent's own space, and the agent's space the operator holds for now,
+   are where the worker opens. *)
+let test_the_agents_own_space_is_written () =
+  List.iter (fun ownership ->
+    with_fixture ~spaces:[ space 42 ownership ] (fun fixture ->
+      let plan = plan_ok ~find:(found fixture) (request fixture) in
+      check bool ("a new table on a space owned by " ^ ownership) true (E.change plan = E.Created);
+      apply_ok plan;
+      check string "the default space" E.default_space (configured fixture).space))
+    [ "agent"; "agentDelegatedToUser" ]
+
+let test_spaces_that_cannot_be_read_are_refused () =
+  with_fixture (fun fixture ->
+    let closed = Filename.concat fixture.root "closed" in
+    fake_ego ~started:fixture.started ~path:closed
+      ~script:(ego_script ~nodejs:"echo 'ego lite is not running' >&2; exit 1");
+    refused "an ego-browser that does not list its spaces"
+      (function E.Spaces_unreadable { detail; _ } -> contains detail "ego lite is not running" | _ -> false)
+      fixture (request ~command:closed fixture) ());
+  with_fixture ~spaces:[ space 36 "team" ] (fun fixture ->
+    refused "an owner masc does not know"
+      (function E.Spaces_unreadable { detail; _ } -> contains detail "team" | _ -> false)
+      fixture (request fixture) ~find:(found fixture) ())
+
+(* The space is looked up where its name is chosen; a plan that keeps it does
+   not start ego for it. *)
+let test_a_kept_space_is_not_looked_up () =
+  with_fixture ~with_table:true ~spaces:[ space 36 "user" ] (fun fixture ->
+    let other = Filename.concat fixture.root "other-ego" in
+    fake_ego ~started:fixture.started ~path:other ~script:(ego_script ~nodejs:"exit 1");
+    let plan = plan_ok (request ~command:other fixture) in
+    check bool "only the command" true (E.change plan = E.Updated [ E.Command ]);
+    check (list string) "the new command is asked its versions, and the kept space is not looked up"
+      [ "--version" ] (runs fixture))
 
 (* --- refused before any write ------------------------------------------ *)
 
@@ -267,6 +337,11 @@ let () =
       , [ test_case "keeps its values" `Quick test_a_table_that_is_there_keeps_its_values
         ; test_case "a named key changes that key and no other" `Quick
             test_a_named_key_changes_that_key_and_no_other ] )
+    ; ( "the space against ego's own"
+      , [ test_case "a space the operator made is refused" `Quick test_a_space_the_operator_made_is_refused
+        ; test_case "the agent's own space is written" `Quick test_the_agents_own_space_is_written
+        ; test_case "spaces that cannot be read are refused" `Quick test_spaces_that_cannot_be_read_are_refused
+        ; test_case "a kept space is not looked up" `Quick test_a_kept_space_is_not_looked_up ] )
     ; ( "refused"
       , [ test_case "no ego-browser to name" `Quick test_no_ego_to_name_is_refused
         ; test_case "an ego that names no versions" `Quick test_an_ego_that_names_no_versions_is_refused

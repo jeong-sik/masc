@@ -25,6 +25,8 @@ type error =
   | Ego_not_executable of string
   | Ego_unusable of { path : string; detail : string }
   | Table_refused of string
+  | Space_held_by_operator of { space : string; space_id : int }
+  | Spaces_unreadable of { path : string; space : string; detail : string }
   | Configuration_changed
   | Not_written of string
 
@@ -53,6 +55,16 @@ let error_message = function
   | Table_refused reason ->
     Printf.sprintf "The [%s] table would not load as written, so it was not written: %s." table_path
       reason
+  | Space_held_by_operator { space; space_id } ->
+    Printf.sprintf
+      "The ego task space %S (id %d) belongs to the operator, and masc does not take over a \
+       space the operator made. Name another with --ego-space."
+      space space_id
+  | Spaces_unreadable { path; space; detail } ->
+    Printf.sprintf
+      "The ego-browser at %s did not list ego lite's task spaces, so whether the operator \
+       holds %S is unknown: %s. Open ego lite and run this again."
+      path space detail
   | Configuration_changed ->
     Printf.sprintf "runtime.toml changed while this ran, so [%s] was not written. Run this again."
       table_path
@@ -128,10 +140,47 @@ let named path =
     | Browser_runtime_dependencies.Failed { detail; _ } -> Error (Ego_unusable { path; detail })
     | Browser_runtime_dependencies.Started { output; _ } -> versions_of ~path output
 
+(* The task spaces called [space], listed by the ego-browser the table
+   names. Opening the space instead would make it. *)
+let named_spaces ~command ~space =
+  let status, stdout, stderr =
+    Process_eio.run_argv_with_status_split
+      ~timeout_sec:Browser_ego_peer.read_window_s
+      ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
+      [ command; "nodejs"; "-e"; Browser_ego_peer.named_spaces_script ~space ]
+  in
+  let output = stdout ^ "\n" ^ stderr in
+  match status with
+  | Unix.WEXITED 0 -> Browser_ego_peer.named_spaces output
+  (* [run_argv_with_status_split] synthesises 124 on its own timeout. *)
+  | Unix.WEXITED 124 -> Error (Browser_ego_peer.run_failure_message Browser_ego_peer.Timed_out)
+  | Unix.WEXITED code -> Error (Browser_ego_peer.run_failure_message (Browser_ego_peer.Exited { code; output }))
+  | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
+    Error (Browser_ego_peer.run_failure_message (Browser_ego_peer.Signaled signal))
+
+(* The worker opens its space by name, and ego refuses a name the operator's
+   space holds; the worker would then fail to start. The space is checked
+   where its name is chosen. *)
+let space_is_free ~(table : Browser_configuration.live_ego) =
+  match named_spaces ~command:table.command ~space:table.space with
+  | Error detail -> Error (Spaces_unreadable { path = table.command; space = table.space; detail })
+  | Ok spaces ->
+    (match
+       List.find_map
+         (fun (space_id, owner) ->
+            match owner with
+            | Browser_ego_peer.Operator_owner -> Some space_id
+            | Browser_ego_peer.Agent_owner | Browser_ego_peer.Handed_to_operator -> None)
+         spaces
+     with
+     | Some space_id -> Error (Space_held_by_operator { space = table.space; space_id })
+     | None -> Ok ())
+
 (* A table that is not there is written whole, with the defaults for what was
    not named. A table that is there keeps its values and changes only what was
    named and differs from what it holds. The command written is started once
-   to read its versions; a command the table keeps is not started. *)
+   to read its versions; a command the table keeps is not started for them.
+   A space written is checked against ego's spaces ([space_is_free]). *)
 let decide ~find_ego request = function
   | None ->
     let* command, versions =
@@ -199,6 +248,7 @@ let plan ~find_ego (request : request) =
     let existing = configuration.Browser_configuration.live_ego in
     let* table, set, change, versions = decide ~find_ego request existing in
     let* () = validated ~path ~existing ~table ~set observation.source_text in
+    let* () = if List.mem Space set then space_is_free ~table else Ok () in
     Ok
       { runtime_config_path = path
       ; revision = Runtime_table_edit.revision_of_observation observation

@@ -107,6 +107,38 @@ let test_the_space_opens_by_name_and_is_held_by_number () =
       ~run:(fun ~window_s:_ _ -> failed "EGO_TASK_SPACE_NAME_IN_USE: masc") in
   check (result reject string) "ego's own refusal is kept" (Error "EGO_TASK_SPACE_NAME_IN_USE: masc") (Result.map ignore in_use)
 
+(* Opening a space by name makes it when it is not there, so the spaces of a
+   name are read from ego's list: setup checks a name this way before it
+   writes it. *)
+let test_the_spaces_of_a_name_are_listed_without_opening_one () =
+  let script = Peer.named_spaces_script ~space:"masc" in
+  let lines = List.map String.trim (String.split_on_char '\n' script) in
+  check string "the step" "// masc-ego: spaces.named" (List.hd lines);
+  check bool "it lists the spaces" true (contains script "await listTaskSpaces()");
+  check bool "it opens no space" false (contains script "await taskSpace(");
+  check bool "the name rides in the arguments" true
+    (List.mem ("const args = " ^ Yojson.Safe.to_string (obj ["space",str "masc"]) ^ ";") lines);
+  let owner = testable (fun out owner -> Format.pp_print_string out (match owner with
+    | Peer.Agent_owner -> "agent" | Handed_to_operator -> "handed to the operator" | Operator_owner -> "operator")) ( = ) in
+  let read value = match value with
+    | Ok output -> Peer.named_spaces output
+    | Error failure -> Error (Peer.run_failure_message failure) in
+  check (result (list (pair int owner)) string) "each space's number and owner"
+    (Ok [36, Peer.Operator_owner; 42, Peer.Agent_owner; 32, Peer.Handed_to_operator])
+    (read (answered (`List [obj ["spaceId",`Int 36;"ownership",str "user"];
+      obj ["spaceId",`Int 42;"ownership",str "agent"];
+      obj ["spaceId",`Int 32;"ownership",str "agentDelegatedToUser"]])));
+  check (result (list (pair int owner)) string) "no space of that name" (Ok []) (read (answered (`List [])));
+  List.iter (fun (label, output) -> check bool label true (Result.is_error (read output)))
+    [ "an owner masc does not know", answered (`List [obj ["spaceId",`Int 9;"ownership",str "team"]]);
+      "a space without its number", answered (`List [obj ["ownership",str "user"]]);
+      "an answer that is not a list", answered (obj ["spaceId",`Int 9]);
+      "a failure the frame caught", failed "ego lite is not running" ];
+  let unknown = Peer.open_space ~run_native:(fun _ -> Error (Peer.Unstarted "no native command in this fixture"))
+      ~downloads:no_downloads ~now ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) ~space:"masc"
+      ~run:(fun ~window_s:_ _ -> answered (obj ["spaceId",`Int 9;"ownership",str "team"])) in
+  check bool "a connection does not open on an owner masc does not know" true (Result.is_error unknown)
+
 (* A tab that left the listing loses its number: reading it is refused
    before any run, and the bookkeeping does not grow with every listing. *)
 let test_a_tab_that_left_the_listing_loses_its_number () =
@@ -1846,6 +1878,7 @@ let () =
       test_case "native drag preserves release and failure boundaries" `Quick test_native_drag_and_release;
       test_case "chooser upload respects uncertain pointer release" `Quick test_chooser_upload_respects_uncertain_pointer_release;
       test_case "the space opens by name and is held by number" `Quick test_the_space_opens_by_name_and_is_held_by_number;
+      test_case "the spaces of a name are listed without opening one" `Quick test_the_spaces_of_a_name_are_listed_without_opening_one;
       test_case "tabs are numbered by page label" `Quick test_tabs_are_numbered_by_label;
       test_case "a tab that left the listing loses its number" `Quick test_a_tab_that_left_the_listing_loses_its_number;
       test_case "an ego error is cut" `Quick test_an_ego_error_is_cut;

@@ -45,15 +45,37 @@ let read_pool : Eio.Executor_pool.t option Atomic.t = Atomic.make None
 
 let set_read p = Atomic.set read_pool (Some p)
 
-(* The pool a submission from this fiber goes to. Without a read pool a read
-   uses the shared pool, so tests and one-pool tools keep a single pool. *)
+(* RFC-0474 L4. Eio's executor admits work until the weights of its running
+   jobs reach 1.0, whether those jobs use the CPU or wait. Measured on the
+   live server on 2026-10-27 at 18:37Z over 60 s: 175 reads ran for 12.25 s
+   in all while the two read pool domains ran fibers for 2.16 s, so a read
+   uses about 0.18 of a core for as long as it runs and waits the rest. At
+   the 1.0 default a waiting read kept its whole worker, and two waiting
+   reads stopped the read pool while both domains were idle. At this weight
+   a worker holds five reads. Work a domain's own system threads run is not
+   in the fiber time, so 0.18 is a lower bound. *)
+let read_job_weight = 0.2
+
+let shared_job_weight = 1.0
+
+type target =
+  { pool : Eio.Executor_pool.t
+  ; default_weight : float
+  }
+
+(* The pool a submission from this fiber goes to, and the weight a job that
+   names none takes there. Without a read pool a read uses the shared pool at
+   the shared weight, so tests and one-pool tools keep a single pool. *)
 let selected () =
+  let shared () =
+    Option.map (fun pool -> { pool; default_weight = shared_job_weight }) (Atomic.get pool)
+  in
   match Pool_lane.current () with
-  | Pool_lane.Background -> Atomic.get pool
+  | Pool_lane.Background -> shared ()
   | Pool_lane.Read ->
     (match Atomic.get read_pool with
-     | Some _ as read -> read
-     | None -> Atomic.get pool)
+     | Some pool -> Some { pool; default_weight = read_job_weight }
+     | None -> shared ())
 ;;
 
 module For_testing = struct
@@ -92,11 +114,12 @@ let strict_submit_error_to_string = function
       (Printexc.raw_backtrace_to_string backtrace)
 ;;
 
-let submit_strict ?(weight = 1.0) f =
+let submit_strict ?weight f =
   match selected (), Eio_guard.execution_context () with
   | None, _ -> Error Pool_unavailable
   | Some _, Eio_guard.Non_eio -> Error Caller_not_in_eio
-  | Some p, Eio_guard.Eio_fiber ->
+  | Some { pool = p; default_weight }, Eio_guard.Eio_fiber ->
+    let weight = Option.value weight ~default:default_weight in
     (try
        Executor_pool_submission.submit p ~weight (fun () ->
          with_worker_context (fun () ->
@@ -120,10 +143,11 @@ let submit_strict ?(weight = 1.0) f =
 (** Submit [f] to the executor pool if available, or run inline.
     Inline fallback ensures callers work in tests and before server init.
     Re-raises [Eio.Cancel.Cancelled] to preserve structured concurrency. *)
-let submit_or_inline ?(weight = 1.0) f =
+let submit_or_inline ?weight f =
   match selected (), Eio_guard.execution_context () with
   | Some _, _ when in_worker_context () -> f ()
-  | Some p, Eio_guard.Eio_fiber ->
+  | Some { pool = p; default_weight }, Eio_guard.Eio_fiber ->
+      let weight = Option.value weight ~default:default_weight in
       Executor_pool_submission.submit p ~weight (fun () ->
         with_worker_context (fun () -> Eio.Switch.run (fun _sw -> f ())))
   | (Some _ | None), Eio_guard.Non_eio

@@ -6,7 +6,7 @@ let rec remove_tree path =
     Unix.rmdir path
   end else Unix.unlink path
 
-let with_workspace f =
+let with_workspace ?(memory = false) f =
   let path = Filename.temp_file "masc-run-tool-" "" in
   Unix.unlink path;
   Unix.mkdir path 0o700;
@@ -14,6 +14,11 @@ let with_workspace f =
     Eio_main.run @@ fun env ->
     Fs_compat.set_fs (Eio.Stdenv.fs env);
     let config = Masc.Workspace.default_config path in
+    let config =
+      if memory then
+        { config with Workspace_utils.backend = Workspace_utils.Memory (Backend.Memory.create ()) }
+      else config
+    in
     ignore (Masc.Workspace.init config ~agent_name:None);
     f config)
 
@@ -117,9 +122,7 @@ let test_plan_metadata_failure_preserves_partial_effect () =
       (Fs_compat.load_file plan_path))
 
 let test_memory_commit_survives_metadata_mirror_failure () =
-  with_workspace @@ fun config ->
-  let config = { config with Workspace_utils.backend = Workspace_utils.Memory (Backend.Memory.create ()) } in
-  ignore (Masc.Workspace.init config ~agent_name:None);
+  with_workspace ~memory:true @@ fun config ->
   let task = "task-memory-mirror" in
   let run_path = Masc.Run_eio.run_json_path config task in
   Workspace_utils.mkdir_p run_path;

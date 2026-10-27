@@ -40,13 +40,34 @@ let test_small_host () =
     (plan ~recommended:4 ~fixed:3 ~override:(Some 1));
   check_plan "one core" ~shared:1 ~read:1 ~codec:1 (plan ~recommended:1 ~fixed:3 ~override:None)
 
-let test_codec_shrinks_before_the_read_pool () =
-  (* limit 8, fixed 3: five left, enough for codec 2, read 2 and one shared. *)
-  check_plan "9 cores" ~shared:1 ~read:2 ~codec:2 (plan ~recommended:9 ~fixed:3 ~override:None);
-  (* limit 7, fixed 3: four left, the codec gives up its second domain first. *)
-  check_plan "8 cores" ~shared:1 ~read:2 ~codec:1 (plan ~recommended:8 ~fixed:3 ~override:None);
-  (* limit 6, fixed 3: three left, the read pool gives up its second next. *)
-  check_plan "7 cores" ~shared:1 ~read:1 ~codec:1 (plan ~recommended:7 ~fixed:3 ~override:None)
+let test_shrink_order () =
+  (* limit 9, fixed 3: six left, codec 2 and read 2 leave the shared pool 2. *)
+  check_plan "10 cores" ~shared:2 ~read:2 ~codec:2 (plan ~recommended:10 ~fixed:3 ~override:None);
+  (* limit 8, fixed 3: five left, the codec gives up its second domain first. *)
+  check_plan "9 cores" ~shared:2 ~read:2 ~codec:1 (plan ~recommended:9 ~fixed:3 ~override:None);
+  (* limit 7, fixed 3: four left, the read pool gives up its second next, so
+     the shared pool keeps two. *)
+  check_plan "8 cores" ~shared:2 ~read:1 ~codec:1 (plan ~recommended:8 ~fixed:3 ~override:None);
+  (* limit 6, fixed 3: three left, one each. *)
+  check_plan "7 cores" ~shared:1 ~read:1 ~codec:1 (plan ~recommended:7 ~fixed:3 ~override:None);
+  (* limits 5 and 4, fixed 3: two and one left; each pool still keeps one. *)
+  List.iter
+    (fun recommended ->
+       let p = plan ~recommended ~fixed:3 ~override:None in
+       check_plan (Printf.sprintf "%d cores" recommended) ~shared:1 ~read:1 ~codec:1 p;
+       Alcotest.(check bool) (Printf.sprintf "%d cores over the limit" recommended) false
+         (Domain_budget.within_limit p))
+    [ 6; 5 ]
+
+let test_override_on_a_small_host () =
+  check_plan "override 2 on 8 cores" ~shared:2 ~read:1 ~codec:1
+    (plan ~recommended:8 ~fixed:3 ~override:(Some 2));
+  match Domain_budget.plan ~recommended:8 ~fixed:3 ~override:(Some 3) with
+  | Ok _ -> Alcotest.fail "an override above the limit was accepted on 8 cores"
+  | Error (Domain_budget.Override_exceeds_limit { override; limit; fixed; read_pool; execution_codec })
+    ->
+    Alcotest.(check (list int)) "error fields" [ 3; 7; 3; 1; 1 ]
+      [ override; limit; fixed; read_pool; execution_codec ]
 
 let () =
   Alcotest.run "domain_budget"
@@ -54,5 +75,5 @@ let () =
         [ Alcotest.test_case "16 cores" `Quick test_sixteen_cores;
           Alcotest.test_case "override" `Quick test_override;
           Alcotest.test_case "small host" `Quick test_small_host;
-          Alcotest.test_case "codec shrinks before the read pool" `Quick
-            test_codec_shrinks_before_the_read_pool ] ) ]
+          Alcotest.test_case "shrink order" `Quick test_shrink_order;
+          Alcotest.test_case "override on a small host" `Quick test_override_on_a_small_host ] ) ]

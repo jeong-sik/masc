@@ -28,19 +28,27 @@ let execution_codec_domains = 2
    times have a long tail (p99 in the 2-5 s bucket), so these are estimates. *)
 let read_pool_domains = 2
 
+(* In the same window background work ran 3,007 jobs at 64.8 ms mean, about
+   1.6 busy workers against the reads' 0.11. So the shared pool keeps two
+   workers before the codec runtime or the read pool takes a second one. *)
+let shared_pool_kept_first = 2
+
 let plan ~recommended ~fixed ~override =
   let limit = Int.max 1 (recommended - 1) in
   let room = limit - fixed in
   (* Short of room, the codec runtime gives up its second domain first, then
-     the read pool, and each pool keeps one worker even on a host too small
-     for the limit, so the largest shared pool is never below 1. *)
+     the read pool, then the shared pool its second; each pool keeps one
+     worker even on a host too small for the limit, so the largest shared
+     pool is never below 1. *)
   let execution_codec =
-    if room >= execution_codec_domains + read_pool_domains + 1
+    if room >= shared_pool_kept_first + read_pool_domains + execution_codec_domains
     then execution_codec_domains
     else 1
   in
   let read_pool =
-    if room >= execution_codec + read_pool_domains + 1 then read_pool_domains else 1
+    if room >= shared_pool_kept_first + read_pool_domains + execution_codec
+    then read_pool_domains
+    else 1
   in
   let largest_shared_pool = Int.max 1 (room - execution_codec - read_pool) in
   match override with

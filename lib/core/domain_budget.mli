@@ -40,7 +40,12 @@ val execution_codec_domains : int
 
 val read_pool_domains : int
 (** Read pool workers when the host has room: 2. Short of room the codec
-    runtime drops to 1 first, then the read pool. *)
+    runtime drops to 1 first, then the read pool, so the shared pool keeps
+    {!shared_pool_kept_first} workers as long as the room allows. *)
+
+val shared_pool_kept_first : int
+(** Shared pool workers kept before the codec runtime or the read pool gets
+    a second worker: 2. *)
 
 val plan : recommended:int -> fixed:int -> override:int option -> (plan, error) result
 (** [override] is the shared pool size the operator set; [None] takes the

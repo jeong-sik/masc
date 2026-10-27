@@ -31,7 +31,13 @@ val create :
 (** The Switch is the endpoint lifetime, never a request, model turn or host
     server connection. Resolution is trusted policy, not forwarded controls;
     it runs only for an original not yet owned by a native supervisor.
-    Fresh IDs come from the controller, never a peer's claimed historical ID. *)
+    Fresh IDs come from the controller, never a peer's claimed historical ID.
+
+    Every original keeps one table entry, one actor and one release hook until
+    this Switch ends, including after its result is final; nothing evicts them
+    earlier (issue #46444). If an actor raises outside a request, that
+    original's controls return [Controller_failed] until this Switch ends, and
+    a later lookup returns the same stopped operation (issue #46445). *)
 val admit : t -> binding:P.binding -> spec:P.spec -> (operation,error) result
 (** Register complete original bytes without launching. Existing live entries
     refresh their captured source; missing authority never falls back to admit.

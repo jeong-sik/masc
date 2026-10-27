@@ -245,17 +245,15 @@ let frame_lines buf =
   if len = 0 then []
   else
     let limit = if str.[len - 1] = '\n' then len - 1 else len in
-    let rec collect acc start idx =
-      if idx >= limit then
-        let last = String.sub str start (idx - start) in
-        List.rev (last :: acc)
-      else if str.[idx] = '\n' then
-        let line = String.sub str start (idx - start) in
-        collect (line :: acc) (idx + 1) (idx + 1)
-      else
-        collect acc start (idx + 1)
-    in
-    collect [] 0 0
+    let rows = ref [] in
+    let stop = ref limit in
+    for index = limit - 1 downto 0 do
+      if str.[index] = '\n' then begin
+        rows := String.sub str (index + 1) (!stop - index - 1) :: !rows;
+        stop := index
+      end
+    done;
+    String.sub str 0 !stop :: !rows
 
 
 (* Two already-drawn panes, side by side, one terminal row per line.

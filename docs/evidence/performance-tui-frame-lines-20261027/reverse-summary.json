@@ -1,0 +1,189 @@
+{
+  "schema": "masc.frame-lines-reverse-scan-native-descriptive-summary.v1",
+  "correctness": {
+    "kind": "correctness",
+    "cases": 5473,
+    "roles": 2,
+    "input_unchanged_and_outputs_survive_mutation": true
+  },
+  "raw_records": 32,
+  "rows": [
+    {
+      "stratum": "empty",
+      "per_call": {
+        "allocation_delta_bytes": {
+          "baseline": 16.0192,
+          "candidate": 16.0192
+        },
+        "cpu_delta_s": {
+          "baseline": 8.8e-09,
+          "candidate": 7.900000000000001e-09
+        },
+        "wall_delta_s": {
+          "baseline": 8.4162e-09,
+          "candidate": 7.7724e-09
+        }
+      },
+      "change_percent": {
+        "allocation_delta_bytes": 0.0,
+        "cpu_delta_s": -10.227272727272707,
+        "wall_delta_s": -7.649533043416268
+      }
+    },
+    {
+      "stratum": "LF",
+      "per_call": {
+        "allocation_delta_bytes": {
+          "baseline": 128.0192,
+          "candidate": 56.0192
+        },
+        "cpu_delta_s": {
+          "baseline": 1.8999999999999998e-08,
+          "candidate": 1.71e-08
+        },
+        "wall_delta_s": {
+          "baseline": 1.8906599999999997e-08,
+          "candidate": 1.6903899999999998e-08
+        }
+      },
+      "change_percent": {
+        "allocation_delta_bytes": -56.24156376543519,
+        "cpu_delta_s": -9.999999999999986,
+        "wall_delta_s": -10.59259729406662
+      }
+    },
+    {
+      "stratum": "row120",
+      "per_call": {
+        "allocation_delta_bytes": {
+          "baseline": 368.048,
+          "candidate": 296.048
+        },
+        "cpu_delta_s": {
+          "baseline": 1.64e-07,
+          "candidate": 1.2875e-07
+        },
+        "wall_delta_s": {
+          "baseline": 1.63734e-07,
+          "candidate": 1.285075e-07
+        }
+      },
+      "change_percent": {
+        "allocation_delta_bytes": -19.562665739251408,
+        "cpu_delta_s": -21.493902439024392,
+        "wall_delta_s": -21.514468589297287
+      }
+    },
+    {
+      "stratum": "screen40x120",
+      "per_call": {
+        "allocation_delta_bytes": {
+          "baseline": 12264.192,
+          "candidate": 11256.192
+        },
+        "cpu_delta_s": {
+          "baseline": 6.69e-06,
+          "candidate": 5.0439999999999995e-06
+        },
+        "wall_delta_s": {
+          "baseline": 6.8039889999999995e-06,
+          "candidate": 5.045175e-06
+        }
+      },
+      "change_percent": {
+        "allocation_delta_bytes": -8.21904940822844,
+        "cpu_delta_s": -24.603886397608377,
+        "wall_delta_s": -25.849747846447123
+      }
+    },
+    {
+      "stratum": "blank40x120",
+      "per_call": {
+        "allocation_delta_bytes": {
+          "baseline": 12264.192,
+          "candidate": 11256.192
+        },
+        "cpu_delta_s": {
+          "baseline": 6.48e-06,
+          "candidate": 5.062e-06
+        },
+        "wall_delta_s": {
+          "baseline": 6.510018999999999e-06,
+          "candidate": 5.060196e-06
+        }
+      },
+      "change_percent": {
+        "allocation_delta_bytes": -8.21904940822844,
+        "cpu_delta_s": -21.88271604938271,
+        "wall_delta_s": -22.270641606422338
+      }
+    },
+    {
+      "stratum": "unicode40",
+      "per_call": {
+        "allocation_delta_bytes": {
+          "baseline": 16384.192,
+          "candidate": 15376.192
+        },
+        "cpu_delta_s": {
+          "baseline": 9.04e-06,
+          "candidate": 7.084e-06
+        },
+        "wall_delta_s": {
+          "baseline": 9.057045e-06,
+          "candidate": 7.114887e-06
+        }
+      },
+      "change_percent": {
+        "allocation_delta_bytes": -6.152271653066565,
+        "cpu_delta_s": -21.63716814159291,
+        "wall_delta_s": -21.44361654380651
+      }
+    },
+    {
+      "stratum": "ANSI40",
+      "per_call": {
+        "allocation_delta_bytes": {
+          "baseline": 13024.192,
+          "candidate": 12016.192
+        },
+        "cpu_delta_s": {
+          "baseline": 7.012e-06,
+          "candidate": 5.366000000000001e-06
+        },
+        "wall_delta_s": {
+          "baseline": 7.205009e-06,
+          "candidate": 5.365132999999999e-06
+        }
+      },
+      "change_percent": {
+        "allocation_delta_bytes": -7.739443644565435,
+        "cpu_delta_s": -23.47404449515116,
+        "wall_delta_s": -25.536068032670066
+      }
+    },
+    {
+      "stratum": "tall300x120",
+      "per_call": {
+        "allocation_delta_bytes": {
+          "baseline": 91560.96,
+          "candidate": 84312.96
+        },
+        "cpu_delta_s": {
+          "baseline": 4.935000000000001e-05,
+          "candidate": 3.888e-05
+        },
+        "wall_delta_s": {
+          "baseline": 5.008936e-05,
+          "candidate": 3.919959e-05
+        }
+      },
+      "change_percent": {
+        "allocation_delta_bytes": -7.9160375775876535,
+        "cpu_delta_s": -21.215805471124625,
+        "wall_delta_s": -21.740685047682774
+      }
+    }
+  ],
+  "scope": "Same frozen benchmark/correctness; new distinct function. Two ABBA phases/role, sharedhost/clock/probe/defaultcompiler limits; no native TUI/MASC typing/SLO."
+}

@@ -1,0 +1,21 @@
+{
+  "schema": "masc.native-frame-lines-reverse-scan-experiment.v1",
+  "parent_native_plan": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/tui-frame-lines-native-carrier-v1/plan.json",
+  "parent_native_plan_sha256": "cea2ac651f391ed01c0e4bb8ad60f209ad5b7a5526ebe7e2cff12c6f8b7cad3f",
+  "parent_native_execution_sha256": "314b8eb82c12859ec0328ebeec24f8cd9d8ec753b89e4237d34baa8b2c6acc17",
+  "source_sha256": "0eb79dd7b506ba6e6f508a7dfc28f4e240379cfeed0c1bbab18307337a71d536",
+  "candidate_function": "let frame_lines buf =\n  let str = Buffer.contents buf in\n  let len = String.length str in\n  if len = 0 then []\n  else\n    let limit = if str.[len - 1] = '\\n' then len - 1 else len in\n    let rows = ref [] in\n    let stop = ref limit in\n    for index = limit - 1 downto 0 do\n      if str.[index] = '\\n' then begin\n        rows := String.sub str (index + 1) (!stop - index - 1) :: !rows;\n        stop := index\n      end\n    done;\n    String.sub str 0 !stop :: !rows",
+  "candidate_function_sha256": "488da013c1a25f178bd7206d62f8c106290cdd8a1bac1f41588969e0e56c34a6",
+  "baseline_correctness_and_strata": "Byte-identical to previous carrier outside Candidate module; all5473cases and8ABBAstrata retained.",
+  "compiler_sha256": "ccadb1995ae48aa74d8df099c313a1bd6a4356e37e112fe938636f9607142488",
+  "compile_argv": [
+    "/Users/dancer/.opam/5.5.1/bin/ocamlopt",
+    "-I",
+    "+unix",
+    "unix.cmxa",
+    "carrier.ml",
+    "-o",
+    "carrier"
+  ],
+  "scope": "New distinct candidate; rejected directBuffer candidate remains failedCPUtradeoff history. Stable immutable snapshot retained; eliminate reverse-list cells only. Extracted native helper, not MASC integration/nativeTUI/speedup/SLO."
+}

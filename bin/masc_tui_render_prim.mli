@@ -110,6 +110,9 @@ val lines_ended_since : Buffer.t -> start:int -> int
     there, that the next line written lands on. *)
 
 val frame_lines : Buffer.t -> string list
+(** Split the current buffer bytes into ordered rows, removing one final LF
+    terminator. Empty input has no rows; leading and interior empty rows remain.
+    Row strings stay unchanged after later buffer mutation. *)
 
 val write_two_panes :
   Buffer.t -> left_cols:int -> left:Buffer.t -> right:Buffer.t -> unit

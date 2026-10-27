@@ -1,0 +1,97 @@
+module Baseline = struct
+let frame_lines buf =
+  let str = Buffer.contents buf in
+  let len = String.length str in
+  if len = 0 then []
+  else
+    let limit = if str.[len - 1] = '\n' then len - 1 else len in
+    let rec collect acc start idx =
+      if idx >= limit then
+        let last = String.sub str start (idx - start) in
+        List.rev (last :: acc)
+      else if str.[idx] = '\n' then
+        let line = String.sub str start (idx - start) in
+        collect (line :: acc) (idx + 1) (idx + 1)
+      else
+        collect acc start (idx + 1)
+    in
+    collect [] 0 0
+end
+module Candidate = struct
+let frame_lines buf =
+  let len = Buffer.length buf in
+  if len = 0 then []
+  else
+    let limit = if Buffer.nth buf (len - 1) = '\n' then len - 1 else len in
+    let rec collect acc start idx =
+      if idx >= limit then
+        let last = Buffer.sub buf start (idx - start) in
+        List.rev (last :: acc)
+      else if Buffer.nth buf idx = '\n' then
+        let line = Buffer.sub buf start (idx - start) in
+        collect (line :: acc) (idx + 1) (idx + 1)
+      else
+        collect acc start (idx + 1)
+    in
+    collect [] 0 0
+end
+
+
+let buffers text =
+ let b = Buffer.create (String.length text) in Buffer.add_string b text; b
+let oracle text =
+ if text = "" then [] else
+ let rows = String.split_on_char '\n' text in
+ if text.[String.length text-1] = '\n' then List.rev (List.tl (List.rev rows)) else rows
+let checked = ref 0
+let check text =
+ let expected = oracle text in
+ List.iter (fun f ->
+   let b = buffers text in let actual = f b in
+   if actual <> expected || Buffer.contents b <> text then failwith "byte/row/input mismatch";
+   Buffer.clear b; Buffer.add_string b "later mutation";
+   if actual <> expected then failwith "output aliases mutable input") [Baseline.frame_lines;Candidate.frame_lines];
+ incr checked
+let () =
+ List.iter check [""; "\n";"\n\n";"a";"a\n";"a\n\n";"\na";"\r\n";"\000\n\255";"한글\n🙂\n";"\027[31mred\027[0m\n"];
+ let alphabet = ['a';'\n';'\000';'\r'] in
+ let rec all left text =
+   check text;
+   if left > 0 then List.iter (fun c -> all (left-1) (text ^ String.make 1 c)) alphabet
+ in all 6 "";
+ check (String.init 256 Char.chr);
+ Printf.printf "{\"kind\":\"correctness\",\"cases\":%d,\"roles\":2,\"input_unchanged_and_outputs_survive_mutation\":true}\n%!" !checked
+let repeat text n = String.concat "" (List.init n (fun _ -> text))
+let strata =
+ [ "empty","",5000
+ ; "LF","\n",5000
+ ; "row120",repeat "a" 120 ^ "\n",2000
+ ; "screen40x120",repeat (repeat "a" 120 ^ "\n") 40,500
+ ; "blank40x120",repeat (repeat " " 120 ^ "\n") 40,500
+ ; "unicode40",repeat (repeat "한🙂" 25 ^ "\n") 40,500
+ ; "ANSI40",repeat ("\027[1;31m" ^ repeat "a" 120 ^ "\027[0m\n") 40,500
+ ; "tall300x120",repeat (repeat "b" 120 ^ "\n") 300,100 ]
+let sink = ref []
+let measure name text iterations role f phase =
+ let b = buffers text in
+ for _=1 to 20 do sink := f b done;
+ Gc.full_major ();
+ let before_gc = Gc.quick_stat () in
+ let before_cpu = Sys.time () in
+ let before_wall = Unix.gettimeofday () in
+ let before_alloc = Gc.allocated_bytes () in
+ for _=1 to iterations do sink := f (Sys.opaque_identity b) done;
+ let after_alloc = Gc.allocated_bytes () in
+ let after_wall = Unix.gettimeofday () in
+ let after_cpu = Sys.time () in
+ let after_gc = Gc.quick_stat () in
+ if !sink <> oracle text || Buffer.contents b <> text then failwith "timed output mismatch";
+ Printf.printf "{\"kind\":\"measurement\",\"stratum\":%S,\"role\":%S,\"phase\":%d,\"input_bytes\":%d,\"iterations\":%d,\"allocation_counter_before\":%.0f,\"allocation_counter_after\":%.0f,\"allocation_delta_bytes\":%.0f,\"wall_before_s\":%.9f,\"wall_after_s\":%.9f,\"wall_delta_s\":%.9f,\"cpu_before_s\":%.9f,\"cpu_after_s\":%.9f,\"cpu_delta_s\":%.9f,\"minor_collections_delta\":%d,\"major_collections_delta\":%d}\n%!"
+ name role phase (String.length text) iterations before_alloc after_alloc (after_alloc-.before_alloc) before_wall after_wall (after_wall-.before_wall) before_cpu after_cpu (after_cpu-.before_cpu) (after_gc.minor_collections-before_gc.minor_collections) (after_gc.major_collections-before_gc.major_collections)
+let () =
+ Printf.printf "{\"kind\":\"environment\",\"ocaml_version\":%S,\"word_size\":%d,\"backend\":\"native extracted helper only; MASC integration not run\",\"wall_clock\":\"Unix.gettimeofday not monotonic\",\"allocation\":\"Gc.allocated_bytes counter delta includes measurement overhead\"}\n%!" Sys.ocaml_version Sys.word_size;
+ List.iter (fun (n,t,i) ->
+   measure n t i "baseline" Baseline.frame_lines 1;
+   measure n t i "candidate" Candidate.frame_lines 2;
+   measure n t i "candidate" Candidate.frame_lines 3;
+   measure n t i "baseline" Baseline.frame_lines 4) strata

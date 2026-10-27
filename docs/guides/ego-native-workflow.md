@@ -125,6 +125,12 @@ in the same handler that rejects the blocked key, so the event is already there
 when `keyboard.type()` returns. The workflow reads the buffer before and after
 the step:
 
+- A dialog already open when the step starts: the SDK sends no key and emits no
+  event for it, so nothing would show the typing was swallowed once the dialog
+  closes. The workflow stops before any key with `inputReleased` still `true`,
+  and `failure.dialog` names the dialog. The check runs after the first buffer
+  read: a dialog that opened before the read is open here, and one that opens
+  after it leaves its event for the read after typing.
 - No opening event during the step and no open dialog: the step is recorded as
   completed with receipt `null`, `inputReleased` becomes `true` and the workflow
   continues.

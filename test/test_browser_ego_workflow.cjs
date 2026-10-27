@@ -170,7 +170,8 @@ test('lost key input preserves unconfirmed release without guessing which keys t
  }
 });
 test('receipt-less holding input keeps release uncertain on dialog or failed observation',async()=>{
- for (const method of ['keyboard.type','keyboard.press','keyboard.paste','press','click','dblclick','mouse.click','dragAndDrop']) {
+ // keyboard.type is judged by the dialog events it leaves and refuses an open dialog before typing; the typing tests cover it.
+ for (const method of ['keyboard.press','keyboard.paste','press','click','dblclick','mouse.click','dragAndDrop']) {
   for (const observationFails of [false,true]) {
    const f=fixture();const input=async()=>{};
    f.page.keyboard={type:input,press:input,paste:input};f.page.mouse={click:input};
@@ -227,11 +228,12 @@ const pageLoaded={method:'Page.loadEventFired',params:{timestamp:1}};
 // Values built inside the script's vm context have that realm's prototypes, which deepStrictEqual rejects.
 const plain=value=>JSON.parse(JSON.stringify(value));
 // `before` is what the event buffer holds when the step starts, `after` what typing adds.
-function typingFixture({before=[],after=[],dialog=null}={}) {
- const f=fixture();const reads=[before,after];let typed=0,later=0;
+// `openBefore` is the dialog page.info shows once the buffer was read, `dialog` the one it shows after typing.
+function typingFixture({before=[],after=[],dialog=null,openBefore=null}={}) {
+ const f=fixture();const reads=[before,after];const infos=[openBefore];let typed=0,later=0;
  f.page.events=async()=>reads.shift()??[];
  f.page.keyboard={async type(){typed++;}};
- f.page.info=async()=>({dialog});
+ f.page.info=async()=>({dialog:infos.length>0?infos.shift():dialog});
  f.page.fill=async()=>{later++;};
  return {...f,counts:()=>({typed,later})};
 }
@@ -260,6 +262,43 @@ test('a dialog closed before page.info still stops typing because its open event
  assert.equal(result.failure.method,'keyboard.type');
  assert.equal(Object.hasOwn(result.failure,'dialog'),false);
  assert.match(result.failure.message,/already closed/);
+});
+// The SDK sends no key and emits no event when a dialog is already open, so nothing marks the typing
+// as swallowed once that dialog closes. The step has to refuse before it types.
+test('a dialog already open at the start refuses typing before any key, whether or not its open event was read',async()=>{
+ for (const [name,before] of [['event still buffered',[dialogOpening]],['event read by an earlier step',[]]]) {
+  const t=typingFixture({before,openBefore:dialogOpening.params});
+  const result=await run(t.page,request(typeThenFill));
+  assert.deepEqual(t.counts(),{typed:0,later:0},name);
+  assert.equal(result.inputReleased,true,name);assert.equal(result.effectStarted,true,name);
+  assert.equal(result.completedEffect,false,name);assert.equal(result.completed.length,0,name);
+  assert.equal(result.failure.index,0,name);assert.equal(result.failure.method,'keyboard.type',name);
+  assert.equal(result.failure.dialog.message,'keep typing?',name);
+  assert.match(result.failure.message,/answer it before typing/,name);
+ }
+});
+test('the dialog check follows the event read, so a dialog that opened just before the read is still seen',async()=>{
+ const t=typingFixture();let opened=false;
+ t.page.events=(reads=>async()=>{opened=true;return reads.shift()??[];})([[dialogOpening],[]]);
+ t.page.info=async()=>({dialog:opened?dialogOpening.params:null});
+ const result=await run(t.page,request(typeThenFill));
+ assert.deepEqual(t.counts(),{typed:0,later:0});
+ assert.equal(result.inputReleased,true);assert.equal(result.failure.method,'keyboard.type');
+ assert.match(result.failure.message,/answer it before typing/);
+});
+test('a dialog that was closed again before the check does not refuse typing',async()=>{
+ const t=typingFixture({before:[dialogOpening,dialogClosed],after:[pageLoaded]});
+ const result=await run(t.page,request(typeThenFill));
+ assert.equal(result.failure,null);assert.equal(result.inputReleased,true);
+ assert.deepEqual(t.counts(),{typed:1,later:1});
+});
+test('a failed dialog check before typing types nothing and leaves the input released',async()=>{
+ const t=typingFixture();
+ t.page.info=async()=>{throw Error('info lost');};
+ const result=await run(t.page,request(typeThenFill));
+ assert.deepEqual(t.counts(),{typed:0,later:0});
+ assert.equal(result.inputReleased,true);assert.equal(result.effectStarted,true);
+ assert.equal(result.failure.method,'keyboard.type');assert.match(result.failure.message,/info lost/);
 });
 test('a dialog-open event from before the typing step neither stops it nor gets lost',async()=>{
  const t=typingFixture({before:[dialogOpening,dialogClosed]});

@@ -101,7 +101,7 @@ Neither means fully supported.
 | `Page.keyboard.down` | None | Held-key state and cancellation/release settlement |
 | `Page.keyboard.up` | None | Explicit release and uncertain-key recovery |
 | `Page.keyboard.press` | Interaction chord; workflow forwards native delay | New option forms require real SDK and installed-route proof |
-| `Page.keyboard.type` | Workflow forwards native text/delay. The SDK's void result is judged by the Page's `Page.javascriptDialogOpening` events: none during the step completes it, one stops it with input release unconfirmed, preserving the earlier completed prefix and requiring private operator recovery | Measured on Ego Lite 0.6.1.11 only; cross-origin frame dialogs and `beforeunload` are not measured; installed-route proof remains open |
+| `Page.keyboard.type` | Workflow forwards native text/delay. The SDK's void result is judged by the Page's `Page.javascriptDialogOpening` events: a dialog already open at the start refuses it before any key, none during the step completes it, one stops it with input release unconfirmed, preserving the earlier completed prefix and requiring private operator recovery | Measured on Ego Lite 0.6.1.11 only; cross-origin frame dialogs and `beforeunload` are not measured; installed-route proof remains open |
 | `Page.keyboard.insertText` | Native workflow | Real SDK primitive proof; installed MASC/Keeper route unverified |
 | `Page.keyboard.paste` | Native workflow plain/rich paste | Real trusted paste proof; installed MASC/Keeper route unverified |
 | `FileChooser.isMultiple` | Internal chooser validation | Explicit chooser handle observation |
@@ -209,6 +209,6 @@ This records a human check/reset assertion for the exact connected Space and
 pending generation, not an SDK cleanup acknowledgement. It does not provide native release acknowledgement, prove login/visible UI, or
 persist pending input through worker replacement. Receipt-less holding workflows
 stop without inferring release from Page.info. The exception is `keyboard.type`,
-which completes when the Page recorded no dialog-open event during the step.
+which completes when no dialog was open before it and the Page recorded no dialog-open event during the step.
 Current exact-source build/test
 receipts must be checked separately from installed Keeper and real SDK proof.

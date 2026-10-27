@@ -43,7 +43,9 @@ this package, because that server answers every native host poll with HTTP 503
 setup step above writes the declaration after the check. With
 `--no-browser-addon` the check applies.
 
-The worker exports `browser_command` through ordinary Add-on discovery. The host
+The worker exports `browser_command` to its host only. A browser service's
+exports are not public tools, so Keeper tool lists and MCP `tools/list` leave
+them out and several browser installations may export the same name. The host
 supplies verified caller context through the private control port. The package
 selects `validate_input` and `validate_output`; an installation can override
 `tool_hooks`, including `[]` to disable these optional checks. Identity,

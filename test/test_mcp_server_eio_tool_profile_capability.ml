@@ -216,6 +216,25 @@ let test_full_profile_admission_uses_catalog_direct_call_policy () =
     (!hidden_disallowed > 0)
 ;;
 
+(* A browser Add-on's own export is host-only, so the browser host tools are
+   what an MCP caller finds in an ordinary tools/list. *)
+let test_full_profile_lists_the_browser_host_tools () =
+  let state =
+    Masc.Mcp_server.For_testing.create_state
+      ~base_path:(Filename.get_temp_dir_name ())
+  in
+  let listed =
+    Masc.Mcp_server_eio_tool_profile.tool_schemas_for_profile
+      state
+      Masc.Mcp_server_eio_tool_profile.Full
+    |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
+  in
+  List.iter
+    (fun name -> check bool (name ^ " is listed without include_hidden") true (List.mem name listed))
+    [ "masc_browser_tabs"; "masc_browser_read"; "masc_browser_session"; "masc_browser_goto"
+    ; "masc_browser_act"; "masc_browser_interact"; "masc_browser_instruct" ]
+;;
+
 let () =
   run
     "mcp-server-eio-tool-profile-capability"
@@ -244,6 +263,10 @@ let () =
             "full-profile-admission-uses-catalog-direct-call-policy"
             `Quick
             test_full_profile_admission_uses_catalog_direct_call_policy
+        ; test_case
+            "full-profile-lists-the-browser-host-tools"
+            `Quick
+            test_full_profile_lists_the_browser_host_tools
         ] )
     ]
 ;;

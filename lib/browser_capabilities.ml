@@ -155,7 +155,14 @@ let support backend operation = match backend with
       | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi | Browser_lane.Ego_task_space) | Safari_unavailable ->
           Unsupported "Connected operator browsers do not expose an owned session lifecycle.")
     | Read_text -> read backend (invoke ~mode:"text" Read) []
-    | Read_html -> Unsupported "Document-source adapters exist, but BrowserRead exposes no HTML/source mode."
+    | Read_html -> (match backend with
+      | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko ->
+          conditional ~mode:"html" Read
+            [observed;"Explicit tabId, top document only; maxChars does not apply. The source is never cut: when the JSON reply would pass 1 MiB, html is null with htmlComplete false."]
+      | Connected Browser_lane.Ego_task_space ->
+          Unsupported "An ego connection does not return document source; read text, elements or a snapshot instead."
+      | Owned_chromium -> Unsupported "Stagehand does not return document source; read text or elements instead."
+      | Safari_unavailable -> missing)
     | Read_elements -> read backend (invoke ~mode:"elements" Read) []
     | Read_scene -> read backend (invoke ~mode:"scene" Read) [observed;"Explicit tabId; viewport scene may be truncated. Geometry is not an occlusion guarantee."]
     | Read_regions -> read backend (invoke ~mode:"regions" Read) [observed;"Explicit tabId; copy observed region references for scoped reads."]
@@ -167,7 +174,7 @@ let support backend operation = match backend with
           Unsupported "Only an ego connection returns its own accessibility snapshot; read scene or elements instead."
       | Safari_unavailable -> missing)
     | Screenshot -> read backend (invoke ~mode:"screenshot" Read)
-        [observed;"Requires an owning Keeper and explicit tabId; captures the viewport, not the whole document."]
+        [observed;"Requires explicit tabId; captures the viewport, not the whole document. A Keeper gets a workspace artifact; another caller gets the PNG as an image block."]
     | Click -> (match backend with
       | Connected Browser_lane.Web_extension -> conditional ~action:"click" Interact
           [observed;target;"Uses DOM click; trusted pointerdown/mousedown is not provided."]

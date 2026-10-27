@@ -207,7 +207,7 @@ Keeper-facing names use CamelCase; the MCP registration names use `masc_browser_
 | Keeper tool | MCP name | Source and behavior |
 | --- | --- | --- |
 | `BrowserTabs` | `masc_browser_tabs` | All three: list tabs and discover the live connection identity |
-| `BrowserRead` | `masc_browser_read` | All three: text, visible elements, scene or regions, or a viewport PNG. Frames, dialogs and downloads: automation |
+| `BrowserRead` | `masc_browser_read` | All three: text, visible elements, scene or regions, or a viewport PNG. Document source (`mode = "html"`, explicit tab, `html: null` when the reply would pass 1 MiB): live extension or BiDi, and automation. Frames, dialogs and downloads: automation |
 | `BrowserInteract` | `masc_browser_interact` | Click, fill, scroll and other input in one explicit tab; native hover/drag/keyboard and zoom depend on transport capabilities |
 | `BrowserSession` | `masc_browser_session` | Automation or stagehand: open, close, or check the session |
 | `BrowserGoto` | `masc_browser_goto` | Automation or stagehand: navigate to an HTTP(S) URL |

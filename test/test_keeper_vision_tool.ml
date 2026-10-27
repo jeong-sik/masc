@@ -2407,6 +2407,22 @@ let test_browser_screenshot_reaches_vision_reader () =
           verify_pointer_receipt "automation" data;
           assert (Yojson.Safe.Util.member "clientId" data = `Null);
           assert (Yojson.Safe.Util.member "transport" data = `Null);
+          (* A caller with no Keeper workspace gets the observation as text and
+             the checked PNG as an image block, and the observation without
+             the bytes. *)
+          (match Masc.Browser_addon_tools.handle ~config ~access:Masc.Lane_addon_sources.Operator_configuration
+              ~principal:Lane_addon_call_context.Operator ~reserved:[] ~keeper_name:None
+              ~tool:Masc.Browser_capabilities.Read ~tool_name:"masc_browser_read" ~start_time:(Tool_timing.start ())
+              (`Assoc ["lane",`String "automation";"mode",`String "screenshot";"tabId",`Int 73]) with
+           | Tool_result.Completed {content_blocks=Some [Agent_core.Types.Text text;
+               Agent_core.Types.Image {media_type="image/png";data=image;source_type=Base64}];data=observed;_} ->
+               assert (image=encoded);
+               assert (Yojson.Safe.from_string text=observed);
+               assert (Yojson.Safe.Util.member "data" observed=`Null);
+               assert (Yojson.Safe.Util.member "viewport" observed=viewport);
+               assert (Yojson.Safe.Util.(observed |> member "browserSelection" |> member "lane")=`String "automation");
+               assert (assoc_string "url" observed="https://example.org/form")
+           | Tool_result.Completed _|Deferred _|Failed _ -> failwith "a screenshot without a Keeper did not return its image block");
           let handle = assoc_string "artifact" data in
           let root_dir = Vt.vision_store_dir ~base_path ~keeper_name:meta.name () in
           let frames_dir = Vt.frames_dir ~base_path ~keeper_name:meta.name () in

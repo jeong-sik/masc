@@ -211,6 +211,10 @@ let keeper_shard_permission required_permission =
 
 let keeper_shard_read = keeper_shard_permission Masc_domain.CanReadState
 let keeper_shard_write = keeper_shard_permission Masc_domain.CanBroadcast
+(* A Keeper shard tool that MCP callers also find in tools/list. Its
+   execution policy stays descriptor-owned, as for the hidden ones. *)
+let public_keeper_shard_read = default_metadata ~required_permission:Masc_domain.CanReadState
+let public_keeper_shard_write = default_metadata ~required_permission:Masc_domain.CanBroadcast
 let keeper_shard_add_task = keeper_shard_permission Masc_domain.CanAddTask
 (* ================================================================ *)
 (* Explicit metadata registry                                       *)
@@ -575,13 +579,15 @@ let explicit_metadata : (string * metadata) list =
        needed it while an operator could still call it. *)
     ("keeper_analyze_image", keeper_shard_read);
     ("keeper_image_read", keeper_shard_read);
-    ("masc_browser_tabs", keeper_shard_read);
-    ("masc_browser_read", keeper_shard_read);
-    ("masc_browser_session", keeper_shard_write);
-    ("masc_browser_goto", keeper_shard_write);
-    ("masc_browser_act", keeper_shard_write);
-    ("masc_browser_interact", keeper_shard_write);
-    ("masc_browser_instruct", keeper_shard_write);
+    (* The browser host tools are the browser surface for MCP callers too;
+       a browser Add-on's own export is called only by this host. *)
+    ("masc_browser_tabs", public_keeper_shard_read);
+    ("masc_browser_read", public_keeper_shard_read);
+    ("masc_browser_session", public_keeper_shard_write);
+    ("masc_browser_goto", public_keeper_shard_write);
+    ("masc_browser_act", public_keeper_shard_write);
+    ("masc_browser_interact", public_keeper_shard_write);
+    ("masc_browser_instruct", public_keeper_shard_write);
     ("masc_web_search", keeper_shard_read);
     ("masc_web_fetch", keeper_shard_read);
     ("masc_file_list", keeper_shard_read);

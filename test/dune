@@ -6649,6 +6649,13 @@
        (source_tree ../addons/keeper-librarian) ../addons/protocol.py ../addons/exact_worker.py)
  (libraries masc_test_deps masc.server exact_output_fixture mcp_protocol masc.masc_random_id))
 
+; Not a test: prints one Librarian pass's allocation and stored bytes per
+; already-read history size. Run by hand from _build/default/test.
+(executable
+ (name bench_keeper_librarian_pass)
+ (modules bench_keeper_librarian_pass)
+ (libraries masc_test_deps masc.server exact_output_fixture mcp_protocol masc.masc_random_id))
+
 (test
  (name test_keeper_addon_deferred_runtime)
  (modules test_keeper_addon_deferred_runtime)

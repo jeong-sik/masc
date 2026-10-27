@@ -18,7 +18,9 @@ after `scripts/install-local-build.sh`:
 
 1. It reads `/health?full=1` on loopback. Only a server of this workspace is
    asked to stop; another workspace, a non-MASC listener, or a lease owner
-   that does not answer on the port is refused and left running.
+   that does not answer on the port is refused and left running. A `--host`
+   that 127.0.0.1 cannot reach is refused too, because restart could not see
+   that replacement answer.
 2. It signs in as the local operator and sends one SIGTERM to the lease
    owner it identified with `F_GETLK`, the same request `masc setup` makes.
    Nothing is forced down.
@@ -26,7 +28,9 @@ after `scripts/install-local-build.sh`:
    with its output appended to `<base>/.masc/logs/masc-start-<UTC time>.log`
    (`--log` chooses another file). That process sleeps on the lease until
    the previous owner exits and then boots as usual, so no other process can
-   take the workspace in between.
+   take the workspace in between. Only one process waits for a workspace: a
+   second replacement started meanwhile exits at once, naming the first.
+   When no server was running, restart starts plain `masc start` instead.
 4. It waits until `/health/ready` answers 200 with the new process's `pid`,
    then prints how long it took. Ctrl-C stops the waiting, not the new server.
 

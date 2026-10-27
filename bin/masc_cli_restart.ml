@@ -6,6 +6,7 @@ type incumbent =
   | This_workspace of { version : string; pid : int option }
 
 type refusal =
+  | Host_not_on_loopback of string
   | Other_workspace of string
   | Port_held_by_unknown_process
   | Owner_without_answer
@@ -18,14 +19,36 @@ type watched =
   | Replacement_ready
   | Replacement_exited of Unix.process_status option
 
-(* How often the replacement's readiness answer is read again. It only bounds
-   how late a ready server is noticed; the watch itself has no deadline. *)
+(* How often the replacement's readiness answer is read again. Each read uses
+   its own client pool (see [fresh_get]), so this alone bounds how late a
+   ready server is noticed; the watch itself has no deadline. *)
 let readiness_poll_interval_s = 0.25
 
 (* How much of the replacement's log is shown when it exits before ready. *)
 let failure_log_lines = 20
 
 let loopback_url port path = Printf.sprintf "http://127.0.0.1:%d%s" port path
+
+(* Restart reaches the running server and its replacement on 127.0.0.1, as
+   setup does, so a replacement bound anywhere else would never be seen. *)
+let reachable_on_loopback host =
+  String.equal host "localhost"
+  ||
+  match Unix.inet_addr_of_string host with
+  | address -> address = Unix.inet_addr_loopback || address = Unix.inet_addr_any
+  | exception Failure _ -> false
+
+(* A shared client pool refuses a host for a while after one failed connect,
+   and the gap between the old listener closing and the new one binding
+   always produces one. A pool per request to the replacement keeps that
+   from delaying or hiding its answers. *)
+let fresh_get ~clock ~port path =
+  match Eio_context.get_env_opt () with
+  | None -> Error "no Eio environment for the request"
+  | Some env ->
+    Eio.Switch.run (fun sw ->
+      Masc_http_client.with_scoped_pool ~sw ~env (fun () ->
+        Masc_http_client.get_sync ~clock ~headers:[] ~url:(loopback_url port path) ()))
 
 let json_field name body =
   match Yojson.Safe.from_string body with
@@ -74,6 +97,10 @@ let observe ~clock ~run_dir ~base_path ~port =
      | Error error -> Error (Owner_unverifiable (stop_error_message error)))
 
 let refusal_message ~base_path ~port = function
+  | Host_not_on_loopback host ->
+    Printf.sprintf "Restart checks and stops servers on 127.0.0.1, so it cannot watch a \
+                    replacement bound to --host %s. Nothing was stopped or started; use \
+                    `masc start --host %s` for that address." host host
   | Other_workspace other ->
     Printf.sprintf "Port %d serves another workspace (%s). Nothing was stopped or started." port other
   | Port_held_by_unknown_process ->
@@ -89,8 +116,8 @@ let refusal_message ~base_path ~port = function
   | Stop_refused error ->
     Printf.sprintf "The stop request was not sent: %s." (stop_error_message error)
   | Log_unopenable { path; reason } ->
-    Printf.sprintf "The log file %s could not be opened (%s). Nothing was stopped or started."
-      path reason
+    Printf.sprintf "The log file %s could not be opened (%s). A server named above as asked \
+                    to stop is shutting down; start one with `masc start`." path reason
   | Spawn_failed reason ->
     Printf.sprintf "The replacement could not be started (%s). A server named above as asked \
                     to stop is shutting down; start one with `masc start`." reason
@@ -120,10 +147,18 @@ let log_tail path =
     let drop = max 0 (List.length lines - failure_log_lines) in
     List.filteri (fun index _ -> index >= drop) lines
 
+(* Unix.process_status carries OCaml's own signal numbers, not the host's. *)
+let signal_name signal =
+  List.assoc_opt signal
+    [ Sys.sigterm, "SIGTERM"; Sys.sigkill, "SIGKILL"; Sys.sigint, "SIGINT"
+    ; Sys.sighup, "SIGHUP"; Sys.sigsegv, "SIGSEGV"; Sys.sigabrt, "SIGABRT"
+    ; Sys.sigbus, "SIGBUS"; Sys.sigstop, "SIGSTOP"; Sys.sigtstp, "SIGTSTP" ]
+  |> Option.value ~default:(Printf.sprintf "signal %d" signal)
+
 let exit_description = function
   | Some (Unix.WEXITED code) -> Printf.sprintf "exited with status %d" code
-  | Some (Unix.WSIGNALED signal) -> Printf.sprintf "was killed by signal %d" signal
-  | Some (Unix.WSTOPPED signal) -> Printf.sprintf "was stopped by signal %d" signal
+  | Some (Unix.WSIGNALED signal) -> Printf.sprintf "was killed by %s" (signal_name signal)
+  | Some (Unix.WSTOPPED signal) -> Printf.sprintf "was stopped by %s" (signal_name signal)
   | None -> "exited"
 
 (* What a readiness answer that is not the replacement's 200 says, so the wait
@@ -142,9 +177,7 @@ let describe_answer ~child_pid = function
    counts once it carries the replacement's own pid. *)
 let watch ~clock ~port (child : Posix_spawn_detached.t) =
   let rec ready last =
-    let answer =
-      Masc_http_client.get_sync ~clock ~headers:[] ~url:(loopback_url port "/health/ready") ()
-    in
+    let answer = fresh_get ~clock ~port "/health/ready" in
     match answer with
     | Ok (200, body) when answered_pid body = Some child.pid -> Replacement_ready
     | Ok _ | Error _ ->
@@ -160,7 +193,7 @@ let watch ~clock ~port (child : Posix_spawn_detached.t) =
     (fun () -> ready None)
 
 let build_summary ~clock ~port =
-  match Masc_http_client.get_sync ~clock ~headers:[] ~url:(loopback_url port "/health") () with
+  match fresh_get ~clock ~port "/health" with
   | Ok (200, body) ->
     (match json_field "build" body with
      | Some (`Assoc build) ->
@@ -172,60 +205,74 @@ let build_summary ~clock ~port =
      | _ -> "masc")
   | Ok _ | Error _ -> "masc"
 
-let run ~base_path ~port ~host ~log_path ~agent ~login =
-  let base_path = Unix.realpath base_path in
-  let run_dir = (Host_config.host ()).base_path_lease_dir in
-  let log_path = Option.value log_path ~default:(default_log_path ~base_path) in
+let replace ~sw ~clock ~run_dir ~base_path ~port ~host ~log_path ~agent ~login =
   let ( let* ) = Result.bind in
-  let outcome =
-    Masc_cli_owner_upgrade.with_http (fun sw clock ->
-      let* incumbent = observe ~clock ~run_dir ~base_path ~port in
-      (* Opened before the stop request, so a log that cannot be written stops
-         restart while the running server is still untouched. *)
-      let* log_fd = open_log log_path in
-      let argv =
-        [ Sys.executable_name; "start"; "--wait-for-previous-owner"
-        ; "--base-path"; base_path; "--port"; string_of_int port; "--host"; host ]
+  let* () = if reachable_on_loopback host then Ok () else Error (Host_not_on_loopback host) in
+  let* incumbent = observe ~clock ~run_dir ~base_path ~port in
+  let* wait_flag =
+    match incumbent with
+    | Nothing_running ->
+      (* Nobody was asked to stop, so a lease someone takes meanwhile is a
+         real owner: plain start refuses it instead of waiting forever. *)
+      Printf.printf "No server holds %s; starting one on port %d.\n%!" base_path port;
+      Ok []
+    | This_workspace { version; pid } ->
+      let* () =
+        Masc_cli_owner_upgrade.with_selected_owner ~sw ~clock ~base_path ~port ~agent
+          ~expected_version:version ~login Upgrade.request_termination
+        |> Result.map_error (fun error -> Stop_refused error)
       in
-      let* child =
-        Fun.protect ~finally:(fun () -> Unix.close log_fd) (fun () ->
-          let* () =
-            match incumbent with
-            | Nothing_running ->
-              Printf.printf "No server holds %s; starting one on port %d.\n%!" base_path port;
-              Ok ()
-            | This_workspace { version; pid } ->
-              let* () =
-                Masc_cli_owner_upgrade.with_selected_owner ~sw ~clock ~base_path ~port ~agent
-                  ~expected_version:version ~login Upgrade.request_termination
-                |> Result.map_error (fun error -> Stop_refused error)
-              in
-              let named = match pid with Some pid -> Printf.sprintf " (pid %d)" pid | None -> "" in
-              Printf.printf "Asked masc %s%s on port %d to stop.\n%!" version named port;
-              Ok ()
-          in
-          Posix_spawn_detached.spawn ~sw ~argv ~env:(Unix.environment ()) ~output:log_fd
-          |> Result.map_error (fun reason -> Spawn_failed reason))
-      in
-      let pid = child.Posix_spawn_detached.pid in
-      Printf.printf "Started pid %d. Log: %s\n\
-                     Waiting for it to become ready; Ctrl-C stops watching, not the server.\n%!"
-        pid log_path;
-      let started_at = Eio.Time.now clock in
-      match watch ~clock ~port child with
-      | Replacement_ready ->
-        Printf.printf "Ready after %.1f s: %s, pid %d, serving %s on port %d.\n%!"
-          (Eio.Time.now clock -. started_at) (build_summary ~clock ~port)
-          pid base_path port;
-        Ok 0
-      | Replacement_exited status ->
-        Printf.eprintf "pid %d %s before it was ready. Last lines of %s:\n%!"
-          pid (exit_description status) log_path;
-        List.iter (Printf.eprintf "  %s\n") (log_tail log_path);
-        Ok 1)
+      let named = match pid with Some pid -> Printf.sprintf " (pid %d)" pid | None -> "" in
+      Printf.printf "Asked masc %s%s on port %d to stop.\n%!" version named port;
+      Ok [ "--wait-for-previous-owner" ]
   in
-  match outcome with
-  | Ok code -> code
-  | Error refusal ->
-    prerr_endline (refusal_message ~base_path ~port refusal);
+  let argv =
+    (Sys.executable_name :: "start" :: wait_flag)
+    @ [ "--base-path"; base_path; "--port"; string_of_int port; "--host"; host ]
+  in
+  (* Opened only now, so a refusal above leaves no empty log behind. *)
+  let* log_fd = open_log log_path in
+  let* child =
+    Fun.protect ~finally:(fun () -> Unix.close log_fd) (fun () ->
+      Posix_spawn_detached.spawn ~sw ~argv ~env:(Unix.environment ()) ~output:log_fd
+      |> Result.map_error (fun reason -> Spawn_failed reason))
+  in
+  let pid = child.Posix_spawn_detached.pid in
+  Printf.printf "Started pid %d. Log: %s\n\
+                 Waiting for it to become ready; Ctrl-C stops watching, not the server.\n%!"
+    pid log_path;
+  let started_at = Eio.Time.now clock in
+  match watch ~clock ~port child with
+  | Replacement_ready ->
+    Printf.printf "Ready after %.1f s: %s, pid %d, serving %s on port %d.\n%!"
+      (Eio.Time.now clock -. started_at) (build_summary ~clock ~port)
+      pid base_path port;
+    Ok 0
+  | Replacement_exited status ->
+    Printf.eprintf "pid %d %s before it was ready. Last lines of %s:\n%!"
+      pid (exit_description status) log_path;
+    List.iter (Printf.eprintf "  %s\n") (log_tail log_path);
+    Ok 1
+
+let run ~base_path ~port ~host ~log_path ~agent ~login =
+  match Unix.realpath base_path with
+  | exception Unix.Unix_error (error, _, _) ->
+    Printf.eprintf "Workspace %s could not be resolved (%s). Nothing was stopped or started.\n"
+      base_path (Unix.error_message error);
     1
+  | base_path ->
+    let run_dir = (Host_config.host ()).base_path_lease_dir in
+    let log_path = Option.value log_path ~default:(default_log_path ~base_path) in
+    (match
+       Masc_cli_owner_upgrade.with_http (fun sw clock ->
+         replace ~sw ~clock ~run_dir ~base_path ~port ~host ~log_path ~agent ~login)
+     with
+     | Ok code -> code
+     | Error refusal ->
+       prerr_endline (refusal_message ~base_path ~port refusal);
+       1
+     | exception (Unix.Unix_error _ | Sys_error _ as error) ->
+       Printf.eprintf "Restart stopped: %s. A server named above as asked to stop is \
+                       shutting down; start one with `masc start`.\n"
+         (Printexc.to_string error);
+       1)

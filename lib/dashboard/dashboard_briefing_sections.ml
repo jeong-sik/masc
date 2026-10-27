@@ -208,7 +208,9 @@ let start_async_refresh ~actor_name ~config ~sw ~(clock : [> float Eio.Time.cloc
     | None -> sw
   in
   if should_start then
+    (* No request waits on this refresh (RFC-0204 3.4). *)
     Eio.Fiber.fork_daemon ~sw:refresh_sw (fun () ->
+        Pool_lane.with_background @@ fun () ->
         (try
            let clock =
              match Eio_context.get_clock_opt () with

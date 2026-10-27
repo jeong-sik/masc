@@ -160,7 +160,7 @@ val current : unit -> [ `Read | `Background ]
 
 - lane 은 Eio fiber key 에 둔다. 표시가 없으면 `Background` 다. `Executor_pool_ref` 의 `worker_marker` 와 같은 방식이다.
 - Eio 에서 fork 한 fiber 는 부모의 fiber key 를 물려받는다. 그래서 요청 중에 fork 한 fiber 도 `Read` 를 본다.
-- `with_read` 는 끝날 때(예외 포함) 그 요청을 끝난 것으로 표시한다. `current ()` 는 끝난 요청의 `Read` 를 `Background` 로 돌려준다. 요청보다 오래 사는 fiber(웹소켓 heartbeat 등)는 요청이 끝나는 순간부터 배경 풀을 쓴다. lane 은 풀에 제출하는 순간의 fiber 로 정한다. 요청이 기다리지 않는 일을 fork 하는 곳은 `with_background` 로 감싼다. 지금은 `Dashboard_cache` 의 SWR 재계산 한 곳이다(3.4).
+- `with_read` 는 끝날 때(예외 포함) 그 요청을 끝난 것으로 표시한다. `current ()` 는 끝난 요청의 `Read` 를 `Background` 로 돌려준다. 요청보다 오래 사는 fiber(웹소켓 heartbeat 등)는 요청이 끝나는 순간부터 배경 풀을 쓴다. lane 은 풀에 제출하는 순간의 fiber 로 정한다. 요청이 기다리지 않는 일을 fork 하는 곳은 `with_background` 로 감싼다. GET 이 닿는 곳의 목록은 3.4 에 있다.
 
 ### 3.2 표시는 요청 입구에서 한다
 
@@ -186,9 +186,10 @@ POST·PUT·DELETE 와 `/mcp` 도구 호출은 `Background` 그대로다. 무거�
 
 `Dashboard_cache` 는 값이 없고 다른 fiber 가 계산 중이면 0.25초 간격으로 확인하며 기다린다(`dashboard_cache.ml` `Wait`). 그 계산을 배경 refresh 루프가 시작했다면 읽기는 결국 배경 풀을 기다린다. 풀 job 안에서 기다리면 그동안 worker 자리도 차지한다.
 
-- 캐시 계산의 lane 은 그 값을 기다리는 쪽이 정한다. 캐시가 비어 읽기가 직접 계산하면(`Compute`) 그 계산은 `Read` 다. 읽기가 옛 값으로 바로 답하고 fork 하는 SWR 재계산은 기다리는 요청이 없으니 `Background` 다. fork 하는 곳 한 곳을 `Pool_lane.with_background` 로 감싼다. 이 재계산은 계산 예산이 8~120초라, `Read` 로 두면 읽기 풀 1~2 domain 을 다 쓸 수 있다.
+- 캐시 계산의 lane 은 그 값을 기다리는 쪽이 정한다. 캐시가 비어 읽기가 직접 계산하면(`Compute`) 그 계산은 `Read` 다. 읽기가 옛 값으로 바로 답하고 fork 하는 SWR 재계산은 기다리는 요청이 없으니 `Background` 다. 이 재계산은 계산 예산이 8~120초라, `Read` 로 두면 읽기 풀 1~2 domain 을 다 쓸 수 있다.
+- GET 이 닿는 배경 갱신 fork 는 일곱 곳이고, 모두 fork 한 fiber 안을 `Pool_lane.with_background` 로 감싼다: `Dashboard_cache` SWR, `Operator_control_snapshot_cache` SWR, `Server_dashboard_http_namespace_truth` shell 갱신, `Server_dashboard_http_runtime_info` 의 git 갱신과 runtime probe 갱신, `Dashboard_briefing_sections` 비동기 갱신, `Runtime_provider_usage_read` 배경 읽기. fork 가 안 돼 그 자리에서 계산하는 경로는 호출자가 기다리므로 감싸지 않는다. 새 배경 갱신 fork 를 만들면 같이 감싼다. 빠뜨리면 그 일은 읽기 풀에서 돌고, `pool_wait.read.run` 의 긴 꼬리로 보인다.
 - 남는 경우: 키가 아예 없을 때(부팅 직후, eviction, invalidate 뒤) 배경 fiber 가 시작한 계산을 읽기가 `Wait` 으로 기다리면, 읽기는 배경 풀의 계산을 기다린다. 옛 값이 있는 동안에는 생기지 않는다.
-- 다른 fiber 의 계산을 기다리는 일은 풀 job 밖, 요청 fiber 에서 한다. L4 에서 `run_dashboard_compute` 안에서 캐시를 기다리는 경로를 모두 찾아, 풀에 넣는 범위를 계산 부분으로 좁힌다.
+- 다른 fiber 의 계산을 기다리는 일은 풀 job 밖, 요청 fiber 에서 한다. L4b 에서 `run_dashboard_compute` 안에서 캐시를 기다리는 경로를 모두 찾아, 풀에 넣는 범위를 계산 부분으로 좁힌다.
 
 ### 3.5 domain 예산
 
@@ -267,10 +268,13 @@ goal `goal-read-api-p99-300-keepers-20261027` 의 판정 표다. 행마다 측�
 |---|---|---|
 | L1 | 이 RFC 와 측정 기록 | — |
 | L2 | `Pool_lane` 표시(풀 선택은 그대로), `Server_bootstrap_http` 의 GET/HEAD 표시(HTTP/1·HTTP/2), lane 별 풀 대기·실행 히스토그램을 `/health` 에 싣기 | 5.2 의 표시 시험, 히스토그램 구간 경계 |
-| L3 | 읽기 풀 생성과 domain 예산, 제출 함수 네 개의 풀 선택, 출처 모를 domain 찾기 | 5.1, 5.2 의 풀 선택 시험 |
-| L4 | `Dashboard_cache` 계산의 lane, 캐시 대기를 풀 job 밖으로 | 5.2 의 캐시 시험 |
+| L3 | 읽기 풀 생성과 domain 예산, 제출 함수 네 개의 풀 선택, 출처 모를 domain 찾기. L4a·L4b 와 같이 또는 그 뒤에 머지한다 | 5.1, 5.2 의 풀 선택 시험 |
+| L4a | 요청이 기다리지 않는 배경 갱신 fork 의 lane(3.4) | 5.2 의 캐시 시험 |
+| L4b | 캐시 대기를 풀 job 밖으로(3.4) | 풀 job 안의 대기가 읽기 worker 를 쥐지 않는다 |
 | L5 | codec 풀의 대기·실행 시간을 `/health` 에 싣고 그 값으로 크기 정하기 | 예산 합이 코어 수 이하 |
 | L6 | 수용 측정 기록, status 갱신 | 5.3 |
+
+L3 를 L4 보다 먼저 넣으면 안 된다. 읽기 풀은 1~2 domain 이다. 요청이 fork 한 SWR 재계산(계산 예산 8~120초)이 Read 로 그 domain 을 다 쓰면 다른 GET 이 그 뒤에 선다. 그 대기는 compute timeout 에 들어가 circuit 을 열 수 있다. 풀 job 안의 `Dashboard_cache` `Wait` 도 읽기 worker 를 붙잡는다. 앞의 것은 L4a(#46385), 뒤의 것은 L4b 가 고친다(#46374 독립 리뷰).
 
 계측(L2)을 맨 앞에 둔다. 1.1절 수정 후 측정에서 공유 풀은 6초 sample 동안 쉬고 있었고, main domain 의 lock 대기가 더 컸다. L2 로 운영 서버의 풀 대기를 한 시간 재서, 읽기의 풀 대기 p99 가 목표(100 ms)를 넘을 때 L3 이후를 진행한다. 넘지 않으면 L3 이후는 보류하고 main domain 쪽을 먼저 고친다.
 
@@ -279,4 +283,5 @@ goal `goal-read-api-p99-300-keepers-20261027` 의 판정 표다. 행마다 측�
 - **읽기끼리 기다린다.** 무거운 GET 이 읽기 풀 2개를 다 쓰면 가벼운 GET 이 기다린다. L2 계측으로 본다. 읽기 하나가 저장소 크기만큼 커지는 경우는 RFC-0372 로 고친다. domain 을 늘려서 덮지 않는다.
 - **포기된 요청이 자리를 잡고 있다.** HTTP/1 핸들러는 연결의 읽기 루프를 막고 돈다. 클라이언트가 timeout 으로 떠나도 서버 job 은 취소되지 않고 읽기 풀 자리를 끝까지 쓴다. 지금도 같은 일이 공유 풀에서 일어난다. 취소는 RFC-0372 의 요청 단위 기한과 같이 다룬다.
 - **배경 작업과 같은 lock.** 읽기 핸들러가 배경 작업이 쥔 store lock 을 기다리면 풀을 나눠도 느리다. 이때는 풀 대기는 짧고 핸들러 시간이 길게 나온다. L2 계측으로 구분한다.
+- **배경 갱신이 늦어진다.** L4a 뒤 SWR 재계산은 L3 로 줄어든 공유 풀에서 기다린다. `compute_under_timeout` 은 풀 대기 시간도 세므로, 공유 풀이 밀리면 재계산이 `Compute_timeout` 으로 끝나는 일이 는다. 그때 `Dashboard_cache` 는 옛 값을 TTL 의 6배(stale 3배 × backoff 2배) 동안 신선한 값으로 다시 쓴다. L3 전에도 같았지만 풀이 더 컸다. 배포 뒤 `pool_wait.background.wait` p99 를 재계산 예산과 비교한다.
 - **배경 처리량.** 배경 풀이 줄어든다. 지금은 domain 30개가 16코어를 나눠 쓰고 있어서 실제로 쓰는 코어 수는 줄지 않을 것으로 본다. Librarian pass 시간(`durable Librarian inventory validated: ... elapsed_ms=`)을 배포 전후로 비교한다.

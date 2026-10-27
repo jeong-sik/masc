@@ -44,10 +44,11 @@ type endpoint =
   { url : string
   ; protocol : endpoint_protocol
   ; capabilities : Capabilities.capabilities
+  ; discovery_timeout_s : float option
   }
 
-let endpoint ~protocol ~capabilities url =
-  { url = String.trim url; protocol; capabilities }
+let endpoint ?discovery_timeout_s ~protocol ~capabilities url =
+  { url = String.trim url; protocol; capabilities; discovery_timeout_s }
 ;;
 
 type probe_failure =
@@ -145,8 +146,8 @@ let parse_ollama_models tags_json =
   | Some _ -> Error "models must be a JSON list"
 ;;
 
-let probe_ollama_models ~sw ~net base_url =
-  match get_json ~sw ~net (base_url ^ "/api/tags") with
+let probe_ollama_models ~headers ?clock ?timeout_s ~sw ~net base_url =
+  match get_json ~headers ?clock ?timeout_s ~sw ~net (base_url ^ "/api/tags") with
   | Error detail -> Error detail
   | Ok tags_json -> parse_ollama_models tags_json
 ;;
@@ -159,7 +160,7 @@ let capabilities_with_props base props =
 
 (* ── Probe ───────────────────────────────────────────────── *)
 
-let probe_endpoint ~sw ~net (declared : endpoint) =
+let probe_endpoint ?(headers=[]) ?clock ?timeout_s ~sw ~net (declared : endpoint) =
   let base = declared.url in
   let failure phase detail =
     warn_probe_failure ~url:base ~phase detail;
@@ -187,7 +188,7 @@ let probe_endpoint ~sw ~net (declared : endpoint) =
   else (
     match declared.protocol with
     | Ollama_native ->
-      (match probe_ollama_models ~sw ~net base with
+      (match probe_ollama_models ~headers ?clock ?timeout_s ~sw ~net base with
        | Ok models -> status ~healthy:true ~models ~props:None ~slots:None ~failures:[]
        | Error detail ->
          status
@@ -198,10 +199,10 @@ let probe_endpoint ~sw ~net (declared : endpoint) =
            ~failures:[ failure "ollama_tags" detail ])
     | Openai_compatible ->
       let liveness =
-        match probe_liveness ~sw ~net (base ^ "/health") with
+        match probe_liveness ~headers ?clock ?timeout_s ~sw ~net (base ^ "/health") with
         | Ok () -> Ok ()
         | Error health_detail ->
-          (match probe_liveness ~sw ~net base with
+          (match probe_liveness ~headers ?clock ?timeout_s ~sw ~net base with
            | Ok () -> Ok ()
            | Error root_detail ->
              Error (Printf.sprintf "/health: %s; /: %s" health_detail root_detail))
@@ -216,7 +217,7 @@ let probe_endpoint ~sw ~net (declared : endpoint) =
            ~failures:[ failure "health" detail ]
        | Ok () ->
          let probe parse target =
-           match get_json ~sw ~net target with
+           match get_json ~headers ?clock ?timeout_s ~sw ~net target with
            | Error _ as error -> error
            | Ok json -> parse json
          in
@@ -320,10 +321,19 @@ let first_discovered_model_id_for_url (url : string) : string option =
     snap.model_endpoints
 ;;
 
-let discover ~sw ~net ~endpoints = Eio.Fiber.List.map (probe_endpoint ~sw ~net) endpoints
+let discover ?clock ?timeout_s ~headers ~sw ~net ~endpoints () =
+  Eio.Fiber.List.map
+    (fun declared ->
+       let effective_timeout_s =
+         match timeout_s with
+         | Some _ -> timeout_s
+         | None -> declared.discovery_timeout_s
+       in
+       probe_endpoint ~headers ?clock ?timeout_s:effective_timeout_s ~sw ~net declared)
+    endpoints
 
-let refresh_and_sync ~sw ~net ~endpoints =
-  let statuses = discover ~sw ~net ~endpoints in
+let refresh_and_sync ?clock ~sw ~net ~endpoints () =
+  let statuses = discover ?clock ~headers:[] ~sw ~net ~endpoints () in
   let healthy = List.filter (fun (s : endpoint_status) -> s.healthy) statuses in
   (* llama-server /props reports n_ctx as the per-slot context
      (server total / n_parallel), not the server total. Do NOT divide

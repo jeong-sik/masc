@@ -50,10 +50,14 @@ let resolve_effective_api_key_env
 ;;
 
 (** Complete a selected immutable runtime binding with per-call options and
-    explicitly supplied credentials. AGENT_CORE owns model/default selection. *)
+    explicitly supplied credentials. AGENT_CORE owns declared defaults; a
+    defaultless Ollama auto selection may use discovery at that exact endpoint. *)
 let make_binding_config
   ?temperature ?max_tokens ?system_prompt ?(api_key_env_overrides = [])
-  ?keep_alive ?num_ctx ~model_id (binding : Runtime_binding.t)
+  ?keep_alive ?num_ctx
+  ?(discover = fun ~headers ~timeout_s url ->
+    Discovery_cache.first_ollama_model_id_for_url ~timeout_s ~headers url)
+  ~model_id (binding : Runtime_binding.t)
   =
   let effective_api_key_env =
     resolve_effective_api_key_env ~api_key_env_overrides ~provider_name:binding.id () in
@@ -62,7 +66,21 @@ let make_binding_config
   if not binding.available || (binding.requires_api_key && api_key = "") then None
   else
     let model = match Runtime_model_resolve.model_selector_of_string model_id with
-      | Concrete model -> Some model | Auto -> None in
+      | Concrete model -> Some model
+      | Auto ->
+        (match Option.bind binding.default_model String_util.trim_nonempty with
+         | Some _ -> None
+         | None ->
+           (match binding.kind with
+            | Ollama ->
+              (match binding.discovery_timeout_s with
+               | Some timeout_s ->
+                 discover
+                   ~headers:(Llm_provider.Provider_config.auth_headers_for_kind_and_key
+                     ~kind:binding.kind ~api_key)
+                   ~timeout_s binding.base_url
+               | None -> None)
+            | Anthropic | Kimi | OpenAI_compat | Gemini | Glm -> None)) in
     match Runtime_binding.to_provider_config ?model binding with
     | Error _ -> None
     | Ok selected ->
@@ -92,6 +110,7 @@ let parse_model_string
   ?(api_key_env_overrides = [])
   ?keep_alive
   ?num_ctx
+  ?discover
   (s : string)
   : Llm_provider.Provider_config.t option
   =
@@ -103,5 +122,5 @@ let parse_model_string
       ~base_url model_id)
   | Registered { binding; model_id } ->
     make_binding_config ?temperature ?max_tokens ?system_prompt ~api_key_env_overrides
-      ?keep_alive ?num_ctx ~model_id binding
+      ?keep_alive ?num_ctx ?discover ~model_id binding
 ;;

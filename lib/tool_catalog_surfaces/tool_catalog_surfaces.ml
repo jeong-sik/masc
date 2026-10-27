@@ -114,6 +114,15 @@ let public_mcp_surface_tools =
   ; "masc_lane_evidence"
   ; "masc_lane_act"
   ; "masc_lane_action_status"
+  ; (* Browser host tools. A browser Add-on's export is host-only, so these
+       are how an MCP caller finds and drives a browser. *)
+    "masc_browser_tabs"
+  ; "masc_browser_read"
+  ; "masc_browser_session"
+  ; "masc_browser_goto"
+  ; "masc_browser_act"
+  ; "masc_browser_interact"
+  ; "masc_browser_instruct"
   ; (* Utility *)
     "masc_tool_help"
   ; "masc_check"

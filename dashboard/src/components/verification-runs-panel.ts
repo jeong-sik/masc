@@ -46,6 +46,8 @@ import { registerInternalAgentRefresh } from '../sse-store'
 export function verificationRunTone(status: VerificationRunStatusLabel): StatusBadgeTone {
   switch (status) {
     case 'running':
+    case 'execution_pending':
+    case 'execution_repair_required':
       return 'warn'
     case 'approved':
       return 'ok'
@@ -78,6 +80,10 @@ export function verificationRunLabel(status: VerificationRunStatusLabel): string
       return '판정 기반시설 오류'
     case 'not_reviewed':
       return '판정 없음'
+    case 'execution_pending':
+      return '원 실행 확인 대기'
+    case 'execution_repair_required':
+      return '원 실행 확인 필요'
     case 'commit_failed':
       return '커밋 실패'
     case 'raised':
@@ -178,7 +184,7 @@ export function VerificationRunsPanel() {
                       <${ThLeft}>태스크<//>
                       <${ThLeft}>생산자<//>
                       <${ThLeft}>판정 런타임<//>
-                      <${ThLeft}>소요<//>
+                      <${ThLeft}>관측 소요<//>
                       <${ThLeft}>시작<//>
                       <${ThLeft}>사유<//>
                     </tr>

@@ -394,6 +394,7 @@ type try_provider_ctx =
   ; cooperative_yield_probe : Runtime_agent.cooperative_yield_probe option
   ; agent_core_checkpoint : Agent_core.Checkpoint.t option
   ; on_request_evidence : (Request_observation.evidence -> unit) option
+  ; on_request_execution_ready : (runtime_id:string -> execution:Types_core.verifier_execution_reference -> (unit, string) result) option
   ; native_binding : Keeper_direct_native_continuation.binding option
   ; native_retired_history_cut : Keeper_direct_native_continuation.retired_history_cut option
   ; sw : Eio.Switch.t

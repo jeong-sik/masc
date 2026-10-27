@@ -126,6 +126,7 @@ Important provider fields:
 | `request_path` | string | Completion request path. Defaults from `kind`. |
 | `auth` | object | Credential mode. See below. |
 | `default_model` | string | Used when a caller selects the provider without a model. |
+| `discovery_timeout_s` | number | Optional positive finite total deadline for one discovery HTTP request, including its response body. No value is inferred from provider kind, URL, or connect timeout. |
 | `aliases` | string array | Catalog-local lookup names. They are not provider registry ids. |
 | `capabilities_base` | string | Provider preset from `Capabilities.capabilities_for_provider_label`. |
 | `capabilities` | object | Optional capability overrides. |

@@ -414,7 +414,10 @@ let retained_recovery_work config (work : pending_work list) =
        processing repeats the same strict discovery before any dispatch. *)
     Log.Misc.error "goal verifier original metadata unavailable: %s" (worker_detail error);
     work
-  | Ok goals ->
+  | Ok (goals, invalid) ->
+    List.iter (fun (request_id,error) ->
+      Log.Misc.error "goal verifier original metadata unavailable request_id=%s: %s"
+        request_id (worker_detail error)) invalid;
     List.fold_left (fun (work : pending_work list) (goal_id,originals) ->
       match originals with
       | Error error ->

@@ -24,6 +24,8 @@ type t = private
   ; requires_api_key : bool
   ; auth : auth
   ; default_model : string option
+  ; discovery_timeout_s : float option
+    (** Explicit total deadline for one discovery HTTP request. *)
   ; max_context : int option
   ; capabilities : capabilities
   ; available : bool

@@ -67,7 +67,7 @@ let review () = review_with request ()
 
 (* A reviewer that answers per slot and records the attempt order. *)
 let recording_reviewer calls behaviors =
-  fun ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
+  fun ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
     calls := !calls @ [ evaluator_runtime ];
     match List.assoc_opt evaluator_runtime behaviors with
     | Some behavior -> Result.map
@@ -186,7 +186,7 @@ let test_nested_runtime_retryable_attempt_survives_terminal_error () =
   with_lane_and_reviewer
     ~slots:(fun () -> Ok [ "slot-a" ])
     ~reviewer:
-      (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
+      (fun ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
            ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
            ~attempt_continuation:_ ~on_runtime_attempt_error () ->
          on_runtime_attempt_error
@@ -214,7 +214,7 @@ let test_nested_runtime_retryable_attempt_survives_terminal_error () =
 let test_nested_retry_does_not_invent_a_serving_outer_slot () =
   with_lane_and_reviewer
     ~slots:(fun () -> Ok ["outer-slot"])
-    ~reviewer:(fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
+    ~reviewer:(fun ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
         ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
         ~attempt_continuation:_ ~on_runtime_attempt_error () ->
       let failure = Agent_core.Error.Api
@@ -306,7 +306,7 @@ let account_refused =
    answers with the same error, which is the live shape; a slot whose walk
    reports nothing is classified from its terminal error alone. *)
 let failing_slot_reviewer ~reports_attempt error =
-  fun ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_
+  fun ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_
       ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error () ->
     if reports_attempt
     then
@@ -349,11 +349,12 @@ let test_a_provider_rest_retries_the_review_when_the_rest_ends () =
                    (label ^ ": the resting slot can review again")
                    [ resting_slot ]
                    retryable_runtimes
+               | CA.Execution_pending _ | CA.Execution_repair_required _
                | CA.Infrastructure_unavailable _ | CA.Commit_failed _ | CA.Raised _ ->
                  Alcotest.fail "a verdict-less review is recorded as Not_reviewed");
               (match CA.retry_request_of_stop_cause cause with
                | CA.Retry_requested -> ()
-               | CA.No_retry_requested ->
+               | CA.Observe_original_requested | CA.No_retry_requested ->
                  Alcotest.failf "%s: a provider rest with a stated reset stopped the review" label);
               Alcotest.(check (float 0.001))
                 (label ^ ": the retry waits until the stated reset, not the pulse")
@@ -369,6 +370,7 @@ let test_a_provider_rest_retries_the_review_when_the_rest_ends () =
                    (label ^ ": a candidate that already serves keeps the pulse")
                    60.0
                    (CA.retry_delay_sec ~retry_interval_sec:60.0 ~now with_serving_slot)
+               | CA.Execution_pending _ | CA.Execution_repair_required _
                | CA.Infrastructure_unavailable _ | CA.Commit_failed _ | CA.Raised _ -> ());
               Runtime_quota_window.reset_for_testing ())
            [ true; false ])
@@ -383,7 +385,7 @@ let test_a_rest_expiring_inside_one_slot_still_retries () =
   with_rest_runtimes (fun () ->
     List.iter
       (fun (label, first_error) ->
-         let reviewer ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:_
+         let reviewer ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:_
              ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
              ~attempt_continuation:_ ~on_runtime_attempt_error () =
            Driver.For_testing.attempt_runtime_candidates
@@ -424,7 +426,8 @@ let test_a_rest_expiring_inside_one_slot_still_retries () =
          (match cause with
           | CA.Not_reviewed { retryable_runtimes; _ } ->
             Alcotest.(check (list string)) label [ resting_slot ] retryable_runtimes
-          | CA.Infrastructure_unavailable _ | CA.Commit_failed _ | CA.Raised _ ->
+          | CA.Execution_pending _ | CA.Execution_repair_required _
+               | CA.Infrastructure_unavailable _ | CA.Commit_failed _ | CA.Raised _ ->
             Alcotest.fail "the exhausted slot is Not_reviewed");
          Alcotest.(check (float 0.)) "an expired rest retries on the normal pulse"
            60. (CA.retry_delay_sec ~retry_interval_sec:60. ~now:(Unix.gettimeofday ()) cause);
@@ -448,10 +451,11 @@ let test_failures_time_does_not_change_still_stop_the_review () =
           | CA.Not_reviewed { retryable_runtimes; _ } ->
             Alcotest.(check (list string)) (label ^ ": no candidate can review again") []
               retryable_runtimes
-          | CA.Infrastructure_unavailable _ | CA.Commit_failed _ | CA.Raised _ ->
+          | CA.Execution_pending _ | CA.Execution_repair_required _
+               | CA.Infrastructure_unavailable _ | CA.Commit_failed _ | CA.Raised _ ->
             Alcotest.fail "a verdict-less review is recorded as Not_reviewed");
          (match CA.retry_request_of_stop_cause cause with
-          | CA.No_retry_requested -> ()
+          | CA.Observe_original_requested | CA.No_retry_requested -> ()
           | CA.Retry_requested -> Alcotest.failf "%s armed a retry" label);
          Runtime_quota_window.reset_for_testing ())
       [ ( "auth refused"
@@ -489,7 +493,7 @@ let test_recorded_images_ride_to_the_reviewer_as_blocks () =
   with_lane_and_reviewer
     ~slots:(fun () -> Ok [ "slot-a" ])
     ~reviewer:
-      (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks
+      (fun ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks
            ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
            ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
          received := goal_blocks;
@@ -554,7 +558,7 @@ let test_unconfigured_lane_is_unavailable_not_rerouted () =
 
 let test_acquired_candidate_kinds_survive_failover () =
   let seen = ref [] in
-  let reviewer ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind ~prompt:_
+  let reviewer ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime ~candidate_kind ~prompt:_
       ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
       ~attempt_continuation:_ ~on_runtime_attempt_error:_ () =
     seen := !seen @ [evaluator_runtime, candidate_kind];

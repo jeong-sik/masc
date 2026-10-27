@@ -294,7 +294,7 @@ let install () =
 
   Atomic.set Task.Anti_rationalization.outcome_observer_fn record_anti_rationalization_outcome;
 
-  Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn (fun ~base_path:_ ?sw ~evaluator_runtime ~candidate_kind ~prompt ?system_prompt ?goal_blocks ~report_tool_schema ~lookup ~on_tool_result ~attempt_continuation ~on_runtime_attempt_error () ->
+  Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn (fun ~base_path:_ ?sw ?execution_owner ~evaluator_runtime ~candidate_kind ~prompt ?system_prompt ?goal_blocks ~report_tool_schema ~lookup ~on_tool_result ~attempt_continuation ~on_runtime_attempt_error () ->
     let verdict_call = ref Task.Anti_rationalization.empty_verdict_call in
     let evaluator_execution = ref None in
     let { Task.Anti_rationalization.schemas = lookup_schemas
@@ -354,7 +354,9 @@ let install () =
     | Ok system_prompt ->
     (* The authority-tool closures retain the submitted evidence root. A review
        owns only this disposable session tree, never a producer's configuration. *)
-    let keeper_name = "completion-review-" ^ Random_id.uuid_v7 () in
+    let keeper_name = match execution_owner with
+      | Some owner -> owner.Task.Anti_rationalization.keeper_name
+      | None -> "completion-review-" ^ Random_id.uuid_v7 () in
     let selected_runtime_id = ref None in
     match
       Masc_agent_core_bridge.run_safe ~caller:Masc_agent_core_bridge.Anti_rationalization (fun () ->
@@ -365,15 +367,30 @@ let install () =
         | Ok () ->
         Option.iter Eio.Switch.check sw;
         Eio.Switch.run (fun review_sw ->
-          let review_root = Filename.temp_file "masc-completion-review-" "" in
-          Unix.unlink review_root;
-          Unix.mkdir review_root 0o700;
-          Eio.Switch.on_release review_sw (fun () -> Fs_compat.remove_tree review_root);
-          Keeper_turn_driver_wrappers.run_named_with_masc_tools
+          let review_root = match execution_owner with
+            | Some owner ->
+              (match Fs_compat.get_fs_opt () with
+               | None -> Error (Agent_core.Error.Config
+                   (Agent_core.Error.InvalidConfig {field="review.execution_owner";
+                    detail="review journal filesystem is unavailable"}))
+               | Some fs ->
+                 Eio.Path.mkdirs ~exists_ok:true ~perm:0o700 Eio.Path.(fs / owner.session_root);
+                 Ok owner.session_root)
+            | None ->
+              let root = Filename.temp_file "masc-completion-review-" "" in
+              Unix.unlink root;
+              Unix.mkdir root 0o700;
+              Eio.Switch.on_release review_sw (fun () -> Fs_compat.remove_tree root);
+              Ok root in
+          match review_root with
+          | Error _ as error -> error
+          | Ok review_root -> Keeper_turn_driver_wrappers.run_named_with_masc_tools
             ~input_source:Keeper_request_source.Completion_review
             ~raw_trace:None
             ~runtime_id:evaluator_runtime
             ~on_selected_runtime:(fun runtime_id -> selected_runtime_id := Some runtime_id)
+            ?on_request_execution_ready:(Option.map
+              (fun owner -> owner.Task.Anti_rationalization.on_execution_ready) execution_owner)
             ~base_path:review_root
             ~goal:prompt
             ?goal_blocks

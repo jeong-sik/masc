@@ -86,7 +86,9 @@ jobs:
               targets+=(bin/main_eio.exe bin/masc_browser_addon_worker.exe bin/masc_native_addon_launcher.exe
                 test/test_browser_lane.exe test/test_browser_lane_watched_work.exe
                 test/test_browser_addon_observation.exe test/test_browser_addon_tool.exe
-                test/test_browser_ego_peer.exe test/test_browser_native_workflow.exe test/test_tui_browser_lane.exe)
+                test/test_browser_ego_peer.exe test/test_browser_native_workflow.exe test/test_tui_browser_lane.exe
+                test/test_browser_addon_live_ego.exe test/test_browser_addon_wire.exe
+                test/test_browser_selection.exe test/test_server_lane_inventory.exe test/test_keeper_vision_tool.exe)
               ;;
             original-tool-result|source-readers)
               targets+=(bin/main_eio.exe test/test_keeper_tool_result_source.exe test/test_tool_output_washing_e2e.exe test/test_server_dashboard_http_keeper_tool_lookup.exe test/test_tui_chat_call_reader.exe)
@@ -112,17 +114,26 @@ jobs:
           printf '%s\n' "${targets[@]}" > proof/build-targets.txt
           opam exec -- dune build "${targets[@]}" 2>&1 | tee proof/build.log
       - name: Verify candidate and ownership behavior
+        env:
+          PROOF_SCENARIO: ${{ inputs.scenario }}
         run: |
           set -euo pipefail
           : > proof/executed-tests.txt
           : > proof/test-results.tsv
+          : > proof/test-invocations.jsonl
           failed=0
           while IFS= read -r target; do
             case "$target" in
               test/*)
                 suite="$(basename "$target" .exe)"
+                arguments=()
+                if [ "$PROOF_SCENARIO" = browser-lane ] && [ "$suite" = test_keeper_vision_tool ]; then
+                  arguments=(--browser-screenshot)
+                fi
+                python3 -c 'import json,sys; print(json.dumps({"suite":sys.argv[1],"arguments":sys.argv[2:]}))' \
+                  "$suite" ${arguments[@]+"${arguments[@]}"} >> proof/test-invocations.jsonl
                 set +e
-                "_build/default/$target" </dev/null 2>&1 | tee "proof/$suite.log"
+                "_build/default/$target" ${arguments[@]+"${arguments[@]}"} </dev/null 2>&1 | tee "proof/$suite.log"
                 result=("${PIPESTATUS[@]}")
                 set -e
                 printf '%s\t%s\t%s\n' "$suite" "${result[0]}" "${result[1]}" >> proof/test-results.tsv
@@ -177,6 +188,12 @@ jobs:
           targets = Path('proof/build-targets.txt').read_text().splitlines()
           expected_tests = [Path(target).stem for target in targets if Path(target).parts[:1] == ('test',)]
           executed_tests = Path('proof/executed-tests.txt').read_text().splitlines()
+          invocations = [json.loads(row) for row in Path('proof/test-invocations.jsonl').read_text().splitlines()]
+          expected_invocations = [
+              {'suite': suite, 'arguments': ['--browser-screenshot']
+               if os.environ['PROOF_SCENARIO'] == 'browser-lane' and suite == 'test_keeper_vision_tool' else []}
+              for suite in expected_tests
+          ]
           Path('proof/receipt.json').write_text(json.dumps({
               'source_sha': os.environ['SOURCE_SHA'],
               'workflow_sha': os.environ['WORKFLOW_SHA'],
@@ -203,7 +220,9 @@ jobs:
               'expected_tests': expected_tests,
               'executed_tests': executed_tests,
               'test_results': results,
-              'behavior_passed': bool(expected_tests) and executed_tests == expected_tests and [result['suite'] for result in results] == expected_tests and all(result['suite_exit_code'] == 0 and result['log_exit_code'] == 0 for result in results),
+              'test_invocations': invocations,
+              'expected_invocations': expected_invocations,
+              'behavior_passed': bool(expected_tests) and executed_tests == expected_tests and [result['suite'] for result in results] == expected_tests and invocations == expected_invocations and all(result['suite_exit_code'] == 0 and result['log_exit_code'] == 0 for result in results),
               'installed_runtime_verified': False,
               'visible_ui_verified': False,
               'packaging': 'native executable; see native-dependencies.txt for dynamic libraries'

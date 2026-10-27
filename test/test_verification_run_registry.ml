@@ -65,6 +65,8 @@ let all_outcomes : (string * E.outcome) list =
   ; ( "not_reviewed"
     , E.Not_reviewed { gate = "evaluator_unavailable"; detail = "no runtime" } )
   ; "commit_failed", E.Commit_failed { detail = "verification id mismatch" }
+  ; "execution_pending", E.Execution_pending {detail="original journal has no terminal event"}
+  ; "execution_repair_required", E.Execution_repair_required {detail="original locator missing"}
   ; "raised", E.Raised { detail = "Failure(\"boom\")" }
   ; ( "review_cancelled"
     , E.Review_cancelled { detail = "review fiber cancelled: shutdown" } )
@@ -139,6 +141,8 @@ let test_outcome_detail_reaches_the_surface () =
          | E.Infrastructure_unavailable _
          | E.Not_reviewed _
          | E.Commit_failed _
+         | E.Execution_pending _
+         | E.Execution_repair_required _
          | E.Raised _
          | E.Review_cancelled _
          | E.Superseded_by _ ->

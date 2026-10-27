@@ -146,6 +146,30 @@ let cancelled_call () = with_fixture (fun env sw root ->
   assert_released worker (await_release clock worker);
   check string "effectful call was never replayed" "increment\n" (read root "calls"))
 
+(* A call cancelled while it waits behind a call the worker is running wrote
+   nothing, so the native worker keeps serving it and its exports. *)
+let queued_cancelled_call () = with_fixture (fun env sw root ->
+  let clock = Eio.Stdenv.clock env in
+  let worker = require (Native.start ~sw ~clock ~grace_seconds:0.02
+    ~admission:(admission root "native-queued-cancel") ~launcher:!launcher ~contract:(contract ()) ~command:(command root "tool") ()) in
+  let blocked = Eio.Fiber.fork_promise ~sw (fun () ->
+    Native.call_exported_tool worker ~name:"increment" ~arguments:(`Assoc ["value",`Int 4])) in
+  wait_for clock (marker root "waiting");
+  let queued_dispatched = ref false and queued_returned = ref false in
+  Eio.Fiber.first
+    (fun () -> ignore (Native.call_exported_tool ~on_dispatch:(fun () -> queued_dispatched := true)
+      worker ~name:"increment" ~arguments:(`Assoc ["value",`Int 5]));
+      queued_returned := true)
+    (fun () -> Eio.Fiber.yield (); Eio.Fiber.yield ());
+  check bool "the queued call was cancelled, not answered" false !queued_returned;
+  check bool "the queued call wrote nothing" false !queued_dispatched;
+  check bool "its cancellation leaves the native worker serving" true (Native.phase worker = Native.Serving);
+  check bool "with its exports" true (Native.exported_tools worker <> []);
+  Native.request_stop worker;
+  ignore (Eio.Promise.await blocked);
+  assert_released worker (await_release clock worker);
+  check string "only the running call reached the worker" "increment\n" (read root "calls"))
+
 let cancelled_finalizer () = with_fixture (fun env sw root ->
   let clock=Eio.Stdenv.clock env in
   let worker=require (Native.start ~sw ~clock ~grace_seconds:0.02
@@ -309,6 +333,7 @@ let () =
     test_case "shared contracts, cwd, environment and owned descendant release" `Quick native_lifecycle;
     test_case "stop interrupts actual blocked discovery" `Quick discovery_stop;
     test_case "cancelled tool call cleans up without an explicit stop" `Quick cancelled_call;
+    test_case "a call cancelled while queued leaves the worker serving" `Quick queued_cancelled_call;
     test_case "cancelled host finalization cleans up the original child" `Quick cancelled_finalizer;
     test_case "cancelled startup cleans up without an explicit stop" `Quick cancelled_start;
     test_case "already-cancelled owner cannot leave startup pending" `Quick cancelled_owner;

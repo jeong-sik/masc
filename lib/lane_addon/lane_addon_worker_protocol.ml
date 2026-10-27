@@ -19,6 +19,7 @@ type ready = {
   action_schema : Yojson.Safe.t option;
   operator_schema : Yojson.Safe.t option;
   companion_tools : string list;
+  observation_effects : (string * Lane_addon_call_context.observation_effect) list;
 }
 type attachment = Awaiting | Initializing of Agent_core.Mcp.t
   | Ready of ready | Retired of Agent_core.Mcp.t option
@@ -88,6 +89,12 @@ let operator_schema t = match t.attachment with
   | Ready ready -> ready.operator_schema | Awaiting | Initializing _ | Retired _ -> None
 let companion_tools t = match t.attachment with
   | Ready ready -> ready.companion_tools | Awaiting | Initializing _ | Retired _ -> []
+let observation_effect t name = match t.attachment with
+  | Ready ready ->
+      (match List.assoc_opt name ready.observation_effects with
+       | Some declared -> declared
+       | None -> Lane_addon_call_context.May_change)
+  | Awaiting | Initializing _ | Retired _ -> Lane_addon_call_context.May_change
 let ready_for_call t = match t.attachment with
   | Ready ready -> Ok ready
   | Awaiting | Initializing _ -> Error (Host_refusal (Lane_addon_call_context.Unavailable "worker protocol is not ready"))
@@ -161,6 +168,25 @@ let initialize t client =
                  | _ -> Error (Protocol_failed "invalid private companion handshake"))
             | [_] -> Error (Invalid_contract "private companion requires host-context invocation")
             | _ -> Error (Protocol_failed "duplicate private companion handshake") in
+          (* The worker's own word on which exports leave its observation as it
+             was. A worker without the port declares nothing, so every export
+             may change it; a declaration the host cannot read refuses Ready. *)
+          let* observation_effects = match List.filter (fun (tool:Mcp_protocol.Mcp_types.tool) ->
+              tool.name=Lane_addon_call_context.effects_tool) tools with
+            | [] -> Ok []
+            | [_] ->
+                let* reply=Agent_core.Mcp.call_tool_full client ~name:Lane_addon_call_context.effects_tool
+                    ~arguments:(`Assoc [])
+                  |> Result.map_error (fun _ -> Protocol_failed "observation effect handshake failed") in
+                (match reply.is_error,reply.structured_content with
+                 | (None|Some false),Some value ->
+                     Lane_addon_call_context.effects_of_json
+                       ~listed:(List.map (fun (tool:Mcp_protocol.Mcp_types.tool) -> tool.name) tools) value
+                     |> Result.map (List.filter (fun (name,_) -> List.mem name t.contract.exported_tools))
+                     |> Result.map_error (fun detail -> Protocol_failed detail)
+                 | Some true,_ | (None|Some false),None ->
+                     Error (Protocol_failed "observation effect handshake refused"))
+            | _ -> Error (Protocol_failed "duplicate observation effect port") in
           let* exported = List.fold_left (fun result name ->
             let* selected = result in
             match List.filter (fun (tool : Mcp_protocol.Mcp_types.tool) -> String.equal tool.name name) tools with
@@ -180,7 +206,8 @@ let initialize t client =
             let* hooks = Lane_addon_tool_hooks.prepare ~hooks:selected_hooks tool
               |> Result.map_error (fun detail -> Protocol_failed detail) in
             Ok ((tool.name, hooks) :: checks)) (Ok []) exported in
-          Ok {client;tool_hooks;action_schema;operator_schema;companion_tools;exported_tools=List.rev exported}
+          Ok {client;tool_hooks;action_schema;operator_schema;companion_tools;observation_effects;
+            exported_tools=List.rev exported}
     with
     | Eio.Cancel.Cancelled _ as exn -> revoke t; raise exn
     | (Eio.Io _ | Unix.Unix_error _ | Sys_error _ | End_of_file | Failure _
@@ -192,8 +219,10 @@ let initialize t client =
       | Retired _ -> Error Stopped
       | Awaiting | Ready _ -> Error (Invalid_contract "worker initialization state changed"))
 
-let protect_call t work =
-  try work () with Eio.Cancel.Cancelled _ as exn -> revoke t; raise exn
+(* A call cancelled after it wrote to the worker has an effect nobody will
+   learn, so the connection is retired. [reached] says whether it wrote. *)
+let protect_call ?(reached = fun () -> true) t work =
+  try work () with Eio.Cancel.Cancelled _ as exn -> if reached () then revoke t; raise exn
 
 let call_operator t ~admit ~arguments =
   protect_call t (fun () ->
@@ -308,10 +337,14 @@ type result_finalizer = name:string -> arguments:Yojson.Safe.t ->
   principal:Lane_addon_call_context.principal -> result:Mcp_protocol.Mcp_types.tool_result ->
   (Mcp_protocol.Mcp_types.tool_result, string) result
 type companion_admission = {context:Lane_addon_call_context.companion;admit:unit -> bool}
-let call_exported_tool ?(on_result = fun _ -> ()) ?companion
+let call_exported_tool ?(on_result = fun _ -> ()) ?(on_dispatch = fun () -> ()) ?companion
     ?(finalize_result = fun ~name:_ ~arguments:_ ~principal:_ ~result -> Ok result)
     ?authorize ?(principal = Lane_addon_call_context.Anonymous) t ~name ~arguments =
-  protect_call t (fun () ->
+  (* A call cancelled while it waits for the RPC mutex, or in its mediation
+     before its first RPC, wrote nothing, and the session stays as it was. *)
+  let dispatched = ref false in
+  let on_dispatch () = dispatched := true; on_dispatch () in
+  protect_call ~reached:(fun () -> !dispatched) t (fun () ->
   if revoked t then Error Stopped
   else
       let* ready = ready_for_call t in
@@ -335,7 +368,8 @@ let call_exported_tool ?(on_result = fun _ -> ()) ?companion
           let admitted=not (revoked t) && (match companion with None -> true | Some admission -> admission.admit ()) in
           if not admitted || revoked t
           then Error "Add-on worker is unavailable"
-          else Agent_core.Mcp.call_tool_full client ~name ~arguments
+          else (on_dispatch ();
+            Agent_core.Mcp.call_tool_full client ~name ~arguments)
             |> Result.map (fun result -> (match companion with None -> on_result result | Some _ -> ()); result)
             |> Result.map_error (fun error -> match companion with
               | None -> Agent_core.Error.to_string error | Some _ -> "private invocation outcome unknown")) in

@@ -69,6 +69,7 @@ let container_name t = t.name
 let action_schema t = Protocol.action_schema t.protocol
 let operator_schema t = Protocol.operator_schema t.protocol
 let companion_tools t = Protocol.companion_tools t.protocol
+let observation_effect t name = Protocol.observation_effect t.protocol name
 let call_operator t ~admit ~arguments = Protocol.call_operator t.protocol ~admit ~arguments
 let exported_tools t = Protocol.exported_tools t.protocol
 let protocol_result result = Result.map_error (function
@@ -452,8 +453,8 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
 let observe t ~binding ~sources =
   Protocol.observe t.protocol ~binding ~sources |> protocol_result
 let act t ~arguments = Protocol.act t.protocol ~arguments |> protocol_result
-let call_exported_tool ?on_result ?companion ?authorize ?principal t ~name ~arguments =
-  Protocol.call_exported_tool ?on_result ?companion ?authorize ?principal t.protocol ~name ~arguments
+let call_exported_tool ?on_result ?on_dispatch ?companion ?authorize ?principal t ~name ~arguments =
+  Protocol.call_exported_tool ?on_result ?on_dispatch ?companion ?authorize ?principal t.protocol ~name ~arguments
   |> protocol_result
 
 let host_requests t = Protocol.host_requests t.protocol |> protocol_result

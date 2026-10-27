@@ -1,4 +1,8 @@
 type verifier_slot_kind = Catalog_slot | Cli_slot | Explicit_runtime
+
+type verifier_execution_reference =
+  | Native_execution of {call_id:string}
+  | Official_session
 (** A completion review retains this admission kind while its acquired lane runs. *)
 
 (** MASC MCP Types - Domain Model *)

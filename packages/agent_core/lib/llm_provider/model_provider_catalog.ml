@@ -20,6 +20,7 @@ type entry =
   ; request_path : string
   ; requires_api_key : bool
   ; default_model : string option
+  ; discovery_timeout_s : float option
   ; capabilities_base : string option
   ; capabilities_base_by_identity_kind : (Provider_kind.t * string) list
   ; supports_parallel_tool_suppression : bool
@@ -100,6 +101,14 @@ let string_list_field ~entry_id key toml =
     Error (Printf.sprintf "provider entry %S field %S expected string array" entry_id key)
 ;;
 
+let positive_finite_float_field ~entry_id key toml =
+  match Otoml.find_opt toml Otoml.get_float [ key ] with
+  | Some value when (not (Float.is_finite value)) || Float.compare value 0.0 <= 0 ->
+    Error (Printf.sprintf "provider entry %S field %S must be finite and greater than zero" entry_id key)
+  | value -> Ok value
+  | exception Otoml.Type_error _ ->
+    Error (Printf.sprintf "provider entry %S field %S expected float" entry_id key)
+
 let known_keys =
   [ "id"
   ; "aliases"
@@ -109,6 +118,7 @@ let known_keys =
   ; "request_path"
   ; "auth"
   ; "default_model"
+  ; "discovery_timeout_s"
   ; "capabilities_base"
   ; "capabilities_base_by_identity_kind"
   ; "supports_parallel_tool_suppression"
@@ -302,6 +312,9 @@ let parse_entry provider_toml =
   let* default_model =
     exact_non_empty_string_field ~entry_id:id "default_model" provider_toml
   in
+  let* discovery_timeout_s =
+    positive_finite_float_field ~entry_id:id "discovery_timeout_s" provider_toml
+  in
   let* capabilities_base =
     canonical_string_opt
       ~entry_id:id
@@ -344,6 +357,7 @@ let parse_entry provider_toml =
     ; request_path
     ; requires_api_key
     ; default_model
+    ; discovery_timeout_s
     ; capabilities_base
     ; capabilities_base_by_identity_kind
     ; supports_parallel_tool_suppression

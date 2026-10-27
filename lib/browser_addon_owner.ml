@@ -126,7 +126,11 @@ let attach_live t ~client_id ~cleanup =
         | Some {transport=(B.Webdriver_bidi | B.Ego_task_space) as transport;_} ->
           let name = "live " ^ B.live_transport_to_string transport in
           if List.mem_assoc transport t.live then Error ("an owned " ^ name ^ " connection is already attached")
-          else (t.live <- (transport, owned_cleanup name cleanup) :: t.live; Ok ())
+          else
+            (* This worker disconnects its own connection when it ends; the
+               lane's no-poll window is for native hosts only. *)
+            Result.map (fun () -> t.live <- (transport, owned_cleanup name cleanup) :: t.live)
+              (B.hold_client ~client_id)
         | None | Some {transport=B.Web_extension;_} -> Error "owned live client is not an active connection this worker runs")
 let revoke t =
   Eio.Mutex.use_rw ~protect:true t.gate (fun () ->

@@ -19,6 +19,8 @@ type outcome =
       ; detail : string
       }
   | Commit_failed of { detail : string }
+  | Execution_pending of { detail : string }
+  | Execution_repair_required of { detail : string }
   | Raised of { detail : string }
   | Review_cancelled of { detail : string }
       (** The review fiber was cancelled mid-flight (shutdown, owner stop).
@@ -54,6 +56,8 @@ type run_status =
       ; evaluator_runtime : string option
       ; elapsed_s : float
       ; tools : tool_observation list
+          (** Observations collected by this host attempt. A reconciliation
+              wake does not reconstruct the original model's lookup history. *)
       }
 
 type run =
@@ -62,7 +66,7 @@ type run =
   ; producer : string
   ; authority_kind : string
   ; authority_actor : string
-  ; started_at : float
+  ; started_at : float (** Host attempt start, including a reconciliation wake. *)
   ; status : run_status
   }
 

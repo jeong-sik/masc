@@ -10,5 +10,7 @@
  (libraries
   masc_core
   masc.agent_core.llm_provider
+  digestif
+  yojson
   eio
   time_compat))

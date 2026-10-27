@@ -25,6 +25,7 @@ val run_named_with_masc_tools :
   ?required_native_posture:Runtime_native_tools.posture ->
   ?tool_result_projection:Tool_output.model_projection ->
   ?on_selected_runtime:(string -> unit) ->
+  ?on_request_execution_ready:(runtime_id:string -> execution:Types_core.verifier_execution_reference -> (unit, string) result) ->
   masc_tools:Masc_domain.tool_schema list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> Tool_result.result) ->
   ?temperature:float ->

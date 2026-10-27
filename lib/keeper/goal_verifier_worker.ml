@@ -91,15 +91,22 @@ let key ~goal_id ~request_id ~attempt =
   if String.trim goal_id = "" || String.trim request_id = "" || attempt < 0 then
     Error "Goal verifier original requires its exact nonblank subject and nonnegative attempt"
   else Ok (Yojson.Safe.to_string (`List [`String goal_id; `String request_id; `Int attempt]))
+type invalid_attribution =
+  | Goal_request of string * string
+  | Unattributable
+
 let subject_of_key encoded =
-  let* json = decode (try Ok (Yojson.Safe.from_string encoded)
-    with Yojson.Json_error detail -> Error detail) in
-  match json with
-  | `List [`String goal_id; `String request_id; `Int attempt] ->
-    let* canonical = decode (key ~goal_id ~request_id ~attempt) in
-    if String.equal canonical encoded then Ok (goal_id,request_id)
-    else invalid "Goal verifier original subject key is not canonical"
-  | _ -> invalid "Goal verifier original subject key is invalid"
+  match (try Ok (Yojson.Safe.from_string encoded)
+    with Yojson.Json_error detail -> Error detail) with
+  | Error detail -> Error (Unattributable, Original_invalid detail)
+  | Ok (`List [`String goal_id; `String request_id; `Int attempt]) ->
+    (match key ~goal_id ~request_id ~attempt with
+     | Ok canonical when String.equal canonical encoded -> Ok (goal_id,request_id)
+     | Ok _ -> Error (Goal_request (goal_id,request_id),
+         Original_invalid "Goal verifier original subject key is not canonical")
+     | Error detail -> Error (Unattributable, Original_invalid detail))
+  | Ok _ -> Error (Unattributable,
+      Original_invalid "Goal verifier original subject key is invalid")
 let original_key original =
   let subject = V.subject original in
   key ~goal_id:subject.goal_id ~request_id:subject.request_id ~attempt:(V.attempt original)
@@ -163,17 +170,31 @@ let inventory ~store ~installation_id ~package_id =
   Ok (List.filter (fun retained -> retained.record.installation_id = installation_id
     && retained.record.package_id = package_id) records)
 
-(* The existing owner metadata binds each complete request to a canonical
-   subject key. Classify every key before selecting bodies; malformed metadata
-   never becomes an unrelated row that can be silently skipped. *)
+type invalid_subject =
+  { request_id : string
+  ; attribution : invalid_attribution
+  ; error : error
+  }
+
+type subject_discovery =
+  { subjects : ((string * string) * Owner.Record.t) list
+  ; invalid : invalid_subject list
+  }
+
+(* Noncanonical keys retain their parsed identity only to bound refusal. They
+   never become readable originals or permission to dispatch another request. *)
 let discover_subjects ~store =
   let* records = Owner.discover ~store ~scope
     |> Result.map_error (fun e -> Store_unavailable (Owner.error_to_string e)) in
-  let* reversed = List.fold_left (fun state record ->
+  let* discovery = List.fold_left (fun state record ->
     let* found = state in
-    let* subject = subject_of_key (Owner.Record.request_id record) in
-    Ok ((subject,record)::found)) (Ok []) records in
-  Ok (List.rev reversed)
+    match subject_of_key (Owner.Record.request_id record) with
+    | Ok subject -> Ok { found with subjects=(subject,record)::found.subjects }
+    | Error (attribution,error) ->
+      let rejected = {request_id=Owner.Record.request_id record;attribution;error} in
+      Ok { found with invalid=rejected::found.invalid })
+    (Ok { subjects=[]; invalid=[] }) records in
+  Ok { subjects=List.rev discovery.subjects; invalid=List.rev discovery.invalid }
 
 let load_discovered ~store ~installation_id ~package_id records =
   let* reversed = List.fold_left (fun state (_,observed) ->
@@ -184,32 +205,49 @@ let load_discovered ~store ~installation_id ~package_id records =
     Ok (retained::found)) (Ok []) records in
   Ok (List.rev reversed)
 
+let invalid_is_unattributable (entry : invalid_subject) =
+  match entry.attribution with
+  | Unattributable -> true
+  | Goal_request _ -> false
+
+let noncanonical_affects_request ~goal_id ~request_id (entry : invalid_subject) =
+  match entry.attribution with
+  | Unattributable -> false
+  | Goal_request (observed_goal,observed_request) ->
+    observed_goal=goal_id && observed_request=request_id
+
 let inventory_for_goal ~store ~installation_id ~package_id ~goal_id =
   if String.trim goal_id = "" then invalid "Goal inventory requires a nonblank Goal ID"
   else
-    let* records = discover_subjects ~store in
-    let selected = List.filter (fun ((observed_goal,_),_) -> observed_goal=goal_id) records in
+    let* discovery = discover_subjects ~store in
+    let selected = List.filter (fun ((observed_goal,_),_) -> observed_goal=goal_id)
+      discovery.subjects in
+    let* () =
+      if selected=[] && List.exists invalid_is_unattributable discovery.invalid
+      then invalid "Goal original metadata is unavailable and cannot be attributed"
+      else Ok () in
     load_discovered ~store ~installation_id ~package_id selected
 
 module Goal_map = Map.Make (String)
 
 let inventory_by_goal ~store ~installation_id ~package_id =
-  let* records = discover_subjects ~store in
+  let* discovery = discover_subjects ~store in
   (* This grouping belongs to this one immutable observation. The original
      metadata remains the authority; no second index is persisted or reused. *)
   let groups,reversed_order = List.fold_left (fun (groups,order) (((goal_id,_),_) as row) ->
     match Goal_map.find_opt goal_id groups with
     | None -> Goal_map.add goal_id [row] groups,goal_id::order
     | Some previous -> Goal_map.add goal_id (row::previous) groups,order)
-    (Goal_map.empty,[]) records in
+    (Goal_map.empty,[]) discovery.subjects in
   let destination_matches (_,record) =
     Owner.Record.installation_id record=installation_id
     && Owner.Record.package_id record=package_id in
-  Ok (List.filter_map (fun goal_id ->
+  let groups = List.filter_map (fun goal_id ->
     let rows = List.rev (Goal_map.find goal_id groups) in
     if List.exists destination_matches rows then
       Some (goal_id,load_discovered ~store ~installation_id ~package_id rows)
-    else None) (List.rev reversed_order))
+    else None) (List.rev reversed_order) in
+  Ok (groups, List.map (fun entry -> entry.request_id,entry.error) discovery.invalid)
 
 let original (retained : retained) = retained.original
 let run_identity (retained : retained) = retained.run
@@ -382,9 +420,14 @@ let retryable_refusal retained evidence =
 
 let select_frontier ~automatic ~store ~installation_id ~package_id ~goal_id ~request_id ~new_run =
   let* _ = decode (key ~goal_id ~request_id ~attempt:0) in
-  let* records = discover_subjects ~store in
+  let* discovery = discover_subjects ~store in
   let selected = List.filter (fun ((observed_goal,observed_request),_) ->
-    observed_goal=goal_id && observed_request=request_id) records in
+    observed_goal=goal_id && observed_request=request_id) discovery.subjects in
+  let* () =
+    if List.exists (noncanonical_affects_request ~goal_id ~request_id) discovery.invalid
+       || (selected=[] && List.exists invalid_is_unattributable discovery.invalid)
+    then invalid "Goal frontier metadata is unavailable and cannot be attributed"
+    else Ok () in
   let* related = load_discovered ~store ~installation_id ~package_id selected in
   let related = List.sort (fun left right -> Int.compare (V.attempt left.original) (V.attempt right.original)) related in
   let restore_child parent successor =
@@ -419,6 +462,17 @@ let select_frontier ~automatic ~store ~installation_id ~package_id ~goal_id ~req
   let rec walk parent rest =
     match Progress.phase (progress parent), rest with
     | (Progress.Subdividing (_, successor) | Subdivided (_, successor)), _ ->
+      let* () =
+        match Progress.phase (progress parent), rest with
+        | Subdivided _, [] ->
+          invalid "Goal successor original is missing after parent observed its intent"
+        | Subdivided _, existing::_ when existing.record.request_id <> successor.Progress.request_id ->
+          invalid "Goal successor original differs from its retained intent"
+        | (Subdividing _ | Subdivided _), _ -> Ok ()
+        | (Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+          | Finished _ | Conflicted _ | Rejected _), _ ->
+          invalid "Goal successor parent changed during restoration"
+      in
       let* child = restore_child parent successor in
       (match rest with
        | [] -> walk child []

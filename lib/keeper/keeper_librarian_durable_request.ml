@@ -103,13 +103,18 @@ let owner_matches_json owner json =
   require (owner=original) "Original history physical roots or Memory epoch changed"
 let fresh_request_id owner = Yojson.Safe.to_string
   (`List [`String "keeper-librarian-history";`String (owner_hash owner);`String (Random_id.uuid_v7 ())])
-let scope_of_request_id id =
+let parse_request_id id =
   let* json=parse id in
   match json with
   | `List [`String "keeper-librarian-history";`String hash;`String nonce]
       when String_util.is_lowercase_sha256_hex hash && Yojson.Safe.to_string json=id ->
-    let+ _=Random_id.parse_uuid_v7 nonce in scope_for_hash hash
+    let+ nonce=Random_id.parse_uuid_v7 nonce in hash,nonce
   | _ -> Error "Invalid original history request ID"
+let scope_of_request_id id = let+ hash,_=parse_request_id id in scope_for_hash hash
+let minted_on id =
+  let* _,nonce=parse_request_id id in
+  let+ time_ms=Random_id.uuid_v7_time_ms nonce in
+  Jsonl_writer.day_key ~ts:(Int64.to_float time_ms /. 1000.)
 
 type destination = {installation_id:string;package_id:string;tool:string;
   source_revision:string;configuration_revision:string}

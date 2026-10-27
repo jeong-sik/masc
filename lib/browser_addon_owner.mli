@@ -47,7 +47,9 @@ val attach_live : t -> client_id:Browser_lane.client_id ->
 (** Bind cleanup of an already registered exact live client this worker runs,
     a BiDi or an ego connection, one of each at most. Retire revokes its input
     before joining its connection: the original BiDi peer and child, or the ego
-    task space. Existing extension clients grant no browser-process ownership. *)
+    task space. Existing extension clients grant no browser-process ownership.
+    Once attached, the lane holds the client instead of timing its polls; it
+    ends only through [disconnect_live] or [revoke]. *)
 val revoke : t -> unit
 (** First retire admission, then wake pending work and retire the owner's client
     IDs. Interrupted issued work has an unknown outcome and is never replayed. *)

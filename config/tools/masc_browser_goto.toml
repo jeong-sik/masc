@@ -1,6 +1,6 @@
 name = "masc_browser_goto"
 description = """
-Navigate a tab to HTTP(S); returns landing URL/title. Server-owned browsers (automation, stagehand) navigate their tabs. A live BiDi connection navigates only a tab it opened with BrowserAct open_tab: pass lane live, its clientId and that tabId. A tab the operator opened is refused before any effect; use BrowserInteract there."""
+Navigate a tab to HTTP(S); returns landing URL/title. Server-owned browsers (automation, stagehand) navigate their tabs. A live BiDi connection navigates only a tab it opened with BrowserAct/masc_browser_act open_tab: pass lane live, its clientId and that tabId. A tab the operator opened is refused before any effect; use BrowserInteract/masc_browser_interact there."""
 additional_properties = false
 
 [[params]]
@@ -18,7 +18,7 @@ description = "Optional advanced browser override. Omit only for initial discove
 [[params]]
 name = "tabId"
 type = "integer"
-description = "BrowserTabs ID; default current tab. Required on live."
+description = "BrowserTabs/masc_browser_tabs ID; default current tab. Required on live."
 minimum = 0
 
 [[params]]

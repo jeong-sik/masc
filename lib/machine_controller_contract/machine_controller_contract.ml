@@ -97,6 +97,15 @@ let controller_need = function
   | Dos_pass -> Hands_controller
   | Dos_meta | Dos_inventory | Dos_screen | Dos_peek | Dos_save -> No_controller
 
+type call_effect =
+  | Reads_only
+  | Changes_state
+
+let call_effect = function
+  | Dos_meta | Dos_inventory | Dos_screen | Dos_peek -> Reads_only
+  | Dos_load | Dos_eject | Dos_pass | Dos_step | Dos_press | Dos_click | Dos_type
+  | Dos_save | Dos_restore -> Changes_state
+
 (* The recipient of a hand-off. [to] left out (or null) frees the controller;
    that is the only way to free it. An empty or blank [to] is an error: a
    caller whose template left the name unset would otherwise hand the machine

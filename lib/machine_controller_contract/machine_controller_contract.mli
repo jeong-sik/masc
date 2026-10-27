@@ -65,6 +65,20 @@ type controller_need =
 
 val controller_need : dos_tool -> controller_need
 
+(** What a call leaves behind in the worker. *)
+type call_effect =
+  | Reads_only
+      (** changes nothing the worker holds, so the worker's last observation
+          still shows the machine after the call *)
+  | Changes_state
+      (** moves the machine, hands its controller or writes a checkpoint. A
+          save leaves the machine where it was, but it writes a file and adds
+          a line to the activity feed the observation carries. *)
+
+val call_effect : dos_tool -> call_effect
+(** The DOS worker derives both its MCP [annotations.readOnlyHint] and the
+    observation effect it declares to the host from this one value. *)
+
 (** {1 Screen errors}
 
     Why a [masc_dos_screen] call answered with an error. The worker writes it

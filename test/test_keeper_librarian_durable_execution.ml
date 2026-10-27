@@ -83,11 +83,12 @@ let backend env base_path delivery delivery_observed : Runtime.For_testing.backe
       resolved_image=Some (Lane_addon_engine.image_of_inspect Lane_addon_types.Docker ("sha256:" ^ String.make 64 'a') |> get);
       observe=(fun ~binding ~sources -> Protocol.observe protocol ~binding ~sources |> Result.map_error protocol_error);
       exported_tools=(fun () -> Protocol.exported_tools protocol);
-      call_exported_tool=(fun ~companion:_ ~on_result ~authorize ~principal ~name ~arguments ->
-        Protocol.call_exported_tool ~on_result ?authorize ~principal protocol ~name ~arguments
+      call_exported_tool=(fun ~companion:_ ~on_result ~on_dispatch ~authorize ~principal ~name ~arguments ->
+        Protocol.call_exported_tool ~on_result ~on_dispatch ?authorize ~principal protocol ~name ~arguments
           |> Result.map_error invocation_error);
       operator_schema=(fun () -> None);
       companion_tools=(fun () -> []);
+      observation_effect=(fun _ -> Lane_addon_call_context.May_change);
       call_operator=(fun ~admit:_ ~arguments:_ -> Error Masc.Lane_addon_worker_protocol.Operator_unavailable);
       action_schema=(fun () -> Protocol.action_schema protocol);
       act=(fun ~arguments -> Protocol.act protocol ~arguments |> Result.map_error protocol_error);
@@ -381,6 +382,37 @@ let latest fixture capture = io (fun () ->
   Lane_addon_exact.read_latest_original_execution ~store:fixture.store ~declaration_id:"librarian" ~schema exact |> get)
 let no_memory fixture = check (list string) "uncommitted original has no Memory facts" []
   (io (fun () -> claims fixture.keepers_dir))
+module Gate = Keeper_librarian_durable_gate
+let canonical request=Lane_addon_action.canonical request |> get
+let day_of request_id=Capture.minted_on request_id |> get
+(* The same history request ID minted one UTC day earlier, for a chain whose
+   root and successor fall on different days. *)
+let day_ms=86_400_000L
+let minted_a_day_before request_id =
+  match Yojson.Safe.from_string request_id with
+  | `List [kind;hash;`String nonce] ->
+    let time=Printf.sprintf "%012Lx" (Int64.sub (Random_id.uuid_v7_time_ms nonce |> get) day_ms) in
+    let nonce=String.sub time 0 8 ^ "-" ^ String.sub time 8 4 ^ String.sub nonce 13 (String.length nonce-13) in
+    Yojson.Safe.to_string (`List [kind;hash;`String nonce])
+  | _ -> fail "a history request ID lists its kind, owner hash and nonce"
+(* Every gate record the owner's gate scope holds now. *)
+let gate_records fixture capture =
+  let inventory=io (fun () -> Gate.Inventory.read ~store:fixture.store ~owner:(Capture.physical_owner capture)) |> get in
+  List.concat_map (fun execution_id -> Gate.Inventory.execution_records inventory ~execution_id)
+    (Gate.Inventory.executions inventory)
+let settled_on fixture ~date (record:Owner.retained) =
+  io (fun () -> Owner.settled ~store:fixture.store ~scope:record.scope ~date ~request_id:record.request_id) |> owned
+let settle_only fixture ~date (record:Owner.retained) =
+  io (fun () -> Owner.settle ~store:fixture.store ~date (Owner.listed record))
+  |> Result.map_error Owner.settle_error_to_string |> get
+(* A settled original as the archive holds it: its progress, and the request
+   body its record names. *)
+let archived fixture ~date (record:Owner.retained) =
+  let read path=io (fun () -> Yojson.Safe.from_file (Filename.concat (Store.root fixture.store) path)) in
+  let stored=read (Store.tool_request_archive_record_path ~scope:record.scope ~date ~request_id:record.request_id) in
+  Progress.of_json (member "progress" stored) |> get,
+  read (Store.tool_request_archive_body_path ~scope:record.scope ~date
+    ~request_digest:(Yojson.Safe.Util.to_string (member "request_digest" stored)))
 let assert_unattached = function
   | Error error ->
     check bool "attachment is a blocked original publication" true (Consumer.publication_unfinished error);
@@ -441,11 +473,11 @@ let test_terminal_refusal_allows_fresh_original () = with_fixture (fun ~sw:_ fix
   no_memory fixture;
   fixture.set_response (fun capture -> `OK,F.openai_response (answer capture));
   drive_advanced fixture;
-  let captures=observed_originals fixture in
-  check int "fresh selection retains a separate original ID" 2 (List.length captures);
-  let retained,restored=List.find (fun (record,_) -> record.Owner.request_id=rejected.request_id) captures in
-  check json "old refused request remains exact" request_before (Capture.to_json restored);
-  check json "old refusal never redispatched or rewritten" progress_before (Progress.to_json retained.progress);
+  let fresh,_=only_original fixture in
+  check bool "fresh selection retains a separate original ID" true (fresh.Owner.request_id<>rejected.request_id);
+  let settled,request=archived fixture ~date:(day_of rejected.request_id) rejected in
+  check json "settled refused request remains exact" (canonical request_before) request;
+  check json "old refusal never redispatched or rewritten" progress_before (Progress.to_json settled);
   check int "one refused and one successful provider call" 2 (F.post_count fixture.server);
   check (list string) "new original alone publishes Memory"
     ["Knowledge from original completed history"] (io (fun () -> claims fixture.keepers_dir)))
@@ -473,10 +505,112 @@ let test_actual_completed_history_path () = with_fixture (fun ~sw:_ fixture ->
      fail "no actual original provider proof");
   let request_before=Capture.to_json capture in
   let posts=F.post_count fixture.server in
+  let gates=gate_records fixture capture in
+  check bool "the finished original has gate records to settle" true (List.length gates>0);
   ignore (run_worker fixture);
-  let _,restored=only_original fixture in
-  check json "completed original restores the full retained input/preparation" request_before (Capture.to_json restored);
+  check int "the next pass settles the finished original" 0 (List.length (observed_originals fixture));
+  let date=day_of record.Owner.request_id in
+  let settled,restored=archived fixture ~date record in
+  check json "settled original keeps the full retained input/preparation" (canonical request_before) restored;
+  check json "settled original keeps its finished progress" (Progress.to_json record.progress) (Progress.to_json settled);
+  check bool "its gate records settle under the same day" true (List.for_all (settled_on fixture ~date) gates);
+  check int "no gate record stays for validation" 0 (List.length (gate_records fixture capture));
   check int "already consumed source never creates another provider request" posts (F.post_count fixture.server))
+(* A settle that stopped between a history record and its gate records leaves
+   gates of an archived execution. A pass with no original reads no gate
+   scope, so the pass of the next original settles them. *)
+let test_stopped_settle_leaves_gates_for_the_next_original () = with_fixture (fun ~sw:_ fixture ->
+  drive_advanced fixture;
+  let record,capture=only_original fixture in
+  let gates=gate_records fixture capture in
+  let date=day_of record.Owner.request_id in
+  settle_only fixture ~date record;
+  (match run_worker fixture with
+   | Ok Consumer.Nothing_to_read -> ()
+   | Ok (Baseline_advanced _ | Progress_advanced _ | Official_advanced _ | Memory_not_committed _ | Pending) ->
+     fail "a consumed source has nothing to read"
+   | Error error -> fail (Consumer.error_to_string error));
+  check int "a pass without an original leaves the stopped gates" (List.length gates)
+    (List.length (gate_records fixture capture));
+  let next=selected_messages @ [message "Second question to retain";
+    Agent_core.Types.make_message ~role:Agent_core.Types.Assistant [Agent_core.Types.Text "Second completed answer"]] in
+  save_checkpoint fixture.config ~trace_id next 3;
+  io (fun () -> append_boundary fixture.config ~turn:3 ~time:(Time_compat.now ())
+    ~history_at_start:(Boundary.history_at_start_of_messages selected_messages) next);
+  drive_advanced fixture;
+  check bool "the stopped gates settle under their execution's day" true (List.for_all (settled_on fixture ~date) gates);
+  check bool "only the new original's gate records stay" true
+    (List.for_all (fun (gate:Owner.retained) ->
+       not (List.exists (fun (old:Owner.retained) -> old.request_id=gate.request_id) gates))
+       (gate_records fixture capture));
+  check int "each original reached the provider once" 2 (F.post_count fixture.server))
+
+let test_inventory_observation_reuses_verified_inputs () = with_fixture (fun ~sw:_ fixture ->
+  let module Journal = Keeper_librarian_durable_gate in
+  let module Commit = Keeper_librarian_durable_commit in
+  drive_advanced fixture;
+  let parent,capture=only_original fixture in
+  let owner=Capture.physical_owner capture in
+  let gates=io (fun () -> Owner.load_scope ~store:fixture.store ~scope:(Journal.scope owner)) |> owned in
+  let gate=match gates with [gate] -> gate | [] | _::_::_ -> fail "expected one completed gate" in
+  let posts=F.post_count fixture.server and positions=progress fixture in
+  memory_action fixture (fun () ->
+    let inventory=io (fun () -> Journal.Inventory.read ~store:fixture.store ~owner) |> get in
+    let validate ()=io (fun () -> Commit.validate_inventory ~inventory ~store:fixture.store
+      ~request:capture ~record:parent) in
+    List.iter (fun (record : Owner.retained) ->
+      let path=Filename.concat (Store.root fixture.store) (Filename.concat Store.tool_request_bodies_directory
+        (Filename.concat (Store.digest record.scope) (record.request_digest ^ ".json"))) in
+      Eio.Switch.run (fun sw ->
+        let hidden=path ^ ".fixture-hidden" in
+        io (fun () -> Unix.rename path hidden);
+        Eio.Switch.on_release sw (fun () -> io (fun () -> Unix.rename hidden path));
+        check bool "one read-only pass reuses its verified parent and gate bodies" true
+          (validate ()=Ok Commit.Settled);
+        check bool "fresh validation never obtains authority from that observation" true
+          (io (fun () -> Commit.validate ~store:fixture.store ~request:capture ~record:parent)
+           |> Result.is_error);
+        check bool "recovery reloads the original parent and acknowledged gate" true
+          (io (fun () -> Journal.recover_root ~store:fixture.store ~owner ~capture)
+           |> Result.is_error);
+        if record.request_id=gate.request_id then
+          check bool "a new inventory refuses an unreadable published gate body" true
+            (io (fun () -> Journal.Inventory.read ~store:fixture.store ~owner)
+             |> Result.is_error))) [parent;gate]);
+  check int "read-only observations do not invoke the provider" posts (F.post_count fixture.server);
+  check bool "read-only observations do not acknowledge new source" true (progress fixture=positions);
+  ignore (run_worker fixture);
+  check int "fresh post-observation wake never redispatches the settled original" posts (F.post_count fixture.server))
+
+let test_inventory_observation_rejects_mixed_parent_and_bad_scope () = with_fixture (fun ~sw:_ fixture ->
+  let module Journal = Keeper_librarian_durable_gate in
+  let module Commit = Keeper_librarian_durable_commit in
+  drive_advanced fixture;
+  let parent,capture=only_original fixture in
+  let owner=Capture.physical_owner capture in
+  memory_action fixture (fun () ->
+    let inventory=io (fun () -> Journal.Inventory.read ~store:fixture.store ~owner) |> get in
+    let other=Store.create ~root:(Filename.concat fixture.base_path "changed-parent-owner") in
+    io (fun () -> Owner.retain ~store:other ~scope:parent.scope ~request_id:parent.request_id
+      ~installation_id:parent.installation_id ~package_id:parent.package_id ~tool:parent.tool
+      ~summary:parent.summary ~request:(`Assoc ["replaced",`Bool true])) |> owned;
+    let changed=io (fun () -> Owner.load ~store:other ~scope:parent.scope ~request_id:parent.request_id)
+      |> owned |> Option.get in
+    check bool "an observation cannot borrow a different original capture" true
+      (io (fun () -> Commit.validate_inventory ~inventory ~store:fixture.store ~request:capture
+        ~record:changed) |> Result.is_error));
+  let posts=F.post_count fixture.server and positions=progress fixture in
+  io (fun () -> Owner.retain ~store:fixture.store ~scope:(Journal.scope owner)
+    ~request_id:"unrelated-invalid-gate" ~installation_id:parent.installation_id
+    ~package_id:parent.package_id ~tool:parent.tool ~summary:`Null
+    ~request:(`Assoc ["version",`Int 1;"unrelated",`Bool true])) |> owned;
+  check bool "complete inventory rejects corruption outside the selected execution" true
+    (io (fun () -> Journal.Inventory.read ~store:fixture.store ~owner) |> Result.is_error);
+  check bool "production wake refuses the corrupt scope before new selection or dispatch" true
+    (Result.is_error (run_worker fixture));
+  check int "corrupt inventory cannot trigger a fresh provider call" posts (F.post_count fixture.server);
+  check bool "corrupt inventory preserves source acknowledgements" true (progress fixture=positions))
+
 let test_actual_official_or_mixed_path kind () = with_fixture ~history_kind:kind (fun ~sw:_ fixture ->
   let atom_before=progress fixture in
   let official ()=io (fun () -> Keeper_librarian_official_progress.read
@@ -836,7 +970,7 @@ let test_epoch_reset_refuses_old_original () = with_fixture (fun ~sw:_ fixture -
   let retained=Option.get retained in
   check json "old epoch evidence remains observable without restoring authority" original retained.Owner.request;
   check int "epoch invalidation starts no replacement provider" posts (F.post_count fixture.server))
-let test_changed_memory_rebases_original_source_without_unknown_retry ?(lose_child_after_dispatch=false) ?(recover_unacked_child=false) () = with_fixture (fun ~sw fixture ->
+let test_changed_memory_rebases_original_source_without_unknown_retry ?(lose_child_after_dispatch=false) ?(recover_unacked_child=false) ?(interrupt_settle=false) () = with_fixture (fun ~sw fixture ->
   let arrived,signal=Eio.Promise.create () and release,unblock=Eio.Promise.create () in
   let child_arrived,child_signal=Eio.Promise.create () and child_release,child_unblock=Eio.Promise.create () in
   fixture.set_response (fun capture ->
@@ -887,7 +1021,7 @@ let test_changed_memory_rebases_original_source_without_unknown_retry ?(lose_chi
         |> Result.map_error Source.error_to_string |> get in
       let preparation=Keeper_librarian_runtime.prepare_durable ~now:(Time_compat.now ()) (Source.input rebased) |> get in
       let owner=Capture.physical_owner original in
-      let request_id=Capture.fresh_request_id owner in
+      let request_id=minted_a_day_before (Capture.fresh_request_id owner) in
       let child=io (fun () -> Capture.create
         ~predecessor:{request_id=original_record.request_id;request_digest=original_record.request_digest}
         ~request_id ~owner ~destination:(Capture.destination original) ~source:rebased ~preparation ()) |> get in
@@ -1001,14 +1135,38 @@ let test_changed_memory_rebases_original_source_without_unknown_retry ?(lose_chi
        check string "parent ACK names exact successful child" child_record.request_id successor.request_id;
        check json "parent keeps the complete successful child" (Lane_addon_action.canonical (Capture.to_json child) |> get) successor.request
      | None | Some (Preparation_pending _) -> fail "successful child has no confirmed parent link");
+    let root_day=day_of original_record.request_id in
+    let gates=gate_records fixture child in
+    check (list string) "both executions hold gate records"
+      (List.sort String.compare [original_record.request_id;child_record.request_id])
+      (List.sort_uniq String.compare (List.map (fun gate -> Gate.parent_execution_id gate |> get) gates));
+    if recover_unacked_child then
+      check bool "the successor was minted on another day than its root" false
+        (String.equal (day_of child_record.request_id) root_day);
+    (* The settle moves the successor's history record first. *)
+    if interrupt_settle then settle_only fixture ~date:root_day child_record;
     ignore (run_worker fixture);
-    check int "later wake validates both originals without a third inference" 2 (F.post_count fixture.server);
-    check int "later wake retains one original and one successor only" 2 (List.length (observed_originals fixture)))))
+    check int "later wake settles both originals without a third inference" 2 (F.post_count fixture.server);
+    check int "the finished chain leaves the scope" 0 (List.length (observed_originals fixture));
+    check bool "the successor settles under its root's day" true (settled_on fixture ~date:root_day child_record);
+    check bool "the root settles under its own day" true (settled_on fixture ~date:root_day parent_after);
+    if recover_unacked_child then
+      check bool "nothing settles under the successor's own day" false
+        (settled_on fixture ~date:(day_of child_record.request_id) child_record);
+    check bool "both executions' gate records settle under that day" true
+      (List.for_all (settled_on fixture ~date:root_day) gates);
+    check int "no gate record stays for validation" 0 (List.length (gate_records fixture child)))))
 
 let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured completed-history",[
   test_case "missing attachment is reported without consuming source" `Quick test_unattached_reports_without_consuming;
   test_case "terminal refusal preserves reason and allows a fresh original" `Quick test_terminal_refusal_allows_fresh_original;
   test_case "actual original reaches Memory and source ACK" `Quick test_actual_completed_history_path;
+  test_case "a settle stopped before its gate records finishes with the next original" `Quick
+    test_stopped_settle_leaves_gates_for_the_next_original;
+  test_case "one inventory observation reuses verified gate and parent bodies without effect authority" `Quick
+    test_inventory_observation_reuses_verified_inputs;
+  test_case "inventory observation rejects mixed parents and unrelated malformed gates" `Quick
+    test_inventory_observation_rejects_mixed_parent_and_bad_scope;
   test_case "actual official-only original reaches Memory and official ACK" `Quick (test_actual_official_or_mixed_path Official);
   test_case "actual mixed original reaches Memory and both receipt/position kinds" `Quick (test_actual_official_or_mixed_path Mixed);
   test_case "production durable queue stops following phases on actual Pending" `Quick test_production_queue_pending_retains_all_sources;
@@ -1030,4 +1188,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     (test_changed_memory_rebases_original_source_without_unknown_retry ~lose_child_after_dispatch:true);
   test_case "unacknowledged replacement is denied by host and locally recovered while Off" `Quick
     (test_changed_memory_rebases_original_source_without_unknown_retry ~recover_unacked_child:true);
+  test_case "a chain settle stopped after its successor finishes from the root" `Quick
+    (test_changed_memory_rebases_original_source_without_unknown_retry ~interrupt_settle:true);
+  test_case "a chain across two UTC days settles and finishes under its root's day" `Quick
+    (test_changed_memory_rebases_original_source_without_unknown_retry ~recover_unacked_child:true ~interrupt_settle:true);
 ]]

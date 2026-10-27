@@ -116,23 +116,24 @@ type endpoint_refresh_error =
 (** Refresh from typed endpoint declarations only. Discovery never scans ports
     or invents a fallback declaration. The previous active snapshot is retained
     when no declaration is supplied or every declared endpoint is unhealthy. *)
-let refresh_llama_endpoints ~sw ~net ~endpoints =
+let refresh_llama_endpoints ?clock ~sw ~net ~endpoints () =
   match endpoints with
   | [] -> Error No_endpoints_declared
   | _ ->
-    let statuses = Discovery.refresh_and_sync ~sw ~net ~endpoints in
+    let statuses = Discovery.refresh_and_sync ?clock ~sw ~net ~endpoints () in
     let healthy_endpoints =
       List.filter_map
-        (fun (status : Discovery.endpoint_status) ->
+        (fun ((declared : Discovery.endpoint), (status : Discovery.endpoint_status)) ->
            if status.healthy
            then
              Some
                (Discovery.endpoint
+                  ?discovery_timeout_s:declared.discovery_timeout_s
                   ~protocol:status.protocol
                   ~capabilities:status.capabilities
                   status.url)
            else None)
-        statuses
+        (List.combine endpoints statuses)
     in
     (match healthy_endpoints with
      | [] -> Error (No_healthy_endpoints statuses)

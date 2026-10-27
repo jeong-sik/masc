@@ -116,9 +116,11 @@ module For_testing : sig
 
   (** What one review attempt asks of the retry scheduler. A request, not an
       outcome: whether a retry is armed is known only once the scheduler
-      answers with a [retry_admission]. *)
+      answers with a [retry_admission]. [Observe_original_requested] schedules
+      observation of the retained execution; it grants no provider replay. *)
   type retry_request =
     | Retry_requested
+    | Observe_original_requested
     | No_retry_requested
 
   (** The scheduler's answer to one request. [Armed_timer]: this request
@@ -158,6 +160,8 @@ module For_testing : sig
         ; retryable_runtimes : string list
         ; model_absent_runtimes : string list
         }
+    | Execution_pending of { detail : string }
+    | Execution_repair_required of { detail : string }
     | Raised of { detail : string }
 
   (** How one review attempt ended. [Superseded_by] records the observed

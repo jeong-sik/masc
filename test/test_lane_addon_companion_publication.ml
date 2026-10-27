@@ -428,13 +428,14 @@ let runtime_worker_exit mode env fs config original =
           resource=L.Native_resource {pid=Unix.getpid ();started=None};resolved_image=None;
           browser=None;host=None;action_schema=(fun () -> None);operator_schema=(fun () -> None);
           exported_tools=(fun () -> [tool]);companion_tools=(fun () -> [tool.name]);
+          observation_effect=(fun _ -> Lane_addon_call_context.May_change);
           observe=(fun ~binding:_ ~sources:_ -> Ok Lane_addon_types.{rows=[];coverage=[]});
           act=(fun ~arguments:_ -> Error "fixture has no actions");
           call_operator=(fun ~admit:_ ~arguments:_ -> Error Lane_addon_worker_protocol.Operator_unavailable);
           await_exit=(fun () -> Eio.Promise.await ended;"fixture worker ended");
           stop=(fun () -> incr stops;ignore (Eio.Promise.try_resolve end_worker ());
             Ok (L.Native_released {installation_id;instance_id}));
-          call_exported_tool=(fun ~companion ~on_result ~authorize:_ ~principal:_ ~name:_ ~arguments:_ ->
+          call_exported_tool=(fun ~companion ~on_result ~on_dispatch:_ ~authorize:_ ~principal:_ ~name:_ ~arguments:_ ->
             let admitted=match companion with Some value -> value | None -> fail "companion missing" in
             check bool "fake external worker receives original host admission" true (admitted.admit ());
             let path=admitted.context.socket_path in

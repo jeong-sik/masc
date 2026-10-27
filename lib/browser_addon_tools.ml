@@ -31,7 +31,7 @@ let absolute_url = function
        | Some ("http"|"https"),Some host when host<>"" -> Ok value
        | (None|Some _),(None|Some _) -> Error "url must be an absolute HTTP(S) URL")
   | None|Some _ -> Error "url is required"
-let prepare_read ~keeper_name json =
+let prepare_read json =
   let* fields=fields ["lane";"clientId";"tabId";"maxChars";"mode";"framePath";
     "scope";"expectedUrl";"navigationSource";"within";"selector";"snapshotScope";"root"] json in
   let* request=surface fields in
@@ -43,34 +43,34 @@ let prepare_read ~keeper_name json =
   let* filter=Browser_page_script.elements_filter_of_json (fun key -> List.assoc_opt key fields) in
   let* ()=match mode,(filter.within,filter.selector) with
     | `Elements,((None|Some _),(None|Some _))
-    | (`Text|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Console|`Network|`Cookies|`Frames|`Dialog),(None,None) -> Ok ()
-    | (`Text|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Console|`Network|`Cookies|`Frames|`Dialog),((Some _,_)|(_,Some _)) ->
+    | (`Text|`Html|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Console|`Network|`Cookies|`Frames|`Dialog),(None,None) -> Ok ()
+    | (`Text|`Html|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Console|`Network|`Cookies|`Frames|`Dialog),((Some _,_)|(_,Some _)) ->
         Error "within and selector apply to mode elements only" in
   let elements_projection=match filter.within,filter.selector with None,None -> Raw | (Some _,_|_,Some _) -> Scoped_elements filter in
   let top_scene=frame_path=[] && (match mode with `Scene|`Regions -> true
-    | `Text|`Elements|`Snapshot|`Screenshot|`Downloads|`Console|`Network|`Cookies|`Frames|`Dialog -> false) in
+    | `Text|`Html|`Elements|`Snapshot|`Screenshot|`Downloads|`Console|`Network|`Cookies|`Frames|`Dialog -> false) in
   let* ()=if not top_scene && List.exists (fun key -> List.mem_assoc key fields)
       ["scope";"expectedUrl";"navigationSource"] then
       Error "scope, expectedUrl and navigationSource support top-document scene or regions only" else Ok () in
   let* ()=match mode with
     | `Snapshot -> Ok ()
-    | `Text|`Elements|`Scene|`Regions|`Screenshot|`Downloads|`Console|`Network|`Cookies|`Frames|`Dialog ->
+    | `Text|`Html|`Elements|`Scene|`Regions|`Screenshot|`Downloads|`Console|`Network|`Cookies|`Frames|`Dialog ->
       if List.exists (fun key -> List.mem_assoc key fields) ["snapshotScope";"root"]
       then Error "snapshotScope and root apply to mode snapshot only" else Ok () in
   let contextual=frame_path<>[] || (match mode with `Frames|`Dialog -> true
-    | `Text|`Elements|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Console|`Network|`Cookies -> false) in
+    | `Text|`Html|`Elements|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Console|`Network|`Cookies -> false) in
   if contextual then
     let* ()=match request.route,mode with
       | Browser_selection.Exact B.Automation_route,_ -> Ok ()
       | Exact (Live_route _),(`Text|`Elements|`Frames) -> Ok ()
-      | Exact (Live_route _),(`Dialog|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Console|`Network|`Cookies) ->
-          Error "a live browser reads text, elements and frames in a frame; a dialog shows on its BrowserTabs row"
+      | Exact (Live_route _),(`Dialog|`Html|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Console|`Network|`Cookies) ->
+          Error "a live browser reads text, elements and frames in a frame; a dialog shows on its BrowserTabs/masc_browser_tabs row"
       | Automatic,_|Exact Stagehand_route,_ -> Error "frame and dialog reads require an explicit automation or live browser" in
     let* tab_id=tab request in
     let* mode=match mode with
       | `Text -> Ok (`Text max_chars) | `Elements -> Ok (`Elements filter) | `Frames -> Ok `Frames
       | `Dialog when frame_path=[] -> Ok `Dialog
-      | `Dialog|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Console|`Network|`Cookies -> Error "framePath supports text, elements and frames" in
+      | `Dialog|`Html|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Console|`Network|`Cookies -> Error "framePath supports text, elements and frames" in
     let projection=match mode with `Elements _ -> elements_projection
       | `Text _|`Frames|`Dialog -> Raw in
     prepared request projection (B.Page_context {tab_id;frame_path;mode})
@@ -92,7 +92,6 @@ let prepare_read ~keeper_name json =
         | Some _,_ | _,Some _ -> Error "snapshotScope and root are text" in
       let* tab_id=tab request in prepared request Raw (B.Page_snapshot {tab_id;max_chars;scope})
   | `Screenshot ->
-      let* ()=Option.to_result ~none:"screenshot requires an owning Keeper" (Option.map (fun _ -> ()) keeper_name) in
       let* tab_id=tab request in prepared request (Screenshot tab_id) (B.Page_capture {tab_id})
   | `Downloads ->
       (* A live connection that does not list downloads refuses at selection
@@ -113,12 +112,18 @@ let prepare_read ~keeper_name json =
         | Automatic|Exact (Live_route _|Stagehand_route) -> Error "cookie reads require automation" in
       let* tab_id=tab request in prepared request Raw (B.Page_cookies {tab_id})
   | `Text -> prepared request Raw (B.Page_read {tab_id=request.tab_id;max_chars=Some max_chars})
+  (* The source of the top document, never cut: when the JSON reply would
+     pass 1 MiB it says htmlComplete false instead. A browser that cannot read it refuses at
+     selection. *)
+  | `Html ->
+      let* ()=match cap with None -> Ok () | Some _ -> Error "maxChars applies to text; html returns the document source uncut, or none when the reply would pass 1 MiB" in
+      let* tab_id=tab request in prepared request Raw (B.Page_document {tab_id})
   | `Elements -> prepared request elements_projection (B.Page_elements {tab_id=request.tab_id;filter})
   | `Frames|`Dialog -> Error "contextual read requires a frame or dialog mode"
-let prepare ~keeper_name ~upload_paths tool json =
+let prepare ~upload_paths tool json =
   let* _=Lane_addon_action.canonical json in
   match tool with
-  | C.Read -> prepare_read ~keeper_name json
+  | C.Read -> prepare_read json
   | Interact ->
     (match json with
      | `Assoc supplied when List.assoc_opt "action" supplied = Some (`String "workflow") ->
@@ -167,7 +172,7 @@ let prepare ~keeper_name ~upload_paths tool json =
         | Browser_selection.Exact B.Stagehand_route -> Ok ()
         | Exact B.Automation_route when B.verb_allowed_on_automation verb -> Ok ()
         | Exact B.Automation_route -> Error "automation supports observe with selected locate Exact Output; act/extract require stagehand"
-        | Automatic|Exact (B.Live_route _) -> Error "BrowserInstruct requires the observed automation or stagehand lane and tabId" in
+        | Automatic|Exact (B.Live_route _) -> Error "BrowserInstruct/masc_browser_instruct requires the observed automation or stagehand lane and tabId" in
       prepared request Raw verb
   | Tabs ->
       let* fields=fields ["lane";"clientId";"tabId";"requiredActions"] json in
@@ -210,23 +215,36 @@ let project ~base_path ~keeper_name ~started request (receipt:Host.receipt) =
     | `Assoc fields -> Ok (`Assoc (capability_fields @ List.filter
         (fun (key,_) -> not (List.mem key ["browserCapabilities";"requiredActions"])) fields))
     | _ -> Error "browser inventory/session response must be an object" in
+  let data value = Result.map (fun data -> data,None) value in
   match request.projection with
-  | Raw -> Ok (annotate receipt.data)
+  | Raw -> data (Ok (annotate receipt.data))
   | Inventory ->
-      let data=match receipt.data with `List tabs -> `Assoc ["tabs",`List tabs] | value -> value in
-      with_capabilities (annotate data)
-  | Session -> with_capabilities (annotate receipt.data)
-  | Scene scene -> Browser_scene.project scene ~binding:receipt.binding ~started receipt.data
+      let inventory=match receipt.data with `List tabs -> `Assoc ["tabs",`List tabs] | value -> value in
+      data (with_capabilities (annotate inventory))
+  | Session -> data (with_capabilities (annotate receipt.data))
+  | Scene scene -> data (Browser_scene.project scene ~binding:receipt.binding ~started receipt.data)
   | Scoped_elements filter ->
-      let* data=Browser_page_script.check_scoped_elements ~filter receipt.data in
-      Ok (annotate data)
+      data (Result.map annotate (Browser_page_script.check_scoped_elements ~filter receipt.data))
   | Screenshot tab_id ->
-      let* keeper_name=Option.to_result ~none:"screenshot requires an owning Keeper" keeper_name in
-      let* data=Browser_surface.capture_from ~binding:receipt.binding ~tab_id ~started receipt.data in
-      Browser_screenshot.persist ~base_path ~keeper_name data
+      let* capture=Browser_surface.capture_from ~binding:receipt.binding ~tab_id ~started receipt.data in
+      match keeper_name,capture with
+      | Some keeper_name,_ -> data (Browser_screenshot.persist ~base_path ~keeper_name capture)
+      (* A caller with no Keeper workspace gets the checked PNG back as an image
+         block of this result, and the observation fields without its bytes.
+         The content repeats the observation as text before the image, so a
+         client that reads only content keeps the viewport and selection. *)
+      | None,`Assoc fields ->
+          (match List.assoc_opt "data" fields with
+           | Some (`String image) ->
+               let observed=`Assoc (List.filter (fun (key,_) -> key<>"data") fields) in
+               Ok (observed,
+                 Some [Llm_provider.Types.Text (Yojson.Safe.to_string observed);
+                   Llm_provider.Types.Image {media_type="image/png";data=image;source_type=Llm_provider.Types.Base64}])
+           | Some _|None -> Error "screenshot lacks its image")
+      | None,_ -> Error "screenshot must be an object"
 let handle ?upload_paths ~config ~access ~principal ~reserved ~keeper_name ~tool ~tool_name ~start_time json =
   let started=Mtime_clock.elapsed_ns () in
-  let result=match prepare ~keeper_name ~upload_paths tool json with
+  let result=match prepare ~upload_paths tool json with
     | Error detail -> Legacy.make_input_err ~tool_name ~start_time detail
     | Ok request ->
         match Host.connect ~config ~access ~principal ~reserved with
@@ -236,7 +254,8 @@ let handle ?upload_paths ~config ~access ~principal ~reserved ~keeper_name ~tool
             | Error result -> result
             | Ok receipt ->
                 (match project ~base_path:config.Workspace.base_path ~keeper_name ~started request receipt with
-                 | Ok data -> Tool_result.make_ok ~tool_name ~start_time ~data ?metadata:receipt.raw_result._meta ()
+                 | Ok (data,content_blocks) ->
+                     Tool_result.make_ok ~tool_name ~start_time ~data ?content_blocks ?metadata:receipt.raw_result._meta ()
                  | Error detail ->
                      let effect_disposition=match request.projection with
                        | Session -> Tool_result.Effect_outcome_unknown

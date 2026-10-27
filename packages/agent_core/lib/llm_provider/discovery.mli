@@ -51,13 +51,16 @@ type endpoint =
   { url : string
   ; protocol : endpoint_protocol
   ; capabilities : Capabilities.capabilities
+  ; discovery_timeout_s : float option
+    (** Declared total deadline for one discovery HTTP request. *)
   }
 
 (** Construct an endpoint declaration. [url] is trimmed. Both protocol and
     capabilities are mandatory declarations; a transport protocol never grants
     model capabilities implicitly. *)
 val endpoint
-  :  protocol:endpoint_protocol
+  :  ?discovery_timeout_s:float
+  -> protocol:endpoint_protocol
   -> capabilities:Capabilities.capabilities
   -> string
   -> endpoint
@@ -84,11 +87,20 @@ type endpoint_status =
 (** Probe explicitly-declared endpoints and return their current status.
     Non-reachable endpoints are returned with [healthy = false].
     Does not raise for endpoint failures; all probe errors are captured in the
-    corresponding [failures] field. *)
+    corresponding [failures] field. An explicit [timeout_s] overrides every
+    endpoint's [discovery_timeout_s]; otherwise each endpoint declaration applies.
+    [clock] is mandatory whenever the effective deadline is present and bounds
+    each complete HTTP request, including its response body. With neither a caller
+    nor an endpoint deadline, the existing unbounded behavior is preserved;
+    AGENT_CORE does not choose a fallback deadline. *)
 val discover
-  :  sw:Eio.Switch.t
+  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> ?timeout_s:float
+  -> headers:(string * string) list
+  -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> endpoints:endpoint list
+  -> unit
   -> endpoint_status list
 
 (** Environment variable consulted by {!resolve_default_endpoint}. *)
@@ -203,10 +215,13 @@ val first_discovered_model_id_for_url : string -> string option
 val context_for_model : string -> (string * int) option
 
 (** Probe [endpoints], update the shared per-slot context state,
-    and return the full status list.  Replaces [discover] when
-    the caller also wants the context state kept current. *)
+    and return the full status list. Replaces [discover] when the caller also
+    wants the context state kept current. [clock] is forwarded to discovery so
+    each endpoint's declared [discovery_timeout_s] can be enforced. *)
 val refresh_and_sync
-  :  sw:Eio.Switch.t
+  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> endpoints:endpoint list
+  -> unit
   -> endpoint_status list

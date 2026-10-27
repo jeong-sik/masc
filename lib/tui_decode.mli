@@ -581,11 +581,12 @@ type harness_snapshot = {
 
 type verification_review_stop =
   | Review_environment | Review_no_judgment | Review_commit_failure
-  | Review_failure | Review_cancelled
+  | Review_failure | Review_cancelled | Review_original_repair
 
 type verification_review =
   | Review_unobserved
   | Review_running of string
+  | Review_waiting_original of {detail:string;actor:string}
   | Review_stopped of { cause : verification_review_stop; detail : string; actor : string }
   | Review_approved of string
   | Review_rejected of string

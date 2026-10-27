@@ -276,9 +276,27 @@ let test_malformed_arguments_reach_no_browser () =
     ; "a scene with no tab", addon_tool Cap.Read ["lane",`String "automation";"mode",`String "scene"]
     ; "a malformed act", addon_tool Cap.Act []
     ; "an unknown session action", addon_tool Cap.Session ["action",`String "unknown"]
-    ; "a malformed navigation URL", addon_tool Cap.Goto ["url",`Int 1] ];
+    ; "a malformed navigation URL", addon_tool Cap.Goto ["url",`Int 1]
+    ; "a document source read with a text cap", read ["mode",`String "html";"maxChars",`Int 100]
+    ; "a document source read with no tab", addon_tool Cap.Read ["lane",`String "automation";"mode",`String "html"]
+    ; "a document source read in a frame",
+      read ["mode",`String "html";"framePath",`List [`String "#frame"]] ];
   check bool "a well-formed text read goes on to find the browser Add-on" true
-    (reaches_the_addon_lookup (read ["mode",`String "text"]))
+    (reaches_the_addon_lookup (read ["mode",`String "text"]));
+  check bool "a document source read with a tab goes on to find the browser Add-on" true
+    (reaches_the_addon_lookup (read ["mode",`String "html"]));
+  (* A client may fill in every default the schema declares, so a document
+     source read carrying them must still go on: no declared default may be
+     an argument html refuses. *)
+  let declared_defaults = Yojson.Safe.Util.(Tool_schemas_misc_toml.browser_read.Masc_domain.input_schema
+    |> member "properties" |> to_assoc
+    |> List.filter_map (fun (name, property) ->
+      match member "default" property with `Null -> None | value -> Some (name, value))) in
+  check bool "the schema walk sees the mode default" true (List.mem_assoc "mode" declared_defaults);
+  let schema_defaults = List.filter (fun (name, _) -> not (List.mem name ["mode";"lane";"tabId"]))
+    declared_defaults in
+  check bool "a document source read carrying the schema defaults goes on to find the browser Add-on" true
+    (reaches_the_addon_lookup (read (("mode",`String "html") :: schema_defaults)))
 
 (* A click or fill on an ego snapshot target goes to a live connection only,
    with expectedUrl. *)
@@ -334,19 +352,19 @@ let test_a_snapshot_read_is_checked_before_any_browser () =
     [ "a viewport snapshot goes on to find the browser Add-on", snapshot []
     ; "and a subtree under a ref", snapshot ["snapshotScope",`String "subtree";"root",`String "ref=12"] ]
 
-(* BrowserRead keeps a screenshot under its Keeper's workspace, so a caller
-   with no owning Keeper is refused as input before the tool looks for a
-   browser Add-on. *)
-let test_screenshot_requires_an_owning_keeper () =
+(* A Keeper keeps a screenshot under its workspace; another caller gets the
+   image in the result. Either way the input is valid and the tool goes on
+   to find the browser Add-on. *)
+let test_screenshot_reaches_the_addon_with_or_without_a_keeper () =
   let read keeper_name = addon_tool ?keeper_name Masc.Browser_capabilities.Read
       ["lane",`String "automation";"mode",`String "screenshot";"tabId",`Int 73] in
-  let unowned = read None in
-  check bool "a screenshot without an owner is refused as input" true (refused_as_input unowned);
-  check bool "an owned screenshot goes on to find the browser Add-on" true
+  check bool "a screenshot without a Keeper goes on to find the browser Add-on" true
+    (reaches_the_addon_lookup (read None));
+  check bool "a Keeper's screenshot goes on to find the browser Add-on" true
     (reaches_the_addon_lookup (read (Some "browser-screenshot-keeper")))
 
 let () = run "browser surface" ["behavior",[
-  test_case "a screenshot needs an owning Keeper" `Quick test_screenshot_requires_an_owning_keeper;
+  test_case "a screenshot reaches the Add-on with or without a Keeper" `Quick test_screenshot_reaches_the_addon_with_or_without_a_keeper;
   test_case "malformed tool arguments reach no browser" `Quick test_malformed_arguments_reach_no_browser;
   test_case "a snapshot read is checked before any browser" `Quick test_a_snapshot_read_is_checked_before_any_browser;
   test_case "a snapshot target is checked before any browser" `Quick test_a_snapshot_target_is_checked_before_any_browser;

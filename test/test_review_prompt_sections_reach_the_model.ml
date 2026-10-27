@@ -164,7 +164,8 @@ let test_every_section_template_renders () =
        were translated (#32133) and the check went silently stale: it had been
        asserting prose no template could produce. A tag is what the section is
        called, so it survives an edit to what the section says. *)
-    [ "one producer tree", AR.Producer_tree [ "repos/masc" ], lookup_status "producer_tree"
+    [ "an unobserved namespace", AR.Producer_namespace {root="/owned/root"}, lookup_status "producer_namespace"
+    ; "one producer tree", AR.Producer_tree [ "repos/masc" ], lookup_status "producer_tree"
     ; "an absent producer root",
       AR.Producer_root_absent { root = "playground/mcp-client" },
       lookup_status "producer_root_absent"

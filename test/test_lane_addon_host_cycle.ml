@@ -109,15 +109,17 @@ let backend ?await_change ?deliver_reply ?during_delivery ?before_listing ?expor
       observe = (fun ~binding:_ ~sources:_ -> incr worker.observations; Ok { rows = []; coverage = [] });
       exported_tools = (fun () -> match exported_tool with
         | None -> [] | Some (tool, _) -> [tool]);
-      call_exported_tool = (fun ~companion:_ ~on_result ~authorize:_ ~principal:_ ~name:_ ~arguments ->
+      call_exported_tool = (fun ~companion:_ ~on_result ~on_dispatch ~authorize:_ ~principal:_ ~name:_ ~arguments ->
         match exported_tool with
         | None -> Error (Lane_addon_call_context.Transport_error "no exported tools")
         | Some (_, invoke) ->
+          on_dispatch ();
           let result = invoke arguments in
           (match result with Ok reply -> on_result reply | Error _ -> ());
           result);
       operator_schema=(fun () -> None);
       companion_tools=(fun () -> []);
+      observation_effect=(fun _ -> Lane_addon_call_context.May_change);
       call_operator=(fun ~admit:_ ~arguments:_ -> Error Lane_addon_worker_protocol.Operator_unavailable);
       action_schema = (fun () -> None); act = (fun ~arguments:_ -> Error "read-only");
       stop = (fun () -> before_stop (); Ok (Lane_addon_lifecycle.Released

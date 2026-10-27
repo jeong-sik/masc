@@ -32,6 +32,7 @@ let run_named_with_masc_tools
     ?required_native_posture
     ?tool_result_projection
     ?on_selected_runtime
+    ?on_request_execution_ready
     ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
     ?temperature
@@ -83,6 +84,7 @@ let run_named_with_masc_tools
       ?on_resume
       ?attempt_continuation
       ?on_runtime_attempt_error
+      ?on_request_execution_ready
       ?transport
       ?context
       ?output_contract

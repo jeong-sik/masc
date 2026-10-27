@@ -174,6 +174,34 @@ type refusal =
   | Guest_facts_unreadable of string
   | Image_command_unavailable of string
   | Runtime_reports_other_than_asked of difference list
+
+let difference_label = function
+  | Plan_label -> "boot_plan_label"
+  | Image -> "image"
+  | Resources -> "resources"
+  | User -> "user"
+  | Working_directory -> "working_directory"
+  | Command -> "command"
+  | Mounts -> "mounts"
+  | Root_filesystem -> "root_filesystem"
+  | Capabilities -> "capabilities"
+  | Network -> "network"
+  | Environment -> "environment"
+  | Labels -> "labels"
+  | Policy_route -> "policy_route"
+  | Identity_snapshot -> "identity_snapshot"
+
+let refusal_message = function
+  | Invalid_requested_plan errors ->
+    "invalid requested plan: " ^ String.concat "; " (List.map invalid_plan_message errors)
+  | Guest_facts_unreadable _ -> "runtime guest facts are unreadable; guest preserved"
+  | Image_command_unavailable detail ->
+    "runtime image command unavailable; guest preserved: " ^ detail
+  | Runtime_reports_other_than_asked differences ->
+    Printf.sprintf
+      "runtime guest facts disagree with the requested plan (fields: %s); guest preserved"
+      (String.concat ", " (List.map difference_label differences))
+
 type assessment =
   | Matches_plan
   | Replace of difference list

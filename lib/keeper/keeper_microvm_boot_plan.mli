@@ -110,6 +110,10 @@ type refusal =
   | Image_command_unavailable of string
   | Runtime_reports_other_than_asked of difference list
 
+val refusal_message : refusal -> string
+(** Operator diagnostic. Runtime disagreement names the differing fields,
+    never their environment, credential or other observed/requested values. *)
+
 type assessment =
   | Matches_plan
   | Replace of difference list

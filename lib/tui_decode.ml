@@ -4883,7 +4883,7 @@ let decode_keeper_turns_projection json =
           loop acc rest
     in
     let* waiting = loop [] items in
-    let* error_items = required_list_field json "waiting_errors" in
+    let* error_items = optional_list_field json "waiting_errors" in
     let decode_error json =
       let* () =
         match json with

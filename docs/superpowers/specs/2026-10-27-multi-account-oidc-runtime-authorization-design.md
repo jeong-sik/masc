@@ -280,7 +280,7 @@ ProviderLink {
 
 ### 6.1 Runtime 조회와 실행
 
-`Runtime_view.t`는 목록·설정·표시용이고 실행할 수 없다. `Authorized_runtime.t`는 abstract 타입으로, attempt를 시작할 때와 failover 후보를 고를 때마다 `Runtime.authorize`로 발급한다. attempt 하나에 결속하며 저장소·캐시에 두거나 다른 attempt에 넘기지 못한다. string ID만으로 실행 객체를 얻는 경로는 금지한다. 허용 후보가 없으면 `NoAuthorizedRuntime`이며 다른 principal의 private Runtime으로 failover하지 않는다.
+`Runtime_view.t`는 목록·설정·표시용이고 실행할 수 없다. `Authorized_runtime.t`는 abstract 타입으로, attempt를 시작할 때와 failover 후보를 고를 때마다 `Runtime.authorize`로 발급한다. attempt 하나에 결속하며 저장소·캐시에 두거나 다른 attempt에 넘기지 못한다. 발급 근거는 닫힌 합타입 `Authorization_basis = Stored_grant of Grant_id.t | Single_user_operator`다. `Single_user`는 저장된 grant를 읽지 않고 `Single_user_operator` 근거로만 발급하며, `Multi_account`는 이 근거를 만들 수 없다. 모드는 부팅 때 정해지고 실행 중에 바뀌지 않는다. 바꾸려면 §10.5의 전환 절차를 거친다. string ID만으로 실행 객체를 얻는 경로는 금지한다. 허용 후보가 없으면 `NoAuthorizedRuntime`이며 다른 principal의 private Runtime으로 failover하지 않는다.
 
 attempt 시작·failover·credential 해석 직전에 현재 grant·policy·fencing을 검사한다. 저장소를 읽지 못하면 `AuthorizationUncertain`으로 거부한다. 새 입력·재시도·resume·official-client 다음 턴은 새 dispatch다.
 

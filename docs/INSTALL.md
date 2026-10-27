@@ -527,7 +527,10 @@ that shows numbers, type `0`).
   your [ego lite](https://lite.ego.app/). Confirming it runs
   `masc browser-lane-setup --mode ego`, which writes the `[browser.live.ego]`
   table of `runtime.toml`. The browser Add-on then opens a task space named
-  `masc` in ego lite and serves it as a live connection. `imp` sees only the
+  `masc-keepers` in ego lite and serves it as a live connection. Setup refuses
+  that name when a task space you made in ego lite already has it, and writes
+  nothing when ego lite does not list its spaces, so keep ego lite open; a
+  refusal leaves the other browser rows of the same run unwritten too. `imp` sees only the
   tabs in that space, and clicks and types only on the pages it opened there.
   Those pages share the cookies of your ego lite profile, so `imp` reads and
   acts as you on the sites you are logged in to. The row needs no Firefox.

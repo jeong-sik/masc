@@ -12,8 +12,9 @@
     geckodriver of the automation lane ([\[browser.automation\]]) and installs
     no host: that lane needs none. [--mode ego] writes the
     [\[browser.live.ego\]] table, so the browser Add-on serves an ego lite task
-    space ({!Masc.Browser_lane_ego_setup}); it installs no host. It starts no
-    browser and loads no extension.
+    space ({!Masc.Browser_lane_ego_setup}); it installs no host. Besides asking
+    [ego-browser] for its versions and for ego lite's list of task spaces,
+    it starts no browser and loads no extension.
 
     [--mode addon] writes the browser Add-on package this masc carries to
     [.masc/packages/browser] and declares it when the workspace has no

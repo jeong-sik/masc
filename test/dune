@@ -4124,6 +4124,11 @@
  (libraries alcotest masc masc.masc_types masc_tui_keeper_list_model masc_tui_keeper_control))
 
 (test
+ (name test_tui_keeper_columns)
+ (modules test_tui_keeper_columns)
+ (libraries alcotest masc_tui_keeper_list_model masc_tui_render_schedule))
+
+(test
  (name test_tui_editor)
  (modules test_tui_editor)
  (libraries alcotest unix masc_tui_editor))

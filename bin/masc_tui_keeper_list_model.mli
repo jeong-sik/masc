@@ -89,6 +89,16 @@ type row = {
   last_activity_at : float option;
 }
 
+type waiting_summary = {
+  tool : int;
+  model : int;
+  external_wait : int;
+  delegate : int;
+  verification : int;
+  background : int;
+}
+(** Primary waiting reasons and actual background async running in that group. *)
+
 val next_layout : layout -> layout
 val next_sort : sort -> sort
 val layout_label : layout -> string
@@ -99,3 +109,7 @@ val group_of_row : row -> attention
 val order_rows : sort:sort -> row list -> row list
 val group_counts : row list -> int * int * int * int * int
 (** Counts in [Needs_you, Active, Waiting, Inactive, Unobserved] order. *)
+val waiting_summary : row list -> waiting_summary
+(** Count each primary waiting reason and, only for those rows, async running.
+    Queued and cancelling async work, and async running on Active rows, does not
+    contribute to [background]. *)

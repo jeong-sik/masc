@@ -84,6 +84,8 @@ type row = {
   waiting : waiting_reading;
   approval : Masc.Tui_decode.keeper_tool_approval option;
   task : Masc.Tui_decode.task option;
+  awaiting_verification : bool;
+      (** The Keeper submitted a task that still awaits its verdict. *)
   open_questions : int;
   async_requests : Masc.Tui_decode.async_request_row list;
   last_activity_at : float option;
@@ -103,6 +105,11 @@ val next_layout : layout -> layout
 val next_sort : sort -> sort
 val layout_label : layout -> string
 val sort_label : sort -> string
+val holds_awaiting_verification : keeper_name:string -> Masc.Tui_decode.task list -> bool
+(** Whether [keeper_name] is the assignee of a task that awaits its verdict.
+    The row's current task cannot be relied on for this, since submission
+    clears it. An empty list, as when the backlog is unread or failed, gives
+    false. *)
 val primary_activity_of_row : row -> activity
 val badges_of_row : row -> badge list
 val group_of_row : row -> attention

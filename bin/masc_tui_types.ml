@@ -10751,6 +10751,8 @@ let keeper_list_rows (state : state) : Masc_tui_keeper_list_model.row list =
       ; waiting
       ; approval
       ; task
+      ; awaiting_verification =
+          Masc_tui_keeper_list_model.holds_awaiting_verification ~keeper_name:name state.tasks
       ; open_questions = keeper_open_question_count state name
       ; async_requests
       ; last_activity_at = keeper_activity_at ~turn ~waiting:activity_waiting keeper

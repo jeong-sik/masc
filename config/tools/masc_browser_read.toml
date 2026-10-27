@@ -19,7 +19,7 @@ minimum = 0
 [[params]]
 name = "maxChars"
 type = "integer"
-description = "Returned text cap in Unicode code points for text, scene, regions and snapshot; 50000 when omitted. html refuses it."
+description = "Returned text cap for text, scene, regions and snapshot; 50000 when omitted. Text, scene and regions count Unicode code points; snapshot counts UTF-16 units and never splits a surrogate pair. html refuses it."
 minimum = 1
 maximum = 100000
 

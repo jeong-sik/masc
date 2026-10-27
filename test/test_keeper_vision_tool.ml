@@ -2420,7 +2420,7 @@ let test_browser_screenshot_reaches_vision_reader () =
                assert (Yojson.Safe.from_string text=observed);
                assert (Yojson.Safe.Util.member "data" observed=`Null);
                assert (Yojson.Safe.Util.member "viewport" observed=viewport);
-               assert (Yojson.Safe.Util.member "browserSelection" observed<>`Null);
+               assert (Yojson.Safe.Util.(observed |> member "browserSelection" |> member "lane")=`String "automation");
                assert (assoc_string "url" observed="https://example.org/form")
            | Tool_result.Completed _|Deferred _|Failed _ -> failwith "a screenshot without a Keeper did not return its image block");
           let handle = assoc_string "artifact" data in

@@ -284,7 +284,17 @@ let test_malformed_arguments_reach_no_browser () =
   check bool "a well-formed text read goes on to find the browser Add-on" true
     (reaches_the_addon_lookup (read ["mode",`String "text"]));
   check bool "a document source read with a tab goes on to find the browser Add-on" true
-    (reaches_the_addon_lookup (read ["mode",`String "html"]))
+    (reaches_the_addon_lookup (read ["mode",`String "html"]));
+  (* A client may fill in every default the schema declares, so a document
+     source read carrying them must still go on: no declared default may be
+     an argument html refuses. *)
+  let schema_defaults = Yojson.Safe.Util.(Tool_schemas_misc_toml.browser_read.Masc_domain.input_schema
+    |> member "properties" |> to_assoc
+    |> List.filter_map (fun (name, property) ->
+      if List.mem name ["mode";"lane";"tabId"] then None
+      else match member "default" property with `Null -> None | value -> Some (name, value))) in
+  check bool "a document source read carrying the schema defaults goes on to find the browser Add-on" true
+    (reaches_the_addon_lookup (read (("mode",`String "html") :: schema_defaults)))
 
 (* A click or fill on an ego snapshot target goes to a live connection only,
    with expectedUrl. *)

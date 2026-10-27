@@ -46,6 +46,7 @@ if hashlib.sha256(binary.read_bytes()).hexdigest() != receipt["binary_sha256"]:
     raise SystemExit("installed binary digest differs")
 installed = health["dashboard_surface"]["installed_release"]
 if installed["kind"] != "installed_release" or installed["status"] != "verified":
+    print("installed_release diagnostics: " + json.dumps(installed, sort_keys=True), file=sys.stderr)
     raise SystemExit("runtime did not select a verified installed release")
 if Path(installed["release_root"]) != binary.parent:
     raise SystemExit("runtime selected another installed release root")

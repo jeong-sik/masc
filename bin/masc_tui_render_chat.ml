@@ -2846,8 +2846,14 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                     le_entry = ({ delivery_state = None; style;
                      heading_boundary;
                      body_presentation;
-                     timestamp = keeper_message_clock (Option.value timeline_at ~default:started_at);
-                     timeline_bucket;
+                     (* The retry summary is source-scoped, and its place at
+                        the end of this block is not its observation time. *)
+                     timestamp =
+                       (if item.origin = Keeper_chat_transcript.Retry_observation_of_source
+                        then "" else keeper_message_clock (Option.value timeline_at ~default:started_at));
+                     timeline_bucket =
+                       (if item.origin = Keeper_chat_transcript.Retry_observation_of_source
+                        then None else timeline_bucket);
                      diagnostics;
                      speaker = Option.value speaker ~default:role_label;
                      role_label =
@@ -2872,7 +2878,8 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                 | Keeper_chat_transcript.Thinking_stretch _
                         | Keeper_chat_transcript.Tool_stretch _
                         | Keeper_chat_transcript.Reply_of_segment _
-                        | Keeper_chat_transcript.Error_of_segment _ -> turn_rail_of ~siding:None
+                        | Keeper_chat_transcript.Error_of_segment _
+                        | Keeper_chat_transcript.Retry_observation_of_source -> turn_rail_of ~siding:None
                             ~edge:Masc_tui_types.Turn_continues ~style);
                      (* A live turn draws its Gate steps as status text the
                         transcript composed, not as the store's argument, so
@@ -2937,7 +2944,8 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                           the body too, where narrow gutters cannot hide it. *)
                        entry Message_layout.Status "RECEIPT" ("접수 당시: " ^ text)
                    | Text_stretch _ | Media_stretch _ | Thinking_stretch _ | Tool_stretch _
-                   | Unstreamed_skills | Reply_of_segment _ | Error_of_segment _ ->
+                   | Unstreamed_skills | Reply_of_segment _ | Error_of_segment _
+                   | Retry_observation_of_source ->
                        entry Message_layout.Status (label "STATUS") text)
               | Keeper_chat_transcript.Drawn_error _
                 when failure_in_live_status turn_log || committed_error ->
@@ -2958,7 +2966,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                       match item.origin with
                         | Admission_of_request _ -> false
                         | Text_stretch _ | Media_stretch _ | Thinking_stretch _ | Tool_stretch _ | Unstreamed_skills
-                        | Reply_of_segment _ | Error_of_segment _ -> true)
+                        | Reply_of_segment _ | Error_of_segment _ | Retry_observation_of_source -> true)
                     (Keeper_chat_transcript.drawn transcript))
                |> List.filter (fun (_, (item : Keeper_chat_transcript.drawn_item)) ->
                     not (List.mem item.origin covered_media))))
@@ -3288,7 +3296,8 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                 | Keeper_chat_transcript.Tool_stretch _
                 | Keeper_chat_transcript.Unstreamed_skills
                 | Keeper_chat_transcript.Reply_of_segment _
-                | Keeper_chat_transcript.Error_of_segment _ ) )
+                | Keeper_chat_transcript.Error_of_segment _
+                | Keeper_chat_transcript.Retry_observation_of_source ) )
           , _ ) -> Some (Masc_tui_types.turn_log_execution_id log)
     in
     let edges = Hashtbl.create 16 in
@@ -3467,7 +3476,8 @@ let search_anchor_of_tag = function
            | Keeper_chat_transcript.Tool_stretch _
            | Keeper_chat_transcript.Unstreamed_skills
            | Keeper_chat_transcript.Reply_of_segment _
-           | Keeper_chat_transcript.Error_of_segment _ ) as origin)
+           | Keeper_chat_transcript.Error_of_segment _
+           | Keeper_chat_transcript.Retry_observation_of_source ) as origin)
       , canonical_reply ) ->
       Some (Search_journal {
         source = Masc_tui_types.turn_log_execution_source log; origin; canonical_reply })
@@ -3512,7 +3522,8 @@ let projection_index_of_anchor projection =
                | Some (Keeper_chat_transcript.Tool_stretch _)
                | Some (Keeper_chat_transcript.Unstreamed_skills)
                | Some (Keeper_chat_transcript.Reply_of_segment _)
-               | Some (Keeper_chat_transcript.Error_of_segment _) -> ());
+               | Some (Keeper_chat_transcript.Error_of_segment _)
+               | Some Keeper_chat_transcript.Retry_observation_of_source -> ());
               if canonical then add (Journal_reply source) at) projection.tagged_entries;
         search_index_memo := Some (projection.tagged_entries, index);
         index in

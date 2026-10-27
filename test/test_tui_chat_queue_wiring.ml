@@ -3301,6 +3301,41 @@ let test_partial_observation_survives_history_ending_and_unavailable_journal () 
     (Tui_types.observed_log_has_ended state (List.hd state.msg_settled_logs))
 ;;
 
+let test_retry_evidence_survives_error_suppression () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+  state.msg_target_keeper_name <- Some "alpha";
+  state.msg_loaded_keeper <- Some "alpha";
+  let retry : Runtime_claude_api_retry.t =
+    { observation_id="private-retry"; attempt=1; max_retries=10;
+      retry_delay_ms=1_000; error_status=Some 401 } in
+  let live = inflight_with_log ~keeper_name:"alpha" ~started_at:100.
+    [Live.Run_started;
+     Live.Runtime_attempt_started {runtime_id=Some "claude";attempt_index=Some 0};
+     Live.Provider_retry_observed
+       {attempt={routing_run_id="route";runtime_id="claude";lane_attempt_index=0};retry};
+     Live.Run_failed {message="The Keeper turn failed."}] in
+  let request_id = live.sent_request.request_id in
+  state.msg_inflight <- [live];
+  state.msg_live <- Some live.log;
+  let wanted = Some (Tui_types.Search_journal
+    {source=Log.Operation request_id; origin=Keeper_chat_transcript.Retry_observation_of_source;
+     canonical_reply=false}) in
+  let has_evidence () =
+    let projection = Masc_tui_render_chat.keeper_message_projection state
+      ~keeper_name:"alpha" ~chat_cols:80 in
+    List.exists (fun (tag,_) -> Masc_tui_render_chat.search_anchor_of_tag tag = wanted)
+      projection.tagged_entries in
+  check bool "live status suppressing the error keeps independent retry evidence" true (has_evidence ());
+  state.msg_inflight <- [];
+  state.msg_live <- None;
+  Log.commit live.log.tl_log;
+  state.msg_settled_logs <- [live.log];
+  state.msg_loaded <- [chat_entry ~request_id ~role:Tui_types.Message_error
+    ~text:"recorded failure" ~at:102. ()];
+  check bool "a committed error does not suppress independent retry evidence" true (has_evidence ())
+;;
+
 let test_succeeded_operation_with_checkpoint_only_keeps_final_history () =
   let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
   state.msg_loaded_keeper <- Some "alpha";
@@ -6480,6 +6515,8 @@ let () =
             test_the_panes_own_turn_is_live_in_flight_and_observed_once_cut
         ; test_case "partial observation survives history ending and unavailable journal" `Quick
             test_partial_observation_survives_history_ending_and_unavailable_journal
+        ; test_case "retry evidence survives error suppression" `Quick
+            test_retry_evidence_survives_error_suppression
         ; test_case "observed handoff retains progress and one final reply" `Quick
             test_observed_history_handoff_keeps_progress_and_one_final_reply
         ; test_case "checkpoint activity rows retain exact source authority" `Quick

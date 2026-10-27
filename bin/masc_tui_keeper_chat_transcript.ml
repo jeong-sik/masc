@@ -283,6 +283,7 @@ type drawn_origin =
   | Unstreamed_skills
   | Reply_of_segment of int
   | Error_of_segment of int
+  | Retry_observation_of_source
 
 type response_part = Observed_response | Final_response
 
@@ -394,6 +395,10 @@ type t =
            streamed and a reader could not tell reasoning from writing from a
            provider that had stopped answering. [None] until the first byte.
            Reset per attempt. *)
+  ; mutable last_provider_retry :
+      (Runtime_native_tasks.attempt * Runtime_claude_api_retry.t) option
+        (* Last retry received from this source, independent of the current
+           progress signal. It does not establish a failure cause. *)
   ; mutable runtime_named_at : float option
         (* When the runtime serving this attempt was named. Read only while
            [model_signal] is [None], where it is the age of the silence:
@@ -475,6 +480,7 @@ let create_for_source ~keeper_name ~source ~started_at =
   ; content_scope_closed = false
   ; active_model_content = []
   ; model_signal = None
+  ; last_provider_retry = None
   ; runtime_named_at = None
   ; reply = None
   ; ending_source = Ending_heard_in_stream
@@ -682,6 +688,7 @@ let settled_at t = t.settled_at
 let attempt t = t.attempt
 let reply t = t.reply
 let phase t = t.phase
+let last_provider_retry_observation t = t.last_provider_retry
 let ending_source t = t.ending_source
 let awaiting_continuation t =
   match t.phase, t.reply with
@@ -927,6 +934,18 @@ let approval_outcome_to_string = function
    this is where a reader starts asking whether it stopped, so it is where the
    row starts stating the silence's age beside the phase. *)
 let quiet_after_s = 2.0
+
+(* Only typed numeric fields are rendered, never the CLI's private error text
+   or observation identity. Counts are separate provider reports, not a
+   client-side retry budget. *)
+let provider_retry_text (retry : Runtime_claude_api_retry.t) =
+  let status = match retry.error_status with
+    | Some code when code >= 100 && code <= 599 -> Printf.sprintf " · HTTP %d" code
+    | Some code -> Printf.sprintf " · status %d" code
+    | None -> "" in
+  Printf.sprintf "provider retry reported in this stream (may have recovered; link to failure unknown)%s · attempt %d · max retries %d"
+    status retry.attempt retry.max_retries
+;;
 
 (* The model side's phase as one clause, or [None] before the first byte,
    where the named runtime is the subject instead. *)
@@ -1713,6 +1732,10 @@ let apply_delta ~now t (delta : Live.delta) =
       t.admission <- Some (admission, queue_length);
       if t.initial_receipt = None then t.initial_receipt <- Some (now, interactive)
   | Live.Provider_retry_observed { attempt; retry } ->
+      (* Historical evidence follows the enclosing source even if a terminal
+         operation record was received before a late journal page. Its runtime
+         is not necessarily the active attempt or failure cause. *)
+      t.last_provider_retry <- Some (attempt, retry);
       (* The enclosing journal owns this operation; the frozen runtime attempt
          must also match before its observation can own current progress. *)
       (match t.phase, t.current_runtime_id with
@@ -2536,7 +2559,8 @@ let compute_drawn t =
       (Drawn_thinking _ | Drawn_media _ | Drawn_skill _ | Drawn_tools _ | Drawn_text _
       | Drawn_reply _ | Drawn_status _ | Drawn_error _)
     | ( Admission_of_request _ | Media_stretch _ | Thinking_stretch _ | Tool_stretch _
-      | Unstreamed_skills | Reply_of_segment _ | Error_of_segment _ ),
+      | Unstreamed_skills | Reply_of_segment _ | Error_of_segment _
+      | Retry_observation_of_source ),
       (None | Some _),
       (Drawn_thinking _ | Drawn_media _ | Drawn_skill _ | Drawn_tools _ | Drawn_text _
       | Drawn_reply _ | Drawn_status _ | Drawn_error _) -> false
@@ -2683,15 +2707,27 @@ let compute_drawn t =
   let items = match t.phase with
   | Waiting | Working | Stream_ended -> items
   | Stream_failed message ->
-      items
-      @ [ { origin = Error_of_segment t.segment
+      let error = { origin = Error_of_segment t.segment
           ; response_part = None
           ; at = t.ended_at
           ; segment = t.segment
           ; superseded = None
           ; superseded_runtime_id = None
           ; drawn = Drawn_error (safe_block message)
-          } ]
+          } in
+      let retry = match last_provider_retry_observation t with
+        | None -> []
+        | Some (_, retry) ->
+            [ { origin = Retry_observation_of_source
+              ; response_part = None
+              ; at = None
+              ; segment = t.segment
+              ; superseded = None
+              ; superseded_runtime_id = None
+              ; drawn = Drawn_status
+                  (provider_retry_text retry)
+              } ] in
+      items @ [error] @ retry
   in
   Option.to_list (admission_prelude t) @ items
 ;;

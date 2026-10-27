@@ -1462,26 +1462,31 @@ let nullable_string = function
   | `String value -> Ok (Some value)
   | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ -> Error ()
 
+(* The seat reads the DOS worker's last completed observation, whose row
+   carries the controller and the loaded program's saves name. Asking the
+   worker instead waited behind its other calls, such as a long press, on
+   every poll of every guest, and a pending seat read disables moves (#46416).
+   A call that may change the controller is followed by a new observation,
+   so the seat trails the worker by that one observation. *)
 let seat_observation ~config =
-  match Machine_addon_host.call_shared ~config ~principal:Lane_addon_call_context.Anonymous
-      ~name:"masc_dos_screen" ~arguments:(`Assoc ["include_frame", `Bool false]) with
-  | Error (Lane_addon_runtime.Unavailable message | Lane_addon_runtime.Outcome_unknown message
-      | Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Rejected message | Unavailable message | Activity_disabled message | Activity_unobserved message)) ->
-      Error message
-  | Ok result when result.Mcp_protocol.Mcp_types.is_error = Some true ->
-      (match Machine_controller_contract.screen_error_of_meta result._meta with
-       | Some Machine_controller_contract.Screen_no_machine -> Ok Seat_no_machine
-       | Some (Machine_controller_contract.Screen_capture_failed | Machine_controller_contract.Screen_encode_failed) | None ->
-           Error (Agent_core.Mcp.text_of_tool_result result))
-  | Ok result ->
-      (match result.structured_content with
-       | Some (`Assoc fields) ->
+  match Lane_addon_runtime.observation_for_export ~config
+      ~access:Lane_addon_sources.Unauthenticated ~name:"masc_dos_screen" with
+  | Error refusal -> Error (Lane_addon_runtime.export_refusal_message refusal)
+  | Ok None -> Error "No attached shared Add-on provides masc_dos_screen"
+  | Ok (Some snapshot) ->
+      let loaded = List.filter_map (fun (row : Lane_addon_types.row) ->
+        Option.map (fun loaded -> loaded, row.fields) (List.assoc_opt "machine_loaded" row.fields))
+        snapshot.output.rows in
+      (match loaded with
+       | [`Bool false, _] -> Ok Seat_no_machine
+       | [`Bool true, fields] ->
            (match Option.map nullable_string (List.assoc_opt "controller" fields),
                   Option.map nullable_string (List.assoc_opt "saves_name" fields) with
             | Some (Ok controller), Some (Ok saves_name) -> Ok (Seat_machine { controller; saves_name })
             | (None | Some (Error ())), _ | _, (None | Some (Error ())) ->
-                Error "DOS worker returned invalid seat information")
-       | _ -> Error "DOS worker returned no seat information")
+                Error "DOS worker observation has invalid seat information")
+       | [] | [(`Null | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _), _] | _ :: _ :: _ ->
+           Error "DOS worker observation has no seat information")
 
 let nullable_json = function None -> `Null | Some value -> `String value
 

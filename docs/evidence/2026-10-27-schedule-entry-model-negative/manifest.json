@@ -1,0 +1,896 @@
+{
+  "schema": "masc.schedule-entry-model-negative.manifest.v1",
+  "source_C3": "87e6f274ddd5958b3966608fab376cfd1cb50ed3",
+  "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate",
+  "retention_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-turn-request-scope",
+  "scope": "Two actual original C3 trials, one per model, both Behavior FAIL. No bundle-wide source approval or behavior PASS.",
+  "files": [
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/independent-actual-review-original.json",
+        "bytes": 36116,
+        "sha256": "094dc56824f597d31e7aa31326d9a38a090e290a68904151cb14a9bd80693920"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/independent-actual-c3-scope-result-review.json",
+          "bytes": 36116,
+          "sha256": "094dc56824f597d31e7aa31326d9a38a090e290a68904151cb14a9bd80693920"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false,
+        "details": ""
+      }
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/integration-correction-original.json",
+        "bytes": 11075,
+        "sha256": "4f314cd5db99be469ea7a57fea4bcc10b8e41d020874f5db1c57325019a8366d"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/independent-integration-correction-87e6f274.json",
+          "bytes": 11075,
+          "sha256": "4f314cd5db99be469ea7a57fea4bcc10b8e41d020874f5db1c57325019a8366d"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false,
+        "details": ""
+      }
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/producer/native-receipt-original.json",
+        "bytes": 1622,
+        "sha256": "62f296dbb8759fd38d1304797e95c928d071be9e54c78b40cc1edadf3122479c"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/native40428400174/extracted/receipt.json",
+          "bytes": 1622,
+          "sha256": "62f296dbb8759fd38d1304797e95c928d071be9e54c78b40cc1edadf3122479c"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false,
+        "details": ""
+      }
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/producer/native-binding-original.json",
+        "bytes": 1402,
+        "sha256": "00c31be20e143b5cccc851025d316adccb97c77da6901f14ebad9d636de32687"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/native40428400174/native-binding.json",
+          "bytes": 1402,
+          "sha256": "00c31be20e143b5cccc851025d316adccb97c77da6901f14ebad9d636de32687"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false,
+        "details": ""
+      }
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/producer/root-build-commit-original.json",
+        "bytes": 755,
+        "sha256": "1f824f3dc91c5560ae11e74881b677c17fd46568967025d164f532a4ba9f42f0"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/native40428400174/root-build-commit-observation.json",
+          "bytes": 755,
+          "sha256": "1f824f3dc91c5560ae11e74881b677c17fd46568967025d164f532a4ba9f42f0"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false,
+        "details": ""
+      }
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/controller-capture.py.txt",
+        "bytes": 78688,
+        "sha256": "5dc790ed515f4bdeab148314ab0dc0d4e6b48c0050c58105a8109bfacf8a5aec"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/probe_real_busy_after_effect_c3_v2.py",
+          "bytes": 78688,
+          "sha256": "5dc790ed515f4bdeab148314ab0dc0d4e6b48c0050c58105a8109bfacf8a5aec"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false,
+        "details": ""
+      }
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/deepseek/generated-create-a-original.json",
+        "bytes": 1532,
+        "sha256": "8a59a3ec71016430677b429731a8b04a422a8e76b89cfda39af328082d15f047"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-deepseek-c3-1/generated-create-a.json",
+          "bytes": 1532,
+          "sha256": "8a59a3ec71016430677b429731a8b04a422a8e76b89cfda39af328082d15f047"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false,
+        "details": ""
+      }
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/deepseek/generated-create-b-original.json",
+        "bytes": 801,
+        "sha256": "af280b43be9dfb72cb5ab856fe252695e662e4b5527b82d125ce2ef4051362c5"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-deepseek-c3-1/generated-create-b.json",
+          "bytes": 801,
+          "sha256": "af280b43be9dfb72cb5ab856fe252695e662e4b5527b82d125ce2ef4051362c5"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false,
+        "details": ""
+      }
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/deepseek/result-original.json",
+        "bytes": 358,
+        "sha256": "2ebb1a0160d0c7efaed946dcd605f94bf18073b0c1186eeabba512d4aa7c08fb"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-deepseek-c3-1/result.json",
+          "bytes": 358,
+          "sha256": "2ebb1a0160d0c7efaed946dcd605f94bf18073b0c1186eeabba512d4aa7c08fb"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false,
+        "details": ""
+      }
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/deepseek/all-owned-inventory-original.json",
+        "bytes": 8606,
+        "sha256": "46d1f558ab586026c7a8d8fb806290daeae0768730c2ba533492060bb4251452"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-deepseek-c3-1/all-owned-tool-inventory.json",
+          "bytes": 8606,
+          "sha256": "46d1f558ab586026c7a8d8fb806290daeae0768730c2ba533492060bb4251452"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false,
+        "details": ""
+      }
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/deepseek/server-ended-original.json",
+        "bytes": 1088,
+        "sha256": "4d38c8409d6289088c0b85c84f40512fdf90f0ef1468480bf21267a6fb6db567"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-deepseek-c3-1/process-ended.json",
+          "bytes": 1088,
+          "sha256": "4d38c8409d6289088c0b85c84f40512fdf90f0ef1468480bf21267a6fb6db567"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false,
+        "details": ""
+      }
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/deepseek/controller-ended-original.json",
+        "bytes": 112,
+        "sha256": "a124d429971a4617b83cb343ead5b9a53aff907971a322326bb478cd71e18c9e"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/after-effect-deepseek-c3-1-controller-ended.json",
+          "bytes": 112,
+          "sha256": "a124d429971a4617b83cb343ead5b9a53aff907971a322326bb478cd71e18c9e"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false,
+        "details": ""
+      }
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/deepseek/owned-tools-and-notes-selected.json",
+        "bytes": 13557,
+        "sha256": "9accdad4f3cce5df1b06307cf2ea99d4f785aef16d88ca6e435367577d0f7e8a"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-deepseek-c3-1/workspace/.masc/tool_calls/2026-10/27.jsonl",
+          "bytes": 50094,
+          "sha256": "c37e659b24a46675218205b497b66bcfda91e9d705af2b0b950629d1d492eb4d"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-deepseek-c3-1/workspace/.masc/schedules.json",
+          "bytes": 6053,
+          "sha256": "21fc9738e34eeef1a3d78e14456fccc840a5bcc21e827c4981e5bec81eac074e"
+        }
+      ],
+      "transformation": {
+        "kind": "selected_field_derivative",
+        "is_derivative": true,
+        "details": "Select explicit identity/input fields from every owned row. Preserve successful note/notes-list output values; other output content replaced by declared value digests. Primary notes selected exactly; no reasoning/provider prompts copied."
+      }
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/deepseek/lifecycle-selected.json",
+        "bytes": 27133,
+        "sha256": "65d999f9a1d21588e85d1f8bd35a8ffc6d77bc67014684ebcba43630af5f2a0f"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-deepseek-c3-1/workspace/.masc/keepers/audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb/reaction-ledger/v7/2026-10/27.jsonl",
+          "bytes": 10400,
+          "sha256": "1700772c09f440b9e4eed2d21fa0ee6978f58da13724dea3e3b8fa1615cf88cc"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-deepseek-c3-1/workspace/.masc/keepers/audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb/turn-records/2026-10/27.jsonl",
+          "bytes": 15234,
+          "sha256": "0de5a2a92c13bcda8e29e9a3230800befc8f9750d4ab4adb3dee837597f5ef38"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-deepseek-c3-1/queue-observations.json",
+          "bytes": 199108,
+          "sha256": "e0f6716c5ae5cfecc90de1859dc4c66ca7a60e89887bdfaa8cc81344ed010799"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-deepseek-c3-1/workspace/.masc/keepers/audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb/event-queue-v19.json",
+          "bytes": 2445,
+          "sha256": "230baac05e5d0faed4219ff9bdee29c1b4e7a7b4a522851a964203be91c39b56"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-deepseek-c3-1/workspace/.masc/schedules.json",
+          "bytes": 6053,
+          "sha256": "21fc9738e34eeef1a3d78e14456fccc840a5bcc21e827c4981e5bec81eac074e"
+        }
+      ],
+      "transformation": {
+        "kind": "selected_field_derivative",
+        "is_derivative": true,
+        "details": "Select all reaction event identities/terminal/ACK fields, exact turn execution memberships, and bounded queue revision/A2-adjacent samples. Omit repeated request bodies, full trace/request observations and every full mutable checkpoint."
+      }
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/deepseek/admission-witness-selected.json",
+        "bytes": 11129,
+        "sha256": "ce48f9323d7a8b24eb684eb0c98fffa8daea84ab6035c313fdbf5fe0e0abbc09"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-deepseek-c3-1/workspace/.masc/keepers/audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb/provider-inputs/2026-10/27.jsonl",
+          "bytes": 42109,
+          "sha256": "f05843087afa82ff6673c379de180b35250b23f07b652f3e5cfc986756071ab2"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-deepseek-c3-1/workspace/.masc/keepers/audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb/runtime-manifests/trace-1793065478099-00000.jsonl",
+          "bytes": 86916,
+          "sha256": "c87bbef1d7dafd5fcbd392fa6dfc403ba9bd3a74bcd9e65ccd1901a0c30bc2ac"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-deepseek-c3-1/workspace/.masc/keepers/audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb/turn-records/2026-10/27.jsonl",
+          "bytes": 15234,
+          "sha256": "0de5a2a92c13bcda8e29e9a3230800befc8f9750d4ab4adb3dee837597f5ef38"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-deepseek-c3-1/generated-create-a.json",
+          "bytes": 1532,
+          "sha256": "8a59a3ec71016430677b429731a8b04a422a8e76b89cfda39af328082d15f047"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-deepseek-c3-1/generated-create-b.json",
+          "bytes": 801,
+          "sha256": "af280b43be9dfb72cb5ab856fe252695e662e4b5527b82d125ce2ef4051362c5"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-deepseek-c3-1/workspace/.masc/tool_blobs/74/74607081442916cb051de0d9a40330f47e92187550423a143f762c1b8f1a1590",
+          "bytes": 25948,
+          "sha256": "74607081442916cb051de0d9a40330f47e92187550423a143f762c1b8f1a1590"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-deepseek-c3-1/workspace/.masc/tool_blobs/e0/e0b535b21817e71d46406f185a45eb340affab90de14aadae244af60957307cc",
+          "bytes": 25955,
+          "sha256": "e0b535b21817e71d46406f185a45eb340affab90de14aadae244af60957307cc"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-deepseek-c3-1/workspace/.masc/tool_blobs/09/093f7ef4d57d177d1b0bdc6f9c553b9b53a8a338b27b8cf2bb4f5f5061232bb9",
+          "bytes": 2972,
+          "sha256": "093f7ef4d57d177d1b0bdc6f9c553b9b53a8a338b27b8cf2bb4f5f5061232bb9"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-deepseek-c3-1/workspace/.masc/tool_blobs/cb/cba5f9021ee3cf70df82609ef56ddb95d60d83907a9a34046c653004b05c9edf",
+          "bytes": 2222,
+          "sha256": "cba5f9021ee3cf70df82609ef56ddb95d60d83907a9a34046c653004b05c9edf"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-deepseek-c3-1/workspace/.masc/tool_blobs/83/83c157db601f547f4a63213a24a2b142c52ed24a31617994d9c4c55dee00a0e6",
+          "bytes": 25948,
+          "sha256": "83c157db601f547f4a63213a24a2b142c52ed24a31617994d9c4c55dee00a0e6"
+        }
+      ],
+      "transformation": {
+        "kind": "selected_field_derivative",
+        "is_derivative": true,
+        "details": "Verify original System/User blob bytes and hashes; extract only typed admission spans, identity metadata and exact-body-equality facts. Source blobs remain original-only and are not copied."
+      }
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/deepseek/run-binding-selected.json",
+        "bytes": 4058,
+        "sha256": "5be50e270c55bb6dbaf0414f253ae56a1aa08d14496fa74a2c8fbdeb7a384a16"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-deepseek-c3-1/provenance.json",
+          "bytes": 6963,
+          "sha256": "39c2335b4a0677988d0da795fc9b8902ab337b0ffd39601879989631fdcfd4f1"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/after-effect-deepseek-c3-1-invocation.json",
+          "bytes": 1515,
+          "sha256": "e6fc1be88613603c6ef40969052985c4d889d0979047f4461823d27cb9f9ef22"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/independent-actual-c3-scope-result-review.json",
+          "bytes": 36116,
+          "sha256": "094dc56824f597d31e7aa31326d9a38a090e290a68904151cb14a9bd80693920"
+        }
+      ],
+      "transformation": {
+        "kind": "selected_field_derivative",
+        "is_derivative": true,
+        "details": "Select source/native/controller/runtime/owned setup and original argv; omit credentials and configuration bodies. Normalization/checkpoint availability are explicitly from retained independent report."
+      }
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/glm/generated-create-a-original.json",
+        "bytes": 1522,
+        "sha256": "2317787b44bfd68f78c3fe0df71fd6fb04fe51f7a63cc04e52ba0201932ad6d9"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-glm-c3-1/generated-create-a.json",
+          "bytes": 1522,
+          "sha256": "2317787b44bfd68f78c3fe0df71fd6fb04fe51f7a63cc04e52ba0201932ad6d9"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false,
+        "details": ""
+      }
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/glm/generated-create-b-original.json",
+        "bytes": 796,
+        "sha256": "fb9153fefcf0d0b4f778679250f2cb68ba9e59860dd6ceabae258befa5105761"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-glm-c3-1/generated-create-b.json",
+          "bytes": 796,
+          "sha256": "fb9153fefcf0d0b4f778679250f2cb68ba9e59860dd6ceabae258befa5105761"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false,
+        "details": ""
+      }
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/glm/result-original.json",
+        "bytes": 358,
+        "sha256": "ef37eee8ded5e6313ec3371e7c5c6cdaefc613d4036b094e275336f130350998"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-glm-c3-1/result.json",
+          "bytes": 358,
+          "sha256": "ef37eee8ded5e6313ec3371e7c5c6cdaefc613d4036b094e275336f130350998"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false,
+        "details": ""
+      }
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/glm/all-owned-inventory-original.json",
+        "bytes": 8708,
+        "sha256": "bb45950e786af52ba2615c79fc881efbcd41ccceb97d77b615c9ef6de40156f5"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-glm-c3-1/all-owned-tool-inventory.json",
+          "bytes": 8708,
+          "sha256": "bb45950e786af52ba2615c79fc881efbcd41ccceb97d77b615c9ef6de40156f5"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false,
+        "details": ""
+      }
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/glm/server-ended-original.json",
+        "bytes": 1080,
+        "sha256": "e5edaf56d2209c278420e872902acb0d0b176ec90f02096083570bb6783e66f6"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-glm-c3-1/process-ended.json",
+          "bytes": 1080,
+          "sha256": "e5edaf56d2209c278420e872902acb0d0b176ec90f02096083570bb6783e66f6"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false,
+        "details": ""
+      }
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/glm/controller-ended-original.json",
+        "bytes": 110,
+        "sha256": "32ac1a1921d46bde5da3d6c65b056169f1b900f08999a4017f9d86be74464773"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/after-effect-glm-c3-1-controller-ended.json",
+          "bytes": 110,
+          "sha256": "32ac1a1921d46bde5da3d6c65b056169f1b900f08999a4017f9d86be74464773"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false,
+        "details": ""
+      }
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/glm/owned-tools-and-notes-selected.json",
+        "bytes": 13352,
+        "sha256": "161b91421893f9460fcd4844ac2782a706c680c4e8a8c3654b5d2dcb825a45ae"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-glm-c3-1/workspace/.masc/tool_calls/2026-10/27.jsonl",
+          "bytes": 50896,
+          "sha256": "489365737c371e32cb3f6a511292076e79ab02e15d6f26dd98bc86e686d4ad02"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-glm-c3-1/workspace/.masc/schedules.json",
+          "bytes": 6012,
+          "sha256": "2ea11f991cb987c6af7ac73a89006668e3333d5560a089f625d3f09ac7f24b7a"
+        }
+      ],
+      "transformation": {
+        "kind": "selected_field_derivative",
+        "is_derivative": true,
+        "details": "Select explicit identity/input fields from every owned row. Preserve successful note/notes-list output values; other output content replaced by declared value digests. Primary notes selected exactly; no reasoning/provider prompts copied."
+      }
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/glm/lifecycle-selected.json",
+        "bytes": 26999,
+        "sha256": "a92c98ac02ac8f8761bb2fb289349d75b3ba868435fd241ef14285ac8f4d1db6"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-glm-c3-1/workspace/.masc/keepers/audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2/reaction-ledger/v7/2026-10/27.jsonl",
+          "bytes": 10347,
+          "sha256": "87519f9635516082381cc350127c4828986bd3f397fc887129bd8ad189c2ae53"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-glm-c3-1/workspace/.masc/keepers/audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2/turn-records/2026-10/27.jsonl",
+          "bytes": 14391,
+          "sha256": "63afee178a14473e39eedf2596c00d96084f6809dd14197e841d816c4c8f2934"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-glm-c3-1/queue-observations.json",
+          "bytes": 819834,
+          "sha256": "3df0b535bbed78421b11abab45078d38a6a57f093dab548701d6f7a440ddb73c"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-glm-c3-1/workspace/.masc/keepers/audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2/event-queue-v19.json",
+          "bytes": 2440,
+          "sha256": "9fc5d274e7e6bc359d38fc2d4f5b62da7f57ae3c514f852b0b9ac63d15e66c37"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-glm-c3-1/workspace/.masc/schedules.json",
+          "bytes": 6012,
+          "sha256": "2ea11f991cb987c6af7ac73a89006668e3333d5560a089f625d3f09ac7f24b7a"
+        }
+      ],
+      "transformation": {
+        "kind": "selected_field_derivative",
+        "is_derivative": true,
+        "details": "Select all reaction event identities/terminal/ACK fields, exact turn execution memberships, and bounded queue revision/A2-adjacent samples. Omit repeated request bodies, full trace/request observations and every full mutable checkpoint."
+      }
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/glm/admission-witness-selected.json",
+        "bytes": 11128,
+        "sha256": "4a155d0813fb2b0e317cb7565dc666682a64d013339171bd5299caf9890514df"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-glm-c3-1/workspace/.masc/keepers/audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2/provider-inputs/2026-10/27.jsonl",
+          "bytes": 40780,
+          "sha256": "d776351532c39b15dfb4d14eae873473302cc043364a3f1774130298e744c48b"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-glm-c3-1/workspace/.masc/keepers/audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2/runtime-manifests/trace-1793065478075-00000.jsonl",
+          "bytes": 85381,
+          "sha256": "1856389b09e034e34f42358b5047e39b0fe7ee050a0d82dc5897cb8ffa0fc0c9"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-glm-c3-1/workspace/.masc/keepers/audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2/turn-records/2026-10/27.jsonl",
+          "bytes": 14391,
+          "sha256": "63afee178a14473e39eedf2596c00d96084f6809dd14197e841d816c4c8f2934"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-glm-c3-1/generated-create-a.json",
+          "bytes": 1522,
+          "sha256": "2317787b44bfd68f78c3fe0df71fd6fb04fe51f7a63cc04e52ba0201932ad6d9"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-glm-c3-1/generated-create-b.json",
+          "bytes": 796,
+          "sha256": "fb9153fefcf0d0b4f778679250f2cb68ba9e59860dd6ceabae258befa5105761"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-glm-c3-1/workspace/.masc/tool_blobs/4d/4d4cb1e2211c281233315bae417afe2555992d364186df1b228c518f6431066c",
+          "bytes": 25933,
+          "sha256": "4d4cb1e2211c281233315bae417afe2555992d364186df1b228c518f6431066c"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-glm-c3-1/workspace/.masc/tool_blobs/fd/fd560848ca0fde9b666b609dd2cdb36405de12cffde4af165689ac967f0659bb",
+          "bytes": 25939,
+          "sha256": "fd560848ca0fde9b666b609dd2cdb36405de12cffde4af165689ac967f0659bb"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-glm-c3-1/workspace/.masc/tool_blobs/b3/b3e03322da641c3e7dd8ecade5b5b55370c776c5f324881330c2715d11482dee",
+          "bytes": 2967,
+          "sha256": "b3e03322da641c3e7dd8ecade5b5b55370c776c5f324881330c2715d11482dee"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-glm-c3-1/workspace/.masc/tool_blobs/3a/3a6fa47c090dee181c187efabe0462323af1b03809e130f23a2cdef7d481fe62",
+          "bytes": 2221,
+          "sha256": "3a6fa47c090dee181c187efabe0462323af1b03809e130f23a2cdef7d481fe62"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-glm-c3-1/workspace/.masc/tool_blobs/88/8881369df01ac025a6ecada9cdb08ba15692eca0a5543a2f4db4879cdb3ca898",
+          "bytes": 25933,
+          "sha256": "8881369df01ac025a6ecada9cdb08ba15692eca0a5543a2f4db4879cdb3ca898"
+        }
+      ],
+      "transformation": {
+        "kind": "selected_field_derivative",
+        "is_derivative": true,
+        "details": "Verify original System/User blob bytes and hashes; extract only typed admission spans, identity metadata and exact-body-equality facts. Source blobs remain original-only and are not copied."
+      }
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/glm/run-binding-selected.json",
+        "bytes": 4008,
+        "sha256": "18380160e71631d825135c8f6ef548b45580dae4c4c72217c6b0bd6a7f271fda"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-glm-c3-1/provenance.json",
+          "bytes": 6911,
+          "sha256": "db15d30289a72e689f29181d9345c4b7723369710563eb3db52cae5fae5e5944"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/after-effect-glm-c3-1-invocation.json",
+          "bytes": 1499,
+          "sha256": "81d8682b9a4b5223db8dcc96d7950bf720851e73722984cc4cae999d8c3f3eb2"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/independent-actual-c3-scope-result-review.json",
+          "bytes": 36116,
+          "sha256": "094dc56824f597d31e7aa31326d9a38a090e290a68904151cb14a9bd80693920"
+        }
+      ],
+      "transformation": {
+        "kind": "selected_field_derivative",
+        "is_derivative": true,
+        "details": "Select source/native/controller/runtime/owned setup and original argv; omit credentials and configuration bodies. Normalization/checkpoint availability are explicitly from retained independent report."
+      }
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/producer/workflow-and-suite-summary-selected.json",
+        "bytes": 1270,
+        "sha256": "84f677126fa51c76a3b04ae30b2e309269a58e6d3058b1de533a7972755b6aa8"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/native40428400174/run.json",
+          "bytes": 13977,
+          "sha256": "93cc85e2389adee4d01f043db78a5c6be774bbae9c595c00a39fe58fa628051d"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/native40428400174/jobs.json",
+          "bytes": 4224,
+          "sha256": "525eab14ef45d622cc745efd3167b0e2589c078b7b3ead1093add03aec7daadc"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/native40428400174/extracted/test_tui_lane_addons.log",
+          "bytes": 2428,
+          "sha256": "7dfd2a36e49694a11f9c6a4211238cbcf33801ebf3cf97e963b94fba4df0322d"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/native40428400174/extracted/test_lane_addon_application.log",
+          "bytes": 652,
+          "sha256": "330edd243b9323b650320e2d1097ad9bfd18844bef720a1327b187eb73b2e54e"
+        }
+      ],
+      "transformation": {
+        "kind": "selected_field_derivative",
+        "is_derivative": true,
+        "details": "Select run/job identity and conclusions plus exact summary lines from the two original suite logs. No job environment, full logs or native executable copied."
+      }
+    }
+  ],
+  "original_copy_count": 18,
+  "original_copy_bytes": 154729,
+  "privacy": "No complete provider prompt/messages, private reasoning, auth values, full API dump or runtime workspace copied. Identity spans and synthetic generated requests are intentional. Exact copied independent report/inventory are original derivatives, not raw journals.",
+  "historical_limit": "Many old rotating checkpoint/snapshot paths are unavailable or replaced; their observed hashes are not reconstructed bytes. Known frozen C3 fixture P2s remain; companion correction retained.",
+  "omitted_originals": [
+    "Full tool journals (selected every owned row instead)",
+    "Full provider-input blobs and full System/User prompts (typed span/equality witnesses only)",
+    "Full runtime manifests (selected per-round issuer partitions only)",
+    "Full mutable checkpoint traces (historical availability limits retained)",
+    "Full API records, health/config bodies, runtime workspace, native executables/archive"
+  ],
+  "verification": {
+    "exact_copy_files": 18,
+    "exact_copy_bytes": 154729,
+    "unique_consumed_original_paths_verified": 52,
+    "checks": [
+      "All consumed input bytes/SHA256 checked against original files",
+      "All retained record bytes/SHA256 checked",
+      "All exact copies byte-equal source and destination",
+      "All JSON parses and captured controller AST parses; controller not executed",
+      "Local README link targets exist",
+      "Retained selection inspected for private prompt/reasoning/auth fields and credential-like literal values"
+    ],
+    "limits": [
+      "Privacy scan supports an explicit field-selection review; it does not certify omitted raw bytes as public.",
+      "No model, native, CI, API or Git command executed during retention.",
+      "Fresh independent review of this authored bundle is not claimed."
+    ]
+  },
+  "bundle_files_excluding_manifest": [
+    {
+      "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/README.md",
+      "bytes": 8453,
+      "sha256": "e4fdf589bda41ae3b92d28b52081069547db2b449ba3ee99343bbdd97c1d3dca"
+    },
+    {
+      "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/capture-path-digests.json",
+      "bytes": 2981,
+      "sha256": "ac1540a1aa2ec0aee46212111ea32528d86346f4dfdffef8f32114f7bad0b0c8"
+    },
+    {
+      "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/controller-capture.py.txt",
+      "bytes": 78688,
+      "sha256": "5dc790ed515f4bdeab148314ab0dc0d4e6b48c0050c58105a8109bfacf8a5aec"
+    },
+    {
+      "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/current-locations.json",
+      "bytes": 7055,
+      "sha256": "36700c42cdae9d1b1d66f04ef5283afcfee535c8ac64c79c5307dda6bf1f011b"
+    },
+    {
+      "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/deepseek/admission-witness-selected.json",
+      "bytes": 11129,
+      "sha256": "ce48f9323d7a8b24eb684eb0c98fffa8daea84ab6035c313fdbf5fe0e0abbc09"
+    },
+    {
+      "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/deepseek/all-owned-inventory-original.json",
+      "bytes": 8606,
+      "sha256": "46d1f558ab586026c7a8d8fb806290daeae0768730c2ba533492060bb4251452"
+    },
+    {
+      "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/deepseek/controller-ended-original.json",
+      "bytes": 112,
+      "sha256": "a124d429971a4617b83cb343ead5b9a53aff907971a322326bb478cd71e18c9e"
+    },
+    {
+      "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/deepseek/generated-create-a-original.json",
+      "bytes": 1532,
+      "sha256": "8a59a3ec71016430677b429731a8b04a422a8e76b89cfda39af328082d15f047"
+    },
+    {
+      "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/deepseek/generated-create-b-original.json",
+      "bytes": 801,
+      "sha256": "af280b43be9dfb72cb5ab856fe252695e662e4b5527b82d125ce2ef4051362c5"
+    },
+    {
+      "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/deepseek/lifecycle-selected.json",
+      "bytes": 27133,
+      "sha256": "65d999f9a1d21588e85d1f8bd35a8ffc6d77bc67014684ebcba43630af5f2a0f"
+    },
+    {
+      "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/deepseek/owned-tools-and-notes-selected.json",
+      "bytes": 13557,
+      "sha256": "9accdad4f3cce5df1b06307cf2ea99d4f785aef16d88ca6e435367577d0f7e8a"
+    },
+    {
+      "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/deepseek/result-original.json",
+      "bytes": 358,
+      "sha256": "2ebb1a0160d0c7efaed946dcd605f94bf18073b0c1186eeabba512d4aa7c08fb"
+    },
+    {
+      "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/deepseek/run-binding-selected.json",
+      "bytes": 4058,
+      "sha256": "5be50e270c55bb6dbaf0414f253ae56a1aa08d14496fa74a2c8fbdeb7a384a16"
+    },
+    {
+      "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/deepseek/server-ended-original.json",
+      "bytes": 1088,
+      "sha256": "4d38c8409d6289088c0b85c84f40512fdf90f0ef1468480bf21267a6fb6db567"
+    },
+    {
+      "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/glm/admission-witness-selected.json",
+      "bytes": 11128,
+      "sha256": "4a155d0813fb2b0e317cb7565dc666682a64d013339171bd5299caf9890514df"
+    },
+    {
+      "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/glm/all-owned-inventory-original.json",
+      "bytes": 8708,
+      "sha256": "bb45950e786af52ba2615c79fc881efbcd41ccceb97d77b615c9ef6de40156f5"
+    },
+    {
+      "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/glm/controller-ended-original.json",
+      "bytes": 110,
+      "sha256": "32ac1a1921d46bde5da3d6c65b056169f1b900f08999a4017f9d86be74464773"
+    },
+    {
+      "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/glm/generated-create-a-original.json",
+      "bytes": 1522,
+      "sha256": "2317787b44bfd68f78c3fe0df71fd6fb04fe51f7a63cc04e52ba0201932ad6d9"
+    },
+    {
+      "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/glm/generated-create-b-original.json",
+      "bytes": 796,
+      "sha256": "fb9153fefcf0d0b4f778679250f2cb68ba9e59860dd6ceabae258befa5105761"
+    },
+    {
+      "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/glm/lifecycle-selected.json",
+      "bytes": 26999,
+      "sha256": "a92c98ac02ac8f8761bb2fb289349d75b3ba868435fd241ef14285ac8f4d1db6"
+    },
+    {
+      "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/glm/owned-tools-and-notes-selected.json",
+      "bytes": 13352,
+      "sha256": "161b91421893f9460fcd4844ac2782a706c680c4e8a8c3654b5d2dcb825a45ae"
+    },
+    {
+      "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/glm/result-original.json",
+      "bytes": 358,
+      "sha256": "ef37eee8ded5e6313ec3371e7c5c6cdaefc613d4036b094e275336f130350998"
+    },
+    {
+      "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/glm/run-binding-selected.json",
+      "bytes": 4008,
+      "sha256": "18380160e71631d825135c8f6ef548b45580dae4c4c72217c6b0bd6a7f271fda"
+    },
+    {
+      "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/glm/server-ended-original.json",
+      "bytes": 1080,
+      "sha256": "e5edaf56d2209c278420e872902acb0d0b176ec90f02096083570bb6783e66f6"
+    },
+    {
+      "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/independent-actual-review-original.json",
+      "bytes": 36116,
+      "sha256": "094dc56824f597d31e7aa31326d9a38a090e290a68904151cb14a9bd80693920"
+    },
+    {
+      "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/integration-correction-original.json",
+      "bytes": 11075,
+      "sha256": "4f314cd5db99be469ea7a57fea4bcc10b8e41d020874f5db1c57325019a8366d"
+    },
+    {
+      "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/producer/native-binding-original.json",
+      "bytes": 1402,
+      "sha256": "00c31be20e143b5cccc851025d316adccb97c77da6901f14ebad9d636de32687"
+    },
+    {
+      "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/producer/native-receipt-original.json",
+      "bytes": 1622,
+      "sha256": "62f296dbb8759fd38d1304797e95c928d071be9e54c78b40cc1edadf3122479c"
+    },
+    {
+      "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/producer/root-build-commit-original.json",
+      "bytes": 755,
+      "sha256": "1f824f3dc91c5560ae11e74881b677c17fd46568967025d164f532a4ba9f42f0"
+    },
+    {
+      "path": "docs/evidence/2026-10-27-schedule-entry-model-negative/producer/workflow-and-suite-summary-selected.json",
+      "bytes": 1270,
+      "sha256": "84f677126fa51c76a3b04ae30b2e309269a58e6d3058b1de533a7972755b6aa8"
+    }
+  ],
+  "retained_file_count_excluding_manifest": 30,
+  "retained_bytes_excluding_manifest": 285852,
+  "total_files_including_manifest": 31,
+  "audit_update": {
+    "path": "docs/audits/2026-10-26-scheduled-job-coverage-update.md",
+    "baseline_source_head": "cb731855979ea335801db7749b03314c2b224280",
+    "baseline_bytes": 25473,
+    "baseline_sha256": "901e74bb75071b7a5a2ae8983927723a4a29f73d89b96bd0f58c8519e6b73536",
+    "current_bytes": 27878,
+    "current_sha256": "9bc345d736e210ec7af86c24304abc7c2f455504fcb1ec2b986353ce60396d1a",
+    "existing_rows_modified": [
+      36
+    ],
+    "row_ID_count": 59,
+    "row_ID_order_unchanged": true,
+    "other_existing_lines_byte_equal": true,
+    "appended_prose_only_after_existing_document": true
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "executable": "masc",
+  "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/native40428400174/extracted/masc",
+  "sha256": "8fb19608eac66c5b0cbaf10cc5a549ae9e3093222d4a504abcd8b6e85473adfe",
+  "bytes": 111123728,
+  "args": [
+    "build-commit"
+  ],
+  "exit_code": 0,
+  "stdout_utf8": "87e6f274ddd5958b3966608fab376cfd1cb50ed3\n",
+  "stdout_sha256": "cfd770019b0e2323c2632b16c54b2e1a7a3f5ad2bdd82d496ecb2ef492d55caf",
+  "stderr_bytes": 82,
+  "stderr_sha256": "46521470dcfd2c60089e37aea01340f257e1c7413685d77b5b10d4bf64976cca",
+  "observed_at_unix": 1793064380.892163,
+  "scope": "Root executed exact downloaded binary once with build-commit only; no server/provider invocation."
+}

@@ -1,0 +1,1372 @@
+#!/usr/bin/env python3
+"""Prepared real-provider after-effect probe for one pinned candidate artifact.
+
+Executing this file starts an owned server and real model work. Preparation and
+AST checks do not execute it. No production installation is performed.
+"""
+import argparse
+import math
+import contextlib
+import select
+import shlex
+import zipfile
+from urllib.parse import quote
+import hashlib
+import json
+import os
+from pathlib import Path
+import shutil
+import socket
+import subprocess
+import tempfile
+import time
+import urllib.error
+import urllib.request
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--output', type=Path, required=True)
+parser.add_argument('--binary', type=Path, required=True)
+parser.add_argument('--image-reference', required=True)
+parser.add_argument('--native-binding', type=Path, required=True, help='Explicit root-verified identity and original receipt/archive/verification file bindings.')
+parser.add_argument('--preflight-only', action='store_true', help='Validate only local input files and CLI; never initialize a workspace, inspect credentials or start a process.')
+parser.add_argument('--provider', choices=['ollama_cloud','glm-coding'], required=True)
+parser.add_argument('--observation-deadline-unix', type=float, required=True, help='Caller-owned observation limit, never a producer terminal verdict.')
+args = parser.parse_args()
+REPO = Path(__file__).resolve().parents[2]
+output = args.output.resolve()
+if not output.is_relative_to(REPO / "artifacts") or output == REPO / "artifacts":
+    raise RuntimeError("output must be a fresh child of this C3 checkout artifacts directory")
+# A new output directory is mandatory; no adoption of an old workspace.
+if output.exists():
+    raise RuntimeError('output already exists; original runs must remain immutable')
+if not math.isfinite(args.observation_deadline_unix) or args.observation_deadline_unix <= time.time():
+    raise RuntimeError('observation deadline must be in the future')
+# No unfrozen C2 source, run or binary value is invented here. The operator's
+# explicit binding is checked against all three original inputs before setup.
+ORIGINAL_090_SHA256 = '090ec200c041b55b9b9f197d77aa919d66910c17e73f7473552baa24e87c8d51'
+ORIGINAL_V3_SHA256 = '6ef94873203553b493c5b0d586070fc124f25d945028cab298f2f2dd5275eeff'
+
+
+def file_digest(path):
+    with path.open('rb') as stream:
+        return hashlib.file_digest(stream, 'sha256').hexdigest()
+
+
+def checked_hex(value, length):
+    if not isinstance(value, str) or len(value) != length or any(c not in '0123456789abcdef' for c in value):
+        raise RuntimeError('invalid canonical digest in native binding')
+    return value
+
+
+binding_path = args.native_binding.resolve(strict=True)
+binding_bytes = binding_path.read_bytes()
+binding = json.loads(binding_bytes)
+if binding.get('schema') != 'masc.schedule-c3-native-binding.v1':
+    raise RuntimeError('unsupported native binding schema')
+EXPECTED_SOURCE = '87e6f274ddd5958b3966608fab376cfd1cb50ed3'
+if checked_hex(binding['source_sha'], 40) != EXPECTED_SOURCE:
+    raise RuntimeError('binding is not the frozen C3 native source')
+EXPECTED_WORKFLOW = checked_hex(binding['workflow_sha'], 40)
+if EXPECTED_WORKFLOW != EXPECTED_SOURCE or binding['workflow_run'] != 40428400174 or binding['artifact_id'] != 12700992849:
+    raise RuntimeError('binding does not identify the selected actual C3 native run')
+EXPECTED_BINARY = checked_hex(binding['server_sha256'], 64)
+EXPECTED_ARCHIVE = checked_hex(binding['archive_sha256'], 64)
+WORKFLOW_RUN = binding['workflow_run']
+ARTIFACT_ID = binding['artifact_id']
+WORKFLOW_REF = binding['workflow_ref']
+if any(type(value) is not int or value <= 0 for value in [WORKFLOW_RUN, ARTIFACT_ID]) or not isinstance(WORKFLOW_REF, str) or not WORKFLOW_REF:
+    raise RuntimeError('invalid run, artifact or ref binding')
+
+
+def bound_input(name):
+    entry = binding[name]
+    path = Path(entry['path'])
+    if not path.is_absolute():
+        path = binding_path.parent / path
+    path = path.resolve(strict=True)
+    if type(entry['bytes']) is not int or path.stat().st_size != entry['bytes'] or file_digest(path) != checked_hex(entry['sha256'], 64):
+        raise RuntimeError('original native input hash/bytes mismatch: '+name)
+    return path
+
+
+artifact_binary = args.binary.resolve(strict=True)
+artifact_receipt_path = bound_input('artifact_receipt')
+archive_path = bound_input('archive')
+verification_path = bound_input('download_verification')
+artifact_receipt_bytes = artifact_receipt_path.read_bytes()
+artifact_receipt = json.loads(artifact_receipt_bytes)
+verification = json.loads(verification_path.read_bytes())
+if (file_digest(artifact_binary) != EXPECTED_BINARY
+        or binding['archive']['sha256'] != EXPECTED_ARCHIVE
+        or artifact_receipt.get('source_sha') != EXPECTED_SOURCE
+        or artifact_receipt.get('workflow_sha') != EXPECTED_WORKFLOW
+        or artifact_receipt.get('server_sha256') != EXPECTED_BINARY
+        or verification.get('workflow') != binding['workflow_name']
+        or verification.get('run_id') != WORKFLOW_RUN
+        or verification.get('workflow_ref') != WORKFLOW_REF
+        or verification.get('workflow_execution_head') != EXPECTED_WORKFLOW
+        or verification.get('source_input') != EXPECTED_SOURCE
+        or verification.get('artifact_id') != ARTIFACT_ID
+        or verification.get('archive_sha256') != EXPECTED_ARCHIVE):
+    raise RuntimeError('exact native source/run/execution/artifact identity mismatch')
+observations = [row for row in verification.get('observations', []) if row.get('executable') == 'masc']
+if len(observations) != 1 or not all([
+        observations[0].get('sha256') == EXPECTED_BINARY,
+        observations[0].get('args') == ['build-commit'],
+        observations[0].get('exit_code') == 0,
+        observations[0].get('stdout_utf8') == EXPECTED_SOURCE+'\n',
+        observations[0].get('stdout_sha256') == hashlib.sha256((EXPECTED_SOURCE+'\n').encode()).hexdigest()]):
+    raise RuntimeError('root build-commit observation does not bind this exact executable')
+with zipfile.ZipFile(archive_path) as archive:
+    for name, expected in [('masc', EXPECTED_BINARY), ('receipt.json', hashlib.sha256(artifact_receipt_bytes).hexdigest())]:
+        members = [member for member in archive.infolist() if not member.is_dir() and Path(member.filename).name == name]
+        if len(members) != 1:
+            raise RuntimeError('archive member missing or ambiguous: '+name)
+        with archive.open(members[0]) as stream:
+            if hashlib.file_digest(stream, 'sha256').hexdigest() != expected:
+                raise RuntimeError('extracted input differs from original archive: '+name)
+if args.preflight_only:
+    print(json.dumps({'scope': 'local native inputs only; no server/model/credential access',
+        'source_sha': EXPECTED_SOURCE, 'workflow_run': WORKFLOW_RUN,
+        'workflow_sha': EXPECTED_WORKFLOW, 'workflow_ref': WORKFLOW_REF,
+        'server_sha256': EXPECTED_BINARY, 'binding_sha256': hashlib.sha256(binding_bytes).hexdigest()}))
+    raise SystemExit(0)
+output.mkdir(parents=True, exist_ok=False)
+repo = REPO
+binary = args.binary.resolve(strict=True)
+records = []
+checks = []
+
+
+class Incomplete(RuntimeError):
+    pass
+
+
+class BehaviorFailure(RuntimeError):
+    pass
+
+
+def sanitize(value):
+    # Never retain control or authentication tokens from live observation APIs.
+    if isinstance(value, dict):
+        return {k: sanitize(v) for k, v in value.items() if k not in
+                {'chat_control_token', 'interrupt_token', 'authorization', 'token',
+                 'access_token', 'refresh_token', 'bearer_token', 'mcp_session_id'}}
+    if isinstance(value, list):
+        return [sanitize(v) for v in value]
+    if isinstance(value, str):
+        # MCP may wrap the same structured response in a JSON text block.
+        try:
+            decoded = json.loads(value)
+        except (json.JSONDecodeError, ValueError):
+            return value
+        if isinstance(decoded, (dict, list)):
+            return json.dumps(sanitize(decoded), ensure_ascii=False)
+    return value
+
+
+def save():
+    (output / 'api-records.json').write_text(json.dumps(records, indent=2) + '\n')
+    (output / 'checks.json').write_text(json.dumps(checks, indent=2) + '\n')
+
+
+def check(name, condition, detail=None):
+    try:
+        checks.append({'name': name, 'passed': bool(condition), 'detail': sanitize(detail)})
+        save()
+        print(('PASS ' if condition else 'FAIL ') + name, flush=True)
+    finally:
+        # An observed behavior failure outranks failure to save/print its receipt.
+        # A positive check still requires its evidence writes to succeed.
+        if not condition:
+            raise BehaviorFailure(name)
+
+
+def command(argv, env):
+    result = subprocess.run(argv, env=env, capture_output=True, text=True)
+    if result.returncode:
+        raise RuntimeError(str(argv[:2]) + ' failed, exit=' + str(result.returncode) + '; output not retained because credential commands share this helper')
+    # login output contains a credential and is intentionally never retained.
+    return result.stdout
+
+
+def request(path, token=None, body=None):
+    headers = {'Content-Type': 'application/json'}
+    if token:
+        headers['Authorization'] = 'Bearer ' + token
+    req = urllib.request.Request(url + path, headers=headers,
+          data=None if body is None else json.dumps(body).encode())
+    try:
+        with urllib.request.urlopen(req, timeout=20) as response:
+            status, data = response.status, json.load(response)
+    except urllib.error.HTTPError as error:
+        status = error.code
+        raw = error.read().decode()
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            data = {'body': raw}
+    retained = data
+    if path == '/health?full=1':
+        retained = {'paths': {'effective_base_path': data.get('paths', {}).get('effective_base_path')},
+                    'build': data.get('build'), 'startup': {'state_ready': data.get('startup', {}).get('state_ready')}}
+    records.append({'stage': stage, 'path': path, 'body': body, 'status': status, 'response': sanitize(retained)})
+    save()
+    return status, data
+
+
+sessions = {}
+request_id = 0
+
+
+def mcp_roundtrip(token, payload, session=None):
+    headers = {'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream',
+               'Authorization': 'Bearer ' + token, 'Mcp-Protocol-Version': '2025-11-25'}
+    if session:
+        headers['Mcp-Session-Id'] = session
+    req = urllib.request.Request(url + '/mcp', headers=headers, data=json.dumps(payload).encode())
+    try:
+        response = urllib.request.urlopen(req, timeout=30)
+    except urllib.error.HTTPError as error:
+        response = error
+    with response:
+        raw = response.read().decode()
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            events = [json.loads(line[5:].strip()) for line in raw.splitlines() if line.startswith('data:')]
+            data = next((event for event in events if event.get('id') == payload.get('id')), {'raw': raw})
+        records.append({'stage': stage, 'path': '/mcp', 'body': payload, 'status': response.status, 'response': sanitize(data)})
+        save()
+        return response.status, data, response.headers.get('Mcp-Session-Id')
+
+
+def tool(name, body, token=None):
+    global request_id
+    selected = admin_token if token is None else token
+    if selected not in sessions:
+        request_id += 1
+        status, result, session = mcp_roundtrip(selected, {'jsonrpc': '2.0', 'id': request_id,
+            'method': 'initialize', 'params': {'protocolVersion': '2025-11-25',
+            'capabilities': {}, 'clientInfo': {'name': 'schedule-api-audit', 'version': '1'}}})
+        if status != 200 or not session or 'error' in result:
+            raise RuntimeError('MCP initialize failed: ' + json.dumps(result))
+        sessions[selected] = session
+    request_id += 1
+    status, result, _ = mcp_roundtrip(selected, {'jsonrpc': '2.0', 'id': request_id,
+        'method': 'tools/call', 'params': {'name': name, 'arguments': body}}, sessions[selected])
+    if 'error' in result:
+        data = {'isError': True, 'data': result['error']}
+    else:
+        reply = result.get('result', {})
+        payload = reply.get('structuredContent')
+        if payload is None:
+            blocks = reply.get('content', [])
+            text = next((block['text'] for block in blocks if block.get('type') == 'text'), '')
+            try:
+                payload = json.loads(text)
+            except json.JSONDecodeError:
+                payload = {'text': text}
+        data = {'isError': reply.get('isError', False), 'data': payload}
+    print(name, status, 'isError=' + str(data['isError']), flush=True)
+    return status, data
+
+
+def unwrap(result):
+    if isinstance(result, dict) and isinstance(result.get('data'), dict):
+        return result['data']
+    if isinstance(result, dict) and isinstance(result.get('message'), str):
+        try:
+            decoded = json.loads(result['message'])
+            return decoded if isinstance(decoded, dict) else result
+        except json.JSONDecodeError:
+            return result
+    return result
+
+
+
+import tomllib
+import uuid
+stage = 'setup'
+source_config=tomllib.loads(subprocess.check_output(['git','show',EXPECTED_SOURCE+':config/runtime.toml'],text=True,cwd=REPO))
+model={'ollama_cloud':'ollama-cloud-deepseek-v4-1-flash','glm-coding':'glm-5-3'}[args.provider]
+runtime_id=args.provider+'.'+model
+provider=source_config['providers'][args.provider]
+credential_name=provider['credentials']['key']
+if provider['credentials']['type']!='env' or not os.environ.get(credential_name):
+    raise RuntimeError('required configured provider credential is unavailable')
+keeper='audit-c3-'+('deepseek' if args.provider=='ollama_cloud' else 'glm')+'-'+uuid.uuid4().hex
+schedule_id='audit-real-model-'+uuid.uuid4().hex
+marker='SCHEDULE_EFFECT_'+uuid.uuid4().hex
+base=(output/'workspace').resolve()
+base.mkdir()
+env={k:v for k,v in os.environ.items() if k in ['PATH','HOME','LANG','LC_ALL','TMPDIR',credential_name]}
+env.update(MASC_BASE_PATH=str(base),MASC_CONFIG_DIR=str(base/'.masc/config'),
+    XDG_CONFIG_HOME=str(base/'xdg-config'),MASC_KEEPER_AUTONOMOUS_ENABLED='false',MASC_SCHEDULE_RUNNER_INTERVAL_SEC='1')
+(base/'xdg-config').mkdir()
+command([str(binary),'init','--base-path',str(base)],env)
+
+def table(name,values):
+    rows=['['+name+']']
+    for key,value in values.items():
+        if not isinstance(value,dict): rows.append(key+' = '+json.dumps(value))
+    for key,value in values.items():
+        if isinstance(value,dict):rows.append(table(name+'.'+key,value))
+    return '\n'.join(rows)+'\n'
+
+# Derive the selected provider/model from the checked-in canonical config.
+# Required lanes come from the existing isolated boot fixture. No invented defaults.
+fixture=tomllib.loads(subprocess.check_output(['git','show',EXPECTED_SOURCE+':scripts/fixtures/release-evidence/runtime.toml'],text=True,cwd=REPO))
+text=table('runtime',{'default':runtime_id})
+for lane in fixture['runtime']['exact_output_lanes']:
+    text+=table('runtime.exact_output_lanes.'+lane,{'slots':[runtime_id]})
+selected_provider={k:provider[k] for k in ['display-name','protocol','endpoint','connect-timeout-s','exact-body-timeout-s','credentials'] if k in provider}
+text+=table('providers.'+args.provider,selected_provider)
+text+=table('models.'+model,source_config['models'][model])
+text+=table(args.provider+'.'+model,source_config[args.provider][model])
+(base/'.masc/config/runtime.toml').write_text(text)
+(output/'runtime-config.toml').write_text(text) # credential name only, never its value
+command([str(binary),'sandbox-image','promote','--base-path',str(base),'--runtime','apple_container','base',args.image_reference],env)
+with socket.socket() as sock:
+    sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
+if port == 8935:
+    raise RuntimeError('shared primary port is forbidden; no server started')
+url='http://127.0.0.1:'+str(port)
+command([str(binary),'login','--base-path',str(base),'--host','127.0.0.1','--port',str(port),
+         '--agent','schedule-audit-observer','--role','admin','--client-env','MASC_SCHEDULE_AUDIT_TOKEN','--no-expiry','--json'],env)
+admin_token=(base/'.masc/auth/schedule-audit-observer.token').read_text().strip()
+meta={'checkout_head':subprocess.check_output(['git','rev-parse','HEAD'],text=True,cwd=REPO).strip(),
+      'binary':str(binary),'executable_sha256':hashlib.sha256(binary.read_bytes()).hexdigest(),
+      'runtime_id':runtime_id,'provider_endpoint':provider['endpoint'],'schedule_id':schedule_id,'keeper':keeper,
+      'script_sha256':hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+      'marker':marker,'base_path':str(base),'url':url,'credential_name':credential_name,
+      'environment_names':sorted(env),'home_unchanged':env.get('HOME')==os.environ.get('HOME'),
+      'masc_config_dir':env['MASC_CONFIG_DIR'],'xdg_config_home':env['XDG_CONFIG_HOME'],
+      'authority_fixture':'owned Gate always_allow plus Keeper yolo; permissive fixture, not default authorization or a grant from scheduled wake',
+      'note':'A1 then B then A2, requiring actual after-effect checkpoint and exact source readmission; observation only until all conditions hold.'}
+(output/'provenance.json').write_text(json.dumps(meta,indent=2)+'\n')
+
+server = None
+log = None
+process = {'url': url, 'base_path': str(base), 'forced_kill': False}
+server_argv = [str(binary),'start','--base-path',str(base),'--host','127.0.0.1','--port',str(port)]
+
+
+
+def successful_tool(name,args):
+    if name == 'masc_schedule_create':
+        raw = json.dumps(args, ensure_ascii=False, separators=(',', ':')).encode()
+        write_json('generated-create-'+('a' if args['schedule_id'] == schedule_id else 'b')+'.json',
+            {'arguments': args, 'json_value_sha256': hashlib.sha256(raw).hexdigest(),
+             'json_value_bytes': len(raw), 'recorded_before_admission': True})
+    status,result=tool(name,args)
+    if status!=200 or result.get('isError') is not False:
+        raise RuntimeError(name+' refused: '+json.dumps(sanitize(unwrap(result))))
+    data=unwrap(result)
+    return data.get('schedule',data)
+
+second_id=schedule_id+'-second'
+second_marker=marker+'_SECOND'
+meta.update(second_schedule_id=second_id,second_marker=second_marker,oracle_version='after-effect-c3-v2', expected_source=EXPECTED_SOURCE, workflow_head=EXPECTED_WORKFLOW, workflow_ref=WORKFLOW_REF, workflow_run=WORKFLOW_RUN, artifact_id=ARTIFACT_ID, artifact_receipt_sha256=hashlib.sha256(artifact_receipt_bytes).hexdigest(), original_v3_sha256=ORIGINAL_V3_SHA256, original_090_sha256=ORIGINAL_090_SHA256, native_binding_path=str(binding_path), native_binding_sha256=hashlib.sha256(binding_bytes).hexdigest(), native_binding=binding, observation_deadline_unix=args.observation_deadline_unix, checkpoint_scope='Exact source readmission and trace checkpoint lineage; not byte-identical original checkpoint restoration')
+(output/'provenance.json').write_text(json.dumps(meta,indent=2)+'\n')
+
+
+# All remaining code is the scoped derivative. The v3 file is unchanged.
+final_marker = marker + '_AFTER_B'
+meta['final_marker'] = final_marker
+meta['archive_sha256'] = EXPECTED_ARCHIVE
+meta['workflow_run_binding'] = 'Explicit native binding crosschecked with original archive members, receipt, root download/build-commit observation and actual served health.'
+meta['oracle_changes'] = [
+    'Always require checkpoint, retention, ACK ordering and exact source readmission.',
+    'Require A2 to execute in the readmitted A Keeper turn, never the B turn.',
+    'Use complete owned durable tool-call files plus exact execution lookup, not a 50-row tail.',
+    'A1 is observed from an atomic primary publication before B is submitted.',
+    'A terminal original source without A1 is BehaviorFAIL after a fresh primary read.',
+    'All notes and note_add calls on both synthetic schedules must be exactly the three required writes.',
+    'Verify all available latest provider snapshot parts, retaining only user-input presence and digests.',
+    'Honor the checkpoint codec structured content/text_content contract.',
+]
+(output/'provenance.json').write_text(json.dumps(meta,indent=2)+'\n')
+
+
+def write_json(name, value):
+    (output/name).write_text(json.dumps(sanitize(value), indent=2)+'\n')
+
+
+def observation_open():
+    if server.poll() is not None:
+        raise Incomplete('producer exited before the required observation completed')
+    if time.time() >= args.observation_deadline_unix:
+        raise Incomplete('caller observation deadline reached; producer completion is not inferred')
+
+
+def exact_read(path):
+    status, value = request(path, admin_token)
+    if status != 200:
+        raise Incomplete('authoritative observation unavailable: '+path)
+    return value
+
+
+def primary():
+    path = base/'.masc/schedules.json'
+    raw = path.read_bytes()
+    value = json.loads(raw)
+    return value, {'path': str(path), 'sha256': hashlib.sha256(raw).hexdigest(),
+                   'bytes': len(raw), 'observed_at_unix': time.time()}
+
+
+def primary_notes(value, created):
+    rows = [r for r in value['schedules'] if r['schedule_id'] == created['schedule_id']]
+    if len(rows) != 1 or rows[0]['schedule_instance_id'] != created['schedule_instance_id']:
+        raise Incomplete('original schedule definition identity is no longer authoritative')
+    return [n for n in value['notes'] if n['schedule_id'] == created['schedule_id']]
+
+
+scenario_messages = {}
+scenario_instances = {}
+
+
+def create_a():
+    message = (
+        f'This authorized scheduled job has TWO required effects on schedule_id "{schedule_id}". '
+        f'First append exactly one note with body "{marker}" using masc_schedule_note_add. '
+        f'Then observe schedule_id "{second_id}" with masc_schedule_notes_list until its note '
+        f'with exact body "{second_marker}" and author_id "{keeper}" is available. '
+        'A missing schedule or missing note means the dependency has not arrived yet, not completion. '
+        f'Only AFTER observing that exact B note, append exactly one note to your original schedule_id '
+        f'"{schedule_id}" with body "{final_marker}". Both effects belong to this original job. '
+        'Do not write B\'s note yourself, create another schedule, send a message, invoke shell tools, '
+        'or ask for confirmation. Preserve this unfinished request when another scheduled job arrives. '
+        'Do not finish this job until both of its required notes have been written and read back.')
+    scenario_messages[schedule_id] = message
+    return successful_tool('masc_schedule_create', {'schedule_id': schedule_id,
+        'keeper_name': keeper, 'due_in_sec': 1, 'message': message})
+
+
+def create_b():
+    message = (
+        f'Append exactly one durable note to your own schedule_id "{second_id}" with body '
+        f'"{second_marker}" using masc_schedule_note_add, read it back, then finish this job. '
+        'Do not perform the first scheduled job\'s remaining steps or write any note on its schedule. '
+        'Do not create other work, send messages, invoke shell tools, or ask for confirmation.')
+    scenario_messages[second_id] = message
+    return successful_tool('masc_schedule_create', {'schedule_id': second_id,
+        'keeper_name': keeper, 'due_in_sec': 1, 'message': message})
+
+
+def history(created):
+    data = exact_read('/api/v1/dashboard/scheduled-automation?schedule_id='+quote(created['schedule_id']))
+    row = data.get('request') or {}
+    if (row.get('schedule_id'), row.get('schedule_instance_id')) != (
+            created['schedule_id'], created['schedule_instance_id']):
+        raise Incomplete('exact schedule observation identity mismatch')
+    q = row.get('keeper_queue_evidence') or {}
+    if q and (q.get('schedule_id'), q.get('schedule_instance_id'), q.get('keeper_name')) != (
+            created['schedule_id'], created['schedule_instance_id'], keeper):
+        raise Incomplete('exact queue projection identity mismatch')
+    return data, q
+
+
+def read_jsonl_files(root):
+    rows, sources = [], []
+    for path in sorted(root.rglob('*.jsonl')):
+        raw = path.read_bytes()
+        # A concurrent final append may not be complete. Do not invent a row.
+        if raw and not raw.endswith(b'\n'):
+            raise Incomplete('concurrent partial JSONL observation: '+str(path))
+        values = [json.loads(line) for line in raw.splitlines() if line.strip()]
+        rows.extend(values)
+        sources.append({'path': str(path), 'sha256': hashlib.sha256(raw).hexdigest(),
+                        'bytes': len(raw), 'rows': len(values)})
+    return rows, sources
+
+
+def reaction_read():
+    return read_jsonl_files(base/'.masc/keepers'/keeper/'reaction-ledger')
+
+
+def source_events(rows, post_id, kind=None, disposition=None):
+    return [r for r in rows if r.get('stimulus_id') == post_id
+            and (kind is None or (r.get('reaction') or {}).get('kind') == kind)
+            and (disposition is None or (r.get('reaction') or {}).get('disposition') == disposition)]
+
+
+def event_times(rows, post_id, kind, disposition=None):
+    return sorted(r['recorded_at_unix'] for r in source_events(rows, post_id, kind, disposition))
+
+
+queue_observations = []
+live_observations = []
+checkpoint_observations = []
+seen_checkpoints = set()
+
+
+def observe_queue():
+    path = base/'.masc/keepers'/keeper/'event-queue-v19.json'
+    if not path.exists():
+        return
+    raw = path.read_bytes()
+    state = json.loads(raw)
+    if state.get('schema') != 'keeper.event_queue.state.v19':
+        raise Incomplete('unsupported durable queue schema')
+    # Retain synthetic source identity and retention facts, never private preview text.
+    selected = []
+    for entry in state['pending']:
+        source = entry['source']; payload = source['payload']
+        if payload.get('kind') == 'schedule_due' and payload.get('schedule_id') in [schedule_id, second_id]:
+            selected.append({'post_id': source['post_id'], 'payload': payload,
+                'admitted_revision': entry['admitted_revision'],
+                'checkpoint_retentions': entry['checkpoint_retentions']})
+    queue_observations.append({'observed_at_unix': time.time(), 'revision': state['revision'],
+        'sha256': hashlib.sha256(raw).hexdigest(), 'bytes': len(raw), 'pending': selected})
+    write_json('queue-observations.json', queue_observations)
+
+
+def decode_tool_output(value):
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return None
+    return value if isinstance(value, dict) else None
+
+
+def checkpoint_result_text(block):
+    # Checkpoint_contract: text_content is legal only alongside structured
+    # content. Checkpoint_codec prefers this exact stored text when present.
+    content = block.get('content')
+    if 'text_content' in block:
+        if not isinstance(content, list) or not isinstance(block['text_content'], str):
+            raise Incomplete('invalid checkpoint ToolResult text_content contract')
+        return block['text_content']
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        # No arbitrary nested-content reconstruction: missing canonical text
+        # cannot prove the exact result. This checkpoint may have other proof.
+        return None
+    raise Incomplete('invalid checkpoint ToolResult content shape')
+
+
+def checkpoint_selection(path):
+    raw = path.read_bytes(); digest = hashlib.sha256(raw).hexdigest()
+    if digest in seen_checkpoints:
+        return
+    cp = json.loads(raw)
+    if not isinstance(cp.get('messages'), list):
+        return
+    uses, results = {}, {}
+    for message in cp['messages']:
+        content = message.get('content', [])
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            if block.get('type') == 'tool_use' and block.get('name') == 'masc_schedule_note_add':
+                call = block.get('input') or {}
+                if call.get('schedule_id') in [schedule_id, second_id]:
+                    uses[block['id']] = call
+            elif block.get('type') == 'tool_result' and block.get('is_error') is False:
+                data = decode_tool_output(checkpoint_result_text(block))
+                if isinstance(data, dict) and isinstance(data.get('note'), dict):
+                    note = data['note']
+                    if note.get('schedule_id') in [schedule_id, second_id]:
+                        results[block['tool_use_id']] = note
+    pairs = [{'tool_use_id': key, 'input': uses[key], 'note': note}
+             for key, note in results.items() if key in uses]
+    seen_checkpoints.add(digest)
+    checkpoint_observations.append({'path': str(path), 'sha256': digest, 'bytes': len(raw),
+        'observed_at_unix': time.time(), 'session_id': cp.get('session_id'),
+        'turn_count': cp.get('turn_count'), 'created_at': cp.get('created_at'),
+        'selected_note_tool_results': pairs,
+        'scope': 'Selected persisted lineage facts only; full messages/reasoning are not copied.'})
+
+
+def observe_checkpoints():
+    for directory in (base/'.masc/traces').glob('*'):
+        if not directory.is_dir():
+            continue
+        for path in directory.glob('*.json'):
+            if path.name == directory.name+'.json' or path.name.startswith('agent-core-snapshot-'):
+                try:
+                    checkpoint_selection(path)
+                except FileNotFoundError:
+                    pass  # An archive was pruned between listing and read; no evidence claimed.
+    write_json('checkpoint-lineage-selected.json', checkpoint_observations)
+
+
+def observe_live():
+    data = exact_read('/api/v1/keepers/turns')
+    rows = [r for r in data.get('keepers', []) if r.get('keeper_name') == keeper]
+    if len(rows) != 1 or rows[0].get('status') != 'ok':
+        raise Incomplete('target Keeper is absent or unreadable; absence is not idle')
+    turn = rows[0].get('turn')
+    if turn is not None:
+        live_observations.append({'observed_at_unix': time.time(),
+            'turn_ref': turn.get('turn_ref'), 'lane': turn.get('lane'),
+            'started_at_unix': turn.get('started_at_unix')})
+        write_json('live-turns-selected.json', live_observations)
+    return turn
+
+
+def known_b_result_blobs(calls):
+    """Only exact successful synthetic B notes_list outputs can name blobs."""
+    known = {}
+    for call in calls:
+        if not (call.get('keeper') == keeper and call.get('tool') == 'masc_schedule_notes_list'
+                and call.get('wire_outcome') == 'ok' and call.get('disposition') == 'completed'
+                and (call.get('input') or {}).get('schedule_id') == second_id
+                and isinstance(call.get('output'), str)):
+            continue
+        data = decode_tool_output(call['output'])
+        if not (isinstance(data, dict) and data.get('status') == 'ok'
+                and data.get('schedule_id') == second_id
+                and any(note.get('schedule_id') == second_id and note.get('body') == second_marker
+                        and note.get('author_id') == keeper for note in data.get('notes', []))):
+            continue
+        raw_output = call['output'].encode('utf-8')
+        digest = hashlib.sha256(raw_output).hexdigest()
+        path = base/'.masc/tool_blobs'/digest[:2]/digest
+        try:
+            blob = path.read_bytes()
+        except FileNotFoundError:
+            continue  # No blob means no canonical-artifact witness, never an invented one.
+        if blob != raw_output or hashlib.sha256(blob).hexdigest() != digest:
+            raise Incomplete('canonical synthetic B result blob bytes disagree with its producing call')
+        entry = known.setdefault(digest, {'raw': blob, 'source': source_receipt(path, blob), 'producers': []})
+        entry['producers'].append(call)
+    return known
+
+
+def dependency_observation_evidence(calls, b_write, a2_write, b_note, a2_note,
+                                    b_acks, a_readmissions, a_source, b_source):
+    """Two concrete reads of the same dependency; no marker-only artifact path."""
+    def successful(call):
+        return (call.get('keeper') == keeper and call.get('wire_outcome') == 'ok'
+                and call.get('disposition') == 'completed'
+                and isinstance(call.get('execution_id'), str) and bool(call['execution_id'])
+                and isinstance(call.get('tool_use_id'), str) and bool(call['tool_use_id']))
+
+    def a_read_before_a2(call):
+        return (successful(call) and call.get('trace_id') == a2_write['trace_id']
+                and call.get('keeper_turn_id') == a2_write['keeper_turn_id']
+                and call['execution_id'] != a2_write['execution_id']
+                and max(b_acks) < call['ts'] < a2_note['created_at'] <= a2_write['ts']
+                and any(max(b_acks) < admission < call['ts'] for admission in a_readmissions))
+
+    def exact_note_in_list(data):
+        return (isinstance(data, dict) and data.get('status') == 'ok'
+                and data.get('schedule_id') == second_id
+                and any(note == b_note for note in data.get('notes', [])))
+
+    direct = [call for call in calls if call.get('tool') == 'masc_schedule_notes_list'
+              and (call.get('input') or {}).get('schedule_id') == second_id
+              and a_read_before_a2(call) and exact_note_in_list(decode_tool_output(call.get('output')))]
+    canonical = []
+    known = known_b_result_blobs(calls)
+    artifact_reads = [call for call in calls if call.get('tool') == 'keeper_artifact_read'
+                      and (call.get('input') or {}).get('sha256') in known and a_read_before_a2(call)]
+    turn_rows, turn_files = ([], [])
+    if artifact_reads:
+        turn_rows, turn_files = read_jsonl_files(base/'.masc/keepers'/keeper/'turn-records')
+
+    def completed_membership(call, companion):
+        matched = [row for row in turn_rows if row.get('keeper') == keeper
+                   and row.get('trace_id') == call['trace_id']
+                   and row.get('absolute_turn') == call['keeper_turn_id']
+                   and row.get('turn_ref') == str(call['trace_id'])+'#'+str(call['keeper_turn_id'])
+                   and row.get('finish_reason') == 'completed'
+                   and call['execution_id'] in row.get('execution_ids', [])
+                   and companion['execution_id'] in row.get('execution_ids', [])]
+        if len(matched) != 1:
+            return None
+        row = matched[0]
+        return {key: row.get(key) for key in ['keeper', 'trace_id', 'absolute_turn', 'turn_ref', 'execution_ids', 'finish_reason', 'ts']}
+
+    for read in artifact_reads:
+        sha = read['input']['sha256']; blob = known[sha]
+        page = decode_tool_output(read.get('output'))
+        offset = read['input'].get('offset', 0)  # canonical API default, not a trust bypass
+        if not (type(offset) is int and offset == 0 and isinstance(page, dict)
+                and page.get('ok') is True and page.get('sha256') == sha
+                and page.get('eof') is True and page.get('encoding') == 'utf-8'
+                and all(type(page.get(field)) is int for field in ['offset', 'next_offset', 'total_bytes'])
+                and page['offset'] == 0 and page['next_offset'] == page['total_bytes'] == len(blob['raw'])
+                and isinstance(page.get('content'), str)
+                and page['content'].encode('utf-8') == blob['raw']
+                and exact_note_in_list(decode_tool_output(page['content']))):
+            continue
+        a_turn = completed_membership(read, a2_write)
+        if a_turn is None:
+            continue
+        for producer in blob['producers']:
+            if not (successful(producer) and producer.get('trace_id') == b_write['trace_id'] == a2_write['trace_id']
+                    and producer.get('keeper_turn_id') == b_write['keeper_turn_id']
+                    and producer['keeper_turn_id'] != a2_write['keeper_turn_id']
+                    and producer['execution_id'] != b_write['execution_id']
+                    and b_note['created_at'] <= b_write['ts'] < producer['ts'] < min(b_acks)
+                    and exact_note_in_list(decode_tool_output(producer['output']))):
+                continue
+            b_turn = completed_membership(producer, b_write)
+            if b_turn is None:
+                continue
+            canonical.append({'b_notes_list': producer, 'canonical_blob': blob['source'],
+                'raw_output_sha256': sha, 'raw_output_bytes': len(blob['raw']),
+                'a_read': read, 'returned_content_sha256': hashlib.sha256(page['content'].encode('utf-8')).hexdigest(),
+                'exact_note': b_note, 'b_turn': b_turn, 'a_turn': a_turn,
+                'b_ack_times': b_acks, 'a_readmission_times': a_readmissions,
+                'a2_note_created_at': a2_note['created_at'], 'a2_execution_id': a2_write['execution_id']})
+    return {'schema': 'masc.schedule-dependency-observation.v1', 'is_derivative': True,
+        'a_source': a_source, 'b_source': b_source, 'direct_notes_list': direct,
+        'canonical_result_reads': canonical, 'turn_record_sources': turn_files,
+        'scope': 'Direct A read, or B successful notes_list raw output == canonical blob == complete A artifact-read bytes. Exact note, source-chain times and turn/execution membership required; unrelated artifact reads excluded.'}
+
+
+def durable_calls():
+    # Every owned row is inventoried, including failed/rejected attempts and
+    # builtin metadata. A partial file cannot erase its already complete rows.
+    owned, sources, errors = [], [], []
+    for path in sorted((base/'.masc/tool_calls').rglob('*.jsonl')):
+        try:
+            raw = path.read_bytes()
+        except OSError as error:
+            errors.append({'path': str(path), 'error_type': type(error).__name__})
+            continue
+        parsed = []
+        for line in raw.splitlines(keepends=True):
+            if not line.strip():
+                continue
+            if not line.endswith(b'\n'):
+                errors.append({'path': str(path), 'error_type': 'partial_final_line'})
+                break
+            try:
+                row = json.loads(line)
+            except (ValueError, TypeError):
+                errors.append({'path': str(path), 'error_type': 'invalid_json_row'})
+                continue
+            if not isinstance(row, dict):
+                errors.append({'path': str(path), 'error_type': 'non_object_row'})
+                continue
+            parsed.append(row)
+        sources.append({'path': str(path), 'sha256': hashlib.sha256(raw).hexdigest(),
+                        'bytes': len(raw), 'rows': len(parsed)})
+        owned.extend(row for row in parsed if row.get('keeper') == keeper)
+    calls = [row for row in owned if row.get('record_kind') == 'tool_call']
+    selected = [row for row in calls if row.get('tool') in
+                ['masc_schedule_note_add', 'masc_schedule_notes_list']
+                and isinstance(row.get('input'), dict)
+                and row['input'].get('schedule_id') in [schedule_id, second_id]]
+    artifacts = [row for row in calls if row.get('tool') == 'keeper_artifact_read'
+                 and isinstance(row.get('input'), dict)]
+    return {'entries': selected, 'owned_rows': owned, 'all_calls': calls,
+            'sources': sources, 'read_errors': errors, 'artifact_candidates': artifacts}
+
+
+def owned_inventory(capture):
+    # Hash JSON values as semantic witnesses, not alleged original wire bytes.
+    def value_binding(value):
+        raw = json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode()
+        return {'json_value_sha256': hashlib.sha256(raw).hexdigest(), 'json_value_bytes': len(raw)}
+    entries = []
+    for row in capture['owned_rows']:
+        entry = {key: row.get(key) for key in ['record_kind', 'tool', 'execution_id',
+            'tool_use_id', 'keeper', 'keeper_turn_id', 'trace_id', 'ts', 'disposition', 'wire_outcome']}
+        entry['input_binding'] = value_binding(row.get('input'))
+        entry['output_binding'] = value_binding(row.get('output'))
+        entry['raw_input_output_retained'] = False
+        entries.append(entry)
+    return {'schema': 'masc.schedule-c3-owned-tool-inventory.v1', 'sources': capture['sources'],
+            'owned_rows': entries, 'row_count': len(entries), 'read_errors': capture['read_errors'],
+            'scope': 'All owned Keeper rows; non-synthetic input/output contents excluded, semantic hashes only.'}
+
+
+def preclassify_owned_calls(capture):
+    # Pure primary-row decisions precede every optional blob/API/evidence read.
+    calls = capture['all_calls']
+    writes = [row for row in calls if row.get('tool') == 'masc_schedule_note_add']
+    allowed_notes = {(schedule_id, marker), (second_id, second_marker), (schedule_id, final_marker)}
+    if len(writes) > 3:
+        raise BehaviorFailure('all owned note_add attempts must be exactly the three required writes; extra attempt observed')
+    for row in writes:
+        arg = row.get('input')
+        if (not isinstance(arg, dict) or not isinstance(arg.get('schedule_id'), str)
+                or not isinstance(arg.get('body'), str) or (arg['schedule_id'], arg['body']) not in allowed_notes):
+            raise BehaviorFailure('owned note_add attempted a wrong target or unrequested body')
+    for sid, body in allowed_notes:
+        if sum(1 for row in writes if row['input'].get('schedule_id') == sid
+               and row['input'].get('body') == body) > 1:
+            raise BehaviorFailure('owned model repeated a required note_add attempt, including failed or rejected calls')
+    # These exact canonical schedule actions are typed read_only:false in the
+    # frozen Tool_schemas_schedule definitions. No name-substring inference.
+    for row in calls:
+        if row.get('tool') in {'masc_schedule_create', 'masc_schedule_update', 'masc_schedule_cancel',
+                'Write', 'Edit', 'Execute', 'tool_execute', 'masc_broadcast', 'keeper_broadcast',
+                'masc_ask', 'keeper_task_create', 'masc_add_task'}:
+            raise BehaviorFailure('owned model attempted an explicitly unrequested mutation, shell, message or Ask')
+    by_effect = [[r for r in writes if (r.get('input') or {}).get('schedule_id') == sid
+                  and (r.get('input') or {}).get('body') == body and r.get('wire_outcome') == 'ok']
+                 for sid, body in [(schedule_id, marker), (second_id, second_marker), (schedule_id, final_marker)]]
+    # Each conclusive pair stands on its own; a missing third row cannot
+    # downgrade an already witnessed wrong-source effect to INCOMPLETE.
+    if len(by_effect[1]) == len(by_effect[2]) == 1:
+        wb, wa2 = by_effect[1][0], by_effect[2][0]
+        if (isinstance(wa2.get('trace_id'), str) and wa2.get('trace_id') == wb.get('trace_id')
+                and wa2.get('keeper_turn_id') is not None and wa2.get('keeper_turn_id') == wb.get('keeper_turn_id')):
+            raise BehaviorFailure('A2 executes in B Keeper turn rather than a separate exact A readmission')
+    if len(by_effect[0]) == len(by_effect[2]) == 1:
+        wa, wa2 = by_effect[0][0], by_effect[2][0]
+        if (isinstance(wa2.get('trace_id'), str) and wa2.get('trace_id') == wa.get('trace_id')
+                and wa2.get('keeper_turn_id') is not None and wa2.get('keeper_turn_id') == wa.get('keeper_turn_id')):
+            raise BehaviorFailure('A2 executes in original A1 turn rather than after actual checkpoint and readmission')
+    return by_effect
+
+
+def require_owned_inventory(capture, calls):
+    # Unknown semantics is an observation limit, never silently successful.
+    if capture['read_errors']:
+        raise Incomplete('complete all-owned tool ledger could not be read')
+    allowed = {'keeper_tool_search', 'masc_schedule_get', 'masc_schedule_list',
+               'masc_schedule_notes_list', 'masc_schedule_note_add', 'keeper_artifact_read'}
+    canonical_reads = {row.get('execution_id') for row in calls if row.get('tool') == 'keeper_artifact_read'}
+    for row in capture['owned_rows']:
+        if row.get('record_kind') != 'tool_call' or row.get('tool') not in allowed:
+            raise Incomplete('owned row semantics is outside the explicitly reviewed synthetic scenario')
+        arg = row.get('input')
+        if not isinstance(arg, dict):
+            raise Incomplete('owned tool arguments are unavailable')
+        if row['tool'] in {'masc_schedule_get', 'masc_schedule_notes_list'} and arg.get('schedule_id') not in [schedule_id, second_id]:
+            raise Incomplete('read-only call targets a non-synthetic schedule; private content excluded')
+        if row['tool'] == 'masc_schedule_list' and not (arg.get('owner') == 'self'
+                or arg.get('owner') in {'wake_target', 'scheduled_by'} and arg.get('owner_name') == keeper):
+            raise Incomplete('schedule list is outside this owned Keeper scope')
+        if row['tool'] == 'keeper_artifact_read' and row.get('execution_id') not in canonical_reads:
+            raise Incomplete('artifact read is not a verified canonical synthetic B result')
+        if not (isinstance(row.get('execution_id'), str) and row['execution_id']
+                and isinstance(row.get('trace_id'), str) and row['trace_id']
+                and type(row.get('keeper_turn_id')) is int):
+            raise Incomplete('owned call lacks exact execution/turn identity')
+    executions = [row['execution_id'] for row in capture['owned_rows']]
+    if len(executions) != len(set(executions)):
+        raise Incomplete('duplicate all-owned execution identities are not silently coalesced')
+
+
+def save_durable_calls(capture):
+    write_json('all-owned-tool-inventory.json', owned_inventory(capture))
+    # Only two synthetic schedules are eligible for raw input/output retention.
+    write_json('tool-call-selection.json', {
+        'scope': 'All owned rows inventoried separately; raw selected rows target the two synthetic schedules only.',
+        'sources': capture['sources'], 'entries': capture['entries']})
+
+
+def capture_durable_calls():
+    capture = durable_calls()
+    save_durable_calls(capture)
+
+
+def enrich_durable_calls(capture):
+    selected = capture['entries']
+    known_b = known_b_result_blobs(selected)
+    selected = selected + [row for row in capture['artifact_candidates'] if row['input'].get('sha256') in known_b]
+    write_json('tool-call-selection.json', {'scope': 'All current owned durable tool-call JSONL files; exact synthetic schedule calls plus artifact reads of verified canonical B notes_list outputs only, no tail limit.',
+        'sources': capture['sources'], 'entries': selected,
+        'known_canonical_b_results': [entry['source'] for entry in known_b.values()]})
+    return selected
+
+
+# Provider snapshots retain the latest request for each turn, not a full wire
+# history. Inspect bound blobs locally; never copy private text or reasoning.
+provider_input_evidence = None
+
+
+def source_receipt(path, raw):
+    return {'path': str(path), 'sha256': hashlib.sha256(raw).hexdigest(), 'bytes': len(raw)}
+
+
+def prompt_quote(text):
+    # Same escaped field representation as keeper_unified_prompt_event_fields.
+    return '"'+text.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t')+'"'
+
+
+def snapshot_blob(artifact):
+    ref = artifact['content_ref']
+    if not isinstance(ref, str) or not ref.startswith('[masc:blob ') or not ref.endswith(']'):
+        raise Incomplete('unsupported provider snapshot artifact reference')
+    fields = shlex.split(ref[len('[masc:blob '):-1])
+    pairs = [field.split('=', 1) for field in fields]
+    if any(len(pair) != 2 for pair in pairs) or len(pairs) != 4:
+        raise Incomplete('malformed provider snapshot artifact reference')
+    values = dict(pairs)
+    if set(values) != {'sha256', 'bytes', 'mime', 'preview'} or values['preview'] != '':
+        raise Incomplete('unexpected provider snapshot artifact fields')
+    sha = checked_hex(values['sha256'], 64)
+    if (type(artifact['bytes']) is not int or artifact['bytes'] < 0
+            or values['bytes'] != str(artifact['bytes'])):
+        raise Incomplete('provider snapshot reference byte count mismatch')
+    path = base/'.masc/tool_blobs'/sha[:2]/sha
+    raw = path.read_bytes()
+    if len(raw) != artifact['bytes'] or hashlib.sha256(raw).hexdigest() != sha:
+        raise Incomplete('provider snapshot blob hash/bytes mismatch')
+    return raw, source_receipt(path, raw)
+
+
+def read_provider_input_evidence():
+    snapshots, sources = read_jsonl_files(base/'.masc/keepers'/keeper/'provider-inputs')
+    selected = []
+    for row in snapshots:
+        if (row.get('schema') != 'masc.provider-input-snapshot.v1'
+                or row.get('keeper') != keeper or row.get('runtime_profile') != runtime_id):
+            raise Incomplete('provider snapshot schema or owned identity mismatch')
+        parts, uses, results = [], set(), set()
+        requests = {identity: [] for identity in scenario_messages}
+        descriptors = []
+        if row['system_prompt'] is not None:
+            descriptors.append(('system', 'system_prompt', row['system_prompt'], None))
+        descriptors += [('message', 'message_'+str(message['index']), message['artifact'], message)
+                        for message in row['messages']]
+        descriptors += [('tool_schema', 'tool_'+str(tool_schema['index']), tool_schema['artifact'], None)
+                        for tool_schema in row['tool_schemas']]
+        for kind, label, artifact, message in descriptors:
+            raw, receipt = snapshot_blob(artifact)
+            part = {'kind': kind, 'label': label, 'source': receipt,
+                    'reference_bytes': artifact['bytes'], 'hash_and_length_verified': True,
+                    'raw_content_copied': False}
+            if kind == 'message':
+                decoded = json.loads(raw)
+                if decoded.get('role') != message['role']:
+                    raise Incomplete('provider message role disagrees with snapshot index')
+                part.update(role=decoded.get('role'), origin=decoded.get('origin'))
+                blocks = decoded.get('content_blocks')
+                if not isinstance(blocks, list):
+                    raise Incomplete('provider message has no canonical content_blocks')
+                # Only ordinary user Text is examined for request presence.
+                # Assistant thinking blocks are never selected or inspected.
+                if decoded.get('role') == 'user' and decoded.get('origin') == 'conversation':
+                    texts = [block['text'] for block in blocks
+                             if block.get('type') == 'text' and isinstance(block.get('text'), str)]
+                    presence = {}
+                    for identity, body in scenario_messages.items():
+                        identity_field = 'schedule_id='+prompt_quote(identity)
+                        instance_field = 'schedule_instance_id='+prompt_quote(scenario_instances[identity])
+                        body_field = 'message='+prompt_quote(body)
+                        flags = {'exact_schedule_id': any(identity_field in text for text in texts),
+                                 'exact_instance_id': any(instance_field in text for text in texts),
+                                 'exact_message': any(body_field in text for text in texts),
+                                 'same_text_block': any(all(field in text for field in [identity_field, instance_field, body_field]) for text in texts)}
+                        presence[identity] = flags
+                        if flags['same_text_block']:
+                            requests[identity].append(label)
+                    part['synthetic_request_presence'] = presence
+                for block in blocks:
+                    if block.get('type') == 'tool_use' and block.get('name') == 'keeper_tool_search':
+                        uses.add(block['id'])
+                    if block.get('type') == 'tool_result' and block.get('is_error') is False:
+                        results.add(block['tool_use_id'])
+            parts.append(part)
+        selected.append({'trace_id': row['trace_id'], 'absolute_turn': row['absolute_turn'],
+            'turn_ref': row['turn_ref'], 'captured_at': row['captured_at'], 'wire': row['wire'],
+            'part_count': len(parts), 'all_parts_verified': True, 'parts': parts,
+            'successful_discovery_tool_result_ids': sorted(uses & results),
+            'durable_user_request_parts': requests})
+    return {'schema': 'masc.schedule-c2-provider-input-selection.v1', 'is_derivative': True,
+        'snapshot_sources': sources, 'snapshots': selected,
+        'scope': 'All bound parts of each available latest-per-turn snapshot verified. Presence checks inspect only conversation/user/text; no prompt, thinking or reasoning body copied.',
+        'first_complete_wire_body_retained_by_controller': False,
+        'complete_wire_body_rehashed_by_controller': False,
+        'limits': 'Bound parts and pre-dispatch wire metadata are not a reconstructed complete HTTP body, provider acceptance proof, or every intermediate request.'}
+
+
+def provider_input_decision(evidence):
+    rows = (evidence or {}).get('snapshots', [])
+    if not rows:
+        return None
+    latest = max(rows, key=lambda row: row['captured_at'])
+    if not latest['successful_discovery_tool_result_ids']:
+        return None
+    return (all(latest['durable_user_request_parts'].get(identity) for identity in [schedule_id, second_id]),
+            {'turn_ref': latest['turn_ref'], 'capture_id': latest['wire'].get('capture_id'),
+             'durable_user_request_parts': latest['durable_user_request_parts'], 'part_count': latest['part_count']})
+
+
+def capture_provider_inputs():
+    global provider_input_evidence
+    try:
+        provider_input_evidence = read_provider_input_evidence()
+    except (Incomplete, OSError, ValueError, KeyError, TypeError, RuntimeError) as error:
+        # Preserve negative behavior independently from missing forensic capture.
+        # Do not expose exception bodies that might contain serialized input.
+        provider_input_evidence = {'schema': 'masc.schedule-c2-provider-input-selection.v1',
+            'is_derivative': True, 'available': False, 'error_type': type(error).__name__,
+            'scope': 'Provider input verification incomplete; no contents copied.'}
+    decision = provider_input_decision(provider_input_evidence)
+    try:
+        write_json('provider-input-selected.json', provider_input_evidence)
+    finally:
+        if (schedule_id in scenario_instances and second_id in scenario_instances
+                and decision is not None and not decision[0]):
+            check('latest verified post-discovery request retains both exact requests as durable user input',
+                  False, decision[1])
+
+
+def require_durable_provider_inputs():
+    evidence = provider_input_evidence or {}
+    rows = evidence.get('snapshots', [])
+    if not rows:
+        raise Incomplete('provider snapshot input evidence unavailable')
+    latest = max(rows, key=lambda row: row['captured_at'])
+    if not latest['successful_discovery_tool_result_ids']:
+        raise Incomplete('latest retained request does not witness completed discovery; post-discovery input criterion unobserved')
+    decision = provider_input_decision(evidence)
+    check('latest verified post-discovery request retains both exact requests as durable user input',
+          decision[0], decision[1])
+
+
+def final_proof(a, b, aq, bq):
+    state, primary_source = primary()
+    an, bn = primary_notes(state, a), primary_notes(state, b)
+    notes = [[n for n in ns if n.get('body') == body]
+             for ns, body in [(an, marker), (bn, second_marker), (an, final_marker)]]
+    primary_evidence = {'primary': primary_source, 'first_notes': an, 'second_notes': bn,
+        'scope': 'All authoritative notes on the two synthetic schedules, before ancillary reads.'}
+    primary_decisions = [
+        ('both synthetic schedules contain exactly the three requested notes',
+         len(an) == 2 and len(bn) == 1,
+         {'first_note_count': len(an), 'second_note_count': len(bn)}),
+        ('A1 B A2 each exist exactly once with the actual Keeper author',
+         all(len(ns) == 1 and ns[0].get('author_id') == keeper for ns in notes),
+         {'notes': notes, 'primary': primary_source})]
+    failed_primary_decision = next((decision for decision in primary_decisions if not decision[1]), None)
+    if failed_primary_decision is not None:
+        try:
+            write_json('primary-scenario-effects.json', primary_evidence)
+            failed_capture = durable_calls()
+            failed_calls = failed_capture['entries']
+            save_durable_calls(failed_capture)
+            write_json('all-scenario-effects.json', {**primary_evidence,
+                'all_synthetic_note_add_calls': [call for call in failed_calls
+                    if call['tool'] == 'masc_schedule_note_add']})
+            capture_provider_inputs()
+        finally:
+            # In particular, a confirmed fourth note cannot be hidden by a
+            # partial tool ledger, missing snapshot or failing evidence write.
+            check(*failed_primary_decision)
+    write_json('primary-scenario-effects.json', primary_evidence)
+    for decision in primary_decisions:
+        check(*decision)
+    call_capture = durable_calls()
+    preclassify_owned_calls(call_capture)
+    calls = call_capture['entries']
+    all_writes = [r for r in calls if r['tool'] == 'masc_schedule_note_add']
+    effects = {'primary': primary_source, 'first_notes': an,
+        'second_notes': bn, 'all_synthetic_note_add_calls': all_writes,
+        'scope': 'All notes and all durable note_add calls targeting these two synthetic schedules; no claim about unrelated schedules.'}
+    if len(all_writes) > 3:
+        try:
+            write_json('all-scenario-effects.json', effects)
+            save_durable_calls(call_capture)
+        finally:
+            check('synthetic schedules have exactly three note_add calls with no additional attempt',
+                  False, {'note_add_call_count': len(all_writes)})
+    write_json('all-scenario-effects.json', effects)
+    save_durable_calls(call_capture)
+    if len(all_writes) < 3:
+        raise Incomplete('primary effects exist but the complete three-call durable evidence is unavailable')
+    check('synthetic schedules have exactly three note_add calls with no additional attempt',
+          len(all_writes) == 3, {'note_add_call_count': len(all_writes)})
+    rows, files = reaction_read(); aid, bid = aq['post_id'], bq['post_id']
+    starts = event_times(rows, aid, 'turn_started')
+    checkpoints = event_times(rows, aid, 'turn_finished', 'checkpointed')
+    bstart = event_times(rows, bid, 'turn_started')
+    back = event_times(rows, bid, 'event_queue_ack')
+    aack = event_times(rows, aid, 'event_queue_ack')
+    arrival = [r['recorded_at_unix'] for r in rows if r.get('stimulus_id') == bid and r.get('record_kind') == 'stimulus']
+    if not (starts and checkpoints and bstart and back and aack and arrival):
+        raise Incomplete('effects completed but the required after-effect checkpoint/ACK witnesses are absent; sequential completion is not PASS')
+    resumed = [s for s in starts if s > max(back)]
+    check('A1 precedes B arrival, actual A checkpoint and B source entry',
+          any(st < notes[0][0]['created_at'] <= seen_a1_at < ar < cp < bs
+              for st in starts for ar in arrival for cp in checkpoints for bs in bstart))
+    check('original A has no premature ACK and is readmitted after B ACK',
+          min(aack) > max(back) and bool(resumed))
+    retentions = [(q, e) for q in queue_observations for e in q['pending']
+                  if e['post_id'] == aid and e['checkpoint_retentions'] > 0
+                  and e['payload']['schedule_instance_id'] == a['schedule_instance_id']
+                  and any(cp <= q['observed_at_unix'] < min(back) for cp in checkpoints)]
+    if not retentions:
+        raise Incomplete('actual retained A incarnation was not captured')
+    incarnations = {e['admitted_revision'] for _, e in retentions}
+    original_incarnations = {e['admitted_revision'] for q in queue_observations for e in q['pending']
+        if e['post_id'] == aid and e['checkpoint_retentions'] == 0
+        and q['observed_at_unix'] < min(checkpoints)}
+    if not original_incarnations:
+        raise Incomplete('original pending incarnation was not sampled before checkpoint')
+    ack_rows = source_events(rows, aid, 'event_queue_ack')
+    ack_incarnations = {(r['reaction'].get('transition_receipt') or {}).get('transition', {}).get('source_incarnation') for r in ack_rows}
+    check('A retention and final ACK refer to the exact original incarnation',
+          len(incarnations) == 1 and ack_incarnations == incarnations == original_incarnations)
+    writes = [[r for r in calls if r['tool'] == 'masc_schedule_note_add'
+               and r['input'].get('schedule_id') == identity and r['input'].get('body') == body
+               and r.get('wire_outcome') == 'ok']
+              for identity, body in [(schedule_id, marker), (second_id, second_marker), (schedule_id, final_marker)]]
+    if not all(len(xs) == 1 for xs in writes):
+        raise Incomplete('complete durable tool-call evidence for the three exact writes is unavailable or ambiguous')
+    wa, wb, wa2 = [xs[0] for xs in writes]
+    for call, stored in zip([wa, wb, wa2], [ns[0] for ns in notes]):
+        result = decode_tool_output(call.get('output'))
+        returned_note = result.get('note') if isinstance(result, dict) else None
+        if not isinstance(returned_note, dict):
+            raise Incomplete('exact note tool result is not available as structured evidence')
+        check('successful tool result names its exact stored note '+stored['note_id'],
+              returned_note == stored)
+    check('B actual effect belongs to B admitted source before its ACK',
+          any(bs < notes[1][0]['created_at'] <= wb['ts'] < ack for bs in bstart for ack in back)
+          and wb['keeper_turn_id'] != wa['keeper_turn_id'])
+    finish_a = event_times(rows, aid, 'turn_finished', 'completed')
+    a2_ref = str(wa2.get('trace_id'))+'#'+str(wa2.get('keeper_turn_id'))
+    live_match = [t for t in live_observations if t['turn_ref'] == a2_ref
+        and t['lane'] == 'autonomous' and any(t['started_at_unix'] <= s <= t['observed_at_unix']
+            for s in resumed) and t['observed_at_unix'] <= wa2['ts']]
+    check('A2 executes only after exact A readmission, separately from the B Keeper turn',
+          any(s < wa2['ts'] < end for s in resumed for end in finish_a)
+          and wa2['keeper_turn_id'] != wb['keeper_turn_id']
+          and wa2['keeper_turn_id'] != wa['keeper_turn_id'])
+    if not live_match:
+        raise Incomplete('exact readmitted A live turn reference was not captured before A2')
+    # Only after source behavior is decided may optional enrichment/API work fail.
+    calls = enrich_durable_calls(call_capture)
+    dependency = dependency_observation_evidence(calls, wb, wa2, notes[1][0], notes[2][0],
+        back, resumed, {'post_id': aid, 'schedule_id': a['schedule_id'], 'schedule_instance_id': a['schedule_instance_id']},
+        {'post_id': bid, 'schedule_id': b['schedule_id'], 'schedule_instance_id': b['schedule_instance_id']})
+    dependency_observed = bool(dependency['direct_notes_list'] or dependency['canonical_result_reads'])
+    try:
+        write_json('dependency-observation.json', dependency)
+    finally:
+        if not dependency_observed:
+            check('readmitted A actually observes the exact B note before writing A2', False)
+    check('readmitted A actually observes the exact B note before writing A2', dependency_observed)
+    require_owned_inventory(call_capture, calls)
+    capture_provider_inputs()
+    exact = []
+    for call in [wa, wb, wa2]:
+        execution = call.get('execution_id')
+        if not execution:
+            raise Incomplete('note write has no exact execution identity')
+        value = exact_read('/api/v1/keepers/'+quote(keeper)+'/tool-calls?execution_id='+quote(execution))
+        row = value.get('entry') or {}
+        check('exact execution lookup confirms '+execution,
+              all(row.get(k) == call.get(k) for k in ['execution_id', 'tool_use_id', 'keeper_turn_id', 'trace_id', 'input', 'output']))
+        exact.append(value)
+    write_json('exact-note-executions.json', exact)
+    dependency_calls = list(dependency['direct_notes_list'])
+    for witness in dependency['canonical_result_reads']:
+        dependency_calls.extend([witness['b_notes_list'], witness['a_read']])
+    seen_dependency_executions = set()
+    for call in dependency_calls:
+        execution = call['execution_id']
+        if execution in seen_dependency_executions:
+            continue
+        seen_dependency_executions.add(execution)
+        value = exact_read('/api/v1/keepers/'+quote(keeper)+'/tool-calls?execution_id='+quote(execution))
+        row = value.get('entry') or {}
+        check('exact dependency execution lookup confirms '+execution,
+              all(row.get(k) == call.get(k) for k in ['execution_id', 'tool_use_id', 'keeper_turn_id', 'trace_id', 'input', 'output']))
+        exact.append(value)
+    write_json('exact-note-and-dependency-executions.json', exact)
+    def includes(cp, call):
+        return any(p['tool_use_id'] == call['tool_use_id'] and p['note'].get('body') == call['input']['body']
+            for p in cp['selected_note_tool_results'])
+    early = [cp for cp in checkpoint_observations if cp['session_id'] == wa['trace_id']
+             and cp['observed_at_unix'] < min(bstart) and includes(cp, wa)]
+    late = [cp for cp in checkpoint_observations if cp['session_id'] == wa2['trace_id']
+            and max(back) < cp['observed_at_unix'] < wa2['ts'] and includes(cp, wa) and includes(cp, wb)]
+    if not early or not late:
+        raise Incomplete('persisted A1→B→readmitted-A tool-result lineage was not captured; source readmission alone is insufficient for this run')
+    check('persisted continuation lineage retains A1 and B tool results before A2',
+          wa['trace_id'] == wb['trace_id'] == wa2['trace_id'])
+    selected_events = [{'event_id': r.get('event_id'), 'stimulus_id': r.get('stimulus_id'),
+        'recorded_at_unix': r.get('recorded_at_unix'), 'record_kind': r.get('record_kind'),
+        'reaction': r.get('reaction')} for r in rows if r.get('stimulus_id') in [aid, bid]]
+    require_durable_provider_inputs()
+    write_json('durable-chain.json', {'sources': files, 'events': selected_events,
+        'retained_incarnation': list(incarnations), 'early_checkpoint': early, 'later_checkpoint': late,
+        'claim': 'Exact original A source readmission and persisted trace lineage; not restoration of identical original checkpoint bytes.'})
+
+
+try:
+    log = (output/'server.log').open('w')
+    server = subprocess.Popen(server_argv, env=env, stdout=log, stderr=log, cwd=base, start_new_session=True)
+    process.update(pid=server.pid, started_at_unix=time.time(), argv=server_argv,
+        executable_sha256=EXPECTED_BINARY, direct_owned_child=True)
+    write_json('process.json', process)
+    print('Owned live-provider child started', server.pid, url, flush=True)
+    while True:
+        observation_open()
+        try:
+            status, health = request('/health?full=1')
+            if status == 200 and health.get('startup', {}).get('state_ready'):
+                break
+        except (urllib.error.URLError, TimeoutError):
+            pass
+        time.sleep(.3)
+    check('owned workspace and pinned native source are actually served',
+          health['paths']['effective_base_path'] == str(base)
+          and health['build']['executable_sha256'] == EXPECTED_BINARY
+          and health['build'].get('binary_commit') == EXPECTED_SOURCE, health['build'])
+    meta['build'] = health['build']; write_json('provenance.json', meta)
+    status, gate = request('/api/v1/dashboard/gate/mode', admin_token, {'mode': 'always_allow'})
+    check('owned workspace gate accepts setting', status == 200, gate)
+    successful_tool('masc_keeper_up', {'name': keeper, 'create_only': True,
+        'sandbox_profile': 'microvm', 'sandbox_image': 'base', 'microvm_backend': 'apple_container',
+        'network_mode': 'none', 'activation_mode': 'manual', 'runtime_id': runtime_id, 'skills': {'names': []},
+        'instructions': 'Perform authorized scheduled requests with their exact identities. Preserve unfinished work across other requests. Use schedule tools directly; do not invoke shell tools, contact people, or create other work. Do not ask for confirmation for these internal notes.'})
+    status, approval = request('/api/v1/keepers/tool-approval-mode', admin_token, {'name': keeper, 'mode': 'yolo'})
+    check('owned Keeper tool approval accepts setting', status == 200, approval)
+    stage = 'after-effect'
+    # Watch the containing directory: each note commit atomically replaces the
+    # primary inode. The event is a wake-up hint, never proof of a note itself.
+    directory_fd = os.open(base/'.masc', os.O_RDONLY)
+    try:
+        with contextlib.closing(select.kqueue()) as watcher:
+            watcher.control([select.kevent(directory_fd, filter=select.KQ_FILTER_VNODE,
+                flags=select.KQ_EV_ADD | select.KQ_EV_CLEAR,
+                fflags=select.KQ_NOTE_WRITE | select.KQ_NOTE_RENAME | select.KQ_NOTE_DELETE)], 0, 0)
+            first = create_a()
+            scenario_instances[schedule_id] = first['schedule_instance_id']
+            write_json('first-created.json', first)
+            while True:
+                observation_open()
+                value, receipt = primary()
+                found = [n for n in primary_notes(value, first) if n.get('body') == marker]
+                if found:
+                    check('first actual A1 publication has exactly one Keeper-authored note',
+                          len(found) == 1 and found[0].get('author_id') == keeper, found)
+                    seen_a1_at = receipt['observed_at_unix']
+                    write_json('a1-publication.json', {'source': receipt, 'note': found[0],
+                        'schedule_instance_id': first['schedule_instance_id']})
+                    # Nothing waits for a slow HTTP observation before B admission.
+                    second = create_b()
+                    scenario_instances[second_id] = second['schedule_instance_id']
+                    write_json('created.json', {'first': first, 'second': second,
+                        'a1_observed_at_unix': seen_a1_at, 'b_response_at_unix': time.time()})
+                    break
+                observe_queue()
+                first_observation, first_queue = history(first)
+                if first_queue.get('terminal_outcome') in ['completed', 'failed', 'cancelled']:
+                    # The first primary read preceded this HTTP call. Reread
+                    # after the terminal observation before declaring missing effect.
+                    terminal_primary, terminal_primary_source = primary()
+                    terminal_notes = primary_notes(terminal_primary, first)
+                    if not any(n.get('body') == marker for n in terminal_notes):
+                        try:
+                            write_json('early-terminal-without-a1.json', {
+                                'observation': first_observation, 'queue': first_queue,
+                                'primary': terminal_primary_source, 'all_original_schedule_notes': terminal_notes,
+                                'B_created': False, 'observed_at_unix': time.time()})
+                            # A failed forensic read cannot downgrade this proven
+                            # terminal-without-effect outcome to INCOMPLETE.
+                            forensic_errors = []
+                            for capture in [capture_durable_calls, observe_checkpoints, capture_provider_inputs]:
+                                try:
+                                    capture()
+                                except (Incomplete, OSError, ValueError, KeyError, TypeError) as error:
+                                    forensic_errors.append({'capture': capture.__name__, 'error_type': type(error).__name__})
+                            write_json('early-terminal-forensic-errors.json', forensic_errors)
+                        finally:
+                            check('original A cannot complete fail or cancel without its required A1 effect', False,
+                                  {'terminal_outcome': first_queue['terminal_outcome'], 'post_id': first_queue.get('post_id')})
+                    continue
+                watcher.control(None, 1, min(1., max(0., args.observation_deadline_unix-time.time())))
+    finally:
+        os.close(directory_fd)
+    observe_checkpoints()
+    while True:
+        observation_open()
+        observe_queue(); observe_checkpoints()
+        turn = observe_live()
+        a, aq = history(first)
+        if aq.get('terminal_outcome') in ['failed', 'cancelled']:
+            check('both scheduled sources avoid terminal failure or cancellation', False, {'first': aq})
+        b, bq = history(second)
+        if bq.get('terminal_outcome') in ['failed', 'cancelled']:
+            check('both scheduled sources avoid terminal failure or cancellation', False, {'second': bq})
+        write_json('last-observation.json', {'first': a, 'second': b,
+            'target_idle': turn is None, 'observed_at_unix': time.time()})
+        if aq.get('terminal_outcome') == bq.get('terminal_outcome') == 'completed' and turn is None:
+            final_proof(first, second, aq, bq)
+            # Reread after final proof; completion is not inferred from the old poll.
+            _, aq = history(first)
+            if aq.get('terminal_outcome') != 'completed':
+                check('both exact sources are completed and the target is actually idle', False, {'first': aq})
+            _, bq = history(second)
+            if bq.get('terminal_outcome') != 'completed':
+                check('both exact sources are completed and the target is actually idle', False, {'second': bq})
+            check('both exact sources are completed and the target is actually idle',
+                  aq.get('terminal_outcome') == bq.get('terminal_outcome') == 'completed'
+                  and observe_live() is None)
+            break
+        time.sleep(.2)
+    result = {'verdict': 'PASS', 'scope': 'one owned provider run, exactly three synthetic note writes, all-owned row inventory, observed after-effect source continuation and selected durable user input',
+        'source': EXPECTED_SOURCE, 'binary_sha256': EXPECTED_BINARY, 'checks': len(checks),
+        'not_proven': ['all complete provider wire bodies or first request body retention', 'identical original checkpoint reload', 'restart', 'provider failover', 'arbitrary effects exactly once', 'installation']}
+except BaseException as error:
+    # Freeze known behavior before forensic capture and normal cleanup.
+    result = {'verdict': 'FAIL' if isinstance(error, BehaviorFailure) else 'INCOMPLETE',
+        'error_type': type(error).__name__, 'detail': str(error),
+        'owned_pid': server.pid if server is not None else None,
+        'scope': 'No retry, provider switch, resume, cancellation, restart or forced kill.'}
+    try:
+        capture = durable_calls()
+        try:
+            preclassify_owned_calls(capture)
+        except BehaviorFailure as known:
+            result.update(verdict='FAIL', error_type=type(known).__name__, detail=str(known))
+        save_durable_calls(capture)
+    except Exception as capture_error:
+        result['forensic_error_type'] = type(capture_error).__name__
+finally:
+    cleanup_errors = []
+    if server is not None:
+        # Popen is our unreaped direct child. Its PID cannot be reused until
+        # wait/reap; no PID discovery/adoption, group signal or force kill.
+        process.update(observation_ended_at_unix=time.time(), returncode_at_observation_end=server.poll(),
+                       stop_reason='normal termination of exact directly spawned owned child after bounded observation')
+        try:
+            if server.poll() is None:
+                server.terminate()
+            server.wait(timeout=15)
+            process.update(returncode=server.returncode, stopped_at_unix=time.time(), forced_kill=False)
+            if result['verdict'] == 'PASS' and server.returncode != 0:
+                result.update(verdict='FAIL', detail='owned producer did not exit normally', producer_returncode=server.returncode)
+        except Exception as cleanup_error:
+            cleanup_errors.append({'error_type': type(cleanup_error).__name__})
+            if result['verdict'] == 'PASS':
+                result.update(verdict='INCOMPLETE', detail='normal owned-child cleanup not completed')
+    if log is not None:
+        try:
+            log.close()
+        except Exception as log_error:
+            cleanup_errors.append({'error_type': type(log_error).__name__})
+            if result['verdict'] == 'PASS':
+                result.update(verdict='INCOMPLETE', detail='owned log closure unavailable')
+    result.update(cleanup_errors=cleanup_errors, forced_kills=[], producer_terminal=server is None or server.poll() is not None,
+                  producer_returncode=server.poll() if server is not None else None)
+    write_errors = []
+    for name, value in [('process-ended.json', process), ('result.json', result)]:
+        try:
+            write_json(name, value)
+        except Exception as receipt_error:
+            write_errors.append({'file': name, 'error_type': type(receipt_error).__name__})
+    try:
+        save()
+    except Exception as receipt_error:
+        write_errors.append({'file': 'api-records.json/checks.json', 'error_type': type(receipt_error).__name__})
+    if write_errors and result['verdict'] == 'PASS':
+        result.update(verdict='INCOMPLETE', detail='positive evidence receipt could not be retained')
+        try:
+            write_json('result.json', result)
+        except Exception:
+            pass
+    try:
+        print(json.dumps({'verdict': result['verdict'], 'receipt_write_errors': write_errors, 'cleanup_errors': cleanup_errors}), flush=True)
+    finally:
+        raise SystemExit({'PASS': 0, 'FAIL': 1, 'INCOMPLETE': 2}[result['verdict']])

@@ -47,7 +47,6 @@ let oauth_error_description = function
   | Auth_oauth.Invalid_grant -> "authorization grant is invalid or expired"
   | Auth_oauth.Invalid_scope -> "requested scope is invalid"
   | Auth_oauth.Access_denied -> "authorization was denied"
-  | Auth_oauth.OAuth_disabled -> "OAuth is disabled"
   | Auth_oauth.Temporarily_unavailable ->
     "authorization server is temporarily unavailable"
   | Auth_oauth.Store_error _ -> "authorization server state is unavailable"
@@ -55,7 +54,7 @@ let oauth_error_description = function
 
 let oauth_error_status = function
   | Auth_oauth.Invalid_client -> `Unauthorized
-  | Auth_oauth.OAuth_disabled | Auth_oauth.Temporarily_unavailable ->
+  | Auth_oauth.Temporarily_unavailable ->
     `Service_unavailable
   | Auth_oauth.Store_error _ -> `Internal_server_error
   | Auth_oauth.Invalid_request _

@@ -10,7 +10,6 @@
 (** {1 OAuth} *)
 
 module OAuth : sig
-  val enabled : unit -> bool
   val code_ttl_sec : unit -> int
   val access_token_ttl_sec : unit -> int
   val refresh_token_ttl_sec : unit -> int

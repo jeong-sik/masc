@@ -229,7 +229,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
         ~extra_headers:[ "cache-control", "no-store"; "pragma", "no-cache" ]
     in
     let with_h2_oauth f =
-      if Auth_oauth.enabled () && Server_oauth_metadata.loopback_authority request_authority
+      if Server_oauth_metadata.loopback_authority request_authority
       then f ()
       else h2_respond_text h2_reqd "Not Found" ~status:`Not_found
     in

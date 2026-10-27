@@ -355,35 +355,34 @@ let issue_oauth_pair base_path bootstrap resource =
 
 let test_oauth_fifo_verification () =
   List.iter (fun access_fifo -> with_fifo_workspace @@ fun base_path ->
-    with_env "MASC_OAUTH_ENABLED" "1" (fun () ->
-      let bootstrap = seed base_path "first" in
-      let resource = "http://127.0.0.1:8935/mcp" in
-      let pair = issue_oauth_pair base_path bootstrap resource in
-      let oauth_root = Filename.concat (Auth.auth_dir base_path) "oauth" in
-      let access = Filename.concat (Filename.concat oauth_root "access_tokens")
-        (Auth.sha256_hash pair.access_token ^ ".json") in
-      let families = Filename.concat oauth_root "families" in
-      let family = match Array.to_list (Sys.readdir families) with
-        | [ name ] -> Filename.concat families name
-        | [] | _ :: _ -> fail "fixture must issue exactly one OAuth family" in
-      let occupied = if access_fifo then access else family in
-      let saved = occupied ^ ".fixture-saved" in
-      let other = if access_fifo then family else access in
-      let before = read occupied, read other, List.map read (pair_paths base_path bootstrap) in
-      let lookup () = Auth_oauth.with_expected_resource resource (fun () ->
-        Auth.find_credential_by_token base_path ~token:pair.access_token) in
-      let _valid = auth_ok (lookup ()) in
-      Unix.rename occupied saved; Unix.mkfifo occupied 0o600;
-      (match lookup () with
-       | Error (D.System (D.System_error.IoError _)) -> ()
-       | Error error -> fail (D.masc_error_to_string error)
-       | Ok _ -> fail "OAuth FIFO store failure must not fall through to static credentials");
-      check bool "OAuth refusal preserves record counterpart and bootstrap pair" true
-        ((read saved, read other, List.map read (pair_paths base_path bootstrap)) = before);
-      check bool "OAuth FIFO remains occupied" true ((Unix.lstat occupied).Unix.st_kind = Unix.S_FIFO);
-      Unix.unlink occupied; Unix.rename saved occupied;
-      let recovered = auth_ok (lookup ()) in
-      check string "repaired OAuth store lock remains usable" bootstrap.agent_name recovered.agent_name))
+    let bootstrap = seed base_path "first" in
+    let resource = "http://127.0.0.1:8935/mcp" in
+    let pair = issue_oauth_pair base_path bootstrap resource in
+    let oauth_root = Filename.concat (Auth.auth_dir base_path) "oauth" in
+    let access = Filename.concat (Filename.concat oauth_root "access_tokens")
+      (Auth.sha256_hash pair.access_token ^ ".json") in
+    let families = Filename.concat oauth_root "families" in
+    let family = match Array.to_list (Sys.readdir families) with
+      | [ name ] -> Filename.concat families name
+      | [] | _ :: _ -> fail "fixture must issue exactly one OAuth family" in
+    let occupied = if access_fifo then access else family in
+    let saved = occupied ^ ".fixture-saved" in
+    let other = if access_fifo then family else access in
+    let before = read occupied, read other, List.map read (pair_paths base_path bootstrap) in
+    let lookup () = Auth_oauth.with_expected_resource resource (fun () ->
+      Auth.find_credential_by_token base_path ~token:pair.access_token) in
+    let _valid = auth_ok (lookup ()) in
+    Unix.rename occupied saved; Unix.mkfifo occupied 0o600;
+    (match lookup () with
+     | Error (D.System (D.System_error.IoError _)) -> ()
+     | Error error -> fail (D.masc_error_to_string error)
+     | Ok _ -> fail "OAuth FIFO store failure must not fall through to static credentials");
+    check bool "OAuth refusal preserves record counterpart and bootstrap pair" true
+      ((read saved, read other, List.map read (pair_paths base_path bootstrap)) = before);
+    check bool "OAuth FIFO remains occupied" true ((Unix.lstat occupied).Unix.st_kind = Unix.S_FIFO);
+    Unix.unlink occupied; Unix.rename saved occupied;
+    let recovered = auth_ok (lookup ()) in
+    check string "repaired OAuth store lock remains usable" bootstrap.agent_name recovered.agent_name)
     [ true; false ]
 
 let () = run "Auth regular file read authority" [

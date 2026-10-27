@@ -1669,6 +1669,19 @@
  (modules test_dashboard_cache_cancellation)
  (libraries alcotest masc.dashboard masc.masc_core eio eio_main yojson))
 
+(test
+ (name test_dashboard_cache_lane)
+ (modules test_dashboard_cache_lane)
+ (libraries
+  alcotest
+  masc.dashboard
+  masc.masc_core
+  masc.masc_eio_context
+  eio
+  eio_main
+  fmt
+  yojson))
+
 ; Focused single-module tests
 
 (test

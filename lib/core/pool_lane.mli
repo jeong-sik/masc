@@ -9,8 +9,8 @@
 
     A submission takes the lane its fiber has at the moment it submits. A
     fiber the request forked counts as [Read] for whatever it submits before
-    the request ends: a stale-while-revalidate recompute that reaches the pool
-    before the handler returns is a read.
+    the request ends, unless it runs under {!with_background}: work no request
+    waits on, such as a stale-while-revalidate recompute, marks itself there.
 
     A pool job does not inherit the submitting fiber's keys: inside the job
     the lane is [Background] unless the job itself marks a read. Work handed
@@ -27,5 +27,10 @@ val current : unit -> lane
 
 val with_read : (unit -> 'a) -> 'a
 (** Run [f] as one HTTP read. Outside Eio this runs [f] unmarked. *)
+
+val with_background : (unit -> 'a) -> 'a
+(** Run [f] as background work even inside a read, for work no request waits
+    on: a refresh started after the request was already answered. Fibers
+    forked inside inherit it. *)
 
 val to_string : lane -> string

@@ -623,7 +623,13 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
           (try
              (match Eio_context.get_root_switch_opt () with
               | Some sw ->
+                (* The reader returns the stale value without waiting, so no
+                   request waits on this refresh. The fork inherits the
+                   reader's lane, and as a read it could hold the 1-2 read
+                   domains for its whole compute budget (RFC-0204 3.4). The
+                   inline path below stays a read: there the reader waits. *)
                 Eio.Fiber.fork ~sw (fun () ->
+                  Pool_lane.with_background @@ fun () ->
                   try do_bg_compute () with
                   | Eio.Cancel.Cancelled _ as e ->
                     restore_stale_ready ();

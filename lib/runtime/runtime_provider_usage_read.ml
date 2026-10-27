@@ -435,7 +435,10 @@ let read_client_in_background ~clock ~cwd ~scope read =
       match Eio_context.get_root_switch_opt () with
       | None -> No_root_switch
       | Some sw ->
-        start_background ~scope ~fork:(Eio.Fiber.fork ~sw) ~read:read_logged)
+        (* No request waits on this read (RFC-0204 3.4). *)
+        start_background ~scope
+          ~fork:(fun read -> Eio.Fiber.fork ~sw (fun () -> Pool_lane.with_background read))
+          ~read:read_logged)
   with
   | outcome -> outcome
   | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled

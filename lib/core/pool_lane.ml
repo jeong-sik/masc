@@ -27,6 +27,12 @@ let with_read f =
       (fun () -> Eio.Fiber.with_binding key read f)
 ;;
 
+let with_background f =
+  match Eio_guard.execution_context () with
+  | Eio_guard.Non_eio -> f ()
+  | Eio_guard.Eio_fiber -> Eio.Fiber.without_binding key f
+;;
+
 let to_string = function
   | Read -> "read"
   | Background -> "background"

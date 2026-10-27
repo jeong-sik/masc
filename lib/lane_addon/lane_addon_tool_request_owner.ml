@@ -259,7 +259,8 @@ let advance_events ~store ~expected ~events =
 let advance ~store ~expected ~event =
   advance_events ~store ~expected ~events:[event]
 module For_testing = struct
-  let fold_all = fold_all_with
+  let fold_all ~store ~(after_inventory : unit -> unit) ~init ~f =
+    fold_all_with ~after_inventory ~store ~init ~f
   let advance_events = advance_events_with
 end
 type settle_error = Settle_unavailable of string | Settle_changed

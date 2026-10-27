@@ -51,9 +51,14 @@ type space_owner = Agent_owner | Handed_to_operator | Operator_owner
     when it is not there. *)
 val named_spaces_script : space:string -> string
 
+(** Why the spaces were not read. [Spaces_failed]: ego did not list them,
+    as when it cannot reach ego lite. [Spaces_malformed]: it answered in a
+    form masc does not read, such as an owner that is not a {!space_owner}. *)
+type spaces_failure = Spaces_failed of string | Spaces_malformed of string
+
 (** Reads what {!named_spaces_script} wrote. An owner ego names that is not a
     {!space_owner} is an error, not a guess. *)
-val named_spaces : string -> ((int * space_owner) list, string) result
+val named_spaces : string -> ((int * space_owner) list, spaces_failure) result
 
 type t
 

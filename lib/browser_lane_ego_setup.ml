@@ -4,7 +4,7 @@ type request =
   ; space : string option
   }
 
-let default_space = "masc"
+let default_space = "masc-keepers"
 
 type key = Command | Space
 
@@ -26,6 +26,7 @@ type error =
   | Ego_unusable of { path : string; detail : string }
   | Table_refused of string
   | Space_held_by_operator of { space : string; space_id : int }
+  | Spaces_unanswered of { path : string; space : string; detail : string }
   | Spaces_unreadable of { path : string; space : string; detail : string }
   | Configuration_changed
   | Not_written of string
@@ -60,10 +61,16 @@ let error_message = function
       "The ego task space %S (id %d) belongs to the operator, and masc does not take over a \
        space the operator made. Name another with --ego-space."
       space space_id
-  | Spaces_unreadable { path; space; detail } ->
+  | Spaces_unanswered { path; space; detail } ->
     Printf.sprintf
       "The ego-browser at %s did not list ego lite's task spaces, so whether the operator \
        holds %S is unknown: %s. Open ego lite and run this again."
+      path space detail
+  | Spaces_unreadable { path; space; detail } ->
+    Printf.sprintf
+      "The ego-browser at %s answered the task space list in a form masc does not read, so \
+       whether the operator holds %S is unknown: %s. Running this again will not help until \
+       masc and ego lite agree; update the one that is older."
       path space detail
   | Configuration_changed ->
     Printf.sprintf "runtime.toml changed while this ran, so [%s] was not written. Run this again."
@@ -150,20 +157,24 @@ let named_spaces ~command ~space =
       [ command; "nodejs"; "-e"; Browser_ego_peer.named_spaces_script ~space ]
   in
   let output = stdout ^ "\n" ^ stderr in
+  let failed failure = Error (Browser_ego_peer.Spaces_failed (Browser_ego_peer.run_failure_message failure)) in
   match status with
   | Unix.WEXITED 0 -> Browser_ego_peer.named_spaces output
   (* [run_argv_with_status_split] synthesises 124 on its own timeout. *)
-  | Unix.WEXITED 124 -> Error (Browser_ego_peer.run_failure_message Browser_ego_peer.Timed_out)
-  | Unix.WEXITED code -> Error (Browser_ego_peer.run_failure_message (Browser_ego_peer.Exited { code; output }))
-  | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
-    Error (Browser_ego_peer.run_failure_message (Browser_ego_peer.Signaled signal))
+  | Unix.WEXITED 124 -> failed Browser_ego_peer.Timed_out
+  | Unix.WEXITED code -> failed (Browser_ego_peer.Exited { code; output })
+  | Unix.WSIGNALED signal | Unix.WSTOPPED signal -> failed (Browser_ego_peer.Signaled signal)
 
 (* The worker opens its space by name, and ego refuses a name the operator's
-   space holds; the worker would then fail to start. The space is checked
-   where its name is chosen. *)
+   space holds; the worker would then fail to start. Every plan checks the
+   space of the table it leaves, written or kept: a kept table may name a
+   space the operator made after it was written. *)
 let space_is_free ~(table : Browser_configuration.live_ego) =
   match named_spaces ~command:table.command ~space:table.space with
-  | Error detail -> Error (Spaces_unreadable { path = table.command; space = table.space; detail })
+  | Error (Browser_ego_peer.Spaces_failed detail) ->
+    Error (Spaces_unanswered { path = table.command; space = table.space; detail })
+  | Error (Browser_ego_peer.Spaces_malformed detail) ->
+    Error (Spaces_unreadable { path = table.command; space = table.space; detail })
   | Ok spaces ->
     (match
        List.find_map
@@ -180,7 +191,7 @@ let space_is_free ~(table : Browser_configuration.live_ego) =
    not named. A table that is there keeps its values and changes only what was
    named and differs from what it holds. The command written is started once
    to read its versions; a command the table keeps is not started for them.
-   A space written is checked against ego's spaces ([space_is_free]). *)
+   The space the table holds is checked against ego's spaces ([space_is_free]). *)
 let decide ~find_ego request = function
   | None ->
     let* command, versions =
@@ -248,7 +259,7 @@ let plan ~find_ego (request : request) =
     let existing = configuration.Browser_configuration.live_ego in
     let* table, set, change, versions = decide ~find_ego request existing in
     let* () = validated ~path ~existing ~table ~set observation.source_text in
-    let* () = if List.mem Space set then space_is_free ~table else Ok () in
+    let* () = space_is_free ~table in
     Ok
       { runtime_config_path = path
       ; revision = Runtime_table_edit.revision_of_observation observation

@@ -398,7 +398,7 @@ class BrowserLaneSetupCommand(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         text = runtime_toml(base).read_text()
         self.assertIn('command = "' + str(ego) + '"', text)
-        self.assertIn('space = "masc"', text)
+        self.assertIn('space = "masc-keepers"', text)
         self.assertFalse(lane(base).exists(), "ego installs no host")
         self.assertTrue((base / ".masc/packages/browser").is_dir(), "every route declares the browser Add-on")
 

@@ -2423,9 +2423,10 @@ let browser_lane_setup_cmd =
           [ "ego-space" ]
           ~docv:"NAME"
           ~doc:
-            "With --mode ego, the ego lite task space the Add-on serves. By default masc. \
-             A name that a task space you made in ego lite already has is refused. \
-             A table that is already there keeps its value unless this is given.")
+            "With --mode ego, the ego lite task space the Add-on serves. By default \
+             masc-keepers. A table that is already there keeps its value unless this is \
+             given. The space the table holds, new or kept, is refused when a task space \
+             you made in ego lite already has that name.")
   in
   let no_addon =
     Arg.(
@@ -2472,8 +2473,10 @@ let browser_lane_setup_cmd =
          ; `P
              "--mode ego writes [browser.live.ego]: the ego-browser the browser Add-on runs \
               and the ego lite task space it serves, after checking that ego-browser \
-              answers --version. It installs no host. An existing table keeps its values \
-              unless they are named. The server reads the table when it starts."
+              answers --version and that no task space you made in ego lite has that \
+              name. When ego lite does not list its spaces, nothing is written. It \
+              installs no host. An existing table keeps its values unless they are named. \
+              The server reads the table when it starts."
          ])
     Term.(
       const (fun base_path modes no_addon binary token_file manifest_dir host_name firefox

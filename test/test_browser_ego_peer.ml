@@ -107,6 +107,12 @@ let test_the_space_opens_by_name_and_is_held_by_number () =
       ~run:(fun ~window_s:_ _ -> failed "EGO_TASK_SPACE_NAME_IN_USE: masc") in
   check (result reject string) "ego's own refusal is kept" (Error "EGO_TASK_SPACE_NAME_IN_USE: masc") (Result.map ignore in_use)
 
+let space_owner = testable (fun out owner -> Format.pp_print_string out (match owner with
+  | Peer.Agent_owner -> "agent" | Handed_to_operator -> "handed to the operator" | Operator_owner -> "operator")) ( = )
+let spaces_failure = testable (fun out -> function
+  | Peer.Spaces_failed detail -> Format.fprintf out "failed: %s" detail
+  | Spaces_malformed detail -> Format.fprintf out "malformed: %s" detail) ( = )
+
 (* Opening a space by name makes it when it is not there, so the spaces of a
    name are read from ego's list: setup checks a name this way before it
    writes it. *)
@@ -118,26 +124,46 @@ let test_the_spaces_of_a_name_are_listed_without_opening_one () =
   check bool "it opens no space" false (contains script "await taskSpace(");
   check bool "the name rides in the arguments" true
     (List.mem ("const args = " ^ Yojson.Safe.to_string (obj ["space",str "masc"]) ^ ";") lines);
-  let owner = testable (fun out owner -> Format.pp_print_string out (match owner with
-    | Peer.Agent_owner -> "agent" | Handed_to_operator -> "handed to the operator" | Operator_owner -> "operator")) ( = ) in
   let read value = match value with
     | Ok output -> Peer.named_spaces output
-    | Error failure -> Error (Peer.run_failure_message failure) in
-  check (result (list (pair int owner)) string) "each space's number and owner"
+    | Error failure -> Error (Peer.Spaces_failed (Peer.run_failure_message failure)) in
+  check (result (list (pair int space_owner)) spaces_failure) "each space's number and owner"
     (Ok [36, Peer.Operator_owner; 42, Peer.Agent_owner; 32, Peer.Handed_to_operator])
     (read (answered (`List [obj ["spaceId",`Int 36;"ownership",str "user"];
       obj ["spaceId",`Int 42;"ownership",str "agent"];
       obj ["spaceId",`Int 32;"ownership",str "agentDelegatedToUser"]])));
-  check (result (list (pair int owner)) string) "no space of that name" (Ok []) (read (answered (`List [])));
-  List.iter (fun (label, output) -> check bool label true (Result.is_error (read output)))
+  check (result (list (pair int space_owner)) spaces_failure) "no space of that name" (Ok []) (read (answered (`List [])));
+  List.iter (fun (label, output) -> check bool (label ^ " is an answer masc does not read") true
+      (match read output with Error (Peer.Spaces_malformed _) -> true | Ok _ | Error (Peer.Spaces_failed _) -> false))
     [ "an owner masc does not know", answered (`List [obj ["spaceId",`Int 9;"ownership",str "team"]]);
       "a space without its number", answered (`List [obj ["ownership",str "user"]]);
-      "an answer that is not a list", answered (obj ["spaceId",`Int 9]);
-      "a failure the frame caught", failed "ego lite is not running" ];
+      "an answer that is not a list", answered (obj ["spaceId",`Int 9]) ];
+  check bool "a failure the frame caught is a listing that failed" true
+    (match read (failed "ego lite is not running") with Error (Peer.Spaces_failed _) -> true | Ok _ | Error (Peer.Spaces_malformed _) -> false);
   let unknown = Peer.open_space ~run_native:(fun _ -> Error (Peer.Unstarted "no native command in this fixture"))
       ~downloads:no_downloads ~now ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) ~space:"masc"
       ~run:(fun ~window_s:_ _ -> answered (obj ["spaceId",`Int 9;"ownership",str "team"])) in
   check bool "a connection does not open on an owner masc does not know" true (Result.is_error unknown)
+
+(* The listing script itself, run by node with ego's listTaskSpaces stood in
+   by the shape the ego guide documents: it keeps the spaces of exactly that
+   name and maps ego's id to spaceId. *)
+let test_the_listing_script_runs_under_node () =
+  let path = Filename.concat (capture_directory ()) "named-spaces.js" in
+  let ego = String.concat "\n" [
+    "globalThis.listTaskSpaces = async () => [";
+    "  {id: 36, name: 'masc', ownership: 'user', createdBy: 'user', state: 'active'},";
+    "  {id: 42, name: 'masc-keepers', ownership: 'agent', createdBy: 'agent'},";
+    "  {id: 7, name: 'Masc', ownership: 'user', createdBy: 'user'}];" ] in
+  Out_channel.with_open_bin path (fun out ->
+    output_string out (ego ^ "\n(async () => {\n" ^ Peer.named_spaces_script ~space:"masc" ^ "\n})();\n"));
+  let channel = Unix.open_process_args_in "node" [| "node"; path |] in
+  let output = In_channel.input_all channel in
+  (match Unix.close_process_in channel with
+   | Unix.WEXITED 0 -> ()
+   | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> fail ("node did not run the listing script: " ^ output));
+  check (result (list (pair int space_owner)) spaces_failure) "the operator's space of exactly that name"
+    (Ok [36, Peer.Operator_owner]) (Peer.named_spaces output)
 
 (* A tab that left the listing loses its number: reading it is refused
    before any run, and the bookkeeping does not grow with every listing. *)
@@ -1879,6 +1905,7 @@ let () =
       test_case "chooser upload respects uncertain pointer release" `Quick test_chooser_upload_respects_uncertain_pointer_release;
       test_case "the space opens by name and is held by number" `Quick test_the_space_opens_by_name_and_is_held_by_number;
       test_case "the spaces of a name are listed without opening one" `Quick test_the_spaces_of_a_name_are_listed_without_opening_one;
+      test_case "the listing script runs under node" `Quick test_the_listing_script_runs_under_node;
       test_case "tabs are numbered by page label" `Quick test_tabs_are_numbered_by_label;
       test_case "a tab that left the listing loses its number" `Quick test_a_tab_that_left_the_listing_loses_its_number;
       test_case "an ego error is cut" `Quick test_an_ego_error_is_cut;

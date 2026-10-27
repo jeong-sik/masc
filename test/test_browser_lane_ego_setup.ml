@@ -172,7 +172,8 @@ let test_a_table_that_is_there_keeps_its_values () =
     let before = read fixture.runtime in
     let plan = plan_ok (request fixture) in
     check bool "unchanged" true (E.change plan = E.Unchanged);
-    check bool "its command is not started" false (Sys.file_exists fixture.started);
+    check (list string) "its space is looked up, and its command is not asked its versions"
+      [ "nodejs" ] (runs fixture);
     apply_ok plan;
     check string "the file is not rewritten" before (read fixture.runtime))
 
@@ -195,7 +196,7 @@ let test_a_named_key_changes_that_key_and_no_other () =
 let test_a_space_the_operator_made_is_refused () =
   with_fixture ~spaces:[ space 36 "user" ] (fun fixture ->
     refused "a new table on the operator's space"
-      (function E.Space_held_by_operator { space = "masc"; space_id = 36 } -> true | _ -> false)
+      (function E.Space_held_by_operator { space; space_id = 36 } -> space = E.default_space | _ -> false)
       fixture (request fixture) ~find:(found fixture) ());
   with_fixture ~with_table:true ~spaces:[ space 36 "user" ] (fun fixture ->
     refused "a space renamed to the operator's"
@@ -219,23 +220,35 @@ let test_spaces_that_cannot_be_read_are_refused () =
     fake_ego ~started:fixture.started ~path:closed
       ~script:(ego_script ~nodejs:"echo 'ego lite is not running' >&2; exit 1");
     refused "an ego-browser that does not list its spaces"
-      (function E.Spaces_unreadable { detail; _ } -> contains detail "ego lite is not running" | _ -> false)
+      (function E.Spaces_unanswered { detail; _ } -> contains detail "ego lite is not running" | _ -> false)
       fixture (request ~command:closed fixture) ());
+  with_fixture (fun fixture ->
+    let unreachable = Filename.concat fixture.root "unreachable" in
+    let threw = Masc.Browser_ego_peer.result_marker ^ {|{"ok":false,"error":"ego lite cannot be reached"}|} in
+    fake_ego ~started:fixture.started ~path:unreachable
+      ~script:(ego_script ~nodejs:(Printf.sprintf "printf '%%s\\n' '%s'" threw));
+    refused "an ego-browser whose listing threw"
+      (function E.Spaces_unanswered { detail; _ } -> contains detail "cannot be reached" | _ -> false)
+      fixture (request ~command:unreachable fixture) ());
   with_fixture ~spaces:[ space 36 "team" ] (fun fixture ->
     refused "an owner masc does not know"
       (function E.Spaces_unreadable { detail; _ } -> contains detail "team" | _ -> false)
       fixture (request fixture) ~find:(found fixture) ())
 
-(* The space is looked up where its name is chosen; a plan that keeps it does
-   not start ego for it. *)
-let test_a_kept_space_is_not_looked_up () =
+(* The incident of 2026-10-26: a table that was there named a space the
+   operator made later. Running setup again refuses it rather than leaving
+   it as it is, whether the table changes or not. *)
+let test_a_kept_space_the_operator_holds_is_refused () =
   with_fixture ~with_table:true ~spaces:[ space 36 "user" ] (fun fixture ->
+    refused "the table's own space, kept as it is"
+      (function E.Space_held_by_operator { space = "slack"; space_id = 36 } -> true | _ -> false)
+      fixture (request fixture) ();
     let other = Filename.concat fixture.root "other-ego" in
-    fake_ego ~started:fixture.started ~path:other ~script:(ego_script ~nodejs:"exit 1");
-    let plan = plan_ok (request ~command:other fixture) in
-    check bool "only the command" true (E.change plan = E.Updated [ E.Command ]);
-    check (list string) "the new command is asked its versions, and the kept space is not looked up"
-      [ "--version" ] (runs fixture))
+    fake_ego ~started:fixture.started ~path:other
+      ~script:(ego_script ~nodejs:(spaces_answer [ space 36 "user" ]));
+    refused "the table's own space, with a new command"
+      (function E.Space_held_by_operator { space = "slack"; space_id = 36 } -> true | _ -> false)
+      fixture (request ~command:other fixture) ())
 
 (* --- refused before any write ------------------------------------------ *)
 
@@ -274,7 +287,9 @@ let test_a_named_command_must_be_an_absolute_file_that_runs () =
 let test_a_space_the_loader_refuses_is_not_written () =
   with_fixture (fun fixture ->
     refused "a blank space" (function E.Table_refused _ -> true | _ -> false) fixture
-      (request ~command:fixture.ego ~space:"  " fixture) ())
+      (request ~command:fixture.ego ~space:"  " fixture) ();
+    check bool "a table that would not load is refused before ego is asked for its spaces" false
+      (List.mem "nodejs" (runs fixture)))
 
 let test_a_missing_runtime_toml_is_refused () =
   with_fixture (fun fixture ->
@@ -341,7 +356,8 @@ let () =
       , [ test_case "a space the operator made is refused" `Quick test_a_space_the_operator_made_is_refused
         ; test_case "the agent's own space is written" `Quick test_the_agents_own_space_is_written
         ; test_case "spaces that cannot be read are refused" `Quick test_spaces_that_cannot_be_read_are_refused
-        ; test_case "a kept space is not looked up" `Quick test_a_kept_space_is_not_looked_up ] )
+        ; test_case "a kept space the operator holds is refused" `Quick
+            test_a_kept_space_the_operator_holds_is_refused ] )
     ; ( "refused"
       , [ test_case "no ego-browser to name" `Quick test_no_ego_to_name_is_refused
         ; test_case "an ego that names no versions" `Quick test_an_ego_that_names_no_versions_is_refused

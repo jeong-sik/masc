@@ -52,9 +52,11 @@ type error =
       (** A task space of the name the table would write is the
           operator's: ego would refuse the worker that opens it by that
           name, and masc does not take it over. *)
-  | Spaces_unreadable of { path : string; space : string; detail : string }
+  | Spaces_unanswered of { path : string; space : string; detail : string }
       (** The ego-browser at [path] did not list ego's task spaces, so
           whether the operator holds [space] is unknown. *)
+  | Spaces_unreadable of { path : string; space : string; detail : string }
+      (** It listed them in a form masc does not read. *)
   | Configuration_changed
       (** [runtime.toml] changed after the plan was made, or, for a plan
           made again, this table changed. The table was not written. *)
@@ -85,12 +87,13 @@ val installed_ego : unit -> Browser_runtime_dependencies.check
 (** Reads [runtime.toml] and decides what the table holds, and refuses what
     can be refused without writing: a [runtime.toml] that does not load, no
     [ego-browser] to name, one that does not name its versions, a table that
-    would not load or would load as another one, and a space it would write
-    that the operator holds. Nothing is written.
+    would not load or would load as another one, a space the table would
+    hold that the operator holds, and a space that cannot be checked.
+    Nothing is written.
 
-    A space the plan writes is looked up in ego's task spaces with the
-    [ego-browser] the table names, which reads the list without opening a
-    space. A plan that keeps the table's space does not look it up.
+    The space the table holds once the plan is applied, written or kept, is
+    looked up in ego's task spaces with the [ego-browser] the table names,
+    which reads the list without opening a space.
 
     [find_ego] is asked only when the table is not there and no command is
     named: a table that is there needs none, and asking starts a program. *)

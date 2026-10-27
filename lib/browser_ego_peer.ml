@@ -92,16 +92,13 @@ let step_failure_message = function
    the operator, or the operator takes it over in ego; ego then stops every
    call on the space with EGO_TASK_SPACE_USER_IN_CONTROL until the agent
    takes it back. A space the operator made ("user") is theirs. *)
-type space_owner = Agent_owner | Handed_to_operator | Operator_owner
+type space_owner = Agent_owner | Handed_to_operator | Operator_owner [@@deriving enumerate]
 let space_owner_to_wire = function
   | Agent_owner -> "agent"
   | Handed_to_operator -> "agentDelegatedToUser"
   | Operator_owner -> "user"
-let space_owner_of_wire = function
-  | "agent" -> Some Agent_owner
-  | "agentDelegatedToUser" -> Some Handed_to_operator
-  | "user" -> Some Operator_owner
-  | _ -> None
+let space_owner_of_wire raw =
+  List.find_opt (fun owner -> String.equal (space_owner_to_wire owner) raw) all_of_space_owner
 let agent_ownership = space_owner_to_wire Agent_owner
 
 (* Who must hold the space for a script's body to run. Every step needs the
@@ -163,18 +160,24 @@ let answer output =
       | Some (`Bool false), None, Some (`String error), None -> Error (Failed (head error))
       | _ -> Error (Unreadable "ego-browser nodejs answered outside its answer frame")
 
+type spaces_failure = Spaces_failed of string | Spaces_malformed of string
 let named_spaces output =
-  let* value = answer output |> Result.map_error step_failure_message in
+  let* value = match answer output with
+    | Ok value -> Ok value
+    (* ego threw inside the frame, for one that could not reach ego lite. *)
+    | Error (Failed detail) -> Error (Spaces_failed detail)
+    | Error (Unanswered failure) -> Error (Spaces_failed (run_failure_message failure))
+    | Error (Unreadable detail | Refused detail) -> Error (Spaces_malformed detail) in
   let row = function
     | `Assoc _ as space ->
       (match field "spaceId" space, field "ownership" space with
        | Some (`Int space_id), Some (`String wire) ->
          (match space_owner_of_wire wire with
           | Some owner -> Ok (space_id, owner)
-          | None -> Error (Printf.sprintf "ego named the owner of task space %d %S, which masc does not know" space_id wire))
-       | _ -> Error "ego listed a task space without its number and owner")
+          | None -> Error (Spaces_malformed (Printf.sprintf "ego named the owner of task space %d %S, which masc does not know" space_id wire)))
+       | _ -> Error (Spaces_malformed "ego listed a task space without its number and owner"))
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
-      Error "ego listed a task space that is not an object" in
+      Error (Spaces_malformed "ego listed a task space that is not an object") in
   match value with
   | `List spaces ->
     List.fold_right (fun space spaces ->
@@ -182,7 +185,7 @@ let named_spaces output =
       let* space = row space in
       Ok (space :: spaces)) spaces (Ok [])
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ ->
-    Error "ego answered the task spaces without a list"
+    Error (Spaces_malformed "ego answered the task spaces without a list")
 
 let asked run ~window_s ~step ~space ~holder ~args body = match run ~window_s (script ~step ~space ~holder ~args body) with
   | Error failure -> Error (Unanswered failure)

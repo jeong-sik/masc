@@ -12,6 +12,10 @@ import sqlite3
 
 
 EVIDENCE_SCHEMA = "masc.keeper-scale-evidence.v3"
+# Exit status when the workload validates but the last inventory coverage
+# group is incomplete; every derived record is still written. 0 keeps meaning
+# that every observed group covered every expected volume.
+INCOMPLETE_INVENTORY_EXIT = 3
 
 
 def read(path):
@@ -373,9 +377,9 @@ def _audit(packet, output):
                     for i, row in enumerate(phase_starts[:-1])]
     release_event = next(row for row in phases if row.get("event") == "provider_release")
     inventory_audit = inventory_coverage(inventory, expected_volumes, phase_starts)
-    (output / "inventory-sweep-audit.json").write_text(json.dumps({**inventory_audit,
-        "raw_receipt": str(packet / "guest-command-attempts.json"),
-        "source_binding": {"source_commit": identity["source"], "identity_receipt": str(packet / "identity.json")}}, indent=2)+"\n")
+    (output / "inventory-sweep-audit.json").write_text(json.dumps({**inventory_audit, "packet": packet.name,
+        "raw_receipt": "guest-command-attempts.json",
+        "source_binding": {"source_commit": identity["source"], "identity_receipt": "identity.json"}}, indent=2)+"\n")
     if "wall_time_ns" in release_event:
         # This is an approximate cross-clock alignment, not a synchronized trace.
         clock_offset = release_event["wall_time_ns"] - release_event["at_ns"]
@@ -392,11 +396,12 @@ def _audit(packet, output):
                 "durable_operation_completion_minus_request_start_ms": public["completed_at"]*1000-(request["start_ns"]+clock_offset)/1e6,
                 "caveat": "Cross-clock alignment uses adjacent wall/perf phase anchor, no exact synchronization guarantee."})
         (output / "slow-status-completion-alignment.json").write_text(json.dumps(aligned, indent=2)+"\n")
-    report = {"evidence_schema": EVIDENCE_SCHEMA, "packet": packet.name, "packet_path": str(packet), "audit_output": str(output),
+    report = {"evidence_schema": EVIDENCE_SCHEMA, "packet": packet.name,
         "source": identity["source"], "binary_sha256": identity["sha256"],
         "packet_auditor_sha256": sha(pathlib.Path(__file__)),
         "runner_sha256": identity["runner_sha256"], "original_run_failure_preserved": original_failure,
         "post_run_workload_validation": "PASS", "overall_original_run_verdict": "FAIL" if original_failure else "PASS",
+        "inventory_final_segment_complete": inventory_audit["final_partial_segment"] is None,
         "keepers": len(names), "public_and_exact_owner_durable_succeeded_operations": len(operations),
         "real_model_calls": len(models), "max_provider_requests_in_flight": peak,
         "phase_windows": phase_windows,
@@ -425,7 +430,8 @@ def _audit(packet, output):
         "start_ns", "end_ns", "phase", "payload", "wire_ms", "wire_bytes", "server_timing"] if key in row}}
         for i, row in sorted(enumerate(requests), key=lambda item: item[1].get("wire_ms", -1), reverse=True)[:20]]
     (output / "mcp-wire-outliers.json").write_text(json.dumps(outliers, indent=2) + "\n")
-    print(json.dumps({key: report[key] for key in ["packet", "overall_original_run_verdict", "post_run_workload_validation", "keepers",
+    print(json.dumps({key: report[key] for key in ["packet", "overall_original_run_verdict", "post_run_workload_validation",
+        "inventory_final_segment_complete", "keepers",
         "public_and_exact_owner_durable_succeeded_operations", "real_model_calls", "max_provider_requests_in_flight", "http_429", "rate_limit_wait_s"]}))
     return report
 
@@ -446,7 +452,7 @@ def audit(packet, output):
     except BaseException as error:
         try:
             (output / "audit-failure.json").write_text(json.dumps({
-                "evidence_schema": EVIDENCE_SCHEMA, "packet": str(packet), "output": str(output),
+                "evidence_schema": EVIDENCE_SCHEMA, "packet": packet.name,
                 "error_type": type(error).__name__, "error": str(error),
                 "packet_auditor_sha256": sha(pathlib.Path(__file__))}, indent=2) + "\n")
         except Exception as receipt_error:
@@ -455,13 +461,15 @@ def audit(packet, output):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, epilog=(
+        "exit 0: every observed inventory coverage group is complete; exit %d: the workload validates "
+        "but the last group is incomplete (all records written); any other failure raises" % INCOMPLETE_INVENTORY_EXIT))
     parser.add_argument("packet", type=pathlib.Path)
     parser.add_argument("--output", type=pathlib.Path, required=True,
                         help="fresh external directory for derived records; never an original packet path")
     args = parser.parse_args(argv)
-    audit(args.packet, args.output)
-    return 0
+    report = audit(args.packet, args.output)
+    return 0 if report["inventory_final_segment_complete"] else INCOMPLETE_INVENTORY_EXIT
 
 
 if __name__ == "__main__":

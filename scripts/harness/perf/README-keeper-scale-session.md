@@ -102,8 +102,12 @@ audit-failure receipts go there, preserving raw receipts and the original worklo
 verdict. Full inventory coverage groups still require the exact expected-volume
 Counter. A final unique known-volume subset is reported as incomplete, with its
 observed count and missing volumes; it is not completed coverage or a producer
-sweep ID. The reader accepts v3 only; older packets retain their frozen original
-readers and results.
+sweep ID. The reader then exits 3 after writing every derived record, and
+`inventory_final_segment_complete` is false in `post-run-audit.json`; exit 0
+means every observed coverage group was complete. Derived records name the
+packet by its directory name and its receipts by their names inside it, never
+by a host path. The reader accepts v3 only; older packets retain their frozen
+original readers and results.
 
 Report held, released and settled phases separately. Creation-to-completion
 includes deliberate provider hold, admission pacing, queueing and runtime

@@ -8,16 +8,12 @@ module Official = Keeper_librarian_official_progress
 module Cursor = Keeper_external_read_cursor
 let ( let* ) = Result.bind
 let require condition detail = if condition then Ok () else Error detail
-let rec prefix equal before current = match before,current with
-  | [],_ -> true
-  | _::_,[] -> false
-  | first::rest,other::tail -> equal first other && prefix equal rest tail
 let parts = function
-  | Capture.Checkpoint_only checkpoint -> Some checkpoint,[]
+  | Capture.Held.Checkpoint_only checkpoint -> Some checkpoint,[]
   | Official_only official -> None,official.traces
   | Mixed (checkpoint,official) -> Some checkpoint,official.traces
-let same_generation (checkpoint : Capture.checkpoint) boundaries =
-  let trace_id=Keeper_id.Trace_id.to_string checkpoint.reference.trace_id in
+let same_generation (checkpoint : Capture.Held.checkpoint) boundaries =
+  let trace_id=Keeper_id.Trace_id.to_string checkpoint.trace_id in
   List.fold_left (fun result (line,record) ->
     let* ()=result in
     if line<=checkpoint.boundary_lines_seen then Ok () else
@@ -49,37 +45,27 @@ let validate_state request =
 let with_original ~request publish =
   let source=Request.source request and owner=Request.physical_owner request in
   let checkpoint,traces=parts (Capture.source source) in
-  let checkpoint_id=Option.map (fun (value : Capture.checkpoint) ->
-    Keeper_id.Trace_id.to_string value.reference.trace_id) checkpoint in
-  let ids=List.map (fun (trace : Capture.official_trace) -> trace.trace_id) traces
+  let checkpoint_id=Option.map (fun (value : Capture.Held.checkpoint) ->
+    Keeper_id.Trace_id.to_string value.trace_id) checkpoint in
+  let ids=List.map (fun (trace : Capture.Held.trace) -> trace.id) traces
     @ Option.to_list checkpoint_id |> List.sort_uniq String.compare in
   let root=Keeper_fs.session_store_path_for_base_path (Request.base_path owner) in
   let validate snapshot =
     let* ()=Request.confirm_owner request in
     let* boundaries=Keeper_turn_boundaries.read ~keepers_dir:(Capture.runtime_keepers_dir source)
       ~keeper_id:(Request.keeper_id owner) in
-    let* ()=require (prefix ( = ) (Capture.boundaries source) boundaries)
-      "Original completed-turn boundary prefix changed" in
-    let* ()=match checkpoint,snapshot with
-      | None,None -> Ok ()
-      | Some original,Some current ->
-        let* ()=same_generation original boundaries in
-        (* The actual checkpoint deliberately does not persist richer live
-           ToolResult.json. Compare the checkpoint-bound representation on
-           both sides; the separate original request still retains all rich
-           input fields and is never reconstructed from this projection. *)
-        let same_message left right=Yojson.Safe.equal
-          (Agent_core.Checkpoint.message_to_json left) (Agent_core.Checkpoint.message_to_json right) in
-        require (prefix same_message original.messages (Checkpoint.exact_snapshot_messages current))
-          "Original checkpoint message prefix changed"
-      | None,Some _ | Some _,None -> Error "Original checkpoint lock observation is missing" in
-    let* ()=List.fold_left (fun result (trace : Capture.official_trace) ->
-      let* ()=result in
-      let session_dir=Filename.concat root trace.trace_id in
+    let* live=List.fold_right (fun (trace : Capture.Held.trace) rest ->
+      let* rest=rest in
+      let session_dir=Filename.concat root trace.id in
       let* main=Fragments.read ~session_dir Fragments.Main in
       let* internal=Fragments.read ~session_dir Fragments.Internal in
-      require (prefix ( = ) trace.main main && prefix ( = ) trace.internal internal)
-        "Original official-client fragment prefix changed") (Ok ()) traces in
+      Ok ({Capture.trace_id=trace.id;main;internal}::rest)) traces (Ok []) in
+    let* ()=Capture.confirm_sources ~boundaries ~messages:(Option.map Checkpoint.exact_snapshot_messages snapshot)
+      ~traces:live source |> Result.map_error Capture.error_to_string in
+    let* ()=match checkpoint,snapshot with
+      | None,None -> Ok ()
+      | Some original,Some _ -> same_generation original boundaries
+      | None,Some _ | Some _,None -> Error "Original checkpoint lock observation is missing" in
     let* ()=Keeper_librarian_input_sources.validate_original_selection (Capture.counterparts source)
       ~base_dir:(Request.base_path owner) ~keeper_name:(Request.keeper_id owner)
       |> Result.map_error Keeper_librarian_input_sources.read_error_to_string in

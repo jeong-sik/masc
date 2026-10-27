@@ -18,9 +18,6 @@ let integer = function `Int value -> Ok value | _ -> Error "Original history req
 let boolean = function `Bool value -> Ok value | _ -> Error "Original history request expects a boolean"
 let optional encode = Option.fold ~none:`Null ~some:encode
 let option decode = function `Null -> Ok None | json -> let+ value=decode json in Some value
-let list decode = function
-  | `List items -> List.fold_right (fun item tail -> let* item=decode item in let+ tail=tail in item::tail) items (Ok [])
-  | _ -> Error "Original history request expects a list"
 let parse bytes = try Ok (Yojson.Safe.from_string bytes) with Yojson.Json_error detail -> Error detail
 let equal left right detail =
   let* left=Lane_addon_action.canonical left in
@@ -154,15 +151,16 @@ let prompt_of_json json =
   let* file_exists=boolean (value "file_exists" f) in
   let+ has_override=boolean (value "has_override" f) in
   {Prompt_registry.effective;source;file_value;override_value;file_path;file_exists;has_override}
+(* The substitutions and the rendered prompt repeat the input, so they are
+   rendered again on restore; the digest names the prompt the host was sent. *)
 let preparation_json (p:Runtime.durable_preparation) = `Assoc [
   "parsing_now",`Float p.parsing_now;
   "policy",`Assoc ["facts_max_bytes",`Int p.policy.facts_max_bytes;"category_cap",`Int p.policy.category_cap;
     "facts_per_category_cap",`Int p.policy.facts_per_category_cap];
   "rule_prompt",prompt_json p.rule_prompt;"prompt",prompt_json p.prompt;
-  "variables",`List (List.map (fun (key,value) -> `List [`String key;`String value]) p.variables);
-  "rendered_prompt",`String p.rendered_prompt;"output_schema",p.output_schema]
+  "rendered_prompt_sha256",`String (hash p.rendered_prompt);"output_schema",p.output_schema]
 let preparation_of_json ~source_input json =
-  let* f=fields ["parsing_now";"policy";"rule_prompt";"prompt";"variables";"rendered_prompt";"output_schema"] json in
+  let* f=fields ["parsing_now";"policy";"rule_prompt";"prompt";"rendered_prompt_sha256";"output_schema"] json in
   let* parsing_now=match value "parsing_now" f with
     | `Float time when Float.is_finite time -> Ok time | `Int time -> Ok (float_of_int time)
     | _ -> Error "Original history parse time is not finite" in
@@ -173,13 +171,11 @@ let preparation_of_json ~source_input json =
   let policy : Runtime.durable_policy = {facts_max_bytes;category_cap;facts_per_category_cap} in
   let* rule_prompt=prompt_of_json (value "rule_prompt" f) in
   let* prompt=prompt_of_json (value "prompt" f) in
-  let* variables=list (function `List [`String key;`String value] -> Ok (key,value)
-    | _ -> Error "Original history substitution is not a pair") (value "variables" f) in
-  let* rendered_prompt=text (value "rendered_prompt" f) in
-  let output_schema=value "output_schema" f in
-  let p : Runtime.durable_preparation = {source_input;parsing_now;policy;rule_prompt;prompt;
-    variables;rendered_prompt;output_schema} in
-  let+ ()=Runtime.validate_durable_preparation p in p
+  let* rendered_prompt_sha256=text (value "rendered_prompt_sha256" f) in
+  let* p=Runtime.restore_durable_preparation ~source_input ~parsing_now ~policy ~rule_prompt ~prompt
+    ~output_schema:(value "output_schema" f) in
+  let+ ()=require (String.equal (hash p.rendered_prompt) rendered_prompt_sha256)
+    "Original history prompt differs from the one its host request named" in p
 
 type predecessor = {request_id:string;request_digest:string}
 (* [digest] names the canonical bytes of [to_json]: the record's digest for a
@@ -208,7 +204,7 @@ let physical_owner capture=capture.owner
 let destination capture=capture.destination
 let source capture=capture.source
 let preparation capture=capture.preparation
-let to_json capture = `Assoc ["schema",`Int 1;"kind",`String "completed-history-execution";
+let to_json capture = `Assoc ["schema",`Int 2;"kind",`String "completed-history-execution";
   "request_id",`String capture.id;"owner",owner_to_json capture.owner;
   "destination",destination_json capture.destination;"source_text",`String capture.source_text;
   "predecessor",predecessor_json capture.predecessor;
@@ -251,7 +247,7 @@ let create ?predecessor ~request_id ~owner ~destination ~source ~(preparation:Ru
   let+ digest=Owner.request_digest (to_json capture) in {capture with digest}
 let decode ~owner ~digest json =
   let* f=header_fields json in
-  let* ()=require (value "schema" f=`Int 1 && value "kind" f=`String "completed-history-execution")
+  let* ()=require (value "schema" f=`Int 2 && value "kind" f=`String "completed-history-execution")
     "Unknown original history schema or kind" in
   let* id=nonblank (value "request_id" f) in
   let* ()=owner_matches_json owner (value "owner" f) in

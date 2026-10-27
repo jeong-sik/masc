@@ -377,6 +377,16 @@ let validate_resolution (resolution : Prompt_registry.prompt_resolution) =
     && resolution.file_exists=Option.is_some resolution.file_value
     && resolution.has_override=Option.is_some resolution.override_value
   then Ok () else Error "Original Librarian prompt resolution is inconsistent"
+let durable_substitutions ~(policy:durable_policy) ~rule_prompt ~prompt source_input =
+  let open Result.Syntax in
+  let* rule=Prompt_registry.render_resolved_prompt_template
+    Prompt_names.librarian_working_contexts_rule rule_prompt [] in
+  let variables=(working_contexts_rule_variable,String.trim rule)
+    ::Keeper_librarian.prompt_variables_with_policy ~facts_max_bytes:policy.facts_max_bytes
+      ~category_cap:policy.category_cap ~facts_per_category_cap:policy.facts_per_category_cap
+      source_input in
+  let+ rendered=Prompt_registry.render_resolved_prompt_template Prompt_names.librarian prompt variables in
+  rule,variables,rendered
 let validate_durable_preparation (preparation : durable_preparation) =
   let open Result.Syntax in
   let policy=preparation.policy in
@@ -386,22 +396,22 @@ let validate_durable_preparation (preparation : durable_preparation) =
     then Ok () else Error "Original history Memory advisory limits are invalid" in
   let* ()=validate_resolution preparation.rule_prompt in
   let* ()=validate_resolution preparation.prompt in
-  let* rule=Prompt_registry.render_resolved_prompt_template
-    Prompt_names.librarian_working_contexts_rule preparation.rule_prompt [] in
-  let variables=(working_contexts_rule_variable,String.trim rule)
-    ::Keeper_librarian.prompt_variables_with_policy ~facts_max_bytes:policy.facts_max_bytes
-      ~category_cap:policy.category_cap ~facts_per_category_cap:policy.facts_per_category_cap
-      preparation.source_input in
+  let* rule,variables,rendered=durable_substitutions ~policy ~rule_prompt:preparation.rule_prompt
+    ~prompt:preparation.prompt preparation.source_input in
   let* ()=if preparation.variables=variables then Ok ()
     else Error "Original history Memory substitutions differ from captured input" in
-  let* rendered=Prompt_registry.render_resolved_prompt_template
-    Prompt_names.librarian preparation.prompt variables in
   let* actual_schema=Lane_addon_action.canonical preparation.output_schema in
   let* expected_schema=Lane_addon_action.canonical
     Keeper_structured_output_schema.librarian_current_output_schema in
   if String.trim rule<>"" && String.trim rendered<>""
     && preparation.rendered_prompt=rendered && Yojson.Safe.equal actual_schema expected_schema
   then Ok () else Error "Original history Memory prompt/schema differs from captured templates and input"
+let restore_durable_preparation ~source_input ~parsing_now ~policy ~rule_prompt ~prompt ~output_schema =
+  let open Result.Syntax in
+  let* _rule,variables,rendered_prompt=durable_substitutions ~policy ~rule_prompt ~prompt source_input in
+  let preparation : durable_preparation = {source_input;parsing_now;policy;rule_prompt;prompt;
+    variables;rendered_prompt;output_schema} in
+  let+ ()=validate_durable_preparation preparation in preparation
 let prepare_durable ~now source_input =
   let open Result.Syntax in
   let policy : durable_policy = {

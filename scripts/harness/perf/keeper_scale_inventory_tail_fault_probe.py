@@ -201,6 +201,34 @@ def main():
                             'all_five_derivative_writers_use_output': True}
                 case('frozen_baseline_counterexample_and_semantic_conservation', baseline_and_conservation)
 
+            def derived_records_hold_no_host_paths():
+                # A derived record names the packet and files inside it; it
+                # never holds where this host keeps them. str() of the packet
+                # or output is allowed only inside an assert.
+                source = args.reader.read_text()
+                tree = ast.parse(source)
+                parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+
+                def root_name(node):
+                    while isinstance(node, (ast.BinOp, ast.Attribute)):
+                        node = node.left if isinstance(node, ast.BinOp) else node.value
+                    return node.id if isinstance(node, ast.Name) else None
+
+                def inside_assert(node):
+                    while node in parents:
+                        node = parents[node]
+                        if isinstance(node, ast.Assert):
+                            return True
+                    return False
+                functions = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in {'_audit', 'audit'}]
+                assert len(functions) == 2
+                leaks = [ast.get_source_segment(source, n) for function in functions for n in ast.walk(function)
+                         if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == 'str'
+                         and len(n.args) == 1 and root_name(n.args[0]) in {'packet', 'output'} and not inside_assert(n)]
+                assert leaks == [], leaks
+                return 'packet and output paths appear only in assertions'
+            case('derived_records_hold_no_host_paths', derived_records_hold_no_host_paths)
+
             packet = temporary / 'mock-packet'
             packet.mkdir()
             (packet / 'original.json').write_text('{"mock_original":true}\n')
@@ -214,7 +242,11 @@ def main():
                 assert source == packet.resolve() and destination.is_dir() and not destination.is_relative_to(source)
                 for name in filenames:
                     (destination / name).write_text(json.dumps({'mock_only': True, 'derived_file': name}) + '\n')
-                return {'mock_only': True}
+                return {'mock_only': True, 'inventory_final_segment_complete': True}
+
+            def mock_incomplete_audit(source, destination):
+                mock_audit(source, destination)
+                return {'mock_only': True, 'inventory_final_segment_complete': False}
 
             def external_success():
                 destination = temporary / 'external-success'
@@ -225,6 +257,16 @@ def main():
                 assert snapshot(packet) == original
                 return {'mocked_full_audit': True, 'external_derivatives': 5, 'original_DB_WAL_receipt_bytes_unchanged': True}
             case('CLI_required_external_output_success_mock_SQL_forbidden', external_success)
+
+            def incomplete_final_segment_exit():
+                destination = temporary / 'external-incomplete'
+                with mock.patch.object(reader, '_audit', side_effect=mock_incomplete_audit):
+                    code = reader.main([str(packet), '--output', str(destination)])
+                assert code == reader.INCOMPLETE_INVENTORY_EXIT and code not in {0, 1, 2}
+                assert set(p.name for p in destination.iterdir()) == set(filenames)
+                assert snapshot(packet) == original
+                return {'exit': code, 'external_derivatives': 5}
+            case('CLI_incomplete_final_inventory_segment_exits_distinctly', incomplete_final_segment_exit)
 
             def refused_output(name, destination):
                 before = snapshot(packet)
@@ -274,6 +316,8 @@ def main():
                         raise AssertionError('audit error swallowed')
                 receipt = json.loads((destination / 'audit-failure.json').read_bytes())
                 assert receipt['error_type'] == 'AssertionError' and receipt['error'] == 'injected join failure'
+                assert receipt['packet'] == packet.name and 'output' not in receipt
+                assert str(temporary) not in (destination / 'audit-failure.json').read_text()
                 assert (destination / 'inventory-sweep-audit.json').exists()
                 assert snapshot(packet) == original
                 return 'original exception, partial derivative and external failure receipt retained'
@@ -309,7 +353,7 @@ def main():
 
     document = {'scope': 'Pure inventory/classification functions, source AST, and mocked external-output ownership only. No supplied packet full audit, SQL, native, HTTP, CI or producer run.',
                 'reader_sha256': digest(args.reader), 'probe_sha256': digest(Path(__file__)),
-                'provided_packet': str(args.packet) if args.packet else None,
+                'provided_packet': args.packet.name if args.packet else None,
                 'cases': results, 'passed': sum(row['passed'] for row in results), 'failed': sum(not row['passed'] for row in results),
                 'full_semantic_audit_executed': False, 'SQL_connections_allowed': False}
     (output / 'results.json').write_text(json.dumps(document, indent=2) + '\n')

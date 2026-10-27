@@ -62,7 +62,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         time.sleep(1);(root/'late-answered').write_text('late')
                     if mode=='slow' and slow_count==0:time.sleep(1.2)
                     slow_count+=1
-                    result={'contexts':[]}
+                    result={'contexts':[{'context':'owned'}] if mode in ['retire-release','retire-input'] else []}
+                elif mode in ['retire-release','retire-input'] and method=='script.callFunction':
+                    function=request['params']['functionDeclaration']
+                    value=None if 'mascPointerFeedback' in function else {'url':'https://fixture.test/','title':'Fixture'}
+                    result={'type':'success','result':{'type':'string','value':json.dumps(value)}}
+                elif mode=='retire-input' and method=='input.performActions':
+                    (root/'input-entered').write_text('entered');continue
+                elif mode=='retire-release' and method=='input.performActions':
+                    result={}
+                elif mode=='retire-release' and method=='input.releaseActions':
+                    (root/'release-entered').write_text('entered');continue
+                elif mode=='retire-input' and method=='input.releaseActions':
+                    (root/'release-entered').write_text('entered');result={}
                 elif method not in ['browser.close','session.end']:
                     self.send_frame({'type':'error','id':request['id'],'error':'unsupported operation','message':'fixture command unavailable'});continue
                 self.send_frame({'type':'success','id':request['id'],'result':result})
@@ -101,12 +113,13 @@ let reserved_port () =
     | Unix.ADDR_UNIX _ -> fail "expected loopback reservation"
 let wait_for clock predicate =
   let rec wait ()=if predicate () then () else (Eio.Time.sleep clock 0.01;wait ()) in wait ()
-let gate_holder = {|import fcntl,pathlib,sys,time
-gate,held,release=map(pathlib.Path,sys.argv[1:])
+let gate_holder = {|import fcntl,os,pathlib,sys,time
+gate,held,release=map(pathlib.Path,sys.argv[1:4])
+owner=int(sys.argv[4])
 with gate.open('r+') as handle:
     fcntl.lockf(handle,fcntl.LOCK_EX)
     held.write_text('held')
-    while not release.exists():time.sleep(.01)
+    while not release.exists() and os.getppid()==owner:time.sleep(.01)
 |}
 let scenario mode =
   let root=Unix.realpath (Filename.temp_dir ~perms:0o700 "owned-live-bidi-" "") in
@@ -151,14 +164,34 @@ let scenario mode =
           let client=match B.connected_clients () with [client] -> client | _ -> fail "expected one original BiDi client" in
           let issue ()=dispatch (W.Issue {route=B.Live_route (Some client.client_id);verb=B.Tabs_list;
             actor=Some "keeper/live-fixture";timeout_sec=(if mode="slow" then 4. else B.default_timeout_sec);only_if_idle=false}) in
-          if mode="gate" || mode="cancel" then Eio.Switch.run (fun sw ->
+          if mode="retire-release" || mode="retire-input" then Eio.Switch.run (fun sw ->
+            let clock=Eio.Stdenv.clock env in
+            let verb=B.Page_interact {tab_id=1;frame_path=[];expected_url=Some "https://fixture.test/";
+              action=B.Type_text {document_id="fixture";text="x"}} in
+            let input=Eio.Fiber.fork_promise ~sw (fun () -> dispatch (W.Issue {
+              route=B.Live_route (Some client.client_id);verb;actor=Some "keeper/live-fixture";
+              timeout_sec=30.;only_if_idle=false})) in
+            let held=if mode="retire-release" then "release-entered" else "input-entered" in
+            Eio.Time.with_timeout_exn clock 8. (fun () ->
+              wait_for clock (fun () -> Sys.file_exists (Filename.concat root held)));
+            Eio.Cancel.protect (fun () ->
+              let started=Eio.Time.now clock in
+              let result=Eio.Time.with_timeout clock 8. (fun () -> Ok (dispatch W.Retire)) in
+              (match result with
+               | Ok (W.Receipt | W.Service_refusal _) -> ()
+               | Ok (W.Issue_result _ | Snapshot_result _ | Model_reply _ | Extension_reply _ | Download_reply _ | Poll_result _)
+               | Error `Timeout -> fail "retirement did not settle its protected release");
+              check bool "retirement does not wait for the original 30-second caller" true (Eio.Time.now clock -. started < 8.);
+              ignore (Eio.Promise.await input));
+            Eio.Fiber.await_cancel ())
+          else if mode="gate" || mode="cancel" then Eio.Switch.run (fun sw ->
             let held=Filename.concat root "gate-held" and release=Filename.concat root "release-gate" in
             let release_gate ()=write release "release" in
             (* Release the independent process's gate even if any assertion
                fails, before protected owner cleanup joins its pending reader. *)
             Fun.protect ~finally:release_gate (fun () ->
               let blocker=Eio.Process.spawn ~sw (Eio.Stdenv.process_mgr env)
-                ["python3";"-c";gate_holder;Filename.concat (Filename.concat root "child-claim") "gate";held;release] in
+                ["python3";"-c";gate_holder;Filename.concat (Filename.concat root "child-claim") "gate";held;release;string_of_int (Unix.getpid ())] in
               let clock=Eio.Stdenv.clock env in
               wait_for clock (fun () -> Sys.file_exists held);
               if mode="cancel" then (
@@ -267,13 +300,13 @@ let scenario mode =
           else work () in
         let failure=try Live.For_testing.run ~before_command_validation:(fun () ->
           ignore (Eio.Promise.try_resolve validating ()))
-          ~connection_timeout_sec:(if mode="slow" then 1. else B.default_timeout_sec)
+          ~connection_timeout_sec:(if mode="slow" || mode="retire-release" || mode="retire-input" then 1. else B.default_timeout_sec)
           ~env ~owner ~directory:allocation worker;None with
           | Invalid_argument detail | Sys_error detail -> Some detail in
         if mode="normal" || mode="late" || mode="ego-conflict" || mode="slow" || mode="cancel" then check (option string) "normal retirement returns" None failure
-        else check bool "failed startup/lost peer does not continue serving" true (Option.is_some failure);
+        else if mode<>"retire-release" && mode<>"retire-input" then check bool "failed startup/lost peer does not continue serving" true (Option.is_some failure);
         check bool "owner input is fenced at termination" true (Owner.is_retired owner));
-      check bool "only verified metadata admits caller work" (mode="normal" || mode="ego-conflict" || mode="slow" || mode="cancel" || mode="lost" || mode="gate" || mode="late") !entered;
+      check bool "only verified metadata admits caller work" (mode="normal" || mode="ego-conflict" || mode="slow" || mode="cancel" || mode="lost" || mode="gate" || mode="late" || mode="retire-release" || mode="retire-input") !entered;
       if mode="ego-conflict" then check string "the SDK only performed the read-only inspection"
         "space.inspect\n" (read (Filename.concat root "ego-steps"));
       if mode="gate" then check bool "blocked validation retirement remains unknown after original stop" true
@@ -327,11 +360,22 @@ let scenario mode =
       if mode="cancel" then
         check int "only the later request reaches Firefox" 1
           (List.length (List.filter (String.equal "browsingContext.getTree") (String.split_on_char '\n' (read commands))));
+      if mode="retire-input" || mode="retire-release" then
+        check int "retirement sends one cleanup release on the original connection" 1
+          (List.length (List.filter (String.equal "input.releaseActions") (String.split_on_char '\n' (read commands))));
       ok (Live.settle config ~incarnation:"0b000000-0000-4000-8000-000000000061" ~directory:allocation)))
 let child mode () =
   let pid=Unix.create_process Sys.executable_name
     [|Sys.executable_name;"--case";mode;!launcher;!guardian|] Unix.stdin Unix.stdout Unix.stderr in
-  check bool ("isolated owned live case " ^ mode) true (snd (Unix.waitpid [] pid)=Unix.WEXITED 0)
+  let deadline=Monotonic_deadline.after ~seconds:20. in
+  let rec wait () = match Unix.waitpid [Unix.WNOHANG] pid with
+    | 0,_ when Monotonic_deadline.passed deadline ->
+        Unix.kill pid Sys.sigkill; ignore (Unix.waitpid [] pid);
+        failf "isolated owned live case %s exceeded its external watchdog" mode
+    | 0,_ -> Unix.sleepf 0.05;wait ()
+    | _,status -> status
+    | exception Unix.Unix_error (Unix.EINTR,_,_) -> wait () in
+  check bool ("isolated owned live case " ^ mode) true (wait ()=Unix.WEXITED 0)
 let () =
   if Array.length Sys.argv=5 && Sys.argv.(1)="--case" then (
     launcher:=Unix.realpath Sys.argv.(3);guardian:=Unix.realpath Sys.argv.(4);scenario Sys.argv.(2))
@@ -346,6 +390,8 @@ let () =
       test_case "user-owned Ego name keeps the original BiDi peer serving" `Quick (child "ego-conflict");
       test_case "a slow request within its own window keeps the original client" `Quick (child "slow");
       test_case "a caller cancelled during validation sends no browser command" `Quick (child "cancel");
+      test_case "retirement does not wait for a long unanswered input release" `Quick (child "retire-release");
+      test_case "retirement during input performs one bounded release" `Quick (child "retire-input");
       test_case "native gate cannot hold the original process alive during retirement" `Quick (child "gate");
       test_case "unexpected peer loss fences the worker" `Quick (child "lost");
       test_case "a result whose caller stopped waiting keeps the connection" `Quick (child "late")]])

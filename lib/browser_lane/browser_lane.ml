@@ -866,8 +866,10 @@ let activity_result = function
    the worker when it ends; elapsed time, which on macOS includes system
    sleep, says nothing about it. *)
 type liveness = Polled of Monotonic_deadline.t | Worker_held
-type live_waiter = { resolver : Yojson.Safe.t Eio.Promise.u; deadline : Monotonic_deadline.t option }
-type live_request_window = No_live_waiter | Live_executor_owned | Live_waiting_until of Monotonic_deadline.t
+type live_waiter = { resolver : Yojson.Safe.t Eio.Promise.u; deadline : Monotonic_deadline.t option;
+  interrupted : unit Eio.Promise.t; interrupt : unit Eio.Promise.u }
+type live_request_window = No_live_waiter | Live_executor_owned of unit Eio.Promise.t
+  | Live_waiting_until of Monotonic_deadline.t * unit Eio.Promise.t
 type client = { info : client_info; commands : issued Eio.Stream.t;
   mutex : Eio.Mutex.t;
   waiters : (string, live_waiter) Hashtbl.t;
@@ -913,8 +915,9 @@ let retire_unlocked key client =
   Hashtbl.replace retired_clients key ();
   Eio.Mutex.use_rw ~protect:true client.mutex (fun () ->
     client.closed <- true;
-    Hashtbl.iter (fun _ waiter -> Eio.Promise.resolve waiter.resolver
-      (`Assoc ["ok", `Bool false; "error", `String "client_disconnected"])) client.waiters;
+    Hashtbl.iter (fun _ waiter ->
+      ignore (Eio.Promise.try_resolve waiter.interrupt ());
+      Eio.Promise.resolve waiter.resolver (`Assoc ["ok", `Bool false; "error", `String "client_disconnected"])) client.waiters;
     Hashtbl.clear client.waiters; Hashtbl.clear client.interactions;
     Hashtbl.clear client.executor_work);
   while Option.is_some (Eio.Stream.take_nonblocking client.commands) do () done
@@ -1176,8 +1179,8 @@ let live_request_window ~client_id ~id =
   | Some client -> Eio.Mutex.use_ro client.mutex (fun () ->
       match Hashtbl.find_opt client.waiters id with
       | None -> No_live_waiter
-      | Some {deadline=None;_} -> Live_executor_owned
-      | Some {deadline=Some deadline;_} -> Live_waiting_until deadline)
+      | Some {deadline=None;interrupted;_} -> Live_executor_owned interrupted
+      | Some {deadline=Some deadline;interrupted;_} -> Live_waiting_until (deadline,interrupted))
 let deliver_result ~client_id ~id ~payload =
   match Eio.Mutex.use_ro clients_mutex (fun () ->
     Hashtbl.find_opt clients (client_id_to_string client_id)) with
@@ -1245,6 +1248,7 @@ let issue_live_with ~activity_check ?actor ?(only_if_idle = false) client ~verb 
       let policy = live_reply_policy client.info.transport verb in
       let id = Uuidm.to_string (command_uuid ()) in
       let promise, resolver = Eio.Promise.create () in
+      let interrupted, interrupt = Eio.Promise.create () in
       let deadline = match policy with
         | Reply_window -> Some (Monotonic_deadline.after ~seconds:timeout_sec)
         | Executor_owned -> None in
@@ -1254,7 +1258,7 @@ let issue_live_with ~activity_check ?actor ?(only_if_idle = false) client ~verb 
         | None -> if only_if_idle &&
            (Hashtbl.length client.waiters <> 0 || Eio.Stream.length client.commands <> 0)
         then Error (Refused "optional_document_observation_busy")
-        else (Hashtbl.add client.waiters id {resolver;deadline};
+        else (Hashtbl.add client.waiters id {resolver;deadline;interrupted;interrupt};
           (match policy with
            | Executor_owned -> Hashtbl.add client.executor_work id Interaction_queued
            | Reply_window -> ());
@@ -1278,14 +1282,16 @@ let issue_live_with ~activity_check ?actor ?(only_if_idle = false) client ~verb 
             | payload, Some _ -> payload in
           Eio.Stream.add client.commands {id; verb_json=payload};
           Answered (Eio.Promise.await promise) in
-        match policy with
-        | Executor_owned -> execute ()
-        | Reply_window -> Watched_work.run execute
-            ~watcher:(fun () ->
-              Time_compat.sleep (match deadline with
-                | Some deadline -> Monotonic_deadline.remaining_seconds deadline
-                | None -> timeout_sec);
-              Timed_out)))
+        (try match policy with
+         | Executor_owned -> execute ()
+         | Reply_window -> Watched_work.run execute
+             ~watcher:(fun () ->
+               Time_compat.sleep (match deadline with
+                 | Some deadline -> Monotonic_deadline.remaining_seconds deadline
+                 | None -> timeout_sec);
+               Timed_out)
+         with Eio.Cancel.Cancelled _ as exn ->
+           ignore (Eio.Promise.try_resolve interrupt ()); raise exn)))
 let issue_live ?only_if_idle client ~verb ~timeout_sec =
   issue_live_with ~activity_check:(activity_refusal Lane_name.Live) ?only_if_idle client ~verb ~timeout_sec
 (* The port this process serves the browser-lane routes on: the port its HTTP

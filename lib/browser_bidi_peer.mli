@@ -35,8 +35,10 @@ val error_code_to_wire : error_code -> string
     no readable answer: the connection ended under it, the reply did not come
     in time, or it was not a BiDi result. [Unsent] was never written: the
     connection had already ended. [Deadline_before_send] was never written
-    because the request window ended while the connection was still open. *)
-type refusal = Rejected of error_code | Unanswered of string | Unsent of string | Deadline_before_send
+    because the request window ended while the connection was still open.
+    [Interrupted_before_send] was never written because local caller or owner
+    authority was withdrawn. *)
+type refusal = Rejected of error_code | Unanswered of string | Unsent of string | Deadline_before_send | Interrupted_before_send
 type t
 (** Why a session was not ended. [Connection_gone]: there was no socket left
     to ask over, so a Firefox that has quit holds no session and one that
@@ -118,15 +120,18 @@ val profile_refusal_message : expected:string -> profile_refusal -> string
 val end_session : t -> (unit, session_end_failure) result
 val session_end_window_sec : float
 val dispatch : ?actor:string -> ?request_id:string -> ?deadline:Monotonic_deadline.t ->
+  ?interruptions:unit Eio.Promise.t list ->
   t -> verb:verb -> Yojson.Safe.t -> (Yojson.Safe.t, failure) result
 (** Run one request on this peer. When [deadline] is supplied, page work is
     refused before its next exchange once the request expires, accounting for
     time spent in the queue and earlier exchanges. A confirmed effect whose
     observation was not sent is a partial failure, without claiming the page's
     final state. After a send, the response may use the longer of the transport
-    window and the remaining request window. Input release and session end
-    have separate cleanup windows. Calls on one peer are serial. Cancellation
-    after dispatch is a separate boundary. *)
+    window and the remaining request window. Input release may still send
+    after expiry, and uses the same response window. Once any [interruptions]
+    resolves, an outstanding response waits only until its original transport
+    deadline. Session end keeps its own cleanup window. Calls on one peer are
+    serial; these signals do not undo a command already sent. *)
 (** One socket message carries at most this many bytes; a larger one ends the
     connection. *)
 val reply_limit_bytes : int

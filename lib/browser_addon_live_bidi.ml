@@ -249,24 +249,24 @@ let run_with ~before_command_validation ~connection_timeout_sec ~env ~owner ~dir
                             | Peer.Observed_failure {disposition=Peer.Uncertain;message=detail;_}) -> Error detail
                     | Ok _
                     | Error (Before_effect _|Partial_failure _|Observed_failure {disposition=Not_started;_}) -> Ok () in
-                  let dispatch deadline =
+                  let dispatch deadline interrupted =
                     let result=let* verb,args,actor=Browser_live_peer.decode command
                         |> Result.map_error (fun detail -> Peer.Before_effect detail) in
-                      Peer.dispatch ?actor ~request_id:command.id ?deadline peer ~verb args in
+                      Peer.dispatch ?actor ~request_id:command.id ?deadline ~interruptions:[interrupted;stopping] peer ~verb args in
                     deliver result in
                   (match window () with
                    | B.No_live_waiter -> Ok ()
-                   | B.Live_waiting_until deadline when Monotonic_deadline.passed deadline -> Ok ()
-                   | B.Live_executor_owned | B.Live_waiting_until _ ->
+                   | B.Live_waiting_until (deadline,_) when Monotonic_deadline.passed deadline -> Ok ()
+                   | B.Live_executor_owned _ | B.Live_waiting_until _ ->
                      (match check ~before:before_command_validation () with
                       | Error detail -> deliver (Error (Peer.Before_effect detail))
                       | Ok () ->
                         (* Validation may yield while the issuer stops waiting. *)
                         match window () with
                         | B.No_live_waiter -> Ok ()
-                        | B.Live_waiting_until deadline when Monotonic_deadline.passed deadline -> Ok ()
-                        | B.Live_waiting_until deadline -> dispatch (Some deadline)
-                        | B.Live_executor_owned -> dispatch None)) in
+                        | B.Live_waiting_until (deadline,_) when Monotonic_deadline.passed deadline -> Ok ()
+                        | B.Live_waiting_until (deadline,interrupted) -> dispatch (Some deadline) interrupted
+                        | B.Live_executor_owned interrupted -> dispatch None interrupted)) in
                 if Browser_addon_owner.is_retired owner then Ok () else serve () in
               let result=Eio.Fiber.first serve (fun () ->
                 Eio.Fiber.first
@@ -285,7 +285,8 @@ let run_with ~before_command_validation ~connection_timeout_sec ~env ~owner ~dir
                   let* ()=Peer.close_browser peer |> Result.map_error (function
                     | Peer.Rejected code -> "Firefox browser.close rejected: " ^ Peer.error_code_to_wire code
                     | Unanswered detail | Unsent detail -> detail
-                    | Deadline_before_send -> "Firefox browser.close deadline exceeded before send") in
+                    | Deadline_before_send -> "Firefox browser.close deadline exceeded before send"
+                    | Interrupted_before_send -> "Firefox browser.close was interrupted before send") in
                   ignore (Eio.Process.await child);
                   let* ()=Eio_unix.run_in_systhread (fun () -> lease (Lease.retire child_admission)) in
                   Eio_unix.run_in_systhread (fun () -> let* ()=settled child_admission in verify c) in

@@ -492,6 +492,137 @@ let test_transport_window_starts_after_encoding_and_send () =
   check (list string) "both requests use the same peer"
     ["browsingContext.getTree";"browsingContext.getTree";"session.end"] (List.rev !seen)
 
+let keyboard_args = obj ["tabId",`Int 1;"expectedUrl",`String "https://example.org";"action",`String "type_text";
+  "documentId",`String "d1";"text",`String "x"]
+let accept_keyboard_until_input flow =
+  let tree=read_client_message flow in
+  send_server_message flow (reply_to tree (obj ["contexts",`List [obj ["context",`String "owned"]]]));
+  let guard=read_client_message flow in
+  send_server_message flow (reply_to guard (script_value (obj ["url",`String "https://example.org";"title",`String "native"])));
+  read_client_message flow
+
+(* A release is still a cleanup, but an active longer request also gives its
+   reply the caller's remaining window. It is sent once on the original socket. *)
+let test_long_request_keeps_its_input_release_window () =
+  let seen=ref [] in
+  let outcome=with_scripted_firefox_clock (fun clock flow ->
+    accept_session flow;
+    let input=accept_keyboard_until_input flow in seen:=method_of input::!seen;
+    send_server_message flow (reply_to input `Null);
+    let release=read_client_message flow in seen:=method_of release::!seen;
+    Eio.Time.sleep clock (scripted_timeout_sec +. 0.2);
+    send_server_message flow (reply_to release `Null);
+    let receipt=read_client_message flow in seen:=method_of receipt::!seen;
+    send_server_message flow (reply_to receipt (script_value (obj ["url",`String "https://example.org";"title",`String "native"])));
+    let ending=read_client_message flow in seen:=method_of ending::!seen;
+    send_server_message flow (reply_to ending (obj [])))
+    (fun ~ended peer ->
+      (match metadata peer with Ok _ -> () | Error detail -> fail detail);
+      let deadline=Monotonic_deadline.after ~seconds:3. in
+      (match Peer.dispatch ~deadline peer ~verb:Peer.Page_interact keyboard_args with
+       | Ok _ -> () | Error _ -> fail "a release inside the original caller window failed");
+      check bool "the original peer remains serving" true (Eio.Promise.peek ended=None);
+      ended_session peer) in
+  check (result unit string) "session ends" (Ok ()) outcome;
+  check (list string) "one input and one release on the same connection"
+    ["input.performActions";"input.releaseActions";"script.callFunction";"session.end"] (List.rev !seen)
+
+(* The release remains authorized after input was sent. Cancellation or a
+   broken peer shortens the wait to its original transport deadline without
+   replaying release or waiting for the much longer request deadline. *)
+let test_interrupted_release_uses_original_transport_window () =
+  List.iter (fun mode ->
+    let interrupted,interrupt=Eio.Promise.create () and seen=ref [] and elapsed=ref 0. in
+    let outcome=with_scripted_firefox_clock (fun clock flow ->
+      accept_session flow;
+      let input=accept_keyboard_until_input flow in seen:=method_of input::!seen;
+      (match mode with
+       | "bad-json" -> send_server_frame flow 1 "not JSON"
+       | "missing-result" -> send_server_message flow (obj ["type",`String "success";"id",Yojson.Safe.Util.member "id" input])
+       | "missing-error" -> send_server_message flow (obj ["type",`String "error";"id",Yojson.Safe.Util.member "id" input])
+       | "interrupted" -> send_server_message flow (reply_to input `Null)
+       | other -> failf "unknown fixture mode %s" other);
+      let release=read_client_message flow in seen:=method_of release::!seen;
+      let started=Eio.Time.now clock in
+      if mode="interrupted" then (Eio.Time.sleep clock 0.75; Eio.Promise.resolve interrupt ());
+      (* Leave release unanswered. A long request must not keep this cleanup
+         alive after the original transport deadline. *)
+      let ending=read_client_message flow in seen:=method_of ending::!seen;
+      elapsed:=Eio.Time.now clock -. started;
+      send_server_message flow (reply_to ending (obj [])))
+      (fun ~ended peer ->
+        (match metadata peer with Ok _ -> () | Error detail -> fail detail);
+        let deadline=Monotonic_deadline.after ~seconds:30. in
+        (match Peer.dispatch ~deadline ~interruptions:[interrupted] peer ~verb:Peer.Page_interact keyboard_args with
+         | Error (Peer.Outcome_unknown _) -> ()
+         | Ok _ | Error (Peer.Before_effect _ | Peer.Partial_failure _) -> fail "unanswered input cleanup must remain unknown");
+        check bool "unanswered release fences the peer" true (Eio.Promise.peek ended<>None);
+        ended_session peer) in
+    check (result unit string) "bounded cleanup leaves session end available" (Ok ()) outcome;
+    if mode="interrupted" then check bool "interruption retains the first transport deadline" true (!elapsed < 1.5);
+    check (list string) "no input or release replay" ["input.performActions";"input.releaseActions";"session.end"] (List.rev !seen))
+    ["interrupted";"bad-json";"missing-result";"missing-error"]
+
+let test_interruption_bounds_an_already_sent_read () =
+  let interrupted,interrupt=Eio.Promise.create () and seen=ref [] and elapsed=ref 0. in
+  let outcome=with_scripted_firefox_clock (fun clock flow ->
+    accept_session flow;
+    let read=read_client_message flow in seen:=method_of read::!seen;
+    let started=Eio.Time.now clock in
+    Eio.Time.sleep clock 0.75;
+    Eio.Promise.resolve interrupt ();
+    let ending=read_client_message flow in seen:=method_of ending::!seen;
+    elapsed:=Eio.Time.now clock -. started;
+    send_server_message flow (reply_to ending (obj [])))
+    (fun ~ended peer ->
+      (match metadata peer with Ok _ -> () | Error detail -> fail detail);
+      let deadline=Monotonic_deadline.after ~seconds:30. in
+      (match Peer.dispatch ~deadline ~interruptions:[interrupted] peer ~verb:Peer.Tabs_list (obj []) with
+       | Error (Peer.Before_effect _) -> ()
+       | Ok _ | Error (Peer.Partial_failure _ | Peer.Outcome_unknown _) -> fail "an unanswered read should fail");
+      check bool "an unanswered read fences the original peer" true (Eio.Promise.peek ended<>None);
+      ended_session peer) in
+  check (result unit string) "session ends" (Ok ()) outcome;
+  check bool "interruption retains the first transport deadline" true (!elapsed < 1.5);
+  check (list string) "read is not replayed" ["browsingContext.getTree";"session.end"] (List.rev !seen)
+
+let test_interruption_at_send_preserves_effect_boundary () =
+  List.iter (fun after_input ->
+    let interrupted,interrupt=Eio.Promise.create () and scripts=ref 0 and seen=ref [] in
+    let after_serialize method_ =
+      if method_="script.callFunction" then incr scripts;
+      if (not after_input && method_="input.performActions") || (after_input && method_="script.callFunction" && !scripts=2)
+      then Eio.Promise.resolve interrupt () in
+    let outcome=with_scripted_firefox_clock ~after_serialize (fun _clock flow ->
+      accept_session flow;
+      let tree=read_client_message flow in seen:=method_of tree::!seen;
+      send_server_message flow (reply_to tree (obj ["contexts",`List [obj ["context",`String "owned"]]]));
+      let guard=read_client_message flow in seen:=method_of guard::!seen;
+      send_server_message flow (reply_to guard (script_value (obj ["url",`String "https://example.org";"title",`String "native"])));
+      if after_input then (
+        let input=read_client_message flow in seen:=method_of input::!seen;
+        send_server_message flow (reply_to input `Null);
+        let release=read_client_message flow in seen:=method_of release::!seen;
+        send_server_message flow (reply_to release `Null));
+      let ending=read_client_message flow in seen:=method_of ending::!seen;
+      send_server_message flow (reply_to ending (obj [])))
+      (fun ~ended peer ->
+        (match metadata peer with Ok _ -> () | Error detail -> fail detail);
+        let deadline=Monotonic_deadline.after ~seconds:10. in
+        (match Peer.dispatch ~deadline ~interruptions:[interrupted] peer ~verb:Peer.Page_interact keyboard_args,after_input with
+         | Error (Peer.Before_effect _),false -> ()
+         | Error (Peer.Partial_failure {receipt;_}),true ->
+           check string "confirmed input has no post-effect observation" "not_sent"
+             Yojson.Safe.Util.(receipt |> member "postEffectObservation" |> to_string)
+         | (Ok _ | Error _),_ -> fail "interruption did not preserve the input effect boundary");
+        check bool "nothing unsent fenced the peer" true (Eio.Promise.peek ended=None);
+        ended_session peer) in
+    check (result unit string) "session ends" (Ok ()) outcome;
+    check (list string) "no page input or observation is sent after interruption"
+      (["browsingContext.getTree";"script.callFunction"]
+       @ (if after_input then ["input.performActions";"input.releaseActions"] else [])
+       @ ["session.end"]) (List.rev !seen)) [false;true]
+
 let test_timed_out_input_still_releases_on_the_original_socket () =
   let seen = ref [] in
   let outcome = with_scripted_firefox (fun flow ->
@@ -1861,11 +1992,11 @@ let test_open_tab_failure_does_not_replay () =
     let calls = ref [] in
     let peer = peer_of (fun method_ _ -> calls := method_ :: !calls; Error failure) in
     (match Peer.dispatch peer ~verb:Peer.Page_act input,failure with
-     | Error (Peer.Before_effect _ | Peer.Observed_failure {disposition=Peer.Not_started;_}), (Peer.Rejected _ | Peer.Unsent _ | Peer.Deadline_before_send)
+     | Error (Peer.Before_effect _ | Peer.Observed_failure {disposition=Peer.Not_started;_}), (Peer.Rejected _ | Peer.Unsent _ | Peer.Deadline_before_send | Peer.Interrupted_before_send)
      | Error (Peer.Outcome_unknown _ | Peer.Observed_failure {disposition=Peer.Uncertain;_}), Peer.Unanswered _ -> ()
-     | (Ok _ | Error (Peer.Partial_failure _)), (Peer.Rejected _ | Peer.Unsent _ | Peer.Unanswered _ | Peer.Deadline_before_send)
+     | (Ok _ | Error (Peer.Partial_failure _)), (Peer.Rejected _ | Peer.Unsent _ | Peer.Unanswered _ | Peer.Deadline_before_send | Peer.Interrupted_before_send)
      | Error (Peer.Before_effect _ | Peer.Observed_failure {disposition=Peer.Not_started;_}), Peer.Unanswered _
-     | Error (Peer.Outcome_unknown _ | Peer.Observed_failure {disposition=Peer.Uncertain;_}), (Peer.Rejected _ | Peer.Unsent _ | Peer.Deadline_before_send) ->
+     | Error (Peer.Outcome_unknown _ | Peer.Observed_failure {disposition=Peer.Uncertain;_}), (Peer.Rejected _ | Peer.Unsent _ | Peer.Deadline_before_send | Peer.Interrupted_before_send) ->
        fail "incorrect create failure effect boundary");
     check (list string) "creation is never replayed" ["browsingContext.create"] !calls)
     [refused;Peer.Unsent "closed";Peer.Unanswered "lost reply";Peer.Deadline_before_send];
@@ -1940,6 +2071,10 @@ let () = run "BiDi live peer" ["identity",[test_case "native keyboard release an
     test_case "a closed socket ends the connection for its holder" `Quick test_a_closed_socket_ends_the_connection;
     test_case "each request owns its BiDi exchange deadline" `Quick test_request_deadline_controls_the_bidi_exchange;
     test_case "transport window starts after encoding and send" `Quick test_transport_window_starts_after_encoding_and_send;
+    test_case "long input release keeps the request window" `Quick test_long_request_keeps_its_input_release_window;
+    test_case "interrupted or broken input release has a bounded wait" `Quick test_interrupted_release_uses_original_transport_window;
+    test_case "interruption bounds an already sent read" `Quick test_interruption_bounds_an_already_sent_read;
+    test_case "interruption at send preserves the effect boundary" `Quick test_interruption_at_send_preserves_effect_boundary;
     test_case "timed-out input releases on its original socket" `Quick test_timed_out_input_still_releases_on_the_original_socket;
     test_case "expiry during encoding sends no input" `Quick test_expiry_during_encoding_does_not_send_input;
     test_case "expiry after tab creation preserves the peer" `Quick test_expiry_after_create_preserves_the_connection;

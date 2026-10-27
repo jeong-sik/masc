@@ -46,12 +46,15 @@ let decode_backlog ~path json =
            path
            msg)
 
-(** Per-path backlog cache keyed by file mtime/size.
+(** Filesystem backlog cache keyed by path and file mtime/size.
 
     CPU sampling showed that reading + Yojson-decoding backlog.json is one
     of the hottest paths in dashboard/keeper snapshot code, and the file is
-    read many times between mutations.  Caching by mtime+size is safe because
-    [write_backlog] invalidates the cache after persisting. *)
+    read many times between mutations. [write_backlog] invalidates this
+    process's cache after persisting; an external replacement with the same
+    mtime and size cannot be distinguished. A Memory backend may use the same
+    path for a different authoritative value, so it neither reads nor populates
+    this filesystem cache. *)
 type backlog_cache_entry = {
   mtime : float;
   size : int;
@@ -112,16 +115,19 @@ let read_backlog_with_source_r config =
            (json_doc_error_to_string recovery_error))
   in
   let cached =
-    Stdlib.Mutex.protect backlog_cache_mu (fun () ->
-        match Hashtbl.find_opt backlog_cache path with
-        | None -> None
-        | Some entry -> (
-            match file_stat_opt path with
+    match config.backend with
+    | Memory _ -> None
+    | FileSystem _ ->
+        Stdlib.Mutex.protect backlog_cache_mu (fun () ->
+            match Hashtbl.find_opt backlog_cache path with
             | None -> None
-            | Some st ->
-                if st.Unix.st_mtime = entry.mtime && st.Unix.st_size = entry.size
-                then Some entry.backlog
-                else None))
+            | Some entry -> (
+                match file_stat_opt path with
+                | None -> None
+                | Some st ->
+                    if st.Unix.st_mtime = entry.mtime && st.Unix.st_size = entry.size
+                    then Some entry.backlog
+                    else None))
   in
   match cached with
   | Some backlog ->
@@ -134,7 +140,11 @@ let read_backlog_with_source_r config =
          lands between the two — an entry the writer's clear has already
          passed, poisoning hits until the next write. Stat before the read
          too and only register when nothing changed across it. *)
-      let stat_before = file_stat_opt path in
+      let stat_before =
+        match config.backend with
+        | Memory _ -> None
+        | FileSystem _ -> file_stat_opt path
+      in
       (* The miss path — the read, the JSON parse and the typed decode of a
          file that is 2 MB on a live root — runs as one job on the domain
          pool when one is installed and inline otherwise. Every keeper wake
@@ -151,7 +161,10 @@ let read_backlog_with_source_r config =
       | Ok (Some decoded) ->
           (match decoded with
           | Ok backlog ->
-              (match (stat_before, file_stat_opt path) with
+              let stat_after =
+                match stat_before with None -> None | Some _ -> file_stat_opt path
+              in
+              (match (stat_before, stat_after) with
               | Some before, Some after
                 when after.Unix.st_mtime = before.Unix.st_mtime
                      && after.Unix.st_size = before.Unix.st_size ->

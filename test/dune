@@ -2727,6 +2727,8 @@
 
 (include stanzas/test_workspace_bootstrap.inc)
 
+(include stanzas/test_workspace_backend_cache_isolation.inc)
+
 (include stanzas/test_workspace_base_path_cache.inc)
 
 (include stanzas/test_dashboard_gate_cli_lane.inc)

@@ -1,0 +1,27 @@
+[2026-10-27 12:38:45] [INFO] [Workspace] MASC base: /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/librarian-addon-owner-c639ca (no git root found)
+[2026-10-27 12:38:45] [INFO] [Workspace] MASC base: /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/librarian-addon-owner-c639ca (MASC_BASE_PATH)
+[2026-10-27 12:38:46] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+[2026-10-27 12:38:46] [INFO] [Keeper/librarian-owner-fixture] durable Librarian inventory validated: originals=0 unfinished=0 gate_records=0 elapsed_ms=1.6
+[llm_provider] [WARN] [backend_openai] clamping max_tokens 4096 to the output ceiling 1024 (declared capability override) for model masc-exact-fixture-model-0: the request asked above what the capability record admits, and the ceiling is what reaches the wire.
+ASSERT the actual declared fixture target requests JSON mode
+[2026-10-27 12:38:47] [INFO] [Keeper/librarian-owner-fixture] durable Librarian inventory validated: originals=1 unfinished=1 gate_records=0 elapsed_ms=138.9
+ASSERT original delivered answer completes local publication
+[2026-10-27 12:38:47] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+        3.81 real         1.74 user         0.17 sys
+           125124608  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               11603  page reclaims
+                1189  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   3  messages sent
+                  12  messages received
+                   2  signals received
+                 251  voluntary context switches
+                3640  involuntary context switches
+            19311194  instructions retired
+            10627808  cycles elapsed
+             1212728  peak memory footprint

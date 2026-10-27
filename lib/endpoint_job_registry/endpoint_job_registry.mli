@@ -223,6 +223,10 @@ val publish_unlaunched :
 (** Publish trusted immutable evidence under this opaque proof's exact original
     storage, serializing only its bounded metadata through the original job
     lock. Content comes from trusted codecs, never forwarded controls.
+    Admission and source reads remain cancellable. Once entered, the short Fs
+    recovery/publication transaction finishes under cancellation protection;
+    the job lock releases before checking the original cancellation context.
+    Evidence readback and input/output work stay outside that protection.
     Existing evidence is accepted only with identical complete bytes, private
     single-link regular attachment and actual matching file/parent sync and
     readback. No overwrite or claim revision change. Missing authority, changed

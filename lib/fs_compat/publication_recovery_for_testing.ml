@@ -56,6 +56,9 @@ let with_replace_dispatch_fault =
 let parent_sync_dispatch_fault =
   Atomic_write.Capability_write_for_testing.parent_sync_dispatch_fault
 
+let before_parent_sync_dispatch =
+  Atomic_write.Capability_write_for_testing.before_parent_sync_dispatch
+
 let remove_staging_payload_before_publish =
   Atomic_write.Capability_write_for_testing.remove_staging_payload_before_publish
 ;;

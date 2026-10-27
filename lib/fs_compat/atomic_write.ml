@@ -169,6 +169,7 @@ type replace_dispatch_fault =
       ; fault_exception : exn
       }
   | Raise_before_parent_syncs of exn
+  | Observe_before_parent_sync of (unit -> unit)
   | Remove_staging_payload_before_publish
 
 (* TEL-OK: this fiber key carries a typed test fault plan; no write occurs here. *)
@@ -197,6 +198,16 @@ let scoped_replace_dispatch () =
     ( (fun stage ->
         if stage = Sync_parent || stage = Cleanup_sync_parent then raise exception_)
     , no_before_publish )
+  | Some (Observe_before_parent_sync before_sync) ->
+    ((fun stage -> if stage = Sync_parent then before_sync ()), no_before_publish)
+;;
+
+let scoped_exclusive_dispatch () =
+  match Eio.Fiber.get replace_dispatch_fault_key with
+  | Some (Observe_before_parent_sync before_sync) ->
+    (fun stage -> if stage = Sync_parent then before_sync ())
+  | None | Some (Raise_before_stage _ | Raise_before_parent_syncs _
+      | Remove_staging_payload_before_publish) -> no_replace_stage
 ;;
 
 type capability_write_target_effect =
@@ -2019,7 +2030,7 @@ let replace_capability_file ~recovery ~parent ~target content =
 let create_capability_file_exclusive ~recovery ~parent ~target content =
   publish_capability_payload_through_access
     ~publication:Recovery.Create_exclusive
-    ~before_stage:(fun _ -> ())
+    ~before_stage:(scoped_exclusive_dispatch ())
     ~before_publish:(fun _ -> ())
     ~recovery ~parent ~target (File_payload content)
 ;;
@@ -2069,6 +2080,8 @@ module Capability_write_for_testing = struct
   ;;
 
   let parent_sync_dispatch_fault ~exception_ = Raise_before_parent_syncs exception_
+
+  let before_parent_sync_dispatch ~before_sync = Observe_before_parent_sync before_sync
 
   let remove_staging_payload_before_publish () =
     Remove_staging_payload_before_publish

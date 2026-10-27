@@ -665,7 +665,7 @@ let publish_unlaunched ~sw proof ~evidence ~content =
   let* ()=match evidence with
     | Stream_data _ -> if String.length content=0 then Ok () else corrupt "unlaunched stream is not empty"
     | Stream_seal _ | Terminal_receipt -> Ok () in
-  locked registry binding (fun () ->
+  let result=locked registry binding (fun () ->
     let* current=read_record registry binding in
     let* ()=if same_original original current then Ok () else Error Stale_record in
     let* ()=match current.claim.state with
@@ -681,17 +681,20 @@ let publish_unlaunched ~sw proof ~evidence ~content =
           ~parent_components:[] ~target_leaf:leaf ~permissions
         |> Result.map_error (fun e -> Authority_unavailable
           (Fs_compat.capability_publication_target_error_to_string e)) in
-      let* recovery=Fs_compat.Publication_recovery.open_registry ~sw:read_sw ~fs:registry.fs ~registry_root:parent
-        |> Result.map_error (fun e -> Recovery_unavailable (Fs_compat.Publication_recovery.registry_error_to_string e)) in
-      let* ()=in_recovery_lane recovery "unlaunched" (fun recovery ->
-        match Fs_compat.create_capability_file_exclusive ~recovery ~parent ~target content
-            |> Result.map_error (fun e -> Publication_failed e) with
-        | Ok () -> Ok ()
-        | Error e when already_exists e -> Ok ()
-        | Error e -> Error e) in
+      let* ()=Eio.Cancel.protect (fun () ->
+        let* recovery=Fs_compat.Publication_recovery.open_registry ~sw:read_sw ~fs:registry.fs ~registry_root:parent
+          |> Result.map_error (fun e -> Recovery_unavailable (Fs_compat.Publication_recovery.registry_error_to_string e)) in
+        in_recovery_lane recovery "unlaunched" (fun recovery ->
+          match Fs_compat.create_capability_file_exclusive ~recovery ~parent ~target content
+              |> Result.map_error (fun e -> Publication_failed e) with
+          | Ok () -> Ok ()
+          | Error e when already_exists e -> Ok ()
+          | Error e -> Error e)) in
       let* ()=verify_unlaunched_evidence ~sw:read_sw ~parent ~leaf ~permissions ~controller_uid:registry.controller_uid content in
       let* confirmed=read_record registry binding in
-      if same_original current confirmed then Ok () else Error Stale_record))
+      if same_original current confirmed then Ok () else Error Stale_record)) in
+  Eio.Fiber.check ();
+  result
 
 let with_launch_with_hook ~after_original ~sw (intent : launch_intent) perform =
   Eio.Switch.check sw;

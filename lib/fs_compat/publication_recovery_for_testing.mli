@@ -51,6 +51,11 @@ val replace_dispatch_fault
 val parent_sync_dispatch_fault : exception_:exn -> replace_dispatch_fault
 (** Fail the real post-publication parent sync and its cleanup retry. *)
 
+val before_parent_sync_dispatch : before_sync:(unit -> unit) -> replace_dispatch_fault
+(** Interleave in the invoking fiber after actual publication and immediately
+    before the actual parent fsync. Used with [with_replace_dispatch_fault];
+    it preserves the production writer and performs no replacement effect. *)
+
 val with_replace_dispatch_fault
   :  replace_dispatch_fault
   -> (unit -> 'a)

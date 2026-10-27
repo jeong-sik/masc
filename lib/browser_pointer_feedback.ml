@@ -45,6 +45,9 @@ let runtime = {js|function mascPointerFeedback(args) {
       }
     }, {capture:true,passive:true});
   }
+  // A late finish belongs only to its own operation. It must not reattach or
+  // rewrite the feedback of a newer request in the same document.
+  if (args.phase !== 'working' && args.requestId !== state.requestId) return null;
   if (!state.host.isConnected) document.documentElement.append(state.host);
   if (args.phase === 'working') {
     state.requestId = args.requestId; state.actor = args.actor; state.action = args.action;

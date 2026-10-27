@@ -465,6 +465,33 @@ let test_request_deadline_controls_the_bidi_exchange () =
   check (list string) "no exchange for expired work"
     ["browsingContext.getTree"; "browsingContext.getTree"; "session.end"] (List.rev !seen)
 
+let test_transport_window_starts_after_encoding_and_send () =
+  let seen=ref [] and encoded=ref 0 in
+  let after_serialize method_ =
+    if method_="browsingContext.getTree" && !encoded=0 then (incr encoded; Unix.sleepf 0.6) in
+  let outcome = with_scripted_firefox_clock ~after_serialize (fun clock flow ->
+    accept_session flow;
+    let first=read_client_message flow in seen:=method_of first :: !seen;
+    Eio.Time.sleep clock 0.7;
+    send_server_message flow (reply_to first (obj ["contexts",`List []]));
+    let next=read_client_message flow in seen:=method_of next :: !seen;
+    send_server_message flow (reply_to next (obj ["contexts",`List []]));
+    let ending=read_client_message flow in seen:=method_of ending :: !seen;
+    send_server_message flow (reply_to ending (obj [])))
+    (fun ~ended peer ->
+      (match metadata peer with Ok _ -> () | Error detail -> fail detail);
+      let deadline=Monotonic_deadline.after ~seconds:1. in
+      (match Peer.dispatch ~deadline peer ~verb:Peer.Tabs_list (obj []) with
+       | Ok _ -> () | Error _ -> fail "a reply inside the post-send transport window must be accepted");
+      check bool "the original peer remains connected" true (Eio.Promise.peek ended=None);
+      (match Peer.dispatch peer ~verb:Peer.Tabs_list (obj []) with
+       | Ok _ -> () | Error _ -> fail "the original peer could not answer again");
+      ended_session peer) in
+  check (result unit string) "the original session ends" (Ok ()) outcome;
+  check int "the first request crossed the encoding delay" 1 !encoded;
+  check (list string) "both requests use the same peer"
+    ["browsingContext.getTree";"browsingContext.getTree";"session.end"] (List.rev !seen)
+
 let test_timed_out_input_still_releases_on_the_original_socket () =
   let seen = ref [] in
   let outcome = with_scripted_firefox (fun flow ->
@@ -472,6 +499,9 @@ let test_timed_out_input_still_releases_on_the_original_socket () =
     let tree = read_client_message flow in
     seen := method_of tree :: !seen;
     send_server_message flow (reply_to tree (obj ["contexts",`List [obj ["context",`String "owned"]]]));
+    let begin_feedback = read_client_message flow in
+    seen := method_of begin_feedback :: !seen;
+    send_server_message flow (reply_to begin_feedback (script_value `Null));
     let guard = read_client_message flow in
     seen := method_of guard :: !seen;
     send_server_message flow (reply_to guard (script_value (obj ["url",`String "https://example.org";"title",`String "native"])));
@@ -490,15 +520,15 @@ let test_timed_out_input_still_releases_on_the_original_socket () =
       let deadline=Monotonic_deadline.after ~seconds:0.3 in
       let args=obj ["tabId",`Int 1;"expectedUrl",`String "https://example.org";"action",`String "type_text";
         "documentId",`String "d1";"text",`String "x"] in
-      (match Peer.dispatch ~deadline peer ~verb:Peer.Page_interact args with
+      (match Peer.dispatch ~request_id:"fixture-unanswered" ~deadline peer ~verb:Peer.Page_interact args with
        | Error (Peer.Outcome_unknown _) -> ()
        | Ok _ | Error (Peer.Before_effect _ | Peer.Partial_failure _) ->
            fail "unanswered input must remain unknown");
       check bool "ordinary commands remain fenced" true (Eio.Promise.peek ended <> None);
       ended_session peer) in
   check (result unit string) "the original session ends" (Ok ()) outcome;
-  check (list string) "one input, one cleanup release, then session end"
-    ["browsingContext.getTree";"script.callFunction";"input.performActions";
+  check (list string) "one input and cleanup release; broken peer sends no receipt or feedback finish"
+    ["browsingContext.getTree";"script.callFunction";"script.callFunction";"input.performActions";
      "input.releaseActions";"session.end"] (List.rev !seen)
 
 let test_expiry_during_encoding_does_not_send_input () =
@@ -568,6 +598,54 @@ let test_expiry_after_create_preserves_the_connection () =
   check int "the navigation reached encoding" 1 !encoded;
   check (list string) "creation is not replayed and navigation is never sent"
     ["browsingContext.create";"browsingContext.getTree";"session.end"] (List.rev !seen)
+
+let test_completed_input_is_observed_and_feedback_finishes_after_deadline () =
+  let run ~request_window ~input_delay ~receipt_delay =
+  let seen = ref [] in
+  let outcome = with_scripted_firefox_clock (fun clock flow ->
+    let request () = let command=read_client_message flow in
+      seen:=method_of command :: !seen; command in
+    accept_session flow;
+    let tree=request () in
+    send_server_message flow (reply_to tree (obj ["contexts",`List [obj ["context",`String "owned"]]]));
+    let begin_feedback=request () in
+    send_server_message flow (reply_to begin_feedback (script_value `Null));
+    let guard=request () in
+    send_server_message flow (reply_to guard (script_value (obj ["url",`String "https://example.org";"title",`String "native"])));
+    let input=request () in
+    Eio.Time.sleep clock input_delay;
+    send_server_message flow (reply_to input `Null);
+    let release=request () in
+    send_server_message flow (reply_to release `Null);
+    let receipt=request () in
+    Eio.Time.sleep clock receipt_delay;
+    send_server_message flow (reply_to receipt (script_value (obj ["url",`String "https://example.org"])));
+    let finish_feedback=request () in
+    send_server_message flow (reply_to finish_feedback (script_value `Null));
+    let next=request () in
+    send_server_message flow (reply_to next (obj ["contexts",`List []]));
+    let ending=request () in
+    send_server_message flow (reply_to ending (obj [])))
+    (fun ~ended peer ->
+      (match metadata peer with Ok _ -> () | Error detail -> fail detail);
+      let deadline=Monotonic_deadline.after ~seconds:request_window in
+      let args=obj ["tabId",`Int 1;"expectedUrl",`String "https://example.org";"action",`String "type_text";
+        "documentId",`String "d1";"text",`String "x"] in
+      (match Peer.dispatch ~request_id:"fixture-input" ~deadline peer ~verb:Peer.Page_interact args with
+       | Ok _ -> () | Error _ -> fail "confirmed input must be observed after the caller window ends");
+      check bool "the original peer is still connected" true (Eio.Promise.peek ended = None);
+      (match Peer.dispatch peer ~verb:Peer.Tabs_list (obj []) with
+       | Ok _ -> () | Error _ -> fail "the original peer could not answer again");
+      ended_session peer) in
+  check (result unit string) "the original session ends" (Ok ()) outcome;
+  check (list string) "one input, release, receipt, feedback finish, then another request"
+    ["browsingContext.getTree";"script.callFunction";"script.callFunction";"input.performActions";
+     "input.releaseActions";"script.callFunction";"script.callFunction";"browsingContext.getTree";"session.end"]
+    (List.rev !seen) in
+  (* One reply crosses the caller window; another receipt exceeds the short
+     transport default while remaining inside the caller's longer window. *)
+  run ~request_window:0.6 ~input_delay:0.8 ~receipt_delay:0.;
+  run ~request_window:3. ~input_delay:0. ~receipt_delay:1.2
 (* The session a connection created is ended over that connection, also after
    this side stopped trusting it for page commands: a page whose command got
    no reply is not a browser that is gone, and a session left in Firefox
@@ -1107,9 +1185,8 @@ let test_release_outlives_the_request_deadline () = Eio_main.run (fun _ ->
   let args=obj ["tabId",`Int 1;"expectedUrl",`String "https://example.org";"action",`String "type_text";
     "documentId",`String "d1";"text",`String "x"] in
   (match Peer.dispatch ~deadline peer ~verb:Peer.Page_interact args with
-   | Error (Peer.Outcome_unknown _) -> ()
-   | Ok _ | Error (Peer.Before_effect _ | Peer.Partial_failure _) ->
-       fail "an expired post-input observation must remain unknown");
+   | Ok _ -> ()
+   | Error _ -> fail "the confirmed input must still receive its post-input observation");
   check int "input was sent once" 1 !performed;
   check int "release still used its cleanup window" 1 !released)
 
@@ -1793,9 +1870,11 @@ let () = run "BiDi live peer" ["identity",[test_case "native keyboard release an
     test_case "a refused upgrade is the connection's error" `Quick test_refused_upgrade_is_the_connections_error;
     test_case "a closed socket ends the connection for its holder" `Quick test_a_closed_socket_ends_the_connection;
     test_case "each request owns its BiDi exchange deadline" `Quick test_request_deadline_controls_the_bidi_exchange;
+    test_case "transport window starts after encoding and send" `Quick test_transport_window_starts_after_encoding_and_send;
     test_case "timed-out input releases on its original socket" `Quick test_timed_out_input_still_releases_on_the_original_socket;
     test_case "expiry during encoding sends no input" `Quick test_expiry_during_encoding_does_not_send_input;
     test_case "expiry after tab creation preserves the peer" `Quick test_expiry_after_create_preserves_the_connection;
+    test_case "completed input remains observable after caller timeout" `Quick test_completed_input_is_observed_and_feedback_finishes_after_deadline;
     test_case "the session is ended after a command got no reply" `Quick
       test_the_session_is_ended_after_a_command_got_no_reply;
     test_case "a session that cannot be ended is an error" `Quick test_a_session_that_cannot_be_ended_is_an_error;

@@ -1,0 +1,161 @@
+{
+  "is_derivative": true,
+  "selected": [
+    {
+      "selection_role": "early_A1_first",
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-combined-candidate/artifacts/schedule-combined-candidate-20261027/runs/after-effect-deepseek-1/workspace/.masc/traces/trace-1793044476404-00000/agent-core-snapshot-1793044490939.json",
+      "sha256": "f5c4e2d663e8b696a454400df1e9ed1b488a84daa06984e9a6c6d0521b029c81",
+      "bytes": 118998,
+      "observed_at_unix": 1793044490.949013,
+      "session_id": "trace-1793044476404-00000",
+      "turn_count": 8,
+      "created_at": 1793044490.939698,
+      "selected_note_tool_results": [
+        {
+          "tool_use_id": "call_kh567egb",
+          "input": {
+            "schedule_id": "audit-real-model-ba22dc383b7246c1b57a73aa007ec19d",
+            "body": "SCHEDULE_EFFECT_ca030a072adf40f0a831b8f5ec8615b3"
+          },
+          "note": {
+            "note_id": "6",
+            "schedule_id": "audit-real-model-ba22dc383b7246c1b57a73aa007ec19d",
+            "author_id": "audit-live-deepseek",
+            "author_kind": "automated_actor",
+            "created_at": 1793044490.927056,
+            "body": "SCHEDULE_EFFECT_ca030a072adf40f0a831b8f5ec8615b3"
+          }
+        }
+      ],
+      "scope": "Selected persisted lineage facts only; full messages/reasoning are not copied.",
+      "source_bytes_available_at_retention": false,
+      "current_path_sha256": null,
+      "historical_bytes_match_now": false
+    },
+    {
+      "selection_role": "early_A1_last",
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-combined-candidate/artifacts/schedule-combined-candidate-20261027/runs/after-effect-deepseek-1/workspace/.masc/traces/trace-1793044476404-00000/agent-core-snapshot-1793044494039.json",
+      "sha256": "18c99532f1668292cc932f10d8e5d114cb68a141ec3edf991b793fd3cf889551",
+      "bytes": 122000,
+      "observed_at_unix": 1793044494.233653,
+      "session_id": "trace-1793044476404-00000",
+      "turn_count": 10,
+      "created_at": 1793044494.039958,
+      "selected_note_tool_results": [
+        {
+          "tool_use_id": "call_kh567egb",
+          "input": {
+            "schedule_id": "audit-real-model-ba22dc383b7246c1b57a73aa007ec19d",
+            "body": "SCHEDULE_EFFECT_ca030a072adf40f0a831b8f5ec8615b3"
+          },
+          "note": {
+            "note_id": "6",
+            "schedule_id": "audit-real-model-ba22dc383b7246c1b57a73aa007ec19d",
+            "author_id": "audit-live-deepseek",
+            "author_kind": "automated_actor",
+            "created_at": 1793044490.927056,
+            "body": "SCHEDULE_EFFECT_ca030a072adf40f0a831b8f5ec8615b3"
+          }
+        }
+      ],
+      "scope": "Selected persisted lineage facts only; full messages/reasoning are not copied.",
+      "source_bytes_available_at_retention": false,
+      "current_path_sha256": null,
+      "historical_bytes_match_now": false
+    },
+    {
+      "selection_role": "later_A1_B_first",
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-combined-candidate/artifacts/schedule-combined-candidate-20261027/runs/after-effect-deepseek-1/workspace/.masc/traces/trace-1793044476404-00000/agent-core-snapshot-1793044498939.json",
+      "sha256": "2a514e169742fa824d8055e059e69ae8b943a66832666c176047614d8ce09f29",
+      "bytes": 125635,
+      "observed_at_unix": 1793044499.1815538,
+      "session_id": "trace-1793044476404-00000",
+      "turn_count": 13,
+      "created_at": 1793044498.939993,
+      "selected_note_tool_results": [
+        {
+          "tool_use_id": "call_kh567egb",
+          "input": {
+            "schedule_id": "audit-real-model-ba22dc383b7246c1b57a73aa007ec19d",
+            "body": "SCHEDULE_EFFECT_ca030a072adf40f0a831b8f5ec8615b3"
+          },
+          "note": {
+            "note_id": "6",
+            "schedule_id": "audit-real-model-ba22dc383b7246c1b57a73aa007ec19d",
+            "author_id": "audit-live-deepseek",
+            "author_kind": "automated_actor",
+            "created_at": 1793044490.927056,
+            "body": "SCHEDULE_EFFECT_ca030a072adf40f0a831b8f5ec8615b3"
+          }
+        },
+        {
+          "tool_use_id": "call_te88isk4",
+          "input": {
+            "schedule_id": "audit-real-model-ba22dc383b7246c1b57a73aa007ec19d-second",
+            "body": "SCHEDULE_EFFECT_ca030a072adf40f0a831b8f5ec8615b3_SECOND"
+          },
+          "note": {
+            "note_id": "11",
+            "schedule_id": "audit-real-model-ba22dc383b7246c1b57a73aa007ec19d-second",
+            "author_id": "audit-live-deepseek",
+            "author_kind": "automated_actor",
+            "created_at": 1793044496.128044,
+            "body": "SCHEDULE_EFFECT_ca030a072adf40f0a831b8f5ec8615b3_SECOND"
+          }
+        }
+      ],
+      "scope": "Selected persisted lineage facts only; full messages/reasoning are not copied.",
+      "source_bytes_available_at_retention": false,
+      "current_path_sha256": null,
+      "historical_bytes_match_now": false
+    },
+    {
+      "selection_role": "later_A1_B_last",
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-combined-candidate/artifacts/schedule-combined-candidate-20261027/runs/after-effect-deepseek-1/workspace/.masc/traces/trace-1793044476404-00000/agent-core-snapshot-1793044503865.json",
+      "sha256": "1e1dbdce039b55739e45ffc4b05a0361c8a1d219448243f10ffc1257ba80254d",
+      "bytes": 129797,
+      "observed_at_unix": 1793044503.972822,
+      "session_id": "trace-1793044476404-00000",
+      "turn_count": 14,
+      "created_at": 1793044503.865459,
+      "selected_note_tool_results": [
+        {
+          "tool_use_id": "call_kh567egb",
+          "input": {
+            "schedule_id": "audit-real-model-ba22dc383b7246c1b57a73aa007ec19d",
+            "body": "SCHEDULE_EFFECT_ca030a072adf40f0a831b8f5ec8615b3"
+          },
+          "note": {
+            "note_id": "6",
+            "schedule_id": "audit-real-model-ba22dc383b7246c1b57a73aa007ec19d",
+            "author_id": "audit-live-deepseek",
+            "author_kind": "automated_actor",
+            "created_at": 1793044490.927056,
+            "body": "SCHEDULE_EFFECT_ca030a072adf40f0a831b8f5ec8615b3"
+          }
+        },
+        {
+          "tool_use_id": "call_te88isk4",
+          "input": {
+            "schedule_id": "audit-real-model-ba22dc383b7246c1b57a73aa007ec19d-second",
+            "body": "SCHEDULE_EFFECT_ca030a072adf40f0a831b8f5ec8615b3_SECOND"
+          },
+          "note": {
+            "note_id": "11",
+            "schedule_id": "audit-real-model-ba22dc383b7246c1b57a73aa007ec19d-second",
+            "author_id": "audit-live-deepseek",
+            "author_kind": "automated_actor",
+            "created_at": 1793044496.128044,
+            "body": "SCHEDULE_EFFECT_ca030a072adf40f0a831b8f5ec8615b3_SECOND"
+          }
+        }
+      ],
+      "scope": "Selected persisted lineage facts only; full messages/reasoning are not copied.",
+      "source_bytes_available_at_retention": false,
+      "current_path_sha256": null,
+      "historical_bytes_match_now": false
+    }
+  ],
+  "controller_snapshot_count": 28,
+  "scope": "Select first/last early and late witnesses from controller summaries. Historical checkpoint digests were captured during execution; pruned or overwritten original checkpoint bytes cannot now be reverified. Full checkpoints, messages, system prompts and reasoning are not retained."
+}

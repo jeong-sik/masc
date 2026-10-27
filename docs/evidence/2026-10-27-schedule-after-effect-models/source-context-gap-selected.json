@@ -1,0 +1,64 @@
+{
+  "is_derivative": true,
+  "source_commit": "d9ba3f57570cc1c1782f21d6f4d9303d014fea2e",
+  "excerpts": [
+    {
+      "path": "lib/keeper/keeper_unified_prompt.ml",
+      "file_sha256": "629c28870b0e99a6c048c68d86e43f32822ef37935df185f19d4d6ab860cbc76",
+      "file_bytes": 96918,
+      "one_based_lines": [
+        1859,
+        1871
+      ],
+      "text": "           ^ \"\\n\")\n      else None\n    (* 5. Scheduled automation — durable MASC schedule store plus the exact\n       message carried by a consumed Schedule_due stimulus. The request is work\n       context, while effect authority remains exclusively Gate-owned. *)\n    | Keeper_context_layers.Scheduled_automation ->\n      combine_prompt_sections\n        [ format_scheduled_automation_summary observation.scheduled_automation\n        ; format_scheduled_wake_observations\n            (List.filter\n               Keeper_world_observation.is_scheduled_automation_event\n               observation.pending_board_events)\n        ]",
+      "frozen_source_url": "https://github.com/jeong-sik/masc/blob/d9ba3f57570cc1c1782f21d6f4d9303d014fea2e/lib/keeper/keeper_unified_prompt.ml#L1859"
+    },
+    {
+      "path": "lib/keeper/keeper_unified_prompt.ml",
+      "file_sha256": "629c28870b0e99a6c048c68d86e43f32822ef37935df185f19d4d6ab860cbc76",
+      "file_bytes": 96918,
+      "one_based_lines": [
+        1987,
+        1998
+      ],
+      "text": "  (* An answered Ask is new conversation input, not just a world observation.\n     Dynamic context is transient across tool rounds and is not checkpointed.\n     Keep the attributed, quoted answer in the ordinary durable user turn;\n     subsequent wakes carry no copy once the answer stimulus is consumed. *)\n  let answered_asks =\n    List.map (fun (row : answered_ask_turn_input) -> row.text) (answered_ask_inputs observation)\n  in\n  let user_message =\n    String.concat \"\\n\\n\"\n      (Env_config_keeper.KeeperAutonomous.wake_prompt () :: answered_asks)\n  in\n  { common_layers; frame; user_message; current_task_id",
+      "frozen_source_url": "https://github.com/jeong-sik/masc/blob/d9ba3f57570cc1c1782f21d6f4d9303d014fea2e/lib/keeper/keeper_unified_prompt.ml#L1987"
+    },
+    {
+      "path": "lib/keeper/keeper_unified_turn.ml",
+      "file_sha256": "9dd0715f58abbd91b01fed86c6f8b9c1c5d0c0a6f74910ac58c4eb713201d0a2",
+      "file_bytes": 87524,
+      "one_based_lines": [
+        1013,
+        1020
+      ],
+      "text": "                 (* The observation frame rides [dynamic_context]: rebuilt fresh\n                    every turn and composed into the per-turn system prompt, so\n                    it never enters the persisted AGENT_CORE conversation. Persisting\n                    it as a user message re-fed the model its own observations\n                    (943/945 identical frames in one live checkpoint, #25193)\n                    and exhausted the request window. Persisted user content is utterances\n                    only (wake marker, answered Asks, and HITL resolutions). *)\n                 { dynamic_context = world_state; dynamic_context_for_tools }",
+      "frozen_source_url": "https://github.com/jeong-sik/masc/blob/d9ba3f57570cc1c1782f21d6f4d9303d014fea2e/lib/keeper/keeper_unified_turn.ml#L1013"
+    },
+    {
+      "path": "lib/keeper/keeper_run_prompt.ml",
+      "file_sha256": "54229d2bce98cbe1406952f4f6655524e5366e0b9ad1a6c8426071894a8334a0",
+      "file_bytes": 9267,
+      "one_based_lines": [
+        67,
+        73
+      ],
+      "text": "  in\n  let blocks = blocks\n    |> List.filter (fun (id, _) -> not post_tool_round || Prompt_block_id.injected_on_post_tool_round id)\n    |> List.stable_sort (fun (left, _) (right, _) ->\n         Int.compare (Prompt_block_id.cache_rank left) (Prompt_block_id.cache_rank right)) in\n  assemble_extra_system_context ~dynamic_context_partition ~existing_extra_system_context ~blocks\n  |> Keeper_context_assembly.with_system_observations",
+      "frozen_source_url": "https://github.com/jeong-sik/masc/blob/d9ba3f57570cc1c1782f21d6f4d9303d014fea2e/lib/keeper/keeper_run_prompt.ml#L67"
+    },
+    {
+      "path": "lib/types/prompt_block_id.ml",
+      "file_sha256": "29d4f8d8ce8bbf3bf53fd304a4ed95e48ee609d83de2ea2f8946c78d3255268e",
+      "file_bytes": 3845,
+      "one_based_lines": [
+        87,
+        91
+      ],
+      "text": "let injected_on_post_tool_round = function\n  | Dynamic_context | Temporal_summary | Memory_os_recall | Librarian_working_context\n  | Skill_compositions -> false\n  | Keeper_instructions | Active_goals | Completion_authority | Operator_note -> true\n;;",
+      "frozen_source_url": "https://github.com/jeong-sik/masc/blob/d9ba3f57570cc1c1782f21d6f4d9303d014fea2e/lib/types/prompt_block_id.ml#L87"
+    }
+  ],
+  "source_finding": "Scheduled observations render in the world-state Dynamic_context. Durable user_message is the generic wake prompt plus answered Asks; post-tool assembly filters Dynamic_context. This can remove the original scheduled instructions from subsequent provider requests while queue source authority remains pending.",
+  "runtime_limit": "These are source excerpts, not provider input captures. The first GLM request wire body is not retained here. Root/independent reviewer is tracing the latest actual provider snapshot separately; model blame and complete causal attribution are not established by this file.",
+  "prohibited_inference": "Do not infer that the first request never contained the schedule, that GLM alone caused the failure, or that DeepSeek wrote its first note before the context was dropped."
+}

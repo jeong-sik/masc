@@ -1,0 +1,131 @@
+{
+  "is_derivative": true,
+  "events": [
+    {
+      "original": {
+        "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/keepers/audit-live-glm/reaction-ledger/v7/2026-10/26.jsonl",
+        "one_based_line": 1
+      },
+      "record": {
+        "schema": "keeper.reaction_ledger.v7",
+        "record_kind": "stimulus",
+        "event_id": "krl:06c4894fa6e9b3f1deecdfe46b9ccc66ba6dcc291dcc4b3aced32a53ca6def3a",
+        "keeper_name": "audit-live-glm",
+        "recorded_at_unix": 1793044560.622143,
+        "stimulus_id": "69677351ff3494687f3eedc50f207c404cd838461529e994e03209b6ccb3b1d9",
+        "stimulus": {
+          "kind": "schedule_due",
+          "source": "keeper_event_queue",
+          "post_id": "69677351ff3494687f3eedc50f207c404cd838461529e994e03209b6ccb3b1d9",
+          "urgency": "normal",
+          "arrived_at_unix": 1793044560.614638,
+          "board_updated_at_unix": null,
+          "payload_preview": "schedule_due schedule_id=audit-real-model-30fa0db345e24e7790b4f5e0f7c36103 due_at=1793044559.773"
+        }
+      }
+    },
+    {
+      "original": {
+        "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/keepers/audit-live-glm/reaction-ledger/v7/2026-10/26.jsonl",
+        "one_based_line": 2
+      },
+      "record": {
+        "schema": "keeper.reaction_ledger.v7",
+        "record_kind": "reaction",
+        "event_id": "69677351ff3494687f3eedc50f207c404cd838461529e994e03209b6ccb3b1d9:reaction:turn_started",
+        "keeper_name": "audit-live-glm",
+        "recorded_at_unix": 1793044560.760328,
+        "stimulus_id": "69677351ff3494687f3eedc50f207c404cd838461529e994e03209b6ccb3b1d9",
+        "reaction": {
+          "kind": "turn_started",
+          "source": "keeper_event_queue",
+          "post_id": "69677351ff3494687f3eedc50f207c404cd838461529e994e03209b6ccb3b1d9",
+          "stimulus_kind": "schedule_due"
+        }
+      }
+    },
+    {
+      "original": {
+        "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/keepers/audit-live-glm/reaction-ledger/v7/2026-10/26.jsonl",
+        "one_based_line": 3
+      },
+      "record": {
+        "schema": "keeper.reaction_ledger.v7",
+        "record_kind": "reaction",
+        "event_id": "69677351ff3494687f3eedc50f207c404cd838461529e994e03209b6ccb3b1d9:reaction:turn_finished",
+        "keeper_name": "audit-live-glm",
+        "recorded_at_unix": 1793044598.310148,
+        "stimulus_id": "69677351ff3494687f3eedc50f207c404cd838461529e994e03209b6ccb3b1d9",
+        "reaction": {
+          "kind": "turn_finished",
+          "source": "keeper_event_queue",
+          "post_id": "69677351ff3494687f3eedc50f207c404cd838461529e994e03209b6ccb3b1d9",
+          "stimulus_kind": "schedule_due",
+          "disposition": "completed"
+        }
+      }
+    },
+    {
+      "original": {
+        "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/keepers/audit-live-glm/reaction-ledger/v7/2026-10/26.jsonl",
+        "one_based_line": 4
+      },
+      "record": {
+        "schema": "keeper.reaction_ledger.v7",
+        "record_kind": "reaction",
+        "event_id": "keeper-event-queue-transition:pending-source-terminal-ack:turn-attempt-terminal:0:8f7bd44bb866da817fb535a323ec816633f88f433a5e49cdfb3eef0b279ff28d:source:0",
+        "keeper_name": "audit-live-glm",
+        "recorded_at_unix": 1793044598.310182,
+        "stimulus_id": "69677351ff3494687f3eedc50f207c404cd838461529e994e03209b6ccb3b1d9",
+        "reaction": {
+          "kind": "event_queue_ack",
+          "source": "keeper_event_queue_transition",
+          "post_id": "69677351ff3494687f3eedc50f207c404cd838461529e994e03209b6ccb3b1d9",
+          "stimulus_kind": "schedule_due",
+          "source_index": 0,
+          "source_count": 1,
+          "transition_source": {
+            "stimulus_id": "69677351ff3494687f3eedc50f207c404cd838461529e994e03209b6ccb3b1d9",
+            "post_id": "69677351ff3494687f3eedc50f207c404cd838461529e994e03209b6ccb3b1d9",
+            "stimulus_kind": "schedule_due"
+          },
+          "transition_id": "pending-source-terminal-ack:turn-attempt-terminal:0:8f7bd44bb866da817fb535a323ec816633f88f433a5e49cdfb3eef0b279ff28d",
+          "transition_receipt": {
+            "transition_id": "pending-source-terminal-ack:turn-attempt-terminal:0:8f7bd44bb866da817fb535a323ec816633f88f433a5e49cdfb3eef0b279ff28d",
+            "event_id": "keeper-event-queue-transition:pending-source-terminal-ack:turn-attempt-terminal:0:8f7bd44bb866da817fb535a323ec816633f88f433a5e49cdfb3eef0b279ff28d",
+            "applied_at_unix": 1793044598.310182,
+            "transition": {
+              "kind": "ack_source_terminal",
+              "source": {
+                "post_id": "69677351ff3494687f3eedc50f207c404cd838461529e994e03209b6ccb3b1d9",
+                "urgency": "normal",
+                "arrived_at_unix": 1793044560.614638,
+                "payload": {
+                  "kind": "schedule_due",
+                  "occurrence_id": "69677351ff3494687f3eedc50f207c404cd838461529e994e03209b6ccb3b1d9",
+                  "schedule_instance_id": "01a179c8-b3b5-7000-b855-e9c27ee9099b",
+                  "schedule_id": "audit-real-model-30fa0db345e24e7790b4f5e0f7c36103",
+                  "due_at_unix": 1793044559.773274,
+                  "payload_digest": "c2ac53a1a8c163ae793113f42ee56003d3ad7b121111054bfc5dc306d829d358",
+                  "title": null,
+                  "message": "This authorized scheduled job has TWO required effects on schedule_id \"audit-real-model-30fa0db345e24e7790b4f5e0f7c36103\". First append exactly one note with body \"SCHEDULE_EFFECT_5132996c9d4e4a76855ff188465915bb\" using masc_schedule_note_add. Then observe schedule_id \"audit-real-model-30fa0db345e24e7790b4f5e0f7c36103-second\" with masc_schedule_notes_list until its note with exact body \"SCHEDULE_EFFECT_5132996c9d4e4a76855ff188465915bb_SECOND\" and author_id \"audit-live-glm\" is available. A missing schedule or missing note means the dependency has not arrived yet, not completion. Only AFTER observing that exact B note, append exactly one note to your original schedule_id \"audit-real-model-30fa0db345e24e7790b4f5e0f7c36103\" with body \"SCHEDULE_EFFECT_5132996c9d4e4a76855ff188465915bb_AFTER_B\". Both effects belong to this original job. Do not write B's note yourself, create another schedule, send a message, invoke shell tools, or ask for confirmation. Preserve this unfinished request when another scheduled job arrives. Do not finish this job until both of its required notes have been written and read back.",
+                  "result_delivery": null
+                }
+              },
+              "source_incarnation": 0,
+              "operator_operation_id": "turn-attempt-terminal:0:8f7bd44bb866da817fb535a323ec816633f88f433a5e49cdfb3eef0b279ff28d",
+              "source_receipt_kind": "turn_completed"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "pending_count_at_read": 0,
+  "synthetic_note_count_at_read": 0,
+  "original_observer_verdict": "INCOMPLETE",
+  "root_behavior_classification": "FAIL required first A1 effect absent despite exact source Completed and ACK; after-effect chain never began",
+  "cause": "Unresolved. Actual delivery of the original schedule ID/markers to provider input is not proved; missing input is under independent investigation. Do not infer model hallucination or deliberate disregard.",
+  "B_created": false,
+  "scope": "First required A1 absent despite original source Completed/ACK; requested after-effect chain never began."
+}

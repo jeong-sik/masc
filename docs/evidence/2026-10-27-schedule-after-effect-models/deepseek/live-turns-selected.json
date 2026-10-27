@@ -1,0 +1,57 @@
+{
+  "is_derivative": true,
+  "source_count": 107,
+  "turns": [
+    {
+      "turn_ref": "trace-1793044476404-00000#1",
+      "first_index": 0,
+      "last_index": 13,
+      "first": {
+        "observed_at_unix": 1793044490.9528909,
+        "turn_ref": "trace-1793044476404-00000#1",
+        "lane": "autonomous",
+        "started_at_unix": 1793044478.481525
+      },
+      "last": {
+        "observed_at_unix": 1793044494.298594,
+        "turn_ref": "trace-1793044476404-00000#1",
+        "lane": "autonomous",
+        "started_at_unix": 1793044478.481525
+      }
+    },
+    {
+      "turn_ref": "trace-1793044476404-00000#2",
+      "first_index": 14,
+      "last_index": 33,
+      "first": {
+        "observed_at_unix": 1793044494.556563,
+        "turn_ref": "trace-1793044476404-00000#2",
+        "lane": "autonomous",
+        "started_at_unix": 1793044494.37254
+      },
+      "last": {
+        "observed_at_unix": 1793044498.9594061,
+        "turn_ref": "trace-1793044476404-00000#2",
+        "lane": "autonomous",
+        "started_at_unix": 1793044494.37254
+      }
+    },
+    {
+      "turn_ref": "trace-1793044476404-00000#3",
+      "first_index": 34,
+      "last_index": 106,
+      "first": {
+        "observed_at_unix": 1793044499.186542,
+        "turn_ref": "trace-1793044476404-00000#3",
+        "lane": "autonomous",
+        "started_at_unix": 1793044498.992326
+      },
+      "last": {
+        "observed_at_unix": 1793044517.11888,
+        "turn_ref": "trace-1793044476404-00000#3",
+        "lane": "autonomous",
+        "started_at_unix": 1793044498.992326
+      }
+    }
+  ]
+}

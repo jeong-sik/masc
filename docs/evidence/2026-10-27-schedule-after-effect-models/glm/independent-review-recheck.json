@@ -1,0 +1,181 @@
+{
+  "is_derivative": true,
+  "independent_report_sha256": "723a426f41bed336b5073d6feba0367dfa65fee7f800d808fc747d22fcb3a165",
+  "parts_checked": 42,
+  "parts": [
+    {
+      "label": "system_prompt",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "message_0",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "message_1",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "message_2",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "message_3",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "message_4",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "tool_0",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "tool_1",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "tool_2",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "tool_3",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "tool_4",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "tool_5",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "tool_6",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "tool_7",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "tool_8",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "tool_9",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "tool_10",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "tool_11",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "tool_12",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "tool_13",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "tool_14",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "tool_15",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "tool_16",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "tool_17",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "tool_18",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "tool_19",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "tool_20",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "tool_21",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "tool_22",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "tool_23",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "tool_24",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "tool_25",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "tool_26",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "tool_27",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "tool_28",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "tool_29",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "tool_30",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "tool_31",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "tool_32",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "tool_33",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "tool_34",
+      "hash_bytes_and_presence_equal": true
+    },
+    {
+      "label": "tool_35",
+      "hash_bytes_and_presence_equal": true
+    }
+  ],
+  "original_schedule_id_or_marker_matches": 0,
+  "all_hash_lengths_presence_match": true,
+  "complete_wire_body_rehashed": false,
+  "first_wire_body_available": false,
+  "raw_private_content_included": false,
+  "scope": "Rechecked the 42 retained latest-snapshot bound parts only. This is not reconstruction or hash verification of any full HTTP request body, and not first-request input proof."
+}

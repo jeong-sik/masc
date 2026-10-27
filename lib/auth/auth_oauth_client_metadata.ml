@@ -15,8 +15,8 @@ let is_https uri =
   | None -> false
 ;;
 
-(* Uri.path keeps percent-encoding, so "%2e" has to be read as a dot here or
-   it would slip past the segment rule. *)
+(* The installed uri decodes "%2E" in Uri.path, but whether it does is the
+   library's choice, so the encoded spellings are refused as well. *)
 let is_dot_segment segment =
   match String.lowercase_ascii segment with
   | "." | ".." | "%2e" | "%2e%2e" | ".%2e" | "%2e." -> true
@@ -40,10 +40,20 @@ let document_url_rule_broken uri =
   | Some _ -> None
 ;;
 
+(* ocaml-uri parses leniently: it stops at a line feed, ends the authority at
+   a backslash, and reads "host:abc" as a path. A string it would print back
+   differently is not the URL that gets fetched or redirected to. *)
+let is_plain_url_text raw =
+  String.for_all (fun c -> c > ' ' && c <> '\127' && c <> '\\') raw
+  && String.equal (Uri.to_string (Uri.of_string raw)) raw
+;;
+
 let classify_client_id raw =
   let uri = Uri.of_string raw in
   if not (is_https uri)
   then Ok (Registered raw)
+  else if not (is_plain_url_text raw)
+  then Error "client_id URL is not plain URL text"
   else
     match document_url_rule_broken uri with
     | Some rule -> Error rule
@@ -64,6 +74,10 @@ let supported_response_types = [ "code" ]
 let rec has_repeated_name = function
   | [] -> false
   | (name, _) :: rest -> List.mem_assoc name rest || has_repeated_name rest
+;;
+
+let has_control_character value =
+  String.exists (fun c -> c < ' ' || c = '\127') value
 ;;
 
 let required_string fields name =
@@ -128,6 +142,11 @@ let parse_document url body =
       then Error "client_id does not equal the document URL"
       else
         let* client_name = required_string fields "client_name" in
+        let* () =
+          if has_control_character client_name
+          then Error "client_name contains a control character"
+          else Ok ()
+        in
         let* redirect_uris = string_array fields "redirect_uris" in
         let* redirect_uris =
           match redirect_uris with
@@ -166,7 +185,8 @@ let same_loopback_target ~listed ~requested =
 ;;
 
 let redirect_uri_allowed document requested =
-  List.exists
+  is_plain_url_text requested
+  && List.exists
     (fun listed ->
       String.equal listed requested || same_loopback_target ~listed ~requested)
     document.redirect_uris

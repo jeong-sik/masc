@@ -10,6 +10,21 @@ let script = {js|async function nativeWorkflow(page, args) {
     completed, effectStarted, completedEffect, inputReleased,
     failure: {index, method, message: String(error?.message ?? error), ...extra}
   });
+  // The SDK buffers the Page's CDP events until someone reads them, and
+  // page.events() hands them over and clears the buffer. Typing needs that
+  // record to tell completion from a dialog interruption, so what this script
+  // reads for itself is parked here for the Keeper's own events step. The
+  // backlog is per Page label, lives as long as this process and keeps the
+  // newest 10000 events, the size of the SDK's own buffer.
+  const sdkEventBufferSize = 10000;
+  const eventBacklog = globalThis.mascPageEvents ??= new Map();
+  const readEvents = async () => {
+    const fresh = await page.events();
+    if (!Array.isArray(fresh)) throw new Error('ego returned a non-array event buffer');
+    if (fresh.length > 0)
+      eventBacklog.set(args.label, (eventBacklog.get(args.label) ?? []).concat(fresh).slice(-sdkEventBufferSize));
+    return fresh;
+  };
   let initialUrl;
   try { initialUrl = await page.url(); }
   catch (error) { return failure(0, 'initialUrl', error); }
@@ -52,7 +67,14 @@ let script = {js|async function nativeWorkflow(page, args) {
         case 'focus': effect = effectStarted = true; receipt = await page.focus(step.selector, options); break;
         case 'reload': effect = effectStarted = true; receipt = await page.reload(options); break;
         case 'keyboard.type':
-          holdingInput = effect = effectStarted = true; inputReleased = false;
+          // Typing is judged by the dialog-open events it leaves behind, so
+          // park what is buffered now and the events read afterwards are this
+          // step's own. Nothing is typed until this read succeeds, so a failed
+          // read leaves the input released.
+          effect = effectStarted = true;
+          try { await readEvents(); }
+          catch (error) { return failure(index, step.method, error); }
+          holdingInput = true; inputReleased = false;
           receipt = await page.keyboard.type(step.text, options); break;
         case 'keyboard.insertText': effect = effectStarted = true; receipt = await page.keyboard.insertText(step.text); break;
         case 'keyboard.paste':
@@ -141,8 +163,9 @@ let script = {js|async function nativeWorkflow(page, args) {
         case 'events':
           // Draining consumes observations even though it does not change the site.
           effect = effectStarted = pageResult = true;
-          receipt = await page.events();
-          if (!Array.isArray(receipt)) throw new Error('ego returned a non-array event buffer');
+          await readEvents();
+          receipt = eventBacklog.get(args.label) ?? [];
+          eventBacklog.delete(args.label);
           break;
         default: return failure(index, step.method, 'unsupported native Page method');
       }
@@ -153,18 +176,32 @@ let script = {js|async function nativeWorkflow(page, args) {
       return failure(index, step.method, error);
     }
     if (holdingInput) {
-      // The SDK's raw keyboard.type boundary can swallow a dialog interruption
-      // into normal void. A later info() without a dialog cannot distinguish
-      // that from completed typing, so do not complete this step or continue.
       if (receipt === null || typeof receipt !== 'object' || Array.isArray(receipt)) {
-        let dialog;
-        try { dialog = (await page.info()).dialog; }
-        catch (error) { return failure(index, step.method, error); }
-        return failure(index, step.method,
-          'Ego returned no native action receipt; input release remains unconfirmed. Inspect this Space and use its private operator input-reset confirmation before another input. Never replay this step.',
-          dialog ? {dialog} : {});
-      }
-      inputReleased = !receipt.dialog;
+        // The SDK's raw keyboard boundary answers void when typing ran to its
+        // end and also when a dialog interrupted it, and a dialog closed
+        // before info() leaves nothing for info() to show. The dialog-open
+        // event stays in the event buffer, so its absence proves that typing
+        // was not interrupted. Every other holding method answers a receipt,
+        // and a value that is neither void nor a receipt is not the SDK's
+        // answer; without a receipt nothing is proven.
+        const sdkVoid = step.method === 'keyboard.type' && receipt == null;
+        let dialog, opened = false;
+        try {
+          if (sdkVoid)
+            opened = (await readEvents()).some(event => event?.method === 'Page.javascriptDialogOpening');
+          dialog = (await page.info()).dialog;
+        } catch (error) { return failure(index, step.method, error); }
+        if (!sdkVoid)
+          return failure(index, step.method,
+            'Ego returned no native action receipt; input release remains unconfirmed. Inspect this Space and use its private operator input-reset confirmation before another input. Never replay this step.',
+            dialog ? {dialog} : {});
+        if (opened || dialog)
+          return failure(index, step.method,
+            dialog ? 'a JavaScript dialog interrupted typing; answer it before continuing'
+              : 'a JavaScript dialog interrupted typing and is already closed',
+            dialog ? {dialog} : {});
+        inputReleased = true;
+      } else inputReleased = !receipt.dialog;
     }
     completedEffect ||= effect;
     completed.push({index, method: step.method, receipt: receipt ?? null});

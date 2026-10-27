@@ -263,9 +263,11 @@ It does not establish original SDK cleanup, visible UI or successful login. The
 existing native producer settlement contract is not strengthened by this local
 admission state. Native workflows stop on a receipt-less holding step without
 using Page.info to infer release or counting that uncertain step as completed.
-The current SDK's keyboard.type returns void even after ordinary typing, so
-this requires explicit operator recovery there as well. It does not supply the
-missing SDK settlement contract or establish non-workflow input cleanup.
+The current SDK's keyboard.type returns void whether or not a dialog interrupted
+it, so the workflow reads the Page's dialog-open events around that step instead:
+with none the step completed, with one it stops like any other receipt-less
+holding step. It does not supply the missing SDK settlement contract or
+establish non-workflow input cleanup.
 Real operator recovery and current installed Keeper/UI acceptance still require
 execution evidence.
 

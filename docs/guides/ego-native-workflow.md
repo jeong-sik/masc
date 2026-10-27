@@ -109,19 +109,43 @@ An exception after entering their SDK method cannot be classified as definitely
 before input. A dialog receipt can interrupt a button/key sequence, and
 `acceptDialog()` plus `info()` does not confirm its release: `info()` has no
 held-button or held-key state. Automatic continuation after such an interruption
-remains unsupported by this integration. In particular, the installed SDK's
-`keyboard.type()` returns void after normal typing and can also return void
-after swallowing a dialog interruption. Even if a dialog closes before the
-subsequent `info()` read, that read cannot distinguish the two outcomes.
-The workflow therefore stops at a receipt-less holding step, leaves it outside
-the completed prefix and retains `inputReleased=false`; no later step or final
-snapshot runs. This also requires explicit recovery after ordinary void-returning
-typing. Keep the original command and inspect the page rather than typing it
-again. The original installation's private operator input-reset confirmation
-permits a new distinct command after the operator has checked/reset that Space;
-it does not prove SDK cleanup. Automatic, fully settled `keyboard.type` workflows
-require an SDK contract that distinguishes the original input's completion from
-interruption. Observed action receipts still report immediate popup/dialog data,
+remains unsupported by this integration. A holding step that returns no receipt
+stops the workflow, stays outside the completed prefix and retains
+`inputReleased=false`; no later step or final snapshot runs. Keep the original
+command and inspect the page rather than repeating it. The original
+installation's private operator input-reset confirmation permits a new distinct
+command after the operator has checked/reset that Space; it does not prove SDK
+cleanup.
+
+The installed SDK's `keyboard.type()` always returns void, both when typing ran
+to its end and when it swallowed a dialog interruption. A dialog closed before
+the subsequent `info()` read leaves nothing for `info()` to show. The Page's
+event buffer tells the two apart: the SDK buffers `Page.javascriptDialogOpening`
+in the same handler that rejects the blocked key, so the event is already there
+when `keyboard.type()` returns. The workflow reads the buffer before and after
+the step:
+
+- No opening event during the step and no open dialog: the step is recorded as
+  completed with receipt `null`, `inputReleased` becomes `true` and the workflow
+  continues.
+- An opening event, or a dialog still open: the workflow stops as described
+  above. `failure.dialog` is present only while the dialog is still open.
+- A failed or malformed buffer read proves nothing. Before typing, nothing is
+  typed and `inputReleased` stays `true`. After typing, `inputReleased` stays
+  `false`.
+
+Reading the buffer drains it. The workflow parks what it read, per Page, and a
+later `events` step returns the parked events first and then new ones, in
+order. Parked events live in the Ego process only and are trimmed to the newest
+10000, the SDK's own buffer size.
+
+Measured with Ego Lite 0.6.1.11 on 2026-10-27: ordinary typing left no opening
+event in 10 of 10 runs, and a dialog-interrupted run left an opening event in 10
+of 10, also when the dialog was closed before `info()`. A dialog opened by a
+cross-origin frame and `beforeunload` were not measured. The SDK source says
+Chromium delivers every dialog event on the Page session.
+
+Observed action receipts still report immediate popup/dialog data,
 and do not verify application success. See the
 [SDK input boundary](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/src/page-model.ts#L2674),
 [pointer implementation](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/src/driver/page-actions.ts#L1183)

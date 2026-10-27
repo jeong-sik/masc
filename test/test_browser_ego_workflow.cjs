@@ -13,6 +13,7 @@ function fixture({fail,dialog,snapshot='native result'}={}) {
  const page={
   async url(){calls.push('url');return url;},async title(){calls.push('title');return 'Fixture';},
   async info(){return {};},
+  async events(){return [];},
   async snapshot(options){
    calls.push(['snapshot',options]);
    if(options?.scope!==undefined&&!['full_page','only_within_viewport','subtree'].includes(options.scope))
@@ -29,7 +30,10 @@ function fixture({fail,dialog,snapshot='native result'}={}) {
  };
  return {page,calls};
 }
-const request=steps=>({expectedUrl:initial,steps,snapshotScope:'viewport',maxChars:100,cursor:'MASC · fixture · workflow'});
+// The script parks events per Page label in the context's globalThis, which every test here shares,
+// so each request gets its own label unless a test needs one Page across several runs.
+let requests=0;
+const request=(steps,label='fixture-'+(++requests))=>({expectedUrl:initial,steps,snapshotScope:'viewport',maxChars:100,cursor:'MASC · fixture · workflow',label});
 test('native Page observations, snapshot options and explicit waits retain values',async()=>{
  const f=fixture();let events=[{method:'Page.loadEventFired',params:{timestamp:1}}];
  f.page.info=async()=>({url:initial,title:'Fixture',w:800,h:600});
@@ -180,7 +184,8 @@ test('receipt-less holding input keeps release uncertain on dialog or failed obs
  }
 });
 test('void holding input never infers release from a clear or rapidly closed dialog',async()=>{
- for (const method of ['keyboard.type','keyboard.press','keyboard.paste','press','click','dblclick','mouse.click','dragAndDrop']) {
+ // keyboard.type is judged by the dialog events it leaves; the typing tests below cover it.
+ for (const method of ['keyboard.press','keyboard.paste','press','click','dblclick','mouse.click','dragAndDrop']) {
   for (const dialogWasClosed of [false,true]) {
    const f=fixture();let entered=0,later=0,held=false,dialog=null;
    const input=async()=>{entered++;held=true;if(dialogWasClosed){dialog={type:'alert'};dialog=null;}};
@@ -202,17 +207,110 @@ test('void holding input never infers release from a clear or rapidly closed dia
  }
 });
 test('a void holding step retains the earlier completed prefix without replay',async()=>{
- const f=fixture();let typed=0,later=0;
- f.page.keyboard={async type(){typed++;}};f.page.click=async()=>{later++;return {};};
+ const f=fixture();let pressed=0,later=0;
+ f.page.keyboard={async press(){pressed++;}};f.page.click=async()=>{later++;return {};};
  const result=await run(f.page,request([
   {method:'fill',selector:'#editor',text:'prefix'},
-  {method:'keyboard.type',text:'may be partial'},
+  {method:'keyboard.press',key:'Enter'},
   {method:'click',selector:'#submit'},
  ]));
- assert.equal(typed,1);assert.equal(later,0);
+ assert.equal(pressed,1);assert.equal(later,0);
  assert.equal(result.completed.length,1);assert.equal(result.completed[0].method,'fill');
  assert.equal(result.completedEffect,true);assert.equal(result.inputReleased,false);
- assert.equal(result.failure.index,1);assert.equal(result.failure.method,'keyboard.type');
+ assert.equal(result.failure.index,1);assert.equal(result.failure.method,'keyboard.press');
+});
+// The SDK answers void from keyboard.type both when typing ran to its end and when a dialog
+// interrupted it. Only the interrupted run leaves a Page.javascriptDialogOpening event.
+const dialogOpening={method:'Page.javascriptDialogOpening',params:{type:'confirm',message:'keep typing?'}};
+const dialogClosed={method:'Page.javascriptDialogClosed',params:{result:true}};
+const pageLoaded={method:'Page.loadEventFired',params:{timestamp:1}};
+// Values built inside the script's vm context have that realm's prototypes, which deepStrictEqual rejects.
+const plain=value=>JSON.parse(JSON.stringify(value));
+// `before` is what the event buffer holds when the step starts, `after` what typing adds.
+function typingFixture({before=[],after=[],dialog=null}={}) {
+ const f=fixture();const reads=[before,after];let typed=0,later=0;
+ f.page.events=async()=>reads.shift()??[];
+ f.page.keyboard={async type(){typed++;}};
+ f.page.info=async()=>({dialog});
+ f.page.fill=async()=>{later++;};
+ return {...f,counts:()=>({typed,later})};
+}
+const typeThenFill=[{method:'keyboard.type',text:'hello'},{method:'fill',selector:'#next',text:'after typing'}];
+test('typing that left no dialog-open event ran to its end and releases the input',async()=>{
+ const t=typingFixture({after:[pageLoaded]});
+ const result=await run(t.page,request(typeThenFill));
+ assert.equal(result.failure,null);assert.equal(result.inputReleased,true);
+ assert.deepEqual(t.counts(),{typed:1,later:1});
+ assert.equal(result.completed.length,2);assert.equal(result.completed[0].receipt,null);
+});
+test('typing interrupted by an open dialog stops with that dialog and keeps the input unreleased',async()=>{
+ const t=typingFixture({after:[dialogOpening],dialog:dialogOpening.params});
+ const result=await run(t.page,request(typeThenFill));
+ assert.deepEqual(t.counts(),{typed:1,later:0});
+ assert.equal(result.inputReleased,false);assert.equal(result.effectStarted,true);
+ assert.equal(result.completedEffect,false);assert.equal(result.completed.length,0);
+ assert.equal(result.failure.index,0);assert.equal(result.failure.method,'keyboard.type');
+ assert.equal(result.failure.dialog.message,'keep typing?');
+});
+test('a dialog closed before page.info still stops typing because its open event remains',async()=>{
+ const t=typingFixture({after:[dialogOpening,dialogClosed]});
+ const result=await run(t.page,request(typeThenFill));
+ assert.deepEqual(t.counts(),{typed:1,later:0});
+ assert.equal(result.inputReleased,false);assert.equal(result.completed.length,0);
+ assert.equal(result.failure.method,'keyboard.type');
+ assert.equal(Object.hasOwn(result.failure,'dialog'),false);
+ assert.match(result.failure.message,/already closed/);
+});
+test('a dialog-open event from before the typing step neither stops it nor gets lost',async()=>{
+ const t=typingFixture({before:[dialogOpening,dialogClosed]});
+ const result=await run(t.page,request([typeThenFill[0],{method:'events'}]));
+ assert.equal(result.failure,null);assert.equal(result.inputReleased,true);
+ assert.deepEqual(plain(result.completed[1].receipt),[dialogOpening,dialogClosed]);
+});
+test('events parked while typing reach the events step in order, once, and only for their own Page',async()=>{
+ const methods=receipt=>plain(receipt).map(event=>event.method);
+ const together=typingFixture();
+ together.page.events=(reads=>async()=>reads.shift()??[])([[pageLoaded],[{method:'Page.frameNavigated'}],[{method:'Page.frameStoppedLoading'}]]);
+ const inCall=await run(together.page,request([typeThenFill[0],{method:'events'}]));
+ assert.deepEqual(methods(inCall.completed[1].receipt),['Page.loadEventFired','Page.frameNavigated','Page.frameStoppedLoading']);
+ const t=typingFixture({before:[pageLoaded],after:[{method:'Page.frameNavigated'}]});
+ await run(t.page,request([typeThenFill[0]],'parked-p1'));
+ const other=await run(t.page,request([{method:'events'}],'parked-p2'));
+ assert.deepEqual(methods(other.completed[0].receipt),[]);
+ const mine=await run(t.page,request([{method:'events'}],'parked-p1'));
+ assert.deepEqual(methods(mine.completed[0].receipt),['Page.loadEventFired','Page.frameNavigated']);
+ const again=await run(t.page,request([{method:'events'}],'parked-p1'));
+ assert.deepEqual(methods(again.completed[0].receipt),[]);
+});
+test('typing that answers neither void nor a receipt is not judged by events',async()=>{
+ for (const answer of ['typed',7,['typed'],true]) {
+  const t=typingFixture();
+  t.page.keyboard={async type(){return answer;}};
+  const result=await run(t.page,request(typeThenFill));
+  assert.equal(t.counts().later,0,String(answer));
+  assert.equal(result.inputReleased,false,String(answer));assert.equal(result.completed.length,0,String(answer));
+  assert.equal(result.failure.method,'keyboard.type',String(answer));
+  assert.match(result.failure.message,/no native action receipt/,String(answer));
+ }
+});
+test('a failed event read before typing types nothing, and one after typing leaves the input unreleased',async()=>{
+ for (const [name,failingRead,bad] of [['lost before',0,'throw'],['lost after',1,'throw'],['malformed after',1,'object']]) {
+  const t=typingFixture();let reads=0;
+  t.page.events=async()=>{if(reads++===failingRead){if(bad==='throw')throw Error(name);return {};}return [];};
+  const result=await run(t.page,request(typeThenFill));
+  const before=failingRead===0;
+  assert.deepEqual(t.counts(),{typed:before?0:1,later:0},name);
+  assert.equal(result.failure.index,0,name);assert.equal(result.failure.method,'keyboard.type',name);
+  assert.equal(result.effectStarted,true,name);assert.equal(result.inputReleased,before,name);
+  assert.equal(result.completed.length,0,name);
+ }
+});
+test('parked events keep the newest 10000, the size of the SDK buffer',async()=>{
+ const numbered=(from,count)=>Array.from({length:count},(_,i)=>({method:'Page.test',params:{n:from+i}}));
+ const t=typingFixture({before:numbered(0,6000),after:numbered(6000,6000)});
+ const result=await run(t.page,request([typeThenFill[0],{method:'events'}]));
+ const parked=result.completed[1].receipt;
+ assert.equal(parked.length,10000);assert.equal(parked[0].params.n,2000);assert.equal(parked.at(-1).params.n,11999);
 });
 test('a missing press selector stops before input while a later press failure stays uncertain',async()=>{
  for(const missing of [false,true]) {
@@ -470,16 +568,9 @@ test('native rich input keeps focus, clipboard content and keyboard signatures',
   async press(key,options){assert.equal(arguments.length,2);assert.equal(options.delay,5);assert.equal(key,'ControlOrMeta+A');return {};},
  };
  f.page.reload=async(options)=>{assert.equal(options.timeout,7000);return {};};
- const typed=await run(f.page,request([
+ const result=await run(f.page,request([
   {method:'focus',selector:'#editor',options:{timeout:0}},
   {method:'keyboard.type',text:'hello ',options:{delay:4}},
-  {method:'keyboard.insertText',text:'must not run'},
- ]));
- assert.equal(typed.failure.method,'keyboard.type');assert.equal(typed.inputReleased,false);
- assert.equal(typed.completed.length,1);assert.equal(value,'hello ');
- // A distinct later invocation models only signature forwarding after an
- // external input reset; it does not exercise or authorize that reset.
- const result=await run(f.page,request([
   {method:'keyboard.insertText',text:'한글 😀'},
   {method:'keyboard.paste',text:'Name\tStatus',html:'<table><tr><td>Name</td><td>Status</td></tr></table>'},
   {method:'keyboard.press',key:'ControlOrMeta+A',options:{delay:5}},
@@ -487,7 +578,8 @@ test('native rich input keeps focus, clipboard content and keyboard signatures',
  ]));
  assert.equal(result.failure,null);assert.equal(value,'hello 한글 😀Name\tStatus');
  assert.equal(html,'<table><tr><td>Name</td><td>Status</td></tr></table>');
- assert.equal(result.completed.length,4);assert.equal(result.completedEffect,true);
+ assert.equal(result.completed.length,6);assert.equal(result.completedEffect,true);
+ assert.equal(result.inputReleased,true);
 });
 test('plain paste preserves empty strings and failed keyboard input is never replayed',async()=>{
  const f=fixture();let pasted;

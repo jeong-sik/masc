@@ -1,0 +1,58 @@
+# Digest native comparison: independent qualification and prepared-source review
+
+**PASS_SOURCE_PLAN_AND_ARTIFACT_RECORDS_ONLY — P0/P1/P2: 0/0/0.** This accepts the exact frozen preparation below as source and a conditional measurement plan. It supplies no native execution, actual campaign result, overall CI verdict, formal GitHub approval, merge, installation, UI or performance-gain claim. Root retains the execution decision and the actual return/conservation gates.
+
+The qualification-only intermediate [stage](qualification-stage.md), [checks](qualification-checks.json) and [freeze](qualification-stage-freeze.json) remain unchanged. Their `PENDING_FROZEN_INPUTS` label describes that earlier stage; this report closes the subsequent frozen-source review. No old source, report, failure or packet was rewritten.
+
+## Exact inputs
+
+The 44 manifest entries (231,920 bytes) in the author's frozen package were independently checked and retained in [frozen-preparation](frozen-preparation). The original output manifest itself is an additional retained file. All 25 small external input bindings match their current bytes. Exact addresses, sizes and hashes are in [source-input-manifest.json](source-input-manifest.json).
+
+| Input | SHA256 |
+|---|---|
+| Controller | `c7f2de2efba3c687a1444a37e624a48f8cecda68534e3de77dc5bf12d158475f` |
+| Plan | `9a550effd9a218fb27430df13ebe48edbbad8b189cf69e75e278ba6829e6a41a` |
+| Qualification | `14c304cd3fa4c3635bc6792219a26ba133fa545ca7485a40080635bf40585f73` |
+| Deriver | `15dd208f7dc1a96a066c06d550e2a854ec9dc6db595afefa5b8a033ef3e141ce` |
+| Generic validator executor | `6b669783616575cbf31becb7950947a932b92c5d0a7dbcb1cc2c3206a4ccf029` |
+| Author README | `7d9e7e14ec7957266058e6300e16f54a4bf500aca3242136da37458216fdabf8` |
+| Author output manifest | `8ce9f5abe950ed54c5116c208e5fc1f6996c6cd0659e7398ae772bf8752668ae` |
+| Root closed-verification utility | `781e9e8dcc993c4e4bce9e6909bdb026491deee13078040c0f256f17309a2876` |
+
+The prepared sources pin reviewed reader0825, runnera6, RunnerOwnerebf and fixtureccbe. Plan `execute:false` remains unchanged. The artifact application identities are candidate `6df61978e0b638e672c7cd76664b90be7ba72fd1` and control `8e61fa43fbf93f0e1edf06f07420fde6c79ccbc0`; no future commit is invented.
+
+## Qualification audit
+
+The candidate qualification summary `fa16036d12d608ee09339f26f749fdb9fc738fff2c921661e78d755813ba10f0`, actual identity command record `ae7586bf779a649dd194c02feb6a87b483e07ea190803ad298016ebeeb9ce60f` and receipt `d291d4156ec47da2591da3f982f6820a4fba6e7606636b9e461a31f5add438b3` agree. Candidate server/TUI hashes are respectively `ad0610183459e7f470531468ad8c3a484e85dfdbbe36a36fcf8fd3a7b37b1bcc` and `681ae6324721bebdd17d0e4523971eda8a65e6e798ef8bf1a8e8c5bc9a63219c`. The two control binaries match their separate receipt: server `2e09b44a26232dceb73182e5aa01fb67f054adccdd2e59238114312a35aa9f21`, TUI `ed61ed3a92721971eeb9b2364d0a8a655af0b3734f83f203621c712c20b5b9ed`.
+
+I independently streamed the four extracted binaries and candidate archive once. Candidate archive `9f7c94e5c9104de3b574592101d41dd1f2044a62c0515dcad46a913f8b644329` (73,472,339 bytes) agrees with the retained artifact API record for artifact12697867303/run40419664296. Its 15 unique flat ZIP members, receipt and small extracted metadata agree. I did not separately decompress and rehash the large binary ZIP members. The whole-archive and actual extracted-binary hashes are separate checks.
+
+Both recorded candidate embedded-source children have actual rc0 and stdout6df. Raw stderr is **server82 bytes / TUI0 bytes**. Their recorded private cwd/environment and actual argv are retained. The enclosing qualification tool session11932 has **UNKNOWN outer returncode**; context-truncated completion was not recovered or replayed. The individual child records do not establish an enclosing CLI0, per-child clocks or a live process map.
+
+Retained workflow40419664296 is **FAIL**: the syntax job rejected inherited retained-diff whitespace. Native job121910651163 is separately **SUCCESS**, with four resource suites16+17+10+12=55 cases and successful seven-target build. It is neither overall green nor digest-service behavioral proof. The previously reviewed exact6df selected Test40418592615 remains its separate 59-case product boundary, not a new result from this review.
+
+Candidate application/builder are both6df; control application is8e and builder6a2d8dd. The exported build/config diff `b871dadc3ee37dd200f62c6fe3d42fa67735eb56d26551d980589f2aefcd968d` contains the accepted one-file `keeper_tool_load_receipts.ml` change. Candidate/control declared build-target and dependency text pairs match. These checks do not establish identical compiler artifacts or actual loaded-library identity. Support-checkout cleanliness is root's retained assertion; I performed no Git traversal. Future controller admission rechecks the selected support HEAD and clean status.
+
+## Source and adversarial checks
+
+[check_source.py](check_source.py) closed0 once (tool chunk `cf14bb`). [source-checks.json](source-checks.json) records the independent results. Only the two new gate functions were compiled from their exact ASTs for virtual checks; `Path`, file reads, digests and the older child-completion validator were virtual. No prepared module, prepare, real helper contract, reader, describe, main or SQL was executed.
+
+The controller's c04 lifecycle/finalization tail is byte-identical. The complete main AST differs only in the declared cell choices, invocation directory and receipt schema. The inherited source keeps pending cancellation registration, owned runner reap/handler restoration, guarded post-owner diagnostics and original cancellation/exception priority. The copied generic executor is byte-identical to reviewed6b669. Old `read`, `digest`, `allocation_snapshot`, `checked_execution` and the complete `describe` function ASTs are unchanged. The complete retained `describe` has47 assert nodes; the older35 identity/GC/time checks are a subset, not its total count. Retained source diffs were independently regenerated and compared.
+
+The independent virtual set accepts six proper cell closures and rejects36 variants: missing native/actual-tool receipts, nonzero or bool exit codes, false/int/null conservation, unreaped or signalled runners, wrong source/argv/plan/receipt hashes, native/read clock inversion, altered/missing closed streams, symlink receipts, native failure files including dangling symlinks, mismatched report subject and failed workload/provider cleanup. Successful cases retain the actual evidence-path hashes. These targeted controls check the new closure function; they do not retest or execute the unchanged generic helper or actual packet decoder.
+
+The fixed order is candidate2, candidate30, control300, candidate300, candidate300, control300. Frozen parameters remain two messages/owner,10ms model delay,15s request timeout,1200s settle and0.1s sampling. All37 future packet/audit/executor/invocation/tool/observation leaves were absent, canonical and mutually disjoint at this source-check snapshot. No leaf was precreated. Current-cell checks and exclusive creation remain necessary at actual execution time; source review is not a reservation against later filesystem changes.
+
+New prior-cell admission binds actual root native CLI0, exact controller/plan/qualification/Owner/argv/cell/packet receipt, owned reaped runner0 and closed log hashes. It then binds the exact generic reader child witness, actual root helper CLI0, literal conservationTrue, source/binary/runner/reader pins, exact packet/audit addresses, native cleanup and both PASS verdicts. Reader request time follows the native returned/reaped/closed-stream boundary. The first cell also preflights actual reader/helper hashes. Each invocation selects one cell; no next cell launches automatically. The aggregate requires all six closure gates before preserving all six descriptive rows in the exact fresh output.
+
+The separately authored root verifier's [one-line diff](root-verifier.diff) changes only `REVISION` from the Map amendment to this preparation. All functions, inventory logic and report/receipt checks are AST-identical. It inventories original paths/bytes and mode/mtime/inode metadata, writes external before/after/verification files exclusively, and calls only the read-only receipt validator in its post-audit branch. It asserts path/byte conservation but **reports** `metadata_all_equal`; the latter is an additional root operator gate, not a utility assertion. Root must require literalTrue alongside actual helper CLI0 before authoring the new tool record. This review did not execute either verifier mode.
+
+## Actual execution and interpretation boundaries
+
+After root's independent decision, the planned API is pinned Python `-B -E run_native.py --cell N --execute`, one exact cell. Actual root tool exit must be recorded from the returned tool. Next, bracket original inventories and run only the adjacent frozen executor with the plan's exact `--plan`, `--qualification`, `--cell N` values. Only reader0825 creates the external audit leaf; only the helper creates its execution leaf. Wait for actual helper completion, verify original path/byte conservation and root-required metadata equality, then write the exact receipt/hash-bound native/validator tool records. Failed or partial output stops progression and stays retained; no replay, overwrite, invented closure or source mutation is admitted.
+
+The five required derivatives include source-conditional alignment conservatively: child0 with a missing derivative still fails closure. Report PASS alone cannot rescue a later child/helper failure. Old be6 attempts for these new six packets are all NOT_ATTEMPTED; old Map reader failures, paused history, counts, amendments and measurements remain immutable and separate.
+
+Any eventual result must retain all four300 cohorts, qualification2/30 separately, negative RPC/read failures, timeouts,429 waits/tails, degraded readiness, raw process memory, full/partial inventory and unequal background work. Two cohorts/role on a shared host in fixed ABBA order with audit gaps and different builders support descriptive comparison only. Whole-program `(minor+major-promoted)*8` quick_stat snapshot deltas may lag collections and include unrelated work; they do not establish function-exclusive allocation, Gc.allocated_bytes, exact GC, CPU, RSS, stable latency, causal parser gain or0.1ms. Scripted loopback held-model ownership does not establish real-model, peer/Add-on, TUI/physical UI, installed-primary, production fleet or Goal completion.
+
+All reviewer writes are in this new review directory. No native/server/TUI/HTTP/SQL/probe/CI/Git/aggregate, campaign prepare or real validator execution occurred. No packet was swept. The qualification phase's declared offline archive/binary reads are the only large artifact reads; source/mocks checks read small source/metadata only.

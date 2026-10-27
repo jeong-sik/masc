@@ -48,7 +48,7 @@ let encode_state state =
       Eio.Fiber.first
         (fun () ->
           Eio.Executor_pool.submit_exn executor ~weight:1.0 (fun () ->
-            Domain_pool.tune_minor_heap ();
+            Minor_heap.tune ();
             run ()))
         (fun () -> raise (Eio.Promise.await stopped))
   | None, (Eio_guard.Eio_fiber | Eio_guard.Non_eio)

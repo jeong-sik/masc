@@ -11,6 +11,11 @@ val get : unit -> Eio.Executor_pool.t option
 val set : Eio.Executor_pool.t -> unit
 (** Install the pool reference. Idempotent overwrite. *)
 
+val set_read : Eio.Executor_pool.t -> unit
+(** Install the read pool (RFC-0204 L3). The submits below send work from a
+    {!Pool_lane.Read} fiber there and everything else to the pool of {!set}.
+    Without a read pool, reads use the pool of {!set}. *)
+
 val in_worker_context : unit -> bool
 (** Whether the current domain is executing a closure submitted through this
     shared pool reference or through {!Domain_pool}. Nested shared-pool
@@ -19,8 +24,8 @@ val in_worker_context : unit -> bool
 
 val with_worker_context : (unit -> 'a) -> 'a
 (** Run a closure marked as pool work, so {!in_worker_context} holds inside
-    it. For code that hands a closure to a pool worker without going through
-    this module. *)
+    it, on a domain with the tuned minor heap ({!Minor_heap.tune}). Every
+    pool job enters through it: this module's submits and {!Domain_pool}'s. *)
 
 module For_testing : sig
   val with_pool_option :
@@ -30,6 +35,9 @@ module For_testing : sig
   val with_pool : Eio.Executor_pool.t -> (unit -> 'a) -> 'a
   (** Install a pool only for the dynamic extent of the callback, then restore
       the exact previous option even when the callback raises. *)
+
+  val with_read_pool : Eio.Executor_pool.t -> (unit -> 'a) -> 'a
+  (** {!with_pool} for the read pool. *)
 end
 
 type strict_submit_error =

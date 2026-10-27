@@ -29,6 +29,7 @@ let in_worker_context () =
 ;;
 
 let with_worker_context f =
+  Minor_heap.tune ();
   match Eio_guard.execution_context () with
   | Eio_guard.Eio_fiber -> Eio.Fiber.with_binding worker_marker () f
   | Eio_guard.Non_eio -> f ()
@@ -38,6 +39,23 @@ let get () = Atomic.get pool
 
 let set p = Atomic.set pool (Some p)
 
+(* RFC-0204 L3: reads get their own pool, so a read never waits in the FIFO
+   queue behind background jobs or runs as a fiber beside them. *)
+let read_pool : Eio.Executor_pool.t option Atomic.t = Atomic.make None
+
+let set_read p = Atomic.set read_pool (Some p)
+
+(* The pool a submission from this fiber goes to. Without a read pool a read
+   uses the shared pool, so tests and one-pool tools keep a single pool. *)
+let selected () =
+  match Pool_lane.current () with
+  | Pool_lane.Background -> Atomic.get pool
+  | Pool_lane.Read ->
+    (match Atomic.get read_pool with
+     | Some _ as read -> read
+     | None -> Atomic.get pool)
+;;
+
 module For_testing = struct
   let with_pool_option pool_option f =
     let previous = Atomic.exchange pool pool_option in
@@ -45,6 +63,11 @@ module For_testing = struct
   ;;
 
   let with_pool p f = with_pool_option (Some p) f
+
+  let with_read_pool p f =
+    let previous = Atomic.exchange read_pool (Some p) in
+    Fun.protect ~finally:(fun () -> Atomic.set read_pool previous) f
+  ;;
 end
 
 (** A strict submission never falls back to the caller domain. *)
@@ -70,7 +93,7 @@ let strict_submit_error_to_string = function
 ;;
 
 let submit_strict ?(weight = 1.0) f =
-  match Atomic.get pool, Eio_guard.execution_context () with
+  match selected (), Eio_guard.execution_context () with
   | None, _ -> Error Pool_unavailable
   | Some _, Eio_guard.Non_eio -> Error Caller_not_in_eio
   | Some p, Eio_guard.Eio_fiber ->
@@ -98,7 +121,7 @@ let submit_strict ?(weight = 1.0) f =
     Inline fallback ensures callers work in tests and before server init.
     Re-raises [Eio.Cancel.Cancelled] to preserve structured concurrency. *)
 let submit_or_inline ?(weight = 1.0) f =
-  match Atomic.get pool, Eio_guard.execution_context () with
+  match selected (), Eio_guard.execution_context () with
   | Some _, _ when in_worker_context () -> f ()
   | Some p, Eio_guard.Eio_fiber ->
       Executor_pool_submission.submit p ~weight (fun () ->

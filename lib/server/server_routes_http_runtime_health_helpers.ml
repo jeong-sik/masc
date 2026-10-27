@@ -132,7 +132,13 @@ let scheduler_json () =
     | Some count -> `Int count
     | None -> `Null
   in
+  let read_pool_domains =
+    match Domain_pool_ref.read_domain_count_opt () with
+    | Some count -> `Int count
+    | None -> `Null
+  in
   `Assoc
     (("pool_domains", pool_domains)
+     :: ("read_pool_domains", read_pool_domains)
      :: ("pool_wait", Pool_wait.to_json ())
      :: Scheduler_lag.to_fields Scheduler_lag.global)

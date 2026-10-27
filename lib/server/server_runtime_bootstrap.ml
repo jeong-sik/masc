@@ -317,9 +317,14 @@ let check_exact_output_registry ?config_root () =
   | Ok () -> ()
 ;;
 
-let install_domain_pool_references domain_pool =
+let install_domain_pool_references ?read domain_pool =
   Domain_pool_ref.set domain_pool;
-  Executor_pool_ref.set (Domain_pool.executor_pool domain_pool)
+  Executor_pool_ref.set (Domain_pool.executor_pool domain_pool);
+  Option.iter
+    (fun read ->
+      Domain_pool_ref.set_read read;
+      Executor_pool_ref.set_read (Domain_pool.executor_pool read))
+    read
 ;;
 
 let publish_exact_output_registry_from_file ~config_path =
@@ -1117,7 +1122,10 @@ let initialize_owner_state_blocking
   let domain_pool =
     Domain_pool.create ~sw ~domain_count:budget.Domain_budget.shared_pool domain_mgr
   in
-  install_domain_pool_references domain_pool;
+  let read_pool =
+    Domain_pool.create ~sw ~domain_count:budget.Domain_budget.read_pool domain_mgr
+  in
+  install_domain_pool_references ~read:read_pool domain_pool;
   Systhread_host.start ();
   (match Runtime_agent_execution_runtime.initialize ~sw ~domain_mgr
       ~domain_count:budget.Domain_budget.execution_codec with
@@ -1126,8 +1134,9 @@ let initialize_owner_state_blocking
      raise (Owner_initialization_failed (Native_execution_runtime_failed error)));
   let log = if Domain_budget.within_limit budget then Log.Server.info else Log.Server.warn in
   log
-    "Executor domains: %d shared pool + %d execution codec + %d fixed = %d (limit %d = recommended %d - 1)"
-    budget.Domain_budget.shared_pool budget.Domain_budget.execution_codec
+    "Executor domains: %d shared pool + %d read pool + %d execution codec + %d fixed = %d (limit %d = recommended %d - 1)"
+    budget.Domain_budget.shared_pool budget.Domain_budget.read_pool
+    budget.Domain_budget.execution_codec
     budget.Domain_budget.fixed (Domain_budget.total budget) budget.Domain_budget.limit
     (Domain.recommended_domain_count ());
   { state; path_diagnostics; prepared_keeper_persistence; domain_pool }
@@ -2124,7 +2133,7 @@ let run ~sw ~env ~address ~port ~base_path ?input_base_path ?on_ready ~accept_st
          serve every request on the 2 MB default -- the isolation this block
          exists for would be undone by the domain collecting eight times as
          often, and a minor collection stops every other domain with it. *)
-      Domain_pool.tune_minor_heap ();
+      Minor_heap.tune ();
       Eio.Switch.run (fun serving_sw ->
         Eio_context.with_turn_switch serving_sw (fun () ->
           let socket =

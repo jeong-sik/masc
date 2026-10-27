@@ -215,19 +215,20 @@ POST·PUT·DELETE 와 `/mcp` 도구 호출은 `Background` 그대로다. 무거�
 
 ### 3.5 domain 예산
 
-프로세스 전체를 `Domain.recommended_domain_count ()`(이 장비 16) 안에 넣는다.
+프로세스 전체를 RFC-0474 L1 의 예산 `Domain.recommended_domain_count () - 1`(이 장비 15) 안에 넣는다. 크기를 정하는 곳은 `Domain_budget.plan` 하나다.
 
-| domain | 지금 | 바꾼 뒤 |
-|---|---:|---:|
-| main | 1 | 1 |
-| snapshot codec | 1 | 1 |
-| system-thread host(#46342) | 0 | 1 |
-| 읽기 풀 | 0 | L2 측정으로 정한다 |
-| 배경 풀 | 14 | 나머지 |
-| agent_core codec 풀 | 14 | L5 측정으로 정한다 |
+| domain | RFC-0474 L1 전 | L1 | L3(이 RFC) |
+|---|---:|---:|---:|
+| main | 1 | 1 | 1 |
+| snapshot codec | 1 | 1 | 1 |
+| system-thread host(#46342) | 1 | 1 | 1 |
+| 읽기 풀 | 0 | 0 | 2 |
+| 배경 풀 | 14 | 10 | 8 |
+| agent_core codec 풀 | 14 | 2 | 2 |
 
 - 읽기 풀 크기는 L2 를 운영 서버에 배포해 잰 값으로 정한다. 읽기가 기다리는 계산도 읽기 풀에서 돈다. 빈 캐시를 채우는 계산(3.4)이 그렇다. 그래서 크기는 부하 상태의 `pool_wait.read` 의 `run`(계산 길이)·`wait`·`abandoned` 분포와 동시에 들어오는 읽기 수로 정한다. 기다리지 않을 때의 핸들러 시간(1.1절 `limit=1` 최소 4 ms)은 근거가 되지 않는다. 목표가 재는 것은 기다릴 때의 읽기다(#46374 리뷰).
-- 배경 풀은 `max 1 (recommended - 2 - 읽기 - codec)` 이다. `MASC_EXECUTOR_DOMAIN_COUNT` 는 지금처럼 배경 풀 크기를 정한다. 읽기 풀과 codec 풀 크기는 따로 정한다.
+- 2026-10-27 14:16~14:18Z 운영 서버(배경 풀 6, load 15~21) 120초 창: 읽기 173건, 대기 평균 50.3 ms(p99 1~2초 구간), 실행 평균 73.8 ms, abandoned 0. 읽기가 쓰는 worker 는 평균 0.11개이고, M/M/c 로 보면 1개일 때 약 11%, 2개일 때 약 0.5% 가 기다린다. 실행 시간 꼬리가 길어(p99 2~5초) 어림값이다. 그래서 2개다.
+- 배경 풀은 `max 1 (recommended - 1 - 고정 - 읽기 - codec)` 이다. 같은 창에서 배경 작업은 worker 를 평균 1.6개 썼다. 자리가 모자라면 codec 이 먼저 1로, 그다음 읽기 풀이 1로 줄어 배경 풀이 2개를 지킨다. `MASC_EXECUTOR_DOMAIN_COUNT` 는 지금처럼 배경 풀 크기를 정하고, 예산을 넘으면 부팅 때 거부한다.
 - agent_core codec 풀은 배경 풀과 합치지 않는다. 지금 `run_cpu` 는 호출자가 취소되면 worker 를 기다리지 않고 `Caller_cancelled`·`Runtime_released` 를 원자 변수로 알린다. masc 의 `Executor_pool_submission.submit` 은 worker 를 취소하고 `Cancel.protect` 아래에서 끝나기를 기다린다. 합치면 이 의미가 바뀌고, Keeper 실행 기록 쓰기(`writer_gate` 를 잡은 채 하는 비교)가 배경 FIFO 뒤에 선다. 크기만 예산 안으로 줄인다. 지금 `Execution_runtime.stats` 는 호출 횟수(`pool_requested`, `reentrant_inline`, `caller_cancelled`)만 세서 크기를 정하기에 모자란다. L5 에서 제출부터 시작까지의 대기와 실행 시간을 재서 `/health` 에 싣고, 그 값으로 정한다.
 - 출처를 모르는 domain 1개는 L3 에서 찾는다.
 - system-thread host 는 #46342 가 더한 domain 이다. main domain 에서 부르던 Curator·Librarian 의 systhread 를 여기서 시작한다. lock 이 하나라 OCaml 로는 최대 한 코어를 쓴다. 10-27 15:25 운영 sample 에서 옮길 일이 이미 약 1.2 코어를 썼다(#46342 리뷰). 배포 뒤 이 domain 이 얼마나 바쁜지 runtime events 의 domain 번호로 같이 잰다. 배경 풀 크기 계산에는 아직 넣지 않았다. 그 계산은 L3 의 `shared_domain_count_beside_read` 가 한다.

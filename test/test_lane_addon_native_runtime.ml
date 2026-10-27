@@ -757,18 +757,36 @@ hooks = ["validate_input", "validate_output"]
   check bool "duplicate client identity is not silently assigned" true
     (Result.is_error (connect (Browser_addon_host.Observed_client ego.client_id)));
   ignore (call next (Browser_addon_wire.Disconnect ego.client_id));
-  (* Disconnect wakes the background observer too. Use persistent semantic
-     invalidity so that observer cannot consume a one-shot transport failure
-     and retire the candidate before the host inspects its inventory. *)
+  (* Disconnect wakes the background observer too. Keep semantic invalidity
+     persistent for both direct and background reads; the background decoder
+     may legitimately mark the original worker failed after either read. *)
   let invalid_inventory=Filename.concat root ("invalid-inventory-"^replacement) in
+  let candidate_is_ready ()=match R.browser_service_status ~config ~access ~instance_id:replacement with
+    | R.Browser_ready _->true | Browser_refresh_needed _|Browser_unavailable|Browser_retired->false in
+  wait clock candidate_is_ready;
+  check bool "the original candidate is ready before snapshot corruption" true (candidate_is_ready ());
   write invalid_inventory "invalid";
-  let candidate_is_ready ()=List.exists (fun (service:R.browser_service) -> service.instance_id=replacement)
-    (R.browser_services ~config ~access) in
-  check bool "the unreadable candidate remains a ready service" true (candidate_is_ready ());
-  check bool "an unreadable ready candidate cannot establish uniqueness" true
-    (Result.is_error (connect (Browser_addon_host.Observed_client ego.client_id)));
-  check bool "semantic inventory failure does not retire the ready candidate" true (candidate_is_ready ());
+  check bool "an unreadable original worker cannot fall back to its readable sibling" true
+    (Result.is_error (connect (Browser_addon_host.Observed_client new_client.client_id)));
+  (* The client decoder also rejects this snapshot for the background
+     observer, which may mark the worker unready. Assert the public partial
+     inventory contract rather than an incidental post-read lifecycle phase. *)
+  let partial_inventory=public Browser_capabilities.Tabs ["mode",`String "connections"] in
+  check bool "a failed worker still returns the surviving connection inventory" true
+    (Tool_result.is_success partial_inventory);
+  let partial_data=Tool_result.data partial_inventory in
+  check bool "failed observation is reported as incomplete" true (member "inventoryComplete" partial_data=`Bool false);
+  check bool "the failed original worker remains an explicit issue" true
+    (partial_data |> member "inventoryIssues" |> Yojson.Safe.Util.to_list
+      |> List.exists (fun row -> member "instanceId" row=`String replacement));
+  check (list string) "readable sibling identity survives failed observation"
+    [Browser_lane.client_id_to_string ego.client_id]
+    (partial_data |> member "clients" |> Yojson.Safe.Util.to_list |> List.map (text "clientId"));
+  check bool "a partial inventory never recommends automatic fallback" true
+    (partial_data |> member "automatic" |> member "browse" |> member "error" |> member "code"=`String "browser_binding_required");
   Unix.unlink invalid_inventory;
+  ignore (dispatch config R.Observe ["instance_id",`String replacement]);
+  wait clock candidate_is_ready;
   ignore (dispatch config R.Detach ["instance_id",`String other_id]);
   wait clock (fun () -> inspect other_id |> member "phase" |> text "kind"="detached");
   check bool "a missing Goal worker never falls back" true

@@ -288,6 +288,7 @@ let test_verdict_enum_mirrors_valid_verdict_strings () =
   with_reviewer
     (fun ~base_path:_
       ?sw:_
+      ?execution_owner:_
       ~evaluator_runtime:_ ~candidate_kind:_
       ~prompt:_
       ?system_prompt:_ ?goal_blocks:_

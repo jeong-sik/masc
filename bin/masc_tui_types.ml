@@ -5999,8 +5999,8 @@ module Browser_lane_view = struct
   let unavailable_notice t = match t.unavailable with
     | Backends_not_reported | Backends_unavailable [] -> None
     | Backends_unreadable _ -> Some "Browser backend status unreadable; refresh the connection list"
-    | Backends_unavailable (Masc.Browser_addon_observation.Ego_user_owned_name {space;_} :: _) ->
-        Some (Printf.sprintf "Ego: %S user-owned at startup · resolve first · Plugins Off→Inactive→On" space)
+    | Backends_unavailable (Masc.Browser_addon_observation.Ego_user_owned_name _ :: _) ->
+        Some "Ego space user-owned (last list) · resolve; Off→Inactive→On · b:recheck"
   let prepare_open t =
     match t.selection, t.source with
     | (Bound_automatic | Bound_explicit), (Automation | Stagehand) -> t, Open_session

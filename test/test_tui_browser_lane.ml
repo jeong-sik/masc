@@ -637,6 +637,10 @@ let test_bidi_host_discovery () =
   expect "switching sources retains the last backend observation"
     ((switch_source Automation observed).unavailable=observed.unavailable
      && (choose_automatic observed).unavailable=observed.unavailable);
+  let renewed, _ = accept_clients ~generation:41 (Ok (found [firefox]))
+      {observed with load=Loading (41, Discover Choose_client)} in
+  expect "a new discovery replaces the previous worker's backend observation"
+    (renewed.unavailable=Backends_not_reported);
   let unreadable = success (decode_discovery (answer ["unavailable",`String "invalid"])) in
   expect "an unreadable backend report does not discard the client list"
     (unreadable.listed=[firefox] && match unreadable.unavailable with

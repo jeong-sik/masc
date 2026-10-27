@@ -68,19 +68,20 @@ let publish recovery storage ~leaf json =
       ~parent_components:[] ~target_leaf:leaf ~permissions:0o400
     |> Result.map_error (fun e -> Recovery_failed
       (Fs_compat.capability_publication_target_error_to_string e)) in
-  let* outcome=Fs_compat.Publication_recovery.with_lane ~registry:recovery ~owner:"launch" (fun recovery ->
-    Fs_compat.create_capability_file_exclusive ~recovery ~parent:storage ~target content
-    |> Result.map_error (fun e -> Publication_failed e))
-    |> Result.map_error (fun e -> Recovery_failed (Fs_compat.Publication_recovery.lane_open_error_to_string e)) in
-  match outcome with
-  | Lane_released value -> value
-  | Lane_release_failed {value;release_failure} ->
-    let detail=Fs_compat.Publication_recovery.lane_release_failure_to_string release_failure in
-    Error (Recovery_failed (match value with Ok () -> detail | Error e -> error_to_string e ^ "; " ^ detail))
+  Eio.Cancel.protect (fun () ->
+    let* outcome=Fs_compat.Publication_recovery.with_lane ~registry:recovery ~owner:"launch" (fun recovery ->
+      Fs_compat.create_capability_file_exclusive ~recovery ~parent:storage ~target content
+      |> Result.map_error (fun e -> Publication_failed e))
+      |> Result.map_error (fun e -> Recovery_failed (Fs_compat.Publication_recovery.lane_open_error_to_string e)) in
+    match outcome with
+    | Lane_released value -> value
+    | Lane_release_failed {value;release_failure} ->
+      let detail=Fs_compat.Publication_recovery.lane_release_failure_to_string release_failure in
+      Error (Recovery_failed (match value with Ok () -> detail | Error e -> error_to_string e ^ "; " ^ detail)))
 
 let launch_with_hook ~after_rendezvous ~sw ~fs ~cgroup_parent_path ~(execution : execution)
     ~stdin ~stdout ~stderr intent =
-  R.with_launch ~sw intent (fun target ~storage ->
+  let result=R.with_launch ~sw intent (fun target ~storage ->
     let* ()=scope target.spec in
     let group_name="masc-job-" ^ P.Id.to_string target.launch_id in
     let* tree=G.Group.create ~sw ~parent_path:cgroup_parent_path ~name:group_name |> group in
@@ -90,8 +91,9 @@ let launch_with_hook ~after_rendezvous ~sw ~fs ~cgroup_parent_path ~(execution :
       ~stdin ~stdout ~stderr |> process in
     let activate () =
       let* ()=G.await_ready child |> process in
-      let* recovery=Fs_compat.Publication_recovery.open_registry ~sw ~fs ~registry_root:storage
-        |> Result.map_error (fun e -> Recovery_failed (Fs_compat.Publication_recovery.registry_error_to_string e)) in
+      let* recovery=Eio.Cancel.protect (fun () ->
+        Fs_compat.Publication_recovery.open_registry ~sw ~fs ~registry_root:storage
+        |> Result.map_error (fun e -> Recovery_failed (Fs_compat.Publication_recovery.registry_error_to_string e))) in
       let* rendezvous=cpu (fun () -> rendezvous_json target execution group_name) in
       let* ()=publish recovery storage ~leaf:rendezvous_leaf rendezvous in
       after_rendezvous ();
@@ -99,9 +101,12 @@ let launch_with_hook ~after_rendezvous ~sw ~fs ~cgroup_parent_path ~(execution :
         "launch_id",identifier target.launch_id;"decision",`String "activate"] in
       let* ()=publish recovery storage ~leaf:activation_leaf intent in
       Eio.Switch.check sw;
+      Eio.Fiber.check ();
       G.activate child |> process in
     let activation=match activate () with Ok () -> Requested | Error e -> Held e in
-    Ok {target;group=tree;child;activation;storage;publication_lock=Eio.Mutex.create ()})
+    Ok {target;group=tree;child;activation;storage;publication_lock=Eio.Mutex.create ()}) in
+  Eio.Fiber.check ();
+  result
 
 let cancel_with_hook ~after_intent t =
   let* committed=R.request_cancel t.target.original_record ~confirmed_admission_id:t.target.admission_id

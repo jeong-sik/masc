@@ -6,6 +6,7 @@ module O = Endpoint_job_output
 module S = Endpoint_job_supervisor
 module D = Endpoint_job_result
 module C = Endpoint_job_lifetime
+module Recovery_test = Fs_compat_test_support.Publication_recovery_for_testing
 let require = function Ok value -> value | Error e -> Alcotest.fail e
 let get value = value |> Result.map_error L.error_to_string |> require
 let registry value = value |> Result.map_error R.error_to_string |> require
@@ -1626,9 +1627,9 @@ let owned_job ~sw ~env fixture permit =
     ~execution:fixture.execution permit
 let held_owned_job ~sw ~env fixture permit ~before_sync =
   let first=Atomic.make true in
-  let fault=Fs_compat.Publication_recovery_for_testing.before_parent_sync_dispatch
+  let fault=Recovery_test.before_parent_sync_dispatch
     ~before_sync:(fun () -> if Atomic.compare_and_set first true false then before_sync ()) in
-  Fs_compat.Publication_recovery_for_testing.with_replace_dispatch_fault fault
+  Recovery_test.with_replace_dispatch_fault fault
     (fun () -> owned_job ~sw ~env fixture permit)
 
 let endpoint_lifetime_survives_request_and_result_observer = fixture (fun ~env ~sw:_ ~store fixture ->
@@ -1738,6 +1739,92 @@ let endpoint_failed_job_does_not_fail_other_jobs = fixture (fun ~env ~sw:_ ~stor
       let output=D.read_output loaded ~stream:P.Stdout ~offset:0L ~max_bytes:64 |> result_read in
       Alcotest.(check string) "another actual job completes after the first refusal" "independent" output.data)))
 
+type lifetime_publication = Startup_rendezvous | Startup_activation | Cancellation_claim
+exception Endpoint_interrupted
+let endpoint_teardown_finishes_entered_publication boundary normal_teardown =
+  fixture (fun ~env ~sw ~store fixture ->
+    let cancelling=match boundary with Cancellation_claim -> true | Startup_rendezvous | Startup_activation -> false in
+    let open_fifo name=
+      let path=Filename.concat fixture.work name in Unix.mkfifo path 0o666;Unix.chmod path 0o666;
+      Unix.openfile path [Unix.O_RDWR;Unix.O_NONBLOCK;Unix.O_CLOEXEC] 0 in
+    let ready=if cancelling then Some (open_fifo "ready") else None in
+    let input=if cancelling then Some (open_fifo "wait-input") else None in
+    Fun.protect ~finally:(fun () -> Option.iter Unix.close ready;Option.iter Unix.close input) (fun () ->
+      let script=if cancelling then "printf R > ready; read token < wait-input; : > must-not-run"
+        else ": > must-not-run; exit 7" in
+      let binding,permit=prepare store fixture "05" script in
+      let path=match boundary with
+        | Startup_rendezvous -> leaf fixture binding L.rendezvous_leaf
+        | Startup_activation -> leaf fixture binding L.activation_leaf
+        | Cancellation_claim -> Filename.concat fixture.registry_path (P.Id.to_string binding.operation_id ^ ".claim.json") in
+      let group=Filename.concat "/sys/fs/cgroup" ("masc-job-" ^ P.Id.to_string (id "06")) in
+      let entered,signal=Eio.Promise.create () and resume,release=Eio.Promise.create () in
+      let teardown,begin_teardown=Eio.Promise.create () and cancelled,notice_cancel=Eio.Promise.create () in
+      let created,provide_job=Eio.Promise.create () and drained,finish_scope=Eio.Promise.create () in
+      let observer_reason=ref None in
+      let unblock ()=if Eio.Promise.peek resume=None then Eio.Promise.resolve release () in
+      let first=Atomic.make true in
+      let fault=Recovery_test.before_parent_sync_dispatch ~before_sync:(fun () ->
+        if Sys.file_exists path && Atomic.compare_and_set first true false then (
+          Eio.Promise.resolve signal ();Eio.Promise.await resume)) in
+      Fun.protect ~finally:unblock (fun () ->
+        Eio.Fiber.fork ~sw (fun () ->
+          let original_completion=match Eio.Switch.run (fun endpoint ->
+            let job=if cancelling then owned_job ~sw:endpoint ~env fixture permit else
+              Recovery_test.with_replace_dispatch_fault fault (fun () -> owned_job ~sw:endpoint ~env fixture permit) in
+            Eio.Fiber.fork_daemon ~sw:endpoint (fun () ->
+              try Eio.Fiber.await_cancel () with Eio.Cancel.Cancelled reason as ex ->
+                Eio.Promise.resolve notice_cancel reason;raise ex);
+            (match ready with
+             | None -> Eio.Fiber.fork_daemon ~sw:endpoint (fun () ->
+                 match C.await_result job with
+                 | Ok _ | Error _ -> `Stop_daemon
+                 | exception (Eio.Cancel.Cancelled reason as ex) -> observer_reason:=Some reason;raise ex)
+             | Some fd ->
+               Eio_unix.await_readable fd;
+               let marker=Bytes.create 1 in
+               Alcotest.(check int) "actual activated child sends its readiness byte" 1 (Unix.read fd marker 0 1);
+               Alcotest.(check string) "native child reached its original blocking input" "R" (Bytes.to_string marker);
+               Eio.Fiber.fork_daemon ~sw:endpoint (fun () ->
+                 match Recovery_test.with_replace_dispatch_fault fault (fun () -> C.cancel job) with
+                 | Ok _ | Error _ -> `Stop_daemon
+                 | exception (Eio.Cancel.Cancelled reason as ex) -> observer_reason:=Some reason;raise ex));
+            Eio.Promise.resolve provide_job job;
+            Eio.Promise.await teardown;
+            if not normal_teardown then Eio.Switch.fail endpoint Endpoint_interrupted) with
+            | () -> normal_teardown
+            | exception Endpoint_interrupted -> not normal_teardown in
+          Eio.Promise.resolve finish_scope original_completion);
+        Eio.Promise.await entered;
+        let job=Eio.Promise.await created in
+        check "real startup owns its native tree before metadata teardown" (Sys.file_exists group);
+        let inode=(Unix.lstat path).st_ino and bytes=read path in
+        Eio.Promise.resolve begin_teardown ();
+        let original_reason=Eio.Promise.await cancelled in
+        check "endpoint drain waits for the actual entered Fs transaction" (Eio.Promise.peek drained=None);
+        check "entered startup or cancellation keeps its original EX authority"
+          (R.load store ~binding=Error R.Busy);
+        let _,next=prepare store fixture "07" "printf independent; exit 8" in
+        ignore (Eio.Switch.run (fun independent -> owned_job ~sw:independent ~env fixture next |> C.await_result |> lifetime));
+        unblock ();
+        check "normal endpoint completion or explicit interruption survives metadata drain" (Eio.Promise.await drained);
+        check "observer retains the original cancellation cause"
+          (match !observer_reason with Some reason -> reason==original_reason | None -> false);
+        check "original native group is quiescent and released after endpoint drain" (not (Sys.file_exists group));
+        check "stopped lifetime cannot claim a terminal publication" (C.await_result job=Error C.Owner_stopped);
+        Alcotest.(check int) "entered metadata retains its original published inode" inode (Unix.lstat path).st_ino;
+        Alcotest.(check string) "entered metadata retains its exact published bytes" bytes (read path);
+        check "pending cancellation never reaches another payload effect"
+          (not (Sys.file_exists (Filename.concat fixture.work "must-not-run")));
+        let current=R.load store ~binding |> registry in
+        check "drained metadata preserves the same original admission and known launch"
+          (R.binding current=binding && R.admission_id current=id "04" && R.launch_state current=R.Requested (id "06"));
+        check "only an entered original cancellation publishes cancellation intent"
+          ((R.cancellation_state current=R.Cancellation_requested)=cancelling);
+        (match R.with_launch ~sw permit (fun _ ~storage:_ -> Alcotest.fail "stopped original launch callback replayed") with
+         | R.Not_performed (R.Launch_intent_spent | Launch_cancelled) -> ()
+         | Not_performed _ | Performed _ -> Alcotest.fail "endpoint teardown made its original permit reusable")))) ()
+
 let () =
   if G.For_testing.linux_build && Unix.geteuid ()<>0 && Sys.getenv_opt "GITHUB_ACTIONS"=Some "true" then (
     let executable=Unix.realpath Sys.executable_name in
@@ -1832,6 +1919,12 @@ let () =
       "endpoint cancellation survives its observer and waits only original startup",endpoint_cancel_observer_survives_busy_startup;
       "endpoint teardown resolves a never-entered job reservation",endpoint_teardown_resolves_unentered_reservation;
       "endpoint pre-child cancellation publishes only opaque original absence",endpoint_prechild_cancellation_publishes_actual_absence;
-      "one refused endpoint job does not fail another",endpoint_failed_job_does_not_fail_other_jobs] in
+      "one refused endpoint job does not fail another",endpoint_failed_job_does_not_fail_other_jobs;
+      "normal endpoint drain finishes entered startup rendezvous",(fun () -> endpoint_teardown_finishes_entered_publication Startup_rendezvous true);
+      "explicit endpoint cancellation finishes entered startup rendezvous",(fun () -> endpoint_teardown_finishes_entered_publication Startup_rendezvous false);
+      "normal endpoint drain finishes entered activation metadata",(fun () -> endpoint_teardown_finishes_entered_publication Startup_activation true);
+      "explicit endpoint cancellation finishes entered activation metadata",(fun () -> endpoint_teardown_finishes_entered_publication Startup_activation false);
+      "normal endpoint drain finishes entered cancellation claim",(fun () -> endpoint_teardown_finishes_entered_publication Cancellation_claim true);
+      "explicit endpoint cancellation finishes entered cancellation claim",(fun () -> endpoint_teardown_finishes_entered_publication Cancellation_claim false)] in
   Alcotest.run "Endpoint job launch" ["original supervisor",List.map
     (fun (name,test) -> Alcotest.test_case name `Quick test) cases]

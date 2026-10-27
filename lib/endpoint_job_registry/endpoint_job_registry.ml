@@ -299,7 +299,9 @@ let with_job_lock attempt (registry : t) (binding : P.binding) f =
   let* ()=validate_root registry in
   settle_lock (attempt ~lock_path:(lock_path registry binding) f)
 let locked registry binding f =
-  with_job_lock File_lock_eio.try_with_liveness_lock_observed registry binding f
+  let result=with_job_lock File_lock_eio.try_with_liveness_lock_observed registry binding f in
+  Eio.Fiber.check ();
+  result
 let read_locked registry binding f =
   with_job_lock File_lock_eio.try_with_shared_liveness_lock_observed registry binding f
 let load registry ~binding = read_locked registry binding (fun () -> read_record registry binding)
@@ -320,10 +322,12 @@ let target (registry : t) ~leaf ~permissions =
 let publish_claim (registry : t) ~exclusive (claim : claim) =
   let* ()=validate_root registry in
   let* json=claim_json claim in let* target=target registry ~leaf:(claim_leaf claim.binding) ~permissions:0o400 in
-  let result=with_recovery registry (base_leaf claim.binding) (fun recovery ->
-    (if exclusive then Fs_compat.create_capability_file_exclusive else Fs_compat.replace_capability_file)
-      ~recovery ~parent:registry.root_cap ~target (Yojson.Safe.to_string json)
-    |> Result.map_error (fun e -> Publication_failed e)) in
+  let content=Yojson.Safe.to_string json in
+  let result=Eio.Cancel.protect (fun () ->
+    with_recovery registry (base_leaf claim.binding) (fun recovery ->
+      (if exclusive then Fs_compat.create_capability_file_exclusive else Fs_compat.replace_capability_file)
+        ~recovery ~parent:registry.root_cap ~target content
+      |> Result.map_error (fun e -> Publication_failed e))) in
   let* ()=result in validate_root registry
 
 let already_exists ?(directory=false) = function
@@ -666,7 +670,7 @@ let publish_unlaunched ~sw proof ~evidence ~content =
   let* ()=match evidence with
     | Stream_data _ -> if String.length content=0 then Ok () else corrupt "unlaunched stream is not empty"
     | Stream_seal _ | Terminal_receipt -> Ok () in
-  let result=locked registry binding (fun () ->
+  locked registry binding (fun () ->
     let* current=read_record registry binding in
     let* ()=if same_original original current then Ok () else Error Stale_record in
     let* ()=match current.claim.state with
@@ -693,9 +697,7 @@ let publish_unlaunched ~sw proof ~evidence ~content =
           | Error e -> Error e)) in
       let* ()=verify_unlaunched_evidence ~sw:read_sw ~parent ~leaf ~permissions ~controller_uid:registry.controller_uid content in
       let* confirmed=read_record registry binding in
-      if same_original current confirmed then Ok () else Error Stale_record)) in
-  Eio.Fiber.check ();
-  result
+      if same_original current confirmed then Ok () else Error Stale_record))
 
 let with_launch_with_hook ~after_original ~sw (intent : launch_intent) perform =
   Eio.Switch.check sw;

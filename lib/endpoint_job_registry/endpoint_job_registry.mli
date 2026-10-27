@@ -140,6 +140,9 @@ val request_cancel :
     lost-reply requests sync the exact existing claim and its actual parent,
     then revalidate the same original before acknowledging that durable intent
     without advancing it. A failed sync or validation remains an error.
+    Source reads and lock admission remain cancellable. An entered claim
+    publication and recovery cleanup finish under cancellation protection;
+    the exclusive job lock releases before the original cancellation check.
     Cancellation before launch prevents a new launch permit, and cancellation
     after a permit was issued prevents its still-pending callback from starting.
     A currently active bounded launch callback returns [Busy]; no other job is

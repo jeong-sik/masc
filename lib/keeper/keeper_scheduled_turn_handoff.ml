@@ -33,7 +33,7 @@ let request ~excluding ~base_path ~keeper_name =
     let* pending = pending ~base_path ~keeper_name
       |> Result.map_error (fun detail -> Queue_unavailable detail) in
     let sources = List.filter (fun source ->
-      not (List.exists (Keeper_event_queue_state.equal_pending_selection source) excluding)) pending in
+      not (List.exists (Keeper_event_queue_state.same_entry source) excluding)) pending in
     if List.is_empty sources then Ok []
     else
     let* accepted = Keeper_owner_registry.request_scheduled_turn

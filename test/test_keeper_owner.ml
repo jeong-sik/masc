@@ -5991,7 +5991,7 @@ let scheduled_selection ?(revision = 1L) occurrence : Keeper_event_queue_state.p
           { occurrence_id = occurrence; schedule_instance_id = "instance-handoff"
           ; schedule_id = "sched-handoff"; due_at = 1.; payload_digest = "digest"
           ; title = None; message = "Consume scheduled work"; result_delivery = None } }
-  ; admitted_revision = revision; checkpoint_retentions = 0
+  ; admitted_revision = revision; arrival = revision; checkpoint_retentions = 0
   ; repetition_scope = None; first_admitted_at = Some 1. }
 
 (* Exercise the real Owner mailbox, chat runner, durable checkpoint deferral,
@@ -6139,7 +6139,7 @@ let test_scheduled_source_handoff case () =
        check int "only the original surviving cohort is prioritized"
          (if case = Replaced_consumer_handoff then 2 else 1) (List.length sources);
        check bool "exact cohort is preserved despite additions" true
-         (Keeper_event_queue_state.equal_pending_selection expected (List.hd sources));
+         (Keeper_event_queue_state.same_entry expected (List.hd sources));
        record "source") with
      | Ok (`Ran ()) -> () | _ -> fail "the source did not receive the next slot");
     ignore (await_terminal owner next 1_000);

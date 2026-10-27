@@ -1,13 +1,16 @@
 type t =
   { admitted : Keeper_event_queue_state.pending_selection list
-  ; pending_at_intake : Keeper_event_queue_state.pending_selection list
+  ; frontier : Keeper_event_queue_state.frontier
   }
 
-let empty = { admitted = []; pending_at_intake = [] }
-let of_intake ~pending ~admitted = { admitted; pending_at_intake = pending }
-let of_selections admitted = of_intake ~pending:admitted ~admitted
+let empty =
+  { admitted = []; frontier = Keeper_event_queue_state.unobserved_frontier }
+let of_intake ~frontier ~admitted = { admitted; frontier }
+let of_selections admitted =
+  of_intake ~frontier:Keeper_event_queue_state.unobserved_frontier ~admitted
 let selections batch = batch.admitted
-let pending_at_intake batch = batch.pending_at_intake
+let arrived_since_intake batch selection =
+  Keeper_event_queue_state.arrived_since batch.frontier selection
 let stimuli batch =
   List.map (fun (selection : Keeper_event_queue_state.pending_selection) -> selection.source)
     (selections batch)

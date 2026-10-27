@@ -16,7 +16,7 @@
    commit message. The decoder rejects foreign generations at the wire
    boundary; tests exercise that rejection without copying these markers. *)
 
-let state = "keeper.event_queue.state.v19"
+let state = "keeper.event_queue.state.v20"
 
 let transition_wal = "masc.keeper_event_queue.transition.v9"
 

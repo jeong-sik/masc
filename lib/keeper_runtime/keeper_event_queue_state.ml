@@ -1,12 +1,5 @@
 include Keeper_event_queue_state_core
 
-let equal_pending_selection (left : pending_selection) (right : pending_selection) =
-  Int64.equal left.admitted_revision right.admitted_revision
-  && String.equal
-       (source_snapshot_ref left.source)
-       (source_snapshot_ref right.source)
-;;
-
 let projected_source_kind_to_string = Keeper_event_queue_state_wire.projected_source_kind_to_string
 let durable_disposition_to_yojson = Keeper_event_queue_state_wire.durable_disposition_to_yojson
 let durable_disposition_of_yojson = Keeper_event_queue_state_wire.durable_disposition_of_yojson

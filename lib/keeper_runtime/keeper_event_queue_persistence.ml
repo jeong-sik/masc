@@ -1517,10 +1517,14 @@ let select_when_result ~base_path ~keeper_name ~now ~ready =
   | Ok state -> Ok (State.select_when ~now ~ready state)
 ;;
 
-let pending_selections_result ~base_path ~keeper_name =
+let pending_frontier_result ~base_path ~keeper_name =
   match load_state_result ~base_path ~keeper_name with
   | Error _ as error -> error
-  | Ok state -> Ok (State.pending_selections state)
+  | Ok state -> Ok (State.frontier state, State.pending_selections state)
+;;
+
+let pending_selections_result ~base_path ~keeper_name =
+  Result.map snd (pending_frontier_result ~base_path ~keeper_name)
 ;;
 
 let validate_pending_selection_result ~base_path ~keeper_name ~selection =

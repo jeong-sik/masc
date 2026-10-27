@@ -97,6 +97,7 @@ type outbox_entry =
 type pending_selection =
   { source : Keeper_event_queue.stimulus
   ; admitted_revision : int64
+  ; arrival : int64
   ; checkpoint_retentions : int
   ; repetition_scope : Keeper_execution_scope_id.t option
   ; first_admitted_at : float option
@@ -123,6 +124,7 @@ let scope_binding_error_to_string = function
 
 type t =
   { revision : int64
+  ; next_arrival : int64
   ; pending_entries : pending_selection list
   ; last_transition : transition_receipt option
   ; projected_dispositions : durable_disposition list
@@ -140,6 +142,7 @@ type transfer_projection_result =
 
 let empty =
   { revision = 0L
+  ; next_arrival = 0L
   ; pending_entries = []
   ; last_transition = None
   ; projected_dispositions = []
@@ -150,6 +153,23 @@ let empty =
 
 let revision state = state.revision
 let pending_selections state = state.pending_entries
+
+(* Each admitted entry takes the next number of a counter the state carries, and
+   keeps it until it leaves the queue. A reader that loaded the state when the
+   counter stood at [f] therefore saw exactly the entries numbered below [f].
+   The counter would need 2^63 admissions to wrap. *)
+type frontier = int64
+
+let frontier state = state.next_arrival
+let unobserved_frontier = 0L
+
+let arrived_since frontier (entry : pending_selection) =
+  Int64.compare entry.arrival frontier >= 0
+;;
+
+let same_entry (left : pending_selection) (right : pending_selection) =
+  Int64.equal left.arrival right.arrival
+;;
 
 let source_snapshot_ref source =
   Keeper_event_queue.stimulus_to_yojson source
@@ -399,10 +419,12 @@ let project_accepted_transfer ?admitted_at (transfer : accepted_transfer) state 
      | [] ->
        Ok
          ( { state with
-             pending_entries =
+             next_arrival = Int64.succ state.next_arrival
+           ; pending_entries =
                state.pending_entries
                @ [ { source = transfer.source
                    ; admitted_revision = state.revision
+                   ; arrival = state.next_arrival
                    ; checkpoint_retentions = 0
                    ; repetition_scope = None
                    ; first_admitted_at = admitted_at
@@ -474,29 +496,32 @@ let reconcile_pending ~first_admitted_at pending state =
       Some entry, List.rev_append skipped rest
     | entry :: rest -> take_matching source (entry :: skipped) rest
   in
-  let rec reconcile available acc = function
-    | [] -> List.rev acc
+  let rec reconcile available acc next_arrival = function
+    | [] -> List.rev acc, next_arrival
     | source :: rest ->
       let existing, available = take_matching source [] available in
-      let entry =
+      let entry, next_arrival =
         match existing with
-        | Some entry -> entry
-        | None -> { source; admitted_revision = state.revision; checkpoint_retentions = 0
-                 ; repetition_scope = None; first_admitted_at }
+        | Some entry -> entry, next_arrival
+        | None ->
+          ( { source; admitted_revision = state.revision
+            ; arrival = next_arrival; checkpoint_retentions = 0
+            ; repetition_scope = None; first_admitted_at }
+          , Int64.succ next_arrival )
       in
-      reconcile available (entry :: acc) rest
+      reconcile available (entry :: acc) next_arrival rest
   in
   (* Urgency order is a property of the pending list, not of the
      reprioritize/defer transitions alone: an [Immediate] arrival lands ahead
      of every [Normal] entry on arrival, and the sort is stable so arrival
      order is kept among entries of the same urgency. *)
-  let pending_entries =
+  let pending_entries, next_arrival =
     Keeper_event_queue.sort_by_urgency pending
     |> Keeper_event_queue.to_list
     |> Keeper_event_queue.uniq_stimuli
-    |> reconcile state.pending_entries []
+    |> reconcile state.pending_entries [] state.next_arrival
   in
-  { state with pending_entries }
+  { state with pending_entries; next_arrival }
 ;;
 
 let with_pending pending state = reconcile_pending ~first_admitted_at:None pending state
@@ -647,6 +672,7 @@ let reprioritize_pending
       let updated =
         { source = { selection.source with urgency }
         ; admitted_revision = next_revision
+        ; arrival = selection.arrival
         ; checkpoint_retentions = selection.checkpoint_retentions
         ; repetition_scope = selection.repetition_scope
         ; first_admitted_at = selection.first_admitted_at

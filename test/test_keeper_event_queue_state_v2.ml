@@ -934,6 +934,109 @@ let test_projected_disposition_ledger_replays_older_operation () =
    | Ok _ -> Alcotest.fail "compact witness accepted a changed transition payload")
 ;;
 
+let entry_named state post_id =
+  State.pending_selections state
+  |> List.find (fun (entry : State.pending_selection) ->
+    String.equal entry.source.post_id post_id)
+;;
+
+let test_arrival_follows_the_entry_through_edits () =
+  let state =
+    State.with_pending (queue [ stimulus "first" 1.0; stimulus "second" 2.0 ]) State.empty
+  in
+  let frontier = State.frontier state in
+  Alcotest.(check (list int64))
+    "each admitted entry takes the next number"
+    [ 0L; 1L ]
+    (List.map (fun (entry : State.pending_selection) -> entry.arrival)
+       (State.pending_selections state));
+  let seen = select state in
+  List.iter
+    (fun (entry : State.pending_selection) ->
+       Alcotest.(check bool)
+         ("entry the reader loaded did not arrive after it: " ^ entry.source.post_id)
+         false
+         (State.arrived_since frontier entry))
+    (State.pending_selections state);
+  let reprioritized, _ =
+    State.reprioritize_pending ~selection:seen ~urgency:Queue.Low state
+    |> require_ok "reprioritize"
+  in
+  let deferred, _ = State.defer_pending ~selection:seen state |> require_ok "defer" in
+  List.iter
+    (fun (label, edited) ->
+       let after = entry_named edited "first" in
+       Alcotest.(check bool) (label ^ " keeps the same entry") true
+         (State.same_entry seen after);
+       Alcotest.(check bool) (label ^ " does not make it arrive later") false
+         (State.arrived_since frontier after);
+       Alcotest.(check bool) (label ^ " changes the selection fence") true
+         (Int64.compare after.admitted_revision seen.admitted_revision > 0))
+    [ "reprioritize", reprioritized; "defer", deferred ];
+  let later =
+    State.with_pending
+      (queue [ stimulus "first" 1.0; stimulus "second" 2.0; stimulus "third" 3.0 ])
+      state
+  in
+  Alcotest.(check bool) "a source admitted after the read arrived later" true
+    (State.arrived_since frontier (entry_named later "third"));
+  Alcotest.(check bool) "the earlier sources still did not" false
+    (State.arrived_since frontier (entry_named later "first"));
+  let acked = State.ack_pending ~selection:seen state |> require_ok "ack" in
+  let reinserted =
+    State.with_pending (queue [ stimulus "first" 1.0; stimulus "second" 2.0 ]) acked
+  in
+  let again = entry_named reinserted "first" in
+  Alcotest.(check bool) "ACK then reinsertion is another entry" false
+    (State.same_entry seen again);
+  Alcotest.(check bool) "and it arrived after the read" true
+    (State.arrived_since frontier again)
+;;
+
+let test_arrival_counter_must_cover_every_entry () =
+  let state =
+    State.with_pending (queue [ stimulus "a" 1.0; stimulus "b" 2.0 ]) State.empty
+  in
+  let json = State.to_yojson state in
+  let replace_top name value =
+    match json with
+    | `Assoc fields ->
+      `Assoc (List.map (fun (key, v) -> if String.equal key name then key, value else key, v) fields)
+    | _ -> Alcotest.fail "state codec did not emit an object"
+  in
+  ignore (State.of_yojson (replace_top "next_arrival" (`Intlit "2"))
+          |> require_ok "counter just above the highest entry");
+  (match State.of_yojson (replace_top "next_arrival" (`Intlit "1")) with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "counter at an entry's number was accepted");
+  let both_numbered_zero =
+    match json with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (function
+             | "pending", `List entries ->
+               ( "pending"
+               , `List
+                   (List.map
+                      (function
+                        | `Assoc entry ->
+                          `Assoc
+                            (List.map
+                               (fun (key, v) ->
+                                  if String.equal key "arrival" then key, `Intlit "0" else key, v)
+                               entry)
+                        | other -> other)
+                      entries) )
+             | field -> field)
+           fields)
+    | _ -> Alcotest.fail "state codec did not emit an object"
+  in
+  match State.of_yojson both_numbered_zero with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "two entries with one arrival number were accepted"
+;;
+
 let test_current_schema_round_trip () =
   let state = State.with_pending (queue [ stimulus "fresh" 1.0 ]) State.empty in
   let json = State.to_yojson state in
@@ -944,6 +1047,7 @@ let test_current_schema_round_trip () =
        "pending-only durable fields"
        [ "accepted_transfer_projections"
        ; "last_transition"
+       ; "next_arrival"
        ; "pending"
        ; "projected_dispositions"
        ; "revision"
@@ -2646,6 +2750,14 @@ let () =
             "current schema only"
             `Quick
             test_current_schema_round_trip
+        ; Alcotest.test_case
+            "arrival follows the entry through edits"
+            `Quick
+            test_arrival_follows_the_entry_through_edits
+        ; Alcotest.test_case
+            "arrival counter covers every entry"
+            `Quick
+            test_arrival_counter_must_cover_every_entry
         ] )
     ; ( "persistence"
       , [ Alcotest.test_case "durable peek ack restart" `Quick test_durable_peek_ack_restart

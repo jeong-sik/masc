@@ -448,23 +448,6 @@ let connector_attention_waiting ~base_path ~keeper_name =
   connector_attention_waiting_with_filter ~filter_pending ~base_path ~keeper_name
 ;;
 
-module Pending_source_keys = Set.Make (struct
-  type t = string * int64
-  let compare (left_ref, left_incarnation) (right_ref, right_incarnation) =
-    let order = String.compare left_ref right_ref in
-    if order = 0 then Int64.compare left_incarnation right_incarnation else order
-end)
-
-let pending_source_key (selection : Keeper_event_queue_state.pending_selection) =
-  Keeper_event_queue_state.source_snapshot_ref selection.source, selection.admitted_revision
-;;
-
-let pending_source_keys selections =
-  List.fold_left (fun keys selection ->
-    Pending_source_keys.add (pending_source_key selection) keys)
-    Pending_source_keys.empty selections
-;;
-
 let source_may_preempt = function
   | Keeper_event_queue.Fusion_completed _ | Delegate_completed _
   | Composition_completed _ | Tool_result_ready _ | Owned_job_completed _
@@ -479,14 +462,16 @@ let make_autonomous_yield_probe ~on_attention_read ~wake ~sources ~base_path ~ke
   let filter_pending =
     make_connector_pointer_filter ~on_attention_read ~base_path ~keeper_name
   in
-  let admitted = pending_source_keys (Keeper_heartbeat_source_batch.selections sources) in
-  let observed = pending_source_keys (Keeper_heartbeat_source_batch.pending_at_intake sources) in
   match wake with
-  (* Only arrivals after the intake snapshot preempt a selected source. Existing
-     bounded backlog remains pending for later intake; it cannot force endless
-     checkpoint exchange. The exact admitted source also remains pending, and
-     cannot preempt itself. The unspent Gate continuation keeps its existing
-     exception because its producer may settle after intake. *)
+  (* Only a source that reached the queue after the intake read preempts a
+     running turn. Everything intake saw, admitted or still backlog, stays
+     pending for a later intake and cannot force endless checkpoint exchange.
+     Whether a source arrived later is read from the queue's own history
+     ([arrived_since_intake]), not from its content, so reprioritizing or
+     deferring the running source never makes it its own successor. The unspent
+     Gate continuation keeps its existing exception because its producer may
+     settle after intake; a resolution this turn already consumed fails that
+     unspent check, so it needs no exclusion here. *)
   | Keeper_registry.Woken (_ :: _) ->
     fun () ->
       (match Keeper_chat_yield_request.request
@@ -497,21 +482,19 @@ let make_autonomous_yield_probe ~on_attention_read ~wake ~sources ~base_path ~ke
          (match Keeper_event_queue_persistence.pending_selections_result ~base_path ~keeper_name with
           | Error _ as error -> error
           | Ok selections ->
-            let independent = List.filter (fun selection ->
-              not (Pending_source_keys.mem (pending_source_key selection) admitted)) selections in
             let queue_of selections = List.fold_left
               (fun queue (s : Keeper_event_queue_state.pending_selection) ->
                 Keeper_event_queue.enqueue queue s.source) Keeper_event_queue.empty selections in
             let now = Time_compat.now () in
             (match hitl_replay_preemption_request
                      ~resolution_deliverable:(approved_resolution_deliverable ~base_path)
-                     ~now (queue_of independent) with
+                     ~now (queue_of selections) with
              | Some _ as request -> Ok request
              | None ->
-               let ready = independent
+               let ready = selections
                  |> List.filter (fun (s : Keeper_event_queue_state.pending_selection) ->
-                      source_may_preempt s.source.payload
-                      && not (Pending_source_keys.mem (pending_source_key s) observed)
+                      Keeper_heartbeat_source_batch.arrived_since_intake sources s
+                      && source_may_preempt s.source.payload
                       && Keeper_heartbeat_stimulus_intake.stimulus_ready_for_intake ~base_path s.source)
                  |> queue_of |> filter_pending in
                if Keeper_event_queue.is_empty ready then

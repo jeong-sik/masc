@@ -2,18 +2,20 @@
     every source envelope and repetition binding without choosing an invocation. *)
 type t
 val empty : t
+(** No intake read: every pending source counts as a later arrival. *)
 val of_selections : Keeper_event_queue_state.pending_selection list -> t
+(** Selections supplied without an intake read. Like {!empty}, every pending
+    source, these included, counts as a later arrival. *)
 val of_intake :
-  pending:Keeper_event_queue_state.pending_selection list ->
+  frontier:Keeper_event_queue_state.frontier ->
   admitted:Keeper_event_queue_state.pending_selection list -> t
-(** Preserve the exact pending frontier from the same intake read that selected
-    [admitted]. Unadmitted backlog is observation only; it gains no execution or
-    acknowledgement authority. It lets a running source distinguish later
-    arrivals without repeatedly yielding to the existing bounded backlog. *)
+(** Preserve the frontier of the very state that intake read when it selected
+    [admitted]. Backlog that was not admitted is observation only; it gains no
+    execution or acknowledgement authority. *)
 val selections : t -> Keeper_event_queue_state.pending_selection list
-val pending_at_intake : t -> Keeper_event_queue_state.pending_selection list
-(** The immutable frontier observed before provider dispatch. [of_selections]
-    knows only those supplied selections and uses them as its frontier. *)
+val arrived_since_intake : t -> Keeper_event_queue_state.pending_selection -> bool
+(** True when a pending source reached the queue after the intake read. Edits of
+    a source intake already saw, admitted or not, never make it arrive later. *)
 val stimuli : t -> Keeper_event_queue.stimulus list
 val count : t -> int
 val first : t -> Keeper_event_queue_state.pending_selection option

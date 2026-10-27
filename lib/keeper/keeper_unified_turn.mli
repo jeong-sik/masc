@@ -175,9 +175,10 @@ module For_testing : sig
     -> (unit -> (Keeper_agent_run.yield_request option, string) result)
        * (unit -> int)
   (** The production source-turn callback plus its actual attention batch-read
-      count. New async outcomes are compared with the exact pending frontier
-      observed by intake. Admitted sources cannot preempt themselves. The
-      counter observes reads; it cannot change cache decisions. *)
+      count. A source preempts only when the queue admitted it after intake
+      read it, which no edit of an entry intake already saw (reprioritize,
+      defer, retention) can change. The counter observes reads; it cannot
+      change cache decisions. *)
 end
 
 val continuation_channel_of_wake :

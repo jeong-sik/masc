@@ -600,6 +600,7 @@ let pending_entry_to_yojson entry =
   `Assoc
     ([ "source", Keeper_event_queue.stimulus_to_yojson entry.source
      ; "admitted_revision", int64_json entry.admitted_revision
+     ; "arrival", int64_json entry.arrival
      ; "checkpoint_retentions", `Int entry.checkpoint_retentions
      ] @ (match entry.first_admitted_at with
        | None -> []
@@ -615,7 +616,7 @@ let pending_entry_of_yojson json =
   let* () =
     exact_fields
       ~context
-      ~expected:([ "source"; "admitted_revision"; "checkpoint_retentions" ]
+      ~expected:([ "source"; "admitted_revision"; "arrival"; "checkpoint_retentions" ]
         @ (if List.mem_assoc "repetition_scope" fields then [ "repetition_scope" ] else [])
         @ if List.mem_assoc "first_admitted_at" fields then [ "first_admitted_at" ] else [])
       fields
@@ -625,11 +626,16 @@ let pending_entry_of_yojson json =
   let* admitted_revision =
     int64_field ~context "admitted_revision" fields
   in
+  let* arrival =
+    int64_field ~context "arrival" fields
+  in
   let* checkpoint_retentions =
     int_field ~context "checkpoint_retentions" fields
   in
   if Int64.compare admitted_revision 0L < 0
   then Error "event queue pending admission revision must not be negative"
+  else if Int64.compare arrival 0L < 0
+  then Error "event queue pending arrival number must not be negative"
   else if checkpoint_retentions < 0 then
     Error "event queue pending checkpoint retentions must not be negative"
   else
@@ -642,13 +648,15 @@ let pending_entry_of_yojson json =
         let* time = float_field ~context "first_admitted_at" fields in
         if Float.is_finite time then Ok (Some time)
         else Error "event queue admission time must be finite" in
-    Ok { source; admitted_revision; checkpoint_retentions; repetition_scope; first_admitted_at }
+    Ok { source; admitted_revision; arrival; checkpoint_retentions
+       ; repetition_scope; first_admitted_at }
 ;;
 
 let to_yojson state =
   `Assoc
     [ "schema", `String schema
     ; "revision", int64_json state.revision
+    ; "next_arrival", int64_json state.next_arrival
     ; ( "pending"
       , `List (List.map pending_entry_to_yojson state.pending_entries) )
     ; ( "last_transition"
@@ -711,6 +719,17 @@ let validate_state state =
          || Int64.compare entry.admitted_revision state.revision > 0)
       state.pending_entries
   then Error "event queue pending admission revision is outside the durable state"
+  else if Int64.compare state.next_arrival 0L < 0
+  then Error "event queue next arrival number must not be negative"
+  else if
+    List.exists
+      (fun entry -> Int64.compare entry.arrival state.next_arrival >= 0)
+      state.pending_entries
+  then Error "event queue pending arrival number is not below the next arrival number"
+  else if
+    let arrivals = List.map (fun entry -> entry.arrival) state.pending_entries in
+    List.length (List.sort_uniq Int64.compare arrivals) <> List.length arrivals
+  then Error "event queue pending arrival number is duplicated"
   else if pending_identity_is_duplicated state.pending_entries
   then Error "event queue pending source identity is duplicated"
   else if List.length state.transition_outbox > 1
@@ -802,6 +821,7 @@ let of_yojson json =
       ~expected:
         [ "schema"
         ; "revision"
+        ; "next_arrival"
         ; "pending"
         ; "last_transition"
         ; "projected_dispositions"
@@ -811,6 +831,7 @@ let of_yojson json =
       fields
   in
   let* revision = int64_field ~context "revision" fields in
+  let* next_arrival = int64_field ~context "next_arrival" fields in
   let* pending_entries =
     list_field ~context "pending" pending_entry_of_yojson fields
   in
@@ -839,6 +860,7 @@ let of_yojson json =
   in
   validate_state
     { revision
+    ; next_arrival
     ; pending_entries
     ; last_transition
     ; projected_dispositions

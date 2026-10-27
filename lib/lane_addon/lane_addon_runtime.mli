@@ -596,6 +596,10 @@ module For_testing : sig
       sources:Yojson.Safe.t -> Lane_addon_types.output ->
       (unit, Lane_addon_store.observation_write_error) result) -> (unit -> 'a) -> 'a
   (** Fiber-local staged publication injection captured before offload. *)
+  val with_binding_writer :
+    (store:Lane_addon_store.t -> instance_id:string -> Yojson.Safe.t ->
+      (unit, Lane_addon_store.binding_write_error) result) -> (unit -> 'a) -> 'a
+  (** Fiber-local staged binding replacement captured before offload. *)
   val await_run_stopped : config:Workspace.config -> instance_id:string -> unit
   (** Waits until the original worker run returns from its work and clears
       its running flag, using the existing lifecycle condition. An instance

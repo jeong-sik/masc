@@ -435,6 +435,65 @@ let test_observation_publication_keeps_sequence_and_action_uncertainty () =
         check string "later retries never overwrite the failed published record" bytes (Fs_compat.load_file path));
       detach clock fixture id))) [true,false;false,false;false,true]
 
+(* The binding replace is the observation's commit. A binding write that fails
+   before its rename leaves the renamed observation held: unpublished, named by
+   every binding write, and committed by the next one before another sequence
+   is written. A binding write that fails after its rename is the commit. The
+   held file is never rewritten. *)
+let test_binding_publication_commits_the_held_observation () =
+  List.iter (fun before -> with_fixture (fun clock fixture ->
+    let armed=ref false in
+    let named=ref [] in
+    let writer ~store ~instance_id json =
+      if not !armed then Store.save_binding_staged store ~instance_id json else (
+        named:=number "observation_seq" json :: !named;
+        Store.For_testing.save_binding_staged store ~instance_id json
+          ~replace_file:(Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+            ~sync_file:(fun path ->
+              if before then raise (Unix.Unix_error (Unix.EIO,"fsync",path))
+              else let fd=Unix.openfile path [Unix.O_RDONLY] 0 in
+                Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd))
+            ~sync_parent:(fun path -> raise (Unix.Unix_error (Unix.EIO,"fsync",path))))) in
+    Runtime.For_testing.with_binding_writer writer (fun () ->
+      let id=attach clock fixture ~acting:false in
+      let root=Filename.concat (Workspace.masc_dir fixture.config) "lane-addons" in
+      let initial=number "observation_seq" (inspect fixture id) in
+      let held=initial+1 in
+      let record=List.fold_left Filename.concat root
+        ["observations";Store.digest id;Printf.sprintf "%020d.json" held] in
+      (* The store reader still recovers renamed files at this layer, so read
+         the binding file itself. *)
+      let bound () = List.fold_left Filename.concat root ["bindings";Store.digest id ^ ".json"]
+        |> Fs_compat.load_file |> Yojson.Safe.from_string |> number "observation_seq" in
+      let phase () = text "kind" (member "phase" (inspect fixture id)) in
+      armed:=true;
+      ignore (dispatch fixture Runtime.Observe ["instance_id",str id] |> unwrap);
+      await clock (fun () -> phase ()="failed");
+      check bool "the renamed observation exists" true (Sys.file_exists record);
+      let bytes=Fs_compat.load_file record in
+      check bool "every binding write names the held observation" true
+        (!named<>[] && List.for_all (Int.equal held) !named);
+      if before then (
+        check int "an unbound observation is not published" initial
+          (number "observation_seq" (inspect fixture id));
+        check int "the binding still names the last commit" initial (bound ()))
+      else (
+        check int "a visible binding commits the observation" held
+          (number "observation_seq" (inspect fixture id));
+        check int "the binding names the committed observation" held (bound ());
+        let live=dispatch fixture Runtime.Inspect ["instance_id",str id] |> unwrap in
+        check bool "unconfirmed binding durability never claims complete coverage" true
+          (values "coverage" live |> List.exists (fun coverage -> member "complete" coverage=`Bool false)));
+      armed:=false;
+      ignore (dispatch fixture Runtime.Observe ["instance_id",str id] |> unwrap);
+      await clock (fun () -> number "observation_seq" (inspect fixture id)>held);
+      check int "the held observation commits before the next sequence" (held+1)
+        (number "observation_seq" (inspect fixture id));
+      check int "the binding names the next commit" (held+1) (bound ());
+      check string "the next commit settles the lane" "attached" (phase ());
+      check string "the held observation is never rewritten" bytes (Fs_compat.load_file record);
+      detach clock fixture id))) [true;false]
+
 let test_confirmed_receipt_requires_result () = with_fixture (fun clock fixture ->
   let id = attach clock fixture ~acting:true in
   let request_id = "retained-confirmation" in
@@ -647,6 +706,7 @@ let () = run "Lane action workflow" ["optional world actions",[
   test_case "terminal and fallback publication failures keep hot uncertainty without replay" `Quick test_failed_terminal_and_fallback_keep_hot_uncertainty;
   test_case "cold terminal receipt requires file and parent sync and exact identity" `Quick test_cold_receipt_requires_sync_and_same_file_identity;
   test_case "observation rename failure preserves sequence and unknown action without replay" `Quick test_observation_publication_keeps_sequence_and_action_uncertainty;
+  test_case "binding publication commits the held observation without rewriting it" `Quick test_binding_publication_commits_the_held_observation;
   test_case "persisted confirmation requires its received result without replay" `Quick test_confirmed_receipt_requires_result;
   test_case "queued receipt, normalized dedup and retained output" `Quick test_one_request_one_effect;
   test_case "identity, schema and actor before effect" `Quick test_validation_precedes_effect;

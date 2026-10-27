@@ -29,6 +29,7 @@ type dynamic_tool_result =
   ; content : string
   ; content_blocks : Agent_core.Types.content_block list option
   ; abort_turn : host_stop option
+  ; on_response_sent : (unit -> unit) option
   }
 
 type loading =
@@ -174,3 +175,26 @@ let mcp_tool_result_content ~success ~content ~content_blocks =
       ; `Assoc [ "type", `String "text"; "text", `String (Llm_provider.Utf8_sanitize.sanitize content) ]
       ]
     , true )
+
+let response_observer transport (result : dynamic_tool_result) =
+  match result.on_response_sent with
+  | None -> None
+  | Some observer ->
+    let text_is_valid = match result.content_blocks with
+      | None -> String_util.is_valid_utf8 result.content
+      | Some blocks -> List.for_all (function
+          | Agent_core.Types.Text text -> String_util.is_valid_utf8 text
+          | Agent_core.Types.Image _ | Audio _ | Document _ | Thinking _
+          | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _ -> true) blocks in
+    if not text_is_valid then None
+    else match project_content transport ~content:result.content ~content_blocks:result.content_blocks with
+      | Ok _ -> Some observer
+      | Error _ -> None
+
+let notify_response_sent observer =
+  Option.iter (fun observer ->
+    try observer () with exn ->
+      if Keeper_operator_interrupt.is_operator_interrupt exn then raise exn;
+      Llm_provider.Reserved_exn.reraise_if_reserved exn;
+      Log.Runtime_agent.warn "official-client response observer failed after write: %s"
+        (Printexc.to_string exn)) observer

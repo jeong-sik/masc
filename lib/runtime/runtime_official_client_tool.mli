@@ -50,6 +50,13 @@ type dynamic_tool_result =
         outcome, then stops the provider loop instead of admitting another
         tool call. The typed reason must remain a checkpoint terminal rather
         than being projected as a provider failure. *)
+  ; on_response_sent : (unit -> unit) option
+    (** Observe only the actual complete transport response write. Preparing or
+        buffering a response, starting a tool, and receiving a vendor terminal
+        do not invoke it. The callback is specific to this physical returned
+        result and must not be looked up by a reusable client request ID.
+        It is an observation of canonical projected content, not an ACK or a
+        claim that the provider consumed the result. See [response_observer]. *)
   }
 
 (** How a client should load one dynamic tool's definition. The Keeper's tool
@@ -96,6 +103,20 @@ val dynamic_tool_bytes : dynamic_tool list -> int
     schema lengths. Bytes this process sends, not provider tokens. *)
 
 type content_transport = Codex | Mcp
+
+val response_observer :
+  content_transport -> dynamic_tool_result -> (unit -> unit) option
+(** Bind the optional observer only when the original model-visible content
+    can be projected without substitution or UTF-8 repair. [None] also covers
+    results without an observer. Preparing this callback does not invoke it. *)
+
+val notify_response_sent : (unit -> unit) option -> unit
+(** Invoke after the complete response write. Observers must be short, pure
+    state updates; they must not perform I/O. Ordinary observer exceptions are
+    reported without reclassifying an already written response as undelivered.
+    Reserved cancellation and operator interrupts still propagate. This is
+    transport delivery evidence, never vendor consumption or permission to ACK. *)
+
 
 val official_client_image_media_types : string list
 (** The closed media-type set an official-client image item accepts, on either

@@ -202,6 +202,7 @@ type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result =
   ; content : string
   ; content_blocks : Agent_core.Types.content_block list option
   ; abort_turn : host_stop option
+  ; on_response_sent : (unit -> unit) option
   }
 
 type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
@@ -704,7 +705,7 @@ type outbound_frame =
       }
 
 type io =
-  { send : outbound_frame -> Yojson.Safe.t -> unit
+  { send : ?on_response_sent:(unit -> unit) -> outbound_frame -> Yojson.Safe.t -> unit
   ; receive : unit -> (wire_message, error) result
   ; set_receive_phase : receive_phase -> unit
   }
@@ -805,6 +806,7 @@ let send_dynamic_tool_response io ~thread_id ~id (result : dynamic_tool_result) 
             `String (Llm_provider.Utf8_sanitize.sanitize result.content) ] ]
   in
   io.send
+    ?on_response_sent:(Runtime_official_client_tool.response_observer Codex result)
     (Context
        { method_ = Dynamic_tool_response; id = Answered_request_id id; thread_id = Some thread_id })
     (`Assoc
@@ -836,7 +838,7 @@ let handle_dynamic_tool_call io ~tools ~terminal_tools_closed ~thread_id ~turn_i
        host effect or killing the client before it records the returned result. *)
     send_dynamic_tool_response io ~thread_id ~id
       { success = false; content = "A terminal tool already completed. No further tools are admitted in this turn. Preserve its result and finish with your progress reply.";
-        content_blocks = None; abort_turn = None };
+        content_blocks = None; abort_turn = None; on_response_sent = None };
     Ok ())
   else
     match find_dynamic_tool tools tool_name with
@@ -859,7 +861,7 @@ let handle_dynamic_tool_call io ~tools ~terminal_tools_closed ~thread_id ~turn_i
             (Printexc.to_string exn);
           { success = false
           ; content = "dynamic tool handler raised"
-          ; content_blocks = None; abort_turn = None
+          ; content_blocks = None; abort_turn = None; on_response_sent = None
           }
       in
       incr tool_call_count;
@@ -1692,7 +1694,7 @@ type turn_input =
       { call_id : string
       ; tool_name : string
       ; arguments : Yojson.Safe.t
-      ; response : (outbound_frame * Yojson.Safe.t) option
+      ; response : (outbound_frame * Yojson.Safe.t * (unit -> unit) option) option
       ; outcome : (unit, error) result
       }
 
@@ -1798,12 +1800,12 @@ let with_turn_dispatch io ~await_handoff ~handoff ~terminal_tools_closed
             (* Only the consumer writes stdin and its context receipts. The
                worker retains the exact response until that consumer can
                decide whether the vendor turn still exists. *)
-            let tool_io = { io with send = (fun frame json -> response := Some (frame, json)) } in
+            let tool_io = { io with send = (fun ?on_response_sent frame json -> response := Some (frame, json, on_response_sent)) } in
             let outcome =
               if !vendor_closed && tool.call_effect arguments = Agent_core.Tool.Effect_possible then begin
                 send_dynamic_tool_response tool_io ~thread_id ~id
                   {success = false; content = "The vendor turn ended before this call started. No execution was attempted. Reassess the request in the next turn.";
-                   content_blocks = None; abort_turn = None};
+                   content_blocks = None; abort_turn = None; on_response_sent = None};
                 Ok ()
               end else
                 handle_dynamic_tool_call tool_io ~tools ~terminal_tools_closed
@@ -1824,7 +1826,7 @@ let with_turn_dispatch io ~await_handoff ~handoff ~terminal_tools_closed
         decr pending;
         let delivery = match response with
          | None -> Ok ()
-         | Some (frame, json) ->
+         | Some (frame, json, on_response_sent) ->
            let retain () =
              on_undelivered_tool_result
                {thread_id; turn_id; call_id; tool_name; arguments; response = json}
@@ -1832,7 +1834,8 @@ let with_turn_dispatch io ~await_handoff ~handoff ~terminal_tools_closed
                   {stage = "undelivered tool result"; detail}) in
            if !vendor_closed then retain ()
            else
-             (try io.send frame json; Ok () with
+             (try io.send ?on_response_sent frame json; Ok () with
+              | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
               | Idle_timeout seconds ->
                 close_delivery ();
                 stopped := Some (Timeout {seconds; turn_accepted = true});
@@ -2919,7 +2922,7 @@ let with_spawned_client ?(on_context_submission = fun _ -> ()) ~mgr ~clock ~cwd 
       `Stop_daemon);
     let reader = Eio.Buf_read.of_flow ~max_size:max_wire_line_bytes stdout_r in
     let receive_phase = ref Awaiting_admission in
-    let send frame json =
+    let send ?on_response_sent frame json =
       let observation = with_idle_timeout clock
         config.admission_timeout_s
         (fun () ->
@@ -2946,6 +2949,7 @@ let with_spawned_client ?(on_context_submission = fun _ -> ()) ~mgr ~clock ~cwd 
           Eio.Flow.copy_string "\n" stdin_w;
           observation)
       in
+      Runtime_official_client_tool.notify_response_sent on_response_sent;
       (* Persistence is outside the write deadline. A completed frame must not
          become an input-write failure because its observer is slow. A deadline
          the observer raises itself ([Eio.Time.Timeout] from its own

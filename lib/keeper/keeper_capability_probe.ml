@@ -348,7 +348,7 @@ let recording_dynamic_tool ~(schema : Masc_domain.tool_schema) ~seen =
         seen := schema.name :: !seen;
         { Runtime_official_client_tool.success = true
         ; content = "probe acknowledged; no side effect performed"
-        ; content_blocks = None; abort_turn = None
+        ; content_blocks = None; abort_turn = None; on_response_sent = None
         })
   }
 ;;

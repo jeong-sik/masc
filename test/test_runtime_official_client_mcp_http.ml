@@ -409,6 +409,54 @@ let test_turn_scoped_capability_and_protocol () =
     snapshot.negotiated_protocol_version
 ;;
 
+let test_physical_response_observer_with_reused_string_id () =
+  Eio_main.run @@ fun env ->
+  Eio.Time.with_timeout_exn env#clock 5.0 @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let cases = [|
+    "first original", None, true;
+    "invalid\255", Some [Agent_core.Types.Text "invalid\255"], false;
+    "image fallback", Some [Agent_core.Types.Image
+      {media_type="image/tiff"; data="AAAA"; source_type=Base64}], false;
+    "second original", None, true |] in
+  let completions = Array.init (Array.length cases) (fun _ -> Eio.Promise.create ()) in
+  let next = ref 0 in
+  let delivered = ref [] and call_ids = ref [] in
+  let call_tool ~name:_ ~call_id ~arguments:_ =
+    let index = !next in
+    incr next;
+    call_ids := call_id :: !call_ids;
+    let content, content_blocks, _ = cases.(index) in
+    let result : Runtime_official_client_tool.dynamic_tool_result =
+      {success=true; content; content_blocks; abort_turn=None;
+       on_response_sent=Some (fun () -> delivered := index :: !delivered)} in
+    let observer = Runtime_official_client_tool.response_observer Mcp result in
+    Some { Runtime_official_client_mcp_http.outcome =
+      {success=result.success; content=result.content; content_blocks=result.content_blocks};
+      after_response_sent=(fun () ->
+        Runtime_official_client_tool.notify_response_sent observer;
+        Eio.Promise.resolve (snd completions.(index)) ()) } in
+  let bridge = Runtime_official_client_mcp_http.start ~sw ~net:env#net
+    ~secure_random:env#secure_random ~server_name:"masc"
+    ~tool_specs:(fun () -> []) ~call_tool () in
+  let endpoint, authorization = config_fields bridge in
+  let protocol_version = initialize_session ~sw ~net:env#net ~endpoint ~authorization in
+  Array.iteri (fun index (_, _, expected_delivery) ->
+    let body = Yojson.Safe.to_string (`Assoc [
+      "jsonrpc", `String "2.0"; "id", `String "same";
+      "method", `String "tools/call";
+      "params", `Assoc ["name", `String "probe"; "arguments", `Assoc []]]) in
+    let response = request ~protocol_version ~sw ~net:env#net ~endpoint ~authorization body in
+    check int "physical HTTP response completed" 200 response.status;
+    Eio.Promise.await (fst completions.(index));
+    check bool "only the original projectable result is observed" expected_delivery
+      (List.mem index !delivered)) cases;
+  check (list int) "separate physical responses retain their own closures" [0;3]
+    (List.rev !delivered);
+  check (list string) "all client request IDs were deliberately reused"
+    ["same";"same";"same";"same"] (List.rev !call_ids)
+;;
+
 let test_callback_failures_do_not_poison_protocol_state () =
   Eio_main.run
   @@ fun env ->
@@ -766,6 +814,9 @@ let () =
         ; test_case "the config declares the given tools eager" `Quick
             test_config_declares_the_given_tools_eager
         ] )
+    ; ( "response delivery"
+      , [ test_case "reused string ID keeps physical delivery and substitution separate"
+            `Quick test_physical_response_observer_with_reused_string_id ] )
     ; ( "effect boundary"
       , [ test_case "turn cancellation reaches active callback without poisoning dispatch" `Quick
             test_turn_cancel_reaches_active_tool_and_releases_dispatch

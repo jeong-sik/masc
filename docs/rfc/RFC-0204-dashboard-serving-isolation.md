@@ -189,7 +189,23 @@ POST·PUT·DELETE 와 `/mcp` 도구 호출은 `Background` 그대로다. 무거�
 - 캐시 계산의 lane 은 그 값을 기다리는 쪽이 정한다. 캐시가 비어 읽기가 직접 계산하면(`Compute`) 그 계산은 `Read` 다. 읽기가 옛 값으로 바로 답하고 fork 하는 SWR 재계산은 기다리는 요청이 없으니 `Background` 다. 이 재계산은 계산 예산이 8~120초라, `Read` 로 두면 읽기 풀 1~2 domain 을 다 쓸 수 있다.
 - GET 이 닿는 배경 갱신 fork 는 일곱 곳이고, 모두 fork 한 fiber 안을 `Pool_lane.with_background` 로 감싼다: `Dashboard_cache` SWR, `Operator_control_snapshot_cache` SWR, `Server_dashboard_http_namespace_truth` shell 갱신, `Server_dashboard_http_runtime_info` 의 git 갱신과 runtime probe 갱신, `Dashboard_briefing_sections` 비동기 갱신, `Runtime_provider_usage_read` 배경 읽기. fork 가 안 돼 그 자리에서 계산하는 경로는 호출자가 기다리므로 감싸지 않는다. 새 배경 갱신 fork 를 만들면 같이 감싼다. 빠뜨리면 그 일은 읽기 풀에서 돌고, `pool_wait.read.run` 의 긴 꼬리로 보인다.
 - 남는 경우: 키가 아예 없을 때(부팅 직후, eviction, invalidate 뒤) 배경 fiber 가 시작한 계산을 읽기가 `Wait` 으로 기다리면, 읽기는 배경 풀의 계산을 기다린다. 옛 값이 있는 동안에는 생기지 않는다.
-- 다른 fiber 의 계산을 기다리는 일은 풀 job 밖, 요청 fiber 에서 한다. L4b 에서 `run_dashboard_compute` 안에서 캐시를 기다리는 경로를 모두 찾아, 풀에 넣는 범위를 계산 부분으로 좁힌다.
+- 다른 fiber 의 계산을 풀 job 안에서 기다리지 않게 한다(L4b, 아래).
+
+#### L4b: 줄 선 계산은 기다리는 job 이 맡는다
+
+풀 job 무게는 1.0 이라, job 이 캐시를 기다리며 쉬는 동안 그 worker 는 다른 일을 받지 않는다. `run_dashboard_compute` 11곳 중 6곳과 캐시 계산 안의 중첩 조회 4갈래가 job 안에서 `Dashboard_cache` 를 조회한다(`docs/evidence/2026-10-27-read-pool-contention/cache-wait-in-pool-jobs.md`). 가장 나쁜 경우는 순서가 꼬이는 것이다. 요청 fiber 가 키의 owner 이고 계산을 같은 풀에 넣었는데, 그 풀의 worker 를 같은 키를 기다리는 job 이 쥐고 있다. 계산은 job 이 비켜야 시작하고, job 은 계산이 끝나야 비킨다. 기다림 timeout 까지 아무것도 안 된다. 같은 키를 HTTP/2 는 요청 fiber 에서, HTTP/1 은 job 안에서 조회하는 곳이 셋 있어 실제로 생길 수 있다.
+
+호출 지점마다 조회를 job 밖으로 옮기지 않는다. 중첩이 4단(briefing → projection → operator snapshot → Keeper 마다의 키)이고, 같은 수정을 열 곳 넘게 따로 해야 한다. `Dashboard_cache` 한 곳에서 고친다.
+
+- `Computing` 칸에 계산을 누가 맡았는지 표시하는 `claimed : bool Atomic.t` 와 결과 promise 를 둔다.
+- owner 의 계산 job 은 시작할 때 `claimed` 를 CAS 로 잡는다. 잡으면 계산한다. 못 잡으면 바로 끝나 worker 를 내놓고, owner 는 자기 fiber 에서 결과 promise 를 기다린다.
+- 풀 job 안의 조회가 `Wait` 를 만나고 `claimed` 가 비어 있으면(owner 계산이 아직 줄에 있으면) 잡고, 자기 compute 를 그 자리에서 돌린다. 이미 쥔 worker 를 쓰므로 자리를 더 쓰지 않는다. 결과는 owner 의 token 으로 칸에 쓰고 promise 를 푼다.
+- `claimed` 가 잡혀 있으면(계산이 도는 중이면) 지금처럼 기다린다. worker 를 쉬게 쥐는 시간은 그 계산 시간을 넘지 않는다. 요청 fiber 의 기다림은 worker 를 쓰지 않으므로 그대로 둔다.
+- 맡은 쪽 계산이 실패하거나 취소되면 promise 를 Error 로 풀고, 칸은 지금의 owner 실패 경로처럼 되돌린다. owner 의 timeout 은 promise 기다림도 감싼다.
+- 같은 키 계산은 한 번만 돈다. `claimed` 는 한 번만 잡힌다.
+- `Operator_control_snapshot_cache` 도 job 안에서 기다리지만 owner 가 계산을 풀에 넘기지 않고 자기 fiber 에서 바로 한다. 기다리는 job 은 도는 계산을 기다리므로 꼬이지 않는다. L4b 범위 밖이다.
+
+검증: 구현 전에 claim 경합·실패·취소를 TLA+ 로 적고, 버그 모델(owner 와 waiter 가 둘 다 계산, 실패 뒤 칸이 `Computing` 으로 남음)이 invariant 를 깨는지 본다. 시험은 읽기 풀 worker 1개로 짠다. (1) 요청 fiber owner 의 계산이 줄에 있고 job 안 조회가 같은 키를 기다리면 timeout 전에 끝나고 계산은 한 번 돈다. 지금 코드는 timeout 으로 실패한다. (2) claim 을 진 owner job 은 바로 worker 를 내놓는다. (3) 맡은 쪽이 실패하면 owner 가 Error 를 받고 칸이 정리된다. (4) 계산이 도는 중이면 job 안 조회는 기다리고 계산은 한 번 돈다.
 
 ### 3.5 domain 예산
 
@@ -270,7 +286,7 @@ goal `goal-read-api-p99-300-keepers-20261027` 의 판정 표다. 행마다 측�
 | L2 | `Pool_lane` 표시(풀 선택은 그대로), `Server_bootstrap_http` 의 GET/HEAD 표시(HTTP/1·HTTP/2), lane 별 풀 대기·실행 히스토그램을 `/health` 에 싣기 | 5.2 의 표시 시험, 히스토그램 구간 경계 |
 | L3 | 읽기 풀 생성과 domain 예산, 제출 함수 네 개의 풀 선택, 출처 모를 domain 찾기. L4a·L4b 와 같이 또는 그 뒤에 머지한다 | 5.1, 5.2 의 풀 선택 시험 |
 | L4a | 요청이 기다리지 않는 배경 갱신 fork 의 lane(3.4) | 5.2 의 캐시 시험 |
-| L4b | 캐시 대기를 풀 job 밖으로(3.4) | 풀 job 안의 대기가 읽기 worker 를 쥐지 않는다 |
+| L4b | 줄 선 캐시 계산을 기다리는 job 이 맡는다(3.4 L4b) | TLA+ claim 모델, 3.4 L4b 시험 넷 |
 | L5 | codec 풀의 대기·실행 시간을 `/health` 에 싣고 그 값으로 크기 정하기 | 예산 합이 코어 수 이하 |
 | L6 | 수용 측정 기록, status 갱신 | 5.3 |
 

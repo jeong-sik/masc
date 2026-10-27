@@ -533,11 +533,15 @@ let handle_tool_execute_typed
            host program of that name (#32730).  A refusal reads as a typed
            refusal with its own code; both refusals travel the same failure
            shape below. *)
+        (* Lowering classifies the cwd with realpath; it performs no Eio
+           effect, so it runs on a host system thread instead of holding
+           this domain while the kernel answers (#46410). *)
         let shell_ir_error =
           match
-            Keeper_tool_execute_typed_input.to_shell_ir
-              ~sandbox:dispatch_sandbox
-              input
+            Systhread_host.run ~label:"execute-shell-lowering" (fun () ->
+              Keeper_tool_execute_typed_input.to_shell_ir
+                ~sandbox:dispatch_sandbox
+                input)
           with
           | Error e ->
             Error (typed_validation_error_text e, "typed_validation_failed")
@@ -785,10 +789,14 @@ let handle_tool_execute_typed
              it. Kept because the predicate is about the type, not about
              which caller happens to be the last one standing. *)
           let lowered = not (Keeper_tooling.Shell_costume.ir_keeps_a_shell ir) in
+          (* Classifying the script parses it and realpaths its redirect
+             targets, with no Eio effect: a host system thread, as for the
+             lowering above. *)
           let costume_findings =
-            Keeper_tool_execute_typed_input.hidden_script_findings
-              ~sandbox:dispatch_sandbox
-              input
+            Systhread_host.run ~label:"execute-shell-costume" (fun () ->
+              Keeper_tool_execute_typed_input.hidden_script_findings
+                ~sandbox:dispatch_sandbox
+                input)
           in
           List.iter
             (fun (shell, finding) ->

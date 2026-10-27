@@ -70,15 +70,7 @@ let validate_paths ?requires_existing_dir ?sandbox ~workdir ir =
   Exec_policy.validate_shell_ir_paths ~requires_existing_dir ~workdir ~extra_roots ir
 ;;
 
-let dispatch
-      ?(allow_pipes = true)
-      ~workdir
-      ~sandbox
-      ?base_host_env
-      ?timeout_sec
-      ?on_output_chunk
-      ir
-  =
+let admit ~allow_pipes ~workdir ~sandbox ir =
   let gate_verdict =
     Shell_gate.gate_typed
       ~ir
@@ -93,11 +85,34 @@ let dispatch
   | Shell_gate.Allow _context ->
     (match validate_paths ~sandbox ~workdir ir with
      | Error error -> Error (Path_reject error)
-     | Ok () ->
-       Ok
-         (Masc_exec.Exec_dispatch.dispatch
-            ?base_host_env
-            ?timeout_sec
-            ?on_output_chunk
-            ir))
+     | Ok () -> Ok ())
+;;
+
+(* The gate and the path check stat and realpath the command's paths, one
+   ancestor at a time for a path that does not exist. On the caller's fiber
+   each call held the caller's whole domain until the kernel answered; Keeper
+   turns call from the main domain, so HTTP waited behind it (#46410). Neither
+   performs an Eio effect, so both run on a host system thread. The command
+   itself still runs on the caller's fiber. *)
+let dispatch
+      ?(allow_pipes = true)
+      ~workdir
+      ~sandbox
+      ?base_host_env
+      ?timeout_sec
+      ?on_output_chunk
+      ir
+  =
+  match
+    Systhread_host.run ~label:"execute-shell-admission" (fun () ->
+      admit ~allow_pipes ~workdir ~sandbox ir)
+  with
+  | Error _ as error -> error
+  | Ok () ->
+    Ok
+      (Masc_exec.Exec_dispatch.dispatch
+         ?base_host_env
+         ?timeout_sec
+         ?on_output_chunk
+         ir)
 ;;

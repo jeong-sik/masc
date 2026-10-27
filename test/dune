@@ -2594,6 +2594,7 @@
 
 (include stanzas/test_exec_policy_containment.inc)
 (include stanzas/test_exec_policy_log_sanitize.inc)
+(include stanzas/test_execute_shell_host_admission.inc)
 (include stanzas/test_lane_cli_probe_args.inc)
 
 (include stanzas/test_artifacts_upload.inc)

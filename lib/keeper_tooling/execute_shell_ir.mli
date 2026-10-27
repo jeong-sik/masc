@@ -57,4 +57,7 @@ val dispatch :
   (Masc_exec.Exec_dispatch.dispatch_result, dispatch_error) result
 (** Validate a structured command and dispatch it:
     typed gate -> path boundary -> sandbox-aware execution.  Authorization is
-    an outer product concern and is deliberately absent from this adapter. *)
+    an outer product concern and is deliberately absent from this adapter.
+    The gate and the path boundary stat and realpath the command's paths, so
+    they run through {!Systhread_host.run}, which chooses their thread's
+    domain; the execution runs on the caller's fiber. *)

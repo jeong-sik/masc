@@ -26,13 +26,18 @@ type error =
   | Ego_unusable of { path : string; detail : string }
   | Ego_unstartable of { path : string; detail : string }
   | Table_refused of string
-  | Space_held_by_operator of { space : string; space_id : int }
-  | Spaces_unanswered of { path : string; space : string; detail : string }
-  | Spaces_unreadable of { path : string; space : string; detail : string }
+  | Space_held_by_operator of { space : Browser_configuration.ego_space; space_id : int }
+  | Spaces_unanswered of { path : string; space : Browser_configuration.ego_space; detail : string }
+  | Spaces_unreadable of { path : string; space : Browser_configuration.ego_space; detail : string }
   | Configuration_changed
   | Not_written of string
 
 let table_path = "browser.live.ego"
+(* How a message names the configured Space: a name quoted, an exact ID as a
+   number, since a quoted number is a name (RFC-browser-live-ego). *)
+let space_label = function
+  | Browser_configuration.Named_space name -> Printf.sprintf "%S" name
+  | Existing_space id -> Printf.sprintf "id %d" id
 
 let error_message = function
   | Configuration_missing path ->
@@ -62,20 +67,20 @@ let error_message = function
       reason
   | Space_held_by_operator { space; space_id } ->
     Printf.sprintf
-      "The ego task space %S (id %d) belongs to the operator, and masc does not take over a \
+      "The ego task space %s (id %d) belongs to the operator, and masc does not take over a \
        space the operator made. Name another with --ego-space."
-      space space_id
+      (space_label space) space_id
   | Spaces_unanswered { path; space; detail } ->
     Printf.sprintf
       "The ego-browser at %s did not list ego lite's task spaces, so whether the operator \
-       holds %S is unknown: %s. Open ego lite and run this again."
-      path space detail
+       holds %s is unknown: %s. Open ego lite and run this again."
+      path (space_label space) detail
   | Spaces_unreadable { path; space; detail } ->
     Printf.sprintf
       "The ego-browser at %s answered the task space list in a form masc does not read, so \
        whether the operator holds %S is unknown: %s. Running this again will not help until \
        masc and ego lite agree; update the one that is older."
-      path space detail
+      path (space_label space) detail
   | Configuration_changed ->
     Printf.sprintf "runtime.toml changed while this ran, so [%s] was not written. Run this again."
       table_path
@@ -176,7 +181,7 @@ let space_is_free ~(table : Browser_configuration.live_ego) =
      (* [run_argv_with_status_split_or_refusal] synthesises 124 on its own timeout. *)
      | Unix.WEXITED 124 -> failed Browser_ego_peer.Timed_out
      | Unix.WEXITED 0 ->
-       (match Browser_ego_peer.named_spaces ~space:table.space output with
+       (match Browser_ego_peer.matching_spaces ~space:table.space output with
         | Error (Browser_ego_peer.Spaces_failed detail) -> unanswered detail
         | Error (Browser_ego_peer.Spaces_malformed detail) ->
           Error (Spaces_unreadable { path = table.command; space = table.space; detail })

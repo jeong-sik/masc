@@ -166,7 +166,7 @@ let answer output =
       | _ -> Error (Unreadable "ego-browser nodejs answered outside its answer frame")
 
 type spaces_failure = Spaces_failed of string | Spaces_malformed of string
-let named_spaces ~space output =
+let matching_spaces ~space output =
   let* value = match answer output with
     | Ok value -> Ok value
     (* ego threw inside the frame, for one that could not reach ego lite. *)
@@ -177,7 +177,10 @@ let named_spaces ~space output =
     | `Assoc _ as listed ->
       (match field "spaceId" listed, field "name" listed, field "ownership" listed with
        | Some (`Int space_id), Some (`String name), Some (`String wire) ->
-         if not (String.equal name space) then Ok None
+         let matches=match space with
+           | Browser_configuration.Named_space wanted -> String.equal name wanted
+           | Existing_space id -> space_id=id in
+         if not matches then Ok None
          else (match space_owner_of_wire wire with
           | Some owner -> Ok (Some (space_id, owner))
           | None -> Error (Spaces_malformed (Printf.sprintf "ego named the owner of task space %d %S, which masc does not know" space_id wire)))

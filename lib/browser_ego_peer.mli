@@ -59,7 +59,8 @@ type spaces_failure = Spaces_failed of string | Spaces_malformed of string
 (** The spaces called [space] in what {!task_spaces_script} wrote, compared
     exactly. A row without its number, name or owner, and an owner of a space
     of that name that is not a {!space_owner}, are errors, not guesses. *)
-val named_spaces : space:string -> string -> ((int * space_owner) list, spaces_failure) result
+val matching_spaces : space:Browser_configuration.ego_space -> string ->
+  ((int * space_owner) list, spaces_failure) result
 
 type t
 

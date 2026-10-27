@@ -138,7 +138,7 @@ let test_the_spaces_of_a_name_are_listed_without_opening_one () =
   check bool "it lists the spaces" true (contains script "await listTaskSpaces()");
   check bool "it opens no space" false (contains script "await taskSpace(");
   let read value = match value with
-    | Ok output -> Peer.named_spaces ~space:"masc" output
+    | Ok output -> Peer.matching_spaces ~space:(Browser_configuration.Named_space "masc") output
     | Error failure -> Error (Peer.Spaces_failed (Peer.run_failure_message failure)) in
   let listed ?(name="masc") id ownership = obj ["spaceId",`Int id;"name",str name;"ownership",str ownership] in
   check (result (list (pair int space_owner)) spaces_failure) "each space of that name, with its number and owner"
@@ -156,7 +156,7 @@ let test_the_spaces_of_a_name_are_listed_without_opening_one () =
   check bool "a failure the frame caught is a listing that failed" true
     (match read (failed "ego lite is not running") with Error (Peer.Spaces_failed _) -> true | Ok _ | Error (Peer.Spaces_malformed _) -> false);
   let unknown = Peer.open_space ~run_native:(fun _ -> Error (Peer.Unstarted "no native command in this fixture"))
-      ~downloads:no_downloads ~now ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) ~space:"masc"
+      ~downloads:no_downloads ~now ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) ~space:(Browser_configuration.Named_space "masc")
       ~run:(fun ~window_s:_ _ -> answered (obj ["spaceId",`Int 9;"ownership",str "team"])) in
   check bool "a connection still does not open on an owner masc does not know" true (Result.is_error unknown)
 
@@ -174,7 +174,7 @@ let test_the_listing_script_runs_under_node () =
     (match Unix.close_process_in channel with
      | Unix.WEXITED 0 -> ()
      | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> fail ("node did not run the listing script: " ^ output));
-    Peer.named_spaces ~space:"masc" output in
+    Peer.matching_spaces ~space:(Browser_configuration.Named_space "masc") output in
   check (result (list (pair int space_owner)) spaces_failure) "the operator's space of exactly that name"
     (Ok [36, Peer.Operator_owner])
     (run (String.concat "\n" [

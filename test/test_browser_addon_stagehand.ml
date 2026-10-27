@@ -33,7 +33,7 @@ let scenario () =
     let safe=match !claim,!configuration,!allocation with
       | Some admission,Some c,Some directory ->
         Result.is_ok (Lease.retire admission) && Result.is_ok (Chrome.settle c ~incarnation ~directory)
-        && Result.is_ok (Socket.cleanup ~admission ~directory:(Filename.concat root "worker-slot"))
+        && Result.is_ok (Socket.cleanup ~admission ~directory:(Filename.concat root "worker-slot") ~kept_root:(Filename.concat root "kept-files"))
       | None,None,None -> true
       | _ -> false in
     if safe then remove root else prerr_endline ("retained unconfirmed Chrome fixture: " ^ root)) (fun () ->
@@ -141,9 +141,10 @@ while True:
       let profile=Filename.concat (Filename.concat directory "chromium-profiles") first in
       Unix.symlink outside (Filename.concat profile "external-link");
       lease (Lease.retire admission);
-      (match ok (Socket.cleanup ~admission ~directory:(Filename.concat root "worker-slot")) with
-       | Socket.Allocation_released -> ()
-       | Allocation_retained -> Alcotest.fail "the allocation was retained, not released");
+      (match ok (Socket.cleanup ~admission ~directory:(Filename.concat root "worker-slot") ~kept_root:(Filename.concat root "kept-files")) with
+       | Socket.Cleanup_released -> ()
+       | Cleanup_kept _ -> Alcotest.fail "the allocation moved files the test never left"
+       | Cleanup_retained -> Alcotest.fail "the allocation was retained, not released");
       check "host cleanup released the original allocation" false (Sys.file_exists directory);
       check "profile cleanup never follows a symlink" true (Sys.file_exists outside);
       check "child admission ledger survives profile cleanup" true (Sys.file_exists (Filename.concat root "chrome-slot/lease"))))))

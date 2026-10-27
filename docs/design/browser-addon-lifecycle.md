@@ -225,9 +225,18 @@ receipts remain distinct from successful contract validation.
    reaches any browser it left. A loss during the worker's own stop only
    leaves its cleanup unconfirmed.
    The host additionally requires native group settlement, the original
-   allocation inode, its unchanged spec and empty download directory trees. It
-   removes only known regular files, the socket and empty directories. Changed
-   identity or downloaded bytes retain the allocation and refuse replacement.
+   allocation inode and its unchanged spec. It removes only known regular
+   files, the socket and empty directories. Files the browser left for the
+   Keeper (downloads, their host snapshots, uploads) are not a running
+   resource: once the group has settled and the inode is the original, their
+   trees move by rename into `<lane-addon store>/kept-files/<instance id>`
+   and the release goes on. The pass that moves them names that folder: in
+   the server log when it releases, or in its unconfirmed cleanup when a
+   later step fails. The host never copies, removes or reads them again; the
+   operator prunes `kept-files`. A link or a multiply linked file in those
+   trees, a destination that already holds a tree, a `kept-files` on another
+   device, or changed identity leaves the release unconfirmed and refuses
+   replacement.
    A session's profile is removed under its own lock when the session ends.
    geckodriver never removes a profile it was given
    ([geckodriver profiles](https://firefox-source-docs.mozilla.org/testing/geckodriver/Profiles.html)),

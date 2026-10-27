@@ -1559,20 +1559,33 @@ let native_directories store installation_id =
   [native_claim_directory store Installation_slot ~id:installation_id]
 let native_result result = Result.map_error (fun error ->
   Lifecycle.Cleanup_unconfirmed (Native_addon_lease.error_to_string error)) result
-let native_settlement claim =
+(* Where a released browser allocation's files for the Keeper go, one folder
+   per instance. The host never removes them. *)
+let native_kept_root store = Filename.concat (Lane_addon_store.root store) "kept-files"
+let native_settlement ~store claim =
   let* status = offload (fun () -> Native_addon_lease.status claim) |> native_result in
   match status with
   | Native_addon_lease.Settled ->
       (match Native_addon_lease.directories claim with
-       | directory::_ -> offload (fun () -> Browser_addon_socket.cleanup ~admission:claim ~directory)
-           |> Result.map_error (fun detail -> Lifecycle.Cleanup_unconfirmed detail)
+       | directory::_ ->
+           let* result = offload (fun () -> Browser_addon_socket.cleanup ~admission:claim ~directory
+               ~kept_root:(native_kept_root store))
+             |> Result.map_error (fun detail -> Lifecycle.Cleanup_unconfirmed detail) in
+           (match result with
+            | Browser_addon_socket.Cleanup_kept {directory;files} ->
+                Log.Misc.warn "Lane Add-on instance %s left %d file(s) for the Keeper; they were \
+                  moved to %s and its allocation was released" (Native_addon_lease.instance_id claim) files directory
+            | Cleanup_released | Cleanup_retained -> ());
+           Ok (match result with
+             | Browser_addon_socket.Cleanup_released | Cleanup_kept _ -> Browser_addon_socket.Allocation_released
+             | Cleanup_retained -> Allocation_retained)
        | [] -> Error (Lifecycle.Cleanup_unconfirmed "native claim has no host slot"))
   | Awaiting_exec | Live _ | Cleanup_pending _ ->
       Error (Lifecycle.Cleanup_unconfirmed "native claim has not settled")
 (* For the callers that only need the claim settled: a retained allocation is
    settled as well, and it is never removed by them. *)
-let native_settled claim =
-  Result.map (fun (_ : Browser_addon_socket.settlement) -> ()) (native_settlement claim)
+let native_settled ~store claim =
+  Result.map (fun (_ : Browser_addon_socket.settlement) -> ()) (native_settlement ~store claim)
 (* An allocation the operator retained is never reported as released, even
    when the binding still says Failed because its own write did not land. *)
 let native_release ~installation_id ~instance_id = function
@@ -1582,7 +1595,7 @@ let native_recover ~store ~installation_id ~instance_id =
   let* claim = offload (fun () -> Native_addon_lease.reopen
     ~directories:(native_directories store installation_id) ~instance_id) |> native_result in
   let* () = offload (fun () -> Native_addon_lease.request_termination claim) |> native_result in
-  let* settlement = native_settlement claim in
+  let* settlement = native_settlement ~store claim in
   Ok (native_release ~installation_id ~instance_id settlement)
 (* What the host still confirms before the operator takes an instance's
    resources over: the admission is Settled (its process and process group are
@@ -1632,7 +1645,7 @@ let prepare_native ~store ~installation_id ~instance_id ~cleanup_context ~is_liv
           (* This also recovers an orphan reservation if the server stopped
              between preparing it and saving its binding. Never re-admit it. *)
           let* () = offload (fun () -> Native_addon_lease.request_termination claim) |> native_result in
-          native_settled claim in
+          native_settled ~store claim in
   offload (fun () -> Native_addon_lease.prepare ~directories ~instance_id ~cleanup_context) |> native_result
 let native_package_ready (package : package) =
   let* () = match package.state_storage with
@@ -1735,7 +1748,7 @@ let backend ~store ~artifact_store () = match !override with
                   (match Eio.Cancel.protect (fun () -> offload (fun () -> Browser_addon_socket.acquire ~admission ~directory)) with
                    | Ok socket -> Ok (Some socket)
                    | Error detail -> let* ()=retire () in
-                       let* ()=native_settled admission in Error (Lifecycle.Worker_failed detail)) in
+                       let* ()=native_settled ~store admission in Error (Lifecycle.Worker_failed detail)) in
             let command=match socket with None -> command | Some socket ->
               {command with arguments=command.arguments @ Browser_addon_socket.arguments socket
                 ~max_message_bytes:(Lane_addon_types.max_reply_bytes package)
@@ -1753,7 +1766,7 @@ let backend ~store ~artifact_store () = match !override with
                 Option.iter Browser_addon_client.revoke !browser_client;
                 let* _receipt=Lane_addon_native_worker.stop worker
                   |> Result.map_error (fun error -> Lifecycle.Cleanup_unconfirmed (Lane_addon_native_worker.error_to_string error)) in
-                let* settlement=native_settlement admission in
+                let* settlement=native_settlement ~store admission in
                 let receipt=native_release ~installation_id ~instance_id settlement in
                 combined_release:=Some receipt;Ok receipt in
             let wrap ~ready worker =
@@ -1839,7 +1852,7 @@ let backend ~store ~artifact_store () = match !override with
                     | Error detail -> let* _receipt=stop_worker worker in
                         Error (Lifecycle.Worker_failed detail))
                | Error error -> let* () = retire () in
-                   let* () = native_settled admission in
+                   let* () = native_settled ~store admission in
                    Error (match error with
                     | Lane_addon_native_worker.Cleanup_unconfirmed detail -> Lifecycle.Cleanup_unconfirmed detail
                     | (Invalid_specification _ | Start_failed _ | Admission _ | Protocol _ | Stopped) as error ->
@@ -1848,7 +1861,7 @@ let backend ~store ~artifact_store () = match !override with
                Eio.Cancel.protect (fun () ->
                  match retire () with
                  | Error failure -> Log.Misc.error "Cancelled native retirement: %s" (Lifecycle.failure_detail failure)
-                 | Ok () -> match native_settled admission with
+                 | Ok () -> match native_settled ~store admission with
                    | Ok () -> ()
                    | Error failure -> Log.Misc.error "Cancelled native resources remain retained: %s" (Lifecycle.failure_detail failure));
                raise exn)

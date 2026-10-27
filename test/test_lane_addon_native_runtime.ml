@@ -172,8 +172,10 @@ let interrupted_reservation () = native_installation_with_slot (fun directory ->
   write (Filename.concat directory "intent.json") "") ()
 (* The operator takes over an instance whose cleanup was not confirmed. Only
    the operator may, only for that failure, and a refusal leaves the record as
-   it was. A browser allocation that holds an unsettled download stays where it
-   is, and no later recovery reports it released. *)
+   it was. A browser allocation that holds an unknown resource stays where it
+   is, and no later recovery reports it released. One that holds only a file
+   its browser left for the Keeper is released by recovery itself, after the
+   file moves to the store's kept files. *)
 let operator_retain () = with_fixture (fun clock root config ->
   let manifest = write_native_manifest root in
   let id = dispatch config R.Attach ["manifest_path",`String manifest;
@@ -202,7 +204,7 @@ let operator_retain () = with_fixture (fun clock root config ->
         "phase",Lane_addon_types.phase_to_json (Lane_addon_lifecycle.project state);
         "lifecycle",Lane_addon_lifecycle.state_to_json state]
         @ List.filter (fun (name,_) -> not (List.mem name replaced)) captured))) in
-  let unconfirmed = Lane_addon_lifecycle.Cleanup_unconfirmed "an unsettled download remains in the allocation" in
+  let unconfirmed = Lane_addon_lifecycle.Cleanup_unconfirmed "an unknown resource remains in the allocation" in
   let retain ?(access=Lane_addon_sources.Operator_configuration) id =
     R.dispatch ~caller:"retain-tester" ~access ~config ~operation:R.Retain (`Assoc ["instance_id",`String id]) in
   let still_failed id = match lifecycle id with
@@ -221,8 +223,8 @@ let operator_retain () = with_fixture (fun clock root config ->
   check string "an instance with no allocation left is found released" "native_released" (release_kind id);
   check bool "a detached instance is not retained again" true (Result.is_error (retain id));
   (* A browser allocation admitted under the record's own installation slot,
-     holding a download no worker settled. *)
-  let browser_instance () =
+     holding a file at [path] under it. *)
+  let browser_instance ~path =
     let instance_id = Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())) in
     let slot = Filename.concat (Filename.concat (Lane_addon_store.root store) "native-claims")
       (Lane_addon_store.digest instance_id) in
@@ -233,38 +235,42 @@ let operator_retain () = with_fixture (fun clock root config ->
         {Browser_addon_automation.driver="/fixture/geckodriver";binary=None;profiles="/fixture/gecko-profiles"})) in
     let admission = lease (Native_addon_lease.prepare ~directories:[slot] ~instance_id ~cleanup_context:(Some context)) in
     let allocation = require (Browser_addon_socket.acquire ~admission ~directory:slot) in
-    let downloads = Filename.concat (Filename.dirname (Browser_addon_socket.socket_path allocation)) "downloads" in
-    Unix.mkdir downloads 0o700;
-    let left = Filename.concat downloads "unsettled-download" in write left "kept";
+    let root = Filename.dirname (Browser_addon_socket.socket_path allocation) in
+    (match Filename.dirname path with
+     | "." -> ()
+     | parent -> Unix.mkdir (Filename.concat root parent) 0o700);
+    let left = Filename.concat root path in write left "kept";
     lease (Native_addon_lease.retire admission);
     seed ~instance_id ~authority:(Lane_addon_lifecycle.authority_to_json
       (Lane_addon_lifecycle.Native_admission {installation_id=instance_id})) unconfirmed;
-    (instance_id, admission, slot, left) in
+    (instance_id, admission, slot, root, left) in
+  (* A file only Stagehand's browser writes is unknown in an automation
+     allocation. *)
+  let unknown = "stagehand.json" in
   let cleanup_refused id = Result.is_error
     (R.dispatch ~caller:"retain-tester" ~access:Lane_addon_sources.Operator_configuration ~config
       ~operation:R.Detach (`Assoc ["instance_id",`String id])) in
-  let first, _, _, left = browser_instance () in
-  Fun.protect ~finally:(fun () -> remove (Filename.dirname (Filename.dirname left))) (fun () ->
-    check bool "recovery cannot release an allocation that holds an unsettled download" true (cleanup_refused first && still_failed first);
+  let first, _, _, allocation, left = browser_instance ~path:unknown in
+  Fun.protect ~finally:(fun () -> remove allocation) (fun () ->
+    check bool "recovery cannot release an allocation that holds an unknown resource" true (cleanup_refused first && still_failed first);
     ignore (dispatch config R.Retain ["instance_id",`String first]);
     check string "the operator's retention is recorded" "native_retained" (release_kind first);
-    check bool "the left download stays in place" true (Sys.file_exists left));
+    check bool "the unknown resource stays in place" true (Sys.file_exists left));
   (* The acquisition was retained but the binding still says Failed, as when
      the binding write of a retain did not land: recovery reports the
      retention, never a release. *)
-  let second, admission, slot, left = browser_instance () in
-  Fun.protect ~finally:(fun () -> remove (Filename.dirname (Filename.dirname left))) (fun () ->
+  let second, admission, slot, allocation, left = browser_instance ~path:unknown in
+  Fun.protect ~finally:(fun () -> remove allocation) (fun () ->
     check bool "the allocation is retained" true
       (match Browser_addon_socket.retain ~admission ~directory:slot with
        | Ok settlement -> settlement = Browser_addon_socket.Allocation_retained
        | Error (Browser_addon_socket.Retain_refused detail | Retained_record_unconfirmed detail) -> fail detail);
     ignore (dispatch config R.Detach ["instance_id",`String second]);
     check string "recovery of a retained allocation is not a release" "native_retained" (release_kind second);
-    check bool "the left download stays in place" true (Sys.file_exists left));
+    check bool "the unknown resource stays in place" true (Sys.file_exists left));
   (* A retain refused after the host began its checks leaves no cleanup marked
      in progress: a later Detach runs the cleanup and reports its failure. *)
-  let third, _, _, left = browser_instance () in
-  let allocation = Filename.dirname (Filename.dirname left) in
+  let third, _, _, allocation, _ = browser_instance ~path:unknown in
   let moved = allocation ^ ".original" in
   Unix.rename allocation moved; Unix.mkdir allocation 0o700;
   Fun.protect ~finally:(fun () -> remove allocation; remove moved) (fun () ->
@@ -274,7 +280,20 @@ let operator_retain () = with_fixture (fun clock root config ->
     check bool "the refused retain left no cleanup in progress" true
       (match R.dispatch ~caller:"retain-tester" ~access:Lane_addon_sources.Operator_configuration ~config
           ~operation:R.Detach (`Assoc ["instance_id",`String third]) with
-       | Error (R.Runtime_failed _) -> true | Ok _ | Error (R.Request_rejected _) -> false)))
+       | Error (R.Runtime_failed _) -> true | Ok _ | Error (R.Request_rejected _) -> false));
+  (* With only a download its browser left for the Keeper, recovery moves the
+     file to the store's kept files and releases the allocation: no operator
+     retain is needed. *)
+  let fourth, _, _, allocation, _ = browser_instance ~path:"downloads/unread-download" in
+  let kept = Filename.concat (Filename.concat (Lane_addon_store.root store) "kept-files") fourth in
+  Fun.protect ~finally:(fun () ->
+      if Sys.file_exists allocation then remove allocation;
+      if Sys.file_exists kept then remove kept) (fun () ->
+    ignore (dispatch config R.Detach ["instance_id",`String fourth]);
+    check string "recovery releases the allocation of a Keeper's file" "native_released" (release_kind fourth);
+    check bool "the allocation is gone" false (Sys.file_exists allocation);
+    check bool "the download is in the kept files" true
+      (Sys.file_exists (Filename.concat (Filename.concat kept "downloads") "unread-download"))))
 let browser_server = {|import argparse,hashlib,json,os,socket,subprocess,sys,threading,time
 p=argparse.ArgumentParser()
 p.add_argument("root");p.add_argument("mode")

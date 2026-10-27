@@ -52,7 +52,7 @@ let authorization_request
   Auth_oauth.validate_authorization_request
     ~base_path
     ~expected_resource:resource
-    ~fetch_client_metadata:(fun _ -> Error "this fixture fetches no document")
+    ~client_document:(Auth_oauth.Fetch_and_verify (fun _ -> Error "this fixture fetches no document"))
     ~response_type:(Some "code")
     ~client_id:(Some client_id)
     ~redirect_uri:(Some redirect_uri)

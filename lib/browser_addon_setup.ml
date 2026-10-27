@@ -368,12 +368,15 @@ let apply_package plan (backend, files) =
     ; missing_programs = missing_programs ~package_directory:directory package
     }
 
+type applied = { installed : installed list; refusal : error option }
+
 (* Packages are written one after another; a refusal leaves the ones before
-   it written and declared. *)
+   it written and declared, and they are returned with it. *)
 let apply plan =
-  List.fold_left
-    (fun installed package ->
-       let* installed = installed in
-       let* one = apply_package plan package in
-       Ok (installed @ [ one ]))
-    (Ok []) plan.packages
+  let rec go installed = function
+    | [] -> { installed = List.rev installed; refusal = None }
+    | package :: rest ->
+      (match apply_package plan package with
+       | Ok one -> go (one :: installed) rest
+       | Error error -> { installed = List.rev installed; refusal = Some error }) in
+  go [] plan.packages

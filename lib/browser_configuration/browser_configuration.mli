@@ -61,3 +61,26 @@ val parse : Otoml.t -> (t, string) result
     configuration loaded, such as [masc doctor]. [Error] says why the file
     cannot be read or its tables do not parse. *)
 val of_file : string -> (t, string) result
+
+(** The table one browser source starts from. *)
+type source_table =
+  | Automation_table of automation
+  | Stagehand_table of stagehand
+  | Live_bidi_table of live_bidi
+  | Live_ego_table of live_ego
+  | No_table  (** External hosts start from no table. *)
+
+(** Why a source does not start: its lane's [enabled = false], naming that
+    lane's table, or no table of its own, naming the table it needs. *)
+type unstarted = Switched_off of string | Table_missing of string
+
+(** The table [backend]'s source starts from: its own table, when that is
+    present and the lane it belongs to is switched on. A switched-off lane
+    keeps its paths, so the switch is read first. The runtime starts a
+    browser worker from this, and [masc browser-lane-setup] declares a
+    source's package only when this lets it start. *)
+val source_table : t -> Browser_lane.Backend.t -> (source_table, unstarted) result
+
+(** The reason in words, naming the table, for a sentence about one
+    runtime.toml. *)
+val unstarted_message : unstarted -> string

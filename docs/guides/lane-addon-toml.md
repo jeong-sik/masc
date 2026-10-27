@@ -85,7 +85,10 @@ Add-on 실행 파일 3개(`masc-native-addon-launcher`, `masc-browser-addon-work
 `masc-browser-process-owner`)를 masc와 같은 prefix에 설치한다. 그리고 새로 설치한 masc로
 `masc browser-lane-setup --mode addon`을 실행한다. 이 명령은 masc 바이너리에 들어 있는
 패키지를 workspace 가 쓰는 browser 출처마다 `.masc/packages/browser-<출처>`에 쓰고, 그 출처의
-선언이 없으면 `browser-<출처>.toml`을 만든다. 이미 있는 선언은 바꾸지 않는다. Add-on이 필요 없으면 `--no-browser-addon`을 준다. 그러면 실행
+선언이 없으면 `browser-<출처>.toml`을 만든다. workspace 가 쓰는 출처는 runtime.toml 에 자기 표가
+있고 그 lane 이 `enabled = false` 로 꺼져 있지 않은 출처, 그리고 native host 가 설치돼 있을 때의
+외부 호스트다. runtime 도 같은 규칙으로 worker 를 띄운다. 표가 없거나 꺼진 출처의 선언은 시작하지
+못하고, 패키지 줄이 그 이유를 보여 준다. 이미 있는 선언은 바꾸지 않는다. Add-on이 필요 없으면 `--no-browser-addon`을 준다. 그러면 실행
 파일을 빌드·설치하지 않고 선언도 그대로 두며, 브라우저 경로는 동작하지 않는다. 선택한 prefix를
 서버 프로세스의 `PATH`에 포함한다. release
 다운로드에는 이 실행 파일이 없다. 자세한 내용은 [Browser 패키지 안내](../../addons/browser/README.md)를 따른다.

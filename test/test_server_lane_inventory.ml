@@ -578,6 +578,7 @@ revision = "1"
 title = "Browser"
 runtime = "host_process"
 service = "browser"
+browser_backend = "external_host"
 command = ["masc-browser-addon-worker"]
 contributions = ["observe"]
 [resources]

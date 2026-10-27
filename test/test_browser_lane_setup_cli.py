@@ -206,6 +206,30 @@ class BrowserLaneSetupCommand(unittest.TestCase):
         self.assertEqual(declared(base), [], "nothing is declared")
         self.assertFalse((base / ".masc/packages").exists(), "no package is written")
 
+    # The runtime does not start a source whose lane is switched off, so setup
+    # does not declare it, even when the run writes its table.
+    def test_a_source_whose_lane_is_switched_off_is_not_declared(self):
+        root = self.scratch()
+        base = workspace(root)
+        runtime_toml(base).write_text(RUNTIME_TOML + STAGEHAND_TABLE + "enabled = false\n"
+                                      + "\n[browser.automation]\nenabled = false\n")
+        result = masc(root, "--mode", "automation", "--geckodriver", str(fake_geckodriver(root)),
+                      "--base-path", str(base))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("geckodriver = ", runtime_toml(base).read_text(), "the table is still written")
+        self.assertEqual(declared(base), [], "neither switched-off source is declared")
+
+    # Which sources a runtime.toml that does not parse runs is not known.
+    def test_a_runtime_toml_that_does_not_parse_is_refused(self):
+        root = self.scratch()
+        base = workspace(root)
+        runtime_toml(base).write_text(RUNTIME_TOML + STAGEHAND_TABLE + "[browser.stagehand\n")
+        result = masc(root, "--mode", "addon", "--base-path", str(base))
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("does not parse", result.stderr)
+        self.assertEqual(declared(base), [], "nothing is declared")
+        self.assertFalse((base / ".masc/packages").exists(), "no package is written")
+
     # A host installed earlier is the external hosts' source.
     def test_addon_declares_the_external_hosts_of_an_installed_host(self):
         root = self.scratch()

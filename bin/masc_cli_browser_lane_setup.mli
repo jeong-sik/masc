@@ -18,9 +18,13 @@
     [--mode addon] writes, for each browser source the workspace runs, the
     package this masc carries to [.masc/packages/browser-<source>] and
     declares it when the workspace has no declaration of that source
-    ({!Masc.Browser_addon_setup}). Every other mode does the
-    same after its host step, but there a refusal of that step is reported and
-    the mode's own steps go on; only [--mode addon] fails on it. [--no-addon]
+    ({!Masc.Browser_addon_setup}). A source runs when the runtime would start
+    it ({!Browser_configuration.source_table}), counting the tables this run
+    writes; external hosts run when a host is installed. A runtime.toml that
+    does not parse is refused. Every other mode does the same after its host
+    step and its tables, so a source is declared only once its table is
+    written; there a refusal of that step is reported and the mode's own
+    steps go on; only [--mode addon] fails on it. [--no-addon]
     skips the step for the other modes and contradicts [--mode addon].
 
     An option that the chosen modes do not use is refused, not ignored. *)

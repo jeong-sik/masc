@@ -287,6 +287,66 @@ extension = "/test/extension"
           stagehand = Some { chrome = "/test/chrome"; extension = "/test/extension"; profile = None }; _ } -> ()
    | _ -> fail "both backends can be configured together")
 
+(* Each source starts from its own table while its lane is switched on; the
+   runtime starts a worker from this and setup declares by it. A switched-off
+   lane keeps its paths, so the switch is read first. *)
+let test_a_source_starts_from_its_own_switched_on_table () =
+  let parse text = match Otoml.Parser.from_string_result text with
+    | Error detail -> fail detail
+    | Ok toml -> (match Browser_configuration.parse toml with Ok c -> c | Error detail -> fail detail) in
+  let tables = {|[browser.automation]
+geckodriver = "/test/geckodriver"
+
+[browser.stagehand]
+chrome = "/test/chrome"
+extension = "/test/extension"
+
+[browser.live.bidi]
+firefox = "/test/firefox"
+profile = "/test/profile"
+
+[browser.live.ego]
+command = "/test/ego-browser"
+space = "masc"
+|} in
+  let on = parse tables in
+  let source = Browser_configuration.source_table in
+  check bool "automation starts from [browser.automation]" true
+    (match source on Lane.Backend.Automation with
+     | Ok (Browser_configuration.Automation_table {driver = "/test/geckodriver"; _}) -> true | _ -> false);
+  check bool "Stagehand starts from [browser.stagehand]" true
+    (match source on Lane.Backend.Stagehand with
+     | Ok (Browser_configuration.Stagehand_table {chrome = "/test/chrome"; _}) -> true | _ -> false);
+  check bool "the owned Firefox starts from [browser.live.bidi]" true
+    (match source on Lane.Backend.Owned_firefox with
+     | Ok (Browser_configuration.Live_bidi_table {firefox = "/test/firefox"; _}) -> true | _ -> false);
+  check bool "ego starts from [browser.live.ego]" true
+    (match source on Lane.Backend.Ego with
+     | Ok (Browser_configuration.Live_ego_table {space = "masc"; _}) -> true | _ -> false);
+  check bool "external hosts start from no table" true
+    (source on Lane.Backend.External_host = Ok Browser_configuration.No_table);
+  let none = parse "" in
+  List.iter (fun (backend, table) ->
+      check bool ("no " ^ table ^ " table") true
+        (source none backend = Error (Browser_configuration.Table_missing table)))
+    [ Lane.Backend.Automation, "browser.automation"; Lane.Backend.Stagehand, "browser.stagehand"
+    ; Lane.Backend.Owned_firefox, "browser.live.bidi"; Lane.Backend.Ego, "browser.live.ego" ];
+  check bool "external hosts need no table" true
+    (source none Lane.Backend.External_host = Ok Browser_configuration.No_table);
+  let off = parse (tables ^ {|
+[browser.live]
+enabled = false
+|}) in
+  List.iter (fun backend ->
+      check bool (Lane.Backend.to_wire backend ^ " is off with its live lane") true
+        (source off backend = Error (Browser_configuration.Switched_off "browser.live")))
+    [ Lane.Backend.Owned_firefox; Lane.Backend.Ego ];
+  check bool "a live lane switched off leaves automation as it is" true
+    (Result.is_ok (source off Lane.Backend.Automation));
+  check bool "a switched-off lane is off before its missing table is" true
+    (source (parse "[browser.stagehand]\nenabled = false\n") Lane.Backend.Stagehand
+     = Error (Browser_configuration.Switched_off "browser.stagehand"))
+
 (* A keeper's first question is whether a session already exists. Every other
    verb answers that only by being refused, which costs a lane round trip and
    reads as a failure. Session_status answers it directly, from the backend's
@@ -1306,4 +1366,5 @@ let () = run "native Firefox lane" ["behavior", [
   test_case "console read uses the tab's context" `Quick test_console_read_uses_the_tabs_context;
   test_case "cookie values never leave the driver module" `Quick test_cookie_values_never_leave_the_driver_module;
   test_case "browser configuration" `Quick test_browser_configuration;
+  test_case "a source starts from its own switched-on table" `Quick test_a_source_starts_from_its_own_switched_on_table;
   test_case "each session lets its profile go once" `Quick test_each_session_lets_its_profile_go_once ]]

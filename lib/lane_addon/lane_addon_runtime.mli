@@ -630,6 +630,7 @@ val browser_observations : config:Workspace.config -> access:Lane_addon_sources.
 (** The cached observations of the browser installations the caller may
     read, found by their package's service and read per source they serve,
     as {!observation_for_export} reads one export: two installations of one
-    source are [Ambiguous_installations] for that source only, and a
-    detaching incarnation gives way to its replacement. Runs on the Lane
+    source are [Ambiguous_installations] for that source only. A released
+    installation is left out, and a detaching incarnation gives way to its
+    replacement. Runs on the Lane
     Add-on owner domain and waits for no browser command. *)

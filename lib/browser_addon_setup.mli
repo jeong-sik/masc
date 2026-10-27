@@ -83,13 +83,17 @@ val plan : base_path:string -> sources:Browser_lane.Backend.t list -> (plan, err
     package, more than one enabled declaration of one of [sources] and an
     embedded package that lists a file without bytes. Nothing is written. *)
 
-val apply : plan -> (installed list, error) result
+(** What {!apply} completed: the packages written and declared, in source
+    order, and the refusal that stopped it, if any. *)
+type applied = { installed : installed list; refusal : error option }
+
+val apply : plan -> applied
 (** For each source in turn, write its package, then read the Lane directory
     again and declare it when no declaration of the source loads. The
     declaration is created only if the file is still absent, through the
-    same writer as the dashboard editor. A refusal leaves the packages before
-    it written and declared. Refusals here come after the package was
-    written: [Package_unwritable], [Package_unloadable],
+    same writer as the dashboard editor. A refusal stops there and leaves the
+    packages before it written and declared, which [installed] lists.
+    Refusals here come after the refused source's package was written: [Package_unwritable], [Package_unloadable],
     [Embedded_package_invalid] for a manifest that is not the source's
     package, [Inventory_unreadable], [Declared_more_than_once],
     [Declaration_unloadable] and [Declaration_refused]. *)

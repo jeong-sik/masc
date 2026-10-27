@@ -100,10 +100,16 @@ let serves backend (declared : Config.declaration) =
 let wire (installed : S.installed list) =
   List.map (fun (one : S.installed) -> B.to_wire one.backend) installed
 
+(* Plan, then apply: a refusal of either, with what apply completed first. *)
+let install ~sources base =
+  match S.plan ~base_path:base ~sources with
+  | Error error -> [], Some error
+  | Ok plan -> let { S.installed; refusal } = S.apply plan in installed, refusal
+
 let installed ?(sources = B.all) base =
-  match Result.bind (S.plan ~base_path:base ~sources) S.apply with
-  | Ok installed -> installed
-  | Error error -> failf "install refused: %s" (S.error_message error)
+  match install ~sources base with
+  | installed, None -> installed
+  | _, Some error -> failf "install refused: %s" (S.error_message error)
 
 let installed_one base backend =
   match installed ~sources:[ backend ] base with
@@ -245,14 +251,14 @@ let test_two_enabled_declarations_of_one_source_are_refused () =
          write (Filename.concat (lane_directory base) (id ^ ".toml"))
            (declaration_text ~id ~manifest_path ()))
       [ "browser-one"; "browser-two" ];
-    match Result.bind (S.plan ~base_path:base ~sources:[ B.Automation; B.Ego ]) S.apply with
-    | Ok _ -> fail "two declarations of one source were accepted"
-    | Error (S.Declared_more_than_once { backend; paths }) ->
+    match install ~sources:[ B.Automation; B.Ego ] base with
+    | _, None -> fail "two declarations of one source were accepted"
+    | _, Some (S.Declared_more_than_once { backend; paths }) ->
       check string "the doubled source" (B.to_wire B.Automation) (B.to_wire backend);
       check int "both are named" 2 (List.length paths);
       check bool "nothing was written for any source" false
         (Sys.file_exists (packages_directory base))
-    | Error error -> failf "refused for another reason: %s" (S.error_message error))
+    | _, Some error -> failf "refused for another reason: %s" (S.error_message error))
 
 (* The server attaches only enabled declarations, so a disabled one beside
    the enabled one does not double the source. *)
@@ -340,13 +346,31 @@ let test_an_unloadable_declaration_of_the_id_is_left_and_reported () =
         ~manifest_path:(Filename.concat base "gone/lane.toml") ()
     in
     write broken text;
-    (match Result.bind (S.plan ~base_path:base ~sources:[ B.Automation ]) S.apply with
-     | Error (S.Declaration_unloadable { path; _ }) -> check string "the broken file" broken path
-     | Ok _ -> fail "a second declaration with the same id was accepted"
-     | Error error -> failf "refused for another reason: %s" (S.error_message error));
+    (match install ~sources:[ B.Automation ] base with
+     | _, Some (S.Declaration_unloadable { path; _ }) -> check string "the broken file" broken path
+     | _, None -> fail "a second declaration with the same id was accepted"
+     | _, Some error -> failf "refused for another reason: %s" (S.error_message error));
     check bool "no declaration of the automation package" false
       (Sys.file_exists (declaration_path base B.Automation));
     check string "the broken file is unchanged" text (read broken))
+
+(* Sources are applied in order. A refusal of a later one leaves the earlier
+   ones written and declared, and says which they are. *)
+let test_a_refusal_returns_the_sources_declared_before_it () =
+  with_workspace (fun base ->
+    write (Filename.concat (lane_directory base) "browser-checkout.toml")
+      (declaration_text ~id:(S.package_name B.Ego)
+         ~manifest_path:(Filename.concat base "gone/lane.toml") ());
+    match install ~sources:[ B.Ego; B.Automation ] base with
+    | installed, Some (S.Declaration_unloadable _) ->
+      check (list string) "the source applied before the refusal" [ B.to_wire B.Automation ]
+        (wire installed);
+      check bool "and its declaration is written" true
+        (Sys.file_exists (declaration_path base B.Automation));
+      check bool "the refused source is not declared" false
+        (Sys.file_exists (declaration_path base B.Ego))
+    | _, None -> fail "an unloadable declaration of ego was accepted"
+    | _, Some error -> failf "refused for another reason: %s" (S.error_message error))
 
 let test_a_workspace_without_a_config_root_is_refused () =
   with_workspace ~config:false (fun base ->
@@ -419,6 +443,8 @@ let () =
             test_a_declaration_whose_package_was_removed_is_kept
         ; test_case "an unloadable declaration of the id is left and reported" `Quick
             test_an_unloadable_declaration_of_the_id_is_left_and_reported
+        ; test_case "a refusal returns the sources declared before it" `Quick
+            test_a_refusal_returns_the_sources_declared_before_it
         ; test_case "a workspace without a config root is refused" `Quick
             test_a_workspace_without_a_config_root_is_refused
         ; test_case "a file this build does not carry is removed" `Quick

@@ -126,16 +126,17 @@ let parse_live_ego ~path = function
      | None, _ -> Error (path ^ ".command is required when the table is configured")
      | Some _, None -> Error (path ^ ".space is required when the table is configured"))
 
+let automation_path = browser_table ^ ".automation"
+let stagehand_path = browser_table ^ ".stagehand"
+let live_path = browser_table ^ ".live"
+let live_bidi_path = live_path ^ ".bidi"
+let live_ego_path = live_path ^ ".ego"
+
 let parse toml =
   let* root = table ~path:browser_table
     ~keys:["geckodriver"; "binary"; "live"; "automation"; "stagehand"]
     (Otoml.find_opt toml Fun.id [browser_table]) in
   let root = fields root in
-  let automation_path = browser_table ^ ".automation" in
-  let stagehand_path = browser_table ^ ".stagehand" in
-  let live_path = browser_table ^ ".live" in
-  let live_bidi_path = live_path ^ ".bidi" in
-  let live_ego_path = live_path ^ ".ego" in
   let* automation_table = table ~path:automation_path
     ~keys:["enabled"; "geckodriver"; "binary"] (List.assoc_opt "automation" root) in
   let* stagehand_table = table ~path:stagehand_path
@@ -164,3 +165,35 @@ let of_file path =
   match Otoml.Parser.from_file_result path with
   | Error detail -> Error detail
   | Ok toml -> parse toml
+
+type source_table =
+  | Automation_table of automation
+  | Stagehand_table of stagehand
+  | Live_bidi_table of live_bidi
+  | Live_ego_table of live_ego
+  | No_table
+type unstarted = Switched_off of string | Table_missing of string
+
+(* A switched-off lane keeps its paths, so the switch is read first. *)
+let source_table t (backend : Browser_lane.Backend.t) =
+  let from ~enabled ~lane ~path table wrap =
+    if not enabled then Error (Switched_off lane)
+    else match table with Some table -> Ok (wrap table) | None -> Error (Table_missing path) in
+  match backend with
+  | Automation ->
+    from ~enabled:t.automation_enabled ~lane:automation_path ~path:automation_path t.automation
+      (fun table -> Automation_table table)
+  | Stagehand ->
+    from ~enabled:t.stagehand_enabled ~lane:stagehand_path ~path:stagehand_path t.stagehand
+      (fun table -> Stagehand_table table)
+  | Owned_firefox ->
+    from ~enabled:t.live_enabled ~lane:live_path ~path:live_bidi_path t.live_bidi
+      (fun table -> Live_bidi_table table)
+  | Ego ->
+    from ~enabled:t.live_enabled ~lane:live_path ~path:live_ego_path t.live_ego
+      (fun table -> Live_ego_table table)
+  | External_host -> Ok No_table
+
+let unstarted_message = function
+  | Switched_off lane -> Printf.sprintf "[%s] enabled = false switches it off" lane
+  | Table_missing path -> Printf.sprintf "it has no [%s] table" path

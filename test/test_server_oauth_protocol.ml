@@ -62,10 +62,19 @@ let test_codex_discovery_contract () =
     let metadata = Server_oauth_metadata.authorization_server_json authority in
     let fields = Yojson.Safe.Util.to_assoc metadata in
     check
-      bool
-      "does not advertise authorization response iss"
-      false
-      (List.mem_assoc "authorization_response_iss_parameter_supported" fields);
+      (option bool)
+      "advertises authorization response iss (RFC 9207)"
+      (Some true)
+      (match List.assoc_opt "authorization_response_iss_parameter_supported" fields with
+       | Some (`Bool value) -> Some value
+       | Some _ | None -> None);
+    check
+      (option string)
+      "metadata issuer is the iss every authorization response carries"
+      (Some (Server_oauth_metadata.issuer authority))
+      (match List.assoc_opt "issuer" fields with
+       | Some (`String value) -> Some value
+       | Some _ | None -> None);
     check
       (list string)
       "PKCE S256 only"
@@ -307,9 +316,70 @@ let test_authorization_denial_redirects_with_state () =
               check (option string) "denial error" (Some "access_denied")
                 (Uri.get_query_param callback "error");
               check (option string) "denial preserves state" (Some "preserved-state")
-                (Uri.get_query_param callback "state")
+                (Uri.get_query_param callback "state");
+              check (option string) "denial names the issuer (RFC 9207)"
+                (Some "http://127.0.0.1:8935")
+                (Uri.get_query_param callback "iss")
             | Ok (Server_oauth_service.Authorization_form_error _) ->
               fail "denial rendered a form error instead of redirecting"
+            | Error error -> fail (Auth_oauth.show_error error)))))
+;;
+
+let test_authorization_approval_redirects_with_issuer () =
+  with_env "MASC_OAUTH_ENABLED" "1" (fun () ->
+    with_workspace (fun base_path ->
+      Eio_main.run (fun env ->
+        Fs_compat.set_fs (Eio.Stdenv.fs env);
+        Eio_guard.enable ();
+        Fun.protect
+          ~finally:(fun () ->
+            Eio_guard.disable ();
+            Fs_compat.clear_fs ())
+          (fun () ->
+            let bootstrap_token, _ =
+              match Auth.create_token base_path ~agent_name:"codex" ~role:Masc_domain.Worker with
+              | Ok created -> created
+              | Error error -> fail (Masc_domain.masc_error_to_string error)
+            in
+            let redirect_uri = "http://127.0.0.1:43133/callback/approve" in
+            let client =
+              Auth_oauth.register_client
+                ~base_path
+                ~client_name:(Some "Codex")
+                ~redirect_uris:[ redirect_uri ]
+              |> Result.get_ok
+            in
+            let body =
+              Uri.encoded_of_query
+                [ "response_type", [ "code" ]
+                ; "client_id", [ client.client_id ]
+                ; "redirect_uri", [ redirect_uri ]
+                ; "resource", [ "http://127.0.0.1:8935/mcp" ]
+                ; "scope", [ "mcp:tools" ]
+                ; "state", [ "approved-state" ]
+                ; "code_challenge", [ String.make 43 'a' ]
+                ; "code_challenge_method", [ "S256" ]
+                ; "bootstrap_token", [ bootstrap_token ]
+                ; "decision", [ "authorize" ]
+                ]
+            in
+            match
+              Server_oauth_service.authorize_post
+                ~base_path
+                ~authority:(authority ())
+                ~body
+            with
+            | Ok (Server_oauth_service.Authorization_redirect location) ->
+              let callback = Uri.of_string location in
+              check bool "approval carries a code" true
+                (Option.is_some (Uri.get_query_param callback "code"));
+              check (option string) "approval preserves state" (Some "approved-state")
+                (Uri.get_query_param callback "state");
+              check (option string) "approval names the issuer (RFC 9207)"
+                (Some (Server_oauth_metadata.issuer (authority ())))
+                (Uri.get_query_param callback "iss")
+            | Ok (Server_oauth_service.Authorization_form_error { message; _ }) ->
+              fail ("approval rendered a form error: " ^ message)
             | Error error -> fail (Auth_oauth.show_error error)))))
 ;;
 
@@ -384,6 +454,10 @@ let () =
             "authorization denial redirects with state"
             `Quick
             test_authorization_denial_redirects_with_state
+        ; test_case
+            "authorization approval redirects with issuer"
+            `Quick
+            test_authorization_approval_redirects_with_issuer
         ; test_case
             "string subset rejects duplicates"
             `Quick

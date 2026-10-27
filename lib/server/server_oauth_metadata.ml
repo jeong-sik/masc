@@ -8,6 +8,10 @@ let base_url authority =
     (Server_request_authority.rendered authority)
 ;;
 
+(* RFC 8414 section 2: the issuer has no query or fragment. The same value
+   is the [iss] of every authorization response (RFC 9207 section 2), so the
+   two cannot drift apart. *)
+let issuer = base_url
 let resource authority = base_url authority ^ "/mcp"
 
 let protected_resource_metadata_url authority =
@@ -28,7 +32,7 @@ let challenge authority =
 let protected_resource_json authority =
   `Assoc
     [ "resource", `String (resource authority)
-    ; "authorization_servers", `List [ `String (base_url authority) ]
+    ; "authorization_servers", `List [ `String (issuer authority) ]
     ; ( "scopes_supported"
       , `List
           (List.map
@@ -40,13 +44,14 @@ let protected_resource_json authority =
 
 let authorization_server_json authority =
   `Assoc
-    [ "issuer", `String (base_url authority)
+    [ "issuer", `String (issuer authority)
     ; "authorization_endpoint", `String (authorization_endpoint authority)
     ; "token_endpoint", `String (token_endpoint authority)
     ; "registration_endpoint", `String (registration_endpoint authority)
     ; "response_types_supported", `List [ `String "code" ]
     ; "grant_types_supported", `List [ `String "authorization_code"; `String "refresh_token" ]
     ; "code_challenge_methods_supported", `List [ `String "S256" ]
+    ; "authorization_response_iss_parameter_supported", `Bool true
     ; "token_endpoint_auth_methods_supported", `List [ `String "none" ]
     ; ( "scopes_supported"
       , `List

@@ -36,10 +36,13 @@ module Workspace = Masc.Workspace
 let rec rm_rf path =
   match Unix.lstat path with
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
-  | { Unix.st_kind = Unix.S_DIR; _ } ->
-      Array.iter (fun n -> rm_rf (Filename.concat path n)) (Sys.readdir path);
-      Unix.rmdir path
-  | _ -> Unix.unlink path
+  | stat ->
+      (match stat.Unix.st_kind with
+       | Unix.S_DIR ->
+           Array.iter (fun n -> rm_rf (Filename.concat path n)) (Sys.readdir path);
+           Unix.rmdir path
+       | Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK ->
+           Unix.unlink path)
 
 let make_tmp_dir () =
   let unique =

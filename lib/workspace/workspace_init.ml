@@ -112,8 +112,16 @@ let memory_document_matches_local config path =
           in
           match observed with
           | Ok matches -> matches
-          | Error { failure = Fs_compat.Path_is_not_regular_file _; close_failure = None } -> false
-          | Error error -> unavailable (Fs_compat.owned_regular_file_read_error_to_string error)
+          | Error error ->
+              (match error.failure with
+               | Fs_compat.Path_is_not_regular_file _ when Option.is_none error.close_failure -> false
+               | Fs_compat.Path_is_not_regular_file _
+               | Fs_compat.Ownership_boundary_rejected _
+               | Fs_compat.Filesystem_identity_changed _
+               | Fs_compat.Owned_path_owner_mismatch _
+               | Fs_compat.Owned_path_writable_by_others _
+               | Fs_compat.Owned_file_operation_failed _ ->
+                   unavailable (Fs_compat.owned_regular_file_read_error_to_string error))
 
 (* Memory is a separate authority and mirrors writes to the filesystem. A
    fresh map cannot safely adopt unrelated local files by overwriting them. *)

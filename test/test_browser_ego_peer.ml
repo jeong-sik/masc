@@ -2436,9 +2436,16 @@ let test_saved_fetch_survives_snapshot_failure_and_reaches_download_broker () =
     let has_original_pin path =
       let expected=Unix.stat path in
       Array.exists (fun name->
-        match Unix.stat (Filename.concat "/dev/fd" name) with
-        | actual->actual.Unix.st_dev=expected.st_dev && actual.st_ino=expected.st_ino
-        | exception Unix.Unix_error ((Unix.ENOENT|EBADF),_,_)->false) (Sys.readdir "/dev/fd") in
+        (* Darwin's devfd path stat reports the devfd mount's device, not
+           the underlying file's device. Inspect an opened descriptor and
+           close this temporary probe before looking at another entry. *)
+        match Unix.openfile (Filename.concat "/dev/fd" name)
+            [Unix.O_RDONLY;O_NONBLOCK;O_CLOEXEC] 0 with
+        | fd->Fun.protect ~finally:(fun ()->Unix.close fd) (fun ()->
+            let actual=Unix.fstat fd in
+            actual.Unix.st_dev=expected.st_dev && actual.st_ino=expected.st_ino)
+        | exception Unix.Unix_error ((Unix.ENOENT|EBADF|EACCES|EINVAL|ENODEV|ENXIO),_,_)->false)
+        (Sys.readdir "/dev/fd") in
     Fun.protect ~finally:(fun ()->
       check (result unit string) "abandon preserves files without confirmed backend teardown"
         (Error "download cleanup requires confirmed backend teardown") (Broker.abandon broker);

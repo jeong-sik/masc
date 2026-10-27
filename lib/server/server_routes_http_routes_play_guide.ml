@@ -29,21 +29,26 @@ let guide ~base ~skills =
     ; ("skills", Server_play_skills.guide_section ~base skills)
     ]
 
+let log_unavailable catalog =
+  match catalog with
+  | Ok _ -> ()
+  | Error unavailable ->
+    Option.iter
+      (Log.DosLog.warn "play skill guides unavailable: %s")
+      (Server_play_skills.unavailable_detail unavailable)
+
 (* The guide is public and reads no credential, so it reads the published
    state directly. Without one there is no published Skill snapshot either. *)
 let current_skills () =
-  let skills =
+  let catalog =
     match Server_auth.current_server_state () with
     | None -> Error Server_play_skills.Skills_unpublished
-    | Some state ->
-      Server_play_skills.catalog ~base_path:(Mcp_server.workspace_config state).base_path
+    | Some state -> Server_play_skills.catalog ~config:(Mcp_server.workspace_config state)
   in
-  List.iter
-    (Log.DosLog.warn "play skill guides left out: %s")
-    (Server_play_skills.unreadable_details skills);
-  skills
+  log_unavailable catalog;
+  catalog
 
-let guide_response () =
+let public_base () =
   match Env_config_core.masc_http_base_url_opt () with
   | None ->
     Error
@@ -55,31 +60,49 @@ let guide_response () =
       ( `Conflict
       , Server_refusal.json ~code:"not_ready"
           "MASC_HTTP_BASE_URL is not an http(s) base URL, so there is no address to join at" )
-  | Some base ->
+  | Some base -> Ok base
+
+let guide_response () =
+  match public_base () with
+  | Error refusal -> Error refusal
+  | Ok base ->
     (match guide ~base ~skills:(current_skills ()) with
      | Ok text -> Ok text
      | Error message ->
        Error (`Internal_server_error, Server_refusal.json ~code:"guide_unrendered" message))
 
-(* A guide stays unavailable, not absent, while nothing is published or the
-   DOS machine add-on is detached: it comes back when the snapshot is
-   published or the add-on attaches. That is 503, the answer the seat gives
-   with no attached DOS worker. 404 is only for a path that names no guide
-   the published catalog holds. *)
-let skill_response ~catalog path =
+(* A guide stays unavailable, not absent, while it cannot be read now: no
+   snapshot yet, no machine attached, a Skill configuration not in effect, an
+   unreadable source. Each is a 503 with its own code, the answer the seat
+   gives with no attached DOS worker; the same URL answers once that changes.
+   404 is only for a path that names nothing published. A refusal never
+   carries a host path; the reason goes to the operator log. *)
+let skill_response ~base ~catalog path =
   let refuse status code message = Error (status, Server_refusal.json ~code message) in
-  match Server_play_skills.fetch catalog path with
+  match Server_play_skills.fetch ~base catalog path with
   | Server_play_skills.Served text -> Ok text
-  | Server_play_skills.Not_found -> refuse `Not_found "skill_not_found" "no game guide or reference file has this name"
-  | Unavailable Skills_unpublished ->
-    refuse `Service_unavailable "skills_unpublished"
-      "this server has not published its Skill catalog yet"
-  | Unavailable Not_attached ->
-    refuse `Service_unavailable "machine_unavailable" "the DOS machine add-on is not attached"
-  | Unavailable (Catalog_unreadable detail) ->
-    Log.DosLog.warn "play skill catalog unreadable: %s" detail;
-    refuse `Internal_server_error "skills_unreadable" "this server could not read its Skill catalog"
-  | References_unavailable detail ->
+  | Served_without_references { body; detail } ->
+    Log.DosLog.warn "play skill references unreadable: %s" detail;
+    Ok body
+  | Server_play_skills.Not_found ->
+    refuse `Not_found "skill_not_found" "no game guide or reference file has this name"
+  | Unavailable unavailable ->
+    log_unavailable (Error unavailable);
+    (match unavailable with
+     | Skills_unpublished ->
+       refuse `Service_unavailable "skills_unpublished"
+         "this server has not published its Skill catalog yet"
+     | Machine_not_attached ->
+       refuse `Service_unavailable "machine_unavailable" "no DOS machine add-on is attached"
+     | Skills_not_in_effect ->
+       refuse `Service_unavailable "skills_not_configured"
+         "this server's Skill configuration is not in effect"
+     | Source_unavailable _ ->
+       refuse `Service_unavailable "skills_source_unavailable"
+         "the DOS machine add-on's Skills cannot be read right now"
+     | Catalog_unreadable _ ->
+       refuse `Internal_server_error "skills_unreadable" "this server could not read its Skill catalog")
+  | References_unreadable detail ->
     Log.DosLog.warn "play skill references unreadable: %s" detail;
     refuse `Service_unavailable "references_unreadable"
       "this guide's reference files cannot be read right now"
@@ -108,11 +131,15 @@ let add_routes router =
   |> Http.Router.prefix_get Server_play_skills.prefix (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanPlayMachine
          (fun state _name request reqd ->
-           let catalog =
-             Server_play_skills.catalog ~base_path:(Mcp_server.workspace_config state).base_path
+           let answer =
+             match public_base () with
+             | Error (status, json) -> Error ((status :> Httpun.Status.t), json)
+             | Ok base ->
+               let catalog = Server_play_skills.catalog ~config:(Mcp_server.workspace_config state) in
+               skill_response ~base ~catalog (Http.Request.path request)
+               |> Result.map_error (fun (status, json) -> ((status :> Httpun.Status.t), json))
            in
-           match skill_response ~catalog (Http.Request.path request) with
+           match answer with
            | Ok text -> respond_markdown text reqd
-           | Error (status, json) ->
-             respond_json_value_with_cors ~status:(status :> Httpun.Status.t) request reqd json)
+           | Error (status, json) -> respond_json_value_with_cors ~status request reqd json)
          request reqd)

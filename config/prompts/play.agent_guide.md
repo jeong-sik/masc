@@ -100,12 +100,12 @@ description matches the program on it, and fetch its URL with your bearer:
 
     curl -s -H "Authorization: Bearer $TOKEN" <guide URL>
 
-The answer is the guide's markdown. When a guide points to one of its
-reference files, fetch the URL listed under that guide here; do not resolve
-the path relative to the guide's URL. Guides are written for Keepers, so a
-step that needs a tool you do not have, such as loading or saving, is theirs.
-404 means no guide has that name; 503 means the guides cannot be read right
-now.
+The answer is the guide's markdown. Its reference files are listed at its
+end with their URLs; a relative `references/...` link in the guide resolves
+against the guide's URL to the same file. Guides are written for Keepers, so
+a step that needs a tool you do not have, such as loading or saving, is
+theirs. 404 means no guide has that name; 503 means the guides cannot be read
+right now.
 
 {{skills}}
 

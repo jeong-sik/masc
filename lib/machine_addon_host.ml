@@ -125,10 +125,13 @@ let call ~continuation ~principal ~config ~access ~reserved ~(export : Lane_addo
   Machine_addon_events.drain ();
   result
 
+(* Every host tool name: an Add-on export under one of them is never served. *)
+let host_tool_names () = List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
+  Config.raw_all_tool_schemas
+
 let call_shared ~principal ~config ~name ~arguments =
   let access = Lane_addon_sources.Unauthenticated in
-  let reserved = List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
-    Config.raw_all_tool_schemas in
+  let reserved = host_tool_names () in
   match Lane_addon_runtime.tool_export_reading ~config ~access ~reserved with
   | Error detail -> Error (Lane_addon_runtime.Unavailable detail)
   | Ok reading ->
@@ -140,10 +143,16 @@ let call_shared ~principal ~config ~name ~arguments =
            | None -> "No attached shared Add-on provides " ^ name))
       | Some export -> call ~continuation:None ~principal ~config ~access ~reserved ~export ~arguments
 
+let shared_skill_owner ~config ~name =
+  let snapshot = Lane_addon_runtime.tool_execution_snapshot ~config
+    ~access:Lane_addon_sources.Unauthenticated ~reserved:(host_tool_names ()) in
+  List.find_map (fun (serving : Lane_addon_runtime.tool_execution) ->
+    if String.equal serving.export.tool.name name
+    then Some (Lane_addon_runtime.tool_execution_skill_owner serving) else None) snapshot.serving
+
 let release_shared_controller ~events ~config ~holder ~by ~reason =
   let access = Lane_addon_sources.Unauthenticated in
-  let reserved = List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
-    Config.raw_all_tool_schemas in
+  let reserved = host_tool_names () in
   let name = Machine_controller_contract.(dos_tool_name Dos_pass) in
   match Lane_addon_runtime.tool_export_reading ~config ~access ~reserved with
   | Error detail -> Error (Lane_addon_runtime.Unavailable detail)

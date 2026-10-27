@@ -90,6 +90,15 @@ let actor_label = function
 
 type observation_effect = Reads_only | May_change
 let effects_tool = "lane_tool_effects"
+let effects_marker = "x-io.github.jeong-sik/masc.observation-effects"
+let effects_input_schema = `Assoc ["type", `String "object";
+  "additionalProperties", `Bool false; effects_marker, `Assoc ["version", `Int 1]]
+let supports_effects_tool = function
+  | `Assoc fields ->
+      (match List.filter (fun (key, _) -> key = effects_marker) fields with
+       | [(_, `Assoc ["version", `Int 1])] -> true
+       | _ -> false)
+  | _ -> false
 let observation_effect_to_json = function
   | Reads_only -> `String "reads_only"
   | May_change -> `String "may_change"
@@ -108,7 +117,7 @@ let effects_of_json ~listed = function
       else List.fold_right (fun (name, value) parsed ->
         let* parsed = parsed in
         if not (List.mem name listed) then
-          Error ("an observation effect declaration names an unlisted tool: " ^ name)
+          Error "an observation effect declaration names an unlisted tool"
         else
           let* declared = observation_effect_of_json value in
           Ok ((name, declared) :: parsed)) declared (Ok [])

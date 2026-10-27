@@ -27,7 +27,8 @@ let with_worker ?other_backend ~machine ~create ~clock ~sw ~base_path f =
         if List.mem tool.name control_ports then None else Some tool.name) tools in
       (* Read the worker's declaration the way the worker protocol does. *)
       let effects = if List.exists (fun (tool : S.tool) ->
-          tool.name = Lane_addon_call_context.effects_tool) tools then
+          tool.name = Lane_addon_call_context.effects_tool
+          && Lane_addon_call_context.supports_effects_tool tool.input_schema) tools then
           let reply = unwrap (Client.call_tool client ~name:Lane_addon_call_context.effects_tool
             ~arguments:(`Assoc []) ()) in
           unwrap (Lane_addon_call_context.effects_of_json

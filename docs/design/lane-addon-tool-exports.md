@@ -21,8 +21,8 @@ export = ["masc_msx_load", "masc_msx_press", "masc_msx_screen"]
 
 The worker owns schemas. Initialization requires exactly one advertised schema
 for each declared export. The host rejects collisions with host tools or other
-visible installations. Private observation, caller-context, observation-effect,
-controller and input-history ports cannot be exported. Packages without exports remain valid
+visible installations. Private observation, caller-context, controller and
+input-history ports cannot be exported. Packages without exports remain valid
 observation-only Add-ons; ordinary direct-invocation packages remain supported.
 
 MCP Full and Seat discovery apply installation visibility and existing host
@@ -105,11 +105,22 @@ invalidate the prior stable observation and schedule reconciliation.
 
 A completed call schedules a new observation, because worker-owned state is not
 a host source and the host cannot see what the call changed. A worker can say
-otherwise for an export on its private `lane_tool_effects` port, which the host
-calls once while the worker initializes. The reply is
+otherwise for an export on its private `lane_tool_effects` port. A worker opts
+in by advertising the `x-io.github.jeong-sik/masc.observation-effects` input
+schema annotation `{"version":1}`; the host calls the port once while the
+worker initializes. This marker is a worker declaration, not authentication.
+Missing, unsupported or ambiguous markers leave the port uncalled and all
+exports `may_change`. The reply is
 `{"tools": {"<export>": "reads_only" | "may_change"}}`. Any other value, a tool
 the worker does not list or a tool named twice refuses Ready. An export left
 out, and every export of a worker without the port, is `may_change`.
+
+An existing package may explicitly designate `lane_tool_effects` as its action
+or an export. That declared role takes precedence: the host does not call it as
+an effect port and treats all its exports as `may_change`. An explicit export
+also makes the tool's response available to callers under the package's normal
+visibility and authorization rules. Existing action and export schema
+validation still applies to those declared roles.
 
 The host takes the worker's word for a `reads_only` export. While such a call
 runs it does not mark the cached observation refreshing or refuse a machine
@@ -122,7 +133,7 @@ observation. The skip therefore holds only for a worker without a host port.
 Every other call is counted while it runs, and a consumer refused as
 refreshing meanwhile is woken again when the call ends: by the observation the
 call schedules, by the failure a lost reply records, or directly when the host
-refuses the call before it reaches the worker.
+refuses or cancels the requested call before it is dispatched.
 
 MCP `annotations.readOnlyHint` never decides this. It promises that a tool
 does not modify its environment, which is weaker: a tool can keep that promise

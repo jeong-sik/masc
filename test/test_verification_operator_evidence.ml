@@ -456,6 +456,23 @@ let test_export_lock_refusal_ends_progress () =
     | File.Writing _ -> Alcotest.fail "refused lock still reports active progress"
     | File.Not_started | File.Saved _ -> Alcotest.fail "refused lock lost or certified its destination")
 
+let test_export_exception_before_confirmation_ends_progress () =
+  with_base_path_env (fun env base ->
+    let module File=Masc_tui_evidence_file in
+    let progress=Atomic.make File.Not_started in
+    let file=download_fixture ~base_path:base "exception before publication" in
+    (match File.For_testing.export
+      ~with_lock:(fun ~lock_path:_ _publish -> raise (Failure "injected publication exception"))
+      ~fs:env#fs ~registry_root:base ~directory:base ~progress
+      ~admitted:(fun () -> Ok ()) ~open_file:None file with
+     | _ -> Alcotest.fail "ordinary exception was swallowed"
+     | exception Failure "injected publication exception" -> ());
+    match Atomic.get progress with
+    | File.Aborted path ->
+      Alcotest.(check bool) "exception destination is still known" false (Filename.is_relative path)
+    | File.Writing _ -> Alcotest.fail "ordinary exception still reports active progress"
+    | File.Not_started | File.Saved _ -> Alcotest.fail "ordinary exception lost or certified its destination")
+
 let test_export_rechecks_authority_and_propagates_cancellation () =
   with_base_path_env (fun env base ->
     let module File=Masc_tui_evidence_file in
@@ -784,6 +801,7 @@ let () =
         Alcotest.test_case "lane release failure preserves confirmed save" `Quick test_export_lane_release_failure_preserves_saved;
         Alcotest.test_case "lock release failure preserves confirmed save" `Quick test_export_lock_release_failure_preserves_saved;
         Alcotest.test_case "lock refusal ends active progress" `Quick test_export_lock_refusal_ends_progress;
+        Alcotest.test_case "ordinary exception ends active progress" `Quick test_export_exception_before_confirmation_ends_progress;
         Alcotest.test_case "saving creates a private local copy with original bytes" `Quick test_download_saves_a_private_local_copy;
         Alcotest.test_case "long original filenames remain usable" `Quick test_export_preserves_long_original_filename;
         Alcotest.test_case "original text and non-image binary bytes round trip" `Quick test_download_preserves_original_bytes;

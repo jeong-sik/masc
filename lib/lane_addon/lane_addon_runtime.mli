@@ -229,9 +229,9 @@ val call_exported_tool_with_principal : principal:Lane_addon_call_context.princi
 (** Trusted host boundary only: principal must come from verified credentials,
     never from caller-supplied tool arguments. [access] still controls visibility. *)
 type browser_service = private {instance_id:string;owner:Lane_addon_tool_export.owner;
-  backends:Lane_addon_types.browser_backends}
+  backend:Browser_lane.Backend.t}
 (** A running browser installation: its instance, the owner its export calls
-    run under, and the sources its package serves. *)
+    run under, and the source its package serves. *)
 type browser_reading = { services : browser_service list; unready : Lane_addon_unready.t list }
 val browser_service_reading : config:Workspace.config -> access:Lane_addon_sources.access -> browser_reading
 (** Usable browser services and, from the same read, the visible browser
@@ -499,15 +499,10 @@ module For_testing : sig
         (** Every such browser is visible to fewer readers than the consumer's output. *)
     | Several_browser_services
   val document_route_services :
-    services:'service list -> backends:('service -> Lane_addon_types.browser_backends) ->
+    services:'service list -> backend:('service -> Browser_lane.Backend.t) ->
     lists:('service -> Browser_lane.client_id -> bool) -> Browser_lane.route -> ('service list, string) result
   (** The browser services a [browser_document] read on a route may go to;
       a client of a live source two services serve is refused. *)
-  type browser_group_presence = Group_present | Group_detaching
-  val browser_groups_kept :
-    (Lane_addon_types.browser_backends * browser_group_presence * 'group) list -> 'group list
-  (** The groups of browser installations presence reads: a group only
-      detaching gives way to one that is not and serves one of its sources. *)
   val choose_document_service :
     visibility:visibility -> ('service * visibility) list -> 'service document_service
   (** Which browser Add-on a [browser_document] source reads: only one whose
@@ -632,16 +627,15 @@ val observation_for_export :
     the refusal tells a starting or failed installation from one that is
     serving and not yet observed, and from an ambiguous name. *)
 type browser_observation = {
-  backends : Lane_addon_types.browser_backends;
+  backend : Browser_lane.Backend.t;
   observation : (export_observation option, export_refusal) result;
 }
 val browser_observations : config:Workspace.config -> access:Lane_addon_sources.access ->
   browser_observation list
 (** The cached observations of the browser installations the caller may
-    read, found by their package's service and read per set of sources they
-    serve, as {!observation_for_export} reads one export: two installations
-    serving the same sources are [Ambiguous_installations] for those sources
-    only. A released installation is left out, and one that is only
-    detaching is left out once an installation that is not detaching serves
-    one of its sources. Runs on the Lane Add-on owner domain and waits for no
-    browser command. *)
+    read, found by their package's service and read per source they serve,
+    as {!observation_for_export} reads one export: two installations of one
+    source are [Ambiguous_installations] for that source only. A released
+    installation is left out, and a detaching incarnation gives way to its
+    replacement. Runs on the Lane
+    Add-on owner domain and waits for no browser command. *)

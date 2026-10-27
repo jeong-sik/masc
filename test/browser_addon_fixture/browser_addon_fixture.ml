@@ -167,9 +167,7 @@ service = "browser"
 contributions = ["observe"]
 [resources]
 max_reply_bytes = 2097152
-%s|} name (match backend with
-    | None -> ""
-    | Some backend -> Printf.sprintf "browser_backend = %S\n" (B.Backend.to_wire backend)) script root
+%s|} name (Printf.sprintf "browser_backend = %S\n" (B.Backend.to_wire backend)) script root
     (if exports then "[world.tools]\nexport = [\"browser_command\"]\ninvocation = \"host_context\"\nhooks = [\"validate_input\", \"validate_output\"]\n" else ""));
   let id=dispatch ~config R.Attach ["manifest_path",`String manifest;"run_id",`String ("fixture-" ^ name);
     "binding",`Assoc ["sources",`List []]] |> Yojson.Safe.Util.member "instance_id"
@@ -214,21 +212,15 @@ max_reply_bytes = 2097152
   id,stop
 let serving ~config id=List.exists (fun (service:R.browser_service) -> service.instance_id=id)
   (R.browser_services ~config ~access:Lane_addon_sources.Operator_configuration)
-let with_worker ?(clients=[]) ?(downloads=[]) ~env ~config ~respond run =
-  with_env ~env ~config (fun ~sw ~root ~settle ->
-    let id,stop=start ~sw ~env ~config ~root ~name:"browser" ~backend:None ~exports:true ~owned:(true,true)
-      ~clients ~downloads ~received:(fun ~route:_ -> ()) ~respond in
-    let stop ()=stop ();settle () in
-    Fun.protect ~finally:stop (fun () ->
-      wait ~env (fun () -> serving ~config id);
-      run {stop}))
-type worker = { serves : Lane_addon_types.browser_backends; clients : B.client_info list; exports : bool }
-type attached = { serves : Lane_addon_types.browser_backends; instance_id : string; polled : unit -> string list }
-let with_workers ?(received=fun ~serves:_ ~route:_ -> ()) ~env ~config ~workers ~respond run =
+type worker = { serves : B.Backend.t; clients : B.client_info list; exports : bool }
+type attached = { serves : B.Backend.t; instance_id : string; polled : unit -> string list }
+(* Starts one scripted worker per entry, each of its own one-source package,
+   and runs [run] once every one serves. Every worker that attached is
+   detached, each on its own, and the root is removed only when all of them
+   settled. *)
+let run_workers ~env ~config ~downloads ~received ~respond workers run =
   with_env ~env ~config (fun ~sw ~root ~settle ->
     let started=ref [] in
-    (* Every worker that attached is detached, each on its own, and the root
-       is removed only when all of them settled. *)
     let stop ()=
       let failures=List.filter_map (fun (_,stop) -> match stop () with
         | () -> None
@@ -237,12 +229,9 @@ let with_workers ?(received=fun ~serves:_ ~route:_ -> ()) ~env ~config ~workers 
     Fun.protect ~finally:stop (fun () ->
       List.iteri (fun index (worker:worker) ->
         let name=Printf.sprintf "worker-%d" index in
-        let backend=match worker.serves with
-          | Lane_addon_types.Every_backend -> None
-          | One_backend backend -> Some backend in
-        let serves backend=Lane_addon_types.serves_backend worker.serves backend in
-        let id,stop=start ~sw ~env ~config ~root ~name ~backend ~exports:worker.exports
-          ~owned:(serves B.Backend.Automation,serves B.Backend.Stagehand) ~clients:worker.clients ~downloads:[]
+        let id,stop=start ~sw ~env ~config ~root ~name ~backend:worker.serves ~exports:worker.exports
+          ~owned:(worker.serves=B.Backend.Automation,worker.serves=B.Backend.Stagehand)
+          ~clients:worker.clients ~downloads
           ~received:(received ~serves:worker.serves) ~respond:(respond ~serves:worker.serves) in
         started:=((worker.serves,id,name),stop) :: !started) workers;
       let attached=List.rev_map (fun ((serves,instance_id,name),_) ->
@@ -251,4 +240,15 @@ let with_workers ?(received=fun ~serves:_ ~route:_ -> ()) ~env ~config ~workers 
           then List.filter (fun line -> line<>"") (String.split_on_char '\n' (In_channel.with_open_bin polls In_channel.input_all))
           else [])}) !started in
       List.iter (fun (worker:attached) -> wait ~env (fun () -> serving ~config worker.instance_id)) attached;
-      run attached))
+      run ~stop attached))
+(* The owned automation and Stagehand sources, and the external hosts that
+   list [clients], each in its own worker answered by [respond]. *)
+let with_worker ?(clients=[]) ?(downloads=[]) ~env ~config ~respond run =
+  run_workers ~env ~config ~downloads ~received:(fun ~serves:_ ~route:_ -> ())
+    ~respond:(fun ~serves:_ -> respond)
+    [{serves=B.Backend.Automation;clients=[];exports=true};
+     {serves=B.Backend.Stagehand;clients=[];exports=true};
+     {serves=B.Backend.External_host;clients;exports=true}]
+    (fun ~stop _ -> run {stop})
+let with_workers ?(received=fun ~serves:_ ~route:_ -> ()) ~env ~config ~workers ~respond run =
+  run_workers ~env ~config ~downloads:[] ~received ~respond workers (fun ~stop:_ attached -> run attached)

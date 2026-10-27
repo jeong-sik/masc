@@ -51,6 +51,25 @@ def runtime_toml(base):
     return base / ".masc/config/runtime.toml"
 
 
+# Each browser source the workspace runs has its own Add-on package and
+# declaration, named browser-<source folder>.
+def package(base, folder):
+    return base / ".masc/packages" / ("browser-" + folder)
+
+
+def declared(base):
+    directory = base / ".masc/config/lane-addons"
+    return sorted(path.name for path in directory.glob("*.toml")) if directory.is_dir() else []
+
+
+# A configured [browser.stagehand]. Parsing reads no file, so fixture paths do.
+STAGEHAND_TABLE = """
+[browser.stagehand]
+chrome = "/fixture/chrome"
+extension = "/fixture/stagehand-extension"
+"""
+
+
 def workspace(root, name="workspace"):
     base = root / name
     runtime_toml(base).parent.mkdir(parents=True)
@@ -165,23 +184,82 @@ class BrowserLaneSetupCommand(unittest.TestCase):
                 self.assertFalse(base.exists(), "nothing was written to the workspace")
                 self.assertFalse(manifests.exists(), "nothing was registered")
 
-    # --mode addon: the browser Add-on package this masc carries and one
-    # declaration of it. Every other mode does the same after its host step.
-    def test_addon_writes_the_package_and_declares_it_once(self):
+    # --mode addon: for each browser source the workspace runs, the package
+    # this masc carries for it and one declaration of it. Every other mode
+    # does the same after its host step.
+    def test_addon_declares_each_configured_source_once(self):
         root = self.scratch()
         base = workspace(root)
+        runtime_toml(base).write_text(RUNTIME_TOML + STAGEHAND_TABLE)
         first = masc(root, "--mode", "addon", "--base-path", str(base))
         self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
-        declaration = base / ".masc/config/lane-addons/browser.toml"
-        self.assertTrue(declaration.is_file(), "the Add-on is declared")
-        self.assertTrue((base / ".masc/packages/browser/lane.toml").is_file(), "the package is written")
+        self.assertEqual(declared(base), ["browser-stagehand.toml"], "the configured source only")
+        self.assertTrue((package(base, "stagehand") / "lane.toml").is_file(), "its package is written")
         self.assertFalse(lane(base).exists(), "no host, no token, no extension")
+        declaration = base / ".masc/config/lane-addons/browser-stagehand.toml"
         written = declaration.read_text()
         again = masc(root, "--mode", "addon", "--base-path", str(base))
         self.assertEqual(again.returncode, 0, again.stdout + again.stderr)
         self.assertEqual(declaration.read_text(), written, "the declaration is not rewritten")
-        self.assertEqual(sorted(path.name for path in declaration.parent.glob("*.toml")),
-                         ["browser.toml"], "one declaration")
+        self.assertEqual(declared(base), ["browser-stagehand.toml"], "one declaration")
+
+    def test_addon_without_a_configured_source_declares_nothing(self):
+        root = self.scratch()
+        base = workspace(root)
+        result = masc(root, "--mode", "addon", "--base-path", str(base))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(declared(base), [], "nothing is declared")
+        self.assertFalse((base / ".masc/packages").exists(), "no package is written")
+
+    # Whether a lane is switched on is the server's to read when it starts a
+    # worker, so setup declares every source whose table is there.
+    def test_a_source_whose_lane_is_switched_off_is_declared(self):
+        root = self.scratch()
+        base = workspace(root)
+        runtime_toml(base).write_text(RUNTIME_TOML + STAGEHAND_TABLE + "enabled = false\n"
+                                      + "\n[browser.automation]\nenabled = false\n")
+        result = masc(root, "--mode", "automation", "--geckodriver", str(fake_geckodriver(root)),
+                      "--base-path", str(base))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("geckodriver = ", runtime_toml(base).read_text(), "the table is still written")
+        self.assertEqual(declared(base), ["browser-automation.toml", "browser-stagehand.toml"])
+
+    # Which sources a runtime.toml that does not parse runs is not known. A
+    # repeated table is refused like a syntax error, not raised.
+    def test_a_runtime_toml_that_does_not_parse_is_refused(self):
+        for label, extra in (("syntax", "[browser.stagehand\n"), ("repeated table", STAGEHAND_TABLE)):
+            with self.subTest(label):
+                root = self.scratch()
+                base = workspace(root)
+                runtime_toml(base).write_text(RUNTIME_TOML + STAGEHAND_TABLE + extra)
+                result = masc(root, "--mode", "addon", "--base-path", str(base))
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("does not parse", result.stderr)
+                self.assertEqual(declared(base), [], "nothing is declared")
+                self.assertFalse((base / ".masc/packages").exists(), "no package is written")
+
+    # The host mode reads no runtime.toml for its own steps, so one that does
+    # not parse stops only the Add-on step.
+    def test_a_runtime_toml_that_does_not_parse_leaves_the_host_step(self):
+        root = self.scratch()
+        base = workspace(root)
+        runtime_toml(base).write_text(RUNTIME_TOML + "[browser.stagehand\n")
+        result = masc(root, "--mode", "host", "--binary", str(HOST), "--base-path", str(base))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue((lane(base) / "host/launch.json").is_file(), "the host is installed")
+        self.assertEqual(declared(base), [], "no source is declared")
+
+    # A host installed earlier is the external hosts' source.
+    def test_addon_declares_the_external_hosts_of_an_installed_host(self):
+        root = self.scratch()
+        base = workspace(root)
+        host = masc(root, "--mode", "host", "--binary", str(HOST), "--base-path", str(base), "--no-addon")
+        self.assertEqual(host.returncode, 0, host.stdout + host.stderr)
+        self.assertEqual(declared(base), [])
+        result = masc(root, "--mode", "addon", "--base-path", str(base))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(declared(base), ["browser-external.toml"])
+        self.assertTrue((package(base, "external") / "lane.toml").is_file())
 
     # A workspace no server has started in has no config root yet. That is not
     # a refusal: the first start writes one, and install-local-build.sh tells
@@ -194,12 +272,25 @@ class BrowserLaneSetupCommand(unittest.TestCase):
         self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
         self.assertFalse((base / ".masc").exists(), "nothing is written")
 
-    def test_every_route_declares_the_addon(self):
+    def test_each_route_declares_the_sources_it_runs(self):
         root = self.scratch()
-        base = workspace(root)
-        result = masc(root, "--mode", "host", "--binary", str(HOST), "--base-path", str(base))
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertTrue((base / ".masc/config/lane-addons/browser.toml").is_file())
+        driver, firefox, ego = fake_geckodriver(root), fake_firefox(root), fake_ego(root / "ego")
+        for label, arguments, folders in (
+            ("host", ("--mode", "host", "--binary", str(HOST)), ["external"]),
+            ("extension", ("--mode", "extension", "--binary", str(HOST),
+                           "--manifest-dir", str(root / "manifests")), ["external"]),
+            ("bidi", ("--mode", "bidi", "--binary", str(HOST), "--firefox", str(firefox),
+                      "--profile", str(root / "keeper profile")), ["external", "firefox"]),
+            ("automation", ("--mode", "automation", "--geckodriver", str(driver)), ["automation"]),
+            ("ego", ("--mode", "ego", "--ego-command", str(ego)), ["ego"]),
+        ):
+            with self.subTest(label):
+                base = workspace(root, name="workspace " + label)
+                result = masc(root, "--base-path", str(base), *arguments)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(declared(base), ["browser-" + folder + ".toml" for folder in folders])
+                for folder in folders:
+                    self.assertTrue((package(base, folder) / "lane.toml").is_file(), folder)
 
     def test_no_addon_leaves_the_addon_alone(self):
         root = self.scratch()
@@ -400,7 +491,7 @@ class BrowserLaneSetupCommand(unittest.TestCase):
         self.assertIn('command = "' + str(ego) + '"', text)
         self.assertIn('space = "masc-keepers"', text)
         self.assertFalse(lane(base).exists(), "ego installs no host")
-        self.assertTrue((base / ".masc/packages/browser").is_dir(), "every route declares the browser Add-on")
+        self.assertTrue(package(base, "ego").is_dir(), "every route declares its browser Add-on")
 
     def test_an_ego_whose_onboarding_is_not_finished_writes_nothing(self):
         root = self.scratch()
@@ -411,7 +502,7 @@ class BrowserLaneSetupCommand(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("Finish ego lite's onboarding", result.stderr)
         self.assertEqual(runtime_toml(base).read_text(), before)
-        self.assertFalse((base / ".masc/packages/browser").exists(), "nothing was written first")
+        self.assertFalse((base / ".masc/packages").exists(), "nothing was written first")
 
     def test_ego_options_are_refused_with_the_other_modes(self):
         root = self.scratch()
@@ -633,6 +724,7 @@ class BrowserLaneSetupCommand(unittest.TestCase):
         # masc needs to create its lock file beside runtime.toml; a directory
         # it cannot write into fails the commit, which comes after the host.
         config = runtime_toml(base).parent
+        (config / "lane-addons").mkdir()
         config.chmod(0o500)
         self.addCleanup(config.chmod, 0o700)
         result = masc(root, "--mode", "bidi", "--binary", str(HOST), "--base-path", str(base),
@@ -643,6 +735,9 @@ class BrowserLaneSetupCommand(unittest.TestCase):
         # leaves is an installed lane and no table, never a table with no lane.
         self.assertTrue((lane(base) / "host/launch.json").is_file())
         self.assertEqual(runtime_toml(base).read_text(), before)
+        # The owned Firefox waits for its table; the installed host's external
+        # hosts need none and are declared.
+        self.assertEqual(declared(base), ["browser-external.toml"])
 
     def test_a_live_lane_that_is_off_says_so_instead_of_asking_for_a_restart(self):
         root = self.scratch()

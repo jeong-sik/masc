@@ -215,7 +215,7 @@ def exercise(args, *, extension: str, profile_mode: str, output: pathlib.Path) -
                         [str(args.probe), "--chrome", str(args.chrome), "--extension", extension,
                          "--fixture-url", fixture_url, "--out", str(output), "--profile-mode", profile_mode,
                          "--launcher", str(args.launcher.resolve()), "--guardian", str(args.guardian.resolve()),
-                         "--worker", str(args.worker.resolve()), "--manifest", str(repo / "addons/browser/lane.toml")],
+                         "--worker", str(args.worker.resolve()), "--manifest", str(repo / "addons/browser/stagehand/lane.toml")],
                         stdout=log, stderr=subprocess.STDOUT, timeout=PROBE_TIMEOUT_S,
                     ).returncode
                 except subprocess.TimeoutExpired:

@@ -42,7 +42,9 @@ let scenario () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
   Time_compat.set_clock clock;
   let base=private_root "browser-artifact-host-" in
   let incarnation="0b000000-0000-4000-8000-000000000051" in
-  let context=ok (Socket.context ~instance_id:incarnation ~automation:None ~stagehand:None ~live_bidi:None ~models:None) in
+  (* The owned Gecko's allocation, which holds the downloads this test reads. *)
+  let gecko={Masc.Browser_addon_automation.driver="/fixture/geckodriver";binary=None;profiles="/fixture/gecko-profiles"} in
+  let context=ok (Socket.context ~instance_id:incarnation ~source:(Socket.Automation gecko) ~models:None) in
   let allocation=member "directory" context |> Yojson.Safe.Util.to_string in
   Fun.protect ~finally:(fun () ->
     if Sys.file_exists allocation then Fs_compat.remove_tree allocation;

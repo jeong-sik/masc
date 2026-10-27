@@ -1,9 +1,17 @@
 (** Host-selected socket resource of a native browser installation. Blocking
     filesystem operations must be offloaded by the server caller. *)
 type t
-val context : instance_id:string -> automation:Browser_addon_automation.configuration option ->
-  stagehand:Browser_addon_stagehand.configuration option ->
-  live_bidi:Browser_addon_live_bidi.configuration option ->
+(** The one browser source an allocation's worker serves, with the browser it
+    starts: an owned Gecko for automation, a Chrome for Stagehand, a live
+    Firefox for the owned BiDi connection. Ego's settings ride the worker's
+    arguments, and an external host worker starts no browser. *)
+type source =
+  | Automation of Browser_addon_automation.configuration
+  | Stagehand of Browser_addon_stagehand.configuration
+  | Owned_firefox of Browser_addon_live_bidi.configuration
+  | Ego
+  | External_host
+val context : instance_id:string -> source:source ->
   models:Browser_addon_models.configuration option -> (Yojson.Safe.t, string) result
 (** Selects a private per-instance socket directory without creating it. Persist
     this immutable descriptor through Native_addon_lease.prepare before mkdir. *)

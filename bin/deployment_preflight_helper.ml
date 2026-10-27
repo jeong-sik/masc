@@ -1196,12 +1196,15 @@ let validate_browser_addon base_path =
       (Unix.error_message error)
   | base_path ->
     (match
-       Masc.Browser_addon_preflight.report (Masc.Browser_addon_preflight.judge ~base_path)
+       ( Masc.Browser_addon_preflight.report (Masc.Browser_addon_preflight.judge ~base_path)
+       , Masc.Browser_addon_preflight.report_doubled
+           (Masc.Browser_addon_preflight.doubled_sources ~base_path) )
      with
-     | Ok line ->
+     | Ok line, Ok () ->
        Printf.printf "%s\n%!" line;
        Ok ()
-     | Error message -> errorf "%s" message)
+     | Error message, Ok () | Ok _, Error message -> errorf "%s" message
+     | Error host, Error doubled -> errorf "%s; %s" host doubled)
 ;;
 
 let validate_browser_addon_cmd =

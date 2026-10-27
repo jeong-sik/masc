@@ -127,7 +127,7 @@ def main():
                         str(args.probe.resolve()), '--firefox', str(args.firefox.resolve()),
                         '--driver', str(args.driver.resolve()), '--payload', str(path),
                         '--launcher', str(args.launcher.resolve()), '--guardian', str(args.guardian.resolve()),
-                        '--worker', str(args.worker.resolve()), '--manifest', str(repo / 'addons/browser/lane.toml'),
+                        '--worker', str(args.worker.resolve()), '--manifest', str(repo / 'addons/browser/automation/lane.toml'),
                         '--fixture-url', f'http://127.0.0.1:{server.server_port}/', '--out', str(output),
                     ], env={**os.environ, 'MOZ_HEADLESS': '1'}, stdout=log,
                         stderr=subprocess.STDOUT, timeout=600)

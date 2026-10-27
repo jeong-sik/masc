@@ -7,6 +7,10 @@ module B = Browser_lane
 module Http = Http_server_eio
 let ( let* ) = Result.bind
 let require = function Ok value -> value | Error detail -> failwith detail
+(* The package of the external host source (addons/browser/external), the
+   one a native host's polls bind to, declared under its own id the way masc
+   browser-lane-setup declares it. *)
+let package_id = "browser-external"
 let argument flag =
   let rec find = function
     | key::value::_ when key=flag -> value
@@ -120,10 +124,10 @@ let () =
     R.register_skill_export_handler Server_skill_snapshot_runtime.publish_lane_skills;
     R.start_configuration_service ~config ~sw ~clock;
     let directory=R.configuration_directory config in Fs_compat.mkdir_p directory;
-    let declaration=Filename.concat directory "browser.toml" in
+    let declaration=Filename.concat directory (package_id ^ ".toml") in
     let attach () =
       write declaration (Printf.sprintf
-        "id=\"browser\"\nrun_id=\"webextension-probe\"\nmanifest_path=%S\nexact_outputs=[]\ntool_hooks=[\"validate_input\",\"validate_output\"]\n[binding]\nsources=[]\n" manifest);
+        "id=%S\nrun_id=\"webextension-probe\"\nmanifest_path=%S\nexact_outputs=[]\ntool_hooks=[\"validate_input\",\"validate_output\"]\n[binding]\nsources=[]\n" package_id manifest);
       let report=require (R.reconcile_configuration ~config ~directory) in
       if field "complete" report<>Some (`Bool true) || field "issues" report<>Some (`List []) then
         failwith ("declaration refused: " ^ Yojson.Safe.to_string report);

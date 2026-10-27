@@ -16,11 +16,17 @@
     [ego-browser] for its versions and for ego lite's list of task spaces,
     it starts no browser and loads no extension.
 
-    [--mode addon] writes the browser Add-on package this masc carries to
-    [.masc/packages/browser] and declares it when the workspace has no
-    declaration of it ({!Masc.Browser_addon_setup}). Every other mode does the
-    same after its host step, but there a refusal of that step is reported and
-    the mode's own steps go on; only [--mode addon] fails on it. [--no-addon]
+    [--mode addon] writes, for each browser source the workspace runs, the
+    package this masc carries to [.masc/packages/browser-<source>] and
+    declares it when the workspace has no declaration of that source
+    ({!Masc.Browser_addon_setup}). A source runs when runtime.toml has its
+    table or this run writes it; external hosts run when a host is installed.
+    Whether a lane is switched on is the server's to read when it starts the
+    worker. Every other mode does the same after its host step and its tables,
+    and a source whose table the mode writes is declared only once that table
+    is written. There a refusal of that step, including a runtime.toml that
+    does not parse, is reported and the mode's own steps go on; only
+    [--mode addon] fails on it. [--no-addon]
     skips the step for the other modes and contradicts [--mode addon].
 
     An option that the chosen modes do not use is refused, not ignored. *)

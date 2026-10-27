@@ -3,15 +3,18 @@
     advertised-tool request and its answer passes through selected hooks. *)
 type t
 val detach : t -> unit
-(** Wait for confirmed settlement of this fixture's exact worker. Idempotent. *)
+(** Wait for confirmed settlement of this fixture's workers. Idempotent. *)
 val with_worker :
   ?clients:Browser_lane.client_info list ->
   ?downloads:(string * Yojson.Safe.t) list ->
   env:Eio_unix.Stdenv.base -> config:Masc.Workspace.config ->
   respond:(route:Browser_lane.route -> Browser_lane.verb -> Browser_lane.answer) ->
   (t -> 'a) -> 'a
-(** Owns attachment and confirmed worker detach, and restores the prior PATH.
-    Owns the Eio test context and full environment for that same lifetime.
+(** One scripted worker per source the old single browser worker served: the
+    owned automation and Stagehand sources, and the external hosts that list
+    [clients], each of its own one-source package and answered by [respond].
+    Owns attachment and confirmed detach of every one, and restores the prior
+    PATH. Owns the Eio test context and full environment for that lifetime.
     Callers must not already hold [Eio_context.with_test_env]'s non-reentrant
     global test lock.
     The invoking test declares the native launcher executable as a Dune dep.
@@ -24,18 +27,16 @@ val with_worker :
     [clients] in its snapshot and, as registered, the automation and Stagehand
     sources it serves. Its package exports the browser command only when
     [exports]. *)
-type worker = { serves : Masc.Lane_addon_types.browser_backends; clients : Browser_lane.client_info list;
-                exports : bool }
+type worker = { serves : Browser_lane.Backend.t; clients : Browser_lane.client_info list; exports : bool }
 
 (** A worker as attached: its instance, and the client ids of the native
     polls it answered. *)
-type attached = { serves : Masc.Lane_addon_types.browser_backends; instance_id : string;
-                  polled : unit -> string list }
+type attached = { serves : Browser_lane.Backend.t; instance_id : string; polled : unit -> string list }
 
 val with_workers :
-  ?received:(serves:Masc.Lane_addon_types.browser_backends -> route:Browser_lane.route -> unit) ->
+  ?received:(serves:Browser_lane.Backend.t -> route:Browser_lane.route -> unit) ->
   env:Eio_unix.Stdenv.base -> config:Masc.Workspace.config -> workers:worker list ->
-  respond:(serves:Masc.Lane_addon_types.browser_backends -> route:Browser_lane.route -> Browser_lane.verb ->
+  respond:(serves:Browser_lane.Backend.t -> route:Browser_lane.route -> Browser_lane.verb ->
     Browser_lane.answer) ->
   (attached list -> 'a) -> 'a
 (** {!with_worker} for several workers at once, each of its own package.

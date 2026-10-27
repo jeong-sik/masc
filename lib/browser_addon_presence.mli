@@ -15,9 +15,6 @@ type unavailable =
           switched on, and the Lane Add-on declarations could not all be
           read: one that was not read may be a browser Add-on switched on, so
           which absence it is is not known. *)
-  | Doubled_sources of Browser_lane.Backend.t list
-      (** More than one installation serves these sources of the lane, and
-          no other installation of the lane published. *)
 
 type t =
   | Observed of Browser_addon_observation.published
@@ -56,17 +53,17 @@ val read :
   config:Workspace.config -> access:Lane_addon_sources.access ->
   declarations:Lane_addon_config.snapshot -> reading
 
-(** The lane as the installations that answer for it say
-    ({!Browser_addon_observation.answers_for}): their observations merged
-    ({!Browser_addon_observation.merge}), the way the host uses them, or why
-    there is none. An installation of a doubled source, or one whose
-    observation is refused or unreadable, leaves out only what it would
-    publish, and its own package row says why. The lane is unavailable only
-    when none of them published: for its doubled sources, or else the first
-    refusal or unreadable observation. With nothing published and nothing
-    withheld, the declarations of that lane's browser Add-ons say which
-    absence it is; an incomplete declaration snapshot proves none. The other
-    lanes are decided apart. *)
+(** The lane as the installations of its sources say: their observations
+    merged ({!Browser_addon_observation.merge}), the way the host uses them,
+    or why there is none. A source whose observation is refused or
+    unreadable, including one two installations serve
+    ({!Lane_addon_runtime.Ambiguous_installations}), leaves out only what it
+    would publish, and its own package row says why. The lane is unavailable
+    only when none of them published, for the first refusal or unreadable
+    observation. With nothing published and nothing withheld, the
+    declarations of that lane's browser Add-ons say which absence it is; an
+    incomplete declaration snapshot proves none. The other lanes are decided
+    apart. *)
 val lane : reading -> Browser_lane.Lane_name.t -> t
 
 (** The reason in words any reader may be shown: a refusal through

@@ -1,10 +1,9 @@
 let () =
-  let socket = ref None and incarnation = ref None and bound = ref None and automation = ref false and models = ref false
-    and stagehand = ref false and live_bidi = ref false and live_ego_command = ref None and live_ego_space = ref None in
+  let socket = ref None and incarnation = ref None and bound = ref None and backend = ref None and models = ref false
+    and live_ego_command = ref None and live_ego_space = ref None in
   Arg.parse [
-    "--automation",Arg.Set automation,"Start the host-selected owned Gecko backend";
-    "--stagehand",Arg.Set stagehand,"Register the host-selected owned Chrome backend";
-    "--live-bidi",Arg.Set live_bidi,"Start the host-selected owned live Firefox connection";
+    "--backend",Arg.String (fun value -> backend:=Some value),
+      "The one browser source this worker serves: " ^ Browser_lane.Backend.expected;
     "--live-ego-command",Arg.String (fun value -> live_ego_command:=Some value),"Serve an ego lite task space with this ego-browser";
     "--live-ego-space",Arg.String (fun value -> live_ego_space:=Some value),"The ego lite task space to serve";
     "--models",Arg.Set models,"Attach the host-selected model request broker";
@@ -15,21 +14,32 @@ let () =
   let socket_path,incarnation,max_message_bytes = match !socket,!incarnation,!bound with
     | Some path,Some id,Some bytes -> path,id,bytes
     | _ -> raise (Arg.Bad "--socket, --incarnation and --max-message-bytes are required") in
-  let live_ego = match !live_ego_command,!live_ego_space with
-    | Some command,Some space -> Some {Browser_configuration.command;space}
-    | None,None -> None
-    | Some _,None | None,Some _ -> raise (Arg.Bad "--live-ego-command and --live-ego-space are given together") in
+  let backend = match Option.map Browser_lane.Backend.of_wire !backend with
+    | Some (Some backend) -> backend
+    | Some None | None -> raise (Arg.Bad ("--backend is required, one of " ^ Browser_lane.Backend.expected)) in
+  let live_ego = match backend,!live_ego_command,!live_ego_space with
+    | Browser_lane.Backend.Ego,Some command,Some space -> Some {Browser_configuration.command;space}
+    | Browser_lane.Backend.Ego,_,_ -> raise (Arg.Bad "the ego source needs --live-ego-command and --live-ego-space")
+    | Browser_lane.Backend.(Automation|Stagehand|Owned_firefox|External_host),None,None -> None
+    | Browser_lane.Backend.(Automation|Stagehand|Owned_firefox|External_host),_,_ ->
+      raise (Arg.Bad "--live-ego-command and --live-ego-space belong to the ego source") in
+  (* The browsers that read upload copies and write downloads are the owned
+     Gecko and ego lite; the other sources get neither broker. *)
+  let transfers = match backend with
+    | Browser_lane.Backend.(Automation|Ego) -> true
+    | Browser_lane.Backend.(Stagehand|Owned_firefox|External_host) -> false in
   Eio_main.run (fun env ->
     Time_compat.set_clock (Eio.Stdenv.clock env);
     Eio.Switch.run (fun sw ->
     let owner = match Masc.Browser_addon_owner.create ~incarnation with
       | Ok owner -> owner | Error message -> raise (Arg.Bad message) in
-    let uploads=Eio_unix.run_in_systhread (fun () ->
-      Masc.Browser_addon_uploads.create ~directory:(Filename.dirname socket_path)) in
-    (match Result.bind uploads (Masc.Browser_addon_owner.attach_uploads owner) with
-     | Ok () -> () | Error detail -> raise (Arg.Bad detail));
+    if transfers then (
+      let uploads=Eio_unix.run_in_systhread (fun () ->
+        Masc.Browser_addon_uploads.create ~directory:(Filename.dirname socket_path)) in
+      match Result.bind uploads (Masc.Browser_addon_owner.attach_uploads owner) with
+      | Ok () -> () | Error detail -> raise (Arg.Bad detail));
     Eio.Switch.on_release sw (fun () ->
-      (* The nested owned backend scopes have joined before this outer release.
+      (* The owned source's scope has joined before this outer release.
          Cancellation may bypass the host's orderly Retire RPC; observe the same
          original backend and transfer cleanup here as well. *)
       match Masc.Browser_addon_owner.dispatch owner
@@ -38,10 +48,11 @@ let () =
       | Service_refusal {message;_} -> Printf.eprintf "browser cleanup unconfirmed: %s\n%!" message
       | Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Issue_result _ ->
           Printf.eprintf "browser cleanup returned no settlement receipt\n%!");
-    let downloads=Eio_unix.run_in_systhread (fun () ->
-      Masc.Browser_addon_downloads.create ~directory:(Filename.dirname socket_path)) in
-    (match Result.bind downloads (Masc.Browser_addon_owner.attach_downloads owner) with
-     | Ok () -> () | Error detail -> raise (Arg.Bad detail));
+    if transfers then (
+      let downloads=Eio_unix.run_in_systhread (fun () ->
+        Masc.Browser_addon_downloads.create ~directory:(Filename.dirname socket_path)) in
+      match Result.bind downloads (Masc.Browser_addon_owner.attach_downloads owner) with
+      | Ok () -> () | Error detail -> raise (Arg.Bad detail));
     if !models then (
       let directory=Filename.dirname socket_path in
       let configuration=Eio_unix.run_in_systhread (fun () ->
@@ -74,14 +85,13 @@ let () =
       (fun () -> Masc.Browser_addon_service.serve ~net:(Eio.Stdenv.net env) ~owner
         ~socket_path ~max_message_bytes)
       until_stop in
-    let ego ()=match live_ego with
-      | Some configuration ->
-        Masc.Browser_addon_live_ego.run ~env ~owner
-          ~downloads:(Masc.Browser_addon_downloads.downloads_directory ~directory:(Filename.dirname socket_path)) configuration serve
-      | None -> serve () in
-    let live ()=if !live_bidi then Masc.Browser_addon_live_bidi.run ~env ~owner
-      ~directory:(Filename.dirname socket_path) ego else ego () in
-    let chrome ()=if !stagehand then Masc.Browser_addon_stagehand.run ~env ~owner
-      ~directory:(Filename.dirname socket_path) live else live () in
-    if !automation then Masc.Browser_addon_automation.run ~env ~owner
-      ~directory:(Filename.dirname socket_path) chrome else chrome ()))
+    let directory=Filename.dirname socket_path in
+    match backend,live_ego with
+    | Browser_lane.Backend.Automation,_ -> Masc.Browser_addon_automation.run ~env ~owner ~directory serve
+    | Browser_lane.Backend.Stagehand,_ -> Masc.Browser_addon_stagehand.run ~env ~owner ~directory serve
+    | Browser_lane.Backend.Owned_firefox,_ -> Masc.Browser_addon_live_bidi.run ~env ~owner ~directory serve
+    | Browser_lane.Backend.Ego,Some configuration ->
+      Masc.Browser_addon_live_ego.run ~env ~owner
+        ~downloads:(Masc.Browser_addon_downloads.downloads_directory ~directory) configuration serve
+    | Browser_lane.Backend.Ego,None -> raise (Arg.Bad "the ego source needs its task space")
+    | Browser_lane.Backend.External_host,_ -> serve ()))

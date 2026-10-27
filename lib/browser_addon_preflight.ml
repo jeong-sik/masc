@@ -16,8 +16,7 @@ let serves_native_hosts (declaration : Lane_addon_config.declaration) =
   declaration.enabled
   &&
   match declaration.package.Lane_addon_types.worker_service with
-  | Lane_addon_types.Browser_service backends ->
-    Lane_addon_types.serves_backend backends Browser_lane.Backend.External_host
+  | Lane_addon_types.Browser_service backend -> backend = Browser_lane.Backend.External_host
   | Lane_addon_types.Mcp_tools -> false
 ;;
 
@@ -61,6 +60,43 @@ let judge ~base_path =
          })
 ;;
 
+type doubled = { source : Browser_lane.Backend.t; ids : string list }
+
+(* A source two enabled declarations serve is used by neither: the host
+   cannot tell which one a request is for. *)
+let doubled_sources ~base_path =
+  let snapshot = Lane_addon_config.load ~directory:(declaration_directory ~base_path) in
+  let browsers =
+    List.filter_map
+      (fun (declaration : Lane_addon_config.declaration) ->
+        match declaration.enabled, declaration.package.Lane_addon_types.worker_service with
+        | true, Lane_addon_types.Browser_service backend ->
+          Some (declaration.Lane_addon_config.id, backend)
+        | false, Lane_addon_types.Browser_service _ | (true | false), Lane_addon_types.Mcp_tools -> None)
+      snapshot.Lane_addon_config.declarations
+  in
+  List.filter_map
+    (fun source ->
+      match List.filter (fun (_, backend) -> backend = source) browsers with
+      | _ :: _ :: _ as serving -> Some { source; ids = List.map fst serving }
+      | [] | [ _ ] -> None)
+    Browser_lane.Backend.all
+;;
+
+let report_doubled = function
+  | [] -> Ok ()
+  | doubled ->
+    Error
+      (Printf.sprintf
+         "more than one enabled browser Add-on declaration serves the same source (%s), so that \
+          source is not used until all but one are disabled. Keep one declaration per source."
+         (String.concat "; "
+            (List.map
+               (fun { source; ids } ->
+                 Browser_lane.Backend.to_wire source ^ ": " ^ String.concat ", " ids)
+               doubled)))
+;;
+
 let report = function
   | Not_required -> Ok "browser lane host not installed; the browser Add-on is not required"
   | Declared { id } -> Ok (Printf.sprintf "browser Add-on declared id=%s" id)
@@ -91,7 +127,8 @@ let report = function
          "a browser lane host is installed under %s but no enabled browser Add-on declaration \
           serving external native hosts is saved in %s, so every native browser host poll would be answered with HTTP 503 \
           (no_browser_addon). Save a declaration whose package has service = \"browser\" \
-          and no browser_backend or browser_backend = \"external_host\" (addons/browser/lane.toml; docs/guides/lane-addon-toml.md), or remove %s if this \
+          and browser_backend = \"external_host\" (addons/browser/external/lane.toml, which masc \
+          browser-lane-setup declares as browser-external; docs/guides/lane-addon-toml.md), or remove %s if this \
           workspace should run no browser%s%s"
          host_directory directory host_directory unloaded_note incomplete_note)
 ;;

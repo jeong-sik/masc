@@ -126,16 +126,17 @@ let parse_live_ego ~path = function
      | None, _ -> Error (path ^ ".command is required when the table is configured")
      | Some _, None -> Error (path ^ ".space is required when the table is configured"))
 
+let automation_path = browser_table ^ ".automation"
+let stagehand_path = browser_table ^ ".stagehand"
+let live_path = browser_table ^ ".live"
+let live_bidi_path = live_path ^ ".bidi"
+let live_ego_path = live_path ^ ".ego"
+
 let parse toml =
   let* root = table ~path:browser_table
     ~keys:["geckodriver"; "binary"; "live"; "automation"; "stagehand"]
     (Otoml.find_opt toml Fun.id [browser_table]) in
   let root = fields root in
-  let automation_path = browser_table ^ ".automation" in
-  let stagehand_path = browser_table ^ ".stagehand" in
-  let live_path = browser_table ^ ".live" in
-  let live_bidi_path = live_path ^ ".bidi" in
-  let live_ego_path = live_path ^ ".ego" in
   let* automation_table = table ~path:automation_path
     ~keys:["enabled"; "geckodriver"; "binary"] (List.assoc_opt "automation" root) in
   let* stagehand_table = table ~path:stagehand_path
@@ -160,7 +161,27 @@ let parse toml =
   let* stagehand_enabled = enabled ~path:stagehand_path (fields stagehand_table) in
   Ok { automation; stagehand; live_bidi; live_ego; live_enabled; automation_enabled; stagehand_enabled }
 
+(* The file parser returns most syntax errors but raises on a repeated
+   table. *)
 let of_file path =
   match Otoml.Parser.from_file_result path with
   | Error detail -> Error detail
   | Ok toml -> parse toml
+  | exception Otoml.Duplicate_key detail -> Error detail
+
+type unstarted = Switched_off of string | Table_missing of string
+
+(* A switched-off lane keeps its paths, so the switch is read first. *)
+let table_of ~enabled ~lane ~path table =
+  if not enabled then Error (Switched_off lane)
+  else match table with Some table -> Ok table | None -> Error (Table_missing path)
+let automation_table t =
+  table_of ~enabled:t.automation_enabled ~lane:automation_path ~path:automation_path t.automation
+let stagehand_table t =
+  table_of ~enabled:t.stagehand_enabled ~lane:stagehand_path ~path:stagehand_path t.stagehand
+let live_bidi_table t = table_of ~enabled:t.live_enabled ~lane:live_path ~path:live_bidi_path t.live_bidi
+let live_ego_table t = table_of ~enabled:t.live_enabled ~lane:live_path ~path:live_ego_path t.live_ego
+
+let unstarted_message = function
+  | Switched_off lane -> Printf.sprintf "[%s] enabled = false switches it off" lane
+  | Table_missing path -> Printf.sprintf "it has no [%s] table" path

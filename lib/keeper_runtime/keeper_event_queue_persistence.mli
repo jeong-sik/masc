@@ -1,7 +1,7 @@
 (** Durable per-Keeper Event Layer state.
 
     Current writes go to [event-queue-v19.json] with the exact
-    [keeper.event_queue.state.v19] compact-witness schema. The envelope holds
+    [keeper.event_queue.state.v20] compact-witness schema. The envelope holds
     revision, pending stimuli, the latest
     projected transition, an operation-indexed ledger of older projected
     dispositions, at most one unprojected transition, and durable
@@ -155,6 +155,18 @@ val select_when_result :
   now:float ->
   ready:(Keeper_event_queue.stimulus -> bool) ->
   (Keeper_event_queue_state.pending_selection option, string) result
+
+val pending_frontier_result :
+  base_path:string ->
+  keeper_name:string ->
+  ( Keeper_event_queue_state.frontier
+    * Keeper_event_queue_state.pending_selection list
+  , string )
+  result
+(** {!pending_selections_result} together with the frontier of the very state
+    it was read from. A later arrival is told apart from an entry in the list
+    by {!Keeper_event_queue_state.arrived_since} on this frontier, so no second
+    read can race with the first. *)
 
 val pending_selections_result :
   base_path:string ->

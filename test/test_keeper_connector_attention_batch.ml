@@ -1997,8 +1997,13 @@ let test_running_source_observes_new_completion_after_intake () =
           ~ctx ~meta_after_triage:meta ~pending_board_events:[] in
         let module Batch = Keeper_heartbeat_source_batch in
         check int "admission respects the configured bound" 2 (Batch.count intake.source_batch);
-        check int "intake records unadmitted backlog without selecting it" backlog_size
-          (List.length (Batch.pending_at_intake intake.source_batch));
+        let backlog = Keeper_event_queue_persistence.pending_selections_result
+          ~base_path ~keeper_name |> require in
+        check int "the queue holds the whole backlog, admitted or not" backlog_size
+          (List.length backlog);
+        check bool "intake saw every backlog entry and none counts as a later arrival" true
+          (List.for_all (fun s -> not (Batch.arrived_since_intake intake.source_batch s))
+             backlog);
         let input = Batch.for_turn ~reactive:true intake.source_batch in
         let make_probe () = fst (Keeper_unified_turn.For_testing.autonomous_yield_probe
           ~wake:(Batch.wake input) ~sources:(Batch.sources input) ~base_path ~keeper_name) in
@@ -2056,6 +2061,73 @@ let test_running_source_observes_new_completion_after_intake () =
     [10;100;300]
 ;;
 
+let test_running_source_does_not_preempt_after_queue_edit ~case ~edit () =
+  with_ctx ("running-source-" ^ case) (fun ~base_path ~keeper_name ~meta ~ctx ->
+    (match Keeper_owner_registry.install_from_store
+        ~sw:ctx.sw ~operation_runner:None ~on_turn_slot_released:None ctx.config with
+     | Ok _ -> ()
+     | Error error -> fail (Keeper_owner_registry.install_error_to_string error));
+    (match Keeper_owner_registry.create_meta ~base_path meta with
+     | Ok (Some _) -> ()
+     | Ok None -> fail "running source fixture metadata disappeared"
+     | Error error -> fail (Keeper_owner_registry.command_error_to_string error));
+    let require = function Ok value -> value | Error detail -> fail detail in
+    let source : Q.stimulus =
+      { post_id = "running-" ^ case; urgency = Q.Immediate; arrived_at = 1.
+      ; payload = Q.Delegate_completed
+          { dc_operation_id = "running-" ^ case; dc_keeper = "original-delegate"
+          ; dc_terminal = Q.Delegate_replied "running result" } }
+    in
+    enqueue_exn ~base_path keeper_name source;
+    let intake = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+      ~ctx ~meta_after_triage:meta ~pending_board_events:[] in
+    let module Batch = Keeper_heartbeat_source_batch in
+    check int "one running source admitted" 1 (Batch.count intake.source_batch);
+    let input = Batch.for_turn ~reactive:true intake.source_batch in
+    let probe = fst (Keeper_unified_turn.For_testing.autonomous_yield_probe
+      ~wake:(Batch.wake input) ~sources:(Batch.sources input) ~base_path ~keeper_name) in
+    check bool (case ^ " intake does not preempt itself") true
+      (Option.is_none (probe () |> require));
+    let selection = match Batch.selections intake.source_batch with
+      | [ selection ] -> selection
+      | _ -> fail "expected exactly one running source selection" in
+    edit ~base_path ~keeper_name ~selection |> require |> ignore;
+    check bool (case ^ " does not turn the running source into a successor") true
+      (Option.is_none (probe () |> require));
+    let successor : Q.stimulus =
+      { post_id = "after-" ^ case; urgency = Q.Immediate; arrived_at = 2.
+      ; payload = Q.Delegate_completed
+          { dc_operation_id = "after-" ^ case; dc_keeper = "original-delegate"
+          ; dc_terminal = Q.Delegate_replied "arrived after the edit" } }
+    in
+    enqueue_exn ~base_path keeper_name successor;
+    match probe () |> require with
+    | Some {Keeper_agent_run.reason = Durable_stimulus_waiting summary} ->
+      check (option string) (case ^ " a source admitted after the edit still preempts")
+        (Some successor.post_id)
+        (Option.map (fun (s : Q.stimulus) -> s.post_id) summary.head)
+    | Some {reason = Operation_queued} | None ->
+      fail (case ^ " edit hid a source admitted after it"))
+;;
+
+let test_running_source_does_not_preempt_after_reprioritize () =
+  test_running_source_does_not_preempt_after_queue_edit
+    ~case:"reprioritize"
+    ~edit:(fun ~base_path ~keeper_name ~selection ->
+      Keeper_registry_event_queue.reprioritize_pending_result
+        ~base_path keeper_name ~selection ~urgency:Q.Low)
+    ()
+;;
+
+let test_running_source_does_not_preempt_after_defer () =
+  test_running_source_does_not_preempt_after_queue_edit
+    ~case:"defer"
+    ~edit:(fun ~base_path ~keeper_name ~selection ->
+      Keeper_registry_event_queue.defer_pending_result
+        ~base_path keeper_name ~selection)
+    ()
+;;
+
 let () =
   run
     "keeper_connector_attention_batch"
@@ -2064,6 +2136,10 @@ let () =
             test_proactive_yields_only_to_ready_intake
         ; test_case "new completions preempt after exact bounded intake frontier" `Quick
             test_running_source_observes_new_completion_after_intake
+        ; test_case "reprioritized running source does not preempt itself" `Quick
+            test_running_source_does_not_preempt_after_reprioritize
+        ; test_case "deferred running source does not preempt itself" `Quick
+            test_running_source_does_not_preempt_after_defer
         ; test_case "checkpoint yields preserve requests until exact settlement" `Quick
             test_checkpoint_retention_preserves_unsettled_sources
         ; test_case "new connector preempts and retains the entire old conversation in FIFO order" `Quick

@@ -173,7 +173,7 @@ type operation_runner =
 
 let surviving_scheduled_sources ~observed requested =
   List.filter (fun source ->
-    List.exists (Keeper_event_queue_state.equal_pending_selection source) observed) requested
+    List.exists (Keeper_event_queue_state.same_entry source) observed) requested
 
 type scheduled_turn_consumer = Scheduled_turn_consumer of Keeper_interrupt_token.t
 
@@ -190,7 +190,7 @@ let remove_handoff_sources current released =
   | Some current when same_scheduled_consumer current.consumer released.consumer
       && Keeper_interrupt_token.equal current.observed_turn released.observed_turn ->
     let sources = List.filter (fun source ->
-      not (List.exists (Keeper_event_queue_state.equal_pending_selection source) released.sources)) current.sources in
+      not (List.exists (Keeper_event_queue_state.same_entry source) released.sources)) current.sources in
     if List.is_empty sources then None else Some { current with sources }
   | Some _ | None -> current
 
@@ -1682,7 +1682,7 @@ let start
             | Some prior when same_scheduled_consumer prior.consumer consumer
                 && Keeper_interrupt_token.equal prior.observed_turn observed ->
               prior.sources @ List.filter (fun source ->
-                not (List.exists (Keeper_event_queue_state.equal_pending_selection source) prior.sources)) sources
+                not (List.exists (Keeper_event_queue_state.same_entry source) prior.sources)) sources
             | Some _ | None -> sources in
           t.scheduled_handoff := Some { consumer; observed_turn = observed; sources };
           t.autonomous_lost_slot := true;
@@ -2716,7 +2716,7 @@ let start
                 | Ok observed -> surviving_scheduled_sources ~observed requested
                 | Error _ -> [] in
               let stale = List.filter (fun source ->
-                not (List.exists (Keeper_event_queue_state.equal_pending_selection source) surviving)) requested in
+                not (List.exists (Keeper_event_queue_state.same_entry source) surviving)) requested in
               t.scheduled_handoff := remove_handoff_sources !(t.scheduled_handoff)
                 { captured with sources = stale };
               surviving, Some { captured with sources = surviving }

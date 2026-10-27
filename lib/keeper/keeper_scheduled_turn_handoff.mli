@@ -10,6 +10,9 @@ val request : excluding:Keeper_event_queue_state.pending_selection list ->
   base_path:string -> keeper_name:string ->
   (Keeper_event_queue_state.pending_selection list, request_error) result
 (** At an owned post-tool boundary, request a handoff for pending scheduled
-    sources not already present in this turn's exact source cohort. No ACK,
+    sources not already present in this turn's exact source cohort. Cohort
+    members are matched as queue entries
+    ({!Keeper_event_queue_state.same_entry}), so reprioritizing or deferring a
+    member does not make it a new source. No ACK,
     reprioritization or new copy of the input is written. A negative live
     queue hint avoids durable I/O on the ordinary post-tool hot path. *)

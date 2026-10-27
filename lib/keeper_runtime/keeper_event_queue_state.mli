@@ -128,25 +128,27 @@ type t
 type pending_selection =
   { source : Keeper_event_queue.stimulus
   ; admitted_revision : int64
+  ; arrival : int64
   ; checkpoint_retentions : int
   ; repetition_scope : Keeper_execution_scope_id.t option
   ; first_admitted_at : float option
   }
-(** One exact durable queue entry. [admitted_revision] records the durable
-    transform that admitted the snapshot; entries admitted by the same
-    transform may share it, so exact selection combines it with
-    {!source_snapshot_ref}. *)
+(** One exact durable queue entry. [admitted_revision] is the current
+    exact-selection fence; deferral and reprioritization advance it. Exact
+    selection combines it with {!source_snapshot_ref}. *)
+(** [arrival] numbers the entry when the queue first admits it. The number is
+    unique among the entries of one queue and never changes afterwards:
+    retention, deferral and reprioritization preserve it, while an ACK followed
+    by reinsertion creates a new entry with a later number. It names the entry,
+    not its content or its position, so it is not an exact selection fence; use
+    [admitted_revision] for that. Read it through {!same_entry} and
+    {!arrived_since}. *)
 (** [repetition_scope = None] means no durable binding has been recorded. It
     does not assert that the source has never been observed by a model. A
     binding identifies work; it does not by itself authorize Fresh or Resume. *)
 (** [first_admitted_at] is first durable queue admission epoch time; [None]
     means no clock was recorded. Source timestamps cannot supply it. It remains
     diagnostic only and survives retention, deferral and reprioritization. *)
-
-val equal_pending_selection : pending_selection -> pending_selection -> bool
-(** Exact durable occurrence identity: both [admitted_revision] and
-    {!source_snapshot_ref} agree. Retention counts, repetition scope and the
-    diagnostic admission clock do not change the occurrence identity. *)
 
 type scope_binding_error =
   | Empty_scope_batch
@@ -172,6 +174,28 @@ val revision : t -> int64
 val pending : t -> Keeper_event_queue.t
 val pending_selections : t -> pending_selection list
 (** FIFO pending entries with their exact source incarnation authority. *)
+
+type frontier
+(** The point in queue history at which one reader loaded the state. *)
+
+val frontier : t -> frontier
+(** The frontier of this loaded state: every entry it holds has a lower
+    [arrival] number than any admitted later. *)
+
+val unobserved_frontier : frontier
+(** A reader that loaded no state: every pending entry arrived after it. *)
+
+val arrived_since : frontier -> pending_selection -> bool
+(** [arrived_since frontier entry] is true when the queue admitted [entry]
+    after the state [frontier] was taken from, so a reader holding [frontier]
+    had not seen it. Reprioritization, deferral and retention of an entry the
+    reader already saw leave this false; an ACK followed by reinsertion makes
+    it true. *)
+
+val same_entry : pending_selection -> pending_selection -> bool
+(** The two values describe the same queue entry, whatever edits happened
+    between the reads. Content, urgency and [admitted_revision] are not
+    compared; an ACK followed by reinsertion is a different entry. *)
 
 val source_snapshot_ref : Keeper_event_queue.stimulus -> string
 (** Stable SHA-256 reference derived from the exact typed source snapshot. It
@@ -474,4 +498,4 @@ val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 
 val schema : string
-(** ["keeper.event_queue.state.v17"] is the only accepted schema. *)
+(** ["keeper.event_queue.state.v20"] is the only accepted schema. *)

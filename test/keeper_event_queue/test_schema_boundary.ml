@@ -11,6 +11,7 @@ let test_event_queue_state_rejects_foreign_schema () =
     `Assoc
       [ ("schema", `String Keeper_event_queue_state.schema)
       ; ("revision", `Int 0)
+      ; ("next_arrival", `Int 0)
       ; ("pending", `List [])
       ; ("last_transition", `Null)
       ; ("projected_dispositions", `List [])

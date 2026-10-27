@@ -3,8 +3,19 @@ type t = {
   domain_count : int;
 }
 
+(* RFC-0204 §3.5. An unqueued read handler finishes in a few ms (gate/keepers
+   detailed=false at 4 ms on 2026-10-27), and the TUI sends a handful at
+   once, so two domains keep reads from waiting on each other; a host with
+   fewer than [cores_for_two_read_domains] cores gives one. The read pool
+   comes out of the shared pool's share, because more domains than cores
+   lengthen every stop-the-world minor collection. *)
+let cores_for_two_read_domains = 8
+
+let read_domain_count () =
+  if Domain.recommended_domain_count () >= cores_for_two_read_domains then 2 else 1
+
 let recommended_domain_count () =
-  max 1 (Domain.recommended_domain_count () - 2)
+  max 1 (Domain.recommended_domain_count () - 2 - read_domain_count ())
 
 let weight_io = 0.05
 let weight_cpu = 1.0

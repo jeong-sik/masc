@@ -317,9 +317,14 @@ let check_exact_output_registry ?config_root () =
   | Ok () -> ()
 ;;
 
-let install_domain_pool_references domain_pool =
+let install_domain_pool_references ?read domain_pool =
   Domain_pool_ref.set domain_pool;
-  Executor_pool_ref.set (Domain_pool.executor_pool domain_pool)
+  Executor_pool_ref.set (Domain_pool.executor_pool domain_pool);
+  Option.iter
+    (fun read ->
+      Domain_pool_ref.set_read read;
+      Executor_pool_ref.set_read (Domain_pool.executor_pool read))
+    read
 ;;
 
 let publish_exact_output_registry_from_file ~config_path =
@@ -1117,7 +1122,10 @@ let initialize_owner_state_blocking
   let domain_pool =
     Domain_pool.create ~sw ~domain_count:budget.Domain_budget.shared_pool domain_mgr
   in
-  install_domain_pool_references domain_pool;
+  let read_pool =
+    Domain_pool.create ~sw ~domain_count:(Domain_pool.read_domain_count ()) domain_mgr
+  in
+  install_domain_pool_references ~read:read_pool domain_pool;
   Systhread_host.start ();
   (match Runtime_agent_execution_runtime.initialize ~sw ~domain_mgr
       ~domain_count:budget.Domain_budget.execution_codec with

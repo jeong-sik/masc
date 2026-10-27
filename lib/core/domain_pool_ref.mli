@@ -7,10 +7,20 @@
 
 val get : unit -> Domain_pool.t option
 val set : Domain_pool.t -> unit
+
+val set_read : Domain_pool.t -> unit
+(** Install the read pool (RFC-0204 L3). The submits below send work from a
+    {!Pool_lane.Read} fiber there and everything else to the pool of {!set};
+    without a read pool, reads use the pool of {!set}. *)
+
 val clear_for_tests : unit -> unit
+(** Remove both pools. *)
 
 val domain_count_opt : unit -> int option
 (** Current worker-domain count, when the pool has been installed. *)
+
+val read_domain_count_opt : unit -> int option
+(** Worker-domain count of the read pool, when installed. *)
 
 val submit_io_or_inline : (unit -> 'a) -> 'a
 (** Submit IO-bound work to the shared domain pool. Runs inline when the

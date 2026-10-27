@@ -130,7 +130,7 @@ module For_testing : sig
     config_path:string -> Runtime_schema.exact_output_lane_decl list -> unit
   (** Raises one [Env_config_core.Config_error] that names every violation. *)
 
-  val install_domain_pool_references : Domain_pool.t -> unit
+  val install_domain_pool_references : ?read:Domain_pool.t -> Domain_pool.t -> unit
 end
 
 val restore_persisted_sessions : Mcp_server.server_state -> unit

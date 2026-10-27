@@ -27,8 +27,13 @@ type t
 (** Opaque pool handle.  Carries the underlying [Eio.Executor_pool.t]
     plus the resolved [domain_count] for telemetry. *)
 
+val read_domain_count : unit -> int
+(** Domains of the read pool (RFC-0204 L3): 2 on a host with at least 8
+    recommended domains, 1 below that. *)
+
 val recommended_domain_count : unit -> int
-(** [max 1 (Domain.recommended_domain_count () - 2)].
+(** [max 1 (Domain.recommended_domain_count () - 2 - read_domain_count ())]:
+    the shared pool gives up the read pool's domains.
 
     The [-2] keeps the original main domain outside the executor pool
     and, when available, leaves one additional domain of host scheduling

@@ -331,11 +331,21 @@ let confirm_final ~store capture final =
   let* declaration_id=match installation with Owner.Configuration id -> Ok id
     | Manual _ -> Error "Original history requires a configured host installation" in
   let* observed=Exact.observe_retained ~store ~declaration_id ~schema exact in
-  let* ()=match observed with
-    | Exact.Retained_absent -> Error "Original history host terminal is absent"
-    | Retained_open -> Error "Original history host terminal is unresolved"
-    | Retained_terminal actual -> equal (Exact.final_to_json (Exact.delivered actual)) (Exact.final_to_json final)
-      "Original history final differs from the actual host terminal" in
+  match observed with
+  | Exact.Retained_absent ->
+    (match final with
+     (* The worker refuses a request no host listing reply can carry before
+        the host ever retains it (addons/exact_worker.py, #45200), so no host
+        terminal can exist. It is the only final taken without one: it carries
+        no answer and no model ran. *)
+     | Exact.Call_final (Exact.Input_refused Exact.Request_body_refused) -> Ok ()
+     | Call_final (Answered _ | Invalid_output _ | Output_limit_reached _
+       | Input_refused (Input_capacity | Context_overflow | Invalid_request))
+     | Outcome_unknown | Not_allowed _ | Request_id_reused -> Error "Original history host terminal is absent")
+  | Retained_open -> Error "Original history host terminal is unresolved"
+  | Retained_terminal actual ->
+  let* ()=equal (Exact.final_to_json (Exact.delivered actual)) (Exact.final_to_json final)
+    "Original history final differs from the actual host terminal" in
   match final with
   | Exact.Call_final expected ->
     let* latest=Exact.read_latest_original_execution ~store ~declaration_id ~schema exact in

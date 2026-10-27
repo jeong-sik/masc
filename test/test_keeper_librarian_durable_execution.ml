@@ -481,6 +481,32 @@ let test_terminal_refusal_allows_fresh_original () = with_fixture (fun ~sw:_ fix
   check int "one refused and one successful provider call" 2 (F.post_count fixture.server);
   check (list string) "new original alone publishes Memory"
     ["Knowledge from original completed history"] (io (fun () -> claims fixture.keepers_dir)))
+(* The Librarian worker's declared reply frame is 4 MiB; a request whose host
+   listing cannot fit is refused by the worker before the host retains it. *)
+let oversized_turn_bytes = 4_500_000
+let test_worker_body_refusal_ends_the_original () = with_fixture (fun ~sw:_ fixture ->
+  let oversized=selected_messages @ [message (String.init oversized_turn_bytes (fun index -> Char.chr (97 + index mod 26)));
+    Agent_core.Types.make_message ~role:Agent_core.Types.Assistant [Agent_core.Types.Text "Oversized answer"]] in
+  save_checkpoint fixture.config ~trace_id oversized 3;
+  io (fun () -> append_boundary fixture.config ~turn:3 ~time:(Time_compat.now ())
+    ~history_at_start:(Boundary.history_at_start_of_messages selected_messages) oversized);
+  let before=progress fixture in
+  (match run_worker fixture with
+   | Ok (Consumer.Memory_not_committed [report]) ->
+     let final=Lane_addon_exact.Call_final (Input_refused Request_body_refused) in
+     check string "the worker's typed frame refusal ends the pass"
+       ("Original history request refused: " ^ Yojson.Safe.to_string (Lane_addon_exact.final_to_json final)) report.detail
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok (Consumer.Memory_not_committed ([] | _::_::_) | Nothing_to_read | Pending
+         | Baseline_advanced _ | Progress_advanced _ | Official_advanced _) ->
+     fail "an unlistable request must end as one refusal");
+  let refused,_=only_original fixture in
+  check bool "the refused original is finished, not left at dispatch" true
+    (match Progress.phase refused.progress with Rejected _ -> true
+     | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+     | Finished _ | Conflicted _ | Subdividing _ | Subdivided _ -> false);
+  check int "no model ran for the refused request" 0 (F.post_count fixture.server);
+  check bool "refusal does not acknowledge source" true (progress fixture=before))
 let test_actual_completed_history_path () = with_fixture (fun ~sw:_ fixture ->
   check bool "actual runtime and Memory configuration roots stay distinct" true
     (Workspace.keepers_runtime_dir fixture.config<>fixture.keepers_dir);
@@ -1190,6 +1216,8 @@ let test_changed_memory_rebases_original_source_without_unknown_retry ?(lose_chi
 let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured completed-history",[
   test_case "missing attachment is reported without consuming source" `Quick test_unattached_reports_without_consuming;
   test_case "terminal refusal preserves reason and allows a fresh original" `Quick test_terminal_refusal_allows_fresh_original;
+  test_case "a worker frame refusal ends the original instead of blocking publication" `Quick
+    test_worker_body_refusal_ends_the_original;
   test_case "actual original reaches Memory and source ACK" `Quick test_actual_completed_history_path;
   test_case "a settle stopped before its gate records finishes with the next original" `Quick
     test_stopped_settle_leaves_gates_for_the_next_original;

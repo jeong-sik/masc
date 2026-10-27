@@ -44,6 +44,21 @@ let inspect ~base_path ~port =
       (match Upgrade.suggest_loopback_port () with Ok port -> ["suggested_port", `Int port] | Error _ -> []) in
   emit (`Assoc (["schema", `String "masc.setup_server.v1"; "read_only", `Bool true;
     "installed_version", `String Runtime_build_version.current] @ fields @ alternative)); 0
+let with_selected_owner ~sw ~clock ~base_path ~port ~agent ~expected_version ~login use =
+  let ( let* ) = Result.bind in
+  let* () = match Masc_http_client.get_sync ~clock ~headers:[]
+    ~url:(Printf.sprintf "http://127.0.0.1:%d/health?full=1" port) () with
+    | Ok (200, body) -> Upgrade.authorize_initial ~base_path ~expected_version ~body
+        ~login:(fun () -> login () = 0)
+    | Ok _ | Error _ -> Error Upgrade.Invalid_health in
+  let* token = match Auth_login.read_persisted_http_token ~base_path ~agent_name:agent with
+    | None -> Error Upgrade.Admin_required | Some token -> Ok token in
+  let run_dir = (Host_config.host ()).base_path_lease_dir in
+  let headers = ["authorization", "Bearer " ^ token; "x-masc-agent", agent] in
+  let* owner = Upgrade.prepare ~sw ~clock ~headers ~run_dir ~base_path ~port in
+  Fun.protect ~finally:(fun () -> Upgrade.close owner) (fun () ->
+    if (Upgrade.incumbent owner).version <> expected_version then Error Upgrade.Incumbent_changed
+    else use owner)
 type request_phase = Request_not_confirmed | Request_confirmed
 let stop ~base_path ~port ~agent ~expected_version ~login =
   let phase = ref Request_not_confirmed in
@@ -51,18 +66,8 @@ let stop ~base_path ~port ~agent ~expected_version ~login =
     let base_path = Unix.realpath (Env_config.normalize_masc_base_path_input base_path) in
     with_http (fun sw clock ->
       let ( let* ) = Result.bind in
-      let* () = match Masc_http_client.get_sync ~clock ~headers:[]
-        ~url:(Printf.sprintf "http://127.0.0.1:%d/health?full=1" port) () with
-        | Ok (200, body) -> Upgrade.authorize_initial ~base_path ~expected_version ~body
-            ~login:(fun () -> login () = 0)
-        | Ok _ | Error _ -> Error Upgrade.Invalid_health in
-      let* token = match Auth_login.read_persisted_http_token ~base_path ~agent_name:agent with
-        | None -> Error Upgrade.Admin_required | Some token -> Ok token in
       let run_dir = (Host_config.host ()).base_path_lease_dir in
-      let headers = ["authorization", "Bearer " ^ token; "x-masc-agent", agent] in
-      let* owner = Upgrade.prepare ~sw ~clock ~headers ~run_dir ~base_path ~port in
-      Fun.protect ~finally:(fun () -> Upgrade.close owner) (fun () ->
-        if (Upgrade.incumbent owner).version <> expected_version then Error Upgrade.Incumbent_changed else
+      with_selected_owner ~sw ~clock ~base_path ~port ~agent ~expected_version ~login (fun owner ->
         match Upgrade.request_termination_and_observe owner ~observe:(fun () ->
           phase := Request_confirmed;
           prerr_endline "Waiting for this workspace to shut down gracefully. Ctrl-C stops waiting; setup never forces it down.";

@@ -4513,6 +4513,21 @@ let setup_stop_owner_cmd =
   Cmd.v (Cmd.info "setup-stop-previous-owner" ~doc:"Gracefully stop the authenticated owner selected for workspace upgrade.")
     Term.(const stop $ base_path $ port $ login_agent $ expected_version)
 
+let restart_cmd =
+  let log_path =
+    Arg.(value & opt (some string) None & info ["log"] ~docv:"FILE"
+      ~doc:"Append the replacement server's output to $(docv). Defaults to a new \
+            masc-start-<UTC time>.log under the workspace's .masc/logs.")
+  in
+  let restart base_path port host agent log_path =
+    Masc_cli_restart.run ~base_path ~port ~host ~log_path ~agent
+      ~login:(fun () -> ensure_local_operator_login ~base_path ~port ~agent)
+  in
+  Cmd.v (Cmd.info "restart"
+    ~doc:"Ask this workspace's running server to stop gracefully, start the installed build \
+          in its place in the background, and wait until it is ready. Nothing is forced down.")
+    Term.(const restart $ base_path $ port $ host $ login_agent $ log_path)
+
 let runtime_client_path_cmd =
   let client = Arg.(required & opt (some Masc_cli_client_path.client_arg) None & info ["client"]
     ~docv:"CLIENT" ~doc:"claude-code, codex, antigravity or muse-code.") in
@@ -4803,6 +4818,7 @@ let cmd =
     ; antigravity_context_cmd
     ; setup_server_cmd
     ; setup_stop_owner_cmd
+    ; restart_cmd
     ; doctor_cmd
     ; sandbox_catalog_cmd
     ; runtime_client_path_cmd

@@ -11,11 +11,33 @@ the owning service or container on the correct host before stopping it.
 Stop the confirmed owner through its operator controls before starting a
 replacement.
 
+## Replacing the running server
+
+`masc restart` replaces this workspace's server on this host, for example
+after `scripts/install-local-build.sh`:
+
+1. It reads `/health?full=1` on loopback. Only a server of this workspace is
+   asked to stop; another workspace, a non-MASC listener, or a lease owner
+   that does not answer on the port is refused and left running.
+2. It signs in as the local operator and sends one SIGTERM to the lease
+   owner it identified with `F_GETLK`, the same request `masc setup` makes.
+   Nothing is forced down.
+3. It starts `masc start --wait-for-previous-owner` in its own process group
+   with its output appended to `<base>/.masc/logs/masc-start-<UTC time>.log`
+   (`--log` chooses another file). That process sleeps on the lease until
+   the previous owner exits and then boots as usual, so no other process can
+   take the workspace in between.
+4. It waits until `/health/ready` answers 200 with the new process's `pid`,
+   then prints how long it took. Ctrl-C stops the waiting, not the new server.
+
+Plain `masc start` still refuses at once while another process holds the
+lease: a running server that was not asked to stop does not exit.
+
 Startup does not read, create, overwrite or remove a port-specific PID file.
 A file named `masc-<port>.pid` does not establish listener ownership. Startup
 also does not infer who sent a shutdown signal from a breadcrumb file; the
 ordinary shutdown path still records the signal it received.
 
-This boundary does not implement the predecessor-advertised handoff or
-connection-publication changes proposed in [RFC-0447](../rfc/RFC-0447-port-bind-or-refuse.md).
-That RFC remains a draft; these are separate changes.
+The design is in [masc restart](../rfc/RFC-masc-restart-replaces-the-workspace-server.md).
+The connection-publication changes proposed in
+[RFC-0447](../rfc/RFC-0447-port-bind-or-refuse.md) are separate and remain a draft.

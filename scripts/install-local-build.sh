@@ -473,6 +473,7 @@ if [ "$browser_addon" = true ]; then
 else
   echo "installed masc, masc-tui, masc-browser-host, masc-deployment-preflight-helper, masc-check-runtime-deployment-preflight, masc-exec-ssh-bootstrap into $prefix (no browser Add-on)"
 fi
+echo "install-local-build: a running server keeps its old build; masc restart replaces it with this one"
 
 # The masc just installed writes the browser Add-on package it carries into
 # the workspace and declares it when the workspace has none, so the server

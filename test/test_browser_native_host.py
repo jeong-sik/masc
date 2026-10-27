@@ -30,6 +30,8 @@ SHORT_POLL_SEC = 0.2
 # environment rather than --server.
 FOLLOWS_WORKSPACE = {
     "test_workspace_connection_port_is_followed",
+    "test_public_base_url_does_not_override_workspace",
+    "test_loopback_base_url_does_not_override_workspace",
     "test_failed_poll_reads_the_workspace_port_again",
     "test_a_failed_poll_stays_while_the_server_still_answers",
     "test_the_host_moves_once_the_named_server_answers",
@@ -211,8 +213,21 @@ class NativeHost(unittest.TestCase):
             else self.server.server_port
         argv = [str(HOST), "--base-path", str(base)]
         self.connection = base / ".masc/config/connection.toml"
-        # An exported MASC_HTTP_BASE_URL or MASC_HTTP_PORT outranks the file.
+        # Start from a clean MASC environment, then add each case's overrides.
         env = {key: value for key, value in os.environ.items() if not key.startswith("MASC_")}
+        if self._testMethodName in {
+            "test_public_base_url_does_not_override_workspace",
+            "test_failed_poll_reads_the_workspace_port_again",
+            "test_an_exported_port_is_never_followed",
+            "test_server_argument_takes_precedence",
+        }:
+            env["MASC_HTTP_BASE_URL"] = "https://masc.example.test"
+        elif self._testMethodName == "test_loopback_base_url_does_not_override_workspace":
+            self.previous_peer, previous_thread = start_peer(self._testMethodName)
+            self.peers.append((self.previous_peer, previous_thread))
+            env["MASC_HTTP_BASE_URL"] = f"http://127.0.0.1:{self.previous_peer.server_port}"
+        if self._testMethodName == "test_server_argument_takes_precedence":
+            env["MASC_HTTP_PORT"] = str(closed_port())
         if self._testMethodName == "test_an_exported_port_is_never_followed":
             # The file names a port nothing listens on; the environment names
             # this server, and a fixed address is never pinged or moved.
@@ -269,11 +284,26 @@ class NativeHost(unittest.TestCase):
         self.assertTrue(self.server.poll_seen.wait(timeout=5))
         self.assertTrue(self.server.identities)
 
+    def test_public_base_url_does_not_override_workspace(self):
+        self.assertTrue(self.server.poll_seen.wait(timeout=5))
+        self.assertTrue(self.server.identities)
+
+    def test_loopback_base_url_does_not_override_workspace(self):
+        self.assertTrue(self.server.poll_seen.wait(timeout=5))
+        self.assertTrue(self.server.identities)
+        self.assertEqual(self.previous_peer.paths, [], "the previous URL must not receive the lane token")
+
+    def test_server_argument_takes_precedence(self):
+        self.assertTrue(self.server.poll_seen.wait(timeout=5))
+        self.assertTrue(self.server.identities)
+
     def test_failed_poll_reads_the_workspace_port_again(self):
         # The server restarted on another port and rewrote connection.toml.
         # The host's first poll went to the port it read at launch and failed.
         self.connection.write_text(f"[server]\nhttp_port = {self.server.server_port}\n")
         self.assertTrue(self.server.poll_seen.wait(timeout=POLL_RETRY_WAIT_SEC))
+        self.assertTrue(self.server.ping_seen.is_set(), "the candidate receives a lane ping before the host moves")
+        self.assertLess(self.server.paths.index("/browser-lane/ping"), self.server.paths.index("/browser-lane/poll"))
         self.assertEqual(len({identity[0] for identity in self.server.identities}), 1)
 
     def test_a_failed_poll_stays_while_the_server_still_answers(self):
@@ -346,8 +376,17 @@ class NativeHost(unittest.TestCase):
         self.assertFalse(self.server.poll_seen.is_set())
 
     def test_tabs_and_page_roundtrip_fragmented_utf8(self):
-        for index, verb in enumerate(["tabs.list", "page.read", "page.capture", "page.interact", "page.scene"]):
-            command = {"id": str(index), "verb": verb, "args": {"tabId": 42} if index else {}}
+        commands = [
+            ("tabs.list", {}),
+            ("page.read", {"tabId": 42}),
+            ("page.capture", {"tabId": 42}),
+            ("page.interact", {"tabId": 42}),
+            ("page.scene", {"tabId": 42}),
+            ("page.goto", {"url": "https://example.com", "tabId": 42}),
+            ("page.act", {"action": "back", "tabId": 42}),
+        ]
+        for index, (verb, args) in enumerate(commands):
+            command = {"id": str(index), "verb": verb, "args": args}
             self.server.commands.put(command)
             self.assert_command(command)
             stale = {"id": "other-id", "ok": True, "data": "must not resolve"}
@@ -382,8 +421,8 @@ class NativeHost(unittest.TestCase):
 
     def test_unsupported_verb_is_not_forwarded(self):
         for verb, args in [
-            ("page.goto", {"url": "https://example.com"}),
-            ("page.act", {"action": "click", "tabId": 73, "selector": "button"}),
+            ("page.native_workflow", {}),
+            ("page.unknown", {}),
         ]:
             with self.subTest(verb=verb):
                 self.server.commands.put({"id": "rejected", "verb": verb, "args": args})
@@ -469,12 +508,6 @@ class Destination(unittest.TestCase):
                 self.assertNotIn(b"secret", result.stderr)
                 self.assertEqual(result.stdout, b"")
 
-    def test_inherited_remote_server_rejected(self):
-        env = dict(os.environ, MASC_HTTP_BASE_URL="http://example.com")
-        result = subprocess.run([str(HOST), "--base-path", "/unused-browser-host-base"], env=env, input=b"", capture_output=True, timeout=3)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn(b"loopback http origin", result.stderr)
-
     def test_malformed_workspace_port_is_an_error_not_a_default(self):
         with tempfile.TemporaryDirectory() as raw:
             base = Path(raw)
@@ -484,7 +517,30 @@ class Destination(unittest.TestCase):
             env = {key: value for key, value in os.environ.items() if not key.startswith("MASC_")}
             result = subprocess.run([str(HOST), "--base-path", str(base)], env=env, input=b"", capture_output=True, timeout=3)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn(b"http_port", result.stderr)
+            self.assertIn(b"connection.toml is invalid", result.stderr)
+            self.assertIn(b"--server", result.stderr)
+            self.assertNotIn(b"--port", result.stderr)
+            self.assertEqual(result.stdout, b"")
+
+    def test_invalid_environment_port_is_an_error_not_a_default(self):
+        with tempfile.TemporaryDirectory() as raw:
+            env = {key: value for key, value in os.environ.items() if not key.startswith("MASC_")}
+            env["MASC_HTTP_BASE_URL"] = "https://masc.example.test"
+            env["MASC_HTTP_PORT"] = "banana"
+            result = subprocess.run([str(HOST), "--base-path", raw], env=env, input=b"", capture_output=True, timeout=3)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(b"HTTP port must be an integer", result.stderr)
+            self.assertEqual(result.stdout, b"")
+
+    def test_non_loopback_workspace_host_identifies_the_source(self):
+        with tempfile.TemporaryDirectory() as raw:
+            env = {key: value for key, value in os.environ.items() if not key.startswith("MASC_")}
+            env["MASC_HOST"] = "192.0.2.1"
+            result = subprocess.run([str(HOST), "--base-path", raw], env=env, input=b"", capture_output=True, timeout=3)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(b"workspace server derived from MASC_HOST", result.stderr)
+            self.assertIn(b"loopback http origin", result.stderr)
+            self.assertNotIn(b"--server must", result.stderr)
             self.assertEqual(result.stdout, b"")
 
 

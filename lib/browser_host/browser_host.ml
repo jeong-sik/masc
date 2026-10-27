@@ -140,8 +140,8 @@ let write_frame stdout json =
     Eio.Flow.copy_string payload stdout;
     Ok ())
 
-(* Where polls go. An explicit --server, MASC_HTTP_BASE_URL or MASC_HTTP_PORT
-   is a fixed choice. Otherwise the workspace connection.toml names the port.
+(* Where polls go. An explicit --server or MASC_HTTP_PORT is a fixed choice.
+   Otherwise the workspace connection.toml names the port.
    That file is the desired endpoint, which the server and other commands
    write, not proof that a server answers there, so the host moves to the
    port it names only once that address answers the lane. *)
@@ -174,7 +174,7 @@ let browser_info json =
       Ok {browser="firefox"; version=engine_version; engine_version; transport=Browser_lane.Web_extension}
     | Some _ | None -> Error "unsupported browser metadata"
 
-let loopback_origin raw =
+let loopback_origin ~source raw =
   let server = Uri.of_string raw in
   let loopback = Masc_network_defaults.is_loopback_host_opt (Uri.host server) in
   let valid_port =
@@ -184,7 +184,7 @@ let loopback_origin raw =
      || Uri.userinfo server <> None || Uri.query server <> []
      || Uri.fragment server <> None
      || (Uri.path server <> "" && Uri.path server <> "/") then
-    Error "--server must be a loopback http origin without credentials, path, query or fragment"
+    Error (source ^ " must be a loopback http origin without credentials, path, query or fragment")
   else Ok server
 
 (* A port that fails to resolve is reported, never silently replaced by a
@@ -193,12 +193,17 @@ let workspace_server ~environment base =
   try
     match Workspace_connection.resolve ~base_path:(Some base)
             ~cli:None ~environment with
-    | Error error -> Error (Workspace_connection.error_message error)
+    | Error Workspace_connection.Invalid_configuration ->
+        Error "The workspace connection.toml is invalid. Repair it or supply --server."
+    | Error ((Workspace_connection.Invalid_port
+             | Workspace_connection.Configuration_unavailable
+             | Workspace_connection.Write_failed) as error) ->
+        Error (Workspace_connection.error_message error)
     | Ok port ->
         Uri.make ~scheme:"http"
           ~host:(Masc_network_defaults.normalize_advertised_host (Env_config_core.masc_host ()))
           ~port:(Workspace_connection.to_int port) ()
-        |> Uri.to_string |> loopback_origin
+        |> Uri.to_string |> loopback_origin ~source:"workspace server derived from MASC_HOST"
   with
   | Env_config_core.Config_error message -> Error message
   | Invalid_argument _ -> Error "invalid workspace server origin"
@@ -222,11 +227,11 @@ let resolve_config ~base_path ~server ~token_file =
       else base
     in
     let* destination, server =
-      match server, Env_config_core.masc_http_base_url_opt (), Env_config_core.masc_http_port_opt () with
-      | Some url, _, _ | None, Some url, _ -> Result.map (fun server -> Fixed, server) (loopback_origin url)
-      | None, None, (Some _ as environment) ->
+      match server, Env_config_core.masc_http_port_opt () with
+      | Some url, _ -> Result.map (fun server -> Fixed, server) (loopback_origin ~source:"--server" url)
+      | None, (Some _ as environment) ->
           Result.map (fun server -> Fixed, server) (workspace_server ~environment base)
-      | None, None, None ->
+      | None, None ->
           Result.map (fun server -> Workspace base, server) (workspace_server ~environment:None base)
     in
     let token_file =

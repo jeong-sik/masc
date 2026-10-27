@@ -163,9 +163,10 @@ The rows under it:
 
 - A running host: `At:` and the address it was given.
   - Attached, with no BiDi connection listed: hover and drag stay refused on
-    this server. Two rows say what may be behind it and what to do:
-    `With MASC_HTTP_BASE_URL or MASC_HTTP_PORT set, it polls another server`,
-    then `If none appears, stop it and start it from a shell without them`.
+    this server. The following rows say what may be behind it and what to do:
+    `A fixed --server or MASC_HTTP_PORT may point elsewhere`,
+    `Older hosts can use MASC_HTTP_BASE_URL · update the host`, and
+    `If none appears, restart it without a fixed override`.
     A host is also missing for a moment after this server starts, and after
     120 seconds without a poll. Its next poll lists it again.
   - Attached, with a BiDi connection listed under another ID: that

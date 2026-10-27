@@ -166,12 +166,12 @@ let poll_sentence (t : Launcher.t) = function
   | Not_listed_here ->
       Printf.sprintf
         " This server lists no BiDi connection, so hover and drag are refused here. One of \
-         these holds: the host polls another server (MASC_HTTP_BASE_URL or MASC_HTTP_PORT \
-         exported in the shell that started it outranks this workspace's port); it has not \
+         these holds: the host polls another server (a fixed --server or MASC_HTTP_PORT can \
+         override this workspace's port; an older host may also use MASC_HTTP_BASE_URL); it has not \
          polled for %.0f seconds, after which this server ends a connection, and registers \
          again with its next poll; or this server started moments ago and the host has not \
-         reached it yet. If no BiDi connection appears, the operator stops that host and starts \
-         it again from a shell without those variables."
+         reached it yet. If no BiDi connection appears, the operator restarts a current host \
+         without a fixed override."
         Browser_lane.lane_connected_window_sec
   | Another_bidi_listed ->
       " This server does not list that client and lists another BiDi connection. That \

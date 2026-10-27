@@ -59,10 +59,10 @@ val settle : pending -> Yojson.Safe.t -> (unit, string) result
 type config
 
 (** Resolves the server origin, the lane token file and a fresh client id.
-    [--server], then an exported [MASC_HTTP_BASE_URL], then an exported
-    [MASC_HTTP_PORT] fixes the origin; without any of them, the workspace
-    connection file names the port and stays the source {!run} consults
-    after a failed request. *)
+    [--server], then an exported [MASC_HTTP_PORT] fixes the origin. Otherwise
+    the workspace connection file names the port and stays the source {!run}
+    consults after a failed request. [MASC_HTTP_BASE_URL] is an advertised
+    public address and does not select the host's local connection. *)
 val resolve_config
   :  base_path:string option
   -> server:string option

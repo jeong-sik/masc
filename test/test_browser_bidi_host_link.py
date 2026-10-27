@@ -297,6 +297,7 @@ def stop_lane(server, thread):
 class FirefoxState:
     def __init__(self):
         self.methods = []
+        self.subscriptions = []
         self.sockets = []
         self.leave_on = None
         self.slow_on = None
@@ -409,6 +410,9 @@ class Firefox(socketserver.BaseRequestHandler):
                         continue
                     result = {"sessionId": "scripted", "capabilities":
                               {"browserName": state.browser_name, "browserVersion": "157.0-scripted"}}
+                elif message["method"] == "session.subscribe":
+                    state.subscriptions.append(message.get("params"))
+                    result = {"subscription": "scripted-subscription"}
                 elif message["method"] == "browsingContext.getTree":
                     result = {"contexts": [{"context": "context-1", "url": PAGE["url"]}]}
                 elif message["method"] == "script.callFunction":
@@ -479,8 +483,10 @@ class BidiHostLink(unittest.TestCase):
             argv += ["--server", f"http://127.0.0.1:{self.lane.server_port}"]
         else:
             self.connection.write_text(f"[server]\nhttp_port = {self.lane.server_port}\n")
-        # An exported MASC_HTTP_BASE_URL or MASC_HTTP_PORT outranks the file.
+        # Start without inherited overrides except in the public URL case.
         env = {key: value for key, value in os.environ.items() if not key.startswith("MASC_")}
+        if self._testMethodName == "test_inherited_public_base_url_does_not_block_bidi_link":
+            env["MASC_HTTP_BASE_URL"] = "https://masc.example.test"
         launch = [sys.executable, "-c", LAUNCHER, ",".join(ignoring)]
         if terminal is None:
             self.process = subprocess.Popen(launch + ["none"] + argv, env=env, stdin=subprocess.DEVNULL,
@@ -569,6 +575,13 @@ class BidiHostLink(unittest.TestCase):
     def assert_session_ended_last(self):
         self.assertEqual(self.firefox.state.methods.count("session.end"), 1, self.firefox.state.methods)
         self.assertEqual(self.firefox.state.methods[-1], "session.end")
+
+    def test_inherited_public_base_url_does_not_block_bidi_link(self):
+        self.attach(fixed=False)
+        self.assertTrue(self.lane.state.polls)
+        self.assertIn("session.subscribe", self.firefox.state.methods)
+        self.assertEqual(self.firefox.state.subscriptions, [{"events": [
+            "browsingContext.userPromptOpened", "browsingContext.userPromptClosed"]}])
 
     def test_a_server_restarted_on_its_port_finds_the_host_still_attached(self):
         self.attach(fixed=True)
@@ -1270,7 +1283,7 @@ class BidiHostLink(unittest.TestCase):
         self.process.send_signal(signal.SIGTERM)
         self.assert_ends("stopped by SIGTERM", code=0)
         self.assertNotIn("before it was attached", self.host_log())
-        self.assertEqual(self.firefox.state.methods, ["session.new", "session.end"])
+        self.assertEqual(self.firefox.state.methods, ["session.new", "session.subscribe", "session.end"])
         self.assertEqual(self.lane.state.polls, [])
 
 

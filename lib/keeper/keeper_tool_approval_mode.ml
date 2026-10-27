@@ -12,16 +12,38 @@ let mode_of_string = function
   | _ -> None
 
 (* Overrides only, oldest set first. An operator watches a handful of
-   keepers, so a linear list under a mutex is the whole cost — the same
-   sizing argument as the approval registry's waiter list. *)
+   keepers, so a linear list is the whole cost — the same sizing argument as
+   the approval registry's waiter list.
+
+   Readers and writers reach the registry differently. [resolve] runs on every
+   keeper turn and the dashboard lists the overrides per request, so they read
+   one immutable [state] from an [Atomic.t] and never wait for a writer. A
+   writer ([set], [bind]) holds [writer] while it reads and rewrites the store
+   file, and publishes the next [state] with one [Atomic.set], so a reader sees
+   the overrides and the restore error of the same write, never one of each.
+
+   [writer] is a [Cross_context_mutex], not a [Stdlib.Mutex]: a writer suspends
+   inside its critical section, because [Fs_compat] runs the store read and the
+   atomic replacement on a worker thread, and the fibers of a domain share one
+   thread. A [Stdlib.Mutex] held across that suspension raises
+   [Sys_error "Mutex.lock: Resource deadlock avoided"] for the next fiber that
+   locks it instead of making it wait. The cross-context lock makes a fiber
+   wait cooperatively, and system threads and other domains still block on the
+   underlying mutex. *)
+type state =
+  { overrides : (string * mode) list
+  ; restore_error : string option
+  }
+
 type t =
-  { mutable overrides : (string * mode) list
-  ; mutable restore_error : string option
-  ; mutex : Stdlib.Mutex.t
+  { state : state Atomic.t
+  ; writer : Cross_context_mutex.t
   }
 
 let create () =
-  { overrides = []; restore_error = None; mutex = Stdlib.Mutex.create () }
+  { state = Atomic.make { overrides = []; restore_error = None }
+  ; writer = Cross_context_mutex.create ()
+  }
 ;;
 
 (* Created at load, so a stance set over HTTP and a gate consulting it cannot
@@ -30,15 +52,13 @@ let shared_registry = create ()
 let shared () = shared_registry
 
 let resolve t ~keeper_name =
-  Stdlib.Mutex.protect t.mutex (fun () ->
-      match List.assoc_opt keeper_name t.overrides with
-      | Some mode -> mode
-      | None -> Auto)
+  match List.assoc_opt keeper_name (Atomic.get t.state).overrides with
+  | Some mode -> mode
+  | None -> Auto
+;;
 
-let overrides t = Stdlib.Mutex.protect t.mutex (fun () -> t.overrides)
-
-let last_restore_error t =
-  Stdlib.Mutex.protect t.mutex (fun () -> t.restore_error)
+let overrides t = (Atomic.get t.state).overrides
+let last_restore_error t = (Atomic.get t.state).restore_error
 
 (* One row per keeper an operator has moved off [Auto]. [actor] and
    [changed_at] follow the Keeper_gate_mode override convention: the file
@@ -148,36 +168,46 @@ type set_outcome =
   | Applied
   | Applied_audit_failed of string
 
+(* The registry state a store that reads back as [rows] stands for. *)
+let state_of_rows rows =
+  { overrides = List.map (fun row -> row.keeper_name, row.mode) rows
+  ; restore_error = None
+  }
+;;
+
 let set t ~base_path ~actor ~keeper_name mode =
-  (* The mutex spans the whole read-modify-write, not just the memory part:
-     the file and the registry are one logical state, so two in-process
+  (* The writer lock spans the whole read-modify-write, not just the memory
+     part: the file and the registry are one logical state, so two in-process
      writers must not interleave read and write phases — the second would
-     read the first's pre-image and clobber it. The durable write still
-     lands before memory for [Yolo], so a failed [set] holds neither. When
-     revoking to [Auto], if the store cannot be read, the keeper's in-memory
-     override is removed immediately so the operator can always fail closed
-     to [Auto] even while the disk store awaits repair. The audit record
-     is deliberately outside the mutex: it must not couple the per-call
-     [resolve] path to event-bus latency, and a failed record does not
-     change the durable answer. *)
+     read the first's pre-image and clobber it. The lock is the durable
+     variant: once a writer holds it, a cancellation waits until the rename
+     and the memory publish are both done, so the file and the registry cannot
+     disagree. The durable write still lands before memory for [Yolo], so a
+     failed [set] holds neither. When revoking to [Auto], if the store cannot
+     be read, the keeper's in-memory override is removed immediately so the
+     operator can always fail closed to [Auto] even while the disk store
+     awaits repair. The audit record is deliberately outside the lock: it must
+     not hold the next writer up on event-bus latency, and a failed record
+     does not change the durable answer. Readers take no lock, so none of this
+     I/O makes [resolve] wait. *)
   let result =
-    Stdlib.Mutex.protect t.mutex (fun () ->
+    Cross_context_mutex.with_durable_lock t.writer (fun () ->
         match keeper_overrides ~base_path with
         | Error detail ->
-          let returned_error =
+          let current = Atomic.get t.state in
+          let overrides, returned_error =
             match mode with
             | Auto ->
-              t.overrides <-
-                List.filter
+              ( List.filter
                   (fun (name, _) -> not (String.equal name keeper_name))
-                  t.overrides;
-              Printf.sprintf
-                "%s (revoked to auto in memory; repairing the store file without removing %s will restore its persisted row on restart)"
-                detail
-                keeper_name
-            | Yolo -> detail
+                  current.overrides
+              , Printf.sprintf
+                  "%s (revoked to auto in memory; repairing the store file without removing %s will restore its persisted row on restart)"
+                  detail
+                  keeper_name )
+            | Yolo -> current.overrides, detail
           in
-          t.restore_error <- Some detail;
+          Atomic.set t.state { overrides; restore_error = Some detail };
           Error returned_error
         | Ok rows ->
           let changed_at = Masc_domain.now_iso () in
@@ -214,9 +244,7 @@ let set t ~base_path ~actor ~keeper_name mode =
                Error
                  (Printf.sprintf "tool approval mode store write failed: %s" detail)
              | Ok () ->
-               t.overrides <-
-                 List.map (fun row -> row.keeper_name, row.mode) rows;
-               t.restore_error <- None;
+               Atomic.set t.state (state_of_rows rows);
                Ok changed_at))
   in
   match result with
@@ -263,13 +291,17 @@ let set t ~base_path ~actor ~keeper_name mode =
 ;;
 
 let bind ~base_path t =
-  match keeper_overrides ~base_path with
-  | Ok rows ->
-    Stdlib.Mutex.protect t.mutex (fun () ->
-        t.overrides <- List.map (fun row -> row.keeper_name, row.mode) rows;
-        t.restore_error <- None);
-    Ok ()
-  | Error detail ->
-    Stdlib.Mutex.protect t.mutex (fun () -> t.restore_error <- Some detail);
-    Error detail
+  (* The replay reads the store and publishes under the writer lock. A replay
+     that read the file before a concurrent [set] stored its row and published
+     after that [set] updated memory would put the stale rows back. *)
+  Cross_context_mutex.with_durable_lock t.writer (fun () ->
+      match keeper_overrides ~base_path with
+      | Ok rows ->
+        Atomic.set t.state (state_of_rows rows);
+        Ok ()
+      | Error detail ->
+        Atomic.set
+          t.state
+          { (Atomic.get t.state) with restore_error = Some detail };
+        Error detail)
 ;;

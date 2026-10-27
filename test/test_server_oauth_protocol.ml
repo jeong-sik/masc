@@ -255,42 +255,41 @@ let contains haystack needle =
 (* The request type is private, so a consent request comes from the same
    validation a browser's GET goes through. *)
 let with_registered_consent ~client_name ~scope f =
-  with_env "MASC_OAUTH_ENABLED" "1" (fun () ->
-    with_workspace (fun base_path ->
-      Eio_main.run (fun env ->
-        Fs_compat.set_fs (Eio.Stdenv.fs env);
-        Eio_guard.enable ();
-        Fun.protect
-          ~finally:(fun () ->
-            Eio_guard.disable ();
-            Fs_compat.clear_fs ())
-          (fun () ->
-            let redirect_uri = "http://127.0.0.1:43123/callback" in
-            let client =
-              Auth_oauth.register_client
-                ~base_path
-                ~client_name:(Some client_name)
-                ~redirect_uris:[ redirect_uri ]
-              |> Result.get_ok
-            in
-            let target =
-              "/oauth/authorize?"
-              ^ Uri.encoded_of_query
-                  [ "response_type", [ "code" ]
-                  ; "client_id", [ client.client_id ]
-                  ; "redirect_uri", [ redirect_uri ]
-                  ; "resource", [ "http://127.0.0.1:8935/mcp" ]
-                  ; "scope", [ scope ]
-                  ; "state", [ "state" ]
-                  ; "code_challenge", [ String.make 43 'a' ]
-                  ; "code_challenge_method", [ "S256" ]
-                  ]
-            in
-            match
-              Server_oauth_service.authorize_get ~base_path ~authority:(authority ()) ~target
-            with
-            | Ok request -> f request
-            | Error error -> fail (Auth_oauth.show_error error)))))
+  with_workspace (fun base_path ->
+    Eio_main.run (fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Eio_guard.enable ();
+      Fun.protect
+        ~finally:(fun () ->
+          Eio_guard.disable ();
+          Fs_compat.clear_fs ())
+        (fun () ->
+          let redirect_uri = "http://127.0.0.1:43123/callback" in
+          let client =
+            Auth_oauth.register_client
+              ~base_path
+              ~client_name:(Some client_name)
+              ~redirect_uris:[ redirect_uri ]
+            |> Result.get_ok
+          in
+          let target =
+            "/oauth/authorize?"
+            ^ Uri.encoded_of_query
+                [ "response_type", [ "code" ]
+                ; "client_id", [ client.client_id ]
+                ; "redirect_uri", [ redirect_uri ]
+                ; "resource", [ "http://127.0.0.1:8935/mcp" ]
+                ; "scope", [ scope ]
+                ; "state", [ "state" ]
+                ; "code_challenge", [ String.make 43 'a' ]
+                ; "code_challenge_method", [ "S256" ]
+                ]
+          in
+          match
+            Server_oauth_service.authorize_get ~base_path ~authority:(authority ()) ~target
+          with
+          | Ok request -> f request
+          | Error error -> fail (Auth_oauth.show_error error))))
 ;;
 
 let test_admin_consent_is_visible_and_explicit () =

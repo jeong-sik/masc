@@ -50,6 +50,8 @@
 
 ### Added
 
+- `keeper_artifact_draft` is registered in the tool catalog with the same `keeper_shard_write` authority as `keeper_artifact_publish`. (#46464)
+- An unregistered model-visible tool fell back to the operator-only policy, so the sandbox tool policy surface test listed `keeper_artifact_draft` among tools a Worker token may not call and blocked the v0.65.0 release candidate at scenario V09. (#46464)
 - Add `Verifier_review_worker`, the E06 worker bridge that runs a retained verifier review attempt through the host-built tool-capable reviewer while keeping verdict extraction, `report_review_verdict`, and Task/Goal transitions on the host side. (#45471)
 - Bind retained review execution to the actual host lookup authority and recorded destination, execute its frozen prompt and media, and allocate retry identities from the durable owner inventory (#45471).
 - `BrowserInteract` `click` and `fill` take a `target` on an ego connection: a ref from the latest `BrowserRead` `mode=snapshot` of the same page (`{ref: 12}`), a role with its accessible name (`{role: "button", name: "Send"}`), or visible text (`{text: "Send"}`); `exact` (default true) matches the whole name or text. masc writes ego's locator itself and acts with ego's own `page.click` and `page.fill`. A target requires `expectedUrl` and excludes `selector` and `documentId`/`nodeId`. In the run that acts, the tab must still be at `expectedUrl` and the target must name exactly one element, or the step is refused before any effect. The receipt lists the pages the action opened as `{tabId, label}` and a JavaScript dialog it raised. Other connections refuse a target before any effect (#45494). Guide: `skills/browser-lanes/references/connection.md`.
@@ -277,6 +279,7 @@
 
 ### Fixed
 
+- The installed server no longer rejects its own release receipt as `invalid_receipt` because of the `masc-exec-ssh-bootstrap` companion that the installer always installs, so `/health` reports the installed release as verified again. (#46474)
 - Fixed obsolete completion rejection delivery after Task resubmission: fence queue publication by current authority, preserve delivered receipts for intake, and prevent stale unroutable releases from changing newer work. (#45493, #38059)
 - Exact Add-on workers hold one request body during the first inventory after a start, and check that their store directory is unchanged when they answer from memory. A pending record that is missing, invalid or finished when read again, or a missing or invalid record in the first inventory, now stops the worker: every later call, observations included, fails with that reason without reading the store again. Transient I/O errors fail only that call. Non-regular records are refused without leaking a file descriptor, and errors safely quote record names. Package revisions move to workspace-curator 0.1.3, candle-appraiser 0.1.4 and keeper-librarian 0.2.2 (#45500).
 - Show prompt authoring errors and original Markdown provenance in the TUI without changing body override behavior. (#45509)

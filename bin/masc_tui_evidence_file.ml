@@ -88,6 +88,14 @@ let save ?(with_lock=File_lock_eio.with_durable_lock_observed) ~fs ~registry_roo
   | Eio.Io _ as ex -> Error (path ^ ": " ^ Format.asprintf "%a" Eio.Exn.pp ex)
   | Sys_error detail -> Error (path ^ ": " ^ detail)
   | Unix.Unix_error (code, _, _) -> Error (path ^ ": " ^ Unix.error_message code)
+  | Eio.Cancel.Cancelled _ as exn ->
+    Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
+  | exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    (match Atomic.get progress with
+     | Saved _ -> ()
+     | Not_started | Writing _ | Aborted _ -> Atomic.set progress (Aborted path));
+    Printexc.raise_with_backtrace exn backtrace
 
 let export_with ?with_lock ~fs ~registry_root ~directory ~progress ~admitted ~open_file t =
   let ( let* ) = Result.bind in

@@ -8,8 +8,9 @@ type progress = Not_started | Writing of string | Saved of string | Aborted of s
     been confirmed. [Saved path] is recorded once the writer confirms complete
     bytes and parent sync, before lane or external lock release. Later release
     failure, viewer failure or cancellation retains it. [Aborted path] records
-    an [Error] return before that confirmation; it retains the intended destination
-    without claiming that no partial file effects occurred. *)
+    an [Error] return or non-cancellation exception before that confirmation;
+    it retains the intended destination without claiming that no partial file
+    effects occurred. Cancellation propagates without replacing a confirmed save. *)
 val export :
   fs:Eio.Fs.dir_ty Eio.Path.t -> registry_root:string -> directory:string ->
   progress:progress Atomic.t -> admitted:(unit -> (unit, string) result) ->

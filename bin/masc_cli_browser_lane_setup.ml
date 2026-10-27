@@ -171,8 +171,9 @@ let print_bidi_steps plan =
   print_endline
     "  1. Restart the MASC server to load runtime.toml. A browser Add-on that was attached \
      before keeps its old settings until it is detached; the server attaches its declaration \
-     again on the next maintenance pass. The Add-on owns this Firefox and its BiDi \
-     connection; its observation reports readiness or the startup refusal.";
+     again on the next maintenance pass. While an enabled browser-firefox declaration runs \
+     it, the Add-on owns this Firefox and its BiDi connection, and its observation reports \
+     readiness or the startup refusal.";
   print_endline
     "  2. In that Firefox, log in once to the sites the Keepers work on. The profile keeps \
      the logins.";

@@ -6347,7 +6347,7 @@ module Browser_lane_view = struct
           | Addon_managed _ -> []
           | Addon_off ->
               host_attach_lines ~address report.attach
-              @ [host_line "[browser.live.bidi] is set, but browser-firefox is off"]
+              @ [host_line "[browser.live.bidi] is set; no enabled browser-firefox declaration runs it"]
           | Not_configured ->
               host_attach_lines ~address report.attach
               @ [host_line "No Addon-managed live Firefox is configured in [browser.live.bidi]"]

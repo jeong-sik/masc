@@ -96,9 +96,9 @@ val verdict : observation -> verdict
 
     {!Addon_managed} describes the Addon's configured port/profile and
     directs the reader to Addon readiness observations. A manual host's
-    session and recovery remain the operator's responsibility. A
-    [browser-firefox] declaration switched off and a workspace with no table
-    add a sentence saying so.
+    session and recovery remain the operator's responsibility. A table no
+    enabled [browser-firefox] declaration runs, and a workspace with no
+    table, add a sentence saying so.
 
     A path, an address and the reason for ending come from files and from
     the host. In a command the operator runs, a path and an address are

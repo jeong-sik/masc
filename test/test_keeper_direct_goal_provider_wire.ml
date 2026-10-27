@@ -47,7 +47,7 @@ let install_catalog ~sw =
     | Some catalog -> Llm_provider.Model_catalog.set_global catalog
     | None -> Llm_provider.Model_catalog.clear_global ());
   let source = Printf.sprintf
-      "[[models]]\nid_prefix = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 8192\nmax_output_tokens = 128\nsupports_native_streaming = false\n"
+      "[[models]]\nmodel_id = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 8192\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n"
       model_id in
   match Llm_provider.Model_catalog.of_toml_string ~source:"direct-goal-wire" source with
   | Ok catalog -> Llm_provider.Model_catalog.set_global catalog

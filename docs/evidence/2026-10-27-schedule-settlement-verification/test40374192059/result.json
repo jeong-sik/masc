@@ -1,0 +1,64 @@
+{
+  "event": "workflow_dispatch",
+  "status": "completed",
+  "conclusion": "success",
+  "created_at": "2026-10-26T18:02:33Z",
+  "updated_at": "2026-10-26T18:07:53Z",
+  "workflow": "Test",
+  "workflow_path": ".github/workflows/test.yml",
+  "run_id": 40374192059,
+  "url": "https://github.com/jeong-sik/masc/actions/runs/40374192059",
+  "head": "c52f799e52d3683bd2a4c624f0f6adfe36015ec9",
+  "ref": "fix/schedule-pending-settlement-20261027",
+  "suites": [
+    {
+      "actual_name": "Schedule_runner",
+      "actual_cases": 30
+    },
+    {
+      "actual_name": "Schedule_consumer_dispatch",
+      "actual_cases": 60
+    },
+    {
+      "actual_name": "Schedule_tool_wiring",
+      "actual_cases": 64
+    },
+    {
+      "actual_name": "Lane_addon_scheduled_act",
+      "actual_cases": 7
+    }
+  ],
+  "counts": {
+    "OK": 161,
+    "FAIL": 0,
+    "SKIP": 0
+  },
+  "artifact_id": 12675255226,
+  "source": {
+    "archive_sha256": "2fc89d25e79f26dc4ae0da3a70fd25599b65e85e77d01d0a83e7411021ec1de1",
+    "entry": "ci-run-tests.log",
+    "entry_sha256": "57bc00674054b7706db307bb06d2d21c83bdc178cb43275c07071fc37163ea52",
+    "entry_bytes": 267617,
+    "source_lines": 2288
+  },
+  "selection": {
+    "path": "selected.json",
+    "sha256": "2b1b812c7c28f9aecad987a5a57d936525d25fb1fd5f34f9a658282c555d85b5",
+    "bytes": 20975,
+    "rows": 169,
+    "method": "Python splitlines 1-based original source line numbers. Only ANSI SGR sequences removed. Every suite header, case verdict and final summary retained; other output omitted.",
+    "is_derivative": true
+  },
+  "scope": "Selected aliases only; same-process production maintenance composition, not actual server fault/recovery, full regression, models, installation or visible UI.",
+  "api_source": {
+    "command": [
+      "gh",
+      "api",
+      "repos/jeong-sik/masc/actions/runs/40374192059"
+    ],
+    "observed_at": "2026-10-26T18:28:08.013463+00:00",
+    "stdout_sha256": "db0bcaad8abfd46f42a3bace5261c9dec99b4793163337a5dd6bbf7c164667ba",
+    "stdout_bytes": 12182,
+    "semantics": "New terminal REST read during evidence retention; full stdout retained in ignored work output."
+  }
+}

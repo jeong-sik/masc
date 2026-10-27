@@ -1,0 +1,12 @@
+{
+  "is_derivative": true,
+  "selection": {
+    "method": "GET",
+    "path": "/api/v1/lane-addons/slice?run_id=audit-export-0cdae5209bc849f89b60733b5cbae929&lane_id=01a1797b-74ae-7000-b1b2-5152f49788b0%2Fquiz%2Fmeasures",
+    "request_body": null,
+    "observed_at": 1793039511.0286279,
+    "status": 200,
+    "body_bytes": 2355,
+    "body_sha256": "765a465802a111d0dde86c094c76878d65c23bef29a217d7b9a980efe7b9d73a"
+  }
+}

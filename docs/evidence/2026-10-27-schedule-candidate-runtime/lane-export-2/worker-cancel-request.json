@@ -1,0 +1,15 @@
+{
+  "is_derivative": true,
+  "selection": {
+    "method": "POST",
+    "path": "/api/v1/tools/masc_schedule_cancel",
+    "request_body": {
+      "schedule_id": "audit-export-0cdae5209bc849f89b60733b5cbae929-control",
+      "reason": "owned authority negative probe"
+    },
+    "observed_at": 1793039511.206998,
+    "status": 400,
+    "body_bytes": 659,
+    "body_sha256": "1d6573cbe4f85ddd6b245abd1299f553148b1a82a463f2e38d4b55da568b7fd9"
+  }
+}

@@ -1,0 +1,126 @@
+{
+  "outcome": "bounded_checks_passed",
+  "checks": [
+    {
+      "name": "candidate executable digest",
+      "passed": true
+    },
+    {
+      "name": "probe and producer resolve the same Docker executable",
+      "passed": true
+    },
+    {
+      "name": "unmodified real operator-quiz acting Docker package",
+      "passed": true
+    },
+    {
+      "name": "existing package image immutable identity",
+      "passed": true
+    },
+    {
+      "name": "ephemeral owned listener differs from primary",
+      "passed": true
+    },
+    {
+      "name": "owned base and candidate observed identity",
+      "passed": true
+    },
+    {
+      "name": "actual observed measures lane identity",
+      "passed": true
+    },
+    {
+      "name": "real worker schema and resolved image",
+      "passed": true
+    },
+    {
+      "name": "exact owned Docker resource and persistent state",
+      "passed": true
+    },
+    {
+      "name": "create-audit-export-0cdae5209bc849f89b60733b5cbae929 HTTP 201",
+      "passed": true
+    },
+    {
+      "name": "audit-export-0cdae5209bc849f89b60733b5cbae929 HTTP Admin human operator stamp",
+      "passed": true
+    },
+    {
+      "name": "one-shot durable schedule acceptance",
+      "passed": true
+    },
+    {
+      "name": "exact occurrence signal and handoff identity",
+      "passed": true
+    },
+    {
+      "name": "actual original worker confirmed export",
+      "passed": true
+    },
+    {
+      "name": "typed export result identity",
+      "passed": true
+    },
+    {
+      "name": "export evidence references result digest",
+      "passed": true
+    },
+    {
+      "name": "copied log is not a symlink",
+      "passed": true
+    },
+    {
+      "name": "host retained bytes and independent owned volume readback",
+      "passed": true
+    },
+    {
+      "name": "stable exact action receipt reread",
+      "passed": true
+    },
+    {
+      "name": "create-audit-export-0cdae5209bc849f89b60733b5cbae929-control HTTP 201",
+      "passed": true
+    },
+    {
+      "name": "audit-export-0cdae5209bc849f89b60733b5cbae929-control HTTP Admin human operator stamp",
+      "passed": true
+    },
+    {
+      "name": "control remains far-future and scheduled",
+      "passed": true
+    },
+    {
+      "name": "worker-cancel HTTP 400",
+      "passed": true
+    },
+    {
+      "name": "Worker stays named and cannot cancel another operator schedule",
+      "passed": true
+    },
+    {
+      "name": "admin-cancel HTTP 200",
+      "passed": true
+    },
+    {
+      "name": "Admin cancels control as human operator",
+      "passed": true
+    },
+    {
+      "name": "owned exact container released",
+      "passed": true
+    }
+  ],
+  "server_exit_code": 0,
+  "forced_server_kill": false,
+  "temporary_base_removed_on_exit": true,
+  "runtime_scope": [
+    "installation",
+    "DOS counter",
+    "nonempty journal mutation",
+    "model/quiz generation",
+    "external effect exactly-once",
+    "restart durability",
+    "HTTP race",
+    "whole RBAC/schedule feature"
+  ]
+}

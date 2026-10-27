@@ -288,11 +288,13 @@ let test_malformed_arguments_reach_no_browser () =
   (* A client may fill in every default the schema declares, so a document
      source read carrying them must still go on: no declared default may be
      an argument html refuses. *)
-  let schema_defaults = Yojson.Safe.Util.(Tool_schemas_misc_toml.browser_read.Masc_domain.input_schema
+  let declared_defaults = Yojson.Safe.Util.(Tool_schemas_misc_toml.browser_read.Masc_domain.input_schema
     |> member "properties" |> to_assoc
     |> List.filter_map (fun (name, property) ->
-      if List.mem name ["mode";"lane";"tabId"] then None
-      else match member "default" property with `Null -> None | value -> Some (name, value))) in
+      match member "default" property with `Null -> None | value -> Some (name, value))) in
+  check bool "the schema walk sees the mode default" true (List.mem_assoc "mode" declared_defaults);
+  let schema_defaults = List.filter (fun (name, _) -> not (List.mem name ["mode";"lane";"tabId"]))
+    declared_defaults in
   check bool "a document source read carrying the schema defaults goes on to find the browser Add-on" true
     (reaches_the_addon_lookup (read (("mode",`String "html") :: schema_defaults)))
 

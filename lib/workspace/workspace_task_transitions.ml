@@ -63,9 +63,11 @@ let transition_broadcast_content ~new_status ~task_id ~(stated_reason : string o
   (* The message says what happened to the Task, so it is read off the status
      the transition produced rather than the action that asked for it.
 
-     Each status is produced by exactly one action, so nothing is lost:
-     [Claimed] only by [Claim], [InProgress] only by [Start], [Todo] only by
-     [Release], [Cancelled] only by [Cancel]. The idempotent repeats ([Cancel] on [Cancelled],
+     Each status is produced by exactly one action on this path, so nothing
+     is lost: [Claimed] only by [Claim], [InProgress] only by [Start], [Todo]
+     only by [Release], [Cancelled] only by [Cancel]. A rejection verdict also
+     yields [InProgress], but verdicts never reach this function — only the
+     agent action path calls it. The idempotent repeats ([Cancel] on [Cancelled],
      [Release] on [Todo]) are filtered as no-ops before this is reached. *)
   match (new_status : Masc_domain.task_status) with
   | Masc_domain.Claimed _ -> Some (Printf.sprintf "Claimed %s" task_id)
@@ -405,23 +407,11 @@ let perform_task_transition
                           verification_id
                           e))))
         in
-        (match action, task.task_status with
-         | Masc_domain.Release, Masc_domain.Todo ->
-(* Idempotent: already in backlog, nothing to release. *)
-           Log.TaskState.debug "release on already-todo task %s — no-op" task_id
-        | Masc_domain.Claim, _
-        | Masc_domain.Start, _
-        | Masc_domain.Done_action, _
-        | Masc_domain.Cancel, _
-        | Masc_domain.Submit_for_verification, _
-         | Masc_domain.Release, Masc_domain.Claimed _
-         | Masc_domain.Release, Masc_domain.InProgress _
-         | Masc_domain.Release, Masc_domain.AwaitingVerification _
-         | Masc_domain.Release, Masc_domain.Done _
-         | Masc_domain.Release, Masc_domain.Cancelled _ -> ());
         if new_status = task.task_status && set_current = None
-        then
+        then begin
 (* Idempotent no-op: status unchanged, skip write/events. Match None explicitly so set_current=Some is never silently dropped. *)
+          Log.TaskState.debug "task %s: %s on %s — no-op" task_id action_s
+            (task_status_to_string task.task_status);
           Ok (Transaction.Noop
             { message =
                 Printf.sprintf
@@ -430,6 +420,7 @@ let perform_task_transition
                   (task_status_to_string task.task_status)
             ; noop = true
             })
+        end
         else (
           let backlog_update =
             match action with
@@ -1147,16 +1138,12 @@ let commit_verdict_r
             | Masc_domain.Claimed _
             | Masc_domain.InProgress _
             | Masc_domain.AwaitingVerification _ -> ());
+           (* [decide_verdict] yields [Done] for every approval, so there is no
+              approved-into-[Cancelled] shape to map: the old inner match
+              labeled an unreachable status. *)
            let event_kind =
              match verdict with
-             | Masc_domain.Verdict_approved ->
-               (match new_status with
-                | Masc_domain.Cancelled _ -> Event_kind.Task.Cancelled
-                | Masc_domain.Todo
-                | Masc_domain.Claimed _
-                | Masc_domain.InProgress _
-                | Masc_domain.AwaitingVerification _
-                | Masc_domain.Done _ -> Event_kind.Task.Approved)
+             | Masc_domain.Verdict_approved -> Event_kind.Task.Approved
              | Masc_domain.Verdict_rejected _ -> Event_kind.Task.Rejected
            in
            (* [authority_actor] is a fresh id per review, so it identifies the

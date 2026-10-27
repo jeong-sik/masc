@@ -213,7 +213,7 @@ let with_durable_intake
 let enqueue_unfenced ~base_path name stimulus =
   if Option.is_none (Keeper_registry.get ~base_path name)
   then
-    Log.Keeper.warn
+    Log.Keeper.info
       "registry: enqueue_event name=%s base_path=%s: keeper not registered; persisting stimulus for replay"
       name
       base_path;

@@ -248,6 +248,135 @@ let stateless_body ?(method_ = "tools/list") ?name () =
     ]
   |> Yojson.Safe.to_string
 
+let test_version_rejections_preserve_request_identity () =
+  let module Session = Server_mcp_transport_http_session in
+  let rejection = Session.Unsupported_version { requested = "2099-01-01" } in
+  let response body =
+    Session.protocol_version_rejection_body_for_request ~request_body:body rejection
+    |> Yojson.Safe.from_string
+  in
+  let request = {|{"jsonrpc":"2.0","id":"client-7","method":"server/discover"}|} in
+  let result = response request in
+  check string "request ID echoed" "client-7"
+    Yojson.Safe.Util.(result |> member "id" |> to_string);
+  check int "unsupported version code" (-32022)
+    Yojson.Safe.Util.(result |> member "error" |> member "code" |> to_int);
+  check string "requested version retained" "2099-01-01"
+    Yojson.Safe.Util.(result |> member "error" |> member "data" |> member "requested" |> to_string);
+  let notification = response {|{"jsonrpc":"2.0","method":"notifications/test"}|} in
+  (match notification with
+   | `Assoc fields -> check bool "notification error has no ID" false (List.mem_assoc "id" fields)
+   | _ -> fail "notification error must be an object");
+  let malformed = response {|{"jsonrpc":"2.0","id":1,"id":2,"method":"server/discover"}|} in
+  check bool "ambiguous ID is null" true (Yojson.Safe.Util.member "id" malformed = `Null)
+
+let test_unknown_version_still_validates_mirrored_headers () =
+  let body version =
+    `Assoc
+      [ "jsonrpc", `String "2.0"; "id", `Int 33; "method", `String "server/discover"
+      ; "params", `Assoc [ "_meta", `Assoc
+          [ Mcp_transport_protocol.protocol_version_meta_key, `String version
+          ; Mcp_transport_protocol.client_capabilities_meta_key, `Assoc [] ] ] ]
+    |> Yojson.Safe.to_string
+  in
+  let request = Httpun.Request.create ~headers:(Httpun.Headers.of_list
+    [ "mcp-protocol-version", "2099-01-01"; "mcp-method", "server/discover" ])
+      `POST "/mcp" in
+  (match Transport_headers.validate_2026_request_headers request (body "2099-01-01") with
+   | Error (Transport_headers.Unsupported_version _ as rejection) ->
+     let result = Transport_headers.header_rejection_body (body "2099-01-01") rejection
+                  |> Yojson.Safe.from_string in
+     check int "unsupported version keeps request ID" 33 Yojson.Safe.Util.(result |> member "id" |> to_int)
+   | Ok () | Error (Mirrored_header_mismatch _ | Unreadable_body _ | Malformed_json _ | Missing_required_meta _
+                    | Invalid_request_envelope _ | Invalid_request_meta _) ->
+     fail "unknown modern version must be rejected as unsupported");
+  (match Transport_headers.validate_2026_request_headers request (body "2026-07-28") with
+   | Error (Transport_headers.Mirrored_header_mismatch _) -> ()
+   | Ok () | Error (Unsupported_version _ | Unreadable_body _ | Malformed_json _ | Missing_required_meta _
+                    | Invalid_request_envelope _ | Invalid_request_meta _) ->
+     fail "different header and body versions must be rejected as a mismatch")
+
+let test_modern_http_error_status () =
+  let body = stateless_body () in
+  let request = Httpun.Request.create ~headers:(Httpun.Headers.of_list
+    [ "mcp-protocol-version", "2026-07-28"; "mcp-method", "tools/list" ])
+      `POST "/mcp" in
+  let response code = Mcp_transport_protocol.make_error ~id:(`Int 1) code "error" in
+  check bool "unknown modern method requires HTTP 404" true
+    (Transport_headers.modern_response_http_error_status ~request ~body_str:body (response (-32601))
+     = Some `Not_found);
+  check bool "invalid modern params require HTTP 400" true
+    (Transport_headers.modern_response_http_error_status ~request ~body_str:body (response (-32602))
+     = Some `Bad_request);
+  let legacy = Httpun.Request.create `POST "/mcp" in
+  check bool "legacy status is unchanged" true
+    (Transport_headers.modern_response_http_error_status ~request:legacy ~body_str:"{}" (response (-32601))
+     = None)
+
+let test_modern_envelope_rejected_before_streaming () =
+  let request = Httpun.Request.create ~headers:(Httpun.Headers.of_list
+    [ "mcp-protocol-version", "2026-07-28"; "mcp-method", "tools/list" ])
+      `POST "/mcp" in
+  let original = Yojson.Safe.from_string (stateless_body ()) in
+  let replace_top key value = function
+    | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
+    | other -> other
+  in
+  let assert_invalid_envelope label body =
+    match Transport_headers.validate_2026_request_headers request (Yojson.Safe.to_string body) with
+    | Error (Transport_headers.Invalid_request_envelope _) -> ()
+    | Ok () | Error (Mirrored_header_mismatch _ | Unreadable_body _ | Malformed_json _ | Unsupported_version _
+                     | Missing_required_meta _ | Invalid_request_meta _) ->
+      failf "%s should fail before a stream opens" label
+  in
+  assert_invalid_envelope "null ID" (replace_top "id" `Null original);
+  assert_invalid_envelope "boolean ID" (replace_top "id" (`Bool true) original);
+  assert_invalid_envelope "JSON-RPC version" (replace_top "jsonrpc" (`String "1.0") original);
+  let duplicate_meta =
+    match original with
+    | `Assoc fields ->
+      `Assoc (List.map (function
+        | "params", `Assoc params ->
+          let meta = List.assoc "_meta" params in
+          "params", `Assoc (("_meta", meta) :: params)
+        | field -> field) fields)
+    | other -> other
+  in
+  match Transport_headers.validate_2026_request_headers request (Yojson.Safe.to_string duplicate_meta) with
+  | Error (Transport_headers.Invalid_request_meta _) -> ()
+  | Ok () | Error (Mirrored_header_mismatch _ | Unreadable_body _ | Malformed_json _ | Unsupported_version _
+                   | Missing_required_meta _ | Invalid_request_envelope _) ->
+    fail "duplicate metadata must fail before a stream opens"
+
+let test_stateless_parse_errors_and_session_selection () =
+  let request headers =
+    Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `POST "/mcp"
+  in
+  let modern = request [ "MCP-Protocol-Version", "2026-07-28" ] in
+  let legacy = request [ "mcp-protocol-version", "2025-11-25" ] in
+  let unknown = request [ "mcp-protocol-version", "2099-01-01" ] in
+  let mixed = request [ "mcp-protocol-version", "2025-11-25";
+                        "MCP-Protocol-Version", "2026-07-28" ] in
+  check bool "modern header selects per-request protocol" true
+    (Transport_headers.header_selects_per_request_protocol modern);
+  check bool "legacy header keeps session protocol" false
+    (Transport_headers.header_selects_per_request_protocol legacy);
+  check bool "unknown version does not consult a legacy session" true
+    (Transport_headers.header_selects_per_request_protocol unknown);
+  check bool "a duplicate modern header does not consult a legacy session" true
+    (Transport_headers.header_selects_per_request_protocol mixed);
+  List.iter (fun (body, expected) ->
+    match Transport_headers.validate_2026_request_headers modern body with
+    | Ok () -> fail "invalid body was accepted"
+    | Error rejection ->
+      let wire = Transport_headers.header_rejection_body body rejection
+                 |> Yojson.Safe.from_string in
+      check int "JSON-RPC error code" expected
+        Yojson.Safe.Util.(wire |> member "error" |> member "code" |> to_int);
+      check bool "unreadable body has null ID" true
+        (Yojson.Safe.Util.member "id" wire = `Null))
+    [ "{", -32700; "[]", -32600 ]
+
 (* 2026-07-28 marks protocolVersion and clientCapabilities required on every
    request and answers a missing one with -32602, not with the header-mismatch
    code: the request is malformed rather than inconsistent with itself. *)
@@ -306,6 +435,34 @@ let test_a_required_meta_field_is_rejected_as_invalid_params () =
     [ Mcp_transport_protocol.protocol_version_meta_key;
       Mcp_transport_protocol.client_capabilities_meta_key ]
 
+let test_client_capabilities_must_be_an_object () =
+  let key = Mcp_transport_protocol.client_capabilities_meta_key in
+  let body = Yojson.Safe.from_string (stateless_body ()) in
+  let replace = function
+    | `Assoc fields ->
+      `Assoc (List.map (fun (name, value) ->
+        if String.equal name "params" then
+          match value with
+          | `Assoc params ->
+            name, `Assoc (List.map (fun (k, v) ->
+              if String.equal k "_meta" then
+                match v with
+                | `Assoc meta -> k, `Assoc ((key, `String "invalid") :: List.remove_assoc key meta)
+                | _ -> k, v
+              else k, v) params)
+          | _ -> name, value
+        else name, value) fields)
+    | other -> other
+  in
+  let request = Httpun.Request.create
+      ~headers:(Httpun.Headers.of_list
+        [ "mcp-protocol-version", "2026-07-28"; "mcp-method", "tools/list" ])
+      `POST "/mcp" in
+  match Transport_headers.validate_2026_request_headers request (Yojson.Safe.to_string (replace body)) with
+  | Error (Transport_headers.Missing_required_meta { key = reported }) ->
+    check string "invalid capabilities named" key reported
+  | Ok () | Error _ -> fail "non-object client capabilities were accepted"
+
 let test_validate_2026_request_headers () =
   let module Transport = Server_mcp_transport_http in
   let ok_request =
@@ -360,6 +517,75 @@ let test_validate_2026_request_headers () =
       check bool "names the header that disagreed" true
         (String_util.contains_substring msg "Mcp-Method")
   | Error _ -> fail "a readable body disagreeing with a header is a mirrored mismatch"
+
+let test_mcp_name_header_encoding () =
+  let request header_name =
+    Httpun.Request.create
+      ~headers:
+        (Httpun.Headers.of_list
+           [ ("accept", "application/json, text/event-stream")
+           ; ("mcp-protocol-version", "2026-07-28")
+           ; ("mcp-method", "tools/call")
+           ; ("mcp-name", header_name)
+           ])
+      `POST "/mcp"
+  in
+  let accepted name header =
+    let body = stateless_body ~method_:"tools/call" ~name () in
+    match Transport_headers.validate_2026_request_headers (request header) body with
+    | Ok () -> ()
+    | Error _ -> failf "valid encoded name %S was rejected" name
+  in
+  accepted "Hello, 세계" "=?base64?SGVsbG8sIOyEuOqzhA==?=";
+  accepted "=?base64?literal?=" "=?base64?PT9iYXNlNjQ/bGl0ZXJhbD89?=";
+  let body = stateless_body ~method_:"tools/call" ~name:"tool" () in
+  List.iter
+    (fun header ->
+      match Transport_headers.validate_2026_request_headers (request header) body with
+      | Error (Transport_headers.Mirrored_header_mismatch _ as rejection) ->
+          let wire = Transport_headers.header_rejection_body body rejection in
+          let open Yojson.Safe.Util in
+          let json = Yojson.Safe.from_string wire in
+          check int "header mismatch code" (-32020)
+            (json |> member "error" |> member "code" |> to_int);
+          check int "request id echoed" 1 (json |> member "id" |> to_int)
+      | Ok () | Error _ -> failf "invalid or mismatched header %S was accepted" header)
+    [ "=?base64?%%%?="; "=?base64?/w==?="; "=?base64?b3RoZXI=?=" ]
+
+let test_mcp_header_value_round_trip () =
+  let module Protocol = Mcp_transport_protocol in
+  List.iter
+    (fun value ->
+      let header = Protocol.encode_header_value value in
+      match Protocol.decode_header_value header with
+      | Ok decoded -> check string "header round trip" value decoded
+      | Error detail -> failf "failed to decode encoded value: %s" detail)
+    [ "plain"; "Hello, 세계"; " padded "; "line1\nline2";
+      "=?base64?literal?="; "inside\ttab" ];
+  check string "safe ASCII stays plain" "plain"
+    (Protocol.encode_header_value "plain");
+  check string "unicode is base64" "=?base64?SGVsbG8sIOyEuOqzhA==?="
+    (Protocol.encode_header_value "Hello, 세계")
+
+let test_duplicate_mcp_routing_headers_are_rejected () =
+  let body = stateless_body ~method_:"tools/call" ~name:"actual" () in
+  let standard =
+    [ ("mcp-protocol-version", "2026-07-28");
+      ("mcp-method", "tools/call"); ("mcp-name", "actual") ]
+  in
+  List.iter
+    (fun (name, value) ->
+      List.iter
+        (fun headers ->
+          let request = Httpun.Request.create ~headers:(Httpun.Headers.of_list headers)
+              `POST "/mcp" in
+          match Transport_headers.validate_2026_request_headers request body with
+          | Error (Transport_headers.Mirrored_header_mismatch _) -> ()
+          | Ok () | Error _ -> failf "duplicate %s was not rejected" name)
+        [ (name, value) :: standard; standard @ [ (name, value) ] ])
+    [ ("MCP-Protocol-Version", "2025-11-25");
+      ("Mcp-Method", "tools/list");
+      ("Mcp-Name", "=?base64?dGFyZ2V0?=") ]
 
 let test_stateless_headers_do_not_emit_session_id () =
   let module Transport = Server_mcp_transport_http in
@@ -530,6 +756,8 @@ let () =
         test_case "mismatch still rejects" `Quick test_protocol_continuity_rejects_mismatch;
         test_case "unsupported version answers -32022" `Quick
           test_unsupported_protocol_version_rejection;
+        test_case "POST version errors preserve request identity" `Quick
+          test_version_rejections_preserve_request_identity;
       ]);
       ("accept_contract", [
         test_case "notification json-only rejected" `Quick
@@ -540,8 +768,23 @@ let () =
         test_case "initialize disables sse" `Quick test_initialize_never_uses_sse;
         test_case "2026 headers are validated" `Quick
           test_validate_2026_request_headers;
+        test_case "unknown versions still validate mirrored headers" `Quick
+          test_unknown_version_still_validates_mirrored_headers;
+        test_case "modern error HTTP status" `Quick test_modern_http_error_status;
+        test_case "modern envelope rejected before streaming" `Quick
+          test_modern_envelope_rejected_before_streaming;
+        test_case "modern parse errors and session selection" `Quick
+          test_stateless_parse_errors_and_session_selection;
+        test_case "encoded Mcp-Name is decoded and checked" `Quick
+          test_mcp_name_header_encoding;
+        test_case "MCP header values round trip" `Quick
+          test_mcp_header_value_round_trip;
+        test_case "duplicate MCP routing headers are rejected" `Quick
+          test_duplicate_mcp_routing_headers_are_rejected;
           test_case "a missing required _meta field is invalid params" `Quick
             test_a_required_meta_field_is_rejected_as_invalid_params;
+          test_case "client capabilities must be an object" `Quick
+            test_client_capabilities_must_be_an_object;
         test_case "2026 headers omit session id" `Quick
           test_stateless_headers_do_not_emit_session_id;
         test_case "sse guard registry has one owner" `Quick

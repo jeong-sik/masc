@@ -27,30 +27,43 @@ val body_jsonrpc_method : string -> (string * bool) option
 (** Case-insensitive lookup of [Mcp-Name]. *)
 
 val request_uses_stateless_protocol : Httpun.Request.t -> string -> bool
-(** [true] iff either the HTTP protocol-version header or body
-    per-request [_meta] declares a stateless MCP revision. *)
+(** [true] if the HTTP header declares a known stateless revision or the body
+    supplies a per-request protocol version, including an unknown one. An
+    unknown version in the header also selects the per-request path. *)
+
+val header_selects_per_request_protocol : Httpun.Request.t -> bool
+(** A known stateless or unknown version in any protocol-version header must
+    not inherit a legacy session before the request body is available. *)
 
 type header_rejection =
   | Mirrored_header_mismatch of string
       (** The body parsed and disagrees with a header. The request id is
           readable, so the response echoes it. *)
   | Unreadable_body of string
-      (** A header opted into the stateless revision but the body is not a
-          JSON object. There is no id to echo. *)
+      (** The body is valid JSON but not a JSON-RPC object. *)
+  | Malformed_json of string
+      (** The body is not valid JSON; respond with JSON-RPC parse error. *)
   | Unsupported_version of { requested : string }
       (** Not a header disagreement: this server does not speak that
           revision. Answered with [-32022] and the supported list. *)
   | Missing_required_meta of { key : string }
       (** A [_meta] field 2026-07-28 marks required on every request is
-          absent. The request is malformed rather than inconsistent, so it is
+          absent or has the wrong type. The request is malformed, so it is
           answered with [-32602]. *)
+  | Invalid_request_envelope of string
+      (** The JSON-RPC version, fields, or request ID are invalid. *)
+  | Invalid_request_meta of string
+      (** Required modern metadata is ambiguous or malformed. *)
 
 val header_rejection_body : string -> header_rejection -> string
-(** [header_rejection_body body_str rejection] is the complete JSON-RPC error
-    response for [rejection]: [-32020] echoing the request id read from
-    [body_str], [-32600] with a null id, or the [-32022] body carrying this
-    server's supported versions. Both transports call this so they cannot
-    answer the same rejection differently. *)
+(** Construct the rejection and correlate it to the request body. A valid
+    notification has no [id]; an unreadable or invalid request has a null ID. *)
+
+val modern_response_http_error_status :
+  request:Httpun.Request.t -> body_str:string -> Yojson.Safe.t ->
+  Httpun.Status.t option
+(** HTTP status required for modern protocol-level JSON-RPC errors. Legacy
+    responses retain their existing transport behavior. *)
 
 val validate_2026_request_headers :
   Httpun.Request.t -> string -> (unit, header_rejection) result
@@ -58,7 +71,9 @@ val validate_2026_request_headers :
     opts into a stateless MCP revision. Legacy requests return [Ok ()].
     Modern requests require [MCP-Protocol-Version], matching body
     [_meta], [Mcp-Method], and, for [tools/call], [resources/read],
-    and [prompts/get], matching [Mcp-Name]. *)
+    and [prompts/get], matching [Mcp-Name] after decoding the MCP Base64
+    sentinel. Malformed or unsafe header values and duplicate routing
+    headers are rejected. *)
 
 (** [is_initialize_method m] tests whether [m] equals the literal
     [["initialize"]].  The initialize handshake must always go over

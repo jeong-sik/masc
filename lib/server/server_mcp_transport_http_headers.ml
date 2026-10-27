@@ -57,11 +57,16 @@ let request_name_header (request : Httpun.Request.t) =
   Server_mcp_transport_http_session.get_header_any_case request.headers
     "mcp-name"
 
+let header_selects_per_request_protocol (request : Httpun.Request.t) =
+  Httpun.Headers.get_multi request.headers "mcp-protocol-version"
+  |> List.exists (fun version ->
+       Mcp_transport_protocol.is_stateless_protocol_version version
+       || not (Mcp_transport_protocol.is_supported_protocol_version version))
+
 let request_uses_stateless_protocol request body_str =
-  match request_protocol_version_header request with
-  | Some version when Mcp_transport_protocol.is_stateless_protocol_version version ->
-      true
-  | _ -> Mcp_transport_protocol.body_uses_stateless_protocol body_str
+  header_selects_per_request_protocol request
+  || Option.is_some
+       (Mcp_transport_protocol.protocol_version_from_request_meta_body body_str)
 
 let body_required_name_for_method body_str method_ =
   let field_name =
@@ -91,26 +96,38 @@ let body_required_name_for_method body_str method_ =
 
    - [Mirrored_header_mismatch] -- the body parsed and disagrees with a header.
      The request id is readable, so JSON-RPC 2.0 §5 requires echoing it.
-   - [Unreadable_body] -- the header opted into the stateless revision but the
-     body is not JSON. No id to echo; §5's null-id case.
+   - [Unreadable_body] -- valid JSON, but not a request object.
+   - [Malformed_json] -- invalid JSON; JSON-RPC requires a parse error.
    - [Unsupported_version] -- not a header disagreement at all. It has carried
      the mismatch code until now, so a client saw "your headers disagree" for a
      version this server simply does not speak. *)
 type header_rejection =
   | Mirrored_header_mismatch of string
   | Unreadable_body of string
+  | Malformed_json of string
   | Unsupported_version of { requested : string }
   | Missing_required_meta of { key : string }
+  | Invalid_request_envelope of string
+  | Invalid_request_meta of string
 
 let header_mismatch msg = Error (Mirrored_header_mismatch msg)
 
-let body_is_readable body_str =
+let classify_body body_str =
   match Yojson.Safe.from_string body_str with
-  | `Assoc _ -> true
-  | _ | (exception Yojson.Json_error _) -> false
+  | `Assoc _ -> `Object
+  | _ -> `Non_object
+  | exception Yojson.Json_error _ -> `Malformed
 
-let validate_2026_request_headers request body_str =
+let validate_2026_header_mirrors request body_str =
   if not (request_uses_stateless_protocol request body_str) then Ok ()
+  else if
+    List.exists
+      (fun name ->
+        match Httpun.Headers.get_multi request.Httpun.Request.headers name with
+        | [] | [ _ ] -> false
+        | _ :: _ :: _ -> true)
+      [ "mcp-protocol-version"; "mcp-method"; "mcp-name" ]
+  then header_mismatch "duplicate MCP routing header"
   else
     match
       ( request_protocol_version_header request,
@@ -118,7 +135,9 @@ let validate_2026_request_headers request body_str =
     with
     | None, _ ->
         header_mismatch "missing MCP-Protocol-Version header"
-    | Some _, None when not (body_is_readable body_str) ->
+    | Some _, None when classify_body body_str = `Malformed ->
+        Error (Malformed_json "Invalid JSON")
+    | Some _, None when classify_body body_str = `Non_object ->
         Error
           (Unreadable_body
              "MCP-Protocol-Version names a stateless revision but the body is \
@@ -142,7 +161,7 @@ let validate_2026_request_headers request body_str =
         Error (Unsupported_version { requested = version })
     | Some _version, Some _
       when not
-             (Mcp_transport_protocol.request_meta_has_key body_str
+             (Mcp_transport_protocol.request_meta_has_object body_str
                 Mcp_transport_protocol.client_capabilities_meta_key) ->
         Error
           (Missing_required_meta
@@ -168,52 +187,88 @@ let validate_2026_request_headers request body_str =
                       "missing body params.name or params.uri for required Mcp-Name"
                 | None -> Ok ()
                 | Some body_name -> (
-                    match request_name_header request with
+                    match Option.map Mcp_transport_protocol.decode_header_value
+                            (request_name_header request) with
                     | None -> header_mismatch "missing Mcp-Name header"
-                    | Some header_name when not (String.equal header_name body_name) ->
+                    | Some (Error detail) ->
+                        header_mismatch ("invalid Mcp-Name header: " ^ detail)
+                    | Some (Ok header_name) when not (String.equal header_name body_name) ->
                         header_mismatch
                           (Printf.sprintf
                              "Mcp-Name header value %S does not match body \
                               value %S"
                              header_name body_name)
-                    | Some _ -> Ok ()))))
+                    | Some (Ok _) -> Ok ()))))
+
+let validate_2026_request_envelope body_str =
+  let invalid () = Error (Invalid_request_envelope "Invalid JSON-RPC request") in
+  match Yojson.Safe.from_string body_str with
+  | json when Mcp_transport_protocol.is_jsonrpc_v2 json
+              && Mcp_transport_protocol.has_unique_jsonrpc_fields json ->
+    (match Mcp_transport_protocol.jsonrpc_request_of_yojson json with
+     | Error _ -> invalid ()
+     | Ok req when Mcp_transport_protocol.is_notification req -> Ok ()
+     | Ok req when not (Mcp_transport_protocol.is_valid_request_id
+                          (Mcp_transport_protocol.get_id req)) -> invalid ()
+     | Ok req ->
+       (match Mcp_transport_protocol.classify_request_protocol
+                ~require_stateless:true ~method_:req.method_ ~params:req.params with
+        | Ok (Mcp_transport_protocol.Legacy_protocol | Stateless_protocol _) -> Ok ()
+        | Error (Mcp_transport_protocol.Invalid_request_meta message) ->
+          Error (Invalid_request_meta message)
+        | Error (Mcp_transport_protocol.Unsupported_request_version requested) ->
+          Error (Unsupported_version { requested })))
+  | _ | exception Yojson.Json_error _ -> invalid ()
+
+let validate_2026_request_headers request body_str =
+  match validate_2026_header_mirrors request body_str with
+  | Error rejection -> Error rejection
+  | Ok () when request_uses_stateless_protocol request body_str ->
+    validate_2026_request_envelope body_str
+  | Ok () -> Ok ()
 
 (* One rejection type, one place that turns it into a body. Both transports
    used to build this themselves and both wrote -32001 -- which is
    [Auth_error] here, so a client could not tell "your headers disagree" from
    "you are not authorized" from "this server does not speak that revision".
    MCP 2026-07-28 gives two of the three their own codes. *)
-let request_id_of_body body_str =
-  match Yojson.Safe.from_string body_str with
-  | `Assoc fields -> List.assoc_opt "id" fields
-  | _ | (exception Yojson.Json_error _) -> None
+let header_rejection_body body_str rejection =
+  let body =
+    match rejection with
+    | Mirrored_header_mismatch msg ->
+      Mcp_error_code.jsonrpc_error_body Mcp_error_code.Header_mismatch ~message:msg
+    | Unreadable_body msg ->
+      Mcp_error_code.jsonrpc_error_body Mcp_error_code.Invalid_request ~message:msg
+    | Malformed_json msg ->
+      Mcp_error_code.jsonrpc_error_body Mcp_error_code.Parse_error ~message:msg
+    | Unsupported_version { requested } ->
+      Mcp_error_code.unsupported_protocol_version_body ~requested
+        ~supported:Mcp_transport_protocol.supported_protocol_versions
+    | Missing_required_meta { key } ->
+      Mcp_error_code.jsonrpc_error_body Mcp_error_code.Invalid_params
+        ~message:(Printf.sprintf "missing or invalid required params._meta.%s" key)
+    | Invalid_request_envelope message ->
+      Mcp_error_code.jsonrpc_error_body Mcp_error_code.Invalid_request ~message
+    | Invalid_request_meta message ->
+      Mcp_error_code.jsonrpc_error_body Mcp_error_code.Invalid_params ~message
+  in
+  Server_mcp_transport_http_session.correlate_error_body_to_request
+    ~request_body:body_str body
 
-(* A rejection raised on a body that parsed answers a request whose id was
-   read, and [Mcp_error_code.allows_null_request_id] already says so for both
-   codes below. Falling back to [Invalid_request] is what carries the "the id
-   itself is missing" case, which is the one JSON-RPC 2.0 §5 lets answer with
-   a null id. *)
-let echoing_request_id body_str code ~message =
-  match request_id_of_body body_str with
-  | Some id -> Mcp_error_code.jsonrpc_error_body_with_id code ~id ~message
-  | None ->
-    Mcp_error_code.jsonrpc_error_body Mcp_error_code.Invalid_request ~message
-
-let header_rejection_body body_str = function
-  | Mirrored_header_mismatch msg ->
-    echoing_request_id body_str Mcp_error_code.Header_mismatch ~message:msg
-  | Unreadable_body msg ->
-    Mcp_error_code.jsonrpc_error_body Mcp_error_code.Invalid_request ~message:msg
-  | Unsupported_version { requested } ->
-    Mcp_error_code.unsupported_protocol_version_body ~requested
-      ~supported:Mcp_transport_protocol.supported_protocol_versions
-  (* The missing field is read out of a body that parsed, so the id is there
-     to echo -- this arm used to answer [id: null] while
-     [allows_null_request_id Invalid_params] said false, leaving a client with
-     no way to match the rejection to the request it sent. *)
-  | Missing_required_meta { key } ->
-    echoing_request_id body_str Mcp_error_code.Invalid_params
-      ~message:(Printf.sprintf "missing required params._meta.%s" key)
+let modern_response_http_error_status ~request ~body_str response =
+  if not (request_uses_stateless_protocol request body_str) then None
+  else
+    match response with
+    | `Assoc fields ->
+      (match List.assoc_opt "error" fields with
+       | Some (`Assoc error) ->
+         (match List.assoc_opt "code" error with
+          | Some (`Int (-32601)) -> Some `Not_found
+          | Some (`Int (-32700 | -32600 | -32602 | -32020 | -32021 | -32022)) ->
+            Some `Bad_request
+          | Some _ | None -> None)
+       | Some _ | None -> None)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 let should_use_sse_for_body (request : Httpun.Request.t) body_str accept_mode =
   match body_jsonrpc_method body_str with

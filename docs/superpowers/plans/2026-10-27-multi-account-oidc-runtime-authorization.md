@@ -83,16 +83,16 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 |---|---|---|---|
 | A1 | 모든 경로가 지금 인증을 어떻게 처리하는지 실제 요청으로 잰 기준선. HTTP/1 경로는 라우터를 격리한 base path로 띄워 무인증 요청과 잘못된 bearer 요청을 보낸다. H2, `/mcp` 사전 처리, `/ws`는 실제 소켓으로 따로 친다. 결과는 `docs/evidence/`에 둔다. 동작은 바꾸지 않는다. | §5.3, §11-1 | - |
 | A2 | `auth_config.account_mode`를 필수 필드로 두고 부팅 때 검사한다. 값이 없거나 모르는 값이면 부팅을 거부한다. `Multi_account`는 `enabled=false`, `require_token=false`, `MASC_ALLOW_ANONYMOUS_MUTATIONS=true`를 거부한다. setup과 restart가 `Single_user`를 써 넣는 단계는 `prepare_login_auth`와 별도로 둔다(§2의 설정 쓰기). 기존 `config.json`으로 띄운 서버가 setup·restart 뒤 부팅되는지 재사용 토큰이 있는 설치까지 시험한다. 변경 기록에 `Fresh state required`를 적는다. | §5.1, §5.3 | - |
-| A3 | 권한 도메인의 닫힌 타입(Principal, Effect, Channel, Runtime_scope, Authorization_scope, ExecutionContext, grant, policy)과 판정식 `allowed`. I/O 없는 순수 코드다. 시험은 deny 기본, `Empty`, `Not_pat`, scope·channel·effects 교집합을 표로 확인한다. | §4, §6.2 | - |
+| A3 | 권한 도메인의 닫힌 타입(Principal, Effect, Channel, Runtime_scope, Authorization_scope, ExecutionContext, grant, policy, record의 author)과 판정식 `allowed`. I/O 없는 순수 코드다. 시험은 deny 기본, `Empty`, `Not_pat`, scope·channel·effects 교집합을 표로 확인한다. | §4, §6.2, §6.3 | - |
 
 ### B. 권한 저장소
 
 | 층 | 결과 | 설계 | 선행 |
 |---|---|---|---|
-| B1 | `authz.jsonl`: append-only, 프로세스 배타 writer lock, lock-free snapshot, replay. `Candle_ledger`의 방식을 따른다. lease 계열 group commit은 E1에서 붙인다. | §8.1 | A3 |
-| B2 | backup 밖 append-only 저장소(설계의 외부 고수위·revocation ledger)와 `Intent_pending`/`Committed`. 같은 writer lock 구역, 판정 갈래 1~5, `AuthorizationUncertain`, `Revocation_pending` 게이트, `Fresh_bootstrap`. 갈래마다 고장 주입 시험을 둔다. 저장소의 위치를 받는 방식을 먼저 정한다(§6의 결정 2). | §8.2~8.4 | B1 |
+| B1 | `authz.jsonl`: append-only, 프로세스 배타 writer lock, lock-free snapshot, replay. `Candle_ledger`의 방식을 따른다. writer는 record 종류와 author 종류의 짝을 검사한다(§6.3). `RuntimeGrant`, `DelegatePolicy`, `Principal`, `InternalServiceCredential`, 명시적 permission revocation은 인증된 author가 필요하고, `System_cron`, `System_maintenance`, `System_migration`이 쓸 수 있는 record는 정해져 있다. lease 계열 group commit은 E1에서 붙인다. | §6.3, §8.1 | A3 |
+| B2 | backup 밖 append-only 저장소(설계의 외부 고수위·revocation ledger)와 `Intent_pending`/`Committed`. 저장소는 객체의 scoped epoch 최고값, artifact별 `credential_generation`, Intent 상태를 기록한다. Intent의 subject는 grant·credential·principal·Runtime 중 하나다(§4.5). 같은 writer lock 구역, 판정 갈래 1~5, `AuthorizationUncertain`, `Revocation_pending` 게이트, `Fresh_bootstrap`. 갈래마다 고장 주입 시험을 둔다. 저장소의 위치를 받는 방식을 먼저 정한다(§6의 결정 2). | §4.5, §8.2~8.4 | B1 |
 | B3 | Principal·Admin_assignment·WorkspaceMembership·초대 저장소, 마지막 Admin 보호, 호스트 로컬 bootstrap, ID 발급 규칙, principal 삭제 사건. 세부는 표 아래 B3 범위다. | §4.1, §5.1 | B1, B2 |
-| B4 | `Purge_pending`, `Purged`, `Purge_failed` 사건과 현재 상태 판정(target의 마지막 사건이 현재 상태, target 단위 멱등), `Purge_pending` 대상의 읽기 거부, 재기동 때 남은 `Purge_pending` 목록. 삭제는 하지 않는다. 삭제 실행기는 F1이다. | §8.5 | B2, B3 |
+| B4 | `Purge_pending`, `Purged`, `Purge_failed` 사건과 현재 상태 판정(target의 마지막 사건이 현재 상태, target 단위 멱등), `Purge_pending` 대상의 읽기 거부, 재기동 때 남은 `Purge_pending` 목록. `Purge_pending` 지정은 §8.2의 scoped epoch 사건이라 `Intent_pending`/`Committed` 규칙을 따른다(initiator 삭제이면 `Delete` 사건). 삭제는 하지 않는다. 삭제 실행기는 F1이다. | §8.5 | B2, B3 |
 
 **B3 범위**
 
@@ -118,7 +118,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 | D2 | `Runtime_view.t`와 abstract `Authorized_runtime.t`, `Runtime.authorize`. Codex와 Claude Code의 `run_turn`, 그 위의 Keeper 경로(`Keeper_codex_runtime`, `Keeper_claude_code_runtime`, `run_codex`·`run_claude` 갈래)가 `Authorized_runtime.t`를 요구하게 바꾼다. 직접 호출자(Fusion, verifier, capability probe)는 컴파일러가 모아 같이 바꾼다. | §6.1 | A3, D1 |
 | D3 | 나머지 실행 진입을 같은 타입으로 바꾼다. Antigravity와 Muse의 `run_turn`, 그 Keeper 래퍼(`Keeper_antigravity_runtime`, `Keeper_muse_runtime`)와 `run_antigravity`·`run_muse` 갈래, 그 밖의 호출자(verifier, Fusion, capability probe), 프로세스를 띄우는 조회(Codex `probe_metadata`의 호출자, Claude `probe_auth_status`, Muse `with_spawned_client`의 호출자). 첫 일은 §2에서 따라가지 못한 곳을 조사하는 것이다. 두 Runtime을 공유 대상으로 열지는 §6의 결정 4가 정한다. | §6.1 | D2 |
 | D4 | API provider 실행 경로를 조사하고 같은 타입으로 바꾼다. | §6.1 | D2 |
-| D5 | Delegated grant, MachineSharePolicy, DelegatePolicy, channel, 영속 작업의 initiator/executor 재검사. §6.2 판정이 `Purge_pending`을 거부 사유로 쓴다. `Purge_pending` initiator의 새 dispatch와 새 shard 쓰기를 거부한다. | §4.3~4.4, §6.2, §8.5-1 | D2, B3, B4 |
+| D5 | Delegated grant, MachineSharePolicy, DelegatePolicy, channel, 영속 작업의 initiator/executor 재검사. 자동 만료는 `Preauthorized_expiry(cause_event_id)`로 닫는다(§6.3). §6.2 판정이 `Purge_pending`을 거부 사유로 쓴다. `Purge_pending` initiator의 새 dispatch와 새 shard 쓰기를 거부한다. | §4.3~4.4, §6.2, §6.3, §8.5-1, §8.5-3 | D2, B3, B4 |
 | D6 | Keeper 지속 상태(컨텍스트·기억·산출 글)에 initiator 표시를 붙이고, `Read_state`가 허용되지 않으면 initiator별 분리 컨텍스트로 돌린다. 파생 상태는 원천 initiator를 표시하고 읽는 쪽에 `Source_sealed`·`Source_purged`를 돌려준다. principal 삭제 연산은 `Delete` 사건과 같은 append로 표시된 몫을 `Purge_pending`에 올린다. 세부와 첫 일은 표 아래 D6 범위다. | §3-11, §6.2, §8.5 | D2, D5, B3, B4 |
 
 **D6 범위**
@@ -133,7 +133,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 | 층 | 결과 | 설계 | 선행 |
 |---|---|---|---|
 | E1 | `Lease_state`와 `with_lease` 출구 규칙(§7.1), `consume` 한 번, 재기동 규칙, attempt 종단 셋(`Failed(Outcome_unknown)`, `Failed(Not_started)`, `Cancelled_before_effect`, §9-5), lease 계열 group commit. group commit은 B2의 writer lock 구역(`Intent_pending`부터 `Committed`까지) 동안 끼지 않는다(§8.2-1). | §7.1, §8.2-1, §9-3~9-5 | B1, D2 |
-| E2 | account-home single-flight, 점유 영속, 단일 FIFO, owner·Admin의 `Executor_teardown`, `account_busy`. mount와 spawn은 `Lease_dispatched` 기록 뒤에만 하고, 실행 전 실패와 `Effect_cancel`은 종단 기록(`Completed(Not_started)`)을 남긴다(§7.2). | §7.2, §9.1~9.2 | E1 |
+| E2 | account-home single-flight, 점유 영속, 단일 FIFO, owner·Admin의 `Executor_teardown`, `account_busy`. mount와 spawn은 `Lease_dispatched` 기록 뒤에만 하고, 실행 전 실패와 `Effect_cancel`은 종단 기록(`Completed(Not_started)`)을 남긴다(§7.2). 효과가 나간 dispatch의 `Completed(Effected)`는 E1의 출구 규칙이 기록한다. | §7.2, §9.1~9.2 | E1 |
 | E3 | credential/state 분리, lane 증명(저장소 종류와 `state_separation` 포함), attestation. | §5.4-6, §7.2, §9 | E2 |
 | E4 | dispatch 전용 MCP credential. | §7.3 | E1 |
 
@@ -142,16 +142,34 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 | 층 | 결과 | 설계 | 선행 |
 |---|---|---|---|
 | F1 | purge 삭제 실행기. 삭제는 대상에 쓸 수 있는 dispatch가 모두 종단에 이른 뒤에 시작하고, 종료를 확인하지 못하면 `Purge_failed {Writer_not_terminated}`로 끝낸다. 진행 중인 dispatch는 지정이 올리는 epoch가 회수하고(E1의 `Revoked(Grant_revoked)`) E2의 `Executor_teardown`이 끊는다. F1은 종료 확인만 기다린다. 대상 표시가 붙은 shard·transcript·credential을 writer lock 밖에서 ID 단위로 멱등하게 지우고, 남은 대상이 0이면 `Purged`를 append한다. 재기동 때 남은 `Purge_pending`을 이어서 지운다. `Purge_failed`는 Dashboard와 `/health`에 보인다. | §8.5, §10.4 | B4, D5, D6, E3 |
-| F2 | 복원 창, `Recovery_manifest`, `restore_disposition`(`Pending`, `Denied`, `Cleared`, `Quarantined`, `Purged`), `Integrity_carry_forward` 계승, 적격 Admin 규칙. 복원본에서 되살아난 principal 레코드를 ledger의 `Delete` 기록과 먼저 대조하고, 컨텍스트 shard와 파생 상태를 분류한다(분류 전 읽기는 `AuthorizationUncertain`). 창 중 purge는 `Purged_during_window`로 센다. | §10.1~10.5 | B2, B3, D5, F1 |
-| F3 | 모드 전환(on→off)과 새 명령 `masc auth recovery`. | §10.5 | F2 |
+| F2 | 복원·전이 분류와 전이 창의 규칙. 복원 창, `Recovery_manifest`, `restore_disposition`(`Pending`, `Denied`, `Cleared`, `Quarantined`, `Purged`), `Integrity_carry_forward` 계승, 적격 Admin 규칙. 복원본에서 되살아난 principal 레코드를 ledger의 `Delete` 기록과 먼저 대조하고, 컨텍스트 shard와 파생 상태를 분류한다(분류 전 읽기는 `AuthorizationUncertain`). 세부는 표 아래 F2 범위다. | §10.1~10.5 | B2, B3, D5, F1 |
+| F3 | 모드 전환(on→off)과 새 명령 `masc auth recovery`. 세부는 표 아래 F3 범위다. | §10.5 | F2 |
 | F4 | 최초 활성화 전이와 귀속. initiator가 없는 기존 durable work는 `Denied(legacy_unattributed)`로, scope가 없는 것은 `legacy_scope_missing`으로 분류하고, 총계·`Denied`·`Cleared`·미분류를 Local_operator 이름으로 기록해 미분류 0을 확인한다. 소유자가 없는 자산은 dry-run 뒤 bootstrap principal에 `candidate_owner`와 `Self.status=Revoked(Attributed_unclaimed)`로 귀속하고, 후보 목록을 후보 본인·Admin·Local_operator에게 보인다. 후보가 현재 OIDC 인증과 `ManageOwnProvider`와 provider 재인증을 마치면 claim append가 새 grant_id의 Active Self를 만든다. 귀속하지 못한 자산은 Disabled로 두고 MachineShared로 올리지 않는다. | §10.3, §10.5 | D1, D5, F2 |
 | F5 | `MultiAccountReadiness` 실행기와 증거 묶음. | §11 | 모든 층 |
+
+**F2 범위**
+
+- 실행은 그 record가 의존하는 모든 record의 `cleared_epoch`가 현재 `transition_epoch`와 같을 때만 허용한다. 과거 epoch의 `Cleared`는 현재 권한이 아니다(§10.1).
+- 분류할 수 없는 record는 `Denied(unclassifiable)`로 확정한다. credential을 품은 record는 `CredentialUncertain`으로 두고 Quarantined로 보낸다. 창 중 purge로 사라진 항목은 `Purged_during_window`로 센다(§10.1).
+- Block record는 `cause`(`Security_incident` 또는 `Operational`)를 필수로 갖는다. `Security_incident`의 해제는 적격 Admin만 한다. 적격 Admin이 없으면 Local_operator가 `Quarantined(cause=No_eligible_admin)`로 기록한다. 부재가 확인된 owner의 `Pending`은 Local_operator의 `Quarantined`로만 끝낸다(§10.4).
+- 복원·롤백 직후 모든 공유와 실행은 `AuthorizationUncertain`이다. 복원본에서 되살아난 account-home과 credential artifact는 `CredentialUncertain`이고, owner가 provider 재인증과 새 credential generation 검증을 마치기 전에는 mount하지 않는다. 일반 재기동은 generation이 같으면 재인증 없이 검증한다(§10.5).
+- ledger 현재본은 backup과 분리된 저장소에 두고 backup 사본과 합집합으로 대조한다. T에 백업하고 T+1에 revoke한 뒤 T+2에 복원해도 revoke가 유지되고, 연결된 work가 `Denied`이고, 유효한 lease가 0임을 시험한다(§10.5).
+- 전이를 시작하기 전에 새 dispatch·새 grant·새 durable work를 먼저 거부한다. 진행 중인 dispatch는 §9-5에 따라 종결한다(§10.2).
+- 창 중에는 `Read_only` dispatch도 새로 받지 않는다. 긴급 Block·Disable·Revoke는 창 중에도 거부하지 않는다. 창 중 도착한 효과는 성공한 work로 적용하지 않고 새 record로 현재 epoch 검사를 받는다(§10.2).
+- account-home은 unmount를 확인하기 전까지 `Release_pending`이다(§10.2).
+- 복구 안내 Board 글은 typed `recovery_notice`로 표시한다. Keeper wake는 subscription 후보 생성 필터와 dispatch 진입 검사 양쪽에서 뺀다. 일반 Board 글에 문자열로 wake를 끄는 규칙은 두지 않는다. 작성자는 Local_operator와 manifest 게시 시스템 이벤트뿐이다. 창이 닫히면 `closed`로 바꾸되 wake 제외는 유지한다. Cleared 승인자에게는 wake 대신 Dashboard 배지와 별도 inbox로 자기 항목 수를 보여 준다(§10.2).
+- 크기가 20k token을 넘으면 분류(§10.1, §10.4, §10.5)와 전이 창 규칙(§10.2)으로 쪼갠다.
+
+**F3 범위**
+
+- on→off 전환은 multi-owned record를 읽기 전용으로 보존하고 legacy 공유 token·admin으로 실행하지 않는다. 진행 중인 multi dispatch는 §9-5에 따라 종결하고 session은 닫는다. account-home 점유는 `Release_pending`으로 바꿔 unmount를 확인한 뒤에만 Released로 한다. 다시 켜면 같은 `Recovery_manifest`와 `Pending` 절차를 거친다.
+- `masc auth recovery --base-path <path>`는 인증 가능한 Admin이 0명이거나 IdP를 쓸 수 없을 때 연다. 호스트 관리자와 root 소유 일회용 recovery 파일이 필요하다. 실행자·사유·시각·결과·파일 digest·파기 결과를 append-only audit와 Board에 남긴다. 원격 break-glass는 없고 활성화 전에 리허설한다. 이 경로에서 Local_operator는 `Admin_assignment`를 새로 발급할 수 있고, 발급받은 principal의 grant와 `Cleared`에는 관여하지 않는다.
 
 ## 4. 순서와 첫 마일스톤
 
 - A, B, C1은 서로 거의 독립이라 병렬 스택으로 쌓을 수 있다. 나머지 순서는 층 표의 선행 열을 따른다.
 - D2와 D3은 `Single_user`에서 동작을 바꾸지 않도록 `Runtime.authorize`가 모드에 따라 근거를 달리 발급해야 한다. 설계 §6.1이 이 점을 정한다. 이 근거가 없으면 D2는 시작하지 않는다.
-- 설계 §11의 readiness가 복구 리허설과 official lane 격리 증거를 요구하고, 설계 §10.5가 최초 활성화 때 미분류 0을 요구한다. 그래서 F2, F4, E3 없이는 원격 다계정을 열 수 없다. 그 앞까지의 층은 다계정을 켜지 않은 채 main에 들어갈 수 있다.
+- 설계 §11의 readiness가 복구 리허설과 official lane 격리 증거를 요구하고, 설계 §10.5가 최초 활성화 때 미분류 0을 요구한다. 그래서 F1~F4와 E3 없이는 원격 다계정을 열 수 없다. 그 앞까지의 층은 다계정을 켜지 않은 채 main에 들어갈 수 있다.
 - 첫 마일스톤은 A~D3이다(2026-10-27 사용자 결정). A2의 부팅 검사를 빼면 `Single_user` 동작은 그대로이고 타입과 저장소와 로그인 경로만 들어간다. C5는 OAuth 스택이 병합된 뒤에만 열리므로 병합 시점에 따라 이 마일스톤 안이나 밖에 놓인다. D4~D6, E, F는 이 마일스톤이 병합된 뒤에 연다.
 - readiness 증거는 층이 만든다. 각 층의 PR 본문이 자기 증거를 적고, F5는 그 증거를 모아 표면 digest에 결속하는 실행기만 만든다.
 
@@ -168,11 +186,11 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 | 복구 리허설 | F2, F3 |
 | Single_flight 대기 시간(§11-6) | E2 |
 
-계획이 더하는 증거가 둘 있다. 기존 설치가 업그레이드 뒤 부팅된다(A2)와 최초 활성화 때 미분류가 0이다(F4)다. 둘 다 F5의 묶음에 넣는다.
+계획이 더하는 증거가 셋 있다. 기존 설치가 업그레이드 뒤 부팅된다(A2), 과거 epoch의 `Cleared`가 실행되지 않는다(F2), 최초 활성화 때 미분류가 0이다(F4)다. 셋 다 F5의 묶음에 넣는다.
 
 ## 5. 설계 문구 정리
 
-병합된 설계에 남은 문구와 빈칸 6건이다. 해당 설계를 구현하는 층의 PR이 설계 문서도 같이 고친다.
+병합된 설계에 남은 문구와 빈칸 7건이다. 해당 설계를 구현하는 층의 PR이 설계 문서도 같이 고친다.
 
 | 번호 | 설계 | 할 일 | 층 |
 |---|---|---|---|
@@ -182,6 +200,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 | 4 | §9-3, §9-4, §9.1 | `Outcome_unknown` 출구 괄호가 같은 말을 되풀이한다. §7.1을 가리키는 한 줄로 줄인다. | E1 |
 | 5 | §9-5 | "attempt 종단 전체의 목록은 기존 dispatch 정책이 소유한다"의 코드 위치를 적는다. `duplicate_possible`은 설계 문서에만 있고 저장소의 코드에는 없다. 종단 타입을 찾는 일이 E1의 첫 일이다. | E1 |
 | 6 | §12, §13 | 300 Keeper 성능 실측을 누가 어디에 남기는지 정한다. 각 층이 자기가 만든 경로의 값을 `docs/evidence/`에 측정 조건(커밋, 호스트, 부하 크기)과 함께 남기고 F5가 모은다. Single_user 기준선과 Single_flight 대기 시간은 E2가 잰다. 300 Keeper 부하 발생기가 이미 있는지는 확인하지 못했다. | E2, F5 |
+| 7 | §6.2, §8.5-1, §8.5-3 | §8.5가 위임한 `Purge_pending` 거부를 §6.2의 거부 목록에 적는다. §6.2는 "Disabled이거나 삭제된 principal"만 거부한다고 말한다. | D5 |
 
 ## 6. 결정이 필요한 것
 
@@ -189,7 +208,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 2. **외부 고수위 저장소의 위치.** 설계는 "backup 밖"만 요구한다. 경로를 코드에 박을 수 없으므로 설정 키나 설치 기록으로 받아야 하는데, 어느 쪽인지 정해지지 않았다. B2 전에 사용자에게 묻는다.
 3. **경로별 인증 처리를 타입으로 붙일지.** A1이 측정한 결과를 보고 정한다. 타입으로 붙이면 등록 호출 382곳과 H2 표를 함께 바꿔야 하므로 층이 여럿 늘어난다. 측정기만 두면 새 경로가 생길 때 사람이 다시 측정해야 한다. A1 뒤에 사용자에게 묻는다.
 4. **Antigravity·Muse Runtime의 공유.** 설계는 이 둘을 다루지 않는다. 설계 §3-10은 증명 없는 공유를 거부하므로, 공유 대상으로 열려면 §7.2 같은 lane 증명이 필요하다. D3이 두 Runtime의 credential 위치를 조사한 뒤, 공유를 거부로 둘지 설계를 넓힐지 사용자에게 묻는다.
-5. **D6의 저장 형식 변경과 기존 Keeper 상태.** 저장소 규칙은 호환 reader 없이 `Fresh state required`다. 이 규칙대로면 D6 배포 때 기존 Keeper 컨텍스트·기억·산출 글은 따로 보관하고 새로 시작한다. 설계 §10.5는 initiator가 없는 기존 work와 record를 `legacy_unattributed`로 분류하라고 하는데, 표시 없는 Keeper 상태를 읽을 수 있는지는 정하지 않는다. D6의 조사 표가 나온 뒤 기존 상태를 어떻게 할지 사용자에게 묻는다.
+5. **이전 형식 데이터.** 저장소 규칙은 호환 reader 없이 `Fresh state required`인데, 설계에는 이전 형식 데이터를 읽는 규칙이 있다. D6가 Keeper 상태에 initiator 표시를 붙이면 기존 컨텍스트·기억·산출 글이 표시 없는 상태가 되고, 설계 §10.5는 표시 없는 Keeper 상태를 읽을 수 있는지 정하지 않는다. `cause`가 없는 기존 Block을 `Security_incident`로 보는 규칙(§10.4-1)도 같은 문제다. 저장소 규칙대로면 D6 배포 때 기존 Keeper 상태를 따로 보관하고 새로 시작한다. D6의 조사 표가 나온 뒤와 F2를 시작할 때 사용자에게 묻는다.
 
 ## 7. 위험과 미확인
 

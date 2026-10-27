@@ -424,6 +424,7 @@ let load_persisted_votes store =
       Ok 0)
     else begin
       try
+      let t0 = Time_compat.now () in
       let loaded = ref 0 in
       let parsed =
         Board_votes_json.load_source_rows
@@ -446,10 +447,8 @@ let load_persisted_votes store =
             Stdlib.incr loaded)
       in
       if Result.is_ok parsed then recalculate_vote_counts store;
-      if !loaded > 0 then
-        Log.BoardLog.info "loaded %d vote entries from %s" !loaded path
-      else
-        Log.BoardLog.debug "loaded 0 vote entries from %s" path;
+      let elapsed = Time_compat.now () -. t0 in
+      Board_votes_json.log_loaded ~noun:"vote entries" ~loaded:!loaded ~path ~elapsed parsed;
       Result.map (fun () -> !loaded) parsed
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
@@ -466,6 +465,7 @@ let load_persisted_reactions store =
     if not (Fs_compat.file_exists path) then Ok 0
     else begin
       try
+      let t0 = Time_compat.now () in
       let loaded = ref 0 in
       let parsed =
         Board_votes_json.load_source_rows
@@ -483,10 +483,8 @@ let load_persisted_reactions store =
             Hashtbl.replace store.reactions key reaction;
             Stdlib.incr loaded)
       in
-      if !loaded > 0 then
-        Log.BoardLog.info "loaded %d reactions from %s" !loaded path
-      else
-        Log.BoardLog.debug "loaded 0 reactions from %s" path;
+      let elapsed = Time_compat.now () -. t0 in
+      Board_votes_json.log_loaded ~noun:"reactions" ~loaded:!loaded ~path ~elapsed parsed;
       Result.map (fun () -> !loaded) parsed
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
@@ -503,6 +501,7 @@ let load_persisted_sub_boards store =
     if not (Fs_compat.file_exists path) then Ok 0
     else begin
       try
+      let t0 = Time_compat.now () in
       let loaded = ref 0 in
       let parsed =
         Board_votes_json.load_source_rows
@@ -514,10 +513,8 @@ let load_persisted_sub_boards store =
             Hashtbl.replace store.sub_boards_by_slug sb.slug id;
             Stdlib.incr loaded)
       in
-      if !loaded > 0 then
-        Log.BoardLog.info "loaded %d sub-boards from %s" !loaded path
-      else
-        Log.BoardLog.debug "loaded 0 sub-boards from %s" path;
+      let elapsed = Time_compat.now () -. t0 in
+      Board_votes_json.log_loaded ~noun:"sub-boards" ~loaded:!loaded ~path ~elapsed parsed;
       Result.map (fun () -> !loaded) parsed
       with
       | Eio.Cancel.Cancelled _ as e -> raise e

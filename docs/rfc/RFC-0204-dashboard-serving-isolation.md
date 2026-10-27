@@ -197,15 +197,15 @@ POST·PUT·DELETE 와 `/mcp` 도구 호출은 `Background` 그대로다. 무거�
 
 호출 지점마다 조회를 job 밖으로 옮기지 않는다. 중첩이 4단(briefing → projection → operator snapshot → Keeper 마다의 키)이고, 같은 수정을 열 곳 넘게 따로 해야 한다. `Dashboard_cache` 한 곳에서 고친다.
 
-- `Computing` 칸에 계산을 누가 맡았는지 표시하는 `claimed : bool Atomic.t` 와 결과 promise 를 둔다.
+- `Computing` 칸에 owner 의 계산(풀에 넘기기 전의 thunk), 누가 맡았는지 표시하는 claim, 결과 promise 를 둔다. 같은 키라도 호출자마다 payload 준비 방식이 다를 수 있어, 맡는 쪽은 자기 compute 가 아니라 owner 의 계산을 돌린다.
 - owner 의 계산 job 은 시작할 때 `claimed` 를 CAS 로 잡는다. 잡으면 계산한다. 못 잡으면 바로 끝나 worker 를 내놓고, owner 는 자기 fiber 에서 결과 promise 를 기다린다.
-- 풀 job 안의 조회가 `Wait` 를 만나고 `claimed` 가 비어 있으면(owner 계산이 아직 줄에 있으면) 잡고, 자기 compute 를 그 자리에서 돌린다. 이미 쥔 worker 를 쓰므로 자리를 더 쓰지 않는다. 결과는 owner 의 token 으로 칸에 쓰고 promise 를 푼다.
+- 풀 job 안의 조회가 `Wait` 를 만나고 `claimed` 가 비어 있으면(owner 계산이 아직 줄에 있으면) 잡고, 칸의 계산을 그 자리에서 돌린다. 이미 쥔 worker 를 쓰므로 자리를 더 쓰지 않는다. 결과는 owner 의 token 으로 칸에 쓰고 promise 를 푼다.
 - `claimed` 가 잡혀 있으면(계산이 도는 중이면) 지금처럼 기다린다. worker 를 쉬게 쥐는 시간은 그 계산 시간을 넘지 않는다. 요청 fiber 의 기다림은 worker 를 쓰지 않으므로 그대로 둔다.
 - 맡은 쪽 계산이 실패하거나 취소되면 promise 를 Error 로 풀고, 칸은 지금의 owner 실패 경로처럼 되돌린다. owner 의 timeout 은 promise 기다림도 감싼다.
 - 같은 키 계산은 한 번만 돈다. `claimed` 는 한 번만 잡힌다.
 - `Operator_control_snapshot_cache` 도 job 안에서 기다리지만 owner 가 계산을 풀에 넘기지 않고 자기 fiber 에서 바로 한다. 기다리는 job 은 도는 계산을 기다리므로 꼬이지 않는다. L4b 범위 밖이다.
 
-검증: 구현 전에 claim 경합·실패·취소를 TLA+ 로 적고, 버그 모델(owner 와 waiter 가 둘 다 계산, 실패 뒤 칸이 `Computing` 으로 남음)이 invariant 를 깨는지 본다. 시험은 읽기 풀 worker 1개로 짠다. (1) 요청 fiber owner 의 계산이 줄에 있고 job 안 조회가 같은 키를 기다리면 timeout 전에 끝나고 계산은 한 번 돈다. 지금 코드는 timeout 으로 실패한다. (2) claim 을 진 owner job 은 바로 worker 를 내놓는다. (3) 맡은 쪽이 실패하면 owner 가 Error 를 받고 칸이 정리된다. (4) 계산이 도는 중이면 job 안 조회는 기다리고 계산은 한 번 돈다.
+검증: `specs/bug-models/DashboardCacheClaim.tla`. clean 모델(worker 1·2개)은 `NoInversion`, `AtMostOneRunner`, `ClaimHasRunner` 와 "맡은 계산은 결국 Ok 나 Failed 가 된다"(`ClaimSettles`, liveness)를 지킨다. 버그 모델 셋은 각각 깬다: 지금 코드(기다리기만 함) → `NoInversion`, owner 가 맡긴 뒤에도 계산 → `AtMostOneRunner`, 맡은 쪽이 실패하고 결과를 안 풂 → `ClaimHasRunner`·`ClaimSettles`. 시험은 읽기 풀 worker 1개로 짠다. (1) 요청 fiber owner 의 계산이 줄에 있고 job 안 조회가 같은 키를 기다리면 timeout 전에 끝나고 계산은 한 번 돈다. 지금 코드는 timeout 으로 실패한다. (2) claim 을 진 owner job 은 바로 worker 를 내놓는다. (3) 맡은 쪽이 실패하면 owner 가 Error 를 받고 칸이 정리된다. (4) 계산이 도는 중이면 job 안 조회는 기다리고 계산은 한 번 돈다.
 
 ### 3.5 domain 예산
 

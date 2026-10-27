@@ -652,7 +652,7 @@ let test_actual_official_or_mixed_path kind () = with_fixture ~history_kind:kind
   let source=Capture.source capture in
   check bool "actual selector retained the requested complete source kind" true
     (match kind,Source.source source with
-     | Official,Source.Official_only _ | Mixed,Source.Mixed _ -> true
+     | Official,Source.Held.Official_only _ | Mixed,Source.Held.Mixed _ -> true
      | Atoms,(Checkpoint_only _ | Official_only _ | Mixed _)
      | Official,(Checkpoint_only _ | Mixed _) | Mixed,(Checkpoint_only _ | Official_only _) -> false);
   (match Source.range_id source with

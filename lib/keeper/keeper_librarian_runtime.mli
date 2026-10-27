@@ -359,6 +359,13 @@ val prepare_durable : now:float -> Keeper_librarian.input ->
 val validate_durable_preparation : durable_preparation -> (unit, string) result
 (** Pure restoration check of the complete captured input, policy, resolutions,
     substitutions, rendered prompt and schema. No environment/prompt lookup. *)
+val restore_durable_preparation : source_input:Keeper_librarian.input -> parsing_now:float ->
+  policy:durable_policy -> rule_prompt:Prompt_registry.prompt_resolution ->
+  prompt:Prompt_registry.prompt_resolution -> output_schema:Yojson.Safe.t ->
+  (durable_preparation, string) result
+(** Render the substitutions and prompt again from the captured input and the
+    retained resolutions, then {!validate_durable_preparation}. No
+    environment/prompt lookup. *)
 type durable_absorption = {
   observations : Yojson.Safe.t list;
   facts : Keeper_memory_os_types.fact list;

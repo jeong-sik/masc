@@ -1,6 +1,8 @@
 (** Original history publication fence. The caller already holds this Keeper's
     serialized Memory lane and purge exclusion. This port acquires the actual
-    selected trace locks in stable order, validates the retained source prefixes,
+    selected trace locks in stable order, confirms that the prefix of each
+    source the original read still has its digest and selects and projects to
+    its input ({!Keeper_librarian_durable_capture.confirm_sources}), checks the
     original read positions, and invokes [publish]
     while those trace locks remain held. Appended history is allowed; it never
     enlarges the original source, receipts or acknowledgement frontier.

@@ -159,6 +159,25 @@ let load_listed ~store (record : Record.t) =
   | Some original when same_listed record (listed original) -> Ok original
   | Some _ -> Error (Store_unavailable "an inventoried original changed")
   | None -> Error (Store_unavailable "an inventoried original disappeared")
+(* Retain fixes the digest a record names its body by, so the record of the
+   same ID naming the same digest names the body [previous] already read and
+   checked; only its progress can differ. Reading the record alone keeps a
+   progress re-check from parsing the body again. *)
+let reload ~store (previous : retained) =
+  let* () = validate_identity ["scope", previous.scope; "request_id", previous.request_id] in
+  let* json = Lane_addon_store.load_tool_request_owner store
+      ~scope:previous.scope ~request_id:previous.request_id |> unavailable in
+  match json with
+  | None -> Ok None
+  | Some json ->
+    let* record = decode ~scope:previous.scope ~request_id:previous.request_id json |> unavailable in
+    if String.equal record.request_digest previous.request_digest
+    && String.equal record.installation_id previous.installation_id
+    && String.equal record.package_id previous.package_id
+    && String.equal record.tool previous.tool
+    && Yojson.Safe.equal record.summary previous.summary
+    then Ok (Some (with_request record previous.request))
+    else Error (Store_unavailable "a reloaded original names another request or binding")
 let load_scope ~store ~scope =
   let* records = discover ~store ~scope in
   let rec restore found = function

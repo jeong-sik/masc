@@ -46,6 +46,11 @@ val create : ?predecessor:predecessor -> request_id:string -> owner:owner -> des
     complete inventory must establish known basis supersession before dispatch.
     Retention/restore performs no provider, Gate, Memory, source or cursor effect. *)
 val restore : owner:owner -> Lane_addon_tool_request_owner.retained -> (t, string) result
+val confirm_record : t -> Lane_addon_tool_request_owner.retained -> (unit, string) result
+(** The record is this original's: same physical source root and host binding
+    as {!restore} checks, and the digest of this request. Equal digests name
+    equal canonical requests, so this replaces restoring the record again and
+    comparing encodings. Offload the whole call; it reads the source root. *)
 val of_json : owner:owner -> Yojson.Safe.t -> (t, string) result
 (** Pure full original-request decoder used for a retained replacement intent.
     This grants no physical-source, retained-owner or dispatch authority. *)

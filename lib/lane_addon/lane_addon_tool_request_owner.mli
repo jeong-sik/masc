@@ -59,6 +59,13 @@ val discover : store:Lane_addon_store.t -> scope:string -> (Record.t list, error
     requests or dispatches are created. Results are observations; load/advance
     and actual workspace authority must be revalidated by the original
     serialized owner. *)
+val reload : store:Lane_addon_store.t -> retained -> (retained option, error) result
+(** The current record of [previous]'s ID, carrying [previous]'s request
+    without reading the body again. Retain fixes the digest a record names its
+    body by, so a record with the same digest, binding and summary names the
+    body {!load} already verified; only progress can differ. A record that
+    names another digest or binding is an error, and [None] means the record
+    is gone (settled or removed). *)
 val load_listed : store:Lane_addon_store.t -> Record.t -> (retained, error) result
 (** Restore one observed record and its complete body using {!load}, then
     confirm that the record still has the exact discovered identity, summary,

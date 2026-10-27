@@ -46,6 +46,35 @@ let test_restart_discovers_original_input_progress_and_scope () = with_store (fu
   Alcotest.(check string) "destination is the original installation" "original-installation"
     (Owner.Record.installation_id restored))
 
+let test_reload_keeps_the_verified_body_and_refuses_another_digest () = with_store (fun root store ->
+  retain store "a";
+  owned (Owner.retain ~store ~scope ~request_id:"b" ~installation_id:"original-installation"
+    ~package_id:"curator" ~tool:"classify" ~summary:`Null ~request:(`Assoc ["input",`String "another body"]));
+  let original = some (owned (load store "a")) in
+  let pending = match get (Result.map_error Owner.update_error_to_string
+      (Owner.advance ~store ~expected:original ~event:Progress.Dispatch_intended)) with
+    | Owner.Stored value -> value
+    | Owner.Already_stored _ | Owner.Unconfirmed _ -> Alcotest.fail "dispatch intent not stored" in
+  let reloaded = some (owned (Owner.reload ~store original)) in
+  Alcotest.check json "reload reads the record's current progress"
+    (Progress.to_json pending.progress) (Progress.to_json reloaded.progress);
+  Alcotest.check json "reload carries the body the first load verified" request reloaded.request;
+  let other = some (owned (load store "b")) in
+  Alcotest.(check bool) "the other original names another body" false
+    (String.equal other.request_digest original.request_digest);
+  let record = Yojson.Safe.from_file (path root "a") in
+  let renamed = match record with
+    | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
+        if key="request_digest" then key,`String other.request_digest else key,value) fields)
+    | _ -> Alcotest.fail "original record is not an object" in
+  save (path root "a") (Yojson.Safe.to_string renamed);
+  (match Owner.reload ~store original with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "a record naming another body kept the earlier body");
+  Sys.remove (path root "a");
+  match owned (Owner.reload ~store original) with
+  | None -> ()
+  | Some _ -> Alcotest.fail "a removed original reloaded")
 let test_initial_absence_requires_existing_safe_anchor_without_creation () = with_store (fun root store ->
   Alcotest.(check int) "absent descendant is an empty observation" 0 (List.length (owned (Owner.discover ~store ~scope)));
   Alcotest.(check bool) "known absent key" true (owned (load store "missing")=None);
@@ -548,6 +577,8 @@ let () =
   Alcotest.test_case "a held root reached through a symlink reads by relative path" `Quick
     test_held_root_through_a_symlink_reads_entries_by_relative_path;
   Alcotest.test_case "restart discovers original input and progress" `Quick test_restart_discovers_original_input_progress_and_scope;
+  Alcotest.test_case "reload keeps the verified body and refuses another digest" `Quick
+    test_reload_keeps_the_verified_body_and_refuses_another_digest;
   Alcotest.test_case "absence requires owned settled authority and creates nothing" `Quick test_initial_absence_requires_existing_safe_anchor_without_creation;
   Alcotest.test_case "bad record and unknown entry refuse complete inventory" `Quick test_bad_record_or_unknown_name_never_returns_a_partial_inventory;
   Alcotest.test_case "listed disappearance and directory replacement" `Quick test_listed_disappearance_and_same_name_directory_replacement_are_errors;

@@ -28,9 +28,7 @@ let same left right =
   let* right=rejected (Lane_addon_action.canonical right) in
   Ok (Yojson.Safe.equal left right)
 let check_request request (record:Owner.retained) =
-  let* restored=io (fun () -> Request.restore ~owner:(Request.physical_owner request) record) |> rejected in
-  let* same=same (Request.to_json request) (Request.to_json restored) in
-  require same "History owner differs from its complete original request"
+  io (fun () -> Request.confirm_record request record) |> rejected
 let check_predecessor ~store ~dispatch request =
   io (fun () -> Request.confirm_predecessor ~store ~require_confirmed:dispatch request) |> rejected
 let retain ~store request =

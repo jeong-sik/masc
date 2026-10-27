@@ -120,8 +120,9 @@ val load_keeper_profile_defaults_result_for_base_path :
     directory and reads each listed file once. When the ordered paths and exact
     bytes equal the previous capture's for the same base path and keepers
     directory, that capture is returned without parsing. Otherwise the captured
-    bytes are parsed without reopening the files. Read failures are returned
-    but not held; errors determined by readable bytes are held. Same-size edits,
+    bytes are inspected without reopening the files. Successful per-file parses
+    can be reused for the same path and complete captured content. Read failures
+    are returned but not held; errors determined by readable bytes are held. Same-size edits,
     replacements with preserved mtime, and newly unreadable files are observed
     on the next capture. The files are read individually, so a capture is not
     an atomic transaction across the directory. In-process writers can still
@@ -202,7 +203,8 @@ val load_declarative_materialization_defaults_or_merged :
   (declarative_materialization_defaults, keeper_toml_load_error) result
 
 val invalidate_keeper_profile_snapshots : unit -> unit
-(** Drops every held profile snapshot. *)
+(** Drops every held directory snapshot. Per-file parses remain eligible for
+    exact-byte reuse; each capture still lists and rereads every declaration. *)
 
 type keeper_toml_config_error =
   { keeper_name : string

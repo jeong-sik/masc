@@ -1,0 +1,54 @@
+{
+  "scope": "parsing only; no typecheck, Dune or native build",
+  "recorded_at_utc": "2026-10-26T18:06:33.014993+00:00",
+  "rows": [
+    {
+      "path": "lib/config/env_config_core.mli",
+      "sha256": "b69ee9ba2f618b2d8347044563b4ede40d2eb32223c1f967c919856a5e863912",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/perf-normalized-path-copy-20261027/lib/config/env_config_core.mli",
+        "-o",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/normalized-path-copy-preparation-v1/env_config_core.mli.parsed"
+      ],
+      "returncode": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "path": "lib/config/env_config_core.ml",
+      "sha256": "29bb930ac2f8ca26c8764c02f6676c150b5e991067d7dd3367891c2432ff1587",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/perf-normalized-path-copy-20261027/lib/config/env_config_core.ml",
+        "-o",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/normalized-path-copy-preparation-v1/env_config_core.ml.parsed"
+      ],
+      "returncode": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "path": "test/test_config_dir_resolver.ml",
+      "sha256": "b1fae4f1d96cb49b5463f7ccc62608ce7824311e5b0541d7b0a3024a5d2cf618",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/perf-normalized-path-copy-20261027/test/test_config_dir_resolver.ml",
+        "-o",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/normalized-path-copy-preparation-v1/test_config_dir_resolver.ml.parsed"
+      ],
+      "returncode": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  ]
+}

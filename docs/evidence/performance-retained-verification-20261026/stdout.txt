@@ -1,0 +1,77 @@
+CHECK	baseline stable 0
+CHECK	candidate stable 0
+CHECK	baseline stable 1
+CHECK	candidate stable 1
+CHECK	baseline stable 65535
+CHECK	candidate stable 65535
+CHECK	baseline stable 65536
+CHECK	candidate stable 65536
+CHECK	baseline stable 131071
+CHECK	candidate stable 131071
+CHECK	baseline stable 131072
+CHECK	candidate stable 131072
+CHECK	baseline stable 131073
+CHECK	candidate stable 131073
+CHECK	baseline stable 1048576
+CHECK	candidate stable 1048576
+CHECK	baseline stable 1048593
+CHECK	candidate stable 1048593
+CHECK	baseline real short reads after EINTR 0
+CHECK	candidate real short reads after EINTR 0
+CHECK	baseline real short reads after EINTR 64
+CHECK	candidate real short reads after EINTR 64
+CHECK	baseline real short reads after EINTR 131073
+CHECK	candidate real short reads after EINTR 131073
+CHECK	baseline real short reads after EINTR 1048593
+CHECK	candidate real short reads after EINTR 1048593
+CHECK	mutation 0
+CHECK	mutation 0
+CHECK	mutation 65535
+CHECK	mutation 65535
+CHECK	mutation 65536
+CHECK	mutation 65536
+CHECK	mutation 131071
+CHECK	mutation 131071
+CHECK	mutation 131072
+CHECK	mutation 131072
+CHECK	mutation 1048575
+CHECK	mutation 1048575
+CHECK	mutation 1048576
+CHECK	mutation 1048576
+CHECK	mutation 1048592
+CHECK	mutation 1048592
+CHECK	baseline shrink
+CHECK	baseline grow
+CHECK	baseline identical replacement
+CHECK	baseline real fsync calls
+CHECK	baseline real fsync bytes
+CHECK	candidate shrink
+CHECK	candidate grow
+CHECK	candidate identical replacement
+CHECK	candidate real fsync calls
+CHECK	candidate real fsync bytes
+role,size,reads,block,elapsed_ms,allocated_bytes
+baseline,64,300,0,10.822417,609848
+candidate,64,300,1,12.098042,609848
+candidate,64,300,2,11.893166,609848
+baseline,64,300,3,12.968583,609848
+baseline,65536,300,0,38.915250,39893048
+candidate,65536,300,1,47.731000,39893048
+candidate,65536,300,2,64.815125,39893048
+baseline,65536,300,3,57.153541,39893048
+baseline,131072,300,0,264.733917,79214648
+candidate,131072,300,1,93.800917,79214648
+candidate,131072,300,2,91.820583,79214648
+baseline,131072,300,3,108.571708,79214648
+baseline,1048576,30,0,52.832458,62971928
+candidate,1048576,30,1,37.223542,35486888
+candidate,1048576,30,2,46.983833,35486888
+baseline,1048576,30,3,63.640125,62971928
+baseline,1048576,300,0,938.058916,629717048
+candidate,1048576,300,1,598.996625,354866648
+candidate,1048576,300,2,628.537875,354866648
+baseline,1048576,300,3,704.527292,629717048
+baseline,4194321,30,0,198.741791,251716568
+candidate,4194321,30,1,107.072458,129976808
+candidate,4194321,30,2,99.959041,129976808
+baseline,4194321,30,3,147.273833,251716568

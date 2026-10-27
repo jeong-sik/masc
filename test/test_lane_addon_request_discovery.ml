@@ -166,6 +166,39 @@ let test_sync_failure_and_actual_replacement_preserve_original_read_boundary () 
       let moved = directory ^ "-original" in
       Unix.rename directory moved;Unix.symlink moved directory)))
 
+let test_large_original_reverification_checks_every_chunk_and_eof () =
+  with_store (fun root store ->
+    let payload=String.init (5 * Sys.io_buffer_size + 17)
+      (fun index -> Char.chr (Char.code 'A' + index / Sys.io_buffer_size)) in
+    owned (Owner.retain ~store ~scope ~request_id:"large-original"
+      ~installation_id:"original-installation" ~package_id:"curator" ~tool:"classify"
+      ~summary:(`String payload) ~request);
+    let original_path=path root "large-original" in
+    let bytes=Fs_compat.load_file original_path in
+    let expected=get (inventory store) in
+    let payload_offset=String.index bytes 'A' in
+    List.iter (fun offset ->
+      save original_path bytes;
+      fail_inventory (inventory store ~sync_file:(fun fd ->
+        Unix.fsync fd;
+        let writing=Unix.openfile original_path [Unix.O_WRONLY;Unix.O_CLOEXEC] 0 in
+        Fun.protect ~finally:(fun () -> Unix.close writing) (fun () ->
+          ignore (Unix.lseek writing offset Unix.SEEK_SET);
+          Alcotest.(check int) "changed one still-valid JSON string byte" 1
+            (Unix.write_substring writing "Z" 0 1)))))
+      [payload_offset; payload_offset + Sys.io_buffer_size; payload_offset + String.length payload - 1];
+    save original_path bytes;
+    fail_inventory (inventory store ~sync_file:(fun fd ->
+      Unix.fsync fd; Unix.truncate original_path (String.length bytes - 1)));
+    save original_path bytes;
+    fail_inventory (inventory store ~sync_file:(fun fd ->
+      Unix.fsync fd;
+      Out_channel.with_open_gen [Open_wronly;Open_append;Open_binary] 0o600 original_path
+        (fun channel -> output_char channel ' ')));
+    save original_path bytes;
+    Alcotest.check (Alcotest.list (Alcotest.pair Alcotest.string json))
+      "large complete original survives a fresh verified read" expected (get (inventory store)))
+
 let test_fresh_ancestor_and_file_permissions_are_checked_after_io () =
   with_store (fun root store -> retain store "original";
     fail_inventory (inventory store ~sync_file:(fun fd -> Unix.fsync fd;Unix.chmod root 0o777)));
@@ -555,6 +588,8 @@ let () =
   Alcotest.test_case "symlink hardlink nonregular and writable bodies" `Quick
     test_symlink_hardlink_nonregular_and_writable_bodies_are_refused;
   Alcotest.test_case "sync failure and replacement through actual descriptors" `Quick test_sync_failure_and_actual_replacement_preserve_original_read_boundary;
+  Alcotest.test_case "large originals verify every chunk and EOF" `Quick
+    test_large_original_reverification_checks_every_chunk_and_eof;
   Alcotest.test_case "fresh ownership and permissions after I/O" `Quick test_fresh_ancestor_and_file_permissions_are_checked_after_io;
   Alcotest.test_case "actual held read serializes aliased publication without blocking other scopes" `Quick
     test_original_publication_waits_for_actual_read_across_store_aliases];

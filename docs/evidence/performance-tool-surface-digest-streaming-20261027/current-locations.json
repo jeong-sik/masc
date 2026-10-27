@@ -1,0 +1,77 @@
+{
+  "schema": "masc.evidence.current-locations.v1",
+  "purpose": "Locate13 exact selected raw/output/source captures. Flat manifest newly authored for this intentional selection, not a raw-run manifest. Captured source status comments are historical; actual results and limitations are explained in README.",
+  "paths_relative_to": "repository_root",
+  "recorded_manifest": {
+    "path": "recorded-capture-hashes.json",
+    "sha256": "e75f51c1cb1b3217bb1e0c9adfe397c214f04e895f35dce2ccf396fd50dbb0b4"
+  },
+  "files": {
+    "docs/evidence/performance-tool-surface-digest-streaming-20261027/correctness.json": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/tool-surface-digest-streaming-correctness-v1/stdout.raw",
+      "recorded_sha256": "bf601462102139b035d789b385551ae402675a273c5ef0ec8ce170125cf05800",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tool-surface-digest-streaming-20261027/warm-benchmark.jsonl": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/tool-surface-digest-warm-benchmark-v1/stdout.jsonl",
+      "recorded_sha256": "2b50dec00cf8e2c3cd2f8fb2a0e8e84b6839bbabf953ef8e10d359c562c02bbc",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tool-surface-digest-streaming-20261027/observations.json": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/tool-surface-digest-warm-benchmark-v1/observations.json",
+      "recorded_sha256": "16ba722a466251d44adc86c15f8528601600dbe4caf605c8dc97910764e1b7bb",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tool-surface-digest-streaming-20261027/goldens.json": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/tool-surface-digest-streaming-preparation-v2/goldens.json",
+      "recorded_sha256": "90d89c115e3fdde22523c7b827a47779c3f8b09ed3346e659246feedd97b57d3",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tool-surface-digest-streaming-20261027/reproduction/correctness_probe.ml": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/tool-surface-digest-streaming-preparation-v2/correctness_probe.ml",
+      "recorded_sha256": "5bcff890b8f37536598c5963077f05e62ab0b59a6280d2ff66818c7cf16d922b",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tool-surface-digest-streaming-20261027/reproduction/canonical_list_digest.ml": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/tool-surface-digest-streaming-preparation-v2/canonical_list_digest.ml",
+      "recorded_sha256": "548f2a541092be282069102b1b244195ace9d54b21a03212e9e6ca01cd10301c",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tool-surface-digest-streaming-20261027/reproduction/canonical_list_digest.mli": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/tool-surface-digest-streaming-preparation-v2/canonical_list_digest.mli",
+      "recorded_sha256": "bae19ba7a3734702d691250a1107fdb839b29690a4f788b15f7df0ea6996da62",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tool-surface-digest-streaming-20261027/reproduction/fixture_carrier.ml": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/tool-surface-digest-streaming-preparation-v2/fixture_carrier.ml",
+      "recorded_sha256": "ae7628bbc9d599cc3b274c7c25327d2ac465e0dce8a5d41fe1d095a75ef769f3",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tool-surface-digest-streaming-20261027/reproduction/fixture_carrier.mli": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/tool-surface-digest-streaming-preparation-v2/fixture_carrier.mli",
+      "recorded_sha256": "8a1d55cd78dec711ff6b82b1b0a59162a54d37d1cf5fde1e18de6e8f9ef2aa63",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tool-surface-digest-streaming-20261027/reproduction/old_oracle_carrier.ml": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/tool-surface-digest-streaming-preparation-v2/old_oracle_carrier.ml",
+      "recorded_sha256": "107b2085ecb2abc2add8ad8026db3141cf2f6603ebe074a2b73ae3e01978774e",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tool-surface-digest-streaming-20261027/reproduction/old_surface_digest.ml": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/tool-surface-digest-streaming-preparation-v2/old_surface_digest.ml",
+      "recorded_sha256": "78cd4b688f5ed9a9659521336b89262c8a2ce8af9739badf7fa427f6eefb1eb1",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tool-surface-digest-streaming-20261027/reproduction/candidate_surface_digest.ml": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/tool-surface-digest-streaming-preparation-v2/candidate_surface_digest.ml",
+      "recorded_sha256": "44a235c47dd1a17a369d5dc526f38da5775dd2d8b054b3d6aa35324a7789cebb",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tool-surface-digest-streaming-20261027/reproduction/benchmark.ml": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/tool-surface-digest-benchmark-preparation-v1/benchmark.ml",
+      "recorded_sha256": "1a4ec061a395d9c8480116988d94bd4adfe58723d48194b1bb59f6e23b2740ff",
+      "content_kind": "retained_capture"
+    }
+  },
+  "historical_records": []
+}

@@ -1,0 +1,166 @@
+{
+  "schema": "masc.root-native-digest-descriptive-comparison.v1",
+  "source_observations_sha256": "3da31448dbb21d1176b3cc92b2b98a12c15881fa1c2ae0647c834c634c20d56c",
+  "source_observations": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-observations-v1.json",
+  "role_means_bytes": {
+    "control": "50754778832",
+    "candidate": "51052786308"
+  },
+  "candidate_percent_change": "0.5871515606174043666651357815929572131053",
+  "rows": [
+    {
+      "packet": "digest-native-6df61978-2-v1",
+      "role": "candidate",
+      "keepers": 2,
+      "succeeded_operations": 4,
+      "actual_scripted_model_calls": 4,
+      "provider_peak": 2,
+      "health_quick_stat_derived_allocation_snapshot_delta_bytes": 270154480,
+      "read_observation_failures": {},
+      "http429": 0,
+      "rate_wait_s": 0,
+      "readiness_after": {
+        "overall_status": "degraded",
+        "operator_action_required": true,
+        "overall_status_reasons": [
+          "keeper_memory_execution:addon_unattached"
+        ]
+      },
+      "inventory_command_counts": {
+        "container_list": 1,
+        "nerdctl_ps": 1
+      }
+    },
+    {
+      "packet": "digest-native-6df61978-30-v1",
+      "role": "candidate",
+      "keepers": 30,
+      "succeeded_operations": 60,
+      "actual_scripted_model_calls": 60,
+      "provider_peak": 30,
+      "health_quick_stat_derived_allocation_snapshot_delta_bytes": 3986534464,
+      "read_observation_failures": {},
+      "http429": 4,
+      "rate_wait_s": 4.021077333,
+      "readiness_after": {
+        "overall_status": "degraded",
+        "operator_action_required": true,
+        "overall_status_reasons": [
+          "keeper_memory_execution:addon_unattached"
+        ]
+      },
+      "inventory_command_counts": {
+        "container_list": 1,
+        "nerdctl_ps": 1
+      }
+    },
+    {
+      "packet": "digest-native-8e61fa43-300-a1-v1",
+      "role": "control",
+      "keepers": 300,
+      "succeeded_operations": 600,
+      "actual_scripted_model_calls": 600,
+      "provider_peak": 300,
+      "health_quick_stat_derived_allocation_snapshot_delta_bytes": 50106204736,
+      "read_observation_failures": {
+        "TimeoutError": 2
+      },
+      "http429": 54,
+      "rate_wait_s": 54.328255958999996,
+      "readiness_after": {
+        "overall_status": "degraded",
+        "operator_action_required": true,
+        "overall_status_reasons": [
+          "keeper_memory_execution:addon_unattached"
+        ]
+      },
+      "inventory_command_counts": {
+        "container_list": 1,
+        "nerdctl_ps": 1,
+        "container_volume_inspect": 670
+      }
+    },
+    {
+      "packet": "digest-native-6df61978-300-b1-v1",
+      "role": "candidate",
+      "keepers": 300,
+      "succeeded_operations": 600,
+      "actual_scripted_model_calls": 600,
+      "provider_peak": 300,
+      "health_quick_stat_derived_allocation_snapshot_delta_bytes": 51417086312,
+      "read_observation_failures": {
+        "TimeoutError": 3
+      },
+      "http429": 46,
+      "rate_wait_s": 46.287846962,
+      "readiness_after": {
+        "overall_status": "degraded",
+        "operator_action_required": true,
+        "overall_status_reasons": [
+          "keeper_memory_execution:addon_unattached"
+        ]
+      },
+      "inventory_command_counts": {
+        "container_list": 1,
+        "nerdctl_ps": 1,
+        "container_volume_inspect": 1090
+      }
+    },
+    {
+      "packet": "digest-native-6df61978-300-b2-v1",
+      "role": "candidate",
+      "keepers": 300,
+      "succeeded_operations": 600,
+      "actual_scripted_model_calls": 600,
+      "provider_peak": 300,
+      "health_quick_stat_derived_allocation_snapshot_delta_bytes": 50688486304,
+      "read_observation_failures": {
+        "TimeoutError": 1
+      },
+      "http429": 59,
+      "rate_wait_s": 59.401786787,
+      "readiness_after": {
+        "overall_status": "degraded",
+        "operator_action_required": true,
+        "overall_status_reasons": [
+          "keeper_memory_execution:addon_unattached"
+        ]
+      },
+      "inventory_command_counts": {
+        "container_list": 1,
+        "nerdctl_ps": 1,
+        "container_volume_inspect": 600
+      }
+    },
+    {
+      "packet": "digest-native-8e61fa43-300-a2-v1",
+      "role": "control",
+      "keepers": 300,
+      "succeeded_operations": 600,
+      "actual_scripted_model_calls": 600,
+      "provider_peak": 300,
+      "health_quick_stat_derived_allocation_snapshot_delta_bytes": 51403352928,
+      "read_observation_failures": {
+        "TimeoutError": 2
+      },
+      "http429": 54,
+      "rate_wait_s": 54.307188662,
+      "readiness_after": {
+        "overall_status": "degraded",
+        "operator_action_required": true,
+        "overall_status_reasons": [
+          "keeper_memory_execution:addon_unattached"
+        ]
+      },
+      "inventory_command_counts": {
+        "container_list": 1,
+        "nerdctl_ps": 1,
+        "container_volume_inspect": 673
+      }
+    }
+  ],
+  "large_comparison_HTTP429": 213,
+  "large_comparison_read_failures": 8,
+  "input_hashes": 150,
+  "scope": "Four300 descriptive whole-program health quick_stat snapshot deltas only, two cells/role, shared host/different builders/unequal background inventory. No exact function allocation,CPU/RSS,causal or stable latency/SLO/0.1ms acceptance. All negatives preserved; independent raw audit pending."
+}

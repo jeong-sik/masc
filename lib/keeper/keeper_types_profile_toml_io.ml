@@ -78,7 +78,7 @@ let load_profile_doc_content ~path content =
                (String.concat ", " unknown))))
 ;;
 
-let inspect_keeper_toml_content ~(path : string) content
+let parse_keeper_toml_content ~(path : string) content
     : (string * keeper_profile_defaults, keeper_toml_load_error) result =
   match load_profile_doc_content ~path content with
   | Error _ as error -> error
@@ -129,28 +129,28 @@ let invalidate_parsed_toml_cache () =
     Hashtbl.reset parsed_toml_cache)
 ;;
 
+let inspect_keeper_toml_content ~(path : string) content =
+  let cached =
+    Stdlib.Mutex.protect parsed_toml_mu (fun () ->
+      match Hashtbl.find_opt parsed_toml_cache path with
+      | Some entry when String.equal entry.content content ->
+        Some entry.parsed
+      | Some _ | None -> None)
+  in
+  (match cached with
+   | Some parsed -> Ok parsed
+   | None ->
+     (match parse_keeper_toml_content ~path content with
+      | Error _ as error -> error
+      | Ok parsed ->
+        Stdlib.Mutex.protect parsed_toml_mu (fun () ->
+          if Hashtbl.length parsed_toml_cache >= parsed_toml_cache_max_entries
+          then Hashtbl.reset parsed_toml_cache;
+          Hashtbl.replace parsed_toml_cache path { content; parsed });
+        Ok parsed))
+
 let inspect_keeper_toml (path : string) =
-  match read_keeper_toml_content path with
-  | Error _ as error -> error
-  | Ok content ->
-    let cached =
-      Stdlib.Mutex.protect parsed_toml_mu (fun () ->
-        match Hashtbl.find_opt parsed_toml_cache path with
-        | Some entry when String.equal entry.content content ->
-          Some entry.parsed
-        | Some _ | None -> None)
-    in
-    (match cached with
-     | Some parsed -> Ok parsed
-     | None ->
-       (match inspect_keeper_toml_content ~path content with
-        | Error _ as error -> error
-        | Ok parsed ->
-          Stdlib.Mutex.protect parsed_toml_mu (fun () ->
-            if Hashtbl.length parsed_toml_cache >= parsed_toml_cache_max_entries
-            then Hashtbl.reset parsed_toml_cache;
-            Hashtbl.replace parsed_toml_cache path { content; parsed });
-          Ok parsed))
+  Result.bind (read_keeper_toml_content path) (inspect_keeper_toml_content ~path)
 
 let load_keeper_toml = inspect_keeper_toml
 

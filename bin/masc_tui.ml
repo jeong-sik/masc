@@ -34473,10 +34473,14 @@ and is loaded on demand through keeper_skill.
                        | List_not_read (Approval_unavailable _) -> Masc_tui_frame_timing.Questions_unavailable in
                      Masc_tui_frame_timing.note_home_forced reading
                    end;
-                   Masc_tui_home.prepare state) in
+                   let prepare_started = Masc_tui_frame_timing.start_stage () in
+                   let prepared = Masc_tui_home.prepare state in
+                   Masc_tui_frame_timing.finish_stage ~name:"home.prepare" prepare_started;
+                   prepared) in
                  (match state.view, Masc_tui_render.frame_choice state ~terminal_rows with
                   | Overview, `Surface ->
                       let prepared = Lazy.force home in
+                      let selection_started = Masc_tui_frame_timing.start_stage () in
                       let selected = Masc_tui_home.home_selected_action prepared in
                       if Option.is_none state.home_selected
                          && Masc_tui_home.home_initial_reading_ready prepared then
@@ -34488,7 +34492,8 @@ and is loaded on demand through keeper_skill.
                             (Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows) in
                       let first, _ = Masc_tui_home.home_decision_window prepared
                           ~scroll:state.home_decision_scroll ~budget in
-                      state.home_decision_scroll <- first
+                      state.home_decision_scroll <- first;
+                      Masc_tui_frame_timing.finish_stage ~name:"home.selection" selection_started
                   | Overview, `Detail_reading _ -> ()
                   | (Overview, (`Palette | (`Link | (`Help | (`About | (`Play_card _ | (`Client_detail _ | (`Account_login _ | (`Keeper_deletions | (`Agenda | (`Too_small _ | (`Collab _ | (`Context | (`Lane_addons _ | (`Answering | `Patch)))))))))))))))
                   | ((Acting | (Metrics | (Memory | (Lanes | (Clients | (Board | (Approvals | (Planning | (Schedules | (Verification | (Harness | (Fusion | (Repositories | (Code | (Changes | (Connectors | (Runtime | (Config | (Resources | (Tools | (System_logs | Keepers _))))))))))))))))))))), _) -> ());

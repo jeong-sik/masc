@@ -6734,3 +6734,8 @@
  (modules test_tui_schedule_observation)
  (flags (:standard -open Masc))
  (libraries masc alcotest yojson))
+
+(test
+ (name test_tui_frame_lines)
+ (modules test_tui_frame_lines)
+ (libraries alcotest masc_tui_render_prim))

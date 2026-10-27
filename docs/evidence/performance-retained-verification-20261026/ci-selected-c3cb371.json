@@ -1,0 +1,88 @@
+{
+  "schema": "masc.retained-verification-selected-ci.v1",
+  "workflow": "Test",
+  "run_id": 40329666119,
+  "url": "https://github.com/jeong-sik/masc/actions/runs/40329666119",
+  "head": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+  "ref": "perf/retained-verification-buffer-20261026",
+  "event": "workflow_dispatch",
+  "backend": "posix",
+  "status": "completed",
+  "conclusion": "failure",
+  "scope": "Five selected suites built and ran; not a full regression",
+  "suites": [
+    {
+      "name": "test_lane_addon_request_discovery",
+      "pass": 18,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "name": "test_lane_addon_actions",
+      "pass": 15,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "name": "test_lane_addon_exact",
+      "pass": 44,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "name": "test_lane_addon_store_query",
+      "pass": 14,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "name": "test_lane_addon_worker",
+      "pass": 71,
+      "fail": 0,
+      "skip": 0
+    }
+  ],
+  "total": {
+    "pass": 162,
+    "fail": 1,
+    "skip": 0
+  },
+  "new_large_original_scenario": "PASS at inventory11 in the actual discovery executable",
+  "failure": "An unchanged baseline scenario compared an unsorted expected scope/request pair list to a sorted actual list. The returned identities were correct.",
+  "repair": "Sort the expected pair list with the same comparator. Preserve exact identity list equality and duplicate detection; do not change product traversal.",
+  "original_failed_log": {
+    "bytes": 164444,
+    "sha256": "09809718b7eb1010c375e14a461b96c9321e174e284264621f3b2f235d72c552",
+    "retention": "Private local publication packet; excerpt below is a declared selection, not byte-identical full log."
+  },
+  "failure_excerpt": [
+    "test suite\tTest\t2026-10-26T13:24:38.3792298Z \u2502 [FAIL]        inventory          0   all original scopes survive restart...  \u2502",
+    "test suite\tTest\t2026-10-26T13:24:38.3792873Z \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518",
+    "test suite\tTest\t2026-10-26T13:24:38.3793350Z File \"test/test_lane_addon_request_discovery.ml\", line 398, character 2:",
+    "test suite\tTest\t2026-10-26T13:24:38.3793841Z FAIL fold_all visits the exact validated originals across all scopes",
+    "test suite\tTest\t2026-10-26T13:24:38.3794166Z ",
+    "test suite\tTest\t2026-10-26T13:24:38.3794313Z    Expected: `[(\"workspace-curator\", \"original-a\");",
+    "test suite\tTest\t2026-10-26T13:24:38.3794785Z                (\"history-physical-owner\", \"original-b\")]'",
+    "test suite\tTest\t2026-10-26T13:24:38.3795082Z ",
+    "test suite\tTest\t2026-10-26T13:24:38.3795358Z    Received: `[(\"history-physical-owner\", \"original-b\");",
+    "test suite\tTest\t2026-10-26T13:24:38.3797023Z                (\"workspace-curator\", \"original-a\")]'",
+    "test suite\tTest\t2026-10-26T13:24:38.3797760Z ",
+    "test suite\tTest\t2026-10-26T13:24:38.3798203Z Raised at Alcotest_engine__Test.check in file \"src/alcotest-engine/test.ml\", lines 216-226, characters 4-19",
+    "test suite\tTest\t2026-10-26T13:24:38.3799122Z Called from Dune__exe__Test_lane_addon_request_discovery.test_all_scopes_survive_restart_without_metadata.(fun) in file \"test/test_lane_addon_request_discovery.ml\", lines 398-400, characters 2-37",
+    "test suite\tTest\t2026-10-26T13:24:38.3799800Z Called from Stdlib__Fun.protect in file \"fun.ml\", line 34, characters 8-15",
+    "test suite\tTest\t2026-10-26T13:24:38.3800175Z Re-raised at Stdlib__Fun.protect in file \"fun.ml\", line 39, characters 6-52",
+    "test suite\tTest\t2026-10-26T13:24:38.3802457Z Called from Alcotest_engine__Core.Make.protect_test.(fun) in file \"src/alcotest-engine/core.ml\", line 186, characters 17-23",
+    "test suite\tTest\t2026-10-26T13:24:38.3803292Z Called from Alcotest_engine__Monad.Identity.catch in file \"src/alcotest-engine/monad.ml\", line 24, characters 31-35",
+    "test suite\tTest\t2026-10-26T13:24:38.3803766Z ",
+    "test suite\tTest\t2026-10-26T13:24:38.3804119Z  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
+    "test suite\tTest\t2026-10-26T13:24:38.3804440Z ",
+    "test suite\tTest\t2026-10-26T13:24:38.3804577Z 1 failure! in 0.176s. 19 tests run."
+  ],
+  "suite_result_lines": [
+    "test suite\tTest\t2026-10-26T13:24:38.3827930Z [targeted] test/test_lane_addon_request_discovery: FAIL exit 1 in 0s",
+    "test suite\tTest\t2026-10-26T13:24:39.0627753Z [targeted] test/test_lane_addon_actions: OK in 1s",
+    "test suite\tTest\t2026-10-26T13:24:39.8594879Z [targeted] test/test_lane_addon_exact: OK in 0s",
+    "test suite\tTest\t2026-10-26T13:24:40.8786739Z [targeted] test/test_lane_addon_store_query: OK in 1s",
+    "test suite\tTest\t2026-10-26T13:25:13.2375748Z [targeted] test/test_lane_addon_worker: OK in 33s"
+  ]
+}

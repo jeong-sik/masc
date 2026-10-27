@@ -1,0 +1,20 @@
+{
+  "schema": "masc.frame-lines-evidence-review-locators.v1",
+  "kind": "New authored locators/scopes, not copies of full reports",
+  "reports": [
+    {
+      "original_report": "artifacts/runs/extreme-perf-20261026/tui-frame-lines-carrier-evidence-review-v1/README.md",
+      "sha256": "132525ff1546529c04794813bd59139caedcfdc9d1156a50d26b6517c2d7c16e",
+      "root_full_read": true,
+      "scope": "Independent selected-source/record/descriptive-arithmetic audit, no experiment or aggregate replay; no project typing/native TUI or source PR approval.",
+      "formal_GitHub_approval": false
+    },
+    {
+      "original_report": "artifacts/runs/extreme-perf-20261026/tui-pre-surface-actual-evidence-review-v1/README.md",
+      "sha256": "f6e2938706bf4f5c3d4149ff9be4bf0f6e7d3bfc2f5597bb6fdd61fbe0f61c9c",
+      "root_full_read": true,
+      "scope": "Previous468 actual TUI saved-data audit; candidate reverse-scan absent from that binary; nomination context only.",
+      "formal_GitHub_approval": false
+    }
+  ]
+}

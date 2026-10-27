@@ -1,0 +1,65 @@
+{
+  "schema": "masc.normalized-path-helper-plan.v1",
+  "baseline_ref": "9edd5752ec3b81c3618f9e3953afb5072f0e0525",
+  "scope": "OCaml5.5 interpreter exact extracted helpers, injected HOME/Common dependencies; not a native server or fleet result",
+  "fixture_dependencies": {
+    "raw_value_opt": "Only HOME is accepted; returns current explicit home_fixture, no actual HOME mutation",
+    "Common.masc_dirname": ".masc"
+  },
+  "differential": {
+    "exhaustive_alphabet": [
+      "/",
+      ".",
+      "a",
+      " ",
+      "\u0000"
+    ],
+    "exhaustive_max_length": 7,
+    "random_seed": [
+      2026,
+      10,
+      27
+    ],
+    "random_cases": 20000,
+    "random_max_components": 24,
+    "long_cases": "1048576 ordinary bytes and 16384 ordinary components"
+  },
+  "order_per_case": [
+    "baseline",
+    "candidate",
+    "candidate",
+    "baseline"
+  ],
+  "warmup_or_discard": "none; full_major before every measured block, outside the block",
+  "sources": {
+    "baseline": {
+      "full_file_sha256": "550081ed2f0279101b53faf2740afd2435f5b333c556bccda9dd3a51dfa28026",
+      "trim_opt_sha256": "9fcc0c70317c66e4d75359dd55f1454f25b99d6e0d310fdb3d9b07beb418187d",
+      "path_helpers_sha256": "a0b5b1ed182f912f9f4fa7b3f2213568cd6881348e366879a0a8faf6b2b5b9c0"
+    },
+    "candidate": {
+      "full_file_sha256": "29bb930ac2f8ca26c8764c02f6676c150b5e991067d7dd3367891c2432ff1587",
+      "trim_opt_sha256": "9fcc0c70317c66e4d75359dd55f1454f25b99d6e0d310fdb3d9b07beb418187d",
+      "path_helpers_sha256": "ec623f769b4cb966bdce8bb9aca0af53dbe21cf48dbccf33575730993e2d91c7"
+    }
+  },
+  "added_and_existing_case_source_sha256": "ef634445d19704b51adc203abaa843ebacbf794a859656193fcdf4f66f49cfa4",
+  "generated_probe_sha256": "9bee5fd28e92c46b9faa6d2ad03bf22eb0ee4bc56f9fd621c9f6cbc25c45529d",
+  "script_sha256": "34e6baf69c0fd2d42f85c9ca10aca21bb3e66180477890711bd11f7337a578f3",
+  "command": [
+    "ocaml",
+    "-noinit",
+    "-noprompt",
+    "-I",
+    "+unix",
+    "-I",
+    "/Users/dancer/.opam/5.5.1/lib/mtime",
+    "-I",
+    "/Users/dancer/.opam/5.5.1/lib/mtime/clock",
+    "unix.cma",
+    "mtime.cma",
+    "mtime_clock.cma",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/normalized-path-copy-helper-v1/probe.ml"
+  ],
+  "interpreter": "5.5.1"
+}

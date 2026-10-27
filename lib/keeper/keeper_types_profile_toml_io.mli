@@ -133,6 +133,9 @@ val inspect_keeper_toml_content :
   path:string ->
   string ->
   (string * keeper_profile_defaults, keeper_toml_load_error) result
+(** Inspect only the supplied bytes, without reopening [path]. Successful
+    parses share the existing per-file cache only when both path and complete
+    content match. Parse/validation errors are not cached. *)
 val load_keeper_toml :
   string -> (string * keeper_profile_defaults, keeper_toml_load_error) result
 

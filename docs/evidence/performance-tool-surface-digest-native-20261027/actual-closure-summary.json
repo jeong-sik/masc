@@ -1,0 +1,102 @@
+{
+  "schema": "masc.selected-closed-native-receipts.v1",
+  "kind": "new selected locator, not copied complete original receipts",
+  "cells": [
+    {
+      "cell": 1,
+      "packet": "digest-native-6df61978-2-v1",
+      "native": {
+        "original_path": "artifacts/runs/extreme-perf-20261026/digest-native-comparison-tool-returns-v1/cell-1-native.json",
+        "sha256": "c6a8fbd8d2d96eb1a9b9ff0063bdfe548d900565fbc662dcd4f186f25d4e3a7d",
+        "actual_outer_exit_code": 0,
+        "scope": "Selected actual root command receipt field; original complete receipt remains private."
+      },
+      "validator": {
+        "original_path": "artifacts/runs/extreme-perf-20261026/digest-native-comparison-tool-returns-v1/cell-1-validator.json",
+        "sha256": "742f75f7817271cba08264ea6121e70df18afbf50eb1b1cdb1376d6ff60e1d0f",
+        "actual_outer_exit_code": 0,
+        "scope": "Selected actual root command receipt field; original complete receipt remains private."
+      }
+    },
+    {
+      "cell": 2,
+      "packet": "digest-native-6df61978-30-v1",
+      "native": {
+        "original_path": "artifacts/runs/extreme-perf-20261026/digest-native-comparison-tool-returns-v1/cell-2-native.json",
+        "sha256": "e9f5d140dcb2eb7d5bcefed7bf9b7d2bf7cd3b07df41a915ec38d0f25d42a1b8",
+        "actual_outer_exit_code": 0,
+        "scope": "Selected actual root command receipt field; original complete receipt remains private."
+      },
+      "validator": {
+        "original_path": "artifacts/runs/extreme-perf-20261026/digest-native-comparison-tool-returns-v1/cell-2-validator.json",
+        "sha256": "70b3ea7a5a6ed1180b21313dd41633a5b283ea1afceccaa49ce15ed17566035d",
+        "actual_outer_exit_code": 0,
+        "scope": "Selected actual root command receipt field; original complete receipt remains private."
+      }
+    },
+    {
+      "cell": 3,
+      "packet": "digest-native-8e61fa43-300-a1-v1",
+      "native": {
+        "original_path": "artifacts/runs/extreme-perf-20261026/digest-native-comparison-tool-returns-v1/cell-3-native.json",
+        "sha256": "c111dfb7fe261da8af69e652a469b30a0909171bae61a5d51dba699563a4c555",
+        "actual_outer_exit_code": 0,
+        "scope": "Selected actual root command receipt field; original complete receipt remains private."
+      },
+      "validator": {
+        "original_path": "artifacts/runs/extreme-perf-20261026/digest-native-comparison-tool-returns-v1/cell-3-validator.json",
+        "sha256": "8f7fba05809db0f7ce4edb052a76043d3f5379f836dec742b82ab8ff5ba3685b",
+        "actual_outer_exit_code": 0,
+        "scope": "Selected actual root command receipt field; original complete receipt remains private."
+      }
+    },
+    {
+      "cell": 4,
+      "packet": "digest-native-6df61978-300-b1-v1",
+      "native": {
+        "original_path": "artifacts/runs/extreme-perf-20261026/digest-native-comparison-tool-returns-v1/cell-4-native.json",
+        "sha256": "90b38d6e2c843438dfc2f19113ef1f4267d1ce0a6639a44f1fff2fb86b5b2d8c",
+        "actual_outer_exit_code": 0,
+        "scope": "Selected actual root command receipt field; original complete receipt remains private."
+      },
+      "validator": {
+        "original_path": "artifacts/runs/extreme-perf-20261026/digest-native-comparison-tool-returns-v1/cell-4-validator.json",
+        "sha256": "51691724d15f6e2e1c0a0e60bdb81ba567e57f98ac0dcccfe11e7a8c41280932",
+        "actual_outer_exit_code": 0,
+        "scope": "Selected actual root command receipt field; original complete receipt remains private."
+      }
+    },
+    {
+      "cell": 5,
+      "packet": "digest-native-6df61978-300-b2-v1",
+      "native": {
+        "original_path": "artifacts/runs/extreme-perf-20261026/digest-native-comparison-tool-returns-v1/cell-5-native.json",
+        "sha256": "b33914024f74dd2dc22b72d28798c39f8b10bc57c1d30604e8191af255135865",
+        "actual_outer_exit_code": 0,
+        "scope": "Selected actual root command receipt field; original complete receipt remains private."
+      },
+      "validator": {
+        "original_path": "artifacts/runs/extreme-perf-20261026/digest-native-comparison-tool-returns-v1/cell-5-validator.json",
+        "sha256": "b0b83fc1201b47fc12c6aa3b04751fd1eb5e7c9a413d603442d27a609218f78a",
+        "actual_outer_exit_code": 0,
+        "scope": "Selected actual root command receipt field; original complete receipt remains private."
+      }
+    },
+    {
+      "cell": 6,
+      "packet": "digest-native-8e61fa43-300-a2-v1",
+      "native": {
+        "original_path": "artifacts/runs/extreme-perf-20261026/digest-native-comparison-tool-returns-v1/cell-6-native.json",
+        "sha256": "5fc3cd1ff4eac82362378c1fd8c5cba167c4009c0bdd500d84ddc976c821ad6a",
+        "actual_outer_exit_code": 0,
+        "scope": "Selected actual root command receipt field; original complete receipt remains private."
+      },
+      "validator": {
+        "original_path": "artifacts/runs/extreme-perf-20261026/digest-native-comparison-tool-returns-v1/cell-6-validator.json",
+        "sha256": "1f320823824bc8eee1e20c596eec734f9a45905d044fcfc3d19340c87d2422bf",
+        "actual_outer_exit_code": 0,
+        "scope": "Selected actual root command receipt field; original complete receipt remains private."
+      }
+    }
+  ]
+}

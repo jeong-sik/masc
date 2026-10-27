@@ -121,6 +121,160 @@ let make_receipts
     ~surface:(receipt_surface offering)
 ;;
 
+(* Persisted hashes are an upgrade boundary: a changed encoding would retire
+   successfully loaded tools even when the offered surface has not changed. *)
+let bind_digest_surface context surface =
+  Load_receipts.create
+    ~restored:(restored_receipts ~source:context ~target:context)
+    ~trace_id:(trace_id "digest-compat")
+    ~task_id:None
+    ~keeper_turn:2
+    ~current_task_id:(fun () -> Ok None)
+    ~surface
+;;
+
+let stored_load_snapshot context =
+  match
+    Agent_core.Context.get_scoped
+      context Agent_core.Context.Session "keeper_outstanding_tool_loads"
+  with
+  | Some snapshot -> snapshot
+  | None -> fail "binding must persist its load scope"
+;;
+
+let stored_surface_digest surface =
+  let context = Agent_core.Context.create_sync () in
+  ignore (bind_digest_surface context surface);
+  Yojson.Safe.Util.(stored_load_snapshot context |> member "surface_sha256" |> to_string)
+;;
+
+let digest_builtin schema : Load_receipts.surface_entry =
+  { source = Load_receipts.Builtin; schema }
+;;
+
+let digest_attached schema : Load_receipts.surface_entry =
+  { source = Load_receipts.Attached
+      { provider_id = "provider-a"; endpoint = "https://fixture.invalid/mcp"
+      ; remote_name = "inspect" }
+  ; schema
+  }
+;;
+
+let digest_input_schema ?strict input_schema =
+  match Agent_core.Types.tool_schema_of_input_schema ?strict
+    ~name:"remote.inspect" ~description:"" ~input_schema () with
+  | Ok schema -> schema
+  | Error reason -> fail reason
+;;
+
+let digest_golden_attached () =
+  digest_input_schema ~strict:true
+    (`Assoc [ "type", `String "object"; "properties", `Assoc []
+            ; "additionalProperties", `Bool false ])
+  |> digest_attached
+;;
+
+(* Independent legacy whole-list serializer, using the real private schema
+   converter. The candidate hashes per-entry chunks instead. *)
+let legacy_surface_digest surface =
+  `List (List.map (fun ({ source; schema } : Load_receipts.surface_entry) ->
+    let identity = match source with
+      | Load_receipts.Builtin -> `Assoc [ "kind", `String "builtin" ]
+      | Load_receipts.Attached { provider_id; endpoint; remote_name } ->
+        `Assoc [ "kind", `String "attached"; "provider_id", `String provider_id
+               ; "endpoint", `String endpoint; "remote_name", `String remote_name ]
+    in
+    `Assoc [ "source", identity; "schema", Agent_core.Types.tool_schema_to_json schema ]) surface)
+  |> Yojson.Safe.sort |> Yojson.Safe.to_string
+  |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex
+;;
+
+let test_surface_digest_preserves_legacy_bytes () =
+  let builtin = Agent_core.Types.tool_schema_of_params
+    ~name:"noop" ~description:"" ~parameters:[] () |> digest_builtin in
+  let attached = digest_golden_attached () in
+  List.iter (fun (label, surface, expected) ->
+    check string label expected (stored_surface_digest surface))
+    [ "empty canonical bytes", [], "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ; "builtin canonical bytes", [ builtin ], "11f42a0e73778149cc9fb0b5c9d6c7f768cf47c364da3d697b66b0f8a3ff67d3"
+    ; "attached canonical bytes", [ attached ], "60bb24bfdcb8814dec7cab1de724320708a887242a303f86f351178c77e6133b"
+    ];
+  let input =
+    [ "type", `String "object"
+    ; "properties", `Assoc [ "value", `Assoc
+        [ "type", `String "number"; "minimum", `Int 1; "maximum", `Int 9 ] ]
+    ; "required", `List [ `String "value" ]; "additionalProperties", `Bool false
+    ; "$defs", `Assoc [ "nested", `Assoc [ "enum", `List [ `String "a"; `String "b" ] ] ]
+    ] in
+  let constrained = digest_input_schema ~strict:false (`Assoc input) |> digest_attached in
+  let reordered = digest_input_schema ~strict:false (`Assoc (List.rev input)) |> digest_attached in
+  let description = Agent_core.Types.tool_schema_of_params
+    ~name:"description.case" ~description:("quote\" slash\\ controls\000 한글 " ^ String.make 4096 'x')
+    ~parameters:[] () |> digest_builtin in
+  let moved = { attached with source = Load_receipts.Attached
+      { provider_id = "provider-b"; endpoint = "https://other.invalid/mcp"
+      ; remote_name = "other" } } in
+  List.iteri (fun index surface ->
+    check string (Printf.sprintf "typed legacy surface %d" index)
+      (legacy_surface_digest surface) (stored_surface_digest surface))
+    [ [ builtin; attached ]; [ attached; builtin ]; [ builtin; builtin; attached ]
+    ; [ constrained ]; [ reordered ]; [ description; constrained; moved ]
+    ; List.init 32 (fun index -> if index mod 2 = 0 then constrained else description)
+    ];
+  check string "object field permutation keeps the stored scope"
+    (stored_surface_digest [ constrained ]) (stored_surface_digest [ reordered ]);
+  check bool "surface order remains meaningful" false
+    (String.equal (stored_surface_digest [ builtin; attached ])
+       (stored_surface_digest [ attached; builtin ]))
+;;
+
+let legacy_load_context () =
+  let context = Agent_core.Context.create_sync () in
+  Agent_core.Context.set_scoped context Agent_core.Context.Session
+    "keeper_outstanding_tool_loads"
+    (`Assoc
+      [ "trace_id", `String "digest-compat"; "task_id", `Null
+      ; "surface_sha256", `String "60bb24bfdcb8814dec7cab1de724320708a887242a303f86f351178c77e6133b"
+      ; "pending", `List [ `Assoc
+          [ "name", `String "remote.inspect"; "keeper_turn", `Int 1
+          ; "tool_use_id", `String "legacy-load"; "turn", `Int 1; "planned_index", `Int 0 ] ]
+      ]);
+  context
+;;
+
+let test_legacy_digest_keeps_outstanding_load () =
+  let context = legacy_load_context () in
+  let attached = digest_golden_attached () in
+  let receipts = bind_digest_surface context [ attached ] in
+  check (list string) "the pre-upgrade load crosses the turn unchanged"
+    [ "remote.inspect" ] (Load_receipts.pending_names receipts);
+  let moved = { attached with source = Load_receipts.Attached
+      { provider_id = "provider-a"; endpoint = "https://other.invalid/mcp"
+      ; remote_name = "inspect" } } in
+  let changed = bind_digest_surface context [ moved ] in
+  check (list string) "changed identity retires the old load" []
+    (Load_receipts.pending_names changed);
+  let returned = bind_digest_surface context [ attached ] in
+  check (list string) "returning cannot revive the retired load" []
+    (Load_receipts.pending_names returned)
+;;
+
+let test_surface_serializer_error_preserves_context () =
+  let context = legacy_load_context () in
+  let receipts = bind_digest_surface context [ digest_golden_attached () ] in
+  let before = stored_load_snapshot context in
+  let invalid = digest_input_schema (`Assoc
+      [ "type", `String "object"; "x-nonfinite", `Float (0. /. 0.) ]) |> digest_attached in
+  (match bind_digest_surface context [ invalid ] with
+   | _ -> fail "a serializer error must not return a newly bound scope"
+   | exception Yojson.Json_error message ->
+     check string "original serializer failure" "NaN value not allowed in standard JSON" message);
+  check bool "failed digest does not publish Context" true
+    (before = stored_load_snapshot context);
+  check (list string) "existing outstanding loads remain readable"
+    [ "remote.inspect" ] (Load_receipts.pending_names receipts)
+;;
+
 let placement
       ?(agent_cell = ref None)
       ?(history = [])
@@ -1472,7 +1626,13 @@ let () =
             test_a_carried_tool_can_still_be_named
         ] )
     ; ( "successful load continuity"
-      , [ test_case "sibling loads survive and consume individually" `Quick
+      , [ test_case "surface digest preserves legacy canonical bytes" `Quick
+            test_surface_digest_preserves_legacy_bytes
+        ; test_case "legacy digest keeps its outstanding load" `Quick
+            test_legacy_digest_keeps_outstanding_load
+        ; test_case "surface serializer error preserves Context" `Quick
+            test_surface_serializer_error_preserves_context
+        ; test_case "sibling loads survive and consume individually" `Quick
             test_successful_sibling_loads_survive_and_consume_individually
         ; test_case "sibling load waits for atomic publication" `Quick
             test_sibling_load_waits_for_atomic_publication

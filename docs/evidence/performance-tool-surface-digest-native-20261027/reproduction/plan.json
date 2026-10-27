@@ -1,0 +1,449 @@
+{
+  "schema": "masc.tool-surface-digest-native-plan.v1",
+  "created_utc": "2026-10-26T23:51:56.520145+00:00",
+  "execute": false,
+  "status": "PREPARATION_ONLY_NOT_EXECUTED_REQUIRES_ROOT_READ_AND_INDEPENDENT_REVIEW",
+  "candidate_application_source": "6df61978e0b638e672c7cd76664b90be7ba72fd1",
+  "candidate_builder_source": "6df61978e0b638e672c7cd76664b90be7ba72fd1",
+  "control_application_source": "8e61fa43fbf93f0e1edf06f07420fde6c79ccbc0",
+  "control_builder_source": "6a2d8dd6171e1d732ca15f918fb084e462e4d371",
+  "candidate_artifact_run": 40419664296,
+  "candidate_native_job": 121910651163,
+  "native_controller_path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-preparation-v1/run_native.py",
+  "runner_owner": {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/dispatch-profile-owner-held-preparation-v4/reviewed_runner_owner.py",
+    "sha256": "ebf10213716afe9ea9d338cee57ed21b8c3016e41161e2ace5763b8385786401"
+  },
+  "runner": {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/dispatch-profile-owner-held-preparation-v4/keeper_scale_session.py",
+    "sha256": "a6df19e949708fb6b44255e2a0623689c1ba9eb9e203c4a0eaf35f30ee537284"
+  },
+  "reader": {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/owner-map-inventory-tail-preparation-v1/keeper_scale_packet_audit.py",
+    "sha256": "0825b96717c9939c7751c918258713476d207b4c8da8db825b5c8eba6fdf56c2",
+    "public_CLI": "ABSOLUTE_PYTHON -B -E READER PACKET --output FRESH_EXTERNAL_OUTPUT",
+    "audit_creates_output_directory": true
+  },
+  "fixture_path": "scripts/fixtures/release-evidence/runtime.toml",
+  "fixture_sha256": "ccbe65e399f47a3abddbf4299e15dd0fd55001dd785b2e0d75948ad86acf7cfd",
+  "fixed_parameters": {
+    "messages_per_keeper": 2,
+    "model_delay_ms": 10,
+    "settle_timeout_s": 1200,
+    "request_timeout_s": 15,
+    "sample_interval_s": 0.1
+  },
+  "native_paths": {
+    "candidate_binary": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-digest-6df61978/masc",
+    "candidate_repo": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/perf-tool-surface-digest-streaming-20261027",
+    "control_binary": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-owner-map-8e61fa43/masc",
+    "control_binary_sha256": "2e09b44a26232dceb73182e5aa01fb67f054adccdd2e59238114312a35aa9f21",
+    "control_repo": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/runtime-owner-map-8e61fa43-20261027"
+  },
+  "order": [
+    {
+      "role": "candidate",
+      "keepers": 2,
+      "output": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-2-v1",
+      "audit_output": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-2-v1-reader-0825-v1",
+      "native_action": "ONE_FRESH_NATIVE_CELL_NOT_EXECUTED",
+      "original_reader_attempt": {
+        "reader_sha256": "be6b0a62cf36d7174f43d2ff282285e8eb151fe8fe25583ee41c8c35c5976f9b",
+        "status": "NOT_ATTEMPTED"
+      },
+      "revised_reader_command": [
+        "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/bin/python3.14",
+        "-B",
+        "-E",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/owner-map-inventory-tail-preparation-v1/keeper_scale_packet_audit.py",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-2-v1",
+        "--output",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-2-v1-reader-0825-v1"
+      ],
+      "validator_execution_output": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-2-v1-validator-execution-v1",
+      "validator_execution_receipt": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-2-v1-validator-execution-v1/execution.json",
+      "validator_execution_stdout": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-2-v1-validator-execution-v1/stdout.log",
+      "validator_execution_stderr": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-2-v1-validator-execution-v1/stderr.log",
+      "validator_execution_command": [
+        "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/bin/python3.14",
+        "-B",
+        "-E",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-preparation-v1/validator_execution.py",
+        "--plan",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-preparation-v1/plan.json",
+        "--qualification",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-preparation-v1/execution-qualification.json",
+        "--cell",
+        "1"
+      ],
+      "native_invocation_output": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-2-v1-native-invocation-v1",
+      "native_execution_receipt": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-2-v1-native-invocation-v1/execution.json",
+      "native_tool_record": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-tool-returns-v1/cell-1-native.json",
+      "validator_tool_record": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-tool-returns-v1/cell-1-validator.json"
+    },
+    {
+      "role": "candidate",
+      "keepers": 30,
+      "output": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-30-v1",
+      "audit_output": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-30-v1-reader-0825-v1",
+      "native_action": "ONE_FRESH_NATIVE_CELL_NOT_EXECUTED",
+      "original_reader_attempt": {
+        "reader_sha256": "be6b0a62cf36d7174f43d2ff282285e8eb151fe8fe25583ee41c8c35c5976f9b",
+        "status": "NOT_ATTEMPTED"
+      },
+      "revised_reader_command": [
+        "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/bin/python3.14",
+        "-B",
+        "-E",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/owner-map-inventory-tail-preparation-v1/keeper_scale_packet_audit.py",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-30-v1",
+        "--output",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-30-v1-reader-0825-v1"
+      ],
+      "validator_execution_output": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-30-v1-validator-execution-v1",
+      "validator_execution_receipt": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-30-v1-validator-execution-v1/execution.json",
+      "validator_execution_stdout": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-30-v1-validator-execution-v1/stdout.log",
+      "validator_execution_stderr": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-30-v1-validator-execution-v1/stderr.log",
+      "validator_execution_command": [
+        "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/bin/python3.14",
+        "-B",
+        "-E",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-preparation-v1/validator_execution.py",
+        "--plan",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-preparation-v1/plan.json",
+        "--qualification",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-preparation-v1/execution-qualification.json",
+        "--cell",
+        "2"
+      ],
+      "native_invocation_output": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-30-v1-native-invocation-v1",
+      "native_execution_receipt": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-30-v1-native-invocation-v1/execution.json",
+      "native_tool_record": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-tool-returns-v1/cell-2-native.json",
+      "validator_tool_record": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-tool-returns-v1/cell-2-validator.json"
+    },
+    {
+      "role": "control",
+      "keepers": 300,
+      "output": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-8e61fa43-300-a1-v1",
+      "audit_output": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-8e61fa43-300-a1-v1-reader-0825-v1",
+      "native_action": "ONE_FRESH_NATIVE_CELL_NOT_EXECUTED",
+      "original_reader_attempt": {
+        "reader_sha256": "be6b0a62cf36d7174f43d2ff282285e8eb151fe8fe25583ee41c8c35c5976f9b",
+        "status": "NOT_ATTEMPTED"
+      },
+      "revised_reader_command": [
+        "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/bin/python3.14",
+        "-B",
+        "-E",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/owner-map-inventory-tail-preparation-v1/keeper_scale_packet_audit.py",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-8e61fa43-300-a1-v1",
+        "--output",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-8e61fa43-300-a1-v1-reader-0825-v1"
+      ],
+      "validator_execution_output": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-8e61fa43-300-a1-v1-validator-execution-v1",
+      "validator_execution_receipt": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-8e61fa43-300-a1-v1-validator-execution-v1/execution.json",
+      "validator_execution_stdout": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-8e61fa43-300-a1-v1-validator-execution-v1/stdout.log",
+      "validator_execution_stderr": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-8e61fa43-300-a1-v1-validator-execution-v1/stderr.log",
+      "validator_execution_command": [
+        "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/bin/python3.14",
+        "-B",
+        "-E",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-preparation-v1/validator_execution.py",
+        "--plan",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-preparation-v1/plan.json",
+        "--qualification",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-preparation-v1/execution-qualification.json",
+        "--cell",
+        "3"
+      ],
+      "native_invocation_output": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-8e61fa43-300-a1-v1-native-invocation-v1",
+      "native_execution_receipt": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-8e61fa43-300-a1-v1-native-invocation-v1/execution.json",
+      "native_tool_record": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-tool-returns-v1/cell-3-native.json",
+      "validator_tool_record": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-tool-returns-v1/cell-3-validator.json"
+    },
+    {
+      "role": "candidate",
+      "keepers": 300,
+      "output": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-300-b1-v1",
+      "audit_output": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-300-b1-v1-reader-0825-v1",
+      "native_action": "ONE_FRESH_NATIVE_CELL_NOT_EXECUTED",
+      "original_reader_attempt": {
+        "reader_sha256": "be6b0a62cf36d7174f43d2ff282285e8eb151fe8fe25583ee41c8c35c5976f9b",
+        "status": "NOT_ATTEMPTED"
+      },
+      "revised_reader_command": [
+        "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/bin/python3.14",
+        "-B",
+        "-E",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/owner-map-inventory-tail-preparation-v1/keeper_scale_packet_audit.py",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-300-b1-v1",
+        "--output",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-300-b1-v1-reader-0825-v1"
+      ],
+      "validator_execution_output": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-300-b1-v1-validator-execution-v1",
+      "validator_execution_receipt": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-300-b1-v1-validator-execution-v1/execution.json",
+      "validator_execution_stdout": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-300-b1-v1-validator-execution-v1/stdout.log",
+      "validator_execution_stderr": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-300-b1-v1-validator-execution-v1/stderr.log",
+      "validator_execution_command": [
+        "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/bin/python3.14",
+        "-B",
+        "-E",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-preparation-v1/validator_execution.py",
+        "--plan",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-preparation-v1/plan.json",
+        "--qualification",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-preparation-v1/execution-qualification.json",
+        "--cell",
+        "4"
+      ],
+      "native_invocation_output": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-300-b1-v1-native-invocation-v1",
+      "native_execution_receipt": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-300-b1-v1-native-invocation-v1/execution.json",
+      "native_tool_record": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-tool-returns-v1/cell-4-native.json",
+      "validator_tool_record": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-tool-returns-v1/cell-4-validator.json"
+    },
+    {
+      "role": "candidate",
+      "keepers": 300,
+      "output": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-300-b2-v1",
+      "audit_output": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-300-b2-v1-reader-0825-v1",
+      "native_action": "ONE_FRESH_NATIVE_CELL_NOT_EXECUTED",
+      "original_reader_attempt": {
+        "reader_sha256": "be6b0a62cf36d7174f43d2ff282285e8eb151fe8fe25583ee41c8c35c5976f9b",
+        "status": "NOT_ATTEMPTED"
+      },
+      "revised_reader_command": [
+        "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/bin/python3.14",
+        "-B",
+        "-E",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/owner-map-inventory-tail-preparation-v1/keeper_scale_packet_audit.py",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-300-b2-v1",
+        "--output",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-300-b2-v1-reader-0825-v1"
+      ],
+      "validator_execution_output": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-300-b2-v1-validator-execution-v1",
+      "validator_execution_receipt": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-300-b2-v1-validator-execution-v1/execution.json",
+      "validator_execution_stdout": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-300-b2-v1-validator-execution-v1/stdout.log",
+      "validator_execution_stderr": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-300-b2-v1-validator-execution-v1/stderr.log",
+      "validator_execution_command": [
+        "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/bin/python3.14",
+        "-B",
+        "-E",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-preparation-v1/validator_execution.py",
+        "--plan",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-preparation-v1/plan.json",
+        "--qualification",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-preparation-v1/execution-qualification.json",
+        "--cell",
+        "5"
+      ],
+      "native_invocation_output": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-300-b2-v1-native-invocation-v1",
+      "native_execution_receipt": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-6df61978-300-b2-v1-native-invocation-v1/execution.json",
+      "native_tool_record": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-tool-returns-v1/cell-5-native.json",
+      "validator_tool_record": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-tool-returns-v1/cell-5-validator.json"
+    },
+    {
+      "role": "control",
+      "keepers": 300,
+      "output": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-8e61fa43-300-a2-v1",
+      "audit_output": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-8e61fa43-300-a2-v1-reader-0825-v1",
+      "native_action": "ONE_FRESH_NATIVE_CELL_NOT_EXECUTED",
+      "original_reader_attempt": {
+        "reader_sha256": "be6b0a62cf36d7174f43d2ff282285e8eb151fe8fe25583ee41c8c35c5976f9b",
+        "status": "NOT_ATTEMPTED"
+      },
+      "revised_reader_command": [
+        "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/bin/python3.14",
+        "-B",
+        "-E",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/owner-map-inventory-tail-preparation-v1/keeper_scale_packet_audit.py",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-8e61fa43-300-a2-v1",
+        "--output",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-8e61fa43-300-a2-v1-reader-0825-v1"
+      ],
+      "validator_execution_output": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-8e61fa43-300-a2-v1-validator-execution-v1",
+      "validator_execution_receipt": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-8e61fa43-300-a2-v1-validator-execution-v1/execution.json",
+      "validator_execution_stdout": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-8e61fa43-300-a2-v1-validator-execution-v1/stdout.log",
+      "validator_execution_stderr": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-8e61fa43-300-a2-v1-validator-execution-v1/stderr.log",
+      "validator_execution_command": [
+        "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/bin/python3.14",
+        "-B",
+        "-E",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-preparation-v1/validator_execution.py",
+        "--plan",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-preparation-v1/plan.json",
+        "--qualification",
+        "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-preparation-v1/execution-qualification.json",
+        "--cell",
+        "6"
+      ],
+      "native_invocation_output": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-8e61fa43-300-a2-v1-native-invocation-v1",
+      "native_execution_receipt": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-8e61fa43-300-a2-v1-native-invocation-v1/execution.json",
+      "native_tool_record": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-tool-returns-v1/cell-6-native.json",
+      "validator_tool_record": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-tool-returns-v1/cell-6-validator.json"
+    }
+  ],
+  "deriver_sha256": "15dd208f7dc1a96a066c06d550e2a854ec9dc6db595afefa5b8a033ef3e141ce",
+  "validator_executor": {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-preparation-v1/validator_execution.py",
+    "sha256": "6b669783616575cbf31becb7950947a932b92c5d0a7dbcb1cc2c3206a4ccf029",
+    "python_executable": "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/bin/python3.14",
+    "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-preparation-v1",
+    "required_derivatives": [
+      "inventory-sweep-audit.json",
+      "slow-status-completion-alignment.json",
+      "post-run-audit.json",
+      "operation-wall-samples.json",
+      "mcp-wire-outliers.json"
+    ]
+  },
+  "source_provenance": {
+    "deriver": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/owner-projection-map-native-plan-amendment-v2/derive_observations.py",
+      "sha256": "498355fe8cd5797fb7bf6896cfd604b32d87fa38d5c2c2873a3a45b2ecd844d3"
+    },
+    "native_controller": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/owner-map-native-continuation-v3/run_native.py",
+      "sha256": "c04e88690dcd198c3ce877d3324a387bc7533f556a482729bd9561e2cdd4b1c5"
+    },
+    "reader": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/owner-map-inventory-tail-preparation-v1/keeper_scale_packet_audit.py",
+      "sha256": "0825b96717c9939c7751c918258713476d207b4c8da8db825b5c8eba6fdf56c2"
+    },
+    "runner": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/dispatch-profile-owner-held-preparation-v4/keeper_scale_session.py",
+      "sha256": "a6df19e949708fb6b44255e2a0623689c1ba9eb9e203c4a0eaf35f30ee537284"
+    },
+    "runner_owner": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/dispatch-profile-owner-held-preparation-v4/reviewed_runner_owner.py",
+      "sha256": "ebf10213716afe9ea9d338cee57ed21b8c3016e41161e2ace5763b8385786401"
+    },
+    "validator_executor": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/owner-projection-map-native-plan-amendment-v2/validator_execution.py",
+      "sha256": "6b669783616575cbf31becb7950947a932b92c5d0a7dbcb1cc2c3206a4ccf029"
+    }
+  },
+  "qualified_metadata": {
+    "candidate_qualification": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-digest-6df61978/qualification/summary.json",
+      "sha256": "fa16036d12d608ee09339f26f749fdb9fc738fff2c921661e78d755813ba10f0"
+    },
+    "candidate_identity_commands": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-digest-6df61978/qualification/identity-commands.json",
+      "sha256": "ae7586bf779a649dd194c02feb6a87b483e07ea190803ad298016ebeeb9ce60f"
+    },
+    "candidate_acquisition": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-digest-6df61978/acquisition.json",
+      "sha256": "5b97fc52a1dc7859d3b2bf592cd934bfdd3f4c6dbaf20abcb05b91b29fff9da3"
+    },
+    "candidate_receipt": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-digest-6df61978/receipt.json",
+      "sha256": "d291d4156ec47da2591da3f982f6820a4fba6e7606636b9e461a31f5add438b3"
+    },
+    "control_qualification": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-owner-map-8e61fa43/qualification/summary.json",
+      "sha256": "e824426b24974b08f65b3307be4b6321606f1b14086dfba36966b6f9c3ff3ed6"
+    },
+    "control_receipt": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-owner-map-8e61fa43/receipt.json",
+      "sha256": "6401c99a60589b706675a002e13679c6a74e9d6171493e0819bf0d8a5ea368f2"
+    },
+    "production_build_config_diff": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-digest-6df61978/qualification/production-build-config.diff",
+      "sha256": "b871dadc3ee37dd200f62c6fe3d42fa67735eb56d26551d980589f2aefcd968d"
+    },
+    "candidate_identity_server_stdout": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-digest-6df61978/qualification/server-stdout.raw",
+      "sha256": "cf521c7269b15257325078d96ec84eb94f0b5ebad919e0538461533fba2869e0"
+    },
+    "candidate_identity_server_stderr": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-digest-6df61978/qualification/server-stderr.raw",
+      "sha256": "2e829374bfb4cc50cde6a1a54e66beb7c29269f3dd2ba7b01cea65518c944d40"
+    },
+    "candidate_identity_TUI_stdout": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-digest-6df61978/qualification/TUI-stdout.raw",
+      "sha256": "cf521c7269b15257325078d96ec84eb94f0b5ebad919e0538461533fba2869e0"
+    },
+    "candidate_identity_TUI_stderr": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-digest-6df61978/qualification/TUI-stderr.raw",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "candidate_fixture": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/perf-tool-surface-digest-streaming-20261027/scripts/fixtures/release-evidence/runtime.toml",
+      "sha256": "ccbe65e399f47a3abddbf4299e15dd0fd55001dd785b2e0d75948ad86acf7cfd"
+    },
+    "control_fixture": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/runtime-owner-map-8e61fa43-20261027/scripts/fixtures/release-evidence/runtime.toml",
+      "sha256": "ccbe65e399f47a3abddbf4299e15dd0fd55001dd785b2e0d75948ad86acf7cfd"
+    },
+    "candidate_build-targets.txt": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-digest-6df61978/build-targets.txt",
+      "sha256": "1876a2326fb593161df1d3d8400da540ceb0d59306094b14cc015c5f3e48d476"
+    },
+    "candidate_native-dependencies.txt": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-digest-6df61978/native-dependencies.txt",
+      "sha256": "30a19842189afd3ee7547d831a72a7143e46ba79226d064b7b3d0a947d1473a9"
+    },
+    "candidate_server-native-dependencies.txt": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-digest-6df61978/server-native-dependencies.txt",
+      "sha256": "14e4f3d5234c5f82eb57a242b558487690df46fb41a8cc16ff03ae90e517200a"
+    },
+    "control_build-targets.txt": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-owner-map-8e61fa43/build-targets.txt",
+      "sha256": "1876a2326fb593161df1d3d8400da540ceb0d59306094b14cc015c5f3e48d476"
+    },
+    "control_native-dependencies.txt": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-owner-map-8e61fa43/native-dependencies.txt",
+      "sha256": "30a19842189afd3ee7547d831a72a7143e46ba79226d064b7b3d0a947d1473a9"
+    },
+    "control_server-native-dependencies.txt": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-owner-map-8e61fa43/server-native-dependencies.txt",
+      "sha256": "14e4f3d5234c5f82eb57a242b558487690df46fb41a8cc16ff03ae90e517200a"
+    }
+  },
+  "observation_output": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-observations-v1.json",
+  "measurements": [
+    "Real service creation RPC wire/dispatch distributions, admission/status tails, phase liveness and rate waits; retain failures separately.",
+    "Whole-program health GC snapshot-counter delta and raw before/after GC/process memory, source-bound to each new actual native packet.",
+    "Observed post-spawn startup/creation envelopes and full degraded/readiness state, not exact ready or UI transition.",
+    "Exact frozen-reader durable/public/original payload/source/operation/model/guard inventory/cleanup validation with separate native/helper actual tool receipts."
+  ],
+  "legacy_field_policy": "revised_reader_command/original_reader_attempt names retained only for exact existing helper/describe compatibility. All be6 statuses NOT_ATTEMPTED; no exits/evidence digests invented;0825 starts this new campaign.",
+  "review_requirement": "Root directly reads exact frozen plan/controller/qualification/deriver and independent reviewer accepts before any explicit --execute. Preparation creates no admission or actual native/validator/root-tool output.",
+  "root_tool_record_contract": {
+    "native": {
+      "required_fields": [
+        "cell",
+        "actual_native_exit_code",
+        "native_execution_receipt",
+        "native_execution_receipt_sha256"
+      ],
+      "actual_native_exit_code": "Actual integer0 from returned tool, not child/receipt inference."
+    },
+    "validator": {
+      "required_fields": [
+        "cell",
+        "actual_helper_exit_code",
+        "validator_execution_receipt",
+        "validator_execution_receipt_sha256",
+        "original_byte_path_conserved"
+      ],
+      "original_byte_path_conserved": "LiteralTrue only after root original packet path/byte inventory before/after read-only validation."
+    }
+  },
+  "audit_protocol": "Root waits for actual native CLI and owned execution receipt/cleanup, records native tool return, brackets original packet inventory, then invokes only the new adjacent generic executor for that cell. Helper owns execution leaf;0825 exclusively creates audit leaf. Root records actual helper CLI and original-byte/path conservation. Next native cell requires all prior closures, and deriver requires all six. Failed/partial paths are never replayed.",
+  "limits": [
+    "Fresh objective native server/Keeper service comparison: candidate2/30 then300 A1-control8e/B1-candidate6df/B2-candidate6df/A2-control8e, one at a time. No old packet or old Map measurement is reused as a new result.",
+    "One pinned admin producer and loopback scripted text-only model with held queues; no external model, peer business/broadcast, guest/Add-on, independent HTTP actors, TUI, installed-primary or production fleet proof.",
+    "Two300 cohorts per role on a shared host in fixed order, with complete-then-audit gaps. Descriptive observations only; no stable/causal gain, confidence/SLO/0.1ms or whole-Goal claim.",
+    "Builder identities differ: candidate application+builder6df; control application8e/builder6a. Build-relevant source/config diff is one keeper_tool_load_receipts.ml file. Equal target/dependency text does not prove loaded-library identity or identical compiler artifacts.",
+    "Each cell requires owned native runner wait/reap0, exact native execution receipt and actual root native CLI0, then owned frozen0825 reader wait/reap0, unchanged five source bindings, closed stdout/stderr and five derivatives, actual root helper CLI0 and literal original-byte/path conservationTrue, exact native cleanup/PASS before next cell.",
+    "No native replay/retry, source mutation, invented report/digest or late PASS upgrade. Failed/partial native or reader/metadata output stops progression and stays retained.",
+    "All be6 attempts in this campaign are NOT_ATTEMPTED. Frozen0825 is the first actual reader. Old Map histories, B1 failure, amendments and results remain separate immutable history; their old original-plan contract is not applied to new packets.",
+    "Retain successful service wire distributions alongside timeouts/read errors,429 waits/retries and degraded full readiness. Candidate latency/GC improvements cannot erase regressions or negative tails.",
+    "Observed inventory complete/partial coverage and unequal background work remain explicit. Coverage groups are not producer cycle IDs; no subtraction or normalized causal gain.",
+    "Allocation is a64-bit whole-program health Gc.quick_stat snapshot-counter delta (minor+major-promoted)*8; may lag collection boundaries, includes creation and other work, and is not Gc.allocated_bytes(), exact phase/function-exclusive allocation,CPU,RSS or rate.",
+    "Startup is post-Popen receipt-to-initialize request preparation including polling/auth; excludes preceding Popen work and is not exact state-ready transition or UI paint.",
+    "Candidate nativejob121910651163 succeeded with55 selected resource cases; overallworkflow40419664296 failed inherited retained diff whitespace. Two identity children exited0; enclosing qualification tool completion was not independently retained. Server identity stderr82B/TUI0B, not universal stderr0.",
+    "Native/TUI qualified artifacts and later PR/head/merge/install/UI evidence remain distinct. No profile/TUI/benchmark or new diagnostic is included in unprofiled means. No real measurement or aggregate ran during preparation."
+  ]
+}

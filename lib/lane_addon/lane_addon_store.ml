@@ -527,7 +527,38 @@ let with_record_fd path fn =
     Printexc.raise_with_backtrace exn backtrace
 let verify_record_bytes path fd stat bytes =
   let _offset=Unix.lseek fd 0 Unix.SEEK_SET in
-  let* verified=record_bytes fd stat.Unix.st_size in
+  let size=stat.Unix.st_size in
+  let* verified=
+    if size <= 2 * Sys.io_buffer_size then record_bytes fd size
+    else
+      (* Two reusable I/O buffers replace the second file-sized allocation.
+         Keep the direct read when it needs no more memory than this pair.
+         Neither scratch buffer aliases the immutable first observation. *)
+      let observed=Bytes.create Sys.io_buffer_size in
+      let expected=Bytes.create Sys.io_buffer_size in
+      let rec fill offset length =
+        if offset=length then Ok () else
+        match Unix.read fd observed offset (length-offset) with
+        | 0 -> Error "retained file shrank during read"
+        | count -> fill (offset+count) length
+        | exception Unix.Unix_error (Unix.EINTR,_,_) -> fill offset length in
+      let eof=Bytes.create 1 in
+      let rec finish unchanged =
+        match Unix.read fd eof 0 1 with
+        | 0 -> if unchanged then Ok bytes else Error "retained file changed during sync"
+        | _ -> Error "retained file grew during read"
+        | exception Unix.Unix_error (Unix.EINTR,_,_) -> finish unchanged in
+      let rec compare offset unchanged =
+        if offset=size then finish unchanged else
+        let count=min (Bytes.length observed) (size-offset) in
+        let* ()=fill 0 count in
+        Bytes.blit_string bytes offset expected 0 count;
+        (* A short final chunk leaves equal tails from the preceding full
+           comparison whenever [unchanged] is true. A prior mismatch stays
+           false; still read through EOF to retain shrink/growth failures. *)
+        let unchanged=unchanged && Bytes.equal observed expected in
+        compare (offset+count) unchanged in
+      compare 0 true in
   if verified<>bytes then Error "retained file changed during sync"
   else if same_file stat (Unix.stat path) then Ok (Confirmed bytes)
   else Ok Republished

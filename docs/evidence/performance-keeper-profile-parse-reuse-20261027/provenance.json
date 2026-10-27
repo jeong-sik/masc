@@ -1,0 +1,63 @@
+{
+  "schema": "masc.profile-parse-reuse-retained-provenance.v1",
+  "created_utc": "2026-10-26T17:18:30.916570+00:00",
+  "code_PR": 46231,
+  "code_PR_head": "5428e9a53dca4c41791dc412b952f8cd60466e0f",
+  "code_PR_base": "9e08499e80c739b51923e816423873290932e27b",
+  "code_PR_full_diff_sha256": "0912108b1d49822e77fb48b30ccd6a089d69aa9cc4fa1eb59b45a7a6de871d2f",
+  "candidate_application_source": "55a0c7482fedece3f114fa8accb64a5084b1a796",
+  "candidate_to_PR_delta": "Six portable actor fixture substitutions in test/test_browser_ego_peer.ml only; production/profile tests unchanged.",
+  "control_application_source": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+  "builder_workflow_source": "6a2d8dd6171e1d732ca15f918fb084e462e4d371",
+  "CI": [
+    {
+      "id": 40357506337,
+      "name": "Test",
+      "head_sha": "55a0c7482fedece3f114fa8accb64a5084b1a796",
+      "head_branch": "perf/keeper-profile-parse-reuse-20261027",
+      "event": "workflow_dispatch",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://github.com/jeong-sik/masc/actions/runs/40357506337",
+      "selected_scope": "test_keeper_toml",
+      "capture_sha256": "569f0789105e450be24a2912fca4a5801481da02fea554978ba4ad90061c202c"
+    },
+    {
+      "id": 40359625516,
+      "name": "Test",
+      "head_sha": "5428e9a53dca4c41791dc412b952f8cd60466e0f",
+      "head_branch": "perf/keeper-profile-parse-reuse-20261027",
+      "event": "workflow_dispatch",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/jeong-sik/masc/actions/runs/40359625516",
+      "selected_scope": "test_keeper_toml",
+      "capture_sha256": "93f1602a0c1cfacb2d2304ab58d79abb88908dd8edca9bf7f14d15a4f7bdc263"
+    },
+    {
+      "id": 40357511881,
+      "name": "Minimal manual checks",
+      "head_sha": "6a2d8dd6171e1d732ca15f918fb084e462e4d371",
+      "head_branch": "ci/perf-baseline-builder-6a2d8dd-20261026",
+      "event": "workflow_dispatch",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/jeong-sik/masc/actions/runs/40357511881",
+      "selected_scope": "resource-reading",
+      "capture_sha256": "2ba3cdc229485a54b79e788765a9649ea2c4e8283ecf034e35ca4bc4bd98994d"
+    }
+  ],
+  "full_regression_for_current_head": "not run",
+  "native_workload": "Two qualification cohorts at2/30 plus300 ABBA four cohorts; one scripted loopback provider,10ms service delay after deliberate hold. Original and parsed-record provenance is separate from raw HTTP bytes.",
+  "review_scope": "Independent inherited-model sessions; source/offline audits are not formal GitHub approvals.",
+  "unverified": [
+    "stable latency SLO",
+    "0.1ms target",
+    "parser-exclusive/exact instantaneous allocation",
+    "real model throughput",
+    "peer business/broadcast",
+    "actual guest/Add-on execution",
+    "visible TUI",
+    "primary install/restart/deployment/merge"
+  ]
+}

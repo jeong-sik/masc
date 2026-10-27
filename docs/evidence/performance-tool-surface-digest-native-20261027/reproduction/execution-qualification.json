@@ -1,0 +1,124 @@
+{
+  "schema": "masc.tool-surface-digest-native-execution-qualification.v1",
+  "created_utc": "2026-10-26T23:51:56.520145+00:00",
+  "plan_sha256": "9a550effd9a218fb27430df13ebe48edbbad8b189cf69e75e278ba6829e6a41a",
+  "candidate_source": "6df61978e0b638e672c7cd76664b90be7ba72fd1",
+  "candidate_builder_source": "6df61978e0b638e672c7cd76664b90be7ba72fd1",
+  "candidate_server_sha256": "ad0610183459e7f470531468ad8c3a484e85dfdbbe36a36fcf8fd3a7b37b1bcc",
+  "candidate_TUI_sha256": "681ae6324721bebdd17d0e4523971eda8a65e6e798ef8bf1a8e8c5bc9a63219c",
+  "control_source": "8e61fa43fbf93f0e1edf06f07420fde6c79ccbc0",
+  "control_builder_source": "6a2d8dd6171e1d732ca15f918fb084e462e4d371",
+  "control_server_sha256": "2e09b44a26232dceb73182e5aa01fb67f054adccdd2e59238114312a35aa9f21",
+  "control_TUI_sha256": "ed61ed3a92721971eeb9b2364d0a8a655af0b3734f83f203621c712c20b5b9ed",
+  "fixture_sha256": "ccbe65e399f47a3abddbf4299e15dd0fd55001dd785b2e0d75948ad86acf7cfd",
+  "deriver_sha256": "15dd208f7dc1a96a066c06d550e2a854ec9dc6db595afefa5b8a033ef3e141ce",
+  "reader_sha256": "0825b96717c9939c7751c918258713476d207b4c8da8db825b5c8eba6fdf56c2",
+  "reader_path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/owner-map-inventory-tail-preparation-v1/keeper_scale_packet_audit.py",
+  "original_reader_sha256": "be6b0a62cf36d7174f43d2ff282285e8eb151fe8fe25583ee41c8c35c5976f9b",
+  "legacy_be6_attempts_in_this_campaign": "NOT_ATTEMPTED_FOR_ALL_SIX_CELLS_NO_EXIT_OR_REPORT",
+  "validator_executor_sha256": "6b669783616575cbf31becb7950947a932b92c5d0a7dbcb1cc2c3206a4ccf029",
+  "validator_executor_path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-preparation-v1/validator_execution.py",
+  "validator_python_executable": "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/bin/python3.14",
+  "validator_required_derivatives": [
+    "inventory-sweep-audit.json",
+    "slow-status-completion-alignment.json",
+    "post-run-audit.json",
+    "operation-wall-samples.json",
+    "mcp-wire-outliers.json"
+  ],
+  "qualified_metadata": {
+    "candidate_qualification": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-digest-6df61978/qualification/summary.json",
+      "sha256": "fa16036d12d608ee09339f26f749fdb9fc738fff2c921661e78d755813ba10f0"
+    },
+    "candidate_identity_commands": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-digest-6df61978/qualification/identity-commands.json",
+      "sha256": "ae7586bf779a649dd194c02feb6a87b483e07ea190803ad298016ebeeb9ce60f"
+    },
+    "candidate_acquisition": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-digest-6df61978/acquisition.json",
+      "sha256": "5b97fc52a1dc7859d3b2bf592cd934bfdd3f4c6dbaf20abcb05b91b29fff9da3"
+    },
+    "candidate_receipt": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-digest-6df61978/receipt.json",
+      "sha256": "d291d4156ec47da2591da3f982f6820a4fba6e7606636b9e461a31f5add438b3"
+    },
+    "control_qualification": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-owner-map-8e61fa43/qualification/summary.json",
+      "sha256": "e824426b24974b08f65b3307be4b6321606f1b14086dfba36966b6f9c3ff3ed6"
+    },
+    "control_receipt": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-owner-map-8e61fa43/receipt.json",
+      "sha256": "6401c99a60589b706675a002e13679c6a74e9d6171493e0819bf0d8a5ea368f2"
+    },
+    "production_build_config_diff": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-digest-6df61978/qualification/production-build-config.diff",
+      "sha256": "b871dadc3ee37dd200f62c6fe3d42fa67735eb56d26551d980589f2aefcd968d"
+    },
+    "candidate_identity_server_stdout": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-digest-6df61978/qualification/server-stdout.raw",
+      "sha256": "cf521c7269b15257325078d96ec84eb94f0b5ebad919e0538461533fba2869e0"
+    },
+    "candidate_identity_server_stderr": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-digest-6df61978/qualification/server-stderr.raw",
+      "sha256": "2e829374bfb4cc50cde6a1a54e66beb7c29269f3dd2ba7b01cea65518c944d40"
+    },
+    "candidate_identity_TUI_stdout": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-digest-6df61978/qualification/TUI-stdout.raw",
+      "sha256": "cf521c7269b15257325078d96ec84eb94f0b5ebad919e0538461533fba2869e0"
+    },
+    "candidate_identity_TUI_stderr": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-digest-6df61978/qualification/TUI-stderr.raw",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "candidate_fixture": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/perf-tool-surface-digest-streaming-20261027/scripts/fixtures/release-evidence/runtime.toml",
+      "sha256": "ccbe65e399f47a3abddbf4299e15dd0fd55001dd785b2e0d75948ad86acf7cfd"
+    },
+    "control_fixture": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/runtime-owner-map-8e61fa43-20261027/scripts/fixtures/release-evidence/runtime.toml",
+      "sha256": "ccbe65e399f47a3abddbf4299e15dd0fd55001dd785b2e0d75948ad86acf7cfd"
+    },
+    "candidate_build-targets.txt": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-digest-6df61978/build-targets.txt",
+      "sha256": "1876a2326fb593161df1d3d8400da540ceb0d59306094b14cc015c5f3e48d476"
+    },
+    "candidate_native-dependencies.txt": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-digest-6df61978/native-dependencies.txt",
+      "sha256": "30a19842189afd3ee7547d831a72a7143e46ba79226d064b7b3d0a947d1473a9"
+    },
+    "candidate_server-native-dependencies.txt": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-digest-6df61978/server-native-dependencies.txt",
+      "sha256": "14e4f3d5234c5f82eb57a242b558487690df46fb41a8cc16ff03ae90e517200a"
+    },
+    "control_build-targets.txt": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-owner-map-8e61fa43/build-targets.txt",
+      "sha256": "1876a2326fb593161df1d3d8400da540ceb0d59306094b14cc015c5f3e48d476"
+    },
+    "control_native-dependencies.txt": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-owner-map-8e61fa43/native-dependencies.txt",
+      "sha256": "30a19842189afd3ee7547d831a72a7143e46ba79226d064b7b3d0a947d1473a9"
+    },
+    "control_server-native-dependencies.txt": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-owner-map-8e61fa43/server-native-dependencies.txt",
+      "sha256": "14e4f3d5234c5f82eb57a242b558487690df46fb41a8cc16ff03ae90e517200a"
+    }
+  },
+  "builder_identity_differs": true,
+  "build_relevant_source_diff": [
+    "lib/keeper/keeper_tool_load_receipts.ml"
+  ],
+  "candidate_workflow_overall_conclusion": "failure",
+  "candidate_native_job_conclusion": "success",
+  "candidate_selected_resource_cases": 55,
+  "identity_children": {
+    "server_returncode": 0,
+    "server_stderr_bytes": 82,
+    "TUI_returncode": 0,
+    "TUI_stderr_bytes": 0
+  },
+  "enclosing_qualification_tool_completion": "Not independently retained/observed; session11932 later Unknown process id. No enclosing CLI0 asserted.",
+  "support_checkout_clean_authority": "Root directly checked both relevant support checkouts clean. This preparation runs no Git; actual controller rechecks HEAD and clean status before admission.",
+  "binary_qualification_authority": "Root actual archive/binary/embedded-source/selected-resource qualification and retained exact metadata. Preparation only rehashes small source/metadata; no binary/archive rehash or identity command repeated.",
+  "scope": "Fresh campaign source/input binding only; no native cell, reader, SQL audit, probe, benchmark or aggregate run by author. Different builder identities, outer-tool uncertainty and overall workflow failure remain explicit."
+}

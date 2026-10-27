@@ -5599,6 +5599,150 @@ let test_root_inventory_reads_undecodable_meta_as_absent_and_boot_rematerializes
                     (Keeper_runtime.boot_meta_failure_for ~base_path ~name)))))
 ;;
 
+let test_owner_projection_replacement_and_root_isolation () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> remove_tree base_path) (fun () ->
+    Eio.Switch.run @@ fun sw ->
+    let other_root = Filename.concat base_path "other-root" in
+    Unix.mkdir other_root 0o755;
+    let initial = make_meta "projection-replacement" in
+    let store = { Owner.replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) } in
+    let first =
+      owner_ok (start_owner ~sw ~store ~keeper_name:initial.name ~initial_meta:(Some initial))
+    in
+    let second =
+      owner_ok (start_owner ~sw ~store ~keeper_name:initial.name ~initial_meta:(Some initial))
+    in
+    let install root owner =
+      Keeper_owner_projection.install ~base_path:root ~keeper_name:initial.name owner
+    in
+    let remove root owner =
+      Keeper_owner_projection.remove ~base_path:root ~keeper_name:initial.name owner
+    in
+    let meta_at root =
+      match Keeper_owner_projection.lookup ~base_path:root ~keeper_name:initial.name with
+      | Owner_absent -> fail "projection owner disappeared"
+      | Owner_projection { meta = None; _ } -> fail "projection metadata disappeared"
+      | Owner_projection { meta = Some meta; _ } -> meta
+    in
+    Fun.protect
+      ~finally:(fun () ->
+        List.iter (fun root -> remove root first; remove root second) [base_path; other_root])
+      (fun () ->
+        install base_path first;
+        install other_root first;
+        check bool "replacement has a distinct Owner handle" false (first == second);
+        install (base_path ^ "/./") second;
+        remove base_path first;
+        check int "late cleanup preserves the initially identical replacement" 0
+          (meta_at base_path).runtime.usage.total_turns;
+        ignore (owner_ok (Owner.apply_meta second (usage_commit initial)));
+        check int "lookup reads the Owner's latest projection" 1
+          (meta_at (base_path ^ "/./")).runtime.usage.total_turns;
+        check int "same name in another root retains its own Owner" 0
+          (meta_at other_root).runtime.usage.total_turns;
+        let digest = Keeper_meta_json.Snapshot_digest.of_meta (meta_at base_path) in
+        ignore (owner_ok (Owner.apply_meta second (Reducer.Delete_if_snapshot digest)));
+        (match Keeper_owner_projection.lookup ~base_path ~keeper_name:initial.name with
+         | Owner_projection { meta = None; _ } -> ()
+         | Owner_projection { meta = Some _; _ } -> fail "lookup retained deleted metadata"
+         | Owner_absent -> fail "metadata deletion lost the installed Owner handle");
+        remove base_path second;
+        (match Keeper_owner_projection.lookup ~base_path ~keeper_name:initial.name with
+         | Owner_absent -> ()
+         | Owner_projection _ -> fail "removed Owner remains in the projection index");
+        remove other_root second;
+        check int "removal preserves a different root and Owner" 0
+          (meta_at other_root).runtime.usage.total_turns))
+;;
+
+let test_owner_projection_concurrent_writers_preserve_other_keys () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> remove_tree base_path) (fun () ->
+    Eio.Switch.run @@ fun sw ->
+    let store = { Owner.replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) } in
+    let start name updated_at =
+      let initial = { (make_meta name) with updated_at } in
+      owner_ok (start_owner ~sw ~store ~keeper_name:name ~initial_meta:(Some initial))
+    in
+    let first_name = "projection-writer-first" in
+    let second_name = "projection-writer-second" in
+    let first_odd = start first_name "odd-generation" in
+    let first_even = start first_name "even-generation" in
+    let second_odd = start second_name "odd-generation" in
+    let second_even = start second_name "even-generation" in
+    let install name owner =
+      Keeper_owner_projection.install ~base_path ~keeper_name:name owner
+    in
+    let remove name owner =
+      Keeper_owner_projection.remove ~base_path ~keeper_name:name owner
+    in
+    let check_name name updated_at =
+      match Keeper_owner_projection.lookup ~base_path ~keeper_name:name with
+      | Owner_absent -> fail "concurrent writer lost a projection key"
+      | Owner_projection { meta = None; _ } -> fail "concurrent lookup lost metadata"
+      | Owner_projection { meta = Some meta; _ } ->
+          check string "concurrent lookup retains the named Owner" name meta.name;
+          check string "concurrent lookup retains this round's replacement"
+            updated_at meta.updated_at
+    in
+    let stopped = Atomic.make false in
+    let requested_round = Atomic.make 0 in
+    let completed_rounds = Atomic.make 0 in
+    let rec await_round round =
+      if Atomic.get stopped then false
+      else if Atomic.get requested_round >= round then true
+      else (Domain.cpu_relax (); await_round round)
+    in
+    let rec await_completed round =
+      if Atomic.get completed_rounds = 2 * round then ()
+      else if Atomic.get stopped then fail "projection writer stopped before completing its round"
+      else (Domain.cpu_relax (); await_completed round)
+    in
+    let writer name odd even =
+      Domain.spawn (fun () ->
+        let finished_normally = ref false in
+        Fun.protect
+          ~finally:(fun () ->
+            if not !finished_normally then Atomic.set stopped true)
+          (fun () ->
+            let current = ref None in
+            for round = 1 to 300 do
+              if await_round round then (
+                Option.iter (remove name) !current;
+                let replacement = if round mod 2 = 1 then odd else even in
+                install name replacement;
+                current := Some replacement;
+                Atomic.incr completed_rounds)
+            done;
+            finished_normally := true))
+    in
+    let stop_and_join writer =
+      Atomic.set stopped true;
+      Domain.join writer
+    in
+    Fun.protect
+      ~finally:(fun () ->
+        List.iter (remove first_name) [first_odd; first_even];
+        List.iter (remove second_name) [second_odd; second_even])
+      (fun () ->
+        let first_writer = writer first_name first_odd first_even in
+        Fun.protect ~finally:(fun () -> stop_and_join first_writer) (fun () ->
+          let second_writer = writer second_name second_odd second_even in
+          Fun.protect ~finally:(fun () -> stop_and_join second_writer) (fun () ->
+            for round = 1 to 300 do
+              Atomic.set requested_round round;
+              await_completed round;
+              let updated_at = if round mod 2 = 1 then "odd-generation" else "even-generation" in
+              check_name first_name updated_at;
+              check_name second_name updated_at
+            done))))
+;;
+
 let test_registry_reads_owner_atomic_projection () =
   Eio_main.run @@ fun env ->
   if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -5870,7 +6014,7 @@ let test_scheduled_source_handoff case () =
   let record text = order := !order @ [text] in
   let execute ~sw:_ ~keeper_name:_ ~claim =
     let owner = Eio.Promise.await owner_p in
-    let operation = Option.get (owner_ok (claim ())) in
+    let operation : Chat_operation.t = Option.get (owner_ok (claim ())) in
     if Chat_operation.Operation_id.equal operation.Chat_operation.operation_id first then (
       incr attempts;
       if !attempts = 1 then (
@@ -5895,7 +6039,15 @@ let test_scheduled_source_handoff case () =
             ~checkpoint:(Keeper_semantic_execution.Agent_core checkpoint)
           |> owner_ok |> ignore;
           Owner.Operation_deferred)
-      else (record "resumed"; Owner.Operation_succeeded { outcome_ref = "resumed" }))
+      else (
+        let observed =
+          owner_ok (Owner.direct_checkpoint owner ~operation_id:operation.operation_id)
+          |> Option.get
+        in
+        Owner.resume_direct_checkpoint owner ~operation_id:operation.operation_id ~observed
+        |> owner_ok;
+        record "resumed";
+        Owner.Operation_succeeded { outcome_ref = "resumed" }))
     else (
       check bool "fresh chat retains its original identity" true
         (Chat_operation.Operation_id.equal operation.Chat_operation.operation_id next);
@@ -6389,6 +6541,14 @@ let () =
             "root inventory reads an undecodable meta as absent and boot re-materialises it"
             `Quick
             test_root_inventory_reads_undecodable_meta_as_absent_and_boot_rematerializes
+        ; test_case
+            "projection replacement preserves identity and root isolation"
+            `Quick
+            test_owner_projection_replacement_and_root_isolation
+        ; test_case
+            "projection concurrent writers preserve other keys"
+            `Quick
+            test_owner_projection_concurrent_writers_preserve_other_keys
         ; test_case
             "registry reads owner Atomic projection"
             `Quick

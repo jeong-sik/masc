@@ -1,0 +1,14 @@
+{
+  "command": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "-B",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/perf-scale-evidence-retention-20261026/scripts/harness/perf/keeper_scale_fault_probe.py",
+    "--output",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/owned-concurrent-scale-source-review-v2/fault-probe.json"
+  ],
+  "returncode": 0,
+  "cases": 24,
+  "passed": true,
+  "masc_processes_started": 0,
+  "scope": "Allowed pure Python fault probe; no MASC native execution, local Dune build, CI or network query."
+}

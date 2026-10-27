@@ -33,13 +33,12 @@ resolver with an isolated base directory. It checks the default and overridden
 pressure-file paths and rejects missing or relative base paths. It does not
 measure host pressure, sample a running server or test pressure delivery.
 
-The deployment check copies the actual deploy/install/preflight scripts into a
+The deployment check copies the actual install and preflight scripts into a
 temporary repository and runs them with a controlled helper. A rejected runtime
-configuration must preserve the fixture serving PID and leave the install prefix
-absent. Separate helper outcomes cover missing, accepted, caller-owned and
-unsupported browser Add-on declarations. This checks the shell consumer of the
-helper result; it does not validate a real runtime TOML, install a built binary
-or deploy a server. The test only stops the `sleep` process it creates.
+configuration must leave the install prefix absent. Separate helper outcomes
+cover missing, accepted, caller-owned and unsupported browser Add-on
+declarations. This checks the shell consumer of the helper result; it does not
+validate a real runtime TOML, install a built binary or start a server.
 
 ## Dashboard fixture rendering
 

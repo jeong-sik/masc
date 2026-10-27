@@ -780,8 +780,8 @@ OCaml 쪽은 임의의 액션·판정 열을 돌려 `OneTaskPerAgent` 를 확인
 2. 남은 완료 제출에 판정이 내려지기를 기다린다. 판정이 멈춘 제출(§1.5)은 운영자가 판정한다. 운영자 복구
    도구는 `AwaitingVerification` 을 받지 않으므로(`workspace_task.ml:293-306`) 판정이 유일한 길이다.
 3. 서버를 멈춘다. Keeper 만 멈추면 MCP 클라이언트가 `masc_transition` 으로 제출할 수 있다.
-4. **멈춘 뒤에** 검사한다. 지금 `scripts/deploy.sh` 는 옛 서버가 살아 있을 때 검사하고(`:101`) 그 뒤에
-   멈춘다(`:162`). 그 사이에 들어온 제출을 놓친다. 줄이 남아 있으면 옛 서버를 다시 올리고 2번으로 간다.
+4. **멈춘 뒤에** 검사한다. 서버가 살아 있을 때 검사하면 검사와 멈춤 사이에 들어온 제출을 놓친다. 줄이
+   남아 있으면 옛 서버를 다시 올리고 2번으로 간다.
 5. `verification-runs.jsonl` 을 자른다. `Operator_routed` 를 지우면 그 줄(id 70개 중 65개)이 replay 에서
    "unknown verification outcome" 으로 거절되고(`verification_run_registry.ml:225-230`), 못 읽는 줄이 있는
    동안에는 파일 압축이 돌지 않는다. 이런 때 쓰라고 있는 함수가 `cut_replay_log ~execute:true` 다
@@ -879,7 +879,7 @@ PR 을 닫힌 이슈라고 적음)이 바로 판정이 걸러야 하는 경우�
   `lib/verification_authority_tools.ml`, `lib/verification_run_registry.ml`,
   `lib/operator_task_attention.ml`, `lib/keeper/keeper_current_task_reconcile.ml`,
   `lib/keeper/keeper_tool_task_runtime.ml`, `lib/task/tool_task.ml`, `lib/types/types_core.ml`,
-  `bin/deployment_preflight_helper.ml`, `scripts/deploy.sh`,
+  `bin/deployment_preflight_helper.ml`,
   `config/tools/keeper_task_{done,cancel,release,claim}.toml`. 기준 커밋 `a31a7f9dad`.
 - 이 문서는 독립 적대 검토를 한 번 거쳤다. 논리 오류로 분류된 것은 없었고, 받아들인 지적은 반려의
   handoff, `basis` 삭제, 운영자 자격을 만드는 자리, 운영자 목록의 출처, 배포 절차, 스펙의 버그 모델 셋이다.

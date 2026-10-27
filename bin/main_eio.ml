@@ -464,7 +464,7 @@ let port = Term.(ret (const (fun requested cli -> match resolve_connection_port 
 
 let accept_store_quarantine =
   let doc =
-    "Let boot move aside every keeper store this build cannot decode and start those keepers with empty stores. Without this flag boot refuses to start while such a store exists and prints each path with its rejection (RFC-0420). The deploy script never passes it: its preflight refuses the same files before the executable starts."
+    "Let boot move aside every keeper store this build cannot decode and start those keepers with empty stores. Without this flag boot refuses to start while such a store exists and prints each path with its rejection (RFC-0420). The deployment preflight never passes it: it refuses the same files before the executable is replaced or started."
   in
   Arg.(value & flag & info ["accept-store-quarantine"] ~doc)
 

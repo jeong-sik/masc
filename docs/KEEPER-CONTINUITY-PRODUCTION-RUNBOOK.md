@@ -54,7 +54,7 @@ surface its error; let unrelated lanes continue.
 
 The executable checks its own durable-store policy during owner initialization,
 including when a supervisor or a shell starts it directly. This check does not
-depend on having run `deploy.sh`. `Keeper_durable_store.reader` owns the policy;
+depend on having run the deployment preflight. `Keeper_durable_store.reader` owns the policy;
 `Keeper_store_boot_reconcile.examine` and `admit` run before Keeper loops and
 before owner readiness is published.
 

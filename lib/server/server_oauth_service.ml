@@ -111,14 +111,20 @@ let render_authorization_form ?error (request : Auth_oauth.authorization_request
   (* MCP 2026-07-28 asks for a warning when a document client returns only to
      this computer: the document proves which site published the name, not
      which local program is asking. *)
+  let document_host () =
+    html_escape (Option.value ~default:"" (Uri.host (Uri.of_string request.client_id)))
+  in
   let document_client_warning =
-    match Auth_oauth_client_metadata.classify_client_id request.client_id with
-    | Ok (Auth_oauth_client_metadata.Document _) ->
+    match request.client_verification with
+    | Auth_oauth.Registered_client -> ""
+    | Auth_oauth.Unverified_document ->
+      Printf.sprintf
+        {|<p class="warning">This client is named by a document at <code>%s</code>. MASC reads it when you press Authorize and refuses the sign-in unless it lists the callback above. The callback goes to a program on this computer, and any program here can claim this client. Authorize only a sign-in you started just now.</p>|}
+        (document_host ())
+    | Auth_oauth.Verified_document ->
       Printf.sprintf
         {|<p class="warning">The name comes from a document published at <code>%s</code>. The callback goes to a program on this computer, and any program here can use that name. Authorize only a sign-in you started just now.</p>|}
-        (html_escape
-           (Option.value ~default:"" (Uri.host (Uri.of_string request.client_id))))
-    | Ok (Auth_oauth_client_metadata.Registered _) | Error _ -> ""
+        (document_host ())
   in
   let scopes = Auth_oauth.scopes_to_string request.scopes |> html_escape in
   let admin_confirmation =
@@ -176,11 +182,11 @@ let authorization_form_headers =
   ]
 ;;
 
-let authorization_request_of_params ~base_path ~authority ~fetch_client_metadata params =
+let authorization_request_of_params ~base_path ~authority ~client_document params =
   Auth_oauth.validate_authorization_request
     ~base_path
     ~expected_resource:(Server_oauth_metadata.resource authority)
-    ~fetch_client_metadata
+    ~client_document
     ~response_type:(param params "response_type")
     ~client_id:(param params "client_id")
     ~redirect_uri:(param params "redirect_uri")
@@ -191,9 +197,15 @@ let authorization_request_of_params ~base_path ~authority ~fetch_client_metadata
     ~code_challenge_method:(param params "code_challenge_method")
 ;;
 
-let authorize_get ~base_path ~authority ~fetch_client_metadata ~target =
+(* Any page can send the operator's browser here, so the consent form never
+   makes this server fetch a document; the approval below does. *)
+let authorize_get ~base_path ~authority ~target =
   let* params = query_params target in
-  authorization_request_of_params ~base_path ~authority ~fetch_client_metadata params
+  authorization_request_of_params
+    ~base_path
+    ~authority
+    ~client_document:Auth_oauth.Show_unverified
+    params
 ;;
 
 (* RFC 9207 section 2: every authorization response redirected to the client,
@@ -234,7 +246,11 @@ type authorization_post_outcome =
 let authorize_post ~base_path ~authority ~fetch_client_metadata ~body =
   let* params = parse_form body in
   let* request =
-    authorization_request_of_params ~base_path ~authority ~fetch_client_metadata params
+    authorization_request_of_params
+      ~base_path
+      ~authority
+      ~client_document:(Auth_oauth.Fetch_and_verify fetch_client_metadata)
+      params
   in
   let issuer = Server_oauth_metadata.issuer authority in
   if Option.equal String.equal (param params "decision") (Some "deny")

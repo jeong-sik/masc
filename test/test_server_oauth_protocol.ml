@@ -273,6 +273,7 @@ let test_admin_consent_is_visible_and_explicit () =
     ; scopes = [ Auth_oauth.Mcp_admin ]
     ; state = Some "state"
     ; code_challenge = String.make 43 'a'
+    ; client_verification = Auth_oauth.Registered_client
     }
   in
   let html = Server_oauth_service.render_authorization_form request in
@@ -448,7 +449,7 @@ let serving document =
 
 let test_document_client_signs_in () =
   with_oauth_workspace (fun base_path ->
-    let bootstrap_token, _ =
+    let bootstrap_token, bootstrap_credential =
       match Auth.create_token base_path ~agent_name:"claude" ~role:Masc_domain.Worker with
       | Ok created -> created
       | Error error -> fail (Masc_domain.masc_error_to_string error)
@@ -462,20 +463,24 @@ let test_document_client_signs_in () =
       ^ authorize_query ~client_id:claude_code_url ~redirect_uri ~challenge ()
     in
     (match
-       Server_oauth_service.authorize_get
-         ~base_path
-         ~authority:(authority ())
-         ~fetch_client_metadata
-         ~target
+       Server_oauth_service.authorize_get ~base_path ~authority:(authority ()) ~target
      with
      | Error error -> fail (Auth_oauth.show_error error)
      | Ok request ->
-       check (option string) "name from the document" (Some "Claude Code")
-         request.client_name;
+       check (option string) "the form claims no name" None request.client_name;
        let html = Server_oauth_service.render_authorization_form request in
-       check bool "consent names the publishing site" true
-         (contains html "published at <code>claude.ai</code>"));
-    check (list string) "the form fetched the client_id URL" [ claude_code_url ] !fetched;
+       check bool "consent names the document's site" true
+         (contains html "named by a document at <code>claude.ai</code>");
+       (match
+          Auth_oauth.issue_authorization_code
+            ~base_path
+            ~request
+            ~bootstrap_credential:bootstrap_credential
+        with
+        | Error (Auth_oauth.Invalid_request _) -> ()
+        | Error error -> fail ("unexpected refusal: " ^ Auth_oauth.show_error error)
+        | Ok _ -> fail "a code was issued for a document nobody checked"));
+    check (list string) "the form fetched nothing" [] !fetched;
     let body =
       authorize_query
         ~client_id:claude_code_url
@@ -496,7 +501,7 @@ let test_document_client_signs_in () =
       | Ok (Server_oauth_service.Authorization_form_error { message; _ }) -> fail message
       | Error error -> fail (Auth_oauth.show_error error)
     in
-    check int "the approval fetched the document again" 2 (List.length !fetched);
+    check (list string) "the approval fetched the client_id URL" [ claude_code_url ] !fetched;
     let callback = Uri.of_string location in
     check (option int) "callback keeps the requested port" (Some 3118) (Uri.port callback);
     let code =
@@ -522,16 +527,20 @@ let test_document_client_refusals () =
   with_oauth_workspace (fun base_path ->
     let challenge = String.make 43 'a' in
     let refused ~label ~fetch_client_metadata ~redirect_uri =
-      let target =
-        "/oauth/authorize?"
-        ^ authorize_query ~client_id:claude_code_url ~redirect_uri ~challenge ()
+      let body =
+        authorize_query
+          ~client_id:claude_code_url
+          ~redirect_uri
+          ~challenge
+          ~extra:[ "decision", [ "deny" ] ]
+          ()
       in
       match
-        Server_oauth_service.authorize_get
+        Server_oauth_service.authorize_post
           ~base_path
           ~authority:(authority ())
           ~fetch_client_metadata
-          ~target
+          ~body
       with
       | Error _ -> ()
       | Ok _ -> fail (label ^ " was accepted")

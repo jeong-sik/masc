@@ -638,12 +638,15 @@ describe('keeper turn record final input composition', () => {
   // TURN_PROMPT_BLOCK_IDS. Walk the constant through the full record path so
   // every id it holds decodes as a component.
   it.each([...TURN_PROMPT_BLOCK_IDS])('decodes the %s prompt component', async (block) => {
+    const blockRow = { block, bytes: 1, digest: 'a'.repeat(64) }
     getMock.mockResolvedValue(payload(entry({
+      blocks: [blockRow],
       input_components: [{ component: `prompt.${block}`, bytes: 1 }],
     })))
 
     const response = await fetchKeeperTurnRecords('sangsu')
 
+    expect(response.entries[0]?.record.blocks).toEqual([blockRow])
     expect(response.entries[0]?.record.input_components).toEqual([
       { component: `prompt.${block}`, bytes: 1 },
     ])

@@ -63,6 +63,27 @@ val register_client :
 val find_client :
   base_path:string -> client_id:string -> (client option, error) result
 
+type client_listing = {
+  client : client;
+  live_families : int;
+      (** Token families issued to the client that are neither revoked nor
+          past their refresh expiry. *)
+}
+
+val list_clients : base_path:string -> (client_listing list, error) result
+(** Every client Dynamic Client Registration stored. Client ID Metadata
+    Document clients are not stored and are not listed. *)
+
+type client_revocation = { revoked_families : int }
+
+val revoke_client :
+  base_path:string -> client_id:string -> (client_revocation option, error) result
+(** Release a stored client's registration slot. Every token family still
+    open for it is revoked, so its access and refresh tokens stop working,
+    then its record is deleted; a code issued to it before can no longer be
+    exchanged. [None] when no stored client has that id. Nothing selects
+    clients by age: the operator names the client (#26702). *)
+
 type client_verification =
   | Registered_client
       (** Stored by Dynamic Client Registration; the redirect_uri equals a

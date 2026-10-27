@@ -1266,6 +1266,71 @@ let token_cmd =
   in
   Cmd.group (Cmd.info "token" ~doc ~man) [ list_cmd; revoke_cmd; prune_cmd ]
 
+let oauth_client_id_arg =
+  let doc = "Client id to revoke, as `masc oauth-client list` prints it." in
+  Arg.(required & pos 0 (some string) None & info [] ~docv:"CLIENT_ID" ~doc)
+
+let oauth_client_list_cmd_exit base_path =
+  let base_path = Env_config.normalize_masc_base_path_input base_path in
+  match Auth_oauth.list_clients ~base_path with
+  | Error error ->
+    Printf.eprintf "cannot read OAuth clients: %s\n" (Auth_oauth.show_error error);
+    Cmd.Exit.some_error
+  | Ok listings ->
+    List.iter
+      (fun { Auth_oauth.client = (client : Auth_oauth.client); live_families } ->
+         Printf.printf "%s  %s  live_token_families=%d  redirect_uris=%s\n"
+           client.client_id
+           (Option.value ~default:"(no name)" client.client_name)
+           live_families
+           (String.concat "," client.redirect_uris))
+      listings;
+    Printf.printf "%d of %d registered clients stored\n"
+      (List.length listings)
+      (Env_config_runtime_services.OAuth.max_clients ());
+    Cmd.Exit.ok
+
+let oauth_client_revoke_cmd_exit base_path client_id =
+  let base_path = Env_config.normalize_masc_base_path_input base_path in
+  match Auth_oauth.revoke_client ~base_path ~client_id with
+  | Error error ->
+    Printf.eprintf "cannot revoke %S: %s\n" client_id (Auth_oauth.show_error error);
+    Cmd.Exit.some_error
+  | Ok None ->
+    Printf.eprintf
+      "no registered client %S; `masc oauth-client list` shows what is stored\n" client_id;
+    Cmd.Exit.some_error
+  | Ok (Some { Auth_oauth.revoked_families }) ->
+    Printf.printf "revoked %s and %d open token famil%s\n" client_id revoked_families
+      (if revoked_families = 1 then "y" else "ies");
+    Cmd.Exit.ok
+
+let oauth_client_cmd =
+  let list_cmd =
+    let doc = "List the clients Dynamic Client Registration stored." in
+    Cmd.v (Cmd.info "list" ~doc) Term.(const oauth_client_list_cmd_exit $ base_path)
+  in
+  let revoke_cmd =
+    let doc = "Revoke one registered client and every token issued to it." in
+    Cmd.v (Cmd.info "revoke" ~doc)
+      Term.(const oauth_client_revoke_cmd_exit $ base_path $ oauth_client_id_arg)
+  in
+  let doc = "Inspect and release the OAuth clients registered on this workspace." in
+  let man =
+    [ `S Manpage.s_description
+    ; `P
+        "Dynamic Client Registration needs no credential, and the store holds \
+         at most MASC_OAUTH_MAX_CLIENTS clients. Once it is full a new \
+         registration is refused until a client is revoked here. Revoking \
+         revokes the client's open token families first, so its access and \
+         refresh tokens stop working, then deletes its record."
+    ; `P
+        "Clients that sign in with a Client ID Metadata Document (an https \
+         client_id, as Claude Code does) are not stored and do not appear."
+    ]
+  in
+  Cmd.group (Cmd.info "oauth-client" ~doc ~man) [ list_cmd; revoke_cmd ]
+
 let login_cmd =
   let doc =
     "Mint a local bearer token, persist its raw token file, and print \
@@ -4858,6 +4923,7 @@ let cmd =
     ; sandbox_catalog_cmd
     ; runtime_client_path_cmd
     ; token_cmd
+    ; oauth_client_cmd
     ; build_commit_cmd
     ]
 

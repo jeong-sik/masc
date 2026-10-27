@@ -30,13 +30,14 @@ let judgment (record : Owner.retained) = match Progress.phase record.progress wi
   | Committing commit | Commit_unknown (commit,_) | Finished commit | Conflicted (commit,_) -> Ok commit.judgment
   | Captured | Admission_wait _ | Dispatch_pending _ | Rejected _
   | Subdividing _ | Subdivided _ -> Error "History publication has no answered original judgment"
-let reload ~store request =
+(* The record as it stands now. [previous] carries the body an earlier load
+   verified, so only the record is read again; [Request.confirm_record] checks
+   that it still names this request. *)
+let reload ~store ~previous request =
   let* ()=Request.confirm_owner request in
-  let* record=owned (Owner.load ~store ~scope:(Request.scope (Request.physical_owner request))
-    ~request_id:(Request.request_id request)) in
+  let* record=owned (Owner.reload ~store previous) in
   let* record=Option.to_result ~none:"Original history publication record is absent" record in
-  let* restored=Request.restore ~owner:(Request.physical_owner request) record in
-  let* ()=same (Request.to_json request) (Request.to_json restored) in
+  let* ()=Request.confirm_record request record in
   Ok record
 let original_answer ~store request record =
   let* value=judgment record in
@@ -198,9 +199,7 @@ let settle_positions request =
 type frontier = Unfinished | Settled
 let validate_with ~validate_chain ~validate_preparation ~root ~latest ~size_evidence
     ~store ~request ~(record : Owner.retained) =
-  let owner=Request.physical_owner request in
-  let* restored=Request.restore ~owner record in
-  let* ()=same (Request.to_json request) (Request.to_json restored) in
+  let* ()=Request.confirm_record request record in
   let* ()=validate_chain () in
   let* ()=match Progress.preparation record.progress with
     | None ->
@@ -273,7 +272,7 @@ let publish_with ~before_settlement ~store ~config ~request ~(original : Owner.r
       ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path) ~keeper_id in
     Request.owner_matches_json current (Request.owner_to_json owner)) in
   let* current,raw,proposal=io (fun () ->
-    let* current=reload ~store request in
+    let* current=reload ~store ~previous:original request in
     let* ()=same (Progress.to_json original.progress) (Progress.to_json current.progress) in
     let* raw,proposal=original_answer ~store request current in
     let* _=validate ~store ~request ~record:current in
@@ -303,7 +302,7 @@ let publish_with ~before_settlement ~store ~config ~request ~(original : Owner.r
     let* current,root,latest=io (fun () ->
       let* _=Journal.recover_root ~store ~owner ~capture:request in
       let* ()=Journal.recover_retries ~store ~owner ~capture:request in
-      let* current=reload ~store request in
+      let* current=reload ~store ~previous:current request in
       let* root=Journal.root ~store ~owner ~capture:request in
       let* root=Option.to_result ~none:"Original history gate root is absent" root in
       let* latest=Journal.latest ~store ~owner ~capture:request in
@@ -376,7 +375,7 @@ let publish_with ~before_settlement ~store ~config ~request ~(original : Owner.r
           let committed=ref None in
           let applied=io (fun () ->
             Keeper_librarian_durable_source_lock.with_original ~request (fun () ->
-              let* actual=reload ~store request in
+              let* actual=reload ~store ~previous:record request in
               let* ()=same (Progress.to_json actual.progress) (Progress.to_json record.Owner.progress) in
               let* proved=receipt_state request in
               let* ()=require (not proved) "Original history Memory effect is already receipt-proved" in

@@ -182,9 +182,13 @@ let preparation_of_json ~source_input json =
   let+ ()=Runtime.validate_durable_preparation p in p
 
 type predecessor = {request_id:string;request_digest:string}
+(* [digest] names the canonical bytes of [to_json]: the record's digest for a
+   restored original, computed once for a new or freestanding one. Equal
+   digests are equal requests, so a re-check of the same record compares this
+   instead of decoding the body again. *)
 type t = {id:string;owner:owner;destination:destination;source:Source.t;source_text:string;
   predecessor:predecessor option;
-  preparation:Runtime.durable_preparation}
+  preparation:Runtime.durable_preparation;digest:string}
 let predecessor capture=capture.predecessor
 let predecessor_json = function
   | None -> `Null
@@ -241,10 +245,11 @@ let create ?predecessor ~request_id ~owner ~destination ~source ~(preparation:Ru
   let* ()=require (preparation.source_input=Source.input source)
     "Original history preparation does not describe its source" in
   let* preparation=preparation_of_json ~source_input:(Source.input source) (preparation_json preparation) in
-  let capture={id=request_id;owner;destination;source;source_text;predecessor;preparation} in
+  let capture={id=request_id;owner;destination;source;source_text;predecessor;preparation;digest=""} in
   let* ()=validate capture in
-  let+ ()=confirm_source_root capture in capture
-let of_json ~owner json =
+  let* ()=confirm_source_root capture in
+  let+ digest=Owner.request_digest (to_json capture) in {capture with digest}
+let decode ~owner ~digest json =
   let* f=header_fields json in
   let* ()=require (value "schema" f=`Int 1 && value "kind" f=`String "completed-history-execution")
     "Unknown original history schema or kind" in
@@ -258,17 +263,30 @@ let of_json ~owner json =
   let* ()=require (Yojson.Safe.to_string (Source.to_json source)=source_text)
     "Original history source text is not its complete canonical encoding" in
   let* preparation=preparation_of_json ~source_input:(Source.input source) (value "preparation" f) in
-  let capture={id;owner;destination;source;source_text;predecessor;preparation} in
+  let capture={id;owner;destination;source;source_text;predecessor;preparation;digest=""} in
   let* ()=validate capture in
-  let+ ()=equal json (to_json capture) "Original history request encoding differs" in capture
+  let* ()=equal json (to_json capture) "Original history request encoding differs" in
+  let+ digest=match digest with Some digest -> Ok digest | None -> Owner.request_digest json in
+  {capture with digest}
+let of_json ~owner json = decode ~owner ~digest:None json
 let restore ~owner (record:Owner.retained) =
-  let* capture=of_json ~owner record.request in
+  (* The record's digest named the body [Owner.load] verified, and [decode]
+     requires that body to be this request's canonical encoding. *)
+  let* capture=decode ~owner ~digest:(Some record.request_digest) record.request in
   let* ()=confirm_source_root capture in
   let id=capture.id and destination=capture.destination in
   let* ()=require (record.scope=scope owner && record.request_id=id
     && record.installation_id=destination.installation_id && record.package_id=destination.package_id
     && record.tool=destination.tool) "Original history host binding differs" in
   let+ ()=equal record.request (to_json capture) "Original history request encoding differs" in capture
+let confirm_record capture (record:Owner.retained) =
+  let* ()=confirm_source_root capture in
+  let destination=capture.destination in
+  let* ()=require (record.scope=scope capture.owner && record.request_id=capture.id
+    && record.installation_id=destination.installation_id && record.package_id=destination.package_id
+    && record.tool=destination.tool) "Original history host binding differs" in
+  require (String.equal record.request_digest capture.digest)
+    "Original history record names another request"
 let confirm_predecessor ~store ~require_confirmed capture =
   match capture.predecessor with
   | None -> Ok ()

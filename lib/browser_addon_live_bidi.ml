@@ -266,7 +266,7 @@ let run_with ~before_command_validation ~connection_timeout_sec ~env ~owner ~dir
                         | B.No_live_waiter -> Ok ()
                         | B.Live_waiting_until deadline when Monotonic_deadline.passed deadline -> Ok ()
                         | B.Live_waiting_until deadline -> dispatch (Some deadline)
-                         | B.Live_executor_owned -> dispatch None)) in
+                        | B.Live_executor_owned -> dispatch None)) in
                 if Browser_addon_owner.is_retired owner then Ok () else serve () in
               let result=Eio.Fiber.first serve (fun () ->
                 Eio.Fiber.first

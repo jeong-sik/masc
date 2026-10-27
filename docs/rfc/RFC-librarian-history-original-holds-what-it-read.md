@@ -1,7 +1,7 @@
 ---
 rfc: "librarian-history-original-holds-what-it-read"
 title: "Librarian history original 은 읽은 범위만 담고, 출처는 길이와 digest 로 가리킨다"
-status: Draft
+status: Active
 created: 2026-10-27
 updated: 2026-10-27
 author: claude
@@ -73,46 +73,49 @@ original 은 Librarian 이 읽은 것의 기록이다. Librarian 은 범위만 �
 
 - 읽은 범위: 원문 그대로 한 번만 담는다.
 - capture 가 본 출처 전체: 출처마다 `{count, digest}` 로 담는다. `count` 는 capture 시점에 본 원소 수, `digest` 는 그 원소 **전부**(범위 앞, 범위, 범위 뒤)의 SHA-256 이다. 지금 `lock` 이 원소별로 비교하는 구간이 바로 이 `[0, count)` 다(`lock` 61줄 경계, 73줄 checkpoint 메시지, 81줄 trace 행).
-- 커밋 직전 `lock` 은 지금 출처의 `[0, count)` 로 같은 digest 를 계산해 비교한다. 그리고 지금 출처에서 범위 구간을 잘라, 담아 둔 범위 원문과 따로 비교한다. 복원은 범위 원문과 digest 의 결속을 스스로 증명하지 못한다. 그 결속은 `lock` 만 만든다.
+- 커밋 직전 `lock` 은 지금 출처의 `[0, count)` 로 같은 digest 를 계산해 비교한다. 그리고 그 원소로 capture 때와 같은 범위 선택·잘라내기·투영을 다시 돌려, 담아 둔 범위 원문과 같은지 본다. 복원은 범위 원문과 digest 의 결속을 스스로 증명하지 못한다. 그 결속은 `lock` 만 만든다.
 
 ### 4.2 digest 원소
 
 | 출처 | 원소 | 원소 바이트 |
 |---|---|---|
-| checkpoint | 메시지 | `Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json m)`. `lock` 의 `same_message` 와 같은 투영이다 |
-| official trace (`main`, `internal` 따로) | `(줄 번호, Ok 행 \| Error 사유)` | 줄 번호(8바이트), 태그 한 바이트(`O`/`E`), 행의 canonical JSON 또는 `read_error` 의 canonical 인코딩 |
+| checkpoint | 메시지 | `Agent_core.Checkpoint.message_to_json m` 의 JSON. checkpoint 가 저장하는 형태다 |
+| official trace (`main`, `internal` 따로) | `(줄 번호, Ok 행 \| Error 사유)` | `[줄 번호, ["ok", 행]]` 또는 `[줄 번호, ["error", 사유]]` 의 JSON |
 | 턴 경계 | `(줄 번호, Ok 기록 \| Error 사유)` | 위와 같다. `Capture.boundary_lines` 의 `(int * (record, read_error) result)` 를 그대로 덮는다 |
 
 - digest 는 원소마다 `길이(8바이트) ‖ 바이트` 를 이어 붙여 SHA-256 으로 스트리밍 해시한다. 길이를 붙여 원소 경계가 다른 두 목록이 같은 digest 가 되지 않게 한다.
-- 줄 번호와 `Error` 를 넣는 이유: `lock` 의 `prefix (=)` 는 이 둘까지 비교한다. 빠지면 "읽지 못하던 줄이 나중에 읽힘"이나 줄 번호 밀림을 digest 가 놓친다. `same_generation` 이 뒤쪽 `Error` 줄을 거절하는 것(`lock` 25줄)과도 맞물린다.
-- 범위 원문은 checkpoint 투영이 아니라 지금처럼 풍부한 표현(`I.message_json`, `ToolResult.json` 포함)으로 담는다. digest 는 투영, 범위 원문은 풍부한 표현이다. `lock` 의 범위 비교는 둘 다 투영으로 한다.
+- 줄 번호와 `Error` 를 넣는 이유: 예전 `lock` 의 `prefix (=)` 는 이 둘까지 비교했다. 빠지면 "읽지 못하던 줄이 나중에 읽힘"이나 줄 번호 밀림을 digest 가 놓친다. `same_generation` 이 뒤쪽 `Error` 줄을 거절하는 것과도 맞물린다.
+- 범위 원문은 checkpoint 투영이 아니라 풍부한 표현(`I.message_json`, `ToolResult.json` 포함)으로 담는다. `lock` 의 범위 비교는 atom 메시지를 checkpoint 형태로, official 턴 메시지를 값 그대로 비교한다. 재시작 뒤 디스크에서 읽은 checkpoint 에는 `ToolResult.json` 이 없기 때문이다. official 턴 메시지는 자기 파일에서 그대로 오므로 값 그대로 비교할 수 있다. 예전 비교와 같은 강도다.
 
 ### 4.3 출처별로 담는 것
 
-- **checkpoint**: `canonical_bytes` 와 전체 `messages` 를 뺀다. `{count, digest}` 와 범위 메시지(풍부한 표현)를 담는다. `{trace_id, turn_count, sha256}` 와 `boundary_lines_seen` 은 남긴다. `boundary_lines_seen` 은 `same_generation` 이 쓴다. `sha256` 은 이제 검증된 참조가 아니라 이름표다(9절).
-- **official trace**: 고른 턴의 행만 원문으로 담는다. 파일마다 `{count, digest}` 를 담는다.
-- **턴 경계**: 범위를 고르고 자르는 데 쓴 줄(`select` 가 본 시작 위치부터 끝 경계, `witness_line`)만 원문으로 담는다. 로그 전체 `{count, digest}` 를 담는다.
-- **input 과 준비 값**: 범위 원문이 들어가는 곳이 지금 넷이다. source 의 범위 메시지, `input_text.messages`, `preparation.variables` 의 대화 이력, `rendered_prompt`. 뒤의 셋은 이미 복원 때 source 에서 다시 만들어 저장값과 비교한다(`project_source`, `validate_durable_preparation`). 그래서 저장하지 않고 다시 만든다. `rendered_prompt` 는 모델에 보낸 실제 입력이므로 SHA-256 만 담고, 다시 만든 값과 digest 로 비교한다. `input_text` 의 나머지(현재 사실, 작업 맥락, 도구 관찰, counterpart)는 그대로 담는다.
-- `range`, `positions`, `counterparts_text`: 그대로.
+- **읽은 범위**: `input_text.messages` 에 한 번만 담는다. 범위 원문은 출처 쪽에 담지 않는다. input 은 원래 `project_source` 결과와 같아야 하는 값이라, 출처 쪽 사본이 없어도 `lock` 이 지금 출처의 투영과 비교할 수 있다.
+- **checkpoint**: `canonical_bytes` 와 전체 `messages` 를 뺀다. `{count, digest}`, `trace_id`, `range`, `boundary_lines_seen`, `end_boundary_line` 을 담는다. `boundary_lines_seen` 은 `same_generation` 이 쓴다. `turn_count` 와 `sha256` 은 뺀다. canonical bytes 가 없으면 이 둘을 읽는 곳이 없다(9절).
+- **official trace**: 행 원문을 담지 않는다. 파일마다 `{count, digest}` 와 고른 턴 목록(`selected`)을 담는다.
+- **턴 경계**: 줄 원문을 담지 않는다. 로그 전체 `{count, digest}` 를 담는다. 범위를 고르고 자르는 데 쓴 줄은 `lock` 이 지금 로그의 `[0, count)` 에서 다시 읽는다.
+- **준비 값**: `variables` 와 `rendered_prompt` 를 담지 않는다. 둘은 input 과 담아 둔 프롬프트 해석값(`rule_prompt`, `prompt`)에서 복원 때 다시 만든다(`Runtime.restore_durable_preparation`). `rendered_prompt` 는 모델에 보낸 실제 입력이므로 SHA-256(`rendered_prompt_sha256`)을 담고, 다시 만든 값과 비교한다.
+- `input_text` 의 나머지(현재 사실, 작업 맥락, 도구 관찰, counterpart), `range`, `positions`, `counterparts_text`: 그대로.
+- capture 와 request 의 schema 를 2로 올린다. 예전 기록을 읽는 코드는 두지 않는다(8절).
 
 ### 4.4 검사가 옮겨 가는 곳
 
 | 검사 | 지금 | 바뀐 뒤 |
 |---|---|---|
-| 조각이 checkpoint 파일에서 왔는가 | 복원 때 원문을 디코딩해 sha256 과 메시지를 대조 | 커밋 직전 `lock` 이 지금 checkpoint 의 `[0, count)` digest 와 범위 구간을 대조 |
-| 저장한 메시지가 retained exact canonical bytes 와 같은가(`cap.mli` 85~87줄) | 복원 | 사라진다. `canonical_bytes` 가 없다. 대신 위 `lock` 대조가 출처와의 일치를 본다 |
-| range 위치 | 복원 때 전체 메시지로 `select`·`cut_lines` 를 다시 돈다 | 복원은 `select` 를 다시 돌지 않는다. `lock` 이 지금 출처(`[0, count)` 메시지와 경계)로 `select` 를 한 번 다시 돌려 같은 range 와 cut 이 나오는지 본다 |
+| 조각이 checkpoint 파일에서 왔는가 | 복원 때 원문을 디코딩해 sha256 과 메시지를 대조 | 커밋 직전 `lock` 이 지금 checkpoint 의 `[0, count)` digest 를 대조하고, 그 메시지로 범위를 다시 잘라 input 과 대조 |
+| 저장한 메시지가 retained exact canonical bytes 와 같은가(`cap.mli` 85~87줄) | 복원 | 하지 않는다. `canonical_bytes` 가 없다. 위 `lock` 대조가 출처와의 일치를 본다 |
+| range 위치 | 복원 때 전체 메시지로 `select`·`cut_lines` 를 다시 돈다 | 복원은 하지 않는다. `lock` 이 지금 출처의 `[0, count)` 로 `select`·`select_official`·`cut_lines` 를 다시 돌려 같은 range·cut·턴이 나오는지 본다(`Capture.confirm_sources`) |
 | 출처가 바뀌었나 | `lock` 이 원소별 `prefix` 비교 | `lock` 이 digest 비교 |
-| 입력이 범위의 투영인가 | 복원 때 `project_source` 결과와 저장 input 비교 | 복원 때 `project_source` 로 input messages 를 만든다 |
-| 프롬프트가 입력과 템플릿에서 나왔나 | 복원 때 다시 렌더링해 저장 문자열과 비교 | 다시 렌더링해 저장한 SHA-256 과 비교 |
+| 입력이 범위의 투영인가 | 복원 때 `project_source` 결과와 저장 input 비교 | `lock` 이 지금 출처의 `[0, count)` 로 `project_source` 를 돌려 저장 input 과 비교 |
+| 프롬프트가 입력과 템플릿에서 나왔나 | 복원 때 다시 렌더링해 저장 문자열과 비교 | 복원 때 다시 렌더링해 저장한 SHA-256 과 비교 |
+| 영수증·커서·counterpart 투영 | 복원 | 그대로 복원(`validate_record`). 출처 없이 기록만으로 볼 수 있다 |
 
 `cap.mli` 의 "restored checkpoint never becomes an exact-source or source-lock token" 은 그대로 지킨다. 복원은 출처를 주장하지 않고, 출처와의 대조는 `lock` 만 한다.
 
-`To_first_cut_point` 는 progress 위치에서 앞으로 훑어 첫 cut 을 찾으므로, 범위 밖 메시지를 볼 수 있다. 그래서 "범위 양옆 atom 몇 개를 담아 복원이 `select` 를 돈다"는 안 대신, `select` 는 지금 출처를 가진 `lock` 에서만 돌린다.
+`To_first_cut_point` 는 progress 위치에서 앞으로 훑어 첫 cut 을 찾으므로, 범위 밖 메시지를 볼 수 있다. 작업 맥락 귀속(`Keeper_librarian_task_context.atom_spans`)도 턴 시작 atom 의 digest 를 보므로 범위 앞 atom 을 볼 수 있다. 그래서 "범위 양옆 atom 몇 개를 담아 복원이 `select` 를 돈다"는 안 대신, 선택과 투영은 지금 출처를 가진 `lock` 에서만 다시 돌린다. digest 가 같으면 `[0, count)` 는 capture 가 본 원소와 같으므로, 같은 계산이 같은 결과를 낸다. 이 계산들은 checkpoint 가 저장하는 필드(role, origin, metadata, 도구 결과 상태)만 본다.
 
 ### 4.5 남는 대화 크기 비용
 
-- capture 때: 출처를 읽어 digest 를 계산한다. 지금도 출처는 통째로 읽는다. 바뀐 뒤에는 그 바이트를 저장하거나 다시 인코딩해 담지 않는다. checkpoint 메시지의 인코딩은 `Keeper_checkpoint_store` 의 lineage 메모가 이미 들고 있으면 그것을 쓸 수 있다(L3 에서 확인).
+- capture 때: 출처를 읽어 digest 를 계산한다. 출처는 지금도 통째로 읽는다. 바뀐 뒤에는 그 바이트를 저장하거나 다시 인코딩해 담지 않는다. L3 은 checkpoint 메시지를 원소마다 한 번 인코딩해 해시한다. lineage 메모의 인코딩을 다시 쓰지는 않았다. 측정한 할당 기울기는 checkpoint 1바이트당 약 13바이트다(7.1절).
 - 커밋 직전 `lock`: 지금 출처의 `[0, count)` 를 한 번 인코딩해 해시하고, `select` 를 한 번 돈다. 지금도 원소별 비교를 위해 같은 양을 읽는다.
 
 복원과 그 반복 검증은 읽은 범위 크기를 따라간다.
@@ -147,7 +150,21 @@ original 은 Librarian 이 읽은 것의 기록이다. Librarian 은 범위만 �
 | 읽을 내용 5 MB, 이미 읽은 대화 5 MB | pass 저장이 읽을 범위의 1.5배 아래. 지금은 범위가 source, input, variables, rendered_prompt 네 곳에 들어간다 |
 | 모든 조건 | 기존 Librarian 시험 세 묶음 통과 |
 
-측정 프로그램에 "읽을 내용 크기" 인자를 더해야 한다(L2).
+측정 프로그램에 "읽을 내용 크기" 인자를 더했다(`이미 읽은 MB:읽을 MB`, #46371).
+
+### 7.1 L3 측정 (#46397)
+
+읽을 내용 210 B, L2(#46394) → L3:
+
+| 이미 읽은 대화 | pass 할당 | pass 저장 | 시간 |
+|---|---|---|---|
+| 1 MB | 0.97 GB → 0.12 GB | 2.3 MB → 166 KB | 1.4 s → 0.32 s |
+| 5 MB | 3.88 GB → 0.18 GB | 10.8 MB → 166 KB | 5.2 s → 0.32 s |
+| 20 MB | 15.20 GB → 0.38 GB | 42.7 MB → 166 KB | 18.3 s → 0.83 s |
+
+- 저장 기준: 맞다. 대화 크기와 상관없이 166 KB, 20 MB 에서 checkpoint 의 0.79% 다.
+- 할당 기준: 20 MB 에서만 맞다(17.9배). 할당은 고정분 약 107 MB 에 checkpoint 1바이트당 약 13바이트다. 1 MB 에서 114배, 5 MB 에서 33배로, 고정분 때문에 넘는다.
+- 읽을 범위 기준: 5 MB 는 잴 수 없었다. 읽을 범위 4 MB 이상은 L2 와 L3 모두 모델을 부르지 못하고 끝난다(#46398). 범위 1 MB 로 쟀다. original 은 1.14 MB 로 범위를 한 번 담는다. pass 저장은 3.33 MB 로 범위의 약 3.2배다. 공용 Exact 실행기의 `exact-requests` 와 `host-results` 가 프롬프트를 한 번씩 더 담는다(#46399). 이 둘은 이 RFC 범위 밖이다.
 
 라이브에서는 배포 뒤 기동 15분 전후의 초당 할당 p50, memprof 할당과 live 상위를 #46247 배포 뒤 값(초당 1.1 GB, live heap 의 약 70% 가 history original 읽기)과 비교해 기록한다.
 
@@ -161,19 +178,20 @@ original 은 Librarian 이 읽은 것의 기록이다. Librarian 은 범위만 �
 4. `keeper-librarian-history-execution-*` 와 그 gate scope(`keeper-librarian-durable-gate/*`) 디렉터리를 `tool-request-owners/` 와 `tool-request-bodies/` 양쪽에서 옮긴다. 읽기 위치는 커밋한 범위까지만 나아가 있으므로, 다음 pass 가 남은 범위를 새 original 로 다시 잡는다.
 5. 새 바이너리로 띄운다.
 
-2026-10-27 하드컷 때 쓴 정지·확인·옮기기·되돌리기 스크립트를 그대로 쓸 수 있다. admission scope 가 이 형식을 쓰는지는 L3 에서 확인한다.
+2026-10-27 하드컷 때 쓴 정지·확인·옮기기·되돌리기 스크립트를 그대로 쓸 수 있다. admission scope 는 이 형식을 쓰지 않으므로 옮기지 않는다(9절).
 
 ## 9. 열린 질문과 L3 확인 목록
 
-- **이름표가 된 `sha256`**: 복원이 `{trace_id, turn_count, sha256}` 를 파일과 대조하지 않으면, 이 값은 검증된 참조가 아니다. 이 값을 읽는 쪽(Memory 의 출처 표기, retained checkpoint sweep 등)이 검증된 참조로 쓰지 않는지 L3 시작 때 소비처를 모두 찾는다.
-- **`lock` 의 `select` 재실행**: `lock` 이 지금 출처로 `select` 를 다시 돌릴 때, capture 때와 같은 progress 위치와 `extent` 를 써야 같은 결과가 나온다. 이 값들이 original 에 남는지 확인한다.
-- **`same_generation`**: live 경계와 원본의 `trace_id`·`boundary_lines_seen` 만 쓴다(`lock` 19~31줄). 담는 경계 줄 범위와 무관하다. `boundary_lines_seen` 을 남기면 된다.
-- **준비 값을 다시 만들기**: `validate_durable_preparation` 이 쓰는 프롬프트 해석(`rule_prompt`, `prompt`)이 템플릿 본문을 담고 있어, 나중에 파일이 바뀌어도 같은 값을 다시 만들 수 있는지 확인한다. 지금도 같은 비교를 하므로 같은 조건이어야 한다.
+- **checkpoint 참조의 `turn_count`·`sha256`**: L3 에서 소비처를 찾았다. 복원된 capture 의 checkpoint 참조를 읽는 곳은 `trace_id` 뿐이다(`project_source`, `lock`). Memory 의 출처 표기는 영수증(`durable_range_id`)을 쓰고, 영수증에는 `sha256` 이 없다. 그래서 둘을 뺐다.
+- **`lock` 의 `select` 재실행**: capture 때의 `positions.selection` 과 `extent` 가 original 에 남는다. `lock` 은 이 둘과 지금 출처의 `[0, count)` 로 다시 돌린다.
+- **`same_generation`**: 지금 경계와 original 의 `trace_id`·`boundary_lines_seen` 만 쓴다. 담는 경계 줄과 무관하다.
+- **준비 값을 다시 만들기**: 프롬프트 해석값(`rule_prompt`, `prompt`)이 파일 본문과 override 를 담고 있어, 나중에 파일이 바뀌어도 같은 값을 다시 만든다. `validate_durable_preparation` 이 이미 이 조건으로 다시 렌더링해 비교하고 있었다.
+- **admission**: 다른 형식과 scope(`keeper-librarian-execution-*`, `keeper-librarian-parts/*`)를 쓴다. 이번 형식 변경과 무관하다.
 - **대체 체인**: `Replacement_intended` 는 자식 요청 전체를 담는다. 요청이 작아지면 이 사본도 작아진다. 따로 바꾸지 않는다.
 
 ## 10. 확신도
 
 - 2절의 필드와 읽는 곳: 높음. 코드에서 확인했고 리뷰(code-reviewer-brother)도 같은 결론이었다. 라인 번호는 `fdda2724cba` 기준이다.
-- 4절 설계로 `lock` 이 지금과 같은 것을 확인한다는 점: 중간에서 높음. `[0, count)` digest 와 범위 비교는 지금의 원소별 비교와 같은 변화를 잡는다. `select` 를 `lock` 에서 다시 돌리는 부분은 L3 에서 코드로 확인해야 한다.
-- L2(parse once)의 효과: 모른다. 재서 정한다.
-- 7절 할당 목표(20배 아래): 낮음. 커밋 때 해시와 `select` 비용을 재 보지 않았다. L2·L3 측정으로 고친다.
+- 4절 설계로 `lock` 이 예전과 같은 것을 확인한다는 점: 높음. L3 시험이 출처 셋 각각의 범위 앞·안·뒤 원소 변경과 `Error`→`Ok` 변경을 거절하는 것을 보이고, digest 비교를 뺀 mutant 를 잡는다(#46397).
+- L2(parse once)의 효과: 쟀다. 할당 −37%(#46394).
+- L3 의 효과: 쟀다(7.1절). 라이브 효과는 배포 뒤 L4 에서 잰다.

@@ -1157,21 +1157,41 @@ let test_queue_residence_is_the_admission_time_not_the_source_time () =
 ;;
 
 let test_queue_residence_without_a_recorded_clock_is_unknown () =
-  with_workspace
-  @@ fun config ->
-  let keeper_name = "queue-residence-unrecorded-keeper" in
-  ensure_keeper config keeper_name;
-  Keeper_event_queue_persistence.persist
-    ~base_path:config.Workspace_utils_backend_setup.base_path
-    ~keeper_name
-    (queue_of_list
-       [ stimulus ~post_id:"residence-2" ~arrived_at:100.0 Keeper_event_queue.Bootstrap ]);
-  let json = Server_keeper_waiting_inventory.dashboard_json config in
-  let _, residence = queue_residence_of_keeper json keeper_name in
-  check string "residence is unknown" "unknown" (json_string_member "status" residence);
+  (* The persistence path always stamps an admission clock, so a selection
+     without one can only come from an old snapshot or [with_pending]: this
+     case lives at the pure projection boundary, not behind [persist]. *)
+  let queue =
+    queue_of_list
+      [ stimulus ~post_id:"residence-2" ~arrived_at:100.0 Keeper_event_queue.Bootstrap ]
+  in
+  let state =
+    Keeper_event_queue_state.with_pending queue Keeper_event_queue_state.empty
+  in
+  let selections = Keeper_event_queue_state.pending_selections state in
+  let residence =
+    Keeper_event_queue_fleet_projection.queue_residence_of_selections
+      ~now:(Unix.gettimeofday ())
+      ~complete:true
+      selections
+  in
+  (match residence with
+   | Keeper_event_queue_fleet_projection.Unknown
+       Keeper_event_queue_fleet_projection.First_admission_not_recorded -> ()
+   | Keeper_event_queue_fleet_projection.Empty ->
+     fail "unclocked selections must not read as an empty queue"
+   | Keeper_event_queue_fleet_projection.Unknown
+       (Keeper_event_queue_fleet_projection.Queue_observation_incomplete
+       | Keeper_event_queue_fleet_projection.Clock_observation_invalid) ->
+     fail "unclocked selections must name the missing clock"
+   | Keeper_event_queue_fleet_projection.Observed _ ->
+     fail "unclocked selections must not read as observed");
+  let json =
+    Keeper_event_queue_fleet_projection.queue_residence_to_yojson residence
+  in
+  check string "residence is unknown" "unknown" (json_string_member "status" json);
   check string "reason names the missing clock" "first_admission_not_recorded"
-    (json_string_member "reason" residence);
-  check bool "no age is invented" true (U.member "oldest_age_seconds" residence = `Null)
+    (json_string_member "reason" json);
+  check bool "no age is invented" true (U.member "oldest_age_seconds" json = `Null)
 ;;
 
 let test_queue_residence_of_an_empty_queue_is_empty () =

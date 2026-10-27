@@ -3,6 +3,11 @@
 val of_snapshot : observed_at:float -> Yojson.Safe.t ->
   (Lane_addon_types.output, string) result
 
+(** A backend that could not start while the rest of the worker serves. *)
+type unavailable = Ego_user_owned_name of { space : string; observed_at : float }
+val unavailable_to_json : unavailable -> Yojson.Safe.t
+val unavailable_of_json : Yojson.Safe.t -> (unavailable, string) result
+
 val publish_client : Browser_lane.client_info ->
   space_observation:Browser_ego_space_observation.t option -> Yojson.Safe.t
 (** Add the cached SDK observation to the ordinary connection/activity row.
@@ -16,6 +21,7 @@ type published = {
   (** The client rows as the worker sent them, for a caller that passes them on. *)
   automation : Browser_selection.work_browser;
   stagehand : Browser_selection.work_browser;
+  unavailable : unavailable list;
 }
 
 val decode_snapshot : Yojson.Safe.t -> (published, string) result

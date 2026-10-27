@@ -1,5 +1,22 @@
 let ( let* ) = Result.bind
 
+type unavailable = Ego_user_owned_name of { space : string; observed_at : float }
+let unavailable_to_json = function
+  | Ego_user_owned_name {space; observed_at} -> `Assoc ["backend",`String "ego";
+      "reason",`String "user_owned_name";"space",`String space;
+      "observedAt",`Float observed_at;"recheck",`String "worker_restart"]
+
+let unavailable_of_json = function
+  | `Assoc fields ->
+    (match List.assoc_opt "backend" fields, List.assoc_opt "reason" fields,
+           List.assoc_opt "space" fields, List.assoc_opt "observedAt" fields, List.assoc_opt "recheck" fields with
+     | Some (`String "ego"), Some (`String "user_owned_name"), Some (`String space),
+       Some (`Float observed_at), Some (`String "worker_restart")
+       when space <> "" && Float.is_finite observed_at && observed_at >= 0. ->
+       Ok (Ego_user_owned_name {space; observed_at})
+     | _ -> Error "invalid unavailable browser backend")
+  | _ -> Error "invalid unavailable browser backend"
+
 let of_snapshot ~observed_at = function
   | `Assoc fields ->
       let output={Lane_addon_types.rows=[{
@@ -24,6 +41,7 @@ type published = {
   client_rows : Yojson.Safe.t list;
   automation : Browser_selection.work_browser;
   stagehand : Browser_selection.work_browser;
+  unavailable : unavailable list;
 }
 
 let decode_snapshot = function
@@ -56,7 +74,14 @@ let decode_snapshot = function
                  then Error "duplicate browser inventory client" else decode (client::acc) rest
              | _::_ -> Error "invalid browser inventory client" in
            let* clients=decode [] rows in
-           Ok {clients;client_rows=rows;automation;stagehand}
+           let rec unavailable acc = function
+             | [] -> Ok (List.rev acc)
+             | row :: rest -> let* item = unavailable_of_json row in unavailable (item :: acc) rest in
+           let* unavailable = match List.assoc_opt "unavailable" fields with
+             | None -> Ok []
+             | Some (`List rows) -> unavailable [] rows
+             | Some _ -> Error "invalid unavailable browser backends" in
+           Ok {clients;client_rows=rows;automation;stagehand;unavailable}
        | Some (`String "retired"),(None|Some _),(None|Some _) -> Error "the browser worker is retired"
        | (None|Some _),(None|Some _),(None|Some _) -> Error "browser inventory is unavailable")
   | _ -> Error "browser inventory is unavailable"
@@ -85,5 +110,6 @@ let merge ~among workers =
     | [ (_, None) ] | [] | _ :: _ :: _ -> unobserved in
   { clients = List.concat_map (fun published -> published.clients) live;
     client_rows = List.concat_map (fun published -> published.client_rows) live;
+    unavailable = List.concat_map (fun published -> published.unavailable) live;
     automation = owned Browser_lane.Backend.Automation (fun published -> published.automation);
     stagehand = owned Browser_lane.Backend.Stagehand (fun published -> published.stagehand) }

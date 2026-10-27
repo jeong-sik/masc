@@ -164,6 +164,23 @@ command = "/Users/me/.local/bin/ego-browser"
 space = "masc-keepers"
 ```
 
+If the configured name is already held by a user-owned Ego task space when
+the browser Add-on starts, Ego is unavailable and the Browser view reports the
+reason. The existing space is not opened, claimed or finished; other browser
+connections can continue. The report is the startup observation, not a live
+ownership check. It includes the observation time in the browser clients API.
+
+Choose a different configured name, or resolve the name conflict yourself.
+Save a new name through the Runtime settings editor or API; after editing
+`runtime.toml` directly, restart the server so its effective configuration is
+reloaded. Ego does not reconnect automatically in that worker. To recheck a declared
+browser Add-on without removing its declaration, switch it off, wait until
+its application reports `Inactive` and cleanup is confirmed, then switch it on
+again ([package activity](lane-package-activity.md)). This restarts the whole
+worker, including its managed Firefox. A list refresh alone does not restart
+it. If the listing itself fails, or a conflict arises after the listing, the
+original startup failure behavior still applies.
+
 The picker identifies its client UUID and the SDK-observed Space ID/name. The
 name is observed when the connection attaches; renaming it does not change its
 identity. A different Space ID requires a new selection even if a producer

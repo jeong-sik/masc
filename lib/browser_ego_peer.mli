@@ -34,6 +34,16 @@ val run_failure_message : run_failure -> string
     server waits for its answer, less the time to deliver the answer. *)
 type runner = window_s:float -> string -> (string, run_failure) result
 
+(** A read-only check of an exact configured name. Explicit current user
+    ownership establishes a conflict; an unreadable listing
+    does not establish either presence or absence. *)
+type space_name_observation =
+  | No_user_owned_match
+  | User_owned_matches of int list
+  | Space_names_unavailable of string
+
+val observe_space_name : run:runner -> space:string -> space_name_observation
+
 (** The prefix of the one line each script writes its answer on. *)
 val result_marker : string
 

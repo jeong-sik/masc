@@ -90,9 +90,11 @@ let clients ~bidi_host host=run (fun () ->
   let decision verb=match Browser_selection.choose ~verb ~bound:false ~snapshot Browser_selection.Automatic with
     | Ok selected -> `Assoc ["ok",`Bool true;"data",Browser_selection.to_json selected]
     | Error error -> `Assoc ["ok",`Bool false;"error",Browser_selection.error_to_json error] in
-  Ok (`Assoc ["clients",`List published.client_rows;"automatic",`Assoc ["browse",decision B.Tabs_list;
+  Ok (`Assoc (["clients",`List published.client_rows;"automatic",`Assoc ["browse",decision B.Tabs_list;
     "work",decision (B.Session_open {headless=Some false})];
-    "bidiHost",Browser_bidi_host_status.to_json bidi_host]))
+    "bidiHost",Browser_bidi_host_status.to_json bidi_host]
+    @ (match published.unavailable with [] -> [] | items ->
+        ["unavailable",`List (List.map Browser_addon_observation.unavailable_to_json items)]))))
 let connection_inventory ~config ~access ~bidi_host=run (fun () ->
   let* inventory=Host.connection_inventory ~config ~access |> Result.map_error (function
     | Host.Snapshot_unavailable detail ->

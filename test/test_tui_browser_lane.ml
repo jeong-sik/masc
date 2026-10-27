@@ -12,7 +12,7 @@ let zen = { client_id = "22222222-2222-4222-8222-222222222222"; browser = Zen;
 let pinned () = choose_client firefox { (create ()) with clients = Some [firefox; zen] }
 (* A connection list that came with no word of the BiDi host. *)
 let found listed = { listed; bidi_host = Host_not_reported;
-  inventory_report = Inventory_not_reported; automatic = None }
+  inventory_report = Inventory_not_reported; automatic = None; unavailable = Backends_not_reported }
 
 module Record = Masc.Browser_bidi_host_record
 module Status = Masc.Browser_bidi_host_status
@@ -625,12 +625,24 @@ let test_bidi_host_discovery () =
   expect "the server's report is read with the list"
     (decode_discovery (answer ["bidiHost", Status.report_to_json ended])
      = Ok { listed = [firefox]; bidi_host = Host_reported ended;
-         inventory_report=Inventory_not_reported; automatic=None });
+         inventory_report=Inventory_not_reported; automatic=None; unavailable=Backends_not_reported });
   expect "a server that says nothing of the host still lists its connections"
     (decode_discovery (answer []) = Ok (found [firefox])
      && decode_discovery (answer ["bidiHost", `Null]) = Ok (found [firefox]));
+  let conflict = Masc.Browser_addon_observation.Ego_user_owned_name {space="masc";observed_at=42.} in
+  let decoded = success (decode_discovery (answer ["unavailable",`List [Masc.Browser_addon_observation.unavailable_to_json conflict]])) in
+  expect "the same discovery retains the unavailable backend and its original observation"
+    (decoded.listed=[firefox] && decoded.unavailable=Backends_unavailable [conflict]);
+  let observed = { (create ()) with unavailable=decoded.unavailable } in
+  expect "switching sources retains the last backend observation"
+    ((switch_source Automation observed).unavailable=observed.unavailable
+     && (choose_automatic observed).unavailable=observed.unavailable);
+  let unreadable = success (decode_discovery (answer ["unavailable",`String "invalid"])) in
+  expect "an unreadable backend report does not discard the client list"
+    (unreadable.listed=[firefox] && match unreadable.unavailable with
+      | Backends_unreadable _ -> true | Backends_not_reported | Backends_unavailable _ -> false);
   (match decode_discovery (answer ["bidiHost", `Assoc ["state", `String "paused"]]) with
-   | Ok { listed; bidi_host = Host_report_unreadable { message = None; _ }; inventory_report=_; automatic=_ } ->
+   | Ok { listed; bidi_host = Host_report_unreadable { message = None; _ }; inventory_report=_; automatic=_; unavailable=_ } ->
        expect "a report this TUI cannot read does not cost the list" (listed = [firefox])
    | Ok _ | Error _ -> failwith "an unreadable host report was not kept apart from the list");
   (* A server of another build may send a report this one cannot read. The
@@ -639,18 +651,18 @@ let test_bidi_host_discovery () =
      decode_discovery
        (answer ["bidiHost", `Assoc ["state", `String "paused"; "message", `String "The host is paused."]])
    with
-   | Ok { listed = _; bidi_host = Host_report_unreadable { message; _ }; inventory_report=_; automatic=_ } ->
+   | Ok { listed = _; bidi_host = Host_report_unreadable { message; _ }; inventory_report=_; automatic=_; unavailable=_ } ->
        expect "the server's paragraph outlives a report this TUI cannot read"
          (message = Some "The host is paused.")
    | Ok _ | Error _ -> failwith "an unreadable host report lost the server's paragraph");
   (match decode_discovery (answer ["bidiHost", `String "running"]) with
-   | Ok { listed; bidi_host = Host_report_unreadable { message = None; _ }; inventory_report=_; automatic=_ } ->
+   | Ok { listed; bidi_host = Host_report_unreadable { message = None; _ }; inventory_report=_; automatic=_; unavailable=_ } ->
        expect "a report that is no object does not cost the list either" (listed = [firefox])
    | Ok _ | Error _ -> failwith "a host report that is no object was not kept apart from the list");
   let discover t = { t with load = Loading (40, Discover Choose_client) } in
   let reported, _ =
     accept_clients ~generation:40 (Ok { listed = [firefox]; bidi_host = Host_reported ended;
-        inventory_report=Inventory_not_reported; automatic=None })
+        inventory_report=Inventory_not_reported; automatic=None; unavailable=Backends_not_reported })
       (discover (create ())) in
   expect "the view holds what the discovery said" (reported.bidi_host = Host_reported ended);
   let again, _ = accept_clients ~generation:40 (Ok (found [firefox])) (discover reported) in

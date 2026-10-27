@@ -1,5 +1,6 @@
 open Alcotest
 module Live = Masc.Browser_addon_live_bidi
+module Ego = Masc.Browser_addon_live_ego
 module Owner = Masc.Browser_addon_owner
 module W = Masc.Browser_addon_wire
 module B = Browser_lane
@@ -69,6 +70,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
 class Server(http.server.HTTPServer):allow_reuse_address=False
 Server(('127.0.0.1',port),Handler).serve_forever()
 |}
+(* This SDK stand-in reports an operator-owned name and records every script;
+   it never opens a task space or touches the real Ego installation. *)
+let conflicting_ego = {|#!/usr/bin/env python3
+import json,os,pathlib,re,socket,sys
+root=pathlib.Path(__file__).resolve().parent
+if sys.argv[1:]==['--version']:
+    print('ego-browser 0.6.0.16\n  chromium 154.0.8037.44\n  node v24.21.0');sys.exit(0)
+assert sys.argv[1:3]==['nodejs','-e'],sys.argv
+path=json.loads(re.search(r'net\.createConnection\((".*?")\);',sys.argv[3]).group(1))
+(root/'ego-pid').write_text(str(os.getpid()))
+(root/'ego-directory').write_text(str(pathlib.Path(path).parent))
+connection=socket.socket(socket.AF_UNIX);connection.connect(path)
+stream=connection.makefile('rw')
+for raw in stream:
+    command=json.loads(raw);step=command['script'].split('\n')[0].removeprefix('// masc-ego: ')
+    with (root/'ego-steps').open('a') as out:out.write(step+'\n')
+    if step=='space.inspect':result={'ok':True,'value':[{'id':36,'createdBy':'user','ownership':'user'}]}
+    else:result={'ok':False,'error':'unexpected '+step}
+    stream.write(json.dumps({'id':command['id'],'lines':['masc-ego-result '+json.dumps(result)]})+'\n');stream.flush()
+|}
 let reserved_port () =
   let fd=Unix.socket ~cloexec:true Unix.PF_INET Unix.SOCK_STREAM 0 in
   Unix.bind fd (Unix.ADDR_INET (Unix.inet_addr_loopback,0));
@@ -105,6 +126,7 @@ let scenario mode =
          user_pref(\"operator.custom2\", true);\n";
     write (Filename.concat root "mode") mode;
     let binary=Filename.concat root "scripted-firefox" in write binary firefox;Unix.chmod binary 0o700;
+    let ego=Filename.concat root "scripted-ego" in write ego conflicting_ego;Unix.chmod ego 0o700;
     let reservation,port=reserved_port () in
     if mode<>"occupied" then Unix.close reservation;
     Fun.protect ~finally:(fun () -> if mode="occupied" then Unix.close reservation) (fun () ->
@@ -182,19 +204,49 @@ let scenario mode =
                | Issue_result (Ok (B.Lane_absent|Timed_out|Refused _|Rejected_before_effect _))
                | Issue_result (Error _) | Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _
                | Poll_result _|Receipt|Service_refusal _ -> false);
+            if mode="ego-conflict" then (
+              check bool "the original connection answers again after Ego conflict" true
+                (match issue () with W.Issue_result (Ok (B.Answered _)) -> true
+                 | Issue_result (Ok (B.Lane_absent|Timed_out|Refused _|Rejected_before_effect _))
+                 | Issue_result (Error _) | Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _
+                 | Poll_result _|Receipt|Service_refusal _ -> false);
+              let published=ok (Masc.Browser_addon_observation.decode_snapshot (Owner.snapshot owner)) in
+              check bool "Ego's exact unavailability is visible" true
+                (match published.unavailable with
+                 | [Masc.Browser_addon_observation.Ego_user_owned_name {space="masc";observed_at}] -> observed_at > 0.
+                 | [] | _::_ -> false);
+              let snapshot : Masc.Browser_selection.snapshot = {live_activity=B.Enabled;live_clients=published.clients;
+                automation=published.automation;stagehand=published.stagehand} in
+              check bool "unbound automatic selection chooses the remaining client" true
+                (match Masc.Browser_selection.choose ~verb:B.Tabs_list ~bound:false ~snapshot Automatic with
+                 | Ok selected -> selected.route=B.Live_route (Some client.client_id) | Error _ -> false);
+              let gone=ok (B.client_id_of_string "0b000000-0000-4000-8000-000000000062") in
+              check bool "an explicit disconnected identity never falls back" true
+                (Masc.Browser_selection.target ~verb:B.Tabs_list ~snapshot (B.Live_route (Some gone))
+                 = Error (B.Selected_client_disconnected gone));
+              check bool "the SDK's temporary directory is gone before caller work" false
+                (Sys.file_exists (read (Filename.concat root "ego-directory")));
+              let pid=int_of_string (read (Filename.concat root "ego-pid")) in
+              check bool "the SDK process was joined before caller work" true
+                (match Unix.kill pid 0 with () -> false | exception Unix.Unix_error (Unix.ESRCH,_,_) -> true));
             check bool "retirement joins the original guardian and peer" true (dispatch W.Retire=W.Receipt);
             check bool "the exact original client cannot register again" true
               (match dispatch (W.Poll {client;window_sec=0.}) with W.Service_refusal _ -> true
                | Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false);
             check bool "retirement exposes no replacement UUID" true (B.connected_clients ()=[]);
             check bool "repeated retirement observes the same receipt" true (dispatch W.Retire=W.Receipt)) in
+        let worker () = if mode="ego-conflict" then
+            Ego.run ~env ~owner ~downloads:root {command=ego;space="masc"} work
+          else work () in
         let failure=try Live.For_testing.run ~before_command_validation:(fun () ->
-          ignore (Eio.Promise.try_resolve validating ())) ~env ~owner ~directory:allocation work;None with
+          ignore (Eio.Promise.try_resolve validating ())) ~env ~owner ~directory:allocation worker;None with
           | Invalid_argument detail | Sys_error detail -> Some detail in
-        if mode="normal" || mode="late" then check (option string) "normal retirement returns" None failure
+        if mode="normal" || mode="late" || mode="ego-conflict" then check (option string) "normal retirement returns" None failure
         else check bool "failed startup/lost peer does not continue serving" true (Option.is_some failure);
         check bool "owner input is fenced at termination" true (Owner.is_retired owner));
-      check bool "only verified metadata admits caller work" (mode="normal" || mode="lost" || mode="gate" || mode="late") !entered;
+      check bool "only verified metadata admits caller work" (mode="normal" || mode="ego-conflict" || mode="lost" || mode="gate" || mode="late") !entered;
+      if mode="ego-conflict" then check string "the SDK only performed the read-only inspection"
+        "space.inspect\n" (read (Filename.concat root "ego-steps"));
       if mode="gate" then check bool "blocked validation retirement remains unknown after original stop" true
         (match !retirement with Some (W.Service_refusal {disposition=W.Outcome_unknown;_}) -> true
          | None | Some (Service_refusal {disposition=Not_started;_}|Snapshot_result _|Model_reply _|Extension_reply _
@@ -235,7 +287,7 @@ let scenario mode =
         if mode="wrong-pid" || mode="wrong-profile" then (
           check bool "identity mismatch executes no page command" false (List.mem "browsingContext.getTree" calls);
           check bool "unverified endpoint never receives browser.close" false (List.mem "browser.close" calls))
-        else if mode="normal" || mode="late" then (
+        else if mode="normal" || mode="late" || mode="ego-conflict" then (
           check int "original browser is closed once" 1
             (List.length (List.filter (String.equal "browser.close") calls));
           if mode="late" then check int "both commands reached the original Firefox" 2
@@ -259,6 +311,7 @@ let () =
       test_case "wrong process refuses before page input" `Quick (child "wrong-pid");
       test_case "wrong profile refuses before page input" `Quick (child "wrong-profile");
       test_case "original client retires once without replacement" `Quick (child "normal");
+      test_case "user-owned Ego name keeps the original BiDi peer serving" `Quick (child "ego-conflict");
       test_case "native gate cannot hold the original process alive during retirement" `Quick (child "gate");
       test_case "unexpected peer loss fences the worker" `Quick (child "lost");
       test_case "a result whose caller stopped waiting keeps the connection" `Quick (child "late")]])

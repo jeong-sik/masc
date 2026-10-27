@@ -44,7 +44,9 @@ val end_session : session -> unit
     Task completion requires explicit [finish_space]. Retained/uncertain Spaces
     preserve browser-backed files and report unconfirmed backend cleanup. The
     caller's work starts once that client is attached. A configured ego that
-    cannot start fails this worker's start, as the owned BiDi Firefox does.
+    cannot start fails this worker's start, as the owned BiDi Firefox does,
+    except when a read-only listing confirms a user-owned space with that
+    name. Then the space is untouched and Ego is published as unavailable.
     Screenshots pass through a private directory this run creates and
     removes. Downloads its agent pages start are saved under [downloads],
     the worker's download folder, and published through [owner]. *)

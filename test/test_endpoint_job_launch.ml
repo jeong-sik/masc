@@ -1822,8 +1822,9 @@ let endpoint_teardown_finishes_entered_publication boundary normal_teardown =
         check "only an entered original cancellation publishes cancellation intent"
           ((R.cancellation_state current=R.Cancellation_requested)=cancelling);
         (match R.with_launch ~sw permit (fun _ ~storage:_ -> Alcotest.fail "stopped original launch callback replayed") with
-         | R.Not_performed (R.Launch_intent_spent | Launch_cancelled) -> ()
-         | Not_performed _ | Performed _ -> Alcotest.fail "endpoint teardown made its original permit reusable")))) ()
+         | R.Not_performed error -> check "endpoint teardown keeps its original permit spent or cancelled"
+             (error=R.Launch_intent_spent || error=R.Launch_cancelled)
+         | Performed _ -> Alcotest.fail "endpoint teardown made its original permit reusable")))) ()
 
 let () =
   if G.For_testing.linux_build && Unix.geteuid ()<>0 && Sys.getenv_opt "GITHUB_ACTIONS"=Some "true" then (

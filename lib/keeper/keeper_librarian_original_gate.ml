@@ -598,7 +598,7 @@ let retain ~store ~owner ~capture ~parent ~proposal ~request_id ~authority ~pred
 type result = Pending of Owner.retained | Complete of Gate.run_result * Owner.retained
 exception Journal_error of string
 let resume ~store ~owner ~capture ~record ~live_authority ~before_dispatch =
-  let* restored = Eio_unix.run_in_systhread (fun () ->
+  let* restored = Systhread_host.run (fun () ->
     let* parent=owned (Owner.load ~store ~scope:(Capture.scope owner) ~request_id:(Capture.request_id capture)) in
     let* parent=Option.to_result ~none:"Original gate execution parent is absent" parent in
     let* ()=match Progress.preparation parent.progress with
@@ -615,7 +615,7 @@ let resume ~store ~owner ~capture ~record ~live_authority ~before_dispatch =
   | Some result -> Ok (Complete (result,record))
   | None ->
     let* proceed, record = match Progress.phase record.Owner.progress with
-      | Progress.Captured -> Eio_unix.run_in_systhread (fun () -> advance ~store record Progress.Dispatch_intended)
+      | Progress.Captured -> Systhread_host.run (fun () -> advance ~store record Progress.Dispatch_intended)
       | Dispatch_pending _ -> Ok (true,record)
       | Admission_wait _ | Judged _ | Committing _ | Commit_unknown _ | Finished _ | Conflicted _
       | Rejected _ | Subdividing _ | Subdivided _ -> Error "Original gate has an invalid execution phase" in
@@ -623,7 +623,7 @@ let resume ~store ~owner ~capture ~record ~live_authority ~before_dispatch =
     else
       let current = ref record and transcript = ref restored.transcript in
       let publish event =
-        match Eio_unix.run_in_systhread (fun () -> advance ~store !current event) with
+        match Systhread_host.run (fun () -> advance ~store !current event) with
         | Ok (true,record) -> current:=record
         | Ok (false,_) -> raise (Journal_error "Gate publication was already stored; reload original work")
         | Error detail -> raise (Journal_error detail) in

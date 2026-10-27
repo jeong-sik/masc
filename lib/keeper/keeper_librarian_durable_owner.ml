@@ -19,7 +19,7 @@ type call = expected:Request.destination -> original:Owner.retained -> arguments
 type outcome = Pending of wait * Owner.retained | Publication_waiting of string
   | Refused of Exact.final * Owner.retained | Finished of Owner.retained
   | Basis_superseded of Owner.retained
-let io = Eio_unix.run_in_systhread
+let io work = Systhread_host.run work
 let rejected value = Result.map_error (fun detail -> Rejected detail) value
 let owned value = Result.map_error (fun error -> Unavailable (Owner.error_to_string error)) value
 let require condition detail = if condition then Ok () else Error (Rejected detail)

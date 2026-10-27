@@ -49,8 +49,10 @@ never replay the sequence after uncertain effects.
 
 The current SDK's `keyboard.type` returns no action receipt, whether typing ran
 to its end or a dialog interrupted it. A native workflow reads the Page's event
-buffer around that step. With no `Page.javascriptDialogOpening` event the step
-completes with receipt `null` and the workflow continues. With one, even when
+buffer around that step. A dialog that is already open when the step starts
+stops it before any key, with input still released. With no
+`Page.javascriptDialogOpening` event the step completes with receipt `null` and
+the workflow continues. With one, even when
 the dialog is already closed, the workflow stops at that step, excludes it from
 `completed` and leaves input release unconfirmed. Answer the dialog and read the
 page, then use the private operator recovery described below before a distinct

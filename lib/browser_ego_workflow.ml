@@ -78,10 +78,17 @@ let script = {js|async function nativeWorkflow(page, args) {
           // Typing is judged by the dialog-open events it leaves behind, so
           // park what is buffered now and the events read afterwards are this
           // step's own. Nothing is typed until this read succeeds, so a failed
-          // read leaves the input released.
+          // read leaves the input released. The SDK sends no key and emits no
+          // event when a dialog is already open, so typing into one would look
+          // finished once the dialog closes. The dialog check follows the read:
+          // a dialog that opened before the read shows up as open here, and one
+          // that opens after it leaves its event for the read after typing.
           effect = effectStarted = true;
-          try { await readEvents(); }
+          let open;
+          try { await readEvents(); open = (await page.info()).dialog; }
           catch (error) { return failure(index, step.method, error); }
+          if (open)
+            return failure(index, step.method, 'a JavaScript dialog is open; answer it before typing', {dialog: open});
           holdingInput = true; inputReleased = false;
           receipt = await page.keyboard.type(step.text, options); break;
         case 'keyboard.insertText': effect = effectStarted = true; receipt = await page.keyboard.insertText(step.text); break;

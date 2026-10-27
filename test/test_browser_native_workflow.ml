@@ -145,7 +145,14 @@ let progress_and_uncertainty () =
      "events",[]];
   assert_stopped (request [step "keyboard.insertText" ["text",str "x"];click])
     (result ~started:true ~completed_effect:true ~completed:[entry 0 "keyboard.insertText"] ~failure:(failure 1 "observation"))
-    ~started:true ~completed_effect:true
+    ~started:true ~completed_effect:true;
+  (* A typing step refused because a dialog was already open: no key was sent, so the input stays released. *)
+  let refused=obj ["index",`Int 0;"method",str "keyboard.type";"message",str "a JavaScript dialog is open; answer it before typing";
+    "dialog",obj ["type",str "confirm";"message",str "keep typing?"]] in
+  (match ok (R.decode (request [step "keyboard.type" ["text",str "x"]])
+       (obj (result ~started:true ~completed_effect:false ~completed:[] ~failure:refused))) with
+   | R.Stopped {effect_started=true;completed_effect=false;input_released=true;_} -> ()
+   | R.Completed _|R.Stopped _ -> fail "a typing step refused before any key was not read as released")
 let observations () =
   let methods=["url",[],str "https://example.test/start";
     "title",[],str "Title";"info",[],obj ["url",str "https://example.test/start"];

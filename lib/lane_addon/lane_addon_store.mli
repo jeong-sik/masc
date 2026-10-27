@@ -147,8 +147,9 @@ val tool_request_archive_directory : string
 val tool_request_archive_record_path : scope:string -> date:string -> request_id:string -> string
 val tool_request_archive_body_path : scope:string -> date:string -> request_digest:string -> string
 (** Where a settled original's record and body live, relative to {!root}:
-    [tool-request-owners-settled/<scope digest>/<date>/records|bodies/]. No
-    pass lists or reads this namespace. *)
+    [tool-request-owners-settled/<scope digest>/<date>/records|bodies/]. Startup
+    cleanup inventories the records but does not read archive body contents;
+    no other pass lists or reads this namespace. *)
 val with_tool_request_settlement_barrier : t -> (unit -> 'a) -> ('a, string) result
 (** Serialize a read-only whole-store sweep with the record and body moves of
     cooperating settles in this process. [work] may re-enter individual scope
@@ -189,6 +190,14 @@ val fold_tool_request_owner_inventory_all :
     scope-directory name, filename and parsed record JSON at a time to [f]
     under the same descriptor/no-follow/durability checks and per-scope
     publication serializer as {!tool_request_owner_inventory_all}. *)
+val fold_startup_tool_request_owners :
+  t -> init:'a ->
+  f:('a -> directory_name:string -> file_name:string -> Yojson.Safe.t -> ('a, string) result) ->
+  ('a, string) result
+(** The same complete inventory while the caller holds the process lease and
+    excludes all original writers. Avoids the per-scope serializer at this
+    quiescent boundary. Staged entries must be owned regular single-link files,
+    although their incomplete contents are not parsed. *)
 val tool_request_owner_inventory_all : t -> ((string * string * Yojson.Safe.t) list, string) result
 (** Read-only observational sweep of all published scopes. Each row retains its
     actual scope-directory name and filename for the Owner's strict key check.
@@ -197,6 +206,33 @@ val tool_request_owner_inventory_all : t -> ((string * string * Yojson.Safe.t) l
     scope fail the whole sweep. Scope membership is checked again before return;
     individual scope reads are serialized, not one cross-scope atomic snapshot.
     No Keeper metadata/profile list is needed and no state is created. *)
+
+val fold_archived_tool_request_owners :
+  t -> init:'a ->
+  f:('a -> directory_name:string -> file_name:string -> Yojson.Safe.t -> ('a, string) result) ->
+  ('a, string) result
+(** Complete, strictly owned inventory of settled record files across scope and
+    day directories. The callback validates each record's schema and key.
+    Missing archive descendants are settled as absence, but a listed entry
+    that disappears or any malformed namespace rejects the entire fold. The
+    archive bodies directory is checked, but its contents are not inputs to
+    this record inventory. *)
+
+type tool_request_body_entry = private {
+  scope_directory : string;
+  request_digest : string;
+  snapshot : Unix.stats;
+}
+val tool_request_body_inventory_all : t -> (tool_request_body_entry list, string) result
+(** Inspect all published live bodies, verifying owned single-link files and
+    their content digests with bounded-memory streaming. Body contents are not
+    parsed. Incomplete owned regular atomic staging entries are preserved.
+    A malformed name, digest mismatch or unsafe or changing entry rejects the
+    entire inventory. *)
+val remove_inventoried_tool_request_body : t -> tool_request_body_entry -> (unit, string) result
+(** Remove an unchanged inventory entry through a held parent and fsync it.
+    The caller must exclude every original writer across the inventory and
+    effect. An error can follow removal and does not prove the body remains. *)
 val save_sampling_request : t -> instance_id:string -> request_id:string ->
   Yojson.Safe.t -> (unit, string) result
 val save_sampling_outcome : t -> instance_id:string -> request_id:string ->

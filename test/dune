@@ -5166,6 +5166,7 @@
  (libraries alcotest eio_main eio yojson masc.browser_lane masc masc.time_compat masc.monotonic_deadline))
 
 (include stanzas/test_browser_activity.inc)
+(include stanzas/test_lane_addon_orphan_body_startup.inc)
 
 ; Mock clock as the lane's clock: a command taken, and an answer delivered,
 ; as their window passed stand.
@@ -5600,6 +5601,11 @@
  (name test_lane_addon_request_progress)
  (modules test_lane_addon_request_progress)
  (libraries alcotest yojson masc masc.fs_compat unix))
+
+(test
+ (name test_lane_addon_orphan_body_sweep)
+ (modules test_lane_addon_orphan_body_sweep)
+ (libraries alcotest yojson masc masc.fs_compat masc.string_util unix))
 
 (test
  (name test_workspace_memory_execution_capture)

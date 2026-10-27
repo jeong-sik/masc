@@ -197,11 +197,11 @@ POST·PUT·DELETE 와 `/mcp` 도구 호출은 `Background` 그대로다. 무거�
 
 호출 지점마다 조회를 job 밖으로 옮기지 않는다. 중첩이 4단(briefing → projection → operator snapshot → Keeper 마다의 키)이고, 같은 수정을 열 곳 넘게 따로 해야 한다. `Dashboard_cache` 한 곳에서 고친다.
 
-- `Computing` 칸에 owner 의 계산(풀에 넘기기 전의 thunk), 누가 맡았는지 표시하는 claim, 결과 promise 를 둔다. 같은 키라도 호출자마다 payload 준비 방식이 다를 수 있어, 맡는 쪽은 자기 compute 가 아니라 owner 의 계산을 돌린다.
+- `Computing` 칸에 누가 계산을 맡았는지 표시하는 claim 과 결과 promise 를 둔다. 계산 자체는 칸에 두지 않는다. 맡는 쪽은 자기 compute 를 돌린다. 같은 키는 같은 값을 만든다는 것이 캐시의 약속이다. 호출자마다 payload 준비 방식이 달라도 캐시는 지금도 먼저 계산한 쪽의 준비 방식으로 값을 두고, 다른 방식이 필요한 읽기는 그 자리에서 만든다(`force_cached_payload`). owner 의 계산을 대신 돌리면 owner 요청의 switch 같은 자원을 owner 가 취소된 뒤에도 쓰게 된다.
 - owner 의 계산 job 은 시작할 때 `claimed` 를 CAS 로 잡는다. 잡으면 계산한다. 못 잡으면 바로 끝나 worker 를 내놓고, owner 는 자기 fiber 에서 결과 promise 를 기다린다.
-- 풀 job 안의 조회가 `Wait` 를 만나고 `claimed` 가 비어 있으면(owner 계산이 아직 줄에 있으면) 잡고, 칸의 계산을 그 자리에서 돌린다. 이미 쥔 worker 를 쓰므로 자리를 더 쓰지 않는다. 결과는 owner 의 token 으로 칸에 쓰고 promise 를 푼다.
+- 풀 job 안의 조회가 `Wait` 를 만나고 `claimed` 가 비어 있으면(owner 계산이 아직 줄에 있으면) 잡고, 자기 compute 를 그 자리에서 돌린다. 이미 쥔 worker 를 쓰므로 자리를 더 쓰지 않는다. 결과는 owner 의 token 으로 칸에 쓰고 promise 를 푼다. 맡은 쪽이 실패하거나 취소되면 promise 를 Error 로 풀고, 칸이 아직 owner 의 token 이면 지운다. 맡기는 옛 값이 없는 칸(`Wait`)에서만 일어나므로 되돌릴 옛 값은 없다. 기다리던 job 들은 지금처럼 빈 칸을 보고 직접 계산한다. 칸을 owner 가 지우게 두면, owner job 이 worker 를 얻을 때까지 기다리던 job 들이 다시 worker 를 쥐고 기다린다.
 - `claimed` 가 잡혀 있으면(계산이 도는 중이면) 지금처럼 기다린다. worker 를 쉬게 쥐는 시간은 그 계산 시간을 넘지 않는다. 요청 fiber 의 기다림은 worker 를 쓰지 않으므로 그대로 둔다.
-- 맡은 쪽 계산이 실패하거나 취소되면 promise 를 Error 로 풀고, 칸은 지금의 owner 실패 경로처럼 되돌린다. owner 의 timeout 은 promise 기다림도 감싼다.
+- owner 의 timeout 은 promise 기다림도 감싼다. 맡은 쪽이 취소돼 생긴 Error 는 owner 에게 계산 실패로 간다. owner 가 다시 계산하지는 않는다.
 - 같은 키 계산은 한 번만 돈다. `claimed` 는 한 번만 잡힌다.
 - `Operator_control_snapshot_cache` 도 job 안에서 기다리지만 owner 가 계산을 풀에 넘기지 않고 자기 fiber 에서 바로 한다. 기다리는 job 은 도는 계산을 기다리므로 꼬이지 않는다. L4b 범위 밖이다.
 

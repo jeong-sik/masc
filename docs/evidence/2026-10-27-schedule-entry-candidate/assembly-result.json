@@ -1,0 +1,53 @@
+{
+  "schema": "masc.schedule-candidate-assembly.v1",
+  "product_assembly_head": "13d235b38c756a9d4b446fa74232f18e8979b180",
+  "C2_base": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+  "source_leaf": "98532cc5dcae3267587148d6f1823a16458268dd",
+  "source_leaf_parent": "625479cbf059b16a471e0c1477bb8eaca783b5ee",
+  "raw_diff_identity_C2_to_product": "5d9fd904f1637b29feff308512e1f0fbd1213e1c47f75f3463e2a7113266ebe8",
+  "picks": [
+    {
+      "original": "57170dfa01a892ec7206745cff2624ef0200dae1",
+      "before": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+      "after": "3c0fb97824f518b40474f0070b9f69889c58e785",
+      "exit_code": 0,
+      "output": "Auto-merging lib/keeper/keeper_unified_turn.ml\n[ci/schedule-entry-candidate-20261027 3c0fb97824f] fix(keeper): identify scheduled admissions for each turn\n Author: masc-pro-builder <besleepers@gmail.com>\n Date: Tue Oct 27 09:05:28 2026 +0900\n 27 files changed, 338 insertions(+), 67 deletions(-)\n"
+    },
+    {
+      "original": "58a4698ce011c72e83c40db11ca4bbf9447b3320",
+      "before": "3c0fb97824f518b40474f0070b9f69889c58e785",
+      "after": "87df15606ee0387a79bbcc8ec968c61550055e5d",
+      "exit_code": 0,
+      "output": "[ci/schedule-entry-candidate-20261027 87df15606ee] docs(schedule): record turn admission context change for PR46311\n Author: masc-pro-builder <besleepers@gmail.com>\n Date: Tue Oct 27 09:06:41 2026 +0900\n 1 file changed, 2 insertions(+)\n create mode 100644 changelog.d/46311.md\n"
+    },
+    {
+      "original": "61420eff33a7482ea570b41b03d881d589f75998",
+      "before": "87df15606ee0387a79bbcc8ec968c61550055e5d",
+      "after": "e5ff7baaf5587b53820b136e40e7281c22f2726a",
+      "exit_code": 0,
+      "output": "[ci/schedule-entry-candidate-20261027 e5ff7baaf55] fix(schedule): propagate admission context to direct and UI consumers\n Author: masc-pro-builder <besleepers@gmail.com>\n Date: Tue Oct 27 09:10:42 2026 +0900\n 5 files changed, 10 insertions(+)\n"
+    },
+    {
+      "original": "98532cc5dcae3267587148d6f1823a16458268dd",
+      "before": "e5ff7baaf5587b53820b136e40e7281c22f2726a",
+      "after": "13d235b38c756a9d4b446fa74232f18e8979b180",
+      "exit_code": 0,
+      "clean": true,
+      "status": "Selected final assembly awaiting independent integration verdict; no build/run yet"
+    }
+  ],
+  "manual_conflict_resolution_edits": false,
+  "changed_product_and_test_paths": 32,
+  "comparison": "31 changed files equal source leaf985; unified_turn preserves C2 yield and adds only four admission preparation lines. Three other lifecycle files unchanged from C2.",
+  "excluded": [
+    "new main",
+    "current #46202 e1ee9f063a1b3d7d1f9d9941b58300090480e36d",
+    "other PR sources",
+    "original failure replacement"
+  ],
+  "limits": [
+    "producer assembly record, not independent approval",
+    "metadata added after product assembly changes final source SHA",
+    "native build/tests/model comparison not executed by this record"
+  ]
+}

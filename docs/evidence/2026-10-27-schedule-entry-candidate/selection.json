@@ -1,0 +1,16 @@
+{
+  "operation_id": "kmsg-c981495c33b6628f426a4dbe4f320e75",
+  "source_bytes": 7568,
+  "source_sha256": "bcece8b107a67ee0ee4ac051d07c665a10c11aab767111f77c534870006106cc",
+  "source_path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-runtime-audit/artifacts/scheduled-job-runtime-audit-20261026/C3-selection-985-current-operation.json",
+  "method": "Exact first reply text, no HTML copies; no unrelated text removed.",
+  "leader_text": "C3 선택 delta를 명시합니다. 범위만 정하는 것이고 병합·설치·primary 변경은 포함하지 않습니다. 기준은 2026-10-27T00:25Z에 REST로 읽은 값입니다.\n\n**확인한 현재 상태**\n- #46311의 head는 `98532cc5dcae3267587148d6f1823a16458268dd`이고 OPEN입니다. base는 `625479cbf059b16a471e0c1477bb8eaca783b5ee`로 그대로입니다.\n- PR 커밋은 네 개입니다: `57170dfa01`, `58a4698ce0`, `61420eff33`, `98532cc5dc`.\n- `61420eff33`에서 `98532cc5dc`까지 compare는 ahead 1, behind 0입니다. 바뀐 파일은 `test/test_keeper_direct_goal_provider_wire.ml`과 `test/test_keeper_wake_turn_context.ml` 두 개뿐입니다. 제품 파일(lib/bin/dashboard/config)이 같다는 말씀은 파일 목록 기준으로 일치하지만, 바이트 동일성은 제가 직접 대조하지 않았습니다.\n\n**선택하는 범위**\nC2 `a3950a189b9cc5a7ce82cb725699455d79923f42` 위에 아래 네 커밋을 순서대로 선별합니다.\n1. `57170dfa01a892ec7206745cff2624ef0200dae1`\n2. `58a4698ce011c72e83c40db11ca4bbf9447b3320`\n3. `61420eff33a7482ea570b41b03d881d589f75998`\n4. `98532cc5dcae3267587148d6f1823a16458268dd`\n\n**지키는 조건**\n- C2 안의 #46202는 과거 head `6dedd652`로 고정합니다. 새 `e1ee9f06`, 새 main, 다른 PR은 넣지 않습니다.\n- 이전 선택(`614` 기준)은 새 head `98532cc`의 승인으로 이월하지 않습니다. `98532cc`에는 별도 현재-head 리뷰가 필요합니다.\n- 조립 세션이 아닌 쪽이 네 lifecycle 경계 보존을 integration delta로 독립 검토하고, 그 뒤 조합 SHA를 고정합니다.\n- 검사 범위는 이전과 같습니다. 최소 native producer로 matching server/TUI artifact를 한 번 만들고, 원래 GLM/DeepSeek A/B 조건을 같은 도구 인자·목적지·판정 기준으로 비교합니다. A1 → B 범위 작업 → B ACK → 정확한 A 재배정 → 별도 A 턴의 A2와 모든 실제 tool row를 확인하며, 원 DeepSeek FAIL과 GLM의 canonical result-read 정정은 보존합니다.\n- Test 40424838832의 원 FAIL은 보존하고, 새 Test 40426117052가 요청한 두 suite의 결과는 아직 읽지 않았습니다. 그 결과를 이 선택의 근거로 삼지 않았습니다.\n\n착수 직전에 #46311 head를 한 번 더 읽어, 달라졌으면 범위를 늘리지 말고 차이를 알려 주세요.",
+  "C2": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+  "selected_leaf_head": "98532cc5dcae3267587148d6f1823a16458268dd",
+  "source_current_PR": {
+    "head": "98532cc5dcae3267587148d6f1823a16458268dd",
+    "base": "625479cbf059b16a471e0c1477bb8eaca783b5ee",
+    "state": "open"
+  },
+  "scope": "Four selected leaf commits on frozen C2 only; not source approval/build/runtime success"
+}

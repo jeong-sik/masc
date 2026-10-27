@@ -1,0 +1,27 @@
+{
+  "original_repository_root": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate",
+  "scope": "Three selected assembly/selection/review artifacts, not model/runtime proof or complete source envelope.",
+  "files": [
+    {
+      "retained_path": "selection.json",
+      "original_path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/selection.json",
+      "bytes": 3210,
+      "sha256": "46559ef3d8c3b9309fd24af204708b7f77a3297d884d23c9286213ffeabb95f1",
+      "transformation": "byte-exact copy of the selected artifact; producer/derivative scope retained"
+    },
+    {
+      "retained_path": "assembly-result.json",
+      "original_path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/assembly-result.json",
+      "bytes": 2952,
+      "sha256": "212a6591114326b393d056775a047485ba163724d332d432f358d06e10dd86a1",
+      "transformation": "byte-exact copy of the selected artifact; producer/derivative scope retained"
+    },
+    {
+      "retained_path": "independent-integration-review.json",
+      "original_path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/independent-final-integration-review-13d235b3.json",
+      "bytes": 9548,
+      "sha256": "79e49d0d2d5d0df0063459327a2596d8e0c6ee244e130c0517e87261d4e27342",
+      "transformation": "byte-exact copy of the selected artifact; producer/derivative scope retained"
+    }
+  ]
+}

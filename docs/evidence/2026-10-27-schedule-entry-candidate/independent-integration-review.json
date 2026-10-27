@@ -1,0 +1,185 @@
+{
+  "schema": "masc.independent-final-integration-review.v1",
+  "verdict": "PASS_SOURCE_ONLY_INTEGRATION",
+  "head": "13d235b38c756a9d4b446fa74232f18e8979b180",
+  "base_C2": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+  "selected_source_leaf": "98532cc5dcae3267587148d6f1823a16458268dd",
+  "source_leaf_parent": "625479cbf059b16a471e0c1477bb8eaca783b5ee",
+  "prefix_already_reviewed": "e5ff7baaf5587b53820b136e40e7281c22f2726a",
+  "remaining_P0_P1_P2": [],
+  "scope": "Independent review of selected four-commit source combination. Reviewer did not assemble/cherry-pick/edit/push it. Complete source leaf reviewed separately; actual prefix/leaf baseline and result bytes and only integration-specific C2 seam independently reread. No Git mutation, builds/tests/CI/native/provider/model/API/runtime or formal approval publication. Only ignored review reports written.",
+  "identity": {
+    "changed_files": 32,
+    "insertions": 366,
+    "deletions": 73,
+    "full_diff_format": "git -c color.ui=false diff --binary <C2> <final> --",
+    "full_diff_bytes": 72092,
+    "full_diff_sha256": "ae9404641da36da5223359cb102e7ae7a463ef8ef1023e997085cb6f62651b02",
+    "prefix_delta_files": 2,
+    "prefix_delta_insertions": 16,
+    "prefix_delta_deletions": 6,
+    "prefix_delta_bytes": 3165,
+    "prefix_delta_sha256": "56f933ea0c0d863903030e9eb9d34ae34d94bae14a540c74dbbf4df058af63f0",
+    "four_selected_commits_only": true,
+    "working_tree_matches_commit": true
+  },
+  "selection_read": {
+    "operation_id": "kmsg-c981495c33b6628f426a4dbe4f320e75",
+    "source_record": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-runtime-audit/artifacts/scheduled-job-runtime-audit-20261026/C3-selection-985-current-operation.json",
+      "bytes": 7568,
+      "sha256": "bcece8b107a67ee0ee4ac051d07c665a10c11aab767111f77c534870006106cc"
+    },
+    "original_terminal_field": "$.data.state = Succeeded",
+    "exact_first_reply_match": "$.data.completed_reply.replies[0].text equals selection.json.leader_text byte-for-byte as decoded string",
+    "selected_original_commits": [
+      "57170dfa01a892ec7206745cff2624ef0200dae1",
+      "58a4698ce011c72e83c40db11ca4bbf9447b3320",
+      "61420eff33a7482ea570b41b03d881d589f75998",
+      "98532cc5dcae3267587148d6f1823a16458268dd"
+    ],
+    "selected_base": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+    "source_current_PR_record": {
+      "head": "98532cc5dcae3267587148d6f1823a16458268dd",
+      "base": "625479cbf059b16a471e0c1477bb8eaca783b5ee",
+      "state": "open"
+    },
+    "limit": "Read retained operation/PR snapshot; no fresh external API or selection decision by reviewer. Scope excludes merge/install/primary changes, new main/PR inclusion and unselected newer F6 heads."
+  },
+  "actual_assembly_commits": [
+    "3c0fb97824f518b40474f0070b9f69889c58e785",
+    "87df15606ee0387a79bbcc8ec968c61550055e5d",
+    "e5ff7baaf5587b53820b136e40e7281c22f2726a",
+    "13d235b38c756a9d4b446fa74232f18e8979b180"
+  ],
+  "independent_equality_checks": {
+    "all32_C2_to_final_paths_equal_leaf_parent_to_985_paths": true,
+    "baseline_C2_equals_leaf_parent_files": 31,
+    "final_equals_leaf_985_files": 31,
+    "sole_different_baseline_and_final_path": "lib/keeper/keeper_unified_turn.ml",
+    "unified_turn_effect": "Final C2 original bytes plus exactly four prepare_prompt turn_ref/admission argument lines. Removing those exact lines reconstructs C2 original. No manual semantic replacement is inferred from producer history; this equality independently proves final effect.",
+    "product_bytes_equal_prefix": "lib/bin/dashboard/config/packages diff empty; prefix→final changes exactly two test files.",
+    "no_whole_tree_equivalence_claim": true
+  },
+  "lifecycle_preservation": [
+    {
+      "path": "lib/keeper/keeper_heartbeat_source_batch.ml/.mli",
+      "finding": "C2 admitted list and separate pending_at_intake cohort retained byte-identically. validate keeps saved intake cohort while changing admitted list. Whole pending cohort never becomes admitted metadata."
+    },
+    {
+      "path": "lib/keeper/keeper_heartbeat_stimulus_intake.ml:1252",
+      "finding": "Unmodified C2 constructs of_intake ~pending:intake_snapshot ~admitted:consumed_selections. The new summary receives selections only."
+    },
+    {
+      "path": "lib/keeper/keeper_unified_turn.ml:939",
+      "finding": "Real preparation_turn_ref and Known(selections(sources turn_input)) supply historical admission observation. The body/accessor/formatter and direct Unknown flow match reviewed leaf interfaces."
+    },
+    {
+      "path": "lib/keeper/keeper_unified_turn.ml:1244",
+      "finding": "C2 yield probe still uses pending_at_intake, not source614 selections. Already-waiting A cannot regain new-arrival priority merely by remaining pending behind B."
+    },
+    {
+      "path": "lib/keeper/keeper_heartbeat_loop.ml:615",
+      "finding": "C2 Schedule_due/Connector_attention checkpoint retention and no-terminal-ACK rule remain byte-identical, including retention-write failure behavior. Existing ACK/standing/cancel/transfer paths unchanged."
+    }
+  ],
+  "fourth_commit_review": {
+    "mapping": {
+      "original": "98532cc5dcae3267587148d6f1823a16458268dd",
+      "before": "e5ff7baaf5587b53820b136e40e7281c22f2726a",
+      "after": "13d235b38c756a9d4b446fa74232f18e8979b180",
+      "cherry_pick_x_footer_verified": true
+    },
+    "exact_delta_matches_reviewed_original_985": true,
+    "source_fixes": [
+      "Legacy no-task check retains no-CurrentTask negative, requires exact Unknown+turnref, removes only typed Goal/admission layers and checks original remainder bytes exactly.",
+      "Fixture catalog declares canonical exact model_id/supports_tools=true, matching actual tool-capable peer; strict production parser and HTTP/effect assertions unchanged."
+    ],
+    "no_test_relaxation_or_product_fix_added": true
+  },
+  "evidence_limits": [
+    "No C3 typecheck/test/native artifact, provider/model scenario, installed runtime or UI execution observed. Source/integration PASS only.",
+    "Original Test40424838832 (Test,614/fix/schedule-entry-source-context-20261027,FAILURE) remains failure54PASS/9FAIL; one new integration case passed at614. It is not C3 execution.",
+    "Selected fixture repairs are now present but no repair/C3 rerun result was observed by this reviewer. Root explicitly reports new result not yet read; no CI query performed.",
+    "Original root Dashboard decoder128/128 remains bound to614 unchanged dashboard blobs, not C3 executed success.",
+    "Frozen C2 original actual trials, DS negative behavior and GLM canonical read correction remain source/native/controller-bound originals. Do not carry their behavior forward to finalC3.",
+    "Admission orientation metadata is not Gate permission, current standing, hard request isolation, universal model compliance, exactly-once effects or proven cause/fix of DS request-scope failure.",
+    "Source-leaf review plus this integration review is not whole scheduled Job audit completion or whole unselected stack approval."
+  ],
+  "bound_source_files": [
+    {
+      "path": "lib/keeper/keeper_heartbeat_source_batch.ml",
+      "bytes": 2624,
+      "sha256": "5c1e6c4647c504e4c7592bd900b72bddd91f1ab721534d28cc79fb94597e211e",
+      "equals_C2": true,
+      "equals_leaf_985": false
+    },
+    {
+      "path": "lib/keeper/keeper_heartbeat_source_batch.mli",
+      "bytes": 2591,
+      "sha256": "b86e7c6bd3522bcada89711f23f14249f59106335cf4fe46c77274fbd75960fe",
+      "equals_C2": true,
+      "equals_leaf_985": false
+    },
+    {
+      "path": "lib/keeper/keeper_heartbeat_loop.ml",
+      "bytes": 87210,
+      "sha256": "8b451d95ada8961e6848537d4160682143508b6b52acd90c91e26fe4de477d34",
+      "equals_C2": true,
+      "equals_leaf_985": false
+    },
+    {
+      "path": "lib/keeper/keeper_unified_turn.ml",
+      "bytes": 87793,
+      "sha256": "973dd285a49368d926567e1823e6d3e962f78eff31145dca254b61b19e68325c",
+      "equals_C2": false,
+      "equals_leaf_985": false
+    },
+    {
+      "path": "test/test_keeper_direct_goal_provider_wire.ml",
+      "bytes": 32916,
+      "sha256": "da1c5cd91caac9dc28cd7218d830475d6bacf2abe4e80f5b2fee5199751b8e9a",
+      "equals_C2": false,
+      "equals_leaf_985": true
+    },
+    {
+      "path": "test/test_keeper_wake_turn_context.ml",
+      "bytes": 99853,
+      "sha256": "bd97ce4b5aa8f1be07e84fdd1645488d2ad805a37f03740d9050d07ae236b826",
+      "equals_C2": false,
+      "equals_leaf_985": true
+    }
+  ],
+  "review_and_producer_bindings": [
+    {
+      "path": "selection.json",
+      "bytes": 3210,
+      "sha256": "46559ef3d8c3b9309fd24af204708b7f77a3297d884d23c9286213ffeabb95f1"
+    },
+    {
+      "path": "assembly-final-pick.json",
+      "bytes": 305,
+      "sha256": "b9392650a4df4007b431df59ebf541fc4716db330838822c499e37ed3b5c2f2c"
+    },
+    {
+      "path": "baseline-file-comparison.json",
+      "bytes": 7124,
+      "sha256": "ad3a9c8b8eb85f82bc608b110088599aa2d79664e8ccab5400ea590681fc9562"
+    },
+    {
+      "path": "assembly-prefix-progress.json",
+      "bytes": 1825,
+      "sha256": "7d608f9d5a26233687ebce63e5418365fb37bd94c8fac76b0cc1c25633aa34e0"
+    },
+    {
+      "path": "independent-prefix-review-e5ff7baa.json",
+      "bytes": 15104,
+      "sha256": "e16af300760a764e6143e1108f26ed360b5824c89e75b6b787e296717bc0558a"
+    },
+    {
+      "path": "external-source-worktree/independent-ci-fixture-review-98532cc5.json",
+      "bytes": 9683,
+      "sha256": "920419a426bd0847b9322db7ec3eb4a989545aaced0fdcac219182e8b5a0ee1c"
+    }
+  ]
+}

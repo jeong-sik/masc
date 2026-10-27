@@ -13,6 +13,7 @@ type layer_id =
   | Autonomous_trigger
   | Scheduled_automation
   | Completion_authority
+  | Admitted_scheduled_input
   | Task_cancellations
   | Pending_mentions
   | Scope_messages
@@ -45,6 +46,7 @@ let ordered =
   ; Autonomous_trigger
   ; Scheduled_automation
   ; Completion_authority
+  ; Admitted_scheduled_input
   ; Task_cancellations
   ; Pending_mentions
   ; Scope_messages
@@ -72,14 +74,15 @@ let order_index = function
   | Autonomous_trigger -> 9
   | Scheduled_automation -> 10
   | Completion_authority -> 11
-  | Task_cancellations -> 12
-  | Pending_mentions -> 13
-  | Scope_messages -> 14
-  | Own_board_posts -> 15
-  | Board_activity -> 16
-  | Own_recent_actions -> 17
-  | Recent_work -> 18
-  | Fleet_messages -> 19
+  | Admitted_scheduled_input -> 12
+  | Task_cancellations -> 13
+  | Pending_mentions -> 14
+  | Scope_messages -> 15
+  | Own_board_posts -> 16
+  | Board_activity -> 17
+  | Own_recent_actions -> 18
+  | Recent_work -> 19
+  | Fleet_messages -> 20
 ;;
 
 type unattributed = World_frame | Host_workspace_recall | Direct_turn | Unprojected_input
@@ -158,6 +161,7 @@ let layer_name = function
   | Autonomous_trigger -> "autonomous_trigger"
   | Scheduled_automation -> "scheduled_automation"
   | Completion_authority -> "completion_authority"
+  | Admitted_scheduled_input -> "admitted_scheduled_input"
   | Task_cancellations -> "task_cancellations"
   | Pending_mentions -> "pending_mentions"
   | Scope_messages -> "scope_messages"
@@ -199,7 +203,7 @@ let resend_on_resume = function
   | Unattributed (Host_workspace_recall | Direct_turn | Unprojected_input) ->
     Sent_when_changed
   | Layer
-      ( Autonomous_trigger | Scheduled_automation | Completion_authority
+      ( Autonomous_trigger | Scheduled_automation | Completion_authority | Admitted_scheduled_input
       | Task_cancellations | Pending_mentions | Scope_messages | Board_activity ) ->
     Sent_every_resume
   | Unattributed World_frame -> Sent_with_other_sections

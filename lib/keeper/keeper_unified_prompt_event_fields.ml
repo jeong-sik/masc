@@ -277,6 +277,35 @@ let scheduled_wake_fields ~occurrence_id
   @ [ "message", wake.message ]
 ;;
 
+type scheduled_admission = Unknown | Known of Keeper_event_queue_state.pending_selection list
+
+let format_scheduled_admission ~turn_ref ~admission =
+  let rows = match admission with
+    | Unknown -> []
+    | Known selections -> List.filter_map
+        (fun (selection : Keeper_event_queue_state.pending_selection) ->
+          match Keeper_event_queue.scheduled_wake selection.source with
+          | Some wake -> Some (format_prompt_row
+              [ "source_post_id", selection.source.post_id
+              ; "occurrence_id", wake.occurrence_id
+              ; "schedule_id", wake.schedule_id
+              ; "schedule_instance_id", wake.schedule_instance_id
+              ; "due_at_unix", Printf.sprintf "%.17g" wake.due_at
+              ; "payload_digest", wake.payload_digest
+              ; "source_snapshot_ref", Keeper_event_queue_state.source_snapshot_ref selection.source
+              ; "admitted_revision", Int64.to_string selection.admitted_revision ])
+          | None -> None)
+        selections in
+  let summary = format_prompt_row
+      ([ "observation", "scheduled_admission_at_turn_entry"
+       ; "turn_ref", Ids.Turn_ref.to_string turn_ref
+       ; "standing", "historical_entry_only_not_permission" ]
+       @ match admission with
+         | Unknown -> [ "availability", "unknown" ]
+         | Known _ -> [ "availability", "known"; "scheduled_source_count", string_of_int (List.length rows) ]) in
+  String.concat "\n" (summary :: rows) ^ "\n\n"
+;;
+
 type scheduled_wake_group =
   { wake : Keeper_event_queue.scheduled_wake
   ; first_occurrence_id : string

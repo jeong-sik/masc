@@ -1435,6 +1435,7 @@ let format_recent_actions_section ~current_task_id own_recent_actions
 ;;
 
 let prepare_prompt_internal
+    ?admitted_scheduled_input
     ~(turn_decision : Keeper_world_observation.keeper_cycle_decision option)
     ?(previous_turn_stop : Keeper_turn_checkpoint_reason.t option)
     ~(current_task : Keeper_world_observation_inputs.current_task_observation)
@@ -1873,6 +1874,7 @@ let prepare_prompt_internal
             observation.pending_board_events
         ; format_task_outcome_observations observation.pending_board_events
         ]
+    | Keeper_context_layers.Admitted_scheduled_input -> admitted_scheduled_input
     (* 6b. Cancellations of Tasks this Keeper authored — the author's only
        in-prompt account of why work it filed stopped. Not Board activity: the
        cancellation produces no post. *)
@@ -2015,7 +2017,7 @@ let project_prompt prepared ?workspace_memory_access ?own_recent_actions
     | Recent_work -> Option.map Keeper_context_layers.prepare_content (format_recent_work recent_work)
     | Active_goals | Current_task | Approval_authority | Connected_surfaces | Namespace_state
     | Lane_updates | Repository_freshness | Autonomous_trigger | Scheduled_automation
-    | Completion_authority | Task_cancellations | Pending_mentions | Scope_messages
+    | Completion_authority | Admitted_scheduled_input | Task_cancellations | Pending_mentions | Scope_messages
     | Own_board_posts | Board_activity | Fleet_messages ->
       (* Captured and assembled through the same immutable [ordered] keys. *)
       Layer_map.find layer prepared.common_layers
@@ -2075,6 +2077,7 @@ let emit_prompt_metrics
 ;;
 
 let prepare_prompt
+      ~turn_ref ~admission
       ~turn_decision
       ?previous_turn_stop
       ~current_task
@@ -2088,6 +2091,7 @@ let prepare_prompt
       ()
   =
   prepare_prompt_internal
+    ~admitted_scheduled_input:(format_scheduled_admission ~turn_ref ~admission)
     ~turn_decision:(Some turn_decision)
     ?previous_turn_stop
     ~current_task
@@ -2101,10 +2105,10 @@ let prepare_prompt
     ()
 ;;
 
-let build_prompt ~turn_decision ?previous_turn_stop ~current_task ?task_skill_surfaces
+let build_prompt ~turn_ref ~admission ~turn_decision ?previous_turn_stop ~current_task ?task_skill_surfaces
     ?active_goal_summaries ?workspace_memory ?workspace_memory_access ?wiki_contents
     ?lane_updates ?repository_freshness ?recent_work ~observation () =
-  let prepared = prepare_prompt ~turn_decision ?previous_turn_stop ~current_task
+  let prepared = prepare_prompt ~turn_ref ~admission ~turn_decision ?previous_turn_stop ~current_task
     ?task_skill_surfaces ?active_goal_summaries ?workspace_memory ?wiki_contents
     ?lane_updates ?repository_freshness ~observation () in
   project_prompt prepared ?workspace_memory_access ?recent_work ()

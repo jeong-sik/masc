@@ -51,15 +51,19 @@ let assemble_request_context ~base_system_prompt ~post_tool_round ~previous_asse
         let sections = Keeper_context_layers.sections partition in
         let unique layer = List.length (List.filter (fun (section : Keeper_context_layers.section) ->
           section.section_source = Keeper_context_layers.Layer layer) sections) <= 1 in
-        if not (unique Active_goals && unique Completion_authority) then [], blocks, dynamic_context_partition
+        if not (unique Active_goals && unique Completion_authority && unique Admitted_scheduled_input)
+        then [], blocks, dynamic_context_partition
         else
           let goals, remaining = Keeper_context_layers.partition_layer Active_goals partition in
           let authority, remaining = Keeper_context_layers.partition_layer Completion_authority remaining in
+          let admission, remaining = Keeper_context_layers.partition_layer Admitted_scheduled_input remaining in
           let observations =
             (match Keeper_context_layers.text goals with
              | "" -> [] | text -> [Keeper_context_assembly.Active_goals (Inference_utils.sanitize_text_utf8 text)])
             @ (match Keeper_context_layers.text authority with
-               | "" -> [] | text -> [Keeper_context_assembly.Completion_authority (Inference_utils.sanitize_text_utf8 text)]) in
+               | "" -> [] | text -> [Keeper_context_assembly.Completion_authority (Inference_utils.sanitize_text_utf8 text)])
+            @ (match Keeper_context_layers.text admission with
+               | "" -> [] | text -> [Keeper_context_assembly.Admitted_scheduled_input (Inference_utils.sanitize_text_utf8 text)]) in
           observations, List.map (fun (id, text) ->
             if Prompt_block_id.equal id Prompt_block_id.Dynamic_context
             then id, Keeper_context_layers.text remaining else id, text) blocks, Some remaining

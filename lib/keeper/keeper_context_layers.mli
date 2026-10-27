@@ -28,6 +28,9 @@ type layer_id =
   | Autonomous_trigger
   | Scheduled_automation
   | Completion_authority
+  | Admitted_scheduled_input
+      (** Exact turn-entry admission observation, including known-empty or
+          unknown input. Historical identity, never effect authority. *)
   | Task_cancellations
   | Pending_mentions
   | Scope_messages

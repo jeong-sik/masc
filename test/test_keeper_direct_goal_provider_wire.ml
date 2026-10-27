@@ -11,6 +11,9 @@ module Json = Yojson.Safe.Util
 
 type source = Current | Revised | Measurement_unavailable | Goal_unavailable | Empty
 
+let scheduled_admission_fixture_ref =
+  Ids.Turn_ref.make ~trace_id:"trace-admission-fixture" ~absolute_turn:1
+
 let contains ~needle text = Astring.String.is_infix ~affix:needle text
 let owner_request = "Create a Task for the remaining result and inspect its evidence."
 let reported_value = "1/2 independently inspected results"
@@ -390,7 +393,7 @@ let test_completion_observation_survives_tool_reply approved () =
      backlog_revision=Some 1;running_keeper_fiber_count=0;connected_surfaces=[];
      connected_surface_failures=[];own_recent_board_posts=[];fleet_messages=[];own_recent_actions=Ok []} in
   let turn_decision = Keeper_world_observation.keeper_cycle_decision ~meta observation in
-  let rendered = Prompt.build_prompt ~turn_decision
+  let rendered = Prompt.build_prompt ~turn_ref:scheduled_admission_fixture_ref ~admission:Masc.Keeper_unified_prompt_event_fields.Unknown ~turn_decision
       ~current_task:Keeper_world_observation_inputs.No_current_task ~observation () in
   let previous = ref None in
   let issued_requests = ref [] in

@@ -4,6 +4,7 @@
 type t
 
 val prepare :
+  turn_ref:Ids.Turn_ref.t ->
   active_goal_summaries:
     (Keeper_unified_prompt.goal_summary list, Goal_store.unavailable) result ->
   current_task:Keeper_world_observation_inputs.current_task_observation ->
@@ -21,7 +22,9 @@ val prepare :
   t
 (** Eagerly render the common Goal, Task, Skills and Lane context once. The original
     conversation, approval observation, worktree, telemetry and instructions
-    are retained with it. Memory and wiki observations are captured, while their
+    are retained with it. The actual turn reference scopes an explicit unknown
+    scheduled-source observation: direct admission observes no heartbeat batch.
+    Memory and wiki observations are captured, while their
     retrieval routes remain request-specific. A new turn, changed observation or
     changed common prompt fragment needs a new preparation. No global cache or
     effect result is shared. *)
@@ -37,4 +40,5 @@ val project :
 val project_partition :
   t -> workspace_memory_access:Keeper_request_tool_access.t option -> Keeper_context_layers.rendered
 (** The same bytes as [project], with the captured Goal snapshot attributed to
-    [Active_goals] so request assembly can keep it through the tool loop. *)
+    [Active_goals] and the real turn's unknown admission observation to
+    [Admitted_scheduled_input], so request assembly retains both through tools. *)

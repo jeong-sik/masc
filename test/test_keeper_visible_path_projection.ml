@@ -13,6 +13,9 @@ module Keeper_alerting_path = Masc.Keeper_alerting_path
    variants directly). These test-local shims reproduce the [.raw_output]
    projection so the assertions below keep exercising the real production
    entry points. *)
+let scheduled_admission_fixture_ref =
+  Ids.Turn_ref.make ~trace_id:"trace-admission-fixture" ~absolute_turn:1
+
 let handle_read_file ~turn_sandbox_factory ~config ~meta ~args =
   (Keeper_tool_filesystem_runtime.handle_read_file_with_outcome
      ~turn_sandbox_factory
@@ -769,7 +772,7 @@ let test_equal_checkout_requires_recent_target_ref () =
   let observation = Masc.Keeper_world_observation.observe
     ~pending_board_events:(Some []) ~config ~meta in
   let { Masc.Keeper_unified_prompt.world_state; _ } =
-    Masc.Keeper_unified_prompt.build_prompt
+    Masc.Keeper_unified_prompt.build_prompt ~turn_ref:scheduled_admission_fixture_ref ~admission:Masc.Keeper_unified_prompt_event_fields.Unknown
       ~turn_decision:(Masc.Keeper_world_observation.keeper_cycle_decision
                         ~meta observation)
       ~current_task:Masc.Keeper_world_observation_inputs.No_current_task
@@ -859,7 +862,7 @@ let test_freshness_rows_render_in_turn_prompt () =
       ~meta
   in
   let { Masc.Keeper_unified_prompt.world_state; _ } =
-    Masc.Keeper_unified_prompt.build_prompt
+    Masc.Keeper_unified_prompt.build_prompt ~turn_ref:scheduled_admission_fixture_ref ~admission:Masc.Keeper_unified_prompt_event_fields.Unknown
       ~turn_decision:
         (Masc.Keeper_world_observation.keeper_cycle_decision ~meta observation)
       ~current_task:Masc.Keeper_world_observation_inputs.No_current_task
@@ -876,7 +879,7 @@ let test_freshness_rows_render_in_turn_prompt () =
     true
     (contains_in world_state "ahead of origin/main by 1");
   let without_rows =
-    Masc.Keeper_unified_prompt.build_prompt
+    Masc.Keeper_unified_prompt.build_prompt ~turn_ref:scheduled_admission_fixture_ref ~admission:Masc.Keeper_unified_prompt_event_fields.Unknown
       ~turn_decision:
         (Masc.Keeper_world_observation.keeper_cycle_decision ~meta observation)
       ~current_task:Masc.Keeper_world_observation_inputs.No_current_task
@@ -942,7 +945,7 @@ let test_freshness_layer_sorts_drift_first_and_aggregates_unmeasured () =
       ~meta
   in
   let { Masc.Keeper_unified_prompt.world_state; _ } =
-    Masc.Keeper_unified_prompt.build_prompt
+    Masc.Keeper_unified_prompt.build_prompt ~turn_ref:scheduled_admission_fixture_ref ~admission:Masc.Keeper_unified_prompt_event_fields.Unknown
       ~turn_decision:
         (Masc.Keeper_world_observation.keeper_cycle_decision ~meta observation)
       ~current_task:Masc.Keeper_world_observation_inputs.No_current_task

@@ -1,0 +1,106 @@
+{
+  "actor": "tui-probe-prerequisite",
+  "is_actual_TUI": false,
+  "bearer_sent": false,
+  "method": "GET",
+  "url": "http://127.0.0.1:54740/health",
+  "observed_at": 1793056657.066368,
+  "status": 200,
+  "original_body_bytes": 12635,
+  "original_body_sha256": "723148363e5c06a0bde3f2d047c973182f9ddb40b9bd955ce6a2013877f897c4",
+  "selected_response": {
+    "build": {
+      "release_version": "0.64.0",
+      "binary_version": "0.64.0",
+      "repo_version": "0.64.0",
+      "commit": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+      "commit_source": "embedded",
+      "binary_commit": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+      "binary_commit_source": "embedded",
+      "provenance_source": "self_observed",
+      "executable_sha256": "1622a35d1082da4fe24d9effb05aec11918d9444288441049c8d6d30cedb415c",
+      "binary_commit_unix_ts": 1793046677.0,
+      "binary_commit_age_seconds": 9980,
+      "repo_head_commit": "a3950a189b9",
+      "repo_head_commit_source": "runtime_repo_head",
+      "repo_head_commit_unix_ts": 1793046677.0,
+      "repo_head_commit_age_seconds": 9980,
+      "executable_path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/masc",
+      "executable_dir": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact",
+      "repo_root": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+      "runtime_instance_id": "01a17a81-41b4-7000-9427-e027653fa58d",
+      "started_at": "2026-10-26T23:17:33Z",
+      "uptime_seconds": 3
+    },
+    "paths": {
+      "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/workspace",
+      "effective_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/workspace",
+      "effective_masc_root": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/workspace/.masc",
+      "current_task_path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/workspace/.masc/current_task",
+      "current_task_shape": "absent",
+      "effective_has_masc_dir": true,
+      "roots_diverge": false,
+      "strict_mode_requested": false,
+      "startup_rejected": false,
+      "startup_abort_eligible": false,
+      "input_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/workspace",
+      "env_masc_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/workspace",
+      "resolution_source": "explicit_cli"
+    },
+    "startup": {
+      "phase": "ready",
+      "state_ready": true,
+      "model_runtime": {
+        "status": "available",
+        "reason": null,
+        "message": null
+      },
+      "pending_lazy_tasks": [],
+      "last_error": null,
+      "path_diagnostics": {
+        "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/workspace",
+        "effective_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/workspace",
+        "effective_masc_root": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/workspace/.masc",
+        "current_task_path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/workspace/.masc/current_task",
+        "current_task_shape": "absent",
+        "effective_has_masc_dir": true,
+        "roots_diverge": false,
+        "strict_mode_requested": false,
+        "startup_rejected": false,
+        "startup_abort_eligible": false,
+        "input_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/workspace",
+        "env_masc_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/workspace",
+        "resolution_source": "explicit_cli"
+      },
+      "config_resolution": {
+        "status": "ready",
+        "warnings": [],
+        "config_root": {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/workspace/.masc/config",
+          "exists": true,
+          "source": "env"
+        },
+        "prompts": {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/workspace/.masc/config/prompts",
+          "exists": true,
+          "source": "env"
+        },
+        "keepers": {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/workspace/.masc/config/keepers",
+          "exists": true,
+          "source": "env"
+        }
+      },
+      "elapsed_sec": 2.6508889198303223,
+      "watchdog_timeout_sec": 240.0,
+      "product": {
+        "lifecycle": "serving",
+        "lazy_tasks": "complete",
+        "readiness": "ready",
+        "last_error": null,
+        "flat_phase": "ready"
+      }
+    }
+  },
+  "scope": "One root observer prerequisite through unchanged relay; canonical Host, no identity/header/health rewriting."
+}

@@ -1,0 +1,21 @@
+{
+  "recorded_unix": 1793056651.953557,
+  "argv": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/owned_tui_request_state_v5.py",
+    "--source-root",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+    "--native-dir",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146",
+    "--output",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4",
+    "--image-reference",
+    "masc-sandbox:general",
+    "--observation-deadline-unix",
+    "1793057251.9534879"
+  ],
+  "controller_sha256": "a97ec74d24c7cca29263d3ad4a78ec80c9e2fa996f31c40b382f51f9c0f00b97",
+  "review": "root full v4-to-v5 delta + schedule_adversarial independent bounded source PASS",
+  "scope": "One owned actual native TUI request/state trial with existing semantic startup and local Keeper application observations before first key. Readiness is not proof of selected Keeper membership or paint. No real provider calls.",
+  "deadline_policy": "finite observation only; no automatic replay/restart/forcedkill"
+}

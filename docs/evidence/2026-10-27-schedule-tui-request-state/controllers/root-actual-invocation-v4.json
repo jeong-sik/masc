@@ -1,0 +1,21 @@
+{
+  "recorded_unix": 1793055732.127192,
+  "argv": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/owned_tui_request_state_v4.py",
+    "--source-root",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+    "--native-dir",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146",
+    "--output",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-3",
+    "--image-reference",
+    "masc-sandbox:general",
+    "--observation-deadline-unix",
+    "1793056332.1271129"
+  ],
+  "controller_sha256": "2180b2f37a34a40ad9670188901a33a1d62f541b38f2a75c2285deb819a92a2d",
+  "review": "root full delta + adversarial independent bounded source-only PASS",
+  "scope": "One owned actual TUI request/state trial with explicit canonical server public identity matching raw relay. Root observer prerequisite is distinct from actual native TUI evidence. No model/paint/F9 appearance proof.",
+  "deadline_policy": "observation only; no automatic replay/restart/forcedkill"
+}

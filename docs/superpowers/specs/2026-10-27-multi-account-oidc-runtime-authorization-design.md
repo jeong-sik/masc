@@ -60,7 +60,7 @@
 8. **판정은 닫힌 합타입으로 표현한다.** 문자열 비교나 이름으로 권한을 추정하지 않는다.
 9. **owner의 부재는 그 의존 사슬만 막는다.** 다른 Cleared 사슬은 계속 실행할 수 있어야 한다.
 10. **실제 증명이 없는 공유는 거부다.** lane·readiness·provider 호출·복구 증명이 없으면 다계정을 열지 않는다.
-11. **dispatch의 prompt·output·transcript는 initiator의 것이다.** owner와 Admin은 사용량·시각·dispatch_id·결과 종류만 읽는다. 공유는 Runtime의 Use이며 대화 내용의 공유가 아니다.
+11. **dispatch의 prompt·output·transcript는 initiator의 것이다.** owner와 Admin은 사용량·시각·dispatch_id·결과 종류만 읽는다. 공유는 Runtime의 Use이며 대화 내용의 공유가 아니다. Keeper의 지속 상태(컨텍스트·기억·산출 글)는 만든 dispatch의 initiator를 표시하고, 다른 initiator의 dispatch에는 `Read_state` effect가 허용될 때만 보인다. 허용이 없으면 initiator별로 분리된 컨텍스트로 돌린다.
 
 ## 4. 주체와 레코드
 
@@ -88,7 +88,7 @@ WorkspaceMembership {
 - Dashboard Admin은 활성 Human principal과 활성 Admin_assignment가 필요하다. 비밀 제시로 role을 만들지 않는다. Admin_assignment의 생성·회수·변경은 `role_epoch`로 기록하고 Admin 경로의 stream·관리 실행만 재평가한다. 개인 Self Runtime은 role 변경만으로 무효화하지 않는다.
 - Service/Keeper에는 일반 Admin role이 없다. 필요한 경우 `ManageMachineShared`, `AdminDisableBlock`, `ReadAuditMetadata` 같은 닫힌 개별 권한만 부여한다.
 - Admin은 다른 사람의 credential·private Runtime을 사용하지 못한다. Disable/Block/감사와 Service-owned 공유 관리만 한다. 점유 중인 dispatch의 `Executor_teardown`은 `AdminDisableBlock`에 포함한다.
-- Admin_assignment를 회수하면 그 Admin이 승인한 MachineSharePolicy와 발급한 Delegated 목록을 감사에 남긴다. 자동 회수가 아니라 재검토 대상 표시다.
+- Admin_assignment 회수에는 `cause = Security_incident | Operational`을 필수로 둔다(§10.4의 Block과 같은 구분). `Security_incident`이면 같은 append로 그 Admin이 author인 MachineSharePolicy와 Delegated grant를 `Revocation_pending`에 둔다. 회수된 Admin과 무관한 활성 Admin이 항목별로 재승인(§8.3의 취소 기록)하거나 회수해서만 푼다. `Operational`이면 그 목록을 감사에 남기고 grant는 유효하게 둔다.
 - **Admin은 관리 권한으로 자기 자신 또는 자신이 관리하는 principal에게 grant를 만들거나 수정할 수 없다.** 감사에는 author·beneficiary·beneficiary manager를 남긴다. Admin이 Service-owned Runtime을 사용하려면 독립된 Service 관리 owner나 제2 승인자의 grant가 필요하다. 제2 승인자는 author와 다른 principal이며 author의 관리 대상이 아니어야 한다.
 
 ### 4.2 ProviderAccount와 Runtime
@@ -244,10 +244,10 @@ OIDC Dashboard는 Authorization header를 제거한 뒤 모드를 연다. cookie
 ### 5.3 credential 선택과 Strict
 
 - `Legacy_workspace_secret`은 parser가 명시적으로 인식하지만 다계정에서는 단독·조합 모두 `Legacy_credential_forbidden`이다. Admin이나 Worker로 해석하지 않는다. HTTP recovery grace는 제거하고 `masc auth recovery`(새 명령, §10.5)의 Local_operator 경로만 사용한다.
-- 요청 하나는 `Browser_session`, `Scoped_pat`, `Service_credential`, `Mcp_oauth_token` 중 정확히 하나로 인증하고, 모두 같은 인증 투영(principal + `auth_binding` + `Pat_scope`)으로 풀어 §6.2 판정을 거친다. 두 번째 권한표를 두지 않는다. PAT·Service·OAuth token의 레코드는 `principal`과 `Pat_scope`를 가진 새 형식이고, `agent_name`과 `role`을 가진 `agent_credential`은 다계정에서 읽지 않는다. Admin은 `Admin_assignment`에서만 온다.
-- MCP OAuth는 loopback 전용 승인 화면에서 기존 bearer를 제시하게 한다. 다계정에서는 이 승인을 해당 Human의 OIDC session에 결속하고, 발급한 token은 `Pat_scope`와 같은 범위 필터를 가진다. 이 결속은 OAuth 스택이 main에 들어간 뒤 별도 층에서 구현한다.
+- 요청 하나는 `Browser_session`, `Scoped_pat`, `Service_credential`, `Mcp_oauth_token` 중 정확히 하나로 인증하고, 모두 같은 인증 투영(principal + `auth_binding` + `Pat_scope`)으로 풀어 §6.2 판정을 거친다. 두 번째 권한표를 두지 않는다. `Service_credential`은 `Not_pat`이고 범위는 Delegated grant와 DelegatePolicy가 정한다. PAT·Service·OAuth token의 레코드는 `principal`과 `Pat_scope`를 가진 새 형식이고, `agent_name`과 `role`을 가진 `agent_credential`은 다계정에서 읽지 않고, 옛 bearer를 든 요청은 `Legacy_credential_forbidden`으로 Reject한다. Admin은 `Admin_assignment`에서만 온다.
+- MCP OAuth는 loopback 전용 승인 화면에서 기존 bearer를 제시하게 한다. 다계정에서는 이 승인을 해당 Human의 OIDC session에 결속하고, 발급한 token은 `Pat_scope`와 같은 범위 필터를 가진다. 이 결속은 OAuth 스택이 main에 들어간 뒤 별도 층에서 구현한다. 그 층이 들어오기 전까지 `Mcp_oauth_token`은 Reject한다.
 - `auth disabled`, `require_token=false`, `MASC_ALLOW_ANONYMOUS_MUTATIONS=true`는 다계정 부팅·활성화를 거부한다. 이 검사는 기존 기능이 아니라 새 요구사항이다.
-- HTTP `http_auth_strict_enabled`와 MCP caller strict를 `Auth_gate.decide = Allow(principal) | Reject(reason) | Log_only(evidence)`로 통합한다. 다계정은 Reject가 실제 응답일 때만 허용하고 token 해석 실패 후 caller alias 유지 경로는 제거한다. `MASC_AUTH_STRICT=strict` 값만으로는 통과하지 않는다.
+- HTTP `http_auth_strict_enabled`와 MCP caller strict를 `Auth_gate.decide = Allow(principal) | Reject(reason) | Log_only(evidence)`로 통합한다. 다계정은 Reject가 실제 응답일 때만 허용하고 token 해석 실패 후 caller alias 유지 경로는 제거한다. 다계정에서 `Log_only` 처분은 금지한다. route 표의 모든 항목이 `Reject`를 반환함을 보이는 시험이 있어야 다계정을 연다. `MASC_AUTH_STRICT=strict` 값만으로는 통과하지 않는다.
 - session cookie가 조금이라도 있으면 bearer 유무와 무관하게 same-origin과 session-bound CSRF token을 모두 요구한다. `Option.is_some token` 우회와 GET mutation은 금지한다. credentialed cross-origin CORS는 기본 거부다.
 - agent query/header와 `x-masc-keeper-name`은 Actor_hint다. 제시한 service hint가 credential의 service_id와 다르면 거부한다. 익명 rate-limit은 직접 접속 peer IP이며 Actor_hint로 나누지 않는다. 인증 진단 endpoint는 Admin 전용이며 token·hash·credential 본문을 반환하지 않는다.
 - route 표에 모든 HTTP/WS/SSE/MCP 경로의 인증·인가·CSRF·query credential 처분을 열거하고, legacy workspace secret을 쓰는 기존 호출자와 대체 `InternalServiceCredential.service_id`도 열거한다. legacy 사용 목록이 0이어야 다계정을 연다.
@@ -273,7 +273,7 @@ ProviderLink {
 3. 모든 `account_ref` resolve는 `ManageOwnProvider + workspace + integration + CLI + owner + namespace`를 검사한다. account_ref·login_id는 권한이 아니다.
 4. official-client OAuth와 MASC Google OIDC transaction은 다른 흐름이다. 각각 state/PKCE와 단회 소비를 검증하고, 완료 시 ProviderAccount.owner와 격리된 account-home을 결속한다. provider email은 소유권 키가 아니다.
 5. OAuth code·provider token·credential 본문은 로그·응답에 남기지 않는다. 로그인 완료와 실제 호출 성공은 구분한다. 현재 `CanAdmin`은 일반 사용자의 `ManageOwnProvider`로 분리한다.
-6. 연결 때 CLI가 실제로 읽는 credential 저장소 종류(`file | keychain | 그 밖`)를 기록한다. `file`이 아니면 로그인 완료로 세지 않고 `Sign_in_required`로 거부한다. 같은 구분이 `Runtime_muse_home`의 `sign_in_gap`에 있다.
+6. 연결 때 lane이 CLI가 실제로 읽는 credential 저장소 종류(`file | keychain | 그 밖`)를 확인해 기록한다. CLI의 자기 신고는 증거가 아니다. 이 값은 §7.2의 증명 묶음에 넣어 lease에 기록하고, dispatch 때 다르면 `NoAuthorizedRuntime`이다. `file` 밖의 저장소는 MASC가 읽는 경로가 증명되기 전까지 `Sign_in_required`로 거부한다. keychain 지원은 이 문서의 범위 밖이며 미검증이다. 같은 구분이 `Runtime_muse_home`의 `sign_in_gap`에 있다.
 
 ## 6. 실행 인가
 
@@ -380,7 +380,7 @@ broker는 lease 뒤에만 account-home을 최소 연결하고, 일반 회수에�
 - `Inference_only`: 내장 도구·MASC MCP·credential/debug 출력을 비활성화한 순수 추론이다. 도구가 필요한 Keeper 실행에는 쓸 수 없다.
 - `Isolated_tools`: trusted official runtime에만 account-home을 두고 내장 tool subprocess·initiator·다른 Keeper가 credential/account-home을 읽을 수 없음을 증명한다. allowed_effects를 실제 sandbox/tool 정책으로 강제하고 종료를 검증한다. CLI 내장 도구 정책으로 옮길 수 없는 effect는 거부한다.
 
-증명은 `{cli_binary_digest, effective_config_digest, lane_identity, host_kernel, filesystem_type, eio_version, evidence_id}`에 결속하고 lease에 기록한다. dispatch 시점 값이 다르거나 증명이 없으면 `NoAuthorizedRuntime(Lane_not_isolated | Attestation_stale)`이다. Human의 Keeper도 owner와 executor가 달라 private 예외가 아니다. owner=executor인 private 실행만 executor별 격리 하에 허용한다. 미검증 lane에 account-home을 mount하지 않는다.
+증명은 `{cli_binary_digest, effective_config_digest, credential_store_kind, state_separation, lane_identity, host_kernel, filesystem_type, eio_version, evidence_id}`에 결속하고 lease에 기록한다. dispatch 시점 값이 다르거나 증명이 없으면 `NoAuthorizedRuntime(Lane_not_isolated | Attestation_stale)`이다. Human의 Keeper도 owner와 executor가 달라 private 예외가 아니다. owner=executor인 private 실행만 executor별 격리 하에 허용한다. 미검증 lane에 account-home을 mount하지 않는다. 호스트에서 직접 도는 경로는 다계정에서 열지 않는다.
 
 ### 7.3 dispatch MCP credential
 
@@ -408,7 +408,7 @@ resource_epoch   : Runtime/ProviderAccount Disable/Block/Quarantine/Purge/정책
 - model/execution revision은 다음 attempt에 적용하고 진행 중 lease를 끊지 않는다. 권한 축소만 scoped epoch으로 회수한다.
 - WS/SSE/MCP는 `principal active ∧ auth_binding active ∧ 구독 대상 grant/policy/resource 유효`를 재평가한다. auth session/PAT 폐기·principal Disable은 해당 transport를 무효화하지만 개별 Runtime 회수가 무관한 transport를 끊지 않는다.
 
-`authz.jsonl`의 writer lock은 최신 snapshot 검증 + append/fsync + 새 불변 snapshot 발행에만 쓴다. 읽기는 lock-free snapshot, replay는 기동·복구 때만이다. grant·lease 발급·회수·Lease_dispatched는 동기 commit이다. Completed evidence는 다음 동기 commit에 함께 실을 수 있지만 손실되면 완료로 추정하지 않고 `Outcome_unknown`이다. lease 계열 commit(발급·`Lease_dispatched`·`Revoked`)은 group commit을 허용한다. 한 fsync로 대기 중인 writer 여럿을 묶되, 각 writer의 응답은 자기 record가 fsync된 뒤에만 나간다. blocking I/O는 main domain에서 분리하고 authorize/append/flush를 각각 측정한다.
+`authz.jsonl`의 writer lock은 최신 snapshot 검증 + append/fsync + 새 불변 snapshot 발행에만 쓴다. epoch를 올리거나 `credential_generation`을 바꾸는 사건은 §8.2의 고수위 쓰기도 같은 구역에서 한다. 읽기는 lock-free snapshot, replay는 기동·복구 때만이다. grant·lease 발급·회수·Lease_dispatched는 동기 commit이다. Completed evidence는 다음 동기 commit에 함께 실을 수 있지만 손실되면 완료로 추정하지 않고 `Outcome_unknown`이다. lease 계열 commit(발급·`Lease_dispatched`·`Revoked`)은 group commit을 허용한다. 한 fsync로 대기 중인 writer 여럿을 묶되, 각 writer의 응답은 자기 record가 fsync된 뒤에만 나간다. blocking I/O는 main domain에서 분리하고 authorize/append/flush를 각각 측정한다.
 
 ### 8.2 고수위와 Intent/Committed
 
@@ -426,16 +426,16 @@ Committed {
 }
 ```
 
-1. 고수위는 Intent_pending으로 시작하고 authz append/fsync 뒤 `Committed(record_hash)`로 갱신한다. snapshot 발행 뒤에만 성공 응답을 돌려준다. Committed 전 성공 응답은 없다.
+1. 고수위는 Intent_pending으로 시작하고 authz append/fsync 뒤 `Committed(record_hash)`로 갱신한다. snapshot 발행 뒤에만 성공 응답을 돌려준다. Committed 전 성공 응답은 없다. `Intent_pending` 쓰기, authz append/fsync, `Committed` 갱신은 같은 writer lock 구역 안에서 하고, 그 구역이 열려 있는 동안 lease 계열 commit(group commit 포함)은 끼지 않는다. 그래서 intended record의 직전 해시는 `Intent_pending`의 `previous_record_hash`와 같다.
 2. 재기동 시 `Intent_pending`인데 replay에 `intended_next_record_digest`와 일치하는 record가 있으면 **digest를 검증하고 Committed로 승격**한다. record가 이미 있으므로 의도를 다시 실행하지 않고 고수위 포인터만 완료한다. digest가 다르면 `AuthorizationUncertain`이다.
-3. `Intent_pending`인데 replay가 직전 해시와 같고 intended record가 없으면 `Incomplete_append_aborted`로 기록하고 intended event를 재생하지 않는다. 응답이 나가지 않은 미완료 의도이며 `aborted_intent`로 epoch 간격의 이유를 남긴다.
+3. `Intent_pending`인데 replay의 head가 `previous_record_hash`와 같고 intended record가 없으면 `Incomplete_append_aborted`로 기록하고 intended event를 재생하지 않는다. 응답이 나가지 않은 미완료 의도이며 `aborted_intent`로 epoch 간격의 이유를 남긴다.
 4. `Committed(h)`인데 replay에 h가 없으면 미완료 append가 아니라 **응답한 사건의 롤백**이다. `AuthorizationUncertain`으로 시작하고 되돌아온 Active grant를 실행하지 않는다. replay에 h가 있으면 포인터만 완료하고 현재 scoped fencing을 다시 검사한다.
-5. replay가 직전 해시와 일치하는지, intended digest가 일치하는지를 분리해서 판정한다. 일반 크래시와 실제 복원 누락을 같은 가지로 처리하지 않는다.
+5. `Intent_pending`은 intended record의 존재와 head 위치로, `Committed`는 `record_hash`의 존재로 판정한다. 위 어느 가지도 아니면(예: record가 없는데 head가 `previous_record_hash`와 다르다) 되감기나 구역 밖 append의 흔적이므로 `AuthorizationUncertain`이다. 일반 크래시와 실제 복원 누락을 같은 가지로 처리하지 않는다.
 6. backup 밖 저장소가 실제 backup 대상에서 제외되는지 T/T+1/T+2 리허설의 경로·제외 목록·digest로 증명한다.
 
 ### 8.3 중단된 보안 회수
 
-`Incomplete_append_aborted`이고 `intended_event_kind ∈ {Revoke, Disable, Block}`이면 해당 `subject`를 **로그를 건드리지 않고 게이트에서만 `Revocation_pending`으로 차단**한다. grant 행이 Active로 보여도 새 dispatch·lease·tool effect를 허용하지 않는다.
+`Incomplete_append_aborted`이고 `intended_event_kind`가 권한을 줄이거나 credential을 무효화하려는 사건(`Revoke`, `Disable`, `Block`, `Purge`, 정책 회수, credential 교체)이면 해당 `subject`를 **로그를 건드리지 않고 게이트에서만 `Revocation_pending`으로 차단**한다. grant 행이 Active로 보여도 새 dispatch·lease·tool effect를 허용하지 않는다.
 
 - 새 Grant·credential 생성·일반 설정 변경은 자동 재생하지 않고 다시 승인한다.
 - `Revocation_pending`은 **재시도 append 성공** 또는 **Admin의 명시적 취소 기록** 중 하나로만 닫는다. owner나 공격자가 임의로 해제하지 못한다. Admin이 없으면 실행을 재개하지 않고 Local_operator의 Quarantined 경로로 간다.
@@ -465,9 +465,9 @@ Committed {
 
 같은 ProviderAccount의 official account-home은 single-flight다. credential 파일 동시 갱신 가능성을 가정하지 않고 한 incarnation만 연결한다. 대기자는 credential 없이 기다리고 lock을 얻은 뒤 writer lock에서 현재 권한을 다시 검사한 뒤 mount/spawn한다. 회수되면 대기를 취소하고 authz writer lock을 잡은 채 account-home lock을 기다리지 않는다.
 
-- 대기열은 ProviderAccount별 단일 FIFO다. owner와 `managed_by=owner`인 Keeper/Service도 같은 줄에 서며 순위 가중치나 선점 횟수 규칙은 없다. owner는 점유 중인 grantee dispatch를 `Executor_teardown`으로 명시적으로 끊을 수 있고, 끊긴 dispatch는 `Outcome_unknown`이다.
+- 대기열은 ProviderAccount별 단일 FIFO다. owner와 `managed_by=owner`인 Keeper/Service도 같은 줄에 서며 순위 가중치나 선점 횟수 규칙은 없다. owner는 자기 ProviderAccount의 점유 중인 dispatch를 `Executor_teardown`으로 끊을 수 있고(끊긴 dispatch는 `Outcome_unknown`), 대기 중인 grantee 항목도 취소할 수 있다. 취소된 항목은 `Owner_cancelled`로 종단하고 failover 규칙은 그대로다. owner는 대기열의 grantee·도착 시각·dispatch_id를 보지만 prompt는 보지 못한다.
 - `account_busy`에는 대기 수와 `Account_recovery_pending`을 구분해 보인다. owner와 Admin에게는 holder의 dispatch_id, 점유 시작 시각, 마지막 출력 이벤트 시각(관측값이며 판정 기준이 아니다)을 보여 주고 prompt·credential은 노출하지 않는다. grantee에게는 사유 코드만 보이고 항목 ID는 숨긴다. owner가 부재하면 Admin이 `AdminDisableBlock`으로 holder를 `Executor_teardown`한다.
-- 침묵 감시는 기존 Runtime의 `turn-timeout-s` 선언을 그대로 쓰고 새 값을 만들지 않는다. 선언자는 Runtime owner다. 선언이 없으면 기존 기본값이 서고, 0 이하로 선언하면 마감이 없다. 마감이 오면 기존 `Timeout` typed 실패로 `Executor_teardown`과 `Outcome_unknown`이 된다. 마감이 없는 Runtime에서 dispatch가 멈추면 `account_busy`의 holder 정보를 보고 owner나 Admin이 하는 `Executor_teardown`이 출구다.
+- 침묵 감시는 기존 Runtime의 `turn-timeout-s` 선언을 그대로 쓰고 새 값을 만들지 않는다. 선언자는 Runtime owner다. 선언이 없으면 기존 기본값이 서고, 0 이하로 선언하면 마감이 없다. 마감이 오면 기존 `Timeout` typed 실패로 `Executor_teardown`과 `Outcome_unknown`이 된다. 마감이 없는 Runtime에서 dispatch가 멈추면 `account_busy`의 holder 정보를 보고 owner나 Admin이 하는 `Executor_teardown`이 출구다. 출력을 조금씩 흘려 이 감시를 피하는 holder도 같은 출구로 끊는다. 알려진 한계다.
 - account-home은 credential과 state로 나눠 다룬다. credential은 ProviderAccount당 하나이고 한 번에 한 incarnation만 쓴다. 대화 기록·cache·프로젝트 설정 같은 state는 executor principal별 디렉터리에 둔다. 다음 incarnation은 이전 executor의 state를 읽지 못해야 한다. 분리 방식은 lane마다 달라도 되지만(`Runtime_muse_home`은 managed credential generation과 native session/data 디렉터리를 나눈다) §7.2의 증명에 이 분리가 들어가야 한다.
 - 점유는 `{provider_account_id, dispatch_id, server_boot_id, worker_instance_id, state}`로 영속 기록한다. 재기동 뒤 이전 점유는 **이전 worker 종료와 account-home 연결 해제가 attestation으로 확인된 뒤에만** 해제한다. 확인하지 못하면 `AuthorizationUncertain`으로 새 mount/spawn을 거부한다. teardown 후 credential 무결성을 검증하고 확인하지 못하면 owner 재인증 또는 로컬 운영자의 Quarantined로 진행한다. credential을 오래된 backup에서 자동 복원하지 않는다.
 
@@ -507,7 +507,7 @@ Single_user 모드의 현재 동작은 바꾸지 않는다. 계정당 동시 dis
 1. Block record에 `cause = Security_incident | Operational`을 필수로 둔다. 원인이 없는 기존 Block은 `Security_incident`로 취급한다.
 2. `Security_incident` 해제 후에는 원 owner·원 grant 승인자가 스스로 Cleared할 수 없다. **Admin이 owner가 수행한 provider 재인증·credential 교체·격리 증거를 확인하고 항목별로 Cleared한다.** Admin이 owner 대신 재인증하거나 credential을 읽는 것은 아니다.
 3. `Operational` 해제 후에는 Active 원 owner·원 승인자 또는 Service 후계가 Cleared한다. 두 경우 모두 Unblock이 lease·stream·durable work를 자동 재개하지 않는다.
-4. Security_incident를 해제할 때 Cleared할 수 있는 활성 Admin이 없으면 Unblock/Cleared하지 않고 Local_operator가 `Quarantined(cause=No_eligible_admin)`로 기록한다. Cleared할 수 있는 Admin은 그 항목의 owner·원 grant 승인자·beneficiary가 아닌 활성 Admin이다. 그런 Admin이 생기면 같은 항목을 `Admin_incident_cleared`로 풀 수 있다. purge는 Local_operator의 명시 결정과 Cleared할 수 있는 Admin이 없다는 확인 기록을 요구하며, 시간 경과는 근거가 아니다. 관리자 부재나 이해충돌을 이유로 owner에게 해제 권한을 돌려주지 않는다.
+4. Security_incident를 해제할 때 Cleared할 수 있는 활성 Admin이 없으면 Unblock/Cleared하지 않고 Local_operator가 `Quarantined(cause=No_eligible_admin)`로 기록한다. Cleared할 수 있는 Admin은 그 항목의 owner·원 grant 승인자·beneficiary가 아닌 활성 Admin이다. 그런 Admin이 생기면 같은 항목을 `Admin_incident_cleared`로 풀 수 있고, 이때도 2번의 항목별 증거 확인을 그대로 요구한다. owner 부재로 그 증거를 만들 수 없으면 해제하지 않고 purge로만 종단한다. purge는 Local_operator의 명시 결정과 Cleared할 수 있는 Admin이 없다는 확인 기록을 요구하며, 시간 경과는 근거가 아니다. 관리자 부재나 이해충돌을 이유로 owner에게 해제 권한을 돌려주지 않는다.
 5. **부재가 확인된 owner의 Pending은 Local_operator의 Quarantined로만 종단하고 그 의존 사슬은 Disabled로 내린다.** Pending을 무기한 감사에 남기지 않는다. Quarantined 후보는 의존 단계 재검증이 명시적으로 실패한 record이며 `failed_stage`, `failure_evidence_id`, `manifest_id`를 필수로 남긴다. 시간 경과를 실패로 취급하지 않는다.
 6. Quarantined는 일반 재활성화·공유·실행이 불가능하다. 종단은 로컬 운영자의 명시적 purge이거나, `cause=No_eligible_admin`인 항목의 Admin 해제다. purge는 credential 조회나 grant 재검증 없이 대상 ID·실행자·사유·결과를 audit/revocation ledger에 남기고 credential을 파기한다. 비밀이 아닌 model/execution config는 읽기 전용으로 export하고 credential은 파기한다. grant는 이전하지 않는다. Purged를 복원으로 Active로 승격하지 않는다.
 
@@ -528,11 +528,12 @@ Single_user 모드의 현재 동작은 바꾸지 않는다. 계정당 동시 dis
 
 `account_mode = Multi_account` 자체는 실행 허가가 아니라 요청이다. 실제 활성화에는 테스트 실행기가 산출한 `MultiAccountReadiness`가 필요하다.
 
-1. readiness에는 route inventory와 각 경로의 실제 Reject/CSRF/credential 단일성 증명, `legacy_workspace_secret_callers=[]`, `auth disabled`·`require_token=false` 부팅 거부 증명, Provider 두 계정 호출·제3자 거부, official lane 격리·복구 리허설 결과, `lib/runtime`에서 string만으로 실행 객체를 얻는 경로(`get_runtime_by_id`, `runtime_id_for_keeper`, `get_runtime_ids`, `capability_of_runtime_id`, `keeper_assignments`, `resolve_assignment` 등)의 잔존 0을 포함한다. `auth disabled` 부팅 거부는 기존 코드에 있다는 의미가 아니라 새로 추가할 요구사항이다.
+1. readiness에는 route inventory와 각 경로의 실제 Reject/CSRF/credential 단일성 증명, `legacy_workspace_secret_callers=[]`, `agent_credential_callers=[]`, `auth disabled`·`require_token=false` 부팅 거부 증명, Provider 두 계정 호출·제3자 거부, official lane 격리·복구 리허설 결과, `lib/runtime`에서 string만으로 실행 객체를 얻는 경로(`get_runtime_by_id`, `runtime_id_for_keeper`, `get_runtime_ids`, `capability_of_runtime_id`, `keeper_assignments`, `resolve_assignment` 등)의 잔존 0, MCP OAuth 결속 층 전에는 `Mcp_oauth_token`이 Reject라는 시험을 포함한다. `auth disabled` 부팅 거부는 기존 코드에 있다는 의미가 아니라 새로 추가할 요구사항이다.
 2. 각 증명은 build 전체가 아니라 **그 항목이 읽는 표면의 digest**에 결속한다. route 표·credential parser·lane 격리·Provider fixture·복구 리허설이 각각 `evidence_id`와 digest를 가진다. 운영자가 문서나 빈 boolean으로 `ready=true`를 쓰는 경로는 없다. 누락·미검증·digest 불일치·legacy 잔존이 있으면 열지 않는다.
 3. digest 불일치 시 `Multi_account_readiness_stale(surface)`로 **부팅·활성화를 거부**하고 `/health`와 로그에 같은 사유를 표시한다. 재-readiness 없이 Single_user로 자동 강등하거나 legacy 인증으로 돌아가지 않는다. 변경된 표면의 항목만 다시 실행한다.
 4. Provider 실계정 증거는 상시 CI가 아니라 후보·Provider 관련 표면이 바뀐 경우에 갱신한다. 실제 계정의 credential 상태도 확인하고, 검증 당시와 다른 계정·credential·Provider 설정이면 그 증거를 사용하지 않는다.
 5. `Fresh_bootstrap`도 readiness 없이 원격 다계정을 열지 않는다. loopback 로컬 복구는 별도 Local_operator 경로로 제한한다.
+6. Single_flight 대기 시간(§12)의 측정값은 readiness의 evidence로 요구한다. 허용 여부는 운영자가 그 값을 보고 내린 명시 결정을 evidence에 기록해서 정하고, 숫자 기준은 문서에 두지 않는다.
 
 ## 12. 필수 적대 시나리오
 
@@ -565,6 +566,7 @@ Single_user 모드의 현재 동작은 바꾸지 않는다. 계정당 동시 dis
 
 - 두 실제 Codex/Claude 계정이 올바른 구독으로 호출되고 제3자 호출·Admin private 사용·Keeper로의 묵시적 공유·미검증 delegated official이 거부된다.
 - 같은 account-home 동시 요청은 한 incarnation만 연결하고 완료 후 owner 로그인이 유지된다. 한 dispatch가 침묵해도 대기자는 `account_busy`로 holder를 보고, owner 또는 Admin이 `Executor_teardown`으로 풀 수 있으며, owner 쪽 Keeper가 grantee를 계속 앞지르지 못한다. 한 grantee의 dispatch가 끝난 뒤 다음 executor가 그 prompt·output·transcript를 읽지 못한다.
+- A의 Keeper 기억에 있는 값이 B의 dispatch 출력에 나오지 않고, B의 prompt가 다음 initiator C의 dispatch에 보이지 않는다.
 - dispatch MCP credential 회수 뒤 Read_only/Effecting 호출이 모두 거부되고, Read_only에는 lease append가 없어도 인가·출력 ACL이 유지된다.
 - lease가 취소·teardown·크래시로 끝나는 모든 경로에서 `Issued`가 남지 않고, 같은 lease로 효과가 두 번 나가지 않는다.
 - 300 Keeper 부하에서 authorize/append/flush p99·snapshot 지연·복원 직후 일제 기상·owner/grantee 대기 수·credential/process/filesystem/trace 격리를 실측한다. 권한 검사를 생략해 목표를 맞추지 않는다. 먼저 Single_user의 계정당 동시 official dispatch 수와 지연을 기준선으로 재고, 같은 부하의 대기 시간을 다계정 Single_flight에서 잰다.

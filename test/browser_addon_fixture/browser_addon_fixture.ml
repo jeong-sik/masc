@@ -29,9 +29,14 @@ def control(conn):
             else: result={"reply":"receipt"}
             conn.sendall((json.dumps(result)+"\n").encode())
             return
-        if op!="snapshot": raise RuntimeError("fixture exposes snapshot and download grants only")
+        if op=="poll":
+            with open(os.path.join(a.root,"polls"),"a") as out: out.write(req["client"]["clientId"]+"\n")
+            conn.sendall((json.dumps({"reply":"poll","command":None,"state_id":"fixture"})+"\n").encode())
+            return
+        if op!="snapshot": raise RuntimeError("fixture exposes snapshot, poll and download grants only")
         with open(os.path.join(a.root,"clients.json")) as src: clients=json.load(src)
-        result={"reply":"snapshot","snapshot":{"state":"serving","clients":clients,"owned_backends":{"automation":{"activity":"enabled","registered":True,"session":"closed","locate":False},"stagehand":{"activity":"enabled","registered":True,"session":"unknown","locate":False}}}}
+        with open(os.path.join(a.root,"owned.json")) as src: owned=json.load(src)
+        result={"reply":"snapshot","snapshot":{"state":"serving","clients":clients,"owned_backends":{"automation":{"activity":"enabled","registered":owned["automation"],"session":"closed","locate":False},"stagehand":{"activity":"enabled","registered":owned["stagehand"],"session":"unknown","locate":False}}}}
         conn.sendall((json.dumps(result)+"\n").encode())
 def serve():
     while True:
@@ -135,7 +140,7 @@ let wait ~env predicate = let rec loop ()=if predicate () then () else
 (* One scripted worker under [root]/[name], attached with its own package.
    [backend] is the one source its package names, or none for the package
    that serves every source. Answers [stop] once its worker detached. *)
-let start ~sw ~env ~config ~root ~name ~backend ~clients ~downloads ~respond =
+let start ~sw ~env ~config ~root ~name ~backend ~owned:(automation,stagehand) ~clients ~downloads ~received ~respond =
   let root=Filename.concat root name in Unix.mkdir root 0o700;
   let requests=Filename.concat root "requests" and answers=Filename.concat root "answers" in
   Unix.mkdir requests 0o700;Unix.mkdir answers 0o700;
@@ -144,6 +149,8 @@ let start ~sw ~env ~config ~root ~name ~backend ~clients ~downloads ~respond =
     (Yojson.Safe.to_string (`List (List.map (fun client -> match W.client_to_json client with
        | `Assoc fields -> `Assoc (("interactions",`List [])::fields)
        | value -> value) clients)));
+  write (Filename.concat root "owned.json")
+    (Yojson.Safe.to_string (`Assoc ["automation",`Bool automation;"stagehand",`Bool stagehand]));
   write (Filename.concat root "downloads.json")
     (Yojson.Safe.to_string (`Assoc downloads));
   write (Filename.concat root "tool.json") (Yojson.Safe.to_string (`Assoc [
@@ -182,6 +189,7 @@ hooks = ["validate_input", "validate_output"]
       | `String "automation",`Null -> B.Automation_route
       | _ -> failwith "invalid fixture browser connection" in
     let verb=require (W.verb_of_json ~route (Yojson.Safe.Util.member "command" arguments)) in
+    received ~route;
     let known=match route with B.Live_route (Some id) ->
         List.exists (fun (client:B.client_info) -> client.client_id=id) clients
       | Automation_route|Stagehand_route -> true | Live_route None -> false in
@@ -211,19 +219,39 @@ let serving ~config id=List.exists (fun (service:R.browser_service) -> service.i
   (R.browser_services ~config ~access:Lane_addon_sources.Operator_configuration)
 let with_worker ?(clients=[]) ?(downloads=[]) ~env ~config ~respond run =
   with_env ~env ~config (fun ~sw ~root ~settle ->
-    let id,stop=start ~sw ~env ~config ~root ~name:"browser" ~backend:None ~clients ~downloads ~respond in
+    let id,stop=start ~sw ~env ~config ~root ~name:"browser" ~backend:None ~owned:(true,true)
+      ~clients ~downloads ~received:(fun ~route:_ -> ()) ~respond in
     let stop ()=stop ();settle () in
     Fun.protect ~finally:stop (fun () ->
       wait ~env (fun () -> serving ~config id);
       run {stop}))
-type worker = { backend : B.Backend.t; clients : B.client_info list }
-let with_workers ~env ~config ~workers ~respond run =
+type worker = { serves : Lane_addon_types.browser_backends; clients : B.client_info list }
+type attached = { serves : Lane_addon_types.browser_backends; instance_id : string; polled : unit -> string list }
+let with_workers ?(received=fun ~serves:_ ~route:_ -> ()) ~env ~config ~workers ~respond run =
   with_env ~env ~config (fun ~sw ~root ~settle ->
-    let started=List.mapi (fun index (worker:worker) ->
-      start ~sw ~env ~config ~root ~name:(Printf.sprintf "%d-%s" index (B.Backend.to_wire worker.backend))
-        ~backend:(Some worker.backend) ~clients:worker.clients ~downloads:[]
-        ~respond:(respond ~backend:worker.backend)) workers in
-    let stop ()=List.iter (fun (_,stop) -> stop ()) started;settle () in
+    let started=ref [] in
+    (* Every worker that attached is detached, each on its own, and the root
+       is removed only when all of them settled. *)
+    let stop ()=
+      let failures=List.filter_map (fun (_,stop) -> match stop () with
+        | () -> None
+        | exception exn -> Some exn) (List.rev !started) in
+      match failures with [] -> settle () | first :: _ -> raise first in
     Fun.protect ~finally:stop (fun () ->
-      List.iter (fun (id,_) -> wait ~env (fun () -> serving ~config id)) started;
-      run ()))
+      List.iteri (fun index (worker:worker) ->
+        let name=Printf.sprintf "worker-%d" index in
+        let backend=match worker.serves with
+          | Lane_addon_types.Every_backend -> None
+          | One_backend backend -> Some backend in
+        let serves backend=Lane_addon_types.serves_backend worker.serves backend in
+        let id,stop=start ~sw ~env ~config ~root ~name ~backend
+          ~owned:(serves B.Backend.Automation,serves B.Backend.Stagehand) ~clients:worker.clients ~downloads:[]
+          ~received:(received ~serves:worker.serves) ~respond:(respond ~serves:worker.serves) in
+        started:=((worker.serves,id,name),stop) :: !started) workers;
+      let attached=List.rev_map (fun ((serves,instance_id,name),_) ->
+        let polls=Filename.concat (Filename.concat root name) "polls" in
+        {serves;instance_id;polled=(fun () -> if Sys.file_exists polls
+          then List.filter (fun line -> line<>"") (String.split_on_char '\n' (In_channel.with_open_bin polls In_channel.input_all))
+          else [])}) !started in
+      List.iter (fun (worker:attached) -> wait ~env (fun () -> serving ~config worker.instance_id)) attached;
+      run attached))

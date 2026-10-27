@@ -493,7 +493,10 @@ let browser_lanes_read_their_own_sources () =
   let state observations lane = Inventory.For_testing.browser_state ~activity:Browser_lane.Enabled
       (Browser_addon_presence.lane (Browser_addon_presence.of_observations ~declarations
          ~applications:(fun () -> fail "no browser Add-on is declared") observations) lane) lane in
-  let automation = serving Browser_lane.Backend.Automation (published [])
+  (* An automation worker that reports a client: it serves no live source,
+     so the live row does not count it. *)
+  let automation = serving Browser_lane.Backend.Automation
+      (published [client "01a16363-ef6a-7000-aee1-37e1be230204" "webdriver_bidi"])
   and ego = serving Browser_lane.Backend.Ego
       (published [client "01a16363-ef67-7000-ad62-05bcd0320d99" "ego_task_space"])
   and extension = serving Browser_lane.Backend.External_host
@@ -518,6 +521,13 @@ let browser_lanes_read_their_own_sources () =
                                | Observed _ | Absent | Off | Not_running _) -> false);
   check bool "the other lanes read as before" true
     (state doubled Browser_lane.Lane_name.Live = Inventory.Browser_clients (Browser_lane.Enabled, Inventory.Browser_observed 3));
+  check bool "a doubled live source leaves the live lane unreadable, not undercounted" true
+    (match Browser_addon_presence.lane (Browser_addon_presence.of_observations ~declarations
+             ~applications:(fun () -> []) (ego :: workers)) Browser_lane.Lane_name.Live with
+     | Browser_addon_presence.Unavailable (Doubled_sources [Browser_lane.Backend.Ego]) -> true
+     | Browser_addon_presence.(Unavailable (Doubled_sources _ | Refused _ | Observation_unreadable _
+                                            | Declarations_incomplete)
+                               | Observed _ | Absent | Off | Not_running _) -> false);
   (* A live installation that withholds its observation would make the count
      a part, so the live lane says it cannot read rather than undercount. *)
   let failed : Lane_addon_unready.t = {installation="ego-work";instance_id="ego-worker";package_id="ego";

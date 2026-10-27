@@ -20,14 +20,24 @@ val with_worker :
     worker returns when the server claims that grant; commit and release are
     acknowledged. *)
 
-(** One scripted worker of a package that names [backend] as its one source,
-    reporting [clients] in its snapshot. *)
-type worker = { backend : Browser_lane.Backend.t; clients : Browser_lane.client_info list }
+(** One scripted worker of a package that serves [serves], reporting
+    [clients] in its snapshot and, as registered, the automation and Stagehand
+    sources it serves. *)
+type worker = { serves : Masc.Lane_addon_types.browser_backends; clients : Browser_lane.client_info list }
+
+(** A worker as attached: its instance, and the client ids of the native
+    polls it answered. *)
+type attached = { serves : Masc.Lane_addon_types.browser_backends; instance_id : string;
+                  polled : unit -> string list }
 
 val with_workers :
+  ?received:(serves:Masc.Lane_addon_types.browser_backends -> route:Browser_lane.route -> unit) ->
   env:Eio_unix.Stdenv.base -> config:Masc.Workspace.config -> workers:worker list ->
-  respond:(backend:Browser_lane.Backend.t -> route:Browser_lane.route -> Browser_lane.verb -> Browser_lane.answer) ->
-  (unit -> 'a) -> 'a
-(** {!with_worker} for several workers at once, each of its own package and
-    source; [respond] is told which worker's source the request reached.
-    Every worker is detached and settled when [run] returns. *)
+  respond:(serves:Masc.Lane_addon_types.browser_backends -> route:Browser_lane.route -> Browser_lane.verb ->
+    Browser_lane.answer) ->
+  (attached list -> 'a) -> 'a
+(** {!with_worker} for several workers at once, each of its own package.
+    [received] is told of every command a worker receives, before the worker
+    checks that it lists the client; [respond] answers only those whose
+    client it lists. Every worker that attached is detached and settled when
+    [run] returns or a later attach fails. *)

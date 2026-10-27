@@ -46,12 +46,20 @@ let read (output : Lane_addon_types.output) = match output.rows with
 
 let unobserved : Browser_selection.work_browser =
   {activity=Browser_lane.Unobserved;registered=false;session=Browser_lane.Browser_unknown;locate=false}
-let serves_live backends = List.exists (Lane_addon_types.serves_backend backends)
-  Browser_lane.Backend.[Owned_firefox; Ego; External_host]
+let live_backends = Browser_lane.Backend.[Owned_firefox; Ego; External_host]
+let serves_live backends = List.exists (Lane_addon_types.serves_backend backends) live_backends
+(* A client does not say which live source it came from, so a worker that
+   serves a live source another worker also serves lists no usable client. *)
+let lists_usable_clients ~among backends =
+  serves_live backends
+  && not (List.exists (fun backend -> Lane_addon_types.serves_backend backends backend
+      && List.length (List.filter (fun other -> Lane_addon_types.serves_backend other backend) among) > 1)
+      live_backends)
 let merge workers =
   let serves backend (backends, _) = Lane_addon_types.serves_backend backends backend in
+  let among = List.map fst workers in
   let live = List.filter_map (fun (backends, published) ->
-    if serves_live backends then published else None) workers in
+    if lists_usable_clients ~among backends then published else None) workers in
   let owned backend pick = match List.filter (serves backend) workers with
     | [ (_, Some published) ] -> pick published
     | [ (_, None) ] | [] | _ :: _ :: _ -> unobserved in

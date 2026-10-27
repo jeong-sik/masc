@@ -28,8 +28,15 @@ val unobserved : Browser_selection.work_browser
 (** A worker of these sources serves a live connection. *)
 val serves_live : Lane_addon_types.browser_backends -> bool
 
+(** Whether a worker of [backends] lists clients the host may use, among the
+    sources of every serving worker [among] (itself included): it serves a
+    live source and no live source it serves is served by another worker. A
+    client does not say which source it came from, so a doubled live source
+    leaves every client of the workers serving it unused. *)
+val lists_usable_clients : among:Lane_addon_types.browser_backends list -> Lane_addon_types.browser_backends -> bool
+
 (** What several browser workers published, read as one, with each worker's
-    sources: the clients of every worker that serves a live source, and the
+    sources: the clients of every worker that {!lists_usable_clients}, and the
     automation and Stagehand reports of the one worker that serves each, when
     exactly one does and it published; otherwise {!unobserved}. A worker that
     published nothing is [None] and still counts as serving its sources. The

@@ -1,7 +1,7 @@
 (** Public host admission for the installed browser Add-ons. The caller
     supplies verified host authority; model arguments cannot select an
-    installation. One handle retains every serving browser service with its
-    own advertised tool across a workflow. Each source is served by exactly
+    installation. One handle retains every serving browser service, with its
+    own advertised tool when it has one, across a workflow. Each source is served by exactly
     one of them: a source no service serves, or two do, is unusable alone,
     and the others are still chosen. Calls never retry or fall back to the
     core browser queue. *)
@@ -11,7 +11,9 @@ val connect : config:Workspace.config -> access:Lane_addon_sources.access ->
   (t, Lane_addon_runtime.tool_call_error) result
 (** [reserved] is the caller's complete host tool namespace, as in ordinary
     Add-on discovery. Visibility and name-collision checks remain authoritative.
-    Only no serving browser service at all is refused here. *)
+    Only no serving browser service at all is refused here; a service that
+    advertises no browser tool still counts for its sources and refuses the
+    calls that reach it. *)
 val call : t -> backend:Browser_lane.Backend.t -> arguments:Yojson.Safe.t ->
   (Mcp_protocol.Mcp_types.tool_result, Lane_addon_runtime.tool_call_error) result
 (** Calls the service of [backend] through the ordinary exported-tool path,
@@ -27,7 +29,8 @@ type snapshot_failure = Snapshot_unavailable of string | Snapshot_unreadable of 
 val selection_snapshot : t -> (Browser_addon_observation.published * Browser_selection.snapshot, snapshot_failure) result
 (** Every service's [Snapshot] reply, asked side by side, merged as the host
     chooses from it: the live clients of the services that serve a live
-    source, and automation and Stagehand as their own service answered. A
+    source no other service serves, and automation and Stagehand as their own
+    service answered. A
     service that did not answer is left out of this choice only; no answer
     at all is the failure. A worker answers only while it serves, so a live
     lane it reports is on. A lost reply leaves the worker serving
@@ -41,7 +44,9 @@ val issue : ?upload_paths:string list -> ?required_actions:Browser_capabilities.
   (receipt, Tool_result.result) result
 (** Choose the browser from the services' snapshots, invoke the advertised
     tool of the service that serves it once on that route, and decode its
-    success receipt. A client that two services list is refused. An explicit owned
+    success receipt. Only the services the preference can reach are asked
+    for a snapshot. A client that two services list is refused, and so is a
+    client of a live source two services serve. An explicit owned
     route without [required_actions] needs no snapshot. The receipt names the
     browser the host chose; the worker states no identity. A worker refusal
     after the snapshot (the client left, the lane turned off) is returned as

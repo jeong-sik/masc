@@ -626,5 +626,7 @@ val browser_observations : config:Workspace.config -> access:Lane_addon_sources.
     read, found by their package's service and read per set of sources they
     serve, as {!observation_for_export} reads one export: two installations
     serving the same sources are [Ambiguous_installations] for those sources
-    only. Runs on the Lane Add-on owner domain and waits for no browser
-    command. *)
+    only. A released installation is left out, and one that is only
+    detaching is left out once an installation that is not detaching serves
+    one of its sources. Runs on the Lane Add-on owner domain and waits for no
+    browser command. *)

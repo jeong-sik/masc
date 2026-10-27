@@ -1,6 +1,8 @@
 module R = Lane_addon_runtime
-(* One browser service, called through its own export. *)
-type served = { service : R.browser_service; export : R.tool_export }
+(* One browser service and its own browser command, if it advertises one.
+   A service without it still serves its sources, so it is still counted
+   when the host asks which service serves a source. *)
+type served = { service : R.browser_service; export : R.tool_export option }
 type t = {
   config : Workspace.config;
   access : Lane_addon_sources.access;
@@ -9,9 +11,8 @@ type t = {
   services : served list;
 }
 let ( let* ) = Result.bind
-(* Every browser service that serves now, each with its own export, matched
-   by instance and owner. A service whose export is gone cannot be called,
-   so it is not one of them; no service at all is the only refusal here. *)
+(* Every browser service that serves now, each with its own export matched
+   by instance and owner. No service at all is the only refusal here. *)
 let connect ~config ~access ~principal ~reserved =
   let* ()=match principal with
     | Lane_addon_call_context.Anonymous -> Error (R.Host_refusal
@@ -27,12 +28,10 @@ let connect ~config ~access ~principal ~reserved =
       | Some reason -> reason
       | None -> "no browser Add-on is attached"))
   | _::_ ->
-    let services=List.filter_map (fun service -> match own service with
-      | [export] -> Some {service;export}
-      | []|_::_::_ -> None) browser.services in
-    match services with
-    | [] -> Error (R.Unavailable "the original browser Add-on command is unavailable")
-    | _::_ -> Ok {config;access;principal;reserved;services}
+    let services=List.map (fun service -> {service;export=match own service with
+      | [export] -> Some export
+      | []|_::_::_ -> None}) browser.services in
+    Ok {config;access;principal;reserved;services}
 (* A source is served by exactly one service or not at all: none, or two,
    leave that source alone unusable, and every other source is still chosen. *)
 type backend_failure = No_service of Browser_lane.Backend.t | Several_services of Browser_lane.Backend.t
@@ -46,8 +45,10 @@ let for_backend t backend=match List.filter (fun served -> serves served backend
   | [served] -> Ok served
   | [] -> Error (No_service backend)
   | _::_::_ -> Error (Several_services backend)
-let call_served t (served:served) ~arguments = Machine_addon_host.call ~continuation:None ~principal:t.principal
-  ~config:t.config ~access:t.access ~reserved:t.reserved ~export:served.export ~arguments
+let call_served t (served:served) ~arguments = match served.export with
+  | Some export -> Machine_addon_host.call ~continuation:None ~principal:t.principal
+      ~config:t.config ~access:t.access ~reserved:t.reserved ~export ~arguments
+  | None -> Error (R.Unavailable "the browser Add-on serving this browser advertises no browser command")
 let call t ~backend ~arguments = match for_backend t backend with
   | Ok served -> call_served t served ~arguments
   | Error failure -> Error (R.Unavailable (backend_failure_message failure))
@@ -89,9 +90,18 @@ type gathered = {
   published : Browser_addon_observation.published;
   selection : Browser_selection.snapshot;
   holders : (string * served) list;
+  doubled : string list;
+      (** Clients listed by a service whose live source another serves too. *)
 }
-let gather t =
-  let answers=Eio.Fiber.List.map (fun served -> served,published_of t served) t.services in
+(* [reach] names the services a request can go to; only those are asked, so
+   a slow worker of another source does not hold the request up. Whether a
+   live client is usable is judged among every service. *)
+let gather t ~reach =
+  let among=List.map (fun (served:served) -> served.service.backends) t.services in
+  match List.filter reach t.services with
+  | [] -> Error (Snapshot_unavailable "no attached browser Add-on serves the requested browser")
+  | reached ->
+  let answers=Eio.Fiber.List.map (fun served -> served,published_of t served) reached in
   match List.filter_map (fun (_,answer) -> Result.to_option answer) answers,answers with
   | [],(_,Error failure)::_ -> Error failure
   | [],((_,Ok _)::_|[]) -> Error (Snapshot_unavailable "no browser Add-on answered its snapshot")
@@ -100,15 +110,21 @@ let gather t =
       served.service.backends,Result.to_option answer) answers) in
     let live=List.filter_map (fun ((served:served),answer) -> match answer with
       | Ok (listed:Browser_addon_observation.published)
-        when Browser_addon_observation.serves_live served.service.backends -> Some (served,listed)
+        when Browser_addon_observation.lists_usable_clients ~among served.service.backends -> Some (served,listed)
       | Ok _|Error _ -> None) answers in
-    Ok {published;
+    let doubled=List.concat_map (fun ((served:served),answer) -> match answer with
+      | Ok (listed:Browser_addon_observation.published)
+        when Browser_addon_observation.serves_live served.service.backends
+          && not (Browser_addon_observation.lists_usable_clients ~among served.service.backends) ->
+          List.map (fun (client:Browser_lane.client_info) -> Browser_lane.client_id_to_string client.client_id) listed.clients
+      | Ok _|Error _ -> []) answers in
+    Ok {published;doubled;
         selection={live_activity=(match live with [] -> Browser_lane.Unobserved | _::_ -> Browser_lane.Enabled);
           live_clients=published.clients;automation=published.automation;stagehand=published.stagehand};
         holders=List.concat_map (fun (served,(listed:Browser_addon_observation.published)) ->
           List.map (fun (client:Browser_lane.client_info) ->
             Browser_lane.client_id_to_string client.client_id,served) listed.clients) live}
-let selection_snapshot t = gather t |> Result.map (fun gathered -> gathered.published,gathered.selection)
+let selection_snapshot t = gather t ~reach:(fun _ -> true) |> Result.map (fun gathered -> gathered.published,gathered.selection)
 (* The service a chosen browser is run on. A client two services list cannot
    be told apart, so it is refused rather than sent to one of them. *)
 let served_for t gathered = function
@@ -182,7 +198,13 @@ let resolve ~required_actions t ~preference verb ~start_time =
     | Exact Stagehand_route,[] ->
         owned Browser_lane.Backend.Stagehand Browser_selection.Owned_stagehand Browser_lane.Stagehand_route
     | (Automatic|Exact (Live_route _)),_ | Exact (Automation_route|Stagehand_route),_::_ ->
-      let* gathered=match gather t with
+      let reach=match preference with
+        | Browser_selection.Automatic -> (fun _ -> true)
+        | Exact (Browser_lane.Live_route _) ->
+            (fun (served:served) -> Browser_addon_observation.serves_live served.service.backends)
+        | Exact Browser_lane.Automation_route -> (fun served -> serves served Browser_lane.Backend.Automation)
+        | Exact Browser_lane.Stagehand_route -> (fun served -> serves served Browser_lane.Backend.Stagehand) in
+      let* gathered=match gather t ~reach with
         | Ok value -> Ok value
         | Error (Snapshot_unavailable detail) -> fail ~class_:Tool_result.Dependency_unavailable
             ~effect_disposition:Tool_result.Proven_pre_effect
@@ -191,6 +213,11 @@ let resolve ~required_actions t ~preference verb ~start_time =
             ~effect_disposition:Tool_result.Proven_pre_effect
             ("browser snapshot is unreadable; no browser command was dispatched: " ^ detail) in
       let published=gathered.published and snapshot=gathered.selection in
+      let* ()=match preference with
+        | Exact (Browser_lane.Live_route (Some id))
+          when List.mem (Browser_lane.client_id_to_string id) gathered.doubled ->
+            refuse "the live source of that browser is served by more than one attached browser Add-on, so it is not used until one is detached"
+        | Automatic|Exact (Browser_lane.Live_route _|Automation_route|Stagehand_route) -> Ok () in
       let* selected=Browser_selection.choose ~required_actions ~verb ~bound:(Browser_selection.bound verb) ~snapshot preference
         |> Result.fold ~ok:Result.ok ~error:(unchosen ~clients:published.clients) in
       let* browser=Browser_selection.target ~verb ~snapshot selected.route

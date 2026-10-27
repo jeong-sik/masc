@@ -146,7 +146,7 @@ ego 만의 읽기는 연결 방식 표의 기능 `accessibility_snapshot` 으로
 ```toml
 [browser.live.ego]
 command = "/절대/경로/ego-browser"
-space = "masc"
+space = "masc-keepers"
 ```
 
 - 경로는 코드에 적지 않는다. 운영자가 적는다.

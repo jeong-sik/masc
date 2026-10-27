@@ -46,19 +46,20 @@ val read_window_s : float
     [Operator_owner]'s, and a connection never takes it over. *)
 type space_owner = Agent_owner | Handed_to_operator | Operator_owner
 
-(** The script that lists the task spaces called [space], each with its
-    number and owner, without opening a space: opening one by name makes it
-    when it is not there. *)
-val named_spaces_script : space:string -> string
+(** The script that lists ego's task spaces, each with its number, name and
+    owner, without opening a space: opening one by name makes it when it is
+    not there. *)
+val task_spaces_script : string
 
 (** Why the spaces were not read. [Spaces_failed]: ego did not list them,
     as when it cannot reach ego lite. [Spaces_malformed]: it answered in a
     form masc does not read, such as an owner that is not a {!space_owner}. *)
 type spaces_failure = Spaces_failed of string | Spaces_malformed of string
 
-(** Reads what {!named_spaces_script} wrote. An owner ego names that is not a
-    {!space_owner} is an error, not a guess. *)
-val named_spaces : string -> ((int * space_owner) list, spaces_failure) result
+(** The spaces called [space] in what {!task_spaces_script} wrote, compared
+    exactly. A row without its number, name or owner, and an owner of a space
+    of that name that is not a {!space_owner}, are errors, not guesses. *)
+val named_spaces : space:string -> string -> ((int * space_owner) list, spaces_failure) result
 
 type t
 

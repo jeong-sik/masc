@@ -44,6 +44,9 @@ type error =
       (** It did not answer [--version], or answered without ego lite's and
           Chromium's versions, as an ego lite whose onboarding is not
           finished does. *)
+  | Ego_unstartable of { path : string; detail : string }
+      (** The table's [ego-browser] could not be started to list the spaces,
+          as one that is gone; [detail] is why. *)
   | Table_refused of string
       (** The text with the table would not load, or loads as another table.
           The sentence is the loader's, or says the table is written in a form

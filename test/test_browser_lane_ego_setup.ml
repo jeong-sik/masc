@@ -74,7 +74,8 @@ let versions_answer =
 
 (* ego lite's task spaces of the name setup asks for, as listTaskSpaces names
    them, on the one answer line the script writes. *)
-let space id ownership = `Assoc [ "spaceId", `Int id; "ownership", `String ownership ]
+let space ?(name = E.default_space) id ownership =
+  `Assoc [ "spaceId", `Int id; "name", `String name; "ownership", `String ownership ]
 let spaces_answer spaces =
   Printf.sprintf "printf '%%s\\n' '%s'"
     (Masc.Browser_ego_peer.result_marker
@@ -198,7 +199,7 @@ let test_a_space_the_operator_made_is_refused () =
     refused "a new table on the operator's space"
       (function E.Space_held_by_operator { space; space_id = 36 } -> space = E.default_space | _ -> false)
       fixture (request fixture) ~find:(found fixture) ());
-  with_fixture ~with_table:true ~spaces:[ space 36 "user" ] (fun fixture ->
+  with_fixture ~with_table:true ~spaces:[ space ~name:"masc" 36 "user" ] (fun fixture ->
     refused "a space renamed to the operator's"
       (function E.Space_held_by_operator { space = "masc"; space_id = 36 } -> true | _ -> false)
       fixture (request ~space:"masc" fixture) ())
@@ -239,16 +240,24 @@ let test_spaces_that_cannot_be_read_are_refused () =
    operator made later. Running setup again refuses it rather than leaving
    it as it is, whether the table changes or not. *)
 let test_a_kept_space_the_operator_holds_is_refused () =
-  with_fixture ~with_table:true ~spaces:[ space 36 "user" ] (fun fixture ->
+  with_fixture ~with_table:true ~spaces:[ space ~name:"slack" 36 "user" ] (fun fixture ->
     refused "the table's own space, kept as it is"
       (function E.Space_held_by_operator { space = "slack"; space_id = 36 } -> true | _ -> false)
       fixture (request fixture) ();
     let other = Filename.concat fixture.root "other-ego" in
     fake_ego ~started:fixture.started ~path:other
-      ~script:(ego_script ~nodejs:(spaces_answer [ space 36 "user" ]));
+      ~script:(ego_script ~nodejs:(spaces_answer [ space ~name:"slack" 36 "user" ]));
     refused "the table's own space, with a new command"
       (function E.Space_held_by_operator { space = "slack"; space_id = 36 } -> true | _ -> false)
-      fixture (request ~command:other fixture) ())
+      fixture (request ~command:other fixture) ();
+    Sys.remove fixture.ego;
+    refused "a kept command that is gone"
+      (function E.Ego_unstartable { path; _ } -> path = fixture.ego | _ -> false)
+      fixture (request fixture) ());
+  (* Only a space of that name is the table's. *)
+  with_fixture ~with_table:true ~spaces:[ space ~name:"masc" 36 "user"; space ~name:"slack" 42 "agent" ] (fun fixture ->
+    check bool "the operator's space of another name leaves the table as it is" true
+      (E.change (plan_ok (request fixture)) = E.Unchanged))
 
 (* --- refused before any write ------------------------------------------ *)
 

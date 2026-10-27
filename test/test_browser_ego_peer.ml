@@ -113,57 +113,65 @@ let spaces_failure = testable (fun out -> function
   | Peer.Spaces_failed detail -> Format.fprintf out "failed: %s" detail
   | Spaces_malformed detail -> Format.fprintf out "malformed: %s" detail) ( = )
 
-(* Opening a space by name makes it when it is not there, so the spaces of a
-   name are read from ego's list: setup checks a name this way before it
-   writes it. *)
+(* Opening a space by name makes it when it is not there, so the spaces are
+   read from ego's list, and the name is compared in masc: setup checks a
+   name this way before it leaves it in the table. *)
 let test_the_spaces_of_a_name_are_listed_without_opening_one () =
-  let script = Peer.named_spaces_script ~space:"masc" in
+  let script = Peer.task_spaces_script in
   let lines = List.map String.trim (String.split_on_char '\n' script) in
-  check string "the step" "// masc-ego: spaces.named" (List.hd lines);
+  check string "the step" "// masc-ego: spaces.list" (List.hd lines);
   check bool "it lists the spaces" true (contains script "await listTaskSpaces()");
   check bool "it opens no space" false (contains script "await taskSpace(");
-  check bool "the name rides in the arguments" true
-    (List.mem ("const args = " ^ Yojson.Safe.to_string (obj ["space",str "masc"]) ^ ";") lines);
   let read value = match value with
-    | Ok output -> Peer.named_spaces output
+    | Ok output -> Peer.named_spaces ~space:"masc" output
     | Error failure -> Error (Peer.Spaces_failed (Peer.run_failure_message failure)) in
-  check (result (list (pair int space_owner)) spaces_failure) "each space's number and owner"
+  let listed ?(name="masc") id ownership = obj ["spaceId",`Int id;"name",str name;"ownership",str ownership] in
+  check (result (list (pair int space_owner)) spaces_failure) "each space of that name, with its number and owner"
     (Ok [36, Peer.Operator_owner; 42, Peer.Agent_owner; 32, Peer.Handed_to_operator])
-    (read (answered (`List [obj ["spaceId",`Int 36;"ownership",str "user"];
-      obj ["spaceId",`Int 42;"ownership",str "agent"];
-      obj ["spaceId",`Int 32;"ownership",str "agentDelegatedToUser"]])));
+    (read (answered (`List [listed 36 "user"; listed ~name:"masc-keepers" 43 "user"; listed 42 "agent";
+      listed ~name:"Masc" 7 "user"; listed ~name:"other" 8 "team"; listed 32 "agentDelegatedToUser"])));
   check (result (list (pair int space_owner)) spaces_failure) "no space of that name" (Ok []) (read (answered (`List [])));
   List.iter (fun (label, output) -> check bool (label ^ " is an answer masc does not read") true
       (match read output with Error (Peer.Spaces_malformed _) -> true | Ok _ | Error (Peer.Spaces_failed _) -> false))
-    [ "an owner masc does not know", answered (`List [obj ["spaceId",`Int 9;"ownership",str "team"]]);
-      "a space without its number", answered (`List [obj ["ownership",str "user"]]);
-      "an answer that is not a list", answered (obj ["spaceId",`Int 9]) ];
+    [ "an owner masc does not know", answered (`List [listed 9 "team"]);
+      "a space without its number", answered (`List [obj ["name",str "masc";"ownership",str "user"]]);
+      "a space without its name", answered (`List [obj ["spaceId",`Int 9;"ownership",str "user"]]);
+      "a row that is not an object", answered (`List [`Null]);
+      "an answer that is not a list", answered `Null ];
   check bool "a failure the frame caught is a listing that failed" true
     (match read (failed "ego lite is not running") with Error (Peer.Spaces_failed _) -> true | Ok _ | Error (Peer.Spaces_malformed _) -> false);
   let unknown = Peer.open_space ~run_native:(fun _ -> Error (Peer.Unstarted "no native command in this fixture"))
       ~downloads:no_downloads ~now ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) ~space:"masc"
       ~run:(fun ~window_s:_ _ -> answered (obj ["spaceId",`Int 9;"ownership",str "team"])) in
-  check bool "a connection does not open on an owner masc does not know" true (Result.is_error unknown)
+  check bool "a connection still does not open on an owner masc does not know" true (Result.is_error unknown)
 
 (* The listing script itself, run by node with ego's listTaskSpaces stood in
-   by the shape the ego guide documents: it keeps the spaces of exactly that
-   name and maps ego's id to spaceId. *)
+   by the shape the ego guide documents: ego's id becomes spaceId, every row
+   is passed on, and an ego without the list, or with no array, answers no
+   list instead of throwing. *)
 let test_the_listing_script_runs_under_node () =
-  let path = Filename.concat (capture_directory ()) "named-spaces.js" in
-  let ego = String.concat "\n" [
-    "globalThis.listTaskSpaces = async () => [";
-    "  {id: 36, name: 'masc', ownership: 'user', createdBy: 'user', state: 'active'},";
-    "  {id: 42, name: 'masc-keepers', ownership: 'agent', createdBy: 'agent'},";
-    "  {id: 7, name: 'Masc', ownership: 'user', createdBy: 'user'}];" ] in
-  Out_channel.with_open_bin path (fun out ->
-    output_string out (ego ^ "\n(async () => {\n" ^ Peer.named_spaces_script ~space:"masc" ^ "\n})();\n"));
-  let channel = Unix.open_process_args_in "node" [| "node"; path |] in
-  let output = In_channel.input_all channel in
-  (match Unix.close_process_in channel with
-   | Unix.WEXITED 0 -> ()
-   | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> fail ("node did not run the listing script: " ^ output));
+  let run ego =
+    let path = Filename.concat (capture_directory ()) "task-spaces.js" in
+    Out_channel.with_open_bin path (fun out ->
+      output_string out (ego ^ "\n(async () => {\n" ^ Peer.task_spaces_script ^ "\n})();\n"));
+    let channel = Unix.open_process_args_in "node" [| "node"; path |] in
+    let output = In_channel.input_all channel in
+    (match Unix.close_process_in channel with
+     | Unix.WEXITED 0 -> ()
+     | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> fail ("node did not run the listing script: " ^ output));
+    Peer.named_spaces ~space:"masc" output in
   check (result (list (pair int space_owner)) spaces_failure) "the operator's space of exactly that name"
-    (Ok [36, Peer.Operator_owner]) (Peer.named_spaces output)
+    (Ok [36, Peer.Operator_owner])
+    (run (String.concat "\n" [
+      "globalThis.listTaskSpaces = async () => [";
+      "  {id: 36, name: 'masc', ownership: 'user', createdBy: 'user', state: 'active'},";
+      "  {id: 42, name: 'masc-keepers', ownership: 'agent', createdBy: 'agent'},";
+      "  {id: 7, name: 'Masc', ownership: 'user', createdBy: 'user'}];" ]));
+  List.iter (fun (label, ego) -> check bool (label ^ " is an answer masc does not read") true
+      (match run ego with Error (Peer.Spaces_malformed _) -> true | Ok _ | Error (Peer.Spaces_failed _) -> false))
+    [ "an ego without listTaskSpaces", "";
+      "a list that is not an array", "globalThis.listTaskSpaces = async () => ({});";
+      "a row that is not an object", "globalThis.listTaskSpaces = async () => [null];" ]
 
 (* A tab that left the listing loses its number: reading it is refused
    before any run, and the bookkeeping does not grow with every listing. *)

@@ -479,7 +479,10 @@ z.ai 줄, SearXNG 줄은 해제된 채로 시작합니다. 확정하기 전에�
 - **ego lite(체크 안 됨).** `ego-browser` 가 `PATH` 나 `~/.local/bin`(ego lite 첫 실행이 두는 곳)에서
   답하면 [ego lite](https://lite.ego.app/) 를 연결하는 줄이 하나 더 나옵니다. 고르면
   `masc browser-lane-setup --mode ego` 를 실행해서 `runtime.toml` 에 `[browser.live.ego]` 표를 씁니다.
-  그러면 browser Add-on 이 ego lite 에 `masc` 라는 작업 공간을 열고 live 연결로 붙입니다. `imp` 는
+  그러면 browser Add-on 이 ego lite 에 `masc-keepers` 라는 작업 공간을 열고 live 연결로 붙입니다.
+  ego lite 에 사용자가 만든 같은 이름의 공간이 있으면 setup 이 거절하고, ego lite 가 공간 목록을
+  주지 않으면 아무것도 쓰지 않습니다. ego lite 를 켜 두세요. 거절되면 같은 실행의 다른 줄도
+  쓰지 않습니다. `imp` 는
   그 공간의 탭만 보고, 그 안에서 자기가 연 페이지에만 클릭하고 입력합니다. 그 페이지들은 ego lite
   프로필의 쿠키를 같이 써서, `imp` 가 로그인된 사이트에서 사용자 이름으로 읽고 움직입니다.
   Firefox 는 필요 없습니다. BiDi 줄과 같이 고르면 연결을 지정하지 않은 요청은 모호하다고

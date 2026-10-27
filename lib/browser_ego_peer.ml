@@ -136,12 +136,16 @@ let frame ~step ~args lines = String.concat "\n" ([
 let script ~step ~space ~holder ~args body =
   frame ~step ~args (("  const task = await taskSpace(" ^ Yojson.Safe.to_string space ^ ");") :: held_by holder body)
 
-(* taskSpace makes the space it does not find, so the spaces of a name are
-   read from the list without opening one. *)
-let named_spaces_script ~space = frame ~step:"spaces.named" ~args:(obj ["space", str space]) [
-  "  const spaces = await listTaskSpaces();";
-  "  emit({ok: true, value: spaces.filter(space => space.name === args.space)";
-  "    .map(space => ({spaceId: space.id, ownership: space.ownership}))});" ]
+(* taskSpace makes the space it does not find, so the spaces are read from
+   the list without opening one. Every row is passed on and the name is
+   compared here, so a row ego lists without a name is refused, not skipped;
+   an ego without the list answers no list. *)
+let task_spaces_script = frame ~step:"spaces.list" ~args:(obj []) [
+  "  const spaces = typeof listTaskSpaces === \"function\" ? await listTaskSpaces() : null;";
+  "  emit({ok: true, value: Array.isArray(spaces)";
+  "    ? spaces.map(space => space !== null && typeof space === \"object\"";
+  "        ? {spaceId: space.id, name: space.name, ownership: space.ownership} : space)";
+  "    : spaces});" ]
 
 let answer output =
   let marked = List.filter_map (fun line ->
@@ -161,7 +165,7 @@ let answer output =
       | _ -> Error (Unreadable "ego-browser nodejs answered outside its answer frame")
 
 type spaces_failure = Spaces_failed of string | Spaces_malformed of string
-let named_spaces output =
+let named_spaces ~space output =
   let* value = match answer output with
     | Ok value -> Ok value
     (* ego threw inside the frame, for one that could not reach ego lite. *)
@@ -169,21 +173,22 @@ let named_spaces output =
     | Error (Unanswered failure) -> Error (Spaces_failed (run_failure_message failure))
     | Error (Unreadable detail | Refused detail) -> Error (Spaces_malformed detail) in
   let row = function
-    | `Assoc _ as space ->
-      (match field "spaceId" space, field "ownership" space with
-       | Some (`Int space_id), Some (`String wire) ->
-         (match space_owner_of_wire wire with
-          | Some owner -> Ok (space_id, owner)
+    | `Assoc _ as listed ->
+      (match field "spaceId" listed, field "name" listed, field "ownership" listed with
+       | Some (`Int space_id), Some (`String name), Some (`String wire) ->
+         if not (String.equal name space) then Ok None
+         else (match space_owner_of_wire wire with
+          | Some owner -> Ok (Some (space_id, owner))
           | None -> Error (Spaces_malformed (Printf.sprintf "ego named the owner of task space %d %S, which masc does not know" space_id wire)))
-       | _ -> Error (Spaces_malformed "ego listed a task space without its number and owner"))
+       | _ -> Error (Spaces_malformed "ego listed a task space without its number, name and owner"))
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
       Error (Spaces_malformed "ego listed a task space that is not an object") in
   match value with
   | `List spaces ->
-    List.fold_right (fun space spaces ->
+    List.fold_right (fun listed spaces ->
       let* spaces = spaces in
-      let* space = row space in
-      Ok (space :: spaces)) spaces (Ok [])
+      let* named = row listed in
+      Ok (match named with Some named -> named :: spaces | None -> spaces)) spaces (Ok [])
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ ->
     Error (Spaces_malformed "ego answered the task spaces without a list")
 

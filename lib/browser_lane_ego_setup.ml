@@ -24,6 +24,7 @@ type error =
   | Ego_not_found
   | Ego_not_executable of string
   | Ego_unusable of { path : string; detail : string }
+  | Ego_unstartable of { path : string; detail : string }
   | Table_refused of string
   | Space_held_by_operator of { space : string; space_id : int }
   | Spaces_unanswered of { path : string; space : string; detail : string }
@@ -52,6 +53,9 @@ let error_message = function
     Printf.sprintf
       "The ego-browser at %s did not answer --version with ego lite's and Chromium's \
        versions: %s. Finish ego lite's onboarding, or name another with --ego-command."
+      path detail
+  | Ego_unstartable { path; detail } ->
+    Printf.sprintf "The ego-browser at %s could not be started: %s. Name another with --ego-command."
       path detail
   | Table_refused reason ->
     Printf.sprintf "The [%s] table would not load as written, so it was not written: %s." table_path
@@ -147,45 +151,45 @@ let named path =
     | Browser_runtime_dependencies.Failed { detail; _ } -> Error (Ego_unusable { path; detail })
     | Browser_runtime_dependencies.Started { output; _ } -> versions_of ~path output
 
-(* The task spaces called [space], listed by the ego-browser the table
-   names. Opening the space instead would make it. *)
-let named_spaces ~command ~space =
-  let status, stdout, stderr =
-    Process_eio.run_argv_with_status_split
-      ~timeout_sec:Browser_ego_peer.read_window_s
-      ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
-      [ command; "nodejs"; "-e"; Browser_ego_peer.named_spaces_script ~space ]
-  in
-  let output = stdout ^ "\n" ^ stderr in
-  let failed failure = Error (Browser_ego_peer.Spaces_failed (Browser_ego_peer.run_failure_message failure)) in
-  match status with
-  | Unix.WEXITED 0 -> Browser_ego_peer.named_spaces output
-  (* [run_argv_with_status_split] synthesises 124 on its own timeout. *)
-  | Unix.WEXITED 124 -> failed Browser_ego_peer.Timed_out
-  | Unix.WEXITED code -> failed (Browser_ego_peer.Exited { code; output })
-  | Unix.WSIGNALED signal | Unix.WSTOPPED signal -> failed (Browser_ego_peer.Signaled signal)
-
 (* The worker opens its space by name, and ego refuses a name the operator's
    space holds; the worker would then fail to start. Every plan checks the
    space of the table it leaves, written or kept: a kept table may name a
-   space the operator made after it was written. *)
+   space the operator made after it was written. The spaces are listed by
+   the ego-browser the table names; opening the space instead would make it. *)
 let space_is_free ~(table : Browser_configuration.live_ego) =
-  match named_spaces ~command:table.command ~space:table.space with
-  | Error (Browser_ego_peer.Spaces_failed detail) ->
-    Error (Spaces_unanswered { path = table.command; space = table.space; detail })
-  | Error (Browser_ego_peer.Spaces_malformed detail) ->
-    Error (Spaces_unreadable { path = table.command; space = table.space; detail })
-  | Ok spaces ->
-    (match
-       List.find_map
-         (fun (space_id, owner) ->
-            match owner with
-            | Browser_ego_peer.Operator_owner -> Some space_id
-            | Browser_ego_peer.Agent_owner | Browser_ego_peer.Handed_to_operator -> None)
-         spaces
-     with
-     | Some space_id -> Error (Space_held_by_operator { space = table.space; space_id })
-     | None -> Ok ())
+  let unanswered detail = Error (Spaces_unanswered { path = table.command; space = table.space; detail }) in
+  let failed failure = unanswered (Browser_ego_peer.run_failure_message failure) in
+  match
+    Process_eio.run_argv_with_status_split_or_refusal
+      ~timeout_sec:Browser_ego_peer.read_window_s
+      ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
+      [ table.command; "nodejs"; "-e"; Browser_ego_peer.task_spaces_script ]
+  with
+  | Error refusal ->
+    Error (Ego_unstartable { path = table.command; detail = Process_eio.spawn_refusal_to_string refusal })
+  | Ok (status, stdout, stderr) ->
+    let output = stdout ^ "\n" ^ stderr in
+    (match status with
+     (* [run_argv_with_status_split_or_refusal] synthesises 124 on its own timeout. *)
+     | Unix.WEXITED 124 -> failed Browser_ego_peer.Timed_out
+     | Unix.WEXITED 0 ->
+       (match Browser_ego_peer.named_spaces ~space:table.space output with
+        | Error (Browser_ego_peer.Spaces_failed detail) -> unanswered detail
+        | Error (Browser_ego_peer.Spaces_malformed detail) ->
+          Error (Spaces_unreadable { path = table.command; space = table.space; detail })
+        | Ok spaces ->
+          (match
+             List.find_map
+               (fun (space_id, owner) ->
+                  match owner with
+                  | Browser_ego_peer.Operator_owner -> Some space_id
+                  | Browser_ego_peer.Agent_owner | Browser_ego_peer.Handed_to_operator -> None)
+               spaces
+           with
+           | Some space_id -> Error (Space_held_by_operator { space = table.space; space_id })
+           | None -> Ok ()))
+     | Unix.WEXITED code -> failed (Browser_ego_peer.Exited { code; output })
+     | Unix.WSIGNALED signal | Unix.WSTOPPED signal -> failed (Browser_ego_peer.Signaled signal))
 
 (* A table that is not there is written whole, with the defaults for what was
    not named. A table that is there keeps its values and changes only what was

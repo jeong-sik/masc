@@ -150,7 +150,7 @@ let start ~sw ~env ~config ~root ~name ~backend ~exports ~owned:(automation,stag
   let tool=Browser_addon_tool.definition in
   write (Filename.concat root "clients.json")
     (Yojson.Safe.to_string (`List (List.map (fun client -> match W.client_to_json client with
-       | `Assoc fields -> `Assoc (("interactions",`List [])::fields)
+       | `Assoc fields -> `Assoc (("interactions",`List [])::("lastActivities",`List [])::fields)
        | value -> value) clients)));
   write (Filename.concat root "owned.json")
     (Yojson.Safe.to_string (`Assoc ["automation",`Bool automation;"stagehand",`Bool stagehand]));
@@ -160,10 +160,7 @@ let start ~sw ~env ~config ~root ~name ~backend ~exports ~owned:(automation,stag
     "name",`String tool.name;"inputSchema",tool.input_schema;
     "outputSchema",Option.get tool.output_schema]));
   let script=Filename.concat root "browser.py" in write script server;
-  write (Filename.concat root "clients.json")
-    (Yojson.Safe.to_string (`List (List.map (fun client -> match W.client_to_json client with
-       | `Assoc fields -> `Assoc (("interactions",`List [])::("lastActivities",`List [])::fields)
-       | value -> value) clients)));
+  let manifest=Filename.concat root "lane.toml" in
   write manifest (Printf.sprintf {|id = "scripted-browser-%s"
 revision = "fixture-1"
 title = "Scripted browser adapter"

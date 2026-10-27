@@ -27,6 +27,57 @@ function fixture({fail,dialog,snapshot='native result'}={}) {
  return {page,calls};
 }
 const request=steps=>({expectedUrl:initial,steps,snapshotScope:'viewport',maxChars:100,cursor:'MASC · fixture · workflow'});
+test('Page code receives JSON in the browser context and never runs as Node source',async()=>{
+ const f=fixture();const browser=vm.createContext({document:{title:'browser only'}});
+ f.page.evaluate=async function(expression){
+  assert.equal(arguments.length,1,'SDK string expressions reject even an explicit undefined argument');
+  f.calls.push(['evaluate',expression]);return vm.runInContext(expression,browser);
+ };
+ f.page.waitForFunction=async function(expression,input,options){
+  assert.equal(input,undefined);assert.equal(options.timeout,300);assert.equal(options.polling,7);
+  assert.equal(vm.runInContext(expression,browser),true);return true;
+ };
+ const argument=JSON.stringify({text:'\");globalThis.hostEscaped=true;//\n한글 😀'});
+ const result=await run(f.page,request([
+  {method:'evaluate',source:'value => ({title:document.title,text:value.text,host:typeof process,dialog:"app data"})',argumentJson:argument},
+  {method:'waitForFunction',source:'value => document.title === value',argumentJson:'"browser only"',timeoutMs:300,pollingMs:7},
+  {method:'evaluate',source:'document.title'},
+  {method:'evaluate',source:'value => ({own:Object.hasOwn(value,"__proto__"),plain:Object.getPrototypeOf(value)===Object.prototype,data:value.__proto__.polluted})',argumentJson:'{"__proto__":{"polluted":true}}'},
+ ]));
+ assert.equal(result.failure,null);assert.equal(result.completed.length,4);
+ assert.equal(result.completed[0].receipt.text,JSON.parse(argument).text);
+ assert.equal(result.completed[0].receipt.host,'undefined');
+ assert.equal(result.completed[0].receipt.dialog,'app data','application fields are not native dialog receipts');
+ assert.equal(result.completed[2].receipt,'browser only');
+ assert.equal(result.completed[3].receipt.own,true);
+ assert.equal(result.completed[3].receipt.plain,true);
+ assert.equal(result.completed[3].receipt.data,true);
+ assert.equal(vm.runInContext('typeof hostEscaped',browser),'undefined');
+ assert.equal(result.effectStarted,true);assert.equal(result.completedEffect,true);
+});
+test('native fetch forwards browser options and returns HTTP errors as data',async()=>{
+ const f=fixture();let observed;
+ f.page.fetch=async(url,options)=>{observed={url,options};return {ok:false,status:409,body:'existing'};};
+ const fetchOptions={method:'POST',headers:{'Content-Type':'text/plain'},body:'한글 😀',credentials:'same-origin',cache:'no-store'};
+ const result=await run(f.page,request([{method:'fetch',url:'https://fixture.test/data',fetchOptions,timeoutMs:400}]));
+ assert.equal(result.failure,null);assert.equal(result.completed[0].receipt.status,409);
+ assert.equal(observed.url,'https://fixture.test/data');assert.equal(observed.options.timeout,400);
+ assert.equal(observed.options.body,'한글 😀');assert.deepEqual(observed.options.headers,fetchOptions.headers);
+ assert.equal(result.completedEffect,true);
+});
+test('Page execution and state predicates can have effects before an uncertain failure',async()=>{
+ for (const method of ['evaluate','waitForFunction','fetch']) {
+  const f=fixture();let entries=0;
+  f.page[method]=async()=>{entries++;throw Error('lost '+method+' result');};
+  const result=await run(f.page,request([
+   {method,source:'window.state = 1',url:'https://fixture.test/data'},
+   {method:'click',selector:'@12'},
+  ]));
+  assert.equal(entries,1);assert.equal(result.failure.index,0);
+  assert.equal(result.effectStarted,true);assert.equal(result.completedEffect,false);
+  assert.equal(result.completed.length,0);assert.equal(f.calls.some(call=>call[0]==='click'),false);
+ }
+});
 test('known native sequence navigates, waits and returns one final snapshot',async()=>{
  const f=fixture();const result=await run(f.page,request([
   {method:'click',selector:'@12'},

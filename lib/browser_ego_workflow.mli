@@ -1,5 +1,6 @@
-(** Fixed SDK call loop used only with a decoded native workflow. It accepts
-    JSON values, never caller JavaScript. Ego owns locator/actionability/waits. *)
+(** Fixed SDK call loop used only with a decoded native workflow. Caller Page
+    source is data for Ego's browser expression channel; the Node/host process
+    never executes it. Ego owns locator/actionability/waits. *)
 val script : string
 
 type outcome = Completed of Yojson.Safe.t

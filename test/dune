@@ -3083,6 +3083,8 @@
 
 (include stanzas/test_keeper_tool_approval_mode_persist.inc)
 
+(include stanzas/test_keeper_tool_approval_mode_concurrent.inc)
+
 (include stanzas/test_keeper_decision_actor_log.inc)
 
 (include stanzas/test_keeper_toml_parser.inc)

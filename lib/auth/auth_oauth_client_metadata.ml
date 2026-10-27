@@ -40,6 +40,29 @@ let document_url_rule_broken uri =
   | Some _ -> None
 ;;
 
+(* C0 controls and DEL, and C1 controls (U+0080..U+009F, UTF-8 C2 80..C2 9F):
+   a terminal reads either as a command, so a name a client chose must not
+   carry them to the operator's screen. *)
+let has_control_character value =
+  let length = String.length value in
+  let rec scan index =
+    if index >= length
+    then false
+    else
+      let byte = Char.code value.[index] in
+      if byte < 0x20 || byte = 0x7f
+      then true
+      else if
+        byte = 0xc2
+        && index + 1 < length
+        && Char.code value.[index + 1] >= 0x80
+        && Char.code value.[index + 1] <= 0x9f
+      then true
+      else scan (index + 1)
+  in
+  scan 0
+;;
+
 (* ocaml-uri parses leniently: it stops at a line feed, ends the authority at
    a backslash, and reads "host:abc" as a path. A string it would print back
    differently is not the URL that gets fetched or redirected to. *)
@@ -76,9 +99,6 @@ let rec has_repeated_name = function
   | (name, _) :: rest -> List.mem_assoc name rest || has_repeated_name rest
 ;;
 
-let has_control_character value =
-  String.exists (fun c -> c < ' ' || c = '\127') value
-;;
 
 let required_string fields name =
   match List.assoc_opt name fields with

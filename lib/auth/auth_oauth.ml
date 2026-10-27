@@ -141,7 +141,8 @@ let validate_loopback_redirect_uri value =
        neither recognised an IPv4-mapped address. *)
     let host_ok = Masc_network_defaults.is_loopback_host_opt (Uri.host uri) in
     if
-      scheme_ok
+      Auth_oauth_client_metadata.is_plain_url_text value
+      && scheme_ok
       && host_ok
       && Option.is_none (Uri.userinfo uri)
       && Option.is_none (Uri.fragment uri)
@@ -476,6 +477,17 @@ let cleanup_expired_codes_locked current =
     pending_codes
 ;;
 
+(* An unreadable record names its file, so the operator can find it: the
+   file name is a hash, not the client id. *)
+let with_record_path path result =
+  Result.map_error
+    (function
+      | Store_error detail -> Store_error (path ^ ": " ^ detail)
+      | ( Invalid_request _ | Invalid_client | Invalid_grant | Invalid_scope
+        | Access_denied | Temporarily_unavailable ) as error -> error)
+    result
+;;
+
 let load_stored_clients_locked ~base_path =
   let entries =
     Sys.readdir (clients_dir base_path)
@@ -486,11 +498,11 @@ let load_stored_clients_locked ~base_path =
     | [] -> Ok (List.rev acc)
     | entry :: rest ->
       let path = Filename.concat (clients_dir base_path) entry in
-      let* json = load_json_opt path in
+      let* json = load_json_opt path |> with_record_path path in
       (match json with
        | None -> load_clients acc rest
        | Some json ->
-         let* stored = client_of_yojson json in
+         let* stored = client_of_yojson json |> with_record_path path in
          load_clients ((path, stored) :: acc) rest)
   in
   load_clients [] entries
@@ -504,6 +516,11 @@ let register_client ~base_path ~client_name ~redirect_uris =
     | Some value -> String.length value > Policy.max_client_name_bytes
     | None -> false
   then Error (Invalid_request "client_name is too long")
+  else if
+    match client_name with
+    | Some value -> Auth_oauth_client_metadata.has_control_character value
+    | None -> false
+  then Error (Invalid_request "client_name contains a control character")
   else
     let rec validate seen = function
       | [] -> Ok ()
@@ -1062,11 +1079,12 @@ let load_families_locked ~base_path =
   let rec load acc = function
     | [] -> Ok (List.rev acc)
     | entry :: rest ->
-      let* json = load_json_opt (Filename.concat (families_dir base_path) entry) in
+      let path = Filename.concat (families_dir base_path) entry in
+      let* json = load_json_opt path |> with_record_path path in
       (match json with
        | None -> load acc rest
        | Some json ->
-         let* family = family_of_yojson json in
+         let* family = family_of_yojson json |> with_record_path path in
          load (family :: acc) rest)
   in
   load [] (json_entries (families_dir base_path))
@@ -1081,7 +1099,18 @@ type client_listing =
   ; live_families : int
   }
 
+(* Listing and revoking only read a store that exists: [with_store_io] would
+   create one, and a mistyped base path would then read as an empty store. *)
+let store_exists ~base_path =
+  Auth_credential_base.run_blocking_io (fun () -> Sys.file_exists (oauth_dir base_path))
+;;
+
+let oauth_store_path = oauth_dir
+
 let list_clients ~base_path =
+  if not (store_exists ~base_path)
+  then Ok None
+  else
   with_store_io ~base_path (fun () ->
     let* clients = load_stored_clients_locked ~base_path in
     let* families = load_families_locked ~base_path in
@@ -1098,7 +1127,8 @@ let list_clients ~base_path =
                   families)
            in
            { client; live_families })
-         clients))
+         clients)
+    |> Result.map Option.some)
 ;;
 
 type client_revocation = { revoked_families : int }
@@ -1107,15 +1137,18 @@ type client_revocation = { revoked_families : int }
    still open for the client is revoked before the record goes, so a crash in
    between leaves a client that a second revoke finishes. *)
 let revoke_client ~base_path ~client_id =
+  if not (store_exists ~base_path)
+  then Ok None
+  else
   with_store_io ~base_path (fun () ->
     let path = client_path base_path client_id in
-    let* json = load_json_opt path in
+    let* json = load_json_opt path |> with_record_path path in
     match json with
     | None -> Ok None
     | Some json ->
-      let* stored = client_of_yojson json in
+      let* stored = client_of_yojson json |> with_record_path path in
       if not (constant_time_string_equal stored.client_id client_id)
-      then Error (Store_error "OAuth client file integrity mismatch")
+      then Error (Store_error (path ^ ": OAuth client file integrity mismatch"))
       else
         let* families = load_families_locked ~base_path in
         let current = now () in
@@ -1134,7 +1167,11 @@ let revoke_client ~base_path ~client_id =
         in
         let* () = revoke open_families in
         remove_file_if_exists path;
-        Ok (Some { revoked_families = List.length open_families }))
+        Ok
+          (Some
+             { revoked_families =
+                 List.length (List.filter (family_is_live ~current) open_families)
+             }))
 ;;
 
 let find_access_credential ~base_path ~token =

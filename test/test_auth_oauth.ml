@@ -809,11 +809,12 @@ let test_revoked_client_releases_its_slot_and_tokens () =
                | Error Auth_oauth.Temporarily_unavailable -> true
                | Ok _ | Error _ -> false);
             (match Auth_oauth.list_clients ~base_path |> oauth_ok with
-             | [ { Auth_oauth.client = listed; live_families } ] ->
+             | Some [ { Auth_oauth.client = listed; live_families } ] ->
                check string "the stored client is listed" client.client_id listed.client_id;
                check int "its one token family is live" 1 live_families
-             | listings ->
-               fail (Printf.sprintf "expected one listed client, got %d" (List.length listings)));
+             | Some listings ->
+               fail (Printf.sprintf "expected one listed client, got %d" (List.length listings))
+             | None -> fail "the store was not found");
             check
               (option int)
               "revoking reports the open family it revoked"
@@ -870,8 +871,95 @@ let test_revoked_client_releases_its_slot_and_tokens () =
               [ replacement.client_id ]
               (Auth_oauth.list_clients ~base_path
                |> oauth_ok
+               |> Option.value ~default:[]
                |> List.map (fun (listing : Auth_oauth.client_listing) ->
                  listing.client.client_id))))))
+;;
+
+let test_revoking_one_client_keeps_another_clients_tokens () =
+  with_workspace (fun base_path ->
+    Eio_main.run (fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Eio_guard.enable ();
+      Fun.protect
+        ~finally:(fun () ->
+          Eio_guard.disable ();
+          Fs_compat.clear_fs ())
+        (fun () ->
+          check
+            bool
+            "a base path without a store lists nothing and creates nothing"
+            true
+            (Option.is_none (Auth_oauth.list_clients ~base_path |> oauth_ok)
+             && not (Sys.file_exists (Auth_oauth.oauth_store_path base_path)));
+          let _, bootstrap_credential =
+            Auth.create_token base_path ~agent_name:"codex" ~role:Masc_domain.Worker
+            |> auth_ok
+          in
+          let resource = "http://127.0.0.1:8935/mcp" in
+          let revoked, _ =
+            issue_pair
+              ~base_path
+              ~bootstrap_credential
+              ~redirect_uri:"http://127.0.0.1:43150/callback/one"
+              ~resource
+              ~scope:"mcp:tools"
+          in
+          let _, kept_pair =
+            issue_pair
+              ~base_path
+              ~bootstrap_credential
+              ~redirect_uri:"http://127.0.0.1:43151/callback/two"
+              ~resource
+              ~scope:"mcp:tools"
+          in
+          ignore (Auth_oauth.revoke_client ~base_path ~client_id:revoked.client_id |> oauth_ok);
+          check
+            bool
+            "the other client's access token still resolves"
+            true
+            (Result.is_ok
+               (Auth_oauth.with_expected_resource resource (fun () ->
+                  Auth.find_credential_by_token base_path ~token:kept_pair.access_token))))))
+;;
+
+let test_registration_refuses_control_characters () =
+  with_workspace (fun base_path ->
+    Eio_main.run (fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Eio_guard.enable ();
+      Fun.protect
+        ~finally:(fun () ->
+          Eio_guard.disable ();
+          Fs_compat.clear_fs ())
+        (fun () ->
+          let refused ~label ~client_name ~redirect_uri =
+            match
+              Auth_oauth.register_client
+                ~base_path
+                ~client_name:(Some client_name)
+                ~redirect_uris:[ redirect_uri ]
+            with
+            | Error (Auth_oauth.Invalid_request _) -> ()
+            | Ok _ | Error _ -> fail (label ^ " was registered")
+          in
+          refused ~label:"an escape sequence in client_name"
+            ~client_name:"x\027[2K\rmasc_fake"
+            ~redirect_uri:"http://127.0.0.1:43152/callback";
+          refused ~label:"a C1 control in client_name"
+            ~client_name:"x\xc2\x9b2K"
+            ~redirect_uri:"http://127.0.0.1:43152/callback";
+          refused ~label:"an escape sequence in a redirect URI"
+            ~client_name:"Codex"
+            ~redirect_uri:"http://127.0.0.1:43152/cb\027[2K";
+          match
+            Auth_oauth.register_client
+              ~base_path
+              ~client_name:(Some "클로드 코드")
+              ~redirect_uris:[ "http://127.0.0.1:43152/callback" ]
+          with
+          | Ok _ -> ()
+          | Error error -> fail ("a plain UTF-8 name was refused: " ^ Auth_oauth.show_error error))))
 ;;
 
 let test_registration_preserves_live_client_at_capacity () =
@@ -1304,6 +1392,14 @@ let () =
             "revoked client releases its slot and tokens"
             `Quick
             test_revoked_client_releases_its_slot_and_tokens
+        ; test_case
+            "revoking one client keeps another client's tokens"
+            `Quick
+            test_revoking_one_client_keeps_another_clients_tokens
+        ; test_case
+            "registration refuses control characters"
+            `Quick
+            test_registration_refuses_control_characters
         ; test_case
             "registration preserves live client at capacity"
             `Quick

@@ -1270,23 +1270,39 @@ let oauth_client_id_arg =
   let doc = "Client id to revoke, as `masc oauth-client list` prints it." in
   Arg.(required & pos 0 (some string) None & info [] ~docv:"CLIENT_ID" ~doc)
 
+(* A client chose these strings without a credential. Registration refuses
+   control characters, but an older record may still hold one, so it is
+   shown escaped and cannot rewrite the operator's terminal. *)
+let oauth_client_terminal_text value =
+  if Auth_oauth_client_metadata.has_control_character value
+  then String.escaped value
+  else value
+
 let oauth_client_list_cmd_exit base_path =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
+  let store = Auth_oauth.oauth_store_path base_path in
   match Auth_oauth.list_clients ~base_path with
   | Error error ->
     Printf.eprintf "cannot read OAuth clients: %s\n" (Auth_oauth.show_error error);
     Cmd.Exit.some_error
-  | Ok listings ->
+  | Ok None ->
+    Printf.printf "no OAuth store at %s\n" store;
+    Cmd.Exit.ok
+  | Ok (Some listings) ->
     List.iter
       (fun { Auth_oauth.client = (client : Auth_oauth.client); live_families } ->
          Printf.printf "%s  %s  live_token_families=%d  redirect_uris=%s\n"
            client.client_id
-           (Option.value ~default:"(no name)" client.client_name)
+           (oauth_client_terminal_text
+              (Option.value ~default:"(no name)" client.client_name))
            live_families
-           (String.concat "," client.redirect_uris))
+           (String.concat "," (List.map oauth_client_terminal_text client.redirect_uris)))
       listings;
-    Printf.printf "%d of %d registered clients stored\n"
+    Printf.printf
+      "%d registered clients stored in %s; this shell's MASC_OAUTH_MAX_CLIENTS \
+       allows %d (the server uses its own environment)\n"
       (List.length listings)
+      store
       (Env_config_runtime_services.OAuth.max_clients ());
     Cmd.Exit.ok
 
@@ -1298,10 +1314,12 @@ let oauth_client_revoke_cmd_exit base_path client_id =
     Cmd.Exit.some_error
   | Ok None ->
     Printf.eprintf
-      "no registered client %S; `masc oauth-client list` shows what is stored\n" client_id;
+      "no registered client %S in %s; `masc oauth-client list` shows what is stored\n"
+      client_id
+      (Auth_oauth.oauth_store_path base_path);
     Cmd.Exit.some_error
   | Ok (Some { Auth_oauth.revoked_families }) ->
-    Printf.printf "revoked %s and %d open token famil%s\n" client_id revoked_families
+    Printf.printf "revoked %s and %d live token famil%s\n" client_id revoked_families
       (if revoked_families = 1 then "y" else "ies");
     Cmd.Exit.ok
 

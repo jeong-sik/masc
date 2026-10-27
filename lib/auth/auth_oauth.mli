@@ -70,19 +70,27 @@ type client_listing = {
           past their refresh expiry. *)
 }
 
-val list_clients : base_path:string -> (client_listing list, error) result
-(** Every client Dynamic Client Registration stored. Client ID Metadata
-    Document clients are not stored and are not listed. *)
+val oauth_store_path : string -> string
+(** Where the OAuth store of a base path lives. *)
+
+val list_clients : base_path:string -> (client_listing list option, error) result
+(** Every client Dynamic Client Registration stored. [None] when the base
+    path has no OAuth store, which is not created. Client ID Metadata
+    Document clients are not stored and are not listed. An unreadable record
+    fails with its file path. *)
 
 type client_revocation = { revoked_families : int }
+(** [revoked_families] counts the live families, as {!list_clients} does.
+    Families already past their refresh expiry are marked revoked too. *)
 
 val revoke_client :
   base_path:string -> client_id:string -> (client_revocation option, error) result
 (** Release a stored client's registration slot. Every token family still
     open for it is revoked, so its access and refresh tokens stop working,
     then its record is deleted; a code issued to it before can no longer be
-    exchanged. [None] when no stored client has that id. Nothing selects
-    clients by age: the operator names the client (#26702). *)
+    exchanged. [None] when no stored client has that id or the base path has
+    no OAuth store. Nothing selects clients by age: the operator names the
+    client (#26702). *)
 
 type client_verification =
   | Registered_client

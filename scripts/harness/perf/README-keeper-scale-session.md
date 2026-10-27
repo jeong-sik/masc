@@ -67,7 +67,15 @@ python3 scripts/harness/perf/keeper_scale_fault_probe.py \
   --output /tmp/keeper-evidence-faults.json
 python3 scripts/harness/perf/keeper_scale_packet_audit.py /tmp/keeper-session-new \
   --output /tmp/keeper-session-new-audit
+python3 scripts/harness/perf/keeper_scale_inventory_tail_fault_probe.py \
+  --output /tmp/keeper-inventory-tail-probe
 ```
+
+The tail-inventory probe's optional `--packet` selects a 650-record regression
+capture and reads only its four JSON files. `--baseline-reader` selects a
+Python reader implementation to compare against the current reader's partial
+coverage and volume accounting. `--output` is required and must be a new
+directory outside the original packet. The probe does not run a full SQL audit.
 
 Before provider release, a single SQLite read transaction per Keeper records
 all operation columns and batch membership together. Original source/input

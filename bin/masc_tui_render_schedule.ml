@@ -178,10 +178,10 @@ let keeper_columns_used_width columns =
    ([antigravity_subscription.claude-opus-4-6-thinking]), so every long id was
    elided while the slack the row had left went on to the task column -- 49
    cells of it, for an id this file's own note calls short by construction. *)
-let allocate_keeper_columns ~prioritize_runtime ~inner_width ~widest_runtime =
+let allocate_keeper_columns ?(runtime_visible = true) ~prioritize_runtime ~inner_width ~widest_runtime =
   let inner_width = max 0 inner_width in
   let show_flags = inner_width >= keeper_flags_minimum_inner_width in
-  let show_runtime = inner_width >= keeper_runtime_minimum_inner_width in
+  let show_runtime = runtime_visible && inner_width >= keeper_runtime_minimum_inner_width in
   let base =
     { kcol_show_flags = show_flags
     ; kcol_show_runtime = show_runtime

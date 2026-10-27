@@ -72,11 +72,17 @@ type keeper_columns = {
 (** Plain-text cell budgets for one roster row, in cells. *)
 
 val allocate_keeper_columns :
-  prioritize_runtime:bool -> inner_width:int -> widest_runtime:int -> keeper_columns
+  ?runtime_visible:bool ->
+  prioritize_runtime:bool ->
+  inner_width:int ->
+  widest_runtime:int ->
+  keeper_columns
 (** Divide the box's inner width across the roster columns. Columns drop from
     the right as the terminal narrows; the keeper's name and its status never
     drop. Above the minimum, slack goes to name and runtime before task, unless
-    a failure context asks the runtime column to take priority. *)
+    a failure context asks the runtime column to take priority.
+    [runtime_visible] defaults to [true]. When it is [false], the runtime cell
+    is absent and its width is available to the other columns. *)
 
 val keeper_columns_used_width : keeper_columns -> int
 (** Total cells the allocation occupies, separators included. Never exceeds the

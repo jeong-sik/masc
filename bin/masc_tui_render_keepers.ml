@@ -172,8 +172,11 @@ let keeper_activity_style (activity : Keeper_list_model.activity) =
   | Held_call | Failure -> Theme.bad ()
   | Question | Confirmation | Offline -> Theme.warn ()
   | Preparing | Streaming | Running | Async_working _ | Deferred -> Theme.info ()
-  | Tool_waiting | Model_waiting | Delegating | Verifying | External_waiting
-  | Idle | Paused | Unknown -> Theme.recede ()
+  | Tool_waiting -> Theme.warn ()
+  | Model_waiting -> Theme.info ()
+  | Delegating -> Theme.category Theme.Slot_2
+  | Verifying -> Theme.category Theme.Slot_1
+  | External_waiting | Idle | Paused | Unknown -> Theme.recede ()
 
 let keeper_badge_text (badge : Keeper_list_model.badge) =
   let glyph = Masc_tui_keeper_mark.badge_glyph badge in
@@ -482,7 +485,7 @@ let keeper_display_entries rows layout =
             Keeper_group_heading (group, count)
             :: List.map (fun (position, row) -> Keeper_display_row (position, row)) matching)
 
-let keeper_group_heading_text group count =
+let keeper_group_heading_text rows group count =
   let glyph, label =
     match group with
     | Keeper_list_model.Needs_you -> "!", "NEEDS YOU"
@@ -491,7 +494,38 @@ let keeper_group_heading_text group count =
     | Keeper_list_model.Inactive -> "\xe2\x97\x8b", "INACTIVE" (* ○ *)
     | Keeper_list_model.Unobserved -> "?", "UNKNOWN"
   in
-  Printf.sprintf "%s %s %d" glyph label count
+  let detail =
+    match group with
+    | Keeper_list_model.Waiting ->
+        let summary = Keeper_list_model.waiting_summary rows in
+        let part activity label count =
+          if count = 0 then None
+          else
+            Some
+              (Masc_tui_keeper_mark.activity_glyph activity
+               ^ " " ^ label ^ " " ^ string_of_int count)
+        in
+        let parts =
+          [ part Keeper_list_model.Tool_waiting "tool" summary.tool
+          ; part Keeper_list_model.Model_waiting "model" summary.model
+          ; part Keeper_list_model.External_waiting "external" summary.external_wait
+          ; part Keeper_list_model.Delegating "delegate" summary.delegate
+          ; part Keeper_list_model.Verifying "verify" summary.verification
+          ; (if summary.background > 0 then
+               Some
+                 (Masc_tui_keeper_mark.badge_glyph
+                    (Keeper_list_model.Badge_async
+                       { running = summary.background; ownership_unknown = 0 })
+                  ^ " async " ^ string_of_int summary.background)
+             else None)
+          ]
+          |> List.filter_map Fun.id
+        in
+        if parts = [] then "" else "  " ^ String.concat " · " parts
+    | Keeper_list_model.Needs_you | Keeper_list_model.Active
+    | Keeper_list_model.Inactive | Keeper_list_model.Unobserved -> ""
+  in
+  Printf.sprintf "%s %s %d%s" glyph label count detail
 
 let keeper_group_heading_style = function
   | Keeper_list_model.Needs_you -> Theme.bad ()
@@ -679,6 +713,7 @@ let render_keeper_list (state : state) =
   in
   let columns =
     Render_schedule.allocate_keeper_columns
+      ~runtime_visible:(state.keeper_list_layout <> Keeper_list_model.Grouped)
       ~prioritize_runtime:has_failing_keeper ~inner_width:inner ~widest_runtime
   in
   box_line_styled buf cols ~style:(Theme.recede ()) (keeper_column_header columns);
@@ -802,7 +837,7 @@ let render_keeper_list (state : state) =
       | Keeper_group_heading (group, count) ->
           box_line buf cols
             (keeper_group_heading_style group ^ "  "
-             ^ keeper_group_heading_text group count ^ Ansi.reset)
+             ^ keeper_group_heading_text model_rows group count ^ Ansi.reset)
       | Keeper_display_row (position, row) ->
           let selected = position = cursor in
           let primary =

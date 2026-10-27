@@ -146,7 +146,7 @@ let support backend operation = match backend with
         | Connected Browser_lane.Web_extension | Safari_unavailable -> missing)
     | Session_lifecycle -> (match backend with
       | Owned_gecko | Owned_chromium -> conditional Session
-          ["Actions open/status/close apply to the selected owned browser; status and close remain available while disabled."]
+          ["Actions open/status/close apply to the selected owned browser."]
       | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi | Browser_lane.Ego_task_space) | Safari_unavailable ->
           Unsupported "Connected operator browsers do not expose an owned session lifecycle.")
     | Read_text -> read backend (invoke ~mode:"text" Read) []

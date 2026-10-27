@@ -57,7 +57,9 @@ type model_access = Model_disabled | Host_sampling
 type state_storage = Ephemeral | Persistent
 type tool_invocation = Direct | Host_context
 type tool_hook = Validate_input | Validate_output
-type worker_service = Mcp_tools | Browser_service
+(** A browser package's worker serves the one browser source its
+    [browser_backend] names (RFC browser-backends-end-alone). *)
+type worker_service = Mcp_tools | Browser_service of Browser_lane.Backend.t
 
 type request_schema_policy = Package_schema_only | Consumer_request_schema
 type exact_output = { name : string; schema : Yojson.Safe.t; request_schema : request_schema_policy }

@@ -373,9 +373,12 @@ let handle_step_until_change ~tool_name ~start_time args =
   with
   | Ok (observation, r) ->
     (* Frames always run here, so the declaration follows the screen: a run
-       that changed it moved the game; one that settled on the same picture
-       is the key-wait signal, and a keeper asking five times in a row on a
-       key-wait scene declares nothing and is still caught. *)
+       that changed it moved the game. changed=false is only a key-wait
+       candidate: with stable=false the budget ran out before two agreeing
+       samples (a tiny max_frames does that on a static screen), so only
+       changed=false with stable=true is the key-wait shape, and a keeper
+       asking five times in a row on one declares nothing and is still
+       caught. *)
     of_lane ~tool_name ~start_time
       ?metadata:(if r.Msx_lane.changed then Some moved_the_machine else None)
       ~extra:
@@ -537,8 +540,8 @@ let handle_checkpoint_info ~tool_name ~start_time ~base_path args =
             ([ ("slot", `String slot)
              ; ("exists", `Bool info.exists)
              ; ("version", `Int info.version)
-             ; ( "saved_at_unix"
-               , match info.saved_at_unix with Some t -> `Float t | None -> `Null )
+             ; ( "mtime_unix"
+               , match info.mtime_unix with Some t -> `Float t | None -> `Null )
              ; ( "mtime_utc"
                , match info.mtime_utc with Some t -> `String t | None -> `Null )
              ; ("core_sha", match info.core_sha with Some s -> `String s | None -> `Null)

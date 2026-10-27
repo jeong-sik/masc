@@ -102,6 +102,12 @@ type t =
       { model_tool_name : string
       ; message : string
       }
+  | Tool_result_retention_failed of
+      { model_tool_name : string
+      ; message : string
+      }
+      (** The returned original could not be durably retained at a host stop.
+          This detail alone makes no assertion about effect commitment. *)
   | Boundary_observation_failed of
       { model_tool_name : string
       ; cause : Keeper_request_failure_core.t

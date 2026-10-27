@@ -154,9 +154,9 @@ val connector_attention_preemption_request
     connector conversation message — is waiting. The owner-operation probe
     above already covers a person's direct address; this covers the ambient
     class, which had no mid-turn preemption before. Any pending
-    [Connector_attention] preempts: the source's own wake payloads were
-    consumed by selection, so what remains arrived after the source
-    started. *)
+    [Connector_attention] in the supplied queue preempts. The production
+    source-turn caller first excludes its exact admitted selections; selection
+    itself leaves them pending until their consumer settles. *)
 
 val connector_attention_waiting
   :  base_path:string
@@ -169,12 +169,15 @@ val connector_attention_waiting
 module For_testing : sig
   val autonomous_yield_probe
     :  wake:Keeper_registry.wake_reason
+    -> sources:Keeper_heartbeat_source_batch.t
     -> base_path:string
     -> keeper_name:string
     -> (unit -> (Keeper_agent_run.yield_request option, string) result)
        * (unit -> int)
   (** The production source-turn callback plus its actual attention batch-read
-      count. The counter observes reads; it cannot change cache decisions. *)
+      count. New async outcomes are compared with the exact pending frontier
+      observed by intake. Admitted sources cannot preempt themselves. The
+      counter observes reads; it cannot change cache decisions. *)
 end
 
 val continuation_channel_of_wake :

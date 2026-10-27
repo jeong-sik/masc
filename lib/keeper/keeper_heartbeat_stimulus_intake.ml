@@ -603,9 +603,9 @@ let reconcile_spent_selection
     in
     let* meta = Keeper_meta_store.read_effective_meta config keeper_name in
     (match meta with
-     | Some meta when Keeper_codex_tool_outbox_wake.route_can_consume meta ->
-       let* snapshot = Keeper_codex_tool_outbox.load ~base_path ~keeper_name in
-       if Keeper_codex_tool_outbox.contains_receipt snapshot ~receipt_id then
+     | Some meta when Keeper_client_tool_outbox_wake.route_can_consume meta ->
+       let* snapshot = Keeper_client_tool_outbox.load ~base_path ~keeper_name in
+       if Keeper_client_tool_outbox.contains_receipt snapshot ~receipt_id then
          Ok Selection_actionable
        else retire_hint ()
      | Some _ | None ->
@@ -1212,6 +1212,7 @@ let heartbeat_event_intake_with_priority
   in
   let ( queued_observations
       , consumed_selections
+      , pending_at_intake
       , first_withdrawn
       , hard_error )
     =
@@ -1225,22 +1226,24 @@ let heartbeat_event_intake_with_priority
         "turn entry: event queue selection failed keeper=%s: %s"
         keeper_name
         message;
-      [], [], None, Some (None, Pending_selection_failed message)
-    | Ok selections ->
+      [], [], [], None, Some (None, Pending_selection_failed message)
+    | Ok pending ->
       (* Revalidate against this actual intake snapshot. A withdrawn or reinserted
          source never borrows the old handoff's admission preference. *)
       let preferred, rest = List.partition (fun source ->
-        List.exists (Keeper_event_queue_state.equal_pending_selection source) priority_sources) selections in
+        List.exists (Keeper_event_queue_state.equal_pending_selection source) priority_sources) pending in
       let batch = ready_batch (preferred @ rest) in
       let observations, selections, withdrawn, error =
         consume_batch batch
       in
       ( observations
       , selections
+      , pending
       , withdrawn
       , Option.map (fun (selection, error) -> Some selection, error) error )
   in
-  let source_batch = Keeper_heartbeat_source_batch.of_selections consumed_selections in
+  let source_batch = Keeper_heartbeat_source_batch.of_intake
+    ~pending:pending_at_intake ~admitted:consumed_selections in
   let diagnostic_selection =
     match hard_error, first_withdrawn with
     | Some (Some selection, _), _ -> Some selection

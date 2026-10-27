@@ -74,7 +74,8 @@ let resume ~store ~config ~reserved ~destination ~(original : Owner.retained)
     && Yojson.Safe.equal original_schema supplied_schema then Ok ()
     else Error (Rejected "Admission dispatch differs from its original capture") in
   let terminal original final =
-    let* () = Eio_unix.run_in_systhread (fun () -> Capture.confirm_final ~store capture final)
+    let* () = Systhread_host.run ~label:"librarian-admission-confirm-final" (fun () ->
+        Capture.confirm_final ~store capture final)
       |> Result.map_error (fun detail -> Rejected detail) in
     match final with
     | Exact.Call_final (Exact.Answered {output; _}) ->

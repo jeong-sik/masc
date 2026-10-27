@@ -265,6 +265,34 @@ let test_async_phases_and_preparing_remain_distinct () =
   Alcotest.(check bool) "a synchronous tool wait is waiting" true
     (Model.primary_activity_of_row tool = Model.Tool_waiting && Model.group_of_row tool = Model.Waiting)
 
+let test_waiting_summary_counts_primary_reasons_and_background_work () =
+  let rows =
+    [ row ~turn:tool_waiting
+        ~async_requests:
+          [ async_request Decode.Async_running "tool-running"
+          ; async_request Decode.Async_queued "tool-queued"
+          ; async_request Decode.Async_cancelling "tool-cancelling"
+          ]
+        "tool"
+    ; row ~turn:model_waiting
+        ~async_requests:[ async_request Decode.Async_running "model-running" ]
+        "model"
+    ; row ~waiting:(waiting "external") "external"
+    ; row
+        ~waiting:(waiting ~items:[ waiting_item ~producer:Model.Wake_keeper_delegate () ] "delegate")
+        "delegate"
+    ; row ~task:(verification_task "verify") "verify"
+    ; row ~turn:streaming
+        ~async_requests:[ async_request Decode.Async_running "active-running" ]
+        "active"
+    ]
+  in
+  let summary = Model.waiting_summary rows in
+  Alcotest.(check bool) "all five primary reasons are counted once" true
+    (summary.tool = 1 && summary.model = 1 && summary.external_wait = 1
+     && summary.delegate = 1 && summary.verification = 1);
+  Alcotest.(check int) "only waiting rows contribute background async running" 2 summary.background
+
 let test_group_counts () =
   let rows =
     [ row ~approval:(approval "held") "held"
@@ -288,6 +316,8 @@ let () =
         ; Alcotest.test_case "paused and offline hide stale activity" `Quick test_paused_and_offline_hide_stale_activity
         ; Alcotest.test_case "confirmation and inventory errors need attention" `Quick test_confirmation_and_inventory_errors_need_attention
         ; Alcotest.test_case "async phases and preparing remain distinct" `Quick test_async_phases_and_preparing_remain_distinct
+        ; Alcotest.test_case "waiting summary counts reasons and background work" `Quick
+            test_waiting_summary_counts_primary_reasons_and_background_work
         ; Alcotest.test_case "group counts" `Quick test_group_counts
         ] )
     ]

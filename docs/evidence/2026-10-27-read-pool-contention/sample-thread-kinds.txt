@@ -1,0 +1,5 @@
+# sample 45284 8 (2026-10-27 08:4x KST). leaf-inclusive sample counts per thread kind
+# kind	threads	caml_lex_engine	sha256_do_chunk
+domain (domain_thread_func)	30	8097	4659
+main thread	1	33	0
+systhread (caml_thread_start)	145	2502	324

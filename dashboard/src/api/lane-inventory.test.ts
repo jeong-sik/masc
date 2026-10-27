@@ -82,27 +82,25 @@ describe('common Lane inventory wire', () => {
       Object.assign(raw.rows.find(item => item.id === 'browser/live')!.state, { addon })
       return parseLaneInventory(raw).rows.find(item => item.id === 'browser/live')?.state
     }
-    expect(read({ kind: 'absent' })).toEqual({ kind: 'browser_clients', activity: 'on', addon: { kind: 'absent' } })
-    expect(read({ kind: 'off' })).toEqual({ kind: 'browser_clients', activity: 'on', addon: { kind: 'off' } })
-    expect(read({ kind: 'not_running' })).toEqual({ kind: 'browser_clients', activity: 'on', addon: { kind: 'not_running' } })
+    expect(read({ kind: 'absent' })).toEqual({ kind: 'browser_clients', addon: { kind: 'absent' } })
+    expect(read({ kind: 'off' })).toEqual({ kind: 'browser_clients', addon: { kind: 'off' } })
+    expect(read({ kind: 'not_running' })).toEqual({ kind: 'browser_clients', addon: { kind: 'not_running' } })
     expect(read({ kind: 'unavailable', detail: 'worker failed' }))
-      .toEqual({ kind: 'browser_clients', activity: 'on', addon: { kind: 'unavailable', detail: 'worker failed' } })
+      .toEqual({ kind: 'browser_clients', addon: { kind: 'unavailable', detail: 'worker failed' } })
     expect(() => read({ kind: 'maybe' })).toThrow()
     expect(() => read({ kind: 'observed' })).toThrow()
   })
-  it('preserves browser activity independently of registration and requires an explicit observation', () => {
-    for (const activity of ['on', 'off', 'unobserved']) {
+  it('reads executor registration and refuses an observation without it', () => {
+    for (const registered of [true, false]) {
       const raw = structuredClone(fixture)
       const row = raw.rows.find(item => item.id === 'browser/automation')!
-      Object.assign(row.state, { activity, addon: { kind: 'observed', registered: true } })
+      Object.assign(row.state, { addon: { kind: 'observed', registered } })
       expect(parseLaneInventory(raw).rows.find(item => item.id === row.id)?.state)
-        .toEqual({ kind: 'browser_executor', activity, addon: { kind: 'observed', registered: true } })
+        .toEqual({ kind: 'browser_executor', addon: { kind: 'observed', registered } })
     }
-    for (const activity of [undefined, null, true, 'enabled']) {
+    for (const registered of [undefined, null, 'yes']) {
       const raw = structuredClone(fixture)
-      for (const row of raw.rows.filter(item => item.selection.kind === 'browser')) {
-        Object.assign(row.state, { activity })
-      }
+      Object.assign(raw.rows.find(item => item.id === 'browser/automation')!.state, { addon: { kind: 'observed', registered } })
       expect(() => parseLaneInventory(raw)).toThrow()
     }
   })

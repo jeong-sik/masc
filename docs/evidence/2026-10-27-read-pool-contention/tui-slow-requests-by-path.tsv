@@ -1,0 +1,17 @@
+requests_over_1s	over_10s	path
+2522	243	/api/v1/gate/keepers
+581	20	/api/v1/keepers/turns
+886	18	/api/v1/dashboard/scheduled-automation
+670	13	/api/v1/operator
+498	6	/api/v1/keepers/asks
+134	6	/api/v1/dashboard/briefing
+190	5	/health
+4	4	/api/v1/dashboard/goals
+90	3	/api/v1/keepers/tool-approval-mode
+68	2	/api/v1/dashboard/gate
+53	2	/api/v1/lane-addons/asks
+2	1	/api/v1/keepers/tool-approvals
+1	1	/api/v1/dashboard/keeper-memory-health
+30	0	/api/v1/dashboard/gate/keeper-settings
+3	0	/api/v1/verification/requests
+1	0	/api/v1/runtime/resolved

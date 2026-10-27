@@ -130,7 +130,7 @@ let one_dynamic_tool
   in
   let terminal_error = ref None in
   let projected =
-    Host.dynamic_tools ?base_path
+    Host.dynamic_tools ~result_scope:None ?base_path
         ~accepts_image_input
         ~content_transport:Runtime_official_client_tool.Codex
       ~tool_approval
@@ -152,7 +152,7 @@ let one_dynamic_tool
       ()
   in
   match projected with
-  | Ok [ tool ] -> tool, terminal_error
+  | Ok ([ tool ], _) -> tool, terminal_error
   | Ok _ -> fail "expected one projected dynamic tool"
   | Error error -> fail (Agent_core.Error.to_string error)
 ;;
@@ -3106,7 +3106,7 @@ let test_every_world_state_section_goes_out_when_the_session_may_not_hold_it () 
           | Keeper_official_client_session_store.(Context_section _ | Context_section_row _) -> false
           | Keeper_official_client_session_store.(
               Context_block _ | Context_carrier | Librarian_working_state | Librarian_unread
-              | Historical_task_reference) -> true)
+              | Historical_task_reference | Tool_result_receipts) -> true)
        whole.held_context);
   let after_whole = resume ~held:whole.held_context (world_state_turn (world_state ())) in
   check (list string) "after a whole World State every section is sent again" []
@@ -3144,7 +3144,7 @@ let held_row_count (delivery : Host.resume_delivery) =
           | Keeper_official_client_session_store.Context_section_row _ -> true
           | Keeper_official_client_session_store.(
               Context_block _ | Context_section _ | Context_carrier | Librarian_working_state
-              | Librarian_unread | Historical_task_reference) -> false)
+              | Librarian_unread | Historical_task_reference | Tool_result_receipts) -> false)
        delivery.held_context)
 ;;
 
@@ -3266,7 +3266,7 @@ let test_a_rows_only_omission_is_named_as_rows () =
            section = Layers.Layer Layers.Own_recent_actions
          | Keeper_official_client_session_store.(
              Context_block _ | Context_carrier | Librarian_working_state | Librarian_unread
-             | Historical_task_reference) -> false)
+             | Historical_task_reference | Tool_result_receipts) -> false)
       (start_holding first)
   in
   let delivery =

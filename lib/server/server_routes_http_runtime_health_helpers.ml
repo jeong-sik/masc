@@ -125,10 +125,14 @@ let scheduler_json () =
   (* The probe fiber runs on the main domain; its ring says how late a ready
      fiber there ran over the last minute. [pool_domains] is carried next to
      it because a stall on the main domain while the pool is idle and a stall
-     while every worker is busy are different findings. *)
+     while every worker is busy are different findings. [pool_wait] splits a
+     pool-routed request's time into waiting for a worker and running. *)
   let pool_domains =
     match Domain_pool_ref.domain_count_opt () with
     | Some count -> `Int count
     | None -> `Null
   in
-  `Assoc (("pool_domains", pool_domains) :: Scheduler_lag.to_fields Scheduler_lag.global)
+  `Assoc
+    (("pool_domains", pool_domains)
+     :: ("pool_wait", Pool_wait.to_json ())
+     :: Scheduler_lag.to_fields Scheduler_lag.global)

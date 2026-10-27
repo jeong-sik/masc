@@ -6,6 +6,11 @@ module B = Browser_lane
 module F = Exact_output_fixture
 let ( let* ) = Result.bind
 let require = function Ok value -> value | Error message -> failwith message
+(* The package of the owned Gecko source (addons/browser/automation), declared
+   under its own id the way masc browser-lane-setup declares it, and the Skill
+   it carries. *)
+let package_id = "browser-automation"
+let skill_name = "browser-automation"
 let argument flag =
   let rec find = function
     | key::value::_ when key=flag -> value
@@ -70,7 +75,8 @@ let () =
   and payload=Unix.realpath (argument "--payload")
   and fixture_url=argument "--fixture-url" in
   let expected_skill_revision=In_channel.with_open_bin
-      (Filename.concat (Filename.dirname manifest) "skills/browser/SKILL.md") In_channel.input_all
+      (List.fold_left Filename.concat (Filename.dirname manifest) [ "skills"; skill_name; "SKILL.md" ])
+      In_channel.input_all
     |> Skill_reference.content_revision_of_source_text in
   output:=Unix.realpath (argument "--out");flush ();
   let expected=In_channel.with_open_bin payload In_channel.input_all in
@@ -87,7 +93,7 @@ let () =
   Unix.mkdir (Filename.concat base_path "fixture-skills") 0o700;
   let runtime_path=Filename.concat config_root "runtime.toml" in
   write runtime_path (Exact_output_fixture.official_client_runtime_fixture ^ Printf.sprintf
-    "\n[skills]\n[[skills.sources]]\nid=\"probe-local\"\nanchor=\"base-path\"\npath=\"fixture-skills\"\naccess=\"read-only\"\n[browser.live]\nenabled=false\n[browser.stagehand]\nenabled=false\n[browser.automation]\nenabled=true\ngeckodriver=%S\nbinary=%S\n" driver firefox);
+    "\n[skills]\n[[skills.sources]]\nid=\"probe-local\"\nanchor=\"base-path\"\npath=\"fixture-skills\"\naccess=\"read-only\"\n[browser.automation]\ngeckodriver=%S\nbinary=%S\n" driver firefox);
   require (Runtime.init_default ~config_path:runtime_path);
   Mirage_crypto_rng_unix.use_default ();
   Eio_main.run @@ fun env ->
@@ -107,14 +113,14 @@ let () =
         | Error message -> `Bad_request,Yojson.Safe.to_string (`Assoc ["error",`Assoc ["message",`String message]]) in
       model_responses:=`Assoc ["request_index",`Int index;"status",`Int (Cohttp.Code.code_of_status status);
         "body",`String response]::!model_responses;flush ();status,response)) in
-    ignore (F.publish_registry ~lane_id:"browser/locate" ~slot_ids:["probe"]
+    ignore (F.publish_registry ~lane_id:(package_id ^ "/locate") ~slot_ids:["probe"]
       (F.resolver_snapshot ~source:base_path [{F.id="probe";base_url=provider.base_url}]) : Runtime_exact_output_registry.t);
     R.register_exact_runner ~authorize_request:(Server_lane_addon_exact.authorize_request ~base_path)
     (Server_lane_addon_exact.runner ~base_path);
     let access=Lane_addon_sources.Operator_configuration in
     let principal=Lane_addon_call_context.Keeper "gecko-transfer-probe" in
     let directory=R.configuration_directory config in Fs_compat.mkdir_p directory;
-    let declaration=Filename.concat directory "browser.toml" in
+    let declaration=Filename.concat directory (package_id ^ ".toml") in
     let rec await work=match work () with Some result -> result
       | None -> Eio.Time.sleep clock 0.01;await work in
     ignore (record "publish the isolated workspace Skill configuration"
@@ -127,7 +133,7 @@ let () =
     R.register_skill_export_handler Server_skill_snapshot_runtime.publish_lane_skills;
     R.start_configuration_service ~config ~sw ~clock;
     write declaration (Printf.sprintf
-      "id=\"browser\"\nrun_id=\"gecko-transfer-probe\"\nmanifest_path=%S\nexact_outputs=[\"locate\"]\ntool_hooks=[\"validate_input\",\"validate_output\"]\n[binding]\nsources=[]\n" manifest);
+      "id=%S\nrun_id=\"gecko-transfer-probe\"\nmanifest_path=%S\nexact_outputs=[\"locate\"]\ntool_hooks=[\"validate_input\",\"validate_output\"]\n[binding]\nsources=[]\n" package_id manifest);
     let report=require (R.reconcile_configuration ~config ~directory) in
     if Yojson.Safe.Util.member "complete" report<>`Bool true
       || Yojson.Safe.Util.member "issues" report<>`List [] then
@@ -144,14 +150,14 @@ let () =
          |> Result.map_error Server_skill_snapshot_runtime.error_to_string in
        match catalog with
        | Server_skill_snapshot_runtime.Ready {snapshot;_} ->
-         (match Skill_catalog_snapshot.find_effective_by_name snapshot "browser" with
+         (match Skill_catalog_snapshot.find_effective_by_name snapshot skill_name with
           | Some entry -> check
               ("catalog Skill has unexpected identity or content: " ^
                Yojson.Safe.to_string (Skill_reference.to_yojson (Skill_catalog_snapshot.entry_reference entry)))
-              (Skill_reference.identity_source_id_to_string entry.identity=R.skill_source_id (R.Declaration "browser")
-               && Skill_reference.identity_package_id_to_string entry.identity="browser"
-               && entry.identity.name="browser"
-               && entry.directory="browser"
+              (Skill_reference.identity_source_id_to_string entry.identity=R.skill_source_id (R.Declaration package_id)
+               && Skill_reference.identity_package_id_to_string entry.identity=package_id
+               && entry.identity.name=skill_name
+               && entry.directory=skill_name
                && Skill_reference.equal_content_revision entry.content_revision expected_skill_revision)
           | None -> Error "browser package Skill is absent")
        | Not_registered|Uninitialized -> Error "workspace Skill catalog is unavailable"));

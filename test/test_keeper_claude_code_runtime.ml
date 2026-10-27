@@ -6340,6 +6340,104 @@ let test_actual_start_demotes_arguments_but_resume_keeps_them_held () =
     [true;false]
 ;;
 
+let test_original_outbox_result_is_delivered_on_start_and_resume () =
+  let base_path = temp_workspace () in
+  let keeper_name = "claude-fixture" in
+  let store f = Eio_main.run (fun env ->
+    Fs_compat.set_fs env#fs;
+    Fun.protect ~finally:Fs_compat.clear_fs f) in
+  let get = function Ok value -> value | Error detail -> fail detail in
+  let retain turn_id value = store (fun () ->
+    Keeper_client_tool_outbox.retain ~base_path ~keeper_name
+      {thread_id="original-codex-session";turn_id;call_id="original-call";
+       tool_name="Execute";arguments=`String "original-effect-no-replay";response=`String value}
+    |> get) in
+  let count () = store (fun () -> Keeper_client_tool_outbox.load ~base_path ~keeper_name
+    |> get |> Keeper_client_tool_outbox.receipt_ids |> List.length) in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    let system_path = Filename.concat base_path "outbox-start.txt"
+    and prompt_path = Filename.concat base_path "outbox-resume.json" in
+    let transmissions = ref [] in
+    let on_request_attribution ~runtime_id:_ ~tools:_ ~transmitted =
+      transmissions := transmitted :: !transmissions in
+    with_fixture_sequence ~first_system_marker:system_path ~second_prompt_marker:prompt_path
+      [Emit (assistant ~turn_id:"outbox-start" "read original result");
+       Emit (result ~turn_id:"outbox-start" "read original result")]
+      [Emit (assistant ~turn_id:"outbox-resume" "read newer original result");
+       Emit (result ~turn_id:"outbox-resume" "read newer original result")]
+      (fun cli_path ->
+        let run goal = match run_keeper_turn ~base_path ~cli_path ~goal ~on_request_attribution () with
+          | Ok result -> result | Error error -> fail (Agent_core.Error.to_string error) in
+        retain "original-1" "ORIGINAL_RESULT_FOR_CLAUDE_START";
+        let first = run "Use the original result" in
+        check bool "Claude Start receives original cross-runtime result" true
+          (String_util.contains_substring (In_channel.with_open_bin system_path In_channel.input_all)
+             "ORIGINAL_RESULT_FOR_CLAUDE_START");
+        check int "completed Start acknowledges the original result" 0 (count ());
+        retain "original-2" "ORIGINAL_RESULT_FOR_CLAUDE_RESUME";
+        let second = run "Use the newer original result" in
+        check bool "the same vendor session consumes the newer result" true
+          (first.session_id = second.session_id);
+        (match List.rev !transmissions with
+         | [Keeper_official_client_host.Whole_input_transmitted _;
+            Keeper_official_client_host.Held_by_client_session] -> ()
+         | _ -> fail "original result must pass through an actual Start and held Resume");
+        check bool "Claude Resume receives exact newer original result" true
+          (String_util.contains_substring (In_channel.with_open_bin prompt_path In_channel.input_all)
+             "ORIGINAL_RESULT_FOR_CLAUDE_RESUME");
+        check int "completed Resume acknowledges only its loaded result" 0 (count ())))
+;;
+
+let test_rejecting_keeper_accept_preserves_loaded_and_new_originals () =
+  let base_path = temp_workspace () in
+  let keeper_name = "claude-fixture" in
+  let effects = ref 0 and accept_calls = ref 0 in
+  let store f = Eio_main.run (fun env ->
+    Fs_compat.set_fs env#fs;
+    Fun.protect ~finally:Fs_compat.clear_fs f) in
+  let get = function Ok value -> value | Error detail -> fail detail in
+  let pending () = store (fun () ->
+    Keeper_client_tool_outbox.load ~base_path ~keeper_name |> get) in
+  let tool = Agent_core.Tool.create ~name:"masc_probe" ~description:"Complete one original effect"
+    ~parameters:[{Agent_core.Types.name="marker";description="Fixture marker";param_type=String;required=true}]
+    (fun _ -> incr effects;
+      Ok {Agent_core.Types.content="MASC_TOOL_RESULT";content_blocks=None;_meta=None}) in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    store (fun () -> Keeper_client_tool_outbox.retain ~base_path ~keeper_name
+      {thread_id="previous-thread";turn_id="previous-turn";call_id="previous-call";
+       tool_name="Execute";arguments=`String "no-effect-replay";
+       response=`String "PREVIOUS_ORIGINAL_RESULT"} |> get);
+    with_fixture_sequence
+      [Emit_and_read mcp_initialize; Emit mcp_initialized_notification;
+       Emit_and_read mcp_list; Emit_and_read mcp_call;
+       Emit (assistant ~turn_id:"rejected-after-tool" "TOOL_EXECUTED");
+       Emit (result ~turn_id:"rejected-after-tool" "TOOL_EXECUTED")]
+      [Emit (assistant ~turn_id:"accepted-originals" "USED_ORIGINAL_RESULTS");
+       Emit (result ~turn_id:"accepted-originals" "USED_ORIGINAL_RESULTS")]
+      (fun cli_path ->
+        let rejected = run_keeper_turn ~tools:[tool] ~base_path ~cli_path
+          ~goal:"Use the earlier result and complete one independent tool"
+          ~accept:(fun _ -> incr accept_calls;false) () in
+        check bool "the real routed Keeper rejects its caller acceptance predicate" true
+          (Result.is_error rejected);
+        check int "caller acceptance actually ran" 1 !accept_calls;
+        check int "the fixture effect ran exactly once before rejection" 1 !effects;
+        let originals = pending () in
+        check int "both previously loaded and newly written originals survive actual rejection" 2
+          (List.length (Keeper_client_tool_outbox.receipt_ids originals));
+        let context = String.concat "" (Keeper_client_tool_outbox.developer_context originals) in
+        List.iter (fun bytes -> check bool "original data survives caller rejection" true
+          (String_util.contains_substring context bytes))
+          ["PREVIOUS_ORIGINAL_RESULT";"MASC_TOOL_RESULT"];
+        (match run_keeper_turn ~tools:[tool] ~base_path ~cli_path
+          ~goal:"Continue from the exact original results"
+          ~accept:(fun _ -> incr accept_calls;true) () with
+         | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+        check int "later acceptance runs without replaying the original tool" 1 !effects;
+        check int "the accepted later consumer ACKs the exact original set" 0
+          (List.length (Keeper_client_tool_outbox.receipt_ids (pending ())))))
+;;
+
 let () =
   (* Pin the prompt directory explicitly. Under dune the registry falls back to
      [DUNE_SOURCEROOT], but a test executable run directly has neither that
@@ -6350,7 +6448,11 @@ let () =
   Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
   run
     "keeper_claude_code_runtime"
-    [ ( "native action", [ test_case "partial content boundary identity" `Quick test_partial_content_boundaries_keep_message_and_channel_identity
+    [ ( "async result outbox",[test_case "original result is delivered on Start and Resume" `Quick
+           test_original_outbox_result_is_delivered_on_start_and_resume;
+         test_case "real Keeper acceptance rejection preserves loaded and new originals" `Quick
+           test_rejecting_keeper_accept_preserves_loaded_and_new_originals])
+    ; ( "native action", [ test_case "partial content boundary identity" `Quick test_partial_content_boundaries_keep_message_and_channel_identity
         ; test_case "exact provider identity" `Quick test_native_action_observer_keeps_exact_provider_identity ] )
     ; ( "usage scope"
       , [ test_case "result-only usage keeps client-turn scope" `Quick

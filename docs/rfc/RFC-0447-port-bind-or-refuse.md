@@ -3,11 +3,11 @@ rfc: "0447"
 title: "서버는 영속 포트에 붙거나 기동을 거부한다"
 status: Draft
 created: 2026-09-12
-updated: 2026-09-12
+updated: 2026-10-27
 author: claude
 supersedes: []
 superseded_by: null
-related: ["0052"]
+related: ["0052", "masc-restart-replaces-the-workspace-server"]
 implementation_prs: []
 ---
 
@@ -23,7 +23,7 @@ implementation_prs: []
 
 - 2026-09-11T15:59:51Z 부터 09-12T07:40:42Z 까지 16시간 안에 포트가 네 번 옮겨졌다: 8935 → 56209 → 54984 → 60690 → 56492. 09-11 bind 줄 20개(8935 16, 56209 3, 54984 1), 09-12 bind 줄 9개(60690 6, 56492 3). 지금 살아 있는 서버는 pid 38621, `127.0.0.1:56492`, `connection.toml` 도 56492 다.
 - 원인은 B6 가 코드 위치까지 잡았다. SIGTERM 을 받은 전임은 `force_timeout_s = 10.0`(`lib/shutdown.ml:28`) 동안 drain 한다. 후임은 `bin/masc_cli_owner_upgrade.ml:stop` 에서 `Owner_draining | Port_busy` 를 0.2초 × 25회, 즉 5초만 기다리고 `port_available=false` 를 돌려준다. setup 은 `Server_upgrade_preparation.suggest_loopback_port`(`:0` bind 로 OS 임시 포트) 가 준 값으로 후임을 띄우고, `server_runtime_bootstrap.ml:run_serving` 이 readiness 전에 `Workspace_connection.save` 로 그 임시 포트를 영속시킨다. 18:54:09Z SIGTERM 뒤 전임은 18:54:09Z 까지 56209 로 stats 를 찍었고 후임은 18:54:25Z 에 54984 를 잡았다(16초 겹침).
-- 포트를 따라가는 소비자는 `Workspace_connection.resolve` 를 읽는 TUI 와 CLI 뿐이다. 나머지는 8935 리터럴이다: `~/me/.mcp.json`(운영자가 손으로 56492 로 고쳐 둔 상태), Cloudflare 터널(`~/.cloudflared/config.yml`, `scripts/deploy.sh:11-12` 주석), `dashboard/src/config/constants.ts:7 DEFAULT_MASC_PORT`, `scripts/` 42개 파일 56줄, docs 217개 파일. 스크립트는 같은 값을 여섯 가지 env 이름으로 읽는다(R11). `connection.toml` 을 읽는 스크립트는 `install-runtime-setup.py` 하나다.
+- 포트를 따라가는 소비자는 `Workspace_connection.resolve` 를 읽는 TUI 와 CLI 뿐이다. 나머지는 8935 리터럴이다: `~/me/.mcp.json`(운영자가 손으로 56492 로 고쳐 둔 상태), Cloudflare 터널(`~/.cloudflared/config.yml`), `dashboard/src/config/constants.ts:7 DEFAULT_MASC_PORT`, `scripts/` 42개 파일 56줄, docs 217개 파일. 스크립트는 같은 값을 여섯 가지 env 이름으로 읽는다(R11). `connection.toml` 을 읽는 스크립트는 `install-runtime-setup.py` 하나다.
 - 대시보드 connector 힌트는 `gate_base_url` 이 없으면 `DEFAULT_MASC_ORIGIN` 을 찍는다. 살아 있는 connector 4행 중 3행이 죽은 8935 를 "서버 확인" 위치로 보여줬다(U7).
 - 두 번째 기동 경로도 같은 결함을 갖고 있다. `bin/main_eio.ml:880` 는 EADDRINUSE 를 2^n 초(최대 30초) × 5회 재시도하고, `server_startup_takeover.ml:520-570` 은 pid 파일의 pid 를 `looks_like_server_command` 문자열 판정으로 거른 뒤 SIGTERM → SIGKILL 까지 보낸다.
 
@@ -75,17 +75,15 @@ type handoff =
   | Handoff_failed of handoff_failure
 
 and handoff_failure =
-  | Predecessor_still_holds of { pid : int; deadline_s : float }
   | Predecessor_identity_changed                          (* Owner_process_identity: Owner_changed *)
   | Predecessor_not_masc of { pid : int }
-  | Cancelled_by_operator
 ```
 
-- 관찰 조건은 workspace lease(`Host_config.base_path_lease_dir` 아래 파일) 의 잠금 해제다. 후임은 `F_SETLKW` 를 systhread 에서 걸어 커널이 깨울 때까지 기다린다. 폴링 간격이 없다. 전임이 정상 종료하든 watchdog 이 exit 124 로 죽이든 fd 는 닫히고 잠금은 풀린다.
-- 기다리는 기한은 후임이 정하지 않는다. 전임이 `/health?full=1` 에 `shutdown.force_timeout_s` 와 `pid` 를 광고하고, 후임은 그 값을 `Eio.Time.with_timeout` 의 기한으로 쓴다. 기한이 지나면 `Predecessor_still_holds {pid; deadline_s}` 로 `Refused` 다. 전임이 광고하지 않으면 기다리지 않고 `Port_held_by_unknown_process` 다.
+- 플래그 없는 `masc start` 는 lease 가 잡혀 있으면 기다리지 않고 거절한다. 종료를 요청받지 않은 정상 서버는 기다려도 끝나지 않는다.
+- 기다림은 `masc start --wait-for-previous-owner` 하나다. `masc restart` 가 전임에게 종료를 요청한 뒤 이 플래그로 후임을 띄운다([masc restart](RFC-masc-restart-replaces-the-workspace-server.md)). 후임은 workspace lease(`Host_config.base_path_lease_dir` 아래 파일) 를 `lockf F_LOCK` 으로 기다리고, 커널이 잠금을 넘길 때 깨어난다. 폴링 간격이 없다. 전임이 정상 종료하든 watchdog 이 exit 124 로 죽이든 fd 는 닫히고 잠금은 풀린다.
+- 기한은 두지 않는다. 종료를 요청받은 전임은 자기 watchdog(`force_timeout_s`) 으로 반드시 끝난다. 기다림을 멈추려면 후임 프로세스를 끝낸다.
 - lease 가 풀린 뒤 bind 가 또 EADDRINUSE 면 재시도 없이 `Port_held_by_unknown_process` 다. 그 사이 다른 프로세스가 잡은 것이다.
-- 기동 경로는 어떤 프로세스에도 시그널을 보내지 않는다. `server_startup_takeover.ml` 의 `looks_like_server_command` 판정, SIGTERM, SIGKILL, takeover breadcrumb 는 지운다. 전임에게 종료를 요청하는 곳은 `masc setup` 의 stop 하나이고, 그 전에 `authorize_initial`(운영자 로그인) 과 `Owner_process_identity.capture` 가 같은 incarnation 임을 확인해야 `request_termination` 을 부른다. SIGTERM 한 번, SIGKILL 없음은 `owner_process_identity.mli` 가 이미 정한 계약이다.
-- Ctrl-C 는 `Cancelled_by_operator` 다. 후임은 아무것도 쓰지 않고 exit 1 한다.
+- 기동 경로는 어떤 프로세스에도 시그널을 보내지 않는다. `server_startup_takeover.ml` 의 `looks_like_server_command` 판정, SIGTERM, SIGKILL, takeover breadcrumb 는 지운다. 전임에게 종료를 요청하는 곳은 `masc setup` 의 stop 과 `masc restart` 둘이다. 둘 다 `Masc_cli_owner_upgrade.with_selected_owner` 로 `authorize_initial`(운영자 로그인) 과 `Owner_process_identity.capture` 가 같은 incarnation 임을 확인한 뒤 `request_termination` 을 부른다. SIGTERM 한 번, SIGKILL 없음은 `owner_process_identity.mli` 가 이미 정한 계약이다.
 
 ### 2.4 영속 시점과 크래시 경계
 
@@ -112,7 +110,7 @@ and handoff_failure =
 
 ### 2.6 각 표면
 
-- 로그 한 줄: `[bind] bound 127.0.0.1:8935 source=persisted handoff=predecessor_released pid=64903 waited_ms=812`. 거부는 `[bind] refused port=8935 reason=port_held_by_known_owner pid=64903 workspace=/Users/dancer/me version=0.35.4 deadline_s=10`.
+- 로그 한 줄: `[bind] bound 127.0.0.1:8935 source=persisted handoff=predecessor_released pid=64903 waited_ms=812`. 거부는 `[bind] refused port=8935 reason=port_held_by_known_owner pid=64903 workspace=/Users/dancer/me version=0.35.4`.
 - `masc start` 종료 코드: `Bound` 0, `Refused` 1, 파서 거부(`--port 0`) 2. `Refused` 는 stderr 에 `masc.start_refused.v1` JSON 을 낸다. 필드는 2.2 의 생성자 이름과 같다.
 - `masc_status` (MCP tool result): `server.endpoint = {host; port; source; handoff; published}`.
 - dashboard runtime/config 패널: 같은 레코드 한 줄. connector 힌트는 `window.location.origin`.
@@ -123,7 +121,7 @@ and handoff_failure =
 
 - P1 재기동 20회: 8935 가 영속된 workspace 에 SIGTERM 재기동 20회. `rg -c "auto 127.0.0.1:8935\] HTTP auto-detect" system_log_*.jsonl` 이 20 늘고 다른 포트의 bind 줄은 0. `connection.toml` mtime 이 안 바뀐다.
 - P2 외부 점유: `python3 -m http.server 8935` 를 띄운 채 `masc start`. 기한 없이 곧바로 exit 1, stderr 에 `reason=port_held_by_unknown_process health=not_masc`. http.server 는 살아 있고 `connection.toml` 은 그대로.
-- P3 전임 기한 초과: 전임의 drain 을 테스트 훅 없이 실제 긴 요청으로 붙잡은 채 후임 기동. 후임은 전임이 광고한 `deadline_s` 안에 `Predecessor_still_holds` 로 exit 1. 전임은 자기 watchdog 으로 exit 124.
+- P3 전임 교체: 정리에 몇 초 걸리는 전임(`MASC_SHUTDOWN_NOTIFY_DELAY`) 에 `masc restart`. 후임 로그에 `Waiting for the previous owner … PID <전임>` 한 줄이 있고, 후임은 전임이 끝난 뒤에 bind 한다. 플래그 없는 `masc start` 는 같은 상황에서 곧바로 exit 1.
 - P4 `--port 0`: exit 2, bind 줄 0.
 - P5 env: `MASC_HTTP_PORT=9000 masc start` 는 9000 에 붙고 로그 `source=environment`, `connection.toml` 그대로.
 - P6 명시 변경: `masc start --port 9001` 은 `state_ready` 뒤에만 파일이 9001 이 된다. init 도중 `kill -9` 하면 파일은 이전 값이다.
@@ -134,16 +132,16 @@ and handoff_failure =
 ## 4. 단계
 
 - PR-1 `lib/workspace_connection`: `port_source`, `[server] host` 필드, 쓰기 조건(2.4). setup 과 main_eio 의 save 두 곳 제거. 판정 P5, P6.
-- PR-2 bind 경로: `bind_outcome`·`handoff` 도입, `F_SETLKW` 대기와 전임 광고 기한, `/health?full=1` 에 `pid`·`shutdown.force_timeout_s` 추가. `main_eio.ml` 의 EADDRINUSE 재시도, `server_startup_takeover.ml` 의 문자열 판정·시그널·breadcrumb, `suggest_loopback_port`·`replacement_readiness` 폴링 제거. 판정 P1, P2, P3, P4, F.
+- PR-2 bind 경로: `bind_outcome`·`handoff` 도입. `main_eio.ml` 의 EADDRINUSE 재시도, `server_startup_takeover.ml` 의 문자열 판정·시그널·breadcrumb, `suggest_loopback_port`·`replacement_readiness` 폴링 제거. 판정 P1, P2, P4, F. lease 대기와 `/health/ready` 의 `pid` 는 masc restart 스택이 넣는다(판정 P3).
 - PR-3 주소 family: `listen_socket` 대체 제거, probe 세 곳이 파싱된 주소를 쓴다. 판정 P7.
 - PR-4 소비자: dashboard 상수 제거와 `window.location.origin`, `masc connection --json`, 스크립트 42개와 env 이름 통일, `check-ssot.sh` 규칙. 판정 P8.
 - PR-5 표면: 로그 한 줄, `masc_status` endpoint 레코드, TUI 배지, `Endpoint_changed` board 게시, setup 의 반복 업그레이드 출력(2.5).
 
 ## 5. 반론과 답
 
-- **"전임을 기다리다 영영 멈춘다"** — 기한은 후임의 추측이 아니라 전임이 광고한 자기 watchdog 기한이다. 전임은 그 시각에 exit 124 로 반드시 죽고 lease fd 가 닫힌다. 후임은 `F_SETLKW` 로 그 순간 깨어나거나 기한에 `Predecessor_still_holds` 로 끝난다. 두 경우 모두 끝이 있다.
+- **"전임을 기다리다 영영 멈춘다"** — 기다림은 restart 가 종료를 요청한 뒤에만 쓴다. 종료를 요청받은 전임은 watchdog 기한에 exit 124 로 반드시 죽고 lease fd 가 닫히며, 후임은 그 순간 깨어난다. 종료를 요청하지 않은 플래그 없는 start 는 기다리지 않는다.
 - **"`Port_held_by {pid}` 는 OS 가 못 주는 정보를 약속한다"** — 그래서 생성자를 둘로 나눴다. pid 는 F_GETLK 가 준 것만 싣고, 못 주면 `Port_held_by_unknown_process` 다. pid 파일과 `lsof` 는 쓰지 않는다.
-- **"pid 를 안다고 죽일 권한이 생기는 건 아니다"** — 기동 경로는 아무에게도 시그널을 보내지 않는다. 종료 요청은 setup 이 운영자 로그인과 incarnation 일치를 확인한 뒤 SIGTERM 한 번만 보낸다. SIGKILL 경로는 지운다.
+- **"pid 를 안다고 죽일 권한이 생기는 건 아니다"** — 기동 경로는 아무에게도 시그널을 보내지 않는다. 종료 요청은 setup 과 restart 가 운영자 로그인과 incarnation 일치를 확인한 뒤 SIGTERM 한 번만 보낸다. SIGKILL 경로는 지운다.
 - **"운영자 파일을 왜 안 고쳐 주나"** — `.mcp.json` 과 터널 설정은 다른 도구의 설정 파일이라 masc 가 고쳐 쓰면 그 도구와 충돌한다. 대신 포트가 바뀌는 순간이 `Endpoint_changed` 한 건으로 남고, 바뀌는 길이 `--port` 하나라 운영자가 그 시각을 안다.
 - 헌법 forbidden: `magic_number` — 0.2초 × 25, 2^n × 5 를 지우고 남는 숫자는 전임이 광고한 기한 하나다. `string_matching` — `looks_like_server_command` 를 지운다. `budget_gate` — 기한은 누적 예산이 아니라 전임 프로세스의 종료 계약이고 재시도 횟수 상한은 없다. `greedy_shortcut` — 임시 포트 대체가 바로 이것이라 지운다. `hardcoded_path` — 파일 경로는 `Common.masc_dir_from_base_path` 로만 만든다. `env_var_sprawl` — env 는 `MASC_HTTP_PORT` 하나이고 영속되지 않는다. `legacy_residue` — `suggested_port`, `port_available`, `DEFAULT_MASC_PORT`, breadcrumb 를 남기지 않고 지운다. host 없는 옛 `connection.toml` 은 `Invalid_configuration` 이며 호환 reader 를 만들지 않는다. 운영자가 `--host --port` 를 한 번 주면 된다.
 - 헌법 invariants: `closed_sum_over_string` — 2.2·2.3 의 합타입이 전부이고 로그 줄은 그 생성자 이름의 투영이다. `strict_parse_no_default` — host 파싱 실패와 `--port 0` 은 오류이지 loopback·기본 포트가 아니다. `failure_keeps_evidence` — 거부는 파일을 안 바꾸고 로그 한 줄과 stderr JSON 을 남기며 전임을 소비하지 않는다.

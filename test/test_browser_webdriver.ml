@@ -243,6 +243,9 @@ let test_browser_configuration () =
   let parse text = match Otoml.Parser.from_string_result text with
     | Error detail -> fail detail | Ok toml -> Browser_configuration.parse toml in
   (match parse "" with Ok { Browser_configuration.automation = None; stagehand = None; _ } -> () | _ -> fail "missing browser config");
+  (* A table that is there names a Firefox to drive. *)
+  check bool "an automation table with no driver is refused" true
+    (Result.is_error (parse "[browser.automation]\n"));
   (match parse {|[browser]
 geckodriver = "/test/geckodriver"
 binary = "/test/Zen.app"
@@ -286,6 +289,65 @@ extension = "/test/extension"
    | Ok { Browser_configuration.automation = Some _;
           stagehand = Some { chrome = "/test/chrome"; extension = "/test/extension"; profile = None }; _ } -> ()
    | _ -> fail "both backends can be configured together")
+
+(* A browser worker starts its source from that source's table alone; with no
+   runtime.toml or no table for it, the source does not start. *)
+let test_a_source_starts_from_its_own_table () =
+  let module C = Browser_configuration in
+  let configuration = match Otoml.Parser.from_string_result {|[browser.automation]
+geckodriver = "/test/geckodriver"
+|} with
+    | Error detail -> fail detail
+    | Ok toml -> (match C.parse toml with Ok c -> c | Error detail -> fail detail) in
+  let start configuration backend source = Result.is_ok
+    (Masc.Lane_addon_runtime.For_testing.browser_source_table configuration ~backend source) in
+  check bool "automation starts from [browser.automation]" true
+    (start (Some configuration) Lane.Backend.Automation C.Automation);
+  check bool "Stagehand has no table, so it does not start" false
+    (start (Some configuration) Lane.Backend.Stagehand C.Stagehand);
+  check bool "with no runtime.toml nothing starts" false
+    (start None Lane.Backend.Automation C.Automation)
+
+(* A source's table path and the field it is read from name one table: a
+   file holding only the table at that path fills that field and no other. *)
+type any_source = Any_source : 'a Browser_configuration.source -> any_source
+
+let test_each_source_reads_the_table_at_its_path () =
+  let module C = Browser_configuration in
+  let keys = function
+    | Any_source C.Automation -> {|geckodriver = "/test/geckodriver"|}
+    | Any_source C.Stagehand -> "chrome = \"/test/chrome\"\nextension = \"/test/extension\""
+    | Any_source C.Live_bidi -> "firefox = \"/test/firefox\"\nprofile = \"/test/profile\""
+    | Any_source C.Live_ego -> "command = \"/test/ego-browser\"\nspace = \"keepers\"" in
+  let sources = [ Any_source C.Automation; Any_source C.Stagehand; Any_source C.Live_bidi
+                ; Any_source C.Live_ego ] in
+  let path (Any_source source) = C.source_path source in
+  let read (Any_source source) configuration = Option.is_some (C.source_table source configuration) in
+  List.iter (fun written ->
+      let configuration =
+        match Otoml.Parser.from_string_result (Printf.sprintf "[%s]\n%s\n" (path written) (keys written)) with
+        | Error detail -> fail detail
+        | Ok toml -> (match C.parse toml with Ok c -> c | Error detail -> fail detail) in
+      List.iter (fun source ->
+          check bool (Printf.sprintf "[%s] fills the field of [%s]" (path written) (path source))
+            (path source = path written) (read source configuration))
+        sources)
+    sources
+
+(* Whether a source runs is its Lane Add-on declaration's to say, so a
+   browser table takes no enabled key, and a table of nothing but one is not
+   read as no table. *)
+let test_a_browser_table_takes_no_enabled_key () =
+  let parse text = match Otoml.Parser.from_string_result text with
+    | Error detail -> fail detail
+    | Ok toml -> Browser_configuration.parse toml in
+  List.iter (fun (table, keys) ->
+      check bool (table ^ " refuses enabled") true
+        (Result.is_error (parse (Printf.sprintf "[%s]\n%senabled = true\n" table keys))))
+    [ "browser.automation", "geckodriver = \"/test/geckodriver\"\n"
+    ; "browser.stagehand", "chrome = \"/test/chrome\"\nextension = \"/test/extension\"\n"
+    ; "browser.live", ""
+    ; "browser.stagehand", "" ]
 
 (* A keeper's first question is whether a session already exists. Every other
    verb answers that only by being refused, which costs a lane round trip and
@@ -1306,4 +1368,7 @@ let () = run "native Firefox lane" ["behavior", [
   test_case "console read uses the tab's context" `Quick test_console_read_uses_the_tabs_context;
   test_case "cookie values never leave the driver module" `Quick test_cookie_values_never_leave_the_driver_module;
   test_case "browser configuration" `Quick test_browser_configuration;
+  test_case "a browser table takes no enabled key" `Quick test_a_browser_table_takes_no_enabled_key;
+  test_case "a source starts from its own table" `Quick test_a_source_starts_from_its_own_table;
+  test_case "each source reads the table at its path" `Quick test_each_source_reads_the_table_at_its_path;
   test_case "each session lets its profile go once" `Quick test_each_session_lets_its_profile_go_once ]]

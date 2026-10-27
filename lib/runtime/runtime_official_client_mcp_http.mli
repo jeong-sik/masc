@@ -10,9 +10,11 @@ type t
 type tool_response =
   { outcome : Runtime_official_client_mcp.tool_result
   ; after_response_sent : unit -> unit
+  ; stop : Runtime_official_client_tool.host_stop option
   }
-(** A completed tool outcome and the acknowledgement to run only after its
-    HTTP response body has been written and flushed. *)
+(** A completed tool outcome. [stop] closes new admission immediately after
+    the handler returns; previously reserved handlers still drain. The delivery
+    observer runs only after the full HTTP response write succeeds. *)
 
 val start :
   sw:Eio.Switch.t ->
@@ -20,6 +22,8 @@ val start :
   secure_random:Eio.Flow.source_ty Eio.Resource.t ->
   server_name:string ->
   tool_specs:(unit -> Yojson.Safe.t list) ->
+  tool_execution_mode:
+    (name:string -> arguments:Yojson.Safe.t -> Agent_core.Tool_contract.execution_mode option) ->
   call_tool:
     (name:string ->
      call_id:string ->
@@ -27,6 +31,14 @@ val start :
      tool_response option) ->
   unit ->
   t
+(** [tool_execution_mode] is the frozen producer contract for the exact tool
+    and arguments and must return without yielding. [None] means no such admitted tool and prevents its handler
+    from running. Concurrent calls may overlap; a Serial call waits for all
+    preceding calls and fences later calls until actual handler settlement.
+    Protocol validation and schedule reservation keep request admission order,
+    while no dispatch mutex is held over a tool handler or predecessor wait.
+    Cancelling a queued Serial call preserves its predecessors for followers;
+    it never releases their effect boundary early. *)
 
 type endpoint =
   { url : string
@@ -38,6 +50,14 @@ type endpoint =
     carry the turn's capability: anyone holding them can call every tool the
     bridge serves until the owning switch closes. Never log or persist this
     value; pass it only to the client process the turn spawns. *)
+
+val await_host_stop : t -> Runtime_official_client_tool.host_stop
+(** Wait until a stop-request response reaches its complete-write or failed-write
+    boundary, then drain every previously admitted handler reservation. Admission
+    closes when the first handler returns a stop; queued admitted work still runs.
+    New calls receive an explicit no-execution outcome. A later terminal failure
+    outranks an earlier successful/deferred stop. Waiting holds no dispatch lock.
+    A failed-write boundary never certifies response delivery or consumption. *)
 
 val endpoint : t -> endpoint
 (** The single source of the bridge's URL and header. {!mcp_config_json}
@@ -69,6 +89,8 @@ module For_testing : sig
     ; last_connection_error : string option
     ; listener_failure : string option
     ; negotiated_protocol_version : string option
+    ; retained_tool_reservations : int
+        (** Exact unresolved admitted requests; no completed history is retained. *)
     }
 
   val snapshot : t -> snapshot

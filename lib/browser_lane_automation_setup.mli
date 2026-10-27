@@ -69,10 +69,6 @@ val table : plan -> Browser_configuration.automation
 val change : plan -> change
 val location : plan -> location
 
-val lane_enabled : plan -> bool
-(** [\[browser.automation\] enabled] is not false. The server starts no
-    geckodriver while it is. The keys are written either way. *)
-
 val notes : plan -> string list
 (** Said when a program the operator named is there and did not answer
     [--version]: it is written as named and not verified. Also said for a value

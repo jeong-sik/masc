@@ -40,8 +40,8 @@ type 'a browser_reading =
   | Browser_addon_unavailable of string
 type state =
   | Exact_state of Server_standalone_lane_projection.lane_configuration
-  | Browser_clients of Browser_lane.activity * int browser_reading
-  | Browser_executor of Browser_lane.activity * bool browser_reading
+  | Browser_clients of int browser_reading
+  | Browser_executor of bool browser_reading
   | Machine_state of Machine_configuration.activity * machine_publication
   | Package_state of {
       declaration : declaration option;
@@ -59,10 +59,11 @@ type row = { id : string; label : string; purpose : string;
 type t
 val snapshot : config:Workspace.config -> t
 
-(** The browser Add-on reading the browser rows of {!snapshot} are made from,
-    for the browser lane check, as a reader with [access] sees it. It reads
-    the Lane directory off the server fiber and the Add-on's cached
-    observation on the owner domain. *)
+(** The live lane of the browser Add-on reading the browser rows of
+    {!snapshot} are made from, for the browser lane check, as a reader with
+    [access] sees it: the browser hosts polling this server register there.
+    It reads the Lane directory off the server fiber and the Add-ons' cached
+    observations on the owner domain. *)
 val browser_presence :
   config:Workspace.config -> access:Lane_addon_sources.access -> Browser_addon_presence.t
 val to_json : t -> Yojson.Safe.t
@@ -72,8 +73,7 @@ val to_json : t -> Yojson.Safe.t
 module For_testing : sig
   val machine_publication :
     (Lane_addon_runtime.export_observation option, Lane_addon_runtime.export_refusal) result -> machine_publication
-  val browser_state : activity:Browser_lane.activity -> Browser_addon_presence.t ->
-    Browser_lane.Lane_name.t -> state
+  val browser_state : Browser_addon_presence.t -> Browser_lane.Lane_name.t -> state
   val package_rows : declarations:Lane_addon_config.snapshot ->
     instances:Lane_addon_runtime.inventory_instance list ->
     applications:Lane_addon_runtime.configuration_application list ->

@@ -377,7 +377,9 @@ let comment_of_yojson (json : Yojson.Safe.t) : comment option =
    nonempty line so evidence readers cannot infer absence from partial data. *)
 let load_source_rows path ~decode ~accept =
   let first_error = ref None in
+  let rejected = ref 0 in
   let reject line reason =
+    incr rejected;
     if Option.is_none !first_error then
       first_error := Some (Printf.sprintf "%s: line %d: %s" path line reason) in
   Fs_compat.load_file path |> String.split_on_char '\n'
@@ -388,7 +390,28 @@ let load_source_rows path ~decode ~accept =
         | Some row -> accept row
         | None -> reject (index + 1) "invalid persisted row schema")
       | exception Yojson.Json_error _ -> reject (index + 1) "invalid JSON");
-  match !first_error with None -> Ok () | Some detail -> Error (path, Failure detail)
+  match !first_error with
+  | None -> Ok ()
+  | Some detail ->
+    let detail =
+      if !rejected > 1
+      then Printf.sprintf "%s (%d rows rejected)" detail !rejected
+      else detail in
+    Error (path, Failure detail)
+
+(* One owner for every "loaded N <noun>" line. A parse failure keeps the
+   rows accepted so far, so the Error arm says partial load at warn: the
+   old info line read as a clean load. *)
+let log_loaded ~noun ~loaded ~path ~elapsed = function
+  | Ok () ->
+    if loaded > 0
+    then Log.BoardLog.info "loaded %d %s from %s in %.3fs" loaded noun path elapsed
+    else Log.BoardLog.debug "loaded 0 %s from %s in %.3fs" noun path elapsed
+  | Error (_, cause) ->
+    let reason =
+      match cause with Failure detail -> detail | _ -> Printexc.to_string cause in
+    Log.BoardLog.warn "partial load: kept %d %s from %s in %.3fs: %s"
+      loaded noun path elapsed reason
 
 let record_load_result set result =
   set (match result with Ok _ -> Ok ()
@@ -441,9 +464,7 @@ let load_persisted_posts store =
       (match parsed with Ok () -> replace_loaded_posts store (List.rev !retained) | Error _ -> ());
       store.post_count := Hashtbl.length store.posts;
       let elapsed = Time_compat.now () -. t0 in
-      if !loaded > 0
-      then Log.BoardLog.info "loaded %d posts from %s in %.3fs" !loaded path elapsed
-      else Log.BoardLog.debug "loaded 0 posts from %s in %.3fs" path elapsed;
+      log_loaded ~noun:"posts" ~loaded:!loaded ~path ~elapsed parsed;
       Result.map (fun () -> !loaded) parsed
     end
     with
@@ -479,9 +500,7 @@ let load_persisted_comments store =
              incr loaded) in
       (match parsed with Ok () -> replace_loaded_comments store (List.rev !retained) | Error _ -> ());
       let elapsed = Time_compat.now () -. t0 in
-      if !loaded > 0
-      then Log.BoardLog.info "loaded %d comments from %s in %.3fs" !loaded path elapsed
-      else Log.BoardLog.debug "loaded 0 comments from %s in %.3fs" path elapsed;
+      log_loaded ~noun:"comments" ~loaded:!loaded ~path ~elapsed parsed;
       Result.map (fun () -> !loaded) parsed
     end
     with

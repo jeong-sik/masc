@@ -19,8 +19,8 @@ let unavailable_to_wire = function
   | Worker_unavailable _ -> "browser_addon_worker_unavailable"
   | Worker_refused _ -> "browser_addon_worker_refused"
 let unavailable_message = function
-  | No_addon -> "no browser Add-on is attached"
-  | Ambiguous_addons -> "multiple browser Add-ons are attached; native host selection is ambiguous"
+  | No_addon -> "no attached browser Add-on serves external native hosts"
+  | Ambiguous_addons -> "more than one attached browser Add-on serves external native hosts; native host selection is ambiguous"
   | Observation_unavailable -> "original browser Add-on observation is unavailable"
   | Addon_unavailable -> "original browser Add-on is temporarily unavailable"
   | Registration_unconfirmed detail -> "browser registration unconfirmed: " ^ detail
@@ -58,7 +58,11 @@ let for_poll ~config ~client =
   match instance with
   | Some instance -> service ~config ~purpose:Polling instance
   | None ->
-      let* selected=match R.browser_services ~config ~access with
+      (* A native host's first poll binds it to the one service that serves
+         external hosts; the other browser services are not asked. *)
+      let* selected=match List.filter (fun (service:R.browser_service) ->
+          service.backend = Browser_lane.Backend.External_host)
+          (R.browser_services ~config ~access) with
         | [selected] -> Ok selected
         | [] -> Error (Unavailable No_addon)
         | _::_::_ -> Error (Unavailable Ambiguous_addons) in

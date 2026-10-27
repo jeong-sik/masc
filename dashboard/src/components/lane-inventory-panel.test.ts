@@ -155,26 +155,25 @@ describe('operator Lane inventory', () => {
     expect(detail.getByText('Worker observation unavailable')).toBeTruthy()
     expect(api.fetchLaneInventory).toHaveBeenCalledTimes(1)
   })
-  it('shows browser off and unavailable without losing executor or live observations', async () => {
+  it('carries each browser row\'s Add-on reading into its details', async () => {
     const raw = structuredClone(fixture)
-    const automation = raw.rows.find(item => item.id === 'browser/automation')!
-    const stagehand = raw.rows.find(item => item.id === 'browser/stagehand')!
-    const live = raw.rows.find(item => item.id === 'browser/live')!
-    Object.assign(automation.state, { activity: 'off', addon: { kind: 'observed', registered: true } })
-    Object.assign(stagehand.state, { activity: 'unobserved', addon: { kind: 'observed', registered: true } })
-    Object.assign(live.state, { activity: 'off', addon: { kind: 'observed', connected_clients: 2 } })
-    api.fetchLaneInventory.mockResolvedValue(parseLaneInventory(raw))
+    const readings: Record<string, object> = {
+      'browser/automation': { kind: 'observed', registered: true },
+      'browser/stagehand': { kind: 'off' },
+      'browser/live': { kind: 'observed', connected_clients: 2 },
+    }
+    for (const [id, addon] of Object.entries(readings)) Object.assign(raw.rows.find(item => item.id === id)!.state, { addon })
+    const inventory = parseLaneInventory(raw)
+    api.fetchLaneInventory.mockResolvedValue(inventory)
     const screen = render(html`<${LaneInventoryPanel} />`)
-    fireEvent.click(await screen.findByRole('button', { name: `Inspect ${automation.label}` }))
-    expect(screen.getAllByText('Off · configuration and sessions retained').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('Executor registered · session activity unverified').length).toBeGreaterThan(0)
-    expect(screen.getAllByText(/Status and close remain available while off/).length).toBeGreaterThan(0)
-    fireEvent.input(screen.getByRole('searchbox'), { target: { value: 'browser/stagehand' } })
-    fireEvent.click(screen.getByRole('button', { name: `Inspect ${stagehand.label}` }))
-    expect(screen.getAllByText('Activity configuration unavailable').length).toBeGreaterThan(0)
-    fireEvent.input(screen.getByRole('searchbox'), { target: { value: 'browser/live' } })
-    fireEvent.click(screen.getByRole('button', { name: `Inspect ${live.label}` }))
-    expect(screen.getAllByText('2 connected clients').length).toBeGreaterThan(0)
+    const browsers = inventory.rows.filter(item => item.selection.kind === 'browser')
+    expect(browsers).toHaveLength(Object.keys(readings).length)
+    for (const row of browsers) {
+      fireEvent.input(await screen.findByRole('searchbox'), { target: { value: row.id } })
+      fireEvent.click(await screen.findByRole('button', { name: `Inspect ${row.label}` }))
+      const shown = screen.getByRole('region', { name: `Details for ${row.label}` }).querySelector('pre')
+      expect(JSON.parse(shown?.textContent ?? 'null')).toEqual({ kind: row.state.kind, addon: readings[row.id] })
+    }
     expect(api.fetchLaneInventory).toHaveBeenCalledTimes(1)
   })
   it('searches all families and offers existing owner destinations without inventing controls', async () => {

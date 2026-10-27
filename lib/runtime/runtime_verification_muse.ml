@@ -36,13 +36,15 @@ let run ~secure_random ~net ~mgr ~clock ~cwd ~directory ~account_home ~quota_sco
         ~tool_specs:(fun () -> [`Assoc [
           "name", `String tool.Runtime_official_client_tool.name;
           "description", `String tool.description; "inputSchema", tool.input_schema]])
+        ~tool_execution_mode:(fun ~name ~arguments ->
+          if String.equal name tool.name then Some (tool.execution_mode arguments) else None)
         ~call_tool:(fun ~name ~call_id ~arguments ->
           if not (String.equal name tool.name) then None else
           let result = tool.call ~call_id arguments in
           Some { Runtime_official_client_mcp_http.outcome =
             { Runtime_official_client_mcp.success = result.success;
               content = result.content; content_blocks = result.content_blocks };
-            after_response_sent = (fun () -> ()) }) () in
+            stop = None; after_response_sent = (fun () -> ()) }) () in
       let { Runtime_official_client_mcp_http.url; headers } =
         Runtime_official_client_mcp_http.endpoint bridge in
       let mcp_servers = [{ Runtime_muse_serve.name = "masc";

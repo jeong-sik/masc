@@ -72,6 +72,8 @@ The command palette is `:`.
 | Keys | What it does |
 |---|---|
 | `j/k` | move the roster cursor |
+| `v` | cycle compact / detailed / grouped |
+| `o` | cycle priority / recent / name |
 | `Right / Enter` | keeper detail |
 | `c` | chat with the keeper |
 | `l` | logs |
@@ -207,6 +209,7 @@ data and paint. A missing finish record remains an unfinished observation.
 | `w` | write a post |
 | `v / V` | press twice to vote: v up, V down; while reading, on the selected comment when the comments have focus, otherwise on the post |
 | `c` | reply (while reading) |
+| `1–9` | read a stored File/Score here; u:source m:Markdown h:HTML y:copy s:save r:retry Esc:post. Other media use their existing action. |
 | `S` | follow the closed post's recorded successor; Esc returns to this post |
 | `[ / ]` | while reading, open the post before or after this one |
 | `s` | cycle hot / trending / recent / updated / discussed |
@@ -355,6 +358,9 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `j/k` | on the Items tab: preview |
 | `PgUp/PgDn` | on the Items tab: page |
 | `Home/End` | on the Items tab: first/last |
+| `v` | on the Items tab: all, owned, can buy, then face/neck/head/hand/base |
+| `Space` | on the Items tab: compare the try-on picture with the current outfit |
+| `a` | on the Items tab: prepare a price-bounded buy/equip chat draft; Enter sends it |
 | `o` | on the Sandbox tab: actual logs |
 | `d/m/s` | on the Sandbox tab: set the sandbox backend in place: docker / microvm / remote_ssh |
 | `PgUp/PgDn` | on the Sandbox tab: detail page |
@@ -393,6 +399,7 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `Ctrl-G` | next keeper with a chat open |
 | `Ctrl-U` | clear the draft |
 | `Ctrl-K / Ctrl-P` | cancel / edit the last queued line |
+| `F9` | fold or expand this Keeper's scheduled Jobs, pending occurrences, holds and latest result |
 | `Ctrl-T` | inspect and manage waiting turns |
 | `PgUp/PgDn` | scroll history by a page |
 | `Ctrl-R` | cycle reasoning hidden / folded / full |
@@ -444,7 +451,7 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `i` | read inventory problems without hiding the Lane list |
 | `Right / Enter` | open exact runs, the selected Browser or machine, or a package configuration/instance |
 | `a` | add a candidate to the selected exact-output lane's walk order |
-| `Space` | open Exact, Browser or machine activity settings; Space changes the draft, s saves explicitly; Required Exact lanes cannot be off |
+| `Space` | open Exact or machine activity settings; Space changes the draft, s saves explicitly; Required Exact lanes cannot be off |
 | `s` | edit the model order: r replaces the selected model/effort, a adds a fallback, 1 makes it first within its HTTP/CLI group, x removes, J/K reorders, Enter/d opens the selected slot's config table, e opens the lane table, Esc closes; HTTP runs before CLI |
 | `e` | open this lane's runtime.exact_output_lanes section in the preview-checked runtime.toml editor; slots is a catalog-ref array and cli_slots an official-client runtime-id array, either may be left out, and an enabled lane needs one slot across the two |
 | `[ / ]` | on a Lane Add-on package row, choose one of its exact outputs; the preview lists each with its binding: bound, unbound, off, or a table the package does not declare. e then opens that output's runtime.addon_exact_lanes table, or says runtime.toml has none yet |
@@ -478,7 +485,6 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `R` | only when the blocked row is safely rearmable |
 | `a` | open the selected question, from a Keeper or a Lane Add-on installation, in its own mode; Esc leaves it |
 | `g` | after answering an installation's question, open that installation's Results in Plugins, where the reveal appears |
-| `T` | while browsing Approvals, inspect the last answered Ask's canonical original Task; `o` reads Task, `h/H` stored history, `v` the next observed verification submission, `r` refreshes that exact source, `b` shows Ask origin facts, `Esc` closes |
 | `o / O` | o shows the question source; O opens that immutable turn's retained input. With no open question use the last answer's source. Esc returns to the question draft; a missing source is never replaced by the Keeper's latest turn |
 | `[ / ]` | while browsing or answering a question, move to the previous or next ask; with an approval detail open, move to the previous or next approval |
 | `w` | choose manual, Auto Judge or allow-all; Enter applies, Esc cancels |
@@ -499,18 +505,6 @@ complete Ask and its answers. The preview does not select or submit an answer;
 the existing answer reader keeps the full prompt, choices and draft. With only
 one content row, the selected preview takes that row; with none, no extra hidden
 count is drawn beyond the available space.
-
-Answer follow-up reads show the reason when interrupted or incomplete alongside
-any received source observations. A cancelled read releases its original reading
-state when its outcome is admitted, allowing the next read to start. Failed,
-cancelled, unstarted and withdrawn reads retain distinct outcomes; leaving a
-completed reading preserves that original outcome. Original Task status and stored evidence remain independently observed.
-
-Follow-up diagnostic records retain the original TUI instance and workspace,
-plus client version and server identity observed when that read was admitted.
-Later health refreshes preserve each earlier read's recorded origin. These
-metadata describe the observation context; installed-binary and response-serving
-identity require their own evidence when comparing runs.
 
 ## Work / Task Review
 
@@ -626,7 +620,7 @@ identity require their own evidence when comparing runs.
 | `Shift-Left / Shift-Right` | with a file open, scroll it sideways one cell at a time |
 | `/` | jump the cursor to a match: the tree, or the open file's lines |
 | `n / N` | next / previous match |
-| `K` | ask the language server what a name on the cursor line is (one name asks at once; several open the palette as choices) |
+| `K` | ask the language server what a name on the cursor line is (one name asks at once; several open the palette as choices); read the complete answer with j/k or paging, Esc returns to code |
 | `R` | ask the language server where a name on the cursor line is used; needs the project's reference index, and says which command builds it when there is none |
 | `D` | jump to where a name on the cursor line is defined (one name jumps at once; several open the palette as choices) |
 | `B` | walk back through the definition jumps, newest first |
@@ -688,6 +682,13 @@ identity require their own evidence when comparing runs.
 
 | Keys | What it does |
 |---|---|
+| `f` | cycle all resources, artifacts, Markdown and HTML |
+| `c` | explicitly toggle shared confirmation for the selected exact report revision |
+| `u` | select the next unchecked report in this format/day scope; open it when the reader is focused |
+| `t` | toggle the local publication day captured at this keypress |
+| `w` | switch full-width list/reader and side-by-side browsing |
+| `v` | show the document or its original text syntax; copied bytes stay original |
+| `i` | expand the URI, type, size and complete report metadata |
 | `j/k` | move the list; with the text focused, scroll it |
 | `h/l` | focus the resource list or text |
 | `Ctrl-W` | cycle the resource list, the text, and the Activity pane when it is drawn |
@@ -697,9 +698,11 @@ identity require their own evidence when comparing runs.
 | `Home/End` | the first or last resource, or the ends of the text when it is focused |
 | `Enter` | read the selected resource |
 | `{ / }` | read the adjacent published report revision from its validated history |
-| `, / .` | select the previous or next image part in the loaded resource |
-| `Ctrl-O` | open the selected image from the retained resource bytes |
+| `, / .` | select the previous or next image or Mermaid diagram in the loaded resource |
+| `Ctrl-O` | open the selected image or Pele diagram from the retained resource bytes |
 | `( / )` | select the previous or next original text part for copying |
+| `s` | choose a local destination; exclusively create the selected report revision's exact bytes |
+| `o` | open the selected fixed report revision; the browser uses its own authentication |
 | `y` | send the selected text part's original bytes via OSC 52; terminal support is unconfirmed |
 | `Esc` | the text hands back to the list; the list leaves for System |
 | `/` | find a resource name in the list, or text in the loaded detail |
@@ -715,12 +718,14 @@ identity require their own evidence when comparing runs.
 | `Home/End` | top/bottom |
 | `p` | available / async runs / receipts / usage / all tools |
 | `J/K` | in async runs, select an original request; otherwise select a published Skill |
+| `f` | outside async requests, select the next Composition and load its exact-revision performance charts |
+| `Ctrl-O` | outside async requests, preview the declared composition with Pele |
 | `[ / ]` | change the effective Keeper surface |
 | `c / C` | open $EDITOR on a template for a new Skill; c starts an instruction Skill, C starts a composition Skill |
 | `e` | open the selected SKILL.md in $EDITOR, validate, CAS-save, and publish |
 | `Esc` | return from original Task to request, then request to list; otherwise back to the System surface it hangs off |
 | `r` | refresh the open original Task body/history, original request detail, or Tools list |
-| `Enter` | in async runs, read the selected original request |
+| `Enter` | in async runs, read the selected original request; otherwise load retained evidence for the selected Skill |
 | `t / T` | from async request detail, read its original source Task and history |
 | `H` | from original Task detail, read earlier stored history; retains the observed prefix on failure |
 | `o / O` | in async runs, edit the original submitter, request ID and target Keeper for an exact lookup |
@@ -743,6 +748,7 @@ or completion.
 
 | Keys | What it does |
 |---|---|
+| `o` | switch between server logs and this TUI's own observations |
 | `e` | Events |
 | `j/k` | move / scroll |
 | `PgUp/PgDn` | detail page |

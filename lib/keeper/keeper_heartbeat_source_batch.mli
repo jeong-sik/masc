@@ -3,7 +3,17 @@
 type t
 val empty : t
 val of_selections : Keeper_event_queue_state.pending_selection list -> t
+val of_intake :
+  pending:Keeper_event_queue_state.pending_selection list ->
+  admitted:Keeper_event_queue_state.pending_selection list -> t
+(** Preserve the exact pending frontier from the same intake read that selected
+    [admitted]. Unadmitted backlog is observation only; it gains no execution or
+    acknowledgement authority. It lets a running source distinguish later
+    arrivals without repeatedly yielding to the existing bounded backlog. *)
 val selections : t -> Keeper_event_queue_state.pending_selection list
+val pending_at_intake : t -> Keeper_event_queue_state.pending_selection list
+(** The immutable frontier observed before provider dispatch. [of_selections]
+    knows only those supplied selections and uses them as its frontier. *)
 val stimuli : t -> Keeper_event_queue.stimulus list
 val count : t -> int
 val first : t -> Keeper_event_queue_state.pending_selection option

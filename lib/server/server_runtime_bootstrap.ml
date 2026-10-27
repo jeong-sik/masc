@@ -1101,6 +1101,7 @@ let initialize_owner_state_blocking
       domain_mgr
   in
   install_domain_pool_references domain_pool;
+  Systhread_host.start ();
   (match Runtime_agent_execution_runtime.initialize ~sw ~domain_mgr
       ~domain_count:(Domain_pool.domain_count domain_pool) with
    | Ok () ->
@@ -1556,7 +1557,6 @@ let activate_owner_state
       (initialized : initialized_owner_state)
   =
   let state = initialized.state in
-  Server_browser_configuration.install_activity_observer ~sw;
   (* Establish the complete barrier before the irreversible ownership commit.
      Gate restore, claim, and start stay ordered inside one transport-neutral
      function. Each composition root publishes readiness only after its own
@@ -1589,7 +1589,7 @@ let activate_owner_state
   }
 ;;
 
-let run ~sw ~env ~host ~port ~base_path ?input_base_path ?on_ready ~accept_store_quarantine
+let run ~sw ~env ~address ~port ~base_path ?input_base_path ?on_ready ~accept_store_quarantine
     ~make_routes ~make_request_handler ~make_h2_request_handler ~make_h2_error_handler () =
   let resolved_auth_config =
     match Server_auth_config.resolve (Server_auth_config.read_env ()) with
@@ -1622,7 +1622,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ?on_ready ~accept_store
   Web_dashboard.log_bundle_freshness_warning ();
   Rate_limit.start_global_cleanup_loop ~sw ~clock;
   (* 1. HTTP socket first — Railway healthcheck can reach /health immediately *)
-  let config = Server_bootstrap_http.make_http_config ~host ~port in
+  let config = Server_bootstrap_http.make_http_config ~address ~port in
   (* The listener identity comes only from the effective CLI/bootstrap config
      above.  A public identity is additional trust only when the operator
      explicitly configured MASC_HTTP_BASE_URL; deriving it again from env
@@ -2110,7 +2110,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ?on_ready ~accept_store
       Eio.Switch.run (fun serving_sw ->
         Eio_context.with_turn_switch serving_sw (fun () ->
           let socket =
-            Server_bootstrap_http.listen_socket ~sw:serving_sw ~net config
+            Server_bootstrap_http.listen_socket ~sw:serving_sw ~net ~address config
           in
           let routes =
             make_routes ~port:config.port ~host:config.host ~sw:serving_sw ~clock
@@ -2134,7 +2134,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ?on_ready ~accept_store
             ~h2_request_handler
             ~h2_error_handler))))
   else (
-    let socket = Server_bootstrap_http.listen_socket ~sw ~net config in
+    let socket = Server_bootstrap_http.listen_socket ~sw ~net ~address config in
     let routes = make_routes ~port:config.port ~host:config.host ~sw ~clock in
     let request_handler =
       make_request_handler ~trust_policy:request_trust_policy routes

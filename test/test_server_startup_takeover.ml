@@ -168,6 +168,154 @@ let test_base_path_lock_reports_a_recorded_owner_that_is_gone () =
            ignore (Unix.write_substring release_write "1" 0 1 : int);
            ignore (Unix.waitpid [] child_pid : int * Unix.process_status)))
 
+(* An owner child that takes the lease, says so on [ready], and exits on its
+   own once it reads a byte from [release]. *)
+let spawn_lease_owner ~run_dir base_path =
+  let ready_read, ready_write = Unix.pipe () in
+  let release_read, release_write = Unix.pipe () in
+  match Unix.fork () with
+  | 0 ->
+    close_quietly ready_read;
+    close_quietly release_write;
+    (match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
+     | Server_startup_takeover.Base_path_acquired _ ->
+       ignore (Unix.write_substring ready_write "1" 0 1 : int);
+       let buffer = Bytes.create 1 in
+       ignore (Unix.read release_read buffer 0 1 : int);
+       Unix._exit 0
+     | Server_startup_takeover.Base_path_already_owned _ -> Unix._exit 2
+     | Server_startup_takeover.Base_path_rejected _ -> Unix._exit 3)
+  | owner_pid ->
+    close_quietly ready_write;
+    close_quietly release_read;
+    let buffer = Bytes.create 1 in
+    Alcotest.(check int) "owner acquired the lease" 1
+      (Unix.read ready_read buffer 0 1);
+    close_quietly ready_read;
+    (owner_pid, release_write)
+
+let owner_exited_on_its_own owner_pid =
+  match waitpid_nointr owner_pid with
+  | Some (_, Unix.WEXITED 0) -> ()
+  | Some (_, _) -> Alcotest.fail "the owner did not exit on its own"
+  | None -> Alcotest.fail "the owner was reaped elsewhere"
+
+(* Locks are not inherited across fork, and this probe asks the kernel
+   directly, not this process's lease table. *)
+let lease_is_held_in_the_kernel ~run_dir base_path =
+  let lease_path =
+    Server_startup_takeover.For_testing.lease_path
+      ~run_dir:(Unix.realpath run_dir)
+      ~canonical_base_path:(Unix.realpath base_path)
+  in
+  match Unix.fork () with
+  | 0 ->
+    let fd = Unix.openfile lease_path [ Unix.O_RDWR ] 0o600 in
+    (match Unix.lockf fd Unix.F_TLOCK 0 with
+     | () -> Unix._exit 1
+     | exception Unix.Unix_error ((Unix.EACCES | Unix.EAGAIN), _, _) -> Unix._exit 0
+     | exception Unix.Unix_error _ -> Unix._exit 2)
+  | probe_pid ->
+    (match waitpid_nointr probe_pid with
+     | Some (_, Unix.WEXITED 0) -> true
+     | Some (_, _) | None -> false)
+
+(* The owner is told to leave only from inside [on_wait], so the wait is
+   proven to start while the lease is held and to end when the owner's exit
+   closes its descriptor. The owner exits on its own; a zero status shows
+   the waiting side sent it no signal. *)
+let test_waiting_acquisition_takes_the_lease_when_the_owner_exits () =
+  with_base_and_run "startup-takeover-base-path-wait"
+    (fun ~base_path ~run_dir ->
+    let owner_pid, release_owner = spawn_lease_owner ~run_dir base_path in
+    Fun.protect
+      ~finally:(fun () ->
+        close_quietly release_owner;
+        if process_alive owner_pid then stop_process owner_pid)
+      (fun () ->
+         let heard = ref [] in
+         let on_wait owner =
+           heard := owner :: !heard;
+           ignore (Unix.write_substring release_owner "1" 0 1 : int)
+         in
+         (match
+            Server_startup_takeover.acquire_base_path_lock_after_owner_exits
+              ~run_dir ~on_wait base_path
+          with
+          | Ok (Server_startup_takeover.Base_path_acquired lease) ->
+            Alcotest.(check bool) "the granted lease is held in the kernel" true
+              (lease_is_held_in_the_kernel ~run_dir base_path);
+            Server_startup_takeover.release_base_path_lease lease
+          | Ok (Server_startup_takeover.Base_path_already_owned _) ->
+            Alcotest.fail "the waiting acquisition returned instead of waiting"
+          | Ok (Server_startup_takeover.Base_path_rejected rejection) ->
+            Alcotest.failf "valid BasePath was rejected: %s"
+              (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
+          | Error (Server_startup_takeover.Another_replacement_waits _) ->
+            Alcotest.fail "a lone waiter was refused as a second one");
+         Alcotest.(check bool) "on_wait heard the recorded owner once" true
+           (match !heard with
+            | [ Server_startup_takeover.Owner_recorded pid ] -> pid = owner_pid
+            | _ -> false);
+         owner_exited_on_its_own owner_pid))
+
+(* While one replacement waits, a second is refused at once rather than
+   queued behind whichever process gets the lease next. The first waiter
+   reports through a pipe from its own [on_wait], so the second attempt is
+   made only while the first is known to wait. *)
+let test_a_second_waiter_is_refused_while_one_waits () =
+  with_base_and_run "startup-takeover-base-path-second-waiter"
+    (fun ~base_path ~run_dir ->
+    let owner_pid, release_owner = spawn_lease_owner ~run_dir base_path in
+    let waiting_read, waiting_write = Unix.pipe () in
+    match Unix.fork () with
+    | 0 ->
+      close_quietly waiting_read;
+      close_quietly release_owner;
+      let on_wait _ = ignore (Unix.write_substring waiting_write "W" 0 1 : int) in
+      (match
+         Server_startup_takeover.acquire_base_path_lock_after_owner_exits
+           ~run_dir ~on_wait base_path
+       with
+       | Ok (Server_startup_takeover.Base_path_acquired _) -> Unix._exit 0
+       | Ok _ | Error _ -> Unix._exit 4)
+    | waiter_pid ->
+      close_quietly waiting_write;
+      Fun.protect
+        ~finally:(fun () ->
+          close_quietly waiting_read;
+          close_quietly release_owner;
+          if process_alive waiter_pid then stop_process waiter_pid;
+          if process_alive owner_pid then stop_process owner_pid)
+        (fun () ->
+           let buffer = Bytes.create 1 in
+           Alcotest.(check int) "the first waiter is waiting" 1
+             (Unix.read waiting_read buffer 0 1);
+           (match
+              Server_startup_takeover.acquire_base_path_lock_after_owner_exits
+                ~run_dir
+                ~on_wait:(fun _ -> Alcotest.fail "the second waiter started to wait")
+                base_path
+            with
+            | Error (Server_startup_takeover.Another_replacement_waits { waiter; _ }) ->
+              Alcotest.(check bool) "the refusal names the first waiter" true
+                (match waiter with
+                 | Server_startup_takeover.Owner_recorded pid -> pid = waiter_pid
+                 | Server_startup_takeover.Owner_this_process _
+                 | Server_startup_takeover.Owner_unnamed -> false)
+            | Ok (Server_startup_takeover.Base_path_acquired lease) ->
+              Server_startup_takeover.release_base_path_lease lease;
+              Alcotest.fail "the second waiter took the lease"
+            | Ok (Server_startup_takeover.Base_path_already_owned _)
+            | Ok (Server_startup_takeover.Base_path_rejected _) ->
+              Alcotest.fail "the second waiter was not refused as a waiter");
+           ignore (Unix.write_substring release_owner "1" 0 1 : int);
+           owner_exited_on_its_own owner_pid;
+           match waitpid_nointr waiter_pid with
+           | Some (_, Unix.WEXITED 0) -> ()
+           | Some (_, _) | None ->
+             Alcotest.fail "the first waiter did not take the lease after the owner"))
+
 let test_base_path_lock_rejects_concurrent_lease () =
   with_base_and_run "startup-takeover-base-path-live"
     (fun ~base_path ~run_dir ->
@@ -1256,6 +1404,10 @@ let () =
         [
           Alcotest.test_case "concurrent BasePath lease blocks takeover" `Quick
             test_base_path_lock_rejects_concurrent_lease;
+          Alcotest.test_case "a waiting start takes the lease when the owner exits"
+            `Quick test_waiting_acquisition_takes_the_lease_when_the_owner_exits;
+          Alcotest.test_case "a second waiter is refused while one waits"
+            `Quick test_a_second_waiter_is_refused_while_one_waits;
           Alcotest.test_case "a recorded owner that is gone is named as stale"
             `Quick test_base_path_lock_reports_a_recorded_owner_that_is_gone;
           Alcotest.test_case "stale base-path owner is reclaimed" `Quick

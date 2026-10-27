@@ -1,5 +1,9 @@
 let script = {js|async function nativeWorkflow(page, args) {
   const completed = [];
+  // These strings are evaluated only by the SDK's browser Page channel.
+  // Never eval, import, or compile a caller's source in this Node process.
+  const pageExpression = step => step.argumentJson === undefined ? step.source
+    : '(' + step.source + ')(JSON.parse(' + JSON.stringify(step.argumentJson) + '))';
   let effectStarted = false, completedEffect = false;
   const failure = (index, method, error, extra = {}) => ({
     completed, effectStarted, completedEffect,
@@ -13,7 +17,7 @@ let script = {js|async function nativeWorkflow(page, args) {
   for (let index = 0; index < args.steps.length; index++) {
     const step = args.steps[index];
     const options = step.timeoutMs === undefined ? {} : {timeout: step.timeoutMs};
-    let receipt = null, effect = false;
+    let receipt = null, effect = false, pageResult = false;
     try {
       switch (step.method) {
         case 'click': effect = effectStarted = true; receipt = await page.click(step.selector, {...options, label: args.cursor}); break;
@@ -38,6 +42,20 @@ let script = {js|async function nativeWorkflow(page, args) {
         case 'waitForURL': await page.waitForURL(step.url, options); break;
         case 'waitForSelector': await page.waitForSelector(step.selector, {...options, state: step.state}); break;
         case 'waitForLoadState': await page.waitForLoadState(step.state, options); break;
+        case 'evaluate': {
+          const expression = pageExpression(step);
+          effect = effectStarted = pageResult = true;
+          receipt = await page.evaluate(expression); break;
+        }
+        case 'waitForFunction': {
+          const expression = pageExpression(step);
+          effect = effectStarted = pageResult = true;
+          receipt = await page.waitForFunction(expression, undefined,
+            {...options, ...(step.pollingMs === undefined ? {} : {polling:step.pollingMs})}); break;
+        }
+        case 'fetch':
+          effect = effectStarted = pageResult = true;
+          receipt = await page.fetch(step.url, {...step.fetchOptions, ...options}); break;
         default: return failure(index, step.method, 'unsupported native Page method');
       }
     } catch (error) { return failure(index, step.method, error); }
@@ -45,8 +63,8 @@ let script = {js|async function nativeWorkflow(page, args) {
     completed.push({index, method: step.method, receipt: receipt ?? null});
     // Keyboard methods return no action receipt. Their input handlers can still
     // open a dialog, so observe it before dispatching the next operation.
-    let dialog = receipt?.dialog;
-    if (effect && receipt == null) {
+    let dialog = pageResult ? null : receipt?.dialog;
+    if (effect && (receipt == null || pageResult)) {
       try { dialog = (await page.info()).dialog; }
       catch (error) { return failure(index + 1, 'observation', error); }
     }

@@ -429,7 +429,7 @@ let dispatch_tool ~execution_mode ~call_effect call : Runtime_codex_app_server.d
 ;;
 
 let tool_response content : Runtime_codex_app_server.dynamic_tool_result =
-  {success = true; content; content_blocks = None; abort_turn = None}
+  {success = true; content; content_blocks = None; abort_turn = None; on_response_sent = None}
 ;;
 
 let before_fixture_terminal path requests =
@@ -504,6 +504,7 @@ let run_undelivered_fixture ?(queued_effect = false) ?(provider_error = false) ?
   let started, signal_started = Eio.Promise.create () in
   let closed, signal_closed = Eio.Promise.create () in
   let effects = ref 0 in
+  let response_writes = ref 0 in
   let tool = dispatch_tool
     ~execution_mode:(fun input ->
       if Yojson.Safe.Util.(input |> member "step" |> to_int) = 2
@@ -514,7 +515,8 @@ let run_undelivered_fixture ?(queued_effect = false) ?(provider_error = false) ?
       Eio.Promise.resolve signal_started ();
       Eio.Promise.await closed;
       incr effects;
-      tool_response "persisted-effect-receipt") in
+      { (tool_response "persisted-effect-receipt") with
+        on_response_sent = Some (fun () -> incr response_writes) }) in
   with_fixture ~await_dynamic_tools:false
     ([init_result; account_chatgpt; thread_result; turn_result; dispatch_request 1 1]
       @ (if queued_effect then [dispatch_request 2 2] else [])
@@ -537,6 +539,7 @@ let run_undelivered_fixture ?(queued_effect = false) ?(provider_error = false) ?
         | _ -> () in
       let result = run_fixture ~dynamic_tools:[tool] ~on_stream_event
         ~on_undelivered_tool_result:retain path in
+      check int "buffered original was not written after vendor close" 0 !response_writes;
       check int "effect is executed once" 1 !effects;
       match eof, provider_error, result with
       | false, false, Ok _ -> ()
@@ -621,7 +624,9 @@ let native_command_completed =
   {|{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","completedAtMs":2,"item":{"type":"commandExecution","id":"native-command-1","command":"pwd","commandActions":[],"cwd":"/tmp","status":"completed","aggregatedOutput":"/tmp"}}}|}
 ;;
 
-let test_dynamic_tool_callback ?(worker_pool = false) () =
+let test_dynamic_tool_callback ?(worker_pool = false) ?(content = "MASC_TOOL_RESULT")
+    ?content_blocks ?(expected_writes = 1) ?(observer_raises = false) () =
+  let response_writes = ref 0 in
   let owner = Domain.self () in
   let call_id = ref None in
   let arguments = ref `Null in
@@ -645,7 +650,10 @@ let test_dynamic_tool_callback ?(worker_pool = false) () =
             (Domain.self () = owner);
           call_id := Some id;
           arguments := input;
-          { success = true; content = "MASC_TOOL_RESULT"; content_blocks = None; abort_turn = None })
+          { success = true; content; content_blocks; abort_turn = None;
+            on_response_sent = Some (fun () ->
+              incr response_writes;
+              if observer_raises then invalid_arg "delivery fixture observer failure") })
     }
   in
   with_fixture
@@ -663,11 +671,17 @@ let test_dynamic_tool_callback ?(worker_pool = false) () =
          run_fixture
            ~worker_pool
            ~dynamic_tools:[ tool ]
-           ~on_stream_event:(fun event -> stream_events := event :: !stream_events)
+           ~on_stream_event:(fun event ->
+             (match event with
+              | Runtime_codex_app_server.Dynamic_tool_finished _ ->
+                check int "settled worker has not written its buffered result" 0 !response_writes
+              | _ -> ());
+             stream_events := event :: !stream_events)
            path
        with
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
        | Ok result ->
+         check int "only the exact projectable response records its complete write" expected_writes !response_writes;
          check int "measured tool calls" 1 result.dynamic_tool_calls;
          check (option string) "call id" (Some "call-1") !call_id;
          check string
@@ -691,6 +705,52 @@ let test_dynamic_tool_callback ?(worker_pool = false) () =
               (Yojson.Safe.to_string arguments)
           | _ -> fail "Codex live stream events were not projected in wire order"))
 ;;
+
+let test_buffered_response_observer_interrupt_keeps_typed_cause () =
+  let effects = ref 0 and response_writes = ref 0 and worker_settled = ref false in
+  let undelivered = ref [] in
+  let tool = dispatch_tool
+      ~execution_mode:(fun _ -> Agent_core.Tool_contract.Serial)
+      ~call_effect:(fun _ -> Agent_core.Tool.Effect_possible)
+      (fun ~call_id:_ _ ->
+        incr effects;
+        { (tool_response "ORIGINAL_WRITTEN_RESULT") with
+          on_response_sent = Some (fun () ->
+            incr response_writes;
+            check bool "interrupt observer follows buffered worker settlement" true !worker_settled;
+            raise Keeper_registry_types.Operator_interrupt) }) in
+  with_fixture [init_result; account_chatgpt; thread_result; turn_result;
+    tool_call_request; item_completed; turn_completed] (fun path ->
+    let outcome =
+      try `Returned (run_fixture ~dynamic_tools:[tool]
+        ~on_stream_event:(function
+          | Runtime_codex_app_server.Dynamic_tool_finished _ ->
+            check int "buffered worker has not physically written its response" 0 !response_writes;
+            worker_settled := true
+          | _ -> ())
+        ~on_undelivered_tool_result:(fun receipt -> undelivered := receipt :: !undelivered; Ok ()) path)
+      with exn -> `Raised exn in
+    (match outcome with
+     | `Raised exn -> check bool "operator interrupt remains typed through physical response settlement"
+         true (Keeper_registry_types.is_operator_interrupt exn)
+     | `Returned (Error error) -> failf "post-write interrupt became a transport failure: %s"
+         (Runtime_codex_app_server.error_to_string error)
+     | `Returned (Ok _) -> fail "response observer operator interrupt disappeared");
+    check int "the original effect executes once" 1 !effects;
+    check int "one complete physical write invokes the interrupting observer" 1 !response_writes;
+    check int "the already written original is never retained as undelivered" 0 (List.length !undelivered))
+;;
+
+let test_response_observer_requires_original_projection () =
+  let image = Agent_core.Types.Image
+    {media_type = "image/tiff"; data = "AAAA"; source_type = Base64} in
+  List.iter (fun (content, content_blocks, expected_writes) ->
+    test_dynamic_tool_callback ~content ~content_blocks ~expected_writes ())
+    ["invalid\255", [Agent_core.Types.Text "invalid\255"], 0;
+     "unsupported image fallback", [image], 0;
+     "unused fallback\255", [Agent_core.Types.Text "authoritative original"], 1]
+;;
+
 
 let test_native_command_events_stay_distinct_from_dynamic_tools () =
   let stream_events = ref [] in
@@ -865,7 +925,7 @@ let test_scheduling_handoff_preserves_active_protocol ?(terminal_second = false)
             if !calls = 1 then (Eio.Promise.resolve signal (); Eio.Fiber.yield ());
             { success = true; content = "effect persisted";
               content_blocks = None;
-              abort_turn = if terminal_second && !calls = 2 then
+              on_response_sent = None; abort_turn = if terminal_second && !calls = 2 then
                 Some (Runtime_codex_app_server.Terminal_tool_boundary
                   { tool_name = "masc_probe"; outcome = Terminal_completed })
                 else None }) } in
@@ -1013,6 +1073,7 @@ let test_scheduling_handoff_waiter_released_at_terminal () =
 ;;
 
 let test_dynamic_tool_abort_stops_the_provider_loop () =
+  let response_writes = ref 0 in
   let tool : Runtime_codex_app_server.dynamic_tool =
     { name = "masc_probe"
     ; description = "Abort a repeated provider loop"
@@ -1026,6 +1087,7 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
           { success = false
           ; content = "same deterministic failure"
           ; content_blocks = None
+          ; on_response_sent = Some (fun () -> incr response_writes)
           ; abort_turn =
               Some
                 (Repeated_tool_call
@@ -1040,6 +1102,7 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
       | Error
           (Runtime_codex_app_server.Stopped_by_host
             (Repeated_tool_call { tool_name; repeated_count })) ->
+        check int "host stop follows complete response write" 1 !response_writes;
         check string "tool" "masc_probe" tool_name;
         check int "repeat count" 3 repeated_count
       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
@@ -1059,7 +1122,7 @@ let test_context_error_records_prior_tool_effect () =
         (fun ~call_id:_ _ ->
           { Runtime_codex_app_server.success = true
           ; content = "effect applied"
-          ; content_blocks = None; abort_turn = None
+          ; content_blocks = None; abort_turn = None; on_response_sent = None
           })
     }
   in
@@ -1101,7 +1164,7 @@ let test_read_only_overflow_contract () =
         ; execution_mode = (fun _ -> Agent_core.Tool_contract.Serial)
         ; call_effect = (fun _ -> call_effect)
         ; call = (fun ~call_id:_ _ ->
-            { success = true; content = "observed"; content_blocks = None; abort_turn = None })
+            { success = true; content = "observed"; content_blocks = None; abort_turn = None; on_response_sent = None })
         }
       in
       with_fixture
@@ -1127,7 +1190,7 @@ let test_native_effect_before_overflow () =
     ; execution_mode = (fun _ -> Agent_core.Tool_contract.Serial)
     ; call_effect = (fun _ -> Agent_core.Tool.Read_only)
     ; call = (fun ~call_id:_ _ ->
-        {success = true; content = "read"; content_blocks = None; abort_turn = None}) }
+        {success = true; content = "read"; content_blocks = None; abort_turn = None; on_response_sent = None}) }
   in
   List.iter (fun method_ ->
     List.iter (fun (kind, expected) ->
@@ -2518,7 +2581,7 @@ let test_thread_resume_sends_dynamic_tools () =
          ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
              (fun ~call_id:_ _ ->
-               { success = true; content = "unused"; content_blocks = None; abort_turn = None })
+               { success = true; content = "unused"; content_blocks = None; abort_turn = None; on_response_sent = None })
          }
        in
        with_fixture
@@ -2579,7 +2642,7 @@ let test_dynamic_tools_clear_what_the_server_needs_to_defer () =
          ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
              (fun ~call_id:_ _ ->
-               { success = true; content = "unused"; content_blocks = None; abort_turn = None })
+               { success = true; content = "unused"; content_blocks = None; abort_turn = None; on_response_sent = None })
          }
        in
        let tool = declare "masc_probe" in
@@ -2798,7 +2861,7 @@ let test_elicitation_cancel_then_dynamic_tool () =
           execution_mode = (fun _ -> Agent_core.Tool_contract.Serial);
           call_effect = (fun _ -> Agent_core.Tool.Effect_possible);
           call = (fun ~call_id:_ _ -> incr calls;
-            { success = true; content = "MASC_TOOL_RESULT"; content_blocks = None; abort_turn = None }) } in
+            { success = true; content = "MASC_TOOL_RESULT"; content_blocks = None; abort_turn = None; on_response_sent = None }) } in
       (match run_fixture ~dynamic_tools:[tool]
         ~on_stream_event:(fun event -> observed := event :: !observed) path with
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
@@ -3128,7 +3191,7 @@ let test_dynamic_tool_bytes_counts_name_description_and_schema () =
         (fun ~call_id:_ _ ->
           { Runtime_codex_app_server.success = true
           ; content = ""
-          ; content_blocks = None; abort_turn = None
+          ; content_blocks = None; abort_turn = None; on_response_sent = None
           })
     }
   in
@@ -3675,6 +3738,7 @@ let test_no_deadline_keeps_turn_started_callback_bounded () =
 ;;
 
 let test_no_deadline_keeps_post_accept_writes_bounded () =
+  let response_writes = ref 0 in
   let retained = ref [] in
   let tool : Runtime_codex_app_server.dynamic_tool =
     { name = "masc_probe"
@@ -3688,7 +3752,7 @@ let test_no_deadline_keeps_post_accept_writes_bounded () =
         (fun ~call_id:_ _ ->
           { success = true
           ; content = String.make (1024 * 1024) 'x'
-          ; content_blocks = None; abort_turn = None
+          ; content_blocks = None; abort_turn = None; on_response_sent = Some (fun () -> incr response_writes)
           })
     }
   in
@@ -3711,6 +3775,7 @@ let test_no_deadline_keeps_post_accept_writes_bounded () =
            (Runtime_codex_app_server.Timeout
               { seconds; turn_accepted = true }) ->
          check (float 0.001) "post-accept write timeout" 0.3 seconds;
+         check int "partial write is not complete delivery" 0 !response_writes;
          check int "the unwritten result has a durable owner" 1 (List.length !retained)
        | Error
            (Runtime_codex_app_server.Timeout
@@ -5202,10 +5267,13 @@ let test_tool_outbox_reaches_the_next_keeper_turn ?(refuse_input = false) ~refus
   let get = function Ok value -> value | Error detail -> fail detail in
   Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
     run_undelivered_fixture ~eof:false
-      ~retain:(Keeper_codex_tool_outbox.retain ~base_path ~keeper_name) ();
-    let pending = get (Keeper_codex_tool_outbox.load ~base_path ~keeper_name) in
+      ~retain:(fun (receipt : Runtime_codex_app_server.undelivered_tool_result) ->
+        Keeper_client_tool_outbox.retain ~base_path ~keeper_name
+          {thread_id=receipt.thread_id;turn_id=receipt.turn_id;call_id=receipt.call_id;
+           tool_name=receipt.tool_name;arguments=receipt.arguments;response=receipt.response}) ();
+    let pending = get (Keeper_client_tool_outbox.load ~base_path ~keeper_name) in
     check int "one retained context batch" 1
-      (List.length (Keeper_codex_tool_outbox.developer_context pending));
+      (List.length (Keeper_client_tool_outbox.developer_context pending));
     with_fixture ~capture_path ~inject_items:true ~close_after_injection:refuse_dispatch
       ([init_result; account_chatgpt; thread_result; {|{"id":4,"result":{}}|};
        {|{"id":5,"result":{"turn":{"id":"turn-1"}}}|}]
@@ -5218,9 +5286,9 @@ let test_tool_outbox_reaches_the_next_keeper_turn ?(refuse_input = false) ~refus
          | false, Ok _ | true, Error _ -> ()
          | false, Error error -> fail (Agent_core.Error.to_string error)
          | true, Ok _ -> fail "a refused input cannot acknowledge receipt delivery");
-        let pending = get (Keeper_codex_tool_outbox.load ~base_path ~keeper_name) in
+        let pending = get (Keeper_client_tool_outbox.load ~base_path ~keeper_name) in
         check int "ACK follows successful dispatch only" (if refuse_dispatch || refuse_input then 1 else 0)
-          (List.length (Keeper_codex_tool_outbox.developer_context pending));
+          (List.length (Keeper_client_tool_outbox.developer_context pending));
         let frames = In_channel.with_open_bin capture_path In_channel.input_lines
           |> List.map Yojson.Safe.from_string in
         let open Yojson.Safe.Util in
@@ -5235,20 +5303,20 @@ let test_tool_outbox_acknowledges_only_its_snapshot () =
   let base_path = temp_workspace "codex-tool-outbox-identity-" in
   let keeper_name = "outbox-fixture" in
   let get = function Ok value -> value | Error detail -> fail detail in
-  let first : Runtime_codex_app_server.undelivered_tool_result =
+  let first : Keeper_client_tool_outbox.receipt =
     {thread_id = "thread-1"; turn_id = "turn-1"; call_id = "call-1";
      tool_name = "probe"; arguments = `Null; response = `String "first-result"} in
   Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
-    get (Keeper_codex_tool_outbox.retain ~base_path ~keeper_name first);
+    get (Keeper_client_tool_outbox.retain ~base_path ~keeper_name first);
     let session_path = get (Keeper_official_client_session_store.path ~base_path ~keeper_name) in
     let staging = Filename.concat (Filename.dirname session_path) ".undelivered-tools-staging" in
     Fs_compat.save_file (Filename.concat staging "interrupted-write.tmp") "{partial";
-    let original = get (Keeper_codex_tool_outbox.load ~base_path ~keeper_name) in
-    get (Keeper_codex_tool_outbox.retain ~base_path ~keeper_name
+    let original = get (Keeper_client_tool_outbox.load ~base_path ~keeper_name) in
+    get (Keeper_client_tool_outbox.retain ~base_path ~keeper_name
       {first with turn_id = "turn-2"; response = `String "later-result"});
-    get (Keeper_codex_tool_outbox.acknowledge original);
-    let remaining = get (Keeper_codex_tool_outbox.load ~base_path ~keeper_name)
-      |> Keeper_codex_tool_outbox.developer_context in
+    get (Keeper_client_tool_outbox.acknowledge original);
+    let remaining = get (Keeper_client_tool_outbox.load ~base_path ~keeper_name)
+      |> Keeper_client_tool_outbox.developer_context in
     match remaining with
     | [text] -> check bool "same call id in a newer turn remains pending" true
         (String_util.contains_substring text "later-result")
@@ -6732,7 +6800,7 @@ let test_keeper_context_lifecycle_three_settled_turns () =
       | Store.Context_block block -> Some (Prompt_block_id.to_string block, held.sha256)
       | Store.Librarian_unread -> None
       | Store.Context_section _ | Store.Context_section_row _ | Store.Context_carrier
-      | Store.Librarian_working_state | Store.Historical_task_reference ->
+      | Store.Librarian_working_state | Store.Historical_task_reference | Store.Tool_result_receipts ->
         fail "unexpected non-issuer context in the fixture") frontier.held_context in
     check int "both issuer identities remain acknowledged" 2 (List.length acknowledged_blocks);
     check int "the independent native unread observation is also acknowledged" 1
@@ -8946,7 +9014,7 @@ let test_live_dynamic_tool_subscription () =
     ; call =
           (fun ~call_id:_ _ ->
             incr tool_calls;
-            { success = true; content = "MASC_TOOL_RESULT"; content_blocks = None; abort_turn = None })
+            { success = true; content = "MASC_TOOL_RESULT"; content_blocks = None; abort_turn = None; on_response_sent = None })
       }
     in
     let result =
@@ -9797,6 +9865,24 @@ let () =
             (test_production_runtime_walk_receipt ~recover:false)
         ; test_case "successful fallback retains the earlier Unknown400" `Quick
             (test_production_runtime_walk_receipt ~recover:true)
+        ] )
+    ; ( "response delivery"
+      , [ test_case "ordinary response writes once" `Quick
+            (fun () -> test_dynamic_tool_callback ())
+        ; test_case "projection substitution is not original delivery" `Quick
+            test_response_observer_requires_original_projection
+        ; test_case "observer failure does not undo a written response" `Quick
+            (fun () -> test_dynamic_tool_callback ~observer_raises:true ())
+        ; test_case "buffered response observer preserves operator interrupt" `Quick
+            test_buffered_response_observer_interrupt_keeps_typed_cause
+        ; test_case "host stop follows response write" `Quick
+            test_dynamic_tool_abort_stops_the_provider_loop
+        ; test_case "vendor completion preserves unwritten original" `Quick
+            (test_ended_turn_retains_tool_result ~eof:false)
+        ; test_case "vendor EOF preserves unwritten original" `Quick
+            (test_ended_turn_retains_tool_result ~eof:true)
+        ; test_case "partial response write never marks delivery" `Quick
+            test_no_deadline_keeps_post_accept_writes_bounded
         ] )
     ; ( "live subscription"
       , [ test_case

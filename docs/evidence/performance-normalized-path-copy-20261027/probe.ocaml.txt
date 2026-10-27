@@ -1,0 +1,340 @@
+let home_fixture = ref None
+let checks = ref 0
+let string = ()
+let check _ label expected actual =
+  incr checks;
+  if not (String.equal expected actual) then
+    failwith (Printf.sprintf "%s: expected %S, actual %S" label expected actual)
+
+module Baseline = struct
+module Common = struct let masc_dirname = ".masc" end
+let raw_value_opt = function
+  | "HOME" -> !home_fixture
+  | name -> failwith ("unexpected environment fixture lookup: " ^ name)
+let trim_opt = function
+  | Some raw ->
+      let trimmed = String.trim raw in
+      if trimmed = "" then None else Some trimmed
+  | None -> None
+
+let strip_path_trailing_slashes value =
+  let trimmed = String.trim value in
+  let rec loop current =
+    let len = String.length current in
+    if len > 1 && current.[len - 1] = '/' then
+      loop (String.sub current 0 (len - 1))
+    else
+      current
+  in
+  if trimmed = "" then "" else loop trimmed
+
+let expand_home_prefix value =
+  if String.length value >= 2 && value.[0] = '~' && value.[1] = '/' then
+    match raw_value_opt "HOME" |> trim_opt with
+    | Some home -> Filename.concat home (String.sub value 2 (String.length value - 2))
+    | None -> value
+  else
+    value
+
+let normalize_path_lexically value =
+  let value = expand_home_prefix (String.trim value) in
+  if value = "" then ""
+  else
+    let absolute = value.[0] = '/' in
+    let parts = String.split_on_char '/' value in
+    let rec fold acc = function
+      | [] -> acc
+      | "" :: rest | "." :: rest -> fold acc rest
+      | ".." :: rest -> (
+          match acc, absolute with
+          | _ :: acc_tail, _ -> fold acc_tail rest
+          | [], true -> fold [] rest
+          | [], false -> fold [ ".." ] rest)
+      | part :: rest -> fold (part :: acc) rest
+    in
+    let normalized_parts = List.rev (fold [] parts) in
+    match absolute, normalized_parts with
+    | true, [] -> "/"
+    | true, parts -> "/" ^ String.concat "/" parts
+    | false, [] -> "."
+    | false, parts -> String.concat "/" parts
+
+let normalize_masc_base_path_input path =
+  let normalized = path |> normalize_path_lexically |> strip_path_trailing_slashes in
+  if normalized = "" then ""
+  else if String.equal (Filename.basename normalized) Common.masc_dirname then
+    match Filename.dirname normalized with
+    | "" -> "."
+    | parent -> parent
+  else
+    normalized
+
+
+end
+
+module Baseline_cases = struct
+module Env_config_core = Baseline
+let test_normalize_masc_base_path_input_canonicalizes_explicit_path () =
+  let actual =
+    Env_config_core.normalize_masc_base_path_input
+      "/tmp/synthetic-masc-base/././/.masc//"
+  in
+  check string "canonical explicit base path" "/tmp/synthetic-masc-base" actual
+
+let test_normalize_path_lexically_normal_paths () =
+  List.iter
+    (fun path ->
+      check string path path (Env_config_core.normalize_path_lexically path))
+    [ "/"; "alpha"; "alpha/beta"; "/alpha/beta";
+      "/.config/.../..suffix/part.."; "/설정/keepér/파일.md";
+      "~someone/docs"; "alpha\\beta" ]
+
+let test_normalize_path_lexically_special_components () =
+  List.iter
+    (fun (path, expected) ->
+      check string (Printf.sprintf "%S" path) expected
+        (Env_config_core.normalize_path_lexically path))
+    [ "", ""; " \t\r\n", ""; " /// ", "/";
+      "/alpha//beta/", "/alpha/beta";
+      "/alpha/./beta", "/alpha/beta";
+      "/alpha/beta/../gamma", "/alpha/gamma";
+      "/../../alpha", "/alpha";
+      "alpha/../../beta", "../beta";
+      "../..", "."; "../../..", "..";
+      "./", "."; "alpha/.", "alpha"; "alpha/..", ".";
+      " alpha beta / gamma ", "alpha beta / gamma" ]
+
+let test_normalize_masc_base_path_input_strips_one_masc_component () =
+  List.iter
+    (fun (path, expected) ->
+      check string path expected
+        (Env_config_core.normalize_masc_base_path_input path))
+    [ ".masc", "."; "/.masc", "/";
+      "project/.masc", "project";
+      "project/.masc/.masc", "project/.masc";
+      "project/.masc/child", "project/.masc/child";
+      "project/.masc-suffix", "project/.masc-suffix" ]
+
+
+end
+
+module Candidate = struct
+module Common = struct let masc_dirname = ".masc" end
+let raw_value_opt = function
+  | "HOME" -> !home_fixture
+  | name -> failwith ("unexpected environment fixture lookup: " ^ name)
+let trim_opt = function
+  | Some raw ->
+      let trimmed = String.trim raw in
+      if trimmed = "" then None else Some trimmed
+  | None -> None
+
+let strip_path_trailing_slashes value =
+  let trimmed = String.trim value in
+  let rec loop current =
+    let len = String.length current in
+    if len > 1 && current.[len - 1] = '/' then
+      loop (String.sub current 0 (len - 1))
+    else
+      current
+  in
+  if trimmed = "" then "" else loop trimmed
+
+let expand_home_prefix value =
+  if String.length value >= 2 && value.[0] = '~' && value.[1] = '/' then
+    match raw_value_opt "HOME" |> trim_opt with
+    | Some home -> Filename.concat home (String.sub value 2 (String.length value - 2))
+    | None -> value
+  else
+    value
+
+type lexical_path_form = Normal_form | Needs_normalization
+
+let rec classify_path_components value length component_start index =
+  if index < length && value.[index] <> '/' then
+    classify_path_components value length component_start (index + 1)
+  else
+    let component_length = index - component_start in
+    if component_length = 0
+       || (component_length = 1 && value.[component_start] = '.')
+       || (component_length = 2 && value.[component_start] = '.'
+           && value.[component_start + 1] = '.')
+    then Needs_normalization
+    else if index = length then Normal_form
+    else classify_path_components value length (index + 1) (index + 1)
+
+let classify_lexical_path value =
+  let length = String.length value in
+  match length with
+  | 0 -> Needs_normalization
+  | 1 when value.[0] = '/' -> Normal_form
+  | _ ->
+      let first_component = if value.[0] = '/' then 1 else 0 in
+      classify_path_components value length first_component first_component
+
+let normalize_path_lexically value =
+  let value = expand_home_prefix (String.trim value) in
+  if value = "" then ""
+  else
+    match classify_lexical_path value with
+    | Normal_form -> value
+    | Needs_normalization ->
+        let absolute = value.[0] = '/' in
+        let parts = String.split_on_char '/' value in
+        let rec fold acc = function
+          | [] -> acc
+          | "" :: rest | "." :: rest -> fold acc rest
+          | ".." :: rest -> (
+              match acc, absolute with
+              | _ :: acc_tail, _ -> fold acc_tail rest
+              | [], true -> fold [] rest
+              | [], false -> fold [ ".." ] rest)
+          | part :: rest -> fold (part :: acc) rest
+        in
+        let normalized_parts = List.rev (fold [] parts) in
+        match absolute, normalized_parts with
+        | true, [] -> "/"
+        | true, parts -> "/" ^ String.concat "/" parts
+        | false, [] -> "."
+        | false, parts -> String.concat "/" parts
+
+let normalize_masc_base_path_input path =
+  let normalized = path |> normalize_path_lexically |> strip_path_trailing_slashes in
+  if normalized = "" then ""
+  else if String.equal (Filename.basename normalized) Common.masc_dirname then
+    match Filename.dirname normalized with
+    | "" -> "."
+    | parent -> parent
+  else
+    normalized
+
+
+end
+
+module Candidate_cases = struct
+module Env_config_core = Candidate
+let test_normalize_masc_base_path_input_canonicalizes_explicit_path () =
+  let actual =
+    Env_config_core.normalize_masc_base_path_input
+      "/tmp/synthetic-masc-base/././/.masc//"
+  in
+  check string "canonical explicit base path" "/tmp/synthetic-masc-base" actual
+
+let test_normalize_path_lexically_normal_paths () =
+  List.iter
+    (fun path ->
+      check string path path (Env_config_core.normalize_path_lexically path))
+    [ "/"; "alpha"; "alpha/beta"; "/alpha/beta";
+      "/.config/.../..suffix/part.."; "/설정/keepér/파일.md";
+      "~someone/docs"; "alpha\\beta" ]
+
+let test_normalize_path_lexically_special_components () =
+  List.iter
+    (fun (path, expected) ->
+      check string (Printf.sprintf "%S" path) expected
+        (Env_config_core.normalize_path_lexically path))
+    [ "", ""; " \t\r\n", ""; " /// ", "/";
+      "/alpha//beta/", "/alpha/beta";
+      "/alpha/./beta", "/alpha/beta";
+      "/alpha/beta/../gamma", "/alpha/gamma";
+      "/../../alpha", "/alpha";
+      "alpha/../../beta", "../beta";
+      "../..", "."; "../../..", "..";
+      "./", "."; "alpha/.", "alpha"; "alpha/..", ".";
+      " alpha beta / gamma ", "alpha beta / gamma" ]
+
+let test_normalize_masc_base_path_input_strips_one_masc_component () =
+  List.iter
+    (fun (path, expected) ->
+      check string path expected
+        (Env_config_core.normalize_masc_base_path_input path))
+    [ ".masc", "."; "/.masc", "/";
+      "project/.masc", "project";
+      "project/.masc/.masc", "project/.masc";
+      "project/.masc/child", "project/.masc/child";
+      "project/.masc-suffix", "project/.masc-suffix" ]
+
+
+end
+
+let compare path =
+  check string "lexical differential"
+    (Baseline.normalize_path_lexically path) (Candidate.normalize_path_lexically path);
+  check string "base-input differential"
+    (Baseline.normalize_masc_base_path_input path)
+    (Candidate.normalize_masc_base_path_input path)
+let () =
+  Baseline_cases.test_normalize_masc_base_path_input_canonicalizes_explicit_path ();
+  Baseline_cases.test_normalize_path_lexically_normal_paths ();
+  Baseline_cases.test_normalize_path_lexically_special_components ();
+  Baseline_cases.test_normalize_masc_base_path_input_strips_one_masc_component ();
+  Candidate_cases.test_normalize_masc_base_path_input_canonicalizes_explicit_path ();
+  Candidate_cases.test_normalize_path_lexically_normal_paths ();
+  Candidate_cases.test_normalize_path_lexically_special_components ();
+  Candidate_cases.test_normalize_masc_base_path_input_strips_one_masc_component ();
+  let actual_cases = !checks in
+  let alphabet = [| '/'; '.'; 'a'; ' '; '\000' |] in
+  let rec enumerate remaining prefix =
+    compare prefix;
+    if remaining > 0 then
+      Array.iter (fun byte ->
+        enumerate (remaining - 1) (prefix ^ String.make 1 byte)) alphabet
+  in
+  enumerate 7 "";
+  let random = Random.State.make [| 2026; 10; 27 |] in
+  let components =
+    [| ""; "."; ".."; "ordinary"; "..."; ".hidden"; "..suffix";
+       "white space"; "설정"; "alpha\\beta"; "\000"; ".masc" |]
+  in
+  for _ = 1 to 20000 do
+    let count = Random.State.int random 25 in
+    let parts = List.init count (fun _ ->
+      components.(Random.State.int random (Array.length components))) in
+    let path = String.concat "/" parts in
+    compare (if Random.State.bool random then "/" ^ path else path)
+  done;
+  compare (String.make 1048576 'a');
+  compare (String.concat "/" (List.init 16384 (fun _ -> "component")));
+  List.iter (fun home ->
+    home_fixture := home;
+    List.iter compare [ "~/"; "~/alpha"; "~/alpha/../beta"; "~/./.masc";
+                        " ~/설정//..suffix/ "; "~/../.."; "~/../../.masc" ])
+    [None; Some ""; Some "  "; Some "/"; Some "/fixture/home";
+     Some " /alpha/./beta/..// "; Some "relative/home"];
+  home_fixture := None;
+  Printf.printf "{\"kind\":\"semantics\",\"actual_test_case_checks\":%d,\"all_checks\":%d}\n%!"
+    actual_cases !checks;
+  let owner_root = "/fixture/owned-base/.masc/config/keepers/scale-owner-299" in
+  let cases =
+    [ "root", "/", 50000;
+      "short_relative", "alpha", 50000;
+      "relative_components", "alpha/beta/gamma", 50000;
+      "normal_owner_path", owner_root, 50000;
+      "trimmed_owner_path", " \t" ^ owner_root ^ "\n", 50000;
+      "late_special_component", owner_root ^ "/..", 50000;
+      "early_special_component", "//" ^ owner_root, 50000;
+      "long_normal_component", "/" ^ String.make 4096 'a', 1000 ]
+  in
+  let roles =
+    [ "baseline", Baseline.normalize_path_lexically;
+      "candidate", Candidate.normalize_path_lexically ]
+  in
+  List.iter (fun (case, path, calls) ->
+    let expected = Baseline.normalize_path_lexically path in
+    List.iteri (fun block role ->
+      let normalize = List.assoc role roles in
+      let checksum = ref 0 in
+      Gc.full_major ();
+      let before = Gc.allocated_bytes () in
+      let started = Mtime_clock.elapsed_ns () in
+      for _ = 1 to calls do
+        let result = Sys.opaque_identity (normalize (Sys.opaque_identity path)) in
+        checksum := !checksum + String.length result
+      done;
+      let elapsed = Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started) /. 1e6 in
+      let allocated = Gc.allocated_bytes () -. before in
+      if !checksum <> calls * String.length expected then failwith "measurement checksum";
+      Printf.printf
+        "{\"kind\":\"measurement\",\"role\":\"%s\",\"case\":\"%s\",\"calls\":%d,\"block\":%d,\"elapsed_ms\":%.6f,\"allocated_bytes\":%.0f,\"checksum\":%d}\n%!"
+        role case calls block elapsed allocated !checksum)
+      [ "baseline"; "candidate"; "candidate"; "baseline" ]) cases

@@ -416,6 +416,45 @@ let test_a_document_source_reads_only_a_browser_that_covers_its_output () =
     (choose T.Shared ["first", T.Shared; "second", T.Shared] = T.Several_browser_services);
   check bool "no browser is no browser" true (choose T.Shared [] = T.No_browser_service)
 
+(* RFC browser-backends-end-alone S-L2: a document read goes to the service of
+   its route's source, and a client of a live source two services serve is not
+   read, since a client does not say which of them it came from. *)
+let test_a_document_read_goes_to_the_service_of_its_source () =
+  let module T = Runtime.For_testing in
+  let module B = Browser_lane in
+  let client n = match B.client_id_of_string (Printf.sprintf "0c000000-0000-4000-8000-%012d" n) with
+    | Ok id -> id | Error detail -> fail detail in
+  let ego = client 1 and extension = client 2 in
+  (* A service: its name, the sources it serves and the clients its last
+     observation lists. *)
+  let service name backend listed = name, backend, listed in
+  let read services route = T.document_route_services ~services ~backend:(fun (_, backend, _) -> backend)
+      ~lists:(fun (_, _, listed) client -> List.mem client listed) route
+    |> Result.map (List.map (fun (name, _, _) -> name)) in
+  let automation = service "automation" B.Backend.Automation []
+  and stagehand = service "stagehand" B.Backend.Stagehand []
+  and ego_worker = service "ego" B.Backend.Ego [ego]
+  and native = service "native" B.Backend.External_host [extension] in
+  let all = [automation; stagehand; ego_worker; native] in
+  let is_refused = function Error _ -> true | Ok _ -> false in
+  check bool "automation reads on its own service" true (read all B.Automation_route = Ok ["automation"]);
+  check bool "Stagehand reads on its own service" true (read all B.Stagehand_route = Ok ["stagehand"]);
+  check bool "a live client reads on the service that lists it" true
+    (read all (B.Live_route (Some ego)) = Ok ["ego"]);
+  check bool "and another on its own" true (read all (B.Live_route (Some extension)) = Ok ["native"]);
+  check bool "the one live service there is reads a client its observation does not list yet" true
+    (read [automation; service "ego" B.Backend.Ego []] (B.Live_route (Some ego)) = Ok ["ego"]);
+  let doubled = [ego_worker; service "second ego" B.Backend.Ego []; native] in
+  check bool "a client of a doubled live source is refused" true
+    (is_refused (read doubled (B.Live_route (Some ego))));
+  check bool "a client of another live source still reads" true
+    (read doubled (B.Live_route (Some extension)) = Ok ["native"]);
+  check bool "a client no doubled service lists yet is not sent to the other live service" true
+    (read [service "ego" B.Backend.Ego []; service "second ego" B.Backend.Ego []; native]
+       (B.Live_route (Some ego)) = Ok []);
+  check bool "a read that names no client is refused while a live source is doubled" true
+    (is_refused (read [ego_worker; service "second ego" B.Backend.Ego []] (B.Live_route None)))
+
 (* A failed DOS installation may still hold the controller in its state, so a
    release is not reported as done, and a shared call names the installation. *)
 let test_a_failed_dos_installation_is_named_and_not_released () = with_fixture (fun env _ config dir _ ->
@@ -2492,6 +2531,32 @@ let test_a_consumer_refused_during_a_call_captures_again () =
     (match refused with Error (Runtime.Host_refusal _) -> true | _ -> false);
   await clock recovered;
   check Alcotest.int "the refusal took no observation of the producer" observed (producer_observes ());
+  (* Cancel before the first worker RPC, after a consumer has already seen
+     the counted call as refreshing. No subsequent write or poll rescues it. *)
+  let observed = producer_observes () in
+  let exports = unwrap (Runtime.tool_export_reading ~config
+    ~access:Lane_addon_sources.Operator_configuration ~reserved:[]) in
+  let write = List.find (fun (export : Runtime.tool_export) ->
+    export.instance_id = producer && export.tool.name = declared_write) exports.exports in
+  let entered, signal_entered = Eio.Promise.create () in
+  let never, _ = Eio.Promise.create () in
+  let admissions_before = List.length !(state.admissions) in
+  let held ~release_controller:_ ~snapshot:_ ~invoke =
+    Eio.Promise.resolve signal_entered ();
+    Eio.Promise.await never;
+    invoke None in
+  Eio.Fiber.first
+    (fun () ->
+      ignore (Runtime.call_exported_tool_with_authority ~companion_publish:None ~continuation:None
+        ~on_complete:(fun () -> ()) ~on_result:(fun _ -> ()) ~authorize:(Some held) ~principal:None
+        ~config ~access:Lane_addon_sources.Operator_configuration ~reserved:[] ~export:write ~arguments:(`Assoc []));
+      fail "a blocked call unexpectedly returned")
+    (fun () ->
+      Eio.Promise.await entered;
+      check bool "a capture during an unsent write is refused" true (Result.is_error (capture_now ())));
+  await clock recovered;
+  check Alcotest.int "cancellation never reached the worker" admissions_before (List.length !(state.admissions));
+  check Alcotest.int "unsent cancellation took no producer observation" observed (producer_observes ());
   let observed = producer_observes () in
   let lost_write = bench.while_held declared_write (`Assoc ["lose", `Bool true]) (fun () ->
     check bool "a capture during the next counted write is refused" true (Result.is_error (capture_now ()))) in
@@ -2558,6 +2623,8 @@ let () = run "Lane Add-on runtime" ["optional extension", [
   test_case "a failure is explained only to the operator" `Quick test_a_failure_is_explained_only_to_the_operator;
   test_case "a document source reads only a browser that covers its output" `Quick
     test_a_document_source_reads_only_a_browser_that_covers_its_output;
+  test_case "a document read goes to the service of its source" `Quick
+    test_a_document_read_goes_to_the_service_of_its_source;
   test_case "a failed DOS installation is named and not released" `Quick
     test_a_failed_dos_installation_is_named_and_not_released;
   test_case "a cleanup that is cut short can run again" `Quick test_a_cleanup_that_is_cut_short_can_run_again;

@@ -161,6 +161,16 @@ let apply_official_client_accept ~runtime_id ~accept ~terminal_effect_state
       run_result
 ;;
 
+let settle_accepted_official_client_results ~pending_result_receipts result =
+  Result.bind result (fun (accepted : Runtime_agent.run_result) ->
+    let settled = match pending_result_receipts with
+      | None -> Ok ()
+      | Some consumption -> Keeper_client_tool_outbox.settle_consumption consumption
+          ~stop_reason:accepted.stop_reason
+          |> Result.map_error Keeper_official_client_host.internal_error in
+    Result.map (fun () -> accepted) settled)
+;;
+
 type deferred_runtime_lane =
   { assignment_id : string
   ; failed_runtime_id : string
@@ -2613,6 +2623,7 @@ let run_named
                             "provider config transforms cannot target a \
                              codex-app-server runtime"
                         }))
+            ; pending_result_receipts = None
             ; settled_session = None
             ; effect_disposition =
                 Keeper_provider_attempt_effect.No_effect_observed
@@ -2686,6 +2697,8 @@ let run_named
                 ~terminal_effect_state
                 run_result)
         in
+        let codex_result = settle_accepted_official_client_results
+          ~pending_result_receipts:codex_attempt.pending_result_receipts codex_result in
         let codex_result = observe_official_result
           ~execution_result:codex_attempt.result codex_result in
         ( selected_runtime_result ?official_client_settlement:codex_attempt.settled_session runtime ~lane_attempt_index:idx codex_result
@@ -2774,6 +2787,7 @@ let run_named
                         ; detail =
                             "provider config transforms cannot target an antigravity-cli runtime"
                         }))
+            ; pending_result_receipts = None
             ; settled_session = None
             ; effect_disposition =
                 Keeper_provider_attempt_effect.No_effect_observed
@@ -2807,6 +2821,8 @@ let run_named
               ~terminal_effect_state
               run_result)
         in
+        let antigravity_result = settle_accepted_official_client_results
+          ~pending_result_receipts:antigravity_attempt.pending_result_receipts antigravity_result in
         let antigravity_result = observe_official_result
           ~execution_result:antigravity_attempt.result antigravity_result in
         ( selected_runtime_result ?official_client_settlement:antigravity_attempt.settled_session runtime ~lane_attempt_index:idx antigravity_result
@@ -2834,6 +2850,7 @@ let run_named
           match workspace with
           | Error error ->
             { Keeper_muse_runtime.result = Error error
+            ; pending_result_receipts = None
             ; settled_session = None
             ; effect_disposition = Keeper_provider_attempt_effect.No_effect_observed }
           | Ok (workspace_root, native_context) ->
@@ -2906,6 +2923,7 @@ let run_named
                         ; detail =
                             "provider config transforms cannot target a muse-serve runtime"
                         }))
+            ; pending_result_receipts = None
             ; settled_session = None
             ; effect_disposition =
                 Keeper_provider_attempt_effect.No_effect_observed
@@ -2939,6 +2957,8 @@ let run_named
               ~terminal_effect_state
               run_result)
         in
+        let muse_result = settle_accepted_official_client_results
+          ~pending_result_receipts:muse_attempt.pending_result_receipts muse_result in
         let muse_result = observe_official_result
           ~execution_result:muse_attempt.result muse_result in
         ( selected_runtime_result ?official_client_settlement:muse_attempt.settled_session runtime ~lane_attempt_index:idx muse_result
@@ -3040,6 +3060,7 @@ let run_named
                         ; detail =
                             "provider config transforms cannot target a claude-code runtime"
                         }))
+            ; pending_result_receipts = None
             ; settled_session = None
             ; effect_disposition =
                 Keeper_provider_attempt_effect.No_effect_observed
@@ -3078,6 +3099,8 @@ let run_named
               ~terminal_effect_state
               run_result)
         in
+        let claude_result = settle_accepted_official_client_results
+          ~pending_result_receipts:claude_attempt.pending_result_receipts claude_result in
         let claude_result = observe_official_result
           ~execution_result:claude_attempt.result claude_result in
         ( selected_runtime_result ?official_client_settlement:claude_attempt.settled_session runtime ~lane_attempt_index:idx claude_result

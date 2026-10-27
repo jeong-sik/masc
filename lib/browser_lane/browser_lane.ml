@@ -21,6 +21,7 @@ module Keyboard = Browser_keyboard
 module Upload_lease = Browser_upload_lease
 module Document = Browser_document
 module Lane_name = Browser_lane_name
+module Backend = Browser_backend
 module Lane_token = Browser_lane_token
 
 (* Shared default for ordinary browser transport requests, in core and workers. *)
@@ -648,8 +649,8 @@ type answer =
   | Refused of string
   | Rejected_before_effect of string
 
-(* The server supplies a view of Runtime's immutable configuration snapshot.
-   Read it at admission; do not keep a second configuration cache here. *)
+(* A browser worker's owner says which lanes it serves while it serves them.
+   Read it at admission; do not keep a second copy here. *)
 type activity = Enabled | Disabled | Unobserved
 let activity_observer : (Lane_name.t -> activity) option Atomic.t = Atomic.make None
 let install_activity_observer observer = Atomic.set activity_observer observer
@@ -659,8 +660,8 @@ let activity lane = match Atomic.get activity_observer with
 
 type activity_rejection = Lane_off of Lane_name.t | Activity_unavailable
 let activity_rejection_message = function
-  | Lane_off lane -> "browser." ^ Lane_name.to_wire lane ^ " is off; enable it before issuing new browser work"
-  | Activity_unavailable -> "Browser activity configuration is unavailable"
+  | Lane_off lane -> "no " ^ Lane_name.to_wire lane ^ " browser runs here; new browser work is refused"
+  | Activity_unavailable -> "no browser worker serves this process"
 
 (* The same check against an activity the caller observed, such as the one a
    worker reported in its snapshot. *)
@@ -762,24 +763,70 @@ type client_info = { client_id : client_id; browser : browser; version : string;
   transport : live_transport }
 type interaction_phase = Interaction_queued | Interaction_running
 type interaction_activity = { request_id : string; actor : string option;
-  action : string; tab_id : int; phase : interaction_phase }
+  action : string; tab_id : int option; phase : interaction_phase }
+type activity_outcome = Activity_returned | Activity_refused | Activity_partial | Activity_unknown
+type settled_activity = { work : interaction_activity; outcome : activity_outcome }
 let interaction_activity_json work = `Assoc ["requestId",`String work.request_id;
   "actor",(match work.actor with Some name -> `String name | None -> `Null);
-  "action",`String work.action;"tabId",`Int work.tab_id;
+  "action",`String work.action;"tabId",(match work.tab_id with Some id -> `Int id | None -> `Null);
   "phase",`String (match work.phase with Interaction_queued->"queued"|Interaction_running->"running")]
 let interaction_activity_of_json = function
-  | `Assoc fields ->
+  | `Assoc fields when List.sort String.compare (List.map fst fields)
+      = ["action";"actor";"phase";"requestId";"tabId"] ->
     let actor = match List.assoc_opt "actor" fields with
-      | Some (`String name) -> Some (Some name) | Some `Null -> Some None | _ -> None in
+      | Some (`String name) when String.trim name<>"" -> Some (Some name)
+      | Some `Null -> Some None | _ -> None in
+    let tab_id = match List.assoc_opt "tabId" fields with
+      | Some (`Int id) when id>=0 -> Some (Some id) | Some `Null -> Some None | _ -> None in
     let phase = match List.assoc_opt "phase" fields with
       | Some (`String "queued") -> Some Interaction_queued
       | Some (`String "running") -> Some Interaction_running | _ -> None in
     (match List.assoc_opt "requestId" fields,actor,List.assoc_opt "action" fields,
-      List.assoc_opt "tabId" fields,phase with
-     | Some (`String request_id),Some actor,Some (`String action),Some (`Int tab_id),Some phase ->
+      tab_id,phase with
+     | Some (`String request_id),Some actor,Some (`String action),Some tab_id,Some phase
+       when String.trim request_id<>"" && String.trim action<>"" ->
        Ok {request_id;actor;action;tab_id;phase}
      | _ -> Error "invalid browser interaction activity")
   | _ -> Error "invalid browser interaction activity"
+let activity_outcome_to_wire = function
+  | Activity_returned -> "returned" | Activity_refused -> "refused"
+  | Activity_partial -> "partial" | Activity_unknown -> "unknown"
+let settled_activity_json {work;outcome} = `Assoc [
+  "work",interaction_activity_json work;"outcome",`String (activity_outcome_to_wire outcome)]
+let settled_activity_of_json = function
+  | `Assoc fields when List.sort String.compare (List.map fst fields)=["outcome";"work"] ->
+    let outcome=match List.assoc_opt "outcome" fields with
+      | Some (`String "returned") -> Some Activity_returned | Some (`String "refused") -> Some Activity_refused
+      | Some (`String "partial") -> Some Activity_partial | Some (`String "unknown") -> Some Activity_unknown
+      | None|Some _ -> None in
+    (match List.assoc_opt "work" fields,outcome with
+     | Some value,Some outcome -> Result.map (fun work -> {work;outcome}) (interaction_activity_of_json value)
+     | (None|Some _),_ -> Error "invalid settled browser activity")
+  | _ -> Error "invalid settled browser activity"
+let activity_scope = function
+  | Page_native_workflow workflow -> Some workflow.tab_id
+  | Page_interact {tab_id;_} | Page_document {tab_id} | Page_downloads {tab_id}
+  | Page_console {tab_id} | Page_network {tab_id} | Page_cookies {tab_id} | Page_capture {tab_id}
+  | Page_scene {tab_id;_} | Page_snapshot {tab_id;_} | Page_context {tab_id;_}
+  | Page_instruct {tab_id;_} | Page_locate {tab_id;_} | Page_extract {tab_id;_}
+  | Page_act (Action.On_tab {tab_id;_}) -> Some tab_id
+  | Page_read {tab_id;_} | Page_elements {tab_id;_} | Page_goto {tab_id;_} -> tab_id
+  | Tabs_list | Session_open _ | Session_close | Session_status
+  | Page_act (Action.Open_tab _|Open_window _|Control _) -> None
+let activity_name = function
+  | Page_interact {action;_} -> interaction_verb action
+  | Page_native_workflow _ -> "workflow"
+  | (Tabs_list|Page_read _|Page_document _|Page_downloads _|Page_console _|Page_network _|Page_cookies _
+    |Page_capture _|Page_scene _|Page_snapshot _|Session_open _|Session_close|Session_status|Page_goto _
+    |Page_elements _|Page_act _|Page_context _|Page_instruct _|Page_locate _|Page_extract _) as verb -> verb_to_string verb
+let activity_result = function
+  | `Assoc fields ->
+    (match List.assoc_opt "ok" fields,List.assoc_opt "effectPhase" fields with
+     | Some (`Bool true),_ -> Activity_returned
+     | Some (`Bool false),Some (`String "not_started") -> Activity_refused
+     | Some (`Bool false),Some (`String "partial") -> Activity_partial
+     | (None|Some _),(None|Some _) -> Activity_unknown)
+  | _ -> Activity_unknown
 (* How the lane learns a client is gone. A native host that stops polling
    says nothing, so it is gone once its window without a poll passes. A
    connection this worker runs itself (owned Firefox, ego) is disconnected by
@@ -790,9 +837,14 @@ type client = { info : client_info; commands : issued Eio.Stream.t;
   mutex : Eio.Mutex.t;
   waiters : (string, Yojson.Safe.t Eio.Promise.u) Hashtbl.t;
   interactions : (string, interaction_activity) Hashtbl.t;
+  last_activities : (string option, settled_activity) Hashtbl.t;
   executor_work : (string, interaction_phase) Hashtbl.t;
   mutable last_delivered_result : (string * Yojson.Safe.t) option;
   mutable liveness : liveness; mutable closed : bool }
+let settle_activity client id outcome = match Hashtbl.find_opt client.interactions id with
+  | None -> ()
+  | Some work -> Hashtbl.replace client.last_activities work.actor {work;outcome};
+      Hashtbl.remove client.interactions id
 type target = Automation | Live_client of client | Stagehand
 let clients : (string, client) Hashtbl.t = Hashtbl.create 4
 let clients_mutex = Eio.Mutex.create ()
@@ -847,15 +899,22 @@ let connected_clients () =
 let client_interactions client = Eio.Mutex.use_ro client.mutex (fun () ->
   Hashtbl.fold (fun _ work acc -> work::acc) client.interactions [])
   |> List.sort (fun a b -> String.compare a.request_id b.request_id)
-let interactions_for info =
+let activity_for info =
   let client = Eio.Mutex.use_ro clients_mutex (fun () ->
     Hashtbl.find_opt clients (client_id_to_string info.client_id)) in
-  match client with Some client when connected client -> client_interactions client | Some _ | None -> []
-let client_json info = `Assoc ["clientId", `String (client_id_to_string info.client_id);
+  match client with
+  | Some client when connected client -> Eio.Mutex.use_ro client.mutex (fun () ->
+      Hashtbl.fold (fun _ work acc -> work::acc) client.interactions [],
+      Hashtbl.fold (fun _ work acc -> work::acc) client.last_activities [])
+  | Some _ | None -> [],[]
+let client_json info =
+  let active,settled=activity_for info in
+  `Assoc ["clientId", `String (client_id_to_string info.client_id);
   "browser", `String (browser_name info.browser); "version", `String info.version;
   "engineVersion", `String info.engine_version;
   "transport", `String (live_transport_to_string info.transport);
-  "interactions",`List (List.map interaction_activity_json (interactions_for info))]
+  "interactions",`List (List.map interaction_activity_json active);
+  "lastActivities",`List (List.map settled_activity_json settled)]
 let target_client_id = function Automation | Stagehand -> None | Live_client client -> Some client.info.client_id
 (* Where an answer came from, as every successful answer states it: a live
    connection's ID and how its browser is reached. The server's own browsers
@@ -1032,7 +1091,8 @@ let register info =
       Ok client
     | None ->
       let client = {info; commands=Eio.Stream.create 16; mutex=Eio.Mutex.create ();
-        waiters=Hashtbl.create 8; interactions=Hashtbl.create 8; executor_work=Hashtbl.create 8;
+        waiters=Hashtbl.create 8; interactions=Hashtbl.create 8; last_activities=Hashtbl.create 8;
+        executor_work=Hashtbl.create 8;
         last_delivered_result=None; closed=false;
         liveness=Polled (Monotonic_deadline.after ~seconds:lane_connected_window_sec)} in
       Hashtbl.add clients key client; Ok client)
@@ -1069,7 +1129,7 @@ let deliver_result ~client_id ~id ~payload =
       match Hashtbl.find_opt client.waiters id with
       | Some resolver ->
         Hashtbl.remove client.waiters id;
-        Hashtbl.remove client.interactions id;
+        settle_activity client id (activity_result payload);
         Hashtbl.remove client.executor_work id;
         refresh_unlocked client;
         client.last_delivered_result <- Some (id, payload);
@@ -1136,17 +1196,16 @@ let issue_live_with ~activity_check ?actor ?(only_if_idle = false) client ~verb 
           (match policy with
            | Executor_owned -> Hashtbl.add client.executor_work id Interaction_queued
            | Reply_window -> ());
-          (match verb with
-           | Page_native_workflow workflow -> Hashtbl.add client.interactions id
-               {request_id=id;actor;action="workflow";tab_id=workflow.tab_id;phase=Interaction_queued}
-           | Page_interact {tab_id;action;_} -> Hashtbl.add client.interactions id
-               {request_id=id;actor;action=interaction_verb action;tab_id;phase=Interaction_queued}
-           | Session_open _|Session_close|Session_status|Tabs_list|Page_read _|Page_document _
-           | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _ | Page_snapshot _|Page_goto _|Page_elements _|Page_act _
-           | Page_context _|Page_instruct _|Page_locate _|Page_extract _ -> ()); Ok ())) in
+          Hashtbl.add client.interactions id
+            {request_id=id;actor;action=activity_name verb;tab_id=activity_scope verb;phase=Interaction_queued};
+          Ok ())) in
       Eio.Switch.on_release sw (fun () ->
         Eio.Mutex.use_rw ~protect:true client.mutex (fun () -> Hashtbl.remove client.waiters id;
-          Hashtbl.remove client.interactions id; Hashtbl.remove client.executor_work id));
+          (match Hashtbl.find_opt client.interactions id with
+           | None -> ()
+           | Some work -> settle_activity client id (match work.phase with
+               | Interaction_queued -> Activity_refused | Interaction_running -> Activity_unknown));
+          Hashtbl.remove client.executor_work id));
       match accepted with
       | Error refusal -> refusal
       | Ok () ->

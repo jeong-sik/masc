@@ -108,10 +108,10 @@ val event_to_string : event -> string
 (** {1 Transition} *)
 
 (** Entry actions — side-effect descriptors emitted on state entry.
-    The registry executes [Publish_lifecycle] as an observability-only
-    log side effect. *)
+    The registry executes [Log_lifecycle] as an observability-only
+    log side effect: a log line, not a bus event. *)
 type entry_action =
-  | Publish_lifecycle of { event_name : string; detail : string }
+  | Log_lifecycle of { event_name : string; detail : string }
 
 (** Result of applying an event. *)
 type transition_result = {

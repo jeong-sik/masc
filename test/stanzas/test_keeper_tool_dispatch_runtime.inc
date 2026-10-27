@@ -24,3 +24,7 @@
   masc.skill_config
   masc.skill_reference
   masc.skill_snapshot))
+
+(rule
+ (alias runtest-test_keeper_result_scope_dispatch)
+ (action (run %{exe:test_keeper_tool_dispatch_runtime.exe} test "peer_delegate_schema")))

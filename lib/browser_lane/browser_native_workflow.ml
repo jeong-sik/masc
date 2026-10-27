@@ -2,6 +2,8 @@ type element_state = Attached | Detached | Visible | Hidden
 type load_state = Dom_content_loaded | Load | Network_idle
 type selection = One of string | Many of string list
 type clipboard_content = { text : string; html : string option }
+type page_code = Expression of string | Call of { source : string; argument : Yojson.Safe.t }
+type fetch_options = Yojson.Safe.t
 type action =
   | Click of string | Double_click of string | Hover of string
   | Fill of { selector : string; text : string }
@@ -13,6 +15,9 @@ type action =
   | Goto of string | Wait_for_url of string
   | Wait_for_selector of { selector : string; state : element_state }
   | Wait_for_load_state of load_state
+  | Evaluate of page_code
+  | Wait_for_function of { code : page_code; polling_ms : int option }
+  | Fetch of { url : string; options : fetch_options }
 type step = { action : action; timeout_ms : int option }
 type snapshot_scope = Viewport | Full_page
 type t = { tab_id : int; expected_url : string; steps : step list;
@@ -45,8 +50,46 @@ let load_state = function
   | "domcontentloaded" -> Ok Dom_content_loaded | "load" -> Ok Load | "networkidle" -> Ok Network_idle
   | _ -> Error "unknown native load state"
 let load_state_name = function Dom_content_loaded -> "domcontentloaded" | Load -> "load" | Network_idle -> "networkidle"
+let rec json_argument = function
+  | `Null|`Bool _|`Int _|`Intlit _|`String _ -> true
+  | `Float value -> Float.is_finite value
+  | `List values -> List.for_all json_argument values
+  | `Assoc fields -> List.length fields=List.length (List.sort_uniq String.compare (List.map fst fields))
+      && List.for_all (fun (_,value) -> json_argument value) fields
+let page_code fields =
+  let* source=text "source" fields in
+  match List.assoc_opt "argumentJson" fields with
+  | None -> Ok (Expression source)
+  | Some (`String json) ->
+    (match Yojson.Safe.from_string json with
+     | argument when json_argument argument -> Ok (Call {source;argument})
+     | _ -> Error "argumentJson must contain finite JSON values without duplicate fields"
+     | exception Yojson.Json_error _ -> Error "argumentJson must encode one JSON value")
+  | Some _ -> Error "argumentJson must be a JSON-encoded string"
+let fetch_options value =
+  let* fields=object_fields ["method";"headers";"body";"cache";"credentials";"integrity";
+    "keepalive";"mode";"redirect";"referrer";"referrerPolicy"] value in
+  let strings fields = List.for_all (function _,`String _ -> true | _,_ -> false) fields in
+  let rec validate = function
+    | [] -> Ok value
+    | (name,raw)::rest ->
+      let valid=match name,raw with
+        | ("method"|"body"|"integrity"|"referrer"),`String _ -> true
+        | "keepalive",`Bool _ -> true
+        | "headers",`Assoc values -> strings values
+            && List.length values=List.length (List.sort_uniq String.compare (List.map fst values))
+        | "cache",`String ("default"|"no-store"|"reload"|"no-cache"|"force-cache"|"only-if-cached")
+        | "credentials",`String ("omit"|"same-origin"|"include")
+        | "mode",`String ("cors"|"no-cors"|"same-origin")
+        | "redirect",`String ("follow"|"error"|"manual")
+        | "referrerPolicy",`String (""|"no-referrer"|"no-referrer-when-downgrade"|"origin"|
+            "origin-when-cross-origin"|"same-origin"|"strict-origin"|"strict-origin-when-cross-origin"|"unsafe-url") -> true
+        | _,_ -> false in
+      if valid then validate rest else Error ("invalid native fetch option " ^ name) in
+  validate fields
 let step_of_json value =
-  let* fields = object_fields ["method";"selector";"text";"html";"key";"url";"value";"values";"state";"timeoutMs"] value in
+  let* fields = object_fields ["method";"selector";"text";"html";"key";"url";"value";"values";"state";"timeoutMs";
+    "source";"argumentJson";"pollingMs";"fetchOptions"] value in
   let* method_ = text "method" fields in
   let arguments names = object_fields ("method" :: "timeoutMs" :: names) value in
   let selector () = text "selector" fields in
@@ -105,6 +148,20 @@ let step_of_json value =
     | "waitForLoadState" -> let* _ = arguments ["state"] in let* raw = text "state" fields in
       let* state = load_state raw in
       Ok (Wait_for_load_state state)
+    | "evaluate" ->
+      let* _=object_fields ["method";"source";"argumentJson"] value in
+      let* code=page_code fields in Ok (Evaluate code)
+    | "waitForFunction" ->
+      let* _=arguments ["source";"argumentJson";"pollingMs"] in
+      let* code=page_code fields in
+      let* polling_ms=match List.assoc_opt "pollingMs" fields with
+        | None -> Ok None | Some _ -> Result.map Option.some (integer "pollingMs" fields) in
+      Ok (Wait_for_function {code;polling_ms})
+    | "fetch" ->
+      let* _=arguments ["url";"fetchOptions"] in
+      let* raw=text "url" fields in let* url=url raw in
+      let* options=fetch_options (match List.assoc_opt "fetchOptions" fields with None -> `Assoc [] | Some value -> value) in
+      Ok (Fetch {url;options})
     | _ -> Error "unsupported native Page method" in
   Ok {action;timeout_ms}
 let of_json value =
@@ -127,7 +184,7 @@ let of_json value =
 let is_effect = function
   | Click _ | Double_click _ | Hover _ | Fill _ | Press _ | Focus _ | Reload
   | Keyboard_type _ | Keyboard_insert_text _ | Keyboard_paste _ | Keyboard_press _
-  | Select_option _ | Goto _ -> true
+  | Select_option _ | Goto _ | Evaluate _ | Wait_for_function _ | Fetch _ -> true
   | Wait_for_url _ | Wait_for_selector _ | Wait_for_load_state _ -> false
 let method_name = function
   | Click _ -> "click" | Double_click _ -> "dblclick" | Hover _ -> "hover" | Fill _ -> "fill"
@@ -136,7 +193,11 @@ let method_name = function
   | Keyboard_type _ -> "keyboard.type" | Keyboard_insert_text _ -> "keyboard.insertText"
   | Keyboard_paste _ -> "keyboard.paste" | Keyboard_press _ -> "keyboard.press"
   | Wait_for_selector _ -> "waitForSelector" | Wait_for_load_state _ -> "waitForLoadState"
+  | Evaluate _ -> "evaluate" | Wait_for_function _ -> "waitForFunction" | Fetch _ -> "fetch"
 let string value = `String value
+let code_fields = function
+  | Expression source -> ["source",string source]
+  | Call {source;argument} -> ["source",string source;"argumentJson",string (Yojson.Safe.to_string argument)]
 let step_to_json {action;timeout_ms} =
   let selector value = ["selector",string value] in
   let fields = match action with
@@ -152,7 +213,11 @@ let step_to_json {action;timeout_ms} =
       (match selection with One value -> ["value",string value] | Many values -> ["values",`List (List.map string values)])
     | Goto url | Wait_for_url url -> ["url",string url]
     | Wait_for_selector {selector=s;state} -> selector s @ ["state",string (element_state_name state)]
-    | Wait_for_load_state state -> ["state",string (load_state_name state)] in
+    | Wait_for_load_state state -> ["state",string (load_state_name state)]
+    | Evaluate code -> code_fields code
+    | Wait_for_function {code;polling_ms} -> code_fields code
+        @ Option.to_list (Option.map (fun value -> "pollingMs",`Int value) polling_ms)
+    | Fetch {url;options} -> ["url",string url;"fetchOptions",options] in
   `Assoc (["method",string (method_name action)] @ fields @ Option.to_list (Option.map (fun n -> "timeoutMs",`Int n) timeout_ms))
 
 let to_json {tab_id;expected_url;steps;snapshot_scope;max_chars} = `Assoc [

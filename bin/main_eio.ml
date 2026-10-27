@@ -395,7 +395,7 @@ let make_extended_handler ~trust_policy routes =
              | None -> try_internal_error_response reqd msg)))
 
 (** Main server loop *)
-let run_server ~sw ~env ~host ~port ~base_path ~input_base_path ~on_ready ~accept_store_quarantine =
+let run_server ~sw ~env ~address ~port ~base_path ~input_base_path ~on_ready ~accept_store_quarantine =
   (* Use the parent switch directly so that ALL fibers spawned by
      Server_runtime_bootstrap (background maintenance, keeper loops,
      dashboard refresh, etc.) are children of this switch.  Graceful
@@ -404,7 +404,7 @@ let run_server ~sw ~env ~host ~port ~base_path ~input_base_path ~on_ready ~accep
      switch propagates cancellation to every child fiber, preventing
      the 10s force-exit timeout. *)
   try
-    Server_runtime_bootstrap.run ~sw ~env ~host ~port ~base_path
+    Server_runtime_bootstrap.run ~sw ~env ~address ~port ~base_path
       ~input_base_path ~on_ready ~accept_store_quarantine ~make_routes
       ~make_request_handler:make_extended_handler
       ~make_h2_request_handler:Server_h2_gateway.make_request_handler
@@ -464,7 +464,7 @@ let port = Term.(ret (const (fun requested cli -> match resolve_connection_port 
 
 let accept_store_quarantine =
   let doc =
-    "Let boot move aside every keeper store this build cannot decode and start those keepers with empty stores. Without this flag boot refuses to start while such a store exists and prints each path with its rejection (RFC-0420). The deploy script never passes it: its preflight refuses the same files before the executable starts."
+    "Let boot move aside every keeper store this build cannot decode and start those keepers with empty stores. Without this flag boot refuses to start while such a store exists and prints each path with its rejection (RFC-0420). The deployment preflight never passes it: it refuses the same files before the executable is replaced or started."
   in
   Arg.(value & flag & info ["accept-store-quarantine"] ~doc)
 
@@ -475,6 +475,20 @@ let record_default_arg =
      a temporary server workspace must not overwrite the machine's default."
   in
   Arg.(value & flag & info [ "record-default" ] ~doc)
+
+(* What `masc start` does when another process holds this workspace. *)
+type previous_owner =
+  | Refuse_previous_owner
+  | Wait_for_previous_owner
+
+let previous_owner_arg =
+  let doc =
+    "When another process holds this workspace, wait for it to exit instead \
+     of refusing to start. Nothing is signalled: `masc restart` passes this \
+     after it has asked the running server to stop."
+  in
+  Term.(const (function true -> Wait_for_previous_owner | false -> Refuse_previous_owner)
+    $ Arg.(value & flag & info [ "wait-for-previous-owner" ] ~doc))
 
 let build_provenance_path =
   let doc = "Absolute content-addressed executable provenance sidecar path" in
@@ -573,8 +587,45 @@ let shutdown_signal_name = function
   | Sigterm -> "SIGTERM"
   | Sigint -> "SIGINT"
 
-let acquire_base_path_lock ~run_dir base_path =
-  match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
+let announce_wait_for_previous_owner ~base_path owner =
+  let recorded =
+    match owner with
+    | Server_startup_takeover.Owner_this_process pid
+    | Server_startup_takeover.Owner_recorded pid -> Printf.sprintf "PID %d" pid
+    | Server_startup_takeover.Owner_unnamed -> "an unnamed process"
+  in
+  Log.legacy_stderr ~level:Log.Info ~module_name:"Server"
+    (Printf.sprintf
+       "Waiting for the previous owner of %s (the lease records %s) to exit. \
+        Nothing is signalled from here; stopping this process ends the wait."
+       base_path recorded)
+
+let acquire_base_path_lock ~previous_owner ~run_dir base_path =
+  let acquired =
+    match previous_owner with
+    | Refuse_previous_owner ->
+      Server_startup_takeover.acquire_base_path_lock ~run_dir base_path
+    | Wait_for_previous_owner ->
+      (match
+         Server_startup_takeover.acquire_base_path_lock_after_owner_exits ~run_dir
+           ~on_wait:(announce_wait_for_previous_owner ~base_path) base_path
+       with
+       | Ok acquired -> acquired
+       | Error (Server_startup_takeover.Another_replacement_waits { waiter; waiter_path }) ->
+         let named =
+           match Server_startup_takeover.base_path_owner_pid waiter with
+           | Some pid -> Printf.sprintf "PID %d" pid
+           | None -> "an unnamed process"
+         in
+         Log.legacy_stderr ~level:Log.Error ~module_name:"Server"
+           (Printf.sprintf
+              "[FATAL] Another replacement (%s, %s) already waits for the previous \
+               owner of %s; it starts once that owner exits. This process waits for \
+               nothing and exits."
+              named (Filename.quote waiter_path) base_path);
+         exit 1)
+  in
+  match acquired with
   | Server_startup_takeover.Base_path_acquired lease -> lease
   | Server_startup_takeover.Base_path_already_owned { owner; lock_path } ->
       let detail =
@@ -592,8 +643,19 @@ let acquire_base_path_lock ~run_dir base_path =
            (Server_startup_takeover.base_path_lock_rejection_to_string rejection));
       exit 1
 
-let run_cmd ?schema_observation ?(record_default = false) ~executable_path host port cli_base_path accept_store_quarantine =
+let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Refuse_previous_owner) ~executable_path host port cli_base_path accept_store_quarantine =
   Printexc.record_backtrace true;
+  (* Read before the workspace directory is created or its lease taken, so a
+     host the socket cannot bind leaves nothing behind. *)
+  let bind_address =
+    match Server_bootstrap_http.parse_bind_address host with
+    | Ok address -> address
+    | Error error ->
+      Printf.eprintf
+        "[FATAL] %s\n%!"
+        (Server_bootstrap_http.bind_address_error_to_string error);
+      exit 1
+  in
   let workspace =
     Server_base_path_guard.exit_on_no_workspace
       (Server_base_path_guard.startup_root ~cli_base_path)
@@ -642,7 +704,7 @@ let run_cmd ?schema_observation ?(record_default = false) ~executable_path host 
   let masc_dir = Filename.concat canonical_base_path Common.masc_dirname in
   let lease_dir = (Host_config.host ()).base_path_lease_dir in
   let base_path_lease =
-    acquire_base_path_lock ~run_dir:lease_dir canonical_base_path
+    acquire_base_path_lock ~previous_owner ~run_dir:lease_dir canonical_base_path
   in
   (* The lease has established the canonical .masc boundary. OCaml read its
      event-directory environment before entering ML, so the default needs a
@@ -721,6 +783,17 @@ let run_cmd ?schema_observation ?(record_default = false) ~executable_path host 
      List.iter
        (fun failure -> Log.Server.warn "[Startup] retained checkpoint sweep: %s" failure)
        failures);
+  (* The process lease is held and no original-request writer has started. *)
+  (match Masc.Lane_addon_orphan_body_sweep.run_at_startup ~base_path:canonical_base_path with
+   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+   | exception _ ->
+     Log.Server.warn "[Startup] original request body sweep raised; its last effect may be unconfirmed"
+   | Error error ->
+     Log.Server.warn "[Startup] original request body sweep stopped: %s"
+       (Masc.Lane_addon_orphan_body_sweep.error_to_string error)
+   | Ok report ->
+     Log.Server.info "[Startup] original request body sweep: removed=%d protected_digests=%d"
+       report.removed report.protected_digests);
   (* Only the server samples. Sampling starts before [Eio_main.run] so the
      executor pool, which the main domain spawns while sampling, shares the
      profile and the boot-time loads are in the tables. The rate is a tenth
@@ -872,7 +945,7 @@ let run_cmd ?schema_observation ?(record_default = false) ~executable_path host 
               run_server
                 ~sw
                 ~env
-                ~host
+                ~address:bind_address
                 ~port
                 ~base_path:canonical_base_path
                 ~input_base_path:raw_base_path
@@ -1004,18 +1077,18 @@ let run_cmd ?schema_observation ?(record_default = false) ~executable_path host 
           ~backtrace:(Printexc.get_backtrace ()));
      exit 1)
 
-let run_cmd_exit host port base_path accept_store_quarantine provenance_path provenance_sha256 provenance_device provenance_inode record_default =
+let run_cmd_exit host port base_path accept_store_quarantine provenance_path provenance_sha256 provenance_device provenance_inode record_default previous_owner =
   let identity = Build_identity.current () in
   Installed_dashboard.initialize ~executable_path:identity.executable_path
     ~binary_commit:identity.binary_commit;
   match provenance_path, provenance_sha256, provenance_device, provenance_inode with
   | None, None, None, None ->
-    run_cmd ~record_default ~executable_path:identity.executable_path host port base_path accept_store_quarantine;
+    run_cmd ~record_default ~previous_owner ~executable_path:identity.executable_path host port base_path accept_store_quarantine;
     Cmd.Exit.ok
   | Some path, Some sha256, Some device, Some inode ->
     (match Build_identity.bind_executable_provenance ~path ~sha256 ~device ~inode with
      | Ok () ->
-       run_cmd ~record_default ~executable_path:identity.executable_path host port base_path accept_store_quarantine;
+       run_cmd ~record_default ~previous_owner ~executable_path:identity.executable_path host port base_path accept_store_quarantine;
        Cmd.Exit.ok
      | Error message ->
        Printf.eprintf "invalid build provenance: %s\n" message;
@@ -1317,6 +1390,7 @@ let front_door_cmd_exit
     | Ok port ->
       run_cmd_exit host (Workspace_connection.to_int port) base_path accept_store_quarantine provenance_path
         provenance_sha256 provenance_device provenance_inode record_default
+        Refuse_previous_owner
   in
   let deployment_flags_present =
     record_default
@@ -1356,7 +1430,7 @@ let start_cmd =
   in
   let info = Cmd.info "start" ~doc in
   Cmd.v info
-    Term.(const run_cmd_exit $ host $ port $ run_base_path $ accept_store_quarantine $ build_provenance_path $ build_provenance_sha256 $ build_provenance_device $ build_provenance_inode $ record_default_arg)
+    Term.(const run_cmd_exit $ host $ port $ run_base_path $ accept_store_quarantine $ build_provenance_path $ build_provenance_sha256 $ build_provenance_device $ build_provenance_inode $ record_default_arg $ previous_owner_arg)
 
 let schema_observe_cmd =
   let module Observation = Agent_core.Base.Schema_observation in
@@ -2283,9 +2357,10 @@ let browser_lane_setup_cmd =
           [ "mode" ]
           ~docv:"MODE"
           ~doc:
-            "How to connect Firefox: addon writes the browser Add-on package this masc \
-             carries to .masc/packages/browser and declares it when no declaration of it \
-             exists, which every other mode also does; extension installs the native host \
+            "How to connect Firefox: addon writes the browser Add-on package of each \
+             browser source the workspace runs to .masc/packages/browser-<source> and \
+             declares it when no declaration of that source exists, which every other \
+             mode also does; extension installs the native host \
              and writes the MASC extension for Firefox to load; bidi installs the host and \
              writes the \
              [browser.live.bidi] table so the MASC server starts a Firefox of its own; \
@@ -2423,8 +2498,10 @@ let browser_lane_setup_cmd =
           [ "ego-space" ]
           ~docv:"NAME"
           ~doc:
-            "With --mode ego, the ego lite task space the Add-on serves. By default masc. \
-             A table that is already there keeps its value unless this is given.")
+            "With --mode ego, the ego lite task space the Add-on serves. By default \
+             masc-keepers. A table that is already there keeps its value unless this is \
+             given. The space the table holds, new or kept, is refused when a task space \
+             you made in ego lite already has that name.")
   in
   let no_addon =
     Arg.(
@@ -2453,12 +2530,18 @@ let browser_lane_setup_cmd =
              "Installing again replaces the host, launcher, manifest and extension files \
               and keeps the workspace's lane token."
          ; `P
-             "Every route runs in the browser Lane Add-on, so every mode also writes the \
-              Add-on package this masc carries to .masc/packages/browser and, when the \
-              workspace has no declaration of it, creates browser.toml in its Lane \
-              directory. An existing declaration is left as it is. The server attaches the \
-              Add-on when it starts and on its maintenance pass. Outside --mode addon a \
-              refusal of that step is reported and the mode goes on; --no-addon skips it."
+             "Every route runs in a browser Lane Add-on, one per browser source, so every \
+              mode also writes the package of each source the workspace runs to \
+              .masc/packages/browser-<source> and, when the workspace has no declaration of \
+              that source, creates browser-<source>.toml in its Lane directory: automation, \
+              firefox and ego when runtime.toml has their table or the mode writes it, \
+              stagehand when [browser.stagehand] is there, and external when a native host is \
+              installed. A source whose table the mode writes is declared once that table is \
+              written. A declaration's enabled switches its source on or off. An existing \
+              declaration is left as it is. \
+              The server attaches the Add-ons when it starts and on its maintenance pass. \
+              Outside --mode addon a refusal of that step is reported and the mode goes on; \
+              --no-addon skips it."
          ; `P
              "--mode automation writes the geckodriver of the lane that opens a fresh \
               profile per session ([browser.automation], or the keys where they already \
@@ -2471,8 +2554,10 @@ let browser_lane_setup_cmd =
          ; `P
              "--mode ego writes [browser.live.ego]: the ego-browser the browser Add-on runs \
               and the ego lite task space it serves, after checking that ego-browser \
-              answers --version. It installs no host. An existing table keeps its values \
-              unless they are named. The server reads the table when it starts."
+              answers --version and that no task space you made in ego lite has that \
+              name. When ego lite does not list its spaces, nothing is written. It \
+              installs no host. An existing table keeps its values unless they are named. \
+              The server reads the table when it starts."
          ])
     Term.(
       const (fun base_path modes no_addon binary token_file manifest_dir host_name firefox
@@ -4457,6 +4542,21 @@ let setup_stop_owner_cmd =
   Cmd.v (Cmd.info "setup-stop-previous-owner" ~doc:"Gracefully stop the authenticated owner selected for workspace upgrade.")
     Term.(const stop $ base_path $ port $ login_agent $ expected_version)
 
+let restart_cmd =
+  let log_path =
+    Arg.(value & opt (some string) None & info ["log"] ~docv:"FILE"
+      ~doc:"Append the replacement server's output to $(docv). Defaults to a new \
+            masc-start-<UTC time>.log under the workspace's .masc/logs.")
+  in
+  let restart base_path port host agent log_path =
+    Masc_cli_restart.run ~base_path ~port ~host ~log_path ~agent
+      ~login:(fun () -> ensure_local_operator_login ~base_path ~port ~agent)
+  in
+  Cmd.v (Cmd.info "restart"
+    ~doc:"Ask this workspace's running server to stop gracefully, start the installed build \
+          in its place in the background, and wait until it is ready. Nothing is forced down.")
+    Term.(const restart $ base_path $ port $ host $ login_agent $ log_path)
+
 let runtime_client_path_cmd =
   let client = Arg.(required & opt (some Masc_cli_client_path.client_arg) None & info ["client"]
     ~docv:"CLIENT" ~doc:"claude-code, codex, antigravity or muse-code.") in
@@ -4471,7 +4571,8 @@ let sandbox_catalog_cmd =
     (* The setup journey reads this catalog for the workspace doctor offered;
        both answer in Workspace_root's order. *)
     let base_path = selected_base_path requested in
-    print_endline (Yojson.Safe.to_string (Masc.Sandbox_readiness.inspect ~base_path));
+    print_endline (Yojson.Safe.to_string
+      (Masc.Sandbox_readiness.inspect ~run:Masc.Sandbox_readiness.system_runner ~base_path));
     0 in
   Cmd.v (Cmd.info "sandbox-catalog" ~doc:"Inspect sandbox choices and host prerequisites without changing settings.")
     Term.(const inspect $ run_base_path)
@@ -4746,6 +4847,7 @@ let cmd =
     ; antigravity_context_cmd
     ; setup_server_cmd
     ; setup_stop_owner_cmd
+    ; restart_cmd
     ; doctor_cmd
     ; sandbox_catalog_cmd
     ; runtime_client_path_cmd

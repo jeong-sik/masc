@@ -172,15 +172,17 @@ run. If the workspace cannot be resolved or observed, installation stops before
 replacement; pass `--base-path DIR` or set `MASC_BASE_PATH` when
 no workspace is found. A configuration or stored-state rejection also stops installation.
 
-Every browser route runs in the browser Lane Add-on, so the script also builds
-and installs `masc-native-addon-launcher`, `masc-browser-addon-worker` and
-`masc-browser-process-owner` into the same prefix. The masc it installed then
-runs `masc browser-lane-setup --mode addon` for the workspace: it writes the
-Add-on package that build carries to `.masc/packages/browser` and declares it
-in `browser.toml` when the workspace has no declaration of it. The server
-attaches it when it starts. Pass `--no-browser-addon` to leave the Add-on out:
-the programs are not built or installed, the workspace's declaration is left as
-it is, and no browser route works. See [Browser Addon setup](addons/browser/README.md).
+Every browser route runs in a browser Lane Add-on, one per browser source, so
+the script also builds and installs `masc-native-addon-launcher`,
+`masc-browser-addon-worker` and `masc-browser-process-owner` into the same
+prefix. The masc it installed then runs `masc browser-lane-setup --mode addon`
+for the workspace: for each source the workspace runs, it writes the package
+that build carries to `.masc/packages/browser-<source>` and declares it in
+`browser-<source>.toml` when the workspace has no declaration of that source.
+The server attaches them when it starts. Pass `--no-browser-addon` to leave the
+Add-ons out: the programs are not built or installed, the workspace's
+declarations are left as they are, and no browser route works. See
+[Browser Addon setup](addons/browser/README.md).
 Release downloads do not include these programs.
 
 `./quickstart.sh` seeds a workspace under `~/masc-quickstart`, starts the

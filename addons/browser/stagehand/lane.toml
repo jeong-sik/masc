@@ -1,0 +1,35 @@
+id = "browser-stagehand"
+revision = "0.1.0"
+title = "Browser Stagehand (owned Chrome)"
+ui_category = "browser"
+runtime = "host_process"
+service = "browser"
+browser_backend = "stagehand"
+command = ["masc-browser-addon-worker"]
+contributions = ["observe"]
+
+[world.skills]
+directory = "skills"
+
+[world.tools]
+export = ["browser_command"]
+invocation = "host_context"
+hooks = ["validate_input", "validate_output"]
+
+[world.outputs.connections]
+all_lanes = true
+
+[world.exact_outputs.stagehand]
+schema = "schemas/stagehand.json"
+request_schema = true
+
+[resources]
+max_reply_bytes = 4194304
+
+[interface]
+binding_schema = '''{
+  "type": "object",
+  "properties": {"sources": {"type": "array", "items": {"type": "object", "properties": {}, "additionalProperties": false}, "maxItems": 0}},
+  "required": ["sources"],
+  "additionalProperties": false
+}'''

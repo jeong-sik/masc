@@ -27,7 +27,17 @@ let decode_snapshot = function
            let rec decode acc = function
              | [] -> Ok (List.rev acc)
              | `Assoc client::rest ->
-                 let* client=Browser_addon_wire.client_of_json (`Assoc (List.remove_assoc "interactions" client)) in
+                 let* ()=if List.sort String.compare (List.map fst client)
+                   =["browser";"clientId";"engineVersion";"interactions";"lastActivities";"transport";"version"]
+                   then Ok () else Error "invalid browser inventory client fields" in
+                 let validate name decode = match List.assoc_opt name client with
+                   | Some (`List values) -> List.fold_left (fun result value ->
+                       let* ()=result in Result.map (fun _ -> ()) (decode value)) (Ok ()) values
+                   | None|Some _ -> Error ("invalid browser " ^ name) in
+                 let* ()=validate "interactions" Browser_lane.interaction_activity_of_json in
+                 let* ()=validate "lastActivities" Browser_lane.settled_activity_of_json in
+                 let* client=Browser_addon_wire.client_of_json (`Assoc
+                   (List.filter (fun (name,_) -> name<>"interactions" && name<>"lastActivities") client)) in
                  if List.exists (fun (known : Browser_lane.client_info) -> known.client_id=client.client_id) acc
                  then Error "duplicate browser inventory client" else decode (client::acc) rest
              | _::_ -> Error "invalid browser inventory client" in
@@ -43,3 +53,23 @@ let decode_snapshot = function
 let read (output : Lane_addon_types.output) = match output.rows with
   | [ row ] -> decode_snapshot (`Assoc row.fields)
   | [] | _::_::_ -> Error "the browser observation does not hold exactly the browser worker row"
+
+let unobserved : Browser_selection.work_browser =
+  {activity=Browser_lane.Unobserved;registered=false;session=Browser_lane.Browser_unknown;locate=false}
+let serves_live backend = Browser_lane.Backend.lane backend = Browser_lane.Lane_name.Live
+(* What a worker publishes does not say which worker of its source it came
+   from, so when two workers serve one source neither answers for its lane. *)
+let answers_for ~among lane backend =
+  Browser_lane.Backend.lane backend = lane
+  && List.length (List.filter (fun other -> other = backend) among) < 2
+let lists_usable_clients ~among backend = answers_for ~among Browser_lane.Lane_name.Live backend
+let merge ~among workers =
+  let live = List.filter_map (fun (backend, published) ->
+    if lists_usable_clients ~among backend then published else None) workers in
+  let owned source pick = match List.filter (fun (backend, _) -> backend = source) workers with
+    | [ (_, Some published) ] -> pick published
+    | [ (_, None) ] | [] | _ :: _ :: _ -> unobserved in
+  { clients = List.concat_map (fun published -> published.clients) live;
+    client_rows = List.concat_map (fun published -> published.client_rows) live;
+    automation = owned Browser_lane.Backend.Automation (fun published -> published.automation);
+    stagehand = owned Browser_lane.Backend.Stagehand (fun published -> published.stagehand) }

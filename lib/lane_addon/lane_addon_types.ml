@@ -47,7 +47,7 @@ type model_access = Model_disabled | Host_sampling
 type state_storage = Ephemeral | Persistent
 type tool_invocation = Direct | Host_context
 type tool_hook = Validate_input | Validate_output
-type worker_service = Mcp_tools | Browser_service
+type worker_service = Mcp_tools | Browser_service of Browser_lane.Backend.t
 type request_schema_policy = Package_schema_only | Consumer_request_schema
 type exact_output = { name : string; schema : Yojson.Safe.t; request_schema : request_schema_policy }
 type package = {
@@ -96,7 +96,7 @@ let validate_exported_tools ~action_tool names =
     let sorted = List.sort_uniq String.compare names in
     if List.length sorted <> List.length names then Error "duplicate exported tool name"
     else if List.exists (fun name -> name = "lane_observe" || name = Lane_addon_call_context.tool_name
-      || name = Lane_addon_call_context.effects_tool || name = host_requests_tool || name = host_result_tool || name = operator_tool || name = companion_tool
+      || name = host_requests_tool || name = host_result_tool || name = operator_tool || name = companion_tool
       || name = Machine_input_history.tool_name
       || name = Machine_controller_contract.snapshot_tool || name = Machine_controller_contract.release_tool
       || Some name = action_tool) sorted then
@@ -241,7 +241,10 @@ let package_to_json (p : package) =
   `Assoc (runtime
     @ (match p.ui_category with None -> []
        | Some category -> ["ui_category", Lane_addon_category.to_json category])
-    @ (match p.worker_service with Mcp_tools -> [] | Browser_service -> ["service", string "browser"])
+    @ (match p.worker_service with
+       | Mcp_tools -> []
+       | Browser_service backend ->
+         ["service", string "browser"; "browser_backend", string (Browser_lane.Backend.to_wire backend)])
     @ (match p.tool_hooks with [] -> [] | hooks ->
       ["tool_hooks", strings (List.map (function
         | Validate_input -> "validate_input" | Validate_output -> "validate_output") hooks)])

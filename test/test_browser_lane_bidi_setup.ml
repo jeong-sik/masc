@@ -458,10 +458,10 @@ let test_a_table_declared_another_way_is_refused_not_declared_twice () =
         ^ "\n[browser.live]\nbidi = { firefox = \"/bin/sh\", profile = \"/tmp\" }\n"
       , fun fixture -> request ~port:9444 fixture )
     ; ( "[browser] is inline"
-      , "browser = { live = { enabled = true } }\n" ^ runtime_base
+      , "browser = { live = { ego = { command = \"/bin/sh\", space = \"masc\" } } }\n" ^ runtime_base
       , fun fixture -> request fixture )
     ; ( "[browser.live] is inline"
-      , runtime_base ^ "\n[browser]\nlive = { enabled = true }\n"
+      , runtime_base ^ "\n[browser]\nlive = { ego = { command = \"/bin/sh\", space = \"masc\" } }\n"
       , fun fixture -> request fixture )
     ]
 
@@ -477,7 +477,8 @@ let test_what_needs_no_edit_or_a_new_header_is_not_refused () =
     check bool "nothing is named" true (B.change plan = B.Unchanged);
     ignore (apply_ok plan);
     check string "the file is as it was" before (read fixture.runtime));
-  with_fixture ~config:("browser.live.enabled = true\n" ^ runtime_base) (fun fixture ->
+  with_fixture ~config:("browser.live.ego.command = \"/bin/sh\"\nbrowser.live.ego.space = \"masc\"\n" ^ runtime_base)
+    (fun fixture ->
     let plan = plan_ok ~find:(found fixture) (request ~profile:fixture.root fixture) in
     ignore (apply_ok plan);
     check string "the table follows dotted keys that name only its parent" fixture.root
@@ -497,18 +498,6 @@ let test_a_key_written_twice_in_the_table_is_refused_untouched () =
     let message = message_of (B.plan ~find_firefox:never_asked (request ~port:9444 fixture)) in
     check bool ("refused (got: " ^ message ^ ")") true (contains message "[browser.live.bidi] was not written");
     check string "runtime.toml is as it was" config (read fixture.runtime))
-
-(* --- the live lane switch --------------------------------------------------- *)
-
-let test_a_lane_that_is_off_is_reported_and_the_table_is_still_written () =
-  with_fixture ~config:(runtime_base ^ "\n[browser.live]\nenabled = false\n") (fun fixture ->
-    let plan = plan_ok ~find:(found fixture) (request ~profile:fixture.root fixture) in
-    check bool "the lane is off" false (B.lane_enabled plan);
-    ignore (apply_ok plan);
-    check string "the table is there" fixture.root (configured fixture).C.profile);
-  with_fixture (fun fixture ->
-    check bool "a lane nobody turned off is on" true
-      (B.lane_enabled (plan_ok ~find:(found fixture) (request ~profile:fixture.root fixture))))
 
 (* --- a Firefox that is there and does not answer ------------------------- *)
 
@@ -610,8 +599,6 @@ let () =
     ; ( "what is not refused"
       , [ test_case "no edit, or a new header beside dotted parents" `Quick
             test_what_needs_no_edit_or_a_new_header_is_not_refused
-        ; test_case "a lane that is off still gets the table" `Quick
-            test_a_lane_that_is_off_is_reported_and_the_table_is_still_written
         ; test_case "a named Firefox that does not answer is noted" `Quick
             test_a_named_firefox_that_does_not_answer_is_written_with_a_note
         ] )

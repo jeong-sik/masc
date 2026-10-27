@@ -1168,7 +1168,7 @@ let core =
 type checkpoint_info = {
   exists : bool;
   version : int;
-  saved_at_unix : float option;
+  mtime_unix : float option;
   mtime_utc : string option;
   core_sha : string option;
   cartridge : string option;
@@ -1256,7 +1256,7 @@ let checkpoint_info ~path =
         let* core_sha = optional_string "core_sha" in
         let* cartridge = optional_string "cartridge" in
         let* disk = optional_string "disk" in
-        let saved_at_unix, mtime_utc =
+        let mtime_unix, mtime_utc =
           match Unix.stat path with
           | exception _ -> None, None
           | stats ->
@@ -1269,7 +1269,7 @@ let checkpoint_info ~path =
         Ok
           { exists = true
           ; version
-          ; saved_at_unix
+          ; mtime_unix
           ; mtime_utc
           ; core_sha
           ; cartridge

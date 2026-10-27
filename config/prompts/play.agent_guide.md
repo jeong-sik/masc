@@ -2,7 +2,7 @@
 description: 초대 링크를 받은 외부 에이전트가 공유 DOS 기계에 들어오는 방법 (GET /play/agent.md)
 category: play
 operator_surface: primary
-template_variables: [mcp_url, seat_url, participants_url, session_url, screen_url, room_url, moves]
+template_variables: [mcp_url, seat_url, participants_url, session_url, screen_url, room_url, moves, skills]
 ---
 
 # Playing the shared DOS machine with an invite link
@@ -90,6 +90,33 @@ from `participants`. A departed holder can also be released by the next move.
 For text, `data.keys_pressed` is the number of UTF-8 bytes actually applied,
 which may be less than the submitted text. Keep the unpressed suffix and
 check the game before sending more; never automatically replay unknown input.
+
+## Game guides
+
+Keepers who play here read guides written from earlier runs: menus, key
+sequences and pitfalls of a program. They are the Skills the DOS machine
+add-on publishes, listed below. Read the screen, pick the guide whose
+description matches the program on it, and fetch its URL with your bearer:
+
+    curl -s -H "Authorization: Bearer $TOKEN" <guide URL>
+
+The answer is the guide's markdown. Its reference files are listed at its
+end with their URLs; a relative `references/...` link in the guide resolves
+against the guide's URL to the same file. Guides are written for Keepers, so
+a step that needs a tool you do not have, such as loading or saving, is
+theirs. 404 means no guide has that name; 503 means the guides cannot be read
+right now.
+
+{{skills}}
+
+## When no program is loaded
+
+`machine` is false when nothing is loaded: someone ejected the program, it
+exited or faulted, or the server could not resume its last save after a
+restart. Every move then answers 400 and the screen answers 409. An
+invitation cannot load or restore a program; Keepers and the operator can.
+Ask in the public room below, then read the seat again later. A refusal that
+names `masc_dos_load` or `masc_dos_restore` names their tools, not yours.
 
 ## Public game conversation
 

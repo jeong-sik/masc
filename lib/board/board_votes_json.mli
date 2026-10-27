@@ -17,13 +17,25 @@ val load_source_rows :
   accept:('a -> unit) ->
   (unit, string * exn) result
 (** Read every nonempty JSONL line, retaining the first invalid JSON or schema
-    error with its line number instead of silently dropping that row. *)
+    error with its line number instead of silently dropping that row. When
+    more than one row is rejected the detail also carries the reject count. *)
 
 val record_load_result :
   ((unit, string) result -> unit) ->
   ('a, string * exn) result ->
   ('a, string * exn) result
 (** Store the last full-load outcome while returning the caller's count. *)
+
+val log_loaded :
+  noun:string ->
+  loaded:int ->
+  path:string ->
+  elapsed:float ->
+  (unit, string * exn) result ->
+  unit
+(** One owner for every "loaded N <noun>" line. The [Error] arm logs a
+    warn naming the partial load: accepted rows stay in the store while
+    the outcome is [Error]. *)
 
 val load_persisted_posts : store -> (int, string * exn) result
 (** Load posts from disk into [store].  Returns [Ok loaded_count] on success

@@ -21,7 +21,7 @@ let work registered = `Assoc ["activity",`String "enabled";"registered",`Bool re
   "session",`String "closed";"locate",`Bool false]
 let client id browser = `Assoc ["clientId",`String id;"browser",`String browser;
   "version",`String "158.0.1";"engineVersion",`String "158.0.1";"transport",`String "web_extension";
-  "interactions",`List []]
+  "interactions",`List [];"lastActivities",`List []]
 let serving clients = `Assoc ["state",`String "serving";"clients",`List clients;
   "owned_backends",`Assoc ["automation",work true;"stagehand",work false]]
 (* The server reads the browser rows of the Lanes list from this cached

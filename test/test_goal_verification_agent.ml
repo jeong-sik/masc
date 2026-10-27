@@ -1814,7 +1814,10 @@ let test_daemon_announces_an_early_original_failure_once () =
               | Some json ->
                 (match Verification_protocol.For_testing.stall_disposition_of_json json with
                  | Some Verification_protocol.No_retry_armed -> ()
-                 | Some (Verification_protocol.Retry_scheduled _) | None ->
+                 | Some (Verification_protocol.Retry_scheduled _
+                        | Verification_protocol.Original_observation_scheduled _
+                        | Verification_protocol.Original_repair_required)
+                 | None ->
                    fail "a corrupt body cannot authorize automatic reviewer retry")
               | None -> fail "original-body notice has no typed disposition")
            | posts -> fail (Printf.sprintf "expected one original-body notice, got %d" (List.length posts)));
@@ -2024,6 +2027,9 @@ let test_deferred_review_is_announced_and_waits_for_a_request () =
                    | Some Verification_protocol.No_retry_armed -> ()
                    | Some (Verification_protocol.Retry_scheduled _) ->
                      fail "the Goal verifier arms no retry"
+                   | Some (Verification_protocol.Original_observation_scheduled _
+                          | Verification_protocol.Original_repair_required) ->
+                     fail "the Goal verifier plans no original-body step"
                    | None -> fail "the disposition must decode")
                 | None -> fail "stall notice lacks its disposition");
                check bool "the notice names the forward path" true
@@ -2126,6 +2132,9 @@ let test_raised_review_is_announced () =
         | Some Verification_protocol.No_retry_armed -> ()
         | Some (Verification_protocol.Retry_scheduled _) ->
           fail "a raised review arms no retry"
+        | Some (Verification_protocol.Original_observation_scheduled _
+               | Verification_protocol.Original_repair_required) ->
+          fail "a raised review plans no original-body step"
         | None -> fail "the disposition must decode")
      | None -> fail "stall notice lacks its disposition");
     check bool "the notice names the forward path" true
@@ -2447,6 +2456,9 @@ tools-support = true
                    fail "the rest-dated retry must name its own delay"
                  | Some Verification_protocol.No_retry_armed ->
                    fail "a stated provider rest stopped the Goal review"
+                 | Some (Verification_protocol.Original_observation_scheduled _
+                        | Verification_protocol.Original_repair_required) ->
+                   fail "a stated provider rest must arm a dated retry, not an original-body step"
                  | None -> fail "the disposition must decode")
               | None -> fail "stall notice lacks its disposition")
            | posts ->

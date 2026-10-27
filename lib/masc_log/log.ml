@@ -337,6 +337,10 @@ module Ring = struct
      extended deliberately. The wire shape (field set + key order) is the
      [LogEntryRawSchema] contract in [dashboard/src/api/schemas/logs.ts]. *)
   let entry_to_json e =
+    (* The dashboard schema requires a non-empty keeper_name string, so
+       [None] encodes as "system". That is also a valid Keeper name: the
+       decoder preserves literal names, and this wire format cannot
+       distinguish those two original option values. *)
     let keeper_name_json = match e.keeper_name with
       | Some s -> `String s
       | None -> `String "system"
@@ -989,9 +993,6 @@ module type LOGGER = sig
   val warn :
     ?keeper_name:string -> ?turn_id:int -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
 
-  val warning :
-    ?keeper_name:string -> ?turn_id:int -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
-
   val error :
     ?keeper_name:string -> ?turn_id:int -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
 end
@@ -1068,7 +1069,6 @@ module Make (M : sig val name : string end) = struct
   let debug ?keeper_name ?turn_id ?category fmt = log_module Debug ?keeper_name ?turn_id ?category fmt
   let info ?keeper_name ?turn_id ?category fmt = log_module Info ?keeper_name ?turn_id ?category fmt
   let warn ?keeper_name ?turn_id ?category fmt = log_module Warn ?keeper_name ?turn_id ?category fmt
-  let warning = warn
   let error ?keeper_name ?turn_id ?category fmt = log_module Error ?keeper_name ?turn_id ?category fmt
 end
 
@@ -1106,6 +1106,7 @@ module TaskState = Make(struct let name = "TaskState" end)
 module KeeperExec = Make(struct let name = "KeeperExec" end)
 module LocalWorker = Make(struct let name = "LocalWorker" end)
 module Harness = Make(struct let name = "Harness" end)
+module Candle = Make(struct let name = "Candle" end)
 
 (* Logging-consistency migration (refactor/logging-consistency-harness):
    modules added so that former top-level [Log.info ~ctx:"<name>"] call sites

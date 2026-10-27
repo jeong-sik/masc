@@ -236,7 +236,8 @@ let fork_background_refresh_or_cancel ~dir ~cancel_refresh run =
   else match Eio_context.get_switch_opt () with
   | None -> cancel_refresh dir
   | Some sw ->
-    (try Eio.Fiber.fork ~sw run with
+    (* No request waits on this refresh (RFC-0204 3.4). *)
+    (try Eio.Fiber.fork ~sw (fun () -> Pool_lane.with_background run) with
      | exn when eio_switch_fork_unavailable exn ->
        background_refresh_mark_domain_unavailable ();
        cancel_refresh dir
@@ -1355,7 +1356,8 @@ let maybe_fork_dashboard_runtime_probe_refresh () =
               (Printexc.to_string exn);
             dashboard_runtime_probe_record_failure exn
         in
-        (try Eio.Fiber.fork ~sw run with
+        (* No request waits on this refresh (RFC-0204 3.4). *)
+        (try Eio.Fiber.fork ~sw (fun () -> Pool_lane.with_background run) with
          | exn when eio_switch_fork_unavailable exn ->
            background_refresh_mark_domain_unavailable ();
            Atomic.set dashboard_runtime_probe_refresh_in_flight false

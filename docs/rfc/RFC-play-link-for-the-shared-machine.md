@@ -233,12 +233,42 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
 - 에이전트가 받는 것도 사람과 같은 링크 하나다. 링크를 열면 `/play` 페이지가 뜨고, 페이지 맨 아래 줄이
   `GET /play/agent.md`(`Play_invite.agent_guide_path`)를 가리킨다. 스크립트를 돌리지 않고 페이지를
   읽는 에이전트도 이 줄은 본다.
-  - 안내문은 공개다. 토큰도 워크스페이스 상태도 담지 않는다. `#` 뒤가 bearer 토큰이라고 알려 줄 뿐이다.
+  - 안내문은 공개다. 토큰은 담지 않는다. `#` 뒤가 bearer 토큰이라고 알려 줄 뿐이다.
   - 글은 프롬프트 `play.agent_guide`(`config/prompts/play.agent_guide.md`)에 둔다. 운영자가 override 로 고칠 수 있다.
   - 주소와 스키마는 서버가 채운다: `MASC_HTTP_BASE_URL` 뒤에 `/mcp/play`, seat, participants, session, `screen.png`, room, §2.5 이동
     라우트 네 개. 이동마다 그 라우트가 본문을 검사하는 도구 스키마를 그대로 싣는다
     (`Server_routes_http_routes_dos.moves`). 복사본이 아니라서 스키마가 바뀌면 안내문도 같이 바뀐다.
+  - 「Game guides」 절(`{{skills}}`, `Server_play_skills`)에는 공유 DOS 기계가 지금 공개한 Skill 을 모두 적는다.
+    Skill 마다 이름, frontmatter 의 description, `<base>/play/skills/<name>/SKILL.md` 를 적는다.
+    이 절은 Skill 스냅샷만 읽고 디스크를 읽지 않는다.
+  - 공유 DOS 기계는 seat 와 이동이 부르는 설치다. DOS 화면 도구(`masc_dos_screen`)를 내보내는 공유 설치를
+    찾고(`Machine_addon_host.shared_skill_owner`), 그 설치가 Skill 을 공개하는 주인(선언이면 선언 id, 손으로 붙였으면
+    instance id)의 source id(`Lane_addon_runtime.skill_source_id`)로 Skill 을 고른다. 선언 이름은 무엇이든 된다.
+  - Skill 은 Keeper 의 `keeper_skill` 이 읽는 것과 같은 스냅샷(`Server_skill_snapshot_runtime.lookup`)에서,
+    Keeper 의 이름 조회가 돌려주는 것만 고른다. 같은 이름의 작업공간 Skill 이 있으면 그쪽이 이기고, 기계의 Skill 은
+    안내문에도 주소에도 나오지 않는다. 저장소의 `addons/` 는 읽지 않는다.
+  - 서버는 프로그램 이름으로 Skill 을 고르지 않는다. 에이전트가 화면의 프로그램과 description 을 맞춰 본다.
+  - Skill 이 없으면 절에 까닭을 한 줄 적는다: 스냅샷이 아직 없음, 기계가 붙어 있지 않음, Skill 설정이 적용되지 않음
+    (runtime.toml 이 거절됐거나 `[skills]` 가 없음), 기계의 Skill 폴더를 읽지 못함.
   - `MASC_HTTP_BASE_URL` 이 없으면 들어올 주소가 없으므로 `409 not_ready` 다. 초대 발급 조건과 같다.
+- `GET /play/skills/<name>/SKILL.md` 는 그 Skill 의 SKILL.md 에서 frontmatter 뒤 본문을 돌려준다. Keeper 의
+  `keeper_skill` 이 돌려주는 글과 같다. 참고 파일이 있으면 본문 끝에 「Reference files」 목록으로 주소를 붙인다.
+  `GET /play/skills/<name>/references/<file>` 은 그 참고 파일을 돌려준다. 본문 안의 상대 링크 `references/<file>` 은
+  본문 주소를 기준으로 같은 파일을 가리킨다.
+  - 참고 파일은 요청이 온 그 Skill 의 `references/` 에서만, 요청이 왔을 때 센다. 링크가 아닌 보통 `.md` 파일만 센다.
+  - 둘 다 `text/markdown; charset=utf-8`, `cache-control: no-store`, `x-content-type-options: nosniff` 로 답한다.
+  - 둘 다 seat 처럼 `CanPlayMachine` bearer 가 있어야 한다. 토큰이 없거나 모르는 토큰이면 401 이다.
+    지금 있는 역할(`Worker`, `Admin`, `Player`)은 모두 `CanPlayMachine` 을 가지므로 403 은 나오지 않는다.
+    안내문은 그대로 공개다. 주소를 만들 `MASC_HTTP_BASE_URL` 이 없으면 안내문처럼 `409 not_ready` 다.
+  - 이름은 공개된 목록에서, 참고 파일은 센 목록에서 찾는다. 요청 경로로 파일 경로를 만들지 않는다.
+    목록에 없는 이름은 `404 skill_not_found` 다. `..`, 절대 경로, 인코딩한 경로, Skill 밖을 가리키는 링크도
+    목록에 없으므로 같다. 참고 파일은 Keeper 처럼 링크를 따라가지 않고 같은 읽기 상한 안에서 읽는다.
+  - 지금 읽을 수 없으면 503 이다. seat 가 붙은 DOS worker 없이 답하는 것과 같고, 사정이 바뀌면 같은 주소가 다시 답한다.
+    코드는 까닭마다 다르다: `skills_unpublished`, `machine_unavailable`, `skills_not_configured`,
+    `skills_source_unavailable`, `references_unreadable`, `reference_unreadable`.
+    본문 요청에서 참고 파일만 셀 수 없으면 본문은 200 으로 주고 주소 목록을 붙이지 않는다.
+  - 거절 본문에는 호스트 경로를 싣지 않는다. 까닭은 운영 로그에 남긴다.
+  - seat 처럼 HTTP/1.1 라우터에만 있다.
   - MCP 클라이언트는 Streamable HTTP 로 붙는다. 안내문에는 확인한 두 클라이언트(Claude Code, Codex)의 명령만 적고,
     나머지는 "같은 URL 과 헤더"로 적는다. MCP 를 못 쓰거나 세션 중에 서버를 더할 수 없는 에이전트(pi 등)는
     같은 자리를 HTTP 로 쓴다: seat 읽기, `screen.png`, `/api/v1/dos/{press,type,step,pass}`.

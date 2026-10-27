@@ -9,6 +9,7 @@ module Mcp_http = Runtime_official_client_mcp_http
 type attempt_outcome =
   { result : (Runtime_agent.run_result, Agent_core.Error.t) result
   ; settled_session : Keeper_official_client_session_store.t option
+  ; pending_result_receipts : Keeper_client_tool_outbox.consumption option
   ; effect_disposition : Keeper_provider_attempt_effect.t
   }
 
@@ -749,7 +750,7 @@ let phase_name : Session_store.phase -> string = function
   | Session_store.Settled _ -> "Settled"
 ;;
 
-let run_without_lifecycle ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled
+let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready
     ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~configured_reasoning_effort ~turn_timeout_s ~quota_scope
     ~on_model_input_window_observation ~carried_front_seed ~librarian_front ~on_carried_front
@@ -759,6 +760,7 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
     ~observe_effect_attempted ~observe_transport_uncertain ~on_official_client_tool_boundary
     ~on_official_client_result_handoff ~on_native_action ~on_native_tool_completion ~on_usage_report ~on_tool_execution
     ~(config : Serve.config) =
+  on_results_ready None;
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
     Error
@@ -850,6 +852,8 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
         ~model_input_projection:None
         ~hooks:(Some hooks)
     in
+    let* tool_outbox = Keeper_client_tool_outbox.load ~base_path ~keeper_name
+      |> Result.map_error internal_error in
     let prepared = { prepared with
       system_prompt = String.concat "\n\n"
         (prepared.system_prompt :: native_posture_note native_posture
@@ -1025,6 +1029,10 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
     let* () = Keeper_official_task_reference.require_preserved
       ~reference:historical_task_message prepared.messages
       |> Result.map_error (config_error ~field:"official_client_session.task_reference") in
+    (* Original returned results survive history projection and range shrinking.
+       Only their completed consumer, after delivery, may acknowledge them. *)
+    let prepared = {prepared with Host.messages = prepared.messages
+      @ Option.to_list (Keeper_client_tool_outbox.context_message tool_outbox)} in
     (* The prepared attribution, not transmission evidence: the serve client
        calls this only after the complete [turn/start] line is written. *)
     let report_transmitted_input () =
@@ -1096,9 +1104,10 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
         ()
     in
     let terminal_error = ref None in
-    let* dynamic_tools =
+    let* (dynamic_tools, result_producer) =
       match
         Host.dynamic_tools
+        ~result_scope:(Some result_scope)
         ~base_path
           ~content_transport:Runtime_official_client_tool.Mcp
           ~accepts_image_input
@@ -1122,11 +1131,18 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
           ~on_result_handoff:on_official_client_result_handoff
           ()
       with
-      | Ok dynamic_tools -> Ok (List.map (muse_dynamic_tool ~observe_effect_attempted) dynamic_tools)
+      | Ok (dynamic_tools, result_producer) ->
+        Ok (List.map (muse_dynamic_tool ~observe_effect_attempted) dynamic_tools, result_producer)
       | Error error ->
         Host.finish_raw_error ~keeper_name raw_trace_run error;
         Error error
     in
+    let produced_results = ref None in
+    let close_delivery_frontier () =
+      if Option.is_none !produced_results then
+        produced_results := Option.map Keeper_client_tool_outbox.close_delivery_frontier result_producer
+    in
+    let natural_completion = ref false in
     let* claimed_session =
       match
         Session_store.claim_with_context_frontier
@@ -1364,12 +1380,10 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
     in
     let run_client () =
       Eio.Switch.run (fun sw ->
-        let abort_turn, resolve_abort_turn = Eio.Promise.create () in
-        let abort_turn_resolved = Atomic.make false in
-        let* mcp_servers =
+        let* (mcp_servers, bridge) =
           try Ok (
           match dynamic_tools with
-          | [] -> []
+          | [] -> [], None
           | _ :: _ ->
             let bridge = Mcp_http.start
               ~sw
@@ -1377,6 +1391,9 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
               ~secure_random:(Eio.Stdenv.secure_random env)
               ~server_name:mcp_server_name
               ~tool_specs:(fun () -> List.map tool_spec dynamic_tools)
+              ~tool_execution_mode:(fun ~name ~arguments ->
+                find_tool dynamic_tools name |> Option.map (fun (tool : Host.dynamic_tool) ->
+                  tool.execution_mode arguments))
               ~call_tool:(fun ~name ~call_id ~arguments ->
                 find_tool dynamic_tools name
                 |> Option.map (fun (tool : Host.dynamic_tool) ->
@@ -1385,17 +1402,15 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
                     ~finally:(fun () -> stream.on_tool_finished ~call_id)
                     (fun () ->
                       let result = tool.call ~call_id arguments in
+                      let on_response_sent =
+                        Runtime_official_client_tool.response_observer Mcp result in
                       { Mcp_http.outcome = tool_result result
-                      ; after_response_sent =
-                          (fun () ->
-                            Option.iter
-                              (fun detail ->
-                                 if Atomic.compare_and_set abort_turn_resolved false true
-                                 then Eio.Promise.resolve resolve_abort_turn detail)
-                              result.abort_turn)
+                      ; stop = result.abort_turn
+                      ; after_response_sent = (fun () ->
+                          Runtime_official_client_tool.notify_response_sent on_response_sent)
                       })))
               () in
-            mcp_servers_of_bridge bridge ~served:dynamic_tools
+            mcp_servers_of_bridge bridge ~served:dynamic_tools, Some bridge
           ) with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn when Keeper_owner_signals.is_owner_cancel_reason exn -> raise exn
@@ -1454,7 +1469,9 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
                         ~submission:(Serve.context_submission_to_json submission) ())
                     ~on_stream_event:(fun event ->
                       (match event with
-                       | Serve.Turn_terminal_received terminal -> provider_terminal := Some terminal
+                       | Serve.Turn_terminal_received terminal ->
+                         close_delivery_frontier ();
+                         provider_terminal := Some terminal
                        (* A host stop settles with the model the calls ran
                           on, as a completed turn does. *)
                        | Serve.Model_call_reported { model; _ } ->
@@ -1483,9 +1500,12 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
                     ~prompt
                     ~images))
             ~watcher:(fun () ->
-              let stop = Eio.Promise.await abort_turn in
-              Eio.Promise.await turn_acknowledged;
-              `Abort stop)
+              match bridge with
+              | None -> Eio.Fiber.await_cancel ()
+              | Some bridge ->
+                let stop = Mcp_http.await_host_stop bridge in
+                Eio.Promise.await turn_acknowledged;
+                `Abort stop)
         with
         | `Runtime client_result ->
           client_result
@@ -1583,6 +1603,7 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
            | (Host.Repeated_tool_call _ | Host.Terminal_tool_boundary _), None ->
              settle_host_stop stop)
         | Ok (`Completed (turn : Serve.turn_result)) ->
+          natural_completion := true;
           recovery_failure := Session_store.Protocol_failed;
           let* () =
             record_turn_identity ~session_id:turn.session_id ~turn_id:turn.turn_id
@@ -1691,6 +1712,14 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
          | Dispatched | Acknowledged -> observe_transport_uncertain ());
         Error (internal_error (runtime_label ^ " turn raised: " ^ Printexc.to_string exn))
     in
+    let turn_result =
+      let* result = turn_result in
+      let produced = match !natural_completion with
+        | true -> Option.to_list !produced_results
+        | false -> [] in
+      on_results_ready (Some (Keeper_client_tool_outbox.pending_consumption (tool_outbox :: produced)));
+      Ok result
+    in
     match turn_result with
     | Ok result -> Ok (Host.finish_raw_success ~keeper_name raw_trace_run result)
     | Error original_error ->
@@ -1729,6 +1758,8 @@ let run ~input_source ?argument_source ?official_task_reference ?composed_contex
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
     ?on_native_action ?on_native_tool_completion ?on_usage_report ?on_tool_execution ~event_bus ~raw_trace ~on_event ~config () =
   let settled_session = Atomic.make None in
+  let pending_result_receipts = Atomic.make None in
+  let on_results_ready value = Atomic.set pending_result_receipts value in
   let on_session_settled value = Atomic.set settled_session (Some value) in
   let effect_disposition = Atomic.make Keeper_provider_attempt_effect.No_effect_observed in
   let observe_effect_attempted () =
@@ -1746,13 +1777,14 @@ let run ~input_source ?argument_source ?official_task_reference ?composed_contex
     | true | false -> ()
   in
   let result =
+    Eio.Switch.run (fun result_scope ->
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
-      run_without_lifecycle ~input_source
+      run_without_lifecycle ~result_scope ~input_source
         ~argument_source
         ~official_task_reference
         ~composed_context
         ~accepts_image_input
-        ~on_session_settled
+        ~on_session_settled ~on_results_ready
         ~required_native_posture
         ~official_client_continuation
         ~runtime_id
@@ -1790,10 +1822,13 @@ let run ~input_source ?argument_source ?official_task_reference ?composed_contex
         ~on_native_tool_completion
         ~on_usage_report
         ~on_tool_execution
-        ~config)
+        ~config))
   in
   { result
   ; settled_session = Atomic.get settled_session
+  ; pending_result_receipts = (match result with
+      | Ok _ -> Atomic.get pending_result_receipts
+      | Error _ -> None)
   ; effect_disposition = Atomic.get effect_disposition
   }
 ;;

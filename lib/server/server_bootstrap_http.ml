@@ -4,8 +4,28 @@
 
 module Http = Http_server_eio
 
-let make_http_config ~host ~port : Http.config =
-  let config = { Http.default_config with port; host } in
+type bind_address_error = Invalid_host of string
+
+(* Ipaddr's message tries both families and spans two lines, so the refusal
+   names the host alone. *)
+let parse_bind_address host =
+  match Ipaddr.of_string host with
+  | Ok address -> Ok address
+  | Error (`Msg (_ : string)) -> Error (Invalid_host host)
+;;
+
+let bind_address_error_to_string = function
+  | Invalid_host host ->
+    Printf.sprintf
+      "Cannot bind host %S: it is not an IPv4 or IPv6 address. --host, or \
+       MASC_HOST when the flag is absent, takes an IP address such as %s; a \
+       name such as localhost is not resolved."
+      host
+      Masc_network_defaults.masc_http_default_host
+;;
+
+let make_http_config ~address ~port : Http.config =
+  let config = { Http.default_config with port; host = Ipaddr.to_string address } in
   let advertised_host =
     if Server_auth.is_unspecified_host config.host
     then Masc_network_defaults.masc_http_default_host
@@ -25,13 +45,8 @@ let make_http_config ~host ~port : Http.config =
   config
 ;;
 
-let listen_socket ~sw ~net (config : Http.config) =
-  let ip =
-    match Ipaddr.of_string config.host with
-    | Ok addr -> Eio.Net.Ipaddr.of_raw (Ipaddr.to_octets addr)
-    | Error _ -> Eio.Net.Ipaddr.V4.loopback
-  in
-  let addr = `Tcp (ip, config.port) in
+let listen_socket ~sw ~net ~address (config : Http.config) =
+  let addr = `Tcp (Eio.Net.Ipaddr.of_raw (Ipaddr.to_octets address), config.port) in
   Eio.Net.listen net ~sw ~reuse_addr:true ~backlog:config.listen_backlog addr
 ;;
 
@@ -129,6 +144,19 @@ let disable_nagle flow =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | _ -> ()
 
+(* RFC-0204 §3.2: a GET or HEAD is a read. The mark covers the handler call
+   and the fibers it forks; httpun callbacks that run after the handler has
+   returned (body reads, streaming) belong to an answered read and see
+   [Background], as do POSTs, gRPC and /mcp tool calls. *)
+let with_request_lane (meth : Httpun.Method.t) f =
+  match meth with
+  | `GET | `HEAD -> Pool_lane.with_read f
+  | `POST | `PUT | `DELETE | `CONNECT | `OPTIONS | `TRACE | `Other _ -> f ()
+
+let h1_request_handler request_handler client_addr (reqd : Httpun.Reqd.t Gluten.Reqd.t) =
+  with_request_lane (Httpun.Reqd.request reqd.Gluten.Reqd.reqd).meth (fun () ->
+    request_handler client_addr reqd)
+
 let serve ~sw ~clock ~socket ~addr_label ~request_handler =
   let mode = "h1" in
   (* Stable listener identity: the [h1 host:port] tag lets error log lines
@@ -156,7 +184,7 @@ let serve ~sw ~clock ~socket ~addr_label ~request_handler =
             let conn_handler =
               Httpun_eio.Server.create_connection_handler
                 ~sw:conn_sw
-                ~request_handler:(fun client_addr -> request_handler client_addr)
+                ~request_handler:(h1_request_handler request_handler)
                 ~error_handler:(fun _client_addr ?request:_ error respond ->
                   let msg =
                     match error with
@@ -237,7 +265,10 @@ let serve_h2_connection
               (fun stream_sw ->
                 Server_h2_response_resources.with_request resources ~sw:stream_sw
                   (fun () ->
-                    try h2_request_handler ~request_sw:stream_sw addr reqd with
+                    try
+                      with_request_lane (H2.Reqd.request reqd).meth (fun () ->
+                        h2_request_handler ~request_sw:stream_sw addr reqd)
+                    with
                     | Eio.Cancel.Cancelled _ as exn -> raise exn
                     | exn -> H2.Reqd.report_exn reqd exn))
           | None -> H2.Reqd.report_exn reqd Request_without_header_block)
@@ -354,7 +385,7 @@ let serve_auto ~sw ~clock ~socket ~addr_label ~request_handler ~h2_request_handl
               let conn_handler =
                 Httpun_eio.Server.create_connection_handler
                   ~sw:conn_sw
-                  ~request_handler:(fun client_addr -> request_handler client_addr)
+                  ~request_handler:(h1_request_handler request_handler)
                   ~error_handler:(fun _client_addr ?request:_ error respond ->
                     let msg =
                       match error with

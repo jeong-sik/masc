@@ -6502,6 +6502,64 @@ let test_main_eio_failed_start_preserves_default () =
               Alcotest.(check string) "failed startup preserves the previous default"
                 previous_record (read_file record_file))))
 
+(* #46352: a host that is not an IP address used to bind loopback, and the
+   server, naming itself by the text it was given, then refused every request
+   that reached it there. *)
+let test_main_eio_start_refuses_a_host_that_is_not_an_address () =
+  List.iter
+    (fun host ->
+      with_temp_dir "start-unparsable-host" (fun dir ->
+          let attempted = Filename.concat dir "attempted" in
+          let exe = Masc_test_runtime.find_main_eio_exe () in
+          let port = find_free_port () in
+          let log_file = Filename.concat dir "server.log" in
+          let log_fd =
+            Unix.openfile log_file [ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC ] 0o644
+          in
+          let env =
+            main_eio_env_overrides
+              [ "MASC_BASE_PATH", attempted
+              ; "MASC_KEEPER_AUTONOMOUS_ENABLED", "0"
+              ; "MASC_USE_H2", "0"
+              ; "DUNE_SOURCEROOT", project_root ()
+              ]
+          in
+          let pid =
+            Unix.create_process_env exe
+              [| exe; "start"; "--host"; host; "--port"; string_of_int port;
+                 "--base-path"; attempted |]
+              env Unix.stdin log_fd log_fd
+          in
+          Unix.close log_fd;
+          let deadline = Unix.gettimeofday () +. 5.0 in
+          let rec wait_for_exit () =
+            match Unix.waitpid [ Unix.WNOHANG ] pid with
+            | 0, _ ->
+              if Unix.gettimeofday () >= deadline then begin
+                stop_process pid;
+                Alcotest.failf "start --host %s kept running\nlog:\n%s"
+                  host (read_file log_file)
+              end;
+              Unix.sleepf 0.1;
+              wait_for_exit ()
+            | _, status -> status
+            | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait_for_exit ()
+          in
+          (match wait_for_exit () with
+           | Unix.WEXITED 1 -> ()
+           | Unix.WEXITED code ->
+             Alcotest.failf "start --host %s exited %d\nlog:\n%s"
+               host code (read_file log_file)
+           | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
+             Alcotest.failf "start --host %s stopped by signal %d\nlog:\n%s"
+               host signal (read_file log_file));
+          Alcotest.(check bool) ("refusal names " ^ host) true
+            (String_util.contains_substring (read_file log_file)
+               (Printf.sprintf "Cannot bind host %S" host));
+          Alcotest.(check bool) "no workspace directory is created" false
+            (Sys.file_exists attempted)))
+    [ "999.0.0.1"; "localhost" ]
+
 (* A wedged case in this suite has burned 57 CI minutes in silence: a hang
    never fails, so dune kept the Alcotest stream buffered and the log showed
    nothing (#32181 — load-only, unreproduced in three 6-way local rounds).
@@ -7064,5 +7122,9 @@ let () =
             "main_eio failed start preserves default"
             `Slow
             test_main_eio_failed_start_preserves_default;
+          Alcotest.test_case
+            "main_eio start refuses a host that is not an address"
+            `Slow
+            test_main_eio_start_refuses_a_host_that_is_not_an_address;
         ] );
     ]

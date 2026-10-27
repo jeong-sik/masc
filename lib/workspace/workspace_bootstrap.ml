@@ -80,20 +80,21 @@ let reconcile_message_seq config path =
          recovery and this does not. *)
       ()
     | `Assoc fields as json ->
-      let recorded = Safe_ops.json_int ~default:0 "message_seq" json in
-      if recorded < filed then begin
-        Log.Misc.warn
-          "workspace message counter behind the store (recorded=%d filed=%d): \
-           resuming above it"
-          recorded
-          filed;
-        write_json
-          config
-          path
-          (`Assoc
-            (List.remove_assoc "message_seq" fields
-             @ [ "message_seq", `Int filed ]))
-      end
+      (match workspace_state_of_yojson json with
+       | Error _ -> () (* Leave malformed state for the strict recovery path. *)
+       | Ok state when state.message_seq < filed ->
+         Log.Misc.warn
+           "workspace message counter behind the store (recorded=%d filed=%d): \
+            resuming above it"
+           state.message_seq
+           filed;
+         write_json
+           config
+           path
+           (`Assoc
+             (List.remove_assoc "message_seq" fields
+              @ [ "message_seq", `Int filed ]))
+       | Ok _ -> ())
     | _ -> ()
 ;;
 

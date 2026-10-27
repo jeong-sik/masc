@@ -1,0 +1,310 @@
+#!/usr/bin/env python3
+"""Describe all six closed, audited plan cells; never launches or edits a run."""
+import argparse
+import collections
+import hashlib
+import importlib.util
+import json
+from pathlib import Path
+
+
+def read(path):
+    return json.loads(path.read_bytes())
+
+
+def digest(path):
+    with path.open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+def allocation_snapshot(health):
+    gc = health["gc"]
+    return (gc["minor_words"] + gc["major_words"] - gc["promoted_words"]) * 8
+
+
+def checked_execution(cell, plan, qualification, inputs):
+    directory = Path(__file__).resolve().parent
+    assert plan == read(directory / "plan.json")
+    assert qualification == read(directory / "execution-qualification.json")
+    helper = directory / "validator_execution.py"
+    assert plan["validator_executor"]["path"] == str(helper)
+    assert digest(helper) == plan["validator_executor"]["sha256"] == qualification["validator_executor_sha256"]
+    specification = importlib.util.spec_from_file_location("owned_validator_execution", helper)
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module.validate_receipt(directory / "plan.json", directory / "execution-qualification.json",
+                                   plan["order"].index(cell) + 1, inputs)
+
+
+def describe(cell, plan, qualification, inputs):
+    assert cell in plan["order"] and cell["role"] in ("candidate", "control")
+    execution = checked_execution(cell, plan, qualification, inputs)
+    packet = Path(cell["output"])
+    audit_output = Path(cell["audit_output"])
+    assert packet.is_absolute() and audit_output.is_absolute()
+    assert not audit_output.is_relative_to(packet) and not packet.is_relative_to(audit_output)
+    assert not (audit_output / "audit-failure.json").exists()
+    names = ["identity.json", "health-before.json", "health-after.json",
+             "owned-process.json", "requests.jsonl", "workload-phases.jsonl", "cleanup.json"]
+    for name in names:
+        inputs[str(packet / name)] = digest(packet / name)
+    report_path = audit_output / "post-run-audit.json"
+    inventory_path = audit_output / "inventory-sweep-audit.json"
+    for path in [report_path, inventory_path]:
+        inputs[str(path)] = digest(path)
+    identity, report = read(packet / names[0]), read(report_path)
+    inventory = read(inventory_path)
+    assert report["packet_path"] == str(packet)
+    assert report["audit_output"] == str(audit_output)
+    before, after = read(packet / "health-before.json"), read(packet / "health-after.json")
+    owner = read(packet / "owned-process.json")
+    role, keepers = cell["role"], cell["keepers"]
+    expected_base = str(packet / "owned-base")
+    expected_masc_root = str(packet / "owned-base/.masc")
+    expected_executable = str(packet / "masc-installed-copy")
+    binary_sha = (qualification["candidate_server_sha256"] if role == "candidate"
+                  else plan["native_paths"]["control_binary_sha256"])
+    source = plan[role + "_application_source"]
+    assert qualification[role + "_source"] == source
+    assert qualification[role + "_server_sha256"] == binary_sha
+    assert report["packet"] == packet.name
+    assert identity["source"] == report["source"] == source
+    assert identity["sha256"] == report["binary_sha256"] == binary_sha
+    assert identity["original_binary"] == plan["native_paths"][role + "_binary"]
+    assert identity["copied_binary"] == expected_executable
+    assert identity["base"] == owner["base"] == expected_base
+    assert owner["source"] == source and owner["binary_sha256"] == binary_sha
+    assert type(owner["pid"]) is int and owner["pid"] > 0
+    assert identity["runner_sha256"] == report["runner_sha256"] == plan["runner"]["sha256"]
+    assert report["packet_auditor_sha256"] == plan["reader"]["sha256"]
+    assert identity["runtime_fixture_sha256"] == plan["fixture_sha256"]
+    assert report["evidence_schema"] == "masc.keeper-scale-evidence.v3"
+    assert report["overall_original_run_verdict"] == report["post_run_workload_validation"] == "PASS"
+    assert report["keepers"] == keepers
+    assert report["public_and_exact_owner_durable_succeeded_operations"] == keepers * plan["fixed_parameters"]["messages_per_keeper"]
+    assert before["keeper_fibers"] == 0 and after["keeper_fibers"] == keepers
+    instance = before["build"]["runtime_instance_id"]
+    assert isinstance(instance, str) and instance.strip()
+    for health in [before, after]:
+        assert health["build"]["binary_commit"] == source
+        assert health["build"]["executable_sha256"] == binary_sha
+        assert health["build"]["executable_path"] == expected_executable
+        assert health["build"]["runtime_instance_id"] == instance
+        assert health["paths"]["effective_base_path"] == expected_base
+        assert health["paths"]["effective_masc_root"] == expected_masc_root
+        assert type(health["process_memory"]["pid"]) is int
+        assert health["process_memory"]["pid"] == owner["pid"]
+    requests = [json.loads(line) for line in (packet / "requests.jsonl").read_text().splitlines()]
+    initialization = [row for row in requests if row["phase"] == "initialize"]
+    creation = [row for row in requests if row["phase"] == "create"]
+    assert len(initialization) == 1 and len(creation) >= keepers
+    assert type(owner["started_ns"]) is int and owner["started_ns"] >= 0
+    for request in initialization + creation:
+        assert type(request["start_ns"]) is type(request["end_ns"]) is int
+        assert owner["started_ns"] <= request["start_ns"] <= request["end_ns"]
+    assert min(row["start_ns"] for row in creation) >= initialization[0]["end_ns"]
+    cleanup = read(packet / "cleanup.json")
+    assert cleanup == report["cleanup_verified"] and cleanup["base_path"] == expected_base
+    delta = allocation_snapshot(after) - allocation_snapshot(before)
+    assert delta >= 0 and delta.is_integer()
+    failures = collections.Counter(row["error"] for row in report["read_only_observation_failures"])
+    coverage = report["guard_classification_audit"]["inventory_coverage"]
+    assert all(inventory[key] == value for key, value in coverage.items())
+    assert inventory["expected_volumes_per_segment"] == keepers * 2
+    assert inventory["raw_receipt"] == str(packet / "guest-command-attempts.json")
+    assert inventory["source_binding"] == {"source_commit": source,
+        "identity_receipt": str(packet / "identity.json")}
+    attempt = cell["original_reader_attempt"]
+    assert attempt["reader_sha256"] == qualification["original_reader_sha256"]
+    assert attempt["status"] in ("PASS", "FAIL", "NOT_ATTEMPTED")
+    if "evidence" in attempt:
+        path = Path(attempt["evidence"]["path"])
+        assert digest(path) == attempt["evidence"]["sha256"]
+        inputs[str(path)] = attempt["evidence"]["sha256"]
+    return {
+        "packet": packet.name, "role": role, "keepers": keepers,
+        "audit_output": str(audit_output),
+        "validator_execution_receipt_path": cell["validator_execution_receipt"],
+        "validator_execution": execution,
+        "revised_reader_report_path": str(report_path),
+        "revised_reader_inventory_path": str(inventory_path),
+        "original_reader_attempt": attempt,
+        "inventory_observation": inventory,
+        "inventory_command_counts": report["guard_classification_audit"]["read_only_inventory_by_exact_argv"],
+        "source": source, "binary_sha256": binary_sha,
+        "runtime_instance_id": instance, "server_pid": owner["pid"],
+        "effective_base_path": expected_base, "effective_masc_root": expected_masc_root,
+        "runner_sha256": identity["runner_sha256"],
+        "packet_auditor_sha256": report["packet_auditor_sha256"],
+        "runtime_fixture_sha256": identity["runtime_fixture_sha256"],
+        "original_verdict": report["overall_original_run_verdict"],
+        "offline_validation": report["post_run_workload_validation"],
+        "succeeded_operations": report["public_and_exact_owner_durable_succeeded_operations"],
+        "actual_scripted_model_calls": report["real_model_calls"],
+        "provider_peak": report["max_provider_requests_in_flight"],
+        "health_quick_stat_derived_allocation_snapshot_delta_bytes": int(delta),
+        "gc_before": before["gc"], "gc_after": after["gc"],
+        "process_memory_after": after["process_memory"],
+        "post_spawn_receipt_to_initialize_request_envelope_ms": (initialization[0]["start_ns"] - owner["started_ns"]) / 1e6,
+        "creation_attempt_envelope_ms": (max(row["end_ns"] for row in creation) - min(row["start_ns"] for row in creation)) / 1e6,
+        "mcp_attempts_by_phase": report["mcp_attempts_by_request_phase"],
+        "liveness_by_phase": report["liveness_wire_ms_by_workload_phase"],
+        "read_observation_failures": dict(failures),
+        "http429": report["http_429"], "rate_wait_s": report["rate_limit_wait_s"],
+        "readiness_after": {key: after[key] for key in ["overall_status", "operator_action_required", "overall_status_reasons"]},
+        "phase_windows": report["phase_windows"],
+        "cleanup": cleanup,
+    }
+
+
+
+def expected_native_argv(cell, plan):
+    fixed = plan["fixed_parameters"]
+    role = cell["role"]
+    return [plan["validator_executor"]["python_executable"], "-B", "-E", plan["runner"]["path"],
+            "--binary", plan["native_paths"][role + "_binary"], "--repo", plan["native_paths"][role + "_repo"],
+            "--output", cell["output"], "--keepers", str(cell["keepers"]),
+            "--messages-per-keeper", str(fixed["messages_per_keeper"]),
+            "--model-delay-ms", str(fixed["model_delay_ms"]), "--sample-interval", str(fixed["sample_interval_s"]),
+            "--request-timeout", str(fixed["request_timeout_s"]), "--settle-timeout", str(fixed["settle_timeout_s"])]
+
+
+def checked_campaign_closure(cell_index, plan, qualification, inputs):
+    """Require actual root CLI0 witnesses after owned native and reader closure."""
+    assert type(cell_index) is int and 1 <= cell_index <= len(plan["order"]) == 6
+    cell = plan["order"][cell_index - 1]
+    directory = Path(__file__).resolve().parent
+    execution = checked_execution(cell, plan, qualification, inputs)
+    native_path = Path(cell["native_execution_receipt"])
+    native_output = Path(cell["native_invocation_output"])
+    assert native_path == native_output / "execution.json"
+    assert native_path.is_file() and not native_path.is_symlink() and native_path == native_path.resolve()
+    native = read(native_path)
+    assert native["schema"] == "masc.owned-digest-native-cell.v1"
+    assert native["cell"] == cell_index and native["packet_path"] == cell["output"]
+    assert native["controller_sha256"] == digest(Path(plan["native_controller_path"]))
+    assert native["runner_owner_path"] == plan["runner_owner"]["path"]
+    assert native["runner_owner_sha256"] == plan["runner_owner"]["sha256"]
+    assert digest(Path(plan["runner_owner"]["path"])) == plan["runner_owner"]["sha256"]
+    assert native["plan_sha256"] == digest(directory / "plan.json") == qualification["plan_sha256"]
+    assert native["qualification_sha256"] == digest(directory / "execution-qualification.json")
+    assert native["argv"] == expected_native_argv(cell, plan)
+    assert native["status"] == "runner_closed0"
+    assert type(native["native_runner_returncode"]) is int and native["native_runner_returncode"] == 0
+    supervision = native["supervision"]
+    assert supervision["runner_reaped"] is True
+    assert type(supervision["runner_returncode"]) is int and supervision["runner_returncode"] == 0
+    assert type(supervision["runner_pid"]) is int and supervision["runner_pid"] > 0
+    assert supervision["first_parent_signal"] is None
+    assert supervision["parent_signal_counts"] == {"SIGINT": 0, "SIGTERM": 0}
+    assert supervision["cooperative_sigint_attempts"] == 0 and supervision["cooperative_interrupt_error"] is None
+    assert type(native["requested_ns"]) is type(native["returned_ns"]) is int
+    assert 0 <= native["requested_ns"] <= native["returned_ns"] <= execution["clocks"]["requested_ns"]
+    assert set(native["closed_streams"]) == {"stdout", "stderr"}
+    inputs[str(native_path)] = digest(native_path)
+    inputs[plan["native_controller_path"]] = native["controller_sha256"]
+    inputs[plan["runner_owner"]["path"]] = plan["runner_owner"]["sha256"]
+    for name in ["stdout", "stderr"]:
+        path = native_output / (name + ".log")
+        assert path.is_file() and not path.is_symlink() and path == path.resolve()
+        actual = {"path": str(path), "sha256": digest(path), "bytes": path.stat().st_size}
+        assert native["closed_streams"][name] == actual
+        inputs[str(path)] = actual["sha256"]
+    native_tool_path, reader_tool_path = Path(cell["native_tool_record"]), Path(cell["validator_tool_record"])
+    for path in [native_tool_path, reader_tool_path]:
+        assert path.is_file() and not path.is_symlink() and path == path.resolve()
+        inputs[str(path)] = digest(path)
+    native_tool, reader_tool = read(native_tool_path), read(reader_tool_path)
+    assert type(native_tool["actual_native_exit_code"]) is int and native_tool["actual_native_exit_code"] == 0
+    assert native_tool["cell"] == cell_index and native_tool["native_execution_receipt"] == str(native_path)
+    assert native_tool["native_execution_receipt_sha256"] == digest(native_path)
+    assert type(reader_tool["actual_helper_exit_code"]) is int and reader_tool["actual_helper_exit_code"] == 0
+    assert reader_tool.get("original_byte_path_conserved") is True
+    assert reader_tool["cell"] == cell_index and reader_tool["validator_execution_receipt"] == cell["validator_execution_receipt"]
+    assert reader_tool["validator_execution_receipt_sha256"] == digest(Path(cell["validator_execution_receipt"]))
+    report_path = Path(cell["audit_output"]) / "post-run-audit.json"
+    cleanup_path = Path(cell["output"]) / "cleanup.json"
+    report, cleanup = read(report_path), read(cleanup_path)
+    expected_cleanup = {"server_returncode": 0, "server_reaped": True, "forced_kill": False,
+        "sampler_stopped": True, "model_server_stopped": True, "base_retained": True,
+        "base_path": str(Path(cell["output"]) / "owned-base"),
+        "provider_requests_drained": True, "active_provider_requests": 0, "provider_handler_threads": 0}
+    assert cleanup == expected_cleanup == report["cleanup_verified"]
+    assert report["overall_original_run_verdict"] == report["post_run_workload_validation"] == "PASS"
+    assert report["packet_path"] == cell["output"] and report["audit_output"] == cell["audit_output"]
+    assert report["keepers"] == cell["keepers"]
+    assert report["source"] == plan[cell["role"] + "_application_source"]
+    assert report["binary_sha256"] == qualification[cell["role"] + "_server_sha256"]
+    assert report["runner_sha256"] == plan["runner"]["sha256"]
+    assert report["packet_auditor_sha256"] == plan["reader"]["sha256"]
+    assert not (Path(cell["output"]) / "failure.json").exists()
+    assert not (Path(cell["output"]) / "failure.json").is_symlink()
+    inputs[str(report_path)] = digest(report_path)
+    inputs[str(cleanup_path)] = digest(cleanup_path)
+    return {"cell": cell_index, "actual_native_exit_code": native_tool["actual_native_exit_code"],
+            "native_runner_returncode": native["native_runner_returncode"],
+            "native_runner_reaped": supervision["runner_reaped"],
+            "actual_helper_exit_code": reader_tool["actual_helper_exit_code"],
+            "reader_returncode": execution["child_returncode"],
+            "original_byte_path_conserved": reader_tool["original_byte_path_conserved"],
+            "native_cleanup": cleanup}
+
+
+def main():
+    if not __debug__:
+        raise RuntimeError("derivation requires assertions enabled")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", required=True, type=Path)
+    args = parser.parse_args()
+    directory = Path(__file__).resolve().parent
+    plan, qualification = read(directory / "plan.json"), read(directory / "execution-qualification.json")
+    assert digest(directory / "plan.json") == qualification["plan_sha256"]
+    assert digest(Path(__file__)) == plan["deriver_sha256"] == qualification["deriver_sha256"]
+    assert plan["reader"]["sha256"] == qualification["reader_sha256"]
+    assert digest(Path(plan["reader"]["path"])) == qualification["reader_sha256"]
+    assert [(cell["role"], cell["keepers"]) for cell in plan["order"]] == [
+        ("candidate", 2), ("candidate", 30), ("control", 300),
+        ("candidate", 300), ("candidate", 300), ("control", 300)]
+    assert all(cell["original_reader_attempt"] == {
+        "reader_sha256": qualification["original_reader_sha256"], "status": "NOT_ATTEMPTED"}
+        for cell in plan["order"])
+    assert plan["candidate_builder_source"] == qualification["candidate_builder_source"]
+    assert plan["control_builder_source"] == qualification["control_builder_source"]
+    inputs = {str(directory / name): digest(directory / name)
+              for name in ["plan.json", "execution-qualification.json"]}
+    inputs[plan["reader"]["path"]] = qualification["reader_sha256"]
+    executor = plan["validator_executor"]
+    assert digest(Path(executor["path"])) == executor["sha256"] == qualification["validator_executor_sha256"]
+    inputs[executor["path"]] = executor["sha256"]
+    for group in ["source_provenance", "qualified_metadata"]:
+        for binding in plan[group].values():
+            assert digest(Path(binding["path"])) == binding["sha256"]
+            inputs[binding["path"]] = binding["sha256"]
+    outputs = [Path(cell[key]) for cell in plan["order"]
+               for key in ["output", "audit_output", "validator_execution_output", "native_invocation_output"]]
+    assert len(set(outputs)) == 24
+    assert all(path.is_absolute() and path == path.resolve() for path in outputs)
+    assert all(not left.is_relative_to(right) and not right.is_relative_to(left)
+               for i,left in enumerate(outputs) for right in outputs[i+1:])
+    assert args.output == Path(plan["observation_output"]) and args.output.is_absolute() and args.output == args.output.resolve()
+    assert not args.output.exists() and not args.output.is_symlink()
+    assert all(not args.output.is_relative_to(path) for path in outputs)
+    closures = [checked_campaign_closure(index, plan, qualification, inputs) for index in range(1, 7)]
+    rows = [describe(cell, plan, qualification, inputs) for cell in plan["order"]]
+    report = {"schema": "masc.tool-surface-digest-native-observations.v1", "rows": rows,
+        "input_sha256": inputs, "deriver_sha256": digest(Path(__file__)),
+        "reader_sha256": qualification["reader_sha256"],
+        "validator_executor_sha256": qualification["validator_executor_sha256"],
+        "candidate_builder_source": qualification["candidate_builder_source"],
+        "control_builder_source": qualification["control_builder_source"],
+        "original_reader_sha256": qualification["original_reader_sha256"],
+        "legacy_be6_attempts_in_this_campaign": "NOT_ATTEMPTED_FOR_ALL_SIX_CELLS",
+        "actual_closure_gates": closures, "limits": plan["limits"]}
+    with args.output.open("x") as stream:
+        json.dump(report, stream, indent=2)
+        stream.write("\n")
+    print(json.dumps({"output": str(args.output), "cohorts": len(rows), "sha256": digest(args.output)}))
+
+
+if __name__ == "__main__":
+    main()

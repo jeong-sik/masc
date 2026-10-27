@@ -73,6 +73,7 @@ type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result =
   ; content : string
   ; content_blocks : Agent_core.Types.content_block list option
   ; abort_turn : host_stop option
+  ; on_response_sent : (unit -> unit) option
   }
 
 type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
@@ -749,6 +750,7 @@ val prepare_turn :
     copy kept. *)
 
 val dynamic_tools :
+  result_scope:Eio.Switch.t option ->
   ?base_path:string ->
   content_transport:Runtime_official_client_tool.content_transport ->
   accepts_image_input:bool ->
@@ -770,8 +772,14 @@ val dynamic_tools :
     (invocation:Agent_core.Tool_contract.Invocation.t -> content:string -> unit) ->
   raw_trace_run:Agent_core.Raw_trace.active_run option ->
   unit ->
-  (dynamic_tool list, Agent_core.Error.t) result
+  (dynamic_tool list * Keeper_client_tool_outbox.host_producer option, Agent_core.Error.t) result
 (** Project Agent Core tools onto one official-client turn.
+
+    [Some result_scope] is the real runtime's enclosing switch. Its producers
+    hold exact kernel liveness leases so their results do not wake or enter a
+    concurrent consumer before the runtime drains. [None] is for prevalidation
+    or a standalone projection; every real runtime passes its actual switch.
+    This scope does not acknowledge results or permit tool replay.
 
     [accepts_image_input] is the runtime's answer to "may a tool result carry an
     image", read from {!Runtime_agent.runtime_accepts_image_input} so it is the
@@ -784,6 +792,15 @@ val dynamic_tools :
     exact terminal evidence already stops the turn. Its errors are recorded in
     [terminal_error] and close the host loop without inventing a checkpoint.
     An existing terminal result takes priority over a callback stop.
+    With [base_path], every original result is durably retained under its
+    host producer identity before post-execution hooks and context injection.
+    The returned producer is [Some] exactly when tools and [base_path] exist;
+    it freezes physical response writes at the client's terminal boundary.
+    The result's [on_response_sent] marks only an unchanged original response.
+    Retention failure records [terminal_error] and a typed terminal failure,
+    so the runtime cannot settle it as successful consumption. Without
+    [base_path] no producer or durable result is created. Prevalidation omits
+    [base_path].
 
     [tool_approval] settles a [pre_tool_use] hook that answers
     [ElicitToolApproval], exactly as it does on AGENT_CORE's own tool loop --

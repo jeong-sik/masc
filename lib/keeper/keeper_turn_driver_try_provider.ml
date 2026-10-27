@@ -41,11 +41,16 @@ type provider_progress_sample =
             answered; nobody had. *)
   }
 
-(* What this dispatch's checkpoints have recorded so far, strongest last. *)
+(* Classified saved facts for this dispatch; assistant and tool saves remain
+   distinct so response persistence cannot authorize retrying saved effects. *)
 type checkpoint_progress =
   | No_checkpoint_stage
   | Checkpoint_stage_reached
   | Tool_results_saved of { tool_result_saves : int }
+  | Assistant_checkpoint_saved of
+      { assistant_saves : int
+      ; tool_result_saves : int option
+      }
 
 type continuity_point =
   | Without_snapshot
@@ -704,35 +709,22 @@ let complete_saved_tool_terminal ~tool_results_saved_in_attempt
     @return [(result, checkpoint_after, liveness_success_sample)] tuple. The
     sample is not recorded here; the caller records it only after the runtime
     accept predicate accepts the response. *)
-(* Progress only moves forward: a later stage never erases a saved tool
-   result, and a stage reached after one does not lower it. *)
-let progress_advances ~current ~next =
-  match current, next with
-  | No_checkpoint_stage, (Checkpoint_stage_reached | Tool_results_saved _)
-  | Checkpoint_stage_reached, Tool_results_saved _ ->
-    true
-  | No_checkpoint_stage, No_checkpoint_stage
-  | Checkpoint_stage_reached, (No_checkpoint_stage | Checkpoint_stage_reached)
-  | Tool_results_saved _, (No_checkpoint_stage | Checkpoint_stage_reached | Tool_results_saved _) ->
-    false
-;;
-
-let rec advance_checkpoint_progress progress next =
+(* Reaching a later stage never erases classified saved progress. *)
+let rec observe_checkpoint_stage progress (stage : Agent_core.Agent.checkpoint_stage) =
   let current = Atomic.get progress in
-  if progress_advances ~current ~next
-     && not (Atomic.compare_and_set progress current next)
-  then advance_checkpoint_progress progress next
-;;
-
-let observe_checkpoint_stage progress (_ : Agent_core.Agent.checkpoint_stage) =
-  advance_checkpoint_progress progress Checkpoint_stage_reached
+  match current with
+  | Checkpoint_stage_reached | Tool_results_saved _ | Assistant_checkpoint_saved _ -> ()
+  | No_checkpoint_stage ->
+    if not (Atomic.compare_and_set progress current Checkpoint_stage_reached)
+    then observe_checkpoint_stage progress stage
 ;;
 
 (* RFC last-path-resumes-after-progress §3.2: a chat operation resumes from its
    latest saved checkpoint, so only a stage written after tools ran, and
    written to that checkpoint, is progress a resumed attempt does not repeat.
    [After_assistant_collected] is saved before accept judges the answer and
-   keeps a refused one, so counting it would resume into the same refusal.
+   keeps a refused one, so counting it as tool retry progress would resume
+   into the same refusal.
 
    Only the sink's owner may call this. A sink answers [Ok ()] for a write it
    skipped as well as for one it made: the keeper's checkpoint store answers
@@ -744,19 +736,45 @@ let observe_checkpoint_stage progress (_ : Agent_core.Agent.checkpoint_stage) =
 let tool_result_save_count progress =
   match Atomic.get progress with
   | Tool_results_saved { tool_result_saves } -> tool_result_saves
+  | Assistant_checkpoint_saved {tool_result_saves=Some count;_} -> count
+  | Assistant_checkpoint_saved {tool_result_saves=None;_}
   | No_checkpoint_stage | Checkpoint_stage_reached -> 0
+;;
+
+let assistant_checkpoint_save_count progress =
+  match Atomic.get progress with
+  | Assistant_checkpoint_saved {assistant_saves;_} -> assistant_saves
+  | No_checkpoint_stage | Checkpoint_stage_reached | Tool_results_saved _ -> 0
 ;;
 
 let rec record_saved_tool_stage progress ~after_tool_results =
   let current = Atomic.get progress in
   let count = match current with
     | Tool_results_saved { tool_result_saves } -> tool_result_saves
+    | Assistant_checkpoint_saved {tool_result_saves=Some count;_} -> count
+    | Assistant_checkpoint_saved {tool_result_saves=None;_}
     | No_checkpoint_stage | Checkpoint_stage_reached -> 0
   in
-  let next = Tool_results_saved
-      { tool_result_saves = if after_tool_results then count + 1 else count } in
+  let tool_result_saves = if after_tool_results then count + 1 else count in
+  let next = match current with
+    | Assistant_checkpoint_saved {assistant_saves;_} ->
+      Assistant_checkpoint_saved {assistant_saves;tool_result_saves=Some tool_result_saves}
+    | No_checkpoint_stage | Checkpoint_stage_reached | Tool_results_saved _ ->
+      Tool_results_saved {tool_result_saves} in
   if not (Atomic.compare_and_set progress current next)
   then record_saved_tool_stage progress ~after_tool_results
+;;
+
+let rec record_saved_assistant_stage progress =
+  let current = Atomic.get progress in
+  let assistant_saves, tool_result_saves = match current with
+    | No_checkpoint_stage | Checkpoint_stage_reached -> 1, None
+    | Tool_results_saved {tool_result_saves} -> 1, Some tool_result_saves
+    | Assistant_checkpoint_saved {assistant_saves;tool_result_saves} ->
+      assistant_saves + 1, tool_result_saves in
+  let next = Assistant_checkpoint_saved {assistant_saves;tool_result_saves} in
+  if not (Atomic.compare_and_set progress current next)
+  then record_saved_assistant_stage progress
 ;;
 
 let observe_checkpoint_saved progress (stage : Agent_core.Agent.checkpoint_stage) =
@@ -765,7 +783,7 @@ let observe_checkpoint_saved progress (stage : Agent_core.Agent.checkpoint_stage
     record_saved_tool_stage progress ~after_tool_results:true
   | Agent_core.Agent.After_context_injection ->
     record_saved_tool_stage progress ~after_tool_results:false
-  | Agent_core.Agent.After_assistant_collected
+  | Agent_core.Agent.After_assistant_collected -> record_saved_assistant_stage progress
   | Agent_core.Agent.After_input_wait_changed
   | Agent_core.Agent.After_rejected_response_dropped ->
     ()
@@ -788,12 +806,14 @@ let observing_checkpoint_sink progress sink (snapshot : Agent_core.Agent.checkpo
 let same_run_retry_allowed progress =
   match Atomic.get progress with
   | No_checkpoint_stage -> true
-  | Checkpoint_stage_reached | Tool_results_saved _ -> false
+  | Checkpoint_stage_reached | Tool_results_saved _ | Assistant_checkpoint_saved _ -> false
 ;;
 
 let tool_results_saved progress =
   match Atomic.get progress with
   | Tool_results_saved _ -> true
+  | Assistant_checkpoint_saved {tool_result_saves=Some _;_} -> true
+  | Assistant_checkpoint_saved {tool_result_saves=None;_}
   | No_checkpoint_stage | Checkpoint_stage_reached -> false
 ;;
 
@@ -2093,6 +2113,8 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
      saved-tool empty-terminal normalization, never normal success authority.
      A replay that emitted no new AfterTurn leaves it empty and stays failed. *)
   let observed_provider_turn_ordinal = ref None in
+  let saved_provider_turn_ordinal = ref None in
+  let retained_results_projected = ref false in
   let capture_provider_ordinal (config : Runtime_agent.config) =
     let capture = { Agent_core.Hooks.empty with after_turn = Some (function
       | Agent_core.Hooks.AfterTurn { turn; _ } ->
@@ -2122,7 +2144,21 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
     ~decision:(`Assoc [ "resolved_lane", `String resolved_lane ])
     Keeper_runtime_manifest.Provider_lane_resolved;
   let checkpoint_sink =
-    observing_checkpoint_sink ctx.checkpoint_progress ctx.checkpoint_sink
+    fun (snapshot : Agent_core.Agent.checkpoint_snapshot) ->
+      let assistant_saves_before = assistant_checkpoint_save_count ctx.checkpoint_progress in
+      let saved = observing_checkpoint_sink ctx.checkpoint_progress ctx.checkpoint_sink snapshot in
+      (match saved, snapshot.stage with
+       | Ok (), Agent_core.Agent.After_assistant_collected
+         when assistant_checkpoint_save_count ctx.checkpoint_progress > assistant_saves_before ->
+         (* Only the caller's classified Saved branch advances this witness.
+            A stale/no-op sink may also return Ok, but has no saved authority.
+            Pair the save in this exact callback with this SDK invocation's
+            actual AfterTurn ordinal; checkpoint counters are not ordinals. *)
+         saved_provider_turn_ordinal := !observed_provider_turn_ordinal
+       | (Ok () | Error _),
+         (Agent_core.Agent.After_input_wait_changed | After_tool_results_appended
+         | After_context_injection | After_rejected_response_dropped | After_assistant_collected) -> ());
+      saved
   in
   (* The attempt's bounded wait for the binding's admission permit, as Agent
      Core writes it: on while the wait is on, then the instant it settled.
@@ -2389,22 +2425,51 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
     | None -> ref None
   in
   let agent_before_attempt = !attempt_agent_ref in
+  let config_result =
+    Result.bind config_result (fun config ->
+      let snapshot = match ctx.request_input with
+        | Completion_review -> Ok None
+        | Keeper_history _ ->
+          Keeper_client_tool_outbox.load ~base_path:ctx.base_path ~keeper_name:ctx.keeper_name
+          |> Result.map Option.some
+          |> Result.map_error (fun detail -> Agent_core.Error.Internal detail) in
+      Result.map (fun snapshot -> config, snapshot) snapshot)
+  in
   match config_result with
   | Error err -> Error err, None, None
-  | Ok config ->
+  | Ok (config, retained_results) ->
     (* Installed here rather than on the record above because the projection
        needs the provider config that record is still producing: it measures
        the history that config's serializer will carry, and asking a config
        that does not exist yet would mean measuring something else. *)
+    let project = bounded_model_input_projection ctx ~state
+        ~agent_cell:attempt_agent_ref ~provider_config:config.Runtime_agent.provider_cfg in
+    let retained_message = Option.bind retained_results Keeper_client_tool_outbox.context_message in
+    let retained_bytes = match retained_message with
+      | None -> 0
+      | Some message -> offload_model_input_cpu (fun () ->
+          let measure = Keeper_context_core.message_measurer () in
+          measure message) in
     let config =
       { config with
         model_input_projection =
           Some
-            (bounded_model_input_projection
-               ctx
-               ~state
-               ~agent_cell:attempt_agent_ref
-               ~provider_config:config.Runtime_agent.provider_cfg)
+            (fun messages -> Result.map (fun messages ->
+               match retained_message with
+               | None -> messages
+               | Some message ->
+                 retained_results_projected := true;
+                 (* This is mandatory per-request data, not another history
+                    atom. Keep the ledger's tail and attribution honest even
+                    when the caller supplied no custom projection. The bounded
+                    projection resets both observations on every request. *)
+                 state.last_request := Option.map (fun request ->
+                   {request with request={request.request with
+                     tail_bytes=request.request.tail_bytes + retained_bytes}}) !(state.last_request);
+                 state.request_range := Option.map (fun range ->
+                   {range with Keeper_continuity_request.custom_projection_changed=true}) !(state.request_range);
+                 List.filter (fun message -> not (Keeper_client_tool_outbox.is_context_message message))
+                   messages @ [message]) (project messages))
       }
     in
     (* Explicit stream stall detection is handled by AGENT_CORE's
@@ -2461,6 +2526,8 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
           let prepared = Result.map
             (fun (config, checkpoint, input) ->
               observed_provider_turn_ordinal := None;
+              saved_provider_turn_ordinal := None;
+              retained_results_projected := false;
               capture_provider_ordinal config, checkpoint, input)
             prepared in
           let result = match prepared with
@@ -2609,6 +2676,17 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
         ?agent_ref:ctx.agent_ref
         !attempt_agent_ref
     in
+    (* A replay may complete from an already-terminal checkpoint without
+       sending any new request. An error can also be normalized below from a
+       saved effect. Neither proves that this receipt snapshot was consumed. *)
+    let completed_received_result = match result with
+      | Ok ({ Runtime_agent.stop_reason = Completed {provider_turn_ordinal}; _ }) ->
+        !retained_results_projected
+        && !observed_provider_turn_ordinal = Some provider_turn_ordinal
+        && !saved_provider_turn_ordinal = Some provider_turn_ordinal
+      | Ok {Runtime_agent.stop_reason=(Yielded_to_operation_queued _ | Yielded_to_durable_stimulus _
+          | Yielded_after_repeated_tool_call _ | Yielded_after_repeated_assistant_text _ | InputRequired _);_}
+      | Error _ -> false in
     let execution_observation =
       match result with
       | Ok (run_result : Runtime_agent.run_result) -> run_result.runtime_observation
@@ -2671,6 +2749,13 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
     Option.iter (fun emit -> Option.iter emit observation) ctx.on_runtime_observation;
     let result = Result.map (fun (run_result : Runtime_agent.run_result) ->
       { run_result with runtime_observation = observation }) result in
+    let result = Result.bind result (fun run_result ->
+      match retained_results with
+      | Some snapshot when completed_received_result ->
+        Keeper_client_tool_outbox.settle_after_turn snapshot ~stop_reason:run_result.Runtime_agent.stop_reason
+        |> Result.map (fun () -> run_result)
+        |> Result.map_error (fun detail -> Agent_core.Error.Internal detail)
+      | Some _ | None -> Ok run_result) in
     result, checkpoint_after, None
 ;;
 

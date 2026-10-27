@@ -1,7 +1,11 @@
-# Browser worker
+# Browser workers
 
-This package runs `masc-browser-addon-worker` as a native Add-on. The server
-finds the worker on its PATH, and `masc-native-addon-launcher` and
+Each browser source has its own package here: `automation/`, `stagehand/`,
+`firefox/`, `ego/` and `external/`, with the ids `browser-automation`,
+`browser-stagehand`, `browser-firefox`, `browser-ego` and `browser-external`.
+Every package runs `masc-browser-addon-worker` as a native Add-on for the one
+source its `lane.toml` names in `browser_backend`, so a failure of one source
+ends only its own worker. The server finds the worker on its PATH, and `masc-native-addon-launcher` and
 `masc-browser-process-owner` beside the masc executable or on its PATH.
 The host supplies the private socket, incarnation and message bound; package
 bindings cannot choose them. Native execution uses a foreground process group
@@ -14,31 +18,37 @@ including when started by a service manager. `--skip-build --build-dir DIR`
 requires all three executable inputs alongside the ordinary installer inputs;
 missing or non-executable inputs are refused before installed programs or guest
 shims change. `--no-browser-addon` leaves the three programs out and the
-workspace's Add-on as it is; without them no browser route works. The release
+workspace's Add-ons as they are; without them no browser route works. The release
 download installer does not supply these programs.
 
-masc carries this package. After installing, the script runs
+masc carries these packages. After installing, the script runs
 `masc browser-lane-setup --mode addon` for the workspace, and every other
-`browser-lane-setup` mode does the same:
+`browser-lane-setup` mode does the same, for each source the workspace runs:
+automation, firefox and ego when `runtime.toml` has their table or the run
+writes it, stagehand when `[browser.stagehand]` is there, and external when a
+native host is installed. A source whose table the mode writes is declared
+once that table is written.
 
-- It writes the package to `<base-path>/.masc/packages/browser/`. An upgraded
-  masc rewrites the files there, so the declaration does not change.
-- When the workspace has no declaration of this package, it creates
-  `browser.toml` in the Lane directory (`<base-path>/.masc/config/lane-addons/`,
-  or the one under `MASC_CONFIG_DIR`). An existing declaration of the package is
-  left as it is; setup reports it, and names the `manifest_path` line to use
-  when it points at another copy. Two declarations of the package are refused,
-  because the server would attach both and refuse every host poll as ambiguous.
+- It writes each package to `<base-path>/.masc/packages/browser-<source>/`. An
+  upgraded masc rewrites the files there, so the declaration does not change.
+- When the workspace has no declaration of a source, it creates
+  `browser-<source>.toml` in the Lane directory
+  (`<base-path>/.masc/config/lane-addons/`, or the one under
+  `MASC_CONFIG_DIR`). An existing declaration is left as it is; setup reports
+  it, and names the `manifest_path` line to use when it points at another copy.
+  Two enabled declarations of one source are refused, because the server would
+  attach both and use neither for that source.
 
-Setup attaches nothing. The server attaches the declared Add-on when it starts
-and on its maintenance pass. Set `enabled = false` in the declaration to keep
-it detached. `browser-lane-setup --no-addon` makes a mode other than `addon`
-leave the package and the declaration as they are.
+Setup attaches nothing. The server attaches the declared Add-ons when it starts
+and on its maintenance pass. Set `enabled = false` in a declaration to keep
+that source detached. `browser-lane-setup --no-addon` makes a mode other than
+`addon` leave the packages and the declarations as they are.
 
 The deployment preflight (`scripts/check-runtime-deployment-preflight.sh`) refuses a
 workspace that has a browser lane host installed and no enabled declaration of
-this package, because that server answers every native host poll with HTTP 503
-(`no_browser_addon`). `scripts/install-local-build.sh` runs it with
+`browser-external`, because that server answers every native host poll with
+HTTP 503 (`no_browser_addon`). It also refuses two enabled declarations of one
+source. `scripts/install-local-build.sh` runs it with
 `--browser-addon-declared-by-caller` when it installs the Add-on, because the
 setup step above writes the declaration after the check. With
 `--no-browser-addon` the check applies.
@@ -70,8 +80,9 @@ dispatch too. An explicit `lane = "live"` tab creation requires the observed `cl
 path, retaining contextual/scene/screenshot projections, capability receipts,
 caller attribution and producer effect metadata. Public core/Keeper dispatchers
 use this adapter. Screenshot retention and Vision handles belong to the served
-Workspace. Owned Gecko uploads and downloads use host-mediated transfer
-brokers independently of the optional validation hooks and model consumers.
+Workspace. The automation worker's owned Gecko and the ego worker use
+host-mediated upload and download brokers, independently of the optional
+validation hooks and model consumers; the other sources have none.
 
 The worker publishes connection observations through MCP. Its separate private
 socket lets browser commands wait while client polls and results use other
@@ -83,8 +94,8 @@ reads the socket allocation intent from the original native reservation.
 
 Authenticated native-host HTTP routes forward polls, results and disconnects to
 this Add-on. They use the served workspace's lane token, even when the process
-environment points elsewhere. A new client can register only when one browser
-Add-on is available. Its ID and full identity are durably bound to that original
+environment points elsewhere. A new client can register only when exactly one
+attached browser Add-on serves external hosts. Its ID and full identity are durably bound to that original
 worker under `<base-path>/.masc/browser-lane/registrations/`. Existing IDs are
 never assigned to a replacement. A temporary observation failure returns
 unavailable and requests an observation refresh; confirmed retirement tells the
@@ -118,41 +129,45 @@ unknown outcomes preserve the original receipt and effect metadata without
 repeating the input. These source changes do not establish an installed TUI or
 an actual browser run.
 
-`masc browser-lane-setup --mode addon` writes this declaration; the
+`masc browser-lane-setup --mode addon` writes these declarations; the
 [TOML guide](../../docs/guides/lane-addon-toml.md) describes every key. To
-choose hooks or model outputs, add them to the `browser.toml` setup wrote;
-setup never rewrites an existing declaration:
+choose hooks or model outputs, add them to the `browser-<source>.toml` setup
+wrote; setup never rewrites an existing declaration. `locate` belongs to
+`browser-automation` and `stagehand` to `browser-stagehand`:
 
 ```toml
-id = "browser"
+id = "browser-automation"
 enabled = true
-run_id = "browser"
-manifest_path = "/absolute/path/to/workspace/.masc/packages/browser/lane.toml"
+run_id = "browser-automation"
+manifest_path = "/absolute/path/to/workspace/.masc/packages/browser-automation/lane.toml"
 tool_hooks = ["validate_input", "validate_output"]
-exact_outputs = ["locate", "stagehand"]
+exact_outputs = ["locate"]
 
 [binding]
 sources = []
 ```
 
 The installed external native host and browser extension/BiDi peer use the
-workspace token. The worker itself can own configured automation, Stagehand
-Chrome, and live Firefox BiDi backends independently. It starts its Gecko driver
-with a private profile/download directory; Chrome sessions use a private or
-explicit persistent profile. A configured live Firefox starts during worker
-attachment, on its dedicated existing owner-only profile. Its reported profile
+workspace token. Each worker owns only its own source's browser. The
+automation worker starts its Gecko driver with a private profile/download
+directory; the Stagehand worker's Chrome sessions use a private or explicit
+persistent profile. The firefox worker starts its configured live
+Firefox during attachment, on its dedicated existing owner-only profile. Its reported profile
 and process ID must match the original process owner. A busy port is refused;
 no external Firefox is adopted. See the [Firefox setup guide](../../docs/design/browser-bidi-live-host.md).
 
-Backend settings are captured at attachment from the loaded `runtime.toml`.
+Backend settings are captured at attachment from the loaded `runtime.toml`. A
+source whose table is missing does not start, and its package row says so.
+`runtime.toml` says how a source starts, never whether it runs: that is its
+declaration's top-level `enabled`.
 Restart after changing runtime settings, then detach/reattach an existing
 installation. Declaration edits reconcile at startup and on the maintenance
 pulse. Check desired/applied revisions, phase and configuration issues; saving
 TOML does not establish readiness. Disable an installation with its top-level
 `enabled = false` and verify detachment before reusing its resources.
 
-Retirement fences input before joining the original live, automation and
-Stagehand cleanups. Concurrent or repeated retire requests observe the same
+Retirement fences input before joining the cleanup of the worker's own
+source. Concurrent or repeated retire requests observe the same
 cleanup result; an error prevents a successful retirement receipt. Confirmed
 settlement releases the private allocation while persistent profile contents
 and stable claims are preserved. External extension/manual browsers remain
@@ -191,7 +206,7 @@ this partial guard is not a full JSON Schema validator. Baseline and grant are
 both pinned to the worker incarnation. The bundled fixed `locate` output does
 not grant request schemas.
 
-The package's `stagehand` output grants request schemas and declares an open
+The `browser-stagehand` package's `stagehand` output grants request schemas and declares an open
 structured-object baseline. `Browser_addon_stagehand_model.for_owner` constructs
 the actual Stagehand session model callback only for that selected contract.
 It routes text/structured protocol requests through the original owner queue
@@ -206,7 +221,7 @@ scenarios and isolated owned Chrome scenarios cover this callback. See the exact
 [lifecycle evidence](../../docs/design/browser-addon-lifecycle.md#completion-evidence);
 these checks do not establish deployment or provider response quality.
 
-The bundled package declares the fixed `locate` output and connects it to owned
+The `browser-automation` package declares the fixed `locate` output and connects it to owned
 Gecko `page.locate`. Configure an existing model slot for the installation's
 `runtime.addon_exact_lanes.<installation-id>.locate` route using the
 [TOML guide](../../docs/guides/lane-addon-toml.md). Package defaults select this

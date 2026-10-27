@@ -426,13 +426,13 @@ type checkpoint_info = {
           answered by reaching this record at all. This field makes the
           answer explicit for a caller comparing surfaces. *)
   version : int;  (** the checkpoint format version, currently 1 *)
-  saved_at_unix : float option;
+  mtime_unix : float option;
       (** the checkpoint file's modification time: the moment the slot was
           written. Absent when the file cannot be stat'ed. *)
   mtime_utc : string option;
       (** the same modification time as an ISO 8601 UTC string
           (e.g. ["2026-10-14T10:30:27Z"]), so a readback compares a rendered
-          instant without float drift. Absent with [saved_at_unix]. *)
+          instant without float drift. Absent with [mtime_unix]. *)
   core_sha : string option;
       (** the [Msx_core_identity.source_digest] of the core that saved the
           checkpoint. Checkpoints saved before the field existed read as

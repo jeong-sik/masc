@@ -226,8 +226,9 @@ let list_dir config path =
 (* Initialization check                         *)
 (* ============================================ *)
 
-(* Server-level cache for is_initialized — avoids 3 syscalls per request.
-   Cache key is the base path, to handle multi-config scenarios. *)
+(* Server-level filesystem cache for is_initialized — avoids 3 syscalls per
+   request. Memory backends have independent state even at the same path and
+   perform an inexpensive key lookup instead of using this cache. *)
 type init_cache_entry = {
   cache_key : string;
   cached_result : bool;
@@ -239,34 +240,33 @@ let initialized_cache_ttl = 1.0  (* seconds *)
 
 let init_cache_key config = config.base_path
 
-(** Check if current workspace is initialized - backend-agnostic.
-    Cached with 1-second TTL to avoid 3 filesystem syscalls per request. *)
+(** Check the selected backend; only filesystem checks use the TTL cache. *)
 let is_initialized config =
-  let now = Time_compat.now () in
-  let cache_key = init_cache_key config in
-  match Atomic.get initialized_cache with
-  | Some entry
-    when entry.cache_key = cache_key
-         && now -. entry.cached_at < initialized_cache_ttl ->
-      entry.cached_result
-  | _ ->
-      let result =
-        match config.backend with
-        | Memory _ ->
-            let state_key =
-              match key_of_path config (state_path config) with
-              | Some k -> k
-              | None -> "state.json"
-            in
-            backend_exists config ~key:state_key
-        | FileSystem _ ->
+  match config.backend with
+  | Memory _ ->
+      let state_key =
+        match key_of_path config (state_path config) with
+        | Some k -> k
+        | None -> "state.json"
+      in
+      backend_exists config ~key:state_key
+  | FileSystem _ ->
+      let now = Time_compat.now () in
+      let cache_key = init_cache_key config in
+      match Atomic.get initialized_cache with
+      | Some entry
+        when entry.cache_key = cache_key
+             && now -. entry.cached_at < initialized_cache_ttl ->
+          entry.cached_result
+      | _ ->
+          let result =
             Sys.file_exists (masc_dir config) &&
             Sys.is_directory (masc_dir config) &&
             Sys.file_exists (state_path config)
-      in
-      Atomic.set initialized_cache
-        (Some { cache_key; cached_result = result; cached_at = now });
-      result
+          in
+          Atomic.set initialized_cache
+            (Some { cache_key; cached_result = result; cached_at = now });
+          result
 
 (** Invalidate the is_initialized cache. Call this when workspace state
     changes (e.g., after init, reset, or cleanup operations). *)

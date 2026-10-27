@@ -616,6 +616,21 @@ val defer_pending_result :
 (** Durably rotate one exact transiently blocked source to the tail of its
     current urgency lane. *)
 
+val retain_checkpoint_batch_result :
+  ?after_commit:(Keeper_event_queue.t -> unit) ->
+  base_path:string -> keeper_name:string ->
+  selections:Keeper_event_queue_state.pending_selection list ->
+  unit -> ((Keeper_event_queue_state.pending_selection * string) list, string) result
+(** Retain a checkpoint batch in one owner-locked, strictly confirmed snapshot
+    transaction. Count only valid admitted selections, then rotate their
+    sources within urgency lanes. Connector conversations include every
+    pending member so an admitted prefix cannot move behind its own suffix.
+    Original payload, first admission and execution scope remain bound. Stale
+    selections appear in the failure list and prevent rotating their own
+    conversation; valid siblings still retain their counts and independent
+    conversations/results rotate. An outer Error means the batch commit was
+    not confirmed. Old successful selections become stale; no source is ACKed. *)
+
 type enqueue_stimulus_result =
   | Enqueued
   | Already_present

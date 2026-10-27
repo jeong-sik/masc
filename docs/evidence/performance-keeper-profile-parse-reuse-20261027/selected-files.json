@@ -1,0 +1,20 @@
+{
+  "schema": "masc.selected-evidence-files.v1",
+  "scope": "Selected parsed/numeric provenance; frozen original paths/hashes remain distinct from formatting/summary derivatives.",
+  "files": {
+    "README.md": "198d8ba4c1c9e46adc65f3e49b2c3e2b3a26571a134601f57b9a9ba25de6b199",
+    "current-locations.json": "56c33e1f5b7bac59bb48e5454a058184ce7ada58256f6e3c376176035fd5d664",
+    "evidence-audits/summary.json": "ccf5ad641665b655d69333617a50d5335b7f93d6bc7ac124b3974f4afe45ccaa",
+    "native/candidate-identity-commands.json": "dc05e71651b0549d247badbc216026596065af26c60f5bd92d60744ecdcf7b56",
+    "native/candidate-qualification.json": "0c10f7bbea11c58a59606c5c7b128a1ba9fbdd9dde67128b71a2567b56b472ce",
+    "native/candidate-receipt.json": "15ba480719d2e4f892e4d4349a8613380690c3f90c94d19ae631e9559934edb1",
+    "native/control-identity-commands.json": "2e6bc50ee4f28b828faf1bbc72eee1138b027dd51b9dbea2fefd58269f1fd6a3",
+    "native/control-receipt.json": "c2280625e4dfec83f87adccfa4f7a4826da0c469739bd133a544a8886db3e674",
+    "observations.json": "30de83ffa82ddf58552277cb9418579c7a7bcbf52dcb860de934361ce4b9bb85",
+    "provenance.json": "dd5461d87b841f36e072c6ba7ecd669054a99060a2969189cc3a17fb0e70972d",
+    "reproduction/derive_observations.py": "d67dab60f7f86e49b94355738999c54860796f150946a0db1963a03632b8b6c8",
+    "reproduction/execution-qualification.json": "044064409c386edb4a812510ad3f7e6baea5e6ace2504457dd287d09645075ea",
+    "reproduction/plan.json": "16fd4047266a278653106bf6ed1f567712db472d81d144d4b99a83d9d248c3fc",
+    "reviews.json": "a867322d4e40564e13d30755007736c0f7809b44427c640042b0eac62ad7637b"
+  }
+}

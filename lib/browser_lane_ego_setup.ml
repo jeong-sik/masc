@@ -4,7 +4,7 @@ type request =
   ; space : string option
   }
 
-let default_space = "masc"
+let default_space = "masc-keepers"
 
 type key = Command | Space
 
@@ -24,7 +24,11 @@ type error =
   | Ego_not_found
   | Ego_not_executable of string
   | Ego_unusable of { path : string; detail : string }
+  | Ego_unstartable of { path : string; detail : string }
   | Table_refused of string
+  | Space_held_by_operator of { space : string; space_id : int }
+  | Spaces_unanswered of { path : string; space : string; detail : string }
+  | Spaces_unreadable of { path : string; space : string; detail : string }
   | Configuration_changed
   | Not_written of string
 
@@ -50,9 +54,28 @@ let error_message = function
       "The ego-browser at %s did not answer --version with ego lite's and Chromium's \
        versions: %s. Finish ego lite's onboarding, or name another with --ego-command."
       path detail
+  | Ego_unstartable { path; detail } ->
+    Printf.sprintf "The ego-browser at %s could not be started: %s. Name another with --ego-command."
+      path detail
   | Table_refused reason ->
     Printf.sprintf "The [%s] table would not load as written, so it was not written: %s." table_path
       reason
+  | Space_held_by_operator { space; space_id } ->
+    Printf.sprintf
+      "The ego task space %S (id %d) belongs to the operator, and masc does not take over a \
+       space the operator made. Name another with --ego-space."
+      space space_id
+  | Spaces_unanswered { path; space; detail } ->
+    Printf.sprintf
+      "The ego-browser at %s did not list ego lite's task spaces, so whether the operator \
+       holds %S is unknown: %s. Open ego lite and run this again."
+      path space detail
+  | Spaces_unreadable { path; space; detail } ->
+    Printf.sprintf
+      "The ego-browser at %s answered the task space list in a form masc does not read, so \
+       whether the operator holds %S is unknown: %s. Running this again will not help until \
+       masc and ego lite agree; update the one that is older."
+      path space detail
   | Configuration_changed ->
     Printf.sprintf "runtime.toml changed while this ran, so [%s] was not written. Run this again."
       table_path
@@ -128,10 +151,51 @@ let named path =
     | Browser_runtime_dependencies.Failed { detail; _ } -> Error (Ego_unusable { path; detail })
     | Browser_runtime_dependencies.Started { output; _ } -> versions_of ~path output
 
+(* The worker opens its space by name, and ego refuses a name the operator's
+   space holds; the worker would then fail to start. Every plan checks the
+   space of the table it leaves, written or kept: a kept table may name a
+   space the operator made after it was written. The spaces are listed by
+   the ego-browser the table names; opening the space instead would make it. *)
+let space_is_free ~(table : Browser_configuration.live_ego) =
+  let unanswered detail = Error (Spaces_unanswered { path = table.command; space = table.space; detail }) in
+  let failed failure = unanswered (Browser_ego_peer.run_failure_message failure) in
+  match
+    Process_eio.run_argv_with_status_split_or_refusal
+      ~timeout_sec:Browser_ego_peer.read_window_s
+      ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
+      [ table.command; "nodejs"; "-e"; Browser_ego_peer.task_spaces_script ]
+  with
+  | Error refusal ->
+    Error (Ego_unstartable { path = table.command; detail = Process_eio.spawn_refusal_to_string refusal })
+  | Ok (status, stdout, stderr) ->
+    let output = stdout ^ "\n" ^ stderr in
+    (match status with
+     (* [run_argv_with_status_split_or_refusal] synthesises 124 on its own timeout. *)
+     | Unix.WEXITED 124 -> failed Browser_ego_peer.Timed_out
+     | Unix.WEXITED 0 ->
+       (match Browser_ego_peer.named_spaces ~space:table.space output with
+        | Error (Browser_ego_peer.Spaces_failed detail) -> unanswered detail
+        | Error (Browser_ego_peer.Spaces_malformed detail) ->
+          Error (Spaces_unreadable { path = table.command; space = table.space; detail })
+        | Ok spaces ->
+          (match
+             List.find_map
+               (fun (space_id, owner) ->
+                  match owner with
+                  | Browser_ego_peer.Operator_owner -> Some space_id
+                  | Browser_ego_peer.Agent_owner | Browser_ego_peer.Handed_to_operator -> None)
+               spaces
+           with
+           | Some space_id -> Error (Space_held_by_operator { space = table.space; space_id })
+           | None -> Ok ()))
+     | Unix.WEXITED code -> failed (Browser_ego_peer.Exited { code; output })
+     | Unix.WSIGNALED signal | Unix.WSTOPPED signal -> failed (Browser_ego_peer.Signaled signal))
+
 (* A table that is not there is written whole, with the defaults for what was
    not named. A table that is there keeps its values and changes only what was
    named and differs from what it holds. The command written is started once
-   to read its versions; a command the table keeps is not started. *)
+   to read its versions; a command the table keeps is not started for them.
+   The space the table holds is checked against ego's spaces ([space_is_free]). *)
 let decide ~find_ego request = function
   | None ->
     let* command, versions =
@@ -162,13 +226,11 @@ type plan =
   ; table : Browser_configuration.live_ego
   ; set : key list
   ; change : change
-  ; lane_enabled : bool
   ; versions : (string * string) option
   }
 
 let table plan = plan.table
 let change plan = plan.change
-let lane_enabled plan = plan.lane_enabled
 let versions plan = plan.versions
 
 let observe path =
@@ -199,6 +261,7 @@ let plan ~find_ego (request : request) =
     let existing = configuration.Browser_configuration.live_ego in
     let* table, set, change, versions = decide ~find_ego request existing in
     let* () = validated ~path ~existing ~table ~set observation.source_text in
+    let* () = space_is_free ~table in
     Ok
       { runtime_config_path = path
       ; revision = Runtime_table_edit.revision_of_observation observation
@@ -206,7 +269,6 @@ let plan ~find_ego (request : request) =
       ; table
       ; set
       ; change
-      ; lane_enabled = configuration.Browser_configuration.live_enabled
       ; versions
       }
 
@@ -227,7 +289,6 @@ let replan previous =
     { previous with
       revision = Runtime_table_edit.revision_of_observation observation
     ; existing
-    ; lane_enabled = configuration.Browser_configuration.live_enabled
     }
 
 (* Under the configuration lock the text is the one on disk now: the revision

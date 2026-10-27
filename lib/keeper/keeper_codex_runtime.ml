@@ -16,6 +16,7 @@ type successful_tool_completion =
 type attempt_outcome =
   { result : (Runtime_agent.run_result, Agent_core.Error.t) result
   ; settled_session : Keeper_official_client_session_store.t option
+  ; pending_result_receipts : Keeper_client_tool_outbox.consumption option
   ; effect_disposition : Keeper_provider_attempt_effect.t
   ; successful_tool_completion : successful_tool_completion
   }
@@ -861,7 +862,7 @@ let observe_failed_dispatch ~observe_transport_uncertain = function
   | Runtime_codex_app_server.Runtime_shutting_down -> ()
 ;;
 
-let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~context_window ~quota_scope ~keeper_name
+let run_without_lifecycle ~result_scope ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~required_native_posture ~official_client_continuation ~runtime_id ~context_window ~quota_scope ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~loading_plan ~initial_messages ~capacity_bytes ~project_history
     ~on_transmitted_model_input ~hooks
@@ -869,6 +870,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     ~observe_effect_attempted ~observe_successful_tool_completion ~observe_transport_uncertain
     ~on_tool_execution ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_completion ~on_native_tool_progress
     ~on_usage_report ~(config : Runtime_execution.codex_app_server) =
+  on_results_ready None;
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
     Error
@@ -1100,9 +1102,9 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     (* Ordinary context keeps its existing placement. Receipts that outlived
        a cancelled vendor cell enter both Start and Resume as acknowledged
        developer items, independently of the previous session's survival. *)
-    let* tool_outbox = Keeper_codex_tool_outbox.load ~base_path ~keeper_name
+    let* tool_outbox = Keeper_client_tool_outbox.load ~base_path ~keeper_name
       |> Result.map_error internal_error in
-    let developer_context = Keeper_codex_tool_outbox.developer_context tool_outbox in
+    let developer_context = Keeper_client_tool_outbox.developer_context tool_outbox in
     let terminal_error = ref None in
     (* Reported only after the complete turn/start write. A Resume sent none of
        the conversation; the thread holds it. *)
@@ -1136,9 +1138,9 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       ; output_schema = None
       }
     in
-    let* host_dynamic_tools =
+    let* (host_dynamic_tools, _) =
       Host.dynamic_tools
-        ~base_path
+        ~result_scope:None
         ~content_transport:Runtime_official_client_tool.Codex
         ~accepts_image_input
         (* These lanes drive a provider CLI that has no place to show an
@@ -1224,8 +1226,9 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
                  requested_reasoning_effort)
             ())
     in
-    let* host_dynamic_tools =
+    let* (host_dynamic_tools, result_producer) =
       Host.dynamic_tools
+        ~result_scope:(Some result_scope)
         ~base_path
         ~content_transport:Runtime_official_client_tool.Codex
         ~accepts_image_input
@@ -1249,6 +1252,11 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
         ?on_tool_boundary:on_official_client_tool_boundary
         ~on_result_handoff:on_official_client_result_handoff
         ()
+    in
+    let produced_results = ref None in
+    let close_delivery_frontier () =
+      if Option.is_none !produced_results then
+        produced_results := Option.map Keeper_client_tool_outbox.close_delivery_frontier result_producer
     in
     let dynamic_tools =
       List.map
@@ -1389,8 +1397,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
            session_state := settled;
            on_session_settled settled;
            let* result = projected in
-           let* () = Keeper_codex_tool_outbox.acknowledge tool_outbox
-             |> Result.map_error internal_error in
+           on_results_ready (Some (Keeper_client_tool_outbox.pending_consumption [tool_outbox]));
            Ok result)
       | Ready | Start _ | Active _ | Turn_inflight { turn_id = None; _ }
       | Recovery_required _ | Settled _ ->
@@ -1438,6 +1445,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
           (match event with
            | Runtime_codex_app_server.Native_tool_started _
            | Native_tool_finished _ -> observe_effect_attempted ()
+           | Tool_delivery_closed _ -> close_delivery_frontier ()
            | Compaction_observed -> settled_held_context := []
            | Usage_reported { frame; _ } ->
              (* The final usage keeps only the newest request. A compaction
@@ -1447,7 +1455,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
               | Context_window_filled _ -> settled_held_context := []
               | Counted { last = Request_usage _; _ } -> ())
            | Native_tool_progress _ | Turn_started _ | Text_delta _ | Thinking_delta _ | Text_completed _ | Thinking_completed _ | Dynamic_tool_started _
-           | Dynamic_tool_finished _ | Tool_delivery_closed _ | Elicitation_cancelled _
+           | Dynamic_tool_finished _ | Elicitation_cancelled _
            | Usage_windows_reported _ | Turn_finished _ -> ());
           Option.iter (fun observe -> observe event) observe_stream
         in
@@ -1500,11 +1508,14 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
          ~history
          ~developer_context
          ~on_undelivered_tool_result:
-           (fun receipt ->
-             let* () = Keeper_codex_tool_outbox.retain ~base_path ~keeper_name receipt in
+           (fun (receipt : Runtime_codex_app_server.undelivered_tool_result) ->
+             let receipt : Keeper_client_tool_outbox.receipt =
+               {thread_id=receipt.thread_id;turn_id=receipt.turn_id;call_id=receipt.call_id;
+                tool_name=receipt.tool_name;arguments=receipt.arguments;response=receipt.response} in
+             let* () = Keeper_client_tool_outbox.retain ~base_path ~keeper_name receipt in
              (* The receipt is committed even if notification cannot commit.
                 Startup and the existing maintenance pulse rediscover it. *)
-             (match Keeper_codex_tool_outbox_wake.notify ~base_path ~keeper_name with
+             (match Keeper_client_tool_outbox_wake.notify ~base_path ~keeper_name with
               | Ok () -> ()
               | Error detail -> Log.Keeper.warn ~keeper_name
                   "retained tool result notification deferred: %s" detail
@@ -1669,8 +1680,19 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
          | Error detail ->
            Error (internal_error ("Codex session settlement failed: " ^ detail))
        in
-       let* () = Keeper_codex_tool_outbox.acknowledge tool_outbox
-         |> Result.map_error internal_error in
+       (* Natural vendor completion may only settle a scheduling handoff.
+          Preserve the original receipts until the consumer itself completes. *)
+       let stop_reason : Runtime_agent.stop_reason =
+         match scheduling_turn, turn.scheduling_handoff with
+         | Some (_, Direct_schedule _),
+             (Runtime_codex_app_server.Handoff_pending | Handoff_accepted) ->
+           Yielded_to_operation_queued { turns_used = turn_count; provider_turn_ordinal = turn_count }
+         | (Some (_, Autonomous_schedule) | None), _
+         | Some (_, Direct_schedule _),
+             (Handoff_unrequested | Handoff_rejected) -> Completed { provider_turn_ordinal = turn_count }
+       in
+       on_results_ready (Some (Keeper_client_tool_outbox.pending_consumption
+         (tool_outbox :: Option.to_list !produced_results)));
        let capture, _metrics =
          Runtime_observation.runtime_metrics_for_candidates ~runtime_id ~keeper_name ()
        in
@@ -1703,20 +1725,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
          ; run_validation = None
          ; runtime_observation = Some runtime_observation
          ; cooperative_boundary = None
-         ; stop_reason =
-             (* This is after natural vendor completion and durable session
-                settlement. The direct turn owner retains that exact authority
-                before requeueing the original operation, never succeeding it
-                on the scheduling reply. An unacknowledged notice is equally
-                unable to prove original-work completion. Autonomous turns keep
-                their own event-batch completion contract. *)
-             (match scheduling_turn, turn.scheduling_handoff with
-              | Some (_, Direct_schedule _),
-                  (Runtime_codex_app_server.Handoff_pending | Handoff_accepted) ->
-                Yielded_to_operation_queued { turns_used = turn_count; provider_turn_ordinal = turn_count }
-              | (Some (_, Autonomous_schedule) | None), _
-              | Some (_, Direct_schedule _),
-                  (Handoff_unrequested | Handoff_rejected) -> Completed { provider_turn_ordinal = turn_count })
+         ; stop_reason
          })
       with
       (* A stop the owner raised is not an ambiguity: it knows the turn did
@@ -1848,6 +1857,8 @@ let run ~input_source ?argument_source ?on_memory_capacity_refusal ?official_tas
       (Runtime_codex_app_server.effective_account_home config.account_home)
   in
   let settled_session = Atomic.make None in
+  let pending_result_receipts = Atomic.make None in
+  let on_results_ready value = Atomic.set pending_result_receipts value in
   let on_session_settled value = Atomic.set settled_session (Some value) in
   let effect_disposition =
     Atomic.make Keeper_provider_attempt_effect.No_effect_observed
@@ -1865,6 +1876,7 @@ let run ~input_source ?argument_source ?on_memory_capacity_refusal ?official_tas
   let observed_next_shrink_capacity_bytes = ref None in
   let measure_message_bytes = measure_model_input_message_bytes in
   let result =
+    Eio.Switch.run (fun result_scope ->
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
       Keeper_turn_driver_try_provider.context_overflow_shrink_sequence
         ?on_memory_capacity_refusal
@@ -1909,7 +1921,7 @@ let run ~input_source ?argument_source ?on_memory_capacity_refusal ?official_tas
         (* A read in an abandoned attempt cannot certify a tool-only answer
            from the next one. Effect evidence remains cumulative. *)
         Atomic.set successful_tool_completion No_successful_tool_completion;
-        run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~official_client_continuation ~context_window
+        run_without_lifecycle ~result_scope ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~official_client_continuation ~context_window
           ~required_native_posture
           ~runtime_id
           ~quota_scope
@@ -1974,10 +1986,13 @@ let run ~input_source ?argument_source ?on_memory_capacity_refusal ?official_tas
           ~observe_successful_tool_completion
         ~observe_transport_uncertain
           ~config)
-      ())
+      ()))
   in
   { result
   ; settled_session = Atomic.get settled_session
+  ; pending_result_receipts = (match result with
+      | Ok _ -> Atomic.get pending_result_receipts
+      | Error _ -> None)
   ; effect_disposition = Atomic.get effect_disposition
   ; successful_tool_completion = Atomic.get successful_tool_completion
   }

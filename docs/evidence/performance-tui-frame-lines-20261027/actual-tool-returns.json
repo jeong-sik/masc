@@ -1,0 +1,71 @@
+{
+  "interpreter": {
+    "request": {
+      "cmd": "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/bin/python3.14 -B -E artifacts/runs/extreme-perf-20261026/tui-frame-lines-prototype-v1/run.py",
+      "yield_time_ms": 1000,
+      "max_output_tokens": 1000
+    },
+    "initial": {
+      "chunk_id": "cf118b",
+      "wall_time_seconds": 1.00224525,
+      "session_id": 8677,
+      "original_token_count": 0,
+      "output": ""
+    },
+    "followups": [
+      {
+        "chunk_id": "0546b1",
+        "wall_time_seconds": 0.000006417,
+        "exit_code": 0,
+        "original_token_count": 42,
+        "output": "{\"child_exit_code\": 0, \"child_reaped\": true, \"original_source_unchanged\": true, \"execution_sha256\": \"e93c57ff37a57cce6fb8c11c874aa162e6131b18c9887b0acd012078e1b16414\"}\n"
+      }
+    ]
+  },
+  "direct_buffer_native": {
+    "request": {
+      "cmd": "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/bin/python3.14 -B -E artifacts/runs/extreme-perf-20261026/tui-frame-lines-prototype-v1/native_experiment.py",
+      "yield_time_ms": 1000,
+      "max_output_tokens": 900
+    },
+    "initial": {
+      "chunk_id": "2f83e6",
+      "wall_time_seconds": 1.001395125,
+      "session_id": 89948,
+      "original_token_count": 0,
+      "output": ""
+    },
+    "followups": [
+      {
+        "chunk_id": "72d9d1",
+        "wall_time_seconds": 0.000011,
+        "exit_code": 0,
+        "original_token_count": 61,
+        "output": "{\"config_rc\": 0, \"compile_rc\": 0, \"run_rc\": 0, \"all_reaped\": true, \"executable_sha256\": \"2aba1a0ecdc25cd8bd17e7f3795028207fd3e8e9cbb941dab7447c9f09cb5f06\", \"execution_sha256\": \"314b8eb82c12859ec0328ebeec24f8cd9d8ec753b89e4237d34baa8b2c6acc17\"}\n"
+      }
+    ]
+  },
+  "reverse_scan_native": {
+    "request": {
+      "cmd": "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/bin/python3.14 -B -E artifacts/runs/extreme-perf-20261026/tui-frame-lines-prototype-v1/reverse_experiment.py",
+      "yield_time_ms": 1000,
+      "max_output_tokens": 900
+    },
+    "initial": {
+      "chunk_id": "0a8802",
+      "wall_time_seconds": 1.001125208,
+      "session_id": 25415,
+      "original_token_count": 0,
+      "output": ""
+    },
+    "followups": [
+      {
+        "chunk_id": "57ac00",
+        "wall_time_seconds": 0.000006209,
+        "exit_code": 0,
+        "original_token_count": 35,
+        "output": "{\"compile_rc\": 0, \"run_rc\": 0, \"all_reaped\": true, \"execution_sha256\": \"f66f45b8648b4aa537185602e0dd89250b48368cc9e7de7837754e1dcef24f82\"}\n"
+      }
+    ]
+  }
+}

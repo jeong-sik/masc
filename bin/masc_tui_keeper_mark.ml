@@ -25,7 +25,9 @@ let activity_glyph : Masc_tui_keeper_list_model.activity -> string = function
   | Preparing | Running -> "\xe2\x97\x8f" (* ●; the list substitutes its animated mark *)
   | Streaming -> ">"
   | Async_working _ -> "&"
-  | Deferred | Tool_waiting | Model_waiting | External_waiting -> "\xe2\x97\x8c" (* ◌ *)
+  | Deferred -> "\xe2\x97\x8c" (* ◌ *)
+  | Tool_waiting -> "\xe2\x96\xa0" (* ■ *)
+  | Model_waiting | External_waiting -> "\xe2\x97\x8c" (* ◌ *)
   | Delegating -> "\xe2\x86\x92" (* → *)
   | Idle -> "\xe2\x97\x8b" (* ○ *)
   | Paused -> "\xe2\x85\xa1" (* Ⅱ *)

@@ -228,8 +228,9 @@ let operator_retain () = with_fixture (fun clock root config ->
       (Lane_addon_store.digest instance_id) in
     Unix.mkdir slot 0o700;
     let lease result = result |> Result.map_error Native_addon_lease.error_to_string |> require in
-    let context = require (Browser_addon_socket.context ~instance_id ~stagehand:None ~live_bidi:None ~models:None
-      ~automation:(Some {Browser_addon_automation.driver="/fixture/geckodriver";binary=None;profiles="/fixture/gecko-profiles"})) in
+    let context = require (Browser_addon_socket.context ~instance_id ~models:None
+      ~source:(Browser_addon_socket.Automation
+        {Browser_addon_automation.driver="/fixture/geckodriver";binary=None;profiles="/fixture/gecko-profiles"})) in
     let admission = lease (Native_addon_lease.prepare ~directories:[slot] ~instance_id ~cleanup_context:(Some context)) in
     let allocation = require (Browser_addon_socket.acquire ~admission ~directory:slot) in
     let downloads = Filename.concat (Filename.dirname (Browser_addon_socket.socket_path allocation)) "downloads" in
@@ -277,7 +278,7 @@ let operator_retain () = with_fixture (fun clock root config ->
 let browser_server = {|import argparse,hashlib,json,os,socket,subprocess,sys,threading,time
 p=argparse.ArgumentParser()
 p.add_argument("root");p.add_argument("mode")
-p.add_argument("--socket");p.add_argument("--incarnation");p.add_argument("--max-message-bytes")
+p.add_argument("--socket");p.add_argument("--incarnation");p.add_argument("--max-message-bytes");p.add_argument("--backend")
 a=p.parse_args()
 environment_check='''import json,os
 print(json.dumps({"provider_absent":"OPENAI_API_KEY" not in os.environ,
@@ -378,6 +379,7 @@ revision = "fixture-1"
 title = "Browser service fixture"
 runtime = "host_process"
 service = "browser"
+browser_backend = "external_host"
 command = ["python3", %S, %S, %S]
 contributions = ["observe"]
 [resources]
@@ -436,7 +438,7 @@ hooks = ["validate_input", "validate_output"]
   check bool "nor makes the public reading collide" true
     (Result.is_ok (R.tool_export_reading ~config ~access ~reserved:[Browser_addon_tool.definition.name]));
   check bool "public host uses selected input middleware" true
-    (match Browser_addon_host.call host ~arguments:(`Assoc ["actor",`String "forged"]) with
+    (match Browser_addon_host.call host ~backend:Browser_lane.Backend.External_host ~arguments:(`Assoc ["actor",`String "forged"]) with
      | Error (R.Host_refusal (Lane_addon_call_context.Rejected _)) -> true | _ -> false);
   check bool "rejected input never reaches worker" false
     (Sys.file_exists (Filename.concat root ("toolcalls-"^id)));
@@ -629,7 +631,7 @@ hooks = ["validate_input", "validate_output"]
   write (Filename.concat root ("reject-tool-output-"^id)) "reject";
   Eio.Fiber.both (fun () ->
     check bool "selected output middleware preserves unknown effect" true
-      (match Browser_addon_host.call host ~arguments with
+      (match Browser_addon_host.call host ~backend:Browser_lane.Backend.External_host ~arguments with
        | Error (R.Outcome_unknown _) -> true | _ -> false))
     (fun () ->
       wait clock (fun () -> Sys.file_exists (issued id));
@@ -646,9 +648,9 @@ hooks = ["validate_input", "validate_output"]
   check bool "detached handle refused" true (unavailable (call original Browser_addon_wire.Snapshot));
   let replacement=attach "normal" in let next=selected replacement in
   check bool "public handle never follows replacement export" true
-    (match Browser_addon_host.call host ~arguments with Error (R.Unavailable _) -> true | _ -> false);
+    (match Browser_addon_host.call host ~backend:Browser_lane.Backend.External_host ~arguments with Error (R.Unavailable _) -> true | _ -> false);
   check bool "public observation never follows replacement service" true
-    (unavailable (Browser_addon_host.snapshot host));
+    (unavailable (Browser_addon_host.snapshot host ~backend:Browser_lane.Backend.External_host));
   check bool "old handle never resolves replacement" true (unavailable (call original Browser_addon_wire.Snapshot));
   check bool "old native client never polls replacement" true
     (poll client=Error (Browser_addon_ingress.Registration_refused Browser_lane.Client_retired));
@@ -707,6 +709,7 @@ revision = "fixture-1"
 title = "Browser service fixture"
 runtime = "host_process"
 service = "browser"
+browser_backend = "external_host"
 command = ["python3", %S, %S, "normal"]
 contributions = ["observe"]
 [resources]

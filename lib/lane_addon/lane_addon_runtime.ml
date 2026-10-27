@@ -18,7 +18,7 @@ exception Host_request_withdrawn
 exception Action_persistence_failed of string
 type tool_export = Lane_addon_tool_export.t = private
   { owner : Lane_addon_tool_export.owner; instance_id : string; tool : Mcp_protocol.Mcp_types.tool }
-type browser_service = {instance_id:string;owner:Lane_addon_tool_export.owner}
+type browser_service = {instance_id:string;owner:Lane_addon_tool_export.owner;backend:Browser_lane.Backend.t}
 type browser_service_status = Browser_ready of browser_service
   | Browser_refresh_needed of browser_service | Browser_unavailable | Browser_retired
 type tool_call_error = Unavailable of string | Outcome_unknown of string
@@ -157,6 +157,11 @@ type skill_export = { owner : skill_export_owner; instance_id : string; package 
 let skill_source_id = function
   | Declaration id -> "lane-" ^ Digestif.SHA256.(to_hex (digest_string ("declaration\x00" ^ id)))
   | Instance id -> "lane-" ^ Digestif.SHA256.(to_hex (digest_string ("instance\x00" ^ id)))
+(* A declared installation publishes its Skills under its declaration id, a
+   manual attachment under its own instance id. *)
+let skill_export_owner ~installation_id ~instance_id = match installation_id with
+  | Some id -> Declaration id
+  | None -> Instance instance_id
 let skill_export_handler = ref None
 let register_skill_export_handler handler = skill_export_handler := Some handler
 (* [Run_actions] serves the action queue only. An action commits the
@@ -1599,6 +1604,18 @@ let native_package_ready (package : package) =
   | command::_ ->
       if Native_addon_program.command_ready ~package_directory:package.directory command
       then Ok () else Error "native Add-on executable is unavailable"
+(* A browser worker serves its package's one source, given that source's
+   table in the runtime.toml this server loaded and no other. A source whose
+   table is missing does not start. *)
+let browser_source_table configuration ~backend source =
+  let unstarted reason = Error (Printf.sprintf "the %s browser source does not start: %s"
+      (Browser_lane.Backend.to_wire backend) reason) in
+  match configuration with
+  | None -> unstarted "this server has not loaded a runtime.toml"
+  | Some configuration -> (match Browser_configuration.source_table source configuration with
+      | Some table -> Ok table
+      | None -> unstarted (Printf.sprintf "the runtime.toml this server loaded has no [%s] table"
+          (Browser_configuration.source_path source)))
 let backend ~store ~artifact_store () = match !override with
   | Some backend -> backend
   | None ->
@@ -1620,42 +1637,38 @@ let backend ~store ~artifact_store () = match !override with
               | executable::arguments -> Ok {Lane_addon_native_worker.executable;arguments} in
             let env=match package.worker_service with
               | Mcp_tools -> None
-              | Browser_service -> Some (Browser_addon_environment.project (Unix.environment ())) in
+              | Browser_service _ -> Some (Browser_addon_environment.project (Unix.environment ())) in
             let* cleanup_context,live_ego=match package.worker_service with
               | Mcp_tools -> Ok (None,None)
-              | Browser_service -> offload (fun () ->
-                  let configuration=Runtime.browser_configuration () in
-                  (* Ego owns its browser; the SDK session follows the worker's
-                     IPC lifetime. Its configuration rides the worker's arguments
-                     without a separate browser-process cleanup descriptor. *)
-                  let live_ego=match configuration with
-                    | Some {live_enabled=true;live_ego=Some ego;_} -> Some ego
-                    | None | Some {live_enabled=false;_}
-                    | Some {live_enabled=true;live_ego=None;_} -> None in
-                  let* stagehand=match configuration with
-                    | Some {stagehand_enabled=true;stagehand=Some browser;_} ->
-                      let* guardian=Native_addon_program.(locate Browser_process_owner) in
-                      Browser_addon_stagehand.configuration ~browser ~launcher ~guardian
-                        ~claim_directory:(native_claim_directory store Chrome_child_slot ~id:instance_id)
-                        |> Result.map Option.some
-                    | None | Some {stagehand_enabled=false;_}
-                    | Some {stagehand_enabled=true;stagehand=None;_} -> Ok None in
-                  let* live_bidi=match configuration with
-                    | Some {live_enabled=true;live_bidi=Some browser;_} ->
-                      let* guardian=Native_addon_program.(locate Browser_process_owner) in
-                      Browser_addon_live_bidi.configuration ~browser ~launcher ~guardian
-                        ~claim_directory:(native_claim_directory store Live_bidi_child_slot ~id:instance_id)
-                        |> Result.map Option.some
-                    | None | Some {live_enabled=false;_}
-                    | Some {live_enabled=true;live_bidi=None;_} -> Ok None in
-                  let* automation=match configuration with
-                    | Some {automation_enabled=true;automation=Some {driver;binary};_} ->
+              | Browser_service backend -> offload (fun () ->
+                  let table source =
+                    browser_source_table (Runtime.browser_configuration ()) ~backend source in
+                  let* source,live_ego=match backend with
+                    | Browser_lane.Backend.Automation ->
+                      let* {Browser_configuration.driver;binary}=table Browser_configuration.Automation in
                       let root=Browser_gecko_profile.root ~lane_addon_root:(Lane_addon_store.root store) in
                       let* profiles=Browser_gecko_profile.prepare_instance ~root ~instance_id in
-                      Ok (Some {Browser_addon_automation.driver;binary;profiles})
-                    | None | Some {automation_enabled=false;_}
-                    | Some {automation_enabled=true;automation=None;_} -> Ok None in
-                  Browser_addon_socket.context ~instance_id ~stagehand ~live_bidi ~automation
+                      Ok (Browser_addon_socket.Automation {Browser_addon_automation.driver;binary;profiles},None)
+                    | Browser_lane.Backend.Stagehand ->
+                      let* browser=table Browser_configuration.Stagehand in
+                      let* guardian=Native_addon_program.(locate Browser_process_owner) in
+                      let* configuration=Browser_addon_stagehand.configuration ~browser ~launcher ~guardian
+                        ~claim_directory:(native_claim_directory store Chrome_child_slot ~id:instance_id) in
+                      Ok (Browser_addon_socket.Stagehand configuration,None)
+                    | Browser_lane.Backend.Owned_firefox ->
+                      let* browser=table Browser_configuration.Live_bidi in
+                      let* guardian=Native_addon_program.(locate Browser_process_owner) in
+                      let* configuration=Browser_addon_live_bidi.configuration ~browser ~launcher ~guardian
+                        ~claim_directory:(native_claim_directory store Live_bidi_child_slot ~id:instance_id) in
+                      Ok (Browser_addon_socket.Owned_firefox configuration,None)
+                    (* Ego owns its browser; the SDK session follows the
+                       worker's IPC lifetime. Its configuration rides the
+                       worker's arguments, not the cleanup descriptor. *)
+                    | Browser_lane.Backend.Ego ->
+                      let* ego=table Browser_configuration.Live_ego in
+                      Ok (Browser_addon_socket.Ego,Some ego)
+                    | Browser_lane.Backend.External_host -> Ok (Browser_addon_socket.External_host,None) in
+                  Browser_addon_socket.context ~instance_id ~source
                     ~models:(if not (uses_host_requests package) then None else Some {
                       Browser_addon_models.store_root=Filename.concat (Lane_addon_store.root store) "worker-model-results";
                       outputs=package.exact_outputs})
@@ -1671,7 +1684,7 @@ let backend ~store ~artifact_store () = match !override with
                   let* () = retire () in Error (Lifecycle.Persistence_failed detail) in
             let* socket=match package.worker_service with
               | Mcp_tools -> Ok None
-              | Browser_service ->
+              | Browser_service _ ->
                   let directory=List.hd (Native_addon_lease.directories admission) in
                   (match Eio.Cancel.protect (fun () -> offload (fun () -> Browser_addon_socket.acquire ~admission ~directory)) with
                    | Ok socket -> Ok (Some socket)
@@ -1887,7 +1900,7 @@ let installation_exports ((e : entry), connection) =
    installations may export the same name. *)
 let serves_public_tools (service : Lane_addon_types.worker_service) = match service with
   | Mcp_tools -> true
-  | Browser_service -> false
+  | Browser_service _ -> false
 let public_reading (reading : live_reading) = ({
   ready = List.filter (fun ((e : entry), _) -> serves_public_tools e.package.worker_service) reading.ready;
   unready = List.filter (fun (unready : Lane_addon_unready.t) -> serves_public_tools unready.service) reading.unready;
@@ -1971,6 +1984,9 @@ let tool_execution_snapshot ~config ~access ~reserved = Eio_context.run_on_owner
       }) isolated.exports in
   ({serving;conflicts=isolated.conflicts;unready=reading.unready} : tool_execution_snapshot))
 
+let tool_execution_skill_owner (serving : tool_execution) =
+  skill_export_owner ~installation_id:serving.installation_id ~instance_id:serving.export.instance_id
+
 let tool_export_reading ~config ~access ~reserved = Eio_context.run_on_owner_domain (fun () ->
   let reading = public_reading (current_reading ~config ~access) in
   unique_exports ~reserved (reading_exports reading)
@@ -1996,32 +2012,55 @@ let refusal_text render = function
 let export_refusal_message = refusal_text Lane_addon_unready.message
 let export_refusal_operator_message = refusal_text Lane_addon_unready.operator_message
 
+(* The cached observation of the one installation among [entries]. A
+   detaching incarnation gives way to its replacement; only when none remains
+   does it explain why the observation cannot be read. *)
+let observation_of_entries entries =
+  let serving, detaching = entries
+    |> List.filter_map (fun (e : entry) -> match readiness e with
+      | Gone -> None
+      | Unready Lane_addon_unready.Detaching -> Some (Either.Right e)
+      | Ready _ | Unready (Lane_addon_unready.Starting | Stopping | Failed _) -> Some (Either.Left e))
+    |> List.partition_map Fun.id in
+  match serving, List.map (fun e -> unready_of e Lane_addon_unready.Detaching) detaching with
+  | [], [] -> Ok None
+  | [], first :: rest -> Error (Unready_installations (first, rest))
+  | [e], ([] | _ :: _) ->
+      (match readiness e with
+       | Unready reason -> Error (Unready_installations (unready_of e reason, []))
+       | Gone -> Ok None
+       | Ready _ ->
+           if e.seq = 0 then Error (Not_yet_observed {installation=installation_name e;package_id=e.package.id})
+           else Ok (Some {instance_id=e.instance_id;observation_seq=e.seq;max_bytes=(Lane_addon_types.max_reply_bytes e.package);
+             refreshing=e.state = Lifecycle.Observing || e.pending <> Idle || e.active_tool_calls > 0 || Option.is_some e.current_action;output=e.output}))
+  | _ :: _ :: _, ([] | _ :: _) -> Error (Ambiguous_installations (List.map installation_name serving))
 let observation_for_export ~config ~access ~name = Eio_context.run_on_owner_domain (fun () ->
   let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
   match Hashtbl.find_opt managers root with
   | None -> Ok None
+  | Some m -> observation_of_entries (entries m |> List.filter (fun (e : entry) ->
+      can_read access e.visibility && List.mem name e.package.exported_tools)))
+type browser_observation = {
+  backend : Browser_lane.Backend.t;
+  observation : (export_observation option, export_refusal) result;
+}
+(* Browser installations are found by their package's service, not by an
+   export name, and read per source they serve: two installations of one
+   source are ambiguous for that source only. A detaching incarnation gives
+   way to its replacement there, as [observation_of_entries] reads it. *)
+let browser_observations ~config ~access = Eio_context.run_on_owner_domain (fun () ->
+  let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+  match Hashtbl.find_opt managers root with
+  | None -> []
   | Some m ->
-      (* A detaching incarnation gives way to its replacement; only when none
-         remains does it explain why the export cannot be read. *)
-      let serving, detaching = entries m |> List.filter (fun (e : entry) ->
-        can_read access e.visibility && List.mem name e.package.exported_tools)
-        |> List.filter_map (fun (e : entry) -> match readiness e with
-          | Gone -> None
-          | Unready Lane_addon_unready.Detaching -> Some (Either.Right e)
-          | Ready _ | Unready (Lane_addon_unready.Starting | Stopping | Failed _) -> Some (Either.Left e))
-        |> List.partition_map Fun.id in
-      match serving, List.map (fun e -> unready_of e Lane_addon_unready.Detaching) detaching with
-      | [], [] -> Ok None
-      | [], first :: rest -> Error (Unready_installations (first, rest))
-      | [e], ([] | _ :: _) ->
-          (match readiness e with
-           | Unready reason -> Error (Unready_installations (unready_of e reason, []))
-           | Gone -> Ok None
-           | Ready _ ->
-               if e.seq = 0 then Error (Not_yet_observed {installation=installation_name e;package_id=e.package.id})
-               else Ok (Some {instance_id=e.instance_id;observation_seq=e.seq;max_bytes=(Lane_addon_types.max_reply_bytes e.package);
-                 refreshing=e.state = Lifecycle.Observing || e.pending <> Idle || e.active_tool_calls > 0 || Option.is_some e.current_action;output=e.output}))
-      | _ :: _ :: _, ([] | _ :: _) -> Error (Ambiguous_installations (List.map installation_name serving)))
+      let browsers = entries m |> List.filter_map (fun (e : entry) ->
+        match e.package.worker_service, readiness e with
+        | (Browser_service _ | Mcp_tools), Gone -> None
+        | Browser_service backend, (Ready _ | Unready _) when can_read access e.visibility -> Some (backend, e)
+        | Browser_service _, (Ready _ | Unready _) | Mcp_tools, (Ready _ | Unready _) -> None) in
+      List.sort_uniq compare (List.map fst browsers) |> List.map (fun backend ->
+        {backend; observation=observation_of_entries (List.filter_map (fun (served, e) ->
+          if served = backend then Some e else None) browsers)}))
 
 let with_tool_call_owner work =
   let cancelled, signal_cancelled = Eio.Promise.create () in
@@ -2103,12 +2142,15 @@ let call_operator ~config ~access ~instance_id ~expected_incarnation ~arguments 
           raise exn))
 
 type browser_reading = { services : browser_service list; unready : Lane_addon_unready.t list }
+(* The browser service a running entry offers, named by its installation,
+   its export owner and the sources its package serves. *)
+let browser_service_of (e : entry) connection = match e.package.worker_service with
+  | Mcp_tools -> None
+  | Browser_service backend -> Some {instance_id=e.instance_id;owner=connection.export_owner;backend}
 let browser_reading (reading : live_reading) =
-  let services = reading.ready |> List.filter_map (fun ((e : entry), connection) ->
-    if serves_public_tools e.package.worker_service then None
-    else Some {instance_id=e.instance_id;owner=connection.export_owner}) in
+  let services = reading.ready |> List.filter_map (fun ((e : entry), connection) -> browser_service_of e connection) in
   let unready = reading.unready |> List.filter (fun (unready : Lane_addon_unready.t) ->
-    match unready.service with Browser_service -> true | Mcp_tools -> false) in
+    match unready.service with Browser_service _ -> true | Mcp_tools -> false) in
   { services; unready }
 let browser_service_reading ~config ~access = Eio_context.run_on_owner_domain (fun () ->
   browser_reading (current_reading ~config ~access))
@@ -2193,12 +2235,49 @@ let choose_document_service ~visibility candidates =
   | [service] -> Document_service service
   | _ :: _ :: _ -> Several_browser_services
   | [] -> (match candidates with [] -> No_browser_service | _ :: _ -> Browser_narrower_than_consumer)
+(* The services a document read on [route] may go to, among [services] with
+   the source [backend] says each serves. A live client is read on the
+   usable live service whose last observation lists it ([lists]), or on the
+   one live service there is, whose observation may lag a new client. A
+   client of a live source two services serve is not read: a client does not
+   say which of them it came from. *)
+let document_route_services ~services ~backend ~lists route =
+  let serving source service = backend service = source in
+  let among = List.map backend services in
+  let doubled_refusal =
+    "the live source of that browser is served by more than one attached browser Add-on, so the document source does not read it" in
+  match route with
+  | Browser_lane.Automation_route -> Ok (List.filter (serving Browser_lane.Backend.Automation) services)
+  | Stagehand_route -> Ok (List.filter (serving Browser_lane.Backend.Stagehand) services)
+  | Live_route client ->
+      let usable, doubled = List.partition (fun service ->
+        Browser_addon_observation.lists_usable_clients ~among (backend service))
+        (List.filter (fun service -> Browser_addon_observation.serves_live (backend service)) services) in
+      (match client, usable, doubled with
+       | Some client, _, _ when List.exists (fun service -> lists service client) doubled -> Error doubled_refusal
+       | Some _, [_], [] -> Ok usable
+       | Some client, ([] | _ :: _), ([] | _ :: _) -> Ok (List.filter (fun service -> lists service client) usable)
+       | None, [], _ :: _ -> Error doubled_refusal
+       | None, ([] | _ :: _), ([] | _ :: _) -> Ok usable)
+let document_services m (reading : browser_reading) route =
+  let lists (service : browser_service) client = match Hashtbl.find_opt m.entries service.instance_id with
+    | None -> false
+    | Some (e : entry) -> (match Browser_addon_observation.read e.output with
+        | Ok published -> List.exists (fun (listed : Browser_lane.client_info) ->
+            String.equal (Browser_lane.client_id_to_string listed.client_id) (Browser_lane.client_id_to_string client))
+            published.clients
+        | Error _ -> false) in
+  document_route_services ~services:reading.services ~backend:(fun (service : browser_service) -> service.backend)
+    ~lists route
 let read_browser_document m ~access ~visibility ~route ~tab_id =
   with_tool_call_owner (fun () ->
     let reading=browser_reading (live_reading m access) in
+    match document_services m reading route with
+    | Error detail -> Error detail
+    | Ok services ->
     let candidates=List.filter_map (fun (service:browser_service) ->
       Hashtbl.find_opt m.entries service.instance_id
-      |> Option.map (fun (browser:entry) -> service, browser.visibility)) reading.services in
+      |> Option.map (fun (browser:entry) -> service, browser.visibility)) services in
     match choose_document_service ~visibility candidates with
     | Document_service service ->
         (* The existing transport deadline; the worker never creates a
@@ -2229,7 +2308,7 @@ let read_browser_document m ~access ~visibility ~route ~tab_id =
     | Browser_narrower_than_consumer ->
         Error "the attached browser Add-on is visible to fewer readers than this installation's output, so its document is not read"
     | Several_browser_services ->
-        Error "more than one browser Add-on is attached, so the document source cannot choose one")
+        Error "more than one attached browser Add-on serves this browser, so the document source cannot choose one")
 
 let retain_tool_request_owner ~config ~access ~reserved ~(export : tool_export) ~scope ~request_id ~summary ~request =
   with_tool_call_owner (fun () ->
@@ -2437,7 +2516,7 @@ let invoke_companion_export ~sw m ~config ~access ~principal ~companion_publish 
   let unavailable ()=Error (Lane_addon_call_context.Host_refusal (Unavailable "private companion is unavailable")) in
   let configuration=e.configuration in
   match e.package.execution,e.package.worker_service with
-  | Container _,(Mcp_tools|Browser_service) | Host_process _,Browser_service -> unavailable ()
+  | Container _,(Mcp_tools|Browser_service _) | Host_process _,Browser_service _ -> unavailable ()
   | Host_process _,Mcp_tools ->
     (match confirm_companion_owner m ~access ~principal e original configuration,Eio_context.get_net_opt () with
      | Error (),_ | Ok _,None -> unavailable ()
@@ -2580,8 +2659,12 @@ let call_exported_tool_on_owner ~companion_publish ~continuation ~on_complete ~o
     (* Whether this call wrote anything to the worker. A companion call
        reserves its origin before the RPC, which is already an effect. *)
     let reached = ref false in
+    let wake_after_return = ref false in
     let on_dispatch () = reached := true in
-    Fun.protect ~finally:(fun () -> e.active_tool_calls <- e.active_tool_calls - in_flight) (fun () ->
+    Fun.protect ~finally:(fun () ->
+      e.active_tool_calls <- e.active_tool_calls - in_flight;
+      if !wake_after_return && not e.stopping then
+        Eio.Cancel.protect (fun () -> wake_dependents m e)) (fun () ->
     try
       let principal = match principal with
         | Some principal -> principal
@@ -2615,11 +2698,11 @@ let call_exported_tool_on_owner ~companion_publish ~continuation ~on_complete ~o
             | Lane_addon_call_context.May_change, (None | Some true | Some false) -> wake e);
            if Option.is_some connection.host then wake_host e)
        | Error (Lane_addon_call_context.Host_refusal _) ->
-           (* A refused call never reached the worker and schedules nothing,
-              but while it was counted a consumer may have been refused. *)
+           (* The requested mutation was refused and schedules nothing, but
+              while it was counted a consumer may have been refused. *)
            (match declared with
             | Lane_addon_call_context.Reads_only -> ()
-            | Lane_addon_call_context.May_change -> if not e.stopping then wake_dependents m e)
+            | Lane_addon_call_context.May_change -> wake_after_return := true)
        | Error (Lane_addon_call_context.Transport_error detail) ->
            if not e.stopping then (
              failed m e (Lifecycle.Effect_outcome_unknown ("tool outcome unknown: " ^ detail));
@@ -2639,7 +2722,10 @@ let call_exported_tool_on_owner ~companion_publish ~continuation ~on_complete ~o
         notify_exports m e;
         (match persist m e with Ok () -> () | Error detail ->
           Log.Misc.error "Cancelled Add-on tool state persistence: %s" detail);
-        stop_entry ~sw ~backend:worker_backend m e);
+        stop_entry ~sw ~backend:worker_backend m e)
+      else (match declared with
+        | Lane_addon_call_context.Reads_only -> ()
+        | Lane_addon_call_context.May_change -> wake_after_return := true);
       raise exn))
 
 let call_exported_tool_with_authority ~companion_publish ~continuation ~on_complete ~on_result ~authorize ~principal
@@ -2726,15 +2812,19 @@ let browser_service_status ~config ~access ~instance_id = Eio_context.run_on_own
          | Detaching|Detached -> Browser_retired
          | Failed _ ->
              (match e.connection with
-              | Some connection when e.started && not (serves_public_tools e.package.worker_service) ->
-                  Browser_refresh_needed {instance_id;owner=connection.export_owner}
+              | Some connection when e.started ->
+                  (match browser_service_of e connection with
+                   | Some service -> Browser_refresh_needed service
+                   | None -> Browser_unavailable)
               | None|Some _ -> Browser_unavailable)
          | Attached|Observing ->
              if not e.started then Browser_unavailable else
              match e.connection with
-             | Some connection when not (serves_public_tools e.package.worker_service) ->
-                 Browser_ready {instance_id;owner=connection.export_owner}
-             | None|Some _ -> Browser_unavailable)
+             | Some connection ->
+                 (match browser_service_of e connection with
+                  | Some service -> Browser_ready service
+                  | None -> Browser_unavailable)
+             | None -> Browser_unavailable)
     | Some _ -> Browser_unavailable
     | None ->
         (match read_retained_bindings m with
@@ -4587,8 +4677,8 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
       match e.package.skills_directory, phase_of e with
       | None, _ | Some _, Detached -> None
       | Some _, (Attached | Observing | Failed _ | Detaching) ->
-          let owner = match e.configuration with
-            | Some owner -> Declaration owner.id | None -> Instance e.instance_id in
+          let owner = skill_export_owner ~instance_id:e.instance_id
+            ~installation_id:(Option.map (fun (owner : configuration_owner) -> owner.id) e.configuration) in
           Some {owner; instance_id=e.instance_id; package=e.package})
       |> List.sort (fun a b -> String.compare (skill_source_id a.owner) (skill_source_id b.owner)) in
     (match !skill_export_handler with
@@ -4708,6 +4798,7 @@ let installation_questions ~config =
         Ok ((declaration_id, rows) :: acc)) ids (Ok [])))
 
 module For_testing = struct
+  let browser_source_table = browser_source_table
   type nonrec visibility = visibility = Shared | Operator_only | Keeper_only of string
   type nonrec 'service document_service = 'service document_service =
     | Document_service of 'service
@@ -4715,6 +4806,7 @@ module For_testing = struct
     | Browser_narrower_than_consumer
     | Several_browser_services
   let choose_document_service = choose_document_service
+  let document_route_services = document_route_services
   let await_run_stopped ~config ~instance_id =
     Eio_context.run_on_owner_domain (fun () ->
       let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in

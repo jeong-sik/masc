@@ -2,6 +2,7 @@ module Capture = Keeper_librarian_admission_capture
 module Parts = Keeper_librarian_admission_parts
 module Gate = Keeper_librarian_admission_gate
 module Owner = Lane_addon_tool_request_owner
+module Store = Lane_addon_store
 module Runtime = Lane_addon_runtime
 module History = Keeper_librarian_durable_request
 let ( let* ) = Result.bind
@@ -11,7 +12,7 @@ let namespace id = match Capture.scope_of_request_id id with
   | Error _ -> match History.scope_of_request_id id with
     | Ok scope -> History scope
     | Error _ -> Other
-type discovery = {keepers:string list;refusals:string list}
+type discovery = {keepers:string list;refusals:string list;original_keepers:string list}
 let discover_parts ~store ~parts_by_owner owner =
   match List.assoc_opt owner !parts_by_owner with
   | Some result -> result
@@ -47,13 +48,10 @@ let rec finish_rescan_pass state =
     if Atomic.compare_and_set state Rerun_needed Running then true
     else finish_rescan_pass state
   | Idle -> false
-let install ~sw ~config =
+let discover ~fold_originals ~config ~store =
   let base_path=config.Workspace.base_path in
   let keepers_dir=Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
-  let stopped=Atomic.make false in
-  let rescan_state=Atomic.make Idle in
-  let discover = function
+  function
     | Runtime.Configuration_observed | Export_inventory_changed ->
       (* An absent dependency stops durable history before an original is
          captured. Its persisted Keeper is still a real owner to notify;
@@ -66,7 +64,8 @@ let install ~sw ~config =
         | Error detail -> [],[detail] in
       let parts_by_owner=ref [] in
       let original_keepers,original_refusals=
-        match Owner.fold_all ~store ~init:([],[]) ~f:(fun (keepers,refusals) (original:Owner.retained) ->
+        let folded = Store.with_tool_request_settlement_barrier store (fun () ->
+          fold_originals ~store ~init:([],[]) ~f:(fun (keepers,refusals) (original:Owner.retained) ->
           let keeper=match namespace original.request_id with
             | Admission scope when scope=original.scope ->
               admission_keeper ~store ~parts_by_owner ~base_path ~keepers_dir original |> Result.map Option.some
@@ -78,11 +77,13 @@ let install ~sw ~config =
           match keeper with
           | Ok None -> keepers,refusals
           | Ok (Some (keeper,_installation)) -> keeper::keepers,refusals
-          | Error detail -> keepers,detail::refusals) with
-        | Ok (keepers,refusals) -> List.rev keepers,List.rev refusals
-        | Error error -> [],[Owner.error_to_string error] in
+          | Error detail -> keepers,detail::refusals)) in
+        match folded with
+        | Error detail -> [],[detail]
+        | Ok (Error error) -> [],[Owner.error_to_string error]
+        | Ok (Ok (keepers,refusals)) -> List.rev keepers,List.rev refusals in
       Ok {keepers=List.sort_uniq String.compare (persisted @ queued @ original_keepers);
-          refusals=metadata_refusals @ queue_refusals @ original_refusals}
+          refusals=metadata_refusals @ queue_refusals @ original_refusals;original_keepers}
     | Exact_result_delivered {installation_id;instance_id=_;request_id} ->
       let* scope=match namespace request_id with
         | Admission scope | History scope -> Ok scope
@@ -95,11 +96,17 @@ let install ~sw ~config =
         | History _ -> history_keeper ~base_path ~keepers_dir original
         | Other -> Error "Librarian result hint has no original execution namespace" in
       if installation_id=original_installation
-      then Ok {keepers=[keeper];refusals=[]}
-      else Error "Librarian result hint belongs to a different original installation" in
+      then Ok {keepers=[keeper];refusals=[];original_keepers=[keeper]}
+      else Error "Librarian result hint belongs to a different original installation"
+let install ~sw ~config =
+  let base_path=config.Workspace.base_path in
+  let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+  let stopped=Atomic.make false in
+  let rescan_state=Atomic.make Idle in
   let run_discovery event =
     if not (Atomic.get stopped) then
-      match Domain_pool_ref.submit_io_or_inline (fun () -> discover event) with
+      match Domain_pool_ref.submit_io_or_inline (fun () ->
+        discover ~fold_originals:Owner.fold_all ~config ~store event) with
       | Error detail -> Log.Server.warn "Librarian Addon wake discovery: %s" detail
       | Ok found ->
         List.iter (fun detail -> Log.Server.warn "Librarian Addon original wake refused: %s" detail) found.refusals;
@@ -129,3 +136,11 @@ let install ~sw ~config =
           run_discovery event)) in
   let unsubscribe=Runtime.subscribe_owner_events ~config ~package_id:Capture.package_id signal in
   Eio.Switch.on_release sw (fun () -> Atomic.set stopped true;unsubscribe ())
+module For_testing = struct
+  let discover ~config ~store ~after_inventory ~on_original ~event =
+    let fold_originals ~store ~init ~f =
+      Owner.For_testing.fold_all ~store ~after_inventory ~init ~f:(fun acc original ->
+        on_original original; f acc original) in
+    Result.map (fun found -> found.keepers,found.refusals,found.original_keepers)
+      (discover ~fold_originals ~config ~store event)
+end

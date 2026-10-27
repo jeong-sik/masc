@@ -302,11 +302,14 @@ class Distribution(unittest.TestCase):
             self.install_bundle(self.binary, self.archive, self.prefix, self.asset, companions)
         self.assertEqual((self.prefix / "masc").read_bytes(), previous)
 
-    def run_installer(self, mirror, extra=()):
+    def run_installer(self, mirror, extra=(), env_override=None, guest_shim=False):
         env = os.environ.copy()
         env.update(MASC_RELEASE_BASE_URL=mirror.parent.as_uri(), MASC_WIZARD="0")
+        if env_override:
+            env.update(env_override)
+        shim_options = [] if guest_shim else ["--no-guest-shim"]
         return subprocess.run(["bash", str(ROOT / "scripts/install.sh"), "--version", "v9.9.9", "--prefix", str(self.prefix),
-                               "--base-path", str(self.root / "base"), "--no-seed", "--no-guest-shim", "--no-wizard", *extra],
+                               "--base-path", str(self.root / "base"), "--no-seed", "--no-wizard", *shim_options, *extra],
                               env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     def test_real_installer_downloads_pair_and_keeps_it_outside_checkout(self):
@@ -327,6 +330,248 @@ class Distribution(unittest.TestCase):
         again = self.run_installer(mirror)
         self.assertEqual(again.returncode, 0, again.stderr)
         self.assertEqual((self.prefix / "masc").resolve(), installed)
+
+    def test_real_installer_refuses_foreign_version_without_executing_it(self):
+        mirror = self.mirror()
+        target = self.prefix / "masc"
+        marker = self.root / "foreign-executed"
+        for reported in ("0.34.0", "9.9.9"):
+            with self.subTest(reported=reported):
+                target.write_text("#!/bin/sh\necho called >> " + shlex.quote(str(marker)) +
+                                  "\necho " + reported + "\n")
+                target.chmod(0o755)
+                previous = target.read_bytes()
+                result = self.run_installer(mirror)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("pass --force", result.stderr)
+                self.assertEqual(target.read_bytes(), previous)
+                self.assertFalse(marker.exists(), "unknown executable was started")
+                self.assertFalse((self.prefix / bundle.TRANSACTION).exists())
+
+    def test_matching_unmanaged_binary_requires_force_in_dry_run_and_install(self):
+        mirror = self.mirror()
+        target = self.prefix / "masc"
+        shutil.copy2(self.binary, target)
+        previous = target.read_bytes()
+        for extra in ([], ["--dry-run"]):
+            with self.subTest(extra=extra):
+                result = self.run_installer(mirror, extra)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("not a managed release pointer", result.stderr)
+                self.assertEqual(target.read_bytes(), previous)
+
+    def test_older_bundle_helper_fails_closed_without_no_replace(self):
+        mirror = self.mirror()
+        helper = mirror / ("masc-release-dashboard-bundle-" + self.arch + ".py")
+        old = helper.read_text().replace('    inst.add_argument("--no-replace", action="store_true")\n', '')
+        old = old.replace('args.runtime_archive, args.no_replace)', 'args.runtime_archive)')
+        helper.write_text(old)
+        checksum_path = mirror / "SHA256SUMS"
+        checksum_path.write_text("".join(
+            f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n"
+            for path in mirror.iterdir() if path.name != "SHA256SUMS"))
+        result = self.run_installer(mirror)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--no-replace", result.stderr)
+        self.assertFalse((self.prefix / "masc").exists())
+        forced = self.run_installer(mirror, ["--force"])
+        self.assertEqual(forced.returncode, 0, forced.stderr)
+        self.assertEqual((self.prefix / "masc").read_bytes(), self.binary.read_bytes())
+
+    def test_installer_leaves_an_unrelated_companion_partial_untouched(self):
+        mirror = self.mirror()
+        outside = self.root / "outside"
+        outside.write_text("keep my file")
+        partial = self.prefix / "masc-tui.partial"
+        partial.symlink_to(outside)
+        result = self.run_installer(mirror)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(partial.is_symlink())
+        self.assertEqual(outside.read_text(), "keep my file")
+
+    def test_installer_leaves_an_unrelated_guest_shim_partial_untouched(self):
+        mirror = self.mirror()
+        shim_name = "masc-exec-shim-linux-" + ("arm64" if self.arch.endswith("arm64") else "amd64")
+        shim = mirror / shim_name
+        shutil.copy2(self.binary, shim)
+        with (mirror / "SHA256SUMS").open("a") as checksums:
+            checksums.write(f"{hashlib.sha256(shim.read_bytes()).hexdigest()}  {shim_name}\n")
+        shim_dir = self.root / "base/.masc/microvm/shim"
+        shim_dir.mkdir(parents=True)
+        outside = self.root / "outside-shim"
+        outside.write_text("keep my file")
+        partial = shim_dir / "masc-exec-shim.partial"
+        partial.symlink_to(outside)
+        result = self.run_installer(mirror, guest_shim=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(partial.is_symlink())
+        self.assertEqual(outside.read_text(), "keep my file")
+        self.assertEqual((shim_dir / "masc-exec-shim").read_bytes(), self.binary.read_bytes())
+
+    def test_real_installer_explicit_force_replaces_foreign_file(self):
+        previous = self.old()
+        mirror = self.mirror()
+        result = self.run_installer(mirror, ["--force"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotEqual((self.prefix / "masc").read_bytes(), previous)
+        bundle.verify_tree((self.prefix / "masc").resolve().parent, self.asset)
+
+    def test_no_replace_does_not_erase_a_file_created_at_publication(self):
+        target = self.prefix / "masc"
+        original_link = os.link
+        def race(source, destination, **options):
+            if Path(destination) == self.prefix.resolve() / "masc":
+                target.write_text("another program appeared")
+            return original_link(source, destination, **options)
+        runtime = self.runtime_archive if self.arch.startswith("macos-") else None
+        with patch.object(bundle.os, "link", side_effect=race):
+            with self.assertRaisesRegex(ValueError, "appeared during installation"):
+                bundle.install(self.binary, self.archive, self.prefix, self.asset,
+                               runtime_archive=runtime, no_replace=True)
+        self.assertEqual(target.read_text(), "another program appeared")
+        self.assertFalse((self.prefix / bundle.TRANSACTION).exists())
+
+    def test_transaction_parent_sync_precedes_publication(self):
+        runtime = self.runtime_archive if self.arch.startswith("macos-") else None
+        original_sync = bundle.fsync_dir
+        failed = False
+        def fail_first_prefix_sync(directory):
+            nonlocal failed
+            if Path(directory) == self.prefix.resolve() and not failed:
+                failed = True
+                self.assertTrue((self.prefix / bundle.TRANSACTION).is_dir())
+                self.assertFalse((self.prefix / "masc").exists())
+                raise OSError("injected pre-publication sync failure")
+            return original_sync(directory)
+        with patch.object(bundle, "fsync_dir", side_effect=fail_first_prefix_sync):
+            with self.assertRaisesRegex(OSError, "pre-publication sync"):
+                bundle.install(self.binary, self.archive, self.prefix, self.asset,
+                               runtime_archive=runtime, no_replace=True)
+        self.assertTrue(failed)
+        self.assertFalse((self.prefix / "masc").exists())
+        self.assertFalse((self.prefix / bundle.TRANSACTION).exists())
+
+    def test_no_replace_rollback_preserves_a_concurrently_replaced_file(self):
+        runtime = self.runtime_archive if self.arch.startswith("macos-") else None
+        with patch("builtins.print"):
+            bundle.install(self.binary, self.archive, self.prefix, self.asset,
+                           runtime_archive=runtime, no_replace=True)
+        target = self.prefix.resolve() / "masc"
+        foreign = self.root / "incoming"
+        foreign.write_text("another program")
+        original_rename = os.rename
+        def race(source, destination):
+            if Path(source) == target:
+                os.replace(foreign, target)
+            return original_rename(source, destination)
+        with patch.object(bundle.os, "rename", side_effect=race):
+            bundle.rollback(self.prefix.resolve())
+        self.assertEqual(target.read_text(), "another program")
+        self.assertFalse((self.prefix / bundle.TRANSACTION).exists())
+
+    def test_no_replace_rollback_restores_a_concurrently_replaced_directory(self):
+        runtime = self.runtime_archive if self.arch.startswith("macos-") else None
+        with patch("builtins.print"):
+            bundle.install(self.binary, self.archive, self.prefix, self.asset,
+                           runtime_archive=runtime, no_replace=True)
+        target = self.prefix.resolve() / "masc"
+        original_rename = os.rename
+        def race(source, destination):
+            if Path(source) == target:
+                target.unlink()
+                target.mkdir()
+                (target / "data").write_text("another program")
+            return original_rename(source, destination)
+        with patch.object(bundle.os, "rename", side_effect=race):
+            bundle.rollback(self.prefix.resolve())
+        self.assertTrue(target.is_dir())
+        self.assertEqual((target / "data").read_text(), "another program")
+        self.assertFalse((self.prefix / bundle.TRANSACTION).exists())
+
+    def test_rollback_preserves_both_directories_when_restore_name_is_taken(self):
+        runtime = self.runtime_archive if self.arch.startswith("macos-") else None
+        with patch("builtins.print"):
+            bundle.install(self.binary, self.archive, self.prefix, self.asset,
+                           runtime_archive=runtime, no_replace=True)
+        target = self.prefix.resolve() / "masc"
+        original_rename, exclusive = os.rename, bundle.rename_directory_no_replace
+        def replace_with_directory(source, destination):
+            if Path(source) == target:
+                target.unlink()
+                target.mkdir()
+                (target / "data").write_text("first program")
+            return original_rename(source, destination)
+        def occupy_restore_name(source, destination):
+            Path(destination).write_text("second program")
+            return exclusive(source, destination)
+        with patch.object(bundle.os, "rename", side_effect=replace_with_directory), \
+             patch.object(bundle, "rename_directory_no_replace", side_effect=occupy_restore_name):
+            with self.assertRaisesRegex(ValueError, "could not confirm the changed destination"):
+                bundle.rollback(self.prefix.resolve())
+        self.assertEqual(target.read_text(), "second program")
+        journal = self.prefix / bundle.TRANSACTION
+        captured = list(journal.glob('.rollback-*/entry/data'))
+        self.assertEqual([path.read_text() for path in captured], ["first program"])
+        with self.assertRaisesRegex(ValueError, "interrupted rollback preserved"):
+            bundle.commit(self.prefix.resolve())
+
+    def test_interrupted_no_replace_rollback_is_never_discarded(self):
+        runtime = self.runtime_archive if self.arch.startswith("macos-") else None
+        with patch("builtins.print"):
+            bundle.install(self.binary, self.archive, self.prefix, self.asset,
+                           runtime_archive=runtime, no_replace=True)
+        journal = self.prefix / bundle.TRANSACTION
+        captured = journal / ".rollback-interrupted" / "entry"
+        captured.parent.mkdir()
+        captured.write_text("preserved other program")
+        for recover in (bundle.rollback, bundle.commit):
+            with self.subTest(recover=recover.__name__):
+                with self.assertRaisesRegex(ValueError, "interrupted rollback preserved"):
+                    recover(self.prefix.resolve())
+                self.assertEqual(captured.read_text(), "preserved other program")
+
+    def test_rollback_sync_failure_keeps_the_captured_file_for_inspection(self):
+        runtime = self.runtime_archive if self.arch.startswith("macos-") else None
+        with patch("builtins.print"):
+            bundle.install(self.binary, self.archive, self.prefix, self.asset,
+                           runtime_archive=runtime, no_replace=True)
+        target = self.prefix.resolve() / "masc"
+        foreign = self.root / "incoming"
+        foreign.write_text("another program")
+        original_rename, original_sync = os.rename, bundle.fsync_dir
+        def race(source, destination):
+            if Path(source) == target:
+                os.replace(foreign, target)
+            return original_rename(source, destination)
+        def fail_holder_sync(directory):
+            if Path(directory).name.startswith('.rollback-'):
+                raise OSError("injected rollback sync failure")
+            return original_sync(directory)
+        with patch.object(bundle.os, "rename", side_effect=race), \
+             patch.object(bundle, "fsync_dir", side_effect=fail_holder_sync):
+            with self.assertRaisesRegex(OSError, "rollback sync"):
+                bundle.rollback(self.prefix.resolve())
+        journal = self.prefix / bundle.TRANSACTION
+        captured = list(journal.glob('.rollback-*/entry'))
+        self.assertEqual([path.read_text() for path in captured], ["another program"])
+        with self.assertRaisesRegex(ValueError, "interrupted rollback preserved"):
+            bundle.commit(self.prefix.resolve())
+
+    def test_real_installer_preserves_a_file_created_after_its_initial_check(self):
+        mirror = self.mirror()
+        target = self.prefix / "masc"
+        commands = self.root / "commands"
+        commands.mkdir()
+        curl = commands / "curl"
+        curl.write_text("#!/bin/sh\ncase \"$*\" in *" + shlex.quote('/v9.9.9/' + self.asset) +
+                        "*) echo another-program > " + shlex.quote(str(target)) +
+                        " ;; esac\nexec " + shlex.quote(shutil.which('curl')) + ' "$@"\n')
+        curl.chmod(0o755)
+        result = self.run_installer(mirror, env_override={"PATH": str(commands) + os.pathsep + os.environ['PATH']})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("pass --force", result.stderr)
+        self.assertEqual(target.read_text(), "another-program\n")
+        self.assertFalse((self.prefix / bundle.TRANSACTION).exists())
 
     def test_missing_ssh_bootstrap_asset_does_not_replace_installed_binary(self):
         previous = self.old()
@@ -349,6 +594,16 @@ class Distribution(unittest.TestCase):
         self.assertEqual((self.prefix / "masc").read_bytes(), previous)
         self.assertEqual(tui.read_text(), "old tui")
         self.assertFalse((self.prefix / "masc-browser-host").exists())
+        self.assertFalse((self.prefix / bundle.TRANSACTION).exists())
+
+    def test_no_replace_smoke_failure_rolls_back_its_own_publications(self):
+        self.binary.write_text(self.binary.read_text().replace("--version) echo 9.9.9", "--version) exit 9"))
+        mirror = self.mirror()
+        result = self.run_installer(mirror)
+        self.assertNotEqual(result.returncode, 0)
+        for name in ("masc", *bundle.COMPANIONS):
+            self.assertFalse((self.prefix / name).exists(), name)
+            self.assertFalse((self.prefix / name).is_symlink(), name)
         self.assertFalse((self.prefix / bundle.TRANSACTION).exists())
 
     def test_real_installer_exposes_startup_error_after_verified_assembly(self):

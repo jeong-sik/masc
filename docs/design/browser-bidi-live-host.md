@@ -22,8 +22,8 @@ existing tab merely to make the listing complete.
 
 ### Let the browser Add-on own Firefox
 
-The attached browser Lane Add-on starts Firefox when the live lane is enabled
-and the workspace's `runtime.toml` contains:
+The attached `browser-firefox` Lane Add-on starts Firefox when its declaration
+is enabled and the workspace's `runtime.toml` contains:
 
 ```toml
 [browser.live.bidi]
@@ -33,9 +33,10 @@ profile = "/Users/you/masc-keeper-firefox-profile"
 ```
 
 `masc browser-lane-setup --mode bidi --base-path DIR` prepares this table and
-profile. Explicit `--firefox`, `--profile` and `--port` options replace their
+profile and declares `browser-firefox` when the workspace has no declaration of
+it. Explicit `--firefox`, `--profile` and `--port` options replace their
 corresponding existing values. Restart MASC to load the configuration, then
-attach the browser Add-on or detach and reattach its installation. Log in once
+attach `browser-firefox` or detach and reattach its installation. Log in once
 in that Firefox; the dedicated profile preserves its logins.
 
 The Add-on captures this configuration in its original native reservation
@@ -59,9 +60,10 @@ original owner and retains an unconfirmed result. Profile contents and stable
 claim files are preserved. The worker log is `live-firefox.log` in its private
 per-incarnation allocation; Add-on observations report readiness or failure.
 
-The server has no independent Firefox startup job. `[browser.live] enabled =
-false` leaves this backend unconfigured on the next attachment. Existing
-instances retain their captured configuration until detached.
+The server has no independent Firefox startup job. The `browser-firefox`
+declaration's `enabled = false` stops this worker; the other browser sources
+keep running. Existing instances retain their captured configuration until
+detached.
 
 ### By hand
 
@@ -328,8 +330,10 @@ does next:
   - `keeper`: the configured browser ownership, by `kind`.
     `addon_managed` carries the configured `port` and `profile`. The attached
     Add-on observation supplies actual worker and connection readiness.
-    `lane_off`, `not_configured` (no `[browser.live.bidi]`) and `not_known`
-    (no configuration was read) carry nothing more.
+    `addon_off` (`[browser.live.bidi]` is set, but no enabled declaration
+    runs `browser-firefox`), `not_configured` (no `[browser.live.bidi]`) and
+    `not_known` (no configuration was read, or the declarations could not
+    all be read) carry nothing more.
   - `message`: the paragraph the doctor prints.
 - The TUI's Browser Lane picker draws it from the server's `bidiHost`:
   whether a host runs and whether the server lists it, why the last one

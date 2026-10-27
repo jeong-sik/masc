@@ -119,7 +119,9 @@ let lifecycle_log_line ~action ~name ~actor ~duration_ms outcome =
      outcome, so the severity is derived from it (single emission) instead of
      a static [Info] — otherwise a rejected/failed lifecycle action hides
      under the noise floor. Failures are degraded-with-recovery (the client
-     gets an error response, the server keeps serving) -> [Warn]. *)
+     gets an error response, the server keeps serving) -> [Warn], except a
+     persist failure: the transition was not durably preserved, which the
+     taxonomy defines as [Error]. *)
   let level, outcome_s, reason =
     match outcome with
     | Succeeded -> (Log.Info, "ok", None)
@@ -127,7 +129,7 @@ let lifecycle_log_line ~action ~name ~actor ~duration_ms outcome =
     | Already_absent -> (Log.Info, "already_absent", None)
     | Rejected why -> (Log.Warn, "rejected", Some why)
     | Dispatch_none -> (Log.Warn, "dispatch_none", None)
-    | Persist_failed why -> (Log.Warn, "persist_failed", Some why)
+    | Persist_failed why -> (Log.Error, "persist_failed", Some why)
   in
   (* [reason] goes last and its newlines collapse to spaces: a dispatched
      tool's error is free text and would otherwise break the line into

@@ -270,19 +270,32 @@ let configuration_error_json {kind; detail} =
 let selection_of_contents = select ~unnamed_backend:Refuse_unnamed
 let read_declaration ~unnamed_backend ~base_path =
   let path = Keeper_sandbox_config.keeper_toml_path ~base_path ~agent_name:"imp" in
-  match In_channel.with_open_text path In_channel.input_all with
-  | contents ->
+  let unreadable detail = Error {kind=Declaration_unreadable; detail} in
+  match Fs_compat.load_file_opt path with
+  | Some contents ->
     select ~unnamed_backend ~path ~contents ~profile:None ~microvm_backend:None ~network_mode:None
+    |> Result.map Option.some
     |> Result.map_error (fun detail -> {kind=Declaration_invalid; detail})
-  | exception Sys_error detail -> Error {kind=Declaration_unreadable; detail}
+  | None ->
+    (* An open can report ENOENT for an existing dangling symlink. Only a
+       missing directory entry is an absent declaration. If it appeared after
+       the open, report the failed observation rather than hiding the race. *)
+    (match Unix.lstat path with
+     | _ -> unreadable (Printf.sprintf "%s: %s" path (Unix.error_message Unix.ENOENT))
+     | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+     | exception Unix.Unix_error (error, _, _) ->
+       unreadable (Printf.sprintf "%s: %s" path (Unix.error_message error)))
+  | exception Sys_error detail -> unreadable detail
 let declaration = read_declaration ~unnamed_backend:Refuse_unnamed
 let boot_declaration = read_declaration ~unnamed_backend:Resolve_like_boot
-let inspect ~base_path =
-  let host = detect_host ~run:system_runner in
-  let declared = Option.map (fun base_path -> declaration ~base_path) base_path in
+let inspect ~run ~base_path =
+  let host = detect_host ~run in
+  let declared = match base_path with
+    | Some base_path -> declaration ~base_path
+    | None -> Ok None in
   let configured_selection = match declared with
-    | Some (Ok selection) -> Some selection | Some (Error _) | None -> None in
-  let entries = List.map (probe ~host ~run:system_runner
+    | Ok selection -> selection | Error _ -> None in
+  let entries = List.map (probe ~host ~run
     ~require_rootless:(Env_config_sandbox.Hardening.require_rootless ())
     ~require_userns:(Env_config_sandbox.Hardening.require_userns ())) all in
   let configured = Option.map (fun (selection : selection) -> selection.backend) configured_selection in
@@ -292,7 +305,7 @@ let inspect ~base_path =
       | Some selection -> `Assoc ["backend", `String (backend_id selection.backend);
           "network_mode", `String (Keeper_types_profile_sandbox.network_mode_to_string selection.network_mode)]))
       :: ("configuration_error", (match declared with
-      | Some (Error error) -> configuration_error_json error | Some (Ok _) | None -> `Null)) :: fields)
+      | Error error -> configuration_error_json error | Ok _ -> `Null)) :: fields)
   | json -> json
 
 let stage_contents ~path ~contents selection =

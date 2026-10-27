@@ -140,12 +140,27 @@ let load ~path =
           Error "ui_category must be a supported string" in
     let* worker_service = match Otoml.find_opt document Fun.id ["service"] with
       | None | Some (Otoml.TomlString "tools") -> Ok Mcp_tools
-      | Some (Otoml.TomlString "browser") -> Ok Browser_service
+      | Some (Otoml.TomlString "browser") ->
+          (* A browser package names the one source its worker serves. *)
+          (match Otoml.find_opt document Fun.id ["browser_backend"] with
+           | None -> Error ("service = \"browser\" requires browser_backend, one of " ^ Browser_lane.Backend.expected)
+           | Some (Otoml.TomlString wire) ->
+               (match Browser_lane.Backend.of_wire wire with
+                | Some backend -> Ok (Browser_service backend)
+                | None -> Error ("browser_backend must be one of " ^ Browser_lane.Backend.expected))
+           | Some (Otoml.TomlInteger _ | Otoml.TomlFloat _
+               | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+               | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+               | Otoml.TomlTable _ | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _) ->
+               Error "browser_backend must be a string")
       | Some (Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
           | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
           | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
           | Otoml.TomlTable _ | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _) ->
           Error "service must be tools or browser" in
+    let* () = match worker_service, Otoml.find_opt document Fun.id ["browser_backend"] with
+      | Mcp_tools, Some _ -> Error "browser_backend requires service = \"browser\""
+      | Mcp_tools, None | Browser_service _, (None | Some _) -> Ok () in
     let* world = match Otoml.find_opt document Fun.id ["world"] with
       | None -> Ok []
       | Some (Otoml.TomlTable fields | Otoml.TomlInlineTable fields) ->
@@ -362,7 +377,7 @@ let load ~path =
           Ok (Container {runtime;image;resources}) in
     let* () = match worker_service with
       | Mcp_tools -> Ok ()
-      | Browser_service ->
+      | Browser_service _ ->
           let* () = match execution with Host_process _ -> Ok ()
             | Container _ -> Error "browser service requires native execution" in
           let* () = match state_storage with Ephemeral -> Ok ()

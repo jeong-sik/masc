@@ -184,6 +184,7 @@ let render_overview (state : state) home =
     ~hints:(if state.keeper_navigation_open then Masc_tui_keys.keeper_navigation_hints
             else Masc_tui_keys.footer_hints Overview)
     ~body:(fun ~budget:chrome_budget c ->
+      let rows_started = Masc_tui_frame_timing.start_stage () in
       (* The one-time door line: the first screen a reader meets names the
          sheet's key, because a footer item is easy to read past before the
          habit of reading footers exists. The first input of any kind
@@ -301,8 +302,9 @@ let render_overview (state : state) home =
                (first + 1) (first + List.length window) count);
         List.iter draw_row window
       end;
-      if selection_changed then
-        c.push_styled ~style:(Theme.warn ()) " Selection changed · j/k to choose again")
+      (if selection_changed then
+         c.push_styled ~style:(Theme.warn ()) " Selection changed · j/k to choose again");
+      Masc_tui_frame_timing.finish_stage ~name:"overview.rows" rows_started)
 
 
 let task_detail_viewport = Masc_tui_render_work.task_detail_viewport

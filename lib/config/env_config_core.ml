@@ -240,28 +240,55 @@ let expand_home_prefix value =
   else
     value
 
+type lexical_path_form = Normal_form | Needs_normalization
+
+let rec classify_path_components value length component_start index =
+  if index < length && value.[index] <> '/' then
+    classify_path_components value length component_start (index + 1)
+  else
+    let component_length = index - component_start in
+    if component_length = 0
+       || (component_length = 1 && value.[component_start] = '.')
+       || (component_length = 2 && value.[component_start] = '.'
+           && value.[component_start + 1] = '.')
+    then Needs_normalization
+    else if index = length then Normal_form
+    else classify_path_components value length (index + 1) (index + 1)
+
+let classify_lexical_path value =
+  let length = String.length value in
+  match length with
+  | 0 -> Needs_normalization
+  | 1 when value.[0] = '/' -> Normal_form
+  | _ ->
+      let first_component = if value.[0] = '/' then 1 else 0 in
+      classify_path_components value length first_component first_component
+
 let normalize_path_lexically value =
   let value = expand_home_prefix (String.trim value) in
   if value = "" then ""
   else
-    let absolute = value.[0] = '/' in
-    let parts = String.split_on_char '/' value in
-    let rec fold acc = function
-      | [] -> acc
-      | "" :: rest | "." :: rest -> fold acc rest
-      | ".." :: rest -> (
-          match acc, absolute with
-          | _ :: acc_tail, _ -> fold acc_tail rest
-          | [], true -> fold [] rest
-          | [], false -> fold [ ".." ] rest)
-      | part :: rest -> fold (part :: acc) rest
-    in
-    let normalized_parts = List.rev (fold [] parts) in
-    match absolute, normalized_parts with
-    | true, [] -> "/"
-    | true, parts -> "/" ^ String.concat "/" parts
-    | false, [] -> "."
-    | false, parts -> String.concat "/" parts
+    match classify_lexical_path value with
+    | Normal_form -> value
+    | Needs_normalization ->
+        let absolute = value.[0] = '/' in
+        let parts = String.split_on_char '/' value in
+        let rec fold acc = function
+          | [] -> acc
+          | "" :: rest | "." :: rest -> fold acc rest
+          | ".." :: rest -> (
+              match acc, absolute with
+              | _ :: acc_tail, _ -> fold acc_tail rest
+              | [], true -> fold [] rest
+              | [], false -> fold [ ".." ] rest)
+          | part :: rest -> fold (part :: acc) rest
+        in
+        let normalized_parts = List.rev (fold [] parts) in
+        match absolute, normalized_parts with
+        | true, [] -> "/"
+        | true, parts -> "/" ^ String.concat "/" parts
+        | false, [] -> "."
+        | false, parts -> String.concat "/" parts
 
 let normalize_masc_base_path_input path =
   let normalized = path |> normalize_path_lexically |> strip_path_trailing_slashes in

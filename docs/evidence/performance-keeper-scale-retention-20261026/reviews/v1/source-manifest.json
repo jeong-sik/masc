@@ -1,0 +1,265 @@
+{
+  "schema": "masc.independent-source-preparation-review.v1",
+  "review_date_local": "2026-10-26",
+  "reviewer": "/root/concurrent_probe_review",
+  "source_authority": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+  "checkout_head_read_only": "6a2d8dd6171e1d732ca15f918fb084e462e4d371",
+  "execution_status": "SOURCE_ONLY_NOT_EXECUTED",
+  "network_or_ci_queries": 0,
+  "runtime_or_target_script_execution": 0,
+  "local_builds": 0,
+  "target_edits": 0,
+  "files": [
+    {
+      "path": "scripts/harness/perf/keeper_scale_session.py",
+      "authority_revision": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+      "authority_sha256": "ab5157338bea4e3f019bac7c5f856d135f8f9875b00b6624a2a1178b73000f29",
+      "authority_bytes": 47365,
+      "authority_lines": 883,
+      "current_sha256": "ab5157338bea4e3f019bac7c5f856d135f8f9875b00b6624a2a1178b73000f29",
+      "current_equals_authority": true,
+      "read_scope": "full"
+    },
+    {
+      "path": "scripts/harness/perf/README-keeper-scale-session.md",
+      "authority_revision": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+      "authority_sha256": "b85d749288a6c56ab3048a7184ec5402215d39a37d1e9ad63c0763071f6541a0",
+      "authority_bytes": 4368,
+      "authority_lines": 78,
+      "current_sha256": "b85d749288a6c56ab3048a7184ec5402215d39a37d1e9ad63c0763071f6541a0",
+      "current_equals_authority": true,
+      "read_scope": "full"
+    },
+    {
+      "path": "scripts/fixtures/release-evidence/runtime.toml",
+      "authority_revision": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+      "authority_sha256": "ccbe65e399f47a3abddbf4299e15dd0fd55001dd785b2e0d75948ad86acf7cfd",
+      "authority_bytes": 3058,
+      "authority_lines": 66,
+      "current_sha256": "ccbe65e399f47a3abddbf4299e15dd0fd55001dd785b2e0d75948ad86acf7cfd",
+      "current_equals_authority": true,
+      "read_scope": "full"
+    },
+    {
+      "path": "scripts/harness/perf/keeper_scale_packet_audit.py",
+      "authority_revision": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+      "authority_sha256": "d90322b27342bc392913a831678ec155f9bac1975eb6963ec6c1e305165383a5",
+      "authority_bytes": 18054,
+      "authority_lines": 277,
+      "current_sha256": "d90322b27342bc392913a831678ec155f9bac1975eb6963ec6c1e305165383a5",
+      "current_equals_authority": true,
+      "read_scope": "full"
+    },
+    {
+      "path": "scripts/harness/perf/keeper_scale_fault_probe.py",
+      "authority_revision": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+      "authority_sha256": "39813847175b0ad83c92a904bd159533af5e96d318a286fc19af3e8d48cee9e8",
+      "authority_bytes": 8308,
+      "authority_lines": 160,
+      "current_sha256": "39813847175b0ad83c92a904bd159533af5e96d318a286fc19af3e8d48cee9e8",
+      "current_equals_authority": true,
+      "read_scope": "full"
+    },
+    {
+      "path": "lib/keeper/keeper_tool_surface.ml",
+      "authority_revision": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+      "authority_sha256": "7673c4b122609bff5d3994b70044ffbfcb2d4def2cb929a56fd0dd9a6653b8f1",
+      "authority_bytes": 32768,
+      "authority_lines": 711,
+      "current_sha256": "7673c4b122609bff5d3994b70044ffbfcb2d4def2cb929a56fd0dd9a6653b8f1",
+      "current_equals_authority": true,
+      "read_scope": "relevant regions only"
+    },
+    {
+      "path": "lib/keeper/keeper_tool_surface_ops.ml",
+      "authority_revision": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+      "authority_sha256": "4e60e405eaf73d16220f9f25eaad1e7201a344453368c293fd4485a8b6427800",
+      "authority_bytes": 45502,
+      "authority_lines": 1165,
+      "current_sha256": "4e60e405eaf73d16220f9f25eaad1e7201a344453368c293fd4485a8b6427800",
+      "current_equals_authority": true,
+      "read_scope": "relevant regions only"
+    },
+    {
+      "path": "lib/keeper/keeper_chat_operation_payload.ml",
+      "authority_revision": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+      "authority_sha256": "6980cfd58d36b0d6063cfb3e7bb8e5efdb2baba9cb044958c10248da8a29d9aa",
+      "authority_bytes": 17400,
+      "authority_lines": 421,
+      "current_sha256": "6980cfd58d36b0d6063cfb3e7bb8e5efdb2baba9cb044958c10248da8a29d9aa",
+      "current_equals_authority": true,
+      "read_scope": "relevant regions only"
+    },
+    {
+      "path": "lib/keeper/keeper_chat_operation_batch.ml",
+      "authority_revision": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+      "authority_sha256": "97a691be96b1ca07fb0142cb3a8f2bdc362fcbe24670426319efcc7baab479d6",
+      "authority_bytes": 5750,
+      "authority_lines": 85,
+      "current_sha256": "97a691be96b1ca07fb0142cb3a8f2bdc362fcbe24670426319efcc7baab479d6",
+      "current_equals_authority": true,
+      "read_scope": "relevant regions only"
+    },
+    {
+      "path": "lib/keeper/keeper_invocation_contract.ml",
+      "authority_revision": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+      "authority_sha256": "8ec5607d5cf02c785d092ce9c24ab295949350976148389df64132ad71af3293",
+      "authority_bytes": 9683,
+      "authority_lines": 276,
+      "current_sha256": "8ec5607d5cf02c785d092ce9c24ab295949350976148389df64132ad71af3293",
+      "current_equals_authority": true,
+      "read_scope": "relevant regions only"
+    },
+    {
+      "path": "lib/keeper/keeper_multimodal_input.ml",
+      "authority_revision": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+      "authority_sha256": "b8ec7b5cbb737c66d2b8231be7f67c160f3d8d370160d385a5c939b00dffc5fb",
+      "authority_bytes": 25464,
+      "authority_lines": 698,
+      "current_sha256": "b8ec7b5cbb737c66d2b8231be7f67c160f3d8d370160d385a5c939b00dffc5fb",
+      "current_equals_authority": true,
+      "read_scope": "relevant regions only"
+    },
+    {
+      "path": "lib/keeper/surface_ref.ml",
+      "authority_revision": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+      "authority_sha256": "f63af00f53ca4a01cdbe9f609e3a0b26bc617289e3f416bd329dc5de604f5aec",
+      "authority_bytes": 4490,
+      "authority_lines": 122,
+      "current_sha256": "f63af00f53ca4a01cdbe9f609e3a0b26bc617289e3f416bd329dc5de604f5aec",
+      "current_equals_authority": true,
+      "read_scope": "relevant regions only"
+    },
+    {
+      "path": "lib/keeper_runtime/keeper_continuation_channel.ml",
+      "authority_revision": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+      "authority_sha256": "84368f3b8c641fda093b63cb75cc21651b1f82242ba1219c23cd5940a7c8ad1e",
+      "authority_bytes": 19849,
+      "authority_lines": 501,
+      "current_sha256": "84368f3b8c641fda093b63cb75cc21651b1f82242ba1219c23cd5940a7c8ad1e",
+      "current_equals_authority": true,
+      "read_scope": "relevant regions only"
+    },
+    {
+      "path": "lib/keeper_chat_operations/keeper_chat_operation.ml",
+      "authority_revision": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+      "authority_sha256": "f6789150d9568945bde3922ce51ef140293063535b728a7bd8d4d9eb65579c2a",
+      "authority_bytes": 7239,
+      "authority_lines": 231,
+      "current_sha256": "f6789150d9568945bde3922ce51ef140293063535b728a7bd8d4d9eb65579c2a",
+      "current_equals_authority": true,
+      "read_scope": "relevant regions only"
+    },
+    {
+      "path": "lib/keeper_chat_operations/keeper_chat_operation_store.ml",
+      "authority_revision": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+      "authority_sha256": "709cefc00acfd3711b0c8f0731ed874e17bf8958bfc6186b2575725267214398",
+      "authority_bytes": 168247,
+      "authority_lines": 3197,
+      "current_sha256": "709cefc00acfd3711b0c8f0731ed874e17bf8958bfc6186b2575725267214398",
+      "current_equals_authority": true,
+      "read_scope": "relevant regions only"
+    },
+    {
+      "path": "lib/server/server_auth.ml",
+      "authority_revision": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+      "authority_sha256": "74de018e73568420993c0485a0a756a34fb640cd61430f658835c9eec0beaf82",
+      "authority_bytes": 59447,
+      "authority_lines": 1426,
+      "current_sha256": "74de018e73568420993c0485a0a756a34fb640cd61430f658835c9eec0beaf82",
+      "current_equals_authority": true,
+      "read_scope": "relevant regions only"
+    },
+    {
+      "path": "lib/server/server_routes_http_dashboard_dev_token.ml",
+      "authority_revision": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+      "authority_sha256": "2a2320b5d9d34cd245b08f19dc8ee5406fb0cd86f4867d1f2cfaa2e39d819d0a",
+      "authority_bytes": 10688,
+      "authority_lines": 298,
+      "current_sha256": "2a2320b5d9d34cd245b08f19dc8ee5406fb0cd86f4867d1f2cfaa2e39d819d0a",
+      "current_equals_authority": true,
+      "read_scope": "relevant regions only"
+    },
+    {
+      "path": "lib/server/server_routes_http_routes_dashboard.ml",
+      "authority_revision": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+      "authority_sha256": "d88df0328be749b351bda5aeba04315e2132e03a303cb6f6c81d5fe69b35b84d",
+      "authority_bytes": 191187,
+      "authority_lines": 4066,
+      "current_sha256": "d88df0328be749b351bda5aeba04315e2132e03a303cb6f6c81d5fe69b35b84d",
+      "current_equals_authority": true,
+      "read_scope": "relevant regions only"
+    },
+    {
+      "path": "lib/server/server_mcp_actor_injection.ml",
+      "authority_revision": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+      "authority_sha256": "fcc40cbb3531a698fa41f271c2aa5db47bef60e1c33e27efa9460cf06b3b76da",
+      "authority_bytes": 3388,
+      "authority_lines": 99,
+      "current_sha256": "fcc40cbb3531a698fa41f271c2aa5db47bef60e1c33e27efa9460cf06b3b76da",
+      "current_equals_authority": true,
+      "read_scope": "relevant regions only"
+    },
+    {
+      "path": "lib/server/server_mcp_transport_http.ml",
+      "authority_revision": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+      "authority_sha256": "d04c2dc7e4c33bb3296736fb014dd92c536c9c99b799f43b72f171da66c99d6a",
+      "authority_bytes": 46412,
+      "authority_lines": 1011,
+      "current_sha256": "d04c2dc7e4c33bb3296736fb014dd92c536c9c99b799f43b72f171da66c99d6a",
+      "current_equals_authority": true,
+      "read_scope": "relevant regions only"
+    },
+    {
+      "path": "lib/server/server_mcp_transport_http_respond.ml",
+      "authority_revision": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+      "authority_sha256": "7789aebb370017bc85459724d7aabca69f6efa27744d9d6ff09e2c918ced8f04",
+      "authority_bytes": 11448,
+      "authority_lines": 261,
+      "current_sha256": "7789aebb370017bc85459724d7aabca69f6efa27744d9d6ff09e2c918ced8f04",
+      "current_equals_authority": true,
+      "read_scope": "relevant regions only"
+    },
+    {
+      "path": "lib/server/server_dashboard_http_keeper_chat_operations.ml",
+      "authority_revision": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+      "authority_sha256": "5fa2da733fdfd52b05892758de4e3be8794a35649bd38d91a4ed3841d3b7d431",
+      "authority_bytes": 27472,
+      "authority_lines": 690,
+      "current_sha256": "5fa2da733fdfd52b05892758de4e3be8794a35649bd38d91a4ed3841d3b7d431",
+      "current_equals_authority": true,
+      "read_scope": "relevant regions only"
+    },
+    {
+      "path": "bin/main_eio.ml",
+      "authority_revision": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+      "authority_sha256": "107443640cec4d076a9c67d33c8ef4207fd94ab95b024fb27a60a0952e6d6ae3",
+      "authority_bytes": 220221,
+      "authority_lines": 4758,
+      "current_sha256": "107443640cec4d076a9c67d33c8ef4207fd94ab95b024fb27a60a0952e6d6ae3",
+      "current_equals_authority": true,
+      "read_scope": "relevant regions only"
+    },
+    {
+      "path": "docs/constitution.xml",
+      "authority_revision": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+      "authority_sha256": "4076f6a42f563ba36c1be6549ecb473929f81f1342e2a65a3b1b293f4591ddc8",
+      "authority_bytes": 42101,
+      "authority_lines": 569,
+      "current_sha256": "4076f6a42f563ba36c1be6549ecb473929f81f1342e2a65a3b1b293f4591ddc8",
+      "current_equals_authority": true,
+      "read_scope": "full"
+    },
+    {
+      "path": "lib/mcp_server_eio_caller_identity.ml",
+      "authority_revision": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+      "authority_sha256": "aab08684e16af2a0fa9a2e142ec181329c3764670b27195066f41f00e1546e25",
+      "authority_bytes": 13662,
+      "authority_lines": 330,
+      "current_sha256": "aab08684e16af2a0fa9a2e142ec181329c3764670b27195066f41f00e1546e25",
+      "current_equals_authority": true,
+      "read_scope": "relevant regions only"
+    }
+  ],
+  "primary_files_unchanged_at_completion": true
+}

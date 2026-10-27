@@ -1,0 +1,87 @@
+{
+  "schema": "masc.normalized-path-copy-native-plan.v1",
+  "created_utc": "2026-10-26T18:19:18.037833+00:00",
+  "execute": false,
+  "reason": "Source-bound native comparison for a new lexical normal-form path implementation; interpreted helper gain and regressions are not native whole-program results.",
+  "builder_source": "6a2d8dd6171e1d732ca15f918fb084e462e4d371",
+  "candidate_application_source": "f861e7c628ff5cfd504c7e85120c39a804a99c41",
+  "control_application_source": "55a0c7482fedece3f114fa8accb64a5084b1a796",
+  "candidate_artifact_run": 40375875592,
+  "candidate_qualification": "pending: no execution until exact artifact bytes, embedded commands, frozen builder/fixture and independent plan review qualify; previous native workloads and offline audits are closed",
+  "runner": {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/perf-normalized-path-copy-20261027/scripts/harness/perf/keeper_scale_session.py",
+    "sha256": "a6df19e949708fb6b44255e2a0623689c1ba9eb9e203c4a0eaf35f30ee537284"
+  },
+  "reader": {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/perf-normalized-path-copy-20261027/scripts/harness/perf/keeper_scale_packet_audit.py",
+    "sha256": "be6b0a62cf36d7174f43d2ff282285e8eb151fe8fe25583ee41c8c35c5976f9b"
+  },
+  "fixture_sha256": "ccbe65e399f47a3abddbf4299e15dd0fd55001dd785b2e0d75948ad86acf7cfd",
+  "fixed_parameters": {
+    "messages_per_keeper": 2,
+    "model_delay_ms": 10,
+    "settle_timeout_s": 1200,
+    "request_timeout_s": 15,
+    "sample_interval_s": 0.1
+  },
+  "native_paths": {
+    "control_binary": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-profile-55a0c748/masc",
+    "control_binary_sha256": "1d3da00a22f602005622af1f47442e1171f318e09dabc768123b946a4300f0cb",
+    "control_repo": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/runtime-profile-55a0c748-20261027",
+    "candidate_binary": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-normalized-f861e7c6/masc",
+    "candidate_repo": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/perf-normalized-path-copy-20261027"
+  },
+  "order": [
+    {
+      "role": "candidate",
+      "keepers": 2,
+      "output": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/path-reuse-f861e7c6-2-v3"
+    },
+    {
+      "role": "candidate",
+      "keepers": 30,
+      "output": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/path-reuse-f861e7c6-30-v3"
+    },
+    {
+      "role": "control",
+      "keepers": 300,
+      "output": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/path-reuse-55a0c748-300-a1-v3"
+    },
+    {
+      "role": "candidate",
+      "keepers": 300,
+      "output": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/path-reuse-f861e7c6-300-b1-v3"
+    },
+    {
+      "role": "candidate",
+      "keepers": 300,
+      "output": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/path-reuse-f861e7c6-300-b2-v3"
+    },
+    {
+      "role": "control",
+      "keepers": 300,
+      "output": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/path-reuse-55a0c748-300-a2-v3"
+    }
+  ],
+  "measurements": [
+    "Official unchanged v3 retained original/source/admission/execution/batch/durable/public/reply and cleanup audits for every actual cohort",
+    "Creation RPC wire/dispatch distributions, admission/status tails, live-health and rate waits from original logs",
+    "Whole process GC allocated bytes delta from health-before to health-after, includes creation; not attributed solely to a parser",
+    "Observed startup preparation envelope and full readiness state; no exact state-ready or UI-paint claim",
+    "At300 fixed ABBA unprofiled order, two cohorts per role on a shared host; small sample descriptive observation, no general stable SLO claim"
+  ],
+  "limits": [
+    "No new profiler GET or native sample during these comparison cohorts",
+    "Loopback scripted text model; no external model/peer business/broadcast/guest/real Add-on/TUI completion proof",
+    "Timeouts, 429s, read retries, degraded full health and failed original verdicts retained",
+    "One cohort executes at a time; stop progression after failure for diagnosis, never rewrite/replay the same output",
+    "No shared primary mutation; retained private bases are not removed; no local Dune build"
+  ],
+  "production_and_fixture_diff_sha256": "9857d132b40f4951b95d544bb9666d1266317c580efb66c7958e89b5cf87594a",
+  "current_PR_head": "f861e7c628ff5cfd504c7e85120c39a804a99c41",
+  "new_fixture_difference": "No lib/bin/config/runtime-fixture difference except env_config_core.ml and its interface documentation; tests/docs/changelog remain separate source changes.",
+  "measurement_packet_policy": "Do not profile these cohorts; do not substitute old55a cohorts for new control cells; retain all timeouts,429s,inventory variation,readiness and cleanup results.",
+  "pending_aggregator": "Local deriver copied from independently reviewed d67dab60 with only schema and function-exclusive wording changed; full describe implementation identical. Qualification must bind the actual new plan hash before any execution.",
+  "fixture_path": "scripts/fixtures/release-evidence/runtime.toml",
+  "deriver_sha256": "d96cbd5e64e357a28ddcc6d4e98806f1ed3f6c6ad569214b17f7983b514d3d35"
+}

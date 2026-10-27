@@ -1,7 +1,7 @@
-(** Whether the workspace has a browser Add-on and what its worker last
-    published. Since #44295 browser hosts register with that worker, not with
-    the server process, so the Lanes rows and the browser lane check both read
-    here. *)
+(** Whether the workspace has browser Add-ons and what their workers last
+    published, read per lane. Since #44295 browser hosts register with a
+    worker, not with the server process, so the Lanes rows and the browser
+    lane check both read here. *)
 
 (** Why the reading says nothing of the hosts, kept typed so each surface
     renders it for whoever reads that surface. *)
@@ -27,20 +27,22 @@ type t =
           the reader can see, with what is known of why. *)
   | Unavailable of unavailable
 
-(** Decide from what {!Lane_addon_runtime.observation_for_export} answered for
-    the browser tool. With no observation, the declarations say which absence
-    it is; an incomplete declaration snapshot proves none. [applications] is
-    asked only when a browser Add-on is declared on and none runs: it answers
-    how the configuration maintenance pass last applied each declaration
-    ({!Lane_addon_runtime.inventory}), or nothing for a reader that may not
-    see that. *)
-val of_export :
+(** One reading of every browser installation, from which each lane is
+    decided. *)
+type reading
+
+(** A reading of these observations ({!Lane_addon_runtime.browser_observations}).
+    [applications] is asked only when a lane's browser Add-on is declared on
+    and none runs: it answers how the configuration maintenance pass last
+    applied each declaration ({!Lane_addon_runtime.inventory}), or nothing for
+    a reader that may not see that. *)
+val of_observations :
   declarations:Lane_addon_config.snapshot ->
   applications:(unit -> Lane_addon_runtime.configuration_application list) ->
-  (Lane_addon_runtime.export_observation option, Lane_addon_runtime.export_refusal) result -> t
+  Lane_addon_runtime.browser_observation list -> reading
 
-(** Ask the runtime for the browser Add-on's cached observation and decide.
-    It runs on the Lane Add-on owner domain and waits for no browser command.
+(** Ask the runtime for the browser installations' cached observations. It
+    runs on the Lane Add-on owner domain and waits for no browser command.
     [access] is the reader's: an installation it cannot see is not read, so
     the reading never names one to a caller who could not list it. Native
     browser hosts register with the installation
@@ -49,7 +51,20 @@ val of_export :
     tells a failed attach. *)
 val read :
   config:Workspace.config -> access:Lane_addon_sources.access ->
-  declarations:Lane_addon_config.snapshot -> t
+  declarations:Lane_addon_config.snapshot -> reading
+
+(** The lane as the installations of its sources say: their observations
+    merged ({!Browser_addon_observation.merge}), the way the host uses them,
+    or why there is none. A source whose observation is refused or
+    unreadable, including one two installations serve
+    ({!Lane_addon_runtime.Ambiguous_installations}), leaves out only what it
+    would publish, and its own package row says why. The lane is unavailable
+    only when none of them published, for the first refusal or unreadable
+    observation. With nothing published and nothing withheld, the
+    declarations of that lane's browser Add-ons say which absence it is; an
+    incomplete declaration snapshot proves none. The other lanes are decided
+    apart. *)
+val lane : reading -> Browser_lane.Lane_name.t -> t
 
 (** The reason in words any reader may be shown: a refusal through
     {!Lane_addon_runtime.export_refusal_message}. *)

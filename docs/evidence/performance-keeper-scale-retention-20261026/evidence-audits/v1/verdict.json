@@ -1,0 +1,78 @@
+{
+  "schema": "masc.independent-native-packet-evidence-verdict.v1",
+  "reviewer": "/root/concurrent_probe_review",
+  "verdict": "PASS_EVIDENCE_CONSISTENCY_WITH_PERFORMANCE_LIMITS",
+  "scope": "Candidate c3cb completed original 2/30/300 cohort packets only. Does not include later baseline or 2x3 experiments.",
+  "counts": {
+    "P0": 0,
+    "P1": 0,
+    "P2": 0
+  },
+  "application_source": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+  "binary_sha256": "06ee93c99b31a6fca6786c2c6a676c8023b62b0fc854da6616518c21202ad3a8",
+  "runner_sha256": "a6df19e949708fb6b44255e2a0623689c1ba9eb9e203c4a0eaf35f30ee537284",
+  "reader_sha256": "be6b0a62cf36d7174f43d2ff282285e8eb151fe8fe25583ee41c8c35c5976f9b",
+  "source_review_manifest_sha256": "98ccdfeaf4aad0113bd93682798165f1ed701a11cfd56d9271b1e102a9d76259",
+  "auditor_script_sha256": "6d496019cefc548851c7f756d5849f4b021cdd74200e59252d64ffd9d31d1010",
+  "cohorts": [
+    {
+      "packet": "owned-concurrent-c3cb371-2-v3",
+      "input_hashes_sha256": "e1ecf66bee4850dd8e89d5fb28ab3c0289c7c44f85dfe08ca9fb0265a8aa106f",
+      "identity_sha256": "aa168daee08a72738423b6ee73e585823b3d6ea2054844c8b2384a028e0ebc80",
+      "admitted_sha256": "fac72d15e3343b81099c6a6529dc735b00d32875efea5d370f365c008097ef9b",
+      "held_snapshot_sha256": "524eae0c0e51753667d9c4923df5f2663a40bb4b933aa1b17193fc988ba3dc3a",
+      "terminal_sha256": "a1e849c575c12888eafa61c741539963ca970405904a8175d73273ec533e61fd",
+      "durable_receipt_sha256": "a26f9f562f983fa05a0e42eed81c957e78c7923bcbc2886812c07369a28dd07b",
+      "summary_sha256": "a60c1ca4631f1f9c2cca0f446e6a4d784563814374818513ba29c4bb93748f31",
+      "original_post_run_audit_sha256": "787185759d49e5cfc0cb523e9a376bdc20b3000c936ed1402262eff0d188be0d",
+      "cleanup_sha256": "958d14bf76ad3855e22fda04438c82ccccd401c328c39bc2d36629b95c106a3a",
+      "raw_and_verdict_unchanged_at_completion": true
+    },
+    {
+      "packet": "owned-concurrent-c3cb371-30-v3",
+      "input_hashes_sha256": "84c0f28ab6fdc8519d52ada08263d0c3e5cf24e88a623860f49379044522f512",
+      "identity_sha256": "07a052ee84b58a55ab869fa78608499a983b6501698e9cca4f48b2a4f7eee55f",
+      "admitted_sha256": "4f247452a2959e77c2683bebdd51d5afbad1b56aea9da56c709d1b41306dfeb1",
+      "held_snapshot_sha256": "ab744678e5fa49d03ea45db4ba92710ae0eb1f9ab3d40b898be9a9aee857e59a",
+      "terminal_sha256": "87ff5c8ef74f4fece635064a2d3192f1bf0a39f0a2ef73384f495abf0e257f25",
+      "durable_receipt_sha256": "c7bdb33c8e7d71faa74a46a2b186765b7dffdd9dd49f6408b8916908c88d847a",
+      "summary_sha256": "dcb541ce24a6b441e799061b51b7ef6171dfc8f8b50b9a489c888c319bcef1ea",
+      "original_post_run_audit_sha256": "e76c3349edb8d9843ee743a61012bbd2bc50a9901f3713f60e0dc47917220edd",
+      "cleanup_sha256": "f461082f7296949d18ef5fd34dad5e4b8f75cfefb8c7472b68d9971139e49035",
+      "raw_and_verdict_unchanged_at_completion": true
+    },
+    {
+      "packet": "owned-concurrent-c3cb371-300-v3",
+      "input_hashes_sha256": "39e3bb8bc34f8a574ec689e50a88a43af95cb9c84d99cbefe8514d6a99ec5d27",
+      "identity_sha256": "6f21db8e43f483aba7b2e513b5696354064731a619db54dbeed13e0a0c1452ff",
+      "admitted_sha256": "e961ba7e2427168394b9c3cc36ec6e5ad90adefb0ffd07dbeecd8224e679510e",
+      "held_snapshot_sha256": "a6d04b2ce311ed49218b543c9836e567ff65f081d3fa15d07478747c18a0afb0",
+      "terminal_sha256": "eb2120d81d9827466cf8be281ba3b932130057784ccc491328107a47973a23d8",
+      "durable_receipt_sha256": "88ec96495fb2f0ece58c7a059a2c961fe92b15f20611f56d027327dfd242330f",
+      "summary_sha256": "08f08575bad745fad779c1d002e89b6c77f2b2c3f4c37bbf65ae3255fee6b7b2",
+      "original_post_run_audit_sha256": "9d44e05a16364ac6e8aec974ab9718eb0f96193b2d5f6c1575d731e908170073",
+      "cleanup_sha256": "30e0695bdd522d94b43f35169b1a9e8b66fb6185fd8f4fcbea75eb0b61da1daf",
+      "raw_and_verdict_unchanged_at_completion": true
+    }
+  ],
+  "critical_limits": {
+    "candidate300_health_wire_max_ms": 3599.31575,
+    "candidate300_exact_status_wire_max_ms": 13209.662667,
+    "candidate300_scheduler_last60s_max_ms": 1158.108,
+    "candidate300_scheduler_last60s_stalls": 1,
+    "candidate300_http_429": 70,
+    "candidate300_measured_retry_wait_s": 70.389767666,
+    "candidate300_denied_inventory": 602,
+    "candidate300_unclassified_guest_attempts": 0,
+    "all_three_full_health_held_after": "degraded: keeper_memory_execution:addon_unattached",
+    "all_three_native_batch_member_rows": 0
+  },
+  "reviewer_new_native_or_workload_executions": 0,
+  "local_dune_builds": 0,
+  "ci_live_api_network_calls": 0,
+  "original_packet_writes": 0,
+  "credential_or_executable_copies": 0,
+  "full_runtime_readiness_pass": false,
+  "formal_github_approval": false,
+  "overall_0_1ms_goal_proven": false
+}

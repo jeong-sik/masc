@@ -10,15 +10,27 @@ type keeper =
       { port : int
       ; profile : string
       }
-      (** [runtime.toml] has [\[browser.live.bidi\]] and the live lane is on:
-          the Browser Addon owns its Firefox and BiDi connection. Existing
-          external Firefox processes are not adopted or restarted. *)
-  | Lane_off  (** [\[browser.live\] enabled = false], configured or not. *)
-  | Not_configured  (** No [\[browser.live.bidi\]]: the operator starts them. *)
-  | Not_known  (** No configuration was given to read it from. *)
+      (** [runtime.toml] has [\[browser.live.bidi\]] and an enabled
+          declaration runs the [browser-firefox] source: the Browser Addon
+          owns its Firefox and BiDi connection. Existing external Firefox
+          processes are not adopted or restarted. *)
+  | Addon_off
+      (** [runtime.toml] has [\[browser.live.bidi\]], but no enabled
+          declaration runs the [browser-firefox] source: the Browser Addon
+          does not start that Firefox, so the operator starts one. *)
+  | Not_configured
+      (** No [\[browser.live.bidi\]]: the operator starts Firefox and the
+          host. *)
+  | Not_known
+      (** No configuration was given to read it from, or the declarations
+          could not all be read. *)
 
-(** [None]: no configuration was loaded or read. Performs no I/O. *)
-val keeper_of_configuration : Browser_configuration.t option -> keeper
+(** [configuration]: [None] when none was loaded or read. [firefox]: whether
+    an enabled declaration runs the [browser-firefox] source, [None] when the
+    declarations could not all be read. It is asked only when
+    [configuration] has [\[browser.live.bidi\]]. *)
+val keeper :
+  configuration:Browser_configuration.t option -> firefox:(unit -> bool option) -> keeper
 
 type observation =
   { lane : Browser_lane_launcher.t
@@ -37,7 +49,9 @@ type observation =
     not in it yet. A caller that also reads the worker live, as the
     dashboard's client list does after this observation, can see a client
     this list lacks. [configuration] is the one this process loaded, or the
-    workspace's [runtime.toml] read for it. *)
+    workspace's [runtime.toml] read for it. When it has
+    [\[browser.live.bidi\]], the workspace's Lane Add-on declarations are
+    read from disk to say whether [browser-firefox] runs. *)
 val observe :
   access:Lane_addon_sources.access -> base_path:string ->
   configuration:Browser_configuration.t option -> observation
@@ -82,8 +96,9 @@ val verdict : observation -> verdict
 
     {!Addon_managed} describes the Addon's configured port/profile and
     directs the reader to Addon readiness observations. A manual host's
-    session and recovery remain the operator's responsibility. A lane turned
-    off and a workspace with no table add a sentence saying so.
+    session and recovery remain the operator's responsibility. A table no
+    enabled [browser-firefox] declaration runs, and a workspace with no
+    table, add a sentence saying so.
 
     A path, an address and the reason for ending come from files and from
     the host. In a command the operator runs, a path and an address are
@@ -136,8 +151,8 @@ val report : observation -> report
     and [detail] (why the record or the lock cannot be read, null otherwise). Then [attach], an
     object with exactly [launcher], [arguments] and [launcher_state]
     ([installed], [not_installed] or [needs_reinstall]); [keeper], an object
-    whose [kind] is [addon_managed] (with [port] and [profile]), [lane_off],
-    [not_configured] or [not_known]; and [message]. *)
+    whose [kind] is [addon_managed] (with [port] and [profile]),
+    [addon_off], [not_configured] or [not_known]; and [message]. *)
 val report_to_json : report -> Yojson.Safe.t
 
 (** Reads what {!report_to_json} wrote. A field more, fewer or twice, in the

@@ -527,7 +527,10 @@ that shows numbers, type `0`).
   your [ego lite](https://lite.ego.app/). Confirming it runs
   `masc browser-lane-setup --mode ego`, which writes the `[browser.live.ego]`
   table of `runtime.toml`. The browser Add-on then opens a task space named
-  `masc` in ego lite and serves it as a live connection. `imp` sees only the
+  `masc-keepers` in ego lite and serves it as a live connection. Setup refuses
+  that name when a task space you made in ego lite already has it, and writes
+  nothing when ego lite does not list its spaces, so keep ego lite open; a
+  refusal leaves the other browser rows of the same run unwritten too. `imp` sees only the
   tabs in that space, and clicks and types only on the pages it opened there.
   Those pages share the cookies of your ego lite profile, so `imp` reads and
   acts as you on the sites you are logged in to. The row needs no Firefox.
@@ -745,6 +748,14 @@ same prefix/base path as before.
 bash /tmp/masc-install.sh --version "$TAG" \
   --base-path "$HOME/masc-workspace" --force --no-wizard
 ```
+
+Replacing an existing binary with a different release requires `--force`.
+Without it, the installer proceeds only when the existing managed release
+pointer's executable matches the requested release's checksum. A version
+string alone cannot identify the file.
+The installer and bundle helper must both support no-replace publication;
+older release helpers that lack this option stop without publishing. After
+checking the destination, `--force` explicitly permits replacement.
 
 From 0.34.0, `--force` updates the binaries and preserves the existing
 runtime configuration, model choice, and Keeper files. In a workspace that

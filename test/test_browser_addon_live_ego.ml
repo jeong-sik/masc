@@ -17,7 +17,7 @@ let test_the_table_names_a_command_and_a_space () =
      check string "command" "/opt/ego-browser" command; check string "space" "masc" space
    | Ok _ -> fail "the ego table was not read"
    | Error detail -> fail detail);
-  (match configuration "[browser.live]\nenabled = true\n" with
+  (match configuration "[browser.live]\n" with
    | Ok {Browser_configuration.live_ego = None; _} -> ()
    | Ok _ -> fail "no table configured an ego connection"
    | Error detail -> fail detail);

@@ -1,0 +1,36 @@
+[
+  {
+    "executable": "masc",
+    "args": [
+      "build-commit"
+    ],
+    "returncode": 0,
+    "stdout": "f861e7c628ff5cfd504c7e85120c39a804a99c41\n",
+    "stderr": "[2026-10-27 03:40:02] [INFO] [MCP] Tag registry initialized: 182 tools registered\n",
+    "sha256": "8cf014ab8a9eeb564bd8f0f56d162f77fc619dffe9ea9fb4fdcdd4a6620d1d6f",
+    "requested_at_utc": "2026-10-26T18:40:00.980986+00:00",
+    "returned_at_utc": "2026-10-26T18:40:02.468214+00:00",
+    "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-normalized-f861e7c6/qualification/command-base",
+    "explicit_product_environment": {
+      "MASC_BASE_PATH": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-normalized-f861e7c6/qualification/command-base",
+      "SB_PATH": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-normalized-f861e7c6/qualification/command-base"
+    }
+  },
+  {
+    "executable": "masc-tui",
+    "args": [
+      "--build-commit"
+    ],
+    "returncode": 0,
+    "stdout": "f861e7c628ff5cfd504c7e85120c39a804a99c41\n",
+    "stderr": "",
+    "sha256": "40c3c43a98e9f7e95ef23278d2fe5305c3c110d5dab76cf511ce11005875184b",
+    "requested_at_utc": "2026-10-26T18:40:02.468535+00:00",
+    "returned_at_utc": "2026-10-26T18:40:03.718604+00:00",
+    "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-normalized-f861e7c6/qualification/command-base",
+    "explicit_product_environment": {
+      "MASC_BASE_PATH": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-normalized-f861e7c6/qualification/command-base",
+      "SB_PATH": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-normalized-f861e7c6/qualification/command-base"
+    }
+  }
+]

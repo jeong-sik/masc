@@ -138,10 +138,9 @@ Only the message text is shaped; the ring entry's typed fields are untouched.
 | `Log.info ~ctx:"X"` (top-level) | per-call component string, drifts; no per-module level override | `Log.X.info` |
 | `Logs.{info,warn,err,debug,app}` | a **different** library (`logs`), routes through its own reporter, not the masc ring | `Log.<Module>.{…}` |
 | `Log.legacy_stderr` / `Log.legacy_traceln` | RFC-0079 raw bridge | `Log.<Module>.{…}` unless the message embeds its own `[LEVEL]` prefix (see the legacy bridge row below) |
-| bare `Log.emit` / `Log.emit_event` | top-level, requires a `~module_name:` string | `Log.<Module>.emit` |
+| bare `Log.emit` | top-level, `~module_name` defaults to empty | `Log.<Module>.emit` |
 
-`Log.emit_routine` is **not** forbidden — `Log.<Module>.routine` is the same
-routine API and either is acceptable, but prefer the per-module form.
+Routine entries go through `Log.<Module>.routine` / `Log.<Module>.routine_lazy`.
 
 `Logs.*` is forbidden in `lib/`: it is the `logs` opam library, not
 `lib/masc_log`. It bypasses the structured ring buffer entirely.
@@ -165,11 +164,10 @@ is added here with its reason.
 | `bin/masc_tui.ml` | Start-up messages before the screen is drawn: a failed stderr redirect (it cannot say so through the sink it is still redirecting), and refusals to start (no interactive terminal, no embedded build commit, an unusable workspace). |
 | `lib/exec_shim/exec_shim.ml` | `masc-exec-shim` is a static binary that runs on the remote endpoint, built from `unix` and a few small libraries without the masc logging stack. Its one stderr line is the usage message. |
 | `lib/keeper/keeper_github_identity.ml` | `print_observation` and the `run_cli_*` functions print what `masc keeper github ...` was asked for. The rest of the module runs inside the server, so the exemption is wider than the functions that need it. Splitting the subcommands into their own module removes it. |
-| `lib/config_dir_resolver/config_dir_resolver.ml` | `Log.warn ~ctx:context` and `Log.info ~ctx:context` use a runtime-computed component string. No static module preserves the per-call value. |
 | `bin/masc_trace.ml`, `bin/masc_cost.ml`, `bin/masc_librarian_replay.ml`, `bin/masc_http_probe.ml`, `bin/masc_lane_cli_probe.ml`, `bin/keeper_capability_probe_cli.ml`, `bin/stagehand_model_probe.ml`, `bin/fusion_run.ml`, `bin/masc_checkpoint_purge.ml`, `bin/deployment_preflight_helper.ml` | Operator commands run at a terminal. Their stdout and stderr are the answer to the command (measurements, JSON receipts, usage and argument errors), not a server record. Routing them to the log would move them away from the person who asked. |
 | `bin/masc_cli_setup.ml`, `bin/masc_cli_docker_session.ml`, `bin/masc_cli_onboarding.ml`, `bin/masc_cli_antigravity.ml`, `bin/masc_cli_account_login.ml`, `bin/masc_cli_codex_models.ml`, `bin/masc_cli_muse_models.ml`, `bin/masc_cli_model_resume.ml`, `bin/masc_cli_owner_upgrade.ml`, `bin/masc_cli_prerequisites.ml` | One-shot setup and onboarding commands. They report account, login and setup failures to the operator's terminal and print machine-readable receipts on stdout before any server or log sink exists. |
 | `bin/gen_board_tool_registry.ml` | A Dune-time generator. Its `eprintf` reports a malformed Board TOML declaration to the build operator. |
-| `lib/server/server_startup_takeover.ml`, `lib/backend/backend.ml`, `lib/workspace/workspace_query.ml`, `lib/mcp_server_eio_resource.ml` | The RFC-0079 legacy bridge. `Log.legacy_stderr` and `Log.legacy_traceln` emit a raw, unprefixed stderr line and mirror it into the ring with a `Legacy_*` source tag (read back by `dashboard/src/api/schemas/logs.ts`). Every call site embeds its own `[FATAL]`, `[WARN]` or `[DEBUG]` marker in the message, so migrating would double-prefix it and drop the `Legacy_*` source. |
+| `bin/main_eio.ml`, `lib/backend/backend.ml`, `lib/workspace/workspace_query.ml`, `lib/mcp_server_eio_resource.ml` | The RFC-0079 legacy bridge. `Log.legacy_stderr` and `Log.legacy_traceln` emit a raw, unprefixed stderr line and mirror it into the ring with a `Legacy_*` source tag (read back by `dashboard/src/api/schemas/logs.ts`). Every call site embeds its own `[FATAL]`, `[WARN]` or `[DEBUG]` marker in the message, so migrating would double-prefix it and drop the `Legacy_*` source. |
 
 A static component such as `"agent_core:event"` does route through `Log`: a
 module's `name` string may contain a colon even though the OCaml identifier

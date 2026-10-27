@@ -3,18 +3,23 @@ title: 브라우저 레인 매뉴얼
 description: Firefox·Zen 또는 Stagehand Chromium을 연결하고 Addon 설치·검증 및 모델 Hook 선택과 Browser Lane TUI 사용법.
 ---
 
-브라우저 Lane Addon이 worker와 설정된 backend를 소유합니다. 한 번 설치한 뒤
-입력·응답 검증 Hook과 모델 소비자를 해당 설치에서 각각 선택합니다. 브라우저 이름과
-transport는 지원 기능을 설명하며, 서로 다른 설치 체계는 아닙니다.
+브라우저 출처마다 Lane Addon 패키지와 worker가 따로 있습니다: `browser-automation`,
+`browser-stagehand`, `browser-firefox`, `browser-ego`, `browser-external`. worker는 자기
+출처만 띄우므로, 한 출처가 실패해도 그 worker만 끝납니다. 입력·응답 검증 Hook과 모델
+소비자는 설치마다 고릅니다. 브라우저 이름과 transport는 지원 기능을 설명하며, 서로 다른
+설치 체계는 아닙니다.
 
-- **live**는 WebExtension으로 기존 Firefox·Zen에 연결하거나, Addon이 소유한 BiDi
-  backend로 전용 Firefox를 띄웁니다. 확장 연결은 기존 탭의 로그인을 쓰고 관리되는
-  Firefox는 전용 프로필을 사용합니다. native hover·drag는 BiDi처럼 지원하는 연결이 필요합니다.
-- **automation**은 worker의 OCaml WebDriver 클라이언트와 geckodriver로 격리된 Gecko
-  세션을 제공합니다. Addon이 driver·브라우저·비공개 프로필을 소유합니다.
-- **stagehand**는 Addon 소유 Chromium과 CDP로 연결한 Stagehand 확장을 사용합니다.
-  native 조작과 선택적인 문장·모델 동작을 지원합니다. 설정한 영속 프로필은 로그인을
-  유지하며, 생략하면 소유한 세션에 비공개 프로필을 만듭니다.
+- **live**에는 출처가 셋 있습니다. `browser-external`은 WebExtension으로 연결한 기존
+  Firefox·Zen이나, 직접 띄운 Firefox의 BiDi host를 받습니다. `browser-firefox`는 전용
+  Firefox를 자기 BiDi peer로 띄웁니다. `browser-ego`는 ego lite 작업 공간을 씁니다.
+  확장 연결은 기존 탭의 로그인을 쓰고, 전용 Firefox는 전용 프로필을 씁니다. native
+  hover·drag는 BiDi처럼 지원하는 연결이 필요합니다.
+- **automation**(`browser-automation`)은 worker의 OCaml WebDriver 클라이언트와
+  geckodriver로 격리된 Gecko 세션을 제공합니다. worker가 driver·브라우저·비공개 프로필을
+  소유합니다.
+- **stagehand**(`browser-stagehand`)는 worker가 소유한 Chromium과 CDP로 연결한 Stagehand
+  확장을 씁니다. native 조작과 선택적인 문장·모델 동작을 지원합니다. 설정한 영속 프로필은
+  로그인을 유지하며, 생략하면 소유한 세션에 비공개 프로필을 만듭니다.
 
 아직 탭에 결속되지 않은 요청은 사용 가능한 브라우저와 필요한 동작에 따라 자동 선택할
 수 있습니다. 이후 탭·문서 작업에는 반환된 브라우저 identity를 유지합니다. 결속된 탭이나
@@ -26,22 +31,25 @@ transport는 지원 기능을 설명하며, 서로 다른 설치 체계는 아�
 `scripts/install-local-build.sh`가 `masc-browser-addon-worker`, `masc-native-addon-launcher`,
 `masc-browser-process-owner`를 masc 옆에 설치합니다. 그다음 workspace에 대해
 `masc browser-lane-setup --mode addon`을 실행합니다. `browser-lane-setup`의 다른 모드도 같은
-일을 합니다. 이 명령은 masc에 들어 있는 패키지를 `<base-path>/.masc/packages/browser/`에 씁니다.
-workspace에 이 패키지의 선언이 없으면 활성 설정 루트에 `lane-addons/browser.toml`을 저장합니다.
-이미 있는 선언은 그대로 둡니다. 설치 prefix를 서버 PATH에 포함합니다. Add-on이 필요 없으면
-설치 스크립트에는 `--no-browser-addon`, setup에는 `--no-addon`을 줍니다. 그러면 브라우저 경로는
-동작하지 않습니다.
+일을 합니다. 이 명령은 workspace가 쓰는 출처마다 일합니다. automation·firefox·ego는
+`runtime.toml`에 표가 있거나 이번 실행이 그 표를 쓸 때, stagehand는 `[browser.stagehand]`가
+있을 때, external은 native host가 설치돼 있을 때입니다. 출처마다 masc에 들어 있는 패키지를
+`<base-path>/.masc/packages/browser-<출처>/`에 쓰고, 그 출처의 선언이 없으면 활성 설정 루트에
+`lane-addons/browser-<출처>.toml`을 저장합니다. 이미 있는 선언은 그대로 둡니다. 설치 prefix를
+서버 PATH에 포함합니다. Add-on이 필요 없으면 설치 스크립트에는 `--no-browser-addon`, setup에는
+`--no-addon`을 줍니다. 그러면 브라우저 경로는 동작하지 않습니다.
 
-Hook이나 모델 출력을 고르려면 그 `browser.toml`에 더합니다. setup은 이미 있는 선언을 다시
-쓰지 않습니다.
+Hook이나 모델 출력을 고르려면 setup이 쓴 선언에 더합니다. setup은 이미 있는 선언을 다시
+쓰지 않습니다. `locate`는 `browser-automation`, `stagehand`는 `browser-stagehand`의
+출력입니다.
 
 ```toml
-id = "browser"
+id = "browser-automation"
 enabled = true
-run_id = "browser"
-manifest_path = "/absolute/path/to/workspace/.masc/packages/browser/lane.toml"
+run_id = "browser-automation"
+manifest_path = "/absolute/path/to/workspace/.masc/packages/browser-automation/lane.toml"
 tool_hooks = ["validate_input", "validate_output"]
-exact_outputs = ["locate", "stagehand"]
+exact_outputs = ["locate"]
 
 [binding]
 sources = []
@@ -59,10 +67,9 @@ incarnation·브라우저 `clientId`는 서로 다른 identity입니다.
 | `tool_hooks = ["validate_output"]` | 아티팩트 중개가 끝난 최종 성공 응답 검증 |
 | `tool_hooks = ["validate_input", "validate_output"]` | 두 도구 검증 사용 |
 | `tool_hooks = []` | 선택적인 도구 검증 끄기 |
-| `exact_outputs = ["locate"]` | Gecko scene 노드 선택 모델 소비자 |
-| `exact_outputs = ["stagehand"]` | Chromium 구조화 모델 소비자 |
-| `exact_outputs = ["locate", "stagehand"]` | 두 모델 소비자 사용 |
-| `exact_outputs = []` | 두 모델 소비자 끄기 |
+| `browser-automation`의 `exact_outputs = ["locate"]` | Gecko scene 노드 선택 모델 소비자 |
+| `browser-stagehand`의 `exact_outputs = ["stagehand"]` | Chromium 구조화 모델 소비자 |
+| `exact_outputs = []` | 그 패키지의 모델 소비자 끄기 |
 
 배열을 생략하면 해당 패키지 기본값을 따릅니다. 제공된 middleware 이름과 선언된 모델
 출력을 선택하며 임의 실행 코드를 Hook으로 로드하지 않습니다. 두 배열을 비워도 caller
@@ -70,22 +77,25 @@ incarnation·브라우저 `clientId`는 서로 다른 identity입니다.
 유지됩니다. backend가 지원하는 비모델 동작은 계속 사용할 수 있습니다.
 
 출력을 선택하는 것과 모델 provider 설정은 별개입니다. `runtime.toml`의
-`runtime.addon_exact_lanes.browser.locate` 및/또는
-`runtime.addon_exact_lanes.browser.stagehand`에 기존 모델 slot을 따로 설정합니다.
-모델 준비와 소비자 inventory는 별도로 확인합니다. route가 없거나 사용할 수 없으면
-공통 Exact Output 대기·취소 정책을 따르며, 다른 브라우저 선택이나 입력 재실행을 허가하지 않습니다.
+`runtime.addon_exact_lanes.browser-automation.locate` 및/또는
+`runtime.addon_exact_lanes.browser-stagehand.stagehand`에 기존 모델 slot을 따로 설정합니다.
+Lanes 화면은 선언된 출력마다 그 표가 있는지 보여 줍니다. 모델 준비와 소비자 inventory는
+별도로 확인합니다. route가 없거나 사용할 수 없으면 공통 Exact Output 대기·취소 정책을 따르며,
+다른 브라우저 선택이나 입력 재실행을 허가하지 않습니다.
 
 아래 backend 설정은 서버 시작 때 실제 `runtime.toml`에서 읽고 설치 부착 때 캡처합니다.
-변경 후 서버를 재시작하며 기존 설치는 detach 후 재부착해야 새 설정을 캡처합니다.
-설치 선언 변경은 시작과 기존 maintenance pulse에서 reconciliation합니다. TOML 저장만으로
-부착됐다고 볼 수 없으므로 `desired_revision`, `applied_revision`, `phase`, 설정 오류를
-확인합니다. Dashboard Refresh는 상태를 읽으며 reconciliation을 강제하지 않습니다.
+이 설정은 출처를 어떻게 띄울지만 말하고, 띄울지 말지는 말하지 않습니다. 표가 없는 출처는
+시작하지 못하고, 그 패키지 줄이 이유를 보여 줍니다. 변경 후 서버를 재시작하며 기존 설치는
+detach 후 재부착해야 새 설정을 캡처합니다. 설치 선언 변경은 시작과 기존 maintenance
+pulse에서 reconciliation합니다. TOML 저장만으로 부착됐다고 볼 수 없으므로
+`desired_revision`, `applied_revision`, `phase`, 설정 오류를 확인합니다. Dashboard Refresh는
+상태를 읽으며 reconciliation을 강제하지 않습니다.
 
-이 설치를 종료하려면 최상위 `enabled = false`로 설정하고 detach·정리 결과를 확인합니다.
-선언 삭제는 완전한 설정 목록을 읽은 뒤 반영합니다. worker는 새 입력을 차단한 뒤 원래
-소유한 자원을 정리하며, 확인되지 않은 정리는 실패로 남깁니다. 교체 인스턴스는 새로운
-incarnation·연결 ID를 가집니다. 외부 확장·수동 브라우저는 운영자가 소유하며, 영속 프로필
-내용은 보존합니다.
+출처를 끄려면 그 선언의 최상위 `enabled = false`를 TUI의 패키지 줄이나 TOML 파일에서
+설정하고, detach·정리 결과를 확인합니다. 그 출처의 worker만 멈춥니다. 선언 삭제는 완전한
+설정 목록을 읽은 뒤 반영합니다. worker는 새 입력을 차단한 뒤 원래 소유한 자원을 정리하며,
+확인되지 않은 정리는 실패로 남깁니다. 교체 인스턴스는 새로운 incarnation·연결 ID를
+가집니다. 외부 확장·수동 브라우저는 운영자가 소유하며, 영속 프로필 내용은 보존합니다.
 
 ## 설정: live
 
@@ -97,7 +107,7 @@ masc browser-lane-setup --mode extension --base-path /path/to/workspace
 
 launcher에는 서버 주소를 적지 않습니다. host는 워크스페이스의 `.masc/config/connection.toml`에서 포트를 읽습니다. poll이 실패하면 그 파일을 다시 읽고, 지금 서버가 더 이상 답하지 않으면서 파일이 가리키는 새 포트가 답할 때만 옮겨 갑니다. 그래서 서버가 다른 포트로 다시 떠도 다시 설치하지 않아도 됩니다.
 
-확장 없이 전용 Firefox에 연결하려면 Addon 소유 BiDi backend를 설정합니다.
+확장 없이 전용 Firefox에 연결하려면 `browser-firefox` 출처를 설정합니다.
 
 ```bash
 masc browser-lane-setup --mode bidi --base-path /path/to/workspace

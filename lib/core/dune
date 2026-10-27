@@ -19,10 +19,13 @@
   failure_observation
   cross_context_mutex
   eio_guard
+  pool_lane
+  pool_wait
   executor_pool_submission
   executor_pool_ref
   domain_pool
   domain_pool_ref
+  systhread_host
   scheduler_lag
   masc_runtime_events
   system_error_class
@@ -45,7 +48,9 @@
   re.pcre
   eio
   eio.unix
+  eio_main
   mtime
+  mtime.clock
   time_compat
   fs_compat
   masc_log

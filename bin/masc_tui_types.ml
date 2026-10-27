@@ -5792,7 +5792,8 @@ module Browser_lane_view = struct
   type source = Browser_lane.Lane_name.t = Live | Automation | Stagehand
   type browser = Browser_lane.browser = Firefox | Zen | Ego_lite
   type client = { client_id : string; browser : browser; transport : Browser_lane.live_transport;
-    interactions : Browser_lane.interaction_activity list }
+    interactions : Browser_lane.interaction_activity list;
+    last_activities : Browser_lane.settled_activity list }
   type discovery = Read_after_discovery | Choose_client
   type tab = { id : int; title : string; url : string; active : bool }
   type page = {
@@ -5937,6 +5938,7 @@ module Browser_lane_view = struct
      erase it. The operator's next input withdraws it. *)
   type t = {
     clients : client list option; selected_client : client option; client_picker : int option;
+    activity_error : string option;
     source : source; selected_tab : int option; scroll : int;
     reading : reading option; load : load; url_draft : string option;
     scene : scene option; scene_cursor : int; scene_scope : scene_scope_context option;
@@ -5964,7 +5966,7 @@ module Browser_lane_view = struct
     | Live, Some client -> Some (browser_name client.browser)
     | Live, None -> None
   let create () =
-    { clients = None; selected_client = None; client_picker = None;
+    { clients = None; selected_client = None; client_picker = None; activity_error = None;
       source = Live; selected_tab = None; scroll = 0;
       reading = None; load = Idle; url_draft = None; scene = None; scene_cursor = 0; scene_scope = None;
       scene_guard = None; scene_delta = None; read_view = Text_view; refresh_pending = None;
@@ -6345,7 +6347,9 @@ module Browser_lane_view = struct
         let attach ~address =
           match report.keeper with
           | Addon_managed _ -> []
-          | Lane_off -> host_attach_lines ~address report.attach
+          | Addon_off ->
+              host_attach_lines ~address report.attach
+              @ [host_line "[browser.live.bidi] is set; no enabled browser-firefox declaration runs it"]
           | Not_configured ->
               host_attach_lines ~address report.attach
               @ [host_line "No Addon-managed live Firefox is configured in [browser.live.bidi]"]
@@ -6408,8 +6412,7 @@ module Browser_lane_view = struct
               host_said "Detail: " detail])
         @ (match report.keeper with
            | Addon_managed { port; profile } -> host_addon_lines ~port ~profile
-           | Lane_off -> [host_line "Live lane off in runtime.toml · it serves nothing"]
-           | Not_configured | Not_known -> [])
+           | Addon_off | Not_configured | Not_known -> [])
   (* A path on rows of [max_cells], broken before a slash so each name
      stays whole. A single name longer than a row has nowhere better to
      break and is cut where the row ends, with every cell of it kept: a
@@ -6473,7 +6476,7 @@ module Browser_lane_view = struct
               (match report.keeper with
                | Addon_managed _ ->
                    "Manual BiDi host: none has run · check Addon readiness · b:details"
-               | Lane_off | Not_configured | Not_known ->
+               | Addon_off | Not_configured | Not_known ->
                    "Manual BiDi host: none has run for this workspace · b:how to attach")
           | Record_missing_but_locked ->
               "Manual BiDi host: lock held, record missing · b:inspect the existing process"
@@ -6654,6 +6657,19 @@ module Browser_lane_view = struct
     | No_available_browser -> true
     | Ambiguous_browsers | Binding_required | Automatic_unavailable
     | Invalid_automatic_response | Unrecognized_selection_error -> false
+  (* Activity refresh updates the original concrete connection only. It never
+     chooses a browser, changes the tab, or consumes the pending page read. *)
+  let accept_activity (result : (discovered, string) result) t = match result with
+    | Error detail -> {t with activity_error=Some detail}
+    | Ok observed ->
+      let selected_client=match t.selected_client with
+        | None -> None
+        | Some original ->
+          (match List.find_opt (same_client original) observed.listed with
+           | Some current -> Some current | None -> Some original) in
+      {t with clients=Some observed.listed;selected_client;bidi_host=observed.bidi_host;
+        automatic=observed.automatic;activity_error=None}
+
   let accept_clients ~generation result t =
     match t.load with
     | Loading (current, Discover purpose) when current = generation ->
@@ -6666,7 +6682,8 @@ module Browser_lane_view = struct
                match List.find_opt (same_client selected) clients with
                | Some current -> current
                | None -> selected) t.selected_client in
-             let next = { t with clients = Some clients; selected_client; bidi_host; automatic; load = Idle } in
+             let next = { t with clients = Some clients; selected_client; bidi_host; automatic;
+               activity_error=None;load = Idle } in
              if purpose = Choose_client then { next with client_picker = Some 0 }, false
              else match t.selection with
              | Live_unbound -> {next with client_picker=Some 0;
@@ -6736,7 +6753,14 @@ module Browser_lane_view = struct
             | row::rest -> let* work = Browser_lane.interaction_activity_of_json row in parse (work::acc) rest in
           parse [] rows
         | _ -> Error "expected browser interactions array") "interactions" json in
-      Ok { client_id; browser; transport; interactions }
+      let* last_activities = get (function
+        | `List rows ->
+          let rec parse acc = function
+            | [] -> Ok (List.rev acc)
+            | row::rest -> let* work=Browser_lane.settled_activity_of_json row in parse (work::acc) rest in
+          parse [] rows
+        | _ -> Error "expected settled browser activities array") "lastActivities" json in
+      Ok { client_id; browser; transport; interactions; last_activities }
   let decode_clients json =
     let* ok = get boolean "ok" json in
     if not ok then let* detail = get string "error" json in Error detail
@@ -8745,9 +8769,6 @@ type state = {
   mutable exact_activity_sessions: Masc_tui_exact_activity.t list;
   mutable exact_activity_open: Masc_tui_exact_activity.owner option;
   mutable exact_activity_generation: int;
-  mutable browser_activity_sessions: Masc_tui_browser_activity.t list;
-  mutable browser_activity_open: Masc_tui_browser_activity.owner option;
-  mutable browser_activity_generation: int;
   mutable machine_activity_sessions: Masc_tui_machine_activity.t list;
   mutable machine_activity_open: Masc_tui_machine_activity.owner option;
   mutable machine_activity_generation: int;
@@ -12289,7 +12310,6 @@ let suspend_workspace_readings state =
          (Masc_tui_fetched.suspend reading)
    | Masc_tui_planning_detail.Submitting _ -> ());
   state.exact_activity_sessions <- List.map Masc_tui_exact_activity.suspend_read state.exact_activity_sessions;
-  state.browser_activity_sessions <- List.map Masc_tui_browser_activity.suspend_read state.browser_activity_sessions;
   state.machine_activity_sessions <- List.map Masc_tui_machine_activity.suspend_read state.machine_activity_sessions;
   let suspend_application (view : Masc_tui_lane_addons.t) =
     {view with application_reading = Masc_tui_lane_application.suspend view.application_reading} in
@@ -15590,7 +15610,6 @@ let modal_owns_keys (state : state) =
   || state.context_inspector_open || state.about_open
   || state.repository_changes_open
   || (state.view = Lanes && Option.is_some state.exact_activity_open)
-  || (state.view = Lanes && Option.is_some state.browser_activity_open)
   || (state.view = Lanes && Option.is_some state.machine_activity_open)
   || Option.is_some state.client_detail
   || Option.is_some state.collab
@@ -15682,7 +15701,6 @@ let close_key_modals (state : state) =
   state.client_detail_scroll <- 0;
   state.collab <- None;
   state.exact_activity_open <- None;
-  state.browser_activity_open <- None;
   state.machine_activity_open <- None;
   if state.agenda_open then close_agenda state;
   if state.context_inspector_open then close_context_inspector state;
@@ -15965,9 +15983,6 @@ let create_state
   exact_activity_sessions = [];
   exact_activity_open = None;
   exact_activity_generation = 0;
-  browser_activity_sessions = [];
-  browser_activity_open = None;
-  browser_activity_generation = 0;
   machine_activity_sessions = [];
   machine_activity_open = None;
   machine_activity_generation = 0;
@@ -17947,21 +17962,6 @@ let runtime_config_workspace (state : state) =
   Option.map (fun identity ->
     Canonical_path.to_string identity.Tui_decode.sid_base_path,
     Canonical_path.to_string identity.Tui_decode.sid_masc_root) state.server_identity
-
-let browser_activity_session (state : state) owner =
-  List.find_opt (fun session -> Masc_tui_browser_activity.same_owner owner
-    (Masc_tui_browser_activity.owner session)) state.browser_activity_sessions
-
-let put_browser_activity (state : state) session =
-  state.browser_activity_sessions <- session :: List.filter (fun existing ->
-    not (Masc_tui_browser_activity.same_owner (Masc_tui_browser_activity.owner session)
-      (Masc_tui_browser_activity.owner existing))) state.browser_activity_sessions
-
-let shown_browser_activity (state : state) =
-  match state.browser_activity_open, runtime_config_workspace state with
-  | Some owner,Some workspace when owner.Masc_tui_browser_activity.workspace=workspace ->
-    browser_activity_session state owner
-  | None,_ | _,None | Some _,Some _ -> None
 
 let machine_activity_session (state : state) owner =
   List.find_opt (fun session -> Masc_tui_machine_activity.same_owner owner

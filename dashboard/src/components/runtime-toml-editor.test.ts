@@ -289,7 +289,7 @@ describe('RuntimeTomlEditor', () => {
     render(html`<${RuntimeTomlEditor} navigationTarget=${target} />`, container)
     await waitFor(() => expect(container.textContent).toContain('This target is not declared in the current draft'))
     const textarea = container.querySelector('textarea') as HTMLTextAreaElement
-    const draft = baseConfig.source_text + '[browser.live]\nenabled = true\n'
+    const draft = baseConfig.source_text + '[browser.live.bidi]\nfirefox = "/firefox"\nprofile = "/profile"\n'
     fireEvent.input(textarea, { target: { value: draft } })
     textarea.setSelectionRange(draft.length, draft.length)
     const offer = await waitFor(() => {
@@ -301,7 +301,7 @@ describe('RuntimeTomlEditor', () => {
     expect(container.textContent).not.toContain('This target is not declared in the current draft')
     expect(textarea.selectionStart).toBe(draft.length)
     fireEvent.click(offer)
-    expect(textarea.selectionStart).toBe(draft.indexOf('[browser.live]'))
+    expect(textarea.selectionStart).toBe(draft.indexOf('[browser.live.bidi]'))
     expect(textarea.selectionEnd).toBeGreaterThan(textarea.selectionStart)
     expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
   })

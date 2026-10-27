@@ -383,6 +383,15 @@ val defer_pending_result :
   (int64, string) result
 (** Durable queue-tail rotation for a transiently blocked exact source. *)
 
+val retain_checkpoint_batch_result :
+  base_path:string -> string ->
+  selections:Keeper_event_queue_state.pending_selection list ->
+  ((Keeper_event_queue_state.pending_selection * string) list, string) result
+(** Retain the exact checkpoint batch and rotate it in one snapshot
+    transaction. Connector conversations move with their unadmitted pending
+    suffix in FIFO order. Publish only after durable confirmation; per-source
+    failures remain explicit while independent valid work still progresses. *)
+
 val drop_by_post_id :
   base_path:string
   -> string

@@ -10,7 +10,7 @@ Queue admission, wake hints, turn start and queue acknowledgement are distinct f
 
 Normal Keeper lifecycle decisions still apply. Recovery does not start an absent owner, unpause a Keeper, override desired state, or restart container services. Startup owner restoration follows the configured activation mode and existing lifecycle. The automatic model wake currently requires a nonempty Codex-only route: every reachable candidate must resolve to Codex. Quota ordering and fallback may select another candidate, so a Codex entry alone is insufficient. Mixed routes, other clients, and unavailable or unknown candidates retain their receipts. A previously queued notification for an unsupported current route is retired without deleting the receipt or blocking unrelated work; returning to a Codex-only route makes the receipt discoverable again.
 
-Malformed or unreadable outbox entries fail closed and remain on disk with an error log. The recovery process does not fabricate a missing response, discard corrupt evidence, or repair unknown data by rerunning a command.
+Malformed or unreadable outbox entries fail closed and remain on disk with a Warn diagnostic. The recovery process does not fabricate a missing response, discard corrupt evidence, or repair unknown data by rerunning a command.
 
 ## Verified artifact materialization
 

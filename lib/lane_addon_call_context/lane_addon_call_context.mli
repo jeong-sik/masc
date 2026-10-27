@@ -35,7 +35,13 @@ type observation_effect =
   | May_change  (** the call may change what the next observation shows *)
 
 val effects_tool : string
-(** The private port. It takes no arguments and answers {!effects_to_json}. *)
+(** The private port when explicitly opted into and not already named as an
+    action or export. It takes no arguments and answers {!effects_to_json}. *)
+
+val effects_input_schema : Yojson.Safe.t
+(** Empty arguments with a namespaced, versioned opt-in annotation. *)
+val supports_effects_tool : Yojson.Safe.t -> bool
+(** Whether the input schema contains exactly one supported opt-in marker. *)
 
 val effects_to_json : (string * observation_effect) list -> Yojson.Safe.t
 (** [{"tools": {"<tool name>": "reads_only" | "may_change", ...}}]. *)

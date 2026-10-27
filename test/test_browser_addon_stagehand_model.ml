@@ -41,7 +41,7 @@ let scenario manifest fixture =
       let params=set "messages" (`List messages) params in
       let output=`Assoc ["action",`Null;"twoStep",`Bool false] in
       let server=F.start_server ~sw ~net ~clock (F.Reply (F.openai_response output)) in
-      ignore (F.publish_registry ~lane_id:"browser/stagehand" ~slot_ids:["http"]
+      ignore (F.publish_registry ~lane_id:"browser-stagehand/stagehand" ~slot_ids:["http"]
         (F.resolver_snapshot ~source:base_path [{F.id="http";base_url=server.base_url}]) : Runtime_exact_output_registry.t);
       let state ()=Models.wait models ~after:None |> ok in
       let begin_call () =
@@ -62,7 +62,7 @@ let scenario manifest fixture =
         (match request.messages with [_;{role=Assistant;text=a};{role=User;text=b}] -> [a;b]
           | _ -> fail "original user/assistant/user history");
       let attempt=Exact.run ~authorize_request:(Server_lane_addon_exact.authorize_request ~base_path) ~store:(Lane_addon_store.create ~root:(Filename.concat base_path "host-store"))
-        ~declaration_id:"browser" ~package ~runner:(Server_lane_addon_exact.runner ~base_path) request |> ok in
+        ~declaration_id:"browser-stagehand" ~package ~runner:(Server_lane_addon_exact.runner ~base_path) request |> ok in
       (match attempt with Exact.Final final -> deliver request (Exact.final_to_json final)
        | Not_final _ -> fail "loopback model did not finish");
       let answer=Eio.Promise.await_exn waiting |> ok in

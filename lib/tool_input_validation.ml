@@ -55,12 +55,20 @@ let validate_with_contract ~contract ?schema ~name ~args () =
       ~reason:(violation_reason rejection.violation);
     (match rejection.violation with
      | Validation_raised _ -> Log.Tool_validation.error "%s" rejection.message
-     | Schema_not_registered
      | Schema_declares_required_without_properties
      | Schema_unusable _
-     | Schema_bound_malformed _
+     | Schema_bound_malformed _ ->
+       Log.Tool_validation.error
+         "tool_input_validation rejected %s (server schema defect): %s"
+         name
+         rejection.message
+     | Schema_not_registered
+     | Retired_transition_alias _ ->
+       Log.Tool_validation.warn
+         "tool_input_validation rejected %s (unknown or retired schema): %s"
+         name
+         rejection.message
      | Arguments_for_fieldless_schema
-     | Retired_transition_alias _
      | Arguments_did_not_arrive
      | Unsupported_fields _
      | No_one_of_branch_matches

@@ -119,6 +119,10 @@ val expand_home_prefix : string -> string
     every config path that names a file under the operator's home shares. *)
 
 val normalize_path_lexically : string -> string
+(** Trim and expand the home prefix, then reduce slash-separated empty, dot and
+    parent components without consulting the filesystem. Already normalized
+    paths may reuse the immutable input string. *)
+
 val normalize_masc_base_path_input : string -> string
 val existing_dir : string -> bool
 val existing_file : string -> bool

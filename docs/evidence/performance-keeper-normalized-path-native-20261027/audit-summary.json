@@ -1,0 +1,49 @@
+{
+  "schema": "masc.selected-native-audit-summary.v1",
+  "authority": "Root-authored numeric/report-locator selection, not exact copies of full reports and not a new independent verdict.",
+  "small_cohorts": {
+    "report": {
+      "path": "artifacts/runs/extreme-perf-20261026/normalized-path-copy-native-evidence-review-v1/README.md",
+      "sha256": "8ded42470dd1b5094e73dd5a974f2da8d2c0c34843bae598364b3658b6d9e365",
+      "kind": "Original local review locator; selected summary is root-authored, not a verbatim report or new verdict."
+    },
+    "recorded_verdict": "PASS_CLOSED_2_AND_30_ONLY",
+    "successful_operations": [
+      4,
+      60
+    ],
+    "scripted_provider_peaks": [
+      2,
+      30
+    ],
+    "original_and_backup_DBs": 64,
+    "immutable_read_only_opens": 96,
+    "identical_reader_derivatives": 10,
+    "observed_original_paths_unchanged": 2644
+  },
+  "comparison_300": {
+    "report": {
+      "path": "artifacts/runs/extreme-perf-20261026/normalized-path-copy-native-evidence-review-v2/README.md",
+      "sha256": "c2d63abddd32b59cc559bca42219ea24a5ad3aad44a5c483e06b43394404a948",
+      "kind": "Original local review locator; selected summary is root-authored, not a verbatim report or new verdict."
+    },
+    "recorded_verdict": "PASS_CLOSED_300_AND_EXISTING_DESCRIPTOR_ONLY",
+    "successful_operations_each": 600,
+    "scripted_provider_calls_each": 600,
+    "actual_held_provider_peaks_each": 300,
+    "original_and_backup_DBs": 2400,
+    "immutable_read_only_opens": 3600,
+    "identical_reader_derivatives": 20,
+    "observed_original_paths_unchanged": 54303,
+    "timeouts": 4,
+    "HTTP429": 247,
+    "config_scope": "Each packet has862 config files;860 byte-identical. runtime.toml differs only by verified scripted-provider port; connection.toml differs only by isolated native-server http_port.",
+    "transport": "All2400 original provider request records have stream:true; fixture SSE branch supports it. Provider response wire bytes are not retained."
+  },
+  "limits": [
+    "Same-reader replay plus independent source/raw joins; not a second independent decoder implementation.",
+    "Full-health snapshots are parsed objects without retained original full-health response bytes/headers/request-return clocks. GC/process memory are request fields; nested rollup sensors can be cached/stale.",
+    "Outcome-reference trace blobs are not separately inspected. No guest/daemon/real model/peer/broadcast/Add-on/UI/installation/production acceptance.",
+    "No new native/HTTP/CI or aggregate main was run by offline reviewers; prior P2/source history remains preserved."
+  ]
+}

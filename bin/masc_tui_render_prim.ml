@@ -245,17 +245,15 @@ let frame_lines buf =
   if len = 0 then []
   else
     let limit = if str.[len - 1] = '\n' then len - 1 else len in
-    let rec collect acc start idx =
-      if idx >= limit then
-        let last = String.sub str start (idx - start) in
-        List.rev (last :: acc)
-      else if str.[idx] = '\n' then
-        let line = String.sub str start (idx - start) in
-        collect (line :: acc) (idx + 1) (idx + 1)
-      else
-        collect acc start (idx + 1)
-    in
-    collect [] 0 0
+    let rows = ref [] in
+    let stop = ref limit in
+    for index = limit - 1 downto 0 do
+      if str.[index] = '\n' then begin
+        rows := String.sub str (index + 1) (!stop - index - 1) :: !rows;
+        stop := index
+      end
+    done;
+    String.sub str 0 !stop :: !rows
 
 
 (* Two already-drawn panes, side by side, one terminal row per line.
@@ -1349,6 +1347,7 @@ let surface_window_height state ~terminal_rows ~count =
 let surface_chrome ~overflow ?(frame = Chrome_screen) ?status ?sidebar (state : state)
     ~terminal_rows ~cols ~surface_key ~title ~hints
     ~(body : budget:int -> chrome_body -> unit) =
+  let setup_started = Masc_tui_frame_timing.start_stage () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let full_cols = cols in
   let sidebar_cols = match sidebar with None -> 0 | Some (width, _) -> width in
@@ -1393,7 +1392,9 @@ let surface_chrome ~overflow ?(frame = Chrome_screen) ?status ?sidebar (state : 
                     sidebar_cols + Masc_tui_ansi.framed_content_column))
     }
   in
+  Masc_tui_frame_timing.finish_stage ~name:"surface.setup" setup_started;
   body ~budget body_pushers;
+  let materialize_started = Masc_tui_frame_timing.start_stage () in
   let held = List.rev !pushed in
   let count = List.length held in
   (* No row is drawn past the budget: one more shoves the bottom rule and the
@@ -1452,6 +1453,7 @@ let surface_chrome ~overflow ?(frame = Chrome_screen) ?status ?sidebar (state : 
         combined
   in
   Buffer.add_string buf (footer_line ?status state ~max_cells:full_cols ~hints);
+  Masc_tui_frame_timing.finish_stage ~name:"surface.materialize" materialize_started;
   finish_surface state ?clamped ~surface_key ~rows:terminal_rows ~cols:full_cols buf
 
 

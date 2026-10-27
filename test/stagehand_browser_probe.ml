@@ -17,6 +17,12 @@ let failures = ref []
 let steps = ref []
 let ( let* ) = Result.bind
 
+(* The package of the Stagehand source (addons/browser/stagehand), declared
+   under its own id the way masc browser-lane-setup declares it, and the
+   Skill it carries. *)
+let package_id = "browser-stagehand"
+let skill_name = "browser-stagehand"
+
 let record name outcome =
   steps := (name, Result.is_ok outcome) :: !steps;
   match outcome with
@@ -154,7 +160,8 @@ let () =
     | _ -> failwith "profile mode must be private or persistent" in
   let manifest=Unix.realpath (argument "--manifest") in
   let expected_skill_revision=In_channel.with_open_bin
-      (Filename.concat (Filename.dirname manifest) "skills/browser/SKILL.md") In_channel.input_all
+      (List.fold_left Filename.concat (Filename.dirname manifest) [ "skills"; skill_name; "SKILL.md" ])
+      In_channel.input_all
     |> Skill_reference.content_revision_of_source_text in
   let base_path=Filename.temp_dir "masc-browser-addon-probe-" "" |> Unix.realpath in
   let config_root=Filename.concat base_path ".masc/config" in
@@ -175,7 +182,7 @@ let () =
       Unix.mkdir path 0o700;Some path in
   Out_channel.with_open_bin runtime_path (fun channel ->
     output_string channel (F.official_client_runtime_fixture ^ Printf.sprintf
-      "\n[skills]\n[[skills.sources]]\nid=\"probe-local\"\nanchor=\"base-path\"\npath=\"fixture-skills\"\naccess=\"read-only\"\n[browser.live]\nenabled=false\n[browser.automation]\nenabled=false\n[browser.stagehand]\nenabled=true\nchrome=%S\nextension=%S\n%s"
+      "\n[skills]\n[[skills.sources]]\nid=\"probe-local\"\nanchor=\"base-path\"\npath=\"fixture-skills\"\naccess=\"read-only\"\n[browser.stagehand]\nchrome=%S\nextension=%S\n%s"
       chrome extension (Option.fold ~none:"" ~some:(Printf.sprintf "profile=%S\n") profile_path)));
   (match Runtime.init_default ~config_path:runtime_path with Ok () -> () | Error detail -> failwith detail);
   Mirage_crypto_rng_unix.use_default ();
@@ -197,12 +204,12 @@ let () =
     provider_responses:=`Assoc ["request_index",`Int index;
       "status",`Int (Cohttp.Code.code_of_status status);"body",`String response]::!provider_responses;
     status,response)) in
-  ignore (F.publish_registry ~lane_id:"browser/stagehand" ~slot_ids:["probe"]
+  ignore (F.publish_registry ~lane_id:(package_id ^ "/stagehand") ~slot_ids:["probe"]
     (F.resolver_snapshot ~source:base_path [{F.id="probe";base_url=provider.base_url}]) : Runtime_exact_output_registry.t);
   R.register_exact_runner ~authorize_request:(Server_lane_addon_exact.authorize_request ~base_path)
     (Server_lane_addon_exact.runner ~base_path);
   let directory=R.configuration_directory config in Fs_compat.mkdir_p directory;
-  let declaration=Filename.concat directory "browser.toml" in
+  let declaration=Filename.concat directory (package_id ^ ".toml") in
   let require = function Ok value -> value | Error detail -> failwith detail in
   let inventory ()=R.inventory ~config in
   let rec await f=match f () with Some value -> value | None -> Eio.Time.sleep clock 0.01;await f in
@@ -216,11 +223,11 @@ let () =
   R.start_configuration_service ~config ~sw ~clock;
   let attach () =
     Out_channel.with_open_bin declaration (fun channel -> output_string channel (Printf.sprintf
-      "id=\"browser\"\nrun_id=\"stagehand-probe\"\nmanifest_path=%S\nexact_outputs=[\"stagehand\"]\ntool_hooks=[\"validate_input\",\"validate_output\"]\n[binding]\nsources=[]\n" manifest));
+      "id=%S\nrun_id=\"stagehand-probe\"\nmanifest_path=%S\nexact_outputs=[\"stagehand\"]\ntool_hooks=[\"validate_input\",\"validate_output\"]\n[binding]\nsources=[]\n" package_id manifest));
     let report=R.reconcile_configuration ~config ~directory |> require in
     let open Yojson.Safe.Util in
     let declared=report |> member "declarations" |> to_list
-      |> List.filter (fun item -> member "id" item=`String "browser") in
+      |> List.filter (fun item -> member "id" item=`String package_id) in
     let refused=report |> member "issues" |> to_list in
     if member "complete" report<>`Bool true || List.length declared<>1 || refused<>[] then
       failwith ("browser declaration was not applied: " ^ Yojson.Safe.to_string report);
@@ -238,12 +245,12 @@ let () =
        |> Result.map_error Server_skill_snapshot_runtime.error_to_string in
      match catalog with
      | Server_skill_snapshot_runtime.Ready {snapshot;_} ->
-       (match Skill_catalog_snapshot.find_effective_by_name snapshot "browser" with
+       (match Skill_catalog_snapshot.find_effective_by_name snapshot skill_name with
         | Some entry when
-            Skill_reference.identity_source_id_to_string entry.identity=R.skill_source_id (R.Declaration "browser")
-            && Skill_reference.identity_package_id_to_string entry.identity="browser"
-            && entry.identity.name="browser"
-            && entry.directory="browser"
+            Skill_reference.identity_source_id_to_string entry.identity=R.skill_source_id (R.Declaration package_id)
+            && Skill_reference.identity_package_id_to_string entry.identity=package_id
+            && entry.identity.name=skill_name
+            && entry.directory=skill_name
             && Skill_reference.equal_content_revision entry.content_revision expected_skill_revision -> Ok `Null
         | Some entry -> Error ("catalog Skill has unexpected identity or content: " ^
             Yojson.Safe.to_string (Skill_reference.to_yojson (Skill_catalog_snapshot.entry_reference entry)))

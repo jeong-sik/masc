@@ -19,8 +19,8 @@ related: ["0204", "0138", "0029"]
 
 ## §0 The axis RFC-0204 does not cover
 
-RFC-0204 isolates dashboard *serving* from fleet *compute*: a dedicated pool,
-then a dedicated serving domain. Its harness (Mode A) drives 48 in-process
+RFC-0204 isolates dashboard *serving* from fleet *compute*: a dedicated read
+pool. Its harness (Mode A) drives 48 in-process
 requests plus host hogs; Mode B drives real keeper turns. Both stress
 **contention** and answer *where does work run, and who is it queued behind*.
 
@@ -40,7 +40,7 @@ On the live runtime (larger store) the same request drove RSS 3.7 GB → 26.4 GB
 and left `/health` unanswered for over 60 s.
 
 A read whose cost scales with the store is not fixed by moving it. Under
-RFC-0204 Phase 3 the request lands on the dedicated serving domain and kills
+RFC-0204 the request lands on the dedicated read pool and kills
 *that* lane instead; the dashboard is still down. And the heap it allocates is
 **process-global**, so every keeper shares the GC pressure no matter which
 domain allocated it. Isolation cannot make a large request small.
@@ -105,9 +105,9 @@ keeps running. Backing off does not release anything.
 - **Not a replacement for RFC-0204.** Contention is real and separately fixed.
 - **No new cache layer.** The per-handler `Dashboard_cache.get_or_compute +
   submit_io_or_inline` retrofit is already flagged as the N-of-M signature
-  (RFC-0204 §4). Adding a tier repeats it; cold start and post-invalidation
+  (RFC-0204 §2.3). Adding a tier repeats it; cold start and post-invalidation
   remain unbounded either way.
-- **Not `submit_cpu` re-weighting.** RFC-0204's Phase 0 assessment stands: Eio
+- **Not `submit_cpu` re-weighting.** RFC-0204 §2.2 stands: Eio
   weight is admission-packing, not priority, and 1.0 makes a heavy job
   monopolise a worker.
 - **No retention change here.** Rotation/rollup for `exact-lane-runs` and
@@ -215,8 +215,5 @@ surfaces once the budget type exists (`/dashboard/board`, `/dashboard/proof`,
   response size and heap cost per entry, measured, not chosen.
 - Does any caller legitimately need a full-store read? If so it belongs on an
   export path with its own admission, not on the dashboard read path.
-- Phase 3 interacts with RFC-0204 §8.4: cancellation crossing a domain boundary
-  needs the session-field synchronisation prerequisite. Sequence with that RFC
-  rather than duplicating it.
 - Should Phase 4 shed by endpoint class or by estimated cost? Cost is more
   faithful but needs an estimator the reader can produce before it starts.

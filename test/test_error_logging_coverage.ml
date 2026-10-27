@@ -1,11 +1,12 @@
 (** Error logging coverage tests for PR #466 silent failure fixes.
 
-    Verifies that the 36 silent failure patterns replaced with explicit
-    stderr logging actually emit the expected log messages when triggered.
+    Verifies that representative silent failure patterns replaced with
+    explicit logging actually emit the expected log messages when triggered.
 
-    Coverage:
-    - tool_task: done transition on nonexistent task → "[task]" prefix
-    - a2a_tools: submit_heartbeat_result with unknown status → "[a2a]" prefix
+    Coverage (tool_task only):
+    - done transition on nonexistent task → "[Task]" marker
+    - cancel transition on nonexistent task → "[Task]" marker
+    - no metric row is recorded without a real start time
 
     Stderr capture approach: Unix.pipe + Unix.dup2 redirect.
     The pipe is set non-blocking to avoid blocking on empty read.

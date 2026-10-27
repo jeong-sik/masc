@@ -37,6 +37,30 @@ type runner = window_s:float -> string -> (string, run_failure) result
 (** The prefix of the one line each script writes its answer on. *)
 val result_marker : string
 
+(** How long a run that reads waits, opening and ending the space included. *)
+val read_window_s : float
+
+(** Who holds an ego task space, as ego names it. [Handed_to_operator] is the
+    agent's space that the operator holds until the agent takes it back; a
+    connection opens on it. A space the operator made is
+    [Operator_owner]'s, and a connection never takes it over. *)
+type space_owner = Agent_owner | Handed_to_operator | Operator_owner
+
+(** The script that lists ego's task spaces, each with its number, name and
+    owner, without opening a space: opening one by name makes it when it is
+    not there. *)
+val task_spaces_script : string
+
+(** Why the spaces were not read. [Spaces_failed]: ego did not list them,
+    as when it cannot reach ego lite. [Spaces_malformed]: it answered in a
+    form masc does not read, such as an owner that is not a {!space_owner}. *)
+type spaces_failure = Spaces_failed of string | Spaces_malformed of string
+
+(** The spaces called [space] in what {!task_spaces_script} wrote, compared
+    exactly. A row without its number, name or owner, and an owner of a space
+    of that name that is not a {!space_owner}, are errors, not guesses. *)
+val named_spaces : space:string -> string -> ((int * space_owner) list, spaces_failure) result
+
 type t
 
 (** Where an agent page's downloads are saved: [root], a folder under the

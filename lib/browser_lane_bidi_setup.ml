@@ -265,14 +265,12 @@ type plan =
   ; set : key list
   ; change : change
   ; port_answers : bool
-  ; lane_enabled : bool
   ; firefox_note : string option
   }
 
 let table plan = plan.table
 let change plan = plan.change
 let port_answers plan = plan.port_answers
-let lane_enabled plan = plan.lane_enabled
 let firefox_note plan = plan.firefox_note
 
 let revision_of = Runtime_table_edit.revision_of_observation
@@ -313,7 +311,6 @@ let plan ~find_firefox (request : request) =
       ; set
       ; change
       ; port_answers = port_answers_now table.port
-      ; lane_enabled = configuration.Browser_configuration.live_enabled
       ; firefox_note
       }
 

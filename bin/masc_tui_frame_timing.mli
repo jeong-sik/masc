@@ -19,8 +19,9 @@ val max_stage_samples : int
     limits are reached. *)
 
 val enabled : bool
-(** Whether the environment asked for timing. False costs one boolean test per
-    frame and nothing else. *)
+(** Whether the environment asked for timing. When false, timer helpers read no
+    clocks and retain no samples. Caller checks and helper calls still have
+    unmeasured instruction overhead. *)
 
 type ask_owner = Keeper of string | Installation of string
 type ask_identity = {
@@ -83,7 +84,11 @@ val finish_stage : name:string -> int64 option -> unit
 (** Stage samples inside a Build carry that Build's frame number. Samples
     outside Build, such as Board fetch and decode, contribute one duration
     per call to their percentile population and are reported separately.
-    A note records a branch such as a cold cache without claiming a duration. *)
+    A note records a branch such as a cold cache without claiming a duration.
+    Build residuals subtract every timed stage, so callers keep these intervals
+    disjoint: end a parent preparation interval before invoking a callback that
+    may record its own stages. Finish only after a successful return; a raising
+    Build may retain earlier stages without a corresponding successful frame. *)
 
 val time_present :
   tag:string ->

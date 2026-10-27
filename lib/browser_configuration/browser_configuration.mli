@@ -37,17 +37,13 @@ type t = {
   stagehand : stagehand option;
   live_bidi : live_bidi option;
   live_ego : live_ego option;
-  live_enabled : bool;
-  automation_enabled : bool;
-  stagehand_enabled : bool;
 }
 [@@deriving show, eq]
 
-(** Activity is independent of backend configuration and installed executors.
-    Omitted [enabled] keys preserve current behavior during the accepting
-    deployment. The canonical automation table is [\[browser.automation\]].
-    That deployment also accepts root [geckodriver]/[binary], but refuses a
-    file using both locations. Turning a lane off keeps these paths intact. *)
+(** How each source starts, never whether it runs: a source runs while its
+    Lane Add-on declaration is switched on. The canonical automation table is
+    [\[browser.automation\]]; root [geckodriver]/[binary] is also read, and a
+    file using both locations is refused. *)
 
 (** The port the attach steps have always used (docs/design/browser-bidi-live-host.md). *)
 val default_live_bidi_port : int
@@ -61,3 +57,17 @@ val parse : Otoml.t -> (t, string) result
     configuration loaded, such as [masc doctor]. [Error] says why the file
     cannot be read or its tables do not parse. *)
 val of_file : string -> (t, string) result
+
+(** A source that starts from a runtime.toml table, with what that table
+    parses to. External hosts need none. *)
+type _ source =
+  | Automation : automation source
+  | Stagehand : stagehand source
+  | Live_bidi : live_bidi source
+  | Live_ego : live_ego source
+
+(** Where runtime.toml writes [source]'s table. *)
+val source_path : _ source -> string
+
+(** [source]'s table as parsed, [None] when runtime.toml has none. *)
+val source_table : 'a source -> t -> 'a option

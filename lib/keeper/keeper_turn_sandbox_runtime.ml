@@ -1326,6 +1326,9 @@ type microvm_start_failure =
       (** A running guest that may not be adopted -- its snapshot died with
           an older server, or its image, size or proxy port is not what the
           keeper asks for now -- and would not go. *)
+  | Previous_mode_guest_not_removed of { container_name : string; detail : string }
+      (** Every network mode shares the Keeper's volumes. A previous mode
+          must release them before any fresh boot can recreate or trim them. *)
   | Adopted_guest_volume_unverified of string
   | Guest_provisions_unavailable of string
   | Github_identity_invalid of string
@@ -1378,6 +1381,9 @@ let microvm_start_failure_message failure =
   | Guest_size_invalid detail -> failed ("microvm_guest_size_invalid: " ^ detail)
   | Unadoptable_guest_not_removed detail ->
     failed ("a running guest that cannot be adopted was not removed: " ^ detail)
+  | Previous_mode_guest_not_removed { container_name; detail } ->
+    failed (Printf.sprintf "previous network-mode guest %s was not removed: %s"
+      container_name detail)
   | Github_identity_invalid detail -> failed ("github_identity_invalid: " ^ detail)
   | Constraints_unexpressible { backend; refusals } ->
     failed (Keeper_sandbox_microvm.constraint_refusals_message backend refusals)
@@ -1466,33 +1472,19 @@ let start_process_bound_microvm_container ?timeout_sec (t : t) =
       set_state t (Running { container_name });
       Ok container_name
     in
-    (* A keeper that changed network mode has a guest under the previous
-       mode's name: still running, on the wrong network, holding a snapshot
-       mount. Nothing was removing it -- the all-modes sweep runs at keeper
-       teardown, which is keeper removal, not a mode change -- so it stayed
-       until the server stopped.
-
-       Removing them before booting is idempotent for a name with no guest
-       behind it, and a failure here is not fatal: the guest we are about to
-       boot is the one that matters, and a stale sibling is a leak rather
-       than a correctness problem. It is logged so the leak is visible. *)
-    List.iter
-      (fun mode ->
-         if mode <> t.network_mode
-         then (
-           let stale =
-             microvm_container_name ~config:t.config ~keeper_name:t.meta.name
-               ~network_mode:mode
-           in
-           match stop_and_delete_microvm_container ?timeout_sec ~backend stale with
-           | Ok () -> ()
-           | Error detail ->
-             Log.Keeper.warn
-               "microvm stale-mode guest not removed keeper=%s name=%s: %s"
-               t.meta.name
-               stale
-               detail))
-      Keeper_types_profile_sandbox.all_network_modes;
+    let rec remove_previous_modes = function
+      | [] -> Ok ()
+      | mode :: rest when mode = t.network_mode -> remove_previous_modes rest
+      | mode :: rest ->
+        let previous =
+          microvm_container_name ~config:t.config ~keeper_name:t.meta.name
+            ~network_mode:mode
+        in
+        (match stop_and_delete_microvm_container ?timeout_sec ~backend previous with
+         | Ok () -> remove_previous_modes rest
+         | Error detail ->
+           Error (Previous_mode_guest_not_removed { container_name = previous; detail }))
+    in
     (* The guest is stopped and deleted only after the nameserver it will be
        booted with is known: see {!microvm_boot_nameserver}. *)
     let boot_after remove_guest =
@@ -1504,7 +1496,14 @@ let start_process_bound_microvm_container ?timeout_sec (t : t) =
       | Error detail -> `Error (Network_unexpressible detail)
       | Ok nameserver ->
         (match remove_guest () with
-         | Ok () -> `Boot nameserver
+         | Ok () ->
+           (* All modes attach the same Keeper-scoped work/build volumes.
+              Failed or unknown removal is not just a leaked guest: proceeding
+              could recreate an attached build volume or trim a live work
+              volume. Warm adoption does neither and needs no sibling cleanup. *)
+           (match remove_previous_modes Keeper_types_profile_sandbox.all_network_modes with
+            | Ok () -> `Boot nameserver
+            | Error failure -> `Error failure)
          | Error detail -> `Error (Unadoptable_guest_not_removed detail))
     in
     let start_state =
@@ -1550,7 +1549,9 @@ let start_process_bound_microvm_container ?timeout_sec (t : t) =
              stop_and_delete_microvm_container ?timeout_sec ~backend container_name))
       | Error probe_error ->
         `Error (Guest_state_unreadable probe_error)
-      | Ok Keeper_sandbox_runtime.Docker_container_stopped
+      | Ok Keeper_sandbox_runtime.Docker_container_stopped ->
+        boot_after (fun () ->
+          stop_and_delete_microvm_container ?timeout_sec ~backend container_name)
       | Ok Keeper_sandbox_runtime.Docker_container_absent ->
         boot_after (fun () -> Ok ())
     in
@@ -1572,14 +1573,8 @@ let start_process_bound_microvm_container ?timeout_sec (t : t) =
        | Error detail -> Error (Adopted_guest_volume_unverified detail))
     | `Error error -> Error error
     | `Boot nameserver ->
-      (* A stopped guest survived [--rm] (host reboot mid-life); clear the
-         name before booting. Absent makes this a no-op. *)
-      let (_ : Unix.process_status * string) =
-        run_argv_with_status
-          ?timeout_sec
-          (Keeper_sandbox_microvm.delete_force_argv_for backend ~container_name)
-      in
-      (* No guest runs under the name here, so a record still held for it
+      (* The current name and all previous modes are confirmed absent before
+         reaching any volume operation. A record still held for this name
          describes one that stopped or vanished without passing through
          [stop_and_delete_microvm_container]. Dropped before the boot: only
          this boot's own success writes the name's record again. *)

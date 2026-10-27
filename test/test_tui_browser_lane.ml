@@ -6,9 +6,9 @@ let success = function Ok value -> value | Error detail -> failwith detail
 let tab id title = `Assoc ["id", `Int id; "title", `String title;
                            "url", `String "https://example.org/"; "active", `Bool (id = 2)]
 let firefox = { client_id = "11111111-1111-4111-8111-111111111111"; browser = Firefox;
-                transport = Browser_lane.Web_extension; interactions = [] }
+                transport = Browser_lane.Web_extension; interactions = []; last_activities = [] }
 let zen = { client_id = "22222222-2222-4222-8222-222222222222"; browser = Zen;
-            transport = Browser_lane.Web_extension; interactions = [] }
+            transport = Browser_lane.Web_extension; interactions = []; last_activities = [] }
 let pinned () = choose_client firefox { (create ()) with clients = Some [firefox; zen] }
 (* A connection list that came with no word of the BiDi host. *)
 let found listed = { listed; bidi_host = Host_not_reported; automatic = None }
@@ -276,11 +276,37 @@ let test_screenshot_ownership_and_draft () =
     (failed.selected_tab = Some 2 && failed.load = Failed "selected tab closed" && preview = None);
   expect "non-PNG payload rejected" (Result.is_error (decode_screenshot (screenshot_response ~mime:"image/jpeg" ())))
 
+let test_activity_refresh_preserves_pending_read () =
+  let original = {(loaded ()) with scroll=9; load=Loading (42, Read_refresh);
+    refresh_pending=Some 42;url_draft=Some "https://example.org/draft"} in
+  let work : Browser_lane.interaction_activity =
+    {request_id="activity-read";actor=Some "keeper/reader";action="page.snapshot";
+     tab_id=Some 2;phase=Browser_lane.Interaction_running} in
+  let current={firefox with interactions=[work];last_activities=[{
+    Browser_lane.work;outcome=Browser_lane.Activity_returned}]} in
+  let updated=accept_activity (Ok (found [current;zen])) original in
+  expect "activity settles independently from the original pending read"
+    (updated.selected_client=Some current && updated.load=original.load
+     && updated.refresh_pending=original.refresh_pending && updated.scroll=9
+     && updated.selected_tab=original.selected_tab && updated.reading=original.reading
+     && updated.scene=original.scene && updated.url_draft=original.url_draft
+     && request_body updated=request_body original);
+  let failed=accept_activity (Error "inventory disconnected") updated in
+  expect "activity failure retains page and activity evidence"
+    (failed.selected_client=updated.selected_client && failed.clients=updated.clients
+     && failed.reading=updated.reading && failed.load=updated.load
+     && failed.activity_error=Some "inventory disconnected");
+  let replaced=accept_activity (Ok (found [zen])) failed in
+  expect "activity refresh cannot silently change the selected browser"
+    (replaced.selected_client=failed.selected_client && not (selected_client_available replaced)
+     && replaced.selected_tab=original.selected_tab && replaced.load=original.load
+     && replaced.activity_error=None)
+
 let test_client_activity_preserves_connection () =
   let initial = { (loaded ()) with scroll = 8 } in
   let queued : Browser_lane.interaction_activity =
     { request_id="0199c0de-0000-4000-8000-0000000000a1"; actor=Some "fixture-keeper";
-      action="hover_at"; tab_id=2; phase=Browser_lane.Interaction_queued } in
+      action="hover_at"; tab_id=Some 2; phase=Browser_lane.Interaction_queued } in
   let discover selected = { selected with load=Loading (24, Discover Read_after_discovery) } in
   let refresh selected interactions =
     let current = { firefox with interactions } in
@@ -377,7 +403,7 @@ let test_picker_empty_row () =
 
 let test_clients_decode () =
   let row ?(transport="web_extension") id browser =
-    `Assoc ["clientId", `String id; "browser", `String browser; "transport", `String transport; "interactions", `List []] in
+    `Assoc ["clientId", `String id; "browser", `String browser; "transport", `String transport; "interactions", `List []; "lastActivities", `List []] in
   let envelope rows = `Assoc ["ok", `Bool true; "data", `Assoc ["clients", `List rows]] in
   expect "backend-normalized Zen identity preserved"
     (decode_clients (envelope [row zen.client_id "zen"]) = Ok [zen]);
@@ -514,7 +540,7 @@ let test_unified_browser_picker () =
 
 let test_bidi_host_discovery () =
   let row id = `Assoc ["clientId", `String id; "browser", `String "firefox";
-                       "interactions", `List []; "transport", `String "web_extension"] in
+                       "interactions", `List []; "lastActivities", `List []; "transport", `String "web_extension"] in
   let answer extra =
     `Assoc ["ok", `Bool true; "data", `Assoc (("clients", `List [row firefox.client_id]) :: extra)] in
   let ended = host_report (let ending = host_ending Record.Session_left in
@@ -613,7 +639,7 @@ let test_operation_is_refresh () =
 let automatic_answer ?(listed=[firefox;zen]) browse work =
   let row (client : client) = `Assoc ["clientId",`String client.client_id;
     "browser",`String (Browser_lane.browser_name client.browser);
-    "transport",`String (Browser_lane.live_transport_to_string client.transport);"interactions",`List []] in
+    "transport",`String (Browser_lane.live_transport_to_string client.transport);"interactions",`List [];"lastActivities",`List []] in
   `Assoc ["ok",`Bool true;"data",`Assoc ["clients",`List (List.map row listed);
     "automatic",`Assoc ["browse",browse;"work",work]]]
 let recommended lane client reason = `Assoc ["ok",`Bool true;"data",`Assoc [
@@ -739,7 +765,8 @@ let test_automatic_work_requests () =
 
 let () =
   List.iter (fun (name, test) -> test (); Printf.printf "PASS %s\n%!" name)
-    ["client activity keeps connection", test_client_activity_preserves_connection;
+    ["activity refresh preserves pending read", test_activity_refresh_preserves_pending_read;
+     "client activity keeps connection", test_client_activity_preserves_connection;
      "automatic browser binding", test_automatic_browser_binding;
      "automatic work requests", test_automatic_work_requests;
      "unified browser picker", test_unified_browser_picker;

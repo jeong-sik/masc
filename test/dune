@@ -209,6 +209,13 @@
  (modules test_keeper_codex_current_context)
  (libraries masc_test_deps))
 
+; Explicit minimal check for the real adapter's asynchronous receipt lifecycle.
+; The ordinary suite continues to include the complete native context group.
+(rule
+ (alias runtest-test_keeper_async_receipt_checkpoint)
+ (action
+  (run %{exe:test_keeper_codex_current_context.exe} test "async receipt continuation")))
+
 (test
  (name test_keeper_vision_official_client)
  (modules test_keeper_vision_official_client)
@@ -1655,9 +1662,46 @@
  (libraries alcotest masc.masc_core eio eio_main))
 
 (test
+ (name test_systhread_host)
+ (modules test_systhread_host)
+ (libraries alcotest masc.masc_core eio eio_main eio.unix unix threads.posix))
+
+(test
+ (name test_pool_lane)
+ (modules test_pool_lane)
+ (libraries alcotest masc.masc_core eio eio_main fmt mtime yojson))
+
+(test
  (name test_dashboard_cache_cancellation)
  (modules test_dashboard_cache_cancellation)
  (libraries alcotest masc.dashboard masc.masc_core eio eio_main yojson))
+
+(test
+ (name test_dashboard_cache_claim)
+ (modules test_dashboard_cache_claim)
+ (libraries
+  alcotest
+  masc.dashboard
+  masc.masc_core
+  masc.masc_eio_context
+  masc.time_compat
+  eio
+  eio_main
+  fmt
+  yojson))
+
+(test
+ (name test_dashboard_cache_lane)
+ (modules test_dashboard_cache_lane)
+ (libraries
+  alcotest
+  masc.dashboard
+  masc.masc_core
+  masc.masc_eio_context
+  eio
+  eio_main
+  fmt
+  yojson))
 
 ; Focused single-module tests
 
@@ -2727,6 +2771,8 @@
 
 (include stanzas/test_workspace_bootstrap.inc)
 
+(include stanzas/test_workspace_backend_cache_isolation.inc)
+
 (include stanzas/test_workspace_base_path_cache.inc)
 
 (include stanzas/test_dashboard_gate_cli_lane.inc)
@@ -2749,6 +2795,7 @@
 (include stanzas/test_play_role_permissions.inc)
 (include stanzas/test_play_screen.inc)
 (include stanzas/test_play_page.inc)
+(include stanzas/test_play_skills.inc)
 (include stanzas/test_play_pad.inc)
 (include stanzas/test_play_pad_routes.inc)
 (include stanzas/test_play_invite.inc)
@@ -3092,6 +3139,9 @@
 (include stanzas/test_keeper_tool_definition_source.inc)
 (include stanzas/test_runtime_codex_app_server.inc)
 (include stanzas/test_keeper_codex_tool_outbox_wake.inc)
+(include stanzas/test_keeper_agent_core_result_outbox.inc)
+(include stanzas/test_keeper_host_result_retention.inc)
+(include stanzas/test_keeper_result_producer_liveness.inc)
 (include stanzas/test_runtime_claude_code.inc)
 (include stanzas/test_runtime_claude_input_attribution.inc)
 (include stanzas/test_runtime_antigravity.inc)
@@ -3580,6 +3630,7 @@
  (name test_tui_keeper_chat_transcript)
  (modules test_tui_keeper_chat_transcript)
  (libraries masc.runtime masc.masc_types masc.fs_compat eio_main unix
+  masc.keeper_chat_operations
   alcotest
   agent_core
   fmt
@@ -4118,6 +4169,11 @@
  (name test_tui_keeper_list_model)
  (modules test_tui_keeper_list_model)
  (libraries alcotest masc masc.masc_types masc_tui_keeper_list_model masc_tui_keeper_control))
+
+(test
+ (name test_tui_keeper_columns)
+ (modules test_tui_keeper_columns)
+ (libraries alcotest masc_tui_keeper_list_model masc_tui_render_schedule))
 
 (test
  (name test_tui_editor)
@@ -5163,6 +5219,7 @@
  (libraries alcotest eio_main eio yojson masc.browser_lane masc masc.time_compat masc.monotonic_deadline))
 
 (include stanzas/test_browser_activity.inc)
+(include stanzas/test_lane_addon_orphan_body_startup.inc)
 
 ; Mock clock as the lane's clock: a command taken, and an answer delivered,
 ; as their window passed stand.
@@ -5599,6 +5656,11 @@
  (libraries alcotest yojson masc masc.fs_compat unix))
 
 (test
+ (name test_lane_addon_orphan_body_sweep)
+ (modules test_lane_addon_orphan_body_sweep)
+ (libraries alcotest yojson masc masc.fs_compat masc.string_util unix))
+
+(test
  (name test_workspace_memory_execution_capture)
  (modules test_workspace_memory_execution_capture)
  (libraries alcotest digestif yojson masc masc.fs_compat masc.prompt_registry unix))
@@ -5755,15 +5817,15 @@
  (name test_browser_addon_locate)
  (modules test_browser_addon_locate)
  (libraries masc_test_deps masc.browser_lane masc.lane_addon_tool_result mcp_protocol)
- (deps (source_tree ../addons/browser))
- (action (run %{test} %{dep:../addons/browser/lane.toml})))
+ (deps (source_tree ../addons/browser/automation))
+ (action (run %{test} %{dep:../addons/browser/automation/lane.toml})))
 
 (test
  (name test_browser_addon_stagehand_model)
  (modules test_browser_addon_stagehand_model)
  (libraries masc_test_deps masc.server exact_output_fixture masc.browser_lane mirage-crypto-rng.unix)
- (deps (source_tree ../addons/browser) fixtures/stagehand/llm-generate-params.json)
- (action (run %{test} %{dep:../addons/browser/lane.toml} %{dep:fixtures/stagehand/llm-generate-params.json})))
+ (deps (source_tree ../addons/browser/stagehand) fixtures/stagehand/llm-generate-params.json)
+ (action (run %{test} %{dep:../addons/browser/stagehand/lane.toml} %{dep:fixtures/stagehand/llm-generate-params.json})))
 
 (test
  (name test_browser_addon_stagehand)
@@ -5786,7 +5848,7 @@
 (test
  (name test_lane_addon)
  (modules test_lane_addon)
- (libraries machine_worker_fixture lane_addon_fake_engine mcp_protocol masc.machine_configuration masc_test_deps masc.fusion_core masc.server masc.msx_lane eio eio_main yojson unix))
+ (libraries machine_worker_fixture lane_addon_fake_engine mcp_protocol masc.machine_configuration masc_test_deps masc.fusion_core masc.server masc.msx_lane masc.browser_lane eio eio_main yojson unix))
 
 (test
  (name test_lane_addon_sources)
@@ -5895,7 +5957,7 @@
        (glob_files ../addons/operator-quiz/*.py) ../addons/operator-quiz/lane.toml
        (glob_files ../addons/operator-quiz/schemas/*.json)
        (glob_files ../addons/operator-quiz/prompts/*.md))
- (libraries alcotest masc masc.masc_log masc.otel_spans mcp_protocol yojson unix))
+ (libraries alcotest masc masc.browser_lane masc.masc_log masc.otel_spans mcp_protocol yojson unix))
 
 (test
  (name test_lane_addon_declaration)
@@ -5983,6 +6045,7 @@
 
 (include stanzas/test_browser_observation.inc)
 (include stanzas/test_browser_observation_composition.inc)
+(include stanzas/test_browser_backend_routes.inc)
 
 (test
  (name test_tui_browser_history_model)
@@ -6278,12 +6341,6 @@
  (modules test_tui_exact_activity)
  (libraries masc.runtime masc_tui_exact_activity masc_tui_runtime_config_edit
   masc_tui_runtime_config_receipt alcotest))
-
-(test
- (name test_tui_browser_activity)
- (modules test_tui_browser_activity)
- (libraries alcotest otoml masc.browser_lane masc.browser_configuration
-  masc_tui_browser_activity masc_tui_runtime_config_edit masc_tui_runtime_config_receipt))
 
 (test
  (name test_msx_lane_activity)
@@ -6708,8 +6765,15 @@
 
 (include stanzas/test_fs_exclusive_create_crash.inc)
 
+(include stanzas/test_workspace_default_config_concurrent.inc)
+
 (test
  (name test_tui_schedule_observation)
  (modules test_tui_schedule_observation)
  (flags (:standard -open Masc))
  (libraries masc alcotest yojson))
+
+(test
+ (name test_tui_frame_lines)
+ (modules test_tui_frame_lines)
+ (libraries alcotest masc_tui_render_prim))

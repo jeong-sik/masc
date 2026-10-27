@@ -175,10 +175,7 @@ needed only to view or click inside a logged-in site.
   lite, shown when `ego-browser` answers) are unmarked by default — choose them
   only when needed. If you have
   already finished setup, run the same command and restart the server.
-- When the lane is off, the Browser Lane screen shows:
-  - `Live lane off in runtime.toml · it serves nothing, MASC starts nothing` —
-    `[browser.live] enabled = false` in `runtime.toml`. Edit it and restart the
-    server to enable the lane.
+- The Browser Lane screen's connection list shows:
   - `No active native browser connections` — the list was read and no Firefox is
     connected.
   - `(nothing here is a reading)` — the list could not be read; the red line

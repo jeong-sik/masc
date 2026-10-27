@@ -1261,6 +1261,7 @@ type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result =
   ; content : string
   ; content_blocks : Agent_core.Types.content_block list option
   ; abort_turn : host_stop option
+  ; on_response_sent : (unit -> unit) option
   }
 
 type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
@@ -1675,12 +1676,36 @@ let boundary_observation_cause error =
     }
 ;;
 
-let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_input ~tool_approval
+type original_capture =
+  | Original_unseen
+  | Original_retained of dynamic_tool_result * Keeper_client_tool_outbox.host_delivery
+  | Original_unavailable of { original : dynamic_tool_result; detail : string }
+
+let retain_original_result producer ~invocation ~call_id ~tool_name ~input
+    (original : dynamic_tool_result) =
+  let* content_blocks = Domain_pool_ref.submit_cpu_or_inline (fun () ->
+    match original.content_blocks with
+    | None -> Ok `Null
+    | Some blocks ->
+      List.fold_left (fun acc block ->
+        let* encoded = acc in
+        let* block = Agent_core.Checkpoint.content_block_to_json_result
+            ~scope:"official_client_original_tool_result" block
+          |> Result.map_error Agent_core.Error.to_string in
+        Ok (block :: encoded)) (Ok []) blocks
+      |> Result.map (fun blocks -> `List (List.rev blocks))) in
+  let response = `Assoc ["success",`Bool original.success;
+    "content",`String original.content;"content_blocks",content_blocks] in
+  Keeper_client_tool_outbox.retain_host_result_with_delivery producer
+    ~invocation_index:(Agent_core.Tool_contract.Invocation.planned_index invocation)
+    ~call_id ~tool_name ~arguments:input ~response
+
+let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_approval
     ~runtime_label ~keeper_name
     ~turn_count ~context ~tools ~loading_plan
     ~(hooks : Agent_core.Hooks.hooks) ~event_bus ~context_injector
     ~terminal_effect_state ~terminal_error ~pre_tool_rejects ~raw_trace_run
-    ~next_dynamic_invocation_index ~on_tool_boundary ~on_result_handoff
+    ~next_dynamic_invocation_index ~on_tool_boundary ~on_result_handoff ~result_producer
     (tool : Agent_core.Tool.t) =
   { name = tool.schema.name
   ; description = tool.schema.description
@@ -1721,6 +1746,38 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
             ~invocation
             ~tool_name:tool.schema.name
         in
+        let captured_original = ref Original_unseen in
+        let capture original =
+          match !captured_original, result_producer with
+          | (Original_retained _ | Original_unavailable _), _ | Original_unseen, None -> ()
+          | Original_unseen, Some producer ->
+            Eio.Cancel.protect (fun () ->
+              let saved = try
+                  retain_original_result producer ~invocation ~call_id
+                    ~tool_name:tool.schema.name ~input original
+                with exn ->
+                  if Keeper_operator_interrupt.is_operator_interrupt exn then raise exn;
+                  Llm_provider.Reserved_exn.reraise_if_reserved exn;
+                  Error (Printexc.to_string exn) in
+              captured_original := match saved with
+                | Ok delivery -> Original_retained (original, delivery)
+                | Error detail -> Original_unavailable {original;detail}) in
+        let post_tool_use event =
+          (match event with
+           | Agent_core.Hooks.PostToolUse {invocation=source;output;_}
+             when source == invocation ->
+             let original : dynamic_tool_result = match output with
+               | Ok output -> {success=true;content=output.content;
+                   content_blocks=output.content_blocks;abort_turn=None;on_response_sent=None}
+               | Error error -> {success=false;content=error.message;
+                   content_blocks=None;abort_turn=None;on_response_sent=None} in
+             capture original
+           | PostToolUse _ | PostToolUseFailure _ | BeforeTurn _ | BeforeTurnParams _
+           | AfterTurn _ | PreToolUse _ | OnStop _ | OnError _ | OnToolError _ -> ());
+          match hooks.post_tool_use with
+          | None -> Agent_core.Hooks.Continue
+          | Some hook -> hook event in
+        let execution_hooks = {hooks with post_tool_use=Some post_tool_use} in
         let execute () =
           let pre_tool_use =
             invoke_turn_hook
@@ -1760,7 +1817,7 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
             pre_tool_rejects
             := { call_id; tool_name = tool.schema.name; input; detail }
                :: !pre_tool_rejects;
-            { success = false; content = detail; content_blocks = None; abort_turn = None }
+            { success = false; content = detail; content_blocks = None; abort_turn = None; on_response_sent = None }
           | Agent_core.Agent_tool_pre_execution_gate.Reject { stage; detail } ->
             (* A hook that failed, or a decision illegal at this stage. Both
                are turn-level faults rather than something the model can
@@ -1773,13 +1830,13 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
                 detail
             in
             record_terminal_error terminal_error detail;
-            { success = false; content = detail; content_blocks = None; abort_turn = None }
+            { success = false; content = detail; content_blocks = None; abort_turn = None; on_response_sent = None }
           | Agent_core.Agent_tool_pre_execution_gate.Admit ->
             (match
                Agent_core.Agent_tools.find_and_execute_tool
                  ~context
                  ~tools
-                 ~hooks
+                 ~hooks:execution_hooks
                  ~event_bus
                  ~tracer:Agent_core.Tracing.null
                  ~agent_name:keeper_name
@@ -1801,7 +1858,7 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
                    not (Agent_core.Types.tool_result_outcome_is_error result.outcome)
                ; content = result.content
                ; content_blocks = result.content_blocks
-               ; abort_turn = None
+               ; abort_turn = None; on_response_sent = None
                }
              | Error error ->
                let detail = tool_hook_error_to_string error in
@@ -1812,7 +1869,7 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
                   { success = true
                   ; content =
                       Tool_guidance.to_string Tool_guidance.Post_execution_hook_failed
-                  ; content_blocks = None; abort_turn = None
+                  ; content_blocks = None; abort_turn = None; on_response_sent = None
                   }
                 | Agent_core.Agent_tools.Hook_execution_failed
                     { stage =
@@ -1820,10 +1877,16 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
                         | Pre_tool_use | On_stop | On_error | On_tool_error )
                     ; _
                     } ->
-                  { success = false; content = detail; content_blocks = None; abort_turn = None }))
+                  { success = false; content = detail; content_blocks = None; abort_turn = None; on_response_sent = None }))
         in
         match execute () with
         | result ->
+          let original_result = match !captured_original with
+            | Original_unseen -> result
+            | Original_retained (original, _) | Original_unavailable {original;_} -> original in
+          (* Pre-execution refusals have no PostToolUse output. They are exact
+             no-execution results, retained at the same boundary here. *)
+          capture original_result;
           let delivery =
             match image_capability_error ~accepts_image_input result.content_blocks with
             | Some detail -> Error detail
@@ -1846,8 +1909,9 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
               ; content = detail ^ "\n" ^ result.content }, Some detail
           in
           let result = settle result in
+          let producer_effect_state = terminal_effect_state () in
           let terminal_boundary =
-            match terminal_effect_state () with
+            match producer_effect_state with
             | Keeper_tools_agent_core.Terminal_effect_failed
                 ({ effect_disposition =
                      ( Tool_result.Proven_post_effect
@@ -1959,7 +2023,7 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
           (* The caller observes the settled call, including result handoff.
              Its scope spans provider attempts; a new client-local counter must
              not replace it. Existing exact terminal evidence has priority. *)
-          (match on_tool_boundary with
+          let result = (match on_tool_boundary with
            | None -> final_result
            | Some observe ->
              let boundary =
@@ -1998,7 +2062,46 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
                  (( Repeated_tool_call _
                   | Terminal_tool_boundary
                       { outcome = Terminal_completed | Durable_stimulus_deferred; _ } )
-                  as stop) -> { final_result with abort_turn = Some stop })
+                  as stop) -> { final_result with abort_turn = Some stop }) in
+          (match !captured_original with
+           | Original_unseen -> result
+           | Original_retained (original, delivery) ->
+             if result.success=original.success && result.content=original.content
+                && result.content_blocks=original.content_blocks then
+               {result with on_response_sent=Some (fun () ->
+                  Keeper_client_tool_outbox.mark_response_sent delivery)}
+             else result
+           | Original_unavailable {detail=message;_} ->
+
+                let detail = Keeper_terminal_effect_detail.Tool_result_retention_failed
+                    { model_tool_name = tool.schema.name; message } in
+                let diagnostic = Keeper_terminal_effect_detail.summary detail in
+                record_terminal_error terminal_error diagnostic;
+                Log.emit Log.Error ~module_name:"Keeper"
+                  ~details:(`Assoc ["keeper_name", `String keeper_name;
+                    "detail", Keeper_terminal_effect_detail.to_yojson detail]) diagnostic;
+                match result.abort_turn with
+                | Some (Terminal_tool_boundary { outcome = Terminal_failed _; _ }) ->
+                  (* Preserve the producer's authoritative failure. The separate
+                     diagnostic records that its original result was also lost. *)
+                  result
+                | None | Some (Repeated_tool_call _)
+                | Some (Terminal_tool_boundary
+                    { outcome = Terminal_completed | Durable_stimulus_deferred; _ }) ->
+                  let effect_disposition =
+                    match producer_effect_state with
+                    | Keeper_tools_agent_core.Terminal_effect_completed _ -> Tool_result.Proven_post_effect
+                    | Keeper_tools_agent_core.Terminal_effect_failed failure -> failure.effect_disposition
+                    | Keeper_tools_agent_core.Terminal_effect_open
+                    | Keeper_tools_agent_core.Deferred_tool_result
+                    | Keeper_tools_agent_core.External_effect_deferred -> Tool_result.Effect_outcome_unknown
+                  in
+                  { result with success = false
+                  ; abort_turn = Some (Terminal_tool_boundary
+                      { tool_name = tool.schema.name
+                      ; outcome = Terminal_failed
+                          { failure_class = Tool_result.Runtime_failure; effect_disposition; detail }
+                      }) })
         | exception exn -> (* cancel-guard-ok: PROVISIONAL, delete with #37372. This arm ends by re-throwing with the original backtrace nine lines down. The site is correct; the marker exists only because the guard reads eight lines. *)
           let backtrace = Printexc.get_raw_backtrace () in
           Eio.Cancel.protect (fun () ->
@@ -2006,31 +2109,42 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
               (settle
                  { success = false
                  ; content = "dynamic tool call exited without an authoritative result"
-                 ; content_blocks = None; abort_turn = None
+                 ; content_blocks = None; abort_turn = None; on_response_sent = None
                  }));
           Printexc.raise_with_backtrace exn backtrace)
   }
 ;;
 
-let dynamic_tools ?base_path ~content_transport ~accepts_image_input ~tool_approval ~runtime_label
+let dynamic_tools ~result_scope ?base_path ~content_transport ~accepts_image_input ~tool_approval ~runtime_label
     ~keeper_name ~turn_count ~tools ~loading_plan
     ~hooks ~event_bus ~context_injector ~context ~terminal_effect_state
     ~terminal_error ~pre_tool_rejects
     ?on_tool_boundary
     ?(on_result_handoff = fun ~invocation:_ ~content:_ -> ()) ~raw_trace_run () =
   match tools, context with
-  | [], _ -> Ok []
+  | [], _ -> Ok ([], None)
   | _ :: _, None ->
     Error
       (config_error
          ~field:"context"
          (runtime_label ^ " dynamic tools require the Keeper shared context"))
   | tools, Some context ->
+    let* result_producer = match base_path, result_scope with
+      | None, None -> Ok None
+      | None, Some _ -> Error (config_error ~field:"base_path"
+          "a running tool result producer requires its workspace authority")
+      | Some base_path, scope ->
+        let producer = match scope with
+          | None -> Keeper_client_tool_outbox.host_producer
+              ~base_path ~keeper_name ~runtime_label ~turn_count
+          | Some sw -> Keeper_client_tool_outbox.start_host_producer
+              ~sw ~base_path ~keeper_name ~runtime_label ~turn_count in
+        producer |> Result.map Option.some
+        |> Result.map_error (config_error ~field:"tool_result_producer") in
     let next_dynamic_invocation_index = Atomic.make 0 in
     Ok
       (List.map
          (dynamic_tool_of_agent_core
-            ~base_path
             ~content_transport
             ~accepts_image_input
             ~tool_approval
@@ -2049,8 +2163,9 @@ let dynamic_tools ?base_path ~content_transport ~accepts_image_input ~tool_appro
             ~raw_trace_run
             ~next_dynamic_invocation_index
             ~on_tool_boundary
-            ~on_result_handoff)
-         tools)
+            ~on_result_handoff
+            ~result_producer)
+         tools, result_producer)
 ;;
 
 (* Append the reject round-trips of a dead turn to the canonical

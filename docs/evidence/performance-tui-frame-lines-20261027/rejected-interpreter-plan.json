@@ -1,0 +1,13 @@
+{
+  "schema": "masc.extracted-frame-lines-experiment.v1",
+  "source": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/perf-tui-pre-surface-build-observation-20261027/bin/masc_tui_render_prim.ml",
+  "source_sha256": "8d7248cfc9cb44a152bffa70d3448c0d90292bec10ba5b1afdceaffc8b595b41",
+  "support_commit": "468e3b3e73d47a5d29e67c91924b0d8f1190658d",
+  "baseline_function_sha256": "26ad9bc46ce764623ffced074467e5e2e9d4a8485e764ad72187a94dd33e22ab",
+  "candidate_function_sha256": "246c78a8ae10de24397b9d15060e42aa20acab07c4e108133b048a6871038b8c",
+  "carrier_sha256": "6ef5b204484b059f1671225e14e9694bec408524f7d97abe968202ae4174fe71",
+  "ocaml": "/Users/dancer/.opam/5.5.1/bin/ocaml",
+  "ocaml_sha256": "3addf929a311601f68553d0aa6d48294af02934316d39a98f46bc09a3b2b1b60",
+  "order": "baseline/candidate/candidate/baseline per8strata,20warmups,2phases/role",
+  "scope": "Extracted pure helper only; no Dune/native/module typing/renderer/physicalUI/SLO or performance gain claim. Buffers stable during each synchronous call; preserve bytes/row endings and no input mutation. Wall clock is not monotonic; all raw counter/clock values retained."
+}

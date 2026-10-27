@@ -340,9 +340,11 @@ val readiness_handler : Httpun.Request.t -> Httpun.Reqd.t -> unit
 
     | State | HTTP status | Body fields |
     |---|---|---|
-    | ready | [200 OK] | [ready: true], [phase] |
-    | not ready | [503 Service Unavailable] | [ready: false], [phase], [elapsed_sec] |
+    | ready | [200 OK] | [ready: true], [phase], [pid] |
+    | not ready | [503 Service Unavailable] | [ready: false], [phase], [elapsed_sec], [pid] |
 
+    [pid] is the answering server process, so [masc restart] can tell its
+    replacement's answer from the draining predecessor's on the same port.
     Pinned at the contract seam — orchestrators (k8s, Railway)
     key off the [200] vs [503] distinction. *)
 

@@ -1,0 +1,72 @@
+--- v2-frozen/scripts/harness/perf/keeper_scale_fault_probe.py
++++ v3-current/scripts/harness/perf/keeper_scale_fault_probe.py
+@@ -91,11 +91,16 @@
+             "created_at": stored["created_at"], "state": stored["state"].capitalize(),
+             "admission_digest": stored["admission_digest"], "execution_digest": stored["execution_digest"]}
+         if op in originals[:2]:
+-            status.update(batch_execution_id="op-1", batch_input_digest=harness.payload_digest(op["original"]["input"]))
++            status.update(state="Running", batch_execution_id="op-1",
++                batch_input_digest=harness.payload_digest(op["original"]["input"]))
+         public_held[harness.operation_key(op)] = status
+     snapshots = [{"keeper": "owner-a", "snapshot": snapshot}]
+     harness.validate_original_payloads(originals, snapshots, public_held, terminal=False)
+     cases.append({"case": "held original payloads with merged leader and independent member digests", "result": "accepted"})
++    wrong_projection = copy.deepcopy(public_held)
++    wrong_projection[harness.operation_key(originals[1])]["state"] = "Queued"
++    reject("batch follower public state must project its Running leader", lambda: harness.validate_original_payloads(
++        originals, snapshots, wrong_projection, terminal=False))
+     for label, change in [
+         ("source route drift", lambda data: data[0]["snapshot"]["operations"]["rows"][0].update(source_json='{}')),
+         ("admission digest drift", lambda data: data[0]["snapshot"]["operations"]["rows"][0].update(admission_digest="0" * 64)),
+--- v2-frozen/scripts/harness/perf/keeper_scale_packet_audit.py
++++ v3-current/scripts/harness/perf/keeper_scale_packet_audit.py
+@@ -169,14 +169,15 @@
+             assert key not in seen
+             seen.add(key)
+             original, status = owned[opid], public[key]
++            member = membership.get(opid)
++            projected_state = rows[member["execution_id"]]["state"] if member else row["state"]
+             assert row["source_json"] == encoded(original["source"])
+             assert row["admission_digest"] == hashed(original)
+             assert row["execution_digest"] == hashed(executions[opid])
+             assert row["input_json"] == (None if terminal else encoded(executions[opid]))
+             assert status["source"] == original["source"] and status["input"] == (None if terminal else executions[opid])
+             assert all(status[field] == row[field] for field in ["admission_digest", "execution_digest", "created_at"])
+-            assert status["sequence"] == str(row["sequence"]) and status["state"].lower() == row["state"]
+-            member = membership.get(opid)
++            assert status["sequence"] == str(row["sequence"]) and status["state"].lower() == projected_state
+             assert status.get("batch_execution_id") == (None if member is None else member["execution_id"])
+             assert status.get("batch_input_digest") == (None if member is None else member["admitted_digest"])
+     assert seen == set(originals)
+@@ -367,6 +368,7 @@
+                 "caveat": "Cross-clock alignment uses adjacent wall/perf phase anchor, no exact synchronization guarantee."})
+         (packet / "slow-status-completion-alignment.json").write_text(json.dumps(aligned, indent=2)+"\n")
+     report = {"evidence_schema": EVIDENCE_SCHEMA, "packet": packet.name, "source": identity["source"], "binary_sha256": identity["sha256"],
++        "packet_auditor_sha256": sha(pathlib.Path(__file__)),
+         "runner_sha256": identity["runner_sha256"], "original_run_failure_preserved": original_failure,
+         "post_run_workload_validation": "PASS", "overall_original_run_verdict": "FAIL" if original_failure else "PASS",
+         "keepers": len(names), "public_and_exact_owner_durable_succeeded_operations": len(operations),
+--- v2-frozen/scripts/harness/perf/keeper_scale_session.py
++++ v3-current/scripts/harness/perf/keeper_scale_session.py
+@@ -198,6 +198,10 @@
+             original = owned[opid]["original"]
+             status = public[key]
+             execution = combined.get(opid, original["input"])
++            member = members.get(opid)
++            # Exact-operation reads project a batch leader's state onto each
++            # follower; its physical row can still be queued while Running.
++            public_state = by_id[member["execution_id"]]["state"] if member else row["state"]
+             require(row["source_json"] == canonical_payload(original["source"])
+                     and row["admission_digest"] == payload_digest(original)
+                     and row["execution_digest"] == payload_digest(execution)
+@@ -209,9 +213,8 @@
+                     and status["input"] == (None if terminal else execution)
+                     and status["sequence"] == str(row["sequence"])
+                     and status["created_at"] == row["created_at"]
+-                    and status["state"].lower() == row["state"],
++                    and status["state"].lower() == public_state,
+                     "public original payload differs from exact SQLite snapshot")
+-            member = members.get(opid)
+             require(status.get("batch_execution_id") == (None if member is None else member["execution_id"])
+                     and status.get("batch_input_digest") == (None if member is None else member["admitted_digest"]),
+                     "public batch binding differs from original SQLite member")

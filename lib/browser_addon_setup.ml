@@ -5,7 +5,8 @@ type declaration =
   | Present of { path : string; manifest_path : string; this_build : bool; enabled : bool }
 
 type installed =
-  { package_directory : string
+  { backend : Browser_lane.Backend.t
+  ; package_directory : string
   ; manifest_path : string
   ; files_written : int
   ; files_removed : string list
@@ -21,7 +22,7 @@ type error =
   | Config_root_invalid of string
   | Config_root_missing of string
   | Inventory_unreadable of { directory : string }
-  | Declared_more_than_once of string list
+  | Declared_more_than_once of { backend : Browser_lane.Backend.t; paths : string list }
   | Declaration_unloadable of { path : string; reason : string }
   | Declaration_refused of string
 
@@ -44,12 +45,12 @@ let error_message = function
       "Could not read every Lane declaration in %s, so whether the browser Add-on is \
        already declared is unknown. Nothing was declared."
       directory
-  | Declared_more_than_once paths ->
+  | Declared_more_than_once { backend; paths } ->
     Printf.sprintf
-      "The browser Add-on is declared and enabled more than once (%s). The server would \
-       attach every one and refuse browser hosts as ambiguous. Keep one enabled and set \
-       enabled = false in, or remove, the others."
-      (String.concat ", " paths)
+      "The %s browser source is declared and enabled more than once (%s). The server uses \
+       neither while both are attached. Keep one enabled and set enabled = false in, or \
+       remove, the others."
+      (Browser_lane.Backend.to_wire backend) (String.concat ", " paths)
   | Declaration_unloadable { path; reason } ->
     Printf.sprintf
       "The browser Add-on declaration %s does not load: %s. It is left as it is; fix or \
@@ -57,32 +58,47 @@ let error_message = function
       path reason
   | Declaration_refused reason -> "The browser Add-on declaration was refused: " ^ reason
 
-(* The folder under packages/ and the declaration's id and file name. The
-   manifest's own id must be the same; [apply] checks it after loading. *)
-let package_name = "browser"
+(* Each browser source's package: its folder in the carried tree, and the
+   folder under packages/, the declaration's id and its file name. The
+   manifest's own id and source must be the same; [apply] checks them. *)
+let package_folder = function
+  | Browser_lane.Backend.Automation -> "automation"
+  | Stagehand -> "stagehand"
+  | Owned_firefox -> "firefox"
+  | Ego -> "ego"
+  | External_host -> "external"
+let package_name backend = "browser-" ^ package_folder backend
 let packages_dirname = "packages"
 let manifest_name = "lane.toml"
-let declaration_file_name = package_name ^ ".toml"
+let declaration_file_name backend = package_name backend ^ ".toml"
 
-let package_directory ~base_path =
+let package_directory ~base_path backend =
   List.fold_left Filename.concat
     (Common.masc_dir_from_base_path ~base_path)
-    [ packages_dirname; package_name ]
+    [ packages_dirname; package_name backend ]
 
-let embedded_files () =
-  match Embedded_browser_addon.read manifest_name with
-  | None -> Error (Embedded_package_invalid ("it carries no " ^ manifest_name))
-  | Some _ ->
+let embedded_files backend =
+  let prefix = package_folder backend ^ "/" in
+  let carried =
+    List.filter_map
+      (fun name -> if String.starts_with ~prefix name
+        then Some (name, String.sub name (String.length prefix) (String.length name - String.length prefix))
+        else None)
+      Embedded_browser_addon.file_list
+  in
+  if not (List.exists (fun (_, name) -> String.equal name manifest_name) carried)
+  then Error (Embedded_package_invalid (Printf.sprintf "it carries no %s%s" prefix manifest_name))
+  else
     List.fold_right
-      (fun name collected ->
+      (fun (carried_name, name) collected ->
          let* collected = collected in
-         match Embedded_browser_addon.read name with
+         match Embedded_browser_addon.read carried_name with
          | Some contents -> Ok ((name, contents) :: collected)
          | None ->
            Error
              (Embedded_package_invalid
-                (Printf.sprintf "it lists %s and carries no bytes for it" name)))
-      Embedded_browser_addon.file_list
+                (Printf.sprintf "it lists %s and carries no bytes for it" carried_name)))
+      carried
       (Ok [])
 
 let current_bytes path =
@@ -179,15 +195,16 @@ let same_file a b =
   | a, b -> String.equal a b
   | exception (Unix.Unix_error _ | Sys_error _) -> false
 
-let declaration_text ~manifest_path ~package_directory =
+let declaration_text ~backend ~manifest_path ~package_directory =
   String.concat "\n"
     [ "# Declared by masc browser-lane-setup. manifest_path names the browser Add-on"
-    ; "# package that masc writes to " ^ package_directory ^ "; setup and"
-    ; "# install-local-build.sh rewrite that package when masc is upgraded, so this"
-    ; "# file does not change. Set enabled = false to keep the Add-on detached."
-    ; Toml_line_editor.scalar_line ~key:"id" ~value:package_name
+    ; "# package of the " ^ Browser_lane.Backend.to_wire backend ^ " source that masc writes to"
+    ; "# " ^ package_directory ^ "; setup and install-local-build.sh rewrite that"
+    ; "# package when masc is upgraded, so this file does not change. Set"
+    ; "# enabled = false to keep the Add-on detached."
+    ; Toml_line_editor.scalar_line ~key:"id" ~value:(package_name backend)
     ; "enabled = true"
-    ; Toml_line_editor.scalar_line ~key:"run_id" ~value:package_name
+    ; Toml_line_editor.scalar_line ~key:"run_id" ~value:(package_name backend)
     ; Toml_line_editor.scalar_line ~key:"manifest_path" ~value:manifest_path
     ; ""
     ; "[binding]"
@@ -195,12 +212,12 @@ let declaration_text ~manifest_path ~package_directory =
     ; ""
     ]
 
-let declare ~directory ~manifest_path ~package_directory =
+let declare ~backend ~directory ~manifest_path ~package_directory =
   let request =
     `Assoc
       [ "mode", `String "create"
-      ; "file_name", `String declaration_file_name
-      ; "source_text", `String (declaration_text ~manifest_path ~package_directory)
+      ; "file_name", `String (declaration_file_name backend)
+      ; "source_text", `String (declaration_text ~backend ~manifest_path ~package_directory)
       ]
   in
   let refused (error : Lane_addon_declaration.error) = Declaration_refused error.message in
@@ -224,15 +241,14 @@ let read_inventory ~lane_directory =
   then Ok snapshot
   else Error (Inventory_unreadable { directory = lane_directory })
 
-(* The declaration of the browser package that counts, if there is one. The
-   server attaches only enabled declarations, so only those can make host
-   polls ambiguous. With none enabled, the first disabled one stands for the
+(* The declaration of a source's package that counts, if there is one. The
+   server attaches only enabled declarations, so only those can double the
+   source. With none enabled, the first disabled one stands for the
    operator's choice to keep the Add-on detached, and nothing is declared. *)
-let browser_declaration (snapshot : Lane_addon_config.snapshot) =
+let browser_declaration backend (snapshot : Lane_addon_config.snapshot) =
   let declared =
     List.filter
-      (fun (declared : Lane_addon_config.declaration) ->
-         String.equal declared.package.id package_name)
+      (fun declared -> Lane_addon_config.browser_source declared = Some backend)
       snapshot.declarations
   in
   match List.filter (fun (d : Lane_addon_config.declaration) -> d.enabled) declared with
@@ -240,7 +256,7 @@ let browser_declaration (snapshot : Lane_addon_config.snapshot) =
   | _ :: _ :: _ as enabled ->
     Error
       (Declared_more_than_once
-         (List.map (fun (d : Lane_addon_config.declaration) -> d.source_path) enabled))
+         { backend; paths = List.map (fun (d : Lane_addon_config.declaration) -> d.source_path) enabled })
   | [] ->
     (match declared with
      | [] -> Ok None
@@ -249,22 +265,30 @@ let browser_declaration (snapshot : Lane_addon_config.snapshot) =
 type plan =
   { base_path : string
   ; lane_directory : string
-  ; files : (string * string) list
+  ; packages : (Browser_lane.Backend.t * (string * string) list) list
   }
 
-let plan ~base_path =
+let plan ~base_path ~sources =
   if Filename.is_relative base_path
   then Error (Base_path_not_absolute base_path)
   else
     let* lane_directory = lane_directory ~base_path in
     let* snapshot = read_inventory ~lane_directory in
-    let* (_ : Lane_addon_config.declaration option) = browser_declaration snapshot in
-    let* files = embedded_files () in
-    Ok { base_path; lane_directory; files }
+    let* packages =
+      List.fold_right
+        (fun backend collected ->
+           let* collected = collected in
+           let* (_ : Lane_addon_config.declaration option) = browser_declaration backend snapshot in
+           let* files = embedded_files backend in
+           Ok ((backend, files) :: collected))
+        (List.sort_uniq compare sources)
+        (Ok [])
+    in
+    Ok { base_path; lane_directory; packages }
 
-let apply plan =
-  let directory = package_directory ~base_path:plan.base_path in
-  let* files_written, files_removed = write_package ~directory plan.files in
+let apply_package plan (backend, files) =
+  let directory = package_directory ~base_path:plan.base_path backend in
+  let* files_written, files_removed = write_package ~directory files in
   let manifest_path = Filename.concat directory manifest_name in
   let* (package : Lane_addon_types.package) =
     Lane_addon_manifest.load ~path:manifest_path
@@ -273,18 +297,19 @@ let apply plan =
         { path = manifest_path; reason = Lane_addon_manifest.error_to_string error })
   in
   let* () =
-    if String.equal package.id package_name
-    then Ok ()
-    else
+    match String.equal package.id (package_name backend), package.worker_service with
+    | true, Lane_addon_types.Browser_service served when served = backend -> Ok ()
+    | (true | false), (Lane_addon_types.Browser_service _ | Lane_addon_types.Mcp_tools) ->
       Error
         (Embedded_package_invalid
-           (Printf.sprintf "its manifest id is %S, not %S" package.id package_name))
+           (Printf.sprintf "the manifest at %s is not the %s package of the %s source"
+              manifest_path (package_name backend) (Browser_lane.Backend.to_wire backend)))
   in
   (* Read again now that the package is in place. A declaration that did not
      load because its package was missing loads now, and one written since
      [plan] is seen. *)
   let* snapshot = read_inventory ~lane_directory:plan.lane_directory in
-  let* existing = browser_declaration snapshot in
+  let* existing = browser_declaration backend snapshot in
   let* declaration =
     match existing with
     | Some (declared : Lane_addon_config.declaration) ->
@@ -296,22 +321,39 @@ let apply plan =
            ; enabled = declared.enabled
            })
     | None ->
-      let own = Filename.concat plan.lane_directory declaration_file_name in
+      let own = Filename.concat plan.lane_directory (declaration_file_name backend) in
       (match
          List.find_opt
            (fun (issue : Lane_addon_config.issue) ->
-              String.equal issue.source_path own || issue.id = Some package_name)
+              String.equal issue.source_path own || issue.id = Some (package_name backend))
            snapshot.issues
        with
        | Some issue ->
          Error (Declaration_unloadable { path = issue.source_path; reason = issue.message })
-       | None -> declare ~directory:plan.lane_directory ~manifest_path ~package_directory:directory)
+       | None -> declare ~backend ~directory:plan.lane_directory ~manifest_path ~package_directory:directory)
   in
   Ok
-    { package_directory = directory
+    { backend
+    ; package_directory = directory
     ; manifest_path
     ; files_written
     ; files_removed
     ; declaration
     ; missing_programs = missing_programs ~package_directory:directory package
     }
+
+type applied = { installed : installed list; refusal : error option }
+
+(* Packages are written one after another; a refusal leaves the ones before
+   it written and declared, and they are returned with it. *)
+let apply plan =
+  let rec go installed = function
+    | [] -> { installed = List.rev installed; refusal = None }
+    | package :: rest ->
+      (match apply_package plan package with
+       | Ok one -> go (one :: installed) rest
+       | Error error -> { installed = List.rev installed; refusal = Some error }) in
+  go [] plan.packages
+
+let without sources plan =
+  { plan with packages = List.filter (fun (backend, _) -> not (List.mem backend sources)) plan.packages }

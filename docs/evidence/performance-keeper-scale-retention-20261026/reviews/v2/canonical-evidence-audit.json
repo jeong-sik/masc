@@ -1,0 +1,21 @@
+{
+  "schema": "masc.canonical-subset-read-only-audit.v1",
+  "evidence_path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/keeper-scale-canonical-subset-v1",
+  "files": {
+    "receipt.json": "a7404aae164a0ccf7a7a03d8e44e63a902c0dc4ec8783d620d97e2f847ea012c",
+    "probe.ml": "d8267d88c2a692ca50ca1411d805c3369375a94667ca0b4f1897aa315d6b3940",
+    "inputs.json": "31f1e01032bbf7dd8f7dab52db052e5da1c479ef07a32a0bdb74ac51c7b555d3",
+    "stdout.txt": "9d3895489d1e330c4cf2b499f1889eef4ae25d225bb597eb4245a942e53856b7",
+    "stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "rows": 8,
+  "source_commit": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+  "exact_production_function_present_in_probe": true,
+  "source_file_sha256_matches_receipt": true,
+  "recomputed_python_bytes_equal_recorded_ocaml_stdout": true,
+  "recomputed_hashes_equal_receipt": true,
+  "stderr_empty": true,
+  "receipt_returncode": 0,
+  "reviewer_reran_ocaml": false,
+  "scope": "Read original evidence files and independently recomputed eight fixture canonical byte strings/hashes; does not prove arbitrary JSON codec equivalence or native execution."
+}

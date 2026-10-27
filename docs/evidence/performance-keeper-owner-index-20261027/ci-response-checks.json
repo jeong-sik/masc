@@ -1,0 +1,35 @@
+{
+  "recorded_at_utc": "2026-10-26T19:22:34.263287+00:00",
+  "test_source_sha256": "e0e23d49aeba3110aa9ba07cd19085005d17308e60b8035601c9e06d3c07544d",
+  "response_diff_sha256": "b9fb89418bbdb588730c09650b1a6d775e8a9e9e7e98c652e021cda722dbc8a2",
+  "only_one_local_type_annotation_changed": true,
+  "annotated_binder": "operation : Chat_operation.t",
+  "record_uses_resolved_by_same_annotation": {
+    "operation.operation_id": 2,
+    "operation.execution_digest": 1
+  },
+  "existing_concurrency_tests_unchanged": true,
+  "product_ML_MLI_unchanged": true,
+  "parse_only": {
+    "command": [
+      "ocamlc",
+      "-stop-after",
+      "parsing",
+      "-c",
+      "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/perf-keeper-owner-projection-map-20261027/test/test_keeper_owner.ml",
+      "-o",
+      "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/owner-projection-map-ci-response-v1/test_keeper_owner.parsed"
+    ],
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  "whitespace_check": {
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  "project_typecheck_or_Alcotest": false,
+  "Dune_CI_native_HTTP": false,
+  "commit_or_push": false
+}

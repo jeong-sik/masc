@@ -6,6 +6,7 @@ module Session_store = Keeper_official_client_session_store
 type attempt_outcome =
   { result : (Runtime_agent.run_result, Agent_core.Error.t) result
   ; settled_session : Keeper_official_client_session_store.t option
+  ; pending_result_receipts : Keeper_client_tool_outbox.consumption option
   ; effect_disposition : Keeper_provider_attempt_effect.t
   }
 
@@ -376,7 +377,7 @@ let stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~tu
     }
 ;;
 
-let run_without_lifecycle ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
+let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~on_model_input_window_observation
     ~carried_front_seed
     ~librarian_front
@@ -389,6 +390,7 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
     ~observe_effect_attempted
     ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_completion
     ~on_usage_report ~on_tool_execution ~(config : Runtime_execution.antigravity_cli) =
+  on_results_ready None;
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
     Error
@@ -541,6 +543,8 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
         ~model_input_projection:None
         ~hooks:(Some hooks)
     in
+    let* tool_outbox = Keeper_client_tool_outbox.load ~base_path ~keeper_name
+      |> Result.map_error internal_error in
     (* Hooks may replace the system prompt or append an ordinary Nudge. Bind
        the final non-carried composition, and retain the mandatory workspace
        note after a system-prompt override. Hooks run once with the candidate
@@ -642,6 +646,10 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
         in
         Ok { prepared with messages }
     in
+    (* Original returned results are not history. A range shrink or caller
+       projection cannot erase them before a completed consumer ACKs them. *)
+    let prepared = {prepared with Host.messages = prepared.messages
+      @ Option.to_list (Keeper_client_tool_outbox.context_message tool_outbox)} in
     (* [Host.framed_prompt_for_turn] renders [prepared.system_prompt] as the
        system-instructions section; [Host.prepare_turn] has already refused a
        blank one, so the section is always present on a start (#33165). *)
@@ -768,8 +776,9 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
              config.effort)
         ()
     in
-    let* dynamic_tools =
+    let* (dynamic_tools, result_producer) =
       Host.dynamic_tools
+        ~result_scope:(Some result_scope)
         ~base_path
         ~content_transport:Runtime_official_client_tool.Mcp
         ~accepts_image_input
@@ -797,6 +806,12 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
         Host.finish_raw_error ~keeper_name raw_trace_run error;
         error)
     in
+    let produced_results = ref None in
+    let close_delivery_frontier () =
+      if Option.is_none !produced_results then
+        produced_results := Option.map Keeper_client_tool_outbox.close_delivery_frontier result_producer
+    in
+    let natural_completion = ref false in
     let dynamic_tools =
       List.map (antigravity_dynamic_tool ~observe_effect_attempted) dynamic_tools
     in
@@ -993,8 +1008,6 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
       let cleanup_error = ref None in
       let turn_result =
         Eio.Switch.run (fun sw ->
-          let abort_turn, resolve_abort_turn = Eio.Promise.create () in
-          let abort_turn_resolved = Atomic.make false in
           Eio.Switch.on_release sw (fun () ->
             match Eio.Cancel.protect (fun () -> Runtime_antigravity_home.clear_mcp_config home) with
             | Ok () -> ()
@@ -1006,6 +1019,9 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
               ~secure_random:(Eio.Stdenv.secure_random env)
               ~server_name:"masc"
               ~tool_specs:(fun () -> List.map tool_spec dynamic_tools)
+              ~tool_execution_mode:(fun ~name ~arguments ->
+                find_tool dynamic_tools name |> Option.map (fun (tool : Host.dynamic_tool) ->
+                  tool.execution_mode arguments))
               ~call_tool:(fun ~name ~call_id ~arguments ->
                 find_tool dynamic_tools name
                 |> Option.map (fun (tool : Host.dynamic_tool) ->
@@ -1014,21 +1030,12 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
                     ~finally:(fun () -> stream.on_tool_finished ~call_id)
                     (fun () ->
                       let result = tool.call ~call_id arguments in
+                      let on_response_sent =
+                        Runtime_official_client_tool.response_observer Mcp result in
                       { Runtime_official_client_mcp_http.outcome = tool_result result
-                      ; after_response_sent =
-                          (fun () ->
-                             Option.iter
-                               (fun detail ->
-                                  if
-                                    Atomic.compare_and_set
-                                      abort_turn_resolved
-                                      false
-                                      true
-                                  then
-                                    Eio.Promise.resolve
-                                      resolve_abort_turn
-                                      detail)
-                               result.abort_turn)
+                      ; stop = result.abort_turn
+                      ; after_response_sent = (fun () ->
+                          Runtime_official_client_tool.notify_response_sent on_response_sent)
                       })))
               ()
           in
@@ -1076,10 +1083,11 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
                         Host.record_context_submission ~keeper_name ~raw_trace_run
                           ~runtime_profile:runtime_id ~client_turn_ordinal:turn_count
                           ~submission:(Runtime_antigravity.context_submission_to_json write) ())
+                      ~on_terminal_received:close_delivery_frontier
                       ~on_stream_event:stream.on_runtime_event
                       client_config
                       ~prompt))
-              ~watcher:(fun () -> `Abort (Eio.Promise.await abort_turn))
+              ~watcher:(fun () -> `Abort (Runtime_official_client_mcp_http.await_host_stop bridge))
           with
           | `Runtime client_result ->
             client_result
@@ -1127,6 +1135,7 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
            | (Host.Repeated_tool_call _ | Host.Terminal_tool_boundary _), None ->
              settle_host_stop stop)
         | Ok (`Completed turn) ->
+          natural_completion := true;
           recovery_failure := Session_store.Protocol_failed;
           (match turn.trajectory_error with
            | None -> ()
@@ -1234,6 +1243,14 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
         settle_cancellation exn
     in
     let turn_result =
+      let* result = turn_result in
+      let produced = match !natural_completion with
+        | true -> Option.to_list !produced_results
+        | false -> [] in
+      on_results_ready (Some (Keeper_client_tool_outbox.pending_consumption (tool_outbox :: produced)));
+      Ok result
+    in
+    let turn_result =
       match turn_result with
       | Ok result -> Ok (Host.finish_raw_success ~keeper_name raw_trace_run result)
       | Error error ->
@@ -1273,6 +1290,8 @@ let run ~input_source ?argument_source ?official_task_reference ?composed_contex
     ?on_tool_execution
     ~event_bus ~raw_trace ~on_event ~config () =
   let settled_session = Atomic.make None in
+  let pending_result_receipts = Atomic.make None in
+  let on_results_ready value = Atomic.set pending_result_receipts value in
   let on_session_settled value = Atomic.set settled_session (Some value) in
   let effect_disposition =
     Atomic.make Keeper_provider_attempt_effect.No_effect_observed
@@ -1281,8 +1300,9 @@ let run ~input_source ?argument_source ?official_task_reference ?composed_contex
     Atomic.set effect_disposition Keeper_provider_attempt_effect.Effect_attempted
   in
   let result =
+    Eio.Switch.run (fun result_scope ->
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
-      run_without_lifecycle ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~official_client_continuation
+      run_without_lifecycle ~result_scope ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~official_client_continuation
         ~required_native_posture
         ~runtime_id
         ~keeper_name
@@ -1312,9 +1332,15 @@ let run ~input_source ?argument_source ?official_task_reference ?composed_contex
         ~raw_trace
         ~on_event
         ~observe_effect_attempted
-        ~config)
+        ~config))
   in
-  { result; settled_session = Atomic.get settled_session; effect_disposition = Atomic.get effect_disposition }
+  { result
+  ; settled_session = Atomic.get settled_session
+  ; pending_result_receipts = (match result with
+      | Ok _ -> Atomic.get pending_result_receipts
+      | Error _ -> None)
+  ; effect_disposition = Atomic.get effect_disposition
+  }
 ;;
 
 module For_testing = struct

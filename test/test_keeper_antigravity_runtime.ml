@@ -2154,10 +2154,83 @@ let test_operator_interrupt_preserves_previous_native_settlement () =
                     observed.turn_id resumed.turn_id)))))
 ;;
 
+let test_original_result_survives_a_vendor_session_change () =
+  let base_path = temp_workspace () |> Unix.realpath in
+  let saved = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore saved; cleanup_tree base_path)
+    (fun () ->
+      Unix.mkdir (Filename.concat base_path ".masc") 0o700;
+      let keeper_name = "antigravity-fixture" in
+      Masc_test_deps.declare_fixture_keeper ~base_path
+        ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) keeper_name;
+      let oauth_source = Filename.concat base_path "operator-oauth-token" in
+      write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "outbox-account");
+      let cli_path = fixture_script ~base_path in
+      let runtime_path = Filename.concat base_path "runtime.toml" in
+      write_file ~mode:0o600 runtime_path (runtime_toml ~cli_path ~oauth_source);
+      Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+        Eio_context.set_env env;
+        Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw (fun () ->
+          Fs_compat.set_fs env#fs;
+          Fun.protect ~finally:Fs_compat.clear_fs (fun () ->
+            let get = function Ok value -> value | Error detail -> fail detail in
+            Runtime.init_default ~config_path:runtime_path |> get;
+            let config = match Runtime.get_runtime_by_id "antigravity.gemini" with
+              | Some {Runtime_instance.execution=Runtime_execution.Antigravity_cli config;_} -> config
+              | Some _ | None -> fail "Antigravity fixture binding missing" in
+            let marker : Agent_core.Types.tool_param =
+              {name="marker";description="marker";param_type=String;required=true} in
+            let tool = Agent_core.Tool.create ~name:"masc_probe" ~description:"Fixture result"
+              ~parameters:[marker] (fun _ -> Ok
+                {Agent_core.Types.content="MASC_TOOL_RESULT";content_blocks=None;_meta=None}) in
+            let run () =
+              let attempt = Keeper_antigravity_runtime.run
+                ~input_source:(Keeper_request_source.Keeper_history {trace_id=keeper_name})
+                ~accepts_image_input:false ~runtime_id:"antigravity.gemini" ~keeper_name
+                ~pre_tool_rejects:(ref []) ~base_path ~goal:"Continue from the original result"
+                ~goal_blocks:None ~system_prompt:"Use retained result data without replaying completed effects."
+                ~tools:[tool] ~initial_messages:[]
+                ~model_input_projection:(Some (fun messages -> Ok (List.filter
+                  (fun message -> not (Keeper_client_tool_outbox.is_context_message message)) messages)))
+                ~turn_start:(Keeper_carried_front.Turn_boundary {end_atom=0})
+                ~on_transmitted_model_input:(fun _ -> ()) ~hooks:None ~context_injector:None
+                ~context:(Some (Agent_core.Context.create ())) ~event_bus:None ~raw_trace:None
+                ~on_event:None ~config () in
+              match attempt.result with
+              | Ok result ->
+                (match attempt.pending_result_receipts with
+                 | None -> ()
+                 | Some pending -> Keeper_client_tool_outbox.settle_consumption pending
+                     ~stop_reason:result.Runtime_agent.stop_reason |> get)
+              | Error error -> fail (Agent_core.Error.to_string error) in
+            let retain turn_id value = Keeper_client_tool_outbox.retain ~base_path ~keeper_name
+              {thread_id="original-codex-session";turn_id;call_id="original-call";
+               tool_name="Execute";arguments=`String "original-effect-no-replay";response=`String value}
+              |> get in
+            let count () = Keeper_client_tool_outbox.load ~base_path ~keeper_name
+              |> get |> Keeper_client_tool_outbox.receipt_ids |> List.length in
+            let prompt () = In_channel.with_open_bin
+              (Filename.concat base_path "antigravity-prompt.txt") In_channel.input_all in
+            retain "original-1" "ORIGINAL_RESULT_FOR_ANTIGRAVITY";
+            run ();
+            check bool "Start carries original other-runtime result" true
+              (String_util.contains_substring (prompt ()) "ORIGINAL_RESULT_FOR_ANTIGRAVITY");
+            check int "completed first consumer ACKs its original snapshot" 0 (count ());
+            Keeper_official_client_session_store.clear_then ~base_path ~keeper_name (fun () -> ()) |> get;
+            retain "original-2" "ORIGINAL_RESULT_FOR_REPLACEMENT";
+            run ();
+            check bool "a replacement session receives exact original result" true
+              (String_util.contains_substring (prompt ()) "ORIGINAL_RESULT_FOR_REPLACEMENT");
+            check int "completed replacement ACKs its loaded snapshot" 0 (count ()))))))
+;;
+
 let () =
   run
     "keeper_antigravity_runtime"
-    [ ( "lifecycle"
+    [ ( "async result outbox"
+        , [test_case "original result survives vendor session replacement" `Quick
+             test_original_result_survives_a_vendor_session_change])
+    ; ( "lifecycle"
         , [ test_case "projection refusal publishes no range" `Quick test_projection_refusal_emits_no_carried_observations
           ; test_case "actual argument Start and held Resume" `Quick test_actual_start_demotes_arguments_but_resume_keeps_them_held
           ; test_case "native policy failure releases its claim" `Quick

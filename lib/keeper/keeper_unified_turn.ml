@@ -379,9 +379,8 @@ let hitl_replay_yield_request ~base_path ~keeper_name =
    waiting behind a multi-hour autonomous run reproduced the measured 17+ min
    priority inversion. Pure decision, mirroring
    [hitl_replay_preemption_request] above: any pending [Connector_attention]
-   payload preempts. Self-exclusion is unnecessary for a different reason than
-   HITL's — the wake payloads of the source turn were consumed by selection,
-   so anything still in the queue arrived after this turn started. *)
+   payload in the supplied queue preempts. The source-turn caller must exclude
+   the exact admitted sources, which remain pending until settlement. *)
 let connector_attention_preemption_request ~now pending =
   let stimuli = Keeper_event_queue.to_list pending in
   match
@@ -449,50 +448,94 @@ let connector_attention_waiting ~base_path ~keeper_name =
   connector_attention_waiting_with_filter ~filter_pending ~base_path ~keeper_name
 ;;
 
-let make_autonomous_yield_probe ~sources ~on_attention_read ~wake ~base_path ~keeper_name =
+module Pending_source_keys = Set.Make (struct
+  type t = string * int64
+  let compare (left_ref, left_incarnation) (right_ref, right_incarnation) =
+    let order = String.compare left_ref right_ref in
+    if order = 0 then Int64.compare left_incarnation right_incarnation else order
+end)
+
+let pending_source_key (selection : Keeper_event_queue_state.pending_selection) =
+  Keeper_event_queue_state.source_snapshot_ref selection.source, selection.admitted_revision
+;;
+
+let pending_source_keys selections =
+  List.fold_left (fun keys selection ->
+    Pending_source_keys.add (pending_source_key selection) keys)
+    Pending_source_keys.empty selections
+;;
+
+let source_may_preempt = function
+  | Keeper_event_queue.Fusion_completed _ | Delegate_completed _
+  | Composition_completed _ | Tool_result_ready _ | Owned_job_completed _
+  | Addon_operation_changed _ | Workspace_message _ | Ask_answered _
+  | Completion_authority_rejected _ | Task_cancelled _ | Task_outcome _
+  | Connector_attention _ -> true
+  | Bootstrap | Board_signal _ | Board_attention _ | Schedule_due _
+  | Hitl_resolved _ -> false
+;;
+
+let make_autonomous_yield_probe ~on_attention_read ~wake ~sources ~base_path ~keeper_name =
   let filter_pending =
     make_connector_pointer_filter ~on_attention_read ~base_path ~keeper_name
   in
+  let admitted = pending_source_keys (Keeper_heartbeat_source_batch.selections sources) in
+  let observed = pending_source_keys (Keeper_heartbeat_source_batch.pending_at_intake sources) in
   match wake with
-  (* A nonempty [Woken] is the event queue input already selected for this
-     turn. It may yield for chat delivery. Two successors may preempt at a
-     persisted post-tool boundary: an approved Gate resolution whose grant is
-     still unspent (#28809 — the source may be the very checkpoint that
-     resolution continues). The selected source remains pending and resumes
-     after the preemptor. Other queued successors still wait for the source
-     terminal. *)
+  (* Only arrivals after the intake snapshot preempt a selected source. Existing
+     bounded backlog remains pending for later intake; it cannot force endless
+     checkpoint exchange. The exact admitted source also remains pending, and
+     cannot preempt itself. The unspent Gate continuation keeps its existing
+     exception because its producer may settle after intake. *)
   | Keeper_registry.Woken (_ :: _) ->
     fun () ->
-      let existing_preemptor =
-        match Keeper_chat_yield_request.request
-                ~turn:Keeper_chat_yield_request.Autonomous ~base_path ~keeper_name with
-        | Error _ as error -> error
-        | Ok (Some _) as request -> request
-        | Ok None ->
-          (match hitl_replay_yield_request ~base_path ~keeper_name with
-           | Error _ as error -> error
-           | Ok (Some _) as request -> request
-           | Ok None -> connector_attention_waiting_with_filter ~filter_pending
-               ~base_path ~keeper_name)
-      in
-      (match existing_preemptor with
-      | Error _ as error -> error
-      | Ok (Some _) as request -> request
-      | Ok None ->
-        (match Keeper_scheduled_turn_handoff.request
-                 ~excluding:sources ~base_path ~keeper_name with
-         | Error (Keeper_scheduled_turn_handoff.Owner_unavailable error) ->
-           Error (Keeper_owner_registry.command_error_to_string error)
-         | Error (Queue_unavailable detail) ->
-           Log.Keeper.warn ~keeper_name
-             "scheduled handoff unavailable; retaining source turn progress: %s" detail;
-           Ok None
-         | Ok [] -> Ok None
-         | Ok pending ->
-           let queue = List.fold_left (fun queue (source : Keeper_event_queue_state.pending_selection) ->
-             Keeper_event_queue.enqueue queue source.source) Keeper_event_queue.empty pending in
-           Ok (Some Keeper_agent_run.{ reason = Durable_stimulus_waiting
-             (durable_stimulus_summary ~now:(Time_compat.now ()) queue) })))
+      (match Keeper_chat_yield_request.request
+               ~turn:Keeper_chat_yield_request.Autonomous ~base_path ~keeper_name with
+       | Error _ as error -> error
+       | Ok (Some _) as request -> request
+       | Ok None ->
+         (match Keeper_event_queue_persistence.pending_selections_result ~base_path ~keeper_name with
+          | Error _ as error -> error
+          | Ok selections ->
+            let independent = List.filter (fun selection ->
+              not (Pending_source_keys.mem (pending_source_key selection) admitted)) selections in
+            let queue_of selections = List.fold_left
+              (fun queue (s : Keeper_event_queue_state.pending_selection) ->
+                Keeper_event_queue.enqueue queue s.source) Keeper_event_queue.empty selections in
+            let now = Time_compat.now () in
+            (match hitl_replay_preemption_request
+                     ~resolution_deliverable:(approved_resolution_deliverable ~base_path)
+                     ~now (queue_of independent) with
+             | Some _ as request -> Ok request
+             | None ->
+               let ready = independent
+                 |> List.filter (fun (s : Keeper_event_queue_state.pending_selection) ->
+                      source_may_preempt s.source.payload
+                      && not (Pending_source_keys.mem (pending_source_key s) observed)
+                      && Keeper_heartbeat_stimulus_intake.stimulus_ready_for_intake ~base_path s.source)
+                 |> queue_of |> filter_pending in
+               if Keeper_event_queue.is_empty ready then
+                 (* No new independent outcome: scheduled sources outside this
+                    turn's exact cohort still hand off at the post-tool boundary. *)
+                 (match Keeper_scheduled_turn_handoff.request
+                          ~excluding:(Keeper_heartbeat_source_batch.selections sources)
+                          ~base_path ~keeper_name with
+                  | Error (Keeper_scheduled_turn_handoff.Owner_unavailable error) ->
+                    Error (Keeper_owner_registry.command_error_to_string error)
+                  | Error (Queue_unavailable detail) ->
+                    Log.Keeper.warn ~keeper_name
+                      "scheduled handoff unavailable; retaining source turn progress: %s" detail;
+                    Ok None
+                  | Ok [] -> Ok None
+                  | Ok scheduled ->
+                    Ok (Some Keeper_agent_run.{ reason = Durable_stimulus_waiting
+                      (Keeper_agent_run.durable_stimulus_summary ~now:(Time_compat.now ())
+                         (queue_of scheduled)) }))
+               else
+                 let summary = Keeper_agent_run.durable_stimulus_summary ~now ready in
+                 Log.Keeper.info ~keeper_name "source turn yields to a new durable successor: %s"
+                   (Keeper_agent_run.durable_stimulus_summary_to_string summary);
+                 Ok (Some Keeper_agent_run.{reason=Durable_stimulus_waiting summary}))))
   | Keeper_registry.Proactive_tick | Keeper_registry.Woken [] ->
     fun () ->
       autonomous_yield_request_with_filter ~filter_pending ~base_path ~keeper_name
@@ -506,11 +549,11 @@ let make_autonomous_yield_probe ~sources ~on_attention_read ~wake ~base_path ~ke
 ;;
 
 module For_testing = struct
-  let autonomous_yield_probe ~wake ~base_path ~keeper_name =
+  let autonomous_yield_probe ~wake ~sources ~base_path ~keeper_name =
     let reads = ref 0 in
     let probe =
-      make_autonomous_yield_probe ~sources:[] ~on_attention_read:(fun () -> incr reads)
-        ~wake ~base_path ~keeper_name
+      make_autonomous_yield_probe ~on_attention_read:(fun () -> incr reads)
+        ~wake ~sources ~base_path ~keeper_name
     in
     probe, (fun () -> !reads)
 end
@@ -1236,10 +1279,9 @@ let run_keeper_cycle
                            }
                            ~yield_requested:
                              (make_autonomous_yield_probe
-                                ~sources:(Keeper_heartbeat_source_batch.selections
-                                  (Keeper_heartbeat_source_batch.sources turn_input))
                                 ~on_attention_read:(fun () -> ())
                                 ~wake
+                                ~sources:(Keeper_heartbeat_source_batch.sources turn_input)
                                 ~base_path:config.base_path
                                 ~keeper_name:meta.name)
                            ~initial_execution

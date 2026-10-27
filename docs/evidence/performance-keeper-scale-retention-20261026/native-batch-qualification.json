@@ -1,0 +1,69 @@
+{
+  "schema": "masc.native-batch-qualification-derivative.v1",
+  "application_source": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+  "binary_sha256": "06ee93c99b31a6fca6786c2c6a676c8023b62b0fc854da6616518c21202ad3a8",
+  "runner_sha256": "a6df19e949708fb6b44255e2a0623689c1ba9eb9e203c4a0eaf35f30ee537284",
+  "auditor_sha256": "be6b0a62cf36d7174f43d2ff282285e8eb151fe8fe25583ee41c8c35c5976f9b",
+  "local_packet": "artifacts/runs/extreme-perf-20261026/owned-concurrent-c3cb371-2x3-v3",
+  "workload": "2 Keepers x3 messages, 10ms scripted delay, first model requests held; fresh owned base and normal rate limits.",
+  "verdict": "PASS",
+  "operations": 6,
+  "actual_scripted_model_calls": 4,
+  "provider_peak": 2,
+  "held_members": 0,
+  "terminal_members": 4,
+  "member_rows_by_keeper": {
+    "scale-keeper-0000": [
+      {
+        "operation_id": "kmsg-a314e53624bf7ccce5cf8274cf6f4274",
+        "execution_id": "kmsg-a314e53624bf7ccce5cf8274cf6f4274",
+        "position": 0,
+        "admitted_digest": "6837f0b939c0a9dc1c4eec274c2777740e1e15e734983269e8f375469418a29d",
+        "admitted_input_json": null
+      },
+      {
+        "operation_id": "kmsg-b1eabb357d790e82a167b98829e68239",
+        "execution_id": "kmsg-a314e53624bf7ccce5cf8274cf6f4274",
+        "position": 1,
+        "admitted_digest": "ec99715414958395581e50b91e5c0c3467c11cb2fd17faadf96aebf8969f245d",
+        "admitted_input_json": null
+      }
+    ],
+    "scale-keeper-0001": [
+      {
+        "operation_id": "kmsg-66b227c2a157b70c92b8fbad994e5516",
+        "execution_id": "kmsg-66b227c2a157b70c92b8fbad994e5516",
+        "position": 0,
+        "admitted_digest": "f75e3cd7ec75b86ac59314525973588367a7852fc1a50ec7cce288a62c7fb6a6",
+        "admitted_input_json": null
+      },
+      {
+        "operation_id": "kmsg-fa40ea4fe62ab1d57905b26ab88da1e7",
+        "execution_id": "kmsg-66b227c2a157b70c92b8fbad994e5516",
+        "position": 1,
+        "admitted_digest": "5bf74f832787f113cb336daef49b594b4237fbf907404a721e4715b105f06304",
+        "admitted_input_json": null
+      }
+    ]
+  },
+  "cleanup": {
+    "server_returncode": 0,
+    "server_reaped": true,
+    "forced_kill": false,
+    "sampler_stopped": true,
+    "model_server_stopped": true,
+    "base_retained": true,
+    "provider_requests_drained": true,
+    "active_provider_requests": 0,
+    "provider_handler_threads": 0
+  },
+  "scope": "Terminal batch source/admission/member/merged execution digest and reply coverage passed in actual native. Held snapshot had zero members, so raw queued/public Running held projection remains source/Python evidence.",
+  "raw_sha256": {
+    "requests.jsonl": "eca67e1771c50b8522591eb9e5e5225a8cc71617a384194e66bc93854bf2f377",
+    "admission-snapshots.json": "5be0033e191532925cf21dc027a13f59caf828a7cf1cf4b9f7b0ff94e107beb9",
+    "durable-operations.json": "ea8f5757efad56950de4907c9807016ec00f10f6dc625297a2459cc62547015a",
+    "terminal.json": "1566cd761a8c84b7a1fff3129a97378214741214317af971a4292cf082a0925a",
+    "model-outcomes.jsonl": "aae894b42c7f9f5e59a9f8c7d380adfb70494e656283bd148a30f03117b81100",
+    "post-run-audit.json": "5b6336b184007b36cd206f5151a4c9990feb6f211e43e163b5d2210480d03586"
+  }
+}

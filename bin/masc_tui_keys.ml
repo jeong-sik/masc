@@ -661,7 +661,7 @@ let for_surface = function
       ; b Act "a" "exact: add slot"
           ~help:"add a candidate to the selected exact-output lane's walk order"
       ; b Act "Space" "activity"
-          ~help:"open Exact, Browser or machine activity settings; Space changes the draft, s saves explicitly; Required Exact lanes cannot be off"
+          ~help:"open Exact or machine activity settings; Space changes the draft, s saves explicitly; Required Exact lanes cannot be off"
       ; b Act "s" "exact: models"
           ~help:"edit the model order: r replaces the selected model/effort, \
                  a adds a fallback, 1 makes it first within its HTTP/CLI group, \
@@ -2347,8 +2347,6 @@ let help_sections_for_state (state : state) =
     if state.patch_modal_open then Some ("Patch review", patch_review_bindings)
     else if state.view = Lanes && Option.is_some state.exact_activity_open then
       Some ("Exact activity", exact_activity_bindings)
-    else if state.view = Lanes && Option.is_some state.browser_activity_open then
-      Some ("Browser activity", exact_activity_bindings)
     else if state.view = Lanes && Option.is_some state.machine_activity_open then
       Some ("Machine activity", exact_activity_bindings)
     else if Option.is_some state.voice_agent_voices then

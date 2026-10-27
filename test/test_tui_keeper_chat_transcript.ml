@@ -2955,7 +2955,55 @@ let test_provider_retry_progress_owner () =
   let settled = Transcript.model_activity t in
   feed t [event "claude" 0];
   check bool "terminal operation rejects late retry progress" true
-    (Transcript.model_activity t = settled)
+    (Transcript.model_activity t = settled);
+  List.iter (fun status ->
+    let observed = { retry with error_status = status; attempt=11; max_retries=0;
+                                observation_id="private-observation-sentinel" } in
+    let attempt : Runtime_native_tasks.attempt =
+      { routing_run_id="routing-run"; runtime_id="claude"; lane_attempt_index=0 } in
+    let delta = Live.Provider_retry_observed {attempt; retry=observed} in
+    let transcript = fresh () in
+    feed transcript [Live.Run_started;
+      Live.Runtime_attempt_started {runtime_id=Some "claude";attempt_index=Some 0};
+      delta; Live.Run_failed {message="The Keeper turn failed."}];
+    check bool "failure keeps the received typed retry as an observation" true
+      (Transcript.last_provider_retry_observation transcript = Some (attempt, observed));
+    let diagnostic = Transcript.drawn transcript |> List.find_map
+      (fun (item : Transcript.drawn_item) ->
+        if item.origin <> Transcript.Retry_observation_of_source then None
+        else match item.drawn with
+          | Drawn_status text -> Some text
+          | Drawn_thinking _ | Drawn_skill _ | Drawn_tools _ | Drawn_text _ | Drawn_media _
+          | Drawn_reply _ | Drawn_error _ -> None) in
+    let diagnostic = match diagnostic with
+      | Some text -> text
+      | None -> fail "typed retry observation has no diagnostic projection" in
+    check bool "private observation identity is not drawn in diagnostics" false
+      (contains ~needle:"private-observation-sentinel" diagnostic);
+    let later = { observed with error_status=Some 529; observation_id="later" } in
+    feed transcript [Live.Provider_retry_observed {attempt; retry=later}];
+    check bool "a late observation changes history without reopening progress" true
+      (Transcript.last_provider_retry_observation transcript = Some (attempt, later)
+       && Transcript.model_activity transcript = Some (Transcript.Activity_provider_retry observed)))
+    [Some 401; Some 403; Some 529; None; Some 0];
+  let log = Log.create ~keeper_name:"keeper.one" ~request_id:"req-1" ~started_at:origin in
+  let incremental = fresh () in
+  let add seq delta =
+    if Log.add ~at:origin log ~seq:(Some seq) delta then
+      Transcript.apply ~now:origin incremental delta in
+  add 1 Live.Run_started;
+  add 2 (Live.Runtime_attempt_started {runtime_id=Some "claude";attempt_index=Some 0});
+  add 3 (event "claude" 0);
+  let failure = Keeper_chat_operation.Failed {completed_at=origin +. 1.;
+    failure={kind=Turn_exception; detail="failed"; outcome_ref=None}} in
+  Log.observe_operation_state log (Some failure);
+  Transcript.reconcile_operation incremental failure;
+  add 4 (Live.Run_failed {message="The Keeper turn failed."});
+  add 5 (event "other" 0);
+  let replay = Transcript.of_log ~now:(origin +. 2.) log in
+  check bool "a record preceding the journal error preserves the same retry on replay" true
+    (Transcript.last_provider_retry_observation incremental =
+     Transcript.last_provider_retry_observation replay)
 ;;
 
 let test_terminal_reasoning_cannot_replace_response_state () =

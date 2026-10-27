@@ -1,0 +1,40 @@
+{
+  "schema": "masc.qualified-native-profile-reuse.v1",
+  "qualified_utc": "2026-10-26T16:33:57.726641+00:00",
+  "workflow": "Minimal manual checks",
+  "run_id": 40357511881,
+  "workflow_conclusion": "success",
+  "artifact_id": 12666114246,
+  "builder_source": "6a2d8dd6171e1d732ca15f918fb084e462e4d371",
+  "application_source": "55a0c7482fedece3f114fa8accb64a5084b1a796",
+  "archive_sha256": "4a384f03f4d0e7531921d33a172ff7a12caaed4a3cb458091dc5453a05c64535",
+  "server_sha256": "1d3da00a22f602005622af1f47442e1171f318e09dabc768123b946a4300f0cb",
+  "tui_sha256": "822b6436ea6e7f494b3e56598241a48a322b4dc523703608b9ac5ef1c7742559",
+  "native_suites": [
+    {
+      "suite": "test_tui_published_reports",
+      "suite_exit_code": 0,
+      "log_exit_code": 0
+    },
+    {
+      "suite": "test_tui_resource_document_search",
+      "suite_exit_code": 0,
+      "log_exit_code": 0
+    },
+    {
+      "suite": "test_tui_resource_image_admission",
+      "suite_exit_code": 0,
+      "log_exit_code": 0
+    },
+    {
+      "suite": "test_tui_resource_images",
+      "suite_exit_code": 0,
+      "log_exit_code": 0
+    }
+  ],
+  "actual_build_commit_commands_match": true,
+  "primary_installed": false,
+  "visible_ui": false,
+  "later_PR_head": "5428e9a53dca4c41791dc412b952f8cd60466e0f",
+  "later_delta": "Browser fixture actor strings only; do not identify this binary as the later head."
+}

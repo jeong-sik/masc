@@ -1540,6 +1540,7 @@ let readiness_handler _request reqd =
          [
            ("ready", `Bool true);
            ("phase", `String (Server_startup_state.phase_to_string current.phase));
+           ("pid", `Int (Unix.getpid ()));
          ])
       reqd
   else
@@ -1549,6 +1550,7 @@ let readiness_handler _request reqd =
            ("ready", `Bool false);
            ("phase", `String (Server_startup_state.phase_to_string current.phase));
            ("elapsed_sec", `Float (Server_startup_state.elapsed_since_start ()));
+           ("pid", `Int (Unix.getpid ()));
          ])
       reqd
 

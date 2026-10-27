@@ -20,13 +20,17 @@ let timed_with ~status ~verb ~path run =
   let started_ns = Mtime_clock.elapsed_ns () and started_cpu = Sys.time () in
   let result = run () in
   let elapsed_ns = Int64.sub (Mtime_clock.elapsed_ns ()) started_ns in
-  if Int64.compare elapsed_ns slow_report_ns >= 0 then
-    Log.Transport.info "http %s %s took %.0f ms elapsed, %.0f ms cpu: %s" verb
-      path (ms_of_ns elapsed_ns)
-      ((Sys.time () -. started_cpu) *. 1000.)
-      (match result with
-       | Ok answer -> Printf.sprintf "status %d" (status answer)
-       | Error detail -> detail);
+  if Int64.compare elapsed_ns slow_report_ns >= 0 then begin
+    let elapsed_ms = ms_of_ns elapsed_ns in
+    let cpu_ms = (Sys.time () -. started_cpu) *. 1000. in
+    match result with
+    | Ok answer ->
+      Log.Transport.info "http %s %s took %.0f ms elapsed, %.0f ms cpu: status %d"
+        verb path elapsed_ms cpu_ms (status answer)
+    | Error detail ->
+      Log.Transport.warn "http %s %s took %.0f ms elapsed, %.0f ms cpu: %s"
+        verb path elapsed_ms cpu_ms detail
+  end;
   result
 
 let timed ~verb ~path (run : unit -> (int * string, string) result) =

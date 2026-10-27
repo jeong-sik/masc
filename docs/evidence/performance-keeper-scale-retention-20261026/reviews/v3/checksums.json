@@ -1,0 +1,13 @@
+{
+  "README.md": "55f67d8c48e2de5c99f4e4a92b00cdedc4a3c6f4930fbcbe7d28978bcd7bcd9f",
+  "projection-check-result.json": "143e2bec8f8540ea382255c079f4eb721b9e90a9d11f7deeb0d43bf1345d6ef2",
+  "projection-check.py": "37ac90519c70fa1f6b6726b88dbb96cb005975158373f6e5e25a5d97ca90bede",
+  "projection-packet/principal.json": "41593a87b667ced2f86c309dc2a7c988c222ce1d2131733ca13fdd2809baa0e4",
+  "projection-packet/requests.jsonl": "b5b3c3fb8f3058dc0f3afb387a90afd7da61229ab22f537558d5bfe1ad034b3c",
+  "projection-packet/workload.json": "a0b55422530576c2fd2d99cb3b1a9123ec3823232260704654b3e38df19860d6",
+  "reviewed-delta.diff": "06c0ee130da45524d71e694253839124520755669a8c37a3b6eeca1443314699",
+  "reviewed-full.diff": "d40158cb9438fab13b8ce23776ec05421f6129bb032a763134a796654abce584",
+  "root-fault-receipt-audit.json": "d3ae7eb3f3cfed7f02b73b3f904a297a5a81074eb44a69ba2acc01fbf4ee6c54",
+  "source-manifest.json": "98ccdfeaf4aad0113bd93682798165f1ed701a11cfd56d9271b1e102a9d76259",
+  "verdict.json": "d54a385bb786c91dd425fda182155c00ed9ce28e3377aa4d473320a7529feee4"
+}

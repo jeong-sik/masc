@@ -213,7 +213,7 @@ let with_durable_intake
 let enqueue_unfenced ~base_path name stimulus =
   if Option.is_none (Keeper_registry.get ~base_path name)
   then
-    Log.Keeper.warn
+    Log.Keeper.info
       "registry: enqueue_event name=%s base_path=%s: keeper not registered; persisting stimulus for replay"
       name
       base_path;
@@ -690,6 +690,12 @@ let defer_pending_result ~base_path name ~selection =
     ~selection
     ~after_commit:(publish_pending ~base_path name)
     ()
+;;
+
+let retain_checkpoint_batch_result ~base_path name ~selections =
+  Keeper_event_queue_persistence.retain_checkpoint_batch_result
+    ~base_path ~keeper_name:name ~selections
+    ~after_commit:(publish_pending ~base_path name) ()
 ;;
 
 let peek_when_result ~base_path name ~now ~ready =

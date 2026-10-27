@@ -6,6 +6,10 @@ module R = Lane_addon_runtime
 module Lease = Native_addon_lease
 let ( let* ) = Result.bind
 let require = function Ok x -> x | Error s -> failwith s
+(* The package of the owned live Firefox source (addons/browser/firefox),
+   declared under its own id the way masc browser-lane-setup declares it. It
+   carries no Skill, so this probe checks no catalog entry for it. *)
+let package_id = "browser-firefox"
 let argument flag =
   let rec find = function
     | key::value::_ when key=flag -> value
@@ -35,9 +39,6 @@ let () =
   let firefox=Unix.realpath (argument "--firefox")
   and manifest=Unix.realpath (argument "--manifest")
   and fixture_url=argument "--fixture-url" in
-  let expected_skill_revision=In_channel.with_open_bin
-      (Filename.concat (Filename.dirname manifest) "skills/browser/SKILL.md") In_channel.input_all
-    |> Skill_reference.content_revision_of_source_text in
   output:=Unix.realpath (argument "--out");flush ();
   let base_path=Filename.temp_dir ~perms:0o700 "browser-addon-firefox-proof-" "" |> Unix.realpath in
   write (Filename.concat !output "workspace.txt") base_path;
@@ -60,7 +61,7 @@ let () =
   Unix.mkdir (Filename.concat base_path "fixture-skills") 0o700;
   let runtime_path=Filename.concat config_root "runtime.toml" in
   write runtime_path (Exact_output_fixture.official_client_runtime_fixture ^ Printf.sprintf
-    "\n[skills]\n[[skills.sources]]\nid=\"probe-local\"\nanchor=\"base-path\"\npath=\"fixture-skills\"\naccess=\"read-only\"\n[browser.automation]\nenabled=false\n[browser.stagehand]\nenabled=false\n[browser.live]\nenabled=true\n[browser.live.bidi]\nfirefox=%S\nprofile=%S\nport=%d\n"
+    "\n[skills]\n[[skills.sources]]\nid=\"probe-local\"\nanchor=\"base-path\"\npath=\"fixture-skills\"\naccess=\"read-only\"\n[browser.live.bidi]\nfirefox=%S\nprofile=%S\nport=%d\n"
     firefox profile port);
   require (Runtime.init_default ~config_path:runtime_path);
   Mirage_crypto_rng_unix.use_default ();
@@ -73,7 +74,7 @@ let () =
     let access=Lane_addon_sources.Operator_configuration in
     let principal=Lane_addon_call_context.Host_actor "firefox-addon-probe" in
     let directory=R.configuration_directory config in Fs_compat.mkdir_p directory;
-    let declaration=Filename.concat directory "browser.toml" in
+    let declaration=Filename.concat directory (package_id ^ ".toml") in
     let rec await work=match work () with Some result -> result
       | None -> Eio.Time.sleep clock 0.01;await work in
     ignore (record "publish the isolated workspace Skill configuration"
@@ -87,7 +88,7 @@ let () =
     R.start_configuration_service ~config ~sw ~clock;
     let attach () =
       write declaration (Printf.sprintf
-        "id=\"browser\"\nrun_id=\"firefox-probe\"\nmanifest_path=%S\nexact_outputs=[]\ntool_hooks=[\"validate_input\",\"validate_output\"]\n[binding]\nsources=[]\n" manifest);
+        "id=%S\nrun_id=\"firefox-probe\"\nmanifest_path=%S\nexact_outputs=[]\ntool_hooks=[\"validate_input\",\"validate_output\"]\n[binding]\nsources=[]\n" package_id manifest);
       let report=require (R.reconcile_configuration ~config ~directory) in
       let open Yojson.Safe.Util in
       if member "complete" report<>`Bool true || member "issues" report<>`List [] then
@@ -111,27 +112,11 @@ let () =
         | Some {phase=Attached|Observing|Detaching;_} -> None) in
     let first=attach () in
     ignore (record "attach starts the installed browser Addon" (Ok (`String first.instance_id)));
-    ignore (record "the real catalog publishes the browser package Skill"
-      (let* catalog=Server_skill_snapshot_runtime.lookup ~base_path
-         |> Result.map_error Server_skill_snapshot_runtime.error_to_string in
-       match catalog with
-       | Server_skill_snapshot_runtime.Ready {snapshot;_} ->
-         (match Skill_catalog_snapshot.find_effective_by_name snapshot "browser" with
-          | Some entry -> bool
-              ("catalog Skill has unexpected identity or content: " ^
-               Yojson.Safe.to_string (Skill_reference.to_yojson (Skill_catalog_snapshot.entry_reference entry)))
-              (Skill_reference.identity_source_id_to_string entry.identity=R.skill_source_id (R.Declaration "browser")
-               && Skill_reference.identity_package_id_to_string entry.identity="browser"
-               && entry.identity.name="browser"
-               && entry.directory="browser"
-               && Skill_reference.equal_content_revision entry.content_revision expected_skill_revision)
-          | None -> Error "browser package Skill is absent")
-       | Not_registered|Uninitialized -> Error "workspace Skill catalog is unavailable"));
     let host=require (Browser_addon_host.connect ~config ~access ~principal ~reserved:[]
       |> Result.map_error (function R.Unavailable s|Outcome_unknown s -> s
         | Host_refusal _ -> "probe principal refused")) in
     let client host =
-      let* snapshot=Browser_addon_host.snapshot host |> Result.map_error (function
+      let* snapshot=Browser_addon_host.snapshot host ~backend:Browser_lane.Backend.Owned_firefox |> Result.map_error (function
         Browser_addon_client.Unavailable s|Outcome_unknown s -> s) in
       match Yojson.Safe.Util.member "clients" snapshot with
       | `List [row] when string "transport" row=Some "webdriver_bidi" ->

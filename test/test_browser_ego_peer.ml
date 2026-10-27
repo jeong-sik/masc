@@ -107,6 +107,72 @@ let test_the_space_opens_by_name_and_is_held_by_number () =
       ~run:(fun ~window_s:_ _ -> failed "EGO_TASK_SPACE_NAME_IN_USE: masc") in
   check (result reject string) "ego's own refusal is kept" (Error "EGO_TASK_SPACE_NAME_IN_USE: masc") (Result.map ignore in_use)
 
+let space_owner = testable (fun out owner -> Format.pp_print_string out (match owner with
+  | Peer.Agent_owner -> "agent" | Handed_to_operator -> "handed to the operator" | Operator_owner -> "operator")) ( = )
+let spaces_failure = testable (fun out -> function
+  | Peer.Spaces_failed detail -> Format.fprintf out "failed: %s" detail
+  | Spaces_malformed detail -> Format.fprintf out "malformed: %s" detail) ( = )
+
+(* Opening a space by name makes it when it is not there, so the spaces are
+   read from ego's list, and the name is compared in masc: setup checks a
+   name this way before it leaves it in the table. *)
+let test_the_spaces_of_a_name_are_listed_without_opening_one () =
+  let script = Peer.task_spaces_script in
+  let lines = List.map String.trim (String.split_on_char '\n' script) in
+  check string "the step" "// masc-ego: spaces.list" (List.hd lines);
+  check bool "it lists the spaces" true (contains script "await listTaskSpaces()");
+  check bool "it opens no space" false (contains script "await taskSpace(");
+  let read value = match value with
+    | Ok output -> Peer.named_spaces ~space:"masc" output
+    | Error failure -> Error (Peer.Spaces_failed (Peer.run_failure_message failure)) in
+  let listed ?(name="masc") id ownership = obj ["spaceId",`Int id;"name",str name;"ownership",str ownership] in
+  check (result (list (pair int space_owner)) spaces_failure) "each space of that name, with its number and owner"
+    (Ok [36, Peer.Operator_owner; 42, Peer.Agent_owner; 32, Peer.Handed_to_operator])
+    (read (answered (`List [listed 36 "user"; listed ~name:"masc-keepers" 43 "user"; listed 42 "agent";
+      listed ~name:"Masc" 7 "user"; listed ~name:"other" 8 "team"; listed 32 "agentDelegatedToUser"])));
+  check (result (list (pair int space_owner)) spaces_failure) "no space of that name" (Ok []) (read (answered (`List [])));
+  List.iter (fun (label, output) -> check bool (label ^ " is an answer masc does not read") true
+      (match read output with Error (Peer.Spaces_malformed _) -> true | Ok _ | Error (Peer.Spaces_failed _) -> false))
+    [ "an owner masc does not know", answered (`List [listed 9 "team"]);
+      "a space without its number", answered (`List [obj ["name",str "masc";"ownership",str "user"]]);
+      "a space without its name", answered (`List [obj ["spaceId",`Int 9;"ownership",str "user"]]);
+      "a row that is not an object", answered (`List [`Null]);
+      "an answer that is not a list", answered `Null ];
+  check bool "a failure the frame caught is a listing that failed" true
+    (match read (failed "ego lite is not running") with Error (Peer.Spaces_failed _) -> true | Ok _ | Error (Peer.Spaces_malformed _) -> false);
+  let unknown = Peer.open_space ~run_native:(fun _ -> Error (Peer.Unstarted "no native command in this fixture"))
+      ~downloads:no_downloads ~now ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) ~space:"masc"
+      ~run:(fun ~window_s:_ _ -> answered (obj ["spaceId",`Int 9;"ownership",str "team"])) in
+  check bool "a connection still does not open on an owner masc does not know" true (Result.is_error unknown)
+
+(* The listing script itself, run by node with ego's listTaskSpaces stood in
+   by the shape the ego guide documents: ego's id becomes spaceId, every row
+   is passed on, and an ego without the list, or with no array, answers no
+   list instead of throwing. *)
+let test_the_listing_script_runs_under_node () =
+  let run ego =
+    let path = Filename.concat (capture_directory ()) "task-spaces.js" in
+    Out_channel.with_open_bin path (fun out ->
+      output_string out (ego ^ "\n(async () => {\n" ^ Peer.task_spaces_script ^ "\n})();\n"));
+    let channel = Unix.open_process_args_in "node" [| "node"; path |] in
+    let output = In_channel.input_all channel in
+    (match Unix.close_process_in channel with
+     | Unix.WEXITED 0 -> ()
+     | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> fail ("node did not run the listing script: " ^ output));
+    Peer.named_spaces ~space:"masc" output in
+  check (result (list (pair int space_owner)) spaces_failure) "the operator's space of exactly that name"
+    (Ok [36, Peer.Operator_owner])
+    (run (String.concat "\n" [
+      "globalThis.listTaskSpaces = async () => [";
+      "  {id: 36, name: 'masc', ownership: 'user', createdBy: 'user', state: 'active'},";
+      "  {id: 42, name: 'masc-keepers', ownership: 'agent', createdBy: 'agent'},";
+      "  {id: 7, name: 'Masc', ownership: 'user', createdBy: 'user'}];" ]));
+  List.iter (fun (label, ego) -> check bool (label ^ " is an answer masc does not read") true
+      (match run ego with Error (Peer.Spaces_malformed _) -> true | Ok _ | Error (Peer.Spaces_failed _) -> false))
+    [ "an ego without listTaskSpaces", "";
+      "a list that is not an array", "globalThis.listTaskSpaces = async () => ({});";
+      "a row that is not an object", "globalThis.listTaskSpaces = async () => [null];" ]
+
 (* A tab that left the listing loses its number: reading it is refused
    before any run, and the bookkeeping does not grow with every listing. *)
 let test_a_tab_that_left_the_listing_loses_its_number () =
@@ -429,8 +495,8 @@ let test_input_acts_through_the_shared_page_scripts () =
   check (pair int int) "the wheel's delta" (0, 120) (to_int (field "dx" wheel), to_int (field "dy" wheel));
   (* ego shows who acts and what beside its cursor. *)
   check string "an input with no actor is the agent's" "MASC · agent · scroll_at" (text (field "cursor" wheel));
-  (match dispatch peer ~actor:"keeper/sangsu" Live.Page_interact (interact_args (Lane.Click_at {point;viewport;button=Lane.Pointer.Primary})) with
-   | Ok _ -> check string "an input names its actor" "MASC · keeper/sangsu · click_at" (text (field "cursor" (last ()).args))
+  (match dispatch peer ~actor:"keeper/fixture-peer" Live.Page_interact (interact_args (Lane.Click_at {point;viewport;button=Lane.Pointer.Primary})) with
+   | Ok _ -> check string "an input names its actor" "MASC · keeper/fixture-peer · click_at" (text (field "cursor" (last ()).args))
    | other -> failf "a click with an actor was %s" (failure_kind other));
   (* Keys. *)
   by_step ["page.keyboard",(fun _ -> input_answer ())];
@@ -973,8 +1039,8 @@ let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
     (answer "ref click" (click (Lane.Target_ref 12)));
   check string "the dialog and URL checks come before native input" {|["info","url","click @12"]|} (seen ());
   check string "ego's click carries the cursor label" {|["MASC · agent · click"]|} (printed "labels ");
-  ignore (answer "named click" (on ~actor:"keeper/sangsu" (Lane.Click_target (Lane.Target_ref 12))));
-  check string "and names the actor" {|["MASC · keeper/sangsu · click"]|} (printed "labels ");
+  ignore (answer "named click" (on ~actor:"keeper/fixture-peer" (Lane.Click_target (Lane.Target_ref 12))));
+  check string "and names the actor" {|["MASC · keeper/fixture-peer · click"]|} (printed "labels ");
   ignore (answer "role" (click (Lane.Target_role {role="button";name="Say \"hi\"";exact=true})));
   check string "a role target is ego's role locator with a JSON name"
     {|["info","url","click loc=role:button[name=\"Say \\\"hi\\\"\"]"]|} (seen ());
@@ -1607,8 +1673,8 @@ let test_an_upload_through_a_file_chooser_answers_what_it_handed () =
     (List.map text (Yojson.Safe.Util.to_list (field "paths" (last ()))));
   check string "and the opener as given" "#attach" (text (field "opener" (last ())));
   check string "whose click is labelled" "MASC · agent · upload" (text (field "cursor" (last ())));
-  ignore (choose ~actor:"keeper/sangsu" paths);
-  check string "with the actor when there is one" "MASC · keeper/sangsu · upload" (text (field "cursor" (last ())));
+  ignore (choose ~actor:"keeper/fixture-peer" paths);
+  check string "with the actor when there is one" "MASC · keeper/fixture-peer · upload" (text (field "cursor" (last ())));
   Lane.Upload_lease.release snapshot;
   check bool "the copies outlive the upload's own scope" true (List.for_all Sys.file_exists paths);
   reply := (fun _ -> answered (obj ["error",`Null;"dialog",ego_dialog "alert" "uploaded";"tab",row]));
@@ -1846,6 +1912,8 @@ let () =
       test_case "native drag preserves release and failure boundaries" `Quick test_native_drag_and_release;
       test_case "chooser upload respects uncertain pointer release" `Quick test_chooser_upload_respects_uncertain_pointer_release;
       test_case "the space opens by name and is held by number" `Quick test_the_space_opens_by_name_and_is_held_by_number;
+      test_case "the spaces of a name are listed without opening one" `Quick test_the_spaces_of_a_name_are_listed_without_opening_one;
+      test_case "the listing script runs under node" `Quick test_the_listing_script_runs_under_node;
       test_case "tabs are numbered by page label" `Quick test_tabs_are_numbered_by_label;
       test_case "a tab that left the listing loses its number" `Quick test_a_tab_that_left_the_listing_loses_its_number;
       test_case "an ego error is cut" `Quick test_an_ego_error_is_cut;

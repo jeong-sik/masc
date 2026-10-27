@@ -92,8 +92,14 @@ let step_failure_message = function
    the operator, or the operator takes it over in ego; ego then stops every
    call on the space with EGO_TASK_SPACE_USER_IN_CONTROL until the agent
    takes it back. A space the operator made ("user") is theirs. *)
-let agent_ownership = "agent"
-let delegated_ownership = "agentDelegatedToUser"
+type space_owner = Agent_owner | Handed_to_operator | Operator_owner [@@deriving enumerate]
+let space_owner_to_wire = function
+  | Agent_owner -> "agent"
+  | Handed_to_operator -> "agentDelegatedToUser"
+  | Operator_owner -> "user"
+let space_owner_of_wire raw =
+  List.find_opt (fun owner -> String.equal (space_owner_to_wire owner) raw) all_of_space_owner
+let agent_ownership = space_owner_to_wire Agent_owner
 
 (* Who must hold the space for a script's body to run. Every step needs the
    agent to hold it, taking the space back needs the operator to, and
@@ -118,16 +124,28 @@ let held_by holder body = match holder with
    Node does not see the caller's environment. It writes exactly one answer
    line whatever happens inside. The first line names the step, for a test
    runner that stands in for ego. *)
-let script ~step ~space ~holder ~args body = String.concat "\n" ([
+let frame ~step ~args lines = String.concat "\n" ([
   "// masc-ego: " ^ step;
   "const emit = answer => console.log(" ^ Yojson.Safe.to_string (str result_marker) ^ " + JSON.stringify(answer));";
   "const args = " ^ Yojson.Safe.to_string args ^ ";";
-  "try {";
-  "  const task = await taskSpace(" ^ Yojson.Safe.to_string space ^ ");" ]
-  @ held_by holder body @ [
+  "try {" ]
+  @ lines @ [
   "} catch (error) {";
   "  emit({ok: false, error: String(error && error.message || error)});";
   "}" ])
+let script ~step ~space ~holder ~args body =
+  frame ~step ~args (("  const task = await taskSpace(" ^ Yojson.Safe.to_string space ^ ");") :: held_by holder body)
+
+(* taskSpace makes the space it does not find, so the spaces are read from
+   the list without opening one. Every row is passed on and the name is
+   compared here, so a row ego lists without a name is refused, not skipped;
+   an ego without the list answers no list. *)
+let task_spaces_script = frame ~step:"spaces.list" ~args:(obj []) [
+  "  const spaces = typeof listTaskSpaces === \"function\" ? await listTaskSpaces() : null;";
+  "  emit({ok: true, value: Array.isArray(spaces)";
+  "    ? spaces.map(space => space !== null && typeof space === \"object\"";
+  "        ? {spaceId: space.id, name: space.name, ownership: space.ownership} : space)";
+  "    : spaces});" ]
 
 let answer output =
   let marked = List.filter_map (fun line ->
@@ -145,6 +163,34 @@ let answer output =
       | Some (`Bool false), None, Some (`String error), Some (`Bool true) -> Error (Refused (head error))
       | Some (`Bool false), None, Some (`String error), None -> Error (Failed (head error))
       | _ -> Error (Unreadable "ego-browser nodejs answered outside its answer frame")
+
+type spaces_failure = Spaces_failed of string | Spaces_malformed of string
+let named_spaces ~space output =
+  let* value = match answer output with
+    | Ok value -> Ok value
+    (* ego threw inside the frame, for one that could not reach ego lite. *)
+    | Error (Failed detail) -> Error (Spaces_failed detail)
+    | Error (Unanswered failure) -> Error (Spaces_failed (run_failure_message failure))
+    | Error (Unreadable detail | Refused detail) -> Error (Spaces_malformed detail) in
+  let row = function
+    | `Assoc _ as listed ->
+      (match field "spaceId" listed, field "name" listed, field "ownership" listed with
+       | Some (`Int space_id), Some (`String name), Some (`String wire) ->
+         if not (String.equal name space) then Ok None
+         else (match space_owner_of_wire wire with
+          | Some owner -> Ok (Some (space_id, owner))
+          | None -> Error (Spaces_malformed (Printf.sprintf "ego named the owner of task space %d %S, which masc does not know" space_id wire)))
+       | _ -> Error (Spaces_malformed "ego listed a task space without its number, name and owner"))
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+      Error (Spaces_malformed "ego listed a task space that is not an object") in
+  match value with
+  | `List spaces ->
+    List.fold_right (fun listed spaces ->
+      let* spaces = spaces in
+      let* named = row listed in
+      Ok (match named with Some named -> named :: spaces | None -> spaces)) spaces (Ok [])
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ ->
+    Error (Spaces_malformed "ego answered the task spaces without a list")
 
 let asked run ~window_s ~step ~space ~holder ~args body = match run ~window_s (script ~step ~space ~holder ~args body) with
   | Error failure -> Error (Unanswered failure)
@@ -174,13 +220,14 @@ let open_space ~run ~run_native ~now ~space ~version ~capture_directory ~downloa
      connection opened while they hold it refuses every step until take_over,
      so a restart during a hand-off does not strand the space. *)
   match field "spaceId" opened, field "ownership" opened with
-  | Some (`Int space_id), Some (`String ownership)
-    when String.equal ownership agent_ownership || String.equal ownership delegated_ownership ->
-    Ok {run; run_native; now; space_id; version; capture_directory; downloads; published = Hashtbl.create 16;
-      uploads = Browser_lane.Upload_lease.create_owner ();
-      pointer_state=Released; pages=[]; next_tab=0; captures=0}
-  | Some (`Int _), Some (`String ownership) ->
-    Error (Printf.sprintf "ego task space %S belongs to %s, not to an agent" space ownership)
+  | Some (`Int space_id), Some (`String ownership) ->
+    (match space_owner_of_wire ownership with
+     | Some (Agent_owner | Handed_to_operator) ->
+       Ok {run; run_native; now; space_id; version; capture_directory; downloads; published = Hashtbl.create 16;
+         uploads = Browser_lane.Upload_lease.create_owner ();
+         pointer_state=Released; pages=[]; next_tab=0; captures=0}
+     | Some Operator_owner | None ->
+       Error (Printf.sprintf "ego task space %S belongs to %s, not to an agent" space ownership))
   | _ -> Error "ego answered the task space without its number and owner"
 
 (* The space's end closes its pages, so the files they were given are no

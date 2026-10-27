@@ -610,30 +610,57 @@ type batch_disposition =
   | Batch_ack_attention_only
   | Batch_no_action
 
-(* Retention is durable source bookkeeping. It does not prove a reply,
-   ignore, or other terminal effect and cannot authorize acknowledging input. *)
-let retain_connector_attention_sources ~base_path ~keeper_name selections =
-  List.iter
+type checkpoint_source_policy =
+  | Attention_delivered
+  | Preserve_and_rotate
+
+let checkpoint_source_policy : Keeper_event_queue.stimulus_payload -> checkpoint_source_policy = function
+  | Keeper_event_queue.Connector_attention _
+  | Keeper_event_queue.Fusion_completed _ | Keeper_event_queue.Delegate_completed _
+  | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Tool_result_ready _
+  | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _
+  | Keeper_event_queue.Workspace_message _ | Keeper_event_queue.Ask_answered _
+  | Keeper_event_queue.Completion_authority_rejected _ | Keeper_event_queue.Task_cancelled _
+  | Keeper_event_queue.Task_outcome _ -> Preserve_and_rotate
+  | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
+  | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Schedule_due _
+  | Keeper_event_queue.Hitl_resolved _ -> Attention_delivered
+;;
+
+let checkpoint_source_may_ack payload =
+  match checkpoint_source_policy payload with
+  | Attention_delivered -> true
+  | Preserve_and_rotate -> false
+;;
+
+(* A checkpoint can lose request-only context on provider/session replacement.
+   Keep original messages/results until a completed turn, and rotate retained
+   sources so old batches cannot exclude every later ready source. Connector
+   conversations move as a whole to preserve their unadmitted suffix's FIFO.
+   A failed rotation still retains the source; it never authorizes an ACK. *)
+let retain_checkpoint_continuations ~base_path ~keeper_name selections =
+  let selections = List.filter
     (fun (selection : Keeper_event_queue_state.pending_selection) ->
-       match selection.source.payload with
-       | Keeper_event_queue.Connector_attention _ ->
-         (match
-            Keeper_registry_event_queue.note_checkpoint_retention_result
-              ~base_path keeper_name ~selection ()
-          with
-          | Ok _ -> ()
-          | Error detail ->
-            Log.Keeper.error
-              "turn exit: connector attention retention failed event_id=%s keeper=%s: %s"
-              selection.source.post_id keeper_name detail)
-       | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
-       | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
-       | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Hitl_resolved _
-       | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _
-       | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
-       | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _
-       | Keeper_event_queue.Task_outcome _ -> ())
-    selections
+      match checkpoint_source_policy selection.source.payload with
+      | Attention_delivered -> false
+      | Preserve_and_rotate -> true)
+    selections in
+  let retained = match selections with
+    | [] -> Ok []
+    | _ :: _ -> Keeper_registry_event_queue.retain_checkpoint_batch_result
+        ~base_path keeper_name ~selections in
+  match retained with
+  | Error _ as error -> error
+  | Ok failures ->
+    List.iter (fun (selection, detail) ->
+        Log.Keeper.error
+          "turn exit: checkpoint continuation retention failed event_id=%s keeper=%s: %s"
+          selection.Keeper_event_queue_state.source.post_id keeper_name detail) failures;
+    match failures with
+    | [] -> Ok ()
+    | _ :: _ -> Error (String.concat "\n" (List.map
+        (fun (selection, detail) -> selection.Keeper_event_queue_state.source.post_id ^ ": " ^ detail)
+        failures))
 ;;
 
 let batch_disposition_of_cycle_outcome
@@ -691,8 +718,9 @@ let batch_disposition_of_cycle_outcome
        reached the model (edgar.a.poe, 2026-09-02, eight turns on one
        Execute; docs/audits/keeper-fleet-waiting-audit-20260902.md §13.4 in
        #32479). The ACK below still requires the HITL continuation receipt,
-       so an unconsumed grant is retained. Connector attention remains
-       pending until the resumed turn completes. *)
+       so an unconsumed grant is retained. Connector attention, messages and
+       producer/decision outcomes remain pending until a completed turn;
+       transiently observing an answer is not a durable consumer handoff. *)
     Batch_ack_attention_only
   | Some
       ( Cycle.Failed _
@@ -1425,25 +1453,18 @@ let run_keepalive_unified_turn
            | Batch_ack_completed ->
              remove_completed_selections ~should_ack:(fun _ -> true)
            | Batch_ack_attention_only ->
-             retain_connector_attention_sources
-               ~base_path:ctx.config.base_path
-               ~keeper_name:meta_after_triage.name
-               selections;
-             (* Connector sources remain pending until the terminal-receipt
-                path settles them. Already projected non-connector attention
-                still advances through its existing completion path. *)
+             (match retain_checkpoint_continuations
+                ~base_path:ctx.config.base_path
+                ~keeper_name:meta_after_triage.name selections with
+              | Ok () -> ()
+              | Error detail -> record_event_queue_failure
+                  ("checkpoint continuation retention failed: " ^ detail));
+             (* Source policy is shared with retention: a failed rotation
+                cannot turn an unread result/message into delivered attention. *)
              remove_completed_selections
                ~should_ack:(fun selection ->
-                 match selection.Keeper_event_queue_state.source.payload with
-                 | Keeper_event_queue.Connector_attention _ -> false
-                 | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
-                 | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
-                 | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Hitl_resolved _
-                 | Keeper_event_queue.Ask_answered _
-                 | Keeper_event_queue.Completion_authority_rejected _
-                 | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
-                 | Keeper_event_queue.Delegate_completed _
-                 | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _ | Keeper_event_queue.Task_outcome _ -> true)
+                 checkpoint_source_may_ack
+                   selection.Keeper_event_queue_state.source.payload)
            | Batch_no_action -> ());
       { meta = meta_after_cycle
       ; cycle_status =
@@ -2034,7 +2055,8 @@ module For_testing = struct
     record_replay_owned_turn_started_reactions
 
   let provider_wait_interrupt = provider_wait_interrupt
-  let retain_connector_attention_sources = retain_connector_attention_sources
+  let retain_checkpoint_continuations = retain_checkpoint_continuations
+  let checkpoint_source_may_ack = checkpoint_source_may_ack
   type deferred_lane_slot = Deferred_lane_slot.t
 
   type deferred_lane_now = Deferred_lane_slot.lane_now =

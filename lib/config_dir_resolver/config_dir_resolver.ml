@@ -430,7 +430,7 @@ let log_warnings ?(context = "ConfigDir") () =
      && claim_new_signature last_logged_signature signature
   then begin
     List.iter (fun warning ->
-        Log.warn ~ctx:context "%s" warning)
+        Log.Config.warn "[%s] %s" context warning)
       resolution.warnings
   end
 
@@ -467,7 +467,7 @@ let log_resolution ?(context = "ConfigDir") () =
     Printf.sprintf "source=%s path=%s%s" source item.path shadow_note
   in
   if claim_new_signature last_logged_resolution_signature signature
-  then Log.info ~ctx:context "resolved: %s" signature
+  then Log.Config.info "[%s] resolved: %s" context signature
 
 (* RFC-0121 — .masc/<sub> sub-directory accessors.
 

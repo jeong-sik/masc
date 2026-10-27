@@ -9,7 +9,7 @@ let execute_observability
   : unit
   =
   match action with
-  | Keeper_state_machine.Publish_lifecycle { event_name; detail } ->
+  | Keeper_state_machine.Log_lifecycle { event_name; detail } ->
     let phase_str = Keeper_state_machine.phase_to_string phase in
     Log.Keeper.emit
       Log.Info

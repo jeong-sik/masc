@@ -119,8 +119,9 @@ type hook = {
 }
 
 val register : name:string -> ?priority:int -> (unit -> unit) -> unit
-val run_registered_hooks : unit -> unit
-(** Run every hook registered with {!register}, in priority order.
+val run_registered_hooks : unit -> int
+(** Run every hook registered with {!register}, in priority order, and return
+    how many hooks failed.
 
     This is the cleanup core used by {!initiate}'s cleanup phase and by the
     inline server shutdown path in {!Shutdown_hooks}. Hook exceptions are logged

@@ -228,7 +228,10 @@ val call_exported_tool_with_principal : principal:Lane_addon_call_context.princi
   (Mcp_protocol.Mcp_types.tool_result, tool_call_error) result
 (** Trusted host boundary only: principal must come from verified credentials,
     never from caller-supplied tool arguments. [access] still controls visibility. *)
-type browser_service = private {instance_id:string;owner:Lane_addon_tool_export.owner}
+type browser_service = private {instance_id:string;owner:Lane_addon_tool_export.owner;
+  backend:Browser_lane.Backend.t}
+(** A running browser installation: its instance, the owner its export calls
+    run under, and the source its package serves. *)
 type browser_reading = { services : browser_service list; unready : Lane_addon_unready.t list }
 val browser_service_reading : config:Workspace.config -> access:Lane_addon_sources.access -> browser_reading
 (** Usable browser services and, from the same read, the visible browser
@@ -479,10 +482,20 @@ val tool_execution_snapshot : config:Workspace.config -> access:Lane_addon_sourc
     existing manager on its owner domain; no retained-store scan, worker RPC,
     reconciliation or model call. A later invocation still checks authority. *)
 
+val tool_execution_skill_owner : tool_execution -> skill_export_owner
+(** The owner the installation serving this export publishes its package
+    Skills under ({!skill_source_id}): its declaration, or the instance itself
+    for a manual attachment. *)
+
 val host_issue_to_json : host_issue -> Yojson.Safe.t
 (** The [issue] of an instance's [host_requests] in the inspect payload. *)
 
 module For_testing : sig
+  val browser_source_table :
+    Browser_configuration.t option -> backend:Browser_lane.Backend.t ->
+    'table Browser_configuration.source -> ('table, string) result
+  (** The table a browser worker starts its source from: [Error] when no
+      runtime.toml was loaded or it has no table for that source. *)
   type visibility = Shared | Operator_only | Keeper_only of string
   type 'service document_service =
     | Document_service of 'service
@@ -490,6 +503,11 @@ module For_testing : sig
     | Browser_narrower_than_consumer
         (** Every such browser is visible to fewer readers than the consumer's output. *)
     | Several_browser_services
+  val document_route_services :
+    services:'service list -> backend:('service -> Browser_lane.Backend.t) ->
+    lists:('service -> Browser_lane.client_id -> bool) -> Browser_lane.route -> ('service list, string) result
+  (** The browser services a [browser_document] read on a route may go to;
+      a client of a live source two services serve is refused. *)
   val choose_document_service :
     visibility:visibility -> ('service * visibility) list -> 'service document_service
   (** Which browser Add-on a [browser_document] source reads: only one whose
@@ -613,3 +631,16 @@ val observation_for_export :
     [name], without an RPC or starting a worker. No installation is [None];
     the refusal tells a starting or failed installation from one that is
     serving and not yet observed, and from an ambiguous name. *)
+type browser_observation = {
+  backend : Browser_lane.Backend.t;
+  observation : (export_observation option, export_refusal) result;
+}
+val browser_observations : config:Workspace.config -> access:Lane_addon_sources.access ->
+  browser_observation list
+(** The cached observations of the browser installations the caller may
+    read, found by their package's service and read per source they serve,
+    as {!observation_for_export} reads one export: two installations of one
+    source are [Ambiguous_installations] for that source only. A released
+    installation is left out, and a detaching incarnation gives way to its
+    replacement. Runs on the Lane
+    Add-on owner domain and waits for no browser command. *)

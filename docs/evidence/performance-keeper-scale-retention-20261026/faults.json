@@ -1,0 +1,169 @@
+{
+  "schema": "masc.keeper-scale-evidence.v3",
+  "harness_sha256": "a6df19e949708fb6b44255e2a0623689c1ba9eb9e203c4a0eaf35f30ee537284",
+  "fault_probe_sha256": "d8d2bb4540bd888ea89b96d9bfc275b5733cba339aa95a0b06845f0c418d2f4b",
+  "masc_processes_started": 0,
+  "cases": [
+    {
+      "case": "two original inputs sharing one owner-scoped admission ID",
+      "result": "rejected",
+      "error": "ProbeError",
+      "detail": "two original inputs share one authoritative Keeper operation identity"
+    },
+    {
+      "case": "duplicate original input with two operation IDs",
+      "result": "rejected",
+      "error": "ProbeError",
+      "detail": "original workload input occurs more than once"
+    },
+    {
+      "case": "same operation ID under two distinct owners",
+      "result": "preserved through pending/terminal/durable join"
+    },
+    {
+      "case": "reply missing second original sequence",
+      "result": "rejected",
+      "error": "ProbeError",
+      "detail": "full completed reply does not cover its exact original queued input"
+    },
+    {
+      "case": "reply belongs to other owner",
+      "result": "rejected",
+      "error": "ProbeError",
+      "detail": "full completed reply does not cover its exact original queued input"
+    },
+    {
+      "case": "public receipt has different operation ID",
+      "result": "rejected",
+      "error": "ProbeError",
+      "detail": "public operation identity differs from requested input"
+    },
+    {
+      "case": "duplicate durable rows do not collapse into a set",
+      "result": "rejected",
+      "error": "ProbeError",
+      "detail": "durable rows do not cover each exact original Keeper input"
+    },
+    {
+      "case": "held original payloads with merged leader and independent member digests",
+      "result": "accepted"
+    },
+    {
+      "case": "batch follower public state must project its Running leader",
+      "result": "rejected",
+      "error": "ProbeError",
+      "detail": "public original payload differs from exact SQLite snapshot"
+    },
+    {
+      "case": "source route drift",
+      "result": "rejected",
+      "error": "ProbeError",
+      "detail": "stored source/input/digests differ from original fixture input"
+    },
+    {
+      "case": "admission digest drift",
+      "result": "rejected",
+      "error": "ProbeError",
+      "detail": "stored source/input/digests differ from original fixture input"
+    },
+    {
+      "case": "leader digest incorrectly replaced by original digest",
+      "result": "rejected",
+      "error": "ProbeError",
+      "detail": "stored source/input/digests differ from original fixture input"
+    },
+    {
+      "case": "member original input drift",
+      "result": "rejected",
+      "error": "ProbeError",
+      "detail": "batch original input differs"
+    },
+    {
+      "case": "member position drift",
+      "result": "rejected",
+      "error": "ProbeError",
+      "detail": "batch is not a contiguous ordered prefix with its leader"
+    },
+    {
+      "case": "terminal cleared inputs preserve original admission and member digests",
+      "result": "accepted"
+    },
+    {
+      "case": "canonicalizer refuses non-ASCII extensions",
+      "result": "rejected",
+      "error": "ProbeError",
+      "detail": "payload canonicalizer requires ASCII fixture strings"
+    },
+    {
+      "case": "canonicalizer refuses float encoding assumptions",
+      "result": "rejected",
+      "error": "ProbeError",
+      "detail": "payload canonicalizer refuses non-fixture JSON types"
+    },
+    {
+      "case": "closed writable backup reopened read-only and exact full typed rows checked",
+      "result": "accepted",
+      "validation": {
+        "backup_path": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/keeper-scale-evidence-fault-thu2ndt2/backup.sqlite3",
+        "integrity_check": "ok",
+        "read_only_reopened": true,
+        "source_connection_closed": true,
+        "exact_typed_rows_equal": true,
+        "columns": [
+          "sequence",
+          "operation_id",
+          "state",
+          "started_at",
+          "completed_at",
+          "outcome_ref",
+          "failure_kind",
+          "extra"
+        ],
+        "row_count": 1,
+        "typed_rows_sha256": "72a5d0873c7a5fcb630e03c0043cecb0a530586778afa4e798c19b31e931fae0"
+      }
+    },
+    {
+      "case": "structurally valid backup with mismatched row",
+      "result": "rejected",
+      "error": "ProbeError",
+      "detail": "closed backup rows differ from closed source store"
+    },
+    {
+      "case": "equal numeric value with different SQLite type in unselected column",
+      "result": "rejected",
+      "error": "ProbeError",
+      "detail": "closed backup rows differ from closed source store"
+    },
+    {
+      "case": "corrupt closed backup",
+      "result": "rejected",
+      "error": "DatabaseError",
+      "detail": "file is not a database"
+    },
+    {
+      "case": "existing --output directory rejected without writing failure.json or cleanup.json",
+      "result": "rejected",
+      "error": "FileExistsError",
+      "preserved_files": [
+        "failure.json",
+        "summary.json"
+      ]
+    },
+    {
+      "case": "symlink --output rejected without touching target packet",
+      "result": "rejected",
+      "error": "ProbeError",
+      "detail": "output path must not be a symlink"
+    },
+    {
+      "case": "owned --output directory receives fallback failure.json and cleanup.json on post-mkdir failure",
+      "result": "accepted"
+    },
+    {
+      "case": "fallback on database failure preserves original DB/WAL/log bytes",
+      "result": "preserved"
+    }
+  ],
+  "passed": true
+}

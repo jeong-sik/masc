@@ -255,14 +255,12 @@ type plan =
   ; table : Browser_configuration.automation
   ; set : key list
   ; change : change
-  ; lane_enabled : bool
   ; notes : string list
   }
 
 let table plan = plan.table
 let change plan = plan.change
 let location plan = plan.location
-let lane_enabled plan = plan.lane_enabled
 let notes plan = plan.notes
 
 let plan ~find_geckodriver (request : request) =
@@ -305,7 +303,6 @@ let plan ~find_geckodriver (request : request) =
       ; table
       ; set
       ; change
-      ; lane_enabled = configuration.Browser_configuration.automation_enabled
       ; notes
       }
 
@@ -341,7 +338,6 @@ let replan previous =
     { previous with
       revision = Runtime_table_edit.revision_of_observation observation
     ; location
-    ; lane_enabled = configuration.Browser_configuration.automation_enabled
     }
 
 let apply plan =

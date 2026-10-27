@@ -44,14 +44,15 @@ let not_running ~complete applications (first, rest) =
   else if complete && List.for_all failed reasons then Browser_lane_launcher.Attach_failed
   else Browser_lane_launcher.Not_known
 
-(* A browser Add-on is a package whose worker serves the browser. With no
-   observation, the declarations say which absence it is: none declared, one
-   switched off, or one switched on that the reader sees no installation of. *)
-let absence ~applications (declarations : Lane_addon_config.snapshot) =
-  let browsers = List.filter (fun (d : Lane_addon_config.declaration) ->
-    match d.package.worker_service with
-    | Lane_addon_types.Browser_service -> true
-    | Lane_addon_types.Mcp_tools -> false) declarations.declarations in
+(* A browser Add-on of a lane is a package whose worker serves one of that
+   lane's sources. With no observation, the declarations say which absence it
+   is: none declared, one switched off, or one switched on that the reader
+   sees no installation of. *)
+let absence ~applications ~lane (declarations : Lane_addon_config.snapshot) =
+  let browsers = List.filter (fun d ->
+    match Lane_addon_config.browser_source d with
+    | Some backend -> Browser_lane.Backend.lane backend = lane
+    | None -> false) declarations.declarations in
   match List.filter (fun (d : Lane_addon_config.declaration) -> d.enabled) browsers,
         browsers, declarations.complete with
   | first :: rest, _, complete -> Not_running (not_running ~complete (applications ()) (first, rest))
@@ -60,14 +61,13 @@ let absence ~applications (declarations : Lane_addon_config.snapshot) =
   (* A declaration that could not be read may be a browser one switched on. *)
   | [], ([] | _ :: _), false -> Unavailable Declarations_incomplete
 
-let of_export ~declarations ~applications = function
-  | Error (Lane_addon_runtime.(Unready_installations _ | Not_yet_observed _ | Ambiguous_installations _)
-           as refusal) -> Unavailable (Refused refusal)
-  | Ok None -> absence ~applications declarations
-  | Ok (Some (snapshot : Lane_addon_runtime.export_observation)) ->
-      (match Browser_addon_observation.read snapshot.output with
-       | Ok published -> Observed published
-       | Error detail -> Unavailable (Observation_unreadable detail))
+type reading = {
+  observations : Lane_addon_runtime.browser_observation list;
+  declarations : Lane_addon_config.snapshot;
+  applications : unit -> Lane_addon_runtime.configuration_application list;
+}
+
+let of_observations ~declarations ~applications observations = {observations; declarations; applications}
 
 let read ~config ~access ~declarations =
   (* How each declaration was applied is operator metadata; another reader
@@ -75,9 +75,39 @@ let read ~config ~access ~declarations =
   let applications () = match access with
     | Lane_addon_sources.Operator_configuration -> (Lane_addon_runtime.inventory ~config).applications
     | Lane_addon_sources.Keeper _ | Lane_addon_sources.Unauthenticated -> [] in
-  Lane_addon_runtime.observation_for_export ~config ~access
-    ~name:Browser_addon_tool.definition.name
-  |> of_export ~declarations ~applications
+  of_observations ~declarations ~applications (Lane_addon_runtime.browser_observations ~config ~access)
+
+type published_or_not = Published of Browser_addon_observation.published | Unpublished | Withheld of unavailable
+let published_or_not = function
+  | Error refusal -> Withheld (Refused refusal)
+  | Ok None -> Unpublished
+  | Ok (Some (snapshot : Lane_addon_runtime.export_observation)) ->
+      (match Browser_addon_observation.read snapshot.output with
+       | Ok published -> Published published
+       | Error detail -> Withheld (Observation_unreadable detail))
+
+(* One lane reads the installations of its sources, one observation per
+   source: two installations of one source arrive as one ambiguous
+   observation. A source whose observation is withheld leaves out only what
+   it would publish, since the host cannot reach it either, and the lane
+   reads the others. Only when none of them published is the lane
+   unavailable, for the first withheld reason; the other lanes are read as
+   usual. *)
+let lane reading lane =
+  let read = List.filter_map (fun (observed : Lane_addon_runtime.browser_observation) ->
+    if Browser_lane.Backend.lane observed.backend = lane
+    then Some (observed.backend, published_or_not observed.observation) else None)
+    reading.observations in
+  let workers = List.map (fun (backend, read) -> backend, match read with
+    | Published published -> Some published | Unpublished | Withheld _ -> None) read in
+  if List.exists (fun (_, published) -> Option.is_some published) workers
+  then Observed (Browser_addon_observation.merge
+                   ~among:(List.map (fun (observed : Lane_addon_runtime.browser_observation) ->
+                     observed.backend) reading.observations) workers)
+  else match List.find_map (fun (_, read) -> match read with
+      | Withheld reason -> Some reason | Published _ | Unpublished -> None) read with
+    | Some reason -> Unavailable reason
+    | None -> absence ~applications:reading.applications ~lane reading.declarations
 
 let render_unavailable refusal_text = function
   | Refused refusal -> refusal_text refusal

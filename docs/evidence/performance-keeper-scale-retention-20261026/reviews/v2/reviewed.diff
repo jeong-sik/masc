@@ -1,0 +1,571 @@
+diff --git a/scripts/harness/perf/README-keeper-scale-session.md b/scripts/harness/perf/README-keeper-scale-session.md
+index 444986ac048..bbaa135e1de 100644
+--- a/scripts/harness/perf/README-keeper-scale-session.md
++++ b/scripts/harness/perf/README-keeper-scale-session.md
+@@ -39,7 +39,11 @@ its actual owner. Admission and terminal identities use `(Keeper, operation
+ ID)` pairs; two inputs cannot silently collapse to one operation. Closed
+ backups are reopened read-only, checked with `PRAGMA integrity_check` and
+ compared across all operation columns using their Python SQLite value types.
+-Provider handlers must drain and the owned process must be reaped.
++Provider handlers must drain and the owned process must be reaped. The original
++base remains under `OUTPUT/owned-base` on success and failure, including SQLite
++WAL files and runtime logs. Cleanup stops owned processes and listeners; it
++does not delete evidence. A failed backup or integrity check must preserve its
++source for diagnosis.
+ 
+ One admin producer encounters the existing server rate limiter. Only explicit
+ pre-dispatch HTTP 429 mutations are retried. Retry-After is honored; when it is
+@@ -55,8 +59,8 @@ keep the packet local rather than committing it. `owned-process.json` and
+ `workload-phases.jsonl` support a separate read-only profiler. Such observers
+ add overhead and their success/failure is independent of workload completion.
+ 
+-New packets declare `masc.keeper-scale-evidence.v2`. Validate the evidence
+-boundary without launching MASC, or independently audit a completed v2 packet:
++New packets declare `masc.keeper-scale-evidence.v3`. Validate the evidence
++boundary without launching MASC, or independently audit a completed v3 packet:
+ 
+ ```sh
+ python3 scripts/harness/perf/keeper_scale_fault_probe.py \
+@@ -64,10 +68,22 @@ python3 scripts/harness/perf/keeper_scale_fault_probe.py \
+ python3 scripts/harness/perf/keeper_scale_packet_audit.py /tmp/keeper-session-new
+ ```
+ 
+-The fault probe covers duplicate identities/inputs, ownership, missing replies
+-and corrupt or changed backups. The independent reader writes derived audit
++Before provider release, a single SQLite read transaction per Keeper records
++all operation columns and batch membership together. Original source/input
++bytes and admission/execution/member digests are checked against the exact
++submitted text and the isolated dashboard principal. The canonical byte check
++is restricted to this ASCII, null, object and list fixture, with no floats; it
++is not a general Python/Yojson equivalence claim. Merged batch leaders and
++cleared terminal inputs follow their distinct producer rules. The independent
++reader reconstructs inputs from the workload and raw successful RPC requests,
++then reopens both the retained original and backup databases. This additional
++held observation cost belongs to the experiment, not released throughput.
++
++The fault probe covers duplicate identities/inputs, ownership, missing replies,
++corrupt or changed backups, original payload/digest/batch drift and failure
++preservation of original DB/WAL/log bytes. The independent reader writes derived audit
+ reports while preserving raw receipts and the original workload verdict. It
+-accepts v2 only; older packets retain their frozen original readers and results.
++accepts v3 only; older packets retain their frozen original readers and results.
+ 
+ Report held, released and settled phases separately. Creation-to-completion
+ includes deliberate provider hold, admission pacing, queueing and runtime
+diff --git a/scripts/harness/perf/keeper_scale_fault_probe.py b/scripts/harness/perf/keeper_scale_fault_probe.py
+index c404d0bb259..da3aa9e1f4d 100644
+--- a/scripts/harness/perf/keeper_scale_fault_probe.py
++++ b/scripts/harness/perf/keeper_scale_fault_probe.py
+@@ -63,6 +63,61 @@ def main():
+     reject("duplicate durable rows do not collapse into a set", lambda: harness.validate_durable_operations(
+         [a, b], ["owner-a", "owner-b"], duplicate_rows, terminal, "fixture"))
+ 
++    originals = [operation("owner-a", sequence, "op-" + str(sequence)) for sequence in (1, 2, 3)]
++    snapshot = {"operations": {"columns": [], "rows": []},
++                "operation_batch_members": {"columns": [], "rows": []}}
++    public_held = {}
++    for sequence, op in enumerate(originals):
++        op["original"] = harness.original_payload(op["keeper"], "fixture-" + str(op["sequence"]))
++        payload = op["original"]
++        snapshot["operations"]["rows"].append({"operation_id": op["operation_id"], "sequence": sequence,
++            "created_at": 0.0, "state": "queued", "source_json": harness.canonical_payload(payload["source"]),
++            "input_json": harness.canonical_payload(payload["input"]),
++            "admission_digest": harness.payload_digest(payload), "execution_digest": harness.payload_digest(payload["input"])})
++    # A running batch leader has a merged execution input while every member
++    # retains its original admission digest. A third operation is unbatched.
++    merged = {**originals[0]["original"]["input"], "message": "fixture-1\n\nfixture-2",
++        "user_blocks": [{"type": "text", "text": "fixture-1"}, {"type": "text", "text": "fixture-2"}]}
++    snapshot["operations"]["rows"][0].update(state="running", input_json=harness.canonical_payload(merged),
++        execution_digest=harness.payload_digest(merged))
++    for position, op in enumerate(originals[:2]):
++        snapshot["operation_batch_members"]["rows"].append({"operation_id": op["operation_id"],
++            "execution_id": "op-1", "position": position,
++            "admitted_digest": harness.payload_digest(op["original"]["input"]),
++            "admitted_input_json": harness.canonical_payload(op["original"]["input"])})
++    for op, stored in zip(originals, snapshot["operations"]["rows"]):
++        status = {"operation_id": op["operation_id"], "source": op["original"]["source"],
++            "input": json.loads(stored["input_json"]), "sequence": str(stored["sequence"]),
++            "created_at": stored["created_at"], "state": stored["state"].capitalize(),
++            "admission_digest": stored["admission_digest"], "execution_digest": stored["execution_digest"]}
++        if op in originals[:2]:
++            status.update(batch_execution_id="op-1", batch_input_digest=harness.payload_digest(op["original"]["input"]))
++        public_held[harness.operation_key(op)] = status
++    snapshots = [{"keeper": "owner-a", "snapshot": snapshot}]
++    harness.validate_original_payloads(originals, snapshots, public_held, terminal=False)
++    cases.append({"case": "held original payloads with merged leader and independent member digests", "result": "accepted"})
++    for label, change in [
++        ("source route drift", lambda data: data[0]["snapshot"]["operations"]["rows"][0].update(source_json='{}')),
++        ("admission digest drift", lambda data: data[0]["snapshot"]["operations"]["rows"][0].update(admission_digest="0" * 64)),
++        ("leader digest incorrectly replaced by original digest", lambda data: data[0]["snapshot"]["operations"]["rows"][0].update(
++            execution_digest=harness.payload_digest(originals[0]["original"]["input"]))),
++        ("member original input drift", lambda data: data[0]["snapshot"]["operation_batch_members"]["rows"][1].update(admitted_input_json='{}')),
++        ("member position drift", lambda data: data[0]["snapshot"]["operation_batch_members"]["rows"][1].update(position=0))]:
++        damaged = copy.deepcopy(snapshots)
++        change(damaged)
++        reject(label, lambda: harness.validate_original_payloads(originals, damaged, public_held, terminal=False))
++    terminal_snapshot, public_terminal = copy.deepcopy(snapshots), copy.deepcopy(public_held)
++    for stored in terminal_snapshot[0]["snapshot"]["operations"]["rows"]:
++        stored.update(state="succeeded", input_json=None)
++    for member in terminal_snapshot[0]["snapshot"]["operation_batch_members"]["rows"]:
++        member["admitted_input_json"] = None
++    for status in public_terminal.values():
++        status.update(state="Succeeded", input=None)
++    harness.validate_original_payloads(originals, terminal_snapshot, public_terminal, terminal=True)
++    cases.append({"case": "terminal cleared inputs preserve original admission and member digests", "result": "accepted"})
++    reject("canonicalizer refuses non-ASCII extensions", lambda: harness.canonical_payload({"text": "한글"}))
++    reject("canonicalizer refuses float encoding assumptions", lambda: harness.canonical_payload({"value": 1.0}))
++
+     with tempfile.TemporaryDirectory(prefix="keeper-scale-evidence-fault-") as directory:
+         base = Path(directory)
+         source, backup = base / "source.sqlite3", base / "backup.sqlite3"
+@@ -149,6 +204,31 @@ def main():
+         else:
+             raise AssertionError("missing --binary was accepted")
+ 
++        failed_out = base / "owned-database-failure"
++        evidence = {"chat-operations.sqlite3": b"damaged database", "chat-operations.sqlite3-wal": b"wal bytes",
++                    "runtime.log": b"original runtime evidence"}
++
++        def damaged_store_run(args, owner):
++            args.output.mkdir()
++            owner["output"] = args.output
++            owned_base = args.output / "owned-base"
++            owned_base.mkdir()
++            owner["base"] = owned_base
++            for name, content in evidence.items():
++                (owned_base / name).write_bytes(content)
++            raise sqlite3.DatabaseError("injected integrity/copy failure")
++
++        with mock.patch.object(harness, "run", damaged_store_run):
++            try:
++                run_main_with_argv(failed_out)
++            except sqlite3.DatabaseError:
++                assert {p.name: p.read_bytes() for p in (failed_out / "owned-base").iterdir()} == evidence
++                assert json.loads((failed_out / "cleanup.json").read_text())["base_retained"] is True
++                assert json.loads((failed_out / "failure.json").read_text())["type"] == "DatabaseError"
++                cases.append({"case": "fallback on database failure preserves original DB/WAL/log bytes", "result": "preserved"})
++            else:
++                raise AssertionError("database failure was swallowed")
++
+     report = {"schema": harness.EVIDENCE_SCHEMA, "harness_sha256": harness.digest(Path(harness.__file__)),
+               "fault_probe_sha256": harness.digest(Path(__file__)), "masc_processes_started": 0, "cases": cases, "passed": True}
+     args.output.parent.mkdir(parents=True, exist_ok=True)
+diff --git a/scripts/harness/perf/keeper_scale_packet_audit.py b/scripts/harness/perf/keeper_scale_packet_audit.py
+index 08d5be740cf..b71ea2266e9 100644
+--- a/scripts/harness/perf/keeper_scale_packet_audit.py
++++ b/scripts/harness/perf/keeper_scale_packet_audit.py
+@@ -1,5 +1,5 @@
+ #!/usr/bin/env python3
+-"""Audit evidence v2 only; never rewrites original workload receipts/verdicts."""
++"""Audit evidence v3 only; never rewrites original workload receipts/verdicts."""
+ import collections
+ from contextlib import closing
+ import datetime
+@@ -11,7 +11,7 @@ import sqlite3
+ import sys
+ 
+ 
+-EVIDENCE_SCHEMA = "masc.keeper-scale-evidence.v2"
++EVIDENCE_SCHEMA = "masc.keeper-scale-evidence.v3"
+ 
+ 
+ def read(path):
+@@ -58,9 +58,133 @@ def objects(value):
+                 yield from objects(child)
+ 
+ 
++def rpc_result(request):
++    body = request["body_utf8"]
++    try:
++        documents = [json.loads(body)]
++    except ValueError:
++        documents = [json.loads("\n".join(line[5:].lstrip() for line in block.splitlines()
++            if line.startswith("data:"))) for block in body.replace("\r\n", "\n").split("\n\n")
++            if any(line.startswith("data:") for line in block.splitlines())]
++    matches = [item for item in documents if item.get("id") == request["payload"]["id"]]
++    assert len(matches) == 1 and "error" not in matches[0]
++    assert matches[0]["result"].get("isError", False) is False
++    return matches[0]["result"]
++
++
++def audit_original_payloads(packet, admitted, snapshots, public, terminal):
++    workload = read(packet / "workload.json")
++    assert read(packet / "principal.json") == {"actor": "dashboard", "role": "admin"}
++    originals = {}
++    requests = lines(packet / "requests.jsonl")
++    enqueues = [item for item in requests
++                if item.get("phase") == "enqueue" and item.get("status") == 200]
++    assert len(enqueues) == len(admitted)
++    for op, request in zip(admitted, enqueues):
++        name, sequence = op["keeper"], op["sequence"]
++        message = json.dumps({"schema": "masc.keeper-scale-input.v1", "marker": workload["marker"],
++                              "keeper": name, "sequence": sequence}, sort_keys=True)
++        assert request["payload"]["params"] == {"name": "masc_keeper_msg", "arguments": {"name": name, "message": message}}
++        acceptances = [item for item in objects(rpc_result(request))
++                       if set(item) == {"operation_id", "state", "queued_count", "existing"}]
++        assert acceptances and all(item["operation_id"] == op["operation_id"] and item["existing"] is False
++                                   for item in acceptances)
++        thread = "keeper:" + name
++        source = {"schema": "masc.keeper_chat_operation.source.v2", "submitted_by": "dashboard",
++            "thread_id": thread, "continuation_channel": {"kind": "dashboard", "thread_id": thread},
++            "surface": {"kind": "agent"}, "channel": "agent", "channel_user_id": "",
++            "channel_user_name": "", "channel_workspace_id": "", "conversation_id": None,
++            "external_message_id": None, "workspace_id": None, "extra_mentions": [],
++            "sender_keeper": None, "user_row_origin": "needs_append"}
++        input_ = {"schema": "masc.keeper_chat_operation.input.v1", "message": message,
++                  "user_blocks": [], "attachments": [], "turn_instructions": None, "surface_context": None}
++        originals[(name, op["operation_id"])] = {"source": source, "input": input_}
++        assert op["original"] == originals[(name, op["operation_id"])]
++    observations = collections.defaultdict(list)
++    for request in requests:
++        if request.get("phase") != ("settlement" if terminal else "queue-held") or request.get("status") != 200:
++            continue
++        arguments = request["payload"]["params"]["arguments"]
++        assert request["payload"]["params"]["name"] == "masc_keeper_delegate_status"
++        key = arguments["target"]["name"], arguments["operation_id"]
++        observations[key].extend(item for item in objects(rpc_result(request))
++            if item.get("schema") == "masc.keeper_chat_operation.v1")
++    assert all(status in observations[key] for key, status in public.items())
++
++    def encoded(value):
++        # Only independently reconstructed ASCII/null/list/object fixture
++        # values are encoded here; this is not a general Yojson codec.
++        result = json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
++        assert result.isascii()
++        return result
++
++    def hashed(value):
++        return hashlib.sha256(encoded(value).encode()).hexdigest()
++
++    seen = set()
++    for entry in snapshots:
++        name = entry["keeper"]
++        tables = entry["snapshot"]
++        if terminal:
++            # Resolve the actual recorded owner path within the retained base.
++            assert pathlib.Path(entry["source_path"]).is_relative_to(packet / "owned-base" / ".masc")
++            retained = pathlib.Path(entry["source_path"])
++            assert retained.parent.name == name
++            for database in [retained, packet / "durable" / name / "chat-operations.sqlite3"]:
++                with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as conn:
++                    assert conn.execute("PRAGMA integrity_check").fetchall() == [("ok",)]
++                    conn.row_factory = sqlite3.Row
++                    conn.execute("BEGIN")
++                    for table, order in [("operations", "sequence"), ("operation_batch_members", "execution_id,position")]:
++                        cursor = conn.execute("SELECT * FROM " + table + " ORDER BY " + order)
++                        columns = [item[0] for item in cursor.description]
++                        rows = [dict(row) for row in cursor]
++                        assert columns == tables[table]["columns"]
++                        assert full_typed_digest(columns, rows) == full_typed_digest(columns, tables[table]["rows"])
++                    conn.rollback()
++        rows = {row["operation_id"]: row for row in tables["operations"]["rows"]}
++        assert len(rows) == len(tables["operations"]["rows"])
++        owned = {key[1]: value for key, value in originals.items() if key[0] == name}
++        assert set(rows) == set(owned)
++        membership, groups = {}, collections.defaultdict(list)
++        for member in tables["operation_batch_members"]["rows"]:
++            opid = member["operation_id"]
++            assert opid in rows and opid not in membership and member["execution_id"] in rows
++            membership[opid] = member
++            groups[member["execution_id"]].append(member)
++            assert member["admitted_digest"] == hashed(owned[opid]["input"])
++            assert member["admitted_input_json"] == (None if terminal else encoded(owned[opid]["input"]))
++        executions = {opid: original["input"] for opid, original in owned.items()}
++        for leader, group in groups.items():
++            group.sort(key=lambda item: item["position"])
++            assert len(group) >= 2 and group[0]["operation_id"] == leader
++            assert [item["position"] for item in group] == list(range(len(group)))
++            sequence = [rows[item["operation_id"]]["sequence"] for item in group]
++            assert sequence == list(range(sequence[0], sequence[0] + len(group)))
++            inputs = [owned[item["operation_id"]]["input"] for item in group]
++            executions[leader] = {**inputs[0], "message": "\n\n".join(item["message"] for item in inputs),
++                "user_blocks": [{"type": "text", "text": item["message"]} for item in inputs]}
++        for opid, row in rows.items():
++            key = name, opid
++            assert key not in seen
++            seen.add(key)
++            original, status = owned[opid], public[key]
++            assert row["source_json"] == encoded(original["source"])
++            assert row["admission_digest"] == hashed(original)
++            assert row["execution_digest"] == hashed(executions[opid])
++            assert row["input_json"] == (None if terminal else encoded(executions[opid]))
++            assert status["source"] == original["source"] and status["input"] == (None if terminal else executions[opid])
++            assert all(status[field] == row[field] for field in ["admission_digest", "execution_digest", "created_at"])
++            assert status["sequence"] == str(row["sequence"]) and status["state"].lower() == row["state"]
++            member = membership.get(opid)
++            assert status.get("batch_execution_id") == (None if member is None else member["execution_id"])
++            assert status.get("batch_input_digest") == (None if member is None else member["admitted_digest"])
++    assert seen == set(originals)
++
++
+ def audit(packet):
+     identity = read(packet / "identity.json")
+-    assert identity["evidence_schema"] == EVIDENCE_SCHEMA, "reader requires explicitly versioned v2 evidence"
++    assert identity["evidence_schema"] == EVIDENCE_SCHEMA, "reader requires explicitly versioned v3 evidence"
+     assert sha(packet / "masc-installed-copy") == identity["sha256"]
+     assert sha(packet / "keeper_scale_session.py") == identity["runner_sha256"]
+     workload = read(packet / "workload.json")
+@@ -167,8 +291,15 @@ def audit(packet):
+     assert not unclassified, unclassified
+     cleanup = read(packet / "cleanup.json")
+     assert cleanup == {"server_returncode": 0, "server_reaped": True, "forced_kill": False,
+-        "sampler_stopped": True, "model_server_stopped": True, "base_removed": True,
++        "sampler_stopped": True, "model_server_stopped": True, "base_retained": True,
++        "base_path": str(packet / "owned-base"),
+         "provider_requests_drained": True, "active_provider_requests": 0, "provider_handler_threads": 0}
++    assert pathlib.Path(identity["base"]) == packet / "owned-base"
++    assert (packet / "owned-base").is_dir()
++    audit_original_payloads(packet, admitted, read(packet / "admission-snapshots.json"),
++        {(item["keeper"], item["status"]["operation_id"]): item["status"]
++         for item in read(packet / "queue-held.json")}, terminal=False)
++    audit_original_payloads(packet, admitted, durable, terminal, terminal=True)
+     requests = lines(packet / "requests.jsonl")
+     waits = lines(packet / "rate-limit-waits.jsonl")
+     intervals = lines(packet / "rpc-intervals.jsonl")
+@@ -272,6 +403,6 @@ def audit(packet):
+ 
+ if __name__ == "__main__":
+     if len(sys.argv) < 2:
+-        raise SystemExit("usage: keeper_scale_packet_audit.py EVIDENCE_V2_PACKET [PACKET ...]")
++        raise SystemExit("usage: keeper_scale_packet_audit.py EVIDENCE_V3_PACKET [PACKET ...]")
+     for name in sys.argv[1:]:
+         audit(pathlib.Path(name).resolve())
+diff --git a/scripts/harness/perf/keeper_scale_session.py b/scripts/harness/perf/keeper_scale_session.py
+index 0f2dd151b39..de7bae4444a 100644
+--- a/scripts/harness/perf/keeper_scale_session.py
++++ b/scripts/harness/perf/keeper_scale_session.py
+@@ -26,14 +26,13 @@ import socket
+ import sqlite3
+ import subprocess
+ import sys
+-import tempfile
+ import threading
+ import time
+ import tomllib
+ from urllib.parse import urlsplit
+ import uuid
+ 
+-EVIDENCE_SCHEMA = "masc.keeper-scale-evidence.v2"
++EVIDENCE_SCHEMA = "masc.keeper-scale-evidence.v3"
+ OPERATION_FIELDS = ("operation_id", "state", "started_at", "completed_at", "outcome_ref", "failure_kind")
+ 
+ 
+@@ -103,6 +102,122 @@ def typed_rows_digest(columns, rows):
+     return hashlib.sha256(json.dumps(canonical, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+ 
+ 
++def canonical_payload(value):
++    # This fixture generates ASCII strings, nulls, lists and objects only.
++    # Within that domain sorted compact JSON equals the producer's Yojson
++    # canonical bytes. Reject extensions instead of claiming a general codec.
++    def check(item):
++        if item is None:
++            return
++        if isinstance(item, str):
++            require(item.isascii(), "payload canonicalizer requires ASCII fixture strings")
++        elif isinstance(item, list):
++            for child in item:
++                check(child)
++        elif isinstance(item, dict):
++            for key, child in item.items():
++                require(isinstance(key, str), "payload object key is not a string")
++                check(key)
++                check(child)
++        else:
++            raise ProbeError("payload canonicalizer refuses non-fixture JSON types")
++    check(value)
++    return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
++
++
++def payload_digest(value):
++    return hashlib.sha256(canonical_payload(value).encode()).hexdigest()
++
++
++def original_payload(name, message):
++    thread = "keeper:" + name
++    source = {"schema": "masc.keeper_chat_operation.source.v2", "submitted_by": "dashboard",
++        "thread_id": thread, "continuation_channel": {"kind": "dashboard", "thread_id": thread},
++        "surface": {"kind": "agent"}, "channel": "agent", "channel_user_id": "",
++        "channel_user_name": "", "channel_workspace_id": "", "conversation_id": None,
++        "external_message_id": None, "workspace_id": None, "extra_mentions": [],
++        "sender_keeper": None, "user_row_origin": "needs_append"}
++    input_ = {"schema": "masc.keeper_chat_operation.input.v1", "message": message,
++        "user_blocks": [], "turn_instructions": None, "surface_context": None, "attachments": []}
++    return {"source": source, "input": input_}
++
++
++def read_admission_snapshot(path):
++    connection = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
++    try:
++        connection.row_factory = sqlite3.Row
++        connection.execute("BEGIN")
++        snapshot = {}
++        for table, order in (("operations", "sequence"), ("operation_batch_members", "execution_id,position")):
++            cursor = connection.execute("SELECT * FROM " + table + " ORDER BY " + order)
++            snapshot[table] = {"columns": [item[0] for item in cursor.description],
++                               "rows": [dict(row) for row in cursor]}
++        connection.rollback()
++        return snapshot
++    finally:
++        connection.close()
++
++
++def validate_original_payloads(operations, snapshots, public, terminal):
++    expected = index_operations(operations)
++    require(len(snapshots) == len({op["keeper"] for op in operations}), "snapshot population differs")
++    seen = set()
++    for snapshot in snapshots:
++        name, tables = snapshot["keeper"], snapshot["snapshot"]
++        rows = tables["operations"]["rows"]
++        by_id = {row["operation_id"]: row for row in rows}
++        owned = {key[1]: op for key, op in expected.items() if key[0] == name}
++        require(len(by_id) == len(rows) and set(by_id) == set(owned), "snapshot operation coverage differs")
++        groups = defaultdict(list)
++        members = {}
++        for member in tables["operation_batch_members"]["rows"]:
++            opid = member["operation_id"]
++            require(opid in owned and opid not in members and member["execution_id"] in owned,
++                    "batch membership identity differs")
++            members[opid] = member
++            groups[member["execution_id"]].append(member)
++            original = owned[opid]["original"]["input"]
++            require(member["admitted_digest"] == payload_digest(original), "batch original digest differs")
++            require(member["admitted_input_json"] == (None if terminal else canonical_payload(original)),
++                    "batch original input differs")
++        combined = {}
++        for leader, group in groups.items():
++            group.sort(key=lambda item: item["position"])
++            sequence = [by_id[item["operation_id"]]["sequence"] for item in group]
++            require(len(group) >= 2 and [item["position"] for item in group] == list(range(len(group)))
++                    and group[0]["operation_id"] == leader
++                    and sequence == list(range(sequence[0], sequence[0] + len(group))),
++                    "batch is not a contiguous ordered prefix with its leader")
++            inputs = [owned[item["operation_id"]]["original"]["input"] for item in group]
++            combined[leader] = {**inputs[0], "message": "\n\n".join(item["message"] for item in inputs),
++                "user_blocks": [{"type": "text", "text": item["message"]} for item in inputs]}
++        for opid, row in by_id.items():
++            key = name, opid
++            require(key not in seen, "snapshot Keeper occurs twice")
++            seen.add(key)
++            original = owned[opid]["original"]
++            status = public[key]
++            execution = combined.get(opid, original["input"])
++            require(row["source_json"] == canonical_payload(original["source"])
++                    and row["admission_digest"] == payload_digest(original)
++                    and row["execution_digest"] == payload_digest(execution)
++                    and row["input_json"] == (None if terminal else canonical_payload(execution)),
++                    "stored source/input/digests differ from original fixture input")
++            require(status["source"] == original["source"]
++                    and status["admission_digest"] == row["admission_digest"]
++                    and status["execution_digest"] == row["execution_digest"]
++                    and status["input"] == (None if terminal else execution)
++                    and status["sequence"] == str(row["sequence"])
++                    and status["created_at"] == row["created_at"]
++                    and status["state"].lower() == row["state"],
++                    "public original payload differs from exact SQLite snapshot")
++            member = members.get(opid)
++            require(status.get("batch_execution_id") == (None if member is None else member["execution_id"])
++                    and status.get("batch_input_digest") == (None if member is None else member["admitted_digest"]),
++                    "public batch binding differs from original SQLite member")
++    require(seen == set(expected), "original payload snapshot coverage differs")
++
++
+ def read_operation_store(path):
+     connection = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
+     try:
+@@ -497,7 +612,10 @@ def run(args, owner):
+     pinned.chmod(0o700)
+     binary_hash = digest(binary)
+     require(digest(pinned) == binary_hash, "binary changed while copied")
+-    base = Path(tempfile.mkdtemp(prefix="masc-keeper-scale-")).resolve()
++    # The owned base is evidence, including on copy/integrity/validation
++    # failures. Keep the original SQLite/WAL and runtime logs in the packet.
++    base = out / "owned-base"
++    base.mkdir()
+     owner["base"] = base
+     config = base / ".masc/config"
+     (config / "keepers").mkdir(parents=True)
+@@ -609,7 +727,10 @@ def run(args, owner):
+                     and before["keeper_fibers"] == 0, "runtime source or isolation mismatch")
+             write_json(out / "health-before.json", before)
+             token_result, _ = anonymous.get("/api/v1/dashboard/dev-token")
+-            require(isinstance(token_result.get("token"), str), "isolated token unavailable")
++            require(isinstance(token_result.get("token"), str)
++                    and token_result.get("actor") == "dashboard" and token_result.get("role") == "admin",
++                    "isolated dashboard admin principal unavailable")
++            write_json(out / "principal.json", {key: token_result[key] for key in ("actor", "role")})
+             client = Client(port, token_result["token"], out, args.request_timeout)
+             client.rpc("initialize", {"protocolVersion": "2025-11-25", "capabilities": {},
+                 "clientInfo": {"name": "keeper-scale-session", "version": "1"}}, "initialize")
+@@ -652,6 +773,7 @@ def run(args, owner):
+                     accepted, row = client.tool("masc_keeper_msg", {"name": name, "message": message}, "enqueue")
+                     require(isinstance(accepted.get("operation_id"), str), "enqueue omitted operation identity")
+                     operations.append({"keeper": name, "sequence": sequence, "operation_id": accepted["operation_id"],
++                                       "original": original_payload(name, message),
+                                        "admission": accepted, "admission_wire_ms": row["wire_ms"],
+                                        "first_attempt_to_accepted_ms": row["first_attempt_to_response_ms"]})
+             write_json(out / "operations-admitted.json", operations)
+@@ -701,6 +823,12 @@ def run(args, owner):
+                 queue_before.append({"keeper": operation["keeper"], "sequence": operation["sequence"], "status": status})
+                 require(status.get("state") in ("Queued", "Running"), "operation settled before provider release")
+             write_json(out / "queue-held.json", queue_before)
++            held_snapshots = [{"keeper": database.parent.name, "source_path": str(database),
++                "snapshot": read_admission_snapshot(database)}
++                for database in sorted((base / ".masc").rglob("chat-operations.sqlite3"))]
++            write_json(out / "admission-snapshots.json", held_snapshots)
++            held_public = {(item["keeper"], item["status"]["operation_id"]): item["status"] for item in queue_before}
++            validate_original_payloads(operations, held_snapshots, held_public, terminal=False)
+             with fixture.lock:
+                 require(fixture.active == args.keepers, "not every Keeper has an actual held provider request")
+                 record_phase_event({"event": "provider_release", "at_ns": time.perf_counter_ns(),
+@@ -774,23 +902,26 @@ def run(args, owner):
+             target = out / "durable" / database.parent.name
+             target.mkdir(parents=True, exist_ok=True)
+             rows, validation = copy_operation_store(database, target / database.name)
++            snapshot = read_admission_snapshot(database)
++            require(snapshot == read_admission_snapshot(target / database.name),
++                    "closed backup operation/batch snapshot differs from retained original")
+             durable.append({"keeper": database.parent.name, "source_path": str(database),
+-                            "rows": rows, "backup_validation": validation})
++                            "rows": rows, "backup_validation": validation, "snapshot": snapshot})
+         write_json(out / "durable-operations.json", durable)
+         cleanup = {"server_returncode": None if process is None else process.poll(),
+                    "server_reaped": process is not None and process.poll() is not None,
+                    "forced_kill": forced, "sampler_stopped": sampler is None or not sampler.is_alive(),
+-                   "model_server_stopped": not model_thread.is_alive(), "base_removed": False}
++                   "model_server_stopped": not model_thread.is_alive(),
++                   "base_retained": base.is_dir(), "base_path": str(base)}
+         cleanup.update(provider_requests_drained=model_drained,
+                        active_provider_requests=fixture.active, provider_handler_threads=fixture.handler_count)
+-        shutil.rmtree(base)
+-        cleanup["base_removed"] = not base.exists()
+         write_json(out / "cleanup.json", cleanup)
+     require(success and not unexpected_guest_commands and model_drained
+             and cleanup["server_returncode"] == 0 and not cleanup["forced_kill"]
+             and cleanup["server_reaped"] and cleanup["model_server_stopped"] and cleanup["sampler_stopped"]
+-            and cleanup["base_removed"], "workload or owned cleanup incomplete")
++            and cleanup["base_retained"], "workload or owned cleanup incomplete")
+     stored = validate_durable_operations(operations, names, durable, terminal, marker)
++    validate_original_payloads(operations, durable, terminal, terminal=True)
+     valid = sorted(row["wire_ms"] for row in samples if row.get("valid"))
+     summary = {"keepers": args.keepers, "messages": len(operations), "succeeded_operations": len(stored),
+                "actual_model_calls": len(fixture.requests), "max_provider_requests_in_flight": fixture.max_active,
+@@ -865,8 +996,6 @@ def main():
+                 thread.join(timeout=5)
+             model.server_close()
+         base = owner.get("base")
+-        if base is not None and base.exists():
+-            shutil.rmtree(base)
+         owned_output = owner.get("output")
+         if owned_output is not None and owned_output.is_dir():
+             if not (owned_output / "cleanup.json").exists():
+@@ -874,7 +1003,8 @@ def main():
+                     "server_reaped": process is None or process.poll() is not None,
+                     "server_returncode": None if process is None else process.poll(),
+                     "model_server_stopped": thread is None or not thread.is_alive(),
+-                    "base_removed": base is None or not base.exists()})
++                    "base_retained": base is not None and base.is_dir(),
++                    "base_path": None if base is None else str(base)})
+             write_json(owned_output / "failure.json", {"type": type(error).__name__, "message": str(error)})
+         raise
+ 

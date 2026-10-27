@@ -564,7 +564,7 @@ let live_firefox_configuration_is_observed_without_starting_it () =
   check bool "the Addon configuration preserves its selected endpoint and profile" true
     (keeper (Some configured)
      = Status.Addon_managed { port = live_bidi.port; profile = live_bidi.profile });
-  check bool "a browser-firefox switched off is told apart from no table" true
+  check bool "no enabled browser-firefox declaration is told apart from no table" true
     (keeper ~firefox:(Some false) (Some configured) = Status.Addon_off);
   check bool "unread declarations do not say who starts Firefox" true
     (keeper ~firefox:None (Some configured) = Status.Not_known);
@@ -575,9 +575,9 @@ let live_firefox_configuration_is_observed_without_starting_it () =
   let paragraph keeper = Status.message (observation ~keeper Record.Never_started) in
   check bool "no table changes the paragraph" false
     (String.equal (paragraph Status.Not_configured) (paragraph Status.Not_known));
-  check bool "a switched-off declaration is not said to be no table" false
+  check bool "a table nothing runs is not said to be no table" false
     (String.equal (paragraph Status.Addon_off) (paragraph Status.Not_configured));
-  check bool "a switched-off declaration changes the paragraph" false
+  check bool "a table nothing runs changes the paragraph" false
     (String.equal (paragraph Status.Addon_off) (paragraph Status.Not_known))
 
 (* Doctor reads Addon configuration from runtime.toml without starting it. *)
@@ -606,9 +606,16 @@ max_reply_bytes = 4096
     "id = \"browser-firefox\"\nrun_id = \"world\"\nenabled = %b\nmanifest_path = %S\n[binding]\nsources = []\n"
     enabled manifest in
   let declaration_path = Filename.concat directory "browser-firefox.toml" in
+  let keeper () =
+    (Status.observe ~access:Masc.Lane_addon_sources.Operator_configuration ~base_path:base
+       ~configuration:(Result.to_option (Browser_configuration.of_file runtime))).keeper in
+  check bool "with no declaration nothing runs the table" true (keeper () = Status.Addon_off);
   write declaration_path (declaration false);
+  check bool "a declaration switched off runs nothing" true (keeper () = Status.Addon_off);
   lacks (bidi_message (inspect ~base_path:(Some base))) [ profile ];
   write declaration_path (declaration true);
+  check bool "a declaration switched on runs the table" true
+    (keeper () = Status.Addon_managed { port = Browser_configuration.default_live_bidi_port; profile });
   let observed = inspect ~base_path:(Some base) in
   says observed [ profile ];
   check bool "no manual host record does not make Addon readiness a setup failure" true

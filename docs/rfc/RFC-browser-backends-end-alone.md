@@ -410,7 +410,7 @@ native worker 는 자기 프로세스 그룹을 가져요. 멈출 때는 먼저 
   | host 가 띄울 출처를 고름(`lane_addon_runtime.ml:1508`, `1512`, `1520`, `1532`) | 지워요. 띄울지는 선언이 정했어요 |
   | server 쪽 activity(`server_browser_configuration.ml:1-16`) | 지워요. 출처가 있는지는 host 가 serving 중인 worker 로 알아요(4.2) |
   | worker 안의 activity(`browser_addon_owner.ml:33`) | 자기 출처만 보면 돼서 단순해져요 |
-  | BiDi host 상태(`browser_bidi_host_status.ml:12-17`) | `Lane_off` 를 지워요. `[browser.live.bidi]` 가 있을 때만 선언을 읽어서, `browser-firefox` 를 돌리는 켜진 선언이 있으면 `Addon_managed`, 없으면 `Addon_off` 예요. 표가 없으면 선언은 읽지 않고 `Not_configured` 예요 |
+  | BiDi host 상태(`browser_bidi_host_status.ml:12-17`) | `Lane_off` 를 지워요. `[browser.live.bidi]` 가 있을 때만 선언을 읽어서, `browser-firefox` 를 돌리는 켜진 선언이 있으면 `Addon_managed`, 없으면 `Addon_off`, 선언을 다 읽지 못하면 `Not_known` 이에요. 표가 없으면 선언은 읽지 않고 `Not_configured` 예요 |
   | setup 계획·안내 문구(2.4) | 선언의 `enabled` 를 읽고 써요 |
   | lane inventory(`server_lane_inventory.ml:160`) | 그 레인 worker 들의 선언으로 정해요 |
   | TUI 의 레인 켜기·끄기(`masc_tui_browser_activity.ml`) | 지워요. 출처마다 켜고 끄는 일은 `browser-<출처>` 패키지 줄의 선언 편집기가 이미 해요(`POST /api/v1/lane-addons/declaration`) |

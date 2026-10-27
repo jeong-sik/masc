@@ -127,6 +127,10 @@
   ; Common_name.t; 1.0.6 (locked) through 1.1.1 take a string, which is what
   ; packages/agent_core/test/test_tls_cancellability.ml passes.
   (x509 (and (>= 1.0) (< 1.2)))
+  ; Upper bound, not just a floor. jose is below 1.0, so a minor release may
+  ; change what lib/auth/oidc_id_token_signature.ml matches on. It verifies
+  ; the RS256 signature of an OIDC ID token against the provider's JWKS.
+  (jose (and (>= 0.11.0) (< 0.12.0)))
   (integers (>= 0.7))
   (zstd (>= 0.4))
   (decompress (>= 1.5.3))

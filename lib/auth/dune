@@ -20,6 +20,8 @@
   eio
    masc.agent_core.digest
   eqaf
+  jose
+  ptime
   masc.fs_compat
   masc.masc_log
   masc.masc_process

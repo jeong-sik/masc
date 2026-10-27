@@ -3,8 +3,9 @@
 
 let ( let* ) = Result.bind
 
-(* One sign-in waits on this fetch twice (form and approval). A client whose
-   document host takes longer than this has no usable sign-in anyway. *)
+(* Bounds connect, request and body. The name lookups (the address check,
+   then the client's own) run in system threads that cancellation cannot
+   stop, so the system resolver bounds those instead. *)
 let fetch_timeout_sec = 5.0
 let request_headers = [ "Accept", "application/json" ]
 

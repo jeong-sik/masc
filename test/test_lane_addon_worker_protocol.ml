@@ -176,6 +176,17 @@ let effect_marker_contract () =
   check bool "extra marker fields do not opt in" false
     (C.supports_effects_tool (`Assoc [marker, `Assoc ["version", `Int 1; "extra", `Bool true]]))
 
+let wide_effect_declaration () =
+  let module C = Lane_addon_call_context in
+  let names = List.init 30000 (fun n -> "tool-" ^ string_of_int n) in
+  let declarations = List.map (fun name -> name, C.Reads_only) names in
+  let decoded = require (C.effects_of_json ~listed:names (C.effects_to_json declarations)) in
+  check int "all declared tools survive in order" (List.length declarations) (List.length decoded);
+  check bool "declaration order and effects are preserved" true (decoded = declarations);
+  check bool "duplicate names remain invalid" true
+    (Result.is_error (C.effects_of_json ~listed:["tool"] (`Assoc ["tools", `Assoc [
+      "tool", `String "reads_only"; "tool", `String "may_change"]])))
+
 let legacy_effect_name mode () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
   let calls = Filename.temp_file "legacy-effect-name-" ".calls" in
   Fun.protect ~finally:(fun () -> Sys.remove calls) (fun () ->
@@ -744,6 +755,7 @@ let () = run "Addon engine-independent MCP admission"
     test_case "an ambiguous port is not called" `Quick
       (negotiated_effects "effects-ambiguous" (Some Lane_addon_call_context.May_change));
     test_case "effect marker requires a single supported version" `Quick effect_marker_contract;
+    test_case "wide effect declarations retain all names" `Quick wide_effect_declaration;
     test_case "a legacy action takes precedence over the effect port" `Quick (legacy_effect_name "legacy-action");
     test_case "a legacy export takes precedence over the effect port" `Quick (legacy_effect_name "legacy-export");
     test_case "an export role takes precedence over an effect marker" `Quick (legacy_effect_name "legacy-export-marked");

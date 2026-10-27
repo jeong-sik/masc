@@ -174,8 +174,11 @@ let initialize t client =
           (* An existing package can already use this name as its action or an
              export. Its declared role wins over the new private handshake. *)
           let effect_name = Lane_addon_call_context.effects_tool in
+          let module Export_names = Set.Make (String) in
+          let export_names = List.fold_left (fun names name -> Export_names.add name names)
+            Export_names.empty t.contract.exported_tools in
           let* observation_effects = if t.contract.action_tool = Some effect_name
-              || List.mem effect_name t.contract.exported_tools then Ok [] else
+              || Export_names.mem effect_name export_names then Ok [] else
             match List.filter (fun (tool:Mcp_protocol.Mcp_types.tool) ->
               tool.name=effect_name) tools with
             | [tool] when Lane_addon_call_context.supports_effects_tool tool.input_schema ->
@@ -186,7 +189,7 @@ let initialize t client =
                  | (None|Some false),Some value ->
                      Lane_addon_call_context.effects_of_json
                        ~listed:(List.map (fun (tool:Mcp_protocol.Mcp_types.tool) -> tool.name) tools) value
-                     |> Result.map (List.filter (fun (name,_) -> List.mem name t.contract.exported_tools))
+                     |> Result.map (List.filter (fun (name,_) -> Export_names.mem name export_names))
                      |> Result.map_error (fun detail -> Protocol_failed detail)
                  | Some true,_ | (None|Some false),None ->
                      Error (Protocol_failed "observation effect handshake refused"))

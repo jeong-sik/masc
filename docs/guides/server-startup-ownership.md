@@ -20,7 +20,8 @@ after `scripts/install-local-build.sh`:
    asked to stop; another workspace, a non-MASC listener, or a lease owner
    that does not answer on the port is refused and left running. A `--host`
    that 127.0.0.1 cannot reach is refused too, because restart could not see
-   that replacement answer.
+   that replacement answer, and so is one that is not an IP address, such as
+   `localhost`, because the replacement could not bind it.
 2. It signs in as the local operator and sends one SIGTERM to the lease
    owner it identified with `F_GETLK`, the same request `masc setup` makes.
    Nothing is forced down.

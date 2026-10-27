@@ -10,7 +10,7 @@ val run :
     command. A server of this workspace that answers on loopback [port] is
     asked to stop once, through the same sign-in and identity check as setup;
     any other holder of the port or the workspace is refused untouched, and so
-    is a [host] that 127.0.0.1 cannot reach. The replacement is
+    is a [host] that is not an IP address or that 127.0.0.1 cannot reach. The replacement is
     [masc start --wait-for-previous-owner] when a server was asked to stop and
     plain [masc start] when none ran, spawned in its own process group with
     its output appended to [log_path] (default

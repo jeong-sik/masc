@@ -6,6 +6,7 @@ type incumbent =
   | This_workspace of { version : string; pid : int option }
 
 type refusal =
+  | Host_not_an_address of string
   | Host_not_on_loopback of string
   | Other_workspace of string
   | Port_held_by_unknown_process
@@ -30,13 +31,15 @@ let failure_log_lines = 20
 let loopback_url port path = Printf.sprintf "http://127.0.0.1:%d%s" port path
 
 (* Restart reaches the running server and its replacement on 127.0.0.1, as
-   setup does, so a replacement bound anywhere else would never be seen. *)
-let reachable_on_loopback host =
-  String.equal host "localhost"
-  ||
+   setup does, so a replacement bound anywhere else would never be seen. A
+   name such as localhost is not an address the replacement can bind, so it
+   is refused before anything is stopped. *)
+let check_host host =
   match Unix.inet_addr_of_string host with
-  | address -> address = Unix.inet_addr_loopback || address = Unix.inet_addr_any
-  | exception Failure _ -> false
+  | address when address = Unix.inet_addr_loopback || address = Unix.inet_addr_any ->
+    Ok ()
+  | (_ : Unix.inet_addr) -> Error (Host_not_on_loopback host)
+  | exception Failure _ -> Error (Host_not_an_address host)
 
 (* A shared client pool refuses a host for a while after one failed connect,
    and the gap between the old listener closing and the new one binding
@@ -97,6 +100,9 @@ let observe ~clock ~run_dir ~base_path ~port =
      | Error error -> Error (Owner_unverifiable (stop_error_message error)))
 
 let refusal_message ~base_path ~port = function
+  | Host_not_an_address host ->
+    Printf.sprintf "--host %s is not an IP address, and the replacement could not bind it. \
+                    Nothing was stopped or started." host
   | Host_not_on_loopback host ->
     Printf.sprintf "Restart checks and stops servers on 127.0.0.1, so it cannot watch a \
                     replacement bound to --host %s. Nothing was stopped or started; use \
@@ -207,7 +213,7 @@ let build_summary ~clock ~port =
 
 let replace ~sw ~clock ~run_dir ~base_path ~port ~host ~log_path ~agent ~login =
   let ( let* ) = Result.bind in
-  let* () = if reachable_on_loopback host then Ok () else Error (Host_not_on_loopback host) in
+  let* () = check_host host in
   let* incumbent = observe ~clock ~run_dir ~base_path ~port in
   let* wait_flag =
     match incumbent with

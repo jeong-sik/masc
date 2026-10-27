@@ -19,8 +19,8 @@ val in_worker_context : unit -> bool
 
 val with_worker_context : (unit -> 'a) -> 'a
 (** Run a closure marked as pool work, so {!in_worker_context} holds inside
-    it. For code that hands a closure to a pool worker without going through
-    this module. *)
+    it, on a domain with the tuned minor heap ({!Minor_heap.tune}). Every
+    pool job enters through it: this module's submits and {!Domain_pool}'s. *)
 
 module For_testing : sig
   val with_pool_option :

@@ -29,6 +29,7 @@ let in_worker_context () =
 ;;
 
 let with_worker_context f =
+  Minor_heap.tune ();
   match Eio_guard.execution_context () with
   | Eio_guard.Eio_fiber -> Eio.Fiber.with_binding worker_marker () f
   | Eio_guard.Non_eio -> f ()

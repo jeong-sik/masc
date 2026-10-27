@@ -12,8 +12,8 @@ let start ~sw ~env =
   Eio.Fiber.fork_daemon ~sw (fun () ->
     Eio.Domain_manager.run (Eio.Stdenv.domain_mgr env) (fun () ->
       (* A minor collection stops every domain, so this one collects on the
-         heap size the rest of the process collects on ([Domain_pool]). *)
-      Domain_pool.tune_minor_heap ();
+         heap size the rest of the process collects on ([Minor_heap]). *)
+      Minor_heap.tune ();
       Eio.Switch.run (fun io_sw ->
         Masc_http_client.with_scoped_pool ~sw:io_sw ~env (fun () ->
           (* The jobs' switch ends inside the pool's scope, so every request

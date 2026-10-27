@@ -21,6 +21,7 @@
   eio_guard
   pool_lane
   pool_wait
+  minor_heap
   executor_pool_submission
   executor_pool_ref
   domain_budget

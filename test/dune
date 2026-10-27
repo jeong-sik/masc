@@ -1672,6 +1672,11 @@
  (libraries alcotest masc.masc_core eio eio_main fmt mtime yojson))
 
 (test
+ (name test_executor_pool_ref)
+ (modules test_executor_pool_ref)
+ (libraries alcotest masc.masc_core eio eio_main))
+
+(test
  (name test_dashboard_cache_cancellation)
  (modules test_dashboard_cache_cancellation)
  (libraries alcotest masc.dashboard masc.masc_core eio eio_main yojson))

@@ -2124,7 +2124,7 @@ let run ~sw ~env ~address ~port ~base_path ?input_base_path ?on_ready ~accept_st
          serve every request on the 2 MB default -- the isolation this block
          exists for would be undone by the domain collecting eight times as
          often, and a minor collection stops every other domain with it. *)
-      Domain_pool.tune_minor_heap ();
+      Minor_heap.tune ();
       Eio.Switch.run (fun serving_sw ->
         Eio_context.with_turn_switch serving_sw (fun () ->
           let socket =

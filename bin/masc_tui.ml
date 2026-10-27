@@ -34441,7 +34441,7 @@ let run_with_eio_context f =
      collection every few frames. Measured on a live chat with PageUp/PageDown
      held, the median key-to-output time fell about a quarter. A larger
      OCAMLRUNPARAM setting is left alone. *)
-  Domain_pool.tune_minor_heap ();
+  Minor_heap.tune ();
   try
     Eio_main.run (fun env ->
         Eio.Switch.run (fun sw ->

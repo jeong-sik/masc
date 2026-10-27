@@ -9,7 +9,8 @@
     range stays flat and one whose cost follows the whole checkpoint grows.
 
     Run from _build/default/test (the fixture reads ../config and ../addons):
-    ./bench_keeper_librarian_pass.exe 1 5 20     (prefix sizes in MB) *)
+    ./bench_keeper_librarian_pass.exe 1 5 20     (prefix sizes in MB)
+    ./bench_keeper_librarian_pass.exe 5:1        (prefix MB : unread MB) *)
 open Alcotest
 open Masc
 module Execution = Keeper_librarian_durable_execution
@@ -470,9 +471,16 @@ let file_size path =
   | { Unix.st_size; _ } -> st_size
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> 0
 
-let measure ~prefix_mib =
+let measure ~prefix_mib ~unread_mib =
   first_messages_ref := prefix_messages ~bytes:(prefix_mib * mib);
-  selected_messages_ref := !first_messages_ref @
+  let unread_turns = if unread_mib = 0 then []
+    else List.map (fun (m : Agent_core.Types.message) ->
+      { m with content = List.map (function
+          | Agent_core.Types.Text text -> Agent_core.Types.Text ("unread " ^ text)
+          | ( Agent_core.Types.Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+            | ToolResult _ | Image _ | Document _ | Audio _ ) as block -> block) m.content })
+      (prefix_messages ~bytes:(unread_mib * mib)) in
+  selected_messages_ref := !first_messages_ref @ unread_turns @
     [ message "Unread question after the long history"
     ; Agent_core.Types.make_message ~role:Agent_core.Types.Assistant
         [ Agent_core.Types.Text "Unread answer" ] ];
@@ -494,6 +502,7 @@ let measure ~prefix_mib =
         acc + String.length (Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json m))) 0 unread in
     print_endline (Yojson.Safe.to_string (`Assoc
       [ "prefix_mib", `Int prefix_mib
+      ; "unread_mib", `Int unread_mib
       ; "checkpoint_bytes", `Int checkpoint_bytes
       ; "unread_message_bytes", `Int unread_bytes
       ; "pass_allocated_bytes", `Float allocated
@@ -503,9 +512,15 @@ let measure ~prefix_mib =
       ; "provider_posts", `Int (F.post_count fixture.server) ])))
 
 let () =
+  let size argument =
+    match String.split_on_char ':' argument with
+    | [ prefix ] -> int_of_string prefix, 0
+    | [ prefix; unread ] -> int_of_string prefix, int_of_string unread
+    | _ -> invalid_arg ("size is PREFIX_MB or PREFIX_MB:UNREAD_MB, got " ^ argument)
+  in
   let sizes =
     match Array.to_list Sys.argv with
-    | [] | [ _ ] -> [ 1; 5; 20 ]
-    | _ :: sizes -> List.map int_of_string sizes
+    | [] | [ _ ] -> [ 1, 0; 5, 0; 20, 0 ]
+    | _ :: sizes -> List.map size sizes
   in
-  List.iter (fun prefix_mib -> measure ~prefix_mib) sizes
+  List.iter (fun (prefix_mib, unread_mib) -> measure ~prefix_mib ~unread_mib) sizes

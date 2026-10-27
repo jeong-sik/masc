@@ -269,6 +269,11 @@ val read_bindings : t -> (binding_reading, string) result
     reconciliation. A binding's sequence is its instance's committed
     observation; no observation directory is listed. Exact record reads still
     require their own durability and payload verification. *)
+val read_binding : t -> instance_id:string -> (binding_reading, string) result
+(** {!read_bindings} for one instance: opens only that instance's binding
+    file and classifies it by the same rules, with the same directory
+    confirmation. An absent file is an empty reading. A record for this
+    instance stored under another file name is not seen. *)
 val bindings : t -> (Yojson.Safe.t list, string) result
 (** [read_bindings] for a caller that cannot use a partial reading: [Error]
     names the first unreadable file. *)

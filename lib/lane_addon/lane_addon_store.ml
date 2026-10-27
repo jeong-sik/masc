@@ -1153,38 +1153,61 @@ let binding_sequence = function
        | Some (`String instance_id), Some (`Int sequence) when sequence >= 0 -> Ok (instance_id, sequence, fields)
        | _ -> Error "invalid retained binding sequence")
   | _ -> Error "invalid retained binding"
+(* One binding file, classified the same way for the whole and the
+   single-instance reading. A binding removed between a listing and this read
+   is absent, the same as one never listed. *)
+let read_binding_file path =
+  let unreadable ?contents detail = Some (Error { path; detail; contents }) in
+  match protect (fun () -> Ok (Fs_compat.load_file_opt path)) with
+  | Error detail -> unreadable detail
+  | Ok None -> None
+  | Ok (Some bytes) ->
+      (match Yojson.Safe.from_string bytes with
+       | exception Yojson.Json_error detail -> unreadable detail
+       | json ->
+           (match binding_sequence json with
+            | Ok (_, _, _) -> Some (Ok json)
+            | Error detail -> unreadable ~contents:json detail))
+(* A reading also authorizes reconciliation. On a cold process, confirm the
+   publication of terminal records/absence before admitting replacement. *)
+let confirm_bindings_directory t =
+  protect (fun () ->
+    sync_existing_parent ~sync_parent:sync_parent_directory (Filename.concat t.root bindings_directory);
+    Ok ())
 let read_bindings t =
   let directory = Filename.concat t.root bindings_directory in
   let* names = protect (fun () ->
     match Fs_compat.exact_path_kind directory with
     | Fs_compat.Exact_missing -> Ok []
     | Fs_compat.Exact_unknown | Fs_compat.Exact_kind _ -> Ok (Fs_compat.read_dir directory |> List.sort String.compare)) in
-  let read name =
-    let path = Filename.concat directory name in
-    let unreadable ?contents detail = Some (Error { path; detail; contents }) in
-    (* A binding removed between the listing and this read is absent,
-       the same as one never listed. *)
-    match protect (fun () -> Ok (Fs_compat.load_file_opt path)) with
-    | Error detail -> unreadable detail
-    | Ok None -> None
-    | Ok (Some bytes) ->
-        (match Yojson.Safe.from_string bytes with
-         | exception Yojson.Json_error detail -> unreadable detail
-         | json ->
-             (match binding_sequence json with
-              | Ok (_, _, _) -> Some (Ok json)
-              | Error detail -> unreadable ~contents:json detail)) in
   let reading = List.fold_left (fun reading name ->
     if not (Filename.check_suffix name ".json") then reading
-    else match read name with
+    else match read_binding_file (Filename.concat directory name) with
       | None -> reading
       | Some (Ok value) -> { reading with readable = value :: reading.readable }
       | Some (Error issue) -> { reading with unreadable = issue :: reading.unreadable })
     { readable = []; unreadable = [] } names in
-  (* This reading also authorizes reconciliation. On a cold process, confirm
-     the publication of terminal records/absence before admitting replacement. *)
-  let* () = protect (fun () -> sync_existing_parent ~sync_parent:sync_parent_directory directory; Ok ()) in
+  let* () = confirm_bindings_directory t in
   Ok { readable = List.rev reading.readable; unreadable = List.rev reading.unreadable }
+(* The binding path is fixed by the instance id, so a caller that needs one
+   instance opens only its file. *)
+let read_binding t ~instance_id =
+  let directory = Filename.concat t.root bindings_directory in
+  (* A binding directory that cannot be listed fails the whole reading, so it
+     fails this one too instead of passing for an absent binding. *)
+  let* present = match Fs_compat.exact_path_kind directory with
+    | Fs_compat.Exact_missing -> Ok false
+    | Fs_compat.Exact_kind Unix.S_DIR | Fs_compat.Exact_unknown -> Ok true
+    | Fs_compat.Exact_kind (Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK) ->
+        Error (directory ^ ": binding directory is not a directory") in
+  let reading = if not present then None
+    else read_binding_file (Filename.concat t.root (binding_path instance_id)) in
+  let reading = match reading with
+    | None -> { readable = []; unreadable = [] }
+    | Some (Ok value) -> { readable = [value]; unreadable = [] }
+    | Some (Error issue) -> { readable = []; unreadable = [issue] } in
+  let* () = confirm_bindings_directory t in
+  Ok reading
 (* The whole-store reading for a caller that cannot use a partial one. *)
 let bindings t =
   let* reading = read_bindings t in

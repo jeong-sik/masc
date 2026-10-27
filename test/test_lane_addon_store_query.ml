@@ -150,6 +150,26 @@ let uncommitted_records_are_not_read () = with_store (fun _root store ->
   check int "named records stop at the committed sequence" 2
     (List.length (unwrap (Store.observations store ~instance_id ~through:2))))
 
+(* A caller that needs one instance opens only that instance's binding file:
+   a damaged sibling the whole reading reports does not appear, and the file
+   itself is classified by the same rules. *)
+let single_binding_reading_reads_one_file () = with_store (fun root store ->
+  let binding id seq = `Assoc ["instance_id", `String id; "observation_seq", `Int seq] in
+  unwrap (Store.save_binding store ~instance_id (binding instance_id 2));
+  unwrap (Store.save_binding store ~instance_id:"sibling" (binding "sibling" 1));
+  let path id = Filename.concat root (Printf.sprintf "bindings/%s.json" (Store.digest id)) in
+  write (path "sibling") "{damaged sibling";
+  let whole = unwrap (Store.read_bindings store) in
+  check int "the whole reading reports the damaged sibling" 1 (List.length whole.unreadable);
+  let single = unwrap (Store.read_binding store ~instance_id) in
+  check int "the single reading returns its own binding" 1 (List.length single.readable);
+  check int "the single reading never opens the sibling" 0 (List.length single.unreadable);
+  let absent = unwrap (Store.read_binding store ~instance_id:"absent") in
+  check bool "an absent binding is an empty reading" true (absent.readable = [] && absent.unreadable = []);
+  write (path instance_id) "{damaged own binding";
+  let damaged = unwrap (Store.read_binding store ~instance_id) in
+  check int "a damaged binding is unreadable, not absent" 1 (List.length damaged.unreadable))
+
 let targeted_evidence () = with_store (fun root store ->
   append store 1 "unrelated"; append store 2 "selected";
   write (record root 1) "{broken unrelated observation";
@@ -396,6 +416,7 @@ let () = run "bounded Lane history" ["queries", [
   test_case "missing persisted intervals" `Quick missing_record;
   test_case "source absence survives a query with no rows" `Quick coverage_without_rows;
   test_case "uncommitted records are not read" `Quick uncommitted_records_are_not_read;
+  test_case "a single binding reading reads one file" `Quick single_binding_reading_reads_one_file;
   test_case "targeted bounded evidence" `Quick targeted_evidence;
   test_case "separate ingress and egress envelopes remain preservable" `Quick separate_source_and_output_envelopes;
   test_case "selected evidence crosses the existing Keeper artifact boundary" `Quick published_evidence_is_readable_by_keeper;

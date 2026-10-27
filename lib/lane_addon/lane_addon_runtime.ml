@@ -2863,10 +2863,18 @@ let recovery_bindings m bindings =
           publication.fields,failed_after publication.fields (Lifecycle.Persistence_failed ("cleanup state persistence: " ^ message)) in
     replace_state fields state) in
   retained @ pending
+let retained_reading m (stored : Lane_addon_store.binding_reading) =
+  let parsed = split_retained (recovery_bindings m stored.readable) in
+  { parsed with faults = parsed.faults @ List.map fault_of_unreadable stored.unreadable }
 let read_retained_bindings m =
   let* stored = offload (fun () -> Lane_addon_store.read_bindings m.store) in
-  let parsed = split_retained (recovery_bindings m stored.readable) in
-  Ok { parsed with faults = parsed.faults @ List.map fault_of_unreadable stored.unreadable }
+  Ok (retained_reading m stored)
+(* One instance's retained binding: only its file is read, with the same
+   recovery overlay, so a cleanup in progress reads as it does in the whole
+   reading. *)
+let read_retained_binding m ~instance_id =
+  let* stored = offload (fun () -> Lane_addon_store.read_binding m.store ~instance_id) in
+  Ok (retained_reading m stored)
 let browser_service_status ~config ~access ~instance_id = Eio_context.run_on_owner_domain (fun () ->
   let root=Filename.concat (Workspace.masc_dir config) "lane-addons" in
   match Hashtbl.find_opt managers root with
@@ -2893,7 +2901,7 @@ let browser_service_status ~config ~access ~instance_id = Eio_context.run_on_own
              | None -> Browser_unavailable)
     | Some _ -> Browser_unavailable
     | None ->
-        (match read_retained_bindings m with
+        (match read_retained_binding m ~instance_id with
          | Error _ -> Browser_unavailable
          | Ok reading ->
              let named binding=text binding.binding_fields "instance_id"=Ok instance_id in
@@ -3082,7 +3090,7 @@ let inventory ~config = Eio_context.run_on_owner_domain (fun () ->
           reading.snapshot.declarations in
   {inventory with applications})
 let persisted_binding m id =
-  let* reading = runtime_result (read_retained_bindings m) in
+  let* reading = runtime_result (read_retained_binding m ~instance_id:id) in
   let named (binding : retained_binding) = match text binding.binding_fields "instance_id" with
     | Ok found -> String.equal found id | Error _ -> false in
   match List.find_opt named reading.readable with

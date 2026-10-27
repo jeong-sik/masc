@@ -354,14 +354,15 @@ let with_tool_request_settlement_barrier t work =
   match Fs_compat.execution_context () with
   | Fs_compat.Non_eio -> protect (fun () -> Ok (File_lock_eio.with_mutex (key ()) work))
   | Fs_compat.Eio_fiber ->
-    let key = Eio_unix.run_in_systhread (fun () -> protect (fun () -> Ok (key ()))) in
+    let key = Systhread_host.run ~label:"addon-settlement-barrier-key" (fun () ->
+      protect (fun () -> Ok (key ()))) in
     Eio.Fiber.check ();
     let* key = key in
     (* Waiting is cancellable. Once admitted, the system-thread work must
        finish before releasing the mutex, even if its caller is cancelled. *)
     let result = protect (fun () -> Ok (File_lock_eio.with_mutex key (fun () ->
       Eio.Fiber.check ();
-      Eio.Cancel.protect (fun () -> Eio_unix.run_in_systhread ~label:"addon-original-wake-sweep" work)))) in
+      Eio.Cancel.protect (fun () -> Systhread_host.run ~label:"addon-original-wake-sweep" work)))) in
     Eio.Fiber.check (); result
 let save_tool_request_owner t ~scope ~request_id json =
   protect (fun () -> with_tool_request_owner_serialization t ~scope (fun () ->
@@ -901,7 +902,7 @@ let inventory_blocking ~label work =
   match Fs_compat.execution_context () with
   | Fs_compat.Non_eio -> blocking ()
   | Fs_compat.Eio_fiber ->
-    let result = Eio_unix.run_in_systhread ~label blocking in
+    let result = Systhread_host.run ~label blocking in
     Eio.Fiber.check (); result
 
 let fold_archived_tool_request_owners t ~init ~f =

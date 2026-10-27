@@ -36,6 +36,32 @@ test('a native drag failure cannot turn void cleanup into release proof', async(
   assert.equal(result.pointerReleased,false);
   assert.equal(f.calls.filter(call=>call[0]==='up').length,0);
 });
+// The SDK throws this typed error before the first press when a selector matches nothing, is hidden,
+// disabled or obscured, or is not a valid selector.
+function refusal(kind='transient') {
+  const error=new Error('page.dragAndDrop timed out after 1500ms: Selector #nope matched 0 elements');
+  error.name='ElementResolutionError';error.kind=kind;return error;
+}
+test('a drag the SDK refused at target resolution never held a button', async()=>{
+  for (const kind of ['transient','permanent']) {
+    const f=fixture(()=>{throw refusal(kind);});
+    const result=await run(f.page,args);
+    assert.match(result.error,/matched 0 elements/);
+    assert.equal(result.pointerReleased,true,kind);
+    assert.equal(f.calls.filter(call=>call[0]==='up').length,0);
+  }
+});
+test('only the typed refusal frees the pointer: the same words or a wrong type stay uncertain', async()=>{
+  const sameWords=new Error('page.dragAndDrop timed out after 1500ms: Selector #nope matched 0 elements');
+  const wrongKind=Object.assign(refusal(),{kind:'other'});
+  const noKind=refusal();delete noKind.kind;
+  const otherType=Object.assign(new Error('connection lost'),{name:'CdpRequestTimeoutError'});
+  for (const thrown of [sameWords,wrongKind,noKind,otherType]) {
+    const f=fixture(()=>{throw thrown;});
+    const result=await run(f.page,args);
+    assert.equal(result.pointerReleased,false,thrown.name+' '+String(thrown.kind));
+  }
+});
 test('a drag already cleaned up by the SDK receives no duplicate release', async()=>{
   const f=fixture(calls=>{calls.push(['SDK-owned release']);throw Error('native result lost');});
   const result=await run(f.page,args);

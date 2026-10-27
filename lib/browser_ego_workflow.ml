@@ -10,6 +10,14 @@ let script = {js|async function nativeWorkflow(page, args) {
     completed, effectStarted, completedEffect, inputReleased,
     failure: {index, method, message: String(error?.message ?? error), ...extra}
   });
+  // A selector gesture whose target the SDK cannot resolve (no match, hidden,
+  // disabled, obscured, invalid selector) throws a typed ElementResolutionError.
+  // Those gestures resolve the target before the first press and between
+  // complete press and release pairs, never between a press and its release,
+  // so nothing is held when this error arrives. Any other error is unknown.
+  const selectorGestures = new Set(['click', 'dblclick', 'dragAndDrop', 'press']);
+  const refusedByTarget = error => error?.name === 'ElementResolutionError'
+    && (error.kind === 'transient' || error.kind === 'permanent');
   // The SDK buffers the Page's CDP events until someone reads them, and
   // page.events() hands them over and clears the buffer. Typing needs that
   // record to tell completion from a dialog interruption, so what this script
@@ -173,6 +181,8 @@ let script = {js|async function nativeWorkflow(page, args) {
       // The SDK's mouse.up can swallow a dialog interruption as normal void.
       // It also lacks the original selector click's coordinates on this Page
       // handle. Do not synthesize cleanup or treat that void as release proof.
+      // A refused target is the exception: no press is outstanding.
+      if (holdingInput && selectorGestures.has(step.method) && refusedByTarget(error)) inputReleased = true;
       return failure(index, step.method, error);
     }
     if (holdingInput) {

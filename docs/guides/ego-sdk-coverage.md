@@ -80,7 +80,7 @@ Neither means fully supported.
 | `Page.click` | Selector/ref interaction; workflow forwards all native options | New option forms require real SDK and installed-route proof |
 | `Page.dblclick` | Selector/ref interaction; workflow forwards all native options | New option forms require real SDK and installed-route proof |
 | `Page.hover` | Selector/ref interaction; workflow forwards all native options | New option forms require real SDK and installed-route proof |
-| `Page.dragAndDrop` | `drag_to`; workflow forwards native options and tracks release uncertainty | New workflow requires real SDK and installed-route proof |
+| `Page.dragAndDrop` | `drag_to`; workflow forwards native options and tracks release uncertainty, except that a typed `ElementResolutionError` refusal holds nothing | New workflow requires real SDK and installed-route proof |
 | `Page.fill` | Selector/ref interaction; workflow forwards clearFirst/timeout | New option forms require real SDK and installed-route proof |
 | `Page.selectOption` | Workflow selectionJson preserves string/object/array/null, including label/index | New selection forms require real SDK and installed-route proof |
 | `Page.focus` | Native workflow focus | Real SDK primitive proof; installed MASC/Keeper route unverified |

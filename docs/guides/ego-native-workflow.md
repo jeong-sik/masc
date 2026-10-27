@@ -104,6 +104,21 @@ input on that connection. The result reports `inputReleased` independently of co
 effects; a guard does not make the failed action successful.
 Manual held-button and held-key workflows are not exposed.
 
+A selector gesture (`click`, `dblclick`, `dragAndDrop`, `press`) whose target the
+SDK cannot resolve fails with the SDK's typed `ElementResolutionError`: no match,
+hidden, disabled, obscured, or an invalid selector. These gestures resolve the
+target before the first press and between complete press and release pairs,
+never between a press and its release, so nothing is held. `inputReleased` stays
+`true` and the connection keeps accepting input. The step is still reported as a
+failure that may have had an effect, because a hover move or the first click of a
+double click can precede the refusal. Any other error from a holding step keeps
+release unconfirmed, including one with the same message from another error
+type or a refusal from a step that resolves no selector (`mouse.click`,
+`keyboard.*`). Measured with Ego Lite 0.6.1.11 on 2026-10-27: missing, hidden,
+disabled and invalid selectors, a missing `dblclick` target and a missing drag
+source or destination each left the page with no mouse or key event, and the next
+click worked.
+
 `keyboard.type`, `keyboard.press` and `keyboard.paste` have no selector preflight.
 An exception after entering their SDK method cannot be classified as definitely
 before input. A dialog receipt can interrupt a button/key sequence, and

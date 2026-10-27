@@ -332,6 +332,49 @@ test('a missing press selector stops before input while a later press failure st
   assert.equal(result.completed.length,0);
  }
 });
+// The SDK throws this typed error when a selector matches nothing, is hidden, disabled or obscured, or is not
+// a valid selector. Its gestures resolve the target before the first press, never between a press and its release.
+function refusal(kind='transient'){
+ const error=new Error('page.click timed out after 1500ms: Selector #nope matched 0 elements');
+ error.name='ElementResolutionError';error.kind=kind;return error;
+}
+test('a selector gesture the SDK refused at target resolution holds nothing and frees the input',async()=>{
+ for (const method of ['click','dblclick','dragAndDrop','press']) {
+  for (const kind of ['transient','permanent']) {
+   const f=fixture();let later=0;
+   f.page.waitForSelector=async()=>{};
+   f.page[method]=async()=>{throw refusal(kind);};
+   f.page.fill=async()=>{later++;};
+   const result=await run(f.page,request([
+    {method,selector:'#nope',destination:'#target',key:'Enter'},
+    {method:'fill',selector:'#next',text:'must not run'},
+   ]));
+   const label=method+' '+kind;
+   assert.equal(result.inputReleased,true,label);assert.equal(result.effectStarted,true,label);
+   assert.equal(result.completedEffect,false,label);assert.equal(result.completed.length,0,label);
+   assert.equal(result.failure.index,0,label);assert.equal(result.failure.method,method,label);
+   assert.match(result.failure.message,/matched 0 elements/,label);assert.equal(later,0,label);
+  }
+ }
+});
+test('only the SDK typed refusal frees the input: the same words, a wrong type or another gesture do not',async()=>{
+ const sameWords=new Error('page.click timed out after 1500ms: Selector #nope matched 0 elements');
+ const wrongKind=Object.assign(refusal(),{kind:'other'});
+ const noKind=refusal();delete noKind.kind;
+ const otherType=Object.assign(new Error('connection lost'),{name:'CdpRequestTimeoutError'});
+ for (const thrown of [sameWords,wrongKind,noKind,otherType]) {
+  const f=fixture();f.page.click=async()=>{throw thrown;};
+  const result=await run(f.page,request([{method:'click',selector:'#nope'}]));
+  assert.equal(result.inputReleased,false,thrown.name+' '+String(thrown.kind));
+ }
+ // Gestures that resolve no selector never earn the exception, whatever they throw.
+ for (const method of ['mouse.click','keyboard.type','keyboard.press','keyboard.paste']) {
+  const f=fixture();const input=async()=>{throw refusal();};
+  f.page.mouse={click:input};f.page.keyboard={type:input,press:input,paste:input};
+  const result=await run(f.page,request([{method,x:1,y:2,text:'x',key:'Enter'}]));
+  assert.equal(result.inputReleased,false,method);
+ }
+});
 test('Page code receives JSON in the browser context and never runs as Node source',async()=>{
  const f=fixture();const browser=vm.createContext({document:{title:'browser only'}});
  f.page.evaluate=async function(expression){

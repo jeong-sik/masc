@@ -1194,6 +1194,10 @@ let target_input_script = {js|async function nativeTargetInput(page, args) {
     // The SDK owns this gesture and its release attempts. mouse.up() can
     // swallow a dialog interruption as void; another release could also
     // duplicate the SDK's original mouseup. Keep uncertainty on failure.
+    // A target the SDK cannot resolve throws a typed ElementResolutionError
+    // before the first press, so no button is down.
+    if (args.action === "drag_to" && error?.name === "ElementResolutionError"
+        && (error.kind === "transient" || error.kind === "permanent")) pointerReleased = true;
   }
   return {urlBefore, receipt, error: failure, pointerReleased};
 }|js}

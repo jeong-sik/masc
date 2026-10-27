@@ -456,9 +456,9 @@ native worker 는 자기 프로세스 그룹을 가져요. 멈출 때는 먼저 
 | S-L3 | 다섯 패키지, `browser_backend`, browser export 를 host 전용으로, host 도구의 verb 빈칸 채우기, worker `--backend`, 출처별 broker·설정, 정리 descriptor variant, setup·preflight 출처별, Skill 나누기, `browser` 패키지 삭제 | 각 worker 가 자기 출처만 띄우는지. 다섯 패키지를 함께 띄워도 `tools/list` 에 browser export 가 없고 실패하지 않는지. live Firefox 를 끊어도 다른 출처 명령이 계속 되는지. 한 출처의 시작 실패가 다른 출처를 막지 않는지. 바깥 BiDi host 와 확장 프로그램이 둘 다 `browser-external` 로 붙는지 |
 | S-L4 | 설계 문서(`browser-addon-lifecycle.md`)와 설치 문서 | Keeper 가 받는 도구 설명과 Skill 목록을 실제 `tools/list` 로 확인 |
 
-스택 2 는 native stack 이라 맨 위 PR 로 한 번에 들어가요. 중간 층은 테스트만 통과하면 되고, 배포할 수 있는 건 맨 위 층이에요.
+스택 2 는 native stack 이라 맨 위 PR 로 한 번에 들어가요. 중간 층은 테스트만 통과하면 되고, 배포할 수 있는 건 맨 위 층이에요. S-L3 부터는 꺼짐 스위치가 runtime.toml 과 선언 두 곳에 있어서, 꺼진 lane 의 선언된 출처가 설정 패스마다 시작 실패와 재시도를 되풀이해요. 그래서 D-L1 을 스택 2 맨 위에 쌓아 함께 머지해요.
 
-**스택 3: 스위치 하나 (D)** — 스택 2 가 배포된 뒤
+**스택 3: 스위치 하나 (D)** — 스택 2 맨 위에 쌓아 함께 머지하고 배포해요(7절 배포 2)
 
 | 층 | 내용 | 검증 |
 |---|---|---|

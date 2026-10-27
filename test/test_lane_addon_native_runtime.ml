@@ -278,7 +278,7 @@ let operator_retain () = with_fixture (fun clock root config ->
 let browser_server = {|import argparse,hashlib,json,os,socket,subprocess,sys,threading,time
 p=argparse.ArgumentParser()
 p.add_argument("root");p.add_argument("mode")
-p.add_argument("--socket");p.add_argument("--incarnation");p.add_argument("--max-message-bytes")
+p.add_argument("--socket");p.add_argument("--incarnation");p.add_argument("--max-message-bytes");p.add_argument("--backend")
 a=p.parse_args()
 environment_check='''import json,os
 print(json.dumps({"provider_absent":"OPENAI_API_KEY" not in os.environ,

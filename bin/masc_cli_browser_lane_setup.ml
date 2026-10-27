@@ -317,8 +317,8 @@ let print_addons (installed : Addon_setup.installed list) =
   match installed with
   | [] ->
     print_endline
-      "No browser source runs here: runtime.toml has no browser table whose lane is switched \
-       on, and no native host is installed. No browser Add-on was declared."
+      "No browser source runs here: runtime.toml has no browser table, and no native host is \
+       installed. No browser Add-on was declared."
   | _ :: _ ->
     List.iter print_addon installed;
     if List.exists (fun (one : Addon_setup.installed) ->

@@ -161,13 +161,13 @@ let parse toml =
   let* stagehand_enabled = enabled ~path:stagehand_path (fields stagehand_table) in
   Ok { automation; stagehand; live_bidi; live_ego; live_enabled; automation_enabled; stagehand_enabled }
 
-(* The parser reports a repeated table by raising, and a lookup through a
-   value that is not a table raises too. *)
+(* The file parser returns most syntax errors but raises on a repeated
+   table. *)
 let of_file path =
   match Otoml.Parser.from_file_result path with
   | Error detail -> Error detail
   | Ok toml -> parse toml
-  | exception (Otoml.Duplicate_key detail | Otoml.Type_error detail) -> Error detail
+  | exception Otoml.Duplicate_key detail -> Error detail
 
 type unstarted = Switched_off of string | Table_missing of string
 

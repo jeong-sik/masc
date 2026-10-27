@@ -245,16 +245,21 @@ let test_ego_table () =
   let reachable = List.filter (fun operation -> match Cap.support backend operation with
     | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false) Cap.operations in
   check (list string) "reads, capture, the tab list, its own tabs, their history, input, frames, dialogs, uploads and downloads on them, and the space handed to the operator and back"
-    ["list_tabs";"open_tab";"close_tab";"navigate";"follow_link";"back";"forward";"reload";"read_text";"read_elements";"read_scene";"read_regions";"read_snapshot";"screenshot";"native_workflow";"click_snapshot_target";"fill_snapshot_target";
+    ["list_tabs";"open_tab";"close_tab";"activate_tab";"navigate";"follow_link";"back";"forward";"reload";"read_text";"read_elements";"read_scene";"read_regions";"read_snapshot";"screenshot";"native_workflow";"click_snapshot_target";"fill_snapshot_target";
      "hover_snapshot_target";"double_click_snapshot_target";"click";"double_click";"right_click";"middle_click";"hover";"pointer_drag";"scroll_page";"scroll_at";
-     "fill";"type_text";"press_key";"key_chord";"select_option";"read_frames";"frame_interaction";"read_dialog";"accept_dialog";"dismiss_dialog";"hand_off";"take_over";"upload_file";"list_downloads"]
+     "fill";"type_text";"press_key";"key_chord";"select_option";"read_frames";"frame_interaction";"read_dialog";"accept_dialog";"dismiss_dialog";"hand_off";"take_over";"space_status";"finish_space";"wait_for_control";"adopt_tab";"release_tab";"upload_file";"list_downloads"]
     (List.map Cap.operation_name reachable);
   List.iter (fun operation -> match Cap.support backend operation with
     | Cap.Conditional {constraints;_} ->
       check bool (Cap.operation_name operation ^ " names the operator's tabs") true
         (List.exists (fun constraint_ -> String_util.contains_substring constraint_ "operator opened") constraints)
     | Cap.Available _ | Cap.Unsupported _ -> failf "%s is not conditional on ego" (Cap.operation_name operation))
-    (List.filter (fun operation -> not (List.mem operation [Cap.List_tabs; Cap.Open_tab])) reachable)
+    (* Space metadata, completion and the control wait act on the Space, not on
+       a page; adopting or releasing a page manages an unmanaged tab the
+       operator opened on purpose. *)
+    (List.filter (fun operation -> not (List.mem operation
+      [Cap.List_tabs; Cap.Open_tab; Cap.Space_status; Cap.Finish_space; Cap.Wait_for_control;
+       Cap.Adopt_tab; Cap.Release_tab])) reachable)
 
 (* ego's own accessibility snapshot, and acting on the targets it names, are
    claimed by the ego connection alone. *)

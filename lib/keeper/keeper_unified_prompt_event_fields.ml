@@ -268,6 +268,7 @@ let scheduled_wake_fields ~occurrence_id
     | Some title -> [ "title", title ]
   in
   [ "schedule_id", wake.schedule_id
+  ; "schedule_instance_id", wake.schedule_instance_id
   ; "due_at_unix", Printf.sprintf "%.17g" wake.due_at
   ; "payload_digest", wake.payload_digest
   ; "occurrence_id", occurrence_id
@@ -362,6 +363,7 @@ let scheduled_wake_group_fields group =
       | Some title -> [ "title", title ]
     in
     [ "schedule_id", group.wake.schedule_id
+    ; "schedule_instance_id", group.wake.schedule_instance_id
     ; "occurrence_count", string_of_int group.occurrence_count
     ; "first_due_at_unix", Printf.sprintf "%.17g" group.first_due_at
     ; "last_due_at_unix", Printf.sprintf "%.17g" group.last_due_at

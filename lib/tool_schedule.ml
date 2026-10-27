@@ -685,7 +685,8 @@ let refusal_of_service_error (err : Schedule_service.service_error) =
       | Schedule_store.Running_wake_absent _
       | Schedule_store.Running_wake_settled _
       | Schedule_store.Schedule_not_due_candidate
-      | Schedule_store.Schedule_not_running
+      | Schedule_store.Running_attempt_superseded _
+      | Schedule_store.Running_attempt_unavailable _
       | Schedule_store.Persistence_failed _
       | Schedule_store.Corrupt_ledger _ )
   | Schedule_service.Invalid_request _
@@ -1406,7 +1407,8 @@ let handle_note_add ~tool_name ~start_time ctx args =
          ~now
      with
      | Error
-         ((Schedule_store.Corrupt_ledger _ | Schedule_store.Persistence_failed _) as err) ->
+         ((Schedule_store.Corrupt_ledger _ | Schedule_store.Persistence_failed _
+          | Schedule_store.Running_attempt_unavailable _) as err) ->
        runtime_error ~tool_name ~start_time (Schedule_store.store_error_to_string err)
      | Error
          ((Schedule_store.Schedule_already_exists
@@ -1419,7 +1421,7 @@ let handle_note_add ~tool_name ~start_time ctx args =
           | Schedule_store.Running_wake_absent _
           | Schedule_store.Running_wake_settled _
           | Schedule_store.Schedule_not_due_candidate
-          | Schedule_store.Schedule_not_running) as err) ->
+          | Schedule_store.Running_attempt_superseded _) as err) ->
        workflow_error ~tool_name ~start_time (Schedule_store.store_error_to_string err)
      | Ok (note, note_count) ->
        ok ~tool_name ~start_time

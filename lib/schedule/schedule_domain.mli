@@ -101,9 +101,34 @@ type wake_status = Schedule_contract_values.wake_status =
   | Wake_succeeded
   | Wake_failed
 
+type wake_attempt_id = private string
+
+val fresh_wake_attempt_id : unit -> wake_attempt_id
+val wake_attempt_id_of_string : string -> (wake_attempt_id, string) result
+(** Requires the complete canonical lowercase UUIDv7 spelling. *)
+val wake_attempt_id_to_string : wake_attempt_id -> string
+
+type wake_attempt_identity = Unidentified | Identified of wake_attempt_id
+(** Only historical rows without [attempt_id] are unidentified. Reading never
+    invents an identity; an explicitly malformed identity refuses decoding. *)
+
+type wake_settlement_kind =
+  | Accepted
+  | Schedule_rejected
+  | Occurrence_rejected
+  | Retryable_failure
+  | Process_interrupted
+  | Unsupported_payload
+  | Cancelled_schedule
+  | Orphaned_attempt
+
 type wake_record =
   { schedule_instance_id : string
   ; schedule_id : string
+  ; attempt_identity : wake_attempt_identity
+  ; settlement_kind : wake_settlement_kind option
+      (** Absent only for unsettled or historical records; absence is preserved
+          by the codec and is never sufficient fenced-settlement evidence. *)
   ; started_at : float
   ; finished_at : float option
   ; due_at : float

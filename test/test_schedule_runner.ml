@@ -428,6 +428,71 @@ let test_tick_reports_failure_when_the_seen_keys_write_cannot_commit () =
            (List.length tick_result.emitted))
 ;;
 
+let check_replacement_after_candidate_snapshot ~accepted =
+  with_workspace @@ fun config ->
+  let original = create_ok ~schedule_id:"replaced-during-admission" config in
+  let replacement =
+    match Schedule_domain.create_request
+        ~schedule_id:original.schedule_id ~requested_by:original.requested_by
+        ~scheduled_by:original.scheduled_by ~requested_at:original.requested_at
+        ~due_at:original.due_at ~payload:(payload_json "replacement work")
+        ~source:original.source () with
+    | Ok request -> request
+    | Error detail -> fail detail
+  in
+  let calls = ref [] in
+  let baseline = accepting_consumer calls in
+  let version_after_replacement = ref None in
+  let accepts (_ : Schedule_domain.schedule_request) =
+    (match Schedule_store.update_request config
+        ~authority:Schedule_store.Operator_authority ~now:201.0 ~runner_tick_sec replacement with
+     | Ok _ -> ()
+     | Error error -> fail (Schedule_store.store_error_to_string error));
+    (* The replacement is genuinely Due before the old snapshot proceeds.
+       A public-ID-only writer would now act on the wrong definition. *)
+    (match Schedule_store.refresh_due config ~now:201.0
+        ~retention_days:Schedule_store.terminal_schedule_retention_days with
+     | Ok (state, _) -> version_after_replacement := Some state.version
+     | Error error -> fail (Schedule_store.store_error_to_string error));
+    if accepted then Ok () else Error "the observed payload is unsupported"
+  in
+  let first = tick_ok config ~now:201.0 ~consumer:{ baseline with accepts } in
+  check int "the old snapshot gets one dispatch decision" 1 (List.length first.dispatches);
+  check (list string) "stale snapshot cannot invoke a consumer" [] !calls;
+  let state = Schedule_store.read_state config in
+  check (option int) "stale admission has no additional schedule mutation"
+    !version_after_replacement (Some state.version);
+  let current = match Schedule_store.get_schedule config ~schedule_id:original.schedule_id with
+    | Some request -> request
+    | None -> fail "replacement disappeared"
+  in
+  check string "replacement instance is preserved" replacement.schedule_instance_id
+    current.schedule_instance_id;
+  check bool "replacement remains due" true (current.status = Due);
+  check int "stale acceptance/rejection creates no wake for the replacement" 0
+    (List.length (Schedule_store.wakes_for_schedule_instance state
+       ~schedule_instance_id:replacement.schedule_instance_id ~schedule_id:original.schedule_id));
+  let second = tick_ok config ~now:202.0 ~consumer:baseline in
+  check int "a fresh snapshot dispatches the replacement" 1 (List.length second.dispatches);
+  check (list string) "the consumer runs only once on fresh admission"
+    [original.schedule_id] !calls;
+  match Schedule_store.last_wake_for_schedule_instance (Schedule_store.read_state config)
+      ~schedule_instance_id:replacement.schedule_instance_id ~schedule_id:original.schedule_id with
+  | Some wake ->
+    check bool "replacement delivery completes" true (wake.status = Wake_succeeded);
+    check string "receipt belongs to the replacement payload"
+      (Schedule_domain.payload_digest replacement.payload) wake.payload_digest
+  | None -> fail "replacement delivery receipt is absent"
+;;
+
+let test_tick_does_not_start_a_replaced_candidate () =
+  check_replacement_after_candidate_snapshot ~accepted:true
+;;
+
+let test_tick_does_not_reject_a_replaced_candidate () =
+  check_replacement_after_candidate_snapshot ~accepted:false
+;;
+
 let test_tick_dispatches_due_candidate_to_success () =
   with_workspace
   @@ fun config ->
@@ -1248,6 +1313,10 @@ let () =
             test_tick_reports_failure_when_the_seen_keys_write_cannot_commit
         ; test_case "dispatches due candidate to success" `Quick
             test_tick_dispatches_due_candidate_to_success
+        ; test_case "stale snapshot cannot start a replacement" `Quick
+            test_tick_does_not_start_a_replaced_candidate
+        ; test_case "stale snapshot rejection cannot fail a replacement" `Quick
+            test_tick_does_not_reject_a_replaced_candidate
         ; test_case "completes wake on durable acceptance" `Quick
             test_tick_completes_wake_on_durable_acceptance
         ; test_case "marks unsupported candidate failed" `Quick

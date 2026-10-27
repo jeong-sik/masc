@@ -81,7 +81,13 @@ type store_error =
       (** A [Running] request whose newest wake already succeeded or failed,
           so there is no running wake to settle or recover. *)
   | Schedule_not_due_candidate
-  | Schedule_not_running
+  | Running_attempt_superseded of { schedule_id : string }
+      (** The authoritative ledger proves this capability no longer denotes
+          the current attempt or its already applied verdict. No write occurs. *)
+  | Running_attempt_unavailable of { schedule_id : string; reason : string }
+      (** Authority could not be established, including a non-authoritative
+          read, unidentified/contradictory wake, or another workspace/backend.
+          This is an error, never evidence of supersession. *)
   | Persistence_failed of string
   | Corrupt_ledger of
       { primary_err : string
@@ -271,22 +277,37 @@ val reschedule_due_recurring :
     generic due signal has been durably recorded. One-shot requests are left
     [Due] for a future consumer/terminal transition. *)
 
+type running_attempt
+(** Opaque authority for one persisted identified wake in its originating
+    workspace/backend. Obtained only from a committed start. All settlement
+    methods revalidate this authority against the primary ledger under its
+    mutation lock. Recovery mirrors and unidentified historical wakes cannot
+    authorize settlement. Repeating the same typed verdict preserves its
+    original receipt; supersession and unavailable authority remain distinct
+    errors. A replay must preserve the original [now] recurrence anchor. *)
+
+type started_dispatch = private
+  { request : Schedule_domain.schedule_request
+  ; attempt : running_attempt
+  }
+
 val start_due_candidate :
   ?started_at:float ->
   Workspace_utils.config ->
   now:float ->
-  schedule_id:string ->
-  (Schedule_domain.schedule_request, store_error) result
+  candidate:Schedule_domain.schedule_request ->
+  (started_dispatch, store_error) result
 (** Atomically transitions a due candidate to [Running] and records a
     generic wake attempt. [now] is the tick that found the candidate due;
     [started_at] (default [now]) stamps the wake with the moment the attempt
-    began, so a reader can measure the attempt rather than the tick. *)
+    began, so a reader can measure the attempt rather than the tick. The
+    candidate's instance, due time and payload must still match under the lock. *)
 
 val accept_running :
   ?finished_at:float ->
   Workspace_utils.config ->
   now:float ->
-  schedule_id:string ->
+  attempt:running_attempt ->
   ?detail:Yojson.Safe.t ->
   unit ->
   (Schedule_domain.schedule_request, store_error) result
@@ -300,7 +321,7 @@ val fail_running :
   ?finished_at:float ->
   Workspace_utils.config ->
   now:float ->
-  schedule_id:string ->
+  attempt:running_attempt ->
   failure_scope:failure_scope ->
   error:string ->
   (Schedule_domain.schedule_request, store_error) result
@@ -314,7 +335,7 @@ val retry_running :
   ?finished_at:float ->
   Workspace_utils.config ->
   now:float ->
-  schedule_id:string ->
+  attempt:running_attempt ->
   reason:running_recovery_reason ->
   (Schedule_domain.schedule_request, store_error) result
 (** Finishes the current wake attempt as [Failed] (stamped [finished_at],
@@ -336,7 +357,7 @@ val fail_due_candidate :
   ?attempted_at:float ->
   Workspace_utils.config ->
   now:float ->
-  schedule_id:string ->
+  candidate:Schedule_domain.schedule_request ->
   error:string ->
   (Schedule_domain.schedule_request, store_error) result
 (** Atomically marks a [Due] request [Failed] and records the failed

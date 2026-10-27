@@ -2165,10 +2165,12 @@ let test_schedule_exact_lookup_found_matches_the_dashboard_fixture () =
     ~retention_days:Schedule_store.terminal_schedule_retention_days with
    | Ok _ -> ()
    | Error _ -> fail "refresh_due refused the fixture");
-  (match Schedule_store.start_due_candidate config ~now:202.0 ~schedule_id with
-   | Ok _ -> ()
-   | Error _ -> fail "start_due_candidate refused the fixture");
-  (match Schedule_store.accept_running config ~now:203.0 ~schedule_id () with
+  let started =
+    match Schedule_store.start_due_candidate config ~now:202.0 ~candidate:request with
+    | Ok started -> started
+    | Error _ -> fail "start_due_candidate refused the fixture"
+  in
+  (match Schedule_store.accept_running config ~now:203.0 ~attempt:started.attempt () with
    | Ok _ -> ()
    | Error _ -> fail "accept_running refused the fixture");
   let body =
@@ -2241,10 +2243,16 @@ let test_schedule_exact_lookup_carries_the_wake_history () =
       ~retention_days:Schedule_store.terminal_schedule_retention_days with
      | Ok _ -> ()
      | Error _ -> fail "refresh_due refused the fixture");
-    (match Schedule_store.start_due_candidate config ~now:(now +. 1.0) ~schedule_id with
-     | Ok _ -> ()
-     | Error _ -> fail "start_due_candidate refused the fixture");
-    match Schedule_store.accept_running config ~now:(now +. 2.0) ~schedule_id () with
+    let candidate = match Schedule_store.get_schedule config ~schedule_id with
+      | Some current -> current
+      | None -> fail "recurring fixture disappeared"
+    in
+    let started =
+      match Schedule_store.start_due_candidate config ~now:(now +. 1.0) ~candidate with
+      | Ok started -> started
+      | Error _ -> fail "start_due_candidate refused the fixture"
+    in
+    match Schedule_store.accept_running config ~now:(now +. 2.0) ~attempt:started.attempt () with
     | Ok _ -> ()
     | Error _ -> fail "accept_running refused the fixture"
   in
@@ -2410,20 +2418,25 @@ let test_schedule_page_counts_retained_wakes () =
     ~retention_days:Schedule_store.terminal_schedule_retention_days);
   (* alpha: the attempt failed retryably, so the definition is still live
      (Due) and its newest wake is Failed. *)
-  store_ok "start alpha"
-    (Schedule_store.start_due_candidate config ~now:201.0
-       ~schedule_id:"sched-wakes-retried");
+  let start schedule_id =
+    let candidate = match Schedule_store.get_schedule config ~schedule_id with
+      | Some current -> current
+      | None -> fail ("fixture disappeared: " ^ schedule_id)
+    in
+    match Schedule_store.start_due_candidate config ~now:201.0 ~candidate with
+    | Ok started -> started
+    | Error error -> fail (Schedule_store.store_error_to_string error)
+  in
+  let alpha = start "sched-wakes-retried" in
   store_ok "retry alpha"
     (Schedule_store.retry_running config ~now:202.0
-       ~schedule_id:"sched-wakes-retried"
+       ~attempt:alpha.attempt
        ~reason:(Schedule_store.Retryable_dispatch_failure "keeper store unavailable"));
   (* beta: accepted, so the one-shot definition is Succeeded with a Succeeded wake. *)
-  store_ok "start beta"
-    (Schedule_store.start_due_candidate config ~now:201.0
-       ~schedule_id:"sched-wakes-accepted");
+  let beta = start "sched-wakes-accepted" in
   store_ok "accept beta"
     (Schedule_store.accept_running config ~now:202.0
-       ~schedule_id:"sched-wakes-accepted" ());
+       ~attempt:beta.attempt ());
   let open Yojson.Safe.Util in
   let fleet =
     Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config

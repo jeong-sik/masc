@@ -35,6 +35,7 @@ let reconcile reason state =
       state.resource_pending_key <- None;
       state.resource_read_owner <- None;
       state.resource_revision_history <- [];
+      state.resource_shared <- None;
       state.resource_content <- None;
       state.resource_content_error <- None;
       state.resource_scroll <- Masc_tui_scroll.Position.first;
@@ -128,6 +129,7 @@ let read_done state ~(request : Catalog.read_request) result =
        (* Acquisition retains original bytes; only display copies are sanitized. *)
        state.resource_content <- Some (key, reading.parts);
        state.resource_revision_history <- reading.revisions;
+       state.resource_shared <- reading.shared;
        state.resource_image_cursor <- 0;
        state.resource_text_cursor <- 0;
        state.resource_search_position <- Masc_tui_resource_reading.first;

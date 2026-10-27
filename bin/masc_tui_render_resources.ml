@@ -158,7 +158,14 @@ let render_resources (state : state) =
     let shown_resource = Option.map Masc_tui_resource_document.entry reading in
     let title =
       match shown_resource with
-      | Some resource -> "Resource · " ^ Terminal_text.single_line (Catalog.display_name resource)
+      | Some resource ->
+          let share_badge =
+            match resource, state.resource_shared with
+            | Catalog.Report _, Some true -> " · [외부 공유중]"
+            | Catalog.Report _, Some false -> " · [비공개]"
+            | Catalog.Report _, None | Catalog.Mcp _, _ -> ""
+          in
+          "Resource · " ^ Terminal_text.single_line (Catalog.display_name resource) ^ share_badge
       | None -> "Resource detail"
     in
     if split then box_top pane_buf pane_cols;

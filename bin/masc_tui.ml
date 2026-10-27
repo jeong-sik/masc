@@ -2075,6 +2075,29 @@ let launch_artifact_check_change state ~mailbox =
         (fun () -> Masc_tui_http.post_artifact_check ~credential ~expected_workspace
           ~host ~port ~request)
 
+let toggle_resource_external_share state ~mailbox =
+  match Masc_tui_resource_document.current state, state.server_identity with
+  | (None | Some { entry = Masc_tui_resource_catalog.Mcp _; _ }), _ ->
+      report_action state "error" "Open a published report revision in the detail pane to toggle external sharing"
+  | Some { entry = Report _; _ }, None ->
+      report_action state "error" "Workspace identity is unavailable"
+  | Some { entry = Report report; _ }, Some expected_workspace ->
+      let next_shared = not (Option.value state.resource_shared ~default:false) in
+      let credential = Masc_tui_http.bind_credential () in
+      let host = server_peer_host and port = state.port in
+      let id = report.id in
+      report_action state "system"
+        (if next_shared then "Enabling external sharing..." else "Revoking external sharing...");
+      launch_workspace_request ~operation:true state ~mailbox ~boundary_error:Fun.id
+        ~cancelled:(Resource_exported (id, Error "External sharing update interrupted"))
+        ~deliver:(fun result -> Resource_exported (id, result))
+        (fun () ->
+          Masc_tui_http.post_artifact_share ~credential ~expected_workspace
+            ~host ~port ~id ~shared:next_shared
+          |> Result.map (fun shared ->
+            if shared then "External sharing enabled for " ^ id
+            else "External sharing revoked for " ^ id))
+
 (* A creation keeps its operation receipt even after its workspace withdraws.
    Only the result handler may use current authority to refresh or open chat. *)
 let launch_keeper_creation state ~mailbox ~request ~declaration =
@@ -13930,6 +13953,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.resource_pending_key <- None;
   state.resource_read_owner <- None;
   state.resource_revision_history <- [];
+  state.resource_shared <- None;
   state.resource_scroll <- Masc_tui_scroll.Position.first;
   state.resource_search_position <- Masc_tui_resource_reading.first;
   state.resource_image_cursor <- 0;
@@ -20252,7 +20276,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
       end
   | Resource_exported (label, result) ->
       (match result with
-       | Ok detail -> report_action state "system" detail
+       | Ok detail ->
+           report_action state "system" detail;
+           (match state.resource_content with
+            | Some ((Masc_tui_resource_catalog.Report_revision current as key), _)
+              when String.equal current.id label ->
+                launch_resources_read state ~mailbox ~key
+            | _ -> ())
        | Error detail -> report_action state "error" (label ^ ": " ^ detail))
   | Resource_read (request, result) ->
       Masc_tui_resources_updates.read_done state ~request result
@@ -29874,6 +29904,8 @@ and is loaded on demand through keeper_skill.
        | Some "o" when state.view = Resources -> open_resource_in_dashboard state ~mailbox:async_messages
        | Some "c" when state.view = Resources ->
            launch_artifact_check_change state ~mailbox:async_messages
+       | Some "P" when state.view = Resources && state.resource_focus = Right_pane ->
+           toggle_resource_external_share state ~mailbox:async_messages
        | Some "u" when state.view = Resources ->
            (match Masc_tui_resources_updates.select_next_unchecked state with
             | Error detail -> report_action state "error" detail

@@ -8684,6 +8684,7 @@ type state = {
   mutable resource_pending_key: Masc_tui_resource_catalog.key option;
   mutable resource_read_owner: unit ref option;
   mutable resource_revision_history: Masc_tui_resource_catalog.report list;
+  mutable resource_shared: bool option;
   mutable resource_scroll: Masc_tui_scroll.Position.t;
   (* Logical search match is independent of last-page scroll clamping. *)
   mutable resource_search_position: Masc_tui_resource_reading.search_position;
@@ -11418,7 +11419,10 @@ let retain_resource_read state ~key =
         Masc_tui_resource_catalog.equal_key
           (Masc_tui_resource_catalog.Report_revision candidate)
           (Masc_tui_resource_catalog.Report_revision report)) state.resource_revision_history in
-  if not (same_resource || known_revision) then state.resource_revision_history <- [];
+  if not (same_resource || known_revision) then begin
+    state.resource_revision_history <- [];
+    state.resource_shared <- None
+  end;
   state.resource_pending_key <- Some key;
   if not same_resource then begin
     state.resource_content <- None;
@@ -15928,6 +15932,7 @@ let create_state
   resource_pending_key = None;
   resource_read_owner = None;
   resource_revision_history = [];
+  resource_shared = None;
   resource_scroll = Masc_tui_scroll.Position.first;
   resource_search_position = Masc_tui_resource_reading.first;
   resource_focus = Left_pane;

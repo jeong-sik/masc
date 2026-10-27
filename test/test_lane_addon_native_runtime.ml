@@ -286,7 +286,9 @@ let operator_retain () = with_fixture (fun clock root config ->
      retain is needed. *)
   let fourth, _, _, allocation, _ = browser_instance ~path:"downloads/unread-download" in
   let kept = Filename.concat (Filename.concat (Lane_addon_store.root store) "kept-files") fourth in
-  Fun.protect ~finally:(fun () -> if Sys.file_exists allocation then remove allocation; remove kept) (fun () ->
+  Fun.protect ~finally:(fun () ->
+      if Sys.file_exists allocation then remove allocation;
+      if Sys.file_exists kept then remove kept) (fun () ->
     ignore (dispatch config R.Detach ["instance_id",`String fourth]);
     check string "recovery releases the allocation of a Keeper's file" "native_released" (release_kind fourth);
     check bool "the allocation is gone" false (Sys.file_exists allocation);

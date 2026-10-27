@@ -197,8 +197,8 @@ let private_root root info =
   Requirement.canonical ~label:socket_directory_label root
 let socket_record = {Requirement.kind=Unix.S_REG;owner=Effective_user;mode=Any_mode;links=Exactly_one}
 let owned_directory = {Requirement.kind=Unix.S_DIR;owner=Effective_user;mode=Any_mode;links=Any_count}
-(* Only empty download trees may be removed. Files, links and uncertain
-   acquisitions are retained for the original incarnation; never recursive rm. *)
+(* Only empty download trees may be removed; never recursive rm. Files the
+   browser left for the Keeper were moved out before this runs. *)
 let rec empty_tree path =
   match Unix.lstat path with
   | info ->
@@ -236,18 +236,25 @@ let keeper_file_count root =
       let* more=keeper_files (Filename.concat root tree) in
       Ok (count+more))
     (Ok 0) keeper_file_trees
-(* A private directory of this user at [path], made if absent. *)
-let private_directory_at ~label path =
-  (try Unix.mkdir path 0o700 with Unix.Unix_error (Unix.EEXIST,_,_) -> ());
-  let* _=Requirement.lstat ~label Requirement.private_directory path in
-  Ok ()
+(* A directory of this user that no group or other user can reach. *)
+let kept_directory = {Requirement.kind=Unix.S_DIR;owner=Effective_user;mode=Clear 0o077;links=Any_count}
+(* [path] as a [kept_directory], made 0700 if absent; a new entry is synced
+   into its parent. *)
+let kept_directory_at ~label path =
+  let made=match Unix.mkdir path 0o700 with
+    | () -> true
+    | exception Unix.Unix_error (Unix.EEXIST,_,_) -> false in
+  if made then sync (Filename.dirname path);
+  Requirement.lstat ~label kept_directory path
 (* Moves each Keeper file tree of [root] into [into] by rename, so every byte
-   is kept and nothing is copied or deleted. A tree already at the
-   destination, or a rename to another file system, refuses and leaves the
-   remaining trees where they are. *)
-let move_keeper_files ~kept_root ~into ~root =
-  let* ()=private_directory_at ~label:"kept browser files root" kept_root in
-  let* ()=private_directory_at ~label:"kept browser files" into in
+   is kept and nothing is copied or deleted. A kept root on another file
+   system refuses before [into] is made; a tree already at the destination
+   refuses and leaves the remaining trees where they are. *)
+let move_keeper_files ~kept_root ~into ~root (allocation : Unix.stats) =
+  let* kept=kept_directory_at ~label:"kept browser files root" kept_root in
+  let* ()=if kept.Unix.st_dev=allocation.Unix.st_dev then Ok ()
+    else Error (Printf.sprintf "kept browser files root %s is on another file system than %s" kept_root root) in
+  let* _=kept_directory_at ~label:"kept browser files" into in
   let* ()=List.fold_left (fun acc tree ->
       let* ()=acc in
       let source=Filename.concat root tree and target=Filename.concat into tree in
@@ -259,6 +266,14 @@ let move_keeper_files ~kept_root ~into ~root =
          | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Unix.rename source target;Ok ()))
     (Ok ()) keeper_file_trees in
   sync into;sync root;Ok ()
+(* The files an earlier or this cleanup moved into [into], when [into]
+   exists. *)
+let kept_files into =
+  match Unix.lstat into with
+  | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok None
+  | _ ->
+    let* files=keeper_file_count into in
+    Ok (Some (into,files))
 (* What an allocation of [source] may hold besides its socket: the files and
    folders its browser writes. [None] is an allocation whose acquisition was
    never confirmed, which may hold only its socket. *)
@@ -415,6 +430,7 @@ let cleanup ~admission ~directory ~kept_root = protect (fun () ->
       | Stagehand c -> Browser_addon_stagehand.settle c ~incarnation:(Native_addon_lease.instance_id admission) ~directory:root
       | Owned_firefox c -> Browser_addon_live_bidi.settle c ~incarnation:(Native_addon_lease.instance_id admission) ~directory:root
       | Automation _ | Ego | External_host -> Ok () in
+    let into=Filename.concat kept_root instance_id in
     let* kept=match Unix.lstat root with
       | info ->
         let* ()=private_root root info in
@@ -432,14 +448,15 @@ let cleanup ~admission ~directory ~kept_root = protect (fun () ->
            the one acquired. Files the browser left for the Keeper move out
            whole to [kept_root], named for this instance, and the release
            goes on without them. *)
-        let* kept=match identity with
+        let* ()=match identity with
           | Acquired _|Cleaning _ ->
             let* files=keeper_file_count root in
-            if files=0 then Ok None else
-            let into=Filename.concat kept_root instance_id in
-            let* ()=move_keeper_files ~kept_root ~into ~root in
-            Ok (Some (into,files))
-          | Missing|Retained _|Released -> Ok None in
+            if files=0 then Ok ()
+            else move_keeper_files ~kept_root ~into ~root info
+          | Missing|Retained _|Released -> Ok () in
+        (* Read before anything is removed, so files moved by a pass that
+           failed later are reported by the pass that releases. *)
+        let* kept=kept_files into in
         let confirmed=match identity with Cleaning _ -> true | Missing|Acquired _|Retained _|Released -> false in
         let confirm ()=if confirmed then Ok () else
           Fs_compat.save_file_atomic_strict file
@@ -455,7 +472,7 @@ let cleanup ~admission ~directory ~kept_root = protect (fun () ->
           | Automation _ | Stagehand _ | Owned_firefox _ -> true | Ego | External_host -> false in
         (match identity,starts_browser with
          | Acquired _,true -> Error "owned browser allocation vanished without confirmed cleanup"
-         | (Missing|Cleaning _|Retained _|Released),_ | Acquired _,false -> Ok None) in
+         | (Missing|Cleaning _|Retained _|Released),_ | Acquired _,false -> kept_files into) in
     sync (Filename.dirname root);
     let* ()=Fs_compat.save_file_atomic_strict file (Yojson.Safe.to_string (`Assoc ["state",`String "released"])) in
     Ok (match kept with

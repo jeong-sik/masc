@@ -229,12 +229,13 @@ receipts remain distinct from successful contract validation.
    files, the socket and empty directories. Files the browser left for the
    Keeper (downloads, their host snapshots, uploads) are not a running
    resource: once the group has settled and the inode is the original, their
-   trees move by rename into `<lane-addon store>/kept-files/<instance id>`,
-   the server log names that folder, and the release goes on. The host never
-   copies or removes them; the operator prunes `kept-files`. A link there, a
-   destination that already holds the tree, a rename to another file system,
-   or changed identity leaves the release unconfirmed and refuses
-   replacement.
+   trees move by rename into `<lane-addon store>/kept-files/<instance id>`
+   and the release goes on. The release that succeeds names that folder in
+   the server log, including files an earlier pass moved before it failed.
+   The host never copies or removes them; the operator prunes `kept-files`.
+   A link or a multiply linked file there, a destination that already holds
+   the tree, a `kept-files` on another file system, or changed identity
+   leaves the release unconfirmed and refuses replacement.
    A session's profile is removed under its own lock when the session ends.
    geckodriver never removes a profile it was given
    ([geckodriver profiles](https://firefox-source-docs.mozilla.org/testing/geckodriver/Profiles.html)),

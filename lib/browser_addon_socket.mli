@@ -48,8 +48,9 @@ type cleanup_result =
   | Cleanup_released
       (** Its known resources were removed, or it never had any. *)
   | Cleanup_kept of { directory : string; files : int }
-      (** As [Cleanup_released], after moving the [files] files the browser
-          left for the Keeper into [directory]. *)
+      (** As [Cleanup_released], and [directory] holds the [files] files the
+          browser left for the Keeper, moved there by this or an earlier
+          cleanup of the instance. *)
   | Cleanup_retained
       (** The operator took it over; nothing of it was removed. *)
 val cleanup : admission:Native_addon_lease.t -> directory:string -> kept_root:string ->
@@ -63,13 +64,18 @@ val cleanup : admission:Native_addon_lease.t -> directory:string -> kept_root:st
     claim, descriptor envelope and acquisition record must still agree.
 
     Once the browser's child claims are settled and the directory is the one
-    acquired, the trees [uploads], [download-snapshots] and [downloads] that
-    hold regular files of this user move by rename into
-    [kept_root/<instance id>], made private if absent, and the release goes
-    on: [Cleanup_kept]. Nothing the browser left for the Keeper is copied or
-    deleted. A link or another kind of entry in those trees, a tree already at
-    the destination, or a rename to another file system leaves the release
-    unconfirmed. *)
+    acquired, any regular single-link file of this user under [uploads],
+    [download-snapshots] or [downloads] moves every one of those trees by
+    rename into [kept_root/<instance id>], and the release goes on. Nothing
+    the browser left for the Keeper is copied or deleted. [kept_root] and the
+    instance folder are made 0700 when absent and must otherwise be
+    directories of this user no group or other user can reach. A link, a
+    file with more links or another kind of entry in those trees, a
+    [kept_root] on another file system than the allocation, or a tree already
+    at the destination leaves the release unconfirmed with nothing moved
+    since the refusal. The release reports [Cleanup_kept] whenever the
+    instance folder exists, so files moved by a pass that failed later are
+    reported by the one that releases. *)
 type retain_error =
   | Retain_refused of string
       (** The acquisition record was not changed. *)

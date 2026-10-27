@@ -228,21 +228,54 @@ let a_cleaning_allocation_moves_keeper_files () =
        | Ok (Socket.Cleanup_kept {files;_}) -> files=1
        | Ok (Socket.Cleanup_released|Cleanup_retained) | Error _ -> false);
     check "the allocation is gone" false (Sys.file_exists root))
-(* A link is no file a browser left for the Keeper: the allocation is not kept
-   on its account and its release stays unconfirmed. *)
+(* A file left for the Keeper in an allocation of [source], beside whatever
+   [extra] adds, with the worker settled. *)
+let with_left_file ?(source=Socket.Automation owned_gecko) ~extra work =
+  with_claim ~source:(fun _ -> source) (fun admission directory root ->
+    ignore (ok (Socket.acquire ~admission ~directory));
+    let downloads=Filename.concat root "downloads" in
+    Unix.mkdir downloads 0o700;
+    let left=Filename.concat downloads "left" in
+    Out_channel.with_open_bin left (fun out -> output_string out "kept");
+    extra ~directory ~root ~downloads;
+    lease (Lease.retire admission);
+    work admission directory root left)
+(* A link, or a file with another link, beside a Keeper's file is no file a
+   browser left for the Keeper: nothing moves and the release stays
+   unconfirmed. *)
 let a_link_left_behind_is_unconfirmed () =
-  with_claim ~source:(fun _ -> Socket.Automation owned_gecko)
-    (fun admission directory root ->
-      ignore (ok (Socket.acquire ~admission ~directory));
-      let downloads=Filename.concat root "downloads" in
-      Unix.mkdir downloads 0o700;
-      let link=Filename.concat downloads "link" in
-      Unix.symlink (Filename.concat root "automation.json") link;
-      lease (Lease.retire admission);
-      check "a link leaves the release unconfirmed" true (Result.is_error (cleanup ~admission ~directory));
-      check "the record is still acquired" true (acquisition_state directory = "acquired");
-      check "the link stays" true (Sys.file_exists link);
-      check "no kept folder is made" false (Sys.file_exists (kept_root directory)))
+  List.iter (fun (label,extra) ->
+    with_left_file ~extra (fun admission directory _root left ->
+      check (label ^ ": the release is unconfirmed") true (Result.is_error (cleanup ~admission ~directory));
+      check (label ^ ": the file stays in the allocation") true (Sys.file_exists left);
+      check (label ^ ": no kept folder is made") false (Sys.file_exists (kept_root directory))))
+    ["a symbolic link",(fun ~directory:_ ~root ~downloads ->
+        Unix.symlink (Filename.concat root "automation.json") (Filename.concat downloads "link"));
+     "a second hard link",(fun ~directory:_ ~root:_ ~downloads ->
+        Unix.link (Filename.concat downloads "left") (Filename.concat downloads "again"))]
+(* A kept root another user could reach is refused before anything moves. *)
+let a_reachable_kept_root_moves_nothing () =
+  with_left_file ~extra:(fun ~directory ~root:_ ~downloads:_ ->
+      Unix.mkdir (kept_root directory) 0o755;Unix.chmod (kept_root directory) 0o755)
+    (fun admission directory _root left ->
+      check "a kept root with group or other access is refused" true (Result.is_error (cleanup ~admission ~directory));
+      check "the file stays in the allocation" true (Sys.file_exists left))
+(* Files moved by a pass that failed later are reported by the pass that
+   releases. *)
+let files_moved_before_a_failure_are_reported () =
+  with_left_file ~extra:(fun ~directory:_ ~root ~downloads:_ ->
+      Out_channel.with_open_bin (Filename.concat root "stagehand.json") (fun out -> output_string out "foreign"))
+    (fun admission directory root _left ->
+      let into=Filename.concat (kept_root directory) (Lease.instance_id admission) in
+      check "an unknown resource fails the pass" true (Result.is_error (cleanup ~admission ~directory));
+      check "the file had already moved" true
+        (Sys.file_exists (Filename.concat (Filename.concat into "downloads") "left"));
+      Unix.unlink (Filename.concat root "stagehand.json");
+      check "the releasing pass reports the moved file" true
+        (match cleanup ~admission ~directory with
+         | Ok (Socket.Cleanup_kept {directory=kept;files}) -> kept=into && files=1
+         | Ok (Socket.Cleanup_released|Cleanup_retained) | Error _ -> false);
+      check "the allocation is gone" false (Sys.file_exists root))
 let operator_retains_unconfirmed_allocation () =
   with_claim ~source:(fun _ -> Socket.Automation owned_gecko)
     (fun admission directory root ->
@@ -476,7 +509,7 @@ let () = Alcotest.run "browser addon socket ownership" ["recovery",[
   Alcotest.test_case "unconfirmed socket is retained" `Quick unknown_resources;
   Alcotest.test_case "replacement identity is retained" `Quick replaced_directory;
   Alcotest.test_case "model bootstrap cleanup preserves separate receipts" `Quick model_configuration_cleanup;
-  Alcotest.test_case "owned backend requires a settled worker and empty resource trees" `Quick owned_backend_cleanup;
+  Alcotest.test_case "an owned backend releases once its worker settled" `Quick owned_backend_cleanup;
   Alcotest.test_case "owned cleanup resumes after interrupted file deletion" `Quick interrupted_owned_cleanup;
   Alcotest.test_case "another source's resources retain the allocation" `Quick foreign_source_resources;
   Alcotest.test_case "files left for the Keeper move out before the release" `Quick keeper_files_move_out;
@@ -485,6 +518,8 @@ let () = Alcotest.run "browser addon socket ownership" ["recovery",[
   Alcotest.test_case "an occupied destination moves nothing" `Quick an_occupied_destination_moves_nothing;
   Alcotest.test_case "a cleaning allocation moves the Keeper's files" `Quick a_cleaning_allocation_moves_keeper_files;
   Alcotest.test_case "a link left behind leaves the release unconfirmed" `Quick a_link_left_behind_is_unconfirmed;
+  Alcotest.test_case "a reachable kept root moves nothing" `Quick a_reachable_kept_root_moves_nothing;
+  Alcotest.test_case "files moved before a failure are reported" `Quick files_moved_before_a_failure_are_reported;
   Alcotest.test_case "the operator retains an unconfirmed allocation in place" `Quick operator_retains_unconfirmed_allocation;
   Alcotest.test_case "retain refuses a replaced allocation directory" `Quick retain_refuses_replaced_directory;
   Alcotest.test_case "retain reports an allocation already released" `Quick retain_reports_a_released_allocation;

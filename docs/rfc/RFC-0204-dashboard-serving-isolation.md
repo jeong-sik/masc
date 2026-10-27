@@ -189,7 +189,29 @@ POST·PUT·DELETE 와 `/mcp` 도구 호출은 `Background` 그대로다. 무거�
 - 캐시 계산의 lane 은 그 값을 기다리는 쪽이 정한다. 캐시가 비어 읽기가 직접 계산하면(`Compute`) 그 계산은 `Read` 다. 읽기가 옛 값으로 바로 답하고 fork 하는 SWR 재계산은 기다리는 요청이 없으니 `Background` 다. 이 재계산은 계산 예산이 8~120초라, `Read` 로 두면 읽기 풀 1~2 domain 을 다 쓸 수 있다.
 - GET 이 닿는 배경 갱신 fork 는 일곱 곳이고, 모두 fork 한 fiber 안을 `Pool_lane.with_background` 로 감싼다: `Dashboard_cache` SWR, `Operator_control_snapshot_cache` SWR, `Server_dashboard_http_namespace_truth` shell 갱신, `Server_dashboard_http_runtime_info` 의 git 갱신과 runtime probe 갱신, `Dashboard_briefing_sections` 비동기 갱신, `Runtime_provider_usage_read` 배경 읽기. fork 가 안 돼 그 자리에서 계산하는 경로는 호출자가 기다리므로 감싸지 않는다. 새 배경 갱신 fork 를 만들면 같이 감싼다. 빠뜨리면 그 일은 읽기 풀에서 돌고, `pool_wait.read.run` 의 긴 꼬리로 보인다.
 - 남는 경우: 키가 아예 없을 때(부팅 직후, eviction, invalidate 뒤) 배경 fiber 가 시작한 계산을 읽기가 `Wait` 으로 기다리면, 읽기는 배경 풀의 계산을 기다린다. 옛 값이 있는 동안에는 생기지 않는다.
-- 다른 fiber 의 계산을 기다리는 일은 풀 job 밖, 요청 fiber 에서 한다. L4b 에서 `run_dashboard_compute` 안에서 캐시를 기다리는 경로를 모두 찾아, 풀에 넣는 범위를 계산 부분으로 좁힌다.
+- 다른 fiber 의 계산을 풀 job 안에서 기다리지 않게 한다(L4b, 아래).
+
+#### L4b: 줄 선 계산은 기다리는 job 이 맡는다
+
+풀 job 무게는 1.0 이라, job 이 캐시를 기다리며 쉬는 동안 그 worker 는 다른 일을 받지 않는다. `run_dashboard_compute` 11곳 중 6곳과 캐시 계산 안의 중첩 조회 4갈래가 job 안에서 `Dashboard_cache` 를 조회한다(`docs/evidence/2026-10-27-read-pool-contention/cache-wait-in-pool-jobs.md`). 가장 나쁜 경우는 순서가 꼬이는 것이다. 요청 fiber 가 키의 owner 이고 계산을 같은 풀에 넣었는데, 그 풀의 worker 를 같은 키를 기다리는 job 이 쥐고 있다. 계산은 job 이 비켜야 시작하고, job 은 계산이 끝나야 비킨다. 기다림 timeout 까지 아무것도 안 된다. 같은 키를 HTTP/2 는 요청 fiber 에서, HTTP/1 은 job 안에서 조회하는 곳이 셋 있어 실제로 생길 수 있다.
+
+호출 지점마다 조회를 job 밖으로 옮기지 않는다. 중첩이 4단(briefing → projection → operator snapshot → Keeper 마다의 키)이고, 같은 수정을 열 곳 넘게 따로 해야 한다. `Dashboard_cache` 한 곳에서 고친다.
+
+- 옛 값이 없는 `Computing` 칸에 claim 과 결과 promise 를 둔다. claim 은 넷 중 하나다: 아무도 안 맡음, owner job 이 맡음, 기다리던 job 이 맡음, 버려짐(`Abandoned`). 계산 자체는 칸에 두지 않는다. 맡는 쪽은 자기 compute 를 돌린다. 같은 키는 같은 값을 만든다는 것이 캐시의 약속이다. 호출자마다 payload 준비 방식이 달라도 캐시는 지금도 먼저 계산한 쪽의 준비 방식으로 값을 두고, 다른 방식이 필요한 읽기는 그 자리에서 만든다(`force_cached_payload`). owner 의 계산을 대신 돌리면 owner 요청의 switch 같은 자원을 owner 가 취소된 뒤에도 쓰게 된다.
+- 계산을 돌린 쪽이 결과를 owner 의 token 으로 칸에 쓰고 promise 를 푼다. owner job 이 돌렸든 기다리던 job 이 돌렸든 같다. 실패하면 칸을 지우고 promise 를 푼다: 계산이 예외를 내면 `Failed`, 취소되거나 자기 window 가 닫히면 `Released`.
+- owner 는 자기 job 을 넣고, 그 job 과 결과 promise 를 함께 기다린다. job 은 시작할 때 claim 을 잡아야 계산하고, 못 잡으면 바로 끝나 worker 를 내놓는다. 결과가 먼저 정해지면 owner 는 바로 돌아오고, 아직 줄에 있던 job 은 시작 전에 취소된다.
+- 풀 job 안의 조회가 `Wait` 를 만나고 claim 이 비어 있으면(owner 계산이 아직 줄에 있으면) 잡고, 자기 compute 를 이미 쥔 worker 에서 돌린다. 자리를 더 쓰지 않는다. 기다리던 job 들은 칸이 비면 지금처럼 직접 계산한다.
+- claim 이 잡혀 있으면(계산이 도는 중이면) 지금처럼 기다린다. worker 를 쉬게 쥐는 시간은 그 계산 시간을 넘지 않는다. 요청 fiber 의 기다림은 worker 를 쓰지 않으므로 그대로 둔다.
+- owner 가 받는 것: `Failed` 면 그 실패를 그대로 받는다. `Released` 면 실패하지 않고 키를 다시 조회한다. 다른 요청이 취소된 것 때문에 owner 가 실패하지 않게 하려는 것이다. 다시 조회해도 owner 의 window 는 새로 열리지 않는다. 한 조회의 window 는 처음 정한 마감 시각 하나이고, 다시 하는 시도는 남은 시간만 쓴다. 기다림 예산도 처음부터 센다.
+- owner 의 window 가 닫히는 순간 결과가 `Published` 로 정해져 있으면, timeout 대신 그 값을 돌려준다. 두 일이 같은 scheduler 차례에 일어나면 Eio 는 이긴 쪽 값을 버리고 취소로 끝낸다.
+- 맡는 job 은 무게 1.0 job 만이 아니다. IO 무게(0.05) job 안의 조회도 맡을 수 있고, 그러면 CPU 계산이 0.05 자리에서 돈다. owner 가 IO job 안에서 바로 계산하던 지금과 같은 성질이다.
+- owner 가 먼저 포기하면(취소, window 닫힘) 아무도 맡지 않은 계산은 `Abandoned` 로 막고 칸을 지운다. 그 뒤에는 누구도 이 claim 을 잡지 못한다. 이미 맡은 계산은 맡은 쪽에 남긴다. 맡은 쪽이 끝나면 칸에 쓰므로, 다음 조회가 같은 키를 다시 계산하지 않는다. owner job 이 맡았다면 그 job 은 owner 와 함께 취소되고, 나가면서 칸을 지운다.
+- 같은 키 계산은 한 epoch 에 한 번만 돈다. claim 은 한 번만 잡힌다.
+- 맡기는 키 사이에 새 기다림을 만들지 않는다. 맡은 쪽은 그 키의 owner 가 돌렸을 계산을 돌리므로, 그 안에서 기다리는 키도 owner 가 기다렸을 키와 같다. 그래서 서로 기다리다 멈추지 않는 조건은 지금과 같다: 캐시 키의 의존이 고리가 없어야 한다. 조사한 중첩은 한 방향이다. 질의 키 → 화면 키(briefing·mission·mission_briefing·workspace·execution) → projection(snapshot·digest) → operator snapshot → Keeper 마다의 키. 맨 아래 키의 계산은 다른 캐시를 조회하지 않는다. 계산이 자기 키를 다시 조회하면 지금처럼 timeout 까지 멈춘다.
+- Eio 밖(systhread 등)에서 만든 칸에는 claim 을 두지 않는다. 그 owner 는 promise 를 기다릴 수 없다.
+- `Operator_control_snapshot_cache` 도 job 안에서 기다리지만 owner 가 계산을 풀에 넘기지 않고 자기 fiber 에서 바로 한다. 기다리는 job 은 도는 계산을 기다리므로 꼬이지 않는다. L4b 범위 밖이다.
+
+검증: `specs/bug-models/DashboardCacheClaim.tla`. clean 모델(worker 1·2개)은 `NoInversion`, `AtMostOneRunner`, `ClaimHasRunner`, `ClaimantKeepsSlot` 와 liveness 둘(맡은 계산은 결국 Ok·Failed·Released 가 된다 `ClaimSettles`, 기다리는 owner 는 결국 돌아온다 `OwnerReturns`)을 지킨다. 버그 모델 넷은 각각 깬다: 기다리기만 함(L4b 전 코드) → `NoInversion`(그리고 `OwnerReturns`), owner job 이 claim 을 무시 → `AtMostOneRunner`, 맡은 쪽이 실패하고 결과를 안 풂 → `ClaimHasRunner`(그리고 `ClaimSettles`), 포기한 owner 가 맡긴 칸을 지움 → `ClaimantKeepsSlot`. 시험(`test/test_dashboard_cache_claim.ml`)은 worker 1~2개로 짠다: 줄 선 계산을 기다리던 job 이 맡음, owner 는 자기 job 이 줄에 있어도 결과가 나오면 돌아옴, 진 owner job 은 계산 안 함, 맡은 쪽 실패는 키를 비우고 owner 를 실패시킴, 맡은 쪽 취소는 owner 가 다시 조회해 계산함, 포기한 owner 는 맡은 쪽 칸을 남김, 맡은 쪽은 새 epoch 에 쓰지 않음, 풀 밖 조회는 맡지 않음, 도는 계산은 기다림, 아무도 안 맡았을 때 포기한 owner 는 키를 비움, 맡은 쪽 window 가 닫히면 owner 가 계산함, 다시 조회해도 owner window 안에서 끝남. 모델에 없는 것: window 와 결과가 같은 차례에 정해지는 경우, 다시 조회(새 epoch), owner 자신이 풀 job 인 경우, IO 무게 job.
 
 ### 3.5 domain 예산
 
@@ -199,14 +221,16 @@ POST·PUT·DELETE 와 `/mcp` 도구 호출은 `Background` 그대로다. 무거�
 |---|---:|---:|
 | main | 1 | 1 |
 | snapshot codec | 1 | 1 |
-| 읽기 풀 | 0 | 2 |
+| system-thread host(#46342) | 0 | 1 |
+| 읽기 풀 | 0 | L2 측정으로 정한다 |
 | 배경 풀 | 14 | 나머지 |
 | agent_core codec 풀 | 14 | L5 측정으로 정한다 |
 
-- 읽기 풀은 코어가 8개 이상이면 2, 그보다 적으면 1이다. 기다리지 않을 때 읽기 핸들러는 수 ms 안에 끝난다(1.1절 `limit=1` 최소 4 ms).
+- 읽기 풀 크기는 L2 를 운영 서버에 배포해 잰 값으로 정한다. 읽기가 기다리는 계산도 읽기 풀에서 돈다. 빈 캐시를 채우는 계산(3.4)이 그렇다. 그래서 크기는 부하 상태의 `pool_wait.read` 의 `run`(계산 길이)·`wait`·`abandoned` 분포와 동시에 들어오는 읽기 수로 정한다. 기다리지 않을 때의 핸들러 시간(1.1절 `limit=1` 최소 4 ms)은 근거가 되지 않는다. 목표가 재는 것은 기다릴 때의 읽기다(#46374 리뷰).
 - 배경 풀은 `max 1 (recommended - 2 - 읽기 - codec)` 이다. `MASC_EXECUTOR_DOMAIN_COUNT` 는 지금처럼 배경 풀 크기를 정한다. 읽기 풀과 codec 풀 크기는 따로 정한다.
 - agent_core codec 풀은 배경 풀과 합치지 않는다. 지금 `run_cpu` 는 호출자가 취소되면 worker 를 기다리지 않고 `Caller_cancelled`·`Runtime_released` 를 원자 변수로 알린다. masc 의 `Executor_pool_submission.submit` 은 worker 를 취소하고 `Cancel.protect` 아래에서 끝나기를 기다린다. 합치면 이 의미가 바뀌고, Keeper 실행 기록 쓰기(`writer_gate` 를 잡은 채 하는 비교)가 배경 FIFO 뒤에 선다. 크기만 예산 안으로 줄인다. 지금 `Execution_runtime.stats` 는 호출 횟수(`pool_requested`, `reentrant_inline`, `caller_cancelled`)만 세서 크기를 정하기에 모자란다. L5 에서 제출부터 시작까지의 대기와 실행 시간을 재서 `/health` 에 싣고, 그 값으로 정한다.
 - 출처를 모르는 domain 1개는 L3 에서 찾는다.
+- system-thread host 는 #46342 가 더한 domain 이다. main domain 에서 부르던 Curator·Librarian 의 systhread 를 여기서 시작한다. lock 이 하나라 OCaml 로는 최대 한 코어를 쓴다. 10-27 15:25 운영 sample 에서 옮길 일이 이미 약 1.2 코어를 썼다(#46342 리뷰). 배포 뒤 이 domain 이 얼마나 바쁜지 runtime events 의 domain 번호로 같이 잰다. 배경 풀 크기 계산에는 아직 넣지 않았다. 그 계산은 L3 의 `shared_domain_count_beside_read` 가 한다.
 
 ### 3.6 풀 대기 시간을 잰다
 
@@ -268,19 +292,21 @@ goal `goal-read-api-p99-300-keepers-20261027` 의 판정 표다. 행마다 측�
 |---|---|---|
 | L1 | 이 RFC 와 측정 기록 | — |
 | L2 | `Pool_lane` 표시(풀 선택은 그대로), `Server_bootstrap_http` 의 GET/HEAD 표시(HTTP/1·HTTP/2), lane 별 풀 대기·실행 히스토그램을 `/health` 에 싣기 | 5.2 의 표시 시험, 히스토그램 구간 경계 |
-| L3 | 읽기 풀 생성과 domain 예산, 제출 함수 네 개의 풀 선택, 출처 모를 domain 찾기. L4a·L4b 와 같이 또는 그 뒤에 머지한다 | 5.1, 5.2 의 풀 선택 시험 |
+| L3 | 읽기 풀 생성과 domain 예산, 제출 함수 네 개의 풀 선택, 출처 모를 domain 찾기. L2·L4a·L4b 를 배포해 잰 뒤에 따로 머지한다 | 5.1, 5.2 의 풀 선택 시험 |
 | L4a | 요청이 기다리지 않는 배경 갱신 fork 의 lane(3.4) | 5.2 의 캐시 시험 |
-| L4b | 캐시 대기를 풀 job 밖으로(3.4) | 풀 job 안의 대기가 읽기 worker 를 쥐지 않는다 |
+| L4b | 줄 선 캐시 계산을 기다리는 job 이 맡는다(3.4 L4b) | TLA+ claim 모델, 3.4 L4b 시험 넷 |
 | L5 | codec 풀의 대기·실행 시간을 `/health` 에 싣고 그 값으로 크기 정하기 | 예산 합이 코어 수 이하 |
 | L6 | 수용 측정 기록, status 갱신 | 5.3 |
 
 L3 를 L4 보다 먼저 넣으면 안 된다. 읽기 풀은 1~2 domain 이다. 요청이 fork 한 SWR 재계산(계산 예산 8~120초)이 Read 로 그 domain 을 다 쓰면 다른 GET 이 그 뒤에 선다. 그 대기는 compute timeout 에 들어가 circuit 을 열 수 있다. 풀 job 안의 `Dashboard_cache` `Wait` 도 읽기 worker 를 붙잡는다. 앞의 것은 L4a(#46385), 뒤의 것은 L4b 가 고친다(#46374 독립 리뷰).
 
+10-27 에 L3 를 스택에서 빼고 L1→L2→L4a→L4b 를 먼저 넣기로 했다. #46374 리뷰가 읽기 풀 크기의 근거가 없다고 짚었기 때문이다. 읽기가 기다리는 빈 캐시 계산 둘이 읽기 풀 2개를 잡으면 다른 읽기가 초 단위로 선다. L4a·L4b 는 L3 없이도 쓸모가 있다. L4a 는 읽기가 fork 한 배경 갱신을 `pool_wait` 의 background 로 세어 L2 의 read 값을 깨끗하게 한다. L4b 는 풀이 하나여도 job 이 자기 뒤에 줄 선 계산을 기다려 둘 다 멈추는 일을 푼다.
+
 계측(L2)을 맨 앞에 둔다. 1.1절 수정 후 측정에서 공유 풀은 6초 sample 동안 쉬고 있었고, main domain 의 lock 대기가 더 컸다. L2 로 운영 서버의 풀 대기를 한 시간 재서, 읽기의 풀 대기 p99 가 목표(100 ms)를 넘을 때 L3 이후를 진행한다. 넘지 않으면 L3 이후는 보류하고 main domain 쪽을 먼저 고친다.
 
 ## 7. 위험
 
-- **읽기끼리 기다린다.** 무거운 GET 이 읽기 풀 2개를 다 쓰면 가벼운 GET 이 기다린다. L2 계측으로 본다. 읽기 하나가 저장소 크기만큼 커지는 경우는 RFC-0372 로 고친다. domain 을 늘려서 덮지 않는다.
+- **읽기끼리 기다린다.** 무거운 GET 이나 읽기가 기다리는 빈 캐시 계산이 읽기 풀을 다 쓰면 가벼운 GET 이 기다린다. L2 계측으로 본다. 읽기 하나가 저장소 크기만큼 커지는 경우는 RFC-0372 로 고친다. domain 을 늘려서 덮지 않는다.
 - **포기된 요청이 자리를 잡고 있다.** HTTP/1 핸들러는 연결의 읽기 루프를 막고 돈다. 클라이언트가 timeout 으로 떠나도 서버 job 은 취소되지 않고 읽기 풀 자리를 끝까지 쓴다. 지금도 같은 일이 공유 풀에서 일어난다. 취소는 RFC-0372 의 요청 단위 기한과 같이 다룬다.
 - **배경 작업과 같은 lock.** 읽기 핸들러가 배경 작업이 쥔 store lock 을 기다리면 풀을 나눠도 느리다. 이때는 풀 대기는 짧고 핸들러 시간이 길게 나온다. L2 계측으로 구분한다.
 - **배경 갱신이 늦어진다.** L4a 뒤 SWR 재계산은 L3 로 줄어든 공유 풀에서 기다린다. `compute_under_timeout` 은 풀 대기 시간도 세므로, 공유 풀이 밀리면 재계산이 `Compute_timeout` 으로 끝나는 일이 는다. 그때 `Dashboard_cache` 는 옛 값을 TTL 의 6배(stale 3배 × backoff 2배) 동안 신선한 값으로 다시 쓴다. L3 전에도 같았지만 풀이 더 컸다. 배포 뒤 `pool_wait.background.wait` p99 를 재계산 예산과 비교한다.

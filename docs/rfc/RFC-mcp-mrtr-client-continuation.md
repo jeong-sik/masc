@@ -36,6 +36,9 @@ MASC 의 현재 상태는 이렇다.
 ## 1. 실측
 
 2026-10-27 확인. 코드는 스택 #46344~#46349 를 얹은 상태이고, 이 스택은 아직 컴파일되지 않았다.
+표의 기준 트리는 스택 맨 위 `refs/pull/46349/head` 다. 이 PR 의 트리(main)에는
+`start_tool_with_continuation`, `resume_tool_with_state`(#46348), `Input_required` 처리(#46349),
+`client_capabilities_meta_key` 가 아직 없다.
 
 | 항목 | 값 | 확인 방법 |
 |---|---|---|
@@ -47,19 +50,25 @@ MASC 의 현재 상태는 이렇다.
 | Keeper 의 처리 | `Input_required` 를 복구 불가 실패로 보고 ("효과가 적용됐을 수 있으니 상태를 확인하라") | `lib/keeper/keeper_identity_tools.ml` |
 
 명세 근거는 [MRTR](https://modelcontextprotocol.io/specification/2026-07-28/basic/patterns/mrtr)
-페이지다. 이 RFC 가 기대는 문장은 다음과 같다.
+페이지다(원본: 명세 저장소 `docs/specification/2026-07-28/basic/patterns/mrtr.mdx`). 이 RFC 가
+기대는 문장은 다음과 같다. 괄호의 번호는 페이지의 "Server Requirements (Basic Workflow)" 와
+"Client Requirements (Basic Workflow)" 목록 번호다.
 
 - 서버는 server→client 요청을 MRTR 로 보내야 한다. 이 요구는 그런 요청을 보낼 때만 의미가 있다.
-- 서버는 클라이언트가 선언하지 않은 요청을 `inputRequests` 에 넣어서는 안 된다.
+  (페이지 머리말)
+- 서버는 클라이언트가 선언하지 않은 요청을 `inputRequests` 에 넣어서는 안 된다. (서버 7)
 - 서버는 `InputRequiredResult` 에 `inputRequests` 와 `requestState` 중 하나 이상을 넣어야 한다.
+  (서버 6)
 - 서버는 들어온 `requestState` 를 공격자가 만든 입력으로 다루고, 결과에 영향을 주면 무결성을
-  검증해야 한다.
-- `inputRequests` 가 없으면 클라이언트는 원래 요청을 바로 다시 보내도 된다.
+  검증해야 한다. (서버 4)
+- `inputRequests` 가 없으면 클라이언트는 원래 요청을 바로 다시 보내도 된다. (클라이언트 1)
 - 클라이언트는 `requestState` 를 있는 그대로 돌려줘야 하고, 없던 라운드에는 넣어서는 안 된다.
-- 재시도의 JSON-RPC `id` 는 처음 요청과 달라야 한다.
-- `requestState` 와 `inputRequests` 는 그 재시도 하나에만 쓴다.
-- 서버는 클라이언트가 재시도할 것이라고 가정해서는 안 된다.
+  (클라이언트 2)
+- 재시도의 JSON-RPC `id` 는 처음 요청과 달라야 한다. (클라이언트 3)
+- `requestState` 와 `inputRequests` 는 그 재시도 하나에만 쓴다. (클라이언트 4)
+- 서버는 클라이언트가 재시도할 것이라고 가정해서는 안 된다. (서버 8)
 - `InputRequiredResult` 를 보낼 수 있는 요청은 `tools/call`, `resources/read`, `prompts/get` 이다.
+  ("Supported Requests" 표)
 
 ## 2. 결정
 
@@ -78,8 +87,8 @@ MASC 의 현재 상태는 이렇다.
 | 받은 결과 | 동작 |
 |---|---|
 | `inputRequests` 없음, `requestState` 있음 | 같은 도구·인자·`requestState` 로 새 id 를 달아 다시 보낸다 |
-| `inputRequests` 있음 | 지금처럼 `Input_required` 실패. 선언하지 않은 capability 를 서버가 요구한 것이고, 채울 수단이 없다 |
-| 둘 다 없음 | 명세 위반이므로 `Malformed` |
+| `inputRequests` 있음 | 지금처럼 `Input_required` 실패. 클라이언트는 capability 를 선언하지 않으므로 서버가 보낸 `inputRequests` 는 명세 위반(서버 7)이다. 선언했더라도 `ElicitRequest`, `CreateMessageRequest`, `ListRootsRequest` 어느 것도 채울 수단이 없다 |
+| 둘 다 없음 | 명세 위반(서버 6)이므로 `Malformed`. 상태도 요청도 없는 라운드는 이어 갈 근거가 없다 |
 
 ### D3. 승인 한 번이 한 번의 호출 전체를 덮는다
 
@@ -91,11 +100,25 @@ MASC 의 현재 상태는 이렇다.
 한 번만 받으면 서버가 라운드를 늘려서 얻는 권한이 없는지 봐야 한다. 라운드가 늘어도 도구와
 인자가 같다는 점이 근거다.
 
-### D4. 이어 붙이는 횟수에 상한을 두지 않는다
+### D4. 이어 붙이는 횟수에는 상한을 두지 않고, 호출 하나가 deadline 하나를 나눠 쓴다
 
-횟수 상한은 `cap` 이라서 워크어라운드 거부 기준에 걸린다. 서버가 끝없이 라운드를 돌려주는 경우를
-끊는 건 호출의 취소 범위(Eio cancel)와 호출 시간 제한이다. 이 시간 제한이 Keeper 도구 호출에
-실제로 있는지는 아직 확인하지 못했다(열린 질문 Q1).
+횟수 상한은 `cap` 이라서 워크어라운드 거부 기준에 걸린다. 두지 않는다.
+
+그렇다고 서버가 끝없이 라운드를 돌려주는 경우를 지금 코드가 끊어 주지는 않는다. 호출 시간 제한은
+요청 하나에만 걸려 있다(줄 번호는 이 PR 의 트리 기준).
+
+- `lib/mcp_client/mcp_client.ml:46`: "one window per request".
+- `lib/keeper/keeper_identity_tools.ml:24-27`: "The bound is per request, not per call: ... one that
+  answers each request inside the threshold runs the call to its end."
+- 두 주석 모두 attempt watchdog 이 진행 중인 도구를 보지 않으므로 이 창이 호출의 유일한 생존 장치라고
+  적는다(`mcp_client.ml:50-51`).
+
+그래서 라운드마다 새 창이 열리고, 서버가 매 요청을 창 안에서 답하면 호출 전체 시간은 `라운드 수 × 문턱`
+이 된다. 라운드 수는 서버가 정한다.
+
+결정: 이어 붙이기는 첫 전송의 deadline 하나를 라운드 사이로 들고 간다. 첫 전송 시각에 문턱을 더한
+시각을 이어 붙이기 전체의 경계로 삼고, 매 라운드에는 남은 시간을 넘긴다. 라운드 수에 상한이 없어도
+호출은 유한하다. 호출 취소(Eio cancel)는 그대로 유효하다.
 
 ### D5. 선언하지 않는 것
 
@@ -119,6 +142,9 @@ MASC 의 현재 상태는 이렇다.
 6. 취소되면 진행 중인 라운드에 `notifications/cancelled` 를 보내고 이어 붙이기를 멈춘다.
 7. 이어 가지 못한 채 끝나면(취소, 서버가 더 이상 응답하지 않음) 지금의 Keeper 문구를 유지한다.
    "효과가 적용됐을 수 있으니 상태를 확인하라"는 뜻이다.
+8. 이어 붙이기 전체가 첫 전송의 deadline 하나를 나눠 쓴다. 라운드마다 새 deadline 을 주지 않는다(D4).
+9. 재시도도 새 요청이라 `_meta` 의 필수 필드(`protocolVersion`, `clientInfo`, `clientCapabilities`)를
+   싣는다. 명세가 모든 요청에 요구한다.
 
 ## 4. 하지 않는 것
 
@@ -142,6 +168,8 @@ MASC 의 현재 상태는 이렇다.
 | 라운드 중 취소 | `notifications/cancelled` 가 나가고 이어 붙이기가 멈춘다 |
 | 라운드 중 도구 스키마 변경 | 보내기 전에 중단 |
 | 승인 | 라운드 수와 상관없이 한 번 쓰인다 |
+| 서버가 매 요청을 문턱 안에서 답하며 라운드를 끝없이 돌려줌 | 첫 전송의 deadline 이 지나면 호출이 실패로 끝나고 더 이어 보내지 않는다. 라운드마다 deadline 이 새로 열리지 않는다 |
+| 재시도 요청 | `_meta` 의 필수 필드가 있다 |
 | 로그와 영수증 | `requestState` 값이 없다 |
 
 실제 서버와의 호환은 확인하지 못했다. `requestState` 라운드를 내는 공개 서버나 SDK 가 있는지
@@ -149,7 +177,8 @@ MASC 의 현재 상태는 이렇다.
 
 ## 6. 열린 질문
 
-- Q1. Keeper 도구 호출에 전체 시간 제한이 있는가. 없으면 D4 는 도구 호출 단위 취소에만 기댄다.
+- Q1. 이어 붙이기가 나눠 쓰는 deadline 의 길이. 첫 전송 + 문턱 하나로 정하면, 라운드마다 오래 걸리는
+  정상 도구가 중간에 끊긴다. 문턱의 배수나 별도 설정이 필요한지 구현 전에 정한다.
 - Q2. 라운드 수와 요청 id 를 Keeper 실행 영수증의 어느 필드에 남기는가.
 - Q3. elicitation 을 선언할 시점과 운영자 화면 경로.
 
@@ -158,6 +187,8 @@ MASC 의 현재 상태는 이렇다.
 - Evidence: [MCP 2026-07-28 MRTR](https://modelcontextprotocol.io/specification/2026-07-28/basic/patterns/mrtr)
 - Timestamp: 2026-10-27
 - Confidence: 명세 문장 High(원문을 읽었다). 코드 사실 Medium(컴파일되지 않은 스택 위의 소스).
+- 보강(2026-10-27): 서버 의무 6~8 과 클라이언트 의무 1~4 를 명세 저장소의 `mrtr.mdx` 원본 파일로 다시
+  대조했다. D4 의 코드 주석은 이 PR 의 head 에서 읽었다.
 - Delta: 이전 감사 문서는 "서버에 일반 MRTR 생산자가 없다"를 남은 필수 간극으로 적었다.
   서버 의무는 server→client 요청을 보낼 때만 걸리므로 간극이 아니다. 실제 간극은 클라이언트가
   `requestState` 만 있는 라운드를 호출 경로에서 이어 가지 않는 것이다.

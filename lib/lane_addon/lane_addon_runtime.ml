@@ -69,6 +69,7 @@ type connection = {
   action_schema : unit -> Yojson.Safe.t option;
   operator_schema : unit -> Yojson.Safe.t option;
   companion_tools : unit -> string list;
+  observation_effect : string -> Lane_addon_call_context.observation_effect;
   call_operator : admit:(unit -> (unit, operator_error) result) -> arguments:Yojson.Safe.t -> (Yojson.Safe.t, operator_error) result;
   act : arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, string) result;
   stop : unit -> (Lifecycle.release, Lifecycle.failure) result;
@@ -1746,6 +1747,7 @@ let backend ~store ~artifact_store () = match !override with
                 action_schema=(fun () -> Lane_addon_native_worker.action_schema worker);
                 operator_schema=(fun () -> Lane_addon_native_worker.operator_schema worker);
                 companion_tools=(fun () -> Lane_addon_native_worker.companion_tools worker);
+                observation_effect=(fun name -> Lane_addon_native_worker.observation_effect worker name);
                 call_operator=(fun ~admit ~arguments -> Lane_addon_native_worker.call_operator worker ~admit ~arguments);
                 call_exported_tool=(fun ~companion ~on_result ~authorize ~principal ~name ~arguments ->
                   Lane_addon_native_worker.call_exported_tool ~on_result ?companion ?authorize ~principal ?finalize_result worker ~name ~arguments
@@ -1809,6 +1811,7 @@ let backend ~store ~artifact_store () = match !override with
             exported_tools=(fun () -> Lane_addon_worker.exported_tools worker);
             operator_schema=(fun () -> Lane_addon_worker.operator_schema worker);
             companion_tools=(fun () -> Lane_addon_worker.companion_tools worker);
+            observation_effect=(fun name -> Lane_addon_worker.observation_effect worker name);
             call_operator=(fun ~admit ~arguments -> Lane_addon_worker.call_operator worker ~admit ~arguments);
             call_exported_tool=(fun ~companion ~on_result ~authorize ~principal ~name ~arguments ->
               Lane_addon_worker.call_exported_tool ~on_result ?companion ?authorize ~principal worker ~name ~arguments
@@ -2529,17 +2532,6 @@ let invoke_companion_export ~sw m ~config ~access ~principal ~companion_publish 
                | Eio.Cancel.Cancelled _ as exn -> C.cancel_invocation grant;raise exn
                | _ -> C.cancel_invocation grant;Error (Lane_addon_call_context.Transport_error "private invocation outcome unknown"))))
 
-(* What a call to an export can do to the worker's last observation, by the
-   worker's own word: [annotations.readOnlyHint] on the tool it listed. The
-   host cannot see worker-owned state, so it takes that word as it takes the
-   worker's rows. A tool that lists no hint may change anything. *)
-type export_effect = Reads_only | May_change
-let export_effect (tool : Mcp_protocol.Mcp_types.tool) =
-  match Option.bind tool.Mcp_protocol.Mcp_types.annotations
-      (fun annotations -> annotations.Mcp_protocol.Mcp_types.read_only_hint) with
-  | Some true -> Reads_only
-  | Some false | None -> May_change
-
 let call_exported_tool_on_owner ~companion_publish ~continuation ~on_complete ~on_result ~authorize ~principal ~config ~access ~reserved ~(export : tool_export) ~arguments =
     Fun.protect ~finally:on_complete (fun () ->
     let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
@@ -2558,12 +2550,17 @@ let call_exported_tool_on_owner ~companion_publish ~continuation ~on_complete ~o
     let* sw = match Eio_context.get_root_switch_opt () with
       | Some sw -> Ok sw | None -> Error (Unavailable "Add-on background owner is unavailable") in
     let worker_backend = backend ~store:m.store ~artifact_store:m.artifact_store () in
-    (* A declared read cannot leave the last observation stale, so it neither
-       marks that observation refreshing nor holds back a machine consumer's
-       capture while it runs. Counting it would also strand a consumer refused
-       during the call: only the next committed observation wakes it again. *)
-    let declared = export_effect export.tool in
-    let in_flight = match declared with Reads_only -> 0 | May_change -> 1 in
+    (* The worker declares, on its private effect port, which exports leave its
+       observation as it was; the host cannot see worker-owned state and takes
+       that word as it takes the worker's rows. A declared read neither marks
+       the observation refreshing nor holds back a machine consumer's capture
+       while it runs. Every other call is counted, and a consumer refused as
+       "refreshing" meanwhile is woken again when it ends: through the
+       observation it schedules, through [failed], or directly on a refusal. *)
+    let declared = original.worker.observation_effect export.tool.name in
+    let in_flight = match declared with
+      | Lane_addon_call_context.Reads_only -> 0
+      | Lane_addon_call_context.May_change -> 1 in
     e.active_tool_calls <- e.active_tool_calls + in_flight;
     Fun.protect ~finally:(fun () -> e.active_tool_calls <- e.active_tool_calls - in_flight) (fun () ->
     try
@@ -2582,19 +2579,27 @@ let call_exported_tool_on_owner ~companion_publish ~continuation ~on_complete ~o
       (* Worker-owned state is not an input source, so source-change hints alone
          cannot reveal a tool's effect. Refresh its observation after a completed
          reply, including a worker error that may have changed machine state.
-         A successful reply from a declared read is the exception: by the
+         A successful reply from a declared read skips that refresh: by the
          worker's word the call changed nothing, so the last observation still
          stands. An error reply from that tool still refreshes.
-         Such a reply can also have admitted a durable host request. Signal the
+         Any reply can also have admitted a durable host request. Signal the
          same instance's host cycle after RPC serialization has unwound; merely
-         observing its rows never lists or dispatches that request. *)
+         observing its rows never lists or dispatches that request. That cycle
+         ends with an observation, so a worker with a host port still observes
+         after a declared read; the skip holds only for a worker without one. *)
       (match result with
        | Ok reply -> if not e.stopping then (
            (match declared, reply.Mcp_protocol.Mcp_types.is_error with
-            | Reads_only, (None | Some false) -> ()
-            | Reads_only, Some true | May_change, (None | Some true | Some false) -> wake e);
+            | Lane_addon_call_context.Reads_only, (None | Some false) -> ()
+            | Lane_addon_call_context.Reads_only, Some true
+            | Lane_addon_call_context.May_change, (None | Some true | Some false) -> wake e);
            if Option.is_some connection.host then wake_host e)
-       | Error (Lane_addon_call_context.Host_refusal _) -> ()
+       | Error (Lane_addon_call_context.Host_refusal _) ->
+           (* A refused call never reached the worker and schedules nothing,
+              but while it was counted a consumer may have been refused. *)
+           (match declared with
+            | Lane_addon_call_context.Reads_only -> ()
+            | Lane_addon_call_context.May_change -> if not e.stopping then wake_dependents m e)
        | Error (Lane_addon_call_context.Transport_error detail) ->
            if not e.stopping then (
              failed m e (Lifecycle.Effect_outcome_unknown ("tool outcome unknown: " ^ detail));
@@ -4718,6 +4723,7 @@ module For_testing = struct
     action_schema : unit -> Yojson.Safe.t option;
     operator_schema : unit -> Yojson.Safe.t option;
     companion_tools : unit -> string list;
+    observation_effect : string -> Lane_addon_call_context.observation_effect;
     call_operator : admit:(unit -> (unit, operator_error) result) -> arguments:Yojson.Safe.t -> (Yojson.Safe.t, operator_error) result;
     act : arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, string) result;
     stop : unit -> (Lifecycle.release, Lifecycle.failure) result;

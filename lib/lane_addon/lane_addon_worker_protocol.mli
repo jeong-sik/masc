@@ -45,6 +45,10 @@ val companion_tools : t -> string list
 (** Ready-only negotiated export names. The optional version-2 handshake requires
     host context and supports binding after a validated public reply. No grant
     is given to other tools; unsupported hosts cannot silently negotiate it. *)
+val observation_effect : t -> string -> Lane_addon_call_context.observation_effect
+(** What the Ready worker declared on its {!Lane_addon_call_context.effects_tool}
+    port for this export. An export it left out, or a worker that is not Ready,
+    is [May_change]. MCP [readOnlyHint] never decides this. *)
 val call_operator : t -> admit:(unit -> (unit, operator_error) result) ->
   arguments:Yojson.Safe.t -> (Yojson.Safe.t, operator_error) result
 (** Private [lane_operator] port. Only the authenticated operator HTTP boundary

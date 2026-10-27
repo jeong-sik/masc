@@ -65,7 +65,7 @@ let test_stdio_controller () =
               let client = Client.create ~transport ~clock:(Eio.Stdenv.clock env) () in
               ignore (unwrap (Client.initialize client ~client_name:"worker-fixture" ~client_version:"1"));
               let tools = unwrap (Client.list_tools_all client) in
-              check int "machine tools and private control ports" 18 (List.length tools);
+              check int "machine tools and private control ports" 19 (List.length tools);
               let raw name arguments = unwrap (Client.call_tool client ~name ~arguments ()) in
               let call ?controller ?(principal=Lane_addon_call_context.Keeper "fixture") name arguments =
                 raw Lane_addon_call_context.tool_name
@@ -458,23 +458,33 @@ let test_a_handler_exception_does_not_end_the_worker () =
       (`Assoc ["steps", `Int 10]) in
     check bool "and so does a call that moves the machine" false (stepped.is_error = Some true))
 
-(* The host takes no new observation after a successful call to a tool the
-   worker lists as read-only, so the listing must follow the contract: true
-   for exactly the four reads, false for every call that changes something. *)
+(* The worker declares, on its private effect port, which tools leave its
+   observation as it was; the host skips the observation after a successful
+   call to one of them. The MCP readOnlyHint it lists comes from the same
+   classification, so both say the same thing for every machine tool. *)
 let test_the_listing_declares_the_reads () =
-  let reads tool = match C.call_effect tool with C.Reads_only -> true | C.Changes_state -> false in
-  check (list string) "the contract's reads"
-    ["masc_dos_inventory"; "masc_dos_meta"; "masc_dos_peek"; "masc_dos_screen"]
-    (C.all_of_dos_tool |> List.filter reads |> List.map C.dos_tool_name |> List.sort String.compare);
   let base_path = Filename.temp_dir "dos-addon-worker-listing-" "" in
   with_worker ~base_path (fun client ->
     let tools = unwrap (Client.list_tools_all client) in
+    let declared = unwrap (Client.call_tool client ~name:Lane_addon_call_context.effects_tool
+        ~arguments:(`Assoc []) ())
+      |> data
+      |> Lane_addon_call_context.effects_of_json ~listed:(List.map (fun (tool : S.tool) -> tool.name) tools)
+      |> unwrap in
+    let reads = List.filter_map (fun (name, effect_of_call) -> match effect_of_call with
+      | Lane_addon_call_context.Reads_only -> Some name
+      | Lane_addon_call_context.May_change -> None) declared in
+    check (list string) "the worker declares exactly the four reads"
+      ["masc_dos_inventory"; "masc_dos_meta"; "masc_dos_peek"; "masc_dos_screen"]
+      (List.sort String.compare reads);
     List.iter (fun tool ->
       let name = C.dos_tool_name tool in
+      check bool (name ^ " has a declared effect") true (List.mem_assoc name declared);
       match List.find_opt (fun (listed : S.tool) -> String.equal listed.name name) tools with
       | None -> fail (name ^ " is not listed")
       | Some listed ->
-          check (option bool) (name ^ " lists its readOnlyHint") (Some (reads tool))
+          check (option bool) (name ^ " lists a readOnlyHint matching its declaration")
+            (Some (List.mem name reads))
             (Option.bind listed.annotations (fun annotations -> annotations.S.read_only_hint)))
       C.all_of_dos_tool)
 

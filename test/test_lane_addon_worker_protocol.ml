@@ -51,6 +51,10 @@ for line in sys.stdin:
             result["tools"].append({"name":"lane_call","inputSchema":{"type":"object"}})
         if companion:
             result["tools"] += [{"name":"lane_companion","inputSchema":{"type":"object"}}] * (2 if mode=="companion-duplicate" else 1)
+        if mode.startswith("effects"):
+            result["tools"].append({"name":"lane_tool_effects","inputSchema":{"type":"object"}})
+        if mode == "hinted":
+            result["tools"][1]["annotations"] = {"readOnlyHint":True}
         if len(sys.argv) > 2 and sys.argv[2] in ["operator", "operator-duplicate"]:
             tool = {"name":"lane_operator","inputSchema":{"type":"object","additionalProperties":False,
                 "properties":{"value":{"type":"string"},"fail":{"type":"boolean"}},"required":["value","fail"]}}
@@ -63,6 +67,13 @@ for line in sys.stdin:
             assert params["arguments"] == {"version":3}
             value = {"version":2 if mode=="companion-version" else 3,"tools":["increment"]}
             print(json.dumps({"jsonrpc":"2.0","id":request["id"],"result":{"content":[],"structuredContent":value}}),flush=True)
+            continue
+        if params["name"] == "lane_tool_effects":
+            assert params["arguments"] == {}
+            declared = {"effects":{"increment":"reads_only"},"effects-may-change":{"increment":"may_change"},
+                "effects-unknown":{"increment":"maybe"},"effects-unlisted":{"decrement":"reads_only"}}[mode]
+            print(json.dumps({"jsonrpc":"2.0","id":request["id"],
+                "result":{"content":[],"structuredContent":{"tools":declared}}}),flush=True)
             continue
         if params["name"] == "lane_controller_snapshot" and mode == "companion-controller-error":
             result = {"content":[{"type":"text","text":"PRIVATE_CONTROLLER_MARKER"}],
@@ -109,6 +120,32 @@ let companion_context () =
   Lane_addon_call_context.companion_of_json (`Assoc ["socket_path",`String "/private/companion/s";
     "invocation_id",`String (String.make 64 'a');"max_message_bytes",`Int 4096;
     "publication_id",`String (String.make 64 'b')]) |> require
+
+(* The private effect port is read once while the worker initializes. Only a
+   declaration there makes an export Reads_only: an MCP readOnlyHint alone does
+   not, and a declaration the host cannot read refuses Ready. *)
+let negotiated_effects mode expected () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+  let calls=Filename.temp_file "effects-protocol-" ".calls" in
+  Fun.protect ~finally:(fun () -> Sys.remove calls) (fun () ->
+    let contract=require (Protocol.contract ~host_requests:false ~action_tool:None
+      ~tool_invocation:Lane_addon_types.Direct ~exported_tools:["increment"] ~tool_hooks:[] ~max_reply_bytes:4096) in
+    let protocol=Protocol.create ~instance_id:"effects-protocol" ~contract () in
+    let client=require (Agent_core.Mcp.connect ~sw ~mgr:(Eio.Stdenv.process_mgr env)
+      ~command:"python3" ~args:["-c";server;calls;mode] ~max_response_bytes:4096 ()) in
+    Fun.protect ~finally:(fun () -> Eio.Cancel.protect (fun () -> Protocol.close protocol)) (fun () ->
+      let initialized=Protocol.initialize protocol client in
+      match expected with
+      | None ->
+          check bool "an unreadable declaration cannot publish Ready" true (Result.is_error initialized);
+          check bool "nothing is taken as read-only" true
+            (Protocol.observation_effect protocol "increment" = Lane_addon_call_context.May_change)
+      | Some declared ->
+          require initialized;
+          check bool "the export carries the declared effect" true
+            (Protocol.observation_effect protocol "increment" = declared);
+          check bool "the effect port is never exported" true
+            (List.for_all (fun (tool:Mcp_protocol.Mcp_types.tool) ->
+              tool.name<>Lane_addon_call_context.effects_tool) (Protocol.exported_tools protocol))))))
 
 let negotiated_companion mode () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
   let calls=Filename.temp_file "companion-protocol-" ".calls" in
@@ -601,6 +638,14 @@ let () = run "Addon engine-independent MCP admission"
     test_case "private companion context and reserved port" `Quick companion_context_codec;
     test_case "companion grants preserve only validated public replies" `Quick (negotiated_companion "companion");
     test_case "private worker errors lose raw text and metadata" `Quick (negotiated_companion "companion-error");
+    test_case "a declared read comes from the private effect port" `Quick
+      (negotiated_effects "effects" (Some Lane_addon_call_context.Reads_only));
+    test_case "an explicit may_change is kept" `Quick
+      (negotiated_effects "effects-may-change" (Some Lane_addon_call_context.May_change));
+    test_case "an MCP readOnlyHint alone declares nothing" `Quick
+      (negotiated_effects "hinted" (Some Lane_addon_call_context.May_change));
+    test_case "an unknown observation effect refuses Ready" `Quick (negotiated_effects "effects-unknown" None);
+    test_case "an effect for an unlisted tool refuses Ready" `Quick (negotiated_effects "effects-unlisted" None);
     test_case "companion public output validation is mandatory" `Quick (negotiated_companion "companion-bad-output");
     test_case "companion output schema cannot declare an open object" `Quick (negotiated_companion "companion-open-output");
     test_case "companion output schema cannot declare a nested open object" `Quick (negotiated_companion "companion-open-nested");

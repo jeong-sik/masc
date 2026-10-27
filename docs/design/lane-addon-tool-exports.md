@@ -21,8 +21,8 @@ export = ["masc_msx_load", "masc_msx_press", "masc_msx_screen"]
 
 The worker owns schemas. Initialization requires exactly one advertised schema
 for each declared export. The host rejects collisions with host tools or other
-visible installations. Private observation, caller-context, controller and
-input-history ports cannot be exported. Packages without exports remain valid
+visible installations. Private observation, caller-context, observation-effect,
+controller and input-history ports cannot be exported. Packages without exports remain valid
 observation-only Add-ons; ordinary direct-invocation packages remain supported.
 
 MCP Full and Seat discovery apply installation visibility and existing host
@@ -104,18 +104,35 @@ calls and observations mark cached screens as refreshing; unknown tool outcomes
 invalidate the prior stable observation and schedule reconciliation.
 
 A completed call schedules a new observation, because worker-owned state is not
-a host source and the host cannot see what the call changed. An export that the
-worker lists with `annotations.readOnlyHint: true` is the exception: the host
-takes the worker's own word that the call changes nothing. While it runs, that
-call does not mark the cached observation refreshing, and a successful reply
-leaves the observation standing. An error reply from it still schedules one, as
-does any reply from an export that lists no hint. The DOS worker sets the hint
-from `Machine_controller_contract.call_effect`: `masc_dos_screen`,
-`masc_dos_meta`, `masc_dos_inventory` and `masc_dos_peek` only read.
-`masc_dos_save` needs no controller but writes a checkpoint and an activity
-line, so it lists `false`. A worker that lists no hints keeps the old behaviour,
-and an older host ignores the hints, so a worker image and a host need not be
-upgraded together.
+a host source and the host cannot see what the call changed. A worker can say
+otherwise for an export on its private `lane_tool_effects` port, which the host
+calls once while the worker initializes. The reply is
+`{"tools": {"<export>": "reads_only" | "may_change"}}`. Any other value, a tool
+the worker does not list or a tool named twice refuses Ready. An export left
+out, and every export of a worker without the port, is `may_change`.
+
+The host takes the worker's word for a `reads_only` export. While such a call
+runs it does not mark the cached observation refreshing or refuse a machine
+consumer's capture, and a successful reply leaves the observation standing. An
+error reply from it still schedules an observation. A worker with a host port
+(`exact_outputs` or `asks`) still observes after every reply: a reply may have
+admitted a durable host request, and the host cycle that lists it ends with an
+observation. The skip therefore holds only for a worker without a host port.
+
+Every other call is counted while it runs, and a consumer refused as
+refreshing meanwhile is woken again when the call ends: by the observation the
+call schedules, by the failure a lost reply records, or directly when the host
+refuses the call before it reaches the worker.
+
+MCP `annotations.readOnlyHint` never decides this. It promises that a tool
+does not modify its environment, which is weaker: a tool can keep that promise
+while its call still changes what the next observation shows. The DOS worker
+lists both from one classification, `Machine_controller_contract.call_effect`:
+`masc_dos_screen`, `masc_dos_meta`, `masc_dos_inventory` and `masc_dos_peek`
+only read. `masc_dos_save` needs no controller but writes a checkpoint and an
+activity line, so it is `may_change`. A worker without the port keeps the
+behaviour above, and a host that predates the port never calls it, so a worker
+image and a host need not be upgraded together.
 
 Lane inventory reads worker publication separately from host activity settings.
 Unavailable observations are distinct from an unloaded machine. `/msx/activity`

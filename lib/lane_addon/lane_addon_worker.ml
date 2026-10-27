@@ -69,6 +69,7 @@ let container_name t = t.name
 let action_schema t = Protocol.action_schema t.protocol
 let operator_schema t = Protocol.operator_schema t.protocol
 let companion_tools t = Protocol.companion_tools t.protocol
+let observation_effect t name = Protocol.observation_effect t.protocol name
 let call_operator t ~admit ~arguments = Protocol.call_operator t.protocol ~admit ~arguments
 let exported_tools t = Protocol.exported_tools t.protocol
 let protocol_result result = Result.map_error (function

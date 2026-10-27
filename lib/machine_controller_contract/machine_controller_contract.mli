@@ -76,7 +76,8 @@ type call_effect =
           a line to the activity feed the observation carries. *)
 
 val call_effect : dos_tool -> call_effect
-(** The worker lists it as the tool's MCP [annotations.readOnlyHint]. *)
+(** The DOS worker derives both its MCP [annotations.readOnlyHint] and the
+    observation effect it declares to the host from this one value. *)
 
 (** {1 Screen errors}
 

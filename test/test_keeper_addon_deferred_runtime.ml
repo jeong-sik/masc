@@ -58,6 +58,7 @@ let backend env base_path calls : R.For_testing.backend = {
         result);
       operator_schema=(fun () -> None);
       companion_tools=(fun () -> []);
+      observation_effect=(fun _ -> Lane_addon_call_context.May_change);
       call_operator=(fun ~admit:_ ~arguments:_ -> Error Masc.Lane_addon_worker_protocol.Operator_unavailable);
       action_schema=(fun () -> P.action_schema protocol);
       act=(fun ~arguments -> P.act protocol ~arguments |> Result.map_error protocol_error);

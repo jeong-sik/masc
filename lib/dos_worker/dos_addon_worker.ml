@@ -60,17 +60,20 @@ let schemas () = List.map (fun tool ->
     | Ok definition -> tool, definition.Tool_definition_toml.schema
     | Error message -> invalid_arg message) Controller.all_of_dos_tool
 
-(* [readOnlyHint] is this worker's word on whether a call changes anything it
-   holds. The host reads it to skip the observation it otherwise takes after a
-   call, so a seat that polls the screen does not copy a frame each time. *)
+(* One classification gives both answers: MCP [readOnlyHint] for any client,
+   and the observation effect the host reads on the private effect port before
+   it skips the observation that otherwise follows a call. A seat that polls
+   the screen then does not copy a frame each time. *)
+let declarations tool = match Controller.call_effect tool with
+  | Controller.Reads_only -> true, Lane_addon_call_context.Reads_only
+  | Controller.Changes_state -> false, Lane_addon_call_context.May_change
+
 let definition tool (schema : Masc_domain.tool_schema) =
   match S.tool_of_yojson (`Assoc ["name", `String schema.name;
     "description", `String schema.description; "inputSchema", schema.input_schema]) with
   | Error message -> invalid_arg message
   | Ok listed ->
-      let read_only = match Controller.call_effect tool with
-        | Controller.Reads_only -> true
-        | Controller.Changes_state -> false in
+      let read_only, _ = declarations tool in
       {listed with S.annotations = Some {S.title = None; read_only_hint = Some read_only;
         destructive_hint = None; idempotent_hint = None; open_world_hint = None}}
 
@@ -277,6 +280,12 @@ let create ~base_path () =
           let metadata = match answer.S._meta with Some (`Assoc fields) -> fields | _ -> [] in
           Ok { answer with S._meta = Some (`Assoc
             (("io.github.jeong-sik/masc.machine.events", `List (List.rev !events)) :: metadata)) })) server in
+  let server = guarded Lane_addon_call_context.effects_tool
+    ~description:"Declare which machine tools leave this worker's observation as it was."
+    ~input_schema:(`Assoc ["type", `String "object"; "additionalProperties", `Bool false])
+    (fun _context _name _arguments -> Ok (json_response (Lane_addon_call_context.effects_to_json
+      (List.map (fun tool -> Controller.dos_tool_name tool, snd (declarations tool))
+        Controller.all_of_dos_tool)))) server in
   let server = guarded Machine_input_history.tool_name
     ~description:"Read a page of the last observed immutable input history."
     ~input_schema:Machine_input_history.input_schema

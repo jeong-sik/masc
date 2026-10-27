@@ -746,6 +746,14 @@ bash /tmp/masc-install.sh --version "$TAG" \
   --base-path "$HOME/masc-workspace" --force --no-wizard
 ```
 
+Replacing an existing binary with a different release requires `--force`.
+Without it, the installer proceeds only when the existing managed release
+pointer's executable matches the requested release's checksum. A version
+string alone cannot identify the file.
+The installer and bundle helper must both support no-replace publication;
+older release helpers that lack this option stop without publishing. After
+checking the destination, `--force` explicitly permits replacement.
+
 From 0.34.0, `--force` updates the binaries and preserves the existing
 runtime configuration, model choice, and Keeper files. In a workspace that
 already has the required runtime configuration, it only adds new embedded skills

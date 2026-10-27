@@ -4,6 +4,7 @@ not run-local executable provenance: it claims no checkout device or inode.
 """
 import argparse
 import datetime
+import errno
 import hashlib
 import io
 import json
@@ -15,6 +16,7 @@ import shutil
 import signal
 import stat
 import subprocess
+import sys
 import tarfile
 import tempfile
 
@@ -287,6 +289,29 @@ def fsync_dir(directory):
         os.close(descriptor)
 
 
+def rename_directory_no_replace(source, destination):
+    # A captured directory cannot be hard-linked back. Use the platform's
+    # exclusive rename; never emulate it with a check followed by os.rename.
+    try:
+        import ctypes
+    except ImportError as error:
+        raise OSError(errno.ENOTSUP, "exclusive directory rename is unavailable", os.fspath(destination)) from error
+    libc = ctypes.CDLL(None, use_errno=True)
+    if sys.platform == "darwin" and hasattr(libc, "renamex_np"):
+        rename = libc.renamex_np
+        rename.argtypes = (ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint)
+        result = rename(os.fsencode(source), os.fsencode(destination), 0x00000004)  # RENAME_EXCL
+    elif sys.platform.startswith("linux") and hasattr(libc, "renameat2"):
+        rename = libc.renameat2
+        rename.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint)
+        result = rename(-100, os.fsencode(source), -100, os.fsencode(destination), 1)  # AT_FDCWD, RENAME_NOREPLACE
+    else:
+        raise OSError(errno.ENOTSUP, "exclusive directory rename is unavailable", os.fspath(destination))
+    if result != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error), os.fspath(destination))
+
+
 def transaction_dir(prefix):
     journal = prefix / TRANSACTION
     if journal.is_symlink():
@@ -295,6 +320,42 @@ def transaction_dir(prefix):
 
 
 def restore_entry(entry, destination):
+    if (entry / "no-replace").is_file():
+        # A no-replace publication hard-links its staged symlink. Move the
+        # current name into this private journal before deciding what to do:
+        # a check followed by unlink could delete a concurrently replaced file.
+        staged = entry / "next"
+        if staged.is_symlink() and destination.is_symlink():
+            left, right = staged.lstat(), destination.lstat()
+            if (left.st_dev, left.st_ino) == (right.st_dev, right.st_ino):
+                holder = Path(tempfile.mkdtemp(prefix=".rollback-", dir=entry))
+                fsync_dir(entry)
+                captured = holder / "entry"
+                try:
+                    os.rename(destination, captured)
+                except FileNotFoundError:
+                    holder.rmdir()
+                    fsync_dir(entry)
+                    return
+                fsync_dir(holder)
+                fsync_dir(destination.parent)
+                current = captured.lstat()
+                if (left.st_dev, left.st_ino) != (current.st_dev, current.st_ino):
+                    try:
+                        # Restore an intervening file only into a vacant name.
+                        if stat.S_ISDIR(current.st_mode):
+                            rename_directory_no_replace(captured, destination)
+                        else:
+                            os.link(captured, destination, follow_symlinks=False)
+                        fsync_dir(destination.parent)
+                    except OSError as error:
+                        fail(f"rollback could not confirm the changed destination; inspect {destination} and {captured}: {error}")
+                if captured.is_symlink() or captured.exists():
+                    captured.unlink()
+                fsync_dir(holder)
+                holder.rmdir()
+                fsync_dir(entry)
+        return
     previous = entry / "previous"
     if previous.is_symlink() or previous.exists():
         os.replace(previous, destination)
@@ -315,10 +376,41 @@ def save_previous(destination, entry):
         (entry / "new-install").touch()
 
 
+def require_no_interrupted_rollback(journal):
+    entries = [journal]
+    companions = journal / "companions"
+    if companions.is_dir():
+        entries.extend(companions.iterdir())
+    if any(any(entry.glob(".rollback-*")) for entry in entries):
+        fail("an interrupted rollback preserved an entry in the transaction; inspect it before recovery")
+
+
+def prepare_no_replace(destination, entry, target):
+    (entry / "no-replace").touch()
+    (entry / "next").symlink_to(target)
+    if destination.is_symlink() and destination.resolve(strict=False) == target:
+        return
+    if destination.is_symlink() or destination.exists():
+        fail(f"existing {destination} differs from the installed release; pass --force to replace it")
+
+
+def publish_no_replace(entry, destination):
+    staged = entry / "next"
+    if destination.is_symlink() and destination.resolve(strict=False) == Path(os.readlink(staged)):
+        return
+    try:
+        # linkat without symlink following atomically refuses an occupied name.
+        # The staged inode remains as rollback proof until commit.
+        os.link(staged, destination, follow_symlinks=False)
+    except FileExistsError:
+        fail(f"{destination} appeared during installation; pass --force to replace it")
+
+
 def rollback(prefix):
     journal = transaction_dir(prefix)
     if not journal.exists():
         fail("install transaction missing; rollback cannot be confirmed")
+    require_no_interrupted_rollback(journal)
     companions = journal / "companions"
     if companions.exists():
         for entry in companions.iterdir():
@@ -333,6 +425,9 @@ def commit(prefix):
     journal = transaction_dir(prefix)
     if not journal.is_dir():
         fail("install transaction missing")
+    require_no_interrupted_rollback(journal)
+    if (journal / "no-replace").is_file() and not (journal / "publication-complete").is_file():
+        fail("no-replace publication was interrupted; inspect or roll it back before commit")
     # Publication must be durable while the undo record still exists.
     # Cleanup is deliberately last: a cleanup failure must never be reported
     # as a successful rollback after the previous binary has been removed.
@@ -340,7 +435,7 @@ def commit(prefix):
     shutil.rmtree(journal)
 
 
-def install(binary, archive, prefix, asset, companions=(), runtime_archive=None):
+def install(binary, archive, prefix, asset, companions=(), runtime_archive=None, no_replace=False):
     names = set()
     for name, source in companions:
         if name not in COMPANIONS or name in names:
@@ -414,25 +509,45 @@ def install(binary, archive, prefix, asset, companions=(), runtime_archive=None)
         journal.mkdir(mode=0o700)
         try:
             destination = prefix / "masc"
-            save_previous(destination, journal)
+            if no_replace:
+                prepare_no_replace(destination, journal, installed / "masc")
+            else:
+                save_previous(destination, journal)
             if companions:
                 companion_journal = journal / "companions"
                 companion_journal.mkdir()
                 for name, source in companions:
                     entry = companion_journal / name
                     entry.mkdir()
-                    (entry / "next").symlink_to(installed / name)
-                    save_previous(prefix / name, entry)
+                    if no_replace:
+                        prepare_no_replace(prefix / name, entry, installed / name)
+                    else:
+                        (entry / "next").symlink_to(installed / name)
+                        save_previous(prefix / name, entry)
                     (entry / "ready").touch()
                     fsync_dir(entry)
                 fsync_dir(companion_journal)
             fsync_dir(journal)
-            next_link = journal / "next"
-            next_link.symlink_to(installed / "masc")
-            for name, _ in companions:
-                os.replace(journal / "companions" / name / "next", prefix / name)
-            os.replace(next_link, destination)
+            # The undo directory itself must be durable before any public
+            # executable name is changed.
             fsync_dir(prefix)
+            next_link = journal / "next"
+            if not no_replace:
+                next_link.symlink_to(installed / "masc")
+            for name, _ in companions:
+                entry = journal / "companions" / name
+                if no_replace:
+                    publish_no_replace(entry, prefix / name)
+                else:
+                    os.replace(entry / "next", prefix / name)
+            if no_replace:
+                publish_no_replace(journal, destination)
+            else:
+                os.replace(next_link, destination)
+            fsync_dir(prefix)
+            if no_replace:
+                (journal / "publication-complete").touch()
+                fsync_dir(journal)
         except BaseException:
             rollback(prefix)
             raise
@@ -455,6 +570,7 @@ def main():
         inst.add_argument("--" + name, type=Path, required=True)
     inst.add_argument("--binary-asset", required=True)
     inst.add_argument("--runtime-archive", type=Path)
+    inst.add_argument("--no-replace", action="store_true")
     inst.add_argument("--companion", nargs=2, action="append", default=[], metavar=("NAME", "PATH"))
     for name in ("commit", "rollback"):
         commands.add_parser(name).add_argument("--prefix", type=Path, required=True)
@@ -462,7 +578,7 @@ def main():
     if args.command == "package":
         package(args.binary, args.assets, args.source_commit, args.binary_asset, args.archive, args.companion, args.runtime_archive, args.runtime_root)
     elif args.command == "install":
-        install(args.binary, args.archive, args.prefix, args.binary_asset, args.companion, args.runtime_archive)
+        install(args.binary, args.archive, args.prefix, args.binary_asset, args.companion, args.runtime_archive, args.no_replace)
     elif args.command == "commit":
         commit(args.prefix.resolve())
     else:

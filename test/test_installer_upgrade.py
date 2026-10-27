@@ -1,6 +1,7 @@
 """Exercise installer config effects without a compiler or network."""
 import os
 from pathlib import Path
+import stat
 import subprocess
 import tempfile
 import unittest
@@ -115,7 +116,7 @@ curl() {
     if [ "$1" = -o ]; then output="$2"; shift 2; else shift; fi
   done
   case "$output" in
-    *.partial) echo 'reset instructions' > "$output" ;;
+    */.masc-team.*) echo 'reset instructions' > "$output" ;;
     *) echo 'keepers/custom.toml' > "$output" ;;
   esac
 }
@@ -196,6 +197,7 @@ curl() {
         # seed_team as the installer defines it, with the network and the
         # release checksums replaced by the manifest and hashes given here.
         script = f'''set -euo pipefail
+umask 022
 BASE_PATH={base}
 REPO=fixture/repo
 VERSION=v0.0.0
@@ -247,7 +249,7 @@ curl() {{
     def test_team_manifest_path_through_a_symlink_is_refused(self):
         # A clean manifest path must not follow an existing link under the
         # config directory out of it.
-        for link in ('keepers', 'keepers/a.toml', 'keepers/a.toml.partial'):
+        for link in ('keepers', 'keepers/a.toml'):
             with self.subTest(link=link), tempfile.TemporaryDirectory() as directory:
                 base = Path(directory)
                 config = base / '.masc/config'
@@ -265,6 +267,22 @@ curl() {{
                 self.assertIn('path crosses a symlink', result.stderr)
                 self.assertEqual(list(outside.iterdir()), [])
 
+    def test_team_uses_its_own_temporary_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            config = base / '.masc/config/keepers'
+            config.mkdir(parents=True)
+            outside = base / 'outside'
+            outside.write_text('keep my file')
+            partial = config / 'a.toml.partial'
+            partial.symlink_to(outside)
+            result = self.run_seed_team(
+                base, "keepers/a.toml", "presets/classic/manifest.txt presets/classic/keepers/a.toml")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(partial.is_symlink())
+            self.assertEqual(outside.read_text(), 'keep my file')
+            self.assertEqual((config / 'a.toml').read_text(), 'fetched\n')
+
     def test_team_manifest_verified_then_files_seeded(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
@@ -273,6 +291,7 @@ curl() {{
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn('verified presets/classic/manifest.txt', result.stdout)
             self.assertEqual((base / '.masc/config/keepers/a.toml').read_text(), 'fetched\n')
+            self.assertEqual(stat.S_IMODE((base / '.masc/config/keepers/a.toml').stat().st_mode), 0o644)
 
 
 if __name__ == '__main__':

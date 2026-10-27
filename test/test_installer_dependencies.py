@@ -40,6 +40,14 @@ class PortableBootstrap(unittest.TestCase):
         self.assertFalse(self.calls.exists(), self.calls.read_text() if self.calls.exists() else '')
         return result
 
+    def matching_managed_binary(self):
+        release = self.fixture.prefix / '.masc-releases' / ('a' * 64)
+        release.mkdir(parents=True)
+        binary = release / 'masc'
+        binary.write_bytes(self.fixture.binary.read_bytes())
+        binary.chmod(0o755)
+        (self.fixture.prefix / 'masc').symlink_to(binary.resolve())
+
     def test_help_and_dry_run_never_launch_brew_or_xcode(self):
         for args in (['--help'], ['--dry-run', '--version', 'v9.9.9']):
             result = self.run_installer(args)
@@ -51,7 +59,7 @@ class PortableBootstrap(unittest.TestCase):
         binary.chmod(0o755)
         result = self.run_installer(['--dry-run', '--version', 'v9.9.9', '--force', '--provider', 'codex'], MASC_WIZARD='1')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('refreshing because --force is set', result.stdout + result.stderr)
+        self.assertIn('overwriting because --force is set', result.stdout + result.stderr)
         self.assertIn('requested provider: codex; catalog validation', result.stdout)
         self.assertIn('[dry-run] would download to', result.stdout)
 
@@ -66,22 +74,61 @@ class PortableBootstrap(unittest.TestCase):
         self.assertGreater(len(marker.read_text().splitlines()), 1)
         self.assertIn('[dry-run] would install verified binary/dashboard bundle', result.stdout)
 
-    def test_dry_run_upgrades_stable_release_without_usable_python(self):
+    def test_dry_run_refuses_foreign_version_without_executing_it(self):
+        mirror = self.fixture.mirror()
         binary = self.fixture.prefix / 'masc'
-        old_bytes = b'#!/bin/sh\necho 0.34.0\n'
-        binary.write_bytes(old_bytes)
-        binary.chmod(0o755)
-        result = self.run_installer(['--dry-run', '--version', 'v0.35.1',
+        marker = self.fixture.root / 'foreign-executed'
+        for reported in ('0.34.0', '9.9.9'):
+            with self.subTest(reported=reported):
+                old_bytes = ('#!/bin/sh\necho called >> ' + shlex.quote(str(marker)) +
+                             '\necho ' + reported + '\n').encode()
+                binary.write_bytes(old_bytes)
+                binary.chmod(0o755)
+                result = self.run_installer(['--dry-run', '--version', 'v9.9.9',
+                                             '--no-wizard', '--no-seed', '--no-guest-shim'], mirror)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('pass --force', result.stderr)
+                self.assertEqual(binary.read_bytes(), old_bytes)
+                self.assertFalse(marker.exists(), 'unknown executable was started')
+                self.assertFalse((self.fixture.root / 'workspace').exists())
+
+    def test_dry_run_accepts_matching_release_without_usable_python(self):
+        mirror = self.fixture.mirror()
+        self.matching_managed_binary()
+        result = self.run_installer(['--dry-run', '--version', 'v9.9.9',
+                                     '--no-wizard', '--no-seed', '--no-guest-shim'], mirror)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('verified release checksum; skipping download', result.stdout)
+
+    def test_dry_run_does_not_probe_python_beside_an_unknown_symlink(self):
+        foreign = self.fixture.root / 'foreign'
+        (foreign / 'python/bin').mkdir(parents=True)
+        (foreign / 'masc').write_text('#!/bin/sh\nexit 0\n')
+        (foreign / 'masc').chmod(0o755)
+        marker = self.fixture.root / 'foreign-python-executed'
+        python = foreign / 'python/bin/python3'
+        python.write_text('#!/bin/sh\ntouch ' + shlex.quote(str(marker)) + '\nexit 0\n')
+        python.chmod(0o755)
+        (self.fixture.prefix / 'masc').symlink_to(foreign / 'masc')
+        result = self.run_installer(['--dry-run', '--version', 'v9.9.9', '--force',
                                      '--no-wizard', '--no-seed', '--no-guest-shim'])
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('from 0.34.0 to 0.35.1; preserving workspace config', result.stdout)
-        self.assertIn('[dry-run] would download to', result.stdout)
-        self.assertEqual(binary.read_bytes(), old_bytes)
-        self.assertFalse((self.fixture.root / 'workspace').exists())
+        self.assertFalse(marker.exists(), 'unverified private interpreter was started')
+
+    def test_dry_run_cannot_use_unverified_override_as_identity(self):
+        mirror = self.fixture.mirror()
+        (mirror / 'SHA256SUMS').unlink()
+        self.matching_managed_binary()
+        result = self.run_installer(['--dry-run', '--version', 'v9.9.9', '--allow-unverified',
+                                     '--no-wizard', '--no-seed', '--no-guest-shim'], mirror)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('cannot verify', result.stderr)
+        self.assertIn('pass --force', result.stderr)
 
     def test_dry_run_preserves_version_conflict(self):
+        mirror = self.fixture.mirror()
         self.fixture.old()
-        result = self.run_installer(['--dry-run', '--version', 'v9.9.9', '--no-wizard'])
+        result = self.run_installer(['--dry-run', '--version', 'v9.9.9', '--no-wizard'], mirror)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('pass --force', result.stderr)
 

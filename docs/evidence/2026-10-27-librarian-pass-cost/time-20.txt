@@ -1,0 +1,27 @@
+[2026-10-27 12:32:39] [INFO] [Workspace] MASC base: /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/librarian-addon-owner-7d44d1 (no git root found)
+[2026-10-27 12:32:39] [INFO] [Workspace] MASC base: /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/librarian-addon-owner-7d44d1 (MASC_BASE_PATH)
+[2026-10-27 12:32:40] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+[2026-10-27 12:32:40] [INFO] [Keeper/librarian-owner-fixture] durable Librarian inventory validated: originals=0 unfinished=0 gate_records=0 elapsed_ms=0.5
+[llm_provider] [WARN] [backend_openai] clamping max_tokens 4096 to the output ceiling 1024 (declared capability override) for model masc-exact-fixture-model-0: the request asked above what the capability record admits, and the ceiling is what reaches the wire.
+ASSERT the actual declared fixture target requests JSON mode
+[2026-10-27 12:32:52] [INFO] [Keeper/librarian-owner-fixture] durable Librarian inventory validated: originals=1 unfinished=1 gate_records=0 elapsed_ms=2102.1
+ASSERT original delivered answer completes local publication
+[2026-10-27 12:33:12] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+       33.25 real        30.29 user         0.81 sys
+          1333886976  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               94154  page reclaims
+                1189  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   3  messages sent
+                  12  messages received
+                   2  signals received
+                 583  voluntary context switches
+               31870  involuntary context switches
+            20129635  instructions retired
+            12927013  cycles elapsed
+             1212728  peak memory footprint

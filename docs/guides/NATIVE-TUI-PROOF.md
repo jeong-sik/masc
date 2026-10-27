@@ -18,7 +18,7 @@ characters) and `native-tui-scenario`:
 | `code-references` | TUI, server and the five test executables | `test_lsp_workspace_pool`, `test_lsp_questions`, `test_lsp_message_router`, `test_lsp_process_manager`, `test_server_ide_lsp_proxy` |
 | `resource-reading` | TUI, server and the four test executables | `test_tui_published_reports`, `test_tui_resource_document_search`, `test_tui_resource_image_admission`, `test_tui_resource_images` |
 | `addon-lifecycle` | TUI, server, native Addon launcher and the two test executables | `test_tui_lane_addons`, `test_lane_addon_application` |
-| `browser-lane` | TUI, server, Browser Addon worker, native Addon launcher and seven test executables | `test_browser_lane`, `test_browser_lane_watched_work`, `test_browser_addon_observation`, `test_browser_addon_tool`, `test_browser_ego_peer`, `test_browser_native_workflow`, `test_tui_browser_lane` |
+| `browser-lane` | TUI, server, Browser Addon worker, native Addon launcher and twelve test executables | `test_browser_lane`, `test_browser_lane_watched_work`, `test_browser_addon_observation`, `test_browser_addon_tool`, `test_browser_ego_peer`, `test_browser_native_workflow`, `test_tui_browser_lane`, `test_browser_addon_live_ego`, `test_browser_addon_wire`, `test_browser_selection`, `test_server_lane_inventory`, `test_keeper_vision_tool --browser-screenshot` |
 | `source-readers` | TUI, server and the seven test executables | The four `original-tool-result` suites plus `test_tui_workspace_entries`, `test_tui_keys`, `test_tui_palette_matching` |
 | `code-drafts` | TUI, server and the five test executables | `test_tui_code_draft`, `test_tui_workspace_entries`, `test_workspace_file_confidentiality`, `test_tui_keys`, `test_tui_palette_matching` |
 
@@ -156,7 +156,11 @@ gh workflow run pr-check.yml --repo jeong-sik/masc --ref WORKFLOW_REF \
 
 Use `browser-lane` for a selected Ego/Browser request and activity candidate.
 It builds the matching TUI, server, Browser Addon worker and native launcher
-together and runs the seven named protocol/codec/routing/request-state suites.
+together and runs the twelve named protocol/codec/routing/request-state suites.
+The additional checks cover private client DTOs, worker-to-Ego process ownership,
+Space selection/binding, exported inventory and stored screenshot context.
+`test_keeper_vision_tool` runs only `--browser-screenshot`, not its full vision
+suite. The invocation arguments are retained with the results.
 The worker peer suites use controlled runners; they do not launch a real Ego
 browser. The artifacts support a separate isolated real Keeper/UI probe of those
 exact bytes. Successful compilation or component tests do not prove installation,
@@ -211,7 +215,11 @@ Every selected suite runs once even if an earlier suite fails. The workflow
 retains each suite and log pipeline exit code in `test-results.tsv` and the
 receipt. `executed_tests` includes completed failed suites as well as passing
 ones; `behavior_passed` requires the complete selected list in order and zero
-suite/log exit codes. A failed suite still fails the job.
+suite/log exit codes. A failed suite still fails the job. `test-invocations.jsonl`
+records each actual suite's argument array. The receipt includes both
+`test_invocations` and `expected_invocations`; `behavior_passed` also requires
+their exact ordered equality. A narrow screenshot check cannot be reported as
+the whole vision suite.
 
 After a successful build, exact-commit binary packaging also runs when a suite
 fails, so the artifact can support further diagnosis without rebuilding. A

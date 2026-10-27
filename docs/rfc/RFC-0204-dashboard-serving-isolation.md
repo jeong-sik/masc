@@ -263,9 +263,9 @@ goal `goal-read-api-p99-300-keepers-20261027` 의 판정 표다. 행마다 측�
 | 층 | 내용 | 시험 |
 |---|---|---|
 | L1 | 이 RFC 와 측정 기록 | — |
-| L2 | 풀 대기 히스토그램과 codec 풀 사용량을 `/health` 에 싣기 | 히스토그램 구간 경계 |
-| L3 | `Pool_lane`, 읽기 풀 생성과 domain 예산, 제출 함수 네 개의 풀 선택, 출처 모를 domain 찾기 | 5.1, 5.2 의 lane 단위 시험 |
-| L4 | `Server_bootstrap_http` 에서 GET/HEAD 표시(HTTP/1·HTTP/2), `Dashboard_cache` 계산의 lane, 캐시 대기를 풀 job 밖으로 | 5.2 |
+| L2 | `Pool_lane` 표시(풀 선택은 그대로), `Server_bootstrap_http` 의 GET/HEAD 표시(HTTP/1·HTTP/2), lane 별 풀 대기 히스토그램, codec 풀 사용량을 `/health` 에 싣기 | 5.2 의 표시 시험, 히스토그램 구간 경계 |
+| L3 | 읽기 풀 생성과 domain 예산, 제출 함수 네 개의 풀 선택, 출처 모를 domain 찾기 | 5.1, 5.2 의 풀 선택 시험 |
+| L4 | `Dashboard_cache` 계산의 lane, 캐시 대기를 풀 job 밖으로 | 5.2 의 캐시 시험 |
 | L5 | codec 풀 크기를 L2 값으로 정하기 | 예산 합이 코어 수 이하 |
 | L6 | 수용 측정 기록, status 갱신 | 5.3 |
 

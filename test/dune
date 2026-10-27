@@ -3010,6 +3010,7 @@
 (include stanzas/test_tui_io_domain.inc)
 (include stanzas/test_keeper_tool_call_index_witness.inc)
 (include stanzas/test_keeper_tool_call_index_domain.inc)
+(include stanzas/test_keeper_tool_call_log_file_change_concurrent.inc)
 
 (include stanzas/test_keeper_surface_status.inc)
 

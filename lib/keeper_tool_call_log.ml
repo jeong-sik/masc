@@ -393,7 +393,18 @@ let file_change_cache : (string * float, file_change_cache_entry) Hashtbl.t =
   Hashtbl.create 16
 ;;
 
-let file_change_cache_mu = Stdlib.Mutex.create ()
+(* Guards [file_change_cache] and makes the incremental fold a single flight, so
+   two callers do not read the same appended bytes twice. The fold holds it
+   across calls that suspend the calling fiber: [Fs_compat.fold_appended_lines]
+   stats each day file through Eio, which runs the stat on a worker thread. The
+   fibers of one domain share one thread, and a [Stdlib.Mutex] raises
+   [Sys_error "Mutex.lock: Resource deadlock avoided"] when the thread that
+   holds it locks it again, so the next caller of the domain raised instead of
+   waiting. [Cross_context_mutex] makes a fiber wait cooperatively, and system
+   threads and other domains still wait on the underlying mutex. A cancelled
+   fold leaves the cache as it was, because its entry is written after the
+   fold returns. *)
+let file_change_cache_lock = Cross_context_mutex.create ()
 
 (* Whether a carried entry still answers for a window whose floor is now
    [since_ts] over the day range starting [since].
@@ -419,7 +430,8 @@ let carried_entry_answers ~entry_since_ts ~entry_oldest_row_ts ~since_ts ~since 
 (* Drop every carried tally. Tests that write rows and read them back in one
    process need the next read to start from an empty window. *)
 let reset_file_change_cache () =
-  Stdlib.Mutex.protect file_change_cache_mu (fun () -> Hashtbl.reset file_change_cache)
+  Cross_context_mutex.with_lock file_change_cache_lock (fun () ->
+    Hashtbl.reset file_change_cache)
 ;;
 
 (* [masc_root] is [<base>/.masc]. *)
@@ -1437,7 +1449,7 @@ let file_change_tally ?keeper_name ~(window_hours : float) () =
       let until = iso_date_of_unix now in
       let key = Option.value keeper_name ~default:"", window_hours in
       let keeper_needle = Option.map (fun name -> "\"" ^ name ^ "\"") keeper_name in
-      Stdlib.Mutex.protect file_change_cache_mu (fun () ->
+      Cross_context_mutex.with_lock file_change_cache_lock (fun () ->
         let carried =
           match Hashtbl.find_opt file_change_cache key with
           | Some entry when entry.fcc_since_ts <= since_ts ->

@@ -1457,13 +1457,14 @@ const taskSpace=async id=>({spaceId:id,name:'SDK Space',ownership:%s,
 
 let test_adopted_managed_page_uses_native_actions_without_changing_origin () =
   let owner=ref "agent" and label=ref `Null and url=ref "https://fixture.test/mail"
-  and closed=ref false and lost=ref false and calls=ref [] and scripts=ref 0 in
+  and closed=ref false and lost=ref false and calls=ref [] and scripts=ref 0 and used_labels=ref [] in
   let run ~window_s:_ script =
     incr scripts;
     let shim=Printf.sprintf {js|
 let label=%s,url=%s,closed=%s,ownership=%s,lost=%s,active=false;
+const usedLabels=new Set(%s);
 const seen=[];
-process.on('exit',()=>console.log('adopted-state '+JSON.stringify({label,url,closed,seen})));
+process.on('exit',()=>console.log('adopted-state '+JSON.stringify({label,url,closed,seen,usedLabels:[...usedLabels]})));
 const handle={targetId:'T9',openedBy:'unknown'};
 const page={
  url:async()=>url,title:async()=> 'Mail',info:async()=>({url,title:'Mail',dialog:null}),
@@ -1478,7 +1479,9 @@ const taskSpace=async reference=>{
  return {spaceId:51,name:'SDK Space',ownership,
   tabs:async()=>{seen.push('tabs');return closed?[]:[{label,targetId:'T9',openedBy:'unknown',url,title:'Mail',active,page:handle}];},
   page:requested=>{if(label===null||requested!==label||closed)throw Error('not a managed Page');seen.push('page');return page;},
-  adopt:async(original,options)=>{if(original!==handle||label!==null)throw Error('wrong adopt handle');seen.push('adopt');label=options.as;return {...handle,label};},
+  adopt:async(original,options)=>{if(original!==handle||label!==null)throw Error('wrong adopt handle');seen.push('adopt');
+   if(usedLabels.has(options.as))throw Error('Page label already used in this Space');
+   usedLabels.add(options.as);label=options.as;return {...handle,label};},
   release:async requested=>{if(requested!==label)throw Error('wrong release label');seen.push('release');label=null;return {...handle,label};},
   cdp:async(method,args)=>{
    if(args.targetId!=='T9')throw Error('foreign activation target');
@@ -1488,13 +1491,15 @@ const taskSpace=async reference=>{
   }};
 };
 |js} (Yojson.Safe.to_string !label) (Yojson.Safe.to_string (str !url))
-      (string_of_bool !closed) (Yojson.Safe.to_string (str !owner)) (string_of_bool !lost) in
+      (string_of_bool !closed) (Yojson.Safe.to_string (str !owner)) (string_of_bool !lost)
+      (Yojson.Safe.to_string (`List (List.map str !used_labels))) in
     let output=in_node (shim^script) in
     let state=match List.find_opt (String.starts_with ~prefix:"adopted-state ") (String.split_on_char '\n' output) with
       | Some line->Yojson.Safe.from_string (after ~prefix:"adopted-state " line)
       | None->fail "native Page fixture emitted no state" in
     label:=field "label" state;url:=text (field "url" state);
     closed:=Yojson.Safe.Util.to_bool (field "closed" state);
+    used_labels:=List.map text (Yojson.Safe.Util.to_list (field "usedLabels" state));
     calls:=List.map text (Yojson.Safe.Util.to_list (field "seen" state));
     Ok output in
   let open_peer ()=match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now
@@ -1536,14 +1541,24 @@ const taskSpace=async reference=>{
   let before= !scripts in
   List.iter (fun action->ignore (before_effect "released Page effect" (action ()))) (effects peer);
   check int "released Page effects run no SDK wrapper" before !scripts;
-  ignore (served "re-adopt same original target" (control peer (Lane.Action.Adopt_tab {tab_id=1;label=Some "borrowed"})));
+  check string "the SDK rejects reuse of a released Page label" "unknown"
+    (failure_kind (control peer (Lane.Action.Adopt_tab {tab_id=1;label=Some "borrowed"})));
+  check bool "failed label reuse retains the unmanaged Page and used-label history" true
+    (!label=`Null && !used_labels=["borrowed"] && not !closed);
+  let still_unmanaged=served "observe original target after rejected label reuse" (dispatch peer Live.Tabs_list (obj [])) in
+  check bool "rejected label reuse keeps the original unmanaged tab and origin" true
+    (List.exists (fun row->field "id" row=`Int 1 && field "egoPage" row=
+      obj ["label",`Null;"targetId",str "T9";"openedBy",str "unknown"])
+      (Yojson.Safe.Util.to_list still_unmanaged));
+  ignore (served "re-adopt same original target with a fresh label"
+    (control peer (Lane.Action.Adopt_tab {tab_id=1;label=Some "borrowed-again"})));
   ignore (before_effect "unknown-origin managed Page is protected from close" (close peer));
   check bool "protected close never calls the native Page method" false (List.mem "close" !calls);
-  check bool "protected close leaves the Page managed and open" true (!label=str "borrowed" && not !closed);
+  check bool "protected close leaves the Page managed and open" true (!label=str "borrowed-again" && not !closed);
   let remaining=served "observe protected original Page" (dispatch peer Live.Tabs_list (obj [])) in
   check bool "protected close retains the original tab and unknown origin" true
     (List.exists (fun row->field "id" row=`Int 1 && field "egoPage" row=
-      obj ["label",str "borrowed";"targetId",str "T9";"openedBy",str "unknown"])
+      obj ["label",str "borrowed-again";"targetId",str "T9";"openedBy",str "unknown"])
       (Yojson.Safe.Util.to_list remaining));
   let uncertain=peer in
   lost:=true;

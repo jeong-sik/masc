@@ -96,3 +96,10 @@ let acknowledge snapshot =
       Keeper_fs.remove_file_durable ~ownership_root:snapshot.directory entry.path
       |> Result.map_error Keeper_fs.durable_remove_error_to_string
     | Some _ -> Error "tool outbox receipt changed before acknowledgement") (Ok ()) snapshot.entries
+
+let settle_after_turn snapshot ~(stop_reason : Runtime_agent_context.stop_reason) =
+  match stop_reason with
+  | Completed _ -> acknowledge snapshot
+  | Yielded_to_operation_queued _ | Yielded_to_durable_stimulus _
+  | Yielded_after_repeated_tool_call _ | Yielded_after_repeated_assistant_text _
+  | InputRequired _ -> Ok ()

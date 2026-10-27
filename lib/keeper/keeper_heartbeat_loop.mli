@@ -211,8 +211,10 @@ val batch_disposition_of_cycle_outcome :
     persistence does not imply that every provider retains dynamic observation
     text in canonical history: OpenAI-compatible context is request-only, and
     official-client session replacement may lose its prior context. Delivery
-    ACK does not certify model-level answer continuity. Connector_attention
-    stays pending until the resumed turn completes, and a HITL resolution
+    ACK does not certify model-level answer continuity. Connector attention,
+    messages and producer/decision outcomes stay pending until a turn completes.
+    Checkpointed messages/outcomes rotate within their original urgency lane so
+    later sources remain admissible. A HITL resolution
     stays pending until its continuation receipt is recorded. Every failed,
     cancelled, input-required, or skipped outcome leaves the whole batch
     pending. Provider/runtime failure is not authority to discard input. *)
@@ -338,11 +340,17 @@ module For_testing : sig
     basis:Keeper_turn_driver.wait_basis ->
     (now:float -> bool)
   (** Revalidate a provider wait against its dispatch and observed path rest. *)
-  (** The production retention pass against the durable queue. Counts are
-      observations only; no pending source is acknowledged by this pass. *)
-  val retain_connector_attention_sources :
+  (** The production checkpoint retention pass. Counts are observations only.
+      Connector sources retain their order. Messages and producer/decision
+      outcomes retain their original payload and execution scope while rotating
+      to the tail of their urgency lane. No source is acknowledged. Failures
+      remain explicit; independent selected sources are still attempted. *)
+  val retain_checkpoint_continuations :
     base_path:string -> keeper_name:string ->
-    Keeper_event_queue_state.pending_selection list -> unit
+    Keeper_event_queue_state.pending_selection list -> (unit, string) result
+
+  val checkpoint_source_may_ack : Keeper_event_queue.stimulus_payload -> bool
+  (** The same source policy used by post-checkpoint acknowledgement. *)
 
   (** Whether post-turn HITL settlement may project a continuation before its
       queue source is acknowledged. *)

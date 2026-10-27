@@ -17,6 +17,21 @@ type jsonrpc_request = {
   params : Yojson.Safe.t option; [@default None]
 } [@@deriving yojson { strict = false }]
 
+(* The generated option decoder treats explicit JSON null like absence.
+   Retain both fields' presence for request admission. *)
+let generated_jsonrpc_request_of_yojson = jsonrpc_request_of_yojson
+
+let jsonrpc_request_of_yojson json =
+  match generated_jsonrpc_request_of_yojson json with
+  | Error error -> Error error
+  | Ok request ->
+    (match json with
+     | `Assoc fields ->
+       Ok { request with id = List.assoc_opt "id" fields;
+                         params = List.assoc_opt "params" fields }
+     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+       Ok request)
+
 type request_id =
   | String_id of string
   | Integer_id of string
@@ -94,6 +109,16 @@ let is_jsonrpc_v2 json =
   match get_field "jsonrpc" json with
   | Some (`String "2.0") -> true
   | _ -> false
+
+let has_unique_jsonrpc_fields = function
+  | `Assoc fields ->
+    List.for_all
+      (fun key ->
+         List.fold_left
+           (fun count (name, _) -> if String.equal name key then count + 1 else count)
+           0 fields <= 1)
+      [ "jsonrpc"; "id"; "method"; "params" ]
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
 
 let is_jsonrpc_response json =
   match json with
@@ -293,6 +318,43 @@ let subscription_filter_of_params params =
     | Some _ | None -> empty_subscription_filter)
   | Some _ | None -> empty_subscription_filter
 
+let validate_subscription_filter_params params =
+  let ( let* ) = Result.bind in
+  let values key fields =
+    List.filter_map (fun (name, value) ->
+      if String.equal name key then Some value else None) fields
+  in
+  let bool key fields =
+    match values key fields with
+    | [] -> Ok false
+    | [ `Bool value ] -> Ok value
+    | _ -> Error (Printf.sprintf "notifications.%s must be a unique boolean" key)
+  in
+  let strings key fields =
+    match values key fields with
+    | [] -> Ok []
+    | [ `List items ] ->
+      let rec collect acc = function
+        | [] -> Ok (List.rev acc)
+        | `String value :: rest -> collect (value :: acc) rest
+        | _ :: _ -> Error (Printf.sprintf "notifications.%s must contain only strings" key)
+      in
+      collect [] items
+    | _ -> Error (Printf.sprintf "notifications.%s must be a unique string array" key)
+  in
+  match params with
+  | Some (`Assoc fields) ->
+    (match values "notifications" fields with
+     | [ `Assoc filter ] ->
+       let* tools_list_changed = bool "toolsListChanged" filter in
+       let* prompts_list_changed = bool "promptsListChanged" filter in
+       let* resources_list_changed = bool "resourcesListChanged" filter in
+       let* resource_subscriptions = strings "resourceSubscriptions" filter in
+       Ok { tools_list_changed; prompts_list_changed; resources_list_changed
+          ; resource_subscriptions }
+     | _ -> Error "notifications must be a unique object")
+  | Some _ | None -> Error "subscriptions/listen params must be an object"
+
 (* The acknowledgement reports the subset the server agreed to honour, and
    "notification types the server does not support are omitted" -- so a field
    the caller did not ask for, or that this server cannot serve, is absent
@@ -328,6 +390,45 @@ let jsonrpc_notification ?params method_name =
     match params with
     | Some params -> [ ("params", params) ]
     | None -> [])
+
+let header_value_prefix = "=?base64?"
+let header_value_suffix = "?="
+
+let has_header_value_sentinel value =
+  String.starts_with ~prefix:header_value_prefix value
+  && String.ends_with ~suffix:header_value_suffix value
+
+let safe_plain_header_value value =
+  let length = String.length value in
+  let whitespace = function ' ' | '\t' -> true | _ -> false in
+  (length = 0
+   || (not (whitespace value.[0]) && not (whitespace value.[length - 1])))
+  && String.for_all
+       (fun c ->
+         let code = Char.code c in
+         code = 9 || (code >= 32 && code <= 126))
+       value
+
+let encode_header_value value =
+  if safe_plain_header_value value && not (has_header_value_sentinel value)
+  then value
+  else header_value_prefix ^ Base64.encode_string value ^ header_value_suffix
+
+let decode_header_value value =
+  if not (safe_plain_header_value value) then
+    Error "header value is not safe ASCII"
+  else if not (has_header_value_sentinel value) then Ok value
+  else
+    let offset = String.length header_value_prefix in
+    let length = String.length value - offset - String.length header_value_suffix in
+    if length < 0 then Error "header value has an incomplete Base64 sentinel"
+    else
+      let encoded = String.sub value offset length in
+      match Base64.decode encoded with
+      | Ok decoded
+        when String.equal (Base64.encode_string decoded) encoded
+             && String.is_valid_utf_8 decoded -> Ok decoded
+      | Ok _ | Error _ -> Error "header value has invalid Base64 or UTF-8"
 
 (* ── HTTP content negotiation ────────────────────────────── *)
 
@@ -496,6 +597,12 @@ let normalize_protocol_version version =
   if is_supported_protocol_version version then version
   else default_protocol_version
 
+let negotiate_legacy_protocol_version version =
+  if is_supported_protocol_version version
+     && not (is_stateless_protocol_version version)
+  then version
+  else default_protocol_version
+
 let protocol_version_from_params = function
   | Some (`Assoc fields) -> (
       match List.assoc_opt "protocolVersion" fields with
@@ -511,6 +618,70 @@ let protocol_version_meta_key = "io.modelcontextprotocol/protocolVersion"
    declared" -- what matters at this layer is that the client declared
    something. *)
 let client_capabilities_meta_key = "io.modelcontextprotocol/clientCapabilities"
+
+type request_protocol = Legacy_protocol | Stateless_protocol of string
+
+type request_protocol_error =
+  | Invalid_request_meta of string
+  | Unsupported_request_version of string
+
+let request_has_continuation_fields = function
+  | Some (`Assoc fields) ->
+    List.mem_assoc "requestState" fields || List.mem_assoc "inputResponses" fields
+  | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _)
+  | None -> false
+
+let classify_request_protocol ~require_stateless ~method_ ~params =
+  let values key fields =
+    List.filter_map (fun (name, value) ->
+      if String.equal name key then Some value else None) fields
+  in
+  let meta_values =
+    match params with
+    | Some (`Assoc fields) -> values "_meta" fields
+    | Some _ | None -> []
+  in
+  let reserved_keys =
+    [ protocol_version_meta_key; client_capabilities_meta_key
+    ; "io.modelcontextprotocol/clientInfo"; "io.modelcontextprotocol/logLevel" ]
+  in
+  let has_modern_field =
+    List.exists
+      (function
+        | `Assoc fields ->
+          List.exists (fun key -> List.mem_assoc key fields) reserved_keys
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false)
+      meta_values
+  in
+  let modern_only =
+    String.equal method_ "server/discover"
+    || String.equal method_ "subscriptions/listen"
+  in
+  if not (require_stateless || modern_only || has_modern_field) then
+    Ok Legacy_protocol
+  else
+    match meta_values with
+    | [ `Assoc meta ] ->
+      (match values protocol_version_meta_key meta with
+       | [ `String version ] ->
+         if not (is_supported_protocol_version version) then
+           Error (Unsupported_request_version version)
+         else if not (is_stateless_protocol_version version) then
+           Error (Invalid_request_meta "per-request protocolVersion must name a stateless version")
+         else
+           (match values client_capabilities_meta_key meta with
+            | [ `Assoc _ ] -> Ok (Stateless_protocol version)
+            | _ ->
+              Error
+                (Invalid_request_meta
+                   (Printf.sprintf "missing, duplicate or invalid params._meta.%s"
+                      client_capabilities_meta_key)))
+       | _ ->
+         Error
+           (Invalid_request_meta
+              (Printf.sprintf "missing, duplicate or invalid params._meta.%s"
+                 protocol_version_meta_key)))
+    | _ -> Error (Invalid_request_meta "missing, duplicate or invalid params._meta")
 
 let request_meta_of_json = function
   | `Assoc fields -> (
@@ -533,6 +704,14 @@ let request_meta_has_key body_str key =
       match List.assoc_opt key meta with
       | Some `Null | None -> false
       | Some _ -> true))
+  | exception Yojson.Json_error _ -> false
+
+let request_meta_has_object body_str key =
+  match Yojson.Safe.from_string body_str with
+  | json ->
+    (match request_meta_of_json json with
+     | Some meta -> (match List.assoc_opt key meta with Some (`Assoc _) -> true | _ -> false)
+     | None -> false)
   | exception Yojson.Json_error _ -> false
 
 let protocol_version_from_request_meta_json = function
@@ -565,7 +744,7 @@ let protocol_version_from_initialize_request_json = function
       | Some (`String "2.0"), Some (`String "initialize") ->
           let params = List.assoc_opt "params" fields in
           Some
-            (protocol_version_from_params params |> normalize_protocol_version)
+            (protocol_version_from_params params |> negotiate_legacy_protocol_version)
       | _ -> None)
   | _ -> None
 

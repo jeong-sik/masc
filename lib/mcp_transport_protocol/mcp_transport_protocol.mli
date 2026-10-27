@@ -15,8 +15,10 @@ type jsonrpc_request = {
   method_ : string;
   params : Yojson.Safe.t option; [@default None]
 } [@@deriving yojson { strict = false }]
-(** JSON-RPC 2.0 request. [id = None] denotes a notification. The
-    [method_] OCaml field maps to the JSON ["method"] key. *)
+(** JSON-RPC 2.0 request. [id = None] denotes an absent ID (a notification);
+    explicit JSON null remains [Some `Null] for both [id] and [params] so
+    admission can distinguish it from omission. The [method_] field maps to
+    JSON ["method"]. *)
 
 type request_id
 (** Exact MCP request identity. Integer ids retain their canonical JSON
@@ -50,6 +52,9 @@ val get_field : string -> Yojson.Safe.t -> Yojson.Safe.t option
 
 val is_jsonrpc_v2 : Yojson.Safe.t -> bool
 (** Returns [true] iff [json] has a top-level field [jsonrpc = "2.0"]. *)
+
+val has_unique_jsonrpc_fields : Yojson.Safe.t -> bool
+(** The JSON-RPC envelope fields used for admission must not be duplicated. *)
 
 val is_jsonrpc_response : Yojson.Safe.t -> bool
 (** Recognizes an [`Assoc] with [jsonrpc = "2.0"], an [id], either
@@ -95,6 +100,12 @@ val subscription_filter_of_params : Yojson.Safe.t option -> subscription_filter
 (** Reads [params.notifications]. Every field is optional and omitting one is
     "equivalent to not subscribing to that notification type", so a missing
     object is {!empty_subscription_filter} rather than an error. *)
+
+val validate_subscription_filter_params :
+  Yojson.Safe.t option -> (subscription_filter, string) result
+(** Strict wire admission for [subscriptions/listen]. The [notifications]
+    object is required; known fields must be unique and have their specified
+    types. Unknown extension fields are ignored. *)
 
 val subscription_filter_to_json : subscription_filter -> Yojson.Safe.t
 (** The subset the server agreed to honour, for the acknowledgement. A type
@@ -151,6 +162,15 @@ val jsonrpc_notification : ?params:Yojson.Safe.t -> string -> Yojson.Safe.t
 (** [jsonrpc_notification ?params method_name] builds an id-less
     [{jsonrpc:"2.0", method, params?}] notification. *)
 
+val encode_header_value : string -> string
+(** Encode an MCP name or parameter value for an HTTP header, using the
+    2026-07-28 Base64 sentinel when the value is not safe as plain ASCII or
+    already has the sentinel shape. *)
+
+val decode_header_value : string -> (string, string) result
+(** Decode and validate an MCP name or parameter header value. Malformed
+    Base64, unsafe plain header values and non-UTF-8 decoded bytes are errors. *)
+
 (** {1 HTTP Content Negotiation} *)
 
 module Http_negotiation : sig
@@ -192,6 +212,9 @@ end
 
 (** {1 Protocol Version} *)
 
+val protocol_version_2026_07_28 : string
+(** Current stateless revision implemented by this module. *)
+
 val supported_protocol_versions : string list
 (** Versions accepted by this server (delegates to
     {!Mcp_protocol.Version.supported_versions}, with the 2026-07-28
@@ -214,6 +237,10 @@ val validate_protocol_version : string -> (string, string) result
 val normalize_protocol_version : string -> string
 (** Returns the input if supported, else {!default_protocol_version}. *)
 
+val negotiate_legacy_protocol_version : string -> string
+(** The [initialize] handshake negotiates only legacy versions. An unknown or
+    stateless proposal receives the latest supported legacy counter-offer. *)
+
 val protocol_version_from_params : Yojson.Safe.t option -> string
 (** Extract [protocolVersion] from a JSON-RPC [params] object,
     falling back to {!default_protocol_version}. *)
@@ -229,9 +256,31 @@ val request_meta_has_key : string -> string -> bool
     [_meta], and an explicit [null] all answer [false] — none of them is a
     declaration. *)
 
+val request_meta_has_object : string -> string -> bool
+(** Whether the named per-request metadata field is a JSON object. *)
+
 val protocol_version_meta_key : string
 (** Fully qualified per-request [_meta] key used by the 2026-07-28
     stateless protocol: ["io.modelcontextprotocol/protocolVersion"]. *)
+
+type request_protocol = Legacy_protocol | Stateless_protocol of string
+
+type request_protocol_error =
+  | Invalid_request_meta of string
+  | Unsupported_request_version of string
+
+val request_has_continuation_fields : Yojson.Safe.t option -> bool
+(** Whether params contain [requestState] or [inputResponses], regardless of
+    field values; the server decides whether it issued a resumable request. *)
+
+val classify_request_protocol :
+  require_stateless:bool -> method_:string -> params:Yojson.Safe.t option ->
+  (request_protocol, request_protocol_error) result
+(** Classify a request using its own reserved metadata, without assuming that
+    a prior modern request selected an era for later requests. A caller which
+    has not established a legacy lifecycle can require stateless metadata.
+    Modern-only methods require it independently. Required fields must occur
+    exactly once and have their specified JSON types. *)
 
 val protocol_version_from_request_meta_json : Yojson.Safe.t -> string option
 (** Extract the per-request protocol version from

@@ -396,6 +396,6 @@ let () = run "Auth regular file read authority" [
     test_case "expected read errors do not swallow cancellation" `Quick test_cancellation_propagates;
     test_case "named/UUID FIFO verification, alias and cold index recover" `Quick test_canonical_fifo_verification_and_index;
     test_case "startup Admin and hot internal/secret FIFO paths recover" `Quick test_hot_metadata_fifo;
-    test_case "OAuth-enabled access/family FIFO verification recovers" `Quick test_oauth_fifo_verification;
+    test_case "OAuth access/family FIFO verification recovers" `Quick test_oauth_fifo_verification;
   ]
 ]

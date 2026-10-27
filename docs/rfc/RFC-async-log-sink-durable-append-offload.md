@@ -3,7 +3,7 @@ rfc: "async-log-sink-durable-append-offload"
 title: "Offload the structured-log durable append off the emitting fiber"
 status: Draft
 created: 2026-07-19
-updated: 2026-07-19
+updated: 2026-10-28
 author: vincent
 supersedes: []
 superseded_by: null
@@ -40,6 +40,29 @@ fights: `log.ml:248-260` (#25003) throttled the sink-identity `stat` pair
 because per-emit syscalls were ~27% of main-thread samples. Per-record
 `write()`+`flush()` is the next such emit-path syscall.
 
+### 1.1 Measured on production (2026-10-28, #46410)
+
+After #46467 removed the shell path checks from the main domain, the per-record
+file flush became the largest blocking call left on the main thread
+(`com.apple.main-thread`, the domain-0 Eio loop) in three 10-second `sample`s
+of build `365dc0d3bf36`, load 11-18:
+
+| OCaml caller | C call under it | main-thread samples |
+|---|---|---|
+| `Log` (`write_to_sink`) | `caml_ml_flush` → `write` | 1,095 |
+
+Blocking calls other than Eio's own readv/writev took 1.0%, 10.8% and 12.2% of
+the three samples; the `Log` flush was the largest. The console mirror is not
+in this list: `Console_sink` has written from its own OS thread since #20684.
+
+The same day's JSONL file (`system_log_2026-10-27.jsonl`, 263,532 records)
+gives the load the queue must take:
+
+| | p50 | p99 | max |
+|---|---|---|---|
+| records per second (seconds with any record) | 4 | 38 | 213 |
+| bytes per record | 356 (mean) | 1,071 | 4,022 |
+
 ## 2. Non-goals
 
 - Dropping or sampling log records. The point of #25162 is durable 4xx request
@@ -49,68 +72,92 @@ because per-emit syscalls were ~27% of main-thread samples. Per-record
   (`buf`) that the dashboard reads. Only the file append is deferred.
 - A per-producer bound at `Oas_diag_sink` (rejected: see §6).
 
-## 3. Design: dual-mode sink with a single backpressured consumer fiber
+## 3. Design: a backpressured queue drained by one OS writer thread
 
-Add async-consumer state alongside the existing file-channel state
-(`log.ml:244-246`):
+The 2026-07-19 draft drained the queue with an Eio fiber forked on the server
+switch. That fiber runs on the main domain, so its `write()` still stops the
+main domain's scheduler: batching lowers the number of stops, not their
+length. `Console_sink` already answered the same question for the console
+mirror (#20684) with an OS thread outside every Eio scheduler. The file sink
+takes the same shape, with one difference: the file is the authoritative
+record, so a full queue makes the producer wait instead of dropping the line.
 
-```
-let async_queue : string Eio.Stream.t option ref = ref None
-```
+State, beside the existing file-channel state in `Log.Ring`:
 
-a bounded stream of pre-serialized JSONL lines.
+- a `string Queue.t` of serialized JSONL lines, bounded by `capacity`;
+- one `Stdlib.Mutex` and two `Condition`s, `nonempty` and `nonfull`;
+- a mode: `Synchronous` (before start, after stop) or `Queued`;
+- the writer `Thread.t`.
 
-`write_to_sink` (`log.ml:417-445`) branches:
+`write_to_sink` serializes the record as today, then:
 
-1. `!async_queue = Some q` → `Eio.Stream.add q line`. The stream is bounded, so
-   this blocks the **producer** only when the queue is full (backpressure) —
-   never on the disk write.
-2. `!async_queue = None` → the current synchronous rotate + `Stdlib.Mutex` +
-   `output_string` + `flush` path, unchanged.
+1. `Synchronous` → the current path, unchanged: rotate, take `sink_mutex`,
+   `output_string`, `flush`.
+2. `Queued` → take the queue mutex; while the queue holds `capacity` lines and
+   the mode is still `Queued`, wait on `nonfull`; then append the line and
+   signal `nonempty`. If the mode became `Synchronous` while waiting, release
+   the queue mutex and take path 1.
 
-Add `start_async_consumer ~sw ~clock ~capacity`:
-- creates the bounded `Eio.Stream.t`, stores it in `async_queue`;
-- forks **one** consumer fiber (`Fiber.fork ~sw`) that loops
-  `Eio.Stream.take q` and runs the existing rotate + mutexed
-  `output_string`/`flush` on the drained line. It may batch-drain the items
-  currently available and `flush` once per batch to amortize the syscall;
-- under `Switch.on_release`, sets `async_queue := None` and synchronously
-  drains any residue through the sync path.
+The writer thread loops: take the queue mutex; wait on `nonempty` while the
+queue is empty and the mode is `Queued`; move every queued line into a local
+batch; release the mutex. It then runs `rotate_if_needed` once and, under
+`sink_mutex`, writes the batch with `output_string` per line and one `flush`.
+Only then does it take the queue mutex again, give the batch's room back and
+broadcast `nonfull`. The lines it holds count against `capacity` until they
+are written, so `capacity` bounds every buffered line: a writer that took
+the whole queue just before `write()` blocked does not let the queue fill a
+second time. When the queue is empty and the mode is `Synchronous`, it exits.
 
-Spawn it in `server_runtime_bootstrap.ml run` (`~960`), just before
-`Oas_diag_sink.install` (`~967`), using the threaded `~sw` and `env` clock.
+`start_writer ()` (idempotent) sets `Queued` and creates the thread. The server
+calls it in `bin/main_eio.ml` right after `Log.Ring.init_file_sink`, before any
+Keeper boots, next to `Console_sink.start`. `stop_writer ()` sets
+`Synchronous`, broadcasts both conditions and joins the thread, which writes
+what is left before it exits. It is registered with `at_exit` by
+`start_writer`. Processes that never call `start_writer` (CLI one-shots,
+tests, the TUI's own file sink) keep the synchronous path.
 
-### 3.1 Why the dual mode is load-bearing
+### 3.1 Why the synchronous path stays
 
-Log calls happen **before** the Eio scheduler (`bin/main_eio.ml:611`
-`init_file_sink` runs before `Eio_main.run` at `:613`) and **after** it
-(`at_exit`, shutdown residue). An `Eio.Stream` cannot exist or be pushed to
-outside a running scheduler. The `async_queue = None` sync fallback is therefore
-mandatory: pre-Eio boot logs and post-Eio at_exit logs keep the synchronous
-path; only the steady-state window uses the async path. A single-mode async
-rewrite would break boot/shutdown logging.
+A thread does not need an Eio scheduler, so the 2026-07-19 reason for the dual
+mode (an `Eio.Stream` cannot exist outside `Eio_main.run`) is gone. Two others
+remain: a process that never starts the writer must still write, and records
+emitted after `stop_writer` (the rest of `at_exit`) must not land in a queue
+nobody drains.
 
 ## 4. Decisions
 
-- **Backpressure, not drop.** Bound the stream; block the producer when full.
-  Lossless and order-preserving. Producer-block latency is bounded and only
-  bites under sustained overload, where the consumer is doing fast page-cache
-  `write()`s. Drop-oldest-with-counter is rejected (§2, telemetry-as-fix).
-- **Single consumer.** Preserves FIFO file ordering and keeps RFC-0108's
-  no-interleave guarantee trivially (one mutexed `output`).
-- **In-memory ring `buf` stays synchronous** (`log.ml:657`) so the dashboard
-  reader is unaffected; only the JSONL file append defers.
+- **Backpressure, not drop.** Unchanged from the draft. A full queue makes the
+  producer wait on `nonfull`; it never drops. The console mirror drops because
+  it is a copy; the file is the record.
+- **One writer.** File order is queue order, and RFC-0108's no-interleave
+  property holds because only the writer (or a synchronous producer, under
+  `sink_mutex`) writes.
+- **An OS thread, not a fiber.** See §3. The writer never runs on an Eio
+  scheduler, so a slow `write()` stops only the writer.
+- **Capacity 8,192 lines**, the console mirror's bound. At the busiest second
+  measured in §1.1 (213 records/s) the writer may stall for 38 s before any
+  producer waits; at p99 (38/s), 3.6 minutes. At the largest measured record
+  (4,022 B) the queued and held lines take at most 33 MB. A producer that does wait blocks
+  its domain's thread on `Condition.wait`, which is what every producer does
+  today on every record.
+- **The in-memory ring `buf` stays synchronous**, so the dashboard reader is
+  unaffected.
 
-## 5. Safety properties (to check, TLA+-style)
+## 5. Safety properties
 
-1. **No loss on clean shutdown.** On switch release, all enqueued-but-unflushed
-   lines are synchronously drained. `NextBuggy` = consumer drops residue on
-   cancel → must violate a `NoLossOnCleanShutdown` invariant.
-2. **FIFO order.** File line order equals `seq` order (single consumer).
-3. **No post-close enqueue.** After `async_queue := None` on release, producers
-   take the sync path; no `Stream.add` to a closed queue.
-4. **No byte interleave within a record** (RFC-0108): single consumer + one
-   mutexed `output` holds it.
+1. **No loss on a normal exit.** `stop_writer` runs from `at_exit`, switches
+   producers to the synchronous path and joins the writer after it empties the
+   queue.
+2. **Order.** File order equals queue order. Records written by different
+   domains were never in `seq` order in the file; this does not change.
+3. **No enqueue after stop.** A producer that finds `Synchronous`, or wakes to
+   it, takes the synchronous path.
+4. **No byte interleave within a record** (RFC-0108): every write is under
+   `sink_mutex`.
+5. **What can be lost.** A process that ends without `at_exit` (SIGKILL,
+   `Unix._exit`, a crash) loses the lines still queued. Today it loses at most
+   the record being written. The queue is normally empty within one write;
+   its depth bounds the loss.
 
 ## 6. Alternative rejected: bound at `Oas_diag_sink`
 
@@ -124,32 +171,35 @@ P1 is latent, not production-blocking now).
 
 ## 7. Test plan
 
-1. Ordering/no-loss: push M records through the async path, drain, assert the
-   file has exactly M lines in `seq` order.
-2. Backpressure: capacity N, paused consumer + N+K producers block (not drop);
-   after resume the file has N+K lines, zero missing seqs.
-3. Boot-boundary (counterfactual): emit with `async_queue=None` → synchronous
-   path, line lands immediately; then start consumer → subsequent lines defer.
-4. Shutdown-drain: enqueue, cancel the switch, assert residue synchronously
-   flushed via `on_release` (models safety invariant #1).
-5. Storm/harness: simulate the deepseek 429 pattern (hundreds of `agent_core:*`
-   `Diag.warn`/s); assert producer emit latency stays bounded (no per-record
-   flush syscall on the emitting fiber).
-6. Interleave (RFC-0108 regression): concurrent producers never emit `}{`-concat
-   lines.
+The tests drive the real sink through `init_file_sink` and the public writer
+functions; they add no test-only setter.
+
+1. **Order and no loss.** Start the writer, emit M records from several
+   domains, stop the writer, and read the file: exactly M lines, each a
+   complete JSON record, and each domain's records in its emit order.
+2. **Backpressure.** Point the sink at a FIFO whose reader the test holds
+   still. Emit more than `capacity` records plus the pipe buffer from a
+   producer thread: the producer stops returning before it finishes, and no
+   record is dropped. Start reading: the producer finishes and the reader gets
+   every record in order.
+3. **The main domain does not wait for the disk.** With the same stalled FIFO
+   and a queue below capacity, an Eio fiber's emit returns while the writer is
+   blocked in `write()`, and another fiber on that domain keeps running.
+4. **Before start and after stop.** Without `start_writer`, a record is in the
+   file when the emit returns. After `stop_writer`, the same holds.
+5. **Interleave** (RFC-0108 regression): concurrent producers never write a
+   `}{`-joined line.
 
 ## 8. Rollout
 
-- Phase 1: add the dual-mode branch + `start_async_consumer`, default **off**
-  (`async_queue=None`) so behaviour is byte-identical to today.
-- Phase 2: wire `start_async_consumer` in `server_runtime_bootstrap`; the sync
-  fallback still covers boot/shutdown.
-- No config knob is introduced for on/off beyond the boot wiring: a knob that
-  toggles durability semantics per deployment is itself a hazard.
+One implementation layer on top of this RFC: the writer in `Log.Ring`, the
+`start_writer` call in `bin/main_eio.ml`, and the tests above. No setting turns
+it on or off; a process either starts the writer or keeps the synchronous
+path. After the deploy, the same three-`sample` measurement as §1.1 checks
+that `caml_ml_flush` under `Log` is gone from the main thread (#46410).
 
 ## 9. Open questions
 
-- Batch-flush size: fixed small batch vs drain-all-available. Prefer
-  drain-all-available with one flush; measure under the storm harness.
-- Bounded capacity N: start from the storm rate × an acceptable
-  producer-stall bound; derive from harness measurement, not a guessed literal.
+- None for the first layer. The capacity is the measured bound in §4; if a
+  later measurement shows producers waiting on `nonfull`, that measurement,
+  not a new literal, sets the next value.

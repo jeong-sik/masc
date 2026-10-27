@@ -13083,7 +13083,7 @@ let apply_planning_load state = function
       (* A failed observation supplies no replacement goal list. Keep the
          snapshot, selected goal and viewport until a successful replacement
          reconciles them; workspace source replacement still clears it. *)
-      Log.Transport.info "tui_planning_refresh_failed=%s"
+      Log.Transport.warn "tui_planning_refresh_failed=%s"
         (Yojson.Safe.to_string (`Assoc
           [ "retained", `Bool (Option.is_some state.planning)
           ; "draft_retained", `Bool (match state.goal_action_pending with

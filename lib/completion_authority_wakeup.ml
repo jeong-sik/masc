@@ -246,7 +246,7 @@ let reconcile_rejections ~config =
       | Ok `Superseded -> report
       | Ok `Queued ->
         Log.Misc.info
-          "completion repair delivered task_id=%s verification_id=%s producer=%s"
+          "completion repair queued task_id=%s verification_id=%s producer=%s"
           item.task_id item.verification_id item.producer;
         { report with delivered = report.delivered + 1 }
       | Ok (`Released (previous_status, backlog_version)) ->
@@ -296,7 +296,7 @@ let reconcile_approvals ~config =
       |> Result.map (fun () -> outcome)) in
     match acknowledged with
     | Ok `Queued ->
-      Log.Misc.info "completion approval delivered task_id=%s verification_id=%s producer=%s"
+      Log.Misc.info "completion approval queued task_id=%s verification_id=%s producer=%s"
         item.task_id item.verification_id item.producer;
       { report with delivered = report.delivered + 1 }
     | Ok `Unroutable ->

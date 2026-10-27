@@ -83,7 +83,7 @@ module Tracker = struct
 
   let notify_ref : (task_id:string -> progress:float -> ?message:string -> ?estimated_remaining:float -> unit -> unit) ref =
     ref (fun ~task_id ~progress ?message:_ ?estimated_remaining:_ () ->
-      Log.Misc.info ~keeper_name:task_id "BUG: notify_ref not wired up! task=%s progress=%.2f" task_id progress
+      Log.Misc.error ~keeper_name:task_id "BUG: notify_ref not wired up! task=%s progress=%.2f" task_id progress
     )
 
   let create ~task_id ?(total_steps=100) () = {
@@ -171,7 +171,7 @@ let notify ~task_id ~progress ?message ?estimated_remaining () =
 
 (** Wire up the forward reference
     INVARIANT: This assignment MUST happen exactly once, after notify is defined.
-    If omitted, Tracker.update/step/complete will log BUG warnings to stderr.
+    If omitted, Tracker.update/step/complete will log BUG errors through the log ring.
     This pattern breaks circular dependency: Tracker needs notify, State needs Tracker.
     Alternative: recursive modules or functors (more complex). *)
 let () =

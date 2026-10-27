@@ -293,6 +293,10 @@ module Capability_write_for_testing : sig
     -> exception_:exn
     -> replace_dispatch_fault
 
+  val parent_sync_dispatch_fault : exception_:exn -> replace_dispatch_fault
+  (** Fail both the publication parent sync and its cleanup retry, after the
+      real rename, leaving the canonical recovery obligation in place. *)
+
   val remove_staging_payload_before_publish
     :  unit
     -> replace_dispatch_fault

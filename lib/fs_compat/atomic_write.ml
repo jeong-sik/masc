@@ -168,6 +168,7 @@ type replace_dispatch_fault =
       { fault_stage : capability_write_stage
       ; fault_exception : exn
       }
+  | Raise_before_parent_syncs of exn
   | Remove_staging_payload_before_publish
 
 (* TEL-OK: this fiber key carries a typed test fault plan; no write occurs here. *)
@@ -191,6 +192,10 @@ let scoped_replace_dispatch () =
   | Some (Raise_before_stage fault) ->
     ( (fun stage ->
         if stage = fault.fault_stage then raise fault.fault_exception)
+    , no_before_publish )
+  | Some (Raise_before_parent_syncs exception_) ->
+    ( (fun stage ->
+        if stage = Sync_parent || stage = Cleanup_sync_parent then raise exception_)
     , no_before_publish )
 ;;
 
@@ -2062,6 +2067,8 @@ module Capability_write_for_testing = struct
     Raise_before_stage
       { fault_stage = stage; fault_exception = exception_ }
   ;;
+
+  let parent_sync_dispatch_fault ~exception_ = Raise_before_parent_syncs exception_
 
   let remove_staging_payload_before_publish () =
     Remove_staging_payload_before_publish

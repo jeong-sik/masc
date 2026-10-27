@@ -48,6 +48,9 @@ val replace_dispatch_fault
   -> exception_:exn
   -> replace_dispatch_fault
 
+val parent_sync_dispatch_fault : exception_:exn -> replace_dispatch_fault
+(** Fail the real post-publication parent sync and its cleanup retry. *)
+
 val with_replace_dispatch_fault
   :  replace_dispatch_fault
   -> (unit -> 'a)

@@ -43,6 +43,7 @@ type error =
   | Admission_incomplete
   | Corrupt_original of string
   | Launch_already_requested
+  | Launch_cancelled
   | Launch_intent_spent
   | Stale_record
   | Cleanup_failed of { primary : error option; cause : File_lock_eio.durable_lock_error }
@@ -97,13 +98,36 @@ val payload_uid : record -> int
 type launch_state = Not_requested | Requested of P.Id.t
 val launch_state : record -> launch_state
 
+type cancellation_state = No_cancellation | Cancellation_requested
+val cancellation_state : record -> cancellation_state
+
+val request_cancel :
+  record -> confirmed_admission_id:P.Id.t -> (record, error) result
+(** Commit cancellation against the same original admission, input and payload
+    identity under its nonwaiting job lock. It may follow launch progress of
+    that same operation; it never retargets another admission, job directory
+    identity or already-issued launch ID. Once cancelled, the original cannot
+    progress into a different launch. Repeated or
+    lost-reply requests sync the exact existing claim and its actual parent,
+    then revalidate the same original before acknowledging that durable intent
+    without advancing it. A failed sync or validation remains an error.
+    Cancellation before launch prevents a new launch permit, and cancellation
+    after a permit was issued prevents its still-pending callback from starting.
+    A currently active bounded launch callback returns [Busy]; no other job is
+    waited on. The caller reconciles after that startup settles.
+
+    This is durable intent only, not process termination or result readiness.
+    The supervisor must validate its original kernel handle and this current
+    intent before any actual signal. This module signals no PID or group. *)
+
 val commit_launch :
   record -> confirmed_admission_id:P.Id.t -> launch_id:P.Id.t ->
   (launch_intent, error) result
 (** Compare the entire original owner/head under its own flock and durably
     publish launch intent before returning one opaque process-local permit.
     The confirmation must identify the same original endpoint admission.
-    An already committed launch never returns a fresh permit, including after
+    A committed cancellation returns [Launch_cancelled]. An already committed
+    launch never returns a fresh permit, including after
     restart/lost reply. Publication/release uncertainty grants no permission.
     The next supervisor layer must reconcile the original paused-child/handle
     rendezvous instead of relaunching such a record. *)
@@ -117,7 +141,8 @@ type 'a launch_outcome =
 
 val with_launch : launch_intent -> (launch_target -> 'a) -> 'a launch_outcome
 (** Revalidate the committed original under its job lock, consume the permit
-    exactly once, then invoke the bounded launch callback. Callback exceptions
+    exactly once, then invoke the bounded launch callback. A cancellation that
+    won the same lock returns [Not_performed Launch_cancelled]. Callback exceptions
     and cancellation propagate with the permit spent; they never replay it.
     Cleanup failure preserves the callback's actual result in [Performed].
     The callback only performs the supervisor's launch rendezvous. It must not
@@ -134,6 +159,14 @@ module For_testing : sig
       Ready promotion. [after_missing_job] interleaves an actual competing
       admission between absence observation and exclusive directory creation.
       Hook exceptions propagate; no alternate store path. *)
+  val request_cancel :
+    ?before_resync_parent:(unit -> unit) ->
+    after_publication:(unit -> unit) -> record -> confirmed_admission_id:P.Id.t ->
+    (record, error) result
+  (** Interrupt after durable cancellation intent and before its reply.
+      [before_resync_parent] runs in the blocking descriptor scope after the
+      duplicate's claim fsync and before its actual parent fsync. It may raise
+      to exercise sync failure; it must not perform Eio effects. *)
   val commit_launch :
     after_publication:(unit -> unit) -> record ->
     confirmed_admission_id:P.Id.t -> launch_id:P.Id.t -> (launch_intent, error) result

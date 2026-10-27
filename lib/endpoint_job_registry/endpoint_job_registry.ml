@@ -14,7 +14,7 @@ type error =
   | Commit_unconfirmed of string
   | Busy | Binding_mismatch | Invalid_request of P.codec_error | Execution_identity_changed
   | Endpoint_replaced | Missing_original | Admission_incomplete | Corrupt_original of string
-  | Launch_already_requested | Launch_intent_spent | Stale_record
+  | Launch_already_requested | Launch_cancelled | Launch_intent_spent | Stale_record
   | Cleanup_failed of { primary : error option; cause : File_lock_eio.durable_lock_error }
 
 let rec error_to_string = function
@@ -41,6 +41,7 @@ let rec error_to_string = function
   | Admission_incomplete -> "endpoint original admission is still preparing"
   | Corrupt_original detail -> "endpoint original record is corrupt: " ^ detail
   | Launch_already_requested -> "endpoint launch is already requested; reconcile original handle"
+  | Launch_cancelled -> "endpoint original launch was cancelled"
   | Launch_intent_spent -> "endpoint launch permit was already consumed"
   | Stale_record -> "endpoint original record changed"
   | Cleanup_failed {primary;cause} ->
@@ -48,7 +49,11 @@ let rec error_to_string = function
      | Some error -> error_to_string error) ^ "; " ^ File_lock_eio.durable_lock_error_to_string cause
 
 type identity = { device : int64; inode : int64 }
-type claim_state = Preparing | Ready of identity | Launch_requested of {job : identity; launch_id : P.Id.t}
+type claim_state =
+  | Preparing
+  | Ready of identity
+  | Launch_requested of {job : identity; launch_id : P.Id.t}
+  | Cancel_requested of {job : identity; launch_id : P.Id.t option}
 type claim =
   { binding : P.binding; admission_id : P.Id.t; controller_uid : int; payload_uid : int
   ; root : identity; revision : int64; state : claim_state }
@@ -68,7 +73,13 @@ let revision record = record.claim.revision
 let payload_uid record = record.claim.payload_uid
 let launch_state record = match record.claim.state with
   | Preparing | Ready _ -> Not_requested
-  | Launch_requested {launch_id;_} -> Requested launch_id
+  | Launch_requested {launch_id;_} | Cancel_requested {launch_id=Some launch_id;_} -> Requested launch_id
+  | Cancel_requested {launch_id=None;_} -> Not_requested
+
+type cancellation_state = No_cancellation | Cancellation_requested
+let cancellation_state record = match record.claim.state with
+  | Preparing | Ready _ | Launch_requested _ -> No_cancellation
+  | Cancel_requested _ -> Cancellation_requested
 
 type launch_target =
   { binding : P.binding; spec : P.spec; admission_id : P.Id.t; launch_id : P.Id.t; payload_uid : int }
@@ -167,7 +178,8 @@ let claim_json (claim : claim) =
   let* original=P.request_to_json (P.Inspect claim.binding) |> Result.map_error (fun e -> Invalid_request e) in
   let state,job,launch_id=match claim.state with
     | Preparing -> "preparing",None,None | Ready job -> "ready",Some job,None
-    | Launch_requested {job;launch_id} -> "launch_requested",Some job,Some launch_id in
+    | Launch_requested {job;launch_id} -> "launch_requested",Some job,Some launch_id
+    | Cancel_requested {job;launch_id} -> "cancel_requested",Some job,launch_id in
   let coordinate f=match job with None -> `Null | Some job -> count (f job) in
   Ok (`Assoc ["version",`Int 1;"original",original;"admission_id",`String (P.Id.to_string claim.admission_id);
     "controller_uid",count (Int64.of_int claim.controller_uid);"payload_uid",count (Int64.of_int claim.payload_uid);
@@ -199,6 +211,14 @@ let claim_of_json value =
       let* device=number "job device" (member f "job_device") in
       let* inode=number "job inode" (member f "job_inode") in
       let* launch_id=identifier "launch ID" (member f "launch_id") in Ok (Launch_requested {job={device;inode};launch_id})
+    | `String "cancel_requested" ->
+      let* device=number "job device" (member f "job_device") in
+      let* inode=number "job inode" (member f "job_inode") in
+      let* launch_id=match member f "launch_id" with
+        | `Null when revision=2L -> Ok None
+        | `String value when revision=3L -> identifier "launch ID" (`String value) |> Result.map Option.some
+        | `Null | `String _ | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> corrupt "cancel launch/revision" in
+      Ok (Cancel_requested {job={device;inode};launch_id})
     | `String _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> corrupt "claim state/revision" in
   Ok {binding;admission_id;controller_uid;payload_uid;root={device;inode};revision;state}
 
@@ -239,7 +259,7 @@ let read_record (registry : t) (binding : P.binding) =
   let* claim=read_claim registry binding in
   let* claim=match claim with None -> Error Missing_original | Some claim -> Ok claim in
   let* expected=match claim.state with Preparing -> Error Admission_incomplete
-    | Ready job | Launch_requested {job;_} -> Ok job in
+    | Ready job | Launch_requested {job;_} | Cancel_requested {job;_} -> Ok job in
   let* observed=inspect_job registry binding in
   let* ()=if observed=Some expected then Ok () else Error Missing_original in
   let* admission=read_private registry [job_leaf binding;"admission_id"] in
@@ -305,7 +325,7 @@ let already_exists ?(directory=false) = function
   | Protection_refused _ | Authority_unavailable _ | Recovery_unavailable _
   | Lock_failed _ | Commit_unconfirmed _ | Busy | Binding_mismatch | Invalid_request _
   | Execution_identity_changed | Endpoint_replaced | Missing_original | Admission_incomplete
-  | Corrupt_original _ | Launch_already_requested | Launch_intent_spent | Stale_record | Cleanup_failed _ -> false
+  | Corrupt_original _ | Launch_already_requested | Launch_cancelled | Launch_intent_spent | Stale_record | Cleanup_failed _ -> false
 
 let create_job (registry : t) (claim : claim) =
   let* ()=validate_root registry in
@@ -366,7 +386,7 @@ let admit_with_hooks ~after_claim ~after_missing_job ~after_job ~after_original 
   let* ()=if claim.payload_uid=registry.payload_uid then Ok () else Error Execution_identity_changed in
   after_claim ();
   match claim.state with
-  | Ready _ | Launch_requested _ -> load registry ~binding
+  | Ready _ | Launch_requested _ | Cancel_requested _ -> load registry ~binding
   | Preparing ->
     let* existing_job=inspect_job registry binding in
     let* ()=match existing_job with
@@ -382,7 +402,7 @@ let admit_with_hooks ~after_claim ~after_missing_job ~after_job ~after_original 
       let* current=read_claim registry binding in
       let* current=match current with None -> Error Missing_original | Some c -> Ok c in
       match current.state with
-      | Ready _ | Launch_requested _ -> read_record registry binding
+      | Ready _ | Launch_requested _ | Cancel_requested _ -> read_record registry binding
       | Preparing ->
         let* job=inspect_job registry binding in
         let* job=match job with None -> Error Missing_original | Some id -> Ok id in
@@ -400,6 +420,62 @@ let admit_with_hooks ~after_claim ~after_missing_job ~after_job ~after_original 
         let* ()=publish_claim registry ~exclusive:false ready in
         read_record registry binding)
 
+let same_execution_progress previous current =
+  match previous with
+  | Preparing -> (match current with
+      | Preparing -> true
+      | Ready _ | Launch_requested _ | Cancel_requested _ -> false)
+  | Ready job -> (match current with
+      | Preparing -> false
+      | Ready next | Launch_requested {job=next;_} | Cancel_requested {job=next;_} -> job=next)
+  | Launch_requested {job;launch_id} -> (match current with
+      | Launch_requested {job=next;launch_id=next_id}
+      | Cancel_requested {job=next;launch_id=Some next_id} -> job=next && launch_id=next_id
+      | Preparing | Ready _ | Cancel_requested {launch_id=None;_} -> false)
+  | Cancel_requested {job;launch_id} -> (match current with
+      | Cancel_requested {job=next;launch_id=next_id} -> job=next && launch_id=next_id
+      | Preparing | Ready _ | Launch_requested _ -> false)
+
+let same_original (original : record) (current : record) =
+  {original.claim with revision=current.claim.revision;state=current.claim.state}=current.claim
+  && same_execution_progress original.claim.state current.claim.state
+  && original.spec=current.spec
+
+let resync_cancel ~before_parent_sync (current : record) =
+  let registry=current.registry and binding=current.claim.binding in
+  let* relative=Fs_compat.owned_relative_path [claim_leaf binding]
+    |> Result.map_error (fun _ -> Corrupt_original "claim relative path") in
+  let* result=blocking (fun () -> Fs_compat.with_owned_inventory_root registry.root_path (fun root ->
+    Fs_compat.with_owned_inventory_regular_file ~owner_uid:registry.controller_uid root relative
+      (fun ~file ~parent ~stat:_ -> Unix.fsync file;before_parent_sync ();Unix.fsync parent))) in
+  let* ()=result |> Result.map_error (fun e ->
+    Authority_unavailable (Fs_compat.owned_regular_file_read_error_to_string e)) in
+  let* confirmed=read_record registry binding in
+  if confirmed.claim=current.claim && confirmed.spec=current.spec then Ok confirmed else Error Stale_record
+
+let request_cancel_with_hook ~before_resync_parent ~after_publication (original : record) ~confirmed_admission_id =
+  let registry=original.registry and binding=original.claim.binding in
+  let* ()=effect_binding registry binding in
+  locked registry binding (fun () ->
+    let* current=read_record registry binding in
+    let* ()=if original.claim.admission_id=confirmed_admission_id
+       && current.claim.admission_id=confirmed_admission_id then Ok () else Error Binding_mismatch in
+    let* ()=if current.claim.payload_uid=registry.payload_uid
+       && current.claim.payload_uid=original.claim.payload_uid then Ok () else Error Execution_identity_changed in
+    let* ()=if same_original original current then Ok () else Error Stale_record in
+    let publish job launch_id =
+      let claim={current.claim with revision=Int64.succ current.claim.revision;
+        state=Cancel_requested {job;launch_id}} in
+      let* ()=publish_claim registry ~exclusive:false claim in
+      after_publication ();
+      let* committed=read_record registry binding in
+      if committed.claim=claim && committed.spec=current.spec then Ok committed else Error Stale_record in
+    match current.claim.state with
+    | Preparing -> Error Admission_incomplete
+    | Cancel_requested _ -> resync_cancel ~before_parent_sync:before_resync_parent current
+    | Ready job -> publish job None
+    | Launch_requested {job;launch_id} -> publish job (Some launch_id))
+
 let commit_launch_with_hook ~after_publication (original : record) ~confirmed_admission_id ~launch_id =
   let registry=original.registry and binding=original.claim.binding in
   let* ()=effect_binding registry binding in
@@ -409,6 +485,7 @@ let commit_launch_with_hook ~after_publication (original : record) ~confirmed_ad
     let* ()=if current.claim.payload_uid=registry.payload_uid then Ok () else Error Execution_identity_changed in
     match current.claim.state with
     | Launch_requested _ -> Error Launch_already_requested
+    | Cancel_requested _ -> Error Launch_cancelled
     | Preparing -> Error Admission_incomplete
     | Ready job ->
       let* ()=if original.claim=current.claim && original.spec=current.spec then Ok () else Error Stale_record in
@@ -427,7 +504,11 @@ let with_launch (intent : launch_intent) perform =
   | Ok () ->
     let attempt=File_lock_eio.try_with_liveness_lock_observed ~lock_path:(lock_path registry binding) (fun () ->
       let* current=read_record registry binding in
-      let* ()=if current.claim=original.claim && current.spec=original.spec then Ok () else Error Stale_record in
+      let* ()=if same_original original current then Ok () else Error Stale_record in
+      let* ()=match current.claim.state with
+        | Cancel_requested _ -> Error Launch_cancelled
+        | Preparing | Ready _ | Launch_requested _ -> Ok () in
+      let* ()=if current.claim=original.claim then Ok () else Error Stale_record in
       let* ()=if current.claim.payload_uid=registry.payload_uid then Ok () else Error Execution_identity_changed in
       if not (Atomic.compare_and_set intent.spent false true) then Error Launch_intent_spent
       else Ok (perform {binding;spec=current.spec;admission_id=current.claim.admission_id;
@@ -444,10 +525,15 @@ let admit registry ~new_admission_id ~binding ~spec =
   admit_with_hooks ~after_claim:(fun () -> ()) ~after_missing_job:(fun () -> ())
     ~after_job:(fun () -> ()) ~after_original:(fun () -> ())
     registry ~new_admission_id ~binding ~spec
+let request_cancel original ~confirmed_admission_id =
+  request_cancel_with_hook ~before_resync_parent:(fun () -> ()) ~after_publication:(fun () -> ())
+    original ~confirmed_admission_id
 let commit_launch original ~confirmed_admission_id ~launch_id =
   commit_launch_with_hook ~after_publication:(fun () -> ())
     original ~confirmed_admission_id ~launch_id
 module For_testing = struct
   let admit = admit_with_hooks
   let commit_launch = commit_launch_with_hook
+  let request_cancel ?(before_resync_parent=fun () -> ()) ~after_publication original ~confirmed_admission_id =
+    request_cancel_with_hook ~before_resync_parent ~after_publication original ~confirmed_admission_id
 end

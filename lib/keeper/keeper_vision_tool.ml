@@ -148,6 +148,22 @@ let record_vision_analyze_result ~result ~reason =
    calls skip it by kind. The parent row is written by the post-tool hook,
    so a walk the parent cancelled, or the eager ingest path that passes no
    [tool_use_id], leaves candidate rows with no parent row to join. *)
+
+(* One owner for the kwargs every vision-candidate row shares; callers vary
+   only the input fields, outcome and duration. *)
+let log_vision_row ?tool_use_id ?trace_id ~input ~wire_outcome ~duration_ms () =
+  Keeper_tool_call_log.log_call
+    ~keeper_name:"system"
+    ~tool_name:"vision_candidate"
+    ~input
+    ~output_text:""
+    ~record_kind:Keeper_tool_call_log.Lifecycle_event
+    ~wire_outcome
+    ~duration_ms
+    ?tool_use_id
+    ?trace_id
+    ()
+
 let record_vision_candidate_attempt
       ?tool_use_id
       ?trace_id
@@ -161,16 +177,12 @@ let record_vision_candidate_attempt
     Keeper_metrics.(to_string VisionCandidateAttempts)
     ~labels:[ "runtime_id", runtime_id; "result", result; "reason", reason ]
     ();
-  Keeper_tool_call_log.log_call
-    ~keeper_name:"system"
-    ~tool_name:"vision_candidate"
+  log_vision_row
     ~input:(`Assoc
               [ "runtime_id", `String runtime_id
               ; "result", `String result
               ; "reason", `String reason
               ])
-    ~output_text:""
-    ~record_kind:Keeper_tool_call_log.Lifecycle_event
     ~wire_outcome:(if success then Tool_result.Ok else Tool_result.Error)
     ~duration_ms
     ?tool_use_id
@@ -188,17 +200,13 @@ let record_vision_candidate_start
       ~attempt_index
       ~candidate_count
       () =
-  Keeper_tool_call_log.log_call
-    ~keeper_name:"system"
-    ~tool_name:"vision_candidate"
+  log_vision_row
     ~input:(`Assoc
               [ "runtime_id", `String runtime_id
               ; "result", `String "started"
               ; "attempt_index", `Int attempt_index
               ; "candidate_count", `Int candidate_count
               ])
-    ~output_text:""
-    ~record_kind:Keeper_tool_call_log.Lifecycle_event
     ~wire_outcome:Tool_result.Unknown
     ~duration_ms:0.0
     ?tool_use_id
@@ -227,16 +235,12 @@ let record_vision_candidate_cancelled ?tool_use_id ?trace_id ~runtime_id () =
         ; "reason", "parent_cancelled"
         ]
       ();
-    Keeper_tool_call_log.log_call
-      ~keeper_name:"system"
-      ~tool_name:"vision_candidate"
+    log_vision_row
       ~input:(`Assoc
                 [ "runtime_id", `String runtime_id
                 ; "result", `String "cancelled"
                 ; "reason", `String "parent_cancelled"
                 ])
-      ~output_text:""
-      ~record_kind:Keeper_tool_call_log.Lifecycle_event
       ~wire_outcome:Tool_result.Error
       ~duration_ms:0.0
       ?tool_use_id

@@ -63,7 +63,9 @@ let test_log_auth_refusal_emits_line () =
     let open Yojson.Safe.Util in
     check string "details carry the path" "/api/v1/keeper/chat"
       (entry.details |> member "path" |> to_string);
-    check int "details carry the status" 401 (entry.details |> member "status" |> to_int)
+    check int "details carry the status" 401 (entry.details |> member "status" |> to_int);
+    check string "level is Warn" "WARN" (Log.level_to_string entry.Log.Ring.level);
+    check bool "category is Routine" true (entry.Log.Ring.category = Some Log.Routine)
 
 (* The responder, not just the helper: this drives [respond_auth_error] itself
    over a real [Httpun.Reqd], so deleting its logging call fails the test. The

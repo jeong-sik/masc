@@ -27,10 +27,10 @@ let request reason = match Atomic.get active with None -> () | Some runtime -> r
 let wake () = request Event
 let pulse () = request Pulse
 let report = function
-  | Candle_appraise.Settled goal_id -> Log.Misc.info "candle: payout settled goal_id=%s" goal_id
+  | Candle_appraise.Settled goal_id -> Log.Candle.info "payout settled goal_id=%s" goal_id
   | Candle_appraise.Superseded _ -> ()
-  | Candle_appraise.Rejected {goal_id;detail} -> Log.Misc.warn "candle: appraisal rejected, awaiting payout event goal_id=%s: %s" goal_id detail
-  | Candle_appraise.Retry_later {goal_id;detail} -> Log.Misc.warn "candle: appraisal pending goal_id=%s: %s" goal_id detail
+  | Candle_appraise.Rejected {goal_id;detail} -> Log.Candle.warn "appraisal rejected, awaiting payout event goal_id=%s: %s" goal_id detail
+  | Candle_appraise.Retry_later {goal_id;detail} -> Log.Candle.warn "appraisal pending goal_id=%s: %s" goal_id detail
 let launch ~sw runtime owner =
   owner.in_flight <- true;
   owner.event_queued <- false;
@@ -65,14 +65,14 @@ let pass ~sw runtime reason =
         if owner.in_flight then owner.event_queued <- true
         else owner.rejected <- false) runtime.owners;
     let reason = match Candle_candidates.drain_once ~now:Time_compat.now runtime.config with
-      | Error detail -> Log.Misc.warn "candle: preparation could not read ledger: %s" detail; reason
+      | Error detail -> Log.Candle.warn "preparation could not read ledger: %s" detail; reason
       | Ok outcomes -> if List.exists (function Candle_candidates.Wrote_unattributed _ -> true
           | Candle_candidates.Wrote_candidates _ | Candle_candidates.Already_prepared _
           | Candle_candidates.Superseded _ | Candle_candidates.Retry_later _ -> false) outcomes
         then Event else reason in
     match Candle_appraise.pending ~base_path:runtime.config.base_path with
     | Error detail ->
-      Log.Misc.warn "candle: payout pass could not read ledger: %s" detail;
+      Log.Candle.warn "payout pass could not read ledger: %s" detail;
       Deferred reason
     | Ok waiting ->
       let ids = List.map (fun (w : Candle_payout.waiting) -> w.goal_id) waiting in
@@ -99,7 +99,7 @@ let run ~sw runtime : [ `Stop_daemon ] =
           try pass ~sw runtime reason with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn ->
-            Log.Misc.error "candle: payout scheduling failed: %s" (Printexc.to_string exn);
+            Log.Candle.error "payout scheduling failed: %s" (Printexc.to_string exn);
             Deferred reason in
         match outcome with
         | Deferred Event ->
@@ -119,8 +119,8 @@ let start ?(appraiser_declaration_changed = fun () -> false)
     Eio.Switch.on_release sw (fun () -> ignore (Atomic.compare_and_set active owner None : bool));
     Eio.Fiber.fork_daemon ~sw (fun () -> run ~sw runtime))
   else match Atomic.get active with
-    | Some running -> Log.Misc.error "candle: payout worker already owns %s; refusing %s" running.config.base_path config.base_path
-    | None -> Log.Misc.error "candle: payout worker start race left no owner"
+    | Some running -> Log.Candle.error "payout worker already owns %s; refusing %s" running.config.base_path config.base_path
+    | None -> Log.Candle.error "payout worker start race left no owner"
 module For_testing = struct
   let idle () = match Atomic.get active with
     | None -> true

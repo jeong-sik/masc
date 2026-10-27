@@ -50,7 +50,19 @@ let test_round_trip_optional_fields () =
     (Some "delta") decoded.keeper_name;
   Alcotest.(check (option int)) "turn_id" (Some 7) decoded.turn_id;
   Alcotest.(check bool) "details preserved" true
-    (decoded.details = `Assoc [("k", `String "v")])
+    (decoded.details = `Assoc [("k", `String "v")]);
+  (* The dashboard label for an absent Keeper is also a valid literal name;
+     the wire cannot distinguish them, so decoding must preserve the name. *)
+  let no_keeper = entry_of () in
+  Alcotest.(check bool) "absent keeper wire label" true
+    (assoc_field "keeper_name" (Log.Ring.entry_to_json no_keeper)
+     = Some (`String "system"));
+  let explicit_system = entry_of ~keeper_name:"system" () in
+  let decoded_system =
+    Log.Ring.entry_of_json (Log.Ring.entry_to_json explicit_system)
+  in
+  Alcotest.(check (option string)) "literal system keeper_name" (Some "system")
+    decoded_system.keeper_name
 
 let test_wire_format_field_set () =
   let e = entry_of () in

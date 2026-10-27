@@ -145,10 +145,12 @@ let body_of_response response =
     | Some (_, body) -> body
     | None -> Alcotest.failf "response has no body separator: %S" response
 
+(* [since_seq] is exclusive and the ring's first entry carries seq 0, so an
+   empty ring has to sit below it rather than at it. *)
 let latest_seq () =
   match Log.Ring.recent ~limit:1 () with
   | entry :: _ -> entry.Log.Ring.seq
-  | [] -> 0
+  | [] -> -1
 
 let keeper_entries_since seq =
   Log.Ring.recent

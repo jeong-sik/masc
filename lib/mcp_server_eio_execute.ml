@@ -5,7 +5,6 @@
     checks authorization, session-binds, and delegates to tool modules.
 *)
 
-let log_mcp_exn = Mcp_server_eio_helpers.log_mcp_exn
 let wait_for_message_eio = Mcp_server_eio_helpers.wait_for_message_eio
 
 let caller_agent_name_from_arguments arguments =
@@ -117,7 +116,7 @@ let execute_tool_eio
     Mcp_server_eio_caller_identity.resolve ~config ~tool_name:name ~arguments
       ~identity ~cached_resolved_agent ~auth_token ~internal_keeper_runtime
       ~direct_call_authority ~workspace_initialized:(fun () -> workspace_init_cached)
-      ~log_mcp_exn
+      ~log_mcp_exn:Mcp_server_eio_helpers.log_mcp_exn
   in
   Option.iter (fun observe -> observe caller_identity) on_caller_resolved;
   let agent_name = caller_identity.agent_name in

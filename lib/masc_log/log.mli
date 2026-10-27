@@ -220,7 +220,6 @@ module type LOGGER = sig
   val debug : ?keeper_name:string -> ?turn_id:int -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
   val info : ?keeper_name:string -> ?turn_id:int -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
   val warn : ?keeper_name:string -> ?turn_id:int -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
-  val warning : ?keeper_name:string -> ?turn_id:int -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
   val error : ?keeper_name:string -> ?turn_id:int -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
 end
 
@@ -261,6 +260,7 @@ module TaskState : LOGGER
 module KeeperExec : LOGGER
 module LocalWorker : LOGGER
 module Harness : LOGGER
+module Candle : LOGGER
 
 (** {2 Logging-consistency migration modules}
 

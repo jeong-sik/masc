@@ -669,18 +669,19 @@ let log_broadcast config ~agent_id ~message_preview ?cost_estimate ?token_count 
     ~details:(`Assoc [("preview", `String preview)])
     ?cost_estimate ?token_count ~outcome:Success ()
 
+let outcome_of ~success ~error_msg =
+  if success then Success else Failure (Option.value error_msg ~default:"unknown")
+
 let log_tool_call config ~agent_id ~tool_name ~success ~error_msg ?cost_estimate ?token_count ?trace_id () =
-  let outcome = if success then Success else Failure (Option.value error_msg ~default:"unknown") in
-  log_action config ~agent_id ~action:(ToolCall tool_name) ?cost_estimate ?token_count ?trace_id ~outcome ()
+  log_action config ~agent_id ~action:(ToolCall tool_name) ?cost_estimate ?token_count ?trace_id
+    ~outcome:(outcome_of ~success ~error_msg) ()
 
 let remove_assoc_keys keys fields =
   List.filter (fun (key, _) -> not (List.mem key keys)) fields
 
 let log_non_public_tool_call config ~agent_id ~tool_name ~success ~error_msg
     ?(details : Yojson.Safe.t = `Null) ?cost_estimate ?token_count ?trace_id () =
-  let outcome =
-    if success then Success else Failure (Option.value error_msg ~default:"unknown")
-  in
+  let outcome = outcome_of ~success ~error_msg in
   let details =
     match details with
     | `Assoc fields ->

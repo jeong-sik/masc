@@ -334,7 +334,14 @@ type all_events_cache_entry =
 
 type all_events_workspace_cache =
   { root : string
-  ; mutex : Stdlib.Mutex.t
+  ; mutex : Cross_context_mutex.t
+    (* Held for a whole read, and a read stats and reads the event files
+       through Eio, so the reading fiber suspends while it holds this. A
+       [Stdlib.Mutex] made the next fiber of the domain raise
+       [Sys_error "Mutex.lock: Resource deadlock avoided"] instead of
+       waiting (the cache gauge did, 2026-10-25). The cross-context lock
+       makes a fiber wait cooperatively. The serialization stays on purpose: a
+       cold read parses the whole store, and two readers must not both do it. *)
   ; mutable entry : all_events_cache_entry option
   ; (* The merged, seq-sorted events of every file EXCEPT the current day,
        keyed on those files' own signature. [entry] above is keyed on every
@@ -409,7 +416,7 @@ let acquire_all_events_workspace_cache root =
       then ignore (evict_lru_idle_workspace_cache ());
       let cache =
         { root
-        ; mutex = Stdlib.Mutex.create ()
+        ; mutex = Cross_context_mutex.create ()
         ; entry = None
         ; past_merged = None
         ; past_day_cache = Past_day_path_map.empty
@@ -450,7 +457,7 @@ let reset_past_day_cache_for_testing () =
   in
   List.iter
     (fun cache ->
-       Stdlib.Mutex.protect cache.mutex (fun () ->
+       Cross_context_mutex.with_lock cache.mutex (fun () ->
          cache.past_day_cache <- Past_day_path_map.empty;
          cache.entry <- None))
     caches
@@ -464,7 +471,7 @@ let cache_stats () =
   List.fold_left
     (fun stats cache ->
        let files, records =
-         Stdlib.Mutex.protect cache.mutex (fun () ->
+         Cross_context_mutex.with_lock cache.mutex (fun () ->
            ( Past_day_path_map.cardinal cache.past_day_cache
            , Past_day_path_map.fold
                (fun _ (_, events) acc -> acc + List.length events)
@@ -628,7 +635,7 @@ let read_all_events config =
   Fun.protect
     ~finally:(fun () -> release_all_events_workspace_cache cache)
     (fun () ->
-       Stdlib.Mutex.protect cache.mutex (fun () ->
+       Cross_context_mutex.with_lock cache.mutex (fun () ->
          let current_day = day_path config in
          let files = collect_event_files config in
          evict_stale_cache_entries cache ~live_paths:files;
@@ -790,7 +797,7 @@ let read_recent_events config ~limit =
   Fun.protect
     ~finally:(fun () -> release_all_events_workspace_cache cache)
     (fun () ->
-       Stdlib.Mutex.protect cache.mutex (fun () ->
+       Cross_context_mutex.with_lock cache.mutex (fun () ->
          let current_day = day_path config in
          let files = collect_event_files config in
          evict_stale_cache_entries cache ~live_paths:files;

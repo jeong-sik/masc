@@ -1261,7 +1261,7 @@ let test_checkpoint_preserves_receipt_across_session_replacement ~repeated_tool 
         if repeated_tool then Repeated_tool_call {tool_name="CheckpointFixture";repeated_count=2}
         else Terminal_tool_boundary {tool_name="CheckpointFixture";outcome=Durable_stimulus_deferred} in
       let attempt = run ~tools:[tool]
-        ~on_official_client_tool_boundary:(fun () -> Ok (Some stop))
+        ~on_official_client_tool_boundary:(fun ~tool_name:_ -> Ok (Some stop))
         ~instructions:"Read the original result without replaying its effect." ~world:"before checkpoint" () in
       let result = match attempt.Keeper_codex_runtime.result with
         | Ok result -> result | Error error -> fail (Agent_core.Error.to_string error) in

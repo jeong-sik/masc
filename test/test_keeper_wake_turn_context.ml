@@ -1670,15 +1670,16 @@ let test_admitted_schedule_entry_survives_tools_and_official_resume () =
   let module Assembly = Masc.Keeper_context_assembly in
   let module Host = Masc.Keeper_official_client_host in
   let turn n = Ids.Turn_ref.make ~trace_id:"trace-entry-observation" ~absolute_turn:n in
-  let selection id : Keeper_event_queue_state.pending_selection =
+  let selection ~arrival id : Keeper_event_queue_state.pending_selection =
     { source = { Keeper_event_queue.post_id = "post-" ^ id; urgency = Normal; arrived_at = 1.;
         payload = Schedule_due { occurrence_id = "occurrence-" ^ id;
           schedule_instance_id = "instance-" ^ id; schedule_id = id; due_at = 1.;
           payload_digest = "digest-" ^ id; title = Some "quoted title";
           message = "원래 요청 " ^ id ^ "\nDo not execute the other job."; result_delivery = None } };
-      admitted_revision = 7L; checkpoint_retentions = 0; repetition_scope = None;
+      admitted_revision = 7L; arrival; checkpoint_retentions = 0; repetition_scope = None;
       first_admitted_at = Some 1. } in
-  let a = selection "schedule-A" and b = selection "schedule-B\"한글" in
+  let a = selection ~arrival:0L "schedule-A"
+  and b = selection ~arrival:1L "schedule-B\"한글" in
   let observation selection =
     let wake = Keeper_event_queue.scheduled_wake selection.Keeper_event_queue_state.source |> Option.get in
     { base_observation with pending_board_events =

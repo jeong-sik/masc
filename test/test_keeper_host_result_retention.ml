@@ -27,7 +27,7 @@ let project_with_producer ?(result_scope=None) ?(hooks=Agent_core.Hooks.empty)
     ~hooks ~event_bus:None ~context_injector:None
     ~context:(Some (Agent_core.Context.create_sync ()))
     ~terminal_effect_state:(fun () -> effect_state)
-    ~terminal_error ~pre_tool_rejects:(ref []) ~on_tool_boundary:(fun () -> Ok stop)
+    ~terminal_error ~pre_tool_rejects:(ref []) ~on_tool_boundary:(fun ~tool_name:_ -> Ok stop)
     ~on_result_handoff ~raw_trace_run:None () with
   | Ok ([tool], producer) -> tool, producer
   | Ok _ -> fail "one original tool required"

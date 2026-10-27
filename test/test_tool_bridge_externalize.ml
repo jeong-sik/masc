@@ -570,9 +570,11 @@ let expected_next_moves =
   ; (Tool_result.Runtime_failure, "runtime_failure", runtime_failure_next_move)
   ; ( Tool_result.Workflow_rejection
     , "workflow_rejection"
-    , "The current state does not admit this action; it is a rule, not a \
-       syntax problem. Read the current state first. The same call succeeds \
-       only after the state changes." )
+    , "The current state does not admit this exact request. Read the failure \
+       detail and current state. Correct the arguments or choose an admissible \
+       target when the detail names one; wait for a state change only when the \
+       detail says that change is required and expected. Otherwise change the \
+       requested action or report the blocker." )
   ; ( Tool_result.Operator_cancelled
     , "operator_cancelled"
     , "An operator stopped this call. It is not re-issued. Say where it \

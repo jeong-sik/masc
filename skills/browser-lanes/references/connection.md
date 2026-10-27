@@ -9,6 +9,13 @@ browser_binding_required는 tabId가 어느 브라우저의 것인지 빠졌다�
 작업 대상을 확인해 명시한다. no_available_browser이면 연결 또는 설정된 작업 세션이
 필요하다. 이 오류들은 브라우저 명령을 보내기 전에 반환된다.
 
+선택 거절이나 특정 탭의 실패를 전체 브라우저·Lane Add-on 장애로 일반화하지
+않는다. `keeper_lane_status`는 Keeper 실행 sandbox를 보는 도구이므로 browser
+연결 진단에는 쓰지 않는다. BrowserSession open 성공은 기존 live 연결·로그인·읽기
+실패의 복구 증거가 아니다. 새 세션은 독립 작업에만 사용하고, 원래 작업은 반환된
+live 연결 중 요청 대상과 로그인이 있는 연결에서 탭 목록과 읽기로 계속할 수
+있는지 먼저 확인한다.
+
 ## 레인 오류
 
 - live의 연결 부재는 브라우저 프로세스, 확장, native host, 서버 연결 중 어디서나

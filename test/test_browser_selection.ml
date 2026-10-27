@@ -149,6 +149,15 @@ let test_wire () =
   check string "wire gives exact backend identity and reason"
     {|{"lane":"stagehand","clientId":null,"reason":"preferred_work_browser"}|}
     (Selection.to_json {route=Lane.Stagehand_route;reason=Selection.Preferred_work_browser} |> Yojson.Safe.to_string)
+let test_ambiguous_selection_recovery () =
+  let first=client "1" Lane.Webdriver_bidi and second=client "2" Lane.Ego_task_space in
+  let json=Selection.error_to_json (Selection.Ambiguous_browsers [route first;route second]) in
+  let open Yojson.Safe.Util in
+  check string "selection refusal code" "ambiguous_browsers" (json |> member "code" |> to_string);
+  check int "both browser choices retained" 2 (json |> member "browsers" |> to_list |> List.length);
+  check string "structured recovery contract"
+    {|{"action":"repeat_same_tool_with_selected_browser","commandDispatched":false,"failureScope":"browser_selection","browserChoices":"browsers"}|}
+    (json |> member "recovery" |> Yojson.Safe.to_string)
 let test_bind_chosen_identity () =
   let info=client "1" Lane.Webdriver_bidi in
   let explicit : Selection.selected = {route=Lane.Live_route None;reason=Selection.Explicit_browser} in
@@ -185,5 +194,6 @@ let () = run "browser selection" ["policy",[
   test_case "inactive owned session inspection and cleanup" `Quick test_inactive_session_cleanup;
   test_case "observation sends no command" `Quick test_observation_is_not_dispatch;
   test_case "selection wire contract" `Quick test_wire;
+  test_case "ambiguous selection names its recovery" `Quick test_ambiguous_selection_recovery;
   test_case "receipts retain the chosen client" `Quick test_bind_chosen_identity;
   test_case "a route names its browser in the snapshot" `Quick test_target_from_snapshot]]

@@ -160,7 +160,7 @@ val current : unit -> [ `Read | `Background ]
 
 - lane 은 Eio fiber key 에 둔다. 표시가 없으면 `Background` 다. `Executor_pool_ref` 의 `worker_marker` 와 같은 방식이다.
 - Eio 에서 fork 한 fiber 는 부모의 fiber key 를 물려받는다. 그래서 요청 중에 fork 한 fiber 도 `Read` 를 본다.
-- `with_read` 는 끝날 때(예외 포함) 그 요청을 끝난 것으로 표시한다. `current ()` 는 끝난 요청의 `Read` 를 `Background` 로 돌려준다. 요청보다 오래 사는 fiber(웹소켓 heartbeat 등)는 요청이 끝나는 순간부터 배경 풀을 쓴다. lane 은 풀에 제출하는 순간의 fiber 로 정한다. 요청 핸들러 안에서 fork 한 SWR 재계산은 핸들러가 돌아오기 전에 풀에 닿으므로 Read 로 센다(3.4 와 같다). 이런 fork 를 손으로 목록에 올릴 필요가 없다.
+- `with_read` 는 끝날 때(예외 포함) 그 요청을 끝난 것으로 표시한다. `current ()` 는 끝난 요청의 `Read` 를 `Background` 로 돌려준다. 요청보다 오래 사는 fiber(웹소켓 heartbeat 등)는 요청이 끝나는 순간부터 배경 풀을 쓴다. lane 은 풀에 제출하는 순간의 fiber 로 정한다. 요청이 기다리지 않는 일을 fork 하는 곳은 `with_background` 로 감싼다. 지금은 `Dashboard_cache` 의 SWR 재계산 한 곳이다(3.4).
 
 ### 3.2 표시는 요청 입구에서 한다
 
@@ -186,7 +186,8 @@ POST·PUT·DELETE 와 `/mcp` 도구 호출은 `Background` 그대로다. 무거�
 
 `Dashboard_cache` 는 값이 없고 다른 fiber 가 계산 중이면 0.25초 간격으로 확인하며 기다린다(`dashboard_cache.ml` `Wait`). 그 계산을 배경 refresh 루프가 시작했다면 읽기는 결국 배경 풀을 기다린다. 풀 job 안에서 기다리면 그동안 worker 자리도 차지한다.
 
-- `Dashboard_cache` 의 계산은 누가 시작했든 `Read` lane 으로 돈다. 캐시는 읽기에 답하려고 있는 것이다. 감싸는 곳은 `Dashboard_cache` 한 곳이다.
+- 캐시 계산의 lane 은 그 값을 기다리는 쪽이 정한다. 캐시가 비어 읽기가 직접 계산하면(`Compute`) 그 계산은 `Read` 다. 읽기가 옛 값으로 바로 답하고 fork 하는 SWR 재계산은 기다리는 요청이 없으니 `Background` 다. fork 하는 곳 한 곳을 `Pool_lane.with_background` 로 감싼다. 이 재계산은 계산 예산이 8~120초라, `Read` 로 두면 읽기 풀 1~2 domain 을 다 쓸 수 있다.
+- 남는 경우: 키가 아예 없을 때(부팅 직후, eviction, invalidate 뒤) 배경 fiber 가 시작한 계산을 읽기가 `Wait` 으로 기다리면, 읽기는 배경 풀의 계산을 기다린다. 옛 값이 있는 동안에는 생기지 않는다.
 - 다른 fiber 의 계산을 기다리는 일은 풀 job 밖, 요청 fiber 에서 한다. L4 에서 `run_dashboard_compute` 안에서 캐시를 기다리는 경로를 모두 찾아, 풀에 넣는 범위를 계산 부분으로 좁힌다.
 
 ### 3.5 domain 예산
@@ -237,7 +238,7 @@ POST·PUT·DELETE 와 `/mcp` 도구 호출은 `Background` 그대로다. 무거�
 - GET 핸들러 안의 `Domain_pool_ref.submit_io_or_inline` 은 읽기 풀에서, POST 핸들러 안의 같은 호출은 배경 풀에서 실행된다.
 - 표시 없는 fiber 는 `Background` 다.
 - `with_read` 안에서 fork 한 fiber 는 요청 중에는 `Read`, `with_read` 가 끝난 뒤에는 `Background` 를 본다. 예외로 끝나도 같다.
-- `Dashboard_cache` 계산은 배경 fiber 가 시작해도 읽기 풀에서 돈다.
+- 읽기가 fork 한 `Dashboard_cache` SWR 재계산은 배경 풀에서 돈다. 캐시가 비어 읽기가 기다리는 계산은 읽기 풀에서 돈다.
 
 ### 5.3 수용 측정
 

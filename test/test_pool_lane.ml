@@ -46,6 +46,28 @@ let test_read_ends_for_every_fiber () =
     [ false; true ]
 ;;
 
+(* A fiber forked under [with_background] inside a read is background work;
+   the read and its other fibers keep [Read]. Outside Eio it runs [f]. *)
+let test_with_background_unmarks_inside_a_read () =
+  check int "outside Eio" 1 (Pool_lane.with_background (fun () -> 1));
+  Eio_main.run (fun _env ->
+    Eio.Switch.run (fun sw ->
+      let forked = ref Pool_lane.Read in
+      let sibling = ref Pool_lane.Background in
+      let under, after =
+        Pool_lane.with_read (fun () ->
+          let under = Pool_lane.with_background Pool_lane.current in
+          Pool_lane.with_background (fun () ->
+            Eio.Fiber.fork ~sw (fun () -> forked := Pool_lane.current ()));
+          Eio.Fiber.fork ~sw (fun () -> sibling := Pool_lane.current ());
+          under, Pool_lane.current ())
+      in
+      check lane "under with_background" Pool_lane.Background under;
+      check lane "a fiber forked under with_background" Pool_lane.Background !forked;
+      check lane "a sibling forked outside it" Pool_lane.Read !sibling;
+      check lane "the read after with_background returns" Pool_lane.Read after))
+;;
+
 let with_pool f =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
@@ -195,6 +217,8 @@ let () =
             test_read_ends_for_every_fiber
         ; test_case "a pool job does not inherit the lane" `Quick
             test_pool_job_does_not_inherit_the_lane
+        ; test_case "with_background unmarks inside a read" `Quick
+            test_with_background_unmarks_inside_a_read
         ] )
     ; ( "wait"
       , [ test_case "wait is recorded under the submitting lane" `Quick

@@ -40,6 +40,8 @@ let accepted =
   ; (* No [alg] in the entry, only [use] = [sig]. The library reads that as RS256,
        which is what some providers publish. *)
     "a key that says RS256 only through use", V.jwks_key_with_use_only, V.token_valid_key_1, "ok:user-1"
+  ; (* No [use], only [alg] RS256. The library fills [use] in as [sig]. *)
+    "a key that says RS256 without use", V.jwks_key_with_alg_only, V.token_valid_key_1, "ok:user-1"
   ]
 ;;
 
@@ -74,6 +76,11 @@ let signature =
     , V.jwks_both
     , V.token_signature_with_extra_bytes
     , "invalid_signature" )
+  ; (* Right length, so the RSA call is reached. mirage-crypto raises
+       Invalid_argument on a zero message, which jose catches in its RSA branch. *)
+    "signature of zero bytes", V.jwks_both, V.token_zero_signature, "invalid_signature"
+  ; (* 0xFF in every byte is a number above the modulus. *)
+    "signature above the modulus", V.jwks_both, V.token_signature_above_modulus, "invalid_signature"
   ]
 ;;
 
@@ -106,7 +113,15 @@ let key_choice =
     , V.jwks_key_without_alg_and_use
     , V.token_signed_with_sha384
     , "key_not_rs256" )
-  ; "a key meant for encryption", V.jwks_key_for_encryption, V.token_valid_key_1, "key_not_rs256"
+  ; (* [use] enc alone makes the library read the key as RSA-OAEP, which it
+       refuses for signatures on its own. *)
+    "a key meant for encryption", V.jwks_key_for_encryption, V.token_valid_key_1, "key_not_rs256"
+  ; (* [alg] RS256 with [use] enc contradicts itself, and the library verifies
+       with it. *)
+    ( "a key that says RS256 and is meant for encryption"
+    , V.jwks_key_declared_rs256_for_encryption
+    , V.token_valid_key_1
+    , "key_not_rs256" )
   ; ( "a key that says RS384 and a SHA-384 signature"
     , V.jwks_key_declared_rs384
     , V.token_signed_with_sha384
@@ -120,8 +135,8 @@ let malformed_token =
   ; "four segments", V.jwks_both, "a.b.c.d", "malformed_token"
   ; "segments that are not base64url", V.jwks_both, "!!!.!!!.!!!", "malformed_token"
   ; "JSON serialization instead of the compact form", V.jwks_both, V.token_flattened_json, "malformed_token"
-  ; (* The next four are signed correctly. The library raises on the first
-       three instead of returning an error. *)
+  ; (* The next five are signed correctly. The library raises on the first four
+       instead of returning an error, and returns an error on the fifth. *)
     "payload is not JSON", V.jwks_both, V.token_payload_not_json, "malformed_token"
   ; "header is not JSON", V.jwks_both, V.token_header_not_json, "malformed_token"
   ; "header names an enc the library does not know", V.jwks_both, V.token_unknown_enc, "malformed_token"
@@ -130,6 +145,20 @@ let malformed_token =
     , V.token_embedded_ec_jwk_off_the_curve
     , "malformed_token" )
   ; "alg is not a string", V.jwks_both, V.token_alg_not_a_string, "malformed_token"
+  ; (* The next three spell the bytes of a valid token in another way. The
+       library decodes each to the same signature and payload bytes and accepts
+       the token. *)
+    "signature with a trailing =", V.jwks_both, V.token_signature_with_padding, "malformed_token"
+  ; ( "signature with nonzero padding bits"
+    , V.jwks_both
+    , V.token_signature_with_nonzero_padding_bits
+    , "malformed_token" )
+  ; ( "payload with a dangling last character"
+    , V.jwks_both
+    , V.token_payload_with_dangling_char
+    , "malformed_token" )
+  ; (* The library finds out only when it checks the signature. *)
+    "signature that is not base64url", V.jwks_both, V.token_signature_not_base64url, "malformed_token"
   ]
 ;;
 

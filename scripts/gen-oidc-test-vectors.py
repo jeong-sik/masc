@@ -41,6 +41,9 @@ NOT_AN_OBJECT = b"[1,2,3]"
 EC_COORDINATE_BYTES = 32  # P-256; the point (0, 0) is not on the curve
 TRUNCATED_SIGNATURE_CHARS = 100  # a multiple of 4, so the text still decodes
 EXTRA_SIGNATURE_CHARS = "AAAA"
+URL_SAFE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+RSA_SIGNATURE_BYTES = 256  # a 2048-bit key
+PADDING_BITS_MASK = 0x0F  # 256 bytes end in a group of one byte: 4 unused bits
 
 DIGEST_INFO_PREFIX = {
     "sha256": bytes.fromhex("3031300d060960864801650304020105000420"),
@@ -64,6 +67,14 @@ EXPECTED_VERIFIES: dict[str, set[str]] = {
     "token_signed_with_sha384": {"sha384@test-key-1"},
     "token_embedded_jwk_signed_by_attacker": {"sha256@embedded"},
     "token_embedded_ec_jwk_off_the_curve": {"sha256@test-key-1"},
+    # Spellings that decode to the same bytes but are not the canonical text.
+    # A strict verifier finds nothing valid in them.
+    "token_signature_with_padding": set(),
+    "token_signature_with_nonzero_padding_bits": set(),
+    "token_payload_with_dangling_char": set(),
+    "token_signature_not_base64url": set(),
+    "token_zero_signature": set(),
+    "token_signature_above_modulus": set(),
     "token_empty_signature": set(),
     "token_truncated_signature": set(),
     "token_signature_with_extra_bytes": set(),
@@ -88,7 +99,11 @@ def b64u(data: bytes) -> str:
 
 
 def b64u_decode(text: str) -> bytes:
-    return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+    """Decode only the canonical spelling (RFC 7515 section 2), unlike many decoders."""
+    data = base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+    if b64u(data) != text:
+        raise ValueError("not the canonical unpadded base64url spelling")
+    return data
 
 
 def run(*args: str, stdin: bytes | None = None) -> bytes:
@@ -172,6 +187,22 @@ def jwks(*keys: dict) -> str:
     return compact_json({"keys": list(keys)})
 
 
+def with_nonzero_padding_bits(segment: str) -> str:
+    """The same bytes, spelled with a set bit in the unused tail of the last character."""
+    index = URL_SAFE_ALPHABET.index(segment[-1])
+    if index & PADDING_BITS_MASK:
+        raise SystemExit("the signature does not end in zero padding bits")
+    return segment[:-1] + URL_SAFE_ALPHABET[index | 1]
+
+
+def claims_in_whole_groups() -> dict:
+    """Claims whose JSON is a whole number of 3-byte groups, so its base64url text has no tail."""
+    note = ""
+    while len(compact_json(claims(note=note)).encode()) % 3:
+        note += "x"
+    return claims(note=note)
+
+
 def rsa_verifies(jwk: dict, signing_input: str, signature: bytes, digest: str) -> bool:
     modulus = int.from_bytes(b64u_decode(jwk["n"]), "big")
     exponent = int.from_bytes(b64u_decode(jwk["e"]), "big")
@@ -192,12 +223,14 @@ def verifying_pairs(
         return set()
     signing_input = f"{parts[0]}.{parts[1]}"
     try:
+        raw_header = b64u_decode(parts[0])
+        b64u_decode(parts[1])
         signature = b64u_decode(parts[2])
     except ValueError:
         return set()
     candidates = dict(rsa_keys)
     try:
-        head = json.loads(b64u_decode(parts[0]))
+        head = json.loads(raw_header)
     except ValueError:
         head = None
     embedded = head.get("jwk") if isinstance(head, dict) else None
@@ -263,13 +296,20 @@ def main() -> None:
             {"protected": header_part, "payload": payload_part, "signature": signature_part}
         )
         truncated = signature_part[:TRUNCATED_SIGNATURE_CHARS]
+        group_header, group_payload, group_signature = rs256(
+            key1, header(), claims_in_whole_groups()
+        ).split(".")
+        all_zeros = b64u(bytes(RSA_SIGNATURE_BYTES))
+        all_ones = b64u(b"\xff" * RSA_SIGNATURE_BYTES)
 
         keysets = {
             "jwks_both": jwks(jwk1, jwk2),
             "jwks_with_other_kinds": jwks(jwk1, ec, oct_jwk),
             "jwks_key_with_use_only": jwks(without(jwk1, "alg")),
+            "jwks_key_with_alg_only": jwks(without(jwk1, "use")),
             "jwks_key_without_alg_and_use": jwks(without(jwk1, "alg", "use")),
             "jwks_key_for_encryption": jwks({**without(jwk1, "alg"), "use": "enc"}),
+            "jwks_key_declared_rs256_for_encryption": jwks({**jwk1, "use": "enc"}),
             "jwks_key_declared_rs384": jwks({**jwk1, "alg": "RS384"}),
             "jwks_with_an_ec_key_off_the_curve": jwks(jwk1, off_curve),
         }
@@ -292,6 +332,16 @@ def main() -> None:
             "token_embedded_ec_jwk_off_the_curve": rs256(
                 key1, header(jwk=off_curve), claims()
             ),
+            "token_signature_with_padding": f"{header_part}.{payload_part}.{signature_part}=",
+            "token_signature_with_nonzero_padding_bits": (
+                f"{header_part}.{payload_part}.{with_nonzero_padding_bits(signature_part)}"
+            ),
+            "token_payload_with_dangling_char": (
+                f"{group_header}.{group_payload}A.{group_signature}"
+            ),
+            "token_signature_not_base64url": f"{header_part}.{payload_part}.!!!",
+            "token_zero_signature": f"{header_part}.{payload_part}.{all_zeros}",
+            "token_signature_above_modulus": f"{header_part}.{payload_part}.{all_ones}",
             "token_empty_signature": f"{header_part}.{payload_part}.",
             "token_truncated_signature": f"{header_part}.{payload_part}.{truncated}",
             "token_signature_with_extra_bytes": (

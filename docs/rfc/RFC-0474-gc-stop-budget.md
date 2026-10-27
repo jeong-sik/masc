@@ -150,7 +150,8 @@ memprof(`/api/v1/diagnostics/memprof`, 부팅 뒤 10분). 할당 757 GB, major 4
 ### L2 — 런타임을 놓는 해시
 
 - `lib/core` 에 sha256 모듈 하나를 둔다. 문자열 입력은 정해진 크기로 잘라 `feed_string` 에 넣는다. 조각 사이에 OCaml 로 돌아오므로 STW 대기는 조각 하나 길이를 넘지 않는다. 파일과 큰 버퍼는 bigstring 으로 읽어 `feed_bigstring` 에 넣는다. 이 경로는 런타임을 놓는다.
-- 조각 크기는 L2 PR 에서 잰 값으로 정한다. 근거는 조각 하나를 해시하는 시간과 STW 대기 p99 다.
+- 조각 크기는 잰 값으로 64 KiB 로 정한다. 2026-10-27 이 Mac(M3 Max)에서 digestif 1.3.0 sha256 은 문자열·bigstring 경로 모두 약 280 MB/s 였다. 한 번에 해시하는 시간은 64 KiB 0.24 ms, 256 KiB 0.99 ms, 1 MiB 3.7 ms, 16 MiB 59 ms 다. `keeper_checkpoint_ref` 주석의 13~109 MB checkpoint 를 한 번에 해시하면 46~390 ms 이고, 이는 §3.2 창의 `stw_api_barrier` 최대값(302~392 ms)과 같은 크기다. 지금의 1 MiB 조각도 정지 하나에 3.7 ms 를 남긴다. 64 KiB 면 0.24 ms 다.
+- 같은 digest 를 내는 더 빠른 구현(ARMv8 SHA 명령을 쓰는 것)으로 바꾸면 CPU 표본의 18% 자체가 줄어든다. 이것은 모듈 하나로 모은 뒤 그 안에서만 바꿀 수 있으므로 L2 다음 일로 둔다. digest 값이 같으므로 저장 형식은 바뀌지 않는다.
 - 351곳을 한 PR 에서 이 모듈로 옮긴다. `keeper_checkpoint_ref` 의 자르기도 이 모듈로 합친다.
 - `Digestif.SHA256` 을 이 모듈 밖에서 부르면 실패하는 소스 검사를 둔다. 한 곳씩 고치면 같은 문제가 다시 생긴다.
 

@@ -392,17 +392,25 @@ let backend_name_of_storage = function
    cases) call [reset_default_config_cache] from outside this module
    when needed. *)
 let default_config_cache : (string, config) Hashtbl.t = Hashtbl.create 4
-let default_config_cache_mutex = Mutex.create ()
 
-let with_default_config_cache_mutex f =
-  Mutex.lock default_config_cache_mutex;
-  Fun.protect ~finally:(fun () -> Mutex.unlock default_config_cache_mutex) f
+(* A cache miss builds the config with this lock held, and the build suspends
+   the calling fiber: [create_backend] stats the filesystem through Eio, which
+   runs the stat on a worker thread. The fibers of one domain share one thread,
+   so a [Stdlib.Mutex] held across that suspension makes the next
+   [default_config] caller of the domain raise
+   [Sys_error "Mutex.lock: Resource deadlock avoided"] instead of waiting. The
+   cross-context lock makes a fiber wait cooperatively, and system threads and
+   other domains still wait on the underlying mutex. *)
+let default_config_cache_lock = Cross_context_mutex.create ()
+
+let with_default_config_cache_lock f =
+  Cross_context_mutex.with_lock default_config_cache_lock f
 
 (** Drop the cached configs.  Intended for tests that need to force a
     re-init (e.g. after relocating the on-disk state).  Production
     code should never call this. *)
 let reset_default_config_cache () =
-  with_default_config_cache_mutex (fun () ->
+  with_default_config_cache_lock (fun () ->
     Hashtbl.clear default_config_cache)
 
 let build_default_config base_path =
@@ -439,7 +447,7 @@ let build_default_config base_path =
   }
 
 let default_config base_path =
-  with_default_config_cache_mutex (fun () ->
+  with_default_config_cache_lock (fun () ->
     match Hashtbl.find_opt default_config_cache base_path with
     | Some cfg -> cfg
     | None ->

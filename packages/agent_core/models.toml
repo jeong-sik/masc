@@ -2732,6 +2732,8 @@ kind = "ollama"
 base_url = "http://127.0.0.1:11434"
 request_path = "/api/chat"
 auth = "none"
+# Bound the complete /api/tags metadata read, not model generation.
+discovery_timeout_s = 5.0
 capabilities_base = "ollama"
 
 [[providers]]
@@ -2761,6 +2763,9 @@ capabilities_base_by_identity_kind = { openai_compat = "ollama_cloud_v1" }
 base_url = "https://ollama.com"
 request_path = "/api/chat"
 auth = "api-key"
+# Match the deployment's explicit 600-second Cloud cold-start budget for the
+# complete /api/tags response, independently of generation and Exact-output.
+discovery_timeout_s = 600.0
 capabilities_base = "ollama_cloud"
 
 # Kimi's coding-plan endpoint. Separate row from [id = "kimi"]: a different

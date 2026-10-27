@@ -22,6 +22,7 @@ type t =
   ; requires_api_key : bool
   ; auth : auth
   ; default_model : string option
+  ; discovery_timeout_s : float option
   ; max_context : int option
   ; capabilities : capabilities
   ; available : bool
@@ -44,7 +45,8 @@ let binding_of_declaration declarations (entry : PD.entry) =
   { id=normalize entry.id;aliases=List.map normalize entry.aliases;kind=entry.kind;base_url=entry.base_url;
     request_path=entry.request_path;
     requires_api_key=PD.requires_api_key entry.authentication;auth;
-    default_model=entry.default_model;max_context=entry.max_context;
+    default_model=entry.default_model;discovery_timeout_s=entry.discovery_timeout_s;
+    max_context=entry.max_context;
     capabilities=entry.capabilities;
     available=PR.authentication_available entry.authentication;
     credential_scope=entry.credential_scope;declarations }

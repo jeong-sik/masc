@@ -538,6 +538,7 @@ let test_structured_extract () =
       ; api_key_env = ""
       ; auth = Llm_provider.Provider_catalog.No_auth
       ; default_model = Some "test-model"
+      ; discovery_timeout_s = None
       ; max_context = None
       ; capabilities = provider_capabilities
       ; credential_scope = None

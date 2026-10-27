@@ -17,6 +17,7 @@
  (libraries
   masc.agent_core
   masc.agent_core.llm_provider
+  masc.discovery_cache
   masc.config
   masc_core
   masc_log

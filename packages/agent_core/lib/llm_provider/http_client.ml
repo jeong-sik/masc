@@ -2037,9 +2037,9 @@ let get_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers () =
   in
   catch_network (fun () ->
     let* origin = parse_uri url in
-    with_client ?cache ~sw ~net ~origin (fun ~sw client ->
-      let hdr = Http.Header.of_list (maybe_add_connection_close ?cache headers) in
-      with_explicit_deadline deadline (fun () ->
+    with_explicit_deadline deadline (fun () ->
+      with_client ?cache ~sw ~net ~origin (fun ~sw client ->
+        let hdr = Http.Header.of_list (maybe_add_connection_close ?cache headers) in
         let resp, resp_body =
           Cohttp_eio.Client.get ~sw client ~headers:hdr origin.uri
         in
@@ -2067,9 +2067,9 @@ let delete_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers () =
   in
   catch_network (fun () ->
     let* origin = parse_uri url in
-    with_client ?cache ~sw ~net ~origin (fun ~sw client ->
-      let hdr = Http.Header.of_list (maybe_add_connection_close ?cache headers) in
-      with_explicit_deadline deadline (fun () ->
+    with_explicit_deadline deadline (fun () ->
+      with_client ?cache ~sw ~net ~origin (fun ~sw client ->
+        let hdr = Http.Header.of_list (maybe_add_connection_close ?cache headers) in
         let resp, resp_body =
           Cohttp_eio.Client.delete ~sw client ~headers:hdr origin.uri
         in
@@ -2095,16 +2095,16 @@ let post_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers ~body () =
   in
   catch_network (fun () ->
     let* origin = parse_uri url in
-    with_client ?cache ~sw ~net ~origin (fun ~sw client ->
-      (* Explicitly set Content-Length to prevent chunked transfer encoding.
-         Ollama's yyjson parser rejects chunked bodies with
-         "Value looks like object, but can't find closing '}' symbol". *)
-      let headers_with_length =
-        ("content-length", string_of_int (String.length body))
-        :: maybe_add_connection_close ?cache headers
-      in
-      let hdr = Http.Header.of_list headers_with_length in
-      with_explicit_deadline deadline (fun () ->
+    with_explicit_deadline deadline (fun () ->
+      with_client ?cache ~sw ~net ~origin (fun ~sw client ->
+        (* Explicitly set Content-Length to prevent chunked transfer encoding.
+           Ollama's yyjson parser rejects chunked bodies with
+           "Value looks like object, but can't find closing '}' symbol". *)
+        let headers_with_length =
+          ("content-length", string_of_int (String.length body))
+          :: maybe_add_connection_close ?cache headers
+        in
+        let hdr = Http.Header.of_list headers_with_length in
         Http_request_observer.dispatch_entered observation;
         let resp, resp_body =
           Cohttp_eio.Client.post

@@ -157,8 +157,9 @@ and process ID must match the original process owner. A busy port is refused;
 no external Firefox is adopted. See the [Firefox setup guide](../../docs/design/browser-bidi-live-host.md).
 
 Backend settings are captured at attachment from the loaded `runtime.toml`. A
-source whose table is missing, or whose lane is switched off with
-`enabled = false`, does not start, and its package row says which.
+source whose table is missing does not start, and its package row says so.
+`runtime.toml` says how a source starts, never whether it runs: that is its
+declaration's top-level `enabled`.
 Restart after changing runtime settings, then detach/reattach an existing
 installation. Declaration edits reconcile at startup and on the maintenance
 pulse. Check desired/applied revisions, phase and configuration issues; saving

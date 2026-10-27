@@ -646,8 +646,6 @@ type async_msg =
       string * int * (Masc_tui_keeper_sandbox.logs, string) result
   | Exact_activity_read of Masc_tui_exact_activity.request * (Masc_tui_exact_activity.document, string) result
   | Exact_activity_saved of Masc_tui_exact_activity.request * Masc_tui_exact_activity.write_result
-  | Browser_activity_read of Masc_tui_browser_activity.request * (Masc_tui_browser_activity.document, string) result
-  | Browser_activity_saved of Masc_tui_browser_activity.request * Masc_tui_browser_activity.write_result
   | Machine_activity_read of Masc_tui_machine_activity.request * (Masc_tui_machine_activity.reading, string) result
   | Machine_activity_saved of Masc_tui_machine_activity.request * Masc_tui_machine_activity.write_result
   | Runtime_config_view_loaded of
@@ -988,7 +986,6 @@ let rec workspace_message_is_read = function
   | Keeper_sandbox_view_loaded _
   | Keeper_sandbox_logs_loaded _
   | Exact_activity_read _
-  | Browser_activity_read _
   | Machine_activity_read _
   | Runtime_config_view_loaded _
   | Runtime_params_loaded _
@@ -1072,7 +1069,6 @@ let rec workspace_message_is_read = function
   | Harness_label_done _
   | Task_cancel_done _
   | Exact_activity_saved _
-  | Browser_activity_saved _
   | Machine_activity_saved _
   | Runtime_param_written _
   | Board_quarantine_requeued _
@@ -1194,8 +1190,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Verification_evidence_loaded (_, _) | Verification_evidence_exported _ | Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _)
     | Keeper_items_loaded (_, _) | Keeper_sandbox_view_loaded (_, _)
     | Keeper_sandbox_logs_loaded (_, _, _) | Exact_activity_read (_, _)
-    | Exact_activity_saved (_, _) | Browser_activity_read (_, _)
-    | Browser_activity_saved (_, _) | Machine_activity_read (_, _)
+    | Exact_activity_saved (_, _) | Machine_activity_read (_, _)
     | Machine_activity_saved (_, _) | Runtime_config_view_loaded (_, _, _, _, _)
     | Runtime_params_loaded _ | Runtime_param_written (_, _)
     | Prompts_loaded (_, _) | Keeper_board_quarantines_loaded (_, _)
@@ -1331,8 +1326,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Verification_evidence_loaded (_, _) | Verification_evidence_exported _ | Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _)
   | Keeper_items_loaded (_, _) | Keeper_sandbox_view_loaded (_, _)
   | Keeper_sandbox_logs_loaded (_, _, _) | Exact_activity_read (_, _)
-  | Exact_activity_saved (_, _) | Browser_activity_read (_, _)
-  | Browser_activity_saved (_, _) | Machine_activity_read (_, _)
+  | Exact_activity_saved (_, _) | Machine_activity_read (_, _)
   | Machine_activity_saved (_, _) | Runtime_config_view_loaded (_, _, _, _, _)
   | Runtime_params_loaded _ | Runtime_param_written (_, _)
   | Prompts_loaded (_, _) | Keeper_board_quarantines_loaded (_, _)

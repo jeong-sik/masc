@@ -97,10 +97,10 @@ let browser_activity_and_backend_are_independent () =
     | _ -> row) builtin_rows)) in
   let off = ok (Decode.decode (make "off")) in
   Alcotest.(check string) "off keeps executor observation"
-    "off; configuration retained; executor registered"
+    "off; executor registered"
     (Display.row_summary (find "browser/automation" off));
   Alcotest.(check string) "live off does not imply disconnect"
-    "off; configuration retained; 0 connected clients"
+    "off; 0 connected clients"
     (Display.row_summary (find "browser/live" off));
   let unavailable = ok (Decode.decode (make "unobserved")) in
   Alcotest.(check string) "unknown activity is not inferred from registration"

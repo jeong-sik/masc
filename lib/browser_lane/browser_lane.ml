@@ -660,7 +660,7 @@ let activity lane = match Atomic.get activity_observer with
 
 type activity_rejection = Lane_off of Lane_name.t | Activity_unavailable
 let activity_rejection_message = function
-  | Lane_off lane -> "browser." ^ Lane_name.to_wire lane ^ " is off; enable it before issuing new browser work"
+  | Lane_off lane -> "no " ^ Lane_name.to_wire lane ^ " browser runs here; new browser work is refused"
   | Activity_unavailable -> "Browser activity configuration is unavailable"
 
 (* The same check against an activity the caller observed, such as the one a

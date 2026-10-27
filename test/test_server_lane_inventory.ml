@@ -643,50 +643,39 @@ max_reply_bytes = 4096
      | Browser_addon_presence.(Unavailable (Refused _ | Observation_unreadable _)
        | Observed _ | Absent | Off | Not_running _) -> false))
 
-let browser_activity_snapshot () = with_fixture (fun _env sw config root _directory ->
-  let previous = Runtime.For_testing.snapshot () in
-  let startup = Runtime_startup_state.get () in
-  Eio.Switch.on_release sw (fun () -> Runtime.For_testing.restore previous;
-    Runtime_startup_state.set startup);
-  Server_browser_configuration.install_activity_observer ~sw;
-  let path = Filename.concat root "runtime.toml" in
-  let load enabled =
-    write path (Printf.sprintf {|[providers.snapshot]
-protocol="openai-compatible-http"
-endpoint="http://127.0.0.1:9"
-[models.sample]
-api-name="snapshot-model"
-max-context=4096
-[snapshot.sample]
-[runtime]
-default="snapshot.sample"
-[browser.live]
-enabled=%b
-[browser.automation]
-enabled=%b
-[browser.stagehand]
-enabled=%b
-|} enabled enabled enabled);
-    match Runtime.init_default ~config_path:path with Ok () -> () | Error detail -> fail detail in
-  load true;
-  let result = Eio.Fiber.fork_promise ~sw (fun () -> Inventory.snapshot ~config |> Inventory.to_json) in
-  (* The snapshot captured its configuration, then suspended to read the
-     declarations, so this publication lands while it is reading. *)
-  Eio.Fiber.yield ();
-  load false;
-  let json = match Eio.Promise.await result with Ok value -> value | Error exn -> raise exn in
-  let activities snapshot = values "rows" snapshot |> List.filter_map (fun row ->
-    if text "kind" (member "selection" row) = "browser" then
-      Some (text "activity" (member "state" row)) else None) in
-  check (list string) "one inventory retains one captured Browser configuration"
-    ["on";"on";"on"] (activities json);
-  check (list string) "next inventory observes the new Browser configuration"
-    ["off";"off";"off"] (activities (Inventory.snapshot ~config |> Inventory.to_json)))
+(* A browser lane is on while an enabled declaration serves one of its
+   sources, so each Lanes row follows the declarations of its own sources. *)
+let browser_activity_follows_the_declarations () = with_fixture (fun _env _sw config root directory ->
+  let browser = Filename.concat root "browser.toml" in
+  write browser {|id = "browser-external"
+revision = "1"
+title = "Browser"
+runtime = "host_process"
+service = "browser"
+browser_backend = "external_host"
+command = ["masc-browser-addon-worker"]
+contributions = ["observe"]
+[resources]
+max_reply_bytes = 4096
+|};
+  let path = Filename.concat directory "browser-external.toml" in
+  let activity lane =
+    let id = Lane_id.to_wire (Lane_id.Builtin (Lane_id.Browser lane)) in
+    match List.find_opt (fun row -> text "id" row = id)
+            (values "rows" (Inventory.snapshot ~config |> Inventory.to_json)) with
+    | Some row -> text "activity" (member "state" row)
+    | None -> failf "no %s row" id in
+  write path (declaration browser "browser-external");
+  check string "a live source declared on turns the live lane on" "on" (activity Browser_lane.Lane_name.Live);
+  check string "a lane none of whose sources is declared is off" "off"
+    (activity Browser_lane.Lane_name.Automation);
+  write path ("enabled = false\n" ^ declaration browser "browser-external");
+  check string "switching its declaration off turns the lane off" "off" (activity Browser_lane.Lane_name.Live))
 
 let () = run "operator lane inventory" ["read boundaries",[
   test_case "machine publication reads worker observations" `Quick machine_publication_reads_worker_observation;
   test_case "machine activity and publication serialize independently" `Quick machine_wire_preserves_both_readings;
-  test_case "Browser activity captures one configuration" `Quick browser_activity_snapshot;
+  test_case "browser activity follows the declarations" `Quick browser_activity_follows_the_declarations;
   test_case "Browser absence reads the declarations" `Quick browser_absence_reads_the_declarations;
   test_case "browser rows read the Add-on observation" `Quick browser_rows_read_the_addon_observation;
   test_case "browser lanes read their own sources" `Quick browser_lanes_read_their_own_sources;

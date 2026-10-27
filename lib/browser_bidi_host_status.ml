@@ -3,17 +3,13 @@ module Record = Browser_bidi_host_record
 
 type keeper =
   | Addon_managed of { port : int; profile : string }
-  | Lane_off
   | Not_configured
   | Not_known
 
-(* The live lane being off is said first, table or not: nothing starts
-   either way. *)
 let keeper_of_configuration = function
-  | Some { Browser_configuration.live_enabled = false; _ } -> Lane_off
-  | Some { Browser_configuration.live_bidi = Some config; live_enabled = true; _ } ->
+  | Some { Browser_configuration.live_bidi = Some config; _ } ->
       Addon_managed { port = config.port; profile = config.profile }
-  | Some { Browser_configuration.live_bidi = None; live_enabled = true; _ } -> Not_configured
+  | Some { Browser_configuration.live_bidi = None; _ } -> Not_configured
   | None -> Not_known
 
 type observation = { lane : Launcher.t; record : Record.state; keeper : keeper }
@@ -370,9 +366,6 @@ let message { lane = t; record; keeper } =
          | Record.Never_started -> "No external manual BiDi host has run for this workspace."
          | Record.Record_missing_but_locked | Record.Running _ | Record.Ended _ | Record.Died _
          | Record.Unreadable _ -> "External manual host: " ^ by_operator t record)
-  | Lane_off ->
-      "[browser.live] is off in runtime.toml, so the live lane serves nothing. "
-      ^ by_operator t record
   | Not_configured ->
       by_operator t record
       ^ " No Addon-managed live Firefox is configured in [browser.live.bidi]."
@@ -416,7 +409,6 @@ let report_fields = [ "state"; "record"; "lock_held"; "detail"; "attach"; "keepe
 let keeper_to_json = function
   | Addon_managed { port; profile } ->
       `Assoc [ "kind", `String "addon_managed"; "port", `Int port; "profile", `String profile ]
-  | Lane_off -> `Assoc [ "kind", `String "lane_off" ]
   | Not_configured -> `Assoc [ "kind", `String "not_configured" ]
   | Not_known -> `Assoc [ "kind", `String "not_known" ]
 let attach_fields = [ "launcher"; "arguments"; "launcher_state" ]
@@ -497,7 +489,6 @@ let keeper_of_json json =
       in
       let* profile = drawable_text ~what fields "profile" in
       Ok (Addon_managed { port; profile })
-  | "lane_off" -> only Lane_off
   | "not_configured" -> only Not_configured
   | "not_known" -> only Not_known
   | _ -> Error (what ^ " is of a kind this reader does not know")

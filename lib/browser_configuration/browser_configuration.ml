@@ -11,17 +11,13 @@ type t = {
   stagehand : stagehand option;
   live_bidi : live_bidi option;
   live_ego : live_ego option;
-  live_enabled : bool;
-  automation_enabled : bool;
-  stagehand_enabled : bool;
 }
 [@@deriving show, eq]
 
 let browser_table = Runtime_toml_namespace.(key Browser)
 let default_live_bidi_port = 9222
 let max_port = 65535
-let none = { automation = None; stagehand = None; live_bidi = None; live_ego = None;
-  live_enabled = true; automation_enabled = true; stagehand_enabled = true }
+let none = { automation = None; stagehand = None; live_bidi = None; live_ego = None }
 let ( let* ) = Result.bind
 
 let table ~path ~keys = function
@@ -38,14 +34,6 @@ let table ~path ~keys = function
     Error (path ^ " must be a TOML table")
 
 let fields = function None -> [] | Some entries -> entries
-let enabled ~path entries =
-  match List.assoc_opt "enabled" entries with
-  | None -> Ok true
-  | Some (Otoml.TomlBoolean value) -> Ok value
-  | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
-  | Some (Otoml.TomlOffsetDateTime _) | Some (Otoml.TomlLocalDateTime _)
-  | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _)
-  | Some (Otoml.TomlTable _) | Some (Otoml.TomlInlineTable _) | Some (Otoml.TomlTableArray _) -> Error (path ^ ".enabled must be a boolean")
 
 let absolute ~path entries key =
   match List.assoc_opt key entries with
@@ -74,7 +62,7 @@ let parse_stagehand ~path configured =
   let* extension = absolute ~path entries "extension" in
   let* profile = absolute ~path entries "profile" in
   match chrome, extension, profile with
-  | None, None, None when configured = None || List.mem_assoc "enabled" entries -> Ok None
+  | None, None, None when configured = None -> Ok None
   | Some chrome, Some extension, profile -> Ok (Some { chrome; extension; profile })
   | None, _, _ -> Error (path ^ ".chrome is required when the backend is configured")
   | Some _, None, _ -> Error (path ^ ".extension is required when the backend is configured")
@@ -138,10 +126,10 @@ let parse toml =
     (Otoml.find_opt toml Fun.id [browser_table]) in
   let root = fields root in
   let* automation_table = table ~path:automation_path
-    ~keys:["enabled"; "geckodriver"; "binary"] (List.assoc_opt "automation" root) in
+    ~keys:["geckodriver"; "binary"] (List.assoc_opt "automation" root) in
   let* stagehand_table = table ~path:stagehand_path
-    ~keys:["enabled"; "chrome"; "extension"; "profile"] (List.assoc_opt "stagehand" root) in
-  let* live_table = table ~path:live_path ~keys:["enabled"; "bidi"; "ego"] (List.assoc_opt "live" root) in
+    ~keys:["chrome"; "extension"; "profile"] (List.assoc_opt "stagehand" root) in
+  let* live_table = table ~path:live_path ~keys:["bidi"; "ego"] (List.assoc_opt "live" root) in
   let* live_bidi_table = table ~path:live_bidi_path
     ~keys:["firefox"; "profile"; "port"] (List.assoc_opt "bidi" (fields live_table)) in
   let* live_bidi = parse_live_bidi ~path:live_bidi_path live_bidi_table in
@@ -156,10 +144,7 @@ let parse toml =
     | None -> parse_automation ~path:browser_table root
   in
   let* stagehand = parse_stagehand ~path:stagehand_path stagehand_table in
-  let* live_enabled = enabled ~path:live_path (fields live_table) in
-  let* automation_enabled = enabled ~path:automation_path (fields automation_table) in
-  let* stagehand_enabled = enabled ~path:stagehand_path (fields stagehand_table) in
-  Ok { automation; stagehand; live_bidi; live_ego; live_enabled; automation_enabled; stagehand_enabled }
+  Ok { automation; stagehand; live_bidi; live_ego }
 
 (* The file parser returns most syntax errors but raises on a repeated
    table. *)
@@ -168,20 +153,3 @@ let of_file path =
   | Error detail -> Error detail
   | Ok toml -> parse toml
   | exception Otoml.Duplicate_key detail -> Error detail
-
-type unstarted = Switched_off of string | Table_missing of string
-
-(* A switched-off lane keeps its paths, so the switch is read first. *)
-let table_of ~enabled ~lane ~path table =
-  if not enabled then Error (Switched_off lane)
-  else match table with Some table -> Ok table | None -> Error (Table_missing path)
-let automation_table t =
-  table_of ~enabled:t.automation_enabled ~lane:automation_path ~path:automation_path t.automation
-let stagehand_table t =
-  table_of ~enabled:t.stagehand_enabled ~lane:stagehand_path ~path:stagehand_path t.stagehand
-let live_bidi_table t = table_of ~enabled:t.live_enabled ~lane:live_path ~path:live_bidi_path t.live_bidi
-let live_ego_table t = table_of ~enabled:t.live_enabled ~lane:live_path ~path:live_ego_path t.live_ego
-
-let unstarted_message = function
-  | Switched_off lane -> Printf.sprintf "[%s] enabled = false switches it off" lane
-  | Table_missing path -> Printf.sprintf "it has no [%s] table" path

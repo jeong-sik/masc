@@ -562,17 +562,11 @@ let live_firefox_configuration_is_observed_without_starting_it () =
   check bool "the Addon configuration preserves its selected endpoint and profile" true
     (keeper (Some configured)
      = Status.Addon_managed { port = live_bidi.port; profile = live_bidi.profile });
-  check bool "the live lane off, with no table, starts nothing" true
-    (keeper (Some { Browser_configuration.none with live_enabled = false }) = Status.Lane_off);
-  check bool "the live lane off retains configuration without enabling the Addon" true
-    (keeper (Some { configured with live_enabled = false }) = Status.Lane_off);
   check bool "no table" true (keeper (Some Browser_configuration.none) = Status.Not_configured);
   check bool "nothing loaded" true (keeper None = Status.Not_known);
   let paragraph keeper = Status.message (observation ~keeper Record.Never_started) in
   check bool "no table changes the paragraph" false
-    (String.equal (paragraph Status.Not_configured) (paragraph Status.Not_known));
-  check bool "the lane off changes the paragraph" false
-    (String.equal (paragraph Status.Lane_off) (paragraph Status.Not_known))
+    (String.equal (paragraph Status.Not_configured) (paragraph Status.Not_known))
 
 (* Doctor reads Addon configuration from runtime.toml without starting it. *)
 let doctor_reads_addon_firefox_configuration_from_runtime_toml () =
@@ -823,7 +817,6 @@ let a_bidi_host_report_reads_back_as_written () =
         ; "ended", Record.Ended (ended, ending); "died", Record.Died entry
         ; "unreadable, no host", Record.Unreadable { detail = "torn"; held = Some false } ])
     [ "Addon managed", managed
-    ; "the lane is off", Status.Lane_off
     ; "no table", Status.Not_configured
     ; "configuration not loaded", Status.Not_known ];
   (* Times on disk are not whole seconds; one that was read is written and
@@ -914,9 +907,9 @@ let a_bidi_host_report_reads_back_as_written () =
   let with_managed name value = with_keeper_json (with_field managed_fields name value) in
   refused "a keeper this reader does not know" (with_keeper_json (`Assoc [ "kind", `String "operator" ]));
   refused "a keeper that names no kind" (with_keeper_json (`Assoc []));
-  refused "a keeper that is no object" (with_keeper_json (`String "lane_off"));
-  refused "a lane that is off, with a port"
-    (with_keeper_json (`Assoc [ "kind", `String "lane_off"; "port", `Int 9222 ]));
+  refused "a keeper that is no object" (with_keeper_json (`String "not_configured"));
+  refused "a kind with no port, given a port"
+    (with_keeper_json (`Assoc [ "kind", `String "not_configured"; "port", `Int 9222 ]));
   List.iter (fun name -> refused ("Addon managed, with no " ^ name) (with_keeper_json (without managed_fields name)))
     [ "port"; "profile" ];
   refused "Addon managed, on no port" (with_managed "port" (`Int 0));

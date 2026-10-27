@@ -287,56 +287,20 @@ extension = "/test/extension"
           stagehand = Some { chrome = "/test/chrome"; extension = "/test/extension"; profile = None }; _ } -> ()
    | _ -> fail "both backends can be configured together")
 
-(* Each source starts from its own table while its lane is switched on. A
-   switched-off lane keeps its paths, so the switch is read first. *)
-let test_a_source_starts_from_its_own_switched_on_table () =
+(* Whether a source runs is its Lane Add-on declaration's to say, so a
+   browser table takes no enabled key, and a table of nothing but one is not
+   read as no table. *)
+let test_a_browser_table_takes_no_enabled_key () =
   let parse text = match Otoml.Parser.from_string_result text with
     | Error detail -> fail detail
-    | Ok toml -> (match Browser_configuration.parse toml with Ok c -> c | Error detail -> fail detail) in
-  let tables = {|[browser.automation]
-geckodriver = "/test/geckodriver"
-
-[browser.stagehand]
-chrome = "/test/chrome"
-extension = "/test/extension"
-
-[browser.live.bidi]
-firefox = "/test/firefox"
-profile = "/test/profile"
-
-[browser.live.ego]
-command = "/test/ego-browser"
-space = "masc"
-|} in
-  let module C = Browser_configuration in
-  let on = parse tables in
-  check bool "automation starts from [browser.automation]" true
-    (match C.automation_table on with Ok {driver = "/test/geckodriver"; _} -> true | _ -> false);
-  check bool "Stagehand starts from [browser.stagehand]" true
-    (match C.stagehand_table on with Ok {chrome = "/test/chrome"; _} -> true | _ -> false);
-  check bool "the owned Firefox starts from [browser.live.bidi]" true
-    (match C.live_bidi_table on with Ok {firefox = "/test/firefox"; _} -> true | _ -> false);
-  check bool "ego starts from [browser.live.ego]" true
-    (match C.live_ego_table on with Ok {space = "masc"; _} -> true | _ -> false);
-  let none = parse "" in
-  let missing name read = check bool ("no " ^ name ^ " table") true (read none = Error (C.Table_missing name)) in
-  missing "browser.automation" (fun c -> Result.map ignore (C.automation_table c));
-  missing "browser.stagehand" (fun c -> Result.map ignore (C.stagehand_table c));
-  missing "browser.live.bidi" (fun c -> Result.map ignore (C.live_bidi_table c));
-  missing "browser.live.ego" (fun c -> Result.map ignore (C.live_ego_table c));
-  let off = parse (tables ^ {|
-[browser.live]
-enabled = false
-|}) in
-  check bool "the owned Firefox is off with its live lane" true
-    (Result.map ignore (C.live_bidi_table off) = Error (C.Switched_off "browser.live"));
-  check bool "ego is off with its live lane" true
-    (Result.map ignore (C.live_ego_table off) = Error (C.Switched_off "browser.live"));
-  check bool "a live lane switched off leaves automation as it is" true
-    (Result.is_ok (C.automation_table off));
-  check bool "a switched-off lane is off before its missing table is" true
-    (Result.map ignore (C.stagehand_table (parse "[browser.stagehand]\nenabled = false\n"))
-     = Error (C.Switched_off "browser.stagehand"))
+    | Ok toml -> Browser_configuration.parse toml in
+  List.iter (fun (table, keys) ->
+      check bool (table ^ " refuses enabled") true
+        (Result.is_error (parse (Printf.sprintf "[%s]\n%senabled = true\n" table keys))))
+    [ "browser.automation", "geckodriver = \"/test/geckodriver\"\n"
+    ; "browser.stagehand", "chrome = \"/test/chrome\"\nextension = \"/test/extension\"\n"
+    ; "browser.live", ""
+    ; "browser.stagehand", "" ]
 
 (* A keeper's first question is whether a session already exists. Every other
    verb answers that only by being refused, which costs a lane round trip and
@@ -1357,5 +1321,5 @@ let () = run "native Firefox lane" ["behavior", [
   test_case "console read uses the tab's context" `Quick test_console_read_uses_the_tabs_context;
   test_case "cookie values never leave the driver module" `Quick test_cookie_values_never_leave_the_driver_module;
   test_case "browser configuration" `Quick test_browser_configuration;
-  test_case "a source starts from its own switched-on table" `Quick test_a_source_starts_from_its_own_switched_on_table;
+  test_case "a browser table takes no enabled key" `Quick test_a_browser_table_takes_no_enabled_key;
   test_case "each session lets its profile go once" `Quick test_each_session_lets_its_profile_go_once ]]

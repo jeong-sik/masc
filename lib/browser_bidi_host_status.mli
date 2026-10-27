@@ -13,7 +13,6 @@ type keeper =
       (** [runtime.toml] has [\[browser.live.bidi\]] and the live lane is on:
           the Browser Addon owns its Firefox and BiDi connection. Existing
           external Firefox processes are not adopted or restarted. *)
-  | Lane_off  (** [\[browser.live\] enabled = false], configured or not. *)
   | Not_configured  (** No [\[browser.live.bidi\]]: the operator starts them. *)
   | Not_known  (** No configuration was given to read it from. *)
 
@@ -136,7 +135,7 @@ val report : observation -> report
     and [detail] (why the record or the lock cannot be read, null otherwise). Then [attach], an
     object with exactly [launcher], [arguments] and [launcher_state]
     ([installed], [not_installed] or [needs_reinstall]); [keeper], an object
-    whose [kind] is [addon_managed] (with [port] and [profile]), [lane_off],
+    whose [kind] is [addon_managed] (with [port] and [profile]),
     [not_configured] or [not_known]; and [message]. *)
 val report_to_json : report -> Yojson.Safe.t
 

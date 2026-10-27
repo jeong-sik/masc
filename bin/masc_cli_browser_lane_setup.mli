@@ -21,8 +21,8 @@
     declares it when the workspace has no declaration of that source
     ({!Masc.Browser_addon_setup}). A source runs when runtime.toml has its
     table or this run writes it; external hosts run when a host is installed.
-    Whether a lane is switched on is the server's to read when it starts the
-    worker. Every other mode does the same after its host step and its tables,
+    A declaration's [enabled] switches its source on or off. Every other mode
+    does the same after its host step and its tables,
     and a source whose table the mode writes is declared only once that table
     is written. There a refusal of that step, including a runtime.toml that
     does not parse, is reported and the mode's own steps go on; only

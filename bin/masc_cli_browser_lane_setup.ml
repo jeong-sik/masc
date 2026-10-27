@@ -168,13 +168,6 @@ let print_bidi_steps plan =
   let { Browser_configuration.port; _ } = Bidi_setup.table plan in
   print_endline "";
   print_endline "Next, for the Firefox MASC starts:";
-  (* Setup writes the table; an attached browser Add-on uses the loaded
-     configuration only while the live lane is enabled. *)
-  if not (Bidi_setup.lane_enabled plan)
-  then
-    print_endline
-      "  [browser.live] enabled = false in runtime.toml keeps the live lane off, so the \
-       browser Add-on starts no Firefox. Turn it on first.";
   print_endline
     "  1. Restart the MASC server to load runtime.toml. A browser Add-on that was attached \
      before keeps its old settings until it is detached; the server attaches its declaration \
@@ -229,11 +222,6 @@ let print_automation ~runtime_config_path plan =
   List.iter (Printf.printf "Note: %s\n") (Automation_setup.notes plan);
   print_endline "";
   print_endline "Next, for the automation lane:";
-  if not (Automation_setup.lane_enabled plan)
-  then
-    print_endline
-      "  [browser.automation] enabled = false in runtime.toml keeps the lane off, so the \
-       browser Add-on starts no geckodriver. Turn it on first.";
   print_endline
     "  Restart the MASC server to load the updated runtime.toml. A browser Add-on that was \
      attached before keeps its old settings until it is detached; the server attaches its \
@@ -263,11 +251,6 @@ let print_ego ~runtime_config_path plan =
     (Ego_setup.versions plan);
   print_endline "";
   print_endline "Next, for the ego lite task space:";
-  if not (Ego_setup.lane_enabled plan)
-  then
-    print_endline
-      "  [browser.live] enabled = false in runtime.toml keeps the live lane off, so the \
-       connection takes no command. Turn it on first.";
   print_endline
     "  Restart the MASC server to load runtime.toml. A browser Add-on that was attached \
      before keeps its old settings until it is detached; the server attaches its declaration \
@@ -357,10 +340,9 @@ let addon_plan_status : Addon_setup.error -> int = function
 
 (* The browser sources this workspace runs, one package each: a source
    whose table runtime.toml has or this run writes, and the external hosts
-   when this run installs a host or one is installed. Whether its lane is
-   switched on is the runtime's to read when it starts the worker. The
-   second list holds the sources that run only once this run writes their
-   table. *)
+   when this run installs a host or one is installed. Whether a source runs
+   is its declaration's enabled. The second list holds the sources that run
+   only once this run writes their table. *)
 let addon_sources ~base_path ~(configuration : Browser_configuration.t) ~modes =
   let host_installed = match (observation ~base_path).Launcher.launcher with
     | Launcher.Follows_workspace -> true

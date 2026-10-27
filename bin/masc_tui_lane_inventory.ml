@@ -81,7 +81,7 @@ let declaration_summary = function
   | Unobserved -> "declaration not observed"
 let browser_activity_label = function
   | Browser_enabled -> "on"
-  | Browser_disabled -> "off; configuration retained"
+  | Browser_disabled -> "off"
   | Browser_unobserved -> "activity unavailable"
 let browser_reading_label observed = function
   | Browser_observed value -> observed value

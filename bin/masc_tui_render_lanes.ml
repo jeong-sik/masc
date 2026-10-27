@@ -282,10 +282,13 @@ let inventory_row_summary_lines ~cols ~standing ~selected_output
       , right_rows
       , exact_lane_overview_actions )
     | Browser_clients _ | Browser_executor _ ->
-      toggleable_lane_summary_columns ~state_line
-        ~off_note:"새 요청만 거절하고 열린 세션은 유지"
-        ~right_title:"백엔드 · 식별자" ~kind_label:"Browser 레인"
-        ~row_id:row.id ~open_hint:"Enter: 브라우저 열기"
+      ( "현재 상태"
+      , [ state_line ]
+      , "백엔드 · 식별자"
+      , [ Ansi.reset, "구분:   Browser 레인"
+        ; Theme.recede (), "식별자: " ^ row.id
+        ]
+      , "Enter: 브라우저 열기 · d: 전체 상세" )
     | Machine_state _ ->
       toggleable_lane_summary_columns ~state_line
         ~off_note:"머신 상태와 체크포인트 보존"
@@ -2290,13 +2293,6 @@ let render_machine_activity (state : state) session =
     ~hints:lane_activity_hints
     (Masc_tui_machine_activity.lines session)
 
-let render_browser_activity (state : state) session =
-  let terminal_rows, cols = get_terminal_size () in
-  render_lane_scrollable_reading state ~terminal_rows ~cols
-    ~surface_key:"browser-activity" ~title:" MASC Browser activity"
-    ~hints:lane_activity_hints
-    (Masc_tui_browser_activity.lines session)
-
 let render_exact_activity (state : state) session =
   let terminal_rows, cols = get_terminal_size () in
   render_lane_scrollable_reading state ~terminal_rows ~cols
@@ -2307,8 +2303,6 @@ let render_exact_activity (state : state) session =
 let render_lanes (state : state) =
   match Masc_tui_types.shown_machine_activity state with
   | Some session -> render_machine_activity state session
-  | None -> match Masc_tui_types.shown_browser_activity state with
-  | Some session -> render_browser_activity state session
   | None -> match Masc_tui_types.shown_exact_activity state with
   | Some session -> render_exact_activity state session
   | None -> match state.lanes_mode with

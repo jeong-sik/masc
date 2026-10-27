@@ -410,10 +410,10 @@ native worker 는 자기 프로세스 그룹을 가져요. 멈출 때는 먼저 
   | host 가 띄울 출처를 고름(`lane_addon_runtime.ml:1508`, `1512`, `1520`, `1532`) | 지워요. 띄울지는 선언이 정했어요 |
   | server 쪽 activity(`server_browser_configuration.ml:1-16`) | 지워요. 출처가 있는지는 host 가 serving 중인 worker 로 알아요(4.2) |
   | worker 안의 activity(`browser_addon_owner.ml:33`) | 자기 출처만 보면 돼서 단순해져요 |
-  | BiDi host 상태(`browser_bidi_host_status.ml:12-17`) | `Lane_off` 대신 `browser-firefox` 선언의 `enabled` 로 정해요 |
+  | BiDi host 상태(`browser_bidi_host_status.ml:12-17`) | `Lane_off` 를 지워요. `browser-firefox` 선언이 켜졌는지는 Lanes 화면의 그 패키지 줄이 보여 줘요 |
   | setup 계획·안내 문구(2.4) | 선언의 `enabled` 를 읽고 써요 |
   | lane inventory(`server_lane_inventory.ml:160`) | 그 레인 worker 들의 선언으로 정해요 |
-  | TUI 의 레인 켜기·끄기(`masc_tui_browser_activity.ml`) | 출처마다 보여 주고, 누르면 선언의 `enabled` 를 고쳐요. 운영자 선언 쓰기 경로(`POST /api/v1/lane-addons/declaration`)가 이미 있어요 |
+  | TUI 의 레인 켜기·끄기(`masc_tui_browser_activity.ml`) | 지워요. 출처마다 켜고 끄는 일은 `browser-<출처>` 패키지 줄의 선언 편집기가 이미 해요(`POST /api/v1/lane-addons/declaration`) |
 
 - 꺼서 생기는 일도 출처 하나예요. `browser-firefox` 선언을 끄면 그 worker 만 멈춰요. ego·Chrome·Gecko·바깥 native host 는 그대로예요.
 - automation 전용 브라우저 설치본은 설치 문서에서 권장만 해요. `[browser.automation] binary` 를 운영자가 평소 쓰지 않는 설치본으로 두고, 그 설치본에만 `DisableAppUpdate` 를 걸면 1.1 의 탈출 자체가 생기지 않아요. setup 이 묻거나 정책 파일을 쓰지는 않아요. G 가 탈출을 정리 박자 안에 풀기 때문이에요.

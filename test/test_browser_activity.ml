@@ -8,41 +8,32 @@ let parsed text = match parse text with Ok config -> config | Error detail -> fa
 let rejects text = check bool "invalid browser setting refused" true (Result.is_error (parse text))
 
 let test_config () =
-  check bool "omitted activity preserves behavior" true (Config.equal Config.none (parsed ""));
-  let config = parsed {|[browser.live]
-enabled = false
-[browser.automation]
-enabled = false
+  check bool "no browser table configures nothing" true (Config.equal Config.none (parsed ""));
+  let config = parsed {|[browser.automation]
 geckodriver = "/fixture/geckodriver"
 binary = "/fixture/browser"
 [browser.stagehand]
-enabled = false
 chrome = "/fixture/chrome"
 extension = "/fixture/extension"
 profile = "/fixture/profile"
 |} in
-  check bool "three lanes off independently" true
-    (not config.live_enabled && not config.automation_enabled && not config.stagehand_enabled);
-  check bool "off retains automation paths" true
+  check bool "automation paths" true
     (config.automation = Some {driver="/fixture/geckodriver";binary=Some "/fixture/browser"});
-  check bool "off retains stagehand paths" true
+  check bool "stagehand paths" true
     (config.stagehand = Some {chrome="/fixture/chrome";extension="/fixture/extension";profile=Some "/fixture/profile"});
-  let one = parsed "[browser.automation]\nenabled = false\n" in
-  check bool "activity without backend configuration remains observable" true
-    (one.automation=None && not one.automation_enabled && one.live_enabled && one.stagehand_enabled);
   let flat = parsed "[browser]\ngeckodriver = '/fixture/driver'\n" in
   let nested = parsed "[browser.automation]\ngeckodriver = '/fixture/driver'\n" in
-  check bool "one accepting deployment reads either location" true (Config.equal flat nested)
+  check bool "either automation location is read" true (Config.equal flat nested)
 
 let invalid = [
-  "both automation locations", "[browser]\ngeckodriver='/fixture/driver'\n[browser.automation]\nenabled=false";
+  "both automation locations", "[browser]\ngeckodriver='/fixture/driver'\n[browser.automation]\ngeckodriver='/fixture/driver'";
   "flat binary and nested driver", "[browser]\nbinary='/fixture/browser'\n[browser.automation]\ngeckodriver='/fixture/driver'";
-  "wrong flag type", "[browser.live]\nenabled='false'";
+  "a lane switch", "[browser.live]\nenabled=false";
   "unknown backend key", "[browser.automation]\nenabld=false";
   "wrong table type", "[browser]\nlive=false";
   "stray browser key", "[browser]\nenabled=false";
-  "relative path even when off", "[browser.automation]\nenabled=false\ngeckodriver='driver'";
-  "partial stagehand even when off", "[browser.stagehand]\nenabled=false\nchrome='/fixture/chrome'";
+  "relative path", "[browser.automation]\ngeckodriver='driver'";
+  "partial stagehand", "[browser.stagehand]\nchrome='/fixture/chrome'";
   "stagehand empty table", "[browser.stagehand]";
 ]
 
@@ -114,7 +105,7 @@ let test_off_preselected_stale () = with_lane (fun sw current ->
   ignore (Lane.disconnect_client ~client_id);
   let check = function
     | Ok (Lane.Rejected_before_effect message) -> check string "off is the stale-target remedy"
-        "browser.live is off; enable it before issuing new browser work" message
+        "no live browser runs here; new browser work is refused" message
     | _ -> fail "off must precede the stale-client diagnostic" in
   check (Lane.issue_for_actor ~actor:None ~target ~verb:Tabs_list ~timeout_sec:1.);
   check (Lane.issue_document_if_idle ~target ~tab_id:1 ~timeout_sec:1.))

@@ -157,9 +157,20 @@ let browser_presence ~config ~access =
   Browser_addon_presence.lane (Browser_addon_presence.read ~config ~access ~declarations)
     Browser_lane.Lane_name.Live
 
+(* A browser lane is switched on while an enabled declaration serves one of
+   its sources; whether it runs is the row's reading. A declaration read that
+   is not complete proves no lane off. *)
+let browser_activity (declarations : Config.snapshot) lane =
+  let serves (d : Config.declaration) = match d.package.worker_service with
+    | Lane_addon_types.Browser_service backend -> Browser_lane.Backend.lane backend = lane
+    | Lane_addon_types.Mcp_tools -> false in
+  if List.exists (fun (d : Config.declaration) -> d.enabled && serves d) declarations.declarations
+  then Browser_lane.Enabled
+  else if declarations.complete then Browser_lane.Disabled
+  else Browser_lane.Unobserved
+
 let snapshot ~config =
   let exact = Exact_projection.observe () in
-  let browser_activity = Server_browser_configuration.activity_snapshot () in
   let machine_configuration = Runtime.machine_configuration () in
   let directory, declarations = declarations ~config in
   (* Read once per snapshot, so the three browser rows describe one
@@ -171,7 +182,7 @@ let snapshot ~config =
     let selection,state = match lane with
       | Lane_id.Exact id -> Exact id,Exact_state (Exact_projection.configuration exact id)
       | Lane_id.Browser id ->
-          Browser id,browser_state ~activity:(browser_activity id)
+          Browser id,browser_state ~activity:(browser_activity declarations id)
             (Browser_addon_presence.lane browser_publication id) id
       | Lane_id.Machine id -> Machine id,machine_state ~config ~configuration:machine_configuration id in
     {id=Lane_id.to_wire (Lane_id.Builtin lane); label=Lane_manifest.label lane;

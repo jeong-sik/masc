@@ -1626,29 +1626,32 @@ let backend ~store ~artifact_store () = match !override with
               | Browser_service backend -> offload (fun () ->
                   (* The worker serves its package's one source, given that
                      source's table and no other. A source whose table is
-                     missing or whose lane is switched off does not start. *)
+                     missing does not start. *)
                   let unstarted reason = Error (Printf.sprintf "the %s browser source does not start: %s"
                       (Browser_lane.Backend.to_wire backend) reason) in
-                  let table read = match Runtime.browser_configuration () with
+                  let table ~path read = match Runtime.browser_configuration () with
                     | None -> unstarted "this server has not loaded a runtime.toml"
                     | Some configuration -> (match read configuration with
-                        | Ok table -> Ok table
-                        | Error why -> unstarted ("in the runtime.toml this server loaded, "
-                                                  ^ Browser_configuration.unstarted_message why)) in
+                        | Some table -> Ok table
+                        | None -> unstarted (Printf.sprintf
+                            "the runtime.toml this server loaded has no [%s] table" path)) in
                   let* source,live_ego=match backend with
                     | Browser_lane.Backend.Automation ->
-                      let* {Browser_configuration.driver;binary}=table Browser_configuration.automation_table in
+                      let* {Browser_configuration.driver;binary}=table ~path:Browser_configuration.automation_path
+                          (fun c -> c.Browser_configuration.automation) in
                       let root=Browser_gecko_profile.root ~lane_addon_root:(Lane_addon_store.root store) in
                       let* profiles=Browser_gecko_profile.prepare_instance ~root ~instance_id in
                       Ok (Browser_addon_socket.Automation {Browser_addon_automation.driver;binary;profiles},None)
                     | Browser_lane.Backend.Stagehand ->
-                      let* browser=table Browser_configuration.stagehand_table in
+                      let* browser=table ~path:Browser_configuration.stagehand_path
+                          (fun c -> c.Browser_configuration.stagehand) in
                       let* guardian=Native_addon_program.(locate Browser_process_owner) in
                       let* configuration=Browser_addon_stagehand.configuration ~browser ~launcher ~guardian
                         ~claim_directory:(native_claim_directory store Chrome_child_slot ~id:instance_id) in
                       Ok (Browser_addon_socket.Stagehand configuration,None)
                     | Browser_lane.Backend.Owned_firefox ->
-                      let* browser=table Browser_configuration.live_bidi_table in
+                      let* browser=table ~path:Browser_configuration.live_bidi_path
+                          (fun c -> c.Browser_configuration.live_bidi) in
                       let* guardian=Native_addon_program.(locate Browser_process_owner) in
                       let* configuration=Browser_addon_live_bidi.configuration ~browser ~launcher ~guardian
                         ~claim_directory:(native_claim_directory store Live_bidi_child_slot ~id:instance_id) in
@@ -1657,7 +1660,8 @@ let backend ~store ~artifact_store () = match !override with
                        worker's IPC lifetime. Its configuration rides the
                        worker's arguments, not the cleanup descriptor. *)
                     | Browser_lane.Backend.Ego ->
-                      let* ego=table Browser_configuration.live_ego_table in
+                      let* ego=table ~path:Browser_configuration.live_ego_path
+                          (fun c -> c.Browser_configuration.live_ego) in
                       Ok (Browser_addon_socket.Ego,Some ego)
                     | Browser_lane.Backend.External_host -> Ok (Browser_addon_socket.External_host,None) in
                   Browser_addon_socket.context ~instance_id ~source

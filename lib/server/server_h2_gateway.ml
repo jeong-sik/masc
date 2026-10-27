@@ -495,12 +495,11 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
               ~extra_headers:[ "cache-control", "no-store" ])
 
       | `GET, "/oauth/authorize" ->
-          with_h2_oauth_authorize_context (fun ~base_path ~fetch_client_metadata ->
+          with_h2_oauth_base_path (fun base_path ->
             match
               Server_oauth_service.authorize_get
                 ~base_path
                 ~authority:request_authority
-                ~fetch_client_metadata
                 ~target:httpun_request.Httpun.Request.target
             with
             | Error error -> h2_respond_oauth_error error

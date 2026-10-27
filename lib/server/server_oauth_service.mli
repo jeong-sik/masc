@@ -33,8 +33,6 @@ val oauth_error_json : Auth_oauth.error -> Yojson.Safe.t
 val authorize_get :
   base_path:string ->
   authority:Server_request_authority.authority ->
-  fetch_client_metadata:
-    (Auth_oauth_client_metadata.document_url -> (string, string) result) ->
   target:string ->
   (Auth_oauth.authorization_request, Auth_oauth.error) result
 
@@ -45,6 +43,8 @@ val authorize_post :
     (Auth_oauth_client_metadata.document_url -> (string, string) result) ->
   body:string ->
   (authorization_post_outcome, Auth_oauth.error) result
+(** The approval. A document client's document is fetched here, so call it
+    only for a same-origin browser request. *)
 
 val register_client :
   base_path:string -> string -> (Auth_oauth.client, Auth_oauth.error) result

@@ -158,6 +158,11 @@ type client =
   ; created_at_unix : float
   }
 
+type client_verification =
+  | Registered_client
+  | Verified_document
+  | Unverified_document
+
 type authorization_request =
   { client_id : string
   ; client_name : string option
@@ -166,7 +171,13 @@ type authorization_request =
   ; scopes : scope list
   ; state : string option
   ; code_challenge : string
+  ; client_verification : client_verification
   }
+
+type client_document_check =
+  | Fetch_and_verify of
+      (Auth_oauth_client_metadata.document_url -> (string, string) result)
+  | Show_unverified
 
 type pending_grant =
   { base_path : string
@@ -573,10 +584,11 @@ let client_metadata_error reason =
   Invalid_request ("client metadata document: " ^ reason)
 ;;
 
-(* The client's display name, once the client and its redirect_uri check
-   out. A document client has no stored record: its document is read again
-   for every request, so the approval form's hidden fields are not trusted. *)
-let resolve_client ~base_path ~fetch_client_metadata ~client_id ~redirect_uri =
+(* The client's display name and how it was checked, once the client and its
+   redirect_uri check out. A document client has no stored record: the
+   approval fetches its document again rather than trusting the consent
+   form's hidden fields. *)
+let resolve_client ~base_path ~client_document ~client_id ~redirect_uri =
   match Auth_oauth_client_metadata.classify_client_id client_id with
   | Error rule -> Error (Invalid_request rule)
   | Ok (Auth_oauth_client_metadata.Registered client_id) ->
@@ -585,27 +597,32 @@ let resolve_client ~base_path ~fetch_client_metadata ~client_id ~redirect_uri =
      | None -> Error Invalid_client
      | Some client when not (List.mem redirect_uri client.redirect_uris) ->
        Error (Invalid_request "redirect_uri is not registered")
-     | Some client -> Ok client.client_name)
+     | Some client -> Ok (client.client_name, Registered_client))
   | Ok (Auth_oauth_client_metadata.Document url) ->
     (* This server only ever redirects to this computer, whatever else the
        document lists. *)
     let* () = validate_loopback_redirect_uri redirect_uri in
-    let* body = fetch_client_metadata url |> Result.map_error client_metadata_error in
-    let* document =
-      Auth_oauth_client_metadata.parse_document url body
-      |> Result.map_error client_metadata_error
-    in
-    if String.length document.client_name > Policy.max_client_name_bytes
-    then Error (client_metadata_error "client_name is too long")
-    else if Auth_oauth_client_metadata.redirect_uri_allowed document redirect_uri
-    then Ok (Some document.client_name)
-    else Error (Invalid_request "redirect_uri is not listed in the client metadata document")
+    (match client_document with
+     | Show_unverified -> Ok (None, Unverified_document)
+     | Fetch_and_verify fetch_client_metadata ->
+       let* body = fetch_client_metadata url |> Result.map_error client_metadata_error in
+       let* document =
+         Auth_oauth_client_metadata.parse_document url body
+         |> Result.map_error client_metadata_error
+       in
+       if String.length document.client_name > Policy.max_client_name_bytes
+       then Error (client_metadata_error "client_name is too long")
+       else if Auth_oauth_client_metadata.redirect_uri_allowed document redirect_uri
+       then Ok (Some document.client_name, Verified_document)
+       else
+         Error
+           (Invalid_request "redirect_uri is not listed in the client metadata document"))
 ;;
 
 let validate_authorization_request
     ~base_path
     ~expected_resource
-    ~fetch_client_metadata
+    ~client_document
     ~response_type
     ~client_id
     ~redirect_uri
@@ -641,10 +658,19 @@ let validate_authorization_request
     then Error (Invalid_request "state is too long")
     else
       let* scopes = parse_scopes scope in
-      let* client_name =
-        resolve_client ~base_path ~fetch_client_metadata ~client_id ~redirect_uri
+      let* client_name, client_verification =
+        resolve_client ~base_path ~client_document ~client_id ~redirect_uri
       in
-      Ok { client_id; client_name; redirect_uri; resource; scopes; state; code_challenge }
+      Ok
+        { client_id
+        ; client_name
+        ; redirect_uri
+        ; resource
+        ; scopes
+        ; state
+        ; code_challenge
+        ; client_verification
+        }
 ;;
 
 let issue_authorization_code
@@ -666,11 +692,13 @@ let issue_authorization_code
     }
   in
   let* () =
-    match Auth_oauth_client_metadata.classify_client_id request.client_id with
-    | Ok (Auth_oauth_client_metadata.Registered client_id) ->
-      with_store_io ~base_path (fun () -> activate_client_locked ~base_path ~client_id)
-    | Ok (Auth_oauth_client_metadata.Document _) -> Ok ()
-    | Error rule -> Error (Invalid_request rule)
+    match request.client_verification with
+    | Registered_client ->
+      with_store_io ~base_path (fun () ->
+        activate_client_locked ~base_path ~client_id:request.client_id)
+    | Verified_document -> Ok ()
+    | Unverified_document ->
+      Error (Invalid_request "the client metadata document has not been checked")
   in
   Stdlib.Mutex.protect pending_mutex (fun () ->
       cleanup_expired_codes_locked issued_at_unix;

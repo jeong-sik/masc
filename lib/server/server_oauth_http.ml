@@ -62,8 +62,8 @@ let with_base_path request reqd handler =
   | None -> respond_oauth_error request reqd Auth_oauth.Temporarily_unavailable
 ;;
 
-(* The authorization endpoint also needs the server's network: an https
-   client_id names a document that has to be fetched. *)
+(* The approval also needs the server's network: an https client_id names a
+   document that has to be fetched. *)
 let with_authorize_context request reqd handler =
   match Server_routes_http_common.current_server_state_opt () with
   | Some state ->
@@ -83,12 +83,11 @@ let respond_authorization_form ?(status = `OK) ?error authorization_request reqd
 
 let handle_authorize_get request reqd =
   with_oauth_authority reqd (fun authority ->
-    with_authorize_context request reqd (fun ~base_path ~fetch_client_metadata ->
+    with_base_path request reqd (fun base_path ->
       match
         Server_oauth_service.authorize_get
           ~base_path
           ~authority
-          ~fetch_client_metadata
           ~target:request.Httpun.Request.target
       with
       | Error error -> respond_oauth_error request reqd error

@@ -16,6 +16,7 @@ type successful_tool_completion =
 type attempt_outcome =
   { result : (Runtime_agent.run_result, Agent_core.Error.t) result
   ; settled_session : Keeper_official_client_session_store.t option
+  ; pending_result_receipts : Keeper_client_tool_outbox.consumption option
   ; effect_disposition : Keeper_provider_attempt_effect.t
   ; successful_tool_completion : successful_tool_completion
   }
@@ -861,7 +862,7 @@ let observe_failed_dispatch ~observe_transport_uncertain = function
   | Runtime_codex_app_server.Runtime_shutting_down -> ()
 ;;
 
-let run_without_lifecycle ~result_scope ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~context_window ~quota_scope ~keeper_name
+let run_without_lifecycle ~result_scope ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~required_native_posture ~official_client_continuation ~runtime_id ~context_window ~quota_scope ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~loading_plan ~initial_messages ~capacity_bytes ~project_history
     ~on_transmitted_model_input ~hooks
@@ -869,6 +870,7 @@ let run_without_lifecycle ~result_scope ~official_task_reference ~composed_conte
     ~observe_effect_attempted ~observe_successful_tool_completion ~observe_transport_uncertain
     ~on_tool_execution ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_completion ~on_native_tool_progress
     ~on_usage_report ~(config : Runtime_execution.codex_app_server) =
+  on_results_ready None;
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
     Error
@@ -1136,7 +1138,7 @@ let run_without_lifecycle ~result_scope ~official_task_reference ~composed_conte
       ; output_schema = None
       }
     in
-    let* host_dynamic_tools =
+    let* (host_dynamic_tools, _) =
       Host.dynamic_tools
         ~result_scope:None
         ~content_transport:Runtime_official_client_tool.Codex
@@ -1224,7 +1226,7 @@ let run_without_lifecycle ~result_scope ~official_task_reference ~composed_conte
                  requested_reasoning_effort)
             ())
     in
-    let* host_dynamic_tools =
+    let* (host_dynamic_tools, result_producer) =
       Host.dynamic_tools
         ~result_scope:(Some result_scope)
         ~base_path
@@ -1250,6 +1252,11 @@ let run_without_lifecycle ~result_scope ~official_task_reference ~composed_conte
         ?on_tool_boundary:on_official_client_tool_boundary
         ~on_result_handoff:on_official_client_result_handoff
         ()
+    in
+    let produced_results = ref None in
+    let close_delivery_frontier () =
+      if Option.is_none !produced_results then
+        produced_results := Option.map Keeper_client_tool_outbox.close_delivery_frontier result_producer
     in
     let dynamic_tools =
       List.map
@@ -1390,9 +1397,7 @@ let run_without_lifecycle ~result_scope ~official_task_reference ~composed_conte
            session_state := settled;
            on_session_settled settled;
            let* result = projected in
-           let* () = Keeper_client_tool_outbox.settle_after_turn tool_outbox
-             ~stop_reason:result.stop_reason
-             |> Result.map_error internal_error in
+           on_results_ready (Some (Keeper_client_tool_outbox.pending_consumption [tool_outbox]));
            Ok result)
       | Ready | Start _ | Active _ | Turn_inflight { turn_id = None; _ }
       | Recovery_required _ | Settled _ ->
@@ -1440,6 +1445,7 @@ let run_without_lifecycle ~result_scope ~official_task_reference ~composed_conte
           (match event with
            | Runtime_codex_app_server.Native_tool_started _
            | Native_tool_finished _ -> observe_effect_attempted ()
+           | Tool_delivery_closed _ -> close_delivery_frontier ()
            | Compaction_observed -> settled_held_context := []
            | Usage_reported { frame; _ } ->
              (* The final usage keeps only the newest request. A compaction
@@ -1449,7 +1455,7 @@ let run_without_lifecycle ~result_scope ~official_task_reference ~composed_conte
               | Context_window_filled _ -> settled_held_context := []
               | Counted { last = Request_usage _; _ } -> ())
            | Native_tool_progress _ | Turn_started _ | Text_delta _ | Thinking_delta _ | Text_completed _ | Thinking_completed _ | Dynamic_tool_started _
-           | Dynamic_tool_finished _ | Tool_delivery_closed _ | Elicitation_cancelled _
+           | Dynamic_tool_finished _ | Elicitation_cancelled _
            | Usage_windows_reported _ | Turn_finished _ -> ());
           Option.iter (fun observe -> observe event) observe_stream
         in
@@ -1685,8 +1691,8 @@ let run_without_lifecycle ~result_scope ~official_task_reference ~composed_conte
          | Some (_, Direct_schedule _),
              (Handoff_unrequested | Handoff_rejected) -> Completed { provider_turn_ordinal = turn_count }
        in
-       let* () = Keeper_client_tool_outbox.settle_after_turn tool_outbox ~stop_reason
-         |> Result.map_error internal_error in
+       on_results_ready (Some (Keeper_client_tool_outbox.pending_consumption
+         (tool_outbox :: Option.to_list !produced_results)));
        let capture, _metrics =
          Runtime_observation.runtime_metrics_for_candidates ~runtime_id ~keeper_name ()
        in
@@ -1851,6 +1857,8 @@ let run ~input_source ?argument_source ?on_memory_capacity_refusal ?official_tas
       (Runtime_codex_app_server.effective_account_home config.account_home)
   in
   let settled_session = Atomic.make None in
+  let pending_result_receipts = Atomic.make None in
+  let on_results_ready value = Atomic.set pending_result_receipts value in
   let on_session_settled value = Atomic.set settled_session (Some value) in
   let effect_disposition =
     Atomic.make Keeper_provider_attempt_effect.No_effect_observed
@@ -1913,7 +1921,7 @@ let run ~input_source ?argument_source ?on_memory_capacity_refusal ?official_tas
         (* A read in an abandoned attempt cannot certify a tool-only answer
            from the next one. Effect evidence remains cumulative. *)
         Atomic.set successful_tool_completion No_successful_tool_completion;
-        run_without_lifecycle ~result_scope ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~official_client_continuation ~context_window
+        run_without_lifecycle ~result_scope ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~official_client_continuation ~context_window
           ~required_native_posture
           ~runtime_id
           ~quota_scope
@@ -1982,6 +1990,9 @@ let run ~input_source ?argument_source ?on_memory_capacity_refusal ?official_tas
   in
   { result
   ; settled_session = Atomic.get settled_session
+  ; pending_result_receipts = (match result with
+      | Ok _ -> Atomic.get pending_result_receipts
+      | Error _ -> None)
   ; effect_disposition = Atomic.get effect_disposition
   ; successful_tool_completion = Atomic.get successful_tool_completion
   }

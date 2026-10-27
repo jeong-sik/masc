@@ -13,9 +13,13 @@ type receipt =
   ; response : Yojson.Safe.t
   }
 
+type delivery_frontier = Open of entry Producer_map.t | Closed of entry Producer_map.t
+
 type host_producer =
   { producer_id : string; runtime_label : string; turn_count : int
-  ; base_path : string; keeper_name : string; lease_path : string }
+  ; base_path : string; keeper_name : string; lease_path : string
+  ; outbox_directory : string; delivery : delivery_frontier Atomic.t }
+type host_delivery = { producer : host_producer; entry : entry }
 
 let directory ~base_path ~keeper_name =
   let* session_path = Keeper_official_client_session_store.path ~base_path ~keeper_name in
@@ -36,6 +40,7 @@ let host_producer ~base_path ~keeper_name ~runtime_label ~turn_count =
   if String.trim runtime_label = "" then Error "tool result producer label is empty"
   else if turn_count < 0 then Error "tool result producer turn count is negative"
   else
+    let* outbox_directory = directory ~base_path ~keeper_name in
     let producer_id = Random_id.uuid_v7 () in
     let* leases = lease_directory ~base_path ~keeper_name in
     let* () = Keeper_fs.save_bytes_durable_atomic ~ownership_root:base_path
@@ -43,7 +48,8 @@ let host_producer ~base_path ~keeper_name ~runtime_label ~turn_count =
         (Filename.concat leases (producer_id ^ ".lock")) ""
       |> Result.map_error Keeper_fs.durable_write_error_to_string in
     let* lease_path = canonical_lease_path ~base_path ~keeper_name producer_id in
-    Ok {producer_id;runtime_label;turn_count;base_path;keeper_name;lease_path}
+    Ok {producer_id;runtime_label;turn_count;base_path;keeper_name;lease_path;
+        outbox_directory;delivery=Atomic.make (Open Producer_map.empty)}
 
 let start_host_producer ~sw ~base_path ~keeper_name ~runtime_label ~turn_count =
   Eio.Switch.check sw;
@@ -112,17 +118,42 @@ let retain_json ~base_path ~keeper_name json =
       ~pretty:false path json
     |> Result.map_error Keeper_fs.durable_write_error_to_string in
   let* persisted = read path in
-  if persisted = Some json then Ok () else Error "tool outbox receipt readback differs"
+  if persisted = Some json then Ok {path;json} else Error "tool outbox receipt readback differs"
 
 let retain ~base_path ~keeper_name result =
-  retain_json ~base_path ~keeper_name (to_json result)
+  retain_json ~base_path ~keeper_name (to_json result) |> Result.map (fun _ -> ())
 
-let retain_host_result producer ~invocation_index ~call_id ~tool_name ~arguments ~response =
+let retain_host_result_with_delivery producer ~invocation_index ~call_id ~tool_name ~arguments ~response =
   let json = `Assoc ["host_invocation_index",`Int invocation_index;
     "host_producer_id",`String producer.producer_id;
     "runtime_label",`String producer.runtime_label;"host_turn_count",`Int producer.turn_count;
     "call_id",`String call_id;"tool_name",`String tool_name;"arguments",arguments;"response",response] in
-  retain_json ~base_path:producer.base_path ~keeper_name:producer.keeper_name json
+  let* entry = retain_json ~base_path:producer.base_path ~keeper_name:producer.keeper_name json in
+  Ok {producer;entry}
+
+let retain_host_result producer ~invocation_index ~call_id ~tool_name ~arguments ~response =
+  retain_host_result_with_delivery producer ~invocation_index ~call_id ~tool_name ~arguments ~response
+  |> Result.map (fun _ -> ())
+
+let rec mark_response_sent delivery =
+  let current = Atomic.get delivery.producer.delivery in
+  match current with
+  | Closed _ -> ()
+  | Open entries ->
+    let next = Open (Producer_map.add delivery.entry.path delivery.entry entries) in
+    if not (Atomic.compare_and_set delivery.producer.delivery current next)
+    then mark_response_sent delivery
+
+let rec close_delivery_frontier producer =
+  let snapshot entries =
+    {directory=producer.outbox_directory;
+     entries=Producer_map.bindings entries |> List.map snd} in
+  let current = Atomic.get producer.delivery in
+  match current with
+  | Open entries ->
+    if Atomic.compare_and_set producer.delivery current (Closed entries)
+    then snapshot entries else close_delivery_frontier producer
+  | Closed entries -> snapshot entries
 
 let load ~base_path ~keeper_name =
   let* directory = directory ~base_path ~keeper_name in
@@ -214,3 +245,10 @@ let settle_after_turn snapshot ~(stop_reason : Runtime_agent_context.stop_reason
   | Yielded_to_operation_queued _ | Yielded_to_durable_stimulus _
   | Yielded_after_repeated_tool_call _ | Yielded_after_repeated_assistant_text _
   | InputRequired _ -> Ok ()
+
+type consumption = Consumption of snapshot list
+let pending_consumption snapshots = Consumption snapshots
+let settle_consumption (Consumption snapshots) ~stop_reason =
+  List.fold_left (fun outcome snapshot ->
+    let* () = outcome in
+    settle_after_turn snapshot ~stop_reason) (Ok ()) snapshots

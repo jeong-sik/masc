@@ -2397,7 +2397,7 @@ let observe_partial_input observer ~session_id fields =
 let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     ~expected_session_id
     ~subscription ~resumed ~rate_limit ~assistant_model ~assistant_texts
-    ~native_tool_calls ~native_tool_attempted ~on_turn_started ~on_stream_event
+    ~native_tool_calls ~native_tool_attempted ~on_terminal_received ~on_turn_started ~on_stream_event
     ~input_observer ~partial_stream ~stream_started ~response_emitted =
   let* json = io.receive () in
   let* kind, fields = wire_fields json in
@@ -2417,7 +2417,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
-      ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
+      ~rate_limit ~assistant_model ~assistant_texts ~on_terminal_received ~on_turn_started
       ~native_tool_calls ~native_tool_attempted ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
   | Frame_control_response ->
@@ -2432,7 +2432,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     observe_partial_input input_observer ~session_id:expected_session_id fields;
     await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~expected_session_id ~subscription ~resumed ~rate_limit ~assistant_model
-      ~assistant_texts ~native_tool_calls ~native_tool_attempted ~on_turn_started
+      ~assistant_texts ~native_tool_calls ~native_tool_attempted ~on_terminal_received ~on_turn_started
       ~on_stream_event ~input_observer ~partial_stream ~stream_started ~response_emitted
   | Frame_assistant ->
     let* scope, origin, uuid, model, blocks, message_id, usage =
@@ -2504,7 +2504,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~subscription ~resumed
       ~rate_limit ~assistant_model
       ~assistant_texts:(assistant_texts @ texts)
-      ~native_tool_calls ~native_tool_attempted ~on_turn_started ~on_stream_event
+      ~native_tool_calls ~native_tool_attempted ~on_terminal_received ~on_turn_started ~on_stream_event
       ~input_observer ~partial_stream ~stream_started ~response_emitted
   | Frame_rate_limit_event ->
     let* rate_limit = parse_rate_limit ~expected_session_id fields in
@@ -2522,7 +2522,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
       ~rate_limit:(Some rate_limit) ~assistant_model ~assistant_texts
-      ~native_tool_calls ~native_tool_attempted ~on_turn_started ~on_stream_event
+      ~native_tool_calls ~native_tool_attempted ~on_terminal_received ~on_turn_started ~on_stream_event
       ~input_observer ~partial_stream ~stream_started ~response_emitted
   | Frame_result ->
     (* The result frame is the only place the turn's spend is reported, and
@@ -2533,6 +2533,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
        turn's responses were measured on; a frame with usage and no measured
        model response has no model to attribute it to and is logged. *)
     let* turn_id = result_turn_id ~expected_session_id fields in
+    on_terminal_received ();
     let usage = turn_usage_of_fields fields in
     (match assistant_model, usage with
      | Some model, Some usage ->
@@ -2634,7 +2635,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
       ~rate_limit ~assistant_model ~assistant_texts ~native_tool_calls
-      ~native_tool_attempted ~on_turn_started ~on_stream_event ~input_observer ~partial_stream ~stream_started
+      ~native_tool_attempted ~on_terminal_received ~on_turn_started ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
   | Frame_system ->
     (* [compact_boundary] is the client's own record that it summarised the
@@ -2656,7 +2657,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
-      ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
+      ~rate_limit ~assistant_model ~assistant_texts ~on_terminal_received ~on_turn_started
       ~native_tool_calls ~native_tool_attempted ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
   | Frame_tool_progress ->
@@ -2676,7 +2677,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
-      ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
+      ~rate_limit ~assistant_model ~assistant_texts ~on_terminal_received ~on_turn_started
       ~native_tool_calls ~native_tool_attempted ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
   | Frame_command_lifecycle ->
@@ -2688,7 +2689,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
-      ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
+      ~rate_limit ~assistant_model ~assistant_texts ~on_terminal_received ~on_turn_started
       ~native_tool_calls ~native_tool_attempted ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
   | Frame_other tag ->
@@ -2854,7 +2855,7 @@ let terminate_spawned_process ~sw ~clock proc stdin_w =
 ;;
 
 let run_protocol io ~native_posture ~dynamic_tools ~subscription ~session_mode ~session_id
-    ~prompt ~images ~on_session_ready ~on_turn_starting ~on_turn_started ~on_prompt_sent
+    ~prompt ~images ~on_session_ready ~on_turn_starting ~on_terminal_received ~on_turn_started ~on_prompt_sent
     ~on_context_submission ~on_stream_event ~on_input_observation ~turn_admitted =
   let tool_call_count = ref 0 in
   let assistant_usage = new_assistant_usage () in
@@ -2941,6 +2942,7 @@ let run_protocol io ~native_posture ~dynamic_tools ~subscription ~session_mode ~
       calls=Hashtbl.create 8;progress_uuids=Hashtbl.create 8;
       retry_bindings=Hashtbl.create 8;task_runs=Hashtbl.create 8;native_posture}
     ~native_tool_attempted:(ref false)
+    ~on_terminal_received
     ~on_turn_started
     ~on_stream_event
     ~input_observer
@@ -2973,7 +2975,7 @@ let with_system_prompt_file prompt use = match prompt with
 
 let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
     ~reasoning_effort ~session_mode ~session_id ~subscription ~prompt ~images
-    ~on_session_ready ~on_turn_starting ~on_turn_started ~on_prompt_sent ~on_context_submission
+    ~on_session_ready ~on_turn_starting ~on_terminal_received ~on_turn_started ~on_prompt_sent ~on_context_submission
     ~on_stream_event ~on_input_observation =
   let turn_admitted = ref false in
   try
@@ -3087,6 +3089,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
             with_admission_timeout (fun () -> on_session_ready ~session_id))
           ~on_turn_starting:(fun ~session_id ->
             with_admission_timeout (fun () -> on_turn_starting ~session_id))
+          ~on_terminal_received
           ~on_turn_started:(fun ~session_id ~turn_id ->
             with_admission_timeout (fun () -> on_turn_started ~session_id ~turn_id))
           ~on_prompt_sent
@@ -3224,7 +3227,8 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
     ?(on_context_submission = fun _ -> ()) ~mgr ~clock ~cwd
     ?(on_session_ready = fun ~session_id:_ -> Ok ())
     ?(on_turn_starting = fun ~session_id:_ -> Ok ())
-    ?(on_turn_started = fun ~session_id:_ ~turn_id:_ -> Ok ()) ?on_stream_event ?on_input_observation config
+    ?(on_turn_started = fun ~session_id:_ ~turn_id:_ -> Ok ())
+    ?(on_terminal_received = fun () -> ()) ?on_stream_event ?on_input_observation config
     ~prompt ~images =
   let result =
     let* () = validate_turn ~dynamic_tools ~session_mode config ~prompt ~images in
@@ -3264,6 +3268,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
         ~images
         ~on_session_ready
         ~on_turn_starting
+        ~on_terminal_received
         ~on_turn_started
         ~on_prompt_sent
         ~on_context_submission

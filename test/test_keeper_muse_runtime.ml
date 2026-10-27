@@ -979,6 +979,22 @@ let run_turn_with ?raw_trace ?composed_context ?goal_blocks ?(accepts_image_inpu
       ~config
       ()
   in
+  (* This direct adapter fixture is its caller: accept the returned result
+     before consuming the opaque durable result set. The routed Keeper test
+     separately exercises a rejecting caller predicate. *)
+  let result = Result.bind outcome.result (fun result ->
+    Result.bind
+      (Keeper_turn_driver.For_testing.apply_official_client_accept ~runtime_id
+        ~accept:(fun _ -> true)
+        ~terminal_effect_state:(fun () -> Keeper_tools_agent_core.Terminal_effect_open) result)
+      (fun result ->
+        let settled = match outcome.pending_result_receipts with
+          | None -> Ok ()
+          | Some pending -> Keeper_client_tool_outbox.settle_consumption pending
+              ~stop_reason:result.Runtime_agent.stop_reason in
+        match settled with
+        | Ok () -> Ok result | Error detail -> Error (Agent_core.Error.Internal detail))) in
+  let outcome = {outcome with result} in
   { outcome
   ; events = List.rev !events
   ; reports = List.rev !reports
@@ -3126,6 +3142,36 @@ let test_original_result_crosses_checkpoint_and_fresh_session () =
       (List.length (Keeper_client_tool_outbox.receipt_ids (load ()))))
 ;;
 
+let test_ordinary_result_is_acknowledged_only_after_accepted_completion () =
+  List.iter (fun fail_after_turn -> with_scripted_host (fun ~base_path ->
+    let effects = ref 0 in
+    let tool = Agent_core.Tool.create ~name:"masc_probe" ~description:"Return one original result"
+      ~parameters:[{Agent_core.Types.name="marker";description="Fixture marker";param_type=String;required=true}]
+      (fun _ -> incr effects;
+        Ok {Agent_core.Types.content="MASC_TOOL_RESULT";content_blocks=None;_meta=None}) in
+    let hooks = if fail_after_turn then
+      {Agent_core.Hooks.empty with after_turn=Some (fun _ ->
+        Agent_core.Hooks.HookFailed {stage=After_turn;detail="reject completed vendor turn"})}
+      else Agent_core.Hooks.empty in
+    let run = run_turn_with ~base_path ~tool ~hooks () in
+    (match fail_after_turn, run.outcome.result with
+     | false, Ok {Runtime_agent.stop_reason=Completed _;_} -> ()
+     | true, Error _ -> ()
+     | false, Error error -> fail (Agent_core.Error.to_string error)
+     | false, Ok _ | true, Ok _ -> fail "unexpected completion acceptance");
+    check int "real adapter executes the effect once" 1 !effects;
+    let pending = match Keeper_client_tool_outbox.load ~base_path ~keeper_name with
+      | Ok snapshot -> snapshot | Error detail -> fail detail in
+    check int "only accepted natural completion consumes its original physical result"
+      (if fail_after_turn then 1 else 0)
+      (List.length (Keeper_client_tool_outbox.receipt_ids pending));
+    if fail_after_turn then
+      check bool "post-turn failure preserves exact original returned data" true
+        (String_util.contains_substring
+          (String.concat "" (Keeper_client_tool_outbox.developer_context pending)) "MASC_TOOL_RESULT")))
+    [false;true]
+;;
+
 let test_original_result_retention_failure_cannot_yield () =
   with_scripted_host ~fixture:(scenario "stop_before_ack" @
     ["expected_probe_result", `Assoc ["content", `String "ORIGINAL_EFFECT_RESULT"; "is_error", `Bool true]])
@@ -3176,6 +3222,8 @@ let () =
     [ ( "async result outbox"
       , [test_case "original result crosses checkpoint and fresh-session delivery" `Quick
            test_original_result_crosses_checkpoint_and_fresh_session
+        ; test_case "ordinary physical result survives failed completion acceptance" `Quick
+            test_ordinary_result_is_acknowledged_only_after_accepted_completion
         ; test_case "post-effect original retention failure cannot yield or complete" `Quick
             test_original_result_retention_failure_cannot_yield])
     ; ( "stream"

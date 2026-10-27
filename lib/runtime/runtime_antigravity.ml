@@ -773,7 +773,7 @@ let verify_restatement ~stage ~expected = function
 ;;
 
 let apply_event (config : config) ~conversation_mode ~on_conversation_ready
-    ~on_stream_event state = function
+    ~on_stream_event ~on_terminal_received state = function
   | Init { conversation_id; model; cwd; permission_mode } ->
     let stage = "init event" in
     if Option.is_some state.init
@@ -918,6 +918,7 @@ let apply_event (config : config) ~conversation_mode ~on_conversation_ready
        if Option.is_some state.result
        then protocol_error stage "received more than one result event"
        else (
+         on_terminal_received ();
          (* The result repeats the whole response the step updates already
             carried, so it is forwarded only when none of them did. *)
          (if state.text_streamed
@@ -961,7 +962,7 @@ let context_submission_to_json write =
 ;;
 
 let run_spawned ?home_dir ?before_spawn ?on_spawned ?on_prompt_sent ?on_context_submission ~mgr ~clock ~cwd config ~conversation_mode
-    ~prompt ~on_conversation_ready ~on_stream_event =
+    ~prompt ~on_conversation_ready ~on_stream_event ~on_terminal_received =
   Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
@@ -1125,6 +1126,7 @@ let run_spawned ?home_dir ?before_spawn ?on_spawned ?on_prompt_sent ?on_context_
                   ~conversation_mode
                   ~on_conversation_ready
                   ~on_stream_event
+                  ~on_terminal_received
                   !state
                   event)
             with
@@ -1169,7 +1171,8 @@ let run_spawned ?home_dir ?before_spawn ?on_spawned ?on_prompt_sent ?on_context_
     status, !state, String.trim (Stderr.contents stderr_tail))
 ;;
 
-let run_turn ?(conversation_mode = Start) ?home_dir ?before_spawn ?on_spawned ?on_prompt_sent ?on_context_submission ~mgr ~clock ~cwd
+let run_turn ?(conversation_mode = Start) ?home_dir ?before_spawn ?on_spawned ?on_prompt_sent ?on_context_submission
+    ?(on_terminal_received = fun () -> ()) ~mgr ~clock ~cwd
     ?(on_conversation_ready = fun ~conversation_id:_ -> Ok ()) ?on_stream_event
     config ~prompt =
   let* () =
@@ -1198,7 +1201,7 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?before_spawn ?on_spawned ?o
              ~conversation_mode
              ~prompt
              ~on_conversation_ready
-             ~on_stream_event))
+             ~on_stream_event ~on_terminal_received))
     with
     | Idle_timeout seconds -> Error (Timeout seconds)
     | Runtime_cli_spawn_gate.Slot_timeout { waited_s; limit_s } ->

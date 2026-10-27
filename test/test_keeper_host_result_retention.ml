@@ -14,23 +14,29 @@ let with_workspace f =
   Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree base_path);
   f base_path
 
-let project ?(effect_state = Keeper_tools_agent_core.Terminal_effect_open)
+let project_with_producer ?(result_scope=None) ?(hooks=Agent_core.Hooks.empty)
+    ?(effect_state = Keeper_tools_agent_core.Terminal_effect_open)
     ?(on_result_handoff = fun ~invocation:_ ~content:_ -> ())
     ~base_path ~stop ~terminal_error handler =
   let tool = Agent_core.Tool.create ~name:"CompleteEffect" ~description:"Complete an effect once"
       ~parameters:[{Agent_core.Types.name="input";description="original call data";
         param_type=String;required=false}] handler in
-  match Host.dynamic_tools ~result_scope:None ~base_path ~content_transport:Runtime_official_client_tool.Mcp
+  match Host.dynamic_tools ~result_scope ~base_path ~content_transport:Runtime_official_client_tool.Mcp
     ~accepts_image_input:true ~tool_approval:None ~runtime_label:"host-result-fixture"
     ~keeper_name ~turn_count:7 ~tools:[tool] ~loading_plan:Host.All_on_demand
-    ~hooks:Agent_core.Hooks.empty ~event_bus:None ~context_injector:None
+    ~hooks ~event_bus:None ~context_injector:None
     ~context:(Some (Agent_core.Context.create_sync ()))
     ~terminal_effect_state:(fun () -> effect_state)
     ~terminal_error ~pre_tool_rejects:(ref []) ~on_tool_boundary:(fun () -> Ok stop)
     ~on_result_handoff ~raw_trace_run:None () with
-  | Ok [tool] -> tool
+  | Ok ([tool], producer) -> tool, producer
   | Ok _ -> fail "one original tool required"
   | Error error -> fail (Agent_core.Error.to_string error)
+
+let project ?result_scope ?hooks ?effect_state ?on_result_handoff
+    ~base_path ~stop ~terminal_error handler =
+  fst (project_with_producer ?result_scope ?hooks ?effect_state ?on_result_handoff
+    ~base_path ~stop ~terminal_error handler)
 
 let stop = Host.Terminal_tool_boundary {tool_name="CompleteEffect";outcome=Durable_stimulus_deferred}
 let load base_path = get (Outbox.load ~base_path ~keeper_name)
@@ -67,12 +73,66 @@ let test_stop_retains_before_transport_return () = with_workspace (fun base_path
     (List.length (Outbox.receipt_ids (load base_path)));
   check int "receipt consumption executes no effect again" 1 !effects)
 
-let test_ordinary_tool_does_not_create_a_continuation () = with_workspace (fun base_path ->
-  let terminal_error = ref None in
-  let tool = project ~base_path ~stop:None ~terminal_error (fun _ -> returned ()) in
-  let result = tool.call ~call_id:"ordinary-host-call" (`Assoc []) in
-  check bool "ordinary call stays with its original provider" true (Option.is_none result.abort_turn);
-  check int "ordinary result creates no completion wake" 0
+let test_ordinary_tool_acknowledges_only_frozen_physical_writes () = with_workspace (fun base_path ->
+  Eio.Switch.run (fun result_scope ->
+    let tool, producer = project_with_producer ~result_scope:(Some result_scope)
+      ~base_path ~stop:None ~terminal_error:(ref None) (fun _ -> returned ()) in
+    let producer = match producer with Some producer -> producer | None -> fail "missing actual producer" in
+    let call () = tool.call ~call_id:"reused-ordinary-client-id" (`Assoc []) in
+    let sent = call () in
+    let unsent = call () in
+    check bool "ordinary result stays with its original provider" true (Option.is_none sent.abort_turn);
+    check int "active ordinary results cannot wake a concurrent consumer" 0
+      (List.length (Outbox.receipt_ids (load base_path)));
+    let notify (result : Host.dynamic_tool_result) = match result.on_response_sent with
+      | Some notify -> notify () | None -> fail "unchanged original has no physical-write token" in
+    notify sent; notify sent;
+    let delivered = Outbox.close_delivery_frontier producer in
+    check int "repeated notification marks exactly one physical response" 1
+      (List.length (Outbox.receipt_ids delivered));
+    notify unsent;
+    let late = call () in
+    notify late;
+    check (list string) "terminal frontier excludes late marks and later completed tools"
+      (Outbox.receipt_ids delivered) (Outbox.receipt_ids (Outbox.close_delivery_frontier producer));
+    get (Outbox.settle_after_turn delivered
+      ~stop_reason:(Yielded_to_durable_stimulus {turns_used=1;provider_turn_ordinal=0}));
+    get (Outbox.settle_after_turn delivered ~stop_reason:(Completed {provider_turn_ordinal=1})));
+  let pending = load base_path in
+  check int "normal completion ACKs only the sent original before its terminal" 2
+    (List.length (Outbox.receipt_ids pending));
+  check bool "late originals retain complete returned bytes" true
+    (String_util.contains_substring (String.concat "" (Outbox.developer_context pending)) marker))
+
+let test_disconnect_before_write_retains_ordinary_original () = with_workspace (fun base_path ->
+  Eio.Switch.run (fun result_scope ->
+    let tool, producer = project_with_producer ~result_scope:(Some result_scope)
+      ~base_path ~stop:None ~terminal_error:(ref None) (fun _ -> returned ()) in
+    ignore (tool.call ~call_id:"disconnected-response" (`Assoc []));
+    let producer = match producer with Some producer -> producer | None -> fail "missing actual producer" in
+    let delivered = Outbox.close_delivery_frontier producer in
+    check (list string) "no complete transport write was observed" [] (Outbox.receipt_ids delivered);
+    get (Outbox.settle_after_turn delivered ~stop_reason:(Completed {provider_turn_ordinal=1})));
+  check int "transport loss leaves the original for a later consumer" 1
+    (List.length (Outbox.receipt_ids (load base_path))))
+
+let test_post_hook_failure_preserves_original_before_substitution () = with_workspace (fun base_path ->
+  let effects = ref 0 and terminal_error = ref None in
+  let hooks = {Agent_core.Hooks.empty with post_tool_use=Some (fun _ ->
+    let original = load base_path in
+    check int "the original is durable before the user's post hook runs" 1
+      (List.length (Outbox.receipt_ids original));
+    check bool "the hook sees exact original bytes already saved" true
+      (String_util.contains_substring (String.concat "" (Outbox.developer_context original)) marker);
+    Agent_core.Hooks.HookFailed {stage=Post_tool_use;detail="post-effect observer failed"})} in
+  let tool = project ~hooks ~base_path ~stop:None ~terminal_error
+    (fun _ -> incr effects; returned ()) in
+  let result = tool.call ~call_id:"post-hook-original" (`Assoc []) in
+  check bool "the host recorded its later hook failure" true (Option.is_some !terminal_error);
+  check bool "substituted hook guidance cannot claim original delivery" true
+    (Option.is_none result.on_response_sent);
+  check int "post-hook failure executes the effect only once" 1 !effects;
+  check int "the original survives a later observer failure" 1
     (List.length (Outbox.receipt_ids (load base_path))))
 
 let test_retention_failure_cannot_claim_safe_consumption () = with_workspace (fun base_path ->
@@ -245,7 +305,9 @@ let test_host_invocation_index_validation () =
 let () = run "Original official-client host result retention"
   ["durable host stop",[
     test_case "typed stop retains original before transport continuation" `Quick test_stop_retains_before_transport_return;
-    test_case "ordinary call stays in the current provider turn" `Quick test_ordinary_tool_does_not_create_a_continuation;
+    test_case "ordinary completion ACKs only frozen physical writes" `Quick test_ordinary_tool_acknowledges_only_frozen_physical_writes;
+    test_case "disconnect before write preserves ordinary original" `Quick test_disconnect_before_write_retains_ordinary_original;
+    test_case "original is retained before later post-hook failure" `Quick test_post_hook_failure_preserves_original_before_substitution;
     test_case "retention failure prevents safe consumption claim" `Quick test_retention_failure_cannot_claim_safe_consumption;
     test_case "retention failure keeps the proven committed effect" `Quick test_retention_failure_keeps_proven_effect;
     test_case "retention failure preserves authoritative effect failure" `Quick test_retention_failure_preserves_authoritative_failure;

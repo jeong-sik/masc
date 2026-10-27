@@ -1349,6 +1349,7 @@ let surface_window_height state ~terminal_rows ~count =
 let surface_chrome ~overflow ?(frame = Chrome_screen) ?status ?sidebar (state : state)
     ~terminal_rows ~cols ~surface_key ~title ~hints
     ~(body : budget:int -> chrome_body -> unit) =
+  let setup_started = Masc_tui_frame_timing.start_stage () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let full_cols = cols in
   let sidebar_cols = match sidebar with None -> 0 | Some (width, _) -> width in
@@ -1393,7 +1394,9 @@ let surface_chrome ~overflow ?(frame = Chrome_screen) ?status ?sidebar (state : 
                     sidebar_cols + Masc_tui_ansi.framed_content_column))
     }
   in
+  Masc_tui_frame_timing.finish_stage ~name:"surface.setup" setup_started;
   body ~budget body_pushers;
+  let materialize_started = Masc_tui_frame_timing.start_stage () in
   let held = List.rev !pushed in
   let count = List.length held in
   (* No row is drawn past the budget: one more shoves the bottom rule and the
@@ -1452,6 +1455,7 @@ let surface_chrome ~overflow ?(frame = Chrome_screen) ?status ?sidebar (state : 
         combined
   in
   Buffer.add_string buf (footer_line ?status state ~max_cells:full_cols ~hints);
+  Masc_tui_frame_timing.finish_stage ~name:"surface.materialize" materialize_started;
   finish_surface state ?clamped ~surface_key ~rows:terminal_rows ~cols:full_cols buf
 
 

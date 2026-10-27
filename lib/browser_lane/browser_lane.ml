@@ -649,8 +649,8 @@ type answer =
   | Refused of string
   | Rejected_before_effect of string
 
-(* The server supplies a view of Runtime's immutable configuration snapshot.
-   Read it at admission; do not keep a second configuration cache here. *)
+(* A browser worker's owner says which lanes it serves while it serves them.
+   Read it at admission; do not keep a second copy here. *)
 type activity = Enabled | Disabled | Unobserved
 let activity_observer : (Lane_name.t -> activity) option Atomic.t = Atomic.make None
 let install_activity_observer observer = Atomic.set activity_observer observer
@@ -661,7 +661,7 @@ let activity lane = match Atomic.get activity_observer with
 type activity_rejection = Lane_off of Lane_name.t | Activity_unavailable
 let activity_rejection_message = function
   | Lane_off lane -> "no " ^ Lane_name.to_wire lane ^ " browser runs here; new browser work is refused"
-  | Activity_unavailable -> "Browser activity configuration is unavailable"
+  | Activity_unavailable -> "no browser worker serves this process"
 
 (* The same check against an activity the caller observed, such as the one a
    worker reported in its snapshot. *)

@@ -34,8 +34,8 @@ let builtin_rows = Lane_id.all_of_builtin |> List.map (fun lane ->
     | Lane_id.Exact id -> object_ ["kind",str "exact";"lane_id",str (Standalone_lane.to_id id)],
         object_ ["kind",str "exact";"configuration",configuration]
     | Lane_id.Browser id -> object_ ["kind",str "browser";"lane",str (Browser_lane.Lane_name.to_wire id)],
-        (match id with Browser_lane.Lane_name.Live -> object_ ["kind",str "browser_clients";"activity",str "on";"addon",object_ ["kind",str "observed";"connected_clients",`Int 0]]
-        | Automation | Stagehand -> object_ ["kind",str "browser_executor";"activity",str "on";"addon",object_ ["kind",str "observed";"registered",`Bool true]])
+        (match id with Browser_lane.Lane_name.Live -> object_ ["kind",str "browser_clients";"addon",object_ ["kind",str "observed";"connected_clients",`Int 0]]
+        | Automation | Stagehand -> object_ ["kind",str "browser_executor";"addon",object_ ["kind",str "observed";"registered",`Bool true]])
     | Lane_id.Machine id -> object_ ["kind",str "machine";"machine",str (Machine_lane.to_wire id)],
         object_ ["kind",str "machine";"activity",str "on";"publication",str "stable"] in
   row (Lane_id.to_wire (Lane_id.Builtin lane)) selection state)
@@ -65,8 +65,8 @@ let complete_inventory () =
   (match (find "instance/manual" snapshot).selection with
    | Decode.Manual_instance {instance_id="manual";incarnation="manual-incarnation"} -> ()
    | _ -> Alcotest.fail "manual selection identity lost");
-  Alcotest.(check string) "registration is not session health" "on; executor registered"
-    (Display.row_summary (find "browser/automation" snapshot))
+  Alcotest.(check bool) "registration is read as registration" true
+    ((find "browser/automation" snapshot).state = Decode.Browser_executor (Decode.Browser_observed true))
 
 let builtin_role_is_server_metadata () =
   let original = ok (Decode.decode (snapshot [])) in
@@ -89,45 +89,31 @@ let builtin_role_is_server_metadata () =
       | `Assoc fields -> `Assoc (("ui_category",str "browser") :: ("ui_category",str "analysis") :: fields)
       | value -> value))
 
-let browser_activity_and_backend_are_independent () =
-  let make activity = snapshot [] |> set "rows" (`List (List.map (fun row ->
-    match get "id" row with
-    | `String ("browser/live" | "browser/automation" | "browser/stagehand") ->
-        set "state" (set "activity" (str activity) (get "state" row)) row
-    | _ -> row) builtin_rows)) in
-  let off = ok (Decode.decode (make "off")) in
-  Alcotest.(check string) "off keeps executor observation"
-    "off; executor registered"
-    (Display.row_summary (find "browser/automation" off));
-  Alcotest.(check string) "live off does not imply disconnect"
-    "off; 0 connected clients"
-    (Display.row_summary (find "browser/live" off));
-  let unavailable = ok (Decode.decode (make "unobserved")) in
-  Alcotest.(check string) "unknown activity is not inferred from registration"
-    "activity unavailable; executor registered"
-    (Display.row_summary (find "browser/stagehand" unavailable));
-  rejects "unknown activity is not enabled" (make "enabled");
-  let missing = make "on" |> fun payload -> set "rows" (`List (List.map (fun row ->
-    if get "id" row = str "browser/live" then
-      set "state" (object_ ["kind",str "browser_clients";"addon",object_ ["kind",str "observed";"connected_clients",`Int 0]]) row
-    else row) builtin_rows)) payload in
-  rejects "missing activity is not enabled" missing
+let a_browser_row_carries_no_activity () =
+  let with_live state = snapshot [] |> set "rows" (`List (List.map (fun row ->
+    if get "id" row = str "browser/live" then set "state" state row else row) builtin_rows)) in
+  let addon = object_ ["kind",str "observed";"connected_clients",`Int 0] in
+  Alcotest.(check bool) "a browser row is its Add-on reading" true
+    ((find "browser/live" (ok (Decode.decode (with_live (object_ ["kind",str "browser_clients";"addon",addon]))))).state
+     = Decode.Browser_clients (Decode.Browser_observed 0));
+  rejects "a browser row with an activity"
+    (with_live (object_ ["kind",str "browser_clients";"activity",str "on";"addon",addon]))
 let browser_addon_reading_wire () =
   let with_live addon = snapshot [] |> set "rows" (`List (List.map (fun row ->
     if get "id" row = str "browser/live"
-    then set "state" (object_ ["kind",str "browser_clients";"activity",str "on";"addon",addon]) row
+    then set "state" (object_ ["kind",str "browser_clients";"addon",addon]) row
     else row) builtin_rows)) in
   let read addon = (find "browser/live" (ok (Decode.decode (with_live addon)))).state in
   Alcotest.(check bool) "no browser Add-on decodes as absent" true
-    (read (object_ ["kind",str "absent"]) = Decode.Browser_clients (Decode.Browser_enabled, Decode.Browser_addon_absent));
+    (read (object_ ["kind",str "absent"]) = Decode.Browser_clients (Decode.Browser_addon_absent));
   Alcotest.(check bool) "a switched-off Add-on decodes as off" true
-    (read (object_ ["kind",str "off"]) = Decode.Browser_clients (Decode.Browser_enabled, Decode.Browser_addon_off));
+    (read (object_ ["kind",str "off"]) = Decode.Browser_clients (Decode.Browser_addon_off));
   Alcotest.(check bool) "an Add-on declared on and not running decodes as not running" true
     (read (object_ ["kind",str "not_running"])
-     = Decode.Browser_clients (Decode.Browser_enabled, Decode.Browser_addon_not_running));
+     = Decode.Browser_clients (Decode.Browser_addon_not_running));
   Alcotest.(check bool) "an unreadable Add-on keeps its reason" true
     (read (object_ ["kind",str "unavailable";"detail",str "worker failed"])
-     = Decode.Browser_clients (Decode.Browser_enabled, Decode.Browser_addon_unavailable "worker failed"));
+     = Decode.Browser_clients (Decode.Browser_addon_unavailable "worker failed"));
   rejects "an unknown Add-on reading" (with_live (object_ ["kind",str "maybe"]));
   rejects "an observed reading without its value" (with_live (object_ ["kind",str "observed"]))
 let machine_activity_and_publication_are_independent () =
@@ -166,7 +152,7 @@ let missing_and_duplicate () =
   rejects "missing builtin" (set "rows" (`List (List.tl builtin_rows)) payload)
 let invalid_targets () =
   rejects "mismatched id" (replace_first (set "id" (str "exact/verifier_exact")) (snapshot []));
-  rejects "wrong family state" (replace_first (set "state" (object_ ["kind",str "browser_clients";"activity",str "on";"addon",object_ ["kind",str "observed";"connected_clients",`Int 1]])) (snapshot []));
+  rejects "wrong family state" (replace_first (set "state" (object_ ["kind",str "browser_clients";"addon",object_ ["kind",str "observed";"connected_clients",`Int 1]])) (snapshot []));
   let wrong = set "selection" (object_ ["kind",str "manual_instance";"instance_id",str "manual";"incarnation",str "another-incarnation"]) manual in
   rejects "manual incarnation mismatch" (snapshot [wrong]);
   rejects "manual declaration owner is not invented" (snapshot [set "state" (package_state `Null [instance "manual"]) manual]);
@@ -317,21 +303,16 @@ let standing_reads_what_the_row_says () =
     (package None [ worker ~presence:Decode.Retained Decode.Detaching ]);
   check "a removed declaration with no worker left is not set up" S.Not_set_up (package (Some Decode.Absent) []);
   check "a declaration the server did not read is unknown" S.Unobserved (package (Some Decode.Unobserved) []);
-  check "a browser lane with no browser connected waits" S.Waiting (Decode.Browser_clients (Decode.Browser_enabled, Decode.Browser_observed 0));
-  check "a browser lane with a browser connected is ready" S.Ready (Decode.Browser_clients (Decode.Browser_enabled, Decode.Browser_observed 1));
-  check "a browser lane switched off is off" S.Off (Decode.Browser_executor (Decode.Browser_disabled, Decode.Browser_observed true));
-  check "a browser lane switched off that still has browsers is changing" S.Changing
-    (Decode.Browser_clients (Decode.Browser_disabled, Decode.Browser_observed 2));
+  check "a browser lane with no browser connected waits" S.Waiting (Decode.Browser_clients (Decode.Browser_observed 0));
+  check "a browser lane with a browser connected is ready" S.Ready (Decode.Browser_clients (Decode.Browser_observed 1));
   check "a browser lane with no browser Add-on is not set up" S.Not_set_up
-    (Decode.Browser_clients (Decode.Browser_enabled, Decode.Browser_addon_absent));
+    (Decode.Browser_clients (Decode.Browser_addon_absent));
   check "a browser lane whose Add-on is switched off is off" S.Off
-    (Decode.Browser_clients (Decode.Browser_enabled, Decode.Browser_addon_off));
+    (Decode.Browser_clients (Decode.Browser_addon_off));
   check "a browser lane whose Add-on is declared on and not running waits" S.Waiting
-    (Decode.Browser_executor (Decode.Browser_enabled, Decode.Browser_addon_not_running));
+    (Decode.Browser_executor (Decode.Browser_addon_not_running));
   check "a browser lane whose Add-on cannot be read is failing" S.Failing
-    (Decode.Browser_executor (Decode.Browser_enabled, Decode.Browser_addon_unavailable "cleanup incomplete"));
-  check "a browser lane the server did not read is unknown" S.Unobserved
-    (Decode.Browser_clients (Decode.Browser_unobserved, Decode.Browser_observed 0));
+    (Decode.Browser_executor (Decode.Browser_addon_unavailable "cleanup incomplete"));
   check "an exact lane switched off is off" S.Off
     (Decode.Exact_state (Decode.Disabled { declared_slots = []; declared_cli_slots = [] }));
   check "an exact lane without its registry is unknown" S.Unobserved
@@ -405,7 +386,7 @@ let () = Alcotest.run "TUI Lane inventory" ["wire and display",[
   Alcotest.test_case "machine activity and publication remain independent" `Quick machine_activity_and_publication_are_independent;
   Alcotest.test_case "standing reads what the row says" `Quick standing_reads_what_the_row_says;
   Alcotest.test_case "exact standing reads the run observation" `Quick exact_standing_reads_the_run_observation;
-  Alcotest.test_case "browser activity and registration remain independent" `Quick browser_activity_and_backend_are_independent;
+  Alcotest.test_case "a browser row carries no activity" `Quick a_browser_row_carries_no_activity;
   Alcotest.test_case "browser Add-on reading wire" `Quick browser_addon_reading_wire;
   Alcotest.test_case "exact off retains candidates and finishing work" `Quick disabled_exact_keeps_candidates_and_finishing_work;
   Alcotest.test_case "disabled intent keeps unfinished cleanup visible" `Quick disabled_is_desired_not_cleanup_proof;

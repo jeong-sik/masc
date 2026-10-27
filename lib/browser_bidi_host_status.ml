@@ -6,11 +6,25 @@ type keeper =
   | Not_configured
   | Not_known
 
-let keeper_of_configuration = function
-  | Some { Browser_configuration.live_bidi = Some config; _ } ->
+let keeper ~configuration ~firefox = match configuration, firefox with
+  | None, (Some _ | None) -> Not_known
+  | Some { Browser_configuration.live_bidi = None; _ }, (Some _ | None) -> Not_configured
+  | Some { Browser_configuration.live_bidi = Some config; _ }, Some true ->
       Addon_managed { port = config.port; profile = config.profile }
-  | Some { Browser_configuration.live_bidi = None; _ } -> Not_configured
-  | None -> Not_known
+  | Some { Browser_configuration.live_bidi = Some _; _ }, Some false -> Not_configured
+  | Some { Browser_configuration.live_bidi = Some _; _ }, None -> Not_known
+
+(* Whether an enabled declaration of the workspace runs the Addon-managed
+   Firefox, read as the server reads its Lane directory. *)
+let firefox_declared ~base_path =
+  let resolution = Config_dir_resolver.resolve_for_base_path ~base_path in
+  match resolution.status with
+  | Config_dir_resolver.Invalid_env_status -> None
+  | Ready | Warn | Missing_status ->
+      Lane_addon_config.browser_source_on
+        (Lane_addon_config.load
+           ~directory:(Lane_addon_config.directory ~config_root:resolution.config_root.path))
+        Browser_lane.Backend.Owned_firefox
 
 type observation = { lane : Launcher.t; record : Record.state; keeper : keeper }
 
@@ -19,7 +33,7 @@ type observation = { lane : Launcher.t; record : Record.state; keeper : keeper }
    Add-on last published, which a host that attached since is not in yet. *)
 let observe ~access ~base_path ~configuration =
   let record = Record.observe ~base_path in
-  let keeper = keeper_of_configuration configuration in
+  let keeper = keeper ~configuration ~firefox:(firefox_declared ~base_path) in
   let lane = Launcher.observe ~base_path ~server:Launcher.Not_serving in
   { lane = { lane with server = Launcher.current_server ~access }; record; keeper }
 

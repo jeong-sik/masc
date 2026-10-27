@@ -48,13 +48,13 @@ let absolute ~path entries key =
         | TomlTableArray _) ->
     Error (path ^ "." ^ key ^ " must be a non-empty absolute path")
 
+(* A table that is there names a Firefox to drive, so geckodriver is needed. *)
 let parse_automation ~path entries =
   let* driver = absolute ~path entries "geckodriver" in
   let* binary = absolute ~path entries "binary" in
-  match driver, binary with
-  | None, None -> Ok None
-  | None, Some _ -> Error (path ^ ".geckodriver is required when binary is configured")
-  | Some driver, binary -> Ok (Some { driver; binary })
+  match driver with
+  | Some driver -> Ok (Some { driver; binary })
+  | None -> Error (path ^ ".geckodriver is required when the backend is configured")
 
 let parse_stagehand ~path configured =
   let entries = fields configured in
@@ -137,11 +137,12 @@ let parse toml =
     ~keys:["command"; "space"] (List.assoc_opt "ego" (fields live_table)) in
   let* live_ego = parse_live_ego ~path:live_ego_path live_ego_table in
   let root_automation = List.mem_assoc "geckodriver" root || List.mem_assoc "binary" root in
-  let* automation = match automation_table with
-    | Some _ when root_automation ->
+  let* automation = match automation_table, root_automation with
+    | Some _, true ->
       Error "configure geckodriver/binary in only one place: [browser.automation] or [browser]"
-    | Some entries -> parse_automation ~path:automation_path entries
-    | None -> parse_automation ~path:browser_table root
+    | Some entries, false -> parse_automation ~path:automation_path entries
+    | None, true -> parse_automation ~path:browser_table root
+    | None, false -> Ok None
   in
   let* stagehand = parse_stagehand ~path:stagehand_path stagehand_table in
   Ok { automation; stagehand; live_bidi; live_ego }

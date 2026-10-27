@@ -243,6 +243,9 @@ let test_browser_configuration () =
   let parse text = match Otoml.Parser.from_string_result text with
     | Error detail -> fail detail | Ok toml -> Browser_configuration.parse toml in
   (match parse "" with Ok { Browser_configuration.automation = None; stagehand = None; _ } -> () | _ -> fail "missing browser config");
+  (* A table that is there names a Firefox to drive. *)
+  check bool "an automation table with no driver is refused" true
+    (Result.is_error (parse "[browser.automation]\n"));
   (match parse {|[browser]
 geckodriver = "/test/geckodriver"
 binary = "/test/Zen.app"
@@ -286,6 +289,24 @@ extension = "/test/extension"
    | Ok { Browser_configuration.automation = Some _;
           stagehand = Some { chrome = "/test/chrome"; extension = "/test/extension"; profile = None }; _ } -> ()
    | _ -> fail "both backends can be configured together")
+
+(* A browser worker starts its source from that source's table alone; with no
+   runtime.toml or no table for it, the source does not start. *)
+let test_a_source_starts_from_its_own_table () =
+  let module C = Browser_configuration in
+  let configuration = match Otoml.Parser.from_string_result {|[browser.automation]
+geckodriver = "/test/geckodriver"
+|} with
+    | Error detail -> fail detail
+    | Ok toml -> (match C.parse toml with Ok c -> c | Error detail -> fail detail) in
+  let start configuration backend path read = Result.is_ok
+    (Masc.Lane_addon_runtime.For_testing.browser_source_table configuration ~backend ~path read) in
+  check bool "automation starts from [browser.automation]" true
+    (start (Some configuration) Lane.Backend.Automation C.automation_path (fun c -> c.C.automation));
+  check bool "Stagehand has no table, so it does not start" false
+    (start (Some configuration) Lane.Backend.Stagehand C.stagehand_path (fun c -> c.C.stagehand));
+  check bool "with no runtime.toml nothing starts" false
+    (start None Lane.Backend.Automation C.automation_path (fun c -> c.C.automation))
 
 (* Whether a source runs is its Lane Add-on declaration's to say, so a
    browser table takes no enabled key, and a table of nothing but one is not
@@ -1322,4 +1343,5 @@ let () = run "native Firefox lane" ["behavior", [
   test_case "cookie values never leave the driver module" `Quick test_cookie_values_never_leave_the_driver_module;
   test_case "browser configuration" `Quick test_browser_configuration;
   test_case "a browser table takes no enabled key" `Quick test_a_browser_table_takes_no_enabled_key;
+  test_case "a source starts from its own table" `Quick test_a_source_starts_from_its_own_table;
   test_case "each session lets its profile go once" `Quick test_each_session_lets_its_profile_go_once ]]

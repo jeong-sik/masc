@@ -10,14 +10,22 @@ type keeper =
       { port : int
       ; profile : string
       }
-      (** [runtime.toml] has [\[browser.live.bidi\]] and the live lane is on:
-          the Browser Addon owns its Firefox and BiDi connection. Existing
-          external Firefox processes are not adopted or restarted. *)
-  | Not_configured  (** No [\[browser.live.bidi\]]: the operator starts them. *)
-  | Not_known  (** No configuration was given to read it from. *)
+      (** [runtime.toml] has [\[browser.live.bidi\]] and an enabled
+          declaration runs the [browser-firefox] source: the Browser Addon
+          owns its Firefox and BiDi connection. Existing external Firefox
+          processes are not adopted or restarted. *)
+  | Not_configured
+      (** No [\[browser.live.bidi\]], or no enabled declaration runs the
+          [browser-firefox] source: the operator starts them. *)
+  | Not_known
+      (** No configuration was given to read it from, or the declarations
+          could not all be read. *)
 
-(** [None]: no configuration was loaded or read. Performs no I/O. *)
-val keeper_of_configuration : Browser_configuration.t option -> keeper
+(** [configuration]: [None] when none was loaded or read. [firefox]: whether
+    an enabled declaration runs the [browser-firefox] source, [None] when the
+    declarations could not all be read. Performs no I/O. *)
+val keeper :
+  configuration:Browser_configuration.t option -> firefox:bool option -> keeper
 
 type observation =
   { lane : Browser_lane_launcher.t
@@ -36,7 +44,8 @@ type observation =
     not in it yet. A caller that also reads the worker live, as the
     dashboard's client list does after this observation, can see a client
     this list lacks. [configuration] is the one this process loaded, or the
-    workspace's [runtime.toml] read for it. *)
+    workspace's [runtime.toml] read for it. The workspace's Lane Add-on
+    declarations are read from disk to say whether [browser-firefox] runs. *)
 val observe :
   access:Lane_addon_sources.access -> base_path:string ->
   configuration:Browser_configuration.t option -> observation

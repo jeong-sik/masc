@@ -29059,7 +29059,8 @@ and is loaded on demand through keeper_skill.
                 open_exact_activity state ~mailbox:async_messages lane
             | Some {selection=Machine machine;_} ->
                 open_machine_activity state ~mailbox:async_messages machine
-            | None | Some {selection=(Browser _ | Declaration _ | Manual_instance _);_} -> show_lanes_action_error state "Select an Exact or machine Lane to change activity.")
+            | Some {selection=Browser _;_} -> show_lanes_action_error state Masc_tui_lane_inventory.browser_switch_line
+            | None | Some {selection=(Declaration _ | Manual_instance _);_} -> show_lanes_action_error state "Select an Exact or machine Lane to change activity.")
        | Some "s"
          when state.view = Lanes
               && state.lanes_mode = Lanes_overview

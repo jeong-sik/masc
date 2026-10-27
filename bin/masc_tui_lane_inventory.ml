@@ -79,10 +79,8 @@ let declaration_summary = function
   | Invalid _ -> "declaration invalid"
   | Absent -> "declaration absent"
   | Unobserved -> "declaration not observed"
-let browser_activity_label = function
-  | Browser_enabled -> "on"
-  | Browser_disabled -> "off"
-  | Browser_unobserved -> "activity unavailable"
+let browser_switch_line =
+  "A source is switched on or off from its browser-<source> package row: Enter, then Space, then s."
 let browser_reading_label observed = function
   | Browser_observed value -> observed value
   | Browser_addon_absent -> "no browser Add-on"
@@ -106,10 +104,8 @@ let row_summary (row : row) = match row.state with
       if c.admitted_slots=[] && c.cli_slots=[] then "no admitted slots"
       else if Option.is_some c.admission_error then "admission issue"
       else Printf.sprintf "%d admitted slots" (List.length c.admitted_slots + List.length c.cli_slots)
-  | Browser_clients (activity,reading) -> browser_activity_label activity ^ "; "
-      ^ browser_reading_label (Printf.sprintf "%d connected clients") reading
-  | Browser_executor (activity,reading) -> browser_activity_label activity ^ "; "
-      ^ browser_reading_label (fun registered ->
+  | Browser_clients reading -> browser_reading_label (Printf.sprintf "%d connected clients") reading
+  | Browser_executor reading -> browser_reading_label (fun registered ->
           if registered then "executor registered" else "executor not registered") reading
   | Machine_state (activity,publication) -> machine_activity_label activity ^ "; " ^ machine_publication_label publication
   | Package_state {declaration;instances} ->
@@ -151,28 +147,18 @@ let row_standing (row : row) = match row.state with
       if c.admitted_slots=[] && c.cli_slots=[] then Standing.Failing
       else if Option.is_some c.admission_error then Standing.Failing
       else Standing.Ready
-  | Browser_clients (Browser_disabled, Browser_observed connected) ->
-      if connected > 0 then Standing.Changing else Standing.Off
-  | Browser_clients (Browser_disabled,
-      (Browser_addon_absent | Browser_addon_off | Browser_addon_not_running | Browser_addon_unavailable _))
-  | Browser_executor (Browser_disabled, _) -> Standing.Off
-  | Browser_clients (Browser_unobserved, _) | Browser_executor (Browser_unobserved, _) -> Standing.Unobserved
-  | Browser_clients (Browser_enabled, Browser_observed connected) ->
+  | Browser_clients (Browser_observed connected) ->
       if connected > 0 then Standing.Ready else Standing.Waiting
-  | Browser_executor (Browser_enabled, Browser_observed registered) ->
+  | Browser_executor (Browser_observed registered) ->
       if registered then Standing.Ready else Standing.Waiting
-  (* A lane switched on that has no browser Add-on to serve it needs one set
-     up; one whose Add-on is switched off is off; one whose Add-on is declared
-     on and not running waits for it; one whose Add-on cannot be read is
-     failing. *)
-  | Browser_clients (Browser_enabled, Browser_addon_absent)
-  | Browser_executor (Browser_enabled, Browser_addon_absent) -> Standing.Not_set_up
-  | Browser_clients (Browser_enabled, Browser_addon_off)
-  | Browser_executor (Browser_enabled, Browser_addon_off) -> Standing.Off
-  | Browser_clients (Browser_enabled, Browser_addon_not_running)
-  | Browser_executor (Browser_enabled, Browser_addon_not_running) -> Standing.Waiting
-  | Browser_clients (Browser_enabled, Browser_addon_unavailable _)
-  | Browser_executor (Browser_enabled, Browser_addon_unavailable _) -> Standing.Failing
+  (* With no observation, a lane no browser Add-on serves needs one set up;
+     one whose Add-ons are all switched off is off; one whose Add-on is
+     declared on and not running waits for it; one whose Add-on cannot be
+     read is failing. *)
+  | Browser_clients Browser_addon_absent | Browser_executor Browser_addon_absent -> Standing.Not_set_up
+  | Browser_clients Browser_addon_off | Browser_executor Browser_addon_off -> Standing.Off
+  | Browser_clients Browser_addon_not_running | Browser_executor Browser_addon_not_running -> Standing.Waiting
+  | Browser_clients (Browser_addon_unavailable _) | Browser_executor (Browser_addon_unavailable _) -> Standing.Failing
   | Machine_state (Machine_disabled, Running) -> Standing.Changing
   | Machine_state (Machine_disabled, (No_screen | Stable | Publication_unavailable)) -> Standing.Off
   | Machine_state (Machine_unobserved, _) -> Standing.Unobserved
@@ -274,10 +260,9 @@ let detail_lines (row : row) =
          @ refused_cli_lines
          @ (match c.admission_error with None -> [] | Some detail -> ["Admission: " ^ detail])
      | Exact_state (Unconfigured detail | Registry_unavailable detail) -> [detail]
-     | Browser_clients _ -> ["Off refuses new requests while accepted requests finish."]
-     | Browser_executor _ -> ["Off retains configuration and sessions; status and close remain available.";
-         "Registration does not prove browser process health or an open session.";
-         "Activity follows saved settings; executable and profile paths are installed at server startup."]
+     | Browser_clients _ -> [browser_switch_line]
+     | Browser_executor _ -> ["Registration does not prove browser process health or an open session.";
+         "Executable and profile paths apply at server startup.";browser_switch_line]
      | Machine_state _ -> ["Off refuses new execution and input; existing machine state and checkpoints are retained.";
          "Select this machine in All Lanes and press Space for activity settings."]
      | Package_state {declaration;instances} ->

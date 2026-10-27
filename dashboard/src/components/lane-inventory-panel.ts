@@ -6,8 +6,6 @@ import { executionWorkspaceAuthority, refreshExecution, type ExecutionWorkspaceA
 import { RouteLink } from './common/route-link'
 import { ExactLaneActivityPanel } from './exact-lane-activity-panel'
 import { exactLaneObservationRevision } from '../lib/exact-lane-observation'
-import { BrowserLaneActivityPanel } from './browser-lane-activity-panel'
-import { browserLaneObservationRevision } from '../lib/browser-lane-observation'
 import { MachineLaneActivityPanel } from './machine-lane-activity-panel'
 import { machineLaneObservationRevision } from '../lib/machine-lane-observation'
 import { laneTargetFor, laneTargetParams, sameLaneTarget, type LaneNavigationTarget } from '../lib/lane-navigation'
@@ -15,8 +13,6 @@ import { categoryGroup, categoryLabel, groupAddonCategories, inventoryCategory, 
 import { LaneAddonCategoryFilter } from './lane-addon-category-filter'
 
 const button = 'rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50'
-const browserActivityText = { on: 'New requests enabled', off: 'Off · configuration and sessions retained',
-  unobserved: 'Activity configuration unavailable' }
 const machineActivityText = { on: 'New execution and input enabled', off: 'Off · machine state retained',
   unobserved: 'Activity configuration unavailable' }
 const machinePublicationText = { no_screen: 'No screen observed', stable: 'Stable screen published',
@@ -44,13 +40,13 @@ function stateLines(row: LaneInventoryRow, snapshot: LaneInventory): string[] {
           : `${config.kind}: ${config.detail}`,
       ...(lane ? [`${lane.status} · ${lane.runningCount} running · ${lane.retainedRunCount} retained runs`] : [])]
     }
-    case 'browser_clients': return [browserActivityText[state.activity],
+    case 'browser_clients': return [
       state.addon.kind === 'observed' ? `${state.addon.connected_clients} connected clients` : browserAddonText(state.addon)]
-    case 'browser_executor': return [browserActivityText[state.activity],
+    case 'browser_executor': return [
       state.addon.kind === 'observed'
         ? (state.addon.registered ? 'Executor registered · session activity unverified' : 'Executor not registered')
         : browserAddonText(state.addon),
-      'Status and close remain available while off. Executable and profile paths apply at server startup.']
+      'Executable and profile paths apply at server startup.']
     case 'machine': return [machineActivityText[state.activity],
       machinePublicationText[state.publication]]
     case 'package': {
@@ -111,7 +107,6 @@ function LaneDetails({ row, snapshot, authority }: { row: LaneInventoryRow; snap
     ${row.state.kind === 'package' && row.state.declaration?.kind === 'valid'
       ? html`<${AddonModelRoutes} installation=${row.state.declaration.installation_id} outputs=${row.state.declaration.exact_outputs} />` : null}
     ${exactLane ? html`<${ExactLaneActivityPanel} key=${exactLane.laneId} lane=${exactLane} />` : null}
-    ${selection.kind === 'browser' ? html`<${BrowserLaneActivityPanel} key=${selection.lane} lane=${selection.lane} title=${row.label} />` : null}
     ${selection.kind === 'machine' ? html`<${MachineLaneActivityPanel} key=${selection.machine} lane=${selection.machine} title=${row.label} />` : null}
     ${selection.kind === 'exact' ? html`<div class="flex flex-wrap gap-3">
       <${RouteLink} tab="monitoring" params=${laneTargetParams(target, true)}>Exact runs and diagnostics<//>
@@ -134,7 +129,6 @@ function LaneDetails({ row, snapshot, authority }: { row: LaneInventoryRow; snap
 export function LaneInventoryPanel() {
   const authority = executionWorkspaceAuthority.value
   const observationRevision = exactLaneObservationRevision(authority)
-  const browserRevision = browserLaneObservationRevision(authority)
   const machineRevision = machineLaneObservationRevision(authority)
   const [reading, setReading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -183,7 +177,7 @@ export function LaneInventoryPanel() {
     request.current?.abort()
     if (authority !== null) void refresh()
     return () => request.current?.abort()
-  }, [authority, observationRevision, browserRevision, machineRevision])
+  }, [authority, observationRevision, machineRevision])
   const search = query.trim().toLocaleLowerCase()
   const rows = snapshot?.rows.filter(row => [row.id, row.label, row.purpose].some(value => value.toLocaleLowerCase().includes(search))) ?? []
   const groups = groupAddonCategories(rows, inventoryCategory, category)

@@ -1599,6 +1599,17 @@ let native_package_ready (package : package) =
   | command::_ ->
       if Native_addon_program.command_ready ~package_directory:package.directory command
       then Ok () else Error "native Add-on executable is unavailable"
+(* A browser worker serves its package's one source, given that source's
+   table in the runtime.toml this server loaded and no other. A source whose
+   table is missing does not start. *)
+let browser_source_table configuration ~backend ~path read =
+  let unstarted reason = Error (Printf.sprintf "the %s browser source does not start: %s"
+      (Browser_lane.Backend.to_wire backend) reason) in
+  match configuration with
+  | None -> unstarted "this server has not loaded a runtime.toml"
+  | Some configuration -> (match read configuration with
+      | Some table -> Ok table
+      | None -> unstarted (Printf.sprintf "the runtime.toml this server loaded has no [%s] table" path))
 let backend ~store ~artifact_store () = match !override with
   | Some backend -> backend
   | None ->
@@ -1624,17 +1635,8 @@ let backend ~store ~artifact_store () = match !override with
             let* cleanup_context,live_ego=match package.worker_service with
               | Mcp_tools -> Ok (None,None)
               | Browser_service backend -> offload (fun () ->
-                  (* The worker serves its package's one source, given that
-                     source's table and no other. A source whose table is
-                     missing does not start. *)
-                  let unstarted reason = Error (Printf.sprintf "the %s browser source does not start: %s"
-                      (Browser_lane.Backend.to_wire backend) reason) in
-                  let table ~path read = match Runtime.browser_configuration () with
-                    | None -> unstarted "this server has not loaded a runtime.toml"
-                    | Some configuration -> (match read configuration with
-                        | Some table -> Ok table
-                        | None -> unstarted (Printf.sprintf
-                            "the runtime.toml this server loaded has no [%s] table" path)) in
+                  let table ~path read =
+                    browser_source_table (Runtime.browser_configuration ()) ~backend ~path read in
                   let* source,live_ego=match backend with
                     | Browser_lane.Backend.Automation ->
                       let* {Browser_configuration.driver;binary}=table ~path:Browser_configuration.automation_path
@@ -4791,6 +4793,7 @@ let installation_questions ~config =
         Ok ((declaration_id, rows) :: acc)) ids (Ok [])))
 
 module For_testing = struct
+  let browser_source_table = browser_source_table
   type nonrec visibility = visibility = Shared | Operator_only | Keeper_only of string
   type nonrec 'service document_service = 'service document_service =
     | Document_service of 'service

@@ -105,7 +105,7 @@ let test_off_preselected_stale () = with_lane (fun sw current ->
   ignore (Lane.disconnect_client ~client_id);
   let check = function
     | Ok (Lane.Rejected_before_effect message) -> check string "off is the stale-target remedy"
-        "no live browser runs here; new browser work is refused" message
+        (Lane.activity_rejection_message (Lane.Lane_off Lane.Lane_name.Live)) message
     | _ -> fail "off must precede the stale-client diagnostic" in
   check (Lane.issue_for_actor ~actor:None ~target ~verb:Tabs_list ~timeout_sec:1.);
   check (Lane.issue_document_if_idle ~target ~tab_id:1 ~timeout_sec:1.))

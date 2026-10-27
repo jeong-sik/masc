@@ -1,2 +1,0 @@
-Command: node dashboard/node_modules/typescript/bin/tsc --noEmit -p dashboard/tsconfig.json
-Exit: 0

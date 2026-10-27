@@ -223,16 +223,16 @@ let test_keys_that_are_directly_in_browser_are_edited_there () =
     check (pair string (option string)) "browser kept"
       (fixture.other_driver, Some fixture.browser) (values (configured fixture)))
 
-let test_a_table_with_no_driver_gets_one_in_that_table () =
+(* A table that is there names a Firefox to drive, so one with no driver is a
+   file the server refuses, and setup refuses it untouched. *)
+let test_a_table_with_no_driver_is_refused_untouched () =
   with_fixture (fun fixture ->
     let config = runtime_base ^ "\n[browser.automation]\n" in
     write fixture.runtime config;
-    let plan = plan_ok ~find:(found fixture) (request fixture) in
-    check bool "where it was" true (A.location plan = A.Automation_table);
-    apply_ok plan;
-    let edited = read fixture.runtime in
-    check int "no second header" 1 (count_lines edited "[browser.automation]");
-    check string "the driver is there" fixture.driver (configured fixture).C.driver)
+    (match A.plan ~find_geckodriver:(found fixture) (request fixture) with
+     | Error (A.Configuration_refused _) -> ()
+     | Ok _ | Error _ -> fail "a table with no driver is refused");
+    check string "untouched" config (read fixture.runtime))
 
 let test_other_browser_tables_are_not_touched () =
   with_fixture (fun fixture ->
@@ -610,8 +610,6 @@ let () =
             test_a_named_browser_is_added_to_the_table_that_is_there
         ; test_case "keys directly in [browser] are edited there" `Quick
             test_keys_that_are_directly_in_browser_are_edited_there
-        ; test_case "a table with no driver gets one in it" `Quick
-            test_a_table_with_no_driver_gets_one_in_that_table
         ; test_case "other browser tables are not touched" `Quick
             test_other_browser_tables_are_not_touched
         ] )
@@ -623,6 +621,7 @@ let () =
             test_a_missing_runtime_toml_is_refused_and_not_created
         ; test_case "a file the server would not load" `Quick
             test_a_file_the_server_would_not_load_is_refused_untouched
+        ; test_case "a table with no driver" `Quick test_a_table_with_no_driver_is_refused_untouched
         ; test_case "both spellings in the file" `Quick
             test_both_spellings_in_the_file_are_refused_by_the_loader
         ; test_case "a spelling the line editor cannot reach" `Quick

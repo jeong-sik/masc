@@ -93,7 +93,7 @@ let () =
   Unix.mkdir (Filename.concat base_path "fixture-skills") 0o700;
   let runtime_path=Filename.concat config_root "runtime.toml" in
   write runtime_path (Exact_output_fixture.official_client_runtime_fixture ^ Printf.sprintf
-    "\n[skills]\n[[skills.sources]]\nid=\"probe-local\"\nanchor=\"base-path\"\npath=\"fixture-skills\"\naccess=\"read-only\"\n[browser.live]\nenabled=false\n[browser.stagehand]\nenabled=false\n[browser.automation]\nenabled=true\ngeckodriver=%S\nbinary=%S\n" driver firefox);
+    "\n[skills]\n[[skills.sources]]\nid=\"probe-local\"\nanchor=\"base-path\"\npath=\"fixture-skills\"\naccess=\"read-only\"\n[browser.automation]\ngeckodriver=%S\nbinary=%S\n" driver firefox);
   require (Runtime.init_default ~config_path:runtime_path);
   Mirage_crypto_rng_unix.use_default ();
   Eio_main.run @@ fun env ->

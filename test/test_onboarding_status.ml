@@ -555,13 +555,17 @@ let manual_host_recovery_installs_only_its_launcher () =
     ; Launcher.Undeclared, "the operator first installs the lane again by running " ]
 
 let live_firefox_configuration_is_observed_without_starting_it () =
-  let keeper configuration = Status.keeper_of_configuration configuration in
+  let keeper ?(firefox = Some true) configuration = Status.keeper ~configuration ~firefox in
   let live_bidi : Browser_configuration.live_bidi =
     { firefox = "/Apps/firefox"; port = 9444; profile = "/keeper/profile" } in
   let configured = { Browser_configuration.none with live_bidi = Some live_bidi } in
   check bool "the Addon configuration preserves its selected endpoint and profile" true
     (keeper (Some configured)
      = Status.Addon_managed { port = live_bidi.port; profile = live_bidi.profile });
+  check bool "a browser-firefox switched off leaves the operator to start Firefox" true
+    (keeper ~firefox:(Some false) (Some configured) = Status.Not_configured);
+  check bool "unread declarations do not say who starts Firefox" true
+    (keeper ~firefox:None (Some configured) = Status.Not_known);
   check bool "no table" true (keeper (Some Browser_configuration.none) = Status.Not_configured);
   check bool "nothing loaded" true (keeper None = Status.Not_known);
   let paragraph keeper = Status.message (observation ~keeper Record.Never_started) in
@@ -575,6 +579,28 @@ let doctor_reads_addon_firefox_configuration_from_runtime_toml () =
   let profile = "/keeper/profile" in
   let table = "\n[browser.live.bidi]\nfirefox = \"/Apps/firefox\"\nprofile = \"" ^ profile ^ "\"\n" in
   write runtime (read "../scripts/fixtures/release-evidence/runtime.toml" ^ table);
+  (* The Addon owns the Firefox only while a declaration runs its source. *)
+  let manifest = Filename.concat base "browser-firefox.toml" in
+  write manifest {|id = "browser-firefox"
+revision = "1"
+title = "Browser"
+runtime = "host_process"
+service = "browser"
+browser_backend = "owned_firefox"
+command = ["masc-browser-addon-worker"]
+contributions = ["observe"]
+[resources]
+max_reply_bytes = 4096
+|};
+  let directory = Filename.concat base ".masc/config/lane-addons" in
+  Unix.mkdir directory 0o700;
+  let declaration enabled = Printf.sprintf
+    "id = \"browser-firefox\"\nrun_id = \"world\"\nenabled = %b\nmanifest_path = %S\n[binding]\nsources = []\n"
+    enabled manifest in
+  let declaration_path = Filename.concat directory "browser-firefox.toml" in
+  write declaration_path (declaration false);
+  lacks (bidi_message (inspect ~base_path:(Some base))) [ profile ];
+  write declaration_path (declaration true);
   let observed = inspect ~base_path:(Some base) in
   says observed [ profile ];
   check bool "no manual host record does not make Addon readiness a setup failure" true

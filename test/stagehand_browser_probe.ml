@@ -182,7 +182,7 @@ let () =
       Unix.mkdir path 0o700;Some path in
   Out_channel.with_open_bin runtime_path (fun channel ->
     output_string channel (F.official_client_runtime_fixture ^ Printf.sprintf
-      "\n[skills]\n[[skills.sources]]\nid=\"probe-local\"\nanchor=\"base-path\"\npath=\"fixture-skills\"\naccess=\"read-only\"\n[browser.live]\nenabled=false\n[browser.automation]\nenabled=false\n[browser.stagehand]\nenabled=true\nchrome=%S\nextension=%S\n%s"
+      "\n[skills]\n[[skills.sources]]\nid=\"probe-local\"\nanchor=\"base-path\"\npath=\"fixture-skills\"\naccess=\"read-only\"\n[browser.stagehand]\nchrome=%S\nextension=%S\n%s"
       chrome extension (Option.fold ~none:"" ~some:(Printf.sprintf "profile=%S\n") profile_path)));
   (match Runtime.init_default ~config_path:runtime_path with Ok () -> () | Error detail -> failwith detail);
   Mirage_crypto_rng_unix.use_default ();

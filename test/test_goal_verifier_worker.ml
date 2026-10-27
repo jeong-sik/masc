@@ -445,7 +445,7 @@ let test_subdivided_parent_requires_retained_unknown_child () =
     let original = W.original retained in
     let subject = V.subject original in
     let calls = ref 0 in
-    with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt
+    with_reviewer (fun ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt
         ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
         ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
       incr calls;
@@ -856,7 +856,7 @@ let test_noncanonical_successor_blocks_automatic_retry () =
     let original = W.original retained in
     let subject = V.subject original in
     let calls = ref 0 in
-    with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
+    with_reviewer (fun ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
         ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
         ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
       incr calls;

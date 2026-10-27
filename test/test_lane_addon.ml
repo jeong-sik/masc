@@ -416,6 +416,64 @@ let test_a_document_source_reads_only_a_browser_that_covers_its_output () =
     (choose T.Shared ["first", T.Shared; "second", T.Shared] = T.Several_browser_services);
   check bool "no browser is no browser" true (choose T.Shared [] = T.No_browser_service)
 
+(* RFC browser-backends-end-alone S-L2: a document read goes to the service of
+   its route's source, and a client of a live source two services serve is not
+   read, since a client does not say which of them it came from. *)
+let test_a_document_read_goes_to_the_service_of_its_source () =
+  let module T = Runtime.For_testing in
+  let module B = Browser_lane in
+  let client n = match B.client_id_of_string (Printf.sprintf "0c000000-0000-4000-8000-%012d" n) with
+    | Ok id -> id | Error detail -> fail detail in
+  let ego = client 1 and extension = client 2 in
+  (* A service: its name, the sources it serves and the clients its last
+     observation lists. *)
+  let service name backends listed = name, backends, listed in
+  let read services route = T.document_route_services ~services ~backends:(fun (_, backends, _) -> backends)
+      ~lists:(fun (_, _, listed) client -> List.mem client listed) route
+    |> Result.map (List.map (fun (name, _, _) -> name)) in
+  let one backend = Types.One_backend backend in
+  let automation = service "automation" (one B.Backend.Automation) []
+  and stagehand = service "stagehand" (one B.Backend.Stagehand) []
+  and ego_worker = service "ego" (one B.Backend.Ego) [ego]
+  and native = service "native" (one B.Backend.External_host) [extension] in
+  let all = [automation; stagehand; ego_worker; native] in
+  let is_refused = function Error _ -> true | Ok _ -> false in
+  check bool "automation reads on its own service" true (read all B.Automation_route = Ok ["automation"]);
+  check bool "Stagehand reads on its own service" true (read all B.Stagehand_route = Ok ["stagehand"]);
+  check bool "a live client reads on the service that lists it" true
+    (read all (B.Live_route (Some ego)) = Ok ["ego"]);
+  check bool "and another on its own" true (read all (B.Live_route (Some extension)) = Ok ["native"]);
+  check bool "the one live service there is reads a client its observation does not list yet" true
+    (read [automation; service "ego" (one B.Backend.Ego) []] (B.Live_route (Some ego)) = Ok ["ego"]);
+  let doubled = [ego_worker; service "second ego" (one B.Backend.Ego) []; native] in
+  check bool "a client of a doubled live source is refused" true
+    (is_refused (read doubled (B.Live_route (Some ego))));
+  check bool "a client of another live source still reads" true
+    (read doubled (B.Live_route (Some extension)) = Ok ["native"]);
+  check bool "a client no doubled service lists yet is not sent to the other live service" true
+    (read [service "ego" (one B.Backend.Ego) []; service "second ego" (one B.Backend.Ego) []; native]
+       (B.Live_route (Some ego)) = Ok []);
+  let every = [service "every" Types.Every_backend [ego]; native] in
+  check bool "beside a package of every source, its clients are refused" true
+    (is_refused (read every (B.Live_route (Some ego))));
+  check bool "and so is a read that names no client" true (is_refused (read every (B.Live_route None)));
+  check bool "while automation, which only it serves, reads on it" true (read every B.Automation_route = Ok ["every"])
+
+(* A replaced package's installation detaches while its replacement serves:
+   presence reads the replacement, not both. *)
+let test_a_detaching_browser_group_gives_way_to_its_replacement () =
+  let module T = Runtime.For_testing in
+  let module B = Browser_lane in
+  let ego = Types.One_backend B.Backend.Ego and automation = Types.One_backend B.Backend.Automation in
+  check bool "a detaching package of every source gives way to one of a source it serves" true
+    (T.browser_groups_kept [Types.Every_backend, T.Group_detaching; ego, T.Group_present] = [ego]);
+  check bool "with nothing to give way to it is still read" true
+    (T.browser_groups_kept [Types.Every_backend, T.Group_detaching] = [Types.Every_backend]);
+  check bool "it does not give way to one of another source" true
+    (T.browser_groups_kept [automation, T.Group_detaching; ego, T.Group_present] = [automation; ego]);
+  check bool "two present groups are both read, and presence reports the doubled source" true
+    (T.browser_groups_kept [Types.Every_backend, T.Group_present; ego, T.Group_present] = [Types.Every_backend; ego])
+
 (* A failed DOS installation may still hold the controller in its state, so a
    release is not reported as done, and a shared call names the installation. *)
 let test_a_failed_dos_installation_is_named_and_not_released () = with_fixture (fun env _ config dir _ ->
@@ -2558,6 +2616,10 @@ let () = run "Lane Add-on runtime" ["optional extension", [
   test_case "a failure is explained only to the operator" `Quick test_a_failure_is_explained_only_to_the_operator;
   test_case "a document source reads only a browser that covers its output" `Quick
     test_a_document_source_reads_only_a_browser_that_covers_its_output;
+  test_case "a document read goes to the service of its source" `Quick
+    test_a_document_read_goes_to_the_service_of_its_source;
+  test_case "a detaching browser group gives way to its replacement" `Quick
+    test_a_detaching_browser_group_gives_way_to_its_replacement;
   test_case "a failed DOS installation is named and not released" `Quick
     test_a_failed_dos_installation_is_named_and_not_released;
   test_case "a cleanup that is cut short can run again" `Quick test_a_cleanup_that_is_cut_short_can_run_again;

@@ -2036,6 +2036,20 @@ type browser_observation = {
   backends : Lane_addon_types.browser_backends;
   observation : (export_observation option, export_refusal) result;
 }
+(* Whether a group of browser installations of one set of sources is only
+   detaching. A group only detaching gives way to a group that is not and
+   serves one of its sources; every other group is kept. *)
+type browser_group_presence = Group_present | Group_detaching
+let browser_groups_kept groups =
+  let overlaps a b = List.exists (fun backend ->
+    Lane_addon_types.serves_backend a backend && Lane_addon_types.serves_backend b backend) Browser_lane.Backend.all in
+  List.filter_map (fun (backends, presence) -> match presence with
+    | Group_present -> Some backends
+    | Group_detaching ->
+        if List.exists (fun (other, other_presence) -> match other_presence with
+            | Group_present -> overlaps backends other
+            | Group_detaching -> false) groups
+        then None else Some backends) groups
 (* Browser installations are found by their package's service, not by an
    export name, and read per set of sources they serve: two installations of
    one source are ambiguous for that source only. A released installation is
@@ -2053,14 +2067,12 @@ let browser_observations ~config ~access = Eio_context.run_on_owner_domain (fun 
         | Browser_service _, (Ready _ | Unready _) | Mcp_tools, (Ready _ | Unready _) -> None) in
       let groups = List.sort_uniq compare (List.map fst browsers) |> List.map (fun backends ->
         backends, List.filter_map (fun (served, e) -> if served = backends then Some e else None) browsers) in
-      let detaching_only (_, group) = List.for_all (fun (e : entry) -> match readiness e with
-        | Unready Lane_addon_unready.Detaching -> true
-        | Ready _ | Unready (Lane_addon_unready.Starting | Stopping | Failed _) | Gone -> false) group in
-      let overlaps a b = List.exists (fun backend ->
-        Lane_addon_types.serves_backend a backend && Lane_addon_types.serves_backend b backend) Browser_lane.Backend.all in
-      List.filter (fun ((backends, _) as group) -> not (detaching_only group
-          && List.exists (fun ((other, _) as replacement) ->
-               other <> backends && not (detaching_only replacement) && overlaps backends other) groups)) groups
+      let presence group = if List.for_all (fun (e : entry) -> match readiness e with
+          | Unready Lane_addon_unready.Detaching -> true
+          | Ready _ | Unready (Lane_addon_unready.Starting | Stopping | Failed _) | Gone -> false) group
+        then Group_detaching else Group_present in
+      let kept = browser_groups_kept (List.map (fun (backends, group) -> backends, presence group) groups) in
+      List.filter (fun (backends, _) -> List.mem backends kept) groups
       |> List.map (fun (backends, group) -> {backends; observation=observation_of_entries group}))
 
 let with_tool_call_owner work =
@@ -2236,34 +2248,40 @@ let choose_document_service ~visibility candidates =
   | [service] -> Document_service service
   | _ :: _ :: _ -> Several_browser_services
   | [] -> (match candidates with [] -> No_browser_service | _ :: _ -> Browser_narrower_than_consumer)
-(* The services a document read on [route] may go to. A live client is read
-   on the one usable live service there is, or, among several, on the one
-   whose last observation lists it. A client of a live source two services
-   serve is not read: a client does not say which of them it came from. *)
+(* The services a document read on [route] may go to, among [services] with
+   the sources [backends] says each serves. A live client is read on the
+   usable live service whose last observation lists it ([lists]), or on the
+   one live service there is, whose observation may lag a new client. A
+   client of a live source two services serve is not read: a client does not
+   say which of them it came from. *)
+let document_route_services ~services ~backends ~lists route =
+  let serving backend service = Lane_addon_types.serves_backend (backends service) backend in
+  let among = List.map backends services in
+  let doubled_refusal =
+    "the live source of that browser is served by more than one attached browser Add-on, so the document source does not read it" in
+  match route with
+  | Browser_lane.Automation_route -> Ok (List.filter (serving Browser_lane.Backend.Automation) services)
+  | Stagehand_route -> Ok (List.filter (serving Browser_lane.Backend.Stagehand) services)
+  | Live_route client ->
+      let usable, doubled = List.partition (fun service ->
+        Browser_addon_observation.lists_usable_clients ~among (backends service))
+        (List.filter (fun service -> Browser_addon_observation.serves_live (backends service)) services) in
+      (match client, usable, doubled with
+       | Some client, _, _ when List.exists (fun service -> lists service client) doubled -> Error doubled_refusal
+       | Some _, [_], [] -> Ok usable
+       | Some client, ([] | _ :: _), ([] | _ :: _) -> Ok (List.filter (fun service -> lists service client) usable)
+       | None, [], _ :: _ -> Error doubled_refusal
+       | None, ([] | _ :: _), ([] | _ :: _) -> Ok usable)
 let document_services m (reading : browser_reading) route =
-  let serving backend (service : browser_service) = Lane_addon_types.serves_backend service.backends backend in
-  let live service = List.exists (fun backend -> serving backend service) Browser_lane.Backend.[Owned_firefox; Ego; External_host] in
-  let lists client (service : browser_service) = match Hashtbl.find_opt m.entries service.instance_id with
+  let lists (service : browser_service) client = match Hashtbl.find_opt m.entries service.instance_id with
     | None -> false
     | Some (e : entry) -> (match Browser_addon_observation.read e.output with
         | Ok published -> List.exists (fun (listed : Browser_lane.client_info) ->
             String.equal (Browser_lane.client_id_to_string listed.client_id) (Browser_lane.client_id_to_string client))
             published.clients
         | Error _ -> false) in
-  let doubled_refusal =
-    "the live source of that browser is served by more than one attached browser Add-on, so the document source does not read it" in
-  match route with
-  | Browser_lane.Automation_route -> Ok (List.filter (serving Browser_lane.Backend.Automation) reading.services)
-  | Stagehand_route -> Ok (List.filter (serving Browser_lane.Backend.Stagehand) reading.services)
-  | Live_route client ->
-      let among = List.map (fun (service : browser_service) -> service.backends) reading.services in
-      let usable, doubled = List.partition (fun (service : browser_service) ->
-        Browser_addon_observation.lists_usable_clients ~among service.backends) (List.filter live reading.services) in
-      (match client, usable, doubled with
-       | Some client, _, _ when List.exists (lists client) doubled -> Error doubled_refusal
-       | None, [], _ :: _ -> Error doubled_refusal
-       | (None | Some _), ([] | [_]), _ | None, _ :: _ :: _, _ -> Ok usable
-       | Some client, _ :: _ :: _, _ -> Ok (List.filter (lists client) usable))
+  document_route_services ~services:reading.services ~backends:(fun (service : browser_service) -> service.backends)
+    ~lists route
 let read_browser_document m ~access ~visibility ~route ~tab_id =
   with_tool_call_owner (fun () ->
     let reading=browser_reading (live_reading m access) in
@@ -4793,6 +4811,9 @@ module For_testing = struct
     | Browser_narrower_than_consumer
     | Several_browser_services
   let choose_document_service = choose_document_service
+  let document_route_services = document_route_services
+  type nonrec browser_group_presence = browser_group_presence = Group_present | Group_detaching
+  let browser_groups_kept = browser_groups_kept
   let await_run_stopped ~config ~instance_id =
     Eio_context.run_on_owner_domain (fun () ->
       let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in

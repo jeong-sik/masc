@@ -140,7 +140,7 @@ let wait ~env predicate = let rec loop ()=if predicate () then () else
 (* One scripted worker under [root]/[name], attached with its own package.
    [backend] is the one source its package names, or none for the package
    that serves every source. Answers [stop] once its worker detached. *)
-let start ~sw ~env ~config ~root ~name ~backend ~owned:(automation,stagehand) ~clients ~downloads ~received ~respond =
+let start ~sw ~env ~config ~root ~name ~backend ~exports ~owned:(automation,stagehand) ~clients ~downloads ~received ~respond =
   let root=Filename.concat root name in Unix.mkdir root 0o700;
   let requests=Filename.concat root "requests" and answers=Filename.concat root "answers" in
   Unix.mkdir requests 0o700;Unix.mkdir answers 0o700;
@@ -167,13 +167,10 @@ service = "browser"
 contributions = ["observe"]
 [resources]
 max_reply_bytes = 2097152
-[world.tools]
-export = ["browser_command"]
-invocation = "host_context"
-hooks = ["validate_input", "validate_output"]
-|} name (match backend with
+%s|} name (match backend with
     | None -> ""
-    | Some backend -> Printf.sprintf "browser_backend = %S\n" (B.Backend.to_wire backend)) script root);
+    | Some backend -> Printf.sprintf "browser_backend = %S\n" (B.Backend.to_wire backend)) script root
+    (if exports then "[world.tools]\nexport = [\"browser_command\"]\ninvocation = \"host_context\"\nhooks = [\"validate_input\", \"validate_output\"]\n" else ""));
   let id=dispatch ~config R.Attach ["manifest_path",`String manifest;"run_id",`String ("fixture-" ^ name);
     "binding",`Assoc ["sources",`List []]] |> Yojson.Safe.Util.member "instance_id"
     |> Yojson.Safe.Util.to_string in
@@ -219,13 +216,13 @@ let serving ~config id=List.exists (fun (service:R.browser_service) -> service.i
   (R.browser_services ~config ~access:Lane_addon_sources.Operator_configuration)
 let with_worker ?(clients=[]) ?(downloads=[]) ~env ~config ~respond run =
   with_env ~env ~config (fun ~sw ~root ~settle ->
-    let id,stop=start ~sw ~env ~config ~root ~name:"browser" ~backend:None ~owned:(true,true)
+    let id,stop=start ~sw ~env ~config ~root ~name:"browser" ~backend:None ~exports:true ~owned:(true,true)
       ~clients ~downloads ~received:(fun ~route:_ -> ()) ~respond in
     let stop ()=stop ();settle () in
     Fun.protect ~finally:stop (fun () ->
       wait ~env (fun () -> serving ~config id);
       run {stop}))
-type worker = { serves : Lane_addon_types.browser_backends; clients : B.client_info list }
+type worker = { serves : Lane_addon_types.browser_backends; clients : B.client_info list; exports : bool }
 type attached = { serves : Lane_addon_types.browser_backends; instance_id : string; polled : unit -> string list }
 let with_workers ?(received=fun ~serves:_ ~route:_ -> ()) ~env ~config ~workers ~respond run =
   with_env ~env ~config (fun ~sw ~root ~settle ->
@@ -244,7 +241,7 @@ let with_workers ?(received=fun ~serves:_ ~route:_ -> ()) ~env ~config ~workers 
           | Lane_addon_types.Every_backend -> None
           | One_backend backend -> Some backend in
         let serves backend=Lane_addon_types.serves_backend worker.serves backend in
-        let id,stop=start ~sw ~env ~config ~root ~name ~backend
+        let id,stop=start ~sw ~env ~config ~root ~name ~backend ~exports:worker.exports
           ~owned:(serves B.Backend.Automation,serves B.Backend.Stagehand) ~clients:worker.clients ~downloads:[]
           ~received:(received ~serves:worker.serves) ~respond:(respond ~serves:worker.serves) in
         started:=((worker.serves,id,name),stop) :: !started) workers;

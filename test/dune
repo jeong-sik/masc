@@ -5786,7 +5786,7 @@
 (test
  (name test_lane_addon)
  (modules test_lane_addon)
- (libraries machine_worker_fixture lane_addon_fake_engine mcp_protocol masc.machine_configuration masc_test_deps masc.fusion_core masc.server masc.msx_lane eio eio_main yojson unix))
+ (libraries machine_worker_fixture lane_addon_fake_engine mcp_protocol masc.machine_configuration masc_test_deps masc.fusion_core masc.server masc.msx_lane masc.browser_lane eio eio_main yojson unix))
 
 (test
  (name test_lane_addon_sources)

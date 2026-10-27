@@ -493,6 +493,16 @@ module For_testing : sig
     | Browser_narrower_than_consumer
         (** Every such browser is visible to fewer readers than the consumer's output. *)
     | Several_browser_services
+  val document_route_services :
+    services:'service list -> backends:('service -> Lane_addon_types.browser_backends) ->
+    lists:('service -> Browser_lane.client_id -> bool) -> Browser_lane.route -> ('service list, string) result
+  (** The browser services a [browser_document] read on a route may go to;
+      a client of a live source two services serve is refused. *)
+  type browser_group_presence = Group_present | Group_detaching
+  val browser_groups_kept :
+    (Lane_addon_types.browser_backends * browser_group_presence) list -> Lane_addon_types.browser_backends list
+  (** The groups of browser installations presence reads: a group only
+      detaching gives way to one that is not and serves one of its sources. *)
   val choose_document_service :
     visibility:visibility -> ('service * visibility) list -> 'service document_service
   (** Which browser Add-on a [browser_document] source reads: only one whose

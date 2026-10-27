@@ -22,8 +22,10 @@ val with_worker :
 
 (** One scripted worker of a package that serves [serves], reporting
     [clients] in its snapshot and, as registered, the automation and Stagehand
-    sources it serves. *)
-type worker = { serves : Masc.Lane_addon_types.browser_backends; clients : Browser_lane.client_info list }
+    sources it serves. Its package exports the browser command only when
+    [exports]. *)
+type worker = { serves : Masc.Lane_addon_types.browser_backends; clients : Browser_lane.client_info list;
+                exports : bool }
 
 (** A worker as attached: its instance, and the client ids of the native
     polls it answered. *)

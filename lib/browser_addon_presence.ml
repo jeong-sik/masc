@@ -114,7 +114,9 @@ let lane reading lane =
           let workers = List.map (fun (backends, read) -> backends, match read with
             | Published published -> Some published | Unpublished | Withheld _ -> None) read in
           if List.exists (fun (_, published) -> Option.is_some published) workers
-          then Observed (Browser_addon_observation.merge workers)
+          then Observed (Browser_addon_observation.merge
+                           ~among:(List.map (fun (observed : Lane_addon_runtime.browser_observation) ->
+                             observed.backends) reading.observations) workers)
           else absence ~applications:reading.applications ~lane reading.declarations
 
 let render_unavailable refusal_text = function

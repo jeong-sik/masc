@@ -14,7 +14,7 @@ let ego=client 2 B.Ego_lite B.Ego_task_space
 let extension=client 3 B.Zen B.Web_extension
 (* A client an automation worker reports; it serves no live source. *)
 let stray=client 4 B.Firefox B.Webdriver_bidi
-let one backend clients={F.serves=T.One_backend backend;clients}
+let one backend clients={F.serves=T.One_backend backend;clients;exports=true}
 let tabs=B.Answered (`Assoc ["ok",`Bool true;"data",`Assoc ["tabs",`List []]])
 let run_with workers check_routes =
   let base=Filename.temp_dir "browser-backend-routes-" "" in
@@ -39,10 +39,14 @@ let reaches name ~issue route serves=match issue route with
   | Ok _,[reached] -> check bool name true (reached=(serves,route))
   | Ok _,([]|_::_::_) -> fail (name ^ ": the command must reach exactly one worker")
   | Error result,_ -> fail (name ^ ": " ^ Tool_result.message result)
-let refused name ~issue route=match issue route with
-  | Error result,[] -> check bool name true (Tool_result.is_failed result)
+let refused ?because name ~issue route=match issue route with
+  | Error result,[] -> check bool name true (Tool_result.is_failed result
+      && match because with None -> true | Some reason -> String_util.string_contains_substring ~needle:reason (Tool_result.message result))
   | Ok _,_ -> fail (name ^ ": the command must be refused")
   | Error _,_::_ -> fail (name ^ ": a refused command reached a worker")
+(* The reason a command is refused when a client's live source is doubled;
+   without it the client is refused only as one the choice does not list. *)
+let doubled_live="served by more than one attached browser Add-on"
 let ids clients=List.sort compare (List.map (fun (c:B.client_info) -> B.client_id_to_string c.client_id) clients)
 let snapshot host=match Browser_addon_host.selection_snapshot host with
   | Ok (published,_) -> published
@@ -96,19 +100,33 @@ let a_doubled_source_fails_alone () =
 let a_doubled_live_source_leaves_its_clients_unused () =
   run_with [one Ego [ego];one Ego [];one External_host [extension]]
     (fun ~config:_ ~host ~issue ~attached:_ ->
-      refused "a client of a live source two workers serve is refused" ~issue (live ego);
+      refused "a client of a live source two workers serve is refused for that reason" ~because:doubled_live
+        ~issue (live ego);
       reaches "a client of another live source is served" ~issue (live extension) (T.One_backend External_host);
       check (list string) "the choice lists only the usable clients" (ids [extension]) (ids (snapshot host).clients))
 
 (* The package that serves every source beside one that names a source: the
    named source is doubled, and the sources only the first serves are its. *)
 let a_package_of_every_source_beside_one_of_a_source () =
-  run_with [{F.serves=T.Every_backend;clients=[ego]};one External_host [extension]]
+  run_with [{F.serves=T.Every_backend;clients=[ego];exports=true};one External_host [extension]]
     (fun ~config:_ ~host ~issue ~attached:_ ->
-      refused "a client of the package serving every source is refused" ~issue (live ego);
-      refused "and so is one of the package naming the doubled source" ~issue (live extension);
+      refused "a client of the package serving every source is refused" ~because:doubled_live ~issue (live ego);
+      refused "and so is one of the package naming the doubled source" ~because:doubled_live ~issue (live extension);
       reaches "automation, which only the first serves, reaches it" ~issue B.Automation_route T.Every_backend;
       check (list string) "no live client is usable" [] (ids (snapshot host).clients))
+
+(* A service that advertises no browser command still serves its source:
+   it is counted, so the source is not given to another, and a command to it
+   is refused before any worker. *)
+let a_service_without_its_command_still_counts () =
+  run_with [{F.serves=T.One_backend Automation;clients=[];exports=false};one Automation [];one Stagehand []]
+    (fun ~config:_ ~host:_ ~issue ~attached:_ ->
+      refused "a source one exporting and one silent service serve is doubled" ~issue B.Automation_route;
+      reaches "the other source is served" ~issue B.Stagehand_route (T.One_backend Stagehand));
+  run_with [{F.serves=T.One_backend Automation;clients=[];exports=false};one Stagehand []]
+    (fun ~config:_ ~host:_ ~issue ~attached:_ ->
+      refused "a command to the silent service is refused" ~issue B.Automation_route;
+      reaches "and the other source is served" ~issue B.Stagehand_route (T.One_backend Stagehand))
 
 let a_client_two_workers_list_is_refused () =
   run_with [one Owned_firefox [bidi];one Ego [bidi;ego]]
@@ -142,6 +160,7 @@ let () = run "browser backend routes" ["one worker per source",[
   test_case "a doubled source fails alone" `Slow a_doubled_source_fails_alone;
   test_case "a doubled live source leaves its clients unused" `Slow a_doubled_live_source_leaves_its_clients_unused;
   test_case "a package of every source beside one of a source" `Slow a_package_of_every_source_beside_one_of_a_source;
+  test_case "a service without its command still counts" `Slow a_service_without_its_command_still_counts;
   test_case "a client two workers list is refused" `Slow a_client_two_workers_list_is_refused;
   test_case "a first native poll needs the one external host worker" `Slow
     a_first_poll_needs_the_one_external_host_worker]]

@@ -106,7 +106,7 @@ let gather t ~reach =
   | [],(_,Error failure)::_ -> Error failure
   | [],((_,Ok _)::_|[]) -> Error (Snapshot_unavailable "no browser Add-on answered its snapshot")
   | _::_,_ ->
-    let published=Browser_addon_observation.merge (List.map (fun ((served:served),answer) ->
+    let published=Browser_addon_observation.merge ~among (List.map (fun ((served:served),answer) ->
       served.service.backends,Result.to_option answer) answers) in
     let live=List.filter_map (fun ((served:served),answer) -> match answer with
       | Ok (listed:Browser_addon_observation.published)

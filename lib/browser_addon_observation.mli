@@ -41,4 +41,7 @@ val lists_usable_clients : among:Lane_addon_types.browser_backends list -> Lane_
     exactly one does and it published; otherwise {!unobserved}. A worker that
     published nothing is [None] and still counts as serving its sources. The
     host chooses from this, and the lane rows read it. *)
-val merge : (Lane_addon_types.browser_backends * published option) list -> published
+val merge : among:Lane_addon_types.browser_backends list ->
+  (Lane_addon_types.browser_backends * published option) list -> published
+(** [among] are the sources of every serving worker, which may be more than
+    the workers read here; a live source is doubled when two of them serve it. *)

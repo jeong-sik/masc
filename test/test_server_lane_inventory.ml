@@ -511,7 +511,11 @@ let browser_lanes_read_their_own_sources () =
   check bool "a source no installation serves reads as no Add-on, though another worker reported it" true
     (state workers Browser_lane.Lane_name.Stagehand
      = Inventory.Browser_executor (Browser_lane.Enabled, Inventory.Browser_addon_absent));
-  let doubled = automation :: workers in
+  (* Two installations of one set of sources reach presence as one
+     ambiguous observation; a doubled source comes from two sets that share
+     it, here the package of every source beside the ones of a source. *)
+  let every = {Addon.backends=Lane_addon_types.Every_backend;observation=published []} in
+  let doubled = every :: workers in
   check bool "a source two installations serve leaves its lane unreadable" true
     (match Browser_addon_presence.lane (Browser_addon_presence.of_observations ~declarations
              ~applications:(fun () -> []) doubled) Browser_lane.Lane_name.Automation with
@@ -519,12 +523,14 @@ let browser_lanes_read_their_own_sources () =
      | Browser_addon_presence.(Unavailable (Doubled_sources _ | Refused _ | Observation_unreadable _
                                             | Declarations_incomplete)
                                | Observed _ | Absent | Off | Not_running _) -> false);
-  check bool "the other lanes read as before" true
-    (state doubled Browser_lane.Lane_name.Live = Inventory.Browser_clients (Browser_lane.Enabled, Inventory.Browser_observed 3));
+  check bool "a lane whose source only one installation serves reads as before" true
+    (state doubled Browser_lane.Lane_name.Stagehand
+     = Inventory.Browser_executor (Browser_lane.Enabled, Inventory.Browser_observed true));
   check bool "a doubled live source leaves the live lane unreadable, not undercounted" true
     (match Browser_addon_presence.lane (Browser_addon_presence.of_observations ~declarations
-             ~applications:(fun () -> []) (ego :: workers)) Browser_lane.Lane_name.Live with
-     | Browser_addon_presence.Unavailable (Doubled_sources [Browser_lane.Backend.Ego]) -> true
+             ~applications:(fun () -> []) doubled) Browser_lane.Lane_name.Live with
+     | Browser_addon_presence.Unavailable
+         (Doubled_sources [Browser_lane.Backend.Ego; Browser_lane.Backend.External_host]) -> true
      | Browser_addon_presence.(Unavailable (Doubled_sources _ | Refused _ | Observation_unreadable _
                                             | Declarations_incomplete)
                                | Observed _ | Absent | Off | Not_running _) -> false);

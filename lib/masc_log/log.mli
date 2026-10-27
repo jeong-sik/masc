@@ -184,6 +184,23 @@ module Ring : sig
 
   val cleanup_old_files : ?keep_days:int -> string -> unit
   (** Remove log files older than [keep_days] (default 7). *)
+
+  val file_writer_capacity : int
+  (** Lines the file-sink queue holds before a producer waits for room. *)
+
+  val start_writer : unit -> unit
+  (** Hand file-sink appends to one OS thread (RFC
+      async-log-sink-durable-append-offload). After this, a record is
+      serialized on the producer and queued; the thread writes and flushes
+      queued lines, so a slow write() stops only that thread. A full queue
+      makes the producer wait; no record is dropped. Idempotent. The first
+      call registers {!stop_writer} with [at_exit]. A process that never calls
+      it writes synchronously. *)
+
+  val stop_writer : unit -> unit
+  (** Send producers back to the synchronous path and wait until the thread
+      has written every queued line. A process that ends without [at_exit]
+      (SIGKILL, [Unix._exit], a crash) loses the lines still queued. *)
 end
 
 val client_tool_host_error :

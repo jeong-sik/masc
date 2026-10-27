@@ -761,6 +761,11 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
   let log_dir = Filename.concat masc_dir "logs" in
   Fs_compat.mkdir_p log_dir;
   Log.Ring.init_file_sink log_dir;
+  (* Before any keeper boots, as for the console mirror above: the JSONL
+     append and flush move to one OS thread, so a slow write() no longer
+     stops the producing domain. They were the main thread's largest
+     blocking call after #46467 (#46410). *)
+  Log.Ring.start_writer ();
   Log.Ring.cleanup_old_files log_dir;
   (* The BasePath writer lease is held and no keeper has started, so no
      retention is between writing its file and committing the execution that

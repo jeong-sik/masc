@@ -2,6 +2,10 @@
 
     No function in this module reads raw Host/Forwarded headers. *)
 
+val issuer : Server_request_authority.authority -> string
+(** The authorization server issuer identifier (RFC 8414 section 2). The
+    authorization response carries the same value as [iss] (RFC 9207). *)
+
 val resource : Server_request_authority.authority -> string
 val protected_resource_metadata_url : Server_request_authority.authority -> string
 val challenge_for_authority : Server_request_authority.authority -> string

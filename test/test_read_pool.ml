@@ -6,18 +6,22 @@ open Alcotest
 
 let domain () = (Domain.self () :> int)
 
+(* The domain of a one-domain pool's only worker, learned before it is held. *)
+let worker_domain pool = Domain_pool.submit_cpu pool domain
+
 let with_pools f =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
       let dm = Eio.Stdenv.domain_mgr env in
       let background = Domain_pool.create ~sw ~domain_count:1 dm in
       let read = Domain_pool.create ~sw ~domain_count:1 dm in
+      let read_domain = worker_domain read in
       Domain_pool_ref.set background;
       Domain_pool_ref.set_read read;
       Fun.protect ~finally:Domain_pool_ref.clear_for_tests (fun () ->
         Executor_pool_ref.For_testing.with_pool (Domain_pool.executor_pool background) (fun () ->
           Executor_pool_ref.For_testing.with_read_pool (Domain_pool.executor_pool read) (fun () ->
-            f env sw background)))))
+            f env sw background read_domain)))))
 ;;
 
 (* Hold the background pool's only worker and learn its domain. *)
@@ -49,15 +53,13 @@ let starts_beside_held_background env submit =
 ;;
 
 let test_a_read_starts_while_the_background_pool_is_full () =
-  with_pools (fun env sw background ->
-    let background_domain, release = occupy_background sw background in
+  with_pools (fun env sw background read_domain ->
+    let _background_domain, release = occupy_background sw background in
     Fun.protect ~finally:release (fun () ->
       let check_submit name submit =
         match starts_beside_held_background env submit with
         | None -> fail (name ^ ": the read waited behind the held background worker")
-        | Some where ->
-          check bool (name ^ ": the read ran off the background domain") true
-            (where <> background_domain)
+        | Some where -> check int (name ^ ": the read ran on the read pool") read_domain where
       in
       check_submit "Executor_pool_ref.submit_or_inline" (fun f -> Executor_pool_ref.submit_or_inline f);
       check_submit "Domain_pool_ref.submit_io_or_inline" Domain_pool_ref.submit_io_or_inline;
@@ -71,7 +73,14 @@ let test_a_read_starts_while_the_background_pool_is_full () =
 (* Background work keeps the background pool, and a read's nested submit
    runs inline on the read worker instead of queueing again. *)
 let test_background_work_and_nested_reads_stay_put () =
-  with_pools (fun _env _sw _background ->
+  with_pools (fun _env _sw background read_domain ->
+    let background_domain = worker_domain background in
+    check int "Executor_pool_ref background work runs on the shared pool" background_domain
+      (Executor_pool_ref.submit_or_inline domain);
+    check int "Domain_pool_ref background work runs on the shared pool" background_domain
+      (Domain_pool_ref.submit_cpu_or_inline domain);
+    check int "a read runs on the read pool" read_domain
+      (Pool_lane.with_read (fun () -> Executor_pool_ref.submit_or_inline domain));
     let background_job = Domain_pool_ref.submit_cpu_or_inline domain in
     let read_job, nested =
       Pool_lane.with_read (fun () ->
@@ -95,6 +104,17 @@ let test_without_a_read_pool_reads_use_the_shared_pool () =
         check bool "the read still ran on a pool domain" true (where <> caller))))
 ;;
 
+(* Beside a read pool the shared pool gives up the read pool's domains; with
+   fewer than 4 recommended domains the floors keep both pools at one. *)
+let test_the_two_pools_share_the_recommended_count () =
+  let raw = Domain.recommended_domain_count () in
+  let shared = Domain_pool.shared_domain_count_beside_read () in
+  let read = Domain_pool.read_domain_count () in
+  if raw >= 4
+  then check int "shared + read = recommended" (Domain_pool.recommended_domain_count ()) (shared + read)
+  else check (pair int int) "small host floors" (1, 1) (shared, read)
+;;
+
 let () =
   run "Read pool"
     [ ( "isolation"
@@ -104,6 +124,8 @@ let () =
             test_background_work_and_nested_reads_stay_put
         ; test_case "without a read pool reads use the shared pool" `Quick
             test_without_a_read_pool_reads_use_the_shared_pool
+        ; test_case "the two pools share the recommended count" `Quick
+            test_the_two_pools_share_the_recommended_count
         ] )
     ]
 ;;

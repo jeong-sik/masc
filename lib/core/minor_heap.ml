@@ -15,9 +15,11 @@
    11 ms with fourteen.
 
    Set on the domain rather than at pool creation because
-   [Eio.Executor_pool.create] has no per-domain entry hook. Every pool job
-   enters through [Executor_pool_ref.with_worker_context], so each domain of
-   every pool pays the check once and the resize once. [Gc.get] is a read of
+   [Eio.Executor_pool.create] has no per-domain entry hook. Every job of a
+   masc pool ([Domain_pool], [Executor_pool_ref]) enters through
+   [Executor_pool_ref.with_worker_context], so each of their domains pays the
+   check once and the resize once. Agent Core's codec pool submits raw jobs
+   and is not covered. [Gc.get] is a read of
    the domain's own state, not a barrier. *)
 let tuned_words = 4 * 1024 * 1024
 

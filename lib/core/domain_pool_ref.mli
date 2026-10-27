@@ -23,7 +23,8 @@ val read_domain_count_opt : unit -> int option
 (** Worker-domain count of the read pool, when installed. *)
 
 val submit_io_or_inline : (unit -> 'a) -> 'a
-(** Submit IO-bound work to the shared domain pool. Runs inline when the
+(** Submit IO-bound work to the pool {!set_read} or {!set} selects for the
+    caller's {!Pool_lane}. Runs inline when the
     process has not installed the pool yet, when the caller is already on the
     shared executor worker, or when the caller is not on an Eio fiber (raw
     systhread/Domain). The worker case prevents a one-domain pool from waiting

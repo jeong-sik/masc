@@ -31,9 +31,15 @@ val read_domain_count : unit -> int
 (** Domains of the read pool (RFC-0204 L3): 2 on a host with at least 8
     recommended domains, 1 below that. *)
 
+val shared_domain_count_beside_read : unit -> int
+(** [max 1 (recommended_domain_count () - read_domain_count ())]: the shared
+    pool of a process that also creates a read pool. With 4 or more
+    recommended domains the two pools together use {!recommended_domain_count};
+    below that the floor of 1 keeps both pools and the process gains a
+    domain. *)
+
 val recommended_domain_count : unit -> int
-(** [max 1 (Domain.recommended_domain_count () - 2 - read_domain_count ())]:
-    the shared pool gives up the read pool's domains.
+(** [max 1 (Domain.recommended_domain_count () - 2)].
 
     The [-2] keeps the original main domain outside the executor pool
     and, when available, leaves one additional domain of host scheduling

@@ -433,6 +433,59 @@ let test_linked_frontier_and_staged_run_recovery () =
   exercise false;
   exercise true
 
+let test_subdivided_parent_requires_retained_unknown_child () =
+  with_workspace (fun config store _ ->
+    let authority, retained = prepared config store in
+    let original = W.original retained in
+    let subject = V.subject original in
+    let calls = ref 0 in
+    with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt
+        ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
+        ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
+      incr calls;
+      Alcotest.(check string) "unknown child keeps the original prompt" (V.prompt original) prompt;
+      if !calls = 1 then Error (Agent_core.Error.Api (Agent_core.Error.Retry.RateLimited
+        {retry_after=Some 1.; message="definite temporary refusal"}))
+      else Ok {AR.selected_runtime_id="goal-reviewer";evaluator_execution=None;
+        verdict=Some (AR.Approve "checked original")}) (fun () ->
+      let refusal = checked (run store retained authority) in
+      Alcotest.(check bool) "typed refusal retains retry candidate" true
+        (refusal.result.retryable_runtimes <> []);
+      let child = get (V.successor original) in
+      let fixed_run : W.run_identity = {run_id="fixed-unknown-child/" ^ subject.request_id;
+        started_at=Time_compat.now ()} in
+      let staged_store = Lane_addon_store.create
+        ~root:(Filename.concat (Workspace.masc_dir config) "staged-unknown-child") in
+      ignore (checked (W.retain ~store:staged_store ~installation_id ~package_id ~run:fixed_run child));
+      let load_scope store = get (Lane_addon_tool_request_owner.load_scope ~store
+        ~scope:"goal-proof-reviews" |> Result.map_error Lane_addon_tool_request_owner.error_to_string) in
+      let only = function [record] -> record | _ -> Alcotest.fail "fixture needs one actual owner" in
+      let child_record = only (load_scope staged_store) in
+      let parent_record = only (load_scope store) in
+      let successor = get (Lane_addon_tool_request_owner.prepare_successor ~store
+        ~scope:"goal-proof-reviews" ~request_id:child_record.request_id ~request:child_record.request
+        |> Result.map_error Lane_addon_tool_request_owner.error_to_string) in
+      ignore (get (Lane_addon_tool_request_owner.advance ~store ~expected:parent_record
+        ~event:(P.Successor_intended successor)
+        |> Result.map_error Lane_addon_tool_request_owner.update_error_to_string));
+      let parent_after_intent = only (load_scope store) in
+      ignore (get (Lane_addon_tool_request_owner.advance ~store ~expected:parent_after_intent
+        ~event:(P.Successor_observed successor.request_id)
+        |> Result.map_error Lane_addon_tool_request_owner.update_error_to_string));
+      (match P.phase (W.progress (load store original)) with
+       | P.Subdivided _ -> ()
+       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+       | Finished _ | Conflicted _ | Rejected _ | Subdividing _ ->
+         Alcotest.fail "fixture must retain a Subdivided parent without its child");
+      let allocations = ref 0 in
+      (match W.frontier ~store ~installation_id ~package_id
+        ~goal_id:subject.goal_id ~request_id:subject.request_id
+        ~new_run:(fun () -> incr allocations; fixed_run) with
+       | Error (W.Original_invalid _) -> ()
+       | Error _ | Ok _ -> Alcotest.fail "missing unknown child was recreated from staged input");
+      Alcotest.(check int) "only the original review happened" 1 !calls;
+      Alcotest.(check int) "no new run was allocated for a missing unknown child" 0 !allocations))
+
 let test_actual_goal_commit_reply_loss_and_conflict () =
   let exercise conflict = with_workspace (fun config store _ ->
     let authority, retained = prepared config store in
@@ -704,6 +757,121 @@ let test_actual_pending_goal_survives_foreign_body_corruption () =
       Alcotest.(check bool) "damaged Goal remains pending" true
         (phase config damaged_subject.goal_id = Goal_phase.Verifying);
       Alcotest.(check int) "later wake does not repeat either original effect" 1 !calls))
+
+let retain_unattributable_metadata store =
+  get (Lane_addon_tool_request_owner.retain ~store ~scope:"goal-proof-reviews"
+    ~request_id:"malformed" ~installation_id:W.host_installation_id
+    ~package_id:W.host_package_id ~tool:"goal_proof_review"
+    ~summary:(`Assoc []) ~request:(`Assoc [])
+    |> Result.map_error Lane_addon_tool_request_owner.error_to_string)
+
+let retain_noncanonical_metadata store ~goal_id ~request_id ~attempt =
+  let noncanonical = Yojson.Safe.to_string
+    (`List [`String goal_id; `String request_id; `Int attempt]) ^ " " in
+  get (Lane_addon_tool_request_owner.retain ~store ~scope:"goal-proof-reviews"
+    ~request_id:noncanonical ~installation_id:W.host_installation_id
+    ~package_id:W.host_package_id ~tool:"goal_proof_review"
+    ~summary:(`Assoc []) ~request:(`Assoc [])
+    |> Result.map_error Lane_addon_tool_request_owner.error_to_string)
+
+let test_actual_pending_goal_survives_unattributable_foreign_metadata () =
+  with_workspace (fun config store _ ->
+    let _, healthy = host_prepared config store in
+    let healthy_original = W.original healthy in
+    ignore (retain_unattributable_metadata store);
+    let calls = ref 0 in
+    with_reviewer (actual_approve calls) (fun () ->
+      drain config;
+      assert_host_proof_published config store healthy_original;
+      Alcotest.(check int) "foreign malformed metadata does not block a valid original" 1 !calls))
+
+let test_unattributable_metadata_never_starts_new_review () =
+  with_workspace (fun config store _ ->
+    ignore (retain_unattributable_metadata store);
+    let goal_id = pending config in
+    let calls = ref 0 in
+    with_reviewer (actual_approve calls) (fun () ->
+      (match Agent.process_pending_work config {Agent.goal_id} with
+       | Agent.Deferred (Agent.Proof_lookup_unavailable _) -> ()
+       | Agent.Committed | Agent.Superseded | Agent.Deferred _ ->
+         Alcotest.fail "unattributable metadata authorized a fresh review");
+      Alcotest.(check bool) "unknown original remains pending" true
+        (phase config goal_id = Goal_phase.Verifying);
+      Alcotest.(check int) "unknown original never dispatches a reviewer" 0 !calls))
+
+let expect_noncanonical_neighbor_to_commute config store goal_id =
+  (match Agent.process_pending_work config {Agent.goal_id} with
+   | Agent.Committed -> ()
+   | Agent.Superseded -> Alcotest.fail "foreign noncanonical key superseded the new Goal"
+   | Agent.Deferred deferral -> Alcotest.failf "foreign noncanonical key blocked the new Goal: %s"
+       (Agent.deferral_detail deferral));
+  match checked (W.inventory_for_goal ~store ~installation_id:W.host_installation_id
+    ~package_id:W.host_package_id ~goal_id) with
+  | [retained] -> assert_host_proof_published config store (W.original retained)
+  | [] | _::_ -> Alcotest.fail "new Goal did not retain exactly one actual original"
+
+let test_noncanonical_other_goal_does_not_block_new_review () =
+  with_workspace (fun config store _ ->
+    let goal_id = pending config in
+    ignore (retain_noncanonical_metadata store ~goal_id:"other-goal" ~request_id:"other-request" ~attempt:0);
+    let calls = ref 0 in
+    with_reviewer (actual_approve calls) (fun () ->
+      expect_noncanonical_neighbor_to_commute config store goal_id;
+      Alcotest.(check int) "another Goal's noncanonical key permits one actual review" 1 !calls))
+
+let test_noncanonical_previous_request_does_not_block_new_review () =
+  with_workspace (fun config store _ ->
+    let goal_id = pending config in
+    ignore (retain_noncanonical_metadata store ~goal_id ~request_id:"previous-request" ~attempt:0);
+    let calls = ref 0 in
+    with_reviewer (actual_approve calls) (fun () ->
+      expect_noncanonical_neighbor_to_commute config store goal_id;
+      Alcotest.(check int) "a previous request's noncanonical key permits one actual review" 1 !calls))
+
+let test_noncanonical_same_request_never_starts_new_review () =
+  with_workspace (fun config store _ ->
+    let goal_id = pending config in
+    let authority = get (A.create_goal_review ~config ~goal_id) in
+    let request_id = (A.goal_review_subject authority).request_id in
+    ignore (retain_noncanonical_metadata store ~goal_id ~request_id ~attempt:0);
+    let calls = ref 0 in
+    with_reviewer (actual_approve calls) (fun () ->
+      (match Agent.process_pending_work config {Agent.goal_id} with
+       | Agent.Deferred (Agent.Proof_lookup_unavailable _) -> ()
+       | Agent.Committed | Agent.Superseded | Agent.Deferred _ ->
+         Alcotest.fail "matching noncanonical metadata authorized a fresh review");
+      Alcotest.(check bool) "matching noncanonical original remains pending" true
+        (phase config goal_id = Goal_phase.Verifying);
+      Alcotest.(check int) "matching noncanonical original never dispatches a reviewer" 0 !calls))
+
+let test_noncanonical_successor_blocks_automatic_retry () =
+  with_workspace (fun config store _ ->
+    let authority, retained = prepared config store in
+    let original = W.original retained in
+    let subject = V.subject original in
+    let calls = ref 0 in
+    with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
+        ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
+        ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
+      incr calls;
+      Error (Agent_core.Error.Api (Agent_core.Error.Retry.RateLimited
+        {retry_after=Some 1.; message="definite temporary refusal"}))) (fun () ->
+      let refusal = checked (run store retained authority) in
+      Alcotest.(check bool) "fixture retains a retryable canonical parent" true
+        (refusal.result.retryable_runtimes <> []);
+      ignore (retain_noncanonical_metadata store ~goal_id:subject.goal_id
+        ~request_id:subject.request_id ~attempt:1);
+      let allocations = ref 0 in
+      let outcome = W.frontier ~store ~installation_id ~package_id
+        ~goal_id:subject.goal_id ~request_id:subject.request_id
+        ~new_run:(fun () ->
+          incr allocations;
+          {run_id="noncanonical-successor-must-not-run/" ^ subject.request_id;
+            started_at=Time_compat.now ()}) in
+      Alcotest.(check int) "noncanonical successor cannot allocate a new run" 0 !allocations;
+      match outcome with
+      | Error (W.Original_invalid _) -> ()
+      | Error _ | Ok _ -> Alcotest.fail "noncanonical successor was replaced by a fresh retry"))
 
 let test_actual_boot_publication_survives_foreign_body_corruption () =
   with_workspace (fun config store _ ->
@@ -1150,9 +1318,22 @@ let () = match restart_probe with
   Alcotest.test_case "same-original pre-admission repair" `Quick test_pre_admission_repair_keeps_original;
   Alcotest.test_case "authority destination and strict inventory" `Quick test_destination_authority_and_inventory;
   Alcotest.test_case "linked frontier restores the original staged run" `Quick test_linked_frontier_and_staged_run_recovery;
+  Alcotest.test_case "Subdivided parent requires retained unknown child" `Quick test_subdivided_parent_requires_retained_unknown_child;
   Alcotest.test_case "actual Goal proof commit reply loss and conflict" `Quick test_actual_goal_commit_reply_loss_and_conflict;
   Alcotest.test_case "actual pending Goal survives foreign original body corruption" `Quick
     test_actual_pending_goal_survives_foreign_body_corruption;
+  Alcotest.test_case "actual pending Goal survives unattributable foreign metadata" `Quick
+    test_actual_pending_goal_survives_unattributable_foreign_metadata;
+  Alcotest.test_case "unattributable metadata never starts a new review" `Quick
+    test_unattributable_metadata_never_starts_new_review;
+  Alcotest.test_case "noncanonical other Goal does not block a new review" `Quick
+    test_noncanonical_other_goal_does_not_block_new_review;
+  Alcotest.test_case "noncanonical previous request does not block a new review" `Quick
+    test_noncanonical_previous_request_does_not_block_new_review;
+  Alcotest.test_case "noncanonical matching request never starts a new review" `Quick
+    test_noncanonical_same_request_never_starts_new_review;
+  Alcotest.test_case "noncanonical successor blocks automatic retry" `Quick
+    test_noncanonical_successor_blocks_automatic_retry;
   Alcotest.test_case "actual boot publication survives foreign original body corruption" `Quick
     test_actual_boot_publication_survives_foreign_body_corruption;
   Alcotest.test_case "actual process restart survives foreign original body corruption" `Quick

@@ -102,6 +102,10 @@ let cached_value_of_json ~preparation ~origin json =
         payload_of_json ~origin json) in
       Json_value { json; origin; prepared; identity }
 
+(* The value a compute publishes, before any pool. *)
+let prepared_value ~preparation compute () =
+  cached_value_of_json ~preparation ~origin:Computed (compute ())
+
 let json_of_cached_value = function
   | Prepared payload -> payload.json
   | Json_value value -> value.json
@@ -147,9 +151,51 @@ type entry = {
   stale_until : float;
 }
 
+(* RFC-0204 3.4 L4b. A [Computing] slot with no stale value records who runs
+   its compute. The pool job that starts it first claims it: the owner's job,
+   or a pool job that looked the key up while the owner's job was still
+   queued. Without the claim, that job would hold its worker polling for a
+   compute queued behind it. The claimant settles [outcome] on every exit;
+   the owner reads it when its own job lost the claim. *)
+type claim = {
+  claimed : bool Atomic.t;
+  outcome : (entry, exn * Printexc.raw_backtrace) result Eio.Promise.t;
+  settle : (entry, exn * Printexc.raw_backtrace) result Eio.Promise.u;
+}
+
+let new_claim () =
+  let outcome, settle = Eio.Promise.create () in
+  { claimed = Atomic.make false; outcome; settle }
+
 type slot =
   | Ready of entry
-  | Computing of { token : int; started_at : float; stale : entry option }
+  | Computing of {
+      token : int;
+      started_at : float;
+      stale : entry option;
+      claim : claim option;
+    }
+
+(* The caller's compute window, applied to whoever runs the compute. *)
+type compute_window = { within : 'a. (unit -> 'a) -> 'a }
+
+let unbounded_window = { within = (fun f -> f ()) }
+
+(* The owner's compute ran in its own job, or a waiting pool job ran it and
+   published [entry]. *)
+type owner_result =
+  | Ran of cached_value
+  | Taken of entry
+
+(* The pool job that claimed [key]'s compute was cancelled before it
+   finished. The owner fails like any failed compute. *)
+exception Claimed_compute_cancelled of string
+
+let await_claim ~key claim =
+  match Eio.Promise.await claim.outcome with
+  | Ok entry -> entry
+  | Error (Eio.Cancel.Cancelled _, _) -> raise (Claimed_compute_cancelled key)
+  | Error (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace
 
 let payload_of_entry entry = entry.payload
 
@@ -470,9 +516,61 @@ let inc_cache_miss () =
 
     Waiter budget is reset when the watched [Computing] slot is replaced
     (detected via [cond] physical identity change), preventing cascading
-    eviction of fresh slots. *)
-let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
+    eviction of fresh slots.
+
+    A pool job that would wait on a compute whose owner's job has not started
+    claims that compute and runs its own instead of holding its worker idle;
+    the owner's job then returns without computing (RFC-0204 3.4 L4b). *)
+let get_or_compute_eio ?wait_timeout_sec ?(window = unbounded_window) key ~ttl produce =
   let stale_grace = ttl *. stale_factor in
+  (* A pool job unless the caller is already inside one. *)
+  let compute () =
+    window.within (fun () -> Executor_pool_ref.submit_or_inline produce)
+  in
+  (* The owner's job computes only if it claims first. A job that lost the
+     claim returns at once, and the owner reads the claimant's outcome on its
+     own fiber, outside the pool. *)
+  let compute_claimed claim =
+    window.within (fun () ->
+      match
+        Executor_pool_ref.submit_or_inline (fun () ->
+          if Atomic.compare_and_set claim.claimed false true
+          then Some (produce ())
+          else None)
+      with
+      | Some payload -> Ran payload
+      | None -> Taken (await_claim ~key claim))
+  in
+  (* This pool job found the key computing while the owner's job had not
+     started. It runs its own compute on the worker it already holds,
+     publishes under the owner's token and settles the claim. On failure it
+     clears the slot (a claim exists only without a stale value), so waiters
+     recompute as they do after an owner's failure. *)
+  let compute_as_claimant ~token claim =
+    match compute () with
+    | payload ->
+      let ts = now () in
+      let entry = {
+        payload;
+        expires_at = ts +. jittered_ttl ~key ttl;
+        stale_until = ts +. jittered_ttl ~key ttl +. stale_grace;
+      } in
+      atomic_update table (fun map ->
+        match SMap.find_opt key map with
+        | Some (Computing { token = c; _ }) when c = token ->
+          ((), SMap.add key (Ready entry) map)
+        | Some (Ready _) | None | Some (Computing _) -> ((), map));
+      Eio.Promise.resolve claim.settle (Ok entry);
+      entry
+    | exception exn ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      atomic_update table (fun map ->
+        match SMap.find_opt key map with
+        | Some (Computing { token = c; _ }) when c = token -> ((), SMap.remove key map)
+        | Some (Ready _) | None | Some (Computing _) -> ((), map));
+      Eio.Promise.resolve claim.settle (Error (exn, backtrace));
+      Printexc.raise_with_backtrace exn backtrace
+  in
   let rec try_get ~waited ~watching_token =
     let action = atomic_update table (fun map ->
       let map = maybe_evict ~incoming_key:key map in
@@ -481,10 +579,10 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
         (`Hit entry, map)
       | Some (Ready entry) when entry.stale_until > now () ->
         let token = next_token () in
-        (`Stale (entry, token), SMap.add key (Computing { token; started_at = now (); stale = Some entry }) map)
+        (`Stale (entry, token), SMap.add key (Computing { token; started_at = now (); stale = Some entry; claim = None }) map)
       | Some (Computing { stale = Some stale_value; _ }) ->
         (`Hit stale_value, map)
-      | Some (Computing { token; started_at; stale = None }) ->
+      | Some (Computing { token; started_at; stale = None; claim }) ->
         let waited =
           match watching_token with
           | Some t when t <> token -> 0.0
@@ -503,13 +601,14 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
           Log.Dashboard.warn "cache: evicting stale Computing slot for %s (%.1fs elapsed)" key elapsed;
           (`Retry_stuck (elapsed, watchdog_ceiling), SMap.remove key map)
         end else
-          (`Wait token, map)
+          (`Wait (token, claim), map)
       | Some (Ready entry) ->
         let token = next_token () in
-        (`Compute token, SMap.add key (Computing { token; started_at = now (); stale = Some entry }) map)
+        (`Compute (token, None), SMap.add key (Computing { token; started_at = now (); stale = Some entry; claim = None }) map)
       | None ->
         let token = next_token () in
-        (`Compute token, SMap.add key (Computing { token; started_at = now (); stale = None }) map)
+        let claim = Some (new_claim ()) in
+        (`Compute (token, claim), SMap.add key (Computing { token; started_at = now (); stale = None; claim }) map)
     ) in
     match action with
     | `Hit entry ->
@@ -517,7 +616,12 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
       inc_cache_hit ();
       entry
     | `Timed_out -> raise (Compute_timeout { key; role = Compute_waiter })
-    | `Wait token ->
+    (* The guard claims: only the job whose CAS succeeds computes. *)
+    | `Wait (token, Some claim)
+      when Executor_pool_ref.in_worker_context ()
+           && Atomic.compare_and_set claim.claimed false true ->
+      compute_as_claimant ~token claim
+    | `Wait (token, (Some _ | None)) ->
       (* Per-fiber ±20% jitter on the poll interval. Concurrent waiters
          parked on the same in-flight cache key (e.g. several keepers
          requesting an expensive execution-surface entry at once) would
@@ -651,7 +755,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
          abandon_registration ();
          raise e);
       stale_entry
-    | `Compute token ->
+    | `Compute (token, claim) ->
       (* PR-0.2.A: cache miss observation (this fiber must compute). *)
       inc_cache_miss ();
       let result_ref = ref None in
@@ -683,7 +787,11 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
           | Some (Ready _) | None | Some (Computing _) -> ((), map))
       in
       let run_compute () =
-        try result_ref := Some (Ok (compute ()))
+        try
+          result_ref :=
+            Some (Ok (match claim with
+              | None -> Ran (compute ())
+              | Some claim -> compute_claimed claim))
         with
         | Eio.Cancel.Cancelled _ as e ->
             release_on_cancel ();
@@ -701,7 +809,8 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
       run_compute ();
       let ts = now () in
       (match !result_ref with
-       | Some (Ok payload) ->
+       | Some (Ok (Taken entry)) -> entry
+       | Some (Ok (Ran payload)) ->
            let new_entry = {
              payload;
              expires_at = ts +. jittered_ttl ~key ttl;
@@ -783,7 +892,7 @@ let get_or_compute_simple key ~ttl compute =
     | Some (Ready entry) when entry.stale_until > ts ->
       (`Hit entry, map)
     | Some (Computing _) | None | Some (Ready _) -> let token = next_token () in
-      (`Compute token, SMap.add key (Computing { token; started_at = ts; stale = None }) map)
+      (`Compute token, SMap.add key (Computing { token; started_at = ts; stale = None; claim = None }) map)
   ) with
   | `Hit entry ->
     (* PR-0.2.A: cache hit observation. *)
@@ -815,10 +924,12 @@ let get_or_compute_simple key ~ttl compute =
        );
        raise exn)
 
-let get_or_compute_entry key ~ttl compute =
+let get_or_compute_entry key ~ttl produce =
   let entry =
-    if Eio_guard.is_ready () then get_or_compute_eio key ~ttl compute
-    else get_or_compute_simple key ~ttl compute
+    if Eio_guard.is_ready () then get_or_compute_eio key ~ttl produce
+    else
+      get_or_compute_simple key ~ttl (fun () ->
+        Executor_pool_ref.submit_or_inline produce)
   in
   clear_timeout_circuit key;
   entry
@@ -873,8 +984,7 @@ let peek key =
    submissions to 1.0, which is a different change. Pool size then bounds how
    many computes run at once, so no separate concurrency gate is added. *)
 let offloaded_value ~preparation compute () =
-  Executor_pool_ref.submit_or_inline (fun () ->
-    cached_value_of_json ~preparation ~origin:Computed (compute ()))
+  Executor_pool_ref.submit_or_inline (prepared_value ~preparation compute)
 
 (* One compute under the caller's window. A compute that finished as the
    window closed is the answer: [Eio.Time.with_timeout] kept whichever arm
@@ -901,13 +1011,14 @@ let get_or_compute_value_with_timeout ~preparation
     Prepared (payload_of_json ~origin:Timeout
       (timeout_envelope_json ~kind:Timeout_circuit_open ~key ~timeout_sec))
   else
+    let produce = prepared_value ~preparation compute in
     let compute = offloaded_value ~preparation compute in
     let with_timeout f = compute_under_timeout ~clock ~timeout_sec ~key f in
     try
       let entry =
         if Eio_guard.is_ready () then
-          get_or_compute_eio ~wait_timeout_sec:timeout_sec key ~ttl
-            (fun () -> with_timeout compute)
+          get_or_compute_eio ~wait_timeout_sec:timeout_sec
+            ~window:{ within = with_timeout } key ~ttl produce
         else
           get_or_compute_simple key ~ttl (fun () -> with_timeout compute)
       in
@@ -975,7 +1086,7 @@ let set_default_clock clock =
 let default_compute_timeout_sec = 30.0
 
 let get_or_compute_unbounded_value ~preparation key ~ttl compute =
-  let entry = get_or_compute_entry key ~ttl (offloaded_value ~preparation compute) in
+  let entry = get_or_compute_entry key ~ttl (prepared_value ~preparation compute) in
   payload_of_entry entry
 
 

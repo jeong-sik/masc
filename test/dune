@@ -1670,6 +1670,20 @@
  (libraries alcotest masc.dashboard masc.masc_core eio eio_main yojson))
 
 (test
+ (name test_dashboard_cache_claim)
+ (modules test_dashboard_cache_claim)
+ (libraries
+  alcotest
+  masc.dashboard
+  masc.masc_core
+  masc.masc_eio_context
+  masc.time_compat
+  eio
+  eio_main
+  fmt
+  yojson))
+
+(test
  (name test_dashboard_cache_lane)
  (modules test_dashboard_cache_lane)
  (libraries

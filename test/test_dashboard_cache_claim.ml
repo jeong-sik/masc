@@ -48,8 +48,27 @@ let start_job ?(queued = false) ~sw ~go body =
   result
 ;;
 
-let start_waiter ?queued ~sw ~clock ~go key compute =
-  start_job ?queued ~sw ~go (fun () -> lookup ~clock key compute)
+let start_waiter ?queued ?timeout_sec ~sw ~clock ~go key compute =
+  start_job ?queued ~sw ~go (fun () -> lookup ?timeout_sec ~clock key compute)
+;;
+
+(* A compute that says when it starts running, so a test knows its claim is
+   taken, and then holds until finished. *)
+let held_compute value =
+  let running, started = Eio.Promise.create () in
+  let finish, finished = Eio.Promise.create () in
+  let compute () =
+    Eio.Promise.resolve started ();
+    Eio.Promise.await finish;
+    value
+  in
+  compute, running, fun () -> Eio.Promise.resolve finished ()
+;;
+
+(* A compute that never returns. *)
+let stuck () =
+  let never, _ = Eio.Promise.create () in
+  Eio.Promise.await never
 ;;
 
 (* A job that holds a worker until released. *)
@@ -130,20 +149,16 @@ let test_an_owner_job_that_lost_the_claim_does_not_compute () =
     let key = "claim-owner-job-lost" in
     let owner_runs = Atomic.make 0 in
     let go, start = Eio.Promise.create () in
-    let finish, finished = Eio.Promise.create () in
-    let claimant =
-      start_waiter ~sw ~clock ~go key (fun () ->
-        Eio.Promise.await finish;
-        `String "claimant")
-    in
+    let compute, running, finish = held_compute (`String "claimant") in
+    let claimant = start_waiter ~sw ~clock ~go key compute in
     let release_second_worker = hold_worker ~sw () in
     let owner = start_owner ~sw ~clock key (counted owner_runs (`String "owner")) in
     Eio.Promise.resolve start ();
-    Eio.Time.sleep clock 0.1;
+    Eio.Promise.await running;
     (* The owner's job takes the second worker while the claim is held. *)
     release_second_worker ();
     Eio.Time.sleep clock 0.1;
-    Eio.Promise.resolve finished ();
+    finish ();
     let claimed, owned =
       within ~clock "the claim did not settle" (fun () ->
         Eio.Promise.await_exn claimant, Eio.Promise.await_exn owner)
@@ -186,18 +201,18 @@ let test_a_cancelled_claim_makes_the_owner_compute () =
     let owner_runs = Atomic.make 0 in
     let go, start = Eio.Promise.create () in
     let give_up, gave_up = Eio.Promise.create () in
-    let never, _ = Eio.Promise.create () in
+    let compute, running, _finish = held_compute (`String "never") in
     let claimant =
       start_job ~sw ~go (fun () ->
         Eio.Fiber.first
-          (fun () -> lookup ~clock key (fun () -> Eio.Promise.await never))
+          (fun () -> lookup ~clock key compute)
           (fun () ->
             Eio.Promise.await give_up;
             `String "gave up"))
     in
     let owner = start_owner ~sw ~clock key (counted owner_runs (`String "owner")) in
     Eio.Promise.resolve start ();
-    Eio.Time.sleep clock 0.1;
+    Eio.Promise.await running;
     Eio.Promise.resolve gave_up ();
     let given_up, owned =
       within ~clock "the owner waited after the claimant gave up" (fun () ->
@@ -214,24 +229,76 @@ let test_an_owner_that_gives_up_leaves_the_claim_to_its_claimant () =
   with_pool ~domain_count:1 (fun ~sw ~clock ->
     let key = "claim-owner-timeout" in
     let go, start = Eio.Promise.create () in
-    let finish, finished = Eio.Promise.create () in
-    let claimant =
-      start_waiter ~sw ~clock ~go key (fun () ->
-        Eio.Promise.await finish;
-        `String "claimant")
-    in
-    let owner = start_owner ~timeout_sec:0.3 ~sw ~clock key (fun () -> `String "owner") in
+    let compute, running, finish = held_compute (`String "claimant") in
+    let claimant = start_waiter ~sw ~clock ~go key compute in
+    let owner = start_owner ~timeout_sec:1.0 ~sw ~clock key (fun () -> `String "owner") in
     Eio.Promise.resolve start ();
+    Eio.Promise.await running;
     let owned =
       within ~clock "the owner's window did not close" (fun () -> Eio.Promise.await_exn owner)
     in
     check bool "the owner got a timeout" true (Dashboard_cache.is_timeout_envelope owned);
-    Eio.Promise.resolve finished ();
+    finish ();
     let claimed =
       within ~clock "the claimant did not finish" (fun () -> Eio.Promise.await_exn claimant)
     in
     check json "the claimant got its value" (`String "claimant") claimed;
     check json "the claimant's value is cached" (`String "claimant") (cached ~clock key))
+;;
+
+(* The owner's window closes before anyone claimed its compute. It abandons
+   the compute and frees the key, so the next lookup computes at once. *)
+let test_an_owner_that_gives_up_first_frees_the_key () =
+  with_pool ~domain_count:1 (fun ~sw ~clock ->
+    let key = "claim-abandoned" in
+    let release = hold_worker ~sw () in
+    let owner = start_owner ~timeout_sec:0.3 ~sw ~clock key (fun () -> `String "owner") in
+    let owned =
+      within ~clock "the owner's window did not close" (fun () -> Eio.Promise.await_exn owner)
+    in
+    check bool "the owner got a timeout" true (Dashboard_cache.is_timeout_envelope owned);
+    release ();
+    let next =
+      within ~clock "the abandoned key was still computing" (fun () ->
+        lookup ~clock key (fun () -> `String "next"))
+    in
+    check json "the next lookup computes" (`String "next") next)
+;;
+
+(* The claimant's own window closes mid-compute. The owner does not take that
+   as a failure: it computes the key itself. *)
+let test_a_claim_whose_window_closes_makes_the_owner_compute () =
+  with_pool ~domain_count:1 (fun ~sw ~clock ->
+    let key = "claim-window" in
+    let owner_runs = Atomic.make 0 in
+    let go, start = Eio.Promise.create () in
+    let claimant = start_waiter ~timeout_sec:0.3 ~sw ~clock ~go key stuck in
+    let owner = start_owner ~sw ~clock key (counted owner_runs (`String "owner")) in
+    Eio.Promise.resolve start ();
+    let claimed, owned =
+      within ~clock "the owner waited after the claimant's window closed" (fun () ->
+        Eio.Promise.await_exn claimant, Eio.Promise.await owner)
+    in
+    check bool "the claimant's window closed" true (Dashboard_cache.is_timeout_envelope claimed);
+    check bool "the owner computed the key" true (owned = Ok (`String "owner"));
+    check int "the owner's compute ran once" 1 (Atomic.get owner_runs))
+;;
+
+(* A retry after a released claim stays inside the owner's window: the owner
+   times out when its own window closes, not a full window after the retry. *)
+let test_a_retry_keeps_the_owners_window () =
+  with_pool ~domain_count:1 (fun ~sw ~clock ->
+    let key = "claim-retry-window" in
+    let go, start = Eio.Promise.create () in
+    let claimant = start_waiter ~timeout_sec:0.4 ~sw ~clock ~go key stuck in
+    let started_at = Eio.Time.now clock in
+    let owner = start_owner ~timeout_sec:1.0 ~sw ~clock key stuck in
+    Eio.Promise.resolve start ();
+    let owned = within ~clock "the owner never timed out" (fun () -> Eio.Promise.await_exn owner) in
+    let elapsed = Eio.Time.now clock -. started_at in
+    ignore (Eio.Promise.await claimant);
+    check bool "the owner timed out" true (Dashboard_cache.is_timeout_envelope owned);
+    check bool (Printf.sprintf "within its own window (%.2fs)" elapsed) true (elapsed < 1.3))
 ;;
 
 (* A claimant publishes only into the epoch it claimed. The key was
@@ -240,18 +307,14 @@ let test_a_claimant_does_not_publish_into_a_newer_epoch () =
   with_pool ~domain_count:1 (fun ~sw ~clock ->
     let key = "claim-epoch" in
     let go, start = Eio.Promise.create () in
-    let finish, finished = Eio.Promise.create () in
-    let claimant =
-      start_waiter ~sw ~clock ~go key (fun () ->
-        Eio.Promise.await finish;
-        `String "old epoch")
-    in
+    let compute, running, finish = held_compute (`String "old epoch") in
+    let claimant = start_waiter ~sw ~clock ~go key compute in
     let first_owner = start_owner ~sw ~clock key (fun () -> `String "first owner") in
     Eio.Promise.resolve start ();
-    Eio.Time.sleep clock 0.1;
+    Eio.Promise.await running;
     Dashboard_cache.invalidate_all ();
     let second_owner = start_owner ~sw ~clock key (fun () -> `String "new epoch") in
-    Eio.Promise.resolve finished ();
+    finish ();
     let _ =
       within ~clock "the old epoch did not finish" (fun () ->
         Eio.Promise.await_exn claimant, Eio.Promise.await_exn first_owner)
@@ -332,6 +395,12 @@ let () =
             test_a_cancelled_claim_makes_the_owner_compute
         ; test_case "an owner that gives up leaves the claim to its claimant" `Quick
             test_an_owner_that_gives_up_leaves_the_claim_to_its_claimant
+        ; test_case "an owner that gives up first frees the key" `Quick
+            test_an_owner_that_gives_up_first_frees_the_key
+        ; test_case "a claim whose window closes makes the owner compute" `Quick
+            test_a_claim_whose_window_closes_makes_the_owner_compute
+        ; test_case "a retry keeps the owner's window" `Quick
+            test_a_retry_keeps_the_owners_window
         ; test_case "a claimant does not publish into a newer epoch" `Quick
             test_a_claimant_does_not_publish_into_a_newer_epoch
         ; test_case "a fiber outside the pool does not claim" `Quick

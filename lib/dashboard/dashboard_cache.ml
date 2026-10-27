@@ -521,6 +521,14 @@ let inc_cache_miss () =
     the owner's job then returns without computing (RFC-0204 3.4 L4b). *)
 let get_or_compute_eio ?wait_timeout_sec ?(window = unbounded_window) key ~ttl produce =
   let stale_grace = ttl *. stale_factor in
+  let started = now () in
+  (* A runner that was cancelled or whose window closed gave up on the
+     compute; the compute itself did not fail. *)
+  let rec gave_up = function
+    | Eio.Cancel.Cancelled _ | Compute_timeout _ -> true
+    | Eio.Exn.Multiple exns -> List.exists (fun (exn, _) -> gave_up exn) exns
+    | _ -> false
+  in
   (* A pool job unless the caller is already inside one. *)
   let compute () =
     window.within (fun () -> Executor_pool_ref.submit_or_inline produce)
@@ -554,9 +562,7 @@ let get_or_compute_eio ?wait_timeout_sec ?(window = unbounded_window) key ~ttl p
       let backtrace = Printexc.get_raw_backtrace () in
       clear_claimed ~token;
       Eio.Promise.resolve claim.settle
-        (match exn with
-         | Eio.Cancel.Cancelled _ | Compute_timeout _ -> Released
-         | _ -> Failed (exn, backtrace));
+        (if gave_up exn then Released else Failed (exn, backtrace));
       Printexc.raise_with_backtrace exn backtrace
   in
   (* The owner of a claimable slot. Its job runs the compute only if it claims
@@ -592,8 +598,15 @@ let get_or_compute_eio ?wait_timeout_sec ?(window = unbounded_window) key ~ttl p
          whoever runs it, which publishes or clears; the owner's own job is
          cancelled with the owner and clears as it exits. *)
       let backtrace = Printexc.get_raw_backtrace () in
-      if Atomic.compare_and_set claim.holder Unclaimed Abandoned then clear_claimed ~token;
-      Printexc.raise_with_backtrace exn backtrace
+      (match exn, Eio.Promise.peek claim.outcome with
+       | Compute_timeout _, Some (Published entry) ->
+         (* The window closed in the round the claim was published: the
+            value is ready, so it is the answer, not a timeout. *)
+         `Entry entry
+       | _, (None | Some (Published _ | Failed _ | Released)) ->
+         if Atomic.compare_and_set claim.holder Unclaimed Abandoned then
+           clear_claimed ~token;
+         Printexc.raise_with_backtrace exn backtrace)
   in
   let rec try_get ~waited ~watching_token =
     let action = atomic_update table (fun map ->
@@ -648,6 +661,7 @@ let get_or_compute_eio ?wait_timeout_sec ?(window = unbounded_window) key ~ttl p
     | `Wait (token, Some claim)
       when Executor_pool_ref.in_worker_context ()
            && Atomic.compare_and_set claim.holder Unclaimed Waiting_job ->
+      inc_cache_miss ();
       run_claimed ~token claim compute
     | `Wait (token, (Some _ | None)) ->
       (* Per-fiber ±20% jitter on the poll interval. Concurrent waiters
@@ -788,7 +802,9 @@ let get_or_compute_eio ?wait_timeout_sec ?(window = unbounded_window) key ~ttl p
       inc_cache_miss ();
       (match own_claimed ~token claim with
        | `Entry entry -> entry
-       | `Retry -> try_get ~waited:0.0 ~watching_token:None)
+       | `Retry ->
+         (* The window is the caller's; the wait budget keeps counting too. *)
+         try_get ~waited:(now () -. started) ~watching_token:None)
     | `Compute (token, None) ->
       (* PR-0.2.A: cache miss observation (this fiber must compute). *)
       inc_cache_miss ();
@@ -1043,11 +1059,18 @@ let get_or_compute_value_with_timeout ~preparation
     let produce = prepared_value ~preparation compute in
     let compute = offloaded_value ~preparation compute in
     let with_timeout f = compute_under_timeout ~clock ~timeout_sec ~key f in
+    (* One window for every attempt of this lookup: a retry after a released
+       claim (RFC-0204 3.4 L4b) gets what is left of it, not a fresh one. *)
+    let deadline = Eio.Time.now clock +. timeout_sec in
+    let within f =
+      compute_under_timeout ~clock ~key
+        ~timeout_sec:(Float.max 0. (deadline -. Eio.Time.now clock)) f
+    in
     try
       let entry =
         if Eio_guard.is_ready () then
           get_or_compute_eio ~wait_timeout_sec:timeout_sec
-            ~window:{ within = with_timeout } key ~ttl produce
+            ~window:{ within } key ~ttl produce
         else
           get_or_compute_simple key ~ttl (fun () -> with_timeout compute)
       in

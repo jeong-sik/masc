@@ -202,14 +202,16 @@ POST·PUT·DELETE 와 `/mcp` 도구 호출은 `Background` 그대로다. 무거�
 - owner 는 자기 job 을 넣고, 그 job 과 결과 promise 를 함께 기다린다. job 은 시작할 때 claim 을 잡아야 계산하고, 못 잡으면 바로 끝나 worker 를 내놓는다. 결과가 먼저 정해지면 owner 는 바로 돌아오고, 아직 줄에 있던 job 은 시작 전에 취소된다.
 - 풀 job 안의 조회가 `Wait` 를 만나고 claim 이 비어 있으면(owner 계산이 아직 줄에 있으면) 잡고, 자기 compute 를 이미 쥔 worker 에서 돌린다. 자리를 더 쓰지 않는다. 기다리던 job 들은 칸이 비면 지금처럼 직접 계산한다.
 - claim 이 잡혀 있으면(계산이 도는 중이면) 지금처럼 기다린다. worker 를 쉬게 쥐는 시간은 그 계산 시간을 넘지 않는다. 요청 fiber 의 기다림은 worker 를 쓰지 않으므로 그대로 둔다.
-- owner 가 받는 것: `Failed` 면 그 실패를 그대로 받는다. `Released` 면 실패하지 않고 키를 다시 조회한다. 다른 요청이 취소된 것 때문에 owner 가 실패하지 않게 하려는 것이다.
+- owner 가 받는 것: `Failed` 면 그 실패를 그대로 받는다. `Released` 면 실패하지 않고 키를 다시 조회한다. 다른 요청이 취소된 것 때문에 owner 가 실패하지 않게 하려는 것이다. 다시 조회해도 owner 의 window 는 새로 열리지 않는다. 한 조회의 window 는 처음 정한 마감 시각 하나이고, 다시 하는 시도는 남은 시간만 쓴다. 기다림 예산도 처음부터 센다.
+- owner 의 window 가 닫히는 순간 결과가 `Published` 로 정해져 있으면, timeout 대신 그 값을 돌려준다. 두 일이 같은 scheduler 차례에 일어나면 Eio 는 이긴 쪽 값을 버리고 취소로 끝낸다.
+- 맡는 job 은 무게 1.0 job 만이 아니다. IO 무게(0.05) job 안의 조회도 맡을 수 있고, 그러면 CPU 계산이 0.05 자리에서 돈다. owner 가 IO job 안에서 바로 계산하던 지금과 같은 성질이다.
 - owner 가 먼저 포기하면(취소, window 닫힘) 아무도 맡지 않은 계산은 `Abandoned` 로 막고 칸을 지운다. 그 뒤에는 누구도 이 claim 을 잡지 못한다. 이미 맡은 계산은 맡은 쪽에 남긴다. 맡은 쪽이 끝나면 칸에 쓰므로, 다음 조회가 같은 키를 다시 계산하지 않는다. owner job 이 맡았다면 그 job 은 owner 와 함께 취소되고, 나가면서 칸을 지운다.
 - 같은 키 계산은 한 epoch 에 한 번만 돈다. claim 은 한 번만 잡힌다.
 - 맡기는 키 사이에 새 기다림을 만들지 않는다. 맡은 쪽은 그 키의 owner 가 돌렸을 계산을 돌리므로, 그 안에서 기다리는 키도 owner 가 기다렸을 키와 같다. 그래서 서로 기다리다 멈추지 않는 조건은 지금과 같다: 캐시 키의 의존이 고리가 없어야 한다. 조사한 중첩은 한 방향이다. 질의 키 → 화면 키(briefing·mission·mission_briefing·workspace·execution) → projection(snapshot·digest) → operator snapshot → Keeper 마다의 키. 맨 아래 키의 계산은 다른 캐시를 조회하지 않는다. 계산이 자기 키를 다시 조회하면 지금처럼 timeout 까지 멈춘다.
 - Eio 밖(systhread 등)에서 만든 칸에는 claim 을 두지 않는다. 그 owner 는 promise 를 기다릴 수 없다.
 - `Operator_control_snapshot_cache` 도 job 안에서 기다리지만 owner 가 계산을 풀에 넘기지 않고 자기 fiber 에서 바로 한다. 기다리는 job 은 도는 계산을 기다리므로 꼬이지 않는다. L4b 범위 밖이다.
 
-검증: `specs/bug-models/DashboardCacheClaim.tla`. clean 모델(worker 1·2개)은 `NoInversion`, `AtMostOneRunner`, `ClaimHasRunner`, `ClaimantKeepsSlot` 와 liveness 둘(맡은 계산은 결국 Ok·Failed·Released 가 된다 `ClaimSettles`, 기다리는 owner 는 결국 돌아온다 `OwnerReturns`)을 지킨다. 버그 모델 넷은 각각 깬다: 기다리기만 함(L4b 전 코드) → `NoInversion`(그리고 `OwnerReturns`), owner job 이 claim 을 무시 → `AtMostOneRunner`, 맡은 쪽이 실패하고 결과를 안 풂 → `ClaimHasRunner`(그리고 `ClaimSettles`), 포기한 owner 가 맡긴 칸을 지움 → `ClaimantKeepsSlot`. 시험(`test/test_dashboard_cache_claim.ml`)은 worker 1~2개로 짠다: 줄 선 계산을 기다리던 job 이 맡음, owner 는 자기 job 이 줄에 있어도 결과가 나오면 돌아옴, 진 owner job 은 계산 안 함, 맡은 쪽 실패는 키를 비우고 owner 를 실패시킴, 맡은 쪽 취소는 owner 가 다시 조회해 계산함, 포기한 owner 는 맡은 쪽 칸을 남김, 맡은 쪽은 새 epoch 에 쓰지 않음, 풀 밖 조회는 맡지 않음, 도는 계산은 기다림.
+검증: `specs/bug-models/DashboardCacheClaim.tla`. clean 모델(worker 1·2개)은 `NoInversion`, `AtMostOneRunner`, `ClaimHasRunner`, `ClaimantKeepsSlot` 와 liveness 둘(맡은 계산은 결국 Ok·Failed·Released 가 된다 `ClaimSettles`, 기다리는 owner 는 결국 돌아온다 `OwnerReturns`)을 지킨다. 버그 모델 넷은 각각 깬다: 기다리기만 함(L4b 전 코드) → `NoInversion`(그리고 `OwnerReturns`), owner job 이 claim 을 무시 → `AtMostOneRunner`, 맡은 쪽이 실패하고 결과를 안 풂 → `ClaimHasRunner`(그리고 `ClaimSettles`), 포기한 owner 가 맡긴 칸을 지움 → `ClaimantKeepsSlot`. 시험(`test/test_dashboard_cache_claim.ml`)은 worker 1~2개로 짠다: 줄 선 계산을 기다리던 job 이 맡음, owner 는 자기 job 이 줄에 있어도 결과가 나오면 돌아옴, 진 owner job 은 계산 안 함, 맡은 쪽 실패는 키를 비우고 owner 를 실패시킴, 맡은 쪽 취소는 owner 가 다시 조회해 계산함, 포기한 owner 는 맡은 쪽 칸을 남김, 맡은 쪽은 새 epoch 에 쓰지 않음, 풀 밖 조회는 맡지 않음, 도는 계산은 기다림, 아무도 안 맡았을 때 포기한 owner 는 키를 비움, 맡은 쪽 window 가 닫히면 owner 가 계산함, 다시 조회해도 owner window 안에서 끝남. 모델에 없는 것: window 와 결과가 같은 차례에 정해지는 경우, 다시 조회(새 epoch), owner 자신이 풀 job 인 경우, IO 무게 job.
 
 ### 3.5 domain 예산
 

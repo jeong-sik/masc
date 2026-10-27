@@ -861,7 +861,7 @@ let observe_failed_dispatch ~observe_transport_uncertain = function
   | Runtime_codex_app_server.Runtime_shutting_down -> ()
 ;;
 
-let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~context_window ~quota_scope ~keeper_name
+let run_without_lifecycle ~result_scope ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~context_window ~quota_scope ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~loading_plan ~initial_messages ~capacity_bytes ~project_history
     ~on_transmitted_model_input ~hooks
@@ -1138,7 +1138,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     in
     let* host_dynamic_tools =
       Host.dynamic_tools
-        ~base_path
+        ~result_scope:None
         ~content_transport:Runtime_official_client_tool.Codex
         ~accepts_image_input
         (* These lanes drive a provider CLI that has no place to show an
@@ -1226,6 +1226,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     in
     let* host_dynamic_tools =
       Host.dynamic_tools
+        ~result_scope:(Some result_scope)
         ~base_path
         ~content_transport:Runtime_official_client_tool.Codex
         ~accepts_image_input
@@ -1867,6 +1868,7 @@ let run ~input_source ?argument_source ?on_memory_capacity_refusal ?official_tas
   let observed_next_shrink_capacity_bytes = ref None in
   let measure_message_bytes = measure_model_input_message_bytes in
   let result =
+    Eio.Switch.run (fun result_scope ->
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
       Keeper_turn_driver_try_provider.context_overflow_shrink_sequence
         ?on_memory_capacity_refusal
@@ -1911,7 +1913,7 @@ let run ~input_source ?argument_source ?on_memory_capacity_refusal ?official_tas
         (* A read in an abandoned attempt cannot certify a tool-only answer
            from the next one. Effect evidence remains cumulative. *)
         Atomic.set successful_tool_completion No_successful_tool_completion;
-        run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~official_client_continuation ~context_window
+        run_without_lifecycle ~result_scope ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~official_client_continuation ~context_window
           ~required_native_posture
           ~runtime_id
           ~quota_scope
@@ -1976,7 +1978,7 @@ let run ~input_source ?argument_source ?on_memory_capacity_refusal ?official_tas
           ~observe_successful_tool_completion
         ~observe_transport_uncertain
           ~config)
-      ())
+      ()))
   in
   { result
   ; settled_session = Atomic.get settled_session

@@ -3141,6 +3141,7 @@
 (include stanzas/test_keeper_codex_tool_outbox_wake.inc)
 (include stanzas/test_keeper_agent_core_result_outbox.inc)
 (include stanzas/test_keeper_host_result_retention.inc)
+(include stanzas/test_keeper_result_producer_liveness.inc)
 (include stanzas/test_runtime_claude_code.inc)
 (include stanzas/test_runtime_claude_input_attribution.inc)
 (include stanzas/test_runtime_antigravity.inc)

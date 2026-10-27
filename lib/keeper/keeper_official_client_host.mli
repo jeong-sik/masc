@@ -750,6 +750,7 @@ val prepare_turn :
     copy kept. *)
 
 val dynamic_tools :
+  result_scope:Eio.Switch.t option ->
   ?base_path:string ->
   content_transport:Runtime_official_client_tool.content_transport ->
   accepts_image_input:bool ->
@@ -773,6 +774,12 @@ val dynamic_tools :
   unit ->
   (dynamic_tool list, Agent_core.Error.t) result
 (** Project Agent Core tools onto one official-client turn.
+
+    [Some result_scope] is the real runtime's enclosing switch. Its producers
+    hold exact kernel liveness leases so their results do not wake or enter a
+    concurrent consumer before the runtime drains. [None] is for prevalidation
+    or a standalone projection; every real runtime passes its actual switch.
+    This scope does not acknowledge results or permit tool replay.
 
     [accepts_image_input] is the runtime's answer to "may a tool result carry an
     image", read from {!Runtime_agent.runtime_accepts_image_input} so it is the

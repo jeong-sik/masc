@@ -2003,7 +2003,7 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
                       { outcome = Terminal_completed | Durable_stimulus_deferred; _ } )
                   as stop) -> { final_result with abort_turn = Some stop }) in
           (match base_path, result_producer, result.abort_turn with
-           | Some base_path, Some producer, Some _ ->
+           | Some _, Some producer, Some _ ->
              let retain () =
                let* content_blocks = Domain_pool_ref.submit_cpu_or_inline (fun () ->
                  match original_result.content_blocks with
@@ -2018,7 +2018,7 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
                    |> Result.map (fun blocks -> `List (List.rev blocks))) in
                let response = `Assoc ["success",`Bool original_result.success;
                  "content",`String original_result.content;"content_blocks",content_blocks] in
-               Keeper_client_tool_outbox.retain_host_result producer ~base_path ~keeper_name
+               Keeper_client_tool_outbox.retain_host_result producer
                  ~invocation_index:(Agent_core.Tool_contract.Invocation.planned_index invocation)
                  ~call_id ~tool_name:tool.schema.name ~arguments:input ~response in
              let retained =
@@ -2073,7 +2073,7 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
   }
 ;;
 
-let dynamic_tools ?base_path ~content_transport ~accepts_image_input ~tool_approval ~runtime_label
+let dynamic_tools ~result_scope ?base_path ~content_transport ~accepts_image_input ~tool_approval ~runtime_label
     ~keeper_name ~turn_count ~tools ~loading_plan
     ~hooks ~event_bus ~context_injector ~context ~terminal_effect_state
     ~terminal_error ~pre_tool_rejects
@@ -2087,10 +2087,17 @@ let dynamic_tools ?base_path ~content_transport ~accepts_image_input ~tool_appro
          ~field:"context"
          (runtime_label ^ " dynamic tools require the Keeper shared context"))
   | tools, Some context ->
-    let* result_producer = match base_path with
-      | None -> Ok None
-      | Some _ -> Keeper_client_tool_outbox.host_producer ~runtime_label ~turn_count
-        |> Result.map Option.some
+    let* result_producer = match base_path, result_scope with
+      | None, None -> Ok None
+      | None, Some _ -> Error (config_error ~field:"base_path"
+          "a running tool result producer requires its workspace authority")
+      | Some base_path, scope ->
+        let producer = match scope with
+          | None -> Keeper_client_tool_outbox.host_producer
+              ~base_path ~keeper_name ~runtime_label ~turn_count
+          | Some sw -> Keeper_client_tool_outbox.start_host_producer
+              ~sw ~base_path ~keeper_name ~runtime_label ~turn_count in
+        producer |> Result.map Option.some
         |> Result.map_error (config_error ~field:"tool_result_producer") in
     let next_dynamic_invocation_index = Atomic.make 0 in
     Ok

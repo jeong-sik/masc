@@ -20,7 +20,7 @@ let project ?(effect_state = Keeper_tools_agent_core.Terminal_effect_open)
   let tool = Agent_core.Tool.create ~name:"CompleteEffect" ~description:"Complete an effect once"
       ~parameters:[{Agent_core.Types.name="input";description="original call data";
         param_type=String;required=false}] handler in
-  match Host.dynamic_tools ~base_path ~content_transport:Runtime_official_client_tool.Mcp
+  match Host.dynamic_tools ~result_scope:None ~base_path ~content_transport:Runtime_official_client_tool.Mcp
     ~accepts_image_input:true ~tool_approval:None ~runtime_label:"host-result-fixture"
     ~keeper_name ~turn_count:7 ~tools:[tool] ~loading_plan:Host.All_on_demand
     ~hooks:Agent_core.Hooks.empty ~event_bus:None ~context_injector:None
@@ -144,9 +144,9 @@ let test_retention_failure_preserves_authoritative_failure () = with_workspace (
      | None -> false))
 
 let test_producer_identity_and_vendor_coexistence () = with_workspace (fun base_path ->
-  let first = get (Outbox.host_producer ~runtime_label:"Claude" ~turn_count:1)
-  and replacement = get (Outbox.host_producer ~runtime_label:"Muse" ~turn_count:1) in
-  let retain ?(invocation_index=0) producer = get (Outbox.retain_host_result producer ~base_path ~keeper_name ~invocation_index
+  let first = get (Outbox.host_producer ~base_path ~keeper_name ~runtime_label:"Claude" ~turn_count:1)
+  and replacement = get (Outbox.host_producer ~base_path ~keeper_name ~runtime_label:"Muse" ~turn_count:1) in
+  let retain ?(invocation_index=0) producer = get (Outbox.retain_host_result producer ~invocation_index
     ~call_id:"same-client-local-call-id" ~tool_name:"Execute" ~arguments:(`Assoc []) ~response:(`String marker)) in
   retain first; retain first;
   check int "the same original source/result is idempotent" 1
@@ -214,8 +214,8 @@ let test_mcp_reused_string_id_keeps_physical_invocations () = with_workspace (fu
 
 let test_host_invocation_index_validation () =
   List.iter (fun index_fields -> with_workspace (fun base_path ->
-    let producer = get (Outbox.host_producer ~runtime_label:"index-validation" ~turn_count:0) in
-    get (Outbox.retain_host_result producer ~base_path ~keeper_name ~invocation_index:0
+    let producer = get (Outbox.host_producer ~base_path ~keeper_name ~runtime_label:"index-validation" ~turn_count:0) in
+    get (Outbox.retain_host_result producer ~invocation_index:0
       ~call_id:"call" ~tool_name:"Execute" ~arguments:(`Assoc []) ~response:(`String marker));
     let session_path = get (Keeper_official_client_session_store.path ~base_path ~keeper_name) in
     let directory = Filename.concat (Filename.dirname session_path) "undelivered-tools" in
@@ -235,8 +235,8 @@ let test_host_invocation_index_validation () =
     [ []; ["host_invocation_index",`Int (-1)]; ["host_invocation_index",`String "0"];
       ["host_invocation_index",`Int 0;"host_invocation_index",`Int 1] ];
   with_workspace (fun base_path ->
-    let producer = get (Outbox.host_producer ~runtime_label:"negative-index" ~turn_count:0) in
-    match Outbox.retain_host_result producer ~base_path ~keeper_name ~invocation_index:(-1)
+    let producer = get (Outbox.host_producer ~base_path ~keeper_name ~runtime_label:"negative-index" ~turn_count:0) in
+    match Outbox.retain_host_result producer ~invocation_index:(-1)
       ~call_id:"call" ~tool_name:"Execute" ~arguments:(`Assoc []) ~response:(`String marker) with
     | Error _ -> check int "invalid producer index creates no receipt" 0
         (List.length (Outbox.receipt_ids (load base_path)))

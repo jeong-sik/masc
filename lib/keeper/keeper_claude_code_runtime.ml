@@ -671,7 +671,7 @@ let note_transport_uncertainty effect_disposition =
   |> ignore
 ;;
 
-let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~quota_scope ~keeper_name
+let run_without_lifecycle ~result_scope ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~quota_scope ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~loading_plan ~initial_messages ~model_input_projection_for
     ~on_transmitted_model_input ~hooks ~context_injector
@@ -914,7 +914,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     let terminal_error = ref None in
     let* host_dynamic_tools =
       Host.dynamic_tools
-        ~base_path
+        ~result_scope:None
         ~content_transport:Runtime_official_client_tool.Mcp
         ~accepts_image_input
         (* These lanes drive a provider CLI that has no place to show an
@@ -1013,6 +1013,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     in
     let* host_dynamic_tools =
       Host.dynamic_tools
+        ~result_scope:(Some result_scope)
         ~base_path
         ~content_transport:Runtime_official_client_tool.Mcp
         ~accepts_image_input
@@ -1617,6 +1618,7 @@ let run ~input_source ?argument_source ?on_memory_capacity_refusal ?official_tas
   let observed_floor_capacity_bytes = ref None in
   let context_overflow_retry_safe = ref false in
   let result =
+    Eio.Switch.run (fun result_scope ->
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
       Keeper_turn_driver_try_provider.context_overflow_shrink_sequence
         ?on_memory_capacity_refusal
@@ -1654,7 +1656,7 @@ let run ~input_source ?argument_source ?on_memory_capacity_refusal ?official_tas
               previous_capacity_bytes
               capacity_bytes)
         ~attempt:(fun ~capacity:capacity_bytes ->
-          run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~official_client_continuation
+          run_without_lifecycle ~result_scope ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~official_client_continuation
           ~required_native_posture
             ~runtime_id
             ~quota_scope
@@ -1720,7 +1722,7 @@ let run ~input_source ?argument_source ?on_memory_capacity_refusal ?official_tas
             ~on_provider_retry
             ~on_tool_execution
             ~config)
-        ())
+        ()))
   in
   { result; settled_session = Atomic.get settled_session; effect_disposition = Atomic.get effect_disposition }
 ;;

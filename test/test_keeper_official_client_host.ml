@@ -130,7 +130,7 @@ let one_dynamic_tool
   in
   let terminal_error = ref None in
   let projected =
-    Host.dynamic_tools ?base_path
+    Host.dynamic_tools ~result_scope:None ?base_path
         ~accepts_image_input
         ~content_transport:Runtime_official_client_tool.Codex
       ~tool_approval

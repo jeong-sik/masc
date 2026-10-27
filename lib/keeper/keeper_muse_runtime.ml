@@ -749,7 +749,7 @@ let phase_name : Session_store.phase -> string = function
   | Session_store.Settled _ -> "Settled"
 ;;
 
-let run_without_lifecycle ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled
+let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled
     ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~configured_reasoning_effort ~turn_timeout_s ~quota_scope
     ~on_model_input_window_observation ~carried_front_seed ~librarian_front ~on_carried_front
@@ -1105,6 +1105,7 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
     let* dynamic_tools =
       match
         Host.dynamic_tools
+        ~result_scope:(Some result_scope)
         ~base_path
           ~content_transport:Runtime_official_client_tool.Mcp
           ~accepts_image_input
@@ -1761,8 +1762,9 @@ let run ~input_source ?argument_source ?official_task_reference ?composed_contex
     | true | false -> ()
   in
   let result =
+    Eio.Switch.run (fun result_scope ->
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
-      run_without_lifecycle ~input_source
+      run_without_lifecycle ~result_scope ~input_source
         ~argument_source
         ~official_task_reference
         ~composed_context
@@ -1805,7 +1807,7 @@ let run ~input_source ?argument_source ?official_task_reference ?composed_contex
         ~on_native_tool_completion
         ~on_usage_report
         ~on_tool_execution
-        ~config)
+        ~config))
   in
   { result
   ; settled_session = Atomic.get settled_session

@@ -376,7 +376,7 @@ let stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~tu
     }
 ;;
 
-let run_without_lifecycle ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
+let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~on_model_input_window_observation
     ~carried_front_seed
     ~librarian_front
@@ -776,6 +776,7 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
     in
     let* dynamic_tools =
       Host.dynamic_tools
+        ~result_scope:(Some result_scope)
         ~base_path
         ~content_transport:Runtime_official_client_tool.Mcp
         ~accepts_image_input
@@ -1296,8 +1297,9 @@ let run ~input_source ?argument_source ?official_task_reference ?composed_contex
     Atomic.set effect_disposition Keeper_provider_attempt_effect.Effect_attempted
   in
   let result =
+    Eio.Switch.run (fun result_scope ->
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
-      run_without_lifecycle ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~official_client_continuation
+      run_without_lifecycle ~result_scope ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~official_client_continuation
         ~required_native_posture
         ~runtime_id
         ~keeper_name
@@ -1327,7 +1329,7 @@ let run ~input_source ?argument_source ?official_task_reference ?composed_contex
         ~raw_trace
         ~on_event
         ~observe_effect_attempted
-        ~config)
+        ~config))
   in
   { result; settled_session = Atomic.get settled_session; effect_disposition = Atomic.get effect_disposition }
 ;;

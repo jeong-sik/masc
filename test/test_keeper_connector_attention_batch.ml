@@ -1891,7 +1891,7 @@ let test_official_turn_keeps_tool_result_until_completion () =
                 ; content_blocks = None; _meta = None })
        in
        let projected =
-         Keeper_official_client_host.dynamic_tools
+         Keeper_official_client_host.dynamic_tools ~result_scope:None
            ~content_transport:Runtime_official_client_tool.Codex
            ~accepts_image_input:true ~tool_approval:None
            ~runtime_label:"official-chat-fixture" ~keeper_name ~turn_count:1

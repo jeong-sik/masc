@@ -4808,6 +4808,7 @@
 (include stanzas/test_tui_paste.inc)
 (include stanzas/test_tui_graphics.inc)
 (include stanzas/test_keeper_connector_names.inc)
+(include stanzas/test_keeper_connector_names_concurrent.inc)
 (include stanzas/test_tui_image_cache.inc)
 (include stanzas/test_tui_image_ref.inc)
 (include stanzas/test_tui_emblem_screen.inc)

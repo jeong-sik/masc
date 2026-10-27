@@ -16,5 +16,5 @@ Rejected before running. The message above names the field or permission that fa
 The tool failed inside the runtime, not on your arguments. Identical arguments reproduce it unless the message says the outcome is unknown. Report it as a runtime failure in your answer.
 
 ### workflow_rejection
-The current state does not admit this action; it is a rule, not a syntax problem. Read the current state first. The same call succeeds only after the state changes.
+The current state does not admit this exact request. Read the failure detail and current state. Correct the arguments or choose an admissible target when the detail names one; wait for a state change only when the detail says that change is required and expected. Otherwise change the requested action or report the blocker.
 

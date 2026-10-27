@@ -38,7 +38,7 @@ let operations_json actions = `List (List.map (fun action -> `String (Browser_ca
 let error_message = function
   | Binding_required -> "This tab or document belongs to a browser. Repeat its observed lane and clientId."
   | No_available_browser -> "No compatible browser is available. Connect a browser or explicitly open a work session."
-  | Ambiguous_browsers _ -> "More than one browser is available. Select its lane and, for a connected browser, clientId."
+  | Ambiguous_browsers _ -> "More than one browser is available. No command was dispatched; this is a selection refusal, not a browser outage. Repeat the same tool with lane and, for a live browser, clientId from one entry in the returned browsers list."
   | Required_actions_unavailable _ -> "No available browser implements all requiredActions. Inspect candidates and their missingActions; explicitly open a compatible work session or change the task requirements."
   | Unsupported_required_actions _ -> "The selected browser does not implement all requiredActions. Its owner was preserved and no command was dispatched."
 let choice_case = function
@@ -48,7 +48,11 @@ let choice_case = function
   | Unsupported_required_actions _ -> Lane.Unsupported_required_actions_case
 let error_to_json error = `Assoc (["code",`String (Lane.choice_case_code (choice_case error));
   "message",`String (error_message error)]
-  @ match error with Ambiguous_browsers routes -> ["browsers",`List (List.map (fun route -> `Assoc (route_fields route)) routes)]
+  @ match error with Ambiguous_browsers routes ->
+        ["browsers",`List (List.map (fun route -> `Assoc (route_fields route)) routes);
+         "recovery",`Assoc ["action",`String "repeat_same_tool_with_selected_browser";
+           "commandDispatched",`Bool false;"failureScope",`String "browser_selection";
+           "browserChoices",`String "browsers"]]
     | Required_actions_unavailable {required;candidates} ->
         ["requiredActions",operations_json required;"candidates",`List (List.map (fun (route,missing) ->
           `Assoc (route_fields route @ ["missingActions",operations_json missing])) candidates)]

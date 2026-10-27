@@ -519,6 +519,9 @@ module For_testing : sig
     action_schema : unit -> Yojson.Safe.t option;
     operator_schema : unit -> Yojson.Safe.t option;
     companion_tools : unit -> string list;
+    observation_effect : string -> Lane_addon_call_context.observation_effect;
+    (** What the worker declared for an export. [Reads_only] lets a successful
+        call to it skip the observation that otherwise follows. *)
     call_operator : admit:(unit -> (unit, operator_error) result) -> arguments:Yojson.Safe.t -> (Yojson.Safe.t, operator_error) result;
     act : arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, string) result;
     stop : unit -> (Lane_addon_lifecycle.release, Lane_addon_lifecycle.failure) result;

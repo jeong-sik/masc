@@ -428,6 +428,7 @@ let runtime_worker_exit mode env fs config original =
           resource=L.Native_resource {pid=Unix.getpid ();started=None};resolved_image=None;
           browser=None;host=None;action_schema=(fun () -> None);operator_schema=(fun () -> None);
           exported_tools=(fun () -> [tool]);companion_tools=(fun () -> [tool.name]);
+          observation_effect=(fun _ -> Lane_addon_call_context.May_change);
           observe=(fun ~binding:_ ~sources:_ -> Ok Lane_addon_types.{rows=[];coverage=[]});
           act=(fun ~arguments:_ -> Error "fixture has no actions");
           call_operator=(fun ~admit:_ ~arguments:_ -> Error Lane_addon_worker_protocol.Operator_unavailable);

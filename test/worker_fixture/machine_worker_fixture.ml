@@ -20,10 +20,20 @@ let with_worker ?other_backend ~machine ~create ~clock ~sw ~base_path f =
       ignore (unwrap (Client.initialize client ~client_name:"machine-fixture" ~client_version:"1"));
       let tools = unwrap (Client.list_tools_all client) in
       let control_ports = ["lane_observe";Lane_addon_call_context.tool_name;
+        Lane_addon_call_context.effects_tool;
         Machine_controller_contract.snapshot_tool;Machine_controller_contract.release_tool;
         Machine_input_history.tool_name] in
       let names = List.filter_map (fun (tool : S.tool) ->
         if List.mem tool.name control_ports then None else Some tool.name) tools in
+      (* Read the worker's declaration the way the worker protocol does. *)
+      let effects = if List.exists (fun (tool : S.tool) ->
+          tool.name = Lane_addon_call_context.effects_tool) tools then
+          let reply = unwrap (Client.call_tool client ~name:Lane_addon_call_context.effects_tool
+            ~arguments:(`Assoc []) ()) in
+          unwrap (Lane_addon_call_context.effects_of_json
+            ~listed:(List.map (fun (tool : S.tool) -> tool.name) tools)
+            (Option.value ~default:`Null reply.S.structured_content))
+        else [] in
       let mutex = Eio.Mutex.create () in
       let rpc ~name ~arguments = Client.call_tool client ~name ~arguments () in
       let call name arguments = Eio.Mutex.use_ro mutex (fun () -> rpc ~name ~arguments) in
@@ -70,6 +80,9 @@ let with_worker ?other_backend ~machine ~create ~clock ~sw ~base_path f =
                 ~max_response_bytes:(Masc.Lane_addon_types.max_reply_bytes package) ~call:rpc output));
             operator_schema=(fun () -> None);
       companion_tools=(fun () -> []);
+            observation_effect=(fun name -> match List.assoc_opt name effects with
+              | Some declared -> declared
+              | None -> Lane_addon_call_context.May_change);
             call_operator=(fun ~admit:_ ~arguments:_ -> Error Masc.Lane_addon_worker_protocol.Operator_unavailable);
             action_schema=(fun () -> None);
             act=(fun ~arguments:_ -> Error "no fixture action port");

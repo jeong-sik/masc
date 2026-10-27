@@ -88,6 +88,7 @@ let backend env base_path delivery delivery_observed : Runtime.For_testing.backe
           |> Result.map_error invocation_error);
       operator_schema=(fun () -> None);
       companion_tools=(fun () -> []);
+      observation_effect=(fun _ -> Lane_addon_call_context.May_change);
       call_operator=(fun ~admit:_ ~arguments:_ -> Error Masc.Lane_addon_worker_protocol.Operator_unavailable);
       action_schema=(fun () -> Protocol.action_schema protocol);
       act=(fun ~arguments -> Protocol.act protocol ~arguments |> Result.map_error protocol_error);

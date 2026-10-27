@@ -23,6 +23,29 @@ val input_schema : Yojson.Safe.t
 val actor_label : principal -> string
 (** Distinct provenance labels; these are not host account identifiers. *)
 
+(** {1 Observation effects}
+
+    What a call to an exported tool can do to the worker's last observation,
+    in the worker's own words on the private [effects_tool] port. MCP
+    [readOnlyHint] is a different promise: it says a tool does not modify its
+    environment, and a tool can keep that promise while its call still changes
+    what the next observation shows. *)
+type observation_effect =
+  | Reads_only  (** the last observation still shows the worker after the call *)
+  | May_change  (** the call may change what the next observation shows *)
+
+val effects_tool : string
+(** The private port. It takes no arguments and answers {!effects_to_json}. *)
+
+val effects_to_json : (string * observation_effect) list -> Yojson.Safe.t
+(** [{"tools": {"<tool name>": "reads_only" | "may_change", ...}}]. *)
+
+val effects_of_json : listed:string list -> Yojson.Safe.t ->
+  ((string * observation_effect) list, string) result
+(** Reads a declaration. A value other than the two names, a tool missing from
+    [listed] (the worker's own tools/list), a tool named twice or any other
+    shape is an [Error]. A tool left out is not in the result. *)
+
 type host_refusal = Rejected of string | Unavailable of string
   | Activity_disabled of string | Activity_unobserved of string
 type invocation_error = Host_refusal of host_refusal | Transport_error of string

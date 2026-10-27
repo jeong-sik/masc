@@ -102,6 +102,7 @@ let with_fixture f =
                       call_exported_tool = (fun ~companion:_ ~on_result:_ ~on_dispatch:_ ~authorize:_ ~principal:_ ~name:_ ~arguments:_ -> Error (Lane_addon_call_context.Transport_error "no exported tools"));
                       operator_schema=(fun () -> None);
       companion_tools=(fun () -> []);
+      observation_effect=(fun _ -> Lane_addon_call_context.May_change);
                       call_operator=(fun ~admit:_ ~arguments:_ -> Error Lane_addon_worker_protocol.Operator_unavailable);
                       action_schema=(fun () -> None);act=(fun ~arguments:_ -> Error "read-only");
                       host = None; stop=(fun () -> Ok (Masc.Lane_addon_lifecycle.Released {engine=Masc.Lane_addon_lifecycle.Docker_engine "fixture-engine";container_id=Some (instance_id)}));resource=Masc.Lane_addon_lifecycle.Container_resource instance_id} in ignore (on_authority (Masc.Lane_addon_lifecycle.Container_authority {runtime=Masc.Lane_addon_types.Docker;engine=Masc.Lane_addon_lifecycle.Docker_engine "fixture-engine"})); on_created connection;Ok connection);

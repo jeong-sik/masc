@@ -41,6 +41,7 @@ type fake = {
   export_arguments : Yojson.Safe.t list ref;
   controller : string option ref;
   admissions : Machine_controller_contract.admission option list ref;
+  call_hold : unit Eio.Promise.t option ref;
   start_gate : unit Eio.Promise.t * unit Eio.Promise.u;
   teardown_gate : unit Eio.Promise.t * unit Eio.Promise.u;
   world : Fake.t;
@@ -55,10 +56,24 @@ let fake_output : Types.output = {
                complete=true; detail=None}];
 }
 
+(* What the fake worker declares on its private effect port, as the DOS worker
+   declares masc_dos_screen and masc_dos_step. [hinted_read] is shaped like
+   onepassword_status: MCP readOnlyHint true and no declaration. *)
+let declared_read = "fixture_read"
+let declared_write = "fixture_write"
+let hinted_read = "fixture_hinted"
+let declared_effects = [declared_read, Lane_addon_call_context.Reads_only;
+  declared_write, Lane_addon_call_context.May_change]
+let argument_set name arguments =
+  match arguments with
+  | `Assoc fields -> List.assoc_opt name fields = Some (`Bool true)
+  | _ -> false
+
 let make_backend ?observe_step () =
   let home = Fake.docker "engine-a" in
   let state = { bindings=Hashtbl.create 4; calls=Hashtbl.create 4; stops=Hashtbl.create 4; modes=Hashtbl.create 4;
                 recovery=ref []; principals=ref []; export_arguments=ref []; controller=ref None; admissions=ref [];
+                call_hold=ref None;
                 start_gate = Eio.Promise.create (); teardown_gate = Eio.Promise.create ();
                 world = Fake.create home; home } in
   let proven ~engine work =
@@ -81,14 +96,23 @@ let make_backend ?observe_step () =
             "additionalProperties",`Bool false]
         | _ -> `Assoc ["type",`String "object"] in
       let exported_tools = List.map (fun name ->
-        match Mcp_protocol.Mcp_types.tool_of_yojson (`Assoc ["name",`String name;
-          "inputSchema",input_schema]) with
+        let annotations = if name = hinted_read
+          then ["annotations", `Assoc ["readOnlyHint", `Bool true]] else [] in
+        match Mcp_protocol.Mcp_types.tool_of_yojson (`Assoc (["name",`String name;
+          "inputSchema",input_schema] @ annotations)) with
         | Ok tool -> tool | Error message -> fail message) package.exported_tools in
       let connection : Runtime.For_testing.connection = {browser=None;
         await_exit = (fun () -> Eio.Fiber.await_cancel ());
         resolved_image = (match Lane_addon_engine.image_of_inspect Lane_addon_types.Docker ("sha256:" ^ String.make 64 'a') with
           | Ok image -> Some image | Error detail -> Alcotest.fail detail);
-                host = None; resource = Lifecycle.Container_resource (Store.digest instance_id);
+                resource = Lifecycle.Container_resource (Store.digest instance_id);
+        (* A package that waits on the host lists no requests; its host cycle
+           only ends with the observation every cycle ends with. *)
+        host = (if package.id = "declared-read-host" then
+            Some {list_requests=(fun () -> Ok (`Assoc ["requests", `List []]));
+              deliver=(fun ~arguments:_ -> Error "the fixture lists no request");
+              await_change=None}
+          else None);
         exported_tools = (fun () -> exported_tools);
         call_exported_tool = (fun ~companion:_ ~on_result:_ ~on_dispatch ~authorize ~principal ~name:_ ~arguments ->
           state.principals := principal :: !(state.principals);
@@ -100,8 +124,14 @@ let make_backend ?observe_step () =
               Hashtbl.replace state.calls (instance_id ^ "/export") 1;
               Eio.Promise.await released
             end;
-            if package.id = "export-error" then
+            Option.iter Eio.Promise.await !(state.call_hold);
+            if package.id = "export-error" || argument_set "lose" arguments then
               Error (Lane_addon_call_context.Transport_error "response lost after possible mutation")
+            else if argument_set "refuse" arguments then
+              Error (Lane_addon_call_context.Host_refusal (Lane_addon_call_context.Rejected "fixture refusal"))
+            else if argument_set "fail" arguments then
+              Ok {(Mcp_protocol.Mcp_types.tool_result_of_text instance_id) with
+                  Mcp_protocol.Mcp_types.is_error = Some true}
             else Ok (Mcp_protocol.Mcp_types.tool_result_of_text instance_id) in
           match authorize with
           | None -> invoke None
@@ -110,6 +140,9 @@ let make_backend ?observe_step () =
               ~snapshot:(fun () -> on_dispatch (); Ok !(state.controller)) ~invoke);
         operator_schema=(fun () -> None);
       companion_tools=(fun () -> []);
+        observation_effect=(fun name -> match List.assoc_opt name declared_effects with
+          | Some declared -> declared
+          | None -> Lane_addon_call_context.May_change);
         call_operator=(fun ~admit:_ ~arguments:_ -> Error Lane_addon_worker_protocol.Operator_unavailable);
         action_schema = (fun () -> None);
         act = (fun ~arguments:_ -> Error "read-only fixture");
@@ -2283,7 +2316,198 @@ let test_machine_notices_keep_effect_order () =
     check (list (pair string string)) "effect order and host authors are preserved"
       ["first-actor","first effect"; "second-actor","second effect"] !published)
 
+(* Calls to one attached fake worker's exports, whether its observation reads
+   as refreshing, and a call held inside the worker while [inside] looks. *)
+type export_bench = {
+  call : string -> Yojson.Safe.t ->
+    (Mcp_protocol.Mcp_types.tool_result, Runtime.tool_call_error) result;
+  refreshing : unit -> bool;
+  settled : unit -> bool;
+  while_held : string -> Yojson.Safe.t -> (unit -> unit) ->
+    (Mcp_protocol.Mcp_types.tool_result, Runtime.tool_call_error) result;
+  await_exports : int -> unit;
+}
+
+let export_bench env sw config state ~id ~observed =
+  let clock = Eio.Stdenv.clock env in
+  let access = Lane_addon_sources.Operator_configuration in
+  let exports () = List.filter (fun (export : Runtime.tool_export) -> export.instance_id = id)
+    (unwrap (Runtime.tool_export_reading ~config ~access ~reserved:[])).exports in
+  let call name arguments =
+    let export = List.find (fun (export : Runtime.tool_export) -> export.tool.name = name) (exports ()) in
+    Runtime.call_exported_tool ~config ~access ~reserved:[] ~export ~arguments in
+  let refreshing () = match Runtime.observation_for_export ~config ~access ~name:observed with
+    | Ok (Some snapshot) -> snapshot.refreshing
+    | Ok None -> fail "the attached export has no observation"
+    | Error refusal -> fail (Runtime.export_refusal_message refusal) in
+  (* A failed or missing observation is not a settled one; poll this one. *)
+  let settled () = match Runtime.observation_for_export ~config ~access ~name:observed with
+    | Ok (Some snapshot) -> not snapshot.refreshing
+    | Ok None | Error _ -> false in
+  let while_held name arguments inside =
+    let hold, release = Eio.Promise.create () in
+    state.call_hold := Some hold;
+    let before = List.length !(state.export_arguments) in
+    let running = Eio.Fiber.fork_promise ~sw (fun () -> call name arguments) in
+    await clock (fun () -> List.length !(state.export_arguments) > before);
+    inside ();
+    state.call_hold := None;
+    Eio.Promise.resolve release ();
+    Eio.Promise.await_exn running in
+  let await_exports count = await clock (fun () -> List.length (exports ()) = count) in
+  {call; refreshing; settled; while_held; await_exports}
+
+let answered name = function
+  | Ok (reply : Mcp_protocol.Mcp_types.tool_result) -> reply
+  | Error _ -> fail (name ^ " was not answered")
+
+(* The next observation of [id] is held inside the fake worker until the
+   returned release runs; the number is the observe call it holds. *)
+let with_holdable_observation f =
+  let held_observation = ref None in
+  with_fixture ~observe_step:(fun call -> match !held_observation with
+      | Some (held, gate) when call = held -> Eio.Promise.await gate
+      | Some _ | None -> ())
+    (fun env sw config dir state ->
+      let hold_next config id =
+        let gate, open_gate = Eio.Promise.create () in
+        let held = Hashtbl.find state.calls id + 1 in
+        held_observation := Some (held, gate);
+        ignore (unwrap (dispatch config Runtime.Observe ["instance_id", `String id]));
+        await (Eio.Stdenv.clock env) (fun () -> Hashtbl.find state.calls id = held);
+        held, (fun () -> held_observation := None; Eio.Promise.resolve open_gate ()) in
+      f env sw config dir state ~hold_next)
+
+(* Only the worker's declaration on its private effect port covers its
+   observation. A declared read never marks the last observation refreshing,
+   and a successful one takes no new observation. An error from that read, a
+   tool hinted read-only over MCP but undeclared (as onepassword_status is),
+   and an explicit may_change each still take one. The wakes are counted while
+   the observer is held inside an earlier observation, so each one stays
+   visible as the pending observation or a coalesced wake. *)
+let test_a_declared_read_keeps_the_last_observation () =
+  with_holdable_observation (fun env sw config dir state ~hold_next ->
+  let clock = Eio.Stdenv.clock env in
+  let id = attach_exporting config dir "declared-read" [declared_read; declared_write; hinted_read] in
+  let bench = export_bench env sw config state ~id ~observed:declared_read in
+  bench.await_exports 3;
+  let seq () = int "observation_seq" (instance config id) in
+  let settled_at expected = await clock (fun () -> seq () = expected && bench.settled ()) in
+  settled_at 1;
+  ignore (answered declared_read (bench.while_held declared_read (`Assoc []) (fun () ->
+    check bool "a declared read in flight leaves the observation stable" false (bench.refreshing ()))));
+  ignore (answered declared_write (bench.while_held declared_write (`Assoc []) (fun () ->
+    check bool "a write in flight marks the observation refreshing" true (bench.refreshing ()))));
+  settled_at 2;
+  let held, release = hold_next config id in
+  let base = int "coalesced_wakes" (instance config id) in
+  let wakes () =
+    let current = instance config id in
+    (if member "observation_pending" current = `Bool true then 1 else 0)
+    + int "coalesced_wakes" current - base in
+  check Alcotest.int "the held observer owes nothing yet" 0 (wakes ());
+  let read = answered declared_read (bench.call declared_read (`Assoc [])) in
+  check bool "the declared read succeeds" true (read.Mcp_protocol.Mcp_types.is_error <> Some true);
+  check Alcotest.int "a successful declared read takes no new observation" 0 (wakes ());
+  let failed = answered declared_read (bench.call declared_read (`Assoc ["fail", `Bool true])) in
+  check bool "the declared read can answer with an error" true (failed.Mcp_protocol.Mcp_types.is_error = Some true);
+  check Alcotest.int "an error from a declared read still takes one" 1 (wakes ());
+  ignore (answered hinted_read (bench.call hinted_read (`Assoc [])));
+  check Alcotest.int "a read hinted only over MCP still takes one" 2 (wakes ());
+  ignore (answered declared_write (bench.call declared_write (`Assoc [])));
+  check Alcotest.int "an explicit may_change still takes one" 3 (wakes ());
+  release ();
+  settled_at 4;
+  check Alcotest.int "the owed wakes ran as one observation" (held + 1) (Hashtbl.find state.calls id);
+  detach config id;
+  await_phase clock config id "detached")
+
+(* A worker with a host port observes after every reply, declared read or
+   not: any reply may have admitted a durable host request, and the host cycle
+   that lists it ends with an observation. The read itself schedules none. *)
+let test_a_host_port_still_observes_after_a_declared_read () =
+  with_holdable_observation (fun env sw config dir state ~hold_next ->
+  let clock = Eio.Stdenv.clock env in
+  let id = attach_exporting config dir "declared-read-host" [declared_read] in
+  let bench = export_bench env sw config state ~id ~observed:declared_read in
+  bench.await_exports 1;
+  await clock (fun () -> int "observation_seq" (instance config id) >= 1 && bench.settled ());
+  let held, release = hold_next config id in
+  let read = answered declared_read (bench.call declared_read (`Assoc [])) in
+  check bool "the declared read succeeds" true (read.Mcp_protocol.Mcp_types.is_error <> Some true);
+  check bool "the read itself schedules no observation" false
+    (member "observation_pending" (instance config id) = `Bool true);
+  release ();
+  await clock (fun () -> Hashtbl.find state.calls id = held + 1 && bench.settled ());
+  detach config id;
+  await_phase clock config id "detached")
+
+(* A machine consumer refused as "refreshing" while a counted call runs is
+   woken again when that call ends, however it ends: a host refusal that
+   schedules nothing, or a lost reply that fails the producer and observes it
+   again. A declared read is not counted, so a capture during it is admitted,
+   and a declared read whose reply is lost still observes the producer again.
+   No later write is needed for the consumer to recover. *)
+let test_a_consumer_refused_during_a_call_captures_again () =
+  let captures = ref [] in
+  let acquire ~access:_ ~store:_ ~(package : Types.package) ~resolve_machine_output
+      ~resolve_lane_output:_ ~read_browser_document:_ ~binding:_ =
+    if package.id <> "machine-consumer" then
+      Ok (`List [`Assoc ["original_bytes", `String "captured source before rotation"]])
+    else begin
+      let captured = resolve_machine_output Masc.Machine_lane.Dos |> Result.map (fun _ -> ()) in
+      captures := captured :: !captures;
+      Result.map (fun () -> `List []) captured
+    end in
+  with_fixture ~acquire (fun env sw config dir state ->
+  let clock = Eio.Stdenv.clock env in
+  let producer = attach_exporting config dir "machine-producer"
+    ["masc_dos_screen"; declared_read; declared_write] in
+  let bench = export_bench env sw config state ~id:producer ~observed:declared_read in
+  bench.await_exports 3;
+  let consumer = unwrap (dispatch config Runtime.Attach
+    ["manifest_path",`String (manifest dir "machine-consumer");"run_id",`String "machine";
+     "binding",`Assoc ["sources",`List [`Assoc ["kind",`String "dos_capture";"source_id",`String "machine"]]]])
+    |> text "instance_id" in
+  let producer_observes () = Hashtbl.find state.calls producer in
+  let recovered () = match !captures with
+    | Ok () :: _ -> phase (instance config consumer) = "attached" && bench.settled ()
+    | Error _ :: _ | [] -> false in
+  await clock recovered;
+  let capture_now () =
+    let before = List.length !captures in
+    ignore (unwrap (dispatch config Runtime.Observe ["instance_id", `String consumer]));
+    await clock (fun () -> List.length !captures > before);
+    List.hd !captures in
+  let observed = producer_observes () in
+  let lost_read = bench.while_held declared_read (`Assoc ["lose", `Bool true]) (fun () ->
+    check bool "a capture during a declared read is admitted" true (capture_now () = Ok ())) in
+  check bool "the declared read's lost reply is an unknown outcome" true
+    (match lost_read with Error (Runtime.Outcome_unknown _) -> true | _ -> false);
+  await clock (fun () -> producer_observes () > observed && recovered ());
+  let observed = producer_observes () in
+  let refused = bench.while_held declared_write (`Assoc ["refuse", `Bool true]) (fun () ->
+    check bool "a capture during a counted write is refused" true (Result.is_error (capture_now ()))) in
+  check bool "the write ends in a host refusal" true
+    (match refused with Error (Runtime.Host_refusal _) -> true | _ -> false);
+  await clock recovered;
+  check Alcotest.int "the refusal took no observation of the producer" observed (producer_observes ());
+  let observed = producer_observes () in
+  let lost_write = bench.while_held declared_write (`Assoc ["lose", `Bool true]) (fun () ->
+    check bool "a capture during the next counted write is refused" true (Result.is_error (capture_now ()))) in
+  check bool "the write's lost reply is an unknown outcome" true
+    (match lost_write with Error (Runtime.Outcome_unknown _) -> true | _ -> false);
+  await clock (fun () -> producer_observes () > observed && recovered ());
+  detach config consumer; detach config producer;
+  await_phase clock config consumer "detached";
+  await_phase clock config producer "detached")
+
 let () = run "Lane Add-on runtime" ["optional extension", [
+  test_case "a declared read keeps the last observation" `Quick test_a_declared_read_keeps_the_last_observation;
+  test_case "a host port still observes after a declared read" `Quick
+    test_a_host_port_still_observes_after_a_declared_read;
+  test_case "a consumer refused during a call captures again" `Quick
+    test_a_consumer_refused_during_a_call_captures_again;
   test_case "machine notices keep effect order" `Quick test_machine_notices_keep_effect_order;
   test_case "machine source dependencies reject cycles" `Quick test_machine_dependencies_reject_cycles;
   test_case "machine activity applies to worker calls" `Quick test_machine_activity_applies_to_worker_calls;

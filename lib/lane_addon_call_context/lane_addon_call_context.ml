@@ -88,6 +88,32 @@ let actor_label = function
   | Operator -> "operator"
   | Anonymous -> "anonymous"
 
+type observation_effect = Reads_only | May_change
+let effects_tool = "lane_tool_effects"
+let observation_effect_to_json = function
+  | Reads_only -> `String "reads_only"
+  | May_change -> `String "may_change"
+let observation_effect_of_json = function
+  | `String "reads_only" -> Ok Reads_only
+  | `String "may_change" -> Ok May_change
+  | _ -> Error "unknown observation effect"
+let effects_to_json declared =
+  `Assoc ["tools", `Assoc (List.map (fun (name, declared) ->
+    name, observation_effect_to_json declared) declared)]
+let effects_of_json ~listed = function
+  | `Assoc ["tools", `Assoc declared] ->
+      let names = List.map fst declared in
+      if List.length (List.sort_uniq String.compare names) <> List.length names then
+        Error "an observation effect declaration names a tool twice"
+      else List.fold_right (fun (name, value) parsed ->
+        let* parsed = parsed in
+        if not (List.mem name listed) then
+          Error ("an observation effect declaration names an unlisted tool: " ^ name)
+        else
+          let* declared = observation_effect_of_json value in
+          Ok ((name, declared) :: parsed)) declared (Ok [])
+  | _ -> Error "invalid observation effect declaration"
+
 type host_refusal = Rejected of string | Unavailable of string
   | Activity_disabled of string | Activity_unobserved of string
 type invocation_error = Host_refusal of host_refusal | Transport_error of string

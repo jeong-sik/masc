@@ -118,6 +118,7 @@ val host_result : t -> arguments:Yojson.Safe.t -> (Yojson.Safe.t, error) result
 val action_schema : t -> Yojson.Safe.t option
 val operator_schema : t -> Yojson.Safe.t option
 val companion_tools : t -> string list
+val observation_effect : t -> string -> Lane_addon_call_context.observation_effect
 val call_operator : t -> admit:(unit -> (unit, Lane_addon_worker_protocol.operator_error) result) -> arguments:Yojson.Safe.t ->
   (Yojson.Safe.t, Lane_addon_worker_protocol.operator_error) result
 val act : t -> arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, error) result

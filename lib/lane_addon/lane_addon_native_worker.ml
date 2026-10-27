@@ -68,6 +68,9 @@ let operator_schema t = match t.phase with
   | Serving -> Protocol.operator_schema t.protocol | Initializing | Validating_owner | Retired -> None
 let companion_tools t = match t.phase with
   | Serving -> Protocol.companion_tools t.protocol | Initializing | Validating_owner | Retired -> []
+let observation_effect t name = match t.phase with
+  | Serving -> Protocol.observation_effect t.protocol name
+  | Initializing | Validating_owner | Retired -> Lane_addon_call_context.May_change
 let call_operator t ~admit ~arguments = match t.phase with
   | Initializing | Validating_owner | Retired -> Error Protocol.Operator_unavailable
   | Serving ->

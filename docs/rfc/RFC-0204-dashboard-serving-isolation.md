@@ -222,11 +222,11 @@ POST·PUT·DELETE 와 `/mcp` 도구 호출은 `Background` 그대로다. 무거�
 | main | 1 | 1 |
 | snapshot codec | 1 | 1 |
 | system-thread host(#46342) | 0 | 1 |
-| 읽기 풀 | 0 | 2 |
+| 읽기 풀 | 0 | L2 측정으로 정한다 |
 | 배경 풀 | 14 | 나머지 |
 | agent_core codec 풀 | 14 | L5 측정으로 정한다 |
 
-- 읽기 풀은 코어가 8개 이상이면 2, 그보다 적으면 1이다. 기다리지 않을 때 읽기 핸들러는 수 ms 안에 끝난다(1.1절 `limit=1` 최소 4 ms).
+- 읽기 풀 크기는 L2 를 운영 서버에 배포해 잰 값으로 정한다. 읽기가 기다리는 계산도 읽기 풀에서 돈다. 빈 캐시를 채우는 계산(3.4)이 그렇다. 그래서 크기는 부하 상태의 `pool_wait.read` 의 `run`(계산 길이)·`wait`·`abandoned` 분포와 동시에 들어오는 읽기 수로 정한다. 기다리지 않을 때의 핸들러 시간(1.1절 `limit=1` 최소 4 ms)은 근거가 되지 않는다. 목표가 재는 것은 기다릴 때의 읽기다(#46374 리뷰).
 - 배경 풀은 `max 1 (recommended - 2 - 읽기 - codec)` 이다. `MASC_EXECUTOR_DOMAIN_COUNT` 는 지금처럼 배경 풀 크기를 정한다. 읽기 풀과 codec 풀 크기는 따로 정한다.
 - agent_core codec 풀은 배경 풀과 합치지 않는다. 지금 `run_cpu` 는 호출자가 취소되면 worker 를 기다리지 않고 `Caller_cancelled`·`Runtime_released` 를 원자 변수로 알린다. masc 의 `Executor_pool_submission.submit` 은 worker 를 취소하고 `Cancel.protect` 아래에서 끝나기를 기다린다. 합치면 이 의미가 바뀌고, Keeper 실행 기록 쓰기(`writer_gate` 를 잡은 채 하는 비교)가 배경 FIFO 뒤에 선다. 크기만 예산 안으로 줄인다. 지금 `Execution_runtime.stats` 는 호출 횟수(`pool_requested`, `reentrant_inline`, `caller_cancelled`)만 세서 크기를 정하기에 모자란다. L5 에서 제출부터 시작까지의 대기와 실행 시간을 재서 `/health` 에 싣고, 그 값으로 정한다.
 - 출처를 모르는 domain 1개는 L3 에서 찾는다.
@@ -292,7 +292,7 @@ goal `goal-read-api-p99-300-keepers-20261027` 의 판정 표다. 행마다 측�
 |---|---|---|
 | L1 | 이 RFC 와 측정 기록 | — |
 | L2 | `Pool_lane` 표시(풀 선택은 그대로), `Server_bootstrap_http` 의 GET/HEAD 표시(HTTP/1·HTTP/2), lane 별 풀 대기·실행 히스토그램을 `/health` 에 싣기 | 5.2 의 표시 시험, 히스토그램 구간 경계 |
-| L3 | 읽기 풀 생성과 domain 예산, 제출 함수 네 개의 풀 선택, 출처 모를 domain 찾기. L4a·L4b 와 같이 또는 그 뒤에 머지한다 | 5.1, 5.2 의 풀 선택 시험 |
+| L3 | 읽기 풀 생성과 domain 예산, 제출 함수 네 개의 풀 선택, 출처 모를 domain 찾기. L2·L4a·L4b 를 배포해 잰 뒤에 따로 머지한다 | 5.1, 5.2 의 풀 선택 시험 |
 | L4a | 요청이 기다리지 않는 배경 갱신 fork 의 lane(3.4) | 5.2 의 캐시 시험 |
 | L4b | 줄 선 캐시 계산을 기다리는 job 이 맡는다(3.4 L4b) | TLA+ claim 모델, 3.4 L4b 시험 넷 |
 | L5 | codec 풀의 대기·실행 시간을 `/health` 에 싣고 그 값으로 크기 정하기 | 예산 합이 코어 수 이하 |
@@ -300,11 +300,13 @@ goal `goal-read-api-p99-300-keepers-20261027` 의 판정 표다. 행마다 측�
 
 L3 를 L4 보다 먼저 넣으면 안 된다. 읽기 풀은 1~2 domain 이다. 요청이 fork 한 SWR 재계산(계산 예산 8~120초)이 Read 로 그 domain 을 다 쓰면 다른 GET 이 그 뒤에 선다. 그 대기는 compute timeout 에 들어가 circuit 을 열 수 있다. 풀 job 안의 `Dashboard_cache` `Wait` 도 읽기 worker 를 붙잡는다. 앞의 것은 L4a(#46385), 뒤의 것은 L4b 가 고친다(#46374 독립 리뷰).
 
+10-27 에 L3 를 스택에서 빼고 L1→L2→L4a→L4b 를 먼저 넣기로 했다. #46374 리뷰가 읽기 풀 크기의 근거가 없다고 짚었기 때문이다. 읽기가 기다리는 빈 캐시 계산 둘이 읽기 풀 2개를 잡으면 다른 읽기가 초 단위로 선다. L4a·L4b 는 L3 없이도 쓸모가 있다. L4a 는 읽기가 fork 한 배경 갱신을 `pool_wait` 의 background 로 세어 L2 의 read 값을 깨끗하게 한다. L4b 는 풀이 하나여도 job 이 자기 뒤에 줄 선 계산을 기다려 둘 다 멈추는 일을 푼다.
+
 계측(L2)을 맨 앞에 둔다. 1.1절 수정 후 측정에서 공유 풀은 6초 sample 동안 쉬고 있었고, main domain 의 lock 대기가 더 컸다. L2 로 운영 서버의 풀 대기를 한 시간 재서, 읽기의 풀 대기 p99 가 목표(100 ms)를 넘을 때 L3 이후를 진행한다. 넘지 않으면 L3 이후는 보류하고 main domain 쪽을 먼저 고친다.
 
 ## 7. 위험
 
-- **읽기끼리 기다린다.** 무거운 GET 이 읽기 풀 2개를 다 쓰면 가벼운 GET 이 기다린다. L2 계측으로 본다. 읽기 하나가 저장소 크기만큼 커지는 경우는 RFC-0372 로 고친다. domain 을 늘려서 덮지 않는다.
+- **읽기끼리 기다린다.** 무거운 GET 이나 읽기가 기다리는 빈 캐시 계산이 읽기 풀을 다 쓰면 가벼운 GET 이 기다린다. L2 계측으로 본다. 읽기 하나가 저장소 크기만큼 커지는 경우는 RFC-0372 로 고친다. domain 을 늘려서 덮지 않는다.
 - **포기된 요청이 자리를 잡고 있다.** HTTP/1 핸들러는 연결의 읽기 루프를 막고 돈다. 클라이언트가 timeout 으로 떠나도 서버 job 은 취소되지 않고 읽기 풀 자리를 끝까지 쓴다. 지금도 같은 일이 공유 풀에서 일어난다. 취소는 RFC-0372 의 요청 단위 기한과 같이 다룬다.
 - **배경 작업과 같은 lock.** 읽기 핸들러가 배경 작업이 쥔 store lock 을 기다리면 풀을 나눠도 느리다. 이때는 풀 대기는 짧고 핸들러 시간이 길게 나온다. L2 계측으로 구분한다.
 - **배경 갱신이 늦어진다.** L4a 뒤 SWR 재계산은 L3 로 줄어든 공유 풀에서 기다린다. `compute_under_timeout` 은 풀 대기 시간도 세므로, 공유 풀이 밀리면 재계산이 `Compute_timeout` 으로 끝나는 일이 는다. 그때 `Dashboard_cache` 는 옛 값을 TTL 의 6배(stale 3배 × backoff 2배) 동안 신선한 값으로 다시 쓴다. L3 전에도 같았지만 풀이 더 컸다. 배포 뒤 `pool_wait.background.wait` p99 를 재계산 예산과 비교한다.

@@ -5895,7 +5895,15 @@ let test_scheduled_source_handoff case () =
             ~checkpoint:(Keeper_semantic_execution.Agent_core checkpoint)
           |> owner_ok |> ignore;
           Owner.Operation_deferred)
-      else (record "resumed"; Owner.Operation_succeeded { outcome_ref = "resumed" }))
+      else (
+        let observed =
+          owner_ok (Owner.direct_checkpoint owner ~operation_id:operation.operation_id)
+          |> Option.get
+        in
+        Owner.resume_direct_checkpoint owner ~operation_id:operation.operation_id ~observed
+        |> owner_ok;
+        record "resumed";
+        Owner.Operation_succeeded { outcome_ref = "resumed" }))
     else (
       check bool "fresh chat retains its original identity" true
         (Chat_operation.Operation_id.equal operation.Chat_operation.operation_id next);

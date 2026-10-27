@@ -9,10 +9,28 @@ open Alcotest
 
 let domain () = (Domain.self () :> int)
 
-let bounded env seconds what f =
-  match Eio.Time.with_timeout (Eio.Stdenv.clock env) seconds (fun () -> Ok (f ())) with
-  | Ok value -> value
-  | Error `Timeout -> fail (what ^ " did not finish")
+(* A wait for the host is protected, so an Eio timeout cannot end it. A
+   watchdog thread outside Eio turns a hang into a failed run instead. *)
+let bounded _env seconds what f =
+  let finished = Atomic.make false in
+  let (_ : Thread.t) =
+    Thread.create
+      (fun () ->
+        let rec watch left =
+          if not (Atomic.get finished)
+          then
+            if left <= 0.
+            then (
+              Printf.eprintf "FAIL %s did not finish within %.0f s\n%!" what seconds;
+              exit 3)
+            else (
+              Unix.sleepf 0.05;
+              watch (left -. 0.05))
+        in
+        watch seconds)
+      ()
+  in
+  Fun.protect ~finally:(fun () -> Atomic.set finished true) f
 ;;
 
 let test_without_the_host_the_thread_is_the_callers () =
@@ -93,7 +111,7 @@ let test_cancelled_caller_waits_for_started_work () =
             Some
               (Systhread_host.run (fun () ->
                  Atomic.set started true;
-                 Unix.sleepf 0.2;
+                 Unix.sleepf 0.5;
                  Atomic.set finished true;
                  7));
           Eio.Fiber.check ()
@@ -107,6 +125,37 @@ let test_cancelled_caller_waits_for_started_work () =
     check bool "the caller was cancelled" true !cancelled;
     check bool "the work ran to its end before the caller returned" true (Atomic.get finished);
     check (option int) "the cancelled caller still got the work's value" (Some 7) !returned)
+;;
+
+let test_outside_eio_the_work_runs_directly () =
+  Systhread_host.start ();
+  let caller = Thread.id (Thread.self ()) in
+  let thread = Systhread_host.run (fun () -> Thread.id (Thread.self ())) in
+  check int "a non-Eio caller runs the work in its own thread" caller thread
+;;
+
+(* Each job gets its own thread on the host: a short job finishes while a
+   long one is still running. *)
+let test_a_long_job_does_not_delay_a_short_one () =
+  Systhread_host.start ();
+  Eio_main.run (fun env ->
+    let release = Atomic.make false in
+    let long_started = Atomic.make false in
+    let short_done_while_long_ran = ref false in
+    bounded env 10.0 "the two jobs" (fun () ->
+      Eio.Fiber.both
+        (fun () ->
+          Systhread_host.run (fun () ->
+            Atomic.set long_started true;
+            while not (Atomic.get release) do Unix.sleepf 0.005 done))
+        (fun () ->
+          while not (Atomic.get long_started) do
+            Eio.Time.sleep (Eio.Stdenv.clock env) 0.005
+          done;
+          Systhread_host.run ignore;
+          short_done_while_long_ran := not (Atomic.get release);
+          Atomic.set release true));
+    check bool "the short job finished while the long one ran" true !short_done_while_long_ran)
 ;;
 
 let test_failure_reraises_once () =
@@ -138,6 +187,13 @@ let () =
         ; test_case "a cancelled caller waits for started work" `Quick
             test_cancelled_caller_waits_for_started_work
         ] )
-    ; "failure", [ test_case "an exception re-raises once" `Quick test_failure_reraises_once ]
+    ; ( "failure"
+      , [ test_case "an exception re-raises once" `Quick test_failure_reraises_once ] )
+    ; ( "outside Eio and concurrency"
+      , [ test_case "outside Eio the work runs directly" `Quick
+            test_outside_eio_the_work_runs_directly
+        ; test_case "a long job does not delay a short one" `Quick
+            test_a_long_job_does_not_delay_a_short_one
+        ] )
     ]
 ;;

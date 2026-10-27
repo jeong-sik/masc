@@ -1657,7 +1657,7 @@
 (test
  (name test_systhread_host)
  (modules test_systhread_host)
- (libraries alcotest masc.masc_core eio eio_main eio.unix unix))
+ (libraries alcotest masc.masc_core eio eio_main eio.unix unix threads.posix))
 
 (test
  (name test_dashboard_cache_cancellation)

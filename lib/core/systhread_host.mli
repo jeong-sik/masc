@@ -7,6 +7,10 @@
     every request handler waiting for the domain lock until it yields. The
     host domain does nothing else, so its threads wait only for each other. *)
 
+exception Host_failed of exn
+(** Raised to a caller whose work the host had already taken when the host's
+    scheduler failed. The work may or may not have run. *)
+
 val start : unit -> unit
 (** Spawn the host domain, once per process; later calls do nothing. The
     domain belongs to no switch and lives until the process exits, so a
@@ -17,15 +21,27 @@ val run : ?label:string -> (unit -> 'a) -> 'a
 (** Run blocking work outside Eio on a system thread, as
     [Eio_unix.run_in_systhread] does, choosing the thread's domain:
 
-    - an Eio fiber that is not pool work, with the host started: a thread of
-      the host domain;
-    - pool work ({!Executor_pool_ref.in_worker_context}): a thread of its own
-      domain, so pool domains keep running such work in parallel;
-    - the host not started (tests, single-domain tools): the caller's domain;
+    - an Eio fiber that is not masc pool work, with the host running: a
+      thread of the host domain;
+    - masc pool work ({!Executor_pool_ref.in_worker_context}): a thread of its
+      own domain, so pool domains keep running such work in parallel. Pools
+      that do not mark their jobs (Agent Core's codec pool, the snapshot
+      codec) count as ordinary callers;
+    - the host not started, or failed: the caller's domain;
     - a caller outside Eio: [work ()] directly.
 
+    Nothing bounds the calls: each is handed to the host at once, and the host
+    gives each its own fiber and thread as soon as it takes it.
+
     Cancellation is as under [Eio_unix.run_in_systhread]: a caller already
-    cancelled does not start the work, and once the work has started the
-    caller waits for it and gets its result. There is no queue: a thread
-    starts at once, as many as there are calls. Exceptions re-raise with
-    their backtrace; the work is never re-run. *)
+    cancelled does not hand the work over, and once handed over the caller
+    waits for it uncancellably and gets its result. Exceptions re-raise with
+    their backtrace; the work is never re-run.
+
+    If the host fails, the failure is logged once. Work it had not taken runs
+    on the caller's domain instead; work it had taken ends with
+    {!Host_failed}. Later calls use the caller's domain.
+
+    The work must not depend on which domain runs it: code that compares the
+    current domain with an owner domain ([Eio_context.run_on_owner_domain])
+    sees the host, not the caller's domain. *)

@@ -263,11 +263,13 @@ val start_post_ready_owner_lanes :
 (** {1 Main Entry Point} *)
 
 (** [on_ready] runs once the owner is ready and the HTTP listener is bound.
-    It is not called when initialization fails before either boundary. *)
+    It is not called when initialization fails before either boundary.
+    [address] is the bind host already read by
+    {!Server_bootstrap_http.parse_bind_address}. *)
 val run :
   sw:Eio.Switch.t ->
   env:Eio_unix.Stdenv.base ->
-  host:string ->
+  address:Ipaddr.t ->
   port:int ->
   base_path:string ->
   ?input_base_path:string ->

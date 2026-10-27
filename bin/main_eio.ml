@@ -476,6 +476,20 @@ let record_default_arg =
   in
   Arg.(value & flag & info [ "record-default" ] ~doc)
 
+(* What `masc start` does when another process holds this workspace. *)
+type previous_owner =
+  | Refuse_previous_owner
+  | Wait_for_previous_owner
+
+let previous_owner_arg =
+  let doc =
+    "When another process holds this workspace, wait for it to exit instead \
+     of refusing to start. Nothing is signalled: `masc restart` passes this \
+     after it has asked the running server to stop."
+  in
+  Term.(const (function true -> Wait_for_previous_owner | false -> Refuse_previous_owner)
+    $ Arg.(value & flag & info [ "wait-for-previous-owner" ] ~doc))
+
 let build_provenance_path =
   let doc = "Absolute content-addressed executable provenance sidecar path" in
   Arg.(value & opt (some string) None & info ["build-provenance-path"] ~docv:"PATH" ~doc)
@@ -573,8 +587,45 @@ let shutdown_signal_name = function
   | Sigterm -> "SIGTERM"
   | Sigint -> "SIGINT"
 
-let acquire_base_path_lock ~run_dir base_path =
-  match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
+let announce_wait_for_previous_owner ~base_path owner =
+  let recorded =
+    match owner with
+    | Server_startup_takeover.Owner_this_process pid
+    | Server_startup_takeover.Owner_recorded pid -> Printf.sprintf "PID %d" pid
+    | Server_startup_takeover.Owner_unnamed -> "an unnamed process"
+  in
+  Log.legacy_stderr ~level:Log.Info ~module_name:"Server"
+    (Printf.sprintf
+       "Waiting for the previous owner of %s (the lease records %s) to exit. \
+        Nothing is signalled from here; stopping this process ends the wait."
+       base_path recorded)
+
+let acquire_base_path_lock ~previous_owner ~run_dir base_path =
+  let acquired =
+    match previous_owner with
+    | Refuse_previous_owner ->
+      Server_startup_takeover.acquire_base_path_lock ~run_dir base_path
+    | Wait_for_previous_owner ->
+      (match
+         Server_startup_takeover.acquire_base_path_lock_after_owner_exits ~run_dir
+           ~on_wait:(announce_wait_for_previous_owner ~base_path) base_path
+       with
+       | Ok acquired -> acquired
+       | Error (Server_startup_takeover.Another_replacement_waits { waiter; waiter_path }) ->
+         let named =
+           match Server_startup_takeover.base_path_owner_pid waiter with
+           | Some pid -> Printf.sprintf "PID %d" pid
+           | None -> "an unnamed process"
+         in
+         Log.legacy_stderr ~level:Log.Error ~module_name:"Server"
+           (Printf.sprintf
+              "[FATAL] Another replacement (%s, %s) already waits for the previous \
+               owner of %s; it starts once that owner exits. This process waits for \
+               nothing and exits."
+              named (Filename.quote waiter_path) base_path);
+         exit 1)
+  in
+  match acquired with
   | Server_startup_takeover.Base_path_acquired lease -> lease
   | Server_startup_takeover.Base_path_already_owned { owner; lock_path } ->
       let detail =
@@ -592,7 +643,7 @@ let acquire_base_path_lock ~run_dir base_path =
            (Server_startup_takeover.base_path_lock_rejection_to_string rejection));
       exit 1
 
-let run_cmd ?schema_observation ?(record_default = false) ~executable_path host port cli_base_path accept_store_quarantine =
+let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Refuse_previous_owner) ~executable_path host port cli_base_path accept_store_quarantine =
   Printexc.record_backtrace true;
   (* Read before the workspace directory is created or its lease taken, so a
      host the socket cannot bind leaves nothing behind. *)
@@ -653,7 +704,7 @@ let run_cmd ?schema_observation ?(record_default = false) ~executable_path host 
   let masc_dir = Filename.concat canonical_base_path Common.masc_dirname in
   let lease_dir = (Host_config.host ()).base_path_lease_dir in
   let base_path_lease =
-    acquire_base_path_lock ~run_dir:lease_dir canonical_base_path
+    acquire_base_path_lock ~previous_owner ~run_dir:lease_dir canonical_base_path
   in
   (* The lease has established the canonical .masc boundary. OCaml read its
      event-directory environment before entering ML, so the default needs a
@@ -1026,18 +1077,18 @@ let run_cmd ?schema_observation ?(record_default = false) ~executable_path host 
           ~backtrace:(Printexc.get_backtrace ()));
      exit 1)
 
-let run_cmd_exit host port base_path accept_store_quarantine provenance_path provenance_sha256 provenance_device provenance_inode record_default =
+let run_cmd_exit host port base_path accept_store_quarantine provenance_path provenance_sha256 provenance_device provenance_inode record_default previous_owner =
   let identity = Build_identity.current () in
   Installed_dashboard.initialize ~executable_path:identity.executable_path
     ~binary_commit:identity.binary_commit;
   match provenance_path, provenance_sha256, provenance_device, provenance_inode with
   | None, None, None, None ->
-    run_cmd ~record_default ~executable_path:identity.executable_path host port base_path accept_store_quarantine;
+    run_cmd ~record_default ~previous_owner ~executable_path:identity.executable_path host port base_path accept_store_quarantine;
     Cmd.Exit.ok
   | Some path, Some sha256, Some device, Some inode ->
     (match Build_identity.bind_executable_provenance ~path ~sha256 ~device ~inode with
      | Ok () ->
-       run_cmd ~record_default ~executable_path:identity.executable_path host port base_path accept_store_quarantine;
+       run_cmd ~record_default ~previous_owner ~executable_path:identity.executable_path host port base_path accept_store_quarantine;
        Cmd.Exit.ok
      | Error message ->
        Printf.eprintf "invalid build provenance: %s\n" message;
@@ -1339,6 +1390,7 @@ let front_door_cmd_exit
     | Ok port ->
       run_cmd_exit host (Workspace_connection.to_int port) base_path accept_store_quarantine provenance_path
         provenance_sha256 provenance_device provenance_inode record_default
+        Refuse_previous_owner
   in
   let deployment_flags_present =
     record_default
@@ -1378,7 +1430,7 @@ let start_cmd =
   in
   let info = Cmd.info "start" ~doc in
   Cmd.v info
-    Term.(const run_cmd_exit $ host $ port $ run_base_path $ accept_store_quarantine $ build_provenance_path $ build_provenance_sha256 $ build_provenance_device $ build_provenance_inode $ record_default_arg)
+    Term.(const run_cmd_exit $ host $ port $ run_base_path $ accept_store_quarantine $ build_provenance_path $ build_provenance_sha256 $ build_provenance_device $ build_provenance_inode $ record_default_arg $ previous_owner_arg)
 
 let schema_observe_cmd =
   let module Observation = Agent_core.Base.Schema_observation in

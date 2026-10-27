@@ -119,6 +119,36 @@ val acquire_base_path_lock :
   string ->
   base_path_acquire_result
 
+type base_path_wait_refusal =
+  | Another_replacement_waits of
+      { waiter : base_path_owner
+          (** The number the waiter file records, like a lease owner's. *)
+      ; waiter_path : string
+      }
+      (** Another process already waits for this workspace. A second waiter
+          would queue behind whichever process the kernel hands the lease to
+          next, so it is refused instead. *)
+
+(** {!acquire_base_path_lock}, except that a lease another process holds is
+    waited for instead of returned as [Base_path_already_owned]. It first
+    takes [<lease>.waiter] with [F_TLOCK], so only one process waits for a
+    workspace; a second one gets [Error Another_replacement_waits] at once.
+    Then [on_wait] hears the number the lease file records, and the process
+    sleeps in [lockf] until the kernel grants the lock, which happens the
+    moment the owner's descriptor closes. The waiter lock is released when
+    this returns. Nothing is signalled and nothing ends the wait but the
+    owner's exit or a signal to this process. For an owner that was already
+    asked to stop, as [masc restart] does. A lease this process already holds
+    is still [Base_path_already_owned].
+
+    [on_wait] runs while this module's process-wide lease mutex is held, so
+    it must not call back into this module. *)
+val acquire_base_path_lock_after_owner_exits :
+  run_dir:string ->
+  on_wait:(base_path_owner -> unit) ->
+  string ->
+  (base_path_acquire_result, base_path_wait_refusal) result
+
 val release_base_path_lease : base_path_lease -> unit
 
 (** Preserve an active lease across the caller's next [exec]. POSIX record

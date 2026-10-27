@@ -172,8 +172,23 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
             | Browser_lane.Interaction_running -> "working" in
           c.push_styled ~style:(Theme.info ()) ("  Agent "
             ^ Terminal_text.single_line (Option.value work.actor ~default:"MASC") ^ " · " ^ phase
-            ^ " · " ^ Terminal_text.single_line work.action ^ " · tab " ^ string_of_int work.tab_id
-            ^ " (at last connection read)")) client.interactions) view.selected_client;
+            ^ " · " ^ Terminal_text.single_line work.action
+            ^ (match work.tab_id with Some id -> " · tab " ^ string_of_int id | None -> " · space")
+            ^ " (at last connection read)")) client.interactions;
+        List.iter (fun (settled : Browser_lane.settled_activity) ->
+          let work=settled.work in
+          let outcome,style=match settled.outcome with
+            | Browser_lane.Activity_returned -> "returned",Theme.recede ()
+            | Activity_refused -> "not performed",Theme.warn ()
+            | Activity_partial -> "partly performed",Theme.warn ()
+            | Activity_unknown -> "outcome unknown",Theme.warn () in
+          c.push_styled ~style ("  Last · "
+            ^ Terminal_text.single_line (Option.value work.actor ~default:"MASC")
+            ^ " · " ^ Terminal_text.single_line work.action ^ " · " ^ outcome
+            ^ (match work.tab_id with Some id -> " · tab " ^ string_of_int id | None -> " · space")))
+          client.last_activities) view.selected_client;
+      Option.iter (fun detail -> c.push_styled ~style:(Theme.warn ())
+        ("  Activity refresh failed · " ^ Terminal_text.single_line detail)) view.activity_error;
       match view.client_picker with
       | Some cursor ->
           c.push_styled ~style:(Theme.info ()) "  Choose browser · separate sessions do not share login";

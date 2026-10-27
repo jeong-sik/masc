@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 # Isolated lane component check; does not type-check the full host or upload path.
 from pathlib import Path
-import subprocess,tempfile,shutil
+import subprocess,tempfile,shutil,argparse
+parser=argparse.ArgumentParser(description='Standalone actual browser-lane component checks, not full host proof')
+parser.add_argument('--activity',action='store_true',help='run the browser routing/activity feature suite')
+args=parser.parse_args()
 root=Path(__file__).resolve().parents[1]
 with tempfile.TemporaryDirectory(prefix='masc-native-lifetime-') as folder:
  d=Path(folder)
@@ -14,8 +17,12 @@ with tempfile.TemporaryDirectory(prefix='masc-native-lifetime-') as folder:
  # Root lane only aliases this module; none of these tests use upload leases.
  (d/'browser_upload_lease.ml').write_text('(* Unused upload-lease alias only; not upload/host integration proof. *)\n')
  files.append('browser_upload_lease.ml')
- for source in [root/'lib/browser_lane/browser_lane.ml',root/'test/test_browser_lane_watched_work.ml']:
+ test_name='test_browser_lane.ml' if args.activity else 'test_browser_lane_watched_work.ml'
+ for source in [root/'lib/browser_lane/browser_lane.ml',root/'test'/test_name]:
   shutil.copyfile(source,d/source.name);files.append(source.name)
- subprocess.run(['ocamlfind','ocamlc','-w','+4+32+69','-warn-error','+a','-ppx',str(d/'ppx.exe')+' -as-ppx','-package','alcotest,eio,eio.mock,mcp_protocol.eio,yojson,uuidm,uri,mtime.clock.os,ppx_enumerate.runtime-lib','-linkpkg',*files,'-o','check'],check=True,cwd=d)
+ compiler=['ocamlfind','ocamlc','-w','+4+32+69','-warn-error','+a','-ppx',str(d/'ppx.exe')+' -as-ppx','-package','alcotest,eio,eio_main,eio.mock,mcp_protocol.eio,yojson,uuidm,uri,mtime.clock.os,ppx_enumerate.runtime-lib']
+ subprocess.run([*compiler,'-c',*files[:-1]],check=True,cwd=d)
+ # Match dune's test/ flags while keeping library sources strict above.
+ subprocess.run([*compiler,'-w','-4-69','-linkpkg',*[Path(f).with_suffix('.cmo').name for f in files[:-1] if f.endswith('.ml')],files[-1],'-o','check'],check=True,cwd=d)
  subprocess.run([str(d/'check')],check=True,cwd=d)
  print('Actual lane sources and mock-clock tests compiled/executed; unused upload lease alias stubbed, not full host proof.')

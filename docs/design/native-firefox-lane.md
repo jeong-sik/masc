@@ -14,7 +14,6 @@ Set the existing workspace `runtime.toml`:
 
 ```toml
 [browser.automation]
-enabled = true
 geckodriver = "/absolute/path/to/geckodriver"
 ```
 

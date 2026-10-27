@@ -29,9 +29,6 @@ omitted keys retain their values. `--base-path` names the workspace containing
 `runtime.toml` there. Edit existing tables rather than appending duplicate ones:
 
 ```toml
-[browser.live]
-enabled = true
-
 [browser.live.bidi]
 firefox = "/absolute/path/to/firefox"
 profile = "/absolute/path/to/dedicated-firefox-profile"
@@ -80,10 +77,6 @@ orderly shutdown sends `browser.close` once; failure retains an unconfirmed
 outcome. Profile contents and stable claim files are preserved. A retired
 connection cannot be reused; discover the new instance's connection after
 reattachment. An uncertain input is never replayed automatically.
-
-`[browser.live] enabled = false` excludes this backend from the next attachment.
-It does not stop an existing worker that already captured the settings. Stop
-that installation through its Addon lifecycle.
 
 ## External Firefox connections
 

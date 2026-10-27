@@ -1,14 +1,17 @@
-# Browser execution as an optional Lane Add-on
+# Browser execution as optional Lane Add-ons
 
-The optional browser Add-on owns live command queues and Gecko automation.
-The Gecko driver starts only with an attached browser Add-on and a configured,
-enabled `[browser.automation]`. Chrome/Stagehand also starts inside that worker,
-with its original native process owner and shared Exact Output broker. The Keeper
-live Firefox also starts inside that worker when `[browser.live.bidi]` is
-configured and `[browser.live]` is enabled, and so does an ego lite
-connection when `[browser.live.ego]` is configured. Attaching the Add-on
-acquires its browser resources; detaching it revokes input and joins their
-cleanup. The configured Firefox profile keeps its logins across attachments.
+Each browser source is its own optional Lane Add-on with its own worker:
+`browser-automation` (Gecko automation), `browser-stagehand` (Chrome/Stagehand),
+`browser-firefox` (the Keeper live Firefox), `browser-ego` (an ego lite
+connection) and `browser-external` (the native hosts of external browsers). A
+worker runs only its source, from that source's `runtime.toml` table:
+`[browser.automation]`, `[browser.stagehand]`, `[browser.live.bidi]` or
+`[browser.live.ego]`; external hosts need none. Whether a source runs is its
+declaration's `enabled`. Chrome/Stagehand starts with its original native
+process owner and the shared Exact Output broker. Attaching an Add-on acquires
+its browser resources; detaching it revokes input and joins their cleanup. A
+failure of one source ends only its own worker. The configured Firefox profile
+keeps its logins across attachments.
 
 The ego connection owns no browser process. The worker receives its command
 and task space name as arguments (`--live-ego-command`, `--live-ego-space`),
@@ -29,8 +32,8 @@ owned by the original request are dropped, and the Keeper reobserves its page.
 Screenshots pass through a private directory that run creates and removes.
 Detaching ends the task space, which closes the pages it manages and keeps the
 tabs the operator opened there. An ego that cannot start, or a task space name
-the operator holds, fails the worker's start as a configured live Firefox
-does.
+the operator holds, fails the `browser-ego` worker's start as a configured live
+Firefox fails `browser-firefox`.
 
 The live Firefox path starts a new browser through the native process owner.
 It checks the original kernel lease and child identity, the configured profile
@@ -40,12 +43,13 @@ remain under their operator's control. Polls and results go directly to the
 original worker and client UUID. Normal detach sends `browser.close` once to
 that verified browser and waits for its original owner. Failed shutdown stays
 unconfirmed. Persistent profile contents and shared lease files remain in place.
-Failure to start a configured live Firefox prevents this worker from becoming
-ready; its other backends are joined during failed-start cleanup. An unexpected
-connection failure revokes that worker rather than publishing a dead client.
+Failure to start a configured live Firefox prevents the `browser-firefox`
+worker from becoming ready and joins its resources during failed-start cleanup.
+An unexpected connection failure revokes that worker rather than publishing a
+dead client; the other sources' workers keep running.
 
-The external WebExtension/native-host bridge remains available independently.
-Its observations describe those external hosts. Read the attached browser
+The external WebExtension/native-host bridge is the `browser-external` worker.
+Its observations describe those external hosts. Read the `browser-firefox`
 Add-on's observation for the worker-owned Firefox connection and startup errors.
 
 The operator selects two independent middleware boundaries:
@@ -467,7 +471,7 @@ receipts remain distinct from successful contract validation.
    fixture covers withdrawal of a blocked Exact call and a later request in the
    same worker. These scenarios have not yet been executed.
 
-   The bundled package now declares the fixed `locate` schema. A selected schema
+   The `browser-automation` package declares the fixed `locate` schema. A selected schema
    must match the worker consumer contract before publishing the Gecko backend;
    an omitted consumer is observed as unavailable independently of provider
    readiness. Owned Gecko `page.locate` reads a typed scene under the existing

@@ -27,9 +27,6 @@ masc browser-lane-setup --mode bidi --base-path /path/to/workspace \
 말고 기존 테이블을 수정합니다.
 
 ```toml
-[browser.live]
-enabled = true
-
 [browser.live.bidi]
 firefox = "/absolute/path/to/firefox"
 profile = "/absolute/path/to/dedicated-firefox-profile"
@@ -71,9 +68,6 @@ detach는 새 입력을 차단한 뒤 원래 peer와 자식의 정리를 기다�
 `browser.close`를 한 번 보내고, 실패하면 결과 불확실 상태를 보존합니다. 프로필 내용과
 안정된 claim 파일은 유지합니다. 종료된 연결은 재사용할 수 없으므로 재부착 후 새
 인스턴스의 연결을 탐색합니다. 결과가 불확실한 입력은 자동 재실행하지 않습니다.
-
-`[browser.live] enabled = false`는 다음 부착에서 이 backend를 제외합니다. 이미 설정을
-캡처한 worker를 종료하지는 않습니다. 해당 설치의 Addon lifecycle로 종료합니다.
 
 ## 외부 Firefox 연결
 

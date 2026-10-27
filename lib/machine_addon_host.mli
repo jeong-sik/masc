@@ -17,6 +17,12 @@ val call_shared :
     Without an export, a shared installation that declares [name] and cannot
     serve is named with its reason. *)
 
+val shared_skill_owner :
+  config:Workspace.config -> name:string -> Lane_addon_runtime.skill_export_owner option
+(** The owner whose package Skills belong to the attached shared installation
+    serving [name], the installation {!call_shared} calls. Reads the same live
+    export admission; [None] when no single one serves it now. *)
+
 val release_shared_controller :
   events:Machine_addon_events.batch -> config:Workspace.config -> holder:string -> by:string ->
   reason:Machine_controller_contract.holder_departure ->

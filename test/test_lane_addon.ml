@@ -888,7 +888,7 @@ let test_file_activity_preserves_explicit_observation () =
     (* A recovered source must be observed even when its bytes equal those
        before the intervening unavailable capture. *)
     let retained = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
-    let records = Store.observations retained ~instance_id:file_id |> unwrap in
+    let records = Store.observations retained ~instance_id:file_id ~through:5 |> unwrap in
     check Alcotest.int "changed, failed and recovered captures are all retained" 5 (List.length records);
     let sources,_ = List.nth records 3 in
     check bool "capture failure reaches the worker as incomplete input" true

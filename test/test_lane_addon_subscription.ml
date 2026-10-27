@@ -284,9 +284,8 @@ let producer_phase_preserves_position () = with_workspace (fun config ->
     (Result.is_error (ack config (receipt second)));
   Store.remove_binding retained ~instance_id:"malformed-peer" |> ok;
   producer retained "instance-1" 1;
-  let recovered = call config "researcher" (args "read") |> ok in
-  check bool "retained high-water recovers observation beyond stale binding" true
-    (receipt recovered = receipt second);
+  check bool "a file above the binding is not committed and is not read" true
+    (Result.is_error (call config "researcher" (args "read")));
   List.iter (fun phase ->
     producer ~phase:(T.phase_to_json phase) retained "instance-1" 2;
     let readable = call config "researcher" (args "read") |> ok in

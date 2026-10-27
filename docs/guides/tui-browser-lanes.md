@@ -193,15 +193,16 @@ The rows under it:
   none to run or none to trust: a running host, an unreadable record a host
   still holds, a lock that could not be asked, and a report this TUI cannot
   read.
-- With `[browser.live.bidi]` configured and the live lane on, the details
-  name the configured Addon-managed port and profile and point to that
-  Addon's observation for actual readiness. Manual host records remain
+- With `[browser.live.bidi]` configured and an enabled `browser-firefox`
+  declaration, the details name the configured Addon-managed port and
+  profile and point to that Addon's observation for actual readiness. Manual host records remain
   independent. Attaching the Addon starts its own Firefox; detaching joins
   cleanup and preserves the profile. An occupied port or profile requires
   the operator to close the existing browser before attachment.
-- With the live lane off, the configuration retains its paths without
-  configuring this backend on a new attachment. With no `[browser.live.bidi]`,
-  no Addon-managed live Firefox is configured.
+- With `[browser.live.bidi]` configured and no enabled `browser-firefox`
+  declaration, the details say the table is set but `browser-firefox` is off,
+  beside the steps to attach a host. With no `[browser.live.bidi]`, no
+  Addon-managed live Firefox is configured.
 - A server that does not report the host draws none of these rows.
 
 The first row of each state is this TUI's own words and fits 80 columns.

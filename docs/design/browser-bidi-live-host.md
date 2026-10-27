@@ -330,8 +330,10 @@ does next:
   - `keeper`: the configured browser ownership, by `kind`.
     `addon_managed` carries the configured `port` and `profile`. The attached
     Add-on observation supplies actual worker and connection readiness.
-    `lane_off`, `not_configured` (no `[browser.live.bidi]`) and `not_known`
-    (no configuration was read) carry nothing more.
+    `addon_off` (`[browser.live.bidi]` is set, but no enabled declaration
+    runs `browser-firefox`), `not_configured` (no `[browser.live.bidi]`) and
+    `not_known` (no configuration was read, or the declarations could not
+    all be read) carry nothing more.
   - `message`: the paragraph the doctor prints.
 - The TUI's Browser Lane picker draws it from the server's `bidiHost`:
   whether a host runs and whether the server lists it, why the last one

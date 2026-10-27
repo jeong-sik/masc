@@ -65,7 +65,7 @@ let fail_host exn =
 (* Each job gets its own fiber at once, so a long one never delays the next.
    The fiber catches everything the work raises. *)
 let serve () =
-  Domain_pool.tune_minor_heap ();
+  Minor_heap.tune ();
   match
     Eio_main.run (fun _env ->
       Eio.Switch.run (fun sw ->

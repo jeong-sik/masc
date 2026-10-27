@@ -104,17 +104,6 @@ let test_without_a_read_pool_reads_use_the_shared_pool () =
         check bool "the read still ran on a pool domain" true (where <> caller))))
 ;;
 
-(* Beside a read pool the shared pool gives up the read pool's domains; with
-   fewer than 4 recommended domains the floors keep both pools at one. *)
-let test_the_two_pools_share_the_recommended_count () =
-  let raw = Domain.recommended_domain_count () in
-  let shared = Domain_pool.shared_domain_count_beside_read () in
-  let read = Domain_pool.read_domain_count () in
-  if raw >= 4
-  then check int "shared + read = recommended" (Domain_pool.recommended_domain_count ()) (shared + read)
-  else check (pair int int) "small host floors" (1, 1) (shared, read)
-;;
-
 let () =
   run "Read pool"
     [ ( "isolation"
@@ -124,8 +113,6 @@ let () =
             test_background_work_and_nested_reads_stay_put
         ; test_case "without a read pool reads use the shared pool" `Quick
             test_without_a_read_pool_reads_use_the_shared_pool
-        ; test_case "the two pools share the recommended count" `Quick
-            test_the_two_pools_share_the_recommended_count
         ] )
     ]
 ;;

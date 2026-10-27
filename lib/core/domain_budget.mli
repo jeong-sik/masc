@@ -10,14 +10,16 @@
 
     The process has domains no pool owns ([fixed]): the main domain, the
     {!Systhread_host} domain, the Keeper snapshot codec and, when enabled, the
-    serving domain. What is left goes to the two pools: Agent Core's execution
-    codec runtime gets {!execution_codec_domains}, the shared masc pool gets the
+    serving domain. What is left goes to three pools: Agent Core's execution
+    codec runtime gets {!execution_codec_domains}, the HTTP read pool
+    (RFC-0204 L3) gets {!read_pool_domains}, the shared masc pool gets the
     rest. *)
 
 type plan = private
   { limit : int  (** [recommended - 1], at least 1 *)
-  ; fixed : int  (** domains outside the two pools *)
+  ; fixed : int  (** domains outside the three pools *)
   ; shared_pool : int  (** masc [Domain_pool] workers *)
+  ; read_pool : int  (** masc read [Domain_pool] workers *)
   ; execution_codec : int  (** Agent Core [Execution_runtime] workers *)
   }
 
@@ -26,19 +28,24 @@ type error =
       { override : int
       ; limit : int
       ; fixed : int
+      ; read_pool : int
       ; execution_codec : int
       }
       (** [MASC_EXECUTOR_DOMAIN_COUNT] asked for more shared pool workers than
-          the default would take: the limit after the fixed domains and the
-          codec runtime, or 1 on a host too small for that. *)
+          the default would take: the limit after the fixed domains, the read
+          pool and the codec runtime, or 1 on a host too small for that. *)
 
 val execution_codec_domains : int
 (** Agent Core execution codec workers when the host has room: 2. *)
 
+val read_pool_domains : int
+(** Read pool workers when the host has room: 2. Short of room the codec
+    runtime drops to 1 first, then the read pool. *)
+
 val plan : recommended:int -> fixed:int -> override:int option -> (plan, error) result
 (** [override] is the shared pool size the operator set; [None] takes the
     rest of the limit. Each pool keeps at least one worker, so a host with
-    fewer than [fixed + 2] usable domains gets a plan whose {!total} exceeds
+    fewer than [fixed + 3] usable domains gets a plan whose {!total} exceeds
     [limit]; {!within_limit} tells the caller to say so. *)
 
 val total : plan -> int

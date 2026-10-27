@@ -7,7 +7,7 @@ module B = Browser_lane
 module F = Browser_addon_fixture
 let require = function Ok value -> value | Error detail -> fail detail
 let client n browser transport = {B.client_id=require (B.client_id_of_string
-    (Printf.sprintf "0c000000-0000-4000-8000-%012d" n));browser;version="1";engine_version="1";transport}
+    (Printf.sprintf "0c000000-0000-4000-8000-%012d" n));browser;version="1";engine_version="1";transport;space=None}
 let bidi=client 1 B.Firefox B.Webdriver_bidi
 let ego=client 2 B.Ego_lite B.Ego_task_space
 let extension=client 3 B.Zen B.Web_extension

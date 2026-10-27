@@ -156,6 +156,7 @@ type owned_regular_file_contents =
 
 val load_owned_regular_file_with_snapshot
   :  ?owner_uid:int
+  -> ?single_link:bool
   -> ownership_root:string
   -> string
   -> (owned_regular_file_contents option, owned_regular_file_read_error) result
@@ -166,10 +167,14 @@ val load_owned_regular_file_with_snapshot
     that UID, and every parent to lack group/other write permission, inside
     the same before/open/after-read validation. All parent identities are
     retained for this mode. Without it, existing no-follow and
-    immediate-parent identity checks are unchanged; ownership is not enforced. *)
+    immediate-parent identity checks are unchanged; ownership is not enforced.
+    [single_link] defaults to false. When true, the observed leaf and actual
+    descriptor must have exactly one hard link before and after I/O. This
+    policy is independent of [owner_uid]. Only initial absence returns None;
+    a lost or changed observed file remains an error, never fresh authority. *)
 
 module Owned_read_for_testing : sig
-  val load_with_snapshot : parent_lstat:(string -> Unix.stats) -> owner_uid:int ->
+  val load_with_snapshot : ?single_link:bool -> parent_lstat:(string -> Unix.stats) -> owner_uid:int ->
     ownership_root:string -> string -> (owned_regular_file_contents option, owned_regular_file_read_error) result
 end
 

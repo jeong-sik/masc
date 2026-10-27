@@ -83,8 +83,7 @@ type failed = { cause : failure; first : failure option }
     that confirmed container absence. [Native_released] names the exact
     installation and incarnation whose admission is retired and settled.
     [Native_retained] names one whose admission settled but whose resources
-    the host did not release: the operator took them over, or its browser
-    left files for the Keeper there. *)
+    the host could not confirm released: the operator took them over. *)
 type release =
   | Never_created
   | Released of { engine : engine; container_id : string option }

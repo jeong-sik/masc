@@ -17,10 +17,11 @@ let source_backend = function
   | External_host -> Browser_lane.Backend.External_host
 type t = {path:string;incarnation:string;backend:Browser_lane.Backend.t;models:bool;device:int;inode:int}
 type acquisition = Missing | Acquired of int * int | Cleaning of int * int | Retained of int * int | Released
-type settlement =
-  | Allocation_released
-  | Allocation_retained
-  | Allocation_kept of { directory : string; files : int }
+type settlement = Allocation_released | Allocation_retained
+type cleanup_result =
+  | Cleanup_released
+  | Cleanup_kept of { directory : string; files : int }
+  | Cleanup_retained
 let socket_path t = t.path
 let arguments t ~max_message_bytes = ["--socket";t.path;"--incarnation";t.incarnation;
   "--max-message-bytes";string_of_int max_message_bytes;"--backend";Browser_lane.Backend.to_wire t.backend]
@@ -235,6 +236,29 @@ let keeper_file_count root =
       let* more=keeper_files (Filename.concat root tree) in
       Ok (count+more))
     (Ok 0) keeper_file_trees
+(* A private directory of this user at [path], made if absent. *)
+let private_directory_at ~label path =
+  (try Unix.mkdir path 0o700 with Unix.Unix_error (Unix.EEXIST,_,_) -> ());
+  let* _=Requirement.lstat ~label Requirement.private_directory path in
+  Ok ()
+(* Moves each Keeper file tree of [root] into [into] by rename, so every byte
+   is kept and nothing is copied or deleted. A tree already at the
+   destination, or a rename to another file system, refuses and leaves the
+   remaining trees where they are. *)
+let move_keeper_files ~kept_root ~into ~root =
+  let* ()=private_directory_at ~label:"kept browser files root" kept_root in
+  let* ()=private_directory_at ~label:"kept browser files" into in
+  let* ()=List.fold_left (fun acc tree ->
+      let* ()=acc in
+      let source=Filename.concat root tree and target=Filename.concat into tree in
+      match Unix.lstat source with
+      | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok ()
+      | _ ->
+        (match Unix.lstat target with
+         | _ -> Error (Printf.sprintf "kept browser files already hold %s" target)
+         | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Unix.rename source target;Ok ()))
+    (Ok ()) keeper_file_trees in
+  sync into;sync root;Ok ()
 (* What an allocation of [source] may hold besides its socket: the files and
    folders its browser writes. [None] is an allocation whose acquisition was
    never confirmed, which may hold only its socket. *)
@@ -367,10 +391,7 @@ let check_retained ~instance_id ~slot context = protect (fun () ->
     | Stagehand c -> Browser_addon_stagehand.check_retained_child c ~incarnation:instance_id ~directory:root
     | Owned_firefox c -> Browser_addon_live_bidi.check_retained_child c ~incarnation:instance_id ~directory:root
     | Automation _ | Ego | External_host -> Ok ())
-(* What [cleanup] did with a confirmed allocation's directory: removed it, or
-   left it in place because the browser left files for the Keeper. *)
-type removal = Emptied | Kept of { info : Unix.stats; files : int }
-let cleanup ~admission ~directory = protect (fun () ->
+let cleanup ~admission ~directory ~kept_root = protect (fun () ->
   let* directory=slot admission directory in
   let* status=Native_addon_lease.status admission |> Result.map_error Native_addon_lease.error_to_string in
   let* ()=match status with
@@ -379,22 +400,22 @@ let cleanup ~admission ~directory = protect (fun () ->
   let instance_id=Native_addon_lease.instance_id admission in
   let* envelope=context_envelope admission in
   match envelope with
-  | None -> let* ()=no_allocation ~instance_id ~directory in Ok Allocation_released
+  | None -> let* ()=no_allocation ~instance_id ~directory in Ok Cleanup_released
   | Some (root,fields) ->
     let file=record admission directory in
     let* identity=acquisition ~instance_id ~root:(Some root) ~file ~directory in
     (* Retain transferred the whole allocation, including its backend payloads.
        Only the original envelope and host record still belong to this check. *)
     match identity with
-    | Retained _ -> Ok Allocation_retained
-    | Released -> let* ()=released_directory_absent root in Ok Allocation_released
+    | Retained _ -> Ok Cleanup_retained
+    | Released -> let* ()=released_directory_absent root in Ok Cleanup_released
     | Missing|Acquired _|Cleaning _ ->
     let* _,source,models=decode_context (root,fields) in
     let* ()=match source with
       | Stagehand c -> Browser_addon_stagehand.settle c ~incarnation:(Native_addon_lease.instance_id admission) ~directory:root
       | Owned_firefox c -> Browser_addon_live_bidi.settle c ~incarnation:(Native_addon_lease.instance_id admission) ~directory:root
       | Automation _ | Ego | External_host -> Ok () in
-    let* removal=match Unix.lstat root with
+    let* kept=match Unix.lstat root with
       | info ->
         let* ()=private_root root info in
         let* ()=match identity with
@@ -407,13 +428,18 @@ let cleanup ~admission ~directory = protect (fun () ->
             if info.st_dev=device && info.st_ino=inode then Ok ()
             else Error (Requirement.replaced ~label:socket_directory_label ~path:root
               ~expected:{Requirement.device;inode} ~observed:(Requirement.identity info)) in
-        (* The browser is confirmed gone: its claim and child claims settled
-           and the directory is the one it acquired. Files it left for the
-           Keeper keep this directory, so they hold no installation. *)
+        (* The worker's group and child claims settled and the directory is
+           the one acquired. Files the browser left for the Keeper move out
+           whole to [kept_root], named for this instance, and the release
+           goes on without them. *)
         let* kept=match identity with
-          | Acquired _|Cleaning _ -> keeper_file_count root
-          | Missing|Retained _|Released -> Ok 0 in
-        if kept>0 then Ok (Kept {info;files=kept}) else
+          | Acquired _|Cleaning _ ->
+            let* files=keeper_file_count root in
+            if files=0 then Ok None else
+            let into=Filename.concat kept_root instance_id in
+            let* ()=move_keeper_files ~kept_root ~into ~root in
+            Ok (Some (into,files))
+          | Missing|Retained _|Released -> Ok None in
         let confirmed=match identity with Cleaning _ -> true | Missing|Acquired _|Retained _|Released -> false in
         let confirm ()=if confirmed then Ok () else
           Fs_compat.save_file_atomic_strict file
@@ -421,7 +447,7 @@ let cleanup ~admission ~directory = protect (fun () ->
         let source=match identity with Missing -> None | Acquired _|Cleaning _|Retained _|Released -> Some source in
         let models=match identity with Missing -> None | Acquired _|Cleaning _|Retained _|Released -> models in
         let* ()=cleanup_contents ~admission ~root ~source ~models ~confirmed ~confirm in
-        Unix.rmdir root;Ok Emptied
+        Unix.rmdir root;Ok kept
       | exception Unix.Unix_error (Unix.ENOENT,_,_) ->
         (* A source that starts a browser keeps its resources in the
            allocation; one acquired and gone was never confirmed released. *)
@@ -429,16 +455,12 @@ let cleanup ~admission ~directory = protect (fun () ->
           | Automation _ | Stagehand _ | Owned_firefox _ -> true | Ego | External_host -> false in
         (match identity,starts_browser with
          | Acquired _,true -> Error "owned browser allocation vanished without confirmed cleanup"
-         | (Missing|Cleaning _|Retained _|Released),_ | Acquired _,false -> Ok Emptied) in
-    match removal with
-    | Kept {info;files} ->
-      let* ()=Fs_compat.save_file_atomic_strict file
-        (Yojson.Safe.to_string (acquired_json admission root info ~state:"retained")) in
-      Ok (Allocation_kept {directory=root;files})
-    | Emptied ->
-      sync (Filename.dirname root);
-      let* ()=Fs_compat.save_file_atomic_strict file (Yojson.Safe.to_string (`Assoc ["state",`String "released"])) in
-      Ok Allocation_released)
+         | (Missing|Cleaning _|Retained _|Released),_ | Acquired _,false -> Ok None) in
+    sync (Filename.dirname root);
+    let* ()=Fs_compat.save_file_atomic_strict file (Yojson.Safe.to_string (`Assoc ["state",`String "released"])) in
+    Ok (match kept with
+      | None -> Cleanup_released
+      | Some (directory,files) -> Cleanup_kept {directory;files}))
 type retain_error = Retain_refused of string | Retained_record_unconfirmed of string
 (* What [retain] decided before writing anything. *)
 type retain_plan =

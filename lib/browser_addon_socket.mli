@@ -35,34 +35,41 @@ val with_download_snapshot : t -> Browser_addon_downloads.descriptor ->
     The worker supplies a UUID and identity/digest, never a pathname. The callback
     must consume this descriptor without reopening a path. *)
 val arguments : t -> max_message_bytes:int -> string list
-(** What {!cleanup} or {!retain} confirmed about the allocation of a Settled
-    claim. *)
+(** What {!retain} confirmed about the allocation of a Settled claim. *)
 type settlement =
   | Allocation_released
       (** Its known resources were removed, or it never had any. *)
   | Allocation_retained
-      (** Its record says retained: the operator took it over, or an earlier
-          {!cleanup} kept it. Nothing of it was removed and it stays where it
-          is. *)
-  | Allocation_kept of { directory : string; files : int }
-      (** This {!cleanup} found the browser gone and [files] files it left for
-          the Keeper (downloads, their snapshots, uploads) under [directory].
-          It recorded the allocation retained and removed nothing. *)
-val cleanup : admission:Native_addon_lease.t -> directory:string -> (settlement, string) result
+      (** The operator took it over; nothing of it was removed and it stays
+          where it is. *)
+
+(** What {!cleanup} confirmed about the allocation of a Settled claim. *)
+type cleanup_result =
+  | Cleanup_released
+      (** Its known resources were removed, or it never had any. *)
+  | Cleanup_kept of { directory : string; files : int }
+      (** As [Cleanup_released], after moving the [files] files the browser
+          left for the Keeper into [directory]. *)
+  | Cleanup_retained
+      (** The operator took it over; nothing of it was removed. *)
+val cleanup : admission:Native_addon_lease.t -> directory:string -> kept_root:string ->
+  (cleanup_result, string) result
 (** Existing claim must be Settled. The original native reservation decides
     whether cleanup is required, including orphan recovery. Known directories
     are never reused and unknown contents are never recursively deleted. A
     missing acquisition record with an existing socket is unconfirmed. A
-    retained allocation is reported as [Allocation_retained] before decoding
+    retained allocation is reported as [Cleanup_retained] before decoding
     backend configuration or inspecting its children or contents. The original
     claim, descriptor envelope and acquisition record must still agree.
 
     Once the browser's child claims are settled and the directory is the one
-    acquired, regular files of this user under [uploads], [download-snapshots]
-    or [downloads] keep the allocation: its record becomes retained, as a
-    {!retain} writes it, nothing is removed, and the result is
-    [Allocation_kept]. A link or another kind of entry there is not counted
-    and leaves the release unconfirmed. *)
+    acquired, the trees [uploads], [download-snapshots] and [downloads] that
+    hold regular files of this user move by rename into
+    [kept_root/<instance id>], made private if absent, and the release goes
+    on: [Cleanup_kept]. Nothing the browser left for the Keeper is copied or
+    deleted. A link or another kind of entry in those trees, a tree already at
+    the destination, or a rename to another file system leaves the release
+    unconfirmed. *)
 type retain_error =
   | Retain_refused of string
       (** The acquisition record was not changed. *)

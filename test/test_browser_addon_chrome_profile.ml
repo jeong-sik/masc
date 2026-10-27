@@ -26,7 +26,7 @@ let scenario launcher guardian () =
     let safe=match !original,!configuration,!allocated with
       | Some admission,Some c,Some directory -> clear admission
         && Result.is_ok (Chrome.settle c ~incarnation ~directory)
-        && Result.is_ok (Socket.cleanup ~admission ~directory:worker_slot)
+        && Result.is_ok (Socket.cleanup ~admission ~directory:worker_slot ~kept_root:(Filename.concat root "kept-files"))
       | None,None,None -> true | _ -> false in
     let safe=safe && (match !successor with None -> true | Some claim -> clear claim) in
     if safe then remove root else prerr_endline ("retained uncertain profile fixture: " ^ root)) (fun () ->
@@ -92,9 +92,10 @@ while True:
       lease (Lease.retire next);
       ok (Chrome.settle c ~incarnation ~directory);
       lease (Lease.retire admission);
-      (match ok (Socket.cleanup ~admission ~directory:worker_slot) with
-       | Socket.Allocation_released -> ()
-       | Allocation_retained | Allocation_kept _ -> Alcotest.fail "the allocation was retained, not released");
+      (match ok (Socket.cleanup ~admission ~directory:worker_slot ~kept_root:(Filename.concat root "kept-files")) with
+       | Socket.Cleanup_released -> ()
+       | Cleanup_kept _ -> Alcotest.fail "the allocation moved files the test never left"
+       | Cleanup_retained -> Alcotest.fail "the allocation was retained, not released");
       check "old cleanup works after the shared profile intent advances" false (Sys.file_exists directory);
       Alcotest.check Alcotest.string "login fixture survives old-owner cleanup" "retained-login-fixture"
         (In_channel.with_open_bin marker In_channel.input_all);

@@ -163,15 +163,17 @@ let scenario ?(open_session=false) ?(refuse_delete=false) ?(wrong_profile=false)
       (In_channel.with_open_bin (Filename.concat driver_root "delete-calls") In_channel.input_all);
     (* The backend scope has joined its driver, so nothing it started holds
        the allocation. The session's profile is left for the host's pass. *)
-    (match ok (Socket.cleanup ~admission ~directory:slot) with
-     | Socket.Allocation_released -> ()
-     | Allocation_retained | Allocation_kept _ -> Alcotest.fail "the allocation was retained, not released");
+    (match ok (Socket.cleanup ~admission ~directory:slot ~kept_root:(slot ^ "-kept")) with
+     | Socket.Cleanup_released -> ()
+     | Cleanup_kept _ -> Alcotest.fail "the allocation moved files the test never left"
+     | Cleanup_retained -> Alcotest.fail "the allocation was retained, not released");
     check bool "a session whose DELETE was refused keeps its profile for the host" true
       (List.for_all Sys.file_exists (seen_profiles driver_root) && seen_profiles driver_root <> []))
   else (
-    (match ok (Socket.cleanup ~admission ~directory:slot) with
-     | Socket.Allocation_released -> ()
-     | Allocation_retained | Allocation_kept _ -> Alcotest.fail "the allocation was retained, not released");
+    (match ok (Socket.cleanup ~admission ~directory:slot ~kept_root:(slot ^ "-kept")) with
+     | Socket.Cleanup_released -> ()
+     | Cleanup_kept _ -> Alcotest.fail "the allocation moved files the test never left"
+     | Cleanup_retained -> Alcotest.fail "the allocation was retained, not released");
     check bool "original allocation released" false (Sys.file_exists directory));
   List.iter Fs_compat.remove_tree [slot;driver_root;profile_root])
 (* The worker of #45187 kept serving after its creation answer carried no
@@ -192,9 +194,10 @@ let with_instance ~marker body = Eio_main.run (fun env ->
     body ~env ~owner ~instance_id ~directory ~driver_root;
     check bool "the worker retired admission" true (Owner.is_retired owner);
     lease (Native_addon_lease.retire admission);
-    (match ok (Socket.cleanup ~admission ~directory:slot) with
-     | Socket.Allocation_released -> ()
-     | Allocation_retained | Allocation_kept _ -> fail "the allocation was retained, not released");
+    (match ok (Socket.cleanup ~admission ~directory:slot ~kept_root:(slot ^ "-kept")) with
+     | Socket.Cleanup_released -> ()
+     | Cleanup_kept _ -> fail "the allocation moved files the test never left"
+     | Cleanup_retained -> fail "the allocation was retained, not released");
     (* The host pass removes a profile the ended worker left. *)
     let left=seen_profiles driver_root in
     let outcomes=Masc.Browser_gecko_sweep.(pass (create ~termination_grace_seconds)

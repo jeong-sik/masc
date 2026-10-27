@@ -174,7 +174,8 @@ let interrupted_reservation () = native_installation_with_slot (fun directory ->
    the operator may, only for that failure, and a refusal leaves the record as
    it was. A browser allocation that holds an unknown resource stays where it
    is, and no later recovery reports it released. One that holds only a file
-   its browser left for the Keeper is kept by recovery itself. *)
+   its browser left for the Keeper is released by recovery itself, after the
+   file moves to the store's kept files. *)
 let operator_retain () = with_fixture (fun clock root config ->
   let manifest = write_native_manifest root in
   let id = dispatch config R.Attach ["manifest_path",`String manifest;
@@ -280,13 +281,17 @@ let operator_retain () = with_fixture (fun clock root config ->
       (match R.dispatch ~caller:"retain-tester" ~access:Lane_addon_sources.Operator_configuration ~config
           ~operation:R.Detach (`Assoc ["instance_id",`String third]) with
        | Error (R.Runtime_failed _) -> true | Ok _ | Error (R.Request_rejected _) -> false));
-  (* With only a download its browser left for the Keeper, recovery keeps the
-     allocation itself: no operator retain is needed and the file stays. *)
-  let fourth, _, _, allocation, left = browser_instance ~path:"downloads/unread-download" in
-  Fun.protect ~finally:(fun () -> remove allocation) (fun () ->
+  (* With only a download its browser left for the Keeper, recovery moves the
+     file to the store's kept files and releases the allocation: no operator
+     retain is needed. *)
+  let fourth, _, _, allocation, _ = browser_instance ~path:"downloads/unread-download" in
+  let kept = Filename.concat (Filename.concat (Lane_addon_store.root store) "kept-files") fourth in
+  Fun.protect ~finally:(fun () -> if Sys.file_exists allocation then remove allocation; remove kept) (fun () ->
     ignore (dispatch config R.Detach ["instance_id",`String fourth]);
-    check string "recovery keeps the allocation of a Keeper's file" "native_retained" (release_kind fourth);
-    check bool "the left download stays in place" true (Sys.file_exists left)))
+    check string "recovery releases the allocation of a Keeper's file" "native_released" (release_kind fourth);
+    check bool "the allocation is gone" false (Sys.file_exists allocation);
+    check bool "the download is in the kept files" true
+      (Sys.file_exists (Filename.concat (Filename.concat kept "downloads") "unread-download"))))
 let browser_server = {|import argparse,hashlib,json,os,socket,subprocess,sys,threading,time
 p=argparse.ArgumentParser()
 p.add_argument("root");p.add_argument("mode")

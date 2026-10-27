@@ -292,8 +292,8 @@ location or a configured label.
 
 `GET /api/v1/dashboard/browser-lane/clients` (read-state permission) returns
 `{ok:true,data:{clients:[{clientId,browser,version,engineVersion,transport}],bidiHost:{state,record,lock_held,detail,attach,message}}}`.
-`clients` are the live connections whose poll lease is current or whose delivered
-executor-owned work is still running, and `bidiHost` is what the
+`clients` are the live connections whose poll lease is current, whose delivered
+executor-owned work is still running, or that the browser Add-on worker holds, and `bidiHost` is what the
 BiDi host's record says ([Live BiDi browser host](browser-bidi-live-host.md)). Browser reads, screenshots, and
 interactions accept `clientId`. With no ID, only one connected live client can
 be selected; multiple connections return `ambiguous_browser_clients`, and none
@@ -352,14 +352,17 @@ headers: `x-browser-client-id`, `x-browser-name`, `x-browser-version`, and
 `x-browser-engine-version`. Hosts also declare `x-browser-transport` as
 `web_extension` or `webdriver_bidi`; an omitted transport identifies the
 WebExtension poll contract. The `ego_task_space` connection runs inside the
-browser Add-on worker and polls there, not over this route. Empty or unknown transports, missing required
+browser Add-on worker and polls there, not over this route. The worker holds
+the connections it runs itself, its own Firefox over BiDi and ego: the poll
+lease does not apply to them, and they end when the worker disconnects them or
+its owner is retired. Empty or unknown transports, missing required
 identity headers, and a transport change on an existing client ID are rejected. Each client
 has its own queue and pending response owners. An HTTP result from a different
 client cannot settle another client's command. Native EOF attempts a bounded
-`POST /browser-lane/disconnect`; after a crash without cleanup the existing
+`POST /browser-lane/disconnect`; after a native host crashes without cleanup the
 120-second poll lease detects idle connection loss. A delivered executor-owned
 request retains its original connection while its SDK operation is running;
-queued work alone does not. Its result renews the ordinary idle lease. Explicit
+queued work alone does not. For a native host its result renews the idle lease. Explicit
 disconnect overrides running work, and cancellation removes the original
 waiter and its execution ownership. Closed/expired clients release queued
 payloads; only their retired IDs remain until server restart. Retired native

@@ -47,6 +47,12 @@ let scenario () =
      | Service_refusal _|Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Receipt|Issue_result _ -> fail "live registration refused");
     ok (Owner.attach_live owner ~client_id ~cleanup:(fun () ->
       incr live_calls;Eio.Promise.resolve start_live ();Eio.Promise.await live_settled;Ok ()));
+    (* The owner ends its own connection, so the lane does not time it. *)
+    check bool "the owner holds the live connection it attached" true
+      (match B.resolve_target ~verb:B.Tabs_list (B.Live_route (Some client_id)) with
+       | Ok (B.Live_client attached) ->
+         (match attached.liveness with B.Worker_held -> true | B.Polled _ -> false)
+       | Ok (B.Automation|B.Stagehand) | Error _ -> false);
     ok (Owner.attach_automation owner ~locate:false
       ~execute:(fun _ -> fail "retirement must not dispatch browser input")
       ~session:(fun () -> B.Browser_closed)

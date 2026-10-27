@@ -5,10 +5,14 @@
 (test
  (name test_play_page)
  (modules test_play_page)
- ; The agent guide renders config/prompts/play.agent_guide.md.
- (deps (source_tree %{workspace_root}/config/prompts))
+ ; The agent guide renders config/prompts/play.agent_guide.md and lists the
+ ; Skills a copy of addons/dos-machine publishes.
+ (deps
+  (source_tree %{workspace_root}/config/prompts)
+  ../addons/dos-machine/lane.toml
+  (source_tree ../addons/dos-machine/skills))
  (action (run %{test}))
- (libraries machine_worker_fixture mcp_protocol masc.machine_configuration masc_test_deps alcotest yojson h2 bigstringaf unix eio eio_main masc.masc_core masc.dos_lane masc.server))
+ (libraries machine_worker_fixture mcp_protocol masc.machine_configuration masc_test_deps alcotest yojson h2 bigstringaf unix eio eio_main masc.masc_core masc.dos_lane masc.server masc.skill_snapshot_service))
 
 (rule
  (alias runtest-test_play_page_client)

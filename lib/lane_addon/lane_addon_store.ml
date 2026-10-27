@@ -634,26 +634,51 @@ let with_tool_request_scope ~namespace ~sync_parent t ~scope fn =
   serialized_tool_request_read t ~scope (fun () -> read_tool_request_scope ~namespace ~sync_parent t ~scope fn)
 let with_tool_request_owner_scope ~sync_parent t ~scope fn =
   with_tool_request_scope ~namespace:tool_request_owners_directory ~sync_parent t ~scope fn
-let read_owned_tool_request_bytes_and_stat ~sync_file ~sync_parent ~owner_uid held name =
+let read_owned_tool_request_bytes ~sync_file ~sync_parent ~owner_uid held name =
   let path = Filename.concat (Fs_compat.owned_inventory_root_path held) name in
   let* relative = Fs_compat.owned_relative_path [name] in
   let* result = Fs_compat.with_owned_inventory_regular_file ~owner_uid held relative
     (fun ~file ~parent ~stat -> protect (fun () ->
       let* bytes = record_bytes file stat.Unix.st_size in
       let* read = settle_verified_record ~sync_file ~sync_parent path file stat bytes parent in
-      let* bytes = changed_during_verification read in
-      Ok (bytes,stat))) |> owned_result in
+      changed_during_verification read)) |> owned_result in
   result
-let read_owned_tool_request_bytes ~sync_file ~sync_parent ~owner_uid held name =
-  read_owned_tool_request_bytes_and_stat ~sync_file ~sync_parent ~owner_uid held name
-  |> Result.map fst
 let read_owned_tool_request ~sync_file ~sync_parent ~owner_uid held name =
   let* bytes = read_owned_tool_request_bytes ~sync_file ~sync_parent ~owner_uid held name in
   protect (fun () -> Ok (Yojson.Safe.from_string bytes))
+let read_startup_tool_request ~owner_uid held name =
+  let* relative = Fs_compat.owned_relative_path [name] in
+  let* result = Fs_compat.with_owned_inventory_regular_file ~owner_uid held relative
+    (fun ~file ~parent ~stat:_ -> protect (fun () ->
+      Unix.fsync file;
+      Unix.fsync parent;
+      let copy = Unix.dup ~cloexec:true file in
+      let input = Unix.in_channel_of_descr copy in
+      let json = Fun.protect ~finally:(fun () -> close_in input)
+        (fun () -> Yojson.Safe.from_channel input) in
+      Unix.fsync file;
+      Unix.fsync parent;
+      Ok json)) |> owned_result in
+  result
 let inspect_staged_tool_request ~owner_uid held name =
   let* relative = Fs_compat.owned_relative_path [name] in
   Fs_compat.with_owned_inventory_regular_file ~owner_uid held relative
     (fun ~file ~parent ~stat:_ -> Unix.fsync file; Unix.fsync parent) |> owned_result
+let inspect_tool_request_body ~owner_uid held name =
+  let* relative = Fs_compat.owned_relative_path [name] in
+  let* stat = Fs_compat.with_owned_inventory_regular_file ~owner_uid held relative
+    (fun ~file ~parent ~stat -> Unix.fsync file; Unix.fsync parent; stat) |> owned_result in
+  (* Stream the digest through the held inventory root, without allocating the
+     request size. Tie that observation back to the owned single-link file
+     whose descriptor and parent were just synced. *)
+  let* digest = Fs_compat.owned_inventory_entry_digest held relative |> owned_result in
+  let snapshot = digest.Fs_compat.snapshot in
+  if snapshot.device <> stat.Unix.st_dev || snapshot.inode <> stat.st_ino
+     || snapshot.owner_uid <> stat.st_uid || snapshot.permissions <> (stat.st_perm land 0o7777)
+     || snapshot.file_size <> stat.st_size || snapshot.modified_at <> stat.st_mtime
+     || snapshot.changed_at <> stat.st_ctime then
+    Error "original request body changed during inventory"
+  else Ok (digest.sha256,stat)
 let tool_request_owner_record t ~scope ~request_id =
   let name = digest request_id ^ ".json" in
   let* result = read_tool_request_scope ~namespace:tool_request_owners_directory ~sync_parent:Unix.fsync t ~scope
@@ -814,7 +839,9 @@ let fold_tool_request_owner_inventory_all_with ~check_staged ~serialize_scopes t
                           read acc tail
                         | Unknown_entry -> Error "unknown entry in original request namespace"
                         | Record_entry ->
-                          let* json=read_owned_tool_request ~sync_file:Unix.fsync ~sync_parent:Unix.fsync ~owner_uid held file_name in
+                          let* json = if serialize_scopes then
+                              read_owned_tool_request ~sync_file:Unix.fsync ~sync_parent:Unix.fsync ~owner_uid held file_name
+                            else read_startup_tool_request ~owner_uid held file_name in
                           let* acc=f acc ~directory_name ~file_name json in
                           read acc tail in
                     read acc files) |> owned_result in
@@ -913,8 +940,7 @@ let fold_archived_tool_request_owners t ~init ~f =
                                scan_records acc remaining
                              | Unknown_entry -> Error "unknown entry in settled original request records"
                              | Record_entry ->
-                               let* json = read_owned_tool_request ~sync_file:Unix.fsync
-                                 ~sync_parent:Unix.fsync ~owner_uid files name in
+                               let* json = read_startup_tool_request ~owner_uid files name in
                                let* acc = f acc ~directory_name:scope_name ~file_name:name json in
                                scan_records acc remaining) in
                         scan_records acc names) in
@@ -935,7 +961,7 @@ type tool_request_body_entry = {
   snapshot : Unix.stats;
 }
 
-let tool_request_body_inventory_all ~validate t =
+let tool_request_body_inventory_all t =
   inventory_blocking ~label:"addon-original-body-inventory" (fun () ->
     let* result = Fs_compat.with_owned_inventory_root (Filename.dirname t.root) (fun anchor ->
       let owner_uid = Unix.geteuid () in
@@ -959,13 +985,10 @@ let tool_request_body_inventory_all ~validate t =
                     let* request_digest = match Filename.chop_suffix_opt ~suffix:".json" name with
                       | Some digest when String_util.is_lowercase_sha256_hex digest -> Ok digest
                       | Some _ | None -> Error "unknown file in original request body namespace" in
-                    let* bytes,snapshot = read_owned_tool_request_bytes_and_stat
-                      ~sync_file:Unix.fsync ~sync_parent:Unix.fsync ~owner_uid held name in
-                    if not (String.equal (digest bytes) request_digest) then
+                    let* content_digest,snapshot = inspect_tool_request_body ~owner_uid held name in
+                    if not (String.equal content_digest request_digest) then
                       Error "original request body does not match its digest"
-                    else
-                      let* () = validate bytes in
-                      scan_files ({scope_directory;request_digest;snapshot} :: acc) tail in
+                    else scan_files ({scope_directory;request_digest;snapshot} :: acc) tail in
                 scan_files acc names) in
               let* acc = require_inventory scope in
               scan_scopes acc rest in

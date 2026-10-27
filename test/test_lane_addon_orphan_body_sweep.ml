@@ -126,6 +126,29 @@ let test_two_active_records_can_share_a_body () = with_store (fun root store ->
     Alcotest.(check bool) "each original still restores its shared input" true
       ((load store ~scope:"shared" ~id).request = request)) ["first";"second"])
 
+let test_referenced_non_json_body_is_protected_but_not_loadable () = with_store (fun root store ->
+  let scope = "owner" and request = `String "original" and orphan = `String "unrelated" in
+  retain store ~scope ~id:"id" ~request;
+  let record_path = Filename.concat root (Filename.concat Store.tool_request_owners_directory
+    (Filename.concat (Store.digest scope) (Store.digest "id" ^ ".json"))) in
+  let bytes = "{not-json" in
+  let digest = Store.digest bytes in
+  get (Store.save_tool_request_body store ~scope ~request_digest:digest bytes);
+  let record = Yojson.Safe.from_file record_path in
+  let record = match record with
+    | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
+        if key = "request_digest" then key,`String digest else key,value) fields)
+    | _ -> Alcotest.fail "fixture needs an owner record" in
+  get (Store.save_tool_request_owner store ~scope ~request_id:"id" record);
+  Sys.remove (body_path root ~scope ~request);
+  stage_orphan store ~scope:"other" orphan;
+  let report = run store in
+  Alcotest.(check int) "unrelated orphan is removed" 1 report.removed;
+  Alcotest.(check bool) "named body remains" true
+    (exists (Filename.concat root (Store.tool_request_body_path ~scope ~request_digest:digest)));
+  Alcotest.(check bool) "normal owner load still rejects noncanonical input" true
+    (Result.is_error (Owner.load ~store ~scope ~request_id:"id")))
+
 let test_unsafe_staging_entry_aborts_but_regular_partial_stage_is_kept () = with_store (fun root store ->
   let orphan = `String "orphan" in
   stage_orphan store ~scope:"one" orphan;
@@ -142,14 +165,56 @@ let test_unsafe_staging_entry_aborts_but_regular_partial_stage_is_kept () = with
   Alcotest.(check int) "safe incomplete staging does not prevent cleanup" 1 report.removed;
   Alcotest.(check bool) "partial staging file is preserved" true (exists stage))
 
-let test_noncanonical_unknown_body_aborts_before_removal () = with_store (fun root store ->
-  let orphan = `String "unrelated" and invalid = "{broken" in
+let test_digest_mismatch_aborts_before_removal () = with_store (fun root store ->
+  let orphan = `String "unrelated" and original = "original bytes" in
   stage_orphan store ~scope:"valid" orphan;
-  get (Store.save_tool_request_body store ~scope:"invalid" ~request_digest:(Store.digest invalid) invalid);
+  let digest = Store.digest original in
+  get (Store.save_tool_request_body store ~scope:"invalid" ~request_digest:digest original);
+  let path = Filename.concat root (Store.tool_request_body_path ~scope:"invalid" ~request_digest:digest) in
+  get (Fs_compat.save_file_atomic_strict path "changed bytes");
   (match Sweep.run ~store with
    | Error (Sweep.Inventory_unavailable _) -> ()
-   | Error (Sweep.Removal_incomplete _) | Ok _ -> Alcotest.fail "unknown body was accepted");
+   | Error (Sweep.Removal_incomplete _) | Ok _ -> Alcotest.fail "digest mismatch was accepted");
   Alcotest.(check bool) "unrelated orphan was not deleted" true (exists (body_path root ~scope:"valid" ~request:orphan)))
+
+let test_unreferenced_non_json_body_is_removed () = with_store (fun root store ->
+  let bytes = "{incomplete" and scope = "scope" in
+  let digest = Store.digest bytes in
+  get (Store.save_tool_request_body store ~scope ~request_digest:digest bytes);
+  let report = run store in
+  Alcotest.(check int) "store permits an unreferenced non-JSON body" 1 report.removed;
+  Alcotest.(check bool) "the unreferenced file is gone" false
+    (exists (Filename.concat root (Store.tool_request_body_path ~scope ~request_digest:digest))))
+
+let test_sparse_body_mismatch_preserves_other_candidates () = with_store (fun root store ->
+  let original = "original" and orphan = `String "unrelated" in
+  let digest = Store.digest original in
+  stage_orphan store ~scope:"valid" orphan;
+  get (Store.save_tool_request_body store ~scope:"sparse" ~request_digest:digest original);
+  let path = Filename.concat root (Store.tool_request_body_path ~scope:"sparse" ~request_digest:digest) in
+  let fd = Unix.openfile path [Unix.O_WRONLY;Unix.O_TRUNC] 0 in
+  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
+    ignore (Unix.LargeFile.lseek fd 8388607L Unix.SEEK_SET);
+    ignore (Unix.write_substring fd "x" 0 1));
+  (match Sweep.run ~store with
+   | Error (Sweep.Inventory_unavailable _) -> ()
+   | Error (Sweep.Removal_incomplete _) | Ok _ -> Alcotest.fail "large sparse mismatch was accepted");
+  Alcotest.(check bool) "other candidate remains" true (exists (body_path root ~scope:"valid" ~request:orphan)))
+
+let test_sparse_malformed_record_preserves_other_candidates () = with_store (fun root store ->
+  let orphan = `String "unrelated" in
+  retain store ~scope:"owner" ~id:"id" ~request:(`String "original");
+  stage_orphan store ~scope:"valid" orphan;
+  let path = Filename.concat root (Filename.concat Store.tool_request_owners_directory
+    (Filename.concat (Store.digest "owner") (Store.digest "id" ^ ".json"))) in
+  let fd = Unix.openfile path [Unix.O_WRONLY;Unix.O_TRUNC] 0 in
+  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
+    ignore (Unix.LargeFile.lseek fd 8388607L Unix.SEEK_SET);
+    ignore (Unix.write_substring fd "x" 0 1));
+  (match Sweep.run ~store with
+   | Error (Sweep.Inventory_unavailable _) -> ()
+   | Error (Sweep.Removal_incomplete _) | Ok _ -> Alcotest.fail "malformed sparse record was accepted");
+  Alcotest.(check bool) "other candidate remains" true (exists (body_path root ~scope:"valid" ~request:orphan)))
 
 let test_inventory_errors_do_not_disclose_input () =
   let sentinel = "private-sentinel-in-malformed-json" in
@@ -159,9 +224,12 @@ let test_inventory_errors_do_not_disclose_input () =
       Alcotest.(check bool) "error does not expose input bytes" false
         (String_util.contains_substring (Sweep.error_to_string error) sentinel)
     | Error (Sweep.Removal_incomplete _) | Ok _ -> Alcotest.fail "malformed input was accepted" in
-  with_store (fun _ store ->
-    let bytes = "!" ^ sentinel in
-    get (Store.save_tool_request_body store ~scope:"bad" ~request_digest:(Store.digest bytes) bytes);
+  with_store (fun root store ->
+    let bytes = "original" in
+    let digest = Store.digest bytes in
+    get (Store.save_tool_request_body store ~scope:"bad" ~request_digest:digest bytes);
+    let path = Filename.concat root (Store.tool_request_body_path ~scope:"bad" ~request_digest:digest) in
+    get (Fs_compat.save_file_atomic_strict path ("!" ^ sentinel));
     refuses_without_leak store);
   with_store (fun root store ->
     retain store ~scope:"owner" ~id:"id" ~request:(`String "original");
@@ -177,7 +245,11 @@ let () = Alcotest.run "lane addon orphan body sweep" ["cleanup", [
   Alcotest.test_case "changed body is retained" `Quick test_replaced_body_is_not_removed;
   Alcotest.test_case "missing body in one scope is not masked" `Quick test_missing_active_body_is_not_masked_by_another_scope;
   Alcotest.test_case "same-scope shared body remains available" `Quick test_two_active_records_can_share_a_body;
+  Alcotest.test_case "referenced noncanonical body stays owned" `Quick test_referenced_non_json_body_is_protected_but_not_loadable;
   Alcotest.test_case "staging file safety" `Quick test_unsafe_staging_entry_aborts_but_regular_partial_stage_is_kept;
-  Alcotest.test_case "unknown body aborts before removal" `Quick test_noncanonical_unknown_body_aborts_before_removal;
+  Alcotest.test_case "digest mismatch aborts before removal" `Quick test_digest_mismatch_aborts_before_removal;
+  Alcotest.test_case "unreferenced non-JSON body can be removed" `Quick test_unreferenced_non_json_body_is_removed;
+  Alcotest.test_case "sparse body mismatch aborts before removal" `Quick test_sparse_body_mismatch_preserves_other_candidates;
+  Alcotest.test_case "sparse malformed record aborts before removal" `Quick test_sparse_malformed_record_preserves_other_candidates;
   Alcotest.test_case "inventory errors do not disclose input" `Quick test_inventory_errors_do_not_disclose_input;
 ]]

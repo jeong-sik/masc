@@ -147,8 +147,9 @@ val tool_request_archive_directory : string
 val tool_request_archive_record_path : scope:string -> date:string -> request_id:string -> string
 val tool_request_archive_body_path : scope:string -> date:string -> request_digest:string -> string
 (** Where a settled original's record and body live, relative to {!root}:
-    [tool-request-owners-settled/<scope digest>/<date>/records|bodies/]. No
-    pass lists or reads this namespace. *)
+    [tool-request-owners-settled/<scope digest>/<date>/records|bodies/]. Startup
+    cleanup inventories the records but does not read archive body contents;
+    no other pass lists or reads this namespace. *)
 val with_tool_request_settlement_barrier : t -> (unit -> 'a) -> ('a, string) result
 (** Serialize a read-only whole-store sweep with the record and body moves of
     cooperating settles in this process. [work] may re-enter individual scope
@@ -222,13 +223,12 @@ type tool_request_body_entry = private {
   request_digest : string;
   snapshot : Unix.stats;
 }
-val tool_request_body_inventory_all :
-  validate:(string -> (unit, string) result) ->
-  t -> (tool_request_body_entry list, string) result
+val tool_request_body_inventory_all : t -> (tool_request_body_entry list, string) result
 (** Inspect all published live bodies, verifying owned single-link files and
-    their content digests and the caller's validation. Incomplete owned regular
-    atomic staging entries are preserved without parsing their contents.
-    Any malformed, unsafe or changing entry rejects the entire inventory. *)
+    their content digests with bounded-memory streaming. Body contents are not
+    parsed. Incomplete owned regular atomic staging entries are preserved.
+    A malformed name, digest mismatch or unsafe or changing entry rejects the
+    entire inventory. *)
 val remove_inventoried_tool_request_body : t -> tool_request_body_entry -> (unit, string) result
 (** Remove an unchanged inventory entry through a held parent and fsync it.
     The caller must exclude every original writer across the inventory and

@@ -18,6 +18,7 @@ import time
 
 repo = Path(os.environ["DUNE_SOURCEROOT"])
 http_binary, stdio_binary = (Path(arg).resolve() for arg in sys.argv[1:3])
+os.umask(0o077)
 
 
 def orphan(base, value):

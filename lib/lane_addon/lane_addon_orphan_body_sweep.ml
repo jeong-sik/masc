@@ -52,7 +52,7 @@ let run_with ~before_remove ~store =
     ~f:(fun marked ~directory_name ~file_name json ->
       let* record = Owner.decode_published ~directory_name ~file_name json in
       protect_record ~active:false marked record) |> Result.map_error unavailable in
-  let* bodies = Store.tool_request_body_inventory_all ~validate:Owner.validate_canonical_request_body store
+  let* bodies = Store.tool_request_body_inventory_all store
     |> Result.map_error unavailable in
   let present = List.fold_left (fun present (entry : Store.tool_request_body_entry) ->
     Body_keys.add (entry.scope_directory,entry.request_digest) present) Body_keys.empty bodies in

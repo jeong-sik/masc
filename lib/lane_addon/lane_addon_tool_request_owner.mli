@@ -41,9 +41,6 @@ type retained = private {
 }
 val request_digest : Yojson.Safe.t -> (string, string) result
 (** The digest a record names a request by: of its canonical JSON bytes. *)
-val validate_canonical_request_body : string -> (unit, string) result
-(** Check the complete canonical request without loading or granting ownership
-    of a record. The caller separately verifies any claimed digest. *)
 val load : store:Lane_addon_store.t -> scope:string -> request_id:string ->
   (retained option, error) result
 (** Read the record and the complete original canonical request it names
@@ -114,8 +111,9 @@ val retain : store:Lane_addon_store.t -> scope:string -> request_id:string ->
     original destination is idempotent and preserves advanced progress; the
     request is compared by its digest. Invalid JSON is refused before writing. A retain
     interrupted between the two writes leaves a body no record names.
-    Retaining the same request again writes that body again; otherwise nothing
-    reads it or removes it. A record whose body is missing is an error.
+    Retaining the same request again writes that body again; startup cleanup may
+    remove it when no active intent or archived record can name it. A record
+    whose body is missing is an error.
     Publication failure is not proof of absence: a retry strictly reads the
     original record again. *)
 type update_error = Ownership_error of error | State_conflict | Invalid_transition of string

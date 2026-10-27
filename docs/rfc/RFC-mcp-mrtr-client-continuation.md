@@ -52,21 +52,24 @@ MASC 의 현재 상태는 이렇다.
 명세 근거는 [MRTR](https://modelcontextprotocol.io/specification/2026-07-28/basic/patterns/mrtr)
 페이지다(원본: 명세 저장소 `docs/specification/2026-07-28/basic/patterns/mrtr.mdx`). 이 RFC 가
 기대는 문장은 다음과 같다. 괄호의 번호는 페이지의 "Server Requirements (Basic Workflow)" 와
-"Client Requirements (Basic Workflow)" 목록 번호다.
+"Client Requirements (Basic Workflow)" 목록 번호이고, 뒤의 `:숫자` 는 원본 `mrtr.mdx` 의 줄이다.
+원본은 모든 항목을 `1.` 로 적어서 번호가 소스에 보이지 않으니 줄로 찾는다.
 
 - 서버는 server→client 요청을 MRTR 로 보내야 한다. 이 요구는 그런 요청을 보낼 때만 의미가 있다.
   (페이지 머리말)
-- 서버는 클라이언트가 선언하지 않은 요청을 `inputRequests` 에 넣어서는 안 된다. (서버 7)
+- 서버는 클라이언트가 선언하지 않은 요청을 `inputRequests` 에 넣어서는 안 된다. (서버 7, :246)
 - 서버는 `InputRequiredResult` 에 `inputRequests` 와 `requestState` 중 하나 이상을 넣어야 한다.
-  (서버 6)
+  (서버 6, :245)
 - 서버는 들어온 `requestState` 를 공격자가 만든 입력으로 다루고, 결과에 영향을 주면 무결성을
-  검증해야 한다. (서버 4)
-- `inputRequests` 가 없으면 클라이언트는 원래 요청을 바로 다시 보내도 된다. (클라이언트 1)
+  검증해야 한다. (서버 4, :232)
+- `inputRequests` 가 없으면 클라이언트는 원래 요청을 바로 다시 보내도 된다. (클라이언트 1, :251-253)
+  글자 그대로 읽으면 `requestState` 도 없는 결과에 붙는다. 그런 결과는 서버 6 을 어긴 것이고,
+  그때 클라이언트가 할 일은 명세에 없다. D2 에서 정한다.
 - 클라이언트는 `requestState` 를 있는 그대로 돌려줘야 하고, 없던 라운드에는 넣어서는 안 된다.
-  (클라이언트 2)
-- 재시도의 JSON-RPC `id` 는 처음 요청과 달라야 한다. (클라이언트 3)
-- `requestState` 와 `inputRequests` 는 그 재시도 하나에만 쓴다. (클라이언트 4)
-- 서버는 클라이언트가 재시도할 것이라고 가정해서는 안 된다. (서버 8)
+  (클라이언트 2, :254-255)
+- 재시도의 JSON-RPC `id` 는 처음 요청과 달라야 한다. (클라이언트 3, :256)
+- `requestState` 와 `inputRequests` 는 그 재시도 하나에만 쓴다. (클라이언트 4, :257)
+- 서버는 클라이언트가 재시도할 것이라고 가정해서는 안 된다. (서버 8, :247)
 - `InputRequiredResult` 를 보낼 수 있는 요청은 `tools/call`, `resources/read`, `prompts/get` 이다.
   ("Supported Requests" 표)
 
@@ -88,7 +91,7 @@ MASC 의 현재 상태는 이렇다.
 |---|---|
 | `inputRequests` 없음, `requestState` 있음 | 같은 도구·인자·`requestState` 로 새 id 를 달아 다시 보낸다 |
 | `inputRequests` 있음 | 지금처럼 `Input_required` 실패. 클라이언트는 capability 를 선언하지 않으므로 서버가 보낸 `inputRequests` 는 명세 위반(서버 7)이다. 선언했더라도 `ElicitRequest`, `CreateMessageRequest`, `ListRootsRequest` 어느 것도 채울 수단이 없다 |
-| 둘 다 없음 | 명세 위반(서버 6)이므로 `Malformed`. 상태도 요청도 없는 라운드는 이어 갈 근거가 없다 |
+| 둘 다 없음 | 서버가 서버 6 을 어긴 경우다. 클라이언트 1 은 글자 그대로 읽으면 이때도 다시 보내도 된다고 하지만, 새 id 만 달아 같은 요청을 되풀이하는 셈이라 서버가 같은 답을 주면 마감까지 헛돈다. 그래서 `Malformed` 로 끝낸다. 명세가 정한 동작이 아니라 이 RFC 의 선택이다 |
 
 ### D3. 승인 한 번이 한 번의 호출 전체를 덮는다
 
@@ -163,7 +166,7 @@ MASC 의 현재 상태는 이렇다.
 | `requestState` 만 있는 라운드 2번 뒤 완료 | 호출 하나가 결과를 돌려주고, id 가 모두 다르고, 상태가 정확히 그대로 간다 |
 | `requestState` 가 없는 라운드 | 재시도에 `requestState` 필드가 없다 |
 | `inputRequests` 가 있는 라운드 | 이어 붙이지 않고 `Input_required` 실패 |
-| 둘 다 없는 라운드 | `Malformed` |
+| 둘 다 없는 라운드 | `Malformed` (D2. 명세에 없는 이 RFC 의 선택) |
 | 라운드 중 전송 오류 | 이어 붙이지 않는다. 같은 라운드를 다시 보내지 않는다 |
 | 라운드 중 취소 | `notifications/cancelled` 가 나가고 이어 붙이기가 멈춘다 |
 | 라운드 중 도구 스키마 변경 | 보내기 전에 중단 |

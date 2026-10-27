@@ -1,0 +1,11 @@
+{
+  "arguments": {
+    "schedule_id": "audit-real-model-ab22839971c14a7eb6e5a94c85646236",
+    "keeper_name": "audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb",
+    "due_in_sec": 1,
+    "message": "This authorized scheduled job has TWO required effects on schedule_id \"audit-real-model-ab22839971c14a7eb6e5a94c85646236\". First append exactly one note with body \"SCHEDULE_EFFECT_63304533b8b44b3c92237752df8967ba\" using masc_schedule_note_add. Then observe schedule_id \"audit-real-model-ab22839971c14a7eb6e5a94c85646236-second\" with masc_schedule_notes_list until its note with exact body \"SCHEDULE_EFFECT_63304533b8b44b3c92237752df8967ba_SECOND\" and author_id \"audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb\" is available. A missing schedule or missing note means the dependency has not arrived yet, not completion. Only AFTER observing that exact B note, append exactly one note to your original schedule_id \"audit-real-model-ab22839971c14a7eb6e5a94c85646236\" with body \"SCHEDULE_EFFECT_63304533b8b44b3c92237752df8967ba_AFTER_B\". Both effects belong to this original job. Do not write B's note yourself, create another schedule, send a message, invoke shell tools, or ask for confirmation. Preserve this unfinished request when another scheduled job arrives. Do not finish this job until both of its required notes have been written and read back."
+  },
+  "json_value_sha256": "cbd206fd992ddb435c0158e13cb6eb5f8c27178545a3ec868afb5711a1072de1",
+  "json_value_bytes": 1329,
+  "recorded_before_admission": true
+}

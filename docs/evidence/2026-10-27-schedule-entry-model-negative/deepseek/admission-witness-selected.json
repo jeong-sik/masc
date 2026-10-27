@@ -1,0 +1,214 @@
+{
+  "schema": "masc.schedule-entry-negative.admission-witness.v1",
+  "scope": "Identity-only exact typed System span; all matching per-round issuer partitions plus retained latest per-turn serialization capture. User body presence is checked by exact JSON unquoting against retained generated arguments. Full prompts/messages/reasoning omitted.",
+  "turns": [
+    {
+      "turn_ref": "trace-1793065478099-00000#1",
+      "expected_admitted_source": "A",
+      "provider_capture_phase": [
+        "Pre_dispatch_serialization"
+      ],
+      "latest_wire_body_bytes": 87574,
+      "latest_wire_body_sha256": "326f4ea7c099d00d4a37a45580fd116a4e5e2e21314c0cee8fce9a3c7c3b54dd",
+      "system_blob_bytes": 25948,
+      "system_blob_sha256": "74607081442916cb051de0d9a40330f47e92187550423a143f762c1b8f1a1590",
+      "admission_span": {
+        "offset": 25249,
+        "bytes": 699,
+        "sha256": "60b20b03dc2a1388b6178e7c0e835d36a5108e72f0fea892fed585a1150b92aa",
+        "text": "- observation=\"scheduled_admission_at_turn_entry\" turn_ref=\"trace-1793065478099-00000#1\" standing=\"historical_entry_only_not_permission\" availability=\"known\" scheduled_source_count=\"1\"\n- source_post_id=\"142605d83bde054be416c58a9ad165a0a334ea10ae4b12b333b688ede4160a1e\" occurrence_id=\"142605d83bde054be416c58a9ad165a0a334ea10ae4b12b333b688ede4160a1e\" schedule_id=\"audit-real-model-ab22839971c14a7eb6e5a94c85646236\" schedule_instance_id=\"01a17b07-e8f8-7000-8591-600aaf237219\" due_at_unix=\"1793065479.3913751\" payload_digest=\"deb0851a09ed531d35ae4b07c47f0505fad7891736cb2143b472dc5ad6bf029d\" source_snapshot_ref=\"28afe4e04b22492dbe31f24c464708520b4ef3622ca335c04f053b2304dead54\" admitted_revision=\"0\"\n\n"
+      },
+      "issued_round_partitions": [
+        {
+          "agent_core_turn_count": 0,
+          "status": "pre_tool_context_injection",
+          "ts": "2026-10-27T01:44:40Z",
+          "system_bytes": 25948,
+          "system_sha256": "74607081442916cb051de0d9a40330f47e92187550423a143f762c1b8f1a1590",
+          "admission_offset": 25249,
+          "admission_bytes": 699,
+          "admission_sha256": "60b20b03dc2a1388b6178e7c0e835d36a5108e72f0fea892fed585a1150b92aa"
+        },
+        {
+          "agent_core_turn_count": 1,
+          "status": "post_tool_context_injection",
+          "ts": "2026-10-27T01:44:42Z",
+          "system_bytes": 25948,
+          "system_sha256": "74607081442916cb051de0d9a40330f47e92187550423a143f762c1b8f1a1590",
+          "admission_offset": 25249,
+          "admission_bytes": 699,
+          "admission_sha256": "60b20b03dc2a1388b6178e7c0e835d36a5108e72f0fea892fed585a1150b92aa"
+        },
+        {
+          "agent_core_turn_count": 2,
+          "status": "post_tool_context_injection",
+          "ts": "2026-10-27T01:44:44Z",
+          "system_bytes": 25948,
+          "system_sha256": "74607081442916cb051de0d9a40330f47e92187550423a143f762c1b8f1a1590",
+          "admission_offset": 25249,
+          "admission_bytes": 699,
+          "admission_sha256": "60b20b03dc2a1388b6178e7c0e835d36a5108e72f0fea892fed585a1150b92aa"
+        },
+        {
+          "agent_core_turn_count": 3,
+          "status": "post_tool_context_injection",
+          "ts": "2026-10-27T01:44:45Z",
+          "system_bytes": 25948,
+          "system_sha256": "74607081442916cb051de0d9a40330f47e92187550423a143f762c1b8f1a1590",
+          "admission_offset": 25249,
+          "admission_bytes": 699,
+          "admission_sha256": "60b20b03dc2a1388b6178e7c0e835d36a5108e72f0fea892fed585a1150b92aa"
+        },
+        {
+          "agent_core_turn_count": 4,
+          "status": "post_tool_context_injection",
+          "ts": "2026-10-27T01:44:48Z",
+          "system_bytes": 25948,
+          "system_sha256": "74607081442916cb051de0d9a40330f47e92187550423a143f762c1b8f1a1590",
+          "admission_offset": 25249,
+          "admission_bytes": 699,
+          "admission_sha256": "60b20b03dc2a1388b6178e7c0e835d36a5108e72f0fea892fed585a1150b92aa"
+        },
+        {
+          "agent_core_turn_count": 5,
+          "status": "post_tool_context_injection",
+          "ts": "2026-10-27T01:44:49Z",
+          "system_bytes": 25948,
+          "system_sha256": "74607081442916cb051de0d9a40330f47e92187550423a143f762c1b8f1a1590",
+          "admission_offset": 25249,
+          "admission_bytes": 699,
+          "admission_sha256": "60b20b03dc2a1388b6178e7c0e835d36a5108e72f0fea892fed585a1150b92aa"
+        }
+      ],
+      "B_turn_durable_User_requests": []
+    },
+    {
+      "turn_ref": "trace-1793065478099-00000#2",
+      "expected_admitted_source": "B",
+      "provider_capture_phase": [
+        "Pre_dispatch_serialization"
+      ],
+      "latest_wire_body_bytes": 89821,
+      "latest_wire_body_sha256": "692554d6033ca8d3418693f5eb10daec5a6955f9e23fd67aadb88629c89a8b27",
+      "system_blob_bytes": 25955,
+      "system_blob_sha256": "e0b535b21817e71d46406f185a45eb340affab90de14aadae244af60957307cc",
+      "admission_span": {
+        "offset": 25249,
+        "bytes": 706,
+        "sha256": "c3628c85ac93ce5bc32cd685d03c6b3dda60fbdd7e2629bc7c988e72e789176e",
+        "text": "- observation=\"scheduled_admission_at_turn_entry\" turn_ref=\"trace-1793065478099-00000#2\" standing=\"historical_entry_only_not_permission\" availability=\"known\" scheduled_source_count=\"1\"\n- source_post_id=\"431505fc5873e6e644a982d0a997fecde86d713df7cd240e071053292c08df24\" occurrence_id=\"431505fc5873e6e644a982d0a997fecde86d713df7cd240e071053292c08df24\" schedule_id=\"audit-real-model-ab22839971c14a7eb6e5a94c85646236-second\" schedule_instance_id=\"01a17b08-0e68-7000-a87c-bbda4a0b1c80\" due_at_unix=\"1793065488.9742451\" payload_digest=\"01d727187ab9402d85a4ab6e9291e198bf753c797e92c4beafde9d5d900d2630\" source_snapshot_ref=\"d26699fe6cd271848bc7f749d50024c9146efbf6926b708e9e7f860bb2f76121\" admitted_revision=\"1\"\n\n"
+      },
+      "issued_round_partitions": [
+        {
+          "agent_core_turn_count": 6,
+          "status": "pre_tool_context_injection",
+          "ts": "2026-10-27T01:44:50Z",
+          "system_bytes": 25955,
+          "system_sha256": "e0b535b21817e71d46406f185a45eb340affab90de14aadae244af60957307cc",
+          "admission_offset": 25249,
+          "admission_bytes": 706,
+          "admission_sha256": "c3628c85ac93ce5bc32cd685d03c6b3dda60fbdd7e2629bc7c988e72e789176e"
+        },
+        {
+          "agent_core_turn_count": 7,
+          "status": "post_tool_context_injection",
+          "ts": "2026-10-27T01:44:52Z",
+          "system_bytes": 25955,
+          "system_sha256": "e0b535b21817e71d46406f185a45eb340affab90de14aadae244af60957307cc",
+          "admission_offset": 25249,
+          "admission_bytes": 706,
+          "admission_sha256": "c3628c85ac93ce5bc32cd685d03c6b3dda60fbdd7e2629bc7c988e72e789176e"
+        },
+        {
+          "agent_core_turn_count": 8,
+          "status": "post_tool_context_injection",
+          "ts": "2026-10-27T01:44:53Z",
+          "system_bytes": 25955,
+          "system_sha256": "e0b535b21817e71d46406f185a45eb340affab90de14aadae244af60957307cc",
+          "admission_offset": 25249,
+          "admission_bytes": 706,
+          "admission_sha256": "c3628c85ac93ce5bc32cd685d03c6b3dda60fbdd7e2629bc7c988e72e789176e"
+        },
+        {
+          "agent_core_turn_count": 9,
+          "status": "post_tool_context_injection",
+          "ts": "2026-10-27T01:44:55Z",
+          "system_bytes": 25955,
+          "system_sha256": "e0b535b21817e71d46406f185a45eb340affab90de14aadae244af60957307cc",
+          "admission_offset": 25249,
+          "admission_bytes": 706,
+          "admission_sha256": "c3628c85ac93ce5bc32cd685d03c6b3dda60fbdd7e2629bc7c988e72e789176e"
+        },
+        {
+          "agent_core_turn_count": 10,
+          "status": "post_tool_context_injection",
+          "ts": "2026-10-27T01:44:57Z",
+          "system_bytes": 25955,
+          "system_sha256": "e0b535b21817e71d46406f185a45eb340affab90de14aadae244af60957307cc",
+          "admission_offset": 25249,
+          "admission_bytes": 706,
+          "admission_sha256": "c3628c85ac93ce5bc32cd685d03c6b3dda60fbdd7e2629bc7c988e72e789176e"
+        }
+      ],
+      "B_turn_durable_User_requests": [
+        {
+          "index": 0,
+          "role": "user",
+          "origin": "conversation",
+          "artifact_bytes": 2972,
+          "artifact_sha256": "093f7ef4d57d177d1b0bdc6f9c553b9b53a8a338b27b8cf2bb4f5f5061232bb9",
+          "exact_JSON_unquoted_request_matches": [
+            "A"
+          ],
+          "message_utf8_sha256": {
+            "A": "e7f04bccf9af7ff346664d21012f21138198a77ee83157534aa395fdd674f34b"
+          }
+        },
+        {
+          "index": 13,
+          "role": "user",
+          "origin": "conversation",
+          "artifact_bytes": 2222,
+          "artifact_sha256": "cba5f9021ee3cf70df82609ef56ddb95d60d83907a9a34046c653004b05c9edf",
+          "exact_JSON_unquoted_request_matches": [
+            "B"
+          ],
+          "message_utf8_sha256": {
+            "B": "0d7fd9d5cc601b9cd0c2cb1d71b62c780328e0e6cae4e8b4facacd67c8f27f2a"
+          }
+        }
+      ]
+    },
+    {
+      "turn_ref": "trace-1793065478099-00000#3",
+      "expected_admitted_source": "A",
+      "provider_capture_phase": [
+        "Pre_dispatch_serialization"
+      ],
+      "latest_wire_body_bytes": 96732,
+      "latest_wire_body_sha256": "b99e4df32af8d52c3a216aca893e0efc8296d1f8f9b470cf45ecbf6818530d3f",
+      "system_blob_bytes": 25948,
+      "system_blob_sha256": "83c157db601f547f4a63213a24a2b142c52ed24a31617994d9c4c55dee00a0e6",
+      "admission_span": {
+        "offset": 25249,
+        "bytes": 699,
+        "sha256": "fa88672f1693a0e70a16e1c59de2e3fbf843f1adc19189e8aaa6e3e531368678",
+        "text": "- observation=\"scheduled_admission_at_turn_entry\" turn_ref=\"trace-1793065478099-00000#3\" standing=\"historical_entry_only_not_permission\" availability=\"known\" scheduled_source_count=\"1\"\n- source_post_id=\"142605d83bde054be416c58a9ad165a0a334ea10ae4b12b333b688ede4160a1e\" occurrence_id=\"142605d83bde054be416c58a9ad165a0a334ea10ae4b12b333b688ede4160a1e\" schedule_id=\"audit-real-model-ab22839971c14a7eb6e5a94c85646236\" schedule_instance_id=\"01a17b07-e8f8-7000-8591-600aaf237219\" due_at_unix=\"1793065479.3913751\" payload_digest=\"deb0851a09ed531d35ae4b07c47f0505fad7891736cb2143b472dc5ad6bf029d\" source_snapshot_ref=\"28afe4e04b22492dbe31f24c464708520b4ef3622ca335c04f053b2304dead54\" admitted_revision=\"0\"\n\n"
+      },
+      "issued_round_partitions": [
+        {
+          "agent_core_turn_count": 11,
+          "status": "pre_tool_context_injection",
+          "ts": "2026-10-27T01:44:59Z",
+          "system_bytes": 25948,
+          "system_sha256": "83c157db601f547f4a63213a24a2b142c52ed24a31617994d9c4c55dee00a0e6",
+          "admission_offset": 25249,
+          "admission_bytes": 699,
+          "admission_sha256": "fa88672f1693a0e70a16e1c59de2e3fbf843f1adc19189e8aaa6e3e531368678"
+        }
+      ],
+      "B_turn_durable_User_requests": []
+    }
+  ],
+  "limits": "Per-round canonical issuer partitions are not an archive of every transmitted HTTP body or evidence of provider attention/causal reasoning."
+}

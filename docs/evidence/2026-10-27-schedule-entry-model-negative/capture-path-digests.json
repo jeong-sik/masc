@@ -1,0 +1,20 @@
+{
+  "artifacts/schedule-entry-candidate-20261027/independent-actual-c3-scope-result-review.json": "094dc56824f597d31e7aa31326d9a38a090e290a68904151cb14a9bd80693920",
+  "artifacts/schedule-entry-candidate-20261027/independent-integration-correction-87e6f274.json": "4f314cd5db99be469ea7a57fea4bcc10b8e41d020874f5db1c57325019a8366d",
+  "artifacts/schedule-entry-candidate-20261027/native40428400174/extracted/receipt.json": "62f296dbb8759fd38d1304797e95c928d071be9e54c78b40cc1edadf3122479c",
+  "artifacts/schedule-entry-candidate-20261027/native40428400174/native-binding.json": "00c31be20e143b5cccc851025d316adccb97c77da6901f14ebad9d636de32687",
+  "artifacts/schedule-entry-candidate-20261027/native40428400174/root-build-commit-observation.json": "1f824f3dc91c5560ae11e74881b677c17fd46568967025d164f532a4ba9f42f0",
+  "artifacts/schedule-entry-candidate-20261027/probe_real_busy_after_effect_c3_v2.py": "5dc790ed515f4bdeab148314ab0dc0d4e6b48c0050c58105a8109bfacf8a5aec",
+  "artifacts/schedule-entry-candidate-20261027/runs/after-effect-deepseek-c3-1/generated-create-a.json": "8a59a3ec71016430677b429731a8b04a422a8e76b89cfda39af328082d15f047",
+  "artifacts/schedule-entry-candidate-20261027/runs/after-effect-deepseek-c3-1/generated-create-b.json": "af280b43be9dfb72cb5ab856fe252695e662e4b5527b82d125ce2ef4051362c5",
+  "artifacts/schedule-entry-candidate-20261027/runs/after-effect-deepseek-c3-1/result.json": "2ebb1a0160d0c7efaed946dcd605f94bf18073b0c1186eeabba512d4aa7c08fb",
+  "artifacts/schedule-entry-candidate-20261027/runs/after-effect-deepseek-c3-1/all-owned-tool-inventory.json": "46d1f558ab586026c7a8d8fb806290daeae0768730c2ba533492060bb4251452",
+  "artifacts/schedule-entry-candidate-20261027/runs/after-effect-deepseek-c3-1/process-ended.json": "4d38c8409d6289088c0b85c84f40512fdf90f0ef1468480bf21267a6fb6db567",
+  "artifacts/schedule-entry-candidate-20261027/after-effect-deepseek-c3-1-controller-ended.json": "a124d429971a4617b83cb343ead5b9a53aff907971a322326bb478cd71e18c9e",
+  "artifacts/schedule-entry-candidate-20261027/runs/after-effect-glm-c3-1/generated-create-a.json": "2317787b44bfd68f78c3fe0df71fd6fb04fe51f7a63cc04e52ba0201932ad6d9",
+  "artifacts/schedule-entry-candidate-20261027/runs/after-effect-glm-c3-1/generated-create-b.json": "fb9153fefcf0d0b4f778679250f2cb68ba9e59860dd6ceabae258befa5105761",
+  "artifacts/schedule-entry-candidate-20261027/runs/after-effect-glm-c3-1/result.json": "ef37eee8ded5e6313ec3371e7c5c6cdaefc613d4036b094e275336f130350998",
+  "artifacts/schedule-entry-candidate-20261027/runs/after-effect-glm-c3-1/all-owned-tool-inventory.json": "bb45950e786af52ba2615c79fc881efbcd41ccceb97d77b615c9ef6de40156f5",
+  "artifacts/schedule-entry-candidate-20261027/runs/after-effect-glm-c3-1/process-ended.json": "e5edaf56d2209c278420e872902acb0d0b176ec90f02096083570bb6783e66f6",
+  "artifacts/schedule-entry-candidate-20261027/after-effect-glm-c3-1-controller-ended.json": "32ac1a1921d46bde5da3d6c65b056169f1b900f08999a4017f9d86be74464773"
+}

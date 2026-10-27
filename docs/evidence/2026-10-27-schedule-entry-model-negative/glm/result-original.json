@@ -1,0 +1,11 @@
+{
+  "verdict": "FAIL",
+  "error_type": "BehaviorFailure",
+  "detail": "A2 executes in B Keeper turn rather than a separate exact A readmission",
+  "owned_pid": 87156,
+  "scope": "No retry, provider switch, resume, cancellation, restart or forced kill.",
+  "cleanup_errors": [],
+  "forced_kills": [],
+  "producer_terminal": true,
+  "producer_returncode": 0
+}

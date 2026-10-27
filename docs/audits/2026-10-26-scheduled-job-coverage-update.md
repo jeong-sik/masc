@@ -59,7 +59,7 @@ API33/F1/restart 상태23은 [실제 API bundle](../evidence/2026-10-26-schedule
 | 33 | due가 되면 wake를 한 번 접수한다 | R-tick0/7–8, C3/28 | 신호 중복·생산 enqueue·offline 반복 tick single acceptance 실행. 모델 완료와 별개. |
 | 34 | 접수 후 receipt 저장 실패에도 중복 효과를 피한다 | C23–27/30–31/41/54, L5 | acceptance/receipt 장애 뒤 같은 occurrence 재사용 실행. F5 settlement write 실패와 다름. |
 | 35 | 한 예약 실패가 다른 due 예약을 막지 않는다 | R-tick17, C42 | fixture retry 격리와 실제 corrupt ledger의 다른 Keeper dispatch 격리 실행. |
-| 36 | Keeper가 작업 중일 때 도착한 예약을 보존한다 | real-busy-deepseek-1; repair-validation 실제 두 모델; [D9 실제 after-effect](../evidence/2026-10-27-schedule-after-effect-models/README.md) | 과거 F6 반례 유지. product94b2에서 DeepSeek/GLM의 checkpoint 보존·두 note·exact ACK 확인. DeepSeek observer의 overlap FAIL은 유지하며 원장으로 별도 대조. b5c976의 Owner103/3 실패는 보존하고 fixture 수리 ccb000의 Owner106 PASS와 구분. standalone rebased6dedd 실행은 미검증. 조합본D9 DeepSeek는 A1→checkpoint·원 incarnation 보존→B ACK→동일 A 재입장→A2→ACK를 실제 확인했지만, 모델이 잘못된 정정 노트까지 추가해 총4회 썼다. 같은 D9 GLM은 A1 없이 다른 ID를 조회하고 원 요청을 완료·ACK해 B 생성 전 실패했다. 모델 행동 전체 PASS가 아니다. 수리 #46272를 포함한 [C2 실제 두 모델](../evidence/2026-10-27-schedule-durable-runtime/README.md)에서 post-tool durable 본문 유지 확인. GLM은 A3에서 canonical B 결과를 읽고 A2를 썼다. 원 observer의 notes_list 전용 FAIL은 보존하고 별도 raw 검증으로 구분한다. DeepSeek는 세 note만 썼지만 B가 A2를 수행한 뒤 A3는 실행 없이 완료했다. B의 A 작업 금지 조건 위반이며 요청별 행동 격리는 FAIL이다([후속 #46281](https://github.com/jeong-sik/masc/issues/46281)). |
+| 36 | Keeper가 작업 중일 때 도착한 예약을 보존한다 | real-busy-deepseek-1; repair-validation 실제 두 모델; [D9 실제 after-effect](../evidence/2026-10-27-schedule-after-effect-models/README.md) | 과거 F6 반례 유지. product94b2에서 DeepSeek/GLM의 checkpoint 보존·두 note·exact ACK 확인. DeepSeek observer의 overlap FAIL은 유지하며 원장으로 별도 대조. b5c976의 Owner103/3 실패는 보존하고 fixture 수리 ccb000의 Owner106 PASS와 구분. standalone rebased6dedd 실행은 미검증. 조합본D9 DeepSeek는 A1→checkpoint·원 incarnation 보존→B ACK→동일 A 재입장→A2→ACK를 실제 확인했지만, 모델이 잘못된 정정 노트까지 추가해 총4회 썼다. 같은 D9 GLM은 A1 없이 다른 ID를 조회하고 원 요청을 완료·ACK해 B 생성 전 실패했다. 모델 행동 전체 PASS가 아니다. 수리 #46272를 포함한 [C2 실제 두 모델](../evidence/2026-10-27-schedule-durable-runtime/README.md)에서 post-tool durable 본문 유지 확인. GLM은 A3에서 canonical B 결과를 읽고 A2를 썼다. 원 observer의 notes_list 전용 FAIL은 보존하고 별도 raw 검증으로 구분한다. DeepSeek는 세 note만 썼지만 B가 A2를 수행한 뒤 A3는 실행 없이 완료했다. B의 A 작업 금지 조건 위반이며 요청별 행동 격리는 FAIL이다([후속 #46281](https://github.com/jeong-sik/masc/issues/46281)). [C3 실제 두 FAIL](../evidence/2026-10-27-schedule-entry-model-negative/README.md): frozen87의 DeepSeek·GLM 각 1회 모두 정확3 note를 쓰되 A2를 B 턴에서 실행했다. 실제 B admission과 B의 A 작업 금지 본문이 보존됐고 B의5개 모델 라운드 issuer에서도 같은 typed frame을 확인했다. 관측 추가만으로 요청 준수 문제를 해소하지 못했으며 두 원 FAIL·controller exit1/server 정상 exit0을 보존한다. |
 | 37 | paused Keeper에 도착해도 유실하지 않는다 | C11; retarget-cancel-4/restart-expiry-3 | 실제 pause·pending 보존 실행. Resume 후 모델 소비는 미검증. |
 | 38 | owner가 꺼져 있어도 demand를 유지한다 | C28–29 | 등록됐으나 미시작 owner의 deferred/not_running·single acceptance 실행. Boot 후 모델 소비 미검증. |
 | 39 | notice에서 busy/paused/offline 원인과 다음 행동을 안다 | C3/28/32는 backend reason만 | notice의 원인별 Resume/Boot 안내와 실제 사용자 조치는 여전히 공백. |
@@ -148,3 +148,25 @@ selector를 고친 다음 관측은 실제 TUI의 HTTP400과 별도 진단의 �
 기존 routine 관측을 TUI child에만 활성화하여 같은 PID/capture의 적용·decoder 준비를 첫 입력 전에 확인했다.
 이전 trial3 INCOMPLETE와 roster 시점 원인 미확정의 별도 정정은 유지한다.
 43개 반복 assertion은 한 시나리오이며 visible UI·전체 52–57행·DeepSeek 두 Job 범위 오류의 해결을 뜻하지 않는다.
+
+
+2026-10-27 C3 실제 음성 근거: [새 retained bundle](../evidence/2026-10-27-schedule-entry-model-negative/README.md)은
+frozen source `87e6f274ddd5958b3966608fab376cfd1cb50ed3`, server SHA256
+`8fb19608eac66c5b0cbaf10cc5a549ae9e3093222d4a504abcd8b6e85473adfe`,
+controller v2 SHA256 `5dc790ed515f4bdeab148314ab0dc0d4e6b48c0050c58105a8109bfacf8a5aec`의
+DeepSeek·GLM 각 한 실제 시나리오를 보존한다. 둘 다 전체 owned tool10행과 정확3 note_add를
+직독했으며 A2는 B의 exact note readback 후 같은 B 턴에 속했다. B Completed/ACK와
+A의 exact 재입장은 그 뒤다. 각 B의5개 pre/post-tool issuer System partition은 실제
+provider capture의 정확한 typed Known[B] span과 맞고, B의 A 작업 금지 요청도 JSON-unquote 뒤
+원 generated body와 같다. 따라서 관측 전달의 양성 근거와 요청 준수의 실제 FAIL은 동시에 존재한다.
+이는 같은 Keeper의 협업 note 권한 우회나 새로운 hard isolation 계약을 증명하지 않는다.
+
+Workflow **Minimal manual checks40428400174**, execution head87 위 SHA,
+ref `ci/schedule-entry-candidate-20261027`, conclusion **success**는
+기존 addon-lifecycle27+5 cases와 native 생산 범위다. 실제 두 모델의 FAIL과 별개이며
+C3가 물려받은 wire fixture P2 두 건도 해소하지 않는다. canonicalcb의 후속 fixture 수리나
+그 head의 별도 검사 결과를 이 후보로 이월하지 않는다. 원 snapshot 회전으로 재읽을 수 없는 과거 checkpoint는
+관측 선택 자료와 해시만 남았으며 원형 전체 복원 성공으로 바꾸지 않는다.
+두 controller exit1, 두 owned server 정상 exit0, forced kill0이며 자동 재실행은 없었다.
+원 C2 GLM 관측기/정정과 DeepSeek FAIL, D9 반례는 모두 유지한다. 59행 ID·순서와
+52–57행의 미검증 경계를 그대로 두며, 전체 기능·일반 provider·운영 설치 PASS는 아니다.

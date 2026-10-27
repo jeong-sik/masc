@@ -1,0 +1,789 @@
+{
+  "schema": "masc-independent-actual-c3-request-scope-review-v1",
+  "reviewer": "schedule_adversarial",
+  "verdict": "BOTH_ACTUAL_REQUEST_SCOPE_FAILURES_CONFIRMED",
+  "source": "87e6f274ddd5958b3966608fab376cfd1cb50ed3",
+  "product_assembly": "13d235b38c756a9d4b446fa74232f18e8979b180",
+  "binary": {
+    "path": "artifacts/schedule-entry-candidate-20261027/native40428400174/extracted/masc",
+    "bytes": 111123728,
+    "sha256": "8fb19608eac66c5b0cbaf10cc5a549ae9e3093222d4a504abcd8b6e85473adfe"
+  },
+  "controller": {
+    "path": "artifacts/schedule-entry-candidate-20261027/probe_real_busy_after_effect_c3_v2.py",
+    "bytes": 78688,
+    "sha256": "5dc790ed515f4bdeab148314ab0dc0d4e6b48c0050c58105a8109bfacf8a5aec"
+  },
+  "native_workflow": 40428400174,
+  "native_artifact": 12700992849,
+  "interpretation": [
+    "Both models wrote A2 inside actual B Keeper turn#2, after exact B note readback and before B Completed/ACK and subsequent exact A readmission. This is a witnessed explicit B-request compliance failure, not an observer timeout or only a strict separate-turn convention.",
+    "B explicitly forbids remaining A steps/writing any note on A. The retained B User message decodes to the exact generated body and the actual System admitted block names only B; earlier durable A remains conversation data. All five per-round B issuer System partitions match that captured System blob and its typed admission span. Observation issuance/delivery evidence is positive, but it does not resolve original DS request-scope issue.",
+    "All10 owned tool rows per run were read directly, including unselected discovery/Get and GLM readmitted-turn artifact read. Exactly3 note_add attempts succeeded and their returned notes exactly match the authoritative primary. No repeated or extra note effect was found. This is not an arbitrary-effect exactly-once guarantee.",
+    "A was checkpointed and remained pending with its same exact source/incarnation while B ran; B Completed/ACK precedes exact A readmission and final A Completed/ACK. No premature A ACK is observed. Actual A2 occurred earlier in B, so healthy retention/ACK mechanics do not make the request behavior PASS.",
+    "The existing typed block is a historical entry observation, explicitly not permission (event_fields282-307); post-tool retention is enabled (prompt_block_id92-105). Same Keeper owns both sources and collaborative note_add permission is distinct from obedience to B. These results do not establish an ACL bypass, a missing owner gate, or permission granted by admission.",
+    "Minimum next action is to retain both FAILs and reopen the behavioral repair hypothesis: identity observation alone was insufficient in these two actual trials. A clearer current-request/control contract or other repair requires independent design and actual validation; this review neither selects a new policy nor claims a text change/hard isolation would fix it."
+  ],
+  "runs": [
+    {
+      "run": "after-effect-deepseek-c3-1",
+      "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+      "keeper": "audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb",
+      "verdict": "CONFIRMED_BEHAVIOR_FAIL",
+      "original_result_detail": "A2 executes in B Keeper turn rather than a separate exact A readmission",
+      "controller_exit_code": 1,
+      "server_pid": 87160,
+      "server_exit_code": 0,
+      "forced_kill": false,
+      "cleanup_errors": [],
+      "all_owned_rows": 10,
+      "selected_synthetic_note_rows": 8,
+      "note_add_attempts": 3,
+      "unselected_tools": [
+        "keeper_tool_search",
+        "masc_schedule_get"
+      ],
+      "effects": [
+        {
+          "effect": "A1",
+          "schedule_id": "audit-real-model-ab22839971c14a7eb6e5a94c85646236",
+          "note_id": "6",
+          "created_at": 1793065487.895309,
+          "body_sha256": "b7ecec41e92c0a0a3a7417ed1873533337621b2f3cab34b790cfa9a282147ce9",
+          "execution_id": "execution-node-67dbfb7c7c627bc3f0083cc2722c9b55",
+          "tool_use_id": "call_i7afk0xk",
+          "tool_row_ts": 1793065487.968226,
+          "keeper_turn_id": 1,
+          "turn_ref": "trace-1793065478099-00000#1",
+          "returned_note_exactly_matches_primary": true
+        },
+        {
+          "effect": "B",
+          "schedule_id": "audit-real-model-ab22839971c14a7eb6e5a94c85646236-second",
+          "note_id": "11",
+          "created_at": 1793065492.208144,
+          "body_sha256": "b173cf315f654d670334933576a1accfbe8cbe7252bb5426f8e68c9d04b6c69b",
+          "execution_id": "execution-node-ea5973f5841208dfb75b5f7f711b6ac3",
+          "tool_use_id": "call_1yzidskh",
+          "tool_row_ts": 1793065492.222543,
+          "keeper_turn_id": 2,
+          "turn_ref": "trace-1793065478099-00000#2",
+          "returned_note_exactly_matches_primary": true
+        },
+        {
+          "effect": "A2",
+          "schedule_id": "audit-real-model-ab22839971c14a7eb6e5a94c85646236",
+          "note_id": "12",
+          "created_at": 1793065495.207647,
+          "body_sha256": "26ce6b7d8e39b765eb9bb141c15fea77d9db1473b046efbedaadc1db44fa590d",
+          "execution_id": "execution-node-64c5591e76b0c80c85cf1ee118356a4a",
+          "tool_use_id": "call_ooege493",
+          "tool_row_ts": 1793065495.229244,
+          "keeper_turn_id": 2,
+          "turn_ref": "trace-1793065478099-00000#2",
+          "returned_note_exactly_matches_primary": true
+        }
+      ],
+      "timeline": {
+        "A_first_start": 1793065480.403247,
+        "A_checkpointed": 1793065490.561968,
+        "B_start": 1793065490.575731,
+        "B_completed": 1793065499.415733,
+        "B_ACK": 1793065499.419519,
+        "A_exact_readmission": 1793065499.541717,
+        "A_completed": 1793065502.905454,
+        "A_ACK": 1793065502.905945
+      },
+      "exact_source": {
+        "A": {
+          "post_id": "142605d83bde054be416c58a9ad165a0a334ea10ae4b12b333b688ede4160a1e",
+          "source_incarnation": 0
+        },
+        "B": {
+          "post_id": "431505fc5873e6e644a982d0a997fecde86d713df7cd240e071053292c08df24",
+          "source_incarnation": 1
+        }
+      },
+      "A_pending_during_B": {
+        "observations": 35,
+        "first": {
+          "observed_at_unix": 1793065490.634609,
+          "revision": 3,
+          "post_id": "142605d83bde054be416c58a9ad165a0a334ea10ae4b12b333b688ede4160a1e",
+          "admitted_revision": 0
+        },
+        "last": {
+          "observed_at_unix": 1793065499.102939,
+          "revision": 3,
+          "post_id": "142605d83bde054be416c58a9ad165a0a334ea10ae4b12b333b688ede4160a1e",
+          "admitted_revision": 0
+        },
+        "all_sampled_A_admitted_revisions": [
+          0
+        ],
+        "final_ACK_source_incarnation_matches_sampled_revision": true
+      },
+      "B_dependency_read": {
+        "execution_id": "execution-node-5ed74dad8cfcfcee7577a25ac54316be",
+        "keeper_turn_id": 2,
+        "ts": 1793065493.486053,
+        "exact_B_note_returned_before_A2": true
+      },
+      "actual_admission_capture": [
+        {
+          "turn_ref": "trace-1793065478099-00000#1",
+          "known_source": "A",
+          "post_id": "142605d83bde054be416c58a9ad165a0a334ea10ae4b12b333b688ede4160a1e",
+          "schedule_instance_id": "01a17b07-e8f8-7000-8591-600aaf237219",
+          "system_blob": {
+            "path": "runs/after-effect-deepseek-c3-1/workspace/.masc/tool_blobs/74/74607081442916cb051de0d9a40330f47e92187550423a143f762c1b8f1a1590",
+            "bytes": 25948,
+            "sha256": "74607081442916cb051de0d9a40330f47e92187550423a143f762c1b8f1a1590"
+          },
+          "admitted_span": {
+            "bytes": 699,
+            "sha256": "60b20b03dc2a1388b6178e7c0e835d36a5108e72f0fea892fed585a1150b92aa",
+            "unique_offset": 25249,
+            "scheduled_source_count": 1,
+            "standing": "historical_entry_only_not_permission"
+          },
+          "capture_scope": "retained latest Pre_dispatch_serialization per Keeper turn, not an all-round wire-body archive"
+        },
+        {
+          "turn_ref": "trace-1793065478099-00000#2",
+          "known_source": "B",
+          "post_id": "431505fc5873e6e644a982d0a997fecde86d713df7cd240e071053292c08df24",
+          "schedule_instance_id": "01a17b08-0e68-7000-a87c-bbda4a0b1c80",
+          "system_blob": {
+            "path": "runs/after-effect-deepseek-c3-1/workspace/.masc/tool_blobs/e0/e0b535b21817e71d46406f185a45eb340affab90de14aadae244af60957307cc",
+            "bytes": 25955,
+            "sha256": "e0b535b21817e71d46406f185a45eb340affab90de14aadae244af60957307cc"
+          },
+          "admitted_span": {
+            "bytes": 706,
+            "sha256": "c3628c85ac93ce5bc32cd685d03c6b3dda60fbdd7e2629bc7c988e72e789176e",
+            "unique_offset": 25249,
+            "scheduled_source_count": 1,
+            "standing": "historical_entry_only_not_permission"
+          },
+          "capture_scope": "retained latest Pre_dispatch_serialization per Keeper turn, not an all-round wire-body archive",
+          "durable_user_request_presence": [
+            {
+              "index": 0,
+              "bytes": 2972,
+              "sha256": "093f7ef4d57d177d1b0bdc6f9c553b9b53a8a338b27b8cf2bb4f5f5061232bb9",
+              "exact_quoted_request_bodies": [
+                "A"
+              ]
+            },
+            {
+              "index": 13,
+              "bytes": 2222,
+              "sha256": "cba5f9021ee3cf70df82609ef56ddb95d60d83907a9a34046c653004b05c9edf",
+              "exact_quoted_request_bodies": [
+                "B"
+              ]
+            }
+          ],
+          "all_B_issued_round_partitions": {
+            "rounds": [
+              {
+                "agent_core_turn_count": 6,
+                "status": "pre_tool_context_injection",
+                "ts": "2026-10-27T01:44:50Z"
+              },
+              {
+                "agent_core_turn_count": 7,
+                "status": "post_tool_context_injection",
+                "ts": "2026-10-27T01:44:52Z"
+              },
+              {
+                "agent_core_turn_count": 8,
+                "status": "post_tool_context_injection",
+                "ts": "2026-10-27T01:44:53Z"
+              },
+              {
+                "agent_core_turn_count": 9,
+                "status": "post_tool_context_injection",
+                "ts": "2026-10-27T01:44:55Z"
+              },
+              {
+                "agent_core_turn_count": 10,
+                "status": "post_tool_context_injection",
+                "ts": "2026-10-27T01:44:57Z"
+              }
+            ],
+            "system_blob_and_typed_span_match_every_round": true,
+            "scope": "canonical_issued_system_prompt_before_transport_projection; not independent wire-body capture for every round"
+          }
+        },
+        {
+          "turn_ref": "trace-1793065478099-00000#3",
+          "known_source": "A",
+          "post_id": "142605d83bde054be416c58a9ad165a0a334ea10ae4b12b333b688ede4160a1e",
+          "schedule_instance_id": "01a17b07-e8f8-7000-8591-600aaf237219",
+          "system_blob": {
+            "path": "runs/after-effect-deepseek-c3-1/workspace/.masc/tool_blobs/83/83c157db601f547f4a63213a24a2b142c52ed24a31617994d9c4c55dee00a0e6",
+            "bytes": 25948,
+            "sha256": "83c157db601f547f4a63213a24a2b142c52ed24a31617994d9c4c55dee00a0e6"
+          },
+          "admitted_span": {
+            "bytes": 699,
+            "sha256": "fa88672f1693a0e70a16e1c59de2e3fbf843f1adc19189e8aaa6e3e531368678",
+            "unique_offset": 25249,
+            "scheduled_source_count": 1,
+            "standing": "historical_entry_only_not_permission"
+          },
+          "capture_scope": "retained latest Pre_dispatch_serialization per Keeper turn, not an all-round wire-body archive"
+        }
+      ],
+      "final": {
+        "pending": 0,
+        "outbox": 0,
+        "target_idle": true,
+        "backend_schedule_states": {
+          "a": "succeeded",
+          "b": "succeeded"
+        },
+        "backend_status_limit": "succeeded/accepted proves enqueue acceptance; model completion is separately shown by exact reaction Completed/ACK, not inferred from this status"
+      },
+      "checkpoint_preservation_limit": {
+        "selected_observation_entries": 24,
+        "currently_missing_original_paths": 15,
+        "currently_replaced_bytes": 8,
+        "currently_matching_paths": 1,
+        "meaning": "Historical observer selections and recorded checkpointed reaction retained; many product-rotated mutable snapshot bytes are no longer independently re-readable. Do not claim full byte-identical preemption checkpoint restoration or full lineage PASS. Direct actual wrong-turn evidence is independent of these missing snapshots."
+      },
+      "original_C2_normalization": {
+        "allowed_substitutions": [
+          "A schedule_id",
+          "B schedule_id",
+          "A1/B/A2 nonce body",
+          "Keeper identity"
+        ],
+        "due_in_sec_unchanged": 1,
+        "tool_destinations_unchanged": true,
+        "bindings": [
+          {
+            "request": "A",
+            "normalized_same_as_original_C2": true,
+            "sha256": "3da29d5b2a1a0fdfa0492113f607d1c8cbd4f3130f8fd221b53fbd4d80508868"
+          },
+          {
+            "request": "B",
+            "normalized_same_as_original_C2": true,
+            "sha256": "ca8031293929df87864c1b5e3f329c89a18008258545cdd54de62a91fbddf8f7"
+          }
+        ],
+        "old_api_records": {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/api-records.json",
+          "bytes": 2204039,
+          "sha256": "7376499d5590034bcc12e680b1b13924914cc2464d87671cda46ca70a8e24c1b"
+        }
+      }
+    },
+    {
+      "run": "after-effect-glm-c3-1",
+      "runtime_profile": "glm-coding.glm-5-3",
+      "keeper": "audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2",
+      "verdict": "CONFIRMED_BEHAVIOR_FAIL",
+      "original_result_detail": "A2 executes in B Keeper turn rather than a separate exact A readmission",
+      "controller_exit_code": 1,
+      "server_pid": 87156,
+      "server_exit_code": 0,
+      "forced_kill": false,
+      "cleanup_errors": [],
+      "all_owned_rows": 10,
+      "selected_synthetic_note_rows": 7,
+      "note_add_attempts": 3,
+      "unselected_tools": [
+        "keeper_tool_search",
+        "masc_schedule_get",
+        "keeper_artifact_read"
+      ],
+      "effects": [
+        {
+          "effect": "A1",
+          "schedule_id": "audit-real-model-347317a33bdf4f51b60817f2a36c10c8",
+          "note_id": "6",
+          "created_at": 1793065546.610177,
+          "body_sha256": "d1480ff8a2ea1a03aa66219b1e13eebd05291e0a6e6aca9ef51e7a62f23e36f7",
+          "execution_id": "execution-node-74180b5ce578712cd679861734e99e54",
+          "tool_use_id": "call_62d80af3914c4a84ad797d86",
+          "tool_row_ts": 1793065546.621941,
+          "keeper_turn_id": 1,
+          "turn_ref": "trace-1793065478075-00000#1",
+          "returned_note_exactly_matches_primary": true
+        },
+        {
+          "effect": "B",
+          "schedule_id": "audit-real-model-347317a33bdf4f51b60817f2a36c10c8-second",
+          "note_id": "11",
+          "created_at": 1793065561.562057,
+          "body_sha256": "b33e01c0abac74073e59c3c0c4c0159289015541558937301e9c0b4a69384698",
+          "execution_id": "execution-node-0c7812bcb52c5aebf5cc7f85bdc9eb14",
+          "tool_use_id": "call_b0d8153c2993449388ddfc8d",
+          "tool_row_ts": 1793065561.575495,
+          "keeper_turn_id": 2,
+          "turn_ref": "trace-1793065478075-00000#2",
+          "returned_note_exactly_matches_primary": true
+        },
+        {
+          "effect": "A2",
+          "schedule_id": "audit-real-model-347317a33bdf4f51b60817f2a36c10c8",
+          "note_id": "12",
+          "created_at": 1793065577.287021,
+          "body_sha256": "7ceefddbbb86c5078cfd36561de9ec71e87d3ddf4f8b40be9e14b01aee857316",
+          "execution_id": "execution-node-9f77b52dd6058c7e54bbd098b89c7436",
+          "tool_use_id": "call_23ba11b4583c4803b76b7876",
+          "tool_row_ts": 1793065577.293428,
+          "keeper_turn_id": 2,
+          "turn_ref": "trace-1793065478075-00000#2",
+          "returned_note_exactly_matches_primary": true
+        }
+      ],
+      "timeline": {
+        "A_first_start": 1793065480.362356,
+        "A_checkpointed": 1793065553.824195,
+        "B_start": 1793065553.839271,
+        "B_completed": 1793065601.672594,
+        "B_ACK": 1793065601.67278,
+        "A_exact_readmission": 1793065601.683774,
+        "A_completed": 1793065616.622677,
+        "A_ACK": 1793065616.622734
+      },
+      "exact_source": {
+        "A": {
+          "post_id": "35460afbbf69214a27ea3947628ac60aef4c38b86328f1c9fc5045fcf3cca79f",
+          "source_incarnation": 0
+        },
+        "B": {
+          "post_id": "efe976928dc7f0a55bd4c35bc6eb2476556412c7036184795c3aca49449289b0",
+          "source_incarnation": 1
+        }
+      },
+      "A_pending_during_B": {
+        "observations": 152,
+        "first": {
+          "observed_at_unix": 1793065553.87791,
+          "revision": 3,
+          "post_id": "35460afbbf69214a27ea3947628ac60aef4c38b86328f1c9fc5045fcf3cca79f",
+          "admitted_revision": 0
+        },
+        "last": {
+          "observed_at_unix": 1793065601.215103,
+          "revision": 3,
+          "post_id": "35460afbbf69214a27ea3947628ac60aef4c38b86328f1c9fc5045fcf3cca79f",
+          "admitted_revision": 0
+        },
+        "all_sampled_A_admitted_revisions": [
+          0
+        ],
+        "final_ACK_source_incarnation_matches_sampled_revision": true
+      },
+      "B_dependency_read": {
+        "execution_id": "execution-node-f73eaf27fe0f5d8d0856203262af8f93",
+        "keeper_turn_id": 2,
+        "ts": 1793065566.444161,
+        "exact_B_note_returned_before_A2": true
+      },
+      "actual_admission_capture": [
+        {
+          "turn_ref": "trace-1793065478075-00000#1",
+          "known_source": "A",
+          "post_id": "35460afbbf69214a27ea3947628ac60aef4c38b86328f1c9fc5045fcf3cca79f",
+          "schedule_instance_id": "01a17b07-e8db-7000-8f92-951e454a3567",
+          "system_blob": {
+            "path": "runs/after-effect-glm-c3-1/workspace/.masc/tool_blobs/4d/4d4cb1e2211c281233315bae417afe2555992d364186df1b228c518f6431066c",
+            "bytes": 25933,
+            "sha256": "4d4cb1e2211c281233315bae417afe2555992d364186df1b228c518f6431066c"
+          },
+          "admitted_span": {
+            "bytes": 699,
+            "sha256": "82b4109269512ce29f492b923b969e4b46b05b7d09e3b024ed7dd271ef064652",
+            "unique_offset": 25234,
+            "scheduled_source_count": 1,
+            "standing": "historical_entry_only_not_permission"
+          },
+          "capture_scope": "retained latest Pre_dispatch_serialization per Keeper turn, not an all-round wire-body archive"
+        },
+        {
+          "turn_ref": "trace-1793065478075-00000#2",
+          "known_source": "B",
+          "post_id": "efe976928dc7f0a55bd4c35bc6eb2476556412c7036184795c3aca49449289b0",
+          "schedule_instance_id": "01a17b08-f388-7000-8e25-141e38960b33",
+          "system_blob": {
+            "path": "runs/after-effect-glm-c3-1/workspace/.masc/tool_blobs/fd/fd560848ca0fde9b666b609dd2cdb36405de12cffde4af165689ac967f0659bb",
+            "bytes": 25939,
+            "sha256": "fd560848ca0fde9b666b609dd2cdb36405de12cffde4af165689ac967f0659bb"
+          },
+          "admitted_span": {
+            "bytes": 705,
+            "sha256": "081855d3755789eeb8fd1c492dc2efe2b9e60e2e7168acc3e6ebeb1c0547ed85",
+            "unique_offset": 25234,
+            "scheduled_source_count": 1,
+            "standing": "historical_entry_only_not_permission"
+          },
+          "capture_scope": "retained latest Pre_dispatch_serialization per Keeper turn, not an all-round wire-body archive",
+          "durable_user_request_presence": [
+            {
+              "index": 0,
+              "bytes": 2967,
+              "sha256": "b3e03322da641c3e7dd8ecade5b5b55370c776c5f324881330c2715d11482dee",
+              "exact_quoted_request_bodies": [
+                "A"
+              ]
+            },
+            {
+              "index": 11,
+              "bytes": 2221,
+              "sha256": "3a6fa47c090dee181c187efabe0462323af1b03809e130f23a2cdef7d481fe62",
+              "exact_quoted_request_bodies": [
+                "B"
+              ]
+            }
+          ],
+          "all_B_issued_round_partitions": {
+            "rounds": [
+              {
+                "agent_core_turn_count": 5,
+                "status": "pre_tool_context_injection",
+                "ts": "2026-10-27T01:45:53Z"
+              },
+              {
+                "agent_core_turn_count": 6,
+                "status": "post_tool_context_injection",
+                "ts": "2026-10-27T01:46:01Z"
+              },
+              {
+                "agent_core_turn_count": 7,
+                "status": "post_tool_context_injection",
+                "ts": "2026-10-27T01:46:06Z"
+              },
+              {
+                "agent_core_turn_count": 8,
+                "status": "post_tool_context_injection",
+                "ts": "2026-10-27T01:46:17Z"
+              },
+              {
+                "agent_core_turn_count": 9,
+                "status": "post_tool_context_injection",
+                "ts": "2026-10-27T01:46:29Z"
+              }
+            ],
+            "system_blob_and_typed_span_match_every_round": true,
+            "scope": "canonical_issued_system_prompt_before_transport_projection; not independent wire-body capture for every round"
+          }
+        },
+        {
+          "turn_ref": "trace-1793065478075-00000#3",
+          "known_source": "A",
+          "post_id": "35460afbbf69214a27ea3947628ac60aef4c38b86328f1c9fc5045fcf3cca79f",
+          "schedule_instance_id": "01a17b07-e8db-7000-8f92-951e454a3567",
+          "system_blob": {
+            "path": "runs/after-effect-glm-c3-1/workspace/.masc/tool_blobs/88/8881369df01ac025a6ecada9cdb08ba15692eca0a5543a2f4db4879cdb3ca898",
+            "bytes": 25933,
+            "sha256": "8881369df01ac025a6ecada9cdb08ba15692eca0a5543a2f4db4879cdb3ca898"
+          },
+          "admitted_span": {
+            "bytes": 699,
+            "sha256": "d99554aef88975832971995cc05e5aef5cb9dbf9b6e5040d20d88850420e0168",
+            "unique_offset": 25234,
+            "scheduled_source_count": 1,
+            "standing": "historical_entry_only_not_permission"
+          },
+          "capture_scope": "retained latest Pre_dispatch_serialization per Keeper turn, not an all-round wire-body archive"
+        }
+      ],
+      "final": {
+        "pending": 0,
+        "outbox": 0,
+        "target_idle": true,
+        "backend_schedule_states": {
+          "a": "succeeded",
+          "b": "succeeded"
+        },
+        "backend_status_limit": "succeeded/accepted proves enqueue acceptance; model completion is separately shown by exact reaction Completed/ACK, not inferred from this status"
+      },
+      "checkpoint_preservation_limit": {
+        "selected_observation_entries": 23,
+        "currently_missing_original_paths": 12,
+        "currently_replaced_bytes": 9,
+        "currently_matching_paths": 2,
+        "meaning": "Historical observer selections and recorded checkpointed reaction retained; many product-rotated mutable snapshot bytes are no longer independently re-readable. Do not claim full byte-identical preemption checkpoint restoration or full lineage PASS. Direct actual wrong-turn evidence is independent of these missing snapshots."
+      },
+      "original_C2_normalization": {
+        "allowed_substitutions": [
+          "A schedule_id",
+          "B schedule_id",
+          "A1/B/A2 nonce body",
+          "Keeper identity"
+        ],
+        "due_in_sec_unchanged": 1,
+        "tool_destinations_unchanged": true,
+        "bindings": [
+          {
+            "request": "A",
+            "normalized_same_as_original_C2": true,
+            "sha256": "3da29d5b2a1a0fdfa0492113f607d1c8cbd4f3130f8fd221b53fbd4d80508868"
+          },
+          {
+            "request": "B",
+            "normalized_same_as_original_C2": true,
+            "sha256": "ca8031293929df87864c1b5e3f329c89a18008258545cdd54de62a91fbddf8f7"
+          }
+        ],
+        "old_api_records": {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/api-records.json",
+          "bytes": 4256966,
+          "sha256": "e3880f6243eca46d955bedb549e3a19a9084f55e58df490f942266bccfffe77d"
+        }
+      }
+    }
+  ],
+  "oracle_and_comparison_limits": [
+    "C3 preclassify_owned_calls controller807-821 identifies same actual trace+Keeper turn for successful B and A2 before optional forensic work. Independent turn-record membership and reaction ordering confirm that diagnosis; no missing ancillary snapshot downgrades this known failure.",
+    "A/B generated arguments and tool destinations match original per-provider C2 after only declared nonce/Keeper identity normalization; due_in_sec remains1. Both normalized request digests agree across providers. C3 actual outcomes do not replace old C2 FAILs or the older GLM canonical-result-read correction.",
+    "Provider-input capture is the latest serialized input per Keeper turn. Separately, each of five B pre/post-tool issuer partitions was checked directly: same full System bytes/SHA and exact typed admission offset/bytes/SHA as the captured blob. This establishes per-round issuer reuse plus captured serialization, not an all-round wire-body archive. No guessed spans, full prompt, private thinking, auth or control-token bytes are copied.",
+    "Two provider trials, one each, under owned permissive Gate/tool-approval fixture. No retry/failover, process restart, installed/shared runtime, all-model success or full scheduled-job audit completion. Both owned servers terminated normally with exit0; controller exit1 is the intentional semantic FAIL."
+  ],
+  "source_bindings": [
+    {
+      "head": "87e6f274ddd5958b3966608fab376cfd1cb50ed3",
+      "path": "lib/keeper/keeper_unified_prompt_event_fields.ml",
+      "git_blob": "7628d499c9b363cabf6e91c41e659d8e4f5740cd",
+      "bytes": 17057,
+      "sha256": "aad0572b9438d29083faa5e267ecb0b9c40ebbc79e5e69a5b3e220d352dbb9be"
+    },
+    {
+      "head": "87e6f274ddd5958b3966608fab376cfd1cb50ed3",
+      "path": "lib/types/prompt_block_id.ml",
+      "git_blob": "092380eeaecb8a39b8f84b05e8534af52461c572",
+      "bytes": 4194,
+      "sha256": "ea400aca11adb0dd7576f09886ffbc3869fb67003f7d83250fab85afe5b2b6eb"
+    },
+    {
+      "head": "87e6f274ddd5958b3966608fab376cfd1cb50ed3",
+      "path": "lib/keeper/keeper_unified_turn.ml",
+      "git_blob": "de3107ca8522ad50fa04b44b23d7ff1e0492d7fd",
+      "bytes": 87793,
+      "sha256": "973dd285a49368d926567e1823e6d3e962f78eff31145dca254b61b19e68325c"
+    },
+    {
+      "head": "87e6f274ddd5958b3966608fab376cfd1cb50ed3",
+      "path": "lib/keeper/keeper_run_prompt.ml",
+      "git_blob": "c20597b2cbedc59ea7bd3729be09271b2074b861",
+      "bytes": 9616,
+      "sha256": "127f0e08b7a6604229dcfc71499acfeb9086c3eea5646e9f138c049d0606ab46"
+    }
+  ],
+  "bound_files": [
+    {
+      "path": "probe_real_busy_after_effect_c3_v2.py",
+      "bytes": 78688,
+      "sha256": "5dc790ed515f4bdeab148314ab0dc0d4e6b48c0050c58105a8109bfacf8a5aec"
+    },
+    {
+      "path": "native40428400174/native-binding.json",
+      "bytes": 1402,
+      "sha256": "00c31be20e143b5cccc851025d316adccb97c77da6901f14ebad9d636de32687"
+    },
+    {
+      "path": "native40428400174/root-native-input-review.json",
+      "bytes": 964,
+      "sha256": "98cd65ff4c070b07c3cbdcb93b830577248e1ee0b0464378a49fe2a121736284"
+    },
+    {
+      "path": "runs/after-effect-deepseek-c3-1/result.json",
+      "bytes": 358,
+      "sha256": "2ebb1a0160d0c7efaed946dcd605f94bf18073b0c1186eeabba512d4aa7c08fb"
+    },
+    {
+      "path": "runs/after-effect-deepseek-c3-1/provenance.json",
+      "bytes": 6963,
+      "sha256": "39c2335b4a0677988d0da795fc9b8902ab337b0ffd39601879989631fdcfd4f1"
+    },
+    {
+      "path": "runs/after-effect-deepseek-c3-1/process-ended.json",
+      "bytes": 1088,
+      "sha256": "4d38c8409d6289088c0b85c84f40512fdf90f0ef1468480bf21267a6fb6db567"
+    },
+    {
+      "path": "runs/after-effect-deepseek-c3-1/generated-create-a.json",
+      "bytes": 1532,
+      "sha256": "8a59a3ec71016430677b429731a8b04a422a8e76b89cfda39af328082d15f047"
+    },
+    {
+      "path": "runs/after-effect-deepseek-c3-1/generated-create-b.json",
+      "bytes": 801,
+      "sha256": "af280b43be9dfb72cb5ab856fe252695e662e4b5527b82d125ce2ef4051362c5"
+    },
+    {
+      "path": "runs/after-effect-deepseek-c3-1/primary-scenario-effects.json",
+      "bytes": 1501,
+      "sha256": "aac83897c05e28b0fd0a352b28b0711df38d6f9e62bb1b99d9f5214373223c9a"
+    },
+    {
+      "path": "runs/after-effect-deepseek-c3-1/all-owned-tool-inventory.json",
+      "bytes": 8606,
+      "sha256": "46d1f558ab586026c7a8d8fb806290daeae0768730c2ba533492060bb4251452"
+    },
+    {
+      "path": "runs/after-effect-deepseek-c3-1/tool-call-selection.json",
+      "bytes": 48030,
+      "sha256": "b26eb23734d7b561719da1677fec13f09611d6fd07cb660b67e590398ad369fa"
+    },
+    {
+      "path": "runs/after-effect-deepseek-c3-1/queue-observations.json",
+      "bytes": 199108,
+      "sha256": "e0f6716c5ae5cfecc90de1859dc4c66ca7a60e89887bdfaa8cc81344ed010799"
+    },
+    {
+      "path": "runs/after-effect-deepseek-c3-1/checkpoint-lineage-selected.json",
+      "bytes": 42917,
+      "sha256": "596221cde622fd8cd9f0c21fff3166360f23ab7cb2ea7a321fd9249938e6a5ac"
+    },
+    {
+      "path": "runs/after-effect-deepseek-c3-1/workspace/.masc/tool_calls/2026-10/27.jsonl",
+      "bytes": 50094,
+      "sha256": "c37e659b24a46675218205b497b66bcfda91e9d705af2b0b950629d1d492eb4d"
+    },
+    {
+      "path": "runs/after-effect-deepseek-c3-1/workspace/.masc/schedules.json",
+      "bytes": 6053,
+      "sha256": "21fc9738e34eeef1a3d78e14456fccc840a5bcc21e827c4981e5bec81eac074e"
+    },
+    {
+      "path": "runs/after-effect-deepseek-c3-1/workspace/.masc/keepers/audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb/reaction-ledger/v7/2026-10/27.jsonl",
+      "bytes": 10400,
+      "sha256": "1700772c09f440b9e4eed2d21fa0ee6978f58da13724dea3e3b8fa1615cf88cc"
+    },
+    {
+      "path": "runs/after-effect-deepseek-c3-1/workspace/.masc/keepers/audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb/turn-records/2026-10/27.jsonl",
+      "bytes": 15234,
+      "sha256": "0de5a2a92c13bcda8e29e9a3230800befc8f9750d4ab4adb3dee837597f5ef38"
+    },
+    {
+      "path": "runs/after-effect-deepseek-c3-1/workspace/.masc/keepers/audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb/provider-inputs/2026-10/27.jsonl",
+      "bytes": 42109,
+      "sha256": "f05843087afa82ff6673c379de180b35250b23f07b652f3e5cfc986756071ab2"
+    },
+    {
+      "path": "runs/after-effect-deepseek-c3-1/workspace/.masc/keepers/audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb/event-queue-v19.json",
+      "bytes": 2445,
+      "sha256": "230baac05e5d0faed4219ff9bdee29c1b4e7a7b4a522851a964203be91c39b56"
+    },
+    {
+      "path": "after-effect-deepseek-c3-1-controller-ended.json",
+      "bytes": 112,
+      "sha256": "a124d429971a4617b83cb343ead5b9a53aff907971a322326bb478cd71e18c9e"
+    },
+    {
+      "path": "after-effect-deepseek-c3-1-invocation.json",
+      "bytes": 1515,
+      "sha256": "e6fc1be88613603c6ef40969052985c4d889d0979047f4461823d27cb9f9ef22"
+    },
+    {
+      "path": "runs/after-effect-glm-c3-1/result.json",
+      "bytes": 358,
+      "sha256": "ef37eee8ded5e6313ec3371e7c5c6cdaefc613d4036b094e275336f130350998"
+    },
+    {
+      "path": "runs/after-effect-glm-c3-1/provenance.json",
+      "bytes": 6911,
+      "sha256": "db15d30289a72e689f29181d9345c4b7723369710563eb3db52cae5fae5e5944"
+    },
+    {
+      "path": "runs/after-effect-glm-c3-1/process-ended.json",
+      "bytes": 1080,
+      "sha256": "e5edaf56d2209c278420e872902acb0d0b176ec90f02096083570bb6783e66f6"
+    },
+    {
+      "path": "runs/after-effect-glm-c3-1/generated-create-a.json",
+      "bytes": 1522,
+      "sha256": "2317787b44bfd68f78c3fe0df71fd6fb04fe51f7a63cc04e52ba0201932ad6d9"
+    },
+    {
+      "path": "runs/after-effect-glm-c3-1/generated-create-b.json",
+      "bytes": 796,
+      "sha256": "fb9153fefcf0d0b4f778679250f2cb68ba9e59860dd6ceabae258befa5105761"
+    },
+    {
+      "path": "runs/after-effect-glm-c3-1/primary-scenario-effects.json",
+      "bytes": 1481,
+      "sha256": "23837d88d1ab7b345469ab3b48e883abbc61c2d883bb3cd5262c2f785292e979"
+    },
+    {
+      "path": "runs/after-effect-glm-c3-1/all-owned-tool-inventory.json",
+      "bytes": 8708,
+      "sha256": "bb45950e786af52ba2615c79fc881efbcd41ccceb97d77b615c9ef6de40156f5"
+    },
+    {
+      "path": "runs/after-effect-glm-c3-1/tool-call-selection.json",
+      "bytes": 41947,
+      "sha256": "95c4fd6238b2a3ed5ad3c452d4c04a8638ee127bc328bfb6fe8aeb10547f2787"
+    },
+    {
+      "path": "runs/after-effect-glm-c3-1/queue-observations.json",
+      "bytes": 819834,
+      "sha256": "3df0b535bbed78421b11abab45078d38a6a57f093dab548701d6f7a440ddb73c"
+    },
+    {
+      "path": "runs/after-effect-glm-c3-1/checkpoint-lineage-selected.json",
+      "bytes": 44560,
+      "sha256": "b8b4d296f2fa850285d837bee619ed78c385421cbc1332a80da0981295a8afa7"
+    },
+    {
+      "path": "runs/after-effect-glm-c3-1/workspace/.masc/tool_calls/2026-10/27.jsonl",
+      "bytes": 50896,
+      "sha256": "489365737c371e32cb3f6a511292076e79ab02e15d6f26dd98bc86e686d4ad02"
+    },
+    {
+      "path": "runs/after-effect-glm-c3-1/workspace/.masc/schedules.json",
+      "bytes": 6012,
+      "sha256": "2ea11f991cb987c6af7ac73a89006668e3333d5560a089f625d3f09ac7f24b7a"
+    },
+    {
+      "path": "runs/after-effect-glm-c3-1/workspace/.masc/keepers/audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2/reaction-ledger/v7/2026-10/27.jsonl",
+      "bytes": 10347,
+      "sha256": "87519f9635516082381cc350127c4828986bd3f397fc887129bd8ad189c2ae53"
+    },
+    {
+      "path": "runs/after-effect-glm-c3-1/workspace/.masc/keepers/audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2/turn-records/2026-10/27.jsonl",
+      "bytes": 14391,
+      "sha256": "63afee178a14473e39eedf2596c00d96084f6809dd14197e841d816c4c8f2934"
+    },
+    {
+      "path": "runs/after-effect-glm-c3-1/workspace/.masc/keepers/audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2/provider-inputs/2026-10/27.jsonl",
+      "bytes": 40780,
+      "sha256": "d776351532c39b15dfb4d14eae873473302cc043364a3f1774130298e744c48b"
+    },
+    {
+      "path": "runs/after-effect-glm-c3-1/workspace/.masc/keepers/audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2/event-queue-v19.json",
+      "bytes": 2440,
+      "sha256": "9fc5d274e7e6bc359d38fc2d4f5b62da7f57ae3c514f852b0b9ac63d15e66c37"
+    },
+    {
+      "path": "after-effect-glm-c3-1-controller-ended.json",
+      "bytes": 110,
+      "sha256": "32ac1a1921d46bde5da3d6c65b056169f1b900f08999a4017f9d86be74464773"
+    },
+    {
+      "path": "after-effect-glm-c3-1-invocation.json",
+      "bytes": 1499,
+      "sha256": "81d8682b9a4b5223db8dcc96d7950bf720851e73722984cc4cae999d8c3f3eb2"
+    },
+    {
+      "path": "runs/after-effect-deepseek-c3-1/workspace/.masc/keepers/audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb/runtime-manifests/trace-1793065478099-00000.jsonl",
+      "bytes": 86916,
+      "sha256": "c87bbef1d7dafd5fcbd392fa6dfc403ba9bd3a74bcd9e65ccd1901a0c30bc2ac"
+    },
+    {
+      "path": "runs/after-effect-glm-c3-1/workspace/.masc/keepers/audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2/runtime-manifests/trace-1793065478075-00000.jsonl",
+      "bytes": 85381,
+      "sha256": "1856389b09e034e34f42358b5047e39b0fe7ee050a0d82dc5897cb8ffa0fc0c9"
+    }
+  ],
+  "review_operations": "Offline filesystem/raw JSON/Git-object reads only. No API, server/process/model/CI/Git mutation or rerun; only this new derivative report written.",
+  "bound_file_path_base": "artifacts/schedule-entry-candidate-20261027/ in C3 worktree; absolute original-C2 paths remain absolute"
+}

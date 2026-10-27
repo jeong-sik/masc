@@ -1,0 +1,226 @@
+{
+  "schema": "masc.schedule-c3-owned-tool-inventory.v1",
+  "sources": [
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-glm-c3-1/workspace/.masc/tool_calls/2026-10/27.jsonl",
+      "sha256": "489365737c371e32cb3f6a511292076e79ab02e15d6f26dd98bc86e686d4ad02",
+      "bytes": 50896,
+      "rows": 10
+    }
+  ],
+  "owned_rows": [
+    {
+      "record_kind": "tool_call",
+      "tool": "keeper_tool_search",
+      "execution_id": "execution-node-75ee7e74ff84bef282eb7d346c7401ad",
+      "tool_use_id": "call_d5a053c112dd4ce0a92faec8",
+      "keeper": "audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2",
+      "keeper_turn_id": 1,
+      "trace_id": "trace-1793065478075-00000",
+      "ts": 1793065495.108809,
+      "disposition": null,
+      "wire_outcome": "ok",
+      "input_binding": {
+        "json_value_sha256": "bb4f05e43c412bc76400a876c1ca394c5d62486cbd18272965153b3aff69e34e",
+        "json_value_bytes": 83
+      },
+      "output_binding": {
+        "json_value_sha256": "dbe148e29626fdbd2b95a95700aafec2923f1dd1f815842b87d44aec90546bca",
+        "json_value_bytes": 317
+      },
+      "raw_input_output_retained": false
+    },
+    {
+      "record_kind": "tool_call",
+      "tool": "masc_schedule_get",
+      "execution_id": "execution-node-5d3630791844238436a01fef1d6daba5",
+      "tool_use_id": "call_ea15bb7cf72d47ceb2c38d91",
+      "keeper": "audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2",
+      "keeper_turn_id": 1,
+      "trace_id": "trace-1793065478075-00000",
+      "ts": 1793065517.948908,
+      "disposition": "completed",
+      "wire_outcome": "ok",
+      "input_binding": {
+        "json_value_sha256": "91d862c18aeb92d5c0719e0487dea9e62163e5a6e57f8aacca4cd0779d0b12b7",
+        "json_value_bytes": 67
+      },
+      "output_binding": {
+        "json_value_sha256": "74a6672570b1446ed0ef2860c7588731a1221a8363cab2c429b6530330b01882",
+        "json_value_bytes": 3802
+      },
+      "raw_input_output_retained": false
+    },
+    {
+      "record_kind": "tool_call",
+      "tool": "masc_schedule_notes_list",
+      "execution_id": "execution-node-756c4057b12dbe4caffe111b851e46c0",
+      "tool_use_id": "call_a9ce4b803cea45a799d80ba3",
+      "keeper": "audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2",
+      "keeper_turn_id": 1,
+      "trace_id": "trace-1793065478075-00000",
+      "ts": 1793065540.256748,
+      "disposition": "completed",
+      "wire_outcome": "ok",
+      "input_binding": {
+        "json_value_sha256": "91d862c18aeb92d5c0719e0487dea9e62163e5a6e57f8aacca4cd0779d0b12b7",
+        "json_value_bytes": 67
+      },
+      "output_binding": {
+        "json_value_sha256": "5dbbbfdfe119a307da12ac96d6237be823ed7bfca81441383d26ac631259a62d",
+        "json_value_bytes": 117
+      },
+      "raw_input_output_retained": false
+    },
+    {
+      "record_kind": "tool_call",
+      "tool": "masc_schedule_note_add",
+      "execution_id": "execution-node-74180b5ce578712cd679861734e99e54",
+      "tool_use_id": "call_62d80af3914c4a84ad797d86",
+      "keeper": "audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2",
+      "keeper_turn_id": 1,
+      "trace_id": "trace-1793065478075-00000",
+      "ts": 1793065546.621941,
+      "disposition": "completed",
+      "wire_outcome": "ok",
+      "input_binding": {
+        "json_value_sha256": "e1756fcee0d635e896f0077fce10e51f1dbe024dc07ffdd2a0fba75385416255",
+        "json_value_bytes": 125
+      },
+      "output_binding": {
+        "json_value_sha256": "ab8e0e5a330722cea8f36771e2e201afe4b8499db86f552c1a48a48b7d628c74",
+        "json_value_bytes": 332
+      },
+      "raw_input_output_retained": false
+    },
+    {
+      "record_kind": "tool_call",
+      "tool": "masc_schedule_notes_list",
+      "execution_id": "execution-node-e9b3bdea9cc467d438d386df1f35b08f",
+      "tool_use_id": "call_4417075b34a740b2b8552120",
+      "keeper": "audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2",
+      "keeper_turn_id": 1,
+      "trace_id": "trace-1793065478075-00000",
+      "ts": 1793065553.541017,
+      "disposition": "completed",
+      "wire_outcome": "ok",
+      "input_binding": {
+        "json_value_sha256": "59d1e6aa8844cd86899f4b539fa78c57a8dc3e1f6fbe5f2d77e5f1ad6ae48c17",
+        "json_value_bytes": 74
+      },
+      "output_binding": {
+        "json_value_sha256": "bd3ee973862c74c2fd2a0c259388fd771a62ede70c87b725aa2159daa0ad7f47",
+        "json_value_bytes": 124
+      },
+      "raw_input_output_retained": false
+    },
+    {
+      "record_kind": "tool_call",
+      "tool": "masc_schedule_note_add",
+      "execution_id": "execution-node-0c7812bcb52c5aebf5cc7f85bdc9eb14",
+      "tool_use_id": "call_b0d8153c2993449388ddfc8d",
+      "keeper": "audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2",
+      "keeper_turn_id": 2,
+      "trace_id": "trace-1793065478075-00000",
+      "ts": 1793065561.575495,
+      "disposition": "completed",
+      "wire_outcome": "ok",
+      "input_binding": {
+        "json_value_sha256": "537a20377ba93b084d79d0bb2d0e8c6ee0072dc1095d48bf000ba4483c483cd2",
+        "json_value_bytes": 139
+      },
+      "output_binding": {
+        "json_value_sha256": "9011ded30996110aeebe81bb456654c8d39d9011ef8da9d2e403411d2c1452fc",
+        "json_value_bytes": 347
+      },
+      "raw_input_output_retained": false
+    },
+    {
+      "record_kind": "tool_call",
+      "tool": "masc_schedule_notes_list",
+      "execution_id": "execution-node-f73eaf27fe0f5d8d0856203262af8f93",
+      "tool_use_id": "call_779ee6a6947a4bf4a760c3c2",
+      "keeper": "audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2",
+      "keeper_turn_id": 2,
+      "trace_id": "trace-1793065478075-00000",
+      "ts": 1793065566.444161,
+      "disposition": "completed",
+      "wire_outcome": "ok",
+      "input_binding": {
+        "json_value_sha256": "59d1e6aa8844cd86899f4b539fa78c57a8dc3e1f6fbe5f2d77e5f1ad6ae48c17",
+        "json_value_bytes": 74
+      },
+      "output_binding": {
+        "json_value_sha256": "25252124fea54cbb32a0a4476cd704b6e219cf577819055cb53586bae50ac1b2",
+        "json_value_bytes": 423
+      },
+      "raw_input_output_retained": false
+    },
+    {
+      "record_kind": "tool_call",
+      "tool": "masc_schedule_note_add",
+      "execution_id": "execution-node-9f77b52dd6058c7e54bbd098b89c7436",
+      "tool_use_id": "call_23ba11b4583c4803b76b7876",
+      "keeper": "audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2",
+      "keeper_turn_id": 2,
+      "trace_id": "trace-1793065478075-00000",
+      "ts": 1793065577.293428,
+      "disposition": "completed",
+      "wire_outcome": "ok",
+      "input_binding": {
+        "json_value_sha256": "914ac8e32ee76e5b8759997324756813a05dc30aac36fc80bdcd03c71f554c4b",
+        "json_value_bytes": 133
+      },
+      "output_binding": {
+        "json_value_sha256": "1792e261001a5f786a4b2c2731f1c720b2ff1532e7a2057bd46146dde1aecba8",
+        "json_value_bytes": 341
+      },
+      "raw_input_output_retained": false
+    },
+    {
+      "record_kind": "tool_call",
+      "tool": "masc_schedule_notes_list",
+      "execution_id": "execution-node-a448a54c5a1cb33c718f8a1be62f2ad9",
+      "tool_use_id": "call_565f73f1ab564ed99dc855a6",
+      "keeper": "audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2",
+      "keeper_turn_id": 2,
+      "trace_id": "trace-1793065478075-00000",
+      "ts": 1793065589.314407,
+      "disposition": "completed",
+      "wire_outcome": "ok",
+      "input_binding": {
+        "json_value_sha256": "91d862c18aeb92d5c0719e0487dea9e62163e5a6e57f8aacca4cd0779d0b12b7",
+        "json_value_bytes": 67
+      },
+      "output_binding": {
+        "json_value_sha256": "c4790f24a97cf436d388e3df9df865a888038d6e26c7f286f7ba3173cdcbd998",
+        "json_value_bytes": 695
+      },
+      "raw_input_output_retained": false
+    },
+    {
+      "record_kind": "tool_call",
+      "tool": "keeper_artifact_read",
+      "execution_id": "execution-node-4a3b94f68dfeeb4f1ba8869c5e941a44",
+      "tool_use_id": "call_9245274a6ba3406ea9743ecf",
+      "keeper": "audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2",
+      "keeper_turn_id": 3,
+      "trace_id": "trace-1793065478075-00000",
+      "ts": 1793065608.617008,
+      "disposition": "completed",
+      "wire_outcome": "ok",
+      "input_binding": {
+        "json_value_sha256": "9dfbcb546274b29e233353ae3e750c25da6b73665301dd8fe528ddf79de6435b",
+        "json_value_bytes": 77
+      },
+      "output_binding": {
+        "json_value_sha256": "f1ab8cd3e177bbafa227c24c46da10daaa2d2c269a86ac7f8a2175a352172c5d",
+        "json_value_bytes": 1006
+      },
+      "raw_input_output_retained": false
+    }
+  ],
+  "row_count": 10,
+  "read_errors": [],
+  "scope": "All owned Keeper rows; non-synthetic input/output contents excluded, semantic hashes only."
+}

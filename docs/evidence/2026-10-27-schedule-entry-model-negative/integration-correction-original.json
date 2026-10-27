@@ -1,0 +1,186 @@
+{
+  "schema": "masc.independent-integration-review-correction.v1",
+  "verdict": "CORRECTION_KNOWN_FIXTURE_P2_IN_FROZEN_SOURCE",
+  "applies_to_product_assembly": "13d235b38c756a9d4b446fa74232f18e8979b180",
+  "applies_to_frozen_C3": "87e6f274ddd5958b3966608fab376cfd1cb50ed3",
+  "base_C2": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+  "selected_leaf": "98532cc5dcae3267587148d6f1823a16458268dd",
+  "scope": "Correct current consumption of earlier source/integration verdict after reading additional concrete CI/review evidence. Read-only exact Git objects, retained source/logs, original report and workflow scope. Only this ignored correction written. No source/Git/CI/API/runtime/model or formal approval mutation.",
+  "original_report": {
+    "path": "artifacts/schedule-entry-candidate-20261027/independent-final-integration-review-13d235b3.json",
+    "retained_copy": "docs/evidence/2026-10-27-schedule-entry-candidate/independent-integration-review.json",
+    "bytes": 9548,
+    "sha256": "79e49d0d2d5d0df0063459327a2596d8e0c6ee244e130c0517e87261d4e27342",
+    "original_verdict": "PASS_SOURCE_ONLY_INTEGRATION",
+    "original_remaining_P0_P1_P2": [],
+    "original_bytes_preserved": true
+  },
+  "current_verdict_scope": {
+    "whole_frozen_C3_source": "HAS_TWO_KNOWN_TEST_FIXTURE_P2; NO_CURRENT_GLOBAL_NO_P2_PASS",
+    "specific_integration_boundary": "C2_COHORT_YIELD_RETENTION_AND_EXACT_ADMISSION_PATCH_FACTS_REMAIN_SUPPORTED",
+    "meaning": "The earlier unconditional remaining_P0_P1_P2=[] and PASS label must not be consumed as a current claim that the entire selected C3 snapshot has no P0/P1/P2. Concrete test-source P2s are inherited from selected985 and remain in13d/87. This correction does not erase the earlier byte/lifecycle checks or establish a new runtime product defect."
+  },
+  "invalidated_current_claims": [
+    {
+      "coordinate": "independent-final-integration-review-13d235b3.json $.remaining_P0_P1_P2",
+      "correction": "Empty list is not current for the whole snapshot. Use the two known fixture P2s below."
+    },
+    {
+      "coordinate": "independent-final-integration-review-13d235b3.json $.verdict",
+      "correction": "Do not cite historical PASS_SOURCE_ONLY_INTEGRATION as current full-source/whole-C3 approval. Retain only specifically named integration facts with this companion correction."
+    },
+    {
+      "coordinate": "docs/evidence/2026-10-27-schedule-entry-candidate/README.md:11",
+      "correction": "Frozen text says PASS with no remaining P0-P2. It is now stale as a current whole-source summary. Keep frozen bytes, but accompany any current PR/review/retention/summary citation with this correction. PR-body qualification alone must not silently turn the retained original into current no-P2 proof."
+    }
+  ],
+  "newly_adjudicated_evidence": {
+    "workflow": "Test",
+    "run_id": 40426117052,
+    "head": "98532cc5dcae3267587148d6f1823a16458268dd",
+    "ref": "fix/schedule-entry-source-context-20261027",
+    "conclusion": "failure",
+    "counts": {
+      "wake": "44PASS/0FAIL",
+      "wire": "6PASS/2FAIL",
+      "total": "50PASS/2FAIL over52 cases"
+    },
+    "source_review_reference": "https://github.com/jeong-sik/masc/pull/46311#pullrequestreview-5660897906",
+    "timing_limit": "Additional evidence was subsequently read/adjudicated; this report does not assert the CI event happened after the earlier review. No C3 execution of the failed suite was observed."
+  },
+  "current_known_P2s": [
+    {
+      "severity": "P2",
+      "path": "test/test_keeper_direct_goal_provider_wire.ml",
+      "lines": [
+        172,
+        173,
+        174
+      ],
+      "issue": "Empty Goal negative scans the entire System for newline bullet, so the distinct required Unknown admission bullet is mistaken for a Goal row.",
+      "actual_source985_evidence": "Raw failed-step lines578 and707-710 report false expected / true received; source construction confirms the independent admission row.",
+      "C3_reachability": "C3 wire fixture and relevant Direct/formatter implementation are selected source985 bytes; source mismatch remains even though no C3 wire-suite run is claimed."
+    },
+    {
+      "severity": "P2",
+      "path": "test/test_keeper_direct_goal_provider_wire.ml",
+      "lines": [
+        346,
+        347,
+        348
+      ],
+      "issue": "Post-tool capture expects exactly keeper_instructions+active_goals but the required stable admission producer is also present.",
+      "actual_source985_evidence": "Raw failed-step lines649 and738-742 show actual three producer IDs vs expected two. The tool-loop had already traversed three local HTTP requests and verified real bundled Task/Goal persistence before this assertion failure.",
+      "C3_reachability": "Exact inherited fixture expectation remains; this is a test-source failure, not evidence that the scheduled consumer/model failed."
+    }
+  ],
+  "exact_inheritance": {
+    "C3_13d_87_and_source985_wire_fixture_bytes": 32916,
+    "C3_13d_87_and_source985_wire_fixture_sha256": "da1c5cd91caac9dc28cd7218d830475d6bacf2abe4e80f5b2fee5199751b8e9a",
+    "canonical_cb_wire_fixture_bytes": 34948,
+    "canonical_cb_wire_fixture_sha256": "f128bf0b45581f514a9b090befea8f3bb3b3e88f433a1dc50ce553c15cb6e2bf",
+    "canonical_cb_fix_included_in_C3": false,
+    "C3_documentation_delta": {
+      "files": 8,
+      "paths": [
+        "changelog.d/46318.md",
+        "docs/evidence/2026-10-27-schedule-entry-candidate/README.md",
+        "docs/evidence/2026-10-27-schedule-entry-candidate/assembly-result.json",
+        "docs/evidence/2026-10-27-schedule-entry-candidate/current-locations.json",
+        "docs/evidence/2026-10-27-schedule-entry-candidate/independent-integration-review.json",
+        "docs/evidence/2026-10-27-schedule-entry-candidate/selected-copies.json",
+        "docs/evidence/2026-10-27-schedule-entry-candidate/selection-time-manifest.json",
+        "docs/evidence/2026-10-27-schedule-entry-candidate/selection.json"
+      ],
+      "product_and_test_tree_unchanged_from13d": true
+    }
+  },
+  "still_valid": [
+    "Leader four-commit selection/provenance and actual cherry-pick mapping remain historical source facts; this correction does not change selected scope.",
+    "Within the32 original selected leaf paths,31 final file blobs equal selected985. The only different file is keeper_unified_turn.ml. This is not whole-tree equality with leaf or C2.",
+    "keeper_unified_turn remains exactly C2 original plus the four prepare_prompt turn_ref/admission argument lines. C2 pending_at_intake yield is preserved.",
+    "C2 source_batch admitted-vs-pending cohort separation and validation retention remain byte-identical.",
+    "C2 heartbeat_loop Schedule_due/Connector_attention checkpoint retention and no-terminal-ACK behavior remain byte-identical.",
+    "13d to frozen87 adds only eight docs/changelog files; it does not add the canonical cb fixture correction.",
+    "Known[]/Unknown metadata and existing User/Gate boundaries remain source-reviewed mechanisms, not model compliance or hard-isolation proof."
+  ],
+  "additional_observations": [
+    {
+      "kind": "fixture_fidelity_only",
+      "finding": "C3 also retains Direct.prepare goal-tool-loop-wire-fixture#1 versus capture/meta trace-goal-loop-wire#1 in the same tool-loop test. Canonical cb aligns these and adds an explicit equality assertion. This is inherited fixture metadata inconsistency; no actual production turn-ref defect is established here."
+    },
+    {
+      "kind": "evidence_consumption_risk",
+      "finding": "The retained report copy is byte-identical to the original, including remaining=[]; metadata-only review cannot clear the inherited test P2s. Current citations must distinguish copied historical evidence from current whole-source verdict."
+    },
+    {
+      "kind": "no_additional_product_finding",
+      "finding": "No new concrete scheduled-runtime, Gate/authorization, source-arbitration or model behavior defect follows from these two fixture failures alone. Original DS request-scope behavior still needs its authorized comparison; no success/failure is inferred."
+    }
+  ],
+  "allowed_QA_evidence_boundary": {
+    "run_parent_reported": "Minimal manual checks40428400174 requested once, source frozen87, scenario addon-lifecycle; no result queried/observed by this reviewer.",
+    "canonical_workflow_source": ".github/workflows/tui-native-proof.yml:82",
+    "wire_suite_in_addon_target_list": false,
+    "meaning": "Known fixture P2s do not imply an unobserved producer/model result and do not require a new hard gate or automatic source change. Continue only within already authorized QA scope, preserving actual build/receipt/native/controller identities and any negative results. An addon-only success, if later observed, would not clear the excluded wire tests.",
+    "not_transferred": "Canonical cb source-only review or later source-suite success is not C3 execution. No automatic addition of unselected commits or new build/test/runtime request is made here.",
+    "addon_specific_additional_targets": [
+      "bin/main_eio.exe",
+      "bin/masc_native_addon_launcher.exe",
+      "test/test_tui_lane_addons.exe",
+      "test/test_lane_addon_application.exe"
+    ]
+  },
+  "critical_preserved_source_bindings": [
+    {
+      "path": "lib/keeper/keeper_heartbeat_source_batch.ml",
+      "bytes": 2624,
+      "sha256": "5c1e6c4647c504e4c7592bd900b72bddd91f1ab721534d28cc79fb94597e211e",
+      "C3_equals_C2": true
+    },
+    {
+      "path": "lib/keeper/keeper_heartbeat_source_batch.mli",
+      "bytes": 2591,
+      "sha256": "b86e7c6bd3522bcada89711f23f14249f59106335cf4fe46c77274fbd75960fe",
+      "C3_equals_C2": true
+    },
+    {
+      "path": "lib/keeper/keeper_heartbeat_loop.ml",
+      "bytes": 87210,
+      "sha256": "8b451d95ada8961e6848537d4160682143508b6b52acd90c91e26fe4de477d34",
+      "C3_equals_C2": true
+    }
+  ],
+  "evidence_bindings": [
+    {
+      "path": "independent-final-integration-review-13d235b3.json",
+      "bytes": 9548,
+      "sha256": "79e49d0d2d5d0df0063459327a2596d8e0c6ee244e130c0517e87261d4e27342"
+    },
+    {
+      "path": "docs/evidence/2026-10-27-schedule-entry-candidate/independent-integration-review.json",
+      "bytes": 9548,
+      "sha256": "79e49d0d2d5d0df0063459327a2596d8e0c6ee244e130c0517e87261d4e27342"
+    },
+    {
+      "path": "docs/evidence/2026-10-27-schedule-entry-candidate/README.md",
+      "bytes": 3306,
+      "sha256": "30d35d9a098130b93393c6d666f3e93061392ada35e7f8dc083c3b7afdd671d1"
+    },
+    {
+      "path": "external-source/test40426117052/failed-step.log",
+      "bytes": 86421,
+      "sha256": "cc890762578795a26c146de1744ded980f9e86005d99f83a67ba42caa767c8df"
+    },
+    {
+      "path": "external-source/test40426117052/result.json",
+      "bytes": 291,
+      "sha256": "84eeb3d617e5916dda1bdb95270d80b47939513b8249591213e336f85222922f"
+    },
+    {
+      "path": "external-source/independent-ci-wire-fixture-review-cb731855.json",
+      "bytes": 8525,
+      "sha256": "2c185f3d40e8457bfd4f5572637796e817e6a35009d371209ac9d5bb67e597ef"
+    }
+  ]
+}

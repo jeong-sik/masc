@@ -203,6 +203,7 @@ POST·PUT·DELETE 와 `/mcp` 도구 호출은 `Background` 그대로다. 무거�
 - `claimed` 가 잡혀 있으면(계산이 도는 중이면) 지금처럼 기다린다. worker 를 쉬게 쥐는 시간은 그 계산 시간을 넘지 않는다. 요청 fiber 의 기다림은 worker 를 쓰지 않으므로 그대로 둔다.
 - owner 의 timeout 은 promise 기다림도 감싼다. 맡은 쪽이 취소돼 생긴 Error 는 owner 에게 계산 실패로 간다. owner 가 다시 계산하지는 않는다.
 - 같은 키 계산은 한 번만 돈다. `claimed` 는 한 번만 잡힌다.
+- 맡기는 키 사이에 새 기다림을 만들지 않는다. 맡은 쪽은 그 키의 owner 가 돌렸을 계산을 돌리므로, 그 안에서 기다리는 키도 owner 가 기다렸을 키와 같다. 그래서 서로 기다리다 멈추지 않는 조건은 지금과 같다: 캐시 키의 의존이 고리가 없어야 한다. 조사한 중첩은 한 방향이다. 질의 키 → 화면 키(briefing·mission·mission_briefing·workspace·execution) → projection(snapshot·digest) → operator snapshot → Keeper 마다의 키. 맨 아래 키의 계산은 다른 캐시를 조회하지 않는다. 계산이 자기 키를 다시 조회하면 지금처럼 timeout 까지 멈춘다.
 - `Operator_control_snapshot_cache` 도 job 안에서 기다리지만 owner 가 계산을 풀에 넘기지 않고 자기 fiber 에서 바로 한다. 기다리는 job 은 도는 계산을 기다리므로 꼬이지 않는다. L4b 범위 밖이다.
 
 검증: `specs/bug-models/DashboardCacheClaim.tla`. clean 모델(worker 1·2개)은 `NoInversion`, `AtMostOneRunner`, `ClaimHasRunner` 와 "맡은 계산은 결국 Ok 나 Failed 가 된다"(`ClaimSettles`, liveness)를 지킨다. 버그 모델 셋은 각각 깬다: 지금 코드(기다리기만 함) → `NoInversion`, owner 가 맡긴 뒤에도 계산 → `AtMostOneRunner`, 맡은 쪽이 실패하고 결과를 안 풂 → `ClaimHasRunner`·`ClaimSettles`. 시험은 읽기 풀 worker 1개로 짠다. (1) 요청 fiber owner 의 계산이 줄에 있고 job 안 조회가 같은 키를 기다리면 timeout 전에 끝나고 계산은 한 번 돈다. 지금 코드는 timeout 으로 실패한다. (2) claim 을 진 owner job 은 바로 worker 를 내놓는다. (3) 맡은 쪽이 실패하면 owner 가 Error 를 받고 칸이 정리된다. (4) 계산이 도는 중이면 job 안 조회는 기다리고 계산은 한 번 돈다.

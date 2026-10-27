@@ -158,7 +158,7 @@ let test_turn_scoped_capability_and_protocol () =
               [ Agent_core.Types.Text "MASC_TOOL_OK"
               ; Agent_core.Types.Image { media_type="image/png"; data=image_data; source_type=Base64 } ]
           }
-      ; after_response_sent =
+      ; stop = None; after_response_sent =
           (fun () -> responses_sent := call_id :: !responses_sent)
       }
   in
@@ -169,7 +169,8 @@ let test_turn_scoped_capability_and_protocol () =
       ~secure_random:env#secure_random
       ~server_name:"masc"
       ~tool_specs
-      ~call_tool
+      ~tool_execution_mode:(fun ~name:_ ~arguments:_ -> Some Agent_core.Tool_contract.Serial)
+    ~call_tool
       ()
   in
   let endpoint, authorization = config_fields bridge in
@@ -433,12 +434,13 @@ let test_physical_response_observer_with_reused_string_id () =
     let observer = Runtime_official_client_tool.response_observer Mcp result in
     Some { Runtime_official_client_mcp_http.outcome =
       {success=result.success; content=result.content; content_blocks=result.content_blocks};
-      after_response_sent=(fun () ->
+      stop=None;after_response_sent=(fun () ->
         Runtime_official_client_tool.notify_response_sent observer;
         Eio.Promise.resolve (snd completions.(index)) ()) } in
   let bridge = Runtime_official_client_mcp_http.start ~sw ~net:env#net
     ~secure_random:env#secure_random ~server_name:"masc"
-    ~tool_specs:(fun () -> []) ~call_tool () in
+    ~tool_specs:(fun () -> []) ~tool_execution_mode:(fun ~name:_ ~arguments:_ -> Some Agent_core.Tool_contract.Serial)
+    ~call_tool () in
   let endpoint, authorization = config_fields bridge in
   let protocol_version = initialize_session ~sw ~net:env#net ~endpoint ~authorization in
   Array.iteri (fun index (_, _, expected_delivery) ->
@@ -480,7 +482,8 @@ let test_callback_failures_do_not_poison_protocol_state () =
       ~secure_random:env#secure_random
       ~server_name:"masc"
       ~tool_specs
-      ~call_tool
+      ~tool_execution_mode:(fun ~name:_ ~arguments:_ -> Some Agent_core.Tool_contract.Serial)
+    ~call_tool
       ()
   in
   let endpoint, authorization = config_fields bridge in
@@ -556,7 +559,8 @@ let test_unknown_notification_is_ignored_and_session_survives () =
       ~secure_random:env#secure_random
       ~server_name:"masc"
       ~tool_specs
-      ~call_tool
+      ~tool_execution_mode:(fun ~name:_ ~arguments:_ -> Some Agent_core.Tool_contract.Serial)
+    ~call_tool
       ()
   in
   let endpoint, authorization = config_fields bridge in
@@ -611,6 +615,7 @@ let test_unsupported_media_is_a_delivery_error () =
   let bridge = Runtime_official_client_mcp_http.start ~sw ~net:env#net
     ~secure_random:env#secure_random ~server_name:"masc"
     ~tool_specs:(fun () -> [`Assoc ["name", `String "artifact"]])
+    ~tool_execution_mode:(fun ~name:_ ~arguments:_ -> Some Agent_core.Tool_contract.Serial)
     ~call_tool:(fun ~name:_ ~call_id:_ ~arguments:_ -> Some
       { Runtime_official_client_mcp_http.outcome =
           { Runtime_official_client_mcp.success = true
@@ -618,7 +623,7 @@ let test_unsupported_media_is_a_delivery_error () =
           ; content_blocks = Some [Agent_core.Types.Document
               {media_type="application/pdf"; data="Zml4dHVyZQ=="; source_type=Base64}]
           }
-      ; after_response_sent = (fun () -> ()) }) () in
+      ; stop = None; after_response_sent = (fun () -> ()) }) () in
   let endpoint, authorization = config_fields bridge in
   let protocol_version = initialize_session ~sw ~net:env#net ~endpoint ~authorization in
   let response = request ~protocol_version ~sw ~net:env#net ~endpoint ~authorization
@@ -648,7 +653,8 @@ let test_turn_cancel_reaches_active_tool_and_releases_dispatch () =
       let bridge = Runtime_official_client_mcp_http.start ~sw:turn ~net:env#net
         ~secure_random:env#secure_random ~server_name:"masc"
         ~tool_specs:(fun () -> [`Assoc ["name", `String "wait"]])
-        ~call_tool:(fun ~name:_ ~call_id:_ ~arguments:_ ->
+        ~tool_execution_mode:(fun ~name:_ ~arguments:_ -> Some Agent_core.Tool_contract.Serial)
+    ~call_tool:(fun ~name:_ ~call_id:_ ~arguments:_ ->
           Eio.Promise.resolve mark_entered ();
           (try Eio.Promise.await release
            with Eio.Cancel.Cancelled _ as exn ->
@@ -656,7 +662,7 @@ let test_turn_cancel_reaches_active_tool_and_releases_dispatch () =
              raise exn);
           Some { Runtime_official_client_mcp_http.outcome =
               { Runtime_official_client_mcp.success = true; content = "released"; content_blocks = None }
-            ; after_response_sent = (fun () -> ()) }) () in
+            ; stop = None; after_response_sent = (fun () -> ()) }) () in
       Eio.Promise.resolve publish (bridge, turn);
       Eio.Fiber.await_cancel ())
      with Stop_turn -> ());
@@ -697,6 +703,7 @@ let test_image_media_type_outside_the_shared_set_is_refused ?(media_type="image/
   let bridge = Runtime_official_client_mcp_http.start ~sw ~net:env#net
     ~secure_random:env#secure_random ~server_name:"masc"
     ~tool_specs:(fun () -> [`Assoc ["name", `String "diagram"]])
+    ~tool_execution_mode:(fun ~name:_ ~arguments:_ -> Some Agent_core.Tool_contract.Serial)
     ~call_tool:(fun ~name:_ ~call_id:_ ~arguments:_ -> Some
       { Runtime_official_client_mcp_http.outcome =
           { Runtime_official_client_mcp.success = true
@@ -704,7 +711,7 @@ let test_image_media_type_outside_the_shared_set_is_refused ?(media_type="image/
           ; content_blocks = Some [Agent_core.Types.Image
               {media_type; data; source_type=Base64}]
           }
-      ; after_response_sent = (fun () -> ()) }) () in
+      ; stop = None; after_response_sent = (fun () -> ()) }) () in
   let endpoint, authorization = config_fields bridge in
   let protocol_version = initialize_session ~sw ~net:env#net ~endpoint ~authorization in
   let response = request ~protocol_version ~sw ~net:env#net ~endpoint ~authorization
@@ -734,13 +741,14 @@ let test_structured_text_is_sanitized_before_it_reaches_the_client () =
   let bridge = Runtime_official_client_mcp_http.start ~sw ~net:env#net
     ~secure_random:env#secure_random ~server_name:"masc"
     ~tool_specs:(fun () -> [`Assoc ["name", `String "note"]])
+    ~tool_execution_mode:(fun ~name:_ ~arguments:_ -> Some Agent_core.Tool_contract.Serial)
     ~call_tool:(fun ~name:_ ~call_id:_ ~arguments:_ -> Some
       { Runtime_official_client_mcp_http.outcome =
           { Runtime_official_client_mcp.success = true
           ; content = "note receipt"
           ; content_blocks = Some [Agent_core.Types.Text raw]
           }
-      ; after_response_sent = (fun () -> ()) }) () in
+      ; stop = None; after_response_sent = (fun () -> ()) }) () in
   let endpoint, authorization = config_fields bridge in
   let protocol_version = initialize_session ~sw ~net:env#net ~endpoint ~authorization in
   let response = request ~protocol_version ~sw ~net:env#net ~endpoint ~authorization
@@ -770,7 +778,8 @@ let test_config_declares_the_given_tools_eager () =
       ~secure_random:env#secure_random
       ~server_name:"masc"
       ~tool_specs:(fun () -> [])
-      ~call_tool:(fun ~name:_ ~call_id:_ ~arguments:_ -> None)
+      ~tool_execution_mode:(fun ~name:_ ~arguments:_ -> Some Agent_core.Tool_contract.Serial)
+    ~call_tool:(fun ~name:_ ~call_id:_ ~arguments:_ -> None)
       ()
   in
   let open Yojson.Safe.Util in
@@ -788,6 +797,189 @@ let test_config_declares_the_given_tools_eager () =
       check bool (name ^ " is eager") true (tools |> member name |> member "eager" |> to_bool))
     [ "masc_ask"; "Read" ];
   check bool "a tool not given is not declared" true (tools |> member "Execute" = `Null)
+;;
+
+let test_independent_tool_can_complete_while_another_is_blocked () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Eio.Time.with_timeout_exn env#clock 10.0 (fun () ->
+    let started, signal_started = Eio.Promise.create () in
+    let release, finish = Eio.Promise.create () in
+    let first_done, signal_first_done = Eio.Promise.create () in
+    let response name = Some {Runtime_official_client_mcp_http.outcome=
+      {Runtime_official_client_mcp.success=true;content=name;content_blocks=None};
+      stop=None;after_response_sent=(fun () -> ())} in
+    let bridge = Runtime_official_client_mcp_http.start ~sw ~net:env#net
+      ~secure_random:env#secure_random ~server_name:"masc"
+      ~tool_specs:(fun () -> List.map (fun name -> `Assoc ["name",`String name]) ["slow";"independent"])
+      ~tool_execution_mode:(fun ~name:_ ~arguments:_ -> Some Agent_core.Tool_contract.Concurrent)
+      ~call_tool:(fun ~name ~call_id:_ ~arguments:_ ->
+        if name="slow" then (Eio.Promise.resolve signal_started ();Eio.Promise.await release);
+        response name) () in
+    let endpoint, authorization = config_fields bridge in
+    let protocol_version = initialize_session ~sw ~net:env#net ~endpoint ~authorization in
+    let call id name = request ~protocol_version ~sw ~net:env#net ~endpoint ~authorization
+      (json_request id "tools/call" (`Assoc ["name",`String name;"arguments",`Assoc []])) in
+    let release () = if Eio.Promise.peek release=None then Eio.Promise.resolve finish () in
+    Fun.protect ~finally:release (fun () ->
+      Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve signal_first_done (call 10 "slow"));
+      Eio.Promise.await started;
+      let fast = call 11 "independent" in
+      check int "independent physical HTTP call completes before slow release" 200 fast.status;
+      check bool "the original handler is still active" true (Eio.Promise.peek first_done=None);
+      let snapshot = Runtime_official_client_mcp_http.For_testing.snapshot bridge in
+      check int "snapshot lookup is not blocked by the active handler" 1 snapshot.tool_calls;
+      check int "only the real blocked reservation remains retained" 1 snapshot.retained_tool_reservations;
+      release ();
+      check int "the original call completes after its real release" 200
+        (Eio.Promise.await first_done).status;
+      check int "completed scheduling history is retired" 0
+        (Runtime_official_client_mcp_http.For_testing.snapshot bridge).retained_tool_reservations))
+;;
+
+let test_serial_boundary_waits_for_predecessors_and_fences_followers ~fail_serial () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Eio.Time.with_timeout_exn env#clock 10.0 (fun () ->
+    let first_started, signal_first_started = Eio.Promise.create () in
+    let serial_reserved, signal_serial_reserved = Eio.Promise.create () in
+    let follower_reserved, signal_follower_reserved = Eio.Promise.create () in
+    let serial_started, signal_serial_started = Eio.Promise.create () in
+    let release_first, finish_first = Eio.Promise.create () in
+    let release_serial, finish_serial = Eio.Promise.create () in
+    let events = ref [] in
+    let record event = events := !events @ [event] in
+    let bridge = Runtime_official_client_mcp_http.start ~sw ~net:env#net
+      ~secure_random:env#secure_random ~server_name:"masc"
+      ~tool_specs:(fun () -> List.map (fun name -> `Assoc ["name",`String name]) ["first";"serial";"follower"])
+      ~tool_execution_mode:(fun ~name ~arguments:_ ->
+        match name with
+        | "serial" -> Eio.Promise.resolve signal_serial_reserved ();Some Agent_core.Tool_contract.Serial
+        | "follower" -> Eio.Promise.resolve signal_follower_reserved ();Some Concurrent
+        | "first" -> Some Concurrent
+        | _ -> None)
+      ~call_tool:(fun ~name ~call_id:_ ~arguments:_ ->
+        record (name ^ " entered");
+        (match name with
+         | "first" -> Eio.Promise.resolve signal_first_started ();Eio.Promise.await release_first
+         | "serial" -> Eio.Promise.resolve signal_serial_started ();Eio.Promise.await release_serial
+         | "follower" -> ()
+         | _ -> fail "unknown test producer");
+        record (name ^ " settled");
+        if name="serial" && fail_serial then failwith "controlled serial handler failure";
+        Some {Runtime_official_client_mcp_http.outcome=
+          {Runtime_official_client_mcp.success=true;content=name;content_blocks=None};
+          stop=None;after_response_sent=(fun () -> ())}) () in
+    let endpoint, authorization = config_fields bridge in
+    let protocol_version = initialize_session ~sw ~net:env#net ~endpoint ~authorization in
+    let start id name =
+      let done_, finish = Eio.Promise.create () in
+      Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve finish
+        (request ~protocol_version ~sw ~net:env#net ~endpoint ~authorization
+          (json_request id "tools/call" (`Assoc ["name",`String name;"arguments",`Assoc []]))));
+      done_ in
+    let release promise resolver = if Eio.Promise.peek promise=None then Eio.Promise.resolve resolver () in
+    Fun.protect ~finally:(fun () -> release release_first finish_first;release release_serial finish_serial)
+      (fun () ->
+        let first = start 20 "first" in
+        Eio.Promise.await first_started;
+        let serial = start 21 "serial" in
+        Eio.Promise.await serial_reserved;
+        let follower = start 22 "follower" in
+        Eio.Promise.await follower_reserved;
+        check (list string) "neither queued handler crosses the active predecessor" ["first entered"] !events;
+        release release_first finish_first;
+        Eio.Promise.await serial_started;
+        check (list string) "the concurrent follower still waits for the admitted Serial call"
+          ["first entered";"first settled";"serial entered"] !events;
+        release release_serial finish_serial;
+        check int "first concurrent call settles" 200 (Eio.Promise.await first).status;
+        check int "serial settles with its actual outcome" (if fail_serial then 500 else 200)
+          (Eio.Promise.await serial).status;
+        check int "follower progresses after success or actual handler failure" 200
+          (Eio.Promise.await follower).status;
+        check int "success and exception cleanup retire the entire settled frontier" 0
+          (Runtime_official_client_mcp_http.For_testing.snapshot bridge).retained_tool_reservations;
+        check (list string) "original physical order survives the serial effect boundary"
+          ["first entered";"first settled";"serial entered";"serial settled";"follower entered";"follower settled"] !events))
+;;
+
+let test_absent_producer_contract_cannot_execute_a_tool () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  let executed = ref false in
+  let bridge = Runtime_official_client_mcp_http.start ~sw ~net:env#net
+    ~secure_random:env#secure_random ~server_name:"masc"
+    ~tool_specs:(fun () -> []) ~tool_execution_mode:(fun ~name:_ ~arguments:_ -> None)
+    ~call_tool:(fun ~name:_ ~call_id:_ ~arguments:_ -> executed:=true;None) () in
+  let endpoint, authorization = config_fields bridge in
+  let protocol_version = initialize_session ~sw ~net:env#net ~endpoint ~authorization in
+  let refused = request ~protocol_version ~sw ~net:env#net ~endpoint ~authorization
+    (json_request 30 "tools/call" (`Assoc ["name",`String "unregistered";"arguments",`Assoc []])) in
+  check int "an unknown frozen producer contract returns a JSON-RPC error over HTTP" 200 refused.status;
+  let json = Yojson.Safe.from_string refused.body in
+  check int "the parsed JSON-RPC error reports an unknown tool" (-32602)
+    Yojson.Safe.Util.(json |> member "error" |> member "code" |> to_int);
+  check bool "the effect-capable handler is never entered" false !executed
+;;
+
+let test_host_stop_drains_admitted_peers_and_refuses_late_execution ~peer_fails () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Eio.Time.with_timeout_exn env#clock 10.0 (fun () ->
+    let peer_started, signal_peer_started = Eio.Promise.create () in
+    let release_peer, finish_peer = Eio.Promise.create () in
+    let peer_done, signal_peer_done = Eio.Promise.create () in
+    let stopped, signal_stopped = Eio.Promise.create () in
+    let peer_calls = ref 0 and stop_calls = ref 0 and late_calls = ref 0 in
+    let deferred : Runtime_official_client_tool.host_stop =
+      Terminal_tool_boundary {tool_name="stop";outcome=Durable_stimulus_deferred} in
+    let failed : Runtime_official_client_tool.host_stop =
+      Terminal_tool_boundary {tool_name="peer";outcome=Terminal_failed
+        {failure_class=Tool_result.Runtime_failure;effect_disposition=Tool_result.Effect_outcome_unknown;
+         detail=Keeper_terminal_effect_detail.Tool_failed {internal_tool_name="peer";message="original peer failure"}}} in
+    let bridge = Runtime_official_client_mcp_http.start ~sw ~net:env#net
+      ~secure_random:env#secure_random ~server_name:"masc"
+      ~tool_specs:(fun () -> List.map (fun name -> `Assoc ["name",`String name]) ["peer";"stop";"late"])
+      ~tool_execution_mode:(fun ~name:_ ~arguments:_ -> Some Agent_core.Tool_contract.Concurrent)
+      ~call_tool:(fun ~name ~call_id:_ ~arguments:_ ->
+        let stop = match name with
+          | "peer" -> incr peer_calls;Eio.Promise.resolve signal_peer_started ();
+            Eio.Promise.await release_peer;if peer_fails then Some failed else None
+          | "stop" -> incr stop_calls;Some deferred
+          | "late" -> incr late_calls;None
+          | _ -> fail "unknown producer" in
+        Some {Runtime_official_client_mcp_http.outcome=
+          {Runtime_official_client_mcp.success=(not (name="peer" && peer_fails));
+           content="original " ^ name;content_blocks=None};stop;
+          after_response_sent=(fun () -> ())}) () in
+    let endpoint, authorization = config_fields bridge in
+    let protocol_version = initialize_session ~sw ~net:env#net ~endpoint ~authorization in
+    let call id name = request ~protocol_version ~sw ~net:env#net ~endpoint ~authorization
+      (json_request id "tools/call" (`Assoc ["name",`String name;"arguments",`Assoc []])) in
+    let release () = if Eio.Promise.peek release_peer=None then Eio.Promise.resolve finish_peer () in
+    Fun.protect ~finally:release (fun () ->
+      Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve signal_peer_done (call 40 "peer"));
+      Eio.Promise.await peer_started;
+      Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve signal_stopped
+        (Runtime_official_client_mcp_http.await_host_stop bridge));
+      check int "the stopping physical response is returned" 200 (call 41 "stop").status;
+      check bool "host stop cannot cancel its still-running admitted peer" true
+        (Eio.Promise.peek stopped=None);
+      let late = call 42 "late" in
+      check int "closed admission returns an explicit result" 200 late.status;
+      let json = Yojson.Safe.from_string late.body in
+      check bool "the late call reports no successful execution" true
+        ((json |> member "result" |> member "isError") = `Bool true);
+      check int "a late request never enters its effect-capable handler" 0 !late_calls;
+      check bool "the late refusal does not release the earlier peer" true
+        (Eio.Promise.peek stopped=None);
+      release ();
+      check int "the admitted peer returns its actual result before scope stop" 200
+        (Eio.Promise.await peer_done).status;
+      let actual = Eio.Promise.await stopped in
+      check bool "a later authoritative peer failure outranks the earlier scheduling stop" true
+        (actual = if peer_fails then failed else deferred);
+      check int "original peer executes once" 1 !peer_calls;
+      check int "original stop tool executes once" 1 !stop_calls;
+      check int "stop drain retains no completed reservation history" 0
+        (Runtime_official_client_mcp_http.For_testing.snapshot bridge).retained_tool_reservations))
 ;;
 
 let () =
@@ -817,6 +1009,20 @@ let () =
     ; ( "response delivery"
       , [ test_case "reused string ID keeps physical delivery and substitution separate"
             `Quick test_physical_response_observer_with_reused_string_id ] )
+    ; ( "tool scheduling"
+      , [ test_case "independent HTTP tool completes while a peer is blocked" `Quick
+            test_independent_tool_can_complete_while_another_is_blocked
+        ; test_case "Serial success waits for predecessors and fences followers" `Quick
+            (test_serial_boundary_waits_for_predecessors_and_fences_followers ~fail_serial:false)
+        ; test_case "Serial failure waits for predecessors and releases followers" `Quick
+            (test_serial_boundary_waits_for_predecessors_and_fences_followers ~fail_serial:true)
+        ; test_case "absent producer contract cannot execute a tool" `Quick
+            test_absent_producer_contract_cannot_execute_a_tool
+        ; test_case "host stop drains admitted peer and refuses late execution" `Quick
+            (test_host_stop_drains_admitted_peers_and_refuses_late_execution ~peer_fails:false)
+        ; test_case "later peer failure outranks host stop after admitted drain" `Quick
+            (test_host_stop_drains_admitted_peers_and_refuses_late_execution ~peer_fails:true)
+        ] )
     ; ( "effect boundary"
       , [ test_case "turn cancellation reaches active callback without poisoning dispatch" `Quick
             test_turn_cancel_reaches_active_tool_and_releases_dispatch

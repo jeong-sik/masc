@@ -599,6 +599,9 @@ let probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs ~base_p
                     ~secure_random
                     ~server_name:"masc"
                     ~tool_specs:(fun () -> [ mcp_tool_spec probe_tool ])
+                    ~tool_execution_mode:(fun ~name ~arguments ->
+                      if String.equal name probe_tool.name then Some (probe_tool.execution_mode arguments)
+                      else None)
                     ~call_tool:(fun ~name ~call_id ~arguments ->
                       if String.equal name probe_tool.name
                       then (
@@ -609,7 +612,7 @@ let probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs ~base_p
                               ; content = result.content
                               ; content_blocks = result.content_blocks
                               }
-                          ; after_response_sent = (fun () -> ())
+                          ; stop = None; after_response_sent = (fun () -> ())
                           })
                       else None)
                     ()

@@ -7,6 +7,7 @@ type snapshot =
   ; last_connection_error : string option
   ; listener_failure : string option
   ; negotiated_protocol_version : string option
+  ; retained_tool_reservations : int
   }
 
 type mutable_state =
@@ -18,6 +19,25 @@ type mutable_state =
   ; mutable listener_failure : string option
   }
 
+(* Only unresolved physical promises remain in the scheduler. A cancelled
+   queued Serial settles itself, while its unresolved predecessors remain in
+   the flat barrier. No historical reservation graph is retained or traversed. *)
+type tool_reservation =
+  { predecessors : unit Eio.Promise.t list
+  ; finish : unit -> unit
+  }
+
+type tool_schedule =
+  { serial_barrier : unit Eio.Promise.t list
+  ; concurrent : unit Eio.Promise.t list
+  }
+
+type tool_admission =
+  | Admission_open
+  | Admission_closed of Runtime_official_client_tool.host_stop
+
+let unresolved promises = List.filter (fun promise -> Eio.Promise.peek promise=None) promises
+
 type t =
   { endpoint : string
   ; server_name : string
@@ -26,11 +46,17 @@ type t =
   ; state : mutable_state
   ; state_mutex : Eio.Mutex.t
   ; dispatch_mutex : Eio.Mutex.t
+  ; mutable tool_schedule : tool_schedule
+  ; mutable pending_reservations : unit Eio.Promise.t list
+  ; mutable admission : tool_admission
+  ; stop_response_boundary : unit Eio.Promise.t
+  ; signal_stop_response_boundary : unit -> unit
   }
 
 type tool_response =
   { outcome : Runtime_official_client_mcp.tool_result
   ; after_response_sent : unit -> unit
+  ; stop : Runtime_official_client_tool.host_stop option
   }
 
 let max_body_bytes = 1024 * 1024
@@ -59,6 +85,7 @@ let snapshot t =
       ; last_connection_error = t.state.last_connection_error
       ; listener_failure = t.state.listener_failure
       ; negotiated_protocol_version = session.negotiated_protocol_version
+      ; retained_tool_reservations = List.length t.pending_reservations
       }))
 ;;
 
@@ -167,15 +194,80 @@ type dispatch_error =
       ; cause : exn
       }
 
-let dispatch t ~request ~tool_specs ~call_tool message =
-  (* This mutex reserves dispatch order; it does not own an in-place protocol
-     transaction. Session transitions use atomic compare-and-set, and tool
-     effects have their own durable boundary in the Keeper host. Every yielding
-     callback therefore leaves session state valid when cancelled. [use_ro]
-     preserves exclusive ordering but unlocks on cancellation instead of
-     protecting an arbitrarily long tool call or poisoning the reservation.
-     The short observation updates below retain their own protected mutex. *)
-  Eio.Mutex.use_ro t.dispatch_mutex (fun () ->
+let prune_schedule t =
+  t.tool_schedule <-
+    { serial_barrier=unresolved t.tool_schedule.serial_barrier
+    ; concurrent=unresolved t.tool_schedule.concurrent };
+  t.pending_reservations <- unresolved t.pending_reservations
+
+let reserve_tool t execution_mode =
+  prune_schedule t;
+  let settled, resolve = Eio.Promise.create () in
+  let predecessors = match execution_mode with
+    | Agent_core.Tool_contract.Concurrent -> t.tool_schedule.serial_barrier
+    | Serial -> t.tool_schedule.serial_barrier @ t.tool_schedule.concurrent in
+  let reservation = {predecessors;finish=(fun () ->
+    Eio.Promise.resolve resolve ();
+    (* Pure owner-domain cleanup: no lock or suspension can mask cancellation. *)
+    prune_schedule t)} in
+  t.pending_reservations <- settled :: t.pending_reservations;
+  t.tool_schedule <- (match execution_mode with
+    | Concurrent -> {t.tool_schedule with concurrent=settled :: t.tool_schedule.concurrent}
+    | Serial -> {serial_barrier=settled :: predecessors;concurrent=[]});
+  reservation
+;;
+
+let close_admission t stop =
+  Eio.Cancel.protect (fun () ->
+    Eio.Mutex.use_ro t.dispatch_mutex (fun () ->
+      t.admission <- Admission_closed (match t.admission with
+        | Admission_open -> stop
+        | Admission_closed previous ->
+          if Runtime_official_client_tool.host_stop_failed stop
+             && not (Runtime_official_client_tool.host_stop_failed previous)
+          then stop else previous)))
+;;
+
+let run_reserved t reservation ~on_stop call =
+  Fun.protect ~finally:reservation.finish (fun () ->
+    List.iter Eio.Promise.await reservation.predecessors;
+    let response = call () in
+    Option.iter (fun response -> Option.iter (fun stop ->
+      on_stop ();
+      close_admission t stop) response.stop) response;
+    response)
+;;
+
+let await_host_stop t =
+  Eio.Promise.await t.stop_response_boundary;
+  let pending = Eio.Mutex.use_ro t.dispatch_mutex (fun () -> t.pending_reservations) in
+  List.iter Eio.Promise.await pending;
+  Eio.Mutex.use_ro t.dispatch_mutex (fun () -> match t.admission with
+    | Admission_closed stop -> stop
+    | Admission_open -> assert false)
+;;
+
+let turn_closed_result : Runtime_official_client_mcp.tool_result =
+  { success=false
+  ; content=Yojson.Safe.to_string (`Assoc
+      ["execution", `String "not_started"; "reason", `String "turn_closed"])
+  ; content_blocks=None }
+;;
+
+let dispatch t ~request ~tool_specs ~tool_execution_mode ~call_tool message =
+  (* Core MCP validates its phase, call shape and argument object before
+     guarded_call_tool. Reserve the producer schedule while still owning this
+     short protocol lock, then release it before waiting or executing. The
+     tools/call continuation only encodes its result and mutates no session. *)
+  Eio.Mutex.lock t.dispatch_mutex;
+  let response_boundary = ref (fun () -> ()) in
+  let boundary_transferred = ref false in
+  let locked = ref true in
+  let release_protocol () =
+    if !locked then begin locked := false; Eio.Mutex.unlock t.dispatch_mutex end in
+  Fun.protect ~finally:(fun () ->
+    release_protocol ();
+    if not !boundary_transferred then !response_boundary ()) (fun () ->
     match protocol_version_header t request with
     | Error detail -> Error (Protocol_header_error detail)
     | Ok () ->
@@ -184,21 +276,35 @@ let dispatch t ~request ~tool_specs ~call_tool message =
       let after_response_sent = ref None in
       let guarded_tool_specs () =
         try tool_specs () with
+        | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn ->
+          Llm_provider.Reserved_exn.reraise_if_reserved exn;
           inventory_failure := Some exn;
           raise exn
       in
       let guarded_call_tool ~name ~call_id ~arguments =
         try
-          match call_tool ~name ~call_id ~arguments with
+          match tool_execution_mode ~name ~arguments with
           | None -> None
-          | Some response ->
-            after_response_sent := Some response.after_response_sent;
-            Some response.outcome
+          | Some execution_mode ->
+            (match t.admission with
+             | Admission_closed _ -> Some turn_closed_result
+             | Admission_open ->
+               let reservation = reserve_tool t execution_mode in
+               release_protocol ();
+               match run_reserved t reservation
+                   ~on_stop:(fun () -> response_boundary := t.signal_stop_response_boundary)
+                   (fun () -> call_tool ~name ~call_id ~arguments) with
+               | None -> None
+               | Some response ->
+                 after_response_sent := Some response.after_response_sent;
+                 Some response.outcome)
         with
+        | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn ->
+          Llm_provider.Reserved_exn.reraise_if_reserved exn;
           tool_failure := Some (name, call_id, exn);
           raise exn
       in
@@ -218,10 +324,13 @@ let dispatch t ~request ~tool_specs ~call_tool message =
           then
             Eio.Mutex.use_rw ~protect:true t.state_mutex (fun () ->
               t.state.tool_calls <- t.state.tool_calls + 1);
-          Ok (result, !after_response_sent)
+          boundary_transferred := true;
+          Ok (result, !after_response_sent, !response_boundary)
       with
+      | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
+        Llm_provider.Reserved_exn.reraise_if_reserved exn;
         (match !tool_failure, !inventory_failure with
          | Some (name, call_id, cause), _ ->
            Error
@@ -295,7 +404,7 @@ let content_length request =
   | _ :: _ :: _ -> Error "duplicate Content-Length"
 ;;
 
-let handle_message t ~request ~tool_specs ~call_tool body =
+let handle_message t ~request ~tool_specs ~tool_execution_mode ~call_tool body =
   match
     try Ok (Yojson.Safe.from_string body) with
     | Yojson.Json_error detail -> Error detail
@@ -308,7 +417,7 @@ let handle_message t ~request ~tool_specs ~call_tool body =
       `Bad_request
       (protocol_error_response `Null (-32700) ("MCP message: " ^ detail))
   | Ok message ->
-    (match dispatch t ~request ~tool_specs ~call_tool message with
+    (match dispatch t ~request ~tool_specs ~tool_execution_mode ~call_tool message with
      | Error (Protocol_error { stage; detail }) ->
        reject t;
        respond_json
@@ -338,19 +447,21 @@ let handle_message t ~request ~tool_specs ~call_tool body =
             id
             (-32603)
             (Tool_guidance.to_string Tool_guidance.Mcp_outcome_unknown))
-     | Ok ({ response = None; _ }, _) -> respond `Accepted ""
-     | Ok ({ response = Some response; _ }, after_response_sent) ->
-       let protocol_version = (snapshot t).negotiated_protocol_version in
-       let response = respond_json ?protocol_version `OK response in
-       (match after_response_sent with
-        | None -> response
-        | Some notify ->
-          fun writer ->
+     | Ok ({ response = None; _ }, _, boundary) ->
+       boundary (); respond `Accepted ""
+     | Ok ({ response = Some response; _ }, after_response_sent, boundary) ->
+       (match
+          let protocol_version = (snapshot t).negotiated_protocol_version in
+          respond_json ?protocol_version `OK response
+        with
+        | response -> fun writer ->
+          Fun.protect ~finally:boundary (fun () ->
             response writer;
-            notify ()))
+            Option.iter (fun notify -> notify ()) after_response_sent)
+        | exception exn -> boundary (); raise exn))
 ;;
 
-let handle_post t ~tool_specs ~call_tool request body =
+let handle_post t ~tool_specs ~tool_execution_mode ~call_tool request body =
   if not (accepts_streamable_mcp request)
   then (
     reject t;
@@ -387,10 +498,10 @@ let handle_post t ~tool_specs ~call_tool request body =
            "official-client MCP request body read failed: %s"
            (Printexc.to_string exn);
          respond `Bad_request "failed to read MCP request body"
-       | Ok body -> handle_message t ~request ~tool_specs ~call_tool body)
+       | Ok body -> handle_message t ~request ~tool_specs ~tool_execution_mode ~call_tool body)
 ;;
 
-let request_handler t ~path ~tool_specs ~call_tool _client_addr request body =
+let request_handler t ~path ~tool_specs ~tool_execution_mode ~call_tool _client_addr request body =
   if not (String.equal (Uri.path (Cohttp.Request.uri request)) path)
   then respond `Not_found "Not found"
   else if not (origin_is_admitted request)
@@ -408,7 +519,7 @@ let request_handler t ~path ~tool_specs ~call_tool _client_addr request body =
   else (
     record_authenticated_request t;
     match Cohttp.Request.meth request with
-    | `POST -> handle_post t ~tool_specs ~call_tool request body
+    | `POST -> handle_post t ~tool_specs ~tool_execution_mode ~call_tool request body
     | `GET ->
       reject t;
       respond `Method_not_allowed "SSE is not enabled for this endpoint"
@@ -420,7 +531,7 @@ let request_handler t ~path ~tool_specs ~call_tool _client_addr request body =
       respond `Method_not_allowed "Method not allowed")
 ;;
 
-let start ~sw ~net ~secure_random ~server_name ~tool_specs ~call_tool () =
+let start ~sw ~net ~secure_random ~server_name ~tool_specs ~tool_execution_mode ~call_tool () =
   let path_id, authorization = fresh_capabilities secure_random in
   let path = "/mcp/" ^ path_id in
   let socket =
@@ -445,6 +556,11 @@ let start ~sw ~net ~secure_random ~server_name ~tool_specs ~call_tool () =
     ; listener_failure = None
     }
   in
+  let stop_response_boundary, resolve_stop_response_boundary = Eio.Promise.create () in
+  let boundary_signalled = Atomic.make false in
+  let signal_stop_response_boundary () =
+    if Atomic.compare_and_set boundary_signalled false true
+    then Eio.Promise.resolve resolve_stop_response_boundary () in
   let t =
     { endpoint = Printf.sprintf "http://127.0.0.1:%d%s" port path
     ; server_name
@@ -453,11 +569,16 @@ let start ~sw ~net ~secure_random ~server_name ~tool_specs ~call_tool () =
     ; state
     ; state_mutex = Eio.Mutex.create ()
     ; dispatch_mutex = Eio.Mutex.create ()
+    ; tool_schedule = {serial_barrier=[];concurrent=[]}
+    ; pending_reservations=[]
+    ; admission=Admission_open
+    ; stop_response_boundary
+    ; signal_stop_response_boundary
     }
   in
   let server =
     Cohttp_eio.Server.make
-      ~callback:(request_handler t ~path ~tool_specs ~call_tool)
+      ~callback:(request_handler t ~path ~tool_specs ~tool_execution_mode ~call_tool)
       ()
   in
   Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -480,6 +601,7 @@ module For_testing = struct
     ; last_connection_error : string option
     ; listener_failure : string option
     ; negotiated_protocol_version : string option
+    ; retained_tool_reservations : int
     }
 
   let snapshot t =
@@ -492,6 +614,7 @@ module For_testing = struct
     ; last_connection_error = current.last_connection_error
     ; listener_failure = current.listener_failure
     ; negotiated_protocol_version = current.negotiated_protocol_version
+    ; retained_tool_reservations = current.retained_tool_reservations
     }
   ;;
 end

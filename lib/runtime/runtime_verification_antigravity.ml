@@ -17,12 +17,14 @@ let run ~secure_random ~net ~mgr ~clock ~cwd ~directory ~oauth_source ~config ~t
           ~tool_specs:(fun () -> [`Assoc [
             "name", `String tool.Runtime_official_client_tool.name;
             "description", `String tool.description; "inputSchema", tool.input_schema]])
-          ~call_tool:(fun ~name ~call_id ~arguments ->
+          ~tool_execution_mode:(fun ~name ~arguments ->
+          if String.equal name tool.name then Some (tool.execution_mode arguments) else None)
+        ~call_tool:(fun ~name ~call_id ~arguments ->
             if not (String.equal name tool.name) then None else
             let result = tool.call ~call_id arguments in
             Some { Runtime_official_client_mcp_http.outcome =
               { Runtime_official_client_mcp.success = result.success; content = result.content; content_blocks = result.content_blocks };
-              after_response_sent = (fun () -> ()) }) () in
+              stop = None; after_response_sent = (fun () -> ()) }) () in
         match Runtime_antigravity_home.publish_mcp_config home
           (Runtime_official_client_mcp_http.mcp_config_json bridge
              ~eager_tools:[ tool.Runtime_official_client_tool.name ]) with

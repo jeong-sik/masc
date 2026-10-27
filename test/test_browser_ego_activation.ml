@@ -32,8 +32,9 @@ let activated=false, state=config.state || 'normal', lookups=0;
 const task={spaceId:51,
  tabs:async()=>{
   const changed=lookups>0 ? config.changeDuringLookup : undefined;
-  return [{label:changed==='label' ? 'p2' : 'p1',targetId:changed==='target' ? 'T2' : 'T1',
-   openedBy:changed==='origin' ? 'unknown' : config.origin || 'agent',
+  return [{label:config.unmanaged ? null : changed==='label' ? 'p2' : 'p1',targetId:changed==='target' ? 'T2' : 'T1',
+   openedBy:changed==='origin' ? (config.origin==='unknown' ? 'agent' : 'unknown')
+    : activated && config.originAfter ? config.originAfter : config.origin || 'agent',
    url:(config.moved && activated) || changed==='url' ? 'https://example.org/moved' : 'https://example.org/',
    title:'Page',active:activated && !config.inactive}];
  },
@@ -72,29 +73,32 @@ console.log(JSON.stringify({value,error,calls}));
 let calls result=Yojson.Safe.Util.to_list (field "calls" result)
 let methods result=List.map (fun call -> field "method" call) (calls result)
 let test_native_activation () =
-  List.iter (fun state ->
-    let result=execute (obj ["state",str state]) in
+  List.iter (fun (origin,state) ->
+    let result=execute (obj ["origin",str origin;"state",str state]) in
     ignore(ok (receipt (field "value" result)));
     check bool "only minimized windows are restored" (state="minimized")
       (List.mem (str "Browser.setWindowBounds") (methods result));
     check int "activation is not replayed" 1
       (List.length (List.filter ((=) (str "Target.activateTarget")) (methods result))))
-    ["normal";"minimized";"maximized";"fullscreen"];
+    (List.concat_map (fun origin -> List.map (fun state -> origin,state)
+      ["normal";"minimized";"maximized";"fullscreen"]) ["agent";"unknown"]);
   List.iter (fun config ->
     let result=execute config in
     check bool "wrong Page/URL refuses before native commands" true
       (field "before" (field "value" result)=`Bool true && calls result=[]))
-    [obj ["origin",str "unknown"];obj ["expectedUrl",str "https://example.org/elsewhere"]];
+    [obj ["origin",str "user"];obj ["unmanaged",`Bool true];
+     obj ["expectedUrl",str "https://example.org/elsewhere"]];
   List.iter (fun config ->
     let result=execute config in
     check bool "post-effect failure has no success receipt" true
       (field "error" result<>`Null && field "value" result=`Null);
     check int "failed activation is never replayed" 1
       (List.length (List.filter ((=) (str "Target.activateTarget")) (methods result))))
-    [obj ["moved",`Bool true];obj ["foreignWindow",`Bool true];obj ["inactive",`Bool true];obj ["lost",`Bool true]]
+    [obj ["moved",`Bool true];obj ["foreignWindow",`Bool true];obj ["inactive",`Bool true];obj ["lost",`Bool true];
+     obj ["origin",str "unknown";"originAfter",str "agent"]]
 let test_native_activation_revalidates_before_effect () =
-  List.iter (fun change ->
-    let result=execute (obj ["state",str "minimized";"changeDuringLookup",str change]) in
+  List.iter (fun (origin,change) ->
+    let result=execute (obj ["origin",str origin;"state",str "minimized";"changeDuringLookup",str change]) in
     check bool "neither window restoration nor target activation was attempted" false
       (List.exists (fun method_ -> method_=str "Browser.setWindowBounds" || method_=str "Target.activateTarget")
         (methods result));
@@ -103,7 +107,8 @@ let test_native_activation_revalidates_before_effect () =
       | _ -> false in
     check bool (change ^ " changed while the first window lookup awaited: before-effect refusal") true
       (refused && field "error" result=`Null))
-    ["url";"label";"origin";"target";"window";"invalidWindow"]
+    (List.concat_map (fun origin -> List.map (fun change -> origin,change)
+      ["url";"label";"origin";"target";"window";"invalidWindow"]) ["agent";"unknown"])
 let () = run "native Ego activation" ["boundary",[
   test_case "receipt stays with original Page and observed window" `Quick test_receipt_binding;
   test_case "native target activation and minimized window restoration" `Quick test_native_activation;

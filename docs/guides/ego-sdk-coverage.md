@@ -43,7 +43,7 @@ Neither means fully supported.
 | `TaskSpace.pages` | Managed pages known through tab enumeration | Direct lifecycle-aware managed inventory |
 | `TaskSpace.tabs` | `tabs.list` preserves label, target ID and `agent`/`unknown` origin for readable and unavailable tabs | Per-goal scope, lifecycle and installed-route proof |
 | `TaskSpace.newPage` | `page.act` open_tab | Per-goal Space and returned permanent label |
-| `TaskSpace.adopt` | Explicit `page.act` adopt_tab, observed tabId and clientId; native UnmanagedPage handle and optional pageLabel/as | Current mutations remain agent-origin only; real SDK/installed-route proof and per-goal scope |
+| `TaskSpace.adopt` | Explicit `page.act` adopt_tab, observed tabId and clientId; native UnmanagedPage handle and optional pageLabel/as. Native Page effects support adopted Pages while preserving origin | Real SDK/installed-route proof and per-goal scope |
 | `TaskSpace.release` | Explicit `page.act` release_tab unmanages an unknown-origin Page without closing it | Real SDK/installed-route proof and per-goal scope |
 | `TaskSpace.waitForControl` | `page.act` wait_for_control forwards native interval/timeout and uses the SDK clock within an agent-owned Space | Real SDK/installed-route proof; no handoff completion or takeover implied |
 | `TaskSpace.handOff` | `page.act` hand_off returns same-Space ID/name; Keeper guidance composes `masc_ask` and explicit-confirmation resume. Input-reset assertions are separate and never authorize takeover | Real Keeper login handoff, per-goal scope and UI control-state projection |
@@ -51,7 +51,7 @@ Neither means fully supported.
 | `TaskSpace.cdp` | Fixed native activate_tab uses Target activation and same-target window lookup; restores only a minimized window. No caller-supplied protocol, target or window IDs | Real SDK/installed route and visible UI proof; general Target/Browser protocol boundary and lifecycle reconciliation |
 | `Page.label` | Inventory and document-read DTO retain the permanent label; TUI shows it for the selected tab | Installed/UI proof and lifecycle-aware resume |
 | `Page.spaceId` | Bound connection Space accompanies inventory and read receipts | Installed-route proof |
-| `Page.openedBy` | Inventory/read DTO and TUI retain the SDK `agent` or `unknown` origin; closure remains conservative | Lifecycle tools and installed/UI proof |
+| `Page.openedBy` | Inventory/read DTO and TUI retain the SDK `agent` or `unknown` origin; explicit managed-Page effects preserve that provenance | Lifecycle tools and installed/UI proof |
 | `Page.targetId` | Inventory/read DTO retain the observed target ID, including unmanaged tabs | Advanced Target protocol lifecycle; target IDs are ephemeral |
 
 ## Page operations
@@ -87,7 +87,7 @@ Neither means fully supported.
 | `Page.press` | Native workflow press with delay/timeout | New option forms require real SDK and installed-route proof |
 | `Page.setInputFiles` | `page.act` upload through staged leases | Direct workflow integration while preserving file broker/lease boundary |
 | `Page.waitForFileChooser` | Internal chooser-opener upload | Explicit chooser wait/handle/options in native workflows |
-| `Page.close` | `page.act` close_tab, agent-origin only | Unknown-origin release workflow and goal/Space lifecycle |
+| `Page.close` | `page.act` close_tab on agent-created Pages; unknown-origin managed Pages use release_tab | Real SDK/installed-route proof and goal/Space lifecycle |
 
 ## Input and returned handles
 

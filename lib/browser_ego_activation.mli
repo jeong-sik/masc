@@ -1,6 +1,9 @@
-(** Explicit activation of an agent-created Page in the original agent-owned
+(** Explicit activation of a native managed Page in the original agent-owned
     Ego Space. CDP target/window IDs are derived from that Space's current
     inventory, never from caller input. Restores only a minimized window.
+    An explicitly adopted unknown-origin Page retains its origin; unmanaged
+    tabs cannot be activated. Target, label, origin and URL stay bound across
+    observations before and after activation.
     Native active/window state is not proof of rendered UI or OS focus. *)
 val script : string
 (** Fixed native TaskSpace.cdp workflow, accepting label and expectedUrl.

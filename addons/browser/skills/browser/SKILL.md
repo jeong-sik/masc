@@ -133,6 +133,16 @@ takeover or input reset. The receipt carries current SDK name/ownership and
 The private operator form displays the last cached SDK observation and its date.
 Control-changing calls and failed refreshes invalidate that cache.
 
+After the operator explicitly completes a handed-off step, `take_over` on the
+same client returns the native user-boundary Page as `activeTabId`/`egoPage`.
+It can be unmanaged (`label:null`); explicitly `adopt_tab` the observed ID
+before reading it. Takeover does not adopt, read a document, clear uncertain
+input or prove login/current focus. An absent boundary Page stays absent.
+A changed or lost boundary result does not authorize another active tab,
+another Space or automatic takeover replay. Confirm login with a fresh read
+of the intended managed Page. Explicit input/navigation/activation can
+then use an adopted native Page without changing its origin.
+
 If an Ego result says input release is unconfirmed, keep the original connection
 and do not replay its command. Answer any JavaScript dialog separately. Ask the
 operator to check/reset key and button state in that Space and use this Browser

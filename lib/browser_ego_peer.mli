@@ -115,10 +115,14 @@ val assert_input_reset : t -> generation:string -> (unit, string) result
     After handing off, ask the operator what is needed and await their explicit
     completion before [take_over]. The peer does not create an Ask or verify an
     operator answer itself. Reads fail
-    before any effect. [open_tab], [goto], [back], [forward], [reload] and
-    [close_tab] act only on pages an agent opened in the space, and so does
-    [page.interact]. [back] and [forward] move one entry in the tab's own
+    before any effect. [goto], [back], [forward], [reload] and
+    [page.interact] act on native managed Pages in the agent-controlled Space,
+    including explicitly adopted Pages. Unmanaged tabs require explicit
+    adoption; their observed origin is never changed. [back] and [forward]
+    move one entry in the tab's own
     history and are refused before acting when there is none.
+    [close_tab] remains agent-origin only; unknown-origin Pages return to the
+    operator through [release_tab] without closing their browser tabs.
     [upload] gives the worker's copies of a Keeper's files to ego's native
     file-input resolver. Its [chosen] receipt describes the staged files handed
     to the SDK, not a subsequent observation of the page's file list; this connection holds those copies until its
@@ -173,8 +177,9 @@ val assert_input_reset : t -> generation:string -> (unit, string) result
     lifecycle, optionally with [pageLabel] as the SDK's [as] option.
     [release_tab] unmanages an unknown-origin Page without closing its tab.
     Both require this agent-controlled Space, preserve origin and tab number,
-    and refuse while input release is uncertain. Reads support an adopted
-    Page; current mutation paths still require agent-created Pages.
+    and refuse while input release is uncertain. Reads and explicit Page
+    effects support an adopted Page through the same native SDK authority.
+    Adoption does not grant Space takeover or clear uncertain input.
     Lost lifecycle receipts require inventory reconciliation, never replay.
     Verbs this connection does not serve are refused before any effect; selection
     refuses them earlier ({!Browser_lane.live_transport_serves}). *)

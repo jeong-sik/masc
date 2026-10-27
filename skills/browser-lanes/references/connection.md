@@ -68,7 +68,7 @@ Ego Space는 같은 브라우저 안의 작업 공간이다. 작업할 때마다
 1. 현재 관측의 lane/clientId/tabId와 페이지 주소를 보관한다. BrowserAct
    `hand_off`를 같은 live clientId로 한 번 호출해 공간 전체를 운영자에게 넘긴다.
    성공 결과의 `spaceId`와 `spaceName`은 그 공간의 SDK 정보다.
-   인계 전에 agent가 제어 중인 공간의 agent-created Page를 활성화하려면
+   인계 전에 agent가 제어 중인 공간의 관리 Page(명시적으로 adopt한 Page 포함)를 활성화하려면
    같은 clientId/tabId와 expectedUrl로 BrowserInteract `activate_tab`을 사용한다.
    Ego의 네이티브 탭 활성화와 최소화된 창 복원을 요청하며, 반환된 active와
    window 상태는 실제 화면 노출이나 OS 포커스의 증명이 아니다. 실패·불확실
@@ -85,7 +85,16 @@ Ego Space는 같은 브라우저 안의 작업 공간이다. 작업할 때마다
    같은 요청을 반복 생성하지 않고, 기다리는 동안 독립 작업을 진행한다.
 4. 원래 Ask에 로그인 완료가 답변됐거나 대화에서 운영자가 명확히 계속하라고 한
    뒤에만 같은 clientId로 `take_over`를 호출한다. 중단 답변이면 되찾지 않는다.
-   되찾은 뒤에는 BrowserTabs와 새 페이지 관측으로 실제 로그인 상태를 확인한다.
+   `take_over`는 같은 Space와 native 사용자 인계 경계의 Page를
+   `activeTabId`/`egoPage`로 돌려준다. 현재 활성 탭이나 로그인 성공 증거가 아니다.
+   `egoPage.label=null`이면 해당 탭을 명시적으로 `adopt_tab`한 뒤 읽는다.
+   되찾기 자체는 adopt·문서 읽기·입력 불확실성 초기화를 하지 않는다.
+   명시적으로 adopt한 뒤에는 원래 출처를 보존한 채 입력·이동·활성화를
+   해당 native Page에 요청할 수 있다. 출처가 unknown인 탭은 닫지 않고
+   `release_tab`으로 운영자에게 돌려준다.
+   경계의 Page가 없거나 달라졌으면 현재 활성 탭으로 대체하지 않으며,
+   응답 유실 뒤 `take_over`를 자동 재실행하지 않는다.
+   BrowserTabs와 의도한 관리 Page의 새 관측으로 실제 로그인 상태를 확인한다.
    완료 답변 자체를 로그인 성공으로 기록하지 않는다. 원래 페이지가 없거나 연결이
    끊겼다면 관측한 상태를 알리고, 다른 공간으로 재개 권한을 옮겨 해석하지 않는다.
 

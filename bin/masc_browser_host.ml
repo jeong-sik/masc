@@ -38,7 +38,7 @@ let () =
     [ Masc.Browser_bidi_host_status.bidi_url_flag, Arg.String (set bidi_url), "URL Attach to an explicitly enabled loopback Firefox BiDi endpoint"
     ; Masc.Browser_bidi_host_status.firefox_profile_flag, Arg.String (set firefox_profile), "PATH With --bidi-url: end the session unless that Firefox runs this profile"
     ; "--base-path", Arg.String (set base_path), "PATH Workspace containing .masc (or MASC_BASE_PATH)"
-    ; "--server", Arg.String (set server), "URL Fixed MASC HTTP server; without it the port comes from the workspace connection.toml, followed after a failed request only to an address that answers the lane"
+    ; "--server", Arg.String (set server), "URL Fixed MASC HTTP server; otherwise MASC_HTTP_PORT fixes the port, or the workspace connection.toml is followed after a failed request only to an address that answers the lane"
     ; "--token-file", Arg.String (set token_file), "PATH Lane token (default: <base-path>/.masc/browser-lane/token)"
     ]
   in

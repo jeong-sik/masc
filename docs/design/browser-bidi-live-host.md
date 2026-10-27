@@ -123,9 +123,19 @@ Without the table the operator does both steps.
    default". Leaving the option out uses `MASC_BASE_PATH`.
 
    The host finds the server's port in the workspace's `connection.toml`. An
-   exported `MASC_HTTP_BASE_URL` or `MASC_HTTP_PORT` outranks that file: with
-   either set, the host polls that server with this workspace's token. Unset
-   both in the shell that runs the host, or name the server with `--server`.
+   exported `MASC_HTTP_PORT` overrides that file; `--server` fixes the origin.
+   `MASC_HTTP_BASE_URL` is an advertised address and does not select the local
+   connection. An older installed host may still use it: rerun browser lane
+   setup and restart the host to use the current executable.
+   If a loopback `MASC_HTTP_BASE_URL` previously pinned the host, verify both
+   the `MASC_HOST` and `MASC_HTTP_PORT`, workspace or default port `8935` before
+   updating: the selected address receives the lane token. With `MASC_HOST`
+   unset, the host is `127.0.0.1`. A later candidate port also receives the
+   token in the ping before it has answered the lane. A positive ping does not
+   authenticate the peer ([issue #36534](https://github.com/jeong-sik/masc/issues/36534)).
+   The workspace-derived host
+   maps `localhost`, `::1` and wildcard binds to `127.0.0.1`; use `--server`
+   when a manually started host needs an IPv6-only listener.
 
 The connection is attached when the TUI's Browser Lane picker (`b`) lists a
 `Firefox · BiDi` row, and `/api/v1/dashboard/browser-lane/clients` reports a
@@ -375,8 +385,8 @@ client:
 
 - The server lists no BiDi connection. Hover and drag are refused on that
   server, and the paragraph names what makes the two differ: the host polls
-  another server (an exported `MASC_HTTP_BASE_URL` or `MASC_HTTP_PORT` in
-  its shell), it has not polled for 120 seconds and the server ended its
+  another server (a fixed `--server` or `MASC_HTTP_PORT`; older hosts may
+  also use `MASC_HTTP_BASE_URL`), it has not polled for 120 seconds and the server ended its
   connection, or the server started moments ago.
 - The server lists another BiDi connection. That connection is this host's
   when it registered again under a new ID that it could not write to its

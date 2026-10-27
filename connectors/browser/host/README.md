@@ -124,9 +124,22 @@ time it starts listening and `masc workspace-connection --save` also writes.
 The file is the desired port, not proof that a server is there. When a poll
 fails, the host reads the file again and moves to the port it names only when
 its current server no longer answers `/browser-lane/ping` and the new port
-does; otherwise it retries where it is. `MASC_HTTP_BASE_URL` or
-`MASC_HTTP_PORT` in the browser's environment fixes the address instead, as
-`masc-browser-host --server URL` does for a manual run; neither is re-read.
+does; otherwise it retries where it is. `MASC_HTTP_PORT` in the browser's
+environment fixes the port instead, as `masc-browser-host --server URL` fixes
+the origin for a manual run; neither is re-read. `MASC_HTTP_BASE_URL` is the
+server's advertised address and does not select the host's local connection.
+An older installed host may still use that variable: rerun browser lane setup
+for the workspace and reload the extension to install and start the current host.
+If a loopback `MASC_HTTP_BASE_URL` previously pinned the host, verify both the
+local host from `MASC_HOST` and the port from `MASC_HTTP_PORT`, the workspace,
+or the default `8935` before updating: the lane token is sent there. If
+`MASC_HOST` is unset, the host is `127.0.0.1`. A later candidate
+port also receives the token in the ping before it has answered the lane.
+The positive ping response does not authenticate the peer; that remaining
+boundary is tracked in [issue #36534](https://github.com/jeong-sik/masc/issues/36534).
+The workspace-derived host maps
+`localhost`, `::1` and wildcard binds to `127.0.0.1`; an IPv6-only listener
+therefore needs an explicit `--server` on a manually started host.
 A result is sent again only when its request may not have reached the server;
 a result the server answered with any status is logged and the host returns to
 polling. The command also writes `launch.json` beside the launcher with the

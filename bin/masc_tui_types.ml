@@ -6372,8 +6372,9 @@ module Browser_lane_view = struct
                   state "attached, not listed by this server"
                   :: List.map host_line
                        ["No BiDi connection is listed · hover and drag stay refused";
-                        "With MASC_HTTP_BASE_URL or MASC_HTTP_PORT set, it polls another server";
-                        "If none appears, stop it and start it from a shell without them"]
+                        "A fixed --server or MASC_HTTP_PORT may point elsewhere";
+                        "Older hosts can use MASC_HTTP_BASE_URL · update the host";
+                        "If none appears, restart it without a fixed override"]
                   @ [at]
               | Host_beside_another_bidi ->
                   state "attached, not listed under its recorded ID"

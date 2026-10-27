@@ -759,10 +759,10 @@ let a_running_host_is_rated_by_the_server_that_lists_it () =
   List.iter (fun server ->
       has (said server host_entry)
         [ "This server lists no BiDi connection, so hover and drag are refused here"
-        ; "the host polls another server"; "MASC_HTTP_BASE_URL or MASC_HTTP_PORT"
+        ; "the host polls another server"; "a fixed --server or MASC_HTTP_PORT"
+        ; "an older host may also use MASC_HTTP_BASE_URL"
         ; "it has not polled for 120 seconds"; "this server started moments ago"
-        ; "If no BiDi connection appears, the operator stops that host and starts it again from a \
-           shell without those variables" ];
+        ; "If no BiDi connection appears, the operator restarts a current host without a fixed override" ];
       rated "a host this server does not list is still to be verified" server host_entry
         Status.Host_unverified)
     lists_no_bidi;

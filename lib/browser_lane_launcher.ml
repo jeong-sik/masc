@@ -172,8 +172,9 @@ let reinstall ~base_path =
     (install ~route:Extension ~base_path)
 
 let environment_note =
-  "An exported MASC_HTTP_BASE_URL or MASC_HTTP_PORT in the browser's environment fixes the \
-   address instead, which this observation cannot see."
+  "An exported MASC_HTTP_PORT may fix the address. An older installed host may also use \
+   MASC_HTTP_BASE_URL; rerun browser lane setup and reload the extension to update it. \
+   This observation cannot see the host version or environment."
 
 let launcher_problem t =
   let base_path = t.base_path in
@@ -256,26 +257,29 @@ let message t =
       Workspace_connection.error_message error
   | Serving { polling = Not_observed; _ }, None, Ok port ->
       Printf.sprintf
-        "The browser lane host follows the workspace connection port, now %d. This server reads \
+        "A current host started by the launcher without a fixed override follows the workspace \
+         connection port, now %d. This server reads \
          no browser Add-on, so whether a browser host polls it is not observed here. %s"
         port environment_note
   | Serving { port = serving; polling = Polling [] }, None, Ok port when port = serving ->
       Printf.sprintf
-        "The browser lane host follows the workspace connection port, %d, which is the port \
+        "A current host started by the launcher without a fixed override follows the workspace \
+         connection port, %d, which is the port \
          this server listens on, and no browser host polls this server now. %s"
         port environment_note
   | Serving { port = serving; polling = Polling [] }, None, Ok port ->
       Printf.sprintf
         "The workspace connection names port %d, but this server listens on %d, and no browser \
-         host polls this server. A host the launcher starts goes to %d. After a request there \
+         host polls this server. A current host without a fixed override starts on %d. After a request there \
          fails it reads the connection again, stays while a server at its address still \
          answers, and moves only to an address that answers. The operator runs `masc \
-         workspace-connection --port %d --save`, then reloads the browser extension so a new \
-         host starts on %d. %s"
+         workspace-connection --port %d --save`, then reloads the browser extension. With a \
+         current host and no fixed override, the new host starts on %d. %s"
         port serving port serving serving environment_note
   | Not_serving, None, Ok port ->
       Printf.sprintf
-        "The browser lane host follows the workspace connection port, now %d. No MASC server \
+        "A current host started by the launcher without a fixed override follows the workspace \
+         connection port, now %d. No MASC server \
          runs in this process, so whether a browser host polls that port is not observed \
          here; a running server's own check reports it. %s"
         port environment_note

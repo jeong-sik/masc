@@ -4,6 +4,8 @@ type worker_entry = Awaiting_worker | Entered_worker | Cancelled_before_entry
    capabilities belong to one submission, across the caller/worker domains.
    The entry CAS decides whether there is user work whose cleanup to join. *)
 let submit pool ~weight f =
+  let lane = Pool_lane.current () in
+  let submitted = Mtime_clock.counter () in
   let entry = Atomic.make Awaiting_worker in
   let cancelled,cancel_worker = Eio.Promise.create () in
   let settled,settle_worker = Eio.Promise.create () in
@@ -13,10 +15,15 @@ let submit pool ~weight f =
   in
   let invoke () =
     Fun.protect ~finally:(fun () -> Eio.Promise.resolve settle_worker ()) (fun () ->
-      if Atomic.compare_and_set entry Awaiting_worker Entered_worker then
-        match Eio.Promise.peek cancelled with
-        | Some (error,backtrace) -> Printexc.raise_with_backtrace error backtrace
-        | None -> Eio.Fiber.first await_cancellation f
+      if Atomic.compare_and_set entry Awaiting_worker Entered_worker then begin
+        Pool_wait.record_wait lane (Mtime_clock.count submitted);
+        let entered = Mtime_clock.counter () in
+        Fun.protect ~finally:(fun () -> Pool_wait.record_run lane (Mtime_clock.count entered))
+          (fun () ->
+            match Eio.Promise.peek cancelled with
+            | Some (error,backtrace) -> Printexc.raise_with_backtrace error backtrace
+            | None -> Eio.Fiber.first await_cancellation f)
+      end
       else await_cancellation ())
   in
   match Eio.Executor_pool.submit_exn pool ~weight invoke with

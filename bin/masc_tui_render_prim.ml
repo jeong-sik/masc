@@ -2752,8 +2752,16 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
      Each item carries its key, so a detail tab that answers one of these
      keys itself can take it off the row. The Sandbox tab's [s] sets the
      remote_ssh backend, and the row beside it still said "s:shutdown". *)
+  let view_and_order =
+    if state.view = Keepers Keeper_list then
+      [ "v", (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "v" ^ Ansi.reset ^ ":view"
+      ; "o", (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "o" ^ Ansi.reset ^ ":order"
+      ]
+    else []
+  in
   let items =
-          [ "j/k", Ansi.dim ^ "j/k:move" ^ Ansi.reset
+      view_and_order
+      @ [ "j/k", Ansi.dim ^ "j/k:move" ^ Ansi.reset
           ; toggle_key, toggle
           ; Keeper_control.action_key Keeper_control.Wakeup, hint Keeper_control.Wakeup "wake"
           (* RFC tui-server-lifecycle: with no server up, "s" starts one

@@ -89,6 +89,13 @@ let client_response request wire =
   match !result with Some response -> response | None -> Alcotest.fail "incomplete HTTP response"
 ;;
 
+let with_pending_confirm_read_result value f =
+  let previous = Atomic.get Workspace_hooks.operator_pending_confirm_read_result_fn in
+  Atomic.set Workspace_hooks.operator_pending_confirm_read_result_fn (fun _ -> value);
+  Fun.protect ~finally:(fun () ->
+    Atomic.set Workspace_hooks.operator_pending_confirm_read_result_fn previous) f
+;;
+
 let with_test_state f =
   let dir = Filename.temp_file "keeper-turns" ".dir" in
   Sys.remove dir;
@@ -113,7 +120,7 @@ let with_test_state f =
       Server_request_authority.with_current request_authority (fun () ->
           ignore (Workspace.init config ~agent_name:None);
           let state = Mcp_server_eio.For_testing.create_state ~base_path:dir () in
-          f ~sw ~config ~state))
+          with_pending_confirm_read_result (Ok []) (fun () -> f ~sw ~config ~state)))
 ;;
 
 let member key json =
@@ -188,10 +195,83 @@ let test_installed_keeper_rides_as_an_idle_row () =
          | Some value ->
            Alcotest.failf "expected no running turn, got %s"
              (Yojson.Safe.to_string value)
-         | None -> Alcotest.fail "row carries no turn field")
+         | None -> Alcotest.fail "row carries no turn field");
+        (match member "waiting" row with
+         | Some (`Assoc _ as waiting) ->
+           (match member "state" waiting with
+            | Some (`String "idle") -> ()
+            | other -> Alcotest.failf "unexpected waiting state: %s"
+                (match other with Some value -> Yojson.Safe.to_string value | None -> "absent"));
+           (match member "waiting_count" waiting with
+            | Some (`Int 0) -> ()
+            | other -> Alcotest.failf "unexpected waiting count: %s"
+                (match other with Some value -> Yojson.Safe.to_string value | None -> "absent"))
+         | Some value -> Alcotest.failf "waiting must be an object, got %s" (Yojson.Safe.to_string value)
+         | None -> Alcotest.fail "row carries no canonical waiting projection")
       | Some (`List rows) ->
         Alcotest.failf "expected one row, got %d" (List.length rows)
       | _ -> Alcotest.fail "keepers field absent or mistyped")
+;;
+
+let test_waiting_read_errors_stay_public () =
+  with_test_state (fun ~sw ~config ~state ->
+    let error_response () =
+      with_pending_confirm_read_result (Error "public fixture read failure")
+        (fun () -> turns_response ~state)
+    in
+    let empty_json = Yojson.Safe.from_string (body_of (error_response ())) in
+    (match member "keepers" empty_json, member "waiting_errors" empty_json with
+     | Some (`List []), Some (`List (_ :: _)) -> ()
+     | _ -> Alcotest.fail "an empty fleet must retain its waiting error");
+    let keeper_name = "turns-waiting-read-error" in
+    let meta =
+      match
+        Masc_test_deps.meta_of_json_fixture
+          (`Assoc
+            [ ("name", `String keeper_name)
+            ; ("trace_id", `String "trace-turns-waiting-read-error")
+            ; ("activation_mode", `String "manual")
+            ])
+      with
+      | Ok meta -> meta
+      | Error err -> Alcotest.fail err
+    in
+    (match Keeper_meta_store.replace_snapshot config meta with
+     | Ok () -> ()
+     | Error err -> Alcotest.failf "persist keeper meta: %s" err);
+    (match Keeper_owner_registry.install_from_store
+       ~sw ~operation_runner:None ~on_turn_slot_released:None config with
+     | Ok count -> Alcotest.(check int) "installed owner count" 1 count
+     | Error error -> Alcotest.fail (Keeper_owner_registry.install_error_to_string error));
+    let response = error_response () in
+    Alcotest.(check bool) "the independent turn observation remains available" true
+      (String_util.contains_substring response "200 OK");
+    let json = Yojson.Safe.from_string (body_of response) in
+    (match member "keepers" json with
+     | Some (`List [ row ]) ->
+       (match member "status" row, member "chat_control_token" row, member "waiting" row with
+        | Some (`String "ok"), Some (`String _), Some `Null -> ()
+        | _ -> Alcotest.fail "turn owner must remain readable without inventing waiting state")
+     | _ -> Alcotest.fail "the independent Keeper turn row was dropped");
+    (match member "waiting_errors" json with
+    | Some (`List items) ->
+      let is_injected_error item =
+        match member "source" item, member "waiting_on" item, member "keeper_name" item with
+        | Some (`String "read_error"), Some (`String "operator_pending_confirm_store"), Some `Null ->
+          true
+        | _ -> false
+      in
+      Alcotest.(check bool) "the injected fleet read error remains public" true
+        (List.exists is_injected_error items)
+    | Some _ -> Alcotest.fail "waiting_errors must be an array"
+    | None -> Alcotest.fail "the fleet read error was dropped");
+    let recovered = Yojson.Safe.from_string (body_of (turns_response ~state)) in
+    (match member "keepers" recovered, member "waiting_errors" recovered with
+     | Some (`List [ row ]), Some (`List []) ->
+       (match member "waiting" row with
+        | Some (`Assoc _) -> ()
+        | _ -> Alcotest.fail "a recovered source must return the observed waiting state")
+     | _ -> Alcotest.fail "the recovered observation did not clear the fleet error"))
 ;;
 
 let test_interrupt_rejects_invalid_or_conflicting_identity () =
@@ -396,6 +476,8 @@ let () =
             test_empty_workspace_answers_an_empty_fleet
         ; Alcotest.test_case "an installed keeper rides as an idle row" `Quick
             test_installed_keeper_rides_as_an_idle_row
+        ; Alcotest.test_case "fleet waiting read errors stay public" `Quick
+            test_waiting_read_errors_stay_public
         ] )
     ]
 ;;

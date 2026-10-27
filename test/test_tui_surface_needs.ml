@@ -136,7 +136,8 @@ let test_forward_navigation_fetches_only_new_surface_datasets () =
     List.fold_left add_delta (needs Types.Overview, 0) destinations
   in
   (* Home no longer fetches Goal measurement. Entering Work now adds that
-     request beside planning: Work 2 + Keepers 2 + Usage 5 + Board 1. Config
+     request beside planning: Work 2 + Keepers 4 + Usage 5 + Board 1. Keepers
+     reads its roster, fleet safety, held calls and open questions. Config
      adds one: the Models pane names the account behind a provider id, so
      entering Config reads account emails. *)
   let work_delta =
@@ -145,15 +146,37 @@ let test_forward_navigation_fetches_only_new_surface_datasets () =
   in
   check bool "entering Work adds the Goal measurement absent from Home" true
     work_delta.Types.needs_overview_goals;
-  check int "only newly visible scoped requests are planned" 11 dataset_count
+  check int "only newly visible scoped requests are planned" 13 dataset_count
 ;;
 
-let test_equal_needs_have_no_delta () =
-  let previous = needs (Types.Keepers Types.Keeper_list) in
-  let next = needs (Types.Keepers Types.Keeper_detail) in
-  check bool "keeper modes share an already loaded dataset set" false
+let test_keepers_list_reads_operator_attention () =
+  let listing = needs (Types.Keepers Types.Keeper_list) in
+  check bool "the list reads held calls" true listing.Types.needs_operator_approvals;
+  check bool "the list reads open questions" true listing.Types.needs_asks;
+  List.iter
+    (fun mode ->
+      let detail = needs (Types.Keepers mode) in
+      check bool "detail does not add held-call reads" false detail.Types.needs_operator_approvals;
+      check bool "detail does not add question reads" false detail.Types.needs_asks)
+    [ Types.Keeper_detail; Types.Keeper_logs; Types.Keeper_calls; Types.Keeper_message ]
+;;
+
+let test_keeper_detail_drops_only_list_attention_reads () =
+  let listing = needs (Types.Keepers Types.Keeper_list) in
+  let detail = needs (Types.Keepers Types.Keeper_detail) in
+  check bool "leaving the list adds no read" false
     (Types.surface_needs_any
-       (Types.surface_needs_delta ~previous ~next))
+       (Types.surface_needs_delta ~previous:listing ~next:detail));
+  let added = Types.surface_needs_delta ~previous:detail ~next:listing in
+  check bool "returning adds held calls" true added.Types.needs_operator_approvals;
+  check bool "returning adds questions" true added.Types.needs_asks;
+  check int "returning adds only attention reads" 2
+    ([ added.Types.needs_transport; added.needs_keeper_roster; added.needs_fleet_safety
+     ; added.needs_board; added.needs_planning; added.needs_system_logs; added.needs_keeper_chat
+     ; added.needs_operator_approvals; added.needs_asks; added.needs_runtime_quota
+     ; added.needs_keeper_usage; added.needs_provider_history; added.needs_overview_goals
+     ; added.needs_account_emails ]
+     |> List.fold_left (fun count wanted -> if wanted then count + 1 else count) 0)
 ;;
 
 let test_authoritative_refresh_waits_for_both_owners_then_runs_once () =
@@ -437,8 +460,10 @@ let () =
             `Quick test_about_refreshes_observed_outfits_over_another_surface
         ; test_case "forward navigation fetches only new datasets" `Quick
             test_forward_navigation_fetches_only_new_surface_datasets
-        ; test_case "equal needs have no delta" `Quick
-            test_equal_needs_have_no_delta
+        ; test_case "the Keepers list reads operator attention" `Quick
+            test_keepers_list_reads_operator_attention
+        ; test_case "Keeper detail drops only list attention reads" `Quick
+            test_keeper_detail_drops_only_list_attention_reads
         ; test_case "authoritative refresh coalesces to one followup" `Quick
             test_authoritative_refresh_waits_for_both_owners_then_runs_once
         ; test_case "foreground navigation settles while full readers remain pending" `Quick

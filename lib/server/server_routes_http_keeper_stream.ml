@@ -476,6 +476,18 @@ let handle_keeper_turns_list state request reqd =
            , `String (Printf.sprintf "keeper name census failed: %s" detail) )
          ])
   | Ok keeper_names ->
+    let waiting_snapshot =
+      Domain_pool_ref.submit_io_or_inline (fun () ->
+        Server_keeper_waiting_inventory.keeper_json_by_name config)
+    in
+    let waiting_by_name, waiting_errors =
+      match waiting_snapshot with
+      | Error errors -> [], errors
+      | Ok rows -> rows, []
+    in
+    let waiting_json keeper_name =
+      Option.value ~default:`Null (List.assoc_opt keeper_name waiting_by_name)
+    in
     let row keeper_name =
       match
         Keeper_owner_registry.get ~base_path:config.base_path ~keeper_name
@@ -487,6 +499,7 @@ let handle_keeper_turns_list state request reqd =
           ; ( "detail"
             , `String (Keeper_owner_registry.lookup_error_to_string error) )
           ; ("turn", `Null)
+          ; ("waiting", waiting_json keeper_name)
           ]
       | Ok owner ->
         let turn_json =
@@ -516,12 +529,17 @@ let handle_keeper_turns_list state request reqd =
               ]
         in
         Tool_args.ok_assoc
-          [ ("keeper_name", `String keeper_name); ("chat_control_token", `String (Keeper_owner.chat_control_token owner)); ("turn", turn_json) ]
+          [ ("keeper_name", `String keeper_name)
+          ; ("chat_control_token", `String (Keeper_owner.chat_control_token owner))
+          ; ("turn", turn_json)
+          ; ("waiting", waiting_json keeper_name)
+          ]
     in
     respond_json_value_with_cors ~status:`OK request reqd
       (`Assoc
          [ ("schema", `String "masc.keeper_turns.v1")
          ; ("keepers", `List (List.map row (List.sort String.compare keeper_names)))
+         ; ("waiting_errors", `List waiting_errors)
          ])
 ;;
 

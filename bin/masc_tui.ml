@@ -912,6 +912,7 @@ let open_message_for_keeper ?(return_to = Keeper_chat_return_detail)
   state.msg_live <- live_for_keeper state keeper_name;
   state.msg_return <- return_to;
   state.keeper_message_focus <- Right_pane;
+  select_keeper_name_with state.keepers state keeper_name;
   restore_message_draft state keeper_name;
   drain_queue ()
 
@@ -934,6 +935,7 @@ let leave_keeper_message state ~drain_queue =
      | Keeper_chat_return_detail, true -> Keepers Keeper_detail
      | Keeper_chat_return_list, _ | Keeper_chat_return_detail, false ->
          Keepers Keeper_list);
+  Option.iter (select_keeper_name state) state.msg_target_keeper_name;
   state.detail_scroll <- 0;
   if not target_registered then state.log_scroll <- 0;
   drain_queue ()
@@ -3674,6 +3676,21 @@ let open_tools_async_source_task state ~mailbox =
     | Async_source_not_composition -> report_action state "system" "This request is not a Composition source"
     | Async_source_unavailable detail -> report_action state "error" ("Original Task source unavailable: " ^ detail)
 
+let launch_tools_async_observation_load state ~mailbox =
+  if server_authority_ready state then
+    match begin_tools_async_observation_read state with
+    | None -> ()
+    | Some generation ->
+        let host = server_peer_host in
+        let port = state.port in
+        launch_workspace_json_read
+          ~on_not_run:(fun () ->
+            if generation = state.tools_async_request_generation then
+              state.tools_async_observation_inflight <- false)
+          state ~mailbox
+          ~deliver:(fun result -> Tools_async_observation_loaded (generation, result))
+          (fun () -> Masc_tui_http.fetch_async_request_observation ~host ~port)
+
 let launch_tools_load ?(force = true) state ~mailbox =
   if server_authority_ready state then begin
   let keeper =
@@ -3690,22 +3707,15 @@ let launch_tools_load ?(force = true) state ~mailbox =
     state.tools_read_inflight <- Some
       { tri_generation = generation
       ; tri_keeper = keeper
-      ; tri_pending = [ Tools_inventory_read; Tools_catalog_read; Tools_async_read ]
+      ; tri_pending = [ Tools_inventory_read; Tools_catalog_read ]
       };
     let host = server_peer_host in
     let port = state.port in
-    (* These projections have no result dependency. Start each in this
-       dispatch with its original workspace binding and completion envelope;
-       a slow or failed inventory must not hold back async observation.
-       Each named pending part still receives its own result, including when
-       the shared launch cannot run, and settles independently in the UI. *)
+    launch_tools_async_observation_load state ~mailbox;
     launch_workspace_json_read state ~mailbox
       ~deliver:(fun result -> Skills_catalog_loaded (generation,
         Masc_tui_async_read.attribute Masc_tui_async_read.Skills_catalog result))
       (fun () -> Masc_tui_loader.load_skills_catalog ~host ~port);
-    launch_workspace_json_read state ~mailbox
-      ~deliver:(fun result -> Tools_async_observation_loaded (generation, result))
-      (fun () -> Masc_tui_http.fetch_async_request_observation ~host ~port);
     launch_workspace_json_read state ~mailbox
       ~deliver:(fun result -> Tools_loaded (generation, keeper, result))
       (fun () -> Masc_tui_loader.load_tools ~host ~port ?keeper ())
@@ -7594,7 +7604,10 @@ let goto_surface ?(from_reference = false) state ~mailbox (destination : surface
    | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Planning | Schedules
    | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors | Runtime | Config
    | Resources | Tools | System_logs | Keepers _ | Approvals -> ());
-  state.view <- destination
+  if state.view = Keepers Keeper_list || destination = Keepers Keeper_list then
+    transition_keeper_view state destination
+  else
+    state.view <- destination
 
 (* One step around the ring the surface strip draws. Tab and Shift-Tab
    call this; so does board compose when its handler declines the key, so
@@ -8956,7 +8969,7 @@ let close_keeper_runtime_pick state =
   state.runtime_pick_keeper <- None;
   state.runtime_pick_list <- Masc_tui_pick_list.closed;
   state.detail_focus_recovery <- None;
-  state.view <- Keepers Keeper_list
+  transition_keeper_view state (Keepers Keeper_list)
 
 let launch_runtime_assignment_set state ~keeper_name ~runtime_id =
   match begin_runtime_assignment_save state ~keeper_name ~runtime_id ~started_ns:(Mtime_clock.elapsed_ns ()) with
@@ -10526,7 +10539,7 @@ let selected_surface_reference state =
   | Keepers _ ->
       Option.map
         (fun (keeper : Tui_decode.keeper) -> Link.reference Keeper keeper.k_name)
-        (List.nth_opt state.keepers state.keeper_cursor)
+        (selected_keeper state)
   | Lanes -> None
   | Clients -> None
   | Verification ->
@@ -11687,7 +11700,7 @@ let handle_acting_pane_click (state : state) ~base_path ~mailbox ~line =
           state.keeper_calls_error <- None;
           state.keeper_calls_scroll <- 0;
           launch_keeper_calls_load state ~mailbox keeper_name;
-          state.view <- Keepers Keeper_calls)
+          transition_keeper_view state (Keepers Keeper_calls))
   | Masc_tui_acting_pane.Target_keeper keeper_name -> (
       match
         List.find_index
@@ -13744,6 +13757,8 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.tools_error <- None;
   state.skills_catalog <- None;
   state.skills_catalog_error <- None;
+  state.tools_async_request_generation <- state.tools_async_request_generation + 1;
+  state.tools_async_observation_inflight <- false;
   state.tools_async_observation <- None;
   state.tools_async_observation_error <- None;
   withdraw_tools_async_details state;
@@ -13797,6 +13812,8 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
      retain an old pending slot nor release a successor workspace's slot. *)
   state.keeper_turns_inflight <- false;
   state.keeper_turns <- [];
+  state.keeper_waiting <- [];
+  state.keeper_waiting_failure <- None;
   state.keeper_turns_error <- None;
   state.keeper_turn_finishes <- [];
   state.keeper_turns_observed_at <- None;
@@ -14015,7 +14032,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   (match state.view with
    | Keepers Keeper_detail when keep_detail_navigation -> ()
    | Keepers (Keeper_message | Keeper_detail | Keeper_runtime_pick) ->
-     state.view <- Keepers Keeper_list;
+     transition_keeper_view state (Keepers Keeper_list);
      set_msg_scroll state 0
    | Keepers (Keeper_list | (Keeper_logs | Keeper_calls)) | Overview | Acting | Metrics | Memory
    | Lanes | Clients | Board | Approvals | Planning | Schedules | Verification | Harness | Fusion
@@ -14988,6 +15005,7 @@ let open_keeper_detail state ~mailbox (keeper : keeper) =
   state.detail_focus_recovery <- None;
   state.keeper_run_cursor <- 0;
   state.view <- Keepers Keeper_detail;
+  select_keeper_name state keeper.k_name;
   state.keeper_detail_focus <- Right_pane;
   state.detail_scroll <- 0;
   ignore (launch_current_keeper_logs state ~mailbox ~intent:Snapshot_read.Poll);
@@ -15148,20 +15166,14 @@ let press_marked_target state ~base_path ~mailbox (target : press_target) =
              open_lane_inventory_selection state ~mailbox
          | Some index -> Option.iter (fun list -> list.rl_place index) (row_list state))
   | Press_keeper_row name -> (
-      match
-        List.find_index
-          (fun (keeper : keeper) -> String.equal keeper.k_name name)
-          state.keepers
-      with
+      match keeper_index state name with
       (* A press read against a list frame after a key in the same burst
          left the list (Enter opened a Keeper) is not the list's any more. *)
       | Some _ when state.view <> Keepers Keeper_list -> ()
       | None -> ()
       | Some index when index = state.keeper_cursor ->
-          Option.iter
-            (open_keeper_detail state ~mailbox)
-            (List.nth_opt state.keepers index)
-      | Some index -> choose_keeper_row state index)
+          Option.iter (open_keeper_detail state ~mailbox) (selected_keeper state)
+      | Some _ -> keeper_list_select_name state name)
 ;;
 
 (* Open the runtime event feed on a daemon fiber: one MCP initialize for the
@@ -18098,6 +18110,12 @@ let present_identity_notice state ~keeper_name (kind, text) =
   | None -> report_action state "system" text
 
 let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path ~http_refresh_inflight
+    ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
+  fun message ->
+    Masc_tui_types.preserve_keeper_list_selection state (fun () ->
+      apply_async_message_body ~input_pending state ~base_path ~http_refresh_inflight
+        ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox message)
+and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path ~http_refresh_inflight
     ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
   function
   | Workspace_scoped (authority, reading, message) ->
@@ -21119,7 +21137,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
   | Keeper_turns_loaded (generation, result) ->
       state.keeper_turns_inflight <- false;
       (match result with
-       | Ok rows ->
+       | Ok { rows; waiting } ->
            let current row =
              Option.value ~default:0 (List.assoc_opt row.Tui_decode.ktr_keeper_name generation)
              = keeper_chat_control_generation state row.Tui_decode.ktr_keeper_name
@@ -21134,6 +21152,10 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
            let rows = fresh @ List.filter (fun previous -> List.exists (fun row ->
              String.equal row.Tui_decode.ktr_keeper_name previous.Tui_decode.ktr_keeper_name) stale)
              state.keeper_turns in
+           let waiting =
+             select_keeper_waiting_observation
+               ~fresh ~stale ~previous_failure:state.keeper_waiting_failure waiting
+           in
            if List.exists (fun row -> not (List.mem_assoc row.Tui_decode.ktr_keeper_name
              state.keeper_chat_control_pending)) stale then launch_keeper_turns_load state ~mailbox;
            let observed_at = Unix.gettimeofday () in
@@ -21146,9 +21168,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
                ~now:observed_at
                ~previous_rows:state.keeper_turns ~current_rows:rows
                state.keeper_turn_finishes;
-           state.keeper_turns <- rows;
-           state.keeper_turns_observed_at <- Some observed_at;
-           state.keeper_turns_error <- None;
+           accept_keeper_turn_observation state ~rows ~waiting ~observed_at;
            (match state.view, state.msg_target_keeper_name with
             | Keepers Keeper_message, Some keeper_name ->
                 launch_current_autonomous_journals state ~mailbox ~keeper_name;
@@ -21158,11 +21178,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
             | ((Overview | (Acting | (Metrics | (Memory | (Lanes | (Clients | (Board | (Approvals | (Planning | (Schedules | (Verification | (Harness | (Fusion | (Repositories | (Code | (Changes | (Connectors | (Runtime | (Config | (Resources | (Tools | System_logs))))))))))))))))))))), _) -> ());
            List.iter (fun row -> launch_waiting_keeper_input state ~mailbox
              ~keeper_name:row.Tui_decode.ktr_keeper_name) fresh
-       | Error detail ->
-           (* Keep the last known rows: a fetch that failed says nothing
-              about the turns themselves, and blanking every badge on one
-              lost poll would flicker. The error shows on the keeper list. *)
-           state.keeper_turns_error <- Some detail)
+       | Error detail -> refuse_keeper_turn_observation state detail)
   | Gate_snapshot_loaded (request, expected_workspace, result) ->
       (match Snapshot_read.settle state.gate_snapshot_read request with
        | None -> ()
@@ -21854,16 +21870,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
   | Tools_async_task_history_loaded (request,result) ->
       complete_tools_async_task_history state request result
   | Tools_async_observation_loaded (generation, result) ->
-      settle_tools_read state ~generation Tools_async_read;
-      if generation = state.tools_request_generation then (
-      match result with
-      | Ok (Async_ready _ as observation) ->
-          state.tools_async_observation <- Some observation;
-          state.tools_async_observation_error <- None;
-          sync_tools_async_selection state
-      | Ok (Async_unavailable {kind;reason}) ->
-          state.tools_async_observation_error <- Some (kind ^ Option.fold ~none:"" ~some:(fun value -> ": " ^ value) reason)
-      | Error detail -> state.tools_async_observation_error <- Some detail)
+      ignore (apply_tools_async_observation_result state ~generation result)
   | Runtime_lane_slots_written (written, replacement_selection, result) ->
       (* Re-read the list the write changed rather than patching the local
          snapshot: a hand-applied edit and a rejected write look the same on
@@ -31077,6 +31084,10 @@ and is loaded on demand through keeper_skill.
               state.keeper_sandbox_logs_error <- None;
               launch_keeper_sandbox_logs state ~mailbox:async_messages
                 keeper.k_name)
+       | Some "v" when state.view = Keepers Keeper_list ->
+           cycle_keeper_list_layout state
+       | Some "o" when state.view = Keepers Keeper_list ->
+           cycle_keeper_list_sort state
        | Some "v" when state.view = Keepers Keeper_detail && state.detail_tab = Detail_items ->
            cycle_item_browser state
        | Some " " when state.view = Keepers Keeper_detail && state.detail_tab = Detail_items ->
@@ -31144,7 +31155,7 @@ and is loaded on demand through keeper_skill.
             | System_logs -> ())
        | Some k when Masc_tui_keys.opens_keepers ~message_mode k ->
            state.detail_focus_recovery <- None;
-           state.view <- Keepers Keeper_list
+           transition_keeper_view state (Keepers Keeper_list)
        (* Following preserves the source surface; Esc returns to it. *)
        | Some "\x1d" ->
            (match
@@ -31196,7 +31207,7 @@ and is loaded on demand through keeper_skill.
                         List.find_index
                           (fun (keeper : Tui_decode.keeper) ->
                              String.equal keeper.k_name keeper_name)
-                          state.keepers
+                          (keepers_for_selection state)
                       with
                       | Some index -> state.keeper_cursor <- index
                       | None -> ())
@@ -31924,7 +31935,7 @@ and is loaded on demand through keeper_skill.
                   goto_surface state ~mailbox:async_messages Repositories
             | Keepers Keeper_detail ->
                 state.detail_focus_recovery <- None;
-                state.view <- Keepers Keeper_list;
+                transition_keeper_view state (Keepers Keeper_list);
                 state.detail_scroll <- 0
             (* The picker's own arm takes Esc. *)
             | Keepers Keeper_runtime_pick -> ()
@@ -32054,7 +32065,7 @@ and is loaded on demand through keeper_skill.
                   state.changes_tree_diff_error <- None;
                   state.changes_tree_diff_path <- None
                 end
-                else
+                else begin
                   (* Changes opens from a keeper surface, so Esc goes back to
                      the one it was opened from rather than to Overview. The
                      detail draws whoever the roster cursor names, and the
@@ -32062,15 +32073,18 @@ and is loaded on demand through keeper_skill.
                      under the cursor the detail has nothing to draw, so the
                      way back is the roster. The chat pane demotes its own
                      return for the same reason. *)
-                  state.view <-
-                    (match state.changes_return, selected_keeper state with
-                     | Changes_return_chat, (Some _ | None) ->
-                         state.changes_return <- Changes_return_list;
-                         Keepers Keeper_message
-                     | Changes_return_detail, Some _ -> Keepers Keeper_detail
-                     | Changes_return_detail, None
-                     | Changes_return_list, (Some _ | None) ->
-                         Keepers Keeper_list)
+                  let destination =
+                    match state.changes_return, selected_keeper state with
+                    | Changes_return_chat, (Some _ | None) ->
+                        state.changes_return <- Changes_return_list;
+                        Keepers Keeper_message
+                    | Changes_return_detail, Some _ -> Keepers Keeper_detail
+                    | Changes_return_detail, None
+                    | Changes_return_list, (Some _ | None) ->
+                        Keepers Keeper_list
+                  in
+                  transition_keeper_view state destination
+                end
             | Repositories -> state.view <- Overview
             | Runtime ->
                 if Option.is_some state.runtime_detail_target then begin
@@ -32130,7 +32144,7 @@ and is loaded on demand through keeper_skill.
                 end
             | Keepers Keeper_detail ->
                 state.detail_focus_recovery <- None;
-                state.view <- Keepers Keeper_list;
+                transition_keeper_view state (Keepers Keeper_list);
                 state.detail_scroll <- 0
             | Keepers Keeper_logs | Keepers Keeper_calls ->
                 state.view <- Keepers Keeper_detail;
@@ -32986,7 +33000,7 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_runtime_pick -> ()
             | Overview -> ()
             | Keepers Keeper_list ->
-                (match List.nth_opt state.keepers state.keeper_cursor with
+                (match selected_keeper state with
                  | Some keeper ->
                      open_keeper_detail state
                        ~mailbox:async_messages keeper
@@ -33217,14 +33231,16 @@ and is loaded on demand through keeper_skill.
               press: the stance is in-memory and a restart returns it to
               auto, and the event line plus the red roster name say loudly
               what was armed. *)
-           let keeper = List.nth state.keepers state.keeper_cursor in
-           let mode =
-             if List.mem keeper.k_name state.keeper_yolo_names then
-               Masc.Keeper_tool_approval_mode.Auto
-             else Masc.Keeper_tool_approval_mode.Yolo
-           in
-           launch_keeper_tool_mode_set state ~mailbox:async_messages
-             ~keeper_name:keeper.k_name ~mode
+           Option.iter
+             (fun (keeper : Tui_decode.keeper) ->
+               let mode =
+                 if List.mem keeper.k_name state.keeper_yolo_names then
+                   Masc.Keeper_tool_approval_mode.Auto
+                 else Masc.Keeper_tool_approval_mode.Yolo
+               in
+               launch_keeper_tool_mode_set state ~mailbox:async_messages
+                 ~keeper_name:keeper.k_name ~mode)
+             (selected_keeper state)
        | Some "u" | Some "U"
          when (match state.view with
                | Keepers Keeper_list -> true
@@ -33240,12 +33256,14 @@ and is loaded on demand through keeper_skill.
            (* Open the runtime picker for the keeper under the cursor. The
               catalogue is fetched on open so the list reflects the server
               now, not the last visit. *)
-           let keeper = List.nth state.keepers state.keeper_cursor in
-           state.runtime_pick_keeper <- Some keeper.k_name;
-           state.runtime_pick_list <- Masc_tui_pick_list.closed;
-           launch_runtime_catalog_load state ~mailbox:async_messages;
-           state.detail_focus_recovery <- None;
-           state.view <- Keepers Keeper_runtime_pick
+           Option.iter
+             (fun (keeper : Tui_decode.keeper) ->
+               state.runtime_pick_keeper <- Some keeper.k_name;
+               state.runtime_pick_list <- Masc_tui_pick_list.closed;
+               launch_runtime_catalog_load state ~mailbox:async_messages;
+               state.detail_focus_recovery <- None;
+               transition_keeper_view state (Keepers Keeper_runtime_pick))
+             (selected_keeper state)
        | Some "d" | Some "D"
          when state.view = Keepers Keeper_runtime_pick ->
            (match state.runtime_pick_keeper with
@@ -33334,7 +33352,7 @@ and is loaded on demand through keeper_skill.
                      state.keeper_calls_scroll <- 0;
                      launch_keeper_calls_load state ~mailbox:async_messages
                        keeper.k_name;
-                     state.view <- Keepers Keeper_calls
+                     transition_keeper_view state (Keepers Keeper_calls)
                  | None -> ())
             | Overview | Acting | Metrics | Keepers (Keeper_logs | Keeper_calls | Keeper_message)
             | Lanes | Board | Approvals | Planning | Schedules
@@ -33605,7 +33623,7 @@ and is loaded on demand through keeper_skill.
            (match keeper with
             | Some _ ->
                 state.log_scroll <- 0;
-                state.view <- Keepers Keeper_logs;
+                transition_keeper_view state (Keepers Keeper_logs);
                 ignore (launch_current_keeper_logs state ~mailbox:async_messages ~intent:Snapshot_read.Poll)
             | None -> ())
 | Some "c" | Some "C"
@@ -33647,27 +33665,31 @@ and is loaded on demand through keeper_skill.
                      ~some:(fun (keeper : Tui_decode.keeper) ->
                        keeper_available_for_new_message state keeper.k_name)
                      (selected_keeper state) ->
-                let keeper = List.nth state.keepers state.keeper_cursor in
-                open_message_for_keeper ~return_to:Keeper_chat_return_list state
-                  keeper.k_name ~drain_queue:(fun () ->
-                    drain_queued_message state ~base_path
-                      ~mailbox:async_messages);
-                launch_keeper_history_load state ~mailbox:async_messages
-                  ~keeper_name:keeper.k_name;
-                state.view <- Keepers Keeper_message
+                (match selected_keeper state with
+                 | Some keeper ->
+                     open_message_for_keeper ~return_to:Keeper_chat_return_list state
+                       keeper.k_name ~drain_queue:(fun () ->
+                         drain_queued_message state ~base_path
+                           ~mailbox:async_messages);
+                     launch_keeper_history_load state ~mailbox:async_messages
+                       ~keeper_name:keeper.k_name;
+                     state.view <- Keepers Keeper_message
+                 | None -> ())
             | Keepers Keeper_detail
               when Option.fold ~none:false
                      ~some:(fun (keeper : Tui_decode.keeper) ->
                        keeper_available_for_new_message state keeper.k_name)
                      (selected_keeper state) ->
-                let keeper = List.nth state.keepers state.keeper_cursor in
-                open_message_for_keeper ~return_to:Keeper_chat_return_detail
-                  state keeper.k_name ~drain_queue:(fun () ->
-                    drain_queued_message state ~base_path
-                      ~mailbox:async_messages);
-                launch_keeper_history_load state ~mailbox:async_messages
-                  ~keeper_name:keeper.k_name;
-                state.view <- Keepers Keeper_message
+                (match selected_keeper state with
+                 | Some keeper ->
+                     open_message_for_keeper ~return_to:Keeper_chat_return_detail
+                       state keeper.k_name ~drain_queue:(fun () ->
+                         drain_queued_message state ~base_path
+                           ~mailbox:async_messages);
+                     launch_keeper_history_load state ~mailbox:async_messages
+                       ~keeper_name:keeper.k_name;
+                     state.view <- Keepers Keeper_message
+                 | None -> ())
             | Keepers Keeper_detail | Keepers Keeper_list
             | Overview | Acting | Metrics | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
@@ -34305,9 +34327,9 @@ and is loaded on demand through keeper_skill.
         (match state.view with
          | Code -> ()
          | Keepers Keeper_runtime_pick -> ()
-         (* Nothing on the list reads the composite; the detail arm below
-            keeps Info and Secrets current while they are on screen. *)
-         | Keepers Keeper_list -> ()
+         (* The list polls only its independent async badges; the detail arm
+            below keeps Info and Secrets current while they are on screen. *)
+         | Keepers Keeper_list -> launch_tools_async_observation_load state ~mailbox:async_messages
          | Keepers (Keeper_logs | Keeper_detail) ->
              ignore (launch_current_keeper_logs state ~mailbox:async_messages ~intent:Snapshot_read.Poll);
              (* Info's execution facts and Secrets share the composite

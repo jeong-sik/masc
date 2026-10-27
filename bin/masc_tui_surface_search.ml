@@ -40,7 +40,7 @@ let surface_row_texts ~cols (state : state) : surface -> string list option =
   else
   match surface with
   | Keepers Keeper_list ->
-      Some (List.map (fun (k : keeper) -> k.k_name) state.keepers)
+      Some (List.map (fun (k : keeper) -> k.k_name) (ordered_keepers state))
   | Lanes ->
       (match state.lanes_mode with
        | Lanes_run_list _ | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ -> None

@@ -1854,10 +1854,13 @@ let tools_display_lines ?(cols = 80) (state : state) =
         Tools_async_read, "async broker", Option.is_some state.tools_async_observation,
         state.tools_async_observation_error
   in
-  let pending = match state.tools_read_inflight with
-    | Some request when request.tri_generation = state.tools_request_generation ->
-        List.mem part request.tri_pending
-    | Some _ | None -> false
+  let pending =
+    if state.tools_pane = Tools_async then state.tools_async_observation_inflight
+    else
+      match state.tools_read_inflight with
+      | Some request when request.tri_generation = state.tools_request_generation ->
+          List.mem part request.tri_pending
+      | Some _ | None -> false
   in
   let reading_lines = if state.tools_pane=Tools_async && state.tools_async_detail_open then [] else match pending, observed, error with
     | true, _, Some _ ->

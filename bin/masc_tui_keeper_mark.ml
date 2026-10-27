@@ -18,6 +18,30 @@ let glyph ~paused reading =
   | Some _ when paused -> paused_glyph
   | Some value -> health_glyph value
 
+let activity_glyph : Masc_tui_keeper_list_model.activity -> string = function
+  | Held_call | Failure -> "!"
+  | Question -> "?"
+  | Confirmation | Verifying -> "\xe2\x97\x87" (* ◇ *)
+  | Preparing | Running -> "\xe2\x97\x8f" (* ●; the list substitutes its animated mark *)
+  | Streaming -> ">"
+  | Async_working _ -> "&"
+  | Deferred | Tool_waiting | Model_waiting | External_waiting -> "\xe2\x97\x8c" (* ◌ *)
+  | Delegating -> "\xe2\x86\x92" (* → *)
+  | Idle -> "\xe2\x97\x8b" (* ○ *)
+  | Paused -> "\xe2\x85\xa1" (* Ⅱ *)
+  | Offline -> "\xc3\x97" (* × *)
+  | Unknown -> unread_glyph
+
+let badge_glyph : Masc_tui_keeper_list_model.badge -> string = function
+  | Badge_read_error -> "!"
+  | Badge_waiting_unavailable -> "!"
+  | Badge_async _ -> "&"
+  | Badge_async_queued _ -> ">"
+  | Badge_async_cancelling _ -> "\xc3\x97" (* × *)
+  | Badge_delegate -> "\xe2\x86\x92" (* → *)
+  | Badge_verification -> "\xe2\x97\x87" (* ◇ *)
+  | Badge_schedule -> "\xe2\x96\xb8" (* ▸ *)
+
 type open_turn = Worked | Worked_while_failing | Left_open
 
 let open_turn = function

@@ -315,7 +315,7 @@ let replace_keeper_rows ~preserve_on_error (state : state)
   (* Capture navigation before replacing the roster. Detail and logs are bound
      to the selected row; message mode is bound to its explicit target. *)
   let current_keeper_ids =
-    List.map (fun keeper -> keeper.k_name) state.keepers
+    List.map (fun keeper -> keeper.k_name) (keepers_for_selection state)
   in
   let selected_keeper_name =
     match state.detail_focus_recovery with
@@ -325,8 +325,7 @@ let replace_keeper_rows ~preserve_on_error (state : state)
         Some name
     | _ ->
         if state.keeper_cursor < 0 then None
-        else List.nth_opt state.keepers state.keeper_cursor
-          |> Option.map (fun keeper -> keeper.k_name)
+        else Option.map (fun keeper -> keeper.k_name) (selected_keeper state)
   in
   let current_keeper_mode =
     match state.view with
@@ -392,7 +391,7 @@ let replace_keeper_rows ~preserve_on_error (state : state)
   state.keepers_error <- keepers_error;
 
   let next_keeper_ids =
-    List.map (fun keeper -> keeper.k_name) state.keepers
+    List.map (fun keeper -> keeper.k_name) (keepers_for_selection state)
   in
   let hold_created_chat =
     match current_keeper_mode with
@@ -446,10 +445,8 @@ let replace_keeper_rows ~preserve_on_error (state : state)
        state.keeper_message_return <- return_keeper;
        state.view <- Keepers Keeper_message);
 
-  let selected_keeper = List.nth_opt state.keepers state.keeper_cursor in
-
   let selected_keeper_name_after_refresh =
-    Option.map (fun keeper -> keeper.k_name) selected_keeper
+    Option.map (fun keeper -> keeper.k_name) (selected_keeper state)
   in
   if not (Option.equal String.equal selected_keeper_name selected_keeper_name_after_refresh)
   then clear_keeper_logs state
@@ -1108,11 +1105,11 @@ let load_keeper_tool_approvals ~(host : string) ~(port : int) :
 
 (** Load which keepers are mid-turn right now (the "answering now" badge). *)
 let load_keeper_turns ~(host : string) ~(port : int) ~preparation_details_for :
-    (Tui_decode.keeper_turn_row list, string) result =
+    (Tui_decode.keeper_turns_projection, string) result =
   let ( let* ) = Result.bind in
   let* json = fetch_keeper_turns ~host ~port ~preparation_details_for in
   Masc_tui_response_decode.run ~name:"keeper.turns.decode_wait" (fun () ->
-    Tui_decode.decode_keeper_turns json)
+    Tui_decode.decode_keeper_turns_projection json)
 
 (** Load the durable Gate: pending approvals and both lane modes. *)
 let load_dashboard_gate ~(host : string) ~(port : int) :

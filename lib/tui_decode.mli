@@ -1289,6 +1289,79 @@ type keeper_turn_row = {
   ktr_state : keeper_turn_state;
 }
 
+type keeper_waiting_state =
+  | Keeper_waiting_idle
+  | Keeper_waiting_busy
+  | Keeper_waiting_blocked
+  | Keeper_waiting_deferred
+
+type waiting_source =
+  | Waiting_source_event_queue_pending
+  | Waiting_source_chat_operation_queued
+  | Waiting_source_chat_operation_running
+  | Waiting_source_hitl_pending
+  | Waiting_source_fusion_running
+  | Waiting_source_schedule_waiting
+  | Waiting_source_owner_shutdown
+  | Waiting_source_operator_pending_confirm
+  | Waiting_source_read_error
+
+type wake_producer =
+  | Wake_board_dispatch
+  | Wake_board_attention_judge
+  | Wake_keeper_owner_actor
+  | Wake_keeper_supervisor
+  | Wake_fusion_sink
+  | Wake_connector_attention_hook
+  | Wake_hitl_resolution_hook
+  | Wake_keeper_ask_answer
+  | Wake_schedule_store
+  | Wake_schedule_runner
+  | Wake_operator_pending_confirm_store
+  | Wake_completion_authority
+  | Wake_keeper_task_cancellation
+  | Wake_keeper_workspace_message
+  | Wake_keeper_delegate
+  | Wake_keeper_composition
+  | Wake_keeper_job
+  | Wake_keeper_addon
+  | Wake_read_model_reader
+
+type waiting_item = {
+  kwi_source : waiting_source;
+  kwi_waiting_on : string;
+  kwi_what : string;
+  kwi_wake_producer : wake_producer;
+  kwi_since : float option;
+  kwi_due_at : float option;
+  kwi_next_action : string;
+}
+
+type keeper_waiting_row = {
+  kwr_keeper_name : string;
+  kwr_state : keeper_waiting_state;
+  kwr_waiting_count : int;
+  kwr_since : float option;
+  kwr_due_at : float option;
+  kwr_waiting_on : waiting_item list;
+}
+
+type keeper_waiting_failure =
+  | Keeper_waiting_sources_unavailable of waiting_item list
+  | Keeper_waiting_invalid of string
+
+type keeper_waiting_observation =
+  | Keeper_waiting_observed of keeper_waiting_row list
+  | Keeper_waiting_fleet_unreported of keeper_waiting_row list
+  | Keeper_waiting_unavailable of keeper_waiting_failure
+(** An unavailable fleet source makes the waiting projection incomplete;
+    its error rows do not belong to any one Keeper. *)
+
+type keeper_turns_projection = {
+  rows : keeper_turn_row list;
+  waiting : keeper_waiting_observation;
+}
+
 type keeper_current_activity =
   | Keeper_activity_idle
       (** No turn is running. *)
@@ -1317,6 +1390,17 @@ val decode_keeper_turns :
 (** Decode [GET /api/v1/keepers/turns] ([masc.keeper_turns.v1]): one row per
     registered keeper. Unknown schema, status, or lane is an error, not a
     silently defaulted row. *)
+
+val decode_keeper_turns_projection :
+  Yojson.Safe.t -> (keeper_turns_projection, string) result
+(** Decode turn rows independently of the fleet waiting observation.
+    [waiting_errors] contains fleet-scoped failures; its absence on an older
+    server becomes [Keeper_waiting_fleet_unreported], preserving any per-Keeper
+    rows without claiming a fleet-wide recovery. A present value must be an
+    array. An absent or null per-Keeper waiting object
+    contributes no observation; it never becomes an idle Keeper. Malformed
+    waiting data becomes [Keeper_waiting_invalid] while valid turn rows remain
+    available. *)
 
 type runtime_assignment_source =
   | Default_runtime

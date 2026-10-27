@@ -1270,14 +1270,43 @@ let inventory_rows snapshot =
   @ snapshot.global_rows
 ;;
 
+let keeper_json_by_name_snapshot snapshot =
+  List.map
+    (fun (keeper_name, busy, rows) ->
+      keeper_name, keeper_json ~base_path:snapshot.base_path keeper_name ~busy rows)
+    snapshot.per_keeper
+;;
+
+let keeper_json_by_name config =
+  let snapshot =
+    read_inventory_snapshot
+      ~read_pending:Keeper_approval_queue.list_pending_entries_with_read_errors_for_workspace
+      config
+  in
+  let fleet_read_errors =
+    List.filter (fun row -> row.source = Read_error) snapshot.global_rows
+  in
+  let recovery_errors =
+    match snapshot.schedule_observation with
+    | Ok (_, Recovery_mirror cause) ->
+      let waiting_on =
+        match cause with
+        | Primary_missing -> "schedule_primary_missing"
+        | Primary_unusable -> "schedule_primary_unusable"
+      in
+      [ read_error_row ~waiting_on ~next_action:"repair_schedule_ledger"
+          (`Assoc [ "source", `String "recovery_mirror" ]) ]
+    | Ok (_, (Uninitialized | Primary_ledger)) | Error _ -> []
+  in
+  match fleet_read_errors @ recovery_errors with
+  | [] -> Ok (keeper_json_by_name_snapshot snapshot)
+  | errors -> Error (List.map waiting_row_json errors)
+;;
+
 let dashboard_json_of_snapshot snapshot =
   let per_keeper = snapshot.per_keeper in
   let global_rows = snapshot.global_rows in
-  let keeper_json_rows =
-    per_keeper
-    |> List.map (fun (keeper_name, busy, rows) ->
-      keeper_json ~base_path:snapshot.base_path keeper_name ~busy rows)
-  in
+  let keeper_json_rows = keeper_json_by_name_snapshot snapshot |> List.map snd in
   let all_keeper_rows =
     List.flatten
       (List.map

@@ -134,14 +134,13 @@ end
    fits its cells to, so a long keeper name or model id cannot push the columns
    to its right out of the frame.
 
-   Columns drop from the right as the terminal narrows, and the two that never
-   drop are what the surface exists to answer: which keeper, and what state it
-   is in. Above the minimum, slack goes to the columns that hold identifiers
-   worth reading whole -- the keeper's name first, then the runtime it is on --
-   before it goes to the task id, which is short by construction. *)
+   The selected-row marker, NOW and activity age stay while runtime and detail
+   yield first, followed by the name. Above the minimum, slack goes to columns
+   that hold identifiers worth reading whole -- the keeper's name first, then
+   the runtime it is on -- before it goes to the task id and secondary badges. *)
 
 let keeper_marker_width = 3
-let keeper_status_width = 10
+let keeper_status_width = 12
 (* "A P S": autoboot, proactive, sandbox. The width and the inner-width
    threshold below move together -- widening the cell without raising the
    threshold spends two columns the layout had already promised to the name and
@@ -155,8 +154,8 @@ let keeper_minimum_name_width = 16
 let keeper_maximum_name_width = 32
 let keeper_minimum_runtime_width = 20
 let keeper_minimum_task_width = 10
-let keeper_flags_minimum_inner_width = 98
-let keeper_runtime_minimum_inner_width = 118
+let keeper_flags_minimum_inner_width = 100
+let keeper_runtime_minimum_inner_width = 120
 
 type keeper_columns = {
   kcol_show_flags : bool;
@@ -192,8 +191,21 @@ let allocate_keeper_columns ~prioritize_runtime ~inner_width ~widest_runtime =
     }
   in
   let slack = inner_width - keeper_columns_used_width base in
-  if slack <= 0 then base
-  else
+  if slack <= 0 then begin
+    let deficit = -slack in
+    let runtime_shrink = min base.kcol_runtime deficit in
+    let remaining = deficit - runtime_shrink in
+    let task_shrink = min base.kcol_task remaining in
+    let remaining = remaining - task_shrink in
+    let name_shrink = min (base.kcol_name - 1) remaining in
+    let remaining = remaining - name_shrink in
+    { kcol_show_flags = base.kcol_show_flags && remaining = 0
+    ; kcol_show_runtime = base.kcol_show_runtime && base.kcol_runtime > runtime_shrink
+    ; kcol_name = base.kcol_name - name_shrink
+    ; kcol_runtime = base.kcol_runtime - runtime_shrink
+    ; kcol_task = base.kcol_task - task_shrink
+    }
+  end else
     let take budget available =
       let taken = min budget available in
       taken, available - taken

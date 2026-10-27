@@ -264,18 +264,49 @@ let contains haystack needle =
   needle_length = 0 || loop 0
 ;;
 
+(* The request type is private, so a consent request comes from the same
+   validation a browser's GET goes through. *)
+let with_registered_consent ~client_name ~scope f =
+  with_env "MASC_OAUTH_ENABLED" "1" (fun () ->
+    with_workspace (fun base_path ->
+      Eio_main.run (fun env ->
+        Fs_compat.set_fs (Eio.Stdenv.fs env);
+        Eio_guard.enable ();
+        Fun.protect
+          ~finally:(fun () ->
+            Eio_guard.disable ();
+            Fs_compat.clear_fs ())
+          (fun () ->
+            let redirect_uri = "http://127.0.0.1:43123/callback" in
+            let client =
+              Auth_oauth.register_client
+                ~base_path
+                ~client_name:(Some client_name)
+                ~redirect_uris:[ redirect_uri ]
+              |> Result.get_ok
+            in
+            let target =
+              "/oauth/authorize?"
+              ^ Uri.encoded_of_query
+                  [ "response_type", [ "code" ]
+                  ; "client_id", [ client.client_id ]
+                  ; "redirect_uri", [ redirect_uri ]
+                  ; "resource", [ "http://127.0.0.1:8935/mcp" ]
+                  ; "scope", [ scope ]
+                  ; "state", [ "state" ]
+                  ; "code_challenge", [ String.make 43 'a' ]
+                  ; "code_challenge_method", [ "S256" ]
+                  ]
+            in
+            match
+              Server_oauth_service.authorize_get ~base_path ~authority:(authority ()) ~target
+            with
+            | Ok request -> f request
+            | Error error -> fail (Auth_oauth.show_error error)))))
+;;
+
 let test_admin_consent_is_visible_and_explicit () =
-  let request : Auth_oauth.authorization_request =
-    { client_id = "masc_client"
-    ; client_name = Some "Codex <Admin>"
-    ; redirect_uri = "http://127.0.0.1:43123/callback"
-    ; resource = "http://127.0.0.1:8935/mcp"
-    ; scopes = [ Auth_oauth.Mcp_admin ]
-    ; state = Some "state"
-    ; code_challenge = String.make 43 'a'
-    ; client_verification = Auth_oauth.Registered_client
-    }
-  in
+  with_registered_consent ~client_name:"Codex <Admin>" ~scope:"mcp:admin" @@ fun request ->
   let html = Server_oauth_service.render_authorization_form request in
   check bool "verified client name is visible and escaped" true (contains html "Codex &lt;Admin&gt;");
   check bool "admin scope is visible" true (contains html "mcp:admin");
@@ -564,6 +595,47 @@ let test_document_client_refusals () =
       ~redirect_uri:"http://localhost:3118/callback")
 ;;
 
+let test_consent_policy_lets_the_callback_redirect_through () =
+  with_registered_consent ~client_name:"Codex" ~scope:"mcp:tools" @@ fun request ->
+  let policy =
+    List.assoc "content-security-policy" (Server_oauth_service.authorization_form_headers request)
+  in
+  check bool "form-action admits this page and the callback origin" true
+    (contains policy "form-action 'self' http://127.0.0.1:43123;")
+;;
+
+let test_approval_without_a_bearer_fetches_nothing () =
+  with_oauth_workspace (fun base_path ->
+    let fetched, fetch_client_metadata = serving claude_code_document in
+    let post extra =
+      Server_oauth_service.authorize_post
+        ~base_path
+        ~authority:(authority ())
+        ~fetch_client_metadata
+        ~body:
+          (authorize_query
+             ~client_id:claude_code_url
+             ~redirect_uri:"http://localhost:3118/callback"
+             ~challenge:(String.make 43 'a')
+             ~extra
+             ())
+    in
+    (match post [ "decision", [ "authorize" ] ] with
+     | Ok (Server_oauth_service.Authorization_form_error { status = `Unauthorized; _ }) -> ()
+     | Ok _ | Error _ -> fail "an approval without a bearer was not refused");
+    (match post [ "bootstrap_token", [ "not-a-bearer" ]; "decision", [ "authorize" ] ] with
+     | Ok (Server_oauth_service.Authorization_form_error { status = `Unauthorized; _ }) -> ()
+     | Ok _ | Error _ -> fail "an approval with a wrong bearer was not refused");
+    check (list string) "neither fetched the document" [] !fetched;
+    (match post [ "decision", [ "deny" ] ] with
+     | Ok (Server_oauth_service.Authorization_redirect location) ->
+       check (option string) "denial redirects with access_denied" (Some "access_denied")
+         (Uri.get_query_param (Uri.of_string location) "error")
+     | Ok (Server_oauth_service.Authorization_form_error { message; _ }) -> fail message
+     | Error error -> fail (Auth_oauth.show_error error));
+    check (list string) "the denial verified the document first" [ claude_code_url ] !fetched)
+;;
+
 let grant_types values = [ "grant_types", `List (List.map (fun v -> `String v) values) ]
 let supported_grant_types = [ "authorization_code"; "refresh_token" ]
 
@@ -641,6 +713,14 @@ let () =
             test_authorization_approval_redirects_with_issuer
         ; test_case "document client signs in" `Quick test_document_client_signs_in
         ; test_case "document client refusals" `Quick test_document_client_refusals
+        ; test_case
+            "consent policy lets the callback redirect through"
+            `Quick
+            test_consent_policy_lets_the_callback_redirect_through
+        ; test_case
+            "approval without a bearer fetches nothing"
+            `Quick
+            test_approval_without_a_bearer_fetches_nothing
         ; test_case
             "string subset rejects duplicates"
             `Quick

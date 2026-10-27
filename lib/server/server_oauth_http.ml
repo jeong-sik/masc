@@ -76,7 +76,7 @@ let with_authorize_context request reqd handler =
 let respond_authorization_form ?(status = `OK) ?error authorization_request reqd =
   Http.Response.html
     ~status
-    ~headers:Server_oauth_service.authorization_form_headers
+    ~headers:(Server_oauth_service.authorization_form_headers authorization_request)
     (Server_oauth_service.render_authorization_form ?error authorization_request)
     reqd
 ;;

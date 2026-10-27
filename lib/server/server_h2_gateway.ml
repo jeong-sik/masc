@@ -253,7 +253,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
         h2_reqd
         (Server_oauth_service.render_authorization_form ?error authorization_request)
         ~status
-        ~extra_headers:Server_oauth_service.authorization_form_headers
+        ~extra_headers:(Server_oauth_service.authorization_form_headers authorization_request)
     in
     let h2_respond_oauth_redirect location =
       h2_respond_empty

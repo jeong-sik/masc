@@ -66,7 +66,7 @@ All three call into the same library (`module Ws = Httpun_ws` in B and C; A uses
 ## 2. Non-goals / constraints
 
 - No change to the in-band auth protocol (hello message carries the token; `/ws` has no HTTP-layer auth).
-- No change to keeper affinity or domain layout ([[RFC-0204]] §2 / RFC-0059 lesson).
+- No change to keeper affinity or domain layout ([[RFC-0204]] §4: keeper fibers stay on the main domain).
 - No change to `read_inbound_message_frame` / `dispatch_inbound_message` semantics — these are already the shared SSOT for message handling and stay byte-for-byte identical.
 - HTTP/2 does not carry WS upgrade in masc; the h2 dispatch path must reject a WS route explicitly, not silently no-op.
 

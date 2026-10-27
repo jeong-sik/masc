@@ -2,6 +2,7 @@ type unavailable =
   | Refused of Lane_addon_runtime.export_refusal
   | Observation_unreadable of string
   | Declarations_incomplete
+  | Doubled_sources of Browser_lane.Backend.t list
 
 type t =
   | Observed of Browser_addon_observation.published
@@ -44,13 +45,18 @@ let not_running ~complete applications (first, rest) =
   else if complete && List.for_all failed reasons then Browser_lane_launcher.Attach_failed
   else Browser_lane_launcher.Not_known
 
-(* A browser Add-on is a package whose worker serves the browser. With no
-   observation, the declarations say which absence it is: none declared, one
-   switched off, or one switched on that the reader sees no installation of. *)
-let absence ~applications (declarations : Lane_addon_config.snapshot) =
+let serves_lane backends lane = List.exists (fun backend ->
+    Browser_lane.Backend.lane backend = lane && Lane_addon_types.serves_backend backends backend)
+    Browser_lane.Backend.all
+
+(* A browser Add-on of a lane is a package whose worker serves one of that
+   lane's sources. With no observation, the declarations say which absence it
+   is: none declared, one switched off, or one switched on that the reader
+   sees no installation of. *)
+let absence ~applications ~lane (declarations : Lane_addon_config.snapshot) =
   let browsers = List.filter (fun (d : Lane_addon_config.declaration) ->
     match d.package.worker_service with
-    | Lane_addon_types.Browser_service _ -> true
+    | Lane_addon_types.Browser_service backends -> serves_lane backends lane
     | Lane_addon_types.Mcp_tools -> false) declarations.declarations in
   match List.filter (fun (d : Lane_addon_config.declaration) -> d.enabled) browsers,
         browsers, declarations.complete with
@@ -60,14 +66,13 @@ let absence ~applications (declarations : Lane_addon_config.snapshot) =
   (* A declaration that could not be read may be a browser one switched on. *)
   | [], ([] | _ :: _), false -> Unavailable Declarations_incomplete
 
-let of_export ~declarations ~applications = function
-  | Error (Lane_addon_runtime.(Unready_installations _ | Not_yet_observed _ | Ambiguous_installations _)
-           as refusal) -> Unavailable (Refused refusal)
-  | Ok None -> absence ~applications declarations
-  | Ok (Some (snapshot : Lane_addon_runtime.export_observation)) ->
-      (match Browser_addon_observation.read snapshot.output with
-       | Ok published -> Observed published
-       | Error detail -> Unavailable (Observation_unreadable detail))
+type reading = {
+  observations : Lane_addon_runtime.browser_observation list;
+  declarations : Lane_addon_config.snapshot;
+  applications : unit -> Lane_addon_runtime.configuration_application list;
+}
+
+let of_observations ~declarations ~applications observations = {observations; declarations; applications}
 
 let read ~config ~access ~declarations =
   (* How each declaration was applied is operator metadata; another reader
@@ -75,14 +80,49 @@ let read ~config ~access ~declarations =
   let applications () = match access with
     | Lane_addon_sources.Operator_configuration -> (Lane_addon_runtime.inventory ~config).applications
     | Lane_addon_sources.Keeper _ | Lane_addon_sources.Unauthenticated -> [] in
-  Lane_addon_runtime.observation_for_export ~config ~access
-    ~name:Browser_addon_tool.definition.name
-  |> of_export ~declarations ~applications
+  of_observations ~declarations ~applications (Lane_addon_runtime.browser_observations ~config ~access)
+
+type published_or_not = Published of Browser_addon_observation.published | Unpublished | Withheld of unavailable
+let published_or_not = function
+  | Error refusal -> Withheld (Refused refusal)
+  | Ok None -> Unpublished
+  | Ok (Some (snapshot : Lane_addon_runtime.export_observation)) ->
+      (match Browser_addon_observation.read snapshot.output with
+       | Ok published -> Published published
+       | Error detail -> Withheld (Observation_unreadable detail))
+
+(* One lane reads the installations that serve one of its sources. A source
+   two of them serve cannot be told apart, so that lane is unavailable; the
+   other lanes are read as usual. *)
+let lane reading lane =
+  let relevant = List.filter (fun (observed : Lane_addon_runtime.browser_observation) ->
+    serves_lane observed.backends lane) reading.observations in
+  let doubled = List.filter (fun backend ->
+      Browser_lane.Backend.lane backend = lane
+      && List.length (List.filter (fun (observed : Lane_addon_runtime.browser_observation) ->
+           Lane_addon_types.serves_backend observed.backends backend) relevant) > 1)
+      Browser_lane.Backend.all in
+  match doubled with
+  | _ :: _ -> Unavailable (Doubled_sources doubled)
+  | [] ->
+      let read = List.map (fun (observed : Lane_addon_runtime.browser_observation) ->
+        observed.backends, published_or_not observed.observation) relevant in
+      match List.find_map (fun (_, read) -> match read with
+          | Withheld reason -> Some reason | Published _ | Unpublished -> None) read with
+      | Some reason -> Unavailable reason
+      | None ->
+          let workers = List.map (fun (backends, read) -> backends, match read with
+            | Published published -> Some published | Unpublished | Withheld _ -> None) read in
+          if List.exists (fun (_, published) -> Option.is_some published) workers
+          then Observed (Browser_addon_observation.merge workers)
+          else absence ~applications:reading.applications ~lane reading.declarations
 
 let render_unavailable refusal_text = function
   | Refused refusal -> refusal_text refusal
   | Observation_unreadable detail -> "its observation is unreadable: " ^ detail
   | Declarations_incomplete -> "the Lane Add-on declarations could not all be read"
+  | Doubled_sources sources -> "more than one browser Add-on serves "
+      ^ String.concat ", " (List.map Browser_lane.Backend.to_wire sources)
 let unavailable_message = render_unavailable Lane_addon_runtime.export_refusal_message
 let unavailable_operator_message = render_unavailable Lane_addon_runtime.export_refusal_operator_message
 

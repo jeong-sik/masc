@@ -43,3 +43,19 @@ let decode_snapshot = function
 let read (output : Lane_addon_types.output) = match output.rows with
   | [ row ] -> decode_snapshot (`Assoc row.fields)
   | [] | _::_::_ -> Error "the browser observation does not hold exactly the browser worker row"
+
+let unobserved : Browser_selection.work_browser =
+  {activity=Browser_lane.Unobserved;registered=false;session=Browser_lane.Browser_unknown;locate=false}
+let serves_live backends = List.exists (Lane_addon_types.serves_backend backends)
+  Browser_lane.Backend.[Owned_firefox; Ego; External_host]
+let merge workers =
+  let serves backend (backends, _) = Lane_addon_types.serves_backend backends backend in
+  let live = List.filter_map (fun (backends, published) ->
+    if serves_live backends then published else None) workers in
+  let owned backend pick = match List.filter (serves backend) workers with
+    | [ (_, Some published) ] -> pick published
+    | [ (_, None) ] | [] | _ :: _ :: _ -> unobserved in
+  { clients = List.concat_map (fun published -> published.clients) live;
+    client_rows = List.concat_map (fun published -> published.client_rows) live;
+    automation = owned Browser_lane.Backend.Automation (fun published -> published.automation);
+    stagehand = owned Browser_lane.Backend.Stagehand (fun published -> published.stagehand) }

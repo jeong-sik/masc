@@ -136,7 +136,7 @@ let () =
       |> Result.map_error (function R.Unavailable detail|Outcome_unknown detail -> detail
         | Host_refusal _ -> "fixture principal refused") |> require in
     let client host=await (fun () ->
-      let snapshot=require (Browser_addon_host.snapshot host |> Result.map_error (function
+      let snapshot=require (Browser_addon_host.snapshot host ~backend:Browser_lane.Backend.External_host |> Result.map_error (function
         Browser_addon_client.Unavailable detail|Outcome_unknown detail -> detail)) in
       match field "clients" snapshot with
       | Some (`List []) -> None

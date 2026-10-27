@@ -59,10 +59,11 @@ type row = { id : string; label : string; purpose : string;
 type t
 val snapshot : config:Workspace.config -> t
 
-(** The browser Add-on reading the browser rows of {!snapshot} are made from,
-    for the browser lane check, as a reader with [access] sees it. It reads
-    the Lane directory off the server fiber and the Add-on's cached
-    observation on the owner domain. *)
+(** The live lane of the browser Add-on reading the browser rows of
+    {!snapshot} are made from, for the browser lane check, as a reader with
+    [access] sees it: the browser hosts polling this server register there.
+    It reads the Lane directory off the server fiber and the Add-ons' cached
+    observations on the owner domain. *)
 val browser_presence :
   config:Workspace.config -> access:Lane_addon_sources.access -> Browser_addon_presence.t
 val to_json : t -> Yojson.Safe.t

@@ -616,3 +616,15 @@ val observation_for_export :
     [name], without an RPC or starting a worker. No installation is [None];
     the refusal tells a starting or failed installation from one that is
     serving and not yet observed, and from an ambiguous name. *)
+type browser_observation = {
+  backends : Lane_addon_types.browser_backends;
+  observation : (export_observation option, export_refusal) result;
+}
+val browser_observations : config:Workspace.config -> access:Lane_addon_sources.access ->
+  browser_observation list
+(** The cached observations of the browser installations the caller may
+    read, found by their package's service and read per set of sources they
+    serve, as {!observation_for_export} reads one export: two installations
+    serving the same sources are [Ambiguous_installations] for those sources
+    only. Runs on the Lane Add-on owner domain and waits for no browser
+    command. *)

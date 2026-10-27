@@ -436,7 +436,7 @@ hooks = ["validate_input", "validate_output"]
   check bool "nor makes the public reading collide" true
     (Result.is_ok (R.tool_export_reading ~config ~access ~reserved:[Browser_addon_tool.definition.name]));
   check bool "public host uses selected input middleware" true
-    (match Browser_addon_host.call host ~arguments:(`Assoc ["actor",`String "forged"]) with
+    (match Browser_addon_host.call host ~backend:Browser_lane.Backend.External_host ~arguments:(`Assoc ["actor",`String "forged"]) with
      | Error (R.Host_refusal (Lane_addon_call_context.Rejected _)) -> true | _ -> false);
   check bool "rejected input never reaches worker" false
     (Sys.file_exists (Filename.concat root ("toolcalls-"^id)));
@@ -629,7 +629,7 @@ hooks = ["validate_input", "validate_output"]
   write (Filename.concat root ("reject-tool-output-"^id)) "reject";
   Eio.Fiber.both (fun () ->
     check bool "selected output middleware preserves unknown effect" true
-      (match Browser_addon_host.call host ~arguments with
+      (match Browser_addon_host.call host ~backend:Browser_lane.Backend.External_host ~arguments with
        | Error (R.Outcome_unknown _) -> true | _ -> false))
     (fun () ->
       wait clock (fun () -> Sys.file_exists (issued id));
@@ -646,9 +646,9 @@ hooks = ["validate_input", "validate_output"]
   check bool "detached handle refused" true (unavailable (call original Browser_addon_wire.Snapshot));
   let replacement=attach "normal" in let next=selected replacement in
   check bool "public handle never follows replacement export" true
-    (match Browser_addon_host.call host ~arguments with Error (R.Unavailable _) -> true | _ -> false);
+    (match Browser_addon_host.call host ~backend:Browser_lane.Backend.External_host ~arguments with Error (R.Unavailable _) -> true | _ -> false);
   check bool "public observation never follows replacement service" true
-    (unavailable (Browser_addon_host.snapshot host));
+    (unavailable (Browser_addon_host.snapshot host ~backend:Browser_lane.Backend.External_host));
   check bool "old handle never resolves replacement" true (unavailable (call original Browser_addon_wire.Snapshot));
   check bool "old native client never polls replacement" true
     (poll client=Error (Browser_addon_ingress.Registration_refused Browser_lane.Client_retired));

@@ -2004,32 +2004,54 @@ let refusal_text render = function
 let export_refusal_message = refusal_text Lane_addon_unready.message
 let export_refusal_operator_message = refusal_text Lane_addon_unready.operator_message
 
+(* The cached observation of the one installation among [entries]. A
+   detaching incarnation gives way to its replacement; only when none remains
+   does it explain why the observation cannot be read. *)
+let observation_of_entries entries =
+  let serving, detaching = entries
+    |> List.filter_map (fun (e : entry) -> match readiness e with
+      | Gone -> None
+      | Unready Lane_addon_unready.Detaching -> Some (Either.Right e)
+      | Ready _ | Unready (Lane_addon_unready.Starting | Stopping | Failed _) -> Some (Either.Left e))
+    |> List.partition_map Fun.id in
+  match serving, List.map (fun e -> unready_of e Lane_addon_unready.Detaching) detaching with
+  | [], [] -> Ok None
+  | [], first :: rest -> Error (Unready_installations (first, rest))
+  | [e], ([] | _ :: _) ->
+      (match readiness e with
+       | Unready reason -> Error (Unready_installations (unready_of e reason, []))
+       | Gone -> Ok None
+       | Ready _ ->
+           if e.seq = 0 then Error (Not_yet_observed {installation=installation_name e;package_id=e.package.id})
+           else Ok (Some {instance_id=e.instance_id;observation_seq=e.seq;max_bytes=(Lane_addon_types.max_reply_bytes e.package);
+             refreshing=e.state = Lifecycle.Observing || e.pending <> Idle || e.active_tool_calls > 0 || Option.is_some e.current_action;output=e.output}))
+  | _ :: _ :: _, ([] | _ :: _) -> Error (Ambiguous_installations (List.map installation_name serving))
 let observation_for_export ~config ~access ~name = Eio_context.run_on_owner_domain (fun () ->
   let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
   match Hashtbl.find_opt managers root with
   | None -> Ok None
+  | Some m -> observation_of_entries (entries m |> List.filter (fun (e : entry) ->
+      can_read access e.visibility && List.mem name e.package.exported_tools)))
+type browser_observation = {
+  backends : Lane_addon_types.browser_backends;
+  observation : (export_observation option, export_refusal) result;
+}
+(* Browser installations are found by their package's service, not by an
+   export name, and read per set of sources they serve: two installations of
+   one source are ambiguous for that source only. *)
+let browser_observations ~config ~access = Eio_context.run_on_owner_domain (fun () ->
+  let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+  match Hashtbl.find_opt managers root with
+  | None -> []
   | Some m ->
-      (* A detaching incarnation gives way to its replacement; only when none
-         remains does it explain why the export cannot be read. *)
-      let serving, detaching = entries m |> List.filter (fun (e : entry) ->
-        can_read access e.visibility && List.mem name e.package.exported_tools)
-        |> List.filter_map (fun (e : entry) -> match readiness e with
-          | Gone -> None
-          | Unready Lane_addon_unready.Detaching -> Some (Either.Right e)
-          | Ready _ | Unready (Lane_addon_unready.Starting | Stopping | Failed _) -> Some (Either.Left e))
-        |> List.partition_map Fun.id in
-      match serving, List.map (fun e -> unready_of e Lane_addon_unready.Detaching) detaching with
-      | [], [] -> Ok None
-      | [], first :: rest -> Error (Unready_installations (first, rest))
-      | [e], ([] | _ :: _) ->
-          (match readiness e with
-           | Unready reason -> Error (Unready_installations (unready_of e reason, []))
-           | Gone -> Ok None
-           | Ready _ ->
-               if e.seq = 0 then Error (Not_yet_observed {installation=installation_name e;package_id=e.package.id})
-               else Ok (Some {instance_id=e.instance_id;observation_seq=e.seq;max_bytes=(Lane_addon_types.max_reply_bytes e.package);
-                 refreshing=e.state = Lifecycle.Observing || e.pending <> Idle || e.active_tool_calls > 0 || Option.is_some e.current_action;output=e.output}))
-      | _ :: _ :: _, ([] | _ :: _) -> Error (Ambiguous_installations (List.map installation_name serving)))
+      let browsers = entries m |> List.filter_map (fun (e : entry) ->
+        match e.package.worker_service with
+        | Browser_service backends when can_read access e.visibility -> Some (backends, e)
+        | Browser_service _ | Mcp_tools -> None) in
+      List.sort_uniq compare (List.map fst browsers)
+      |> List.map (fun backends -> {backends;
+          observation=observation_of_entries (List.filter_map (fun (served, e) ->
+            if served = backends then Some e else None) browsers)}))
 
 let with_tool_call_owner work =
   let cancelled, signal_cancelled = Eio.Promise.create () in
@@ -2204,12 +2226,32 @@ let choose_document_service ~visibility candidates =
   | [service] -> Document_service service
   | _ :: _ :: _ -> Several_browser_services
   | [] -> (match candidates with [] -> No_browser_service | _ :: _ -> Browser_narrower_than_consumer)
+(* The services a document read on [route] may go to. A live client is read
+   on the one live service there is, or, among several, on the one whose
+   last observation lists it. *)
+let document_services m (reading : browser_reading) route =
+  let serving backend (service : browser_service) = Lane_addon_types.serves_backend service.backends backend in
+  let live service = List.exists (fun backend -> serving backend service) Browser_lane.Backend.[Owned_firefox; Ego; External_host] in
+  let lists client (service : browser_service) = match Hashtbl.find_opt m.entries service.instance_id with
+    | None -> false
+    | Some (e : entry) -> (match Browser_addon_observation.read e.output with
+        | Ok published -> List.exists (fun (listed : Browser_lane.client_info) ->
+            String.equal (Browser_lane.client_id_to_string listed.client_id) (Browser_lane.client_id_to_string client))
+            published.clients
+        | Error _ -> false) in
+  match route with
+  | Browser_lane.Automation_route -> List.filter (serving Browser_lane.Backend.Automation) reading.services
+  | Stagehand_route -> List.filter (serving Browser_lane.Backend.Stagehand) reading.services
+  | Live_route client ->
+      (match List.filter live reading.services, client with
+       | ([] | [_]) as services, (None | Some _) | (_ :: _ :: _ as services), None -> services
+       | (_ :: _ :: _ as services), Some client -> List.filter (lists client) services)
 let read_browser_document m ~access ~visibility ~route ~tab_id =
   with_tool_call_owner (fun () ->
     let reading=browser_reading (live_reading m access) in
     let candidates=List.filter_map (fun (service:browser_service) ->
       Hashtbl.find_opt m.entries service.instance_id
-      |> Option.map (fun (browser:entry) -> service, browser.visibility)) reading.services in
+      |> Option.map (fun (browser:entry) -> service, browser.visibility)) (document_services m reading route) in
     match choose_document_service ~visibility candidates with
     | Document_service service ->
         (* The existing transport deadline; the worker never creates a
@@ -2240,7 +2282,7 @@ let read_browser_document m ~access ~visibility ~route ~tab_id =
     | Browser_narrower_than_consumer ->
         Error "the attached browser Add-on is visible to fewer readers than this installation's output, so its document is not read"
     | Several_browser_services ->
-        Error "more than one browser Add-on is attached, so the document source cannot choose one")
+        Error "more than one attached browser Add-on serves this browser, so the document source cannot choose one")
 
 let retain_tool_request_owner ~config ~access ~reserved ~(export : tool_export) ~scope ~request_id ~summary ~request =
   with_tool_call_owner (fun () ->

@@ -17,6 +17,8 @@
 
 | 파일 | 내용 | 창 |
 |---|---|---|
+| `probe-after-fix-d0c79a5.json` | 수정 후 서버에서 `scripts/harness/perf/response_latency_probe.py` 원문 결과. 목표 경로 네 개와 `/health`, 경로마다 200번, 2초 간격, 30초 제한 | 11:06:54~11:20:08 KST |
+| `sample-after-fix-thread-kinds.txt` | 수정 후 서버 `sample 8821 6` 을 스레드 종류별로 나눈 것. main 스레드의 runtime lock 대기와 systhread 의 masc 모듈 | 11:2x KST, 6초 |
 | `probe-pooled-vs-main-domain.tsv` | 수정 전 서버에서 `gate/keepers?detailed=false&limit=1`(풀 경유)과 `/health`(main domain)를 번갈아 20번 부른 curl 결과 | 01:29:05~01:29:08 UTC |
 | `tui-slow-requests-by-path.tsv` | TUI 가 1초 넘게 걸렸다고 적은 요청을 경로별로 센 것 | `masc-tui-59258.log` 02:29~10:59 KST (수정 전 서버의 수명) |
 | `gate-keepers-by-hour.tsv` | 위 TUI 기록 중 `gate/keepers` 의 시간대별 값 | 같은 창 |

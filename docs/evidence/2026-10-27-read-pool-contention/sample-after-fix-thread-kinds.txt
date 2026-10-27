@@ -1,0 +1,7 @@
+# sample 8821 6 (2026-10-27 11:2x KST, server d0c79a5d83a). Per-thread max inclusive count of each frame, summed by thread kind.
+# kind	threads	thread_samples	caml_lex_engine	sha256_do_chunk	leave_blocking_section(lock wait)	iomux_poll
+?	45	156600	0	0	0	0
+domain (domain_thread_func)	29	100920	4641	1845	210	85832
+main thread	1	3480	141	21	734	965
+systhread (caml_thread_start)	345	44861	1704	479	5434	31
+# top masc modules on systhreads: Workspace_memory_ledger=1354, Workspace_memory_request=803, Lane_addon_store=318, Lane_addon_config=121, Lane_addon_tool_request_owner=66, Keeper_librarian_admission_parts=66

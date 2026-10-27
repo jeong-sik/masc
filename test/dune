@@ -4125,7 +4125,7 @@
 (test
  (name test_tui_keeper_columns)
  (modules test_tui_keeper_columns)
- (libraries alcotest masc_tui_render_schedule))
+ (libraries alcotest masc_tui_keeper_list_model masc_tui_render_schedule))
 
 (test
  (name test_tui_editor)

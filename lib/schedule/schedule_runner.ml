@@ -32,6 +32,32 @@ type held =
   ; reason : hold_reason
   }
 
+type settlement_verdict = Retry_dispatch of string
+  | Reject_dispatch of Schedule_store.failure_scope * string
+
+type finish_stamp = Awaiting_finish_stamp | Finished_at of float
+
+type pending_settlement =
+  { attempt : Schedule_store.running_attempt
+  ; occurrence_id : Schedule_occurrence_id.t
+  ; schedule_id : string
+  ; schedule_instance_id : string
+  ; recurrence_now : float
+  ; verdict : settlement_verdict
+  ; finish_stamp : finish_stamp
+  }
+
+type settlement_failure =
+  | Finish_clock_raised of string
+  | Store_settlement_error of Schedule_store.store_error
+  | Store_settlement_raised of string
+
+type settlement_error =
+  { occurrence_id : Schedule_occurrence_id.t
+  ; schedule_id : string
+  ; failure : settlement_failure
+  }
+
 type tick_result =
   { due_changed : int
   ; emitted : wake_signal list
@@ -39,6 +65,8 @@ type tick_result =
   ; dispatches : dispatch_result list
   ; held : held list
   ; held_at : float
+  ; pending_settlements : pending_settlement list
+  ; settlement_errors : settlement_error list
   }
 
 and dispatch_status =
@@ -98,12 +126,32 @@ type consumer =
 type runner_error =
   | Service_error of Schedule_service.service_error
   | Signal_store_error of string
+  | Tick_raised of string
+
+type tick_failure =
+  { error : runner_error
+  ; pending_settlements : pending_settlement list
+  ; settlement_errors : settlement_error list
+  }
 
 let ( let* ) = Result.bind
 
 let runner_error_to_string = function
   | Service_error err -> Schedule_service.service_error_to_string err
   | Signal_store_error msg -> "signal store error: " ^ msg
+  | Tick_raised msg -> "schedule tick raised: " ^ msg
+;;
+
+let tick_failure_to_string (failure : tick_failure) = runner_error_to_string failure.error
+;;
+
+let settlement_error_to_string error =
+  let failure = match error.failure with
+    | Finish_clock_raised detail -> "settlement finish clock raised: " ^ detail
+    | Store_settlement_error error -> Schedule_store.store_error_to_string error
+    | Store_settlement_raised detail -> "settlement store raised: " ^ detail in
+  Printf.sprintf "schedule_id=%s occurrence=%s: %s" error.schedule_id
+    (Schedule_occurrence_id.to_string error.occurrence_id) failure
 ;;
 
 let signal_kind_to_string = function
@@ -449,43 +497,67 @@ let dispatch_result ?detail ?error occurrence_id schedule_id status =
   { occurrence_id; schedule_id; status; detail; error }
 ;;
 
-let finish_failed_dispatch config ~now ~clock ~attempt ~occurrence_id ~schedule_id
-    ~failure_scope error =
-  match
-    Schedule_store.fail_running ~finished_at:(clock ()) config ~now ~attempt
-      ~failure_scope ~error
-  with
-  | Ok _ -> dispatch_result ~error occurrence_id schedule_id Dispatch_failed
-  | Error err ->
-    let error =
-      Printf.sprintf
-        "%s; failed to record dispatch failure: %s"
-        error
-        (Schedule_store.store_error_to_string err)
-    in
-    dispatch_result ~error occurrence_id schedule_id Dispatch_failed
+let replay_settlement config ~clock (pending : pending_settlement) =
+  let stamp = match pending.finish_stamp with
+    | Finished_at value -> Ok value
+    | Awaiting_finish_stamp ->
+      Cancel_safe.protect
+        ~on_exn:(fun exn -> Error (Finish_clock_raised (Printexc.to_string exn)))
+        (fun () -> Ok (clock ())) in
+  let result, retained = match stamp with
+    | Error failure -> Error failure, pending
+    | Ok finished_at ->
+      let retained = { pending with finish_stamp = Finished_at finished_at } in
+      let result = Cancel_safe.protect
+          ~on_exn:(fun exn -> Error (Store_settlement_raised (Printexc.to_string exn)))
+          (fun () ->
+            (match retained.verdict with
+             | Retry_dispatch detail ->
+               Schedule_store.retry_running ~finished_at config ~now:retained.recurrence_now
+                 ~attempt:retained.attempt ~reason:(Schedule_store.Retryable_dispatch_failure detail)
+             | Reject_dispatch (failure_scope, error) ->
+               Schedule_store.fail_running ~finished_at config ~now:retained.recurrence_now
+                 ~attempt:retained.attempt ~failure_scope ~error)
+            |> Result.map_error (fun error -> Store_settlement_error error)) in
+      result, retained in
+  let keep failure =
+    Some retained,
+    Some { occurrence_id = retained.occurrence_id; schedule_id = retained.schedule_id; failure }
+  in
+  match result with
+  | Ok _ -> None, None
+  | Error ((Finish_clock_raised _ | Store_settlement_raised _) as failure) -> keep failure
+  | Error (Store_settlement_error error as failure) ->
+    (match error with
+     | Schedule_store.Running_attempt_superseded _ | Schedule_store.Schedule_not_found ->
+       None, None
+     | Schedule_store.Schedule_already_exists
+     | Schedule_store.Not_schedule_owner _
+     | Schedule_store.Invalid_initial_status _
+     | Schedule_store.Transition_refused _
+     | Schedule_store.Changed_due_already_past _
+     | Schedule_store.Interval_below_runner_tick _
+     | Schedule_store.Running_wake_absent _
+     | Schedule_store.Running_wake_settled _
+     | Schedule_store.Schedule_not_due_candidate
+     | Schedule_store.Running_attempt_unavailable _
+     | Schedule_store.Persistence_failed _
+     | Schedule_store.Corrupt_ledger _ -> keep failure)
 ;;
 
-let finish_retryable_dispatch config ~now ~clock ~attempt ~occurrence_id ~schedule_id detail =
-  let reason = Schedule_store.Retryable_dispatch_failure detail in
-  let error = Schedule_store.running_recovery_reason_to_string reason in
-  match
-    Schedule_store.retry_running ~finished_at:(clock ()) config ~now ~attempt ~reason
-  with
-  | Ok _ ->
-    dispatch_result
-      ~error:(error ^ "; schedule returned to due for retry")
-      occurrence_id
-      schedule_id
-      Dispatch_failed
-  | Error err ->
-    let error =
-      Printf.sprintf
-        "%s; failed to return schedule to due: %s"
-        error
-        (Schedule_store.store_error_to_string err)
-    in
-    dispatch_result ~error occurrence_id schedule_id Dispatch_failed
+let finish_dispatch config ~now ~clock ~attempt ~occurrence_id ~schedule_id ~schedule_instance_id verdict =
+  let pending = { attempt; occurrence_id; schedule_id; schedule_instance_id; recurrence_now = now;
+    verdict; finish_stamp = Awaiting_finish_stamp } in
+  let retained, error = replay_settlement config ~clock pending in
+  let detail = match verdict with
+    | Retry_dispatch reason -> Schedule_store.running_recovery_reason_to_string
+        (Schedule_store.Retryable_dispatch_failure reason)
+    | Reject_dispatch (_, detail) -> detail in
+  let message = match verdict, error with
+    | Retry_dispatch _, None -> detail ^ "; schedule returned to due for retry"
+    | Reject_dispatch _, None -> detail
+    | (Retry_dispatch _ | Reject_dispatch _), Some failure -> detail ^ "; " ^ settlement_error_to_string failure in
+  dispatch_result ~error:message occurrence_id schedule_id Dispatch_failed, retained, error
 ;;
 
 let safe_consumer_dispatch config ~now ~clock ~attempt consumer signal request =
@@ -539,7 +611,7 @@ let dispatch_candidate
          ~error:reason
      with
      | Ok _ ->
-       dispatch_result ~error:reason occurrence_id schedule_id Dispatch_unsupported
+       dispatch_result ~error:reason occurrence_id schedule_id Dispatch_unsupported, None, None
      | Error err ->
        let error =
          Printf.sprintf
@@ -547,7 +619,7 @@ let dispatch_candidate
            reason
            (Schedule_store.store_error_to_string err)
        in
-       dispatch_result ~error occurrence_id schedule_id Dispatch_unsupported)
+       dispatch_result ~error occurrence_id schedule_id Dispatch_unsupported, None, None)
   | Ok () ->
     (match
        Schedule_store.start_due_candidate
@@ -558,33 +630,50 @@ let dispatch_candidate
      with
      | Error err ->
        dispatch_result ~error:(Schedule_store.store_error_to_string err) occurrence_id
-         schedule_id Dispatch_start_rejected
+         schedule_id Dispatch_start_rejected, None, None
      | Ok started ->
        (match
           safe_consumer_dispatch config ~now ~clock ~attempt:started.attempt
             consumer signal started.request
         with
         | Error (Retryable_dispatch_failure detail) ->
-          finish_retryable_dispatch config ~now ~clock ~attempt:started.attempt
-            ~occurrence_id ~schedule_id detail
+          finish_dispatch config ~now ~clock ~attempt:started.attempt
+            ~occurrence_id ~schedule_id ~schedule_instance_id:started.request.schedule_instance_id
+            (Retry_dispatch detail)
         | Error (Occurrence_dispatch_rejection detail) ->
-          finish_failed_dispatch config ~now ~clock ~attempt:started.attempt ~occurrence_id ~schedule_id
-            ~failure_scope:Schedule_store.Occurrence_failure detail
+          finish_dispatch config ~now ~clock ~attempt:started.attempt ~occurrence_id ~schedule_id
+            ~schedule_instance_id:started.request.schedule_instance_id
+            (Reject_dispatch (Schedule_store.Occurrence_failure, detail))
         | Error (Terminal_dispatch_rejection detail) ->
-          finish_failed_dispatch config ~now ~clock ~attempt:started.attempt ~occurrence_id ~schedule_id
-            ~failure_scope:Schedule_store.Schedule_failure detail
+          finish_dispatch config ~now ~clock ~attempt:started.attempt ~occurrence_id ~schedule_id
+            ~schedule_instance_id:started.request.schedule_instance_id
+            (Reject_dispatch (Schedule_store.Schedule_failure, detail))
         | Ok (Work_accepted { detail; acceptance_commit = Acceptance_committed }) ->
-          dispatch_result ~detail occurrence_id schedule_id Dispatch_succeeded))
+          dispatch_result ~detail occurrence_id schedule_id Dispatch_succeeded, None, None))
 ;;
 
 let dispatch_candidates config ~now ~clock consumer candidates =
-  List.map
-    (fun (request, signal) ->
-       dispatch_candidate config ~now ~clock consumer signal request)
-    candidates
+  let rec loop dispatches = function
+    | [] -> List.rev dispatches, None, None
+    | (request, signal) :: rest ->
+      let result, pending, error = dispatch_candidate config ~now ~clock consumer signal request in
+      match pending with
+      | Some _ -> List.rev (result :: dispatches), pending, error
+      | None -> loop (result :: dispatches) rest
+  in loop [] candidates
 ;;
 
-let tick ?consumer ?clock config ~now ~retention_days =
+let replay_settlements config ~clock pending_settlements =
+  let pending, errors = List.fold_left
+      (fun (pending, errors) intent ->
+         let retained, failure = replay_settlement config ~clock intent in
+         (match retained with None -> pending | Some value -> value :: pending),
+         (match failure with None -> errors | Some value -> value :: errors))
+      ([], []) pending_settlements in
+  List.rev pending, List.rev errors
+;;
+
+let tick ?consumer ?clock config ~pending_settlements ~now ~retention_days =
   (* Without a clock every wake stamp copies [now], which is the tick start:
      the store then records a dispatch that took fourteen seconds as one
      that took none. The production caller passes its wall clock; tests that
@@ -594,47 +683,70 @@ let tick ?consumer ?clock config ~now ~retention_days =
     | Some clock -> clock
     | None -> fun () -> now
   in
-  match Schedule_store.refresh_due config ~now ~retention_days with
-  | Error err -> Error (Service_error (Schedule_service.Store_error err))
-  | Ok (state, due_changed) ->
-    let all_candidates = candidates ~now state in
-    (* Self-clock (#36213): a consumer may hold a due schedule back when its
-       target still carries the previous unconsumed occurrence. Held candidates
-       emit no signal and are not dispatched or advanced — they stay due and are
-       reconsidered next tick, so emission tracks consumption instead of the
-       wall clock. Without a consumer the runner is keeper-agnostic and holds
-       nothing. *)
-    let held, active =
-      match consumer with
-      | Some consumer ->
-        List.partition_map
-          (fun ((request, (signal : wake_signal)) as candidate) ->
-             match
-               consumer.defer_wake config ~occurrence_id:signal.occurrence_id request
-             with
-             | Some reason -> Either.Left { signal; reason }
-             | None -> Either.Right candidate)
-          all_candidates
-      | None -> [], all_candidates
-    in
-    (* Read before anything is emitted or dispatched: a dispatch can take
-       seconds, and the tick's finish time would then describe the dispatches
-       rather than when the holds were decided (#38411). *)
-    let held_at = clock () in
-    let candidate_signals = List.map snd active in
-    let* emitted = append_new_signals config ~state candidate_signals in
-    (match consumer with
-     | Some consumer ->
-       let dispatches = dispatch_candidates config ~now ~clock consumer active in
-       Ok { due_changed; emitted; rescheduled = 0; dispatches; held; held_at }
-     | None ->
-       let schedule_ids =
-         List.map (fun (signal : wake_signal) -> signal.schedule_id) candidate_signals
-       in
-       (match Schedule_store.reschedule_due_recurring config ~now ~schedule_ids with
-        | Error err -> Error (Service_error (Schedule_service.Store_error err))
-        | Ok (_, rescheduled) ->
-          Ok { due_changed; emitted; rescheduled; dispatches = []; held; held_at }))
+  let progress = ref (pending_settlements, []) in
+  let failed error =
+    let pending_settlements, settlement_errors = !progress in
+    Error { error; pending_settlements; settlement_errors } in
+  let run_fresh () =
+    match Schedule_store.refresh_due config ~now ~retention_days with
+    | Error err -> Error (Service_error (Schedule_service.Store_error err))
+    | Ok (state, due_changed) ->
+      let all_candidates = candidates ~now state
+        |> List.filter (fun (_, (signal : wake_signal)) ->
+             not (List.exists (fun (pending : pending_settlement) ->
+               String.equal signal.schedule_instance_id pending.schedule_instance_id
+               && String.equal signal.schedule_id pending.schedule_id) pending_settlements)) in
+      (* Self-clock (#36213): a consumer may hold a due schedule back when its
+         target still carries the previous unconsumed occurrence. Held candidates
+         emit no signal and are not dispatched or advanced — they stay due and are
+         reconsidered next tick, so emission tracks consumption instead of the
+         wall clock. Without a consumer the runner is keeper-agnostic and holds
+         nothing. *)
+      let held, active =
+        match consumer with
+        | Some consumer ->
+          List.partition_map
+            (fun ((request, (signal : wake_signal)) as candidate) ->
+               match
+                 consumer.defer_wake config ~occurrence_id:signal.occurrence_id request
+               with
+               | Some reason -> Either.Left { signal; reason }
+               | None -> Either.Right candidate)
+            all_candidates
+        | None -> [], all_candidates
+      in
+      (* Read before anything is emitted or dispatched: a dispatch can take
+         seconds, and the tick's finish time would then describe the dispatches
+         rather than when the holds were decided (#38411). *)
+      let held_at = clock () in
+      let candidate_signals = List.map snd active in
+      let* emitted = append_new_signals config ~state candidate_signals in
+      (match consumer with
+       | Some consumer ->
+         let dispatches, pending, error = dispatch_candidates config ~now ~clock consumer active in
+         let retained, errors = !progress in
+         let pending_settlements, settlement_errors = match pending with
+           | Some intent -> retained @ [ intent ], errors @ Option.to_list error
+           | None -> retained, errors in
+         progress := pending_settlements, settlement_errors;
+         Ok { due_changed; emitted; rescheduled = 0; dispatches; held; held_at;
+           pending_settlements; settlement_errors }
+       | None ->
+         let schedule_ids =
+           List.map (fun (signal : wake_signal) -> signal.schedule_id) candidate_signals
+         in
+         (match Schedule_store.reschedule_due_recurring config ~now ~schedule_ids with
+          | Error err -> Error (Service_error (Schedule_service.Store_error err))
+          | Ok (_, rescheduled) ->
+            let pending_settlements, settlement_errors = !progress in
+            Ok { due_changed; emitted; rescheduled; dispatches = []; held; held_at;
+              pending_settlements; settlement_errors }))
+  in
+  Cancel_safe.protect
+    ~on_exn:(fun exn -> failed (Tick_raised (Printexc.to_string exn)))
+    (fun () ->
+      progress := replay_settlements config ~clock pending_settlements;
+      match run_fresh () with Ok result -> Ok result | Error error -> failed error)
 ;;
 
 let hold_reason_to_json = function

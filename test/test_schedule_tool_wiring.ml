@@ -1220,10 +1220,10 @@ let test_due_signal_and_dashboard_projection () =
       ~payload:(keeper_wake_payload "signal me") ()
   in
   let tick =
-    match Schedule_runner.tick config ~now:201.0
+    match Schedule_runner.tick ~pending_settlements:[] config ~now:201.0
       ~retention_days:Schedule_store.terminal_schedule_retention_days with
     | Ok result -> result
-    | Error err -> fail (Schedule_runner.runner_error_to_string err)
+    | Error err -> fail (Schedule_runner.tick_failure_to_string err)
   in
   check int "one signal" 1 (List.length tick.emitted);
   let signal = List.hd tick.emitted in

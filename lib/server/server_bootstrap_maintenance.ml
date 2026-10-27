@@ -126,105 +126,120 @@ let wake_enqueue_counts_of_dispatches dispatches =
    schedule list is dropped: the page reports the runner's status and holds,
    and would otherwise keep the previous tick's for up to its cache lifetime
    (#38411). *)
-type schedule_runner_state = Startup_pending | Active of Schedule_runner.held list
+type active_schedule_runner =
+  { held : Schedule_runner.held list
+  ; pending_settlements : Schedule_runner.pending_settlement list
+  }
+
+type schedule_runner_state = Startup_pending | Active of active_schedule_runner
 
 let initial_schedule_runner_state = Startup_pending
 
 let run_schedule_runner_tick ~clock config ~state =
   let started_at = clock () in
-  Schedule_runner_status.record_tick_started ~now:started_at;
-  let run_active previously_held =
-    try
-      match
-        Schedule_runner.tick
-          ~consumer:Server_schedule_consumers.consumer
-          ~clock
-          config
-          ~now:started_at
-          ~retention_days:
-            (Runtime_params.get Runtime_settings.schedule_terminal_retention_days)
-      with
-      | Ok result ->
-        let finished_at = clock () in
-        let wake_enqueue_counts = wake_enqueue_counts_of_dispatches result.dispatches in
-        Schedule_runner_status.record_tick_ok
-          ~wake_enqueue_counts
-          ~started_at
-          ~finished_at
-          result;
-        record_schedule_runner_tick_outcome "ok";
-        List.iter log_schedule_dispatch result.dispatches;
-        let newly_held =
-          Schedule_runner.newly_held ~previous:previously_held result.held
-        in
-        List.iter log_schedule_hold_started newly_held;
-        Server_schedule_consumers.resume_fenced_owners config ~newly_held result.held;
-        if result.Schedule_runner.emitted <> []
-           || result.rescheduled > 0
-           || result.dispatches <> []
-        then
-          Log.Server.info
-            "schedule_runner: due_changed=%d emitted=%d rescheduled=%d dispatched=%d"
-            result.due_changed
-            (List.length result.emitted)
-            result.rescheduled
-            (List.length result.dispatches)
-        else
-          Log.Server.debug
-            "schedule_runner: idle due_changed=%d emitted=0 rescheduled=0 dispatched=0 held=%d"
-            result.due_changed
-            (List.length result.held);
-        result.held
-      | Error err ->
-        let finished_at = clock () in
-        let error = Schedule_runner.runner_error_to_string err in
-        Schedule_runner_status.record_tick_error ~started_at ~finished_at error;
-        record_schedule_runner_tick_outcome "error";
-        Log.Server.warn "schedule_runner: tick failed: %s" error;
-        previously_held
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      let finished_at = clock () in
-      let error = Printexc.to_string exn in
-      Schedule_runner_status.record_tick_crash ~started_at ~finished_at error;
-      record_schedule_runner_tick_outcome "crash";
-      Log.Server.warn "schedule_runner: tick crashed: %s" error;
-      previously_held
+  let last_observed_at = ref started_at in
+  let observe_clock () =
+    let observed = clock () in
+    last_observed_at := observed;
+    observed
   in
-  let active = match state with
-    | Active previously_held -> Some previously_held
-    | Startup_pending ->
-      (try
+  Schedule_runner_status.record_tick_started ~now:started_at;
+  let next_state = ref state in
+  (* Keep the accepted immutable progress before any fallible observation or
+     owner effect. A telemetry failure must not discard a returned intent. *)
+  let report_crash exn =
+    Schedule_runner_status.record_tick_crash ~started_at
+      ~finished_at:!last_observed_at (Printexc.to_string exn);
+    Cancel_safe.protect ~on_exn:(fun _ -> ()) (fun () ->
+      record_schedule_runner_tick_outcome "crash";
+      Log.Server.warn "schedule_runner: tick crashed: %s" (Printexc.to_string exn))
+  in
+  let run_active (previous : active_schedule_runner) =
+    match
+      Schedule_runner.tick
+        ~consumer:Server_schedule_consumers.consumer
+        ~clock:observe_clock
+        ~pending_settlements:previous.pending_settlements
+        config ~now:started_at
+        ~retention_days:
+          (Runtime_params.get Runtime_settings.schedule_terminal_retention_days)
+    with
+    | Ok result ->
+      next_state := Active
+        { held = result.held; pending_settlements = result.pending_settlements };
+      Schedule_runner_status.record_settlement_progress
+        ~pending_settlements:result.pending_settlements
+        ~settlement_errors:result.settlement_errors;
+      let finished_at = observe_clock () in
+      let wake_enqueue_counts = wake_enqueue_counts_of_dispatches result.dispatches in
+      List.iter log_schedule_dispatch result.dispatches;
+      List.iter (fun error ->
+        Log.Server.warn "schedule_runner: settlement pending: %s"
+          (Schedule_runner.settlement_error_to_string error)) result.settlement_errors;
+      let newly_held = Schedule_runner.newly_held ~previous:previous.held result.held in
+      List.iter log_schedule_hold_started newly_held;
+      Server_schedule_consumers.resume_fenced_owners config ~newly_held result.held;
+      if result.Schedule_runner.emitted <> []
+         || result.rescheduled > 0 || result.dispatches <> []
+      then Log.Server.info
+        "schedule_runner: due_changed=%d emitted=%d rescheduled=%d dispatched=%d pending_settlements=%d"
+        result.due_changed (List.length result.emitted) result.rescheduled
+        (List.length result.dispatches) (List.length result.pending_settlements)
+      else Log.Server.debug
+        "schedule_runner: idle due_changed=%d held=%d pending_settlements=%d"
+        result.due_changed (List.length result.held) (List.length result.pending_settlements);
+      record_schedule_runner_tick_outcome "ok";
+      Server_dashboard_http_core_cache.invalidate_scheduled_automation config;
+      Schedule_runner_status.record_tick_ok ~wake_enqueue_counts
+        ~started_at ~finished_at result
+    | Error failure ->
+      next_state := Active { previous with
+        pending_settlements = failure.pending_settlements };
+      Schedule_runner_status.record_settlement_progress
+        ~pending_settlements:failure.pending_settlements
+        ~settlement_errors:failure.settlement_errors;
+      let finished_at = observe_clock () in
+      let error = Schedule_runner.tick_failure_to_string failure in
+      let outcome, record = match failure.error with
+        | Schedule_runner.Tick_raised _ ->
+          "crash", Schedule_runner_status.record_tick_crash
+        | Schedule_runner.Service_error _ | Schedule_runner.Signal_store_error _ ->
+          "error", Schedule_runner_status.record_tick_error in
+      record_schedule_runner_tick_outcome outcome;
+      Log.Server.warn "schedule_runner: tick %s: %s" outcome error;
+      Server_dashboard_http_core_cache.invalidate_scheduled_automation config;
+      record ~started_at ~finished_at error
+  in
+  (try
+     let active = match state with
+       | Active previous -> Some previous
+       | Startup_pending ->
          match Schedule_store.recover_running_on_startup config ~now:started_at with
          | Ok (_, recovered) ->
-           if recovered > 0 then
-             Log.Server.warn
-               "schedule_runner: recovered %d interrupted running schedule(s)" recovered;
-           Some []
+           let previous = { held = []; pending_settlements = [] } in
+           next_state := Active previous;
+           if recovered > 0 then Log.Server.warn
+             "schedule_runner: recovered %d interrupted running schedule(s)" recovered;
+           Some previous
          | Error err ->
            let error = "startup recovery failed: " ^ Schedule_store.store_error_to_string err in
-           Schedule_runner_status.record_tick_error ~started_at ~finished_at:(clock ()) error;
+           let finished_at = observe_clock () in
            record_schedule_runner_tick_outcome "error";
            Log.Server.warn "schedule_runner: %s" error;
+           Server_dashboard_http_core_cache.invalidate_scheduled_automation config;
+           Schedule_runner_status.record_tick_error ~started_at ~finished_at error;
            None
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-         let error = "startup recovery crashed: " ^ Printexc.to_string exn in
-         Schedule_runner_status.record_tick_crash ~started_at ~finished_at:(clock ()) error;
-         record_schedule_runner_tick_outcome "crash";
-         Log.Server.warn "schedule_runner: %s" error;
-         None)
-  in
-  (* Once recovery succeeded, a later tick failure cannot return this loop to
-     startup: its Running occurrences may now belong to this live process. *)
-  let next_state = match active with
-    | None -> Startup_pending
-    | Some previously_held -> Active (run_active previously_held)
-  in
-  Server_dashboard_http_core_cache.invalidate_scheduled_automation config;
-  next_state
+     in
+     match active with None -> () | Some previous -> run_active previous
+   with
+   | Eio.Cancel.Cancelled _ as exn -> raise exn
+   | exn ->
+     report_crash exn;
+     (* Invalidation is an observation effect too. The crash is already on
+        record; a second observation failure cannot erase captured progress. *)
+     Cancel_safe.protect ~on_exn:(fun _ -> ()) (fun () ->
+       Server_dashboard_http_core_cache.invalidate_scheduled_automation config));
+  !next_state
 ;;
 
 let latest_keeper_msg_recovery = Atomic.make None

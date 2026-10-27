@@ -67,13 +67,13 @@ let create_ok
 
 (* These cases are about what a tick emits and dispatches, not about how long
    a finished schedule is kept, so they pass the library's own window. *)
-let tick_ok ?consumer ?clock config ~now =
+let tick_ok ?consumer ?clock ?(pending_settlements = []) config ~now =
   match
-    tick ?consumer ?clock config ~now
+    tick ?consumer ?clock config ~pending_settlements ~now
       ~retention_days:Schedule_store.terminal_schedule_retention_days
   with
   | Ok result -> result
-  | Error err -> fail (runner_error_to_string err)
+  | Error err -> fail (tick_failure_to_string err)
 ;;
 
 let check_kind label expected actual =
@@ -249,9 +249,9 @@ let test_tick_prunes_the_key_of_a_forgotten_schedule () =
      [now] is behind that stamp forgets nothing, so this pass runs later. *)
   let later = Unix.gettimeofday () +. 3600.0 in
   let forgetting =
-    match tick config ~now:later ~consumer:(accepting_consumer calls) ~retention_days:0 with
+    match tick config ~pending_settlements:[] ~now:later ~consumer:(accepting_consumer calls) ~retention_days:0 with
     | Ok result -> result
-    | Error err -> fail (runner_error_to_string err)
+    | Error err -> fail (tick_failure_to_string err)
   in
   check int "the forgetting tick emits nothing" 0 (List.length forgetting.emitted);
   (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
@@ -375,13 +375,13 @@ let test_tick_recovers_seen_keys_from_last_good_mirror_when_primary_is_corrupt (
   Out_channel.with_open_bin seen_path (fun channel -> output_string channel "{not json");
   let _second = create_ok ~schedule_id:"corrupt-2" config in
   let second_due =
-    tick config ~now:301.0
+    tick config ~pending_settlements:[] ~now:301.0
       ~retention_days:Schedule_store.terminal_schedule_retention_days
   in
   (match second_due with
    | Error err ->
      failf "tick did not recover from the corrupt primary: %s"
-       (runner_error_to_string err)
+       (tick_failure_to_string err)
    | Ok result ->
      check int "recovered tick emits only the new occurrence" 1
        (List.length result.emitted);
@@ -416,7 +416,7 @@ let test_tick_reports_failure_when_the_seen_keys_write_cannot_commit () =
     (fun () ->
        let _second = create_ok ~schedule_id:"readonly-2" config in
        let result =
-         tick config ~now:301.0
+         tick config ~pending_settlements:[] ~now:301.0
            ~retention_days:Schedule_store.terminal_schedule_retention_days
        in
        match result with
@@ -1046,6 +1046,8 @@ let test_runner_status_snapshot_tracks_liveness () =
     ; rescheduled = 2
     ; held = []
     ; held_at = 1.0
+    ; pending_settlements = []
+    ; settlement_errors = []
     ; dispatches =
         [ { occurrence_id = test_occurrence_id "status-1"
           ; schedule_id = "status-1"
@@ -1115,6 +1117,8 @@ let test_runner_status_snapshot_tracks_liveness () =
     ; rescheduled = 0
     ; held = []
     ; held_at = 2.0
+    ; pending_settlements = []
+    ; settlement_errors = []
     ; dispatches =
         [ { occurrence_id = test_occurrence_id "status-dispatch-failed"
           ; schedule_id = "status-dispatch-failed"
@@ -1294,6 +1298,251 @@ let test_tick_defers_held_wake_without_advancing () =
 ;;
 
 
+let pending_primary_path config = Filename.concat (Workspace_utils.masc_dir config) "schedules.json"
+
+let pending_request config (request : schedule_request) =
+  match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+  | Some current -> current
+  | None -> fail "pending fixture lost its schedule"
+;;
+
+let seed_pending_rejection ?clock ?after_decision config (request : schedule_request) rejection =
+  let staging = pending_primary_path config ^ ".tmp-atomic" in
+  let calls = ref 0 in
+  let consumer =
+    { accepts = (fun _ -> Ok ())
+    ; defer_wake = (fun _ ~occurrence_id:_ _ -> None)
+    ; dispatch = (fun _ ~now:_ _ (running : schedule_request) ~commit_acceptance:_ ->
+        incr calls;
+        check bool "production store persisted genuine Running before consumer decision" true
+          ((pending_request config request).status = Running);
+        check string "consumer received the genuine instance" request.schedule_instance_id running.schedule_instance_id;
+        Unix.mkdir staging 0o755;
+        Option.iter (fun notify -> notify ()) after_decision;
+        Error rejection) } in
+  let result = tick_ok ?clock ~consumer config ~now:201.0 in
+  check int "one final consumer rejection" 1 !calls;
+  check int "one unresolved exact settlement" 1 (List.length result.pending_settlements);
+  check int "one typed settlement failure" 1 (List.length result.settlement_errors);
+  check bool "actual failed primary write leaves Running" true
+    ((pending_request config request).status = Running);
+  staging, result
+;;
+
+let test_pending_settlements_replay_only_original_store_decision () =
+  List.iter (fun (rejection, expected_status, expected_due, expected_kind) ->
+    with_workspace @@ fun config ->
+    let request = create_ok ~recurrence:(Interval { interval_sec = 60 }) config in
+    let staging, first = seed_pending_rejection ~clock:(fun () -> 301.0) config request rejection in
+    (match (List.hd first.settlement_errors).failure with
+     | Store_settlement_error (Schedule_store.Persistence_failed _) -> ()
+     | Finish_clock_raised _ | Store_settlement_raised _
+     | Store_settlement_error
+         ( Schedule_store.Schedule_already_exists
+         | Schedule_store.Schedule_not_found
+         | Schedule_store.Not_schedule_owner _
+         | Schedule_store.Invalid_initial_status _
+         | Schedule_store.Transition_refused _
+         | Schedule_store.Changed_due_already_past _
+         | Schedule_store.Interval_below_runner_tick _
+         | Schedule_store.Running_wake_absent _
+         | Schedule_store.Running_wake_settled _
+         | Schedule_store.Schedule_not_due_candidate
+         | Schedule_store.Running_attempt_superseded _
+         | Schedule_store.Running_attempt_unavailable _
+         | Schedule_store.Corrupt_ledger _ ) ->
+       fail "fixture did not reach a real primary settlement write failure");
+    Unix.rmdir staging;
+    let calls = ref [] in
+    let replayed = tick_ok ~consumer:(accepting_consumer calls) ~clock:(fun () -> 1002.0)
+        ~pending_settlements:first.pending_settlements config ~now:1001.0 in
+    check (list string) "replay never reruns the consumer" [] !calls;
+    check int "replay is not counted as a fresh dispatch" 0 (List.length replayed.dispatches);
+    check int "replay is not counted as a fresh signal" 0 (List.length replayed.emitted);
+    check int "successful exact settlement clears pending intent" 0 (List.length replayed.pending_settlements);
+    check int "successful replay clears settlement errors" 0 (List.length replayed.settlement_errors);
+    let current = pending_request config request in
+    check bool "original decision and current due scan determine status" true (current.status = expected_status);
+    check (float 0.001) "recurrence uses the original tick, across the repair delay" expected_due current.due_at;
+    let wakes = Schedule_store.wakes_for_schedule_instance (Schedule_store.read_state config)
+        ~schedule_instance_id:request.schedule_instance_id ~schedule_id:request.schedule_id in
+    check int "replay creates no second wake attempt" 1 (List.length wakes);
+    let wake = List.hd wakes in
+    check (option (float 0.001)) "first observed finish time is preserved" (Some 301.0) wake.finished_at;
+    check bool "typed original verdict is preserved" true (wake.settlement_kind = Some expected_kind);
+    let next_calls = ref [] in
+    let next = tick_ok ~consumer:(accepting_consumer next_calls) config ~now:1001.0
+        ~pending_settlements:replayed.pending_settlements in
+    match rejection with
+    | Retryable_dispatch_failure _ | Occurrence_dispatch_rejection _ ->
+      check (list string) "the same definition is eligible again next cadence" [ request.schedule_id ] !next_calls;
+      check int "the next cadence starts its own new attempt" 1 (List.length next.dispatches)
+    | Terminal_dispatch_rejection _ ->
+      check (list string) "terminal definition remains closed next cadence" [] !next_calls)
+    [ Retryable_dispatch_failure "retry", Due, 200.0, Retryable_failure
+    ; Occurrence_dispatch_rejection "occurrence", Due, 260.0, Occurrence_rejected
+    ; Terminal_dispatch_rejection "definition", Failed, 200.0, Schedule_rejected ]
+;;
+
+let test_new_pending_returns_before_a_later_candidate_exception () =
+  with_workspace @@ fun config ->
+  let old = create_ok ~schedule_id:"already-pending" config in
+  let old_staging, old_result = seed_pending_rejection config old (Retryable_dispatch_failure "old pending") in
+  Unix.rmdir old_staging;
+  let later = create_ok ~schedule_id:"later-candidate" config in
+  let first = create_ok ~schedule_id:"first-candidate" config in
+  let later_entered = ref false in
+  let staging = pending_primary_path config ^ ".tmp-atomic" in
+  let consumer =
+    { accepts = (fun (request : schedule_request) ->
+        if String.equal request.schedule_id later.schedule_id then (later_entered := true; raise Exit);
+        Ok ())
+    ; defer_wake = (fun _ ~occurrence_id:_ _ -> None)
+    ; dispatch = (fun _ ~now:_ _ (running : schedule_request) ~commit_acceptance:_ ->
+        check bool "fresh attempt genuinely started" true ((pending_request config running).status = Running);
+        Unix.mkdir staging 0o755;
+        Error (Terminal_dispatch_rejection "stop after this unresolved settlement")) } in
+  let result = tick_ok ~consumer config ~now:201.0 ~pending_settlements:old_result.pending_settlements in
+  check bool "later fallible candidate is never entered after new pending" false !later_entered;
+  check int "first dispatch progress is returned" 1 (List.length result.dispatches);
+  check int "only the newly failed attempt remains pending" 1 (List.length result.pending_settlements);
+  check bool "existing retry settlement progresses before a fresh failure" true
+    ((pending_request config old).status = Due);
+  Unix.rmdir staging;
+  ignore (create_ok ~schedule_id:"next-failing-candidate" config);
+  let next = tick_ok ~consumer config ~now:201.0 ~pending_settlements:result.pending_settlements in
+  check int "successive fresh failures do not accumulate older pending intents" 1
+    (List.length next.pending_settlements);
+  check bool "the preceding exact terminal rejection settles before the next failure" true
+    ((pending_request config first).status = Failed)
+;;
+
+let test_pending_stamp_and_input_survive_later_tick_errors () =
+  with_workspace @@ fun config ->
+  ignore (create_ok ~schedule_id:"exception-after-replay" config);
+  let request = create_ok config in
+  let refuse_stamp = ref false in
+  let clock () = if !refuse_stamp then raise Exit else 301.0 in
+  let staging, unstamped = seed_pending_rejection ~clock
+      ~after_decision:(fun () -> refuse_stamp := true) config request
+      (Occurrence_dispatch_rejection "deferred finish stamp") in
+  (match (List.hd unstamped.settlement_errors).failure with
+   | Finish_clock_raised _ -> ()
+   | Store_settlement_error _ | Store_settlement_raised _ -> fail "finish clock failure was lost");
+  refuse_stamp := false;
+  let throwing = { (accepting_consumer (ref [])) with accepts = (fun _ -> raise Exit) } in
+  let failure = match tick ~consumer:throwing ~clock config ~now:401.0
+      ~pending_settlements:unstamped.pending_settlements
+      ~retention_days:Schedule_store.terminal_schedule_retention_days with
+   | Error ({ error = Tick_raised _; _ } as failure) -> failure
+   | Error ({ error = (Service_error _ | Signal_store_error _); _ } as failure) ->
+     fail ("fixture did not reach the pre-start exception: " ^ tick_failure_to_string failure)
+   | Ok _ -> fail "pre-start exception did not produce a typed failure envelope" in
+  check int "failure envelope retains the newly observed stamp" 1 (List.length failure.pending_settlements);
+  check int "failure envelope retains the actual earlier store failure" 1 (List.length failure.settlement_errors);
+  Unix.rmdir staging;
+  let replayed = tick_ok ~consumer:(accepting_consumer (ref [])) ~clock:(fun () -> 2002.0)
+      config ~now:2001.0 ~pending_settlements:failure.pending_settlements in
+  check int "envelope-preserved progress clears after later healthy tick" 0 (List.length replayed.pending_settlements);
+  match Schedule_store.last_wake_for_schedule_instance (Schedule_store.read_state config)
+      ~schedule_instance_id:request.schedule_instance_id ~schedule_id:request.schedule_id with
+  | Some wake -> check (option (float 0.001)) "repair retains the stamp observed before the later exception"
+      (Some 301.0) wake.finished_at
+  | None -> fail "replayed wake missing"
+;;
+
+let test_pending_read_error_does_not_block_unrelated_due_work () =
+  with_workspace @@ fun config ->
+  let request = create_ok config in
+  let staging, first = seed_pending_rejection config request (Retryable_dispatch_failure "keep pending") in
+  Unix.rmdir staging;
+  let state = Schedule_store.read_state config in
+  let primary = `Assoc
+    [ "version", `Int state.version; "updated_at", `Float state.updated_at
+    ; "schedules", `List (List.map schedule_request_to_yojson state.schedules)
+    ; "notes", `List (List.map schedule_note_to_yojson state.notes)
+    ; "wakes", `List (List.map (fun (wake : wake_record) ->
+        wake_record_to_yojson { wake with attempt_identity = Unidentified }) state.wakes) ] in
+  Workspace_core.write_text config (pending_primary_path config) (Yojson.Safe.to_string primary);
+  let healthy = create_ok ~schedule_id:"unrelated-healthy" config in
+  let calls = ref [] in
+  let result = tick_ok ~consumer:(accepting_consumer calls) config ~now:401.0
+      ~pending_settlements:first.pending_settlements in
+  check (list string) "unrelated due consumer still progresses" [ healthy.schedule_id ] !calls;
+  check bool "unrelated accepted occurrence succeeds" true ((pending_request config healthy).status = Succeeded);
+  check int "unavailable old authority remains pending" 1 (List.length result.pending_settlements);
+  (match (List.hd result.settlement_errors).failure with
+   | Store_settlement_error (Schedule_store.Running_attempt_unavailable _) -> ()
+   | Finish_clock_raised _ | Store_settlement_raised _
+   | Store_settlement_error
+       ( Schedule_store.Schedule_already_exists
+       | Schedule_store.Schedule_not_found
+       | Schedule_store.Not_schedule_owner _
+       | Schedule_store.Invalid_initial_status _
+       | Schedule_store.Transition_refused _
+       | Schedule_store.Changed_due_already_past _
+       | Schedule_store.Interval_below_runner_tick _
+       | Schedule_store.Running_wake_absent _
+       | Schedule_store.Running_wake_settled _
+       | Schedule_store.Schedule_not_due_candidate
+       | Schedule_store.Running_attempt_superseded _
+       | Schedule_store.Persistence_failed _
+       | Schedule_store.Corrupt_ledger _ ) ->
+     fail "legacy authority failure was hidden or cleared");
+  Schedule_runner_status.reset_for_test ();
+  Fun.protect ~finally:Schedule_runner_status.reset_for_test @@ fun () ->
+  Schedule_runner_status.record_tick_ok ~started_at:401.0 ~finished_at:402.0 result;
+  let only_replay = tick_ok config ~now:403.0 ~pending_settlements:result.pending_settlements in
+  Schedule_runner_status.record_tick_ok ~started_at:403.0 ~finished_at:404.0 only_replay;
+  check int "a failing replay alone has no consumer dispatch count" 0 (List.length only_replay.dispatches);
+  let status = Schedule_runner_status.snapshot () in
+  check bool "pending settlement alone keeps health degraded" true
+    (Schedule_runner_status.status ~now:404.0 status = Schedule_contract_values.Runner_degraded);
+  check int "replay never inflates accepted dispatch totals" 1 status.totals.dispatch_succeeded;
+  check int "replay never inflates failed dispatch totals" 0 status.totals.dispatch_failed
+;;
+
+let test_pending_supersession_does_not_settle_a_new_attempt () =
+  with_workspace @@ fun config ->
+  let request = create_ok config in
+  let staging, first = seed_pending_rejection config request (Retryable_dispatch_failure "old decision") in
+  Unix.rmdir staging;
+  (match Schedule_store.recover_running_on_startup config ~now:202.0 with
+   | Ok (_, recovered) -> check int "fixture settles the former attempt" 1 recovered
+   | Error error -> fail (Schedule_store.store_error_to_string error));
+  (match Schedule_store.start_due_candidate config ~now:201.0 ~candidate:request with
+   | Ok _ -> ()
+   | Error error -> fail (Schedule_store.store_error_to_string error));
+  let before = Workspace_core.read_text config (pending_primary_path config) in
+  let calls = ref [] in
+  let result = tick_ok ~consumer:(accepting_consumer calls) config ~now:203.0
+      ~pending_settlements:first.pending_settlements in
+  check int "authoritative supersession clears only the old intent" 0 (List.length result.pending_settlements);
+  check (list string) "old-intent replay invokes no consumer" [] !calls;
+  check string "old decision cannot change the genuine newer Running attempt" before
+    (Workspace_core.read_text config (pending_primary_path config))
+;;
+
+let test_pending_finish_clock_propagates_actual_cancellation () =
+  with_workspace @@ fun config ->
+  let request = create_ok config in
+  let decision_returned = ref false in
+  let escaped = ref false in
+  (try Eio.Cancel.sub (fun cancellation ->
+     let clock () =
+       if !decision_returned then (
+         Eio.Cancel.cancel cancellation Exit;
+         Eio.Fiber.check ());
+       301.0 in
+     ignore (seed_pending_rejection ~clock
+       ~after_decision:(fun () -> decision_returned := true) config request
+       (Terminal_dispatch_rejection "cancelled after the returned decision")))
+   with Eio.Cancel.Cancelled Exit -> escaped := true);
+  check bool "actual cancellation escapes the finish-clock wrapper" true !escaped;
+  check bool "cancellation is not converted into a committed failure or retry" true
+    ((pending_request config request).status = Running)
+;;
+
 let () =
   run "Schedule_runner"
     [ ( "tick",
@@ -1337,6 +1586,18 @@ let () =
             test_tick_dispatch_failure_scope
         ; test_case "retries same occurrence without blocking other schedule" `Quick
             test_tick_retries_same_occurrence_without_blocking_other_schedule
+        ; test_case "pending settlements replay only the original store decision" `Quick
+            test_pending_settlements_replay_only_original_store_decision
+        ; test_case "new pending returns before later candidate exception" `Quick
+            test_new_pending_returns_before_a_later_candidate_exception
+        ; test_case "pending stamp and input survive later tick errors" `Quick
+            test_pending_stamp_and_input_survive_later_tick_errors
+        ; test_case "pending authority read error does not block unrelated due work" `Quick
+            test_pending_read_error_does_not_block_unrelated_due_work
+        ; test_case "pending supersession cannot settle a new attempt" `Quick
+            test_pending_supersession_does_not_settle_a_new_attempt
+        ; test_case "pending finish clock propagates actual cancellation" `Quick
+            test_pending_finish_clock_propagates_actual_cancellation
         ; test_case "occurrence decode rejects tampered facts" `Quick
             test_occurrence_decode_rejects_tampered_facts
         ; test_case "defers held wake without advancing" `Quick

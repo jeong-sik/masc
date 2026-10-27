@@ -315,7 +315,8 @@ val accept_running :
     requests advance to their next [Scheduled] occurrence after [now]; one-shot
     requests become [Succeeded]. The matching wake completes immediately as a
     wake-delivery receipt stamped [finished_at] (default [now]); Keeper turn
-    results live in the Keeper ledger. *)
+    results live in the Keeper ledger. Repeated calls for the same verdict must
+    retain the original [now], even after later recurrence boundaries pass. *)
 
 val fail_running :
   ?finished_at:float ->
@@ -329,7 +330,9 @@ val fail_running :
     (default [now]). [Schedule_failure] ends the request as [Failed].
     [Occurrence_failure] advances to the next [Scheduled] occurrence after
     [now], or ends as [Failed] when no future occurrence exists. The tick
-    [now], not the attempt's finish time, anchors recurrence advancement. *)
+    [now], not the attempt's finish time, anchors recurrence advancement. A
+    delayed retry must retain that original [now], rather than recompute the
+    next occurrence using its later wall-clock observation. *)
 
 val retry_running :
   ?finished_at:float ->

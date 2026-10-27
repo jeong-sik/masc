@@ -680,12 +680,14 @@ let zai_location = "us"
 
 (* What an MCP failure says to the chain. The server's own message is left
    out, as for the other providers: it can echo the query. *)
-let zai_error_of_mcp : Mcp_client.error -> provider_error = function
+let rec zai_error_of_mcp : Mcp_client.error -> provider_error = function
   | Mcp_client.Transport detail ->
       Transport (endpoint_error ~fallback:"provider request failed" detail)
   | Mcp_client.Unauthorized _ -> Server "provider refused the key"
   | Mcp_client.Http { status; _ } -> Server (Printf.sprintf "provider returned HTTP %d" status)
   | Mcp_client.Rpc { code; _ } -> Server (Printf.sprintf "provider refused the call (%d)" code)
+  | Mcp_client.Input_required _ -> Server "provider requires additional input"
+  | Mcp_client.Before_tool_call error -> zai_error_of_mcp error
   | Mcp_client.Malformed _ -> Parse "provider returned an unreadable MCP answer"
 
 (* z.ai reports an API-level failure as HTTP 200 with a body like
@@ -739,7 +741,7 @@ let search_via_zai ~post ~api_key ~query ~limit =
          | Some code -> Server (Printf.sprintf "provider refused the call (%d)" code)
          | None -> zai_error_of_mcp error)
     | Mcp_client.Transport _ | Mcp_client.Unauthorized _ | Mcp_client.Http _
-    | Mcp_client.Rpc _ -> zai_error_of_mcp error
+    | Mcp_client.Rpc _ | Mcp_client.Input_required _ | Mcp_client.Before_tool_call _ -> zai_error_of_mcp error
   in
   match Mcp_client.connect ~post ~url:zai_mcp_url ~access_token:api_key () with
   | Error error -> Error (zai_error_of_mcp error)
@@ -752,7 +754,12 @@ let search_via_zai ~post ~api_key ~query ~limit =
        with
        | Error error -> Error (zai_error_of_mcp error)
        | Ok { Mcp_client.is_error = true; _ } -> Error (Server "provider reported a failed search")
-       | Ok { Mcp_client.text; _ } ->
+       | Ok { Mcp_client.text; structured_content; _ } ->
+           let text =
+             match text, structured_content with
+             | "", Some value -> Yojson.Safe.to_string value
+             | text, _ -> text
+           in
            let* parsed = parse_zai_search_text text in
            let hits =
              parsed |> take_results limit

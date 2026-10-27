@@ -6347,7 +6347,9 @@ module Browser_lane_view = struct
         let attach ~address =
           match report.keeper with
           | Addon_managed _ -> []
-          | Lane_off -> host_attach_lines ~address report.attach
+          | Addon_off ->
+              host_attach_lines ~address report.attach
+              @ [host_line "[browser.live.bidi] is set; no enabled browser-firefox declaration runs it"]
           | Not_configured ->
               host_attach_lines ~address report.attach
               @ [host_line "No Addon-managed live Firefox is configured in [browser.live.bidi]"]
@@ -6410,8 +6412,7 @@ module Browser_lane_view = struct
               host_said "Detail: " detail])
         @ (match report.keeper with
            | Addon_managed { port; profile } -> host_addon_lines ~port ~profile
-           | Lane_off -> [host_line "Live lane off in runtime.toml · it serves nothing"]
-           | Not_configured | Not_known -> [])
+           | Addon_off | Not_configured | Not_known -> [])
   (* A path on rows of [max_cells], broken before a slash so each name
      stays whole. A single name longer than a row has nowhere better to
      break and is cut where the row ends, with every cell of it kept: a
@@ -6475,7 +6476,7 @@ module Browser_lane_view = struct
               (match report.keeper with
                | Addon_managed _ ->
                    "Manual BiDi host: none has run · check Addon readiness · b:details"
-               | Lane_off | Not_configured | Not_known ->
+               | Addon_off | Not_configured | Not_known ->
                    "Manual BiDi host: none has run for this workspace · b:how to attach")
           | Record_missing_but_locked ->
               "Manual BiDi host: lock held, record missing · b:inspect the existing process"
@@ -8767,9 +8768,6 @@ type state = {
   mutable exact_activity_sessions: Masc_tui_exact_activity.t list;
   mutable exact_activity_open: Masc_tui_exact_activity.owner option;
   mutable exact_activity_generation: int;
-  mutable browser_activity_sessions: Masc_tui_browser_activity.t list;
-  mutable browser_activity_open: Masc_tui_browser_activity.owner option;
-  mutable browser_activity_generation: int;
   mutable machine_activity_sessions: Masc_tui_machine_activity.t list;
   mutable machine_activity_open: Masc_tui_machine_activity.owner option;
   mutable machine_activity_generation: int;
@@ -12308,7 +12306,6 @@ let suspend_workspace_readings state =
          (Masc_tui_fetched.suspend reading)
    | Masc_tui_planning_detail.Submitting _ -> ());
   state.exact_activity_sessions <- List.map Masc_tui_exact_activity.suspend_read state.exact_activity_sessions;
-  state.browser_activity_sessions <- List.map Masc_tui_browser_activity.suspend_read state.browser_activity_sessions;
   state.machine_activity_sessions <- List.map Masc_tui_machine_activity.suspend_read state.machine_activity_sessions;
   let suspend_application (view : Masc_tui_lane_addons.t) =
     {view with application_reading = Masc_tui_lane_application.suspend view.application_reading} in
@@ -15609,7 +15606,6 @@ let modal_owns_keys (state : state) =
   || state.context_inspector_open || state.about_open
   || state.repository_changes_open
   || (state.view = Lanes && Option.is_some state.exact_activity_open)
-  || (state.view = Lanes && Option.is_some state.browser_activity_open)
   || (state.view = Lanes && Option.is_some state.machine_activity_open)
   || Option.is_some state.client_detail
   || Option.is_some state.collab
@@ -15701,7 +15697,6 @@ let close_key_modals (state : state) =
   state.client_detail_scroll <- 0;
   state.collab <- None;
   state.exact_activity_open <- None;
-  state.browser_activity_open <- None;
   state.machine_activity_open <- None;
   if state.agenda_open then close_agenda state;
   if state.context_inspector_open then close_context_inspector state;
@@ -15983,9 +15978,6 @@ let create_state
   exact_activity_sessions = [];
   exact_activity_open = None;
   exact_activity_generation = 0;
-  browser_activity_sessions = [];
-  browser_activity_open = None;
-  browser_activity_generation = 0;
   machine_activity_sessions = [];
   machine_activity_open = None;
   machine_activity_generation = 0;
@@ -17965,21 +17957,6 @@ let runtime_config_workspace (state : state) =
   Option.map (fun identity ->
     Canonical_path.to_string identity.Tui_decode.sid_base_path,
     Canonical_path.to_string identity.Tui_decode.sid_masc_root) state.server_identity
-
-let browser_activity_session (state : state) owner =
-  List.find_opt (fun session -> Masc_tui_browser_activity.same_owner owner
-    (Masc_tui_browser_activity.owner session)) state.browser_activity_sessions
-
-let put_browser_activity (state : state) session =
-  state.browser_activity_sessions <- session :: List.filter (fun existing ->
-    not (Masc_tui_browser_activity.same_owner (Masc_tui_browser_activity.owner session)
-      (Masc_tui_browser_activity.owner existing))) state.browser_activity_sessions
-
-let shown_browser_activity (state : state) =
-  match state.browser_activity_open, runtime_config_workspace state with
-  | Some owner,Some workspace when owner.Masc_tui_browser_activity.workspace=workspace ->
-    browser_activity_session state owner
-  | None,_ | _,None | Some _,Some _ -> None
 
 let machine_activity_session (state : state) owner =
   List.find_opt (fun session -> Masc_tui_machine_activity.same_owner owner

@@ -7200,20 +7200,16 @@ max-context = 1024
 [local.sample]
 [runtime]
 default = "local.sample"
-[browser.live]
-enabled = %b
 [browser.automation]
-enabled = %b
 geckodriver = "/fixture/geckodriver"
 [browser.stagehand]
-enabled = %b
 chrome = "/fixture/chrome"
 extension = "/fixture/extension"
 [machines.msx]
 enabled = %b
 [machines.dos]
 enabled = %b
-|} enabled enabled enabled enabled enabled in
+|} enabled enabled in
   let on = content true and off = content false in
   let expected text = match Runtime_toml.parse_string text with
     | Ok config -> config
@@ -7296,7 +7292,7 @@ let test_wizard_provider_models_share_catalog_authority () =
 let () =
   run "runtime_config_validity"
     [ ( "runtime TOML gate",
-        [ test_case "Browser and machine activity follow the visible config across save failure and reload" `Quick
+        [ test_case "Browser settings and machine activity follow the visible config across save failure and reload" `Quick
             test_browser_config_publication_follows_visible_file;
           test_case "same model serves three context windows concurrently" `Quick
             test_same_model_context_windows_coexist;

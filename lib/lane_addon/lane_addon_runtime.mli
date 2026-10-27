@@ -491,6 +491,11 @@ val host_issue_to_json : host_issue -> Yojson.Safe.t
 (** The [issue] of an instance's [host_requests] in the inspect payload. *)
 
 module For_testing : sig
+  val browser_source_table :
+    Browser_configuration.t option -> backend:Browser_lane.Backend.t ->
+    'table Browser_configuration.source -> ('table, string) result
+  (** The table a browser worker starts its source from: [Error] when no
+      runtime.toml was loaded or it has no table for that source. *)
   type visibility = Shared | Operator_only | Keeper_only of string
   type 'service document_service =
     | Document_service of 'service

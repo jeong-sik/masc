@@ -364,13 +364,6 @@ let test_a_replan_refuses_a_table_written_since () =
      | Ok _ | Error _ -> fail "a table written since the plan is refused as changed");
     check string "their table is kept" theirs (read fixture.runtime))
 
-let test_a_lane_that_is_off_still_gets_the_table () =
-  with_fixture ~config:(runtime_base ^ "\n[browser.live]\nenabled = false\n") (fun fixture ->
-    let plan = plan_ok ~find:(found fixture) (request fixture) in
-    check bool "the lane is off" false (E.lane_enabled plan);
-    apply_ok plan;
-    ignore (configured fixture))
-
 let () =
   run "browser_lane_ego_setup"
     [ ( "a new table"
@@ -398,6 +391,5 @@ let () =
         ; test_case "a replan writes beside what was written since" `Quick
             test_a_replan_writes_beside_what_was_written_since
         ; test_case "a replan refuses a table written since" `Quick
-            test_a_replan_refuses_a_table_written_since
-        ; test_case "a lane that is off still gets the table" `Quick test_a_lane_that_is_off_still_gets_the_table ] )
+            test_a_replan_refuses_a_table_written_since ] )
     ]

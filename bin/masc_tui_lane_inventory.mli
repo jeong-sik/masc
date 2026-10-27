@@ -25,6 +25,8 @@ val identity_index : identity -> Masc.Tui_decode_lane_inventory.row list -> int 
     A missing or replaced original has no selected target. Category and worker
     status changes alone do not change this identity. *)
 val row_summary : Masc.Tui_decode_lane_inventory.row -> string
+(** Where a browser source is switched on or off, for a Browser row. *)
+val browser_switch_line : string
 (** Machine activity is displayed independently of its retained publication. *)
 val row_standing : Masc.Tui_decode_lane_inventory.row -> Masc_tui_lane_standing.t
 (** How the row stands. A package row with a failed worker is [Failing]

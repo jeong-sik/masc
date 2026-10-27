@@ -1557,7 +1557,6 @@ let activate_owner_state
       (initialized : initialized_owner_state)
   =
   let state = initialized.state in
-  Server_browser_configuration.install_activity_observer ~sw;
   (* Establish the complete barrier before the irreversible ownership commit.
      Gate restore, claim, and start stay ordered inside one transport-neutral
      function. Each composition root publishes readiness only after its own

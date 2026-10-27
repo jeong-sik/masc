@@ -25,8 +25,8 @@ type 'a browser_reading =
   | Browser_addon_unavailable of string
 type state =
   | Exact_state of Exact_projection.lane_configuration
-  | Browser_clients of Browser_lane.activity * int browser_reading
-  | Browser_executor of Browser_lane.activity * bool browser_reading
+  | Browser_clients of int browser_reading
+  | Browser_executor of bool browser_reading
   | Machine_state of Machine_configuration.activity * machine_publication
   | Package_state of { declaration : declaration option; instances : Addon.inventory_instance list }
 type row = { id : string; label : string; purpose : string; selection : selection; state : state }
@@ -129,15 +129,15 @@ let browser_map f = function
      shown with its detail. *)
   | Browser_addon_presence.Unavailable reason ->
       Browser_addon_unavailable (Browser_addon_presence.unavailable_operator_message reason)
-let browser_state ~activity publication = function
+let browser_state publication = function
   | Browser_lane.Lane_name.Live ->
-      Browser_clients (activity, browser_map (fun (p : Browser_addon_observation.published) ->
+      Browser_clients (browser_map (fun (p : Browser_addon_observation.published) ->
         List.length p.clients) publication)
   | Browser_lane.Lane_name.Automation ->
-      Browser_executor (activity, browser_map (fun (p : Browser_addon_observation.published) ->
+      Browser_executor (browser_map (fun (p : Browser_addon_observation.published) ->
         p.automation.registered) publication)
   | Browser_lane.Lane_name.Stagehand ->
-      Browser_executor (activity, browser_map (fun (p : Browser_addon_observation.published) ->
+      Browser_executor (browser_map (fun (p : Browser_addon_observation.published) ->
         p.stagehand.registered) publication)
 
 (* The Lane directory and what it declares, read off the server fiber. *)
@@ -159,7 +159,6 @@ let browser_presence ~config ~access =
 
 let snapshot ~config =
   let exact = Exact_projection.observe () in
-  let browser_activity = Server_browser_configuration.activity_snapshot () in
   let machine_configuration = Runtime.machine_configuration () in
   let directory, declarations = declarations ~config in
   (* Read once per snapshot, so the three browser rows describe one
@@ -171,8 +170,7 @@ let snapshot ~config =
     let selection,state = match lane with
       | Lane_id.Exact id -> Exact id,Exact_state (Exact_projection.configuration exact id)
       | Lane_id.Browser id ->
-          Browser id,browser_state ~activity:(browser_activity id)
-            (Browser_addon_presence.lane browser_publication id) id
+          Browser id,browser_state (Browser_addon_presence.lane browser_publication id) id
       | Lane_id.Machine id -> Machine id,machine_state ~config ~configuration:machine_configuration id in
     {id=Lane_id.to_wire (Lane_id.Builtin lane); label=Lane_manifest.label lane;
      purpose=Lane_manifest.purpose lane; selection; state}) in
@@ -226,10 +224,6 @@ let instance_json (i : Addon.inventory_instance) = `Assoc ([
   "applied_revision",optional (fun (o : Addon.configuration_owner) -> str o.revision) i.configuration]
   @ (match i.ui_category with None -> []
      | Some category -> ["ui_category",Lane_addon_category.to_json category]))
-let browser_activity_json = function
-  | Browser_lane.Enabled -> str "on"
-  | Disabled -> str "off"
-  | Unobserved -> str "unobserved"
 let browser_reading_json fields = function
   | Browser_observed value -> `Assoc (("kind",str "observed") :: fields value)
   | Browser_addon_absent -> `Assoc ["kind",str "absent"]
@@ -238,9 +232,9 @@ let browser_reading_json fields = function
   | Browser_addon_unavailable detail -> `Assoc ["kind",str "unavailable";"detail",str detail]
 let state_json = function
   | Exact_state configuration -> `Assoc ["kind",str "exact";"configuration",configuration_json configuration]
-  | Browser_clients (activity,reading) -> `Assoc ["kind",str "browser_clients";"activity",browser_activity_json activity;
+  | Browser_clients reading -> `Assoc ["kind",str "browser_clients";
       "addon",browser_reading_json (fun count -> ["connected_clients",`Int count]) reading]
-  | Browser_executor (activity,reading) -> `Assoc ["kind",str "browser_executor";"activity",browser_activity_json activity;
+  | Browser_executor reading -> `Assoc ["kind",str "browser_executor";
       "addon",browser_reading_json (fun registered -> ["registered",`Bool registered]) reading]
   | Machine_state (activity,publication) -> `Assoc ["kind",str "machine";
       "activity",str (Machine_configuration.activity_to_wire activity);

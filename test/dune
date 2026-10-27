@@ -6343,12 +6343,6 @@
   masc_tui_runtime_config_receipt alcotest))
 
 (test
- (name test_tui_browser_activity)
- (modules test_tui_browser_activity)
- (libraries alcotest otoml masc.browser_lane masc.browser_configuration
-  masc_tui_browser_activity masc_tui_runtime_config_edit masc_tui_runtime_config_receipt))
-
-(test
  (name test_msx_lane_activity)
  (modules test_msx_lane_activity)
  (libraries alcotest unix otoml ocaml-msx.msx masc.msx_lane

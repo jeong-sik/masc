@@ -38,7 +38,6 @@ type instance = {
   ui_category : Lane_addon_category.t option;
   presence : presence; phase : phase; applied_revision : string option;
 }
-type browser_activity = Browser_enabled | Browser_disabled | Browser_unobserved
 type machine_activity = Machine_enabled | Machine_disabled | Machine_unobserved
 type machine_publication = No_screen | Stable | Running | Publication_unavailable
 type 'a browser_reading =
@@ -49,8 +48,8 @@ type 'a browser_reading =
   | Browser_addon_unavailable of string
 type state =
   | Exact_state of configuration
-  | Browser_clients of browser_activity * int browser_reading
-  | Browser_executor of browser_activity * bool browser_reading
+  | Browser_clients of int browser_reading
+  | Browser_executor of bool browser_reading
   | Machine_state of machine_activity * machine_publication
   | Package_state of { declaration : declaration option; instances : instance list }
 type row = { id : string; label : string; purpose : string;
@@ -218,12 +217,6 @@ let instance json =
   let* applied_revision = get (nullable nonblank) "applied_revision" f in
   Ok {instance_id;incarnation;run_id;package_id;title;package_revision;ui_category;presence;phase;applied_revision}
 
-let browser_activity = function
-  | `String "on" -> Ok Browser_enabled
-  | `String "off" -> Ok Browser_disabled
-  | `String "unobserved" -> Ok Browser_unobserved
-  | _ -> error "unknown Browser activity"
-
 let machine_activity = function
   | `String "on" -> Ok Machine_enabled
   | `String "off" -> Ok Machine_disabled
@@ -246,13 +239,11 @@ let state json =
   let* tag = kind json in
   match tag with
   | "exact" -> let* f = fields ["kind";"configuration"] json in Result.map (fun c -> Exact_state c) (get configuration "configuration" f)
-  | "browser_clients" -> let* f = fields ["kind";"activity";"addon"] json in
-      let* activity = get browser_activity "activity" f in
-      Result.map (fun reading -> Browser_clients (activity,reading))
+  | "browser_clients" -> let* f = fields ["kind";"addon"] json in
+      Result.map (fun reading -> Browser_clients reading)
         (get (browser_reading "connected_clients" count) "addon" f)
-  | "browser_executor" -> let* f = fields ["kind";"activity";"addon"] json in
-      let* activity = get browser_activity "activity" f in
-      Result.map (fun reading -> Browser_executor (activity,reading))
+  | "browser_executor" -> let* f = fields ["kind";"addon"] json in
+      Result.map (fun reading -> Browser_executor reading)
         (get (browser_reading "registered" bool) "addon" f)
   | "machine" -> let* f = fields ["kind";"activity";"publication"] json in
       let* activity = get machine_activity "activity" f in
@@ -327,11 +318,11 @@ let exact_matches snapshot (row : row) = match row.selection,row.state with
                && item.sl_declared_cli_slots=c.declared_cli_slots && item.sl_dropped_slots=c.dropped_slots
                && item.sl_admission_error=c.admission_error)
   | ((Browser _ | Machine _ | Declaration _ | Manual_instance _), Exact_state _)
-  | ((Browser _ | Machine _ | Declaration _ | Manual_instance _), Browser_clients (_, _))
-  | ((Browser _ | Machine _ | Declaration _ | Manual_instance _), Browser_executor (_, _))
+  | ((Browser _ | Machine _ | Declaration _ | Manual_instance _), Browser_clients _)
+  | ((Browser _ | Machine _ | Declaration _ | Manual_instance _), Browser_executor _)
   | ((Browser _ | Machine _ | Declaration _ | Manual_instance _), Machine_state (_, _))
   | ((Browser _ | Machine _ | Declaration _ | Manual_instance _), Package_state _) -> true
-  | (Exact _, Browser_clients (_, _)) | (Exact _, Browser_executor (_, _))
+  | (Exact _, Browser_clients _) | (Exact _, Browser_executor _)
   | (Exact _, Machine_state (_, _)) | (Exact _, Package_state _) -> false
 
 let decode json =

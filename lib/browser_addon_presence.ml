@@ -49,10 +49,10 @@ let not_running ~complete applications (first, rest) =
    is: none declared, one switched off, or one switched on that the reader
    sees no installation of. *)
 let absence ~applications ~lane (declarations : Lane_addon_config.snapshot) =
-  let browsers = List.filter (fun (d : Lane_addon_config.declaration) ->
-    match d.package.worker_service with
-    | Lane_addon_types.Browser_service backend -> Browser_lane.Backend.lane backend = lane
-    | Lane_addon_types.Mcp_tools -> false) declarations.declarations in
+  let browsers = List.filter (fun d ->
+    match Lane_addon_config.browser_source d with
+    | Some backend -> Browser_lane.Backend.lane backend = lane
+    | None -> false) declarations.declarations in
   match List.filter (fun (d : Lane_addon_config.declaration) -> d.enabled) browsers,
         browsers, declarations.complete with
   | first :: rest, _, complete -> Not_running (not_running ~complete (applications ()) (first, rest))

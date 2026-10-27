@@ -248,10 +248,7 @@ let read_inventory ~lane_directory =
 let browser_declaration backend (snapshot : Lane_addon_config.snapshot) =
   let declared =
     List.filter
-      (fun (declared : Lane_addon_config.declaration) ->
-         match declared.package.Lane_addon_types.worker_service with
-         | Lane_addon_types.Browser_service served -> served = backend
-         | Lane_addon_types.Mcp_tools -> false)
+      (fun declared -> Lane_addon_config.browser_source declared = Some backend)
       snapshot.declarations
   in
   match List.filter (fun (d : Lane_addon_config.declaration) -> d.enabled) declared with

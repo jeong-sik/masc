@@ -3,18 +3,30 @@ module Record = Browser_bidi_host_record
 
 type keeper =
   | Addon_managed of { port : int; profile : string }
-  | Lane_off
+  | Addon_off
   | Not_configured
   | Not_known
 
-(* The live lane being off is said first, table or not: nothing starts
-   either way. *)
-let keeper_of_configuration = function
-  | Some { Browser_configuration.live_enabled = false; _ } -> Lane_off
-  | Some { Browser_configuration.live_bidi = Some config; live_enabled = true; _ } ->
-      Addon_managed { port = config.port; profile = config.profile }
-  | Some { Browser_configuration.live_bidi = None; live_enabled = true; _ } -> Not_configured
+let keeper ~configuration ~firefox = match configuration with
   | None -> Not_known
+  | Some { Browser_configuration.live_bidi = None; _ } -> Not_configured
+  | Some { Browser_configuration.live_bidi = Some config; _ } ->
+      (match firefox () with
+       | Some true -> Addon_managed { port = config.port; profile = config.profile }
+       | Some false -> Addon_off
+       | None -> Not_known)
+
+(* Whether an enabled declaration of the workspace runs the Addon-managed
+   Firefox, read as the server reads its Lane directory. *)
+let firefox_declared ~base_path =
+  let resolution = Config_dir_resolver.resolve_for_base_path ~base_path in
+  match resolution.status with
+  | Config_dir_resolver.Invalid_env_status -> None
+  | Ready | Warn | Missing_status ->
+      Lane_addon_config.browser_source_on
+        (Lane_addon_config.load
+           ~directory:(Lane_addon_config.directory ~config_root:resolution.config_root.path))
+        Browser_lane.Backend.Owned_firefox
 
 type observation = { lane : Launcher.t; record : Record.state; keeper : keeper }
 
@@ -23,7 +35,7 @@ type observation = { lane : Launcher.t; record : Record.state; keeper : keeper }
    Add-on last published, which a host that attached since is not in yet. *)
 let observe ~access ~base_path ~configuration =
   let record = Record.observe ~base_path in
-  let keeper = keeper_of_configuration configuration in
+  let keeper = keeper ~configuration ~firefox:(fun () -> firefox_declared ~base_path) in
   let lane = Launcher.observe ~base_path ~server:Launcher.Not_serving in
   { lane = { lane with server = Launcher.current_server ~access }; record; keeper }
 
@@ -370,9 +382,10 @@ let message { lane = t; record; keeper } =
          | Record.Never_started -> "No external manual BiDi host has run for this workspace."
          | Record.Record_missing_but_locked | Record.Running _ | Record.Ended _ | Record.Died _
          | Record.Unreadable _ -> "External manual host: " ^ by_operator t record)
-  | Lane_off ->
-      "[browser.live] is off in runtime.toml, so the live lane serves nothing. "
-      ^ by_operator t record
+  | Addon_off ->
+      by_operator t record
+      ^ " [browser.live.bidi] is set, but no enabled browser-firefox Lane Add-on declaration \
+         runs it, so the Browser Addon does not start that Firefox."
   | Not_configured ->
       by_operator t record
       ^ " No Addon-managed live Firefox is configured in [browser.live.bidi]."
@@ -416,7 +429,7 @@ let report_fields = [ "state"; "record"; "lock_held"; "detail"; "attach"; "keepe
 let keeper_to_json = function
   | Addon_managed { port; profile } ->
       `Assoc [ "kind", `String "addon_managed"; "port", `Int port; "profile", `String profile ]
-  | Lane_off -> `Assoc [ "kind", `String "lane_off" ]
+  | Addon_off -> `Assoc [ "kind", `String "addon_off" ]
   | Not_configured -> `Assoc [ "kind", `String "not_configured" ]
   | Not_known -> `Assoc [ "kind", `String "not_known" ]
 let attach_fields = [ "launcher"; "arguments"; "launcher_state" ]
@@ -497,7 +510,7 @@ let keeper_of_json json =
       in
       let* profile = drawable_text ~what fields "profile" in
       Ok (Addon_managed { port; profile })
-  | "lane_off" -> only Lane_off
+  | "addon_off" -> only Addon_off
   | "not_configured" -> only Not_configured
   | "not_known" -> only Not_known
   | _ -> Error (what ^ " is of a kind this reader does not know")

@@ -549,30 +549,36 @@ let manual_host_recovery_installs_only_its_launcher () =
               let said = Status.message (observation ~launcher ~keeper record) in
               has said [ lead ^ install ];
               lacks said [ "--mode bidi"; "--mode extension" ])
-            [ Status.Not_configured; Status.Not_known ])
+            [ Status.Addon_off; Status.Not_configured; Status.Not_known ])
         records)
     [ Launcher.Not_installed, "the operator first installs the lane by running "
     ; Launcher.Undeclared, "the operator first installs the lane again by running " ]
 
 let live_firefox_configuration_is_observed_without_starting_it () =
-  let keeper configuration = Status.keeper_of_configuration configuration in
+  let asked = ref 0 in
+  let keeper ?(firefox = Some true) configuration =
+    Status.keeper ~configuration ~firefox:(fun () -> incr asked; firefox) in
   let live_bidi : Browser_configuration.live_bidi =
     { firefox = "/Apps/firefox"; port = 9444; profile = "/keeper/profile" } in
   let configured = { Browser_configuration.none with live_bidi = Some live_bidi } in
   check bool "the Addon configuration preserves its selected endpoint and profile" true
     (keeper (Some configured)
      = Status.Addon_managed { port = live_bidi.port; profile = live_bidi.profile });
-  check bool "the live lane off, with no table, starts nothing" true
-    (keeper (Some { Browser_configuration.none with live_enabled = false }) = Status.Lane_off);
-  check bool "the live lane off retains configuration without enabling the Addon" true
-    (keeper (Some { configured with live_enabled = false }) = Status.Lane_off);
+  check bool "no enabled browser-firefox declaration is told apart from no table" true
+    (keeper ~firefox:(Some false) (Some configured) = Status.Addon_off);
+  check bool "unread declarations do not say who starts Firefox" true
+    (keeper ~firefox:None (Some configured) = Status.Not_known);
+  check int "each table asks the declarations once" 3 !asked;
   check bool "no table" true (keeper (Some Browser_configuration.none) = Status.Not_configured);
   check bool "nothing loaded" true (keeper None = Status.Not_known);
+  check int "with no table the declarations are not read" 3 !asked;
   let paragraph keeper = Status.message (observation ~keeper Record.Never_started) in
   check bool "no table changes the paragraph" false
     (String.equal (paragraph Status.Not_configured) (paragraph Status.Not_known));
-  check bool "the lane off changes the paragraph" false
-    (String.equal (paragraph Status.Lane_off) (paragraph Status.Not_known))
+  check bool "a table nothing runs is not said to be no table" false
+    (String.equal (paragraph Status.Addon_off) (paragraph Status.Not_configured));
+  check bool "a table nothing runs changes the paragraph" false
+    (String.equal (paragraph Status.Addon_off) (paragraph Status.Not_known))
 
 (* Doctor reads Addon configuration from runtime.toml without starting it. *)
 let doctor_reads_addon_firefox_configuration_from_runtime_toml () =
@@ -581,6 +587,35 @@ let doctor_reads_addon_firefox_configuration_from_runtime_toml () =
   let profile = "/keeper/profile" in
   let table = "\n[browser.live.bidi]\nfirefox = \"/Apps/firefox\"\nprofile = \"" ^ profile ^ "\"\n" in
   write runtime (read "../scripts/fixtures/release-evidence/runtime.toml" ^ table);
+  (* The Addon owns the Firefox only while a declaration runs its source. *)
+  let manifest = Filename.concat base "browser-firefox.toml" in
+  write manifest {|id = "browser-firefox"
+revision = "1"
+title = "Browser"
+runtime = "host_process"
+service = "browser"
+browser_backend = "owned_firefox"
+command = ["masc-browser-addon-worker"]
+contributions = ["observe"]
+[resources]
+max_reply_bytes = 4096
+|};
+  let directory = Filename.concat base ".masc/config/lane-addons" in
+  Unix.mkdir directory 0o700;
+  let declaration enabled = Printf.sprintf
+    "id = \"browser-firefox\"\nrun_id = \"world\"\nenabled = %b\nmanifest_path = %S\n[binding]\nsources = []\n"
+    enabled manifest in
+  let declaration_path = Filename.concat directory "browser-firefox.toml" in
+  let keeper () =
+    (Status.observe ~access:Masc.Lane_addon_sources.Operator_configuration ~base_path:base
+       ~configuration:(Result.to_option (Browser_configuration.of_file runtime))).keeper in
+  check bool "with no declaration nothing runs the table" true (keeper () = Status.Addon_off);
+  write declaration_path (declaration false);
+  check bool "a declaration switched off runs nothing" true (keeper () = Status.Addon_off);
+  lacks (bidi_message (inspect ~base_path:(Some base))) [ profile ];
+  write declaration_path (declaration true);
+  check bool "a declaration switched on runs the table" true
+    (keeper () = Status.Addon_managed { port = Browser_configuration.default_live_bidi_port; profile });
   let observed = inspect ~base_path:(Some base) in
   says observed [ profile ];
   check bool "no manual host record does not make Addon readiness a setup failure" true
@@ -823,7 +858,7 @@ let a_bidi_host_report_reads_back_as_written () =
         ; "ended", Record.Ended (ended, ending); "died", Record.Died entry
         ; "unreadable, no host", Record.Unreadable { detail = "torn"; held = Some false } ])
     [ "Addon managed", managed
-    ; "the lane is off", Status.Lane_off
+    ; "browser-firefox off", Status.Addon_off
     ; "no table", Status.Not_configured
     ; "configuration not loaded", Status.Not_known ];
   (* Times on disk are not whole seconds; one that was read is written and
@@ -914,9 +949,11 @@ let a_bidi_host_report_reads_back_as_written () =
   let with_managed name value = with_keeper_json (with_field managed_fields name value) in
   refused "a keeper this reader does not know" (with_keeper_json (`Assoc [ "kind", `String "operator" ]));
   refused "a keeper that names no kind" (with_keeper_json (`Assoc []));
-  refused "a keeper that is no object" (with_keeper_json (`String "lane_off"));
-  refused "a lane that is off, with a port"
-    (with_keeper_json (`Assoc [ "kind", `String "lane_off"; "port", `Int 9222 ]));
+  refused "a keeper that is no object" (with_keeper_json (`String "not_configured"));
+  List.iter (fun kind ->
+      refused ("a kind with no port, given a port: " ^ kind)
+        (with_keeper_json (`Assoc [ "kind", `String kind; "port", `Int 9222 ])))
+    [ "addon_off"; "not_configured" ];
   List.iter (fun name -> refused ("Addon managed, with no " ^ name) (with_keeper_json (without managed_fields name)))
     [ "port"; "profile" ];
   refused "Addon managed, on no port" (with_managed "port" (`Int 0));

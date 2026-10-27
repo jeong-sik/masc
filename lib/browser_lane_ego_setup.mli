@@ -74,10 +74,6 @@ val table : plan -> Browser_configuration.live_ego
 
 val change : plan -> change
 
-val lane_enabled : plan -> bool
-(** [\[browser.live\] enabled] is not false. While it is, the connection
-    takes no command. The table is written either way. *)
-
 val versions : plan -> (string * string) option
 (** ego lite's and Chromium's versions, when the plan started the
     [ego-browser] it writes. A table that keeps its command does not start

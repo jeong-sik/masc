@@ -226,13 +226,11 @@ type plan =
   ; table : Browser_configuration.live_ego
   ; set : key list
   ; change : change
-  ; lane_enabled : bool
   ; versions : (string * string) option
   }
 
 let table plan = plan.table
 let change plan = plan.change
-let lane_enabled plan = plan.lane_enabled
 let versions plan = plan.versions
 
 let observe path =
@@ -271,7 +269,6 @@ let plan ~find_ego (request : request) =
       ; table
       ; set
       ; change
-      ; lane_enabled = configuration.Browser_configuration.live_enabled
       ; versions
       }
 
@@ -292,7 +289,6 @@ let replan previous =
     { previous with
       revision = Runtime_table_edit.revision_of_observation observation
     ; existing
-    ; lane_enabled = configuration.Browser_configuration.live_enabled
     }
 
 (* Under the configuration lock the text is the one on disk now: the revision

@@ -265,7 +265,7 @@ let browser_bidi_host_check (host:Browser_bidi_host_status.observation) =
   in
   match host.keeper with
   | Browser_bidi_host_status.Addon_managed _ -> report Needs_verification
-  | Lane_off | Not_configured | Not_known ->
+  | Addon_off | Not_configured | Not_known ->
   match Browser_bidi_host_status.verdict host with
   | Browser_bidi_host_status.Host_absent -> []
   | Browser_bidi_host_status.Host_serving -> report Satisfied

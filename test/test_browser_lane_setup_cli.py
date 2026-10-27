@@ -211,23 +211,11 @@ class BrowserLaneSetupCommand(unittest.TestCase):
         self.assertEqual(declared(base), [], "nothing is declared")
         self.assertFalse((base / ".masc/packages").exists(), "no package is written")
 
-    # Whether a lane is switched on is the server's to read when it starts a
-    # worker, so setup declares every source whose table is there.
-    def test_a_source_whose_lane_is_switched_off_is_declared(self):
-        root = self.scratch()
-        base = workspace(root)
-        runtime_toml(base).write_text(RUNTIME_TOML + STAGEHAND_TABLE + "enabled = false\n"
-                                      + "\n[browser.automation]\nenabled = false\n")
-        result = masc(root, "--mode", "automation", "--geckodriver", str(fake_geckodriver(root)),
-                      "--base-path", str(base))
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("geckodriver = ", runtime_toml(base).read_text(), "the table is still written")
-        self.assertEqual(declared(base), ["browser-automation.toml", "browser-stagehand.toml"])
-
     # Which sources a runtime.toml that does not parse runs is not known. A
     # repeated table is refused like a syntax error, not raised.
     def test_a_runtime_toml_that_does_not_parse_is_refused(self):
-        for label, extra in (("syntax", "[browser.stagehand\n"), ("repeated table", STAGEHAND_TABLE)):
+        for label, extra in (("syntax", "[browser.stagehand\n"), ("repeated table", STAGEHAND_TABLE),
+                             ("a lane switch", "\n[browser.automation]\nenabled = false\n")):
             with self.subTest(label):
                 root = self.scratch()
                 base = workspace(root)
@@ -738,16 +726,6 @@ class BrowserLaneSetupCommand(unittest.TestCase):
         # The owned Firefox waits for its table; the installed host's external
         # hosts need none and are declared.
         self.assertEqual(declared(base), ["browser-external.toml"])
-
-    def test_a_live_lane_that_is_off_says_so_instead_of_asking_for_a_restart(self):
-        root = self.scratch()
-        base = workspace(root)
-        runtime_toml(base).write_text(RUNTIME_TOML + "\n[browser.live]\nenabled = false\n")
-        result = masc(root, "--mode", "bidi", "--binary", str(HOST), "--base-path", str(base),
-                      "--firefox", str(fake_firefox(root)), "--profile", str(root / "profile"))
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("[browser.live.bidi]", runtime_toml(base).read_text().splitlines())
-        self.assertIn("keeps the live lane off", result.stdout)
 
     def test_the_table_goes_where_the_config_directory_override_points(self):
         root = self.scratch()

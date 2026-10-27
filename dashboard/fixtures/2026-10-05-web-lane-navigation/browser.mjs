@@ -26,7 +26,7 @@ inventory.rows.push({id:'instance/worker',label:'Fixture manual worker',purpose:
  state:{kind:'package',declaration:null,instances:[{instance_id:'worker',incarnation:'i1',run_id:'run',package_id:'fixture',title:'Fixture worker',package_revision:'v1',presence:'live',phase:{kind:'attached'},applied_revision:null}]}})
 const snapshot=()=>({configuration:{directory,complete:true,issues:[],declarations:[{id:'pkg',source_path:path,enabled:true,desired_revision:'semantic',applied_revision:null,instance_id:null}]},
  instances:[{instance_id:'worker',run_id:'run',addon_id:'fixture',title:'Fixture worker',revision:'v1',incarnation,action_schema:null,binding:{},package:{binding_schema:null,presentation:{description:null,readings:[]},outputs:{}},configuration:null,phase:{kind:'attached'},observation_seq:0,rows_count:0}],rows:[],coverage:[]})
-const runtimeSource='# retained runtime\nmachines = { msx = { enabled = true }, dos = { enabled = false } }\n[browser.live]\nenabled = true\n[browser.automation]\ngeckodriver = "/fixture/driver"\n[runtime]\n'
+const runtimeSource='# retained runtime\nmachines = { msx = { enabled = true }, dos = { enabled = false } }\n[browser.live.bidi]\nfirefox = "/fixture/firefox"\nprofile = "/fixture/profile"\n[browser.automation]\ngeckodriver = "/fixture/driver"\n[runtime]\n'
 await page.context().route('**/api/**',async route=>{
  const request=route.request(),url=new URL(request.url()),p=url.pathname
  if(!p.startsWith('/api/'))return route.continue()

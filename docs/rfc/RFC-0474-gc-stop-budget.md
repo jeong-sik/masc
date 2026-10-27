@@ -27,7 +27,7 @@ TUI 의 `Pool.request: timeout`(10초)이 계속 난다. 2026-10-27 에 runtime 
 | L1 | domain 예산 하나: 프로그램 전체 domain 수를 `Domain.recommended_domain_count () - 1` 이하로 묶는다 | 링 수(domain 수)가 15 이하. 놀던 domain 이 늦게 온 STW 비율이 절반 이하 |
 | L2 | 런타임을 놓는 해시: sha256 을 core 함수 하나로 모으고, 큰 입력은 런타임을 놓는 경로로 보낸다. 직접 `Digestif.SHA256` 호출을 막는 검사를 둔다 | `Digestif.SHA256` 직접 참조 0. CPU 표본의 `sha256_do_chunk` 몫이 절반 이하. `stw_api_barrier` p99 가 절반 이하 |
 | L3 | 원본을 다시 검증하지 않는다: digest 로 이름 붙은 본문은 처음 읽을 때 한 번만 검증한다 | memprof major 에서 `request_of_body` 몫이 5% 이하. 1초 넘게 양보하지 않는 `addon-original-request-read` fiber 가 0 |
-| L4 | Executor weight: job 안의 블로킹 호출을 정리한 뒤, I/O job 은 Eio 문서대로 낮은 weight 로 넣는다 | 같은 domain 수에서 `pool_wait.read` wait p90 이 L1 직후보다 낮다 |
+| L4 | Executor weight 를 job 이 실제로 하는 일에 맞춘다: CPU 일과 블로킹 읽기를 하는 job 은 I/O weight 로 넣지 않고, I/O job 안의 블로킹 호출은 systhread 로 옮긴다 | 같은 domain 수에서 `pool_wait.read` wait·run p90 이 L1 직후보다 낮다 |
 
 ## 1. 2026-09-05 RFC 이후 무엇이 바뀌었나
 
@@ -56,7 +56,7 @@ TUI 의 `Pool.request: timeout`(10초)이 계속 난다. 2026-10-27 에 runtime 
 
 **weight**
 - Eio `Executor_pool` 문서: weight 는 "the anticipated proportion of a CPU core used by the job". 예시: "given an IO-bound job that averages 2% of a CPU core, pass `~weight:0.02`". "Each domain worker starts new jobs until the total `~weight` of its running jobs reaches 1.0".
-- 그래서 지금처럼 모든 job 을 `~weight:1.0` 으로 넣으면 worker 하나가 job 하나만 돌린다. 파일을 기다리는 job 도 worker 를 통째로 쥔다.
+- masc 의 I/O 제출(`Domain_pool_ref.submit_io_or_inline`)은 weight 0.05 라서 worker 하나가 이런 job 을 20개까지 받는다. CPU 제출(`submit_cpu_or_inline`)과 `Executor_pool_ref.submit_or_inline` 은 1.0 이다. 바깥 job 안에서 다시 제출하면 바깥 job 의 weight 로 바로 돈다(`dashboard_cache.ml` 의 `produce` 는 1.0).
 
 **C 코드와 해시**
 - 매뉴얼 [Interfacing C](https://ocaml.org/manual/5.4/intfc.html) §12.2: "If a C primitive runs for a long time or performs potentially blocking input-output operations, it can explicitly release the domain lock". 같은 문서 §5.3: `caml_process_pending_actions` 를 "regularly at safe points inside long-running non-blocking C code" 부르라고 권한다.
@@ -98,7 +98,7 @@ TUI 의 `Pool.request: timeout`(10초)이 계속 난다. 2026-10-27 에 runtime 
 | p90 / p99, `gate/keepers?detailed=true` | 5.8 / 2,738 ms | 19.4 / 231 ms |
 | p90 / p99, `operator` | 18.3 / 870 ms | 30.6 / 1,967 ms |
 
-장벽 대기는 44% 줄고 job 실행은 빨라졌다. 대신 worker 가 14에서 6으로 줄어 p90 이 늘었다. L4(weight)가 이 줄을 메운다.
+장벽 대기는 44% 줄고 job 실행은 빨라졌다. 대신 worker 가 14에서 6으로 줄어 p90 이 늘었다. L1 은 같은 15개 안에서 공유 풀에 10개를 주고, L4 는 CPU job 이 한 domain 에 몰리지 않게 한다.
 
 ### 3.3 장벽에 가장 늦게 온 domain
 
@@ -163,11 +163,16 @@ memprof(`/api/v1/diagnostics/memprof`, 부팅 뒤 10분). 할당 757 GB, major 4
   - `Keeper_chat_store.append_lines_once` 는 줄을 붙일 때마다 `Fs_compat.update_private_file_durable_locked_result` 로 파일 전체를 읽고, 모든 줄을 파싱해 provenance 색인을 만든다. 이 경로가 쓰는 것은 새 줄 묶음(`Some payload`)뿐이라 파일 끝에 붙는다. 그래서 마지막으로 색인한 위치 뒤만 읽으면 된다. 같은 파일을 다시 쓰는 다른 writer 가 있는지는 L3 PR 에서 모든 writer 를 읽고 정한다. 끝부분만 읽는 `update_private_file_tail_durable_locked_result ~max_bytes` 가 이미 있다.
   - `Keeper_approval.Audit.read_recent` 는 최신 줄부터 읽다가 n개를 찾으면 멈춘다. 그러나 keeper 이름으로 거를 때는 그 Keeper 의 줄이 n개 모일 때까지 다른 Keeper 의 줄도 모두 JSON 으로 디코드한다. 대시보드 Keeper 화면(`dashboard_http_keeper.ml:278`)이 부른다. memprof major 몫은 2.1% 다. Keeper 로 먼저 거른 뒤에 디코드한다.
 
-### L4 — Executor weight
+### L4 — Executor weight 를 일에 맞춘다
 
-- 먼저 풀 job 안의 블로킹 호출을 찾는다. 이름에 `_blocking` 이 붙은 `Fs_compat` 함수와, Eio 를 거치지 않는 syscall 이 대상이다. 이런 호출은 domain 전체를 멈추므로 weight 를 낮추면 오히려 나빠진다.
-- eio_posix(`lib_eio_posix/low_level.ml`)는 openat·fstat·readdir·mkdir·unlink·rename 을 systhread(`in_worker_thread`)로 보낸다. 일반 파일 read 는 호출 domain 에서 `Unix.read` 로 바로 한다. 같은 파일 머리 주석이 이것이 "will block the whole domain" 할 수 있다고 적는다. 그래서 큰 파일을 읽는 job 은 weight 를 낮춰도 같은 domain 의 다른 job 을 멈춘다. 이런 읽기는 systhread 로 옮기거나 나눠 읽은 뒤에 I/O 위주 job 을 `Domain_pool.submit_io`(weight 0.05)로 넣는다.
-- `Executor_pool_ref.submit_or_inline` 의 기본값 1.0 은 그대로 두고, 호출자가 job 성격을 고르게 한다.
+2026-10-27 감사(코드 읽기, 공유 풀 제출 약 251곳): 순수 CPU 58곳, Eio·systhread I/O 39곳, domain 을 멈추는 블로킹 호출 55곳, CPU 와 블로킹이 섞인 곳 33곳, 끝까지 따라가지 못한 곳 61곳이다. 블로킹 55곳의 대부분은 `submit_io_or_inline`(0.05)으로 들어가거나, 1.0 인 `Dashboard_cache` job 안에서 돈다.
+
+- weight 0.05 인 job 이 블로킹 호출을 하면 그 domain 에 함께 받아 둔 job 이 모두 멈춘다. 예: `Dated_jsonl.off_fiber`(`dated_jsonl.ml:555`)는 `submit_io_or_inline` 으로 넣고, 그 안에서 Stdlib 채널로 `seek_in`·`really_input` 을 한 뒤 스캔과 파싱을 한다. 주석도 "the reads are blocking syscalls, the scan and the parse are CPU work" 라고 적는다. `Fs_compat.read_slice`(`fs_compat.ml:2039`)도 호출 domain 에서 `open_in_bin` 한다.
+- eio_posix(`lib_eio_posix/low_level.ml`)는 openat·fstat·readdir·mkdir·unlink·rename 을 systhread(`in_worker_thread`)로 보내지만, 일반 파일 read 는 호출 domain 에서 `Unix.read` 로 바로 한다. 같은 파일 머리 주석이 이것이 "will block the whole domain" 할 수 있다고 적는다.
+- 그래서 할 일은 weight 를 더 낮추는 것이 아니라 둘이다.
+  1. CPU 일(스캔·파싱·해시)을 하는 job 은 `submit_cpu_or_inline`(1.0)으로 넣는다. 그래야 20개가 한 domain 에 몰리지 않는다.
+  2. I/O 를 기다리는 job 안의 블로킹 읽기·`fsync`·인라인 SQLite 는 systhread 로 옮긴다. 그 뒤에만 weight 0.05 가 맞다.
+- 순서는 감사 표의 블로킹 55곳 중 읽기 경로(`Dated_jsonl`, `read_slice`, `fold_appended_lines`)부터다. 이 셋을 쓰는 곳이 가장 많다.
 
 ## 5. 순서
 

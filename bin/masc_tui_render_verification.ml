@@ -382,7 +382,8 @@ let verification_evidence_index state request ~width observation =
           then (match progress with
             | Masc_tui_evidence_file.Not_started -> None
             | Writing path -> Some (Theme.warn (), "  저장 시도 경로(완료 미확인): " ^ path)
-            | Saved path -> Some (Ansi.reset, "  이 기기에 저장한 파일: " ^ path))
+            | Saved path -> Some (Ansi.reset, "  이 기기에 저장한 파일: " ^ path)
+            | Aborted path -> Some (Theme.warn (), "  저장하지 못한 목적지: " ^ path))
           else None)
           state.verification_evidence_saved), index
   | Absent | Loading | Failed _ | Ready (Masc_tui_evidence_picture.Access_unavailable _)

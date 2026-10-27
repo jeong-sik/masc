@@ -34,33 +34,94 @@ let decode ~task_id ~verification_id ~index json =
   then Error "The downloaded evidence does not match its recorded size or SHA-256"
   else Ok {name; contents}
 
-type progress = Not_started | Writing of string | Saved of string
+type progress = Not_started | Writing of string | Saved of string | Aborted of string
 
-let save ~fs ~directory ~directory_name ~path t =
+let save ?(with_lock=File_lock_eio.with_durable_lock_observed) ~fs ~registry_root ~directory ~directory_name ~path ~progress t =
+  let ( let* ) = Result.bind in
+  let lock_path = Filename.concat registry_root "tui-evidence-export.lock" in
   try
-    Eio.Path.with_open_dir Eio.Path.(fs / directory) (fun parent ->
-      let destination = Eio.Path.(parent / directory_name) in
-      Eio.Path.mkdir ~perm:0o700 destination;
-      Fs_compat.create_file_exclusive ~fs ~owner:"tui-evidence-export"
-        ~path ~permissions:0o600 t.contents)
-    |> Result.map_error (fun detail -> path ^ ": " ^ detail)
+    Eio.Path.with_open_dir Eio.Path.(fs / registry_root) (fun registry_root ->
+      Eio.Path.with_open_dir Eio.Path.(fs / directory) (fun export_root ->
+        let destination = Eio.Path.(export_root / directory_name) in
+        Eio.Path.mkdir ~perm:0o700 destination;
+        Eio.Path.with_open_dir destination (fun parent ->
+          let root = Eio.Path.stat ~follow:true parent in
+          let* target =
+            Fs_compat.capability_publication_target
+              ~allowed_root_path:(Filename.dirname path)
+              ~allowed_root_device:root.dev ~allowed_root_inode:root.ino
+              ~parent_components:[] ~target_leaf:t.name ~permissions:0o600
+            |> Result.map_error Fs_compat.capability_publication_target_error_to_string
+          in
+          let publish () =
+            Eio.Switch.run @@ fun sw ->
+            let* registry =
+              Fs_compat.Publication_recovery.open_registry ~sw ~fs ~registry_root
+              |> Result.map_error Fs_compat.Publication_recovery.registry_error_to_string
+            in
+            match Fs_compat.Publication_recovery.with_lane
+              ~registry ~owner:"tui-evidence-export" (fun recovery ->
+                let result =
+                  Fs_compat.create_capability_file_exclusive ~recovery ~parent ~target t.contents
+                  |> Result.map_error Fs_compat.capability_write_error_to_string
+                in
+                (match result with
+                 | Ok () -> Atomic.set progress (Saved path)
+                 | Error _ -> ());
+                result)
+            with
+            | Error error -> Error (Fs_compat.Publication_recovery.lane_open_error_to_string error)
+            | Ok (Fs_compat.Publication_recovery.Lane_released result) -> result
+            | Ok (Fs_compat.Publication_recovery.Lane_release_failed { value; release_failure }) ->
+              let detail = Fs_compat.Publication_recovery.lane_release_failure_to_string release_failure in
+              Error (match value with Ok () -> detail | Error primary -> primary ^ "; " ^ detail)
+          in
+          match with_lock ~lock_path publish with
+          | File_lock_eio.Lock_not_acquired error ->
+            Error (File_lock_eio.durable_lock_error_to_string error)
+          | File_lock_eio.Body_completed { value; release_error = None } -> value
+          | File_lock_eio.Body_completed { value; release_error = Some error } ->
+            let detail = File_lock_eio.durable_lock_error_to_string error in
+            Error (match value with Ok () -> detail | Error primary -> primary ^ "; " ^ detail))))
+    |> Result.map_error (fun error -> path ^ ": " ^ error)
   with
   | Eio.Io _ as ex -> Error (path ^ ": " ^ Format.asprintf "%a" Eio.Exn.pp ex)
   | Sys_error detail -> Error (path ^ ": " ^ detail)
   | Unix.Unix_error (code, _, _) -> Error (path ^ ": " ^ Unix.error_message code)
+  | Eio.Cancel.Cancelled _ as exn ->
+    Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
+  | exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    (match Atomic.get progress with
+     | Saved _ -> ()
+     | Not_started | Writing _ | Aborted _ -> Atomic.set progress (Aborted path));
+    Printexc.raise_with_backtrace exn backtrace
 
-let export ~fs ~directory ~progress ~admitted ~open_file t =
+let export_with ?with_lock ~fs ~registry_root ~directory ~progress ~admitted ~open_file t =
   let ( let* ) = Result.bind in
   let* () = admitted () in
   let directory = if Filename.is_relative directory then Filename.concat (Sys.getcwd ()) directory else directory in
   let directory_name = "masc-evidence-" ^ Random_id.uuid_v7 () in
   let path = Filename.concat (Filename.concat directory directory_name) t.name in
   Atomic.set progress (Writing path);
-  let* () = save ~fs ~directory ~directory_name ~path t in
-  Atomic.set progress (Saved path);
+  let result = save ?with_lock ~fs ~registry_root ~directory ~directory_name ~path ~progress t in
+  (match result with
+   | Ok () -> ()
+   | Error _ ->
+     (match Atomic.get progress with
+      | Saved _ -> ()
+      | Not_started | Writing _ | Aborted _ -> Atomic.set progress (Aborted path)));
+  Eio.Fiber.check ();
+  let* () = result in
   match open_file with
   | None -> Ok path
   | Some open_file ->
     let* () = admitted () in
     let* () = open_file path in
     Ok path
+
+let export = export_with ?with_lock:None
+
+module For_testing = struct
+  let export = export_with
+end

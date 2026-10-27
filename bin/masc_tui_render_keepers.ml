@@ -714,7 +714,7 @@ let render_keeper_list (state : state) =
   let columns =
     Render_schedule.allocate_keeper_columns
       ~runtime_visible:(state.keeper_list_layout <> Keeper_list_model.Grouped)
-      ~prioritize_runtime:has_failing_keeper ~inner_width:inner ~widest_runtime
+      ~prioritize_runtime:has_failing_keeper ~inner_width:inner ~widest_runtime ()
   in
   box_line_styled buf cols ~style:(Theme.recede ()) (keeper_column_header columns);
 

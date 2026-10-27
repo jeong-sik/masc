@@ -291,7 +291,7 @@ let test_waiting_summary_counts_primary_reasons_and_background_work () =
   Alcotest.(check bool) "all five primary reasons are counted once" true
     (summary.tool = 1 && summary.model = 1 && summary.external_wait = 1
      && summary.delegate = 1 && summary.verification = 1);
-  Alcotest.(check bool) "only waiting rows contribute background async running" 2 summary.background
+  Alcotest.(check int) "only waiting rows contribute background async running" 2 summary.background
 
 let test_group_counts () =
   let rows =

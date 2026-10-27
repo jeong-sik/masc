@@ -170,7 +170,7 @@ let load_and_verify_dashboard_blob
   | Ok (Some contents) ->
     after_exact_read ();
     let body = contents.content in
-    let actual_sha256 = Digestif.SHA256.(digest_string body |> to_hex) in
+    let actual_sha256 = Agent_core_sha256.(digest_string body |> to_hex) in
     if not (source_matches ())
     then Error (Asset_exact_read_failed "dashboard launch source root identity changed")
     else if not (root_matches ())
@@ -503,7 +503,7 @@ let surface_status_json_for_selection
      ; ( "index_sha256"
        , Json_util.string_opt_to_json
            (match loaded_index with
-            | Ok body -> Some Digestif.SHA256.(digest_string body |> to_hex)
+            | Ok body -> Some Agent_core_sha256.(digest_string body |> to_hex)
             | Error _ -> None) )
      ; ( "asset_tree_sha256"
        , (match manifest_identity with

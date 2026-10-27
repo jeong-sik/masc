@@ -2502,7 +2502,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
       in
       let receipt_root =
         let keeper_hash =
-          Digestif.SHA256.(digest_string stale_name |> to_hex)
+          Agent_core_sha256.(digest_string stale_name |> to_hex)
         in
         Filename.concat
           (Filename.concat

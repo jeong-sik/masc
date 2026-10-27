@@ -312,7 +312,7 @@ let test_goal_survives_read_then_task_creation () =
     List.iter (fun (span : Keeper_context_assembly.span) ->
       let bytes = String.sub context span.offset span.bytes in
       check string "every issued physical span matches received bytes" span.sha256
-        Digestif.SHA256.(digest_string bytes |> to_hex)) physical.partition.spans;
+        Agent_core_sha256.(digest_string bytes |> to_hex)) physical.partition.spans;
     List.iter (fun needle -> check bool "every receiver request retains the exact Goal snapshot" true
       (contains ~needle context)) [goal.id;goal.criterion_revision;measurement.id;reported_value];
     check bool "Goal is not duplicated in the extra User carrier" false

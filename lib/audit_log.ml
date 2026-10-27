@@ -392,7 +392,7 @@ let audit_entry_id ~timestamp ~agent_id ~action =
   (* SHA-256, not Stdlib.Digest (MD5): this suffix is the collision boundary
      for an audit key, and it is truncated to 32 bits on top (#26720). *)
   let hash =
-    Digestif.SHA256.(
+    Agent_core_sha256.(
       digest_string
         (agent_id ^ action_to_string action ^ Printf.sprintf "%.6f" timestamp)
       |> to_hex)

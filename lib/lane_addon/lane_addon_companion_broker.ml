@@ -66,7 +66,7 @@ let end_invocation grant = match grant.decision with
 let descriptor grant = `Assoc ["socket_path",`String grant.broker.socket_path;
   "invocation_id",`String grant.invocation_id;"max_message_bytes",`Int grant.broker.max_message_bytes;
   "publication_id",(match grant.publication_id with None -> `Null | Some id -> `String id)]
-let nonce ()=Digestif.SHA256.(to_hex (digest_string (Crypto_rng.generate 32)))
+let nonce ()=Agent_core_sha256.(to_hex (digest_string (Crypto_rng.generate 32)))
 let issue broker ~publish ~bind =
   if not broker.live then Error Unavailable else
   let invocation_id=nonce () in

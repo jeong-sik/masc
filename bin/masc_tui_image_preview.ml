@@ -113,7 +113,7 @@ let decode_artifact (reference : Tool_output.artifact_ref) = function
               || bytes <> reference.bytes || String.length content <> bytes then
              Error "sent image response does not match its recorded artifact"
            else if not (String.equal
-               Digestif.SHA256.(to_hex (digest_string content)) reference.sha256) then
+               Agent_core_sha256.(to_hex (digest_string content)) reference.sha256) then
              Error "sent image content does not match its recorded digest"
            else Masc_tui_image_payload.decode_wire content
        | _ -> Error "sent image response requires sha256, bytes, and content")

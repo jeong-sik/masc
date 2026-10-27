@@ -147,8 +147,8 @@ let rec canonical_json = function
 let fingerprint_schema schema =
   canonical_json schema
   |> Yojson.Safe.to_string
-  |> Digestif.SHA256.digest_string
-  |> Digestif.SHA256.to_hex
+  |> Agent_core_sha256.digest_string
+  |> Agent_core_sha256.to_hex
   |> fun value -> Schema_fingerprint value
 ;;
 

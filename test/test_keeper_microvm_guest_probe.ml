@@ -307,7 +307,7 @@ let with_fake_cli backend f =
   Unix.chmod shim 0o755;
   write
     (Filename.concat shim_dir M.shim_sidecar_name)
-    (Digestif.SHA256.(to_hex (digest_string shim_contents)) ^ "  masc-exec-shim\n");
+    (Agent_core_sha256.(to_hex (digest_string shim_contents)) ^ "  masc-exec-shim\n");
   let cli = Filename.concat bin (Backend.cli_name backend) in
   Out_channel.with_open_bin cli (fun channel ->
     Printf.fprintf

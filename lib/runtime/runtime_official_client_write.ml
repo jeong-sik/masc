@@ -34,7 +34,7 @@ type selection =
   | Elements of (int -> Yojson.Safe.t -> selection)
   | Carry
 
-let sha256_hex text = Digestif.SHA256.(digest_string text |> to_hex)
+let sha256_hex text = Agent_core_sha256.(digest_string text |> to_hex)
 
 (* End offset of the JSON value starting at [pos] in compact serializer output,
    or [None] when those bytes are not one complete value. Strings end at their
@@ -78,9 +78,9 @@ let json_fragments selection json payload =
   let exception Layout_mismatch in
   let cursor = ref 0 in
   let fragments = ref [] in
-  let residual = ref Digestif.SHA256.empty and residual_bytes = ref 0 in
+  let residual = ref Agent_core_sha256.empty and residual_bytes = ref 0 in
   let carry stop =
-    residual := Digestif.SHA256.feed_string !residual ~off:!cursor ~len:(stop - !cursor) payload;
+    residual := Agent_core_sha256.feed_string !residual ~off:!cursor ~len:(stop - !cursor) payload;
     residual_bytes := !residual_bytes + (stop - !cursor);
     cursor := stop in
   let literal text =
@@ -97,7 +97,7 @@ let json_fragments selection json payload =
     if !cursor >= length || payload.[!cursor] <> opener then raise Layout_mismatch;
     let offset = !cursor and stop = value_end () in
     fragments := {slot;offset=Some offset;bytes=stop - offset;
-      sha256=Digestif.SHA256.(digest_string ~off:offset ~len:(stop - offset) payload |> to_hex)}
+      sha256=Agent_core_sha256.(digest_string ~off:offset ~len:(stop - offset) payload |> to_hex)}
       :: !fragments;
     cursor := stop in
   let rec visit selection value = match selection, value with
@@ -123,7 +123,7 @@ let json_fragments selection json payload =
   | () ->
     Partitioned (List.rev !fragments @
       [{slot=Unattributed_carrier;offset=None;bytes= !residual_bytes;
-        sha256=Digestif.SHA256.(get !residual |> to_hex)}])
+        sha256=Agent_core_sha256.(get !residual |> to_hex)}])
 ;;
 
 let json_line selection json payload =

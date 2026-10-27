@@ -444,7 +444,7 @@ let run_command_with_capture ?read_authority ?turn_sandbox_factory
                   (match max_bytes with
                    | Some _ -> Exec_policy.truncate_for_log out
                    | None -> Printf.sprintf "binary_bytes=%d sha256=%s"
-                       (String.length out) Digestif.SHA256.(digest_string out |> to_hex)))
+                       (String.length out) Agent_core_sha256.(digest_string out |> to_hex)))
            | Unix.WSIGNALED n ->
              Error
                (Printf.sprintf "docker_%s_signaled: signal=%d" head_program n)

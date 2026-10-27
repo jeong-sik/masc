@@ -114,7 +114,7 @@ let test_new_staging_and_new_paths_order_against_sent_images () =
   | _ -> fail "later message paths remain previewable"
 
 let artifact_reference content =
-  let sha256 = Digestif.SHA256.(to_hex (digest_string content)) in
+  let sha256 = Agent_core_sha256.(to_hex (digest_string content)) in
   match Tool_output.make_artifact_ref ~sha256 ~bytes:(String.length content)
           ~mime:"text/plain" ~preview:"attachment payload" with
   | Ok reference -> reference

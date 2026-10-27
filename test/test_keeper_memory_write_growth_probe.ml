@@ -29,7 +29,7 @@ let run_probe () =
         (`Assoc ["name",`String keeper_id;"trace_id",`String ("trace-" ^ cohort)]) |> require in
       let inputs = List.init 200 (fun index ->
         `Assoc ["content",`String (content (index+1))]) in
-      let input_sha256 = Digestif.SHA256.(digest_string
+      let input_sha256 = Agent_core_sha256.(digest_string
         (Yojson.Safe.to_string (`List inputs)) |> to_hex) in
       let receipts = Hashtbl.create 4 in
       List.iteri (fun index args ->

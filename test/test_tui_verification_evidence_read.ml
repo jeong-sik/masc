@@ -14,7 +14,7 @@ module Protocol = Masc_tui_async_protocol
 
 let bytes = Base64.decode_exn
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jk1cAAAAASUVORK5CYII="
-let sha256 = Digestif.SHA256.(to_hex (digest_string bytes))
+let sha256 = Agent_core_sha256.(to_hex (digest_string bytes))
 let task_id = "task-original"
 let key verification_id = {vek_request_id=verification_id;vek_task_id=task_id}
 let with_root f =
@@ -110,7 +110,7 @@ let test_board_snapshot_projects_real_comments_without_losing_source () = with_r
       votes_up=0; votes_down=0 } in
   let content = Yojson.Safe.to_string (`Assoc ["source",`String "board";
     "post",Board.post_to_yojson post; "comments",`List [Board.comment_to_yojson comment]]) in
-  let digest = Digestif.SHA256.(to_hex (digest_string content)) in
+  let digest = Agent_core_sha256.(to_hex (digest_string content)) in
   let verification_id = "verification-board-snapshot" in
   let request : Store.request_header = {id=verification_id;task_id;worker="producer";created_at=3.} in
   let access = Store.Evidence_available {request;items=[Store.Evidence_collaboration {

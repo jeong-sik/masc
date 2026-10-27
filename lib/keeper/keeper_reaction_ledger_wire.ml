@@ -96,11 +96,11 @@ let reaction_kind_of_string = function
 (* The event id is recomputed on read and compared, so a collision is a replay
    decision, not a display artefact -- two stimuli landing on one id make the
    second read as the first. Stdlib.Digest is MD5; the schedule, auth and
-   cache identities in this repository already use Digestif.SHA256 (#26720).
+   cache identities in this repository already use Agent_core_sha256 (#26720).
    The digest feeds the id readers compare, so the storage generation advances
    with it: rows written under v6 stay in the v6 namespace and are not read. *)
 let digest_id prefix payload =
-  prefix ^ ":" ^ Digestif.SHA256.(digest_string payload |> to_hex)
+  prefix ^ ":" ^ Agent_core_sha256.(digest_string payload |> to_hex)
 ;;
 let event_queue_transition_event_id
       (receipt : Keeper_event_queue_state.transition_receipt)

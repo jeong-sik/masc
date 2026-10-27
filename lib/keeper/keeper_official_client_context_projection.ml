@@ -172,7 +172,7 @@ type resume_delivery =
   ; partly_held_sections : Keeper_context_layers.source list
   }
 
-let sha256_hex text = Digestif.SHA256.(digest_string text |> to_hex)
+let sha256_hex text = Agent_core_sha256.(digest_string text |> to_hex)
 
 (* One row of a World State section with rows, and the name and digest a
    session holds it under. *)

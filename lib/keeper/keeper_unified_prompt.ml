@@ -671,7 +671,7 @@ let answered_ask_evidence_fingerprint
       ]
     |> Yojson.Safe.to_string
   in
-  "ask-answer-v1:" ^ Digestif.SHA256.(digest_string canonical |> to_hex)
+  "ask-answer-v1:" ^ Agent_core_sha256.(digest_string canonical |> to_hex)
 ;;
 
 let answered_ask_rows (observation : Keeper_world_observation.world_observation) =
@@ -2066,7 +2066,7 @@ let emit_prompt_metrics
   let prompt_hash =
     let combined = system_prompt ^ world_state ^ user_message in
     let hex =
-      Digestif.SHA256.(to_hex (digest_string combined))
+      Agent_core_sha256.(to_hex (digest_string combined))
     in
     Int32.to_float (Int32.of_string ("0x" ^ String.sub hex 0 8))
   in

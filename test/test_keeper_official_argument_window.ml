@@ -131,7 +131,7 @@ let test_seed_witness_uses_raw_source_and_dropped_arguments_are_not_written () =
   ignore (reference (input "beta" sent));
   check bool "discarded alpha is absent" false (List.mem_assoc "alpha" (inputs sent));
   let store = Tool_blob_store.create ~base_path:base in
-  let digest = Digestif.SHA256.(to_hex (digest_string (Yojson.Safe.to_string alpha))) in
+  let digest = Agent_core_sha256.(to_hex (digest_string (Yojson.Safe.to_string alpha))) in
   match Tool_blob_store.fetch store ~sha256:digest with
   | Ok None -> () | Ok (Some _) -> fail "discarded argument was written" | Error error -> fail (Tool_blob_store.fetch_error_to_string error)
 

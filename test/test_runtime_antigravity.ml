@@ -847,7 +847,7 @@ let test_large_prompt_streams_over_stdin () =
           check int "receipt counts the bytes the client received"
             (String.length received) write.bytes;
           check string "receipt hashes the bytes the client received"
-            Digestif.SHA256.(digest_string received |> to_hex) write.sha256;
+            Agent_core_sha256.(digest_string received |> to_hex) write.sha256;
           check bool "the whole write is the one slot" true
             (Option.is_some
                (Runtime_official_client_write.matching_fragment write

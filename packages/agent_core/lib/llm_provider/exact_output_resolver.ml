@@ -206,7 +206,7 @@ type target_catalog_admission_error =
   | Target_not_in_catalog of string
 
 let ( let* ) = Result.bind
-let sha256 value = Digestif.SHA256.(to_hex (digest_string value))
+let sha256 value = Agent_core_sha256.(to_hex (digest_string value))
 
 let hash_parts parts =
   let material = Buffer.create 512 in

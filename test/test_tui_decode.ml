@@ -4182,8 +4182,8 @@ let skill_activation_projection_json activations =
       ; "transition_rejections", `List []; "async_result_deliveries", `List []; "async_actions", `List []
       ]
     |> Yojson.Safe.to_string
-    |> Digestif.SHA256.digest_string
-    |> Digestif.SHA256.to_hex
+    |> Agent_core_sha256.digest_string
+    |> Agent_core_sha256.to_hex
   in
   `Assoc
     [ "status", `String "available"
@@ -12725,7 +12725,7 @@ let evidence_pdf = "%PDF-1.7\n"
 let binary_evidence_json ?(format = "png") ?bytes ?sha256 ~data preview =
   let bytes = Option.value bytes ~default:(String.length data) in
   let sha256 =
-    Option.value sha256 ~default:Digestif.SHA256.(digest_string data |> to_hex)
+    Option.value sha256 ~default:Agent_core_sha256.(digest_string data |> to_hex)
   in
   Yojson.Safe.from_string
     (Printf.sprintf

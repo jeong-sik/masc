@@ -362,8 +362,8 @@ let test_binary_stdout_is_complete_and_not_rewritten () =
   check status_testable "binary exit" (Unix.WEXITED 0) status;
   let expected = binary_fixture () in
   check int "complete length" (String.length expected) (String.length stdout);
-  check string "exact binary SHA" Digestif.SHA256.(digest_string expected |> to_hex)
-    Digestif.SHA256.(digest_string stdout |> to_hex);
+  check string "exact binary SHA" Agent_core_sha256.(digest_string expected |> to_hex)
+    Agent_core_sha256.(digest_string stdout |> to_hex);
   check string "remote path bytes unchanged" expected stdout
 
 let test_frame_exit_and_injected_env () =

@@ -46,7 +46,7 @@ let assess ?clock ~keeper_id ~context ~reference ~body () =
        let requested_models =
          List.map (fun (destination : Client.destination) -> destination.model) (first :: rest)
        in
-       let body_sha256 = Digestif.SHA256.(digest_string body |> to_hex) in
+       let body_sha256 = Agent_core_sha256.(digest_string body |> to_hex) in
        let state = `Assoc
          [ "keeper", `String keeper_id
          ; "turn_context", context

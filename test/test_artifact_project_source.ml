@@ -156,7 +156,7 @@ let test_blob_parent_symlinks () =
     let blobs = Filename.concat masc "tool_blobs" in
     let target = if shard then (
       Unix.mkdir blobs 0o700;
-      let digest = Digestif.SHA256.(digest_string "{}\n" |> to_hex) in
+      let digest = Agent_core_sha256.(digest_string "{}\n" |> to_hex) in
       Filename.concat blobs (String.sub digest 0 2)) else blobs in
     Unix.symlink outside target;
     S.save ~base_path ~author:"human" request |> unavailable;

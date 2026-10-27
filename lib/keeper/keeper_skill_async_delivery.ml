@@ -45,7 +45,7 @@ let fields value =
    "presentation",`String (match value.presentation with Inline_result -> "inline_result" | Manifest_reference -> "manifest_reference");
    "child_activations",`List (List.map (fun child -> `Assoc ["skill_tool_use_id",`String child.skill_tool_use_id; "activation_sha256",`String child.activation_sha256]) value.child_activations)]
 let to_json value = `Assoc (fields value @ ["observed_at",`String value.observed_at])
-let identity value = Digestif.SHA256.(digest_string (Yojson.Safe.to_string (`Assoc (fields value))) |> to_hex)
+let identity value = Agent_core_sha256.(digest_string (Yojson.Safe.to_string (`Assoc (fields value))) |> to_hex)
 let nonblank name value = if String.trim value <> "" then Ok () else Error (name ^ " is blank")
 let validate_invocation invocation =
   let* () = nonblank "SDK invocation" (Invocation.tool_use_id invocation) in

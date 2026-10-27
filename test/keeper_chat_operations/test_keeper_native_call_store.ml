@@ -257,7 +257,7 @@ let gate_waiting_on reference store =
   submit store gate_operation_id "approve first";
   let gate_operation = claim store in
   let obligation = Keeper_semantic_execution.gate_obligation ~approval_id:"approval"
-      ~tool_name:"tool_execute" ~input_hash:(Digestif.SHA256.(digest_string "tool input" |> to_hex))
+      ~tool_name:"tool_execute" ~input_hash:(Agent_core_sha256.(digest_string "tool input" |> to_hex))
     |> value in
   let waiting = Keeper_semantic_execution.gate_wait ~checkpoint:reference ~obligations:[obligation]
     |> value in

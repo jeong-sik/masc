@@ -20,7 +20,7 @@ let live_observation result =
     |> List.find (fun artifact -> artifact |> member "id" |> to_string = artifact_id) in
   check string "live artifact is JSON" "application/json" (artifact |> member "mime_type" |> to_string);
   let bytes = artifact |> member "data_base64" |> to_string |> Base64.decode_exn in
-  let digest = Digestif.SHA256.(to_hex (digest_string bytes)) in
+  let digest = Agent_core_sha256.(to_hex (digest_string bytes)) in
   check string "context digest identifies the screen artifact" digest (reference |> member "sha256" |> to_string);
   check string "context URI identifies the screen artifact" ("lane-evidence:" ^ digest) (reference |> member "uri" |> to_string);
   Yojson.Safe.from_string bytes

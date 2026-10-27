@@ -53,9 +53,9 @@ let file_digest path =
         | 0 ->
           if not (same_file (Unix.fstat (Unix.descr_of_in_channel input)) opened)
              || not (same_file (Unix.lstat path) opened) then Error Invalid_file
-          else Ok (Digestif.SHA256.(to_hex (get digest)), opened.st_size)
-        | count -> read (Digestif.SHA256.feed_string digest (Bytes.sub_string buffer 0 count)) in
-      read Digestif.SHA256.empty)
+          else Ok (Agent_core_sha256.(to_hex (get digest)), opened.st_size)
+        | count -> read (Agent_core_sha256.feed_string digest (Bytes.sub_string buffer 0 count)) in
+      read Agent_core_sha256.empty)
   with Sys_error _ | Unix.Unix_error _ -> Error Invalid_file
 let verify_file ~run ~sha256 ~size ~path =
   let* digest,actual_size = file_digest path in

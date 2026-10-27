@@ -903,8 +903,8 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
     let snapshot_sha256 =
       snapshot
       |> Yojson.Safe.to_string
-      |> Digestif.SHA256.digest_string
-      |> Digestif.SHA256.to_hex
+      |> Agent_core_sha256.digest_string
+      |> Agent_core_sha256.to_hex
     in
     let admission_error reason =
       config_error

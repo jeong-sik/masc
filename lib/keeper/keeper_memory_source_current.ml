@@ -147,7 +147,7 @@ let valid_sha256 value =
 let finite_nonnegative value = Float.is_finite value && value >= 0.0
 
 let sha256 content =
-  "sha256:" ^ Digestif.SHA256.(digest_string content |> to_hex)
+  "sha256:" ^ Agent_core_sha256.(digest_string content |> to_hex)
 ;;
 
 let render_fact ?(verified = true) fact =

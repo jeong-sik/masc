@@ -27,7 +27,7 @@ let equipment observation ~keeper = match observation with
   | Ready { balance; _ } -> Ok (Candle_balance.equipment balance ~keeper)
 
 let disabled_account_revision reason =
-  Digestif.SHA256.(digest_string ("disabled\000" ^ reason) |> to_hex)
+  Agent_core_sha256.(digest_string ("disabled\000" ^ reason) |> to_hex)
 
 let event_may_affect_account_revision (event : Candle_event.t) =
   match event.body with
@@ -123,7 +123,7 @@ let ready_account_revision_reader ~events ~policy ~balance =
     let account =
       `List ([ half_life; `List facts; `List owned; `List catalog ] @ pricing_tail)
     in
-    Digestif.SHA256.(digest_string ("ready\000" ^ Yojson.Safe.to_string account) |> to_hex)
+    Agent_core_sha256.(digest_string ("ready\000" ^ Yojson.Safe.to_string account) |> to_hex)
 
 let ready_account_revision ~events ~policy ~balance ~keeper =
   ready_account_revision_reader ~events ~policy ~balance ~keeper

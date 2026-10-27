@@ -464,7 +464,7 @@ let preview draft =
     | Some source -> `Assoc
         [ "package_id", `String (Skill_reference.package_id_to_string source.package_id)
         ; "source", `Assoc
-            [ "sha256", `String Digestif.SHA256.(digest_string source.source_text |> to_hex)
+            [ "sha256", `String Agent_core_sha256.(digest_string source.source_text |> to_hex)
             ; "bytes", `Int (String.length source.source_text); "filename", `String "SKILL.md" ] ] in
   `Assoc [ "draft", Tool_output.normalized_artifact_ref_to_json draft.reference
          ; "nested_calls", Nested.calls_to_json draft.compiled

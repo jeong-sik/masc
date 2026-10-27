@@ -68,7 +68,7 @@ let handle ?turn_sandbox_factory ~config ~(meta : Keeper_meta_contract.keeper_me
       | Ok (bytes, media_type, dimensions, artifact) ->
           let data = `Assoc
             ([ "ok", `Bool true; "artifact", `String artifact
-             ; "sha256", `String Digestif.SHA256.(digest_string bytes |> to_hex)
+             ; "sha256", `String Agent_core_sha256.(digest_string bytes |> to_hex)
              ; "media_type", `String media_type; "bytes", `Int (String.length bytes)
              ; "visual_input", `Bool true ]
              @ (match dimensions with

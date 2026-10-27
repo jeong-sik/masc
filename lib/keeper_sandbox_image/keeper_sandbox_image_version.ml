@@ -182,7 +182,7 @@ let inputs_sha256 recipe =
        frame input.path;
        frame input.contents)
     recipe.inputs;
-  Digestif.SHA256.(to_hex (digest_string (Buffer.contents buf)))
+  Agent_core_sha256.(to_hex (digest_string (Buffer.contents buf)))
 
 let repository recipe = "masc-sandbox-" ^ recipe.name
 
@@ -208,7 +208,7 @@ let current_lock_sha256 () = Keeper_sandbox_lock_digest.sha256
 
 let lock_sha256 recipe =
   match List.find_opt (fun input -> String.equal input.path "masc.opam.locked") recipe.inputs with
-  | Some input -> Digestif.SHA256.(to_hex (digest_string input.contents))
+  | Some input -> Agent_core_sha256.(to_hex (digest_string input.contents))
   | None -> current_lock_sha256 ()
 
 let lock_warning ~image ~built_lock_sha256 =

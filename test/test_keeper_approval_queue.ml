@@ -2853,7 +2853,7 @@ let defer_direct_gate_on ~base_path ~keeper_name ~approval_id =
          Execution.gate_obligation
            ~approval_id
            ~tool_name:"external-effect"
-           ~input_hash:Digestif.SHA256.(digest_string "tool input" |> to_hex)
+           ~input_hash:Agent_core_sha256.(digest_string "tool input" |> to_hex)
          |> string_ok
        in
        let waiting =

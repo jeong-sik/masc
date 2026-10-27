@@ -199,7 +199,7 @@ let test_save_served_artifact_boundary () =
       Filename.set_temp_dir_name root;
       let limit = Tool_blob_store.max_served_bytes in
       let bytes = String.init limit (fun index -> Char.chr (index land 0xff)) in
-      let sha256 = Digestif.SHA256.(digest_string bytes |> to_hex) in
+      let sha256 = Agent_core_sha256.(digest_string bytes |> to_hex) in
       let attachment name ~sha256 size : Masc_tui_types.board_attachment =
         { ba_kind = Ak_file
         ; ba_name = Some name
@@ -216,13 +216,13 @@ let test_save_served_artifact_boundary () =
              limit (Unix.stat path).st_size;
            let saved = In_channel.with_open_bin path In_channel.input_all in
            Alcotest.(check string) "saved binary bytes retain their exact digest"
-             sha256 Digestif.SHA256.(digest_string saved |> to_hex)
+             sha256 Agent_core_sha256.(digest_string saved |> to_hex)
        | Failed reason -> Alcotest.fail reason
        | Played | Opened -> Alcotest.fail "a file attachment started a process");
       Alcotest.(check (list string)) "fetch uses the original reference once"
         [sha256] !requested;
       let oversized = bytes ^ "\000" in
-      let oversized_sha256 = Digestif.SHA256.(digest_string oversized |> to_hex) in
+      let oversized_sha256 = Agent_core_sha256.(digest_string oversized |> to_hex) in
       let refused = attachment "oversized.bin" ~sha256:oversized_sha256
           (String.length oversized) in
       let target = Action.target_path ~name:refused.ba_name ~sha256:oversized_sha256 in
@@ -237,7 +237,7 @@ let test_save_served_artifact_boundary () =
 let test_retired_writer_cannot_damage_prepared_audio () =
   let nonce = Filename.temp_file "tui-listen-publication" "" in
   let bytes = "complete prepared audio " ^ nonce in
-  let sha256 = Digestif.SHA256.(digest_string bytes |> to_hex) in
+  let sha256 = Agent_core_sha256.(digest_string bytes |> to_hex) in
   let path = Action.target_path ~name:(Some "take.wav") ~sha256 in
   let attachment : Masc_tui_types.board_attachment =
     {ba_kind=Ak_audio; ba_name=Some "take.wav";

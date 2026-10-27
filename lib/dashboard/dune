@@ -31,7 +31,7 @@
   mirage-crypto-rng
   mirage-crypto-rng.unix
   cstruct
-  digestif
+   masc.agent_core.digest
   ocaml-protoc-plugin
   masc_proto
   grpc-direct

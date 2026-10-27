@@ -26,7 +26,7 @@ let make ~(identity : A.identity) ~prompt original =
      order remains part of model input. No timestamp or random retry ID enters
      this identity, so rebuilding the same snapshot cannot dispatch fresh work. *)
   let canonical = Yojson.Safe.sort (`Assoc fields) |> Yojson.Safe.to_string in
-  let id = "candle-appraisal-" ^ Digestif.SHA256.(to_hex (digest_string canonical)) in
+  let id = "candle-appraisal-" ^ Agent_core_sha256.(to_hex (digest_string canonical)) in
   Ok {id; original; snapshot=Yojson.Safe.sort (`Assoc (("request_id", `String id) :: fields))}
 let request_id t = t.id
 let request t = t.original

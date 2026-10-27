@@ -2577,7 +2577,7 @@ let test_pending_proof_binds_submitted_evidence () =
   let criterion = Goal_store.criterion_of_goal goal in
   let item content = Workspace_verification_store.Evidence_collaboration {
     reference="board:submitted-source"; content;
-    sha256=Digestif.SHA256.(to_hex (digest_string content)) } in
+    sha256=Agent_core_sha256.(to_hex (digest_string content)) } in
   let original = item {|{"post":{"content":"original secret source"}}|} in
   let mark ?submitted_evidence () =
     match Goal_verification.mark_proof_pending ?submitted_evidence config ~goal_id ~criterion with

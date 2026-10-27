@@ -952,7 +952,7 @@ let signed_prefix_replays_the_first_mixed_storage_outcome () =
                 tool_message ~id:"earlier" result_body] in
   let signed = stamp_signed_call ~config ~prefix ~id:"signed" (`Assoc []) in
   let source = prefix @ [signed; tool_message ~id:"signed" "done"] in
-  let result_sha = Digestif.SHA256.(to_hex (digest_string result_body)) in
+  let result_sha = Agent_core_sha256.(to_hex (digest_string result_body)) in
   let result_target = Filename.concat
       (Filename.concat (Tool_blob_store.root_dir store) (String.sub result_sha 0 2)) result_sha in
   (* Only this result's exact blob filename is a directory. Other addresses,

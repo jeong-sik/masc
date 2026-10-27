@@ -255,7 +255,7 @@ let test_current_json_exposes_runtime_binary_identity () =
 let fixture_dashboard_tree_sha256 () =
   let digest = String.make 64 'd' in
   Printf.sprintf {|[{"path":"index.html","sha256":"%s","size":9}]|} digest
-  |> fun value -> Digestif.SHA256.(digest_string value |> to_hex)
+  |> fun value -> Agent_core_sha256.(digest_string value |> to_hex)
 ;;
 
 let executable_provenance_json
@@ -563,7 +563,7 @@ let test_executable_provenance_binding_rejects_replacement_and_forgery () =
     (fun () ->
       write raw;
       let sidecar = Unix.lstat path in
-      let digest = Digestif.SHA256.(digest_string raw |> to_hex) in
+      let digest = Agent_core_sha256.(digest_string raw |> to_hex) in
       let validate () =
         Build_identity.For_testing.validate_executable_provenance_binding
           ~path
@@ -623,7 +623,7 @@ let test_executable_provenance_binding_rejects_source_root_replacement () =
       Out_channel.with_open_bin sidecar_path (fun channel -> output_string channel raw);
       Unix.chmod sidecar_path 0o400;
       let sidecar = Unix.lstat sidecar_path in
-      let digest = Digestif.SHA256.(digest_string raw |> to_hex) in
+      let digest = Agent_core_sha256.(digest_string raw |> to_hex) in
       let validate () =
         Build_identity.For_testing.validate_executable_provenance_binding
           ~path:sidecar_path

@@ -5,7 +5,7 @@ let release_directory_mode = 0o700
 let release_file_mode = 0o644
 let release_mode = function Directory -> release_directory_mode | File -> release_file_mode
 let entry_kind_tag = function Directory -> "directory" | File -> "file"
-let file_digest content = Digestif.SHA256.(to_hex (digest_string content))
+let file_digest content = Agent_core_sha256.(to_hex (digest_string content))
 
 (* Include directory entries and permissions: empty operator directories and
    chmod edits must not disappear merely because all file bytes still match. *)

@@ -606,7 +606,7 @@ let preserved_files prompts =
 
 let preserved_name file content =
   Printf.sprintf "%s.operator-edit-%s" file
-    (String.sub Digestif.SHA256.(digest_string content |> to_hex) 0 8)
+    (String.sub Agent_core_sha256.(digest_string content |> to_hex) 0 8)
 
 let curator_v3 =
   "---\ndescription: curator\ntemplate_variables: [memory]\n---\nKeep the newest \
@@ -810,7 +810,7 @@ let test_an_old_schema_manifest_reads_as_none () =
              (List.sort compare (List.map fst digests));
            check (option string) "the digest is of the bytes written"
              (Some
-                (Digestif.SHA256.(
+                (Agent_core_sha256.(
                    digest_string (List.assoc "prompts/keeper.example.md" embedded)
                    |> to_hex)))
              (match List.assoc_opt "keeper.example.md" digests with

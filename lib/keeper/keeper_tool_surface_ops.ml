@@ -582,7 +582,7 @@ let operation_id_of_invocation_ref invocation_ref =
   let canonical =
     Tool_invocation_ref.to_yojson invocation_ref |> Yojson.Safe.to_string
   in
-  let digest = Digestif.SHA256.(digest_string canonical |> to_hex) in
+  let digest = Agent_core_sha256.(digest_string canonical |> to_hex) in
   "kmsg-" ^ String.sub digest 0 32
 ;;
 

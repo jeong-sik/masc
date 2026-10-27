@@ -128,7 +128,7 @@ let file_to_yojson ~base_path ~index = function
     let ( let* ) = Result.bind in
     let text ~name content =
       Ok (name, Base64.encode_string content, String.length content,
-        Digestif.SHA256.(to_hex (digest_string content))) in
+        Agent_core_sha256.(to_hex (digest_string content))) in
     let artifact_name reference =
       match Store.classify_evidence_reference reference with
       | Store.Artifact_reference relative when Store.valid_producer_relative_path relative ->
@@ -141,7 +141,7 @@ let file_to_yojson ~base_path ~index = function
       | None -> Error "The selected evidence item does not exist"
       | Some (Store.Evidence_note content) -> text ~name:"note.txt" content
       | Some (Store.Evidence_collaboration { content; sha256; _ }) ->
-        if not (String.equal sha256 Digestif.SHA256.(to_hex (digest_string content)))
+        if not (String.equal sha256 Agent_core_sha256.(to_hex (digest_string content)))
         then Error "The collaboration snapshot does not match its submitted SHA-256"
         else text ~name:"source.json" content
       | Some (Store.Evidence_artifact { truncated = true; _ }) ->

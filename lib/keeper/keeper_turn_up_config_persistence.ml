@@ -198,7 +198,7 @@ let read_snapshot_unlocked path =
 let revision_of_snapshot = function
   | Absent -> Missing
   | Present bytes ->
-    Sha256 Digestif.SHA256.(digest_string bytes |> to_hex)
+    Sha256 Agent_core_sha256.(digest_string bytes |> to_hex)
 
 let revision_of_path_unlocked path =
   read_snapshot_unlocked path |> Result.map revision_of_snapshot

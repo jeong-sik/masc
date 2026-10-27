@@ -86,8 +86,8 @@ module Snapshot_digest = struct
     meta
     |> meta_to_json
     |> Yojson.Safe.to_string
-    |> Digestif.SHA256.digest_string
-    |> Digestif.SHA256.to_hex
+    |> Agent_core_sha256.digest_string
+    |> Agent_core_sha256.to_hex
   ;;
 
   let of_string value =

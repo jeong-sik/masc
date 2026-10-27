@@ -12,8 +12,8 @@ let make ~schedule_instance_id ~schedule_id ~due_at ~payload_digest =
     ; stable_float due_at
     ; payload_digest
     ]
-  |> Digestif.SHA256.digest_string
-  |> Digestif.SHA256.to_hex
+  |> Agent_core_sha256.digest_string
+  |> Agent_core_sha256.to_hex
 ;;
 
 let to_string value = value

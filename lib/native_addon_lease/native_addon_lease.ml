@@ -113,7 +113,7 @@ let write_metadata slot name value =
 let write_intent slot instance state = write_metadata slot "intent.json"
   (`Assoc ["instance_id",`String instance;"state",`String state])
 let history_name instance =
-  "instance-" ^ Digestif.SHA256.(to_hex (digest_string instance)) ^ ".json"
+  "instance-" ^ Agent_core_sha256.(to_hex (digest_string instance)) ^ ".json"
 let with_history slot instance work =
   let fd = open_private_file ~path:slot.path slot.directory (history_name instance) false in
   Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> work fd)

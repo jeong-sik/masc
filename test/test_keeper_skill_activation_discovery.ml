@@ -83,7 +83,7 @@ let activation ~trace ~tool_use_id ~activated_at reference =
                Ledger.Skill_body
                  { bytes = 4
                  ; sha256 =
-                     Digestif.SHA256.(digest_string "BODY" |> to_hex)
+                     Agent_core_sha256.(digest_string "BODY" |> to_hex)
                  }
            })
       ~activated_at

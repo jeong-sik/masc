@@ -169,7 +169,7 @@ let decode json =
           | _ -> Error (Expected_list "top-level.overrides"))
       | _ -> Error (Expected_integer "top-level.schema_version"))
 
-let default_revision ~body = Digestif.SHA256.(digest_string body |> to_hex)
+let default_revision ~body = Agent_core_sha256.(digest_string body |> to_hex)
 
 let entry_to_yojson entry =
   `Assoc

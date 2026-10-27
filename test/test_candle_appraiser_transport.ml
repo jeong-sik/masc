@@ -213,7 +213,7 @@ let test_conflicting_producer_receipt_cannot_be_replaced () =
       | Runs.Completed {origin=Runs.Producer;elapsed_s=Some _;output;_} -> output
       | Runs.Running | Runs.Completion_persistence_failed _ | Runs.Completed _ ->
         fail "conflict fixture must retain a genuine measured producer receipt" in
-    let digest = Digestif.SHA256.(digest_string (Yojson.Safe.to_string output) |> to_hex) in
+    let digest = Agent_core_sha256.(digest_string (Yojson.Safe.to_string output) |> to_hex) in
     let payload = Filename.concat
       (Filename.concat (Filename.concat base_path Runs.payload_dirname) id)
       ("output-" ^ digest ^ ".json") in
@@ -352,7 +352,7 @@ let test_missing_terminal_payload_is_not_silently_repaired_by_reread () =
     | Runs.Completed {output;_} -> output
     | Runs.Running | Runs.Completion_persistence_failed _ -> fail "original did not complete" in
   let text = Yojson.Safe.to_string output in
-  let digest = Digestif.SHA256.(digest_string text |> to_hex) in
+  let digest = Agent_core_sha256.(digest_string text |> to_hex) in
   let payload = Filename.concat
       (Filename.concat (Filename.concat base_path Runs.payload_dirname) answer.trace.run_id)
       ("output-" ^ digest ^ ".json") in

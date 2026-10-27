@@ -2,7 +2,7 @@ module Store = Keeper_chat_operation_store
 module Checkpoint = Keeper_checkpoint_store
 module Semantic = Keeper_semantic_execution
 let ( let* ) = Result.bind
-let digest text = Digestif.SHA256.(digest_string text |> to_hex)
+let digest text = Agent_core_sha256.(digest_string text |> to_hex)
 
 type plan =
   { base_path : string; keeper_name : string; source_path : string

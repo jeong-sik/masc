@@ -114,7 +114,7 @@ let test_stored_goal_preparation_and_actual_visual_lookup () = with_workspace (f
   let image = Filename.concat root "proof.png" in
   Out_channel.with_open_bin image (fun out -> output_string out bytes);
   let image_evidence = Evidence.Evidence_artifact_binary {reference="artifact:proof.png";
-    bytes=String.length bytes; sha256=Digestif.SHA256.(digest_string bytes |> to_hex);
+    bytes=String.length bytes; sha256=Agent_core_sha256.(digest_string bytes |> to_hex);
     format="image/png"; body=Some image} in
   let goal_id = pending ~items:(evidence @ [image_evidence]) config in
   let authority = authority config goal_id in

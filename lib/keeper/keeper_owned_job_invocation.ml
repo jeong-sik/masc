@@ -32,7 +32,7 @@ let invocation_json keeper_name invocation =
   `Assoc ["keeper_name", `String keeper_name; "trace_id", `String invocation.trace_id;
           "turn_ref", Ids.Turn_ref.to_yojson invocation.turn_ref;
           "tool_use_id", `String invocation.tool_use_id]
-let sha json = Digestif.SHA256.(to_hex (digest_string (Yojson.Safe.to_string json)))
+let sha json = Agent_core_sha256.(to_hex (digest_string (Yojson.Safe.to_string json)))
 let request_sha argv (inputs : Store.input list) =
   sha (`Assoc ["argv", `List (List.map (fun value -> `String value) argv);
        "inputs", `List (List.map (fun (input : Store.input) ->

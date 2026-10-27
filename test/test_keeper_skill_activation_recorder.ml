@@ -461,7 +461,7 @@ let test_native_action_uses_the_delivery_turn_axis () =
     [ Keeper_skill_activation_ledger.
         { tool_use_id = "call-native"
         ; content_bytes = String.length body
-        ; content_sha256 = Digestif.SHA256.(digest_string body |> to_hex)
+        ; content_sha256 = Agent_core_sha256.(digest_string body |> to_hex)
         }
     ]
   in

@@ -577,7 +577,7 @@ let drop_can_change_later_digests = function
   | Prefix_reasoning_mismatch -> true
 ;;
 
-let sha256_hex material = Digestif.SHA256.(to_hex (digest_string material))
+let sha256_hex material = Agent_core_sha256.(to_hex (digest_string material))
 
 (* One chain step over a running hex digest and one tagged piece. Chained
    single-shot hashes cost O(total bytes); the fold compares at every

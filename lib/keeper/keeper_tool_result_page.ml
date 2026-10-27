@@ -85,5 +85,5 @@ let verify_body identity (page:Keeper_artifact_read.page) content =
   if not page.eof || String.length content<>page.total_bytes then
     Error "Original result body is incomplete"
   else if not (String.is_valid_utf_8 content) then Error "Original result is not valid UTF8"
-  else if not (String.equal Digestif.SHA256.(to_hex (digest_string content)) identity.sha256)
+  else if not (String.equal Agent_core_sha256.(to_hex (digest_string content)) identity.sha256)
   then Error "Original result body digest mismatch" else Ok ()

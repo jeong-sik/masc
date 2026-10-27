@@ -9,7 +9,7 @@
  (libraries
   eio.mock
   masc_test_deps
-  digestif
+  masc.agent_core.digest
   masc_candle
   masc_candle_store
   masc_candle_config

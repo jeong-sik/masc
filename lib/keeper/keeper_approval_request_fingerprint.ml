@@ -10,5 +10,5 @@ let rec canonical_request_json = function
 
 let request_fingerprint (input : Yojson.Safe.t) =
   let canonical_json = canonical_request_json input |> Yojson.Safe.to_string in
-  Digestif.SHA256.(digest_string canonical_json |> to_hex)
+  Agent_core_sha256.(digest_string canonical_json |> to_hex)
 ;;

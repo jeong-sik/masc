@@ -10,7 +10,7 @@ let markdown = "# 보고서 🎵\r\n\r\n| 음 | 값 |\r\n|---|---|\r\n| C | 36 |
 let html = "<!doctype html>\r\n<script>window.location='/secret'</script>\t<p>원문</p>"
 let revision ?(format=Published.Markdown) ?(number=1) content =
   let body = get (Result.map_error Tool_output.make_error_to_string
-    (Tool_output.make_artifact_ref ~sha256:Digestif.SHA256.(to_hex (digest_string content))
+    (Tool_output.make_artifact_ref ~sha256:Agent_core_sha256.(to_hex (digest_string content))
       ~bytes:(String.length content) ~preview:content ~mime:(Published.media_type format))) in
   { Published.revision = number; title = "음악 보고서"; summary = "원문";
     format; author = "keeper"; created_at = "2026-10-21T00:00:00Z"; body;

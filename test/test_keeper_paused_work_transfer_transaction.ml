@@ -62,7 +62,7 @@ let write_json path json =
     output_string channel (Yojson.Safe.to_string json))
 ;;
 
-let sha256 value = Digestif.SHA256.(digest_string value |> to_hex)
+let sha256 value = Agent_core_sha256.(digest_string value |> to_hex)
 
 let receipt_path config ~keeper_name ~operator_operation_id =
   Filename.concat

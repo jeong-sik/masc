@@ -24,7 +24,7 @@ let install base bytes =
   mkdir (shim_dir base);
   write (binary base) bytes;
   Unix.chmod (binary base) 0o700;
-  let digest = Digestif.SHA256.(digest_string bytes |> to_hex) in
+  let digest = Agent_core_sha256.(digest_string bytes |> to_hex) in
   write (sidecar base) (digest ^ "  " ^ Shim.shim_binary_name ^ "\n")
 
 let corrupt base =

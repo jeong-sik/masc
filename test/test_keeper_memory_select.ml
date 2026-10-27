@@ -11,7 +11,7 @@ let member = Json.member
 let rows key json = member key json |> Json.to_list
 let text key json = member key json |> Json.to_string
 let integer key json = member key json |> Json.to_int
-let sha bytes = Digestif.SHA256.(digest_string bytes |> to_hex)
+let sha bytes = Agent_core_sha256.(digest_string bytes |> to_hex)
 let fixture_capture () =
   Yojson.Safe.from_file (Masc_test_deps.source_path "test/fixtures/memory_resolved_selection_replay/actual.json")
   |> member "capture"

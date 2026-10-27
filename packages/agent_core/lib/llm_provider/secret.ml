@@ -53,7 +53,7 @@ let empty = ""
 let is_empty s = String.trim s = ""
 let header_value s = s
 let length = String.length
-let digest s = Digestif.SHA256.(to_hex (digest_string s))
+let digest s = Agent_core_sha256.(to_hex (digest_string s))
 let identity s = if is_empty s then None else Some (Identity (digest s))
 let equal_identity (Identity left) (Identity right) = String.equal left right
 let hash_identity (Identity digest) = Hashtbl.hash digest

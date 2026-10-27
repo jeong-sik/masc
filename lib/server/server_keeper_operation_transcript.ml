@@ -17,7 +17,7 @@ let tool_delivery_key ~operation_id ~resumed_from =
       let canonical = Yojson.Safe.to_string (`List (List.map (fun s -> `String s)
         [client; checkpoint.runtime_id; checkpoint.session_id; checkpoint.turn_id])) in
       let* continuation_id = Keeper_chat_delivery_identity.Request_id.of_string
-        (Digestif.SHA256.(digest_string canonical |> to_hex)) in
+        (Agent_core_sha256.(digest_string canonical |> to_hex)) in
       Ok (Keeper_chat_delivery_identity.Operation_native {operation_id; continuation_id})
 
 let committed_tool_events ~operation_id ~resumed_from tool_calls =

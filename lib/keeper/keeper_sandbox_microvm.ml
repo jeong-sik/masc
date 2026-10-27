@@ -1537,7 +1537,7 @@ type shim_provenance =
    can preserve. The boot edge offloads this read and hash to its executor. *)
 let sha256_of_file path =
   match In_channel.with_open_bin path In_channel.input_all with
-  | contents -> Ok Digestif.SHA256.(digest_string contents |> to_hex)
+  | contents -> Ok Agent_core_sha256.(digest_string contents |> to_hex)
   | exception Sys_error detail -> Error detail
 ;;
 

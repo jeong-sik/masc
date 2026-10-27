@@ -18,7 +18,7 @@ let day = Catalog.local_day (match Time_codec.parse_rfc3339 published_at with
 let report ?(number=1) ?(report_id=id) content =
   let body = get (Result.map_error Tool_output.make_error_to_string
     (Tool_output.make_artifact_ref
-      ~sha256:Digestif.SHA256.(to_hex (digest_string content))
+      ~sha256:Agent_core_sha256.(to_hex (digest_string content))
       ~bytes:(String.length content) ~preview:content ~mime:"text/markdown")) in
   let revision = { Published.revision=number; title="report"; summary="fixture";
     format=Published.Markdown; author="keeper"; created_at=published_at; body;

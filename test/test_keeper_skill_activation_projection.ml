@@ -115,7 +115,7 @@ let record_one config (meta : Keeper_meta_contract.keeper_meta) =
                  Ledger.Skill_body
                    { bytes = String.length "projection body"
                    ; sha256 =
-                       Digestif.SHA256.(digest_string "projection body" |> to_hex)
+                       Agent_core_sha256.(digest_string "projection body" |> to_hex)
                    }
              })
         ~activated_at:"2026-08-26T00:00:00Z"
@@ -440,7 +440,7 @@ let test_chat_history_reads_execution_beyond_the_trace () =
   (match Ledger.observe_delivery ~config ~trace_id:meta.runtime.trace_id
     ~turn_ref:activation.turn_ref
     ~tool_results:[ { Ledger.tool_use_id = "composition-call"; content_bytes = String.length content;
-      content_sha256 = Digestif.SHA256.(digest_string content |> to_hex) } ]
+      content_sha256 = Agent_core_sha256.(digest_string content |> to_hex) } ]
     ~boundary:(Ledger.Model_response { agent_core_turn = 1 })
     ~runtime_id:"test.runtime" ~delivered_at:"2026-08-26T00:00:01Z" with
    | Ok _ -> () | Error error -> fail (Ledger.store_error_to_string error));

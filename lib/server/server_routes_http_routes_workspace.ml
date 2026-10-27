@@ -438,7 +438,7 @@ type workspace_file_save_error =
 let workspace_file_revision_at_root ~root file content =
   Yojson.Safe.to_string (`List [ `String root;
     `String file.resolved_path; `String content ])
-  |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex
+  |> Agent_core_sha256.digest_string |> Agent_core_sha256.to_hex
 
 let workspace_file_revision ~base file content =
   workspace_file_revision_at_root ~root:(resolve_existing_prefix base) file content

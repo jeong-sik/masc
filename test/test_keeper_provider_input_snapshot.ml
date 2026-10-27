@@ -139,7 +139,7 @@ let test_exact_turn_round_trip () =
            check bool "the part read is the part listed" true (content.pc_part = part);
            check int "bytes" part.part_bytes (String.length content.pc_text);
            check string "sha256 of the bytes" part.part_sha256
-             Digestif.SHA256.(digest_string content.pc_text |> to_hex))
+             Agent_core_sha256.(digest_string content.pc_text |> to_hex))
       manifest.mf_parts;
     (match read_part config 7 0 with
      | Ok content -> check string "system prompt" "exact system prompt" content.pc_text
@@ -186,7 +186,7 @@ let test_shared_pool_and_nested_worker_round_trip () =
              | Ok content ->
                check int "part byte count" part.part_bytes (String.length content.pc_text);
                check string "part digest" part.part_sha256
-                 Digestif.SHA256.(digest_string content.pc_text |> to_hex);
+                 Agent_core_sha256.(digest_string content.pc_text |> to_hex);
                if part.part_index = 0 then
                  check string "system prompt" expected_prompt content.pc_text)
           manifest.mf_parts
@@ -451,7 +451,7 @@ let test_message_payload_matches_the_serialised_message () =
   check
     string
     "digest is the sha256 of those bytes"
-    Digestif.SHA256.(digest_string bytes |> to_hex)
+    Agent_core_sha256.(digest_string bytes |> to_hex)
     payload.Snapshot.payload_sha256
 ;;
 

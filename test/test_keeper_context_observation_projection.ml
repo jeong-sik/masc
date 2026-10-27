@@ -16,7 +16,7 @@ let with_temp_workspace f =
 ;;
 
 let digest_of_label label =
-  Digestif.SHA256.digest_string label |> Digestif.SHA256.to_hex
+  Agent_core_sha256.digest_string label |> Agent_core_sha256.to_hex
 ;;
 
 let sample_trace = "trace-1780648779957-00000"

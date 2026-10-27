@@ -1902,7 +1902,7 @@ let test_structured_report_preserves_corrupt_evidence () =
            (Yojson.Safe.to_string value));
     check (option string)
       "structured raw SHA-256"
-      (Some Digestif.SHA256.(digest_string raw |> to_hex))
+      (Some Agent_core_sha256.(digest_string raw |> to_hex))
       (match require_json_field "raw_sha256" corrupt with
        | `String value -> Some value
        | _ -> None);
@@ -1939,7 +1939,7 @@ let test_structured_report_preserves_corrupt_evidence () =
            (Yojson.Safe.to_string value));
     check (option string)
       "canonical validation payload SHA-256"
-      (Some Digestif.SHA256.(digest_string canonical_payload |> to_hex))
+      (Some Agent_core_sha256.(digest_string canonical_payload |> to_hex))
       (match require_json_field "canonical_json_sha256" payload with
        | `String value -> Some value
        | _ -> None)

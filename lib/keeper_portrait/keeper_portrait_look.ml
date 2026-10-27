@@ -74,7 +74,7 @@ let mantissa_bits = 53
 let mantissa_scale = Float.ldexp 1.0 (-mantissa_bits)
 
 let generator_of key =
-  let digest = Digestif.SHA256.(digest_string key |> to_raw_string) in
+  let digest = Agent_core_sha256.(digest_string key |> to_raw_string) in
   { state = String.get_int64_be digest 0 }
 
 let next g =

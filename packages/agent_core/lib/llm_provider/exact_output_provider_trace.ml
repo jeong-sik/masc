@@ -50,8 +50,8 @@ let of_evidence ?response receipt (evidence : Exec.raw_response_evidence) =
   let fingerprint =
     payload
     |> Yojson.Safe.to_string
-    |> Digestif.SHA256.digest_string
-    |> Digestif.SHA256.to_hex
+    |> Agent_core_sha256.digest_string
+    |> Agent_core_sha256.to_hex
   in
   { fingerprint }
 ;;

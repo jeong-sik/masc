@@ -3277,7 +3277,7 @@ module Measurement = struct
            Error (Printf.sprintf "Measurement artifact declares %d bytes but carries %d"
                     bytes (String.length content))
          else
-           let content_sha256 = Digestif.SHA256.(to_hex (digest_string content)) in
+           let content_sha256 = Agent_core_sha256.(to_hex (digest_string content)) in
            if not (String.equal content_sha256 sha256) then
              Error ("Measurement artifact content hashes to " ^ content_sha256
                     ^ ", expected " ^ sha256)
@@ -3287,7 +3287,7 @@ module Measurement = struct
                 Result.map (fun (report : R.t) ->
                   let context_hashes = List.map (fun (sample : R.sample) ->
                     sample.case.id,
-                    Digestif.SHA256.(to_hex (digest_string
+                    Agent_core_sha256.(to_hex (digest_string
                       (Yojson.Safe.to_string (R.answer_context_to_yojson sample.case.context)))))
                     report.samples in
                   { report; context_hashes }) (R.of_yojson json)
@@ -10512,7 +10512,7 @@ let begin_local_workspace_read (state : state) ~intent ~source ~base_path ~start
           (local_source_observation state source);
         let Workspace_authority workspace_revision=state.workspace_authority in
         let workspace_fingerprint=Option.map (fun (identity : Tui_decode.server_identity) ->
-          Digestif.SHA256.(digest_string (Yojson.Safe.to_string (`List
+          Agent_core_sha256.(digest_string (Yojson.Safe.to_string (`List
             [`String (Masc.Tui_decode.Canonical_path.to_string identity.sid_base_path);`String (Masc.Tui_decode.Canonical_path.to_string identity.sid_masc_root)])) |> to_hex)) state.server_identity in
         let lwr_observation=Local_read_observation.create ~requested_ns:started_ns
           {source;intent=(match actual_intent with Snapshot_read.Poll -> Poll | Refresh -> Refresh);
@@ -17699,7 +17699,7 @@ let sync_task_documents state ~cols =
                 keeper_name=target.keeper_name;run_id=source.ats_run_id;task_id=source.ats_task_id} in
           let Workspace_authority workspace_revision=state.workspace_authority in
           let workspace_fingerprint=Option.map (fun (identity : Tui_decode.server_identity) ->
-            Digestif.SHA256.(digest_string (Yojson.Safe.to_string (`List
+            Agent_core_sha256.(digest_string (Yojson.Safe.to_string (`List
               [`String (Canonical_path.to_string identity.sid_base_path);
                `String (Canonical_path.to_string identity.sid_masc_root)])) |> to_hex)) state.server_identity in
           let tdr_observation=Observation.create {source;part;columns=cols;

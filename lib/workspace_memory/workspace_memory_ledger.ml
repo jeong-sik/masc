@@ -123,7 +123,7 @@ let to_json t =
           `Assoc (fact_ref_fields fact @ ["disposition", disposition_json disposition]))
           (dispositions t)) ) ]
 
-let sha256 t = Digestif.SHA256.(digest_string (Yojson.Safe.to_string (to_json t)) |> to_hex)
+let sha256 t = Agent_core_sha256.(digest_string (Yojson.Safe.to_string (to_json t)) |> to_hex)
 
 let rec traverse f = function
   | [] -> Ok []
@@ -379,7 +379,7 @@ let observe ~base_path =
 
 (* Reconciliation *)
 
-let claim_sha256 claim = Digestif.SHA256.(digest_string claim |> to_hex)
+let claim_sha256 claim = Agent_core_sha256.(digest_string claim |> to_hex)
 
 type store_key =
   | Ordinary_store of string
@@ -500,7 +500,7 @@ let apply_error_to_string = function
   | Invalid_result detail -> "workspace curator ledger result: " ^ detail
 
 let id_of_text ~kind text =
-  kind ^ "-" ^ Digestif.SHA256.(digest_string text |> to_hex)
+  kind ^ "-" ^ Agent_core_sha256.(digest_string text |> to_hex)
 
 let apply t ~selected assignments =
   let selected_refs = List.map (fun (pending : pending_fact) -> pending.fact) selected in

@@ -174,14 +174,14 @@ let same_entry (left : pending_selection) (right : pending_selection) =
 let source_snapshot_ref source =
   Keeper_event_queue.stimulus_to_yojson source
   |> Yojson.Safe.to_string
-  |> Digestif.SHA256.digest_string
-  |> Digestif.SHA256.to_hex
+  |> Agent_core_sha256.digest_string
+  |> Agent_core_sha256.to_hex
 ;;
 
 let disposition_reason_ref reason =
   ("keeper.event_queue.cancel_reason.v1\000" ^ reason)
-  |> Digestif.SHA256.digest_string
-  |> Digestif.SHA256.to_hex
+  |> Agent_core_sha256.digest_string
+  |> Agent_core_sha256.to_hex
 ;;
 
 let resolve_pending_selection
@@ -325,8 +325,8 @@ let transition_ref transition =
   in
   `Assoc (("schema", `String "keeper.event_queue.transition_ref.v1") :: fields)
   |> Yojson.Safe.to_string
-  |> Digestif.SHA256.digest_string
-  |> Digestif.SHA256.to_hex
+  |> Agent_core_sha256.digest_string
+  |> Agent_core_sha256.to_hex
 ;;
 
 let witness_of_receipt receipt =

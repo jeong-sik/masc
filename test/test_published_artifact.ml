@@ -293,7 +293,7 @@ let test_keeper_model_publication_receipt () = with_base (fun base_path ->
          | Tool_output.Decoded_artifact_manifest {structured_content; artifact_refs=[body]; _} ->
            check_json "manifest retains the exact publication receipt" data structured_content;
            Alcotest.(check string) "manifest roots the original body"
-             Digestif.SHA256.(digest_string content |> to_hex) body.sha256
+             Agent_core_sha256.(digest_string content |> to_hex) body.sha256
          | Tool_output.Decoded_artifact_manifest _ | Tool_output.Not_artifact_manifest
          | Tool_output.Invalid_artifact_manifest _ -> Alcotest.fail "invalid publication receipt manifest");
         let _, _, stored = S.read ~base_path ~id ~revision:(Some 1) |> store_ok in

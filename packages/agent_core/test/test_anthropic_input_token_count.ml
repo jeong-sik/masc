@@ -626,7 +626,7 @@ let check_pre_dispatch_serialization ~label ~body observations =
     check
       string
       (label ^ " body digest")
-      Digestif.SHA256.(to_hex (digest_string body))
+      Agent_core_sha256.(to_hex (digest_string body))
       observation.body_sha256
   | observations -> failf "%s observer called %d times" label (List.length observations)
 ;;
@@ -912,7 +912,7 @@ let test_admitted_body_is_frozen_across_catalog_mutation () =
            string
            "frozen admission digest"
            admitted_evidence.body_sha256
-           Digestif.SHA256.(to_hex (digest_string body));
+           Agent_core_sha256.(to_hex (digest_string body));
          check_pre_dispatch_serialization
            ~label:"frozen admitted body"
            ~body

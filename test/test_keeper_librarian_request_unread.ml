@@ -183,7 +183,7 @@ let test_summary_fallback_and_resume () =
     Config_dir_resolver.reset ();
     Fs_compat.remove_tree base_path);
   let module Store=Masc.Keeper_official_client_session_store in
-  let tool_surface_sha256=Digestif.SHA256.(digest_string "native tool surface" |> to_hex) in
+  let tool_surface_sha256=Agent_core_sha256.(digest_string "native tool surface" |> to_hex) in
   let frontier : Store.context_frontier={message_count=List.length composed.sent;
     delivery=Store.Prepared_start_context;acknowledged_turn=None;held_context=[]} in
   let keeper_name="frozen-fixture" and session_id="native-session" and turn_id="native-turn" in

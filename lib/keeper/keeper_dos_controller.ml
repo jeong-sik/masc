@@ -28,7 +28,7 @@ let set_participation ~config ~who ~token participation =
       |> Result.map_error (fun error -> unavailable (Masc_domain.masc_error_to_string error)) in
     let* credential = match current with
       | Some credential when String.equal credential.Masc_domain.token
-          Digestif.SHA256.(digest_string token |> to_hex)
+          Agent_core_sha256.(digest_string token |> to_hex)
           && Masc_domain.has_permission credential.role Masc_domain.CanPlayMachine ->
         (match Play_invite.expired ~now:(Time_compat.now ()) credential with
          | Ok false -> Ok credential

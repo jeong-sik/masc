@@ -112,7 +112,7 @@ val broadcast_namespace_truth_snapshot :
     dedup cache between scenarios. *)
 
 val last_namespace_truth_snapshot_hash :
-  Digestif.SHA256.t option ref
+  Agent_core_sha256.t option ref
 (** [last_namespace_truth_snapshot_hash] is the dedup state for
     {!broadcast_namespace_truth_snapshot}.  Holds the SHA-256 of
     the most recently broadcast snapshot (with [generated_at]

@@ -135,7 +135,7 @@ end
 
 let notes_hash ~(task_title : string) ~(notes : string) : string =
   let input = task_title ^ "\n" ^ notes in
-  Digestif.SHA256.(digest_string input |> to_hex)
+  Agent_core_sha256.(digest_string input |> to_hex)
 
 (* ================================================================ *)
 (* JSON serialization                                                *)

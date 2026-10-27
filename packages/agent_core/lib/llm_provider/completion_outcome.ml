@@ -21,7 +21,7 @@ let before_serialization result = { result; request_provenance = Not_serialized 
 let seal_request (request : Complete_common.serialized_http_request) =
   { output_token_receipt = request.output_token_receipt
   ; body_bytes = String.length request.body
-  ; body_sha256 = Digestif.SHA256.(digest_string request.body |> to_hex)
+  ; body_sha256 = Agent_core_sha256.(digest_string request.body |> to_hex)
   }
 ;;
 
@@ -81,8 +81,8 @@ let request_provenance_of_yojson json =
       then Ok () else Error "request provenance: non-canonical output-token receipt" in
     match List.assoc "body_bytes" fs, List.assoc "body_sha256" fs with
     | `Int body_bytes, `String body_sha256 when body_bytes > 0 ->
-      (match Digestif.SHA256.consistent_of_hex_opt body_sha256 with
-       | Some digest when String.equal body_sha256 (Digestif.SHA256.to_hex digest) ->
+      (match Agent_core_sha256.consistent_of_hex_opt body_sha256 with
+       | Some digest when String.equal body_sha256 (Agent_core_sha256.to_hex digest) ->
          Ok {output_token_receipt; body_bytes; body_sha256}
        | Some _ | None -> Error "request provenance: invalid canonical SHA256")
     | _ -> Error "request provenance: expected positive body bytes and SHA256"

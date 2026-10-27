@@ -884,13 +884,13 @@ let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Ma
     { tool_use_id = (match execution with Inline -> "run-nested" | Async ->
         Masc.Keeper_tool_plan.Composition_run_id.of_string run_id |> require "original result receipt run"
           |> Masc.Keeper_composition_nested_run.async_result_parent); content_bytes = String.length result_content
-    ; content_sha256 = Digestif.SHA256.(digest_string result_content |> to_hex) } in
+    ; content_sha256 = Agent_core_sha256.(digest_string result_content |> to_hex) } in
   (match execution with
    | Inline -> ()
    | Async ->
      let accepted_receipt : Ledger.tool_result_receipt =
        {tool_use_id="run-nested";content_bytes=String.length accepted_content;
-        content_sha256=Digestif.SHA256.(digest_string accepted_content |> to_hex)} in
+        content_sha256=Agent_core_sha256.(digest_string accepted_content |> to_hex)} in
      let delivered = Recorder.observe_delivery ~config recorder ~tool_results:[accepted_receipt]
        ~boundary:(Ledger.Model_response {agent_core_turn=2}) ~runtime_id:"later.runtime"
        |> require "observe only actual original acceptance receipt" in

@@ -114,7 +114,7 @@ let test_issued_partition_preserves_occurrences () =
     check int "contiguous actual source offset" !cursor offset;
     let actual = String.sub (L.text rendered) offset bytes in
     check string "actual slice hash" (member "sha256" span |> to_string)
-      Digestif.SHA256.(digest_string actual |> to_hex);
+      Agent_core_sha256.(digest_string actual |> to_hex);
     cursor := offset + bytes) spans;
   check int "all bytes accounted for" (String.length (L.text rendered)) !cursor
 

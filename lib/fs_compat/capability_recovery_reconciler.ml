@@ -222,7 +222,7 @@ type report =
   ; rows : row list
   }
 
-let sha256 raw = Digestif.SHA256.(digest_string raw |> to_hex)
+let sha256 raw = Agent_core_sha256.(digest_string raw |> to_hex)
 
 let digest_json json =
   let canonical = json |> Yojson.Safe.sort |> Yojson.Safe.to_string in

@@ -104,7 +104,7 @@ let media_dir ~base_dir =
    normalized media type in the digest material so identical bytes mislabeled as
    different media types cannot create multiple files for one token. *)
 let token_of_payload ~media_type data =
-  Digestif.SHA256.(digest_string (normalize media_type ^ "\000" ^ data) |> to_hex)
+  Agent_core_sha256.(digest_string (normalize media_type ^ "\000" ^ data) |> to_hex)
 
 let media_url token = Printf.sprintf "/api/v1/media/%s" token
 

@@ -763,7 +763,7 @@ let run_runtime_evidence () =
           Alcotest.(check string) "actual answer model" "jev-fixture" (member "model" evaluation |> string);
           Alcotest.(check string) "destination observation is sanitized" displayed_jev_uri (member "destination_uri" evaluation |> string);
           Alcotest.(check string) "actual HTTP request digest"
-            Digestif.SHA256.(digest_string raw |> to_hex)
+            Agent_core_sha256.(digest_string raw |> to_hex)
             (member "request_body_sha256" evaluation |> string);
           let evaluations = member "evaluations" gate |> Yojson.Safe.Util.to_list in
           Alcotest.(check int) "each complete source has its own judgment" 2 (List.length evaluations);
@@ -1330,7 +1330,7 @@ let test_cancelled_next_request_keeps_the_completed_observation () =
     (match evaluation.result with
      | Ok evaluated ->
        Alcotest.(check string) "completed response hash identifies the sent bytes"
-         Digestif.SHA256.(digest_string sent |> to_hex) evaluated.request_body_sha256;
+         Agent_core_sha256.(digest_string sent |> to_hex) evaluated.request_body_sha256;
        (match evaluated.response.answers with
         | [ "s0_0", T.Choice_answer { choice; _ } ] ->
           Alcotest.(check string) "raw completed choice survives cancellation" "mergeable" choice
@@ -2539,7 +2539,7 @@ let record_gate_evaluations ~respond ~facts ~absorbed =
         let body = T.request_to_yojson ~model:replay_destination.model ~state ~questions
           |> Yojson.Safe.to_string in
         Ok { C.response; destination = replay_destination; passed_over = [];
-          request_body_sha256 = Digestif.SHA256.(digest_string body |> to_hex) } in
+          request_body_sha256 = Agent_core_sha256.(digest_string body |> to_hex) } in
     let evaluation : Gate.evaluation =
       { direction; destinations = [replay_destination]; state; questions; result } in
     records := { Gate.request = Gate.evaluation_request_to_yojson ~direction

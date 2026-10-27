@@ -14,7 +14,7 @@
  (modules tool_projection)
  (libraries
   yojson
-  digestif
+   masc.agent_core.digest
   eio
   masc_core
   masc_log

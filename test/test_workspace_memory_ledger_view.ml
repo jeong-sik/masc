@@ -6,7 +6,7 @@ let require = function Ok value -> value | Error detail -> Alcotest.fail detail
 let ledger claims =
   let selected : Ledger.pending_fact list = List.map (fun claim ->
     { Ledger.fact = Ledger.Ordinary { keeper_id = "writer";
-        claim_sha256 = Digestif.SHA256.(digest_string claim |> to_hex) }; claim }) claims in
+        claim_sha256 = Agent_core_sha256.(digest_string claim |> to_hex) }; claim }) claims in
   let assignments : Ledger.assignment list = List.map (fun (row : Ledger.pending_fact) ->
     { Ledger.fact = row.fact; decision = Ledger.Create_claim row.claim }) selected in
   match Ledger.apply Ledger.empty ~selected assignments with
@@ -19,7 +19,7 @@ let with_base f =
 
 let check_summary label expected response =
   let open Yojson.Safe.Util in
-  let expected_sha256 = Digestif.SHA256.(digest_string
+  let expected_sha256 = Agent_core_sha256.(digest_string
     (Yojson.Safe.to_string (Ledger.to_json expected)) |> to_hex) in
   Alcotest.(check string) (label ^ " binds its exact content") expected_sha256
     (response |> member "ledger_sha256" |> to_string);

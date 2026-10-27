@@ -1727,7 +1727,7 @@ let expected_jev_provenance run : Candidate.system_one_provenance =
   | [ body ] ->
     { destination_uri = run.jev_destination
     ; answering_model_id = "jev-latest"
-    ; request_body_sha256 = Digestif.SHA256.(digest_string body |> to_hex)
+    ; request_body_sha256 = Agent_core_sha256.(digest_string body |> to_hex)
     }
   | bodies ->
     Alcotest.failf
@@ -2509,7 +2509,7 @@ let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
       | [ body ] ->
         Alcotest.(check string)
           "the adapter hashes the exact serialized body"
-          Digestif.SHA256.(digest_string body |> to_hex)
+          Agent_core_sha256.(digest_string body |> to_hex)
           judged.provenance.request_body_sha256;
         let request_json = Yojson.Safe.from_string body in
         let state, relevance =

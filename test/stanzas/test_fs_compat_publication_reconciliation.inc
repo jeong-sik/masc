@@ -12,4 +12,4 @@
   unix
   uuidm
   yojson
-  digestif))
+  masc.agent_core.digest))

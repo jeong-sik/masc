@@ -75,7 +75,7 @@ let snapshot base =
 let content = function None -> "" | Some (file:Fs_compat.owned_regular_file_contents) -> file.content
 let revision first =
   let item = function None -> `Null | Some (file:Fs_compat.owned_regular_file_contents) -> `String file.content in
-  Revision (Digestif.SHA256.(to_hex (digest_string (Yojson.Safe.to_string (`List [item first])))))
+  Revision (Agent_core_sha256.(to_hex (digest_string (Yojson.Safe.to_string (`List [item first])))))
 let same_file a b = match a,b with
   | None,None -> true
   | Some (a:Fs_compat.owned_regular_file_contents),Some (b:Fs_compat.owned_regular_file_contents) -> a.content=b.content

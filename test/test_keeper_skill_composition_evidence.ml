@@ -190,8 +190,8 @@ let store_dir config =
 let partition reference =
   Skill_reference.to_yojson reference
   |> Yojson.Safe.to_string
-  |> Digestif.SHA256.digest_string
-  |> Digestif.SHA256.to_hex
+  |> Agent_core_sha256.digest_string
+  |> Agent_core_sha256.to_hex
 ;;
 
 let test_same_reference_runs_do_not_overlap () =

@@ -1275,7 +1275,7 @@ let test_goal_and_task_read_deliver_full_png () =
   Alcotest.(check bool) "fixture exceeds text Read default" true (String.length bytes > 200000);
   let image_path = Filename.concat root "proof.png" in
   Out_channel.with_open_bin image_path (fun out -> output_string out bytes);
-  let sha = Digestif.SHA256.(digest_string bytes |> to_hex) in
+  let sha = Agent_core_sha256.(digest_string bytes |> to_hex) in
   let encoded = Base64.encode_exn bytes in
   let task_surface = VAT.create ~submitted_evidence:[] ~config ~producer:producer_name |> Result.get_ok in
   let goal_surface = VAT.create_goal_proof ~submitted_evidence:[] ~config |> Result.get_ok in
@@ -1354,7 +1354,7 @@ let test_goal_and_task_inspect_real_pdf () =
   let fixture = Filename.concat (Masc_test_deps.find_project_root ())
     "docs/evidence/2026-09-10-collaboration-baseline/goal-publication/booklet.pdf" in
   let bytes = In_channel.with_open_bin fixture In_channel.input_all in
-  let sha = Digestif.SHA256.(digest_string bytes |> to_hex) in
+  let sha = Agent_core_sha256.(digest_string bytes |> to_hex) in
   let source = Filename.concat root "booklet.pdf" in
   Out_channel.with_open_bin source (fun out -> output_string out bytes);
   Out_channel.with_open_bin (Filename.concat root "broken.pdf")
@@ -1383,7 +1383,7 @@ let test_goal_and_task_inspect_real_pdf () =
        List.iteri (fun i (page,png) ->
          Alcotest.(check int) "page identity" (i+1) (member "page" page |> to_int);
          Alcotest.(check string) "rendered bytes tied to metadata"
-           Digestif.SHA256.(digest_string png |> to_hex)
+           Agent_core_sha256.(digest_string png |> to_hex)
            (member "rendered_sha256" page |> to_string);
          Alcotest.(check bool) "A4 width from parsed PDF geometry" true
            (abs_float ((member "width_points" page |> to_float) -. 595.2756) < 0.001);
@@ -1432,7 +1432,7 @@ let test_goal_and_task_inspect_real_mp4 () =
   let fixture = Filename.concat (Masc_test_deps.find_project_root ())
     "test/fixtures/verifier-video.mp4" in
   let bytes = In_channel.with_open_bin fixture In_channel.input_all in
-  let sha = Digestif.SHA256.(digest_string bytes |> to_hex) in
+  let sha = Agent_core_sha256.(digest_string bytes |> to_hex) in
   let source = Filename.concat root "clip.mp4" in
   Out_channel.with_open_bin source (fun out -> output_string out bytes);
   Out_channel.with_open_bin (Filename.concat root "broken.mp4")
@@ -1535,7 +1535,7 @@ let test_a_capture_without_the_mp4_extension_is_still_inspected () =
   let fixture = Filename.concat (Masc_test_deps.find_project_root ())
     "test/fixtures/verifier-video.mp4" in
   let bytes = In_channel.with_open_bin fixture In_channel.input_all in
-  let sha = Digestif.SHA256.(digest_string bytes |> to_hex) in
+  let sha = Agent_core_sha256.(digest_string bytes |> to_hex) in
   List.iter (fun filename ->
   Out_channel.with_open_bin (Filename.concat root filename)
     (fun out -> output_string out bytes);

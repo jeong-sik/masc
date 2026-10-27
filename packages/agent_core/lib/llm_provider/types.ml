@@ -345,7 +345,7 @@ module Reasoning_source = struct
   let provider_instance ~base_url ~request_path =
     let canonical value = Uri.of_string value |> Uri.canonicalize |> Uri.to_string in
     let material = canonical base_url ^ "\000" ^ canonical request_path in
-    Provider_instance_id Digestif.SHA256.(to_hex (digest_string material))
+    Provider_instance_id Agent_core_sha256.(to_hex (digest_string material))
   ;;
 
   let create ~provider_kind ~provider_instance ~canonical_model_id ~replay_contract =

@@ -146,13 +146,13 @@ let test_real_dispatch_preserves_pair_across_refusal () =
     check int "bound evidence counts the exact prepared body" (String.length body)
       (row |> U.member "wire" |> U.member "body_bytes" |> U.to_int);
     check string "bound evidence names the exact prepared body digest"
-      Digestif.SHA256.(digest_string body |> to_hex)
+      Agent_core_sha256.(digest_string body |> to_hex)
       (row |> U.member "wire" |> U.member "body_sha256" |> U.to_string);
     let selection = U.member "selection" row in
     check string "selection keeps the snapshot prefix identity" snapshot.prefix_sha256
       (selection |> U.member "prefix_sha256" |> U.to_string);
     check string "working state is represented by its digest"
-      Digestif.SHA256.(digest_string working_state |> to_hex)
+      Agent_core_sha256.(digest_string working_state |> to_hex)
       (selection |> U.member "working_state_sha256" |> U.to_string);
     check bool "raw working state is absent" true
       (selection |> U.member "working_state" = `Null))
@@ -227,7 +227,7 @@ let test_real_dispatch_freezes_unread_across_refusal () =
     let body=List.hd (Fixture.request_bodies peer) in
     check int "diagnostic counts the actual body bytes" (String.length body)
       (row |> U.member "wire" |> U.member "body_bytes" |> U.to_int);
-    check string "diagnostic hashes the actual body bytes" Digestif.SHA256.(digest_string body |> to_hex)
+    check string "diagnostic hashes the actual body bytes" Agent_core_sha256.(digest_string body |> to_hex)
       (row |> U.member "wire" |> U.member "body_sha256" |> U.to_string))
     ["refused.sample",refused;"accepted.sample",accepted];
   let ledger=Keeper_memory_os_current.read_unread_messages ~keepers_dir ~keeper_id:keeper_name |> require in

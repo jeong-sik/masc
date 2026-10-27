@@ -12,7 +12,7 @@ let trace_id prefix =
     Printf.sprintf "%s|%d|%.6f|%d"
       prefix (Unix.getpid ()) (Unix.gettimeofday ()) (Random.bits ())
   in
-  let digest = Digestif.SHA256.(digest_string entropy |> to_hex) in
+  let digest = Agent_core_sha256.(digest_string entropy |> to_hex) in
   prefix ^ "_" ^ String.sub digest 0 16
 
 let normalized_actor ~context_actor = function

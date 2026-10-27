@@ -11,7 +11,7 @@ type durability = Durable | Unconfirmed of string
 type receipt = { document : document; state : write_state; durability : durability }
 let ( let* ) = Result.bind
 let reject ?current code message = Error {code;message;current}
-let digest text = Digestif.SHA256.(to_hex (digest_string text))
+let digest text = Agent_core_sha256.(to_hex (digest_string text))
 let code = function Invalid_request -> "invalid_request" | Not_found -> "not_found"
   | Revision_conflict -> "revision_conflict" | Invalid_declaration -> "invalid_declaration" | Io_error -> "io_error"
 let nullable = function None -> `Null | Some text -> `String text

@@ -777,5 +777,5 @@ let digest surface =
     |> Yojson.Safe.sort
     |> Yojson.Safe.to_string
   in
-  Digestif.SHA256.(digest_string canonical |> to_hex)
+  Agent_core_sha256.(digest_string canonical |> to_hex)
 ;;

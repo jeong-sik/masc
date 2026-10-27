@@ -19,7 +19,7 @@
   masc.fusion_core
   base64
   dune-build-info
-  digestif
+   masc.agent_core.digest
   unix
   uuidm
   logs

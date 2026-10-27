@@ -284,18 +284,18 @@ let namespace_truth_snapshot_from_caches (state : Mcp_server.server_state) :
       (Namespace_truth_support.compose_namespace_truth_snapshot ~config
          ~initialized:(Workspace.is_initialized config) ~shell_json ~execution_json)
 
-let last_namespace_truth_snapshot_hash : Digestif.SHA256.t option ref =
+let last_namespace_truth_snapshot_hash : Agent_core_sha256.t option ref =
   ref None
 
 let namespace_truth_snapshot_hash_mu = Eio.Mutex.create ()
 
-let hash_namespace_truth_snapshot (snapshot : Yojson.Safe.t) : Digestif.SHA256.t =
+let hash_namespace_truth_snapshot (snapshot : Yojson.Safe.t) : Agent_core_sha256.t =
   (* Incremental SHA256 over the snapshot structure, skipping the volatile
      [generated_at]/[generated_at_iso] fields (they change every compose but
      must not trigger a broadcast). Replaces the prior normalize-copy +
      [Yojson.Safe.to_string] + [digest_string], which allocated a normalized
      Yojson tree AND a full serialized string on every broadcast check. This
-     walks the structure once, feeding [Digestif.SHA256.feed_string] directly:
+     walks the structure once, feeding [Agent_core_sha256.feed_string] directly:
      one O(n) pass, no intermediate Yojson or string allocation.
 
      The hash value differs from the old string-hash (different bytes fed),
@@ -303,52 +303,52 @@ let hash_namespace_truth_snapshot (snapshot : Yojson.Safe.t) : Digestif.SHA256.t
      detection (compare current to previous, both via this walker), so the
      broadcast semantics are preserved. Type tags (S/I/F/...) prevent prefix
      collisions between scalar kinds. *)
-  let rec walk (ctx : Digestif.SHA256.ctx) (json : Yojson.Safe.t) :
-      Digestif.SHA256.ctx =
+  let rec walk (ctx : Agent_core_sha256.ctx) (json : Yojson.Safe.t) :
+      Agent_core_sha256.ctx =
     match json with
     | `Assoc fields ->
-        let ctx = Digestif.SHA256.feed_string ctx "{" in
+        let ctx = Agent_core_sha256.feed_string ctx "{" in
         let ctx =
           List.fold_left
             (fun ctx (key, value) ->
                if String.equal key "generated_at" || String.equal key "generated_at_iso"
                then ctx
                else
-                 let ctx = Digestif.SHA256.feed_string ctx key in
-                 let ctx = Digestif.SHA256.feed_string ctx ":" in
+                 let ctx = Agent_core_sha256.feed_string ctx key in
+                 let ctx = Agent_core_sha256.feed_string ctx ":" in
                  walk ctx value)
             ctx fields
         in
-        Digestif.SHA256.feed_string ctx "}"
+        Agent_core_sha256.feed_string ctx "}"
     | `List values ->
-        let ctx = Digestif.SHA256.feed_string ctx "[" in
+        let ctx = Agent_core_sha256.feed_string ctx "[" in
         let ctx = List.fold_left walk ctx values in
-        Digestif.SHA256.feed_string ctx "]"
+        Agent_core_sha256.feed_string ctx "]"
     | `String s ->
         (* Length-prefix variable-length string fields so distinct JSON
            payloads cannot collide in the hash stream (e.g. ["aS","b"] vs
            ["a","Sb"]). The exact separator format is internal to this hash. *)
-        let ctx = Digestif.SHA256.feed_string ctx (Printf.sprintf "S%d:" (String.length s)) in
-        Digestif.SHA256.feed_string ctx s
+        let ctx = Agent_core_sha256.feed_string ctx (Printf.sprintf "S%d:" (String.length s)) in
+        Agent_core_sha256.feed_string ctx s
     | `Int n ->
-        let ctx = Digestif.SHA256.feed_string ctx "I" in
-        Digestif.SHA256.feed_string ctx (string_of_int n)
+        let ctx = Agent_core_sha256.feed_string ctx "I" in
+        Agent_core_sha256.feed_string ctx (string_of_int n)
     | `Intlit s ->
-        let ctx = Digestif.SHA256.feed_string ctx "L" in
-        Digestif.SHA256.feed_string ctx s
+        let ctx = Agent_core_sha256.feed_string ctx "L" in
+        Agent_core_sha256.feed_string ctx s
     | `Float f ->
-        let ctx = Digestif.SHA256.feed_string ctx "F" in
-        Digestif.SHA256.feed_string ctx (string_of_float f)
-    | `Bool b -> Digestif.SHA256.feed_string ctx (if b then "Bt" else "Bf")
-    | `Null -> Digestif.SHA256.feed_string ctx "N"
+        let ctx = Agent_core_sha256.feed_string ctx "F" in
+        Agent_core_sha256.feed_string ctx (string_of_float f)
+    | `Bool b -> Agent_core_sha256.feed_string ctx (if b then "Bt" else "Bf")
+    | `Null -> Agent_core_sha256.feed_string ctx "N"
   in
-  Digestif.SHA256.get (walk Digestif.SHA256.empty snapshot)
+  Agent_core_sha256.get (walk Agent_core_sha256.empty snapshot)
 
 let should_broadcast_namespace_truth_snapshot (snapshot : Yojson.Safe.t) =
   let hash = hash_namespace_truth_snapshot snapshot in
   Eio.Mutex.use_rw ~protect:true namespace_truth_snapshot_hash_mu (fun () ->
       match !last_namespace_truth_snapshot_hash with
-      | Some prev when Digestif.SHA256.equal prev hash -> false
+      | Some prev when Agent_core_sha256.equal prev hash -> false
       | _ ->
           last_namespace_truth_snapshot_hash := Some hash;
           true)

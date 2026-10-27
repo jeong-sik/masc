@@ -19,7 +19,7 @@ let tools_json = function
   | Some No_tools_member ->
     let json = "[]" in
     `Assoc ["state",`String "absent";"wire_entries",`Int 0;
-      "json_bytes",`Int (String.length json);"json_sha256",`String Digestif.SHA256.(digest_string json |> to_hex)]
+      "json_bytes",`Int (String.length json);"json_sha256",`String Agent_core_sha256.(digest_string json |> to_hex)]
   | Some (Tools_member {wire_entries;json_bytes;json_sha256}) ->
     `Assoc ["state",`String "present";"wire_entries",`Int wire_entries;
       "json_bytes",`Int json_bytes;"json_sha256",`String json_sha256]
@@ -77,7 +77,7 @@ let snapshot observation =
     | _ -> None) in
   let failures = Observe.delivery_failure_count observation.observer in
   let sha_file = try
-      Some Digestif.SHA256.(In_channel.with_open_bin observation.path In_channel.input_all |> digest_string |> to_hex)
+      Some Agent_core_sha256.(In_channel.with_open_bin observation.path In_channel.input_all |> digest_string |> to_hex)
     with Sys_error _ | Unix.Unix_error _ -> None in
   let complete = failures=0 && List.for_all Option.is_some facts && Option.is_some sha_file in
   let first_dispatched_entry = if not complete then None else

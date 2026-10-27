@@ -33,7 +33,7 @@ let classification_prompt = prompt "Original instructions:\n{{workspace_memory_c
 let render key variable p input =
   Prompt_registry.render_resolved_prompt_template key p [variable,Yojson.Safe.to_string input]
 let fact keeper claim : L.pending_fact =
-  {fact=L.Ordinary {keeper_id=keeper;claim_sha256=Digestif.SHA256.(digest_string claim |> to_hex)};claim}
+  {fact=L.Ordinary {keeper_id=keeper;claim_sha256=Agent_core_sha256.(digest_string claim |> to_hex)};claim}
 let stored_ledger base_path ledger =
   get (Revision.write_ledger ~base_path ledger |> Result.map_error Revision.write_error_to_string)
 let classification ?(ledger=L.empty) ?(narrowed=true) ?(request_id=id) ~base_path workspace =
@@ -174,7 +174,7 @@ let test_a_restore_refuses_a_changed_input_that_still_decodes () = with_workspac
   let rows f = function `List rows -> `List (List.map f rows) | _ -> Alcotest.fail "expected array" in
   let a,_,_,classified = classification ~base_path:root workspace in
   let forged = "Forged source evidence A" in
-  let sha text = `String Digestif.SHA256.(digest_string text |> to_hex) in
+  let sha text = `String Agent_core_sha256.(digest_string text |> to_hex) in
   let forge_claim batch =
     let input = member "input" batch in
     let claims = rows (fun row ->

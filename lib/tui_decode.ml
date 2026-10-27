@@ -7977,7 +7977,7 @@ let decode_inline_preview ~declared_bytes ~declared_sha256 encoded =
       else if
         not
           (String.equal declared_sha256
-             Digestif.SHA256.(digest_string data |> to_hex))
+             Agent_core_sha256.(digest_string data |> to_hex))
       then Preview_defective Defect_digest_mismatch
       else
         match Keeper_vision_tool.sniff_image_media_type data with
@@ -8539,8 +8539,8 @@ let decode_msx_checkpoint_receipt ~operation_id ~restore ~slot ~base_path ~masc_
       let* count = field "change_count" evidence in
       let* () = match count with `Int count when count>=0 -> Ok () | _ -> invalid () in
       let* digest = string "checkpoint_sha256" evidence in
-      let* () = match Digestif.SHA256.consistent_of_hex_opt digest with
-        | Some parsed when Digestif.SHA256.to_hex parsed=digest -> Ok () | _ -> invalid () in
+      let* () = match Agent_core_sha256.consistent_of_hex_opt digest with
+        | Some parsed when Agent_core_sha256.to_hex parsed=digest -> Ok () | _ -> invalid () in
       (match List.assoc_opt "live" fields with
        | None -> Ok (Checkpoint_committed None)
        | Some live when List.assoc_opt "live_relation" fields=Some (`String "observed_after_completion") ->

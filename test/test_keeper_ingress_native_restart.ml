@@ -53,9 +53,9 @@ let executable_sha256 () =
   In_channel.with_open_bin Sys.executable_name (fun channel ->
     let buffer = Bytes.create Sys.io_buffer_size in
     let rec loop context = match input channel buffer 0 (Bytes.length buffer) with
-      | 0 -> Digestif.SHA256.(get context |> to_hex)
-      | size -> loop (Digestif.SHA256.feed_bytes context ~off:0 ~len:size buffer) in
-    loop Digestif.SHA256.empty)
+      | 0 -> Agent_core_sha256.(get context |> to_hex)
+      | size -> loop (Agent_core_sha256.feed_bytes context ~off:0 ~len:size buffer) in
+    loop Agent_core_sha256.empty)
 
 let emit_evidence ~root ~cut ~executable_sha256 ~note_rows ~target_tool_log_rows =
   let json = `Assoc [

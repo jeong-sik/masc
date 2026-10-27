@@ -19,7 +19,7 @@ let rec normalize_json = function
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as json -> json
 ;;
 
-let sha256_hex raw = Digestif.SHA256.(digest_string raw |> to_hex)
+let sha256_hex raw = Agent_core_sha256.(digest_string raw |> to_hex)
 
 let digest_json json =
   json |> normalize_json |> Yojson.Safe.to_string |> sha256_hex

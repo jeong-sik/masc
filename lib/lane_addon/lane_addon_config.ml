@@ -169,7 +169,7 @@ let decode ~source_path ~source_revision ~id fields =
       "package", Lane_addon_types.package_to_json {package with ui_category=None}; "binding", binding]
     |> Yojson.Safe.sort |> Yojson.Safe.to_string
   in
-  let revision = Digestif.SHA256.(to_hex (digest_string canonical)) in
+  let revision = Agent_core_sha256.(to_hex (digest_string canonical)) in
   Ok { id; enabled; run_id; manifest_path; package; binding; revision; source_revision; source_path }
 
 let parse_declaration ~source_path bytes =
@@ -183,7 +183,7 @@ let parse_declaration ~source_path bytes =
             | Error message -> failure ~unreadable:false message
             | Ok id ->
                 try
-                  let source_revision = Digestif.SHA256.(to_hex (digest_string bytes)) in
+                  let source_revision = Agent_core_sha256.(to_hex (digest_string bytes)) in
                   match decode ~source_path ~source_revision ~id fields with
                   | Ok declaration -> Ok declaration
                   | Error message -> failure ~id ~unreadable:false message

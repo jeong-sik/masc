@@ -27,7 +27,7 @@
   masc_keeper_registry
   masc_config_dir_resolver
   masc_log
-  digestif
+   masc.agent_core.digest
   yojson
   time_compat
   eio

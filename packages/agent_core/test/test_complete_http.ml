@@ -22,7 +22,7 @@ let check_observed_request_metadata ~body events =
        List.iter2 (fun (_,value) (member : Http_request_observer.request_member) ->
          let json = Yojson.Safe.to_string value in
          check int "actual peer value bytes" (String.length json) member.value_json_bytes;
-         check string "actual peer value digest" Digestif.SHA256.(digest_string json |> to_hex)
+         check string "actual peer value digest" Agent_core_sha256.(digest_string json |> to_hex)
            member.value_json_sha256) fields members
    | _ -> fail "component observation was unavailable for an actual compact JSON request");
   match Yojson.Safe.Util.member "tools" (Yojson.Safe.from_string body),actual with
@@ -31,7 +31,7 @@ let check_observed_request_metadata ~body events =
     let json = Yojson.Safe.to_string tools in
     check int "actual wire entries, including provider wrappers" (List.length entries) wire_entries;
     check int "actual peer tool encoding bytes" (String.length json) json_bytes;
-    check string "actual peer tool encoding digest" Digestif.SHA256.(digest_string json |> to_hex) json_sha256
+    check string "actual peer tool encoding digest" Agent_core_sha256.(digest_string json |> to_hex) json_sha256
   | _ -> fail "observed inventory did not describe the actual received tools"
 ;;
 
@@ -509,7 +509,7 @@ let test_complete_request_wire_observer_sees_exact_sync_body () =
        check
          string
          "exact digest"
-         Digestif.SHA256.(to_hex (digest_string body))
+         Agent_core_sha256.(to_hex (digest_string body))
          observation.body_sha256
      | None, _ -> fail "mock server did not capture the request body"
      | Some _, _ -> fail "request observer was not invoked exactly once");
@@ -1035,7 +1035,7 @@ let test_complete_cache_store_and_hit () =
        let body = match !received with Some body -> body
          | None -> fail "cache miss never reached peer" in
        check string "public miss describes actual peer body"
-         Digestif.SHA256.(digest_string body |> to_hex) sent.body_sha256
+         Agent_core_sha256.(digest_string body |> to_hex) sent.body_sha256
      | (Completion_outcome.Not_serialized | Completion_outcome.Cache_reused _
        | Completion_outcome.External_unobserved | Completion_outcome.Interrupted_unobserved), _
      | Completion_outcome.Serialized _, (Completion_outcome.Not_serialized
@@ -2177,7 +2177,7 @@ let test_complete_request_wire_observer_sees_exact_stream_body () =
        check
          string
          "exact digest"
-         Digestif.SHA256.(to_hex (digest_string body))
+         Agent_core_sha256.(to_hex (digest_string body))
          observation.body_sha256
      | None, _ -> fail "SSE server did not capture the request body"
      | Some _, _ -> fail "stream request observer was not invoked exactly once");
@@ -4637,7 +4637,7 @@ let test_native_completion_outcome ?(public = false) ~via_transport () =
           | Completion_outcome.Serialized actual ->
             check int "actual peer body length" (String.length body) actual.body_bytes;
             check string "actual peer body digest"
-              Digestif.SHA256.(digest_string body |> to_hex) actual.body_sha256;
+              Agent_core_sha256.(digest_string body |> to_hex) actual.body_sha256;
             check (option int) "caller intent retained" (Some 200)
               (Types.output_token_receipt_requested actual.output_token_receipt);
             check (option int) "actual wire decision retained"
@@ -4800,7 +4800,7 @@ let test_prepared_work_timeout_retains_serialization () =
        let body = match !captured with Some body -> body
          | None -> fail "deadline moved before peer received the request" in
        check string "interruption preserves known peer body"
-         Digestif.SHA256.(digest_string body |> to_hex) request.body_sha256
+         Agent_core_sha256.(digest_string body |> to_hex) request.body_sha256
      | Completion_outcome.Not_serialized | Completion_outcome.Cache_reused _
      | Completion_outcome.External_unobserved | Completion_outcome.Interrupted_unobserved ->
        fail "work timeout discarded known prepared serialization");

@@ -685,7 +685,7 @@ let recorded_part (activation : activation) =
 let activation_frame_to_yojson activation = activation_to_yojson (recorded_part activation)
 
 let activation_frame_sha256 activation =
-  Digestif.SHA256.(digest_string (Yojson.Safe.to_string (activation_frame_to_yojson activation)) |> to_hex)
+  Agent_core_sha256.(digest_string (Yojson.Safe.to_string (activation_frame_to_yojson activation)) |> to_hex)
 ;;
 
 let async_evidence_for_activation ledger (activation : activation) =
@@ -706,7 +706,7 @@ let async_evidence_for_activation ledger (activation : activation) =
 ;;
 
 let workspace_key_of_root root =
-  Digestif.SHA256.(digest_string root |> to_hex)
+  Agent_core_sha256.(digest_string root |> to_hex)
 ;;
 
 let revision_of_ledger ~workspace_key ~session_id ~activations ~transition_rejections ~async_result_deliveries ~async_actions =
@@ -721,7 +721,7 @@ let revision_of_ledger ~workspace_key ~session_id ~activations ~transition_rejec
       ; "async_actions", `List (List.map Keeper_skill_async_action.to_json async_actions)
       ]
   in
-  Digestif.SHA256.(digest_string (Yojson.Safe.to_string canonical) |> to_hex)
+  Agent_core_sha256.(digest_string (Yojson.Safe.to_string canonical) |> to_hex)
 ;;
 
 let make ~workspace_key ~session_id ~activations ~transition_rejections ~async_result_deliveries ~async_actions =
@@ -757,7 +757,7 @@ let receipt_projection_revision ledger ~skill_tool_use_id =
   in
   add "ledger_revision" (revision ledger);
   add "skill_tool_use_id" skill_tool_use_id;
-  Digestif.SHA256.(digest_string (Buffer.contents buffer) |> to_hex)
+  Agent_core_sha256.(digest_string (Buffer.contents buffer) |> to_hex)
 ;;
 
 let empty ~workspace_root ~trace_id =
@@ -2030,7 +2030,7 @@ let apply_event_rows ~expected_trace_id ledger rows =
              | Missing_string { field } ->
                Missing_string_in_event_row
                  { field; row_in_batch
-                 ; row_sha256 = Digestif.SHA256.(digest_string row |> to_hex)
+                 ; row_sha256 = Agent_core_sha256.(digest_string row |> to_hex)
                  }
              | (Expected_object _
                | Missing_string_in_event_row _

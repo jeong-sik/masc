@@ -9,6 +9,6 @@
   masc.agent_core
   masc.skill_config
   masc.skill_reference
-  digestif
+   masc.agent_core.digest
   yojson
   unix))

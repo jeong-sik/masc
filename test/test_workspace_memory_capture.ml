@@ -27,7 +27,7 @@ let retain ?(installation_id = "original-installation") ?(package_id = "curator"
 let load store request_id = Owner.load ~store ~scope:"workspace-curator" ~request_id
 let render input = Ok ("Original captured prompt:\n" ^ Yojson.Safe.to_string input)
 let fact ?path keeper claim : Ledger.pending_fact =
-  let claim_sha256 = Digestif.SHA256.(digest_string claim |> to_hex) in
+  let claim_sha256 = Agent_core_sha256.(digest_string claim |> to_hex) in
   let fact = match path with
     | None -> Ledger.Ordinary {keeper_id=keeper;claim_sha256}
     | Some path -> Ledger.Source_bound {keeper_id=keeper;path;claim_sha256} in

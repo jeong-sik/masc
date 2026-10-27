@@ -4,7 +4,7 @@ module Memory = Masc.Keeper_memory_os_types
 module Queue = Masc.Keeper_memory_admission_queue
 module Selector = Masc.Keeper_memory_successor_selection
 let require = function Ok value -> value | Error detail -> fail detail
-let sha bytes = Digestif.SHA256.(digest_string bytes |> to_hex)
+let sha bytes = Agent_core_sha256.(digest_string bytes |> to_hex)
 let hash_json json = sha (Yojson.Safe.to_string json)
 let () = Masc.Prompt_defaults.init ()
 

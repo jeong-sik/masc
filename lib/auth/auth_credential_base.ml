@@ -23,8 +23,8 @@ let is_generated_token_shape raw =
        raw
 ;;
 
-(** SHA256 hash of a string using Digestif *)
-let sha256_hash input = Digestif.SHA256.(digest_string input |> to_hex)
+(** SHA256 hash of a string, fed in slices by Agent_core_sha256 *)
+let sha256_hash input = Agent_core_sha256.(digest_string input |> to_hex)
 
 (** Timing-resistant equality delegated to Eqaf. Runtime depends on the public
     input lengths, not secret contents. Auth comparisons below operate on

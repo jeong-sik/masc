@@ -16,7 +16,7 @@ let encode = function
                         | Some (`String id) -> Ok ("machine-live/" ^ id)
                         | _ -> Error "machine row requires an id" in
                       let bytes = Yojson.Safe.to_string live in
-                      let digest = Digestif.SHA256.(to_hex (digest_string bytes)) in
+                      let digest = Agent_core_sha256.(to_hex (digest_string bytes)) in
                       let reference = `Assoc ["uri", `String ("lane-evidence:" ^ digest); "sha256", `String digest] in
                       let* evidence = match List.assoc_opt "evidence" fields with
                         | Some (`List evidence) -> Ok evidence | _ -> Error "machine row requires evidence" in

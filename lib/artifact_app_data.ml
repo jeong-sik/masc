@@ -40,7 +40,7 @@ and json_values = function
 let data_of_json = function
   | `Assoc _ as json -> json_value json
   | _ -> Error "application data must be a JSON object"
-let digest data = Digestif.SHA256.(to_hex (digest_string (Yojson.Safe.to_string data)))
+let digest data = Agent_core_sha256.(to_hex (digest_string (Yojson.Safe.to_string data)))
 let valid_target target =
   if Published_artifact.valid_id target.artifact_id && target.revision > 0 && safe_integer target.revision then Ok ()
   else Error "invalid application data artifact or revision"

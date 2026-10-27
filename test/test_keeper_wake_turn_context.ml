@@ -1547,7 +1547,7 @@ let test_prepared_prompt_keeps_turn_inputs_and_request_authority () =
         let actual = String.sub parts.world_state offset bytes in
         check string "each reassembled span names its actual UTF8 content"
           (span |> member "sha256" |> to_string)
-          Digestif.SHA256.(digest_string actual |> to_hex)) in
+          Agent_core_sha256.(digest_string actual |> to_hex)) in
     let access offered deferred loader_alive = shared_reader_access ~offered ~deferred ~loader_alive in
     let project access = Prompt.project_prompt prepared ~workspace_memory_access:access
         ~recent_work:(Masc.Keeper_recent_work.Evidence "최근 작업 근거: 🐾 원래 목표 계속") () in

@@ -52,7 +52,7 @@ let pdf_result ~base_path ~name ~path ~bytes ~start_time ~max_image_bytes =
               "height_points",`Float page.height_points;"text",`String page.text;
               "rendered_media_type",`String "image/png";
               "rendered_bytes",`Int (String.length page.png);
-              "rendered_sha256",`String Digestif.SHA256.(digest_string page.png |> to_hex)]) inspection.pages in
+              "rendered_sha256",`String Agent_core_sha256.(digest_string page.png |> to_hex)]) inspection.pages in
     let data = `Assoc ["path",`String path;"media_type",`String "application/pdf";
       "bytes",`Int inspection.source_bytes;"sha256",`String inspection.source_sha256;
       "page_count",`Int page_count;"pages",`List pages;
@@ -99,7 +99,7 @@ let presentation_result ~base_path ~name ~path ~bytes ~start_time ~max_image_byt
       `Assoc ["slide",`Int page.number;"width_points",`Float page.width_points;
         "height_points",`Float page.height_points;"rendered_text",`String page.text;
         "rendered_bytes",`Int (String.length page.png);
-        "rendered_sha256",`String Digestif.SHA256.(digest_string page.png |> to_hex)])
+        "rendered_sha256",`String Agent_core_sha256.(digest_string page.png |> to_hex)])
       inspection.rendered_pdf.pages in
     let data = `Assoc ["path",`String path;
       "media_type",`String "application/vnd.openxmlformats-officedocument.presentationml.presentation";

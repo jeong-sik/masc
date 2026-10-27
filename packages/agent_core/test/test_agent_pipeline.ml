@@ -327,7 +327,7 @@ let check_pre_dispatch_serialization ~label ~body observations =
     check
       string
       (label ^ " body digest")
-      Digestif.SHA256.(to_hex (digest_string body))
+      Agent_core_sha256.(to_hex (digest_string body))
       observation.body_sha256
   | observations -> failf "%s observer called %d times" label (List.length observations)
 ;;

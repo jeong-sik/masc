@@ -298,7 +298,7 @@ let publish options report bytes =
   in
   let fields =
     [ "output_path", `String options.output_path
-    ; "sha256", `String Digestif.SHA256.(to_hex (digest_string bytes))
+    ; "sha256", `String Agent_core_sha256.(to_hex (digest_string bytes))
     ; "all_cases_scored", `Bool all_scored
     ]
   in
@@ -323,7 +323,7 @@ let run options =
     ; run_id = identity.runtime_instance_id
     ; started_at = identity.started_at
     ; input_path = options.input_path
-    ; input_sha256 = Digestif.SHA256.(to_hex (digest_string input_bytes))
+    ; input_sha256 = Agent_core_sha256.(to_hex (digest_string input_bytes))
     ; output_path = options.output_path
     ; config_revision
     ; binary_commit = identity.binary_commit
@@ -352,7 +352,7 @@ let run_paired options ~schema ~extra_fields ~parse_dataset ~case_id
   let* () = check_output options in
   let* input_bytes, (provenance, cases) = read_dataset_with parse_dataset options.input_path in
   let snapshot_path case =
-    options.output_path ^ ".snapshot-" ^ Digestif.SHA256.(to_hex (digest_string (case_id case))) ^ ".json"
+    options.output_path ^ ".snapshot-" ^ Agent_core_sha256.(to_hex (digest_string (case_id case))) ^ ".json"
   in
   let rec check_snapshots = function
     | [] -> Ok ()
@@ -374,7 +374,7 @@ let run_paired options ~schema ~extra_fields ~parse_dataset ~case_id
       ; "run_id", `String identity.runtime_instance_id
       ; "started_at", `String identity.started_at
       ; "input_path", `String options.input_path
-      ; "input_sha256", `String Digestif.SHA256.(to_hex (digest_string input_bytes))
+      ; "input_sha256", `String Agent_core_sha256.(to_hex (digest_string input_bytes))
       ; "output_path", `String options.output_path
       ; "config_revision", `String config_revision
       ; "binary_commit", (match identity.binary_commit with None -> `Null | Some value -> `String value)
@@ -429,7 +429,7 @@ let run_paired options ~schema ~extra_fields ~parse_dataset ~case_id
         in
         print_endline (Yojson.Safe.to_string (`Assoc
           ([ "output_path", `String options.output_path
-           ; "sha256", `String Digestif.SHA256.(to_hex (digest_string bytes))
+           ; "sha256", `String Agent_core_sha256.(to_hex (digest_string bytes))
            ; "all_cases_scored", `Bool all_scored ]
            @ match publication with
              | Ok sha -> ["blob_sha256", (match sha with None -> `Null | Some value -> `String value)]
@@ -572,7 +572,7 @@ let snapshot_command mode =
   print_endline (Yojson.Safe.to_string (`Assoc
     [ "operation", `String command
     ; "output_path", `String output_path
-    ; "sha256", `String Digestif.SHA256.(to_hex (digest_string bytes))
+    ; "sha256", `String Agent_core_sha256.(to_hex (digest_string bytes))
     ; "semantic_continuity_evaluated", `Bool false
     ]));
   Ok 0

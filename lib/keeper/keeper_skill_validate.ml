@@ -59,7 +59,7 @@ let failure ~class_ ~code ~message fields =
    (#37493). *)
 let source_identity ~filename source_text =
   `Assoc
-    [ "sha256", `String Digestif.SHA256.(digest_string source_text |> to_hex)
+    [ "sha256", `String Agent_core_sha256.(digest_string source_text |> to_hex)
     ; "bytes", `Int (String.length source_text)
     ; "filename", `String filename
     ]

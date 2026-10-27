@@ -600,7 +600,7 @@ let test_receipts_are_the_bytes_the_cli_read () =
         | Error error -> fail (Runtime_claude_code.error_to_string error)
         | Ok _ -> ());
     let read file = In_channel.with_open_bin file In_channel.input_all in
-    let hash text = Digestif.SHA256.(digest_string text |> to_hex) in
+    let hash text = Agent_core_sha256.(digest_string text |> to_hex) in
     let line = read message_copy and file = read prompt_copy in
     let module Write = Runtime_official_client_write in
     match List.rev !receipts with

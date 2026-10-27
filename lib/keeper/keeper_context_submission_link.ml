@@ -30,7 +30,7 @@ type t =
   ; acquisitions : acquisition list
   }
 
-let hash text = Digestif.SHA256.(digest_string text |> to_hex)
+let hash text = Agent_core_sha256.(digest_string text |> to_hex)
 let literal text = { text; occurrences = []; omitted = []; acquisitions = [] }
 let text t = t.text
 

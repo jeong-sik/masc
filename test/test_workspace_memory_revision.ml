@@ -5,7 +5,7 @@ module Revision = Masc.Workspace_memory_revision
 let get = function Ok value -> value | Error detail -> Alcotest.fail detail
 let written = function Ok value -> value | Error error -> Alcotest.fail (Revision.write_error_to_string error)
 let read_back = function Ok value -> value | Error error -> Alcotest.fail (Revision.read_error_to_string error)
-let sha bytes = Digestif.SHA256.(digest_string bytes |> to_hex)
+let sha bytes = Agent_core_sha256.(digest_string bytes |> to_hex)
 let str value = `String value
 let json = Alcotest.testable Yojson.Safe.pp Yojson.Safe.equal
 

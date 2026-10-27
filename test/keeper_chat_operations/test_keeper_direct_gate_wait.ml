@@ -24,7 +24,7 @@ let checkpoint bytes = Keeper_checkpoint_ref.create
     ~trace_id:(Keeper_id.Trace_id.of_string "original-trace" |> require)
     ~turn_count:3 ~canonical_checkpoint_bytes:(canonical_bytes bytes) |> require
 let obligation = Semantic.gate_obligation ~approval_id:"approval-original"
-    ~tool_name:"tool_execute" ~input_hash:(Digestif.SHA256.(digest_string "original tool input" |> to_hex)) |> require
+    ~tool_name:"tool_execute" ~input_hash:(Agent_core_sha256.(digest_string "original tool input" |> to_hex)) |> require
 let waiting = Semantic.gate_wait ~checkpoint:(checkpoint "input and effect references") ~obligations:[obligation] |> require
 let preparation_source = function
   | Semantic.Agent_core reference -> Semantic.Prepared_agent_core {reference;canonical_checkpoint_bytes=canonical_bytes "input and effect references"}

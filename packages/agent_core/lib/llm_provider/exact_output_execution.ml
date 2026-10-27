@@ -92,7 +92,7 @@ let receipt_request_body_sha256 receipt = (receipt_identity receipt).request_bod
 
 let raw_response_evidence (raw : Http_client.raw_sync_response) response_header_evidence =
   { raw_body = raw.body
-  ; raw_body_sha256 = Digestif.SHA256.(to_hex (digest_string raw.body))
+  ; raw_body_sha256 = Agent_core_sha256.(to_hex (digest_string raw.body))
   ; response_header_evidence
   }
 ;;

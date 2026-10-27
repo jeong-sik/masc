@@ -1,4 +1,4 @@
-module Sha256 = Digestif.SHA256
+module Sha256 = Agent_core_sha256
 
 let ( let* ) = Result.bind
 

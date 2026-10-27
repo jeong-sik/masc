@@ -22,7 +22,7 @@
   yojson
   unix
   eio
-  digestif
+   masc.agent_core.digest
   re
   re.str
   re.pcre))

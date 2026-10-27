@@ -63,7 +63,7 @@ let protocol_major marker =
 let extension_id_length = 32
 
 let extension_id_of_real_path path =
-  let hex = Digestif.SHA256.(to_hex (digest_string path)) in
+  let hex = Agent_core_sha256.(to_hex (digest_string path)) in
   String.init extension_id_length (fun i ->
     Char.chr (Char.code 'a' + int_of_string ("0x" ^ String.make 1 hex.[i])))
 ;;

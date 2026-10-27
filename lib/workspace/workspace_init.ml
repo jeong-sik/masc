@@ -103,7 +103,7 @@ let memory_document_matches_local config path =
             Fs_compat.with_owned_inventory_root root (fun held ->
               Fs_compat.owned_inventory_entry_digest held relative
               |> Result.map (fun (actual : Fs_compat.owned_regular_file_range_digest) ->
-                   String.equal actual.sha256 Digestif.SHA256.(digest_string expected |> to_hex)))
+                   String.equal actual.sha256 Agent_core_sha256.(digest_string expected |> to_hex)))
           in
           let observed =
             match Eio_guard.execution_context () with

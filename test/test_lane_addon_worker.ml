@@ -1332,7 +1332,7 @@ let test_docker_control_ignores_the_package_reply_bound () = with_fixture (fun e
    loader, which prefers the terminal outcome over the pending index row. *)
 let sampling_requests store ~instance_id =
   let module Store = Masc.Lane_addon_store in
-  let digest = Digestif.SHA256.(to_hex (digest_string instance_id)) in
+  let digest = Agent_core_sha256.(to_hex (digest_string instance_id)) in
   let request_ids directory =
     let path = Filename.concat (Store.root store) (Filename.concat directory digest) in
     try Array.to_list (Sys.readdir path) |> List.filter_map (fun name ->
@@ -1360,10 +1360,10 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
   let fail_index = ref false and fail_journal = ref false in
   let store = Masc.Lane_addon_store.create ~root:(Filename.concat dir "model-evidence") in
   let index_directory = Filename.concat (Masc.Lane_addon_store.root store)
-    (Filename.concat "sampling" Digestif.SHA256.(to_hex (digest_string "sampling-worker"))) in
+    (Filename.concat "sampling" Agent_core_sha256.(to_hex (digest_string "sampling-worker"))) in
   let saved_index = index_directory ^ ".saved" in
   let outcome_directory = Filename.concat (Masc.Lane_addon_store.root store)
-    (Filename.concat "sampling-outcomes" Digestif.SHA256.(to_hex (digest_string "sampling-worker"))) in
+    (Filename.concat "sampling-outcomes" Agent_core_sha256.(to_hex (digest_string "sampling-worker"))) in
   let saved_outcomes = outcome_directory ^ ".saved" in
   let invoke ~route ~request (_ : Mcp_protocol.Sampling.create_message_params) =
     incr calls;

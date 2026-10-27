@@ -77,7 +77,7 @@ let test_sliced_digest_equals_one_shot_digest () =
        let bytes = String.init size (fun index -> Char.chr ((index * 31 + 7) land 255)) in
        Alcotest.(check string)
          (Printf.sprintf "%d bytes" size)
-         Digestif.SHA256.(to_hex (digest_string bytes))
+         Agent_core_sha256.(to_hex (digest_string bytes))
          (Keeper_checkpoint_ref.sha256_of_canonical_bytes bytes);
        Alcotest.(check string)
          (Printf.sprintf "a reference over %d bytes carries that digest" size)

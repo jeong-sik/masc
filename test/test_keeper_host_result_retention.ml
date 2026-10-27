@@ -288,7 +288,7 @@ let test_host_invocation_index_validation () =
     let invalid = `Assoc (index_fields @ fields) in
     (* Recompute the real digest so schema validation, not a filename mismatch,
        refuses this committed receipt. Keep the valid seed beside it. *)
-    let name = Digestif.SHA256.(digest_string (Yojson.Safe.to_string invalid) |> to_hex) ^ ".json" in
+    let name = Agent_core_sha256.(digest_string (Yojson.Safe.to_string invalid) |> to_hex) ^ ".json" in
     Fs_compat.save_file (Filename.concat directory name) (Yojson.Safe.to_string invalid);
     match Outbox.load ~base_path ~keeper_name with
     | Error _ -> () | Ok _ -> fail "malformed physical invocation index was accepted"))

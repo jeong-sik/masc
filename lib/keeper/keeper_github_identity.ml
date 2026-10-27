@@ -383,7 +383,7 @@ type docker_tool_projection =
   }
 
 let unconfigured_tool_identity_revision =
-  Digestif.SHA256.(digest_string "masc.github-tool-identity.unconfigured.v1" |> to_hex)
+  Agent_core_sha256.(digest_string "masc.github-tool-identity.unconfigured.v1" |> to_hex)
 ;;
 
 let yaml_scalar_has_value value =
@@ -584,7 +584,7 @@ let configured_revision_of_contents ~hosts ~config =
         ; "hosts.yml", `String hosts
         ; "config.yml", (match config with None -> `Null | Some value -> `String value)
         ]) in
-  Digestif.SHA256.(digest_string material |> to_hex)
+  Agent_core_sha256.(digest_string material |> to_hex)
 ;;
 
 let configured_tool_identity_revision config_dir =

@@ -75,7 +75,7 @@ let test_block_id_post_tool_round_classes () =
 (* ── TurnRecord codec ─────────────────────────────────── *)
 
 let digest_of_label label =
-  Digestif.SHA256.digest_string label |> Digestif.SHA256.to_hex
+  Agent_core_sha256.digest_string label |> Agent_core_sha256.to_hex
 
 let sample_block block label =
   { Turn_record.block

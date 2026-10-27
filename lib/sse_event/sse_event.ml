@@ -213,7 +213,7 @@ let turn_ready
   : Yojson.Safe.t
   =
   let names_hash =
-    Digestif.SHA256.(digest_string (String.concat "\n" tool_names) |> to_hex)
+    Agent_core_sha256.(digest_string (String.concat "\n" tool_names) |> to_hex)
   in
   let payload_json =
     let p : Sse_event_t.turn_ready_payload =

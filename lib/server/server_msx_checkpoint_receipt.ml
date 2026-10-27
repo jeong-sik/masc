@@ -81,8 +81,8 @@ let with_db ?(create=false) ~write ~path f =
       Error (Store_unavailable (operation ^ " " ^ path ^ ": " ^ Unix.error_message error))
 let valid_completion completed =
   completed.mark.count >= 0 && String.trim completed.mark.incarnation <> ""
-  && match Digestif.SHA256.consistent_of_hex_opt completed.checkpoint_sha256 with
-     | Some digest -> Digestif.SHA256.to_hex digest = completed.checkpoint_sha256
+  && match Agent_core_sha256.consistent_of_hex_opt completed.checkpoint_sha256 with
+     | Some digest -> Agent_core_sha256.to_hex digest = completed.checkpoint_sha256
      | None -> false
 let read db binding =
   statement db

@@ -14,24 +14,11 @@ let validate_coordinates ~turn_count =
   else Ok ()
 ;;
 
-(* Digestif's string update hashes its whole argument in one [@@noalloc] C
-   call, and an OCaml 5 domain answers a stop-the-world request only at a
-   poll point. While one domain hashed a 13-109 MB checkpoint in a single
-   call, every other domain that reached a minor collection's barrier, the
-   scheduler domain included, waited for the hash to end. Feeding one slice
-   per call returns to OCaml between slices. *)
-let digest_slice_bytes = 1 lsl 20
-
+(* A 13-109 MB checkpoint hashed in one digestif call held every other domain
+   at the next stop-the-world barrier. Agent_core_sha256 feeds bounded slices,
+   so the hash answers those requests between slices (RFC-0474 L2). *)
 let sha256_of_canonical_bytes bytes =
-  let length = String.length bytes in
-  let rec feed ctx off =
-    if off >= length
-    then ctx
-    else (
-      let len = Int.min digest_slice_bytes (length - off) in
-      feed (Digestif.SHA256.feed_string ctx ~off ~len bytes) (off + len))
-  in
-  Digestif.SHA256.(to_hex (get (feed empty 0)))
+  Agent_core_sha256.(to_hex (digest_string bytes))
 ;;
 
 let create ~trace_id ~turn_count ~canonical_checkpoint_bytes =
@@ -49,8 +36,8 @@ let of_persisted ~trace_id ~turn_count ~sha256 =
   match validate_coordinates ~turn_count with
   | Error _ as error -> error
   | Ok () ->
-    (match Digestif.SHA256.consistent_of_hex_opt sha256 with
-     | Some digest when String.equal sha256 (Digestif.SHA256.to_hex digest) ->
+    (match Agent_core_sha256.consistent_of_hex_opt sha256 with
+     | Some digest when String.equal sha256 (Agent_core_sha256.to_hex digest) ->
        Ok { trace_id; turn_count; sha256 }
      | Some _ | None -> Error (Invalid_sha256 sha256))
 ;;

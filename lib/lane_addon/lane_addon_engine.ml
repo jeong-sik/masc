@@ -28,7 +28,7 @@ type held = {
 }
 
 let ( let* ) = Result.bind
-let digest value = Digestif.SHA256.(to_hex (digest_string value))
+let digest value = Agent_core_sha256.(to_hex (digest_string value))
 let owned_name runtime instance_id = match runtime with
   | Docker -> "masc-lane-" ^ digest instance_id
   | Apple_container -> digest instance_id

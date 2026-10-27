@@ -4803,7 +4803,7 @@ let test_complete_large_binary_snapshots () =
       let item = List.hd (to_list snapshot) in
       Alcotest.(check string) "binary retained" "artifact_binary" (item |> member "kind" |> to_string);
       Alcotest.(check int) "full size" (String.length bytes) (item |> member "bytes" |> to_int);
-      Alcotest.(check string) "full SHA" Digestif.SHA256.(digest_string bytes |> to_hex)
+      Alcotest.(check string) "full SHA" Agent_core_sha256.(digest_string bytes |> to_hex)
         (item |> member "sha256" |> to_string);
       let body = Filename.concat (Common.masc_dir_from_base_path ~base_path)
           (item |> member "body" |> to_string) in
@@ -4824,7 +4824,7 @@ let test_a_binary_payload_is_adopted_and_filed () =
                  (VS.Binary_payload
                     { data = png_bytes
                     ; bytes = String.length png_bytes
-                    ; sha256 = Digestif.SHA256.(digest_string png_bytes |> to_hex)
+                    ; sha256 = Agent_core_sha256.(digest_string png_bytes |> to_hex)
                     ; format = "png"
                     })
              else Error (VS.Evidence_read_error "backend: not found"))
@@ -4877,7 +4877,7 @@ let test_a_filed_binary_body_reads_back_and_only_images_attach () =
         VS.Evidence_artifact_binary
           { reference = "artifact:shot.png"
           ; bytes = String.length png_bytes
-          ; sha256 = Digestif.SHA256.(digest_string png_bytes |> to_hex)
+          ; sha256 = Agent_core_sha256.(digest_string png_bytes |> to_hex)
           ; format = "png"
           ; body
           }
@@ -4926,7 +4926,7 @@ let test_a_filed_binary_body_reads_back_and_only_images_attach () =
            (VS.Evidence_artifact_binary
               { reference = "artifact:big.png"
               ; bytes = String.length oversized
-              ; sha256 = Digestif.SHA256.(digest_string oversized |> to_hex)
+              ; sha256 = Agent_core_sha256.(digest_string oversized |> to_hex)
               ; format = "png"
               ; body = big_body
               })
@@ -4960,7 +4960,7 @@ let test_a_filed_binary_body_reads_back_and_only_images_attach () =
 let test_changed_filed_binary_bodies_do_not_reach_the_judge () =
   with_temp_dir (fun base_path ->
       let original = "\x89PNG\r\n\x1a\nA" in
-      let sha256 data = Digestif.SHA256.(digest_string data |> to_hex) in
+      let sha256 data = Agent_core_sha256.(digest_string data |> to_hex) in
       let changed = [ "\x89PNG\r\n\x1a\nB"; "short"; original ^ "extra" ] in
       let items = List.mapi
         (fun index replacement ->
@@ -5010,7 +5010,7 @@ let test_filed_binary_symlinks_are_not_read () =
       Unix.symlink target path;
       let item = VS.Evidence_artifact_binary
         { reference = "artifact:shot.png"; bytes = String.length data
-        ; sha256 = Digestif.SHA256.(digest_string data |> to_hex); format = "png"; body } in
+        ; sha256 = Agent_core_sha256.(digest_string data |> to_hex); format = "png"; body } in
       match VS.read_binary_body_base64 ~base_path item with
       | Error (VS.Body_unreadable _) -> ()
       | Ok _ -> Alcotest.fail "a symlink must not borrow a matching file's bytes"
@@ -5044,7 +5044,7 @@ let test_an_unreadable_image_body_is_named_in_the_review_record () =
         VS.Evidence_artifact_binary
           { reference
           ; bytes = String.length png_bytes
-          ; sha256 = Digestif.SHA256.(digest_string png_bytes |> to_hex)
+          ; sha256 = Agent_core_sha256.(digest_string png_bytes |> to_hex)
           ; format = "png"
           ; body
           }

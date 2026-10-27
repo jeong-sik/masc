@@ -121,7 +121,7 @@ let test_interrupted_history () =
   List.iter (fun contents -> with_fixture (fun fixture ->
     let directory = path fixture "slot" in
     let a = prepare [directory] "a" in
-    let digest = Digestif.SHA256.(to_hex (digest_string "a")) in
+    let digest = Agent_core_sha256.(to_hex (digest_string "a")) in
     (* A crash after truncating a retirement/consumption record must never make
        this existing inode indistinguishable from a never-admitted instance. *)
     write (Filename.concat directory ("instance-" ^ digest ^ ".json")) contents;
@@ -286,7 +286,7 @@ let test_cleanup_context () = with_fixture (fun fixture ->
   check "retirement and recovery preserve descriptor" true (ok (Lease.cleanup_context recovered)=context);
   let directory=List.hd (Lease.directories claim) in
   let file=Filename.concat directory
-    ("instance-" ^ Digestif.SHA256.(to_hex (digest_string "context")) ^ ".json") in
+    ("instance-" ^ Agent_core_sha256.(to_hex (digest_string "context")) ^ ".json") in
   let fields=match Yojson.Safe.from_file file with `Assoc fields -> fields | _ -> Alcotest.fail "expected history" in
   write file (Yojson.Safe.to_string (`Assoc (List.remove_assoc "cleanup_context" fields)));
   rejected (Lease.cleanup_context claim);

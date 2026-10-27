@@ -29,7 +29,7 @@ let is_canonical descriptor =
 let make (export : Lane_addon_tool_export.t) : Keeper_tool_descriptor.t =
   let open Keeper_tool_descriptor in
   let tool = export.tool in
-  let id = "lane-addon:" ^ Digestif.SHA256.(to_hex (digest_string
+  let id = "lane-addon:" ^ Agent_core_sha256.(to_hex (digest_string
     (Yojson.Safe.to_string (`List [`String export.instance_id; `String tool.name])))) in
   let descriptor = { id
   ; capability_id = id

@@ -384,7 +384,7 @@ type payload =
 
 let payload_of_string payload_bytes =
   { payload_bytes
-  ; payload_sha256 = Digestif.SHA256.(digest_string payload_bytes |> to_hex)
+  ; payload_sha256 = Agent_core_sha256.(digest_string payload_bytes |> to_hex)
   }
 ;;
 

@@ -27,11 +27,11 @@ let judge_request id =
 
 let judgment id probability : R.judgment =
   { request = judge_request id; response_model = "actual-judge"
-  ; request_body_sha256 = Digestif.SHA256.(to_hex (digest_string "request")); probability }
+  ; request_body_sha256 = Agent_core_sha256.(to_hex (digest_string "request")); probability }
 
 let report : R.t =
   { schema = R.schema; provenance = R.Synthetic; run_id = "measurement-fixture"; started_at = "2026-09-21T00:00:00Z"
-  ; input_path = "synthetic.json"; input_sha256 = Digestif.SHA256.(to_hex (digest_string "input"))
+  ; input_path = "synthetic.json"; input_sha256 = Agent_core_sha256.(to_hex (digest_string "input"))
   ; output_path = "result.json"; config_revision = "fixture"
   ; binary_commit = None; executable_sha256 = None
   ; samples =
@@ -55,7 +55,7 @@ let report : R.t =
   }
 
 let envelope content =
-  `Assoc [ "sha256", `String (Digestif.SHA256.(to_hex (digest_string content))); "bytes", `Int (String.length content)
+  `Assoc [ "sha256", `String (Agent_core_sha256.(to_hex (digest_string content))); "bytes", `Int (String.length content)
          ; "content", `String content ]
 
 let test_stage_counts () =
@@ -66,14 +66,14 @@ let test_stage_counts () =
 
 let decoded_report () =
   let content = Yojson.Safe.to_string (R.to_yojson report) in
-  let sha256 = Digestif.SHA256.(to_hex (digest_string content)) in
+  let sha256 = Agent_core_sha256.(to_hex (digest_string content)) in
   match UI.Measurement.decode_artifact ~sha256 (envelope content) with
   | Ok loaded -> loaded
   | Error detail -> Alcotest.fail detail
 
 let test_artifact_integrity () =
   let content = Yojson.Safe.to_string (R.to_yojson report) in
-  let sha256 = Digestif.SHA256.(to_hex (digest_string content)) in
+  let sha256 = Agent_core_sha256.(to_hex (digest_string content)) in
   let actual = decoded_report () in
   Alcotest.(check string) "exact report" content
     (Yojson.Safe.to_string (R.to_yojson actual.report));
@@ -84,12 +84,12 @@ let test_artifact_integrity () =
   rejects "missing fields identify malformed envelope"
     "Measurement artifact response requires sha256, bytes and content fields" (`Assoc []);
   let other_content = content ^ " " in
-  let other_sha = Digestif.SHA256.(to_hex (digest_string other_content)) in
+  let other_sha = Agent_core_sha256.(to_hex (digest_string other_content)) in
   rejects "another blob identifies its SHA"
     ("Measurement artifact SHA " ^ other_sha ^ " differs from requested " ^ sha256)
     (envelope other_content);
   let tampered = String.make (String.length content) 'x' in
-  let tampered_sha = Digestif.SHA256.(to_hex (digest_string tampered)) in
+  let tampered_sha = Agent_core_sha256.(to_hex (digest_string tampered)) in
   rejects "same length corruption identifies content SHA"
     ("Measurement artifact content hashes to " ^ tampered_sha ^ ", expected " ^ sha256)
     (`Assoc [ "sha256", `String sha256; "bytes", `Int (String.length content)
@@ -99,7 +99,7 @@ let test_artifact_integrity () =
     (`Assoc [ "sha256", `String sha256; "bytes", `Int (-1); "content", `String content ]);
   let invalid = "not-json" in
   Alcotest.(check bool) "valid hash does not excuse malformed report" true
-    (Result.is_error (UI.Measurement.decode_artifact ~sha256:(Digestif.SHA256.(to_hex (digest_string invalid))) (envelope invalid)))
+    (Result.is_error (UI.Measurement.decode_artifact ~sha256:(Agent_core_sha256.(to_hex (digest_string invalid))) (envelope invalid)))
 
 let test_loaded_context_hashes () =
   let loaded = decoded_report () in

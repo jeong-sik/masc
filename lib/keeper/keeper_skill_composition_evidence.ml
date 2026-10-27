@@ -348,8 +348,8 @@ let of_yojson json =
 let partition reference =
   Skill_reference.to_yojson reference
   |> Yojson.Safe.to_string
-  |> Digestif.SHA256.digest_string
-  |> Digestif.SHA256.to_hex
+  |> Agent_core_sha256.digest_string
+  |> Agent_core_sha256.to_hex
 ;;
 
 let store_dir config =

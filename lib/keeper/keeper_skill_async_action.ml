@@ -13,7 +13,7 @@ type t =
   { delivery_sha256 : string; physical_turn_ref : Ids.Turn_ref.t
   ; runtime_id : string; tool_name : string; occurrence : occurrence; observed_at : string }
 
-let digest text = Digestif.SHA256.(digest_string text |> to_hex)
+let digest text = Agent_core_sha256.(digest_string text |> to_hex)
 let sdk_result (result : Agent_core.Types.tool_result) = match result with
   | Ok output -> Handler_returned {bytes=String.length output.content;sha256=digest output.content}
   | Error error -> Handler_errored {bytes=String.length error.message;sha256=digest error.message;

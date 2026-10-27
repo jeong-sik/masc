@@ -10,7 +10,7 @@ let id value =
   Keeper_execution_scope_id.of_json (`Assoc [ "kind", `String "direct_operation"; "id", `String value ])
   |> require "scope ID"
 
-let hash text = Digestif.SHA256.(digest_string text |> to_hex)
+let hash text = Agent_core_sha256.(digest_string text |> to_hex)
 
 let call : Masc.Keeper_agent_result.tool_call_detail =
   { tool_name = "Execute"; provider = "fixture"; execution_outcome = Tool_result.Ok

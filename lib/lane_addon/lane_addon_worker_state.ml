@@ -17,8 +17,8 @@ let identity owner =
 let volume_name ?(runtime = Lane_addon_types.Docker) owner =
   match runtime with
   | Lane_addon_types.Docker ->
-      "masc-lane-state-" ^ Digestif.SHA256.(to_hex (digest_string (identity owner)))
-  | Apple_container -> Digestif.SHA256.(to_hex (digest_string ("volume:" ^ identity owner)))
+      "masc-lane-state-" ^ Agent_core_sha256.(to_hex (digest_string (identity owner)))
+  | Apple_container -> Agent_core_sha256.(to_hex (digest_string ("volume:" ^ identity owner)))
 
 (* The engine reserves the container name before start. All writers
    of one logical volume use this slot; worker incarnations still have distinct
@@ -26,7 +26,7 @@ let volume_name ?(runtime = Lane_addon_types.Docker) owner =
 let container_name ?(runtime = Lane_addon_types.Docker) owner =
   match runtime with
   | Lane_addon_types.Docker -> volume_name owner ^ "-writer"
-  | Apple_container -> Digestif.SHA256.(to_hex (digest_string ("writer:" ^ identity owner)))
+  | Apple_container -> Agent_core_sha256.(to_hex (digest_string ("writer:" ^ identity owner)))
 
 (* The writer name a state owner label stands for, recomputed from the label's
    own text. A container whose name this does not explain was not named for

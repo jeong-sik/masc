@@ -155,8 +155,8 @@ type visibility = Shared | Operator_only | Keeper_only of string
 type skill_export_owner = Declaration of string | Instance of string
 type skill_export = { owner : skill_export_owner; instance_id : string; package : package }
 let skill_source_id = function
-  | Declaration id -> "lane-" ^ Digestif.SHA256.(to_hex (digest_string ("declaration\x00" ^ id)))
-  | Instance id -> "lane-" ^ Digestif.SHA256.(to_hex (digest_string ("instance\x00" ^ id)))
+  | Declaration id -> "lane-" ^ Agent_core_sha256.(to_hex (digest_string ("declaration\x00" ^ id)))
+  | Instance id -> "lane-" ^ Agent_core_sha256.(to_hex (digest_string ("instance\x00" ^ id)))
 (* A declared installation publishes its Skills under its declaration id, a
    manual attachment under its own instance id. *)
 let skill_export_owner ~installation_id ~instance_id = match installation_id with

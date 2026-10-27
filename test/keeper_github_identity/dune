@@ -15,7 +15,7 @@
   test_keeper_github_identity)
  (libraries
   alcotest
-  digestif
+   masc.agent_core.digest
   eio
   eio_main
   masc.exec_ssh_protocol

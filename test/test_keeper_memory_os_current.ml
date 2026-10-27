@@ -2066,7 +2066,7 @@ let test_atom_receipt_wire_and_exclusive_identity () =
           ; "last_atom_digest", `String (String.make 64 'a')
           ; "end_boundary_line", `Int 2; "boundary_lines_seen", `Int 2 ]
       ; "snapshot_revision", `Int 1
-      ; "snapshot_sha256", `String Digestif.SHA256.(digest_string snapshot |> to_hex)
+      ; "snapshot_sha256", `String Agent_core_sha256.(digest_string snapshot |> to_hex)
       ] ] ]
   in
   let path = Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper" in
@@ -2119,7 +2119,7 @@ let test_official_receipt_survives_other_commits () =
                 official_range_id.turns)
           ]
       ; "snapshot_revision", `Int 1
-      ; "snapshot_sha256", `String Digestif.SHA256.(digest_string snapshot |> to_hex)
+      ; "snapshot_sha256", `String Agent_core_sha256.(digest_string snapshot |> to_hex)
       ] ] ]
   in
   let path = Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper" in
@@ -2493,7 +2493,7 @@ let test_unchanged_pass_keeps_snapshot_and_commits_range () =
 
 let candidate_receipt sequence request_id payload : Current.explicit_candidate_id =
   {queue_generation="candidate-generation"; request_id; sequence;
-   input_sha256=Digestif.SHA256.(digest_string payload |> to_hex)}
+   input_sha256=Agent_core_sha256.(digest_string payload |> to_hex)}
 ;;
 
 let commit_candidates ~keepers_dir ids claims =

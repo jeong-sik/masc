@@ -398,7 +398,7 @@ let load_disk = function
     else Error (Unreadable (Printf.sprintf "disk not found: %s" path))
 ;;
 
-let media_id bytes = Digestif.SHA256.(to_hex (digest_string bytes))
+let media_id bytes = Agent_core_sha256.(to_hex (digest_string bytes))
 
 let media_json media =
   `List (List.map (fun (id, bytes) -> `Assoc
@@ -988,7 +988,7 @@ let save ~path =
     | Some st ->
       try
         let contents = Yojson.Safe.to_string (checkpoint_json st) in
-        let checkpoint_sha256 = Digestif.SHA256.(to_hex (digest_string contents)) in
+        let checkpoint_sha256 = Agent_core_sha256.(to_hex (digest_string contents)) in
         let* () = atomic_write path contents in
         Ok { observation = observe st;
              mark = { count = !change_count; incarnation = st.incarnation };
@@ -1063,7 +1063,7 @@ let restore ~path ~ledger_dir =
   let decoded =
     try
       let contents = read_file path in
-      let checkpoint_sha256 = Digestif.SHA256.(to_hex (digest_string contents)) in
+      let checkpoint_sha256 = Agent_core_sha256.(to_hex (digest_string contents)) in
       Result.map (fun decoded -> decoded, checkpoint_sha256)
         (decode_checkpoint (Yojson.Safe.from_string contents))
     with
@@ -1192,7 +1192,7 @@ let checkpoint_info ~path =
     | Error e -> Error e
     | Ok contents ->
       let byte_length = String.length contents in
-      let sha256 = Digestif.SHA256.(to_hex (digest_string contents)) in
+      let sha256 = Agent_core_sha256.(to_hex (digest_string contents)) in
       let json =
         try Ok (Yojson.Safe.from_string contents) with
         | Yojson.Json_error message ->

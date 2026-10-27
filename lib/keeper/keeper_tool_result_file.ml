@@ -4,7 +4,7 @@ type reading = {
   sha256 : string;
 }
 let ( let* ) = Result.bind
-let digest text = Digestif.SHA256.(to_hex (digest_string text))
+let digest text = Agent_core_sha256.(to_hex (digest_string text))
 (* Same transfer buffer as Fs_compat's streaming owned SHA reader. This is
    not a file, record, result or history limit. *)
 let chunk_bytes = 65536
@@ -61,7 +61,7 @@ let read_with_range ~read_range ~config ~keeper target =
           let* body = Keeper_tool_result_source.finish scan
             |> Result.map_error Keeper_tool_result_source.error_to_string in
           let sha256 = digest body.content in
-          let file_sha256 = Digestif.SHA256.(to_hex (get context)) in
+          let file_sha256 = Agent_core_sha256.(to_hex (get context)) in
           let source_id = digest (Yojson.Safe.to_string (`Assoc [
             "keeper", `String keeper;
             "execution_id", Ids.Execution_id.to_yojson body.execution_id;
@@ -77,9 +77,9 @@ let read_with_range ~read_range ~config ~keeper target =
           Ok {body;sha256;source_id}
       else
         let* scan = consume scan chunk.content in
-        loop (Some snapshot) (Digestif.SHA256.feed_string context chunk.content)
+        loop (Some snapshot) (Agent_core_sha256.feed_string context chunk.content)
           (offset+String.length chunk.content) scan in
-    loop None Digestif.SHA256.empty 0 (Keeper_tool_result_source.start target)
+    loop None Agent_core_sha256.empty 0 (Keeper_tool_result_source.start target)
 
 let read ~config ~keeper target =
   read_with_range ~read_range:(Fs_compat.load_owned_regular_file_range

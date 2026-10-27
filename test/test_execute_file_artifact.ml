@@ -1,5 +1,5 @@
 module B = Tool_blob_store
-module H = Digestif.SHA256
+module H = Agent_core_sha256
 
 let with_directory f =
   let path = Filename.temp_file "execute-file-artifact-" "" in

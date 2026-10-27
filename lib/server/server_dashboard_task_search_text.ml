@@ -3,7 +3,7 @@ type error = Search_text_unavailable
 type status = [ `OK | `Service_unavailable ]
 
 let document (task : Masc_domain.task) =
-  let revision = Digestif.SHA256.(digest_string task.description |> to_hex) in
+  let revision = Agent_core_sha256.(digest_string task.description |> to_hex) in
   `Assoc [ "id", `String task.id; "description", `String task.description;
            "description_revision", `String revision ]
 

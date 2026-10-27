@@ -25,7 +25,7 @@
   mirage-crypto-ec
   mirage-crypto-rng
   mirage-crypto-rng.unix
-  digestif
+   masc.agent_core.digest
   eio
   eio_main
   eio.unix

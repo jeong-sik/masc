@@ -16,7 +16,7 @@ let kind_to_string = function
   | Document -> "document"
 ;;
 
-let source_sha256 bytes = Digestif.SHA256.to_hex (Digestif.SHA256.digest_string bytes)
+let source_sha256 bytes = Agent_core_sha256.to_hex (Agent_core_sha256.digest_string bytes)
 
 (* A stored reading lives while a durable record still carries its
    attachment. The sweep (Keeper_media_reading_maintenance) cannot decode and

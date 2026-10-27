@@ -160,7 +160,7 @@
 (test
  (name test_librarian_continuity_report)
  (modules test_librarian_continuity_report)
- (libraries alcotest masc yojson digestif))
+ (libraries alcotest masc yojson  masc.agent_core.digest))
 
 (rule
  (alias runtest-test_librarian_continuity_cli)
@@ -2063,7 +2063,7 @@
   eio.mock
   ; test_server_startup_takeover plants v2 lease files whose name is the
   ; digest of the directory's own (st_dev, st_ino) identity.
-  digestif
+  masc.agent_core.digest
   masc.tool_metrics_store)
  (deps ../bin/main_eio.exe fixtures/skill-ledger-async-actions.json))
 
@@ -2337,7 +2337,7 @@
   masc.fs_compat
   masc.keeper_chat_delivery_identity
   base64
-  digestif
+   masc.agent_core.digest
   eio
   eio_main
   unix))
@@ -3767,7 +3767,7 @@
 (test
  (name test_tui_measurement)
  (modules test_tui_measurement)
- (libraries alcotest digestif masc masc_tui_types yojson))
+ (libraries alcotest  masc.agent_core.digest masc masc_tui_types yojson))
 
 (test
  (name test_tui_music_launcher)
@@ -3924,7 +3924,7 @@
 (test
  (name test_tui_image_preview)
  (modules test_tui_image_preview)
- (libraries alcotest masc_tui_image_preview masc_tui_keeper_chat_projection masc.masc_tool_blob_store digestif))
+ (libraries alcotest masc_tui_image_preview masc_tui_keeper_chat_projection masc.masc_tool_blob_store  masc.agent_core.digest))
 
 (test
  (name test_tui_keeper_chat_projection)
@@ -4055,7 +4055,7 @@
  (modules test_tui_context_inspector)
  (libraries
   alcotest
-  digestif
+   masc.agent_core.digest
   masc_tui_context_inspector
   masc
   masc.agent_core.llm_provider
@@ -5002,7 +5002,7 @@
  (deps fixtures/skill-ledger-revision.json fixtures/skill-ledger-async-delivery.json fixtures/skill-ledger-async-actions.json)
  (libraries
   alcotest
-  digestif
+   masc.agent_core.digest
   masc
   masc.keeper_registry
   masc.masc_types
@@ -5016,7 +5016,7 @@
  (modules test_keeper_skill_activation_recorder)
  (libraries
   alcotest
-  digestif
+   masc.agent_core.digest
   masc
   masc.agent_core
   masc.keeper_registry
@@ -5039,7 +5039,7 @@
  (deps fixtures/skill-ledger-async-actions.json)
  (libraries
   alcotest
-  digestif
+   masc.agent_core.digest
   yojson
   fs_compat
   masc
@@ -5492,7 +5492,7 @@
 (test
  (name test_dashboard_task_preview)
  (modules test_dashboard_task_preview)
- (libraries alcotest masc.dashboard masc.masc_types yojson digestif))
+ (libraries alcotest masc.dashboard masc.masc_types yojson  masc.agent_core.digest))
 
 (include stanzas/test_h2_json_worker.inc)
 (include stanzas/test_h2_request_fibers.inc)
@@ -5616,17 +5616,17 @@
 (test
  (name test_workspace_memory_ledger_view)
  (modules test_workspace_memory_ledger_view)
- (libraries alcotest digestif yojson masc masc.fs_compat))
+ (libraries alcotest  masc.agent_core.digest yojson masc masc.fs_compat))
 
 (test
  (name test_workspace_memory_ledger)
  (modules test_workspace_memory_ledger)
- (libraries alcotest digestif yojson masc masc.fs_compat masc.prompt_registry))
+ (libraries alcotest  masc.agent_core.digest yojson masc masc.fs_compat masc.prompt_registry))
 
 (test
  (name test_workspace_memory_revision)
  (modules test_workspace_memory_revision)
- (libraries alcotest digestif yojson unix masc))
+ (libraries alcotest  masc.agent_core.digest yojson unix masc))
 
 (test
  (name test_keeper_memory_search_index)
@@ -5646,12 +5646,12 @@
 (test
  (name test_workspace_memory_request)
  (modules test_workspace_memory_request)
- (libraries alcotest digestif yojson masc masc.masc_core eio eio_main))
+ (libraries alcotest  masc.agent_core.digest yojson masc masc.masc_core eio eio_main))
 
 (test
  (name test_workspace_memory_capture)
  (modules test_workspace_memory_capture)
- (libraries alcotest digestif yojson masc unix))
+ (libraries alcotest  masc.agent_core.digest yojson masc unix))
 
 (test
  (name test_lane_addon_request_discovery)
@@ -5671,17 +5671,17 @@
 (test
  (name test_workspace_memory_execution_capture)
  (modules test_workspace_memory_execution_capture)
- (libraries alcotest digestif yojson masc masc.fs_compat masc.prompt_registry unix))
+ (libraries alcotest  masc.agent_core.digest yojson masc masc.fs_compat masc.prompt_registry unix))
 
 (test
  (name test_workspace_memory_log_reader)
  (modules test_workspace_memory_log_reader)
- (libraries alcotest digestif yojson masc masc.fs_compat unix))
+ (libraries alcotest  masc.agent_core.digest yojson masc masc.fs_compat unix))
 
 (test
  (name test_keeper_direct_runtime_resume)
  (modules test_keeper_direct_runtime_resume)
- (libraries alcotest masc_test_deps masc.keeper_checkpoint_ref eio_main unix digestif))
+ (libraries alcotest masc_test_deps masc.keeper_checkpoint_ref eio_main unix  masc.agent_core.digest))
 
 (test
  (name test_fusion_decision)
@@ -5738,7 +5738,7 @@
  (name test_keeper_journal_preparation)
  (modules test_keeper_journal_preparation)
  (libraries masc masc.server masc.masc_core masc.keeper_chat_operations masc.agent_core
-  masc.keeper_registry masc.keeper_checkpoint_ref masc_test_deps fs_compat alcotest unix sqlite3 yojson digestif eio))
+  masc.keeper_registry masc.keeper_checkpoint_ref masc_test_deps fs_compat alcotest unix sqlite3 yojson  masc.agent_core.digest eio))
 (test
  (name test_keeper_declared_roster)
  (modules test_keeper_declared_roster)
@@ -5775,7 +5775,7 @@
 (test
  (name test_browser_addon_artifacts)
  (modules test_browser_addon_artifacts)
- (libraries masc masc.browser_lane masc.lane_addon_call_context masc.masc_tool_blob_store masc.native_addon_lease masc.fs_compat masc.masc_eio_context masc.time_compat mcp_protocol alcotest eio eio.unix eio_main yojson unix digestif))
+ (libraries masc masc.browser_lane masc.lane_addon_call_context masc.masc_tool_blob_store masc.native_addon_lease masc.fs_compat masc.masc_eio_context masc.time_compat mcp_protocol alcotest eio eio.unix eio_main yojson unix  masc.agent_core.digest))
 
 (test
  (name test_lane_addon_worker_protocol)
@@ -5791,7 +5791,7 @@
 (test
  (name test_native_addon_lease)
  (modules test_native_addon_lease)
- (libraries alcotest unix yojson digestif masc.native_addon_lease masc_process)
+ (libraries alcotest unix yojson  masc.agent_core.digest masc.native_addon_lease masc_process)
  (deps ../bin/masc_native_addon_launcher.exe)
  (action (run %{test} %{dep:../bin/masc_native_addon_launcher.exe})))
 
@@ -5846,7 +5846,7 @@
 (test
  (name test_lane_addon_worker)
  (modules test_lane_addon_worker)
- (libraries masc.lane_addon_call_context masc masc.string_util masc_random_id mcp_protocol alcotest eio eio_main yojson unix digestif masc.fs_compat base64))
+ (libraries masc.lane_addon_call_context masc masc.string_util masc_random_id mcp_protocol alcotest eio eio_main yojson unix  masc.agent_core.digest masc.fs_compat base64))
 
 (include stanzas/test_bedrock_sdk.inc)
 (test
@@ -6459,7 +6459,7 @@
  (name test_msx_addon_worker)
  (modules test_msx_addon_worker)
  (libraries masc.lane_addon_call_context masc.lane_addon_tool_result masc.tool_types masc.msx_worker masc.msx_lane masc.masc_core masc.masc_log masc.machine_configuration
-  mcp_protocol mcp_protocol.eio eio eio_main eio.unix alcotest yojson base64 digestif unix))
+  mcp_protocol mcp_protocol.eio eio eio_main eio.unix alcotest yojson base64  masc.agent_core.digest unix))
 
 (test
  (name test_dos_addon_worker)
@@ -6467,7 +6467,7 @@
  (libraries masc.tool_types masc.lane_addon_tool_result masc.lane_addon_call_context masc.machine_controller_contract
   masc.dos_worker masc.dos_lane masc.machine_pad_layout masc.masc_core masc.machine_configuration
   masc.machine_checkpoint masc.machine_action_feed
-  mcp_protocol mcp_protocol.eio eio eio_main eio.unix alcotest yojson base64 digestif unix))
+  mcp_protocol mcp_protocol.eio eio eio_main eio.unix alcotest yojson base64  masc.agent_core.digest unix))
 
 (test
  (name test_machine_input_history)
@@ -6642,7 +6642,7 @@
 (test
  (name test_tui_published_reports)
  (modules test_tui_published_reports)
- (libraries masc.time_codec alcotest masc masc.masc_tool_blob_store digestif yojson masc_tui_resource_catalog
+ (libraries masc.time_codec alcotest masc masc.masc_tool_blob_store  masc.agent_core.digest yojson masc_tui_resource_catalog
   masc_tui_artifact_checks masc_tui_fetched masc_tui_types masc_tui_resources_updates masc_tui_mcp))
 
 (test
@@ -6650,7 +6650,7 @@
  (modules test_tui_resource_export)
  (libraries masc_tui_resource_export masc_tui_resource_catalog masc masc.masc_tool_blob_store alcotest
   masc_tui_workspace_read masc_tui_kept_reads masc_tui_types masc.http_client
-  digestif uri yojson eio eio_main unix fs_compat))
+   masc.agent_core.digest uri yojson eio eio_main unix fs_compat))
 
 (test
  (name test_tui_resource_document_search)
@@ -6661,7 +6661,7 @@
 (test
  (name test_tui_artifact_checks)
  (modules test_tui_artifact_checks)
- (libraries alcotest masc masc.server masc.masc_tool_blob_store masc.tool_types masc.time_codec digestif httpun unix yojson
+ (libraries alcotest masc masc.server masc.masc_tool_blob_store masc.tool_types masc.time_codec  masc.agent_core.digest httpun unix yojson
   masc_tui_artifact_check_action masc_tui_artifact_checks masc_tui_resource_catalog
   masc_tui_resources_updates masc_tui_types masc_tui_fetched masc_tui_mcp))
 

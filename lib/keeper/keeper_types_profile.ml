@@ -335,7 +335,7 @@ let load_declarative_materialization_defaults ~base_path name =
             ; manifest_snapshot =
                 Declarative_manifest_present
                   { path
-                  ; sha256 = Digestif.SHA256.(digest_string bytes |> to_hex)
+                  ; sha256 = Agent_core_sha256.(digest_string bytes |> to_hex)
                   }
             }))
 
@@ -481,7 +481,7 @@ let load_declarative_materialization_defaults_or_merged ~base_path ~name ~toml_e
                   ; manifest_snapshot =
                       Declarative_manifest_present
                         { path
-                        ; sha256 = Digestif.SHA256.(digest_string current |> to_hex)
+                        ; sha256 = Agent_core_sha256.(digest_string current |> to_hex)
                         }
                   }))))
 

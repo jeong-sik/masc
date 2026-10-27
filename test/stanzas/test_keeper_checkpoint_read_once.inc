@@ -4,4 +4,4 @@
 (test
  (name test_keeper_checkpoint_read_once)
  (modules test_keeper_checkpoint_read_once)
- (libraries masc_test_deps masc.keeper_checkpoint_ref digestif))
+ (libraries masc_test_deps masc.keeper_checkpoint_ref masc.agent_core.digest))

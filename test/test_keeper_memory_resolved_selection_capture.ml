@@ -7,7 +7,7 @@ let require = function Ok value -> value | Error detail -> fail detail
 let member = Yojson.Safe.Util.member
 module Json = Yojson.Safe.Util
 let jstring name json = member name json |> Json.to_string
-let sha bytes = Digestif.SHA256.(digest_string bytes |> to_hex)
+let sha bytes = Agent_core_sha256.(digest_string bytes |> to_hex)
 let hash_json json = sha (Yojson.Safe.to_string json)
 let () = Masc.Prompt_defaults.init ()
 

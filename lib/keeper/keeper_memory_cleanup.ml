@@ -61,7 +61,7 @@ let run_with ~execute ~base_path ~keeper_name =
               ; tool_observations = []
               ; counterpart_observations = []
               } in
-            let signature = Digestif.SHA256.(to_hex (digest_string
+            let signature = Agent_core_sha256.(to_hex (digest_string
               (Yojson.Safe.to_string
                 (`Assoc
                   [ "variables", `Assoc (List.map (fun (name, value) -> name, `String value)

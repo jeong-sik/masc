@@ -21,7 +21,7 @@ module Ws_msg = Ws_direct_core.Connection.Message
 
 (** SHA1 (raw 20-byte digest) for the RFC 6455 §1.3 handshake accept proof. *)
 let sha1 s =
-  Digestif.SHA1.(digest_string s |> to_raw_string)
+  Agent_core_sha1.raw_digest_string s
 
 (* RFC 6455 §1.3 handshake GUID + the Sec-WebSocket-Accept proof. *)
 let websocket_guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"

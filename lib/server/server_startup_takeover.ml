@@ -229,7 +229,7 @@ let base_path_lease_directory ~run_dir ~owner_uid =
    one directory has exactly one lease name on every supported platform. *)
 let base_path_lock_digest_of_stats (stat : Unix.stats) =
   Printf.sprintf "masc-base-path-lease:%d:%d" stat.st_dev stat.st_ino
-  |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex
+  |> Agent_core_sha256.digest_string |> Agent_core_sha256.to_hex
 ;;
 
 let base_path_owner_pid = function

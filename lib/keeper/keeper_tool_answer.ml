@@ -120,7 +120,7 @@ let verified_stored_answer ~base_path ~tool_name ~output_text =
      | Ok (Some original) when String.length original = bytes ->
        (match Option.bind (stored_answer_content ~mime original) read with
         | Some value ->
-          let actual = Digestif.SHA256.(digest_string
+          let actual = Agent_core_sha256.(digest_string
               (value |> Yojson.Safe.sort |> Yojson.Safe.to_string) |> to_hex) in
           if String.equal actual declared then Some value else None
         | None -> None)

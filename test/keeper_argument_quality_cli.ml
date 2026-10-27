@@ -5,7 +5,7 @@ module T = Agent_core.Types
 module Http = Llm_provider.Http_request_observer
 module Wire = Llm_provider.Request_wire_observer
 let ( let* ) = Result.bind
-let sha text = Digestif.SHA256.(to_hex (digest_string text))
+let sha text = Agent_core_sha256.(to_hex (digest_string text))
 let encode value = Yojson.Safe.pretty_to_string value ^ "\n"
 
 type arm = Verbatim | Projected

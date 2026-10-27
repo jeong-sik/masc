@@ -76,8 +76,8 @@ let observation_of_json json =
     match Yojson.Safe.Util.member name json with
     | `Null -> Ok None
     | `String value ->
-        (match Digestif.SHA256.consistent_of_hex_opt value with
-         | Some digest -> Ok (Some (Digestif.SHA256.to_hex digest))
+        (match Agent_core_sha256.consistent_of_hex_opt value with
+         | Some digest -> Ok (Some (Agent_core_sha256.to_hex digest))
          | None -> Error (name ^ " must be null or a SHA-256 digest"))
     | _ -> Error (name ^ " must be null or a SHA-256 digest")
   in

@@ -48,7 +48,7 @@ let owner_to_json owner = `Assoc ["epoch",`String owner.epoch;"keeper_id",`Strin
 let scope_identity owner = Yojson.Safe.to_string (`Assoc [
   "keeper_id",`String owner.keeper_id;"keepers",physical_json owner.keepers;
   "queue_generation",`String owner.queue_generation;"workspace",physical_json owner.workspace])
-let scope_hash identity = Digestif.SHA256.(to_hex (digest_string identity))
+let scope_hash identity = Agent_core_sha256.(to_hex (digest_string identity))
 let keeper_id owner = owner.keeper_id
 let base_path owner = owner.workspace.path
 let keepers_dir owner = owner.keepers.path

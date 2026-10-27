@@ -2,7 +2,7 @@ open Alcotest
 
 module Write = Runtime_official_client_write
 
-let hash text = Digestif.SHA256.(digest_string text |> to_hex)
+let hash text = Agent_core_sha256.(digest_string text |> to_hex)
 
 let fragments (write : Write.t) =
   match write.fragments with

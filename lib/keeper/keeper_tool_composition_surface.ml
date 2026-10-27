@@ -1208,7 +1208,7 @@ let make_instruction_skill_tool
                    ; "bytes", `Int (String.length skill.body)
                    ; ( "sha256"
                      , `String
-                         Digestif.SHA256.(digest_string skill.body |> to_hex) )
+                         Agent_core_sha256.(digest_string skill.body |> to_hex) )
                    ]
                | Some relative_path ->
                  (match skill.resource_location with
@@ -1259,7 +1259,7 @@ let make_instruction_skill_tool
                          Skill_resource_path.to_string relative_path
                        in
                        let sha256 =
-                         Digestif.SHA256.(digest_string contents |> to_hex)
+                         Agent_core_sha256.(digest_string contents |> to_hex)
                        in
                        record_and_return
                          ~content:

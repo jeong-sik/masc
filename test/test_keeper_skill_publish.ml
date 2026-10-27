@@ -552,7 +552,7 @@ let test_owned_draft_validates_and_publishes_exact_bytes () =
   check bool "validation creates no package" false (Sys.file_exists path);
   let validated_sha = Yojson.Safe.Util.(member "source" validation |> member "sha256" |> to_string) in
   check string "validation identifies frozen bytes"
-    Digestif.SHA256.(digest_string source.source_text |> to_hex) validated_sha;
+    Agent_core_sha256.(digest_string source.source_text |> to_hex) validated_sha;
   (* Rejections happen before the editor hook and do not claim a write. *)
   let reject caller args kind =
     let ((_, data) as outcome) = dispatch caller "keeper_skill_publish" args in

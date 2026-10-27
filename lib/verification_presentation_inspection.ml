@@ -143,7 +143,7 @@ let inspect ~base_path ~max_image_bytes ~bytes =
       let source = Filename.concat root "source.pptx" in
       Auth.save_private_text_file source bytes;
       Unix.chmod source 0o400;
-      let sha256 = Digestif.SHA256.(digest_string bytes |> to_hex) in
+      let sha256 = Agent_core_sha256.(digest_string bytes |> to_hex) in
       let run program arguments =
         match Process_eio.run_argv_with_status_split_or_refusal
             ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))

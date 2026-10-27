@@ -65,7 +65,7 @@ let to_json (result : receipt) =
 
 let filename json =
   Domain_pool_ref.submit_cpu_or_inline (fun () ->
-    Digestif.SHA256.(digest_string (Yojson.Safe.to_string json) |> to_hex) ^ ".json")
+    Agent_core_sha256.(digest_string (Yojson.Safe.to_string json) |> to_hex) ^ ".json")
 
 let read path =
   let* body = Fs_compat.load_owned_regular_file ~ownership_root:(Filename.dirname path) path

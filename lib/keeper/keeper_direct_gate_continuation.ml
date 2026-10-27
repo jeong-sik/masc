@@ -269,7 +269,7 @@ let denial_input (selected : Semantic.gate_resolution) =
     let encoded = Yojson.Safe.to_string (`Assoc ["approval_id", `String selected.obligation.approval_id;
       "tool_name", `String selected.obligation.tool_name; "input_hash", `String selected.obligation.input_hash;
       "denied", `String detail]) in
-    let evidence_fingerprint = Digestif.SHA256.(digest_string encoded |> to_hex) in
+    let evidence_fingerprint = Agent_core_sha256.(digest_string encoded |> to_hex) in
     let* identity = Keeper_approval_input_admission.identity
       ~approval_id:selected.obligation.approval_id ~evidence_fingerprint
       |> Result.map_error Keeper_approval_input_admission.error_to_string in

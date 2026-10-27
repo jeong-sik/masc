@@ -1,5 +1,5 @@
 let ( let* ) = Result.bind
-let digest text = Digestif.SHA256.(digest_string text |> to_hex)
+let digest text = Agent_core_sha256.(digest_string text |> to_hex)
 
 type plan =
   { path : string

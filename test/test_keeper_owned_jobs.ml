@@ -223,7 +223,7 @@ let control_launch fixture ~tool_use_id ~keeper_turn_id json =
       turn_ref=Some (Ids.Turn_ref.make ~trace_id ~absolute_turn:41);
       tool_use_id=Some tool_use_id } in
   let request = `Assoc ["argv",`List [`String "fixture-program"];"inputs",`List []] in
-  let digest = Digestif.SHA256.(to_hex (digest_string (Yojson.Safe.to_string request))) in
+  let digest = Agent_core_sha256.(to_hex (digest_string (Yojson.Safe.to_string request))) in
   write_control fixture ~shared:(`Assoc []) ~jobs:[] ~armed:[`Assoc
     ["base_path",`String fixture.base_path;"keeper_name",`String keeper;
      "source",Store.source_to_json source;"request_sha256",`String digest;"fault",json]]
@@ -723,7 +723,7 @@ let test_large_streams_publish_complete_original_artifacts () = with_fixture @@ 
       let expected_bytes = String.length expected in
       check bool "full stream exceeds process preview ceiling" true (expected_bytes > head + tail);
       check int "declared artifact bytes cover the complete stream" expected_bytes reference.Tool_output.bytes;
-      let expected_sha = Digestif.SHA256.(to_hex (digest_string expected)) in
+      let expected_sha = Agent_core_sha256.(to_hex (digest_string expected)) in
       check string "artifact SHA matches independent full source digest" expected_sha reference.sha256;
       let actual = match Tool_blob_store.fetch blobs ~sha256:reference.sha256 with
         | Ok (Some bytes) -> bytes
@@ -2737,7 +2737,7 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   let loser_marker = Filename.concat
       (Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path:fixture.base_path)
          "keeper_msg_requests") "prepared_continuations")
-      (Digestif.SHA256.(to_hex (digest_string losing_request)) ^ ".json") in
+      (Agent_core_sha256.(to_hex (digest_string losing_request)) ^ ".json") in
   check bool "rejected CAS never publishes a continuation marker" false (Sys.file_exists loser_marker);
   let losing_entry = Async.load_canonical_durable_terminal ~base_path:fixture.base_path
       ~caller:keeper losing_request |> require "CAS loser canonical acceptance failure"
@@ -4000,7 +4000,7 @@ let test_interrupted_prepared_launch_resumes_the_same_job keeper_turn_id () = wi
     Yojson.Safe.from_string original_binding |> to_assoc
     |> List.map (fun (name, prior) -> name, if name = field then value else prior)
     |> fun fields -> Yojson.Safe.to_string (`Assoc fields) in
-  let different_request_sha = Digestif.SHA256.(to_hex (digest_string
+  let different_request_sha = Agent_core_sha256.(to_hex (digest_string
       (Yojson.Safe.to_string (`Assoc
         ["argv", `List [`String "different-program"]; "inputs", `List []])))) in
   (* Every retry crosses the real broker/Executor/Handler/Dispatcher/Runtime.
@@ -4816,7 +4816,7 @@ let test_native_child_acceptance_survives_physical_parent_loss () =
         (Filename.concat
           (Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path:fixture.base_path)
             "keeper_msg_requests") "execution_journals")
-          Digestif.SHA256.(digest_string keeper |> to_hex))
+          Agent_core_sha256.(digest_string keeper |> to_hex))
         (Plan.Composition_run_id.to_string run_id ^ ".jsonl") in
     let blob_root = Tool_blob_store.root_dir (Tool_blob_store.create ~base_path:fixture.base_path) in
     let draft_file = Filename.concat

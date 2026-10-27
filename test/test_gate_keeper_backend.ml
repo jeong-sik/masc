@@ -2603,7 +2603,7 @@ let test_keeper_stream_bridge_preserves_typed_media_source () =
   in
   let expected_ref =
     "/api/v1/media/"
-    ^ Digestif.SHA256.(digest_string ("image/png\000" ^ raw_media) |> to_hex)
+    ^ Agent_core_sha256.(digest_string ("image/png\000" ^ raw_media) |> to_hex)
   in
   match events with
   | [

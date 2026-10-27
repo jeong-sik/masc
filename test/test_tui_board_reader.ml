@@ -1,6 +1,6 @@
 module R = Masc_tui_board_reader
 let original="# 밤섬\r\n\r\n| Bass VI | C → C♯ → D |\r\n끝 Ω\r\n"
-let key : R.key={post_id="original-post";sha256=Digestif.SHA256.(digest_string original |> to_hex);
+let key : R.key={post_id="original-post";sha256=Agent_core_sha256.(digest_string original |> to_hex);
   bytes=String.length original;name=Some "밤섬.md"}
 let require=function Ok value -> value | Error error -> Alcotest.fail error
 let request=function Some request -> request | None -> Alcotest.fail "original request not started"
@@ -54,7 +54,7 @@ let test_integrity_and_binary () =
   Alcotest.(check bool) "wrong byte length refuses observed bytes" true
     (Result.is_error (R.validate key (original ^ "x")));
   let bytes="\255\000\128" in
-  let key={key with sha256=Digestif.SHA256.(digest_string bytes |> to_hex);bytes=String.length bytes} in
+  let key={key with sha256=Agent_core_sha256.(digest_string bytes |> to_hex);bytes=String.length bytes} in
   let reader,read=R.open_read ~key R.initial in
   let reader=R.complete reader (request read) (R.validate key bytes) in
   Alcotest.(check bool) "binary cannot become terminal text" true (Result.is_error (R.source reader));

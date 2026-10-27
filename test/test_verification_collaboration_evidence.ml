@@ -458,7 +458,7 @@ let test_large_sources_survive_actual_bridge () = with_fixture (fun config ->
         check int "complete byte count" offset (page |> member "total_bytes" |> to_int);
         let bytes = String.concat "" (List.rev (content :: parts)) in
         check string "reconstructed digest matches exact original" expected_digest
-          Digestif.SHA256.(digest_string bytes |> to_hex);
+          Agent_core_sha256.(digest_string bytes |> to_hex);
         Yojson.Safe.from_string bytes, member "next_cursor" first
       | cursor -> collect offset (bridge surface name (cursor_args args cursor)) (content :: parts) in
     collect 0 first [] in

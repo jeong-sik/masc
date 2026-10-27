@@ -14,7 +14,7 @@ module Fixture = Exact_output_fixture
 
 let () = Masc.Prompt_defaults.init ()
 let require = function Ok value -> value | Error detail -> fail detail
-let sha256 bytes = Digestif.SHA256.(digest_string bytes |> to_hex)
+let sha256 bytes = Agent_core_sha256.(digest_string bytes |> to_hex)
 let hash_json json = sha256 (Yojson.Safe.to_string json)
 let member = Yojson.Safe.Util.member
 let json_string name json = member name json |> Yojson.Safe.Util.to_string

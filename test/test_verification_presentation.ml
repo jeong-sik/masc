@@ -4,7 +4,7 @@ module VAT = Verification_authority_tools
 
 let read path = In_channel.with_open_bin path In_channel.input_all
 let write path bytes = Out_channel.with_open_bin path (fun out -> output_string out bytes)
-let sha bytes = Digestif.SHA256.(digest_string bytes |> to_hex)
+let sha bytes = Agent_core_sha256.(digest_string bytes |> to_hex)
 
 let test_original_presentation () =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->

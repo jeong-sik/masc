@@ -62,7 +62,7 @@ let root_id ~keeper_name ~context_key ~candidate_id =
       ; candidate_id
       ]
   in
-  "ba-root-" ^ Digestif.SHA256.(digest_string payload |> to_hex)
+  "ba-root-" ^ Agent_core_sha256.(digest_string payload |> to_hex)
 ;;
 
 module Ready_order = struct

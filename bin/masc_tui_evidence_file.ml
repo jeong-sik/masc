@@ -30,7 +30,7 @@ let decode ~task_id ~verification_id ~index json =
   let* contents = Base64.decode encoded |> Result.map_error (fun (`Msg detail) -> detail) in
   let* sha256 = string "sha256" in
   if List.assoc_opt "bytes" fields <> Some (`Int (String.length contents))
-     || not (String.equal sha256 Digestif.SHA256.(to_hex (digest_string contents)))
+     || not (String.equal sha256 Agent_core_sha256.(to_hex (digest_string contents)))
   then Error "The downloaded evidence does not match its recorded size or SHA-256"
   else Ok {name; contents}
 

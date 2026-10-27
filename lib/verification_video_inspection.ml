@@ -176,7 +176,7 @@ let inspect ~base_path ~bytes =
       | Ok None -> Error (Storage_failed "captured video disappeared")
       | Error error -> Error (Storage_failed (Fs_compat.owned_regular_file_read_error_to_string error)) in
     if not (String.equal retained bytes) then Error (Invalid_output "captured video changed during inspection") else
-    Ok {source_bytes=String.length bytes;source_sha256=Digestif.SHA256.(digest_string bytes |> to_hex);
+    Ok {source_bytes=String.length bytes;source_sha256=Agent_core_sha256.(digest_string bytes |> to_hex);
         format_name;duration_seconds;streams;probe;decode;versions=[probe_version;decode_version]}
   with
   | Sys_error detail -> Error (Storage_failed detail)

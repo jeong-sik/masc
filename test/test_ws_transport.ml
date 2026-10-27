@@ -20,17 +20,17 @@ let test_close_all_empty () =
     Alcotest.(check int) "close_all on empty returns 0" 0 closed)
 
 let test_sha1_produces_20_bytes () =
-  let result = Digestif.SHA1.(digest_string "test" |> to_raw_string) in
+  let result = Agent_core_sha1.raw_digest_string "test" in
   Alcotest.(check int) "SHA1 raw length" 20 (String.length result)
 
 let test_sha1_deterministic () =
-  let r1 = Digestif.SHA1.(digest_string "hello" |> to_raw_string) in
-  let r2 = Digestif.SHA1.(digest_string "hello" |> to_raw_string) in
+  let r1 = Agent_core_sha1.raw_digest_string "hello" in
+  let r2 = Agent_core_sha1.raw_digest_string "hello" in
   Alcotest.(check string) "SHA1 deterministic" r1 r2
 
 let test_sha1_different_inputs () =
-  let r1 = Digestif.SHA1.(digest_string "a" |> to_raw_string) in
-  let r2 = Digestif.SHA1.(digest_string "b" |> to_raw_string) in
+  let r1 = Agent_core_sha1.raw_digest_string "a" in
+  let r2 = Agent_core_sha1.raw_digest_string "b" in
   Alcotest.(check bool) "different inputs different hashes" true (r1 <> r2)
 
 (* ====== WebSocket handshake accept (RFC 6455 §1.3 / §4.2.1) ====== *)

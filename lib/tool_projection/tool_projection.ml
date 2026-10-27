@@ -16,7 +16,7 @@ let semantic_answer_fingerprint reader (result : Tool_result.result) =
   | None -> None
   | Some answer ->
     Some
-      (Digestif.SHA256.(digest_string (answer |> Yojson.Safe.sort |> Yojson.Safe.to_string) |> to_hex))
+      (Agent_core_sha256.(digest_string (answer |> Yojson.Safe.sort |> Yojson.Safe.to_string) |> to_hex))
 
 type projection_error_kind =
   | Artifact_storage_failure

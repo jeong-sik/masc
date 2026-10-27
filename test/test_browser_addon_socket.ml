@@ -248,7 +248,8 @@ let a_link_left_behind_is_unconfirmed () =
     with_left_file ~extra (fun admission directory _root left ->
       check (label ^ ": the release is unconfirmed") true (Result.is_error (cleanup ~admission ~directory));
       check (label ^ ": the file stays in the allocation") true (Sys.file_exists left);
-      check (label ^ ": no kept folder is made") false (Sys.file_exists (kept_root directory))))
+      check (label ^ ": no kept folder is made") false (Sys.file_exists (kept_root directory));
+      check (label ^ ": the record is still acquired") true (acquisition_state directory = "acquired")))
     ["a symbolic link",(fun ~directory:_ ~root ~downloads ->
         Unix.symlink (Filename.concat root "automation.json") (Filename.concat downloads "link"));
      "a second hard link",(fun ~directory:_ ~root:_ ~downloads ->
@@ -260,22 +261,41 @@ let a_reachable_kept_root_moves_nothing () =
     (fun admission directory _root left ->
       check "a kept root with group or other access is refused" true (Result.is_error (cleanup ~admission ~directory));
       check "the file stays in the allocation" true (Sys.file_exists left))
-(* Files moved by a pass that failed later are reported by the pass that
-   releases. *)
-let files_moved_before_a_failure_are_reported () =
+(* An existing kept root needs only to be private, not exactly 0700. *)
+let a_private_kept_root_of_another_mode_is_used () =
+  with_left_file ~extra:(fun ~directory ~root:_ ~downloads:_ ->
+      Unix.mkdir (kept_root directory) 0o700;Unix.chmod (kept_root directory) 0o1700)
+    (fun admission directory root _left ->
+      check "the file moves and the allocation is released" true
+        (match cleanup ~admission ~directory with
+         | Ok (Socket.Cleanup_kept {files;_}) -> files=1
+         | Ok (Socket.Cleanup_released|Cleanup_retained) | Error _ -> false);
+      check "the allocation is gone" false (Sys.file_exists root))
+let mentions text part =
+  let length=String.length part in
+  let rec from index = index+length<=String.length text
+    && (String.sub text index length=part || from (index+1)) in
+  from 0
+(* A pass that moved files and then failed names the kept folder in its
+   error. A later pass never reads that folder, so whatever the operator does
+   there cannot hold the allocation. *)
+let a_failure_after_the_move_names_the_kept_folder () =
   with_left_file ~extra:(fun ~directory:_ ~root ~downloads:_ ->
       Out_channel.with_open_bin (Filename.concat root "stagehand.json") (fun out -> output_string out "foreign"))
     (fun admission directory root _left ->
       let into=Filename.concat (kept_root directory) (Lease.instance_id admission) in
-      check "an unknown resource fails the pass" true (Result.is_error (cleanup ~admission ~directory));
-      check "the file had already moved" true
-        (Sys.file_exists (Filename.concat (Filename.concat into "downloads") "left"));
-      Unix.unlink (Filename.concat root "stagehand.json");
-      check "the releasing pass reports the moved file" true
+      let moved=Filename.concat (Filename.concat into "downloads") "left" in
+      check "the failed pass names the kept folder" true
         (match cleanup ~admission ~directory with
-         | Ok (Socket.Cleanup_kept {directory=kept;files}) -> kept=into && files=1
-         | Ok (Socket.Cleanup_released|Cleanup_retained) | Error _ -> false);
-      check "the allocation is gone" false (Sys.file_exists root))
+         | Error detail -> mentions detail into
+         | Ok (Socket.Cleanup_released|Cleanup_kept _|Cleanup_retained) -> false);
+      check "the file had already moved" true (Sys.file_exists moved);
+      Unix.link moved (Filename.concat (Filename.concat into "downloads") "again");
+      Unix.symlink moved (Filename.concat into "link");
+      Unix.unlink (Filename.concat root "stagehand.json");
+      released (cleanup ~admission ~directory);
+      check "the allocation is gone" false (Sys.file_exists root);
+      check "the moved file stays" true (Sys.file_exists moved))
 let operator_retains_unconfirmed_allocation () =
   with_claim ~source:(fun _ -> Socket.Automation owned_gecko)
     (fun admission directory root ->
@@ -519,7 +539,8 @@ let () = Alcotest.run "browser addon socket ownership" ["recovery",[
   Alcotest.test_case "a cleaning allocation moves the Keeper's files" `Quick a_cleaning_allocation_moves_keeper_files;
   Alcotest.test_case "a link left behind leaves the release unconfirmed" `Quick a_link_left_behind_is_unconfirmed;
   Alcotest.test_case "a reachable kept root moves nothing" `Quick a_reachable_kept_root_moves_nothing;
-  Alcotest.test_case "files moved before a failure are reported" `Quick files_moved_before_a_failure_are_reported;
+  Alcotest.test_case "a private kept root of another mode is used" `Quick a_private_kept_root_of_another_mode_is_used;
+  Alcotest.test_case "a failure after the move names the kept folder" `Quick a_failure_after_the_move_names_the_kept_folder;
   Alcotest.test_case "the operator retains an unconfirmed allocation in place" `Quick operator_retains_unconfirmed_allocation;
   Alcotest.test_case "retain refuses a replaced allocation directory" `Quick retain_refuses_replaced_directory;
   Alcotest.test_case "retain reports an allocation already released" `Quick retain_reports_a_released_allocation;

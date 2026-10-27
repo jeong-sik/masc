@@ -48,9 +48,8 @@ type cleanup_result =
   | Cleanup_released
       (** Its known resources were removed, or it never had any. *)
   | Cleanup_kept of { directory : string; files : int }
-      (** As [Cleanup_released], and [directory] holds the [files] files the
-          browser left for the Keeper, moved there by this or an earlier
-          cleanup of the instance. *)
+      (** As [Cleanup_released], after this cleanup moved the [files] files
+          the browser left for the Keeper into [directory]. *)
   | Cleanup_retained
       (** The operator took it over; nothing of it was removed. *)
 val cleanup : admission:Native_addon_lease.t -> directory:string -> kept_root:string ->
@@ -70,12 +69,12 @@ val cleanup : admission:Native_addon_lease.t -> directory:string -> kept_root:st
     the browser left for the Keeper is copied or deleted. [kept_root] and the
     instance folder are made 0700 when absent and must otherwise be
     directories of this user no group or other user can reach. A link, a
-    file with more links or another kind of entry in those trees, a
-    [kept_root] on another file system than the allocation, or a tree already
-    at the destination leaves the release unconfirmed with nothing moved
-    since the refusal. The release reports [Cleanup_kept] whenever the
-    instance folder exists, so files moved by a pass that failed later are
-    reported by the one that releases. *)
+    file with more links or another kind of entry in those three trees, a
+    [kept_root] on another device than the allocation, or a tree already in
+    the instance folder leaves the release unconfirmed with nothing moved.
+    When anything after the first tree moved fails, the error names the
+    instance folder. A later cleanup never reads that folder; it belongs to
+    the operator. *)
 type retain_error =
   | Retain_refused of string
       (** The acquisition record was not changed. *)

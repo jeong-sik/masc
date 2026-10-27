@@ -246,34 +246,37 @@ let kept_directory_at ~label path =
     | exception Unix.Unix_error (Unix.EEXIST,_,_) -> false in
   if made then sync (Filename.dirname path);
   Requirement.lstat ~label kept_directory path
+(* Runs what follows a move of Keeper files out of an allocation; its failure
+   names [into], so the unconfirmed cleanup says where they went. *)
+let after_move ~into run =
+  protect run |> Result.map_error (fun detail ->
+    Printf.sprintf "%s; the Keeper files of this allocation were already moved to %s" detail into)
 (* Moves each Keeper file tree of [root] into [into] by rename, so every byte
-   is kept and nothing is copied or deleted. A kept root on another file
-   system refuses before [into] is made; a tree already at the destination
-   refuses and leaves the remaining trees where they are. *)
+   is kept and nothing is copied or deleted. A kept root on another device
+   than the allocation refuses before [into] is made, and a tree already at
+   the destination refuses before any tree moves. A rename that fails anyway,
+   as across a bind mount, leaves an empty [into]. *)
 let move_keeper_files ~kept_root ~into ~root (allocation : Unix.stats) =
   let* kept=kept_directory_at ~label:"kept browser files root" kept_root in
   let* ()=if kept.Unix.st_dev=allocation.Unix.st_dev then Ok ()
     else Error (Printf.sprintf "kept browser files root %s is on another file system than %s" kept_root root) in
   let* _=kept_directory_at ~label:"kept browser files" into in
+  let trees=List.filter (fun tree -> match Unix.lstat (Filename.concat root tree) with
+      | _ -> true
+      | exception Unix.Unix_error (Unix.ENOENT,_,_) -> false) keeper_file_trees in
   let* ()=List.fold_left (fun acc tree ->
       let* ()=acc in
-      let source=Filename.concat root tree and target=Filename.concat into tree in
-      match Unix.lstat source with
-      | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok ()
-      | _ ->
-        (match Unix.lstat target with
-         | _ -> Error (Printf.sprintf "kept browser files already hold %s" target)
-         | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Unix.rename source target;Ok ()))
-    (Ok ()) keeper_file_trees in
-  sync into;sync root;Ok ()
-(* The files an earlier or this cleanup moved into [into], when [into]
-   exists. *)
-let kept_files into =
-  match Unix.lstat into with
-  | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok None
-  | _ ->
-    let* files=keeper_file_count into in
-    Ok (Some (into,files))
+      let target=Filename.concat into tree in
+      match Unix.lstat target with
+      | _ -> Error (Printf.sprintf "kept browser files already hold %s" target)
+      | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok ())
+    (Ok ()) trees in
+  let move tree=Unix.rename (Filename.concat root tree) (Filename.concat into tree) in
+  match trees with
+  | [] -> Ok ()
+  | first :: rest ->
+    move first;
+    after_move ~into (fun () -> List.iter move rest;sync into;sync root;Ok ())
 (* What an allocation of [source] may hold besides its socket: the files and
    folders its browser writes. [None] is an allocation whose acquisition was
    never confirmed, which may hold only its socket. *)
@@ -430,8 +433,10 @@ let cleanup ~admission ~directory ~kept_root = protect (fun () ->
       | Stagehand c -> Browser_addon_stagehand.settle c ~incarnation:(Native_addon_lease.instance_id admission) ~directory:root
       | Owned_firefox c -> Browser_addon_live_bidi.settle c ~incarnation:(Native_addon_lease.instance_id admission) ~directory:root
       | Automation _ | Ego | External_host -> Ok () in
-    let into=Filename.concat kept_root instance_id in
-    let* kept=match Unix.lstat root with
+    let release ()=
+      sync (Filename.dirname root);
+      Fs_compat.save_file_atomic_strict file (Yojson.Safe.to_string (`Assoc ["state",`String "released"])) in
+    match Unix.lstat root with
       | info ->
         let* ()=private_root root info in
         let* ()=match identity with
@@ -448,23 +453,25 @@ let cleanup ~admission ~directory ~kept_root = protect (fun () ->
            the one acquired. Files the browser left for the Keeper move out
            whole to [kept_root], named for this instance, and the release
            goes on without them. *)
-        let* ()=match identity with
+        let into=Filename.concat kept_root instance_id in
+        let* moved=match identity with
           | Acquired _|Cleaning _ ->
             let* files=keeper_file_count root in
-            if files=0 then Ok ()
-            else move_keeper_files ~kept_root ~into ~root info
-          | Missing|Retained _|Released -> Ok () in
-        (* Read before anything is removed, so files moved by a pass that
-           failed later are reported by the pass that releases. *)
-        let* kept=kept_files into in
+            if files=0 then Ok None
+            else let* ()=move_keeper_files ~kept_root ~into ~root info in Ok (Some files)
+          | Missing|Retained _|Released -> Ok None in
         let confirmed=match identity with Cleaning _ -> true | Missing|Acquired _|Retained _|Released -> false in
         let confirm ()=if confirmed then Ok () else
           Fs_compat.save_file_atomic_strict file
             (Yojson.Safe.to_string (acquired_json admission root info ~state:"cleaning")) in
         let source=match identity with Missing -> None | Acquired _|Cleaning _|Retained _|Released -> Some source in
         let models=match identity with Missing -> None | Acquired _|Cleaning _|Retained _|Released -> models in
-        let* ()=cleanup_contents ~admission ~root ~source ~models ~confirmed ~confirm in
-        Unix.rmdir root;Ok kept
+        let finish ()=
+          let* ()=cleanup_contents ~admission ~root ~source ~models ~confirmed ~confirm in
+          Unix.rmdir root;release () in
+        (match moved with
+         | None -> let* ()=finish () in Ok Cleanup_released
+         | Some files -> let* ()=after_move ~into finish in Ok (Cleanup_kept {directory=into;files}))
       | exception Unix.Unix_error (Unix.ENOENT,_,_) ->
         (* A source that starts a browser keeps its resources in the
            allocation; one acquired and gone was never confirmed released. *)
@@ -472,12 +479,8 @@ let cleanup ~admission ~directory ~kept_root = protect (fun () ->
           | Automation _ | Stagehand _ | Owned_firefox _ -> true | Ego | External_host -> false in
         (match identity,starts_browser with
          | Acquired _,true -> Error "owned browser allocation vanished without confirmed cleanup"
-         | (Missing|Cleaning _|Retained _|Released),_ | Acquired _,false -> kept_files into) in
-    sync (Filename.dirname root);
-    let* ()=Fs_compat.save_file_atomic_strict file (Yojson.Safe.to_string (`Assoc ["state",`String "released"])) in
-    Ok (match kept with
-      | None -> Cleanup_released
-      | Some (directory,files) -> Cleanup_kept {directory;files}))
+         | (Missing|Cleaning _|Retained _|Released),_ | Acquired _,false ->
+           let* ()=release () in Ok Cleanup_released))
 type retain_error = Retain_refused of string | Retained_record_unconfirmed of string
 (* What [retain] decided before writing anything. *)
 type retain_plan =

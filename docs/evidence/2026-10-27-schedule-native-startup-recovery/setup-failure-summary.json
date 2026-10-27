@@ -1,0 +1,80 @@
+{
+  "outcome": "incomplete",
+  "checks": [
+    {
+      "name": "binary hash matches verified input",
+      "passed": true
+    },
+    {
+      "name": "owned port differs from primary",
+      "passed": true
+    },
+    {
+      "name": "A verified owned candidate identity",
+      "passed": true
+    },
+    {
+      "name": "create-only owner registered audit-startup-a",
+      "passed": true
+    },
+    {
+      "name": "explicit pause committed audit-startup-a",
+      "passed": true
+    },
+    {
+      "name": "create-only owner registered audit-startup-b",
+      "passed": true
+    },
+    {
+      "name": "explicit pause committed audit-startup-b",
+      "passed": true
+    },
+    {
+      "name": "bounded successful MCP response",
+      "passed": true
+    },
+    {
+      "name": "MCP initialized",
+      "passed": true
+    },
+    {
+      "name": "bounded successful MCP response",
+      "passed": true
+    },
+    {
+      "name": "masc_keeper_status succeeds",
+      "passed": true
+    },
+    {
+      "name": "initial manual paused zero-turn audit-startup-a",
+      "passed": true
+    },
+    {
+      "name": "bounded successful MCP response",
+      "passed": true
+    },
+    {
+      "name": "masc_keeper_status succeeds",
+      "passed": true
+    },
+    {
+      "name": "initial manual paused zero-turn audit-startup-b",
+      "passed": true
+    }
+  ],
+  "intentional_first_death": null,
+  "final_cleanup_forced_kills": [],
+  "process_exit_codes": {
+    "A": 0
+  },
+  "fault_removed_during_observation_at": null,
+  "observer_deadline_means": "incomplete trial, not product timing defect",
+  "not_proven": [
+    "power-loss durability",
+    "model execution",
+    "arbitrary exactly-once effects",
+    "ordinary uninstrumented crash frequency",
+    "all scheduler races",
+    "whole feature"
+  ]
+}

@@ -71,8 +71,8 @@ API33/F1/restart 상태23은 [실제 API bundle](../evidence/2026-10-26-schedule
 | 45 | dispatch 기록만 있고 exact queue가 없으면 경고한다 | C38; 기존 decoder | 생산 stale occurrence 거절 + 기존 Missing 판정 근거. 새 CI의 채팅 경고 검사는 아님. |
 | 46 | ledger와 queue 종단 증거가 충돌하면 완료로 만들지 않는다 | 기존 decoder conflict | 새 195개에 직접 TUI terminal-conflict case 없음. 이전 component 근거 유지. |
 | 47 | 이전 owner ACK와 새 owner pending을 구분한다 | C21/33/37; 기존 decoder/재생 | 실제 transfer outbox/projection/cached target 실행. 실제 model-to-model 인계 미검증. |
-| 48 | 재시작 전 Running을 Due로 복원한다 | S-due7–8 | 실제 filesystem Running→Due recovery 함수/idempotence 실행. 새 process bootstrap은 아님. |
-| 49 | 첫 startup recovery 실패 후 같은 process에서 회복한다 | Test40358821346 Consumer의 keeper_wake46–47, 117 PASS; Test40365052184에 같은 source 포함 | genuine Running·실제 publication 실패→첫 recovery 실패→저장 복원→같은 maintenance state의 다음 cadence 성공, 성공 뒤 normal crash가 startup으로 돌아가지 않음 실행. 실제 서버 프로세스 bootstrap/설치 binary는 미검증. |
+| 48 | 재시작 전 Running을 Due로 복원한다 | S-due7–8 | 실제 filesystem Running→Due recovery 함수/idempotence 실행. [c52 native 새 process](../evidence/2026-10-27-schedule-native-startup-recovery/README.md)에서 genuine Running 사망 후 old attempt가 process_interrupted로 정리되고 새 attempt/paused enqueue까지 관측. 중간 Due 화면을 직접 캡처한 것은 아님. |
+| 49 | 첫 startup recovery 실패 후 같은 process에서 회복한다 | Test40358821346 Consumer의 keeper_wake46–47, 117 PASS; Test40365052184에 같은 source 포함 | genuine Running·실제 publication 실패→첫 recovery 실패→저장 복원→같은 maintenance state의 다음 cadence 성공, 성공 뒤 normal crash가 startup으로 돌아가지 않음 실행. [c52 native 실제 bootstrap](../evidence/2026-10-27-schedule-native-startup-recovery/README.md): SIGSTOP·lease 자연만료·의도SIGKILL로 보존된 Running에 첫 실제 staging-write 실패→동일 B runtime 다음tick 복구·원본/control 합계 dispatch2. old Running/control 원장 불변 확인. scheduler ok이나 overall health는 degraded, 모델/운영 설치 증명 아님. |
 | 50 | dispatch 실패 정산 write 실패 뒤 같은 process에서 회복한다 | Test40365052184의 exact attempt/primary fault 회귀; 후속 PR46248 | Store의 실제 primary 실패·같은 capability 재정산은 실행. 보류 intent를 다음 production cadence에 보존/재시도하는 PR46248은 작성·독립 소스 검토 완료, Test40369739062는 head22014660의 직접 Eio 의존 참조로 suite 전 컴파일 실패. head2861571의 Test40371389026도 warning4로 suite 전 실패. 닫힌 오류 분기와 문서 수리 headc52f799의 [Test40374192059](../evidence/2026-10-27-schedule-settlement-verification/test40374192059/result.json)는 success: Runner30·Consumer60·Tool wiring64·Lane act7, 161 PASS/FAIL0/SKIP0. production maintenance composition에서 intent 보존·같은 process cadence 재정산·health와 오류 경계 검증. 실제 서버 binary fault→수렴은 미검증. |
 | 51 | 손상·stale receipt·결과 불확실을 성공으로 덮지 않는다 | S-corruption2–3/6–9, C23–27/34/38/41/43/47/49 | 손상·write failure·retired/stale/noncanonical receipt 거절 실행. 전체 runtime 장애 복구는 아님. |
 | 52 | 도착한 단발이 dispatch Succeeded여도 계속 보인다 | 기존 chat_schedule_entries 추출 결정 | 새 195개에 해당 TUI suite 없음. 실제 채팅 표시 미검증. |
@@ -110,4 +110,4 @@ ref `fix/schedule-pending-settlement-20261027`, conclusion **success**의 161 PA
 합쳐서 새 시나리오 수로 세지 않는다. 8–10행의 기존 domain 정책과 49행 복구 근거도
 각 실행 head에 한정한다. [동일 candidate 실제 실행](../evidence/2026-10-27-schedule-candidate-runtime/README.md)은
 20행의 제한된 A→B 취소와 2·13·59행의 빈 export/권한 사례를 보강한다.
-actual process fault/recovery·busy 모델·TUI·운영 설치는 별도로 검증해야 한다.
+[통제된 실제 bootstrap 복구](../evidence/2026-10-27-schedule-native-startup-recovery/README.md)는 c52에 한정해 48–49행을 보강했다. F5 process-local intent 사망 후 보존·busy 모델·TUI·운영 설치는 별도 경계다.

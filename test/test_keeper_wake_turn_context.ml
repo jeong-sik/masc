@@ -1775,7 +1775,7 @@ let test_admitted_schedule_entry_survives_tools_and_official_resume () =
   check bool "Start User carries B entry" true
     (contains ~needle:(Ids.Turn_ref.to_string (turn 2)) (Masc.Keeper_context_submission_link.text start));
   let held = { Masc.Keeper_official_client_session_store.context = Context_block Prompt_block_id.Admitted_scheduled_input;
-               sha256 = Digestif.SHA256.(digest_string b_text |> to_hex) }
+               sha256 = Agent_core_sha256.(digest_string b_text |> to_hex) }
       :: Host.start_held_context ~composed_context:issued_b prepared_b.messages in
   let resume assembly held =
     let prepared = prepare assembly in

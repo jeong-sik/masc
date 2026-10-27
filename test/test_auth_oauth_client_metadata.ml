@@ -37,7 +37,7 @@ let test_document_url_rules () =
     "a valid URL is kept byte-for-byte"
     claude_code_url
     (document_url claude_code_url :> string);
-  ignore (document_url "HTTPS://example.com:8443/client.json");
+  ignore (document_url "https://example.com:8443/client.json");
   List.iter
     (fun raw ->
       match Metadata.classify_client_id raw with
@@ -52,6 +52,13 @@ let test_document_url_rules () =
     ; "https://example.com/a/../client.json"
     ; "https://example.com/./client.json"
     ; "https://example.com/a/%2E%2E/client.json"
+    ; "https://attacker.example/c.json\n(claude.ai)"
+    ; "https://a.example @b.example/c.json"
+    ; "https://a.example\\@b.example/c.json"
+    ; "https://example.com:abc/c.json"
+      (* ocaml-uri prints the scheme in lower case, so this is not the URL it
+         would fetch. *)
+    ; "HTTPS://example.com/client.json"
     ]
 ;;
 
@@ -101,6 +108,10 @@ let test_document_rules () =
     (Printf.sprintf
        {|{"client_id":%S,"client_name":"E","client_name":"F","redirect_uris":["http://127.0.0.1/cb"]}|}
        url);
+  refused ~label:"control character in client_name" url
+    (Printf.sprintf
+       {|{"client_id":%S,"client_name":"Claude\nCode","redirect_uris":["http://127.0.0.1/cb"]}|}
+       url);
   refused ~label:"client_secret" url (with_fields [ "client_secret", `String "s" ]);
   refused ~label:"client_secret_expires_at" url
     (with_fields [ "client_secret_expires_at", `Int 0 ]);
@@ -131,7 +142,25 @@ let test_loopback_redirects_ignore_the_port () =
   check bool "a host that only starts like loopback" false
     (allowed "http://127.0.0.1.attacker.example:3118/callback");
   check bool "another loopback spelling is not the listed host" false
-    (allowed "http://[::1]:3118/callback")
+    (allowed "http://[::1]:3118/callback");
+  check bool "a line feed tail" false (allowed "http://localhost:3118/callback\nX");
+  check bool "a space" false (allowed "http://localhost:3118/call back")
+;;
+
+let test_ipv6_loopback_redirects_ignore_the_port () =
+  let url = "https://client.example/meta.json" in
+  let body =
+    Printf.sprintf
+      {|{"client_id":%S,"client_name":"E","redirect_uris":["http://[::1]/cb"]}|}
+      url
+  in
+  match Metadata.parse_document (document_url url) body with
+  | Error reason -> fail reason
+  | Ok document ->
+    check bool "[::1] on an ephemeral port" true
+      (Metadata.redirect_uri_allowed document "http://[::1]:4000/cb");
+    check bool "127.0.0.1 is not the listed host" false
+      (Metadata.redirect_uri_allowed document "http://127.0.0.1:4000/cb")
 ;;
 
 let test_non_loopback_redirects_match_exactly () =
@@ -166,6 +195,8 @@ let () =
     ; ( "redirect"
       , [ test_case "loopback redirects ignore the port" `Quick
             test_loopback_redirects_ignore_the_port
+        ; test_case "IPv6 loopback redirects ignore the port" `Quick
+            test_ipv6_loopback_redirects_ignore_the_port
         ; test_case "non-loopback redirects match exactly" `Quick
             test_non_loopback_redirects_match_exactly
         ] )

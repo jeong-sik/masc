@@ -303,6 +303,11 @@ detach가 확인되면 해당 source는 이후 discovery에서 빠진다. 이미
 모델 요청부터 전달된다. Browser 서비스(`service = "browser"`) 패키지의 export 는
 공개 도구가 아니라서 이 목록에 오르지 않는다. Keeper 는 host 의 `Browser*` 도구를 쓰고,
 host 가 고른 설치의 export 를 그 신원으로 부른다.
+Browser 서비스 패키지는 `browser_backend` 로 자기 worker 가 맡는 browser 출처 하나를 적을 수
+있다(`automation`, `stagehand`, `owned_firefox`, `ego`, `external_host`). 적지 않으면 모든 출처를
+맡는다. 한 출처는 붙은 설치 하나만 맡는다. 맡은 설치가 없거나 둘이면 그 출처만 쓰지 못하고, 다른
+출처는 그대로 쓴다. live 출처를 두 설치가 맡으면 그 두 설치가 올린 연결은 쓰지 않는다. 연결은 자기가
+어느 출처에서 왔는지 말하지 않기 때문이다.
 설치별 도구 접근 권한과 Keeper의 `tool_deny`는 검색 전에 적용한다.
 
 공식 클라이언트 연결에도 같은 지연 로딩 계획을 전달한다. Codex에는 `deferLoading`을,

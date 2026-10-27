@@ -1655,6 +1655,11 @@
  (libraries alcotest masc.masc_core eio eio_main))
 
 (test
+ (name test_pool_systhread)
+ (modules test_pool_systhread)
+ (libraries alcotest masc.masc_core eio eio_main eio.unix unix))
+
+(test
  (name test_dashboard_cache_cancellation)
  (modules test_dashboard_cache_cancellation)
  (libraries alcotest masc.dashboard masc.masc_core eio eio_main yojson))

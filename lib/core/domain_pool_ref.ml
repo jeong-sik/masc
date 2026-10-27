@@ -34,3 +34,13 @@ let submit_cpu_or_inline f =
   | Some _, Eio_guard.Non_eio
   | None, (Eio_guard.Eio_fiber | Eio_guard.Non_eio) -> f ()
 ;;
+
+let run_in_pool_systhread ?label f =
+  let in_systhread () = Eio_unix.run_in_systhread ?label f in
+  match Atomic.get pool, Eio_guard.execution_context () with
+  | _, Eio_guard.Non_eio -> f ()
+  | Some _, Eio_guard.Eio_fiber when Executor_pool_ref.in_worker_context () ->
+    in_systhread ()
+  | Some p, Eio_guard.Eio_fiber -> Domain_pool.submit_cpu p in_systhread
+  | None, Eio_guard.Eio_fiber -> in_systhread ()
+;;

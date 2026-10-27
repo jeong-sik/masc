@@ -9,11 +9,15 @@ type verdict =
       ; complete : bool
       }
 
-let is_browser_declaration (declaration : Lane_addon_config.declaration) =
+(* A native browser host's first poll binds to the one service that serves
+   external hosts (Browser_addon_ingress.for_poll), so only those
+   declarations decide what the host is answered. *)
+let serves_native_hosts (declaration : Lane_addon_config.declaration) =
   declaration.enabled
   &&
   match declaration.package.Lane_addon_types.worker_service with
-  | Lane_addon_types.Browser_service -> true
+  | Lane_addon_types.Browser_service backends ->
+    Lane_addon_types.serves_backend backends Browser_lane.Backend.External_host
   | Lane_addon_types.Mcp_tools -> false
 ;;
 
@@ -37,7 +41,7 @@ let judge ~base_path =
   | Browser_lane_launcher.Follows_workspace ->
     let directory = declaration_directory ~base_path in
     let snapshot = Lane_addon_config.load ~directory in
-    (match List.filter is_browser_declaration snapshot.Lane_addon_config.declarations with
+    (match List.filter serves_native_hosts snapshot.Lane_addon_config.declarations with
      | [ (declaration : Lane_addon_config.declaration) ] ->
        Declared { id = declaration.Lane_addon_config.id }
      | [] ->
@@ -63,8 +67,8 @@ let report = function
   | Ambiguous { ids } ->
     Error
       (Printf.sprintf
-         "more than one enabled browser Add-on declaration is saved (%s), so the server cannot \
-          choose which one answers a native browser host and would answer every poll with HTTP \
+         "more than one enabled browser Add-on declaration serves external native hosts (%s), so \
+          the server cannot choose which one answers a native browser host and would answer every poll with HTTP \
           503 (ambiguous_browser_addons). Keep one of them enabled."
          (String.concat ", " ids))
   | Missing { host_directory; directory; unloaded; complete } ->
@@ -85,9 +89,9 @@ let report = function
     Error
       (Printf.sprintf
          "a browser lane host is installed under %s but no enabled browser Add-on declaration \
-          is saved in %s, so every native browser host poll would be answered with HTTP 503 \
+          serving external native hosts is saved in %s, so every native browser host poll would be answered with HTTP 503 \
           (no_browser_addon). Save a declaration whose package has service = \"browser\" \
-          (addons/browser/lane.toml; docs/guides/lane-addon-toml.md), or remove %s if this \
+          and no browser_backend or browser_backend = \"external_host\" (addons/browser/lane.toml; docs/guides/lane-addon-toml.md), or remove %s if this \
           workspace should run no browser%s%s"
          host_directory directory host_directory unloaded_note incomplete_note)
 ;;

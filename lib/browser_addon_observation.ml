@@ -43,3 +43,32 @@ let decode_snapshot = function
 let read (output : Lane_addon_types.output) = match output.rows with
   | [ row ] -> decode_snapshot (`Assoc row.fields)
   | [] | _::_::_ -> Error "the browser observation does not hold exactly the browser worker row"
+
+let unobserved : Browser_selection.work_browser =
+  {activity=Browser_lane.Unobserved;registered=false;session=Browser_lane.Browser_unknown;locate=false}
+let live_backends = List.filter (fun backend ->
+  Browser_lane.Backend.lane backend = Browser_lane.Lane_name.Live) Browser_lane.Backend.all
+let serves_live backends = List.exists (Lane_addon_types.serves_backend backends) live_backends
+let served_twice ~among backend =
+  List.length (List.filter (fun other -> Lane_addon_types.serves_backend other backend) among) > 1
+(* What a worker publishes does not say which source it came from, so a
+   worker that serves a source of the lane another worker also serves does
+   not answer for that lane. *)
+let answers_for ~among lane backends =
+  match List.filter (fun backend -> Browser_lane.Backend.lane backend = lane
+                                    && Lane_addon_types.serves_backend backends backend)
+          Browser_lane.Backend.all with
+  | [] -> false
+  | served -> not (List.exists (served_twice ~among) served)
+let lists_usable_clients ~among backends = answers_for ~among Browser_lane.Lane_name.Live backends
+let merge ~among workers =
+  let serves backend (backends, _) = Lane_addon_types.serves_backend backends backend in
+  let live = List.filter_map (fun (backends, published) ->
+    if lists_usable_clients ~among backends then published else None) workers in
+  let owned backend pick = match List.filter (serves backend) workers with
+    | [ (_, Some published) ] -> pick published
+    | [ (_, None) ] | [] | _ :: _ :: _ -> unobserved in
+  { clients = List.concat_map (fun published -> published.clients) live;
+    client_rows = List.concat_map (fun published -> published.client_rows) live;
+    automation = owned Browser_lane.Backend.Automation (fun published -> published.automation);
+    stagehand = owned Browser_lane.Backend.Stagehand (fun published -> published.stagehand) }

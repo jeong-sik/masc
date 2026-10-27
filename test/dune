@@ -5795,7 +5795,7 @@
 (test
  (name test_lane_addon)
  (modules test_lane_addon)
- (libraries machine_worker_fixture lane_addon_fake_engine mcp_protocol masc.machine_configuration masc_test_deps masc.fusion_core masc.server masc.msx_lane eio eio_main yojson unix))
+ (libraries machine_worker_fixture lane_addon_fake_engine mcp_protocol masc.machine_configuration masc_test_deps masc.fusion_core masc.server masc.msx_lane masc.browser_lane eio eio_main yojson unix))
 
 (test
  (name test_lane_addon_sources)
@@ -5904,7 +5904,7 @@
        (glob_files ../addons/operator-quiz/*.py) ../addons/operator-quiz/lane.toml
        (glob_files ../addons/operator-quiz/schemas/*.json)
        (glob_files ../addons/operator-quiz/prompts/*.md))
- (libraries alcotest masc masc.masc_log masc.otel_spans mcp_protocol yojson unix))
+ (libraries alcotest masc masc.browser_lane masc.masc_log masc.otel_spans mcp_protocol yojson unix))
 
 (test
  (name test_lane_addon_declaration)
@@ -5992,6 +5992,7 @@
 
 (include stanzas/test_browser_observation.inc)
 (include stanzas/test_browser_observation_composition.inc)
+(include stanzas/test_browser_backend_routes.inc)
 
 (test
  (name test_tui_browser_history_model)

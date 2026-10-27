@@ -121,6 +121,30 @@ let test_two_enabled_browser_declarations_are_refused () =
    | P.Not_required | P.Declared _ | P.Missing _ -> fail "expected an ambiguous verdict");
   check bool "the deployment is refused" true (Result.is_error (P.report (P.judge ~base_path:base)))
 
+(* A native host's first poll binds to the one Add-on serving external
+   hosts, so a declaration of a package that names another source answers
+   no host, and one beside it that serves external hosts is the one. *)
+let test_only_declarations_serving_native_hosts_count () =
+  with_workspace @@ fun base ->
+  install_host base;
+  let declare id source =
+    let package = List.fold_left Filename.concat base [ "packages"; id; "lane.toml" ] in
+    write package
+      (Printf.sprintf
+         "id = %S\nrevision = \"1\"\ntitle = \"Browser\"\nruntime = \"host_process\"\nservice = \"browser\"\nbrowser_backend = %S\ncommand = [\"masc-browser-addon-worker\"]\ncontributions = [\"observe\"]\n[resources]\nmax_reply_bytes = 4096\n"
+         id source);
+    write
+      (Filename.concat (Filename.dirname (declaration_path base)) (id ^ ".toml"))
+      (Printf.sprintf "id = %S\nrun_id = %S\nmanifest_path = %S\n[binding]\nsources = []\n" id (id ^ "-work") package) in
+  declare "browser-automation" "automation";
+  check bool "a package of another source answers no native host" true
+    (match P.judge ~base_path:base with
+     | P.Missing _ -> true
+     | P.Not_required | P.Declared _ | P.Ambiguous _ -> false);
+  declare "browser-native" "external_host";
+  check bool "the one serving external hosts is the one" true
+    (P.judge ~base_path:base = P.Declared { id = "browser-native" })
+
 (* The declaration directory is the one the server reconciles. *)
 let test_the_directory_is_the_one_the_server_reads () =
   with_workspace @@ fun base ->
@@ -147,6 +171,8 @@ let () =
             test_a_half_installed_host_is_not_a_host
         ; test_case "two enabled browser declarations are refused" `Quick
             test_two_enabled_browser_declarations_are_refused
+        ; test_case "only declarations serving native hosts count" `Quick
+            test_only_declarations_serving_native_hosts_count
         ; test_case "the directory is the one the server reads" `Quick
             test_the_directory_is_the_one_the_server_reads
         ] )

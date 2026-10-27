@@ -131,7 +131,7 @@ let () =
       |> Result.map_error (function R.Unavailable s|Outcome_unknown s -> s
         | Host_refusal _ -> "probe principal refused")) in
     let client host =
-      let* snapshot=Browser_addon_host.snapshot host |> Result.map_error (function
+      let* snapshot=Browser_addon_host.snapshot host ~backend:Browser_lane.Backend.Owned_firefox |> Result.map_error (function
         Browser_addon_client.Unavailable s|Outcome_unknown s -> s) in
       match Yojson.Safe.Util.member "clients" snapshot with
       | `List [row] when string "transport" row=Some "webdriver_bidi" ->

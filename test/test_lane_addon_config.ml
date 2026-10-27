@@ -853,9 +853,43 @@ max_reply_bytes = 4096
   let browser=match load "\"browser\"" "" with Ok package -> package
     | Error error -> fail (Lane_addon_manifest.error_to_string error) in
   check bool "browser service is a typed package contract" true
-    (browser.worker_service=Lane_addon_types.Browser_service);
+    (browser.worker_service=Lane_addon_types.Browser_service Lane_addon_types.Every_backend);
   check bool "browser selection survives revision serialization" true
     (Yojson.Safe.Util.member "service" (Lane_addon_types.package_to_json browser)=`String "browser");
+  check bool "the package that serves every source writes no source" true
+    (Yojson.Safe.Util.member "browser_backend" (Lane_addon_types.package_to_json browser)=`Null);
+  let ego=match load "\"browser\"\nbrowser_backend = \"ego\"" "" with Ok package -> package
+    | Error error -> fail (Lane_addon_manifest.error_to_string error) in
+  check bool "a browser package names the one source its worker serves" true
+    (ego.worker_service=Lane_addon_types.Browser_service (Lane_addon_types.One_backend Browser_lane.Backend.Ego));
+  check bool "its source survives revision serialization" true
+    (Yojson.Safe.Util.member "browser_backend" (Lane_addon_types.package_to_json ego)=`String "ego");
+  List.iter (fun (label, service) -> match load service "" with
+    | Ok _ -> failf "%s was accepted" label
+    | Error error -> check bool (label ^ " is refused as a browser_backend error") true
+        (contains (Lane_addon_manifest.error_to_string error) "browser_backend"))
+    [ "an unknown source", "\"browser\"\nbrowser_backend = \"chrome\"";
+      "a source that is not a string", "\"browser\"\nbrowser_backend = 1";
+      "a source on a tools package", "\"tools\"\nbrowser_backend = \"ego\"" ];
+  List.iter (fun backend -> check bool (Browser_lane.Backend.to_wire backend ^ " is read as its source") true
+    (match load (Printf.sprintf "\"browser\"\nbrowser_backend = %S" (Browser_lane.Backend.to_wire backend)) "" with
+     | Ok package -> package.worker_service=Lane_addon_types.Browser_service (Lane_addon_types.One_backend backend)
+     | Error _ -> false)) Browser_lane.Backend.all;
+  (* With no service the package serves tools, which name no source. *)
+  write path {|id = "browser"
+revision = "1"
+title = "Browser"
+runtime = "host_process"
+browser_backend = "ego"
+command = ["masc-browser-addon-worker"]
+contributions = ["observe"]
+[resources]
+max_reply_bytes = 4096
+|};
+  check bool "a source with no service is refused as a browser_backend error" true
+    (match Lane_addon_manifest.load ~path with
+     | Ok _ -> false
+     | Error error -> contains (Lane_addon_manifest.error_to_string error) "browser_backend");
   let exported=match load "\"browser\"" "[world.tools]\nexport = [\"browser_command\"]\ninvocation = \"host_context\"\nhooks = [\"validate_input\", \"validate_output\"]" with
     | Ok package -> package | Error error -> fail (Lane_addon_manifest.error_to_string error) in
   check (list string) "browser exports require host caller context" ["browser_command"] exported.exported_tools;
@@ -933,7 +967,8 @@ let ui_category_is_strict_display_metadata () = with_directory (fun _root packag
     (Lane_addon_types.same_execution_package original.package package))
     [{changed with command=["different-worker"]};
      {changed with model_access=Lane_addon_types.Host_sampling};
-     {changed with worker_service=Lane_addon_types.Browser_service};
+     {changed with worker_service=Lane_addon_types.Browser_service Lane_addon_types.Every_backend};
+     {changed with worker_service=Lane_addon_types.Browser_service (Lane_addon_types.One_backend Browser_lane.Backend.Ego)};
      {changed with tool_hooks=[Lane_addon_types.Validate_input]}];
   List.iter (fun category ->
     write manifest ("ui_category = " ^ category ^ "\n" ^ package ());

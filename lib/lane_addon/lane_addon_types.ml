@@ -47,7 +47,11 @@ type model_access = Model_disabled | Host_sampling
 type state_storage = Ephemeral | Persistent
 type tool_invocation = Direct | Host_context
 type tool_hook = Validate_input | Validate_output
-type worker_service = Mcp_tools | Browser_service
+type browser_backends = Every_backend | One_backend of Browser_lane.Backend.t
+type worker_service = Mcp_tools | Browser_service of browser_backends
+let serves_backend backends backend = match backends with
+  | Every_backend -> true
+  | One_backend own -> own = backend
 type request_schema_policy = Package_schema_only | Consumer_request_schema
 type exact_output = { name : string; schema : Yojson.Safe.t; request_schema : request_schema_policy }
 type package = {
@@ -241,7 +245,11 @@ let package_to_json (p : package) =
   `Assoc (runtime
     @ (match p.ui_category with None -> []
        | Some category -> ["ui_category", Lane_addon_category.to_json category])
-    @ (match p.worker_service with Mcp_tools -> [] | Browser_service -> ["service", string "browser"])
+    @ (match p.worker_service with
+       | Mcp_tools -> []
+       | Browser_service Every_backend -> ["service", string "browser"]
+       | Browser_service (One_backend backend) ->
+         ["service", string "browser"; "browser_backend", string (Browser_lane.Backend.to_wire backend)])
     @ (match p.tool_hooks with [] -> [] | hooks ->
       ["tool_hooks", strings (List.map (function
         | Validate_input -> "validate_input" | Validate_output -> "validate_output") hooks)])

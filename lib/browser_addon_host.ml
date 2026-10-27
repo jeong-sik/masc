@@ -1,33 +1,57 @@
 module R = Lane_addon_runtime
+(* One browser service and its own browser command, if it advertises one.
+   A service without it still serves its sources, so it is still counted
+   when the host asks which service serves a source. *)
+type served = { service : R.browser_service; export : R.tool_export option }
 type t = {
   config : Workspace.config;
   access : Lane_addon_sources.access;
   principal : Lane_addon_call_context.principal;
   reserved : string list;
-  service : R.browser_service;
-  export : R.tool_export;
+  services : served list;
 }
 let ( let* ) = Result.bind
+(* Every browser service that serves now, each with its own export matched
+   by instance and owner. No service at all is the only refusal here. *)
 let connect ~config ~access ~principal ~reserved =
   let* ()=match principal with
     | Lane_addon_call_context.Anonymous -> Error (R.Host_refusal
         (Lane_addon_call_context.Rejected "browser calls require verified host authority"))
     | Keeper _|Authenticated_agent _|Host_actor _|Operator -> Ok () in
   let browser=R.browser_service_reading ~config ~access in
-  let* service=match browser.services with
-    | [service] -> Ok service
-    | [] -> Error (R.Unavailable (match Lane_addon_unready.summary browser.unready with
-        | Some reason -> reason
-        | None -> "no browser Add-on is attached"))
-    | _::_::_ -> Error (R.Unavailable "multiple visible browser Add-ons are attached") in
-  let* export=match List.filter (fun (export:R.tool_export) ->
+  let exports=R.browser_export_reading ~config ~access in
+  let own (service:R.browser_service)=List.filter (fun (export:R.tool_export) ->
     export.instance_id=service.instance_id && export.tool.name=Browser_addon_tool.definition.name
-    && Lane_addon_tool_export.equal_owner export.owner service.owner) (R.browser_export_reading ~config ~access) with
-    | [export] -> Ok export
-    | []|_::_::_ -> Error (R.Unavailable "the original browser Add-on command is unavailable") in
-  Ok {config;access;principal;reserved;service;export}
-let call t ~arguments = Machine_addon_host.call ~continuation:None ~principal:t.principal ~config:t.config
-  ~access:t.access ~reserved:t.reserved ~export:t.export ~arguments
+    && Lane_addon_tool_export.equal_owner export.owner service.owner) exports in
+  match browser.services with
+  | [] -> Error (R.Unavailable (match Lane_addon_unready.summary browser.unready with
+      | Some reason -> reason
+      | None -> "no browser Add-on is attached"))
+  | _::_ ->
+    let services=List.map (fun service -> {service;export=match own service with
+      | [export] -> Some export
+      | []|_::_::_ -> None}) browser.services in
+    Ok {config;access;principal;reserved;services}
+(* A source is served by exactly one service or not at all: none, or two,
+   leave that source alone unusable, and every other source is still chosen. *)
+type backend_failure = No_service of Browser_lane.Backend.t | Several_services of Browser_lane.Backend.t
+let backend_failure_message = function
+  | No_service backend -> Printf.sprintf "no attached browser Add-on serves %s" (Browser_lane.Backend.to_wire backend)
+  | Several_services backend -> Printf.sprintf
+      "more than one attached browser Add-on serves %s, so it is not used until one is detached"
+      (Browser_lane.Backend.to_wire backend)
+let serves (served:served) backend=Lane_addon_types.serves_backend served.service.backends backend
+let for_backend t backend=match List.filter (fun served -> serves served backend) t.services with
+  | [served] -> Ok served
+  | [] -> Error (No_service backend)
+  | _::_::_ -> Error (Several_services backend)
+let call_served t (served:served) ~arguments = match served.export with
+  | Some export -> Machine_addon_host.call ~continuation:None ~principal:t.principal
+      ~config:t.config ~access:t.access ~reserved:t.reserved ~export ~arguments
+  | None -> Error (R.Unavailable "the browser Add-on serving this browser advertises no browser command")
+let call t ~backend ~arguments = match for_backend t backend with
+  | Ok served -> call_served t served ~arguments
+  | Error failure -> Error (R.Unavailable (backend_failure_message failure))
 let error_result ~start_time error =
   let class_,effect_disposition,detail=match error with
     | R.Unavailable detail -> Tool_result.Dependency_unavailable,Tool_result.Proven_pre_effect,detail
@@ -38,26 +62,81 @@ let error_result ~start_time error =
           | Unavailable detail|Activity_unobserved detail -> Tool_result.Dependency_unavailable,detail in
         class_,Tool_result.Proven_pre_effect,detail in
   Tool_result.make_err ~tool_name:Browser_addon_tool.definition.name ~start_time ~class_ ~effect_disposition detail
-let snapshot t =
-  let* reply=R.call_browser_service ~config:t.config ~access:t.access ~service:t.service
+let snapshot_of t (served:served) =
+  let* reply=R.call_browser_service ~config:t.config ~access:t.access ~service:served.service
     ~command:Browser_addon_wire.Snapshot in
   match reply with
   | Browser_addon_wire.Snapshot_result value -> Ok value
   | Service_refusal {message;disposition=Not_started} -> Error (Browser_addon_client.Unavailable message)
   | Service_refusal {message;disposition=Outcome_unknown} -> Error (Browser_addon_client.Outcome_unknown message)
   | Model_reply _|Extension_reply _|Download_reply _|Receipt|Issue_result _|Poll_result _ -> Error (Browser_addon_client.Outcome_unknown "unexpected browser snapshot reply")
-(* A worker answers its snapshot only while it serves (decode_snapshot), so
-   the live lane it reports is on. *)
+let snapshot t ~backend = match for_backend t backend with
+  | Ok served -> snapshot_of t served
+  | Error failure -> Error (Browser_addon_client.Unavailable (backend_failure_message failure))
 type snapshot_failure = Snapshot_unavailable of string | Snapshot_unreadable of string
-let selection_snapshot t =
-  match snapshot t with
+let published_of t served =
+  match snapshot_of t served with
   | Error (Browser_addon_client.Unavailable detail|Outcome_unknown detail) -> Error (Snapshot_unavailable detail)
   | Ok value ->
-    let decoded=let* _=Lane_addon_action.canonical value in Browser_addon_observation.decode_snapshot value in
-    match decoded with
-    | Error detail -> Error (Snapshot_unreadable detail)
-    | Ok published -> Ok (published,{Browser_selection.live_activity=Browser_lane.Enabled;live_clients=published.clients;
-        automation=published.automation;stagehand=published.stagehand})
+    (let* _=Lane_addon_action.canonical value in Browser_addon_observation.decode_snapshot value)
+    |> Result.map_error (fun detail -> Snapshot_unreadable detail)
+(* What the host chooses from: each service's answer at the time of the
+   request, asked side by side. A service that did not answer is left out of
+   this choice only. Live clients are the clients of the services that serve
+   a live source, with the service that listed each one; automation and
+   Stagehand are what their own service answered. A worker answers only while
+   it serves (decode_snapshot), so a live lane it reports is on. *)
+type gathered = {
+  published : Browser_addon_observation.published;
+  selection : Browser_selection.snapshot;
+  holders : (string * served) list;
+  doubled : string list;
+      (** Clients listed by a service whose live source another serves too. *)
+}
+(* [reach] names the services a request can go to; only those are asked, so
+   a slow worker of another source does not hold the request up. Whether a
+   live client is usable is judged among every service. *)
+let gather t ~reach =
+  let among=List.map (fun (served:served) -> served.service.backends) t.services in
+  match List.filter reach t.services with
+  | [] -> Error (Snapshot_unavailable "no attached browser Add-on serves the requested browser")
+  | reached ->
+  let answers=Eio.Fiber.List.map (fun served -> served,published_of t served) reached in
+  match List.filter_map (fun (_,answer) -> Result.to_option answer) answers,answers with
+  | [],(_,Error failure)::_ -> Error failure
+  | [],((_,Ok _)::_|[]) -> Error (Snapshot_unavailable "no browser Add-on answered its snapshot")
+  | _::_,_ ->
+    let published=Browser_addon_observation.merge ~among (List.map (fun ((served:served),answer) ->
+      served.service.backends,Result.to_option answer) answers) in
+    let live=List.filter_map (fun ((served:served),answer) -> match answer with
+      | Ok (listed:Browser_addon_observation.published)
+        when Browser_addon_observation.lists_usable_clients ~among served.service.backends -> Some (served,listed)
+      | Ok _|Error _ -> None) answers in
+    let doubled=List.concat_map (fun ((served:served),answer) -> match answer with
+      | Ok (listed:Browser_addon_observation.published)
+        when Browser_addon_observation.serves_live served.service.backends
+          && not (Browser_addon_observation.lists_usable_clients ~among served.service.backends) ->
+          List.map (fun (client:Browser_lane.client_info) -> Browser_lane.client_id_to_string client.client_id) listed.clients
+      | Ok _|Error _ -> []) answers in
+    Ok {published;doubled;
+        selection={live_activity=(match live with [] -> Browser_lane.Unobserved | _::_ -> Browser_lane.Enabled);
+          live_clients=published.clients;automation=published.automation;stagehand=published.stagehand};
+        holders=List.concat_map (fun (served,(listed:Browser_addon_observation.published)) ->
+          List.map (fun (client:Browser_lane.client_info) ->
+            Browser_lane.client_id_to_string client.client_id,served) listed.clients) live}
+let selection_snapshot t = gather t ~reach:(fun _ -> true) |> Result.map (fun gathered -> gathered.published,gathered.selection)
+(* The service a chosen browser is run on. A client two services list cannot
+   be told apart, so it is refused rather than sent to one of them. *)
+let served_for t gathered = function
+  | Browser_selection.Owned_automation ->
+      for_backend t Browser_lane.Backend.Automation |> Result.map_error backend_failure_message
+  | Owned_stagehand -> for_backend t Browser_lane.Backend.Stagehand |> Result.map_error backend_failure_message
+  | Connected (client:Browser_lane.client_info) ->
+      let id=Browser_lane.client_id_to_string client.client_id in
+      (match List.filter_map (fun (holder,served) -> if String.equal holder id then Some served else None) gathered.holders with
+       | [served] -> Ok served
+       | [] -> Error "no attached browser Add-on lists that browser client"
+       | _::_::_ -> Error "more than one attached browser Add-on lists that browser client, so it is not used")
 type receipt = {binding:Browser_binding.t;data:Yojson.Safe.t;
   raw_result:Mcp_protocol.Mcp_types.tool_result}
 let route_arguments = function
@@ -79,7 +158,7 @@ let selection_detail ~clients error = `Assoc ["error",Browser_selection.error_to
 (* Choose from the worker's snapshot, then run the command once on the chosen
    route. A refusal after the snapshot is returned as the worker gave it; the
    host never sends the command to another browser. *)
-let dispatch ?upload_id ~required_actions t ~preference verb ~start_time =
+let resolve ~required_actions t ~preference verb ~start_time =
   let fail ?metadata ?(data=`Null) ~class_ ~effect_disposition message =
     Error (Tool_result.make_err ~tool_name:Browser_addon_tool.definition.name ~start_time
       ?metadata ~data ~class_ ~effect_disposition message) in
@@ -105,18 +184,27 @@ let dispatch ?upload_id ~required_actions t ~preference verb ~start_time =
       (Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_native_workflow _|Page_interact _
       |Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act (Browser_lane.Action.Open_tab _|Open_window _|On_tab _)|Page_context _
       |Page_instruct _|Page_locate _|Page_extract _) -> Ok () in
-  let* binding=match preference,required_actions with
+  let owned backend browser route=match for_backend t backend with
+    | Ok served -> Ok (Browser_binding.of_browser {Browser_selection.route;
+        reason=Browser_selection.Explicit_browser} browser,served)
+    | Error failure -> fail ~class_:Tool_result.Dependency_unavailable
+        ~effect_disposition:Tool_result.Proven_pre_effect (backend_failure_message failure) in
+  match preference,required_actions with
     (* An explicit owned route with nothing to check against its snapshot
        names its browser already; the worker checks the lane again before it
        dispatches (RFC #45368 4.2). *)
     | Browser_selection.Exact Browser_lane.Automation_route,[] ->
-        Ok (Browser_binding.of_browser {Browser_selection.route=Browser_lane.Automation_route;
-          reason=Browser_selection.Explicit_browser} Browser_selection.Owned_automation)
+        owned Browser_lane.Backend.Automation Browser_selection.Owned_automation Browser_lane.Automation_route
     | Exact Stagehand_route,[] ->
-        Ok (Browser_binding.of_browser {Browser_selection.route=Browser_lane.Stagehand_route;
-          reason=Browser_selection.Explicit_browser} Browser_selection.Owned_stagehand)
+        owned Browser_lane.Backend.Stagehand Browser_selection.Owned_stagehand Browser_lane.Stagehand_route
     | (Automatic|Exact (Live_route _)),_ | Exact (Automation_route|Stagehand_route),_::_ ->
-      let* published,snapshot=match selection_snapshot t with
+      let reach=match preference with
+        | Browser_selection.Automatic -> (fun _ -> true)
+        | Exact (Browser_lane.Live_route _) ->
+            (fun (served:served) -> Browser_addon_observation.serves_live served.service.backends)
+        | Exact Browser_lane.Automation_route -> (fun served -> serves served Browser_lane.Backend.Automation)
+        | Exact Browser_lane.Stagehand_route -> (fun served -> serves served Browser_lane.Backend.Stagehand) in
+      let* gathered=match gather t ~reach with
         | Ok value -> Ok value
         | Error (Snapshot_unavailable detail) -> fail ~class_:Tool_result.Dependency_unavailable
             ~effect_disposition:Tool_result.Proven_pre_effect
@@ -124,18 +212,30 @@ let dispatch ?upload_id ~required_actions t ~preference verb ~start_time =
         | Error (Snapshot_unreadable detail) -> fail ~class_:Tool_result.Runtime_failure
             ~effect_disposition:Tool_result.Proven_pre_effect
             ("browser snapshot is unreadable; no browser command was dispatched: " ^ detail) in
+      let published=gathered.published and snapshot=gathered.selection in
+      let* ()=match preference with
+        | Exact (Browser_lane.Live_route (Some id))
+          when List.mem (Browser_lane.client_id_to_string id) gathered.doubled ->
+            refuse "the live source of that browser is served by more than one attached browser Add-on, so it is not used until one is detached"
+        | Automatic|Exact (Browser_lane.Live_route _|Automation_route|Stagehand_route) -> Ok () in
       let* selected=Browser_selection.choose ~required_actions ~verb ~bound:(Browser_selection.bound verb) ~snapshot preference
         |> Result.fold ~ok:Result.ok ~error:(unchosen ~clients:published.clients) in
       let* browser=Browser_selection.target ~verb ~snapshot selected.route
         |> Result.fold ~ok:Result.ok ~error:(fun error -> refuse (Browser_lane.selection_error_message error)) in
       let* ()=Browser_selection.require ~snapshot required_actions browser
         |> Result.fold ~ok:Result.ok ~error:(unchosen ~clients:published.clients) in
-      Ok (Browser_binding.of_browser selected browser) in
+      let* served=served_for t gathered browser |> Result.fold ~ok:Result.ok ~error:refuse in
+      Ok (Browser_binding.of_browser selected browser,served)
+(* Run the command once on the chosen service and route. *)
+let invoke ?upload_id t served binding verb ~start_time =
   let grant=match upload_id with None -> []|Some id -> ["uploadId",`String id] in
-  match call t ~arguments:(`Assoc (route_arguments (Browser_binding.selected binding).route @ grant
+  match call_served t served ~arguments:(`Assoc (route_arguments (Browser_binding.selected binding).route @ grant
       @ ["command",Browser_lane.verb_json verb])) with
   | Error error -> Error (error_result ~start_time error)
   | Ok result -> Ok (binding,stamp binding result)
+let dispatch ?upload_id ~required_actions t ~preference verb ~start_time =
+  let* binding,served=resolve ~required_actions t ~preference verb ~start_time in
+  invoke ?upload_id t served binding verb ~start_time
 (* The public command shape: a missing lane leaves the choice to the host. *)
 let parse_command json =
   let* fields=match json with
@@ -194,14 +294,17 @@ let issue ?upload_paths ?(required_actions=[]) t ~preference verb =
   let* upload_id=match preparation with
     | Ok id -> Ok id | Error detail -> fail ~class_:Tool_result.Workflow_rejection
         ~effect_disposition:Tool_result.Proven_pre_effect detail in
+  (* The browser is chosen first, so the grant is staged on, and discarded
+     from, the service the command then goes to. *)
+  let* binding,served=resolve ~required_actions t ~preference verb ~start_time in
   let discard ()=Option.iter (fun (id,_) -> Eio.Cancel.protect (fun () ->
-    ignore (R.call_browser_service ~config:t.config ~access:t.access ~service:t.service
+    ignore (R.call_browser_service ~config:t.config ~access:t.access ~service:served.service
       ~command:(Browser_addon_wire.Upload_discard id)))) upload_id in
   Fun.protect ~finally:discard (fun () ->
   let* ()=match upload_id with
     | None -> Ok ()
     | Some (id,route) ->
-      match R.call_browser_service ~config:t.config ~access:t.access ~service:t.service
+      match R.call_browser_service ~config:t.config ~access:t.access ~service:served.service
         ~command:(Browser_addon_wire.Upload_stage {id;actor=Lane_addon_call_context.actor_label t.principal;
           route;verb}) with
       | Ok Browser_addon_wire.Receipt -> Ok ()
@@ -210,7 +313,7 @@ let issue ?upload_paths ?(required_actions=[]) t ~preference verb =
           "worker upload staging was refused; no browser command was dispatched"
       | Error error -> fail ~class_:Tool_result.Dependency_unavailable ~effect_disposition:Tool_result.Proven_pre_effect
           (match error with Browser_addon_client.Unavailable detail|Outcome_unknown detail -> detail) in
-  let* binding,result=dispatch ?upload_id:(Option.map fst upload_id) ~required_actions t ~preference verb ~start_time in
+  let* binding,result=invoke ?upload_id:(Option.map fst upload_id) t served binding verb ~start_time in
   let raw=Mcp_protocol.Mcp_types.tool_result_to_yojson result in
   if result.is_error=Some true then
     let class_,effect_disposition=Lane_addon_tool_result.failure result in

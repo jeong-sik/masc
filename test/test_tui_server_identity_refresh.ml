@@ -4703,6 +4703,16 @@ let test_turn_observation_replaces_and_refuses_atomically () =
   Alcotest.(check bool) "stale control generation cannot clear the waiting failure" true
     (state.keeper_waiting_failure = Some unavailable
      && (List.hd state.keeper_waiting).Tui_decode.kwr_state = Tui_decode.Keeper_waiting_busy);
+  let unreported_waiting =
+    select_keeper_waiting_observation ~fresh:[ turn "new" ] ~stale:[]
+      ~previous_failure:state.keeper_waiting_failure
+      (Tui_decode.Keeper_waiting_fleet_unreported [ waiting "new" ])
+  in
+  accept_keeper_turn_observation state ~rows:[ turn "new" ]
+    ~waiting:unreported_waiting ~observed_at:58.;
+  Alcotest.(check bool) "an unreported fleet cannot clear a previous failure" true
+    (state.keeper_waiting_failure = Some unavailable
+     && (List.hd state.keeper_waiting).Tui_decode.kwr_state = Tui_decode.Keeper_waiting_idle);
   accept_keeper_turn_observation state ~rows:[ turn "new" ]
     ~waiting:(Tui_decode.Keeper_waiting_observed [ waiting "new" ]) ~observed_at:60.;
   Alcotest.(check bool) "a fresh waiting observation clears the failure" true

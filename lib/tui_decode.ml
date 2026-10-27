@@ -4595,6 +4595,7 @@ type keeper_waiting_failure =
 
 type keeper_waiting_observation =
   | Keeper_waiting_observed of keeper_waiting_row list
+  | Keeper_waiting_fleet_unreported of keeper_waiting_row list
   | Keeper_waiting_unavailable of keeper_waiting_failure
 
 type keeper_turns_projection = {
@@ -4885,8 +4886,8 @@ let decode_keeper_turns_projection json =
     let* waiting = loop [] items in
     let* error_items =
       match Json_util.assoc_member_opt "waiting_errors" json with
-      | None -> Ok []
-      | Some (`List items) -> Ok items
+      | None -> Ok None
+      | Some (`List items) -> Ok (Some items)
       | Some _ -> Error "field 'waiting_errors' must be an array"
     in
     let decode_error json =
@@ -4909,12 +4910,15 @@ let decode_keeper_turns_projection json =
           let* error = decode_error item in
           errors (error :: acc) rest
     in
-    let* errors = errors [] error_items in
-    match errors, waiting with
-    | [], _ -> Ok (Keeper_waiting_observed waiting)
-    | (_ :: _ as errors), [] ->
-        Ok (Keeper_waiting_unavailable (Keeper_waiting_sources_unavailable errors))
-    | _ :: _, _ :: _ -> Error "fleet waiting errors conflict with per-Keeper waiting"
+    match error_items with
+    | None -> Ok (Keeper_waiting_fleet_unreported waiting)
+    | Some error_items ->
+      let* errors = errors [] error_items in
+      (match errors, waiting with
+       | [], _ -> Ok (Keeper_waiting_observed waiting)
+       | (_ :: _ as errors), [] ->
+           Ok (Keeper_waiting_unavailable (Keeper_waiting_sources_unavailable errors))
+       | _ :: _, _ :: _ -> Error "fleet waiting errors conflict with per-Keeper waiting")
   in
   let waiting =
     match decode_waiting () with

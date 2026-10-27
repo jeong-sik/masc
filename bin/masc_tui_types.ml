@@ -10810,9 +10810,7 @@ let merge_keeper_waiting ~previous ~rows ~waiting =
     rows
 
 let select_keeper_waiting_observation ~fresh ~stale ~previous_failure observation =
-  match observation with
-  | Tui_decode.Keeper_waiting_unavailable _ as unavailable -> unavailable
-  | Tui_decode.Keeper_waiting_observed waiting ->
+  let select waiting make_observation =
     let waiting =
       List.filter
         (fun (waiting : Tui_decode.keeper_waiting_row) ->
@@ -10822,14 +10820,24 @@ let select_keeper_waiting_observation ~fresh ~stale ~previous_failure observatio
             fresh)
         waiting
     in
-    (match stale, previous_failure with
-     | _ :: _, Some failure -> Tui_decode.Keeper_waiting_unavailable failure
-     | [], _ | _ :: _, None -> Tui_decode.Keeper_waiting_observed waiting)
+    match stale, previous_failure with
+    | _ :: _, Some failure -> Tui_decode.Keeper_waiting_unavailable failure
+    | [], _ | _ :: _, None -> make_observation waiting
+  in
+  match observation with
+  | Tui_decode.Keeper_waiting_unavailable _ as unavailable -> unavailable
+  | Tui_decode.Keeper_waiting_observed waiting ->
+      select waiting (fun rows -> Tui_decode.Keeper_waiting_observed rows)
+  | Tui_decode.Keeper_waiting_fleet_unreported waiting ->
+      select waiting (fun rows -> Tui_decode.Keeper_waiting_fleet_unreported rows)
 
 let accept_keeper_turn_observation state ~rows ~waiting ~observed_at =
   preserve_keeper_list_selection state (fun () ->
     state.keeper_turns <- rows;
     (match waiting with
+     | Tui_decode.Keeper_waiting_fleet_unreported waiting ->
+       state.keeper_waiting <- merge_keeper_waiting
+         ~previous:state.keeper_waiting ~rows ~waiting
      | Tui_decode.Keeper_waiting_observed waiting ->
        state.keeper_waiting <- merge_keeper_waiting
          ~previous:state.keeper_waiting ~rows ~waiting;

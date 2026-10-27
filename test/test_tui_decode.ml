@@ -8663,6 +8663,7 @@ let test_decode_keeper_turns_projection_reads_waiting () =
            Alcotest.(check (float 0.001)) "wait began" 10. (Option.get item.kwi_since)
        | items -> Alcotest.failf "expected one waiting item, got %d" (List.length items))
     | _, Tui_decode.Keeper_waiting_observed _
+    | _, Tui_decode.Keeper_waiting_fleet_unreported _
     | _, Tui_decode.Keeper_waiting_unavailable _ ->
         Alcotest.fail "expected one turn and one waiting row")
 
@@ -8674,6 +8675,7 @@ let test_decode_keeper_turns_projection_keeps_waiting_unobserved () =
      | Tui_decode.Keeper_waiting_observed [] ->
          Alcotest.(check int) "turn rows remain available" 3 (List.length rows)
      | Tui_decode.Keeper_waiting_observed (_ :: _)
+     | Tui_decode.Keeper_waiting_fleet_unreported _
      | Tui_decode.Keeper_waiting_unavailable _ ->
          Alcotest.fail "an absent waiting object invented a waiting observation")
 
@@ -8688,7 +8690,7 @@ let test_decode_keeper_turns_projection_accepts_an_older_server () =
        (without_fleet_errors keeper_turns_json)
    with
    | Error detail -> Alcotest.fail detail
-   | Ok { rows; waiting = Tui_decode.Keeper_waiting_observed [] } ->
+   | Ok { rows; waiting = Tui_decode.Keeper_waiting_fleet_unreported [] } ->
        Alcotest.(check int) "older turn rows remain available" 3 (List.length rows)
    | Ok _ -> Alcotest.fail "a missing fleet error field became a waiting failure");
   match
@@ -8696,13 +8698,14 @@ let test_decode_keeper_turns_projection_accepts_an_older_server () =
       (without_fleet_errors keeper_turns_waiting_json)
   with
   | Error detail -> Alcotest.fail detail
-  | Ok { rows = [ _ ]; waiting = Tui_decode.Keeper_waiting_observed [ _ ] } -> ()
+  | Ok { rows = [ _ ]; waiting = Tui_decode.Keeper_waiting_fleet_unreported [ _ ] } -> ()
   | Ok _ -> Alcotest.fail "an older server's waiting observation was discarded"
 
 let waiting_is_invalid = function
   | Tui_decode.Keeper_waiting_unavailable (Tui_decode.Keeper_waiting_invalid _) -> true
   | Tui_decode.Keeper_waiting_unavailable (Tui_decode.Keeper_waiting_sources_unavailable _)
-  | Tui_decode.Keeper_waiting_observed _ -> false
+  | Tui_decode.Keeper_waiting_observed _
+  | Tui_decode.Keeper_waiting_fleet_unreported _ -> false
 
 let test_decode_keeper_turns_projection_rejects_unknown_waiting_vocabulary () =
   let rec replace key replacement = function
@@ -8758,6 +8761,7 @@ let test_decode_keeper_turns_projection_separates_fleet_errors () =
           Alcotest.(check bool) "fleet error keeps its source" true
             (error.Tui_decode.kwi_source = Tui_decode.Waiting_source_read_error)
       | _, Tui_decode.Keeper_waiting_observed _
+      | _, Tui_decode.Keeper_waiting_fleet_unreported _
       | _, Tui_decode.Keeper_waiting_unavailable (Tui_decode.Keeper_waiting_invalid _)
       | _, Tui_decode.Keeper_waiting_unavailable (Tui_decode.Keeper_waiting_sources_unavailable _) ->
           Alcotest.fail "fleet error must remain separate from the turn"));

@@ -413,9 +413,15 @@ let live_read ~config source ~since =
                  Ok (reference, cached.blob_bytes, cached.screen)
              | Some _ | None ->
                  let store = Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
-                 let* bytes = Eio_unix.run_in_systhread (fun () -> Lane_addon_store.read_blob ~max_bytes:snapshot.max_bytes store reference) in
-                 let* screen = try Ok (Yojson.Safe.from_string bytes) with Yojson.Json_error detail -> Error detail in
-                 let blob_bytes = String.length bytes in
+                 (* A DOS screen blob is about 1.2 MB. Its digest check and
+                    parse take about 10 ms on an idle machine, so both run on
+                    the system-thread host rather than on the domain serving
+                    HTTP, as [Systhread_host] intends (#46410). *)
+                 let* blob_bytes, screen = Systhread_host.run ~label:"machine-live-screen" (fun () ->
+                   let* bytes = Lane_addon_store.read_blob ~max_bytes:snapshot.max_bytes store reference in
+                   match Yojson.Safe.from_string bytes with
+                   | screen -> Ok (String.length bytes, screen)
+                   | exception Yojson.Json_error detail -> Error detail) in
                  remember_screen cache_key ~blob:reference ~blob_bytes ~screen;
                  Ok (reference, blob_bytes, screen))
         | _ -> Error "worker observation does not provide one machine screen reference" in

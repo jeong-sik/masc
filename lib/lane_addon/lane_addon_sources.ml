@@ -426,11 +426,14 @@ let machine_capture ~store ~resolve_machine_output ~machine ~id =
     let* reference = Lane_addon_types.evidence_of_json value in
     if List.mem reference row.evidence then Ok reference else Error "machine reference is not declared row evidence" in
   let* live_ref = declared_reference (List.assoc "machine_live" row.fields) in
-  let* bytes = Eio_unix.run_in_systhread (fun () ->
-    Lane_addon_store.read_blob ~max_bytes:captured.worker_max_bytes store live_ref) in
-  let* live = try match Yojson.Safe.from_string bytes with
-    | `Assoc fields -> Ok fields | _ -> Error "machine screen artifact must be an object"
-    with Yojson.Json_error detail -> Error detail in
+  (* A machine screen blob is about 1.2 MB: its digest check, parse and the
+     re-encoded screen below run on the system-thread host, not on the
+     calling domain (#46410). *)
+  let* live = Systhread_host.run ~label:"machine-capture-screen-read" (fun () ->
+    let* bytes = Lane_addon_store.read_blob ~max_bytes:captured.worker_max_bytes store live_ref in
+    try match Yojson.Safe.from_string bytes with
+      | `Assoc fields -> Ok fields | _ -> Error "machine screen artifact must be an object"
+    with Yojson.Json_error detail -> Error detail) in
   let* () = if List.assoc_opt "source_kind" live = Some (`String (kind_to_string (kind_of_machine machine)))
       && List.assoc_opt "state" live = Some (`String "changed") then Ok ()
     else Error "machine worker has no complete loaded screen" in
@@ -445,7 +448,7 @@ let machine_capture ~store ~resolve_machine_output ~machine ~id =
     | Some (`Int n) when n >= 0 -> Ok n | _ -> Error "invalid machine input count" in
   let* input_ledger = match List.assoc_opt "evidence" ledger with
     | Some value -> declared_reference value | None -> Error "machine input evidence missing" in
-  let* screen = Eio_unix.run_in_systhread (fun () ->
+  let* screen = Systhread_host.run ~label:"machine-capture-screen-write" (fun () ->
     Lane_addon_store.write_blob store (Yojson.Safe.to_string image)) in
   let* current = resolve_machine_output machine in
   let* () = if current.worker_instance=captured.worker_instance && current.worker_seq=captured.worker_seq

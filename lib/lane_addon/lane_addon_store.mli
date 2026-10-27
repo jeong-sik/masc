@@ -262,13 +262,12 @@ type unreadable_binding = { path : string; detail : string; contents : Yojson.Sa
 type binding_reading = { readable : Yojson.Safe.t list; unreadable : unreadable_binding list }
 val read_bindings : t -> (binding_reading, string) result
 (** Reads every binding file on its own. A file that is not JSON, is not an
-    object, lacks an instance id or sequence, or sits beside a misnamed
-    observation file is listed in [unreadable] and does not hide its siblings.
-    The result is [Error] only when the directory cannot be listed or synced.
-    Confirms containing-directory durability after capturing records/absence,
-    including cold reads used to authorize reconciliation. Each readable
-    sequence is reconciled with retained observation filenames so a failed
-    binding write cannot hide a renamed observation. Exact record reads still
+    object, or lacks an instance id or sequence is listed in [unreadable] and
+    does not hide its siblings. The result is [Error] only when the directory
+    cannot be listed or synced. Confirms containing-directory durability after
+    capturing records/absence, including cold reads used to authorize
+    reconciliation. A binding's sequence is its instance's committed
+    observation; no observation directory is listed. Exact record reads still
     require their own durability and payload verification. *)
 val bindings : t -> (Yojson.Safe.t list, string) result
 (** [read_bindings] for a caller that cannot use a partial reading: [Error]
@@ -279,8 +278,8 @@ type binding_inventory = {
   complete : bool;
 }
 val binding_inventory : root:string -> binding_inventory
-(** Read metadata without constructing a store, reconciling observation
-    sequences, rewriting records or creating directories. A record whose read
+(** Read metadata without constructing a store, rewriting records or
+    creating directories. A record whose read
     collides with this process's own rename/unlink publication retries once
     and accepts a confirmed absence, so a successful concurrent write does not
     read as a damaged store; only a failure that persists across the retry
@@ -304,8 +303,10 @@ val append_observation : t -> instance_id:string -> seq:int ->
     visible-byte verification fails. [verification_error] records that failure;
     neither case establishes durability. The runtime must reserve the renamed
     sequence before propagating uncertainty; this never authorizes action replay. *)
-val observations : t -> instance_id:string ->
+val observations : t -> instance_id:string -> through:int ->
   ((Yojson.Safe.t * Lane_addon_types.output) list, string) result
+(** The records from sequence 1 through [through], the binding's committed
+    sequence, read by name. A missing or malformed record fails. *)
 val read_observation : instance_id:string -> seq:int -> max_bytes:int -> t ->
   (Lane_addon_types.output, string) result
 (** One immutable completed record. Missing, oversized and malformed records
@@ -316,8 +317,9 @@ val read_observation : instance_id:string -> seq:int -> max_bytes:int -> t ->
 val query_observations : t -> instance_id:string -> expected_seq:int -> max_bytes:int ->
   since:float option -> until:float option -> lane_id:string option ->
   (Lane_addon_types.output, string) result
-(** Streams retained sequence files with bounded response and per-record reads.
-    Matching rows have priority over source coverage. A second pass over the
+(** Streams retained sequence files 1 through [expected_seq], the binding's
+    committed sequence, with bounded response and per-record reads. A file
+    above it is not committed and is not read. Matching rows have priority over source coverage. A second pass over the
     inspected prefix returns coverage for selected records first, then other
     source coverage, including observations without rows. Each coverage buffer
     is bounded by the space remaining after rows. The query receipt identifies
@@ -325,7 +327,9 @@ val query_observations : t -> instance_id:string -> expected_seq:int -> max_byte
     or unreadable observations; source coverage is not a chronological ledger. *)
 val freeze : t -> instance_id:string -> binding:Yojson.Safe.t ->
   row_ids:string list -> (Yojson.Safe.t, string) result
-(** The receipt includes [instance_id] and the exact validated [row_ids] from
+(** Refuses a row whose sequence is above the [binding]'s [observation_seq]:
+    only committed observations are evidence.
+    The receipt includes [instance_id] and the exact validated [row_ids] from
     the frozen bundle, alongside its reference and row count. Publication keeps
     those selection coordinates; neither receipt implies delivery or reading. *)
 val publish_for_keeper : base_path:string -> t -> Yojson.Safe.t ->

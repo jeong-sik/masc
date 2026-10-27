@@ -464,8 +464,6 @@ let test_binding_publication_commits_the_held_observation () =
       let held=initial+1 in
       let record=List.fold_left Filename.concat root
         ["observations";Store.digest id;Printf.sprintf "%020d.json" held] in
-      (* The store reader still recovers renamed files at this layer, so read
-         the binding file itself. *)
       let bound () = List.fold_left Filename.concat root ["bindings";Store.digest id ^ ".json"]
         |> Fs_compat.load_file |> Yojson.Safe.from_string |> number "observation_seq" in
       let phase () = text "kind" (member "phase" (inspect fixture id)) in

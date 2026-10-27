@@ -35,7 +35,8 @@ let receipt output = List.find (fun (coverage : Types.coverage) ->
 let check_bound max_bytes output =
   check bool "encoded response fits its declared bound" true
     (String.length (Yojson.Safe.to_string (Types.output_to_json output)) <= max_bytes)
-let binding max_bytes = `Assoc ["package", `Assoc ["resources", `Assoc ["max_reply_bytes", `Int max_bytes]]]
+let binding ~seq max_bytes = `Assoc ["observation_seq", `Int seq;
+  "package", `Assoc ["resources", `Assoc ["max_reply_bytes", `Int max_bytes]]]
 let record root seq = Filename.concat root (Printf.sprintf "observations/%s/%020d.json" (Store.digest instance_id) seq)
 let write path text = let channel = open_out_bin path in
   Fun.protect ~finally:(fun () -> close_out channel) (fun () -> output_string channel text)
@@ -60,7 +61,7 @@ let covered_history ~count ~detail () = with_store (fun _root store ->
    | first :: _ -> check bool "selected record's source coverage has priority" true (first = source count detail)
    | [] -> fail "selected source coverage is missing");
   let retained = receipt output in
-  check (option string) "row scan reaches the retained highwater"
+  check (option string) "row scan reaches the binding sequence"
     (Some (Printf.sprintf "scanned:%d/of:%d" count count)) retained.cursor;
   check bool "coverage omission is explicitly partial" false retained.complete;
   check (option string) "receipt distinguishes coverage omission from an incomplete row scan"
@@ -116,7 +117,7 @@ let missing_record () = with_store (fun root store ->
   Sys.remove (record root 3);
   Sys.remove (record root 1);
   let empty = query store ~expected_seq:3 ~max_bytes:4096 () in
-  check bool "persisted highwater exposes missing entire history" false (complete empty))
+  check bool "the binding sequence exposes missing entire history" false (complete empty))
 let coverage_without_rows () = with_store (fun _root store ->
   append store 1 "outside the selected window";
   let source : Types.coverage = { source_id = "msx"; incarnation = "unobserved";
@@ -129,10 +130,30 @@ let coverage_without_rows () = with_store (fun _root store ->
   check bool "source's reason remains in the query" true
     (List.exists (fun (coverage : Types.coverage) -> coverage = source) output.coverage);
   check bool "retained scan completeness is separate from unavailable source" true (receipt output).complete)
+(* The binding replace commits an observation, so a file above the binding's
+   sequence is not committed. Binding reads report the binding's own sequence
+   and history readers stop there. *)
+let uncommitted_records_are_not_read () = with_store (fun _root store ->
+  append store 1 "one"; append store 2 "two"; append store 3 "uncommitted";
+  unwrap (Store.save_binding store ~instance_id (`Assoc ["instance_id", `String instance_id;
+    "observation_seq", `Int 2]));
+  let stored = unwrap (Store.bindings store) |> List.find (fun json ->
+    Yojson.Safe.Util.(member "instance_id" json |> to_string) = instance_id) in
+  check int "a binding read reports the binding's own sequence" 2
+    Yojson.Safe.Util.(member "observation_seq" stored |> to_int);
+  let output = query store ~expected_seq:2 ~max_bytes:4096 () in
+  check (list string) "history stops at the committed sequence"
+    [(row 1 "").id; (row 2 "").id] (List.map (fun (row : Types.row) -> row.id) output.rows);
+  check (option string) "the receipt names the committed sequence"
+    (Some "scanned:2/of:2") (receipt output).cursor;
+  check bool "the committed history is complete" true (complete output);
+  check int "named records stop at the committed sequence" 2
+    (List.length (unwrap (Store.observations store ~instance_id ~through:2))))
+
 let targeted_evidence () = with_store (fun root store ->
   append store 1 "unrelated"; append store 2 "selected";
   write (record root 1) "{broken unrelated observation";
-  let frozen = Store.freeze store ~instance_id ~binding:(binding 4096)
+  let frozen = Store.freeze store ~instance_id ~binding:(binding ~seq:2 4096)
     ~row_ids:[(row 2 "").id] in
   check bool "selected evidence does not scan corrupt unrelated history" true (Result.is_ok frozen);
   let receipt = unwrap frozen in
@@ -142,9 +163,11 @@ let targeted_evidence () = with_store (fun root store ->
     (Yojson.Safe.Util.member "row_ids" receipt |> Yojson.Safe.Util.to_list
      |> List.map Yojson.Safe.Util.to_string);
   check bool "different instance rejected" true
-    (Result.is_error (Store.freeze store ~instance_id ~binding:(binding 4096) ~row_ids:["other/2/row"]));
+    (Result.is_error (Store.freeze store ~instance_id ~binding:(binding ~seq:2 4096) ~row_ids:["other/2/row"]));
   check bool "evidence envelope enforced" true
-    (Result.is_error (Store.freeze store ~instance_id ~binding:(binding 64) ~row_ids:[(row 2 "").id])))
+    (Result.is_error (Store.freeze store ~instance_id ~binding:(binding ~seq:2 64) ~row_ids:[(row 2 "").id]));
+  check bool "a row above the binding is not evidence" true
+    (Result.is_error (Store.freeze store ~instance_id ~binding:(binding ~seq:1 4096) ~row_ids:[(row 2 "").id])))
 let separate_source_and_output_envelopes () = with_store (fun root store ->
   let max_bytes = 4096 in
   let sources = `List [`String (String.make 3000 's')] in
@@ -154,7 +177,7 @@ let separate_source_and_output_envelopes () = with_store (fun root store ->
   check bool "valid record exceeds one component envelope" true (String.length original > max_bytes);
   let queried = query store ~expected_seq:1 ~max_bytes () in
   check int "both bounded components remain queryable" 1 (List.length queried.rows);
-  let frozen = unwrap (Store.freeze store ~instance_id ~binding:(binding max_bytes) ~row_ids:[(row 1 "").id]) in
+  let frozen = unwrap (Store.freeze store ~instance_id ~binding:(binding ~seq:1 max_bytes) ~row_ids:[(row 1 "").id]) in
   let open Yojson.Safe.Util in
   let bundle_path = frozen |> member "evidence" |> member "path" |> to_string in
   let bundle = In_channel.with_open_bin bundle_path In_channel.input_all |> Yojson.Safe.from_string in
@@ -196,7 +219,7 @@ let published_evidence_is_readable_by_keeper () = with_store (fun root store ->
   unwrap (append_observation store ~instance_id ~seq:1 ~sources
     { rows = [row 1 "separate assertion"]; coverage = [] });
   let record_bytes = In_channel.with_open_bin (record root 1) In_channel.input_all in
-  let frozen = unwrap (Store.freeze store ~instance_id ~binding:(binding 4096) ~row_ids:[(row 1 "").id]) in
+  let frozen = unwrap (Store.freeze store ~instance_id ~binding:(binding ~seq:1 4096) ~row_ids:[(row 1 "").id]) in
   let bundle_bytes = frozen |> member "evidence" |> member "path" |> to_string
     |> fun path -> In_channel.with_open_bin path In_channel.input_all in
   let published = unwrap (Store.publish_for_keeper ~base_path:root store frozen) in
@@ -231,7 +254,7 @@ let corrupted_source_is_not_delivered () = with_store (fun root store ->
   let source = unwrap (Store.write_blob store "original source bytes") in
   unwrap (append_observation store ~instance_id ~seq:1
     ~sources:(`List [retained_json source]) { rows = [row 1 "assertion"]; coverage = [] });
-  let frozen = unwrap (Store.freeze store ~instance_id ~binding:(binding 4096) ~row_ids:[(row 1 "").id]) in
+  let frozen = unwrap (Store.freeze store ~instance_id ~binding:(binding ~seq:1 4096) ~row_ids:[(row 1 "").id]) in
   let hash = Option.get source.sha256 in
   write (Filename.concat root ("evidence/" ^ hash ^ ".json")) "changed bytes";
   check bool "corrupt raw source prevents publication" true
@@ -273,7 +296,7 @@ let sequence_graph_is_published_and_rejects_nonlocal_or_broken_links () = with_s
   unwrap (append_observation store ~instance_id ~seq:1
     ~sources:(`List [`Assoc ["evidence", `List [retained_json snapshot.reference]]])
     {rows=[row 1 "ledger"];coverage=[]});
-  let frozen = unwrap (Store.freeze store ~instance_id ~binding:(binding 4096)
+  let frozen = unwrap (Store.freeze store ~instance_id ~binding:(binding ~seq:1 4096)
     ~row_ids:[(row 1 "").id]) in
   let delivered = unwrap (Store.publish_for_keeper ~base_path:root store frozen) in
   let manifest = read_as_keeper ~base_path:root
@@ -324,17 +347,17 @@ let sequence_graph_is_published_and_rejects_nonlocal_or_broken_links () = with_s
   unwrap (append_observation store ~instance_id ~seq:2
     ~sources:(`Assoc ["arbitrary_plugin_field", retained_json corrupt])
     {rows=[row 2 "untrusted field"];coverage=[]});
-  let opaque_frozen = unwrap (Store.freeze store ~instance_id ~binding:(binding 4096)
+  let opaque_frozen = unwrap (Store.freeze store ~instance_id ~binding:(binding ~seq:2 4096)
     ~row_ids:[(row 2 "").id]) in
   ignore (unwrap (Store.publish_for_keeper ~base_path:root store opaque_frozen));
   unwrap (append_observation store ~instance_id ~seq:3
     ~sources:(`Assoc ["evidence", `List [retained_json corrupt]])
     {rows=[row 3 "unrelated corrupt sequence"];coverage=[]});
-  let healthy_frozen = unwrap (Store.freeze store ~instance_id ~binding:(binding 4096)
+  let healthy_frozen = unwrap (Store.freeze store ~instance_id ~binding:(binding ~seq:3 4096)
     ~row_ids:[(row 1 "").id]) in
   ignore (unwrap (Store.publish_for_keeper ~base_path:root store healthy_frozen));
   check bool "selecting the corrupt sequence still refuses complete evidence" true
-    (Result.is_error (Store.freeze store ~instance_id ~binding:(binding 4096)
+    (Result.is_error (Store.freeze store ~instance_id ~binding:(binding ~seq:3 4096)
       ~row_ids:[(row 3 "").id]));
   let head = unwrap (Store.read_blob store snapshot.reference) |> Yojson.Safe.from_string in
   let previous = unwrap (Types.evidence_of_json (Yojson.Safe.Util.member "previous" head)) in
@@ -344,7 +367,7 @@ let sequence_graph_is_published_and_rejects_nonlocal_or_broken_links () = with_s
   check bool "missing ancestor refuses publication of a frozen root" true
     (Result.is_error (Store.publish_for_keeper ~base_path:root store frozen));
   check bool "missing ancestor refuses a new freeze" true
-    (Result.is_error (Store.freeze store ~instance_id ~binding:(binding 4096) ~row_ids:[(row 1 "").id])))
+    (Result.is_error (Store.freeze store ~instance_id ~binding:(binding ~seq:3 4096) ~row_ids:[(row 1 "").id])))
 
 let original_evidence_addresses_cross_feed_boundaries () = with_store (fun _root store ->
   List.iter (fun (length, expected) ->
@@ -372,6 +395,7 @@ let () = run "bounded Lane history" ["queries", [
   test_case "large coverage preserves fitting rows and later diagnostics" `Quick large_selected_coverage;
   test_case "missing persisted intervals" `Quick missing_record;
   test_case "source absence survives a query with no rows" `Quick coverage_without_rows;
+  test_case "uncommitted records are not read" `Quick uncommitted_records_are_not_read;
   test_case "targeted bounded evidence" `Quick targeted_evidence;
   test_case "separate ingress and egress envelopes remain preservable" `Quick separate_source_and_output_envelopes;
   test_case "selected evidence crosses the existing Keeper artifact boundary" `Quick published_evidence_is_readable_by_keeper;

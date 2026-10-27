@@ -392,21 +392,6 @@ let load_broadcast t ~instance_id ~request_id = protect (fun () ->
   | Fs_compat.Exact_unknown | Fs_compat.Exact_kind _ -> let stat = Unix.stat path in
       if stat.Unix.st_kind <> Unix.S_REG then Error "Broadcast evidence record is not a regular file"
       else Ok (Some (Fs_compat.load_file path |> Yojson.Safe.from_string)))
-let read_directory t relative = protect (fun () ->
-  let path = Filename.concat t.root relative in
-  match Fs_compat.exact_path_kind path with
-  | Fs_compat.Exact_missing -> Ok []
-  | Fs_compat.Exact_unknown | Fs_compat.Exact_kind _ -> let names = Fs_compat.read_dir path |> List.sort String.compare in
-      let rec loop acc = function
-        | [] -> Ok (List.rev acc)
-        | name :: rest when Filename.check_suffix name ".json" ->
-            (* A binding removed between the listing and this read is absent,
-               the same as one never listed. *)
-            (match Fs_compat.load_file_opt (Filename.concat path name) with
-             | None -> loop acc rest
-             | Some bytes -> loop (Yojson.Safe.from_string bytes :: acc) rest)
-        | _ :: rest -> loop acc rest
-      in loop [] names)
 type binding_inventory = {
   records : (string * Yojson.Safe.t) list;
   issues : (string * string) list;
@@ -1093,17 +1078,6 @@ let append_observation_with ~replace_file t ~instance_id ~seq ~sources output =
         | Error detail -> Some detail in
       Error (Publication_failed {failure;verification_error})
 let append_observation = append_observation_with ~replace_file:Fs_compat.save_file_atomic_strict_staged
-let observations t ~instance_id =
-  let* values = read_directory t (observation_dir instance_id) in
-  let rec loop acc = function
-    | [] -> Ok (List.rev acc)
-    | `Assoc fields :: rest ->
-        (match List.assoc_opt "sources" fields, List.assoc_opt "output" fields with
-         | Some sources, Some json ->
-             let* output = output_of_json json in loop ((sources, output) :: acc) rest
-         | _ -> Error "invalid retained observation")
-    | _ -> Error "invalid retained observation"
-  in loop [] values
 (* The sequence is part of the row identity issued by the host, so evidence
    selection can read exactly its files without scanning unrelated history. *)
 let sequence_of_row ~instance_id id =
@@ -1154,30 +1128,25 @@ let decode_record bytes =
              let* output = output_of_json json in Ok (sources, output)
          | _ -> Error "invalid retained observation")
     | _ -> Error "invalid retained observation")
-let highwater t instance_id = protect (fun () ->
-  let directory = Filename.concat t.root (observation_dir instance_id) in
-  match Fs_compat.exact_path_kind directory with
-  | Fs_compat.Exact_missing -> Ok 0
-  | Fs_compat.Exact_unknown | Fs_compat.Exact_kind _ -> let handle = Unix.opendir directory in
-      Fun.protect ~finally:(fun () -> Unix.closedir handle) (fun () ->
-        let rec scan maximum =
-          match Unix.readdir handle with
-          | name when Filename.check_suffix name ".json" ->
-              let stem = Filename.remove_extension name in
-              (match int_of_string_opt stem with
-               | Some seq when seq > 0 && name = Printf.sprintf "%020d.json" seq -> scan (max maximum seq)
-               | _ -> Error "invalid retained observation filename")
-          | _ -> scan maximum
-          | exception End_of_file -> Ok maximum
-        in scan 0))
+(* The records a binding names. Sequences are dense from 1 and a binding names
+   only committed ones, so they are read by name without listing the
+   directory (RFC lane-addon-observation-commits-at-the-binding). *)
+let observations t ~instance_id ~through =
+  let rec loop acc seq =
+    if seq > through then Ok (List.rev acc)
+    else
+      let* bytes = protect (fun () -> Ok (Fs_compat.load_file (record_path t instance_id seq))) in
+      let* record = decode_record bytes in
+      loop (record :: acc) (seq + 1) in
+  loop [] 1
 type unreadable_binding = { path : string; detail : string; contents : Yojson.Safe.t option }
 type binding_reading = { readable : Yojson.Safe.t list; unreadable : unreadable_binding list }
-(* A renamed observation can survive a failed binding write. Recover its
-   sequence for every retained reader; reads still verify the exact record.
-   Each file is read on its own: a file that is not JSON, is not an object,
-   lacks an instance id or sequence, or sits beside a misnamed observation
-   file is listed in [unreadable] and never hides its siblings. Only a
-   directory that cannot be listed or synced fails the whole reading. *)
+(* The binding's sequence is the instance's committed observation: the binding
+   replace is the commit, so readers stop there and never list observation
+   directories. Each file is read on its own: a file that is not JSON, is not
+   an object, or lacks an instance id or sequence is listed in [unreadable] and
+   never hides its siblings. Only a directory that cannot be listed or synced
+   fails the whole reading. *)
 let binding_sequence = function
   | `Assoc fields ->
       (match List.assoc_opt "instance_id" fields, List.assoc_opt "observation_seq" fields with
@@ -1203,12 +1172,7 @@ let read_bindings t =
          | exception Yojson.Json_error detail -> unreadable detail
          | json ->
              (match binding_sequence json with
-              | Ok (instance_id, sequence, fields) ->
-                  (match highwater t instance_id with
-                   | Ok retained ->
-                       Some (Ok (`Assoc (("observation_seq", `Int (max sequence retained)) ::
-                         List.remove_assoc "observation_seq" fields)))
-                   | Error detail -> unreadable ~contents:json detail)
+              | Ok (_, _, _) -> Some (Ok json)
               | Error detail -> unreadable ~contents:json detail)) in
   let reading = List.fold_left (fun reading name ->
     if not (Filename.check_suffix name ".json") then reading
@@ -1243,8 +1207,9 @@ let read_observation_with ~sync_file ~sync_parent ~instance_id ~seq ~max_bytes t
 let read_observation = read_observation_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
 let query_observations t ~instance_id ~expected_seq ~max_bytes ~since ~until ~lane_id =
   let* max_record_bytes = retained_read_limit max_bytes in
-  let* found = highwater t instance_id in
-  let maximum = max found expected_seq in
+  (* [expected_seq] is the binding's committed sequence; a file above it is
+     not committed and is not read. *)
+  let maximum = expected_seq in
   let matches (row : row) =
     Option.fold ~none:true ~some:(String.equal row.lane_id) lane_id
     && Option.fold ~none:true ~some:(fun time -> row.observed_at >= time) since
@@ -1360,9 +1325,18 @@ let freeze t ~instance_id ~binding ~row_ids =
          | _ -> Error "missing retained package")
     | _ -> Error "invalid retained binding" in
   let* max_record_bytes = retained_read_limit max_bytes in
+  (* A row id names its sequence, so a caller could name a file the binding
+     has not committed. Only committed sequences are evidence. *)
+  let* committed = match binding with
+    | `Assoc fields -> (match List.assoc_opt "observation_seq" fields with
+        | Some (`Int seq) when seq >= 0 -> Ok seq
+        | _ -> Error "missing retained binding sequence")
+    | _ -> Error "invalid retained binding" in
   let rec sequences acc = function
     | [] -> Ok (List.sort_uniq Int.compare acc)
-    | id :: rest -> let* seq = sequence_of_row ~instance_id id in sequences (seq :: acc) rest in
+    | id :: rest -> let* seq = sequence_of_row ~instance_id id in
+        if seq > committed then Error "selected row is not committed by the binding"
+        else sequences (seq :: acc) rest in
   let* sequences = sequences [] row_ids in
   let base_bundle observations = `Assoc ["instance_id", `String instance_id; "binding", binding;
     "row_ids", `List (List.map (fun id -> `String id) row_ids); "observations", `List observations] in

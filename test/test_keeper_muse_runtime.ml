@@ -657,7 +657,9 @@ if server is not None:
 def call_probe():
     called = post({"jsonrpc": "2.0", "id": "call-1", "method": "tools/call", "params": {
         "name": "masc_probe", "arguments": {"marker": "from-muse"}}}, version)
-    assert called["result"]["content"][0]["text"] == "MASC_TOOL_RESULT", called
+    expected = FIXTURE.get("expected_probe_result", {"content": "MASC_TOOL_RESULT", "is_error": False})
+    assert called["result"]["content"][0]["text"] == expected["content"], called
+    assert called["result"].get("isError", False) == expected["is_error"], called
 
 turn = read()
 assert turn["method"] == "turn/start", turn
@@ -3106,8 +3108,11 @@ let test_original_result_crosses_checkpoint_and_fresh_session () =
     check bool "Muse resume receives the original other-runtime result" true
       (String_util.contains_substring (read_text (Filename.concat base_path "resume-prompt.txt"))
          "ORIGINAL_CROSS_RUNTIME_RESULT");
-    check int "host checkpoint does not ACK original result data" 1
+    check int "host checkpoint preserves original and newly returned tool results" 2
       (List.length (Keeper_client_tool_outbox.receipt_ids (load ())));
+    check bool "host checkpoint preserves its own completed tool result" true
+      (String_util.contains_substring
+        (String.concat "\n" (Keeper_client_tool_outbox.developer_context (load ()))) "MASC_TOOL_RESULT");
     Store.clear_then ~base_path ~keeper_name (fun () -> ()) |> get;
     write_fixture ~base_path [];
     (match (run_turn_with ~base_path ~tool ~model_input_projection:project ()).outcome.result with
@@ -3121,6 +3126,47 @@ let test_original_result_crosses_checkpoint_and_fresh_session () =
       (List.length (Keeper_client_tool_outbox.receipt_ids (load ()))))
 ;;
 
+let test_original_result_retention_failure_cannot_yield () =
+  with_scripted_host ~fixture:(scenario "stop_before_ack" @
+    ["expected_probe_result", `Assoc ["content", `String "ORIGINAL_EFFECT_RESULT"; "is_error", `Bool true]])
+    (fun ~base_path ->
+    let get = function Ok value -> value | Error detail -> fail detail in
+    let session_path = Store.path ~base_path ~keeper_name |> get in
+    let blocked_path = Filename.concat (Filename.dirname session_path) "undelivered-tools" in
+    let effects = ref 0 in
+    let tool = Agent_core.Tool.create ~name:"masc_probe" ~description:"Commit one fixture effect"
+      ~parameters:[{Agent_core.Types.name="marker";description="Fixture marker";param_type=String;required=true}]
+      (fun _ ->
+        incr effects;
+        (* Initial load has already succeeded. Refuse retention only after
+           the tool's effect, at the actual producer/host-stop boundary. *)
+        Fs_compat.save_file blocked_path "blocked after completed fixture effect";
+        Ok {Agent_core.Types.content="ORIGINAL_EFFECT_RESULT";content_blocks=None;_meta=None}) in
+    let initial = Keeper_client_tool_outbox.load ~base_path ~keeper_name |> get in
+    check int "original store is readable before the tool executes" 0
+      (List.length (Keeper_client_tool_outbox.receipt_ids initial));
+    let run = run_turn_with ~base_path ~tool
+      ~on_official_client_tool_boundary:(fun () -> Ok (Some
+        (Keeper_official_client_host.Terminal_tool_boundary
+          {tool_name="masc_probe";outcome=Durable_stimulus_deferred}))) () in
+    (match run.outcome.result with
+     | Error error ->
+       (match Keeper_internal_error.classify_masc_internal_error error with
+        | Some (Keeper_internal_error.Terminal_effect_failed
+            {failure_class=Tool_result.Runtime_failure;effect_disposition=Tool_result.Effect_outcome_unknown;
+             detail=Keeper_terminal_effect_detail.Tool_result_retention_failed {model_tool_name;message}}) ->
+          check string "the real adapter reports the failed original's producer" "masc_probe" model_tool_name;
+          check bool "storage failure keeps its diagnosis" true (message <> "")
+        | Some _ | None -> failf "retention failure was replaced: %s" (Agent_core.Error.to_string error))
+     | Ok _ -> fail "failed original retention cannot yield or complete the Muse turn");
+    check int "retention refusal executes the effect exactly once" 1 !effects;
+    check string "the post-effect storage refusal remains observable"
+      "blocked after completed fixture effect" (read_text blocked_path);
+    match Keeper_client_tool_outbox.load ~base_path ~keeper_name with
+    | Error _ -> ()
+    | Ok _ -> fail "unavailable original results were converted into an empty outbox")
+;;
+
 let () =
   (* The Muse start prompt uses the shared Antigravity framing assets. Pin
      their source directory so selected cases also run outside Dune. *)
@@ -3129,7 +3175,9 @@ let () =
     "keeper_muse_runtime"
     [ ( "async result outbox"
       , [test_case "original result crosses checkpoint and fresh-session delivery" `Quick
-           test_original_result_crosses_checkpoint_and_fresh_session])
+           test_original_result_crosses_checkpoint_and_fresh_session
+        ; test_case "post-effect original retention failure cannot yield or complete" `Quick
+            test_original_result_retention_failure_cannot_yield])
     ; ( "stream"
       , [ test_case "native failure reaches its exact stream block" `Quick
             test_native_failure_reaches_the_exact_stream_block

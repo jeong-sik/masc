@@ -12,6 +12,13 @@ type receipt =
   ; response : Yojson.Safe.t
   }
 
+type host_producer = { producer_id : string; runtime_label : string; turn_count : int }
+
+let host_producer ~runtime_label ~turn_count =
+  if String.trim runtime_label = "" then Error "tool result producer label is empty"
+  else if turn_count < 0 then Error "tool result producer turn count is negative"
+  else Ok {producer_id=Random_id.uuid_v7 ();runtime_label;turn_count}
+
 let directory ~base_path ~keeper_name =
   let* session_path = Keeper_official_client_session_store.path ~base_path ~keeper_name in
   Ok (Filename.concat (Filename.dirname session_path) "undelivered-tools")
@@ -22,7 +29,8 @@ let to_json (result : receipt) =
     "arguments", result.arguments; "response", result.response]
 
 let filename json =
-  Digestif.SHA256.(digest_string (Yojson.Safe.to_string json) |> to_hex) ^ ".json"
+  Domain_pool_ref.submit_cpu_or_inline (fun () ->
+    Digestif.SHA256.(digest_string (Yojson.Safe.to_string json) |> to_hex) ^ ".json")
 
 let read path =
   let* body = Fs_compat.load_owned_regular_file ~ownership_root:(Filename.dirname path) path
@@ -37,19 +45,37 @@ let validate path json =
   match json with
   | `Assoc fields ->
     let names = List.map fst fields in
-    let expected = ["arguments"; "call_id"; "response"; "thread_id"; "tool_name"; "turn_id"] in
-    if List.sort String.compare names <> expected then Error "invalid tool outbox fields"
-    else if not (List.for_all (fun name -> match List.assoc_opt name fields with
+    let names = List.sort String.compare names in
+    let vendor = ["arguments"; "call_id"; "response"; "thread_id"; "tool_name"; "turn_id"] in
+    let host = ["arguments"; "call_id"; "host_invocation_index"; "host_producer_id"; "host_turn_count";
+      "response"; "runtime_label"; "tool_name"] in
+    let strings_valid names = List.for_all (fun name -> match List.assoc_opt name fields with
       | Some (`String value) -> String.trim value <> ""
-      | Some _ | None -> false) ["thread_id"; "turn_id"; "call_id"; "tool_name"])
-    then Error "invalid tool outbox identity"
-    else if Filename.basename path <> filename json then Error "tool outbox digest mismatch"
+      | Some _ | None -> false) names in
+    let* () =
+      if names = vendor then
+        if strings_valid ["thread_id"; "turn_id"; "call_id"; "tool_name"] then Ok ()
+        else Error "invalid vendor tool outbox identity"
+      else if names = host then
+        if not (strings_valid ["host_producer_id"; "runtime_label"; "call_id"; "tool_name"])
+        then Error "invalid host tool outbox identity"
+        else
+          let* () = match List.assoc_opt "host_producer_id" fields with
+            | Some (`String value) -> Random_id.parse_uuid_v7 value |> Result.map (fun _ -> ())
+            | Some _ | None -> Error "invalid host tool result producer" in
+          let* () = match List.assoc_opt "host_invocation_index" fields with
+            | Some (`Int value) when value >= 0 -> Ok ()
+            | Some _ | None -> Error "invalid host tool invocation index" in
+          (match List.assoc_opt "host_turn_count" fields with
+           | Some (`Int value) when value >= 0 -> Ok ()
+           | Some _ | None -> Error "invalid host tool result turn count")
+      else Error "invalid tool outbox fields" in
+    if Filename.basename path <> filename json then Error "tool outbox digest mismatch"
     else Ok ()
   | _ -> Error "tool outbox receipt must be an object"
 
-let retain ~base_path ~keeper_name result =
+let retain_json ~base_path ~keeper_name json =
   let* directory = directory ~base_path ~keeper_name in
-  let json = to_json result in
   let path = Filename.concat directory (filename json) in
   let* () = validate path json in
   let temp_dir = Filename.concat (Filename.dirname directory) ".undelivered-tools-staging" in
@@ -58,6 +84,16 @@ let retain ~base_path ~keeper_name result =
     |> Result.map_error Keeper_fs.durable_write_error_to_string in
   let* persisted = read path in
   if persisted = Some json then Ok () else Error "tool outbox receipt readback differs"
+
+let retain ~base_path ~keeper_name result =
+  retain_json ~base_path ~keeper_name (to_json result)
+
+let retain_host_result producer ~base_path ~keeper_name ~invocation_index ~call_id ~tool_name ~arguments ~response =
+  let json = `Assoc ["host_invocation_index",`Int invocation_index;
+    "host_producer_id",`String producer.producer_id;
+    "runtime_label",`String producer.runtime_label;"host_turn_count",`Int producer.turn_count;
+    "call_id",`String call_id;"tool_name",`String tool_name;"arguments",arguments;"response",response] in
+  retain_json ~base_path ~keeper_name json
 
 let load ~base_path ~keeper_name =
   let* directory = directory ~base_path ~keeper_name in

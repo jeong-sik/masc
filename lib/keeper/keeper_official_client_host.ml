@@ -1680,7 +1680,7 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
     ~turn_count ~context ~tools ~loading_plan
     ~(hooks : Agent_core.Hooks.hooks) ~event_bus ~context_injector
     ~terminal_effect_state ~terminal_error ~pre_tool_rejects ~raw_trace_run
-    ~next_dynamic_invocation_index ~on_tool_boundary ~on_result_handoff
+    ~next_dynamic_invocation_index ~on_tool_boundary ~on_result_handoff ~result_producer
     (tool : Agent_core.Tool.t) =
   { name = tool.schema.name
   ; description = tool.schema.description
@@ -1824,6 +1824,7 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
         in
         match execute () with
         | result ->
+          let original_result = result in
           let delivery =
             match image_capability_error ~accepts_image_input result.content_blocks with
             | Some detail -> Error detail
@@ -1846,8 +1847,9 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
               ; content = detail ^ "\n" ^ result.content }, Some detail
           in
           let result = settle result in
+          let producer_effect_state = terminal_effect_state () in
           let terminal_boundary =
-            match terminal_effect_state () with
+            match producer_effect_state with
             | Keeper_tools_agent_core.Terminal_effect_failed
                 ({ effect_disposition =
                      ( Tool_result.Proven_post_effect
@@ -1959,7 +1961,7 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
           (* The caller observes the settled call, including result handoff.
              Its scope spans provider attempts; a new client-local counter must
              not replace it. Existing exact terminal evidence has priority. *)
-          (match on_tool_boundary with
+          let result = (match on_tool_boundary with
            | None -> final_result
            | Some observe ->
              let boundary =
@@ -1998,7 +2000,65 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
                  (( Repeated_tool_call _
                   | Terminal_tool_boundary
                       { outcome = Terminal_completed | Durable_stimulus_deferred; _ } )
-                  as stop) -> { final_result with abort_turn = Some stop })
+                  as stop) -> { final_result with abort_turn = Some stop }) in
+          (match base_path, result_producer, result.abort_turn with
+           | Some base_path, Some producer, Some _ ->
+             let retain () =
+               let* content_blocks = Domain_pool_ref.submit_cpu_or_inline (fun () ->
+                 match original_result.content_blocks with
+                 | None -> Ok `Null
+                 | Some blocks ->
+                   List.fold_left (fun acc block ->
+                     let* encoded = acc in
+                     let* block = Agent_core.Checkpoint.content_block_to_json_result
+                         ~scope:"official_client_original_tool_result" block
+                       |> Result.map_error Agent_core.Error.to_string in
+                     Ok (block :: encoded)) (Ok []) blocks
+                   |> Result.map (fun blocks -> `List (List.rev blocks))) in
+               let response = `Assoc ["success",`Bool original_result.success;
+                 "content",`String original_result.content;"content_blocks",content_blocks] in
+               Keeper_client_tool_outbox.retain_host_result producer ~base_path ~keeper_name
+                 ~invocation_index:(Agent_core.Tool_contract.Invocation.planned_index invocation)
+                 ~call_id ~tool_name:tool.schema.name ~arguments:input ~response in
+             let retained =
+               try retain () with
+               | exn -> (* cancel-guard-ok: reserved cancellation must propagate *)
+                 Llm_provider.Reserved_exn.reraise_if_reserved exn;
+                 Error (Printexc.to_string exn)
+             in
+             (match retained with
+              | Ok () -> result
+              | Error message ->
+                let detail = Keeper_terminal_effect_detail.Tool_result_retention_failed
+                    { model_tool_name = tool.schema.name; message } in
+                let diagnostic = Keeper_terminal_effect_detail.summary detail in
+                record_terminal_error terminal_error diagnostic;
+                Log.emit Log.Error ~module_name:"Keeper"
+                  ~details:(`Assoc ["keeper_name", `String keeper_name;
+                    "detail", Keeper_terminal_effect_detail.to_yojson detail]) diagnostic;
+                match result.abort_turn with
+                | Some (Terminal_tool_boundary { outcome = Terminal_failed _; _ }) ->
+                  (* Preserve the producer's authoritative failure. The separate
+                     diagnostic records that its original result was also lost. *)
+                  result
+                | None | Some (Repeated_tool_call _)
+                | Some (Terminal_tool_boundary
+                    { outcome = Terminal_completed | Durable_stimulus_deferred; _ }) ->
+                  let effect_disposition =
+                    match producer_effect_state with
+                    | Keeper_tools_agent_core.Terminal_effect_completed _ -> Tool_result.Proven_post_effect
+                    | Keeper_tools_agent_core.Terminal_effect_failed failure -> failure.effect_disposition
+                    | Keeper_tools_agent_core.Terminal_effect_open
+                    | Keeper_tools_agent_core.Deferred_tool_result
+                    | Keeper_tools_agent_core.External_effect_deferred -> Tool_result.Effect_outcome_unknown
+                  in
+                  { result with success = false
+                  ; abort_turn = Some (Terminal_tool_boundary
+                      { tool_name = tool.schema.name
+                      ; outcome = Terminal_failed
+                          { failure_class = Tool_result.Runtime_failure; effect_disposition; detail }
+                      }) })
+           | None, _, _ | _, None, _ | _, _, None -> result)
         | exception exn -> (* cancel-guard-ok: PROVISIONAL, delete with #37372. This arm ends by re-throwing with the original backtrace nine lines down. The site is correct; the marker exists only because the guard reads eight lines. *)
           let backtrace = Printexc.get_raw_backtrace () in
           Eio.Cancel.protect (fun () ->
@@ -2026,6 +2086,11 @@ let dynamic_tools ?base_path ~content_transport ~accepts_image_input ~tool_appro
          ~field:"context"
          (runtime_label ^ " dynamic tools require the Keeper shared context"))
   | tools, Some context ->
+    let* result_producer = match base_path with
+      | None -> Ok None
+      | Some _ -> Keeper_client_tool_outbox.host_producer ~runtime_label ~turn_count
+        |> Result.map Option.some
+        |> Result.map_error (config_error ~field:"tool_result_producer") in
     let next_dynamic_invocation_index = Atomic.make 0 in
     Ok
       (List.map
@@ -2049,7 +2114,8 @@ let dynamic_tools ?base_path ~content_transport ~accepts_image_input ~tool_appro
             ~raw_trace_run
             ~next_dynamic_invocation_index
             ~on_tool_boundary
-            ~on_result_handoff)
+            ~on_result_handoff
+            ~result_producer)
          tools)
 ;;
 

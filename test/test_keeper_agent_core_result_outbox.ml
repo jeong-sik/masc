@@ -17,7 +17,7 @@ let receipt turn_id : Outbox.receipt =
 type scenario = Completed | Deferred | Projection_failed | Provider_failed | Rejected | Save_failed
   | Stale_save | Noop_sink | No_sink | Review
 
-let run_case scenario () =
+let run_case ?(host=false) scenario () =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;
   Fs_compat.set_fs env#fs;
@@ -31,7 +31,15 @@ let run_case scenario () =
     Fs_compat.remove_tree base_path);
   let config = Workspace.default_config base_path in
   ignore (Workspace.init config ~agent_name:(Some keeper_name));
-  let retain turn_id = get (Outbox.retain ~base_path ~keeper_name (receipt turn_id)) in
+  let host_producer = get (Outbox.host_producer ~runtime_label:"source-client-fixture" ~turn_count:4) in
+  let next_host_invocation_index = ref 0 in
+  let retain turn_id = if host then
+      let invocation_index = !next_host_invocation_index in
+      incr next_host_invocation_index;
+      get (Outbox.retain_host_result host_producer ~base_path ~keeper_name ~invocation_index ~call_id:turn_id
+        ~tool_name:"Execute" ~arguments:(`Assoc ["command",`String "already-executed-effect"])
+        ~response:(`Assoc ["content",`String marker;"success",`Bool true]))
+    else get (Outbox.retain ~base_path ~keeper_name (receipt turn_id)) in
   let snapshot () = get (Outbox.load ~base_path ~keeper_name) in
   retain "original-turn";
   let original_ids = Outbox.receipt_ids (snapshot ()) in
@@ -200,7 +208,7 @@ streaming = false
      List.iter (fun body ->
        check bool "actual HTTP bytes carry original result data" expected (contains marker body);
        check bool "actual HTTP bytes carry original producer provenance" expected
-         (contains "original-vendor-session" body)) !requests;
+         (contains (if host then "source-client-fixture" else "original-vendor-session") body)) !requests;
      check int "one HTTP response per expected boundary"
        (match scenario with Deferred -> 2
         | Completed | Projection_failed | Provider_failed | Rejected | Save_failed
@@ -208,6 +216,8 @@ streaming = false
 
 let () = run "Agent Core original result continuation"
   ["durable result consumption",[
+    test_case "host receipt crosses actual HTTP and exact completed ACK" `Quick (run_case ~host:true Completed);
+    test_case "host receipt survives deferred HTTP consumer and resume" `Quick (run_case ~host:true Deferred);
     test_case "actual wire completion ACKs exact snapshot after checkpoint save" `Quick (run_case Completed);
     test_case "deferred consumer resumes without replay and ACKs after completion" `Quick (run_case Deferred);
     test_case "projection failure retains original before dispatch" `Quick (run_case Projection_failed);

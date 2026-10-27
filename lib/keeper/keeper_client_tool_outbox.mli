@@ -20,6 +20,22 @@ val retain :
   base_path:string -> keeper_name:string ->
   receipt -> (unit, string) result
 
+type host_producer
+val host_producer : runtime_label:string -> turn_count:int -> (host_producer, string) result
+(** One host-owned dynamic-tool projection, with a fresh source identity.
+    Its label and claim ordinal describe the host; neither impersonates vendor
+    session/turn coordinates or authorizes tool replay. *)
+
+val retain_host_result :
+  host_producer -> base_path:string -> keeper_name:string ->
+  invocation_index:int -> call_id:string -> tool_name:string -> arguments:Yojson.Safe.t ->
+  response:Yojson.Safe.t -> (unit, string) result
+(** Retain original returned data before a host stop can discard the provider
+    invocation. Host and vendor receipts have distinct, strict source shapes
+    and share exact snapshot consumption and ACK. [invocation_index] is the
+    nonnegative physical invocation index assigned by this host projection;
+    a client may reuse [call_id] for a later physical invocation. *)
+
 val load : base_path:string -> keeper_name:string -> (snapshot, string) result
 val receipt_ids : snapshot -> string list
 (** Exact SHA256 identities of the validated committed receipts. Staging files

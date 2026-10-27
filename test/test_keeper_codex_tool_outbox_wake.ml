@@ -292,7 +292,7 @@ command = "/bin/false"
 is-non-interactive = true
 [providers.antigravity]
 protocol = "antigravity-cli"
-timeout-s = 60
+timeout-s = 60.0
 command = "/bin/false"
 is-non-interactive = true
 [providers.antigravity.credentials]

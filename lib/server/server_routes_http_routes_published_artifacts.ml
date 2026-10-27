@@ -64,6 +64,19 @@ let decode_check_request ~config ~body =
 let authorized handler request reqd =
   with_token_permission_auth ~permission:Masc_domain.CanAdmin handler request reqd
 
+let authorized_capability_read handler request reqd =
+  with_public_read (fun state request reqd ->
+    let base_path = (Mcp_server.workspace_config state).base_path in
+    match authorize_optional_token_bound_permission_request
+            ~base_path ~permission:Masc_domain.CanAdmin request with
+    | Error err -> respond_auth_error request reqd err
+    | Ok _ ->
+        match check_agent_rate_limit
+                ~quota:(read_request_quota request.Httpun.Request.meth)
+                request reqd with
+        | Ok () -> handler state request reqd
+        | Error () -> ()) request reqd
+
 let revision_param request =
   match query_param request "revision" with
   | None -> Ok None
@@ -83,7 +96,7 @@ let add_routes router =
         ["artifacts", `List listing.artifacts;
          "diagnostics", `List (List.map (fun (id, message) ->
            `Assoc ["id", `String id; "error", `String message]) listing.diagnostics)])))
-  |> Http.Router.prefix_get "/api/v1/published-artifacts/" (authorized (fun state _actor request reqd ->
+  |> Http.Router.prefix_get "/api/v1/published-artifacts/" (authorized_capability_read (fun state request reqd ->
     let base_path = (Mcp_server.workspace_config state).base_path in
     match extract_path_param ~prefix:"/api/v1/published-artifacts/" (Http.Request.path request),
           revision_param request with

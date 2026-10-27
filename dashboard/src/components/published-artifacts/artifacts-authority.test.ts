@@ -57,6 +57,22 @@ it('waits without reading or inventing an empty catalog when workspace authority
   expect(screen.queryByText(/아직 게시된 아티팩트가 없습니다/)).toBeNull()
 })
 
+it('opens a capability-addressed shared artifact in read-only mode when workspace authority is initially null', async () => {
+  workspace.current.value = null
+  clearStoredToken()
+  select(firstId)
+  render(html`<${ArtifactsSurface} />`)
+  const reader = within(await screen.findByRole('dialog'))
+  expect(reader.getByRole('heading', { name: 'Original report' })).toBeTruthy()
+  expect(reader.getByText('original body')).toBeTruthy()
+  expect(reader.getByRole('button', { name: '링크 복사' })).toBeTruthy()
+  expect(reader.getByRole('button', { name: '원본 다운로드' })).toBeTruthy()
+  expect(reader.queryByRole('button', { name: '편집' })).toBeNull()
+  expect(reader.queryByRole('button', { name: '← 목록으로' })).toBeNull()
+  expect(reader.queryByRole('button', { name: '○ 미확인' })).toBeNull()
+  expect(vi.mocked(get).mock.calls.map(([path]) => path)).toEqual([`/api/v1/published-artifacts/${firstId}`])
+})
+
 it('withdraws the ready inventory, document, checks and preview immediately on workspace loss', async () => {
   select(firstId)
   render(html`<${ArtifactsSurface} />`)

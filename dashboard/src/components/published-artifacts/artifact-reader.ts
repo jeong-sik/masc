@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useLayoutEffect, useRef, useState } from 'preact/hooks'
+import { useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { artifactHref, type ArtifactDocument, type ArtifactPublication } from '../../api/published-artifacts'
 import { Markdown } from '../common/markdown'
 import { navigate } from '../../router'
@@ -9,9 +9,31 @@ import { ArtifactCheckControl, type ArtifactCheckOutcome } from './artifact-chec
 import { ArtifactSharedEditor, type ArtifactSharedCloseRequest } from './artifact-shared-editor'
 import { ArtifactComposer, type ArtifactPublicationOutcome, type ArtifactDraftRetention, type ArtifactDraftSnapshot } from './artifact-composer'
 import { ArtifactAppView } from './artifact-app-view'
+import { artifactAppFrame, appFrameMessage } from '../../lib/artifact-app-frame'
 import { ArtifactWordExport } from './artifact-word-export'
 import { ArtifactPptxExport } from './artifact-pptx-export'
 import { ArtifactPdfExport } from './artifact-pdf-export'
+
+function ReadOnlyArtifactFrame({ doc }: { doc: ArtifactDocument }) {
+  const iframe = useRef<HTMLIFrameElement>(null)
+  const frame = useMemo(() => artifactAppFrame(doc.content, []), [doc.content])
+  useLayoutEffect(() => {
+    const receive = (event: MessageEvent) => {
+      if (event.source !== iframe.current?.contentWindow) return
+      const message = appFrameMessage(frame, event.data)
+      if (message?.kind === 'ready') {
+        iframe.current?.contentWindow?.postMessage(
+          { type: 'masc.artifact.inputs.init.v1', token: frame.token, instance: message.instance, data: { forms: {}, app: {} } },
+          '*',
+        )
+      }
+    }
+    window.addEventListener('message', receive)
+    return () => window.removeEventListener('message', receive)
+  }, [frame])
+  return html`<iframe ref=${iframe} title=${doc.artifact.title} sandbox="allow-scripts" referrerPolicy="no-referrer"
+    class="min-h-0 w-full flex-1 border-0 bg-white" srcDoc=${frame.document} />`
+}
 
 function downloadSource(doc: ArtifactDocument): void {
   const { artifact, content } = doc
@@ -26,8 +48,9 @@ function downloadSource(doc: ArtifactDocument): void {
   URL.revokeObjectURL(url)
 }
 
-export function ArtifactReader({ doc, fixedRevision, readError, workspaceRoot, draftRetention, checkState, authRevision, isCurrent, onMutation, onPublication, onPublished, onCheckChanged, onClose }: {
+export function ArtifactReader({ doc, fixedRevision, readOnly = false, readError, workspaceRoot, draftRetention, checkState, authRevision, isCurrent, onMutation, onPublication, onPublished, onCheckChanged, onClose }: {
   doc: ArtifactDocument; fixedRevision: boolean; checkState: ArtifactCheckState;
+  readOnly?: boolean;
   readError?: string;
   workspaceRoot: string;
   draftRetention: ArtifactDraftRetention;
@@ -74,25 +97,29 @@ export function ArtifactReader({ doc, fixedRevision, readError, workspaceRoot, d
         // Let the native dialog handle Escape before the shell's chat shortcut.
         if (event.key === 'Escape') event.stopPropagation()
       }}
-      onCancel=${(event: Event) => { event.preventDefault(); close() }}>
+      onCancel=${(event: Event) => { event.preventDefault(); if (!readOnly) close() }}>
     <article class="flex h-full min-w-0 flex-col" aria-label="아티팩트 본문">
       <header class="shrink-0 border-b border-[var(--color-border-default)] px-4 py-3 space-y-2">
         ${readError ? html`<p role="alert">문서 재조회 실패: ${readError} 이전에 읽은 문서와 작성 중인 원고를 유지합니다.</p>` : null}
         <div class="flex flex-wrap items-center justify-between gap-2">
-          <button type="button" aria-label="목록으로" onClick=${close}>← <span class="hidden sm:inline">목록으로</span></button>
+          ${readOnly
+            ? html`<span class="rounded border border-[var(--color-border-default)] px-2 py-0.5 text-xs text-[var(--color-fg-secondary)]">외부 공유 열람</span>`
+            : html`<button type="button" aria-label="목록으로" onClick=${close}>← <span class="hidden sm:inline">목록으로</span></button>`}
           <h2 id="artifact-reader-title" class="m-0 min-w-0 flex-1 truncate text-base font-semibold">${artifact.title}</h2>
           <div class="flex flex-wrap gap-3 text-xs">
             <button type="button" aria-label="링크 복사" onClick=${copyLink}><span class="sm:hidden">복사</span><span class="hidden sm:inline">링크 복사</span></button>
             <button type="button" aria-label="원본 다운로드" onClick=${() => downloadSource(doc)}><span class="sm:hidden">저장</span><span class="hidden sm:inline">원본 다운로드</span></button>
-            <button type="button" aria-label="문서 편집" disabled=${editing !== null || sharing !== null} onClick=${() => leaveApp(() => {
-              const snapshot: ArtifactDraftSnapshot = { identity: {}, base: { id: artifact.id, revision: artifact.revision }, value: {
-                title: artifact.title, summary: artifact.summary, format: artifact.format,
-                content, task_id: artifact.task_id, goal_id: artifact.goal_id,
-              } }
-              draftRetention.remember(snapshot)
-              setEditing({ document: doc, snapshot })
-            })}>편집</button>
-            <button type="button" disabled=${editing !== null || sharing !== null} onClick=${() => leaveApp(()=>setSharing(doc))}>공동 편집</button>
+            ${readOnly ? null : html`
+              <button type="button" aria-label="문서 편집" disabled=${editing !== null || sharing !== null} onClick=${() => leaveApp(() => {
+                const snapshot: ArtifactDraftSnapshot = { identity: {}, base: { id: artifact.id, revision: artifact.revision }, value: {
+                  title: artifact.title, summary: artifact.summary, format: artifact.format,
+                  content, task_id: artifact.task_id, goal_id: artifact.goal_id,
+                } }
+                draftRetention.remember(snapshot)
+                setEditing({ document: doc, snapshot })
+              })}>편집</button>
+              <button type="button" disabled=${editing !== null || sharing !== null} onClick=${() => leaveApp(()=>setSharing(doc))}>공동 편집</button>
+            `}
           </div>
         </div>
         <div class="flex flex-wrap items-center justify-between gap-3">
@@ -114,8 +141,8 @@ export function ArtifactReader({ doc, fixedRevision, readError, workspaceRoot, d
             </select>
           </label>
         </div>
-        <${ArtifactCheckControl} key=${JSON.stringify([authRevision,artifact.id,artifact.revision,artifact.body._blob.sha256])}
-          artifact=${artifact} state=${checkState} authRevision=${authRevision} isCurrent=${isCurrent} onMutation=${onMutation} onChanged=${onCheckChanged} />
+        ${readOnly ? null : html`<${ArtifactCheckControl} key=${JSON.stringify([authRevision,artifact.id,artifact.revision,artifact.body._blob.sha256])}
+          artifact=${artifact} state=${checkState} authRevision=${authRevision} isCurrent=${isCurrent} onMutation=${onMutation} onChanged=${onCheckChanged} />`}
         <${ArtifactWordExport} key=${JSON.stringify([authRevision,workspaceRoot,artifact.id,artifact.revision,artifact.body._blob.sha256])}
           doc=${doc} authRevision=${authRevision} isCurrent=${isCurrent} disabled=${editing!==null||sharing!==null} />
         <${ArtifactPptxExport} key=${JSON.stringify(['pptx',authRevision,workspaceRoot,artifact.id,artifact.revision,artifact.body._blob.sha256])}
@@ -147,8 +174,10 @@ export function ArtifactReader({ doc, fixedRevision, readError, workspaceRoot, d
           ? html`<pre tabIndex=${0} aria-label="문서 원본" class="m-0 flex-1 whitespace-pre-wrap break-words p-6 text-xs">${content}</pre>`
           : artifact.format === 'markdown'
             ? html`<div class=${`mx-auto w-full min-w-0 p-4 sm:p-8 ${width === 'reading' ? 'max-w-[90ch]' : ''}`}><${Markdown} text=${content} /></div>`
-            : html`<${ArtifactAppView} key=${JSON.stringify([authRevision,workspaceRoot,artifact.id,artifact.revision,artifact.body._blob.sha256])}
-              doc=${doc} workspaceRoot=${workspaceRoot} authRevision=${authRevision} isCurrent=${isCurrent} onPending=${(pending:boolean)=>{appPending.current=pending}} />`}
+            : readOnly
+              ? html`<${ReadOnlyArtifactFrame} key=${JSON.stringify([artifact.id, artifact.revision, artifact.body._blob.sha256])} doc=${doc} />`
+              : html`<${ArtifactAppView} key=${JSON.stringify([authRevision,workspaceRoot,artifact.id,artifact.revision,artifact.body._blob.sha256])}
+                doc=${doc} workspaceRoot=${workspaceRoot} authRevision=${authRevision} isCurrent=${isCurrent} onPending=${(pending:boolean)=>{appPending.current=pending}} />`}
       </div>
     </article>
     </dialog>

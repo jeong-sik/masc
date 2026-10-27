@@ -28,6 +28,9 @@ function isToday(timestamp: string, now: Date): boolean {
 export function ArtifactsSurface() {
   const authRevision = storedTokenRevision.value
   const authority = executionWorkspaceAuthority.value
+  const hadAuthority = useRef(false)
+  if (authority !== null) hadAuthority.current = true
+  const { artifact: selectedId, revision } = route.value.params
   const mounts = useRef(0)
   // The ordinal is only a component key. Authority is the existing SSOT object.
   const owner = useMemo(() => ({ mount: ++mounts.current, authRevision, authority }), [authRevision, authority])
@@ -85,7 +88,11 @@ export function ArtifactsSurface() {
         ${original !== owner ? ' · 이전 접근 상태의 요청 결과' : ''}
       </p>`)}
     </section>` : null}
-    ${authority === null ? html`<p role="status">현재 작업 공간을 확인한 뒤 아티팩트를 읽습니다.</p>`
+    ${authority === null
+      ? (!hadAuthority.current && selectedId
+          ? html`<${SharedArtifactObservation} key=${`${owner.mount}:${selectedId}:${revision ?? ''}`}
+              authRevision=${authRevision} selectedId=${selectedId} revision=${revision} />`
+          : html`<p role="status">현재 작업 공간을 확인한 뒤 아티팩트를 읽습니다.</p>`)
       : html`<${ArtifactsObservation} key=${owner.mount} authRevision=${authRevision} isCurrent=${current}
           workspaceRoot=${authority.workspaceRoot} draftRetention=${draftRetention}
           onPublication=${(outcome: ArtifactPublicationOutcome) => setPublications(previous => {
@@ -98,6 +105,36 @@ export function ArtifactsSurface() {
           })}
           onMutation=${(outcome: ArtifactCheckOutcome) => setReceipts(previous => [...previous, { owner, outcome }])} />`}
   </div>`
+}
+
+const noopDraftRetention: ArtifactDraftRetention = { remember: () => {}, forget: () => {} }
+
+function SharedArtifactObservation({ authRevision, selectedId, revision }: {
+  authRevision: number; selectedId: string; revision: string | undefined
+}) {
+  const [document, setDocument] = useState<Remote<ArtifactDocument> | null>(null)
+  const documentKey = useMemo(() => ({}), [selectedId, revision])
+  const active = useRef(true)
+  const current = () => active.current && currentStoredTokenRevision() === authRevision && executionWorkspaceAuthority.peek() === null
+  useEffect(() => () => { active.current = false }, [])
+  useEffect(() => {
+    const controller = new AbortController()
+    void fetchPublishedArtifact(selectedId, revision, controller.signal).then(data => {
+      if (!controller.signal.aborted && current()) setDocument({ key: documentKey, kind: 'loaded', data, receivedAt: Date.now() })
+    }, error => {
+      if (!controller.signal.aborted && current()) setDocument({ key: documentKey, kind: 'error', message: errorMessage(error) })
+    })
+    return () => controller.abort()
+  }, [authRevision, selectedId, revision, documentKey])
+  const doc = document?.key === documentKey ? document : null
+  if (doc === null) return html`<p role="status">문서를 불러오고 있습니다.</p>`
+  if (!doc.data) return html`<p role="alert">${doc.kind === 'error' ? doc.message : '문서를 읽지 못했습니다.'}</p>`
+  return html`<${ArtifactReader} doc=${doc.data} fixedRevision=${revision !== undefined} readOnly=${true}
+    draftRetention=${noopDraftRetention} workspaceRoot=""
+    checkState=${{ kind: 'unknown', message: '외부 공유 열람' }} authRevision=${authRevision}
+    isCurrent=${current} onMutation=${() => {}} onCheckChanged=${() => {}}
+    onPublication=${() => {}} onPublished=${() => {}}
+    onClose=${() => navigate('workspace', { section: 'artifacts' })} />`
 }
 
 function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, isCurrent, onMutation, onPublication }: {

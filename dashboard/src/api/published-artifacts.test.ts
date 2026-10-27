@@ -64,4 +64,16 @@ describe('published artifact native wire contract', () => {
     vi.mocked(get).mockResolvedValueOnce({ ...nativeInventory, artifacts: [{ ...nativeInventory.artifacts[0], body }] })
     await expect(fetchPublishedArtifacts()).rejects.toThrow()
   })
+
+  it('falls back to the static published artifact snapshot when unauthenticated shared read returns 401', async () => {
+    const artifact = nativeInventory.artifacts[0]!
+    const payload = { artifact, content: '# 공유 보고서', revisions: [artifact] }
+    vi.mocked(get)
+      .mockRejectedValueOnce(Object.assign(new Error('Unauthorized'), { status: 401 }))
+      .mockResolvedValueOnce(payload)
+    const document = await fetchPublishedArtifact(artifact.id, '2')
+    expect(document.content).toBe('# 공유 보고서')
+    expect(get).toHaveBeenNthCalledWith(1, `/api/v1/published-artifacts/${artifact.id}?revision=2`, {})
+    expect(get).toHaveBeenNthCalledWith(2, `/dashboard/assets/published-artifacts/${artifact.id}-r2.json`, {})
+  })
 })

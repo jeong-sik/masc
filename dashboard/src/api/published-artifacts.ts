@@ -91,9 +91,20 @@ export async function fetchPublishedArtifacts(signal?: AbortSignal): Promise<Art
 
 export async function fetchPublishedArtifact(id: string, revision: string | undefined, signal?: AbortSignal, workspace?: ArtifactWorkspace): Promise<ArtifactDocument> {
   const query = revision === undefined ? '' : `?revision=${encodeURIComponent(revision)}`
-  const doc = Schema.decodeUnknownSync(DocumentSchema)(await get<unknown>(`/api/v1/published-artifacts/${encodeURIComponent(id)}${query}`, {
-    signal, ...(workspace ? { extraHeaders: artifactWorkspaceHeaders(workspace) } : {}),
-  }))
+  let raw: unknown
+  try {
+    raw = await get<unknown>(`/api/v1/published-artifacts/${encodeURIComponent(id)}${query}`, {
+      signal, ...(workspace ? { extraHeaders: artifactWorkspaceHeaders(workspace) } : {}),
+    })
+  } catch (error) {
+    if (workspace === undefined && typeof error === 'object' && error !== null && (error as { status?: unknown }).status === 401 && /^artifact-[0-9a-f]{32}$/.test(id)) {
+      const suffix = revision === undefined ? '' : `-r${encodeURIComponent(revision)}`
+      raw = await get<unknown>(`/dashboard/assets/published-artifacts/${encodeURIComponent(id)}${suffix}.json`, { signal })
+    } else {
+      throw error
+    }
+  }
+  const doc = Schema.decodeUnknownSync(DocumentSchema)(raw)
   if (doc.artifact.id !== id || (revision !== undefined && String(doc.artifact.revision) !== revision)) {
     throw new Error('요청한 문서와 저장된 문서의 식별자가 다릅니다.')
   }

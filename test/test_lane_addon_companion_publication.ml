@@ -434,7 +434,7 @@ let runtime_worker_exit mode env fs config original =
           await_exit=(fun () -> Eio.Promise.await ended;"fixture worker ended");
           stop=(fun () -> incr stops;ignore (Eio.Promise.try_resolve end_worker ());
             Ok (L.Native_released {installation_id;instance_id}));
-          call_exported_tool=(fun ~companion ~on_result ~authorize:_ ~principal:_ ~name:_ ~arguments:_ ->
+          call_exported_tool=(fun ~companion ~on_result ~on_dispatch:_ ~authorize:_ ~principal:_ ~name:_ ~arguments:_ ->
             let admitted=match companion with Some value -> value | None -> fail "companion missing" in
             check bool "fake external worker receives original host admission" true (admitted.admit ());
             let path=admitted.context.socket_path in

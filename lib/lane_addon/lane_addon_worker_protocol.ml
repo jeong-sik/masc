@@ -192,8 +192,10 @@ let initialize t client =
       | Retired _ -> Error Stopped
       | Awaiting | Ready _ -> Error (Invalid_contract "worker initialization state changed"))
 
-let protect_call t work =
-  try work () with Eio.Cancel.Cancelled _ as exn -> revoke t; raise exn
+(* A call cancelled after it wrote to the worker has an effect nobody will
+   learn, so the connection is retired. [reached] says whether it wrote. *)
+let protect_call ?(reached = fun () -> true) t work =
+  try work () with Eio.Cancel.Cancelled _ as exn -> if reached () then revoke t; raise exn
 
 let call_operator t ~admit ~arguments =
   protect_call t (fun () ->
@@ -308,10 +310,14 @@ type result_finalizer = name:string -> arguments:Yojson.Safe.t ->
   principal:Lane_addon_call_context.principal -> result:Mcp_protocol.Mcp_types.tool_result ->
   (Mcp_protocol.Mcp_types.tool_result, string) result
 type companion_admission = {context:Lane_addon_call_context.companion;admit:unit -> bool}
-let call_exported_tool ?(on_result = fun _ -> ()) ?companion
+let call_exported_tool ?(on_result = fun _ -> ()) ?(on_dispatch = fun () -> ()) ?companion
     ?(finalize_result = fun ~name:_ ~arguments:_ ~principal:_ ~result -> Ok result)
     ?authorize ?(principal = Lane_addon_call_context.Anonymous) t ~name ~arguments =
-  protect_call t (fun () ->
+  (* A call cancelled while it waits for the RPC mutex, or in its mediation
+     before its first RPC, wrote nothing, and the session stays as it was. *)
+  let dispatched = ref false in
+  let on_dispatch () = dispatched := true; on_dispatch () in
+  protect_call ~reached:(fun () -> !dispatched) t (fun () ->
   if revoked t then Error Stopped
   else
       let* ready = ready_for_call t in
@@ -335,7 +341,8 @@ let call_exported_tool ?(on_result = fun _ -> ()) ?companion
           let admitted=not (revoked t) && (match companion with None -> true | Some admission -> admission.admit ()) in
           if not admitted || revoked t
           then Error "Add-on worker is unavailable"
-          else Agent_core.Mcp.call_tool_full client ~name ~arguments
+          else (on_dispatch ();
+            Agent_core.Mcp.call_tool_full client ~name ~arguments)
             |> Result.map (fun result -> (match companion with None -> on_result result | Some _ -> ()); result)
             |> Result.map_error (fun error -> match companion with
               | None -> Agent_core.Error.to_string error | Some _ -> "private invocation outcome unknown")) in

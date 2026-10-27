@@ -44,15 +44,28 @@ let fields expected = function
   | `Assoc fields when List.sort String.compare (List.map fst fields) = List.sort String.compare expected -> Ok fields
   | _ -> Error "Original gate record has unknown, duplicate or missing fields"
 let value name fields = List.assoc name fields
+(* A gate request names its parent execution by ID and request digest; the
+   parent's body is read from the parent record, never copied here
+   (RFC-librarian-history-settles-finished-originals 3.4). *)
+let request_version = 2
+let request_fields = ["version";"kind";"request_id";"owner";"execution_id";"execution_digest";
+  "proposal";"authority";"predecessor"]
+(* The version is read before the field set, so a request written in another
+   shape is refused by name rather than as an unknown field. *)
+let request_members json =
+  let* () = match json with
+    | `Assoc members when List.assoc_opt "version" members <> Some (`Int request_version) ->
+      Error (Printf.sprintf "Original gate request is not version %d" request_version)
+    | _ -> Ok () in
+  fields request_fields json
 let text = function
   | `String text when String.trim text <> "" -> Ok text
   | _ -> Error "Original gate identity must be nonblank"
 let optional_text = function `Null -> Ok None | json -> let* text = text json in Ok (Some text)
 let owned value = Result.map_error Owner.error_to_string value
 let parent_execution_id (record : Owner.retained) =
-  let* members = fields ["version";"kind";"request_id";"owner";"execution_id";"execution_digest";
-    "capture";"proposal";"authority";"predecessor"] record.request in
-  let* () = require (value "version" members=`Int 1 && value "kind" members=`String Capture.gate_kind
+  let* members = request_members record.request in
+  let* () = require (value "kind" members=`String Capture.gate_kind
     && value "request_id" members=`String record.request_id) "Invalid gate original header" in
   text (value "execution_id" members)
 
@@ -153,9 +166,9 @@ let transcript_step previous next =
 type restored = {proposal:Yojson.Safe.t;authority:Gate.replay_authority;
   input:inputs;transcript:transcript;complete:Gate.run_result option}
 let gate_request ~owner ~capture ~parent ~proposal ~request_id ~authority ~predecessor =
-  `Assoc ["version",`Int 1;"kind",`String Capture.gate_kind;"request_id",`String request_id;
+  `Assoc ["version",`Int request_version;"kind",`String Capture.gate_kind;"request_id",`String request_id;
     "owner",Capture.owner_to_json owner;"execution_id",`String (Capture.request_id capture);
-    "execution_digest",`String parent.Owner.request_digest;"capture",Capture.to_json capture;
+    "execution_digest",`String parent.Owner.request_digest;
     "proposal",proposal;"authority",Gate.replay_authority_to_yojson authority;
     "predecessor",Option.fold ~none:`Null ~some:(fun id -> `String id) predecessor]
 let completed_json transcript result =
@@ -165,13 +178,11 @@ let completed_json transcript result =
 
 let validate_successor_request_with ~read ~store ~owner ~capture ~(prior:Owner.retained) (successor:Progress.successor) =
   let* request = read.successor ~scope:(scope owner) successor in
-  let* members = fields ["version";"kind";"request_id";"owner";"execution_id";"execution_digest";
-    "capture";"proposal";"authority";"predecessor"] request in
+  let* members = request_members request in
   let* _ = text (`String successor.request_id) in
   let* () = require (successor.request_id<>prior.request_id) "Gate successor cannot name itself" in
   let proposal = value "proposal" members in
-  let* prior_members = fields ["version";"kind";"request_id";"owner";"execution_id";"execution_digest";
-    "capture";"proposal";"authority";"predecessor"] prior.request in
+  let* prior_members = request_members prior.request in
   let* () = equal proposal (value "proposal" prior_members) "Gate successor changed the original proposal" in
   let* parent = load_parent_with ~read ~store ~owner ~capture ~proposal in
   let* authority = Gate.replay_authority_of_yojson (value "authority" members) in
@@ -181,8 +192,7 @@ let validate_successor_request_with ~read ~store ~owner ~capture ~(prior:Owner.r
 
 let rec restore_record_with ~read ~store ~owner ~capture ~visited (record : Owner.retained) =
   let* () = require (not (List.mem record.request_id visited)) "Cyclic gate retry ancestry" in
-  let* members = fields ["version";"kind";"request_id";"owner";"execution_id";"execution_digest";
-    "capture";"proposal";"authority";"predecessor"] record.request in
+  let* members = request_members record.request in
   let* () = Capture.owner_matches_json owner (value "owner" members) in
   let proposal = value "proposal" members in
   let* input = inputs capture proposal in
@@ -275,8 +285,7 @@ let read_chain_with ~read ~store ~owner ~capture =
     let* matching = result in
     let* execution_id = parent_execution_id record in
     let* () = require (record.scope=scope owner) "Gate inventory scope differs" in
-    let* members = fields ["version";"kind";"request_id";"owner";"execution_id";"execution_digest";
-      "capture";"proposal";"authority";"predecessor"] record.request in
+    let* members = request_members record.request in
     let* () = Capture.owner_matches_json owner (value "owner" members) in
     if execution_id<>Capture.request_id capture then Ok matching else
     let* _ = restore_record_with ~read ~store ~owner ~capture ~visited:[] record in
@@ -394,8 +403,7 @@ let root_preparation_with ~read ~store ~owner ~capture =
     | Some (Preparation_pending intent) -> Ok (intent,true)
     | Some (Preparation_confirmed intent) -> Ok (intent,false)
     | None -> Error "Original execution has no gate publication intent" in
-  let* members = fields ["version";"kind";"request_id";"owner";"execution_id";"execution_digest";
-    "capture";"proposal";"authority";"predecessor"] intended.request in
+  let* members = request_members intended.request in
   let proposal=value "proposal" members in
   let* current=load_parent_with ~read ~store ~owner ~capture ~proposal in
   let* authority=Gate.replay_authority_of_yojson (value "authority" members) in
@@ -439,8 +447,7 @@ module Inventory = struct
     let* by_id,by_execution = List.fold_left (fun result (record : Owner.retained) ->
       let* by_id,by_execution = result in
       let* execution_id = parent_execution_id record in
-      let* members = fields ["version";"kind";"request_id";"owner";"execution_id";"execution_digest";
-        "capture";"proposal";"authority";"predecessor"] record.request in
+      let* members = request_members record.request in
       let* () = require (record.scope=scope owner) "Gate inventory scope differs" in
       let* () = Capture.owner_matches_json owner (value "owner" members) in
       let* () = require (not (Records.mem record.request_id by_id)) "Duplicate original gate identity" in

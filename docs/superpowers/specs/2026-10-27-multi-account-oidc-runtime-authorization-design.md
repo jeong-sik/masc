@@ -60,7 +60,7 @@
 8. **판정은 닫힌 합타입으로 표현한다.** 문자열 비교나 이름으로 권한을 추정하지 않는다.
 9. **owner의 부재는 그 의존 사슬만 막는다.** 다른 Cleared 사슬은 계속 실행할 수 있어야 한다.
 10. **실제 증명이 없는 공유는 거부다.** lane·readiness·provider 호출·복구 증명이 없으면 다계정을 열지 않는다.
-11. **dispatch의 prompt·output·transcript는 initiator의 것이다.** owner와 Admin은 사용량·시각·dispatch_id·결과 종류만 읽는다. 공유는 Runtime의 Use이며 대화 내용의 공유가 아니다. Keeper의 지속 상태(컨텍스트·기억·산출 글)는 만든 dispatch의 initiator를 표시하고, 다른 initiator의 dispatch에는 `Read_state` effect가 허용될 때만 보인다. 허용이 없으면 initiator별로 분리된 컨텍스트로 돌린다. 여러 dispatch의 내용을 합쳐 만든 파생 상태(요약·병합된 기억)의 표시는 원천 initiator 전체이고, 모든 원천이 허용될 때만 보인다. 사람 initiator가 없는 dispatch(autonomous·system)가 만든 상태는 Service(system) 표시를 달고 `Read_state`가 허용된 initiator에게만 보인다. initiator가 Disabled/tombstone이 되면 그가 만든 분리 컨텍스트와 prompt·output은 같은 append로 purge 대상이 되고 감사 메타데이터만 남는다. 파생 상태에 섞인 그 몫은 `source_purged`로 표시해 읽지 않는다.
+11. **dispatch의 prompt·output·transcript는 initiator의 것이다.** owner와 Admin은 사용량·시각·dispatch_id·결과 종류만 읽는다. 공유는 Runtime의 Use이며 대화 내용의 공유가 아니다. Keeper의 지속 상태(컨텍스트·기억·산출 글)는 만든 dispatch의 initiator를 표시하고, 다른 initiator의 dispatch에는 `Read_state` effect가 허용될 때만 보인다. 허용이 없으면 initiator별로 분리된 컨텍스트로 돌린다. 여러 dispatch의 내용을 합쳐 만든 파생 상태(요약·병합된 기억)의 표시는 원천 initiator 전체이고, 모든 원천이 허용될 때만 보인다. 사람 initiator가 없는 dispatch(autonomous·system)가 만든 상태는 Service(system) 표시를 달고 `Read_state`가 허용된 initiator에게만 보인다. initiator가 Disabled/tombstone이 되면 그가 만든 분리 컨텍스트와 prompt·output은 같은 append로 purge 대상이 되고 감사 메타데이터만 남는다. 파생 상태에 섞인 그 몫은 `source_purged`로 표시한다. 그 몫을 읽으려는 호출은 `Source_purged`를 돌려받고 값은 보지 못한다.
 
 ## 4. 주체와 레코드
 
@@ -90,7 +90,7 @@ WorkspaceMembership {
 - Admin은 다른 사람의 credential·private Runtime을 사용하지 못한다. Disable/Block/감사와 Service-owned 공유 관리만 한다. 점유 중인 dispatch의 `Executor_teardown`은 `AdminDisableBlock`에 포함한다.
 - Admin_assignment 회수에는 `cause = Security_incident | Operational`을 필수로 둔다(§10.4의 Block과 같은 구분). `Security_incident`이면 같은 append로 그 Admin이 author인 MachineSharePolicy와 Delegated grant를 `Revocation_pending`에 둔다. 적격 Admin이 항목별로 재승인(§8.3의 취소 기록)하거나 회수해서만 푼다. `Operational`이면 그 목록을 감사에 남기고 grant는 유효하게 둔다.
 - **Admin은 관리 권한으로 자기 자신 또는 자신이 관리하는 principal에게 grant를 만들거나 수정할 수 없다.** 감사에는 author·beneficiary·beneficiary manager를 남긴다. Admin이 Service-owned Runtime을 사용하려면 독립된 Service 관리 owner나 제2 승인자의 grant가 필요하다. 제2 승인자는 author와 다른 principal이며 author의 관리 대상이 아니어야 한다.
-- **적격 Admin**은 어떤 항목에 대해 그 항목의 owner·원 grant 승인자·beneficiary·beneficiary의 manager·subject 자신이 아닌 활성 Admin이다. incident 해제(§10.4)와 `Revocation_pending` 취소(§8.3)와 재승인은 적격 Admin만 한다.
+- **적격 Admin**은 어떤 항목에 대해 그 항목의 owner, 원 grant 승인자, beneficiary, subject, 그리고 beneficiary와 subject를 관리하는 manager가 아닌 활성 Admin이다. incident 해제(§10.4)와 `Revocation_pending` 취소(§8.3)와 재승인은 적격 Admin만 한다.
 
 ### 4.2 ProviderAccount와 Runtime
 

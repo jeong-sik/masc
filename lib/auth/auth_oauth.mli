@@ -15,7 +15,6 @@ val scopes_to_string : scope list -> string
 val scopes_supported : scope list
 
 type error =
-  | OAuth_disabled
   | Invalid_request of string
   | Invalid_client
   | Invalid_grant
@@ -29,7 +28,6 @@ val protocol_error_code : error -> string
 (** Stable OAuth wire error code.  [Store_error] is intentionally lowered to
     [server_error] without exposing its detail. *)
 
-val enabled : unit -> bool
 val access_token_ttl_sec : unit -> int
 val refresh_token_ttl_sec : unit -> int
 

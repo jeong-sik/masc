@@ -23,22 +23,21 @@ let oauth_ok = function
 
 let with_workspace f =
   let base_path = Filename.temp_dir "credential-expiry-" "" in
-  Masc_test_deps.with_process_env "MASC_OAUTH_ENABLED" (Some "1") (fun () ->
-    Eio_main.run @@ fun env ->
-    Masc_test_deps.init_eio_clock env;
-    Fs_compat.set_fs (Eio.Stdenv.fs env);
-    let clock = Eio_mock.Clock.make () in
-    Eio_mock.Clock.set_time clock (expiry_second -. 10.);
-    Time_compat.set_clock (clock :> float Eio.Time.clock_ty Eio.Resource.t);
-    Fun.protect
-      ~finally:(fun () ->
-        Time_compat.clear_clock ();
-        Fs_compat.remove_tree base_path;
-        Fs_compat.clear_fs ())
-      (fun () ->
-        Auth.save_auth_config base_path
-          { Masc_domain.default_auth_config with enabled = true; require_token = true };
-        f base_path clock))
+  Eio_main.run @@ fun env ->
+  Masc_test_deps.init_eio_clock env;
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio_mock.Clock.make () in
+  Eio_mock.Clock.set_time clock (expiry_second -. 10.);
+  Time_compat.set_clock (clock :> float Eio.Time.clock_ty Eio.Resource.t);
+  Fun.protect
+    ~finally:(fun () ->
+      Time_compat.clear_clock ();
+      Fs_compat.remove_tree base_path;
+      Fs_compat.clear_fs ())
+    (fun () ->
+      Auth.save_auth_config base_path
+        { Masc_domain.default_auth_config with enabled = true; require_token = true };
+      f base_path clock)
 
 let issue_oauth_pair base_path bootstrap_credential =
   let resource = "http://127.0.0.1:8935/mcp" in

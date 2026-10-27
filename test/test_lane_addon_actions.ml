@@ -38,11 +38,14 @@ type outcome = Confirm | Refuse | Unknown | Lost_reply
    declared bound, so the fixture echoes only its digest. *)
 let echoed request_id = if String.length request_id > 256 then Store.digest request_id else request_id
 type fixture = {config:Workspace.config; root:string; calls:int ref; observes:int ref;
-  outcome:outcome ref; barrier:unit Eio.Promise.t option ref}
+  outcome:outcome ref; barrier:unit Eio.Promise.t option ref;
+  exited:string Eio.Promise.t option ref}
 let backend fixture : Runtime.For_testing.backend = {
   start=(fun ~sw:_ ~state_owner:_ ~instance_id ~installation_id:_ ~(package:Types.package) ~binding:_ ~on_authority ~is_live_instance:_ ~on_created ->
     let connection : Runtime.For_testing.connection = {browser=None;
-        await_exit = (fun () -> Eio.Fiber.await_cancel ());
+        await_exit = (fun () -> match !(fixture.exited) with
+          | Some exited -> Eio.Promise.await exited
+          | None -> Eio.Fiber.await_cancel ());
         resolved_image = (match Lane_addon_engine.image_of_inspect Lane_addon_types.Docker ("sha256:" ^ String.make 64 'a') with
           | Ok image -> Some image | Error detail -> Alcotest.fail detail);
             host = None; resource=Masc.Lane_addon_lifecycle.Container_resource (Store.digest instance_id);
@@ -140,7 +143,7 @@ let with_fixture f =
             ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
               Runtime.For_testing.reset ();
               let fixture = {config=Workspace.default_config root;root;calls=ref 0;observes=ref 0;
-                outcome=ref Confirm;barrier=ref None} in
+                outcome=ref Confirm;barrier=ref None;exited=ref None} in
               Runtime.For_testing.with_backend (backend fixture) (fun () -> f clock fixture))))))
 let rejects label = function Error _ -> () | Ok value -> failf "%s accepted: %s" label (Yojson.Safe.to_string value)
 
@@ -494,6 +497,41 @@ let test_binding_publication_commits_the_held_observation () =
       check string "the held observation is never rewritten" bytes (Fs_compat.load_file record);
       detach clock fixture id))) [true;false]
 
+(* A worker that ends while the commit's binding write is in flight retires
+   the entry (stopping) and fails it. The commit still publishes the held
+   observation, and the failure stays: a commit never settles the state of
+   a stopping entry. *)
+let test_worker_ending_during_the_commit_stays_failed () = with_fixture (fun clock fixture ->
+  let exited, exit = Eio.Promise.create () in
+  fixture.exited := Some exited;
+  let gate = Mutex.create () and opened = Condition.create () in
+  let armed = Atomic.make false and entered = Atomic.make false and released = ref false in
+  let target = Atomic.make 0 in
+  (* Runs on the offload system thread, so it blocks with a system mutex. Only
+     the write that names the held observation, the commit, is held back. *)
+  let writer ~store ~instance_id json =
+    if number "observation_seq" json = Atomic.get target
+       && Atomic.compare_and_set armed true false then (
+      Atomic.set entered true;
+      Mutex.lock gate;
+      while not !released do Condition.wait opened gate done;
+      Mutex.unlock gate);
+    Store.save_binding_staged store ~instance_id json in
+  Runtime.For_testing.with_binding_writer writer (fun () ->
+    let id=attach clock fixture ~acting:false in
+    let held=number "observation_seq" (inspect fixture id)+1 in
+    let phase () = text "kind" (member "phase" (inspect fixture id)) in
+    Atomic.set target held;
+    Atomic.set armed true;
+    ignore (dispatch fixture Runtime.Observe ["instance_id",str id] |> unwrap);
+    await clock (fun () -> Atomic.get entered);
+    Eio.Promise.resolve exit "fixture worker ended";
+    await clock (fun () -> phase ()="failed");
+    Mutex.lock gate; released:=true; Condition.broadcast opened; Mutex.unlock gate;
+    await clock (fun () -> number "observation_seq" (inspect fixture id)=held);
+    check string "a worker that ended during the binding write stays failed" "failed" (phase ());
+    detach clock fixture id))
+
 let test_confirmed_receipt_requires_result () = with_fixture (fun clock fixture ->
   let id = attach clock fixture ~acting:true in
   let request_id = "retained-confirmation" in
@@ -707,6 +745,7 @@ let () = run "Lane action workflow" ["optional world actions",[
   test_case "cold terminal receipt requires file and parent sync and exact identity" `Quick test_cold_receipt_requires_sync_and_same_file_identity;
   test_case "observation rename failure preserves sequence and unknown action without replay" `Quick test_observation_publication_keeps_sequence_and_action_uncertainty;
   test_case "binding publication commits the held observation without rewriting it" `Quick test_binding_publication_commits_the_held_observation;
+  test_case "a worker ending during the commit's binding write stays failed" `Quick test_worker_ending_during_the_commit_stays_failed;
   test_case "persisted confirmation requires its received result without replay" `Quick test_confirmed_receipt_requires_result;
   test_case "queued receipt, normalized dedup and retained output" `Quick test_one_request_one_effect;
   test_case "identity, schema and actor before effect" `Quick test_validation_precedes_effect;

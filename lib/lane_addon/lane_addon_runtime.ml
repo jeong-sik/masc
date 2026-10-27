@@ -189,9 +189,10 @@ type entry = {
   mutable resolved_image : Lane_addon_engine.image_identity option;
   mutable seq : int; mutable output : output;
   (* An observation file already renamed into place that no binding names
-     yet. It is never rewritten, and it is published only when a binding
-     write names it (RFC lane-addon-observation-commits-at-the-binding). *)
-  mutable held : (int * output) option;
+     yet, with how its commit settles the lane state. It is never rewritten,
+     and it is published only when a binding write names it (RFC
+     lane-addon-observation-commits-at-the-binding). *)
+  mutable held : (int * output * (Lifecycle.state -> Lifecycle.state)) option;
   mutable connection : owned_connection option; mutable stopping : bool;
   mutable cleanup_running : bool; changed : Eio.Condition.t; mutable wake : unit Eio.Promise.t;
   mutable resolver : unit Eio.Promise.u; mutable pending : observation_request;
@@ -725,32 +726,34 @@ let binding_writer_key : binding_writer Eio.Fiber.key = Eio.Fiber.create_key ()
    lands is its commit (RFC lane-addon-observation-commits-at-the-binding).
    A write that fails after its rename is visible and commits too: the staged
    writer's contract converges memory before propagating [After_rename].
-   The commit converges, settles [commit_state] and wakes dependents before
-   this mutex is released, with no yield in between, so no reader sees the
-   commit without its wake and no later write names an earlier sequence. *)
-let persist_with ?commit_state m e = Eio.Mutex.use_ro e.persistence_mutex (fun () ->
+   Whichever write commits, the commit converges, applies the held settle to
+   the state current at that moment and wakes dependents before this mutex
+   is released, with no yield in between. So no reader sees the commit
+   without its wake, no later write names an earlier sequence, and a state
+   change made while the write was in flight is not overwritten. *)
+let persist m e = Eio.Mutex.use_ro e.persistence_mutex (fun () ->
   (* Capture mutable state on the owning domain after serializing writes.
      The I/O thread sees only the immutable snapshot. Every write, including
      a late one after detach, derives the file from the same state under this
      mutex, so the last write leaves the record that state calls for. *)
   let held = e.held in
-  let seq, output = match held with Some named -> named | None -> e.seq, e.output in
+  let seq, output = match held with Some (seq, output, _) -> seq, output | None -> e.seq, e.output in
   if leaves_no_record ~seq ~resource:(Option.map (fun c -> c.worker.resource) e.connection) e.state
   then offload (fun () -> Lane_addon_store.remove_binding m.store ~instance_id:e.instance_id)
   else
-    let proposed = match held, commit_state with
-      | Some _, Some state when not e.stopping -> state
-      | Some _, (Some _ | None) | None, (Some _ | None) -> e.state in
+    let proposed = match held with
+      | Some (_, _, settle) when not e.stopping -> settle e.state
+      | Some _ | None -> e.state in
     let json = entry_json_with ~state:proposed ~seq ~output e in
     let write = match Eio.Fiber.get binding_writer_key with
       | Some write -> write
       | None -> (fun ~store ~instance_id json -> Lane_addon_store.save_binding_staged store ~instance_id json) in
-    let commit settled = Option.iter (fun (seq, output) ->
+    let commit ~unconfirmed = Option.iter (fun (seq, output, settle) ->
       e.seq <- seq; e.output <- output; e.held <- None;
-      if not e.stopping then e.state <- settled;
+      if not e.stopping then e.state <- unconfirmed (settle e.state);
       wake_dependents m e) held in
     match offload (fun () -> write ~store:m.store ~instance_id:e.instance_id json) with
-    | Ok () -> commit proposed; Ok ()
+    | Ok () -> commit ~unconfirmed:Fun.id; Ok ()
     | Error (Lane_addon_store.Binding_rejected detail) -> Error detail
     | Error (Lane_addon_store.Binding_publication_failed failure) ->
         let detail = Fs_compat.atomic_replace_failure_to_string failure in
@@ -758,12 +761,11 @@ let persist_with ?commit_state m e = Eio.Mutex.use_ro e.persistence_mutex (fun (
           | Fs_compat.Before_rename, (Some _ | None) | Fs_compat.After_rename, None -> detail
           | Fs_compat.After_rename, Some _ ->
               let detail = "binding published with unconfirmed durability: " ^ detail in
-              commit (failed_state proposed (Lifecycle.Persistence_failed detail));
+              commit ~unconfirmed:(fun state -> failed_state state (Lifecycle.Persistence_failed detail));
               detail in
         (match failure.exception_ with
          | Eio.Cancel.Cancelled _ -> Printexc.raise_with_backtrace failure.exception_ failure.backtrace
          | _ -> Error detail))
-let persist m e = persist_with m e
 let failed m e cause =
   if not e.stopping then (e.state <- fail_state e cause; notify_exports m e);
   match persist m e with Ok () -> wake_dependents m e | Error error ->
@@ -987,15 +989,17 @@ let commit_output m e ~sources output =
     ~instance_id:e.instance_id ~seq ~sources output) in
   (* A renamed file reserves its sequence: it is held, never rewritten, and
      published by the binding write that names it. *)
-  let hold () = e.held <- Some (seq, output) in
+  let hold settle = e.held <- Some (seq, output, settle) in
   match published with
   | Ok () ->
-    hold ();
     (* Dependents read the entry, not the binding file. The commit settles
        [Attached], which makes [refreshing] false, and wakes them in the same
        step, so a reader that saw the producer settled cannot act before its
-       dependents were told. *)
-    persist_with ~commit_state:Lifecycle.Attached m e
+       dependents were told. A state set after the hold, such as a failure
+       that arrived during the binding write, is newer and stays. *)
+    let held_from = e.state in
+    hold (fun current -> if current = held_from then Lifecycle.Attached else current);
+    persist m e
   | Error (Lane_addon_store.Observation_rejected detail) -> Error detail
   | Error (Lane_addon_store.Publication_failed {failure;verification_error}) ->
     let cause=Lane_addon_store.observation_write_error_to_string
@@ -1006,8 +1010,8 @@ let commit_output m e ~sources output =
     let saved = match failure.stage with
       | Fs_compat.Before_rename -> Ok ()
       | Fs_compat.After_rename ->
-        hold ();
-        persist_with ~commit_state:(fail_state e (Lifecycle.Persistence_failed detail)) m e in
+        hold (fun current -> failed_state current (Lifecycle.Persistence_failed detail));
+        persist m e in
     wake_dependents m e;
     (match failure.exception_ with
      | Eio.Cancel.Cancelled _ -> Printexc.raise_with_backtrace failure.exception_ failure.backtrace

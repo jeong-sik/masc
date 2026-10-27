@@ -152,8 +152,10 @@ let test_queued_time_reduces_the_original_window () = with_clients (fun sw conne
   answered result "queued";
   check bool "a settled request has no remaining authority" true
     (Lane.live_request_window ~client_id:client.client_id ~id:command.id = Lane.No_live_waiter))
-let test_waiter_interruption_is_not_reply_timeout () = with_clients (fun sw connect ->
-  let client = connect Lane.Firefox in
+let test_waiter_interruption_is_not_reply_timeout ?(held=false) () = with_clients (fun sw connect ->
+  let client = if held then connect ~transport:Lane.Webdriver_bidi Lane.Firefox else connect Lane.Firefox in
+  if held then check bool "the worker holds the BiDi client" true (Lane.hold_client ~client_id:client.client_id = Ok ());
+  let connected () = List.exists (fun (info : Lane.client_info) -> info.client_id = client.client_id) (Lane.connected_clients ()) in
   let selected = target client.client_id in
   let interruption command = match Lane.live_request_window ~client_id:client.client_id ~id:command.Lane.id with
     | Lane.Live_waiting_until (_,signal) | Lane.Live_executor_owned signal -> signal
@@ -176,12 +178,14 @@ let test_waiter_interruption_is_not_reply_timeout () = with_clients (fun sw conn
   check bool "the ordinary reply deadline expires" true
     (match Eio.Promise.await timed with Ok (Ok Lane.Timed_out) -> true | _ -> false);
   check bool "timeout alone does not signal cancellation" false (Eio.Promise.is_resolved timed_signal);
+  if held then check bool "cancellation and timeout leave the held client connected" true (connected ());
   let disconnected = Eio.Fiber.fork_promise ~sw (fun () ->
     Lane.issue_for_actor ~actor:None ~target:selected ~verb:Lane.Tabs_list ~timeout_sec:10.) in
   let disconnected_command = take client in
   let disconnected_signal = interruption disconnected_command in
   ignore (Lane.disconnect_client ~client_id:client.client_id);
   check bool "disconnect signals interruption" true (Eio.Promise.is_resolved disconnected_signal);
+  if held then check bool "disconnect retires the held client" false (connected ());
   ignore (Eio.Promise.await disconnected))
 let test_disconnect_releases_waiter () = with_clients (fun sw connect ->
   let client = connect Lane.Zen in
@@ -668,6 +672,7 @@ let () = run "browser client routing" ["ownership", [
   test_case "expired queued actions do not execute" `Quick test_timed_out_queue_is_not_executed;
   test_case "queue time consumes the issuer's window" `Quick test_queued_time_reduces_the_original_window;
   test_case "caller cancellation and disconnect differ from reply timeout" `Quick test_waiter_interruption_is_not_reply_timeout;
+  test_case "worker-held BiDi observes cancellation and disconnect" `Quick (test_waiter_interruption_is_not_reply_timeout ~held:true);
   test_case "disconnect releases pending caller" `Quick test_disconnect_releases_waiter;
   test_case "source and live command policy" `Quick test_sources_and_live_policy;
   test_case "a replacement Space cannot take queued work" `Quick test_space_identity_cannot_take_queued_work;

@@ -725,6 +725,76 @@ let test_cancelled_retirement_keeps_permit_retired () = fixture (fun ~env:_ ~sw 
    | R.Not_performed R.Launch_cancelled -> ()
    | Not_performed _ | Performed _ -> fail "retired original no longer retains its durable cancellation"))
 
+let test_uncertain_cancel_requires_resync_before_nonstart_proof launch_requested =
+  fixture (fun ~env:_ ~sw ~root ~registry ~open_root ->
+    let b=binding (id "05") in let original=admitted registry b in
+    let permit=if launch_requested then Some (commit original) else None in
+    let fault=Recovery_test.parent_sync_dispatch_fault
+        ~exception_:(Unix.Unix_error (Unix.EIO,"fsync","cancel parent")) in
+    (match Recovery_test.with_replace_dispatch_fault fault (fun () ->
+        R.request_cancel original ~confirmed_admission_id:(id "04")) with
+     | Error (R.Publication_failed failure) ->
+       check bool "uncertain cancellation actually replaced its original claim" true
+         (failure.target_effect=Fs_compat.Target_replaced);
+       (match failure.primary_failure with
+        | Fs_compat.Write_primary_failure failed ->
+          check bool "original cancellation parent sync actually failed" true
+            (failed.stage=Fs_compat.Sync_parent)
+        | Fs_compat.Recovery_primary_failure _ | Fs_compat.Recovery_access_primary_failure _ ->
+          fail "cancellation failed before the intended real parent sync");
+       check bool "cancellation cleanup also failed to confirm parent durability" true
+         (List.exists (function
+           | Fs_compat.Write_cleanup_failure failed -> failed.stage=Fs_compat.Cleanup_sync_parent
+           | Fs_compat.Recovery_cleanup_failure _ -> false) failure.cleanup_failures)
+     | Error error -> fail (R.error_to_string error)
+     | Ok _ -> fail "uncertain original cancellation was acknowledged");
+    let reopened=open_root () |> get in
+    let pending=R.load reopened ~binding:b |> get in
+    let claim=claim_path root b in
+    let inode=(Unix.lstat claim).st_ino and bytes=In_channel.with_open_bin claim In_channel.input_all in
+    let revision=R.revision pending in
+    check bool "visible uncertain cancellation retains its exact original coordinates" true
+      (R.cancellation_state pending=R.Cancellation_requested && R.binding pending=b
+        && R.admission_id pending=id "04" && R.specification pending=spec);
+    let retired=ref false and entered_sync=ref false in
+    let before_resync_parent ()=
+      entered_sync:=true;raise (Unix.Unix_error (Unix.EIO,"fsync","proof parent")) in
+    let attempt=match permit with
+      | None -> R.For_testing.settle_cancelled_admission ~before_resync_parent ~sw pending
+      | Some permit -> R.For_testing.retire_cancelled_launch ~before_resync_parent
+          ~after_retirement:(fun () -> retired:=true) ~sw permit in
+    (match attempt with
+     | Error (R.Authority_unavailable _) -> ()
+     | Error error -> fail (R.error_to_string error)
+     | Ok _ -> fail "non-start proof trusted cancellation with a failed actual resync");
+    check bool "proof attempted the matching claim and actual parent sync" true !entered_sync;
+    check bool "failed sync never reached permit retirement" false !retired;
+    let unchanged ()=
+      let current=R.load reopened ~binding:b |> get in
+      check int64 "proof observation never advances the original cancellation revision" revision (R.revision current);
+      check int "proof observation never republishes the original claim inode" inode (Unix.lstat claim).st_ino;
+      check string "proof observation preserves the exact original claim bytes" bytes
+        (In_channel.with_open_bin claim In_channel.input_all) in
+    unchanged ();
+    let independent=admitted registry (binding (id "07")) in
+    ignore (R.with_launch ~sw (commit independent) (fun _ ~storage:_ -> ()) |> completed);
+    let proof=match permit with
+      | None -> R.settle_cancelled_admission ~sw pending |> get
+      | Some permit -> R.retire_cancelled_launch ~sw permit |> get in
+    let confirmed=R.unlaunched_storage proof |> R.storage_record in
+    check bool "successful proof binds the same original cancellation and known launch" true
+      (R.binding confirmed=b && R.admission_id confirmed=id "04" && R.specification confirmed=spec
+        && R.revision confirmed=revision && R.cancellation_state confirmed=R.Cancellation_requested
+        && R.launch_state confirmed=(match permit with None -> R.Not_requested | Some _ -> R.Requested (id "06")));
+    unchanged ();
+    (match permit with
+     | None -> check bool "settled cancelled admission never issues a new launch permit" true
+         (R.commit_launch confirmed ~confirmed_admission_id:(id "04") ~launch_id:(id "08")=Error R.Launch_cancelled)
+     | Some permit ->
+       (match R.with_launch ~sw permit (fun _ ~storage:_ -> fail "retired original callback was reused") with
+        | R.Not_performed R.Launch_cancelled -> ()
+        | Not_performed _ | Performed _ -> fail "retired original lost its cancellation authority")))
+
 let ()=run "endpoint job registry" ["original durable admission",[
   test_case "original admission is idempotent and survives reopen" `Quick test_original_admission_survives_reopen;
   test_case "base Inspect outer v1 is rejected before original decoding" `Quick
@@ -756,4 +826,8 @@ let ()=run "endpoint job registry" ["original durable admission",[
   test_case "cancelled admission proves no known launch without inventing an exit" `Quick test_cancelled_admission_proves_no_known_launch;
   test_case "only the same unused cancelled permit can be retired" `Quick test_retire_only_unused_cancelled_original_permit;
   test_case "a used permit never becomes non-start after cancellation" `Quick test_used_permit_never_becomes_nonstart_after_cancellation;
-  test_case "cancelled retirement keeps its original permit retired" `Quick test_cancelled_retirement_keeps_permit_retired]]
+  test_case "cancelled retirement keeps its original permit retired" `Quick test_cancelled_retirement_keeps_permit_retired;
+  test_case "uncertain cancelled admission requires actual resync before proof" `Quick
+    (fun () -> test_uncertain_cancel_requires_resync_before_nonstart_proof false);
+  test_case "uncertain cancelled launch requires actual resync before retirement" `Quick
+    (fun () -> test_uncertain_cancel_requires_resync_before_nonstart_proof true)]]

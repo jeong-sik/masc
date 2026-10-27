@@ -189,11 +189,16 @@ val with_launch :
 
 val settle_cancelled_admission : sw:Eio.Switch.t -> record -> (unlaunched,error) result
 (** Prove the same protected original was cancelled before any launch intent
-    existed. Refresh under its shared job lock and retain its exact storage.
+    existed. Under its exclusive nonwaiting job lock, sync the exact existing
+    cancellation claim and its actual parent, revalidate its full original
+    contents without republication, and retain its exact storage.
+    Failed sync or readback grants no proof.
     A known launch refuses this proof, even if it is now cancelled. *)
 val retire_cancelled_launch : sw:Eio.Switch.t -> launch_intent -> (unlaunched,error) result
-(** Under the original exclusive job lock, validate its durable cancellation
-    and atomically retire this exact unused process-local permit. A permit
+(** Under the original exclusive job lock, sync the exact existing cancellation
+    claim and its actual parent and revalidate its full original contents before
+    atomically retiring this exact unused process-local permit. Failed sync or
+    readback grants no proof and does not retire an unused permit. A permit
     already reserved for callback entry, including an interrupted storage open,
     can never supply this proof. Repeated retirement
     may reopen the same original storage, including after an interrupted open;
@@ -210,11 +215,19 @@ val unlaunched_storage : unlaunched -> storage
     Cancelling a proof observer never launches or signals a process. *)
 
 module For_testing : sig
+  val settle_cancelled_admission :
+    ?before_resync_parent:(unit -> unit) -> sw:Eio.Switch.t -> record -> (unlaunched,error) result
+  (** Inject immediately before the actual parent fsync, after the matching
+      claim file fsync, using the production resync path. This blocking-scope
+      hook may raise but must not perform Eio effects. *)
   val retire_cancelled_launch :
+    ?before_resync_parent:(unit -> unit) ->
     after_retirement:(unit -> unit) -> sw:Eio.Switch.t -> launch_intent -> (unlaunched,error) result
   (** Interleave after retiring the actual unused permit under its original
       exclusive lock, before opening its storage. Exceptions/cancellation leave
-      it retired and release only this lock observer's descriptor. *)
+      it retired and release only this lock observer's descriptor.
+      [before_resync_parent] has the same blocking-scope contract as above and
+      runs before any unused permit is retired. *)
   val refresh : after_lock:(unit -> unit) -> record -> (record, error) result
   (** Interleave after acquiring the actual shared read lock and before reading
       the original. The hook remains cancellable and cannot authorize writes. *)

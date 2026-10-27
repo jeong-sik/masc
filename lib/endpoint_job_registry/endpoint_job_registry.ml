@@ -552,18 +552,23 @@ let unlaunched ~sw current =
   let* directory=original_storage ~sw current in
   Ok {original_storage={record=current;directory}}
 
-let settle_cancelled_admission ~sw (original : record) =
+let settle_cancelled_admission_with_hook ~before_resync_parent ~sw (original : record) =
   Eio.Switch.check sw;
   let registry=original.registry and binding=original.claim.binding in
-  read_locked registry binding (fun () ->
+  locked registry binding (fun () ->
     let* current=read_record registry binding in
     let* ()=if same_original original current then Ok () else Error Stale_record in
     match current.claim.state with
-    | Cancel_requested {launch_id=None;_} -> unlaunched ~sw current
+    | Cancel_requested {launch_id=None;_} ->
+      let* current=resync_cancel ~before_parent_sync:before_resync_parent current in
+      unlaunched ~sw current
     | Cancel_requested {launch_id=Some _;_} | Launch_requested _ -> Error Launch_already_requested
     | Preparing | Ready _ -> Error Stale_record)
 
-let retire_cancelled_launch_with_hook ~after_retirement ~sw (intent : launch_intent) =
+let settle_cancelled_admission ~sw original =
+  settle_cancelled_admission_with_hook ~before_resync_parent:(fun () -> ()) ~sw original
+
+let retire_cancelled_launch_with_hook ~before_resync_parent ~after_retirement ~sw (intent : launch_intent) =
   Eio.Switch.check sw;
   let original=intent.original in
   let registry=original.registry and binding=original.claim.binding in
@@ -577,6 +582,10 @@ let retire_cancelled_launch_with_hook ~after_retirement ~sw (intent : launch_int
       | Preparing | Ready _ | Launch_requested _ -> Error Stale_record in
     let* ()=match Atomic.get intent.use with
       | Callback_reserved -> Error Launch_intent_spent
+      | Unused | Retired_without_callback -> Ok () in
+    let* current=resync_cancel ~before_parent_sync:before_resync_parent current in
+    let* ()=match Atomic.get intent.use with
+      | Callback_reserved -> Error Launch_intent_spent
       | Retired_without_callback -> Ok ()
       | Unused ->
         if Atomic.compare_and_set intent.use Unused Retired_without_callback then Ok ()
@@ -587,7 +596,7 @@ let retire_cancelled_launch_with_hook ~after_retirement ~sw (intent : launch_int
     unlaunched ~sw current)
 
 let retire_cancelled_launch ~sw intent =
-  retire_cancelled_launch_with_hook ~after_retirement:(fun () -> ()) ~sw intent
+  retire_cancelled_launch_with_hook ~before_resync_parent:(fun () -> ()) ~after_retirement:(fun () -> ()) ~sw intent
 
 let with_launch_with_hook ~after_original ~sw (intent : launch_intent) perform =
   Eio.Switch.check sw;
@@ -631,7 +640,10 @@ let commit_launch original ~confirmed_admission_id ~launch_id =
 let with_launch ~sw intent perform =
   with_launch_with_hook ~after_original:(fun () -> ()) ~sw intent perform
 module For_testing = struct
-  let retire_cancelled_launch = retire_cancelled_launch_with_hook
+  let settle_cancelled_admission ?(before_resync_parent=fun () -> ()) ~sw original =
+    settle_cancelled_admission_with_hook ~before_resync_parent ~sw original
+  let retire_cancelled_launch ?(before_resync_parent=fun () -> ()) ~after_retirement ~sw intent =
+    retire_cancelled_launch_with_hook ~before_resync_parent ~after_retirement ~sw intent
   let refresh = refresh_with_hook
   let with_launch = with_launch_with_hook
   let admit = admit_with_hooks

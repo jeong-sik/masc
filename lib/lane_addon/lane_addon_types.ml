@@ -96,7 +96,7 @@ let validate_exported_tools ~action_tool names =
     let sorted = List.sort_uniq String.compare names in
     if List.length sorted <> List.length names then Error "duplicate exported tool name"
     else if List.exists (fun name -> name = "lane_observe" || name = Lane_addon_call_context.tool_name
-      || name = Lane_addon_call_context.effects_tool || name = host_requests_tool || name = host_result_tool || name = operator_tool || name = companion_tool
+      || name = host_requests_tool || name = host_result_tool || name = operator_tool || name = companion_tool
       || name = Machine_input_history.tool_name
       || name = Machine_controller_contract.snapshot_tool || name = Machine_controller_contract.release_tool
       || Some name = action_tool) sorted then

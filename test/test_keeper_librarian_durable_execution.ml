@@ -611,6 +611,36 @@ let test_inventory_observation_rejects_mixed_parent_and_bad_scope () = with_fixt
   check int "corrupt inventory cannot trigger a fresh provider call" posts (F.post_count fixture.server);
   check bool "corrupt inventory preserves source acknowledgements" true (progress fixture=positions))
 
+(* A gate request and the parent's publication intent name the parent by ID
+   and body digest, so the history body is stored once. The earlier shape
+   carried a copy of the parent and has no reader. *)
+let test_gate_request_names_its_parent_by_digest () = with_fixture (fun ~sw:_ fixture ->
+  drive_advanced fixture;
+  let parent,capture=only_original fixture in
+  let gate=match gate_records fixture capture with [gate] -> gate | [] | _::_::_ -> fail "expected one completed gate" in
+  let intent=match Progress.preparation parent.progress with
+    | Some (Preparation_confirmed intent) -> intent
+    | None | Some (Preparation_pending _) -> fail "a finished original holds its confirmed gate intent" in
+  check json "the parent's intent is the gate request it published" gate.request intent.request;
+  check bool "the gate request holds no copy of its parent" true (member "capture" gate.request=`Null);
+  check string "the gate request names its parent by ID" parent.request_id
+    (Yojson.Safe.Util.to_string (member "execution_id" gate.request));
+  check string "and its parent's body by digest" parent.request_digest
+    (Yojson.Safe.Util.to_string (member "execution_digest" gate.request));
+  let earlier=match gate.request with
+    | `Assoc fields -> `Assoc (("capture",Capture.to_json capture)::List.map (fun (name,value) ->
+        match name with
+        | "version" -> name,`Int 1
+        | "request_id" -> name,`String "earlier-gate-shape"
+        | _ -> name,value) fields)
+    | _ -> fail "a gate request is an object" in
+  io (fun () -> Owner.retain ~store:fixture.store ~scope:gate.scope ~request_id:"earlier-gate-shape"
+    ~installation_id:gate.installation_id ~package_id:gate.package_id ~tool:gate.tool ~summary:`Null
+    ~request:earlier) |> owned;
+  match io (fun () -> Gate.Inventory.read ~store:fixture.store ~owner:(Capture.physical_owner capture)) with
+  | Error detail -> check string "a gate request in the earlier shape is refused by its version"
+      "Original gate request is not version 2" detail
+  | Ok _ -> fail "a gate request that copies its parent was read")
 let test_actual_official_or_mixed_path kind () = with_fixture ~history_kind:kind (fun ~sw:_ fixture ->
   let atom_before=progress fixture in
   let official ()=io (fun () -> Keeper_librarian_official_progress.read
@@ -1167,6 +1197,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_inventory_observation_reuses_verified_inputs;
   test_case "inventory observation rejects mixed parents and unrelated malformed gates" `Quick
     test_inventory_observation_rejects_mixed_parent_and_bad_scope;
+  test_case "a gate request names its parent by digest instead of copying it" `Quick
+    test_gate_request_names_its_parent_by_digest;
   test_case "actual official-only original reaches Memory and official ACK" `Quick (test_actual_official_or_mixed_path Official);
   test_case "actual mixed original reaches Memory and both receipt/position kinds" `Quick (test_actual_official_or_mixed_path Mixed);
   test_case "production durable queue stops following phases on actual Pending" `Quick test_production_queue_pending_retains_all_sources;

@@ -184,21 +184,25 @@ let launch_supervised_fiber_body
               detail
               ()
           else
+            (* No bus event here is deliberate: the FSM never held a terminal
+               phase, so Crashed would lie, and no verb names "removed without
+               terminal phase". The logs below are the record; they carry the
+               fork-reject detail the Crashed publish would have carried. *)
             match
               Keeper_registry.unregister_exact_for_lifecycle lifecycle_token reg
             with
             | Keeper_registry.Exact_unregistered ->
               Log.Keeper.error
-                "supervisor: removed non-terminalizable fork-rejected lane name=%s"
-                meta.name
+                "supervisor: removed non-terminalizable fork-rejected lane name=%s detail=%s"
+                meta.name detail
             | Keeper_registry.Exact_entry_missing ->
               Log.Keeper.warn
-                "supervisor: fork-rejected lane was already unregistered name=%s"
-                meta.name
+                "supervisor: fork-rejected lane was already unregistered name=%s detail=%s"
+                meta.name detail
             | Keeper_registry.Exact_entry_replaced ->
               Log.Keeper.warn
-                "supervisor: fork-rejected lane retained newer same-name owner name=%s"
-                meta.name
+                "supervisor: fork-rejected lane retained newer same-name owner name=%s detail=%s"
+                meta.name detail
             | Keeper_registry.Exact_unregister_lifecycle_reserved owner ->
               Log.Keeper.info
                 "supervisor: fork-rejected lane cleanup deferred to lifecycle transaction owner name=%s %s"

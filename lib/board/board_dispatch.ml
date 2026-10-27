@@ -260,7 +260,7 @@ let warn_comment_cap_once () =
 
 let init_jsonl () =
   if match Atomic.get backend_state with Active _ -> true | Uninitialized -> false then
-    Log.BoardLog.warn "already initialized, ignoring init_jsonl"
+    Log.BoardLog.debug "already initialized, ignoring init_jsonl"
   else begin
     let store = Board.global () in
     let backend = Active (Jsonl store, false) in
@@ -269,7 +269,7 @@ let init_jsonl () =
       warn_comment_cap_once ();
       Log.BoardLog.info "JSONL backend initialized"
     end else
-      Log.BoardLog.warn "already initialized concurrently, ignoring init_jsonl"
+      Log.BoardLog.debug "already initialized concurrently, ignoring init_jsonl"
   end
 
 let reset_for_test () =
@@ -575,6 +575,24 @@ let get_post_and_comments ~post_id =
       Board.read_post_and_comments store ~post_id
       |> Result.map_error Board.board_error_of_read_error
 
+(* One owner for board-operation failure lines. A re-vote is a routine
+   re-click at debug, a missing target is an ordinary race at info, and
+   only malformed input, IO, auth and duplicate-create problems warn. *)
+let log_board_error ~op ~ids (e : Board_types.board_error) =
+  (match e with
+   | Board_types.Already_voted _ ->
+       Log.BoardLog.debug
+   | Board_types.Post_not_found _ | Board_types.Comment_not_found _ ->
+       Log.BoardLog.info
+   | Board_types.Invalid_id _ | Board_types.Io_error _ | Board_types.Validation_error _
+   | Board_types.Already_exists _ | Board_types.Unauthorized _ -> Log.BoardLog.warn)
+    "board %s failed: %s: %s" op ids (Board_types.show_board_error e)
+
+(* One owner for skipped board-signal lines: the write landed, only the
+   keeper-facing signal was dropped because its follow-up read failed. *)
+let log_signal_skip ~op ~read ~id detail =
+  Log.BoardLog.warn "board %s skipped: %s failed for %s: %s" op read id detail
+
 let add_comment ~post_id ~author ~content ?parent_id
     ?(ttl_hours = Board.Limits.default_ttl_hours) () =
   match backend () with
@@ -604,8 +622,8 @@ let add_comment ~post_id ~author ~content ?parent_id
                 ; audience = creation.audience
                 }
           | Error e ->
-              Log.BoardLog.warn "board signal skipped: read_post failed for %s: %s"
-                post_id (Board_types.show_board_read_error e));
+              log_signal_skip ~op:"signal" ~read:"read_post" ~id:post_id
+                (Board_types.show_board_read_error e));
           emit_board_sse_event
             (Comment_added { post_id; comment_id = cid; author = auth });
           Ok comment
@@ -647,9 +665,8 @@ let vote ~voter ~post_id ~direction =
                     ~target_author:(Board.Agent_id.to_string post.author)
                     ~voter ~direction post
               | Error e ->
-                  Log.BoardLog.warn
-                    "board vote signal skipped: read_post failed for %s: %s"
-                    post_id (Board_types.show_board_read_error e));
+                  log_signal_skip ~op:"vote signal" ~read:"read_post" ~id:post_id
+                    (Board_types.show_board_read_error e));
              ok
          | Error _ as err -> err)
   in
@@ -658,15 +675,8 @@ let vote ~voter ~post_id ~direction =
        emit_board_sse_event
          (Post_voted { post_id; voter; direction })
    | Error e ->
-       (match e with
-        | Board_types.Already_voted _ ->
-            Log.BoardLog.debug
-        | Board_types.Post_not_found _ | Board_types.Comment_not_found _ ->
-            Log.BoardLog.info
-        | Board_types.Invalid_id _ | Board_types.Io_error _ | Board_types.Validation_error _
-        | Board_types.Already_exists _ | Board_types.Unauthorized _ -> Log.BoardLog.warn)
-         "board vote failed: post_id=%s voter=%s: %s"
-         post_id voter (Board_types.show_board_error e));
+       log_board_error ~op:"vote"
+         ~ids:(Printf.sprintf "post_id=%s voter=%s" post_id voter) e);
   result
 
 let current_vote_for_comment ~voter ~comment_id =
@@ -681,9 +691,8 @@ let vote_comment ~voter ~comment_id ~direction =
          | Ok _score as ok ->
              (match Board.get_comment store ~comment_id with
               | Error e ->
-                  Log.BoardLog.warn
-                    "board comment vote signal skipped: get_comment failed for %s: %s"
-                    comment_id (Board_types.show_board_error e)
+                  log_signal_skip ~op:"comment vote signal" ~read:"get_comment"
+                    ~id:comment_id (Board_types.show_board_error e)
               | Ok comment ->
                   let post_id = Board.Post_id.to_string comment.post_id in
                   (match Board.read_post store ~post_id with
@@ -694,9 +703,8 @@ let vote_comment ~voter ~comment_id ~direction =
                          ~target_author:(Board.Agent_id.to_string comment.author)
                          ~voter ~direction post
                    | Error e ->
-                       Log.BoardLog.warn
-                         "board comment vote signal skipped: read_post failed for %s: %s"
-                         post_id (Board_types.show_board_read_error e)));
+                       log_signal_skip ~op:"comment vote signal" ~read:"read_post"
+                         ~id:post_id (Board_types.show_board_read_error e)));
              ok
          | Error _ as err -> err)
   in
@@ -705,15 +713,8 @@ let vote_comment ~voter ~comment_id ~direction =
        emit_board_sse_event
          (Comment_voted { comment_id; voter; direction })
    | Error e ->
-       (match e with
-        | Board_types.Already_voted _ ->
-            Log.BoardLog.debug
-        | Board_types.Post_not_found _ | Board_types.Comment_not_found _ ->
-            Log.BoardLog.info
-        | Board_types.Invalid_id _ | Board_types.Io_error _ | Board_types.Validation_error _
-        | Board_types.Already_exists _ | Board_types.Unauthorized _ -> Log.BoardLog.warn)
-         "board vote_comment failed: comment_id=%s voter=%s: %s"
-         comment_id voter (Board_types.show_board_error e));
+       log_board_error ~op:"vote_comment"
+         ~ids:(Printf.sprintf "comment_id=%s voter=%s" comment_id voter) e);
   result
 
 let post_for_reaction_target store ~target_type ~target_id =
@@ -783,14 +784,10 @@ let toggle_reaction ~target_type ~target_id ~user_id ~emoji =
               reacted = toggled.reacted;
             })
    | Error e ->
-       (match e with
-        | Board_types.Post_not_found _ | Board_types.Comment_not_found _ ->
-            Log.BoardLog.info
-        | Board_types.Invalid_id _ | Board_types.Io_error _ | Board_types.Validation_error _
-        | Board_types.Already_voted _ | Board_types.Already_exists _ | Board_types.Unauthorized _ -> Log.BoardLog.warn)
-         "board reaction failed: target=%s:%s user=%s emoji=%s: %s"
-         (Board.reaction_target_type_to_string target_type)
-         target_id user_id emoji (Board_types.show_board_error e));
+       log_board_error ~op:"reaction"
+         ~ids:(Printf.sprintf "target=%s:%s user=%s emoji=%s"
+           (Board.reaction_target_type_to_string target_type)
+           target_id user_id emoji) e);
   result
 
 let list_reactions ~target_type ~target_id ?user_id () =

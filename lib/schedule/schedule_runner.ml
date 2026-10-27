@@ -472,7 +472,12 @@ let finish_retryable_dispatch config ~now ~clock ~occurrence_id ~schedule_id det
   match
     Schedule_store.retry_running ~finished_at:(clock ()) config ~now ~schedule_id ~reason
   with
-  | Ok _ -> dispatch_result ~error occurrence_id schedule_id Dispatch_failed
+  | Ok _ ->
+    dispatch_result
+      ~error:(error ^ "; schedule returned to due for retry")
+      occurrence_id
+      schedule_id
+      Dispatch_failed
   | Error err ->
     let error =
       Printf.sprintf

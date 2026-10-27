@@ -287,7 +287,7 @@ let create ~base_path () =
             (("io.github.jeong-sik/masc.machine.events", `List (List.rev !events)) :: metadata)) })) server in
   let server = guarded Lane_addon_call_context.effects_tool
     ~description:"Declare which machine tools leave this worker's observation as it was."
-    ~input_schema:(`Assoc ["type", `String "object"; "additionalProperties", `Bool false])
+    ~input_schema:Lane_addon_call_context.effects_input_schema
     (fun _context _name _arguments -> Ok (json_response (Lane_addon_call_context.effects_to_json
       (List.map (fun tool -> Controller.dos_tool_name tool, snd (declarations tool))
         Controller.all_of_dos_tool)))) server in

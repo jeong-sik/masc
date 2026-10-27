@@ -167,6 +167,22 @@ let test_boot_does_not_touch_unreadable_state () =
     check string "left for the typed recovery" {|"not a state object"|}
       (Yojson.Safe.to_string (Workspace_utils_ops.read_json config path)))
 
+let test_boot_does_not_rewrite_an_invalid_counter () =
+  with_workspace (fun config messages ->
+    List.iter (file_a_message messages) [ 2604 ];
+    let path = write_state_with config 84 in
+    let damaged =
+      match Workspace_utils_ops.read_json config path with
+      | `Assoc fields ->
+          `Assoc (("message_seq", `String "broken") :: List.remove_assoc "message_seq" fields)
+      | _ -> fail "fixture state is not an object"
+    in
+    Workspace_utils_ops.write_json config path damaged;
+    ignore (Workspace_init.init config ~agent_name:None : string);
+    check string "invalid counter remains available for recovery"
+      (Yojson.Safe.to_string damaged)
+      (Yojson.Safe.to_string (Workspace_utils_ops.read_json config path)))
+
 (* The repair reads the counter and writes it back. A message numbered by
    [next_seq] in between would be written over by the older read and the
    counter would step back, so the repair waits for the state lock. Here the
@@ -247,6 +263,8 @@ let () =
             test_boot_leaves_the_counter_when_nothing_is_filed
         ; test_case "boot does not touch unreadable state" `Quick
             test_boot_does_not_touch_unreadable_state
+        ; test_case "boot does not rewrite an invalid counter" `Quick
+            test_boot_does_not_rewrite_an_invalid_counter
         ; test_case "boot waits for the state lock" `Quick
             test_boot_waits_for_the_state_lock
         ; test_case "boot keeps a number issued while it waited" `Quick

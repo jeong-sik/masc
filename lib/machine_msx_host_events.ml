@@ -14,12 +14,12 @@ let relay ~author content =
     in
     if not (Tool_result.is_success result) then
       Log.MsxLog.warn
-        "arcade relay: board post refused, the load itself is unaffected: %s"
+        "arcade relay: board post refused, the machine is unaffected: %s"
         (Tool_result.message result)
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | e ->
     Log.MsxLog.warn
-      "arcade relay: board post raised, the load itself is unaffected: %s"
+      "arcade relay: board post raised, the machine is unaffected: %s"
       (Printexc.to_string e)
 ;;

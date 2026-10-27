@@ -2531,6 +2531,32 @@ let test_a_consumer_refused_during_a_call_captures_again () =
     (match refused with Error (Runtime.Host_refusal _) -> true | _ -> false);
   await clock recovered;
   check Alcotest.int "the refusal took no observation of the producer" observed (producer_observes ());
+  (* Cancel before the first worker RPC, after a consumer has already seen
+     the counted call as refreshing. No subsequent write or poll rescues it. *)
+  let observed = producer_observes () in
+  let exports = unwrap (Runtime.tool_export_reading ~config
+    ~access:Lane_addon_sources.Operator_configuration ~reserved:[]) in
+  let write = List.find (fun (export : Runtime.tool_export) ->
+    export.instance_id = producer && export.tool.name = declared_write) exports.exports in
+  let entered, signal_entered = Eio.Promise.create () in
+  let never, _ = Eio.Promise.create () in
+  let admissions_before = List.length !(state.admissions) in
+  let held ~release_controller:_ ~snapshot:_ ~invoke =
+    Eio.Promise.resolve signal_entered ();
+    Eio.Promise.await never;
+    invoke None in
+  Eio.Fiber.first
+    (fun () ->
+      ignore (Runtime.call_exported_tool_with_authority ~companion_publish:None ~continuation:None
+        ~on_complete:(fun () -> ()) ~on_result:(fun _ -> ()) ~authorize:(Some held) ~principal:None
+        ~config ~access:Lane_addon_sources.Operator_configuration ~reserved:[] ~export:write ~arguments:(`Assoc []));
+      fail "a blocked call unexpectedly returned")
+    (fun () ->
+      Eio.Promise.await entered;
+      check bool "a capture during an unsent write is refused" true (Result.is_error (capture_now ())));
+  await clock recovered;
+  check Alcotest.int "cancellation never reached the worker" admissions_before (List.length !(state.admissions));
+  check Alcotest.int "unsent cancellation took no producer observation" observed (producer_observes ());
   let observed = producer_observes () in
   let lost_write = bench.while_held declared_write (`Assoc ["lose", `Bool true]) (fun () ->
     check bool "a capture during the next counted write is refused" true (Result.is_error (capture_now ()))) in

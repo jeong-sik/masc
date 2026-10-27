@@ -99,6 +99,10 @@ val check_published :
     and request ID the record names: the complete record, the body
     [read_body] returns for its digest, and its scope directory and filename.
     Reads nothing else and writes nothing. *)
+val decode_published : directory_name:string -> file_name:string -> Yojson.Safe.t ->
+  (Record.t, string) result
+(** Strictly decode a record and verify the scope-directory and request-file
+    identities it names. Does not read its body or authorize any effect. *)
 val retain : store:Lane_addon_store.t -> scope:string -> request_id:string ->
   installation_id:string -> package_id:string -> tool:string -> summary:Yojson.Safe.t ->
   request:Yojson.Safe.t -> (unit, error) result
@@ -107,8 +111,9 @@ val retain : store:Lane_addon_store.t -> scope:string -> request_id:string ->
     original destination is idempotent and preserves advanced progress; the
     request is compared by its digest. Invalid JSON is refused before writing. A retain
     interrupted between the two writes leaves a body no record names.
-    Retaining the same request again writes that body again; otherwise nothing
-    reads it or removes it. A record whose body is missing is an error.
+    Retaining the same request again writes that body again; startup cleanup may
+    remove it when no active intent or archived record can name it. A record
+    whose body is missing is an error.
     Publication failure is not proof of absence: a retry strictly reads the
     original record again. *)
 type update_error = Ownership_error of error | State_conflict | Invalid_transition of string
@@ -134,6 +139,9 @@ val advance : store:Lane_addon_store.t -> expected:retained ->
   event:Lane_addon_request_progress.event -> (publication, update_error) result
 (** {!advance_events} for one event, with the same publication contract. *)
 module For_testing : sig
+  val fold_all : store:Lane_addon_store.t -> after_inventory:(unit -> unit) ->
+    init:'a -> f:('a -> retained -> 'a) -> ('a, error) result
+  (** Invoke the hook after inventory and before restoring the listed records. *)
   val advance_events :
     save:(Lane_addon_store.t -> scope:string -> request_id:string -> Yojson.Safe.t ->
       (unit, string) result) ->
@@ -154,9 +162,8 @@ val settle : store:Lane_addon_store.t -> date:string -> Record.t -> (unit, settl
     under [date], if the scope still holds exactly this record; [Settle_changed]
     otherwise, and nothing moves. A record already in the archive completes
     the move of whatever is left. The caller settles only originals no pass
-    needs again and whose body no other record names. The check and the move
-    each take the scope serializer, so this is an expected-record check under
-    the caller's lease and serialization, like {!advance}. *)
+    needs again and whose body no other record names. The expected-record check
+    and move share the scope serializer, under the caller's workspace lease. *)
 val settled : store:Lane_addon_store.t -> scope:string -> date:string -> request_id:string ->
   (bool, error) result
 (** Whether the archive holds the record of [request_id] under [date]. *)

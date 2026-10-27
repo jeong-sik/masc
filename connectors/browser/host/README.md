@@ -55,7 +55,9 @@ masc browser-lane-setup --mode ego --base-path "$HOME/masc-workspace"
 
 It names the first `ego-browser` that answers `--version`, on `PATH` and then in
 `~/.local/bin` where ego lite's onboarding links it, unless `--ego-command` names
-one, and the task space `masc` unless `--ego-space` names another. The
+one, and the task space `masc-keepers` unless `--ego-space` names another. A
+space name that a task space you made in ego lite already has is refused, and so
+is one that cannot be checked because ego lite does not list its spaces. The
 `ego-browser` it writes must answer with ego lite's and Chromium's versions, as one
 whose onboarding is finished does: a configured ego that cannot start stops the
 browser Add-on, and with it the other routes it serves. A table that is already

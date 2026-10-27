@@ -47,7 +47,7 @@ type event =
   | Operator_clear_requested of { preserve_system : bool; reason : string; }
 val event_to_string : event -> string
 type entry_action =
-    Publish_lifecycle of { event_name : string; detail : string; }
+    Log_lifecycle of { event_name : string; detail : string; }
 type transition_result = {
   prev_phase : phase;
   new_phase : phase;

@@ -71,7 +71,9 @@ type observation = {
 
 type entry = { at_step : int; who : string; key_name : string }
 
-type autosave_status = { program : string; steps : int; saved_by : string; saved_at : float }
+type autosave_status = { program : string; steps : int; saved_by : string; mtime : float }
+(** [mtime] is the checkpoint file's modification time: meta records who saved
+    it, not when. *)
 
 type autosave_lookup =
   | No_autosave

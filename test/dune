@@ -2727,6 +2727,8 @@
 
 (include stanzas/test_workspace_bootstrap.inc)
 
+(include stanzas/test_workspace_backend_cache_isolation.inc)
+
 (include stanzas/test_workspace_base_path_cache.inc)
 
 (include stanzas/test_dashboard_gate_cli_lane.inc)
@@ -3580,6 +3582,7 @@
  (name test_tui_keeper_chat_transcript)
  (modules test_tui_keeper_chat_transcript)
  (libraries masc.runtime masc.masc_types masc.fs_compat eio_main unix
+  masc.keeper_chat_operations
   alcotest
   agent_core
   fmt
@@ -5163,6 +5166,7 @@
  (libraries alcotest eio_main eio yojson masc.browser_lane masc masc.time_compat masc.monotonic_deadline))
 
 (include stanzas/test_browser_activity.inc)
+(include stanzas/test_lane_addon_orphan_body_startup.inc)
 
 ; Mock clock as the lane's clock: a command taken, and an answer delivered,
 ; as their window passed stand.
@@ -5597,6 +5601,11 @@
  (name test_lane_addon_request_progress)
  (modules test_lane_addon_request_progress)
  (libraries alcotest yojson masc masc.fs_compat unix))
+
+(test
+ (name test_lane_addon_orphan_body_sweep)
+ (modules test_lane_addon_orphan_body_sweep)
+ (libraries alcotest yojson masc masc.fs_compat masc.string_util unix))
 
 (test
  (name test_workspace_memory_execution_capture)

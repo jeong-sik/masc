@@ -721,6 +721,17 @@ let run_cmd ?schema_observation ?(record_default = false) ~executable_path host 
      List.iter
        (fun failure -> Log.Server.warn "[Startup] retained checkpoint sweep: %s" failure)
        failures);
+  (* The process lease is held and no original-request writer has started. *)
+  (match Masc.Lane_addon_orphan_body_sweep.run_at_startup ~base_path:canonical_base_path with
+   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+   | exception _ ->
+     Log.Server.warn "[Startup] original request body sweep raised; its last effect may be unconfirmed"
+   | Error error ->
+     Log.Server.warn "[Startup] original request body sweep stopped: %s"
+       (Masc.Lane_addon_orphan_body_sweep.error_to_string error)
+   | Ok report ->
+     Log.Server.info "[Startup] original request body sweep: removed=%d protected_digests=%d"
+       report.removed report.protected_digests);
   (* Only the server samples. Sampling starts before [Eio_main.run] so the
      executor pool, which the main domain spawns while sampling, shares the
      profile and the boot-time loads are in the tables. The rate is a tenth
@@ -2424,8 +2435,10 @@ let browser_lane_setup_cmd =
           [ "ego-space" ]
           ~docv:"NAME"
           ~doc:
-            "With --mode ego, the ego lite task space the Add-on serves. By default masc. \
-             A table that is already there keeps its value unless this is given.")
+            "With --mode ego, the ego lite task space the Add-on serves. By default \
+             masc-keepers. A table that is already there keeps its value unless this is \
+             given. The space the table holds, new or kept, is refused when a task space \
+             you made in ego lite already has that name.")
   in
   let no_addon =
     Arg.(
@@ -2478,8 +2491,10 @@ let browser_lane_setup_cmd =
          ; `P
              "--mode ego writes [browser.live.ego]: the ego-browser the browser Add-on runs \
               and the ego lite task space it serves, after checking that ego-browser \
-              answers --version. It installs no host. An existing table keeps its values \
-              unless they are named. The server reads the table when it starts."
+              answers --version and that no task space you made in ego lite has that \
+              name. When ego lite does not list its spaces, nothing is written. It \
+              installs no host. An existing table keeps its values unless they are named. \
+              The server reads the table when it starts."
          ])
     Term.(
       const (fun base_path modes no_addon binary token_file manifest_dir host_name firefox
@@ -4478,7 +4493,8 @@ let sandbox_catalog_cmd =
     (* The setup journey reads this catalog for the workspace doctor offered;
        both answer in Workspace_root's order. *)
     let base_path = selected_base_path requested in
-    print_endline (Yojson.Safe.to_string (Masc.Sandbox_readiness.inspect ~base_path));
+    print_endline (Yojson.Safe.to_string
+      (Masc.Sandbox_readiness.inspect ~run:Masc.Sandbox_readiness.system_runner ~base_path));
     0 in
   Cmd.v (Cmd.info "sandbox-catalog" ~doc:"Inspect sandbox choices and host prerequisites without changing settings.")
     Term.(const inspect $ run_base_path)

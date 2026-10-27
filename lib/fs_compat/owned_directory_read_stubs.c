@@ -59,6 +59,37 @@ CAMLprim value caml_masc_owned_entry_open(value v_parent, value v_name)
   CAMLreturn(Val_int(result));
 }
 
+/* The caller holds its writer exclusion and has checked the observed file
+   against its inventory snapshot. Recheck the named entry against the held
+   descriptor immediately before unlinking relative to the held parent.
+   POSIX cannot make this check and unlink atomic against unrelated writers. */
+CAMLprim value caml_masc_owned_inventory_unlink_checked(value v_parent, value v_file,
+                                                        value v_name)
+{
+  CAMLparam3(v_parent, v_file, v_name);
+  char *name = caml_stat_strdup(String_val(v_name));
+  int parent = Int_val(v_parent), file = Int_val(v_file), result = -1, saved_errno;
+  caml_enter_blocking_section();
+  struct stat held, entry;
+  if (fstat(file, &held) == -1 || fstatat(parent, name, &entry, AT_SYMLINK_NOFOLLOW) == -1) {
+    /* Keep the system error. */
+  } else if (!S_ISREG(held.st_mode) || !S_ISREG(entry.st_mode)
+             || held.st_dev != entry.st_dev || held.st_ino != entry.st_ino
+             || held.st_uid != geteuid() || entry.st_uid != held.st_uid
+             || held.st_nlink != 1 || entry.st_nlink != 1
+             || (held.st_mode & 0022) != 0 || entry.st_mode != held.st_mode
+             || entry.st_size != held.st_size) {
+    errno = EAGAIN;
+  } else {
+    result = unlinkat(parent, name, 0);
+  }
+  saved_errno = errno;
+  caml_leave_blocking_section();
+  caml_stat_free(name);
+  if (result == -1) { errno = saved_errno; uerror("unlinkat", v_name); }
+  CAMLreturn(Val_unit);
+}
+
 struct inventory_name { char *name; struct inventory_name *next; };
 
 /* A duplicated descriptor owns the DIR stream, so closedir cannot close the

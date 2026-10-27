@@ -385,7 +385,7 @@ let judgment_arg args =
          judgment: true; coercing preserves the data. *)
       let coerced = Yojson.Safe.to_string other in
       Log.BoardLog.warn
-        "judgment_arg: coerced non-string/judgment %s to string for key %S"
+        "judgment_arg: coerced non-string judgment %s to string for key %S"
         (Yojson.Safe.to_string other) key;
       Some (`String coerced)
   in

@@ -38,10 +38,17 @@ let event lifecycle (resource : resource) =
            ; ("resource", Option.fold ~none:`Null ~some:Lane_addon_lifecycle.resource_to_json resource.resource)
            ; ("detail", optional resource.detail) ] ))
 
+(* The bus is down for a whole window, not one event: warn once until a
+   publish succeeds instead of once per acquire/release. *)
+let bus_down_warned = Atomic.make false
+
 let publish lifecycle (resource : resource) =
   let event = event lifecycle resource in
   match Event_bus_slots.get_masc () with
-  | Some bus -> Runtime_event_bus.publish bus event
+  | Some bus ->
+    Atomic.set bus_down_warned false;
+    Runtime_event_bus.publish bus event
   | None ->
-    Log.Misc.warn
-      "Lane Add-on resource event was not published: event bus is not initialized"
+    if Atomic.compare_and_set bus_down_warned false true then
+      Log.Misc.warn
+        "Lane Add-on resource event was not published: event bus is not initialized"

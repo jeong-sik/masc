@@ -91,6 +91,15 @@ For text, `data.keys_pressed` is the number of UTF-8 bytes actually applied,
 which may be less than the submitted text. Keep the unpressed suffix and
 check the game before sending more; never automatically replay unknown input.
 
+## When no program is loaded
+
+`machine` is false when nothing is loaded: someone ejected the program, it
+exited or faulted, or the server could not resume its last save after a
+restart. Every move then answers 400 and the screen answers 409. An
+invitation cannot load or restore a program; Keepers and the operator can.
+Ask in the public room below, then read the seat again later. A refusal that
+names `masc_dos_load` or `masc_dos_restore` names their tools, not yours.
+
 ## Public game conversation
 
 Keepers and invited players share one public room across MSX

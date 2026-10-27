@@ -2640,8 +2640,12 @@ let call_exported_tool_on_owner ~companion_publish ~continuation ~on_complete ~o
     (* Whether this call wrote anything to the worker. A companion call
        reserves its origin before the RPC, which is already an effect. *)
     let reached = ref false in
+    let wake_after_return = ref false in
     let on_dispatch () = reached := true in
-    Fun.protect ~finally:(fun () -> e.active_tool_calls <- e.active_tool_calls - in_flight) (fun () ->
+    Fun.protect ~finally:(fun () ->
+      e.active_tool_calls <- e.active_tool_calls - in_flight;
+      if !wake_after_return && not e.stopping then
+        Eio.Cancel.protect (fun () -> wake_dependents m e)) (fun () ->
     try
       let principal = match principal with
         | Some principal -> principal
@@ -2675,11 +2679,11 @@ let call_exported_tool_on_owner ~companion_publish ~continuation ~on_complete ~o
             | Lane_addon_call_context.May_change, (None | Some true | Some false) -> wake e);
            if Option.is_some connection.host then wake_host e)
        | Error (Lane_addon_call_context.Host_refusal _) ->
-           (* A refused call never reached the worker and schedules nothing,
-              but while it was counted a consumer may have been refused. *)
+           (* The requested mutation was refused and schedules nothing, but
+              while it was counted a consumer may have been refused. *)
            (match declared with
             | Lane_addon_call_context.Reads_only -> ()
-            | Lane_addon_call_context.May_change -> if not e.stopping then wake_dependents m e)
+            | Lane_addon_call_context.May_change -> wake_after_return := true)
        | Error (Lane_addon_call_context.Transport_error detail) ->
            if not e.stopping then (
              failed m e (Lifecycle.Effect_outcome_unknown ("tool outcome unknown: " ^ detail));
@@ -2699,7 +2703,10 @@ let call_exported_tool_on_owner ~companion_publish ~continuation ~on_complete ~o
         notify_exports m e;
         (match persist m e with Ok () -> () | Error detail ->
           Log.Misc.error "Cancelled Add-on tool state persistence: %s" detail);
-        stop_entry ~sw ~backend:worker_backend m e);
+        stop_entry ~sw ~backend:worker_backend m e)
+      else (match declared with
+        | Lane_addon_call_context.Reads_only -> ()
+        | Lane_addon_call_context.May_change -> wake_after_return := true);
       raise exn))
 
 let call_exported_tool_with_authority ~companion_publish ~continuation ~on_complete ~on_result ~authorize ~principal

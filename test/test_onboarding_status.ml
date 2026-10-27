@@ -1293,7 +1293,7 @@ let a_declared_remote_ssh_backend_is_unverified_not_unconfigured () = with_works
   let run, _ = fixture_runner linux_host in
   let observed = Onboarding_status.inspect ~sandbox:(Onboarding_status.Probe_with run) ~base_path:(Some base) in
   match Readiness.declaration ~base_path:base with
-  | Ok { Readiness.backend = Readiness.Remote_ssh; _ } ->
+  | Ok (Some { Readiness.backend = Readiness.Remote_ssh; _ }) ->
     let sandbox = sandbox_check_of observed in
     let asked_again = match
         (Readiness.probe ~host:(Readiness.Linux Readiness.X64) ~run

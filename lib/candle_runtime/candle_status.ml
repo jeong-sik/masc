@@ -135,6 +135,6 @@ let for_recording ~base_path =
 
 let report_at_start ~base_path =
   match current ~base_path with
-  | Candle_config.Off -> Log.Misc.info "candle: off (no candle.toml)"
-  | Candle_config.Disabled { reason } -> Log.Misc.warn "candle: disabled: %s" reason
-  | Candle_config.Enabled _ -> Log.Misc.info "candle: enabled (ledger recovery may await its writer lock)"
+  | Candle_config.Off -> Log.Candle.info "off (no candle.toml)"
+  | Candle_config.Disabled { reason } -> Log.Candle.warn "disabled: %s" reason
+  | Candle_config.Enabled _ -> Log.Candle.info "enabled (ledger recovery may await its writer lock)"

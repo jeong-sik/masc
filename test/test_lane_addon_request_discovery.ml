@@ -363,12 +363,125 @@ let test_all_scopes_survive_restart_without_metadata () = with_store (fun root s
     ["original-a";"original-b"]
     (List.map (fun (record:Owner.retained) -> record.request_id) records |> List.sort String.compare);
   Alcotest.(check (list (pair string string))) "fold_all visits the exact validated originals across all scopes"
-    [scope,"original-a";"history-physical-owner","original-b"]
+    (List.sort Stdlib.compare [scope,"original-a";"history-physical-owner","original-b"])
     (List.sort Stdlib.compare folded);
   List.iter (fun (record:Owner.retained) ->
     Alcotest.check json "original evidence and destination survive the sweep" request record.request;
     Alcotest.(check bool) "the original scope remains its own binding" true
       (record.scope=(if record.request_id="original-a" then scope else "history-physical-owner"))) records)
+
+let test_sweep_barrier_serializes_settlement_across_store_aliases () = with_store (fun root store ->
+  retain_own store "original"; retain_own store "kept";
+  let record = listed store "original" in
+  let alias = Filename.concat (Filename.dirname root) "parent-alias" in
+  Unix.symlink (Filename.dirname root) alias;
+  let writer = Store.create ~root:(Filename.concat alias (Filename.basename root)) in
+  let other = Store.create ~root:(Filename.concat (Filename.dirname root) "independent-store") in
+  retain_own other "independent";
+  let other_record = listed other "independent" in
+  Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+    let gate = Stdlib.Mutex.create () and changed = Condition.create () and released = ref false in
+    let release () = Stdlib.Mutex.protect gate (fun () -> released:=true; Condition.broadcast changed) in
+    let inventoried, inventoried_resolver = Eio.Promise.create () in
+    let reading, reading_resolver = Eio.Promise.create () in
+    let moving, moving_resolver = Eio.Promise.create () in
+    Fun.protect ~finally:release (fun () ->
+      Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 10. (fun () ->
+        Eio.Fiber.fork ~sw (fun () ->
+          let result = Store.with_tool_request_settlement_barrier store (fun () ->
+              Owner.For_testing.fold_all ~store ~init:[]
+                ~after_inventory:(fun () ->
+                  Eio.Promise.resolve inventoried_resolver ();
+                  Stdlib.Mutex.protect gate (fun () ->
+                    while not !released do Condition.wait changed gate done))
+                ~f:(fun found (original:Owner.retained) ->
+                  (* Wake's admission callback re-enters this scope. *)
+                  let nested = owned (Owner.load_scope ~store ~scope) in
+                  Alcotest.(check int) "nested scope read remains available" 2 (List.length nested);
+                  original.request_id :: found)) in
+          Eio.Promise.resolve reading_resolver result);
+        Eio.Promise.await inventoried;
+        let key = Filename.concat (Unix.realpath root) "tool-request-settlement-barrier" in
+        let rec await_mover () =
+          if File_lock_eio.For_testing.holders_and_waiters ~lock_path:key=2 then ()
+          else (Eio.Fiber.yield (); await_mover ()) in
+        let context,resolve_context=Eio.Promise.create () in
+        let cancelled=Eio.Fiber.fork_promise ~sw (fun () -> Eio.Cancel.sub (fun context ->
+          Eio.Promise.resolve resolve_context context;
+          settle writer record)) in
+        let context=Eio.Promise.await context in
+        await_mover ();
+        Eio.Cancel.cancel context Exit;
+        (match Eio.Promise.await cancelled with
+         | Error (Eio.Cancel.Cancelled _) -> ()
+         | Error exn -> raise exn
+         | Ok _ -> Alcotest.fail "cancelled waiter performed a settle");
+        Alcotest.(check bool) "cancelled settle leaves the original active" true
+          (Sys.file_exists (path root "original"));
+        Eio.Fiber.fork ~sw (fun () ->
+          let result = settle writer record in
+          Eio.Promise.resolve moving_resolver result);
+        await_mover ();
+        Alcotest.(check bool) "inventoried original has not moved" true (Sys.file_exists (path root "original"));
+        Eio_unix.run_in_systhread (fun () -> settled_ok (settle other other_record));
+        release ();
+        let found = Eio.Promise.await reading |> get |> owned |> List.sort String.compare in
+        Alcotest.(check (list string)) "both originals reach the completed sweep" ["kept";"original"] found;
+        settled_ok (Eio.Promise.await moving);
+        Alcotest.(check bool) "the waiting settle completes after the sweep" true (is_settled store "original"))))))
+
+let test_barrier_does_not_hide_an_external_disappearance () = with_store (fun root store ->
+  retain_own store "lost";
+  let result = Store.with_tool_request_settlement_barrier store (fun () ->
+    Owner.For_testing.fold_all ~store ~init:[]
+      ~after_inventory:(fun () -> Sys.remove (path root "lost"))
+      ~f:(fun found original -> original::found)) |> get in
+  fail_inventory result)
+
+let test_admitted_barrier_survives_cancellation () = with_store (fun root store ->
+  retain_own store "original";
+  let record = listed store "original" in
+  Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+    let gate=Stdlib.Mutex.create () and changed=Condition.create () and released=ref false in
+    let release ()=Stdlib.Mutex.protect gate (fun () -> released:=true; Condition.broadcast changed) in
+    let entered,resolve_entered=Eio.Promise.create () in
+    let context,resolve_context=Eio.Promise.create () in
+    let moved,resolve_moved=Eio.Promise.create () in
+    let completed=Atomic.make false in
+    Fun.protect ~finally:release (fun () ->
+      Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 10. (fun () ->
+        let admitted=Eio.Fiber.fork_promise ~sw (fun () -> Eio.Cancel.sub (fun context ->
+          Eio.Promise.resolve resolve_context context;
+          Store.with_tool_request_settlement_barrier store (fun () ->
+            Eio.Promise.resolve resolve_entered ();
+            Stdlib.Mutex.protect gate (fun () ->
+              while not !released do Condition.wait changed gate done);
+            Atomic.set completed true))) in
+        let context=Eio.Promise.await context in
+        Eio.Promise.await entered;
+        Eio.Cancel.cancel context Exit;
+        Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve resolve_moved (settle store record));
+        let key=Filename.concat (Unix.realpath root) "tool-request-settlement-barrier" in
+        let rec await_mover () =
+          if File_lock_eio.For_testing.holders_and_waiters ~lock_path:key=2 then ()
+          else (Eio.Fiber.yield (); await_mover ()) in
+        await_mover ();
+        Alcotest.(check bool) "cancelled admitted work remains protected" false (Atomic.get completed);
+        Alcotest.(check bool) "settle still waits for admitted work" true (Sys.file_exists (path root "original"));
+        release ();
+        (match Eio.Promise.await admitted with
+         | Error (Eio.Cancel.Cancelled _) -> ()
+         | Error exn -> raise exn
+         | Ok _ -> Alcotest.fail "pending cancellation did not propagate");
+        Alcotest.(check bool) "admitted work finished before release" true (Atomic.get completed);
+        settled_ok (Eio.Promise.await moved))))))
+
+let test_barrier_released_after_exception () = with_store (fun _root store ->
+  Eio_main.run (fun _env ->
+    (try ignore (Store.with_tool_request_settlement_barrier store (fun () -> raise Exit));
+         Alcotest.fail "exception did not escape"
+     with Exit -> ());
+    ignore (get (Store.with_tool_request_settlement_barrier store (fun () -> ())))))
 
 let test_all_scope_refusals_never_become_partial_success () =
   with_store (fun root store ->
@@ -390,9 +503,45 @@ let test_all_scope_refusals_never_become_partial_success () =
     fail_inventory (Owner.discover_all ~store);
     fail_inventory (Owner.fold_all ~store ~init:[] ~f:(fun acc r -> r::acc)))
 
-let () = Alcotest.run "Original Add-on request discovery" ["inventory",[
+(* The work under test can block inside a system-thread mutex. An Eio timeout
+   cannot join a truly deadlocked system thread, so run this one scenario in
+   its own process group and kill it if the outer hang guard expires. *)
+let run_guarded_scenario key =
+  let program = "import os,signal,subprocess,sys\n" ^
+    "env=os.environ.copy(); env[sys.argv[2]]='1'\n" ^
+    "child=subprocess.Popen([sys.argv[1]],env=env,start_new_session=True)\n" ^
+    "try: code=child.wait(timeout=180)\n" ^
+    "except subprocess.TimeoutExpired:\n" ^
+    " os.killpg(child.pid,signal.SIGKILL); child.wait(); sys.exit(124)\n" ^
+    "sys.exit(code if code>=0 else 128-code)\n" in
+  let exe = Unix.realpath Sys.executable_name in
+  let pid=Unix.create_process "python3" [|"python3";"-c";program;exe;key|]
+    Unix.stdin Unix.stdout Unix.stderr in
+  match snd (Unix.waitpid [] pid) with
+  | Unix.WEXITED 0 -> ()
+  | Unix.WEXITED 124 -> Alcotest.fail "scenario exceeded the process hang guard"
+  | Unix.WEXITED code -> Alcotest.fail (Printf.sprintf "scenario exited %d" code)
+  | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
+    Alcotest.fail (Printf.sprintf "scenario ended with signal %d" signal)
+
+let () =
+  if Sys.getenv_opt "MASC_TEST_46252_SWEEP" = Some "1" then (
+    test_sweep_barrier_serializes_settlement_across_store_aliases (); exit 0);
+  if Sys.getenv_opt "MASC_TEST_46252_ADMITTED" = Some "1" then (
+    test_admitted_barrier_survives_cancellation (); exit 0);
+  if Sys.getenv_opt "MASC_TEST_46252_EXCEPTION" = Some "1" then (
+    test_barrier_released_after_exception (); exit 0);
+  Alcotest.run "Original Add-on request discovery" ["inventory",[
   Alcotest.test_case "all original scopes survive restart without a metadata index" `Quick
     test_all_scopes_survive_restart_without_metadata;
+  Alcotest.test_case "sweep barrier waits for settle across store aliases" `Quick
+    (fun () -> run_guarded_scenario "MASC_TEST_46252_SWEEP");
+  Alcotest.test_case "barrier does not hide external disappearance" `Quick
+    test_barrier_does_not_hide_an_external_disappearance;
+  Alcotest.test_case "admitted barrier finishes before cancellation releases it" `Quick
+    (fun () -> run_guarded_scenario "MASC_TEST_46252_ADMITTED");
+  Alcotest.test_case "barrier is released after an exception" `Quick
+    (fun () -> run_guarded_scenario "MASC_TEST_46252_EXCEPTION");
   Alcotest.test_case "all-scope key and symlink refusals never return partial success" `Quick
     test_all_scope_refusals_never_become_partial_success;
   Alcotest.test_case "owned relative paths are names only" `Quick test_owned_relative_path_refuses_non_names;

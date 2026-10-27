@@ -64,10 +64,14 @@ let run_all () =
   (* NDT-OK: shutdown hook elapsed timing is operator telemetry only; cleanup
      ordering remains priority-driven and does not branch on wall-clock time. *)
   let t_registered = Unix.gettimeofday () in
-  Shutdown.run_registered_hooks ();
+  let failed_hooks = Shutdown.run_registered_hooks () in
   (* NDT-OK: second wall-clock read closes the elapsed telemetry span above. *)
   let registered_elapsed_s = Unix.gettimeofday () -. t_registered in
-  Log.Server.info "[Shutdown] registered hooks completed (%.2fs)" registered_elapsed_s;
+  if failed_hooks = 0 then
+    Log.Server.info "[Shutdown] registered hooks completed (%.2fs)" registered_elapsed_s
+  else
+    Log.Server.warn "[Shutdown] registered hooks finished with %d failures (%.2fs)"
+      failed_hooks registered_elapsed_s;
   (* Clear transient A2A state to free memory *)
   (* Clear session identity caches *)
   Client_registry_eio.clear_all ();

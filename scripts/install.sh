@@ -1221,24 +1221,15 @@ if [ "$(uname -s)" = Darwin ]; then
   [ "$major" -ge "$minimum" ] || die "macOS $os_version is below the released binary minimum macOS $minimum.0"
   if [ "$DRY_RUN" -eq 1 ]; then
     log "[dry-run] would verify and install bundled macOS libraries and Python; no Homebrew or Command Line Tools required"
-    # Prefer the installed private interpreter, then a usable non-system
-    # interpreter. Never probe Apple's python3/CLT shim.
+    # A prefix symlink has not been verified yet, so do not execute a private
+    # interpreter beside its target. Probe only an explicit PATH interpreter,
+    # and never Apple's python3/CLT shim.
     dry_python=""
-    installed_target=$(readlink "$PREFIX/masc" 2>/dev/null || true)
-    if [ -n "$installed_target" ]; then
-      case "$installed_target" in /*) ;; *) installed_target="$PREFIX/$installed_target" ;; esac
-      candidate="$(dirname "$installed_target")/python/bin/python3"
-      if [ -x "$candidate" ] && installer_python_ready "$candidate" >/dev/null 2>&1; then
-        dry_python="$candidate"
-      fi
-    fi
-    if [ -z "$dry_python" ]; then
-      candidate=$(command -v python3 || true)
-      case "$candidate" in
-        ''|/usr/bin/python3|/Library/Developer/*|/Applications/Xcode.app/*) ;;
-        *) if installer_python_ready "$candidate" >/dev/null 2>&1; then dry_python="$candidate"; fi ;;
-      esac
-    fi
+    candidate=$(command -v python3 || true)
+    case "$candidate" in
+      ''|/usr/bin/python3|/Library/Developer/*|/Applications/Xcode.app/*) ;;
+      *) if installer_python_ready "$candidate" >/dev/null 2>&1; then dry_python="$candidate"; fi ;;
+    esac
     if [ -n "$dry_python" ]; then
       PATH="$(dirname "$dry_python"):$PATH"; export PATH; hash -r
     else
@@ -1388,6 +1379,8 @@ fetch_release_checksums() {
     -o "$CHECKSUMS_FILE" \
     "$CHECKSUMS_URL" 2>"$curl_stderr"; then
     CHECKSUMS_AVAILABLE=1
+  elif [ "${1:-}" = "identity" ]; then
+    return 1
   elif [ "$ALLOW_UNVERIFIED" = "1" ]; then
     warn "could not fetch release checksums ($CHECKSUMS_URL); continuing because unverified install override is enabled"
   else
@@ -1484,54 +1477,45 @@ masc_reported_version() {
   run_masc_with_install_env "$bin" --version 2>/dev/null | tail -n1
 }
 
-# Automatic upgrades apply only to ordered stable release versions. Unknown
-# development/prerelease strings and downgrades still require an explicit force.
-is_stable_upgrade() {
-  # Keep version planning available before the private Python bootstrap.
-  # Decimal components are compared without shell integer overflow.
-  local installed="$1" requested="${2#v}" left right index
-  local LC_ALL=C
-  local installed_parts requested_parts
-  [[ "$installed" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
-  [[ "$requested" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
-  IFS=. read -r -a installed_parts <<< "$installed"
-  IFS=. read -r -a requested_parts <<< "$requested"
-  for index in 0 1 2; do
-    left="${installed_parts[$index]}"; right="${requested_parts[$index]}"
-    while [ "${#left}" -gt 1 ] && [[ "$left" = 0* ]]; do left="${left#0}"; done
-    while [ "${#right}" -gt 1 ] && [[ "$right" = 0* ]]; do right="${right#0}"; done
-    [ "${#left}" -lt "${#right}" ] && return 0
-    [ "${#left}" -gt "${#right}" ] && return 1
-    [[ "$left" < "$right" ]] && return 0
-    [[ "$left" > "$right" ]] && return 1
-  done
-  return 1
-}
-
 SKIP_DL=0
-if [ -e "$DEST" ]; then
-  # The pipeline `... | tail -n1` masks the binary's own exit status, so
-  # ask the binary directly first, then capture its output.
-  if masc_responds_to_version "$DEST"; then
-    existing_ver=$(masc_reported_version "$DEST")
-    if [ "$existing_ver" = "${VERSION#v}" ] && [ "$FORCE" -eq 0 ]; then
-      log "already at $VERSION ($DEST), skipping download"
-      SKIP_DL=1
-    elif [ "$existing_ver" = "${VERSION#v}" ]; then
-      warn "existing $DEST already reports $existing_ver; refreshing because --force is set"
-    elif [ "$FORCE" -eq 0 ] && is_stable_upgrade "$existing_ver" "$VERSION"; then
-      log "upgrading $DEST from $existing_ver to ${VERSION#v}; preserving workspace config"
-    elif [ "$FORCE" -eq 0 ]; then
-      warn "existing $DEST is version $existing_ver, target is ${VERSION#v}; pass --force to overwrite"
-      exit 1
-    else
-      warn "existing $DEST is version $existing_ver, target is ${VERSION#v}; overwriting because --force is set"
-    fi
-  elif [ "$FORCE" -eq 0 ]; then
-    warn "$DEST exists but does not respond to --version; pass --force to overwrite"
-    exit 1
+if [ -e "$DEST" ] || [ -L "$DEST" ]; then
+  if [ "$FORCE" -eq 1 ]; then
+    warn "$DEST already exists; overwriting because --force is set"
   else
-    warn "$DEST exists but does not respond to --version; overwriting because --force is set"
+    # Do not execute an unknown file to decide whether it belongs to MASC.
+    # Only the requested release's exact bytes qualify for the no-force
+    # same-version path. Any other version requires an explicit replacement.
+    if [ ! -f "$DEST" ] || [ ! -x "$DEST" ]; then
+      warn "$DEST is not an executable file; pass --force to replace it"
+      exit 1
+    fi
+    # A verified same-release installation is an immutable release pointer.
+    # A regular file or an arbitrary link would need to be replaced to bind
+    # the executable and its runtime, which requires explicit force.
+    canonical_prefix=$(cd "$PREFIX" && pwd -P)
+    existing_link=$(readlink "$DEST" 2>/dev/null || true)
+    case "$existing_link" in
+      "$canonical_prefix"/.masc-releases/*/masc)
+        release_identity=${existing_link#"$canonical_prefix"/.masc-releases/}
+        release_identity=${release_identity%/masc}
+        [[ "$release_identity" =~ ^[0-9a-f]{64}$ ]] || {
+          warn "$DEST is not a managed release pointer; pass --force to replace it"
+          exit 1
+        } ;;
+      *) warn "$DEST is not a managed release pointer; pass --force to replace it"; exit 1 ;;
+    esac
+    if ! fetch_release_checksums identity || [ "$CHECKSUMS_AVAILABLE" -ne 1 ]; then
+      warn "cannot verify the existing $DEST against $VERSION; pass --force to replace it"
+      exit 1
+    fi
+    expected_existing=$(expected_hash "$ASSET")
+    actual_existing=$(sha256_file "$DEST")
+    if [ -z "$expected_existing" ] || [ -z "$actual_existing" ] || [ "$actual_existing" != "$expected_existing" ]; then
+      warn "$DEST does not match the $VERSION release; pass --force to replace it"
+      exit 1
+    fi
+    log "already at $VERSION ($DEST), verified release checksum; skipping download"
+    SKIP_DL=1
   fi
 fi
 
@@ -1549,7 +1533,8 @@ install_release_companion() {
     return 0
   fi
   mkdir -p "$PREFIX"
-  local tmp="$dest.partial"
+  local tmp
+  tmp=$(mktemp "$PREFIX/.masc-companion.XXXXXX")
   PARTIAL_FILES+=("$tmp")
   fetch_release_checksums
   curl -fL \
@@ -1610,7 +1595,7 @@ install_guest_shim() {
     return 0
   fi
   mkdir -p "$dest_dir"
-  tmp="$dest.partial"
+  tmp=$(mktemp "$dest_dir/.masc-exec-shim.XXXXXX")
   PARTIAL_FILES+=("$tmp")
   fetch_release_checksums
   curl -fL \
@@ -1670,9 +1655,11 @@ else
   PARTIAL_FILES+=("$BUNDLE_HELPER" "$bundle_archive")
   fetch_bundle_asset "$BUNDLE_HELPER_ASSET" "$BUNDLE_HELPER"
   fetch_bundle_asset "$DASHBOARD_ASSET" "$bundle_archive"
+  PUBLICATION_ARGS=()
+  if [ "$FORCE" -eq 0 ]; then PUBLICATION_ARGS=(--no-replace); fi
   DASHBOARD_ASSETS_DIR="$(python3 "$BUNDLE_HELPER" install \
     --binary "$binary_input" --archive "$bundle_archive" \
-    --prefix "$PREFIX" --binary-asset "$ASSET" ${COMPANION_ARGS[@]+"${COMPANION_ARGS[@]}"} ${RUNTIME_ARGS[@]+"${RUNTIME_ARGS[@]}"})" \
+    --prefix "$PREFIX" --binary-asset "$ASSET" ${COMPANION_ARGS[@]+"${COMPANION_ARGS[@]}"} ${RUNTIME_ARGS[@]+"${RUNTIME_ARGS[@]}"} ${PUBLICATION_ARGS[@]+"${PUBLICATION_ARGS[@]}"})" \
     || die "binary/dashboard installation rejected"
   BUNDLE_TRANSACTION_ACTIVE=1
   log "installed verified binary/dashboard: $DEST"
@@ -1797,7 +1784,8 @@ seed_team() {
     || die "team preset '$preset' manifest fetch failed ($manifest_url)"
   verify_checksum "$manifest_tmp" "presets/$preset/manifest.txt"
 
-  local rel dest tmp raw
+  local rel dest tmp raw creation_mask
+  creation_mask=$(umask)
   while IFS= read -r rel || [ -n "$rel" ]; do
     case "$rel" in ''|'#'*) continue ;; esac
     # Nothing is created from a manifest path before it is known to stay inside
@@ -1816,15 +1804,17 @@ seed_team() {
       part="${part:+$part/}$component"
       [ ! -L "$cfg/$part" ] || die "team preset '$preset' path crosses a symlink in $cfg: $part"
     done
-    [ ! -L "$cfg/$rel.partial" ] || die "team preset '$preset' path crosses a symlink in $cfg: $rel.partial"
     dest="$cfg/$rel"
     if [ -e "$dest" ] && [ "$RESET_CONFIG" -eq 0 ]; then
       log "team file present: $rel, skipping"
       continue
     fi
     raw="$presets_base/$preset/$rel"
-    tmp="$dest.partial"
     mkdir -p "$(dirname "$dest")"
+    tmp=$(mktemp "$(dirname "$dest")/.masc-team.XXXXXX")
+    # mktemp starts at 0600; preserve the old curl-created file's 0666/umask
+    # mode when the verified preset becomes the final configuration file.
+    chmod "$(printf '%03o' "$((0666 & ~creation_mask))")" "$tmp"
     PARTIAL_FILES+=("$tmp")
     curl -fsSL \
       --max-time "$MASC_INSTALL_CONFIG_FETCH_TIMEOUT_S" \

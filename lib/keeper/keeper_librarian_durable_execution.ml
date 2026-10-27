@@ -232,7 +232,7 @@ let validate_lineage originals =
    holds its own request ID, so no two records share a body file and a move
    never takes another record's body. *)
 let settle_record ~store ~date (record:Retained.retained) =
-  io (fun () -> Retained.settle ~store ~date (Retained.listed record))
+  Retained.settle ~store ~date (Retained.listed record)
   |> Result.map_error Retained.settle_error_to_string
 let archived ~store ~scope ~date request_id =
   io (fun () -> Retained.settled ~store ~scope ~date ~request_id)

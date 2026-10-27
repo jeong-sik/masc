@@ -486,6 +486,11 @@ val response_metadata : t -> response_metadata
 
 val model_activity : t -> model_activity option
 
+val last_provider_retry_observation :
+  t -> (Runtime_native_tasks.attempt * Runtime_claude_api_retry.t) option
+(** Last retry received from this source, including an earlier attempt or a
+    late journal page. It does not determine the active failure's cause. *)
+
 val ending_source : t -> ending_source
 (** {!Ending_read_from_record} only after {!close_from_operation_record} closed
     the turn. A later RUN_FINISHED or RUN_ERROR the log hears sets it back to
@@ -632,7 +637,8 @@ type drawn =
           cannot be mapped back from the canonical flat body. *)
   | Drawn_status of string
       (** Request admission feedback, or how a turn without visible reply
-          text ended, from the recorded reply through {!turn_status_text}. *)
+          text ended, from the recorded reply through {!turn_status_text}; a
+          received provider retry may also be shown as noncausal evidence. *)
   | Drawn_error of string
       (** The terminal stream failure, after any partial text and tools. *)
 
@@ -647,6 +653,8 @@ type drawn_origin =
   | Unstreamed_skills
   | Reply_of_segment of int
   | Error_of_segment of int
+  | Retry_observation_of_source
+      (** An execution-record observation, not a failure or segment cause. *)
 (** Source-local identity, independent of visibility and rendered position.
     Stretch and tool ids are allocated monotonically across the whole log,
     including retries and continuation segments. Replay of the same ordered
@@ -668,7 +676,10 @@ type drawn_item =
         (** First observed event time for this stretch; [None] for delivery
             records whose stream event was unavailable. Journal replay keeps
             the recorded time, rather than the time the page was fetched. *)
-  ; segment : int (** Continuation segment owning this stretch. *)
+  ; segment : int
+        (** Continuation segment owning this stretch. For a source-scoped
+            retry observation this is its presentation segment, not an
+            assertion that the retry happened in that segment. *)
   ; superseded : int option
         (** [Some attempt] when a later runtime attempt superseded this row;
             [None] on the current attempt's rows. *)

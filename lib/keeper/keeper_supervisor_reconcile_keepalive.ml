@@ -98,7 +98,7 @@ let reconcile_keepalive_keepers
                ; phase = Some Keeper_state_machine.Running
                })
           meta.name
-          "durable keeper"
+          "sweep confirmed supervise reached running"
           ();
         Log.Keeper.info "%s: reconciled durable keeper" meta.name))
   in

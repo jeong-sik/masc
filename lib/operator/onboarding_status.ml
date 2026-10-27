@@ -219,7 +219,9 @@ let sandbox_check ~sandbox ~base_path =
     check Sandbox Needs_setup detail [Inspect_configuration; Configure_sandbox]
   | Error { Sandbox_readiness.kind = Declaration_invalid; detail } ->
     check Sandbox Needs_setup detail [Configure_sandbox]
-  | Ok selection ->
+  | Ok None ->
+    check Sandbox Needs_setup "Choose imp's isolated workspace." [Configure_sandbox]
+  | Ok (Some selection) ->
     (match sandbox with
      | Probe_with run ->
        let host = Sandbox_readiness.detect_host ~run in

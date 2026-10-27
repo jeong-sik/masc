@@ -825,9 +825,10 @@ let test_direct_turn_carries_held_task_skills () =
   check bool "no synthetic current task" false (contains ~needle:"### Current Task" context)
 
 let test_direct_turn_has_no_synthetic_task_context () =
-  let context =
-    render_direct_context
-      ~workspace_memory_access:None
+  let prepared =
+    Direct_context.prepare
+      ~turn_ref:scheduled_admission_fixture_ref
+      ~active_goal_summaries:(Ok [])
       ~wiki_contents:Masc.Keeper_wiki_contents.Off
       ~lane_updates:(Ok (`List []))
       ~workspace_memory:Masc.Workspace_memory_ledger.Missing
@@ -838,11 +839,20 @@ let test_direct_turn_has_no_synthetic_task_context () =
       ~recent_direct_conversation_text:"recent owner message"
       ~worktree_text:""
       ~telemetry_feedback_text:""
-      ~turn_instructions_text:""
+      ~turn_instructions_text:"" ()
   in
+  let module Layers = Masc.Keeper_context_layers in
+  let partition = Direct_context.project_partition prepared ~workspace_memory_access:None in
+  let context = Layers.text partition in
   check bool "no held task means no synthetic task context" false
     (contains ~needle:"### Current Task" context);
-  check string "non-task context remains" "recent owner message" context
+  let admission, remaining = Layers.partition_layer Admitted_scheduled_input partition in
+  check bool "the real direct entry explicitly observes unknown admission" true
+    (contains ~needle:"availability=\"unknown\"" (Layers.text admission)
+     && contains ~needle:(Ids.Turn_ref.to_string scheduled_admission_fixture_ref) (Layers.text admission));
+  let _goals, remainder = Layers.partition_layer Active_goals remaining in
+  check string "non-task remainder and its original separator remain exact"
+    "\n\nrecent owner message" (Layers.text remainder)
 
 let shared_reader_access ~offered ~deferred ~loader_alive =
   let tools = List.map (fun name -> Agent_core.Tool.create ~name

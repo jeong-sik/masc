@@ -884,7 +884,7 @@ let test_wake_fail_closed_rejects_conflicting_delivery () =
     in
     let conflicting : Keeper_event_queue.stimulus =
       { post_id = Keeper_event_queue.fusion_completion_post_id conflicting_payload
-      ; urgency = Keeper_event_queue.Normal
+      ; urgency = Keeper_event_queue.Immediate
       ; arrived_at = 1.0
       ; payload = Keeper_event_queue.Fusion_completed conflicting_payload
       }
@@ -1258,6 +1258,62 @@ let test_tool_handle_async_success_projects_running_then_completed ?(with_contex
     | None -> fail "fusion run should remain visible after background success")
 ;;
 
+(* These are ambient queue backlogs, not fleet/model scale measurements. Use
+   the production wake writer and durable admission snapshot, including a
+   previously urgent source whose arrival order must not change. *)
+let test_completion_is_selected_before_ambient_backlog () =
+  List.iter (fun backlog ->
+    List.iter (fun terminal ->
+      with_isolated_base_path "fusion-wake-backlog" (fun base_dir _registry ->
+        let keeper = "fusion-backlog-keeper" in
+        let run_id = "fusion-original-run" in
+        let arrived_at = Unix.gettimeofday () in
+        let prior : Keeper_event_queue.stimulus =
+          {post_id="prior-immediate";urgency=Immediate;arrived_at;payload=Bootstrap} in
+        let ambient = List.init backlog (fun index ->
+          {Keeper_event_queue.post_id=Printf.sprintf "ambient-%d" index;
+           urgency=Normal;arrived_at;
+           payload=Board_signal
+             {kind=Post_created;author="other-keeper";title="ambient";
+              content="unrelated Board activity";hearth=None;updated_at=None}}) in
+        (match Keeper_event_queue_persistence.update_result ~base_path:base_dir ~keeper_name:keeper
+            (fun queue -> List.fold_left Keeper_event_queue.enqueue queue (prior::ambient)) with
+         | Ok () -> () | Error detail -> fail detail);
+        (match Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id
+            ~channel:discord_channel ~terminal ~board_post_id:"original-board-post" with
+         | Ok () -> () | Error detail -> fail detail);
+        let selections = match Keeper_event_queue_persistence.pending_selections_result
+            ~base_path:base_dir ~keeper_name:keeper with
+          | Ok selections -> selections | Error detail -> fail detail in
+        (match selections with
+         | earlier :: answer :: rest ->
+           check string "earlier Immediate source keeps its position" prior.post_id
+             earlier.Keeper_event_queue_state.source.post_id;
+           (match answer.Keeper_event_queue_state.source.payload with
+            | Fusion_completed completion ->
+              check string "selected original run" run_id completion.run_id;
+              check bool "selected original terminal" true (completion.terminal=terminal);
+              check bool "originating conversation survives priority" true
+                (completion.channel=discord_channel)
+            | _ -> fail "ambient activity buried the Fusion answer");
+           check (list string) "ambient rows retain original arrival order"
+             (List.map (fun (s : Keeper_event_queue.stimulus) -> s.post_id) ambient)
+             (List.map (fun (s : Keeper_event_queue_state.pending_selection) -> s.source.post_id) rest)
+         | _ -> fail "durable queue lost the answer or ambient work");
+        let ready (source : Keeper_event_queue.stimulus) = source.post_id<>prior.post_id in
+        match Keeper_event_queue_persistence.select_when_result ~base_path:base_dir ~keeper_name:keeper
+            ~now:(Unix.gettimeofday ()) ~ready with
+        | Ok (Some selection) ->
+          (match selection.Keeper_event_queue_state.source.payload with
+           | Fusion_completed completion ->
+             check string "ready selection reaches original result" run_id completion.run_id
+           | _ -> fail "a ready Fusion answer waited behind ambient Board rows")
+        | Ok None -> fail "durable Fusion answer was not selectable"
+        | Error detail -> fail detail))
+      [Keeper_event_queue.Fusion_succeeded "original result";Fusion_failed "original failure";Fusion_cancelled])
+    [10;100;300]
+;;
+
 let () =
   run
     "fusion_wake"
@@ -1291,6 +1347,8 @@ let () =
             "wake durably commits the explicit continuation channel"
             `Quick
             test_wake_durable_commit_carries_channel
+        ; test_case "ready results pass ambient backlogs without reordering earlier urgent work"
+            `Quick test_completion_is_selected_before_ambient_backlog
         ; test_case
             "wake fail-closed: conflicting durable delivery is rejected"
             `Quick

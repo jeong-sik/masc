@@ -221,6 +221,7 @@ POST·PUT·DELETE 와 `/mcp` 도구 호출은 `Background` 그대로다. 무거�
 |---|---:|---:|
 | main | 1 | 1 |
 | snapshot codec | 1 | 1 |
+| system-thread host(#46342) | 0 | 1 |
 | 읽기 풀 | 0 | 2 |
 | 배경 풀 | 14 | 나머지 |
 | agent_core codec 풀 | 14 | L5 측정으로 정한다 |
@@ -229,6 +230,7 @@ POST·PUT·DELETE 와 `/mcp` 도구 호출은 `Background` 그대로다. 무거�
 - 배경 풀은 `max 1 (recommended - 2 - 읽기 - codec)` 이다. `MASC_EXECUTOR_DOMAIN_COUNT` 는 지금처럼 배경 풀 크기를 정한다. 읽기 풀과 codec 풀 크기는 따로 정한다.
 - agent_core codec 풀은 배경 풀과 합치지 않는다. 지금 `run_cpu` 는 호출자가 취소되면 worker 를 기다리지 않고 `Caller_cancelled`·`Runtime_released` 를 원자 변수로 알린다. masc 의 `Executor_pool_submission.submit` 은 worker 를 취소하고 `Cancel.protect` 아래에서 끝나기를 기다린다. 합치면 이 의미가 바뀌고, Keeper 실행 기록 쓰기(`writer_gate` 를 잡은 채 하는 비교)가 배경 FIFO 뒤에 선다. 크기만 예산 안으로 줄인다. 지금 `Execution_runtime.stats` 는 호출 횟수(`pool_requested`, `reentrant_inline`, `caller_cancelled`)만 세서 크기를 정하기에 모자란다. L5 에서 제출부터 시작까지의 대기와 실행 시간을 재서 `/health` 에 싣고, 그 값으로 정한다.
 - 출처를 모르는 domain 1개는 L3 에서 찾는다.
+- system-thread host 는 #46342 가 더한 domain 이다. main domain 에서 부르던 Curator·Librarian 의 systhread 를 여기서 시작한다. lock 이 하나라 OCaml 로는 최대 한 코어를 쓴다. 10-27 15:25 운영 sample 에서 옮길 일이 이미 약 1.2 코어를 썼다(#46342 리뷰). 배포 뒤 이 domain 이 얼마나 바쁜지 runtime events 의 domain 번호로 같이 잰다. 배경 풀 크기 계산에는 아직 넣지 않았다. 그 계산은 L3 의 `shared_domain_count_beside_read` 가 한다.
 
 ### 3.6 풀 대기 시간을 잰다
 

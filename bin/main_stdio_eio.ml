@@ -14,6 +14,10 @@ let base_path =
   Arg.(value & opt (some string) None & info ["base-path"] ~docv:"PATH" ~doc)
 
 let run_cmd cli_base_path =
+  (* Capture the external client's credential before owner startup establishes
+     any internal runtime credentials. It is never logged or substituted by
+     a bootstrap/admin token. *)
+  let stdio_auth_token = Sys.getenv_opt "MASC_TOKEN" in
   Printexc.record_backtrace true;
   let workspace =
     Server_base_path_guard.exit_on_no_workspace
@@ -157,7 +161,7 @@ let run_cmd cli_base_path =
            "shutdown: board flush failed: %s"
            (Printexc.to_string exn));
       Shutdown_hooks.run_all ())
-    (fun () -> Mcp_eio.run_stdio ~sw ~env state)
+    (fun () -> Mcp_eio.run_stdio ?auth_token:stdio_auth_token ~sw ~env state)
 
 let cmd =
   let doc = "MASC MCP Server (stdio, Eio)" in

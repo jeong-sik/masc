@@ -165,7 +165,13 @@ let test_the_handshake_advertises_tools_only () =
        | Some (`String text) -> Some text
        | _ -> None);
     let discovered =
-      match member "result" (handle (request "server/discover")) with
+      match member "result"
+              (handle
+                 (request ~params:(`Assoc
+                      [ "_meta", `Assoc
+                          [ Mcp_transport_protocol.protocol_version_meta_key, `String "2026-07-28"
+                          ; Mcp_transport_protocol.client_capabilities_meta_key, `Assoc [] ] ])
+                    "server/discover")) with
       | Some result -> result
       | None -> fail "server/discover failed on the seat"
     in

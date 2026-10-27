@@ -91,6 +91,10 @@ val clear_resource_subscriptions_for_session : string -> unit
     [resources/updated] broadcaster does not push to a
     dead session id. *)
 
+module For_testing : sig
+  val resource_is_subscribed : session_id:string -> uri:string -> bool
+end
+
 (** {1 Notifications} *)
 
 val broadcast_tools_list_changed : unit -> unit
@@ -179,12 +183,12 @@ val detect_mode : string -> transport_mode
 val run_stdio :
   handle_request:
     (clock:([> float Eio.Time.clock_ty ] as 'clk) Eio.Resource.t ->
-     sw:'sw ->
-     mcp_session_id:string ->
+     sw:Eio.Switch.t ->
+     mcp_session_id:string option ->
      Mcp_server.server_state ->
      string ->
      Yojson.Safe.t) ->
-  sw:'sw ->
+  sw:Eio.Switch.t ->
   env:< clock : 'clk Eio.Resource.t
       ; stdin : [> Eio.Flow.source_ty ] Eio.Resource.t
       ; stdout : [> Eio.Flow.sink_ty ] Eio.Resource.t
@@ -196,8 +200,13 @@ val run_stdio :
     first line, then loops feeding messages through the
     injected [handle_request] and writing the response
     back to [Eio.Stdenv.stdout env] in the same framing.
-    Cancellation propagates through [sw]; EOF / [Eio.Cancel]
-    exits cleanly. *)
+    Legacy requests receive the connection's session ID; stateless requests
+    receive [None] so caller identity cannot carry over from an earlier call.
+    Long-running calls execute in request-scoped fibers, allowing later
+    messages and cancellation to be read while they run. Responses are
+    serialized on stdout. Closing stdin cancels outstanding calls before
+    connection-scoped state is released; cancellation cannot undo an effect
+    already sent to an external service. *)
 
 val register_dashboard_ws_handlers :
   hello:(base_path:string -> session_id:string -> ?token:string -> unit -> (Yojson.Safe.t, string) result) ->

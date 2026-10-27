@@ -2,7 +2,9 @@
 
     A request has exactly one canonical non-empty string [name]. [arguments]
     is either absent (the MCP-defined empty object) or exactly one JSON object.
-    Invalid and duplicate fields are rejected before dispatch. *)
+    Invalid and duplicate fields are rejected before dispatch. Protocol-era
+    admission, including the refusal of unissued MRTR continuations, belongs
+    to the protocol dispatcher. *)
 
 type t
 type error

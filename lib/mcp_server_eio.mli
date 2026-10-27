@@ -127,12 +127,15 @@ val clear_resource_subscriptions_for_session : string -> unit
 
 (** {1 Stdio Transport - Eio Native} *)
 
-(** Run MCP server in stdio mode with Eio
+(** Run MCP server in stdio mode with Eio.
 
     Reads JSON-RPC requests from stdin, writes responses to stdout.
-    Uses length-prefixed framing (Content-Length header).
+    Accepts newline-delimited messages and legacy length-prefixed framing.
+    [auth_token] is the external caller's bearer, verified by the same
+    per-request authorization gate as HTTP; it is never an internal token.
 
     @param sw Eio.Switch for structured concurrency
     @param env Eio environment (for stdin/stdout)
     @param state Server state *)
-val run_stdio : sw:Eio.Switch.t -> env:Eio_unix.Stdenv.base -> server_state -> unit
+val run_stdio :
+  ?auth_token:string -> sw:Eio.Switch.t -> env:Eio_unix.Stdenv.base -> server_state -> unit

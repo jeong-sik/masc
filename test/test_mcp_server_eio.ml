@@ -543,7 +543,7 @@ let test_handle_request_initialize () =
 
   cleanup_dir base_path
 
-let test_handle_request_initialize_rejects_unsupported_protocol_version () =
+let test_handle_request_initialize_counteroffers_legacy_version () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
@@ -566,10 +566,28 @@ let test_handle_request_initialize_rejects_unsupported_protocol_version () =
     ]);
   ]) in
 
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
-  Alcotest.(check int) "invalid params code" (-32602) (error_code_exn response);
-  Alcotest.(check bool) "unsupported protocol message" true
-    (String_util.contains_substring (error_message_exn response) "Unsupported protocolVersion");
+  let expect_legacy response =
+    Alcotest.(check (option string)) "counter-offers latest legacy version"
+      (Some "2025-11-25")
+      (match List.assoc_opt "protocolVersion" (result_fields_exn response) with
+       | Some (`String version) -> Some version
+       | Some _ | None -> None)
+  in
+  expect_legacy (Mcp_eio.handle_request ~clock ~sw state request);
+  let modern_request =
+    Yojson.Safe.from_string request
+    |> (function
+        | `Assoc fields ->
+          `Assoc (List.map (function
+            | "params", `Assoc params ->
+              "params", `Assoc (List.map (function
+                | "protocolVersion", _ -> "protocolVersion", `String "2026-07-28"
+                | field -> field) params)
+            | field -> field) fields)
+        | json -> json)
+    |> Yojson.Safe.to_string
+  in
+  expect_legacy (Mcp_eio.handle_request ~clock ~sw state modern_request);
 
   cleanup_dir base_path
 
@@ -630,6 +648,333 @@ let test_handle_request_server_discover_2026 () =
   Alcotest.(check bool) "has capabilities" true
     (List.mem_assoc "capabilities" result);
   cleanup_dir base_path
+
+let stdio_modern_params ?(version = "2026-07-28") () =
+  `Assoc [ "_meta", `Assoc
+    [ Mcp_transport_protocol.protocol_version_meta_key, `String version
+    ; Mcp_transport_protocol.client_capabilities_meta_key, `Assoc [] ] ]
+
+let stdio_listen_params () =
+  match stdio_modern_params () with
+  | `Assoc fields -> `Assoc (("notifications", `Assoc []) :: fields)
+  | other -> other
+
+let stdio_request ?id ?params method_ =
+  `Assoc
+    ([ "jsonrpc", `String "2.0"; "method", `String method_ ]
+     @ (match id with Some value -> [ "id", value ] | None -> [])
+     @ (match params with Some value -> [ "params", value ] | None -> []))
+
+let run_stdio_messages ?(on_handled = fun _ _ _ -> ()) ~clock ~sw state messages =
+  let was_ready = Eio_guard.is_ready () in
+  Eio_guard.enable ();
+  let input, input_writer = Eio_unix.pipe sw in
+  let output, output_writer = Eio_unix.pipe sw in
+  let env = object
+    method clock = clock
+    method stdin = input
+    method stdout = output_writer
+  end in
+  let handle_request ~clock ~sw ~mcp_session_id state request =
+    let response = Mcp_eio.handle_request ~clock ~sw ?mcp_session_id state request in
+    on_handled mcp_session_id request response;
+    response
+  in
+  let finished, finish = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Fun.protect
+      ~finally:(fun () -> Eio.Flow.close output_writer; Eio.Promise.resolve finish ())
+      (fun () -> Masc.Mcp_server_eio_protocol.run_stdio ~handle_request ~sw ~env state));
+  let reader = Eio.Buf_read.of_flow output ~max_size:(1024 * 1024) in
+  let input_open = ref true in
+  let close_input () =
+    if !input_open then (input_open := false; Eio.Flow.close input_writer) in
+  let expects_response = function
+    | `Assoc fields ->
+      List.assoc_opt "jsonrpc" fields <> Some (`String "2.0")
+      || List.mem_assoc "id" fields
+    | _ -> true in
+  Fun.protect
+    ~finally:(fun () -> close_input (); if not was_ready then Eio_guard.disable ())
+    (fun () ->
+      let responses = List.filter_map (fun message ->
+        Eio.Flow.copy_string (Yojson.Safe.to_string message ^ "\n") input_writer;
+        if expects_response message then
+          Some (Eio.Time.with_timeout_exn clock 5. (fun () ->
+            Yojson.Safe.from_string (Eio.Buf_read.line reader)))
+        else None) messages in
+      close_input ();
+      Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await finished);
+      (match Eio.Buf_read.line reader with
+       | exception End_of_file -> ()
+       | _ -> Alcotest.fail "unexpected trailing stdio response");
+      responses)
+
+let test_stdio_admission_and_subscription_cancellation () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+    let state = Mcp_eio.For_testing.create_state ~base_path () in
+    let modern = stdio_modern_params () in
+    let listen = stdio_listen_params () in
+    let cancelled = `Assoc [ "requestId", `Int 3 ] in
+    let malformed_cancel = `Assoc
+      [ "jsonrpc", `String "1.0"; "method", `String "notifications/cancelled"
+      ; "params", cancelled ] in
+    let initialize = `Assoc
+      [ "protocolVersion", `String "2026-07-28"; "capabilities", `Assoc []
+      ; "clientInfo", `Assoc [ "name", `String "test"; "version", `String "1" ] ] in
+    let responses = run_stdio_messages ~clock ~sw state
+      [ stdio_request ~id:(`Int 1) "server/discover"
+      ; stdio_request ~id:(`Int 2) ~params:(stdio_modern_params ~version:"2099-01-01" ()) "server/discover"
+      ; stdio_request ~params:listen "subscriptions/listen"
+      ; stdio_request ~id:`Null ~params:listen "subscriptions/listen"
+      ; stdio_request ~id:(`Bool true) ~params:listen "subscriptions/listen"
+      ; stdio_request ~id:(`Int 3) ~params:listen "subscriptions/listen"
+      ; malformed_cancel
+      ; stdio_request ~params:(`Assoc [ "requestId", `Int 3; "reason", `Int 42 ]) "notifications/cancelled"
+      ; stdio_request ~params:(`Assoc [ "requestId", `Int 3; "requestId", `Int 3 ]) "notifications/cancelled"
+      ; stdio_request ~id:(`Int 3) ~params:modern "server/discover"
+      ; stdio_request ~params:cancelled "notifications/cancelled"
+      ; stdio_request ~id:(`Int 3) ~params:modern "server/discover"
+      ; stdio_request ~id:(`Int 4) ~params:initialize "initialize"
+      ; stdio_request "notifications/initialized"
+      ; stdio_request ~id:(`Int 5) "unknown/method"
+      ; stdio_request ~id:(`Int 6) ~params:modern "resources/subscribe"
+      ] in
+    let nth = List.nth responses in
+    Alcotest.(check int) "only requests and acknowledgement produce messages" 11
+      (List.length responses);
+    Alcotest.(check int) "missing modern metadata" (-32602) (error_code_exn (nth 0));
+    Alcotest.(check int) "unsupported modern version" (-32022) (error_code_exn (nth 1));
+    Alcotest.(check bool) "unsupported version echoes request ID" true
+      (Yojson.Safe.Util.member "id" (nth 1) = `Int 2);
+    Alcotest.(check int) "null request ID is not a notification" (-32600) (error_code_exn (nth 2));
+    Alcotest.(check int) "invalid request ID" (-32600) (error_code_exn (nth 3));
+    Alcotest.(check bool) "subscription acknowledged" true
+      (Yojson.Safe.Util.member "method" (nth 4) = `String "notifications/subscriptions/acknowledged");
+    Alcotest.(check int) "malformed cancellation rejected" (-32600) (error_code_exn (nth 5));
+    Alcotest.(check int) "active subscription ID is not reused" (-32600) (error_code_exn (nth 6));
+    Alcotest.(check bool) "duplicate error cannot end active subscription" true
+      (Yojson.Safe.Util.member "id" (nth 6) = `Null);
+    Alcotest.(check bool) "cancel frees ID without sending a response" true
+      (Yojson.Safe.Util.member "id" (nth 7) = `Int 3
+       && Yojson.Safe.Util.member "result" (nth 7) <> `Null);
+    Alcotest.(check bool) "initialize counter-offers legacy" true
+      (Yojson.Safe.Util.(member "protocolVersion" (member "result" (nth 8))) = `String "2025-11-25");
+    Alcotest.(check int) "legacy request reaches dispatcher" (-32601) (error_code_exn (nth 9));
+    Alcotest.(check int) "removed 2026 method rejected" (-32601) (error_code_exn (nth 10));
+    Alcotest.(check int) "no subscription remains after EOF" 0 (Mcp_subscriptions.count ()))
+
+let test_stdio_subscription_requires_auth () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+    let state = Mcp_eio.For_testing.create_state ~base_path () in
+    ignore (Auth.enable_auth base_path ~require_token:true ~agent_name:"test-admin");
+    let messages = run_stdio_messages ~clock ~sw state
+      [ stdio_request ~id:(`Int 7) ~params:(stdio_listen_params ()) "subscriptions/listen" ] in
+    match messages with
+    | [ response ] ->
+      Alcotest.(check int) "authentication rejection" (-32001) (error_code_exn response);
+      Alcotest.(check bool) "no subscription acknowledgement" true
+        (Yojson.Safe.Util.member "method" response = `Null)
+    | _ -> Alcotest.fail "expected only an authentication error")
+
+let test_stdio_legacy_ping_and_modern_removal () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+    let state = Mcp_eio.For_testing.create_state ~base_path () in
+    Auth.disable_auth base_path;
+    let initialize = `Assoc
+      [ "protocolVersion", `String "2025-11-25"; "capabilities", `Assoc []
+      ; "clientInfo", `Assoc [ "name", `String "test"; "version", `String "1" ] ] in
+    let responses = run_stdio_messages ~clock ~sw state
+      [ stdio_request ~id:(`Int 21) ~params:initialize "initialize"
+      ; stdio_request ~id:(`Int 22) "ping"
+      ; stdio_request "notifications/initialized"
+      ; stdio_request ~id:(`Int 23) "ping"
+      ; stdio_request ~id:(`Int 24) ~params:(stdio_modern_params ()) "ping"
+      ; stdio_request ~id:(`Int 25) ~params:`Null "ping"
+      ; stdio_request ~id:(`Int 26) ~params:(`List []) "ping"
+      ; stdio_request ~id:(`Int 27) ~params:(`Bool true) "ping"
+      ; stdio_request ~id:(`Int 28) ~params:(`Assoc [ "_meta", `Null ]) "ping"
+      ; stdio_request ~id:(`Int 29) ~params:(`Assoc [ "_meta", `Assoc [ "progressToken", `Bool true ] ]) "ping"
+      ; stdio_request ~id:(`Int 30) ~params:(`Assoc [ "_meta", `Assoc [ "progressToken", `String "p" ]; "extra", `Int 1 ]) "ping" ] in
+    match responses with
+    | [ _; before_ready; after_ready; modern; null_params; list_params; bool_params;
+        bad_meta; bad_token; valid_meta ] ->
+      List.iter2 (fun id response ->
+        Alcotest.(check bool) "legacy ping returns an empty result with its ID" true
+          (Yojson.Safe.Util.member "id" response = `Int id
+           && Yojson.Safe.Util.member "result" response = `Assoc []))
+        [ 22; 23 ] [ before_ready; after_ready ];
+      Alcotest.(check int) "modern ping was removed" (-32601) (error_code_exn modern);
+      Alcotest.(check bool) "modern error preserves ID" true
+        (Yojson.Safe.Util.member "id" modern = `Int 24);
+      List.iter2 (fun id response ->
+        Alcotest.(check int) "invalid ping params rejected" (-32602) (error_code_exn response);
+        Alcotest.(check bool) "ping error preserves ID" true
+          (Yojson.Safe.Util.member "id" response = `Int id))
+        [ 25; 26; 27; 28; 29 ] [ null_params; list_params; bool_params; bad_meta; bad_token ];
+      Alcotest.(check bool) "legacy metadata and extensions are accepted" true
+        (Yojson.Safe.Util.member "id" valid_meta = `Int 30
+         && Yojson.Safe.Util.member "result" valid_meta = `Assoc [])
+    | _ -> Alcotest.fail "expected initialize and nine ping responses")
+
+let test_stdio_rejects_unissued_modern_continuations () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+    let state = Mcp_eio.For_testing.create_state ~base_path () in
+    Auth.disable_auth base_path;
+    let params field name continuation =
+      match stdio_modern_params () with
+      | `Assoc fields -> `Assoc ((field, `String name) :: continuation :: fields)
+      | _ -> assert false in
+    let cases =
+      [ 31, "tools/call", "name", "masc_status", ("requestState", `String "opaque")
+      ; 32, "tools/call", "name", "masc_status", ("inputResponses", `Assoc [])
+      ; 33, "resources/read", "uri", "masc://status", ("requestState", `String "opaque")
+      ; 34, "resources/read", "uri", "masc://status", ("inputResponses", `Assoc [])
+      ; 35, "prompts/get", "name", "tool_help", ("requestState", `String "opaque")
+      ; 36, "prompts/get", "name", "tool_help", ("inputResponses", `Assoc []) ] in
+    let messages = List.map (fun (id, method_, field, name, continuation) ->
+      stdio_request ~id:(`Int id) ~params:(params field name continuation) method_) cases in
+    let responses = run_stdio_messages ~clock ~sw state messages in
+    Alcotest.(check int) "one error per request" (List.length cases) (List.length responses);
+    List.iter2 (fun (id, _, _, _, _) response ->
+      Alcotest.(check int) "unissued continuation is invalid" (-32602) (error_code_exn response);
+      Alcotest.(check bool) "original ID is preserved" true
+        (Yojson.Safe.Util.member "id" response = `Int id)) cases responses)
+
+let test_stdio_modern_calls_do_not_reuse_legacy_identity () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+    let state = Mcp_eio.For_testing.create_state ~base_path () in
+    ignore (Masc.Workspace.init (Masc.Mcp_server.workspace_config state) ~agent_name:None);
+    let before = Client_registry_eio.total_count () in
+    let observed = ref [] in
+    let on_handled session request _response =
+      let method_ = Yojson.Safe.from_string request |> Yojson.Safe.Util.member "method" in
+      let subscribed = match session with
+        | None -> false
+        | Some session_id ->
+          Masc.Mcp_server_eio_protocol.For_testing.resource_is_subscribed
+            ~session_id ~uri:"masc://status" in
+      observed := (method_, session, Client_registry_eio.total_count (), subscribed) :: !observed
+    in
+    let modern_call arguments =
+      match stdio_modern_params () with
+      | `Assoc fields -> `Assoc (("name", `String "masc_status") :: ("arguments", arguments) :: fields)
+      | _ -> assert false
+    in
+    let initialize = `Assoc
+      [ "protocolVersion", `String "2025-11-25"; "capabilities", `Assoc []
+      ; "clientInfo", `Assoc [ "name", `String "test"; "version", `String "1" ] ] in
+    let uri = `Assoc [ "uri", `String "masc://status" ] in
+    let responses = run_stdio_messages ~on_handled ~clock ~sw state
+      [ stdio_request ~id:(`Int 1) ~params:(modern_call (`Assoc [ "_agent_name", `String "alice" ])) "tools/call"
+      ; stdio_request ~id:(`Int 2) ~params:(modern_call (`Assoc [])) "tools/call"
+      ; stdio_request ~id:(`Int 3) ~params:initialize "initialize"
+      ; stdio_request "notifications/initialized"
+      ; stdio_request ~id:(`Int 6) ~params:(`Assoc
+          [ "name", `String "masc_status"; "arguments", `Assoc [ "_agent_name", `String "legacy-alice" ] ]) "tools/call"
+      ; stdio_request ~id:(`Int 4) ~params:uri "resources/subscribe"
+      ; stdio_request ~id:(`Int 5) ~params:uri "resources/unsubscribe"
+      ; stdio_request ~id:(`Int 7) ~params:uri "resources/subscribe" ] in
+    let seen = List.rev !observed in
+    (match seen with
+     | [ (`String "tools/call", None, count1, _); (`String "tools/call", None, count2, _)
+       ; (`String "initialize", Some session1, _, _); (`String "notifications/initialized", Some session2, _, _)
+       ; (`String "tools/call", Some session3, legacy_count, _)
+       ; (`String "resources/subscribe", Some session4, _, true)
+       ; (`String "resources/unsubscribe", Some session5, _, false)
+       ; (`String "resources/subscribe", Some session6, _, true) ] ->
+       Alcotest.(check int) "first modern call does not cache its caller" before count1;
+       Alcotest.(check int) "second modern call has no prior caller cache" before count2;
+       Alcotest.(check int) "legacy call registered an identity" (before + 1) legacy_count;
+       Alcotest.(check bool) "legacy lifecycle keeps one connection session" true
+         (String.equal session1 session2 && String.equal session2 session3 && String.equal session3 session4
+          && String.equal session4 session5 && String.equal session5 session6);
+       Alcotest.(check bool) "stdio EOF removes the remaining legacy subscription" false
+         (Masc.Mcp_server_eio_protocol.For_testing.resource_is_subscribed
+            ~session_id:session1 ~uri:"masc://status")
+     | _ -> Alcotest.fail "unexpected modern or legacy session admission");
+    Alcotest.(check int) "all requests returned one response" 7 (List.length responses);
+    List.iter (fun response ->
+      Alcotest.(check bool) "tool and legacy subscription requests reached their handler" true
+        (Yojson.Safe.Util.member "result" response <> `Null)) responses;
+    Alcotest.(check int) "stdio EOF removed legacy identity" before (Client_registry_eio.total_count ()))
+
+let test_stdio_forwards_external_credential () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+    let state = Mcp_eio.For_testing.create_state ~base_path () in
+    ignore (Auth.enable_auth base_path ~require_token:true ~agent_name:"test-admin");
+    let token = match Auth.create_token base_path ~agent_name:"stdio-client" ~role:Masc_domain.Worker with
+      | Ok (token, _) -> token
+      | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error) in
+    let player = match Auth.create_token base_path ~agent_name:"stdio-player" ~role:Masc_domain.Player with
+      | Ok (token, _) -> token
+      | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error) in
+    let execute ?auth_token () =
+      let input, input_writer = Eio_unix.pipe sw in
+      let output, output_writer = Eio_unix.pipe sw in
+      let stdio_env : Eio_unix.Stdenv.base = object
+        method stdin = input
+        method stdout = output_writer
+        method stderr = env#stderr
+        method net = env#net
+        method domain_mgr = env#domain_mgr
+        method process_mgr = env#process_mgr
+        method clock = env#clock
+        method mono_clock = env#mono_clock
+        method fs = env#fs
+        method cwd = env#cwd
+        method secure_random = env#secure_random
+        method debug = env#debug
+        method backend_id = env#backend_id
+      end in
+      let finished, finish = Eio.Promise.create () in
+      Eio.Fiber.fork ~sw (fun () ->
+        Fun.protect
+          ~finally:(fun () -> Eio.Flow.close output_writer; Eio.Promise.resolve finish ())
+          (fun () -> Mcp_eio.run_stdio ?auth_token ~sw ~env:stdio_env state));
+      let request = stdio_request ~id:(`Int 10) ~params:(stdio_modern_params ()) "resources/list" in
+      Eio.Flow.copy_string (Yojson.Safe.to_string request ^ "\n") input_writer;
+      Eio.Flow.close input_writer;
+      let response = Eio.Buf_read.of_flow output ~max_size:(1024 * 1024) |> Eio.Buf_read.line in
+      Eio.Promise.await finished;
+      Yojson.Safe.from_string response
+    in
+    Alcotest.(check int) "missing credential rejected" (-32001) (error_code_exn (execute ()));
+    Alcotest.(check int) "invalid credential rejected" (-32001)
+      (error_code_exn (execute ~auth_token:"invalid" ()));
+    Alcotest.(check int) "player cannot read full workspace resources" (-32001)
+      (error_code_exn (execute ~auth_token:player ()));
+    Alcotest.(check bool) "explicit caller credential admitted" true
+      (Yojson.Safe.Util.member "result" (execute ~auth_token:token ()) <> `Null))
 
 let test_handle_request_tools_list () =
   Eio_main.run @@ fun env ->
@@ -3203,10 +3548,22 @@ let response_tests = [
 
 let eio_tests = [
   "handle initialize", `Quick, test_handle_request_initialize;
-  "handle initialize rejects unsupported protocol version", `Quick,
-    test_handle_request_initialize_rejects_unsupported_protocol_version;
+  "handle initialize counteroffers a legacy version", `Quick,
+    test_handle_request_initialize_counteroffers_legacy_version;
   "handle server/discover advertises 2026", `Quick,
     test_handle_request_server_discover_2026;
+  "stdio admission and subscription cancellation", `Quick,
+    test_stdio_admission_and_subscription_cancellation;
+  "stdio subscription requires authentication", `Quick,
+    test_stdio_subscription_requires_auth;
+  "stdio legacy ping and modern removal", `Quick,
+    test_stdio_legacy_ping_and_modern_removal;
+  "stdio rejects unissued modern continuations", `Quick,
+    test_stdio_rejects_unissued_modern_continuations;
+  "stdio modern identity and legacy session isolation", `Quick,
+    test_stdio_modern_calls_do_not_reuse_legacy_identity;
+  "stdio forwards external credential", `Quick,
+    test_stdio_forwards_external_credential;
   "handle initialize operator profile", `Quick,
     test_handle_request_initialize_operator_profile;
   "handle tools/list", `Quick, test_handle_request_tools_list;

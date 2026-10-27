@@ -6784,3 +6784,5 @@
  (name test_tui_frame_lines)
  (modules test_tui_frame_lines)
  (libraries alcotest masc_tui_render_prim))
+
+(include stanzas/test_endpoint_job_protocol.inc)

@@ -56,7 +56,7 @@
 |---|---|---|---|
 | B1 | `authz.jsonl`: append-only, 프로세스 배타 writer lock, lock-free snapshot, replay. `Candle_ledger`의 방식을 따른다. lease 계열 group commit은 E1에서 붙인다. | §8.1 | A3 |
 | B2 | 외부 고수위와 `Intent_pending`/`Committed`. 같은 writer lock 구역, 판정 갈래 1~5, `AuthorizationUncertain`, `Revocation_pending` 게이트, `Fresh_bootstrap`. 갈래마다 고장 주입 시험을 둔다. 외부 저장소의 위치를 정하는 방식을 먼저 정한다(§5의 결정 3). | §8.2~8.4 | B1 |
-| B3 | Principal·Admin_assignment·WorkspaceMembership·초대 저장소, tombstone, 마지막 Admin 보호, 호스트 로컬 bootstrap. | §4.1, §5.1 | B1, B2 |
+| B3 | Principal·Admin_assignment·WorkspaceMembership·초대 저장소, principal 삭제 사건, 마지막 Admin 보호, 호스트 로컬 bootstrap. | §4.1, §5.1 | B1, B2 |
 
 ### C. 인증
 

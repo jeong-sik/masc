@@ -1117,9 +1117,84 @@ let test_health_placeholder_has_unknown_counts () =
     ["keeper_count"; "total_row_count"; "observed_row_count"; "observed_source_counts"; "read_error_count"; "schedule_ledger"]
 ;;
 
+let admit_stimulus config keeper_name stimulus =
+  match
+    Keeper_event_queue_persistence.enqueue_stimulus_if_absent_result
+      ~base_path:config.Workspace_utils_backend_setup.base_path
+      ~keeper_name
+      stimulus
+  with
+  | Ok _ -> ()
+  | Error err -> fail ("enqueue failed: " ^ err)
+;;
+
+let queue_residence_of_keeper json keeper_name =
+  match find_keeper json keeper_name with
+  | None -> fail ("keeper row missing: " ^ keeper_name)
+  | Some keeper -> keeper, U.member "queue_residence" keeper
+;;
+
+let test_queue_residence_is_the_admission_time_not_the_source_time () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "queue-residence-keeper" in
+  ensure_keeper config keeper_name;
+  let before = Unix.gettimeofday () in
+  admit_stimulus
+    config
+    keeper_name
+    (stimulus ~post_id:"residence-1" ~arrived_at:100.0 Keeper_event_queue.Bootstrap);
+  let json = Server_keeper_waiting_inventory.dashboard_json config in
+  let keeper, residence = queue_residence_of_keeper json keeper_name in
+  check bool "row since stays the source's own arrival time" true
+    (Float.equal 100.0 U.(keeper |> member "since" |> to_float));
+  check string "residence is observed" "observed" (json_string_member "status" residence);
+  let admitted_at = U.(residence |> member "oldest_admitted_at_unix" |> to_float) in
+  check bool "residence starts at the durable admission clock" true
+    (admitted_at >= before);
+  check bool "residence age is not the source age" true
+    (U.(residence |> member "oldest_age_seconds" |> to_float) < 100.0)
+;;
+
+let test_queue_residence_without_a_recorded_clock_is_unknown () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "queue-residence-unrecorded-keeper" in
+  ensure_keeper config keeper_name;
+  Keeper_event_queue_persistence.persist
+    ~base_path:config.Workspace_utils_backend_setup.base_path
+    ~keeper_name
+    (queue_of_list
+       [ stimulus ~post_id:"residence-2" ~arrived_at:100.0 Keeper_event_queue.Bootstrap ]);
+  let json = Server_keeper_waiting_inventory.dashboard_json config in
+  let _, residence = queue_residence_of_keeper json keeper_name in
+  check string "residence is unknown" "unknown" (json_string_member "status" residence);
+  check string "reason names the missing clock" "first_admission_not_recorded"
+    (json_string_member "reason" residence);
+  check bool "no age is invented" true (U.member "oldest_age_seconds" residence = `Null)
+;;
+
+let test_queue_residence_of_an_empty_queue_is_empty () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "queue-residence-empty-keeper" in
+  ensure_keeper config keeper_name;
+  let json = Server_keeper_waiting_inventory.dashboard_json config in
+  let _, residence = queue_residence_of_keeper json keeper_name in
+  check string "residence is empty" "empty" (json_string_member "status" residence)
+;;
+
 let () =
   run "keeper_waiting_inventory"
-    [ ( "dashboard_json"
+    [ ( "queue_residence"
+      , [ test_case "residence is the admission time, not the source time" `Quick
+            test_queue_residence_is_the_admission_time_not_the_source_time
+        ; test_case "residence without a recorded clock is unknown" `Quick
+            test_queue_residence_without_a_recorded_clock_is_unknown
+        ; test_case "residence of an empty queue is empty" `Quick
+            test_queue_residence_of_an_empty_queue_is_empty
+        ] )
+    ; ( "dashboard_json"
       , [ test_case "event queue pending is visible" `Quick
             test_event_queue_pending_is_visible
         ; test_case "a settled composition row names what finished" `Quick

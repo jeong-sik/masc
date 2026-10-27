@@ -89,12 +89,7 @@ let owned_backend_cleanup () =
       let downloads=Filename.concat root "downloads" in
       Unix.mkdir downloads 0o700;
       Unix.mkdir (Filename.concat downloads "session") 0o700;
-      let file=Filename.concat (Filename.concat downloads "session") "partial" in
-      Out_channel.with_open_bin file (fun out -> output_string out "preserve");
       lease (Lease.retire admission);
-      check "download content is retained" true (Result.is_error (Socket.cleanup ~admission ~directory));
-      check "unconfirmed download content remains" true (Sys.file_exists file);
-      Unix.unlink file;
       released (Socket.cleanup ~admission ~directory);
       check "a settled worker and empty trees release the allocation" false (Sys.file_exists root))
 let interrupted_owned_cleanup () =
@@ -137,21 +132,61 @@ let acquisition_state directory =
           | Some (`String state) -> state | _ -> Alcotest.fail "acquisition record has no state")
       | _ -> Alcotest.fail "acquisition record is not an object")
   | names -> Alcotest.failf "expected one acquisition record, found %d" (List.length names)
-let operator_retains_unconfirmed_allocation () =
+(* Files the browser left for the Keeper keep the allocation once its worker
+   settled: the record says retained, nothing is removed, and no later
+   cleanup releases it. *)
+let keeper_files_keep_the_allocation () =
+  List.iter (fun tree ->
+    with_claim ~source:(fun _ -> Socket.Automation owned_gecko)
+      (fun admission directory root ->
+        ignore (ok (Socket.acquire ~admission ~directory));
+        let parent=Filename.concat root tree in
+        Unix.mkdir parent 0o700;
+        Unix.mkdir (Filename.concat parent "session") 0o700;
+        let file=Filename.concat (Filename.concat parent "session") "left" in
+        Out_channel.with_open_bin file (fun out -> output_string out "kept");
+        check (tree ^ ": a worker that has not settled keeps nothing") true
+          (Result.is_error (Socket.cleanup ~admission ~directory));
+        check (tree ^ ": the record is still acquired") true (acquisition_state directory = "acquired");
+        lease (Lease.retire admission);
+        check (tree ^ ": the allocation is kept with its one file") true
+          (match Socket.cleanup ~admission ~directory with
+           | Ok (Socket.Allocation_kept {directory=kept;files}) -> kept=root && files=1
+           | Ok (Socket.Allocation_released|Allocation_retained) | Error _ -> false);
+        check (tree ^ ": the record says retained") true (acquisition_state directory = "retained");
+        check (tree ^ ": the file stays") true (Sys.file_exists file);
+        check (tree ^ ": the worker's own files stay") true (Sys.file_exists (Filename.concat root "automation.json"));
+        check (tree ^ ": a later cleanup reports it retained") true
+          (ok (Socket.cleanup ~admission ~directory) = Socket.Allocation_retained);
+        check (tree ^ ": a later cleanup leaves it in place") true (Sys.file_exists file)))
+    ["downloads";"download-snapshots";"uploads"]
+(* A link is no file a browser left for the Keeper: the allocation is not kept
+   on its account and its release stays unconfirmed. *)
+let a_link_left_behind_is_unconfirmed () =
   with_claim ~source:(fun _ -> Socket.Automation owned_gecko)
     (fun admission directory root ->
       ignore (ok (Socket.acquire ~admission ~directory));
       let downloads=Filename.concat root "downloads" in
       Unix.mkdir downloads 0o700;
-      let file=Filename.concat downloads "unsettled-download" in
+      let link=Filename.concat downloads "link" in
+      Unix.symlink (Filename.concat root "automation.json") link;
+      lease (Lease.retire admission);
+      check "a link leaves the release unconfirmed" true (Result.is_error (Socket.cleanup ~admission ~directory));
+      check "the record is not retained" true (acquisition_state directory = "acquired");
+      check "the link stays" true (Sys.file_exists link))
+let operator_retains_unconfirmed_allocation () =
+  with_claim ~source:(fun _ -> Socket.Automation owned_gecko)
+    (fun admission directory root ->
+      ignore (ok (Socket.acquire ~admission ~directory));
+      let file=Filename.concat root "stagehand.json" in
       Out_channel.with_open_bin file (fun out -> output_string out "preserve");
       refused "a launchable reservation cannot be retained" (Socket.retain ~admission ~directory);
       check "a refused retain keeps the acquisition" true (acquisition_state directory = "acquired");
       lease (Lease.retire admission);
-      check "unsettled download content retains the allocation" true (Result.is_error (Socket.cleanup ~admission ~directory));
+      check "an unknown resource leaves the release unconfirmed" true (Result.is_error (Socket.cleanup ~admission ~directory));
       check "the operator retains the allocation" true (retain_ok (Socket.retain ~admission ~directory) = Socket.Allocation_retained);
       check "the acquisition record names the operator's retention" true (acquisition_state directory = "retained");
-      check "retained download content remains" true (Sys.file_exists file);
+      check "the unknown resource remains" true (Sys.file_exists file);
       (* A later recovery pass reports the retention, never a release. *)
       retained (Socket.cleanup ~admission ~directory);
       check "cleanup leaves a retained allocation in place" true (Sys.file_exists file);
@@ -375,6 +410,8 @@ let () = Alcotest.run "browser addon socket ownership" ["recovery",[
   Alcotest.test_case "owned backend requires a settled worker and empty resource trees" `Quick owned_backend_cleanup;
   Alcotest.test_case "owned cleanup resumes after interrupted file deletion" `Quick interrupted_owned_cleanup;
   Alcotest.test_case "another source's resources retain the allocation" `Quick foreign_source_resources;
+  Alcotest.test_case "files left for the Keeper keep the allocation" `Quick keeper_files_keep_the_allocation;
+  Alcotest.test_case "a link left behind leaves the release unconfirmed" `Quick a_link_left_behind_is_unconfirmed;
   Alcotest.test_case "the operator retains an unconfirmed allocation in place" `Quick operator_retains_unconfirmed_allocation;
   Alcotest.test_case "retain refuses a replaced allocation directory" `Quick retain_refuses_replaced_directory;
   Alcotest.test_case "retain reports an allocation already released" `Quick retain_reports_a_released_allocation;

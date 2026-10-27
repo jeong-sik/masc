@@ -1518,8 +1518,16 @@ let native_settlement claim =
   match status with
   | Native_addon_lease.Settled ->
       (match Native_addon_lease.directories claim with
-       | directory::_ -> offload (fun () -> Browser_addon_socket.cleanup ~admission:claim ~directory)
-           |> Result.map_error (fun detail -> Lifecycle.Cleanup_unconfirmed detail)
+       | directory::_ ->
+           let* settlement = offload (fun () -> Browser_addon_socket.cleanup ~admission:claim ~directory)
+             |> Result.map_error (fun detail -> Lifecycle.Cleanup_unconfirmed detail) in
+           (match settlement with
+            | Browser_addon_socket.Allocation_kept {directory;files} ->
+                Log.Misc.warn "Lane Add-on instance %s left %d file(s) for the Keeper in %s; the \
+                  allocation is kept there for the operator and its declaration may start a new instance"
+                  (Native_addon_lease.instance_id claim) files directory
+            | Allocation_released | Allocation_retained -> ());
+           Ok settlement
        | [] -> Error (Lifecycle.Cleanup_unconfirmed "native claim has no host slot"))
   | Awaiting_exec | Live _ | Cleanup_pending _ ->
       Error (Lifecycle.Cleanup_unconfirmed "native claim has not settled")
@@ -1527,11 +1535,12 @@ let native_settlement claim =
    settled as well, and it is never removed by them. *)
 let native_settled claim =
   Result.map (fun (_ : Browser_addon_socket.settlement) -> ()) (native_settlement claim)
-(* An allocation the operator retained is never reported as released, even
-   when the binding still says Failed because its own write did not land. *)
+(* An allocation the operator retained, or one kept for the files its browser
+   left for the Keeper, is never reported as released, even when the binding
+   still says Failed because its own write did not land. *)
 let native_release ~installation_id ~instance_id = function
   | Browser_addon_socket.Allocation_released -> Lifecycle.Native_released {installation_id;instance_id}
-  | Allocation_retained -> Lifecycle.Native_retained {installation_id;instance_id}
+  | Allocation_retained | Allocation_kept _ -> Lifecycle.Native_retained {installation_id;instance_id}
 let native_recover ~store ~installation_id ~instance_id =
   let* claim = offload (fun () -> Native_addon_lease.reopen
     ~directories:(native_directories store installation_id) ~instance_id) |> native_result in

@@ -94,7 +94,7 @@ while True:
       lease (Lease.retire admission);
       (match ok (Socket.cleanup ~admission ~directory:worker_slot) with
        | Socket.Allocation_released -> ()
-       | Allocation_retained -> Alcotest.fail "the allocation was retained, not released");
+       | Allocation_retained | Allocation_kept _ -> Alcotest.fail "the allocation was retained, not released");
       check "old cleanup works after the shared profile intent advances" false (Sys.file_exists directory);
       Alcotest.check Alcotest.string "login fixture survives old-owner cleanup" "retained-login-fixture"
         (In_channel.with_open_bin marker In_channel.input_all);

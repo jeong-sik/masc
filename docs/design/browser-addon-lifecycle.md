@@ -227,7 +227,12 @@ receipts remain distinct from successful contract validation.
    The host additionally requires native group settlement, the original
    allocation inode, its unchanged spec and empty download directory trees. It
    removes only known regular files, the socket and empty directories. Changed
-   identity or downloaded bytes retain the allocation and refuse replacement.
+   identity refuses replacement. Files the browser left for the Keeper
+   (downloads, their host snapshots, uploads) are not a running resource: once
+   the group has settled and the inode is the original, they keep the
+   allocation where it is, its record becomes retained as an operator retain
+   writes it, the server log names the folder, and the declaration may start
+   the next instance. The host never removes them.
    A session's profile is removed under its own lock when the session ends.
    geckodriver never removes a profile it was given
    ([geckodriver profiles](https://firefox-source-docs.mozilla.org/testing/geckodriver/Profiles.html)),

@@ -165,13 +165,13 @@ let scenario ?(open_session=false) ?(refuse_delete=false) ?(wrong_profile=false)
        the allocation. The session's profile is left for the host's pass. *)
     (match ok (Socket.cleanup ~admission ~directory:slot) with
      | Socket.Allocation_released -> ()
-     | Allocation_retained -> Alcotest.fail "the allocation was retained, not released");
+     | Allocation_retained | Allocation_kept _ -> Alcotest.fail "the allocation was retained, not released");
     check bool "a session whose DELETE was refused keeps its profile for the host" true
       (List.for_all Sys.file_exists (seen_profiles driver_root) && seen_profiles driver_root <> []))
   else (
     (match ok (Socket.cleanup ~admission ~directory:slot) with
      | Socket.Allocation_released -> ()
-     | Allocation_retained -> Alcotest.fail "the allocation was retained, not released");
+     | Allocation_retained | Allocation_kept _ -> Alcotest.fail "the allocation was retained, not released");
     check bool "original allocation released" false (Sys.file_exists directory));
   List.iter Fs_compat.remove_tree [slot;driver_root;profile_root])
 (* The worker of #45187 kept serving after its creation answer carried no
@@ -194,7 +194,7 @@ let with_instance ~marker body = Eio_main.run (fun env ->
     lease (Native_addon_lease.retire admission);
     (match ok (Socket.cleanup ~admission ~directory:slot) with
      | Socket.Allocation_released -> ()
-     | Allocation_retained -> fail "the allocation was retained, not released");
+     | Allocation_retained | Allocation_kept _ -> fail "the allocation was retained, not released");
     (* The host pass removes a profile the ended worker left. *)
     let left=seen_profiles driver_root in
     let outcomes=Masc.Browser_gecko_sweep.(pass (create ~termination_grace_seconds)

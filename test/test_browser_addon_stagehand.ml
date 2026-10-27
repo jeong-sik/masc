@@ -143,7 +143,7 @@ while True:
       lease (Lease.retire admission);
       (match ok (Socket.cleanup ~admission ~directory:(Filename.concat root "worker-slot")) with
        | Socket.Allocation_released -> ()
-       | Allocation_retained -> Alcotest.fail "the allocation was retained, not released");
+       | Allocation_retained | Allocation_kept _ -> Alcotest.fail "the allocation was retained, not released");
       check "host cleanup released the original allocation" false (Sys.file_exists directory);
       check "profile cleanup never follows a symlink" true (Sys.file_exists outside);
       check "child admission ledger survives profile cleanup" true (Sys.file_exists (Filename.concat root "chrome-slot/lease"))))))

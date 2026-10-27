@@ -21952,7 +21952,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
        | Some view ->
            let next, read = match view.load with
              | Loading (_, Discover _) -> Browser_lane_view.accept_clients ~generation result view
-             | Idle | No_browser | Loading _ | Failed _ ->
+             | Loading (_, (Read | Open_session | Close_session | Goto _ | Screenshot _
+                            | Read_refresh | Scene_read _ | Scene_regions _ | Scene_refresh _
+                            | Scene_scroll _ | Scene_focus _ | Scene_click _ | Scene_follow _
+                            | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_cadence _
+                            | Viewport_pointer _))
+             | Idle | No_browser | Failed _ ->
                (if generation=state.browser_lane_generation
                 then Browser_lane_view.accept_activity result view else view),false in
            let operation = Browser_lane_view.discovery_continuation next in

@@ -5,9 +5,16 @@
     must resolve only to public addresses ({!Server_outbound_address}), no
     redirect is followed, the body may be at most
     {!Auth_oauth_client_metadata.max_document_bytes}, and only HTTP 200 is a
-    document. Every fetch goes to the network; nothing is cached. *)
+    document. Every fetch goes to the network; nothing is cached.
+
+    The URL is chosen by whoever sends the request, so call this only for a
+    request a cross-site page cannot send, such as the operator's
+    same-origin approval. A fetch can take longer than [fetch_timeout_sec]:
+    the two name lookups (the address check, then the HTTP client's own) are
+    bounded by the system resolver, not by that deadline. *)
 
 val fetch_timeout_sec : float
+(** The deadline for connecting, sending the request and reading the body. *)
 
 val fetch :
   clock:float Eio.Time.clock_ty Eio.Resource.t ->

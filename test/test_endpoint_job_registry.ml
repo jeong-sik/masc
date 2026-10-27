@@ -37,17 +37,63 @@ let completed = function
   | R.Not_performed e -> fail (R.error_to_string e)
 let rejected label value = check bool label true (Result.is_error value)
 
-let test_original_admission_survives_reopen () = fixture (fun ~env:_ ~sw:_ ~root:_ ~registry ~open_root ->
+let test_original_admission_survives_reopen () = fixture (fun ~env:_ ~sw:_ ~root ~registry ~open_root ->
   let b=binding (id "05") in let first=admitted registry b in
   check int64 "admission is durably ready before return" 1L (R.revision first);
   check bool "complete binary launch data is retained" true (R.specification first=spec);
   check bool "admission itself grants no launch" true (R.launch_state first=R.Not_requested);
+  let claim=Yojson.Safe.from_file (claim_path root b) in
+  check int "new claims use outer format v2" 2 Yojson.Safe.Util.(claim |> member "version" |> to_int);
+  check string "new claims retain the reconciliation operation" "reconcile_admission"
+    Yojson.Safe.Util.(claim |> member "original" |> member "operation" |> to_string);
   let repeated=R.admit registry ~new_admission_id:(id "99") ~binding:b ~spec |> get in
   check bool "duplicate caller does not replace the original admission identity" true (R.admission_id first=R.admission_id repeated);
   let reopened=open_root () |> get in let recovered=R.load reopened ~binding:b |> get in
   check bool "restart read preserves original owner, invocation and launch bytes" true
     (R.binding recovered=b && R.specification recovered=spec && R.admission_id recovered=id "04");
   check int "payload identity remains original" (chosen_payload_uid ()) (R.payload_uid recovered))
+
+let test_legacy_claim_version_is_rejected_before_decode label historical_kind () =
+  fixture (fun ~env:_ ~sw:_ ~root ~registry ~open_root ->
+    let b=binding (id "05") in let original=admitted registry b in
+    let claim=claim_path root b in
+    let fields=match Yojson.Safe.from_file claim with
+      | `Assoc fields -> fields | _ -> fail "fixture claim is not an object" in
+    let current_original=List.assoc "original" fields in
+    let historical_original=match historical_kind with
+      | `Inspect ->
+        let binding=match current_original with
+          | `Assoc fields -> List.assoc "binding" fields
+          | _ -> fail "fixture original is not an object" in
+        `Assoc ["protocol",`String "masc_endpoint_jobs";"version",`Int 1;
+          "operation",`String "inspect";"binding",binding]
+      | `Reconcile_admission -> current_original in
+    let replace key value fields=(key,value)::List.remove_assoc key fields in
+    let historical=`Assoc (fields |> replace "version" (`Int 1) |> replace "original" historical_original) in
+    Unix.chmod claim 0o600;Yojson.Safe.to_file claim historical;Unix.chmod claim 0o400;
+    let job=job_path root b in
+    let admission_path=Filename.concat job "admission_id" in
+    let original_path=Filename.concat job "original.json" in
+    let claim_before=In_channel.with_open_bin claim In_channel.input_all in
+    let admission_before=In_channel.with_open_bin admission_path In_channel.input_all in
+    let original_before=In_channel.with_open_bin original_path In_channel.input_all in
+    let job_inode=(Unix.lstat job).st_ino in
+    let expected=Error (R.Unsupported_version {expected=2;actual=1}) in
+    let reopened=open_root () |> get in
+    let check_unchanged operation =
+      check string (label ^ ": " ^ operation ^ " leaves claim bytes unchanged") claim_before
+        (In_channel.with_open_bin claim In_channel.input_all);
+      check string (label ^ ": " ^ operation ^ " leaves admission identity unchanged") admission_before
+        (In_channel.with_open_bin admission_path In_channel.input_all);
+      check string (label ^ ": " ^ operation ^ " leaves original bytes unchanged") original_before
+        (In_channel.with_open_bin original_path In_channel.input_all);
+      check int (label ^ ": " ^ operation ^ " does not replace the job") job_inode (Unix.lstat job).st_ino in
+    check bool (label ^ ": public load rejects outer v1") true (R.load reopened ~binding:b=expected);
+    check_unchanged "load";
+    check bool (label ^ ": public admit rejects outer v1") true
+      (R.admit reopened ~new_admission_id:(id "99") ~binding:b ~spec=expected);
+    check_unchanged "admit";
+    check string (label ^ ": fixture retains the original admission") (P.Id.to_string (R.admission_id original)) admission_before)
 
 exception Interrupted
 let test_preparing_boundaries_resume_original () =
@@ -417,6 +463,10 @@ let test_cancel_rejects_rebound_job_and_known_launch_coordinates () =
 
 let ()=run "endpoint job registry" ["original durable admission",[
   test_case "original admission is idempotent and survives reopen" `Quick test_original_admission_survives_reopen;
+  test_case "base Inspect outer v1 is rejected before original decoding" `Quick
+    (test_legacy_claim_version_is_rejected_before_decode "base Inspect with bare binding" `Inspect);
+  test_case "f8df Reconcile_admission outer v1 is rejected before original decoding" `Quick
+    (test_legacy_claim_version_is_rejected_before_decode "f8df Reconcile_admission with outer v1" `Reconcile_admission);
   test_case "preparing interruptions resume original admission and directory" `Quick test_preparing_boundaries_resume_original;
   test_case "competing directory publication preserves the original admission" `Quick test_competing_directory_publication_preserves_original;
   test_case "launch confirmation is original and its permit is single use" `Quick test_launch_confirmation_and_one_use;

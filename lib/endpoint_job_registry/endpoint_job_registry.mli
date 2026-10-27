@@ -41,6 +41,7 @@ type error =
   | Endpoint_replaced
   | Missing_original
   | Admission_incomplete
+  | Unsupported_version of { expected : int; actual : int }
   | Corrupt_original of string
   | Launch_already_requested
   | Launch_cancelled

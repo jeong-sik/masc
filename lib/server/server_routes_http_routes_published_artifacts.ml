@@ -61,6 +61,33 @@ let decode_check_request ~config ~body =
     check_error_response (Published_artifact_check_store.Invalid message))
     (Published_artifact_check.request_of_json json)
 
+let decode_share_request ~config ~body =
+  let ( let* ) = Result.bind in
+  let* json = match Yojson.Safe.from_string body with
+    | json -> Ok json
+    | exception Yojson.Json_error _ ->
+      Error (error_response (Store.Invalid "invalid JSON body")) in
+  let* json = match Workspace.validate_expected_workspace ~config json with
+    | Ok json -> Ok json
+    | Error Workspace.Invalid_workspace_precondition ->
+      Error (Server_refusal.json ~code:"invalid_workspace_precondition"
+        "invalid expected_workspace precondition", `Bad_request)
+    | Error Workspace.Workspace_precondition_failed ->
+      Error (Server_refusal.json ~code:"workspace_precondition_failed"
+        "workspace precondition failed", `Conflict) in
+  match json with
+  | `Assoc fields ->
+    let names = List.map fst fields in
+    if List.length names <> List.length (List.sort_uniq String.compare names)
+       || List.exists (fun name -> name <> "id" && name <> "shared") names
+    then Error (error_response (Store.Invalid "expected id and shared fields"))
+    else
+      (match List.assoc_opt "id" fields, List.assoc_opt "shared" fields with
+       | Some (`String id), Some (`Bool shared) when Published_artifact.valid_id id ->
+         Ok (id, shared)
+       | _ -> Error (error_response (Store.Invalid "id must be a valid artifact id and shared must be a boolean")))
+  | _ -> Error (error_response (Store.Invalid "expected a JSON object"))
+
 let authorized handler request reqd =
   with_token_permission_auth ~permission:Masc_domain.CanAdmin handler request reqd
 
@@ -70,11 +97,11 @@ let authorized_capability_read handler request reqd =
     match authorize_optional_token_bound_permission_request
             ~base_path ~permission:Masc_domain.CanAdmin request with
     | Error err -> respond_auth_error request reqd err
-    | Ok _ ->
+    | Ok actor ->
         match check_agent_rate_limit
                 ~quota:(read_request_quota request.Httpun.Request.meth)
                 request reqd with
-        | Ok () -> handler state request reqd
+        | Ok () -> handler state actor request reqd
         | Error () -> ()) request reqd
 
 let revision_param request =
@@ -96,20 +123,35 @@ let add_routes router =
         ["artifacts", `List listing.artifacts;
          "diagnostics", `List (List.map (fun (id, message) ->
            `Assoc ["id", `String id; "error", `String message]) listing.diagnostics)])))
-  |> Http.Router.prefix_get "/api/v1/published-artifacts/" (authorized_capability_read (fun state request reqd ->
+  |> Http.Router.prefix_get "/api/v1/published-artifacts/" (authorized_capability_read (fun state actor request reqd ->
     let base_path = (Mcp_server.workspace_config state).base_path in
     match extract_path_param ~prefix:"/api/v1/published-artifacts/" (Http.Request.path request),
           revision_param request with
     | None, _ -> refuse request reqd (Store.Invalid "artifact id required")
     | Some _, Error error -> refuse request reqd error
     | Some id, Ok revision ->
-      match Eio_unix.run_in_systhread (fun () -> Store.read ~base_path ~id ~revision) with
+      match Eio_unix.run_in_systhread (fun () ->
+        let ( let* ) = Result.bind in
+        let* shared = Store.is_shared ~base_path ~id in
+        match actor, shared with
+        | None, false -> Ok `Unauthorized_private_artifact
+        | Some _, _ | None, true ->
+          let* (artifact, selected, content) = Store.read ~base_path ~id ~revision in
+          Ok (`Allowed (artifact, selected, content, shared))) with
       | Error error -> refuse request reqd error
-      | Ok (artifact, selected, content) ->
+      | Ok `Unauthorized_private_artifact ->
+        respond_auth_error request reqd
+          (Masc_domain.Auth
+             (Masc_domain.Auth_error.Unauthorized
+                { reason = Missing_token
+                ; message = "Authentication required unless external sharing is enabled for this artifact."
+                }))
+      | Ok (`Allowed (artifact, selected, content, shared)) ->
         respond request reqd (`Assoc
           ["artifact", Published_artifact.summary_to_json ~id:artifact.id selected;
            "content", `String content;
-           "revisions", `List (List.map Published_artifact.revision_to_json artifact.revisions)])))
+           "revisions", `List (List.map Published_artifact.revision_to_json artifact.revisions);
+           "shared", `Bool shared])))
   |> Http.Router.post "/api/v1/published-artifacts" (authorized (fun state actor request reqd ->
     let base_path = (Mcp_server.workspace_config state).base_path in
     Http.Request.read_body_async reqd (fun body ->
@@ -144,3 +186,13 @@ let add_routes router =
         | Error error -> refuse_check request reqd error
         | Ok check -> respond request reqd
           (`Assoc ["check", Published_artifact_check.to_json check]))))
+  |> Http.Router.post "/api/v1/published-artifact-shares" (authorized (fun state _actor request reqd ->
+    let config = Mcp_server.workspace_config state in
+    let base_path = config.base_path in
+    Http.Request.read_body_async reqd (fun body ->
+      match decode_share_request ~config ~body with
+      | Error (json, status) -> respond ~status request reqd json
+      | Ok (id, shared) ->
+        match Eio_unix.run_in_systhread (fun () -> Store.set_shared ~base_path ~id ~shared) with
+        | Error error -> refuse request reqd error
+        | Ok shared -> respond request reqd (`Assoc ["id", `String id; "shared", `Bool shared]))))

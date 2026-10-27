@@ -56,6 +56,16 @@ let test_create_and_revise () = with_base (fun base_path ->
   let recovered, _, content = S.read ~base_path ~id:artifact.id ~revision:None |> store_ok in
   Alcotest.(check string) "fresh reader preserves exact source bytes" original content;
   Alcotest.(check string) "identity recovered" artifact.id recovered.id;
+  Alcotest.(check bool) "new artifact is private by default" false
+    (S.is_shared ~base_path ~id:artifact.id |> store_ok);
+  Alcotest.(check bool) "enabling external sharing persists" true
+    (S.set_shared ~base_path ~id:artifact.id ~shared:true |> store_ok);
+  Alcotest.(check bool) "share state recovered" true
+    (S.is_shared ~base_path ~id:artifact.id |> store_ok);
+  Alcotest.(check bool) "revoking external sharing persists" false
+    (S.set_shared ~base_path ~id:artifact.id ~shared:false |> store_ok);
+  Alcotest.(check bool) "revoked share state recovered" false
+    (S.is_shared ~base_path ~id:artifact.id |> store_ok);
   let next = "<!doctype html><html><body><h1>두 번째 보고서</h1></body></html>\n" in
   let _, second = publish ~base_path
     (request ~id:artifact.id ~expected_revision:1 ~format:"html" next) in

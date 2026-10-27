@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { artifactHref, type ArtifactDocument, type ArtifactPublication } from '../../api/published-artifacts'
+import { artifactHref, setPublishedArtifactShared, type ArtifactDocument, type ArtifactPublication } from '../../api/published-artifacts'
 import { Markdown } from '../common/markdown'
 import { navigate } from '../../router'
 import { copyToClipboard } from '../common/copyable-code'
@@ -62,11 +62,16 @@ export function ArtifactReader({ doc, fixedRevision, readOnly = false, readError
   const [view, setView] = useState<'rendered' | 'source'>('rendered')
   const [width, setWidth] = useState<'wide' | 'reading'>('wide')
   const [copyFeedback, setCopyFeedback] = useState('')
+  const [sharedState, setSharedState] = useState(Boolean(doc.shared))
+  const [sharePending, setSharePending] = useState(false)
   const [editing, setEditing] = useState<{ document: ArtifactDocument; snapshot: ArtifactDraftSnapshot } | null>(null)
   const [sharing, setSharing] = useState<ArtifactDocument | null>(null)
   const sharedCloseRequest = useRef<ArtifactSharedCloseRequest | null>(null)
   const appPending=useRef(false)
   const { artifact, content, revisions } = doc
+  useLayoutEffect(() => {
+    setSharedState(Boolean(doc.shared))
+  }, [doc.artifact.id, doc.shared])
   useLayoutEffect(() => {
     const element = dialog.current!
     element.showModal()
@@ -81,6 +86,27 @@ export function ArtifactReader({ doc, fixedRevision, readOnly = false, readError
     const href = artifactHref(artifact.id, fixedRevision ? artifact.revision : undefined)
     const success = await copyToClipboard(new URL(href, window.location.href).href, dialog.current ?? undefined)
     setCopyFeedback(success ? '문서 링크를 복사했습니다.' : '링크를 복사하지 못했습니다.')
+  }
+  const toggleExternalShare = async () => {
+    const nextShared = !sharedState
+    setSharePending(true)
+    try {
+      const updated = await setPublishedArtifactShared(artifact.id, nextShared)
+      if (!isCurrent()) return
+      setSharedState(updated.shared)
+      if (updated.shared) {
+        const href = artifactHref(artifact.id, fixedRevision ? artifact.revision : undefined)
+        const copied = await copyToClipboard(new URL(href, window.location.href).href, dialog.current ?? undefined)
+        setCopyFeedback(copied ? '외부 공유를 켜고 링크를 복사했습니다.' : '외부 공유를 켰습니다.')
+      } else {
+        setCopyFeedback('외부 공유를 해제했습니다.')
+      }
+    } catch (error) {
+      if (!isCurrent()) return
+      setCopyFeedback(error instanceof Error ? `외부 공유 변경 실패: ${error.message}` : '외부 공유 설정을 변경하지 못했습니다.')
+    } finally {
+      if (isCurrent()) setSharePending(false)
+    }
   }
   const discardDraft = () => window.confirm('작성 중인 원고를 닫을까요? 저장하지 않은 내용은 사라집니다.')
   const close = () => {
@@ -110,6 +136,9 @@ export function ArtifactReader({ doc, fixedRevision, readOnly = false, readError
             <button type="button" aria-label="링크 복사" onClick=${copyLink}><span class="sm:hidden">복사</span><span class="hidden sm:inline">링크 복사</span></button>
             <button type="button" aria-label="원본 다운로드" onClick=${() => downloadSource(doc)}><span class="sm:hidden">저장</span><span class="hidden sm:inline">원본 다운로드</span></button>
             ${readOnly ? null : html`
+              <button type="button" aria-label=${sharedState ? '외부 공유 해제' : '외부 공유 켜기'} aria-pressed=${sharedState}
+                disabled=${sharePending || editing !== null || sharing !== null}
+                onClick=${toggleExternalShare}>${sharedState ? '외부 공유 중' : '외부 공유 켜기'}</button>
               <button type="button" aria-label="문서 편집" disabled=${editing !== null || sharing !== null} onClick=${() => leaveApp(() => {
                 const snapshot: ArtifactDraftSnapshot = { identity: {}, base: { id: artifact.id, revision: artifact.revision }, value: {
                   title: artifact.title, summary: artifact.summary, format: artifact.format,

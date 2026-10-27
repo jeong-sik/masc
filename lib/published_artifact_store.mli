@@ -15,3 +15,5 @@ val publish : base_path:string -> author:string -> Published_artifact.request ->
 val list : base_path:string -> (listing, error) result
 val read : base_path:string -> id:string -> revision:int option ->
   (Published_artifact.t * Published_artifact.revision * string, error) result
+val is_shared : base_path:string -> id:string -> (bool, error) result
+val set_shared : base_path:string -> id:string -> shared:bool -> (bool, error) result

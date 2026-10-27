@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Schema } from 'effect'
 import nativeInventory from './fixtures/published-artifacts-native.json'
 import { get, post } from './core'
-import { ArtifactPublicationSchema, captureArtifactWorkspace, fetchPublishedArtifact, fetchPublishedArtifacts } from './published-artifacts'
+import { ArtifactPublicationSchema, captureArtifactWorkspace, fetchPublishedArtifact, fetchPublishedArtifacts, setPublishedArtifactShared } from './published-artifacts'
 import { resolveArtifactCheck, setArtifactCheck } from './published-artifact-checks'
 
 vi.mock('./core', () => ({ get: vi.fn(), post: vi.fn() }))
@@ -67,13 +67,21 @@ describe('published artifact native wire contract', () => {
 
   it('falls back to the static published artifact snapshot when unauthenticated shared read returns 401', async () => {
     const artifact = nativeInventory.artifacts[0]!
-    const payload = { artifact, content: '# 공유 보고서', revisions: [artifact] }
+    const payload = { artifact, content: '# 공유 보고서', revisions: [artifact], shared: true }
     vi.mocked(get)
       .mockRejectedValueOnce(Object.assign(new Error('Unauthorized'), { status: 401 }))
       .mockResolvedValueOnce(payload)
     const document = await fetchPublishedArtifact(artifact.id, '2')
     expect(document.content).toBe('# 공유 보고서')
+    expect(document.shared).toBe(true)
     expect(get).toHaveBeenNthCalledWith(1, `/api/v1/published-artifacts/${artifact.id}?revision=2`, {})
     expect(get).toHaveBeenNthCalledWith(2, `/dashboard/assets/published-artifacts/${artifact.id}-r2.json`, {})
+  })
+
+  it('toggles per-artifact external sharing via /api/v1/published-artifact-shares', async () => {
+    const artifact = nativeInventory.artifacts[0]!
+    vi.mocked(post).mockResolvedValueOnce({ id: artifact.id, shared: true })
+    expect(await setPublishedArtifactShared(artifact.id, true)).toEqual({ id: artifact.id, shared: true })
+    expect(post).toHaveBeenCalledWith('/api/v1/published-artifact-shares', { id: artifact.id, shared: true })
   })
 })

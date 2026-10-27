@@ -26,6 +26,11 @@ const ListSchema = Schema.Struct({
 })
 const DocumentSchema = Schema.Struct({
   artifact: PublishedArtifactSchema, content: Schema.String, revisions: Schema.Array(ArtifactRevisionSchema),
+  shared: Schema.optional(Schema.Boolean),
+})
+const ArtifactShareSchema = Schema.Struct({
+  id: Schema.String.pipe(Schema.pattern(/^artifact-[0-9a-f]{32}$/)),
+  shared: Schema.Boolean,
 })
 export type PublishedArtifact = typeof PublishedArtifactSchema.Type
 export type ArtifactDocument = typeof DocumentSchema.Type
@@ -83,6 +88,16 @@ export function artifactHref(id: string, revision?: number): string {
   const params = new URLSearchParams({ section: 'artifacts', artifact: id })
   if (revision !== undefined) params.set('revision', String(revision))
   return `/dashboard/#/workspace?${params}`
+}
+
+export async function setPublishedArtifactShared(id: string, shared: boolean): Promise<{ id: string; shared: boolean }> {
+  const result = Schema.decodeUnknownSync(ArtifactShareSchema)(
+    await post<unknown>('/api/v1/published-artifact-shares', { id, shared }),
+  )
+  if (result.id !== id || result.shared !== shared) {
+    throw new Error('외부 공유 상태 응답이 요청과 다릅니다.')
+  }
+  return result
 }
 
 export async function fetchPublishedArtifacts(signal?: AbortSignal): Promise<ArtifactList> {

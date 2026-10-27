@@ -116,8 +116,9 @@ that a Keeper is currently viewing or editing a document.
 - Existing dashboard token authentication and admin permission apply to the
   catalog list, check state and publication routes. Capability-addressed single
   artifact reads (`GET /api/v1/published-artifacts/<id>`) allow unauthenticated
-  read-only sharing while still validating presented tokens. Responses are
-  private and uncached.
+  read-only sharing only when external sharing is enabled for that artifact via
+  `POST /api/v1/published-artifact-shares` (`{"id": "<id>", "shared": true|false}`),
+  while still validating any presented token. Responses are private and uncached.
 - `keeper_artifact_publish`: the same store operation using the Keeper's own
   identity. Publication is non-terminal: the Keeper can continue and report its
   durable link. No automatic duplicate Board/chat post is sent by the tool.

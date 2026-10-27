@@ -169,25 +169,25 @@ build their rejection from it.
 | `viewport_capture` | `BrowserRead mode=screenshot` | yes | yes | yes, only the pages the task space manages |
 | `element_inventory` | `BrowserRead mode=elements` | yes | yes | yes, only the pages the task space manages |
 | `document_source` | the `browser_document` Lane Add-on source | yes | yes | no |
-| `dom_interaction` | `click`, `fill`, `scroll`, `follow_link` | yes | yes | yes, on a page an agent opened |
-| `point_click` | `click_at` | yes, the element's own `click()` | yes, a trusted pointer | yes, on a page an agent opened, ego's mouse |
-| `trusted_button_click` | `click_at` with `button` `middle` or `secondary` | no | yes | yes, on a page an agent opened |
-| `trusted_double_click` | `double_click`, `double_click_at` | no | yes | yes, on a page an agent opened |
-| `trusted_keyboard` | `type_text`, `press_key` | no | yes | yes, on a page an agent opened, ego's keyboard |
+| `dom_interaction` | `click`, `fill`, `scroll`, `follow_link` | yes | yes | yes, on a native managed Page |
+| `point_click` | `click_at` | yes, the element's own `click()` | yes, a trusted pointer | yes, on a native managed Page, ego's mouse |
+| `trusted_button_click` | `click_at` with `button` `middle` or `secondary` | no | yes | yes, on a native managed Page |
+| `trusted_double_click` | `double_click`, `double_click_at` | no | yes | yes, on a native managed Page |
+| `trusted_keyboard` | `type_text`, `press_key` | no | yes | yes, on a native managed Page, ego's keyboard |
 | `touch_input` | `tap_at`, `swipe` | no | yes | no |
 | `viewport_resize` | `set_viewport` | no | yes | no |
-| `tab_history` | `back`, `forward`, `reload`, only for a tab the same connection opened | no | yes | yes, only a page an agent opened in the task space; back and forward through the page's CDP history |
-| `tab_navigation` | `BrowserGoto`, only for a tab the same connection opened | no | yes | yes, only a page an agent opened in the task space |
-| `tab_closing` | `close_tab`, only for a tab the same connection opened | no | yes | yes, only a page an agent opened in the task space |
+| `tab_history` | `back`, `forward`, `reload`, subject to the transport's Page authority | no | yes | yes, native managed Pages in the task space; back and forward through the page's CDP history |
+| `tab_navigation` | `BrowserGoto`, subject to the transport's Page authority | no | yes | yes, native managed Pages in the task space |
+| `tab_closing` | `close_tab`, subject to the transport's Page authority | no | yes | yes, only agent-created Pages; unknown-origin Pages use release_tab |
 | `tab_creation` | `open_tab` | no | yes | yes |
-| `dialog_answer` | `accept_dialog`, `dismiss_dialog`, only for a tab the same connection opened; the dialog is read from the tab's `list_tabs` row (`dialog`: type, message, defaultValue) | no | yes | yes, only a page an agent opened in the task space; an input that opens one answers with it |
+| `dialog_answer` | `accept_dialog`, `dismiss_dialog`, subject to the transport's Page authority; the dialog is read from the tab's `list_tabs` row (`dialog`: type, message, defaultValue) | no | yes | yes, native managed Pages in the task space; an input that opens one answers with it |
 | `frame_read` | `BrowserRead` text, elements and frames modes with `framePath` (observed outer-to-inner iframe selectors); a dialog is not read this way | no | yes | no; ego reads frames through `accessibility_snapshot` (its snapshot holds iframe content, and a subtree rooted at the iframe's ref reads one frame) and acts in them through `snapshot_target_input` |
-| `download_listing` | `BrowserRead mode=downloads` with `tabId` | no | no, its downloads are the person's own | yes, the downloads a page an agent opened started, saved in the worker's folder and returned as artifacts |
-| `file_upload` | `BrowserAct upload` with the Keeper's files | no | no | yes, one CSS-matched file input on a page an agent opened, or with `opener` the one control whose click opens the page's file chooser; the connection keeps the copies until its space ends |
-| `point_scroll` | `scroll_at` | yes | yes, a trusted wheel | yes, on a page an agent opened, ego's wheel |
-| `trusted_hover` | `hover`, `hover_at` | no | yes | yes, on a page an agent opened |
-| `trusted_drag` | `drag_to`, `drag` | no | yes | yes, zero duration on agent pages |
-| `tab_activation` | `activate_tab` | yes | yes, and it also focuses the window | no |
+| `download_listing` | `BrowserRead mode=downloads` with `tabId` | no | no, its downloads are the person's own | yes, the downloads a native managed Page started, saved in the worker's folder and returned as artifacts |
+| `file_upload` | `BrowserAct upload` with the Keeper's files | no | no | yes, one CSS-matched file input on a native managed Page, or with `opener` the one control whose click opens the page's file chooser; the connection keeps the copies until its space ends |
+| `point_scroll` | `scroll_at` | yes | yes, a trusted wheel | yes, on a native managed Page, ego's wheel |
+| `trusted_hover` | `hover`, `hover_at` | no | yes | yes, on a native managed Page |
+| `trusted_drag` | `drag_to`, `drag` | no | yes | yes, zero duration on native managed Pages |
+| `tab_activation` | `activate_tab` | yes | yes, and it also focuses the window | yes, native managed Page and expectedUrl; native active/window observation without rendered UI or OS-focus proof |
 | `browser_zoom` | `set_zoom` | yes | no | no |
 
 The extension acts through DOM calls inside the page and has no pointer the
@@ -201,12 +201,16 @@ The ego connection runs one fixed script per command in an ego lite task space
 with `ego-browser nodejs` (RFC-browser-live-ego). Its reads run the same page
 scripts as the other connections, so selectors and `within` mean the same
 thing. Its tab IDs follow the page labels ego gives (`p1`, `p2`), which ego
-keeps for the life of the space. A tab the operator opened in that space is
-listed, and a read of it is refused before any script runs. It opens tabs,
-and moves and closes only the pages an agent opened in the space, its first
-page `p1` included; a load that fails after it started is answered as a
-partial effect with where the tab is now. Input acts on those pages too, never
-inside a frame. The page scripts the BiDi peer runs find the target, check that
+keeps for the managed Page lifecycle. Unmanaged tabs are listed but refused
+before reads or effects until explicitly adopted. Native managed Pages,
+including adopted unknown-origin Pages, support input, navigation and activation
+without changing their origin. Release unmanages an
+unknown-origin Page without closing its tab; agent-created Pages must be closed.
+All Page operations require the original agent-controlled Space, and adoption
+never clears uncertain input. A load that fails after it started is answered as
+a partial effect with where the tab is now. Snapshot refs can address iframe
+content; explicit input frame paths remain unsupported. The page scripts the
+BiDi peer runs find the target, check that
 the observed document, URL and viewport are still there, and make the DOM edits,
 so a selector or node means the same on both; ego's own mouse and keyboard
 input clicks, hovers, scrolls at a point and types. Finding a target and acting

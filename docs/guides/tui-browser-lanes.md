@@ -173,8 +173,9 @@ The worker, host/server and TUI must be updated together: the private client
 contract requires `space` on every client, with `null` for non-Ego transports.
 
 It reads and captures the pages
-of that one task space. It opens, moves and closes the pages an agent opened
-there, and uses Ego's native snapshots, selectors and input, including hover,
+of that one task space. It opens Pages and operates on native managed Pages
+there, including explicit adoption. Unknown-origin Pages are released rather
+than closed. It uses Ego's native snapshots, selectors and input, including hover,
 double-click, drag and option selection. Snapshot refs also address iframe
 content; explicit `framePath` and touch input are not supported. Keeper workflows
 can focus an editor, type or insert text, paste text/HTML through Ego's native

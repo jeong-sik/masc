@@ -65,7 +65,8 @@ before reading it. Takeover does not adopt, read a document, clear uncertain
 input or prove login/current focus. An absent boundary Page stays absent.
 A changed or lost boundary result does not authorize another active tab,
 another Space or automatic takeover replay. Confirm login with a fresh read
-of the intended managed Page; existing input still requires agent-origin Pages.
+of the intended managed Page. Explicit input/navigation/activation can
+then use an adopted native Page without changing its origin.
 
 If an Ego result says input release is unconfirmed, keep the original connection
 and do not replay its command. Answer any JavaScript dialog separately. Ask the

@@ -807,6 +807,91 @@ let test_cache_stats_follow_the_cache () =
       check int "clearing the cache clears the count" 0 cleared.Activity_graph.past_day_files)
 ;;
 
+(* [read_all_events] and [read_recent_events] hold the workspace cache lock
+   while they stat and read the event files through Eio, so the reading fiber
+   suspends inside the lock. With a [Stdlib.Mutex] the next fiber of the domain
+   to take it raised "Mutex.lock: Resource deadlock avoided" instead of
+   waiting; the 30 s cache gauge did so in production on 2026-10-25. Each
+   caller below runs as its own fiber, and the first one to start suspends in
+   its read, so the others start while it holds the lock. *)
+let run_colliding callers =
+  let order = ref [] in
+  Eio.Fiber.List.iter
+    (fun (name, work) ->
+      order := (name ^ " asks") :: !order;
+      work ();
+      order := (name ^ " served") :: !order)
+    callers;
+  List.rev !order
+;;
+
+(* Without this a read that never suspended would serve its caller before the
+   next one started, and the cases below would pass without testing anything. *)
+let check_every_caller_asked_before_any_was_served ~callers order =
+  let first_served =
+    List.find_index (fun event -> String.ends_with ~suffix:" served" event) order
+  in
+  check (option int) "every caller asked before any was served" (Some callers)
+    first_served
+;;
+
+let test_cache_gauge_waits_for_a_suspended_read () =
+  with_config (fun config ->
+      Activity_graph.For_testing.reset_current_day_cache_for_testing ();
+      let _ = write_past_day_file config ~lines:7 in
+      emit_n config 3;
+      let events = ref [] in
+      let stats = ref None in
+      let order =
+        run_colliding
+          [ ( "reader"
+            , fun () ->
+                events :=
+                  Activity_graph.list_events config ~after_seq:0 ~limit:100
+                    ~keep:(fun _ -> true) () )
+          ; "gauge", (fun () -> stats := Some (Activity_graph.cache_stats ()))
+          ]
+      in
+      check_every_caller_asked_before_any_was_served ~callers:2 order;
+      check int "the reader saw the past and the current events" 10
+        (List.length !events);
+      match !stats with
+      | None -> fail "the gauge was not served"
+      | Some stats ->
+        check int "the gauge waited and saw the past day file" 1
+          stats.Activity_graph.past_day_files;
+        check int "and its records" 7 stats.Activity_graph.past_day_records)
+;;
+
+let test_readers_of_one_workspace_wait_for_each_other () =
+  with_config (fun config ->
+      Activity_graph.For_testing.reset_current_day_cache_for_testing ();
+      Activity_graph.For_testing.reset_line_count_cache_for_testing ();
+      let _ = write_past_day_file config ~lines:7 in
+      emit_n config 3;
+      let filtered = ref [] in
+      let page_count = ref (-1) in
+      let order =
+        run_colliding
+          [ ( "filtered"
+            , fun () ->
+                filtered :=
+                  Activity_graph.list_events config ~after_seq:0 ~limit:100
+                    ~keep:(fun _ -> true) () )
+          ; ( "unfiltered"
+            , fun () ->
+                let json =
+                  Activity_graph.json_response config ~after_seq:0 ~limit:100 ()
+                in
+                page_count := Yojson.Safe.Util.(member "count" json |> to_int) )
+          ; "gauge", (fun () -> ignore (Activity_graph.cache_stats ()))
+          ]
+      in
+      check_every_caller_asked_before_any_was_served ~callers:3 order;
+      check int "the filtered reader saw every event" 10 (List.length !filtered);
+      check int "the unfiltered page saw every event" 10 !page_count)
+;;
+
 let test_current_day_cache_rebuilds_once_per_fingerprint () =
   with_config (fun config ->
       Activity_graph.For_testing.reset_current_day_cache_for_testing ();
@@ -1420,6 +1505,10 @@ let () =
             test_workspace_aggregate_cache_uses_lru_at_capacity;
           test_case "cache_stats follow the cache" `Quick
             test_cache_stats_follow_the_cache;
+          test_case "the cache gauge waits for a suspended read" `Quick
+            test_cache_gauge_waits_for_a_suspended_read;
+          test_case "readers of one workspace wait for each other" `Quick
+            test_readers_of_one_workspace_wait_for_each_other;
           test_case "incremental path output matches full-reparse reference"
             `Quick test_current_day_cache_matches_uncached_golden;
           test_case "truncated file rescans from zero" `Quick

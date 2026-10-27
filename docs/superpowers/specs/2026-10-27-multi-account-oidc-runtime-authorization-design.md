@@ -60,7 +60,7 @@
 8. **판정은 닫힌 합타입으로 표현한다.** 문자열 비교나 이름으로 권한을 추정하지 않는다.
 9. **owner의 부재는 그 의존 사슬만 막는다.** 다른 Cleared 사슬은 계속 실행할 수 있어야 한다.
 10. **실제 증명이 없는 공유는 거부다.** lane·readiness·provider 호출·복구 증명이 없으면 다계정을 열지 않는다.
-11. **dispatch의 prompt·output·transcript는 initiator의 것이다.** owner와 Admin은 사용량·시각·dispatch_id·결과 종류만 읽는다. 공유는 Runtime의 Use이며 대화 내용의 공유가 아니다. Keeper의 지속 상태(컨텍스트·기억·산출 글)는 만든 dispatch의 initiator를 표시하고, 다른 initiator의 dispatch에는 `Read_state` effect가 허용될 때만 보인다. 허용이 없으면 initiator별로 분리된 컨텍스트로 돌린다. 여러 dispatch의 내용을 합쳐 만든 파생 상태(요약·병합된 기억)의 표시는 원천 initiator 전체이고, 모든 원천이 허용될 때만 보인다. 사람 initiator가 없는 dispatch(autonomous·system)가 만든 상태는 Service(system) 표시를 달고 `Read_state`가 허용된 initiator에게만 보인다. initiator가 Disabled가 되면 그가 만든 분리 컨텍스트와 prompt·output은 지우지 않고 아무도 읽지 못한다. 파생 상태에 그의 몫이 섞여 있으면 읽는 호출은 `Source_sealed`를 돌려받고 값은 보지 못한다. 봉인은 읽을 때 원천 initiator의 현재 상태로 판정하고 표시를 쓰지 않으며, Active로 돌아오면 풀린다. initiator가 tombstone이 되면 같은 몫이 같은 append로 `Purge_pending`이 되고(§8.5) 감사 메타데이터만 남는다. 파생 상태에 섞인 그 몫은 `source_purged`로 표시하고, 읽는 호출은 `Source_purged`를 돌려받고 값은 보지 못한다. Disabled에서 tombstone으로 가는 것은 명시 결정이고 시간 경과는 근거가 아니다. `Source_sealed`와 `Source_purged`가 막는 범위는 그 원천이 섞인 파생 상태 하나이고, 다른 원천의 분리 컨텍스트와 다른 파생 상태는 읽힌다(§3-9). 대가는 그 파생 상태에 같이 섞인 다른 initiator의 몫도 읽지 못하는 것이다. 남은 원천의 분리 컨텍스트로 새 파생 상태를 만들 수 있으면 Keeper가 만들고, 만들 수 없는 몫은 잃는다. 몫 단위로 되살리는 설계는 이 문서의 범위가 아니며 알려진 한계다.
+11. **dispatch의 prompt·output·transcript는 initiator의 것이다.** owner와 Admin은 사용량·시각·dispatch_id·결과 종류만 읽는다. 공유는 Runtime의 Use이며 대화 내용의 공유가 아니다. Keeper의 지속 상태(컨텍스트·기억·산출 글)는 만든 dispatch의 initiator를 표시하고, 다른 initiator의 dispatch에는 `Read_state` effect가 허용될 때만 보인다. 허용이 없으면 initiator별로 분리된 컨텍스트로 돌린다. 여러 dispatch의 내용을 합쳐 만든 파생 상태(요약·병합된 기억)의 표시는 원천 initiator 전체이고, 모든 원천이 허용될 때만 보인다. 사람 initiator가 없는 dispatch(autonomous·system)가 만든 상태는 Service(system) 표시를 달고 `Read_state`가 허용된 initiator에게만 보인다. initiator가 Disabled가 되면 그가 만든 분리 컨텍스트와 prompt·output은 지우지 않고 아무도 읽지 못한다. 파생 상태에 그의 몫이 섞여 있으면 읽는 호출은 `Source_sealed`를 돌려받고 값은 보지 못한다. 봉인은 읽을 때 원천 initiator의 현재 상태로 판정하고 표시를 쓰지 않으며, Active로 돌아오면 풀린다. initiator가 삭제되면 같은 몫이 삭제와 같은 append로 `Purge_pending`이 되고(§8.5) 감사 메타데이터만 남는다. 파생 상태에 섞인 그 몫은 `source_purged`로 표시하고, 읽는 호출은 `Source_purged`를 돌려받고 값은 보지 못한다. Disabled에서 삭제로 가는 것은 명시 결정이고 시간 경과는 근거가 아니다. `Source_sealed`와 `Source_purged`가 막는 범위는 그 원천이 섞인 파생 상태 하나이고, 다른 원천의 분리 컨텍스트와 다른 파생 상태는 읽힌다(§3-9). 대가는 그 파생 상태에 같이 섞인 다른 initiator의 몫도 읽지 못하는 것이다. 남은 원천의 분리 컨텍스트로 새 파생 상태를 만들 수 있으면 Keeper가 만들고, 만들 수 없는 몫은 잃는다. 몫 단위로 되살리는 설계는 이 문서의 범위가 아니며 알려진 한계다.
 
 ## 4. 주체와 레코드
 
@@ -84,7 +84,7 @@ WorkspaceMembership {
 }
 ```
 
-- ID는 불변이며 삭제 후 재사용하지 않는다. `(iss, sub)`도 tombstone으로 남겨 재결속하지 않는다.
+- ID는 불변이며 삭제 후 재사용하지 않는다. Principal의 상태는 `Active | Disabled`이고 삭제된 principal은 레코드가 없다. 삭제는 revocation ledger의 사건으로만 남는다. 삭제된 principal과 같은 `(iss, sub)`로 로그인하면 초대받은 적 없는 사람과 같게 다룬다. 새 초대가 있어야 새 principal이 생긴다.
 - Dashboard Admin은 활성 Human principal과 활성 Admin_assignment가 필요하다. 비밀 제시로 role을 만들지 않는다. Admin_assignment의 생성·회수·변경은 `role_epoch`로 기록하고 Admin 경로의 stream·관리 실행만 재평가한다. 개인 Self Runtime은 role 변경만으로 무효화하지 않는다.
 - Service/Keeper에는 일반 Admin role이 없다. 필요한 경우 `ManageMachineShared`, `AdminDisableBlock`, `ReadAuditMetadata` 같은 닫힌 개별 권한만 부여한다.
 - Admin은 다른 사람의 credential·private Runtime을 사용하지 못한다. Disable/Block/감사와 Service-owned 공유 관리만 한다. 점유 중인 dispatch의 `Executor_teardown`은 `AdminDisableBlock`에 포함한다.
@@ -154,7 +154,7 @@ MachineSharePolicy {
 - Service-owned Runtime의 Keeper용 Delegated는 Service 관리 owner 또는 Admin이 발급하지만 §4.1의 자기 승인 금지가 적용된다.
 - UI의 Private/Granted/MachineShared와 `New_humans_excluded`는 grant에서 유도한다. Self는 공유로 세지 않는다.
 - profile의 권한 관련 수정은 owner만 하며 연결된 grant의 effects와 revision을 같은 append로 바꾼다. 효과 제거는 해당 grant_epoch만 올려 다음 lease를 막고, 다른 grant나 principal은 건드리지 않는다.
-- tombstone의 grant는 감사를 위해 `Revoked`로 남기고 실행하지 않는다. Purged 대상의 grant와 artifact도 `Purged`로 표시한다.
+- 삭제된 principal의 grant는 감사를 위해 `Revoked`로 남기고 실행하지 않는다. Purged 대상의 grant와 artifact도 `Purged`로 표시한다.
 
 ### 4.4 DelegatePolicy, PAT, scope
 
@@ -327,7 +327,7 @@ allowed =
 - `Not_pat`은 교집합에서만 중립 필터이며 `Empty`와 혼동하지 않는다. grant/policy/PAT의 effect는 모두 현재 범위를 좁히는 필터이며 넓히지 못한다. Direct의 중립 policy와 `All`도 현재 grant 안으로 제한된다.
 - `invocation_allowed`는 initiator=executor인 Direct를 허용하되 grant와 effects는 그대로 요구한다. 외부 initiator의 Delegate·Schedule·BoardTrigger는 현재 일치하는 DelegatePolicy가 필요하다.
 - 영속 작업은 원본 `{initiator, executor, channel, stored_scope}`를 유지하고 발화·재시도·resume 때 **initiator와 executor 양쪽의 현재 grant**를 재확인한다. 원본 권한이 철회된 뒤 executor grant만으로 실행하지 않는다. chain은 감사 기록이며 권한 확장 근거가 아니다.
-- Disabled/tombstone principal은 새 실행과 새 durable record 생성이 모두 거부된다. 순수 system 이벤트만 initiator=Service(system)이며, Human schedule이 cron으로 발화할 때도 initiator는 Human이다.
+- Disabled이거나 삭제된 principal은 새 실행과 새 durable record 생성이 모두 거부된다. 순수 system 이벤트만 initiator=Service(system)이며, Human schedule이 cron으로 발화할 때도 initiator는 Human이다.
 - `author`는 record writer, `initiator`는 실행 권한 출처다. 비실행 진단 record만 initiator가 없을 수 있다.
 
 ### 6.3 authorless writer 경계
@@ -340,7 +340,7 @@ System_migration   -> migration 진단 record만
 
 `RuntimeGrant`, `DelegatePolicy`, `Principal`, `InternalServiceCredential`, 명시적 permission revocation은 인증된 author가 필요하다. owner는 자기 자산, Admin은 허용된 관리 행위, 로컬 복구는 Local_operator만 쓴다. migration 기동은 호스트 로컬 운영자/런처 전용이며 actor·run_id를 남긴다.
 
-자동 만료는 `Preauthorized_expiry(cause_event_id)`로 닫고 author는 System_maintenance다. 원 승인자와 원 승인 사건을 보존하고 tombstone이어도 새 서명 없이 만료를 적용한다. revalidation 성공 증거나 새 grant·owner 변경·임의 회수에는 쓰지 않는다.
+자동 만료는 `Preauthorized_expiry(cause_event_id)`로 닫고 author는 System_maintenance다. 원 승인자와 원 승인 사건을 보존하고, 원 승인자가 삭제된 뒤에도 새 서명 없이 만료를 적용한다. revalidation 성공 증거나 새 grant·owner 변경·임의 회수에는 쓰지 않는다.
 
 ## 7. Runtime별 lease와 도구
 
@@ -394,7 +394,7 @@ official runtime에만 전달하고 내장 tool 자식에서 제거하지 못하
 ### 8.1 epoch과 읽기 모델
 
 ```text
-principal_epoch  : principal Disable/tombstone/RevokeAll에만 증가
+principal_epoch  : principal Disable/Delete/RevokeAll에만 증가
 role_epoch       : Admin_assignment 생성·회수·변경에만 증가
 membership_epoch : WorkspaceMembership 생성·회수·namespace 변경에만 증가
 auth_binding_epoch: 해당 browser session/PAT/Service credential 폐기에만 증가
@@ -413,7 +413,7 @@ resource_epoch   : Runtime/ProviderAccount Disable/Block/Quarantine/Purge/정책
 
 ### 8.2 고수위와 Intent/Committed
 
-backup 밖 append-only 저장소에는 객체의 scoped epoch 최고값·artifact별 `credential_generation`·Intent 상태를 기록한다. 이 저장소와 아래 Intent/Committed 규칙은 **scoped epoch를 올리거나 `credential_generation`을 바꾸는 사건**(Grant·Revoke·Disable·Block·Purge·정책 회수·credential 교체)에만 적용한다. lease 발급·`Lease_dispatched`·`Completed`·`Revoked`는 `authz.jsonl`에만 쓰고 발급 때 읽은 epoch에 결속한다. replay 값과 외부 고수위가 다르거나 외부 저장소를 읽지 못하면 `AuthorizationUncertain`으로 시작하고 옛 lease·점유·grant를 승인하지 않는다. 고수위 일치는 무결성 조건이지 실행 승인 조건이 아니다.
+backup 밖 append-only 저장소에는 객체의 scoped epoch 최고값·artifact별 `credential_generation`·Intent 상태를 기록한다. 이 저장소와 아래 Intent/Committed 규칙은 **scoped epoch를 올리거나 `credential_generation`을 바꾸는 사건**(Grant·Revoke·Disable·Delete·Block·Purge·정책 회수·credential 교체)에만 적용한다. lease 발급·`Lease_dispatched`·`Completed`·`Revoked`는 `authz.jsonl`에만 쓰고 발급 때 읽은 epoch에 결속한다. replay 값과 외부 고수위가 다르거나 외부 저장소를 읽지 못하면 `AuthorizationUncertain`으로 시작하고 옛 lease·점유·grant를 승인하지 않는다. 고수위 일치는 무결성 조건이지 실행 승인 조건이 아니다.
 
 ```text
 Intent_pending {
@@ -436,7 +436,7 @@ Committed {
 
 ### 8.3 중단된 보안 회수
 
-`Incomplete_append_aborted`이고 `intended_event_kind`가 권한을 줄이거나 credential을 무효화하려는 사건(`Revoke`, `Disable`, `Block`, `Purge`, 정책 회수, credential 교체)이면 해당 `subject`를 **로그를 건드리지 않고 게이트에서만 `Revocation_pending`으로 차단**한다. grant 행이 Active로 보여도 새 dispatch·lease·tool effect를 허용하지 않는다.
+`Incomplete_append_aborted`이고 `intended_event_kind`가 권한을 줄이거나 credential을 무효화하려는 사건(`Revoke`, `Disable`, `Delete`, `Block`, `Purge`, 정책 회수, credential 교체)이면 해당 `subject`를 **로그를 건드리지 않고 게이트에서만 `Revocation_pending`으로 차단**한다. grant 행이 Active로 보여도 새 dispatch·lease·tool effect를 허용하지 않는다.
 
 - 새 Grant·credential 생성·일반 설정 변경은 자동 재생하지 않고 다시 승인한다.
 - `Revocation_pending`은 **재시도 append 성공** 또는 **적격 Admin(§4.1)의 명시적 취소 기록** 중 하나로만 닫는다. 두 출구 record는 닫는 `aborted_intent`를 가리키고, 가리키는 record가 없는 `aborted_intent`는 재기동 뒤에도 차단을 유지한다. 재시도는 새 요청이며 aborted 의도를 이어 쓰지 않고 새 `Intent_pending`으로 시작한다. owner나 공격자가 임의로 해제하지 못한다. 적격 Admin이 없으면 실행을 재개하지 않고 Local_operator가 `Quarantined(cause=No_eligible_admin)`로 보낸다.
@@ -452,9 +452,9 @@ Committed {
 
 ### 8.5 purge의 지정과 삭제
 
-purge는 지정과 삭제가 따로다. tombstone된 initiator의 컨텍스트·prompt·output(§3-11)과 Quarantined 자산의 credential(§10.4)에 같은 규칙을 쓴다.
+purge는 지정과 삭제가 따로다. 삭제된 initiator의 컨텍스트·prompt·output(§3-11)과 Quarantined 자산의 credential(§10.4)에 같은 규칙을 쓴다.
 
-1. 지정은 authz append 하나로 `Purge_pending {target}`을 기록한다(tombstone이면 tombstone과 같은 append다). 이 append는 §8.2의 `Purge` 사건이므로 Intent/Committed 규칙을 따른다. 대상은 지정 시점의 ID 목록이 아니라 initiator(또는 자산) 표시로 정한다. 지정 뒤 그 initiator의 새 shard 쓰기는 §6.2 판정에서 거부된다.
+1. 지정은 authz append 하나로 `Purge_pending {target}`을 기록한다(initiator 삭제이면 삭제와 같은 append다). 이 append는 §8.2의 `Purge` 사건(initiator 삭제이면 `Delete` 사건)이므로 Intent/Committed 규칙을 따른다. 대상은 지정 시점의 ID 목록이 아니라 initiator(또는 자산) 표시로 정한다. 지정 뒤 그 initiator의 새 shard 쓰기는 §6.2 판정에서 거부된다.
 2. `Purge_pending`인 대상은 삭제가 끝나기 전에도 읽을 수 없다.
 3. 삭제는 writer lock을 잡지 않고 대상 표시가 붙은 shard·transcript·credential을 ID 단위로 멱등하게 지운다. 남은 대상이 0임을 확인하면 `Purged {target, 삭제한 ID 수}`를 `authz.jsonl`에 append한다. 이 append만 writer lock 구역에서 한다.
 4. 삭제가 실패하면 `Purge_failed {target, failed_stage}`를 append하고 대상은 읽을 수 없는 채로 둔다. `Purge_failed`는 Dashboard와 `/health`에 보이고, 다음 재기동이나 Local_operator의 명시 재실행으로만 다시 한다.
@@ -525,8 +525,8 @@ Single_user 모드의 현재 동작은 바꾸지 않는다. 계정당 동시 dis
 ### 10.5 복원·모드·ledger
 
 - 복원·롤백 직후 모든 공유·실행은 AuthorizationUncertain이다. snapshot Active·ledger replay·store_seq 고수위만으로 해제하지 않는다. 도메인 상태와 별도의 `restore_disposition = Pending | Denied | Cleared | Quarantined | Purged`를 둔다.
-- Disabled/tombstone/purged initiator·executor·owner의 durable work는 먼저 Denied로 확정하고 나중에 계정이 활성화돼도 자동 복귀하지 않는다. `Outcome_unknown` lease는 되살리지 않는다.
-- 컨텍스트 shard와 파생 상태도 복원 분류 대상이다. 복원본의 `source_purged` 표시는 옛 상태이므로 믿지 않고, revocation ledger(아래)의 tombstone 기록과 shard·파생 상태의 initiator 표시를 대조한다. tombstone initiator의 몫은 읽기 전에 `Purge_pending`(§8.5)으로 다시 올리고, 파생 상태의 그 몫에는 `source_purged`를 다시 붙인다. Disabled initiator의 몫은 §3-11의 읽기 시점 판정이 그대로 봉인한다. 이 분류가 끝나기 전에는 컨텍스트 shard와 파생 상태 읽기를 `AuthorizationUncertain`으로 거부한다. `Purged`를 복원으로 되살리지 않는다는 §10.4-6의 원칙은 컨텍스트에도 적용한다.
+- Disabled·삭제·purged initiator·executor·owner의 durable work는 먼저 Denied로 확정하고 나중에 계정이 활성화돼도 자동 복귀하지 않는다. `Outcome_unknown` lease는 되살리지 않는다.
+- 컨텍스트 shard와 파생 상태도 복원 분류 대상이다. 복원본의 `source_purged` 표시는 옛 상태이므로 믿지 않고, revocation ledger(아래)의 삭제 기록과 shard·파생 상태의 initiator 표시를 대조한다. 삭제된 initiator의 몫은 읽기 전에 `Purge_pending`(§8.5)으로 다시 올리고, 파생 상태의 그 몫에는 `source_purged`를 다시 붙인다. Disabled initiator의 몫은 §3-11의 읽기 시점 판정이 그대로 봉인한다. 이 분류가 끝나기 전에는 컨텍스트 shard와 파생 상태 읽기를 `AuthorizationUncertain`으로 거부한다. `Purged`를 복원으로 되살리지 않는다는 §10.4-6의 원칙은 컨텍스트에도 적용한다.
 - 남은 record는 Principal/credential → grant/policy → Runtime → schedule/resume/work 의존 순서로 재검증한다. Admin/Service → system cron → Human은 같은 단계의 우선순위일 뿐이며 Pending/Denied work는 cron이 열리더라도 실행하지 않는다. Cleared는 원 grant 승인자 또는 Service의 Admin 지정 후계가 항목별로 승인한다.
 - Recovery_manifest는 전 record의 ID·의존 관계·분류·digest를 접근 제한된 artifact로 게시한다. 전이 시작에 `Outcome_unknown`으로 종결한 dispatch와 창 중 purge로 대상이 사라진 항목(`Purged_during_window`)은 분류와 별도 칸으로 센다. 독자는 Cleared 승인자·Admin·Local_operator로 제한하고 owner/승인자는 자기가 승인할 entry만 projection으로 읽는다. Board/health에는 count와 미해제 상태만 공개한다. manifest에는 산출 명령·대상 범위·전이 epoch·분류 count·digest를 기록한다.
 - backup/rollback에서 되돌아온 account-home과 credential artifact는 `CredentialUncertain`이다. **현재 owner가 provider official 재인증을 완료하고 새 credential generation과 account-home을 검증하기 전에는 mount하지 않는다.** MASC principal의 Dashboard 로그인만으로 Cleared하지 않는다. 비밀이 아닌 설정만 별도 projection으로 복원하고 credential-bearing home은 새로 만든다. owner가 없거나 재인증할 수 없으면 Local_operator가 Quarantined로 기록하고 purge한다. provider에서 아직 유효한 token이라도 사용하지 않는다.
@@ -573,8 +573,8 @@ Single_user 모드의 현재 동작은 바꾸지 않는다. 계정당 동시 dis
 - 부재 owner의 Pending은 Local_operator의 Quarantined로만 종단하고 다른 Cleared 사슬은 계속 실행한다. 계승 배치를 기다리는 전역 정지는 없다.
 - 복원된 account-home은 owner provider 재인증 전 mount하지 않고, 일반 재기동은 generation이 같으면 재인증 없이 검증한다. 외부 저장소 불일치·읽기 실패는 `AuthorizationUncertain`이다.
 - `Recovery_in_progress` 중 진행 중인 Effecting dispatch는 `Outcome_unknown`이며, 창 중 도착한 효과는 성공으로 적용하지 않는다. 복원 Cleared로 부활하지 않는다.
-- initiator가 Disabled가 되면 그의 컨텍스트·prompt·output은 지워지지 않고 읽히지 않으며 Active로 돌아오면 다시 읽힌다. tombstone은 `Purge_pending`에서 `Purged`로 끝난다. 삭제 도중 크래시하면 재기동이 이어서 지우고 그 사이 읽기는 거부된다. 시간 경과만으로 Disabled가 tombstone이 되지 않는다.
-- T 백업 → T+1 initiator tombstone·purge → T+2 복원 뒤, 분류가 끝나기 전 컨텍스트 shard·파생 상태 읽기는 `AuthorizationUncertain`이다. 분류 뒤 그 initiator의 몫은 다시 지워지거나 `source_purged`로 표시되어 `Read_state`가 허용된 다른 initiator도 읽지 못한다. 창 중 purge된 항목은 `Purged_during_window`로 세고 `Denied(unclassifiable)`로 세지 않는다.
+- initiator가 Disabled가 되면 그의 컨텍스트·prompt·output은 지워지지 않고 읽히지 않으며 Active로 돌아오면 다시 읽힌다. initiator 삭제는 `Purge_pending`에서 `Purged`로 끝난다. 삭제 도중 크래시하면 재기동이 이어서 지우고 그 사이 읽기는 거부된다. 시간 경과만으로 Disabled가 삭제되지 않는다.
+- T 백업 → T+1 initiator 삭제·purge → T+2 복원 뒤, 분류가 끝나기 전 컨텍스트 shard·파생 상태 읽기는 `AuthorizationUncertain`이다. 분류 뒤 그 initiator의 몫은 다시 지워지거나 `source_purged`로 표시되어 `Read_state`가 허용된 다른 initiator도 읽지 못한다. 창 중 purge된 항목은 `Purged_during_window`로 세고 `Denied(unclassifiable)`로 세지 않는다.
 - `Single_user`에서 만든 durable work는 `Single_user_operator` 근거로 기록되고, `Multi_account` 활성화 뒤 `Denied(legacy_unattributed)`로 분류된다.
 
 ### official·동시성·성능

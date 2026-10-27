@@ -18,9 +18,13 @@ val within_command : t -> command_id:string -> (unit -> 'a) -> ('a, string) resu
     but releases only the local running marker. *)
 val admit : t -> (unit, string) result
 val begin_holding : t -> tab_id:int -> page_label:string -> operation:string -> (unit, string) result
-val command_settled : t -> unit
-(** Consume the existing producer's settlement indication. This module does
-    not strengthen that producer's SDK evidence or inspect physical keys. *)
+val command_settled : t -> Browser_ego_release.proof -> unit
+(** Settle the pending input. A proof comes only from [Browser_ego_release.judge]
+    over answers that [Browser_ego_release.answer_of_json] read, so a flag a
+    script sets cannot settle it. The types cannot show that the caller read the
+    SDK's answer for this pending input: the proof is not tied to one input, and
+    [answer_of_json] reads whatever JSON it is given. This module does not
+    inspect physical keys. *)
 val not_started : t -> unit
 (** Restore the prior readiness, retaining its operator provenance. *)
 val assert_reset : t -> generation:string -> now:float -> (unit, string) result

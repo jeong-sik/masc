@@ -38,7 +38,12 @@ live 연결 중 요청 대상과 로그인이 있는 연결에서 탭 목록과 
     `hand_off`·`take_over`, `upload`(`selector` 의 파일 입력, 또는 `opener` 로 뜨는 파일 선택 창),
     `mode=downloads`, `BrowserGoto`,
     그리고 click·`click_at`·`double_click`·hover·drag·`scroll`·`scroll_at`·fill·
-    `select_option`·`follow_link`·`type_text`·`press_key` 를 한다. 프레임은 `framePath`
+    `select_option`·`follow_link`·`type_text`·`press_key` 를 한다. 드래그는 셀렉터로 고른
+    `drag_to`(경유점 `via` 없음)만 SDK 가 영수증을 돌려주고, 영수증에 `dialog` 가 없으면 입력이
+    풀린 것으로 본다. 좌표 `drag`, `via` 가 있는 `drag_to`, `scene` 노드로 고른 드래그는 입력을
+    보낸 뒤에는 끝까지 실행돼도 결과를 알 수 없다고 답하고, 운영자가 입력을 초기화할 때까지 그
+    연결의 다음 입력이 거절된다. 입력을 보내기 전에 거절된 드래그는 입력을 그대로 쓸 수 있다.
+    프레임은 `framePath`
     없이 다룬다: snapshot 이 iframe 내용을 ref 와 함께 담고, 그 ref 나 role·글 `target` 으로
     프레임 안을 누르고 채운다. 터치·`set_zoom`·`set_viewport`·`activate_tab` 은 하지
     않는다. `press_key` 는

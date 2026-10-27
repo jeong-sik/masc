@@ -506,7 +506,7 @@ let interact_args ?(tab_id=1) ?(frame_path=[]) action =
 let page_summary = in_page (obj ["url",str observed_url;"title",str "Slack";"scrollX",`Int 0;"scrollY",`Int 0])
 (* What the DOM input script answers: the shared script's own answer. *)
 let dom_answer value = answered (obj ["result",in_page value])
-let input_answer ?(error=`Null) ?(released=true) () = answered (obj ["guard",page_summary;"receipt",page_summary;"error",error;"pointerReleased",`Bool released])
+let input_answer ?(error=`Null) () = answered (obj ["guard",page_summary;"receipt",page_summary;"error",error])
 (* The pointer target script's answer: the URL, a point and the viewport it is in. *)
 let resolved = in_page (obj ["url",str observed_url;"point",Lane.Pointer.point_to_json {x=0.25;y=0.5};
   "viewport",Lane.Pointer.viewport_to_json viewport])
@@ -630,7 +630,7 @@ let test_selector_input_uses_ego_sdk () =
       asked := sent :: !asked;
       let receipt = if field "action" sent.args = str "select_option" then
           obj ["selectedValues",`List [str "b"]] else obj [] in
-      answered (obj ["urlBefore",str observed_url;"pointerReleased",`Bool true;"receipt",receipt;"error",!native_error;
+      answered (obj ["urlBefore",str observed_url;"receipt",receipt;"error",!native_error;
         "tab",obj ["url",str observed_url;"title",str "Slack"]])
     | other -> failf "selector input invoked its own adapter: %s" other) in
   ignore (dispatch peer Live.Tabs_list (obj []));
@@ -682,8 +682,7 @@ let test_native_drag_and_release () =
     | "page.drag" ->
       (match !mode with
        | "refused" -> refused "observed_viewport_changed"
-       | "unknown" -> Error Peer.Timed_out
-       | "release_failed" -> input_answer ~released:false ~error:(str "up failed") ()
+       | "unstarted" -> Error (Peer.Unstarted "no node here")
        | _ -> input_answer ())
     | "page.pointer" -> input_answer ()
     | "page.read" -> page_answer ~label:"p1" (obj ["text",str "still readable"])
@@ -692,7 +691,17 @@ let test_native_drag_and_release () =
   let drag duration_ms = Lane.Drag_to {source=Lane.Selector "#source";destination=Lane.Selector "#destination";
     via=[{Lane.Pointer.x=0.5;y=0.25}];duration_ms} in
   let invoke action = dispatch peer Live.Page_interact (interact_args action) in
-  check string "native drag succeeds" "served" (failure_kind (invoke (drag 0)));
+  let count = List.length !sent in
+  check string "timed movement is not emulated" "before effect" (failure_kind (invoke (drag 100)));
+  check int "no script for unsupported timing" count (List.length !sent);
+  mode := "refused";
+  check string "guard rejects before input" "before effect" (failure_kind (invoke (drag 0)));
+  mode := "unstarted";
+  check string "a script that never started rejects before input" "before effect" (failure_kind (invoke (drag 0)));
+  mode := "success";
+  (* mouse.down, move and up answer void, so a clean run proves nothing about the button. *)
+  check string "a drag after a guard refusal runs and cannot confirm the release" "unknown"
+    (failure_kind (invoke (drag 0)));
   let last = List.hd !sent in
   check string "native API step" "page.drag" last.step;
   check bool "observed path is converted once to CSS pixels" true
@@ -700,20 +709,79 @@ let test_native_drag_and_release () =
       obj ["x",`Int 400;"y",`Int 150];obj ["x",`Int 600;"y",`Int 300];
       obj ["x",`Int 600;"y",`Int 300]]);
   let count = List.length !sent in
-  check string "timed movement is not emulated" "before effect" (failure_kind (invoke (drag 100)));
-  check int "no script for unsupported timing" count (List.length !sent);
-  mode := "refused";
-  check string "guard rejects before input" "before effect" (failure_kind (invoke (drag 0)));
-  mode := "success";
-  check string "guard refusal leaves input usable" "served" (failure_kind (invoke (drag 0)));
-  mode := "release_failed";
-  check string "failed release is unknown" "unknown" (failure_kind (invoke (drag 0)));
-  let count = List.length !sent in
-  check string "no further input after unconfirmed release" "before effect"
+  check string "no further input until the operator resets" "before effect"
     (failure_kind (invoke (Lane.Click "#next")));
   check int "blocked input is not run" count (List.length !sent);
   check string "reads remain available" "served"
     (failure_kind (dispatch peer Live.Page_read (obj ["tabId",`Int 1])))
+
+(* The raw drag cannot be confirmed, but what its script saw is not dropped. *)
+let test_a_raw_drag_reports_what_the_script_saw () =
+  let drag = Lane.Drag {from={x=0.25;y=0.5};to_={x=0.75;y=0.5};viewport;via=[];duration_ms=0} in
+  let detail_of reply =
+    let peer = opened (fun sent -> match sent.step with
+      | "tabs.list" -> answered tabs
+      | "page.drag" -> reply
+      | other -> failf "unexpected step %s" other) in
+    ignore (dispatch peer Live.Tabs_list (obj []));
+    match dispatch peer Live.Page_interact (interact_args drag) with
+    | Error (Live.Outcome_unknown detail) -> detail
+    | other -> failf "a raw drag was %s, not unknown" (failure_kind other) in
+  check bool "the failure text the SDK gave is kept" true
+    (String_util.contains_substring (detail_of (input_answer ~error:(str "up failed") ())) "up failed");
+  let row = obj ["url",str observed_url;"title",str "Slack"] in
+  let seen_with fields = detail_of (answered (obj (["guard",page_summary;"tab",row;"error",`Null] @ fields))) in
+  check bool "an open dialog changes what is reported" true
+    (seen_with ["dialog",ego_dialog "confirm" "sure?"] <> seen_with [])
+
+(* dragAndDrop is the one drag whose answer the SDK declares: a receipt object,
+   with a [dialog] member when a dialog interrupted it. Only a receipt object
+   without [dialog] lets the next input run. *)
+let test_a_target_drag_settles_only_from_the_receipt_it_returns () =
+  let drag = Lane.Drag_to {source=Lane.Selector "#source";destination=Lane.Selector "#destination";via=[];duration_ms=0} in
+  let tab = obj ["url",str observed_url;"title",str "Slack"] in
+  let drag_reply fields = answered (obj (["urlBefore",str observed_url;"tab",tab] @ fields)) in
+  let failed_after_start = Ok (Peer.result_marker ^ Yojson.Safe.to_string (obj ["ok",`Bool false;"error",str "native failed"]) ^ "\n") in
+  List.iter (fun (name, reply, first, settles) ->
+    let asked = ref [] in
+    let peer = opened (fun sent ->
+      asked := sent.step :: !asked;
+      match sent.step with
+      | "tabs.list" -> answered tabs
+      | "page.target_input" -> reply
+      | other -> failf "%s unexpectedly dispatched %s" name other) in
+    ignore (dispatch peer Live.Tabs_list (obj []));
+    check string (name ^ " answers the drag") first
+      (failure_kind (dispatch peer Live.Page_interact (interact_args drag)));
+    let before = List.length !asked in
+    let next = failure_kind (dispatch peer Live.Page_interact (interact_args drag)) in
+    if settles then check int (name ^ " lets the next input run") (before + 1) (List.length !asked)
+    else begin
+      check string (name ^ " keeps input blocked") "before effect" next;
+      check int (name ^ " runs no script for the blocked input") before (List.length !asked)
+    end)
+    [ "a receipt object", drag_reply ["receipt",obj [];"error",`Null], "served", true;
+      "a receipt that names a dialog", drag_reply ["receipt",obj ["dialog",ego_dialog "confirm" "sure?"];"error",`Null], "served", false;
+      "a void receipt", drag_reply ["receipt",`Null;"error",`Null], "unknown", false;
+      "a missing receipt", drag_reply ["error",`Null], "unknown", false;
+      "a receipt that is not an object", drag_reply ["receipt",str "done";"error",`Null], "unknown", false;
+      "a caught failure", drag_reply ["receipt",obj [];"error",str "native drag interrupted"], "unknown", false;
+      "a lost answer", Error (Peer.Unobserved "lost"), "unknown", false;
+      "a timed out answer", Error Peer.Timed_out, "unknown", false;
+      "a script failure after the start", failed_after_start, "unknown", false;
+      "an unreadable answer", Ok "no answer line", "unknown", false;
+      (* One reply read by one rule: whatever the call cannot read whole settles nothing. *)
+      "a receipt with a member the SDK does not declare", drag_reply ["receipt",obj ["error",str "boom";"ok",`Bool false];"error",`Null], "unknown", false;
+      "a null dialog", drag_reply ["receipt",obj ["dialog",`Null];"error",`Null], "unknown", false;
+      "a popup without its targetId", drag_reply ["receipt",obj ["popups",`List [obj ["label",str "p2"]]];"error",`Null], "unknown", false;
+      "a popup without its label", drag_reply ["receipt",obj ["popups",`List [obj ["label",str "";"targetId",str "T2"]]];"error",`Null], "unknown", false;
+      "a popup with an empty targetId", drag_reply ["receipt",obj ["popups",`List [obj ["label",str "p2";"targetId",str ""]]];"error",`Null], "unknown", false;
+      "a popup with a member the SDK does not declare", drag_reply ["receipt",obj ["popups",`List [obj ["label",str "p2";"targetId",str "T2";"url",str observed_url]]];"error",`Null], "unknown", false;
+      "a receipt with one declared popup", drag_reply ["receipt",obj ["popups",`List [obj ["label",str "p2";"targetId",str "T2"]]];"error",`Null], "served", true;
+      "a reply without its starting URL", answered (obj ["receipt",obj [];"error",`Null;"tab",tab]), "unknown", false;
+      "a reply without its tab", answered (obj ["urlBefore",str observed_url;"receipt",obj [];"error",`Null]), "unknown", false;
+      "a refusal before the drag", refused "observed_url_changed", "before effect", true;
+      "a script that never started", Error (Peer.Unstarted "no node here"), "before effect", true ]
 
 let test_chooser_upload_respects_uncertain_pointer_release () =
   let directory = Unix.realpath (capture_directory ()) in
@@ -727,8 +795,8 @@ let test_chooser_upload_respects_uncertain_pointer_release () =
       asked := sent.step :: !asked;
       match sent.step with
       | "tabs.list" -> answered tabs
-      | "page.drag" -> input_answer ~released:false ~error:(str "input release unconfirmed") ()
-      | "page.target_input" -> answered (obj ["error",str "input release unconfirmed";"pointerReleased",`Bool false])
+      | "page.drag" -> input_answer ()
+      | "page.target_input" -> answered (obj ["error",str "input release unconfirmed"])
       | "page.upload" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null])
       | other -> failf "%s unexpectedly dispatched %s" name other) in
     ignore (dispatch peer Live.Tabs_list (obj []));
@@ -800,7 +868,6 @@ let test_the_scripts_parse_as_modules () =
       Live.Page_interact, interact_args (Lane.Hover_at {point={x=0.5;y=0.5};viewport});
       Live.Page_interact, interact_args (Lane.Scroll_at {point={x=0.5;y=0.5};viewport;x=0;y=120});
       Live.Page_interact, interact_args (Lane.Type_text {document_id="d1";text="hi"});
-      Live.Page_interact, interact_args (Lane.Drag {from={x=0.25;y=0.5};to_={x=0.75;y=0.5};viewport;via=[];duration_ms=0});
       Live.Page_interact, interact_args (Lane.Fill_node {target={document_id="d1";node_id="message"};text="hi"});
       Live.Page_interact, interact_args (Lane.Fill_target {target=Lane.Target_ref 5;text="hi"});
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=3;frame_path=[];interaction=Lane.Action.Close_tab});
@@ -809,12 +876,14 @@ let test_the_scripts_parse_as_modules () =
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Accept_dialog (Some "hi")});
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Dismiss_dialog});
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Upload {target=Lane.Action.File_input "#file";paths=[upload_file]}});
-      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Upload {target=Lane.Action.Chooser_opener "#attach";paths=[upload_file]}}) ];
+      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Upload {target=Lane.Action.Chooser_opener "#attach";paths=[upload_file]}});
+      (* Last: a raw drag cannot confirm the release, so it blocks the input that follows it. *)
+      Live.Page_interact, interact_args (Lane.Drag {from={x=0.25;y=0.5};to_={x=0.75;y=0.5};viewport;via=[];duration_ms=0}) ];
   check (result unit string) "finish" (Ok ()) (Peer.finish peer);
   check (list string) "every step"
     ["space.open";"tabs.list";"page.read";"page.elements";"page.scene";"page.snapshot";"page.downloads";"page.capture";
-     "page.open";"page.goto";"page.target";"page.pointer";"page.pointer";"page.pointer";"page.keyboard";"page.drag";"page.input";"page.target_input";
-     "page.close";"page.reload";"page.history";"page.dialog";"page.dialog";"page.upload";"page.choose_files";"space.finish"]
+     "page.open";"page.goto";"page.target";"page.pointer";"page.pointer";"page.pointer";"page.keyboard";"page.input";"page.target_input";
+     "page.close";"page.reload";"page.history";"page.dialog";"page.dialog";"page.upload";"page.choose_files";"page.drag";"space.finish"]
     (List.rev_map fst !scripts);
   List.iter (fun (step, script) ->
     let file = Filename.concat directory (step ^ ".mjs") in
@@ -858,6 +927,7 @@ let test_capture_reads_and_removes_the_file () =
 (* Every live capability is either served, or refused before any page
    script, as Browser_lane.live_transport_serves says of ego. *)
 let test_the_peer_serves_what_the_lane_table_says () =
+  let drag_ran = ref false in
   let directory = capture_directory () in
   let upload_file = Filename.concat directory "note.txt" in
   Out_channel.with_open_bin upload_file (fun channel -> Out_channel.output_string channel "hello");
@@ -889,7 +959,8 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | "page.downloads" -> answered (obj ["since",`Null;"rows",`List []])
     | "page.upload" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null])
     | "page.target" -> answered resolved
-    | "page.pointer" | "page.keyboard" | "page.drag" -> input_answer ()
+    | "page.drag" -> drag_ran := true; input_answer ()
+    | "page.pointer" | "page.keyboard" -> input_answer ()
     | "page.input" -> dom_answer (obj ["action",str "fill"])
     | other -> failf "unexpected step %s" other) in
   ignore (dispatch peer Live.Tabs_list (obj []));
@@ -942,10 +1013,13 @@ let test_the_peer_serves_what_the_lane_table_says () =
     let served = Lane.live_transport_serves Lane.Ego_task_space capability in
     match dispatch peer verb (Yojson.Safe.Util.member "args" wire), served with
     | Ok _, true | Error (Live.Before_effect _), false -> ()
+    (* ego's mouse calls answer void, so a served raw drag always ends unknown. *)
+    | Error (Live.Outcome_unknown _), true when capability = Lane.Trusted_drag && !drag_ran -> ()
     | Ok _, false -> failf "the peer served %s, which the lane table says ego does not" name
     | Error (Live.Before_effect detail), true | Error (Live.Outcome_unknown detail | Live.Partial_failure {message=detail;_}), _ ->
       failf "the peer did not serve %s (%s), which the lane table says ego does" name detail)
-    Lane.all_of_live_capability
+    (* The raw drag goes last: it cannot confirm the release, so it blocks the input after it. *)
+    (List.filter (fun capability -> capability <> Lane.Trusted_drag) Lane.all_of_live_capability @ [Lane.Trusted_drag])
 
 (* The history scripts run in node against a stand-in for ego: one agent page
    whose history holds a.test then b.test. A move to an entry lands a little
@@ -1352,7 +1426,7 @@ const taskSpace=async id=>({spaceId:id,name:'SDK Space',ownership:%s,
 |js} (Yojson.Safe.to_string (str !ownership))
         (if !native_failure then "throw new Error('SDK control wait timed out');" else "") in
       output:=in_node (shim ^ script);Ok !output
-    | "page.target_input" -> answered (obj ["urlBefore",str observed_url;"pointerReleased",`Bool false;
+    | "page.target_input" -> answered (obj ["urlBefore",str observed_url;
         "receipt",obj [];"error",str "native drag interrupted";"tab",obj ["url",str observed_url;"title",str "Slack"]])
     | other -> failf "unexpected control wait step %s" other in
   let peer=match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now
@@ -1407,7 +1481,7 @@ const taskSpace=async id=>({spaceId:id,name:'SDK Space',ownership:%s,
         (if !sdk_failure then "throw Error('SDK result lost');" else "") in
       output:=in_node (shim ^ script);Ok !output
     | "page.read" -> page_answer ~label:"borrowed" (obj ["url",str "https://mail.example/";"title",str "Mail"])
-    | "page.target_input" -> answered (obj ["urlBefore",str "https://mail.example/";"pointerReleased",`Bool false;
+    | "page.target_input" -> answered (obj ["urlBefore",str "https://mail.example/";
         "receipt",obj [];"error",str "native drag interrupted";"tab",obj ["url",str "https://mail.example/";"title",str "Mail"]])
     | other -> failf "unexpected Page management step %s" other in
   let peer=match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now
@@ -1811,7 +1885,7 @@ let test_an_input_that_opens_a_dialog_answers_with_it () =
   let row = obj ["url",str observed_url;"title",str "Slack"] in
   reply := (fun sent -> match sent.step with
     | "page.target" -> answered resolved
-    | "page.pointer" -> answered (obj ["guard",page_summary;"dialog",ego_dialog "confirm" "sure?";"tab",row;"error",`Null;"pointerReleased",`Bool true])
+    | "page.pointer" -> answered (obj ["guard",page_summary;"dialog",ego_dialog "confirm" "sure?";"tab",row;"error",`Null])
     | other -> failf "unexpected step %s" other);
   (match interact (Lane.Click_node {document_id="d1";node_id="send"}) with
    | Ok receipt -> check string "the click and the dialog it opened"
@@ -2668,9 +2742,17 @@ let test_native_workflow_pointer_ownership () =
           | `Before -> answered (obj ["completed",`List [];"effectStarted",`Bool false;
               "completedEffect",`Bool false;"inputReleased",`Bool true;
               "failure",obj ["index",`Int 0;"method",str "inputPreflight";"message",str "selector absent"]])
-          | `Unreleased|`Released -> answered (obj ["completed",`List [];"effectStarted",`Bool true;
-              "completedEffect",`Bool false;"inputReleased",`Bool (mode=`Released);
+          | `Unreleased|`Contradicted -> answered (obj ["completed",`List [];"effectStarted",`Bool true;
+              "completedEffect",`Bool false;"inputReleased",`Bool (mode=`Contradicted);
               "failure",obj ["index",`Int 0;"method",str method_;"message",str "SDK failed"]])
+          | `Snapshot_failed -> answered (obj ["completed",`List [obj ["index",`Int 0;"method",str method_;"receipt",obj []]];
+              "effectStarted",`Bool true;"completedEffect",`Bool true;"inputReleased",`Bool true;
+              "failure",obj ["index",`Int 1;"method",str "snapshot";"message",str "snapshot failed"]])
+          | `Unproven|`Proven -> answered (obj ["completed",`List [obj ["index",`Int 0;"method",str method_;
+                "receipt",(if mode=`Proven then obj [] else `Null)]];
+              "effectStarted",`Bool true;"completedEffect",`Bool true;"inputReleased",`Bool true;"failure",`Null;
+              "urlBefore",str "https://app.slack.com/";"url",str "https://app.slack.com/";"title",str "Slack";
+              "snapshot",str "root";"chars",`Int 4;"truncated",`Bool false])
         else answered (obj ["completed",`List [];"effectStarted",`Bool false;"completedEffect",`Bool false;
           "inputReleased",`Bool true;"failure",`Null;"urlBefore",str "https://app.slack.com/";
           "url",str "https://app.slack.com/";"title",str "Slack";"snapshot",str "root";"chars",`Int 4;"truncated",`Bool false])
@@ -2681,18 +2763,23 @@ let test_native_workflow_pointer_ownership () =
     let first=call [obj (("method",str method_)::fields)] in
     (match mode,first with
      | `Before,Error (Live.Before_effect _)
-     | (`Lost|`Unreleased|`Released),Error (Live.Outcome_unknown _) -> ()
-     | (`Before|`Lost|`Unreleased|`Released),
+     | (`Lost|`Unreleased|`Contradicted|`Unproven),Error (Live.Outcome_unknown _)
+     | `Snapshot_failed,Error (Live.Partial_failure _)
+     | `Proven,Ok _ -> ()
+     | (`Before|`Lost|`Unreleased|`Contradicted|`Unproven|`Proven|`Snapshot_failed),
        (Ok _|Error (Live.Before_effect _|Live.Partial_failure _|Live.Outcome_unknown _)) ->
        fail "workflow input result changed its effect classification");
     (match mode,call [] with
-     | (`Released|`Before),Ok _ -> check int "confirmed release permits the next original request" 2 !issued
-     | (`Lost|`Unreleased),Error (Live.Before_effect _) ->
+     | (`Proven|`Before|`Snapshot_failed),Ok _ -> check int "a settled or never-started input permits the next original request" 2 !issued
+     | (`Lost|`Unreleased|`Contradicted|`Unproven),Error (Live.Before_effect _) ->
        check int "unknown release never dispatches another workflow" 1 !issued
-     | (`Lost|`Unreleased),Ok _|(`Released|`Before),Error _|(`Lost|`Unreleased),Error (Live.Partial_failure _|Live.Outcome_unknown _) ->
+     | (`Lost|`Unreleased|`Contradicted|`Unproven),Ok _|(`Proven|`Before|`Snapshot_failed),Error _
+     | (`Lost|`Unreleased|`Contradicted|`Unproven),Error (Live.Partial_failure _|Live.Outcome_unknown _) ->
        fail "native input ownership did not survive the workflow boundary");
     ignore (dispatch peer Live.Tabs_list (obj [])))
-      ([`Lost;`Unreleased;`Released] @ if method_="press" then [`Before] else []))
+      (* keyboard.type returns void in the SDK, so no real success carries a receipt for it. *)
+      ([`Lost;`Unreleased;`Contradicted;`Unproven] @ (if method_="press" then [`Before] else [])
+        @ (if method_="keyboard.type" then [] else [`Proven;`Snapshot_failed])))
     ["dragAndDrop",["selector",str "#source";"destination",str "#target"];
      "click",["selector",str "#source"];
      "dblclick",["selector",str "#source"];
@@ -2701,6 +2788,44 @@ let test_native_workflow_pointer_ownership () =
      "keyboard.press",["key",str "ControlOrMeta+Enter"];
      "keyboard.type",["text",str "x"];
      "keyboard.paste",["text",str "x"]]
+
+(* A workflow whose holding step is never reached held nothing. It must not turn an operator's reset
+   into a settled command. *)
+let test_a_workflow_that_never_held_input_keeps_the_previous_readiness () =
+  let module Input=Masc.Browser_ego_input in
+  let issued=ref 0 in
+  let peer=opened (fun sent -> match sent.step with
+    | "tabs.list" -> answered tabs
+    | "page.native_workflow" ->
+      incr issued;
+      let failed method_ ~released = answered (obj ["completed",`List [];"effectStarted",`Bool true;
+        "completedEffect",`Bool false;"inputReleased",`Bool released;
+        "failure",obj ["index",`Int 0;"method",str method_;"message",str "SDK failed"]]) in
+      if !issued=1 then failed "keyboard.type" ~released:false
+      else if !issued=2 then failed "fill" ~released:true
+      else Error (Peer.Unstarted "no node here")
+    | other -> failf "unexpected workflow fixture step %s" other) in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let call steps=dispatch peer Live.Page_native_workflow (obj ["tabId",`Int 1;
+    "expectedUrl",str "https://app.slack.com/";"maxChars",`Int 1000;"steps",`List steps]) in
+  check string "typing that never returned is unknown" "unknown"
+    (failure_kind (call [obj ["method",str "keyboard.type";"text",str "x"]]));
+  let pending=match Peer.input_status peer with Input.Uncertain pending -> pending
+    | Ready _ -> fail "typing did not hold the input" in
+  check bool "the operator resets the held input" true
+    (Result.is_ok (Peer.assert_input_reset peer ~generation:pending.generation));
+  let reset=Peer.input_status peer in
+  check bool "the reset is the operator's" true
+    (match reset with Input.Ready (Input.Operator_reset_asserted _) -> true | Ready Input.Command_settled | Uncertain _ -> false);
+  check string "a fill that fails before the click is unknown" "unknown"
+    (failure_kind (call [obj ["method",str "fill";"selector",str "#editor";"text",str "x"];
+      obj ["method",str "click";"selector",str "#send"]]));
+  check int "the second workflow ran" 2 !issued;
+  check bool "a workflow that never held input leaves the operator's reset in place" true (Peer.input_status peer=reset);
+  check string "a script that never started is refused before any effect" "before effect"
+    (failure_kind (call [obj ["method",str "click";"selector",str "#send"]]));
+  check int "the third workflow was asked for" 3 !issued;
+  check bool "a script that never started leaves the operator's reset in place" true (Peer.input_status peer=reset)
 
 let test_operator_input_recovery () =
   let module Input=Masc.Browser_ego_input in
@@ -2901,9 +3026,12 @@ let () =
       test_case "adopted managed Pages retain origin while using native actions" `Quick test_adopted_managed_page_uses_native_actions_without_changing_origin;
       test_case "takeover receipts and native runner preserve pending input" `Quick test_takeover_receipt_and_native_runner_preserve_pending_input;
       test_case "saved fetch survives snapshot failure and reaches the download broker" `Quick test_saved_fetch_survives_snapshot_failure_and_reaches_download_broker;
-      test_case "native drag preserves release and failure boundaries" `Quick test_native_drag_and_release;
+      test_case "a raw drag never confirms input release" `Quick test_native_drag_and_release;
+      test_case "a raw drag reports what its script saw" `Quick test_a_raw_drag_reports_what_the_script_saw;
+      test_case "a target drag settles only from the receipt it returns" `Quick test_a_target_drag_settles_only_from_the_receipt_it_returns;
       test_case "operator input assertion resumes the same peer without replay" `Quick test_operator_input_recovery;
       test_case "native workflows retain input ownership after a lost result" `Quick test_native_workflow_pointer_ownership;
+      test_case "a workflow that never held input keeps the previous readiness" `Quick test_a_workflow_that_never_held_input_keeps_the_previous_readiness;
       test_case "chooser upload respects uncertain input release" `Quick test_chooser_upload_respects_uncertain_pointer_release;
       test_case "explicit completion is terminal and never replayed" `Quick test_explicit_completion_is_terminal_and_never_replayed;
       test_case "the space opens by name and is held by number" `Quick test_the_space_opens_by_name_and_is_held_by_number;

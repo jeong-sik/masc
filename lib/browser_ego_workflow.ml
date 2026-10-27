@@ -191,9 +191,11 @@ let script = {js|async function nativeWorkflow(page, args) {
   } catch (error) { return failure(args.steps.length, 'snapshot', error); }
 }|js}
 
-type outcome = Completed of Yojson.Safe.t
+module Release = Browser_ego_release
+type outcome =
+  | Completed of { reply : Yojson.Safe.t; input : Release.settled }
   | Stopped of { receipt : Yojson.Safe.t; message : string;
-      effect_started : bool; completed_effect : bool; input_released : bool }
+      effect_started : bool; completed_effect : bool; input : Release.t }
 let ( let* ) = Result.bind
 let object_fields allowed = function
   | `Assoc fields when List.for_all (fun (key,_) -> List.mem key allowed) fields
@@ -233,6 +235,8 @@ let observation_receipt (step:Browser_lane.Native_workflow.step) value =
     | Select_option _|Goto _|Wait_for_url _|Wait_for_selector _|Wait_for_load_state _
     | Evaluate _|Wait_for_function _|Fetch _ -> true in
   if valid then Ok () else Error ("invalid native " ^ W.method_name step.action ^ " observation receipt")
+let receipts_do_not_show reason =
+  "workflow reports a released input that its receipts do not show: " ^ Release.describe reason
 let decode (request : Browser_lane.Native_workflow.t) receipt =
   let* fields=object_fields ["completed";"effectStarted";"completedEffect";"inputReleased";"failure";"urlBefore";"url";"title";"snapshot";"truncated";"chars"] receipt in
   let* started=bool "effectStarted" fields in let* completed_effect=bool "completedEffect" fields in
@@ -245,8 +249,11 @@ let decode (request : Browser_lane.Native_workflow.t) receipt =
   let methods=List.map (fun (step : Browser_lane.Native_workflow.step) ->
     Browser_lane.Native_workflow.method_name step.action) request.steps in
   let method_at index = Option.to_result ~none:"workflow step index is outside the request" (List.nth_opt methods index) in
-  let rec progress index has_effect steps = function
-    | [] -> Ok (index,has_effect,steps)
+  let holds_at index = match List.nth_opt request.steps index with
+    | Some step -> Browser_lane.Native_workflow.holds_input step.action | None -> false in
+  (* [answers]: the SDK's answer for each input-holding step that returned, newest first. *)
+  let rec progress index has_effect answers steps = function
+    | [] -> Ok (index,has_effect,List.rev answers,steps)
     | value::rest ->
       let* row=object_fields ["index";"method";"receipt"] value in
       let* observed=integer "index" row in let* method_=text "method" row in let* receipt=get "receipt" row in
@@ -256,31 +263,37 @@ let decode (request : Browser_lane.Native_workflow.t) receipt =
         | [] -> Error "workflow completed more steps than requested"
         | (step : Browser_lane.Native_workflow.step)::steps ->
           let* ()=observation_receipt step receipt in
-          progress (index+1) (has_effect || Browser_lane.Native_workflow.is_effect step.action) steps rest in
-  let* count,has_effect,remaining=progress 0 false request.steps completed in
+          let answers=if Browser_lane.Native_workflow.holds_input step.action
+            then (index,Release.answer_of_json receipt)::answers else answers in
+          progress (index+1) (has_effect || Browser_lane.Native_workflow.is_effect step.action) answers steps rest in
+  let* count,has_effect,answers,remaining=progress 0 false [] request.steps completed in
   let* ()=if completed_effect=has_effect && (not has_effect || started) then Ok ()
     else Error "workflow effect flags do not match completed steps" in
   let* failure=get "failure" fields in
   match failure with
   | `Null ->
     let* ()=if remaining=[] && started=has_effect && input_released then Ok () else Error "workflow success omitted requested steps or input release" in
+    let* input=match Release.judge answers with
+      | Release.Settled settled -> Ok settled
+      | Release.Unconfirmed reason -> Error (receipts_do_not_show reason) in
     let* url_before=text "urlBefore" fields in
     let* ()=if url_before=request.expected_url then Ok () else Error "workflow starting URL does not match request" in
     let* _=text "url" fields in let* _=text "title" fields in let* _=text "snapshot" fields in
     let* truncated=bool "truncated" fields in let* chars=integer "chars" fields in
     let* ()=if truncated=(chars>request.max_chars) then Ok () else Error "workflow snapshot cut flags disagree" in
-    Ok (Completed receipt)
+    Ok (Completed {reply=receipt; input})
   | `Assoc _ ->
     let* failed=object_fields ["index";"method";"message";"dialog"] failure in
     let* index=integer "index" failed in let* method_=text "method" failed in let* message=text "message" failed in
-    let* expected_started=match method_ with
-      | "initialUrl" when index=0 && count=0 -> Ok false
+    (* [entered]: when the failed step holds input, what the SDK did not give for it: no answer, or a dialog. *)
+    let* expected_started,entered=match method_ with
+      | "initialUrl" when index=0 && count=0 -> Ok (false,None)
       | "inputPreflight" when index=count ->
         (match remaining with
          | [] -> Error "workflow input preflight is outside the request"
          | step :: _ ->
            match step.action with
-           | Browser_lane.Native_workflow.Press _ -> Ok has_effect
+           | Browser_lane.Native_workflow.Press _ -> Ok (has_effect,None)
            | Click _ | Double_click _ | Hover _ | Drag_and_drop _ | Mouse_click _
            | Mouse_move _ | Mouse_wheel _ | Fill _ | Focus _ | Reload
            | Keyboard_type _ | Keyboard_insert_text _ | Keyboard_paste _ | Keyboard_press _
@@ -288,16 +301,26 @@ let decode (request : Browser_lane.Native_workflow.t) receipt =
            | Wait_for_load_state _ | Evaluate _ | Wait_for_function _ | Fetch _
            | Url | Title | Info | Snapshot | Events | Wait_for_timeout _ ->
              Error "workflow input preflight does not match a pending press")
-      | "observation" when index=count && count>0 -> Ok has_effect
-      | "snapshot" when index=count && remaining=[] -> Ok has_effect
+      | "observation" when index=count && count>0 -> Ok (has_effect,None)
+      | "snapshot" when index=count && remaining=[] -> Ok (has_effect,None)
       | _ ->
         let* expected=method_at index in
         if expected<>method_ then Error "workflow failed method does not match its step"
         else if index=count then
-          (match remaining with step::_ -> Ok (has_effect || Browser_lane.Native_workflow.is_effect step.action)
+          (match remaining with
+           | step::_ -> Ok (has_effect || Browser_lane.Native_workflow.is_effect step.action,
+               if Browser_lane.Native_workflow.holds_input step.action then Some (index,Release.of_unreleased Release.Never_returned) else None)
            | [] -> Error "workflow failed step is outside request")
-        else if index+1=count && List.mem_assoc "dialog" failed then Ok has_effect
+        else if index+1=count && List.mem_assoc "dialog" failed then
+          Ok (has_effect,if holds_at index then Some (index,Release.of_unreleased Release.Receipt_with_dialog) else None)
         else Error "workflow failure index does not match progress" in
     let* ()=if started=expected_started then Ok () else Error "workflow failed-step effect flag disagrees" in
-    Ok (Stopped {receipt;message;effect_started=started;completed_effect;input_released})
+    (* The failed step is one more answer for the same rule as the completed ones. *)
+    let judged=Release.judge (answers @ Option.to_list entered) in
+    let* input=match input_released,judged with
+      | true,Release.Settled _ -> Ok judged
+      | true,Release.Unconfirmed reason -> Error (receipts_do_not_show reason)
+      | false,Release.Unconfirmed _ -> Ok judged
+      | false,Release.Settled _ -> Ok (Release.Unconfirmed Release.Held_by_script_report) in
+    Ok (Stopped {receipt;message;effect_started=started;completed_effect;input})
   | _ -> Error "workflow failure must be null or an object"

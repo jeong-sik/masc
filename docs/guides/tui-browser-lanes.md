@@ -178,8 +178,10 @@ browser Add-on without removing its declaration, switch it off, wait until
 its application reports `Inactive` and cleanup is confirmed, then switch it on
 again ([package activity](lane-package-activity.md)). This restarts the whole
 worker, including its managed Firefox. A list refresh alone does not restart
-it; after the restart, `b` refreshes the Browser connection list and its
-reported startup observation. If the listing itself fails, or a conflict arises after the listing, the
+it. After the restart, `b` opens and refreshes the Browser connection list;
+use `r` if the picker is already open, or Esc before `b` when editing a URL.
+The list reports the worker's startup observation. If the listing itself fails,
+or a conflict arises after the listing, the
 original startup failure behavior still applies.
 
 The picker identifies its client UUID and the SDK-observed Space ID/name. The

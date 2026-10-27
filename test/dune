@@ -6905,3 +6905,5 @@
 (include stanzas/test_endpoint_process_gate.inc)
 
 (include stanzas/test_endpoint_job_launch.inc)
+
+(include stanzas/test_endpoint_job_owner.inc)

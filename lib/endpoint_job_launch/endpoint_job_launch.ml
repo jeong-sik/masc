@@ -44,6 +44,7 @@ let scope (spec : P.spec) =
   | P.Workspace_process,Exec_ssh_protocol.Effect,None -> Ok ()
   | P.Workspace_process,(Observe | Guest_local),_
   | P.Workspace_process,Effect,Some _ | P.Isolated_job _,_,_ -> Error Scope_unavailable
+let check_execution_domain = scope
 
 let encoded value = `String (Base64.encode_string value)
 let identifier value = `String (P.Id.to_string value)
@@ -82,7 +83,7 @@ let publish recovery storage ~leaf json =
 let launch_with_hook ~after_rendezvous ~sw ~fs ~cgroup_parent_path ~(execution : execution)
     ~stdin ~stdout ~stderr intent =
   let result=R.with_launch ~sw intent (fun target ~storage ->
-    let* ()=scope target.spec in
+    let* ()=check_execution_domain target.spec in
     let group_name="masc-job-" ^ P.Id.to_string target.launch_id in
     let* tree=G.Group.create ~sw ~parent_path:cgroup_parent_path ~name:group_name |> group in
     let* child=G.create_in_group ~group:tree ~sw ~executable:execution.executable

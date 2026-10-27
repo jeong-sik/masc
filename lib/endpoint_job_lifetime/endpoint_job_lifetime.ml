@@ -52,14 +52,26 @@ type t = {
 let original t=P.original ~binding:(R.binding t.source) ~admission_id:(R.admission_id t.source)
 let await_result t=Eio.Promise.await t.result.value
 let stop t error = finish t.startup (Error error);finish t.result (Error error)
-let terminal_result ~sw intent = function
+(* A startup attempt can lose the registry to this job's own cancellation.
+   Only that cancellation's completion is awaited; its outcome is not the
+   job outcome, so the caller re-derives the result from the registry. *)
+let settle_cancellation t = match Atomic.get t.cancellation with
+  | Some pending -> ignore (Eio.Promise.await pending.value : (R.record,error) result); true
+  | None -> false
+
+let retire_unlaunched ~sw intent =
+  let* proof=R.retire_cancelled_launch ~sw intent |> Result.map_error (fun e -> Registry_error e) in
+  let* result=D.publish_unlaunched ~sw ~proof |> Result.map_error (fun e -> Result_error e) in
+  Ok (D.sha256 result)
+
+let terminal_result t ~sw intent = function
   | S.Not_performed {error;pipe_cleanup_errors=_} ->
     (match classify_startup_error error with
-     | Cancelled_original ->
-       let* proof=R.retire_cancelled_launch ~sw intent |> Result.map_error (fun e -> Registry_error e) in
-       let* result=D.publish_unlaunched ~sw ~proof |> Result.map_error (fun e -> Result_error e) in
-       Ok (D.sha256 result)
-     | Busy_original | Unavailable -> Error (Supervisor_error error))
+     | Cancelled_original -> retire_unlaunched ~sw intent
+     | Busy_original ->
+       if settle_cancellation t then retire_unlaunched ~sw intent
+       else Error (Supervisor_error error)
+     | Unavailable -> Error (Supervisor_error error))
   | S.Performed {value=Error error;registry_release_error=_;pipe_cleanup_errors=_} ->
     Error (Supervisor_error error)
   | S.Performed {value=Ok owner;registry_release_error=_;pipe_cleanup_errors=_} ->
@@ -77,7 +89,7 @@ let start_effect_workspace ~sw ~fs ~cgroup_parent_path ~execution intent =
       Eio.Switch.run (fun job_sw ->
         let outcome=S.launch_effect_workspace ~sw:job_sw ~fs ~cgroup_parent_path ~execution intent in
         finish t.startup (Ok outcome);
-        finish t.result (terminal_result ~sw:job_sw intent outcome);
+        finish t.result (terminal_result t ~sw:job_sw intent outcome);
         (* No control observer owns these resources. Release will require a
            separate digest-bound durable host-consumption capability. *)
         Eio.Fiber.await_cancel ())

@@ -14,10 +14,7 @@ type verdict =
    declarations decide what the host is answered. *)
 let serves_native_hosts (declaration : Lane_addon_config.declaration) =
   declaration.enabled
-  &&
-  match declaration.package.Lane_addon_types.worker_service with
-  | Lane_addon_types.Browser_service backend -> backend = Browser_lane.Backend.External_host
-  | Lane_addon_types.Mcp_tools -> false
+  && Lane_addon_config.browser_source declaration = Some Browser_lane.Backend.External_host
 ;;
 
 (* The server reads declarations from the config root's Lane directory
@@ -69,10 +66,9 @@ let doubled_sources ~base_path =
   let browsers =
     List.filter_map
       (fun (declaration : Lane_addon_config.declaration) ->
-        match declaration.enabled, declaration.package.Lane_addon_types.worker_service with
-        | true, Lane_addon_types.Browser_service backend ->
-          Some (declaration.Lane_addon_config.id, backend)
-        | false, Lane_addon_types.Browser_service _ | (true | false), Lane_addon_types.Mcp_tools -> None)
+        match declaration.enabled, Lane_addon_config.browser_source declaration with
+        | true, Some backend -> Some (declaration.id, backend)
+        | false, (Some _ | None) | true, None -> None)
       snapshot.Lane_addon_config.declarations
   in
   List.filter_map

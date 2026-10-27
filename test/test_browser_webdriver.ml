@@ -299,14 +299,40 @@ geckodriver = "/test/geckodriver"
 |} with
     | Error detail -> fail detail
     | Ok toml -> (match C.parse toml with Ok c -> c | Error detail -> fail detail) in
-  let start configuration backend path read = Result.is_ok
-    (Masc.Lane_addon_runtime.For_testing.browser_source_table configuration ~backend ~path read) in
+  let start configuration backend source = Result.is_ok
+    (Masc.Lane_addon_runtime.For_testing.browser_source_table configuration ~backend source) in
   check bool "automation starts from [browser.automation]" true
-    (start (Some configuration) Lane.Backend.Automation C.automation_path (fun c -> c.C.automation));
+    (start (Some configuration) Lane.Backend.Automation C.Automation);
   check bool "Stagehand has no table, so it does not start" false
-    (start (Some configuration) Lane.Backend.Stagehand C.stagehand_path (fun c -> c.C.stagehand));
+    (start (Some configuration) Lane.Backend.Stagehand C.Stagehand);
   check bool "with no runtime.toml nothing starts" false
-    (start None Lane.Backend.Automation C.automation_path (fun c -> c.C.automation))
+    (start None Lane.Backend.Automation C.Automation)
+
+(* A source's table path and the field it is read from name one table: a
+   file holding only the table at that path fills that field and no other. *)
+type any_source = Any_source : 'a Browser_configuration.source -> any_source
+
+let test_each_source_reads_the_table_at_its_path () =
+  let module C = Browser_configuration in
+  let keys = function
+    | Any_source C.Automation -> {|geckodriver = "/test/geckodriver"|}
+    | Any_source C.Stagehand -> "chrome = \"/test/chrome\"\nextension = \"/test/extension\""
+    | Any_source C.Live_bidi -> "firefox = \"/test/firefox\"\nprofile = \"/test/profile\""
+    | Any_source C.Live_ego -> "command = \"/test/ego-browser\"\nspace = \"keepers\"" in
+  let sources = [ Any_source C.Automation; Any_source C.Stagehand; Any_source C.Live_bidi
+                ; Any_source C.Live_ego ] in
+  let path (Any_source source) = C.source_path source in
+  let read (Any_source source) configuration = Option.is_some (C.source_table source configuration) in
+  List.iter (fun written ->
+      let configuration =
+        match Otoml.Parser.from_string_result (Printf.sprintf "[%s]\n%s\n" (path written) (keys written)) with
+        | Error detail -> fail detail
+        | Ok toml -> (match C.parse toml with Ok c -> c | Error detail -> fail detail) in
+      List.iter (fun source ->
+          check bool (Printf.sprintf "[%s] fills the field of [%s]" (path written) (path source))
+            (path source = path written) (read source configuration))
+        sources)
+    sources
 
 (* Whether a source runs is its Lane Add-on declaration's to say, so a
    browser table takes no enabled key, and a table of nothing but one is not
@@ -1344,4 +1370,5 @@ let () = run "native Firefox lane" ["behavior", [
   test_case "browser configuration" `Quick test_browser_configuration;
   test_case "a browser table takes no enabled key" `Quick test_a_browser_table_takes_no_enabled_key;
   test_case "a source starts from its own table" `Quick test_a_source_starts_from_its_own_table;
+  test_case "each source reads the table at its path" `Quick test_each_source_reads_the_table_at_its_path;
   test_case "each session lets its profile go once" `Quick test_each_session_lets_its_profile_go_once ]]

@@ -147,6 +147,25 @@ let parse toml =
   let* stagehand = parse_stagehand ~path:stagehand_path stagehand_table in
   Ok { automation; stagehand; live_bidi; live_ego }
 
+type _ source =
+  | Automation : automation source
+  | Stagehand : stagehand source
+  | Live_bidi : live_bidi source
+  | Live_ego : live_ego source
+
+let source_path : type a. a source -> string = function
+  | Automation -> automation_path
+  | Stagehand -> stagehand_path
+  | Live_bidi -> live_bidi_path
+  | Live_ego -> live_ego_path
+
+let source_table : type a. a source -> t -> a option = fun source t ->
+  match source with
+  | Automation -> t.automation
+  | Stagehand -> t.stagehand
+  | Live_bidi -> t.live_bidi
+  | Live_ego -> t.live_ego
+
 (* The file parser returns most syntax errors but raises on a repeated
    table. *)
 let of_file path =

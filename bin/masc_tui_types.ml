@@ -6345,6 +6345,9 @@ module Browser_lane_view = struct
         let attach ~address =
           match report.keeper with
           | Addon_managed _ -> []
+          | Addon_off ->
+              host_attach_lines ~address report.attach
+              @ [host_line "[browser.live.bidi] is set, but browser-firefox is off"]
           | Not_configured ->
               host_attach_lines ~address report.attach
               @ [host_line "No Addon-managed live Firefox is configured in [browser.live.bidi]"]
@@ -6407,7 +6410,7 @@ module Browser_lane_view = struct
               host_said "Detail: " detail])
         @ (match report.keeper with
            | Addon_managed { port; profile } -> host_addon_lines ~port ~profile
-           | Not_configured | Not_known -> [])
+           | Addon_off | Not_configured | Not_known -> [])
   (* A path on rows of [max_cells], broken before a slash so each name
      stays whole. A single name longer than a row has nowhere better to
      break and is cut where the row ends, with every cell of it kept: a
@@ -6471,7 +6474,7 @@ module Browser_lane_view = struct
               (match report.keeper with
                | Addon_managed _ ->
                    "Manual BiDi host: none has run · check Addon readiness · b:details"
-               | Not_configured | Not_known ->
+               | Addon_off | Not_configured | Not_known ->
                    "Manual BiDi host: none has run for this workspace · b:how to attach")
           | Record_missing_but_locked ->
               "Manual BiDi host: lock held, record missing · b:inspect the existing process"

@@ -254,10 +254,12 @@ let load ~directory =
         ([], [], true) results in
       {declarations = List.rev declarations; issues = List.rev issues; paths; complete}
 
+let browser_source (d : declaration) = match d.package.worker_service with
+  | Lane_addon_types.Browser_service served -> Some served
+  | Lane_addon_types.Mcp_tools -> None
+
 let browser_source_on snapshot backend =
-  let runs (d : declaration) = d.enabled && (match d.package.worker_service with
-    | Lane_addon_types.Browser_service served -> served = backend
-    | Lane_addon_types.Mcp_tools -> false) in
+  let runs (d : declaration) = d.enabled && browser_source d = Some backend in
   if List.exists runs snapshot.declarations then Some true
   else if snapshot.complete then Some false
   else None

@@ -410,7 +410,7 @@ native worker 는 자기 프로세스 그룹을 가져요. 멈출 때는 먼저 
   | host 가 띄울 출처를 고름(`lane_addon_runtime.ml:1508`, `1512`, `1520`, `1532`) | 지워요. 띄울지는 선언이 정했어요 |
   | server 쪽 activity(`server_browser_configuration.ml:1-16`) | 지워요. 출처가 있는지는 host 가 serving 중인 worker 로 알아요(4.2) |
   | worker 안의 activity(`browser_addon_owner.ml:33`) | 자기 출처만 보면 돼서 단순해져요 |
-  | BiDi host 상태(`browser_bidi_host_status.ml:12-17`) | `Lane_off` 를 지워요. `browser-firefox` 선언이 켜졌는지는 Lanes 화면의 그 패키지 줄이 보여 줘요 |
+  | BiDi host 상태(`browser_bidi_host_status.ml:12-17`) | `Lane_off` 를 지워요. `[browser.live.bidi]` 가 있을 때만 선언을 읽어서, `browser-firefox` 를 돌리는 켜진 선언이 있으면 `Addon_managed`, 없으면 `Addon_off` 예요. 표가 없으면 선언은 읽지 않고 `Not_configured` 예요 |
   | setup 계획·안내 문구(2.4) | 선언의 `enabled` 를 읽고 써요 |
   | lane inventory(`server_lane_inventory.ml:160`) | 그 레인 worker 들의 선언으로 정해요 |
   | TUI 의 레인 켜기·끄기(`masc_tui_browser_activity.ml`) | 지워요. 출처마다 켜고 끄는 일은 `browser-<출처>` 패키지 줄의 선언 편집기가 이미 해요(`POST /api/v1/lane-addons/declaration`) |
@@ -462,7 +462,7 @@ native worker 는 자기 프로세스 그룹을 가져요. 멈출 때는 먼저 
 
 | 층 | 내용 | 검증 |
 |---|---|---|
-| D-L1 | `*_enabled` 와 그 parser·읽는 곳 삭제(4.4 표), TUI 켜기·끄기를 선언으로 | `enabled` 가 남은 runtime.toml 이 거절되는지. TUI 에서 끈 출처의 선언만 `enabled = false` 가 되고 그 worker 만 멈추는지 |
+| D-L1 | `*_enabled` 와 그 parser·읽는 곳 삭제(4.4 표), TUI·웹의 browser lane 편집기 삭제(켜기·끄기는 `browser-<출처>` 패키지 줄) | `enabled` 가 남은 runtime.toml 이 거절되는지. 선언을 끄면 Lanes 의 browser 줄과 BiDi host 상태가 그 선언만으로 바뀌는지 |
 
 **바뀌는 기존 테스트**
 - `test/test_browser_addon_live_bidi.ml` 의 "unexpected peer loss fences the worker": 그 worker 만 끝나는 걸로 바뀌어요(S-L3).

@@ -78,6 +78,8 @@ type authorization_request = {
 val validate_authorization_request :
   base_path:string ->
   expected_resource:string ->
+  fetch_client_metadata:
+    (Auth_oauth_client_metadata.document_url -> (string, string) result) ->
   response_type:string option ->
   client_id:string option ->
   redirect_uri:string option ->
@@ -87,6 +89,13 @@ val validate_authorization_request :
   code_challenge:string option ->
   code_challenge_method:string option ->
   (authorization_request, error) result
+(** A [client_id] that is an https URL names a Client ID Metadata Document
+    (MCP 2026-07-28). The request is checked first, then
+    [fetch_client_metadata] is called and the document read with
+    {!Auth_oauth_client_metadata}. The requested [redirect_uri] must be a
+    loopback HTTP URI that the document lists, whatever its port. Any other
+    [client_id] must be one Dynamic Client Registration stored, and its
+    [redirect_uri] must equal a registered one. *)
 
 val issue_authorization_code :
   base_path:string ->

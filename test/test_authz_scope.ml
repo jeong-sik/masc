@@ -8,6 +8,7 @@ module Test_id = Authz_id.Make ()
 
 let id_error_to_string = function
   | Authz_id.Empty -> "empty"
+  | Authz_id.Too_long -> "too_long"
   | Authz_id.Invalid_byte { index } -> Printf.sprintf "invalid_byte@%d" index
   | Authz_id.Path_segment -> "path_segment"
 ;;
@@ -28,6 +29,8 @@ let id_cases =
   ; "existing runtime id", "anthropic.claude-opus-5-5", "ok:anthropic.claude-opus-5-5"
   ; "dots inside are fine", "a..b", "ok:a..b"
   ; "empty", "", "empty"
+  ; "as long as allowed", String.make Authz_id.max_length 'a', "ok:" ^ String.make Authz_id.max_length 'a'
+  ; "one byte too long", String.make (Authz_id.max_length + 1) 'a', "too_long"
   ; "one dot", ".", "path_segment"
   ; "two dots", "..", "path_segment"
   ; "slash", "a/b", "invalid_byte@1"

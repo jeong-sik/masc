@@ -41,8 +41,9 @@ module Effect : sig
   val to_string : t -> string
 
   (** The five [Manage_*] effects and [Admin_disable_block]: the ones that
-      change who may do what, or whether something runs. A PAT must name them
-      and the channel; [All] does not count (design 4.4). Every effect is
+      change who may do what, or whether something runs. A PAT that asks for
+      one must name the channel and the effects; [All] in either does not
+      count, and its runtimes may stay [All] (design 4.4). Every effect is
       placed by an exhaustive match, so a new one cannot skip this question. *)
   val is_management : t -> bool
 

@@ -2,6 +2,7 @@
 
 type error =
   | Empty
+  | Too_long
   | Invalid_byte of { index : int }
   | Path_segment
 
@@ -15,6 +16,8 @@ module type S = sig
 
   module Set : Set.S with type elt = t
 end
+
+let max_length = 255
 
 let in_alphabet = function
   | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '.' | '_' | ':' | '-' -> true
@@ -32,6 +35,8 @@ let first_invalid_byte s =
   scan 0
 ;;
 
+(* The alphabet has no '/', so [.] and [..] are the only ids that can step out
+   of a directory. Whoever adds '/' to the alphabet has to rule out more. *)
 let is_path_segment s = String.equal s "." || String.equal s ".."
 
 module Make () = struct
@@ -40,6 +45,8 @@ module Make () = struct
   let of_string s =
     if String.equal s ""
     then Error Empty
+    else if String.length s > max_length
+    then Error Too_long
     else (
       match first_invalid_byte s with
       | Some index -> Error (Invalid_byte { index })

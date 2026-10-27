@@ -39,9 +39,6 @@ module Effect = struct
     | Admin_disable_block
     | Read_audit_metadata
 
-  (* Constant constructors only, so the structural order is total and cheap. *)
-  let compare (a : t) (b : t) = Stdlib.compare a b
-
   let to_string = function
     | Read_state -> "read_state"
     | Invoke_model -> "invoke_model"
@@ -54,6 +51,11 @@ module Effect = struct
     | Admin_disable_block -> "admin_disable_block"
     | Read_audit_metadata -> "read_audit_metadata"
   ;;
+
+  (* By label. [to_string] is an exhaustive match, so a new effect, or a
+     constructor that carries data, fails to compile here instead of changing
+     the order silently. *)
+  let compare a b = String.compare (to_string a) (to_string b)
 
   let is_management = function
     | Manage_own_provider
@@ -85,8 +87,21 @@ module Channel = struct
     | Verifier
     | Autonomous
 
-  (* Constant constructors only, so the structural order is total and cheap. *)
-  let compare (a : t) (b : t) = Stdlib.compare a b
+  let to_string = function
+    | Direct -> "direct"
+    | Delegate -> "delegate"
+    | Schedule -> "schedule"
+    | Board_trigger -> "board_trigger"
+    | Retry -> "retry"
+    | Resume -> "resume"
+    | Fusion -> "fusion"
+    | Vision -> "vision"
+    | Verifier -> "verifier"
+    | Autonomous -> "autonomous"
+  ;;
+
+  (* By label, for the same reason as [Effect.compare]. *)
+  let compare a b = String.compare (to_string a) (to_string b)
   let equal a b = compare a b = 0
 
   module Set = Set.Make (struct

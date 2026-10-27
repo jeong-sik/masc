@@ -10,6 +10,7 @@ let with_workspace f =
   Unix.mkdir base_path 0o700;
   let config = Workspace.default_config base_path in
   let runtime_snapshot = Runtime.For_testing.snapshot () in
+  let catalog_snapshot = Llm_provider.Model_catalog.global () in
   let path = Filename.concat base_path "runtime.toml" in
   let toml = {|[providers.codex]
 protocol = "codex-app-server"
@@ -25,6 +26,8 @@ default = "codex.codex"
   Fun.protect
     ~finally:(fun () ->
       Runtime.For_testing.restore runtime_snapshot;
+      (match catalog_snapshot with None -> Llm_provider.Model_catalog.clear_global ()
+       | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
       Keeper_registry.For_testing.unregister ~base_path keeper_name;
       ignore (Workspace.reset config))
     (fun () -> Eio_main.run (fun env ->
@@ -168,7 +171,7 @@ let test_unreadable_result_is_not_consumed () =
     pulse config;
     check int "original result is discovered after storage repair" 1 (List.length (pending config)))
 
-let test_route_change_preserves_unrelated_work_and_receipt ?(corrupt=false) ?(mixed=false) () =
+let test_route_change_preserves_unrelated_work_and_receipt ?(corrupt=false) () =
   with_workspace (fun config meta env ->
     let result = receipt "turn-route-change" in
     retain config result;
@@ -188,32 +191,27 @@ let test_route_change_preserves_unrelated_work_and_receipt ?(corrupt=false) ?(mi
     if corrupt then Fs_compat.save_file receipt_path "{unreadable";
     let path = Filename.concat config.Workspace.base_path "runtime.toml" in
     let codex_config = Fs_compat.load_file path in
-    let alternate_config = if mixed then codex_config ^ {|[providers.http]
+    let alternate_config = codex_config ^ {|[providers.http]
 protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:1"
 [models.http]
-api-name = "http-fixture"
+api-name = "unavailable-result-fixture"
 max-context = 400000
 [http.http]
-[runtime.lanes.recovery]
-candidates = ["codex.codex", "http.http"]
 [runtime.assignments]
-result-owner = "recovery"
-|} else {|[providers.http]
-protocol = "openai-compatible-http"
-endpoint = "http://127.0.0.1:1"
-[models.http]
-api-name = "http-fixture"
-max-context = 400000
-[http.http]
-[runtime]
-default = "http.http"
+result-owner = "http.http"
 |} in
+    let catalog = get (Llm_provider.Model_catalog.of_toml_string ~source:"outbox-unavailable-route"
+      "[[models]]\nmodel_id = \"unrelated-fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 8192\n") in
+    Llm_provider.Model_catalog.set_global catalog;
     Fs_compat.save_file path alternate_config;
-    get (Runtime.init_default ~config_path:path);
-    if mixed then
-      check (option string) "the mixed route really declares Codex first" (Some "codex.codex")
-        (Runtime.entry_runtime_id_of_route (Keeper_meta_contract.runtime_id_of_meta meta));
+    (match Runtime.init_default_degraded_report ~config_path:path with
+     | Ok (Runtime.Initialized_degraded _) -> ()
+     | Ok Runtime.Initialized -> fail "missing catalog binding must remain unavailable"
+     | Error error -> fail (Runtime.strict_init_error_to_string error));
+    (match Runtime.resolve_assignment "http.http" with
+     | `Unavailable _ -> ()
+     | `Missing | `Lane _ -> fail "fixture requires a real unavailable assignment");
     check bool "every reachable client must consume the receipt" false
       (Keeper_client_tool_outbox_wake.route_can_consume meta);
     let unrelated : Keeper_event_queue.stimulus =
@@ -228,7 +226,7 @@ default = "http.http"
          publication_recovery_provider=Masc_test_deps.non_runtime_publication_recovery_provider} in
       Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
         ~ctx ~meta_after_triage:meta ~pending_board_events:[]) in
-    check bool "unsupported receipt does not poison actual intake" true
+    check bool "unavailable receipt does not poison actual intake" true
       (Option.is_none intake.event_queue_intake_error);
     (match Keeper_heartbeat_source_batch.stimuli intake.source_batch with
      | [source] -> check string "actual intake advances to unrelated work"
@@ -237,9 +235,9 @@ default = "http.http"
     let next = only_selection config in
     check string "unrelated work can be selected" unrelated.post_id next.source.post_id;
     pulse config;
-    check int "other client is not woken for unread Codex data" 1 (List.length (pending config));
+    check int "unavailable client is not woken for unread Codex data" 1 (List.length (pending config));
     if corrupt then
-      check string "unsupported route preserves unreadable evidence" "{unreadable"
+      check string "unavailable route preserves unreadable evidence" "{unreadable"
         (Fs_compat.load_file receipt_path)
     else
       check int "receipt still belongs to its durable owner" 1
@@ -275,19 +273,26 @@ result-owner = "recovery"
     check int "Codex-only fallback route receives its unread result" 1
       (List.length (pending config)))
 
-let test_official_route_changes_can_consume_the_original_receipt () =
+let test_mixed_route_changes_can_consume_the_original_receipt () =
   with_workspace (fun config meta _ ->
+    let catalog = get (Llm_provider.Model_catalog.of_toml_string ~source:"outbox-mixed-runtime-route"
+      "[[models]]\nmodel_id = \"gpt-fixture\"\nprovider_name = \"http\"\nbase = \"openai_chat\"\nmax_context_tokens = 400000\nmax_output_tokens = 128\nsupports_native_streaming = false\n") in
+    Llm_provider.Model_catalog.set_global catalog;
     let path = Filename.concat config.Workspace.base_path "runtime.toml" in
     let original_config = Fs_compat.load_file path in
     let oauth_path = Filename.concat config.base_path "synthetic-antigravity-oauth" in
     Fs_compat.save_file oauth_path (Masc_test_deps.antigravity_oauth_fixture "outbox-route-fixture");
     let additional =
-      Printf.sprintf {|[providers.claude]
+      Printf.sprintf {|[providers.http]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+[providers.claude]
 protocol = "claude-code"
 command = "/bin/false"
 is-non-interactive = true
 [providers.antigravity]
 protocol = "antigravity-cli"
+timeout-s = 60
 command = "/bin/false"
 is-non-interactive = true
 [providers.antigravity.credentials]
@@ -297,17 +302,18 @@ path = %S
 protocol = "muse-serve"
 command = "/bin/false"
 is-non-interactive = true
+[http.codex]
 [claude.codex]
 [antigravity.codex]
 [muse.codex]
 [runtime.lanes.recovery]
-candidates = ["codex.codex", "claude.codex", "antigravity.codex", "muse.codex"]
+candidates = ["codex.codex", "http.codex", "claude.codex", "antigravity.codex", "muse.codex"]
 [runtime.assignments]
 result-owner = "recovery"
 |} oauth_path in
     Fs_compat.save_file path (original_config ^ additional);
     get (Runtime.init_default ~config_path:path);
-    check bool "every declared official candidate has original result delivery" true
+    check bool "every declared runtime candidate has original result delivery" true
       (Keeper_client_tool_outbox_wake.route_can_consume meta);
     retain config (receipt "original-codex-result");
     pulse config;
@@ -316,7 +322,7 @@ result-owner = "recovery"
        ~config ~keeper_name selection) with
      | Selection_actionable -> ()
      | Tool_result_hint_retired | Spent_grant_replay_acknowledged | Absent_grant_retired _ ->
-       fail "an official-client fallback must keep the original receipt actionable"))
+       fail "a mixed-runtime fallback must keep the original receipt actionable"))
 
 let test_receipt_carrier_has_independent_held_identity () =
   with_workspace (fun config _ _ ->
@@ -397,8 +403,8 @@ let test_quiet_result_enters_the_actual_cycle_decision () =
 let () =
   run "Keeper unread tool result recovery"
     ["durable continuation",[
-      test_case "all-official fallback keeps original receipt actionable" `Quick
-        test_official_route_changes_can_consume_the_original_receipt;
+      test_case "mixed Agent Core and official fallback keeps original receipt actionable" `Quick
+        test_mixed_route_changes_can_consume_the_original_receipt;
       test_case "result data is independent from the ordinary held carrier" `Quick
         test_receipt_carrier_has_independent_held_identity;
       test_case "restart discovery is durable and deduplicated" `Quick test_restart_discovers_and_deduplicates;
@@ -407,12 +413,8 @@ let () =
       test_case "unreadable result remains pending until owner repair" `Quick test_unreadable_result_is_not_consumed;
       test_case "route change preserves other work and later result recovery" `Quick
         (test_route_change_preserves_unrelated_work_and_receipt ~corrupt:false);
-      test_case "corrupt receipt cannot block an unsupported route" `Quick
+      test_case "corrupt receipt cannot block an unavailable route" `Quick
         (test_route_change_preserves_unrelated_work_and_receipt ~corrupt:true);
-      test_case "Codex entry with another client fallback preserves other work" `Quick
-        (test_route_change_preserves_unrelated_work_and_receipt ~mixed:true);
-      test_case "mixed route retires its pointer without reading corrupt evidence" `Quick
-        (test_route_change_preserves_unrelated_work_and_receipt ~mixed:true ~corrupt:true);
       test_case "multiple Codex candidates remain recoverable" `Quick
         test_multiple_codex_candidates_remain_recoverable;
       test_case "quiet owner consumes result through actual heartbeat scheduling" `Quick

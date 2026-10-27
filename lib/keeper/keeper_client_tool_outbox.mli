@@ -27,7 +27,8 @@ val receipt_ids : snapshot -> string list
 val contains_receipt : snapshot -> receipt_id:string -> bool
 val developer_context : snapshot -> string list
 val context_message : snapshot -> Agent_core.Types.message option
-(** A separately identified result-data carrier for official Start and Resume.
+(** A separately identified result-data carrier for official Start and Resume
+    and Agent Core's final model-input projection.
     It cannot collide with the ordinary composed-context or Librarian carrier. *)
 val is_context_message : Agent_core.Types.message -> bool
 

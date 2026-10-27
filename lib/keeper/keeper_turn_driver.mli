@@ -405,6 +405,11 @@ val run_named :
   unit ->
   (named_run_result, Agent_core.Error.t) result
 (** Run a single [Agent.run] call with MASC-driven runtime model fallback.
+    Keeper-history requests deliver retained original tool results after the
+    final model-input projection. Agent Core acknowledges the exact snapshot
+    only after an accepted, newly observed completed response and a successful
+    caller-owned assistant checkpoint save. With no checkpoint sink the
+    results stay retained. Completion-review requests do not consume them.
     MASC drives the runtime FSM directly: resolves runtime providers,
     resolves each candidate's model temperature before trying it with AGENT_CORE, and
     asks [Runtime_attempt_fsm.should_try_next] on failure.

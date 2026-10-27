@@ -13,6 +13,7 @@ type operation =
   | Upload_file | List_downloads | Page_zoom | Resize_viewport | Touch
   | Read_clipboard | Write_clipboard | Read_network | Intercept_network
   | Read_console | Read_storage | Write_storage | Emulate_environment | Sentence_action
+[@@deriving enumerate]
 type tool = Tabs | Read | Interact | Act | Session | Goto | Instruct
 type invocation = { tool : tool; action : string option; mode : string option }
 type support = Available of invocation
@@ -20,15 +21,9 @@ type support = Available of invocation
   | Unsupported of string
 type entry = { operation : operation; support : support }
 
-let operations = [List_tabs;Open_tab;Close_tab;Activate_tab;List_windows;Create_window;Close_window;
-  Navigate;Follow_link;Back;Forward;Reload;Session_lifecycle;
-  Read_text;Read_html;Read_elements;Read_scene;Read_regions;Read_snapshot;Screenshot;
-  Native_workflow;Click_snapshot_target;Fill_snapshot_target;Hover_snapshot_target;Double_click_snapshot_target;
-  Click;Double_click;Right_click;Middle_click;Pointer_down;Pointer_up;Hover;Pointer_drag;Html5_drop;Scroll_page;Scroll_at;
-  Fill;Type_text;Press_key;Key_chord;Select_option;Read_frames;Frame_interaction;
-  Read_dialog;Accept_dialog;Dismiss_dialog;Hand_off;Take_over;Upload_file;List_downloads;Page_zoom;
-  Resize_viewport;Touch;Read_clipboard;Write_clipboard;Read_network;Intercept_network;
-  Read_console;Read_storage;Write_storage;Emulate_environment;Sentence_action]
+(* Every constructor, in declaration order, so the catalog, the wire
+   parser and the tool schemas cannot skip one. *)
+let operations = all_of_operation
 let invoke ?action ?mode tool = {tool;action;mode}
 let available ?action ?mode tool = Available (invoke ?action ?mode tool)
 let conditional ?action ?mode tool constraints =

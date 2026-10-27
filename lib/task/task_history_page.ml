@@ -15,7 +15,7 @@ type error = Invalid_request | Invalid_cursor | Source_changed
   | Invalid_layout of { entry : string } | Source_unavailable
 type page = { task_id : string; cursor : cursor option; sources : (source * availability) list;
   events : Yojson.Safe.t list; next_cursor : cursor option }
-let hash text = Digestif.SHA256.(digest_string text |> to_hex)
+let hash text = Agent_core_sha256.(digest_string text |> to_hex)
 let cursor_json cursor =
   let p=cursor.position in
   `Assoc ["schema",`String "masc.task-history.cursor/v2";"task_id",`String cursor.task;

@@ -132,7 +132,7 @@ let run ~config_path ~scenario_path ~runtime_ids =
                 ; "provenance_source", `String identity.provenance_source
                 ; "source_fingerprint", nullable (fun s -> `String s) identity.source_fingerprint
                 ; "started_at", `String identity.started_at
-                ; "scenario_source_sha256", `String Digestif.SHA256.(to_hex (digest_string scenario_source))
+                ; "scenario_source_sha256", `String Agent_core_sha256.(to_hex (digest_string scenario_source))
                 ; "schema_version", `Int 1
                 ; "config_revision", `String (Runtime.config_source_revision_to_string observation.source_revision)
                 ; "startup_degradation", Runtime.startup_degradation_to_yojson

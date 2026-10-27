@@ -48,7 +48,7 @@ let with_request_metadata ~body ~metadata run =
       | exception exn ->
           Reserved_exn.reraise_if_reserved exn;
           { tool_inventory = Tools_unavailable; components = Components_unavailable } in
-    let binding = {body_sha256=Digestif.SHA256.(digest_string body |> to_hex);metadata} in
+    let binding = {body_sha256=Agent_core_sha256.(digest_string body |> to_hex);metadata} in
     Eio.Fiber.with_binding metadata_key binding run
 let capture run =
   match Eio.Fiber.get observer_key with
@@ -78,7 +78,7 @@ let with_call ~mode ~body run =
   | None -> run None
   | Some owner ->
     let call = { owner; id = Atomic.fetch_and_add owner.next_id 1 } in
-    let body_sha256 = Digestif.SHA256.(digest_string body |> to_hex) in
+    let body_sha256 = Agent_core_sha256.(digest_string body |> to_hex) in
     let tool_inventory, request_components = match Eio.Fiber.get metadata_key with
       | Some binding when String.equal binding.body_sha256 body_sha256 ->
           Some binding.metadata.tool_inventory, Some binding.metadata.components

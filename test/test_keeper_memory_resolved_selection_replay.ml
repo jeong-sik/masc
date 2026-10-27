@@ -10,7 +10,7 @@ let require = function Ok value -> value | Error detail -> fail detail
 let member = Json.member
 let jstring name json = member name json |> Json.to_string
 let rows name json = member name json |> Json.to_list
-let sha bytes = Digestif.SHA256.(digest_string bytes |> to_hex)
+let sha bytes = Agent_core_sha256.(digest_string bytes |> to_hex)
 let restore ~keepers_dir ~keeper_id bundle =
   let stores = ["current_snapshot",Current.path_for_keepers_dir ~keepers_dir ~keeper_id;
     "consumption_and_lookup_receipt",Current.durable_range_receipt_path ~keepers_dir ~keeper_id;

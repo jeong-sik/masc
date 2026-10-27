@@ -134,7 +134,7 @@ let check_delivery_journal config meta =
   (match requests with
    | [{Request_observation.provenance=Some (Llm_provider.Completion_outcome.Serialized request);_}] ->
      require (request.body_bytes=String.length body &&
-       request.body_sha256=Digestif.SHA256.(digest_string body |> to_hex))
+       request.body_sha256=Agent_core_sha256.(digest_string body |> to_hex))
        "durable native request witness differs from the actual peer body"
    | [] | _::_ -> failwith "expected one serialized native HTTP request")
 let queue_chat config =

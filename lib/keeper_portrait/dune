@@ -14,4 +14,4 @@
   (:standard -w +4 -w +33))
  (preprocess
   (pps ppx_enumerate))
- (libraries digestif yojson))
+ (libraries  masc.agent_core.digest yojson))

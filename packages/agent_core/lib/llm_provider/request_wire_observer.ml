@@ -31,7 +31,7 @@ type failure =
   }
 [@@deriving yojson, show]
 
-let body_sha256 body = Digestif.SHA256.(to_hex (digest_string body))
+let body_sha256 body = Agent_core_sha256.(to_hex (digest_string body))
 
 let observation ~capture_id ~provider ~model ~http_codec ~stream ~body =
   { phase = Pre_dispatch_serialization

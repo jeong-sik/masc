@@ -878,7 +878,7 @@ let check_context_fragments raw event =
     let selected = String.sub raw offset bytes in
     check string "actual range equals independently decoded JSON slot" (Yojson.Safe.to_string value) selected;
     check string "fragment SHA binds actual captured bytes"
-      Digestif.SHA256.(digest_string selected |> to_hex)
+      Agent_core_sha256.(digest_string selected |> to_hex)
       (member "sha256" fragment |> to_string);
     cursor := offset + bytes; selected_bytes := !selected_bytes + bytes) expected;
   Buffer.add_substring residual raw !cursor (String.length raw - !cursor);
@@ -889,7 +889,7 @@ let check_context_fragments raw event =
   check int "residual counts captured gaps including framing" (String.length residual_bytes)
     (member "bytes" remainder |> to_int);
   check string "residual SHA binds ordered captured gaps"
-    Digestif.SHA256.(digest_string residual_bytes |> to_hex)
+    Agent_core_sha256.(digest_string residual_bytes |> to_hex)
     (member "sha256" remainder |> to_string);
   check int "disjoint selected values plus residual close exact IPC JSON bytes"
     (String.length raw) (!selected_bytes + String.length residual_bytes)
@@ -1009,7 +1009,7 @@ let test_scheduling_handoff_preserves_active_protocol ?(terminal_second = false)
         check (option string) "late frames name the active thread" (Some "thread-1") event.thread_id;
         check int "byte count is the written line" (String.length line) event.write.bytes;
         check string "SHA binds the written line"
-          Digestif.SHA256.(digest_string line |> to_hex) event.write.sha256;
+          Agent_core_sha256.(digest_string line |> to_hex) event.write.sha256;
         check_context_fragments line json) late lines))
     (if terminal_second then [Some true; None] else [Some true; Some false; None])
 ;;
@@ -1777,7 +1777,7 @@ let test_prompt_transmission_boundary ?(worker_pool = false) () =
 
 let test_content_free_context_submission () =
   let module Client = Runtime_codex_app_server in
-  let hash text=Digestif.SHA256.(digest_string text |> to_hex) in
+  let hash text=Agent_core_sha256.(digest_string text |> to_hex) in
   let success=[init_result;account_chatgpt;thread_result;turn_result;item_completed;turn_completed] in
   let injected=[init_result;account_chatgpt;thread_result;
     {|{"id":4,"result":{}}|}; {|{"id":5,"result":{"turn":{"id":"turn-1"}}}|};item_completed;turn_completed] in
@@ -1877,7 +1877,7 @@ let test_content_free_context_submission () =
 
 let export_assembly_submission_measurement ~fixture_kind ~scenario ~binding ~submission ~raw =
   let open Yojson.Safe.Util in
-  let hash text = Digestif.SHA256.(digest_string text |> to_hex) in
+  let hash text = Agent_core_sha256.(digest_string text |> to_hex) in
   let slice label text offset bytes =
     check bool (label ^ " has closed bounds") true
       (offset >= 0 && bytes >= 0 && offset <= String.length text
@@ -1911,7 +1911,7 @@ let export_assembly_submission_measurement ~fixture_kind ~scenario ~binding ~sub
   let offset = member "offset" slot |> to_int in
   let bytes = member "bytes" slot |> to_int in
   let captured_slot = slice "captured slot" raw offset bytes in
-  let captured_sha256 = Digestif.SHA256.(digest_string captured_slot |> to_hex) in
+  let captured_sha256 = Agent_core_sha256.(digest_string captured_slot |> to_hex) in
   check string "exported slot hash comes from the same captured RPC"
     (member "sha256" slot |> to_string) captured_sha256;
   let decoded_slot = Yojson.Safe.from_string captured_slot |> to_string in
@@ -6807,7 +6807,7 @@ let test_keeper_context_lifecycle_three_settled_turns () =
       (List.length (List.filter (fun (held : Store.held_context) ->
         held.context=Store.Librarian_unread) frontier.held_context));
     let expected_blocks = List.map (fun (block,text) ->
-      Prompt_block_id.to_string block, Digestif.SHA256.(digest_string text |> to_hex)) issued.blocks in
+      Prompt_block_id.to_string block, Agent_core_sha256.(digest_string text |> to_hex)) issued.blocks in
     check (list (pair string string)) "settlement replaces changed block digest and preserves unchanged digest"
       (List.sort compare expected_blocks) (List.sort compare acknowledged_blocks);
     let records = match Agent_core.Raw_trace.read_all ~path:trace () with
@@ -6851,7 +6851,7 @@ let test_keeper_context_lifecycle_three_settled_turns () =
         check int "whole RPC byte count matches actual captured frame" (String.length captured)
           (member "write" observed |> member "bytes" |> to_int);
         check string "whole RPC SHA matches actual captured frame"
-          Digestif.SHA256.(digest_string captured |> to_hex)
+          Agent_core_sha256.(digest_string captured |> to_hex)
           (member "write" observed |> member "sha256" |> to_string));
     let session_method = if ordinal=1 then "thread/start" else "thread/resume" in
     let session_requests = List.filter (fun row -> member "method" row=`String session_method) calls in
@@ -7013,7 +7013,7 @@ let test_keeper_codex_raw_trace_contains_actual_tool_and_response () =
                 check int "durable submission names exact stdin bytes" (String.length raw)
                   (event |> member "write" |> member "bytes" |> to_int);
                 check string "durable submission SHA binds the actual stdin request"
-                  Digestif.SHA256.(digest_string raw |> to_hex)
+                  Agent_core_sha256.(digest_string raw |> to_hex)
                   (event |> member "write" |> member "sha256" |> to_string)) submitted;
               let kinds =
                 List.map
@@ -7072,7 +7072,7 @@ let test_keeper_codex_raw_trace_contains_actual_tool_and_response () =
                   "session_id",(match record.session_id with None -> `Null | Some id -> `String id);
                   "manifest",manifest;
                   "captured_ipc_json_bytes",`Int (String.length raw);
-                  "captured_ipc_json_sha256",`String Digestif.SHA256.(digest_string raw |> to_hex)]) submitted in
+                  "captured_ipc_json_sha256",`String Agent_core_sha256.(digest_string raw |> to_hex)]) submitted in
               Printf.printf "MEMORY_CODEX_CONTEXT_SUBMISSION_JSON %s\n%!"
                 (Yojson.Safe.to_string (`Assoc [
                   "evidence",`String "actual_keeper_fake_cli_complete_stdin_writes";
@@ -8808,7 +8808,7 @@ let test_production_dynamic_context_reaches_codex_instruction_wire ~project () =
          (Yojson.Safe.to_string (`Assoc ["evidence",`String "production_hook_manifest_and_fake_cli_carrier";
            "partition",List.hd partitions;
            "captured_carrier_raw_bytes",`Int (String.length wire_text);
-           "captured_carrier_raw_sha256",`String Digestif.SHA256.(digest_string wire_text |> to_hex)]));
+           "captured_carrier_raw_sha256",`String Agent_core_sha256.(digest_string wire_text |> to_hex)]));
        (* Stable memory availability precedes dynamic instructions. Assert the
           complete instruction section survives exactly once, without assuming
           it is the first section of the assembled carrier. *)

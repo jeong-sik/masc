@@ -3,7 +3,7 @@ module A = Masc.Apple_container_install
 module S = Masc.Sandbox_readiness
 let payload = "fixture package bytes"
 let url = "https://github.com/apple/container/releases/download/1.4.1/container-1.4.1-installer-signed.pkg"
-let metadata ?(name="container-1.4.1-installer-signed.pkg") ?(asset_url=url) ?(digest=Digestif.SHA256.(to_hex (digest_string payload))) () =
+let metadata ?(name="container-1.4.1-installer-signed.pkg") ?(asset_url=url) ?(digest=Agent_core_sha256.(to_hex (digest_string payload))) () =
   `Assoc ["tag_name",`String "1.4.1";"assets",`List [`Assoc [
     "name",`String name;"browser_download_url",`String asset_url;
     "digest",`String ("sha256:" ^ digest);"size",`Int (String.length payload)]]]
@@ -43,7 +43,7 @@ let test_install_revalidates () = with_package @@ fun path ->
   let elevate = function
     | ["/usr/bin/sudo";_;"sandbox-install-apple-verified";"--source";actual;"--sha256";sha;"--size";size] ->
       check string "terminal installer uses verified package" path actual;
-      check string "verified hash survives boundary" Digestif.SHA256.(to_hex (digest_string payload)) sha;
+      check string "verified hash survives boundary" Agent_core_sha256.(to_hex (digest_string payload)) sha;
       check string "verified size survives boundary" (string_of_int (String.length payload)) size;
       incr elevations; Ok ()
     | _ -> fail "verification must use captured output, only elevation uses terminal" in
@@ -85,7 +85,7 @@ let test_acquisition () =
 let test_private_install_copy () = with_package @@ fun source ->
   let copied_path = ref None in
   let installed = ref false in
-  let sha256 = Digestif.SHA256.(to_hex (digest_string payload)) in
+  let sha256 = Agent_core_sha256.(to_hex (digest_string payload)) in
   if Unix.geteuid () <> 0 then
     check bool "internal command rejects unprivileged callers without executing"
       true (A.install_privileged ~run:(fun _ -> fail "unprivileged execution")

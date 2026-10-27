@@ -507,9 +507,9 @@ let read_source_raw config path =
      | exn -> Error (Printexc.to_string exn))
 
 let quarantine_outbox_source config ~name ~reason ~detail ~raw =
-  let raw_sha256 = Digestif.SHA256.(digest_string raw |> to_hex) in
+  let raw_sha256 = Agent_core_sha256.(digest_string raw |> to_hex) in
   let evidence_sha256 =
-    Digestif.SHA256.(digest_string (name ^ "\000" ^ raw) |> to_hex)
+    Agent_core_sha256.(digest_string (name ^ "\000" ^ raw) |> to_hex)
   in
   let quarantine_name = "q-" ^ evidence_sha256 ^ ".json" in
   let quarantine_path =

@@ -567,7 +567,7 @@ let ensure_login_keychain home_dir =
 let keeper_owner_leaf ~keeper_name ~oauth_source =
   let identity = Yojson.Safe.to_string
       (`List [`String keeper_name; `String oauth_source]) in
-  "keeper-" ^ (Digestif.SHA256.digest_string identity |> Digestif.SHA256.to_hex)
+  "keeper-" ^ (Agent_core_sha256.digest_string identity |> Agent_core_sha256.to_hex)
 ;;
 
 let keeper_home_dir ~runtime_root ~owner_leaf =
@@ -651,7 +651,7 @@ let account_digest ~make_error ~path bytes =
                        String.for_all (fun char -> Char.code char < 128) subject ->
                      let canonical = Yojson.Safe.to_string (`List
                        [`String "https://accounts.google.com"; `String subject]) in
-                     Ok Digestif.SHA256.(to_hex (digest_string canonical))
+                     Ok Agent_core_sha256.(to_hex (digest_string canonical))
                    | _ -> invalid ())
                 | _ -> invalid ()))
           | _ -> invalid ())

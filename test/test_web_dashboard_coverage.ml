@@ -305,7 +305,7 @@ let test_verified_blob_returns_manifest_bytes_and_rejects_replacement () =
   write_file path original;
   Unix.chmod path 0o600;
   let snapshot_stat = Unix.stat snapshot_root in
-  let expected_sha256 = Digestif.SHA256.(digest_string original |> to_hex) in
+  let expected_sha256 = Agent_core_sha256.(digest_string original |> to_hex) in
   Fun.protect
     ~finally:(fun () ->
       if Sys.file_exists path then Sys.remove path;
@@ -378,7 +378,7 @@ let test_verified_blob_rejects_same_path_root_replacement () =
   in
   let original_path = write_blob snapshot_root in
   let snapshot_stat = Unix.stat snapshot_root in
-  let expected_sha256 = Digestif.SHA256.(digest_string original |> to_hex) in
+  let expected_sha256 = Agent_core_sha256.(digest_string original |> to_hex) in
   Fun.protect
     ~finally:(fun () ->
       let remove_root root =
@@ -420,7 +420,7 @@ let test_verified_blob_rejects_launch_source_replacement () =
   let path = Filename.concat snapshot_root (String.make 64 'c') in
   write_file path body;
   Unix.chmod path 0o600;
-  let digest = Digestif.SHA256.(digest_string body |> to_hex) in
+  let digest = Agent_core_sha256.(digest_string body |> to_hex) in
   Fun.protect
     ~finally:(fun () ->
       if Sys.file_exists path then Sys.remove path;

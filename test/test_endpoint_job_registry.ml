@@ -5,7 +5,7 @@ module Recovery_test = Fs_compat_test_support.Publication_recovery_for_testing
 let require = function Ok value -> value | Error e -> fail e
 let get = function Ok value -> value | Error e -> fail (R.error_to_string e)
 let id suffix = P.Id.of_string ("019a0000-0000-7000-8000-0000000000" ^ suffix) |> require
-let digest value = P.Sha256.of_string Digestif.SHA256.(digest_string value |> to_hex) |> require
+let digest value = P.Sha256.of_string Agent_core_sha256.(digest_string value |> to_hex) |> require
 let route : P.route = {backend=Remote_ssh;endpoint_incarnation=id "01";boot_id=id "02"}
 let owner : P.owner = {workspace_id=id "03";keeper_name="original keeper"}
 let spec = P.spec ~domain:P.Workspace_process ~argv:["/bin/echo";"original\255argument"]

@@ -8,7 +8,7 @@ let require = function Ok value -> value | Error detail -> fail detail
 let member = Json.member
 let jstring name json = member name json |> Json.to_string
 let rows name json = member name json |> Json.to_list
-let sha bytes = Digestif.SHA256.(digest_string bytes |> to_hex)
+let sha bytes = Agent_core_sha256.(digest_string bytes |> to_hex)
 let fixture_dir = "test/fixtures/memory_successor_http_replay"
 let () = Masc.Prompt_defaults.init ()
 

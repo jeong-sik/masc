@@ -1392,8 +1392,8 @@ let capture_response_header_evidence headers =
                redacted_headers) )
       ]
     |> Yojson.Safe.to_string
-    |> Digestif.SHA256.digest_string
-    |> Digestif.SHA256.to_hex
+    |> Agent_core_sha256.digest_string
+    |> Agent_core_sha256.to_hex
   in
   Response_header_evidence fingerprint, retry_after_header
 ;;

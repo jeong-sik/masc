@@ -5,7 +5,7 @@ let error_to_string = function
   | Storage_failed detail -> "Telegram prepared claim storage failed: " ^ detail
 let ( let* ) = Result.bind
 let path ~root ~operation_id =
-  Filename.concat root (Digestif.SHA256.(to_hex (digest_string operation_id)) ^ ".json")
+  Filename.concat root (Agent_core_sha256.(to_hex (digest_string operation_id)) ^ ".json")
 let with_claim ~root ~operation_id body =
   let* () = if String.trim operation_id = "" then Error Invalid_claim else Ok () in
   let* () = match Fs_compat.mkdir_p root with

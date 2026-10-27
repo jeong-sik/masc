@@ -221,7 +221,7 @@ let test_a_png_is_drawable_without_a_converter () =
       Alcotest.(check string) "the bytes go to the terminal as they are"
         (png_of ~width:1000 ~height:500) pixels.png;
       Alcotest.(check string) "the key is the digest of those bytes"
-        Digestif.SHA256.(digest_string pixels.png |> to_hex) pixels.key;
+        Agent_core_sha256.(digest_string pixels.png |> to_hex) pixels.key;
       Alcotest.(check string) "the first picture owns the first slot"
         (slot_name Masc_tui_graphics.Evidence_image_1) (slot_name pixels.slot)
   | _ -> Alcotest.fail "a PNG was not drawable"

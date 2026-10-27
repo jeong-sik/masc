@@ -54,7 +54,7 @@ let required_id args field =
 let page_source ~args source =
   let bytes = Yojson.Safe.to_string source in
   let total = String.length bytes in
-  let digest = Digestif.SHA256.(digest_string bytes |> to_hex) in
+  let digest = Agent_core_sha256.(digest_string bytes |> to_hex) in
   let budget = Tool_bridge.default_externalize_threshold_bytes in
   let* cursor = match args with
     | `Assoc fields ->
@@ -174,7 +174,7 @@ let capture ~config ~authority ~references = protect (fun () ->
          | None -> Error (Storage_failed "Task reference has no primary capture observation"))
       | None -> Error (Invalid_request "expected board:<post-id>, fusion:<run-id> or task:<task-id>") in
     let content = Yojson.Safe.to_string source in
-    let sha256 = Digestif.SHA256.(digest_string content |> to_hex) in
+    let sha256 = Agent_core_sha256.(digest_string content |> to_hex) in
     Ok (items @ [Store.Evidence_collaboration {reference; content; sha256}]))
     (Ok []) references)
 

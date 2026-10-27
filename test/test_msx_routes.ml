@@ -1340,7 +1340,7 @@ let test_encoded_pixel_snapshot () =
               "changed pixels have exact SHA256"
               true
               (List.assoc "revision" pixel_fields
-              = `String Digestif.SHA256.(to_hex (digest_string rgb)));
+              = `String Agent_core_sha256.(to_hex (digest_string rgb)));
             let status, full_tick = Route.tick_response ~config ~body:"{}" in
             check bool "full frame tick succeeds" true (status = `OK);
             (match Lane.frame () with

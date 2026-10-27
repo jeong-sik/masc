@@ -18,7 +18,7 @@
   masc.config_dir_resolver
   masc_random_id
   eio
-  digestif
+   masc.agent_core.digest
   eqaf
   masc.fs_compat
   masc.masc_log

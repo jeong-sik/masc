@@ -42,8 +42,8 @@ let digest (message : Agent_core.Types.message) =
   { message with metadata = Agent_core.Types.Input_speaker.without message.metadata }
   |> Keeper_context_core_message_json.message_to_json
   |> Yojson.Safe.to_string
-  |> Digestif.SHA256.digest_string
-  |> Digestif.SHA256.to_hex
+  |> Agent_core_sha256.digest_string
+  |> Agent_core_sha256.to_hex
 
 let marker_values (message : Agent_core.Types.message) =
   List.filter_map
@@ -70,8 +70,8 @@ let decode_marker = function
        (match (match source with
                 | Approval_evidence approval_id -> identity ~approval_id ~evidence_fingerprint
                 | Answered_ask ask_id -> answered_ask_identity ~ask_id ~evidence_fingerprint),
-              Digestif.SHA256.consistent_of_hex_opt body_digest with
-        | Ok identity, Some hash when String.equal body_digest (Digestif.SHA256.to_hex hash) ->
+              Agent_core_sha256.consistent_of_hex_opt body_digest with
+        | Ok identity, Some hash when String.equal body_digest (Agent_core_sha256.to_hex hash) ->
           Ok (identity, body_digest)
         | (Ok _ | Error _), (Some _ | None) -> Error Malformed_marker)
      | _ -> Error Malformed_marker)

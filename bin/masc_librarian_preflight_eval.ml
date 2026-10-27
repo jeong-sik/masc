@@ -133,7 +133,7 @@ let run () =
      "provenance", `String "synthetic";
      "binary_commit", nullable identity.binary_commit;
      "executable_sha256", nullable identity.executable_sha256;
-     "input_sha256", `String Digestif.SHA256.(to_hex (digest_string bytes));
+     "input_sha256", `String Agent_core_sha256.(to_hex (digest_string bytes));
      "fact_observed_at", `Float fact_observed_at;
      "keeper_instructions", `String keeper_instructions;
      "prompt_mode", `String "candidate_directory_no_persisted_overrides";

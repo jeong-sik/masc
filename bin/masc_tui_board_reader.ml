@@ -39,7 +39,7 @@ let open_read ~key t=
       document=notice key "Reading original bytes…"},Some request
 let validate key original=
   if String.length original<>key.bytes then Error "Attachment byte length differs from the selected reference"
-  else if Digestif.SHA256.(digest_string original |> to_hex)<>key.sha256
+  else if Agent_core_sha256.(digest_string original |> to_hex)<>key.sha256
   then Error "Attachment digest differs from the selected reference"
   else Ok {reference=key;original}
 let complete t request result=

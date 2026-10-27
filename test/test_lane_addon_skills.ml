@@ -14,7 +14,7 @@ let unwrap = function Ok value -> value | Error message -> fail message
 let member = Yojson.Safe.Util.member
 let json_string key value = member key value |> Yojson.Safe.Util.to_string
 let values key value = member key value |> Yojson.Safe.Util.to_list
-let digest bytes = Digestif.SHA256.(digest_string bytes |> to_hex)
+let digest bytes = Agent_core_sha256.(digest_string bytes |> to_hex)
 let read path = In_channel.with_open_bin path In_channel.input_all
 let write path bytes =
   Fs_compat.mkdir_p (Filename.dirname path);

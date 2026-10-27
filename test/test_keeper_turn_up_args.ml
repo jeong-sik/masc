@@ -2913,7 +2913,7 @@ sandbox_image = "masc-keeper-sandbox:local"
         fail "merged snapshot must record the manifest on disk"
       | Keeper_types_profile.Declarative_manifest_present { sha256; _ } ->
         check string "snapshot hashes the disk bytes"
-          Digestif.SHA256.(digest_string current |> to_hex)
+          Agent_core_sha256.(digest_string current |> to_hex)
           sha256));
   match
     Keeper_types_profile.load_declarative_materialization_defaults_or_merged

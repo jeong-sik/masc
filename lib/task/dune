@@ -30,7 +30,7 @@
   fs_compat
   masc.dated_jsonl
   masc.activity_graph
-  digestif
+   masc.agent_core.digest
   base64
   masc_random_id
   masc.config

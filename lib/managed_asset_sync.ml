@@ -106,7 +106,7 @@ type sync_result =
   ; failed : (string * string) list
   }
 
-let sha256_hex content = Digestif.SHA256.(digest_string content |> to_hex)
+let sha256_hex content = Agent_core_sha256.(digest_string content |> to_hex)
 
 (* Where an edit that cannot become an override is kept: beside the managed
    file, named by the edit's digest. The name does not end in [.md], so the

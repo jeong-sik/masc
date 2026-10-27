@@ -224,7 +224,7 @@ let fetch t ~sha256 =
          forget_written path;
          Ok None
        | Ok (Some { content = bytes; snapshot }) ->
-         let actual = Digestif.SHA256.(digest_string bytes |> to_hex) in
+         let actual = Agent_core_sha256.(digest_string bytes |> to_hex) in
          if String.equal sha256 actual
          then (
            cache_validated_snapshot path snapshot;
@@ -258,7 +258,7 @@ let fetch_bounded t ~sha256 ~max_bytes =
      | Ok (Some { truncated = true; file_size; _ }) ->
        Error (Too_large { path; actual = file_size; maximum = max_bytes })
      | Ok (Some { content = bytes; _ }) ->
-       let actual = Digestif.SHA256.(digest_string bytes |> to_hex) in
+       let actual = Agent_core_sha256.(digest_string bytes |> to_hex) in
        if String.equal sha256 actual
        then Ok (Some bytes)
        else (
@@ -385,7 +385,7 @@ type addressed =
   }
 
 let address_with ~operation t ~bytes ~mime =
-  let sha256 = Digestif.SHA256.(digest_string bytes |> to_hex) in
+  let sha256 = Agent_core_sha256.(digest_string bytes |> to_hex) in
   (* A digestif-produced sha256 and a byte length are always valid; an empty
      [mime] is the only reachable rejection and is a caller bug, raised
      visibly rather than stored. *)
@@ -540,16 +540,16 @@ let scan_file_for_ingest ~buffer ~copy_to channel =
   let preview = Buffer.create preview_max in
   let rec loop digest total =
     match input channel buffer 0 (Bytes.length buffer) with
-    | 0 -> Digestif.SHA256.get digest, total, make_preview (Buffer.contents preview)
+    | 0 -> Agent_core_sha256.get digest, total, make_preview (Buffer.contents preview)
     | count ->
       Option.iter (fun output_channel -> output output_channel buffer 0 count) copy_to;
       let preview_count = min count (preview_max - Buffer.length preview) in
       Buffer.add_subbytes preview buffer 0 preview_count;
       loop
-        (Digestif.SHA256.feed_bytes digest ~off:0 ~len:count buffer)
+        (Agent_core_sha256.feed_bytes digest ~off:0 ~len:count buffer)
         (total + count)
   in
-  loop Digestif.SHA256.empty 0
+  loop Agent_core_sha256.empty 0
 ;;
 
 let same_ingest_source (before : Unix.stats) (after : Unix.stats) =
@@ -597,7 +597,7 @@ let ingest_open_file_blocking ~after_hash ~expected_sha256 t ~source_path ~sourc
         let digest, bytes, preview = scan_file_for_ingest ~buffer ~copy_to:None source in
         check_source_snapshot ();
         after_hash ();
-        let sha256 = Digestif.SHA256.to_hex digest in
+        let sha256 = Agent_core_sha256.to_hex digest in
         (match expected_sha256 with
          | Some expected when not (String.equal expected sha256) ->
              raise (Sys_error "tool_blob_store: descriptor contents do not match the granted digest")
@@ -617,7 +617,7 @@ let ingest_open_file_blocking ~after_hash ~expected_sha256 t ~source_path ~sourc
             let copied_digest, copied_bytes, _ =
               scan_file_for_ingest ~buffer ~copy_to:(Some output_channel) source
             in
-            if copied_bytes <> bytes || not (Digestif.SHA256.equal copied_digest digest)
+            if copied_bytes <> bytes || not (Agent_core_sha256.equal copied_digest digest)
             then
               raise
                 (Sys_error

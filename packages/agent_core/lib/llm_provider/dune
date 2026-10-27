@@ -53,7 +53,7 @@
   tls
   tls-eio
   ca-certs
-  digestif
+   masc.agent_core.digest
   cstruct
   mirage-crypto-rng
   mirage-crypto-rng.unix

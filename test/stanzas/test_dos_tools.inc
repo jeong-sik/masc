@@ -5,7 +5,7 @@
  (modules test_dos_tools)
  (libraries masc.embedded_config machine_worker_fixture mcp_protocol masc.dos_tools
   masc.machine_configuration masc.machine_action_feed
-  alcotest yojson unix digestif eio_main fs_compat masc masc.dos_lane masc.machine_checkpoint
+  alcotest yojson unix masc.agent_core.digest eio_main fs_compat masc masc.dos_lane masc.machine_checkpoint
   ocaml-dos.core-identity
   masc.board_handlers
   masc.masc_core masc.tool_types masc.masc_tool_dispatch masc.tool_schemas

@@ -779,7 +779,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     match assignment_id_opt with
     | Some aid ->
         let args_hash =
-          Digestif.SHA256.(digest_string (Yojson.Safe.to_string arguments) |> to_hex)
+          Agent_core_sha256.(digest_string (Yojson.Safe.to_string arguments) |> to_hex)
         in
         Tool_assignment_telemetry.emit_called
           ~agent_id:agent_name

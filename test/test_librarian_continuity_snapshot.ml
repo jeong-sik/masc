@@ -97,7 +97,7 @@ let test_digest_matches_checkpoint_array () =
   let lines = [1, boundary messages] in
   let array_digest prefix =
     let json = `List (List.map Agent_core.Checkpoint.message_to_json prefix) in
-    Digestif.SHA256.(digest_string (Yojson.Safe.to_string json) |> to_hex) in
+    Agent_core_sha256.(digest_string (Yojson.Safe.to_string json) |> to_hex) in
   let check_prefix end_atom prefix remaining =
     let expected = array_digest prefix in
     let snapshot = S.capture_checkpoint_prefix ~unread_messages:[] ~end_atom ~catch_up_end_atom:None
@@ -329,7 +329,7 @@ let test_unread_snapshot_source_binding () =
   check bool "only pinned messages remain after the declared end" true (restored.messages = [pinned]);
   (match hole.source with
    | H.Atom {message_sha256;_} -> check string "hash covers the exact tool message, not its atom opener"
-       Digestif.SHA256.(digest_string (Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json tool)) |> to_hex)
+       Agent_core_sha256.(digest_string (Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json tool)) |> to_hex)
        message_sha256
    | H.Official_turn _ -> fail "wrong source identity");
   let fields = match S.to_json decoded with `Assoc fields -> fields | _ -> fail "snapshot object" in

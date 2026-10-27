@@ -63,7 +63,7 @@
   masc_config
   masc_log
   masc_process
-  digestif
+   masc.agent_core.digest
   str
   time_compat
   uri

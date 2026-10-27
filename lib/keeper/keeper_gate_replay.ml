@@ -59,7 +59,7 @@ let replay_journal_to_string = function
 ;;
 
 let payload_fingerprint payload =
-  Digestif.SHA256.(digest_string payload |> to_hex)
+  Agent_core_sha256.(digest_string payload |> to_hex)
 ;;
 
 let persist_replay_artifact ~base_path payload =
@@ -630,7 +630,7 @@ let replay_evidence_fragment ?(include_journal = true) evidence =
 
 let approval_input evidence =
   let stable = replay_evidence_json ~include_journal:false evidence in
-  let fingerprint = Digestif.SHA256.(digest_string stable |> to_hex) in
+  let fingerprint = Agent_core_sha256.(digest_string stable |> to_hex) in
   match Keeper_approval_input_admission.identity
           ~approval_id:evidence.approval_id ~evidence_fingerprint:fingerprint with
   | Error _ as error -> error

@@ -167,7 +167,7 @@ let baseline_turn_ready ~agent_name ~turn ~tool_names =
      keeper_event_bridge.ml:122), so the baseline was checking the typed path
      against a digest nothing in the product computes. *)
   let names_hash =
-    Digestif.SHA256.(digest_string (String.concat "\n" tool_names) |> to_hex)
+    Agent_core_sha256.(digest_string (String.concat "\n" tool_names) |> to_hex)
   in
   let payload =
     `Assoc

@@ -212,7 +212,7 @@ let recovery_owner ~base_path ~keeper_name ~backend ~network_mode =
   let material = `List [`String "guest-identity-v1";
       `String (Keeper_microvm_backend.to_string backend);
       `String (guest_name ~base_path ~keeper_name ~network_mode)] |> Yojson.Safe.to_string in
-  "microvm-identity-" ^ Digestif.SHA256.(digest_string material |> to_hex)
+  "microvm-identity-" ^ Agent_core_sha256.(digest_string material |> to_hex)
 
 let with_recovery ~fs ~root ~owner callback =
   Eio.Path.with_open_dir Eio.Path.(fs / root.canonical) (fun registry_root ->

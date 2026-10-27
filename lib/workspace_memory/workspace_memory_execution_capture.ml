@@ -114,7 +114,7 @@ let briefing_render ~prompt input = Prompt_registry.render_resolved_prompt_templ
 let renderer ~prompt = function
   | Classification _ -> classification_render ~prompt
   | Briefing _ -> briefing_render ~prompt
-let sha256 text = Digestif.SHA256.(digest_string text |> to_hex)
+let sha256 text = Agent_core_sha256.(digest_string text |> to_hex)
 let work_json = function
   | Classification {revision;batch;_} -> `Assoc ["kind",`String "classification";
       "ledger_revision",Revision.to_json (Revision.Ledger revision);"batch",Request.batch_to_json batch]

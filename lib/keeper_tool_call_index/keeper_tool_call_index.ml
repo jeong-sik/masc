@@ -515,20 +515,20 @@ exception Continuity_unavailable of string
 let continuity_dir ledger_dir = Filename.concat ledger_dir ".continuity"
 let ledger_dir_of_day_path path = Filename.dirname (Filename.dirname path)
 let continuity_path path =
-  let key = Digestif.SHA256.(to_hex (digest_string path)) ^ ".json" in
+  let key = Agent_core_sha256.(to_hex (digest_string path)) ^ ".json" in
   Filename.concat (continuity_dir (ledger_dir_of_day_path path)) key
 
 let same_observed_file (left : Unix.stats) (right : Unix.stats) =
   left.st_dev = right.st_dev && left.st_ino = right.st_ino
   && left.st_kind = right.st_kind && left.st_size = right.st_size
   && left.st_mtime = right.st_mtime && left.st_ctime = right.st_ctime
-let empty_digest = Digestif.SHA256.(to_hex (digest_string ""))
+let empty_digest = Agent_core_sha256.(to_hex (digest_string ""))
 
 (* The witness is a chain over complete lines: a line's link is SHA-256 of the
    previous link's hex, the line, and its newline. The hash takes the three
    pieces in turn, so no line is copied to form the input. *)
 let extend_digest digest line =
-  Digestif.SHA256.(to_hex (get (feed_string (feed_string (feed_string empty digest) line) "\n")))
+  Agent_core_sha256.(to_hex (get (feed_string (feed_string (feed_string empty digest) line) "\n")))
 
 let load_continuity path =
   try
@@ -543,8 +543,8 @@ let load_continuity path =
        | Some (`String ledger_path), Some (`String generation), Some (`Int boundary), Some (`String prefix_digest),
          Some (`Int device), Some (`Int inode)
          when String.equal ledger_path path && boundary >= 0 && Option.is_some (Uuidm.of_string generation) ->
-         (match Digestif.SHA256.consistent_of_hex_opt prefix_digest with
-          | Some digest when String.equal prefix_digest (Digestif.SHA256.to_hex digest) ->
+         (match Agent_core_sha256.consistent_of_hex_opt prefix_digest with
+          | Some digest when String.equal prefix_digest (Agent_core_sha256.to_hex digest) ->
             Ok (Some { generation; boundary; prefix_digest; device; inode })
           | Some _ | None -> Error "invalid continuity digest")
        | _ -> Error "invalid tool-call ledger continuity record")
@@ -588,22 +588,22 @@ let digest_prefix ~path ~from ~until digest =
       if offset = until then Some digest
       else if offset > until then None
       else
-        in_line ~link:(Digestif.SHA256.feed_string Digestif.SHA256.empty digest)
+        in_line ~link:(Agent_core_sha256.feed_string Agent_core_sha256.empty digest)
           ~fed:false ~buffer_start ~filled ~next
     and in_line ~link ~fed ~buffer_start ~filled ~next =
       if next < filled then
         match newline_from ~filled next with
         | Some ending ->
-          let link = Digestif.SHA256.feed_bytes link ~off:next ~len:(ending + 1 - next) buffer in
-          at_line_start ~digest:Digestif.SHA256.(to_hex (get link))
+          let link = Agent_core_sha256.feed_bytes link ~off:next ~len:(ending + 1 - next) buffer in
+          at_line_start ~digest:Agent_core_sha256.(to_hex (get link))
             ~offset:(buffer_start + ending + 1) ~buffer_start ~filled ~next:(ending + 1)
         | None ->
-          let link = Digestif.SHA256.feed_bytes link ~off:next ~len:(filled - next) buffer in
+          let link = Agent_core_sha256.feed_bytes link ~off:next ~len:(filled - next) buffer in
           in_line ~link ~fed:true ~buffer_start ~filled ~next:filled
       else
         match input channel buffer 0 prefix_read_bytes with
         | 0 when fed ->
-          let ended = Digestif.SHA256.(to_hex (get (feed_string link "\n"))) in
+          let ended = Agent_core_sha256.(to_hex (get (feed_string link "\n"))) in
           if buffer_start + filled = until then Some ended else None
         | 0 -> None
         | read -> in_line ~link ~fed ~buffer_start:(buffer_start + filled) ~filled:read ~next:0
@@ -768,8 +768,8 @@ let retire_missing_continuities ~ledger_dir =
     match Filename.extension name with
     | ".json" ->
       let stem = Filename.remove_extension name in
-      (match Digestif.SHA256.consistent_of_hex_opt stem with
-       | Some digest -> String.equal stem (Digestif.SHA256.to_hex digest)
+      (match Agent_core_sha256.consistent_of_hex_opt stem with
+       | Some digest -> String.equal stem (Agent_core_sha256.to_hex digest)
        | None -> false)
     | _ -> false in
   List.iter (fun name ->

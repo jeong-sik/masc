@@ -327,7 +327,7 @@ let candidate_id_of_signal ~keeper_name (signal : Board_dispatch.board_signal) =
         ; "signal", signal_to_yojson signal
         ]
   in
-  Digestif.SHA256.(digest_string (Yojson.Safe.to_string identity) |> to_hex)
+  Agent_core_sha256.(digest_string (Yojson.Safe.to_string identity) |> to_hex)
 ;;
 
 (* Must stay in lockstep with [candidate_id_of_signal]: two signals are

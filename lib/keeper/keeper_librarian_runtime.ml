@@ -1246,7 +1246,7 @@ let prompt_material_payload ~key = function
       ; "effective_template", `String resolution.effective
       ; "rendered_bytes", `Int (String.length rendered)
       ; ( "rendered_sha256"
-        , `String Digestif.SHA256.(digest_string rendered |> to_hex) )
+        , `String Agent_core_sha256.(digest_string rendered |> to_hex) )
       ]
   | Error detail ->
     `Assoc

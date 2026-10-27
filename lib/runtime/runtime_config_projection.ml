@@ -241,7 +241,7 @@ let keeper_assignment_revision_of_yojson = function
 
 let config_source_revision_of_text source_text =
   let digest =
-    Digestif.SHA256.(to_hex (digest_string ("runtime_config_source\x00" ^ source_text)))
+    Agent_core_sha256.(to_hex (digest_string ("runtime_config_source\x00" ^ source_text)))
   in
   Config_source_revision digest
 

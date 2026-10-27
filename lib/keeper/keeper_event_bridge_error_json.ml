@@ -1,5 +1,5 @@
 let stop_reason_to_wire = Agent_core.Types.stop_reason_to_string
-let sha256_hex value = Digestif.SHA256.(digest_string value |> to_hex)
+let sha256_hex value = Agent_core_sha256.(digest_string value |> to_hex)
 
 let agent_completed_usage_fields (response : Agent_core.Types.api_response) =
   match response.usage with

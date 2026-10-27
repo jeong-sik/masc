@@ -21,7 +21,7 @@ type t = { source : source; reasons : Refusal.t list }
 
 let message_digest message =
   Agent_core.Checkpoint.message_to_json message |> Yojson.Safe.to_string
-  |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex
+  |> Agent_core_sha256.digest_string |> Agent_core_sha256.to_hex
 
 let validate_source source =
   let valid_digest = String_util.is_lowercase_sha256_hex in

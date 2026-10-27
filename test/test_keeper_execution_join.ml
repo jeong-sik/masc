@@ -384,7 +384,7 @@ let check_terminal_projection
        projection.error_detail);
   Alcotest.(check string)
     (label ^ " detail digest")
-    Digestif.SHA256.(digest_string secret |> to_hex)
+    Agent_core_sha256.(digest_string secret |> to_hex)
     (terminal_projection_string_field
        ~label
        "detail_digest"

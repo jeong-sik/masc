@@ -346,7 +346,7 @@ let admission_recall_binding_of_json = function
       else wire_fail [Wire_field "target_memory_id"] (Unknown_token target_memory_id) in
     let row = `Assoc ["sequence", `Int candidate_id.sequence;
       "request_id", `String candidate_id.request_id; "fact", fact_to_json source_fact] in
-    let digest = Digestif.SHA256.(digest_string (Yojson.Safe.to_string row) |> to_hex) in
+    let digest = Agent_core_sha256.(digest_string (Yojson.Safe.to_string row) |> to_hex) in
     let+ () = if String.equal digest candidate_id.input_sha256 then Ok ()
       else wire_fail [Wire_field "source_fact"] (Unknown_token "candidate payload digest mismatch") in
     {candidate_id; source_fact; target_memory_id}
@@ -724,7 +724,7 @@ let quarantine_skipped_range_receipts ~keepers_dir ~keeper_id ~skipped =
             message))
 ;;
 
-let sha256 content = Digestif.SHA256.(digest_string content |> to_hex)
+let sha256 content = Agent_core_sha256.(digest_string content |> to_hex)
 
 let receipt_range_id = function
   | Prepared { range_id; _ } | Committed { range_id; _ } -> range_id

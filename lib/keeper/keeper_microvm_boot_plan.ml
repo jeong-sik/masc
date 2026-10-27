@@ -60,7 +60,7 @@ let digest (plan : t) =
     ; "labels", pairs plan.labels
     ]
   in
-  Digestif.SHA256.(digest_string (Yojson.Safe.to_string json) |> to_hex)
+  Agent_core_sha256.(digest_string (Yojson.Safe.to_string json) |> to_hex)
 
 let expected_mounts (plan : t) =
   if List.mem Keeper_microvm_backend.Scratch_tmpfs plan.isolation then

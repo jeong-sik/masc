@@ -211,7 +211,7 @@ let agent_key_of_token_or_name ?token ?agent_name () =
          collision scenario two distinct tokens would share a bucket, which is
          safe (one may consume the other's quota) but not a security hazard.
          SHA-256 hex is always 64 chars, so String.sub 0 32 is safe. *)
-      let digest = Digestif.SHA256.(to_hex (digest_string t)) in
+      let digest = Agent_core_sha256.(to_hex (digest_string t)) in
       Some ("token:" ^ String.sub digest 0 32)
   | _ ->
       (match agent_name with

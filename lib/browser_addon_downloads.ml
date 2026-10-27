@@ -162,10 +162,10 @@ let copy t path id = io (fun () ->
     let result=Fun.protect ~finally:(fun () -> Unix.close output) (fun () ->
       let buffer=Bytes.create Sys.io_buffer_size in
       let rec stream digest bytes = match Unix.read source buffer 0 (Bytes.length buffer) with
-        | 0 -> Digestif.SHA256.(to_hex (get digest)),bytes
+        | 0 -> Agent_core_sha256.(to_hex (get digest)),bytes
         | count -> write_all output buffer count;
-            stream (Digestif.SHA256.feed_bytes digest ~off:0 ~len:count buffer) (bytes+count) in
-      let sha256,bytes=stream Digestif.SHA256.empty 0 in
+            stream (Agent_core_sha256.feed_bytes digest ~off:0 ~len:count buffer) (bytes+count) in
+      let sha256,bytes=stream Agent_core_sha256.empty 0 in
       Unix.fsync output;
       let* ()=check t in let* ()=check_parents parents in
       let after=Unix.fstat source in
@@ -282,12 +282,12 @@ let original_digest fd bytes =
   let buffer=Bytes.create Sys.io_buffer_size in
   let rec stream remaining digest =
     if remaining=0 then
-      if Unix.read fd buffer 0 1=0 then Ok Digestif.SHA256.(to_hex (get digest))
+      if Unix.read fd buffer 0 1=0 then Ok Agent_core_sha256.(to_hex (get digest))
       else Error "original completed download has extra bytes"
     else match Unix.read fd buffer 0 (min remaining (Bytes.length buffer)) with
       | 0 -> Error "original completed download was truncated"
-      | count -> stream (remaining-count) (Digestif.SHA256.feed_bytes digest ~off:0 ~len:count buffer) in
-  stream bytes Digestif.SHA256.empty
+      | count -> stream (remaining-count) (Agent_core_sha256.feed_bytes digest ~off:0 ~len:count buffer) in
+  stream bytes Agent_core_sha256.empty
 let remove_original t snapshot =
   match Unix.lstat snapshot.source with
   | current ->

@@ -94,7 +94,7 @@ let component = "keeper-owned-job"
 let container_kind = "owned-job"
 let job_label = "masc.mcp.owned_job"
 let workspace_target = "/masc-job"
-let digest text = Digestif.SHA256.(to_hex (digest_string text))
+let digest text = Agent_core_sha256.(to_hex (digest_string text))
 let container_name prepared = "masc-owned-job-" ^ prepared.spec.job_id
 let contains_nul text = String.contains text '\000'
 let identity text = text <> "" && String.trim text = text && not (contains_nul text)

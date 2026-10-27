@@ -47,7 +47,7 @@
   tls-eio
   ca-certs
   mtime.clock.os
-  digestif
+   masc.agent_core.digest
   dune-build-info
   cstruct
   optint

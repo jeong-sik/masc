@@ -258,7 +258,7 @@ let rec update_assignments_for_epoch epoch transition =
 
 let default_config_hash ~profile ~tool_list =
   let input = String.concat "|" (profile :: tool_list) in
-  Digestif.SHA256.(digest_string input |> to_hex)
+  Agent_core_sha256.(digest_string input |> to_hex)
 
 (* ── Public API ───────────────────────────────────────── *)
 

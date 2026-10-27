@@ -108,7 +108,7 @@ let handle ~descriptors ~capability_surface ~config ~keeper_name ~args =
        | Malformed _ | Invalid_package_id _ | Invalid_evidence _ | Frozen_surface_required -> [])
   | Ok request ->
     let identity =
-      [ "source_sha256", `String Digestif.SHA256.(digest_string request.source_text |> to_hex)
+      [ "source_sha256", `String Agent_core_sha256.(digest_string request.source_text |> to_hex)
       ; "package_id", `String (Skill_reference.package_id_to_string request.package_id)
       ; ( "evidence"
         , `List

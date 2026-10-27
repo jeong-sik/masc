@@ -127,7 +127,7 @@ let slot admission directory =
   else Error (Printf.sprintf "browser claim slot %s must be one of its native claim's directories %s"
     directory (String.concat ", " (Native_addon_lease.directories admission)))
 let record_of_instance instance_id directory = Filename.concat directory
-  ("browser-" ^ Digestif.SHA256.(to_hex (digest_string instance_id)) ^ ".json")
+  ("browser-" ^ Agent_core_sha256.(to_hex (digest_string instance_id)) ^ ".json")
 let record admission directory = record_of_instance (Native_addon_lease.instance_id admission) directory
 let allocation_json admission root ~device ~inode ~state = `Assoc ["state",`String state;
   "incarnation",`String (Native_addon_lease.instance_id admission);"directory",`String root;

@@ -115,7 +115,7 @@ let activation_result ?(trace = "trace-one") ?(source = "workspace")
            ; served_content =
                Ledger.Skill_body
                  { bytes = String.length body
-                 ; sha256 = Digestif.SHA256.(digest_string body |> to_hex)
+                 ; sha256 = Agent_core_sha256.(digest_string body |> to_hex)
                  }
            })
       invocation
@@ -163,7 +163,7 @@ let receipt ?(content = "skill body") tool_use_id =
   Ledger.
     { tool_use_id
     ; content_bytes = String.length content
-    ; content_sha256 = Digestif.SHA256.(digest_string content |> to_hex)
+    ; content_sha256 = Agent_core_sha256.(digest_string content |> to_hex)
     }
 ;;
 
@@ -279,7 +279,7 @@ let test_the_held_ledger_is_the_one_the_file_replays () =
                  Ledger.Skill_resource
                    { relative_path = "references/checklist.md"
                    ; bytes = String.length "skill body"
-                   ; sha256 = Digestif.SHA256.(digest_string "skill body" |> to_hex)
+                   ; sha256 = Agent_core_sha256.(digest_string "skill body" |> to_hex)
                    }
              })
         ()
@@ -401,7 +401,7 @@ let test_legacy_composition_reports_exact_row_without_appending () =
       check string "the actual missing field is retained" "execution_id" field;
       check int "second event in this replay batch" 2 row_in_batch;
       check string "hash identifies the unchanged original JSON row"
-        Digestif.SHA256.(digest_string row |> to_hex) row_sha256;
+        Agent_core_sha256.(digest_string row |> to_hex) row_sha256;
       check string "stable failure class" "decode_failed.missing_string"
         (Ledger.store_error_code error)
     | Error error -> fail (Ledger.store_error_to_string error)
@@ -1178,7 +1178,7 @@ let test_duplicate_exact_key_is_rejected_during_decode () =
       ]
   in
   let revision =
-    Digestif.SHA256.(digest_string (Yojson.Safe.to_string revision_input) |> to_hex)
+    Agent_core_sha256.(digest_string (Yojson.Safe.to_string revision_input) |> to_hex)
   in
   let json =
     `Assoc

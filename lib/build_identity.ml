@@ -518,7 +518,7 @@ type dashboard_asset_resolution =
 
 let executable_provenance_schema = "masc.run-local-executable-identity.v2"
 let dashboard_assets_schema = "masc.run-local-dashboard-assets.v1"
-let sha256_hex_length = Digestif.SHA256.digest_size * 2
+let sha256_hex_length = Agent_core_sha256.digest_size * 2
 
 let valid_sha256 value =
   String.length value = sha256_hex_length
@@ -751,7 +751,7 @@ let parse_executable_provenance
                ])
            files)
       |> Yojson.Safe.to_string
-      |> fun value -> Digestif.SHA256.(digest_string value |> to_hex)
+      |> fun value -> Agent_core_sha256.(digest_string value |> to_hex)
     in
     let environment_paths = String.split_on_char ':' build_environment_path in
     let environment_paths_are_valid =
@@ -926,13 +926,13 @@ let sha256_channel ic =
   let buffer = Bytes.create Sys.io_buffer_size in
   let rec loop context =
     match input ic buffer 0 (Bytes.length buffer) with
-    | 0 -> Digestif.SHA256.(get context |> to_hex)
-    | count -> Digestif.SHA256.feed_bytes context ~off:0 ~len:count buffer |> loop
+    | 0 -> Agent_core_sha256.(get context |> to_hex)
+    | count -> Agent_core_sha256.feed_bytes context ~off:0 ~len:count buffer |> loop
   in
-  loop Digestif.SHA256.empty
+  loop Agent_core_sha256.empty
 ;;
 
-let sha256_string value = Digestif.SHA256.(digest_string value |> to_hex)
+let sha256_string value = Agent_core_sha256.(digest_string value |> to_hex)
 
 (* The hash of the binary that is running, read from its own path.
 

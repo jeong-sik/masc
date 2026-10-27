@@ -17,8 +17,8 @@ let carried_digest = function
 ;;
 
 let recorded_digest atom =
-  Digestif.SHA256.digest_string (Printf.sprintf "front-%d" atom)
-  |> Digestif.SHA256.to_hex
+  Agent_core_sha256.digest_string (Printf.sprintf "front-%d" atom)
+  |> Agent_core_sha256.to_hex
 
 let record
       ?(runtime = "glm")

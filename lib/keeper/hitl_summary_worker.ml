@@ -1112,7 +1112,7 @@ let try_cli_slots
     let entry = prepared.entry in
     let base_dir = entry.Keeper_approval_queue_rules_types.audit_base_path in
     let prompt = cli_prompt ~context_bundle:prepared.context_bundle in
-    let prompt_sha = Digestif.SHA256.(digest_string prompt |> to_hex) in
+    let prompt_sha = Agent_core_sha256.(digest_string prompt |> to_hex) in
     let quarantine_cause_of_failure = function
       | Keeper_lane_cli_oneshot.Invalid_json_output _
       | Keeper_lane_cli_oneshot.Invalid_domain_output _ -> Exact_domain_invalid_output

@@ -898,7 +898,7 @@ let with_request_metadata ~body run =
        | [`List entries as tools] ->
          let json = Yojson.Safe.to_string tools in
          Tools_member {wire_entries=List.length entries;json_bytes=String.length json;
-           json_sha256=Digestif.SHA256.(digest_string json |> to_hex)}
+           json_sha256=Agent_core_sha256.(digest_string json |> to_hex)}
        | [_] | _ :: _ :: _ -> Tools_unavailable in
       let components =
         if not (String.equal (Yojson.Safe.to_string json) body) then Components_unavailable
@@ -908,7 +908,7 @@ let with_request_metadata ~body run =
             { name;
               wire_bytes=String.length (Yojson.Safe.to_string (`Assoc [name,value])) - 2;
               value_json_bytes=String.length json;
-              value_json_sha256=Digestif.SHA256.(digest_string json |> to_hex) }) fields in
+              value_json_sha256=Agent_core_sha256.(digest_string json |> to_hex) }) fields in
           let framing_bytes = match members with [] -> 2 | _ :: _ -> List.length members + 1 in
           Json_object_members {members;framing_bytes} in
       {tool_inventory;components}

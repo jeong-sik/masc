@@ -31,7 +31,7 @@ let selection_to_json = function
       ; "unread_messages", Keeper_librarian_unread.list_to_json snapshot.unread_messages
       ; "prefix_sha256", `String snapshot.prefix_sha256
       ; "working_state_sha256",
-        `String Digestif.SHA256.(digest_string snapshot.working_state |> to_hex)
+        `String Agent_core_sha256.(digest_string snapshot.working_state |> to_hex)
       ]
   | Absorbed { trace_id; end_atom } ->
     `Assoc [ "kind", `String "absorbed"; "trace_id", `String trace_id;

@@ -144,7 +144,7 @@ let report_contents expected json =
        || not (List.mem expected.revision history.revisions)
     then Error "report revision changed since listing; refresh Resources"
     else if String.length content <> expected.revision.body.bytes
-         || not (String.equal (Digestif.SHA256.(to_hex (digest_string content))) expected.revision.body.sha256)
+         || not (String.equal (Agent_core_sha256.(to_hex (digest_string content))) expected.revision.body.sha256)
          || not (String.is_valid_utf_8 content)
     then Error "report body does not match its published reference"
     else Ok { parts = [{ Masc_tui_mcp.rc_uri = Some (metadata (Report expected)).uri

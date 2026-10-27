@@ -617,7 +617,7 @@ let task_list_json ~goal_task_index (task : Masc_domain.task) =
   else
     let preview = String_util.utf8_prefix
       ~max_bytes:task_description_preview_bytes task.description in
-    let revision = Digestif.SHA256.(digest_string task.description |> to_hex) in
+    let revision = Agent_core_sha256.(digest_string task.description |> to_hex) in
     match task_json ~goal_task_index {task with description = preview} with
     | `Assoc fields -> `Assoc
         (("detail_level", `String "summary")

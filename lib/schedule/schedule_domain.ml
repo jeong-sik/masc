@@ -239,7 +239,7 @@ let rec canonical_json = function
 
 let sha256_json json =
   json |> canonical_json |> Yojson.Safe.to_string
-  |> Digestif.SHA256.(fun stable -> digest_string stable |> to_hex)
+  |> Agent_core_sha256.(fun stable -> digest_string stable |> to_hex)
 ;;
 
 let option_to_yojson f = function

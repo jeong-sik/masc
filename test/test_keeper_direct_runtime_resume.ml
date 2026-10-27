@@ -128,7 +128,7 @@ let check_unbound_request_journals ~base_path ~keeper_name ~bodies observations 
     ([], []) observations in
   check int "each actual Agent API invocation owns one request journal" 2
     (List.length (List.sort_uniq String.compare call_ids));
-  let expected = List.map (fun body -> Digestif.SHA256.(digest_string body |> to_hex)) bodies in
+  let expected = List.map (fun body -> Agent_core_sha256.(digest_string body |> to_hex)) bodies in
   check (list string) "success and HTTP failure facts match exact received wire bodies"
     (List.sort String.compare expected) (List.sort String.compare digests)
 ;;

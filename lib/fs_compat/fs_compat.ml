@@ -1489,7 +1489,7 @@ let read_owned_range_digest_descriptor ~offset ~max_bytes ~path fd descriptor =
             then
               Ok
                 { content = Bytes.to_string window
-                ; sha256 = Digestif.SHA256.(to_hex (get context))
+                ; sha256 = Agent_core_sha256.(to_hex (get context))
                 ; snapshot = owned_regular_file_snapshot_of_stats descriptor
                 }
             else
@@ -1510,11 +1510,11 @@ let read_owned_range_digest_descriptor ~offset ~max_bytes ~path fd descriptor =
                     (copy_start - window_start)
                     (copy_stop - copy_start);
                 feed
-                  (Digestif.SHA256.feed_bytes context ~off:0 ~len:count buffer)
+                  (Agent_core_sha256.feed_bytes context ~off:0 ~len:count buffer)
                   chunk_stop
               | exception Unix.Unix_error (Unix.EINTR, _, _) -> feed context position
           in
-          feed Digestif.SHA256.empty 0
+          feed Agent_core_sha256.empty 0
         with
         | Eio.Cancel.Cancelled _ as cancellation ->
           reraise_current cancellation
@@ -2806,7 +2806,7 @@ module Private_jsonl_cursor = struct
         end_offset
   ;;
 
-  let fingerprint cursor = Digestif.SHA256.(digest_string (to_string cursor) |> to_hex)
+  let fingerprint cursor = Agent_core_sha256.(digest_string (to_string cursor) |> to_hex)
 
   let prefix_end_offset cursor ~device ~inode ~file_length =
     match cursor with

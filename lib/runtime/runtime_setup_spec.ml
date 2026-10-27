@@ -232,7 +232,7 @@ let setup_exact_body_timeout_s = 1200.0
    sequence, not a byte) becomes one '-'. *)
 let answers_hash_length = 8
 let answers_hash answers =
-  String.sub Digestif.SHA256.(to_hex (digest_string answers)) 0 answers_hash_length
+  String.sub Agent_core_sha256.(to_hex (digest_string answers)) 0 answers_hash_length
 let provider_id spec =
   match spec.declared_provider_id with
   | Some id -> id

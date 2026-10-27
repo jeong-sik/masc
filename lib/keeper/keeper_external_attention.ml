@@ -98,7 +98,7 @@ type record_result =
 type event = Recorded of item
 
 let event_id_of_dedupe_key key =
-  Digestif.SHA256.(digest_string key |> to_hex)
+  Agent_core_sha256.(digest_string key |> to_hex)
 
 let urgency_to_string = function
   | Mention -> "mention"

@@ -17,7 +17,7 @@ let with_env key value f =
       f ())
 
 let expected_token ~media_type data =
-  Digestif.SHA256.(
+  Agent_core_sha256.(
     digest_string (String.lowercase_ascii (String.trim media_type) ^ "\000" ^ data)
     |> to_hex)
 

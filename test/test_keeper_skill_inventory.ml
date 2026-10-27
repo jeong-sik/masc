@@ -916,8 +916,8 @@ let test_surface_digest_binds_exact_tool_input_schema () =
     altered_material
     |> Yojson.Safe.sort
     |> Yojson.Safe.to_string
-    |> Digestif.SHA256.digest_string
-    |> Digestif.SHA256.to_hex
+    |> Agent_core_sha256.digest_string
+    |> Agent_core_sha256.to_hex
   in
   check bool "input schema change changes digest" false
     (String.equal (Masc.Keeper_capability_surface.digest surface) altered_digest)
@@ -1196,8 +1196,8 @@ let test_surface_digest_binds_exact_tool_reference () =
     altered_material
     |> Yojson.Safe.sort
     |> Yojson.Safe.to_string
-    |> Digestif.SHA256.digest_string
-    |> Digestif.SHA256.to_hex
+    |> Agent_core_sha256.digest_string
+    |> Agent_core_sha256.to_hex
   in
   check bool "exact Tool reference change changes surface digest" false
     (String.equal (Masc.Keeper_capability_surface.digest surface) altered_digest)

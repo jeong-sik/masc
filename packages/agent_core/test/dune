@@ -18,7 +18,7 @@
   (re_export cohttp-eio)
   (re_export cstruct)
   (re_export mcp_protocol)
-  (re_export digestif)
+  (re_export  masc.agent_core.digest)
   (re_export optint)
   (re_export re)
   (re_export mirage-crypto-rng.unix)
@@ -371,7 +371,7 @@
 (test
  (name test_execution_event_store)
  (modules test_execution_event_store)
- (libraries agent_core_test_deps agent_core llm_provider alcotest digestif eio_main)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest  masc.agent_core.digest eio_main)
  (flags
   (:standard -alias-deps))
  (deps ../models.toml)
@@ -762,3 +762,8 @@
  (name test_provider_declarations)
  (modules test_provider_declarations)
  (libraries agent_core_test_deps llm_provider alcotest yojson unix))
+
+(test
+ (name test_agent_core_digest)
+ (modules test_agent_core_digest)
+ (libraries agent_core_digest alcotest))

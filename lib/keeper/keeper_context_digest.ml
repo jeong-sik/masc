@@ -3,7 +3,7 @@
 let text value = Digest.to_hex (Digest.string value)
 
 let compute_message_texts_as_joined messages =
-  let module Hash = Digestif.MD5 in
+  let module Hash = Agent_core_md5 in
   let rec loop ctx = function
     | [] -> ctx
     | [ message ] ->
@@ -12,7 +12,7 @@ let compute_message_texts_as_joined messages =
       let ctx = Hash.feed_string ctx (Agent_core.Types.text_of_message message) in
       loop (Hash.feed_string ctx "\n") rest
   in
-  Hash.(to_hex (get (loop empty messages)))
+  Hash.(to_hex (loop empty messages))
 ;;
 
 let message_texts_as_joined messages =

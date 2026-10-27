@@ -1163,7 +1163,7 @@ let test_post_observation_matches_actual_native_calls () =
     List.iter2 (fun (_,bytes,digest) body ->
       Alcotest.(check int) "metadata measures the received body" (String.length body) bytes;
       Alcotest.(check string) "metadata hashes the received body"
-        Digestif.SHA256.(digest_string body |> to_hex) digest) entered (List.rev !bodies);
+        Agent_core_sha256.(digest_string body |> to_hex) digest) entered (List.rev !bodies);
     List.iter (fun (id,_,_) ->
       let phases = List.filter_map (fun (event : Observe.event) ->
         if event.call_id=id then Some event.phase else None) events in
@@ -1224,7 +1224,7 @@ let test_post_observers_are_owned_across_concurrent_fibers () =
     let hashes events = List.filter_map (fun (event : Observe.event) -> match event.phase with
       | Client_entered {body_sha256;_} -> Some body_sha256
       | Dispatch_entered | Response_headers_received _ | Client_finished _ -> None) (List.rev !events) in
-    let sha body = Digestif.SHA256.(digest_string body |> to_hex) in
+    let sha body = Agent_core_sha256.(digest_string body |> to_hex) in
     Alcotest.(check (list string)) "outer ownership survives concurrent nested binding"
       (List.map sha ["outer-first";"outer-second"]) (hashes outer_events);
     Alcotest.(check (list string)) "nested owner receives only its request" [sha "inner"] (hashes inner_events);

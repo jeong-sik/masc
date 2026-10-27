@@ -124,7 +124,7 @@ let refuse detail = raise (Decode_error detail)
 let require condition detail = if not condition then refuse detail
 let decode f = try Ok (f ()) with
   | Decode_error detail | Yojson.Json_error detail -> Error detail
-let sha text = Digestif.SHA256.(digest_string text |> to_hex)
+let sha text = Agent_core_sha256.(digest_string text |> to_hex)
 let json_sha json = sha (Yojson.Safe.to_string json)
 let canonical_equal left right = Yojson.Safe.equal (Yojson.Safe.sort left) (Yojson.Safe.sort right)
 let nonblank text = String.trim text <> ""

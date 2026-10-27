@@ -191,7 +191,7 @@ let browser_lane_fixture ?(declared=true) ?(connection_port="") () f =
   if declared then
     write (Filename.concat (Filename.concat root "browser-lane") "host/launch.json")
       (Yojson.Safe.to_string (`Assoc ["destination", `String "workspace_connection";
-         "launcher_sha256", `String Digestif.SHA256.(to_hex (digest_string script))]));
+         "launcher_sha256", `String Agent_core_sha256.(to_hex (digest_string script))]));
   f base
 
 let browser_lane_absent_launcher_is_unobserved () = with_workspace @@ fun base ->

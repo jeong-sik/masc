@@ -73,7 +73,7 @@ let destination_field = "destination"
 let launcher_digest_field = "launcher_sha256"
 let workspace_connection_destination = "workspace_connection"
 let declaration_fields = List.sort String.compare [ destination_field; launcher_digest_field ]
-let launcher_digest script = Digestif.SHA256.(to_hex (digest_string script))
+let launcher_digest script = Agent_core_sha256.(to_hex (digest_string script))
 
 let declaration ~launcher_script =
   Yojson.Safe.to_string

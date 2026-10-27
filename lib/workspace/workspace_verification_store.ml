@@ -124,7 +124,7 @@ let payload_of_complete_bytes ~path content =
   match binary_format, scan_utf8 content with
   | true, (Utf8_valid | Utf8_incomplete_at _ | Utf8_invalid) ->
     Ok (Binary_payload {data=content; bytes=String.length content; format;
-      sha256=Digestif.SHA256.(digest_string content |> to_hex)})
+      sha256=Agent_core_sha256.(digest_string content |> to_hex)})
   | false, Utf8_valid ->
     let bytes = String.length content in
     let truncated = bytes > verification_evidence_max_bytes in
@@ -305,7 +305,7 @@ let read_binary_body_base64_at_limit ~max_bytes ~base_path (item : submitted_evi
          { bytes = body.file_size; ceiling = max_bytes })
      | Ok (Some body) ->
        let actual_bytes = String.length body.content in
-       let actual_sha256 = Digestif.SHA256.(digest_string body.content |> to_hex) in
+       let actual_sha256 = Agent_core_sha256.(digest_string body.content |> to_hex) in
        if actual_bytes <> expected_bytes || not (String.equal actual_sha256 expected_sha256)
        then Error (Body_identity_mismatch
          { expected_bytes; actual_bytes; expected_sha256; actual_sha256 })

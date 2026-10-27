@@ -321,7 +321,7 @@ let test_corrupt_snapshot_rebuild_rejects_old_generation () = with_store @@ fun 
   expect_error (Context.read ~keepers_dir ~keeper_id);
   check bool "background capture quarantines invalid derived bytes" true
     (ok (Context.read_for_update ~keepers_dir ~keeper_id) = None);
-  let quarantine = file ^ ".invalid-" ^ Digestif.SHA256.(digest_string invalid |> to_hex) in
+  let quarantine = file ^ ".invalid-" ^ Agent_core_sha256.(digest_string invalid |> to_hex) in
   check string "exact corrupt evidence preserved" invalid
     (In_channel.with_open_bin quarantine In_channel.input_all);
   let rebuilt = ok (Context.commit ~keepers_dir ~keeper_id ~expected_version:None

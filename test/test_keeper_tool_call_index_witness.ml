@@ -7,7 +7,7 @@
 module Witness = Keeper_tool_call_index.For_testing
 
 let reference_extend digest line =
-  Digestif.SHA256.(to_hex (digest_string (digest ^ line ^ "\n")))
+  Agent_core_sha256.(to_hex (digest_string (digest ^ line ^ "\n")))
 
 let reference_prefix ~path ~from ~until digest =
   let channel = open_in_bin path in

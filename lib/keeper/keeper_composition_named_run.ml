@@ -21,7 +21,7 @@ let record ~base_path ~keeper_name binding =
 let path ~base_path ~keeper_name binding =
   let identity = `List [`String keeper_name;
       `String (Keeper_tool_plan.Composition_run_id.to_string binding.Dependency.composition_run_id)] in
-  let name = Digestif.SHA256.(digest_string (Yojson.Safe.to_string identity) |> to_hex) ^ ".json" in
+  let name = Agent_core_sha256.(digest_string (Yojson.Safe.to_string identity) |> to_hex) ^ ".json" in
   Filename.concat
     (Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path)
        "keeper_msg_requests") "named_composition_runs") name

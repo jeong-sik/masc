@@ -273,7 +273,7 @@ let test_inventory_describes_mountable_assets_without_a_machine () =
        | Some (`String value) -> String.length value = 64
        | _ -> false);
     check string "sha256 matches the mounted bytes"
-      Digestif.SHA256.(to_hex (digest_string hello_com))
+      Agent_core_sha256.(to_hex (digest_string hello_com))
       (match List.assoc_opt "sha256" solo with
        | Some (`String value) -> value
        | _ -> ""))
@@ -531,7 +531,7 @@ let test_inventory_root_replacement_between_reads_is_refused () =
       let response = Tool_result.message result ^ Yojson.Safe.to_string (Tool_result.data result) in
       check bool "foreign filename is never published" false (contains "private-outside.com" response);
       check bool "foreign digest is never published" false
-        (contains Digestif.SHA256.(to_hex (digest_string "foreign")) response);
+        (contains Agent_core_sha256.(to_hex (digest_string "foreign")) response);
       check bool "host path is never published" false (contains outside response)))
 ;;
 

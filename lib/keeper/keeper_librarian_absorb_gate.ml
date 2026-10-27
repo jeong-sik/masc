@@ -1092,7 +1092,7 @@ module Replay = struct
           "response contains an unrequested answer";
         let request_body_sha256 = field index "request_body_sha256" result_json |> string index in
         let body = Typesafeai_types.request_to_yojson ~model:destination.model ~state ~questions |> Yojson.Safe.to_string in
-        require index (request_body_sha256 = Digestif.SHA256.(digest_string body |> to_hex)) "request body digest differs";
+        require index (request_body_sha256 = Agent_core_sha256.(digest_string body |> to_hex)) "request body digest differs";
         Ok { Typesafeai_client.response; destination; request_body_sha256; passed_over }
       | _ -> reject index "evaluation did not return a typed response or refusal"
     in

@@ -296,7 +296,7 @@ let test_cancellation_records_terminal_raw_observation () =
 
 
 let scoped_observation : Masc.Keeper_agent_result.tool_call_detail =
-  let hash text = Digestif.SHA256.(digest_string text |> to_hex) in
+  let hash text = Agent_core_sha256.(digest_string text |> to_hex) in
   { tool_name = "effect"; provider = "fixture"; execution_outcome = Tool_result.Ok
   ; typed_outcome = None; latency_ms = 1.; task_id = None; route_evidence = None
   ; input_fingerprint = Some (hash "same-input")
@@ -2907,7 +2907,7 @@ let test_system_authority_repeats_with_exact_source_on_official_resume () =
     ("USER:\n" ^ Host.encode_history_message (Agent_core.Types.user_msg text) ^ "\n\nOWNER")
     (Keeper_context_submission_link.text start);
   let held = {Keeper_official_client_session_store.context=Context_block block;
-              sha256=Digestif.SHA256.(digest_string text |> to_hex)}
+              sha256=Agent_core_sha256.(digest_string text |> to_hex)}
              :: Host.start_held_context ~composed_context:assembly prepared.messages in
   let deliver held = Host.resume_prompt ~goal:"OWNER" ~held ~composed_context:assembly prepared.messages in
   let first = deliver held in
@@ -3209,7 +3209,7 @@ let test_recent_actions_go_out_whole_when_the_session_holds_no_row () =
     [ { Keeper_official_client_session_store.context =
           Keeper_official_client_session_store.Context_section
             (Layers.Layer Layers.Own_recent_actions)
-      ; sha256 = Digestif.SHA256.(digest_string (Layers.text turn) |> to_hex)
+      ; sha256 = Agent_core_sha256.(digest_string (Layers.text turn) |> to_hex)
       } ]
   in
   let old_copy = resume ~held:as_one_text (world_state_turn (world_state_with_actions [ 2; 3; 4 ])) in
@@ -3244,7 +3244,7 @@ let test_recent_action_rows_sent_in_part_keep_their_issuer_attribution () =
          (entry |> member "section" |> to_string);
        check (list string) "the attribution names the rows left out by digest"
          (List.map
-            (fun turn -> Digestif.SHA256.(digest_string (action_row turn) |> to_hex))
+            (fun turn -> Agent_core_sha256.(digest_string (action_row turn) |> to_hex))
             [ 2; 3 ])
          (entry |> member "row_sha256" |> to_list |> List.map to_string)
      | _ -> fail "one section was sent in part")

@@ -54,8 +54,8 @@ let max_pending_codes = Env_config_runtime_services.OAuth.max_pending_codes
 let max_clients = Env_config_runtime_services.OAuth.max_clients
 
 let pkce_s256 verifier =
-  Digestif.SHA256.digest_string verifier
-  |> Digestif.SHA256.to_raw_string
+  Agent_core_sha256.digest_string verifier
+  |> Agent_core_sha256.to_raw_string
   |> Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet
 ;;
 

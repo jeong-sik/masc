@@ -2,7 +2,7 @@ open Alcotest
 module Installed = Masc.Installed_dashboard
 let error = testable (fun fmt e -> Format.pp_print_string fmt (Yojson.Safe.to_string (Installed.error_json e))) ( = )
 let commit = String.make 40 'a'
-let sha body = Digestif.SHA256.(digest_string body |> to_hex)
+let sha body = Agent_core_sha256.(digest_string body |> to_hex)
 let write path body =
   let ch = open_out_bin path in
   Fun.protect ~finally:(fun () -> close_out ch) (fun () -> output_string ch body)

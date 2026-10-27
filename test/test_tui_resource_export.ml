@@ -8,7 +8,7 @@ let id = "artifact-0123456789abcdef0123456789abcdef"
 let source = "# 원문 🎵\r\n\t값\r\n"
 let document ?(format=Published.Markdown) ?(number=3) source =
   let body = get (Result.map_error Tool_output.make_error_to_string
-    (Tool_output.make_artifact_ref ~sha256:Digestif.SHA256.(to_hex (digest_string source))
+    (Tool_output.make_artifact_ref ~sha256:Agent_core_sha256.(to_hex (digest_string source))
       ~bytes:(String.length source) ~preview:source ~mime:(Published.media_type format))) in
   let revision = { Published.revision=number; title="report"; summary="original";
     format; author="keeper"; created_at="2026-10-22T00:00:00Z"; body;

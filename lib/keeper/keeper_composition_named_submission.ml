@@ -138,7 +138,7 @@ let decode_header request bytes =
     Ok {source;phase}
   with Yojson.Json_error detail -> Error (Corrupt_intent detail)
 
-let source_sha source = Digestif.SHA256.(digest_string
+let source_sha source = Agent_core_sha256.(digest_string
     (Yojson.Safe.to_string (Journal.source_to_yojson source)) |> to_hex)
 
 let header request bytes =
@@ -242,7 +242,7 @@ let unwrap ~path ~failure_to_string = function
 
 let location ~base_path request =
   let root = Common.masc_dir_from_base_path ~base_path in
-  let name = Digestif.SHA256.(digest_string (Yojson.Safe.to_string (identity_json request)) |> to_hex) ^ ".json" in
+  let name = Agent_core_sha256.(digest_string (Yojson.Safe.to_string (identity_json request)) |> to_hex) ^ ".json" in
   let path = Filename.concat (Filename.concat (Filename.concat root "keeper_msg_requests") "named_submissions") name in
   root,path
 

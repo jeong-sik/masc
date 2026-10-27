@@ -7,7 +7,7 @@ let fail msg = failwith msg
 let get = function Ok x -> x | Error msg -> fail msg
 let read path = In_channel.with_open_bin path In_channel.input_all
 let write path body = Out_channel.with_open_bin path (fun out -> output_string out body)
-let hash bytes = Digestif.SHA256.(digest_string bytes |> to_hex)
+let hash bytes = Agent_core_sha256.(digest_string bytes |> to_hex)
 let now () = Unix.gettimeofday ()
 type sample = {
   operation : string; fixture : string; outcome : string;

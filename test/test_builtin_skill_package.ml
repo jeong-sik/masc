@@ -163,14 +163,14 @@ let test_streamed_resource_revision () = with_base (fun base ->
   Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
     ignore (Unix.lseek fd (Bytes.length chunk * chunks - 1) Unix.SEEK_SET);
     ignore (Unix.write fd chunk 0 1));
-  let expected = ref Digestif.SHA256.empty in
-  for _ = 1 to chunks do expected := Digestif.SHA256.feed_bytes !expected chunk done;
+  let expected = ref Agent_core_sha256.empty in
+  for _ = 1 to chunks do expected := Agent_core_sha256.feed_bytes !expected chunk done;
   let before = Gc.allocated_bytes () in
   let digest = Fs_compat.sha256_owned_regular_file ~ownership_root:base resource in
   let allocated = Gc.allocated_bytes () -. before in
   (match digest with
    | Ok (Some digest) -> check string "sparse resource streams exact SHA256"
-       Digestif.SHA256.(to_hex (get !expected)) digest
+       Agent_core_sha256.(to_hex (get !expected)) digest
    | _ -> fail "owned sparse resource digest unavailable");
   check bool "hashing does not allocate a file-sized string" true
     (allocated < float_of_int (Bytes.length chunk * chunks));

@@ -201,7 +201,7 @@ let receipt_to_yojson receipt =
     ]
 ;;
 
-let sha256 value = Digestif.SHA256.(digest_string value |> to_hex)
+let sha256 value = Agent_core_sha256.(digest_string value |> to_hex)
 
 let receipt_path ~masc_dir ~keeper ~repair_id =
   Filename.concat

@@ -1547,7 +1547,7 @@ let test_prepared_prompt_keeps_turn_inputs_and_request_authority () =
         let actual = String.sub parts.world_state offset bytes in
         check string "each reassembled span names its actual UTF8 content"
           (span |> member "sha256" |> to_string)
-          Digestif.SHA256.(digest_string actual |> to_hex)) in
+          Agent_core_sha256.(digest_string actual |> to_hex)) in
     let access offered deferred loader_alive = shared_reader_access ~offered ~deferred ~loader_alive in
     let project access = Prompt.project_prompt prepared ~workspace_memory_access:access
         ~recent_work:(Masc.Keeper_recent_work.Evidence "최근 작업 근거: 🐾 원래 목표 계속") () in
@@ -1775,7 +1775,7 @@ let test_admitted_schedule_entry_survives_tools_and_official_resume () =
   check bool "Start User carries B entry" true
     (contains ~needle:(Ids.Turn_ref.to_string (turn 2)) (Masc.Keeper_context_submission_link.text start));
   let held = { Masc.Keeper_official_client_session_store.context = Context_block Prompt_block_id.Admitted_scheduled_input;
-               sha256 = Digestif.SHA256.(digest_string b_text |> to_hex) }
+               sha256 = Agent_core_sha256.(digest_string b_text |> to_hex) }
       :: Host.start_held_context ~composed_context:issued_b prepared_b.messages in
   let resume assembly held =
     let prepared = prepare assembly in

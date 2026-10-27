@@ -38,7 +38,7 @@ let same left right =
 let require condition detail = if condition then Ok () else Error detail
 let equal left right detail = let* matches = same left right in require matches detail
 let digest json = let* json = canonical json in
-  Ok Digestif.SHA256.(digest_string (Yojson.Safe.to_string json) |> to_hex)
+  Ok Agent_core_sha256.(digest_string (Yojson.Safe.to_string json) |> to_hex)
 let scope = Capture.gate_scope
 let fields expected = function
   | `Assoc fields when List.sort String.compare (List.map fst fields) = List.sort String.compare expected -> Ok fields

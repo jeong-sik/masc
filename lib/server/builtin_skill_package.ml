@@ -245,7 +245,7 @@ let require_chain ~root path =
 
 let load_receipt ~root path =
   (* Receipt format is a hex SHA-256 plus newline, never a resource payload. *)
-  let max_bytes = Digestif.SHA256.digest_size * 2 + 1 in
+  let max_bytes = Agent_core_sha256.digest_size * 2 + 1 in
   match Fs_compat.load_owned_regular_file_prefix ~ownership_root:root ~max_bytes path with
   | Ok None -> None
   | Ok (Some receipt) when not receipt.truncated -> Some receipt.content

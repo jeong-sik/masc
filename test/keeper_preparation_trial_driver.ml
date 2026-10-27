@@ -28,7 +28,7 @@ let append_event path value =
     output_string channel (Yojson.Safe.to_string value ^ "\n");
     flush channel; Unix.fsync (Unix.descr_of_out_channel channel))
 let load path = Yojson.Safe.from_string (read path)
-let sha bytes = Digestif.SHA256.(digest_string bytes |> to_hex)
+let sha bytes = Agent_core_sha256.(digest_string bytes |> to_hex)
 let field name value = member name value
 let string name value = field name value |> to_string
 let integer name value = field name value |> to_int

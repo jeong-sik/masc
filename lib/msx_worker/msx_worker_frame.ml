@@ -54,7 +54,7 @@ let prepare_tick_pixels (frame : Msx_lane.frame) =
       let pixels =
         { rgb = frame.rgb; encoded = Base64.encode_string frame.rgb;
           reference = { width = frame.width; height = frame.height;
-            revision = Digestif.SHA256.(to_hex (digest_string frame.rgb)) } } in
+            revision = Agent_core_sha256.(to_hex (digest_string frame.rgb)) } } in
       Mutex.protect tick_pixels_mutex (fun () -> tick_pixels := Some pixels);
       pixels
 

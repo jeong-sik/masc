@@ -51,7 +51,7 @@ let observe_roots ~base_path ~keepers_dir ~keeper_id f =
 let address ~workspace ~keepers ~runtime ~keeper_id =
   Yojson.Safe.to_string (`Assoc ["workspace",physical_json workspace;
     "keepers",physical_json keepers;"runtime",physical_json runtime;"keeper_id",`String keeper_id])
-let hash text = Digestif.SHA256.(to_hex (digest_string text))
+let hash text = Agent_core_sha256.(to_hex (digest_string text))
 let scope_for_hash hash = "keeper-librarian-history-execution-" ^ hash
 let owner_hash owner = hash (address ~workspace:owner.workspace ~keepers:owner.keepers ~runtime:owner.runtime ~keeper_id:owner.keeper_id)
 let scope owner = scope_for_hash (owner_hash owner)

@@ -590,7 +590,7 @@ let payload_path ~log_path ~run_id kind ~sha256 =
    the replay sweep. *)
 let write_payload ~log_path ~run_id kind value =
   let text = Yojson.Safe.to_string value in
-  let sha256 = Digestif.SHA256.(digest_string text |> to_hex) in
+  let sha256 = Agent_core_sha256.(digest_string text |> to_hex) in
   match
     Keeper_fs.save_bytes_durable_atomic (payload_path ~log_path ~run_id kind ~sha256) text
   with
@@ -1074,7 +1074,7 @@ let confirmed_payload ~log_path ~run_id kind ~value ~source =
             | exception Unix.Unix_error (Unix.EINTR,_,_) -> read offset in
           let* ()=read 0 in
           let text=Bytes.to_string buffer in
-          if not (String.equal Digestif.SHA256.(to_hex (digest_string text)) sha256) then
+          if not (String.equal Agent_core_sha256.(to_hex (digest_string text)) sha256) then
             Error "Original payload digest changed" else
           let* value=try Ok (Yojson.Safe.from_string text) with Yojson.Json_error detail -> Error detail in
           let* ()=validate_original_json value in
@@ -1286,7 +1286,7 @@ let read_payload_file ~log_path ~run_id kind ~bytes ~sha256 ~missing =
     Error
       (Invalid_payload
          (Printf.sprintf "%s holds %d bytes; its row recorded %d" path (String.length text) bytes))
-  | text when not (String.equal (Digestif.SHA256.(digest_string text |> to_hex)) sha256) ->
+  | text when not (String.equal (Agent_core_sha256.(digest_string text |> to_hex)) sha256) ->
     Error (Invalid_payload (Printf.sprintf "%s does not match the SHA-256 its row recorded" path))
   | text ->
     (match Yojson.Safe.from_string text with

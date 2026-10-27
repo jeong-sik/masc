@@ -789,7 +789,7 @@ let test_no_measure_one_post_and_wire_authority () =
       check
         string
         (id ^ " frozen body digest")
-        Digestif.SHA256.(to_hex (digest_string capture.body))
+        Agent_core_sha256.(to_hex (digest_string capture.body))
         (EO.receipt_request_body_sha256 success.receipt)
     | Error _ -> fail (id ^ " exact execution failed")
   in
@@ -1047,7 +1047,7 @@ let test_response_received_error_evidence_matrix () =
       check
         string
         (label ^ " exact body digest")
-        Digestif.SHA256.(to_hex (digest_string response))
+        Agent_core_sha256.(to_hex (digest_string response))
         raw.body_sha256;
       check
         (option int)

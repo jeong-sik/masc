@@ -63,7 +63,7 @@ let identity path =
     let* payload = capture (fun () ->
       match before.Unix.st_kind with
       | Unix.S_REG ->
-        Some (Fs_compat.load_file path |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex)
+        Some (Fs_compat.load_file path |> Agent_core_sha256.digest_string |> Agent_core_sha256.to_hex)
       | Unix.S_LNK -> Some (Unix.readlink path)
       | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK -> None)
     in

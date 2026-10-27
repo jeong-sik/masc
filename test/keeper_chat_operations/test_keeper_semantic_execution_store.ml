@@ -13,7 +13,7 @@ let uuid n =
   match Uuidm.of_string (Printf.sprintf "00000000-0000-4000-8000-%012d" n) with
   | Some id -> id | None -> fail "invalid fixture UUID"
 let scope_id n = Scope.autonomous_admission (uuid n)
-let hash text = Digestif.SHA256.(digest_string text |> to_hex)
+let hash text = Agent_core_sha256.(digest_string text |> to_hex)
 let source ?(retentions = 0) n =
   Execution.source_member ~post_id:(Printf.sprintf "source-%d" n)
     ~admitted_revision:(Int64.of_int n) ~checkpoint_retentions:retentions

@@ -202,7 +202,7 @@ let inspect_with_budget ~poppler_budget_sec ?(max_pages = max_pages) ?(max_total
   let* pages = render 1 0 [] descriptions in
   let* retained = read_owned root source in
   if not (String.equal retained bytes) then Error (Invalid_output "captured PDF changed during inspection")
-  else Ok {source_bytes=String.length bytes;source_sha256=Digestif.SHA256.(digest_string bytes |> to_hex);
+  else Ok {source_bytes=String.length bytes;source_sha256=Agent_core_sha256.(digest_string bytes |> to_hex);
            pages;diagnostics=List.rev !diagnostics}
 
 (* The text half of [inspect] with no rendering, no image policy and no review

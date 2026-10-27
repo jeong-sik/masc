@@ -1776,7 +1776,7 @@ let test_event_queue_reaction_evidence_batch_indexes_multiple_occurrences () =
 let test_event_id_digest_is_sha256 () =
   let stimulus_id = "board:post-42" in
   let expected =
-    "krl:" ^ Digestif.SHA256.(digest_string (stimulus_id ^ "|stimulus") |> to_hex)
+    "krl:" ^ Agent_core_sha256.(digest_string (stimulus_id ^ "|stimulus") |> to_hex)
   in
   let actual = Masc.Keeper_reaction_ledger.digest_id "krl" (stimulus_id ^ "|stimulus") in
   check string "event id carries a SHA-256 digest" expected actual;

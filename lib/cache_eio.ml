@@ -55,7 +55,7 @@ let key_filename_prefix key =
 
 (** 16 hex chars gives a compact, stable disambiguator without making cache filenames unwieldy. *)
 let key_filename_hash key =
-  Digestif.SHA256.(digest_string key |> to_hex) |> fun hex -> String.sub hex 0 16
+  Agent_core_sha256.(digest_string key |> to_hex) |> fun hex -> String.sub hex 0 16
 ;;
 
 let cache_filename key =

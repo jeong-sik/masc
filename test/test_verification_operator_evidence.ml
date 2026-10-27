@@ -26,7 +26,7 @@ let png_signature = "\x89PNG\r\n\x1a\n"
    right. *)
 let png_of_length length = png_signature ^ String.make (length - String.length png_signature) 'p'
 
-let sha256_of data = Digestif.SHA256.(digest_string data |> to_hex)
+let sha256_of data = Agent_core_sha256.(digest_string data |> to_hex)
 
 (* A binary item as the capture path files it, so the body is read back from
    disk rather than assumed. *)

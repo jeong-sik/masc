@@ -560,7 +560,7 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
     let snapshot = `Assoc ["system_prompt", `String prepared.system_prompt;
       "messages", `List (List.map Keeper_official_client_context_codec.to_json snapshot_messages)] in
     let snapshot_sha256 = snapshot |> Yojson.Safe.to_string
-      |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
+      |> Agent_core_sha256.digest_string |> Agent_core_sha256.to_hex in
     let admission_error reason = config_error
         ~field:"official_client_session.context_admission"
         (Session_store.context_admission_error_to_string reason) in

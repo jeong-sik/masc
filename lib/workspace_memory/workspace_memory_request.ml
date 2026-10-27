@@ -241,7 +241,7 @@ let batch_of_json ~ledger ~render json =
     let pending id =
       match String_map.find_opt id refs, String_map.find_opt id claims with
       | Some fact, Some claim ->
-        if String.equal (claim_sha256 fact) Digestif.SHA256.(digest_string claim |> to_hex)
+        if String.equal (claim_sha256 fact) Agent_core_sha256.(digest_string claim |> to_hex)
         then Ok { Ledger.fact; claim } else Error "snapshot claim does not match its source hash"
       | None, (None | Some _) | Some _, None -> Error "snapshot names a fact outside its id map" in
     let* rows = snapshot_array (fun row ->

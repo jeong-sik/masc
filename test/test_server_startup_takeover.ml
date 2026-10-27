@@ -1152,7 +1152,7 @@ let test_base_path_lock_external_location_and_full_digest () =
         Printf.sprintf "masc-base-path-lease:%d:%d"
           (Unix.stat canonical_base_path).Unix.st_dev
           (Unix.stat canonical_base_path).Unix.st_ino
-        |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex
+        |> Agent_core_sha256.digest_string |> Agent_core_sha256.to_hex
       in
       Alcotest.(check string)
         "lease filename is the full (st_dev, st_ino) identity digest"

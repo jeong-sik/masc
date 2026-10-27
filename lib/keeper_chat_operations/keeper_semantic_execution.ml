@@ -10,8 +10,8 @@ type source_member =
   }
 
 let canonical_sha value =
-  match Digestif.SHA256.consistent_of_hex_opt value with
-  | Some digest -> String.equal value (Digestif.SHA256.to_hex digest)
+  match Agent_core_sha256.consistent_of_hex_opt value with
+  | Some digest -> String.equal value (Agent_core_sha256.to_hex digest)
   | None -> false
 
 let source_member ~post_id ~admitted_revision ~checkpoint_retentions ~source_sha256 =

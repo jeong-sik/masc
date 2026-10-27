@@ -328,7 +328,7 @@ let sanitize_namespace_segment name =
       then String.sub folded 0 namespace_segment_max_length
       else folded
     in
-    let digest = String.sub Digestif.SHA256.(digest_string name |> to_hex) 0 16 in
+    let digest = String.sub Agent_core_sha256.(digest_string name |> to_hex) 0 16 in
     if head = "" then "x-" ^ digest else head ^ "-" ^ digest)
 
 let backend_config_for base_path =

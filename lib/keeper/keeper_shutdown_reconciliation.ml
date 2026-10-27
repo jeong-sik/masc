@@ -176,7 +176,7 @@ let acknowledge_absent_owner_observing ~on_guards_acquired ~config ~keeper_name 
               let* () = if outstanding = [] then Ok () else Error (Outstanding_tasks outstanding) in
               Ok { finalization; prior_revision = operation.revision
                  ; prior_updated_at = operation.updated_at
-                 ; prior_operation_sha256 = Digestif.SHA256.(to_hex (digest_string
+                 ; prior_operation_sha256 = Agent_core_sha256.(to_hex (digest_string
                      (Yojson.Safe.to_string (Keeper_shutdown_store.to_json operation))))
                  ; actor; reason
                  ; acknowledged_at = Masc_domain.now_iso (); backlog_version = backlog.version }

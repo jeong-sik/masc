@@ -766,7 +766,7 @@ let test_frozen_unread_changes_and_clears_across_native_requests () =
         frontier.held_context in
       (match held with
        | [receipt] -> check string "session holds the latest frozen unread bytes"
-           Digestif.SHA256.(digest_string (encoded unread) |> to_hex) receipt.sha256
+           Agent_core_sha256.(digest_string (encoded unread) |> to_hex) receipt.sha256
        | [] | _ :: _ :: _ -> fail "native session lost its single unread receipt")
     | Ok _ | Error _ -> fail "native session lost its acknowledged context frontier")
     [initial,true;initial,false;changed,true;Frozen.empty,true;Frozen.empty,false;

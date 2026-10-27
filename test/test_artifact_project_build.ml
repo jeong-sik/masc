@@ -15,7 +15,7 @@ let rec remove path = match (Unix.lstat path).Unix.st_kind with
 let with_base f =
   let base = Filename.temp_file "artifact-project-build-" "" in Sys.remove base; Unix.mkdir base 0o700;
   Fun.protect ~finally:(fun () -> remove base) (fun () -> f base)
-let digest text = Digestif.SHA256.(digest_string text |> to_hex)
+let digest text = Agent_core_sha256.(digest_string text |> to_hex)
 let write path text = Out_channel.with_open_bin path (fun out -> output_string out text)
 let metadata base id = Filename.concat
   (Filename.concat (Common.masc_dir_from_base_path ~base_path:base) "artifact_project_builds") (id ^ ".json")

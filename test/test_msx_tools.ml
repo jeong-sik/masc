@@ -1090,7 +1090,7 @@ let test_disk_export_survives_fresh_boot () =
   check (option int) "receipt byte count" (Some (String.length contents))
     (match member "byte_length" (Tool_result.data result) with Some (`Int n) -> Some n | _ -> None);
   check (option string) "receipt digest identifies bytes"
-    (Some Digestif.SHA256.(to_hex (digest_string contents)))
+    (Some Agent_core_sha256.(to_hex (digest_string contents)))
     (match member "sha256" (Tool_result.data result) with Some (`String s) -> Some s | _ -> None);
   check (option string) "receipt filename" (Some "campaign-data.dsk")
     (match member "filename" (Tool_result.data result) with Some (`String s) -> Some s | _ -> None);
@@ -1517,7 +1517,7 @@ let test_checkpoint_info_reads_without_restoring () =
      | Some (`Int n) -> n
      | _ -> -1);
   check string "checkpoint sha256 reported"
-    Digestif.SHA256.(to_hex (digest_string payload))
+    Agent_core_sha256.(to_hex (digest_string payload))
     (match member "sha256" (Tool_result.data info) with
      | Some (`String s) -> s
      | _ -> "");

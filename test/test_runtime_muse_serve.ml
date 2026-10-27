@@ -392,7 +392,7 @@ let test_turn_start_receipt_is_the_line_the_host_read () =
         check int "the receipt counts the line the host read" (String.length line)
           submission.write.bytes;
         check string "the receipt hashes the line the host read"
-          Digestif.SHA256.(digest_string line |> to_hex) submission.write.sha256;
+          Agent_core_sha256.(digest_string line |> to_hex) submission.write.sha256;
         check bool "the prompt is the turn's text slot" true
           (Option.is_some
              (Runtime_official_client_write.matching_fragment submission.write

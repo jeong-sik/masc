@@ -4,4 +4,4 @@
  (public_name masc.keeper_execution_scope)
  (wrapped false)
  (modules keeper_execution_scope_id keeper_repetition_snapshot)
- (libraries masc.keeper_operation_identity digestif uuidm yojson))
+ (libraries masc.keeper_operation_identity  masc.agent_core.digest uuidm yojson))

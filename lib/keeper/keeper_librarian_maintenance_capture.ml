@@ -23,7 +23,7 @@ let owner_keeper_id = Keeper_librarian_durable_request.keeper_id
 
 type destination = Keeper_librarian_durable_request.destination
 
-let digest_of_string text = Digestif.SHA256.(to_hex (digest_string text))
+let digest_of_string text = Agent_core_sha256.(to_hex (digest_string text))
 
 (* Field-exact JSON object reader: unknown, duplicate or missing fields refuse. *)
 let fields_of error expected json =

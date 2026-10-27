@@ -90,7 +90,7 @@ let fit ~limit ~prefix ~keeper_segment ~qualifiers =
   else (
     let digest =
       String.sub
-        Digestif.SHA256.(digest_string full |> to_hex)
+        Agent_core_sha256.(digest_string full |> to_hex)
         0
         cut_name_digest_hex_length
     in
@@ -133,7 +133,7 @@ let make spec =
       ~qualifiers:
         [ Keeper_types_profile_sandbox.network_mode_to_string network_mode
         ; base_path_segment base_path
-        ; Digestif.SHA256.(digest_string image |> to_hex)
+        ; Agent_core_sha256.(digest_string image |> to_hex)
         ]
   | Docker_oneshot { keeper_name; pid; started_ms; seq } ->
     spell

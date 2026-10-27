@@ -57,7 +57,7 @@ let source binding = binding.source
 let original_recorder binding = binding.activation
 let request_id binding = binding.entry.request_id
 let status_invocation binding = binding.invocation
-let sha256 content = Digestif.SHA256.(digest_string content |> to_hex)
+let sha256 content = Agent_core_sha256.(digest_string content |> to_hex)
 
 type continuation_status =
   | Not_a_composition

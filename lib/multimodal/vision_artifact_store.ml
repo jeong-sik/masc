@@ -6,7 +6,7 @@ let of_string s = s
 
 (* Content hash = SHA-256 hex of the raw bytes. The full digest is kept rather
    than a truncated prefix because this is an identity, not a display label. *)
-let hash (raw : string) : handle = Digestif.SHA256.(digest_string raw |> to_hex)
+let hash (raw : string) : handle = Agent_core_sha256.(digest_string raw |> to_hex)
 
 (* A handle is the lowercase-hex SHA-256 of stored bytes: exactly 64 hex chars.
    [store] only ever produces such strings, but [of_string] re-wraps arbitrary

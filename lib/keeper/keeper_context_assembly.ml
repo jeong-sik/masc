@@ -35,7 +35,7 @@ type t =
   ; system_prompt : system_prompt option
   }
 
-let sha256 text = Digestif.SHA256.(digest_string text |> to_hex)
+let sha256 text = Agent_core_sha256.(digest_string text |> to_hex)
 
 let assemble ~dynamic_context_partition ~existing_extra_system_context ~blocks =
   let buffer = Buffer.create 128 in

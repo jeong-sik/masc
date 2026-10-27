@@ -497,7 +497,7 @@ let submitted_evidence_item_of_yojson = function
        let* sha256 = string_field "sha256" in
        let* () = match collaboration_reference reference with
          | Some _ -> Ok () | None -> Error "invalid collaboration reference" in
-       if not (String.equal sha256 Digestif.SHA256.(digest_string content |> to_hex)) then
+       if not (String.equal sha256 Agent_core_sha256.(digest_string content |> to_hex)) then
          Error "submitted collaboration digest mismatch"
        else (match Yojson.Safe.from_string content with
          | `Assoc _ -> Ok (Evidence_collaboration {reference; content; sha256})

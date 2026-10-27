@@ -150,7 +150,7 @@ let receipt_of_tool_result ~tool_use_id ~content =
     | Tool_output.Decoded reference ->
       reference.Tool_output.bytes, reference.Tool_output.sha256
     | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
-      String.length content, Digestif.SHA256.(digest_string content |> to_hex)
+      String.length content, Agent_core_sha256.(digest_string content |> to_hex)
   in
   Keeper_skill_activation_ledger.{ tool_use_id; content_bytes; content_sha256 }
 ;;
@@ -1270,7 +1270,7 @@ let assemble_hooks
                    (sha256 of the sanitized rendered system prompt) —
                    the digest the prompt store already records. *)
                 let sha256_hex text =
-                  Digestif.SHA256.(digest_string text |> to_hex)
+                  Agent_core_sha256.(digest_string text |> to_hex)
                 in
                 let keeper_instruction_blocks =
                   match Inference_utils.sanitize_text_utf8 base_system_prompt with

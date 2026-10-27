@@ -845,7 +845,7 @@ let test_first_loss_retains_unproven_effects mode () =
     let marker_directory = Filename.concat (Filename.concat
         (Common.masc_dir_from_base_path ~base_path) "keeper_msg_requests") "prepared_continuations" in
     let marker_path = Filename.concat marker_directory
-        (Digestif.SHA256.(digest_string request_id |> to_hex) ^ ".json") in
+        (Agent_core_sha256.(digest_string request_id |> to_hex) ^ ".json") in
     let marker_bytes = read marker_path in
     let reject = function
       | Error (Journal.Replay_not_proven id) -> check string "exact unresolved node" "interrupted" (Plan.Node_id.to_string id)
@@ -1516,7 +1516,7 @@ let test_pending_marker_retirement_settlement () =
     ignore (await base_path submission);
     let directory = Filename.concat (Filename.concat
         (Common.masc_dir_from_base_path ~base_path) "keeper_msg_requests") "prepared_continuations" in
-    let filename = Digestif.SHA256.(digest_string submission.request.request_id |> to_hex) ^ ".json" in
+    let filename = Agent_core_sha256.(digest_string submission.request.request_id |> to_hex) ^ ".json" in
     let path = Filename.concat directory filename in
     let expected = Fs_compat.read_private_jsonl_durable_locked_result path ~after:None
         |> require "actual terminal marker snapshot" in

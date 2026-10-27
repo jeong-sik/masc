@@ -132,12 +132,12 @@ let fragment_row_json (line,value) = pair_json (`Int line) (result_json fragment
    Checkpoint messages are taken in the form the checkpoint persists them:
    a live checkpoint read after a restart holds only that form. *)
 let digest_of encode rows =
-  Digestif.SHA256.to_hex (Digestif.SHA256.get (List.fold_left (fun context row ->
+  Agent_core_sha256.to_hex (Agent_core_sha256.get (List.fold_left (fun context row ->
     let bytes=Yojson.Safe.to_string (encode row) in
     let length=Bytes.create 8 in
     Bytes.set_int64_be length 0 (Int64.of_int (String.length bytes));
-    Digestif.SHA256.feed_string (Digestif.SHA256.feed_bytes context length) bytes)
-    Digestif.SHA256.empty rows))
+    Agent_core_sha256.feed_string (Agent_core_sha256.feed_bytes context length) bytes)
+    Agent_core_sha256.empty rows))
 let span_of encode rows = {Held.count=List.length rows;digest=digest_of encode rows}
 let held_prefix ~changed encode (span:Held.span) rows =
   if List.length rows<span.count then refuse changed

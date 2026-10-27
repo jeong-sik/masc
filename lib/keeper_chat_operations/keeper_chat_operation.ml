@@ -219,7 +219,7 @@ let canonical_json_string value =
   |> Result.map_error canonical_json_error_to_string
 ;;
 
-let sha256 value = Digestif.SHA256.(digest_string value |> to_hex)
+let sha256 value = Agent_core_sha256.(digest_string value |> to_hex)
 
 let execution_digest input =
   canonical_json_string input |> Result.map sha256

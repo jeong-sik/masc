@@ -30,7 +30,7 @@ let source_json (source : source) = `Assoc
   ["id", `String source.id; "kind", `String (kind_name source.kind);
    "text", `String source.text]
 let source_key source =
-  source.id, Digestif.SHA256.(digest_string (Yojson.Safe.to_string (source_json source)) |> to_hex)
+  source.id, Agent_core_sha256.(digest_string (Yojson.Safe.to_string (source_json source)) |> to_hex)
 let source_keys sources = List.map source_key sources |> List.sort_uniq Stdlib.compare
 module Keys = Set.Make (struct type t = string * string let compare = Stdlib.compare end)
 let subset left right = Keys.subset (Keys.of_list left) (Keys.of_list right)
@@ -150,7 +150,7 @@ let output_schema = `Assoc
    "required", `List [`String "briefing"]; "additionalProperties", `Bool false]
 
 let contract ~template =
-  Digestif.SHA256.(digest_string
+  Agent_core_sha256.(digest_string
     (Yojson.Safe.to_string (`List [`String template; output_schema])) |> to_hex)
 
 let exact_fields what names = function

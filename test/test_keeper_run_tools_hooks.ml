@@ -162,7 +162,7 @@ let test_prompt_metrics_follow_request_tool_projection () =
   let check_metric text =
     check (option (float 0.)) "world bytes describe returned request body"
       (Some (Float.of_int (String.length text))) (world_bytes ());
-    let hex = Digestif.SHA256.(digest_string (system_prompt ^ text ^ user_message) |> to_hex) in
+    let hex = Agent_core_sha256.(digest_string (system_prompt ^ text ^ user_message) |> to_hex) in
     let expected = Int32.to_float (Int32.of_string ("0x" ^ String.sub hex 0 8)) in
     check (option (float 0.)) "instruction hash describes returned request body"
       (Some expected) (instruction_hash ());
@@ -1943,7 +1943,7 @@ let wire_receipt tool_use_id =
   Masc.Keeper_skill_activation_ledger.
     { tool_use_id
     ; content_bytes = 4
-    ; content_sha256 = Digestif.SHA256.(digest_string "body" |> to_hex)
+    ; content_sha256 = Agent_core_sha256.(digest_string "body" |> to_hex)
     }
 ;;
 
@@ -2148,12 +2148,12 @@ let test_projection_adoption_preserves_durable_projection_fields () =
    equals what the skill served -- which is what lets the ledger record the
    delivery instead of leaving it SERVED ONLY forever. *)
 let served_body = String.concat "\n" (List.init 400 (fun i -> Printf.sprintf "line %d of the skill body" i))
-let served_sha = Digestif.SHA256.(digest_string served_body |> to_hex)
+let served_sha = Agent_core_sha256.(digest_string served_body |> to_hex)
 
 let blob_marker_for body =
   match
     Tool_output.make_artifact_ref
-      ~sha256:Digestif.SHA256.(digest_string body |> to_hex)
+      ~sha256:Agent_core_sha256.(digest_string body |> to_hex)
       ~bytes:(String.length body)
       ~preview:"preview"
       ~mime:"text/plain"
@@ -2214,7 +2214,7 @@ let test_receipt_reads_plain_content () =
     let bytes, sha = receipt_bytes_sha receipt in
     check int "bytes are the content's own" (String.length "a short inline result") bytes;
     check string "sha is the content's own"
-      Digestif.SHA256.(digest_string "a short inline result" |> to_hex) sha
+      Agent_core_sha256.(digest_string "a short inline result" |> to_hex) sha
   | _ -> fail "expected exactly one receipt"
 ;;
 

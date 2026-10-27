@@ -533,7 +533,7 @@ let validate_operation operation =
       { operation with revision = ack.prior_revision
       ; updated_at = ack.prior_updated_at; phase } in
     let digest_of record =
-      Digestif.SHA256.(to_hex (digest_string (Yojson.Safe.to_string (to_json record)))) in
+      Agent_core_sha256.(to_hex (digest_string (Yojson.Safe.to_string (to_json record)))) in
     let candidates =
       [ replaced (Finalized ack.finalization)
       ; replaced (Owner_absent

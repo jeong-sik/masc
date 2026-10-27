@@ -7,7 +7,7 @@ let ok = function Ok value -> value | Error cause -> fail (Journal.error_message
 let store_ok = function Ok value -> value | Error cause -> fail (Store.error_to_string cause)
 let contents path = In_channel.with_open_bin path In_channel.input_all
 let write path text = Out_channel.with_open_bin path (fun out -> output_string out text)
-let digest text = Digestif.SHA256.(digest_string text |> to_hex)
+let digest text = Agent_core_sha256.(digest_string text |> to_hex)
 let with_db path f =
   let db = Sqlite3.db_open path in
   Fun.protect ~finally:(fun () -> check bool "database closed" true (Sqlite3.db_close db)) (fun () -> f db)

@@ -1989,8 +1989,8 @@ let test_measurement_receipt_codec_and_transition () =
       let integrity_sha256 =
         `Assoc payload
         |> Yojson.Safe.to_string
-        |> Digestif.SHA256.digest_string
-        |> Digestif.SHA256.to_hex
+        |> Agent_core_sha256.digest_string
+        |> Agent_core_sha256.to_hex
       in
       `Assoc (payload @ [ "integrity_sha256", `String integrity_sha256 ])
       |> Yojson.Safe.to_string
@@ -3151,7 +3151,7 @@ let test_exact_anthropic_frozen_artifact_parity () =
   check
     string
     "measured generation receipt binds the actual wire bytes"
-    Digestif.SHA256.(to_hex (digest_string measured_body))
+    Agent_core_sha256.(to_hex (digest_string measured_body))
     (EO.receipt_request_body_sha256 measured_success.receipt);
   let unmeasured_json = Yojson.Safe.from_string unmeasured_body in
   let measured_json = Yojson.Safe.from_string measured_body in

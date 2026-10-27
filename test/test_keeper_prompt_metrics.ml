@@ -262,7 +262,7 @@ let test_ctx_composition_splits_final_provider_input_bytes () =
   let prompt_block block text =
     { Turn_record.block
     ; bytes = String.length text
-    ; digest = Digestif.SHA256.(digest_string text |> to_hex)
+    ; digest = Agent_core_sha256.(digest_string text |> to_hex)
     }
   in
   let tool =

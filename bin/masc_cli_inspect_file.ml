@@ -41,7 +41,7 @@ let run ~base_path ~path =
         | Ok (Some captured) ->
           let bytes = captured.content in
           source := `Assoc ["path", `String path; "bytes", `Int (String.length bytes);
-            "sha256", `String Digestif.SHA256.(digest_string bytes |> to_hex)];
+            "sha256", `String Agent_core_sha256.(digest_string bytes |> to_hex)];
           let max_image_bytes = Env_config_keeper.KeeperVision.max_image_bytes () in
           if Verification_media_inspection.is_presentation path then
             Verification_media_inspection.presentation_result

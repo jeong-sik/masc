@@ -81,7 +81,7 @@ let spec_json s = `Assoc
   ; "mode",`String (Exec_ssh_protocol.mode_to_string s.mode)
   ; "network_policy_sha256",digest_json s.network_policy_sha256 ]
 
-let hash value = Digestif.SHA256.(digest_string value |> to_hex)
+let hash value = Agent_core_sha256.(digest_string value |> to_hex)
 let spec_sha256 s = hash ("masc-endpoint-job-spec-v1\000" ^ Yojson.Safe.to_string (spec_json s))
 
 type binding =

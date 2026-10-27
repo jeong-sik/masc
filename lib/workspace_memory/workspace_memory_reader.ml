@@ -88,7 +88,7 @@ let compute_digest (entries : Workspace_memory_log.change_entry list) =
         (Workspace_memory_log.Change entry))
     |> String.concat "\n"
   in
-  Digestif.SHA256.(digest_string canonical |> to_hex)
+  Agent_core_sha256.(digest_string canonical |> to_hex)
 
 let slice_for_pending
     (p : pending_delivery)

@@ -141,7 +141,7 @@ let failure_to_yojson failure =
 let ask ~timeout_sec ?clock ~state ~questions { endpoint; model; api_key } =
   let request_json = Typesafeai_types.request_to_yojson ~model ~state ~questions in
   let body = Yojson.Safe.to_string request_json in
-  let request_body_sha256 = Digestif.SHA256.(digest_string body |> to_hex) in
+  let request_body_sha256 = Agent_core_sha256.(digest_string body |> to_hex) in
   let headers =
     [ "authorization", "Bearer " ^ api_key
     ; "content-type", "application/json"

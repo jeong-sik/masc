@@ -105,7 +105,7 @@
   mirage-crypto-rng
   mirage-crypto-rng.unix
   cstruct
-  digestif
+  masc.agent_core.digest
   eqaf
   ocaml-protoc-plugin
   masc_proto

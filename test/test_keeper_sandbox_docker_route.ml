@@ -2010,7 +2010,7 @@ fi
 |} ^ fake_docker_echo_script
 ;;
 
-module Output_sha = Digestif.SHA256
+module Output_sha = Agent_core_sha256
 
 let write_large_execute_source ~path ~stream ~private_token ~combined =
   let block = String.make 4095 (if stream = `Stdout then 'a' else 'b') ^ "\n" in

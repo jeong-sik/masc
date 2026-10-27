@@ -228,7 +228,7 @@ let prompt_segment_metrics_of_sanitized_text (text : string) : prompt_segment_me
     fingerprint =
       (if text = ""
        then None
-       else Some Digestif.SHA256.(digest_string text |> to_hex));
+       else Some Agent_core_sha256.(digest_string text |> to_hex));
   }
 
 let build_prompt_metrics_with_sanitizer ~sanitize
@@ -259,7 +259,7 @@ let build_prompt_metrics_with_sanitizer ~sanitize
     |> Yojson.Safe.to_string
   in
   {
-    fingerprint = Digestif.SHA256.(digest_string fingerprint_input |> to_hex);
+    fingerprint = Agent_core_sha256.(digest_string fingerprint_input |> to_hex);
     total_bytes =
       (system_prompt_metrics.bytes
        + dynamic_context_metrics.bytes
@@ -429,7 +429,7 @@ let build_ctx_segments
       { bytes = tool_schema_bytes
       ; fingerprint =
           Some
-            Digestif.SHA256.(
+            Agent_core_sha256.(
               digest_string (String.concat "\n" tool_schema_json) |> to_hex)
       };
   List.iter

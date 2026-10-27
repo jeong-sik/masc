@@ -9737,7 +9737,7 @@ let test_workspace_memory_read_dispatch () =
       let module Ledger = Masc.Workspace_memory_ledger in
       let pending owner claim : Ledger.pending_fact =
         { fact = Ledger.Ordinary { keeper_id = owner;
-            claim_sha256 = Digestif.SHA256.(digest_string claim |> to_hex) }; claim } in
+            claim_sha256 = Agent_core_sha256.(digest_string claim |> to_hex) }; claim } in
       let writer = pending "writer" "PDF completed" in
       let reviewer = pending "reviewer" "PDF incomplete" in
       let selected = [writer; reviewer] in
@@ -10435,7 +10435,7 @@ let test_peer_artifact_materializes_exact_binary () =
       | [reference] -> reference | _ -> fail "delegation lost reference" in
     check int "model-visible export preserves complete binary size" (String.length bytes) reference.blob.bytes;
     check string "model-visible export preserves complete binary digest"
-      Digestif.SHA256.(digest_string bytes |> to_hex) reference.blob.sha256;
+      Agent_core_sha256.(digest_string bytes |> to_hex) reference.blob.sha256;
     let write args = Masc.Keeper_tool_filesystem_runtime.handle_file_write_with_outcome
         ~turn_sandbox_factory:None ~config ~meta:peer ~publication_recovery:recovery ~args () in
     let invoke path = Masc.Keeper_peer_artifact.handle ~config ~meta:peer

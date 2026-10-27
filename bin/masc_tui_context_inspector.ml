@@ -575,7 +575,7 @@ let decode_part (key : part_key) = function
     else if
       not
         (String.equal
-           Digestif.SHA256.(digest_string text |> to_hex)
+           Agent_core_sha256.(digest_string text |> to_hex)
            part.sha256)
     then Error "provider-input part does not hash to its SHA-256"
     else (

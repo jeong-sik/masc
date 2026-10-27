@@ -696,7 +696,7 @@ let test_actual_followup_report_keeps_unobserved_and_bad_artifacts () =
   let resources=Masc.Workspace.get_tasks_raw config and resources2=Masc.Workspace.get_tasks_raw config2 in
   Log.set_level Log.Info;
   let packet_dir=Filename.temp_dir ~temp_dir:base "comparison-packet-" "" in
-  let sha bytes=Digestif.SHA256.(to_hex (digest_string bytes)) in
+  let sha bytes=Agent_core_sha256.(to_hex (digest_string bytes)) in
   let copy_logs label directory=Array.to_list (Sys.readdir directory)
     |> List.filter (fun name -> not (Sys.is_directory (Filename.concat directory name))) |> List.mapi (fun index name ->
     let body=In_channel.with_open_bin (Filename.concat directory name) In_channel.input_all in

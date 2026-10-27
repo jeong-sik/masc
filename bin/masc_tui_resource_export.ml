@@ -4,7 +4,7 @@ type t = { report : Catalog.report; source : string }
 let create ~report ~source =
   let body = report.Catalog.revision.body in
   if String.length source <> body.bytes
-     || not (String.equal Digestif.SHA256.(to_hex (digest_string source)) body.sha256)
+     || not (String.equal Agent_core_sha256.(to_hex (digest_string source)) body.sha256)
   then Error "The retained source does not match this report revision"
   else Ok { report; source }
 

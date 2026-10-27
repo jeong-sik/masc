@@ -35,7 +35,7 @@ let private_tmpdir t = Filename.concat t.config_home "tmp"
 let account_revision t = t.account_revision
 let ( let* ) = Result.bind
 let unavailable detail = Error (State_unavailable detail)
-let digest text = Digestif.SHA256.(to_hex (digest_string text))
+let digest text = Agent_core_sha256.(to_hex (digest_string text))
 
 let check_directory_stat ~private_ (stat : Unix.stats) =
   if stat.Unix.st_kind <> Unix.S_DIR || stat.Unix.st_uid <> Unix.geteuid ()

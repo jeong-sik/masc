@@ -56,7 +56,7 @@ let request = R.judge_request ~endpoint:"https://judge.invalid/eval" ~model:"con
 let evaluated answers : Masc.Typesafeai_client.evaluated =
   { response = { model = "actual-judge"; answers; usage = None }
   ; destination = { destination_uri = request.endpoint; model = request.model }
-  ; request_body_sha256 = Digestif.SHA256.(to_hex (digest_string "synthetic request"))
+  ; request_body_sha256 = Agent_core_sha256.(to_hex (digest_string "synthetic request"))
   ; passed_over = []
   }
 
@@ -89,7 +89,7 @@ let question = R.Generated generated_question
 
 let report samples : R.t =
     { schema = R.schema; provenance = R.Synthetic; run_id = "synthetic-test"; started_at = "2026-09-21T00:00:00Z"
-    ; input_path = "synthetic.json"; input_sha256 = Digestif.SHA256.(to_hex (digest_string "synthetic"))
+    ; input_path = "synthetic.json"; input_sha256 = Agent_core_sha256.(to_hex (digest_string "synthetic"))
     ; output_path = "report.json"; config_revision = "synthetic"
     ; binary_commit = None; executable_sha256 = None
     ; samples

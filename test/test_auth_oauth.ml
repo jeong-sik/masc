@@ -142,7 +142,7 @@ let test_dual_auth_code_and_refresh_lifecycle () =
               Filename.concat
                 base_path
                 (".masc/auth/oauth/clients/"
-                 ^ Digestif.SHA256.(digest_string client.client_id |> to_hex)
+                 ^ Agent_core_sha256.(digest_string client.client_id |> to_hex)
                  ^ ".json")
             in
             check

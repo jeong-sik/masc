@@ -11,21 +11,9 @@ let create ~root =
       trim_separator (String.sub root 0 (length - 1)) else root in
   { root = trim_separator root; root_parent_pending = true; sequence_mutex = Mutex.create (); sequences = Hashtbl.create 4 }
 let root t = t.root
-(* A single Digestif C feed retains this domain's runtime lock for its entire
-   input, even when its OCaml caller is a systhread. Large original requests
-   therefore prevent the HTTP scheduler from reacquiring that lock. This is
-   an internal feed buffer size, not a request or work allowance. *)
-let digest_feed_bytes = 64 * 1024
-let digest bytes =
-  let length = String.length bytes in
-  let rec feed context offset =
-    if offset = length then Digestif.SHA256.(to_hex (get context))
-    else
-      let count = min digest_feed_bytes (length - offset) in
-      feed (Digestif.SHA256.feed_string context ~off:offset ~len:count bytes)
-        (offset + count)
-  in
-  feed Digestif.SHA256.empty 0
+(* Agent_core_sha256 feeds bounded slices, so hashing a large original request
+   answers stop-the-world requests between slices (RFC-0474 L2). *)
+let digest bytes = Agent_core_sha256.(to_hex (digest_string bytes))
 let protect f =
   try f () with
   | Sys_error message -> Error message

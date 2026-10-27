@@ -1339,7 +1339,7 @@ let test_context_only_api_holes case () =
       (List.length ids) (List.length (List.sort_uniq Int.compare ids));
     let current_requests = List.drop previous_calls !requests in
     check (list (pair int string)) "every observed HTTP call binds the exact body the server received"
-      (List.map (fun body -> String.length body,Digestif.SHA256.(digest_string body |> to_hex)) current_requests)
+      (List.map (fun body -> String.length body,Agent_core_sha256.(digest_string body |> to_hex)) current_requests)
       (List.map (fun (_,bytes,sha256) -> bytes,sha256) entered);
     let phases = List.map (fun (event : Http.event) -> event.call_id,
       (match event.phase with

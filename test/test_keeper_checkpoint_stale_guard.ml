@@ -1834,8 +1834,8 @@ let test_pooled_saves_and_loads_derive_the_digest_of_the_file () =
   let digest_on_disk () =
     Filename.concat session_dir (session_id ^ ".json")
     |> Fs_compat.load_file
-    |> Digestif.SHA256.digest_string
-    |> Digestif.SHA256.to_hex
+    |> Agent_core_sha256.digest_string
+    |> Agent_core_sha256.to_hex
   in
   save_ok ~session_dir
     (make_checkpoint ~session_id ~turn_count:3 ~marker:"seed")

@@ -41,7 +41,7 @@ let directory ~base_path =
 ;;
 
 let pending_directory ~base_path = Filename.concat (directory ~base_path) "pending"
-let filename request_id = Digestif.SHA256.(digest_string request_id |> to_hex) ^ ".json"
+let filename request_id = Agent_core_sha256.(digest_string request_id |> to_hex) ^ ".json"
 let path ~base_path request_id = Filename.concat (pending_directory ~base_path) (filename request_id)
 
 let to_json (obligation : obligation) = `Assoc

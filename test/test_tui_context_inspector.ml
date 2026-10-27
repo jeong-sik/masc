@@ -195,7 +195,7 @@ let test_malformed_row_is_not_dropped () =
   check bool "malformed row fails the whole reading" true
     (Result.is_error (Inspector.decode_turn_records json))
 
-let digest text = Digestif.SHA256.(digest_string text |> to_hex)
+let digest text = Agent_core_sha256.(digest_string text |> to_hex)
 
 let wire =
   Llm_provider.Request_wire_observer.observation

@@ -16,7 +16,7 @@ let error_message = function
   | Commit_uncertain _ -> "application inputs may have been saved; reread before retrying"
 let root ~base_path = Filename.concat (Common.masc_dir_from_base_path ~base_path) "artifact_app_data"
 let filename ~actor (target : Data.target) =
-  let owner = Digestif.SHA256.(to_hex (digest_string actor)) in
+  let owner = Agent_core_sha256.(to_hex (digest_string actor)) in
   target.artifact_id ^ "-r" ^ string_of_int target.revision ^ "-" ^ owner ^ ".json"
 let protect f = try f () with
   | Sys_error message -> Error (Unavailable message)

@@ -41,15 +41,15 @@ let test_context_message_schema_is_part_of_the_resume_digest () =
       ; "tools", `List []
       ]
     |> Yojson.Safe.to_string
-    |> Digestif.SHA256.digest_string
-    |> Digestif.SHA256.to_hex
+    |> Agent_core_sha256.digest_string
+    |> Agent_core_sha256.to_hex
   in
   Alcotest.(check string)
     "context projection participates in the durable digest"
     expected
     empty_surface;
   let bare_tool_list =
-    Digestif.SHA256.digest_string "[]" |> Digestif.SHA256.to_hex
+    Agent_core_sha256.digest_string "[]" |> Agent_core_sha256.to_hex
   in
   Alcotest.(check bool)
     "a tools-only digest cannot resume the new projection"

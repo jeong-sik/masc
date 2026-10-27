@@ -59,7 +59,7 @@ let metrics_dir (config : config) =
 
 (** Get agent-specific metrics directory *)
 let agent_metrics_dir config agent_id =
-  Filename.concat (metrics_dir config) Digestif.SHA256.(digest_string agent_id |> to_hex)
+  Filename.concat (metrics_dir config) Agent_core_sha256.(digest_string agent_id |> to_hex)
 
 type read_error =
   | Invalid_agent_id of string

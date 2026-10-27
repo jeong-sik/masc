@@ -40,7 +40,7 @@ let candidate_to_json row =
 
 let candidate_id ~generation row : Keeper_memory_os_current.explicit_candidate_id =
   {queue_generation=generation; request_id=row.request_id; sequence=row.sequence;
-   input_sha256=Digestif.SHA256.(digest_string
+   input_sha256=Agent_core_sha256.(digest_string
      (Yojson.Safe.to_string (candidate_to_json row)) |> to_hex)}
 
 let candidate_ids batch = List.map (candidate_id ~generation:batch.generation) batch.rows

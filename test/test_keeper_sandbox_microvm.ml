@@ -2848,7 +2848,7 @@ let test_preboot_refusals_retain_durable_identity_and_recheck_shim () =
        refuses the boot. A subsequent Boot must invalidate that verification. *)
     Out_channel.with_open_bin (Filename.concat shim_dir M.shim_sidecar_name)
       (fun channel -> output_string channel
-        (Digestif.SHA256.(to_hex (digest_string shim_contents)) ^ "  masc-exec-shim\n"));
+        (Agent_core_sha256.(to_hex (digest_string shim_contents)) ^ "  masc-exec-shim\n"));
     (* Whole seconds round-trip through utimes on both Linux and macOS. *)
     let timestamp = floor (Unix.stat shim).Unix.st_mtime in
     Unix.utimes shim timestamp timestamp;
@@ -3035,7 +3035,7 @@ let test_the_shim_sidecar_decides_the_boot () =
   let write path content = ignore (Fs_compat.save_file_atomic path content) in
   write binary "#!/bin/sh\necho shim\n";
   let digest =
-    Digestif.SHA256.(to_hex (digest_string "#!/bin/sh\necho shim\n"))
+    Agent_core_sha256.(to_hex (digest_string "#!/bin/sh\necho shim\n"))
   in
   (match M.verify_shim_sidecar ~dir with
    | Ok M.Shim_unverified -> ()

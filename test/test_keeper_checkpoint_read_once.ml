@@ -75,7 +75,7 @@ let with_session f =
 let canonical_path session_dir = Store.agent_core_checkpoint_path ~session_dir ~session_id:"session"
 let read_file path = In_channel.with_open_bin path In_channel.input_all
 let write_file path bytes = Out_channel.with_open_bin path (fun ch -> output_string ch bytes)
-let one_shot_sha256 bytes = Digestif.SHA256.(to_hex (digest_string bytes))
+let one_shot_sha256 bytes = Agent_core_sha256.(to_hex (digest_string bytes))
 
 let save_plain ~session_dir checkpoint =
   match Store.save_agent_core_classified ~history_retained:(history_retained ()) ~session_dir checkpoint with

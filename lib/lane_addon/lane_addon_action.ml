@@ -46,7 +46,7 @@ let rec canonical = function
         | _ -> Error "invalid JSON integer"
        with Yojson.Json_error message -> Error message)
   | (`Null | `Bool _ | `Int _ | `Float _ | `String _) as value -> Ok value
-let input_digest json = Digestif.SHA256.(to_hex (digest_string (Yojson.Safe.to_string json)))
+let input_digest json = Agent_core_sha256.(to_hex (digest_string (Yojson.Safe.to_string json)))
 let context instance_id = `Assoc ["instance_id", `String instance_id; "incarnation", `String instance_id]
 let arguments ~instance_id ~request_id ~action = `Assoc ["context", context instance_id;
   "request_id", `String request_id; "action", action]

@@ -7,7 +7,7 @@ type ledger = string
 type briefing = string
 type t = Ledger of ledger | Briefing of briefing
 
-let sha256 bytes = Digestif.SHA256.(digest_string bytes |> to_hex)
+let sha256 bytes = Agent_core_sha256.(digest_string bytes |> to_hex)
 let digest = function Ledger digest | Briefing digest -> digest
 let kind = function Ledger _ -> "ledger" | Briefing _ -> "briefing"
 

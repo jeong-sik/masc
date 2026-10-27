@@ -248,7 +248,7 @@ let record_bound_nested ~config bound ~invocation ~tool_name ~scope ~reference =
 
 let evidence ~relative_path contents =
   let bytes = String.length contents in
-  let sha256 = Digestif.SHA256.(digest_string contents |> to_hex) in
+  let sha256 = Agent_core_sha256.(digest_string contents |> to_hex) in
   match relative_path with
   | None -> Ledger.Skill_body { bytes; sha256 }
   | Some relative_path ->

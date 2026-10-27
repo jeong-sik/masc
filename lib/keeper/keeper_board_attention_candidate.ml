@@ -781,8 +781,8 @@ let quarantine_id
      ; Printf.sprintf "%.17g" quarantined_at
      ]
      @ provenance)
-  |> Digestif.SHA256.digest_string
-  |> Digestif.SHA256.to_hex
+  |> Agent_core_sha256.digest_string
+  |> Agent_core_sha256.to_hex
   |> ( ^ ) "ba-quarantine-"
 ;;
 

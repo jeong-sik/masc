@@ -50,7 +50,7 @@
   masc.auth
   masc.http_client
   masc_cli_keeper_create
-  digestif
+   masc.agent_core.digest
   masc_tui_editor
   masc.crypto_rng
   masc.masc_random_id
@@ -640,7 +640,7 @@
  (name masc_tui_resource_catalog)
  (wrapped false)
  (modules masc_tui_resource_catalog)
- (libraries masc_tui_mcp masc masc.tool_types masc.time_codec unix yojson digestif))
+ (libraries masc_tui_mcp masc masc.tool_types masc.time_codec unix yojson  masc.agent_core.digest))
 
 (library
  (name masc_tui_artifact_checks)
@@ -676,7 +676,7 @@
  (name masc_tui_resource_diagrams)
  (wrapped false)
  (modules masc_tui_resource_diagrams)
- (libraries masc_tui_text_block masc_tui_resource_images masc_tui_mcp masc_tui_image_preview masc digestif))
+ (libraries masc_tui_text_block masc_tui_resource_images masc_tui_mcp masc_tui_image_preview masc  masc.agent_core.digest))
 
 (library
  (name masc_tui_acting)
@@ -1184,7 +1184,7 @@
  ; called from this side -- the inspector reads blobs over HTTP, so a
  ; direct read would work only when the TUI runs on the server's host.
  (libraries
-  digestif
+   masc.agent_core.digest
   masc
   masc.agent_core.llm_provider
   masc.masc_tool_blob_store
@@ -1752,7 +1752,7 @@
   ;; workspace identity composes the local masc root with the function the
   ;; server reports its own root from.
   masc.config masc.keeper_chat_operations masc_tui_message_input masc_tui_play_room masc_tui_collab masc_tui_evidence_picture
-  masc_tui_machine_activity masc.machine_configuration masc_tui_exact_activity masc_tui_memory_usage masc_tui_lane_inventory masc_tui_runtime_config_edit masc_tui_runtime_config_receipt masc_tui_runtime_evidence masc.masc_core masc.masc_candle masc_tui_identity_model masc_tui_voice_wizard_session masc.keeper_registry masc_tui_config masc_tui_account_login digestif mtime.clock.os masc_tui_command masc_tui_features masc_tui_play_card masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
+  masc_tui_machine_activity masc.machine_configuration masc_tui_exact_activity masc_tui_memory_usage masc_tui_lane_inventory masc_tui_runtime_config_edit masc_tui_runtime_config_receipt masc_tui_runtime_evidence masc.masc_core masc.masc_candle masc_tui_identity_model masc_tui_voice_wizard_session masc.keeper_registry masc_tui_config masc_tui_account_login  masc.agent_core.digest mtime.clock.os masc_tui_command masc_tui_features masc_tui_play_card masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
   ;; [threshold_cols] is the width two panes need: the Board read layout is
   ;; decided here so the footer and the frame cannot disagree about it.
   masc_tui_roster_pane
@@ -1897,7 +1897,7 @@
  (name masc_tui_resource_export)
  (wrapped false)
  (modules masc_tui_resource_export)
- (libraries masc_tui_resource_catalog masc masc.masc_tool_blob_store masc.fs_compat digestif uri eio unix))
+ (libraries masc_tui_resource_catalog masc masc.masc_tool_blob_store masc.fs_compat  masc.agent_core.digest uri eio unix))
 
 (library
  (name masc_tui_resource_document)
@@ -2569,7 +2569,7 @@
   masc_tui_press
   masc_tui_pick_list
   masc_tui_usage_trend
-  digestif
+   masc.agent_core.digest
   masc.string_util
   masc.keeper_runtime
   masc.voice_wizard
@@ -2872,7 +2872,7 @@
  (name masc_tui_image_preview)
  (wrapped false)
  (modules masc_tui_image_preview)
- (libraries masc_tui_image_payload masc_tui_keeper_chat_projection masc_tui_image_ref masc_tui_markdown masc.masc_tool_blob_store digestif yojson uri))
+ (libraries masc_tui_image_payload masc_tui_keeper_chat_projection masc_tui_image_ref masc_tui_markdown masc.masc_tool_blob_store  masc.agent_core.digest yojson uri))
 
 (library
  (name masc_tui_link_label)
@@ -2928,7 +2928,7 @@
  (name masc_tui_evidence_picture)
  (wrapped false)
  (modules masc_tui_evidence_picture)
- (libraries masc masc_tui_graphics masc_tui_portrait_view digestif yojson))
+ (libraries masc masc_tui_graphics masc_tui_portrait_view  masc.agent_core.digest yojson))
 
 ;; The links an operator evidence item carries, parsed into a closed variant.
 (library
@@ -2941,7 +2941,7 @@
  (name masc_tui_evidence_file)
  (wrapped false)
  (modules masc_tui_evidence_file)
- (libraries masc.fs_compat masc.masc_random_id masc_process base64 digestif yojson eio unix))
+ (libraries masc.fs_compat masc.masc_random_id masc_process base64  masc.agent_core.digest yojson eio unix))
 
 ;; The "EVIDENCE CONTENT" rows of the awaiting-verification task detail, with
 ;; the area a picture reserves among them. Apart from the pane so the row
@@ -3060,7 +3060,7 @@
  (package masc)
  (libraries masc masc_core masc.prompt_registry masc.runtime masc.server masc.config masc.config_dir_resolver
   masc.masc_eio_context masc.http_client masc.masc_tool_blob_store
-  masc.agent_core masc.agent_core.llm_provider masc.masc_log masc.fs_compat digestif eio eio_main yojson))
+  masc.agent_core masc.agent_core.llm_provider masc.masc_log masc.fs_compat  masc.agent_core.digest eio eio_main yojson))
 
 (library
  (name masc_tui_input_decoder)
@@ -3157,7 +3157,7 @@
  (package masc)
  (libraries masc masc.runtime masc.server masc.config masc.config_dir_resolver
   masc.masc_eio_context masc.http_client masc.masc_log masc.fs_compat
-  masc.agent_core masc.prompt_registry masc.time_compat masc.masc_types digestif eio eio_main yojson))
+  masc.agent_core masc.prompt_registry masc.time_compat masc.masc_types  masc.agent_core.digest eio eio_main yojson))
 
 (executable
  (name masc_msx_addon_worker)
@@ -3239,7 +3239,7 @@
  (name masc_tui_board_reader)
  (wrapped false)
  (modules masc_tui_board_reader)
- (libraries masc digestif masc_tui_fetched masc_tui_detail_reading
+ (libraries masc  masc.agent_core.digest masc_tui_fetched masc_tui_detail_reading
   masc_tui_text_block masc_tui_message_layout masc_tui_markdown_theme
   masc_tui_artifact_html masc_tui_artifact_html_rows))
 

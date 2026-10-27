@@ -1,7 +1,7 @@
 open Result_syntax
 module Event = Execution_event
 module Codec = Execution_codec_executor
-module Sha256 = Digestif.SHA256
+module Sha256 = Agent_core_sha256
 
 let reverse_append_cooperatively values tail =
   let rec loop reversed = function

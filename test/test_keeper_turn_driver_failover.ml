@@ -1056,7 +1056,7 @@ let h5_fact_audio = "h5-audio-only-fact::the vault code is 4172"
 let h5_fact_document = "h5-document-only-fact::the ledger year is 1987"
 
 let h5_source_sha256_prefix bytes =
-  String.sub (Digestif.SHA256.to_hex (Digestif.SHA256.digest_string bytes)) 0 16
+  String.sub (Agent_core_sha256.to_hex (Agent_core_sha256.digest_string bytes)) 0 16
 
 let h5_text_of_blocks blocks =
   blocks

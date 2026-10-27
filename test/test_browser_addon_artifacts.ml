@@ -19,7 +19,7 @@ let descriptor_ingestion () =
     Fun.protect ~finally:(fun () -> Unix.close source) (fun () ->
       Unix.rename path (path ^ ".original");write path "replacement";
       let store=Tool_blob_store.create ~base_path:root in
-      let digest=Digestif.SHA256.(to_hex (digest_string bytes)) in
+      let digest=Agent_core_sha256.(to_hex (digest_string bytes)) in
       let wrong_digest=String.make 64 '0' in
       check bool "a mismatched grant cannot publish another digest" true
         (try ignore (Tool_blob_store.put_file_descriptor_durable_blocking store ~source

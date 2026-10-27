@@ -226,7 +226,7 @@ let test_changed_owned_source () = with_record Direct (fun config record ->
     (Result.is_error (Keeper_tool_result_file.read ~config ~keeper (target record))))
 let test_page_failures () =
   let module Page=Keeper_tool_result_page in
-  let sha=Digestif.SHA256.(to_hex (digest_string "🙂x")) in
+  let sha=Agent_core_sha256.(to_hex (digest_string "🙂x")) in
   let identity : Page.identity={source_id=sha;sha256=sha;recorded_bytes=5;is_error=false} in
   let request : Keeper_artifact_read.request={sha256=sha;offset=0;max_bytes=1} in
   let first=match Keeper_artifact_read.page request "🙂x" with

@@ -80,7 +80,7 @@ let scope_of_headers = function
       `List (List.map (fun (name, value) -> `List [ `String name; `String value ]) headers)
       |> Yojson.Safe.to_string
     in
-    Header_fingerprint Digestif.SHA256.(to_hex (digest_string wire))
+    Header_fingerprint Agent_core_sha256.(to_hex (digest_string wire))
 
 let same_model_key left right =
   String.equal left.url right.url

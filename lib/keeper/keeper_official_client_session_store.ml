@@ -272,8 +272,8 @@ let tool_surface_sha256 ?account_home ?account_revision ~native_posture tools =
          | Some revision -> ["account_revision", `String revision]))
   |> canonical_json
   |> Yojson.Safe.to_string
-  |> Digestif.SHA256.digest_string
-  |> Digestif.SHA256.to_hex
+  |> Agent_core_sha256.digest_string
+  |> Agent_core_sha256.to_hex
 ;;
 
 (* Shared with [Types_auth.is_sha256_hex] and the capability heads rather

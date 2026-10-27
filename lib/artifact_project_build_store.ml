@@ -79,7 +79,7 @@ let save ~base_path ~source_id ~author (input : input) =
   then Error (Invalid "author must be nonblank UTF-8 without NUL")
   else protect (fun () ->
     let* source, _ = Artifact_project_source_store.read ~base_path ~id:source_id |> Result.map_error source_error in
-    let* () = validate_source ~digest:(fun bytes -> Digestif.SHA256.(digest_string bytes |> to_hex)) ~source input.receipt
+    let* () = validate_source ~digest:(fun bytes -> Agent_core_sha256.(digest_string bytes |> to_hex)) ~source input.receipt
       |> Result.map_error (fun message -> Invalid message) in
     let dir = root ~base_path in
     let* _ = directory ~base_path in

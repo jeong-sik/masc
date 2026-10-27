@@ -71,7 +71,7 @@ let parse_create_response_json body =
     | None ->
         Alcotest.failf "expected JSON payload in create response: %s" body
 
-let sha256_hex text = Digestif.SHA256.(digest_string text |> to_hex)
+let sha256_hex text = Agent_core_sha256.(digest_string text |> to_hex)
 
 let source_snapshot_for_created_post json =
   let open Yojson.Safe.Util in

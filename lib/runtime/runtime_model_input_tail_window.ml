@@ -194,7 +194,7 @@ let atom_opening_digest (messages : Agent_core.Types.message list) =
         Yojson.Safe.to_string
           (Agent_core.Checkpoint.message_to_json openers.(atom))
       in
-      Some Digestif.SHA256.(digest_string encoded |> to_hex))
+      Some Agent_core_sha256.(digest_string encoded |> to_hex))
 ;;
 
 let first_atom_at_or_after messages ~message_index =

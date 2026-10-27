@@ -152,7 +152,7 @@ let drawable ~convert ~slot ~media data =
                   else
                     Drawable
                       { media; png
-                      ; key = Digestif.SHA256.(digest_string png |> to_hex)
+                      ; key = Agent_core_sha256.(digest_string png |> to_hex)
                       ; pixel_width; pixel_height; slot })))
 
 (* Simultaneous pictures take slots in evidence order; individual selections

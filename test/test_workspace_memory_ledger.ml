@@ -4,7 +4,7 @@ module Os_current = Masc.Keeper_memory_os_current
 module Os_types = Masc.Keeper_memory_os_types
 module Source_current = Masc.Keeper_memory_source_current
 
-let sha claim = Digestif.SHA256.(digest_string claim |> to_hex)
+let sha claim = Agent_core_sha256.(digest_string claim |> to_hex)
 let str value = `String value
 
 let ordinary ?(revision = 1) claims : Os_current.t =
@@ -447,7 +447,7 @@ let test_apply_refuses_unselected_or_missing_decisions () =
   refused (Ledger.Unknown_claim "absent") [writer]
     [{ Ledger.fact = writer.fact; decision = Ledger.Join_claim "absent" }];
   let new_claim = "Build uses OCaml" in
-  let new_claim_id = "claim-" ^ Digestif.SHA256.(digest_string new_claim |> to_hex) in
+  let new_claim_id = "claim-" ^ Agent_core_sha256.(digest_string new_claim |> to_hex) in
   refused (Ledger.Unknown_claim new_claim_id) [writer; reviewer]
     [ decision writer.fact
     ; { Ledger.fact = reviewer.fact; decision = Ledger.Join_claim new_claim_id } ];

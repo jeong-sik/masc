@@ -414,7 +414,7 @@ let prefix_digest ~system_prompt ~tools =
                  (fun () -> Yojson.Safe.to_string json)))
       tools
   in
-  Digestif.SHA256.(digest_string (String.concat "" (part system_prompt :: schemas)) |> to_hex)
+  Agent_core_sha256.(digest_string (String.concat "" (part system_prompt :: schemas)) |> to_hex)
 ;;
 
 module Table = struct

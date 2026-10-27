@@ -18,7 +18,7 @@ let rec canonical = function
   | `List values -> `List (List.map canonical values)
   | value -> value
 
-let hash value = Digestif.SHA256.(digest_string (Yojson.Safe.to_string (canonical value)) |> to_hex)
+let hash value = Agent_core_sha256.(digest_string (Yojson.Safe.to_string (canonical value)) |> to_hex)
 let observation_json snapshot_json = function
   | Missing -> `Assoc ["status", `String "missing"]
   | Unavailable detail -> `Assoc ["status", `String "unavailable"; "detail", `String detail]

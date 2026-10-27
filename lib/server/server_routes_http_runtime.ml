@@ -1637,7 +1637,7 @@ let board_post_detail_json ?(comment_request = default_board_comment_request) ?f
                   ; (match comment.parent_id with
                      | None -> `Null
                      | Some parent -> `String (Board.Comment_id.to_string parent)) ]) comments)
-        |> Yojson.Safe.to_string |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
+        |> Yojson.Safe.to_string |> Agent_core_sha256.digest_string |> Agent_core_sha256.to_hex in
       let author = Board.Agent_id.to_string post.author in
       let author_karma = Board_dispatch.get_agent_karma ~agent_name:author in
       match

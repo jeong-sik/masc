@@ -259,7 +259,7 @@ let finish config receipt ~cleanup =
   let* () = match source, receipt.state with
     | None, Artifacts_removed -> Ok ()
     | Some source, (Prepared | Cleanup_required _ | Artifacts_removed | Removed)
-      when Digestif.SHA256.(digest_string source |> to_hex) = receipt.source_sha256 -> Ok ()
+      when Agent_core_sha256.(digest_string source |> to_hex) = receipt.source_sha256 -> Ok ()
     | None, (Prepared | Cleanup_required _ | Removed)
     | Some _, (Prepared | Cleanup_required _ | Artifacts_removed | Removed) ->
       Error (Conflict "configuration source changed since deletion was requested") in
@@ -319,7 +319,7 @@ let submit ~config ~keeper_name ~actor ~cleanup =
       | Some bytes ->
         let now = Masc_domain.now_iso () in
         let* receipt = save config {operation_id=Id.generate (); keeper_name; actor;
-          source_path; source_sha256=Digestif.SHA256.(digest_string bytes |> to_hex);
+          source_path; source_sha256=Agent_core_sha256.(digest_string bytes |> to_hex);
           requested_at=now; updated_at=now; state=Prepared; last_error=None} in
         finish config receipt ~cleanup)
 

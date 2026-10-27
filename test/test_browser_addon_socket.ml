@@ -482,7 +482,7 @@ let opaque_backends = function
       | _ -> key,value) fields)
   | value -> value
 let allocation_record admission directory = Filename.concat directory
-  ("browser-" ^ Digestif.SHA256.(to_hex (digest_string (Lease.instance_id admission))) ^ ".json")
+  ("browser-" ^ Agent_core_sha256.(to_hex (digest_string (Lease.instance_id admission))) ^ ".json")
 let produce_allocation admission directory root =
   Unix.mkdir root 0o700;
   let info=Unix.lstat root in

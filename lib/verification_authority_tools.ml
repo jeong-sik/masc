@@ -656,7 +656,7 @@ let media_result t tool ~name ~args ~start_time =
                let data = `Assoc
                  [ "path", `String path; "media_type", `String media_type
                  ; "bytes", `Int size
-                 ; "sha256", `String Digestif.SHA256.(digest_string bytes |> to_hex)
+                 ; "sha256", `String Agent_core_sha256.(digest_string bytes |> to_hex)
                  ; "visual_input", `Bool true ] in
                Some (Tool_result.make_ok ~tool_name:name ~start_time ~data
                  ~content_blocks:
@@ -724,7 +724,7 @@ let dispatch t ~name ~args =
                    ; "tool", `String name
                    ; "output_bytes", `Int (String.length bytes)
                    ; "output_sha256",
-                     `String Digestif.SHA256.(digest_string bytes |> to_hex)
+                     `String Agent_core_sha256.(digest_string bytes |> to_hex)
                    ; "error",
                      `String "The lookup returned non-UTF-8 bytes, not readable text. No text content was delivered. Binary file bytes are not a visual inspection."
                    ]))))

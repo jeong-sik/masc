@@ -2,7 +2,7 @@ module Ledger = Masc.Workspace_memory_ledger
 module Request = Masc.Workspace_memory_request
 module Decision = Masc.Workspace_memory_decision
 
-let sha claim = Digestif.SHA256.(digest_string claim |> to_hex)
+let sha claim = Agent_core_sha256.(digest_string claim |> to_hex)
 let pending keeper claim : Ledger.pending_fact =
   { fact = Ledger.Ordinary { keeper_id = keeper; claim_sha256 = sha claim }; claim }
 let sourced keeper path claim : Ledger.pending_fact =

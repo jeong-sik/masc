@@ -164,7 +164,7 @@ let digest_fields fields =
        Buffer.add_char buffer ':';
        Buffer.add_string buffer value)
     fields;
-  Digestif.SHA256.(to_hex (digest_string (Buffer.contents buffer)))
+  Agent_core_sha256.(to_hex (digest_string (Buffer.contents buffer)))
 ;;
 
 let content_revision = Skill_reference.content_revision_of_source_text

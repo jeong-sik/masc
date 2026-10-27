@@ -114,7 +114,7 @@ let schedule_occurrence_receipt_path ~base_path ~keeper_name ~occurrence_id =
       keeper_name
   in
   let digest =
-    Digestif.SHA256.(digest_string occurrence_id |> to_hex)
+    Agent_core_sha256.(digest_string occurrence_id |> to_hex)
   in
   Filename.concat
     (Filename.concat owner_dir "consumed-schedule-occurrences-v1")

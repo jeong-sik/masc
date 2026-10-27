@@ -3027,7 +3027,7 @@ module Argument_start_fixture = struct
         check string "canonical tool reconstructs exact original JSON"
           (Yojson.Safe.to_string old_input) (Buffer.contents bytes)
   let check_resume_did_not_store base_path =
-    let sha256=Digestif.SHA256.(to_hex (digest_string (Yojson.Safe.to_string current_input))) in
+    let sha256=Agent_core_sha256.(to_hex (digest_string (Yojson.Safe.to_string current_input))) in
     match Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256 with
     | Ok None -> ()
     | Ok (Some _) -> fail "Resume materialized the newly eligible argument"

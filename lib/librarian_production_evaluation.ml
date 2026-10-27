@@ -50,7 +50,7 @@ let preparation_json = function
       "file_path",optional text resolution.file_path;
       "file_exists",`Bool resolution.file_exists;"has_override",`Bool resolution.has_override;
       "variables",variables prepared.variables;"rendered_prompt",text prepared.rendered_prompt;
-      "rendered_sha256",text Digestif.SHA256.(to_hex (digest_string prepared.rendered_prompt));
+      "rendered_sha256",text Agent_core_sha256.(to_hex (digest_string prepared.rendered_prompt));
       "output_schema",prepared.output_schema]
 let refusals values = `List (List.map (fun value -> text (Keeper_librarian_input_refusal.to_string value)) values)
 let report_json (report : L.not_committed) =

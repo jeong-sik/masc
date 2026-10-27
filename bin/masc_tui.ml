@@ -11332,7 +11332,7 @@ let prepare_listen_media ~host ~port (media : Masc_tui_chat_media.playable) =
           | End_of_file -> Error "audio source changed while reading"
           | Unix.Unix_error (code, _, _) -> Error (Unix.error_message code)) in
   Eio_guard.run_in_systhread ~label:"tui-listen-prepare" (fun () ->
-    let sha256 = Digestif.SHA256.(to_hex (digest_string bytes)) in
+    let sha256 = Agent_core_sha256.(to_hex (digest_string bytes)) in
     let attachment : board_attachment =
       { ba_kind=(match media.kind with `Audio -> Ak_audio | `Midi -> Ak_midi);
         ba_source=As_artifact {sha256; bytes=String.length bytes}; ba_name=Some media.name } in

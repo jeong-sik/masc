@@ -186,7 +186,7 @@ let legacy_surface_digest surface =
     in
     `Assoc [ "source", identity; "schema", Agent_core.Types.tool_schema_to_json schema ]) surface)
   |> Yojson.Safe.sort |> Yojson.Safe.to_string
-  |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex
+  |> Agent_core_sha256.digest_string |> Agent_core_sha256.to_hex
 ;;
 
 let test_surface_digest_preserves_legacy_bytes () =

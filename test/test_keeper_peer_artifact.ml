@@ -405,7 +405,7 @@ let test_materialize_manifest_failure_keeps_effect_and_roots () =
       (String_util.contains_substring result.raw_output "manifest could not be stored");
     Alcotest.(check bool) "artifact stays rooted" true
       (List.exists (fun (root : Tool_output.artifact_ref) ->
-        root.sha256 = Digestif.SHA256.(digest_string expected |> to_hex)) result.retained_artifacts);
+        root.sha256 = Agent_core_sha256.(digest_string expected |> to_hex)) result.retained_artifacts);
     Alcotest.(check bool) "no stale manifest binding" true (result.metadata = None);
     let receipt = Yojson.Safe.Util.member "result" (Option.get result.data) in
     Alcotest.(check bool) "unpublished exact verification remains inspectable" true

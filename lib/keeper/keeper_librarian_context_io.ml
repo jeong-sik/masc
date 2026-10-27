@@ -11,7 +11,7 @@ let execution_basis ~base_path ~keeper_name =
            "progress_at", `Float observation.last_progress_at; "active_tools", `Int observation.active_tool_count]
       | None -> `Assoc ["completed_turns", `Int meta.runtime.usage.total_turns;
           "last_turn_at", `Float meta.runtime.usage.last_turn_ts] in
-    Some (Digestif.SHA256.(digest_string (Yojson.Safe.to_string (`Assoc
+    Some (Agent_core_sha256.(digest_string (Yojson.Safe.to_string (`Assoc
       ["trace", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id); "progress", progress])) |> to_hex))
   | None, _ | Some _, (Owner_absent | Owner_projection {meta = None; _}
       | Owner_projection {stopping = true; _}) -> None

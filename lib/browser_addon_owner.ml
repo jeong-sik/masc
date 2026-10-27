@@ -310,7 +310,7 @@ let dispatch t (request : W.request) =
      | Ok client -> waiting t ~disposition:W.Not_started (fun () ->
          match B.take_registered_command ~client ~window_sec with
          | Ok command ->
-           let state_id=Digestif.SHA256.(to_hex (digest_string (Yojson.Safe.to_string (snapshot t)))) in
+           let state_id=Agent_core_sha256.(to_hex (digest_string (Yojson.Safe.to_string (snapshot t)))) in
            W.Poll_result {command;state_id}
          | Error error -> refusal (B.registration_refusal_to_wire error)))
   | W.Deliver {client_id;id;payload} ->

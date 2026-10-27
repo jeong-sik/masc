@@ -626,7 +626,7 @@ window.addEventListener("message",event=>{
 document.getElementById("retry").addEventListener("click",deliver);
 deliver();
 |} in
-  let hash = Digestif.SHA256.digest_string script |> Digestif.SHA256.to_raw_string |> Base64.encode_string in
+  let hash = Agent_core_sha256.digest_string script |> Agent_core_sha256.to_raw_string |> Base64.encode_string in
   let policy = "default-src 'none'; script-src 'sha256-" ^ hash ^ "'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" in
   Http.Response.html ~headers:(private_headers @ ["content-security-policy",policy;
     "cross-origin-opener-policy","same-origin-allow-popups"])

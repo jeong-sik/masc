@@ -40,7 +40,7 @@ let ledger_of_json revision =
 
 let revision_solved =
   let canonical = `Assoc [ "workspace_key", `String hex64; "session_id", `String trace_id; "activations", `List [ activation ]; "transition_rejections", `List []; "async_result_deliveries", `List []; "async_actions", `List [] ] in
-  Digestif.SHA256.(to_hex (digest_string (Yojson.Safe.to_string canonical)))
+  Agent_core_sha256.(to_hex (digest_string (Yojson.Safe.to_string canonical)))
 
 let async_of_json () =
   match Masc.Tui_decode.decode_async_request_observation async_json with

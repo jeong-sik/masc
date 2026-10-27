@@ -183,7 +183,7 @@ let test_explicit_effort_reaches_serialized_request () =
     (* Bind the inspected bytes to the opaque plan produced by actual runtime
        initialization and bootstrap, without dispatching a provider request. *)
     check string "runtime bootstrap freezes these exact request bytes"
-      (Digestif.SHA256.(digest_string serialized |> to_hex))
+      (Agent_core_sha256.(digest_string serialized |> to_hex))
       (EO.receipt_request_body_sha256 runtime_receipt);
     check int "request inspection performs no provider dispatch" 0
       (EO.receipt_dispatch_count runtime_receipt);

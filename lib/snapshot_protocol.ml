@@ -53,5 +53,5 @@ let rec canonical_json = function
 
 let revision_of_json ~namespace value =
   let canonical = canonical_json value |> Yojson.Safe.to_string in
-  Printf.sprintf "%s:%s" namespace (Digestif.SHA256.(digest_string canonical |> to_hex))
+  Printf.sprintf "%s:%s" namespace (Agent_core_sha256.(digest_string canonical |> to_hex))
 ;;

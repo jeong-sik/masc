@@ -4,7 +4,7 @@ module P = Endpoint_job_protocol
 let require = function Ok x -> x | Error e -> fail e
 let get = function Ok x -> x | Error e -> fail (P.error_to_string e)
 let id suffix = P.Id.of_string ("019a0000-0000-7000-8000-0000000000" ^ suffix) |> require
-let digest text = P.Sha256.of_string Digestif.SHA256.(digest_string text |> to_hex) |> require
+let digest text = P.Sha256.of_string Agent_core_sha256.(digest_string text |> to_hex) |> require
 let isolated : P.isolated_preparation =
   {preparation_id=id "04";image_sha256=digest "immutable image";input_manifest_sha256=digest "verified inputs"}
 let spec ?(domain=P.Workspace_process) ?(argv=["/bin/echo";"original \255 argument"])

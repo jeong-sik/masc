@@ -594,13 +594,13 @@ let test_extra_system_context_preserves_typed_blocks () =
       | Some text,Some receipt ->
         Alcotest.(check int) "receipt counts raw UTF8 bytes" (String.length text) receipt.bytes;
         Alcotest.(check string) "whole raw carrier hash"
-          Digestif.SHA256.(digest_string text |> to_hex) receipt.sha256;
+          Agent_core_sha256.(digest_string text |> to_hex) receipt.sha256;
         let cursor = ref 0 and block_index = ref 0 and prefix_seen = ref false in
         List.iter (fun (span:Assembly.span) ->
           Alcotest.(check int) "ordered spans have no gaps or overlap" !cursor span.offset;
           let source = String.sub text span.offset span.bytes in
           Alcotest.(check string) "span hash binds exact issued bytes"
-            Digestif.SHA256.(digest_string source |> to_hex) span.sha256;
+            Agent_core_sha256.(digest_string source |> to_hex) span.sha256;
           (match span.kind with
            | Assembly.Block block ->
              let expected_block,expected_text = List.nth blocks !block_index in

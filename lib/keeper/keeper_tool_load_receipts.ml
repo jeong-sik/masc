@@ -32,7 +32,7 @@ type load =
 type scope =
   { trace_id : Keeper_id.Trace_id.t
   ; task_id : Keeper_id.Task_id.t option
-  ; surface_sha256 : Digestif.SHA256.t
+  ; surface_sha256 : Agent_core_sha256.t
   }
 
 type snapshot =
@@ -103,7 +103,7 @@ let decode_snapshot json =
   in
   let* digest = Json_util.require_string json "surface_sha256" in
   let* surface_sha256 =
-    match Digestif.SHA256.consistent_of_hex_opt digest with
+    match Agent_core_sha256.consistent_of_hex_opt digest with
     | Some digest -> Ok digest
     | None -> Error "surface_sha256 must be a SHA-256 digest"
   in
@@ -130,7 +130,7 @@ let snapshot_to_json { scope; pending } =
           ~none:`Null
           ~some:(fun id -> `String (Keeper_id.Task_id.to_string id))
           scope.task_id )
-    ; "surface_sha256", `String (Digestif.SHA256.to_hex scope.surface_sha256)
+    ; "surface_sha256", `String (Agent_core_sha256.to_hex scope.surface_sha256)
     ; ( "pending"
       , `List
           (Names.bindings pending
@@ -177,7 +177,7 @@ let source_to_json = function
 ;;
 
 let surface_digest surface =
-  Digestif.SHA256.digesti_string (fun emit ->
+  Agent_core_sha256.digesti_string (fun emit ->
     (* Same initial size as Yojson.Safe.to_string; owned by this one call. *)
     let buffer = Buffer.create 256 in
     let emit_entry { source; schema } =
@@ -205,7 +205,7 @@ let surface_digest surface =
 let equal_scope a b =
   Keeper_id.Trace_id.equal a.trace_id b.trace_id
   && Option.equal Keeper_id.Task_id.equal a.task_id b.task_id
-  && Digestif.SHA256.equal a.surface_sha256 b.surface_sha256
+  && Agent_core_sha256.equal a.surface_sha256 b.surface_sha256
 ;;
 
 let store context snapshot =

@@ -45,7 +45,7 @@ let settle request ~source result t =
         (match Masc.Keeper_vision_tool.sniff_image_media_type png,
             Masc.Keeper_image_dimensions.image_dimensions png with
          | Ok "image/png", Some (width,height) when width > 0 && height > 0 ->
-             Ready {png;key=Digestif.SHA256.(to_hex (digest_string png));width;height}
+             Ready {png;key=Agent_core_sha256.(to_hex (digest_string png));width;height}
          | (Ok _ | Error _), (Some _ | None) -> Failed "Diagram renderer did not return a valid PNG") in
     {t with entries=List.map (fun (original,previous) ->
       original, (match previous with

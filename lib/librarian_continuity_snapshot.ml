@@ -31,7 +31,7 @@ type error =
   | Read_failed of string
   | Write_failed of string
 
-module Hash = Digestif.SHA256
+module Hash = Agent_core_sha256
 
 (* [prefix_sha256] is SHA-256 over the compact JSON array of the atom messages
    [0, end_atom). This is the hash state before the closing bracket, with the

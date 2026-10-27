@@ -96,7 +96,7 @@ type rendered = { text : string; spans : span list }
 type prepared_content = { content_text : string; content_sha256 : string; content_rows : section_rows }
 type section = { section_source : source; section_text : string; section_rows : section_rows }
 
-let hash text = Digestif.SHA256.(digest_string text |> to_hex)
+let hash text = Agent_core_sha256.(digest_string text |> to_hex)
 let prepare_content text = {content_text=text;content_sha256=hash text;content_rows=Whole_section}
 let prepare_rows ~head ~rows ~tail =
   let content_text = head ^ String.concat "" rows ^ tail in

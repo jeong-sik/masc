@@ -29,7 +29,7 @@ let test_preview () =
   check string "does not split Korean character" (String.make 159 'x') (field row "description");
   check string "full detail retained" description (field complete "description");
   check string "exact full text revision"
-    Digestif.SHA256.(digest_string description |> to_hex) (field row "description_revision");
+    Agent_core_sha256.(digest_string description |> to_hex) (field row "description_revision");
   let retained = function
     | `Assoc fields -> `Assoc (List.filter (fun (key, _) ->
         not (List.mem key ["description"; "detail_level"; "description_revision"])) fields)

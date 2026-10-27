@@ -7,4 +7,4 @@
  (modules keeper_checkpoint_ref)
  (flags
   (:standard -w +4 -w +33))
- (libraries digestif masc.keeper_registry))
+ (libraries  masc.agent_core.digest masc.keeper_registry))

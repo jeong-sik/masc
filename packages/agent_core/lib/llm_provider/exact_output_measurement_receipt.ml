@@ -128,7 +128,7 @@ let measurement_receipt_dispatch_fact snapshot = snapshot.dispatch
 let measurement_receipt_outcome snapshot = snapshot.outcome
 let snapshot_format = "agent_core.exact-output.measurement-receipt"
 let snapshot_version = 1
-let sha256 value = Digestif.SHA256.(to_hex (digest_string value))
+let sha256 value = Agent_core_sha256.(to_hex (digest_string value))
 
 let phase_to_string = function
   | Measurement_fence_committed -> "fence_committed"

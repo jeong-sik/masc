@@ -91,7 +91,7 @@ let authority_with_format_version ~version payload =
     | _ -> fail "authority fixture is not an object"
   in
   let authority_bytes = Yojson.Safe.to_string authority in
-  let authority_sha256 = Digestif.SHA256.(to_hex (digest_string authority_bytes)) in
+  let authority_sha256 = Agent_core_sha256.(to_hex (digest_string authority_bytes)) in
   Yojson.Safe.to_string
     (`Assoc [ "authority", authority; "authority_sha256", `String authority_sha256 ])
 ;;

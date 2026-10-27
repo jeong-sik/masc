@@ -127,7 +127,7 @@ let validate receipt =
         else Error "paused-work source-terminal receipt does not match source"
 ;;
 
-let sha256 value = Digestif.SHA256.(digest_string value |> to_hex)
+let sha256 value = Agent_core_sha256.(digest_string value |> to_hex)
 
 let keeper_dir config keeper_name =
   let root = Workspace.masc_dir config in

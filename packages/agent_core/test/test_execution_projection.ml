@@ -716,7 +716,7 @@ let test_native_request_provenance_reopen () =
              | None -> fail "provider never received the body" in
            check int "persisted body length" (String.length body) request.body_bytes;
            check string "persisted body SHA256"
-             Digestif.SHA256.(digest_string body |> to_hex) request.body_sha256;
+             Agent_core_sha256.(digest_string body |> to_hex) request.body_sha256;
            check (option int) "persisted requested value" (Some 200)
              (Llm_provider.Types.output_token_receipt_requested request.output_token_receipt);
            check (option int) "persisted wire value"

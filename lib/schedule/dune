@@ -20,7 +20,7 @@
  (flags
   (:standard -w +4 -w +33))
  (libraries
-  digestif
+   masc.agent_core.digest
   fs_compat
   masc_workspace
   dated_jsonl

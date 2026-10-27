@@ -3,34 +3,32 @@
 [RFC-0204](../../rfc/RFC-0204-dashboard-serving-isolation.md) 의 측정 근거다.
 대화 본문, 체크포인트 본문, 토큰은 넣지 않았다. 요청 경로, 시간, 건수, 코드 경로만 있다.
 
-## 대상
+## 대상 서버
 
-- 서버: `masc start --base-path ~/me`, PID 45284, 2026-10-27 02:28 KST 기동.
-- 바이너리 커밋 `9377c7f3025d68e3856d2afd3762468dabc77813` (`GET /health` 의 `build.binary_commit`).
-  Librarian 수정 스택 #46242~#46244 는 이 바이너리에 없다.
-- Keeper 42명 (`GET /api/v1/gate/keepers` 의 `total`).
-- 장비: 16코어(`sysctl -n hw.ncpu`). 같은 시간에 다른 코딩 세션 6개와 Keeper microVM 이 돌고 있었다.
+| 구간 | PID | 바이너리 커밋 | 비고 |
+|---|---|---|---|
+| 수정 전 | 45284 | `9377c7f3025d68e3856d2afd3762468dabc77813` | 2026-10-27 02:28:22 KST 기동. Librarian 수정 #46242~#46244 없음 |
+| 수정 후 | 8821 | `d0c79a5d83a51b3e4b30b67cb05342f10e20e2ea` | 2026-10-27 11:01:45 KST 기동. #46244 포함. 다른 세션이 배포했다 |
+
+- 바이너리 커밋은 `GET /health` 의 `build.binary_commit` 이다.
+- Keeper 42명. 장비는 16코어(`sysctl -n hw.ncpu`). 같은 시간에 다른 코딩 세션 6개와 Keeper microVM 이 돌았다.
 
 ## 파일
 
-| 파일 | 내용 | 집계 창 |
+| 파일 | 내용 | 창 |
 |---|---|---|
-| `tui-slow-requests-by-path.tsv` | TUI 가 1초 넘게 걸린 요청을 경로별로 센 것. TUI 는 1초 넘는 요청만 로그에 남긴다 | `masc-tui-59258.log` 01:34:45 ~ 10:29:04 KST |
-| `gate-keepers-by-hour.tsv` | `GET /api/v1/gate/keepers` 의 시간대별 평균·최대·10초 timeout | 같은 창 |
-| `probe-pooled-vs-main-domain.tsv` | 같은 순간에 `gate/keepers?detailed=false&limit=1`(풀 경유)과 `/health`(main domain) 을 번갈아 20번 부른 결과 | 01:29:05 ~ 01:29:08 UTC |
-| `sample-top-of-stack.txt` | `sample 45284 8` 의 leaf 상위 | 08:4x KST, 8초 |
-| `sample-masc-modules.txt` | 같은 sample 에서 `camlMasc__*` 프레임을 모듈별로 센 것 | 같은 sample |
-| `memprof-allocated-by-module.txt` | `GET /api/v1/diagnostics/memprof` 의 `allocated` 표를 masc 모듈별로 묶은 것 | 직전 읽기 이후 누적. 시작 시각은 응답에 없다 |
+| `probe-pooled-vs-main-domain.tsv` | 수정 전 서버에서 `gate/keepers?detailed=false&limit=1`(풀 경유)과 `/health`(main domain)를 번갈아 20번 부른 curl 결과 | 01:29:05~01:29:08 UTC |
+| `tui-slow-requests-by-path.tsv` | TUI 가 1초 넘게 걸렸다고 적은 요청을 경로별로 센 것 | `masc-tui-59258.log` 02:29~10:59 KST (수정 전 서버의 수명) |
+| `gate-keepers-by-hour.tsv` | 위 TUI 기록 중 `gate/keepers` 의 시간대별 값 | 같은 창 |
+| `sample-top-of-stack.txt` | 수정 전 서버 `sample 45284 8` 의 leaf 상위 | 08:4x KST, 8초 |
+| `sample-masc-modules.txt` | 같은 sample 의 `camlMasc__*` 프레임을 모듈별로 센 것 | 같은 sample |
+| `sample-thread-kinds.txt` | 같은 sample 을 스레드 종류(main, domain, systhread)별로 나눠 JSON 파싱과 sha256 샘플을 센 것 | 같은 sample |
+| `memprof-allocated-by-module.txt` | 수정 전 서버 `GET /api/v1/diagnostics/memprof` 의 `allocated` 표를 masc 모듈별로 묶은 것 | 직전 읽기 이후 누적. 시작 시각은 응답에 없다 |
 
-## 만든 방법
+## 읽을 때 주의할 점
 
-- TUI 로그: `took (\d+) ms elapsed` 가 붙은 `[Transport] http GET|POST` 줄을 경로별로 셌다. 10,000 ms 이상을 timeout 으로 셌다(TUI 의 `Pool.request: timeout after 10.0s`).
-- 탐침: `curl -s -o /dev/null -m 30 -w '%{time_total}'`. `/health` 는 응답 헤더 `server-timing` 의 `health_response` 도 적었다.
-- 이 표보다 앞서(09시 전후 KST, 정확한 시각은 남기지 않았다) 같은 탐침을 8번 돌렸을 때 풀 경유 요청은 0.49~5.2초, `/health` 는 1.5~11 ms 였다. 이 표에는 10:29 KST 의 20번만 있다. 그때는 풀 경유 요청도 4~527 ms 였다. 지연은 계속되지 않고 몰려서 나타난다.
-- domain 수: 같은 sample 에서 `domain_thread_func` 프레임을 가진 스레드가 30개였다. main domain 을 더하면 31개다.
-
-## 한계
-
-- 풀 대기 시간을 직접 잰 값이 아니다. 서버에 그 계측이 없다. "풀 경유 요청은 느리고 main domain 요청은 빠르다"는 대조만 있다.
-- memprof 할당 표는 표본(rate 1e-5)에서 추정한 값이다. 비율로만 읽는다.
-- TUI 로그는 1초 미만 요청을 남기지 않아서 p50·p99 를 구할 수 없다.
+- **TUI 기록은 서버 지연이 아니다.** `bin/masc_tui_http.ml` 첫 주석대로 TUI 의 elapsed 는 "서버 응답 + TUI 그리기 루프가 다음에 돌 때까지의 대기"다. 클라이언트 timeout 이 10초인데 45,564 ms 로 기록된 요청이 있다. 그러니 TUI 표는 사용자가 겪은 지연으로만 읽는다. 서버 지연은 `probe-*` 파일로 본다.
+- TUI 는 1초 미만 요청을 기록하지 않는다. TUI 표의 평균은 1초 넘은 요청끼리의 평균이다.
+- `memprof` 표에서 Librarian 호출자가 확인된 할당은 55.6%다. `lane_addon_store`(35.3%)는 같은 tool-request 저장소 읽기지만 스택이 잘려 호출자를 확인하지 못했다.
+- 풀 대기 시간을 직접 잰 값은 없다. 서버에 그 계측이 없다.
+- domain 수는 `sample-thread-kinds.txt` 에서 `domain_thread_func` 를 가진 스레드 30개다. main 을 더하면 31개다. 부팅 로그(`Native execution runtime created (14 codec domains)`, `Domain_pool created (14 shared domains, 1 independent snapshot codec domain)`)로 설명되는 것은 29개다.

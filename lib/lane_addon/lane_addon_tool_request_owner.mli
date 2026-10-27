@@ -134,6 +134,9 @@ val advance : store:Lane_addon_store.t -> expected:retained ->
   event:Lane_addon_request_progress.event -> (publication, update_error) result
 (** {!advance_events} for one event, with the same publication contract. *)
 module For_testing : sig
+  val fold_all : store:Lane_addon_store.t -> after_inventory:(unit -> unit) ->
+    init:'a -> f:('a -> retained -> 'a) -> ('a, error) result
+  (** Invoke the hook after inventory and before restoring the listed records. *)
   val advance_events :
     save:(Lane_addon_store.t -> scope:string -> request_id:string -> Yojson.Safe.t ->
       (unit, string) result) ->
@@ -154,9 +157,8 @@ val settle : store:Lane_addon_store.t -> date:string -> Record.t -> (unit, settl
     under [date], if the scope still holds exactly this record; [Settle_changed]
     otherwise, and nothing moves. A record already in the archive completes
     the move of whatever is left. The caller settles only originals no pass
-    needs again and whose body no other record names. The check and the move
-    each take the scope serializer, so this is an expected-record check under
-    the caller's lease and serialization, like {!advance}. *)
+    needs again and whose body no other record names. The expected-record check
+    and move share the scope serializer, under the caller's workspace lease. *)
 val settled : store:Lane_addon_store.t -> scope:string -> date:string -> request_id:string ->
   (bool, error) result
 (** Whether the archive holds the record of [request_id] under [date]. *)

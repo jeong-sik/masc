@@ -342,6 +342,27 @@ let with_tool_request_owner_directory_serialization t ~directory_name work =
   File_lock_eio.with_mutex key work
 let with_tool_request_owner_serialization t ~scope work =
   with_tool_request_owner_directory_serialization t ~directory_name:(digest scope) work
+(* A wake scans all scopes and can re-enter their readers. This separate
+   store-wide mutex keeps a settle from moving a listed record until that
+   scan has finished without holding any scope mutex across its callbacks.
+   Like the scope mutex, it relies on the caller's workspace process lease. *)
+let with_tool_request_settlement_barrier t work =
+  let key () =
+    let parent = Unix.realpath (Filename.dirname t.root) in
+    Filename.concat parent
+      (Filename.concat (Filename.basename t.root) "tool-request-settlement-barrier") in
+  match Fs_compat.execution_context () with
+  | Fs_compat.Non_eio -> protect (fun () -> Ok (File_lock_eio.with_mutex (key ()) work))
+  | Fs_compat.Eio_fiber ->
+    let key = Eio_unix.run_in_systhread (fun () -> protect (fun () -> Ok (key ()))) in
+    Eio.Fiber.check ();
+    let* key = key in
+    (* Waiting is cancellable. Once admitted, the system-thread work must
+       finish before releasing the mutex, even if its caller is cancelled. *)
+    let result = protect (fun () -> Ok (File_lock_eio.with_mutex key (fun () ->
+      Eio.Fiber.check ();
+      Eio.Cancel.protect (fun () -> Eio_unix.run_in_systhread ~label:"addon-original-wake-sweep" work)))) in
+    Eio.Fiber.check (); result
 let save_tool_request_owner t ~scope ~request_id json =
   protect (fun () -> with_tool_request_owner_serialization t ~scope (fun () ->
     save_record_with ~sync_parent:sync_parent_directory t (tool_request_owner_path ~scope ~request_id) json))
@@ -703,16 +724,22 @@ let move_into_archive t ~source ~target =
     | _ -> Error ("a settled original request file is not a regular file this process owns: " ^ target)
     | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
       Error ("an original request file is in neither its scope nor the settled archive: " ^ source)
-let settle_tool_request t ~scope ~date ~request_id ~request_digest =
+let settle_tool_request t ~scope ~date ~request_id ~request_digest ~check_record =
   let* () = settled_day date in
-  protect (fun () -> with_tool_request_owner_serialization t ~scope (fun () ->
+  let* outcome = with_tool_request_settlement_barrier t (fun () ->
+    protect (fun () -> with_tool_request_owner_serialization t ~scope (fun () ->
+    let* record = tool_request_owner_record t ~scope ~request_id in
+    let* matches = check_record record in
+    if not matches then Ok false else
     (* The record first, the reverse of publication: an interrupted settle
        leaves a body no record names, as an interrupted retain does, never a
        record without its body. *)
     let* () = move_into_archive t ~source:(tool_request_owner_path ~scope ~request_id)
         ~target:(tool_request_archive_record_path ~scope ~date ~request_id) in
-    move_into_archive t ~source:(tool_request_body_path ~scope ~request_digest)
-      ~target:(tool_request_archive_body_path ~scope ~date ~request_digest)))
+    let* () = move_into_archive t ~source:(tool_request_body_path ~scope ~request_digest)
+      ~target:(tool_request_archive_body_path ~scope ~date ~request_digest) in
+    Ok true))) in
+  outcome
 let tool_request_settled t ~scope ~date ~request_id =
   let* () = settled_day date in
   protect (fun () ->
@@ -721,6 +748,7 @@ let tool_request_settled t ~scope ~date ~request_id =
   | stat when owned_regular_file stat -> Ok true
   | _ -> Error ("a settled original request record is not a regular file this process owns: " ^ path)
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false)
+
 type namespace_entry = Record_entry | Staged_entry | Unknown_entry
 let tool_request_owner_entry name =
   if Fs_compat.is_atomic_orphan_name name then Staged_entry

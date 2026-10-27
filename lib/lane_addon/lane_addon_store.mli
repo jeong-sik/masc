@@ -149,8 +149,16 @@ val tool_request_archive_body_path : scope:string -> date:string -> request_dige
 (** Where a settled original's record and body live, relative to {!root}:
     [tool-request-owners-settled/<scope digest>/<date>/records|bodies/]. No
     pass lists or reads this namespace. *)
+val with_tool_request_settlement_barrier : t -> (unit -> 'a) -> ('a, string) result
+(** Serialize a read-only whole-store sweep with the record and body moves of
+    cooperating settles in this process. [work] may re-enter individual scope
+    readers, but must not invoke a settle. For Eio callers, admission can be
+    cancelled, and admitted blocking work finishes on a system thread before
+    the barrier is released. Cancellation after admission does not establish
+    that a move did not happen. This is not a cross-process lock or an atomic
+    inventory snapshot; cooperative writers hold the workspace process lease. *)
 val settle_tool_request : t -> scope:string -> date:string -> request_id:string -> request_digest:string ->
-  (unit, string) result
+  check_record:(Yojson.Safe.t option -> (bool, string) result) -> (bool, string) result
 (** Move one original's record, then its body, from the scope into the settled
     archive under [date], syncing both directories after each rename. The
     record leaves first, the reverse of publication, so an interrupted settle
@@ -158,8 +166,9 @@ val settle_tool_request : t -> scope:string -> date:string -> request_id:string 
     already in the archive counts as moved, so settling again completes the
     move; a file in neither place is an error. Only single-link regular files
     this process owns are moved. Same scope serializer as publication. The
-    caller checks that the record is the one it means to settle and that no
-    other record names the body. *)
+    [check_record] checks the current record under the same scope serializer
+    as the move; [false] moves nothing. The caller checks that no other record
+    names the body. The store barrier is acquired before the scope serializer. *)
 val tool_request_settled : t -> scope:string -> date:string -> request_id:string -> (bool, string) result
 (** Whether the archive holds the record of [request_id] under [date]. *)
 val tool_request_owner_inventory : t -> scope:string -> ((string * Yojson.Safe.t) list, string) result

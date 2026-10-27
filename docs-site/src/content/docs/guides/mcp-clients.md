@@ -74,6 +74,8 @@ one place: `.masc/auth/<agent>.token`, mode `0600`.
 masc token list                 # what bearers exist
 masc token revoke --agent NAME  # retire one
 masc token prune                # only the expired ones
+masc oauth-client list                # what OAuth clients exist
+masc oauth-client revoke <client_id>  # retire one; frees a MASC_OAUTH_MAX_CLIENTS slot
 ```
 
 Minting the same agent name again replaces the credential — that is how you

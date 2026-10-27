@@ -4160,6 +4160,60 @@ let test_provider_resets_outlive_the_fallback_cap () =
        | Driver.Walk_waits_until _ -> Alcotest.fail "the quota path is released")))
 ;;
 
+(* The Keeper list publishes the same walk the failed-cycle wait reads, so a
+   Keeper whose lane is out of quota no longer looks the same as one that can
+   dispatch. The row carries no release time: a quota the provider did not date
+   rests from "now", which would move on every read. *)
+let quota_lane_path_rest_json ~now =
+  Yojson.Safe.to_string
+    (Masc.Keeper_tool_surface_ops.runtime_path_rest_json ~now "quota_lane")
+;;
+
+let test_the_list_row_says_serving_when_no_path_rests () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    Fun.protect ~finally:reset_quota_lane_rests (fun () ->
+      reset_quota_lane_rests ();
+      Alcotest.(check string) "the declared head serves"
+        {|{"status":"serving","runtime_id":"shared_a.test_model"}|}
+        (quota_lane_path_rest_json ~now:(Unix.gettimeofday ()))))
+;;
+
+let test_the_list_row_says_resting_when_every_path_is_out_of_quota () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    Fun.protect ~finally:reset_quota_lane_rests (fun () ->
+      reset_quota_lane_rests ();
+      let now = Unix.gettimeofday () in
+      List.iter
+        (fun id ->
+           Runtime_quota_window.note_exhausted
+             ~scope:(Option.get (Runtime.quota_scope_of_runtime_id id))
+             ~resets_at:(now +. 600.))
+        [ "shared_a.test_model"; "shared_b.test_model"; "other.test_model" ];
+      Alcotest.(check string) "a lane whose paths all rest is resting"
+        {|{"status":"resting","runtime_id":"shared_a.test_model"}|}
+        (quota_lane_path_rest_json ~now);
+      Alcotest.(check string) "the row is serving again once the window ends"
+        {|{"status":"serving","runtime_id":"shared_a.test_model"}|}
+        (quota_lane_path_rest_json ~now:(now +. 601.))))
+;;
+
+let test_an_undated_quota_row_does_not_move_between_reads () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    Fun.protect ~finally:reset_quota_lane_rests (fun () ->
+      reset_quota_lane_rests ();
+      let now = Unix.gettimeofday () in
+      List.iter
+        (fun id ->
+           Runtime_quota_window.note_observed_exhausted
+             ~scope:(Option.get (Runtime.quota_scope_of_runtime_id id)))
+        [ "shared_a.test_model"; "shared_b.test_model"; "other.test_model" ];
+      let first = quota_lane_path_rest_json ~now in
+      Alcotest.(check string) "an undated quota is resting"
+        {|{"status":"resting","runtime_id":"shared_a.test_model"}|} first;
+      Alcotest.(check string) "a later read says the same thing" first
+        (quota_lane_path_rest_json ~now:(now +. 60.))))
+;;
+
 (* Exhausting a lane does not turn the last candidate's quota reset into a
    deadline for every sibling. Use the observed fresh-walk rest and otherwise
    let the normal failed-cycle cadence run. *)
@@ -7029,6 +7083,12 @@ let () =
             test_a_deferred_suffix_waits_only_while_its_walk_head_rests;
           Alcotest.test_case "provider resets outlive the fallback cap" `Quick
             test_provider_resets_outlive_the_fallback_cap;
+          Alcotest.test_case "the list row says serving when no path rests" `Quick
+            test_the_list_row_says_serving_when_no_path_rests;
+          Alcotest.test_case "the list row says resting when every path is out of quota" `Quick
+            test_the_list_row_says_resting_when_every_path_is_out_of_quota;
+          Alcotest.test_case "an undated quota row does not move between reads" `Quick
+            test_an_undated_quota_row_does_not_move_between_reads;
           Alcotest.test_case "a failure without a suffix waits until a fresh walk head serves"
             `Quick test_a_failure_without_a_suffix_waits_until_a_fresh_walk_head_serves;
           Alcotest.test_case "a chat retry follows the shared next dispatch" `Quick

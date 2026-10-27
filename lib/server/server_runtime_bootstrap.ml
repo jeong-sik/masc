@@ -810,7 +810,7 @@ let initialize_owner_state_blocking
      [Workspace.default_config_uncached] constructs its backend, otherwise the
      config record says canonical while its backend still follows an alias. *)
   Workspace_utils_backend_setup.cache_resolved_base_path base_path;
-  Discovery_cache.set_env ~sw ~net;
+  Discovery_cache.set_env ~sw ~clock ~net;
   Gc_sampler.run ~sw ~clock ~interval:30.0;
   (* The activity-events parse cache alongside the heap gauges: it is retained
      for the life of each day file, so its size is a steady state rather than

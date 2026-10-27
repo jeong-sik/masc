@@ -114,10 +114,11 @@ let make_backend ?observe_step () =
               await_change=None}
           else None);
         exported_tools = (fun () -> exported_tools);
-        call_exported_tool = (fun ~companion:_ ~on_result:_ ~authorize ~principal ~name:_ ~arguments ->
+        call_exported_tool = (fun ~companion:_ ~on_result:_ ~on_dispatch ~authorize ~principal ~name:_ ~arguments ->
           state.principals := principal :: !(state.principals);
           state.export_arguments := arguments :: !(state.export_arguments);
           let invoke admission =
+            on_dispatch ();
             state.admissions := admission :: !(state.admissions);
             if package.id = "export-hang" then begin
               Hashtbl.replace state.calls (instance_id ^ "/export") 1;
@@ -136,7 +137,7 @@ let make_backend ?observe_step () =
           | None -> invoke None
           | Some authorize -> authorize ~release_controller:(fun ~holder:_ ~reason:_ ->
               Error (Lane_addon_call_context.Transport_error "release fixture unavailable"))
-              ~snapshot:(fun () -> Ok !(state.controller)) ~invoke);
+              ~snapshot:(fun () -> on_dispatch (); Ok !(state.controller)) ~invoke);
         operator_schema=(fun () -> None);
       companion_tools=(fun () -> []);
         observation_effect=(fun name -> match List.assoc_opt name declared_effects with
@@ -2070,6 +2071,51 @@ let test_tool_exports_bind_live_incarnations () = with_fixture (fun env sw confi
   check bool "caller cancellation retires the installation" true
     (Hashtbl.mem state.stops cancelled);
   check bool "cancelled handle stays revoked" true (Result.is_error (call cancelled_handle));
+  (* A call cancelled before it wrote anything to the worker, here held in its
+     mediation, changed nothing there: the installation keeps serving. *)
+  let unsent = attach_export "export-hang" in
+  await clock (fun () -> match exports () with Ok [_] -> true | _ -> false);
+  await clock (fun () -> int "observation_seq" (instance config unsent) > 0);
+  let unsent_handle = List.hd (unwrap (exports ())) in
+  let mediating, entered = Eio.Promise.create () in
+  let never, _ = Eio.Promise.create () in
+  let held ~release_controller:_ ~snapshot:_ ~invoke =
+    Eio.Promise.resolve entered (); Eio.Promise.await never; invoke None in
+  Eio.Fiber.first
+    (fun () -> ignore (Runtime.call_exported_tool_with_authority ~companion_publish:None ~continuation:None
+      ~on_complete:(fun () -> ()) ~on_result:(fun _ -> ()) ~authorize:(Some held) ~principal:None
+      ~config ~access ~reserved:[] ~export:unsent_handle ~arguments:(`Assoc [])))
+    (fun () -> Eio.Promise.await mediating);
+  check bool "a call cancelled before it wrote reached nothing in the worker" false
+    (Hashtbl.mem state.calls (unsent ^ "/export"));
+  check bool "a call cancelled before it wrote leaves the installation serving" false
+    (Hashtbl.mem state.stops unsent);
+  check bool "and its export stays callable" true
+    (match exports () with
+     | Ok [handle] -> Lane_addon_tool_export.equal_owner handle.owner unsent_handle.owner
+     | Ok _ | Error _ -> false);
+  detach config unsent;
+  await_phase clock config unsent "detached";
+  (* A mediated call counts as written from its first RPC, the controller
+     snapshot, so one cancelled after it stops the installation even though
+     its tool call never went. *)
+  let snapped = attach_export "export-hang" in
+  await clock (fun () -> match exports () with Ok [_] -> true | _ -> false);
+  await clock (fun () -> int "observation_seq" (instance config snapped) > 0);
+  let snapped_handle = List.hd (unwrap (exports ())) in
+  let snapshotted, mark_snapshotted = Eio.Promise.create () in
+  let after_snapshot ~release_controller:_ ~snapshot ~invoke =
+    ignore (snapshot ()); Eio.Promise.resolve mark_snapshotted (); Eio.Promise.await never; invoke None in
+  Eio.Fiber.first
+    (fun () -> ignore (Runtime.call_exported_tool_with_authority ~companion_publish:None ~continuation:None
+      ~on_complete:(fun () -> ()) ~on_result:(fun _ -> ()) ~authorize:(Some after_snapshot) ~principal:None
+      ~config ~access ~reserved:[] ~export:snapped_handle ~arguments:(`Assoc [])))
+    (fun () -> Eio.Promise.await snapshotted);
+  await_phase clock config snapped "detached";
+  check bool "its tool call never reached the worker" false
+    (Hashtbl.mem state.calls (snapped ^ "/export"));
+  check bool "a mediated call cancelled after its snapshot stops the installation" true
+    (Hashtbl.mem state.stops snapped);
   let remote = attach_export "export-hang" in
   await clock (fun () -> match exports () with Ok [_] -> true | _ -> false);
   let remote_handle = List.hd (unwrap (exports ())) in

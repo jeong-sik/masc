@@ -103,8 +103,8 @@ let backend env base_path delivery delivery_observed observation_observed after_
         let result=Protocol.observe protocol ~binding ~sources |> Result.map_error protocol_error in
         observation_observed ();result);
       exported_tools=(fun () -> Protocol.exported_tools protocol);
-      call_exported_tool=(fun ~companion:_ ~on_result ~authorize ~principal ~name ~arguments ->
-        let result=Protocol.call_exported_tool ~on_result ?authorize ~principal protocol ~name ~arguments
+      call_exported_tool=(fun ~companion:_ ~on_result ~on_dispatch ~authorize ~principal ~name ~arguments ->
+        let result=Protocol.call_exported_tool ~on_result ~on_dispatch ?authorize ~principal protocol ~name ~arguments
           |> Result.map_error invocation_error in
         (match member "kind" arguments with `String "submit" -> after_submit ()
          | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ -> ());

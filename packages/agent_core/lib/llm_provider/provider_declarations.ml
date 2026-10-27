@@ -12,6 +12,7 @@ type entry =
   ; request_path : string
   ; authentication : authentication
   ; default_model : string option
+  ; discovery_timeout_s : float option
   ; max_context : int option
   ; capabilities : Capabilities.capabilities
   ; credential_scope : string option
@@ -46,7 +47,7 @@ let of_model_entry (entry : Model_catalog.provider_entry) =
     { id=entry.id;aliases=entry.aliases;
       kind=entry.kind;base_url=entry.base_url;request_path=entry.request_path;
       authentication=(if entry.requires_api_key then Caller_api_key else No_auth);
-      default_model=entry.default_model;max_context=capabilities.max_context_tokens;
+      default_model=entry.default_model;discovery_timeout_s=entry.discovery_timeout_s;max_context=capabilities.max_context_tokens;
       capabilities;credential_scope=None }
 
 let of_provider_entry (entry : Provider_catalog.entry) =
@@ -56,7 +57,7 @@ let of_provider_entry (entry : Provider_catalog.entry) =
     | Provider_catalog.Setup_token_env env -> Setup_token_env env in
   { id=entry.id;aliases=entry.aliases;
     kind=entry.kind;base_url=entry.base_url;request_path=entry.request_path;
-    authentication;default_model=entry.default_model;
+    authentication;default_model=entry.default_model;discovery_timeout_s=entry.discovery_timeout_s;
     max_context=(match entry.max_context with Some _ as n -> n
       | None -> entry.capabilities.max_context_tokens);
     capabilities=entry.capabilities;credential_scope=entry.credential_scope }
@@ -94,7 +95,7 @@ let of_catalogs ~models ~providers =
       ; base_url=entry.base_url;request_path=entry.request_path
       ; requires_api_key=(match entry.authentication with No_auth -> false
           | Caller_api_key | Api_key_env _ | Setup_token_env _ -> true)
-      ; default_model=entry.default_model;capabilities_base=None
+      ; default_model=entry.default_model;discovery_timeout_s=entry.discovery_timeout_s;capabilities_base=None
       ; capabilities_base_by_identity_kind=[];supports_parallel_tool_suppression=false
       ; serves_bare_models=[] } in
     Ids.add (normalize entry.id) provider index) policy_providers overlay in

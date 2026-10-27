@@ -179,8 +179,9 @@ let listed_beside (t : Launcher.t) =
        | _ :: _ ->
            Printf.sprintf
              " This server lists a BiDi connection all the same: a host that died stays listed \
-              until %.0f seconds pass without a poll, and a host started for another workspace \
-              can poll this server."
+              until %.0f seconds pass without a poll, the live Firefox this server's browser \
+              worker runs stays listed while that worker runs, and a host started for another \
+              workspace can poll this server."
              Browser_lane.lane_connected_window_sec)
 
 (* Count the actual decoded record, including a longer record from another

@@ -784,9 +784,8 @@ let test_turn_start_argv_shape () =
        if contains flag a
        then Alcotest.failf "turn_start_argv passes %s (container rejects it)" flag)
     M.unsupported_docker_flags;
-  (* The caller's projections have to reach the guest, and they have to sit
-     before the image: container reads everything after the image name as the
-     command. A mount that lands after it becomes an argument to [tail]. *)
+  (* Options precede the image. The image entrypoint is overridden so its
+     wrapper cannot change the requested hold process. *)
   if not (contains "/base/.masc/config:/home/keeper/.masc/config:ro" a)
   then Alcotest.fail "turn_start_argv drops mount_args";
   (match
@@ -796,13 +795,15 @@ let test_turn_start_argv_shape () =
    | Some mount_at, Some image_at when mount_at < image_at -> ()
    | _ -> Alcotest.fail "mount_args must precede the image");
   (match List.rev a with
-   | "/dev/null" :: "-f" :: "tail" :: image :: _ ->
-     Alcotest.(check string) "detached hold process follows the image"
+   | "/dev/null" :: "-f" :: image :: _ ->
+     Alcotest.(check string) "detached hold arguments follow the image"
        "masc-keeper-sandbox:local" image
    | rest ->
      Alcotest.failf
-       "turn_start_argv must end with <image> tail -f /dev/null, got: %s"
+       "turn_start_argv must end with <image> -f /dev/null, got: %s"
        (String.concat " " (List.rev rest)));
+  Alcotest.(check bool) "hold executable overrides the image entrypoint" true
+    (adjacent ~flag:"--entrypoint" ~value:"tail" a);
   List.iter
     (fun needle ->
        if not (contains needle a)

@@ -19,6 +19,8 @@ export type VerificationRunStatusLabel =
   | 'rejected'
   | 'infrastructure_unavailable'
   | 'not_reviewed'
+  | 'execution_pending'
+  | 'execution_repair_required'
   | 'commit_failed'
   | 'raised'
   | 'review_cancelled'
@@ -41,6 +43,8 @@ const BACKEND_STATUSES: readonly string[] = [
   'rejected',
   'infrastructure_unavailable',
   'not_reviewed',
+  'execution_pending',
+  'execution_repair_required',
   'commit_failed',
   'raised',
   'review_cancelled',
@@ -195,6 +199,8 @@ function parseRun(raw: unknown, index: number): VerificationRunRecord {
       requiredOutcomeFields = ['elapsed_s', 'stage', 'detail', 'tools']
       optionalFields = ['evaluator_runtime']
       break
+    case 'execution_pending':
+    case 'execution_repair_required':
     case 'commit_failed':
     case 'raised':
     case 'review_cancelled':
@@ -231,6 +237,7 @@ function parseRun(raw: unknown, index: number): VerificationRunRecord {
       : status === 'approved'
       ? stringValue(raw.reason, `${context}.reason`)
       : status === 'infrastructure_unavailable' || status === 'not_reviewed'
+        || status === 'execution_pending' || status === 'execution_repair_required'
         || status === 'commit_failed' || status === 'raised' || status === 'review_cancelled'
         ? nonEmptyString(raw.detail, `${context}.detail`)
         : undefined,

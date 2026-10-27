@@ -21,6 +21,7 @@ type entry =
   ; api_key_env : string
   ; auth : auth_mode
   ; default_model : string option
+  ; discovery_timeout_s : float option
   ; max_context : int option
   ; capabilities : Capabilities.capabilities
   ; credential_scope : string option
@@ -74,6 +75,12 @@ let validate_typed_entry (entry : entry) =
     match entry.max_context with
     | Some value when value <= 0 ->
       Error (Printf.sprintf "provider %S max_context must be positive" entry.id)
+    | Some _ | None -> Ok ()
+  in
+  let* () =
+    match entry.discovery_timeout_s with
+    | Some value when (not (Float.is_finite value)) || Float.compare value 0.0 <= 0 ->
+      Error (Printf.sprintf "provider %S discovery_timeout_s must be finite and greater than zero" entry.id)
     | Some _ | None -> Ok ()
   in
   let validate_positive_capability field = function
@@ -277,6 +284,24 @@ let member_positive_int key json =
   | value -> Ok value
 ;;
 
+let member_positive_finite_float key json =
+  let* value =
+    match member key json with
+    | `Float value -> Ok (Some value)
+    | `Int value -> Ok (Some (float_of_int value))
+    | `Intlit raw ->
+      (match float_of_string_opt raw with
+       | Some value -> Ok (Some value)
+       | None -> Error (Printf.sprintf "field %S float is out of range" key))
+    | `Null -> Ok None
+    | actual -> Error (Printf.sprintf "field %S expected float, got %s" key (json_kind actual))
+  in
+  match value with
+  | Some value when (not (Float.is_finite value)) || Float.compare value 0.0 <= 0 ->
+    Error (Printf.sprintf "field %S must be finite and greater than zero" key)
+  | value -> Ok value
+;;
+
 let member_string_list key json =
   match member key json with
   | `List items ->
@@ -318,6 +343,7 @@ let provider_fields =
   ; "request_path"
   ; "auth"
   ; "default_model"
+  ; "discovery_timeout_s"
   ; "max_context"
   ; "capabilities_base"
   ; "capabilities"
@@ -841,6 +867,7 @@ let parse_entry json =
          json)
   in
   let* default_model = with_id (member_string "default_model" json) in
+  let* discovery_timeout_s = with_id (member_positive_finite_float "discovery_timeout_s" json) in
   let* max_context_override = with_id (member_positive_int "max_context" json) in
   let* credential_scope = with_id (member_string "credential_scope" json) in
   let max_context =
@@ -857,6 +884,7 @@ let parse_entry json =
     ; api_key_env = auth_env auth
     ; auth
     ; default_model
+    ; discovery_timeout_s
     ; max_context
     ; capabilities
     ; credential_scope

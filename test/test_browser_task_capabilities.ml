@@ -5,6 +5,20 @@ module Selection = Masc.Browser_selection
 module Tools = Masc.Browser_addon_tools
 module Worker = Masc.Browser_addon_tool
 
+(* The requiredActions a discovery schema advertises are the operations this
+   table answers for. Input validation refuses a name the schema leaves out
+   before the host sees it, so a browser needed only for that work could not
+   be chosen. *)
+let test_required_actions_schema_lists_every_operation () =
+  let enum (schema : Masc_domain.tool_schema) = Yojson.Safe.Util.(schema.input_schema
+    |> member "properties" |> member "requiredActions" |> member "items" |> member "enum"
+    |> to_list |> List.map to_string) |> List.sort String.compare in
+  let operations = List.map Cap.operation_name Cap.operations |> List.sort String.compare in
+  List.iter (fun (name, schema) ->
+    check (list string) (name ^ " requiredActions are the operation table") operations (enum schema))
+    ["masc_browser_tabs", Tool_schemas_misc_toml.browser_tabs;
+     "masc_browser_session", Tool_schemas_misc_toml.browser_session]
+
 let test_bound_request_keeps_its_browser () =
   check bool "bound automatic request cannot be reselected by capabilities" true
     (Selection.choose ~required_actions:[Cap.Type_text] ~verb:Lane.Tabs_list ~bound:true
@@ -274,4 +288,5 @@ let () = run "task-aware browser choice" ["scenarios",[
   test_case "select_option is claimed where the shared script runs" `Quick test_select_option_table;
   test_case "window listing is claimed only where tabs name their window" `Quick test_list_windows_table;
   test_case "an ego connection is claimed only for what its peer does" `Quick test_ego_table;
-  test_case "the ego snapshot is claimed by the ego connection alone" `Quick test_snapshot_table]]
+  test_case "the ego snapshot is claimed by the ego connection alone" `Quick test_snapshot_table;
+  test_case "discovery schemas list every operation" `Quick test_required_actions_schema_lists_every_operation]]

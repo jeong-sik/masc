@@ -358,6 +358,8 @@ let test_stall_disposition_metadata_decodes_strictly () =
        | None -> Alcotest.fail "the encoder's own output must decode")
     [ VP.Retry_scheduled { delay = VP.Full_interval { seconds = 60.0 } }
     ; VP.Retry_scheduled { delay = VP.Shared_timer }
+    ; VP.Original_observation_scheduled {delay=VP.Shared_timer}
+    ; VP.Original_repair_required
     ; VP.No_retry_armed
     ];
   List.iter
@@ -408,6 +410,43 @@ let test_the_same_stall_is_posted_once () =
   done;
   Alcotest.(check int) "three rediscoveries, one post" 1
     (stalled_posts_for ~verification_id:"vrf-stall-1")
+;;
+
+(* Pending journal observations share one notice despite different diagnostics
+   or timer admissions. Operator repair is a distinct, non-replaying state. *)
+let test_original_observation_notice_is_posted_once_until_repair () =
+  Eio_main.run @@ fun _env ->
+  Masc.Board_dispatch.reset_for_test ();
+  let verification_id = "vrf-original-observation-stall" in
+  let notify cause disposition detail =
+    VP.notify_stalled_verification ~authority:stall_authority
+      ~subject:(VP.Task_review { task_id = "task-original-observation"; verification_id; disposition })
+      ~gate:(CA.For_testing.stalled_gate cause) ~detail
+  in
+  List.iter
+    (fun (detail, delay) ->
+       let cause = CA.For_testing.Execution_pending { detail } in
+       (match CA.For_testing.retry_request_of_stop_cause cause with
+        | CA.For_testing.Observe_original_requested -> ()
+        | CA.For_testing.Retry_requested | CA.For_testing.No_retry_requested ->
+          Alcotest.fail "pending original must request observation only");
+       notify cause (VP.Original_observation_scheduled { delay }) detail)
+    [ "journal is still open", VP.Full_interval { seconds = 60.0 }
+    ; "same original is still pending", VP.Shared_timer
+    ; "journal has no terminal yet", VP.Full_interval { seconds = 60.0 }
+    ];
+  Alcotest.(check int) "changing detail and timer do not repost the original observation" 1
+    (stalled_posts_for ~verification_id);
+  let detail = "original effect requires operator reconciliation" in
+  let cause = CA.For_testing.Execution_repair_required { detail } in
+  (match CA.For_testing.retry_request_of_stop_cause cause with
+   | CA.For_testing.No_retry_requested -> ()
+   | CA.For_testing.Retry_requested | CA.For_testing.Observe_original_requested ->
+     Alcotest.fail "repair must not request replay or continued observation");
+  notify cause VP.Original_repair_required detail;
+  notify cause VP.Original_repair_required "same repair with more diagnostic detail";
+  Alcotest.(check int) "repair is new information and is posted once" 2
+    (stalled_posts_for ~verification_id)
 ;;
 
 (* Re-submitting one task posted the same 'Verify: <title>' each time
@@ -807,22 +846,24 @@ let test_system_llm_retry_disposition_is_typed () =
   let module For_testing = CA.For_testing in
   (match For_testing.retry_request_of_stop_cause (not_reviewed_stop ~retryable_runtimes:[ "slot" ]) with
    | For_testing.Retry_requested -> ()
-   | For_testing.No_retry_requested ->
+   | For_testing.Observe_original_requested | For_testing.No_retry_requested ->
      Alcotest.fail "a candidate whose failure passes with time must request a retry");
   (match For_testing.retry_request_of_stop_cause (not_reviewed_stop ~retryable_runtimes:[]) with
    | For_testing.No_retry_requested -> ()
-   | For_testing.Retry_requested ->
+   | For_testing.Observe_original_requested | For_testing.Retry_requested ->
      Alcotest.fail "a review with no such candidate must request nothing");
   let disposition =
     For_testing.stall_disposition_of_scheduling ~retry_interval_sec:60.0
   in
   (match disposition For_testing.Retry_not_requested with
    | VP.No_retry_armed -> ()
+   | VP.Original_observation_scheduled _ | VP.Original_repair_required
    | VP.Retry_scheduled _ -> Alcotest.fail "a request for nothing must not post a retry");
   (match disposition (For_testing.Retry_admitted For_testing.Armed_timer) with
    | VP.Retry_scheduled { delay = VP.Full_interval { seconds } } ->
      Alcotest.(check (float 0.0))
        "a timer this stall armed names the lane interval" 60.0 seconds
+   | VP.Original_observation_scheduled _ | VP.Original_repair_required
    | VP.Retry_scheduled { delay = VP.Shared_timer } | VP.No_retry_armed ->
      Alcotest.fail "an armed timer must post the full interval");
   List.iter
@@ -831,6 +872,7 @@ let test_system_llm_retry_disposition_is_typed () =
        | VP.Retry_scheduled { delay = VP.Shared_timer } -> ()
        | VP.Retry_scheduled { delay = VP.Full_interval _ } ->
          Alcotest.fail "a joined timer must not promise the full interval"
+       | VP.Original_observation_scheduled _ | VP.Original_repair_required
        | VP.No_retry_armed -> Alcotest.fail "a joined timer is still an armed retry")
     [ For_testing.Joined_running_timer; For_testing.Already_pending ]
 
@@ -900,7 +942,7 @@ let test_system_llm_stop_and_retry_lines_name_the_next_move () =
 let test_only_a_reviewed_stop_can_request_a_retry () =
   (match CA.For_testing.retry_request_of_stop_cause retryable_stop with
    | CA.For_testing.Retry_requested -> ()
-   | CA.For_testing.No_retry_requested ->
+   | CA.For_testing.Observe_original_requested | CA.For_testing.No_retry_requested ->
      Alcotest.fail "a retryable reviewed stop must carry its request");
   Alcotest.(check string) "a reviewed stop is keyed by its gate" "evaluator_unavailable"
     (CA.For_testing.stalled_gate retryable_stop);
@@ -908,12 +950,13 @@ let test_only_a_reviewed_stop_can_request_a_retry () =
     (fun (cause, label) ->
        (match CA.For_testing.retry_request_of_stop_cause cause with
         | CA.For_testing.No_retry_requested -> ()
-        | CA.For_testing.Retry_requested -> Alcotest.failf "%s must not request a retry" label);
+        | CA.For_testing.Observe_original_requested | CA.For_testing.Retry_requested -> Alcotest.failf "%s must not request a retry" label);
        let expected_gate =
          match cause with
          | CA.For_testing.Not_reviewed { gate; _ } -> gate
          | CA.For_testing.Infrastructure_unavailable _
          | CA.For_testing.Commit_failed _
+         | CA.For_testing.Execution_pending _ | CA.For_testing.Execution_repair_required _
          | CA.For_testing.Raised _ -> label
        in
        Alcotest.(check string) ("board key of " ^ label) expected_gate
@@ -1136,7 +1179,8 @@ let test_joining_a_running_retry_timer_posts_no_interval () =
     (match disposition first with
      | VP.Retry_scheduled { delay = VP.Full_interval { seconds } } ->
        Alcotest.(check (float 0.0)) "the first deferral armed the timer" 60.0 seconds
-     | VP.Retry_scheduled { delay = VP.Shared_timer } | VP.No_retry_armed ->
+     | VP.Original_observation_scheduled _ | VP.Original_repair_required
+   | VP.Retry_scheduled { delay = VP.Shared_timer } | VP.No_retry_armed ->
        Alcotest.fail "the first deferral must arm the full interval");
     let joined = admit (CA.For_testing.Targets [ retry_key "task-b" "vrf-2" ]) in
     let repeated = admit (CA.For_testing.Targets [ retry_key "task-a" "vrf-1" ]) in
@@ -1146,6 +1190,7 @@ let test_joining_a_running_retry_timer_posts_no_interval () =
          | VP.Retry_scheduled { delay = VP.Shared_timer } -> ()
          | VP.Retry_scheduled { delay = VP.Full_interval _ } ->
            Alcotest.fail "a later arrival must not be promised the full interval"
+         | VP.Original_observation_scheduled _ | VP.Original_repair_required
          | VP.No_retry_armed -> Alcotest.fail "a later arrival is still retried")
       [ joined; repeated ];
     Alcotest.(check int) "one timer for the whole batch" 1 !waits;
@@ -1888,7 +1933,7 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
                  Eio.Promise.resolve resolve_run_completed ()
                | _ -> ()));
           Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn
-            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
+            (fun ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
                on_tool_result
                  ~input:(`Assoc [ "path", `String "evidence.md" ])
                  (Tool_result.ok
@@ -2329,7 +2374,7 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
           in
           W.write_backlog config { backlog with tasks };
           Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn
-            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt ?system_prompt:_ ?goal_blocks:_
+            (fun ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt ?system_prompt:_ ?goal_blocks:_
                  ~report_tool_schema:_ ~lookup ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
                captured_prompt := Some prompt;
                captured_lookup := Some
@@ -5410,6 +5455,8 @@ let () =
         test_stall_disposition_metadata_decodes_strictly;
       Alcotest.test_case "the same stall is posted once" `Quick
         test_the_same_stall_is_posted_once;
+      Alcotest.test_case "original observation notice is posted once until repair" `Quick
+        test_original_observation_notice_is_posted_once_until_repair;
       Alcotest.test_case "a different stall still reaches the board" `Quick
         test_a_different_stall_still_reaches_the_board;
       Alcotest.test_case "a disposition change is its own stall" `Quick

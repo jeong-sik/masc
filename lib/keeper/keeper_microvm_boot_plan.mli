@@ -26,11 +26,14 @@ type t =
   }
 (** [environment] and [labels] contain only stable requested values. DNS,
     policy gateway/port, owner PID and start time belong to boot execution,
-    not to the plan. Credential mount paths are those of the guest snapshot. *)
+    not to the plan. Credential mount paths are those of the guest snapshot.
+    [command] is the exact init process: a nonempty executable followed by its
+    arguments. Boot overrides the image entrypoint with that executable. *)
 
 val label_key : string
 
 type invalid_plan =
+  | Missing_executable
   | Duplicate_environment_key of string
   | Duplicate_label_key of string
   | Duplicate_mount_destination of string
@@ -107,6 +110,10 @@ type refusal =
   | Image_command_unavailable of string
   | Runtime_reports_other_than_asked of difference list
 
+val refusal_message : refusal -> string
+(** Operator diagnostic. Runtime disagreement names the differing fields,
+    never their environment, credential or other observed/requested values. *)
+
 type assessment =
   | Matches_plan
   | Replace of difference list
@@ -129,6 +136,8 @@ val assess :
     replacement before same-label runtime differences are considered. Unreadable
     facts always refuse. A same-plan readable identity also requires actual image
     metadata bound to that guest's descriptor/platform. Metadata failure refuses
-    without replacing the guest. The explicit command is compared after the
-    image's OCI entrypoint, without changing the requested-plan digest.
+    without replacing the guest. The renderer overrides the image's OCI
+    entrypoint with the requested executable, so runtime argv must equal
+    [plan.command] exactly. Image metadata still binds descriptor/platform;
+    an image's default entrypoint cannot authorize a command prefix.
     [Matches_plan] is a comparison result, not lifecycle authority. *)

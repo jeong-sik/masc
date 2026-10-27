@@ -64,7 +64,7 @@ type host_port = {
 type connection = {
   observe : binding:Yojson.Safe.t -> sources:Yojson.Safe.t -> (output, string) result;
   exported_tools : unit -> Mcp_protocol.Mcp_types.tool list;
-  call_exported_tool : companion:Lane_addon_worker_protocol.companion_admission option -> on_result:(Mcp_protocol.Mcp_types.tool_result -> unit) -> authorize:Lane_addon_call_context.mediation option -> principal:Lane_addon_call_context.principal -> name:string -> arguments:Yojson.Safe.t ->
+  call_exported_tool : companion:Lane_addon_worker_protocol.companion_admission option -> on_result:(Mcp_protocol.Mcp_types.tool_result -> unit) -> on_dispatch:(unit -> unit) -> authorize:Lane_addon_call_context.mediation option -> principal:Lane_addon_call_context.principal -> name:string -> arguments:Yojson.Safe.t ->
     (Mcp_protocol.Mcp_types.tool_result, Lane_addon_call_context.invocation_error) result;
   action_schema : unit -> Yojson.Safe.t option;
   operator_schema : unit -> Yojson.Safe.t option;
@@ -1749,8 +1749,8 @@ let backend ~store ~artifact_store () = match !override with
                 companion_tools=(fun () -> Lane_addon_native_worker.companion_tools worker);
                 observation_effect=(fun name -> Lane_addon_native_worker.observation_effect worker name);
                 call_operator=(fun ~admit ~arguments -> Lane_addon_native_worker.call_operator worker ~admit ~arguments);
-                call_exported_tool=(fun ~companion ~on_result ~authorize ~principal ~name ~arguments ->
-                  Lane_addon_native_worker.call_exported_tool ~on_result ?companion ?authorize ~principal ?finalize_result worker ~name ~arguments
+                call_exported_tool=(fun ~companion ~on_result ~on_dispatch ~authorize ~principal ~name ~arguments ->
+                  Lane_addon_native_worker.call_exported_tool ~on_result ~on_dispatch ?companion ?authorize ~principal ?finalize_result worker ~name ~arguments
                   |> Result.map_error (function
                     | Lane_addon_native_worker.Protocol (Lane_addon_worker_protocol.Host_refusal refusal) -> Lane_addon_call_context.Host_refusal refusal
                     | (Lane_addon_native_worker.Invalid_specification _ | Start_failed _ | Admission _
@@ -1813,8 +1813,8 @@ let backend ~store ~artifact_store () = match !override with
             companion_tools=(fun () -> Lane_addon_worker.companion_tools worker);
             observation_effect=(fun name -> Lane_addon_worker.observation_effect worker name);
             call_operator=(fun ~admit ~arguments -> Lane_addon_worker.call_operator worker ~admit ~arguments);
-            call_exported_tool=(fun ~companion ~on_result ~authorize ~principal ~name ~arguments ->
-              Lane_addon_worker.call_exported_tool ~on_result ?companion ?authorize ~principal worker ~name ~arguments
+            call_exported_tool=(fun ~companion ~on_result ~on_dispatch ~authorize ~principal ~name ~arguments ->
+              Lane_addon_worker.call_exported_tool ~on_result ~on_dispatch ?companion ?authorize ~principal worker ~name ~arguments
               |> Result.map_error (function
                 | Lane_addon_worker.Host_refusal refusal -> Lane_addon_call_context.Host_refusal refusal
                 | (Lane_addon_worker.Stopped | Invalid_package _ | Docker_failed _ | Engine_failed _ | Engine_fault _ | Lifecycle _ | Protocol_failed _ | Invalid_observation _) as error ->
@@ -1876,11 +1876,34 @@ let manager config =
                        ~termination_grace_seconds:Browser_gecko_sweep.termination_grace_seconds;
                      gecko_kept = [] } in
       Hashtbl.add managers root m; m
+let installation_exports ((e : entry), connection) =
+  connection.worker.exported_tools () |> List.filter_map (fun (tool : Mcp_protocol.Mcp_types.tool) ->
+    if List.mem tool.Mcp_protocol.Mcp_types.name e.package.exported_tools
+    then Some (Lane_addon_tool_export.create ~owner:connection.export_owner ~tool) else None)
+(* Public tools are the exports of MCP tool installations. Keeper tool lists,
+   MCP tools/list and lookups by name read only these, and one public name
+   names one installation. A browser service's export is called only by the
+   browser host, which finds the installation by its identity; several browser
+   installations may export the same name. *)
+let serves_public_tools (service : Lane_addon_types.worker_service) = match service with
+  | Mcp_tools -> true
+  | Browser_service -> false
+let public_reading (reading : live_reading) = ({
+  ready = List.filter (fun ((e : entry), _) -> serves_public_tools e.package.worker_service) reading.ready;
+  unready = List.filter (fun (unready : Lane_addon_unready.t) -> serves_public_tools unready.service) reading.unready;
+} : live_reading)
 let reading_exports (reading : live_reading) =
-  reading.ready |> List.concat_map (fun ((e : entry), connection) ->
-    connection.worker.exported_tools () |> List.filter_map (fun (tool : Mcp_protocol.Mcp_types.tool) ->
-      if List.mem tool.Mcp_protocol.Mcp_types.name e.package.exported_tools
-      then Some (Lane_addon_tool_export.create ~owner:connection.export_owner ~tool) else None))
+  List.concat_map installation_exports (public_reading reading).ready
+let browser_reading_exports (reading : live_reading) =
+  reading.ready |> List.filter (fun ((e : entry), _) -> not (serves_public_tools e.package.worker_service))
+  |> List.concat_map installation_exports
+(* [export] is still served by the incarnation that published it: a public
+   export where its name is not quarantined, a browser export by identity. *)
+let export_current ~reserved (reading : live_reading) (export : tool_export) =
+  let same (current : tool_export) =
+    Lane_addon_tool_export.equal_owner current.owner export.owner && current.tool = export.tool in
+  List.exists same (Lane_addon_tool_export.isolate ~reserved (reading_exports reading)).exports
+  || List.exists same (browser_reading_exports reading)
 (* A held export that is no longer live names its own incarnation's state when
    that incarnation is still visible; [ended] is the text when it is not. *)
 let installation_ended = "Add-on tool installation is no longer available"
@@ -1911,7 +1934,7 @@ let current_reading ~config ~access =
   | Some m -> live_reading m access
 
 let tool_export_snapshot ~config ~access ~reserved = Eio_context.run_on_owner_domain (fun () ->
-  let reading = current_reading ~config ~access in
+  let reading = public_reading (current_reading ~config ~access) in
   let isolated = Lane_addon_tool_export.isolate ~reserved (reading_exports reading) in
   ({ exports = isolated.exports; conflicts = isolated.conflicts; unready = reading.unready } : export_snapshot))
 
@@ -1930,7 +1953,7 @@ type tool_execution_snapshot = {
   unready : Lane_addon_unready.t list;
 }
 let tool_execution_snapshot ~config ~access ~reserved = Eio_context.run_on_owner_domain (fun () ->
-  let reading = current_reading ~config ~access in
+  let reading = public_reading (current_reading ~config ~access) in
   let isolated = Lane_addon_tool_export.isolate ~reserved (reading_exports reading) in
   let serving = List.filter_map (fun (export : tool_export) ->
     match List.find_opt (fun ((entry : entry), connection) ->
@@ -1949,7 +1972,7 @@ let tool_execution_snapshot ~config ~access ~reserved = Eio_context.run_on_owner
   ({serving;conflicts=isolated.conflicts;unready=reading.unready} : tool_execution_snapshot))
 
 let tool_export_reading ~config ~access ~reserved = Eio_context.run_on_owner_domain (fun () ->
-  let reading = current_reading ~config ~access in
+  let reading = public_reading (current_reading ~config ~access) in
   unique_exports ~reserved (reading_exports reading)
   |> Result.map (fun exports -> ({ exports; unready = reading.unready } : export_reading)))
 
@@ -2082,15 +2105,16 @@ let call_operator ~config ~access ~instance_id ~expected_incarnation ~arguments 
 type browser_reading = { services : browser_service list; unready : Lane_addon_unready.t list }
 let browser_reading (reading : live_reading) =
   let services = reading.ready |> List.filter_map (fun ((e : entry), connection) ->
-    match connection.worker.browser with
-    | Some _ -> Some {instance_id=e.instance_id;owner=connection.export_owner}
-    | None -> None) in
+    if serves_public_tools e.package.worker_service then None
+    else Some {instance_id=e.instance_id;owner=connection.export_owner}) in
   let unready = reading.unready |> List.filter (fun (unready : Lane_addon_unready.t) ->
     match unready.service with Browser_service -> true | Mcp_tools -> false) in
   { services; unready }
 let browser_service_reading ~config ~access = Eio_context.run_on_owner_domain (fun () ->
   browser_reading (current_reading ~config ~access))
 let browser_services ~config ~access = (browser_service_reading ~config ~access).services
+let browser_export_reading ~config ~access = Eio_context.run_on_owner_domain (fun () ->
+  browser_reading_exports (current_reading ~config ~access))
 (* Runs on the owner domain; both callers enter it through [with_tool_call_owner]. *)
 let call_manager_browser_service m ~access ~(service:browser_service) ~command =
     let* ()=match command with
@@ -2213,9 +2237,7 @@ let retain_tool_request_owner ~config ~access ~reserved ~(export : tool_export) 
     let* m = match Hashtbl.find_opt managers root with
       | Some m -> Ok m | None -> Error (Unavailable "Add-on owner is unavailable") in
     let reading = live_reading m access in
-    let snapshot = Lane_addon_tool_export.isolate ~reserved (reading_exports reading) in
-    let* () = if List.exists (fun (current : tool_export) ->
-        Lane_addon_tool_export.equal_owner current.owner export.owner && current.tool = export.tool) snapshot.exports
+    let* () = if export_current ~reserved reading export
       then Ok () else Error (ended_export ~ended:installation_ended reading export) in
     let* e = match Hashtbl.find_opt m.entries export.instance_id with
       | Some e -> Ok e | None -> Error (Unavailable "Add-on tool connection is unavailable") in
@@ -2243,9 +2265,7 @@ let with_tool_request_destination_on_owner ~config ~access ~reserved ~(export : 
     let* prepared=Eio.Cancel.protect (fun () ->
       (* Acquiring the serializer can yield. Inspect authority only afterwards. *)
       let reading = live_reading m access in
-      let snapshot = Lane_addon_tool_export.isolate ~reserved (reading_exports reading) in
-      let* () = if List.exists (fun (current : tool_export) ->
-          Lane_addon_tool_export.equal_owner current.owner export.owner && current.tool=export.tool) snapshot.exports
+      let* () = if export_current ~reserved reading export
         then Ok () else Error (ended_export ~ended:installation_ended reading export) in
       let* e, owner = match Hashtbl.find_opt m.entries export.instance_id with
         | Some ({configuration=Some owner;connection=Some connection;_} as e)
@@ -2263,9 +2283,7 @@ let with_tool_request_destination_on_owner ~config ~access ~reserved ~(export : 
         | Some declaration -> Ok declaration
         | None -> Error (Unavailable "Fresh Add-on declaration no longer permits the configured installation") in
       let reading = live_reading m access in
-      let current=Lane_addon_tool_export.isolate ~reserved (reading_exports reading) in
-      let* ()=if List.exists (fun (candidate : tool_export) ->
-          Lane_addon_tool_export.equal_owner candidate.owner export.owner && candidate.tool=export.tool) current.exports
+      let* ()=if export_current ~reserved reading export
         then Ok () else Error (ended_export ~ended:"Add-on export ended during declaration confirmation" reading export) in
       let destination = {
         installation_id=Lane_addon_tool_request_owner.installation_id
@@ -2538,10 +2556,7 @@ let call_exported_tool_on_owner ~companion_publish ~continuation ~on_complete ~o
     let* m = match Hashtbl.find_opt managers root with
       | Some m -> Ok m | None -> Error (Unavailable "Add-on owner is unavailable") in
     let reading = live_reading m access in
-    let snapshot = Lane_addon_tool_export.isolate ~reserved (reading_exports reading) in
-    let exports = snapshot.exports in
-    let* () = if List.exists (fun (current : tool_export) ->
-        Lane_addon_tool_export.equal_owner current.owner export.owner && current.tool = export.tool) exports then Ok ()
+    let* () = if export_current ~reserved reading export then Ok ()
       else Error (ended_export ~ended:installation_ended reading export) in
     let* e, original = match Hashtbl.find_opt m.entries export.instance_id with
       | Some ({connection=Some connection; _} as e)
@@ -2562,6 +2577,10 @@ let call_exported_tool_on_owner ~companion_publish ~continuation ~on_complete ~o
       | Lane_addon_call_context.Reads_only -> 0
       | Lane_addon_call_context.May_change -> 1 in
     e.active_tool_calls <- e.active_tool_calls + in_flight;
+    (* Whether this call wrote anything to the worker. A companion call
+       reserves its origin before the RPC, which is already an effect. *)
+    let reached = ref false in
+    let on_dispatch () = reached := true in
     Fun.protect ~finally:(fun () -> e.active_tool_calls <- e.active_tool_calls - in_flight) (fun () ->
     try
       let principal = match principal with
@@ -2571,11 +2590,12 @@ let call_exported_tool_on_owner ~companion_publish ~continuation ~on_complete ~o
           | Lane_addon_sources.Operator_configuration -> Lane_addon_call_context.Operator
           | Lane_addon_sources.Unauthenticated -> Lane_addon_call_context.Anonymous in
       let connection=original.worker in
-      let result = if List.mem export.tool.name (connection.companion_tools ()) then
+      let result = if List.mem export.tool.name (connection.companion_tools ()) then (
+          reached := true;
           invoke_companion_export ~sw m ~config ~access ~principal ~companion_publish ~continuation ~export ~arguments e original
             (fun companion -> connection.call_exported_tool ~companion:(Some companion)
-              ~on_result ~authorize ~principal ~name:export.tool.name ~arguments)
-        else connection.call_exported_tool ~companion:None ~on_result ~authorize ~principal ~name:export.tool.name ~arguments in
+              ~on_result ~on_dispatch ~authorize ~principal ~name:export.tool.name ~arguments))
+        else connection.call_exported_tool ~companion:None ~on_result ~on_dispatch ~authorize ~principal ~name:export.tool.name ~arguments in
       (* Worker-owned state is not an input source, so source-change hints alone
          cannot reveal a tool's effect. Refresh its observation after a completed
          reply, including a worker error that may have changed machine state.
@@ -2608,9 +2628,12 @@ let call_exported_tool_on_owner ~companion_publish ~continuation ~on_complete ~o
         | Lane_addon_call_context.Host_refusal refusal -> Host_refusal refusal
         | Transport_error detail -> Outcome_unknown detail)
     with Eio.Cancel.Cancelled _ as exn ->
-      (* This caller has a shorter lifetime than the observer. Retire both
-         projections before handing cleanup to the server-owned switch. *)
-      Eio.Cancel.protect (fun () ->
+      (* A call cancelled before it wrote to the worker, such as one waiting
+         behind another call, changed nothing there; the worker keeps serving.
+         Otherwise this caller has a shorter lifetime than the observer:
+         retire both projections before handing cleanup to the server-owned
+         switch. *)
+      if !reached then Eio.Cancel.protect (fun () ->
         retire_admission e;
         e.state <- fail_state e (Lifecycle.Effect_outcome_unknown "exported tool call cancelled; effect outcome unknown");
         notify_exports m e;
@@ -2703,13 +2726,13 @@ let browser_service_status ~config ~access ~instance_id = Eio_context.run_on_own
          | Detaching|Detached -> Browser_retired
          | Failed _ ->
              (match e.connection with
-              | Some connection when e.started && Option.is_some connection.worker.browser ->
+              | Some connection when e.started && not (serves_public_tools e.package.worker_service) ->
                   Browser_refresh_needed {instance_id;owner=connection.export_owner}
               | None|Some _ -> Browser_unavailable)
          | Attached|Observing ->
              if not e.started then Browser_unavailable else
              match e.connection with
-             | Some connection when Option.is_some connection.worker.browser ->
+             | Some connection when not (serves_public_tools e.package.worker_service) ->
                  Browser_ready {instance_id;owner=connection.export_owner}
              | None|Some _ -> Browser_unavailable)
     | Some _ -> Browser_unavailable
@@ -4718,7 +4741,7 @@ module For_testing = struct
   type nonrec connection = connection = {
     observe : binding:Yojson.Safe.t -> sources:Yojson.Safe.t -> (output, string) result;
     exported_tools : unit -> Mcp_protocol.Mcp_types.tool list;
-    call_exported_tool : companion:Lane_addon_worker_protocol.companion_admission option -> on_result:(Mcp_protocol.Mcp_types.tool_result -> unit) -> authorize:Lane_addon_call_context.mediation option -> principal:Lane_addon_call_context.principal -> name:string -> arguments:Yojson.Safe.t ->
+    call_exported_tool : companion:Lane_addon_worker_protocol.companion_admission option -> on_result:(Mcp_protocol.Mcp_types.tool_result -> unit) -> on_dispatch:(unit -> unit) -> authorize:Lane_addon_call_context.mediation option -> principal:Lane_addon_call_context.principal -> name:string -> arguments:Yojson.Safe.t ->
       (Mcp_protocol.Mcp_types.tool_result, Lane_addon_call_context.invocation_error) result;
     action_schema : unit -> Yojson.Safe.t option;
     operator_schema : unit -> Yojson.Safe.t option;

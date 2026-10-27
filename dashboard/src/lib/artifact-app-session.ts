@@ -74,13 +74,22 @@ export class ArtifactAppSession {
       this.mode='unknown';this.wanted=false;this.retain();this.options.result(this.instance,this.change,'error');this.emit()
     }
   }
+  private discardAppliedImports(state:AppState):void {
+    const remaining=[]
+    for(const copy of this.imported){
+      const applied=equalJson(copy.data,state.data)
+        &&(copy.request?appRequestApplied(state,copy.request):true)
+      if(applied)discardAppInput(copy)
+      else remaining.push(copy)
+    }
+    this.imported=remaining
+  }
   private acknowledge(saved:AppState,operation:Operation):void {
     resourceOrigins(saved.data)
     this.server=saved;this.frozen=null;this.mode='ready'
     if(equalJson(this.data,saved.data)){
       if(this.recovery)discardAppInput(this.recovery)
-      for(const copy of this.imported)discardAppInput(copy)
-      this.imported=[];this.recovery=null
+      this.discardAppliedImports(saved);this.recovery=null
     }else this.retain()
     this.options.result(operation.instance,operation.change,'saved');this.emit()
     if(this.wanted)void this.save()
@@ -95,7 +104,16 @@ export class ArtifactAppSession {
       if(this.frozen&&appRequestApplied(current,this.frozen.request)){this.acknowledge(current,this.frozen);return}
       resourceOrigins(current.data)
       this.server=current
-      this.mode=this.frozen&&current.version===this.frozen.request.expected_version
+      if(!this.frozen){
+        const unchanged=equalJson(this.data,current.data)
+        this.mode=unchanged?'ready':'conflict';this.wanted=false
+        if(unchanged){
+          if(this.recovery)discardAppInput(this.recovery)
+          this.discardAppliedImports(current);this.recovery=null
+        }else this.retain()
+        this.emit();return
+      }
+      this.mode=current.version===this.frozen.request.expected_version
         &&!current.receipts.some(receipt=>receipt.id===this.frozen!.request.id)?'retry':'conflict'
       this.wanted=false;this.retain();this.emit()
     }catch{if(this.current()){this.mode='unknown';this.wanted=false;this.options.result(this.instance,this.change,'error');this.emit()}}

@@ -317,6 +317,7 @@ let verdict_question_of_json (json : Yojson.Safe.t) : (AR.verdict_question, stri
 
 let lookup_root_to_json (root : AR.lookup_root) : Yojson.Safe.t =
   match root with
+  | AR.Producer_namespace { root } -> `Assoc [ "producer_namespace", `String root ]
   | AR.Producer_tree paths -> `Assoc [ "producer_tree", `List (List.map (fun p -> `String p) paths) ]
   | AR.Producer_root_absent { root } -> `Assoc [ "producer_root_absent", `String root ]
 ;;
@@ -336,27 +337,15 @@ let lookup_root_of_json (json : Yojson.Safe.t) : (AR.lookup_root, string) result
   in
   match json with
   | `Assoc fields ->
-    let has_tree = List.mem_assoc "producer_tree" fields in
-    let has_absent = List.mem_assoc "producer_root_absent" fields in
-    if has_tree && has_absent
-    then Error "lookup_root must not carry both producer_tree and producer_root_absent"
-    else if not has_tree && not has_absent
-    then Error "lookup_root must be producer_tree or producer_root_absent"
-    else (
-      let* () =
-        require_fields ~what:"lookup_root"
-          ~expected:(if has_tree then [ "producer_tree" ] else [ "producer_root_absent" ])
-          fields
-      in
-      if has_tree
-      then (
+    (match fields with
+    | [ "producer_tree", _ ] ->
         let* paths = string_list "producer_tree" fields in
-        Ok (AR.Producer_tree paths))
-      else (
-        let* value = field "producer_root_absent" fields in
-        match value with
-        | `String root when String.trim root <> "" -> Ok (AR.Producer_root_absent { root })
-        | _ -> Error "lookup_root producer_root_absent must be non-blank text"))
+        Ok (AR.Producer_tree paths)
+    | [ "producer_namespace", `String root ] when String.trim root <> "" ->
+        Ok (AR.Producer_namespace { root })
+    | [ "producer_root_absent", `String root ] when String.trim root <> "" ->
+        Ok (AR.Producer_root_absent { root })
+    | _ -> Error "lookup_root must contain exactly one valid producer root variant")
   | _ -> Error "lookup_root must be an object"
 ;;
 

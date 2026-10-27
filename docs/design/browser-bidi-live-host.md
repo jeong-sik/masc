@@ -381,7 +381,9 @@ client:
 
 The record can also say that no host runs while the server lists a BiDi
 connection: a host that died stays listed until 120 seconds pass without a
-poll, and a host started for another workspace can poll this server. The
+poll, the live Firefox this server's browser worker runs stays listed while
+that worker runs, and a host started for another workspace can poll this
+server. The
 paragraph says so beside what the record says.
 
 Attaching again is the host command alone. A host that is stopped, or ends

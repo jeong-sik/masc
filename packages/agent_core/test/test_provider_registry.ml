@@ -128,7 +128,7 @@ let test_refresh_rejects_missing_endpoint_declarations () =
   @@ fun env ->
   Eio.Switch.run
   @@ fun sw ->
-  match Provider_registry.refresh_llama_endpoints ~sw ~net:env#net ~endpoints:[] with
+  match Provider_registry.refresh_llama_endpoints ~sw ~net:env#net ~endpoints:[] () with
   | Error Provider_registry.No_endpoints_declared ->
     check
       int
@@ -847,6 +847,7 @@ let provider_catalog_entry ?(aliases = []) id : Provider_catalog.entry =
   ; api_key_env = ""
   ; auth = No_auth
   ; default_model = None
+  ; discovery_timeout_s = None
   ; max_context = None
   ; capabilities = Capabilities.default_capabilities
   ; credential_scope = None

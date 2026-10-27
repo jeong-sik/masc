@@ -73,6 +73,7 @@ let valid_typed_entry
   ; api_key_env
   ; auth
   ; default_model
+  ; discovery_timeout_s = None
   ; max_context
   ; capabilities
   ; credential_scope

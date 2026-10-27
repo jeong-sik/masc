@@ -232,7 +232,8 @@ Marionette 포트에 관한 두 줄(`--marionette-port` 있음·없음)은 2026-
 **browser export 는 host 만 불러요**
 - `Browser_service` 설치의 export 는 Keeper 도구 목록과 MCP `tools/list` 에 오르지 않아요. 공개 export 를 읽는 함수(`tool_export_snapshot`, `tool_export_reading`)는 `Mcp_tools` 설치만 봐요. 설치의 타입으로 가르므로 이름이나 문자열을 보지 않아요.
 - `Browser_addon_host` 는 browser 서비스를 출처로 따로 읽어요. 그래서 다섯 패키지가 모두 `browser_command` 라는 같은 이름을 내보내도 서로 겹치지 않아요.
-- Keeper 는 지금도 있는 host 도구(`Browser*`, `masc_browser_*`, 2.4)로 브라우저를 써요. S-L3 에서 worker 의 `browser_command` 로만 되던 verb 가 있는지 목록을 만들고, 있으면 먼저 host 도구에 더해요.
+- Keeper 는 지금도 있는 host 도구(`Browser*`, `masc_browser_*`, 2.4)로 브라우저를 써요. MCP 호출자도 `masc_browser_*` 를 써요. 이 일곱 도구는 MCP `tools/list` 에 올라요.
+- worker 의 `browser_command` 로만 되던 일은 둘이었어요. 문서 원문 읽기는 `BrowserRead` `mode = "html"` 로, Keeper 가 아닌 호출자의 스크린샷은 결과의 이미지 블록으로 host 도구에 옮겨요. export 를 host 전용으로 바꾸는 PR(#46183)에서 같이 해요.
 - 그래서 worker export 이름은 공개 이름 규칙(2.4)과 상관이 없어지고, #45360 의 넓은 실패에도 browser 는 걸리지 않아요.
 
 **Skill**

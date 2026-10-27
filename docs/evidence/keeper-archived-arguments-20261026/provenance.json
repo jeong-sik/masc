@@ -1,0 +1,36 @@
+{
+  "schema": "masc.evidence.archived-argument-reference.v1",
+  "verified_at_utc": "2026-10-26T14:46:49.572739+00:00",
+  "source_kind": "private captured provider input, canonical checkpoint and immutable tool blob",
+  "snapshot_line": 66,
+  "snapshot_line_sha256_without_newline": "72238d03fb0d9fd542da946a3065e9dede87307ff3cba1b149b3c41cf085b068",
+  "provider_message_index": 32,
+  "provider_message_sha256": "cdd96474a2c60fcff96a4ff0f752e0bce454c331539caad17a1abbd92cec41f5",
+  "checkpoint_sha256_at_verification": "a883ba5fcc517b0378fb66b053df6950fbf47710d5e5d3be9d885493aacae9bb",
+  "checkpoint_json_path": "$.messages[1096].content[1]",
+  "original_blob_sha256": "ffa1c74448d6114fd28dfac03605cf3bed8de4e0ada3cd189d921384fc3e8c08",
+  "original_blob_bytes": 929,
+  "original_argument_fields": [
+    "file_path",
+    "content"
+  ],
+  "provider_argument_fields": [
+    "_blob"
+  ],
+  "original_json_equals_checkpoint_input": true,
+  "historical_blob_input_count": 467,
+  "historical_blob_input_counts_by_tool": {
+    "Execute": 285,
+    "Write": 150,
+    "masc_board_post": 16,
+    "Edit": 4,
+    "masc_board_comment": 12
+  },
+  "write_schema_sha256": "a962e2e80564a2c254663729b8a2c65e4cb988848ec4d7b8f58e5edd963907b5",
+  "write_schema_required_fields": [
+    "file_path",
+    "content"
+  ],
+  "new_model_calls_executed": 0,
+  "scope": "Historical argument reference provenance; no claim of reduced fresh-call errors."
+}

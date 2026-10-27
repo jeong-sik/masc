@@ -96,6 +96,7 @@ val recover_stop :
 val exported_tools : t -> Mcp_protocol.Mcp_types.tool list
 
 val call_exported_tool : ?on_result:(Mcp_protocol.Mcp_types.tool_result -> unit) ->
+  ?on_dispatch:(unit -> unit) ->
   ?companion:Lane_addon_worker_protocol.companion_admission -> ?authorize:Lane_addon_call_context.mediation -> ?principal:Lane_addon_call_context.principal -> t -> name:string -> arguments:Yojson.Safe.t ->
   (Mcp_protocol.Mcp_types.tool_result, error) result
 (** Calls only a declared, initialized export. A stop revokes admission before

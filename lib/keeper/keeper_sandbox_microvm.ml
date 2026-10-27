@@ -775,8 +775,13 @@ let render_turn_start_argv_for
       ~image
       ~constraints
       ~working_directory
-      ~command
+      ~command:(executable, arguments)
   =
+  let entrypoint_args, command_args =
+    match backend with
+    | Backend.Apple_container -> ["--entrypoint"; executable], arguments
+    | Backend.Nerdctl_kata | Backend.Microsandbox -> [], executable :: arguments
+  in
   let expressed, refused, dropped =
     List.fold_left
       (fun (expressed, refused, dropped) guest_constraint ->
@@ -834,8 +839,9 @@ let render_turn_start_argv_for
        @ mount_args
        @ [ "--workdir"; working_directory ]
        @ network_args
+       @ entrypoint_args
        @ Backend.command_separator backend
-       @ [ image ] @ command)
+       @ [ image ] @ command_args)
 ;;
 
 let turn_start_argv_for backend ~container_name ~label_args ~uid ~gid
@@ -844,7 +850,7 @@ let turn_start_argv_for backend ~container_name ~label_args ~uid ~gid
     ~backend_label_args:["--label"; microvm_backend_label_key ^ "=" ^ Backend.to_string backend]
     ~user:(Printf.sprintf "%d:%d" uid gid) ~guest_size ~network_args ~mount_args
     ~image ~constraints ~working_directory:work_volume_guest_root
-    ~command:["tail"; "-f"; "/dev/null"]
+    ~command:("tail", ["-f"; "/dev/null"])
 ;;
 
 type apple_boot_failure =
@@ -862,6 +868,9 @@ let apple_turn_start_argv ~container_name ~(plan : Keeper_microvm_boot_plan.t)
       (match policy_proxy with None -> [] | Some proxy -> apple_policy_environment proxy) in
   let* () = Plan.validate_boot ~plan ~lifecycle_labels ~execution_environment
     |> Result.map_error (fun errors -> Apple_invalid_boot_plan errors) in
+  let* command = match plan.command with
+    | [] -> Error (Apple_invalid_boot_plan [Plan.Missing_executable])
+    | executable :: arguments -> Ok (executable, arguments) in
   let network_args = apple_network_args ~dns ~policy_proxy plan.network
     |> Result.map_error (fun detail -> Apple_network_unavailable detail) in
   Result.bind network_args (fun network_args ->
@@ -881,7 +890,7 @@ let apple_turn_start_argv ~container_name ~(plan : Keeper_microvm_boot_plan.t)
       ~user:plan.user ~guest_size:plan.guest_size ~network_args
       ~mount_args:(environment_args @ mount_args) ~image:plan.image
       ~constraints:plan.isolation ~working_directory:plan.working_directory
-      ~command:plan.command
+      ~command
     |> Result.map_error (fun refusals -> Apple_constraints_unexpressible refusals))
 ;;
 

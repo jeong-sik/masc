@@ -127,13 +127,16 @@ type export_snapshot = {
 }
 val tool_export_snapshot : config:Workspace.config -> access:Lane_addon_sources.access ->
   reserved:string list -> export_snapshot
-(** Live export snapshot with individual name conflicts quarantined. *)
+(** Live export snapshot with individual name conflicts quarantined. Public
+    tools only: the exports and unready installations of MCP tool packages.
+    Browser services are read with {!browser_service_reading}. *)
 val tool_export_reading : config:Workspace.config -> access:Lane_addon_sources.access ->
   reserved:string list -> (export_reading, string) result
 (** Reads initialized live workers only; does not start or recover installations.
     The caller supplies the complete reserved host namespace. Collisions fail
     explicitly. Visibility follows verified caller authority; an installation
-    the caller cannot read is in neither list. *)
+    the caller cannot read is in neither list. Public tools only, as
+    {!tool_export_snapshot}. *)
 val retain_tool_request_owner : config:Workspace.config -> access:Lane_addon_sources.access ->
   reserved:string list -> export:tool_export -> scope:string -> request_id:string -> summary:Yojson.Safe.t ->
   request:Yojson.Safe.t -> (unit, tool_call_error) result
@@ -232,6 +235,11 @@ val browser_service_reading : config:Workspace.config -> access:Lane_addon_sourc
     installations that cannot serve now. *)
 val browser_services : config:Workspace.config -> access:Lane_addon_sources.access -> browser_service list
 (** The services of {!browser_service_reading}. *)
+val browser_export_reading : config:Workspace.config -> access:Lane_addon_sources.access -> tool_export list
+(** The exports of the browser services the caller may read. They are not
+    public tools: {!tool_export_snapshot} and {!tool_export_reading} leave
+    them out, so several browser installations may export one name. The
+    browser host calls one by the identity of the service it chose. *)
 type browser_service_status = Browser_ready of browser_service
   | Browser_refresh_needed of browser_service | Browser_unavailable | Browser_retired
 val browser_service_status : config:Workspace.config -> access:Lane_addon_sources.access ->
@@ -506,7 +514,7 @@ module For_testing : sig
     observe : binding:Yojson.Safe.t -> sources:Yojson.Safe.t ->
       (Lane_addon_types.output, string) result;
     exported_tools : unit -> Mcp_protocol.Mcp_types.tool list;
-    call_exported_tool : companion:Lane_addon_worker_protocol.companion_admission option -> on_result:(Mcp_protocol.Mcp_types.tool_result -> unit) -> authorize:Lane_addon_call_context.mediation option -> principal:Lane_addon_call_context.principal -> name:string -> arguments:Yojson.Safe.t ->
+    call_exported_tool : companion:Lane_addon_worker_protocol.companion_admission option -> on_result:(Mcp_protocol.Mcp_types.tool_result -> unit) -> on_dispatch:(unit -> unit) -> authorize:Lane_addon_call_context.mediation option -> principal:Lane_addon_call_context.principal -> name:string -> arguments:Yojson.Safe.t ->
       (Mcp_protocol.Mcp_types.tool_result, Lane_addon_call_context.invocation_error) result;
     action_schema : unit -> Yojson.Safe.t option;
     operator_schema : unit -> Yojson.Safe.t option;

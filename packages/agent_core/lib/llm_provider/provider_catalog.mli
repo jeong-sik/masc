@@ -23,6 +23,8 @@ type entry =
   ; api_key_env : string
   ; auth : auth_mode
   ; default_model : string option
+  ; discovery_timeout_s : float option
+    (** Positive finite total deadline for one discovery HTTP request. *)
   ; max_context : int option
   ; capabilities : Capabilities.capabilities
   ; credential_scope : string option

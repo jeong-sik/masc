@@ -240,7 +240,15 @@ let run_with ~before_command_validation ~env ~owner ~directory work =
                       |> Result.map_error (fun detail -> Peer.Before_effect detail) in
                     let* verb,args,actor=Browser_live_peer.decode command |> Result.map_error (fun detail -> Peer.Before_effect detail) in
                     Peer.dispatch ?actor ~request_id:command.id peer ~verb args in
-                  let* ()=Browser_addon_owner.deliver_live owner ~client_id ~id:command.id ~payload:(Browser_live_peer.payload result) in
+                  (* A refused delivery loses this one result. When its
+                     caller stopped waiting (it was told the command timed
+                     out) the connection is still good. A retired client
+                     fails the next poll, and a closed BiDi socket ends this
+                     loop through [ended]. *)
+                  (match Browser_addon_owner.deliver_live owner ~client_id ~id:command.id ~payload:(Browser_live_peer.payload result) with
+                   | Ok () -> ()
+                   | Error detail ->
+                     Log.Server.warn "browser Add-on Firefox result of command %s was not delivered: %s" command.id detail);
                   (match result with Error (Peer.Outcome_unknown detail) -> Error detail
                     | Ok _|Error (Before_effect _|Partial_failure _) -> Ok ()) in
                 if Browser_addon_owner.is_retired owner then Ok () else serve () in

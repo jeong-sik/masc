@@ -120,7 +120,10 @@ receipts remain distinct from successful contract validation.
    Chrome execution. Core admission and artifact/model brokers remain host edges;
    built-in browser execution and tool fallback are removed.
    `masc-browser-addon-worker` publishes `browser_command` and `lane_observe`
-   on stdio. The command requires the private host-context control port and
+   on stdio. A browser service's exports are not public tools: Keeper tool
+   lists, MCP `tools/list` and lookups by name read only MCP tool packages, so
+   only the browser host calls `browser_command`, by the identity of the
+   installation it chose. The command requires the private host-context control port and
    uses the installation's selected input/output hooks. A host-selected private Unix socket handles concurrent
    issue/poll/result/disconnect/snapshot requests. One canonical incarnation is
    admitted per process, and every request carries it. Live execution requires
@@ -567,7 +570,7 @@ into its own allocation. The existing per-file 16 MiB bound is shared by both
 sides; file bytes do not travel inside the bounded MCP/JSON frame.
 
 A host-minted one-use grant binds the verified actor, route and complete upload
-command. The ordinary exported `browser_command` still runs the installation's
+command. The host's call to the exported `browser_command` still runs the installation's
 selected input/output hooks. Only its matching upload can consume the grant;
 an ordinary low-level Issue with arbitrary paths is refused. The worker passes
 its registered copies to the existing WebDriver upload owner, so a browser may

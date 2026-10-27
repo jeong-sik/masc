@@ -453,8 +453,8 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
 let observe t ~binding ~sources =
   Protocol.observe t.protocol ~binding ~sources |> protocol_result
 let act t ~arguments = Protocol.act t.protocol ~arguments |> protocol_result
-let call_exported_tool ?on_result ?companion ?authorize ?principal t ~name ~arguments =
-  Protocol.call_exported_tool ?on_result ?companion ?authorize ?principal t.protocol ~name ~arguments
+let call_exported_tool ?on_result ?on_dispatch ?companion ?authorize ?principal t ~name ~arguments =
+  Protocol.call_exported_tool ?on_result ?on_dispatch ?companion ?authorize ?principal t.protocol ~name ~arguments
   |> protocol_result
 
 let host_requests t = Protocol.host_requests t.protocol |> protocol_result

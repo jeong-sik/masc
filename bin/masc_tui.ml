@@ -17225,7 +17225,9 @@ let export_verification_evidence state ~mailbox ~open_file =
           Eio_guard.run_in_systhread ~label:"tui-evidence-open" (fun () ->
             Masc_tui_browser.open_url (Uri.to_string (Uri.make ~scheme:"file" ~path ())))
           |> Result.map (fun _ -> ())) in
-        Masc_tui_evidence_file.export ~fs:env#fs ~directory:(Filename.get_temp_dir_name ())
+        Masc_tui_evidence_file.export ~fs:env#fs
+          ~registry_root:(Common.masc_dir_from_base_path ~base_path:state.local_base_path)
+          ~directory:(Filename.get_temp_dir_name ())
           ~progress:request.vex_progress ~admitted:current ~open_file file)
 
 let open_harness_detail state =
@@ -19511,12 +19513,13 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
       let location = match progress with
         | Masc_tui_evidence_file.Not_started -> ""
         | Writing path -> " · 저장 시도 경로(완료 미확인): " ^ path
-        | Saved path -> " · 저장한 사본: " ^ path in
+        | Saved path -> " · 저장한 사본: " ^ path
+        | Aborted path -> " · 저장하지 못한 목적지: " ^ path in
       if request.vex_authority = state.workspace_authority
          && request.vex_reading == state.workspace_read_authority then
         (match progress with
          | Masc_tui_evidence_file.Not_started -> ()
-         | Writing _ | Saved _ -> state.verification_evidence_saved <-
+         | Writing _ | Saved _ | Aborted _ -> state.verification_evidence_saved <-
              (request.vex_key, request.vex_index, progress) :: state.verification_evidence_saved);
       (match result with
        | Error detail -> report_action state "error" ("Evidence: " ^ detail ^ location)

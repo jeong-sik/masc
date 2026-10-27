@@ -63,10 +63,11 @@ let with_worker ?other_backend ~machine ~create ~clock ~sw ~base_path f =
                         host = None; resource=Masc.Lane_addon_lifecycle.Container_resource instance_id;
             exported_tools=(fun () -> List.filter (fun (tool : S.tool) ->
               List.mem tool.name package.exported_tools) tools);
-            call_exported_tool=(fun ~companion:_ ~on_result ~authorize ~principal ~name ~arguments ->
+            call_exported_tool=(fun ~companion:_ ~on_result ~on_dispatch ~authorize ~principal ~name ~arguments ->
               Masc.Lane_addon_worker_invocation.run ~companion:None ~invocation:package.tool_invocation
                 ~authorize ~principal ~name ~arguments
                 ~call:(fun ~name ~arguments -> Eio.Mutex.use_ro mutex (fun () ->
+                  on_dispatch ();
                   rpc ~name ~arguments |> Result.map (fun result -> on_result result;result))));
             observe=(fun ~binding ~sources -> Eio.Mutex.use_ro mutex (fun () ->
               let ( let* ) = Result.bind in

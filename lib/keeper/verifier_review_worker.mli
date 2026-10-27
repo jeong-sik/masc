@@ -4,8 +4,10 @@
 type error =
   | Original_not_found
   | Original_corrupt of string
+  | Authority_unavailable of string
   | Grants_mismatch of string
   | Execution_pending of string
+  | Execution_repair_required of string
   | Persistence_unavailable of string
 
 val run_attempt :
@@ -17,7 +19,8 @@ val run_attempt :
   store:Verifier_review_owner.store -> verification_id:string -> attempt:int ->
   installation_id:string -> package_id:string ->
   prepare_notes:(Task.Anti_rationalization.review_result -> string) ->
-  authority:Verification_authority_tools.task_review ->
+  base_path:string ->
+  prepare_authority:(unit -> (Verification_authority_tools.task_review, string) result) ->
   provider_rest:(string -> Task.Anti_rationalization.provider_rest) -> unit ->
   (Task.Anti_rationalization.review_result, error) result
 (** Strictly load the original for its recorded destination, then compare the
@@ -27,8 +30,11 @@ val run_attempt :
     another question nor a lookup dispatch closure. The structured output
     contract must still match the review protocol. [prepare_notes] belongs to
     the host and renders its captured evidence metadata before the judgment
-    and notes are published atomically. Restored judgments do not rebuild or
-    validate lookup authority. The host's actual observer registration, when
+    and notes are published atomically. The physical owner store must belong
+    to [base_path]. [prepare_authority] is called only for a not-yet-dispatched
+    original; pending native executions are observed through their pre-effect
+    journal bindings without reconnecting to the producer. Neither observation
+    nor restored judgments rebuild lookup authority or dispatch another model. The host's actual observer registration, when
     supplied, is published atomically with the judgment in one owner record. *)
 
 type 'error apply_failure =
@@ -75,7 +81,8 @@ module For_testing : sig
   store:Verifier_review_owner.store -> verification_id:string -> attempt:int ->
   installation_id:string -> package_id:string ->
   prepare_notes:(Task.Anti_rationalization.review_result -> string) ->
-  authority:Verification_authority_tools.task_review ->
+  base_path:string ->
+  prepare_authority:(unit -> (Verification_authority_tools.task_review, string) result) ->
   provider_rest:(string -> Task.Anti_rationalization.provider_rest) -> unit ->
   (Task.Anti_rationalization.review_result, error) result
 end

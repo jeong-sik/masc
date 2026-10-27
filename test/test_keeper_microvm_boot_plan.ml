@@ -145,6 +145,29 @@ let test_all_runtime_security_disagreements_are_named () =
     (Plan.differences ~image_command plan changed = [Plan.User; Plan.Working_directory; Plan.Command;
       Plan.Mounts; Plan.Root_filesystem; Plan.Capabilities; Plan.Network; Plan.Environment; Plan.Labels])
 
+let test_command_refusal_reports_fields_without_values () =
+  let requested_secret = "requested-private-credential" in
+  let observed_secret = "observed-private-credential" in
+  let plan = {plan with environment = ["CREDENTIAL", requested_secret]} in
+  let actual = {(facts ()) with plan_label = Some (Plan.digest plan);
+    command = ["opam"; "exec"; "--"; "tail"; "-f"; "/dev/null"];
+    environment = ["CREDENTIAL", observed_secret]} in
+  match Plan.assess ~image_command:(Ok image_command)
+      ~identity_reading:Plan.Identity_readable ~plan ~policy_environment:[] (Plan.Facts actual) with
+  | Plan.Refuse refusal ->
+    let message = Plan.refusal_message refusal in
+    check string "diagnostic identifies the actual mismatched fields"
+      "runtime guest facts disagree with the requested plan (fields: command, environment); guest preserved"
+      message;
+    List.iter (fun secret -> check bool "diagnostic does not expose credential values" false
+      (Astring.String.is_infix ~affix:secret message)) [requested_secret; observed_secret]
+  | Plan.Matches_plan | Plan.Replace _ -> fail "same-plan command mismatch must preserve and refuse"
+
+let test_image_command_refusal_preserves_diagnostic () =
+  check string "image metadata failure remains a distinct preservation refusal"
+    "runtime image command unavailable; guest preserved: fixture metadata unavailable"
+    (Plan.refusal_message (Plan.Image_command_unavailable "fixture metadata unavailable"))
+
 let flag_value flag argv =
   let rec find = function
     | key :: value :: _ when key = flag -> Some value
@@ -166,12 +189,14 @@ let test_boot_projects_the_labelled_plan () =
   check (option string) "requested memory" (Some "2048m") (flag_value "--memory" argv);
   check (option string) "requested CPU" (Some "4") (flag_value "--cpus" argv);
   check (option string) "requested working directory" (Some plan.working_directory) (flag_value "--workdir" argv);
+  check (option string) "requested executable replaces the image entrypoint"
+    (Some "tail") (flag_value "--entrypoint" argv);
   check bool "argv labels the same plan it projects" true
     (List.mem (Plan.label_key ^ "=" ^ Plan.digest plan) argv);
   check bool "snapshot source is the plan's read-only mount" true
     (List.mem "/private-fixture/identity:/guest/identity:ro" argv);
-  check bool "requested command is the final argv" true
-    (List.rev (plan.image :: plan.command) = List.take 4 (List.rev argv))
+  check bool "requested arguments follow the image" true
+    (List.rev [plan.image; "-f"; "/dev/null"] = List.take 3 (List.rev argv))
 
 let test_ephemeral_routes_do_not_change_plan_identity () =
   let inherit_plan = {plan with network = Plan.Network_inherit} in
@@ -231,6 +256,8 @@ let test_renderer_rejects_order_sensitive_duplicates () =
 let test_renderer_rejects_implicit_and_execution_collisions () =
   let reject expected invalid =
     require_invalid_boot expected invalid ~lifecycle_labels:[] ~policy_proxy:None in
+  reject Plan.Missing_executable {plan with command = []};
+  reject Plan.Missing_executable {plan with command = [""]};
   reject (Plan.Duplicate_mount_destination Backend.scratch_guest_root)
     {plan with mounts = Plan.Tmpfs {destination = Backend.scratch_guest_root} :: plan.mounts};
   reject (Plan.Duplicate_constraint Backend.Drop_all_capabilities)
@@ -256,15 +283,19 @@ let test_valid_plan_keeps_command_order_semantic () =
   check bool "command order remains significant" false
     (Plan.digest plan = Plan.digest {plan with command = List.rev plan.command})
 
-let test_image_entrypoint_composes_without_relabelling () =
+let test_explicit_entrypoint_preserves_image_binding () =
   let wrapped = image_command_for ["opam"; "exec"; "--"] in
-  let facts = { (facts ()) with command=["opam"; "exec"; "--"; "tail"; "-f"; "/dev/null"] } in
+  let facts = facts () in
   let assess = Plan.assess ~plan ~policy_environment:[] ~identity_reading:Plan.Identity_readable in
-  check bool "same originally labelled plan adopts its image entrypoint" true
+  check bool "explicit entrypoint overrides the image default" true
     (assess ~image_command:(Ok wrapped) (Plan.Facts facts) = Plan.Matches_plan);
   check bool "canonical guest reference with the same queried image content is an alias" true
     (assess ~image_command:(Ok wrapped)
       (Plan.Facts {facts with image="registry.example.test/library/fixture:image"}) = Plan.Matches_plan);
+  (match assess ~image_command:(Ok wrapped)
+      (Plan.Facts {facts with command=["opam"; "exec"; "--"; "tail"; "-f"; "/dev/null"]}) with
+   | Plan.Refuse (Plan.Runtime_reports_other_than_asked [Plan.Command]) -> ()
+   | _ -> fail "the image entrypoint cannot prefix an explicitly overridden command");
   (match assess ~image_command:(Ok wrapped)
       (Plan.Facts {facts with command=["opam"; "exec"; "--"; "sh"]}) with
    | Plan.Refuse (Plan.Runtime_reports_other_than_asked [Plan.Command]) -> ()
@@ -278,12 +309,14 @@ let test_image_entrypoint_composes_without_relabelling () =
   | _ -> fail "another guest image cannot borrow an image command observation"
 
 let () = run "Keeper Apple boot plan"
-  [ "authority", [test_case "image entrypoint keeps unchanged plan and exact command" `Quick test_image_entrypoint_composes_without_relabelling
+  [ "authority", [test_case "explicit entrypoint preserves image binding and exact argv" `Quick test_explicit_entrypoint_preserves_image_binding
                  ; test_case "requested security changes identity" `Quick test_requested_security_changes_digest
                  ; test_case "same plan disagrees with runtime" `Quick test_label_separates_change_from_runtime_disagreement
                  ; test_case "identity and runtime refusal order" `Quick test_identity_refusal_priority
                  ; test_case "unreadable facts preserve guest" `Quick test_unreadable_is_not_replacement
-                 ; test_case "every security disagreement is retained" `Quick test_all_runtime_security_disagreements_are_named]
+                 ; test_case "every security disagreement is retained" `Quick test_all_runtime_security_disagreements_are_named
+                 ; test_case "command refusal names fields without credentials" `Quick test_command_refusal_reports_fields_without_values
+                 ; test_case "image command refusal preserves its diagnostic" `Quick test_image_command_refusal_preserves_diagnostic]
   ; "boot", [test_case "actual Apple argv projects its labelled plan" `Quick test_boot_projects_the_labelled_plan
              ; test_case "ephemeral routing is outside plan identity" `Quick test_ephemeral_routes_do_not_change_plan_identity
              ; test_case "renderer refuses duplicate keys in both orders" `Quick test_renderer_rejects_order_sensitive_duplicates

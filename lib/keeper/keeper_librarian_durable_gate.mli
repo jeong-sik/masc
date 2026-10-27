@@ -81,3 +81,31 @@ val restore_size_evidence : store:Lane_addon_store.t ->
     capacity result cannot bypass a pending/unknown successor. Only a complete
     result is returned; the caller separately checks Input_capacity_exceeded.
     Blocking Store scope; offload the complete operation in Eio. *)
+
+  module Inventory : sig
+    type t
+    type chain
+    val read : store:Lane_addon_store.t -> owner:Keeper_librarian_durable_request.owner -> (t, string) Stdlib.result
+    (** Acquire and strictly decode the complete gate scope once for one
+        read-only inventory-validation pass under the caller's serialized owner.
+        Not an atomic cross-scope snapshot, global cache or effect authority. *)
+    val record_count : t -> int
+    (** Gate records this observation decoded. Pass observation only. *)
+    val executions : t -> string list
+    (** Every execution ID the observed gate records name. *)
+    val execution_records : t -> execution_id:string -> Lane_addon_tool_request_owner.retained list
+    (** The observed gate records of one execution, in scope order. A caller
+        may settle them: [Lane_addon_tool_request_owner.settle] moves a record
+        only while the scope still holds it unchanged. *)
+    val validate : t -> capture:Keeper_librarian_durable_request.t -> parent:Lane_addon_tool_request_owner.retained ->
+      (chain, string) Stdlib.result
+    (** Bind an already restored original parent to this same-owner observation.
+        Validate complete lineage and derive the parent-preparation verdict without rereading the
+        gate scope or parent body. Keep this view within the same validation
+        pass; mutation, recovery and dispatch must use the fresh-read APIs. *)
+    val root : chain -> Lane_addon_tool_request_owner.retained option
+    val latest : chain -> (Lane_addon_tool_request_owner.retained option, string) Stdlib.result
+    val validate_root_preparation : chain -> (unit, string) Stdlib.result
+    val restore_size_evidence : chain -> gate_request_id:string ->
+      (Keeper_librarian_absorb_gate.run_result, string) Stdlib.result
+  end

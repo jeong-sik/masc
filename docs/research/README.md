@@ -9,6 +9,8 @@ See the [storage guide](../guides/WORKSPACE-STORAGE.md) for output locations.
 
 | Date | Record |
 | --- | --- |
+| 2026-10-26 | [Librarian 완료 기록 검증 비용 — 실측, 외부 설계 대조, 선택지 (r1)](2026-10-26-librarian-history-validation-cost-r1.md) |
+| 2026-10-26 | [Keeper volume lifecycle and reclamation](2026-10-26-keeper-volume-lifecycle.md) |
 | 2026-09-18 | [TypeSafe Jev(System One) 분석과 masc 판단 레인 적용 가능성 (r1)](2026-09-18-typesafe-jev-masc-applicability-r1.md) |
 | 2026-09-09 | [Browser Lane composition experiments](2026-09-09-browser-composition-patterns.md) |
 | 2026-09-05 | [기억은 무엇으로 굳는가: 연구와 기성 제품이 쓰는 강화 신호, 그리고 masc 에 없는 것](2026-09-05-memory-reinforcement-signals-in-research-and-products.md) |

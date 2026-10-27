@@ -6,9 +6,8 @@
 
 (** Resolve a model label string to an AGENT_CORE Provider.config.
     Uses MASC [Runtime_model_string.parse_model_string] with an AGENT_CORE runtime binding.
-    Explicit model-label execution must never silently substitute a
-    discovery-only model. Callers are expected to validate labels
-    before reaching this helper. *)
+    Only a defaultless Ollama [auto] may use discovery scoped to its exact endpoint.
+    Other unresolved labels are refused rather than silently substituting a model. *)
 type label_resolution_error = Runtime_transport_label_resolution.label_resolution_error =
   | Invalid_model_label of string
 

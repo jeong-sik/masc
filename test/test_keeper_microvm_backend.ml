@@ -183,7 +183,7 @@ let test_boot_argv_is_each_runtimes_own () =
      @ [ "-v"; "h:c:ro" ]
      @ [ "--workdir"; Microvm.work_volume_guest_root ]
      @ [ "--network"; "none" ]
-     @ [ "img"; "tail"; "-f"; "/dev/null" ])
+     @ [ "--entrypoint"; "tail"; "img"; "-f"; "/dev/null" ])
     (booted "apple" Backend.Apple_container);
   (* containerd's default runtime shares the host kernel, so a Kata boot that
      forgets the shim is a container wearing this profile's name. *)

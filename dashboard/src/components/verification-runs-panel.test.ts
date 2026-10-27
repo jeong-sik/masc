@@ -20,6 +20,8 @@ describe('VerificationRunsPanel', () => {
       { status: 'review_cancelled', detail: 'review fiber cancelled: owner stopped' },
       { status: 'not_reviewed', gate: 'evaluator_unavailable', detail: 'no runtime' },
       { status: 'approved', reason: '' },
+      { status: 'execution_pending', detail: 'original journal is pending' },
+      { status: 'execution_repair_required', detail: 'historical locator is missing' },
     ]
     api.fetchVerificationRuns.mockResolvedValue(parseVerificationRunsResponse({
       generated_at: '2026-09-29T00:00:00Z', count: outcomes.length,
@@ -34,6 +36,8 @@ describe('VerificationRunsPanel', () => {
     const cancelled = await screen.findByText('판정 취소')
     expect(cancelled.getAttribute('data-status-badge-tone')).toBe('neutral')
     expect(cancelled.closest('tr')?.textContent).toContain('review fiber cancelled: owner stopped')
+    expect(screen.getByText('원 실행 확인 대기').getAttribute('data-status-badge-tone')).toBe('warn')
+    expect(screen.getByText('원 실행 확인 필요').closest('tr')?.textContent).toContain('historical locator is missing')
     const notReviewed = screen.getByText('판정 없음')
     expect(notReviewed.getAttribute('data-status-badge-tone')).toBe('bad')
     expect(notReviewed.closest('tr')?.textContent).toContain('evaluator_unavailable')

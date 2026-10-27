@@ -45,7 +45,7 @@ let digest (plan : t) =
     | Network_policy {name} -> strings ["policy"; name]
   in
   let json = `Assoc
-    [ "schema", `String "masc.keeper-boot-plan.v1"
+    [ "schema", `String "masc.keeper-boot-plan.v2"
     ; "image", `String plan.image
     ; "memory_mib", `Int (Keeper_microvm_guest_size.memory_mib plan.guest_size.memory)
     ; "cpus", `Int (Keeper_microvm_guest_size.cpus_count plan.guest_size.cpus)
@@ -68,6 +68,7 @@ let expected_mounts (plan : t) =
   else plan.mounts
 
 type invalid_plan =
+  | Missing_executable
   | Duplicate_environment_key of string
   | Duplicate_label_key of string
   | Duplicate_mount_destination of string
@@ -103,7 +104,10 @@ let plan_errors (plan : t) =
   let destinations = List.map (function
     | Tmpfs {destination} | Host_dir {destination; _}
     | Named_volume {destination; _} -> destination) (expected_mounts plan) in
-  duplicate_errors (fun key -> Duplicate_environment_key key) environment_keys
+  (match plan.command with
+   | [] | "" :: _ -> [Missing_executable]
+   | _ :: _ -> [])
+  @ duplicate_errors (fun key -> Duplicate_environment_key key) environment_keys
   @ duplicate_errors (fun key -> Duplicate_label_key key) label_keys
   @ duplicate_errors (fun destination -> Duplicate_mount_destination destination) destinations
   @ duplicate_errors (fun constraint_ -> Duplicate_constraint constraint_) plan.isolation
@@ -128,6 +132,7 @@ let validate_boot ~plan ~lifecycle_labels ~execution_environment =
          then Some (Execution_environment_collision key) else None) execution_environment)
 
 let invalid_plan_message = function
+  | Missing_executable -> "command requires a nonempty executable"
   | Duplicate_environment_key key -> Printf.sprintf "duplicate environment key %S" key
   | Duplicate_label_key key -> Printf.sprintf "duplicate label key %S" key
   | Duplicate_mount_destination destination -> Printf.sprintf "duplicate mount destination %S" destination
@@ -169,6 +174,34 @@ type refusal =
   | Guest_facts_unreadable of string
   | Image_command_unavailable of string
   | Runtime_reports_other_than_asked of difference list
+
+let difference_label = function
+  | Plan_label -> "boot_plan_label"
+  | Image -> "image"
+  | Resources -> "resources"
+  | User -> "user"
+  | Working_directory -> "working_directory"
+  | Command -> "command"
+  | Mounts -> "mounts"
+  | Root_filesystem -> "root_filesystem"
+  | Capabilities -> "capabilities"
+  | Network -> "network"
+  | Environment -> "environment"
+  | Labels -> "labels"
+  | Policy_route -> "policy_route"
+  | Identity_snapshot -> "identity_snapshot"
+
+let refusal_message = function
+  | Invalid_requested_plan errors ->
+    "invalid requested plan: " ^ String.concat "; " (List.map invalid_plan_message errors)
+  | Guest_facts_unreadable _ -> "runtime guest facts are unreadable; guest preserved"
+  | Image_command_unavailable detail ->
+    "runtime image command unavailable; guest preserved: " ^ detail
+  | Runtime_reports_other_than_asked differences ->
+    Printf.sprintf
+      "runtime guest facts disagree with the requested plan (fields: %s); guest preserved"
+      (String.concat ", " (List.map difference_label differences))
+
 type assessment =
   | Matches_plan
   | Replace of difference list
@@ -211,8 +244,9 @@ let observed_differences ~image_difference ~command_difference (plan : t) (facts
     ]
 
 let differences ~image_command (plan : t) (facts : facts) =
-  let expected = Keeper_microvm_image_command.command image_command ~arguments:plan.command in
-  let command_difference = if expected = facts.command then None else Some Command in
+  (* Apple launch overrides the image entrypoint with the plan's executable.
+     Keep image binding checks separate from the exact requested runtime argv. *)
+  let command_difference = if plan.command = facts.command then None else Some Command in
   let image_difference = Keeper_microvm_image_command.validate_binding image_command
       ~reference:plan.image ~identity:facts.image_identity <> Ok () in
   observed_differences ~image_difference ~command_difference plan facts

@@ -196,17 +196,18 @@ let settle_positions request =
     && official=Option.fold ~none:positions.official ~some:(fun value -> Some value) official_next)
     "Original history read-position settlement remains unconfirmed"
 type frontier = Unfinished | Settled
-let validate ~store ~request ~(record : Owner.retained) =
+let validate_with ~validate_chain ~validate_preparation ~root ~latest ~size_evidence
+    ~store ~request ~(record : Owner.retained) =
   let owner=Request.physical_owner request in
   let* restored=Request.restore ~owner record in
   let* ()=same (Request.to_json request) (Request.to_json restored) in
-  let* ()=Journal.validate_chain ~store ~owner ~capture:request in
+  let* ()=validate_chain () in
   let* ()=match Progress.preparation record.progress with
     | None ->
-      let* root=Journal.root ~store ~owner ~capture:request in
+      let* root=root () in
       require (Option.is_none root) "History gate exists without its original parent intent"
     | Some (Preparation_pending _ | Preparation_confirmed _) ->
-      Journal.validate_root_preparation ~store ~owner ~capture:request in
+      validate_preparation () in
   match Progress.phase record.progress with
   | Progress.Captured | Admission_wait _ | Dispatch_pending _ -> Ok Unfinished
   | Judged _ -> let* _=original_answer ~store request record in Ok Unfinished
@@ -216,17 +217,16 @@ let validate ~store ~request ~(record : Owner.retained) =
     let* ()=match Progress.preparation record.progress with
       | Some (Preparation_confirmed _) -> Ok ()
       | None | Some (Preparation_pending _) -> Error "History commit precedes original gate publication ACK" in
-    let* root=Journal.root ~store ~owner ~capture:request in
+    let* root=root () in
     let* root=Option.to_result ~none:"Original history commit gate root is absent" root in
     let* before=marker request record ~root:root.Owner.request_id ~committed:false in
     let* after=marker request record ~root:root.request_id ~committed:true in
     let* ()=commit_matches record ~before ~after in
     (match Progress.phase record.progress with
      | Progress.Finished _ | Conflicted _ ->
-       let* latest=Journal.latest ~store ~owner ~capture:request in
+       let* latest=latest () in
        let* latest=Option.to_result ~none:"Terminal history gate chain is absent" latest in
-       let* gate=Journal.restore_size_evidence ~store ~owner ~parent_execution:request
-         ~gate_request_id:latest.Owner.request_id in
+       let* gate=size_evidence ~gate_request_id:latest.Owner.request_id in
        (match Gate.failure_detail ~absorbed:proposal.accepted.selection.absorbed gate with
         | None -> Ok Settled | Some detail -> Error detail)
      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
@@ -244,6 +244,24 @@ let validate ~store ~request ~(record : Owner.retained) =
      | Not_allowed _ | Request_id_reused -> Ok Settled)
   | Rejected {stage=Progress.Before_dispatch;_} | Subdividing _ | Subdivided _ ->
     Error "Original history record has an unsupported domain phase"
+let validate ~store ~request ~record =
+  let owner=Request.physical_owner request in
+  validate_with ~store ~request ~record
+    ~validate_chain:(fun () -> Journal.validate_chain ~store ~owner ~capture:request)
+    ~validate_preparation:(fun () -> Journal.validate_root_preparation ~store ~owner ~capture:request)
+    ~root:(fun () -> Journal.root ~store ~owner ~capture:request)
+    ~latest:(fun () -> Journal.latest ~store ~owner ~capture:request)
+    ~size_evidence:(fun ~gate_request_id -> Journal.restore_size_evidence ~store ~owner
+      ~parent_execution:request ~gate_request_id)
+let validate_inventory ~inventory ~store ~request ~record =
+  let* chain=Journal.Inventory.validate inventory ~capture:request ~parent:record in
+  validate_with ~store ~request ~record
+    ~validate_chain:(fun () -> Ok ())
+    ~validate_preparation:(fun () -> Journal.Inventory.validate_root_preparation chain)
+    ~root:(fun () -> Ok (Journal.Inventory.root chain))
+    ~latest:(fun () -> Journal.Inventory.latest chain)
+    ~size_evidence:(fun ~gate_request_id -> Journal.Inventory.restore_size_evidence chain ~gate_request_id)
+
 type preparation = Ready of Owner.retained | Unavailable of string
 let publish_with ~before_settlement ~store ~config ~request ~(original : Owner.retained) ~proposal:_ ~fresh_authority =
   let owner=Request.physical_owner request in

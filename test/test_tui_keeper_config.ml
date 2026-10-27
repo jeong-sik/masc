@@ -439,6 +439,56 @@ let test_runtime_picker_revision_decoder () =
     Alcotest.failf "runtime picker accepted malformed revision: %s"
       (Yojson.Safe.to_string revision)
 
+let prior_of_revision revision = prior_runtime_assignment revision
+
+let test_prior_runtime_assignment () =
+  let check_prior label expected revision =
+    match prior_of_revision revision with
+    | Ok actual when actual = expected -> ()
+    | Ok _ -> Alcotest.failf "%s: unexpected prior assignment" label
+    | Error detail -> Alcotest.failf "%s: %s" label detail
+  in
+  let check_unreadable label revision =
+    match prior_of_revision revision with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.failf "%s: a revision that names no assignment was read as one" label
+  in
+  let source_revision = `String (String.make 64 'b') in
+  (* The revision the picker fences its write on, taken from the observed
+     config, names the runtime the Keeper holds right now. *)
+  (match expected_runtime_assignment_revision observed with
+   | Ok revision ->
+     check_prior "observed config" (Prior_assigned "codex_subscription.gpt-5.6-sol") revision
+   | Error detail -> Alcotest.fail detail);
+  check_prior "config file missing" Prior_workspace_default
+    (`Assoc [ "state", `String "runtime_config_missing" ]);
+  check_prior "no assignment in the file" Prior_workspace_default
+    (`Assoc
+       [ "state", `String "runtime_config_present"
+       ; "source_revision", source_revision
+       ; "assignment", `Assoc [ "state", `String "missing" ]
+       ]);
+  check_unreadable "assigned without a runtime id"
+    (`Assoc
+       [ "state", `String "runtime_config_present"
+       ; "source_revision", source_revision
+       ; "assignment", `Assoc [ "state", `String "assigned" ]
+       ]);
+  check_unreadable "assigned to a blank runtime id"
+    (`Assoc
+       [ "state", `String "runtime_config_present"
+       ; "source_revision", source_revision
+       ; "assignment", `Assoc [ "state", `String "assigned"; "runtime_id", `String " " ]
+       ]);
+  check_unreadable "unknown assignment state"
+    (`Assoc
+       [ "state", `String "runtime_config_present"
+       ; "source_revision", source_revision
+       ; "assignment", `Assoc [ "state", `String "pending" ]
+       ]);
+  check_unreadable "unknown revision state" (`Assoc [ "state", `String "other" ]);
+  check_unreadable "not an object" (`String "runtime_config_missing")
+
 let test_unchanged_runtime_assignment_response_decoder () =
   let valid =
     `Assoc
@@ -644,6 +694,8 @@ let () =
             test_strict_config_revision_decoder
         ; Alcotest.test_case "strict runtime picker revision" `Quick
             test_runtime_picker_revision_decoder
+        ; Alcotest.test_case "prior runtime assignment is read from the fenced revision" `Quick
+            test_prior_runtime_assignment
         ; Alcotest.test_case "strict unchanged assignment revision" `Quick
             test_unchanged_runtime_assignment_response_decoder
         ; Alcotest.test_case "assignment refusals and uncertain responses retain distinct outcomes" `Quick

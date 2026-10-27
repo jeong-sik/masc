@@ -1414,6 +1414,7 @@ let render_runtime_pick (state : state) =
     Masc_tui_types.runtime_pick_column_widths ~cols items
   in
   let view = Masc_tui_types.keeper_runtime_picker_view state ~terminal_rows in
+  let current_id = Masc_tui_types.runtime_pick_current_id state in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"runtime-pick"
     ~title:
       (Printf.sprintf "%s  %scurrent: %s%s"
@@ -1481,5 +1482,12 @@ let render_runtime_pick (state : state) =
           in
           if view.Masc_tui_pick_list.selected_row = Some row then
             c.push_selected ("> " ^ Masc_tui_theme.strip_sgr line)
-          else c.push ("  " ^ line))
+          else
+            (* The Keeper's own assignment is starred; the cursor row keeps
+               its [>], and the title still names the assignment. *)
+            let current =
+              Option.equal String.equal current_id
+                (Some (Masc_tui_types.runtime_pick_item_id item))
+            in
+            c.push ((if current then "* " else "  ") ^ line))
         view.Masc_tui_pick_list.rows)

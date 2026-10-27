@@ -4,6 +4,16 @@ val editor_stem : Yojson.Safe.t -> string
 val expected_runtime_assignment_revision :
   Yojson.Safe.t -> (Yojson.Safe.t, string) result
 
+type prior_assignment =
+  | Prior_assigned of string
+  | Prior_workspace_default
+
+val prior_runtime_assignment :
+  Yojson.Safe.t -> (prior_assignment, string) result
+(** The assignment in force when the revision was read: an explicit runtime id,
+    or the workspace default when the config file or its assignment is
+    missing. A revision of any other shape is an [Error], not a default. *)
+
 type runtime_assignment_unchanged = {
   revision : Yojson.Safe.t;
   warnings : Masc_tui_runtime_config_receipt.lock_warning list;

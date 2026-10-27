@@ -611,6 +611,9 @@ let test_completed_input_respects_the_observation_deadline () =
     let tree=request () in
     send_server_message flow (reply_to tree (obj ["contexts",`List [obj ["context",`String "owned"]]]));
     let begin_feedback=request () in
+    check_declares ~name:"deadline-backed feedback is a neutral request record"
+      ~needle:"return mascPointerFeedback({...arguments[0],phase:'recorded'});"
+      Yojson.Safe.Util.(begin_feedback |> member "params" |> member "functionDeclaration" |> to_string);
     send_server_message flow (reply_to begin_feedback (script_value `Null));
     let guard=request () in
     send_server_message flow (reply_to guard (script_value (obj ["url",`String "https://example.org";"title",`String "native"])));
@@ -656,6 +659,26 @@ let test_completed_input_respects_the_observation_deadline () =
      transport default while remaining inside the caller's longer window. *)
   run ~request_window:0.6 ~input_delay:0.8 ~receipt_delay:0. ~expires:true;
   run ~request_window:3. ~input_delay:0. ~receipt_delay:1.2 ~expires:false
+
+let test_feedback_without_a_deadline_still_shows_working () = Eio_main.run (fun _ ->
+  let scripts=ref 0 in
+  let peer=peer_of (fun method_ args -> match method_ with
+    | "browsingContext.getTree" -> Ok (obj ["contexts",`List [obj ["context",`String "owned"]]])
+    | "script.callFunction" ->
+      incr scripts;
+      if !scripts=1 then (
+        check_declares ~name:"unbounded feedback keeps its working phase"
+          ~needle:"return mascPointerFeedback({...arguments[0],phase:'working'});"
+          Yojson.Safe.Util.(args |> member "functionDeclaration" |> to_string);
+        Ok (script_value `Null))
+      else if !scripts=2 then Error (Peer.Rejected (Peer.error_code_of_wire "stale document"))
+      else Ok (script_value `Null)
+    | other -> failf "unexpected no-deadline feedback command %s" other) in
+  let args=obj ["tabId",`Int 1;"expectedUrl",`String "https://example.org";"action",`String "type_text";
+    "documentId",`String "d1";"text",`String "x"] in
+  (match Peer.dispatch ~request_id:"fixture-unbounded" peer ~verb:Peer.Page_interact args with
+   | Error (Peer.Before_effect _) -> () | Ok _ | Error _ -> fail "the guard should refuse this input");
+  check int "begin, refused guard, and finish" 3 !scripts)
 (* The session a connection created is ended over that connection, also after
    this side stopped trusting it for page commands: a page whose command got
    no reply is not a browser that is gone, and a session left in Firefox
@@ -1921,6 +1944,7 @@ let () = run "BiDi live peer" ["identity",[test_case "native keyboard release an
     test_case "expiry during encoding sends no input" `Quick test_expiry_during_encoding_does_not_send_input;
     test_case "expiry after tab creation preserves the peer" `Quick test_expiry_after_create_preserves_the_connection;
     test_case "confirmed input stops page observation at the caller deadline" `Quick test_completed_input_respects_the_observation_deadline;
+    test_case "feedback without a deadline still shows working" `Quick test_feedback_without_a_deadline_still_shows_working;
     test_case "the session is ended after a command got no reply" `Quick
       test_the_session_is_ended_after_a_command_got_no_reply;
     test_case "a session that cannot be ended is an error" `Quick test_a_session_that_cannot_be_ended_is_an_error;

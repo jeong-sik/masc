@@ -2209,29 +2209,40 @@ status: reference
   `masc_dos_restore` 도 쓰지 않는다. 되살린 기계의 다음 호출부터 쓴다.
   쓰기가 실패해도(예: 디렉터리를 쓸 수 없음) 원래 호출의 결과는 그대로 돌아가고,
   결과 안에 `autosave: {"saved": false, "reason": ...}` 로만 남는다.
-  슬롯은 둘이다. `autosave` 는 기계의 가장 최근 상태이고, `autosave-prev` 는 지금 도는
-  기계가 시작될 때 `autosave` 에 있던 것이다. `masc_dos_load`·`masc_dos_restore` 로 시작한
-  새 기계(incarnation)의 첫 자동 저장이 `autosave` 파일을 `autosave-prev` 로 복사하고,
-  `autosave-prev` 에 있던 것은 사라진다. 그 뒤 같은 기계의 자동 저장은 복사하지 않고
-  `autosave` 만 갈아 쓴다.
-  그래서 두 파일이 모두 있을 때만 시작에 동의가 필요하다(파일이 읽히지 않아도 있는 것으로
-  센다). 동의 없이 부르면 아무것도 바꾸지 않고 거절하며, 거절 응답의 `would_discard` 가
-  사라질 `autosave-prev` 의 내용(프로그램, 실행한 명령어 수, 저장한 사람, 시각)을,
-  `moves_to_previous` 가 그 자리로 옮겨 가는 `autosave` 를 알려 준다.
-  `masc_dos_load` 와 `masc_dos_restore`(`autosave-prev` 를 되살리는 경우는 빼고)가 같은
-  관문을 지난다. `autosave-prev` 의 내용을 지키려면 먼저
-  `masc_dos_restore slot=autosave-prev` 로 되살려 이름을 붙여 저장한다. 그래도 새로
-  시작하려면 같은 호출에 `discard_previous_autosave=true` 를 넣는다.
+  슬롯은 둘이다. `autosave` 는 기계의 가장 최근 상태이고, `autosave-prev` 는 그 앞의 다른
+  판이 남긴 마지막 자동 저장이다. `masc_dos_load` 로 불러온 기계와, 이름 붙인 슬롯이나
+  `autosave-prev` 에서 되살린 기계는 새 판이다. 새 판의 첫 자동 저장은 `autosave` 파일을
+  `autosave-prev` 로 복사하고, `autosave-prev` 에 있던 것은 사라진다. 그 뒤로는 복사하지 않고
+  `autosave` 만 갈아 쓴다. `autosave` 에서 되살린 기계는 그 파일의 판을 이어 가므로 처음부터
+  `autosave` 만 갈아 쓰고 `autosave-prev` 는 건드리지 않는다. 멈춘 적 없이 계속 했을 때와 같다.
+  그래서 `masc_dos_load` 와 이름 붙인 슬롯의 `masc_dos_restore` 만, 두 파일이 모두 있을 때
+  동의를 받는다(파일이 읽히지 않아도 있는 것으로 센다). 동의 없이 부르면 아무것도 바꾸지 않고
+  거절하며, 거절 응답의 `would_discard` 가 사라질 `autosave-prev` 의 내용(프로그램, 실행한
+  명령어 수, 저장한 사람, 시각)을, `moves_to_previous` 가 그 자리로 옮겨 가는 `autosave` 를
+  알려 준다. `autosave-prev` 의 내용을 지키려면 먼저 `masc_dos_restore slot=autosave-prev` 로
+  되살려 이름을 붙여 저장한다. 그래도 새로 시작하려면 같은 호출에
+  `discard_previous_autosave=true` 를 넣는다.
   `autosave-prev` 파일이 없으면 `autosave` 가 그대로 옮겨 가 남으므로 동의가 필요 없고,
   `autosave` 없이 `autosave-prev` 만 남았을 때도 건드리지 않으므로 묻지 않는다.
-  `autosave-prev` 를 되살리는 호출은 되살린 기계가 이미 그 내용을 들고 있어서 묻지 않는다.
+  `autosave` 와 `autosave-prev` 를 되살리는 호출은 묻지 않는다. 앞의 것은 아무것도 지우지 않고,
+  뒤의 것은 되살린 기계가 지울 내용을 이미 들고 있다. 슬롯 이름은 대소문자를 가리지 않아서
+  `AUTOSAVE` 도 `autosave` 파일을 가리킨다.
+  워커가 시작하면, 기계가 없고 `autosave` 가 돌던 기계의 마지막 상태일 때 `autosave` 를
+  스스로 되살린다. 조종권은 비어 있고 다음에 움직이는 쪽이 가져간다. "돌던 기계의 마지막
+  상태"라는 사실은 `autosave` 옆 파일 `autosave.current` 가 남긴다. 돌던 기계가 자동 저장에
+  성공하면 쓰고, `masc_dos_load`, 다른 슬롯의 `masc_dos_restore`, 프로그램 종료, 자동 저장
+  실패, fault, `masc_dos_eject` 때 지운다. 그래서 eject 하거나 끝나거나 fault 가 난 기계는
+  재시작 때 돌아오지 않는다. 이 파일을 지우지 못하면 `masc_dos_load`·`masc_dos_restore`·
+  `masc_dos_eject` 는 아무것도 바꾸지 않고 거절한다. 이 파일은 사실의 기록이지 Keeper 를 막는
+  장치가 아니다. 워커는 `autosave-prev` 로 대신 넘어가지 않는다.
   기계가 없을 때 — 기계가 필요한 호출의 거절(`masc_dos_screen`·`masc_dos_peek` 등)과
   프로그램 이름 없이 부른 `masc_dos_load` 의 인벤토리 응답 — 는 두 슬롯에 무엇이 있는지
   (프로그램, 실행한 명령어 수, 저장한 사람, 시각, 되살리는 명령)를 `autosave` 와
   `previous_autosave` 필드로 알려 준다. 파일이 있는데 읽히지 않으면(다른 체크포인트 형식,
-  손상) `{"unreadable": 이유}` 로 그렇게 말한다.
-  되살리는 것은 언제나 사람의 몫이고, 서버가 스스로 되살리지 않는다.
+  손상) `{"unreadable": 이유}` 로 그렇게 말한다. 워커가 시작할 때 되살리지 못한 `autosave` 는
+  그 이유(`restore_failed_at_start`)와 함께 알리고, 되살리는 명령은 붙이지 않는다.
   → [Dos_lane.lookup_autosave](../../lib/dos_lane/dos_lane.mli),
+  [Dos_lane.resume_autosave](../../lib/dos_lane/dos_lane.mli),
   [Dos_lane.lookup_previous_autosave](../../lib/dos_lane/dos_lane.mli),
   [Machine_checkpoint.read_meta](../../lib/machine_checkpoint/machine_checkpoint.mli)
 

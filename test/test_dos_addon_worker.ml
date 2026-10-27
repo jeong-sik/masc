@@ -349,13 +349,16 @@ let rec mkdir_p path =
 let write_file path contents =
   Out_channel.with_open_bin path (fun channel -> output_string channel contents)
 
-(* The worker over in-process pipes, as the host sees it. *)
-let with_worker ~base_path run_client =
+(* The worker over in-process pipes, as the host sees it. [setup] runs first,
+   inside the same cleanup, so whatever it leaves behind -- a held machine, the
+   activity observer, the workspace -- is removed even when it fails. *)
+let with_worker_after ~base_path setup run_client =
   Dos_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
   Fun.protect ~finally:(fun () ->
     eject_whoever_holds ~default:"fixture";
     Dos_lane.install_activity_observer None;
     remove_owned_tree base_path) (fun () ->
+    let prepared = setup () in
     Eio_main.run (fun env ->
       Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 30. (fun () ->
         Eio.Switch.run (fun sw ->
@@ -370,7 +373,10 @@ let with_worker ~base_path run_client =
               let client = Client.create ~transport ~clock:(Eio.Stdenv.clock env) () in
               ignore (unwrap (Client.initialize client ~client_name:"worker-fixture"
                 ~client_version:"1"));
-              run_client client)))))
+              run_client client prepared)))))
+
+let with_worker ~base_path run_client =
+  with_worker_after ~base_path (fun () -> ()) (fun client () -> run_client client)
 
 let test_contained_turns_an_exception_into_an_error_result () =
   let result = Dos_addon_worker.contained ~tool_name:"masc_dos_step"
@@ -468,27 +474,25 @@ let checkpoints_of ~base_path = Filename.concat (dos_of ~base_path) "checkpoints
    while the machine runs: it booted hello.com, whose boot autosaved and
    marked the autosave as the running machine's. In one process the machine
    can only be dropped with an eject, which removes that mark, so the
-   checkpoint files are put back as the eject found them. A failure here must
-   not leave a held machine for the tests after it. *)
-let boot_then_stop_the_process ~base_path =
+   checkpoint files are put back as the eject found them. It runs as
+   [with_worker_after]'s setup, inside the cleanup. *)
+let boot_then_stop_the_process ~base_path () =
   let dos = dos_of ~base_path and checkpoints = checkpoints_of ~base_path in
   mkdir_p dos;
-  Dos_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
-  Fun.protect ~finally:(fun () -> eject_whoever_holds ~default:"before-restart") (fun () ->
-    let booted, _boot =
-      require
-        (Dos_lane.load ~who:"before-restart" ~ledger_dir:dos
-           ~saves_dir:(Filename.concat (Filename.concat dos "saves") "hello.com")
-           ~checkpoint_dir:checkpoints ~previous_autosave:Dos_lane.Keep_previous_autosave
-           ~program_name:"hello.com" ~program_bytes:hello_com ~files:[] ~announce:ignore)
-    in
-    let files =
-      Sys.readdir checkpoints |> Array.to_list |> List.map (Filename.concat checkpoints)
-      |> List.map (fun path -> (path, In_channel.with_open_bin path In_channel.input_all))
-    in
-    require (Dos_lane.eject ~who:"before-restart" ~announce:ignore ());
-    List.iter (fun (path, contents) -> write_file path contents) files;
-    booted)
+  let booted, _boot =
+    require
+      (Dos_lane.load ~who:"before-restart" ~ledger_dir:dos
+         ~saves_dir:(Filename.concat (Filename.concat dos "saves") "hello.com")
+         ~checkpoint_dir:checkpoints ~previous_autosave:Dos_lane.Keep_previous_autosave
+         ~program_name:"hello.com" ~program_bytes:hello_com ~files:[] ~announce:ignore)
+  in
+  let files =
+    Sys.readdir checkpoints |> Array.to_list |> List.map (Filename.concat checkpoints)
+    |> List.map (fun path -> (path, In_channel.with_open_bin path In_channel.input_all))
+  in
+  require (Dos_lane.eject ~who:"before-restart" ~announce:ignore ());
+  List.iter (fun (path, contents) -> write_file path contents) files;
+  booted
 
 let worker_call client =
   let raw name arguments = unwrap (Client.call_tool client ~name ~arguments ()) in
@@ -508,8 +512,7 @@ let free = {C.observed_holder=None; release=None; handoff_target=None}
    move takes it. *)
 let test_a_worker_start_resumes_the_autosave () =
   let base_path = Filename.temp_dir "dos-addon-worker-resume-" "" in
-  let booted = boot_then_stop_the_process ~base_path in
-  with_worker ~base_path (fun client ->
+  with_worker_after ~base_path (boot_then_stop_the_process ~base_path) (fun client booted ->
     let call, snapshot = worker_call client in
     let screen = call "masc_dos_screen" (`Assoc ["include_frame", `Bool false]) in
     check bool "the first call finds a machine" false (screen.is_error = Some true);
@@ -545,7 +548,7 @@ let cut_the_autosave_payload ~checkpoints =
      | Ok () -> ()
      | Error message -> fail message)
 
-let text_of result =
+let text_of (result : S.tool_result) =
   match result.S.content with
   | S.TextContent { text; _ } :: _ -> text
   | _ -> fail "the answer has no text"
@@ -562,12 +565,14 @@ let mentions needle haystack =
    to the restore that just failed. *)
 let test_a_worker_start_survives_an_autosave_that_will_not_restore () =
   let base_path = Filename.temp_dir "dos-addon-worker-bad-autosave-" "" in
-  ignore (boot_then_stop_the_process ~base_path : Dos_lane.observation);
-  cut_the_autosave_payload ~checkpoints:(checkpoints_of ~base_path);
-  let programs = Filename.concat (dos_of ~base_path) "programs" in
-  mkdir_p programs;
-  write_file (Filename.concat programs "hello.com") hello_com;
-  with_worker ~base_path (fun client ->
+  let setup () =
+    ignore (boot_then_stop_the_process ~base_path () : Dos_lane.observation);
+    cut_the_autosave_payload ~checkpoints:(checkpoints_of ~base_path);
+    let programs = Filename.concat (dos_of ~base_path) "programs" in
+    mkdir_p programs;
+    write_file (Filename.concat programs "hello.com") hello_com
+  in
+  with_worker_after ~base_path setup (fun client () ->
     let call, snapshot = worker_call client in
     let screen = call "masc_dos_screen" (`Assoc ["include_frame", `Bool false]) in
     check bool "the worker answers with no machine" true

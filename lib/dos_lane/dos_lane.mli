@@ -592,7 +592,10 @@ val restore :
     {!autosave_prev_slot} already holds what its first autosave replaces. A
     slot that does not exist is not asked about; the read reports it. A
     commit refuses when the previous autosave was replaced since
-    {!prepare_restore}.
+    {!prepare_restore}. The slot is classified once ({!classify_slot}, without
+    case): a lane-owned slot reads and counts its own file however it was
+    spelled, so [AUTOSAVE] restores {!autosave_slot}'s file and never a file
+    by that spelling.
 
     Everything is read and checked first; on any error the current machine,
     its ledger and its controller are untouched. [announce] runs under the

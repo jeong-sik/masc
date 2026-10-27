@@ -2374,11 +2374,17 @@ let test_no_machine_guidance_after_a_failed_start () =
     fail "an unreadable autosave is reported with its own reason"
 ;;
 
+(* With both autosave files on disk, so that the command named here is one a
+   consent rule could refuse: it is not, because restoring the autosave
+   discards nothing, and autosave-prev is untouched by its first save. *)
 let test_a_refusal_with_no_machine_carries_the_restore_command () =
   with_workspace (fun base_path ->
     install_program ~base_path "echo.com" echo_com;
     boot ~base_path "echo.com";
+    ignore (dispatch ~base_path "masc_dos_step" [ ("steps", `Int 1_000) ] : Tool_result.result);
+    ignore (dispatch ~base_path "masc_dos_load" [ ("program", `String "echo.com") ] : Tool_result.result);
     eject ();
+    let previous = Digest.file (prev_file ~base_path) in
     let refused = dispatch ~base_path "masc_dos_screen" [] in
     refused_before_any_effect "a screen with no machine" refused;
     check bool "the data names the restore command" true
@@ -2386,7 +2392,10 @@ let test_a_refusal_with_no_machine_carries_the_restore_command () =
        = Some (`String "masc_dos_restore slot=autosave"));
     (* The command the refusal names works as named, with no machine loaded. *)
     check bool "and that command restores" true
-      (is_completed (dispatch ~base_path "masc_dos_restore" [ ("slot", `String "autosave") ])))
+      (is_completed (dispatch ~base_path "masc_dos_restore" [ ("slot", `String "autosave") ]));
+    ignore (dispatch ~base_path "masc_dos_step" [ ("steps", `Int 1_000) ] : Tool_result.result);
+    check string "and its first save leaves autosave-prev as it was" previous
+      (Digest.file (prev_file ~base_path)))
 ;;
 
 (* Right after a restart with only autosave-prev left: the refusal names it

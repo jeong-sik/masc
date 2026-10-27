@@ -37,12 +37,13 @@ type held_autosave =
   | Held of autosave_status
   | Held_unreadable of string
 
-(* An incarnation's first autosave copies the autosave to the previous-autosave
-   slot, so it replaces what that slot held. Starting a machine -- a load, or a
-   restore of any slot but the previous autosave itself -- is therefore the
-   act that discards the previous autosave, and it is the consent for that act
-   that is asked for. With no previous autosave nothing is discarded: the
-   autosave moves to the slot and survives there. *)
+(* A new incarnation's first autosave copies the autosave to the
+   previous-autosave slot, so it replaces what that slot held. A load, or a
+   restore of a named slot, starts such an incarnation: it is the act that
+   discards the previous autosave, and it is the consent for that act that is
+   asked for. With no previous autosave nothing is discarded: the autosave
+   moves to the slot and survives there. A restore of either autosave slot
+   discards nothing and is not asked ([check_restore_consent]). *)
 type previous_autosave_consent =
   | Keep_previous_autosave
   | Discard_previous_autosave
@@ -210,15 +211,16 @@ type machine = {
          the machine it read was replaced, even when the step count is back
          where it was. *)
   mutable previous_kept : bool;
-      (* Whether this incarnation has kept the autosave it found. The first
-         autosave of an incarnation finds a file that belongs to a machine it
-         never touched -- the previous load's or restore's -- and
-         [autosave_after] copies it to [autosave_prev_slot] before it writes.
-         Once the copy is on disk this is true and it is not made again, even
-         if the write that follows fails: a second copy would put this
-         incarnation's own history over the one it was keeping. Every write
-         after the first is this incarnation's own history replacing the last
-         one, same slot. *)
+      (* Whether the autosave this machine finds needs no keeping. A loaded
+         machine, or one restored from a named slot or the previous autosave,
+         starts false: its first autosave finds a file another history wrote,
+         and [autosave_after] copies it to [autosave_prev_slot] before it
+         writes. Once the copy is on disk this is true and it is not made
+         again, even if the write that follows fails: a second copy would put
+         this machine's own history over the one it was keeping. A machine
+         restored from the autosave starts true: that file is the last save of
+         the history it carries on ([previous_kept_on_restore]). Every write
+         with this true is this history replacing its own last save. *)
   mutable resume_marked : bool;
       (* Whether this incarnation wrote the resume mark since it last removed
          it, so a successful autosave writes the mark once, not on every call.
@@ -330,6 +332,18 @@ let remove_resume_mark ~dir =
   | () -> Ok ()
   | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> Ok ()
   | exception Unix.Unix_error (error, _, path) -> Error (path ^ ": " ^ Unix.error_message error)
+;;
+
+(* A load, or a restore of another slot, removes the mark before it installs
+   its machine. The machine running now has no mark on disk from here: if the
+   install then fails, that machine keeps running and its next autosave
+   writes the mark again. *)
+let remove_resume_mark_for_install ~dir =
+  match remove_resume_mark ~dir with
+  | Error message -> Error message
+  | Ok () ->
+    Option.iter (fun running -> running.resume_marked <- false) !state;
+    Ok ()
 ;;
 
 (* [st]'s autosave no longer holds what [st] is. *)
@@ -714,11 +728,10 @@ let autosave_slot =
   | Error message -> failwith message
 ;;
 
-(* Where an incarnation's first autosave moves whatever [autosave_slot]
-   already held, before writing its own state there. That prior file belongs
-   to a machine this incarnation never touched -- the previous [load]'s or
-   [restore]'s last autosave -- and a fresh boot's own first write must not
-   erase it silently. *)
+(* Where a new incarnation's first autosave copies whatever [autosave_slot]
+   already held, before writing its own state there. That prior file is
+   another history's last autosave, and a fresh load's or a named restore's
+   first write must not erase it silently. *)
 let autosave_prev_slot =
   match Machine_checkpoint.slot_of_string "autosave-prev" with
   | Ok s -> s
@@ -746,6 +759,16 @@ let classify_slot slot =
 ;;
 
 let named_slot_to_string = Machine_checkpoint.slot_to_string
+
+(* The file a classified slot names. A lane-owned slot names its canonical
+   file however the caller spelled it: on a case-sensitive filesystem
+   "AUTOSAVE.ckpt" is another file, and on a case-folding one a write counter
+   keyed by that spelling would miss the lane's own writes to autosave.ckpt. *)
+let checkpoint_slot = function
+  | Named named -> named
+  | Current_autosave -> autosave_slot
+  | Previous_autosave -> autosave_prev_slot
+;;
 
 let checkpoint_meta st ~who : Yojson.Safe.t =
   `Assoc
@@ -823,13 +846,13 @@ let keep_previous_autosave ~dir =
    resume. A failed write is reported in [ran.autosave] and never turns the
    call into an error, because the guest moved either way.
 
-   This incarnation's first autosave keeps whatever [autosave_slot] already
-   held, by copying it to [autosave_prev_slot] first: that file is the previous
-   incarnation's own last save, not this one's, and [load]'s or [restore]'s
-   very next call must not silently overwrite it. If the copy fails nothing is
-   written and the reason is reported, so the old autosave stays and the next
-   call tries again. Every autosave after the copy is this incarnation's own
-   history replacing its own history. *)
+   Until [previous_kept], the first autosave keeps whatever [autosave_slot]
+   held, by copying it to [autosave_prev_slot] first: that file is another
+   history's last save, and a load's or a named restore's very next call must
+   not silently overwrite it. If the copy fails nothing is written and the
+   reason is reported, so the old autosave stays and the next call tries
+   again. Every autosave after that is this history replacing its own last
+   save. A success writes the resume mark; an exit or a failure removes it. *)
 let autosave_after st ~who =
   if Dos_machine.exited st.m then
     (* Nothing to resume: the autosave is the program before it exited. *)
@@ -1189,7 +1212,7 @@ let commit_load ~who prepared ~announce =
     else match !(prepared.load_machine) with
     | None -> Error (Invalid_request "DOS load preparation was already consumed")
     | Some (m, kept) ->
-      match remove_resume_mark ~dir:prepared.load_checkpoint_dir with
+      match remove_resume_mark_for_install ~dir:prepared.load_checkpoint_dir with
       | Error message -> Error (refused_for_mark ~nothing_was:"loaded" message)
       | Ok () ->
       prepared.load_machine := None;
@@ -1550,7 +1573,8 @@ type restore_payload = {
   restore_ledger_path : string;
   restore_saves_dir : string;
   restore_checkpoint_dir : string;
-  restore_slot : Machine_checkpoint.slot;
+  restore_slot : slot;
+      (* Classified once by [prepare_restore]; its file is [checkpoint_slot]. *)
   restore_slot_writes : int;
   restore_previous_writes : int;
       (* How many times this lane replaced the previous autosave when the
@@ -1579,11 +1603,11 @@ let discard_prepared_restore prepared =
    ([previous_kept_on_restore]). The previous autosave's machine replaces only
    the previous autosave, which it holds, after keeping the autosave there. A
    slot that is not there is not asked about: the read reports it. *)
-let check_restore_consent ~dir ~slot consent =
-  match classify_slot slot with
+let check_restore_consent ~dir slot consent =
+  match slot with
   | Current_autosave | Previous_autosave -> Ok ()
-  | Named _ ->
-    if Sys.file_exists (Machine_checkpoint.path ~dir slot) then
+  | Named named ->
+    if Sys.file_exists (Machine_checkpoint.path ~dir named) then
       check_previous_autosave_consent ~dir consent
     else Ok ()
 ;;
@@ -1594,8 +1618,7 @@ let check_restore_consent ~dir ~slot consent =
    autosave stays as uninterrupted play leaves it. Every other restored
    machine keeps the autosave in [autosave_prev_slot] with its first save, as
    a loaded one does. *)
-let previous_kept_on_restore slot =
-  match classify_slot slot with
+let previous_kept_on_restore = function
   | Current_autosave -> true
   | Previous_autosave | Named _ -> false
 ;;
@@ -1604,19 +1627,20 @@ let previous_kept_on_restore slot =
    autosave's own machine continues the history the mark records, so the mark
    stays as it is. Any other restored machine is not what the autosave holds,
    so the mark goes, and comes back with that machine's first autosave. *)
-let clear_mark_on_restore ~dir slot =
-  match classify_slot slot with
+let clear_mark_on_restore ~dir = function
   | Current_autosave -> Ok ()
-  | Previous_autosave | Named _ -> remove_resume_mark ~dir
+  | Previous_autosave | Named _ -> remove_resume_mark_for_install ~dir
 ;;
 
 let prepare_restore ~dir ~slot ~previous_autosave ~ledger_dir ~saves_dir_of =
+  let classified = classify_slot slot in
+  let slot = checkpoint_slot classified in
   let* () = require_activity () in
   let restore_slot_writes, restore_previous_writes =
     locked (fun () ->
       ( checkpoint_write_count (Machine_checkpoint.path ~dir slot)
       , checkpoint_write_count (Machine_checkpoint.path ~dir autosave_prev_slot) )) in
-  let* () = check_restore_consent ~dir ~slot previous_autosave in
+  let* () = check_restore_consent ~dir classified previous_autosave in
   let* checkpoint = match Machine_checkpoint.read ~dir slot ~machine:Machine_checkpoint.Dos
       ~format:checkpoint_format with
     | Ok checkpoint -> Ok checkpoint
@@ -1651,7 +1675,7 @@ let prepare_restore ~dir ~slot ~previous_autosave ~ledger_dir ~saves_dir_of =
         let prepared = Atomic.make (Some {
           restore_machine=m;restore_kept=kept;restore_meta=meta;restore_entries=entries;
           restore_staged_ledger=temporary;restore_ledger_path=Filename.concat ledger_dir "ledger.jsonl";
-          restore_saves_dir=saves_dir;restore_checkpoint_dir=dir;restore_slot=slot;
+          restore_saves_dir=saves_dir;restore_checkpoint_dir=dir;restore_slot=classified;
           restore_slot_writes;restore_previous_writes}) in
         transferred := true;
         Ok prepared)
@@ -1672,13 +1696,13 @@ let commit_admitted ~controller ~by prepared ~announce =
   | Some owned ->
     Fun.protect ~finally:(fun () -> remove_restore_stage owned.restore_staged_ledger)
       (fun () ->
-        if checkpoint_write_count
-            (Machine_checkpoint.path ~dir:owned.restore_checkpoint_dir owned.restore_slot)
+        let slot = checkpoint_slot owned.restore_slot in
+        if checkpoint_write_count (Machine_checkpoint.path ~dir:owned.restore_checkpoint_dir slot)
            <> owned.restore_slot_writes
         then
           Error (Invalid_request (Printf.sprintf
             "DOS checkpoint %s was saved again during restore preparation; request the restore again"
-            (Machine_checkpoint.slot_to_string owned.restore_slot)))
+            (Machine_checkpoint.slot_to_string slot)))
         else if checkpoint_write_count
                   (Machine_checkpoint.path ~dir:owned.restore_checkpoint_dir autosave_prev_slot)
                 <> owned.restore_previous_writes
@@ -1686,9 +1710,6 @@ let commit_admitted ~controller ~by prepared ~announce =
           Error (Invalid_request
             "the previous autosave changed during restore preparation; request the restore again")
         else
-        match clear_mark_on_restore ~dir:owned.restore_checkpoint_dir owned.restore_slot with
-        | Error message -> Error (refused_for_mark ~nothing_was:"restored" message)
-        | Ok () ->
         let meta = owned.restore_meta in
         let st = {m=owned.restore_machine; steps=meta.saved_steps; program=meta.saved_program;
           ledger_path=owned.restore_ledger_path; entries=owned.restore_entries;
@@ -1697,14 +1718,25 @@ let commit_admitted ~controller ~by prepared ~announce =
           incarnation=Random_id.uuid_v7 ();
           previous_kept=previous_kept_on_restore owned.restore_slot;
           resume_marked=false} in
+        (* Read before anything changes: the core's readers can raise, and a
+           machine must not be published, nor the mark removed, for a commit
+           that then fails. *)
+        let observation = observe st in
+        match clear_mark_on_restore ~dir:owned.restore_checkpoint_dir owned.restore_slot with
+        | Error message -> Error (refused_for_mark ~nothing_was:"restored" message)
+        | Ok () ->
+        (* The checkpoint's ledger replaces the file. At a worker's start this
+           drops any keys a killed process appended after its last autosave;
+           what those keys did to the guest died with that process too, so the
+           ledger and the machine still agree. *)
         match Sys.rename owned.restore_staged_ledger owned.restore_ledger_path with
         | exception Sys_error message -> Error (Unreadable message)
         | () ->
           state := Some st;
           mark_change ();
-          note_activity ~who:by ("restore " ^ Machine_checkpoint.slot_to_string owned.restore_slot);
+          note_activity ~who:by ("restore " ^ Machine_checkpoint.slot_to_string slot);
           announce ();
-          Ok (observe st))
+          Ok observation)
 ;;
 
 let commit_restore ~who prepared ~announce =
@@ -1732,16 +1764,18 @@ type resume =
 let worker_start = "worker start"
 
 (* The restore of the autosave a caller would make, admitted only with no
-   machine loaded: nobody asked, so nobody's machine is replaced. It is tried
-   only when the resume mark says the autosave holds the machine that was
-   running; with no mark, or no file, there is nothing to resume and nothing
-   to say. The consent argument is never consulted for this slot
+   machine loaded: nobody asked, so nobody's machine is replaced. The checks
+   run in this order: a loaded machine, then the resume mark, then the file,
+   and only then activity and the file's contents, so a loaded machine wins
+   over everything and a missing mark or file is always a quiet
+   [Nothing_to_resume]. The consent argument is never consulted for this slot
    ([check_restore_consent]). The restore runs inside the worker before it
    serves, so an exception from it is reported as the reason and never ends
    the worker; cancellation goes on unwinding. *)
 let resume_autosave ~dir ~ledger_dir ~saves_dir_of =
   let attempt () =
-    if not (Sys.file_exists (resume_mark_path ~dir)) then Nothing_to_resume
+    if locked (fun () -> Option.is_some !state) then Machine_loaded
+    else if not (Sys.file_exists (resume_mark_path ~dir)) then Nothing_to_resume
     else if not (Sys.file_exists (Machine_checkpoint.path ~dir autosave_slot)) then
       Nothing_to_resume
     else

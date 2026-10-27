@@ -91,33 +91,30 @@ let published_or_not = function
        | Ok published -> Published published
        | Error detail -> Withheld (Observation_unreadable detail))
 
-(* One lane reads the installations that serve one of its sources. A source
-   two of them serve cannot be told apart, so that lane is unavailable; the
-   other lanes are read as usual. *)
+(* One lane reads the installations that answer for it, as the host uses
+   them: one serving a source another also serves, or one that withholds its
+   observation, leaves out only what it would publish, and the lane reads
+   the others. Only when none of them published is the lane unavailable,
+   naming its doubled sources first; the other lanes are read as usual. *)
 let lane reading lane =
-  let relevant = List.filter (fun (observed : Lane_addon_runtime.browser_observation) ->
-    serves_lane observed.backends lane) reading.observations in
-  let doubled = List.filter (fun backend ->
-      Browser_lane.Backend.lane backend = lane
-      && List.length (List.filter (fun (observed : Lane_addon_runtime.browser_observation) ->
-           Lane_addon_types.serves_backend observed.backends backend) relevant) > 1)
-      Browser_lane.Backend.all in
-  match doubled with
-  | _ :: _ -> Unavailable (Doubled_sources doubled)
-  | [] ->
-      let read = List.map (fun (observed : Lane_addon_runtime.browser_observation) ->
-        observed.backends, published_or_not observed.observation) relevant in
-      match List.find_map (fun (_, read) -> match read with
-          | Withheld reason -> Some reason | Published _ | Unpublished -> None) read with
-      | Some reason -> Unavailable reason
-      | None ->
-          let workers = List.map (fun (backends, read) -> backends, match read with
-            | Published published -> Some published | Unpublished | Withheld _ -> None) read in
-          if List.exists (fun (_, published) -> Option.is_some published) workers
-          then Observed (Browser_addon_observation.merge
-                           ~among:(List.map (fun (observed : Lane_addon_runtime.browser_observation) ->
-                             observed.backends) reading.observations) workers)
-          else absence ~applications:reading.applications ~lane reading.declarations
+  let among = List.map (fun (observed : Lane_addon_runtime.browser_observation) ->
+    observed.backends) reading.observations in
+  let read = List.filter_map (fun (observed : Lane_addon_runtime.browser_observation) ->
+    if Browser_addon_observation.answers_for ~among lane observed.backends
+    then Some (observed.backends, published_or_not observed.observation) else None)
+    reading.observations in
+  let workers = List.map (fun (backends, read) -> backends, match read with
+    | Published published -> Some published | Unpublished | Withheld _ -> None) read in
+  if List.exists (fun (_, published) -> Option.is_some published) workers
+  then Observed (Browser_addon_observation.merge ~among workers)
+  else
+    let doubled = List.filter (fun backend -> Browser_lane.Backend.lane backend = lane
+        && Browser_addon_observation.served_twice ~among backend) Browser_lane.Backend.all in
+    match doubled, List.find_map (fun (_, read) -> match read with
+        | Withheld reason -> Some reason | Published _ | Unpublished -> None) read with
+    | _ :: _, (Some _ | None) -> Unavailable (Doubled_sources doubled)
+    | [], Some reason -> Unavailable reason
+    | [], None -> absence ~applications:reading.applications ~lane reading.declarations
 
 let render_unavailable refusal_text = function
   | Refused refusal -> refusal_text refusal

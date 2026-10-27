@@ -473,8 +473,8 @@ let browser_rows_read_the_addon_observation () =
       Browser_lane_launcher.Browser_addon_unreadable (Addon.export_refusal_message refusal) ]
 
 (* Several browser installations, each serving the sources its package
-   names: a lane reads only the installations that serve one of its sources,
-   and a source two of them serve leaves only that lane unreadable. *)
+   names: a lane reads only the installations that answer for it, as the
+   host uses them, and is unreadable only when none of them published. *)
 let browser_lanes_read_their_own_sources () =
   let work registered = `Assoc ["activity",`String "enabled";"registered",`Bool registered;
     "session",`String "closed";"locate",`Bool false] in
@@ -526,7 +526,7 @@ let browser_lanes_read_their_own_sources () =
   check bool "a lane whose source only one installation serves reads as before" true
     (state doubled Browser_lane.Lane_name.Stagehand
      = Inventory.Browser_executor (Browser_lane.Enabled, Inventory.Browser_observed true));
-  check bool "a doubled live source leaves the live lane unreadable, not undercounted" true
+  check bool "a live lane no installation answers for names its doubled sources" true
     (match Browser_addon_presence.lane (Browser_addon_presence.of_observations ~declarations
              ~applications:(fun () -> []) doubled) Browser_lane.Lane_name.Live with
      | Browser_addon_presence.Unavailable
@@ -534,15 +534,31 @@ let browser_lanes_read_their_own_sources () =
      | Browser_addon_presence.(Unavailable (Doubled_sources _ | Refused _ | Observation_unreadable _
                                             | Declarations_incomplete)
                                | Observed _ | Absent | Off | Not_running _) -> false);
-  (* A live installation that withholds its observation would make the count
-     a part, so the live lane says it cannot read rather than undercount. *)
+  (* Two installations of ego beside one of external hosts: the host uses
+     no ego client and every external one, and the live row says the same. *)
+  let ego_twice = [ego; serving Browser_lane.Backend.Ego (published []); extension] in
+  check bool "a doubled live source leaves out only its own clients" true
+    (state ego_twice Browser_lane.Lane_name.Live
+     = Inventory.Browser_clients (Browser_lane.Enabled, Inventory.Browser_observed 2));
+  check bool "the browser lane check lists the hosts of the source that still answers" true
+    (match Browser_addon_presence.polling (Browser_addon_presence.lane
+             (Browser_addon_presence.of_observations ~declarations
+                ~applications:(fun () -> fail "an observation was published") ego_twice)
+             Browser_lane.Lane_name.Live) with
+     | Browser_lane_launcher.Polling clients -> List.length clients = 2
+     | Browser_lane_launcher.(Unlisted _ | Not_observed) -> false);
+  (* A live installation that withholds its observation has no client the
+     host can reach, so the live row counts the others. *)
   let failed : Lane_addon_unready.t = {installation="ego-work";instance_id="ego-worker";package_id="ego";
     declared_tools=[];service=Lane_addon_types.Browser_service (Lane_addon_types.One_backend Browser_lane.Backend.Ego);
     reason=Failed {Lane_addon_lifecycle.cause=Cleanup_unconfirmed "cleanup incomplete";first=None}} in
   let refusal = Addon.Unready_installations (failed, []) in
   let withheld = [automation; serving Browser_lane.Backend.Ego (Error refusal); extension] in
-  check bool "one withheld live installation leaves the live count unread" true
+  check bool "a withheld live installation leaves out only its own clients" true
     (state withheld Browser_lane.Lane_name.Live
+     = Inventory.Browser_clients (Browser_lane.Enabled, Inventory.Browser_observed 2));
+  check bool "a live lane whose only installation withholds says why" true
+    (state [automation; serving Browser_lane.Backend.Ego (Error refusal)] Browser_lane.Lane_name.Live
      = Inventory.Browser_clients (Browser_lane.Enabled,
          Inventory.Browser_addon_unavailable (Addon.export_refusal_operator_message refusal)));
   check bool "and leaves automation as it was" true

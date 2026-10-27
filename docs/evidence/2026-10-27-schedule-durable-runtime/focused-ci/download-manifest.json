@@ -1,0 +1,22 @@
+{
+  "workflow": "Test",
+  "run_id": 40394461863,
+  "head": "2d8fa7543519c5c58be056f3460a2a06e76c2730",
+  "ref": "fix/schedule-durable-request-20261027",
+  "conclusion": "success",
+  "suites": [
+    "test_keeper_unified_verification_surface",
+    "test_keeper_run_tools_hooks"
+  ],
+  "artifact_id": 12686083824,
+  "archive_bytes": 8393,
+  "archive_sha256": "4d104784ef8830b373f695fc5e702df5afe98eaa97f1cf274a64ec63c8c688bc",
+  "members": [
+    {
+      "original_archive_name": "ci-run-tests.log",
+      "retained_as": "member-0.txt",
+      "bytes": 43473,
+      "sha256": "03eb55364bcf04a870a097e1ecc32def7c9b0de09d2c24d56382817f5f0c138b"
+    }
+  ]
+}

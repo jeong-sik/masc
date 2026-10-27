@@ -1,0 +1,156 @@
+{
+  "is_derivative": true,
+  "observed_at_unix": 1793048638.406358,
+  "source": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+  "scope": "Fresh read-only terminal/idle/source observation and exact canonical-result-read execution lookup; original controller FAIL remains unchanged",
+  "http_receipts": [
+    {
+      "path": "/api/v1/keepers/turns",
+      "status": 200,
+      "observed_at_unix": 1793048638.397953,
+      "body_sha256": "1a9da708a9bc0a0c2c8ffd1519f1335e4b41ff84c231ea588e625e8a2c3a93b2",
+      "body_bytes": 164,
+      "scope": "selected fields only; raw response not retained here"
+    },
+    {
+      "path": "/api/v1/dashboard/scheduled-automation?schedule_id=audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+      "status": 200,
+      "observed_at_unix": 1793048638.3995578,
+      "body_sha256": "dcda0bcc718f2c6d023d4af7f7bb6a60e4189c07ab7aca14c49b43a46016fafc",
+      "body_bytes": 8271,
+      "scope": "selected fields only; raw response not retained here"
+    },
+    {
+      "path": "/api/v1/dashboard/scheduled-automation?schedule_id=audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second",
+      "status": 200,
+      "observed_at_unix": 1793048638.401579,
+      "body_sha256": "72d8ae45a716f83c4f009ffb926922125c59ba93201101a711cab1a82af214eb",
+      "body_bytes": 7640,
+      "scope": "selected fields only; raw response not retained here"
+    },
+    {
+      "path": "/api/v1/keepers/audit-live-glm/tool-calls?execution_id=execution-node-24da7d98da52fdfb2430c9394deb36be",
+      "status": 200,
+      "observed_at_unix": 1793048638.405687,
+      "body_sha256": "54ade5919c2fbfa6179dd016d7c049096367f2597c4e166e0ebfc12ab52f6348",
+      "body_bytes": 5627,
+      "scope": "selected fields only; raw response not retained here"
+    }
+  ],
+  "target_idle": true,
+  "exact_sources": [
+    {
+      "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+      "schedule_instance_id": "01a179fd-6a9b-7000-8661-5fe342eeab00",
+      "queue": {
+        "projection_status": "matched_terminal_completed",
+        "source": "durable_event_queue_snapshot",
+        "queue": "keeper_event_queue",
+        "stimulus": "schedule_due",
+        "keeper_name": "audit-live-glm",
+        "schedule_instance_id": "01a179fd-6a9b-7000-8661-5fe342eeab00",
+        "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+        "post_id": "2f4d9ccc61659e0a1455112da4639edb2d7190fdd15f4f26d0da74ed956367aa",
+        "wake_due_at": 1793048014.467253,
+        "wake_due_at_iso": "2026-10-26T20:53:34Z",
+        "wake_payload_digest": "3b41de06f4099ce221586d3f0f3100c3f58954ed3ebe417a6f06eaef296df64b",
+        "schedule_status": "succeeded",
+        "pending_count": 0,
+        "read_errors": [],
+        "resolved_owner": "audit-live-glm",
+        "terminal_outcome": "completed",
+        "terminal_reason": null,
+        "matched_bucket": "terminal",
+        "matched_post_id": "2f4d9ccc61659e0a1455112da4639edb2d7190fdd15f4f26d0da74ed956367aa",
+        "matched_payload_kind": "schedule_due",
+        "matched_arrived_at": 1793048015.148091,
+        "matched_arrived_at_iso": "2026-10-26T20:53:35Z",
+        "matched_schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+        "matched_schedule_instance_id": "01a179fd-6a9b-7000-8661-5fe342eeab00",
+        "matched_due_at": 1793048014.467253,
+        "matched_due_at_iso": "2026-10-26T20:53:34Z",
+        "matched_payload_digest": "3b41de06f4099ce221586d3f0f3100c3f58954ed3ebe417a6f06eaef296df64b",
+        "matched_age_seconds": 623.2502489089966
+      }
+    },
+    {
+      "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second",
+      "schedule_instance_id": "01a179fd-bbaf-7000-9acd-cc2e0b2d3c73",
+      "queue": {
+        "projection_status": "matched_terminal_completed",
+        "source": "durable_event_queue_snapshot",
+        "queue": "keeper_event_queue",
+        "stimulus": "schedule_due",
+        "keeper_name": "audit-live-glm",
+        "schedule_instance_id": "01a179fd-bbaf-7000-9acd-cc2e0b2d3c73",
+        "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second",
+        "post_id": "f9db2ee7c04f33800fa0db0fa36017c9b1739e5b17d89c1b5e4ea05293b38b54",
+        "wake_due_at": 1793048035.223111,
+        "wake_due_at_iso": "2026-10-26T20:53:55Z",
+        "wake_payload_digest": "dc440684f6d7aa65ce86b1eee58dd2d66c0f61a73bfb09cb2151c0a1fab017d9",
+        "schedule_status": "succeeded",
+        "pending_count": 0,
+        "read_errors": [],
+        "resolved_owner": "audit-live-glm",
+        "terminal_outcome": "completed",
+        "terminal_reason": null,
+        "matched_bucket": "terminal",
+        "matched_post_id": "f9db2ee7c04f33800fa0db0fa36017c9b1739e5b17d89c1b5e4ea05293b38b54",
+        "matched_payload_kind": "schedule_due",
+        "matched_arrived_at": 1793048035.307678,
+        "matched_arrived_at_iso": "2026-10-26T20:53:55Z",
+        "matched_schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second",
+        "matched_schedule_instance_id": "01a179fd-bbaf-7000-9acd-cc2e0b2d3c73",
+        "matched_due_at": 1793048035.223111,
+        "matched_due_at_iso": "2026-10-26T20:53:55Z",
+        "matched_payload_digest": "dc440684f6d7aa65ce86b1eee58dd2d66c0f61a73bfb09cb2151c0a1fab017d9",
+        "matched_age_seconds": 603.0922660827637
+      }
+    }
+  ],
+  "synthetic_notes": [
+    {
+      "note_id": "6",
+      "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+      "author_id": "audit-live-glm",
+      "author_kind": "automated_actor",
+      "created_at": 1793048034.209748,
+      "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+    },
+    {
+      "note_id": "11",
+      "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second",
+      "author_id": "audit-live-glm",
+      "author_kind": "automated_actor",
+      "created_at": 1793048048.849434,
+      "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND"
+    },
+    {
+      "note_id": "12",
+      "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+      "author_id": "audit-live-glm",
+      "author_kind": "automated_actor",
+      "created_at": 1793048072.48934,
+      "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_AFTER_B"
+    }
+  ],
+  "primary_sha256": "9d23b3fec333d67f059b6547a3888e3298b4b941ab70d77ff00792dec8ef79e5",
+  "primary_bytes": 5763,
+  "queue_sha256": "20ffccdb01969843d51b222f1f2a0c2f3bfb66d5e8d086ec78f0737dd2f8a41f",
+  "queue_bytes": 2409,
+  "pending": [],
+  "exact_artifact_read_lookup": {
+    "execution_id": "execution-node-24da7d98da52fdfb2430c9394deb36be",
+    "tool_use_id": "call_d4410a4d7680431fbd976dfe",
+    "keeper_turn_id": 3,
+    "trace_id": "trace-1793048013383-00000",
+    "tool": "keeper_artifact_read",
+    "ts": 1793048067.692621,
+    "input": {
+      "sha256": "d019cef276c7783864eef254c7d10fafba3df612c3648ab715bdea8456b01578"
+    },
+    "output": "{\"ok\":true,\"sha256\":\"d019cef276c7783864eef254c7d10fafba3df612c3648ab715bdea8456b01578\",\"offset\":0,\"next_offset\":356,\"total_bytes\":356,\"eof\":true,\"encoding\":\"utf-8\",\"content\":\"{\\\"status\\\":\\\"ok\\\",\\\"schedule_id\\\":\\\"audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second\\\",\\\"limit\\\":50,\\\"notes\\\":[{\\\"note_id\\\":\\\"11\\\",\\\"schedule_id\\\":\\\"audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second\\\",\\\"author_id\\\":\\\"audit-live-glm\\\",\\\"author_kind\\\":\\\"automated_actor\\\",\\\"created_at\\\":1793048048.849434,\\\"body\\\":\\\"SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND\\\"}]}\"}",
+    "wire_outcome": "ok"
+  },
+  "lookup_output_comparison": "Decoded JSON equal; serialized output string byte identity not claimed"
+}

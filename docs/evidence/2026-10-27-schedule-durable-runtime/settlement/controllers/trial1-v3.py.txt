@@ -1,0 +1,625 @@
+#!/usr/bin/env python3
+"""One owned native same-process final-Retry settlement observation trial.
+
+Public setup/cancel creates the genuine WAL; POSIX record locking and kqueue
+freeze genuine Running before publication. Missing any stage is INCOMPLETE.
+No ledger/queue JSON is authored; no process restart or model execution.
+"""
+import argparse
+import contextlib
+import fcntl
+import hashlib
+import importlib.util
+import json
+import math
+import os
+from pathlib import Path
+import select
+import signal
+import socket
+import stat
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.request
+import uuid
+
+
+class Incomplete(RuntimeError):
+    pass
+
+
+def canonical_queue_source_bytes(raw, expected):
+    """Select pending[0].source lexical bytes; never reserialize float values.
+
+    The frozen codec uses the same stimulus serializer for the snapshot and
+    source ref. Restrict this proof to its controlled ASCII, finite source.
+    """
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise Incomplete('duplicate JSON member in source-address evidence')
+            result[key] = value
+        return result
+    def reject_constant(value):
+        raise Incomplete('nonfinite JSON token in source-address evidence')
+    decoder = json.JSONDecoder(object_pairs_hook=unique_object, parse_constant=reject_constant)
+    text = raw.decode('utf-8')
+    def skip(index):
+        while index < len(text) and text[index] in ' \t\r\n':
+            index += 1
+        return index
+    decoded, end = decoder.raw_decode(text, skip(0))
+    if skip(end) != len(text) or decoded != expected or len(decoded['pending']) != 1:
+        raise Incomplete('source-address snapshot differs from final single-source observation')
+    def member(start, key):
+        index = skip(start)
+        if text[index] != '{':
+            raise Incomplete('source-address JSON path is not an object')
+        index = skip(index + 1)
+        found = []
+        while text[index] != '}':
+            name, next_index = decoder.raw_decode(text, index)
+            index = skip(next_index)
+            if not isinstance(name, str) or text[index] != ':':
+                raise Incomplete('invalid source-address JSON member')
+            start_value = skip(index + 1)
+            _, end_value = decoder.raw_decode(text, start_value)
+            if name == key:
+                found.append((start_value, end_value))
+            index = skip(end_value)
+            if text[index] == '}':
+                break
+            if text[index] != ',':
+                raise Incomplete('invalid source-address JSON separator')
+            index = skip(index + 1)
+        if len(found) != 1:
+            raise Incomplete('ambiguous or absent source-address JSON path')
+        return found[0]
+    pending, _ = member(skip(0), 'pending')
+    if text[pending] != '[':
+        raise Incomplete('source-address pending is not an array')
+    entry = skip(pending + 1)
+    _, entry_end = decoder.raw_decode(text, entry)
+    if text[skip(entry_end)] != ']':
+        raise Incomplete('source-address evidence has multiple pending entries')
+    start, end = member(entry, 'source')
+    source = decoder.raw_decode(text, start)[0]
+    def controlled(value):
+        if isinstance(value, dict):
+            return all(key.isascii() and controlled(item) for key, item in value.items())
+        if isinstance(value, list):
+            return all(controlled(item) for item in value)
+        if isinstance(value, str):
+            return value.isascii()
+        if isinstance(value, float):
+            return math.isfinite(value)
+        return value is None or type(value) in (int, bool)
+    if source != expected['pending'][0]['source'] or not controlled(source):
+        raise Incomplete('source-address bytes are outside controlled finite ASCII scope')
+    lexical = text[start:end].encode('utf-8')
+    compact, quoted, escaped = bytearray(), False, False
+    for byte in lexical:
+        if quoted:
+            if escaped:
+                escaped = False
+            elif byte == 92:
+                escaped = True
+            elif byte == 34:
+                quoted = False
+        else:
+            if byte in (32, 9, 13, 10):
+                continue
+            if byte == 34:
+                quoted = True
+        compact.append(byte)
+    if quoted or escaped:
+        raise Incomplete('unterminated source-address JSON string')
+    return bytes(compact)
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__)
+    for name in ['binary', 'output']:
+        p.add_argument('--' + name, type=Path, required=True)
+    for name in ['source-commit', 'expected-sha256', 'image-reference', 'producer-workflow',
+                 'producer-run-id', 'producer-head', 'producer-ref', 'producer-source-ref']:
+        p.add_argument('--' + name, required=True)
+    p.add_argument('--runtime-id', default='ollama_cloud.deepseek-v4.1-flash')
+    p.add_argument('--wait-seconds', type=float, default=90, help='Finite observation envelope only')
+    a = p.parse_args()
+    def hexid(value, size):
+        return len(value) == size and all(c in '0123456789abcdef' for c in value)
+    if sys.platform != 'darwin' or not hasattr(select, 'kqueue'):
+        p.error('this controller requires macOS kqueue; no polling/debugger fallback')
+    if not all(hexid(v, 40) for v in [a.source_commit, a.producer_head]) or not hexid(a.expected_sha256, 64):
+        p.error('full lowercase source/producer commit and executable SHA-256 required')
+    if not math.isfinite(a.wait_seconds) or a.wait_seconds <= 0:
+        p.error('positive finite observation window required')
+    if a.source_commit != 'a3950a189b9cc5a7ce82cb725699455d79923f42' or a.producer_source_ref != a.source_commit:
+        p.error('this source-reviewed controller is bound to C2 a3950a189b9cc5a7ce82cb725699455d79923f42 with matching producer source input')
+    repo = Path(__file__).resolve().parents[2]
+    output, binary = a.output.resolve(), a.binary.resolve(strict=True)
+    if not output.is_relative_to(repo / 'artifacts') or output.exists():
+        p.error('output must be a NEW directory under this checkout artifacts/')
+    output.mkdir(mode=0o700, parents=True)
+    def sha(data):
+        return hashlib.sha256(data).hexdigest()
+    def git(*args):
+        return subprocess.check_output(['git', '-C', str(repo), *args])
+    reviewed_source_bindings = {'lib/schedule/schedule_runner.ml': '75b8c9de27318178182520a72f3e4b97506ec6e2281f0f238e7fbe96635c8425', 'lib/schedule/schedule_store.ml': '82d0fdc88f0e88b63a881f4d5badb27fe4ac424e6ac103feaa55b02db1687ef2', 'lib/schedule/schedule_runner_status.ml': 'ae52f4417555f4031cc76cb7442ba6465bbd2eddb4b8ffdc01565e598f68cbeb', 'lib/server/server_bootstrap_maintenance.ml': '6c32469ed124bdb07e970b11a29e0c14b7555e251ad7fc691d73af776d7b8183', 'lib/server/server_schedule_consumers.ml': '1049380c7da869797970a497166857e76f991a75731c0f98a69afd9b2a86eb3e', 'lib/server/server_routes_http_routes_activity.ml': '0e25318d0ddf991eaade70a93a549301cca0dc0de4693506f0b0f4b81e757e73', 'lib/keeper_schedule_creation_admission.ml': '31625a02de1a277ad6f7ed8c0e3c73d2a406739802ded966410b4fd9761fe025', 'lib/keeper/keeper_registry_event_queue.ml': 'b6419e9bfce1ddad9ee8110b852b5f21e9210c7aca452fac7fbe654a59768efb', 'lib/keeper_runtime/keeper_event_queue_persistence.ml': '2e5a3653e41f6b2963d5358e4dc646288ecaeb4daf2207d9cfa7669da140d3a9', 'lib/keeper_runtime/keeper_event_queue_schema.ml': 'ba652ae46cd7ba27d3b23fd573b08a908276222abea0f794740f19d1218a31a4', 'lib/keeper_runtime/keeper_event_queue_state_wire.ml': '53d7c4d57b17a376c8428320a1cf3f89025efbd5a0cedcb570bb03878c2df17b', 'lib/keeper_runtime/keeper_event_queue_owner_lock.ml': '0f447ed7e2a9b22e7b10725a22aa2d78f5fa4251d0b8a856c2c06aba6b315ae5', 'lib/fs_compat/fs_compat.ml': '990a2417e1272142d07b2db309c3971d41692e77d623e015e3db6e469d3be3ba', 'lib/fs_compat/atomic_replace.ml': '88a63172b265c2c5907e0d83885b405388c2b9bc4b04fa3f27f93ae23dc05d9b', 'lib/fs_compat/atomic_temp_name.ml': '6504705133d494dbeedd412ad17ffcc4205db1ee3838f8c9cbcd3075ac3a8d1b', 'lib/backend/backend.ml': 'd09bed16a3a59c79687b1fdcdff5c52fdf3841cd2295ddaccf0171a95a3ec374', 'lib/workspace/workspace_utils_ops.ml': 'b00257c7ce608b6cb0993ea4702b5cb9e5c0a1a4e1df8123277f751b8c9fd6bd', 'lib/tool_schedule.ml': '0c9eb68dc0436870c85f663f918d55f07b807f5503f7abe73114a372b1aeb5f0', 'lib/schedule/schedule_occurrence_id.ml': '06b70943cb98d5e7e4d6855ded11713a80475ed468bd2cb4f7bba9663e61cf10', 'lib/server_keeper_waiting_inventory.ml': 'd1feaf480a8c4e7d7bbaec09bce7934439df1c2dbb063c6b61c90b716c466381', 'lib/keeper_runtime/keeper_event_queue.ml': '1173e06eca9e45cb95cf4af6411e0c47412a3bf4e64c293636758ecd809105af', 'lib/keeper_runtime/keeper_event_queue_state_core.ml': 'bd20f22f1d89f1ecdd936d2b76176289c29e1b66935b8bc6cd1434de9e82d163', 'lib/keeper_runtime/keeper_event_queue_snapshot_codec.ml': '0d0c774bdd8e235c66201aaab550be1f00e0d281f8cab6275d5bd90afb3151ba', 'lib/core/safe_ops.ml': '5b10632defd19dbde4b2d033a3cd9aa4e7481ab858391c5e8ef2acf445e6a9a8'}
+    for source_path, expected_digest in reviewed_source_bindings.items():
+        if sha(git('show', a.source_commit + ':' + source_path)) != expected_digest:
+            p.error('C2 reviewed source identity mismatch: ' + source_path)
+    helper_bytes = git('show', a.source_commit + ':scripts/lane-addons/qualify.py')
+    helper = output / 'qualify-source.py'
+    helper.write_bytes(helper_bytes)
+    spec = importlib.util.spec_from_file_location('settlement_probe_http', helper)
+    q = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(q)  # imports guarded collector classes, never its main
+    ev = q.Evidence(output / 'http')
+    checks, processes, stopped = [], {}, set()
+    final_forced_kills, wal_fd, original_mode, queue_dir = [], None, None, None
+    rpc_session, rpc_id, api, token, url = None, 0, None, None, None
+    outcome, staging = 'incomplete', None
+    provenance = {'source_commit': a.source_commit, 'expected_executable_sha256': a.expected_sha256,
+        'executable_sha256': sha(binary.read_bytes()), 'controller_sha256': sha(Path(__file__).read_bytes()),
+        'helper_sha256': sha(helper_bytes), 'harness_checkout_head': git('rev-parse', 'HEAD').decode().strip(),
+        'reviewed_source_bindings': reviewed_source_bindings,
+        'original_controller_sha256': '104e287c4928a728431cfe4f12105543311cd45399e5ecc193253a1d38759882',
+        'producer': {'workflow': a.producer_workflow, 'run_id': a.producer_run_id, 'execution_head': a.producer_head,
+                     'ref': a.producer_ref, 'source_input': a.producer_source_ref, 'basis': 'supplied; no CI query'},
+        'scope': 'isolated native candidate; one same-process final-Retry trial, not installation',
+        'existing_image_reference': a.image_reference,
+        'interpretation_limit': 'Requires independent cause review of original server-A.log, first-failure-health.json and final Retry error: actual enqueue permission refusal plus primary staging-directory failure; checks alone are not product PASS.',
+        'not_proven': ['power-loss durability', 'model execution', 'arbitrary exactly-once effects',
+                       'opaque finish-stamp bit equality', 'process-restart pending preservation', 'all scheduler races', 'whole feature']}
+    def check(name, condition):
+        checks.append({'name': name, 'passed': bool(condition)})
+        print(('PASS ' if condition else 'INCOMPLETE ') + name, flush=True)
+        if not condition:
+            raise Incomplete(name)
+    def command(args, env):
+        result = subprocess.run(args, env=env, capture_output=True, timeout=a.wait_seconds)
+        if result.returncode:
+            raise Incomplete(str(args[:2]) + ' exit ' + str(result.returncode) + '; output withheld')
+        return result.stdout  # login output is credential-bearing and is never journalled
+    def wait(read, accept, *, process, deadline=None):
+        deadline = time.monotonic() + a.wait_seconds if deadline is None else deadline
+        while True:
+            if process.poll() is not None:
+                raise Incomplete('owned process exited before observation')
+            value = read()
+            if accept(value):
+                return value
+            if time.monotonic() >= deadline:
+                raise Incomplete('observation deadline; no replay/restart/retry of this trial')
+            time.sleep(min(.2, max(0, deadline - time.monotonic())))
+    def request(method, path, body=None, *, stage):
+        return api.request(method, path, body, stage=stage)
+    def tool(name, args):
+        nonlocal rpc_session, rpc_id
+        def rpc(payload):
+            headers = {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json',
+                       'Accept': 'application/json, text/event-stream', 'Mcp-Protocol-Version': '2025-11-25'}
+            if rpc_session:
+                headers['Mcp-Session-Id'] = rpc_session
+            req = urllib.request.Request(url + '/mcp', json.dumps(payload).encode(), headers)
+            with api.opener.open(req, timeout=15) as response:
+                raw, status, session = response.read(8*1024*1024 + 1), response.status, response.headers.get('Mcp-Session-Id')
+            ev.record({'kind': 'http-mcp', 'stage': name, 'method': 'POST', 'path': '/mcp',
+                       'status': status, 'request_body': payload, 'observed_at': time.time()}, raw)
+            check('bounded successful MCP response', status == 200 and len(raw) <= 8*1024*1024)
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                data = next(json.loads(line[5:]) for line in raw.decode().splitlines()
+                            if line.startswith('data:') and json.loads(line[5:]).get('id') == payload['id'])
+            return data, session
+        if rpc_session is None:
+            rpc_id += 1
+            initialized, rpc_session = rpc({'jsonrpc': '2.0', 'id': rpc_id, 'method': 'initialize',
+                'params': {'protocolVersion': '2025-11-25', 'capabilities': {}, 'clientInfo': {'name': 'owned-settlement-replay', 'version': '1'}}})
+            check('MCP initialized', bool(rpc_session) and 'error' not in initialized)
+        rpc_id += 1
+        result, _ = rpc({'jsonrpc': '2.0', 'id': rpc_id, 'method': 'tools/call', 'params': {'name': name, 'arguments': args}})
+        check(name + ' succeeds', 'error' not in result and result['result'].get('isError') is not True)
+        reply = result['result']
+        return reply['structuredContent'] if 'structuredContent' in reply else json.loads(next(b['text'] for b in reply['content'] if b['type'] == 'text'))
+    def save_raw(name, raw):
+        q.private_write(output / name, raw)
+    def read_ledger():
+        raw = primary.read_bytes()
+        return raw, json.loads(raw)
+    def row(state, sid):
+        return next(r for r in state['schedules'] if r['schedule_id'] == sid)
+    def wakes(state, definition):
+        return [w for w in state['wakes'] if w['schedule_id'] == definition['schedule_id']
+                and w['schedule_instance_id'] == definition['schedule_instance_id']]
+    def running(state):
+        current = row(state, original['schedule_id'])
+        matches = [w for w in wakes(state, original) if w['status'] == 'running'
+                   and w['due_at'] == original['due_at'] and w['payload_digest'] == original['payload_digest']]
+        if (current['status'] != 'running' or current['schedule_instance_id'] != original['schedule_instance_id']
+                or current['due_at'] != original['due_at'] or current['payload'] != original['payload'] or len(matches) != 1):
+            return None
+        attempt = matches[0].get('attempt_id')
+        if not isinstance(attempt, str):
+            return None
+        parsed = uuid.UUID(attempt)
+        return matches[0] if str(parsed) == attempt and parsed.version == 7 else None
+    with tempfile.TemporaryDirectory(prefix='masc-settlement-actual-') as directory:
+        base = Path(directory).resolve()
+        primary, staging = base / '.masc/schedules.json', base / '.masc/schedules.json.tmp-atomic'
+        lease = base / '.masc/locks/schedules.json'
+        env = {k: v for k, v in os.environ.items() if k in ['PATH', 'HOME', 'LANG', 'LC_ALL', 'TMPDIR']}
+        env.update(MASC_BASE_PATH=str(base), MASC_KEEPER_AUTONOMOUS_ENABLED='false')
+        names = ['audit-settle-a', 'audit-settle-b']
+        def launch(label):
+            nonlocal api, url, rpc_session
+            rpc_session = None
+            with (output / ('server-' + label + '.log')).open('xb') as log:
+                process = subprocess.Popen([str(binary), 'start', '--base-path', str(base), '--host', '127.0.0.1',
+                                            '--port', str(port)], cwd=base, env=env, stdout=log, stderr=log)
+            processes[label] = process
+            api = q.API(url, ev, token=token, timeout=15, max_response_bytes=8*1024*1024)
+            ev.json('process-' + label + '.json', {'pid': process.pid, 'port': port, 'base_path': str(base)})
+            def health():
+                try:
+                    return request('GET', '/health?full=1', stage='health-' + label)
+                except q.QualificationError:
+                    return {}
+            observed = wait(health, lambda h: h.get('startup', {}).get('state_ready') is True, process=process)
+            check(label + ' verified owned candidate identity', observed['paths']['effective_base_path'] == str(base)
+                  and observed['build']['binary_commit'] == a.source_commit and observed['build']['executable_sha256'] == a.expected_sha256)
+            ev.json('build-' + label + '.json', observed['build'])
+            return process, observed
+        def owner_checks(stage):
+            for name in names:
+                inv = request('GET', '/api/v1/keepers/' + name + '/waiting-inventory', stage=stage + '-queue-' + name)
+                status = tool('masc_keeper_status', {'name': name, 'fast': True})
+                ev.json(stage + '-owner-' + name + '.json', status)
+                meta = status.get('meta', {})
+                check(stage + ' manual paused zero-turn ' + name, len(inv.get('keepers', [])) == 1
+                      and inv['keepers'][0].get('paused') is True and status.get('activation_mode') == 'manual'
+                      and meta.get('paused') is True and meta.get('total_turns') == 0 and meta.get('last_turn_ts') == 0
+                      and 'last_runtime_attempt' in meta and meta['last_runtime_attempt'] is None)
+        try:
+            check('non-root effective UID for real permission refusal', os.geteuid() != 0)
+            check('binary hash matches verified input', provenance['executable_sha256'] == a.expected_sha256)
+            command([str(binary), 'init', '--base-path', str(base)], env)
+            fixture = git('show', a.source_commit + ':scripts/fixtures/release-evidence/runtime.toml')
+            (base / '.masc/config/runtime.toml').write_bytes(fixture)
+            provenance['runtime_fixture_sha256'] = sha(fixture)
+            command([str(binary), 'sandbox-image', 'promote', '--base-path', str(base), '--runtime', 'apple_container', 'base', a.image_reference], env)
+            with socket.socket() as sock:
+                sock.bind(('127.0.0.1', 0))
+                port = sock.getsockname()[1]
+            check('owned port differs from primary', port != 8935)
+            url = 'http://127.0.0.1:' + str(port)
+            command([str(binary), 'login', '--base-path', str(base), '--host', '127.0.0.1', '--port', str(port),
+                     '--agent', 'audit-settle-admin', '--role', 'admin', '--client-env', 'OWNED_STARTUP_TOKEN', '--no-expiry', '--json'], env)
+            token = (base / '.masc/auth/audit-settle-admin.token').read_text().strip()
+            first, first_health = launch('A')
+            for name in names:
+                value = request('POST', '/api/v1/keepers/' + name + '/up', {'create_only': True,
+                    'sandbox_profile': 'microvm', 'sandbox_image': 'base', 'microvm_backend': 'apple_container',
+                    'network_mode': 'none', 'activation_mode': 'manual', 'runtime_id': a.runtime_id,
+                    'skills': {'names': []}, 'instructions': 'Owned paused final-Retry observation; do not start.'}, stage='register-' + name)
+                check('create-only owner registered ' + name, value.get('ok') is True)
+                value = request('POST', '/api/v1/keepers/' + name + '/directive', {'action': 'pause'}, stage='pause-' + name)
+                check('explicit pause committed ' + name, value.get('ok') is True)
+            owner_checks('initial')
+            def create(sid, due, recurrence='one_shot'):
+                args = {'schedule_id': sid, 'keeper_name': names[0], 'message': 'Owned paused settlement observation; do not execute.',
+                        'due_in_sec': due, 'recurrence_kind': recurrence}
+                if recurrence == 'interval':
+                    args['recurrence_interval_sec'] = 3600
+                response = request('POST', '/api/v1/tools/masc_schedule_create', args, stage='create-' + sid)
+                check('canonical create ' + sid, response.get('ok') is True and ev.events[-1]['status'] == 201)
+                value = json.loads(response['message'])
+                check('HTTP Admin human_operator stamp ' + sid, all(value[k]['kind'] == 'human_operator' and value[k]['id'] == 'audit-settle-admin' for k in ['requested_by', 'scheduled_by']))
+                return value
+            def occurrence(definition):
+                return sha('|'.join(['schedule.due_candidate', definition['schedule_instance_id'], definition['schedule_id'],
+                                     format(float(definition['due_at']), '.17g'), definition['payload_digest']]).encode())
+            def health(stage):
+                h = request('GET', '/health?full=1', stage=stage)
+                check(stage + ' same owned process identity', first.poll() is None
+                      and h['build']['runtime_instance_id'] == first_health['build']['runtime_instance_id'])
+                return h
+            def completed(status):
+                return (not status['tick_in_flight'] and status['last_success_at'] is not None
+                        and status['last_success_at'] == status['last_tick_finished_at'])
+            def inventory(stage):
+                return request('GET', '/api/v1/keepers/' + names[0] + '/waiting-inventory', stage=stage)
+            def queue_snapshot():
+                raw = snapshot.read_bytes()
+                return raw, json.loads(raw)
+            def empty(state):
+                return state['schema'] == 'keeper.event_queue.state.v19' and state['pending'] == [] and state['transition_outbox'] == []
+            def release_wal():
+                nonlocal wal_fd
+                if wal_fd is not None:
+                    fcntl.lockf(wal_fd, fcntl.LOCK_UN, 0, 0, os.SEEK_SET)
+                    os.close(wal_fd)
+                    wal_fd = None
+            def observed(stage):
+                h, (raw, ledger) = health(stage), read_ledger()
+                ev.record({'kind': 'canonical-ledger-observation', 'stage': stage, 'observed_at': time.time()}, raw)
+                qraw, qs = queue_snapshot()
+                ev.record({'kind': 'canonical-queue-observation', 'stage': stage, 'observed_at': time.time()}, qraw)
+                return h, ledger, qs
+            # Capability check on controller-owned scratch only. The child has its own FD/process.
+            lock_probe = base / 'controller-lock-preflight'
+            lock_probe.write_bytes(b'')
+            test_fd = os.open(lock_probe, os.O_RDWR)
+            child = ('import fcntl,os,sys; f=os.open(sys.argv[1],os.O_RDONLY);\n'
+                     'try: fcntl.lockf(f,fcntl.LOCK_SH|fcntl.LOCK_NB,0,0,os.SEEK_SET)\n'
+                     'except BlockingIOError: sys.exit(73)\n')
+            try:
+                fcntl.lockf(test_fd, fcntl.LOCK_EX | fcntl.LOCK_NB, 0, 0, os.SEEK_SET)
+                blocked = subprocess.run([sys.executable, '-c', child, str(lock_probe)], capture_output=True, timeout=a.wait_seconds)
+                check('actual POSIX exclusive lock excludes separate-process shared lock', blocked.returncode == 73)
+                fcntl.lockf(test_fd, fcntl.LOCK_UN, 0, 0, os.SEEK_SET)
+                released = subprocess.run([sys.executable, '-c', child, str(lock_probe)], capture_output=True, timeout=a.wait_seconds)
+                check('actual POSIX release permits shared lock', released.returncode == 0)
+                ev.json('posix-lock-preflight.json', {'blocked_exit': blocked.returncode, 'released_exit': released.returncode,
+                        'api': 'fcntl.lockf whole-file record lock, not BSD flock'})
+            finally:
+                os.close(test_fd)
+                lock_probe.unlink()
+            wait(lambda: health('startup-active'), lambda h: not h['schedule_runner']['tick_in_flight']
+                 and h['schedule_runner']['success_count'] > 0, process=first)
+            queue_dir = base / '.masc/keepers' / names[0]
+            snapshot, wal = queue_dir / 'event-queue-v19.json', queue_dir / 'event-queue-transitions-v9.jsonl'
+            setup = create('audit-settle-wal-setup', 1, 'interval')
+            setup_post = occurrence(setup)
+            accepted_raw, accepted = wait(read_ledger, lambda pair: row(pair[1], setup['schedule_id'])['status'] == 'scheduled'
+                and len(wakes(pair[1], setup)) == 1 and wakes(pair[1], setup)[0]['settlement_kind'] == 'accepted', process=first)
+            save_raw('setup-accepted-ledger.json', accepted_raw)
+            setup_inventory = inventory('setup-accepted-inventory')
+            exact = [r for r in setup_inventory['rows'] if r.get('source') == 'event_queue_pending'
+                     and r.get('detail', {}).get('post_id') == setup_post]
+            check('public setup source accepted at exact queue address', len(exact) == 1
+                  and bool(exact[0]['detail'].get('source_ref')) and bool(exact[0]['detail'].get('source_incarnation')))
+            response = request('POST', '/api/v1/tools/masc_schedule_cancel', {'schedule_id': setup['schedule_id'],
+                'reason': 'Remove only the public setup source before the settlement trial.'}, stage='cancel-public-setup')
+            check('public setup cancel succeeds', response.get('ok') is True and ev.events[-1]['status'] == 200
+                  and json.loads(response['message'])['schedule']['status'] == 'cancelled')
+            setup_raw, setup_state = queue_snapshot()
+            witnesses = [entry['witness'] for entry in setup_state['projected_dispositions'] if entry['storage'] == 'compact_witness'
+                         and entry['witness']['post_id'] == setup_post]
+            check('exact setup cancellation terminal and authoritative queue empty', empty(setup_state) and len(witnesses) == 1
+                  and witnesses[0]['disposition']['kind'] == 'cancel'
+                  and witnesses[0]['source_ref'] == exact[0]['detail']['source_ref']
+                  and str(witnesses[0]['source_incarnation']) == str(exact[0]['detail']['source_incarnation']))
+            save_raw('setup-cancelled-queue.json', setup_raw)
+            check('canonical setup produced an empty regular WAL', stat.S_ISREG(wal.lstat().st_mode) and wal.read_bytes() == b'')
+            save_raw('setup-cancelled-wal.jsonl', b'')
+            ev.json('setup-cancelled-inventory.json', inventory('setup-cancelled-inventory'))
+            original = create('audit-settle-original', 15)
+            before_health = health('before-original-lock')
+            base_counts = before_health['schedule_runner']['totals']
+            # No open/close/read_bytes/copytree of this WAL while the parent record lock is held.
+            wal_fd = os.open(wal, os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW)
+            fcntl.lockf(wal_fd, fcntl.LOCK_EX | fcntl.LOCK_NB, 0, 0, os.SEEK_SET)
+            check('canonical WAL lock acquired before original due', time.time() < original['due_at'])
+            held_stat = os.fstat(wal_fd)
+            check('locked canonical WAL still empty', held_stat.st_size == 0)
+            deadline = time.monotonic() + a.wait_seconds
+            with contextlib.closing(select.kqueue()) as queue:
+                dfd, ffd, identity = os.open(primary.parent, os.O_EVTONLY), None, None
+                try:
+                    notes = select.KQ_NOTE_WRITE | select.KQ_NOTE_RENAME | select.KQ_NOTE_DELETE | select.KQ_NOTE_ATTRIB
+                    queue.control([select.kevent(dfd, filter=select.KQ_FILTER_VNODE, flags=select.KQ_EV_ADD | select.KQ_EV_CLEAR, fflags=notes)], 0, 0)
+                    while True:
+                        if first.poll() is not None or time.monotonic() >= deadline:
+                            raise Incomplete('single Running/consumer barrier trial missed; no automatic retrial')
+                        current_stat = primary.stat()
+                        if identity != (current_stat.st_dev, current_stat.st_ino):
+                            if ffd is not None:
+                                os.close(ffd)
+                            ffd = os.open(primary, os.O_EVTONLY)
+                            identity = (current_stat.st_dev, current_stat.st_ino)
+                            queue.control([select.kevent(ffd, filter=select.KQ_FILTER_VNODE, flags=select.KQ_EV_ADD | select.KQ_EV_CLEAR, fflags=notes)], 0, 0)
+                        before_raw, before = read_ledger()
+                        candidate = running(before)
+                        if candidate is not None and not lease.exists():
+                            os.kill(first.pid, signal.SIGSTOP)
+                            stopped.add(first.pid)
+                            break
+                        events = queue.control(None, 8, min(1, max(0, deadline - time.monotonic())))
+                        ev.record({'kind': 'kqueue', 'observed_at': time.time(), 'events': [{'ident': e.ident, 'filter': e.filter, 'fflags': e.fflags} for e in events]})
+                    while True:
+                        pid, status = os.waitpid(first.pid, os.WUNTRACED | os.WNOHANG)
+                        if pid:
+                            if not os.WIFSTOPPED(status):
+                                first.returncode = os.waitstatus_to_exitcode(status)
+                                raise Incomplete('owned process exited instead of stopping')
+                            check('kernel confirms genuine SIGSTOP', os.WSTOPSIG(status) == signal.SIGSTOP)
+                            ev.json('stopped-process.json', {'pid': pid, 'waitpid_status': status, 'at': time.time()})
+                            break
+                        if time.monotonic() >= deadline:
+                            raise Incomplete('SIGSTOP receipt observation incomplete')
+                        time.sleep(.01)
+                    frozen_raw, frozen = read_ledger()
+                    frozen_wake = running(frozen)
+                    save_raw('before-stop-ledger.json', before_raw)
+                    save_raw('frozen-ledger.json', frozen_raw)
+                    check('frozen exact genuine Running attempt', frozen_wake is not None and frozen_wake['attempt_id'] == candidate['attempt_id'])
+                    qraw, qs = queue_snapshot()
+                    current_wal = wal.lstat()
+                    check('publication has not occurred and barrier inode unchanged', qraw == setup_raw and empty(qs)
+                          and (current_wal.st_dev, current_wal.st_ino) == (held_stat.st_dev, held_stat.st_ino)
+                          and os.fstat(wal_fd).st_size == 0 and os.pread(wal_fd, 1, 0) == b'' and not lease.exists())
+                    save_raw('frozen-queue.json', qraw)
+                    save_raw('frozen-wal.jsonl', os.pread(wal_fd, os.fstat(wal_fd).st_size, 0))
+                    ev.json('wal-barrier.json', {'device': held_stat.st_dev, 'inode': held_stat.st_ino,
+                            'held_until_after_faults': True, 'opened_wal_once': True, 'at': time.time()})
+                    check('owned queue directory is real', queue_dir.is_dir() and not queue_dir.is_symlink())
+                    original_mode = stat.S_IMODE(queue_dir.stat().st_mode)
+                    check('original owner directory permits read/search/write', original_mode & 0o700 == 0o700)
+                    os.chmod(queue_dir, original_mode & ~0o222)
+                    scratch = queue_dir / 'controller-publication-refusal-scratch'
+                    try:
+                        probe_fd = os.open(scratch, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                    except PermissionError as error:
+                        ev.json('queue-effective-write-refusal.json', {'errno': error.errno, 'original_mode': oct(original_mode),
+                                'fault_mode': oct(stat.S_IMODE(queue_dir.stat().st_mode)), 'at': time.time()})
+                    else:
+                        os.close(probe_fd)
+                        scratch.unlink()
+                        raise Incomplete('effective write was not refused; publication fault premise absent')
+                    check('queue remains readable under publication fault', queue_snapshot()[0] == setup_raw)
+                    check('primary staging path absent after Running primary commit', not staging.exists())
+                    staging.mkdir(mode=0o700)
+                    ev.json('faults-installed.json', {'pid': first.pid, 'at': time.time(), 'queue_mode': oct(stat.S_IMODE(queue_dir.stat().st_mode)),
+                            'ledger_staging_directory': str(staging), 'no_domain_bytes_authored': True})
+                    release_wal()
+                    resumed_at = time.time()
+                    os.kill(first.pid, signal.SIGCONT)
+                    stopped.discard(first.pid)
+                    ev.json('resumed-process.json', {'pid': first.pid, 'at': resumed_at})
+                finally:
+                    if ffd is not None:
+                        os.close(ffd)
+                    os.close(dfd)
+            def first_failure(value):
+                h, ledger, qs = value
+                status = h['schedule_runner']
+                counts = status.get('last_counts') or {}
+                return (completed(status) and status['pending_settlement_count'] == 1 and status['status'] == 'degraded'
+                    and counts.get('dispatch_failed') == 1 and counts.get('dispatch_start_rejected') == 0
+                    and status['totals']['dispatch_failed'] == base_counts['dispatch_failed'] + 1
+                    and status['totals']['dispatch_start_rejected'] == base_counts['dispatch_start_rejected']
+                    and bool(status['settlement_errors']) and running(ledger) == frozen_wake and empty(qs))
+            failed = wait(lambda: observed('first-failure'), first_failure, process=first)
+            failure_status = failed[0]['schedule_runner']
+            ev.json('first-failure-health.json', failed[0])
+            log_at_failure = (output / 'server-A.log').read_bytes()
+            save_raw('server-at-first-failure.log', log_at_failure)
+            check('new failed dispatch retained as pending; not rejected start', first_failure(failed))
+            queue_restored_at = time.time()
+            os.chmod(queue_dir, original_mode)
+            check('queue-only repair preserves real ledger fault', staging.is_dir() and empty(queue_snapshot()[1]))
+            ev.json('queue-repaired.json', {'at': queue_restored_at, 'restored_mode': oct(original_mode), 'pid': first.pid})
+            def replay_still_pending(value):
+                h, ledger, qs = value
+                status = h['schedule_runner']
+                return (completed(status) and status['tick_count'] > failure_status['tick_count']
+                    and status['last_tick_started_at'] > queue_restored_at and status['status'] == 'degraded'
+                    and status['pending_settlement_count'] == 1 and bool(status['settlement_errors'])
+                    and status['last_counts']['dispatch_failed'] == 0 and status['last_counts']['dispatch_succeeded'] == 0
+                    and status['totals'] == failure_status['totals'] and running(ledger) == frozen_wake and empty(qs))
+            pending = wait(lambda: observed('queue-repaired-ledger-fault'), replay_still_pending, process=first)
+            ev.json('queue-repaired-completed-cadence-health.json', pending[0])
+            check('completed later cadence retries only original settlement with repaired empty queue', replay_still_pending(pending))
+            staging.rmdir()
+            ledger_restored_at = time.time()
+            ev.json('ledger-repaired.json', {'at': ledger_restored_at, 'pid': first.pid})
+            def retry_settled(value):
+                h, ledger, qs = value
+                status = h['schedule_runner']
+                old = [w for w in wakes(ledger, original) if w['attempt_id'] == frozen_wake['attempt_id']]
+                return (completed(status) and status['last_tick_started_at'] > ledger_restored_at
+                    and status['pending_settlement_count'] == 0 and status['settlement_errors'] == []
+                    and status['totals'] == failure_status['totals'] and status['last_counts']['dispatch_failed'] == 0
+                    and status['last_counts']['dispatch_succeeded'] == 0 and row(ledger, original['schedule_id'])['status'] == 'due'
+                    and len(wakes(ledger, original)) == 1 and len(old) == 1 and old[0]['status'] == 'failed'
+                    and old[0]['settlement_kind'] == 'retryable_failure' and bool(old[0].get('error'))
+                    and failure_status['last_tick_started_at'] <= old[0]['finished_at'] <= failure_status['last_tick_finished_at']
+                    and old[0]['finished_at'] < queue_restored_at < ledger_restored_at and empty(qs))
+            settled = wait(lambda: observed('retry-settled-only'), retry_settled, process=first)
+            ev.json('retry-settled-only-health.json', settled[0])
+            check('same PID settles original Retry with first-failure-aged finish stamp and no fresh dispatch', retry_settled(settled))
+            old_wake = wakes(settled[1], original)[0]
+            ev.json('original-retry-settled.json', old_wake)
+            settled_tick = settled[0]['schedule_runner']['tick_count']
+            def accepted_again(value):
+                h, ledger, qs = value
+                status = h['schedule_runner']
+                attempt_wakes = wakes(ledger, original)
+                new = [w for w in attempt_wakes if w['attempt_id'] != frozen_wake['attempt_id']]
+                entries = qs['pending']
+                return (completed(status) and status['tick_count'] > settled_tick
+                    and status['pending_settlement_count'] == 0 and row(ledger, original['schedule_id'])['status'] == 'succeeded'
+                    and len(attempt_wakes) == 2 and len(new) == 1 and new[0]['settlement_kind'] == 'accepted'
+                    and new[0]['status'] == 'succeeded' and [w for w in attempt_wakes if w['attempt_id'] == frozen_wake['attempt_id']] == [old_wake]
+                    and status['totals']['dispatch_succeeded'] == failure_status['totals']['dispatch_succeeded'] + 1
+                    and status['totals']['dispatch_failed'] == failure_status['totals']['dispatch_failed']
+                    and status['totals']['dispatch_start_rejected'] == failure_status['totals']['dispatch_start_rejected']
+                    and len(entries) == 1 and entries[0]['source']['post_id'] == occurrence(original) and qs['transition_outbox'] == [])
+            final = wait(lambda: observed('fresh-admission'), accepted_again, process=first)
+            ev.json('fresh-admission-health.json', final[0])
+            check('only following cadence creates one fresh accepted attempt and one queued source', accepted_again(final))
+            final_inventory = inventory('final-exact-inventory')
+            exact = [r for r in final_inventory['rows'] if r.get('source') == 'event_queue_pending'
+                     and r.get('detail', {}).get('post_id') == occurrence(original)]
+            final_entry = final[2]['pending'][0]
+            final_payload = final_entry['source']['payload']
+            check('canonical queue confirms the exact original scheduled occurrence',
+                  final_payload.get('kind') == 'schedule_due'
+                  and final_payload.get('schedule_id') == original['schedule_id']
+                  and final_payload.get('schedule_instance_id') == original['schedule_instance_id']
+                  and final_payload.get('occurrence_id') == occurrence(original)
+                  and final_payload.get('due_at_unix') == original['due_at']
+                  and final_payload.get('payload_digest') == original['payload_digest'])
+            source_snapshot_raw = snapshot.read_bytes()
+            source_bytes = canonical_queue_source_bytes(source_snapshot_raw, final[2])
+            canonical_ref = sha(source_bytes)
+            save_raw('final-source-address-queue.json', source_snapshot_raw)
+            ev.json('final-source-address-proof.json', {
+                'snapshot_sha256': sha(source_snapshot_raw), 'snapshot_bytes': len(source_snapshot_raw),
+                'path': ['pending', 0, 'source'], 'canonical_source_sha256': canonical_ref,
+                'canonical_source_bytes': len(source_bytes),
+                'method': 'Exact nested source lexical span, outside-string JSON whitespace removed; no number/order/escape reserialization. Frozen snapshot/ref use the same stimulus codec; controlled finite ASCII only.'})
+            check('public inventory confirms the exact canonical source address', len(exact) == 1
+                  and exact[0]['detail'].get('source_ref') == canonical_ref
+                  and str(exact[0]['detail'].get('source_incarnation')) == str(final_entry['admitted_revision']))
+            owner_checks('final')
+            outcome = 'bounded_checks_passed_requires_two_fault_cause_review'
+        except (Exception, KeyboardInterrupt) as error:
+            ev.json('incomplete.json', {'kind': type(error).__name__, 'message': str(error), 'at': time.time()})
+        finally:
+            # Every cleanup step is independent: a fault restore error must not strand SIGSTOP.
+            cleanup_errors = []
+            def cleanup(label, action):
+                try:
+                    action()
+                except Exception as error:
+                    cleanup_errors.append({'step': label, 'kind': type(error).__name__, 'message': str(error)})
+            if original_mode is not None:
+                cleanup('restore-own-directory-mode', lambda: os.chmod(queue_dir, original_mode))
+            if staging is not None and staging.is_dir():
+                cleanup('remove-own-staging-fault-directory', staging.rmdir)
+            if wal_fd is not None:
+                cleanup('unlock-own-wal-fd', lambda: fcntl.lockf(wal_fd, fcntl.LOCK_UN, 0, 0, os.SEEK_SET))
+                cleanup('close-own-wal-fd', lambda: os.close(wal_fd))
+                wal_fd = None
+            for label, process in reversed(list(processes.items())):
+                if process.poll() is None:
+                    if process.pid in stopped:
+                        cleanup('continue-own-stopped-process', lambda: os.kill(process.pid, signal.SIGCONT))
+                        stopped.discard(process.pid)
+                    cleanup('terminate-own-process', process.terminate)
+                    try:
+                        process.wait(timeout=a.wait_seconds)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait()
+                        final_forced_kills.append({'label': label, 'pid': process.pid})
+            if primary is not None and primary.exists():
+                save_raw('after-owned-shutdown-ledger.json', primary.read_bytes())
+            ev.json('summary.json', {'outcome': outcome, 'checks': checks,
+                'cleanup_errors': cleanup_errors, 'final_cleanup_forced_kills': final_forced_kills, 'process_exit_codes': {k: v.returncode for k, v in processes.items()},
+                'observer_deadline_means': 'incomplete observation, not producer terminal or product timing failure',
+                'restart_count': 0, 'not_proven': provenance['not_proven']})
+            ev.json('provenance.json', provenance)
+    return 0 if outcome == 'bounded_checks_passed_requires_two_fault_cause_review' and not final_forced_kills and not cleanup_errors and all(p.returncode == 0 for p in processes.values()) else 1
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

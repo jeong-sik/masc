@@ -1,0 +1,20 @@
+{
+  "id": 12687003191,
+  "node_id": "MDg6QXJ0aWZhY3QxMjY4NzAwMzE5MQ==",
+  "name": "tui-macos-arm64-a3950a189b9cc5a7ce82cb725699455d79923f42-40396800146",
+  "size_in_bytes": 74909557,
+  "url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/12687003191",
+  "archive_download_url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/12687003191/zip",
+  "expired": false,
+  "digest": "sha256:a9e1eff4b3ddc6b43c14fa2fc48b7f468634d902ff487d9337b57bc4f5cb5927",
+  "created_at": "2026-10-26T20:42:05Z",
+  "updated_at": "2026-10-26T20:42:05Z",
+  "expires_at": "2026-11-02T20:41:56Z",
+  "workflow_run": {
+    "id": 40396800146,
+    "repository_id": 1136640865,
+    "head_repository_id": 1136640865,
+    "head_branch": "main",
+    "head_sha": "9377c7f3025d68e3856d2afd3762468dabc77813"
+  }
+}

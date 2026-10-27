@@ -1,0 +1,5 @@
+{
+  "blocked_exit": 73,
+  "released_exit": 0,
+  "api": "fcntl.lockf whole-file record lock, not BSD flock"
+}

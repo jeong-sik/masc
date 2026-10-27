@@ -1,0 +1,14 @@
+{
+  "observed_at_unix": 1793047493.371134,
+  "run": {
+    "conclusion": "success",
+    "event": "workflow_dispatch",
+    "headBranch": "main",
+    "headSha": "9377c7f3025d68e3856d2afd3762468dabc77813",
+    "name": "Minimal manual checks",
+    "status": "completed",
+    "url": "https://github.com/jeong-sik/masc/actions/runs/40396800146"
+  },
+  "explicit_source_input": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+  "scope": "Initial dispatch identity only; source/artifact awaits producer receipt"
+}

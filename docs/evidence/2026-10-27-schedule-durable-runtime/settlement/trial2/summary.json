@@ -1,0 +1,1085 @@
+{
+  "outcome": "bounded_checks_passed_requires_two_fault_cause_review",
+  "checks": [
+    {
+      "name": "non-root effective UID for real permission refusal",
+      "passed": true
+    },
+    {
+      "name": "binary hash matches verified input",
+      "passed": true
+    },
+    {
+      "name": "owned port differs from primary",
+      "passed": true
+    },
+    {
+      "name": "A verified owned candidate identity",
+      "passed": true
+    },
+    {
+      "name": "create-only owner registered audit-settle-a",
+      "passed": true
+    },
+    {
+      "name": "explicit pause committed audit-settle-a",
+      "passed": true
+    },
+    {
+      "name": "create-only owner registered audit-settle-b",
+      "passed": true
+    },
+    {
+      "name": "explicit pause committed audit-settle-b",
+      "passed": true
+    },
+    {
+      "name": "bounded successful MCP response",
+      "passed": true
+    },
+    {
+      "name": "MCP initialized",
+      "passed": true
+    },
+    {
+      "name": "bounded successful MCP response",
+      "passed": true
+    },
+    {
+      "name": "masc_keeper_status succeeds",
+      "passed": true
+    },
+    {
+      "name": "initial manual paused zero-turn audit-settle-a",
+      "passed": true
+    },
+    {
+      "name": "bounded successful MCP response",
+      "passed": true
+    },
+    {
+      "name": "masc_keeper_status succeeds",
+      "passed": true
+    },
+    {
+      "name": "initial manual paused zero-turn audit-settle-b",
+      "passed": true
+    },
+    {
+      "name": "actual POSIX exclusive lock excludes separate-process shared lock",
+      "passed": true
+    },
+    {
+      "name": "actual POSIX release permits shared lock",
+      "passed": true
+    },
+    {
+      "name": "startup-active same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "canonical create audit-settle-wal-setup",
+      "passed": true
+    },
+    {
+      "name": "HTTP Admin human_operator stamp audit-settle-wal-setup",
+      "passed": true
+    },
+    {
+      "name": "public setup source accepted at exact canonical queue address",
+      "passed": true
+    },
+    {
+      "name": "public setup cancel succeeds",
+      "passed": true
+    },
+    {
+      "name": "public cancellation actor and original reason are authoritative",
+      "passed": true
+    },
+    {
+      "name": "setup-after-cancel WAL is a regular file when present",
+      "passed": true
+    },
+    {
+      "name": "setup-after-cancel WAL capture keeps the observed inode",
+      "passed": true
+    },
+    {
+      "name": "setup-after-cancel complete WAL bytes captured",
+      "passed": true
+    },
+    {
+      "name": "exact setup cancellation terminal and authoritative queue empty",
+      "passed": true
+    },
+    {
+      "name": "canonical setup produced an empty regular WAL",
+      "passed": true
+    },
+    {
+      "name": "canonical create audit-settle-original",
+      "passed": true
+    },
+    {
+      "name": "HTTP Admin human_operator stamp audit-settle-original",
+      "passed": true
+    },
+    {
+      "name": "before-original-lock same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "canonical WAL lock acquired before original due",
+      "passed": true
+    },
+    {
+      "name": "locked canonical WAL still empty",
+      "passed": true
+    },
+    {
+      "name": "kernel confirms genuine SIGSTOP",
+      "passed": true
+    },
+    {
+      "name": "frozen exact genuine Running attempt",
+      "passed": true
+    },
+    {
+      "name": "publication has not occurred and barrier inode unchanged",
+      "passed": true
+    },
+    {
+      "name": "owned queue directory is real",
+      "passed": true
+    },
+    {
+      "name": "original owner directory permits read/search/write",
+      "passed": true
+    },
+    {
+      "name": "queue remains readable under publication fault",
+      "passed": true
+    },
+    {
+      "name": "primary staging path absent after Running primary commit",
+      "passed": true
+    },
+    {
+      "name": "first-failure same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "first-failure same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "new failed dispatch retained as pending; not rejected start",
+      "passed": true
+    },
+    {
+      "name": "queue-only repair preserves real ledger fault",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "queue-repaired-ledger-fault same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "completed later cadence retries only original settlement with repaired empty queue",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "retry-settled-only same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "same PID settles original Retry with first-failure-aged finish stamp and no fresh dispatch",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "fresh-admission same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "only following cadence creates one fresh accepted attempt and one queued source",
+      "passed": true
+    },
+    {
+      "name": "canonical queue confirms the exact original scheduled occurrence",
+      "passed": true
+    },
+    {
+      "name": "public inventory confirms the exact canonical source address",
+      "passed": true
+    },
+    {
+      "name": "bounded successful MCP response",
+      "passed": true
+    },
+    {
+      "name": "masc_keeper_status succeeds",
+      "passed": true
+    },
+    {
+      "name": "final manual paused zero-turn audit-settle-a",
+      "passed": true
+    },
+    {
+      "name": "bounded successful MCP response",
+      "passed": true
+    },
+    {
+      "name": "masc_keeper_status succeeds",
+      "passed": true
+    },
+    {
+      "name": "final manual paused zero-turn audit-settle-b",
+      "passed": true
+    }
+  ],
+  "cleanup_errors": [],
+  "final_cleanup_forced_kills": [],
+  "process_exit_codes": {
+    "A": 0
+  },
+  "observer_deadline_means": "incomplete observation, not producer terminal or product timing failure",
+  "restart_count": 0,
+  "not_proven": [
+    "power-loss durability",
+    "model execution",
+    "arbitrary exactly-once effects",
+    "opaque finish-stamp bit equality",
+    "process-restart pending preservation",
+    "all scheduler races",
+    "whole feature"
+  ]
+}

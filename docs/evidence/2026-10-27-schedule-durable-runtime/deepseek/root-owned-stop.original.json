@@ -1,0 +1,11 @@
+{
+  "is_derivative": true,
+  "owned_pid": 4757,
+  "verified_command_sha256": "cc35a0ab12c31d9147aad430205bcbb4d1c957f44923088d84b538f7fcca9fa2",
+  "signal": "SIGTERM",
+  "signalled_at_unix": 1793049845.15209,
+  "process_absence_observed_at_unix": 1793049845.5872262,
+  "forced_kill": false,
+  "producer_exit_status": null,
+  "limit": "Observer had already exited; root is not parent and cannot claim exit0. Final original FAIL and completed-source/read-only observations preserved."
+}

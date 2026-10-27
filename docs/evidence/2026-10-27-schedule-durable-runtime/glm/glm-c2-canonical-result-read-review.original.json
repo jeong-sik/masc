@@ -1,0 +1,408 @@
+{
+  "schema": "masc.schedule-c2-canonical-result-read-independent-review.v1",
+  "is_derivative": true,
+  "reviewed_at_utc": "2026-10-26T20:59:14.751156+00:00",
+  "review_scope": "Independent read-only correlation of existing GLM C2 raw evidence. This new review receipt is the only file authored; no controller/process/provider action or original edit.",
+  "product_source": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+  "controller_sha256": "3b587c0c19d98301da5c07c76e70abb80a857b804191f21180784dfa66855095",
+  "native_executable_sha256": "1622a35d1082da4fe24d9effb05aec11918d9444288441049c8d6d30cedb415c",
+  "original_controller_result": {
+    "record": {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/result.json",
+      "sha256": "659d2157fece97b6273a74a8c25e67034a7fb26c8ff74f29d35ac66bb7e630b7",
+      "bytes": 301
+    },
+    "verdict": "FAIL",
+    "detail": "readmitted A actually observes B note before writing A2",
+    "unchanged": true
+  },
+  "interpretation": {
+    "verdict": "canonical_dependency_observation_proven; notes_list-only predicate is a false negative for this retained-result path",
+    "basis": "B turn2 actually called masc_schedule_notes_list and produced canonical note11 result. Readmitted A turn3 after B ACK used keeper_artifact_read to read those exact complete durable result bytes, then wrote A2. This verifies the original dependency, not a substituted dependency or a fabricated marker.",
+    "original_request_explicitly_requires_notes_list_until_exact_b_note": true,
+    "original_request_explicitly_requires_new_post_ack_notes_list_call": false,
+    "strict_controller_requires_notes_list_in_same_a2_keeper_turn_after_b_ack": true,
+    "no_automatic_original_result_rewrite": true,
+    "whole_runtime_feature_pass_claimed": false
+  },
+  "checks": {
+    "b_notes_list_output_matches_canonical_blob_json": true,
+    "blob_sha256_and_356_bytes_match_read_input": true,
+    "a3_read_return_is_exact_complete_blob_bytes": true,
+    "returned_dependency_note11_matches_schedule_author_body": true,
+    "b_ack_precedes_a_exact_readmission_precedes_actual_canonical_read_precedes_a2": true,
+    "read_and_a2_share_turn3_with_exact_execution_membership": true,
+    "b_producer_and_list_share_turn2": true,
+    "a_and_b_terminal_sources_match_created_instance_due_digest": true,
+    "only_three_note_add_calls": true,
+    "all_eight_raw_tool_calls_wire_ok": true,
+    "latest_snapshot_all_bound_parts_verified": true,
+    "captured_live_turn3_brackets_exact_a_readmission_before_a2": true
+  },
+  "raw_bindings": [
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/tool_calls/2026-10/26.jsonl",
+      "sha256": "002e91f7092a362acc4f46772462bbd044313d1e43ce52419c4643b657af86c3",
+      "bytes": 36923
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/keepers/audit-live-glm/reaction-ledger/v7/2026-10/26.jsonl",
+      "sha256": "83c786c1a095d2fe91ebdf0df5ebb8946eddd7b5d55dc336b9ec6c3140f66cc2",
+      "bytes": 10007
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/keepers/audit-live-glm/turn-records/2026-10/26.jsonl",
+      "sha256": "0b2027e56f4b102f365338a45b1470ebdf3208b5636b3faf0a2fd6fd46e6e8e8",
+      "bytes": 12588
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/keepers/audit-live-glm/provider-inputs/2026-10/26.jsonl",
+      "sha256": "8a8bed032c394905ed8b6c5e7c35f67a90b169d6e66edaf2ff66c8755e93e73c",
+      "bytes": 36737
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/first-created.json",
+      "sha256": "7a7d0d96a05694d34ce9289fbc39ee52040b392191d7687ae55fddfaad480445",
+      "bytes": 2611
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/created.json",
+      "sha256": "8d87a250ca31ce65303e8cf94ab6e016d51497c83bf2113dbe49adb383105509",
+      "bytes": 4825
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/exact-note-executions.json",
+      "sha256": "348e5f9da5492f2b00da4cb90d051878f51a9030a25d4bc17e86a6364cc3ab1e",
+      "bytes": 18549
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/checks.json",
+      "sha256": "0336a98c9a58209ec634f5ec1d0aac5d5333f564e0981058570330c171fc9063",
+      "bytes": 6050
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/provenance.json",
+      "sha256": "b51e029a990e279f26af7c87ba2590da9c222971050f72ca5fa3c188ba17add5",
+      "bytes": 6044
+    }
+  ],
+  "dependency_chain": {
+    "b_note_production": {
+      "ts": 1793048048.853037,
+      "tool": "masc_schedule_note_add",
+      "input": {
+        "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND",
+        "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second"
+      },
+      "keeper": "audit-live-glm",
+      "trace_id": "trace-1793048013383-00000",
+      "keeper_turn_id": 2,
+      "turn": 3,
+      "execution_id": "execution-node-6d3477ffe12afb8fb244ef4b9b5ef896",
+      "physical_execution_id": "execution-node-6d3477ffe12afb8fb244ef4b9b5ef896",
+      "tool_use_id": "call_097903ee2ddc4720a61412d2",
+      "wire_outcome": "ok",
+      "disposition": "completed"
+    },
+    "b_notes_list": {
+      "ts": 1793048053.105589,
+      "tool": "masc_schedule_notes_list",
+      "input": {
+        "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second"
+      },
+      "keeper": "audit-live-glm",
+      "trace_id": "trace-1793048013383-00000",
+      "keeper_turn_id": 2,
+      "turn": 4,
+      "execution_id": "execution-node-36f97db9933a2094327a71b94cb8d8f2",
+      "physical_execution_id": "execution-node-36f97db9933a2094327a71b94cb8d8f2",
+      "tool_use_id": "call_30541ab7b6a44be19eb066a6",
+      "wire_outcome": "ok",
+      "disposition": "completed",
+      "raw_output_string_sha256": "d019cef276c7783864eef254c7d10fafba3df612c3648ab715bdea8456b01578",
+      "output_json_semantically_equal_to_blob": true
+    },
+    "canonical_result_blob": {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/tool_blobs/d0/d019cef276c7783864eef254c7d10fafba3df612c3648ab715bdea8456b01578",
+      "sha256": "d019cef276c7783864eef254c7d10fafba3df612c3648ab715bdea8456b01578",
+      "bytes": 356,
+      "requested_sha256": "d019cef276c7783864eef254c7d10fafba3df612c3648ab715bdea8456b01578",
+      "notes": [
+        {
+          "note_id": "11",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048048.849434,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND"
+        }
+      ]
+    },
+    "b_ack": {
+      "at": 1793048059.462986,
+      "post_id": "f9db2ee7c04f33800fa0db0fa36017c9b1739e5b17d89c1b5e4ea05293b38b54",
+      "source_incarnation": 1
+    },
+    "exact_a_readmission": {
+      "at": 1793048059.467897,
+      "post_id": "2f4d9ccc61659e0a1455112da4639edb2d7190fdd15f4f26d0da74ed956367aa"
+    },
+    "a3_canonical_read": {
+      "ts": 1793048067.692621,
+      "tool": "keeper_artifact_read",
+      "input": {
+        "sha256": "d019cef276c7783864eef254c7d10fafba3df612c3648ab715bdea8456b01578"
+      },
+      "keeper": "audit-live-glm",
+      "trace_id": "trace-1793048013383-00000",
+      "keeper_turn_id": 3,
+      "turn": 6,
+      "execution_id": "execution-node-24da7d98da52fdfb2430c9394deb36be",
+      "physical_execution_id": "execution-node-24da7d98da52fdfb2430c9394deb36be",
+      "tool_use_id": "call_d4410a4d7680431fbd976dfe",
+      "wire_outcome": "ok",
+      "disposition": "completed",
+      "result_ok": true,
+      "result_eof": true,
+      "offset": 0,
+      "next_offset": 356,
+      "total_bytes": 356,
+      "returned_content_sha256": "d019cef276c7783864eef254c7d10fafba3df612c3648ab715bdea8456b01578"
+    },
+    "a2_publication": {
+      "ts": 1793048072.511824,
+      "tool": "masc_schedule_note_add",
+      "input": {
+        "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_AFTER_B",
+        "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba"
+      },
+      "keeper": "audit-live-glm",
+      "trace_id": "trace-1793048013383-00000",
+      "keeper_turn_id": 3,
+      "turn": 7,
+      "execution_id": "execution-node-e3b53eb7b06b0c0a49fa3ba4faa4f5a2",
+      "physical_execution_id": "execution-node-e3b53eb7b06b0c0a49fa3ba4faa4f5a2",
+      "tool_use_id": "call_7575f0bd4fad48d296939782",
+      "wire_outcome": "ok",
+      "disposition": "completed",
+      "note": {
+        "note_id": "12",
+        "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+        "author_id": "audit-live-glm",
+        "author_kind": "automated_actor",
+        "created_at": 1793048072.48934,
+        "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_AFTER_B"
+      }
+    },
+    "a_completed_ack": {
+      "at": 1793048084.007397,
+      "post_id": "2f4d9ccc61659e0a1455112da4639edb2d7190fdd15f4f26d0da74ed956367aa",
+      "source_incarnation": 0
+    }
+  },
+  "turn3_record": {
+    "turn_ref": "trace-1793048013383-00000#3",
+    "absolute_turn": 3,
+    "execution_ids": [
+      "execution-node-24da7d98da52fdfb2430c9394deb36be",
+      "execution-node-e3b53eb7b06b0c0a49fa3ba4faa4f5a2",
+      "execution-node-9432e4ba57a41710e0c896889d25adae"
+    ],
+    "finish_reason": "completed",
+    "ts": 1793048084.003454
+  },
+  "latest_snapshot_part_verification": [
+    {
+      "absolute_turn": 1,
+      "verified_parts": 42,
+      "captured_at": 1793048036.177392,
+      "wire_metadata": {
+        "phase": [
+          "Pre_dispatch_serialization"
+        ],
+        "capture_id": "wr-1a179fd729c-0170-0000",
+        "provider": "glm",
+        "model": "glm-5.3",
+        "http_codec": "glm-chat",
+        "stream": true,
+        "body_bytes": 81112,
+        "body_sha256": "9053370a8abda1450ec5dda8c9c9896da9921aed3a4bdb70e397c0b47dd11a24"
+      }
+    },
+    {
+      "absolute_turn": 2,
+      "verified_parts": 49,
+      "captured_at": 1793048059.459523,
+      "wire_metadata": {
+        "phase": [
+          "Pre_dispatch_serialization"
+        ],
+        "capture_id": "wr-1a179fdc36a-0170-0000",
+        "provider": "glm",
+        "model": "glm-5.3",
+        "http_codec": "glm-chat",
+        "stream": true,
+        "body_bytes": 85021,
+        "body_sha256": "e76a40190581c8a2dc4a1b21ed6c8ed752cec442729ba2d9a0acfa8d23993728"
+      }
+    },
+    {
+      "absolute_turn": 3,
+      "verified_parts": 55,
+      "captured_at": 1793048084.003363,
+      "wire_metadata": {
+        "phase": [
+          "Pre_dispatch_serialization"
+        ],
+        "capture_id": "wr-1a179fe1e57-0170-0000",
+        "provider": "glm",
+        "model": "glm-5.3",
+        "http_codec": "glm-chat",
+        "stream": true,
+        "body_bytes": 90200,
+        "body_sha256": "ca46f1d2b97766ebc827e1da5a981f635d43d43fed864d18c48d1aad24a36850"
+      }
+    }
+  ],
+  "latest_turn3_selected_message_bindings": [
+    {
+      "index": 9,
+      "role": "tool",
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/tool_blobs/8f/8fb5d5b37ee9af1444411936f767b0d29546b13813fd0c4f2d6200de27fe1244",
+      "sha256": "8fb5d5b37ee9af1444411936f767b0d29546b13813fd0c4f2d6200de27fe1244",
+      "bytes": 518
+    },
+    {
+      "index": 10,
+      "role": "assistant",
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/tool_blobs/b0/b0001d757bb552526d7fcc05d74ccb32f8936ec86fdfdda32ddcd768b556ff73",
+      "sha256": "b0001d757bb552526d7fcc05d74ccb32f8936ec86fdfdda32ddcd768b556ff73",
+      "bytes": 237
+    },
+    {
+      "index": 11,
+      "role": "tool",
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/tool_blobs/38/383f97a95a2db1323eac558f57121f70a48c71759bb5d4a74e92793a03e751cd",
+      "sha256": "383f97a95a2db1323eac558f57121f70a48c71759bb5d4a74e92793a03e751cd",
+      "bytes": 589
+    },
+    {
+      "index": 13,
+      "role": "assistant",
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/tool_blobs/f8/f8ced894fa3fef5a95f243856a17bf15723ce4e6aa2b2c6a2b35cd33a888773e",
+      "sha256": "f8ced894fa3fef5a95f243856a17bf15723ce4e6aa2b2c6a2b35cd33a888773e",
+      "bytes": 600,
+      "tool_uses": [
+        {
+          "id": "call_d4410a4d7680431fbd976dfe",
+          "name": "keeper_artifact_read",
+          "input": {
+            "sha256": "d019cef276c7783864eef254c7d10fafba3df612c3648ab715bdea8456b01578"
+          }
+        }
+      ]
+    },
+    {
+      "index": 14,
+      "role": "tool",
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/tool_blobs/6b/6bcca3b5b1413ce850970c31c91009e523401c5aa92ad5dc1cbb67d12efcd168",
+      "sha256": "6bcca3b5b1413ce850970c31c91009e523401c5aa92ad5dc1cbb67d12efcd168",
+      "bytes": 861
+    },
+    {
+      "index": 15,
+      "role": "assistant",
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/tool_blobs/2b/2bdb9194f3fda4d9887cbac149d8d1f6ebf903fa2e125d65f8df20b948e4cb09",
+      "sha256": "2bdb9194f3fda4d9887cbac149d8d1f6ebf903fa2e125d65f8df20b948e4cb09",
+      "bytes": 860,
+      "tool_uses": [
+        {
+          "id": "call_7575f0bd4fad48d296939782",
+          "name": "masc_schedule_note_add",
+          "input": {
+            "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_AFTER_B",
+            "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba"
+          }
+        }
+      ]
+    },
+    {
+      "index": 16,
+      "role": "tool",
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/tool_blobs/8b/8bf359aaa0ce6cffc9b58fb4548f75cdcd38257e30fc80b8734cbaab9c88c9ad",
+      "sha256": "8bf359aaa0ce6cffc9b58fb4548f75cdcd38257e30fc80b8734cbaab9c88c9ad",
+      "bytes": 511
+    }
+  ],
+  "note_execution_lookup_vs_raw": [
+    {
+      "execution_id": "execution-node-e2670fec6758d0bb60ee78a27c4d8fa6",
+      "identity_and_input_fields_equal": [
+        "execution_id",
+        "tool_use_id",
+        "keeper_turn_id",
+        "trace_id",
+        "input"
+      ],
+      "output_json_semantically_equal": true,
+      "output_string_byte_equal": false,
+      "lookup_extra_field": "definition_source"
+    },
+    {
+      "execution_id": "execution-node-6d3477ffe12afb8fb244ef4b9b5ef896",
+      "identity_and_input_fields_equal": [
+        "execution_id",
+        "tool_use_id",
+        "keeper_turn_id",
+        "trace_id",
+        "input"
+      ],
+      "output_json_semantically_equal": true,
+      "output_string_byte_equal": false,
+      "lookup_extra_field": "definition_source"
+    },
+    {
+      "execution_id": "execution-node-e3b53eb7b06b0c0a49fa3ba4faa4f5a2",
+      "identity_and_input_fields_equal": [
+        "execution_id",
+        "tool_use_id",
+        "keeper_turn_id",
+        "trace_id",
+        "input"
+      ],
+      "output_json_semantically_equal": true,
+      "output_string_byte_equal": false,
+      "lookup_extra_field": "definition_source"
+    }
+  ],
+  "limits": [
+    "First and intermediate complete HTTP wire bodies were not retained or reconstructed; latest per-turn message parts are not proof of every earlier provider input.",
+    "Latest turn3 snapshot was captured after A2; actual pre-A2 canonical read is independently evidenced by raw tool call ordering and the shared durable transcript, not by pretending this latest snapshot is a pre-A2 HTTP body.",
+    "No fresh execution lookup was requested for keeper_artifact_read; its exact execution is bound through the raw durable tool-call row, tool_use_id, turn3 execution_ids and matching latest transcript messages.",
+    "Exact note execution API outputs are JSON-semantic matches to original raw outputs, not byte-identical output strings.",
+    "Early checkpoint files may be normally pruned; selected checkpoint observations are derivatives and are not fresh reloaded-byte proof.",
+    "Original observer FAIL and process-at-observation status are retained. This receipt does not establish current server liveness or exit status and does not authorize a replay.",
+    "No provider switch, process restart, same-checkpoint reload, arbitrary exactly-once guarantee, installation or whole-feature PASS is claimed."
+  ],
+  "privacy": "No system/person prompt, private reasoning/thinking content, credential, authorization header or unrelated tool schema text is copied. Only synthetic request/effect IDs, bound hashes and selected tool/source facts are included.",
+  "live_readmission_turn_binding": {
+    "is_derivative": true,
+    "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/live-turns-selected.json",
+    "sha256": "cf34f1a99464846ca97a56e566f47207d2a0660a12d8aaa58ae4f8cd7b5ebbf6",
+    "bytes": 29237,
+    "matching_observations_before_A2": 38,
+    "first": {
+      "observed_at_unix": 1793048059.648899,
+      "turn_ref": "trace-1793048013383-00000#3",
+      "lane": "autonomous",
+      "started_at_unix": 1793048059.465481
+    },
+    "last": {
+      "observed_at_unix": 1793048072.390474,
+      "turn_ref": "trace-1793048013383-00000#3",
+      "lane": "autonomous",
+      "started_at_unix": 1793048059.465481
+    },
+    "scope": "Captured live autonomous turn3 brackets the exact original A source readmission, before A2. No current liveness query."
+  }
+}

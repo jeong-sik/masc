@@ -1,0 +1,60 @@
+{
+  "is_derivative": true,
+  "original_observer_verdict": "FAIL",
+  "A_source": "61c6098451aa8c04392fd3f86e22fed61cf5d59ce42424916138ac7180061fc7",
+  "B_source": "6a65d2bd88358717d1a16051fc460e8d730cc1e71dba0ed1feb239046fbadda7",
+  "note_calls": [
+    {
+      "tool": "masc_schedule_note_add",
+      "ts": 1793049665.98925,
+      "trace_id": "trace-1793049660076-00000",
+      "keeper_turn_id": 1,
+      "turn": 1,
+      "execution_id": "execution-node-25ad4730843904db3d0af24772d02cf4",
+      "tool_use_id": "call_xqkxm6d3",
+      "input": {
+        "schedule_id": "audit-real-model-9d05dc9680b84cafa6813d8204202b8f",
+        "body": "SCHEDULE_EFFECT_7f1aaa2537794abebc29c55f646c02f0"
+      }
+    },
+    {
+      "tool": "masc_schedule_note_add",
+      "ts": 1793049674.229358,
+      "trace_id": "trace-1793049660076-00000",
+      "keeper_turn_id": 2,
+      "turn": 4,
+      "execution_id": "execution-node-1dc49c160845ec3f7dc5f754ba77299d",
+      "tool_use_id": "call_2i979tjt",
+      "input": {
+        "body": "SCHEDULE_EFFECT_7f1aaa2537794abebc29c55f646c02f0_SECOND",
+        "schedule_id": "audit-real-model-9d05dc9680b84cafa6813d8204202b8f-second"
+      }
+    },
+    {
+      "tool": "masc_schedule_note_add",
+      "ts": 1793049681.965843,
+      "trace_id": "trace-1793049660076-00000",
+      "keeper_turn_id": 2,
+      "turn": 7,
+      "execution_id": "execution-node-91c384ef91bbf616fbf2a5719815dfb5",
+      "tool_use_id": "call_mwgm2aqz",
+      "input": {
+        "body": "SCHEDULE_EFFECT_7f1aaa2537794abebc29c55f646c02f0_AFTER_B",
+        "schedule_id": "audit-real-model-9d05dc9680b84cafa6813d8204202b8f"
+      }
+    }
+  ],
+  "B_ACK": [
+    1793049686.993637
+  ],
+  "A_readmission_after_B_ACK": [
+    1793049687.001076
+  ],
+  "A2_keeper_turn_equals_B": true,
+  "A2_call_before_B_ACK": true,
+  "A2_call_before_A_readmission": true,
+  "third_turn_execution_ids": [
+    []
+  ],
+  "classification": "Actual source-scope failure retained; A2 executed in B turn before B ACK/original A readmission; later no-tool A turn does not repair it."
+}

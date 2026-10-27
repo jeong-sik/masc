@@ -1,0 +1,62 @@
+{
+  "is_derivative": true,
+  "B_raw_notes_list": {
+    "ts": 1793048053.105589,
+    "record_kind": "tool_call",
+    "keeper": "audit-live-glm",
+    "tool": "masc_schedule_notes_list",
+    "input": {
+      "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second"
+    },
+    "wire_outcome": "ok",
+    "disposition": "completed",
+    "trace_id": "trace-1793048013383-00000",
+    "session_id": "trace-1793048013383-00000",
+    "turn": 4,
+    "keeper_turn_id": 2,
+    "execution_id": "execution-node-36f97db9933a2094327a71b94cb8d8f2",
+    "physical_execution_id": "execution-node-36f97db9933a2094327a71b94cb8d8f2",
+    "tool_use_id": "call_30541ab7b6a44be19eb066a6",
+    "model": "runtime",
+    "runtime_profile": "glm-coding.glm-5-3",
+    "turn_kind": "autonomous",
+    "lane": "tool_optional",
+    "result_bytes": 356,
+    "input_fingerprint": "b7aa25627d46bbb5b6e6071f3da6a58a01efe1c2d5af121f50e6ada2ad981903",
+    "output_fingerprint": "f0f2187d85b81e5f2b23a899d934e0527797de9521499a7fbca28b4c1c38eb65",
+    "output": "{\"status\":\"ok\",\"schedule_id\":\"audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second\",\"limit\":50,\"notes\":[{\"note_id\":\"11\",\"schedule_id\":\"audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second\",\"author_id\":\"audit-live-glm\",\"author_kind\":\"automated_actor\",\"created_at\":1793048048.849434,\"body\":\"SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND\"}]}"
+  },
+  "canonical_blob": {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/tool_blobs/d0/d019cef276c7783864eef254c7d10fafba3df612c3648ab715bdea8456b01578",
+    "sha256": "d019cef276c7783864eef254c7d10fafba3df612c3648ab715bdea8456b01578",
+    "bytes": 356
+  },
+  "A3_artifact_read": {
+    "ts": 1793048067.692621,
+    "record_kind": "tool_call",
+    "keeper": "audit-live-glm",
+    "tool": "keeper_artifact_read",
+    "input": {
+      "sha256": "d019cef276c7783864eef254c7d10fafba3df612c3648ab715bdea8456b01578"
+    },
+    "wire_outcome": "ok",
+    "disposition": "completed",
+    "trace_id": "trace-1793048013383-00000",
+    "session_id": "trace-1793048013383-00000",
+    "turn": 6,
+    "keeper_turn_id": 3,
+    "execution_id": "execution-node-24da7d98da52fdfb2430c9394deb36be",
+    "physical_execution_id": "execution-node-24da7d98da52fdfb2430c9394deb36be",
+    "tool_use_id": "call_d4410a4d7680431fbd976dfe",
+    "model": "runtime",
+    "runtime_profile": "glm-coding.glm-5-3",
+    "turn_kind": "autonomous",
+    "lane": "tool_optional",
+    "result_bytes": 567,
+    "input_fingerprint": "4354070b3b10ff4660c260d8594e219f112b353ccffe0ee6e3ab8c12a5c9d881",
+    "output_fingerprint": "6ae7bbe6597a78ede998b20d6479171a23b1d493856c0913aced34df5f4658b6",
+    "output": "{\"ok\":true,\"sha256\":\"d019cef276c7783864eef254c7d10fafba3df612c3648ab715bdea8456b01578\",\"offset\":0,\"next_offset\":356,\"total_bytes\":356,\"eof\":true,\"encoding\":\"utf-8\",\"content\":\"{\\\"status\\\":\\\"ok\\\",\\\"schedule_id\\\":\\\"audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second\\\",\\\"limit\\\":50,\\\"notes\\\":[{\\\"note_id\\\":\\\"11\\\",\\\"schedule_id\\\":\\\"audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second\\\",\\\"author_id\\\":\\\"audit-live-glm\\\",\\\"author_kind\\\":\\\"automated_actor\\\",\\\"created_at\\\":1793048048.849434,\\\"body\\\":\\\"SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND\\\"}]}\"}"
+  },
+  "all_three_byte_sequences_equal": true,
+  "bytes": 356
+}

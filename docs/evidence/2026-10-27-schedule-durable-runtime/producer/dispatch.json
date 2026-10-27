@@ -1,0 +1,28 @@
+{
+  "recorded_at_unix": 1793046849.293866,
+  "workflow": "Minimal manual checks",
+  "workflow_file": "pr-check.yml",
+  "workflow_ref": "main",
+  "expected_workflow_execution_head": "9377c7f3025d68e3856d2afd3762468dabc77813",
+  "source_input": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+  "scenario": "addon-lifecycle",
+  "argv": [
+    "gh",
+    "workflow",
+    "run",
+    "pr-check.yml",
+    "--ref",
+    "main",
+    "-f",
+    "native-tui-source-sha=a3950a189b9cc5a7ce82cb725699455d79923f42",
+    "-f",
+    "native-tui-scenario=addon-lifecycle"
+  ],
+  "dispatch_returncode": 0,
+  "stdout": "https://github.com/jeong-sik/masc/actions/runs/40396800146\n",
+  "stderr": "",
+  "completion": "not_observed",
+  "actual_repaired_models": "not_run",
+  "installation": false,
+  "run_id": 40396800146
+}

@@ -1,0 +1,35 @@
+{
+  "is_derivative": true,
+  "scope": "All stored notes on both synthetic schedule IDs, without body/author/success filtering",
+  "primary": {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/schedules.json",
+    "sha256": "9d23b3fec333d67f059b6547a3888e3298b4b941ab70d77ff00792dec8ef79e5",
+    "bytes": 5763
+  },
+  "notes": [
+    {
+      "note_id": "6",
+      "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+      "author_id": "audit-live-glm",
+      "author_kind": "automated_actor",
+      "created_at": 1793048034.209748,
+      "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+    },
+    {
+      "note_id": "11",
+      "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second",
+      "author_id": "audit-live-glm",
+      "author_kind": "automated_actor",
+      "created_at": 1793048048.849434,
+      "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND"
+    },
+    {
+      "note_id": "12",
+      "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+      "author_id": "audit-live-glm",
+      "author_kind": "automated_actor",
+      "created_at": 1793048072.48934,
+      "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_AFTER_B"
+    }
+  ]
+}

@@ -486,13 +486,13 @@ Single_user 모드의 현재 동작은 바꾸지 않는다. 계정당 동시 dis
 - 새 전이에서 `cleared_epoch < transition_epoch`인 record를 전부 owner가 다시 승인할 필요는 없다. 현재 manifest·generation·revocation 고수위·principal 상태·grant·policy·runtime·membership이 이전 Cleared 이후 **인가 관련 변경이 없음**을 확인한 record는 `Integrity_carry_forward`로 현재 epoch의 Cleared를 기록할 수 있다. 이것은 새 grant가 아니라 기존 권한의 무결성 계승이다. `Integrity_carry_forward`는 author=System_maintenance가 다음을 모두 만족할 때만 기록한다. (a) record digest가 마지막 Cleared 시점과 같다. (b) 그 객체의 외부 고수위가 record의 epoch와 같고 그 뒤의 회수 사건이 없다. (c) 의존 사슬의 모든 항이 같은 방식으로 Cleared다. `Security_incident` Block 대상, Quarantined, 외부 고수위에 흔적이 없는 record(복원본에서만 존재하는 것)는 계승할 수 없다. 계승마다 (a)(b)(c)의 입력 값을 `evidence_id`로 남기고, 분류 단계의 authz append는 한 묶음 단위로 Intent/Committed 규칙을 적용해 중단되면 같은 묶음을 이어서 한다.
 - 계승은 **전 record 일괄 epoch 갱신이 아니라 의존 사슬별 판정**이다. `Recovery_manifest` 항목별로 증거 입력과 digest를 남기고, 각 사슬을 독립적으로 평가한다. 배치를 실행의 선행 조건으로 두지 않아 전이 중 전역 정지를 만들지 않는다.
 - 변경·누락·판정 불일치가 있는 record만 Pending으로 남기고 Active 원 owner·원 승인자 또는 Service 후계가 `Owner_revalidated`로 닫는다. 증명하지 못하면 자동 계승하지 않는다. 부재 owner의 Pending은 그 의존 사슬만 막고 다른 Cleared 사슬은 실행한다.
-- 창은 manifest 게시와 모든 record/artifact의 분류가 끝나는 시점에 닫는다. Pending이 0이라는 뜻이 아니다. 분류 도중 크래시하면 같은 transition_epoch와 manifest를 재사용해 이어서 분류하고, 새 epoch이나 부분 계승 상태를 만들지 않는다. 분류할 수 없는 record(파싱 불가, 참조 끊김, digest 불일치)는 `Denied(unclassifiable)`로 확정하고 `failed_stage`와 digest를 manifest에 남긴 뒤 분류가 끝난 것으로 센다. 창 중 도래한 `Preauthorized_expiry`는 분류 단계에서 다시 유도한다.
+- 창은 manifest 게시와 모든 record/artifact의 분류가 끝나는 시점에 닫는다. Pending이 0이라는 뜻이 아니다. 분류 도중 크래시하면 같은 transition_epoch와 manifest를 재사용해 이어서 분류하고, 새 epoch이나 부분 계승 상태를 만들지 않는다. 분류할 수 없는 record(파싱 불가, 참조 끊김, digest 불일치)는 `Denied(unclassifiable)`로 확정하고 `failed_stage`와 digest를 manifest에 남긴 뒤 분류가 끝난 것으로 센다. credential을 품은 record는 `Denied` 대신 `CredentialUncertain`으로 두고 Quarantined로 보낸다. 창 중 도래한 `Preauthorized_expiry`는 분류 단계에서 다시 유도한다.
 
 ### 10.2 전이 중 work
 
 전이 시작 전에 새 dispatch·새 grant·새 durable work를 먼저 거부하고, 이미 진행 중인 **Effecting dispatch는 `Outcome_unknown`으로 종결**한다. 창 중 도착한 효과는 성공한 work로 적용하지 않고 새 record로 현재 epoch 검사를 받는다. account-home은 unmount 확인 전 `Release_pending`이다. `Read_only` dispatch도 새로 받지 않는다. 긴급 Block·Disable·Revoke는 창 중에도 거부하지 않는다.
 
-복구 안내 Board 글은 typed `recovery_notice`로 표시하고 **subscription 후보 생성 필터와 dispatch 진입 검사 양쪽**에서 Keeper wake를 제외한다. `recovery_notice`의 작성자는 Local_operator와 manifest 게시 시스템 이벤트뿐이며, 복원 창이 열려 있는 동안만 유효하다. 일반 Board 글에 문자열로 wake를 끄는 규칙은 두지 않는다. Cleared 승인자에게는 wake 대신 Dashboard 배지와 별도 inbox로 자기 항목 수를 보여 준다.
+복구 안내 Board 글은 typed `recovery_notice`로 표시하고 **subscription 후보 생성 필터와 dispatch 진입 검사 양쪽**에서 Keeper wake를 제외한다. `recovery_notice`의 작성자는 Local_operator와 manifest 게시 시스템 이벤트뿐이며, 복원 창이 열려 있는 동안만 유효하다. 창이 닫히면 `closed`로 바꾸고 wake 제외는 유지한다. 일반 Board 글에 문자열로 wake를 끄는 규칙은 두지 않는다. Cleared 승인자에게는 wake 대신 Dashboard 배지와 별도 inbox로 자기 항목 수를 보여 준다.
 
 ### 10.3 귀속은 claim 후보다
 
@@ -507,16 +507,16 @@ Single_user 모드의 현재 동작은 바꾸지 않는다. 계정당 동시 dis
 1. Block record에 `cause = Security_incident | Operational`을 필수로 둔다. 원인이 없는 기존 Block은 `Security_incident`로 취급한다.
 2. `Security_incident` 해제 후에는 원 owner·원 grant 승인자가 스스로 Cleared할 수 없다. **Admin이 owner가 수행한 provider 재인증·credential 교체·격리 증거를 확인하고 항목별로 Cleared한다.** Admin이 owner 대신 재인증하거나 credential을 읽는 것은 아니다.
 3. `Operational` 해제 후에는 Active 원 owner·원 승인자 또는 Service 후계가 Cleared한다. 두 경우 모두 Unblock이 lease·stream·durable work를 자동 재개하지 않는다.
-4. Security_incident 해제 시 활성 Admin이 없으면 Unblock/Cleared하지 않고 Local_operator가 `Quarantined(cause=Admin_absent)`로 기록한다. Admin이 복귀하면 같은 항목을 `Admin_incident_cleared`로 풀 수 있다. purge는 Local_operator의 명시 결정과 활성 Admin이 0명이라는 확인 기록을 요구하며, 시간 경과는 근거가 아니다. 관리자 부재를 이유로 owner에게 해제 권한을 돌려주지 않는다.
+4. Security_incident를 해제할 때 Cleared할 수 있는 활성 Admin이 없으면 Unblock/Cleared하지 않고 Local_operator가 `Quarantined(cause=No_eligible_admin)`로 기록한다. Cleared할 수 있는 Admin은 그 항목의 owner·원 grant 승인자·beneficiary가 아닌 활성 Admin이다. 그런 Admin이 생기면 같은 항목을 `Admin_incident_cleared`로 풀 수 있다. purge는 Local_operator의 명시 결정과 Cleared할 수 있는 Admin이 없다는 확인 기록을 요구하며, 시간 경과는 근거가 아니다. 관리자 부재나 이해충돌을 이유로 owner에게 해제 권한을 돌려주지 않는다.
 5. **부재가 확인된 owner의 Pending은 Local_operator의 Quarantined로만 종단하고 그 의존 사슬은 Disabled로 내린다.** Pending을 무기한 감사에 남기지 않는다. Quarantined 후보는 의존 단계 재검증이 명시적으로 실패한 record이며 `failed_stage`, `failure_evidence_id`, `manifest_id`를 필수로 남긴다. 시간 경과를 실패로 취급하지 않는다.
-6. Quarantined는 일반 재활성화·공유·실행이 불가능하다. 종단은 로컬 운영자의 명시적 purge이거나, `cause=Admin_absent`인 항목의 Admin 해제다. purge는 credential 조회나 grant 재검증 없이 대상 ID·실행자·사유·결과를 audit/revocation ledger에 남기고 credential을 파기한다. 비밀이 아닌 model/execution config는 읽기 전용으로 export하고 credential은 파기한다. grant는 이전하지 않는다. Purged를 복원으로 Active로 승격하지 않는다.
+6. Quarantined는 일반 재활성화·공유·실행이 불가능하다. 종단은 로컬 운영자의 명시적 purge이거나, `cause=No_eligible_admin`인 항목의 Admin 해제다. purge는 credential 조회나 grant 재검증 없이 대상 ID·실행자·사유·결과를 audit/revocation ledger에 남기고 credential을 파기한다. 비밀이 아닌 model/execution config는 읽기 전용으로 export하고 credential은 파기한다. grant는 이전하지 않는다. Purged를 복원으로 Active로 승격하지 않는다.
 
 ### 10.5 복원·모드·ledger
 
 - 복원·롤백 직후 모든 공유·실행은 AuthorizationUncertain이다. snapshot Active·ledger replay·store_seq 고수위만으로 해제하지 않는다. 도메인 상태와 별도의 `restore_disposition = Pending | Denied | Cleared | Quarantined | Purged`를 둔다.
 - Disabled/tombstone/purged initiator·executor·owner의 durable work는 먼저 Denied로 확정하고 나중에 계정이 활성화돼도 자동 복귀하지 않는다. `Outcome_unknown` lease는 되살리지 않는다.
 - 남은 record는 Principal/credential → grant/policy → Runtime → schedule/resume/work 의존 순서로 재검증한다. Admin/Service → system cron → Human은 같은 단계의 우선순위일 뿐이며 Pending/Denied work는 cron이 열리더라도 실행하지 않는다. Cleared는 원 grant 승인자 또는 Service의 Admin 지정 후계가 항목별로 승인한다.
-- Recovery_manifest는 전 record의 ID·의존 관계·분류·digest를 접근 제한된 artifact로 게시한다. 독자는 Cleared 승인자·Admin·Local_operator로 제한하고 owner/승인자는 자기가 승인할 entry만 projection으로 읽는다. Board/health에는 count와 미해제 상태만 공개한다. manifest에는 산출 명령·대상 범위·전이 epoch·분류 count·digest를 기록한다.
+- Recovery_manifest는 전 record의 ID·의존 관계·분류·digest를 접근 제한된 artifact로 게시한다. 전이 시작에 `Outcome_unknown`으로 종결한 dispatch는 분류와 별도 칸으로 센다. 독자는 Cleared 승인자·Admin·Local_operator로 제한하고 owner/승인자는 자기가 승인할 entry만 projection으로 읽는다. Board/health에는 count와 미해제 상태만 공개한다. manifest에는 산출 명령·대상 범위·전이 epoch·분류 count·digest를 기록한다.
 - backup/rollback에서 되돌아온 account-home과 credential artifact는 `CredentialUncertain`이다. **현재 owner가 provider official 재인증을 완료하고 새 credential generation과 account-home을 검증하기 전에는 mount하지 않는다.** MASC principal의 Dashboard 로그인만으로 Cleared하지 않는다. 비밀이 아닌 설정만 별도 projection으로 복원하고 credential-bearing home은 새로 만든다. owner가 없거나 재인증할 수 없으면 Local_operator가 Quarantined로 기록하고 purge한다. provider에서 아직 유효한 token이라도 사용하지 않는다.
 - 일반 재기동이나 on/off만으로 backup을 되돌린 것은 아니라면, artifact와 외부 generation이 일치하는지 대조해 provider 재인증 없이 기존 credential을 재검증할 수 있다. 평시 재기동에 Recovery_manifest가 없어도 generation을 대조한다.
 - revocation ledger 현재본은 backup과 분리된 append-only 저장소에 유지하고 backup 사본과 합집합으로 대조한다. 고수위 불일치·누락이 있으면 AuthorizationUncertain이며 일치도 실행 승인 근거가 아니다. T 백업 → T+1 revoke R → T+2 복원 후 R 유지·연결 work Denied·유효 lease 0을 확인한다.

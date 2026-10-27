@@ -125,8 +125,9 @@ val list_dir : config -> string -> string list
 
 (** {1 Initialization check} *)
 
-(** [true] iff the current workspace is initialized (state.json
-    present). Backend-agnostic check. Cached with 1-second TTL. *)
+(** [true] iff the selected backend has an initialized workspace
+    (state.json present). Filesystem checks use a 1-second TTL cache;
+    Memory checks read their own backend without that cache. *)
 val is_initialized : config -> bool
 
 (** Invalidate the is_initialized cache. Call when workspace state

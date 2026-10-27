@@ -466,6 +466,9 @@ let test_the_listing_declares_the_reads () =
   let base_path = Filename.temp_dir "dos-addon-worker-listing-" "" in
   with_worker ~base_path (fun client ->
     let tools = unwrap (Client.list_tools_all client) in
+    check bool "the worker opts in to effect negotiation" true
+      (List.exists (fun (tool : S.tool) -> tool.name = Lane_addon_call_context.effects_tool
+        && Lane_addon_call_context.supports_effects_tool tool.input_schema) tools);
     let declared = unwrap (Client.call_tool client ~name:Lane_addon_call_context.effects_tool
         ~arguments:(`Assoc []) ())
       |> data

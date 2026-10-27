@@ -2,6 +2,7 @@
 """Exercise cleanup and lease contention in isolated stdio and HTTP owners."""
 
 import hashlib
+import http.client
 import json
 import os
 from pathlib import Path
@@ -13,8 +14,6 @@ import subprocess
 import sys
 import tempfile
 import time
-from urllib.error import URLError
-from urllib.request import urlopen
 
 
 repo = Path(os.environ["DUNE_SOURCEROOT"])
@@ -112,11 +111,16 @@ with tempfile.TemporaryDirectory(prefix="masc-orphan-startup-") as tmp:
             while True:
                 assert server.poll() is None, "HTTP owner exited: " + server_log.read_text()[-3000:]
                 try:
-                    with urlopen(f"http://127.0.0.1:{port}/health?full=1", timeout=2) as response:
-                        health = json.load(response)
+                    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+                    try:
+                        connection.request("GET", "/health?full=1")
+                        response = connection.getresponse()
+                        health = json.loads(response.read()) if response.status == 200 else {}
+                    finally:
+                        connection.close()
                     if health.get("startup", {}).get("state_ready"):
                         break
-                except (URLError, TimeoutError, OSError):
+                except (http.client.HTTPException, TimeoutError, OSError):
                     pass
                 assert time.monotonic() < deadline, "HTTP owner not ready: " + server_log.read_text()[-3000:]
                 time.sleep(0.1)

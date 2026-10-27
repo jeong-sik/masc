@@ -21,6 +21,14 @@
 - 프로그램: `test/bench_keeper_librarian_pass.ml`. `test_keeper_librarian_durable_execution.ml` 의 fixture 를 그대로 쓴다. production durable queue, 설정한 Runtime, Python 작업자(`addons/keeper-librarian/server.py`), 공용 Exact HTTP 경로, gate 와 Memory 반영까지 실제 코드가 돈다. container 실행만 테스트 backend 로 바꿨다.
 - 대화: 16 KiB 짜리 질문·답 쌍을 크기만큼 쌓았다. 반복되지 않는 문장이다. 첫 pass(baseline)로 이 대화를 읽은 것으로 표시한 뒤, 질문 하나와 답 하나(210 B)를 더하고 pass 하나를 잰다.
 - 실행: `_build/default/test` 에서 크기마다 따로 `./bench_keeper_librarian_pass.exe <MB>`. 한 프로세스에 한 크기만 돌려 앞 실행의 힙이 섞이지 않게 했다.
+- 빌드: fixture 가 읽는 파일도 `_build` 로 복사해야 해서 실행 파일과 함께 빌드한다.
+
+```sh
+dune build --root . ./test/bench_keeper_librarian_pass.exe \
+  $(git ls-files addons/keeper-librarian | sed 's#^#./#') \
+  ./addons/protocol.py ./addons/exact_worker.py \
+  ./config/prompts/librarian.md ./config/prompts/keeper.md
+```
 
 ## 무엇을 쟀나
 

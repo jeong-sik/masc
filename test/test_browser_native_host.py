@@ -376,8 +376,17 @@ class NativeHost(unittest.TestCase):
         self.assertFalse(self.server.poll_seen.is_set())
 
     def test_tabs_and_page_roundtrip_fragmented_utf8(self):
-        for index, verb in enumerate(["tabs.list", "page.read", "page.capture", "page.interact", "page.scene"]):
-            command = {"id": str(index), "verb": verb, "args": {"tabId": 42} if index else {}}
+        commands = [
+            ("tabs.list", {}),
+            ("page.read", {"tabId": 42}),
+            ("page.capture", {"tabId": 42}),
+            ("page.interact", {"tabId": 42}),
+            ("page.scene", {"tabId": 42}),
+            ("page.goto", {"url": "https://example.com", "tabId": 42}),
+            ("page.act", {"action": "back", "tabId": 42}),
+        ]
+        for index, (verb, args) in enumerate(commands):
+            command = {"id": str(index), "verb": verb, "args": args}
             self.server.commands.put(command)
             self.assert_command(command)
             stale = {"id": "other-id", "ok": True, "data": "must not resolve"}
@@ -412,8 +421,8 @@ class NativeHost(unittest.TestCase):
 
     def test_unsupported_verb_is_not_forwarded(self):
         for verb, args in [
-            ("page.goto", {"url": "https://example.com"}),
-            ("page.act", {"action": "click", "tabId": 73, "selector": "button"}),
+            ("page.native_workflow", {}),
+            ("page.unknown", {}),
         ]:
             with self.subTest(verb=verb):
                 self.server.commands.put({"id": "rejected", "verb": verb, "args": args})

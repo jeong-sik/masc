@@ -297,6 +297,7 @@ def stop_lane(server, thread):
 class FirefoxState:
     def __init__(self):
         self.methods = []
+        self.subscriptions = []
         self.sockets = []
         self.leave_on = None
         self.slow_on = None
@@ -409,6 +410,9 @@ class Firefox(socketserver.BaseRequestHandler):
                         continue
                     result = {"sessionId": "scripted", "capabilities":
                               {"browserName": state.browser_name, "browserVersion": "157.0-scripted"}}
+                elif message["method"] == "session.subscribe":
+                    state.subscriptions.append(message.get("params"))
+                    result = {"subscription": "scripted-subscription"}
                 elif message["method"] == "browsingContext.getTree":
                     result = {"contexts": [{"context": "context-1", "url": PAGE["url"]}]}
                 elif message["method"] == "script.callFunction":
@@ -575,6 +579,9 @@ class BidiHostLink(unittest.TestCase):
     def test_inherited_public_base_url_does_not_block_bidi_link(self):
         self.attach(fixed=False)
         self.assertTrue(self.lane.state.polls)
+        self.assertIn("session.subscribe", self.firefox.state.methods)
+        self.assertEqual(self.firefox.state.subscriptions, [{"events": [
+            "browsingContext.userPromptOpened", "browsingContext.userPromptClosed"]}])
 
     def test_a_server_restarted_on_its_port_finds_the_host_still_attached(self):
         self.attach(fixed=True)
@@ -1276,7 +1283,7 @@ class BidiHostLink(unittest.TestCase):
         self.process.send_signal(signal.SIGTERM)
         self.assert_ends("stopped by SIGTERM", code=0)
         self.assertNotIn("before it was attached", self.host_log())
-        self.assertEqual(self.firefox.state.methods, ["session.new", "session.end"])
+        self.assertEqual(self.firefox.state.methods, ["session.new", "session.subscribe", "session.end"])
         self.assertEqual(self.lane.state.polls, [])
 
 

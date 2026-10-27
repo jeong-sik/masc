@@ -472,6 +472,67 @@ let browser_rows_read_the_addon_observation () =
       Browser_addon_presence.Unavailable (Browser_addon_presence.Refused refusal),
       Browser_lane_launcher.Browser_addon_unreadable (Addon.export_refusal_message refusal) ]
 
+(* Several browser installations, each serving the sources its package
+   names: a lane reads only the installations that serve one of its sources,
+   and a source two of them serve leaves only that lane unreadable. *)
+let browser_lanes_read_their_own_sources () =
+  let work registered = `Assoc ["activity",`String "enabled";"registered",`Bool registered;
+    "session",`String "closed";"locate",`Bool false] in
+  let client id transport = `Assoc ["clientId",`String id;"browser",`String "firefox";"version",`String "158.0.1";
+    "engineVersion",`String "158.0.1";"transport",`String transport;"interactions",`List []] in
+  (* A worker answers its snapshot whatever its package serves; the host
+     reads only the sources the package names. *)
+  let published clients = match Browser_addon_observation.of_snapshot ~observed_at:1.
+      (`Assoc ["state",`String "serving";"clients",`List clients;
+        "owned_backends",`Assoc ["automation",work true;"stagehand",work true]]) with
+    | Ok output -> Ok (Some ({instance_id="worker";observation_seq=1;max_bytes=4096;refreshing=false;output}
+                             : Addon.export_observation))
+    | Error detail -> fail detail in
+  let serving backend observation = {Addon.backends=Lane_addon_types.One_backend backend;observation} in
+  let declarations : Config.snapshot = {declarations=[];issues=[];paths=[];complete=true} in
+  let state observations lane = Inventory.For_testing.browser_state ~activity:Browser_lane.Enabled
+      (Browser_addon_presence.lane (Browser_addon_presence.of_observations ~declarations
+         ~applications:(fun () -> fail "no browser Add-on is declared") observations) lane) lane in
+  let automation = serving Browser_lane.Backend.Automation (published [])
+  and ego = serving Browser_lane.Backend.Ego
+      (published [client "01a16363-ef67-7000-ad62-05bcd0320d99" "ego_task_space"])
+  and extension = serving Browser_lane.Backend.External_host
+      (published [client "01a16363-ef68-7000-aee1-37e1be230202" "web_extension";
+                  client "01a16363-ef69-7000-aee1-37e1be230203" "web_extension"]) in
+  let workers = [automation; ego; extension] in
+  check bool "the live row counts the clients of every live installation" true
+    (state workers Browser_lane.Lane_name.Live = Inventory.Browser_clients (Browser_lane.Enabled, Inventory.Browser_observed 3));
+  check bool "the automation row reads the installation that serves automation" true
+    (state workers Browser_lane.Lane_name.Automation
+     = Inventory.Browser_executor (Browser_lane.Enabled, Inventory.Browser_observed true));
+  check bool "a source no installation serves reads as no Add-on, though another worker reported it" true
+    (state workers Browser_lane.Lane_name.Stagehand
+     = Inventory.Browser_executor (Browser_lane.Enabled, Inventory.Browser_addon_absent));
+  let doubled = automation :: workers in
+  check bool "a source two installations serve leaves its lane unreadable" true
+    (match Browser_addon_presence.lane (Browser_addon_presence.of_observations ~declarations
+             ~applications:(fun () -> []) doubled) Browser_lane.Lane_name.Automation with
+     | Browser_addon_presence.Unavailable (Doubled_sources [Browser_lane.Backend.Automation]) -> true
+     | Browser_addon_presence.(Unavailable (Doubled_sources _ | Refused _ | Observation_unreadable _
+                                            | Declarations_incomplete)
+                               | Observed _ | Absent | Off | Not_running _) -> false);
+  check bool "the other lanes read as before" true
+    (state doubled Browser_lane.Lane_name.Live = Inventory.Browser_clients (Browser_lane.Enabled, Inventory.Browser_observed 3));
+  (* A live installation that withholds its observation would make the count
+     a part, so the live lane says it cannot read rather than undercount. *)
+  let failed : Lane_addon_unready.t = {installation="ego-work";instance_id="ego-worker";package_id="ego";
+    declared_tools=[];service=Lane_addon_types.Browser_service (Lane_addon_types.One_backend Browser_lane.Backend.Ego);
+    reason=Failed {Lane_addon_lifecycle.cause=Cleanup_unconfirmed "cleanup incomplete";first=None}} in
+  let refusal = Addon.Unready_installations (failed, []) in
+  let withheld = [automation; serving Browser_lane.Backend.Ego (Error refusal); extension] in
+  check bool "one withheld live installation leaves the live count unread" true
+    (state withheld Browser_lane.Lane_name.Live
+     = Inventory.Browser_clients (Browser_lane.Enabled,
+         Inventory.Browser_addon_unavailable (Addon.export_refusal_operator_message refusal)));
+  check bool "and leaves automation as it was" true
+    (state withheld Browser_lane.Lane_name.Automation
+     = Inventory.Browser_executor (Browser_lane.Enabled, Inventory.Browser_observed true))
+
 (* The live lane with no browser installation running: the declarations
    alone say which absence it is. *)
 let live_presence ~declarations ~applications =
@@ -598,6 +659,7 @@ let () = run "operator lane inventory" ["read boundaries",[
   test_case "Browser activity captures one configuration" `Quick browser_activity_snapshot;
   test_case "Browser absence reads the declarations" `Quick browser_absence_reads_the_declarations;
   test_case "browser rows read the Add-on observation" `Quick browser_rows_read_the_addon_observation;
+  test_case "browser lanes read their own sources" `Quick browser_lanes_read_their_own_sources;
   test_case "invalid explicit root remains unobserved" `Quick invalid_config_root;
   test_case "retained mismatched incarnation is a per-record issue" `Quick mismatched_retained_incarnation;
   test_case "suffix-only declaration stays editable" `Quick suffix_only_declaration_is_editable;

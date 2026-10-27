@@ -5983,6 +5983,7 @@
 
 (include stanzas/test_browser_observation.inc)
 (include stanzas/test_browser_observation_composition.inc)
+(include stanzas/test_browser_backend_routes.inc)
 
 (test
  (name test_tui_browser_history_model)

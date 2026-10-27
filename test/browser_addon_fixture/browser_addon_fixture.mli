@@ -19,3 +19,15 @@ val with_worker :
     [downloads] maps a download grant id to the publication the scripted
     worker returns when the server claims that grant; commit and release are
     acknowledged. *)
+
+(** One scripted worker of a package that names [backend] as its one source,
+    reporting [clients] in its snapshot. *)
+type worker = { backend : Browser_lane.Backend.t; clients : Browser_lane.client_info list }
+
+val with_workers :
+  env:Eio_unix.Stdenv.base -> config:Masc.Workspace.config -> workers:worker list ->
+  respond:(backend:Browser_lane.Backend.t -> route:Browser_lane.route -> Browser_lane.verb -> Browser_lane.answer) ->
+  (unit -> 'a) -> 'a
+(** {!with_worker} for several workers at once, each of its own package and
+    source; [respond] is told which worker's source the request reached.
+    Every worker is detached and settled when [run] returns. *)

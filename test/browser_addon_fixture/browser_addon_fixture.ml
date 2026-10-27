@@ -101,7 +101,10 @@ let response ~route verb answer =
   Mcp_protocol.Mcp_types.tool_result_to_yojson {
     content=[];is_error=Some (Tool_result.is_failed typed);structured_content=Some data;
     _meta=Lane_addon_tool_result.metadata typed}
-let with_worker ?(clients=[]) ?(downloads=[]) ~env ~config ~respond run =
+(* The PATH that finds the native launcher, the Eio test context and the
+   workspace for every worker of one run. [root] is removed only once every
+   worker has settled. *)
+let with_env ~env ~config run =
   let root=Filename.temp_dir "browser-addon-fixture-" "" in
   let previous=Sys.getenv_opt "PATH" in
   let launcher=Filename.concat (Filename.dirname Sys.executable_name) "../bin/masc_native_addon_launcher.exe"
@@ -123,26 +126,37 @@ let with_worker ?(clients=[]) ?(downloads=[]) ~env ~config ~respond run =
            attaches, and the Lane Add-on store creates only its own root under
            it. Tests that start from a bare temp directory get the same. *)
         Fs_compat.mkdir_p (Workspace.masc_dir config);
-        let requests=Filename.concat root "requests" and answers=Filename.concat root "answers" in
-        Unix.mkdir requests 0o700;Unix.mkdir answers 0o700;
-        let tool=Browser_addon_tool.definition in
-        write (Filename.concat root "clients.json")
-          (Yojson.Safe.to_string (`List (List.map (fun client -> match W.client_to_json client with
-             | `Assoc fields -> `Assoc (("interactions",`List [])::fields)
-             | value -> value) clients)));
-        write (Filename.concat root "downloads.json")
-          (Yojson.Safe.to_string (`Assoc downloads));
-        write (Filename.concat root "tool.json") (Yojson.Safe.to_string (`Assoc [
-          "name",`String tool.name;"inputSchema",tool.input_schema;
-          "outputSchema",Option.get tool.output_schema]));
-        let script=Filename.concat root "browser.py" in write script server;
-        let manifest=Filename.concat root "lane.toml" in
-        write manifest (Printf.sprintf {|id = "scripted-browser"
+        run ~sw ~root ~settle:(fun () -> settled:=true))))
+let dispatch ~config operation fields=R.dispatch ~caller:"browser-fixture"
+  ~access:Lane_addon_sources.Operator_configuration ~config ~operation (`Assoc fields)
+  |> Result.map_error R.error_to_string |> require
+let wait ~env predicate = let rec loop ()=if predicate () then () else
+  (Eio.Time.sleep (Eio.Stdenv.clock env) 0.001;loop ()) in loop ()
+(* One scripted worker under [root]/[name], attached with its own package.
+   [backend] is the one source its package names, or none for the package
+   that serves every source. Answers [stop] once its worker detached. *)
+let start ~sw ~env ~config ~root ~name ~backend ~clients ~downloads ~respond =
+  let root=Filename.concat root name in Unix.mkdir root 0o700;
+  let requests=Filename.concat root "requests" and answers=Filename.concat root "answers" in
+  Unix.mkdir requests 0o700;Unix.mkdir answers 0o700;
+  let tool=Browser_addon_tool.definition in
+  write (Filename.concat root "clients.json")
+    (Yojson.Safe.to_string (`List (List.map (fun client -> match W.client_to_json client with
+       | `Assoc fields -> `Assoc (("interactions",`List [])::fields)
+       | value -> value) clients)));
+  write (Filename.concat root "downloads.json")
+    (Yojson.Safe.to_string (`Assoc downloads));
+  write (Filename.concat root "tool.json") (Yojson.Safe.to_string (`Assoc [
+    "name",`String tool.name;"inputSchema",tool.input_schema;
+    "outputSchema",Option.get tool.output_schema]));
+  let script=Filename.concat root "browser.py" in write script server;
+  let manifest=Filename.concat root "lane.toml" in
+  write manifest (Printf.sprintf {|id = "scripted-browser-%s"
 revision = "fixture-1"
 title = "Scripted browser adapter"
 runtime = "host_process"
 service = "browser"
-command = ["python3", %S, %S]
+%scommand = ["python3", %S, %S]
 contributions = ["observe"]
 [resources]
 max_reply_bytes = 2097152
@@ -150,52 +164,66 @@ max_reply_bytes = 2097152
 export = ["browser_command"]
 invocation = "host_context"
 hooks = ["validate_input", "validate_output"]
-|} script root);
-        let dispatch operation fields=R.dispatch ~caller:"browser-fixture"
-          ~access:Lane_addon_sources.Operator_configuration ~config ~operation (`Assoc fields)
-          |> Result.map_error R.error_to_string |> require in
-        let id=dispatch R.Attach ["manifest_path",`String manifest;"run_id",`String "fixture";
-          "binding",`Assoc ["sources",`List []]] |> Yojson.Safe.Util.member "instance_id"
-          |> Yojson.Safe.Util.to_string in
-        let inspect ()=dispatch R.Inspect ["instance_id",`String id]
-          |> Yojson.Safe.Util.member "instances" |> Yojson.Safe.Util.to_list |> List.hd in
-        let wait predicate = let rec loop ()=if predicate () then () else
-          (Eio.Time.sleep (Eio.Stdenv.clock env) 0.001;loop ()) in loop () in
-        let respond_file name=
-          let path=Filename.concat requests name in
-          let request=Yojson.Safe.from_file path in Unix.unlink path;
-          let arguments=Yojson.Safe.Util.member "arguments" request in
-          let route=match Yojson.Safe.Util.member "lane" arguments,Yojson.Safe.Util.member "clientId" arguments with
-            | `String "live",`String raw -> B.Live_route (Some (require (B.client_id_of_string raw)))
-            | `String "stagehand",`Null -> B.Stagehand_route
-            | `String "automation",`Null -> B.Automation_route
-            | _ -> failwith "invalid fixture browser connection" in
-          let verb=require (W.verb_of_json ~route (Yojson.Safe.Util.member "command" arguments)) in
-          let known=match route with B.Live_route (Some id) ->
-              List.exists (fun (client:B.client_info) -> client.client_id=id) clients
-            | Automation_route|Stagehand_route -> true | Live_route None -> false in
-          let result=if known then response ~route verb (respond ~route verb)
-            else
-              let typed=Tool_result.make_err ~tool_name:"browser_command" ~start_time:(Tool_timing.start ())
-                ~class_:Tool_result.Dependency_unavailable ~effect_disposition:Tool_result.Proven_pre_effect
-                "selected fixture browser is disconnected" in
-              Mcp_protocol.Mcp_types.tool_result_to_yojson {content=[];is_error=Some true;
-                structured_content=Some (W.reply_to_json (W.Service_refusal {
-                  message="selected fixture browser is disconnected";disposition=W.Not_started}));
-                _meta=Lane_addon_tool_result.metadata typed} in
-          write (Filename.concat answers name) (Yojson.Safe.to_string result) in
-        let running=ref true in
-        Eio.Switch.check sw;
-        Eio.Fiber.fork ~sw (fun () ->
-          while !running do
-            Array.iter (fun name -> if Filename.extension name=".json" then respond_file name) (Sys.readdir requests);
-            Eio.Time.sleep (Eio.Stdenv.clock env) 0.001
-          done);
-        let stop ()=if not !settled then Eio.Cancel.protect (fun () ->
-          ignore (dispatch R.Detach ["instance_id",`String id]);
-          wait (fun () -> Yojson.Safe.Util.(inspect () |> member "phase" |> member "kind")=`String "detached");
-          running:=false;settled:=true) in
-        Fun.protect ~finally:stop (fun () ->
-          wait (fun () -> List.exists (fun (service:R.browser_service) -> service.instance_id=id)
-            (R.browser_services ~config ~access:Lane_addon_sources.Operator_configuration));
-          run {stop}))))
+|} name (match backend with
+    | None -> ""
+    | Some backend -> Printf.sprintf "browser_backend = %S\n" (B.Backend.to_wire backend)) script root);
+  let id=dispatch ~config R.Attach ["manifest_path",`String manifest;"run_id",`String ("fixture-" ^ name);
+    "binding",`Assoc ["sources",`List []]] |> Yojson.Safe.Util.member "instance_id"
+    |> Yojson.Safe.Util.to_string in
+  let inspect ()=dispatch ~config R.Inspect ["instance_id",`String id]
+    |> Yojson.Safe.Util.member "instances" |> Yojson.Safe.Util.to_list |> List.hd in
+  let respond_file name=
+    let path=Filename.concat requests name in
+    let request=Yojson.Safe.from_file path in Unix.unlink path;
+    let arguments=Yojson.Safe.Util.member "arguments" request in
+    let route=match Yojson.Safe.Util.member "lane" arguments,Yojson.Safe.Util.member "clientId" arguments with
+      | `String "live",`String raw -> B.Live_route (Some (require (B.client_id_of_string raw)))
+      | `String "stagehand",`Null -> B.Stagehand_route
+      | `String "automation",`Null -> B.Automation_route
+      | _ -> failwith "invalid fixture browser connection" in
+    let verb=require (W.verb_of_json ~route (Yojson.Safe.Util.member "command" arguments)) in
+    let known=match route with B.Live_route (Some id) ->
+        List.exists (fun (client:B.client_info) -> client.client_id=id) clients
+      | Automation_route|Stagehand_route -> true | Live_route None -> false in
+    let result=if known then response ~route verb (respond ~route verb)
+      else
+        let typed=Tool_result.make_err ~tool_name:"browser_command" ~start_time:(Tool_timing.start ())
+          ~class_:Tool_result.Dependency_unavailable ~effect_disposition:Tool_result.Proven_pre_effect
+          "selected fixture browser is disconnected" in
+        Mcp_protocol.Mcp_types.tool_result_to_yojson {content=[];is_error=Some true;
+          structured_content=Some (W.reply_to_json (W.Service_refusal {
+            message="selected fixture browser is disconnected";disposition=W.Not_started}));
+          _meta=Lane_addon_tool_result.metadata typed} in
+    write (Filename.concat answers name) (Yojson.Safe.to_string result) in
+  let running=ref true and settled=ref false in
+  Eio.Switch.check sw;
+  Eio.Fiber.fork ~sw (fun () ->
+    while !running do
+      Array.iter (fun name -> if Filename.extension name=".json" then respond_file name) (Sys.readdir requests);
+      Eio.Time.sleep (Eio.Stdenv.clock env) 0.001
+    done);
+  let stop ()=if not !settled then Eio.Cancel.protect (fun () ->
+    ignore (dispatch ~config R.Detach ["instance_id",`String id]);
+    wait ~env (fun () -> Yojson.Safe.Util.(inspect () |> member "phase" |> member "kind")=`String "detached");
+    running:=false;settled:=true) in
+  id,stop
+let serving ~config id=List.exists (fun (service:R.browser_service) -> service.instance_id=id)
+  (R.browser_services ~config ~access:Lane_addon_sources.Operator_configuration)
+let with_worker ?(clients=[]) ?(downloads=[]) ~env ~config ~respond run =
+  with_env ~env ~config (fun ~sw ~root ~settle ->
+    let id,stop=start ~sw ~env ~config ~root ~name:"browser" ~backend:None ~clients ~downloads ~respond in
+    let stop ()=stop ();settle () in
+    Fun.protect ~finally:stop (fun () ->
+      wait ~env (fun () -> serving ~config id);
+      run {stop}))
+type worker = { backend : B.Backend.t; clients : B.client_info list }
+let with_workers ~env ~config ~workers ~respond run =
+  with_env ~env ~config (fun ~sw ~root ~settle ->
+    let started=List.mapi (fun index (worker:worker) ->
+      start ~sw ~env ~config ~root ~name:(Printf.sprintf "%d-%s" index (B.Backend.to_wire worker.backend))
+        ~backend:(Some worker.backend) ~clients:worker.clients ~downloads:[]
+        ~respond:(respond ~backend:worker.backend)) workers in
+    let stop ()=List.iter (fun (_,stop) -> stop ()) started;settle () in
+    Fun.protect ~finally:stop (fun () ->
+      List.iter (fun (id,_) -> wait ~env (fun () -> serving ~config id)) started;
+      run ()))

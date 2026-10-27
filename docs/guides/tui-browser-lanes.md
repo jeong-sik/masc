@@ -200,8 +200,8 @@ The rows under it:
   cleanup and preserves the profile. An occupied port or profile requires
   the operator to close the existing browser before attachment.
 - With `[browser.live.bidi]` configured and no enabled `browser-firefox`
-  declaration, the details say the table is set but `browser-firefox` is off,
-  beside the steps to attach a host. With no `[browser.live.bidi]`, no
+  declaration, the details say the table is set but no enabled
+  `browser-firefox` declaration runs it, beside the steps to attach a host. With no `[browser.live.bidi]`, no
   Addon-managed live Firefox is configured.
 - A server that does not report the host draws none of these rows.
 

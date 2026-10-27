@@ -378,7 +378,7 @@ function refusal(kind='transient'){
  error.name='ElementResolutionError';error.kind=kind;return error;
 }
 test('a selector gesture the SDK refused at target resolution holds nothing and frees the input',async()=>{
- for (const method of ['click','dblclick','dragAndDrop','press']) {
+ for (const method of ['click','dblclick','dragAndDrop']) {
   for (const kind of ['transient','permanent']) {
    const f=fixture();let later=0;
    f.page.waitForSelector=async()=>{};
@@ -394,6 +394,17 @@ test('a selector gesture the SDK refused at target resolution holds nothing and 
    assert.equal(result.failure.index,0,label);assert.equal(result.failure.method,method,label);
    assert.match(result.failure.message,/matched 0 elements/,label);assert.equal(later,0,label);
   }
+ }
+});
+// Page.press sends its keys through the SDK's raw keyboard, so the SDK's input tracking never sees them. When
+// a key command times out, the SDK reports that with this same typed error although the key was already sent.
+test('a press that fails with the typed refusal keeps the input unreleased',async()=>{
+ for (const kind of ['transient','permanent']) {
+  const f=fixture();f.page.waitForSelector=async()=>{};
+  f.page.press=async()=>{throw Object.assign(refusal(kind),{message:'page.press timed out after 3000ms: CDP request timed out: Input.dispatchKeyEvent'});};
+  const result=await run(f.page,request([{method:'press',selector:'#editor',key:'Enter'}]));
+  assert.equal(result.inputReleased,false,kind);assert.equal(result.effectStarted,true,kind);
+  assert.equal(result.completed.length,0,kind);assert.equal(result.failure.method,'press',kind);
  }
 });
 test('only the SDK typed refusal frees the input: the same words, a wrong type or another gesture do not',async()=>{

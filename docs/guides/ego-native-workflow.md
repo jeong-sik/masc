@@ -104,7 +104,7 @@ input on that connection. The result reports `inputReleased` independently of co
 effects; a guard does not make the failed action successful.
 Manual held-button and held-key workflows are not exposed.
 
-A selector gesture (`click`, `dblclick`, `dragAndDrop`, `press`) whose target the
+A selector gesture (`click`, `dblclick`, `dragAndDrop`) whose target the
 SDK cannot resolve fails with the SDK's typed `ElementResolutionError`: no match,
 hidden, disabled, obscured, or an invalid selector. These gestures resolve the
 target before the first press and between complete press and release pairs,
@@ -118,6 +118,16 @@ type or a refusal from a step that resolves no selector (`mouse.click`,
 disabled and invalid selectors, a missing `dblclick` target and a missing drag
 source or destination each left the page with no mouse or key event, and the next
 click worked.
+
+`press` is not on that list. It sends its keys through the SDK's raw keyboard,
+which the SDK's input tracking does not see, so a key command that times out
+comes back as the same typed error after the key was sent. Measured the same day
+with a keydown handler that stalled the page for 17 seconds: `press` failed with
+`page.press timed out after 3000ms: CDP request timed out: Input.dispatchKeyEvent`
+after the page had received the keydown. `click`, `dblclick` and `dragAndDrop`
+under a stalled mousedown or mouseup failed with the plain `CDP request timed
+out: Input.dispatchMouseEvent`, which stays unconfirmed. A `press` on a missing
+selector is still refused before any key by the read-only attached-selector wait.
 
 `keyboard.type`, `keyboard.press` and `keyboard.paste` have no selector preflight.
 An exception after entering their SDK method cannot be classified as definitely

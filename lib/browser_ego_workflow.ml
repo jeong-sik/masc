@@ -15,7 +15,10 @@ let script = {js|async function nativeWorkflow(page, args) {
   // Those gestures resolve the target before the first press and between
   // complete press and release pairs, never between a press and its release,
   // so nothing is held when this error arrives. Any other error is unknown.
-  const selectorGestures = new Set(['click', 'dblclick', 'dragAndDrop', 'press']);
+  // press is not one of them: it sends its keys through the SDK's raw keyboard,
+  // which the SDK's input tracking does not see, so a key command that times out
+  // reaches this same error after the key was sent.
+  const selectorGestures = new Set(['click', 'dblclick', 'dragAndDrop']);
   const refusedByTarget = error => error?.name === 'ElementResolutionError'
     && (error.kind === 'transient' || error.kind === 'permanent');
   // The SDK buffers the Page's CDP events until someone reads them, and

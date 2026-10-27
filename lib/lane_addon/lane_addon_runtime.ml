@@ -2043,13 +2043,13 @@ type browser_group_presence = Group_present | Group_detaching
 let browser_groups_kept groups =
   let overlaps a b = List.exists (fun backend ->
     Lane_addon_types.serves_backend a backend && Lane_addon_types.serves_backend b backend) Browser_lane.Backend.all in
-  List.filter_map (fun (backends, presence) -> match presence with
-    | Group_present -> Some backends
+  List.filter_map (fun (backends, presence, group) -> match presence with
+    | Group_present -> Some group
     | Group_detaching ->
-        if List.exists (fun (other, other_presence) -> match other_presence with
+        if List.exists (fun (other, other_presence, _) -> match other_presence with
             | Group_present -> overlaps backends other
             | Group_detaching -> false) groups
-        then None else Some backends) groups
+        then None else Some group) groups
 (* Browser installations are found by their package's service, not by an
    export name, and read per set of sources they serve: two installations of
    one source are ambiguous for that source only. A released installation is
@@ -2071,8 +2071,7 @@ let browser_observations ~config ~access = Eio_context.run_on_owner_domain (fun 
           | Unready Lane_addon_unready.Detaching -> true
           | Ready _ | Unready (Lane_addon_unready.Starting | Stopping | Failed _) | Gone -> false) group
         then Group_detaching else Group_present in
-      let kept = browser_groups_kept (List.map (fun (backends, group) -> backends, presence group) groups) in
-      List.filter (fun (backends, _) -> List.mem backends kept) groups
+      browser_groups_kept (List.map (fun ((backends, entries) as group) -> backends, presence entries, group) groups)
       |> List.map (fun (backends, group) -> {backends; observation=observation_of_entries group}))
 
 let with_tool_call_owner work =

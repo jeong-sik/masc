@@ -465,14 +465,15 @@ let test_a_detaching_browser_group_gives_way_to_its_replacement () =
   let module T = Runtime.For_testing in
   let module B = Browser_lane in
   let ego = Types.One_backend B.Backend.Ego and automation = Types.One_backend B.Backend.Automation in
+  let kept groups = T.browser_groups_kept (List.map (fun (backends, presence) -> backends, presence, backends) groups) in
   check bool "a detaching package of every source gives way to one of a source it serves" true
-    (T.browser_groups_kept [Types.Every_backend, T.Group_detaching; ego, T.Group_present] = [ego]);
+    (kept [Types.Every_backend, T.Group_detaching; ego, T.Group_present] = [ego]);
   check bool "with nothing to give way to it is still read" true
-    (T.browser_groups_kept [Types.Every_backend, T.Group_detaching] = [Types.Every_backend]);
+    (kept [Types.Every_backend, T.Group_detaching] = [Types.Every_backend]);
   check bool "it does not give way to one of another source" true
-    (T.browser_groups_kept [automation, T.Group_detaching; ego, T.Group_present] = [automation; ego]);
+    (kept [automation, T.Group_detaching; ego, T.Group_present] = [automation; ego]);
   check bool "two present groups are both read, and presence reports the doubled source" true
-    (T.browser_groups_kept [Types.Every_backend, T.Group_present; ego, T.Group_present] = [Types.Every_backend; ego])
+    (kept [Types.Every_backend, T.Group_present; ego, T.Group_present] = [Types.Every_backend; ego])
 
 (* A failed DOS installation may still hold the controller in its state, so a
    release is not reported as done, and a shared call names the installation. *)

@@ -500,7 +500,7 @@ module For_testing : sig
       a client of a live source two services serve is refused. *)
   type browser_group_presence = Group_present | Group_detaching
   val browser_groups_kept :
-    (Lane_addon_types.browser_backends * browser_group_presence) list -> Lane_addon_types.browser_backends list
+    (Lane_addon_types.browser_backends * browser_group_presence * 'group) list -> 'group list
   (** The groups of browser installations presence reads: a group only
       detaching gives way to one that is not and serves one of its sources. *)
   val choose_document_service :

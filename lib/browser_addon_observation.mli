@@ -43,5 +43,7 @@ val lists_usable_clients : among:Lane_addon_types.browser_backends list -> Lane_
     host chooses from this, and the lane rows read it. *)
 val merge : among:Lane_addon_types.browser_backends list ->
   (Lane_addon_types.browser_backends * published option) list -> published
-(** [among] are the sources of every serving worker, which may be more than
-    the workers read here; a live source is doubled when two of them serve it. *)
+(** [among] lists the sources of every worker the caller counts as serving,
+    which may be more than the workers read here; a live source is doubled
+    when two of them serve it. The host counts its ready services; presence
+    counts one entry per set of sources it reads. *)

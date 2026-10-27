@@ -121,11 +121,13 @@ let a_package_of_every_source_beside_one_of_a_source () =
 let a_service_without_its_command_still_counts () =
   run_with [{F.serves=T.One_backend Automation;clients=[];exports=false};one Automation [];one Stagehand []]
     (fun ~config:_ ~host:_ ~issue ~attached:_ ->
-      refused "a source one exporting and one silent service serve is doubled" ~issue B.Automation_route;
+      refused "a source one exporting and one silent service serve is doubled"
+        ~because:"more than one attached browser Add-on serves" ~issue B.Automation_route;
       reaches "the other source is served" ~issue B.Stagehand_route (T.One_backend Stagehand));
   run_with [{F.serves=T.One_backend Automation;clients=[];exports=false};one Stagehand []]
     (fun ~config:_ ~host:_ ~issue ~attached:_ ->
-      refused "a command to the silent service is refused" ~issue B.Automation_route;
+      refused "a command to the silent service is refused" ~because:"advertises no browser command"
+        ~issue B.Automation_route;
       reaches "and the other source is served" ~issue B.Stagehand_route (T.One_backend Stagehand))
 
 let a_client_two_workers_list_is_refused () =

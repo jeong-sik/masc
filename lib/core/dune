@@ -23,6 +23,7 @@
   pool_wait
   executor_pool_submission
   executor_pool_ref
+  domain_budget
   domain_pool
   domain_pool_ref
   systhread_host

@@ -611,6 +611,7 @@ let startup_failure_disposition ~state_ready =
 type owner_initialization_error =
   | Runtime_config_read_failed of string
   | Native_execution_runtime_failed of Runtime_agent_execution_runtime.initialization_error
+  | Domain_budget_exceeded of Domain_budget.error
   | Keeper_config_recovery_failed of Keeper_config_journal.report
   | Admin_credential_bootstrap_failed of Masc_domain.masc_error
   | Run_registry_already_installed of
@@ -649,6 +650,8 @@ let owner_initialization_error_to_string = function
   | Native_execution_runtime_failed error ->
     "native execution runtime initialization failed: "
     ^ Runtime_agent_execution_runtime.initialization_error_to_string error
+  | Domain_budget_exceeded error ->
+    "executor domain budget refused: " ^ Domain_budget.error_to_string error
   | Keeper_config_recovery_failed report ->
     let detail = match report.Keeper_config_journal.outcome with
       | Journal_corrupt detail -> detail
@@ -1094,24 +1097,39 @@ let initialize_owner_state_blocking
        hours
        stale_threshold_hours
    | _ -> ());
+  (* One budget for every domain of the process (RFC-0474 L1). The calling
+     domain counts as one; the systhread host, the snapshot codec and the
+     optional serving domain each report their own. *)
+  let main_domain = 1 in
+  let fixed_domains =
+    main_domain + Systhread_host.domain_count
+    + Keeper_event_queue_snapshot_codec.domain_count
+    + (if Env_config.Transport.serving_domain_enabled () then 1 else 0)
+  in
+  let budget =
+    match
+      Domain_budget.plan ~recommended:(Domain.recommended_domain_count ())
+        ~fixed:fixed_domains ~override:(Env_config.Executor.domain_count_override ())
+    with
+    | Ok budget -> budget
+    | Error error -> raise (Owner_initialization_failed (Domain_budget_exceeded error))
+  in
   let domain_pool =
-    Domain_pool.create
-      ~sw
-      ?domain_count:(Env_config.Executor.domain_count_override ())
-      domain_mgr
+    Domain_pool.create ~sw ~domain_count:budget.Domain_budget.shared_pool domain_mgr
   in
   install_domain_pool_references domain_pool;
   Systhread_host.start ();
   (match Runtime_agent_execution_runtime.initialize ~sw ~domain_mgr
-      ~domain_count:(Domain_pool.domain_count domain_pool) with
-   | Ok () ->
-     Log.Server.info "Native execution runtime created (%d codec domains)"
-       (Domain_pool.domain_count domain_pool)
+      ~domain_count:budget.Domain_budget.execution_codec with
+   | Ok () -> ()
    | Error error ->
      raise (Owner_initialization_failed (Native_execution_runtime_failed error)));
-  Log.Server.info
-    "Domain_pool created (%d shared domains, 1 independent snapshot codec domain) for dashboard/keeper compute"
-    (Domain_pool.domain_count domain_pool);
+  let log = if Domain_budget.within_limit budget then Log.Server.info else Log.Server.warn in
+  log
+    "Executor domains: %d shared pool + %d execution codec + %d fixed = %d (limit %d = recommended %d - 1)"
+    budget.Domain_budget.shared_pool budget.Domain_budget.execution_codec
+    budget.Domain_budget.fixed (Domain_budget.total budget) budget.Domain_budget.limit
+    (Domain.recommended_domain_count ());
   { state; path_diagnostics; prepared_keeper_persistence; domain_pool }
 
 (* Copies and deletions are two events, so they get two lines with two

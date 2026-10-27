@@ -5,6 +5,9 @@
     This executor accepts only immutable snapshot data, never caller jobs,
     and its workers never acquire an owner lock or submit to another pool. *)
 
+val domain_count : int
+(** Domains {!install} adds to the process: 1. *)
+
 val install : sw:Eio.Switch.t -> _ Eio.Domain_manager.t -> unit
 (** Install one independent encoding worker for the server switch lifetime.
     One worker is sufficient to break the shared-pool dependency; no Keeper

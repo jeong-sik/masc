@@ -5,11 +5,13 @@ type installation =
 
 let pool : installation option Atomic.t = Atomic.make None
 
+let domain_count = 1
+
 let install ~sw domain_mgr =
   Eio.Switch.check sw;
   (* This resource is independent of the executor that runs owner-lock
      waiters. The worker count affects encoding throughput, not progress. *)
-  let executor = Eio.Executor_pool.create ~sw ~domain_count:1 domain_mgr in
+  let executor = Eio.Executor_pool.create ~sw ~domain_count domain_mgr in
   let stopped, stop = Eio.Promise.create () in
   (* A durable writer can mask caller cancellation while waiting to encode.
      Pool workers stop before switch release hooks run, so waiting until

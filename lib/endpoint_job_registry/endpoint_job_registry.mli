@@ -16,6 +16,7 @@ type t
 type record
 type launch_intent
 type storage
+type unlaunched
 
 type protection_refusal =
   | Payload_is_controller
@@ -186,7 +187,34 @@ val with_launch :
     wait for program completion, hold a global owner lock or reenter a registry
     mutation for this same operation. No PID signalling is authorized here. *)
 
+val settle_cancelled_admission : sw:Eio.Switch.t -> record -> (unlaunched,error) result
+(** Prove the same protected original was cancelled before any launch intent
+    existed. Refresh under its shared job lock and retain its exact storage.
+    A known launch refuses this proof, even if it is now cancelled. *)
+val retire_cancelled_launch : sw:Eio.Switch.t -> launch_intent -> (unlaunched,error) result
+(** Under the original exclusive job lock, validate its durable cancellation
+    and atomically retire this exact unused process-local permit. A permit
+    already reserved for callback entry, including an interrupted storage open,
+    can never supply this proof. Repeated retirement
+    may reopen the same original storage, including after an interrupted open;
+    it never re-enables callback entry or issues another launch permission.
+
+    Not_performed Launch_cancelled alone does not supply this authority: that
+    check may precede the permit-use check after an earlier callback. *)
+val unlaunched_storage : unlaunched -> storage
+(** Opaque historical no-callback authority and original storage, not output
+    sealing, a physical exit status, result readiness, host consumption or
+    cleanup permission. The consumer must durably publish the complete original
+    non-start receipt. The retired-permit proof is process-local until that
+    publication; a restart cannot reconstruct it from a cancelled known launch.
+    Cancelling a proof observer never launches or signals a process. *)
+
 module For_testing : sig
+  val retire_cancelled_launch :
+    after_retirement:(unit -> unit) -> sw:Eio.Switch.t -> launch_intent -> (unlaunched,error) result
+  (** Interleave after retiring the actual unused permit under its original
+      exclusive lock, before opening its storage. Exceptions/cancellation leave
+      it retired and release only this lock observer's descriptor. *)
   val refresh : after_lock:(unit -> unit) -> record -> (record, error) result
   (** Interleave after acquiring the actual shared read lock and before reading
       the original. The hook remains cancellable and cannot authorize writes. *)

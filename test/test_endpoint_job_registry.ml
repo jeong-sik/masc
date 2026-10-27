@@ -642,6 +642,89 @@ let test_original_readers_overlap_without_admitting_writers () = fixture (fun ~e
   check bool "exclusive original mutation succeeds after every shared reader releases" true
     (R.cancellation_state cancelled=R.Cancellation_requested && R.revision cancelled=2L))
 
+let test_cancelled_admission_proves_no_known_launch () = fixture (fun ~env:_ ~sw ~root:_ ~registry ~open_root ->
+  let b=binding (id "05") in let original=admitted registry b in
+  check bool "uncancelled admission grants no non-start proof" true
+    (R.settle_cancelled_admission ~sw original=Error R.Stale_record);
+  let cancelled=R.request_cancel original ~confirmed_admission_id:(id "04") |> get in
+  let proof=R.settle_cancelled_admission ~sw original |> get in
+  let source=R.unlaunched_storage proof |> R.storage_record in
+  check bool "no-launch proof preserves exact cancelled input and original admission" true
+    (R.specification source=spec && R.admission_id source=id "04"
+      && R.cancellation_state source=R.Cancellation_requested && R.launch_state source=R.Not_requested);
+  check bool "non-start proof grants no launch permission" true
+    (R.commit_launch cancelled ~confirmed_admission_id:(id "04") ~launch_id:(id "06")=Error R.Launch_cancelled);
+  let rebooted=open_root ~route:{route with boot_id=id "08"} () |> get in
+  let historical=R.load rebooted ~binding:b |> get |> R.settle_cancelled_admission ~sw |> get in
+  check bool "durable cancellation before any launch remains historical proof after boot change" true
+    (R.unlaunched_storage historical |> R.storage_record |> R.launch_state=R.Not_requested))
+
+let test_retire_only_unused_cancelled_original_permit () = fixture (fun ~env:_ ~sw ~root ~registry ~open_root:_ ->
+  let b=binding (id "05") in let original=admitted registry b in let permit=commit original in
+  check bool "uncancelled permit cannot be retired as non-start" true
+    (R.retire_cancelled_launch ~sw permit=Error R.Stale_record);
+  let current=R.request_cancel original ~confirmed_admission_id:(id "04") |> get in
+  check bool "known launch is never proven absent from its cancellation flag" true
+    (R.settle_cancelled_admission ~sw current=Error R.Launch_already_requested);
+  let invoked=ref false in
+  (match R.with_launch ~sw permit (fun _ ~storage:_ -> invoked:=true) with
+   | R.Not_performed R.Launch_cancelled -> ()
+   | Not_performed _ | Performed _ -> fail "durable cancellation did not win callback admission");
+  let claim=claim_path root b in
+  Unix.rename claim (claim ^ ".evidence");
+  check bool "missing original cancellation authority cannot retire a permit" true
+    (R.retire_cancelled_launch ~sw permit=Error R.Missing_original);
+  Unix.rename (claim ^ ".evidence") claim;
+  let proof=R.retire_cancelled_launch ~sw permit |> get in
+  let again=R.retire_cancelled_launch ~sw permit |> get in
+  let original_storage=R.unlaunched_storage proof and reopened=R.unlaunched_storage again in
+  check bool "retirement retains only the same original known launch" true
+    (R.launch_state (R.storage_record original_storage)=R.Requested (id "06")
+      && R.specification (R.storage_record reopened)=spec);
+  let first=Eio.Path.stat ~follow:true (R.storage_path original_storage)
+  and second=Eio.Path.stat ~follow:true (R.storage_path reopened) in
+  check bool "repeated retirement reopens the same original storage" true (first.dev=second.dev && first.ino=second.ino);
+  check bool "proof retirement never invokes the original callback" false !invoked)
+
+let test_used_permit_never_becomes_nonstart_after_cancellation () = fixture (fun ~env:_ ~sw ~root ~registry ~open_root:_ ->
+  let b=binding (id "05") in let original=admitted registry b in let permit=commit original in
+  let marker=Filename.concat root "original-callback-effect" in
+  ignore (R.with_launch ~sw permit (fun _ ~storage:_ ->
+    Out_channel.with_open_bin marker (fun oc -> output_string oc "original effect")) |> completed);
+  ignore (R.request_cancel original ~confirmed_admission_id:(id "04") |> get);
+  (match R.with_launch ~sw permit (fun _ ~storage:_ -> fail "spent callback replayed") with
+   | R.Not_performed R.Launch_cancelled -> ()
+   | Not_performed _ | Performed _ -> fail "actual cancellation-before-spent-check boundary changed");
+  check bool "cancelled outcome cannot retire a previously reserved original permit" true
+    (R.retire_cancelled_launch ~sw permit=Error R.Launch_intent_spent);
+  check string "failed non-start proof preserves the actual callback's effect" "original effect"
+    (In_channel.with_open_bin marker In_channel.input_all);
+  let independent=admitted registry (binding (id "07")) in
+  ignore (R.with_launch ~sw (commit independent) (fun _ ~storage:_ -> ()) |> completed))
+
+let test_cancelled_retirement_keeps_permit_retired () = fixture (fun ~env:_ ~sw ~root:_ ~registry ~open_root:_ ->
+  let b=binding (id "05") in let original=admitted registry b in let permit=commit original in
+  ignore (R.request_cancel original ~confirmed_admission_id:(id "04") |> get);
+  let entered,signal=Eio.Promise.create () in let interrupted=ref false in
+  Eio.Fiber.first
+    (fun () -> try
+      ignore (R.For_testing.retire_cancelled_launch ~sw permit ~after_retirement:(fun () ->
+        Eio.Promise.resolve signal ();Eio.Fiber.await_cancel ()) |> get);
+      fail "paused original retirement returned a proof before opening its storage"
+      with Eio.Cancel.Cancelled _ as ex -> interrupted:=true;raise ex)
+    (fun () -> Eio.Promise.await entered;
+      check bool "original retirement still excludes another original observer without waiting" true
+        (R.refresh original=Error R.Busy);
+      let independent=admitted registry (binding (id "07")) in
+      ignore (R.with_launch ~sw (commit independent) (fun _ ~storage:_ -> ()) |> completed));
+  check bool "retirement observer cancellation propagates and releases its lease" true !interrupted;
+  let proof=R.retire_cancelled_launch ~sw permit |> get in
+  check bool "interrupted storage open can resume only the same retired cancelled source" true
+    (R.unlaunched_storage proof |> R.storage_record |> R.cancellation_state=R.Cancellation_requested);
+  (match R.with_launch ~sw permit (fun _ ~storage:_ -> fail "retired permit became fresh after interruption") with
+   | R.Not_performed R.Launch_cancelled -> ()
+   | Not_performed _ | Performed _ -> fail "retired original no longer retains its durable cancellation"))
+
 let ()=run "endpoint job registry" ["original durable admission",[
   test_case "original admission is idempotent and survives reopen" `Quick test_original_admission_survives_reopen;
   test_case "base Inspect outer v1 is rejected before original decoding" `Quick
@@ -669,4 +752,8 @@ let ()=run "endpoint job registry" ["original durable admission",[
   test_case "old boot can read original storage without restoring a launch" `Quick test_original_storage_read_survives_boot_without_launch;
   test_case "storage pins its actual registry and rejects a rebound job" `Quick test_open_storage_pins_actual_registry_and_rejects_rebound_job;
   test_case "storage contention preserves progress and known launch authority" `Quick test_storage_contention_and_known_launch_revalidation;
-  test_case "original readers overlap while exclusive writers remain nonwaiting" `Quick test_original_readers_overlap_without_admitting_writers]]
+  test_case "original readers overlap while exclusive writers remain nonwaiting" `Quick test_original_readers_overlap_without_admitting_writers;
+  test_case "cancelled admission proves no known launch without inventing an exit" `Quick test_cancelled_admission_proves_no_known_launch;
+  test_case "only the same unused cancelled permit can be retired" `Quick test_retire_only_unused_cancelled_original_permit;
+  test_case "a used permit never becomes non-start after cancellation" `Quick test_used_permit_never_becomes_nonstart_after_cancellation;
+  test_case "cancelled retirement keeps its original permit retired" `Quick test_cancelled_retirement_keeps_permit_retired]]

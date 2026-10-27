@@ -18,7 +18,15 @@ type store = {
   db : Sqlite3.db;
 }
 
-let store_mu = Stdlib.Mutex.create ()
+(* Serialises every use of [current_store], the open SQLite handle. Opening a
+   store suspends the calling fiber: [Fs_compat.mkdir_p] runs the mkdir on a
+   worker thread through Eio. The fibers of one domain share one thread, and a
+   [Stdlib.Mutex] raises [Sys_error "Mutex.lock: Resource deadlock avoided"]
+   when the thread that holds it locks it again, so the next caller of the
+   domain raised instead of waiting. [Cross_context_mutex] makes a fiber wait
+   cooperatively, and system threads and other domains still wait on the
+   underlying mutex. The SQLite calls are blocking C calls and do not suspend. *)
+let store_lock = Cross_context_mutex.create ()
 let current_store : store option ref = ref None
 let ( let* ) = Result.bind
 
@@ -209,7 +217,7 @@ let get_or_open_locked ~masc_root =
     Ok store
 
 let with_store ~masc_root f =
-  Stdlib.Mutex.protect store_mu (fun () ->
+  Cross_context_mutex.with_lock store_lock (fun () ->
     let* store = get_or_open_locked ~masc_root in
     try f store with
     | Sqlite3.Error detail -> Error ("SQLite operation: " ^ detail)
@@ -223,7 +231,7 @@ let with_store ~masc_root f =
            (Unix.error_message error)))
 
 let reset_for_testing () =
-  Stdlib.Mutex.protect store_mu close_current_store_locked
+  Cross_context_mutex.with_lock store_lock close_current_store_locked
 
 let insert ~masc_root row =
   with_store ~masc_root (fun store ->

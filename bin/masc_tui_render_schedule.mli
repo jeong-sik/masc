@@ -90,6 +90,29 @@ val keeper_columns_used_width : keeper_columns -> int
     [inner_width] it was allocated for, and equals it once that width admits
     the minimum row. *)
 
+type waiting_group_layout = {
+  compact : bool;
+  cells : int;
+  segment_count : int;
+}
+(** A width decision for the Waiting summary. [cells] measures the whole group
+    heading, and [segment_count] retains every nonzero reason and async count. *)
+
+val waiting_group_layout :
+  available_cells:int ->
+  group_count:int ->
+  Masc_tui_keeper_list_model.waiting_summary ->
+  waiting_group_layout
+(** Use dense labels only when the full heading exceeds [available_cells].
+    The compact decision never drops a nonzero summary segment. *)
+
+val waiting_group_heading_detail :
+  available_cells:int ->
+  group_count:int ->
+  Masc_tui_keeper_list_model.waiting_summary ->
+  string
+(** Render the suffix selected by [waiting_group_layout]. *)
+
 (** {1 Memory fleet columns} *)
 
 type memory_columns = {

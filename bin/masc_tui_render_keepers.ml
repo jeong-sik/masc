@@ -485,7 +485,7 @@ let keeper_display_entries rows layout =
             Keeper_group_heading (group, count)
             :: List.map (fun (position, row) -> Keeper_display_row (position, row)) matching)
 
-let keeper_group_heading_text rows group count =
+let keeper_group_heading_text ~available_cells rows group count =
   let glyph, label =
     match group with
     | Keeper_list_model.Needs_you -> "!", "NEEDS YOU"
@@ -497,31 +497,8 @@ let keeper_group_heading_text rows group count =
   let detail =
     match group with
     | Keeper_list_model.Waiting ->
-        let summary = Keeper_list_model.waiting_summary rows in
-        let part activity label count =
-          if count = 0 then None
-          else
-            Some
-              (Masc_tui_keeper_mark.activity_glyph activity
-               ^ " " ^ label ^ " " ^ string_of_int count)
-        in
-        let parts =
-          [ part Keeper_list_model.Tool_waiting "tool" summary.tool
-          ; part Keeper_list_model.Model_waiting "model" summary.model
-          ; part Keeper_list_model.External_waiting "external" summary.external_wait
-          ; part Keeper_list_model.Delegating "delegate" summary.delegate
-          ; part Keeper_list_model.Verifying "verify" summary.verification
-          ; (if summary.background > 0 then
-               Some
-                 (Masc_tui_keeper_mark.badge_glyph
-                    (Keeper_list_model.Badge_async
-                       { running = summary.background; ownership_unknown = 0 })
-                  ^ " async " ^ string_of_int summary.background)
-             else None)
-          ]
-          |> List.filter_map Fun.id
-        in
-        if parts = [] then "" else "  " ^ String.concat " · " parts
+        Render_schedule.waiting_group_heading_detail ~available_cells ~group_count:count
+          (Keeper_list_model.waiting_summary rows)
     | Keeper_list_model.Needs_you | Keeper_list_model.Active
     | Keeper_list_model.Inactive | Keeper_list_model.Unobserved -> ""
   in
@@ -837,7 +814,8 @@ let render_keeper_list (state : state) =
       | Keeper_group_heading (group, count) ->
           box_line buf cols
             (keeper_group_heading_style group ^ "  "
-             ^ keeper_group_heading_text model_rows group count ^ Ansi.reset)
+             ^ keeper_group_heading_text ~available_cells:(inner - 2) model_rows group count
+             ^ Ansi.reset)
       | Keeper_display_row (position, row) ->
           let selected = position = cursor in
           let primary =

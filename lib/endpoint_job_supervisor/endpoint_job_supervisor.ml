@@ -140,7 +140,8 @@ let result_content (observation : observation) launch_id =
       (* Display evidence only, like a rejection diagnostic. *)
       Failed {diagnostic=G.error_to_string (G.control_failure_error failure)} in
   let gate : Endpoint_job_result.gate={preparation;decision=boundary.decision;control} in
-  Endpoint_job_result.encode ~status:observation.status ~physical_exit:(physical_status observation.settled) ~launch_id ~input ~gate
+  let process=Endpoint_job_result.Child {physical_exit=physical_status observation.settled;launch_id;input;gate} in
+  Endpoint_job_result.encode ~status:observation.status ~process
   |> Result.map_error (fun e -> Result_encoding_failed e)
 
 let verify_receipt ~sw ~storage ~root_stat ~content ~sha256 =

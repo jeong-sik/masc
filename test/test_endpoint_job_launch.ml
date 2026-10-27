@@ -450,6 +450,9 @@ let output_owner_teardown_finishes_entered_metadata = fixture (fun ~env ~sw ~sto
       (read (leaf fixture binding "stdout.bin"))))
 
 let supervise value = value |> Result.map_error S.error_to_string |> require
+let result_child value = match D.process value with
+  | D.Child child -> child
+  | Not_created _ -> Alcotest.fail "expected actual original child evidence"
 let supervised ?execution ?(after_spawn=fun _ -> ()) ?(before_result_publish=fun () -> ())
     ?(after_result_publish=fun () -> ()) ?(before_result_read=fun _ -> ())
     ?(on_result_read_busy=fun _ -> ()) ~sw ~env fixture permit =
@@ -877,7 +880,7 @@ let held_startup_is_stopped_and_durably_proves_nonstart = fixture (fun ~env ~sw 
     ~route:{route with boot_id=id "09"} ~owner ~payload_uid:fixture.uid |> registry in
   let storage=R.load rebooted ~binding |> registry |> R.open_storage ~sw |> registry in
   let restored=D.load ~sw ~storage ~expected_sha256:(Some receipt.sha256) |> Result.map_error D.error_to_string |> require in
-  check "bootstrap physical status is retained without inventing a payload exit" (D.physical_exit restored=P.Signaled 9);
+  check "bootstrap physical status is retained without inventing a payload exit" ((result_child restored).physical_exit=P.Signaled 9);
   (match D.inspect restored |> Result.map_error D.error_to_string |> require with
    | P.Status {phase=P.Not_started P.Cancelled_before_activation;cancel_requested=true;_} -> ()
    | P.Admitted _ | Status _ | Output _ | Released _ | Refused _ | Held _ -> Alcotest.fail "cold read lost the proven original non-start"))
@@ -899,7 +902,7 @@ let native_exec_rejection_is_distinct_from_payload_exit127 = fixture (fun ~env ~
   check "rejected executable performed no payload marker" (not (Sys.file_exists (Filename.concat fixture.work "activated")));
   let storage=R.load store ~binding |> registry |> R.open_storage ~sw |> registry in
   let restored=D.load ~sw ~storage ~expected_sha256:(Some receipt.sha256) |> Result.map_error D.error_to_string |> require in
-  check "native bootstrap exit remains separate receipt evidence" (D.physical_exit restored=P.Exited 127);
+  check "native bootstrap exit remains separate receipt evidence" ((result_child restored).physical_exit=P.Exited 127);
   let _,next=prepare store fixture "07" "exit 127" in
   let actual=Eio.Switch.run (fun job_sw -> supervised ~sw:job_sw ~env fixture next |> S.await_result |> supervise) in
   match actual.status with
@@ -1150,6 +1153,155 @@ let persisted_result ~env ~store fixture script = Eio.Switch.run (fun sw ->
   let binding,permit=prepare store fixture "05" script in
   let original=supervised ~sw ~env fixture permit in
   binding,(S.await_result original |> supervise))
+let unlaunched_original ?(mode=Exec_ssh_protocol.Effect) ?(domain=P.Workspace_process)
+    ~sw ~store fixture ~known_launch () =
+  let spec=P.spec ~domain ~argv:["/bin/sh";"-c";": > must-not-run"] ~env:[]
+    ~cwd:fixture.work ~remote_root:fixture.work ~stdin:"original\000unsent\255" ~mode
+    ~network_policy_sha256:None |> require in
+  let binding=P.binding ~route ~owner ~operation_id:(id "05")
+    ~invocation_sha256:(digest "unlaunched original") ~spec_sha256:(P.spec_sha256 spec) |> require in
+  let original=R.admit store ~new_admission_id:(id "04") ~binding ~spec |> registry in
+  let permit=if known_launch then Some (R.commit_launch original ~confirmed_admission_id:(id "04")
+      ~launch_id:(id "06") |> registry) else None in
+  let cancelled=R.request_cancel original ~confirmed_admission_id:(id "04") |> registry in
+  let proof=match permit with
+    | None -> R.settle_cancelled_admission ~sw cancelled |> registry
+    | Some permit -> R.retire_cancelled_launch ~sw permit |> registry in
+  binding,proof
+let no_child_result value expected =
+  (match D.process value with
+   | D.Not_created {launch_id} -> check "no child retains only its original optional launch" (launch_id=expected)
+   | Child _ -> Alcotest.fail "no-child result invented an OS child, gate or input delivery");
+  match D.inspect value |> result_read with
+  | P.Status {phase=P.Not_started P.Cancelled_before_activation;cancel_requested=true;
+      result=P.Result_ready hash;stdout=P.Sealed {byte_length=0L;sha256=out};stderr=P.Sealed {byte_length=0L;sha256=err};_} ->
+    check "no-child readiness binds complete actual empty streams and exact receipt"
+      (hash=D.sha256 value && out=digest "" && err=digest "")
+  | P.Admitted _ | Status _ | Output _ | Released _ | Refused _ | Held _ ->
+    Alcotest.fail "no-child result fabricated exit or lost complete original bytes"
+let no_child_results_preserve_modes_domains_and_restart () =
+  let isolated=P.Isolated_job {preparation_id=id "11";image_sha256=digest "image";input_manifest_sha256=digest "inputs"} in
+  List.iter (fun known_launch -> List.iter (fun mode -> List.iter (fun domain ->
+    fixture (fun ~env ~sw ~store fixture ->
+      let binding,proof=unlaunched_original ~mode ~domain ~sw ~store fixture ~known_launch () in
+      let expected=if known_launch then Some (id "06") else None in
+      let published=D.publish_unlaunched ~sw ~proof |> result_read in
+      no_child_result published expected;
+      check "cancelled original never executes its payload" (not (Sys.file_exists (Filename.concat fixture.work "must-not-run")));
+      let names=["stdout.bin";"stdout.seal.json";"stderr.bin";"stderr.seal.json";D.leaf] in
+      let saved=List.map (fun name -> let path=leaf fixture binding name in name,(Unix.lstat path).st_ino,read path) names in
+      let again=D.publish_unlaunched ~sw ~proof |> result_read in
+      check "duplicate no-child publication retains exact frozen digest" (D.sha256 again=D.sha256 published);
+      List.iter (fun (name,inode,bytes) -> let path=leaf fixture binding name in
+        Alcotest.(check int) "duplicate publication does not replace original evidence inode" inode (Unix.lstat path).st_ino;
+        Alcotest.(check string) "duplicate publication preserves every original evidence byte" bytes (read path)) saved;
+      let rebooted=R.open_registry ~sw ~fs:env#fs ~root_path:fixture.registry_path
+        ~route:{route with boot_id=id "09"} ~owner ~payload_uid:fixture.uid |> registry in
+      let storage=original_storage ~sw rebooted binding in
+      let restored=D.load ~sw ~storage ~expected_sha256:(Some (D.sha256 published)) |> result_read in
+      no_child_result restored expected;
+      let out=D.read_output restored ~stream:P.Stdout ~offset:0L ~max_bytes:max_int |> result_read in
+      Alcotest.(check string) "original no-child output is an actual verified empty stream" "" out.data) ())
+      [P.Workspace_process;isolated]) [Exec_ssh_protocol.Observe;Guest_local;Effect]) [false;true]
+
+let no_child_partial_publication_cancel_reconciles_original () =
+  List.iter (fun boundary -> fixture (fun ~env ~sw ~store fixture ->
+    let binding,proof=unlaunched_original ~sw ~store fixture ~known_launch:true () in
+    let entered,signal=Eio.Promise.create () in let cancelled=ref false in
+    Eio.Fiber.first
+      (fun () -> try
+        ignore (D.For_testing.publish_unlaunched ~sw ~proof ~on_stage:(fun stage ->
+          if stage=boundary then (Eio.Promise.resolve signal ();Eio.Fiber.await_cancel ())) |> result_read);
+        Alcotest.fail "paused no-child publisher returned before its actual stage resumed"
+        with Eio.Cancel.Cancelled _ as ex -> cancelled:=true;raise ex)
+      (fun () -> Eio.Promise.await entered;
+        ignore (R.refresh (R.storage_record (R.unlaunched_storage proof)) |> registry);
+        let _,next=prepare store fixture "07" "printf independent; exit 8" in
+        ignore (Eio.Switch.run (fun next_sw -> supervised ~sw:next_sw ~env fixture next |> S.await_result |> supervise)));
+    check "no-child producer interruption propagates without cancelling another job" !cancelled;
+    let names=List.filter (fun name -> Sys.file_exists (leaf fixture binding name))
+      ["stdout.bin";"stdout.seal.json";"stderr.bin";"stderr.seal.json";D.leaf] in
+    let saved=List.map (fun name -> let path=leaf fixture binding name in name,(Unix.lstat path).st_ino,read path) names in
+    let recovered=D.publish_unlaunched ~sw ~proof |> result_read in
+    no_child_result recovered (Some (id "06"));
+    List.iter (fun (name,inode,bytes) -> let path=leaf fixture binding name in
+      Alcotest.(check int) "reconciliation retains earlier committed inode" inode (Unix.lstat path).st_ino;
+      Alcotest.(check string) "reconciliation retains earlier committed exact bytes" bytes (read path)) saved) ())
+    [D.For_testing.Stdout_sealed;Stderr_sealed;Receipt_committed]
+
+let no_child_missing_sealed_evidence_never_recreates_empty_data () =
+  List.iter (fun name -> fixture (fun ~env:_ ~sw ~store fixture ->
+    let binding,proof=unlaunched_original ~sw ~store fixture ~known_launch:true () in
+    let published=D.publish_unlaunched ~sw ~proof |> result_read in
+    let path=leaf fixture binding name in Unix.unlink path;
+    let storage=R.unlaunched_storage proof in
+    check "missing original sealed evidence refuses readback" (Result.is_error (D.load ~sw ~storage ~expected_sha256:(Some (D.sha256 published))));
+    check "a repeated publisher cannot turn missing sealed data into fresh empty completion"
+      (Result.is_error (D.publish_unlaunched ~sw ~proof));
+    check "missing sealed evidence remains missing for reconciliation" (not (Sys.file_exists path))) ())
+    ["stdout.bin";"stdout.seal.json";"stderr.bin";"stderr.seal.json"]
+
+let no_child_receipt_rejects_invented_process_facts () =
+  List.iter (fun change -> fixture (fun ~env ~sw ~store fixture ->
+    let binding,proof=unlaunched_original ~sw ~store fixture ~known_launch:true () in
+    ignore (D.publish_unlaunched ~sw ~proof |> result_read);
+    let path=leaf fixture binding D.leaf in
+    let object_ = function `Assoc fields -> fields
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Alcotest.fail "original receipt object missing" in
+    let update name f fields=List.map (fun (key,value) -> key,if key=name then f value else value) fields in
+    let fields=Yojson.Safe.from_file path |> object_ in
+    let payload=List.assoc "payload" fields |> object_ in
+    let process=List.assoc "process" payload |> object_ in
+    let process=match change with
+      | `Physical -> ("physical_status",`Assoc ["kind",`String "exited";"code",`String "0"])::process
+      | `Gate -> ("gate",`Null)::process
+      | `Input -> ("stdin",`Assoc ["state",`String "written";"byte_length",`String "0"])::process
+      | `Missing_launch -> List.remove_assoc "launch_id" process
+      | `Wrong_launch -> update "launch_id" (fun _ -> `Null) process
+      | `Duplicate_state -> ("state",`String "not_created")::process
+      | `Unknown -> update "state" (fun _ -> `String "future") process
+      | `Phase -> process in
+    let payload=update "process" (fun _ -> `Assoc process) payload in
+    let payload=match change with
+      | `Phase -> update "status" (fun value -> `Assoc (update "phase" (fun _ ->
+          `Assoc ["state",`String "termination_observed";"physical_status",`Assoc ["kind",`String "exited";"code",`String "0"]]) (object_ value))) payload
+      | `Physical | `Gate | `Input | `Missing_launch | `Wrong_launch | `Duplicate_state | `Unknown -> payload in
+    let payload=`Assoc payload in
+    let checksum=Digestif.SHA256.(to_hex (digest_string ("masc_endpoint_terminal_result_v1\000" ^ Yojson.Safe.to_string payload))) in
+    let fields=update "payload" (fun _ -> payload) fields |> update "payload_sha256" (fun _ -> `String checksum) in
+    Unix.chmod path 0o600;Yojson.Safe.to_file path (`Assoc fields);Unix.chmod path 0o400;
+    let malformed=read path in
+    check "valid checksum cannot grant invented OS or input facts" (Result.is_error (D.load ~sw ~storage:(R.unlaunched_storage proof) ~expected_sha256:None));
+    Alcotest.(check string) "invalid historical evidence is preserved without repair" malformed (read path);
+    let _,next=prepare store fixture "07" "printf independent; exit 8" in
+    ignore (Eio.Switch.run (fun next_sw -> supervised ~sw:next_sw ~env fixture next |> S.await_result |> supervise))) ())
+    [`Physical;`Gate;`Input;`Missing_launch;`Wrong_launch;`Duplicate_state;`Unknown;`Phase]
+
+let no_child_final_mutation_never_becomes_readiness () =
+  List.iter (fun change -> fixture (fun ~env ~sw ~store fixture ->
+    let binding,proof=unlaunched_original ~sw ~store fixture ~known_launch:true () in
+    let receipt=leaf fixture binding D.leaf in
+    let result=D.For_testing.publish_unlaunched ~sw ~proof ~on_stage:(function
+      | D.For_testing.Stdout_sealed | Stderr_sealed -> ()
+      | Receipt_committed -> match change with
+        | `Missing_stdout -> Unix.unlink (leaf fixture binding "stdout.bin")
+        | `Receipt_bytes -> Unix.chmod receipt 0o600;
+          Out_channel.with_open_gen [Open_wronly;Open_append;Open_binary] 0 receipt (fun oc -> output_string oc "\n");Unix.chmod receipt 0o400) in
+    check "late output or exact receipt mutation never yields complete readiness" (Result.is_error result);
+    let malformed=read receipt in
+    let _,next=prepare store fixture "07" "printf independent; exit 8" in
+    ignore (Eio.Switch.run (fun next_sw -> supervised ~sw:next_sw ~env fixture next |> S.await_result |> supervise));
+    Alcotest.(check string) "failure preserves the exact current receipt evidence" malformed (read receipt)) ())
+    [`Missing_stdout;`Receipt_bytes]
+
+let no_child_original_authority_rejects_rebound_storage = fixture (fun ~env:_ ~sw ~store fixture ->
+  let binding,proof=unlaunched_original ~sw ~store fixture ~known_launch:true () in
+  let path=Filename.dirname (leaf fixture binding D.leaf) in
+  Unix.rename path (path ^ ".evidence");Unix.mkdir path 0o700;
+  check "no-child proof never adopts a replacement job with matching pathname"
+    (Result.is_error (D.publish_unlaunched ~sw ~proof));
+  Alcotest.(check int) "replacement storage receives no original output or receipt" 0 (Array.length (Sys.readdir path)))
+
 let empty_output_or_bootstrap_code_cannot_invent_nonstart = fixture (fun ~env ~sw ~store fixture ->
   let binding,receipt=persisted_result ~env ~store fixture ": > activated; exit 7" in
   check "actual silent payload performed its marker" (Sys.file_exists (Filename.concat fixture.work "activated"));
@@ -1163,8 +1315,7 @@ let empty_output_or_bootstrap_code_cannot_invent_nonstart = fixture (fun ~env ~s
     let status : P.response=P.Status {original;revision=R.revision cancelled;phase;cancel_requested=true;
       result=P.Result_pending;stdout=empty;stderr=empty} in
     check "actual activated gate rejects a fabricated non-start or mismatched raw physical status"
-      (Result.is_error (D.encode ~status ~physical_exit:(D.physical_exit loaded) ~launch_id:(id "06")
-        ~input:(D.input_delivery loaded) ~gate:(D.gate loaded))))
+      (Result.is_error (D.encode ~status ~process:(D.process loaded))))
     [P.Not_started P.Cancelled_before_activation;P.Not_started P.Launch_rejected;P.Termination_observed (P.Exited 8)])
 let recovered_bytes original stream byte_length =
   let buffer=Buffer.create 128 in
@@ -1185,8 +1336,8 @@ let terminal_result_reopens_after_owner_exit_and_boot_change = fixture (fun ~env
       (Result.is_error (D.load ~sw:read_sw ~storage ~expected_sha256:(Some (digest "different result"))));
     let restored=D.load ~sw:read_sw ~storage ~expected_sha256:(Some receipt.sha256) |> result_read in
     check "recovered receipt keeps its original exact digest and accepted stdin fact"
-      (D.sha256 restored=receipt.sha256 && D.input_delivery restored=D.Accepted 0L);
-    let gate=D.gate restored in
+      (D.sha256 restored=receipt.sha256 && (result_child restored).input=D.Accepted 0L);
+    let gate=(result_child restored).gate in
     check "raw gate evidence survives without reconstructing a kernel handle"
       (gate.preparation=D.Ready && gate.decision=G.Activate_requested && gate.control=D.Ended);
     (match D.inspect restored |> result_read with
@@ -1215,19 +1366,20 @@ let terminal_result_strictly_rejects_corrupt_records () =
     let update name f fields=List.map (fun (key,value) -> key,if key=name then f value else value) fields in
     let object_ f=function `Assoc values -> `Assoc (f values)
       | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Alcotest.fail "actual receipt object missing" in
+    let in_process f values=update "process" (object_ f) values in
     let payload_change values=match change with
       | `Unknown -> ("unexpected",`Bool true)::values
-      | `Bad_input -> update "stdin" (fun _ -> `Assoc ["state",`String "written";"byte_length",`String "1"]) values
-      | `Bad_launch -> update "launch_id" (fun _ -> `String (P.Id.to_string (id "12"))) values
+      | `Bad_input -> in_process (update "stdin" (fun _ -> `Assoc ["state",`String "written";"byte_length",`String "1"])) values
+      | `Bad_launch -> in_process (update "launch_id" (fun _ -> `String (P.Id.to_string (id "12")))) values
       | `Wrong_admission -> update "status" (object_ (update "admission_id" (fun _ -> `String (P.Id.to_string (id "13"))))) values
       | `Old_revision -> update "status" (object_ (update "revision" (fun _ -> `String "1"))) values
-      | `Duplicate_gate -> update "gate" (object_ (fun fields -> ("control",`String "ended")::fields)) values
-      | `Physical_mismatch -> update "physical_status" (fun _ ->
-          `Assoc ["kind",`String "exited";"code",`String "8"]) values
-      | `Noncanonical_physical -> update "physical_status" (fun _ ->
-          `Assoc ["kind",`String "exited";"code",`String "07"]) values
-      | `Duplicate_physical -> update "physical_status" (object_ (fun fields -> ("kind",`String "exited")::fields)) values
-      | `Missing_physical -> List.remove_assoc "physical_status" values
+      | `Duplicate_gate -> in_process (update "gate" (object_ (fun fields -> ("control",`String "ended")::fields))) values
+      | `Physical_mismatch -> in_process (update "physical_status" (fun _ ->
+          `Assoc ["kind",`String "exited";"code",`String "8"])) values
+      | `Noncanonical_physical -> in_process (update "physical_status" (fun _ ->
+          `Assoc ["kind",`String "exited";"code",`String "07"])) values
+      | `Duplicate_physical -> in_process (update "physical_status" (object_ (fun fields -> ("kind",`String "exited")::fields))) values
+      | `Missing_physical -> in_process (List.remove_assoc "physical_status") values
       | `Checksum -> update "status" (object_ (update "phase" (fun _ ->
           `Assoc ["state",`String "termination_observed";"physical_status",`Assoc ["kind",`String "exited";"code",`String "8"]]))) values
       | `Missing_version -> values in
@@ -1549,6 +1701,12 @@ let () =
       "snapshot never waits for a blocked original process",snapshot_does_not_wait_for_a_blocked_original;
       "snapshot distinguishes pending physical settlement and original publication",snapshot_keeps_settlement_publication_and_current_source_distinct;
       "missing snapshot authority neither poisons nor cancels the original",snapshot_missing_authority_does_not_poison_or_cancel_original;
-      "snapshot observer cancellation leaves original and other jobs alive",snapshot_observer_cancel_leaves_original_alive] in
+      "snapshot observer cancellation leaves original and other jobs alive",snapshot_observer_cancel_leaves_original_alive;
+      "no-child results preserve original modes, domains and restart evidence",no_child_results_preserve_modes_domains_and_restart;
+      "interrupted no-child publication reconciles original evidence",no_child_partial_publication_cancel_reconciles_original;
+      "missing no-child sealed evidence never becomes a fresh empty spool",no_child_missing_sealed_evidence_never_recreates_empty_data;
+      "no-child receipt rejects invented OS, gate and input facts",no_child_receipt_rejects_invented_process_facts;
+      "late no-child file mutation never becomes readiness",no_child_final_mutation_never_becomes_readiness;
+      "no-child authority refuses rebound storage before publication",no_child_original_authority_rejects_rebound_storage] in
   Alcotest.run "Endpoint job launch" ["original supervisor",List.map
     (fun (name,test) -> Alcotest.test_case name `Quick test) cases]

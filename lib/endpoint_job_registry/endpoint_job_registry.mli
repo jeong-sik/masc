@@ -213,6 +213,28 @@ val unlaunched_storage : unlaunched -> storage
     non-start receipt. The retired-permit proof is process-local until that
     publication; a restart cannot reconstruct it from a cancelled known launch.
     Cancelling a proof observer never launches or signals a process. *)
+type evidence = Stream_data of P.stream | Stream_seal of P.stream | Terminal_receipt
+val evidence_leaf : evidence -> string
+(** Canonical original stream/seal/terminal filenames shared with live readers
+    and publishers; these names grant no storage or process authority. *)
+val publish_unlaunched :
+  sw:Eio.Switch.t -> unlaunched ->
+  evidence:evidence -> content:string -> (unit,error) result
+(** Publish trusted immutable evidence under this opaque proof's exact original
+    storage, serializing only its bounded metadata through the original job
+    lock. Content comes from trusted codecs, never forwarded controls.
+    Existing evidence is accepted only with identical complete bytes, private
+    single-link regular attachment and actual matching file/parent sync and
+    readback. No overwrite or claim revision change. Missing authority, changed
+    evidence or uncertain durability remains an error. The callback permit stays
+    retired after cancellation or failure; this grants neither a process effect
+    nor result readiness. [sw] is the independent publisher's resource lifetime.
+    Reconciliation concerns only the same immutable evidence, never a relaunch.
+    Publication uses the original registry's captured filesystem authority and
+    canonical private file mode. A missing stream below an existing seal or
+    terminal receipt is refused, and missing seals below a terminal receipt are
+    never reconstructed. Interrupted initial publication may complete only its
+    original dependencies; a sealed result never becomes a fresh empty spool. *)
 
 module For_testing : sig
   val settle_cancelled_admission :

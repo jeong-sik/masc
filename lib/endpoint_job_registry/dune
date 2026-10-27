@@ -3,4 +3,4 @@
  (name endpoint_job_registry)
  (public_name masc.endpoint_job_registry)
  (modules endpoint_job_registry)
- (libraries endpoint_job_protocol fs_compat masc_process masc_core eio eio.unix unix yojson))
+ (libraries endpoint_job_protocol fs_compat masc_process masc_core eio eio.unix unix yojson optint))

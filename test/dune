@@ -2751,6 +2751,7 @@
 (include stanzas/test_play_role_permissions.inc)
 (include stanzas/test_play_screen.inc)
 (include stanzas/test_play_page.inc)
+(include stanzas/test_play_skills.inc)
 (include stanzas/test_play_pad.inc)
 (include stanzas/test_play_pad_routes.inc)
 (include stanzas/test_play_invite.inc)
@@ -4121,6 +4122,11 @@
  (name test_tui_keeper_list_model)
  (modules test_tui_keeper_list_model)
  (libraries alcotest masc masc.masc_types masc_tui_keeper_list_model masc_tui_keeper_control))
+
+(test
+ (name test_tui_keeper_columns)
+ (modules test_tui_keeper_columns)
+ (libraries alcotest masc_tui_keeper_list_model masc_tui_render_schedule))
 
 (test
  (name test_tui_editor)

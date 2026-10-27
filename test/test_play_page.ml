@@ -338,7 +338,7 @@ let test_the_guide_over_h2 () =
                 [ "content-type", "text/markdown; charset=utf-8"
                 ; "cache-control", "no-store"
                 ; "x-content-type-options", "nosniff" ];
-              (match Guide.guide ~base:public_base with
+              (match Guide.guide ~base:public_base ~skills:(Guide.current_skills ()) with
                | Ok expected -> check string "same rendered guide" expected reply.h2_body
                | Error reason -> fail reason);
               check int "guide suffix is not another public guide" 404

@@ -172,8 +172,11 @@ let keeper_activity_style (activity : Keeper_list_model.activity) =
   | Held_call | Failure -> Theme.bad ()
   | Question | Confirmation | Offline -> Theme.warn ()
   | Preparing | Streaming | Running | Async_working _ | Deferred -> Theme.info ()
-  | Tool_waiting | Model_waiting | Delegating | Verifying | External_waiting
-  | Idle | Paused | Unknown -> Theme.recede ()
+  | Tool_waiting -> Theme.warn ()
+  | Model_waiting -> Theme.info ()
+  | Delegating -> Theme.category Theme.Slot_2
+  | Verifying -> Theme.category Theme.Slot_1
+  | External_waiting | Idle | Paused | Unknown -> Theme.recede ()
 
 let keeper_badge_text (badge : Keeper_list_model.badge) =
   let glyph = Masc_tui_keeper_mark.badge_glyph badge in
@@ -214,7 +217,7 @@ let keeper_waiting_detail (row : Keeper_list_model.row) =
   | Keeper_list_model.Waiting_observed { kwr_waiting_on = []; _ }
   | Keeper_list_model.Waiting_unobserved | Keeper_list_model.Waiting_unavailable -> None
 
-let keeper_detail_text (row : Keeper_list_model.row) =
+let keeper_detail_text ?(failure_context = None) (row : Keeper_list_model.row) =
   let approval =
     Option.map
       (fun (approval : Tui_decode.keeper_tool_approval) ->
@@ -232,7 +235,8 @@ let keeper_detail_text (row : Keeper_list_model.row) =
     | "" -> None
     | word -> Some ("health " ^ word)
   in
-  List.map keeper_badge_text (Keeper_list_model.badges_of_row row)
+  Option.to_list failure_context
+  @ List.map keeper_badge_text (Keeper_list_model.badges_of_row row)
   @ List.filter_map Fun.id
       [ approval; questions; keeper_waiting_detail row; keeper_task_detail row; health ]
   |> String.concat " · "
@@ -305,7 +309,15 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
          ^ Ansi.reset
        else "")
     ; " "
-    ; Theme.recede () ^ fit_width (keeper_detail_text row) columns.kcol_task ^ Ansi.reset
+    ; Theme.recede ()
+      ^ fit_width
+          (keeper_detail_text
+             ~failure_context:
+               (Render_schedule.keeper_failure_context_for_detail
+                  ~show_runtime:columns.kcol_show_runtime failure_context)
+             row)
+          columns.kcol_task
+      ^ Ansi.reset
     ]
 
 let keeper_secondary_row_content ~inner (row : Keeper_list_model.row) =
@@ -482,7 +494,7 @@ let keeper_display_entries rows layout =
             Keeper_group_heading (group, count)
             :: List.map (fun (position, row) -> Keeper_display_row (position, row)) matching)
 
-let keeper_group_heading_text group count =
+let keeper_group_heading_text ~available_cells rows group count =
   let glyph, label =
     match group with
     | Keeper_list_model.Needs_you -> "!", "NEEDS YOU"
@@ -491,7 +503,15 @@ let keeper_group_heading_text group count =
     | Keeper_list_model.Inactive -> "\xe2\x97\x8b", "INACTIVE" (* ○ *)
     | Keeper_list_model.Unobserved -> "?", "UNKNOWN"
   in
-  Printf.sprintf "%s %s %d" glyph label count
+  let detail =
+    match group with
+    | Keeper_list_model.Waiting ->
+        Render_schedule.waiting_group_heading_detail ~available_cells ~group_count:count
+          (Keeper_list_model.waiting_summary rows)
+    | Keeper_list_model.Needs_you | Keeper_list_model.Active
+    | Keeper_list_model.Inactive | Keeper_list_model.Unobserved -> ""
+  in
+  Printf.sprintf "%s %s %d%s" glyph label count detail
 
 let keeper_group_heading_style = function
   | Keeper_list_model.Needs_you -> Theme.bad ()
@@ -679,7 +699,8 @@ let render_keeper_list (state : state) =
   in
   let columns =
     Render_schedule.allocate_keeper_columns
-      ~prioritize_runtime:has_failing_keeper ~inner_width:inner ~widest_runtime
+      ~runtime_visible:(state.keeper_list_layout <> Keeper_list_model.Grouped)
+      ~prioritize_runtime:has_failing_keeper ~inner_width:inner ~widest_runtime ()
   in
   box_line_styled buf cols ~style:(Theme.recede ()) (keeper_column_header columns);
 
@@ -802,7 +823,8 @@ let render_keeper_list (state : state) =
       | Keeper_group_heading (group, count) ->
           box_line buf cols
             (keeper_group_heading_style group ^ "  "
-             ^ keeper_group_heading_text group count ^ Ansi.reset)
+             ^ keeper_group_heading_text ~available_cells:(inner - 2) model_rows group count
+             ^ Ansi.reset)
       | Keeper_display_row (position, row) ->
           let selected = position = cursor in
           let primary =

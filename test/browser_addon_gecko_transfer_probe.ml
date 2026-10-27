@@ -113,7 +113,7 @@ let () =
         | Error message -> `Bad_request,Yojson.Safe.to_string (`Assoc ["error",`Assoc ["message",`String message]]) in
       model_responses:=`Assoc ["request_index",`Int index;"status",`Int (Cohttp.Code.code_of_status status);
         "body",`String response]::!model_responses;flush ();status,response)) in
-    ignore (F.publish_registry ~lane_id:"browser/locate" ~slot_ids:["probe"]
+    ignore (F.publish_registry ~lane_id:(package_id ^ "/locate") ~slot_ids:["probe"]
       (F.resolver_snapshot ~source:base_path [{F.id="probe";base_url=provider.base_url}]) : Runtime_exact_output_registry.t);
     R.register_exact_runner ~authorize_request:(Server_lane_addon_exact.authorize_request ~base_path)
     (Server_lane_addon_exact.runner ~base_path);

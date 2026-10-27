@@ -11,21 +11,32 @@
     callers reach config / socket types via {!Http_server_eio}
     directly. *)
 
+type bind_address_error = Invalid_host of string
+
+val parse_bind_address : string -> (Ipaddr.t, bind_address_error) result
+(** [parse_bind_address host] reads the host the server is told to bind as one
+    IPv4 or IPv6 address. A name is not resolved: [localhost] is
+    [Invalid_host], and so is an address no family can hold, such as
+    [999.0.0.1]. *)
+
+val bind_address_error_to_string : bind_address_error -> string
+
 val make_http_config :
-  host:string -> port:int -> Http_server_eio.config
-(** [make_http_config ~host ~port] builds the listener config from
-    the resolved host / port pair.  Other config fields default
-    via {!Http_server_eio.default_config}. *)
+  address:Ipaddr.t -> port:int -> Http_server_eio.config
+(** [make_http_config ~address ~port] builds the listener config. Its [host]
+    is [address] written out by {!Ipaddr.to_string}. Other config fields
+    default via {!Http_server_eio.default_config}. *)
 
 val listen_socket :
   sw:Eio.Switch.t ->
   net:[> `Network | `Platform of [> `Generic ] as 'a ] Eio.Resource.t ->
+  address:Ipaddr.t ->
   Http_server_eio.config ->
   'a Eio.Net.listening_socket_ty Eio.Resource.t
-(** [listen_socket ~sw ~net config] binds + listens on
-    [config.host:config.port] via {!Eio.Net.listen}.  Returns
+(** [listen_socket ~sw ~net ~address config] binds + listens on
+    [address:config.port] via {!Eio.Net.listen}.  Returns
     the listening-socket resource owned by the supplied switch.
-    Raises if the host is not a valid IP literal. *)
+    [address] is the one {!make_http_config} wrote into [config]. *)
 
 val print_startup_banner :
   config:Http_server_eio.config ->

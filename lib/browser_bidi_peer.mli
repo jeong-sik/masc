@@ -124,10 +124,9 @@ val dispatch : ?actor:string -> ?request_id:string -> ?deadline:Monotonic_deadli
     time spent in the queue and earlier exchanges. A confirmed effect whose
     observation was not sent is a partial failure, without claiming the page's
     final state. After a send, the response may use the longer of the transport
-    window and the remaining request window. Input release may be sent after
-    the deadline and uses the same longer response window; session end has
-    its own cleanup window. Calls on one peer are serial. Cancellation after
-    dispatch is a separate boundary. *)
+    window and the remaining request window. Input release and session end
+    have separate cleanup windows. Calls on one peer are serial. Cancellation
+    after dispatch is a separate boundary. *)
 (** One socket message carries at most this many bytes; a larger one ends the
     connection. *)
 val reply_limit_bytes : int

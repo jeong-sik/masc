@@ -48,7 +48,7 @@ let session_end_failure_message = function Connection_gone why | Not_confirmed w
 type session_failure = Session_refused of string | Session_failed of string
 let session_failure_message = function Session_refused why | Session_failed why -> why
 type t = { ask : deadline:Monotonic_deadline.t option -> on_send:(unit -> unit) -> string -> Yojson.Safe.t -> (Yojson.Safe.t,refusal) result;
-  release_input : deadline:Monotonic_deadline.t option -> string -> Yojson.Safe.t -> (Yojson.Safe.t,refusal) result;
+  release_input : string -> Yojson.Safe.t -> (Yojson.Safe.t,refusal) result;
   mutable request_deadline : Monotonic_deadline.t option;
   session_end : unit -> (unit,session_end_failure) result; mutable session_may_exist : bool;
   mutable contexts : (string * int) list; mutable next_tab : int;
@@ -67,15 +67,14 @@ let create_internal ~session_end ~command ~release_input =
   {ask=command;release_input;request_deadline=None;session_end;session_may_exist=false;contexts=[];next_tab=0;windows=[];opened=[];sized=[];version=None;profile=None;process_id=None;
    prompts=Hashtbl.create 4}
 let create_with_deadline ~session_end ~command =
-  create_internal ~session_end ~command
-    ~release_input:(fun ~deadline:_ -> command ~deadline:None ~on_send:(fun () -> ()))
+  create_internal ~session_end ~command ~release_input:(command ~deadline:None ~on_send:(fun () -> ()))
 let create ~session_end ~command =
   create_with_deadline ~session_end ~command:(fun ~deadline:_ ~on_send method_ params -> on_send (); command method_ params)
 let ask ?(on_send=(fun () -> ())) t method_ params =
   t.ask ~deadline:t.request_deadline ~on_send method_ params
 let cleanup_command t method_ params =
   Result.map_error (fun refusal -> method_ ^ ": " ^ refusal_message refusal)
-    (t.release_input ~deadline:t.request_deadline method_ params)
+    (t.release_input method_ params)
 let perform_input t ~on_send params =
   t.ask ~deadline:t.request_deadline ~on_send "input.performActions" params
 let input_result = function
@@ -802,12 +801,12 @@ let with_connection_with_hook ~after_serialize ~env ~timeout ~url use =
         | exception Failure detail->Error ("BiDi connection: " ^ detail) in
       (* One command and its reply. A reply that arrived as the window
          closed is the reply. *)
-      let exchange ~window ~deadline ~enforce_deadline ~on_send method_ params =
+      let exchange ~window ~deadline ~on_send method_ params =
         incr sequence;let id= !sequence in
         let payload=Yojson.Safe.to_string (obj ["id",`Int id;"method",str method_;"params",params]) in
         after_serialize method_;
         if Endpoint.Wsd.is_closed wsd then Error `Closed_before_send
-        else if enforce_deadline && Option.fold ~none:false ~some:Monotonic_deadline.passed deadline then Error `Expired_before_send
+        else if Option.fold ~none:false ~some:Monotonic_deadline.passed deadline then Error `Expired_before_send
         else (
           let reply,resolve=Eio.Promise.create () in Hashtbl.add pending id resolve;
           on_send ();
@@ -828,7 +827,7 @@ let with_connection_with_hook ~after_serialize ~env ~timeout ~url use =
           (* The connection is ended only for a command that got no reply. *)
           if Endpoint.Wsd.is_closed wsd then Error (Unsent "BiDi socket closed before send")
           else if Option.fold ~none:false ~some:Monotonic_deadline.passed deadline then Error Deadline_before_send
-          else (match exchange ~window:timeout ~deadline ~enforce_deadline:true ~on_send method_ params with
+          else (match exchange ~window:timeout ~deadline ~on_send method_ params with
            | Ok reply->reply
            | Error `Expired_before_send -> Error Deadline_before_send
            | Error `Closed_before_send -> Error (Unsent "BiDi socket closed before send")
@@ -842,14 +841,12 @@ let with_connection_with_hook ~after_serialize ~env ~timeout ~url use =
              raise cancelled) in
       (* Release is cleanup of an input already attempted, not another page
          command. Like session.end it may use the original socket even after
-         an unanswered command fenced that socket against further input. Its
-         response can use a longer remaining request window, but admission of
-         this cleanup does not depend on that window still being open. *)
-      let release_input ~deadline method_ params =
+         an unanswered command fenced that socket against further input. *)
+      let release_input method_ params =
         match !shut with
         | Some reason -> Error (Unsent reason)
         | None when Endpoint.Wsd.is_closed wsd -> Error (Unsent "BiDi socket closed before input release")
-        | None -> (match exchange ~window:timeout ~deadline ~enforce_deadline:false ~on_send:(fun () -> ()) method_ params with
+        | None -> (match exchange ~window:timeout ~deadline:None ~on_send:(fun () -> ()) method_ params with
             | Ok reply -> reply
             | Error `Expired_before_send -> Error (Unsent "BiDi input release deadline exceeded before send")
             | Error `Closed_before_send -> Error (Unsent "BiDi socket closed before input release")
@@ -861,7 +858,7 @@ let with_connection_with_hook ~after_serialize ~env ~timeout ~url use =
          page whose script hung is not a browser that is gone. *)
       let session_end () =
         match !shut with Some reason->Error (Connection_gone reason)|None->
-          (match exchange ~window:session_end_window_sec ~deadline:None ~enforce_deadline:false ~on_send:(fun () -> ()) "session.end" (obj []) with
+          (match exchange ~window:session_end_window_sec ~deadline:None ~on_send:(fun () -> ()) "session.end" (obj []) with
            | Ok (Ok _)->Ok ()
            (* A session asked for and never confirmed, which Firefox says it
               does not have: there is none to end. *)

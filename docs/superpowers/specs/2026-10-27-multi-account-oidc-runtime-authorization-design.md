@@ -90,7 +90,7 @@ WorkspaceMembership {
 - Admin은 다른 사람의 credential·private Runtime을 사용하지 못한다. Disable/Block/감사와 Service-owned 공유 관리만 한다. 점유 중인 dispatch의 `Executor_teardown`은 `AdminDisableBlock`에 포함한다.
 - Admin_assignment 회수에는 `cause = Security_incident | Operational`을 필수로 둔다(§10.4의 Block과 같은 구분). `Security_incident`이면 같은 append로 그 Admin이 author인 MachineSharePolicy와 Delegated grant를 `Revocation_pending`에 둔다. 적격 Admin이 항목별로 재승인(§8.3의 취소 기록)하거나 회수해서만 푼다. `Operational`이면 그 목록을 감사에 남기고 grant는 유효하게 둔다.
 - **Admin은 관리 권한으로 자기 자신 또는 자신이 관리하는 principal에게 grant를 만들거나 수정할 수 없다.** 감사에는 author·beneficiary·beneficiary manager를 남긴다. Admin이 Service-owned Runtime을 사용하려면 독립된 Service 관리 owner나 제2 승인자의 grant가 필요하다. 제2 승인자는 author와 다른 principal이며 author의 관리 대상이 아니어야 한다.
-- **적격 Admin**은 어떤 항목에 대해 그 항목의 owner·원 grant 승인자·beneficiary·subject 자신이 아닌 활성 Admin이다. incident 해제(§10.4)와 `Revocation_pending` 취소(§8.3)와 재승인은 적격 Admin만 한다.
+- **적격 Admin**은 어떤 항목에 대해 그 항목의 owner·원 grant 승인자·beneficiary·beneficiary의 manager·subject 자신이 아닌 활성 Admin이다. incident 해제(§10.4)와 `Revocation_pending` 취소(§8.3)와 재승인은 적격 Admin만 한다.
 
 ### 4.2 ProviderAccount와 Runtime
 

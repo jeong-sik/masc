@@ -5202,10 +5202,13 @@ let test_tool_outbox_reaches_the_next_keeper_turn ?(refuse_input = false) ~refus
   let get = function Ok value -> value | Error detail -> fail detail in
   Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
     run_undelivered_fixture ~eof:false
-      ~retain:(Keeper_codex_tool_outbox.retain ~base_path ~keeper_name) ();
-    let pending = get (Keeper_codex_tool_outbox.load ~base_path ~keeper_name) in
+      ~retain:(fun (receipt : Runtime_codex_app_server.undelivered_tool_result) ->
+        Keeper_client_tool_outbox.retain ~base_path ~keeper_name
+          {thread_id=receipt.thread_id;turn_id=receipt.turn_id;call_id=receipt.call_id;
+           tool_name=receipt.tool_name;arguments=receipt.arguments;response=receipt.response}) ();
+    let pending = get (Keeper_client_tool_outbox.load ~base_path ~keeper_name) in
     check int "one retained context batch" 1
-      (List.length (Keeper_codex_tool_outbox.developer_context pending));
+      (List.length (Keeper_client_tool_outbox.developer_context pending));
     with_fixture ~capture_path ~inject_items:true ~close_after_injection:refuse_dispatch
       ([init_result; account_chatgpt; thread_result; {|{"id":4,"result":{}}|};
        {|{"id":5,"result":{"turn":{"id":"turn-1"}}}|}]
@@ -5218,9 +5221,9 @@ let test_tool_outbox_reaches_the_next_keeper_turn ?(refuse_input = false) ~refus
          | false, Ok _ | true, Error _ -> ()
          | false, Error error -> fail (Agent_core.Error.to_string error)
          | true, Ok _ -> fail "a refused input cannot acknowledge receipt delivery");
-        let pending = get (Keeper_codex_tool_outbox.load ~base_path ~keeper_name) in
+        let pending = get (Keeper_client_tool_outbox.load ~base_path ~keeper_name) in
         check int "ACK follows successful dispatch only" (if refuse_dispatch || refuse_input then 1 else 0)
-          (List.length (Keeper_codex_tool_outbox.developer_context pending));
+          (List.length (Keeper_client_tool_outbox.developer_context pending));
         let frames = In_channel.with_open_bin capture_path In_channel.input_lines
           |> List.map Yojson.Safe.from_string in
         let open Yojson.Safe.Util in
@@ -5235,20 +5238,20 @@ let test_tool_outbox_acknowledges_only_its_snapshot () =
   let base_path = temp_workspace "codex-tool-outbox-identity-" in
   let keeper_name = "outbox-fixture" in
   let get = function Ok value -> value | Error detail -> fail detail in
-  let first : Runtime_codex_app_server.undelivered_tool_result =
+  let first : Keeper_client_tool_outbox.receipt =
     {thread_id = "thread-1"; turn_id = "turn-1"; call_id = "call-1";
      tool_name = "probe"; arguments = `Null; response = `String "first-result"} in
   Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
-    get (Keeper_codex_tool_outbox.retain ~base_path ~keeper_name first);
+    get (Keeper_client_tool_outbox.retain ~base_path ~keeper_name first);
     let session_path = get (Keeper_official_client_session_store.path ~base_path ~keeper_name) in
     let staging = Filename.concat (Filename.dirname session_path) ".undelivered-tools-staging" in
     Fs_compat.save_file (Filename.concat staging "interrupted-write.tmp") "{partial";
-    let original = get (Keeper_codex_tool_outbox.load ~base_path ~keeper_name) in
-    get (Keeper_codex_tool_outbox.retain ~base_path ~keeper_name
+    let original = get (Keeper_client_tool_outbox.load ~base_path ~keeper_name) in
+    get (Keeper_client_tool_outbox.retain ~base_path ~keeper_name
       {first with turn_id = "turn-2"; response = `String "later-result"});
-    get (Keeper_codex_tool_outbox.acknowledge original);
-    let remaining = get (Keeper_codex_tool_outbox.load ~base_path ~keeper_name)
-      |> Keeper_codex_tool_outbox.developer_context in
+    get (Keeper_client_tool_outbox.acknowledge original);
+    let remaining = get (Keeper_client_tool_outbox.load ~base_path ~keeper_name)
+      |> Keeper_client_tool_outbox.developer_context in
     match remaining with
     | [text] -> check bool "same call id in a newer turn remains pending" true
         (String_util.contains_substring text "later-result")
@@ -6732,7 +6735,7 @@ let test_keeper_context_lifecycle_three_settled_turns () =
       | Store.Context_block block -> Some (Prompt_block_id.to_string block, held.sha256)
       | Store.Librarian_unread -> None
       | Store.Context_section _ | Store.Context_section_row _ | Store.Context_carrier
-      | Store.Librarian_working_state | Store.Historical_task_reference ->
+      | Store.Librarian_working_state | Store.Historical_task_reference | Store.Tool_result_receipts ->
         fail "unexpected non-issuer context in the fixture") frontier.held_context in
     check int "both issuer identities remain acknowledged" 2 (List.length acknowledged_blocks);
     check int "the independent native unread observation is also acknowledged" 1

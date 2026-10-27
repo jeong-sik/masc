@@ -603,9 +603,9 @@ let reconcile_spent_selection
     in
     let* meta = Keeper_meta_store.read_effective_meta config keeper_name in
     (match meta with
-     | Some meta when Keeper_codex_tool_outbox_wake.route_can_consume meta ->
-       let* snapshot = Keeper_codex_tool_outbox.load ~base_path ~keeper_name in
-       if Keeper_codex_tool_outbox.contains_receipt snapshot ~receipt_id then
+     | Some meta when Keeper_client_tool_outbox_wake.route_can_consume meta ->
+       let* snapshot = Keeper_client_tool_outbox.load ~base_path ~keeper_name in
+       if Keeper_client_tool_outbox.contains_receipt snapshot ~receipt_id then
          Ok Selection_actionable
        else retire_hint ()
      | Some _ | None ->

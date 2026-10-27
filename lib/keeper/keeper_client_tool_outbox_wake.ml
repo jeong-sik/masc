@@ -7,9 +7,9 @@ let route_can_consume (meta : Keeper_meta_contract.keeper_meta) =
     | None -> false
     | Some runtime ->
       match runtime.Runtime_instance.execution with
-      | Runtime_execution.Codex_app_server _ -> true
-      | Runtime_execution.Agent_core _ | Runtime_execution.Claude_code _
-      | Runtime_execution.Antigravity_cli _ | Runtime_execution.Muse_serve _ -> false
+      | Runtime_execution.Codex_app_server _ | Runtime_execution.Claude_code _
+      | Runtime_execution.Antigravity_cli _ | Runtime_execution.Muse_serve _ -> true
+      | Runtime_execution.Agent_core _ -> false
   in
   match Runtime.resolve_assignment route with
   | `Missing | `Unavailable _ -> false
@@ -39,8 +39,8 @@ let notify ~base_path ~keeper_name =
   | Some meta when not (route_can_consume meta) -> Ok ()
   | Some meta ->
     let keeper_name = meta.Keeper_meta_contract.name in
-    let* snapshot = Keeper_codex_tool_outbox.load ~base_path ~keeper_name in
-    let receipt_ids = Keeper_codex_tool_outbox.receipt_ids snapshot in
+    let* snapshot = Keeper_client_tool_outbox.load ~base_path ~keeper_name in
+    let receipt_ids = Keeper_client_tool_outbox.receipt_ids snapshot in
     let* () = List.fold_left (fun acc receipt_id ->
       let* () = acc in
       let stimulus : Keeper_event_queue.stimulus =

@@ -1,20 +1,20 @@
 (** Recover unread dynamic-tool results through the existing Keeper queue.
     Queue admission and wake hints do not acknowledge the result and never
-    execute tools. The next successful Codex settlement owns the exact ACK. *)
+    execute tools. Only a completed consumer owns the exact ACK. *)
 
 val notify : base_path:string -> keeper_name:string -> (unit, string) result
 (** Read the authoritative outbox, durably enqueue pointer-only notifications
     with pending/outbox deduplication, then hint the existing live owner.
     Failed provider turns may be notified again while receipts remain unread.
     An absent/paused owner is never started or unpaused. Recovery currently
-    requires a nonempty Codex-only route: every reachable candidate must resolve
-    to Codex. Mixed, unavailable and unknown routes retain receipts without
-    initiating model turns that cannot consume them. *)
+    requires a nonempty official-client route: every reachable candidate must
+    deliver original result context. Agent Core, unavailable and unknown routes
+    retain receipts without initiating model turns that cannot consume them. *)
 
 val route_can_consume : Keeper_meta_contract.keeper_meta -> bool
-(** Every candidate in the current route must resolve to Codex developer-context
+(** Every candidate in the current route must resolve to official-client result
     delivery. Quota ordering or fallback may select any declared candidate;
-    checking just the entry cannot establish consumption. Empty, mixed,
+    checking just the entry cannot establish consumption. Empty, Agent Core,
     missing or unavailable candidates retain their unread receipts. *)
 
 type t

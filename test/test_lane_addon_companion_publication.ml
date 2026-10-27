@@ -360,10 +360,10 @@ default = "codex.codex"
   let meta=match Keeper_meta_store.read_effective_meta config keeper |> string_ok with
     | Some meta -> meta | None -> fail "declared fixture Keeper missing" in
   check bool "fixture route can consume Codex receipt bodies" true
-    (Keeper_codex_tool_outbox_wake.route_can_consume meta);
-  let outbox=Keeper_codex_tool_outbox.load ~base_path:config.base_path ~keeper_name:keeper |> string_ok in
+    (Keeper_client_tool_outbox_wake.route_can_consume meta);
+  let outbox=Keeper_client_tool_outbox.load ~base_path:config.base_path ~keeper_name:keeper |> string_ok in
   check (list string) "fixture has no unread receipt bodies" []
-    (Keeper_codex_tool_outbox.receipt_ids outbox);
+    (Keeper_client_tool_outbox.receipt_ids outbox);
   with_intake env config (fun intake ->
   (* An inactive receipt hint is synthetic; the real queue/intake retires it
      without acknowledging any Codex result or the companion publication. *)

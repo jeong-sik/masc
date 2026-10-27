@@ -170,11 +170,6 @@ not mean the user created the tab. The same context survives partial inventories
 and document projection. These observations grant no adoption, takeover or close
 authority. The TUI changes are source integration; visible behavior is unverified.
 
-The Dashboard activity editor recognises the native Ego configuration table and
-preserves both named and numeric Space references while changing lane flags. It
-does not select, create or take control of a Space; complete configuration/path
-validation stays with the server preview.
-
 A pending input may be resumed through the private operator confirmation form.
 This records a human check/reset assertion for the exact connected Space and
 pending generation, not an SDK cleanup acknowledgement. It does not fix the

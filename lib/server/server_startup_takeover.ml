@@ -257,12 +257,15 @@ let base_path_contention_message ~base_path ~lock_path owner =
     | Owner_unnamed -> "The lease has no readable recorded PID"
   in
   Printf.sprintf
-    "Base path %s is locked. %s. Lock file: %s. Inspect the services or \
-     containers configured to use this base path on the owning host and stop \
-     the confirmed owner there, or choose a different --base-path. Do not \
-     signal the recorded PID or delete the lock file to bypass ownership. \
-     If lsof is installed on the owning host, optional open-file evidence: \
-     lsof %s (open files alone do not prove lock ownership)."
+    "Base path %s is locked. %s. Lock file: %s. When the owner is this \
+     workspace's server on this host, `masc restart` asks it to stop \
+     gracefully and starts this build in its place. Otherwise inspect the \
+     services or containers configured to use this base path on the owning \
+     host and stop the confirmed owner there, or choose a different \
+     --base-path. Do not signal the recorded PID or delete the lock file to \
+     bypass ownership. If lsof is installed on the owning host, optional \
+     open-file evidence: lsof %s (open files alone do not prove lock \
+     ownership)."
     base_path detail (Filename.quote lock_path) (Filename.quote lock_path)
 ;;
 
@@ -868,8 +871,32 @@ let parsed_pid_fd fd =
     None
 ;;
 
+(* What acquisition does when another process holds the kernel lock. *)
+type contention =
+  | Refuse_when_owned
+  | Wait_for_release of (base_path_owner -> unit)
+
+let rec lockf_until_granted fd =
+  try Unix.lockf fd Unix.F_LOCK 0 with
+  | Unix.Unix_error (Unix.EINTR, _, _) -> lockf_until_granted fd
+;;
+
+(* [F_TLOCK] first even when waiting, so the caller hears who it waits for
+   before the process blocks; [F_LOCK] then sleeps in the kernel until the
+   owner's descriptor closes, which every exit does, normal or forced. *)
+let lock_lease_file ~contention fd =
+  match contention with
+  | Refuse_when_owned -> Unix.lockf fd Unix.F_TLOCK 0
+  | Wait_for_release on_wait ->
+    (try Unix.lockf fd Unix.F_TLOCK 0 with
+     | Unix.Unix_error ((Unix.EACCES | Unix.EAGAIN), _, _) ->
+       on_wait (base_path_owner_of_recorded (parsed_pid_fd fd));
+       lockf_until_granted fd)
+;;
+
 let acquire_base_path_lock_with
       ?(before_lease_commit = ignore)
+      ?(contention = Refuse_when_owned)
       ~before_lease_open
       ~before_commit_identity_check
       ~before_runtime_identity_check
@@ -906,7 +933,7 @@ let acquire_base_path_lock_with
               let commit_outcome =
                 try
                   before_lease_commit fd;
-                  Unix.lockf fd Unix.F_TLOCK 0;
+                  lock_lease_file ~contention fd;
                   Ok ()
                 with
                 | Unix.Unix_error ((Unix.EACCES | Unix.EAGAIN), _, _) ->
@@ -1054,8 +1081,33 @@ let acquire_base_path_lock ~run_dir base_path =
     ~run_dir base_path
 ;;
 
+let acquire_base_path_lock_after_owner_exits ~run_dir ~on_wait base_path =
+  acquire_base_path_lock_with
+    ~contention:(Wait_for_release on_wait)
+    ~before_lease_open:(fun () -> ())
+    ~before_commit_identity_check:(fun () -> ())
+    ~before_runtime_identity_check:(fun () -> ())
+    ~run_dir base_path
+;;
+
 module For_testing = struct
-  let acquire_base_path_lock = acquire_base_path_lock_with
+  let acquire_base_path_lock
+        ?before_lease_commit
+        ~before_lease_open
+        ~before_commit_identity_check
+        ~before_runtime_identity_check
+        ~run_dir
+        base_path
+    =
+    acquire_base_path_lock_with
+      ?before_lease_commit
+      ~contention:Refuse_when_owned
+      ~before_lease_open
+      ~before_commit_identity_check
+      ~before_runtime_identity_check
+      ~run_dir
+      base_path
+  ;;
 
   (* The v2 lease file of an already-canonical BasePath, name-only: nothing is
      opened or locked. *)

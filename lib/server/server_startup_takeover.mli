@@ -119,6 +119,20 @@ val acquire_base_path_lock :
   string ->
   base_path_acquire_result
 
+(** {!acquire_base_path_lock}, except that a lease another process holds is
+    waited for instead of returned as [Base_path_already_owned]: [on_wait]
+    hears the number the lease file records, then the process sleeps in
+    [lockf] until the kernel grants the lock, which happens the moment the
+    owner's descriptor closes. Nothing is signalled and nothing ends the wait
+    but the owner's exit or a signal to this process. For an owner that was
+    already asked to stop, as [masc restart] does. A lease this process
+    already holds is still [Base_path_already_owned]. *)
+val acquire_base_path_lock_after_owner_exits :
+  run_dir:string ->
+  on_wait:(base_path_owner -> unit) ->
+  string ->
+  base_path_acquire_result
+
 val release_base_path_lease : base_path_lease -> unit
 
 (** Preserve an active lease across the caller's next [exec]. POSIX record

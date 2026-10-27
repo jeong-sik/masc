@@ -247,7 +247,8 @@ let test_read_only_install () = with_fixture (fun _ root binary _ ->
         (Installed.load (bound binary) "index.html")))
 let companion_fixture = ["masc-tui", "fixture tui"; "masc-browser-host", "fixture browser";
   "masc-deployment-preflight-helper", "fixture preflight";
-  "masc-check-runtime-deployment-preflight", "fixture gate"]
+  "masc-check-runtime-deployment-preflight", "fixture gate";
+  "masc-exec-ssh-bootstrap", "fixture ssh bootstrap"]
 let runtime_fixture = ["python/bin/python3", "fixture interpreter", 0o755;
   "runtime-provenance.json", "{}", 0o644; "lib/runtime.dylib", "fixture library", 0o755]
 let with_payload_fixture ?(change_receipt = Fun.id) f =

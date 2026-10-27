@@ -303,6 +303,9 @@ behavior for this extension remain unverified. See
 
 ## Goal-bound Space
 
+Goal Space binding is experimental: no installed Keeper has run Goal discovery
+through a binding yet.
+
 After `masc_browser_tabs` reports a live Ego connection, bind its observed
 client to an existing shared Goal with `masc_browser_session`:
 
@@ -312,8 +315,8 @@ client to an existing shared Goal with `masc_browser_session`:
 
 This records the original installation and numeric Space without taking control
 or creating a replacement. Repeating the same binding is idempotent; a different
-assignment or sharing the Space across Goals is refused. There is no unbind
-action on this tool. To read the stored binding, call:
+assignment or sharing the Space across Goals is refused. To read the stored
+binding, call:
 
 ```json
 {"action":"goal_status","goalId":"<existing-goal-id>"}
@@ -323,13 +326,26 @@ The status is stored metadata and does not prove that the browser is connected.
 If the bound connection is unavailable, initial Goal discovery refuses instead
 of selecting another browser.
 
+To remove a wrong binding, or to stop Goal discovery from using one, call:
+
+```json
+{"action":"unbind_goal","goalId":"<existing-goal-id>"}
+```
+
+The reply names the removed binding (`removed`, `null` when the Goal had none)
+and the `actor` who removed it. Unbinding changes no browser, Space or Page.
+Afterwards initial discovery chooses a browser as it does without a binding,
+and `bind_goal` can record a different Space for the Goal.
+
 ## Space control wait
 
 `masc_browser_act` with `action: "wait_for_control"`, the observed live
 `clientId` and optional `controlOptions: {interval, timeout}` invokes Ego's
 `TaskSpace.waitForControl()` inside the same agent-owned Space. Both options
-are positive finite milliseconds; omitted values retain SDK defaults. The SDK
-owns polling and its deadline. MASC adds no timer around that call.
+are positive finite milliseconds. The SDK owns polling and its deadline, and
+MASC adds no timer around that call, so the timeout must end inside the
+action's reply window: a longer one is refused before the wait starts, and an
+omitted one waits for that window. An omitted interval keeps the SDK default.
 
 This is an in-place SDK availability observation. It does not complete a login
 handoff, reclaim a user-held Space, or clear uncertain input release. A handed-off

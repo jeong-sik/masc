@@ -20,6 +20,12 @@ val bind : Workspace.config -> goal_id:string -> addon_instance_id:string ->
 (** Idempotent for the same Goal/controller/Space ID. Different assignments are
     refused. Holds the Goal lock before the binding-store lock. A mirror error
     after the authoritative commit is returned as a committed result. *)
+type unbinding = { removed : t option; mirror_error : string option }
+val unbind : Workspace.config -> goal_id:string -> (unbinding, error) result
+(** Removes the Goal's binding so a wrong one can be replaced. Holds the Goal
+    lock before the binding-store lock, as [bind] does. [removed = None] means
+    the Goal had no binding and nothing was written. A mirror error after the
+    authoritative commit is returned as a committed result. *)
 val resolve : t -> addon_instance_id:string -> Browser_lane.client_info list ->
   (Browser_lane.client_id, error) result
 (** Resolve the durable identity to the current observed connection, including

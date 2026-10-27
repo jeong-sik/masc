@@ -733,6 +733,26 @@ hooks = ["validate_input", "validate_output"]
     (Tool_result.is_success (goal_status Lane_addon_call_context.Operator));
   check bool "stored Goal status still requires verified authority" true
     (Tool_result.is_failed (goal_status Lane_addon_call_context.Anonymous));
+  let unbind principal=Browser_addon_tools.handle ~config ~access ~principal ~reserved:[]
+    ~keeper_name:None ~tool:Browser_capabilities.Session ~tool_name:"unbind-goal"
+    ~start_time:(Tool_timing.start ()) (`Assoc ["action",`String "unbind_goal";"goalId",`String goal]) in
+  check bool "unbinding requires verified authority" true
+    (Tool_result.is_failed (unbind Lane_addon_call_context.Anonymous));
+  check bool "an anonymous unbind leaves the binding stored" true
+    (goal_status Lane_addon_call_context.Operator |> Tool_result.data |> member "browserGoal"<>`Null);
+  let unbound=unbind Lane_addon_call_context.Operator in
+  check bool "the operator removes the binding and is named as its actor" true
+    (Tool_result.is_success unbound
+     && (Tool_result.data unbound |> member "removed" |> member "goalId")=`String goal
+     && (Tool_result.data unbound |> member "actor")<>`Null);
+  check bool "goal_status reads no binding after unbind" true
+    (goal_status Lane_addon_call_context.Operator |> Tool_result.data |> member "browserGoal"=`Null);
+  check bool "unbinding a Goal without a binding removes nothing" true
+    (unbind Lane_addon_call_context.Operator |> Tool_result.data |> member "removed"=`Null);
+  (match Browser_goal_space.bind config ~goal_id:goal ~addon_instance_id:other_id
+      ~space:{id=52;name="Replacement Space"} ~actor:"goal-fixture" with
+   | Ok committed -> check bool "after unbind the Goal accepts a different Space" true committed.created
+   | Error error -> fail (Browser_goal_space.error_message error));
   let next_pid=inspect replacement |> member "resource" |> member "pid" |> Yojson.Safe.Util.to_int in
   Eio.Fiber.first (fun () -> ignore (call next issue);fail "cancelled issue returned")
     (fun () -> wait clock (fun () -> Sys.file_exists (issued replacement)));

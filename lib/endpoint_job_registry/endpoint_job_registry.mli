@@ -100,6 +100,12 @@ val admission_id : record -> P.Id.t
 val revision : record -> int64
 val payload_uid : record -> int
 
+val launch_record : launch_intent -> record
+(** The opaque original captured when this permit was committed, without I/O
+    or a new permission. Trusted lifetime owners retain it for original-source
+    cancellation and result readback before a native supervisor exists.
+    Mutations still refresh and validate that exact source. *)
+
 val refresh : record -> (record, error) result
 (** Read only this opaque record's original registry/job and known launch under
     the same nonwaiting shared read lock as [load].

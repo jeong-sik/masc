@@ -74,6 +74,7 @@ let storage_path (storage : storage) = storage.directory
 let unlaunched_storage proof = proof.original_storage
 type launch_use = Unused | Callback_reserved | Retired_without_callback
 type launch_intent = { original : record; launch_id : P.Id.t; use : launch_use Atomic.t }
+let launch_record (intent : launch_intent) = intent.original
 type launch_state = Not_requested | Requested of P.Id.t
 let binding record = record.claim.binding
 let specification record = record.spec

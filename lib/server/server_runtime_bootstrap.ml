@@ -1101,6 +1101,7 @@ let initialize_owner_state_blocking
       domain_mgr
   in
   install_domain_pool_references domain_pool;
+  Systhread_host.start ();
   (match Runtime_agent_execution_runtime.initialize ~sw ~domain_mgr
       ~domain_count:(Domain_pool.domain_count domain_pool) with
    | Ok () ->

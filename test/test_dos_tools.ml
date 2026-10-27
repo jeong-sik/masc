@@ -2283,25 +2283,28 @@ let test_no_machine_names_the_autosave_after_an_eject () =
     names_it "peek" (dispatch ~base_path "masc_dos_peek" [ ("address", `String "0") ]))
 ;;
 
-(* After a restart the autosave is the way back: [masc_dos_restore] works with
-   no machine loaded. The guidance is a value first and a sentence second, so
-   the order the sentence gives is the order of the constructor, not of some
-   string edit. The previous autosave is part of the value: it is what a
-   restore of the autosave, or a load, would discard, and the only thing left
-   to resume when the autosave is gone. *)
+(* With no machine loaded the autosave is the way back: [masc_dos_restore]
+   works with no machine loaded. The guidance is a value first and a sentence
+   second, so the order the sentence gives is the order of the constructor,
+   not of some string edit. The previous autosave is part of the value: it is
+   what a load would discard, and the only thing left to resume when the
+   autosave is gone. *)
 let held_lookup ?(program = "echo.com") steps =
   Dos_lane.Autosave { Dos_lane.program; steps; saved_by = "liu-bei"; saved_at = 1.0 }
 ;;
 
 let discards_of = function
-  | Dos_tools.Restore_autosave { discards; _ } | Dos_tools.Unreadable_autosave { discards; _ } ->
+  | Dos_tools.Restore_autosave { discards; _ } | Dos_tools.Unreadable_autosave { discards; _ }
+  | Dos_tools.Restore_failed_at_start { discards; _ } ->
     discards
   | Dos_tools.Restore_previous_autosave _ | Dos_tools.Unreadable_previous_autosave _
   | Dos_tools.Load_a_program -> None
 ;;
 
 let test_no_machine_guidance_leads_with_the_autosave () =
-  let guide current previous = Dos_tools.no_machine_guidance { Dos_tools.current; previous } in
+  let guide current previous =
+    Dos_tools.no_machine_guidance ~start_failure:None { Dos_tools.current; previous }
+  in
   (match guide (held_lookup 120) Dos_lane.No_autosave with
    | Dos_tools.Restore_autosave { autosave; discards = None } ->
      check string "restore names the program" "echo.com" autosave.Dos_lane.program;
@@ -2309,15 +2312,15 @@ let test_no_machine_guidance_leads_with_the_autosave () =
    | Dos_tools.Restore_autosave { discards = Some _; _ } ->
      fail "with autosave-prev empty nothing is discarded"
    | Dos_tools.Unreadable_autosave _ | Dos_tools.Restore_previous_autosave _
-   | Dos_tools.Unreadable_previous_autosave _ | Dos_tools.Load_a_program ->
+   | Dos_tools.Unreadable_previous_autosave _ | Dos_tools.Restore_failed_at_start _ | Dos_tools.Load_a_program ->
      fail "a readable autosave must lead with a restore");
   (match guide (held_lookup 120) (held_lookup 90) with
    | Dos_tools.Restore_autosave { autosave; discards = Some (Dos_lane.Held previous) } ->
      check int "the autosave is still what resumes" 120 autosave.Dos_lane.steps;
-     check int "autosave-prev is what would be discarded" 90 previous.Dos_lane.steps
+     check int "autosave-prev is what a load would discard" 90 previous.Dos_lane.steps
    | Dos_tools.Restore_autosave _ | Dos_tools.Unreadable_autosave _
    | Dos_tools.Restore_previous_autosave _ | Dos_tools.Unreadable_previous_autosave _
-   | Dos_tools.Load_a_program -> fail "a readable autosave-prev is at stake");
+   | Dos_tools.Restore_failed_at_start _ | Dos_tools.Load_a_program -> fail "a readable autosave-prev is at stake");
   (match discards_of (guide (held_lookup 120) (Dos_lane.Autosave_unreadable "damaged")) with
    | Some (Dos_lane.Held_unreadable reason) ->
      check string "with the reason" "damaged" reason
@@ -2326,7 +2329,7 @@ let test_no_machine_guidance_leads_with_the_autosave () =
    | Dos_tools.Unreadable_autosave { reason = "damaged"; discards = None } -> ()
    | Dos_tools.Unreadable_autosave _ | Dos_tools.Restore_autosave _
    | Dos_tools.Restore_previous_autosave _ | Dos_tools.Unreadable_previous_autosave _
-   | Dos_tools.Load_a_program -> fail "an unreadable autosave cannot be restored");
+   | Dos_tools.Restore_failed_at_start _ | Dos_tools.Load_a_program -> fail "an unreadable autosave cannot be restored");
   (match discards_of (guide (Dos_lane.Autosave_unreadable "damaged") (held_lookup 90)) with
    | Some (Dos_lane.Held previous) -> check int "autosave-prev is at stake" 90 previous.Dos_lane.steps
    | Some (Dos_lane.Held_unreadable _) | None -> fail "a readable autosave-prev is at stake");
@@ -2334,33 +2337,65 @@ let test_no_machine_guidance_leads_with_the_autosave () =
    | Dos_tools.Restore_previous_autosave status ->
      check int "with only autosave-prev left, it is what resumes" 90 status.Dos_lane.steps
    | Dos_tools.Restore_autosave _ | Dos_tools.Unreadable_autosave _
-   | Dos_tools.Unreadable_previous_autosave _ | Dos_tools.Load_a_program ->
+   | Dos_tools.Unreadable_previous_autosave _ | Dos_tools.Restore_failed_at_start _ | Dos_tools.Load_a_program ->
      fail "autosave-prev alone must lead with its restore");
   (match guide Dos_lane.No_autosave (Dos_lane.Autosave_unreadable "damaged") with
    | Dos_tools.Unreadable_previous_autosave "damaged" -> ()
    | Dos_tools.Unreadable_previous_autosave _ | Dos_tools.Restore_autosave _
    | Dos_tools.Unreadable_autosave _ | Dos_tools.Restore_previous_autosave _
-   | Dos_tools.Load_a_program -> fail "an unreadable autosave-prev alone is reported as such");
+   | Dos_tools.Restore_failed_at_start _ | Dos_tools.Load_a_program -> fail "an unreadable autosave-prev alone is reported as such");
   match guide Dos_lane.No_autosave Dos_lane.No_autosave with
   | Dos_tools.Load_a_program -> ()
   | Dos_tools.Restore_autosave _ | Dos_tools.Unreadable_autosave _
-  | Dos_tools.Restore_previous_autosave _ | Dos_tools.Unreadable_previous_autosave _ ->
+  | Dos_tools.Restore_failed_at_start _ | Dos_tools.Restore_previous_autosave _
+  | Dos_tools.Unreadable_previous_autosave _ ->
     fail "with nothing saved, loading is the only way forward"
 ;;
 
+(* A start that could not restore the autosave it still finds: the guidance
+   gives the reason and does not lead with that restore again. *)
+let test_no_machine_guidance_after_a_failed_start () =
+  let guide current previous =
+    Dos_tools.no_machine_guidance ~start_failure:(Some "cut short") { Dos_tools.current; previous }
+  in
+  (match guide (held_lookup 120) (held_lookup 90) with
+   | Dos_tools.Restore_failed_at_start { reason; discards = Some (Dos_lane.Held previous) } ->
+     check string "the start's reason" "cut short" reason;
+     check int "and what a load would discard" 90 previous.Dos_lane.steps
+   | Dos_tools.Restore_failed_at_start _ | Dos_tools.Restore_autosave _
+   | Dos_tools.Unreadable_autosave _ | Dos_tools.Restore_previous_autosave _
+   | Dos_tools.Unreadable_previous_autosave _ | Dos_tools.Load_a_program ->
+     fail "a readable autosave the start could not restore is not offered again");
+  match guide (Dos_lane.Autosave_unreadable "damaged") Dos_lane.No_autosave with
+  | Dos_tools.Unreadable_autosave { reason = "damaged"; discards = None } -> ()
+  | Dos_tools.Unreadable_autosave _ | Dos_tools.Restore_failed_at_start _
+  | Dos_tools.Restore_autosave _ | Dos_tools.Restore_previous_autosave _
+  | Dos_tools.Unreadable_previous_autosave _ | Dos_tools.Load_a_program ->
+    fail "an unreadable autosave is reported with its own reason"
+;;
+
+(* With both autosave files on disk, so that the command named here is one a
+   consent rule could refuse: it is not, because restoring the autosave
+   discards nothing, and autosave-prev is untouched by its first save. *)
 let test_a_refusal_with_no_machine_carries_the_restore_command () =
   with_workspace (fun base_path ->
     install_program ~base_path "echo.com" echo_com;
     boot ~base_path "echo.com";
+    ignore (dispatch ~base_path "masc_dos_step" [ ("steps", `Int 1_000) ] : Tool_result.result);
+    ignore (dispatch ~base_path "masc_dos_load" [ ("program", `String "echo.com") ] : Tool_result.result);
     eject ();
+    let previous = Digest.file (prev_file ~base_path) in
     let refused = dispatch ~base_path "masc_dos_screen" [] in
     refused_before_any_effect "a screen with no machine" refused;
     check bool "the data names the restore command" true
       (member "resume" (autosave_field refused)
        = Some (`String "masc_dos_restore slot=autosave"));
-    (* The command the refusal names works with no machine loaded. *)
+    (* The command the refusal names works as named, with no machine loaded. *)
     check bool "and that command restores" true
-      (is_completed (restore_as ~base_path "autosave")))
+      (is_completed (dispatch ~base_path "masc_dos_restore" [ ("slot", `String "autosave") ]));
+    ignore (dispatch ~base_path "masc_dos_step" [ ("steps", `Int 1_000) ] : Tool_result.result);
+    check string "and its first save leaves autosave-prev as it was" previous
+      (Digest.file (prev_file ~base_path)))
 ;;
 
 (* Right after a restart with only autosave-prev left: the refusal names it
@@ -2419,12 +2454,17 @@ let test_restore_asks_before_discarding_the_previous_autosave () =
     check string "the running machine is the same one" machine (mark ()).Dos_lane.incarnation;
     check bool "a restore that declines is refused too" false
       (is_completed (restore_quick [ ("discard_previous_autosave", `Bool false) ]));
-    check bool "a restore of the autosave itself asks as well" false
-      (is_completed (dispatch ~base_path "masc_dos_restore" [ ("slot", `String "autosave") ]));
     check bool "a slot that does not exist is reported, not asked about" true
       (contains "never-saved"
          (Tool_result.message
             (dispatch ~base_path "masc_dos_restore" [ ("slot", `String "never-saved") ])));
+    (* The autosave's machine carries on writing the autosave, as uninterrupted
+       play does, so it asks nothing and the campaign stays in autosave-prev. *)
+    check bool "a restore of the autosave asks nothing" true
+      (is_completed (dispatch ~base_path "masc_dos_restore" [ ("slot", `String "autosave") ]));
+    ignore (dispatch ~base_path "masc_dos_step" [ ("steps", `Int 1_000) ] : Tool_result.result);
+    check string "and its save leaves autosave-prev byte for byte as it was" previous_before
+      (Digest.file (prev_file ~base_path));
     check bool "with consent the restore goes through" true
       (is_completed (restore_quick [ ("discard_previous_autosave", `Bool true) ])))
 ;;
@@ -2767,6 +2807,8 @@ let () =
             test_no_machine_names_the_autosave_after_an_eject
         ; test_case "no-machine guidance leads with the autosave" `Quick
             test_no_machine_guidance_leads_with_the_autosave
+        ; test_case "no-machine guidance after a failed start" `Quick
+            test_no_machine_guidance_after_a_failed_start
         ; test_case "a no-machine refusal carries the restore command" `Quick
             test_a_refusal_with_no_machine_carries_the_restore_command
         ; test_case "inventory names the autosave" `Quick test_inventory_names_the_autosave

@@ -86,6 +86,11 @@ let create ~base_path () =
     let parse_controller value =
       Validation.Id_shape.parse value |> Result.map (fun _ -> value)
   end) in
+  (* Before the first call: a worker that replaces another one, after a server
+     restart or an image upgrade, picks the game up from its autosave instead
+     of leaving every guest a no_machine refusal that only a controller holder
+     can answer. The outcome is on the lane's activity feed. *)
+  ignore (Machine.resume_autosave ~base_path : Dos_lane.resume);
   let mutex = Eio.Mutex.create () in
   let holder () =
     match Machine.off_domain Dos_lane.screen with

@@ -215,7 +215,7 @@ the other Keeper on which slots each of you overwrites.
 Load, at the title menu `어느 것을 하겠습니까(1-3)?`: `2`, `enter` (데이터 로드), then the
 slot number, `enter`. The screen goes black while the game reads; call
 `masc_dos_step` until it settles, then `space`. After a server restart with
-no `autosave` to restore, this is the way back: boot, pass the copy
+no `autosave` to resume, this is the way back: boot, pass the copy
 protection, then `2`.
 
 ## The ending

@@ -22,7 +22,7 @@ Keeper는 문서를 읽은 뒤 받은 상대 위치와 읽었던 문장을 함�
 
 `dashboard/src/lib/artifact-shared-document.ts`가 브라우저와 변환 프로세스에서 쓰는 Yjs 로직입니다. `src/workers/artifact-document.ts`는 stdin으로 JSON 요청 하나를 받아 stdout으로 결과 하나를 반환합니다. 변환 프로세스에는 파일 경로·네트워크 주소·인증 정보·작성자 권한을 주지 않습니다. OCaml 호출자가 작업 공간·인증·문서 잠금·저장·전달을 담당합니다.
 
-`scripts/install-artifact-document.sh`로 self-contained transformer를 설치합니다. Node와 Dashboard의 고정 의존성이 필요합니다. 생성한 bundle은 커밋하지 않습니다. 설치본은 bundle 해시별 디렉터리에 보관하고 launcher를 교체합니다. 이 설치는 서버 바이너리를 갱신하지 않습니다.
+`scripts/install-artifact-document.sh`로 self-contained transformer를 설치합니다. Node와 Dashboard의 고정 의존성이 필요합니다. 생성한 bundle은 커밋하지 않습니다. 설치본은 bundle 해시별 디렉터리에 보관하고 launcher를 교체합니다. 이 설치는 서버 바이너리를 갱신하지 않습니다. OCaml 호출자는 변환 프로세스에 30초의 실행 상한을 두고, 상한을 넘은 호출은 문서 오류가 아니라 Unavailable로 되돌려 클라이언트가 재시도할 수 있게 합니다.
 
 ## 현재 구현 범위
 

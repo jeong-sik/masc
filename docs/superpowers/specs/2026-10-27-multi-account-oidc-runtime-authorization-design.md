@@ -85,7 +85,7 @@ WorkspaceMembership {
 ```
 
 - ID는 불변이며 삭제 후 재사용하지 않는다. Human의 `user_id`는 OS CSPRNG가 만든 128비트 이상의 값이고 `(iss, sub)`나 email 같은 외부 값에서 유도하지 않는다. principal을 만들 때는 writer lock 안에서 현재 principal과 revocation ledger의 `Delete` 기록 양쪽에 같은 ID가 없는지 검사한다. `user_id`가 겹치면 새로 뽑고, 이름으로 정하는 `service_id`가 겹치면 등록을 거부한다. ledger를 읽지 못하면(`AuthorizationUncertain`) principal을 만들지 않는다.
-- Principal의 상태는 `Active | Disabled`이고 삭제된 principal은 레코드가 없다. 삭제는 revocation ledger의 `Delete` 기록(ID만)과 `authz.jsonl`의 `Delete` 사건으로 남는다. `(iss, sub)`는 `authz.jsonl`의 사건에만 싣는다. 이 로그는 결속 사건에서 이미 같은 값을 담고 있어서 삭제 사건이 새 외부 식별자를 더 남기지 않는다. 삭제된 principal과 같은 `(iss, sub)`로 로그인하면 초대받은 적 없는 사람과 같게 다룬다. 새 초대가 있어야 새 principal이 생기고, 새 principal은 옛 principal의 grant·산출물·표시를 이어받지 않는다. 입장하는 쪽에 삭제 이력을 보이는 방법은 §5.1-6이다.
+- Principal의 상태는 `Active | Disabled`이고 삭제된 principal은 레코드가 없다. 삭제는 revocation ledger의 `Delete` 기록(ID만)과 `authz.jsonl`의 `Delete` 사건으로 남는다. `(iss, sub)`는 `authz.jsonl`의 사건에만 싣는다. `authz.jsonl`은 purge 대상이 아니고 결속 사건에서 이미 같은 값을 담고 있어서, 삭제 사건이 새 외부 식별자를 더 남기지 않는다. 삭제된 principal과 같은 `(iss, sub)`로 로그인하면 초대받은 적 없는 사람과 같게 다룬다. 새 초대가 있어야 새 principal이 생기고, 새 principal은 옛 principal의 grant·산출물·표시를 이어받지 않는다. 입장하는 쪽에 삭제 이력을 보이는 방법은 §5.1-6이다.
 - Dashboard Admin은 활성 Human principal과 활성 Admin_assignment가 필요하다. 비밀 제시로 role을 만들지 않는다. Admin_assignment의 생성·회수·변경은 `role_epoch`로 기록하고 Admin 경로의 stream·관리 실행만 재평가한다. 개인 Self Runtime은 role 변경만으로 무효화하지 않는다.
 - Service/Keeper에는 일반 Admin role이 없다. 필요한 경우 `ManageMachineShared`, `AdminDisableBlock`, `ReadAuditMetadata` 같은 닫힌 개별 권한만 부여한다.
 - Admin은 다른 사람의 credential·private Runtime을 사용하지 못한다. Disable/Block/감사와 Service-owned 공유 관리만 한다. 점유 중인 dispatch의 `Executor_teardown`은 `AdminDisableBlock`에 포함한다.
@@ -358,12 +358,12 @@ System_migration   -> migration 진단 record만
 
 ```text
 Lease_state =
-  Issued | Lease_dispatched | Completed
+  Issued | Lease_dispatched | Completed of (Effected | Not_started)
   | Revoked of (Cancelled | Teardown | Grant_revoked)
   | Outcome_unknown
 ```
 
-- 발급은 `with_lease` 범위 안에서만 한다. attempt 종료·fiber 취소·executor teardown 중 어느 경로로 나가도 범위 출구에서 `Issued`는 `Revoked`로, `Lease_dispatched`는 종단 기록이 있으면 `Completed`, 없으면 `Outcome_unknown`으로 닫는다. 종단 기록이 실패하면 삼키지 않고 `Outcome_unknown`으로 올린다. `Revoked`의 하위 값은 닫은 원인이 정한다. attempt 종료·fiber 취소·`Effect_cancel`은 `Cancelled`, `Executor_teardown`과 재기동은 `Teardown`, scoped epoch 회수(§8.1)는 `Grant_revoked`다. 효과가 시작되지 않은 `Issued` lease는 어느 경로로 닫혀도 `Outcome_unknown`이 되지 않고 reconciliation 질문도 만들지 않는다.
+- 발급은 `with_lease` 범위 안에서만 한다. attempt 종료·fiber 취소·executor teardown 중 어느 경로로 나가도 범위 출구에서 `Issued`는 `Revoked`로, `Lease_dispatched`는 종단 기록이 있으면 `Completed`(효과가 나갔으면 `Effected`, 나가기 전에 실패했으면 `Not_started`), 없으면 `Outcome_unknown`으로 닫는다. 종단 기록이 실패하면 삼키지 않고 `Outcome_unknown`으로 올린다. `Revoked`의 하위 값은 닫은 원인이 정한다. attempt 종료·fiber 취소·`Effect_cancel`은 `Cancelled`, `Executor_teardown`과 재기동은 `Teardown`, scoped epoch 회수(§8.1)는 `Grant_revoked`다. 효과가 시작되지 않은 `Issued` lease는 어느 경로로 닫혀도 `Outcome_unknown`이 되지 않고 reconciliation 질문도 만들지 않는다.
 - 효과는 `consume`으로만 일으킨다. `consume`은 `Issued`에서 한 번만 성공하고 `Lease_dispatched`를 동기 commit한 뒤에 효과를 낸다. 같은 lease의 두 번째 `consume`과 `Revoked` lease의 `consume`은 거부하고 audit record를 남긴다.
 - 재기동 때 `Issued`로 남은 lease는 질문 없이 `Revoked(Teardown)`로 닫는다. `Lease_dispatched`로 남은 lease만 `Outcome_unknown`이 되어 §9의 확인 대상이 된다.
 
@@ -376,7 +376,7 @@ Lease_state =
 
 Codex/Claude Code는 credential을 CLI가 읽고 한 dispatch에서 여러 요청과 내장 도구를 실행한다. 따라서 `Official_client_dispatch`의 단위는 **인증된 CLI process incarnation 하나 + dispatch 하나**이며 `dispatch_id`로 구분한다. Request_sent·한 응답 완료·MASC tool lease를 이 경로에 적용하지 않는다.
 
-broker는 `Lease_dispatched` 기록 뒤에만 account-home을 최소 연결하고, 일반 회수에서도 process tree 종료와 account-home 연결 해제를 실행한다. 연결이나 spawn이 CLI 실행 전에 실패하면 broker가 그 실패를 종단 기록으로 남겨 lease를 `Completed`(시작 전 실패)로 닫고, `Outcome_unknown`도 확인 질문도 만들지 않는다. 다음 입력은 새 incarnation·새 lease다.
+broker는 `Lease_dispatched` 기록 뒤에만 account-home을 최소 연결하고, 일반 회수에서도 process tree 종료와 account-home 연결 해제를 실행한다. 연결이나 spawn이 CLI 실행 전에 실패하면 broker가 그 실패를 종단 기록으로 남겨 lease를 `Completed(Not_started)`로 닫고 attempt는 `Failed(Not_started)`로 끝낸다. `Outcome_unknown`도 확인 질문도 만들지 않는다. 그 기록을 쓰지 못하면 시작 전이었음을 증명할 수 없으므로 §7.1대로 `Outcome_unknown`이다. 다음 입력은 새 incarnation·새 lease다.
 
 공유/Delegated official 실행은 다음 둘 중 하나를 **현재 후보의 레인 실측으로 증명할 때만** 허용한다.
 
@@ -469,7 +469,7 @@ purge는 지정과 삭제가 따로다. 삭제된 initiator의 컨텍스트·pro
 2. `attestation = Spawn_nonce | Mtls | Os_identity | Broker_attestation`이다. Spawn_nonce는 전용 IPC의 단일 사용자 개발 전용이며 다계정에서 허용하지 않는다. 다계정은 lane별 VM instance ID·OS process/boot identity·broker run ID의 실제 출처를 요구하고 미증명 lane은 실행 불가다. 격리·attestation을 먼저 완료한다.
 3. worker 종료·channel closed·supervisor exit 같은 실제 사건으로 미종료 lease를 §7.1의 출구 규칙으로 닫는다(`Lease_dispatched`만 `Outcome_unknown`이고 `Issued`는 `Revoked(Teardown)`이다). 임의의 N초 heartbeat TTL은 없다. 침묵하는 dispatch는 Runtime의 `turn-timeout-s` 선언 또는 §9.1의 `Executor_teardown`으로 끝낸다. 다음 worker가 예전 lease를 재사용하지 않는다.
 4. 취소는 `Effect_cancel | Executor_teardown`이다. per-effect shim이 없으면 executor 전체를 종료하고 영향 lease를 §7.1의 출구 규칙으로 닫는다(`Lease_dispatched`만 `Outcome_unknown`이고 `Issued`는 `Revoked(Teardown)`이다). 다른 principal은 종료하지 않는다. process tree SIGTERM 후 종료가 확인되지 않으면 SIGKILL/VM teardown을 사용하며 미증명 lane은 제외한다.
-5. `Outcome_unknown`은 `Failed(Outcome_unknown)`이라는 attempt 종단이며 AuthorizationUncertain보다 우선한다. 복원 Cleared가 이전 lease를 살리지 않는다. attempt가 `Outcome_unknown`이 되는 것은 `Lease_dispatched` lease가 종단 기록 없이 닫힐 때뿐이다(§7.1). 효과가 시작되기 전에 끝난 attempt는 `Outcome_unknown`이 아니고 확인 질문도 만들지 않는다. 시작 전에 취소된 것은 `Cancelled_before_effect`다(§9.1).
+5. `Outcome_unknown`은 `Failed(Outcome_unknown)`이라는 attempt 종단이며 AuthorizationUncertain보다 우선한다. 복원 Cleared가 이전 lease를 살리지 않는다. attempt가 `Outcome_unknown`이 되는 것은 `Lease_dispatched` lease가 종단 기록 없이 닫힐 때뿐이다(§7.1). 효과가 시작되기 전에 끝났고 그것이 기록된 attempt는 `Outcome_unknown`이 아니며 확인 질문도 만들지 않는다. 시작 전에 취소된 attempt의 종단은 `Cancelled_before_effect`이고 시작 전에 실패한 attempt의 종단은 `Failed(Not_started)`다. 둘 다 attempt의 종단이며 lease 상태가 아니다. 같은 사건에서 `Issued` lease는 §7.1대로 `Revoked`로, 실행 전에 실패한 `Lease_dispatched` lease는 `Completed(Not_started)`로 닫힌다.
    - 전송 전이라면 현재 권한으로 새 attempt를 만들 수 있다.
    - 전송된 provider 요청은 idempotent로 단정하지 않는다. 기존 dispatch 정책이 새 lease·새 인가·duplicate_possible로 새 attempt를 만들 수는 있지만 exactly-once는 주장하지 않는다.
    - `Inference_only`가 아닌 official dispatch나 Non_idempotent/불명 tool effect는 외부 결과 확인 뒤 새 attempt를 만든다. idempotency key나 외부 dedup 증거가 있는 tool만 자동 새 attempt를 허용한다.
@@ -479,7 +479,7 @@ purge는 지정과 삭제가 따로다. 삭제된 initiator의 컨텍스트·pro
 
 같은 ProviderAccount의 official account-home은 single-flight다. credential 파일 동시 갱신 가능성을 가정하지 않고 한 incarnation만 연결한다. 대기자는 credential 없이 기다리고 lock을 얻은 뒤 writer lock에서 현재 권한을 다시 검사한 뒤 mount/spawn한다. 회수되면 대기를 취소하고 authz writer lock을 잡은 채 account-home lock을 기다리지 않는다.
 
-- 대기열은 ProviderAccount별 단일 FIFO다. owner와 `managed_by=owner`인 Keeper/Service도 같은 줄에 서며 순위 가중치나 선점 횟수 규칙은 없다. owner는 자기 ProviderAccount의 점유 중인 dispatch를 `Executor_teardown`으로 끊을 수 있고(끊긴 dispatch의 `Lease_dispatched` lease는 `Outcome_unknown`이다, §7.1), 대기 중인 grantee 항목도 취소할 수 있다. 취소된 항목은 `Owner_cancelled`로 종단하고 failover 규칙은 그대로다. owner는 대기열의 grantee·도착 시각·dispatch_id를 보지만 prompt는 보지 못한다. 대기 항목은 재기동을 넘지 않는다. 효과가 시작되기 전이므로 `Cancelled_before_effect`로 닫는다(`Outcome_unknown`이 아니다). 영속 work(schedule·retry·resume)는 새 attempt가 다시 줄을 서고, 호출자가 연결돼 있던 직접 HTTP/WS 요청은 다시 줄서지 않으며 initiator에게 `Cancelled_before_effect`로 보인다.
+- 대기열은 ProviderAccount별 단일 FIFO다. owner와 `managed_by=owner`인 Keeper/Service도 같은 줄에 서며 순위 가중치나 선점 횟수 규칙은 없다. owner는 자기 ProviderAccount의 점유 중인 dispatch를 `Executor_teardown`으로 끊을 수 있고(끊긴 dispatch의 `Lease_dispatched` lease는 `Outcome_unknown`이다, §7.1), 대기 중인 grantee 항목도 취소할 수 있다. 취소된 항목은 `Owner_cancelled`로 종단하고 failover 규칙은 그대로다. owner는 대기열의 grantee·도착 시각·dispatch_id를 보지만 prompt는 보지 못한다. 대기 항목은 재기동을 넘지 않고, 재기동 때 사라지는 항목은 효과가 시작되기 전이므로 `Cancelled_before_effect`로 닫는다(`Outcome_unknown`이 아니다, §9-5). `Owner_cancelled`는 owner가 취소한 항목의 종단이며 이 경우와 겹치지 않는다. 영속 work(schedule·retry·resume)는 새 attempt가 다시 줄을 서고, 호출자가 연결돼 있던 직접 HTTP/WS 요청은 다시 줄서지 않으며 initiator에게 `Cancelled_before_effect`로 보인다.
 - `account_busy`에는 대기 수와 `Account_recovery_pending`을 구분해 보인다. owner와 Admin에게는 holder의 dispatch_id, 점유 시작 시각, 마지막 출력 이벤트 시각(관측값이며 판정 기준이 아니다)을 보여 주고 prompt·credential은 노출하지 않는다. grantee에게는 사유 코드만 보이고 항목 ID는 숨긴다. owner가 부재하면 Admin이 `AdminDisableBlock`으로 holder를 `Executor_teardown`한다.
 - 침묵 감시는 기존 Runtime의 `turn-timeout-s` 선언을 그대로 쓰고 새 값을 만들지 않는다. 선언자는 Runtime owner다. 선언이 없으면 기존 기본값이 서고, 0 이하로 선언하면 마감이 없다. 마감이 오면 기존 `Timeout` typed 실패로 `Executor_teardown`이 되고, 그때 `Lease_dispatched`인 lease는 `Outcome_unknown`이 된다(§7.1). 마감이 없는 Runtime에서 dispatch가 멈추면 `account_busy`의 holder 정보를 보고 owner나 Admin이 하는 `Executor_teardown`이 출구다. 출력을 조금씩 흘려 이 감시를 피하는 holder도 같은 출구로 끊는다. 알려진 한계다.
 - account-home은 credential과 state로 나눠 다룬다. credential은 ProviderAccount당 하나이고 한 번에 한 incarnation만 쓴다. 대화 기록·cache·프로젝트 설정 같은 state는 executor principal별 디렉터리에 둔다. 다음 incarnation은 이전 executor의 state를 읽지 못해야 한다. 분리 방식은 lane마다 달라도 되지만(`Runtime_muse_home`은 managed credential generation과 native session/data 디렉터리를 나눈다) §7.2의 증명에 이 분리가 들어가야 한다.
@@ -589,7 +589,7 @@ Single_user 모드의 현재 동작은 바꾸지 않는다. 계정당 동시 dis
 - 재기동으로 대기열이 사라지면 영속 work는 새 attempt로 다시 줄을 서고, 직접 HTTP/WS 요청의 initiator는 `Cancelled_before_effect`를 본다.
 - A의 Keeper 기억에 있는 값이 B의 dispatch 출력에 나오지 않고, B의 prompt가 다음 initiator C의 dispatch에 보이지 않는다.
 - dispatch MCP credential 회수 뒤 Read_only/Effecting 호출이 모두 거부되고, Read_only에는 lease append가 없어도 인가·출력 ACL이 유지된다.
-- lease가 취소·teardown·크래시로 끝나는 모든 경로에서 `Issued`가 남지 않고, 같은 lease로 효과가 두 번 나가지 않는다. `Issued` lease는 어느 경로에서도 `Outcome_unknown`이 되지 않고 reconciliation 질문을 만들지 않는다. `Lease_dispatched` 기록 뒤 CLI 실행 전에 mount나 spawn이 실패해도 `Outcome_unknown`이 아니고 질문이 없다.
+- lease가 취소·teardown·크래시로 끝나는 모든 경로에서 `Issued`가 남지 않고, 같은 lease로 효과가 두 번 나가지 않는다. `Issued` lease는 어느 경로에서도 `Outcome_unknown`이 되지 않고 reconciliation 질문을 만들지 않는다. `Lease_dispatched` 기록 뒤 CLI 실행 전에 mount나 spawn이 실패하면 lease는 `Completed(Not_started)`이고 attempt는 `Failed(Not_started)`이며 질문이 없다. 그 종단 기록을 쓰지 못하면 `Outcome_unknown`이다.
 - 300 Keeper 부하에서 authorize/append/flush p99·snapshot 지연·복원 직후 일제 기상·owner/grantee 대기 수·credential/process/filesystem/trace 격리를 실측한다. 권한 검사를 생략해 목표를 맞추지 않는다. 먼저 Single_user의 계정당 동시 official dispatch 수와 지연을 기준선으로 재고, 같은 부하의 대기 시간을 다계정 Single_flight에서 잰다. §8.2의 writer lock 구역 점유 시간(`Intent_pending` 쓰기부터 `Committed` 갱신까지)도 직접 잰다.
 
 ## 13. 검토 요청과 미검증

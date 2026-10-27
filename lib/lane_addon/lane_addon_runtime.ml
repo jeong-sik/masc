@@ -188,6 +188,11 @@ type entry = {
   mutable state : Lifecycle.state; mutable authority : Lifecycle.authority option;
   mutable resolved_image : Lane_addon_engine.image_identity option;
   mutable seq : int; mutable output : output;
+  (* An observation file already renamed into place that no binding names
+     yet, with how its commit settles the lane state. It is never rewritten,
+     and it is published only when a binding write names it (RFC
+     lane-addon-observation-commits-at-the-binding). *)
+  mutable held : (int * output * (Lifecycle.state -> Lifecycle.state)) option;
   mutable connection : owned_connection option; mutable stopping : bool;
   mutable cleanup_running : bool; changed : Eio.Condition.t; mutable wake : unit Eio.Promise.t;
   mutable resolver : unit Eio.Promise.u; mutable pending : observation_request;
@@ -510,17 +515,19 @@ let authorize_retained_read ~bindings ~access json =
        | Ok visibility -> require_read access visibility
        | Error reason -> Error (retained_fault_message reason))
   | _ -> Error "retained instance identity is ambiguous or absent"
-let entry_json e =
+(* [persist] writes the binding a commit proposes; every other reader sees the
+   published state through [entry_json]. *)
+let entry_json_with ~state ~seq ~(output : output) e =
   `Assoc ["instance_id", `String e.instance_id; "incarnation", `String e.instance_id;
     "action_schema", (match e.connection with None -> `Null
       | Some c -> Option.fold ~none:`Null ~some:Fun.id (c.worker.action_schema ()));
     "run_id", `String e.run_id;
     "addon_id", `String e.package.id; "title", `String e.package.title;
-    "revision", `String e.package.revision; "phase", phase_to_json (phase_of e);
-    "lifecycle", Lifecycle.state_to_json e.state;
+    "revision", `String e.package.revision; "phase", phase_to_json (Lifecycle.project state);
+    "lifecycle", Lifecycle.state_to_json state;
     "execution_authority", (match e.authority with None -> `Null | Some authority -> Lifecycle.authority_to_json authority);
     "resolved_image", Option.fold ~none:`Null ~some:Lane_addon_engine.image_identity_to_json e.resolved_image;
-    "observation_seq", `Int e.seq; "rows_count", `Int (List.length e.output.rows);
+    "observation_seq", `Int seq; "rows_count", `Int (List.length output.rows);
     "observation_pending", `Bool (match e.pending with
       | Observe_now | Refresh_sources -> true | Run_actions | Idle -> false); "coalesced_wakes", `Int e.coalesced_wakes;
     "unchanged_source_refreshes", `Int e.unchanged_source_refreshes;
@@ -529,6 +536,7 @@ let entry_json e =
     "visibility", visibility_to_json e.visibility;
     "configuration", Option.fold ~none:`Null ~some:configuration_owner_json e.configuration;
     "resource", (match e.connection with None -> `Null | Some c -> Lifecycle.resource_to_json c.worker.resource)]
+let entry_json e = entry_json_with ~state:e.state ~seq:e.seq ~output:e.output e
 (* A released worker that never held a resource and never committed an
    observation leaves nothing for Inspect, Slice or Evidence.  When
    its start returned [Error], the masc:lane:resource:acquire_failed event in
@@ -550,16 +558,6 @@ let leaves_no_record ~seq ~resource = function
       seq=0 && Option.is_none resource
   | Lifecycle.Detached (Lifecycle.Native_retained _)
   | Lifecycle.Attached | Lifecycle.Observing | Lifecycle.Failed _ | Lifecycle.Detaching _ -> false
-let persist m e = Eio.Mutex.use_ro e.persistence_mutex (fun () ->
-  (* Capture mutable state on the owning domain after serializing writes.
-     The I/O thread sees only the immutable snapshot. Every write, including
-     a late one after detach, derives the file from the same state under this
-     mutex, so the last write leaves the record that state calls for. *)
-  if leaves_no_record ~seq:e.seq ~resource:(Option.map (fun c -> c.worker.resource) e.connection) e.state
-  then offload (fun () -> Lane_addon_store.remove_binding m.store ~instance_id:e.instance_id)
-  else
-    let json = entry_json e in
-    offload (fun () -> Lane_addon_store.save_binding m.store ~instance_id:e.instance_id json))
 (* [e.wake] is resolved exactly while [e.pending <> Idle || e.host_due]. *)
 let signalled e = e.pending<>Idle || e.host_due
 let wake ?(request=Observe_now) e =
@@ -715,11 +713,59 @@ let wake_dependents m producer =
       && depends_on ~consumer:e ~producer then wake ~request:Refresh_sources e)
 (* The failure replaces the current one and keeps the earliest different cause,
    so a cleanup that fails afterwards does not erase why the worker failed. *)
-let fail_state (e : entry) cause = match e.state with
+let failed_state state cause = match state with
   | Lifecycle.Failed previous | Lifecycle.Detaching (Some previous) ->
       Lifecycle.Failed (Lifecycle.fail_again previous cause)
   | Lifecycle.Attached | Lifecycle.Observing | Lifecycle.Detaching None | Lifecycle.Detached _ ->
       Lifecycle.Failed (Lifecycle.failed cause)
+let fail_state (e : entry) cause = failed_state e.state cause
+type binding_writer = store:Lane_addon_store.t -> instance_id:string -> Yojson.Safe.t ->
+  (unit, Lane_addon_store.binding_write_error) result
+let binding_writer_key : binding_writer Eio.Fiber.key = Eio.Fiber.create_key ()
+(* Every binding write names the held observation, if any, so the write that
+   lands is its commit (RFC lane-addon-observation-commits-at-the-binding).
+   A write that fails after its rename is visible and commits too: the staged
+   writer's contract converges memory before propagating [After_rename].
+   Whichever write commits, the commit converges, applies the held settle to
+   the state current at that moment and wakes dependents before this mutex
+   is released, with no yield in between. So no reader sees the commit
+   without its wake, no later write names an earlier sequence, and a state
+   change made while the write was in flight is not overwritten. *)
+let persist m e = Eio.Mutex.use_ro e.persistence_mutex (fun () ->
+  (* Capture mutable state on the owning domain after serializing writes.
+     The I/O thread sees only the immutable snapshot. Every write, including
+     a late one after detach, derives the file from the same state under this
+     mutex, so the last write leaves the record that state calls for. *)
+  let held = e.held in
+  let seq, output = match held with Some (seq, output, _) -> seq, output | None -> e.seq, e.output in
+  if leaves_no_record ~seq ~resource:(Option.map (fun c -> c.worker.resource) e.connection) e.state
+  then offload (fun () -> Lane_addon_store.remove_binding m.store ~instance_id:e.instance_id)
+  else
+    let proposed = match held with
+      | Some (_, _, settle) when not e.stopping -> settle e.state
+      | Some _ | None -> e.state in
+    let json = entry_json_with ~state:proposed ~seq ~output e in
+    let write = match Eio.Fiber.get binding_writer_key with
+      | Some write -> write
+      | None -> (fun ~store ~instance_id json -> Lane_addon_store.save_binding_staged store ~instance_id json) in
+    let commit ~unconfirmed = Option.iter (fun (seq, output, settle) ->
+      e.seq <- seq; e.output <- output; e.held <- None;
+      if not e.stopping then e.state <- unconfirmed (settle e.state);
+      wake_dependents m e) held in
+    match offload (fun () -> write ~store:m.store ~instance_id:e.instance_id json) with
+    | Ok () -> commit ~unconfirmed:Fun.id; Ok ()
+    | Error (Lane_addon_store.Binding_rejected detail) -> Error detail
+    | Error (Lane_addon_store.Binding_publication_failed failure) ->
+        let detail = Fs_compat.atomic_replace_failure_to_string failure in
+        let detail = match failure.Fs_compat.stage, held with
+          | Fs_compat.Before_rename, (Some _ | None) | Fs_compat.After_rename, None -> detail
+          | Fs_compat.After_rename, Some _ ->
+              let detail = "binding published with unconfirmed durability: " ^ detail in
+              commit ~unconfirmed:(fun state -> failed_state state (Lifecycle.Persistence_failed detail));
+              detail in
+        (match failure.exception_ with
+         | Eio.Cancel.Cancelled _ -> Printexc.raise_with_backtrace failure.exception_ failure.backtrace
+         | _ -> Error detail))
 let failed m e cause =
   if not e.stopping then (e.state <- fail_state e cause; notify_exports m e);
   match persist m e with Ok () -> wake_dependents m e | Error error ->
@@ -920,6 +966,9 @@ type observation_writer = store:Lane_addon_store.t -> instance_id:string -> seq:
   sources:Yojson.Safe.t -> output -> (unit, Lane_addon_store.observation_write_error) result
 let observation_writer_key : observation_writer Eio.Fiber.key = Eio.Fiber.create_key ()
 let commit_output m e ~sources output =
+  (* A held observation is committed before another is written, so at most
+     one is held and the next sequence follows the committed one. *)
+  let* () = match e.held with None -> Ok () | Some _ -> persist m e in
   let seq = e.seq + 1 in
   (* The declared observation envelope also bounds the host representation:
      package-controlled relation lists cannot manufacture extra retained
@@ -938,34 +987,31 @@ let commit_output m e ~sources output =
         Lane_addon_store.append_observation store ~instance_id ~seq ~sources output) in
   let published = offload (fun () -> write ~store:m.store
     ~instance_id:e.instance_id ~seq ~sources output) in
-  let converge () = e.seq <- seq; e.output <- output in
+  (* A renamed file reserves its sequence: it is held, never rewritten, and
+     published by the binding write that names it. *)
+  let hold settle = e.held <- Some (seq, output, settle) in
   match published with
   | Ok () ->
-    converge ();
-    if not e.stopping then e.state <- Lifecycle.Attached;
-    (* The output is published and converged, and dependents read it from the
-       entry, not from the binding file. Wake them in the same step that makes
-       [refreshing] false: persisting yields, and a reader that saw the
-       producer settled could otherwise act before its dependents were told,
-       so one commit reached them after the reader's next action. *)
-    wake_dependents m e;
+    (* Dependents read the entry, not the binding file. The commit settles
+       [Attached], which makes [refreshing] false, and wakes them in the same
+       step, so a reader that saw the producer settled cannot act before its
+       dependents were told. A state set after the hold, such as a failure
+       that arrived during the binding write, is newer and stays. *)
+    let held_from = e.state in
+    hold (fun current -> if current = held_from then Lifecycle.Attached else current);
     persist m e
   | Error (Lane_addon_store.Observation_rejected detail) -> Error detail
   | Error (Lane_addon_store.Publication_failed {failure;verification_error}) ->
     let cause=Lane_addon_store.observation_write_error_to_string
       (Lane_addon_store.Publication_failed {failure;verification_error}) in
-    (match failure.Fs_compat.stage with
-     | Fs_compat.Before_rename -> ()
-     | Fs_compat.After_rename ->
-       converge ();
-       if not e.stopping then e.state <- fail_state e
-         (Lifecycle.Persistence_failed ("observation published with unconfirmed durability: " ^ cause)));
-    let detail = match failure.stage with
+    let detail = match failure.Fs_compat.stage with
       | Fs_compat.Before_rename -> cause
       | Fs_compat.After_rename -> "observation published with unconfirmed durability: " ^ cause in
     let saved = match failure.stage with
       | Fs_compat.Before_rename -> Ok ()
-      | Fs_compat.After_rename -> persist m e in
+      | Fs_compat.After_rename ->
+        hold (fun current -> failed_state current (Lifecycle.Persistence_failed detail));
+        persist m e in
     wake_dependents m e;
     (match failure.exception_ with
      | Eio.Cancel.Cancelled _ -> Printexc.raise_with_backtrace failure.exception_ failure.backtrace
@@ -3532,7 +3578,7 @@ let attach_entry ~sw m ~run_id ~package ~binding ~configuration ~source_access ~
     | Some owner -> validate_connection m ~run_id ~configuration_id:owner.id ~binding in
   let promise, resolver = Eio.Promise.create () in
   let e = { instance_id = Random_id.uuid_v7 (); run_id; package; binding;
-    state = Lifecycle.Attached; authority = None; resolved_image = None; seq = 0; output = {rows=[];coverage=[]}; connection = None;
+    state = Lifecycle.Attached; authority = None; resolved_image = None; seq = 0; output = {rows=[];coverage=[]}; held = None; connection = None;
     stopping = false; cleanup_running = false; changed = Eio.Condition.create (); wake = promise; resolver; pending = Idle;
     refresh_interest; source_access; visibility; last_committed_sources=None; unchanged_source_refreshes=0;
     running = true; started = false; active_tool_calls = 0; persistence_mutex = Eio.Mutex.create (); coalesced_wakes = 0;
@@ -4870,6 +4916,7 @@ module For_testing = struct
     Fun.protect ~finally:(fun () -> override := previous) f
   let with_action_writer write f = Eio.Fiber.with_binding action_writer_key write f
   let with_observation_writer write f = Eio.Fiber.with_binding observation_writer_key write f
+  let with_binding_writer write f = Eio.Fiber.with_binding binding_writer_key write f
   let reset () =
     Hashtbl.iter (fun _ stop -> stop ()) configuration_services;
     Hashtbl.clear configuration_services; Hashtbl.clear managers;

@@ -304,6 +304,20 @@ let tool_request_owners_directory = "tool-request-owners"
 let tool_request_bodies_directory = "tool-request-bodies"
 let binding_path instance_id = Filename.concat bindings_directory (digest instance_id ^ ".json")
 let save_binding t ~instance_id json = write t (binding_path instance_id) (Yojson.Safe.to_string json)
+type binding_write_error =
+  | Binding_rejected of string
+  | Binding_publication_failed of Fs_compat.atomic_replace_failure
+let binding_write_error_to_string = function
+  | Binding_rejected detail -> detail
+  | Binding_publication_failed failure -> Fs_compat.atomic_replace_failure_to_string failure
+let save_binding_staged_with ~replace_file t ~instance_id json =
+  let* path = protect (fun () ->
+    let path = Filename.concat t.root (binding_path instance_id) in
+    durable_directory t ~sync_parent:sync_parent_directory (Filename.dirname path);
+    Ok path) |> Result.map_error (fun detail -> Binding_rejected detail) in
+  replace_file path (Yojson.Safe.to_string json)
+  |> Result.map_error (fun failure -> Binding_publication_failed failure)
+let save_binding_staged = save_binding_staged_with ~replace_file:Fs_compat.save_file_atomic_strict_staged
 let remove_binding_with ~sync_parent t ~instance_id = protect (fun () ->
   let path = Filename.concat t.root (binding_path instance_id) in
   (try Unix.unlink path
@@ -1480,5 +1494,6 @@ module For_testing = struct
   let load_action = load_action_with
   let load_exact_request = load_exact_request_with
   let append_observation = append_observation_with
+  let save_binding_staged = save_binding_staged_with
   let read_observation = read_observation_with
 end

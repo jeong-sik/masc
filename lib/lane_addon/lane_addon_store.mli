@@ -84,6 +84,16 @@ val tool_request_owner_entry : string -> namespace_entry
     a record, an interrupted staged write it skips, or an entry that fails the
     whole inventory. *)
 val save_binding : t -> instance_id:string -> Yojson.Safe.t -> (unit, string) result
+type binding_write_error =
+  | Binding_rejected of string
+  | Binding_publication_failed of Fs_compat.atomic_replace_failure
+val binding_write_error_to_string : binding_write_error -> string
+val save_binding_staged : t -> instance_id:string -> Yojson.Safe.t -> (unit, binding_write_error) result
+(** [save_binding] that keeps whether a publication failure preceded or
+    followed the rename. [Binding_rejected] fails before any rename. The
+    runtime commits a held observation by this write, so an [After_rename]
+    failure names a visible binding and cancellation comes back as the
+    failure's exception for the caller to re-raise after converging. *)
 val remove_binding : t -> instance_id:string -> (unit, string) result
 (** Removes one binding record and syncs the containing directory. A retry
     syncs even when the record was already unlinked by an uncertain attempt. *)
@@ -351,6 +361,9 @@ module For_testing : sig
     replace_file:(string -> string -> (unit, Fs_compat.atomic_replace_failure) result) ->
     t -> instance_id:string -> seq:int -> sources:Yojson.Safe.t ->
     Lane_addon_types.output -> (unit, observation_write_error) result
+  val save_binding_staged :
+    replace_file:(string -> string -> (unit, Fs_compat.atomic_replace_failure) result) ->
+    t -> instance_id:string -> Yojson.Safe.t -> (unit, binding_write_error) result
   val read_observation : sync_file:(Unix.file_descr -> unit) -> sync_parent:(Unix.file_descr -> unit) ->
     instance_id:string -> seq:int -> max_bytes:int -> t -> (Lane_addon_types.output, string) result
 

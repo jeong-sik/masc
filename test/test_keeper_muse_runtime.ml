@@ -3114,7 +3114,7 @@ let test_original_result_crosses_checkpoint_and_fresh_session () =
       (fun message -> not (Keeper_client_tool_outbox.is_context_message message)) messages) in
     write_fixture ~base_path (scenario "stop_before_ack");
     let stopped = run_turn_with ~base_path ~tool ~model_input_projection:project
-      ~on_official_client_tool_boundary:(fun () -> Ok (Some
+      ~on_official_client_tool_boundary:(fun ~tool_name:_ -> Ok (Some
         (Keeper_official_client_host.Terminal_tool_boundary
           {tool_name="masc_probe";outcome=Durable_stimulus_deferred}))) () in
     (match stopped.outcome.result with
@@ -3192,7 +3192,7 @@ let test_original_result_retention_failure_cannot_yield () =
     check int "original store is readable before the tool executes" 0
       (List.length (Keeper_client_tool_outbox.receipt_ids initial));
     let run = run_turn_with ~base_path ~tool
-      ~on_official_client_tool_boundary:(fun () -> Ok (Some
+      ~on_official_client_tool_boundary:(fun ~tool_name:_ -> Ok (Some
         (Keeper_official_client_host.Terminal_tool_boundary
           {tool_name="masc_probe";outcome=Durable_stimulus_deferred}))) () in
     (match run.outcome.result with

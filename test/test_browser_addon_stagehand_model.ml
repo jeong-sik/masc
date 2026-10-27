@@ -41,7 +41,7 @@ let scenario manifest fixture =
       let params=set "messages" (`List messages) params in
       let output=`Assoc ["action",`Null;"twoStep",`Bool false] in
       let server=F.start_server ~sw ~net ~clock (F.Reply (F.openai_response output)) in
-      ignore (F.publish_registry ~lane_id:"browser/stagehand" ~slot_ids:["http"]
+      ignore (F.publish_registry ~lane_id:"browser-stagehand/stagehand" ~slot_ids:["http"]
         (F.resolver_snapshot ~source:base_path [{F.id="http";base_url=server.base_url}]) : Runtime_exact_output_registry.t);
       let state ()=Models.wait models ~after:None |> ok in
       let begin_call () =

@@ -395,7 +395,7 @@ let make_extended_handler ~trust_policy routes =
              | None -> try_internal_error_response reqd msg)))
 
 (** Main server loop *)
-let run_server ~sw ~env ~host ~port ~base_path ~input_base_path ~on_ready ~accept_store_quarantine =
+let run_server ~sw ~env ~address ~port ~base_path ~input_base_path ~on_ready ~accept_store_quarantine =
   (* Use the parent switch directly so that ALL fibers spawned by
      Server_runtime_bootstrap (background maintenance, keeper loops,
      dashboard refresh, etc.) are children of this switch.  Graceful
@@ -404,7 +404,7 @@ let run_server ~sw ~env ~host ~port ~base_path ~input_base_path ~on_ready ~accep
      switch propagates cancellation to every child fiber, preventing
      the 10s force-exit timeout. *)
   try
-    Server_runtime_bootstrap.run ~sw ~env ~host ~port ~base_path
+    Server_runtime_bootstrap.run ~sw ~env ~address ~port ~base_path
       ~input_base_path ~on_ready ~accept_store_quarantine ~make_routes
       ~make_request_handler:make_extended_handler
       ~make_h2_request_handler:Server_h2_gateway.make_request_handler
@@ -594,6 +594,17 @@ let acquire_base_path_lock ~run_dir base_path =
 
 let run_cmd ?schema_observation ?(record_default = false) ~executable_path host port cli_base_path accept_store_quarantine =
   Printexc.record_backtrace true;
+  (* Read before the workspace directory is created or its lease taken, so a
+     host the socket cannot bind leaves nothing behind. *)
+  let bind_address =
+    match Server_bootstrap_http.parse_bind_address host with
+    | Ok address -> address
+    | Error error ->
+      Printf.eprintf
+        "[FATAL] %s\n%!"
+        (Server_bootstrap_http.bind_address_error_to_string error);
+      exit 1
+  in
   let workspace =
     Server_base_path_guard.exit_on_no_workspace
       (Server_base_path_guard.startup_root ~cli_base_path)
@@ -883,7 +894,7 @@ let run_cmd ?schema_observation ?(record_default = false) ~executable_path host 
               run_server
                 ~sw
                 ~env
-                ~host
+                ~address:bind_address
                 ~port
                 ~base_path:canonical_base_path
                 ~input_base_path:raw_base_path

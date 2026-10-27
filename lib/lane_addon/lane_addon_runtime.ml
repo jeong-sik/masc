@@ -157,6 +157,11 @@ type skill_export = { owner : skill_export_owner; instance_id : string; package 
 let skill_source_id = function
   | Declaration id -> "lane-" ^ Digestif.SHA256.(to_hex (digest_string ("declaration\x00" ^ id)))
   | Instance id -> "lane-" ^ Digestif.SHA256.(to_hex (digest_string ("instance\x00" ^ id)))
+(* A declared installation publishes its Skills under its declaration id, a
+   manual attachment under its own instance id. *)
+let skill_export_owner ~installation_id ~instance_id = match installation_id with
+  | Some id -> Declaration id
+  | None -> Instance instance_id
 let skill_export_handler = ref None
 let register_skill_export_handler handler = skill_export_handler := Some handler
 (* [Run_actions] serves the action queue only. An action commits the
@@ -1975,6 +1980,9 @@ let tool_execution_snapshot ~config ~access ~reserved = Eio_context.run_on_owner
         host_issue=entry.host_status.issue;
       }) isolated.exports in
   ({serving;conflicts=isolated.conflicts;unready=reading.unready} : tool_execution_snapshot))
+
+let tool_execution_skill_owner (serving : tool_execution) =
+  skill_export_owner ~installation_id:serving.installation_id ~instance_id:serving.export.instance_id
 
 let tool_export_reading ~config ~access ~reserved = Eio_context.run_on_owner_domain (fun () ->
   let reading = public_reading (current_reading ~config ~access) in
@@ -4666,8 +4674,8 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
       match e.package.skills_directory, phase_of e with
       | None, _ | Some _, Detached -> None
       | Some _, (Attached | Observing | Failed _ | Detaching) ->
-          let owner = match e.configuration with
-            | Some owner -> Declaration owner.id | None -> Instance e.instance_id in
+          let owner = skill_export_owner ~instance_id:e.instance_id
+            ~installation_id:(Option.map (fun (owner : configuration_owner) -> owner.id) e.configuration) in
           Some {owner; instance_id=e.instance_id; package=e.package})
       |> List.sort (fun a b -> String.compare (skill_source_id a.owner) (skill_source_id b.owner)) in
     (match !skill_export_handler with

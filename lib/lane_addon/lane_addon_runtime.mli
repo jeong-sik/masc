@@ -482,6 +482,11 @@ val tool_execution_snapshot : config:Workspace.config -> access:Lane_addon_sourc
     existing manager on its owner domain; no retained-store scan, worker RPC,
     reconciliation or model call. A later invocation still checks authority. *)
 
+val tool_execution_skill_owner : tool_execution -> skill_export_owner
+(** The owner the installation serving this export publishes its package
+    Skills under ({!skill_source_id}): its declaration, or the instance itself
+    for a manual attachment. *)
+
 val host_issue_to_json : host_issue -> Yojson.Safe.t
 (** The [issue] of an instance's [host_requests] in the inspect payload. *)
 

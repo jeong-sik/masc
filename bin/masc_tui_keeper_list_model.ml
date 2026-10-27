@@ -260,3 +260,28 @@ let group_counts rows =
       | Inactive -> needs_you, active, waiting, inactive + 1, unobserved
       | Unobserved -> needs_you, active, waiting, inactive, unobserved + 1)
     (0, 0, 0, 0, 0) rows
+
+type waiting_summary = {
+  tool : int;
+  model : int;
+  external_wait : int;
+  delegate : int;
+  verification : int;
+  background : int;
+}
+
+let waiting_summary rows =
+  List.fold_left
+    (fun summary row ->
+      let running, _, _, _ = async_counts row.async_requests in
+      let background = summary.background + running in
+      match primary_activity_of_row row with
+      | Tool_waiting -> { summary with tool = summary.tool + 1; background }
+      | Model_waiting -> { summary with model = summary.model + 1; background }
+      | External_waiting -> { summary with external_wait = summary.external_wait + 1; background }
+      | Delegating -> { summary with delegate = summary.delegate + 1; background }
+      | Verifying -> { summary with verification = summary.verification + 1; background }
+      | Held_call | Question | Confirmation | Failure | Preparing | Streaming | Running
+      | Async_working _ | Deferred | Idle | Paused | Offline | Unknown -> summary)
+    { tool = 0; model = 0; external_wait = 0; delegate = 0; verification = 0; background = 0 }
+    rows

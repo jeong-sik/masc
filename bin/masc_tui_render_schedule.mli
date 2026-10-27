@@ -72,16 +72,50 @@ type keeper_columns = {
 (** Plain-text cell budgets for one roster row, in cells. *)
 
 val allocate_keeper_columns :
-  prioritize_runtime:bool -> inner_width:int -> widest_runtime:int -> keeper_columns
+  ?runtime_visible:bool ->
+  prioritize_runtime:bool ->
+  inner_width:int ->
+  widest_runtime:int ->
+  unit ->
+  keeper_columns
 (** Divide the box's inner width across the roster columns. Columns drop from
     the right as the terminal narrows; the keeper's name and its status never
     drop. Above the minimum, slack goes to name and runtime before task, unless
-    a failure context asks the runtime column to take priority. *)
+    a failure context asks the runtime column to take priority.
+    [runtime_visible] defaults to [true]. When it is [false], the runtime cell
+    is absent and its width is available to the other columns. *)
 
 val keeper_columns_used_width : keeper_columns -> int
 (** Total cells the allocation occupies, separators included. Never exceeds the
     [inner_width] it was allocated for, and equals it once that width admits
     the minimum row. *)
+
+type waiting_group_layout = {
+  compact : bool;
+  cells : int;
+  segment_count : int;
+}
+(** A width decision for the Waiting summary. [cells] measures the whole group
+    heading, and [segment_count] retains every nonzero reason and async count. *)
+
+val waiting_group_layout :
+  available_cells:int ->
+  group_count:int ->
+  Masc_tui_keeper_list_model.waiting_summary ->
+  waiting_group_layout
+(** Use dense labels only when the full heading exceeds [available_cells].
+    The compact decision never drops a nonzero summary segment. *)
+
+val waiting_group_heading_detail :
+  available_cells:int ->
+  group_count:int ->
+  Masc_tui_keeper_list_model.waiting_summary ->
+  string
+(** Render the suffix selected by [waiting_group_layout]. *)
+
+val keeper_failure_context_for_detail : show_runtime:bool -> string option -> string option
+(** Preserve the existing failure reading for DETAIL only when its runtime cell
+    is hidden. A visible runtime keeps the sole copy and returns [None]. *)
 
 (** {1 Memory fleet columns} *)
 

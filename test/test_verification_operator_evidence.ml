@@ -457,16 +457,17 @@ let test_export_lock_refusal_ends_progress () =
     | File.Not_started | File.Saved _ -> Alcotest.fail "refused lock lost or certified its destination")
 
 let test_export_exception_before_confirmation_ends_progress () =
+  let exception Injected_publication_failure in
   with_base_path_env (fun env base ->
     let module File=Masc_tui_evidence_file in
     let progress=Atomic.make File.Not_started in
     let file=download_fixture ~base_path:base "exception before publication" in
     (match File.For_testing.export
-      ~with_lock:(fun ~lock_path:_ _publish -> raise (Failure "injected publication exception"))
+      ~with_lock:(fun ~lock_path:_ _publish -> raise Injected_publication_failure)
       ~fs:env#fs ~registry_root:base ~directory:base ~progress
       ~admitted:(fun () -> Ok ()) ~open_file:None file with
      | _ -> Alcotest.fail "ordinary exception was swallowed"
-     | exception Failure "injected publication exception" -> ());
+     | exception Injected_publication_failure -> ());
     match Atomic.get progress with
     | File.Aborted path ->
       Alcotest.(check bool) "exception destination is still known" false (Filename.is_relative path)

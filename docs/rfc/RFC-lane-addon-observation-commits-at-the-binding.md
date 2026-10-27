@@ -65,7 +65,10 @@ related: []
 1. `e.held` 가 비어 있을 때만 새 관측을 써요. 순번은 `seq = e.seq + 1` 이에요. 붙잡은 관측이 남아 있으면 먼저 binding 을 다시 써서 그것을 커밋해요(3.4). 이게 실패하면 새 출력은 쓰지 않고 실패를 돌려줘요. 그래서 붙잡는 관측은 늘 한 개 이하예요.
 2. 관측 파일 N 이 보이게 되면(성공이든 `After_rename` 이든) `e.held <- Some (N, output)` 으로 붙잡아요. 아직 공개하지 않아요.
 3. binding 을 써요. 이 binding 은 붙잡은 N 을 가리켜요. **이 교체가 커밋이에요.**
-4. binding 쓰기가 끝나면, `persistence_mutex` 를 놓기 전에 양보 없이 한 걸음으로 이렇게 해요: `e.seq <- N`, `e.output <- output`, `e.held <- None`, `Attached`(또는 아래 표의 `Failed`), `wake_dependents`.
+4. binding 쓰기가 끝나면, `persistence_mutex` 를 놓기 전에 양보 없이 한 걸음으로 이렇게 해요: `e.seq <- N`, `e.output <- output`, `e.held <- None`, 레인 상태 정하기, `wake_dependents`.
+   - 레인 상태는 붙잡을 때 함께 둔 규칙을 커밋하는 순간의 상태에 적용해서 정해요. 보통 관측은 "붙잡은 뒤 상태가 바뀌지 않았으면 `Attached`, 바뀌었으면 나중 상태를 둔다"예요. 관측 `After_rename` 은 "지금 상태를 `Failed` 로"예요.
+   - 규칙이 붙잡은 값에 실려 있어서, 어느 binding 쓰기가 커밋하든 결과가 같아요.
+   - 인스턴스가 멈추는 중(`stopping`)이면 상태는 건드리지 않아요. 워커 종료·도구 취소처럼 커밋 도중 상태를 바꾸는 경로는 먼저 `stopping` 을 켜요.
 
 4는 지금 코드가 지키는 순서("Wake them in the same step that makes [refreshing] false")를 그대로 지켜요. `refreshing` 이 거짓이 되는 걸음과 깨우는 걸음이 같아요.
 
@@ -86,9 +89,9 @@ related: []
 
 ### 3.4 붙잡은 관측의 커밋
 
-- `persist` 는 어느 경로에서 부르든(종료 감시, 도구 취소, `failed`, detach 등) 붙잡은 관측이 있으면 그 순번을 binding 에 써요. 성공하면 3.2 의 4를 해요(상태는 바꾸지 않고 순번·출력만 맞추고 깨움).
+- `persist` 는 어느 경로에서 부르든(종료 감시, 도구 취소, `failed`, detach 등) 붙잡은 관측이 있으면 그 순번을 binding 에 써요. 성공하면 3.2 의 4를 해요. 레인 상태도 붙잡을 때 둔 규칙대로 정해요.
 - 그래서 binding `Before_rename` 뒤에는 그 인스턴스의 다음 binding 쓰기가 N 을 커밋해요. N+1 을 쓰기 전에 N 이 먼저 커밋돼요. 의존하는 쪽은 N 이 커밋될 때 한 번 깨요.
-- 다음 binding 쓰기는 반드시 와요. 커밋 실패는 곧바로 `failed` 가 `persist` 를 다시 부르고, 인스턴스가 끝날 때도 detach 와 종료 감시가 `persist` 를 불러요. 그래서 살아 있는 인스턴스의 붙잡은 관측은 binding 쓰기가 한 번이라도 성공하면 커밋돼요. 끝까지 커밋되지 않는 경우는 binding 쓰기가 계속 실패하거나 프로세스가 죽을 때뿐이에요(§7).
+- binding 쓰기 시도는 반드시 다시 와요. 커밋 실패는 곧바로 `failed` 가 `persist` 를 다시 부르고, 인스턴스가 끝날 때도 detach 와 종료 감시가 `persist` 를 불러요. 그래서 살아 있는 인스턴스의 붙잡은 관측은 그 시도가 한 번이라도 성공하면 커밋돼요. 끝까지 커밋되지 않는 경우는 binding 쓰기가 계속 실패하거나 프로세스가 죽을 때뿐이에요(§7).
 - binding 을 지우는 판단(`leaves_no_record`)도 붙잡은 관측을 봐요. 붙잡은 관측이 있으면 지우지 않아요.
 - binding 에 쓰는 순번은 줄어들지 않아요. `persist` 는 `persistence_mutex` 안에서 상태를 떠서 쓰고, 떠내는 값(`held` 가 있으면 그 순번, 없으면 `e.seq`)은 늘기만 해요. 그래서 N 을 쓴 뒤에 다른 경로가 N-1 을 쓸 수 없어요.
 - 새 필드 `held` 가 필요한 이유: 없으면 둘 중 하나예요. 보이는 N 을 다시 쓰거나(행동 증거를 지움), binding 전에 공개하거나(읽는 쪽이 매번 되찾아야 함). 둘 다 이 RFC 가 없애려는 상태예요.
@@ -165,6 +168,8 @@ binding 경로는 인스턴스 ID 로 정해져요(`bindings/<digest instance_id
 | L2 | 단계를 돌려주는 binding 쓰기, `held`, binding 성공 뒤 공개(3.2~3.4), 3.3 표와 5의 runtime 시험. 이 층에서는 `highwater` 가 남아 있어 디스크 binding 을 읽는 쪽은 붙잡은 N 을 일찍 볼 수 있어요(지금과 같은 동작). 메모리 항목을 읽는 쪽은 커밋 뒤에만 봐요. L3 에서 같아져요. |
 | L3 | `highwater` 삭제, 읽기 상한(3.5), `Lane_addon_store.mli` 문구, 5의 읽기 시험 |
 | L4 | 하나만 필요한 읽기를 binding 파일 하나로(3.6), 복구 중 상태 시험 |
+
+L2~L4 는 한 native stack 으로 함께 병합해요. 층을 따로 배포하지 않아요. L2 만 들어간 구간에서는 디스크 binding 을 읽는 쪽이 아직 붙잡은 N 을 볼 수 있어서, 이 RFC 가 없애려는 어긋남이 그 경로에 남아요.
 
 ## 9. 검증
 

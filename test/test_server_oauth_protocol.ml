@@ -41,6 +41,8 @@ let with_env name value f =
     f
 ;;
 
+let no_document _ = Error "this fixture fetches no document"
+
 let test_codex_discovery_contract () =
   with_env "MASC_OAUTH_ENABLED" "1" (fun () ->
     let authority = authority () in
@@ -74,6 +76,13 @@ let test_codex_discovery_contract () =
       (Some (Server_oauth_metadata.issuer authority))
       (match List.assoc_opt "issuer" fields with
        | Some (`String value) -> Some value
+       | Some _ | None -> None);
+    check
+      (option bool)
+      "advertises Client ID Metadata Documents (MCP 2026-07-28)"
+      (Some true)
+      (match List.assoc_opt "client_id_metadata_document_supported" fields with
+       | Some (`Bool value) -> Some value
        | Some _ | None -> None);
     check
       (list string)
@@ -317,6 +326,7 @@ let test_authorization_denial_redirects_with_state () =
               Server_oauth_service.authorize_post
                 ~base_path
                 ~authority:(authority ())
+                ~fetch_client_metadata:no_document
                 ~body
             with
             | Ok (Server_oauth_service.Authorization_redirect location) ->
@@ -375,6 +385,7 @@ let test_authorization_approval_redirects_with_issuer () =
               Server_oauth_service.authorize_post
                 ~base_path
                 ~authority:(authority ())
+                ~fetch_client_metadata:no_document
                 ~body
             with
             | Ok (Server_oauth_service.Authorization_redirect location) ->
@@ -389,6 +400,159 @@ let test_authorization_approval_redirects_with_issuer () =
             | Ok (Server_oauth_service.Authorization_form_error { message; _ }) ->
               fail ("approval rendered a form error: " ^ message)
             | Error error -> fail (Auth_oauth.show_error error)))))
+;;
+
+let claude_code_url = "https://claude.ai/oauth/claude-code-client-metadata"
+
+(* What https://claude.ai/oauth/claude-code-client-metadata served on
+   2026-10-27. *)
+let claude_code_document =
+  {|{"client_id":"https://claude.ai/oauth/claude-code-client-metadata","client_name":"Claude Code","client_uri":"https://claude.ai","redirect_uris":["http://localhost/callback","http://127.0.0.1/callback"],"grant_types":["authorization_code","refresh_token"],"response_types":["code"],"token_endpoint_auth_method":"none"}|}
+;;
+
+let with_oauth_workspace f =
+  with_env "MASC_OAUTH_ENABLED" "1" (fun () ->
+    with_workspace (fun base_path ->
+      Eio_main.run (fun env ->
+        Fs_compat.set_fs (Eio.Stdenv.fs env);
+        Eio_guard.enable ();
+        Fun.protect
+          ~finally:(fun () ->
+            Eio_guard.disable ();
+            Fs_compat.clear_fs ())
+          (fun () -> f base_path))))
+;;
+
+let authorize_query ?(extra = []) ~client_id ~redirect_uri ~challenge () =
+  Uri.encoded_of_query
+    ([ "response_type", [ "code" ]
+     ; "client_id", [ client_id ]
+     ; "redirect_uri", [ redirect_uri ]
+     ; "resource", [ "http://127.0.0.1:8935/mcp" ]
+     ; "scope", [ "mcp:tools" ]
+     ; "state", [ "cimd-state" ]
+     ; "code_challenge", [ challenge ]
+     ; "code_challenge_method", [ "S256" ]
+     ]
+     @ extra)
+;;
+
+let serving document =
+  let fetched = ref [] in
+  let fetch url =
+    fetched := (url : Auth_oauth_client_metadata.document_url :> string) :: !fetched;
+    Ok document
+  in
+  fetched, fetch
+;;
+
+let test_document_client_signs_in () =
+  with_oauth_workspace (fun base_path ->
+    let bootstrap_token, _ =
+      match Auth.create_token base_path ~agent_name:"claude" ~role:Masc_domain.Worker with
+      | Ok created -> created
+      | Error error -> fail (Masc_domain.masc_error_to_string error)
+    in
+    let verifier = String.make 43 'v' in
+    let challenge = Auth_oauth.pkce_s256 verifier in
+    let redirect_uri = "http://localhost:3118/callback" in
+    let fetched, fetch_client_metadata = serving claude_code_document in
+    let target =
+      "/oauth/authorize?"
+      ^ authorize_query ~client_id:claude_code_url ~redirect_uri ~challenge ()
+    in
+    (match
+       Server_oauth_service.authorize_get
+         ~base_path
+         ~authority:(authority ())
+         ~fetch_client_metadata
+         ~target
+     with
+     | Error error -> fail (Auth_oauth.show_error error)
+     | Ok request ->
+       check (option string) "name from the document" (Some "Claude Code")
+         request.client_name;
+       let html = Server_oauth_service.render_authorization_form request in
+       check bool "consent names the publishing site" true
+         (contains html "published at <code>claude.ai</code>"));
+    check (list string) "the form fetched the client_id URL" [ claude_code_url ] !fetched;
+    let body =
+      authorize_query
+        ~client_id:claude_code_url
+        ~redirect_uri
+        ~challenge
+        ~extra:[ "bootstrap_token", [ bootstrap_token ]; "decision", [ "authorize" ] ]
+        ()
+    in
+    let location =
+      match
+        Server_oauth_service.authorize_post
+          ~base_path
+          ~authority:(authority ())
+          ~fetch_client_metadata
+          ~body
+      with
+      | Ok (Server_oauth_service.Authorization_redirect location) -> location
+      | Ok (Server_oauth_service.Authorization_form_error { message; _ }) -> fail message
+      | Error error -> fail (Auth_oauth.show_error error)
+    in
+    check int "the approval fetched the document again" 2 (List.length !fetched);
+    let callback = Uri.of_string location in
+    check (option int) "callback keeps the requested port" (Some 3118) (Uri.port callback);
+    let code =
+      match Uri.get_query_param callback "code" with
+      | Some code -> code
+      | None -> fail "approval carried no code"
+    in
+    match
+      Auth_oauth.exchange_authorization_code
+        ~base_path
+        ~expected_resource:"http://127.0.0.1:8935/mcp"
+        ~code
+        ~client_id:claude_code_url
+        ~redirect_uri
+        ~resource:(Some "http://127.0.0.1:8935/mcp")
+        ~code_verifier:verifier
+    with
+    | Ok pair -> check string "bearer pair" "Bearer" pair.token_type
+    | Error error -> fail (Auth_oauth.show_error error))
+;;
+
+let test_document_client_refusals () =
+  with_oauth_workspace (fun base_path ->
+    let challenge = String.make 43 'a' in
+    let refused ~label ~fetch_client_metadata ~redirect_uri =
+      let target =
+        "/oauth/authorize?"
+        ^ authorize_query ~client_id:claude_code_url ~redirect_uri ~challenge ()
+      in
+      match
+        Server_oauth_service.authorize_get
+          ~base_path
+          ~authority:(authority ())
+          ~fetch_client_metadata
+          ~target
+      with
+      | Error _ -> ()
+      | Ok _ -> fail (label ^ " was accepted")
+    in
+    let _, serve_claude = serving claude_code_document in
+    refused ~label:"unreachable document" ~fetch_client_metadata:no_document
+      ~redirect_uri:"http://localhost:3118/callback";
+    refused ~label:"unlisted path" ~fetch_client_metadata:serve_claude
+      ~redirect_uri:"http://localhost:3118/other";
+    let listing_a_web_redirect =
+      {|{"client_id":"https://claude.ai/oauth/claude-code-client-metadata","client_name":"Claude Code","redirect_uris":["https://attacker.example/cb"]}|}
+    in
+    let _, serve_web = serving listing_a_web_redirect in
+    refused ~label:"a listed redirect off this computer" ~fetch_client_metadata:serve_web
+      ~redirect_uri:"https://attacker.example/cb";
+    let _, serve_other =
+      serving
+        {|{"client_id":"https://other.example/meta.json","client_name":"Other","redirect_uris":["http://localhost/callback"]}|}
+    in
+    refused ~label:"a document naming another client_id" ~fetch_client_metadata:serve_other
+      ~redirect_uri:"http://localhost:3118/callback")
 ;;
 
 let grant_types values = [ "grant_types", `List (List.map (fun v -> `String v) values) ]
@@ -466,6 +630,8 @@ let () =
             "authorization approval redirects with issuer"
             `Quick
             test_authorization_approval_redirects_with_issuer
+        ; test_case "document client signs in" `Quick test_document_client_signs_in
+        ; test_case "document client refusals" `Quick test_document_client_refusals
         ; test_case
             "string subset rejects duplicates"
             `Quick

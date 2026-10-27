@@ -47,7 +47,8 @@ let issue_oauth_pair base_path bootstrap_credential =
       ~redirect_uris:[ redirect_uri ]) in
   let verifier = String.make 43 'v' in
   let request = oauth_ok (Auth_oauth.validate_authorization_request ~base_path
-      ~expected_resource:resource ~response_type:(Some "code") ~client_id:(Some client.client_id)
+      ~expected_resource:resource ~fetch_client_metadata:(fun _ -> Error "this fixture fetches no document")
+      ~response_type:(Some "code") ~client_id:(Some client.client_id)
       ~redirect_uri:(Some redirect_uri) ~resource:(Some resource) ~scope:(Some "mcp:admin")
       ~state:None ~code_challenge:(Some (Auth_oauth.pkce_s256 verifier))
       ~code_challenge_method:(Some "S256")) in

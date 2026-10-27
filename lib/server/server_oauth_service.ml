@@ -108,6 +108,18 @@ let render_authorization_form ?error (request : Auth_oauth.authorization_request
         (html_escape request.client_id)
     | None -> Printf.sprintf {|<code>%s</code>|} (html_escape request.client_id)
   in
+  (* MCP 2026-07-28 asks for a warning when a document client returns only to
+     this computer: the document proves which site published the name, not
+     which local program is asking. *)
+  let document_client_warning =
+    match Auth_oauth_client_metadata.classify_client_id request.client_id with
+    | Ok (Auth_oauth_client_metadata.Document _) ->
+      Printf.sprintf
+        {|<p class="warning">The name comes from a document published at <code>%s</code>. The callback goes to a program on this computer, and any program here can use that name. Authorize only a sign-in you started just now.</p>|}
+        (html_escape
+           (Option.value ~default:"" (Uri.host (Uri.of_string request.client_id))))
+    | Ok (Auth_oauth_client_metadata.Registered _) | Error _ -> ""
+  in
   let scopes = Auth_oauth.scopes_to_string request.scopes |> html_escape in
   let admin_confirmation =
     if admin_scope_requested request.scopes
@@ -136,6 +148,7 @@ let render_authorization_form ?error (request : Auth_oauth.authorization_request
         scopes
         (Auth_oauth.access_token_ttl_sec ())
         (Auth_oauth.refresh_token_ttl_sec ())
+    ; document_client_warning
     ; {|<p>Enter an existing MASC bearer once to bind this OAuth session to its agent identity.</p>|}
     ; error_html
     ; {|<form method="post" action="/oauth/authorize">|}
@@ -163,10 +176,11 @@ let authorization_form_headers =
   ]
 ;;
 
-let authorization_request_of_params ~base_path ~authority params =
+let authorization_request_of_params ~base_path ~authority ~fetch_client_metadata params =
   Auth_oauth.validate_authorization_request
     ~base_path
     ~expected_resource:(Server_oauth_metadata.resource authority)
+    ~fetch_client_metadata
     ~response_type:(param params "response_type")
     ~client_id:(param params "client_id")
     ~redirect_uri:(param params "redirect_uri")
@@ -177,9 +191,9 @@ let authorization_request_of_params ~base_path ~authority params =
     ~code_challenge_method:(param params "code_challenge_method")
 ;;
 
-let authorize_get ~base_path ~authority ~target =
+let authorize_get ~base_path ~authority ~fetch_client_metadata ~target =
   let* params = query_params target in
-  authorization_request_of_params ~base_path ~authority params
+  authorization_request_of_params ~base_path ~authority ~fetch_client_metadata params
 ;;
 
 (* RFC 9207 section 2: every authorization response redirected to the client,
@@ -217,9 +231,11 @@ type authorization_post_outcome =
       ; request : Auth_oauth.authorization_request
       }
 
-let authorize_post ~base_path ~authority ~body =
+let authorize_post ~base_path ~authority ~fetch_client_metadata ~body =
   let* params = parse_form body in
-  let* request = authorization_request_of_params ~base_path ~authority params in
+  let* request =
+    authorization_request_of_params ~base_path ~authority ~fetch_client_metadata params
+  in
   let issuer = Server_oauth_metadata.issuer authority in
   if Option.equal String.equal (param params "decision") (Some "deny")
   then

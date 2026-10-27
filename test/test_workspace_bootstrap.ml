@@ -367,6 +367,7 @@ let test_memory_state_mirror_failure_still_binds_requested_agent () =
         ; Workspace_utils.messages_dir config
         ; Filename.concat root "traces"
         ; Filename.concat root "events"
+        ; Filename.concat dir Playground_paths.all_playgrounds_prefix
         ];
       Unix.chmod root 0o555;
       Fun.protect ~finally:(fun () -> Unix.chmod root 0o755) (fun () ->
@@ -383,7 +384,8 @@ let test_memory_state_mirror_failure_still_binds_requested_agent () =
           print_endline "state mirror failure fixture skipped: permissions are bypassed"
         else (
           let agent_name = "mirror-fixture-agent" in
-          ignore (Workspace.init config ~agent_name:(Some agent_name));
+          let result = Workspace.init config ~agent_name:(Some agent_name) in
+          assert (String.starts_with ~prefix:"MASC workspace created; local state mirror failed:" result);
           assert (not (Sys.file_exists (Workspace_utils.state_path config)));
           assert (List.mem agent_name (Workspace.read_state config).active_agents);
           let agent_path =

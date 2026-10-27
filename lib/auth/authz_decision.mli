@@ -16,7 +16,7 @@
     + the initiator and the executor have a current membership;
     + the PAT deadline has not passed;
     + a PAT that asks for a management effect names the channel and the
-      effects (design 4.4);
+      effects; its runtimes may stay [All] (design 4.4);
     + a policy covers the pair and the channel;
     + the Runtime exists, and the initiator and the executor each hold a
       current grant on it;
@@ -65,11 +65,15 @@ module Chain : sig
     }
 end
 
-(** The facts one decision reads. Every function must answer from one
-    consistent snapshot, return only rows that are current under the epoch and
-    high-water checks of design 8.1 and 8.2, and never raise: a read that
-    fails answers {!Unreadable}. {!allowed} does not catch exceptions, so
-    cancellation still propagates. *)
+(** The facts one decision reads. This record is the trust boundary of the
+    module: only the store adapter builds it, from the store and nothing else.
+    A record whose functions answer [Found Active] for everything allows
+    everything, and nothing here can tell.
+
+    Every function must answer from one consistent snapshot, return only rows
+    that are current under the epoch and high-water checks of design 8.1 and
+    8.2, and never raise: a read that fails answers {!Unreadable}. {!allowed}
+    does not catch exceptions, so cancellation still propagates. *)
 type facts =
   { now : float  (** Seconds since the epoch. *)
   ; principal : Principal.t -> Principal_status.t lookup
@@ -77,7 +81,9 @@ type facts =
   ; auth_binding : Principal.t -> Auth_binding_status.t lookup
         (** The credential binding that authenticated this request as the given
             principal. [Absent] when the request's credential belongs to
-            someone else. *)
+            someone else. Only the initiator's binding is asked for, because
+            the request is authenticated as the initiator. A revocation that
+            is pending on the executor shows up through [revocation]. *)
   ; membership : Principal.t -> Workspace_id.t -> Membership_status.t lookup
   ; delegate_policy :
       initiator:Principal.t -> executor:Principal.t -> Delegate_policy.t lookup
@@ -152,7 +158,8 @@ type allowance =
   ; policy : Policy_id.t option
   }
 
-type decision =
+(** Only {!allowed} makes an [Allow]. Callers read it by pattern matching. *)
+type decision = private
   | Allow of allowance
   | Deny of deny_reason
 

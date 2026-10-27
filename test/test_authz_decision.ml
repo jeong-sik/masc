@@ -762,7 +762,7 @@ let effect_scope =
     ; self
         "only the uncovered effects are named"
         ~r:(with_requested Effect.[ Invoke_model; Use_tool; Read_state; Manage_own_grant ])
-        (deny "effects_out_of_scope:read_state,manage_own_grant")
+        (deny "effects_out_of_scope:manage_own_grant,read_state")
     ; self
         "every requested effect is covered"
         ~r:(with_requested Effect.[ Invoke_model; Use_tool ])
@@ -856,6 +856,67 @@ let chain_names_what_the_decision_stood_on () =
   | chains -> Alcotest.failf "expected one dependency question, got %d" (List.length chains)
 ;;
 
+(* Two reasons must never share a label, or a test that compares labels could
+   pass for the wrong reason. [index] is an exhaustive match, so a new reason
+   cannot be added without this test. *)
+let reason_labels_are_distinct () =
+  let index = function
+    | D.Authorization_uncertain -> 0
+    | D.Principal_inactive _ -> 1
+    | D.Auth_binding_inactive -> 2
+    | D.Membership_inactive _ -> 3
+    | D.Pat_expired -> 4
+    | D.Pat_scope_not_explicit -> 5
+    | D.Invocation_not_allowed -> 6
+    | D.Initiator_grant_not_current _ -> 7
+    | D.Executor_grant_not_current _ -> 8
+    | D.Runtime_unavailable _ -> 9
+    | D.Provider_account_unavailable _ -> 10
+    | D.Runtime_out_of_scope -> 11
+    | D.Channel_out_of_scope -> 12
+    | D.Effects_out_of_scope _ -> 13
+    | D.Revocation_pending _ -> 14
+    | D.Dependencies_not_cleared -> 15
+  in
+  let parties = [ D.Initiator; D.Executor; D.Owner ] in
+  let grant_defects =
+    D.[ No_grant; Grant_revoked; Grant_purged; Grant_expired; Grantee_not_owner ]
+  in
+  let resource_defects =
+    D.[ Resource_disabled; Resource_blocked; Resource_quarantined; Resource_purged ]
+  in
+  let reasons =
+    [ D.Authorization_uncertain
+    ; D.Auth_binding_inactive
+    ; D.Pat_expired
+    ; D.Pat_scope_not_explicit
+    ; D.Invocation_not_allowed
+    ; D.Runtime_out_of_scope
+    ; D.Channel_out_of_scope
+    ; D.Effects_out_of_scope (effects [ Effect.Read_state ])
+    ; D.Effects_out_of_scope (effects [ Effect.Use_tool ])
+    ; D.Revocation_pending (Subject.Runtime rt)
+    ; D.Revocation_pending (Subject.Credential account)
+    ; D.Dependencies_not_cleared
+    ]
+    @ List.map (fun party -> D.Principal_inactive party) parties
+    @ List.map (fun party -> D.Membership_inactive party) parties
+    @ List.map (fun defect -> D.Initiator_grant_not_current defect) grant_defects
+    @ List.map (fun defect -> D.Executor_grant_not_current defect) grant_defects
+    @ List.map (fun defect -> D.Runtime_unavailable defect) resource_defects
+    @ List.map (fun defect -> D.Provider_account_unavailable defect) resource_defects
+  in
+  let labels = List.map D.deny_reason_to_string reasons in
+  Alcotest.(check int)
+    "every label is different"
+    (List.length labels)
+    (List.length (List.sort_uniq String.compare labels));
+  Alcotest.(check (list int))
+    "the list holds every kind of reason"
+    (List.init 16 Fun.id)
+    (List.sort_uniq Int.compare (List.map index reasons))
+;;
+
 (* No fact is optional: whichever one the store cannot read, the answer is
    [Authorization_uncertain]. The delegated world reads every fact. *)
 let unreadable =
@@ -902,6 +963,7 @@ let () =
             `Quick
             chain_names_what_the_decision_stood_on
         ] )
+    ; "labels", [ Alcotest.test_case "all different" `Quick reason_labels_are_distinct ]
     ; unreadable
     ]
 ;;

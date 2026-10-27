@@ -372,6 +372,33 @@ let test_a_refusal_returns_the_sources_declared_before_it () =
     | _, None -> fail "an unloadable declaration of ego was accepted"
     | _, Some error -> failf "refused for another reason: %s" (S.error_message error))
 
+(* An exact-output table of the retired package is named with the table of
+   the package that carries that output now; one no package carries is named
+   alone. Tables of the current packages are not named. *)
+let test_tables_of_the_retired_package_are_named_with_their_new_table () =
+  with_workspace (fun base ->
+    let runtime_config_path = Filename.concat base "runtime.toml" in
+    let retired installed = match S.retired_exact_lanes ~runtime_config_path installed with
+      | Ok retired ->
+        List.map (fun ({ output; moves_to } : S.retired_exact_lane) ->
+            output, Option.map B.to_wire moves_to) retired
+      | Error detail -> failf "runtime.toml did not parse: %s" detail in
+    let installed = installed ~sources:[ B.Automation ] base in
+    check (list (pair string (option string))) "no runtime.toml names nothing" [] (retired installed);
+    write runtime_config_path
+      {|[runtime.addon_exact_lanes.browser.locate]
+slots = []
+
+[runtime.addon_exact_lanes.browser.stagehand]
+slots = []
+
+[runtime.addon_exact_lanes.browser-automation.locate]
+slots = []
+|};
+    check (list (pair string (option string))) "each retired table, with its new owner"
+      [ "locate", Some (B.to_wire B.Automation); "stagehand", None ]
+      (retired installed))
+
 let test_a_workspace_without_a_config_root_is_refused () =
   with_workspace ~config:false (fun base ->
     (match S.plan ~base_path:base ~sources:B.all with
@@ -445,6 +472,8 @@ let () =
             test_an_unloadable_declaration_of_the_id_is_left_and_reported
         ; test_case "a refusal returns the sources declared before it" `Quick
             test_a_refusal_returns_the_sources_declared_before_it
+        ; test_case "tables of the retired package are named with their new table" `Quick
+            test_tables_of_the_retired_package_are_named_with_their_new_table
         ; test_case "a workspace without a config root is refused" `Quick
             test_a_workspace_without_a_config_root_is_refused
         ; test_case "a file this build does not carry is removed" `Quick

@@ -11,6 +11,7 @@ type installed =
   ; files_written : int
   ; files_removed : string list
   ; declaration : declaration
+  ; exact_outputs : string list
   ; missing_programs : string list
   }
 
@@ -366,6 +367,8 @@ let apply_package plan (backend, files) =
     ; files_removed
     ; declaration
     ; missing_programs = missing_programs ~package_directory:directory package
+    ; exact_outputs =
+        List.map (fun (output : Lane_addon_types.exact_output) -> output.name) package.exact_outputs
     }
 
 type applied = { installed : installed list; refusal : error option }
@@ -380,3 +383,37 @@ let apply plan =
        | Ok one -> go (one :: installed) rest
        | Error error -> { installed = List.rev installed; refusal = Some error }) in
   go [] plan.packages
+
+type retired_exact_lane = { output : string; moves_to : Browser_lane.Backend.t option }
+
+(* The server loads an exact-output table for a declaration id no
+   installation has, so a table of the retired package binds nothing and its
+   output waits for a route. *)
+let retired_exact_lanes_of ~runtime_toml installed =
+  match
+    Otoml.find_opt runtime_toml Fun.id
+      [ Runtime_toml_namespace.(key Runtime); "addon_exact_lanes"; retired_package_name ]
+  with
+  | Some (Otoml.TomlTable outputs | Otoml.TomlInlineTable outputs) ->
+    List.map
+      (fun (output, _) ->
+         { output
+         ; moves_to =
+             List.find_map
+               (fun (one : installed) ->
+                  if List.mem output one.exact_outputs then Some one.backend else None)
+               installed
+         })
+      outputs
+  | None
+  | Some
+      Otoml.(
+        TomlString _ | TomlInteger _ | TomlFloat _ | TomlBoolean _ | TomlOffsetDateTime _
+        | TomlLocalDateTime _ | TomlLocalDate _ | TomlLocalTime _ | TomlArray _
+        | TomlTableArray _) -> []
+
+let retired_exact_lanes ~runtime_config_path installed =
+  if not (Sys.file_exists runtime_config_path) then Ok []
+  else
+    Otoml.Parser.from_file_result runtime_config_path
+    |> Result.map (fun runtime_toml -> retired_exact_lanes_of ~runtime_toml installed)

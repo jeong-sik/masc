@@ -327,6 +327,36 @@ let print_addons (installed : Addon_setup.installed list) =
         "The MASC server attaches a declared Add-on when it starts and on its maintenance pass; \
          set enabled = false in its declaration to keep it detached."
 
+(* Tables of the retired package bind nothing now, so each is named with the
+   table to move it to. runtime.toml is the operator's to edit. *)
+let print_retired_exact_lanes ~runtime_config_path (installed : Addon_setup.installed list) =
+  let table id output =
+    Printf.sprintf "[runtime.addon_exact_lanes.%s.%s]" (Toml_line_editor.render_key id)
+      (Toml_line_editor.render_key output) in
+  match Addon_setup.retired_exact_lanes ~runtime_config_path installed with
+  | Error detail ->
+    Printf.printf
+      "%s did not parse when read again for tables of the retired browser package: %s\n"
+      runtime_config_path detail
+  | Ok retired ->
+    (match retired with
+     | [] -> ()
+     | _ :: _ ->
+       Printf.printf
+         "%s still binds exact outputs of the retired browser package, and the server \
+          reads those tables for no installation:\n"
+         runtime_config_path;
+       List.iter
+         (fun ({ output; moves_to } : Addon_setup.retired_exact_lane) ->
+            match moves_to with
+            | Some backend ->
+              Printf.printf "  move %s to %s\n" (table Addon_setup.retired_package_name output)
+                (table (Addon_setup.package_name backend) output)
+            | None ->
+              Printf.printf "  %s: no browser package declared here has the %s output\n"
+                (table Addon_setup.retired_package_name output) output)
+         retired)
+
 (* Whether this command runs the browser Add-on step, and what its refusal
    means. --mode addon requires it: a refusal is the command's. Every other
    mode offers it: a refusal is reported and that mode's own steps go on, so
@@ -531,6 +561,7 @@ let install
               (match applied, refusal with
                | [], Some _ -> ()
                | ([] | _ :: _), (None | Some _) -> print_addons applied);
+              print_retired_exact_lanes ~runtime_config_path applied;
               (match refusal with
                | None -> Ok ()
                | Some error ->

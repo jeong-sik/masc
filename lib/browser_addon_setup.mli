@@ -35,6 +35,8 @@ type installed =
   ; files_removed : string list
         (** Paths of files an earlier build wrote that this one does not carry. *)
   ; declaration : declaration
+  ; exact_outputs : string list
+        (** The exact outputs the package declares, by name. *)
   ; missing_programs : string list
         (** Programs the browser Add-on runs that this process cannot find:
             its worker command, looked up on [PATH], and every
@@ -71,6 +73,11 @@ val error_message : error -> string
 val package_name : Browser_lane.Backend.t -> string
 (** [browser-<source>]: the package id, declaration id and folder name. *)
 
+val retired_package_name : string
+(** [browser]: the id of the package that served every source in one worker,
+    which setup refuses ({!Retired_declaration}) and names in
+    {!retired_exact_lanes}. *)
+
 val package_directory : base_path:string -> Browser_lane.Backend.t -> string
 (** [<base>/.masc/packages/browser-<source>]. *)
 
@@ -97,3 +104,18 @@ val apply : plan -> applied
     [Embedded_package_invalid] for a manifest that is not the source's
     package, [Inventory_unreadable], [Declared_more_than_once],
     [Declaration_unloadable] and [Declaration_refused]. *)
+
+(** A [\[runtime.addon_exact_lanes.browser.<output>\]] table: one bound to the
+    retired [browser] package. [moves_to] is the source whose package among
+    the [installed] ones declares [output]; that installation's table is the
+    one the server reads now. *)
+type retired_exact_lane = { output : string; moves_to : Browser_lane.Backend.t option }
+
+(** Every exact-output table the runtime.toml at [runtime_config_path] still
+    has for the retired [browser] package; none when there is no file. The
+    server loads such a table without an installation to bind it to, so the
+    output it names waits for a model route. Setup names each table to move;
+    runtime.toml is the operator's to edit. [Error] says why the file did not
+    parse. *)
+val retired_exact_lanes :
+  runtime_config_path:string -> installed list -> (retired_exact_lane list, string) result

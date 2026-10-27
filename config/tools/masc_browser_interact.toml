@@ -2,8 +2,8 @@ name = "masc_browser_interact"
 description = """
 Click, fill, scroll, hover, drag, follow a link, activate a browser tab, set the page viewport size, or set actual browser zoom. tap_at and swipe send a touch pointer (not a mouse) on a live BiDi connection or the owned Firefox: tap_at presses and releases at an observed point, swipe holds the touch from one observed point to another; Stagehand and a connected WebExtension refuse them before any effect. set_viewport takes width and height together in CSS pixels (100–4096) on a live BiDi connection, an automation Firefox or Stagehand; on a live BiDi connection or an automation Firefox, giving neither restores the browser's own size. An automation Firefox resizes its window and keeps at least about 500 x 120 outer pixels, so a smaller request is refused with the size the page kept. Read scene/screenshot geometry again afterward. set_zoom requires an exact WebExtension client/tab, expectedUrl and factor 0.3–5. It measures the resulting zoomFactor and zoomScope; Firefox per-origin zoom can affect same-site tabs. Read scene/screenshot geometry again afterward. hover/drag_to accept observed elements (selector or scene reference) without guessing screenshot coordinates. On connections other than ego they resolve visible, unobstructed targets in the current viewport; scroll and re-read offscreen targets first. Ego selector hover uses SDK resolution and auto-scrolling. hover_at (no click) and drag move a trusted pointer. automation, Stagehand Chromium, live webdriver_bidi and ego task spaces serve these actions; Stagehand and ego support custom drag paths but require durationMs=0. activate_tab is live-only, on a web_extension connection (>=0.6.0): it verifies active=true without window focus or navigation. A live request its connection cannot serve is refused before input as live_transport_unsupported; servingClients are the connected browsers that can. List that connection's tabs first: tab IDs are per connection.
 On an ego task space action=workflow runs known native Page calls in steps, then returns a final native snapshot. Methods include click, dblclick, hover, fill, focus, press, selectOption, goto, reload, native URL/selector/load waits, and keyboard.type/insertText/paste/press. Focus an observed editor before keyboard input; paste accepts text and optional HTML, and the SDK restores the native clipboard. SDK methods own resolution and waits. A step failure stops the sequence and retains completed steps; inspect before continuing and never replay the workflow. expectedUrl guards the initial page only; later navigation is allowed. Use separate workflows when an intermediate observation requires new judgment. No host JavaScript is accepted.
-On an ego task space, selector click/fill/hover/double_click/select_option use ego native Page methods. The selector follows ego SDK syntax (snapshot refs, semantic locators, CSS, iframe/shadow traversal); ego owns target resolution, actionability and auto-scrolling. Prefer BrowserRead/masc_browser_read mode=snapshot and its refs. Ego selectOption follows native programmatic selection semantics, including disabled options. TUI documentId/nodeId actions retain their scene adapter.
-The tab is explicit; no arbitrary JavaScript. drag/drag_to issue trusted pointer input; a receipt does not prove the application accepted a drop. HTML5 DataTransfer/drop is not guaranteed by Firefox and has no synthetic fallback. Read again after success or failure before retrying: page handlers can change external state. click/fill require an inspected target; ego applies its native actionability rules. On automation, Stagehand Chromium and live webdriver_bidi, click resolves an unobstructed selector or scene node and sends native pointerDown/pointerUp, supporting trusted pointerdown/mousedown menus; disabled and aria-disabled targets are refused. On those three connections click captures the current URL when expectedUrl is omitted, then checks it before input. Ego reads the URL before entering its SDK method, which can itself wait; this is not an atomic navigation guard. WebExtension retains DOM click. Ego fill follows its native SDK input behavior; other connections fill text inputs/textarea with input/change events. Fill does not press Enter or submit. scroll_at scrolls the pane under the point. follow_link bypasses click handlers for observed same-tab HTTP(S) HTML/SVG anchors (_self/_top/_parent); rejects downloads, new-window targets, noreferrer and explicit referrerpolicy. destinationUrl is intent, not loaded-page evidence."""
+On an ego task space, selector click/fill/hover/double_click/select_option use ego native Page methods. The selector follows ego SDK syntax (snapshot refs, semantic locators, CSS, iframe/shadow traversal); ego owns target resolution, actionability and auto-scrolling. Prefer BrowserRead mode=snapshot and its refs. Ego selectOption follows native programmatic selection semantics, including disabled options. TUI documentId/nodeId actions retain their scene adapter.
+The tab is explicit. Browser JavaScript is available only through workflow evaluate/waitForFunction on Ego, never through host execution. Native workflow fetch obeys browser CORS. These calls may change external state, so their failure is not replay permission. drag/drag_to issue trusted pointer input; a receipt does not prove the application accepted a drop. HTML5 DataTransfer/drop is not guaranteed by Firefox and has no synthetic fallback. Read again after success or failure before retrying: page handlers can change external state. click/fill require an inspected target; ego applies its native actionability rules. On automation, Stagehand Chromium and live webdriver_bidi, click resolves an unobstructed selector or scene node and sends native pointerDown/pointerUp, supporting trusted pointerdown/mousedown menus; disabled and aria-disabled targets are refused. On those three connections click captures the current URL when expectedUrl is omitted, then checks it before input. Ego reads the URL before entering its SDK method, which can itself wait; this is not an atomic navigation guard. WebExtension retains DOM click. Ego fill follows its native SDK input behavior; other connections fill text inputs/textarea with input/change events. Fill does not press Enter or submit. scroll_at scrolls the pane under the point. follow_link bypasses click handlers for observed same-tab HTTP(S) HTML/SVG anchors (_self/_top/_parent); rejects downloads, new-window targets, noreferrer and explicit referrerpolicy. destinationUrl is intent, not loaded-page evidence."""
 additional_properties = false
 # 2026-09-24 측정: agent-core 레인 요청 5,047건(09-23)이 이 정의
 # 3,294 B 를 매번 실었고, 09-17~23 7일간 이 도구를 부른 서로 다른
@@ -320,7 +320,7 @@ description = "set_zoom only: actual browser zoom factor (0.3–5), requires exa
 [[params]]
 name = "steps"
 type = "array"
-description = "workflow only: native Page calls in order, followed by one final snapshot. click/dblclick/hover/focus take selector; fill takes selector,text; press takes selector,key; selectOption takes selector and value or distinct values ([] clears); reload takes no fields; goto takes an absolute HTTP(S) url; waitForURL takes a native string/glob url; waitForSelector takes selector,state (attached/detached/visible/hidden); waitForLoadState takes state (domcontentloaded/load/networkidle). keyboard.type/keyboard.insertText take text; keyboard.paste takes text and optional html and the SDK restores the native clipboard; keyboard.press takes key. Keyboard methods act on the focused element: focus an observed target first. Optional nonnegative JavaScript-safe timeoutMs is forwarded unchanged to Page methods; keyboard methods reject timeoutMs. Omission uses the SDK default. MASC adds no cumulative execution-time or step-count limit. Locators come from observations; no injected script or new intermediate judgment inside this call."
+description = "workflow only: native Page calls in order, followed by one final snapshot. click/dblclick/hover/focus take selector; fill takes selector,text; press takes selector,key; selectOption takes selector and value or distinct values ([] clears); reload takes no fields; goto takes an absolute HTTP(S) url; waitForURL takes a native string/glob url; waitForSelector takes selector,state (attached/detached/visible/hidden); waitForLoadState takes state (domcontentloaded/load/networkidle). keyboard.type/keyboard.insertText take text; keyboard.paste takes text and optional html and the SDK restores the native clipboard; keyboard.press takes key. Keyboard methods act on the focused element: focus an observed target first. Optional nonnegative JavaScript-safe timeoutMs is forwarded unchanged to Page methods; keyboard methods reject timeoutMs. Omission uses the SDK default. MASC adds no cumulative execution-time or step-count limit. evaluate/waitForFunction take source and optional argumentJson; waitForFunction also accepts pollingMs and timeoutMs. evaluate rejects timeoutMs. fetch takes url and optional fetchOptions, with timeoutMs on the step; saveAs is refused until a download broker is supplied. Page source executes only in the browser. These methods may have effects even on failure. Locators come from observations; use a new call when an intermediate result needs judgment."
 
 [params.items]
 type = "object"
@@ -330,7 +330,7 @@ additional_properties = false
 name = "method"
 type = "string"
 required = true
-enum = ["click", "dblclick", "hover", "fill", "press", "focus", "reload", "keyboard.type", "keyboard.insertText", "keyboard.paste", "keyboard.press", "selectOption", "goto", "waitForURL", "waitForSelector", "waitForLoadState"]
+enum = ["click", "dblclick", "hover", "fill", "press", "focus", "reload", "keyboard.type", "keyboard.insertText", "keyboard.paste", "keyboard.press", "selectOption", "goto", "waitForURL", "waitForSelector", "waitForLoadState", "evaluate", "waitForFunction", "fetch"]
 
 [[params.items.params]]
 name = "selector"
@@ -372,6 +372,80 @@ name = "timeoutMs"
 type = "integer"
 minimum = 0
 maximum = 9007199254740991
+
+[[params.items.params]]
+name = "source"
+type = "string"
+description = "evaluate/waitForFunction only: JavaScript expression evaluated in the observed Ego Page. With argumentJson, source must be a callable expression and receives that parsed JSON value. Node.js and host APIs are unavailable. Page code, including wait predicates, is treated as a possible effect; inspect after a failure and never replay blindly."
+
+[[params.items.params]]
+name = "argumentJson"
+type = "string"
+description = "evaluate/waitForFunction only: one JSON-encoded argument (any JSON type). The source is called with this value inside the browser. Omit for a plain expression."
+
+[[params.items.params]]
+name = "pollingMs"
+type = "integer"
+minimum = 0
+maximum = 9007199254740991
+description = "waitForFunction only: native SDK polling interval in milliseconds; omission uses its default."
+
+[[params.items.params]]
+name = "fetchOptions"
+type = "object"
+additional_properties = false
+description = "fetch only: browser fetch options, with timeoutMs on the step. Returns the native structured response as the step receipt. saveAs is refused: host file output must use a download broker. HTTP error status is a returned response for the caller to inspect."
+
+[[params.items.params.params]]
+name = "method"
+type = "string"
+
+[[params.items.params.params]]
+name = "headers"
+type = "object"
+additional_properties = true
+description = "HTTP header names mapped to string values."
+
+[[params.items.params.params]]
+name = "body"
+type = "string"
+
+[[params.items.params.params]]
+name = "cache"
+type = "string"
+enum = ["default", "no-store", "reload", "no-cache", "force-cache", "only-if-cached"]
+
+[[params.items.params.params]]
+name = "credentials"
+type = "string"
+enum = ["omit", "same-origin", "include"]
+
+[[params.items.params.params]]
+name = "integrity"
+type = "string"
+
+[[params.items.params.params]]
+name = "keepalive"
+type = "boolean"
+
+[[params.items.params.params]]
+name = "mode"
+type = "string"
+enum = ["cors", "no-cors", "same-origin"]
+
+[[params.items.params.params]]
+name = "redirect"
+type = "string"
+enum = ["follow", "error", "manual"]
+
+[[params.items.params.params]]
+name = "referrer"
+type = "string"
+
+[[params.items.params.params]]
+name = "referrerPolicy"
+type = "string"
+enum = ["", "no-referrer", "no-referrer-when-downgrade", "origin", "origin-when-cross-origin", "same-origin", "strict-origin", "strict-origin-when-cross-origin", "unsafe-url"]
 
 [[params]]
 name = "snapshotScope"

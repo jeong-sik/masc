@@ -19,6 +19,8 @@
   failure_observation
   cross_context_mutex
   eio_guard
+  pool_lane
+  pool_wait
   executor_pool_submission
   executor_pool_ref
   domain_pool
@@ -48,6 +50,7 @@
   eio.unix
   eio_main
   mtime
+  mtime.clock
   time_compat
   fs_compat
   masc_log

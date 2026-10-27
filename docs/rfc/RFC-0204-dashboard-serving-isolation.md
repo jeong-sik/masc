@@ -160,7 +160,7 @@ val current : unit -> [ `Read | `Background ]
 
 - lane 은 Eio fiber key 에 둔다. 표시가 없으면 `Background` 다. `Executor_pool_ref` 의 `worker_marker` 와 같은 방식이다.
 - Eio 에서 fork 한 fiber 는 부모의 fiber key 를 물려받는다. 그래서 요청 중에 fork 한 fiber 도 `Read` 를 본다.
-- `with_read` 는 끝날 때(예외 포함) 그 요청을 끝난 것으로 표시한다. `current ()` 는 끝난 요청의 `Read` 를 `Background` 로 돌려준다. 요청보다 오래 사는 fiber(웹소켓 heartbeat, 요청이 시작한 stale 캐시 재계산 등)는 요청이 끝나는 순간부터 배경 풀을 쓴다. 이런 fork 를 손으로 목록에 올릴 필요가 없다.
+- `with_read` 는 끝날 때(예외 포함) 그 요청을 끝난 것으로 표시한다. `current ()` 는 끝난 요청의 `Read` 를 `Background` 로 돌려준다. 요청보다 오래 사는 fiber(웹소켓 heartbeat 등)는 요청이 끝나는 순간부터 배경 풀을 쓴다. lane 은 풀에 제출하는 순간의 fiber 로 정한다. 요청 핸들러 안에서 fork 한 SWR 재계산은 핸들러가 돌아오기 전에 풀에 닿으므로 Read 로 센다(3.4 와 같다). 이런 fork 를 손으로 목록에 올릴 필요가 없다.
 
 ### 3.2 표시는 요청 입구에서 한다
 
@@ -209,6 +209,8 @@ POST·PUT·DELETE 와 `/mcp` 도구 호출은 `Background` 그대로다. 무거�
 ### 3.6 풀 대기 시간을 잰다
 
 지금은 제출부터 worker 가 시작할 때까지를 재는 곳이 없다. `Executor_pool_submission.submit` 에서 그 시간을 lane 별 고정 구간 히스토그램(Atomic 카운터)에 넣고 `/health` 에 싣는다. 이 계측만으로 고쳐지는 것은 없다. 고친 뒤 효과와 남은 대기를 나눠 보려는 것이다.
+
+기다리다 취소된 제출(데드라인, HTTP/2 연결 끊김)은 lane 별 `abandoned` 히스토그램에 따로 센다. L3 진행 판단은 `wait` 와 `abandoned` 를 함께 본다.
 
 ## 4. 하지 않는 것
 

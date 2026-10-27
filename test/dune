@@ -1660,6 +1660,11 @@
  (libraries alcotest masc.masc_core eio eio_main eio.unix unix threads.posix))
 
 (test
+ (name test_pool_lane)
+ (modules test_pool_lane)
+ (libraries alcotest masc.masc_core eio eio_main fmt mtime yojson))
+
+(test
  (name test_dashboard_cache_cancellation)
  (modules test_dashboard_cache_cancellation)
  (libraries alcotest masc.dashboard masc.masc_core eio eio_main yojson))

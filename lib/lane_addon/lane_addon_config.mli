@@ -51,6 +51,10 @@ val load_source : source_path:string -> source_text:string -> (declaration, stri
     from [declarations] and reported, without selecting an arbitrary winner. *)
 val load : directory:string -> snapshot
 
+val browser_source : declaration -> Browser_lane.Backend.t option
+(** The browser source [declaration]'s worker serves, [None] for an MCP tool
+    package. *)
+
 val browser_source_on : snapshot -> Browser_lane.Backend.t -> bool option
 (** Whether an enabled declaration runs [backend]'s worker. [None]: the read
     is not complete, so a declaration it missed may run it. *)

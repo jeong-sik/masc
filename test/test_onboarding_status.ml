@@ -549,28 +549,36 @@ let manual_host_recovery_installs_only_its_launcher () =
               let said = Status.message (observation ~launcher ~keeper record) in
               has said [ lead ^ install ];
               lacks said [ "--mode bidi"; "--mode extension" ])
-            [ Status.Not_configured; Status.Not_known ])
+            [ Status.Addon_off; Status.Not_configured; Status.Not_known ])
         records)
     [ Launcher.Not_installed, "the operator first installs the lane by running "
     ; Launcher.Undeclared, "the operator first installs the lane again by running " ]
 
 let live_firefox_configuration_is_observed_without_starting_it () =
-  let keeper ?(firefox = Some true) configuration = Status.keeper ~configuration ~firefox in
+  let asked = ref 0 in
+  let keeper ?(firefox = Some true) configuration =
+    Status.keeper ~configuration ~firefox:(fun () -> incr asked; firefox) in
   let live_bidi : Browser_configuration.live_bidi =
     { firefox = "/Apps/firefox"; port = 9444; profile = "/keeper/profile" } in
   let configured = { Browser_configuration.none with live_bidi = Some live_bidi } in
   check bool "the Addon configuration preserves its selected endpoint and profile" true
     (keeper (Some configured)
      = Status.Addon_managed { port = live_bidi.port; profile = live_bidi.profile });
-  check bool "a browser-firefox switched off leaves the operator to start Firefox" true
-    (keeper ~firefox:(Some false) (Some configured) = Status.Not_configured);
+  check bool "a browser-firefox switched off is told apart from no table" true
+    (keeper ~firefox:(Some false) (Some configured) = Status.Addon_off);
   check bool "unread declarations do not say who starts Firefox" true
     (keeper ~firefox:None (Some configured) = Status.Not_known);
+  check int "each table asks the declarations once" 3 !asked;
   check bool "no table" true (keeper (Some Browser_configuration.none) = Status.Not_configured);
   check bool "nothing loaded" true (keeper None = Status.Not_known);
+  check int "with no table the declarations are not read" 3 !asked;
   let paragraph keeper = Status.message (observation ~keeper Record.Never_started) in
   check bool "no table changes the paragraph" false
-    (String.equal (paragraph Status.Not_configured) (paragraph Status.Not_known))
+    (String.equal (paragraph Status.Not_configured) (paragraph Status.Not_known));
+  check bool "a switched-off declaration is not said to be no table" false
+    (String.equal (paragraph Status.Addon_off) (paragraph Status.Not_configured));
+  check bool "a switched-off declaration changes the paragraph" false
+    (String.equal (paragraph Status.Addon_off) (paragraph Status.Not_known))
 
 (* Doctor reads Addon configuration from runtime.toml without starting it. *)
 let doctor_reads_addon_firefox_configuration_from_runtime_toml () =
@@ -843,6 +851,7 @@ let a_bidi_host_report_reads_back_as_written () =
         ; "ended", Record.Ended (ended, ending); "died", Record.Died entry
         ; "unreadable, no host", Record.Unreadable { detail = "torn"; held = Some false } ])
     [ "Addon managed", managed
+    ; "browser-firefox off", Status.Addon_off
     ; "no table", Status.Not_configured
     ; "configuration not loaded", Status.Not_known ];
   (* Times on disk are not whole seconds; one that was read is written and
@@ -934,8 +943,10 @@ let a_bidi_host_report_reads_back_as_written () =
   refused "a keeper this reader does not know" (with_keeper_json (`Assoc [ "kind", `String "operator" ]));
   refused "a keeper that names no kind" (with_keeper_json (`Assoc []));
   refused "a keeper that is no object" (with_keeper_json (`String "not_configured"));
-  refused "a kind with no port, given a port"
-    (with_keeper_json (`Assoc [ "kind", `String "not_configured"; "port", `Int 9222 ]));
+  List.iter (fun kind ->
+      refused ("a kind with no port, given a port: " ^ kind)
+        (with_keeper_json (`Assoc [ "kind", `String kind; "port", `Int 9222 ])))
+    [ "addon_off"; "not_configured" ];
   List.iter (fun name -> refused ("Addon managed, with no " ^ name) (with_keeper_json (without managed_fields name)))
     [ "port"; "profile" ];
   refused "Addon managed, on no port" (with_managed "port" (`Int 0));

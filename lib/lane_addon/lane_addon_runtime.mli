@@ -492,8 +492,8 @@ val host_issue_to_json : host_issue -> Yojson.Safe.t
 
 module For_testing : sig
   val browser_source_table :
-    Browser_configuration.t option -> backend:Browser_lane.Backend.t -> path:string ->
-    (Browser_configuration.t -> 'table option) -> ('table, string) result
+    Browser_configuration.t option -> backend:Browser_lane.Backend.t ->
+    'table Browser_configuration.source -> ('table, string) result
   (** The table a browser worker starts its source from: [Error] when no
       runtime.toml was loaded or it has no table for that source. *)
   type visibility = Shared | Operator_only | Keeper_only of string

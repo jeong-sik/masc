@@ -58,9 +58,16 @@ val parse : Otoml.t -> (t, string) result
     cannot be read or its tables do not parse. *)
 val of_file : string -> (t, string) result
 
-(** The table each source that needs one starts from, as runtime.toml names
-    it; external hosts need none. *)
-val automation_path : string
-val stagehand_path : string
-val live_bidi_path : string
-val live_ego_path : string
+(** A source that starts from a runtime.toml table, with what that table
+    parses to. External hosts need none. *)
+type _ source =
+  | Automation : automation source
+  | Stagehand : stagehand source
+  | Live_bidi : live_bidi source
+  | Live_ego : live_ego source
+
+(** Where runtime.toml writes [source]'s table. *)
+val source_path : _ source -> string
+
+(** [source]'s table as parsed, [None] when runtime.toml has none. *)
+val source_table : 'a source -> t -> 'a option

@@ -185,7 +185,10 @@ let test_waiter_interruption_is_not_reply_timeout ?(held=false) () = with_client
   let disconnected_signal = interruption disconnected_command in
   ignore (Lane.disconnect_client ~client_id:client.client_id);
   check bool "disconnect signals interruption" true (Eio.Promise.is_resolved disconnected_signal);
-  if held then check bool "disconnect retires the held client" false (connected ());
+  if held then (
+    check bool "disconnect removes the held client" false (connected ());
+    check bool "the retired held identity cannot re-register" true
+      (Lane.take_command ~client_info:client ~window_sec:0.001 = Error Lane.Client_retired));
   ignore (Eio.Promise.await disconnected))
 let test_disconnect_releases_waiter () = with_clients (fun sw connect ->
   let client = connect Lane.Zen in

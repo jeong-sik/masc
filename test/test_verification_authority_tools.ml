@@ -220,6 +220,7 @@ let require_root = function
 
 let require_layout result =
   match require_root result with
+  | AR.Producer_namespace _ -> Alcotest.fail "inventory returned an unobserved namespace"
   | AR.Producer_tree layout -> layout
   | AR.Producer_root_absent { root } ->
     Alcotest.failf "expected a producer tree, got an absent root: %s" root
@@ -395,6 +396,7 @@ let test_keeper_surface_uses_the_effective_sandbox_root () =
       Alcotest.failf "Docker producer root was not inspected: %s" detail
     | Ok (AR.Producer_root_absent { root }) ->
       Alcotest.failf "Docker producer root was reported absent: %s" root
+    | Ok (AR.Producer_namespace _) -> Alcotest.fail "inventory returned an unobserved namespace"
     | Ok (AR.Producer_tree layout) ->
       Alcotest.(check bool)
         "inspects the Docker-scoped producer root"
@@ -520,6 +522,7 @@ let test_workspace_producer_without_a_playground_gets_a_stated_absence () =
   | Error reason -> Alcotest.failf "workspace surface creation failed: %s" reason
   | Ok surface ->
     (match VAT.root_layout surface |> require_root with
+     | AR.Producer_namespace _ -> Alcotest.fail "inventory returned an unobserved namespace"
      | AR.Producer_tree layout ->
        Alcotest.failf
          "a missing workspace root was listed as a tree: %s"
@@ -656,6 +659,7 @@ let test_endpoint_layout_fails_closed () =
 let test_root_layout_fails_closed_when_discovery_is_unavailable () =
   with_surface ~sandbox_profile:"docker" (fun _config surface ->
     match VAT.root_layout surface with
+    | Ok (AR.Producer_namespace _) -> Alcotest.fail "inventory returned an unobserved namespace"
     | Ok (AR.Producer_tree layout) ->
       Alcotest.failf
         "missing producer root was presented as a usable layout: %s"
@@ -677,6 +681,7 @@ let test_root_layout_fails_closed_when_checkout_discovery_is_partial () =
       make_checkout root (Printf.sprintf "checkout-%02d" index)
     done;
     match VAT.root_layout surface with
+    | Ok (AR.Producer_namespace _) -> Alcotest.fail "inventory returned an unobserved namespace"
     | Ok (AR.Producer_tree layout) ->
       Alcotest.failf
         "partial checkout discovery was presented as complete: %s"
@@ -688,6 +693,39 @@ let test_root_layout_fails_closed_when_checkout_discovery_is_partial () =
         "partial discovery names its limit"
         true
         (Astring.String.is_infix ~affix:"checkout discovery is partial" detail))
+;;
+
+let test_task_review_does_not_require_inventory () =
+  let check config expected_root =
+    let request : Workspace_verification_store.request_header =
+      {id="vrf-namespace";task_id="task-001";worker=producer;created_at=1.} in
+    match VAT.create_task_review ~config ~verification_id:request.id
+      ~task_id:request.task_id ~producer
+      ~evidence_access:(Workspace_verification_store.Evidence_available {request;items=[]}) with
+    | Error detail -> Alcotest.failf "inventory vetoed Task admission: %s" detail
+    | Ok review ->
+      (match VAT.task_review_root review with
+       | AR.Producer_namespace {root} ->
+         Alcotest.(check string) "captured namespace" expected_root root
+       | Producer_tree _ | Producer_root_absent _ ->
+         Alcotest.fail "Task admission asserted an inventory observation");
+      (match VAT.validate_task_review review with
+       | Ok () -> () | Error detail -> Alcotest.fail detail)
+  in
+  with_surface ~sandbox_profile:"docker" (fun config surface ->
+    (* Missing roots and more checkouts than the inventory cap both used to
+       stop before the submitted evidence reached a judge. *)
+    let root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config
+      (match Keeper_meta_store.read_effective_meta config producer with
+       | Ok (Some meta) -> meta | _ -> Alcotest.fail "fixture meta missing") in
+    check config root;
+    let playground = producer_playground config producer in
+    for index = 0 to Masc.Keeper_playground_checkouts.max_reported_checkouts do
+      make_checkout playground (Printf.sprintf "checkout-%02d" index)
+    done;
+    (match VAT.root_layout surface with
+     | Error _ -> () | Ok _ -> Alcotest.fail "fixture inventory should remain partial");
+    check config root)
 ;;
 
 let test_root_layout_reports_entries_and_discovered_checkouts () =
@@ -1602,6 +1640,8 @@ let () =
             "root_layout fails closed when checkout discovery is partial"
             `Quick
             test_root_layout_fails_closed_when_checkout_discovery_is_partial
+        ; Alcotest.test_case "Task review does not require a complete inventory"
+            `Quick test_task_review_does_not_require_inventory
         ; Alcotest.test_case
             "a workspace producer without a playground gets a stated absence"
             `Quick

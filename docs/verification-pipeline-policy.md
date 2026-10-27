@@ -21,9 +21,11 @@ must preserve the producer's submitted evidence without semantic inference:
 Artifact paths are relative to the producer workspace root, including any
 checkout prefix: a file at `repo/evidence/build.log` is submitted as
 `artifact:repo/evidence/build.log`, even when Execute ran with `cwd=repo`.
-For endpoint-owned Keepers, both verifier layout discovery and Read/Grep observe
-the attached endpoint; the host bookkeeping directory is not the working tree.
-An unreachable endpoint or incomplete scan is reported as unavailable, not empty.
+For endpoint-owned Keepers, Read/Grep observe the captured endpoint; the host
+bookkeeping directory is not the working tree. A Task review freezes its declared
+producer namespace and read authority without recursively inventorying every
+checkout. Inventory APIs still report an unreachable endpoint or incomplete scan
+as unavailable, never empty. Actual lookup failures remain unconfirmed evidence.
 
 Successful submission responses include `evidence_capture.verification_id` and
 `evidence_capture.diagnostics` from that exact saved request. Unreadable references
@@ -39,9 +41,9 @@ requirements, not submitted evidence. They are persisted separately as
 
 Completion `notes` and handoff `summary` are persisted as explicit `note:`
 items. A bare path, absolute host path, URL, commit, or board id is not an
-artifact. The system LLM lane does not fetch those references. If one is
-required as proof, the producer must materialize the relevant content as an
-`artifact:` snapshot. Invalid, unreadable, and truncated items remain typed
+artifact. Such references remain claims until the judge reads an available
+snapshot or the corresponding read-only lookup result. Producers can preserve
+the relevant content as an `artifact:` snapshot. Invalid, unreadable, and truncated items remain typed
 and visible; they are not silently treated as proof.
 
 ## 2. System LLM review contract
@@ -79,6 +81,35 @@ If the system LLM runtime is unavailable or produces no structured verdict,
 the task remains `awaiting_verification` and the reason is observable. The
 runtime must not substitute a Keeper, a name-based role, a timer, or a local
 string classifier.
+
+## 4. Original execution recovery
+
+Native Task reviewers retain a journal locator and its immutable original digest
+before provider effects. The journal tree belongs to that original and survives
+the caller's cancellation. A pending review observes those exact recorded calls;
+it never starts another model call or allocates a successor on uncertainty.
+Observation does not require reconnecting to the producer's VM or SSH endpoint.
+
+`execution_pending` means the original journal has no terminal observation. The
+maintenance pulse schedules observation only. `execution_repair_required` means
+automatic reconciliation cannot establish an original result; the operator must
+inspect it. TUI and Dashboard distinguish these from a generic review failure.
+Historical originals without a locator remain unresolved, even after upgrade.
+
+Only a terminal native success with one admitted, successfully settled structured
+verdict call can be recovered. Schema refusals, duplicate reports, unsettled
+effects and ambiguous histories cannot become judgments. The recovered judgment
+and its observer intent enter the existing atomic publication and Task commit
+path. Its missing native response identity stays unknown. Official-client
+candidates keep their existing supported execution path in the original's
+stable session namespace. Their pre-dispatch owner reference is retained too;
+interrupted official sessions require operator reconciliation because this
+observer cannot establish a structured verdict from their session alone.
+
+Run-registry timestamps, elapsed time and tool observations describe the host's
+current review or reconciliation attempt. A recovery wake does not reconstruct
+the original model's start time, elapsed time or complete lookup history; an
+empty tool list on that wake does not assert that the model used no tools.
 
 ## Revision History
 

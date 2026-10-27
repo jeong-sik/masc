@@ -273,7 +273,12 @@ type attempt_input =
     execution runtime, filesystem and a valid [keeper_name]. Journal setup or
     locator publication failure aborts before provider effects; readback failure
     is explicit evidence rather than synthesized wire settings. Official-client
-    calls remain unobserved. This is not a nested Agent-call entry point. *)
+    calls remain unobserved by [on_request_observation].
+    [on_request_execution_ready] confirms native ownership after locator
+    publication and official-session ownership after admission, before provider
+    effects. Its typed reference distinguishes these capabilities. A
+    direct-native binding cannot be replaced by this owner callback.
+    This is not a nested Agent-call entry point. *)
 val run_named :
   ?input_policy:Keeper_input_policy.t ->
   runtime_id:string ->
@@ -377,6 +382,7 @@ val run_named :
   ?on_memory_capacity_refusal:Keeper_memory_delivery_reprojection.t ->
   ?on_runtime_attempt:(runtime_attempt -> unit) ->
   ?on_request_observation:(Request_observation.t -> unit) ->
+  ?on_request_execution_ready:(runtime_id:string -> execution:Types_core.verifier_execution_reference -> (unit, string) result) ->
   ?runtime_retry_deferral:runtime_retry_deferral ->
   ?checkpoint_progress:
     Keeper_turn_driver_try_provider.checkpoint_progress Atomic.t ->

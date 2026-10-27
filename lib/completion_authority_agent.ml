@@ -582,6 +582,7 @@ let system_authority = Verifier_review_publication.authority
    ([retry_admission]). *)
 type retry_request =
   | Retry_requested
+  | Observe_original_requested
   | No_retry_requested
 
 (* What the scheduler did with one request. [Armed_timer]: this request
@@ -627,6 +628,8 @@ type stop_cause =
               from [retryable_runtimes], and named here so the stall record
               carries per-candidate outcomes (2026-10-07 audit F-02). *)
       }
+  | Execution_pending of { detail : string }
+  | Execution_repair_required of { detail : string }
   | Raised of { detail : string }
 
 type process_outcome =
@@ -639,9 +642,10 @@ type process_outcome =
    with none leaves the next move to the producer, the operator, or the
    whole-backlog sweep. *)
 let retry_request_of_stop_cause : stop_cause -> retry_request = function
+  | Execution_pending _ -> Observe_original_requested
   | Not_reviewed { retryable_runtimes = _ :: _; _ } -> Retry_requested
   | Not_reviewed { retryable_runtimes = []; _ }
-  | Infrastructure_unavailable _ | Commit_failed _ | Raised _ -> No_retry_requested
+  | Execution_repair_required _ | Infrastructure_unavailable _ | Commit_failed _ | Raised _ -> No_retry_requested
 ;;
 
 let registry_outcome_of_stop_cause : stop_cause -> Verification_run_registry.outcome
@@ -658,6 +662,8 @@ let registry_outcome_of_stop_cause : stop_cause -> Verification_run_registry.out
       else Printf.sprintf "%s | model_absent=%s" detail (String.concat "," model_absent_runtimes)
     in
     Verification_run_registry.Not_reviewed { gate; detail }
+  | Execution_pending {detail} -> Verification_run_registry.Execution_pending {detail}
+  | Execution_repair_required {detail} -> Verification_run_registry.Execution_repair_required {detail}
   | Raised { detail } -> Verification_run_registry.Raised { detail }
 ;;
 
@@ -697,6 +703,8 @@ let stop_cause_label = function
   | Commit_failed _ -> "Commit_failed"
   | Not_reviewed { gate; evaluator_runtime; _ } ->
     Printf.sprintf "Not_reviewed{gate=%s,slot=%s}" gate evaluator_runtime
+  | Execution_pending _ -> "Execution_pending"
+  | Execution_repair_required _ -> "Execution_repair_required"
   | Raised _ -> "Raised"
 ;;
 
@@ -704,6 +712,7 @@ let stop_cause_detail = function
   | Infrastructure_unavailable { detail; _ }
   | Commit_failed { detail }
   | Not_reviewed { detail; _ }
+  | Execution_pending {detail} | Execution_repair_required {detail}
   | Raised { detail } -> detail
 ;;
 
@@ -711,7 +720,7 @@ let stop_cause_detail = function
    the evaluator's gate name, every other stop is keyed by its constructor. *)
 let stalled_gate = function
   | Not_reviewed { gate; _ } -> gate
-  | (Infrastructure_unavailable _ | Commit_failed _ | Raised _) as cause ->
+  | (Execution_pending _ | Execution_repair_required _ | Infrastructure_unavailable _ | Commit_failed _ | Raised _) as cause ->
     stop_cause_label cause
 ;;
 
@@ -753,6 +762,12 @@ let stall_log_line ~task_id ~verification_id ~cause ~disposition =
       (retry_delay_field delay)
       (Masc_domain.completion_authority_actor system_authority)
       (stop_cause_detail cause)
+  | Verification_protocol.Original_observation_scheduled {delay} ->
+    Printf.sprintf "system LLM completion authority will observe original task_id=%s verification_id=%s %s reason=%s"
+      task_id verification_id (retry_delay_field delay) (stop_cause_detail cause)
+  | Verification_protocol.Original_repair_required ->
+    Printf.sprintf "system LLM completion authority requires original reconciliation task_id=%s verification_id=%s reason=%s"
+      task_id verification_id (stop_cause_detail cause)
   | Verification_protocol.No_retry_armed ->
     Printf.sprintf
       "system LLM completion authority stopped: %s; producer or operator must act task_id=%s verification_id=%s authority=%s reason=%s"
@@ -913,7 +928,7 @@ let commit_verdict_with_effects ~observe_original ~apply_original
     | Error (W.Worker_error error) ->
       Error (match error with
         | W.Original_not_found -> "original absent"
-        | Original_corrupt detail | Grants_mismatch detail | Execution_pending detail
+        | Authority_unavailable detail | Original_corrupt detail | Grants_mismatch detail | Execution_pending detail | Execution_repair_required detail
         | Persistence_unavailable detail -> detail)
     | Error (W.Apply_failed (Invalid_commit_intent detail)) -> Error detail
     | Error (W.Apply_failed (Workspace_commit_refused error)) ->
@@ -1120,14 +1135,10 @@ let process_task_once ?(registry=Verification_run_registry.global ())
         ~stage:Verification_run_registry.Review_preparation
         ~detail:reason
     | Ok prepared ->
-      (match Verification_authority_tools.create_task_review
+      (let lookup_authority = Eio.Lazy.from_fun ~cancel:`Record (fun () -> Verification_authority_tools.create_task_review
          ~config:runtime.config ~verification_id ~task_id:task.id ~producer:assignee
-         ~evidence_access:prepared.evidence_access with
-       | Error reason ->
-         defer_unavailable ~stage:Verification_run_registry.Lookup_surface ~detail:reason
-       | Ok lookup_authority ->
-            let lookup_tools = Verification_authority_tools.task_review_tools lookup_authority in
-            let lookup_root = Verification_authority_tools.task_review_root lookup_authority in
+         ~evidence_access:prepared.evidence_access) in
+       let prepare_authority () = Eio.Lazy.force lookup_authority in
             (* Human labels close the judge's own loop: where an operator
                disagreed with a past verdict, the divergence returns to the
                judge as a few-shot example, false positives first. Filled
@@ -1155,20 +1166,24 @@ let process_task_once ?(registry=Verification_run_registry.global ())
             in
             let installation_id = "masc.completion-authority" in
             let package_id = "masc.completion-authority.review" in
-            let run_result : (int * Task.Anti_rationalization.review_result, string) result =
+            let prepared_original : (int * Verifier_review_original.t, Verifier_review_worker.error) result =
               let* attempt =
                 Verifier_review_owner.next_attempt ~store:owner_store ~verification_id
                   ~installation_id ~package_id
                 |> Result.map_error (function
-                  | Verifier_review_owner.Not_found -> "attempt inventory not found"
-                  | Verifier_review_owner.Load_store_unavailable d -> "store: " ^ d
-                  | Verifier_review_owner.Corrupt_original d -> "original_corrupt: " ^ d) in
+                  | Verifier_review_owner.Not_found -> Verifier_review_worker.Original_not_found
+                  | Verifier_review_owner.Load_store_unavailable d -> Verifier_review_worker.Persistence_unavailable d
+                  | Verifier_review_owner.Corrupt_original d -> Verifier_review_worker.Original_corrupt d) in
               let* () = match Verifier_review_owner.load_for_destination ~store:owner_store
                 ~verification_id ~attempt ~installation_id ~package_id with
               | Ok _ -> Ok ()
-              | Error (Verifier_review_owner.Load_store_unavailable detail
-                | Verifier_review_owner.Corrupt_original detail) -> Error detail
+              | Error (Verifier_review_owner.Load_store_unavailable detail) -> Error (Verifier_review_worker.Persistence_unavailable detail)
+              | Error (Verifier_review_owner.Corrupt_original detail) -> Error (Verifier_review_worker.Original_corrupt detail)
               | Error Verifier_review_owner.Not_found ->
+              let* lookup_authority = prepare_authority ()
+                |> Result.map_error (fun detail -> Verifier_review_worker.Authority_unavailable detail) in
+              let lookup_tools = Verification_authority_tools.task_review_tools lookup_authority in
+              let lookup_root = Verification_authority_tools.task_review_root lookup_authority in
               let* original =
                 Verifier_review_original.prepare
                   ~generator_runtime:(Option.map
@@ -1181,7 +1196,7 @@ let process_task_once ?(registry=Verification_run_registry.global ())
                   ~lookup_schemas:(List.map (fun (s : Types_core.tool_schema) -> s.name)
                                      (Verification_authority_tools.schemas lookup_tools))
                   prepared.review_request
-                |> Result.map_error (fun reason -> "original_invalid: " ^ reason)
+                |> Result.map_error (fun reason -> Verifier_review_worker.Original_corrupt reason)
               in
               Verifier_review_owner.retain
                   ~store:owner_store
@@ -1191,15 +1206,20 @@ let process_task_once ?(registry=Verification_run_registry.global ())
                   ~package_id
                   original
                 |> Result.map_error (function
-                  | Verifier_review_owner.Original_invalid d -> "original_invalid: " ^ d
-                  | Verifier_review_owner.Identity_mismatch d -> "identity_mismatch: " ^ d
-                  | Verifier_review_owner.Retain_store_unavailable d -> "store: " ^ d
-                  | Verifier_review_owner.Already_retained d -> "already_retained: " ^ d)
+                  | Verifier_review_owner.Original_invalid d -> Verifier_review_worker.Original_corrupt d
+                  | Verifier_review_owner.Identity_mismatch d -> Verifier_review_worker.Original_corrupt d
+                  | Verifier_review_owner.Retain_store_unavailable d -> Verifier_review_worker.Persistence_unavailable d
+                  | Verifier_review_owner.Already_retained d -> Verifier_review_worker.Original_corrupt d)
               in
               let* original=Verifier_review_owner.load_for_destination ~store:owner_store
                 ~verification_id ~attempt ~installation_id ~package_id
-                |> Result.map_error (function Verifier_review_owner.Not_found -> "original absent"
-                  | Load_store_unavailable detail | Corrupt_original detail -> detail) in
+                |> Result.map_error (function Verifier_review_owner.Not_found -> Verifier_review_worker.Original_not_found
+                  | Load_store_unavailable detail -> Verifier_review_worker.Persistence_unavailable detail
+                  | Corrupt_original detail -> Verifier_review_worker.Original_corrupt detail) in
+              Ok (attempt,original)
+            in
+            let run_result =
+              let* attempt,original = prepared_original in
               let* result =
               with_original_publication_guard ~store:owner_store ~verification_id ~attempt
                 ~installation_id ~package_id (fun () -> Verifier_review_worker.run_attempt
@@ -1225,19 +1245,20 @@ let process_task_once ?(registry=Verification_run_registry.global ())
                 ~attempt
                 ~installation_id
                 ~package_id
-                ~authority:lookup_authority
+                ~base_path:runtime.config.base_path ~prepare_authority
                 ~provider_rest:Verification_retry.provider_rest
                 ())
-              |> Result.map_error (function
-                | Verifier_review_worker.Original_not_found -> "original_not_found"
-                | Verifier_review_worker.Original_corrupt d -> "original_corrupt: " ^ d
-                | Verifier_review_worker.Grants_mismatch d -> "grants_mismatch: " ^ d
-                | Verifier_review_worker.Execution_pending d -> "execution_pending: " ^ d
-                | Verifier_review_worker.Persistence_unavailable d -> "persistence: " ^ d)
               in Ok (attempt,result)
             in
             match run_result with
-            | Error detail -> stop (Raised { detail = "verifier review attempt failed: " ^ detail })
+            | Error (Verifier_review_worker.Execution_pending detail) -> stop (Execution_pending {detail})
+            | Error (Verifier_review_worker.Execution_repair_required detail) -> stop (Execution_repair_required {detail})
+            | Error (Verifier_review_worker.Authority_unavailable detail) ->
+              defer_unavailable ~stage:Verification_run_registry.Lookup_surface ~detail
+            | Error (Verifier_review_worker.Persistence_unavailable detail) ->
+              defer_unavailable ~stage:Verification_run_registry.Review_preparation ~detail
+            | Error Verifier_review_worker.Original_not_found -> stop (Raised {detail="verifier original not found"})
+            | Error (Verifier_review_worker.Original_corrupt detail | Grants_mismatch detail) -> stop (Raised {detail})
             | Ok (attempt,result) ->
             (* Every verdict lands in the calibration ledger the Harness
                surface reads — which evaluator judged, and whether a fallback
@@ -1388,7 +1409,7 @@ let schedule_retry_scope (runtime : runtime) ~delay_sec scope =
 let retry_delay_sec ~retry_interval_sec ~now = function
   | Not_reviewed { retryable_runtimes; _ } ->
     Verification_retry.delay ~retry_interval_sec ~now retryable_runtimes
-  | Infrastructure_unavailable _ | Commit_failed _ | Raised _ -> retry_interval_sec
+  | Execution_pending _ | Execution_repair_required _ | Infrastructure_unavailable _ | Commit_failed _ | Raised _ -> retry_interval_sec
 ;;
 
 (* A retry that only waits the pulse joins the shared timer. One that must
@@ -1458,7 +1479,7 @@ let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verifi
       let scheduling =
         match retry_request_of_stop_cause cause with
         | No_retry_requested -> Retry_not_requested
-        | Retry_requested -> Retry_admitted (schedule_retry runtime key ~delay_sec)
+        | Retry_requested | Observe_original_requested -> Retry_admitted (schedule_retry runtime key ~delay_sec)
       in
       (* One disposition, read after the scheduler answered, drives both the
          WARN template and the Board sentence: the reader of either is told
@@ -1469,7 +1490,7 @@ let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verifi
           let evaluator_runtime =
             match cause with
             | Not_reviewed { evaluator_runtime; _ } -> Some evaluator_runtime
-            | Infrastructure_unavailable _ | Commit_failed _ | Raised _ -> None
+            | Execution_pending _ | Execution_repair_required _ | Infrastructure_unavailable _ | Commit_failed _ | Raised _ -> None
           in
           Verification_protocol.notify_stalled_verification_with_runtime
             ~authority:system_authority
@@ -1483,7 +1504,15 @@ let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verifi
         ~verification_id
         ~cause
         ~disposition:
-          (stall_disposition_of_scheduling ~retry_interval_sec:delay_sec scheduling))
+          (let disposition = stall_disposition_of_scheduling ~retry_interval_sec:delay_sec scheduling in
+           match cause with
+           | Execution_pending _ ->
+             (match disposition with
+              | Verification_protocol.Retry_scheduled {delay} ->
+                Verification_protocol.Original_observation_scheduled {delay}
+              | Original_observation_scheduled _ | Original_repair_required | No_retry_armed -> disposition)
+           | Execution_repair_required _ -> Verification_protocol.Original_repair_required
+           | Infrastructure_unavailable _ | Commit_failed _ | Not_reviewed _ | Raised _ -> disposition))
   else
     Log.Misc.debug
       "system LLM completion authority skipped duplicate in-flight review task_id=%s verification_id=%s"
@@ -1755,6 +1784,7 @@ module For_testing = struct
 
   type nonrec retry_request = retry_request =
     | Retry_requested
+    | Observe_original_requested
     | No_retry_requested
 
   type nonrec retry_admission = retry_admission =
@@ -1779,6 +1809,8 @@ module For_testing = struct
         ; retryable_runtimes : string list
         ; model_absent_runtimes : string list
         }
+    | Execution_pending of { detail : string }
+    | Execution_repair_required of { detail : string }
     | Raised of { detail : string }
 
   type nonrec process_outcome = process_outcome =

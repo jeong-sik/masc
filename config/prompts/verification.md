@@ -76,6 +76,28 @@ URL, 호스트 경로, commit, board 참조, 명령과 그 결과에 대한 주�
 {{evidence_items}}
 </required_evidence>
 
+### lookup.producer_namespace (vars: lookup_tools, root)
+<live_lookup>
+이 검증의 읽기 전용 도구는 {{lookup_tools}}입니다. 파일 조회 권한은 제출자의
+`{{root}}` namespace에 고정되어 있습니다. 이 경로는 저장소 루트라는 뜻이
+아니며, 전체 트리를 탐색했거나 경로의 존재·접근 가능성을 확인했다는 뜻도 아닙니다.
+제출된 artifact 경로와 정확한 조회 대상을 사용하세요.
+
+제출 스냅샷과 직접 읽은 조회 결과를 계약에 대조하세요. 소스 조회는 구현의
+근거이며 테스트·빌드·배포 실행의 근거는 아닙니다. 실행 주장에는 읽을 수 있는
+실행 로그나 영수증이 필요합니다. 체크아웃을 읽으면 그 브랜치·HEAD와 제출된
+리비전을 구분하고 main에 반영됐다고 추정하지 마세요.
+
+<evidence_lookup_status>
+{"lookup_surface":"producer_namespace","evidence_lookup_succeeded":false}
+</evidence_lookup_status>
+
+조회가 성공하면 도구 결과에 `evidence_lookup_succeeded: true`와 원래 결과인
+`lookup_result`가 함께 실립니다. 실패하거나 미뤄진 조회는 성공으로 바뀌지
+않습니다. 실패는 파일 부재나 제출자의 작업 실패를 증명하지 않습니다. 확인할
+수 없는 요구 항목이 남으면 승인하지 말고, 대상과 실제 조회 오류를 사유에 적으세요.
+</live_lookup>
+
 ### lookup.producer_tree (vars: lookup_tools, lookup_root_layout)
 <live_lookup>
 producer가 작업하던 sandbox 루트를 기준으로 읽는 도구가 있습니다:

@@ -1759,6 +1759,7 @@ let run_named
     ?on_memory_capacity_refusal
     ?on_runtime_attempt
     ?on_request_observation
+    ?on_request_execution_ready
     ?runtime_retry_deferral
     ?checkpoint_progress
     ?attempt_continuation
@@ -2297,7 +2298,13 @@ let run_named
           | Some saved, Runtime_execution.Agent_core _ -> String.equal saved attempt_runtime_id
           | Some _, (Runtime_execution.Codex_app_server _ | Antigravity_cli _
                     | Muse_serve _ | Claude_code _) -> false in
-        if not native_ready then Error (Agent_core.Error.Internal
+        let execution_owner_ready = match on_request_execution_ready,native_binding with
+          | Some _, Some _ -> false
+          | None, _ | Some _, None -> true in
+        if not execution_owner_ready then Error (Agent_core.Error.Config
+          (Agent_core.Error.InvalidConfig {field="on_request_execution_ready";
+            detail="original-owned execution cannot replace a direct-native binding"}))
+        else if not native_ready then Error (Agent_core.Error.Internal
           "native recovery requires its saved Agent Core runtime")
         else if required_native_posture = Some Runtime_native_tools.Native_none
            && not (Runtime_execution.supports_native_none runtime.Runtime_instance.execution) then
@@ -2332,10 +2339,22 @@ let run_named
         admission |> Result.map_error (fun detail -> Agent_core.Error.Config
           (Agent_core.Error.InvalidConfig { field = "verifier.runtime"; detail }))
       in
-      (match Result.bind verifier_ready (fun () -> Result.bind source_reader_ready (fun () ->
-          Keeper_required_tools.check_surface tool_requirement
+      let bind_official_owner () =
+        match runtime.Runtime_instance.execution,on_request_execution_ready with
+        | Runtime_execution.Agent_core _, _
+        | (Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Muse_serve _), None -> Ok ()
+        | (Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Muse_serve _), Some ready ->
+          ready ~runtime_id:attempt_runtime_id ~execution:Types_core.Official_session
+          |> Result.map_error (fun detail -> Agent_core.Error.Config
+            (Agent_core.Error.InvalidConfig {field="review.execution_owner";detail}))
+      in
+      let admission = Result.bind verifier_ready (fun () ->
+        Result.bind source_reader_ready (fun () ->
+          let tools_ready = Keeper_required_tools.check_surface tool_requirement
             ~runtime_id:attempt_runtime_id ~surface_enabled ~has_tools
-          |> Result.map_error Keeper_required_tools.to_core_error)) with
+            |> Result.map_error Keeper_required_tools.to_core_error in
+          Result.bind tools_ready bind_official_owner)) in
+      (match admission with
        | Error failure ->
          Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
          Error failure, None,
@@ -3247,6 +3266,7 @@ let run_named
             ; cooperative_yield_probe
             ; agent_core_checkpoint
             ; on_request_evidence
+            ; on_request_execution_ready
             ; native_binding
             ; native_retired_history_cut = None
             ; trace_link

@@ -397,6 +397,8 @@ let review_observation (listed : listed) =
           | R.Infrastructure_unavailable { detail; _ } -> "unavailable", detail
           | R.Not_reviewed { detail; _ } -> "not_reviewed", detail
           | R.Commit_failed { detail } -> "commit_failed", detail
+          | R.Execution_pending {detail} -> "execution_pending", detail
+          | R.Execution_repair_required {detail} -> "execution_repair_required", detail
           | R.Raised { detail } -> "failed", detail
           | R.Review_cancelled { detail } -> "cancelled", detail
           | R.Superseded_by { authority } -> "superseded", authority in

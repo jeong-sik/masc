@@ -432,6 +432,8 @@ type retry_delay =
 
 type stall_disposition =
   | Retry_scheduled of { delay : retry_delay }
+  | Original_observation_scheduled of { delay : retry_delay }
+  | Original_repair_required
   | No_retry_armed
 
 (* The metadata spelling of the disposition and its inverse. The Board post
@@ -449,6 +451,8 @@ let stall_disposition_to_json = function
       [ ("kind", `String "retry_scheduled")
       ; ("retry_delay", retry_delay_to_json delay)
       ]
+  | Original_observation_scheduled {delay} -> `Assoc ["kind",`String "original_observation_scheduled";"retry_delay",retry_delay_to_json delay]
+  | Original_repair_required -> `Assoc ["kind",`String "original_repair_required"]
   | No_retry_armed -> `Assoc [ ("kind", `String "no_retry_armed") ]
 
 let retry_delay_of_json : Yojson.Safe.t -> retry_delay option = function
@@ -463,6 +467,9 @@ let stall_disposition_of_json : Yojson.Safe.t -> stall_disposition option = func
     (match retry_delay_of_json delay with
      | Some delay -> Some (Retry_scheduled { delay })
      | None -> None)
+  | `Assoc [("kind", `String "original_observation_scheduled");("retry_delay",delay)] ->
+    Option.map (fun delay -> Original_observation_scheduled {delay}) (retry_delay_of_json delay)
+  | `Assoc [("kind", `String "original_repair_required")] -> Some Original_repair_required
   | `Assoc [ ("kind", `String "no_retry_armed") ] -> Some No_retry_armed
   | `Assoc _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _
   | `List _ -> None
@@ -471,13 +478,16 @@ let stall_disposition_of_json : Yojson.Safe.t -> stall_disposition option = func
    armed. The delay is how soon, not whether. *)
 let same_disposition left right =
   match left, right with
-  | Retry_scheduled _, Retry_scheduled _ -> true
+  | Retry_scheduled _, Retry_scheduled _
+  | Original_observation_scheduled _, Original_observation_scheduled _
+  | Original_repair_required, Original_repair_required
   | No_retry_armed, No_retry_armed -> true
-  | Retry_scheduled _, No_retry_armed | No_retry_armed, Retry_scheduled _ -> false
+  | Retry_scheduled _, (Original_observation_scheduled _ | Original_repair_required | No_retry_armed)
+  | Original_observation_scheduled _, (Retry_scheduled _ | Original_repair_required | No_retry_armed)
+  | Original_repair_required, (Retry_scheduled _ | Original_observation_scheduled _ | No_retry_armed)
+  | No_retry_armed, (Retry_scheduled _ | Original_observation_scheduled _ | Original_repair_required) -> false
+;;
 
-(* A timer this stall armed fires after the full interval. A timer that was
-   already running fires when it fires; the post promises no number it does
-   not hold. *)
 let retry_delay_sentence ~now = function
   | Full_interval { seconds } ->
     Printf.sprintf
@@ -543,6 +553,12 @@ let stalled_board_content_with_runtime ~subject ~gate ~detail ~evaluator_runtime
       (retry_delay_sentence ~now delay)
       gate
       detail
+  | Task_review {task_id;verification_id;disposition=Original_observation_scheduled {delay}} ->
+    Printf.sprintf "Task %s (vrf:%s) awaits its original execution: %s. gate=%s: %s. Only the recorded original journal is observed; no model replay is authorized."
+      task_id verification_id (retry_delay_sentence ~now delay) gate detail
+  | Task_review {task_id;verification_id;disposition=Original_repair_required} ->
+    Printf.sprintf "Task %s (vrf:%s) requires operator reconciliation of its original execution. gate=%s: %s. No automatic model replay is authorized."
+      task_id verification_id gate detail
   | Task_review { task_id; verification_id; disposition = No_retry_armed } ->
     Printf.sprintf
       "Stalled task %s (vrf:%s) — no retry armed. gate=%s: %s. Forward path: \
@@ -558,6 +574,12 @@ let stalled_board_content_with_runtime ~subject ~gate ~detail ~evaluator_runtime
     Printf.sprintf
       "Stalled goal %s (request:%s) — %s. gate=%s: %s. The authority retries this unchanged proof request; no resubmission is needed."
       goal_id request_id (retry_delay_sentence ~now delay) gate detail
+  | Goal_review {goal_id;request_id;disposition=Original_observation_scheduled {delay}} ->
+    Printf.sprintf "Goal %s (request:%s) awaits its original execution: %s. gate=%s: %s. No model replay is authorized."
+      goal_id request_id (retry_delay_sentence ~now delay) gate detail
+  | Goal_review {goal_id;request_id;disposition=Original_repair_required} ->
+    Printf.sprintf "Goal %s (request:%s) requires original execution reconciliation. gate=%s: %s. No automatic model replay is authorized."
+      goal_id request_id gate detail
   | Goal_review { goal_id; request_id; disposition = No_retry_armed } ->
     Printf.sprintf
       "Stalled goal %s (request:%s) — no retry armed. gate=%s: %s. The Goal \

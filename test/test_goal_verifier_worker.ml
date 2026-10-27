@@ -123,7 +123,7 @@ let test_actual_retained_lookup_and_restored_receipt () = with_workspace (fun co
   let authority, retained = prepared config store in
   let original = W.original retained in
   let calls = ref 0 in
-  with_reviewer (fun ~base_path ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt
+  with_reviewer (fun ~base_path ?sw:_ ?execution_owner:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt
       ?system_prompt ?goal_blocks:_ ~report_tool_schema:_ ~lookup ~on_tool_result
       ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
     incr calls;
@@ -201,7 +201,7 @@ let test_reported_measurement_snapshot_reaches_retained_worker () =
     Alcotest.(check bool) "changed report does not revoke the captured original" true
       (V.matches_authority original updated_authority);
     let calls = ref 0 and received = ref [] and lookup_results = ref [] in
-    with_reviewer (fun ~base_path ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt
+    with_reviewer (fun ~base_path ?sw:_ ?execution_owner:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt
         ?system_prompt ?goal_blocks:_ ~report_tool_schema:_ ~lookup ~on_tool_result
         ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
       incr calls;
@@ -289,7 +289,7 @@ let test_unknown_and_cancellation_never_redispatch () =
   with_workspace (fun config store _ ->
     let authority, retained = prepared config store in
     let calls = ref 0 in
-    with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
+    with_reviewer (fun ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
         ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
         ~attempt_continuation ~on_runtime_attempt_error () ->
       incr calls;
@@ -315,7 +315,7 @@ let test_unknown_and_cancellation_never_redispatch () =
   with_workspace (fun config store _ ->
     let authority, retained = prepared config store in
     let calls = ref 0 in
-    with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
+    with_reviewer (fun ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
         ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
         ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
       incr calls; raise (Eio.Cancel.Cancelled Exit)) (fun () ->
@@ -328,7 +328,7 @@ let test_unknown_and_cancellation_never_redispatch () =
 let test_pre_admission_repair_keeps_original () = with_workspace (fun config store _ ->
   let authority, retained = prepared config store in
   let calls = ref 0 in
-  with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
+  with_reviewer (fun ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
       ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
       ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
     incr calls; Ok {AR.selected_runtime_id="goal-reviewer";evaluator_execution=None; verdict=Some (AR.Approve "admitted")}) (fun () ->
@@ -352,7 +352,7 @@ let test_destination_authority_and_inventory () = with_workspace (fun config sto
   let authority, retained = prepared config store in
   let other_authority = get (A.create_goal_review ~config ~goal_id:(pending config)) in
   let calls = ref 0 in
-  with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
+  with_reviewer (fun ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
       ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
       ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
     incr calls; Alcotest.fail "unauthorized Goal review dispatched") (fun () ->
@@ -383,7 +383,7 @@ let test_linked_frontier_and_staged_run_recovery () =
     let original = W.original retained in
     let subject = V.subject original in
     let calls = ref 0 in
-    with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt
+    with_reviewer (fun ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt
         ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
         ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
       incr calls;
@@ -492,7 +492,7 @@ let test_actual_goal_commit_reply_loss_and_conflict () =
     let original = W.original retained in
     let subject = V.subject original in
     let calls = ref 0 in
-    with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
+    with_reviewer (fun ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
         ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
         ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
       incr calls; Ok {AR.selected_runtime_id="goal-reviewer";evaluator_execution=None; verdict=Some (AR.Approve "actual proof")}) (fun () ->
@@ -579,7 +579,7 @@ let transition config goal_id action =
     (`Assoc ["goal_id", `String goal_id; "action", `String action; "note", `String "fixture actor request"]) in
   if not (Tool_result.is_success result) then Alcotest.fail (Tool_result.message result)
 let actual_review verdict calls =
-  fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
+  fun ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
       ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup ~on_tool_result
       ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
     incr calls;
@@ -698,7 +698,7 @@ let recover_body_fixture (probe : restart_probe) =
       (phase config probe.goal_id = Goal_phase.Awaiting_confirmation);
     let before = proof_record_snapshot config probe.goal_id in
     let calls = ref 0 in
-    with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
+    with_reviewer (fun ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
         ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
         ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
       incr calls;
@@ -1098,7 +1098,7 @@ let test_actual_explicit_retry_and_unknown_fence () =
     let original = W.original retained in
     let subject = V.subject original in
     let calls = ref 0 in
-    with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
+    with_reviewer (fun ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
         ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
         ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
       incr calls;
@@ -1227,7 +1227,7 @@ let test_finished_publication_survives_registry_retention () = with_workspace (f
       (In_channel.with_open_bin registry_path In_channel.input_all);
     Alcotest.(check int) "no reviewer redispatch" 1 !calls))
 
-let reviewer_exit_after_actual_lookup calls ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
+let reviewer_exit_after_actual_lookup calls ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
     ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup ~on_tool_result
     ~attempt_continuation:_ ~on_runtime_attempt_error:_ () =
   incr calls;

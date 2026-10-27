@@ -18,6 +18,7 @@ let goal_verification_lookup = "goal_verification.lookup"
    stale: [Anti_rationalization] supplies the data and picks the key, and holds
    no review prose of its own. *)
 let verification_lookup_producer_tree = "verification.lookup.producer_tree"
+let verification_lookup_producer_namespace = "verification.lookup.producer_namespace"
 let verification_lookup_root_layout_empty = "verification.lookup.root_layout_empty"
 
 let verification_lookup_producer_root_absent =

@@ -84,6 +84,8 @@ type retry_delay =
     this value, so the post cannot describe a timer the lane did not arm. *)
 type stall_disposition =
   | Retry_scheduled of { delay : retry_delay }
+  | Original_observation_scheduled of { delay : retry_delay }
+  | Original_repair_required
   | No_retry_armed
 
 (** Each review carries its durable identity and the scheduling owner's actual

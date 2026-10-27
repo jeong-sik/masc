@@ -43,6 +43,7 @@ type lookup_surface =
   }
 
 type lookup_root =
+  | Producer_namespace of { root : string }
   | Producer_tree of string list
   | Producer_root_absent of { root : string }
 
@@ -64,6 +65,12 @@ type reviewer_reply =
   ; evaluator_execution : Runtime_response_identity.t option
   }
 
+type execution_owner =
+  { keeper_name : string
+  ; session_root : string
+  ; on_execution_ready : runtime_id:string -> execution:Types_core.verifier_execution_reference -> (unit, string) result
+  }
+
 let outcome_observer_fn
   : (outcome:string -> runtime:string -> unit) Atomic.t
   = Atomic.make (fun ~outcome:_ ~runtime:_ -> ())
@@ -71,6 +78,7 @@ let outcome_observer_fn
 let run_llm_reviewer_fn
   : (base_path:string ->
      ?sw:Eio.Switch.t ->
+     ?execution_owner:execution_owner ->
      evaluator_runtime:string ->
      candidate_kind:Types_core.verifier_slot_kind ->
      prompt:string ->
@@ -87,7 +95,7 @@ let run_llm_reviewer_fn
         -> Agent_core.Error.t
         -> unit) ->
      unit -> (reviewer_reply, Agent_core.Error.t) result) Atomic.t
-  = Atomic.make (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
+  = Atomic.make (fun ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
       Error (Agent_core.Error.Internal "Workspace_hooks: run_llm_reviewer_fn not connected"))
 
 (** Issue #8436: the verdict vocabulary is owned by this variant. Witness
@@ -254,6 +262,10 @@ let tool_names schemas =
    because a producer with no tree must not be told it has one. *)
 let lookup_section ~(lookup : lookup_surface) ~lookup_root =
   match lookup_root with
+  | Producer_namespace { root } ->
+    render
+      Prompt_names.verification_lookup_producer_namespace
+      [ "lookup_tools", tool_names lookup.schemas; "root", root ]
   | Producer_tree root_layout ->
     let ( let* ) = Result.bind in
     let* lookup_root_layout = root_layout_lines root_layout in
@@ -614,6 +626,7 @@ let failure_certainty ~dispatch error =
 type execution_policy = Ordinary_review | Retained_original
 
 let run_with_execution_policy ~execution_policy
+      ?execution_owner
       ?evaluator_runtime
       ?generator_runtime
       ?(on_verdict : review_result -> unit = fun _ -> ())
@@ -798,6 +811,7 @@ let run_with_execution_policy ~execution_policy
              (Atomic.get run_llm_reviewer_fn)
                ~base_path
                ?sw
+               ?execution_owner
                ~evaluator_runtime:slot
                ~candidate_kind
                ~prompt
@@ -977,6 +991,7 @@ let run ?evaluator_runtime ?generator_runtime ?on_verdict ?on_tool_result ?sw
 (* The Task lane: its own prompt variables, its own log subject. Everything
    after the prompt string is the shared {!run}. *)
 let run_review
+      ?execution_owner
       ?(execution_policy=Ordinary_review)
       ?system_prompt
       ?on_execution
@@ -1007,6 +1022,7 @@ let run_review
   in
   let lookup_for_judge = lookup_with_evidence_observation lookup in
   run_with_execution_policy ~execution_policy
+    ?execution_owner
     ?evaluator_runtime
     ?generator_runtime
     ?on_verdict
@@ -1033,9 +1049,9 @@ let review ?evaluator_runtime ?generator_runtime ?on_verdict ?on_tool_result
     ~lookup ~provider_rest ~base_path req
 ;;
 
-let review_rendered ~generator_runtime ~system_prompt ?on_execution ?on_verdict ?on_tool_result ?sw ~prompt ~lookup
+let review_rendered ~generator_runtime ~system_prompt ?execution_owner ?on_execution ?on_verdict ?on_tool_result ?sw ~prompt ~lookup
     ~provider_rest ~base_path req =
-  run_review ?generator_runtime ~execution_policy:Retained_original ~system_prompt ?on_execution ?on_verdict ?on_tool_result ?sw ~render_prompt:(fun () -> Ok prompt)
+  run_review ?execution_owner ?generator_runtime ~execution_policy:Retained_original ~system_prompt ?on_execution ?on_verdict ?on_tool_result ?sw ~render_prompt:(fun () -> Ok prompt)
     ~lookup ~provider_rest ~base_path req
 ;;
 

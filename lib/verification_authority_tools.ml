@@ -791,7 +791,8 @@ let create_task_review ~config ~verification_id ~task_id ~producer ~evidence_acc
     then Error "submitted evidence does not name this verification, task and producer"
     else
       let* review_tools = create ~config ~producer ~submitted_evidence:items in
-      let* layout = root_layout review_tools in
+      let layout = Task.Anti_rationalization.Producer_namespace
+        {root=review_tools.ownership_root} in
       let* route = captured_review_route review_tools in
       let tool_json (tool : Types_core.tool_schema) =
         `Assoc ["name", `String tool.name; "description", `String tool.description;

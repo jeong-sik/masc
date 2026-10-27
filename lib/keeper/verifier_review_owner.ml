@@ -304,7 +304,8 @@ let terminal_review_result evidence =
     let* reached,failed=known_observations (List.assoc "observations" fields) in
     let* result = result_of_json (List.assoc "result" fields) in
     (match result.AR.verdict with
-     | None when reached && List.for_all (fun id -> List.mem id failed) result.retryable_runtimes -> Ok result
+     | None when (reached || (failed<>[] && result.gate=AR.Evaluator_unavailable))
+         && List.for_all (fun id -> List.mem id failed) result.retryable_runtimes -> Ok result
      | None | Some _ -> Error "terminal reviewer retry lacks its definite execution observations")
   | _ -> Error "original refusal does not establish a definite terminal retry"
 

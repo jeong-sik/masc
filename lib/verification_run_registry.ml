@@ -14,6 +14,8 @@ type outcome =
       ; detail : string
       }
   | Commit_failed of { detail : string }
+  | Execution_pending of { detail : string }
+  | Execution_repair_required of { detail : string }
   | Raised of { detail : string }
   | Review_cancelled of { detail : string }
   | Superseded_by of { authority : string }
@@ -113,6 +115,8 @@ let outcome_label = function
   | Infrastructure_unavailable _ -> "infrastructure_unavailable"
   | Not_reviewed _ -> "not_reviewed"
   | Commit_failed _ -> "commit_failed"
+  | Execution_pending _ -> "execution_pending"
+  | Execution_repair_required _ -> "execution_repair_required"
   | Raised _ -> "raised"
   | Review_cancelled _ -> "review_cancelled"
   | Superseded_by _ -> "superseded_by"
@@ -188,6 +192,8 @@ module Payload = struct
   let outcome_fields = function
     | Approved { reason } | Rejected { reason } -> [ "reason", `String reason ]
     | Commit_failed { detail }
+    | Execution_pending { detail }
+    | Execution_repair_required { detail }
     | Raised { detail }
     | Review_cancelled { detail } ->
       [ "detail", `String detail ]
@@ -226,7 +232,7 @@ module Payload = struct
       | "approved" -> Ok []
       | "rejected" -> Ok [ "reason" ]
       | "infrastructure_unavailable" -> Ok [ "stage"; "detail" ]
-      | "commit_failed" | "raised" | "review_cancelled" -> Ok [ "detail" ]
+      | "execution_pending" | "execution_repair_required" | "commit_failed" | "raised" | "review_cancelled" -> Ok [ "detail" ]
       | "not_reviewed" -> Ok [ "gate"; "detail" ]
       | "superseded_by" -> Ok [ "authority" ]
       | other -> Error (Printf.sprintf "unknown verification outcome %S" other)
@@ -282,6 +288,12 @@ module Payload = struct
       | "commit_failed" ->
         let* detail = Run_registry_core.Json.string_field "detail" fields in
         Ok (Commit_failed { detail })
+      | "execution_pending" ->
+        let* detail = Run_registry_core.Json.string_field "detail" fields in
+        Ok (Execution_pending {detail})
+      | "execution_repair_required" ->
+        let* detail = Run_registry_core.Json.string_field "detail" fields in
+        Ok (Execution_repair_required {detail})
       | "raised" ->
         let* detail = Run_registry_core.Json.string_field "detail" fields in
         Ok (Raised { detail })
@@ -499,6 +511,8 @@ let infrastructure_stage_label = Payload.infrastructure_stage_to_string
 let outcome_detail_fields = function
   | Approved { reason } | Rejected { reason } -> [ "reason", `String reason ]
   | Commit_failed { detail }
+  | Execution_pending { detail }
+  | Execution_repair_required { detail }
   | Raised { detail }
   | Review_cancelled { detail } ->
     [ "detail", `String detail ]

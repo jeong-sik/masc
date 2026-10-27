@@ -28,3 +28,18 @@ vm.runInContext('mascPointerFeedback(args)', context);
 assert.equal(attachments, 1, 'the owner can restore its own badge');
 assert.equal(badgeWrites, 1, 'the owner can finish its own badge');
 assert.equal(state.phase, 'finished');
+
+context.args = { phase: 'recorded', requestId: 'later-request', actor: 'keeper', action: 'type' };
+vm.runInContext('mascPointerFeedback(args)', context);
+assert.equal(state.phase, 'recorded');
+assert.match(badge.value, /Last request/);
+assert.doesNotMatch(badge.value, /Working/);
+
+context.args = { phase: 'working', requestId: 'newest-request', actor: 'keeper', action: 'click' };
+vm.runInContext('mascPointerFeedback(args)', context);
+const latestWrites = badgeWrites;
+context.args = { phase: 'finished', requestId: 'later-request' };
+assert.equal(vm.runInContext('mascPointerFeedback(args)', context), null);
+assert.equal(badgeWrites, latestWrites, 'a stale finish must not change the newer request');
+assert.equal(state.requestId, 'newest-request');
+assert.equal(state.phase, 'working');

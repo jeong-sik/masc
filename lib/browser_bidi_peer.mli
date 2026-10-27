@@ -119,14 +119,14 @@ val end_session : t -> (unit, session_end_failure) result
 val session_end_window_sec : float
 val dispatch : ?actor:string -> ?request_id:string -> ?deadline:Monotonic_deadline.t ->
   t -> verb:verb -> Yojson.Safe.t -> (Yojson.Safe.t, failure) result
-(** Run one request on this peer. When [deadline] is supplied, ordinary work
-    is refused before its next exchange once the request expires, accounting
-    for time spent in the queue and earlier exchanges. Read-only observation
-    following a dispatched effect, and finish of feedback that was sent, may
-    still use the healthy original connection. After a send, the response may
-    use the longer of the transport window and the remaining request window.
-    Input release and session end have separate cleanup windows. Calls on one
-    peer are serial. Cancellation after dispatch is a separate boundary. *)
+(** Run one request on this peer. When [deadline] is supplied, page work is
+    refused before its next exchange once the request expires, accounting for
+    time spent in the queue and earlier exchanges. A confirmed effect whose
+    observation was not sent is a partial failure, without claiming the page's
+    final state. After a send, the response may use the longer of the transport
+    window and the remaining request window. Input release and session end
+    have separate cleanup windows. Calls on one peer are serial. Cancellation
+    after dispatch is a separate boundary. *)
 (** One socket message carries at most this many bytes; a larger one ends the
     connection. *)
 val reply_limit_bytes : int

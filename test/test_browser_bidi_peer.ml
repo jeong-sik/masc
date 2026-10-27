@@ -587,7 +587,9 @@ let test_expiry_after_create_preserves_the_connection () =
       let deadline=Monotonic_deadline.after ~seconds:0.4 in
       let args=obj ["action",`String "open_tab";"url",`String "https://example.test/new"] in
       (match Peer.dispatch ~deadline peer ~verb:Peer.Page_act args with
-       | Error (Peer.Partial_failure {tab_id;_}) -> check int "created tab remains known" 1 tab_id
+       | Error (Peer.Partial_failure {tab_id;receipt;_}) ->
+         check int "created tab remains known" 1 tab_id;
+         check bool "navigation was never sent" false Yojson.Safe.Util.(receipt |> member "navigationSent" |> to_bool)
        | Ok _ | Error (Peer.Before_effect _ | Peer.Outcome_unknown _) ->
            fail "a created tab with unsent navigation must remain a known partial effect");
       check bool "unsent navigation did not end the peer" true (Eio.Promise.peek ended = None);
@@ -599,8 +601,8 @@ let test_expiry_after_create_preserves_the_connection () =
   check (list string) "creation is not replayed and navigation is never sent"
     ["browsingContext.create";"browsingContext.getTree";"session.end"] (List.rev !seen)
 
-let test_completed_input_is_observed_and_feedback_finishes_after_deadline () =
-  let run ~request_window ~input_delay ~receipt_delay =
+let test_completed_input_respects_the_observation_deadline () =
+  let run ~request_window ~input_delay ~receipt_delay ~expires =
   let seen = ref [] in
   let outcome = with_scripted_firefox_clock (fun clock flow ->
     let request () = let command=read_client_message flow in
@@ -617,11 +619,12 @@ let test_completed_input_is_observed_and_feedback_finishes_after_deadline () =
     send_server_message flow (reply_to input `Null);
     let release=request () in
     send_server_message flow (reply_to release `Null);
-    let receipt=request () in
-    Eio.Time.sleep clock receipt_delay;
-    send_server_message flow (reply_to receipt (script_value (obj ["url",`String "https://example.org"])));
-    let finish_feedback=request () in
-    send_server_message flow (reply_to finish_feedback (script_value `Null));
+    if not expires then (
+      let receipt=request () in
+      Eio.Time.sleep clock receipt_delay;
+      send_server_message flow (reply_to receipt (script_value (obj ["url",`String "https://example.org"])));
+      let finish_feedback=request () in
+      send_server_message flow (reply_to finish_feedback (script_value `Null)));
     let next=request () in
     send_server_message flow (reply_to next (obj ["contexts",`List []]));
     let ending=request () in
@@ -631,21 +634,28 @@ let test_completed_input_is_observed_and_feedback_finishes_after_deadline () =
       let deadline=Monotonic_deadline.after ~seconds:request_window in
       let args=obj ["tabId",`Int 1;"expectedUrl",`String "https://example.org";"action",`String "type_text";
         "documentId",`String "d1";"text",`String "x"] in
-      (match Peer.dispatch ~request_id:"fixture-input" ~deadline peer ~verb:Peer.Page_interact args with
-       | Ok _ -> () | Error _ -> fail "confirmed input must be observed after the caller window ends");
+      (match Peer.dispatch ~request_id:"fixture-input" ~deadline peer ~verb:Peer.Page_interact args,expires with
+       | Error (Peer.Partial_failure {tab_id;receipt;_}),true ->
+         check int "confirmed input names its tab" 1 tab_id;
+         check string "the post-effect observation was not sent" "not_sent"
+           Yojson.Safe.Util.(receipt |> member "postEffectObservation" |> to_string)
+       | Ok _,false -> ()
+       | (Ok _ | Error (Peer.Before_effect _ | Peer.Outcome_unknown _)),true
+       | Error _,false -> fail "confirmed input did not retain the correct observation boundary");
       check bool "the original peer is still connected" true (Eio.Promise.peek ended = None);
       (match Peer.dispatch peer ~verb:Peer.Tabs_list (obj []) with
        | Ok _ -> () | Error _ -> fail "the original peer could not answer again");
       ended_session peer) in
   check (result unit string) "the original session ends" (Ok ()) outcome;
-  check (list string) "one input, release, receipt, feedback finish, then another request"
-    ["browsingContext.getTree";"script.callFunction";"script.callFunction";"input.performActions";
-     "input.releaseActions";"script.callFunction";"script.callFunction";"browsingContext.getTree";"session.end"]
+  check (list string) "the next command uses the original peer"
+    (["browsingContext.getTree";"script.callFunction";"script.callFunction";"input.performActions";
+      "input.releaseActions"] @ (if expires then [] else ["script.callFunction";"script.callFunction"])
+     @ ["browsingContext.getTree";"session.end"])
     (List.rev !seen) in
   (* One reply crosses the caller window; another receipt exceeds the short
      transport default while remaining inside the caller's longer window. *)
-  run ~request_window:0.6 ~input_delay:0.8 ~receipt_delay:0.;
-  run ~request_window:3. ~input_delay:0. ~receipt_delay:1.2
+  run ~request_window:0.6 ~input_delay:0.8 ~receipt_delay:0. ~expires:true;
+  run ~request_window:3. ~input_delay:0. ~receipt_delay:1.2 ~expires:false
 (* The session a connection created is ended over that connection, also after
    this side stopped trusting it for page commands: a page whose command got
    no reply is not a browser that is gone, and a session left in Firefox
@@ -1185,10 +1195,46 @@ let test_release_outlives_the_request_deadline () = Eio_main.run (fun _ ->
   let args=obj ["tabId",`Int 1;"expectedUrl",`String "https://example.org";"action",`String "type_text";
     "documentId",`String "d1";"text",`String "x"] in
   (match Peer.dispatch ~deadline peer ~verb:Peer.Page_interact args with
-   | Ok _ -> ()
-   | Error _ -> fail "the confirmed input must still receive its post-input observation");
+   | Error (Peer.Partial_failure {receipt;_}) ->
+     check string "the post-effect observation was not sent" "not_sent"
+       Yojson.Safe.Util.(receipt |> member "postEffectObservation" |> to_string)
+   | Ok _ | Error (Peer.Before_effect _ | Peer.Outcome_unknown _) ->
+     fail "confirmed input with no observation must be a known partial result");
   check int "input was sent once" 1 !performed;
   check int "release still used its cleanup window" 1 !released)
+
+let test_partial_semantic_input_names_the_requested_frame () = Eio_main.run (fun _ ->
+  let scripts=ref 0 and inputs=ref 0 in
+  let command ~deadline ~on_send method_ args =
+    match method_,deadline with
+    | "input.releaseActions",None -> on_send (); Ok `Null
+    | _,Some deadline when Monotonic_deadline.passed deadline -> Error Peer.Deadline_before_send
+    | "browsingContext.getTree",_ -> on_send (); Ok (obj ["contexts",`List [obj ["context",`String "owned"]]])
+    | "script.callFunction",_ ->
+      on_send ();
+      let declaration=Yojson.Safe.Util.(args |> member "functionDeclaration" |> to_string) in
+      if String.starts_with ~prefix:"function(selector) {" declaration then
+        Ok (obj ["type",`String "success";"result",obj ["type",`String "window";
+          "value",obj ["context",`String "inner"]]])
+      else (incr scripts;
+        if !scripts=1 then Ok (script_value (obj ["url",`String "https://example.test/";
+          "point",obj ["x",`Float 0.25;"y",`Float 0.5];
+          "viewport",obj ["documentId",`String "observed";"width",`Int 800;"height",`Int 600;
+            "scrollX",`Int 0;"scrollY",`Int 0]]))
+        else Ok (script_value (obj ["url",`String "https://example.test/"])))
+    | "input.performActions",_ -> on_send (); incr inputs; Unix.sleepf 0.05; Ok `Null
+    | other,_ -> failf "unexpected command %s" other in
+  let peer=Peer.For_testing.create ~command ~session_end:(fun () -> fail "no session") in
+  let deadline=Monotonic_deadline.after ~seconds:0.02 in
+  let args=obj ["tabId",`Int 1;"action",`String "click";"selector",`String "#menu";
+    "framePath",`List [`String "iframe"]] in
+  (match Peer.dispatch ~deadline peer ~verb:Peer.Page_interact args with
+   | Error (Peer.Partial_failure {receipt;_}) ->
+     check string "receipt retains caller's semantic action" "click" Yojson.Safe.Util.(receipt |> member "action" |> to_string);
+     check bool "receipt retains caller's frame" true (Yojson.Safe.Util.member "framePath" receipt=`List [`String "iframe"])
+   | Ok _ | Error (Peer.Before_effect _ | Peer.Outcome_unknown _) -> fail "confirmed input did not preserve its partial receipt");
+  check int "semantic input was sent once" 1 !inputs;
+  check int "only resolution and guard scripts ran" 2 !scripts)
 
 let test_expired_unsent_input_does_not_release () = Eio_main.run (fun _ ->
   let attempted=ref 0 and performed=ref 0 and released=ref 0 in
@@ -1874,7 +1920,7 @@ let () = run "BiDi live peer" ["identity",[test_case "native keyboard release an
     test_case "timed-out input releases on its original socket" `Quick test_timed_out_input_still_releases_on_the_original_socket;
     test_case "expiry during encoding sends no input" `Quick test_expiry_during_encoding_does_not_send_input;
     test_case "expiry after tab creation preserves the peer" `Quick test_expiry_after_create_preserves_the_connection;
-    test_case "completed input remains observable after caller timeout" `Quick test_completed_input_is_observed_and_feedback_finishes_after_deadline;
+    test_case "confirmed input stops page observation at the caller deadline" `Quick test_completed_input_respects_the_observation_deadline;
     test_case "the session is ended after a command got no reply" `Quick
       test_the_session_is_ended_after_a_command_got_no_reply;
     test_case "a session that cannot be ended is an error" `Quick test_a_session_that_cannot_be_ended_is_an_error;
@@ -1904,6 +1950,7 @@ let () = run "BiDi live peer" ["identity",[test_case "native keyboard release an
     test_case "dialogs are answered only on tabs this connection opened" `Quick test_dialogs_are_answered_only_on_tabs_this_connection_opened;
     test_case "open tab preserves existing context" `Quick test_open_tab_preserves_existing_context;
     test_case "open tab failure does not replay" `Quick test_open_tab_failure_does_not_replay;
+    test_case "partial semantic input retains its frame" `Quick test_partial_semantic_input_names_the_requested_frame;
     test_case "live act rejects other actions" `Quick test_live_act_rejects_other_actions_before_effect;
     test_case "semantic clicks use trusted native input" `Quick test_semantic_click_uses_native_input;
     test_case "hover moves without clicking" `Quick test_hover_without_click; test_case "open_window creates a window context" `Quick test_open_window_creates_a_window_context; test_case "context reads run in the frame" `Quick test_context_reads_run_in_the_frame; test_case "a framed request runs in the child context" `Quick test_framed_interaction_runs_in_the_child_context; test_case "element inventory is the shared page script" `Quick test_element_inventory;

@@ -1662,7 +1662,7 @@
 (test
  (name test_pool_lane)
  (modules test_pool_lane)
- (libraries alcotest masc.masc_core eio eio_main fmt yojson))
+ (libraries alcotest masc.masc_core eio eio_main fmt mtime yojson))
 
 (test
  (name test_dashboard_cache_cancellation)

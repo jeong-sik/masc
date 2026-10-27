@@ -4,11 +4,18 @@
     The mark lives in an Eio fiber key, so fibers forked while a read is being
     answered inherit it. A read ends when {!with_read} returns or raises;
     from then on {!current} reports [Background] in every fiber that carries
-    the mark, so a fiber that outlives its request (a WebSocket heartbeat, a
-    stale-while-revalidate recompute) needs no list of exceptions.
+    the mark, so a fiber that outlives its request (a WebSocket heartbeat)
+    needs no list of exceptions.
+
+    A submission takes the lane its fiber has at the moment it submits. A
+    fiber the request forked counts as [Read] for whatever it submits before
+    the request ends: a stale-while-revalidate recompute that reaches the pool
+    before the handler returns is a read.
 
     A pool job does not inherit the submitting fiber's keys: inside the job
-    the lane is [Background] unless the job itself marks a read. *)
+    the lane is [Background] unless the job itself marks a read. Work handed
+    to the owner domain ([Eio_context.run_on_owner_domain], used when the
+    serving domain is enabled) runs unmarked. *)
 
 type lane =
   | Read

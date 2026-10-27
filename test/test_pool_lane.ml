@@ -95,22 +95,39 @@ let test_wait_is_recorded_under_the_submitting_lane () =
     check int "one background submission" 1 (background_last - background_after))
 ;;
 
-(* A job queued behind a 30 ms occupant of the only worker waited at least
-   30 ms: its observation lands above every bucket bound below 30 ms. *)
+let counts lane_name kind =
+  let h = member [ lane_name; kind ] (Pool_wait.to_json ()) in
+  ( Yojson.Safe.Util.to_int (member [ "count" ] h)
+  , List.map Yojson.Safe.Util.to_int (Yojson.Safe.Util.to_list (member [ "buckets" ] h)) )
+;;
+
+let occupy_the_only_worker sw pool =
+  let occupied, occupy = Eio.Promise.create () in
+  let release, release_worker = Eio.Promise.create () in
+  let blocker =
+    Eio.Executor_pool.submit_fork ~sw pool ~weight:1.0 (fun () ->
+      Eio.Promise.resolve occupy ();
+      Eio.Promise.await release)
+  in
+  Eio.Promise.await occupied;
+  fun () ->
+    Eio.Promise.resolve release_worker ();
+    ignore (Eio.Promise.await_exn blocker)
+;;
+
+(* The only worker is held until 30 ms after the submission, so the job waited
+   at least 30 ms by construction: its observation lands above every bucket
+   bound below 30 ms. *)
 let test_a_queued_wait_lands_above_its_lower_buckets () =
   with_pool (fun env sw pool ->
-    let clock = Eio.Stdenv.clock env in
-    let occupied, occupy = Eio.Promise.create () in
-    let blocker =
-      Eio.Executor_pool.submit_fork ~sw pool ~weight:1.0 (fun () ->
-        Eio.Promise.resolve occupy ();
-        Eio.Time.sleep clock 0.03)
-    in
-    Eio.Promise.await occupied;
-    let _, before = wait_counts "read" in
-    Pool_lane.with_read (fun () -> Executor_pool_ref.submit_or_inline ignore);
-    ignore (Eio.Promise.await_exn blocker);
-    let _, after = wait_counts "read" in
+    let release = occupy_the_only_worker sw pool in
+    let _, before = counts "read" "wait" in
+    Eio.Fiber.both
+      (fun () -> Pool_lane.with_read (fun () -> Executor_pool_ref.submit_or_inline ignore))
+      (fun () ->
+        Eio.Time.sleep (Eio.Stdenv.clock env) 0.03;
+        release ());
+    let _, after = counts "read" "wait" in
     let added = diff after before in
     check int "one observation" 1 (List.fold_left ( + ) 0 added);
     List.iteri
@@ -120,6 +137,54 @@ let test_a_queued_wait_lands_above_its_lower_buckets () =
           check int (Printf.sprintf "nothing at or below %g ms" upper) 0 n
         | Some _ | None -> ())
       added)
+;;
+
+let test_run_is_recorded_under_the_submitting_lane () =
+  with_pool (fun _env _sw _pool ->
+    let before, _ = counts "read" "run" in
+    Pool_lane.with_read (fun () -> Executor_pool_ref.submit_or_inline ignore);
+    let after, _ = counts "read" "run" in
+    check int "one read run" 1 (after - before))
+;;
+
+(* A read that gave up while queued is counted as abandoned, not as a wait. *)
+let test_a_cancelled_queued_submission_is_abandoned () =
+  with_pool (fun env sw pool ->
+    let release = occupy_the_only_worker sw pool in
+    let waits_before, _ = counts "read" "wait" in
+    let abandoned_before, _ = counts "read" "abandoned" in
+    let ran = ref false in
+    Eio.Fiber.first
+      (fun () -> Pool_lane.with_read (fun () -> Executor_pool_ref.submit_or_inline (fun () -> ran := true)))
+      (fun () -> Eio.Time.sleep (Eio.Stdenv.clock env) 0.03);
+    release ();
+    let waits_after, _ = counts "read" "wait" in
+    let abandoned_after, _ = counts "read" "abandoned" in
+    check bool "the cancelled job never ran" false !ran;
+    check int "no wait recorded" 0 (waits_after - waits_before);
+    check int "one abandoned submission" 1 (abandoned_after - abandoned_before))
+;;
+
+(* Bucket [i] holds spans at most its bound and above the previous one. *)
+let test_a_span_on_a_bound_belongs_to_that_bucket () =
+  let ms n = Mtime.Span.of_uint64_ns (Int64.of_float (n *. 1e6)) in
+  let place span =
+    let _, before = counts "background" "abandoned" in
+    Pool_wait.record_abandoned Pool_lane.Background span;
+    let _, after = counts "background" "abandoned" in
+    let rec index i = function
+      | [] -> fail "no bucket changed"
+      | 0 :: rest -> index (i + 1) rest
+      | _ :: _ -> i
+    in
+    index 0 (diff after before)
+  in
+  let bounds = bounds () in
+  check int "exactly 1 ms is the first bucket" 0 (place (ms 1.));
+  check int "just above 1 ms is the second" 1
+    (place (Mtime.Span.add (ms 1.) (Mtime.Span.of_uint64_ns 1L)));
+  check int "above every bound is the overflow bucket" (List.length bounds)
+    (place (ms 20_000.))
 ;;
 
 let () =
@@ -136,6 +201,12 @@ let () =
             test_wait_is_recorded_under_the_submitting_lane
         ; test_case "a queued wait lands above its lower buckets" `Quick
             test_a_queued_wait_lands_above_its_lower_buckets
+        ; test_case "run is recorded under the submitting lane" `Quick
+            test_run_is_recorded_under_the_submitting_lane
+        ; test_case "a cancelled queued submission is abandoned" `Quick
+            test_a_cancelled_queued_submission_is_abandoned
+        ; test_case "a span on a bound belongs to that bucket" `Quick
+            test_a_span_on_a_bound_belongs_to_that_bucket
         ] )
     ]
 ;;

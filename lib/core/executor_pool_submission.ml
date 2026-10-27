@@ -31,6 +31,7 @@ let submit pool ~weight f =
   | exception (Eio.Cancel.Cancelled _ as error) ->
     let backtrace = Printexc.get_raw_backtrace () in
     Eio.Promise.resolve cancel_worker (error,backtrace);
-    if not (Atomic.compare_and_set entry Awaiting_worker Cancelled_before_entry) then
-      Eio.Cancel.protect (fun () -> Eio.Promise.await settled);
+    if Atomic.compare_and_set entry Awaiting_worker Cancelled_before_entry
+    then Pool_wait.record_abandoned lane (Mtime_clock.count submitted)
+    else Eio.Cancel.protect (fun () -> Eio.Promise.await settled);
     Printexc.raise_with_backtrace error backtrace

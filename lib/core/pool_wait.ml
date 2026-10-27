@@ -25,10 +25,12 @@ let histogram () =
 type lane_histograms =
   { wait : histogram
   ; run : histogram
+  ; abandoned : histogram
   }
 
-let read = { wait = histogram (); run = histogram () }
-let background = { wait = histogram (); run = histogram () }
+let lane_histograms () = { wait = histogram (); run = histogram (); abandoned = histogram () }
+let read = lane_histograms ()
+let background = lane_histograms ()
 
 let of_lane = function
   | Pool_lane.Read -> read
@@ -57,6 +59,7 @@ let record h span =
 
 let record_wait lane span = record (of_lane lane).wait span
 let record_run lane span = record (of_lane lane).run span
+let record_abandoned lane span = record (of_lane lane).abandoned span
 
 let ms_of_ns ns = float ns /. 1e6
 
@@ -69,7 +72,12 @@ let histogram_json h =
     ]
 ;;
 
-let lane_json l = `Assoc [ "wait", histogram_json l.wait; "run", histogram_json l.run ]
+let lane_json l =
+  `Assoc
+    [ "wait", histogram_json l.wait
+    ; "run", histogram_json l.run
+    ; "abandoned", histogram_json l.abandoned
+    ]
 
 let to_json () =
   `Assoc

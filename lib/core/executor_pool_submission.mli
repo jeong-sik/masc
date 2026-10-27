@@ -5,5 +5,5 @@ val submit : Eio.Executor_pool.t -> weight:float -> (unit -> 'a) -> 'a
     original cancellation. Joining is protected cleanup; uncooperative work
     can delay it. Exceptions propagate without inline fallback or replay.
     Pool choice, worker marking and IO/CPU weights belong to the caller.
-    The caller's {!Pool_lane} at submission keys the wait and run times it
-    records in {!Pool_wait}. *)
+    The caller's {!Pool_lane} at submission keys the wait, run and abandoned
+    times it records in {!Pool_wait}. *)

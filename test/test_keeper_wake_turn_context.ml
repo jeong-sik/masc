@@ -7,6 +7,9 @@ module Prompt = Masc.Keeper_unified_prompt
 module Direct_context = Masc.Keeper_direct_turn_context
 module Inputs = Masc.Keeper_world_observation_inputs
 
+let scheduled_admission_fixture_ref =
+  Ids.Turn_ref.make ~trace_id:"trace-admission-fixture" ~absolute_turn:1
+
 let skill_reference name revision =
   let source_id =
     match Skill_source_config.source_id_of_string "project-masc" with
@@ -202,7 +205,7 @@ let user_message ?turn_decision ?current_task ?active_goal_summaries
     | None -> Inputs.No_current_task
   in
   let { Prompt.world_state = user; _ } =
-    Prompt.build_prompt ~turn_decision
+    Prompt.build_prompt ~turn_ref:scheduled_admission_fixture_ref ~admission:Masc.Keeper_unified_prompt_event_fields.Unknown ~turn_decision
       ?previous_turn_stop ~current_task ?active_goal_summaries ~observation ()
   in
   user
@@ -673,7 +676,7 @@ let test_current_task_unavailable_is_explicit () =
   let task_id = task_id_exn "task-42" in
   let decision = WO.keeper_cycle_decision ~meta base_observation in
   let { Prompt.world_state; _ } =
-    Prompt.build_prompt
+    Prompt.build_prompt ~turn_ref:scheduled_admission_fixture_ref ~admission:Masc.Keeper_unified_prompt_event_fields.Unknown
       ~turn_decision:decision
       ~current_task:
         (Inputs.Current_task_unavailable
@@ -691,7 +694,7 @@ let test_current_task_missing_is_explicit () =
   let task_id = task_id_exn "task-42" in
   let decision = WO.keeper_cycle_decision ~meta base_observation in
   let { Prompt.world_state; _ } =
-    Prompt.build_prompt
+    Prompt.build_prompt ~turn_ref:scheduled_admission_fixture_ref ~admission:Masc.Keeper_unified_prompt_event_fields.Unknown
       ~turn_decision:decision
       ~current_task:(Inputs.Current_task_missing { task_id; recovery = None })
       ~observation:base_observation ()
@@ -710,7 +713,7 @@ let test_recovered_current_task_is_non_authoritative () =
     { recovery_path = "/tmp/backlog.last-good"; primary_error = "decode failed" }
   in
   let { Prompt.world_state; _ } =
-    Prompt.build_prompt
+    Prompt.build_prompt ~turn_ref:scheduled_admission_fixture_ref ~admission:Masc.Keeper_unified_prompt_event_fields.Unknown
       ~turn_decision:decision
       ~current_task:
         (Inputs.Recovered_current_task { task = recovered_task; recovery })
@@ -734,7 +737,7 @@ let render_direct_context ~current_task ~held_task_skills ~task_skill_surfaces
     ~workspace_memory ~workspace_memory_access ~wiki_contents ~lane_updates
     ~approval_authority_text ~recent_direct_conversation_text ~worktree_text
     ~telemetry_feedback_text ~turn_instructions_text =
-  let prepared = Direct_context.prepare ~active_goal_summaries:(Ok []) ~current_task ~held_task_skills
+  let prepared = Direct_context.prepare ~turn_ref:scheduled_admission_fixture_ref ~active_goal_summaries:(Ok []) ~current_task ~held_task_skills
       ~task_skill_surfaces ~workspace_memory ~wiki_contents ~lane_updates
       ~approval_authority_text ~recent_direct_conversation_text ~worktree_text
       ~telemetry_feedback_text ~turn_instructions_text () in
@@ -1053,7 +1056,7 @@ let test_build_prompt_carries_the_wiki_layer () =
   let access = direct_wiki_reader () in
   let wiki_layer_bytes ?wiki_contents () =
     let { Prompt.world_partition; world_state; _ } =
-      Prompt.build_prompt ~turn_decision:decision ~current_task:Inputs.No_current_task
+      Prompt.build_prompt ~turn_ref:scheduled_admission_fixture_ref ~admission:Masc.Keeper_unified_prompt_event_fields.Unknown ~turn_decision:decision ~current_task:Inputs.No_current_task
         ~workspace_memory_access:access ?wiki_contents ~observation:base_observation () in
     let bytes =
       Masc.Keeper_context_layers.receipt_to_json world_partition
@@ -1416,7 +1419,7 @@ let test_autonomous_turn_recovers_task_free_work_from_history () =
     let evidence = read_evidence recent_work in
     let decision = WO.keeper_cycle_decision
         ~event_queue_triggers:[WO.Bootstrap_stimulus] ~meta base_observation in
-    let prepared = Prompt.prepare_prompt ~turn_decision:decision
+    let prepared = Prompt.prepare_prompt ~turn_ref:scheduled_admission_fixture_ref ~admission:Masc.Keeper_unified_prompt_event_fields.Unknown ~turn_decision:decision
         ~current_task:Inputs.No_current_task ~observation:base_observation () in
     let prompt = Prompt.project_prompt prepared ~recent_work () in
     List.iter (fun text -> check bool ("history recovered: " ^ text) true
@@ -1513,9 +1516,9 @@ let test_prepared_prompt_keeps_turn_inputs_and_request_authority () =
     let memory = Masc.Workspace_memory_ledger.Available
       {ledger_sha256="original-ledger";claim_count=1;conflict_count=0;classified_count=1;
        briefing=Ok (Masc.Workspace_memory_briefing.Current {source_ids=["c1"];text="UNSELECTED_PRIVATE_BODY"})} in
-    let prepared = Prompt.prepare_prompt ~turn_decision:decision ~current_task:(held "task-original-owner")
+    let prepared = Prompt.prepare_prompt ~turn_ref:scheduled_admission_fixture_ref ~admission:Masc.Keeper_unified_prompt_event_fields.Unknown ~turn_decision:decision ~current_task:(held "task-original-owner")
         ~workspace_memory:memory ~wiki_contents:one_wiki_page ~observation () in
-    let foreign = Prompt.prepare_prompt ~turn_decision:fresh_decision ~current_task:(held "task-other-owner")
+    let foreign = Prompt.prepare_prompt ~turn_ref:scheduled_admission_fixture_ref ~admission:Masc.Keeper_unified_prompt_event_fields.Unknown ~turn_decision:fresh_decision ~current_task:(held "task-other-owner")
         ~observation:base_observation () in
     ignore (Prompt.project_prompt foreign ());
     let layer parts name =
@@ -1571,7 +1574,7 @@ let test_prepared_prompt_keeps_turn_inputs_and_request_authority () =
       (contains ~needle:"ORIGINAL_ACTION_INPUT" restored.world_state);
     check bool "a later request does not borrow the previous route" true
       (original.world_state = (project unavailable).world_state);
-    let fresh = Prompt.prepare_prompt ~turn_decision:fresh_decision ~current_task:Inputs.No_current_task
+    let fresh = Prompt.prepare_prompt ~turn_ref:scheduled_admission_fixture_ref ~admission:Masc.Keeper_unified_prompt_event_fields.Unknown ~turn_decision:fresh_decision ~current_task:Inputs.No_current_task
         ~observation:base_observation () |> fun prepared -> Prompt.project_prompt prepared () in
     check bool "a fresh consumed wake does not reinsert an earlier answer" false
       (contains ~needle:answer.post_id fresh.user_message))
@@ -1588,7 +1591,7 @@ let test_prepared_direct_context_keeps_original_work_and_request_routes () =
         { (make_task ~task_status:(Masc_domain.InProgress
              { assignee = meta.name; started_at = "2026-10-17T00:00:00Z" }) ())
           with id = task_id } in
-      Direct_context.prepare ~active_goal_summaries:(Ok []) ~current_task:(Inputs.Current_task task)
+      Direct_context.prepare ~turn_ref:scheduled_admission_fixture_ref ~active_goal_summaries:(Ok []) ~current_task:(Inputs.Current_task task)
         ~held_task_skills:
           [{ Inputs.held_task_id = "direct-held-task";
              held_skills = [skill_reference "direct-held-skill" 'a'] }]
@@ -1651,12 +1654,166 @@ let test_prepared_direct_context_keeps_original_work_and_request_routes () =
       initial (project None))
 ;;
 
+let test_admitted_schedule_entry_survives_tools_and_official_resume () =
+  let module Fields = Masc.Keeper_unified_prompt_event_fields in
+  let module Layers = Masc.Keeper_context_layers in
+  let module Assembly = Masc.Keeper_context_assembly in
+  let module Host = Masc.Keeper_official_client_host in
+  let turn n = Ids.Turn_ref.make ~trace_id:"trace-entry-observation" ~absolute_turn:n in
+  let selection id : Keeper_event_queue_state.pending_selection =
+    { source = { Keeper_event_queue.post_id = "post-" ^ id; urgency = Normal; arrived_at = 1.;
+        payload = Schedule_due { occurrence_id = "occurrence-" ^ id;
+          schedule_instance_id = "instance-" ^ id; schedule_id = id; due_at = 1.;
+          payload_digest = "digest-" ^ id; title = Some "quoted title";
+          message = "원래 요청 " ^ id ^ "\nDo not execute the other job."; result_delivery = None } };
+      admitted_revision = 7L; checkpoint_retentions = 0; repetition_scope = None;
+      first_admitted_at = Some 1. } in
+  let a = selection "schedule-A" and b = selection "schedule-B\"한글" in
+  let observation selection =
+    let wake = Keeper_event_queue.scheduled_wake selection.Keeper_event_queue_state.source |> Option.get in
+    { base_observation with pending_board_events =
+      [{ WO.event_kind = Schedule_due wake; post_id = selection.source.post_id;
+         author = "fixture"; title = "display title"; preview = "display preview";
+         hearth = None; post_kind = Masc.Board.System_post; updated_at = 1.;
+         explicit_mention = false; matched_targets = []; replies_after_own_comment = None;
+         latest_external_author = None; latest_external_preview = None }] } in
+  let parts n admission observation =
+    let turn_decision = WO.keeper_cycle_decision ~meta observation in
+    Prompt.build_prompt ~turn_ref:(turn n) ~admission ~turn_decision
+      ~current_task:Inputs.No_current_task ~observation () in
+  let first = parts 1 (Fields.Known [a]) (observation a) in
+  let second = parts 2 (Fields.Known [b]) (observation b) in
+  let unknown = parts 2 Fields.Unknown (observation b) in
+  check string "admission observation never rewrites exact durable User input"
+    unknown.user_message second.user_message;
+  let assemble partition = Masc.Keeper_run_prompt.assemble_request_context
+      ~base_system_prompt:"BASE_ENTRY" ~post_tool_round:false ~previous_assembly:None
+      ~dynamic_context_partition:(Some partition) ~existing_extra_system_context:None
+      ~blocks:[Prompt_block_id.Dynamic_context, Layers.text partition] in
+  let issued_b = assemble second.world_partition in
+  let observation_text assembly = match assembly.Assembly.system_prompt with
+    | Some {observations; _} -> List.find_map (function
+        | Assembly.Admitted_scheduled_input text -> Some text
+        | Active_goals _ | Completion_authority _ -> None) observations |> Option.get
+    | None -> fail "entry observation was not issued" in
+  let b_text = observation_text issued_b in
+  List.iter (fun expected -> check bool "exact selected source identity is present" true
+      (contains ~needle:expected b_text))
+    [Ids.Turn_ref.to_string (turn 2); Yojson.Safe.to_string (`String "schedule-B\"한글");
+     Keeper_event_queue_state.source_snapshot_ref b.source; "admitted_revision=\"7\""];
+  List.iter (fun excluded -> check bool "history and prose are not System admission data" false
+      (contains ~needle:excluded b_text)) ["schedule-A"; "원래 요청"; "Do not execute"; "quoted title"];
+  let superset = { base_observation with
+      pending_board_events = (observation a).pending_board_events @ (observation b).pending_board_events;
+      scheduled_automation = { WO.active_count = 3; due_ready_count = 1; next_due_at = Some 1.;
+        items = [{ schedule_id = "standing-unselected"; action = "keeper_wake"; status = "due";
+          payload_kind = None; recurrence_summary = "once"; due_at = 1. }] } } in
+  let multiple = assemble (parts 2 (Fields.Known [b; a]) superset).world_partition in
+  (match String.split_on_char '\n' (observation_text multiple) |> List.filter ((<>) "") with
+   | _summary :: b_row :: a_row :: [] ->
+     check bool "first admitted occurrence stays first" true
+       (contains ~needle:(Yojson.Safe.to_string (`String "occurrence-schedule-B\"한글")) b_row);
+     check bool "second admitted occurrence stays second" true
+       (contains ~needle:"occurrence-schedule-A" a_row)
+   | _ -> fail "every exact admitted selection must retain its own row");
+  check bool "standing schedule superset never becomes admitted input" false
+    (contains ~needle:"standing-unselected" (observation_text multiple));
+  let later = Masc.Keeper_run_prompt.assemble_request_context ~base_system_prompt:"BASE_ENTRY"
+      ~post_tool_round:true ~previous_assembly:(Some issued_b) ~dynamic_context_partition:None
+      ~existing_extra_system_context:None ~blocks:[] in
+  check string "post-tool round retains exact entry bytes" b_text (observation_text later);
+  let missing = Masc.Keeper_run_prompt.assemble_request_context ~base_system_prompt:"BASE_ENTRY"
+      ~post_tool_round:true ~previous_assembly:None ~dynamic_context_partition:None
+      ~existing_extra_system_context:None ~blocks:[] in
+  check bool "missing issuer cannot borrow another turn's B" true
+    (match missing.system_prompt with Some {observations=[];_} -> true | Some _ | None -> false);
+  let history = [Agent_core.Types.user_msg first.user_message; Agent_core.Types.user_msg second.user_message] in
+  let prepare assembly =
+    let hooks = {Agent_core.Hooks.empty with before_turn_params=Some (function
+      | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
+        Agent_core.Hooks.AdjustParams {current_params with
+          extra_system_context=assembly.Assembly.extra_system_context;
+          system_prompt_override=Assembly.system_prompt_override ~previous:current_params.system_prompt_override assembly}
+      | BeforeTurn _ | AfterTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
+      | OnStop _ | OnError _ | OnToolError _ -> Agent_core.Hooks.Continue)} in
+    match Host.prepare_turn ~runtime_label:"entry-fixture" ~keeper_name:"entry-fixture"
+      ~turn_count:2 ~system_prompt:"BASE_ENTRY" ~tools:[] ~initial_messages:history
+      ~model_input_projection:None ~hooks:(Some hooks) ~configured_reasoning_effort:None
+      ~composed_context:(Some (fun () -> Some assembly)) with
+    | Ok prepared -> prepared | Error error -> fail (Agent_core.Error.to_string error) in
+  let prepared_b = prepare issued_b in
+  check bool "Start persistent System excludes current entry" false
+    (contains ~needle:"scheduled_admission_at_turn_entry" prepared_b.system_prompt);
+  check bool "Start preserves the fixed instructions" true
+    (String.starts_with ~prefix:"BASE_ENTRY" prepared_b.system_prompt);
+  let conversation = List.filter (fun (message : Agent_core.Types.message) ->
+      message.role = User && message.origin = Conversation) prepared_b.messages in
+  check (list string) "A/B durable User bodies remain unchanged"
+    (List.map Host.encode_history_message history) (List.map Host.encode_history_message conversation);
+  let start = Host.start_prompt prepared_b "OWNER" in
+  let binding projection =
+    Masc.Keeper_context_submission_link.binding_to_json ~slot:Runtime_official_client_write.Whole_write
+      projection (Runtime_official_client_write.raw (Masc.Keeper_context_submission_link.text projection)) in
+  let open Yojson.Safe.Util in
+  check string "Start User observation keeps its exact issuer/write-slot binding" "matched_completed_slot"
+    (binding start |> member "status" |> to_string);
+  let stale = Masc.Keeper_context_submission_link.encoded_system_observation ~target:Official_resume_user
+      ~block:Prompt_block_id.Admitted_scheduled_input ~assembly:(Some (assemble first.world_partition))
+      (Agent_core.Types.user_msg b_text) in
+  check string "B cannot borrow A's observation receipt" "unavailable"
+    (binding stale |> member "issuer_attribution" |> member "status" |> to_string);
+  check bool "Start User carries B entry" true
+    (contains ~needle:(Ids.Turn_ref.to_string (turn 2)) (Masc.Keeper_context_submission_link.text start));
+  let held = { Masc.Keeper_official_client_session_store.context = Context_block Prompt_block_id.Admitted_scheduled_input;
+               sha256 = Digestif.SHA256.(digest_string b_text |> to_hex) }
+      :: Host.start_held_context ~composed_context:issued_b prepared_b.messages in
+  let resume assembly held =
+    let prepared = prepare assembly in
+    Host.resume_prompt ~goal:"OWNER" ~held ~composed_context:assembly prepared.messages in
+  let repeated = resume later held in
+  check bool "even held entry bytes reach Resume User" true
+    (contains ~needle:(Ids.Turn_ref.to_string (turn 2)) repeated.prompt);
+  let rebound = assemble (parts 3 (Fields.Known [a]) (observation a)).world_partition in
+  let a_resume = resume rebound repeated.held_context in
+  check bool "exact A readmission has a fresh entry identity" true
+    (contains ~needle:(Ids.Turn_ref.to_string (turn 3)) a_resume.prompt);
+  check bool "new A packet does not replay B identity" false (contains ~needle:"instance-schedule-B" a_resume.prompt);
+  let empty = assemble (parts 4 (Fields.Known []) base_observation).world_partition in
+  let empty_resume = resume empty a_resume.held_context in
+  check bool "known empty produces a new current-entry packet" true
+    (contains ~needle:(Ids.Turn_ref.to_string (turn 4)) empty_resume.prompt
+     && contains ~needle:"scheduled_source_count=\\\"0\\\"" empty_resume.prompt);
+  let direct = Direct_context.prepare ~turn_ref:(turn 5) ~active_goal_summaries:(Ok [])
+      ~current_task:Inputs.No_current_task ~held_task_skills:[] ~task_skill_surfaces:[]
+      ~workspace_memory:Masc.Workspace_memory_ledger.Missing ~wiki_contents:Masc.Keeper_wiki_contents.Off
+      ~lane_updates:(Ok (`List [])) ~approval_authority_text:"" ~recent_direct_conversation_text:""
+      ~worktree_text:"" ~telemetry_feedback_text:"" ~turn_instructions_text:"" () in
+  let direct_assembly = assemble (Direct_context.project_partition direct ~workspace_memory_access:None) in
+  let direct_resume = resume direct_assembly empty_resume.held_context in
+  check bool "direct/chat explicitly observes unknown in its own turn" true
+    (contains ~needle:(Ids.Turn_ref.to_string (turn 5)) direct_resume.prompt
+     && contains ~needle:"availability=\\\"unknown\\\"" direct_resume.prompt);
+  check bool "unknown does not claim a known empty observation" false
+    (contains ~needle:"scheduled_source_count" direct_resume.prompt);
+  List.iter (fun packet -> List.iter (fun identity ->
+    check bool "fresh empty/unknown packet contains no historical A/B admission identity" false
+      (contains ~needle:identity packet)) ["schedule-A"; "schedule-B"])
+    [empty_resume.prompt; direct_resume.prompt];
+  let preview = Prompt.build_prompt_preview ~current_task:Inputs.No_current_task
+      ~observation:base_observation () in
+  check bool "dashboard preview invents no real entry" false
+    (List.exists (fun (section : Layers.section) -> section.section_source = Layer Admitted_scheduled_input)
+       (Layers.sections preview.world_partition))
+;;
+
 let () =
   init_prompt_config_for_tests ();
   init_runtime_default_for_tests ();
   run "keeper_wake_turn_context"
     [
-      ("prepared prompt ownership", [test_case "common turn input survives request-specific access and source failure" `Quick
+      ("prepared prompt ownership", [test_case "admitted entry is exact through tools and official Start/Resume" `Quick
+          test_admitted_schedule_entry_survives_tools_and_official_resume;
+        test_case "common turn input survives request-specific access and source failure" `Quick
           test_prepared_prompt_keeps_turn_inputs_and_request_authority;
         test_case "direct work survives interleaved preparation and changing request routes" `Quick
           test_prepared_direct_context_keeps_original_work_and_request_routes]);

@@ -8,6 +8,9 @@ module KTP = Masc.Keeper_types_profile
 module Inputs = Masc.Keeper_world_observation_inputs
 module MS = Masc.Keeper_world_observation_message_scope
 
+let scheduled_admission_fixture_ref =
+  Ids.Turn_ref.make ~trace_id:"trace-admission-fixture" ~absolute_turn:1
+
 let () = Masc.Workspace_metric_hooks.install ()
 
 (* The shared Keeper prompt identifies the repository root from a Dune sandbox. *)
@@ -135,7 +138,7 @@ let init_prompt_config_for_tests () =
 let user_message observation =
   let turn_decision = WO.keeper_cycle_decision ~meta observation in
   let { Prompt.world_state = user; _ } =
-    Prompt.build_prompt ~turn_decision
+    Prompt.build_prompt ~turn_ref:scheduled_admission_fixture_ref ~admission:Masc.Keeper_unified_prompt_event_fields.Unknown ~turn_decision
       ~current_task:Inputs.No_current_task ~observation ()
   in
   user

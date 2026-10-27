@@ -123,7 +123,7 @@ let history_role_label = function
 
 (* A vendor may keep its first System for the whole session. Keep Goal's
    existing Start/held policy, but deliver a current Completion Authority event
-   in User only. Select the closed observation from the exact issuer; never
+   or identified historical admission fact in User only. Select the closed observation from the exact issuer; never
    search the selected text or borrow a receipt from another composition. *)
 let project_start_system ~system_prompt ~composed_context =
   match Option.bind composed_context (fun assembly ->
@@ -132,18 +132,19 @@ let project_start_system ~system_prompt ~composed_context =
   | Some (assembly, issued) when String.equal issued.text system_prompt ->
     let standing = List.filter (function
       | Keeper_context_assembly.Active_goals _ -> true
-      | Completion_authority _ -> false) issued.observations in
+      | Completion_authority _ | Admitted_scheduled_input _ -> false) issued.observations in
     let system_prompt = Keeper_context_assembly.with_system_observations
         ~base_text:issued.base_text ~observations:standing assembly
       |> Keeper_context_assembly.effective_system_prompt ~base_text:issued.base_text in
     let observations = List.filter_map (function
       | Keeper_context_assembly.Active_goals _ -> None
-      | Completion_authority text ->
+      | (Completion_authority text | Admitted_scheduled_input text) as observation ->
+        let block, _ = Keeper_context_assembly.observation_block observation in
         let message = user_message text in
         Some (Keeper_context_submission_link.concat ~separator:""
           [Keeper_context_submission_link.literal (history_role_label message.role);
            Keeper_context_submission_link.encoded_system_observation
-             ~target:Official_start_user ~block:Prompt_block_id.Completion_authority
+             ~target:Official_start_user ~block
              ~assembly:(Some assembly) message])) issued.observations in
     system_prompt, Keeper_context_submission_link.concat ~separator:"\n\n" observations,
     Some assembly
@@ -277,7 +278,7 @@ let block_body assembly = function
      | Some sections -> World_state_sections (List.map world_state_section sections)
      | None -> Whole_text)
   | Prompt_block_id.(
-      Keeper_instructions | Active_goals | Completion_authority | Temporal_summary | Memory_os_recall
+      Keeper_instructions | Active_goals | Completion_authority | Admitted_scheduled_input | Temporal_summary | Memory_os_recall
       | Librarian_working_context | Operator_note | Skill_compositions) -> Whole_text
 ;;
 
@@ -732,7 +733,7 @@ let resume_prompt ~goal ~held ?composed_context messages =
     | World_state_sections _,
       ( Session_store.Context_block
           Prompt_block_id.(
-            Keeper_instructions | Active_goals | Completion_authority | Temporal_summary | Memory_os_recall
+            Keeper_instructions | Active_goals | Completion_authority | Admitted_scheduled_input | Temporal_summary | Memory_os_recall
             | Librarian_working_context | Operator_note | Skill_compositions)
       | Session_store.Librarian_working_state
       | Session_store.Librarian_unread

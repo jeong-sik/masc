@@ -742,6 +742,7 @@ let run_keeper_invocation_turn_admitted_inner
               in
               let prepared_context =
                 Keeper_direct_turn_context.prepare
+                  ~turn_ref
                   ~active_goal_summaries
                   ~current_task
                   ~held_task_skills

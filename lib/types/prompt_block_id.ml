@@ -3,6 +3,7 @@ type t =
   | Dynamic_context
   | Active_goals
   | Completion_authority
+  | Admitted_scheduled_input
   | Temporal_summary
   | Memory_os_recall
   | Librarian_working_context
@@ -15,12 +16,13 @@ let equal a b =
   | Dynamic_context, Dynamic_context
   | Active_goals, Active_goals
   | Completion_authority, Completion_authority
+  | Admitted_scheduled_input, Admitted_scheduled_input
   | Temporal_summary, Temporal_summary
   | Librarian_working_context, Librarian_working_context
   | Memory_os_recall, Memory_os_recall
   | Operator_note, Operator_note
   | Skill_compositions, Skill_compositions -> true
-  | ( Keeper_instructions | Dynamic_context | Active_goals | Completion_authority | Temporal_summary | Memory_os_recall
+  | ( Keeper_instructions | Dynamic_context | Active_goals | Completion_authority | Admitted_scheduled_input | Temporal_summary | Memory_os_recall
     | Librarian_working_context | Operator_note | Skill_compositions )
   , _ -> false
 
@@ -28,6 +30,7 @@ let to_string = function
   | Keeper_instructions -> "keeper_instructions"
   | Dynamic_context -> "dynamic_context"
   | Active_goals -> "active_goals"
+  | Admitted_scheduled_input -> "admitted_scheduled_input"
   | Completion_authority -> "completion_authority"
   | Temporal_summary -> "temporal_summary"
   | Memory_os_recall -> "memory_os_recall"
@@ -39,6 +42,7 @@ let of_string = function
   | "keeper_instructions" -> Ok Keeper_instructions
   | "dynamic_context" -> Ok Dynamic_context
   | "active_goals" -> Ok Active_goals
+  | "admitted_scheduled_input" -> Ok Admitted_scheduled_input
   | "completion_authority" -> Ok Completion_authority
   | "temporal_summary" -> Ok Temporal_summary
   | "memory_os_recall" -> Ok Memory_os_recall
@@ -52,6 +56,7 @@ let all_known =
   ; Dynamic_context
   ; Active_goals
   ; Completion_authority
+  ; Admitted_scheduled_input
   ; Temporal_summary
   ; Memory_os_recall
   ; Librarian_working_context
@@ -72,11 +77,12 @@ let cache_rank = function
   | Librarian_working_context -> 3
   | Active_goals -> 4
   | Completion_authority -> 5
-  | Dynamic_context -> 6
-  | Temporal_summary -> 7
+  | Admitted_scheduled_input -> 6
+  | Dynamic_context -> 7
+  | Temporal_summary -> 8
   (* An operator speaking mid-turn is the newest thing in the assembly and the
      newest instruction in a post-tool round; it stays last on both counts. *)
-  | Operator_note -> 8
+  | Operator_note -> 9
 ;;
 
 (* See the mli. [Keeper_instructions] never enters the extra-context
@@ -87,7 +93,7 @@ let cache_rank = function
 let injected_on_post_tool_round = function
   | Dynamic_context | Temporal_summary | Memory_os_recall | Librarian_working_context
   | Skill_compositions -> false
-  | Keeper_instructions | Active_goals | Completion_authority | Operator_note -> true
+  | Keeper_instructions | Active_goals | Completion_authority | Admitted_scheduled_input | Operator_note -> true
 ;;
 
 (* See the mli. [Keeper_instructions] never enters the extra-context assembly
@@ -96,5 +102,5 @@ let injected_on_post_tool_round = function
 let resent_when_held = function
   | Keeper_instructions | Dynamic_context | Active_goals | Temporal_summary | Memory_os_recall
   | Librarian_working_context | Skill_compositions -> false
-  | Completion_authority | Operator_note -> true
+  | Completion_authority | Admitted_scheduled_input | Operator_note -> true
 ;;

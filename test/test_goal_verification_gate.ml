@@ -28,6 +28,9 @@ open Workspace_types
    world.* keys, rendered through the prompt registry at assembly time.
    Loading them into the registry is what [Prompt_defaults.init] does below;
    the registry locates config/prompts itself under Dune. *)
+let scheduled_admission_fixture_ref =
+  Ids.Turn_ref.make ~trace_id:"trace-admission-fixture" ~absolute_turn:1
+
 let () =
   Masc.Prompt_defaults.init ()
 ;;
@@ -1472,7 +1475,7 @@ let test_keeper_keeps_and_sees_a_verifying_goal () =
     ]
   in
   let { Keeper_unified_prompt.world_state; _ } =
-    Keeper_unified_prompt.build_prompt
+    Keeper_unified_prompt.build_prompt ~turn_ref:scheduled_admission_fixture_ref ~admission:Masc.Keeper_unified_prompt_event_fields.Unknown
       ~turn_decision:(Keeper_world_observation.keeper_cycle_decision ~meta observation)
       ~current_task:Keeper_world_observation_inputs.No_current_task
       ~active_goal_summaries:(Ok summaries)

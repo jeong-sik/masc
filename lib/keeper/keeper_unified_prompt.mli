@@ -174,6 +174,8 @@ type prepared_prompt
     A new turn or world snapshot requires a new product. *)
 
 val prepare_prompt :
+  turn_ref:Ids.Turn_ref.t ->
+  admission:Keeper_unified_prompt_event_fields.scheduled_admission ->
   turn_decision:Keeper_world_observation.keeper_cycle_decision ->
   ?previous_turn_stop:Keeper_turn_checkpoint_reason.t ->
   current_task:Keeper_world_observation_inputs.current_task_observation ->
@@ -186,7 +188,10 @@ val prepare_prompt :
   observation:Keeper_world_observation.world_observation ->
   unit -> prepared_prompt
 (** Render common layers, frame provenance and durable user input once from
-    this exact turn's data and prompt fragments. No process-global cache or
+    this exact turn's data and prompt fragments. [turn_ref] and [admission]
+    always issue a historical entry observation, even for [Known []] or [Unknown].
+    Neither omission nor the pending queue can stand in for that observation.
+    No process-global cache or
     permission result is retained. Tool-dependent layers are deferred to
     {!project_prompt}; new preparations observe current inputs/fragments. *)
 
@@ -210,6 +215,8 @@ val project_prompt :
 
     @param observation Current world snapshot *)
 val build_prompt :
+  turn_ref:Ids.Turn_ref.t ->
+  admission:Keeper_unified_prompt_event_fields.scheduled_admission ->
   turn_decision:Keeper_world_observation.keeper_cycle_decision ->
   ?previous_turn_stop:Keeper_turn_checkpoint_reason.t ->
   current_task:Keeper_world_observation_inputs.current_task_observation ->

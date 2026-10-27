@@ -10,6 +10,8 @@
     per-turn world context, including current criterion and measurement.
     [Completion_authority] is the existing completion-authority renderer's
     Task approval/rejection event observations with their correlation keys.
+    [Admitted_scheduled_input] is an exact turn-entry admission observation,
+    including known-empty or unknown source data. It is not a permission grant.
     [Dynamic_context] is the remaining composite soft-context string built by
     keeper_turn.ml/keeper_run_prompt.ml (continuity snapshot, skill
     route, worktree, telemetry feedback, turn instructions, recent
@@ -34,6 +36,7 @@ type t =
   | Dynamic_context
   | Active_goals
   | Completion_authority
+  | Admitted_scheduled_input
   | Temporal_summary
   | Memory_os_recall
   | Librarian_working_context
@@ -105,8 +108,10 @@ val resent_when_held : t -> bool
     words is a new utterance, not a copy of the earlier one. A new constructor
     must declare its class here.
 
-    [Completion_authority] also answers [true], preserving its producer layer's
-    [Sent_every_resume] event semantics even when the session saw identical bytes.
+    [Completion_authority] and [Admitted_scheduled_input] also answer [true],
+    preserving their producer layers' [Sent_every_resume] semantics even when
+    the session saw identical bytes. Entry facts name their own exact turn;
+    later empty/unknown observations do not erase historical transcript rows.
 
     [Dynamic_context] answers for the block as one text. When the renderer's
     partition of the block is known, a resume compares its World State

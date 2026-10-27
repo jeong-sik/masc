@@ -8677,6 +8677,28 @@ let test_decode_keeper_turns_projection_keeps_waiting_unobserved () =
      | Tui_decode.Keeper_waiting_unavailable _ ->
          Alcotest.fail "an absent waiting object invented a waiting observation")
 
+let test_decode_keeper_turns_projection_accepts_an_older_server () =
+  let without_fleet_errors json =
+    match json with
+    | `Assoc fields -> `Assoc (List.remove_assoc "waiting_errors" fields)
+    | _ -> Alcotest.fail "turns fixture must be an object"
+  in
+  (match
+     Tui_decode.decode_keeper_turns_projection
+       (without_fleet_errors keeper_turns_json)
+   with
+   | Error detail -> Alcotest.fail detail
+   | Ok { rows; waiting = Tui_decode.Keeper_waiting_observed [] } ->
+       Alcotest.(check int) "older turn rows remain available" 3 (List.length rows)
+   | Ok _ -> Alcotest.fail "a missing fleet error field became a waiting failure");
+  match
+    Tui_decode.decode_keeper_turns_projection
+      (without_fleet_errors keeper_turns_waiting_json)
+  with
+  | Error detail -> Alcotest.fail detail
+  | Ok { rows = [ _ ]; waiting = Tui_decode.Keeper_waiting_observed [ _ ] } -> ()
+  | Ok _ -> Alcotest.fail "an older server's waiting observation was discarded"
+
 let waiting_is_invalid = function
   | Tui_decode.Keeper_waiting_unavailable (Tui_decode.Keeper_waiting_invalid _) -> true
   | Tui_decode.Keeper_waiting_unavailable (Tui_decode.Keeper_waiting_sources_unavailable _)
@@ -13781,6 +13803,8 @@ let () =
           test_decode_keeper_turns_projection_reads_waiting
       ; Alcotest.test_case "projection keeps waiting unobserved" `Quick
           test_decode_keeper_turns_projection_keeps_waiting_unobserved
+      ; Alcotest.test_case "projection accepts an older server" `Quick
+          test_decode_keeper_turns_projection_accepts_an_older_server
       ; Alcotest.test_case "projection rejects unknown waiting vocabulary" `Quick
           test_decode_keeper_turns_projection_rejects_unknown_waiting_vocabulary
       ; Alcotest.test_case "projection separates fleet waiting errors" `Quick

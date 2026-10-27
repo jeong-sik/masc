@@ -166,10 +166,7 @@ Keeper 에게 이렇게 부탁해 한 장으로 남깁니다.
   줄, ego lite 안의 작업 공간을 쓰는 ego lite 줄(`ego-browser` 가 답할 때만 나옴)은
   처음에 표시되어 있지 않으니 필요할 때만 고릅니다. 설치를 이미 끝냈다면 같은 명령을 직접 실행하고
   서버를 다시 시작합니다.
-- 레인이 꺼져 있으면 Browser Lane 화면에 이런 줄이 보입니다.
-  - `Live lane off in runtime.toml · it serves nothing, MASC starts nothing` —
-    `runtime.toml` 의 `[browser.live] enabled = false` 때문입니다. 이 값을 고친 뒤
-    서버를 다시 시작합니다.
+- Browser Lane 화면의 연결 목록에는 이런 줄이 보입니다.
   - `No active native browser connections` — 목록을 읽었고, 연결된 Firefox 가
     없습니다.
   - `(nothing here is a reading)` — 목록을 읽지 못했습니다. 바로 위의 빨간 줄이

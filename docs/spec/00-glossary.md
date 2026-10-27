@@ -2404,19 +2404,18 @@ status: reference
   [Masc_tui_msx.shows_sidebar](../../bin/masc_tui_msx.mli)
 
 **Lane activity (레인 활동 설정)**
-: exact lane·machine·Browser 표·package Add-on이 새 작업을 받을지 정하는 `enabled`
+: exact lane·machine·package Add-on이 새 작업을 받을지 정하는 `enabled`
   플래그. TUI는 exact lane을 "Exact activity", machine을 "Machine activity"로 읽는다.
-  `[runtime.exact_output_lanes.<id>]`·`[machines.msx]`·`[machines.dos]`·
-  `[browser.automation]`·`[browser.stagehand]`·`[browser.live]` 표와 package 설치
-  선언의 `enabled` 키가 그 값이고, 키를 빼면 `true`다. `false`는 새 작업의 진입만 막고
+  `[runtime.exact_output_lanes.<id>]`·`[machines.msx]`·`[machines.dos]` 표와 package 설치
+  선언의 `enabled` 키가 그 값이고, 키를 빼면 `true`다. browser 출처는
+  `browser-<출처>` package 선언의 `enabled` 로만 켜고 끈다. `false`는 새 작업의 진입만 막고
   선언된 후보·경로·설정과 이미 잡은 실행 스냅샷은 그대로 둔다 — package Add-on은 소유
   worker의 정리를 요청한다. Required exact lane(Board Attention·HITL auto-judge)은 끌 수
   없다(`Standalone_lane.obligation`·`Runtime_exact_output_registry.admit_publication`).
   위의 **기계 행동 피드 (Machine Action Feed)**(DOS에서 누가 무엇을 했는지의 흐름)와 다른
   층이다 — 이쪽은 작업 진입을 여닫는 구성값이다.
   → [Runtime_schema.exact_output_lane_decl](../../lib/runtime/runtime_schema.mli),
-  [Machine_configuration](../../lib/machine_configuration/machine_configuration.mli),
-  [Browser_configuration](../../lib/browser_configuration/browser_configuration.mli)
+  [Machine_configuration](../../lib/machine_configuration/machine_configuration.mli)
 
 **Agent Core Hook**
 : Agent 실행의 정해진 시점에 호스트가 등록한 동기 판단 콜백. `hook_event`

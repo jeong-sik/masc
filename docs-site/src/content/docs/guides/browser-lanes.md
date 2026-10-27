@@ -3,21 +3,26 @@ title: Browser Lane Guide
 description: Connect Firefox or Zen or the Stagehand Chromium as an Addon, select validation and model hooks, and use the Browser Lane TUI.
 ---
 
-The browser Lane Addon owns the worker and its configured browser backends.
-Install it once, then select the input/output validation hooks and model
-consumers for that installation independently. Browser names and connection
-transports describe capabilities; they are not separate installation systems.
+Each browser source is its own Lane Addon package with its own worker:
+`browser-automation`, `browser-stagehand`, `browser-firefox`, `browser-ego` and
+`browser-external`. A worker runs only its source, so a failure of one source
+ends only that worker. Select the input/output validation hooks and model
+consumers per installation. Browser names and connection transports describe
+capabilities; they are not separate installation systems.
 
-- **live** connects an existing Firefox or Zen through its WebExtension, or
-  starts a dedicated Firefox through the Addon-owned BiDi backend. Existing
-  extension tabs keep their logins; managed Firefox uses its dedicated profile.
-  Native hover and drag require a compatible connection such as BiDi.
-- **automation** uses the worker's OCaml WebDriver client and geckodriver for an
-  isolated Gecko session. The Addon owns the driver, browser, and private profile.
-- **stagehand** uses an Addon-owned Chromium and the Stagehand extension over
-  CDP. It supports native interactions and optional sentence/model operations.
-  A configured persistent profile keeps logins; otherwise a private profile is
-  created for the owned session.
+- **live** has three sources. `browser-external` serves an existing Firefox or
+  Zen through its WebExtension, or a Firefox you start with its own BiDi host.
+  `browser-firefox` starts a dedicated Firefox with its own BiDi peer.
+  `browser-ego` serves an ego lite task space. Existing extension tabs keep
+  their logins; the dedicated Firefox uses its own profile. Native hover and
+  drag require a compatible connection such as BiDi.
+- **automation** (`browser-automation`) uses the worker's OCaml WebDriver client
+  and geckodriver for an isolated Gecko session. The worker owns the driver,
+  browser, and private profile.
+- **stagehand** (`browser-stagehand`) uses a worker-owned Chromium and the
+  Stagehand extension over CDP. It supports native interactions and optional
+  sentence/model operations. A configured persistent profile keeps logins;
+  otherwise a private profile is created for the owned session.
 
 For an unbound request, automatic selection considers the available browsers
 and required actions. Keep the returned browser identity for tab/document work;
@@ -25,28 +30,32 @@ a bound tab or explicit connection does not fall back to a different browser.
 Check the reported capability inventory rather than assuming every transport
 supports every action. Safari is not a backend in this package.
 
-## Install the browser Addon
+## Install the browser Addons
 
 `scripts/install-local-build.sh` installs `masc-browser-addon-worker`,
 `masc-native-addon-launcher` and `masc-browser-process-owner` beside masc, then
 runs `masc browser-lane-setup --mode addon` for the workspace. Every other
-`browser-lane-setup` mode does the same step. It writes the package masc carries
-to `<base-path>/.masc/packages/browser/` and, when the workspace has no
-declaration of it, saves `lane-addons/browser.toml` in the active config root.
-An existing declaration of the package is left as it is. Keep the install
+`browser-lane-setup` mode does the same step for the sources the workspace
+runs: automation, firefox and ego when `runtime.toml` has their table or the
+run writes it, stagehand when `[browser.stagehand]` is there, and external when
+a native host is installed. For each, it writes the package masc carries to
+`<base-path>/.masc/packages/browser-<source>/` and, when the workspace has no
+declaration of that source, saves `lane-addons/browser-<source>.toml` in the
+active config root. An existing declaration is left as it is. Keep the install
 prefix on the server's PATH. `--no-browser-addon` (installer) and `--no-addon`
-(setup) leave the Add-on out; without it no browser route works.
+(setup) leave the Addons out; without them no browser route works.
 
-To choose hooks or model outputs, add them to that `browser.toml`; setup never
-rewrites an existing declaration:
+To choose hooks or model outputs, add them to the declaration setup wrote;
+setup never rewrites an existing declaration. `locate` belongs to
+`browser-automation` and `stagehand` to `browser-stagehand`:
 
 ```toml
-id = "browser"
+id = "browser-automation"
 enabled = true
-run_id = "browser"
-manifest_path = "/absolute/path/to/workspace/.masc/packages/browser/lane.toml"
+run_id = "browser-automation"
+manifest_path = "/absolute/path/to/workspace/.masc/packages/browser-automation/lane.toml"
 tool_hooks = ["validate_input", "validate_output"]
-exact_outputs = ["locate", "stagehand"]
+exact_outputs = ["locate"]
 
 [binding]
 sources = []
@@ -65,10 +74,9 @@ and browser `clientId` are separate identities.
 | `tool_hooks = ["validate_output"]` | Validate the final successful structured reply after artifact mediation |
 | `tool_hooks = ["validate_input", "validate_output"]` | Enable both tool checks |
 | `tool_hooks = []` | Disable the optional tool checks |
-| `exact_outputs = ["locate"]` | Select the Gecko scene-node model consumer |
-| `exact_outputs = ["stagehand"]` | Select the Chromium structured model consumer |
-| `exact_outputs = ["locate", "stagehand"]` | Select both model consumers |
-| `exact_outputs = []` | Disable both model consumers |
+| `exact_outputs = ["locate"]` in `browser-automation` | Select the Gecko scene-node model consumer |
+| `exact_outputs = ["stagehand"]` in `browser-stagehand` | Select the Chromium structured model consumer |
+| `exact_outputs = []` | Disable that package's model consumer |
 
 Omitting either array uses that package default. These are named middleware
 and declared model outputs; arbitrary executable hooks are not loaded. With
@@ -78,23 +86,27 @@ Non-model actions remain available where the backend supports them.
 
 Selecting an output does not configure a model provider. Configure existing
 model slots separately in `runtime.toml` under
-`runtime.addon_exact_lanes.browser.locate` and/or
-`runtime.addon_exact_lanes.browser.stagehand`. Model availability and
+`runtime.addon_exact_lanes.browser-automation.locate` and/or
+`runtime.addon_exact_lanes.browser-stagehand.stagehand`. The Lanes screen shows
+each declared output with the state of its table. Model availability and
 consumer inventory are separate observations. A missing or unavailable route
 uses the shared Exact Output waiting/cancellation policy; it does not authorize
 a different browser or input replay.
 
 Backend settings below are loaded from the resolved `runtime.toml` at server
-startup and captured when an installation attaches. Restart after changing
-those settings, and detach/reattach an existing installation to capture them.
-Installation declaration edits are reconciled at startup and on the existing
-maintenance pulse. Saving TOML is not an attachment receipt: inspect
-`desired_revision`, `applied_revision`, `phase`, and configuration issues.
-Dashboard Refresh reads that state rather than forcing reconciliation.
+startup and captured when an installation attaches. They say how a source
+starts, never whether it runs: a source whose table is missing does not start,
+and its package row says so. Restart after changing those settings, and
+detach/reattach an existing installation to capture them. Installation
+declaration edits are reconciled at startup and on the existing maintenance
+pulse. Saving TOML is not an attachment receipt: inspect `desired_revision`,
+`applied_revision`, `phase`, and configuration issues. Dashboard Refresh reads
+that state rather than forcing reconciliation.
 
-To stop this installation, set its top-level `enabled = false` and verify
-detachment and cleanup. Removing its declaration takes effect after a complete
-config scan. The worker fences input before joining its original owned
+To stop a source, set the top-level `enabled = false` in its declaration, from
+the TUI's package row or the TOML file, and verify detachment and cleanup. Only
+that source's worker stops. Removing a declaration takes effect after a
+complete config scan. The worker fences input before joining its original owned
 resources; unconfirmed cleanup remains a failure. A replacement has a fresh
 incarnation and connection IDs. External extension/manual browsers retain
 operator ownership. Persistent profile contents are preserved.
@@ -116,7 +128,7 @@ file again and moves to the port it names only when the current server no
 longer answers and the new port does, so a server restarted on another port is
 found without reinstalling.
 
-For a dedicated Firefox without the extension, configure the Addon-owned BiDi backend:
+For a dedicated Firefox without the extension, configure the `browser-firefox` source:
 
 ```bash
 masc browser-lane-setup --mode bidi --base-path /path/to/workspace

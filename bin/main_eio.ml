@@ -4471,7 +4471,8 @@ let sandbox_catalog_cmd =
     (* The setup journey reads this catalog for the workspace doctor offered;
        both answer in Workspace_root's order. *)
     let base_path = selected_base_path requested in
-    print_endline (Yojson.Safe.to_string (Masc.Sandbox_readiness.inspect ~base_path));
+    print_endline (Yojson.Safe.to_string
+      (Masc.Sandbox_readiness.inspect ~run:Masc.Sandbox_readiness.system_runner ~base_path));
     0 in
   Cmd.v (Cmd.info "sandbox-catalog" ~doc:"Inspect sandbox choices and host prerequisites without changing settings.")
     Term.(const inspect $ run_base_path)

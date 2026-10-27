@@ -25,9 +25,9 @@ masc carries these packages. After installing, the script runs
 `masc browser-lane-setup --mode addon` for the workspace, and every other
 `browser-lane-setup` mode does the same, for each source the workspace runs:
 automation, firefox and ego when `runtime.toml` has their table or the run
-writes it, stagehand when `[browser.stagehand]` is there, each only while its
-lane is not switched off with `enabled = false`, and external when a native
-host is installed. A mode declares its sources after writing its tables.
+writes it, stagehand when `[browser.stagehand]` is there, and external when a
+native host is installed. A source whose table the mode writes is declared
+once that table is written.
 
 - It writes each package to `<base-path>/.masc/packages/browser-<source>/`. An
   upgraded masc rewrites the files there, so the declaration does not change.
@@ -38,9 +38,6 @@ host is installed. A mode declares its sources after writing its tables.
   it, and names the `manifest_path` line to use when it points at another copy.
   Two enabled declarations of one source are refused, because the server would
   attach both and use neither for that source.
-- A declaration of the `browser` package that served every source in one
-  worker is refused. Detach that instance, remove its declaration and
-  `.masc/packages/browser`, then run setup again.
 
 Setup attaches nothing. The server attaches the declared Add-ons when it starts
 and on its maintenance pass. Set `enabled = false` in a declaration to keep

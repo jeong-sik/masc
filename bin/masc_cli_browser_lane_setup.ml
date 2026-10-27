@@ -327,36 +327,6 @@ let print_addons (installed : Addon_setup.installed list) =
         "The MASC server attaches a declared Add-on when it starts and on its maintenance pass; \
          set enabled = false in its declaration to keep it detached."
 
-(* Tables of the retired package bind nothing now, so each is named with the
-   table to move it to. runtime.toml is the operator's to edit. *)
-let print_retired_exact_lanes ~runtime_config_path (installed : Addon_setup.installed list) =
-  let table id output =
-    Printf.sprintf "[runtime.addon_exact_lanes.%s.%s]" (Toml_line_editor.render_key id)
-      (Toml_line_editor.render_key output) in
-  match Addon_setup.retired_exact_lanes ~runtime_config_path installed with
-  | Error detail ->
-    Printf.printf
-      "%s did not parse when read again for tables of the retired browser package: %s\n"
-      runtime_config_path detail
-  | Ok retired ->
-    (match retired with
-     | [] -> ()
-     | _ :: _ ->
-       Printf.printf
-         "%s still binds exact outputs of the retired browser package, and the server \
-          reads those tables for no installation:\n"
-         runtime_config_path;
-       List.iter
-         (fun ({ output; moves_to } : Addon_setup.retired_exact_lane) ->
-            match moves_to with
-            | Some backend ->
-              Printf.printf "  move %s to %s\n" (table Addon_setup.retired_package_name output)
-                (table (Addon_setup.package_name backend) output)
-            | None ->
-              Printf.printf "  %s: no browser package declared here has the %s output\n"
-                (table Addon_setup.retired_package_name output) output)
-         retired)
-
 (* Whether this command runs the browser Add-on step, and what its refusal
    means. --mode addon requires it: a refusal is the command's. Every other
    mode offers it: a refusal is reported and that mode's own steps go on, so
@@ -366,11 +336,12 @@ type addon_choice = Require_addon | Offer_addon | Skip_addon
 
 type 'a addon_step = Not_run | Reported of string | Done of 'a
 
-let addon_refusal choice error =
-  let message = Addon_setup.error_message error in
+let step_refusal choice message =
   match choice with
   | Require_addon -> Error message
   | Offer_addon | Skip_addon -> Ok (Reported message)
+
+let addon_refusal choice error = step_refusal choice (Addon_setup.error_message error)
 
 let addon_plan_status : Addon_setup.error -> int = function
   | Addon_setup.Config_root_missing _ -> no_config_root_status
@@ -382,36 +353,38 @@ let addon_plan_status : Addon_setup.error -> int = function
   | Addon_setup.Inventory_unreadable _
   | Addon_setup.Declared_more_than_once _
   | Addon_setup.Declaration_unloadable _
-  | Addon_setup.Declaration_refused _
-  | Addon_setup.Retired_declaration _ -> 1
+  | Addon_setup.Declaration_refused _ -> 1
 
 (* The browser sources this workspace runs, one package each: a source
-   whose table runtime.toml has, or this run writes, while its lane is
-   switched on, as the runtime starts it
-   ({!Browser_configuration.source_table}), and the external hosts when this
-   run installs a host or one is installed. *)
+   whose table runtime.toml has or this run writes, and the external hosts
+   when this run installs a host or one is installed. Whether its lane is
+   switched on is the runtime's to read when it starts the worker. The
+   second list holds the sources that run only once this run writes their
+   table. *)
 let addon_sources ~base_path ~(configuration : Browser_configuration.t) ~modes =
   let host_installed = match (observation ~base_path).Launcher.launcher with
     | Launcher.Follows_workspace -> true
     | Launcher.Not_installed | Launcher.Undeclared | Launcher.Unreadable
     | Launcher.Describes_another_launcher -> false in
-  let writes : Browser_lane.Backend.t -> bool = function
+  let table_present : Browser_lane.Backend.t -> bool = function
+    | Automation -> Option.is_some configuration.automation
+    | Stagehand -> Option.is_some configuration.stagehand
+    | Owned_firefox -> Option.is_some configuration.live_bidi
+    | Ego -> Option.is_some configuration.live_ego
+    | External_host -> false in
+  let written_here : Browser_lane.Backend.t -> bool = function
     | Automation -> List.mem Automation modes
     | Owned_firefox -> List.mem Bidi modes
     | Ego -> List.mem Ego modes
     | Stagehand | External_host -> false in
-  List.filter
-    (fun (backend : Browser_lane.Backend.t) -> match backend with
-       | External_host -> installs_host modes || host_installed
-       | Automation | Stagehand | Owned_firefox | Ego ->
-         (match Browser_configuration.source_table configuration backend with
-          | Ok _ -> true
-          | Error (Browser_configuration.Table_missing _) -> writes backend
-          | Error (Browser_configuration.Switched_off _) -> false))
-    Browser_lane.Backend.all
+  let sources = List.filter (fun (backend : Browser_lane.Backend.t) -> match backend with
+      | External_host -> installs_host modes || host_installed
+      | Automation | Stagehand | Owned_firefox | Ego -> table_present backend || written_here backend)
+      Browser_lane.Backend.all in
+  sources, List.filter (fun backend -> written_here backend && not (table_present backend)) sources
 
-(* No runtime.toml configures no source; one that does not parse is
-   refused, since which sources it runs is not known. *)
+(* No runtime.toml configures no source. Which sources one that does not
+   parse runs is not known. *)
 let runtime_browser_configuration runtime_config_path =
   if not (Sys.file_exists runtime_config_path) then Ok Browser_configuration.none
   else
@@ -424,16 +397,18 @@ let plan_addon ~base_path ~runtime_config_path ~modes choice =
   match choice with
   | Skip_addon -> Ok Not_run
   | Require_addon | Offer_addon ->
-    let* configuration =
-      runtime_browser_configuration runtime_config_path |> Result.map_error (fun message -> 1, message) in
-    (match Addon_setup.plan ~base_path ~sources:(addon_sources ~base_path ~configuration ~modes) with
-     | Ok plan -> Ok (Done plan)
-     | Error error ->
-       addon_refusal choice error
-       |> Result.map_error (fun message -> addon_plan_status error, message))
+    (match runtime_browser_configuration runtime_config_path with
+     | Error message -> step_refusal choice message |> Result.map_error (fun message -> 1, message)
+     | Ok configuration ->
+       let sources, awaiting = addon_sources ~base_path ~configuration ~modes in
+       (match Addon_setup.plan ~base_path ~sources with
+        | Ok plan -> Ok (Done (plan, awaiting))
+        | Error error ->
+          addon_refusal choice error
+          |> Result.map_error (fun message -> addon_plan_status error, message)))
 
 let print_addon_skipped message =
-  prerr_endline ("The browser Add-on was not set up: " ^ message)
+  prerr_endline ("The browser Add-on step stopped: " ^ message)
 
 let print_host_only =
   "--mode host connects no browser: it installs the native host and launcher for a browser \
@@ -481,10 +456,10 @@ let install
   | Ok (addon, extension, bidi, automation, ego) ->
     (* Install the requested host assets, then write the configuration
        tables, then each browser source's package and declaration. A source
-       is declared only after the table it starts from is written, since its
-       worker fails without that table. A later refusal retains what was
-       completed before it. Setup does not attach the browser Add-ons or
-       start their browsers. *)
+       whose table this run writes is declared only once that table is
+       written, since its worker fails without it. A later refusal retains
+       what was completed before it. Setup does not attach the browser
+       Add-ons or start their browsers. *)
     let installed =
       if installs_host modes
       then
@@ -541,51 +516,61 @@ let install
          written.bidi;
        Option.iter (print_automation ~runtime_config_path) written.automation;
        Option.iter (print_ego ~runtime_config_path) written.ego;
-       (match refusal with
-        | Some message ->
-          (match addon with
-           | Done _ ->
-             prerr_endline
-               "No browser Add-on was declared, since a table a source starts from was not \
-                written. Run the same command again once the refusal below is resolved."
-           | Not_run | Reported _ -> ());
+       (* A source whose table this run was to write and did not is left out.
+          The others are declared even after a table refusal, since their
+          workers do not start from that table. *)
+       let table_written : Browser_lane.Backend.t -> bool = function
+         | Automation -> Option.is_some written.automation
+         | Owned_firefox -> Option.is_some written.bidi
+         | Ego -> Option.is_some written.ego
+         | Stagehand | External_host -> false
+       in
+       let addon =
+         match addon with
+         | Not_run -> Ok ()
+         | Reported message -> Ok (print_addon_skipped message)
+         | Done (plan, awaiting) ->
+           let unwritten = List.filter (fun backend -> not (table_written backend)) awaiting in
+           let { Addon_setup.installed = applied; refusal = stopped } =
+             Addon_setup.apply (Addon_setup.without unwritten plan)
+           in
+           print_endline "";
+           (match applied, stopped, unwritten with
+            | [], Some _, ([] | _ :: _) | [], None, _ :: _ -> ()
+            | [], None, [] | _ :: _, (None | Some _), ([] | _ :: _) -> print_addons applied);
+           (match unwritten with
+            | [] -> ()
+            | _ :: _ ->
+              Printf.printf "Not declared, since its table was not written: %s\n"
+                (String.concat ", " (List.map Browser_lane.Backend.to_wire unwritten)));
+           (match stopped with
+            | None -> Ok ()
+            | Some error ->
+              addon_refusal addon_choice error
+              |> Result.map (function
+                | Reported message -> print_addon_skipped message
+                | Not_run | Done _ -> ()))
+       in
+       (match refusal, addon with
+        | Some message, Ok () -> refuse message
+        | Some message, Error addon_message ->
+          prerr_endline addon_message;
           refuse message
-        | None ->
-          let addon =
-            match addon with
-            | Not_run -> Ok ()
-            | Reported message -> Ok (print_addon_skipped message)
-            | Done plan ->
-              let { Addon_setup.installed = applied; refusal } = Addon_setup.apply plan in
-              print_endline "";
-              (match applied, refusal with
-               | [], Some _ -> ()
-               | ([] | _ :: _), (None | Some _) -> print_addons applied);
-              print_retired_exact_lanes ~runtime_config_path applied;
-              (match refusal with
-               | None -> Ok ()
-               | Some error ->
-                 addon_refusal addon_choice error
-                 |> Result.map (function
-                   | Reported message -> print_addon_skipped message
-                   | Not_run | Done _ -> ()))
+        | None, Error message -> refuse message
+        | None, Ok () ->
+          if modes = [ Host ] then (print_endline ""; print_endline print_host_only);
+          if List.mem Extension modes && List.mem Bidi modes
+          then (print_endline ""; print_endline print_both_routes);
+          let extension_written =
+            match installed with
+            | Some { Setup.extension = Some _; _ } -> true
+            | Some { Setup.extension = None; _ } | None -> false
           in
-          (match addon with
-           | Error message -> refuse message
-           | Ok () ->
-             if modes = [ Host ] then (print_endline ""; print_endline print_host_only);
-             if List.mem Extension modes && List.mem Bidi modes
-             then (print_endline ""; print_endline print_both_routes);
-             let extension_written =
-               match installed with
-               | Some { Setup.extension = Some _; _ } -> true
-               | Some { Setup.extension = None; _ } | None -> false
-             in
-             if extension_written || List.mem Host modes
-             then (print_endline ""; print_lane_state ~base_path);
-             if Option.is_some written.bidi
-             then (print_endline ""; print_bidi_state ~base_path ~runtime_config_path);
-             0)))
+          if extension_written || List.mem Host modes
+          then (print_endline ""; print_lane_state ~base_path);
+          if Option.is_some written.bidi
+          then (print_endline ""; print_bidi_state ~base_path ~runtime_config_path);
+          0))
 
 let run
       ~base_path

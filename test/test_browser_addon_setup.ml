@@ -290,40 +290,6 @@ let test_a_disabled_declaration_alone_keeps_the_addon_detached () =
     check bool "no declaration of the automation package" false
       (Sys.file_exists (declaration_path base B.Automation)))
 
-(* The package that served every source in one worker. Its manifest names no
-   browser_backend, so the declaration setup wrote for it no longer loads. *)
-let retired_manifest =
-  "id = \"browser\"\nrevision = \"0.1.0\"\ntitle = \"Browser\"\nruntime = \"host_process\"\n\
-   service = \"browser\"\ncommand = [\"masc-browser-addon-worker\"]\ncontributions = [\"observe\"]\n\
-   [resources]\nmax_reply_bytes = 4096\n"
-
-let test_a_declaration_of_the_retired_package_is_refused () =
-  with_workspace (fun base ->
-    let retired_package = Filename.concat (packages_directory base) "browser" in
-    let manifest_path = Filename.concat retired_package manifest_name in
-    write manifest_path retired_manifest;
-    let declaration = Filename.concat (lane_directory base) "browser.toml" in
-    let text = declaration_text ~id:"browser" ~manifest_path () in
-    write declaration text;
-    let refused () =
-      match S.plan ~base_path:base ~sources:B.all with
-      | Error (S.Retired_declaration path) -> check string "the leftover declaration" declaration path
-      | Ok _ -> fail "a declaration of the retired package was planned past"
-      | Error error -> failf "refused for another reason: %s" (S.error_message error)
-    in
-    refused ();
-    List.iter
-      (fun backend ->
-         check bool (B.to_wire backend ^ ": no package") false
-           (Sys.file_exists (S.package_directory ~base_path:base backend)))
-      B.all;
-    check string "the leftover declaration is unchanged" text (read declaration);
-    check string "the retired package is unchanged" retired_manifest (read manifest_path);
-    (* With its package folder already removed, the declaration alone is
-       still the operator's to remove. *)
-    remove_tree retired_package;
-    refused ())
-
 let test_a_declaration_whose_package_was_removed_is_kept () =
   with_workspace (fun base ->
     let first = installed_one base B.Automation in
@@ -372,32 +338,19 @@ let test_a_refusal_returns_the_sources_declared_before_it () =
     | _, None -> fail "an unloadable declaration of ego was accepted"
     | _, Some error -> failf "refused for another reason: %s" (S.error_message error))
 
-(* An exact-output table of the retired package is named with the table of
-   the package that carries that output now; one no package carries is named
-   alone. Tables of the current packages are not named. *)
-let test_tables_of_the_retired_package_are_named_with_their_new_table () =
+(* A source left out of the plan is neither written nor declared. *)
+let test_a_source_left_out_of_the_plan_is_not_declared () =
   with_workspace (fun base ->
-    let runtime_config_path = Filename.concat base "runtime.toml" in
-    let retired installed = match S.retired_exact_lanes ~runtime_config_path installed with
-      | Ok retired ->
-        List.map (fun ({ output; moves_to } : S.retired_exact_lane) ->
-            output, Option.map B.to_wire moves_to) retired
-      | Error detail -> failf "runtime.toml did not parse: %s" detail in
-    let installed = installed ~sources:[ B.Automation ] base in
-    check (list (pair string (option string))) "no runtime.toml names nothing" [] (retired installed);
-    write runtime_config_path
-      {|[runtime.addon_exact_lanes.browser.locate]
-slots = []
-
-[runtime.addon_exact_lanes.browser.stagehand]
-slots = []
-
-[runtime.addon_exact_lanes.browser-automation.locate]
-slots = []
-|};
-    check (list (pair string (option string))) "each retired table, with its new owner"
-      [ "locate", Some (B.to_wire B.Automation); "stagehand", None ]
-      (retired installed))
+    match S.plan ~base_path:base ~sources:[ B.Automation; B.Owned_firefox ] with
+    | Error error -> failf "plan refused: %s" (S.error_message error)
+    | Ok plan ->
+      let { S.installed; refusal } = S.apply (S.without [ B.Owned_firefox ] plan) in
+      check bool "nothing refused" true (Option.is_none refusal);
+      check (list string) "only the source kept" [ B.to_wire B.Automation ] (wire installed);
+      check bool "the left-out source has no package" false
+        (Sys.file_exists (S.package_directory ~base_path:base B.Owned_firefox));
+      check bool "nor a declaration" false
+        (Sys.file_exists (declaration_path base B.Owned_firefox)))
 
 let test_a_workspace_without_a_config_root_is_refused () =
   with_workspace ~config:false (fun base ->
@@ -464,16 +417,14 @@ let () =
             test_a_disabled_declaration_beside_the_enabled_one_is_not_counted
         ; test_case "a disabled declaration alone keeps the Add-on detached" `Quick
             test_a_disabled_declaration_alone_keeps_the_addon_detached
-        ; test_case "a declaration of the retired package is refused" `Quick
-            test_a_declaration_of_the_retired_package_is_refused
         ; test_case "a declaration whose package was removed is kept" `Quick
             test_a_declaration_whose_package_was_removed_is_kept
         ; test_case "an unloadable declaration of the id is left and reported" `Quick
             test_an_unloadable_declaration_of_the_id_is_left_and_reported
         ; test_case "a refusal returns the sources declared before it" `Quick
             test_a_refusal_returns_the_sources_declared_before_it
-        ; test_case "tables of the retired package are named with their new table" `Quick
-            test_tables_of_the_retired_package_are_named_with_their_new_table
+        ; test_case "a source left out of the plan is not declared" `Quick
+            test_a_source_left_out_of_the_plan_is_not_declared
         ; test_case "a workspace without a config root is refused" `Quick
             test_a_workspace_without_a_config_root_is_refused
         ; test_case "a file this build does not carry is removed" `Quick

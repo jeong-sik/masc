@@ -161,38 +161,26 @@ let parse toml =
   let* stagehand_enabled = enabled ~path:stagehand_path (fields stagehand_table) in
   Ok { automation; stagehand; live_bidi; live_ego; live_enabled; automation_enabled; stagehand_enabled }
 
+(* The parser reports a repeated table by raising, and a lookup through a
+   value that is not a table raises too. *)
 let of_file path =
   match Otoml.Parser.from_file_result path with
   | Error detail -> Error detail
   | Ok toml -> parse toml
+  | exception (Otoml.Duplicate_key detail | Otoml.Type_error detail) -> Error detail
 
-type source_table =
-  | Automation_table of automation
-  | Stagehand_table of stagehand
-  | Live_bidi_table of live_bidi
-  | Live_ego_table of live_ego
-  | No_table
 type unstarted = Switched_off of string | Table_missing of string
 
 (* A switched-off lane keeps its paths, so the switch is read first. *)
-let source_table t (backend : Browser_lane.Backend.t) =
-  let from ~enabled ~lane ~path table wrap =
-    if not enabled then Error (Switched_off lane)
-    else match table with Some table -> Ok (wrap table) | None -> Error (Table_missing path) in
-  match backend with
-  | Automation ->
-    from ~enabled:t.automation_enabled ~lane:automation_path ~path:automation_path t.automation
-      (fun table -> Automation_table table)
-  | Stagehand ->
-    from ~enabled:t.stagehand_enabled ~lane:stagehand_path ~path:stagehand_path t.stagehand
-      (fun table -> Stagehand_table table)
-  | Owned_firefox ->
-    from ~enabled:t.live_enabled ~lane:live_path ~path:live_bidi_path t.live_bidi
-      (fun table -> Live_bidi_table table)
-  | Ego ->
-    from ~enabled:t.live_enabled ~lane:live_path ~path:live_ego_path t.live_ego
-      (fun table -> Live_ego_table table)
-  | External_host -> Ok No_table
+let table_of ~enabled ~lane ~path table =
+  if not enabled then Error (Switched_off lane)
+  else match table with Some table -> Ok table | None -> Error (Table_missing path)
+let automation_table t =
+  table_of ~enabled:t.automation_enabled ~lane:automation_path ~path:automation_path t.automation
+let stagehand_table t =
+  table_of ~enabled:t.stagehand_enabled ~lane:stagehand_path ~path:stagehand_path t.stagehand
+let live_bidi_table t = table_of ~enabled:t.live_enabled ~lane:live_path ~path:live_bidi_path t.live_bidi
+let live_ego_table t = table_of ~enabled:t.live_enabled ~lane:live_path ~path:live_ego_path t.live_ego
 
 let unstarted_message = function
   | Switched_off lane -> Printf.sprintf "[%s] enabled = false switches it off" lane

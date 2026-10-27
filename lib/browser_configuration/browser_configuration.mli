@@ -62,24 +62,18 @@ val parse : Otoml.t -> (t, string) result
     cannot be read or its tables do not parse. *)
 val of_file : string -> (t, string) result
 
-(** The table one browser source starts from. *)
-type source_table =
-  | Automation_table of automation
-  | Stagehand_table of stagehand
-  | Live_bidi_table of live_bidi
-  | Live_ego_table of live_ego
-  | No_table  (** External hosts start from no table. *)
-
 (** Why a source does not start: its lane's [enabled = false], naming that
     lane's table, or no table of its own, naming the table it needs. *)
 type unstarted = Switched_off of string | Table_missing of string
 
-(** The table [backend]'s source starts from: its own table, when that is
+(** The table each source that needs one starts from: its own, when that is
     present and the lane it belongs to is switched on. A switched-off lane
     keeps its paths, so the switch is read first. The runtime starts a
-    browser worker from this, and [masc browser-lane-setup] declares a
-    source's package only when this lets it start. *)
-val source_table : t -> Browser_lane.Backend.t -> (source_table, unstarted) result
+    browser worker from these; external hosts need no table. *)
+val automation_table : t -> (automation, unstarted) result
+val stagehand_table : t -> (stagehand, unstarted) result
+val live_bidi_table : t -> (live_bidi, unstarted) result
+val live_ego_table : t -> (live_ego, unstarted) result
 
 (** The reason in words, naming the table, for a sentence about one
     runtime.toml. *)

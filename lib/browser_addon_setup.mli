@@ -35,8 +35,6 @@ type installed =
   ; files_removed : string list
         (** Paths of files an earlier build wrote that this one does not carry. *)
   ; declaration : declaration
-  ; exact_outputs : string list
-        (** The exact outputs the package declares, by name. *)
   ; missing_programs : string list
         (** Programs the browser Add-on runs that this process cannot find:
             its worker command, looked up on [PATH], and every
@@ -63,20 +61,11 @@ type error =
       (** [browser-<source>.toml], or a declaration with that package's id,
           does not load even with the package in place. It is left as it is. *)
   | Declaration_refused of string
-  | Retired_declaration of string
-      (** A declaration of the [browser] package that served every source in
-          one worker, which this build no longer carries. Setup refuses until
-          the operator removes it (hard cut, no conversion). *)
 
 val error_message : error -> string
 
 val package_name : Browser_lane.Backend.t -> string
 (** [browser-<source>]: the package id, declaration id and folder name. *)
-
-val retired_package_name : string
-(** [browser]: the id of the package that served every source in one worker,
-    which setup refuses ({!Retired_declaration}) and names in
-    {!retired_exact_lanes}. *)
 
 val package_directory : base_path:string -> Browser_lane.Backend.t -> string
 (** [<base>/.masc/packages/browser-<source>]. *)
@@ -86,9 +75,9 @@ type plan
 val plan : base_path:string -> sources:Browser_lane.Backend.t list -> (plan, error) result
 (** Read what [apply] needs for each of [sources] and refuse, before any
     write, a relative [base_path], an invalid or missing config root, an
-    unreadable Lane directory, a declaration of the retired [browser]
-    package, more than one enabled declaration of one of [sources] and an
-    embedded package that lists a file without bytes. Nothing is written. *)
+    unreadable Lane directory, more than one enabled declaration of one of
+    [sources] and an embedded package that lists a file without bytes.
+    Nothing is written. *)
 
 (** What {!apply} completed: the packages written and declared, in source
     order, and the refusal that stopped it, if any. *)
@@ -105,17 +94,7 @@ val apply : plan -> applied
     package, [Inventory_unreadable], [Declared_more_than_once],
     [Declaration_unloadable] and [Declaration_refused]. *)
 
-(** A [\[runtime.addon_exact_lanes.browser.<output>\]] table: one bound to the
-    retired [browser] package. [moves_to] is the source whose package among
-    the [installed] ones declares [output]; that installation's table is the
-    one the server reads now. *)
-type retired_exact_lane = { output : string; moves_to : Browser_lane.Backend.t option }
-
-(** Every exact-output table the runtime.toml at [runtime_config_path] still
-    has for the retired [browser] package; none when there is no file. The
-    server loads such a table without an installation to bind it to, so the
-    output it names waits for a model route. Setup names each table to move;
-    runtime.toml is the operator's to edit. [Error] says why the file did not
-    parse. *)
-val retired_exact_lanes :
-  runtime_config_path:string -> installed list -> (retired_exact_lane list, string) result
+(** [plan] without the packages of [sources]: setup leaves out a source
+    whose table this run was to write and did not, since its worker fails
+    without that table. *)
+val without : Browser_lane.Backend.t list -> plan -> plan

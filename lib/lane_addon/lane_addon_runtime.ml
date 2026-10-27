@@ -1625,24 +1625,30 @@ let backend ~store ~artifact_store () = match !override with
               | Mcp_tools -> Ok (None,None)
               | Browser_service backend -> offload (fun () ->
                   (* The worker serves its package's one source, given that
-                     source's table and no other
-                     ({!Browser_configuration.source_table}). *)
-                  let configuration=Option.value (Runtime.browser_configuration ())
-                      ~default:Browser_configuration.none in
-                  let* source,live_ego=match Browser_configuration.source_table configuration backend with
-                    | Error unstarted -> Error (Printf.sprintf
-                        "the %s browser source does not start: in the runtime.toml this server loaded, %s"
-                        (Browser_lane.Backend.to_wire backend) (Browser_configuration.unstarted_message unstarted))
-                    | Ok (Browser_configuration.Automation_table {driver;binary}) ->
+                     source's table and no other. A source whose table is
+                     missing or whose lane is switched off does not start. *)
+                  let unstarted reason = Error (Printf.sprintf "the %s browser source does not start: %s"
+                      (Browser_lane.Backend.to_wire backend) reason) in
+                  let table read = match Runtime.browser_configuration () with
+                    | None -> unstarted "this server has not loaded a runtime.toml"
+                    | Some configuration -> (match read configuration with
+                        | Ok table -> Ok table
+                        | Error why -> unstarted ("in the runtime.toml this server loaded, "
+                                                  ^ Browser_configuration.unstarted_message why)) in
+                  let* source,live_ego=match backend with
+                    | Browser_lane.Backend.Automation ->
+                      let* {Browser_configuration.driver;binary}=table Browser_configuration.automation_table in
                       let root=Browser_gecko_profile.root ~lane_addon_root:(Lane_addon_store.root store) in
                       let* profiles=Browser_gecko_profile.prepare_instance ~root ~instance_id in
                       Ok (Browser_addon_socket.Automation {Browser_addon_automation.driver;binary;profiles},None)
-                    | Ok (Browser_configuration.Stagehand_table browser) ->
+                    | Browser_lane.Backend.Stagehand ->
+                      let* browser=table Browser_configuration.stagehand_table in
                       let* guardian=Native_addon_program.(locate Browser_process_owner) in
                       let* configuration=Browser_addon_stagehand.configuration ~browser ~launcher ~guardian
                         ~claim_directory:(native_claim_directory store Chrome_child_slot ~id:instance_id) in
                       Ok (Browser_addon_socket.Stagehand configuration,None)
-                    | Ok (Browser_configuration.Live_bidi_table browser) ->
+                    | Browser_lane.Backend.Owned_firefox ->
+                      let* browser=table Browser_configuration.live_bidi_table in
                       let* guardian=Native_addon_program.(locate Browser_process_owner) in
                       let* configuration=Browser_addon_live_bidi.configuration ~browser ~launcher ~guardian
                         ~claim_directory:(native_claim_directory store Live_bidi_child_slot ~id:instance_id) in
@@ -1650,8 +1656,10 @@ let backend ~store ~artifact_store () = match !override with
                     (* Ego owns its browser; the SDK session follows the
                        worker's IPC lifetime. Its configuration rides the
                        worker's arguments, not the cleanup descriptor. *)
-                    | Ok (Browser_configuration.Live_ego_table ego) -> Ok (Browser_addon_socket.Ego,Some ego)
-                    | Ok Browser_configuration.No_table -> Ok (Browser_addon_socket.External_host,None) in
+                    | Browser_lane.Backend.Ego ->
+                      let* ego=table Browser_configuration.live_ego_table in
+                      Ok (Browser_addon_socket.Ego,Some ego)
+                    | Browser_lane.Backend.External_host -> Ok (Browser_addon_socket.External_host,None) in
                   Browser_addon_socket.context ~instance_id ~source
                     ~models:(if not (uses_host_requests package) then None else Some {
                       Browser_addon_models.store_root=Filename.concat (Lane_addon_store.root store) "worker-model-results";
@@ -2036,7 +2044,7 @@ let browser_observations ~config ~access = Eio_context.run_on_owner_domain (fun 
   | Some m ->
       let browsers = entries m |> List.filter_map (fun (e : entry) ->
         match e.package.worker_service, readiness e with
-        | _, Gone -> None
+        | (Browser_service _ | Mcp_tools), Gone -> None
         | Browser_service backend, (Ready _ | Unready _) when can_read access e.visibility -> Some (backend, e)
         | Browser_service _, (Ready _ | Unready _) | Mcp_tools, (Ready _ | Unready _) -> None) in
       List.sort_uniq compare (List.map fst browsers) |> List.map (fun backend ->

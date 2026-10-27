@@ -211,9 +211,9 @@ class BrowserLaneSetupCommand(unittest.TestCase):
         self.assertEqual(declared(base), [], "nothing is declared")
         self.assertFalse((base / ".masc/packages").exists(), "no package is written")
 
-    # The runtime does not start a source whose lane is switched off, so setup
-    # does not declare it, even when the run writes its table.
-    def test_a_source_whose_lane_is_switched_off_is_not_declared(self):
+    # Whether a lane is switched on is the server's to read when it starts a
+    # worker, so setup declares every source whose table is there.
+    def test_a_source_whose_lane_is_switched_off_is_declared(self):
         root = self.scratch()
         base = workspace(root)
         runtime_toml(base).write_text(RUNTIME_TOML + STAGEHAND_TABLE + "enabled = false\n"
@@ -222,18 +222,32 @@ class BrowserLaneSetupCommand(unittest.TestCase):
                       "--base-path", str(base))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("geckodriver = ", runtime_toml(base).read_text(), "the table is still written")
-        self.assertEqual(declared(base), [], "neither switched-off source is declared")
+        self.assertEqual(declared(base), ["browser-automation.toml", "browser-stagehand.toml"])
 
-    # Which sources a runtime.toml that does not parse runs is not known.
+    # Which sources a runtime.toml that does not parse runs is not known. A
+    # repeated table is refused like a syntax error, not raised.
     def test_a_runtime_toml_that_does_not_parse_is_refused(self):
+        for label, extra in (("syntax", "[browser.stagehand\n"), ("repeated table", STAGEHAND_TABLE)):
+            with self.subTest(label):
+                root = self.scratch()
+                base = workspace(root)
+                runtime_toml(base).write_text(RUNTIME_TOML + STAGEHAND_TABLE + extra)
+                result = masc(root, "--mode", "addon", "--base-path", str(base))
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("does not parse", result.stderr)
+                self.assertEqual(declared(base), [], "nothing is declared")
+                self.assertFalse((base / ".masc/packages").exists(), "no package is written")
+
+    # The host mode reads no runtime.toml for its own steps, so one that does
+    # not parse stops only the Add-on step.
+    def test_a_runtime_toml_that_does_not_parse_leaves_the_host_step(self):
         root = self.scratch()
         base = workspace(root)
-        runtime_toml(base).write_text(RUNTIME_TOML + STAGEHAND_TABLE + "[browser.stagehand\n")
-        result = masc(root, "--mode", "addon", "--base-path", str(base))
-        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertIn("does not parse", result.stderr)
-        self.assertEqual(declared(base), [], "nothing is declared")
-        self.assertFalse((base / ".masc/packages").exists(), "no package is written")
+        runtime_toml(base).write_text(RUNTIME_TOML + "[browser.stagehand\n")
+        result = masc(root, "--mode", "host", "--binary", str(HOST), "--base-path", str(base))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue((lane(base) / "host/launch.json").is_file(), "the host is installed")
+        self.assertEqual(declared(base), [], "no source is declared")
 
     # A host installed earlier is the external hosts' source.
     def test_addon_declares_the_external_hosts_of_an_installed_host(self):
@@ -710,6 +724,7 @@ class BrowserLaneSetupCommand(unittest.TestCase):
         # masc needs to create its lock file beside runtime.toml; a directory
         # it cannot write into fails the commit, which comes after the host.
         config = runtime_toml(base).parent
+        (config / "lane-addons").mkdir()
         config.chmod(0o500)
         self.addCleanup(config.chmod, 0o700)
         result = masc(root, "--mode", "bidi", "--binary", str(HOST), "--base-path", str(base),
@@ -720,6 +735,9 @@ class BrowserLaneSetupCommand(unittest.TestCase):
         # leaves is an installed lane and no table, never a table with no lane.
         self.assertTrue((lane(base) / "host/launch.json").is_file())
         self.assertEqual(runtime_toml(base).read_text(), before)
+        # The owned Firefox waits for its table; the installed host's external
+        # hosts need none and are declared.
+        self.assertEqual(declared(base), ["browser-external.toml"])
 
     def test_a_live_lane_that_is_off_says_so_instead_of_asking_for_a_restart(self):
         root = self.scratch()

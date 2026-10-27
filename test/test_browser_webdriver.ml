@@ -287,9 +287,8 @@ extension = "/test/extension"
           stagehand = Some { chrome = "/test/chrome"; extension = "/test/extension"; profile = None }; _ } -> ()
    | _ -> fail "both backends can be configured together")
 
-(* Each source starts from its own table while its lane is switched on; the
-   runtime starts a worker from this and setup declares by it. A switched-off
-   lane keeps its paths, so the switch is read first. *)
+(* Each source starts from its own table while its lane is switched on. A
+   switched-off lane keeps its paths, so the switch is read first. *)
 let test_a_source_starts_from_its_own_switched_on_table () =
   let parse text = match Otoml.Parser.from_string_result text with
     | Error detail -> fail detail
@@ -309,43 +308,35 @@ profile = "/test/profile"
 command = "/test/ego-browser"
 space = "masc"
 |} in
+  let module C = Browser_configuration in
   let on = parse tables in
-  let source = Browser_configuration.source_table in
   check bool "automation starts from [browser.automation]" true
-    (match source on Lane.Backend.Automation with
-     | Ok (Browser_configuration.Automation_table {driver = "/test/geckodriver"; _}) -> true | _ -> false);
+    (match C.automation_table on with Ok {driver = "/test/geckodriver"; _} -> true | _ -> false);
   check bool "Stagehand starts from [browser.stagehand]" true
-    (match source on Lane.Backend.Stagehand with
-     | Ok (Browser_configuration.Stagehand_table {chrome = "/test/chrome"; _}) -> true | _ -> false);
+    (match C.stagehand_table on with Ok {chrome = "/test/chrome"; _} -> true | _ -> false);
   check bool "the owned Firefox starts from [browser.live.bidi]" true
-    (match source on Lane.Backend.Owned_firefox with
-     | Ok (Browser_configuration.Live_bidi_table {firefox = "/test/firefox"; _}) -> true | _ -> false);
+    (match C.live_bidi_table on with Ok {firefox = "/test/firefox"; _} -> true | _ -> false);
   check bool "ego starts from [browser.live.ego]" true
-    (match source on Lane.Backend.Ego with
-     | Ok (Browser_configuration.Live_ego_table {space = "masc"; _}) -> true | _ -> false);
-  check bool "external hosts start from no table" true
-    (source on Lane.Backend.External_host = Ok Browser_configuration.No_table);
+    (match C.live_ego_table on with Ok {space = "masc"; _} -> true | _ -> false);
   let none = parse "" in
-  List.iter (fun (backend, table) ->
-      check bool ("no " ^ table ^ " table") true
-        (source none backend = Error (Browser_configuration.Table_missing table)))
-    [ Lane.Backend.Automation, "browser.automation"; Lane.Backend.Stagehand, "browser.stagehand"
-    ; Lane.Backend.Owned_firefox, "browser.live.bidi"; Lane.Backend.Ego, "browser.live.ego" ];
-  check bool "external hosts need no table" true
-    (source none Lane.Backend.External_host = Ok Browser_configuration.No_table);
+  let missing name read = check bool ("no " ^ name ^ " table") true (read none = Error (C.Table_missing name)) in
+  missing "browser.automation" (fun c -> Result.map ignore (C.automation_table c));
+  missing "browser.stagehand" (fun c -> Result.map ignore (C.stagehand_table c));
+  missing "browser.live.bidi" (fun c -> Result.map ignore (C.live_bidi_table c));
+  missing "browser.live.ego" (fun c -> Result.map ignore (C.live_ego_table c));
   let off = parse (tables ^ {|
 [browser.live]
 enabled = false
 |}) in
-  List.iter (fun backend ->
-      check bool (Lane.Backend.to_wire backend ^ " is off with its live lane") true
-        (source off backend = Error (Browser_configuration.Switched_off "browser.live")))
-    [ Lane.Backend.Owned_firefox; Lane.Backend.Ego ];
+  check bool "the owned Firefox is off with its live lane" true
+    (Result.map ignore (C.live_bidi_table off) = Error (C.Switched_off "browser.live"));
+  check bool "ego is off with its live lane" true
+    (Result.map ignore (C.live_ego_table off) = Error (C.Switched_off "browser.live"));
   check bool "a live lane switched off leaves automation as it is" true
-    (Result.is_ok (source off Lane.Backend.Automation));
+    (Result.is_ok (C.automation_table off));
   check bool "a switched-off lane is off before its missing table is" true
-    (source (parse "[browser.stagehand]\nenabled = false\n") Lane.Backend.Stagehand
-     = Error (Browser_configuration.Switched_off "browser.stagehand"))
+    (Result.map ignore (C.stagehand_table (parse "[browser.stagehand]\nenabled = false\n"))
+     = Error (C.Switched_off "browser.stagehand"))
 
 (* A keeper's first question is whether a session already exists. Every other
    verb answers that only by being refused, which costs a lane round trip and

@@ -11,7 +11,6 @@ type installed =
   ; files_written : int
   ; files_removed : string list
   ; declaration : declaration
-  ; exact_outputs : string list
   ; missing_programs : string list
   }
 
@@ -26,7 +25,6 @@ type error =
   | Declared_more_than_once of { backend : Browser_lane.Backend.t; paths : string list }
   | Declaration_unloadable of { path : string; reason : string }
   | Declaration_refused of string
-  | Retired_declaration of string
 
 let error_message = function
   | Base_path_not_absolute path -> Printf.sprintf "--base-path must be absolute, got %s" path
@@ -59,13 +57,6 @@ let error_message = function
        remove it, then run masc browser-lane-setup --mode addon again."
       path reason
   | Declaration_refused reason -> "The browser Add-on declaration was refused: " ^ reason
-  | Retired_declaration path ->
-    Printf.sprintf
-      "%s declares the browser package that served every source, which this masc no \
-       longer carries; each source now has its own package. Detach that instance, then \
-       remove %s and the .masc/packages/browser folder, and run masc browser-lane-setup \
-       again."
-      path path
 
 (* Each browser source's package: its folder in the carried tree, and the
    folder under packages/, the declaration's id and its file name. The
@@ -77,9 +68,6 @@ let package_folder = function
   | Ego -> "ego"
   | External_host -> "external"
 let package_name backend = "browser-" ^ package_folder backend
-(* The package that served every source in one worker before each source
-   had its own; a declaration of it no longer loads. *)
-let retired_package_name = "browser"
 let packages_dirname = "packages"
 let manifest_name = "lane.toml"
 let declaration_file_name backend = package_name backend ^ ".toml"
@@ -277,17 +265,6 @@ let browser_declaration backend (snapshot : Lane_addon_config.snapshot) =
      | [] -> Ok None
      | disabled :: _ -> Ok (Some disabled))
 
-(* A declaration of the retired package no longer loads: its manifest names
-   no source. It is the operator's to remove, so setup refuses until it is. *)
-let retired_declaration (snapshot : Lane_addon_config.snapshot) =
-  match
-    List.find_opt
-      (fun (issue : Lane_addon_config.issue) -> issue.id = Some retired_package_name)
-      snapshot.issues
-  with
-  | Some issue -> Error (Retired_declaration issue.source_path)
-  | None -> Ok ()
-
 type plan =
   { base_path : string
   ; lane_directory : string
@@ -300,7 +277,6 @@ let plan ~base_path ~sources =
   else
     let* lane_directory = lane_directory ~base_path in
     let* snapshot = read_inventory ~lane_directory in
-    let* () = retired_declaration snapshot in
     let* packages =
       List.fold_right
         (fun backend collected ->
@@ -367,8 +343,6 @@ let apply_package plan (backend, files) =
     ; files_removed
     ; declaration
     ; missing_programs = missing_programs ~package_directory:directory package
-    ; exact_outputs =
-        List.map (fun (output : Lane_addon_types.exact_output) -> output.name) package.exact_outputs
     }
 
 type applied = { installed : installed list; refusal : error option }
@@ -384,36 +358,5 @@ let apply plan =
        | Error error -> { installed = List.rev installed; refusal = Some error }) in
   go [] plan.packages
 
-type retired_exact_lane = { output : string; moves_to : Browser_lane.Backend.t option }
-
-(* The server loads an exact-output table for a declaration id no
-   installation has, so a table of the retired package binds nothing and its
-   output waits for a route. *)
-let retired_exact_lanes_of ~runtime_toml installed =
-  match
-    Otoml.find_opt runtime_toml Fun.id
-      [ Runtime_toml_namespace.(key Runtime); "addon_exact_lanes"; retired_package_name ]
-  with
-  | Some (Otoml.TomlTable outputs | Otoml.TomlInlineTable outputs) ->
-    List.map
-      (fun (output, _) ->
-         { output
-         ; moves_to =
-             List.find_map
-               (fun (one : installed) ->
-                  if List.mem output one.exact_outputs then Some one.backend else None)
-               installed
-         })
-      outputs
-  | None
-  | Some
-      Otoml.(
-        TomlString _ | TomlInteger _ | TomlFloat _ | TomlBoolean _ | TomlOffsetDateTime _
-        | TomlLocalDateTime _ | TomlLocalDate _ | TomlLocalTime _ | TomlArray _
-        | TomlTableArray _) -> []
-
-let retired_exact_lanes ~runtime_config_path installed =
-  if not (Sys.file_exists runtime_config_path) then Ok []
-  else
-    Otoml.Parser.from_file_result runtime_config_path
-    |> Result.map (fun runtime_toml -> retired_exact_lanes_of ~runtime_toml installed)
+let without sources plan =
+  { plan with packages = List.filter (fun (backend, _) -> not (List.mem backend sources)) plan.packages }

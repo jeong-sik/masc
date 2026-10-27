@@ -354,14 +354,15 @@ let with_tool_request_settlement_barrier t work =
   match Fs_compat.execution_context () with
   | Fs_compat.Non_eio -> protect (fun () -> Ok (File_lock_eio.with_mutex (key ()) work))
   | Fs_compat.Eio_fiber ->
-    let key = Eio_unix.run_in_systhread (fun () -> protect (fun () -> Ok (key ()))) in
+    let key = Systhread_host.run ~label:"addon-settlement-barrier-key" (fun () ->
+      protect (fun () -> Ok (key ()))) in
     Eio.Fiber.check ();
     let* key = key in
     (* Waiting is cancellable. Once admitted, the system-thread work must
        finish before releasing the mutex, even if its caller is cancelled. *)
     let result = protect (fun () -> Ok (File_lock_eio.with_mutex key (fun () ->
       Eio.Fiber.check ();
-      Eio.Cancel.protect (fun () -> Eio_unix.run_in_systhread ~label:"addon-original-wake-sweep" work)))) in
+      Eio.Cancel.protect (fun () -> Systhread_host.run ~label:"addon-original-wake-sweep" work)))) in
     Eio.Fiber.check (); result
 let save_tool_request_owner t ~scope ~request_id json =
   protect (fun () -> with_tool_request_owner_serialization t ~scope (fun () ->
@@ -622,13 +623,16 @@ let read_tool_request_scope ~namespace ~sync_parent t ~scope fn =
     Ok result) |> owned_result in
   result
 (* Run [work] under the scope serializer, on a system thread for an Eio
-   caller. *)
+   caller. The thread is the system-thread host's ([Systhread_host]): [work]
+   decodes, hashes and re-serializes whole records, and the Librarian calls
+   this from a fiber of the main domain, whose lock a thread of its own would
+   hold meanwhile. *)
 let serialized_tool_request_read t ~scope work =
   let blocking () = protect (fun () -> with_tool_request_owner_serialization t ~scope work) in
   match Fs_compat.execution_context () with
   | Fs_compat.Non_eio -> blocking ()
   | Fs_compat.Eio_fiber ->
-    let result = Eio_unix.run_in_systhread ~label:"addon-original-request-read" blocking in
+    let result = Systhread_host.run ~label:"addon-original-request-read" blocking in
     Eio.Fiber.check (); result
 let with_tool_request_scope ~namespace ~sync_parent t ~scope fn =
   serialized_tool_request_read t ~scope (fun () -> read_tool_request_scope ~namespace ~sync_parent t ~scope fn)
@@ -860,7 +864,7 @@ let fold_tool_request_owner_inventory_all_with ~check_staged ~serialize_scopes t
   match Fs_compat.execution_context () with
   | Fs_compat.Non_eio -> blocking ()
   | Fs_compat.Eio_fiber ->
-    let result=Eio_unix.run_in_systhread ~label:"addon-original-request-sweep" blocking in
+    let result=Systhread_host.run ~label:"addon-original-request-sweep" blocking in
     Eio.Fiber.check ();result
 
 let fold_tool_request_owner_inventory_all t ~init ~f =
@@ -898,7 +902,7 @@ let inventory_blocking ~label work =
   match Fs_compat.execution_context () with
   | Fs_compat.Non_eio -> blocking ()
   | Fs_compat.Eio_fiber ->
-    let result = Eio_unix.run_in_systhread ~label blocking in
+    let result = Systhread_host.run ~label blocking in
     Eio.Fiber.check (); result
 
 let fold_archived_tool_request_owners t ~init ~f =

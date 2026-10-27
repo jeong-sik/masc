@@ -155,17 +155,31 @@ type entry = {
    its compute. The pool job that starts it first claims it: the owner's job,
    or a pool job that looked the key up while the owner's job was still
    queued. Without the claim, that job would hold its worker polling for a
-   compute queued behind it. The claimant settles [outcome] on every exit;
-   the owner reads it when its own job lost the claim. *)
+   compute queued behind it. Whoever runs the compute publishes it under the
+   slot's token and settles [outcome]; the owner returns on [outcome] as soon
+   as it is settled, whether or not its own job has reached a worker. An owner
+   that gives up first marks an unclaimed compute [Abandoned] and clears the
+   slot; a claimed one stays with whoever runs it. *)
+type holder =
+  | Unclaimed
+  | Owner_job
+  | Waiting_job
+  | Abandoned
+
+type claim_outcome =
+  | Published of entry
+  | Failed of exn * Printexc.raw_backtrace
+  | Released  (** The runner was cancelled or its window closed; the slot is clear. *)
+
 type claim = {
-  claimed : bool Atomic.t;
-  outcome : (entry, exn * Printexc.raw_backtrace) result Eio.Promise.t;
-  settle : (entry, exn * Printexc.raw_backtrace) result Eio.Promise.u;
+  holder : holder Atomic.t;
+  outcome : claim_outcome Eio.Promise.t;
+  settle : claim_outcome Eio.Promise.u;
 }
 
 let new_claim () =
   let outcome, settle = Eio.Promise.create () in
-  { claimed = Atomic.make false; outcome; settle }
+  { holder = Atomic.make Unclaimed; outcome; settle }
 
 type slot =
   | Ready of entry
@@ -180,22 +194,6 @@ type slot =
 type compute_window = { within : 'a. (unit -> 'a) -> 'a }
 
 let unbounded_window = { within = (fun f -> f ()) }
-
-(* The owner's compute ran in its own job, or a waiting pool job ran it and
-   published [entry]. *)
-type owner_result =
-  | Ran of cached_value
-  | Taken of entry
-
-(* The pool job that claimed [key]'s compute was cancelled before it
-   finished. The owner fails like any failed compute. *)
-exception Claimed_compute_cancelled of string
-
-let await_claim ~key claim =
-  match Eio.Promise.await claim.outcome with
-  | Ok entry -> entry
-  | Error (Eio.Cancel.Cancelled _, _) -> raise (Claimed_compute_cancelled key)
-  | Error (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace
 
 let payload_of_entry entry = entry.payload
 
@@ -527,27 +525,17 @@ let get_or_compute_eio ?wait_timeout_sec ?(window = unbounded_window) key ~ttl p
   let compute () =
     window.within (fun () -> Executor_pool_ref.submit_or_inline produce)
   in
-  (* The owner's job computes only if it claims first. A job that lost the
-     claim returns at once, and the owner reads the claimant's outcome on its
-     own fiber, outside the pool. *)
-  let compute_claimed claim =
-    window.within (fun () ->
-      match
-        Executor_pool_ref.submit_or_inline (fun () ->
-          if Atomic.compare_and_set claim.claimed false true
-          then Some (produce ())
-          else None)
-      with
-      | Some payload -> Ran payload
-      | None -> Taken (await_claim ~key claim))
+  let clear_claimed ~token =
+    atomic_update table (fun map ->
+      match SMap.find_opt key map with
+      | Some (Computing { token = c; _ }) when c = token -> ((), SMap.remove key map)
+      | Some (Ready _) | None | Some (Computing _) -> ((), map))
   in
-  (* This pool job found the key computing while the owner's job had not
-     started. It runs its own compute on the worker it already holds,
-     publishes under the owner's token and settles the claim. On failure it
-     clears the slot (a claim exists only without a stale value), so waiters
-     recompute as they do after an owner's failure. *)
-  let compute_as_claimant ~token claim =
-    match compute () with
+  (* Run a claimed compute, publish it under [token] and settle the claim. A
+     claim exists only without a stale value, so failure clears the slot and
+     later lookups recompute, as after any owner's failure. *)
+  let run_claimed ~token claim run =
+    match run () with
     | payload ->
       let ts = now () in
       let entry = {
@@ -560,15 +548,51 @@ let get_or_compute_eio ?wait_timeout_sec ?(window = unbounded_window) key ~ttl p
         | Some (Computing { token = c; _ }) when c = token ->
           ((), SMap.add key (Ready entry) map)
         | Some (Ready _) | None | Some (Computing _) -> ((), map));
-      Eio.Promise.resolve claim.settle (Ok entry);
+      Eio.Promise.resolve claim.settle (Published entry);
       entry
     | exception exn ->
       let backtrace = Printexc.get_raw_backtrace () in
-      atomic_update table (fun map ->
-        match SMap.find_opt key map with
-        | Some (Computing { token = c; _ }) when c = token -> ((), SMap.remove key map)
-        | Some (Ready _) | None | Some (Computing _) -> ((), map));
-      Eio.Promise.resolve claim.settle (Error (exn, backtrace));
+      clear_claimed ~token;
+      Eio.Promise.resolve claim.settle
+        (match exn with
+         | Eio.Cancel.Cancelled _ | Compute_timeout _ -> Released
+         | _ -> Failed (exn, backtrace));
+      Printexc.raise_with_backtrace exn backtrace
+  in
+  (* The owner of a claimable slot. Its job runs the compute only if it claims
+     first. The owner returns on the settled outcome even while its job is
+     still queued, which cancels that job before it starts. [`Retry]: whoever
+     claimed gave up and cleared the slot, so the owner looks the key up
+     again instead of failing for another request's cancellation. *)
+  let own_claimed ~token claim =
+    let job () =
+      if Atomic.compare_and_set claim.holder Unclaimed Owner_job then
+        match run_claimed ~token claim produce with
+        | _entry -> ()
+        | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
+        | exception _ -> ()  (* settled as [Failed]; the owner raises it below *)
+    in
+    match
+      window.within (fun () ->
+        Eio.Fiber.first
+          (fun () ->
+            Executor_pool_ref.submit_or_inline job;
+            Eio.Promise.await claim.outcome)
+          (fun () -> Eio.Promise.await claim.outcome))
+    with
+    | Published entry -> `Entry entry
+    | Failed (exn, backtrace) ->
+      if not (Cancel_safe.is_internal_race_cancel exn) then
+        Log.Dashboard.error "cache revalidation failed: %s" (Printexc.to_string exn);
+      Printexc.raise_with_backtrace exn backtrace
+    | Released -> `Retry
+    | exception exn ->
+      (* The owner gave up: cancelled, or its window closed. An unclaimed
+         compute is abandoned and its slot cleared. A claimed one is left to
+         whoever runs it, which publishes or clears; the owner's own job is
+         cancelled with the owner and clears as it exits. *)
+      let backtrace = Printexc.get_raw_backtrace () in
+      if Atomic.compare_and_set claim.holder Unclaimed Abandoned then clear_claimed ~token;
       Printexc.raise_with_backtrace exn backtrace
   in
   let rec try_get ~waited ~watching_token =
@@ -607,7 +631,11 @@ let get_or_compute_eio ?wait_timeout_sec ?(window = unbounded_window) key ~ttl p
         (`Compute (token, None), SMap.add key (Computing { token; started_at = now (); stale = Some entry; claim = None }) map)
       | None ->
         let token = next_token () in
-        let claim = Some (new_claim ()) in
+        let claim =
+          match Eio_guard.execution_context () with
+          | Eio_guard.Eio_fiber -> Some (new_claim ())
+          | Eio_guard.Non_eio -> None
+        in
         (`Compute (token, claim), SMap.add key (Computing { token; started_at = now (); stale = None; claim }) map)
     ) in
     match action with
@@ -619,8 +647,8 @@ let get_or_compute_eio ?wait_timeout_sec ?(window = unbounded_window) key ~ttl p
     (* The guard claims: only the job whose CAS succeeds computes. *)
     | `Wait (token, Some claim)
       when Executor_pool_ref.in_worker_context ()
-           && Atomic.compare_and_set claim.claimed false true ->
-      compute_as_claimant ~token claim
+           && Atomic.compare_and_set claim.holder Unclaimed Waiting_job ->
+      run_claimed ~token claim compute
     | `Wait (token, (Some _ | None)) ->
       (* Per-fiber ±20% jitter on the poll interval. Concurrent waiters
          parked on the same in-flight cache key (e.g. several keepers
@@ -755,7 +783,13 @@ let get_or_compute_eio ?wait_timeout_sec ?(window = unbounded_window) key ~ttl p
          abandon_registration ();
          raise e);
       stale_entry
-    | `Compute (token, claim) ->
+    | `Compute (token, Some claim) ->
+      (* PR-0.2.A: cache miss observation (this fiber must compute). *)
+      inc_cache_miss ();
+      (match own_claimed ~token claim with
+       | `Entry entry -> entry
+       | `Retry -> try_get ~waited:0.0 ~watching_token:None)
+    | `Compute (token, None) ->
       (* PR-0.2.A: cache miss observation (this fiber must compute). *)
       inc_cache_miss ();
       let result_ref = ref None in
@@ -787,11 +821,7 @@ let get_or_compute_eio ?wait_timeout_sec ?(window = unbounded_window) key ~ttl p
           | Some (Ready _) | None | Some (Computing _) -> ((), map))
       in
       let run_compute () =
-        try
-          result_ref :=
-            Some (Ok (match claim with
-              | None -> Ran (compute ())
-              | Some claim -> compute_claimed claim))
+        try result_ref := Some (Ok (compute ()))
         with
         | Eio.Cancel.Cancelled _ as e ->
             release_on_cancel ();
@@ -809,8 +839,7 @@ let get_or_compute_eio ?wait_timeout_sec ?(window = unbounded_window) key ~ttl p
       run_compute ();
       let ts = now () in
       (match !result_ref with
-       | Some (Ok (Taken entry)) -> entry
-       | Some (Ok (Ran payload)) ->
+       | Some (Ok payload) ->
            let new_entry = {
              payload;
              expires_at = ts +. jittered_ttl ~key ttl;

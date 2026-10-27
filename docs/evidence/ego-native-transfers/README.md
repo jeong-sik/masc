@@ -13,8 +13,10 @@ Selector-to-selector drag without waypoints calls `page.dragAndDrop` directly.
 Coordinate, scene-identity and custom-waypoint drags retain their distinct
 MASC contract and raw button-release cleanup. The SDK's native drag can be
 interrupted before release. On an error MASC sends native mouse.up once;
-missing/failed release or a dialog keeps the existing release-uncertain state,
-so later input is refused while observation/dialog handling/finish remain.
+missing/failed release keeps the existing release-uncertain state, so later
+input is refused while observation/dialog handling/finish remain. A dialog the
+SDK reports in the selector drag's receipt is recorded as `dialog_interrupted`
+and does not refuse later input.
 
 ## Evidence
 

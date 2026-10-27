@@ -132,6 +132,7 @@ test('a drag interrupted by a dialog preserves uncertain input ownership',async(
   {method:'click',selector:'#submit'},
  ]));
  assert.equal(result.inputReleased,false);assert.equal(result.completedEffect,true);
+ assert.equal(result.inputInterruptedBy,'dialog');
  assert.equal(result.completed.length,1);assert.equal(result.failure.dialog.type,'alert');
  assert.equal(later,0,'a blocking dialog is handed back before further input');
 });
@@ -253,6 +254,7 @@ test('typing interrupted by an open dialog stops with that dialog and keeps the 
  assert.equal(result.completedEffect,false);assert.equal(result.completed.length,0);
  assert.equal(result.failure.index,0);assert.equal(result.failure.method,'keyboard.type');
  assert.equal(result.failure.dialog.message,'keep typing?');
+ assert.equal(result.inputInterruptedBy,'dialog');
 });
 test('a dialog closed before page.info still stops typing because its open event remains',async()=>{
  const t=typingFixture({after:[dialogOpening,dialogClosed]});
@@ -262,6 +264,7 @@ test('a dialog closed before page.info still stops typing because its open event
  assert.equal(result.failure.method,'keyboard.type');
  assert.equal(Object.hasOwn(result.failure,'dialog'),false);
  assert.match(result.failure.message,/already closed/);
+ assert.equal(result.inputInterruptedBy,'dialog');
 });
 // The SDK sends no key and emits no event when a dialog is already open, so nothing marks the typing
 // as swallowed once that dialog closes. The step has to refuse before it types.
@@ -331,6 +334,42 @@ test('typing that answers neither void nor a receipt is not judged by events',as
   assert.equal(result.failure.method,'keyboard.type',String(answer));
   assert.match(result.failure.message,/no native action receipt/,String(answer));
  }
+});
+test('only a dialog the SDK reported cutting a holding input short is a typed interruption',async()=>{
+ const dialog={type:'confirm',message:'Delete this?'};
+ // A receipt that carries the dialog: every holding gesture that answers a receipt.
+ for (const method of ['click','dblclick','dragAndDrop','press','mouse.click','keyboard.press','keyboard.paste']) {
+  const f=fixture();let later=0;
+  const input=async()=>({dialog});
+  f.page.waitForSelector=async()=>{};f.page.mouse={click:input};f.page.keyboard={press:input,paste:input};
+  if(!method.includes('.'))f.page[method]=input;
+  f.page.fill=async()=>{later++;};
+  const result=await run(f.page,request([
+   {method,selector:'#delete',destination:'#bin',key:'Enter',text:'x',x:1,y:2},
+   {method:'fill',selector:'#next',text:'must not run'},
+  ]));
+  assert.equal(result.inputReleased,false,method);assert.equal(result.inputInterruptedBy,'dialog',method);
+  assert.equal(result.failure.dialog.message,'Delete this?',method);assert.equal(later,0,method);
+  assert.equal(result.completed.length,1,method);
+ }
+ // Everything else that leaves the release unconfirmed carries no such claim.
+ const lostClick=fixture();lostClick.page.click=async()=>{throw Error('lost click response');};
+ const lost=await run(lostClick.page,request([{method:'click',selector:'#x'}]));
+ assert.equal(lost.inputReleased,false);assert.equal(Object.hasOwn(lost,'inputInterruptedBy'),false,'a thrown error');
+ const noReceipt=fixture();noReceipt.page.keyboard={press:async()=>{}};noReceipt.page.info=async()=>({dialog});
+ const voided=await run(noReceipt.page,request([{method:'keyboard.press',key:'Enter'}]));
+ assert.equal(voided.inputReleased,false);assert.equal(Object.hasOwn(voided,'inputInterruptedBy'),false,'a void that only keyboard.type may answer');
+ const refused=fixture();refused.page.click=async()=>{throw refusal();};
+ const refusedResult=await run(refused.page,request([{method:'click',selector:'#nope'}]));
+ assert.equal(refusedResult.inputReleased,true);assert.equal(Object.hasOwn(refusedResult,'inputInterruptedBy'),false,'a refused target');
+ // A dialog after a step that holds no input is not an input interruption.
+ const fill=fixture();fill.page.fill=async()=>({dialog});
+ const filled=await run(fill.page,request([{method:'fill',selector:'#editor',text:'x'}]));
+ assert.equal(filled.inputReleased,true);assert.equal(Object.hasOwn(filled,'inputInterruptedBy'),false,'a fill');
+ assert.equal(filled.failure.dialog.message,'Delete this?');
+ // A completed workflow reports no interruption either.
+ const done=await run(fixture().page,request([{method:'click',selector:'#ok'}]));
+ assert.equal(done.failure,null);assert.equal(Object.hasOwn(done,'inputInterruptedBy'),false);
 });
 test('a failed event read before typing types nothing, and one after typing leaves the input unreleased',async()=>{
  for (const [name,failingRead,bad] of [['lost before',0,'throw'],['lost after',1,'throw'],['malformed after',1,'object']]) {

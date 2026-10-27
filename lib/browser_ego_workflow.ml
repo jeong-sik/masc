@@ -6,8 +6,13 @@ let script = {js|async function nativeWorkflow(page, args) {
     : '(' + step.source + ')(JSON.parse(' + JSON.stringify(step.argumentJson) + '))';
   let effectStarted = false, completedEffect = false;
   let inputReleased = true;
+  // Set when the SDK itself reported that a JavaScript dialog interrupted a
+  // holding input: a dialog receipt, or the dialog-open event after typing.
+  // The page may then have missed the release, which is not a lost reply.
+  let interruptedByDialog = false;
   const failure = (index, method, error, extra = {}) => ({
     completed, effectStarted, completedEffect, inputReleased,
+    ...(interruptedByDialog ? {inputInterruptedBy: 'dialog'} : {}),
     failure: {index, method, message: String(error?.message ?? error), ...extra}
   });
   // A selector gesture whose target the SDK cannot resolve (no match, hidden,
@@ -215,13 +220,18 @@ let script = {js|async function nativeWorkflow(page, args) {
           return failure(index, step.method,
             'Ego returned no native action receipt; input release remains unconfirmed. Inspect this Space and use its private operator input-reset confirmation before another input. Never replay this step.',
             dialog ? {dialog} : {});
-        if (opened || dialog)
+        if (opened || dialog) {
+          interruptedByDialog = true;
           return failure(index, step.method,
             dialog ? 'a JavaScript dialog interrupted typing; answer it before continuing'
               : 'a JavaScript dialog interrupted typing and is already closed',
             dialog ? {dialog} : {});
+        }
         inputReleased = true;
-      } else inputReleased = !receipt.dialog;
+      } else {
+        inputReleased = !receipt.dialog;
+        interruptedByDialog = Boolean(receipt.dialog);
+      }
     }
     completedEffect ||= effect;
     completed.push({index, method: step.method, receipt: receipt ?? null});
@@ -248,9 +258,10 @@ let script = {js|async function nativeWorkflow(page, args) {
   } catch (error) { return failure(args.steps.length, 'snapshot', error); }
 }|js}
 
+type input_after_stop = Released | Cut_by_dialog | Unconfirmed
 type outcome = Completed of Yojson.Safe.t
   | Stopped of { receipt : Yojson.Safe.t; message : string;
-      effect_started : bool; completed_effect : bool; input_released : bool }
+      effect_started : bool; completed_effect : bool; input : input_after_stop }
 let ( let* ) = Result.bind
 let object_fields allowed = function
   | `Assoc fields when List.for_all (fun (key,_) -> List.mem key allowed) fields
@@ -291,12 +302,21 @@ let observation_receipt (step:Browser_lane.Native_workflow.step) value =
     | Evaluate _|Wait_for_function _|Fetch _ -> true in
   if valid then Ok () else Error ("invalid native " ^ W.method_name step.action ^ " observation receipt")
 let decode (request : Browser_lane.Native_workflow.t) receipt =
-  let* fields=object_fields ["completed";"effectStarted";"completedEffect";"inputReleased";"failure";"urlBefore";"url";"title";"snapshot";"truncated";"chars"] receipt in
+  let* fields=object_fields ["completed";"effectStarted";"completedEffect";"inputReleased";"inputInterruptedBy";"failure";"urlBefore";"url";"title";"snapshot";"truncated";"chars"] receipt in
   let* started=bool "effectStarted" fields in let* completed_effect=bool "completedEffect" fields in
-  let* input_released=bool "inputReleased" fields in
-  let* ()=if input_released || (started && List.exists (fun (step : Browser_lane.Native_workflow.step) ->
-      Browser_lane.Native_workflow.holds_input step.action) request.steps) then Ok ()
-    else Error "workflow claims a held input without a input-holding effect" in
+  let* released=bool "inputReleased" fields in
+  let* input=match released,List.assoc_opt "inputInterruptedBy" fields with
+    | true,None -> Ok Released
+    | false,None -> Ok Unconfirmed
+    | false,Some (`String "dialog") -> Ok Cut_by_dialog
+    | true,Some (`String "dialog") -> Error "workflow reported a dialog interruption of a released input"
+    | (true|false),Some _ -> Error "workflow receipt has invalid inputInterruptedBy" in
+  let* ()=match input with
+    | Released -> Ok ()
+    | Cut_by_dialog|Unconfirmed ->
+      if started && List.exists (fun (step : Browser_lane.Native_workflow.step) ->
+        Browser_lane.Native_workflow.holds_input step.action) request.steps then Ok ()
+      else Error "workflow claims a held input without a input-holding effect" in
   let* raw=get "completed" fields in
   let* completed=match raw with `List values -> Ok values | _ -> Error "workflow completed is not an array" in
   let methods=List.map (fun (step : Browser_lane.Native_workflow.step) ->
@@ -320,7 +340,7 @@ let decode (request : Browser_lane.Native_workflow.t) receipt =
   let* failure=get "failure" fields in
   match failure with
   | `Null ->
-    let* ()=if remaining=[] && started=has_effect && input_released then Ok () else Error "workflow success omitted requested steps or input release" in
+    let* ()=if remaining=[] && started=has_effect && input=Released then Ok () else Error "workflow success omitted requested steps or input release" in
     let* url_before=text "urlBefore" fields in
     let* ()=if url_before=request.expected_url then Ok () else Error "workflow starting URL does not match request" in
     let* _=text "url" fields in let* _=text "title" fields in let* _=text "snapshot" fields in
@@ -356,5 +376,5 @@ let decode (request : Browser_lane.Native_workflow.t) receipt =
         else if index+1=count && List.mem_assoc "dialog" failed then Ok has_effect
         else Error "workflow failure index does not match progress" in
     let* ()=if started=expected_started then Ok () else Error "workflow failed-step effect flag disagrees" in
-    Ok (Stopped {receipt;message;effect_started=started;completed_effect;input_released})
+    Ok (Stopped {receipt;message;effect_started=started;completed_effect;input})
   | _ -> Error "workflow failure must be null or an object"

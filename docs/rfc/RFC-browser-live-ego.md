@@ -259,14 +259,19 @@ reply. This extension does not change that transport or persist pending input
 across worker replacement, and never applies an old assertion to a replacement.
 
 Dialog answers, handoff, takeover and generic “go” do not create this assertion.
+A dialog the SDK reports cutting a holding input short creates no pending input
+either: the workflow reports `inputInterruptedBy="dialog"`, the connection keeps
+admitting input and receipts carry `inputReadiness=dialog_interrupted` until a
+later holding input settles. Only an unexplained unconfirmed release waits for
+this assertion.
 It does not establish original SDK cleanup, visible UI or successful login. The
 existing native producer settlement contract is not strengthened by this local
 admission state. Native workflows stop on a receipt-less holding step without
 using Page.info to infer release or counting that uncertain step as completed.
 The current SDK's keyboard.type returns void whether or not a dialog interrupted
 it, so the workflow reads the Page's dialog-open events around that step instead:
-with none, and no dialog open before it, the step completed; with one it stops
-like any other receipt-less holding step. It does not supply the missing SDK settlement contract or
+with none, and no dialog open before it, the step completed; with one it stops with `inputInterruptedBy="dialog"`.
+It does not supply the missing SDK settlement contract or
 establish non-workflow input cleanup.
 Real operator recovery and current installed Keeper/UI acceptance still require
 execution evidence.

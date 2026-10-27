@@ -2586,6 +2586,9 @@ let test_native_workflow_pointer_ownership () =
           | `Unreleased|`Released -> answered (obj ["completed",`List [];"effectStarted",`Bool true;
               "completedEffect",`Bool false;"inputReleased",`Bool (mode=`Released);
               "failure",obj ["index",`Int 0;"method",str method_;"message",str "SDK failed"]])
+          | `Dialog -> answered (obj ["completed",`List [];"effectStarted",`Bool true;
+              "completedEffect",`Bool false;"inputReleased",`Bool false;"inputInterruptedBy",str "dialog";
+              "failure",obj ["index",`Int 0;"method",str method_;"message",str "a JavaScript dialog interrupted the input"]])
         else answered (obj ["completed",`List [];"effectStarted",`Bool false;"completedEffect",`Bool false;
           "inputReleased",`Bool true;"failure",`Null;"urlBefore",str "https://app.slack.com/";
           "url",str "https://app.slack.com/";"title",str "Slack";"snapshot",str "root";"chars",`Int 4;"truncated",`Bool false])
@@ -2596,18 +2599,22 @@ let test_native_workflow_pointer_ownership () =
     let first=call [obj (("method",str method_)::fields)] in
     (match mode,first with
      | `Before,Error (Live.Before_effect _)
-     | (`Lost|`Unreleased|`Released),Error (Live.Outcome_unknown _) -> ()
-     | (`Before|`Lost|`Unreleased|`Released),
+     | (`Lost|`Unreleased|`Released|`Dialog),Error (Live.Outcome_unknown _) -> ()
+     | (`Before|`Lost|`Unreleased|`Released|`Dialog),
        (Ok _|Error (Live.Before_effect _|Live.Partial_failure _|Live.Outcome_unknown _)) ->
        fail "workflow input result changed its effect classification");
     (match mode,call [] with
      | (`Released|`Before),Ok _ -> check int "confirmed release permits the next original request" 2 !issued
+     | `Dialog,Ok receipt ->
+       check int "a dialog the SDK reported does not hold the next request" 2 !issued;
+       check string "the next receipt says the release was not observed" "dialog_interrupted"
+         (text (field "inputReadiness" receipt))
      | (`Lost|`Unreleased),Error (Live.Before_effect _) ->
        check int "unknown release never dispatches another workflow" 1 !issued
-     | (`Lost|`Unreleased),Ok _|(`Released|`Before),Error _|(`Lost|`Unreleased),Error (Live.Partial_failure _|Live.Outcome_unknown _) ->
+     | (`Lost|`Unreleased),Ok _|(`Released|`Before|`Dialog),Error _|(`Lost|`Unreleased),Error (Live.Partial_failure _|Live.Outcome_unknown _) ->
        fail "native input ownership did not survive the workflow boundary");
     ignore (dispatch peer Live.Tabs_list (obj [])))
-      ([`Lost;`Unreleased;`Released] @ if method_="press" then [`Before] else []))
+      ([`Lost;`Unreleased;`Released;`Dialog] @ if method_="press" then [`Before] else []))
     ["dragAndDrop",["selector",str "#source";"destination",str "#target"];
      "click",["selector",str "#source"];
      "dblclick",["selector",str "#source"];
@@ -2650,10 +2657,10 @@ let test_operator_input_recovery () =
              && pending.operation="native_workflow");
          input_commands := (pending.command_id,selector) :: !input_commands;
          (match selector with
-          | "#dialog" -> answered (obj [
-              "completed",`List [obj ["index",`Int 0;"method",str "click";"receipt",obj ["dialog",dialog]]];
-              "effectStarted",`Bool true;"completedEffect",`Bool true;"inputReleased",`Bool false;
-              "failure",obj ["index",`Int 0;"method",str "click";"message",str "answer dialog";"dialog",dialog]])
+          | "#receiptless" -> answered (obj [
+              "completed",`List [];"effectStarted",`Bool true;"completedEffect",`Bool false;"inputReleased",`Bool false;
+              "failure",obj ["index",`Int 0;"method",str "click";
+                "message",str "Ego returned no native action receipt; input release remains unconfirmed";"dialog",dialog]])
           | "#continue" -> completed [obj ["index",`Int 0;"method",str "click";"receipt",obj []]]
               ~has_effect:true ~snapshot:"root\n  button Continue"
           | _ -> failf "unexpected recovery click %s" selector)
@@ -2663,10 +2670,10 @@ let test_operator_input_recovery () =
   ignore (dispatch peer Live.Tabs_list (obj []));
   let args steps=obj ["tabId",`Int 1;"expectedUrl",str "https://app.slack.com/";"maxChars",`Int 1000;"steps",`List steps] in
   let first=Peer.dispatch ~command_id:"original-input-command" peer ~verb:Live.Page_native_workflow
-    (args [obj ["method",str "click";"selector",str "#dialog"]]) in
-  check string "dialog retains partial effect" "partial" (failure_kind first);
+    (args [obj ["method",str "click";"selector",str "#receiptless"]]) in
+  check string "a receipt-less input leaves its effect unknown" "unknown" (failure_kind first);
   let pending=match Peer.input_status peer with Input.Uncertain pending -> pending
-    | Ready _ -> fail "dialog lost its pending input" in
+    | Ready _ -> fail "a receipt-less input lost its pending state" in
   check string "pending input names original command" "original-input-command" pending.command_id;
   ignore (answer "answer dialog" (dispatch peer Live.Page_act (Lane.Action.to_json
     (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Accept_dialog None}))));
@@ -2705,8 +2712,117 @@ let test_operator_input_recovery () =
     (Peer.input_status peer=Input.Ready Input.Command_settled && not (Peer.input_busy peer)
       && field "inputReadiness" continued=`Null);
   check (list (pair string string)) "original click is never replayed; the new command clicks once"
-    ["original-input-command","#dialog";"continued-input-command","#continue"] (List.rev !input_commands);
+    ["original-input-command","#receiptless";"continued-input-command","#continue"] (List.rev !input_commands);
   check int "only original, empty observation and new input workflows were issued" 3 !issued
+
+(* A dialog the SDK reports cutting a click short is an outcome, not a lost reply. The dialog is the page's
+   to answer, so the next request is admitted and receipts say the release was not observed. *)
+let test_dialog_interrupted_input_keeps_admission () =
+  let module Input=Masc.Browser_ego_input in
+  let module Operator=Masc.Browser_ego_operator in
+  let answer label = function
+    | Ok value -> value
+    | Error _ as result -> failf "%s: %s" label (failure_kind result) in
+  let dialog=ego_dialog "confirm" "Delete this?" in
+  let issued=ref 0 in
+  let settled steps ~has_effect = answered (obj [
+    "completed",`List steps;"effectStarted",`Bool has_effect;"completedEffect",`Bool has_effect;
+    "inputReleased",`Bool true;"failure",`Null;"urlBefore",str "https://app.slack.com/";
+    "url",str "https://app.slack.com/";"title",str "Slack";"snapshot",str "root";"chars",`Int 4;"truncated",`Bool false]) in
+  let peer=opened (fun sent -> match sent.step with
+    | "tabs.list" -> answered tabs
+    | "page.dialog" -> answered (obj ["dialog",dialog])
+    | "page.native_workflow" ->
+      incr issued;
+      (match Yojson.Safe.Util.to_list (field "steps" sent.args) with
+       | [] -> settled [] ~has_effect:false
+       | [step] when field "selector" step=str "#delete" -> answered (obj [
+           "completed",`List [obj ["index",`Int 0;"method",str "click";"receipt",obj ["dialog",dialog]]];
+           "effectStarted",`Bool true;"completedEffect",`Bool true;"inputReleased",`Bool false;
+           "inputInterruptedBy",str "dialog";
+           "failure",obj ["index",`Int 0;"method",str "click";
+             "message",str "answer the JavaScript dialog before continuing";"dialog",dialog]])
+       | [step] when field "selector" step=str "#first" -> answered (obj [
+           "completed",`List [];"effectStarted",`Bool true;"completedEffect",`Bool false;"inputReleased",`Bool false;
+           "inputInterruptedBy",str "dialog";
+           "failure",obj ["index",`Int 0;"method",str "click";
+             "message",str "answer the JavaScript dialog before continuing";"dialog",dialog]])
+       | [step] when field "selector" step=str "#continue" ->
+         settled [obj ["index",`Int 0;"method",str "click";"receipt",obj []]] ~has_effect:true
+       | _ -> fail "unexpected workflow steps")
+    | other -> failf "unexpected dialog fixture step %s" other) in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let args steps=obj ["tabId",`Int 1;"expectedUrl",str "https://app.slack.com/";"maxChars",`Int 1000;"steps",`List steps] in
+  let click selector=obj ["method",str "click";"selector",str selector] in
+  let first=Peer.dispatch ~command_id:"interrupted-command" peer ~verb:Live.Page_native_workflow (args [click "#delete"]) in
+  check string "the interrupted click keeps its partial effect" "partial" (failure_kind first);
+  let interrupted_generation=match Peer.input_status peer with
+    | Input.Ready (Input.Dialog_interrupted pending) ->
+      check string "the note names the interrupted command" "interrupted-command" pending.command_id;
+      check int "and its tab" 1 pending.tab_id;
+      pending.generation
+    | Input.Ready Input.Command_settled | Input.Ready (Input.Operator_reset_asserted _) | Input.Uncertain _ ->
+      failf "a dialog the SDK reported held the connection's input" in
+  ignore (answer "answer the dialog" (dispatch peer Live.Page_act (Lane.Action.to_json
+    (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Accept_dialog None}))));
+  let resumed=answer "the next request is admitted" (dispatch peer Live.Page_native_workflow (args [])) in
+  check string "its receipt says the release was not observed" "dialog_interrupted"
+    Yojson.Safe.Util.(resumed |> member "inputReadiness" |> to_string);
+  let connection:Operator.connection={client_id="original-client";space=Peer.space peer;recovery={
+    status=(fun () -> Peer.input_status peer);busy=(fun () -> Peer.input_busy peer);
+    assert_reset=(fun ~generation -> Peer.assert_input_reset peer ~generation);
+    space_observation=(fun () -> Peer.space_observation peer)}} in
+  let view=Operator.invoke (Some connection) (obj ["action",str "view";"arguments",obj []]) in
+  check bool "the operator form has nothing to confirm" true
+    (Yojson.Safe.Util.(view |> member "actions" |> to_list)=[]);
+  let stale=Operator.invoke (Some connection) (obj ["action",str "assert_input_reset";"arguments",obj [
+    "clientId",str "original-client";"spaceId",str "51";"generation",str interrupted_generation;"confirmation",str "checked_and_reset"]]) in
+  check string "a confirmation naming its own generation is still not applied" "not_applied"
+    Yojson.Safe.Util.(stale |> member "outcome" |> to_string);
+  check bool "and the dialog note stays" true
+    (match Peer.input_status peer with Input.Ready (Input.Dialog_interrupted _) -> true
+     | Input.Ready Input.Command_settled | Input.Ready (Input.Operator_reset_asserted _) | Input.Uncertain _ -> false);
+  let continued=answer "a later click"
+    (Peer.dispatch ~command_id:"continued-command" peer ~verb:Live.Page_native_workflow (args [click "#continue"])) in
+  check bool "a later holding input settles and drops the note" true
+    (Peer.input_status peer=Input.Ready Input.Command_settled && not (Peer.input_busy peer)
+      && field "inputReadiness" continued=`Null);
+  check int "interrupted, empty observation and later click were issued" 3 !issued;
+  (* An interruption of the first effect has no completed step to carry a receipt, so it is an unknown outcome
+     whose message says the next input is still accepted. *)
+  (match Peer.dispatch ~command_id:"first-command" peer ~verb:Live.Page_native_workflow (args [click "#first"]) with
+   | Error (Live.Outcome_unknown detail) ->
+     check bool "the message says later input is still accepted" true (String_util.contains_substring detail "later input is still accepted")
+   | other -> failf "an interrupted first effect was %s" (failure_kind other));
+  check bool "and the connection keeps the dialog note" true
+    (match Peer.input_status peer with Input.Ready (Input.Dialog_interrupted _) -> true
+     | Input.Ready Input.Command_settled | Input.Ready (Input.Operator_reset_asserted _) | Input.Uncertain _ -> false);
+  check int "the interrupted first effect was issued" 4 !issued
+
+(* The selector drag reports its dialog in the SDK receipt. That is the same outcome. *)
+let test_selector_drag_dialog_keeps_admission () =
+  let module Input=Masc.Browser_ego_input in
+  let dialog=ego_dialog "alert" "dropped" in
+  let asked=ref 0 in
+  let peer=opened (fun sent -> match sent.step with
+    | "tabs.list" -> answered tabs
+    | "page.target_input" ->
+      incr asked;
+      answered (obj ["urlBefore",str observed_url;"pointerReleased",`Bool false;"receipt",obj ["dialog",dialog];
+        "error",`Null;"tab",obj ["url",str observed_url;"title",str "Slack"]])
+    | other -> failf "unexpected drag fixture step %s" other) in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let drag=Lane.Drag_to {source=Lane.Selector "@12";destination=Lane.Selector "loc=css:#destination";via=[];duration_ms=0} in
+  (match dispatch peer Live.Page_interact (interact_args drag) with
+   | Ok receipt -> check bool "the receipt carries the dialog" true (field "dialog" receipt<>`Null)
+   | other -> failf "a drag the dialog cut short was %s" (failure_kind other));
+  (match Peer.input_status peer with
+   | Input.Ready (Input.Dialog_interrupted _) -> ()
+   | Input.Ready Input.Command_settled | Input.Ready (Input.Operator_reset_asserted _) | Input.Uncertain _ ->
+     fail "a dialog the drag reported held the connection's input");
+  (match dispatch peer Live.Page_interact (interact_args drag) with
+   | Ok _ -> check int "the next drag reached the SDK" 2 !asked
+   | other -> failf "the next drag was %s" (failure_kind other))
 
 let test_native_space_status () =
   let ownership=ref "agentDelegatedToUser" and invalid=ref false and unavailable=ref false in
@@ -2781,6 +2897,8 @@ let () =
       test_case "native drag preserves release and failure boundaries" `Quick test_native_drag_and_release;
       test_case "operator input assertion resumes the same peer without replay" `Quick test_operator_input_recovery;
       test_case "native workflows retain input ownership after a lost result" `Quick test_native_workflow_pointer_ownership;
+      test_case "a dialog the SDK reported keeps the next request admitted" `Quick test_dialog_interrupted_input_keeps_admission;
+      test_case "a selector drag a dialog cut short keeps the next request admitted" `Quick test_selector_drag_dialog_keeps_admission;
       test_case "chooser upload respects uncertain input release" `Quick test_chooser_upload_respects_uncertain_pointer_release;
       test_case "the space opens by name and is held by number" `Quick test_the_space_opens_by_name_and_is_held_by_number;
       test_case "the spaces of a name are listed without opening one" `Quick test_the_spaces_of_a_name_are_listed_without_opening_one;

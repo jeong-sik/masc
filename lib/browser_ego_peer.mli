@@ -156,14 +156,18 @@ val assert_input_reset : t -> generation:string -> (unit, string) result
     its cursor: MASC, [actor] (or "agent"), and the interaction, as the BiDi
     connection's overlay does. Native input checks the observed URL before calling ego; this is not an
     atomic navigation guard. Ego owns its locator/actionability waits; a method
-    failure is uncertain, including a missing or stale target. Re-read a snapshot after page changes or input and on a native
+    failure is uncertain, including a stale target, except the SDK's typed
+    [ElementResolutionError] for a click, double click or drag target, where
+    nothing was pressed. Re-read a snapshot after page changes or input and on a native
     stale/unknown ref refusal. Selector drags without waypoints use native [dragAndDrop]. A native drag
-    failure adds no synthetic mouse-up; a dialog or missing release proof preserves
-    the same release-uncertain state as raw drag. Coordinate and
+    failure adds no synthetic mouse-up; missing release proof preserves the same
+    release-uncertain state as raw drag, while a dialog the SDK reports in the
+    drag receipt is recorded as [Browser_ego_input.dialog_interrupted] and does
+    not block input. Coordinate and
     scene drags retain the observed waypoint contract, require zero duration
     and release the button in the same run.
-    Unconfirmed release blocks further input on this peer; read/finish remain
-    available. The private operator controls can record an explicit human
+    Unconfirmed release blocks further input on this peer, except one the SDK
+    explained with a dialog; read/finish remain available. The private operator controls can record an explicit human
     check/reset assertion for this pending input generation and resume the
     same peer. This remains [operator_asserted], not native release proof.
     Answering a dialog, handing off or taking over alone does not reset it.

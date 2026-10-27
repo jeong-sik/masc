@@ -1,5 +1,5 @@
 type pending = {generation:string;command_id:string;tab_id:int;page_label:string;operation:string}
-type readiness = Command_settled | Operator_reset_asserted of {pending:pending;at:float}
+type readiness = Command_settled | Operator_reset_asserted of {pending:pending;at:float} | Dialog_interrupted of pending
 type status = Ready of readiness | Uncertain of pending
 type state = Available of readiness | Pending of {pending:pending;previous:readiness}
 type t = {mutable state:state;mutable command_id:string option}
@@ -25,6 +25,9 @@ let begin_holding t ~tab_id ~page_label ~operation =
 let command_settled t = match t.state with
   | Available _ -> ()
   | Pending _ -> t.state <- Available Command_settled
+let dialog_interrupted t = match t.state with
+  | Available _ -> ()
+  | Pending {pending;_} -> t.state <- Available (Dialog_interrupted pending)
 let not_started t = match t.state with
   | Available _ -> ()
   | Pending {previous;_} -> t.state <- Available previous
@@ -34,9 +37,10 @@ let assert_reset t ~generation ~now =
   | Pending {pending;_} when pending.generation=generation ->
       t.state <- Available (Operator_reset_asserted {pending;at=now});Ok ()
   | Available (Operator_reset_asserted {pending;_}) when pending.generation=generation -> Ok ()
-  | Pending _ | Available (Command_settled|Operator_reset_asserted _) ->
+  | Pending _ | Available (Command_settled|Operator_reset_asserted _|Dialog_interrupted _) ->
       Error "the pending input generation changed; this confirmation was not applied"
 let provenance t = match t.state with
   | Available Command_settled -> "command_settled"
   | Available (Operator_reset_asserted _) -> "operator_asserted"
+  | Available (Dialog_interrupted _) -> "dialog_interrupted"
   | Pending _ -> "release_uncertain"

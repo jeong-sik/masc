@@ -1201,6 +1201,13 @@ let target_input_script = {js|async function nativeTargetInput(page, args) {
   }
   return {urlBefore, receipt, error: failure, pointerReleased};
 }|js}
+(* The drag's own receipt says a dialog cut the gesture short. A failure, or a
+   receipt without a dialog, says nothing about why the release was not seen. *)
+let drag_receipt_reports_dialog value =
+  match field "error" value, field "receipt" value with
+  | Some `Null, Some (`Assoc receipt) ->
+    (match List.assoc_opt "dialog" receipt with Some (`Assoc _) -> true | Some _ | None -> false)
+  | (None | Some _), (None | Some _) -> false
 let native_input t ~id ~label ~cursor ~expected_url ~locator ~reference ~operation =
   let verb, text = match operation with
     | Target_click -> "click", `Null
@@ -1235,6 +1242,7 @@ let native_input t ~id ~label ~cursor ~expected_url ~locator ~reference ~operati
         "  }" ]) in
   if holds_button then (match response with
     | Ok value when field "pointerReleased" value = Some (`Bool true) -> Input.command_settled t.input
+    | Ok value when drag_receipt_reports_dialog value -> Input.dialog_interrupted t.input
     | Error (Refused _ | Unanswered (Unstarted _)) -> Input.not_started t.input
     | Ok _ | Error (Unanswered (Exited _ | Signaled _ | Timed_out | Output_exceeded | Unobserved _) | Failed _ | Unreadable _) -> ());
   match response with
@@ -1590,18 +1598,25 @@ let workflow ?actor t args =
   | Ok value ->
     let unknown detail = Live.Outcome_unknown (detail ^ "; read the same tab and do not replay the workflow") in
     let* outcome=Browser_ego_workflow.decode request value |> Result.map_error unknown in
-    let input_released=match outcome with Browser_ego_workflow.Completed _ -> true
-      | Stopped {input_released;_} -> input_released in
+    (* A dialog the SDK reported is an outcome, not a lost reply: the dialog is
+       the page's to answer, so admission continues and receipts say that the
+       release was not observed. Only an outcome nothing reported stays pending. *)
     if holds_input then (match outcome with
       | Browser_ego_workflow.Stopped {effect_started=false;_} -> Input.not_started t.input
-      | Completed _|Stopped {effect_started=true;_} -> if input_released then Input.command_settled t.input);
+      | Completed _|Stopped {effect_started=true;input=Released;_} -> Input.command_settled t.input
+      | Stopped {effect_started=true;input=Cut_by_dialog;_} -> Input.dialog_interrupted t.input
+      | Stopped {effect_started=true;input=Unconfirmed;_} -> ());
     let receipt_of value=match value with
       | `Assoc fields -> Ok (obj (("tabId",`Int request.tab_id)::("action",str "workflow")::fields))
       | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Error (unknown "workflow receipt is not an object") in
     match outcome with
     | Browser_ego_workflow.Completed value -> receipt_of value
-    | Browser_ego_workflow.Stopped {receipt=value;message=detail;effect_started;completed_effect;input_released=_} ->
-      let message=head detail ^ "; read the same tab before continuing; never replay the workflow" in
+    | Browser_ego_workflow.Stopped {receipt=value;message=detail;effect_started;completed_effect;input} ->
+      let advice=match input with
+        | Browser_ego_workflow.Cut_by_dialog ->
+          "; its release was not observed, but later input is still accepted; read the same tab before continuing; never replay the workflow"
+        | Released|Unconfirmed -> "; read the same tab before continuing; never replay the workflow" in
+      let message=head detail ^ advice in
       if completed_effect then
         let* receipt=receipt_of value in Error (Live.Partial_failure {tab_id=request.tab_id;receipt;message})
       else if effect_started then Error (Live.Outcome_unknown message)
@@ -1629,7 +1644,7 @@ let dispatch ?command_id ?actor t ~verb args =
     | None -> Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())) in
   let annotate = function
     | `Assoc fields as value -> (match Input.status t.input with
-        | Input.Ready (Operator_reset_asserted _) ->
+        | Input.Ready (Operator_reset_asserted _|Dialog_interrupted _) ->
             `Assoc (("inputReadiness",str (Input.provenance t.input)) :: List.remove_assoc "inputReadiness" fields)
         | Ready Command_settled|Uncertain _ -> value)
     | value -> value in

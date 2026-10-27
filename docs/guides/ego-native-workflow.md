@@ -83,25 +83,50 @@ accept an option `label`; MASC prefixes it with the actor's identity.
 `mouse.wheel` uses `x`/`y` as horizontal/vertical deltas: first move or click
 over the observed scroll container within this same workflow invocation.
 `dragAndDrop` takes `selector` and `destination`, both observed locators.
-If a pointer click or drag fails, release stays unconfirmed. The SDK's
-`mouse.up()` can return normally when a dialog interrupted the release, and a
-selector click does not preserve its coordinates in the public mouse handle.
-Native workflows and selector `drag_to` therefore do not synthesize a release
-from that handle or call its void return a release acknowledgement. A failed
-selector drag preserves the original SDK failure and blocks further input until
-its unconfirmed input state is resolved. Coordinate-path drag has a separate
-manual-input implementation; this selector repair does not establish its release
-acknowledgement or safe recovery. A lost key press/type/paste response also
-keeps release unconfirmed without guessing a key-up sequence. `keyboard.paste`
-uses the SDK's `ControlOrMeta+V` sequence, so it can leave a modifier held.
-`press` is included because its key sequence may be held if
-its reply is lost. Before `press`, a read-only SDK attached-selector wait can
-refuse the step without sending keys. It does not authorize a later press or
-classify an exception from that actual press as pre-effect. A dialog can be
-reported before release: answering it alone does not prove that every original
-key or pointer button was released. An unconfirmed release prevents further
-input on that connection. The result reports `inputReleased` independently of completed
-effects; a guard does not make the failed action successful.
+If a pointer click or drag fails, release stays unconfirmed unless the failure
+says why. The SDK's `mouse.up()` can return normally when a dialog interrupted
+the release, and a selector click does not preserve its coordinates in the
+public mouse handle. Native workflows and selector `drag_to` therefore do not
+synthesize a release from that handle or call its void return a release
+acknowledgement. A lost key press/type/paste response also keeps release
+unconfirmed without guessing a key-up sequence. `keyboard.paste` uses the SDK's
+`ControlOrMeta+V` sequence, so it can leave a modifier held. `press` is included
+because its key sequence may be held if its reply is lost. Before `press`, a
+read-only SDK attached-selector wait can refuse the step without sending keys.
+It does not authorize a later press or classify an exception from that actual
+press as pre-effect. Coordinate-path drag has a separate manual-input
+implementation; this selector repair does not establish its release
+acknowledgement or safe recovery.
+
+An unconfirmed release with no reported cause, such as a lost reply or an
+unexpected SDK error, prevents further input on that connection until the
+operator confirms it. Two causes are reported and do not block: a typed target
+refusal and a dialog, both described below. The result reports `inputReleased`
+independently of completed effects; a guard does not make the failed action
+successful.
+
+A dialog the SDK reports is a cause, not a lost reply. When the SDK itself says
+that a JavaScript dialog cut a holding input short (a dialog receipt, or for
+`keyboard.type` the dialog-open event) the workflow stops at that step with
+`inputReleased=false` and `inputInterruptedBy="dialog"`. The page may have
+missed the release, and answering the dialog does not prove it did not. The
+dialog is the page's to answer, so the connection keeps accepting input. Answer
+the dialog with `accept_dialog` or `dismiss_dialog`, read the page, then
+continue. Receipts carry `inputReadiness="dialog_interrupted"` until a later
+holding input settles. When no earlier step completed an effect, the workflow
+fails as an unknown outcome and there is no receipt to carry the field: its
+message says the release was not observed and later input is still accepted.
+The selector `drag_to` input follows the same rule through its dialog receipt.
+
+Measured with Ego Lite 0.6.1.11 on 2026-10-27 (issue #46237 and
+`scripts/probe-browser-ego-input-release.mjs`): after a `confirm()` opened by a
+click, double click, selector drag, coordinate click, paste, keystroke or chord
+cut the input short, the next click started clean. The page saw
+`mousedown buttons=1`, `mouseup buttons=0` and `click`, no modifier, no repeat
+flag, and `page.keyboard.modifierMask()` read 0. The same held when the dialog
+came from a cross-site iframe (a `localhost` page and a `127.0.0.1` frame), both
+for a click and for typing. Not measured: `alert`, `prompt` and `beforeunload`
+dialogs, a dialog that opens on `mouseup`, and SDK versions other than 0.6.1.11.
 Manual held-button and held-key workflows are not exposed.
 
 A selector gesture (`click`, `dblclick`, `dragAndDrop`) whose target the
@@ -133,8 +158,8 @@ selector is still refused before any key by the read-only attached-selector wait
 An exception after entering their SDK method cannot be classified as definitely
 before input. A dialog receipt can interrupt a button/key sequence, and
 `acceptDialog()` plus `info()` does not confirm its release: `info()` has no
-held-button or held-key state. Automatic continuation after such an interruption
-remains unsupported by this integration. A holding step that returns no receipt
+held-button or held-key state. This integration never replays the interrupted
+input. A holding step that returns no receipt
 stops the workflow, stays outside the completed prefix and retains
 `inputReleased=false`; no later step or final snapshot runs. Keep the original
 command and inspect the page rather than repeating it. The original
@@ -159,8 +184,10 @@ the step:
 - No opening event during the step and no open dialog: the step is recorded as
   completed with receipt `null`, `inputReleased` becomes `true` and the workflow
   continues.
-- An opening event, or a dialog still open: the workflow stops as described
-  above. `failure.dialog` is present only while the dialog is still open.
+- An opening event, or a dialog still open: the workflow stops at that step with
+  `inputReleased=false` and `inputInterruptedBy="dialog"`, the reported cause
+  described above. `failure.dialog` is present only while the dialog is still
+  open.
 - A failed or malformed buffer read proves nothing. Before typing, nothing is
   typed and `inputReleased` stays `true`. After typing, `inputReleased` stays
   `false`.

@@ -230,7 +230,7 @@ let support backend operation = match backend with
     | Scroll_at -> dom_input backend (conditional ~action:"scroll_at" Interact [observed;geometry;"Scrolls the pane at the observed viewport point."])
     | Native_workflow -> (match backend with
       | Connected Browser_lane.Ego_task_space -> conditional ~action:"workflow" Interact
-          [observed;ego_agent_pages;"Known native Page calls run serially with SDK waits and one final snapshot. expectedUrl checks the starting page; navigation can change it afterward. Per-method options use native SDK names and milliseconds; selectionJson preserves string/object/array/null forms. No cumulative command window. Failures retain completed steps; never replay the sequence. Unconfirmed button/key release blocks further input."]
+          [observed;ego_agent_pages;"Known native Page calls run serially with SDK waits and one final snapshot. expectedUrl checks the starting page; navigation can change it afterward. Per-method options use native SDK names and milliseconds; selectionJson preserves string/object/array/null forms. No cumulative command window. Failures retain completed steps; never replay the sequence. Unconfirmed button/key release blocks further input, except one the SDK reported as cut short by a dialog."]
       | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Owned_chromium | Safari_unavailable ->
           Unsupported "Native workflows require an ego connection.")
     | Click_snapshot_target -> snapshot_target backend ~action:"click"

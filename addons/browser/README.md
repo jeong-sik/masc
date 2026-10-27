@@ -253,6 +253,8 @@ An Ego input whose release is uncertain can be resumed on the same connection
 through the installation's private operator controls. After manually checking
 and resetting key/button state in the displayed Space, press the confirmation
 button. It is bound to that pending input generation, sends no browser input and
-is recorded as an operator assertion. Answering a dialog or taking over a Space
-alone does not clear the uncertainty. Original gesture cleanup, visible UI and
+is recorded as an operator assertion. Taking over a Space alone does not clear
+the uncertainty. A dialog the SDK reports cutting an input short is not that
+uncertainty: the connection keeps accepting input and receipts carry
+`inputReadiness=dialog_interrupted`. Original gesture cleanup, visible UI and
 login completion are separate observations.

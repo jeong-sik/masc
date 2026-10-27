@@ -54,9 +54,9 @@ stops it before any key, with input still released. With no
 `Page.javascriptDialogOpening` event the step completes with receipt `null` and
 the workflow continues. With one, even when
 the dialog is already closed, the workflow stops at that step, excludes it from
-`completed` and leaves input release unconfirmed. Answer the dialog and read the
-page, then use the private operator recovery described below before a distinct
-next input. Do not repeat typing or silently substitute another input method.
+`completed` and reports `inputInterruptedBy="dialog"`. Answer the dialog and read
+the page, then continue. Do not repeat typing or silently substitute another input
+method.
 A later `events` step still returns the events the workflow read for this check.
 
 When the work needs the page's markup, `BrowserRead` `mode = "html"` returns
@@ -149,8 +149,15 @@ another Space or automatic takeover replay. Confirm login with a fresh read
 of the intended managed Page. Explicit input/navigation/activation can
 then use an adopted native Page without changing its origin.
 
-If an Ego result says input release is unconfirmed, keep the original connection
-and do not replay its command. Answer any JavaScript dialog separately. Ask the
+If an Ego result says `inputInterruptedBy="dialog"`, a JavaScript dialog cut the
+input short. Answer it with `accept_dialog` or `dismiss_dialog`, read the page and
+continue; input is not blocked, and receipts carry `inputReadiness=dialog_interrupted`
+until a later holding input settles. When no earlier step completed an effect, the
+result is an error whose message says the same instead of a receipt. Never replay
+the interrupted command.
+
+If an Ego result says input release is unconfirmed without that field, keep the
+original connection and do not replay its command. Ask the
 operator to check/reset key and button state in that Space and use this Browser
 installation's private operator controls to confirm completion. The confirmation
 applies only to the pending input generation; `inputReadiness=operator_asserted`

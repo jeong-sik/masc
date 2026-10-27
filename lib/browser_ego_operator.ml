@@ -20,6 +20,9 @@ let view ?(outcome=Observed) connection =
       else match connection.recovery.status () with
         | Input.Ready Input.Command_settled -> where ^ "에 입력 확인 요청이 없습니다.",[]
         | Ready (Operator_reset_asserted _) -> where ^ "의 입력 상태를 운영자가 확인·초기화했다고 기록했습니다. 원래 동작은 재실행하지 않습니다.",[]
+        | Ready (Dialog_interrupted pending) ->
+          Printf.sprintf "%s의 탭 %d에서 마지막 입력이 JavaScript 대화상자에 끊겼습니다. 입력이 풀렸는지는 확인하지 못했지만 새 입력을 막지는 않습니다."
+            where pending.tab_id,[]
         | Uncertain pending ->
           Printf.sprintf "%s의 탭 %d에서 입력 해제 여부가 불확실합니다. 해당 Space에서 키·버튼 상태를 직접 확인하고 필요한 초기화를 마친 경우에만 아래 버튼을 누르세요. 로그인 완료와는 별도입니다."
             where pending.tab_id,

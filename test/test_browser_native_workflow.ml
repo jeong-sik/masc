@@ -151,7 +151,7 @@ let progress_and_uncertainty () =
     "dialog",obj ["type",str "confirm";"message",str "keep typing?"]] in
   (match ok (R.decode (request [step "keyboard.type" ["text",str "x"]])
        (obj (result ~started:true ~completed_effect:false ~completed:[] ~failure:refused))) with
-   | R.Stopped {effect_started=true;completed_effect=false;input_released=true;_} -> ()
+   | R.Stopped {effect_started=true;completed_effect=false;input=R.Released;_} -> ()
    | R.Completed _|R.Stopped _ -> fail "a typing step refused before any key was not read as released")
 let observations () =
   let methods=["url",[],str "https://example.test/start";
@@ -231,14 +231,38 @@ let pointer_release () =
   let fields=result ~started:true ~completed_effect:false ~completed:[] ~failure:(failure 0 "dragAndDrop") in
   let fields=("inputReleased",`Bool false)::List.remove_assoc "inputReleased" fields in
   (match ok (R.decode (request [drag;click]) (obj fields)) with
-   | R.Stopped {input_released=false;_} -> ()
+   | R.Stopped {input=R.Unconfirmed;_} -> ()
    | R.Completed _|R.Stopped _ -> fail "lost release was called confirmed");
   let paste_fields=("failure",failure 0 "keyboard.paste")::List.remove_assoc "failure" fields in
   (match ok (R.decode (request [step "keyboard.paste" ["text",str "x"]]) (obj paste_fields)) with
-   | R.Stopped {input_released=false;_} -> ()
+   | R.Stopped {input=R.Unconfirmed;_} -> ()
    | R.Completed _|R.Stopped _ -> fail "paste lost its modifier release uncertainty");
   check bool "held input is impossible without a holding operation" true
     (Result.is_error (R.decode (request [step "fill" ["selector",str "#editor";"text",str "x"]]) (obj fields)))
+(* The script says why an input stayed unreleased only when the SDK reported a dialog.
+   Anything else, including a missing key, is an input nothing explains. *)
+let dialog_interruption () =
+  let click_step=step "click" ["selector",str "#delete"] in
+  (* Otherwise valid: the click is the failed step, so it is not in [completed]. *)
+  let stopped ?(released=false) extra =
+    let fields=result ~started:true ~completed_effect:false ~completed:[] ~failure:(failure 0 "click") in
+    let fields=("inputReleased",`Bool released)::List.remove_assoc "inputReleased" fields in
+    obj (extra @ fields) in
+  (match ok (R.decode (request [click_step]) (stopped ["inputInterruptedBy",str "dialog"])) with
+   | R.Stopped {input=R.Cut_by_dialog;effect_started=true;_} -> ()
+   | R.Completed _|R.Stopped _ -> fail "a reported dialog interruption was not decoded");
+  (match ok (R.decode (request [click_step]) (stopped [])) with
+   | R.Stopped {input=R.Unconfirmed;_} -> ()
+   | R.Completed _|R.Stopped _ -> fail "an unexplained unreleased input was called a dialog interruption");
+  List.iter (fun (label,value) ->
+    check bool label true (Result.is_error (R.decode (request [click_step]) value)))
+    ["another interruption name",stopped ["inputInterruptedBy",str "timeout"];
+     "a non-text interruption",stopped ["inputInterruptedBy",`Bool true];
+     "a null interruption",stopped ["inputInterruptedBy",`Null];
+     "a dialog interruption of a released input",stopped ~released:true ["inputInterruptedBy",str "dialog"];
+     "a dialog interruption on a completed workflow",
+       obj (("inputInterruptedBy",str "dialog")::snapshot
+            @ result ~started:true ~completed_effect:true ~completed:[entry 0 "click"] ~failure:`Null)]
 let proof path =
   let json=Yojson.Safe.from_file path in
   let request=ok (W.of_json (Yojson.Safe.Util.member "request" json)) in
@@ -266,4 +290,5 @@ let () = if Array.length Sys.argv=3 && Sys.argv.(1)="--proof" then proof Sys.arg
   test_case "fetch save names are safe artifact metadata" `Quick fetch_save_inputs;
   test_case "saved fetch receipts bind exact artifact provenance" `Quick fetch_save_receipts;
   test_case "drag release is separate from effect completion" `Quick pointer_release;
+  test_case "only a reported dialog explains an unreleased input" `Quick dialog_interruption;
   test_case "malformed execution never proves success" `Quick malformed_receipts]]

@@ -80,7 +80,7 @@ Neither means fully supported.
 | `Page.click` | Selector/ref interaction; workflow forwards all native options | New option forms require real SDK and installed-route proof |
 | `Page.dblclick` | Selector/ref interaction; workflow forwards all native options | New option forms require real SDK and installed-route proof |
 | `Page.hover` | Selector/ref interaction; workflow forwards all native options | New option forms require real SDK and installed-route proof |
-| `Page.dragAndDrop` | `drag_to`; workflow forwards native options and tracks release uncertainty, except that a typed `ElementResolutionError` refusal holds nothing | New workflow requires real SDK and installed-route proof |
+| `Page.dragAndDrop` | `drag_to`; workflow forwards native options and tracks release uncertainty, except that a typed `ElementResolutionError` refusal holds nothing and a dialog the SDK reports in its receipt is `inputInterruptedBy="dialog"`, which does not block input | New workflow requires real SDK and installed-route proof |
 | `Page.fill` | Selector/ref interaction; workflow forwards clearFirst/timeout | New option forms require real SDK and installed-route proof |
 | `Page.selectOption` | Workflow selectionJson preserves string/object/array/null, including label/index | New selection forms require real SDK and installed-route proof |
 | `Page.focus` | Native workflow focus | Real SDK primitive proof; installed MASC/Keeper route unverified |
@@ -101,7 +101,7 @@ Neither means fully supported.
 | `Page.keyboard.down` | None | Held-key state and cancellation/release settlement |
 | `Page.keyboard.up` | None | Explicit release and uncertain-key recovery |
 | `Page.keyboard.press` | Interaction chord; workflow forwards native delay | New option forms require real SDK and installed-route proof |
-| `Page.keyboard.type` | Workflow forwards native text/delay. The SDK's void result is judged by the Page's `Page.javascriptDialogOpening` events: a dialog already open at the start refuses it before any key, none during the step completes it, one stops it with input release unconfirmed, preserving the earlier completed prefix and requiring private operator recovery | Measured on Ego Lite 0.6.1.11 only; cross-origin frame dialogs and `beforeunload` are not measured; installed-route proof remains open |
+| `Page.keyboard.type` | Workflow forwards native text/delay. The SDK's void result is judged by the Page's `Page.javascriptDialogOpening` events: a dialog already open at the start refuses it before any key, none during the step completes it, one stops it with `inputInterruptedBy="dialog"`, preserving the earlier completed prefix; the connection keeps accepting input | Measured on Ego Lite 0.6.1.11 only; cross-origin frame dialogs and `beforeunload` are not measured; installed-route proof remains open |
 | `Page.keyboard.insertText` | Native workflow | Real SDK primitive proof; installed MASC/Keeper route unverified |
 | `Page.keyboard.paste` | Native workflow plain/rich paste | Real trusted paste proof; installed MASC/Keeper route unverified |
 | `FileChooser.isMultiple` | Internal chooser validation | Explicit chooser handle observation |

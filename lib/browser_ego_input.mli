@@ -7,7 +7,7 @@ type pending = private {
   page_label : string;
   operation : string;
 }
-type readiness = Command_settled | Operator_reset_asserted of { pending:pending; at:float }
+type readiness = Command_settled | Operator_reset_asserted of { pending:pending; at:float } | Dialog_interrupted of pending
 type status = Ready of readiness | Uncertain of pending
 type t
 val create : unit -> t
@@ -21,6 +21,12 @@ val begin_holding : t -> tab_id:int -> page_label:string -> operation:string -> 
 val command_settled : t -> unit
 (** Consume the existing producer's settlement indication. This module does
     not strengthen that producer's SDK evidence or inspect physical keys. *)
+val dialog_interrupted : t -> unit
+(** The SDK itself reported that a JavaScript dialog cut the pending input
+    short. The input is not claimed released. The reply was not lost and the
+    dialog is the page's to answer, so admission continues and receipts carry
+    [inputReadiness] until a later holding input settles. A pending input whose
+    outcome is unknown stays pending. *)
 val not_started : t -> unit
 (** Restore the prior readiness, retaining its operator provenance. *)
 val assert_reset : t -> generation:string -> now:float -> (unit, string) result

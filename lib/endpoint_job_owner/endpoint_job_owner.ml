@@ -291,6 +291,7 @@ let rec actor_loop operation =
      (match Atomic.get operation.execution with
       | Awaiting_activation -> finish result_cell (Error error)
       | Owned _ | Unknown_launch -> ())
+   (* A request error reaches its caller through [complete_active]. With a followup, the result cell takes the publish outcome and the request error is not repeated there. *)
    | Ok (),None | Ok (),Some _ | Error _,Some _ -> ());
   (match followup with
    | Some publish -> finish result_cell (publish ())

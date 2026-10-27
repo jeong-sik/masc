@@ -785,8 +785,12 @@ hooks = ["validate_input", "validate_output"]
   check bool "a partial inventory never recommends automatic fallback" true
     (partial_data |> member "automatic" |> member "browse" |> member "error" |> member "code"=`String "browser_binding_required");
   Unix.unlink invalid_inventory;
+  let before_recovery=inspect replacement |> member "observation_seq" |> Yojson.Safe.Util.to_int in
   ignore (dispatch config R.Observe ["instance_id",`String replacement]);
-  wait clock candidate_is_ready;
+  wait clock (fun () -> let current=inspect replacement in
+    text "kind" (member "phase" current)="attached" &&
+    (current |> member "observation_seq" |> Yojson.Safe.Util.to_int)>before_recovery);
+  check bool "the original worker recovered after a committed observation" true (candidate_is_ready ());
   ignore (dispatch config R.Detach ["instance_id",`String other_id]);
   wait clock (fun () -> inspect other_id |> member "phase" |> text "kind"="detached");
   check bool "a missing Goal worker never falls back" true

@@ -1,3 +1,0 @@
-### Fixed
-
-- The browser worker regression checks preserved sibling choices and explicit incomplete-inventory refusal after snapshot validation fails, without requiring the failing worker to remain ready.

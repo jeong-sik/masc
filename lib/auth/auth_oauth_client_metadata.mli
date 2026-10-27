@@ -18,16 +18,18 @@ type client_id =
   | Document of document_url
 
 val classify_client_id : string -> (client_id, string) result
-(** A client id with the https scheme must be a usable document URL: it has
-    a host and a path other than ["/"], and no userinfo, query, fragment, or
-    ["."] / [".."] segment, percent-encoded or not (draft section 3). The
-    error names the rule the URL broke. Every other client id is
-    [Registered]. *)
+(** A client id with the https scheme must be a usable document URL. It is
+    plain URL text: no space, control character or backslash, and ocaml-uri
+    prints it back unchanged. It has a host and a path other than ["/"], and
+    no userinfo, fragment, query or ["."] / [".."] segment, percent-encoded
+    or not (draft section 3; the draft only says SHOULD NOT for a query, this
+    server refuses one). The error names the rule the URL broke. Every other
+    client id is [Registered]. *)
 
 val max_document_bytes : int
 (** 5 KiB, the limit draft section 6.6 recommends. *)
 
-type document =
+type document = private
   { client_id : document_url
   ; client_name : string
   ; redirect_uris : string list
@@ -37,7 +39,8 @@ val parse_document : document_url -> string -> (document, string) result
 (** Read a fetched document. It must be at most [max_document_bytes], a JSON
     object without repeated member names, and carry [client_id] equal to the
     URL, a non-blank [client_name], and a non-empty [redirect_uris] array
-    without duplicates (MCP 2026-07-28). [client_secret] and
+    without duplicates (MCP 2026-07-28). A [client_name] with a control
+    character is refused; its length is the caller's limit. [client_secret] and
     [client_secret_expires_at] are refused (draft section 4.5).
     [token_endpoint_auth_method], [grant_types] and [response_types] must,
     when present, stay within what this server supports: a public client
@@ -45,7 +48,13 @@ val parse_document : document_url -> string -> (document, string) result
     ignored. *)
 
 val redirect_uri_allowed : document -> string -> bool
-(** [true] when the requested redirect URI equals a listed one, or both are
-    loopback [http] URIs with the same host, path and query whatever their
-    ports. A native client picks a free port when it starts listening, so
-    its document cannot name one (RFC 8252 section 7.3). *)
+(** [true] when the requested redirect URI is plain URL text (see
+    {!classify_client_id}) and equals a listed one, or both are loopback
+    [http] URIs with the same host, path and query whatever their ports. A
+    native client picks a free port when it starts listening, so its
+    document cannot name one. RFC 8252 section 7.3 asks this for loopback IP
+    literals; [localhost] is treated the same because Claude Code's document
+    lists it, although RFC 8252 section 8.3 does not recommend it.
+
+    Listed entries are not checked here. The caller must still require the
+    requested URI to be one it is willing to redirect to. *)

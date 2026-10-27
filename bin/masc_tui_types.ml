@@ -6009,7 +6009,7 @@ module Browser_lane_view = struct
         let reload = match list_reload t with
           | Wait_until_idle -> "When ready"
           | Reload_picker -> "r:list"
-          | Close_url_draft_then_open -> "Esc then b:list"
+          | Close_url_draft_then_open -> "Esc→b:list"
           | Open_browser_list -> "b:list" in
         Some (reload ^ " · Ego user-owned at startup (last list); fix, Off→Inactive→On")
   let prepare_open t =

@@ -1,3 +1,5 @@
+let domain_count = 1
+
 type 'a outcome =
   | Served of ('a, exn * Printexc.raw_backtrace) result
   | Unserved

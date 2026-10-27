@@ -6789,3 +6789,5 @@
 (include stanzas/test_endpoint_job_protocol.inc)
 
 (include stanzas/test_endpoint_job_registry.inc)
+
+(include stanzas/test_domain_budget.inc)

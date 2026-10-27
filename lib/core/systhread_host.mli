@@ -11,6 +11,9 @@ exception Host_failed of exn
 (** Raised to a caller whose work the host had already taken when the host's
     scheduler failed. The work may or may not have run. *)
 
+val domain_count : int
+(** Domains {!start} adds to the process: 1. *)
+
 val start : unit -> unit
 (** Spawn the host domain, once per process; later calls do nothing. The
     domain belongs to no switch and lives until the process exits, so a

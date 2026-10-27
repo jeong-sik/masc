@@ -168,13 +168,20 @@ let initialize t client =
                  | _ -> Error (Protocol_failed "invalid private companion handshake"))
             | [_] -> Error (Invalid_contract "private companion requires host-context invocation")
             | _ -> Error (Protocol_failed "duplicate private companion handshake") in
-          (* The worker's own word on which exports leave its observation as it
-             was. A worker without the port declares nothing, so every export
-             may change it; a declaration the host cannot read refuses Ready. *)
-          let* observation_effects = match List.filter (fun (tool:Mcp_protocol.Mcp_types.tool) ->
-              tool.name=Lane_addon_call_context.effects_tool) tools with
-            | [] -> Ok []
-            | [_] ->
+          (* Only an explicit schema marker opts into the worker's word on
+             which exports leave its observation as it was. Absent or ambiguous
+             opt-in declares nothing; a malformed reply refuses Ready. *)
+          (* An existing package can already use this name as its action or an
+             export. Its declared role wins over the new private handshake. *)
+          let effect_name = Lane_addon_call_context.effects_tool in
+          let module Export_names = Set.Make (String) in
+          let export_names = List.fold_left (fun names name -> Export_names.add name names)
+            Export_names.empty t.contract.exported_tools in
+          let* observation_effects = if t.contract.action_tool = Some effect_name
+              || Export_names.mem effect_name export_names then Ok [] else
+            match List.filter (fun (tool:Mcp_protocol.Mcp_types.tool) ->
+              tool.name=effect_name) tools with
+            | [tool] when Lane_addon_call_context.supports_effects_tool tool.input_schema ->
                 let* reply=Agent_core.Mcp.call_tool_full client ~name:Lane_addon_call_context.effects_tool
                     ~arguments:(`Assoc [])
                   |> Result.map_error (fun _ -> Protocol_failed "observation effect handshake failed") in
@@ -182,11 +189,11 @@ let initialize t client =
                  | (None|Some false),Some value ->
                      Lane_addon_call_context.effects_of_json
                        ~listed:(List.map (fun (tool:Mcp_protocol.Mcp_types.tool) -> tool.name) tools) value
-                     |> Result.map (List.filter (fun (name,_) -> List.mem name t.contract.exported_tools))
+                     |> Result.map (List.filter (fun (name,_) -> Export_names.mem name export_names))
                      |> Result.map_error (fun detail -> Protocol_failed detail)
                  | Some true,_ | (None|Some false),None ->
                      Error (Protocol_failed "observation effect handshake refused"))
-            | _ -> Error (Protocol_failed "duplicate observation effect port") in
+            | _ -> Ok [] in
           let* exported = List.fold_left (fun result name ->
             let* selected = result in
             match List.filter (fun (tool : Mcp_protocol.Mcp_types.tool) -> String.equal tool.name name) tools with

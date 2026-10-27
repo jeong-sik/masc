@@ -90,6 +90,15 @@ let actor_label = function
 
 type observation_effect = Reads_only | May_change
 let effects_tool = "lane_tool_effects"
+let effects_marker = "x-io.github.jeong-sik/masc.observation-effects"
+let effects_input_schema = `Assoc ["type", `String "object";
+  "additionalProperties", `Bool false; effects_marker, `Assoc ["version", `Int 1]]
+let supports_effects_tool = function
+  | `Assoc fields ->
+      (match List.filter (fun (key, _) -> key = effects_marker) fields with
+       | [(_, `Assoc ["version", `Int 1])] -> true
+       | _ -> false)
+  | _ -> false
 let observation_effect_to_json = function
   | Reads_only -> `String "reads_only"
   | May_change -> `String "may_change"
@@ -100,18 +109,22 @@ let observation_effect_of_json = function
 let effects_to_json declared =
   `Assoc ["tools", `Assoc (List.map (fun (name, declared) ->
     name, observation_effect_to_json declared) declared)]
+module Effect_names = Set.Make (String)
 let effects_of_json ~listed = function
   | `Assoc ["tools", `Assoc declared] ->
-      let names = List.map fst declared in
-      if List.length (List.sort_uniq String.compare names) <> List.length names then
-        Error "an observation effect declaration names a tool twice"
-      else List.fold_right (fun (name, value) parsed ->
-        let* parsed = parsed in
-        if not (List.mem name listed) then
-          Error ("an observation effect declaration names an unlisted tool: " ^ name)
-        else
-          let* declared = observation_effect_of_json value in
-          Ok ((name, declared) :: parsed)) declared (Ok [])
+      let listed = List.fold_left (fun names name -> Effect_names.add name names)
+        Effect_names.empty listed in
+      let rec read seen parsed = function
+        | [] -> Ok (List.rev parsed)
+        | (name, value) :: rest ->
+            if Effect_names.mem name seen then
+              Error "an observation effect declaration names a tool twice"
+            else if not (Effect_names.mem name listed) then
+              Error "an observation effect declaration names an unlisted tool"
+            else
+              let* declared_effect = observation_effect_of_json value in
+              read (Effect_names.add name seen) ((name, declared_effect) :: parsed) rest in
+      read Effect_names.empty [] declared
   | _ -> Error "invalid observation effect declaration"
 
 type host_refusal = Rejected of string | Unavailable of string

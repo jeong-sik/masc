@@ -52,7 +52,17 @@ for line in sys.stdin:
         if companion:
             result["tools"] += [{"name":"lane_companion","inputSchema":{"type":"object"}}] * (2 if mode=="companion-duplicate" else 1)
         if mode.startswith("effects"):
-            result["tools"].append({"name":"lane_tool_effects","inputSchema":{"type":"object"}})
+            effect_schema = {"type":"object"}
+            if mode != "effects-legacy":
+                effect_schema["x-io.github.jeong-sik/masc.observation-effects"] = {"version":2 if mode=="effects-unsupported" else 1}
+            effect_tool = {"name":"lane_tool_effects","inputSchema":effect_schema}
+            result["tools"].append(effect_tool)
+            if mode == "effects-ambiguous": result["tools"].append(effect_tool)
+        if mode.startswith("legacy-action") or mode.startswith("legacy-export"):
+            legacy_schema = dict(action if mode.startswith("legacy-action") else schema)
+            if mode.endswith("-marked"):
+                legacy_schema["x-io.github.jeong-sik/masc.observation-effects"] = {"version":1}
+            result["tools"].append({"name":"lane_tool_effects","inputSchema":legacy_schema,"outputSchema":schema})
         if mode == "hinted":
             result["tools"][1]["annotations"] = {"readOnlyHint":True}
         if len(sys.argv) > 2 and sys.argv[2] in ["operator", "operator-duplicate"]:
@@ -68,12 +78,17 @@ for line in sys.stdin:
             value = {"version":2 if mode=="companion-version" else 3,"tools":["increment"]}
             print(json.dumps({"jsonrpc":"2.0","id":request["id"],"result":{"content":[],"structuredContent":value}}),flush=True)
             continue
-        if params["name"] == "lane_tool_effects":
+        if params["name"] == "lane_tool_effects" and mode.startswith("effects"):
             assert params["arguments"] == {}
             declared = {"effects":{"increment":"reads_only"},"effects-may-change":{"increment":"may_change"},
-                "effects-unknown":{"increment":"maybe"},"effects-unlisted":{"decrement":"reads_only"}}[mode]
+                "effects-unknown":{"increment":"maybe"},"effects-unlisted":{"PRIVATE_EFFECT_SENTINEL":"reads_only"}}[mode]
             print(json.dumps({"jsonrpc":"2.0","id":request["id"],
                 "result":{"content":[],"structuredContent":{"tools":declared}}}),flush=True)
+            continue
+        if params["name"] == "lane_tool_effects" and mode.startswith("legacy-action"):
+            result = {"content":[],"structuredContent":{"status":"confirmed","result":{"applied":1},
+                "output":{"rows":[],"coverage":[]}}}
+            print(json.dumps({"jsonrpc":"2.0","id":request["id"],"result":result}),flush=True)
             continue
         if params["name"] == "lane_controller_snapshot" and mode == "companion-controller-error":
             result = {"content":[{"type":"text","text":"PRIVATE_CONTROLLER_MARKER"}],
@@ -121,9 +136,8 @@ let companion_context () =
     "invocation_id",`String (String.make 64 'a');"max_message_bytes",`Int 4096;
     "publication_id",`String (String.make 64 'b')]) |> require
 
-(* The private effect port is read once while the worker initializes. Only a
-   declaration there makes an export Reads_only: an MCP readOnlyHint alone does
-   not, and a declaration the host cannot read refuses Ready. *)
+(* Only an opted-in private effect declaration makes an export Reads_only:
+   an MCP readOnlyHint alone does not, and a malformed reply refuses Ready. *)
 let negotiated_effects mode expected () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
   let calls=Filename.temp_file "effects-protocol-" ".calls" in
   Fun.protect ~finally:(fun () -> Sys.remove calls) (fun () ->
@@ -137,6 +151,9 @@ let negotiated_effects mode expected () = Eio_main.run (fun env -> Eio.Switch.ru
       match expected with
       | None ->
           check bool "an unreadable declaration cannot publish Ready" true (Result.is_error initialized);
+          if mode = "effects-unlisted" then
+            check bool "private effect names cannot enter initialization errors" true
+              (initialized = Error (Protocol.Protocol_failed "an observation effect declaration names an unlisted tool"));
           check bool "nothing is taken as read-only" true
             (Protocol.observation_effect protocol "increment" = Lane_addon_call_context.May_change)
       | Some declared ->
@@ -145,7 +162,62 @@ let negotiated_effects mode expected () = Eio_main.run (fun env -> Eio.Switch.ru
             (Protocol.observation_effect protocol "increment" = declared);
           check bool "the effect port is never exported" true
             (List.for_all (fun (tool:Mcp_protocol.Mcp_types.tool) ->
-              tool.name<>Lane_addon_call_context.effects_tool) (Protocol.exported_tools protocol))))))
+              tool.name<>Lane_addon_call_context.effects_tool) (Protocol.exported_tools protocol));
+          if List.mem mode ["effects-legacy";"effects-unsupported";"effects-ambiguous"] then
+            check string "unrecognized or ambiguous ports are never called" ""
+              (In_channel.with_open_bin calls In_channel.input_all)))))
+
+let effect_marker_contract () =
+  let module C = Lane_addon_call_context in
+  let marker = "x-io.github.jeong-sik/masc.observation-effects" in
+  check bool "the current input schema opts in" true (C.supports_effects_tool C.effects_input_schema);
+  check bool "duplicate markers do not opt in" false
+    (C.supports_effects_tool (`Assoc [marker, `Assoc ["version", `Int 1]; marker, `Assoc ["version", `Int 1]]));
+  check bool "extra marker fields do not opt in" false
+    (C.supports_effects_tool (`Assoc [marker, `Assoc ["version", `Int 1; "extra", `Bool true]]))
+
+let wide_effect_declaration () =
+  let module C = Lane_addon_call_context in
+  let names = List.init 30000 (fun n -> "tool-" ^ string_of_int n) in
+  let declarations = List.map (fun name -> name, C.Reads_only) names in
+  let decoded = require (C.effects_of_json ~listed:names (C.effects_to_json declarations)) in
+  check int "all declared tools survive in order" (List.length declarations) (List.length decoded);
+  check bool "declaration order and effects are preserved" true (decoded = declarations);
+  check bool "duplicate names remain invalid" true
+    (Result.is_error (C.effects_of_json ~listed:["tool"] (`Assoc ["tools", `Assoc [
+      "tool", `String "reads_only"; "tool", `String "may_change"]])))
+
+let legacy_effect_name mode () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+  let calls = Filename.temp_file "legacy-effect-name-" ".calls" in
+  Fun.protect ~finally:(fun () -> Sys.remove calls) (fun () ->
+    let action = mode = "legacy-action" in
+    let action_tool = if action then Some Lane_addon_call_context.effects_tool else None in
+    let exported_tools = if action then ["increment"] else [Lane_addon_call_context.effects_tool;"increment"] in
+    let contract = require (Protocol.contract ~host_requests:false ~action_tool
+      ~tool_invocation:Lane_addon_types.Direct ~exported_tools ~tool_hooks:[] ~max_reply_bytes:4096) in
+    let protocol = Protocol.create ~instance_id:"legacy-effect-name" ~contract
+      ~artifact_store:(Lane_addon_store.create ~root:(calls ^ ".store")) () in
+    let client = require (Agent_core.Mcp.connect ~sw ~mgr:(Eio.Stdenv.process_mgr env)
+      ~command:"python3" ~args:["-c";server;calls;mode] ~max_response_bytes:4096 ()) in
+    Fun.protect ~finally:(fun () -> Eio.Cancel.protect (fun () -> Protocol.close protocol)) (fun () ->
+      require (Protocol.initialize protocol client);
+      check string "initialization does not call the legacy handler" "" (In_channel.with_open_bin calls In_channel.input_all);
+      check bool "other exports retain conservative effects" true
+        (Protocol.observation_effect protocol "increment" = Lane_addon_call_context.May_change);
+      if action then (
+        check bool "the configured action remains available" true (Option.is_some (Protocol.action_schema protocol));
+        let result = require (Protocol.act protocol ~arguments:(Lane_addon_action.arguments
+          ~instance_id:"legacy-effect-name" ~request_id:"action-1" ~action:(`Assoc ["kind", `String "increment"]))) in
+        check bool "the explicit action still executes" true (result.status = Lane_addon_action.Package_confirmed))
+      else (
+        check bool "the explicitly exported tool remains available" true
+          (List.exists (fun (tool:Mcp_protocol.Mcp_types.tool) -> tool.name = Lane_addon_call_context.effects_tool)
+            (Protocol.exported_tools protocol));
+        let result = require (Protocol.call_exported_tool protocol ~name:Lane_addon_call_context.effects_tool
+          ~arguments:(`Assoc ["value", `Int 7])) in
+        check bool "the explicit export still executes" true (result.structured_content = Some (`Assoc ["value", `Int 8])));
+      check string "only the explicitly requested handler runs" "lane_tool_effects\n"
+        (In_channel.with_open_bin calls In_channel.input_all)))))
 
 let negotiated_companion mode () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
   let calls=Filename.temp_file "companion-protocol-" ".calls" in
@@ -676,6 +748,17 @@ let () = run "Addon engine-independent MCP admission"
       (negotiated_effects "hinted" (Some Lane_addon_call_context.May_change));
     test_case "an unknown observation effect refuses Ready" `Quick (negotiated_effects "effects-unknown" None);
     test_case "an effect for an unlisted tool refuses Ready" `Quick (negotiated_effects "effects-unlisted" None);
+    test_case "an unmarked legacy private tool is not called" `Quick
+      (negotiated_effects "effects-legacy" (Some Lane_addon_call_context.May_change));
+    test_case "an unsupported marker is not called" `Quick
+      (negotiated_effects "effects-unsupported" (Some Lane_addon_call_context.May_change));
+    test_case "an ambiguous port is not called" `Quick
+      (negotiated_effects "effects-ambiguous" (Some Lane_addon_call_context.May_change));
+    test_case "effect marker requires a single supported version" `Quick effect_marker_contract;
+    test_case "wide effect declarations retain all names" `Quick wide_effect_declaration;
+    test_case "a legacy action takes precedence over the effect port" `Quick (legacy_effect_name "legacy-action");
+    test_case "a legacy export takes precedence over the effect port" `Quick (legacy_effect_name "legacy-export");
+    test_case "an export role takes precedence over an effect marker" `Quick (legacy_effect_name "legacy-export-marked");
     test_case "companion public output validation is mandatory" `Quick (negotiated_companion "companion-bad-output");
     test_case "companion output schema cannot declare an open object" `Quick (negotiated_companion "companion-open-output");
     test_case "companion output schema cannot declare a nested open object" `Quick (negotiated_companion "companion-open-nested");

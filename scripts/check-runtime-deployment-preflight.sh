@@ -28,7 +28,7 @@ KEEPER_META_REJECTED='current keeper meta is invalid'
 # next from each place the check runs.
 RUNTIME_CONFIG_REJECTED='runtime.toml is not one this build accepts'
 RUNTIME_CONFIG_NEXT_BEFORE_STOP='nothing was stopped or installed: change the value (through the runtime config editor while a server runs on this workspace, in the file otherwise), then deploy again'
-RUNTIME_CONFIG_NEXT_UNDER_LEASE='no server runs on this workspace while this gate holds its writer lease (scripts/deploy.sh stopped the previous prod and does not restart it), and nothing was installed: change the value in the file, then deploy again'
+RUNTIME_CONFIG_NEXT_UNDER_LEASE='no server runs on this workspace while this gate holds its writer lease, and the next runtime was not started: change the value in the file, then start it again'
 # Keep aligned with Keeper_board_attention_candidate.schema_version.
 BOARD_ATTENTION_SCHEMA_VERSION=7
 
@@ -194,11 +194,10 @@ run_gate() {
     # stopped writing (2026-08-23 hard cuts) makes the file undecodable on
     # boot: the runtime reads it as absent and re-materialises the keeper from
     # its declaration, and the accumulated counters and the task binding are
-    # gone (#29610). This gate runs between the stop of the previous runtime
-    # and the start of the next one (scripts/deploy.sh stops prod in step 3
-    # and runs this under the deployment lease in step 4; the runbook needs
-    # the writer lease free), so a rejection here leaves the plane down until
-    # the operator repairs the file and redeploys. That downtime is the price
+    # gone (#29610). This gate runs under the writer lease before the next
+    # runtime starts (the container entrypoint runs it through lease-handoff),
+    # so a rejection here leaves the workspace without a server until the
+    # operator repairs the file and starts again. That downtime is the price
     # of keeping the counters the boot-time fail-open would lose. The helper
     # verdict printed above the FAIL line names the class and the fix.
     while IFS= read -r -d '' meta_path; do
@@ -309,10 +308,10 @@ run_gate() {
     "$in_progress_count_total" "$(helper_identity)"
 }
 
-# Before the stop step the previous server still holds the writer lease, so
-# this reads runtime.toml alone and takes no lease. A refusal here stops
-# nothing. The full gate checks the file again under the lease, because it can
-# change in between.
+# Before anything is replaced the running server still holds the writer
+# lease (install-local-build.sh runs this mode), so this reads runtime.toml
+# alone and takes no lease. A refusal here stops nothing. The full gate checks
+# the file again under the lease, because it can change in between.
 if [[ "$RUNTIME_CONFIG_ONLY" -eq 1 ]]; then
   [[ -d "$BASE_PATH" && ! -L "$BASE_PATH" ]] \
     || fail "base path is not an exact directory: $BASE_PATH"

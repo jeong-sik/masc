@@ -329,7 +329,7 @@ val offers : Lane_id.builtin -> Lane_addon_sources.kind list      (* Lane_addon_
    ```
 
    모든 값은 지금 라이브의 동작을 그대로 옮긴 것이다. 켜져 있던 것은 `true`, 꺼져 있던 것은 `false` 다.
-3. **요구하는 PR (PR-4b).** 표나 `enabled` 가 없으면 load 오류다. 배포는 #39345 의 preflight 를 거친다. #39345 는 새 바이너리의 검사로 라이브 runtime.toml 을 **이전 서버를 멈추기 전에** 읽고, 거절하면 배포를 멈춘다(`scripts/deploy.sh` 3단계 앞, `scripts/install-local-build.sh`). 운영자 단계를 빠뜨렸으면 서버는 멈추지 않고 옛 바이너리로 계속 돈다. 그래서 PR-4b 는 #39345 가 병합된 뒤에만 진행한다.
+3. **요구하는 PR (PR-4b).** 표나 `enabled` 가 없으면 load 오류다. 배포는 #39345 의 preflight 를 거친다. #39345 는 새 바이너리의 검사로 라이브 runtime.toml 을 **이전 서버를 멈추기 전에** 읽고, 거절하면 배포를 멈춘다(`scripts/install-local-build.sh`). 운영자 단계를 빠뜨렸으면 서버는 멈추지 않고 옛 바이너리로 계속 돈다. 그래서 PR-4b 는 #39345 가 병합된 뒤에만 진행한다.
 
 package 선언도 같은 순서다. PR-5a 가 선언의 `enabled` 를 받아들이고, 운영자가 선언 저장 API 로 라이브 선언 둘에 `enabled = true` 를 넣고, PR-5b 가 요구한다. #39345 는 선언 디렉터리를 읽지 않는다. 다만 선언 파일의 load 오류는 그 파일 하나의 문제이고, reconcile 이 마지막 적용 상태를 유지한다(2.3 규칙 2). 서버 전체가 멈추지는 않는다.
 

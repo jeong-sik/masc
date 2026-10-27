@@ -44,7 +44,7 @@ related: ["0044", "0418"]
 
 | | 어디 | 무엇을 보나 | 못 읽으면 |
 |---|---|---|---|
-| `validate-stores` | `deploy.sh` 4단계, preflight helper | keeper meta, memory current, memory source, paused-work 영수증, board posts, provider-input, turn record, 공식 클라이언트 세션 — 8종 | **배포 중단**, exit 1 |
+| `validate-stores` | `install-local-build.sh` 와 컨테이너 진입점의 preflight, preflight helper | keeper meta, memory current, memory source, paused-work 영수증, board posts, provider-input, turn record, 공식 클라이언트 세션 — 8종 | **배포 중단**, exit 1 |
 | boot reconcile | 바이너리 부팅, keeper 루프 전 | keeper meta, memory current — 2종 | **옮기고 계속** |
 
 두 게이트는 같은 디코더를 쓴다. 답이 다른 것은 정책이다.
@@ -55,8 +55,8 @@ related: ["0044", "0418"]
   keeper 는 그 뒤로 그것을 읽지 않는다. 그런 결정은 운영자의 것이다.
 - 부팅은 **거부**가 기본이다. 운영자가 격리를 원하면 플래그로 말한다. 그러면
   지금 코드가 하는 일을 그대로 한다.
-- `deploy.sh` 경로는 바뀌지 않는다. preflight 가 이미 막았으므로 부팅이 거부할
-  일이 없다. 거부가 나면 preflight 와 부팅이 다른 답을 낸 것이고, 그건 override 가
+- preflight 를 거치는 경로(`install-local-build.sh`, 컨테이너 진입점)는 바뀌지 않는다.
+  preflight 가 이미 막았으므로 부팅이 거부할 일이 없다. 거부가 나면 preflight 와 부팅이 다른 답을 낸 것이고, 그건 override 가
   아니라 조사할 결함이다.
 - 새 상태·필드·계측은 없다. 이미 계산하는 보고서(`report.quarantined`)를 옮기기
   전에 한 번 더 보는 것뿐이다.
@@ -110,7 +110,7 @@ or start with --accept-store-quarantine to move them aside and start empty.
 
 `bin/main_eio.ml` 에 Cmdliner 플래그 `--accept-store-quarantine` (기본 false).
 환경변수 짝은 두지 않는다. 격리는 한 번 내리는 결정이고, 환경에 남으면 다음 부팅도
-말없이 격리한다. `deploy.sh` 의 `lease-handoff --next-argument` 에는 넣지 않는다.
+말없이 격리한다. 컨테이너 진입점의 `lease-handoff --next-argument` 에도 넣지 않는다.
 
 ### 4.4 `failed` 는 그대로
 
@@ -126,7 +126,7 @@ rename 자체가 실패한 경우(`report.failed`)는 지금처럼 보고서에 
 2. 같은 base path 에 `--accept-store-quarantine` 을 주면 지금과 같이 뜬다.
    `*.rejected-<ts>` 가 생기고 WARN 과 요약 줄이 남는다 (#32515 의 테스트
    `undecodable stores are moved aside once` 가 이 경로로 그대로 통과).
-3. `deploy.sh` 로 배포한 것은 동작이 같다. preflight 가 통과한 base path 에서 부팅
+3. preflight 를 거쳐 설치한 것은 동작이 같다. preflight 가 통과한 base path 에서 부팅
    거부가 나지 않는다.
 4. `examine` 은 파일을 바꾸지 않는다. 두 번 불러도 같은 답이다.
 

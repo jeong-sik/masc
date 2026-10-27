@@ -194,7 +194,7 @@ let test_empty_bootstrap_follows_boot exe () = with_workspace (fun root ->
     in
     reports output "boot_writes_seed=yes"))
 
-(* scripts/deploy.sh names MASC_CONFIG_DIR itself, and boot creates it. *)
+(* A caller may name MASC_CONFIG_DIR before it exists, and boot creates it. *)
 let test_missing_config_dir_needs_empty_workspace exe () =
   with_workspace (fun root ->
     let config_dir = Filename.concat root "not-created-yet" in

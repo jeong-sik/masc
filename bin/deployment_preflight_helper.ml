@@ -335,28 +335,6 @@ let verify_base_path_lease_owner base_path owner_pid =
         owner_pid
 ;;
 
-let write_prepared_file path =
-  try
-    let descriptor =
-      Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL ] 0o600
-    in
-    let output = Unix.out_channel_of_descr descriptor in
-    Fun.protect
-      ~finally:(fun () -> close_out_noerr output)
-      (fun () ->
-         output_string output "prepared\n";
-         flush output;
-         Unix.fsync descriptor);
-    Ok ()
-  with
-  | Unix.Unix_error (error, syscall, argument) ->
-    errorf
-      "deployment preparation marker failed syscall=%s argument=%s: %s"
-      syscall
-      argument
-      (Unix.error_message error)
-;;
-
 let run_under_base_path_lease base_path command =
   match command with
   | [] -> errorf "lease-run requires a command"
@@ -675,7 +653,6 @@ let handoff_base_path_lease
       base_path
       next_executable
       next_arguments
-      prepared_file
       prepare_command
   =
   match prepare_command with
@@ -713,34 +690,23 @@ let handoff_base_path_lease
             release ();
             Stdlib.exit prepare_exit_code)
           else (
-            match
-              match prepared_file with
-              | None -> Ok ()
-              | Some path -> write_prepared_file path
-            with
-            | Error _ as error ->
+            match Server_startup_takeover.prepare_base_path_lease_exec_handoff lease with
+            | Error rejection ->
               release ();
-              error
+              errorf
+                "workspace writer lease handoff rejected base_path=%s: %s"
+                base_path
+                (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
             | Ok () ->
-              (match
-                 Server_startup_takeover.prepare_base_path_lease_exec_handoff lease
-               with
-               | Error rejection ->
+              let arguments = Array.of_list (next_executable :: next_arguments) in
+              let environment = environment_without_lease_owner () |> Array.of_list in
+              (try Unix.execve next_executable arguments environment with
+               | exn ->
                  release ();
                  errorf
-                   "workspace writer lease handoff rejected base_path=%s: %s"
-                   base_path
-                   (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
-               | Ok () ->
-                 let arguments = Array.of_list (next_executable :: next_arguments) in
-                 let environment = environment_without_lease_owner () |> Array.of_list in
-                 (try Unix.execve next_executable arguments environment with
-                  | exn ->
-                    release ();
-                    errorf
-                      "deployment runtime handoff failed executable=%s: %s"
-                      next_executable
-                      (Printexc.to_string exn))))))
+                   "deployment runtime handoff failed executable=%s: %s"
+                   next_executable
+                   (Printexc.to_string exn)))))
 ;;
 
 let signal_files =
@@ -1336,8 +1302,8 @@ let cut_run_registries_report ~execute reports =
   in
   (* A store whose last line is unterminated is left alone, which is what a
      crashed server leaves behind — exactly the state a deployment runs into.
-     Reporting that as success would tell the deploy script the store was
-     cleaned when it was not. *)
+     Reporting that as success would tell the deployment preflight the store
+     was cleaned when it was not. *)
   let unfinished =
     List.filter (fun (_, r) -> not r.Run_registry_core.reached_end) reports
     |> List.map fst
@@ -1456,11 +1422,6 @@ let next_arguments =
   Arg.(value & opt_all string [] & info [ "next-argument" ] ~docv:"ARG" ~doc)
 ;;
 
-let prepared_file =
-  let doc = "Exclusive marker created after preparation succeeds and before exec." in
-  Arg.(value & opt (some string) None & info [ "prepared-file" ] ~docv:"PATH" ~doc)
-;;
-
 let lease_handoff_cmd =
   let doc = "prepare a deployment under lease, then atomically exec the new runtime" in
   Cmd.v
@@ -1468,18 +1429,16 @@ let lease_handoff_cmd =
     Term.(
       ret
         (const
-           (fun base_path next_executable next_arguments prepared_file command ->
+           (fun base_path next_executable next_arguments command ->
               cmdliner_result
                 (handoff_base_path_lease
                    base_path
                    next_executable
                    next_arguments
-                   prepared_file
                    command))
          $ base_path
          $ next_executable
          $ next_arguments
-         $ prepared_file
          $ command))
 ;;
 

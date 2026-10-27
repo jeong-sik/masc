@@ -3,13 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FIXTURE_DIR="$(mktemp -d)"
-SLEEP_PID=""
 
 cleanup() {
-    if [ -n "$SLEEP_PID" ]; then
-        kill "$SLEEP_PID" 2>/dev/null || true
-        wait "$SLEEP_PID" 2>/dev/null || true
-    fi
     rm -rf "$FIXTURE_DIR"
 }
 trap cleanup EXIT
@@ -19,21 +14,16 @@ mkdir -p \
     "$FIXTURE_DIR/repo/config" \
     "$FIXTURE_DIR/repo/_build/default/bin" \
     "$FIXTURE_DIR/runtime/.masc/logs"
-cp "$ROOT_DIR/scripts/deploy.sh" "$FIXTURE_DIR/repo/scripts/deploy.sh"
 touch \
     "$FIXTURE_DIR/repo/_build/default/bin/main_eio.exe" \
     "$FIXTURE_DIR/repo/_build/default/bin/deployment_preflight_helper.exe"
 chmod +x \
-    "$FIXTURE_DIR/repo/scripts/deploy.sh" \
     "$FIXTURE_DIR/repo/_build/default/bin/main_eio.exe" \
     "$FIXTURE_DIR/repo/_build/default/bin/deployment_preflight_helper.exe"
-sleep 30 &
-SLEEP_PID=$!
-printf '%s\n' "$SLEEP_PID" > "$FIXTURE_DIR/runtime/.masc/masc-prod.pid"
 
-# The new build refuses the live runtime.toml before the stop step, so the
-# serving process keeps running and its editor can still change the value
-# (#39311). The helper here stands in for one that refuses the file.
+# The new build refuses the live runtime.toml before anything is replaced,
+# so the serving process keeps running and its editor can still change the
+# value (#39311). The helper here stands in for one that refuses the file.
 cp "$ROOT_DIR/scripts/check-runtime-deployment-preflight.sh" \
     "$FIXTURE_DIR/repo/scripts/check-runtime-deployment-preflight.sh"
 chmod +x "$FIXTURE_DIR/repo/scripts/check-runtime-deployment-preflight.sh"
@@ -54,30 +44,8 @@ esac
 HELPER
 chmod +x "$FIXTURE_DIR/repo/_build/default/bin/deployment_preflight_helper.exe"
 
-RUNTIME_CONFIG_ERR="$FIXTURE_DIR/deploy-runtime-config.err"
-if MASC_BASE_PATH="$FIXTURE_DIR/runtime" \
-    bash "$FIXTURE_DIR/repo/scripts/deploy.sh" --skip-build \
-    >"$FIXTURE_DIR/deploy-runtime-config.out" 2>"$RUNTIME_CONFIG_ERR"
-then
-    echo "expected a refused runtime.toml to reject deployment" >&2
-    exit 1
-fi
-
-if ! grep -q "nothing was stopped or installed" "$RUNTIME_CONFIG_ERR"; then
-    echo "deployment failed for a reason other than the runtime.toml check" >&2
-    cat "$RUNTIME_CONFIG_ERR" >&2
-    exit 1
-fi
-
-if ! kill -0 "$SLEEP_PID" 2>/dev/null; then
-    echo "deployment stopped the serving process before the runtime.toml check" >&2
-    exit 1
-fi
-
-echo "deploy preflight refuses runtime.toml before stopping prod"
-
-# scripts/install-local-build.sh runs the same check before it replaces any
-# binary, with the same refusing helper.
+# scripts/install-local-build.sh runs this check before it replaces any
+# binary.
 cp "$ROOT_DIR/scripts/install-local-build.sh" \
     "$FIXTURE_DIR/repo/scripts/install-local-build.sh"
 # The install asks for the three browser Add-on programs unless it is told
@@ -88,6 +56,7 @@ INSTALL_BINARIES=(
     "$FIXTURE_DIR/repo/_build/default/bin/masc_native_addon_launcher.exe"
     "$FIXTURE_DIR/repo/_build/default/bin/masc_browser_addon_worker.exe"
     "$FIXTURE_DIR/repo/_build/default/bin/masc_browser_process_owner.exe"
+    "$FIXTURE_DIR/repo/_build/default/bin/masc_exec_ssh_bootstrap.exe"
 )
 touch "${INSTALL_BINARIES[@]}"
 chmod +x "${INSTALL_BINARIES[@]}"
@@ -121,7 +90,7 @@ echo "local install refuses runtime.toml before replacing binaries"
 # refused in the same before-the-stop pass, with the helper standing in for one
 # that accepts runtime.toml and refuses the missing declaration. A helper that
 # accepts both passes the pass.
-echo "deploy preflight refuses a browser host with no Add-on declaration before stopping prod"
+echo "deploy preflight refuses a browser host with no Add-on declaration"
 
 write_helper() {
     cat > "$FIXTURE_DIR/repo/_build/default/bin/deployment_preflight_helper.exe" <<HELPER

@@ -263,6 +263,22 @@ let keeper_failure_cause = function
   | Keeper_registry.Exception _ -> "exception"
   | Keeper_registry.Operator_interrupt -> "operator_interrupt"
 
+(* Whether the Keeper's next dispatch would wait on a resting runtime path (a
+   provider quota window or a rate limit). It reads the walk the heartbeat
+   reads after a failed turn, so the list and the loop answer one question.
+   It is a reading beside [status], not part of it: a resting path is an
+   expected state, not a fault.
+
+   No release time is published. For a quota the provider did not date, the
+   walk's release is [now] plus a fallback, so it moves on every read and
+   would show a time nobody stated. *)
+let runtime_path_rest_json ~now assignment_id =
+  match Keeper_turn_driver.assignment_walk_rest ~now assignment_id with
+  | Keeper_turn_driver.Walk_head_serving { runtime_id } ->
+    `Assoc [ "status", `String "serving"; "runtime_id", `String runtime_id ]
+  | Keeper_turn_driver.Walk_waits_until { release_at = _; resting_runtime_id } ->
+    `Assoc [ "status", `String "resting"; "runtime_id", `String resting_runtime_id ]
+
 let keeper_list_row_json ~runtime_class config name =
   let effective_meta, persisted_meta =
     match read_meta_resolved config name with
@@ -381,6 +397,10 @@ let keeper_list_row_json ~runtime_class config name =
             ("runtime_blocker_summary", Json_util.string_opt_to_json runtime_blocker_summary);
             ("runtime_blocker_signature", Json_util.string_opt_to_json runtime_blocker_signature);
             ("runtime_lane_observation", runtime_lane_observation);
+            ( "runtime_path_rest"
+            , runtime_path_rest_json
+                ~now:now_ts
+                (Keeper_meta_contract.runtime_id_of_meta meta) );
             ("keepalive_running", `Bool keepalive_running);
             ("activation_mode", Keeper_activation_mode.to_yojson meta.activation_mode);
             ("runtime_id", `String (Keeper_meta_contract.runtime_id_of_meta meta));

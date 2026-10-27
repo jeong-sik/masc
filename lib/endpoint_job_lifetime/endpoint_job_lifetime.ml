@@ -24,7 +24,8 @@ let classify_original_error : R.error -> original_error = function
   | Recovery_unavailable _ | Lock_failed _ | Commit_unconfirmed _
   | Binding_mismatch | Invalid_request _ | Execution_identity_changed
   | Endpoint_replaced | Missing_original | Admission_incomplete | Corrupt_original _
-  | Launch_already_requested | Launch_intent_spent | Stale_record | Cleanup_failed _ -> Unavailable
+  | Launch_already_requested | Launch_intent_spent | Stale_record | Cleanup_failed _
+  | Unsupported_version _ -> Unavailable
 let classify_startup_error : S.error -> original_error = function
   | S.Registry_error error -> classify_original_error error
   | Launch_error _ | Output_error _ | Pipe_unavailable | Pipe_cleanup_failed _

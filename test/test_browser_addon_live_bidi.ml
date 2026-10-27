@@ -200,13 +200,13 @@ let scenario mode =
               (dispatch W.Retire=W.Receipt))
           else (
             check bool "actual owned queue answers on its original connection" true
-              (match issue () with W.Issue_result (Ok (B.Answered _)) -> true
+              (match issue () with W.Issue_result (Ok (B.Answered payload)) -> Yojson.Safe.Util.member "ok" payload=`Bool true
                | Issue_result (Ok (B.Lane_absent|Timed_out|Refused _|Rejected_before_effect _))
                | Issue_result (Error _) | Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _
                | Poll_result _|Receipt|Service_refusal _ -> false);
             if mode="ego-conflict" then (
               check bool "the original connection answers again after Ego conflict" true
-                (match issue () with W.Issue_result (Ok (B.Answered _)) -> true
+                (match issue () with W.Issue_result (Ok (B.Answered payload)) -> Yojson.Safe.Util.member "ok" payload=`Bool true
                  | Issue_result (Ok (B.Lane_absent|Timed_out|Refused _|Rejected_before_effect _))
                  | Issue_result (Error _) | Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _
                  | Poll_result _|Receipt|Service_refusal _ -> false);
@@ -290,7 +290,7 @@ let scenario mode =
         else if mode="normal" || mode="late" || mode="ego-conflict" then (
           check int "original browser is closed once" 1
             (List.length (List.filter (String.equal "browser.close") calls));
-          if mode="late" then check int "both commands reached the original Firefox" 2
+          if mode="late" || mode="ego-conflict" then check int "both commands reached the original Firefox" 2
             (List.length (List.filter (String.equal "browsingContext.getTree") calls)))
         else if mode="gate" then (
           check bool "no delayed input follows gate release" false (List.mem "browsingContext.getTree" calls);

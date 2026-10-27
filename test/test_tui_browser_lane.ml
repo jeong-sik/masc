@@ -637,6 +637,11 @@ let test_bidi_host_discovery () =
   expect "switching sources retains the last backend observation"
     ((switch_source Automation observed).unavailable=observed.unavailable
      && (choose_automatic observed).unavailable=observed.unavailable);
+  expect "connection-list refresh follows the current input owner"
+    (list_reload observed=Open_browser_list
+     && list_reload {observed with client_picker=Some 0}=Reload_picker
+     && list_reload {observed with url_draft=Some "https://example.test"}=Close_url_draft_then_open
+     && list_reload {observed with load=Loading (42,Read)}=Wait_until_idle);
   let renewed, _ = accept_clients ~generation:41 (Ok (found [firefox]))
       {observed with load=Loading (41, Discover Choose_client)} in
   expect "a new discovery replaces the previous worker's backend observation"

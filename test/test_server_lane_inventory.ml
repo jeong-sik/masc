@@ -443,7 +443,7 @@ let browser_rows_read_the_addon_observation () =
     (state (read (Ok None)) Browser_lane.Lane_name.Live
      = Inventory.Browser_clients (Browser_lane.Enabled, Inventory.Browser_addon_absent));
   let failed : Lane_addon_unready.t = {installation="browser-work";instance_id="browser-worker";package_id="browser";
-    declared_tools=[];service=Lane_addon_types.Browser_service;reason=Failed {Lane_addon_lifecycle.cause=Cleanup_unconfirmed "cleanup incomplete";first=None}} in
+    declared_tools=[];service=Lane_addon_types.Browser_service Lane_addon_types.Every_backend;reason=Failed {Lane_addon_lifecycle.cause=Cleanup_unconfirmed "cleanup incomplete";first=None}} in
   let refusal = Addon.Unready_installations (failed, []) in
   check bool "a failed browser Add-on shows the operator its failure" true
     (state (read (Error refusal)) Browser_lane.Lane_name.Live

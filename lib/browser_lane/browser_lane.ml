@@ -21,6 +21,7 @@ module Keyboard = Browser_keyboard
 module Upload_lease = Browser_upload_lease
 module Document = Browser_document
 module Lane_name = Browser_lane_name
+module Backend = Browser_backend
 module Lane_token = Browser_lane_token
 
 (* Shared default for ordinary browser transport requests, in core and workers. *)

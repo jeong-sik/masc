@@ -50,7 +50,7 @@ let not_running ~complete applications (first, rest) =
 let absence ~applications (declarations : Lane_addon_config.snapshot) =
   let browsers = List.filter (fun (d : Lane_addon_config.declaration) ->
     match d.package.worker_service with
-    | Lane_addon_types.Browser_service -> true
+    | Lane_addon_types.Browser_service _ -> true
     | Lane_addon_types.Mcp_tools -> false) declarations.declarations in
   match List.filter (fun (d : Lane_addon_config.declaration) -> d.enabled) browsers,
         browsers, declarations.complete with

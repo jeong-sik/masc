@@ -228,7 +228,10 @@ val call_exported_tool_with_principal : principal:Lane_addon_call_context.princi
   (Mcp_protocol.Mcp_types.tool_result, tool_call_error) result
 (** Trusted host boundary only: principal must come from verified credentials,
     never from caller-supplied tool arguments. [access] still controls visibility. *)
-type browser_service = private {instance_id:string;owner:Lane_addon_tool_export.owner}
+type browser_service = private {instance_id:string;owner:Lane_addon_tool_export.owner;
+  backends:Lane_addon_types.browser_backends}
+(** A running browser installation: its instance, the owner its export calls
+    run under, and the sources its package serves. *)
 type browser_reading = { services : browser_service list; unready : Lane_addon_unready.t list }
 val browser_service_reading : config:Workspace.config -> access:Lane_addon_sources.access -> browser_reading
 (** Usable browser services and, from the same read, the visible browser

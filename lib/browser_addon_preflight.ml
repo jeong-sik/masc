@@ -13,7 +13,7 @@ let is_browser_declaration (declaration : Lane_addon_config.declaration) =
   declaration.enabled
   &&
   match declaration.package.Lane_addon_types.worker_service with
-  | Lane_addon_types.Browser_service -> true
+  | Lane_addon_types.Browser_service _ -> true
   | Lane_addon_types.Mcp_tools -> false
 ;;
 

@@ -18,7 +18,7 @@ exception Host_request_withdrawn
 exception Action_persistence_failed of string
 type tool_export = Lane_addon_tool_export.t = private
   { owner : Lane_addon_tool_export.owner; instance_id : string; tool : Mcp_protocol.Mcp_types.tool }
-type browser_service = {instance_id:string;owner:Lane_addon_tool_export.owner}
+type browser_service = {instance_id:string;owner:Lane_addon_tool_export.owner;backends:Lane_addon_types.browser_backends}
 type browser_service_status = Browser_ready of browser_service
   | Browser_refresh_needed of browser_service | Browser_unavailable | Browser_retired
 type tool_call_error = Unavailable of string | Outcome_unknown of string
@@ -1620,11 +1620,19 @@ let backend ~store ~artifact_store () = match !override with
               | executable::arguments -> Ok {Lane_addon_native_worker.executable;arguments} in
             let env=match package.worker_service with
               | Mcp_tools -> None
-              | Browser_service -> Some (Browser_addon_environment.project (Unix.environment ())) in
+              | Browser_service _ -> Some (Browser_addon_environment.project (Unix.environment ())) in
             let* cleanup_context,live_ego=match package.worker_service with
               | Mcp_tools -> Ok (None,None)
-              | Browser_service -> offload (fun () ->
-                  let configuration=Runtime.browser_configuration () in
+              | Browser_service backends -> offload (fun () ->
+                  (* A package that names one source is given that source's
+                     table and no other; the browser package is given them all. *)
+                  let own backend table=if serves_backend backends backend then table else None in
+                  let configuration=Option.map (fun (configuration : Browser_configuration.t) ->
+                    {configuration with automation=own Browser_lane.Backend.Automation configuration.automation;
+                      stagehand=own Browser_lane.Backend.Stagehand configuration.stagehand;
+                      live_bidi=own Browser_lane.Backend.Owned_firefox configuration.live_bidi;
+                      live_ego=own Browser_lane.Backend.Ego configuration.live_ego})
+                    (Runtime.browser_configuration ()) in
                   (* Ego owns its browser; the SDK session follows the worker's
                      IPC lifetime. Its configuration rides the worker's arguments
                      without a separate browser-process cleanup descriptor. *)
@@ -1671,7 +1679,7 @@ let backend ~store ~artifact_store () = match !override with
                   let* () = retire () in Error (Lifecycle.Persistence_failed detail) in
             let* socket=match package.worker_service with
               | Mcp_tools -> Ok None
-              | Browser_service ->
+              | Browser_service _ ->
                   let directory=List.hd (Native_addon_lease.directories admission) in
                   (match Eio.Cancel.protect (fun () -> offload (fun () -> Browser_addon_socket.acquire ~admission ~directory)) with
                    | Ok socket -> Ok (Some socket)
@@ -1887,7 +1895,7 @@ let installation_exports ((e : entry), connection) =
    installations may export the same name. *)
 let serves_public_tools (service : Lane_addon_types.worker_service) = match service with
   | Mcp_tools -> true
-  | Browser_service -> false
+  | Browser_service _ -> false
 let public_reading (reading : live_reading) = ({
   ready = List.filter (fun ((e : entry), _) -> serves_public_tools e.package.worker_service) reading.ready;
   unready = List.filter (fun (unready : Lane_addon_unready.t) -> serves_public_tools unready.service) reading.unready;
@@ -2103,12 +2111,15 @@ let call_operator ~config ~access ~instance_id ~expected_incarnation ~arguments 
           raise exn))
 
 type browser_reading = { services : browser_service list; unready : Lane_addon_unready.t list }
+(* The browser service a running entry offers, named by its installation,
+   its export owner and the sources its package serves. *)
+let browser_service_of (e : entry) connection = match e.package.worker_service with
+  | Mcp_tools -> None
+  | Browser_service backends -> Some {instance_id=e.instance_id;owner=connection.export_owner;backends}
 let browser_reading (reading : live_reading) =
-  let services = reading.ready |> List.filter_map (fun ((e : entry), connection) ->
-    if serves_public_tools e.package.worker_service then None
-    else Some {instance_id=e.instance_id;owner=connection.export_owner}) in
+  let services = reading.ready |> List.filter_map (fun ((e : entry), connection) -> browser_service_of e connection) in
   let unready = reading.unready |> List.filter (fun (unready : Lane_addon_unready.t) ->
-    match unready.service with Browser_service -> true | Mcp_tools -> false) in
+    match unready.service with Browser_service _ -> true | Mcp_tools -> false) in
   { services; unready }
 let browser_service_reading ~config ~access = Eio_context.run_on_owner_domain (fun () ->
   browser_reading (current_reading ~config ~access))
@@ -2437,7 +2448,7 @@ let invoke_companion_export ~sw m ~config ~access ~principal ~companion_publish 
   let unavailable ()=Error (Lane_addon_call_context.Host_refusal (Unavailable "private companion is unavailable")) in
   let configuration=e.configuration in
   match e.package.execution,e.package.worker_service with
-  | Container _,(Mcp_tools|Browser_service) | Host_process _,Browser_service -> unavailable ()
+  | Container _,(Mcp_tools|Browser_service _) | Host_process _,Browser_service _ -> unavailable ()
   | Host_process _,Mcp_tools ->
     (match confirm_companion_owner m ~access ~principal e original configuration,Eio_context.get_net_opt () with
      | Error (),_ | Ok _,None -> unavailable ()
@@ -2726,15 +2737,19 @@ let browser_service_status ~config ~access ~instance_id = Eio_context.run_on_own
          | Detaching|Detached -> Browser_retired
          | Failed _ ->
              (match e.connection with
-              | Some connection when e.started && not (serves_public_tools e.package.worker_service) ->
-                  Browser_refresh_needed {instance_id;owner=connection.export_owner}
+              | Some connection when e.started ->
+                  (match browser_service_of e connection with
+                   | Some service -> Browser_refresh_needed service
+                   | None -> Browser_unavailable)
               | None|Some _ -> Browser_unavailable)
          | Attached|Observing ->
              if not e.started then Browser_unavailable else
              match e.connection with
-             | Some connection when not (serves_public_tools e.package.worker_service) ->
-                 Browser_ready {instance_id;owner=connection.export_owner}
-             | None|Some _ -> Browser_unavailable)
+             | Some connection ->
+                 (match browser_service_of e connection with
+                  | Some service -> Browser_ready service
+                  | None -> Browser_unavailable)
+             | None -> Browser_unavailable)
     | Some _ -> Browser_unavailable
     | None ->
         (match read_retained_bindings m with

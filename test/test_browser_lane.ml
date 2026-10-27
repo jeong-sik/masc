@@ -42,6 +42,23 @@ let test_colliding_tabs_are_isolated () = with_clients (fun sw connect ->
      = Error "request_not_owned_by_client");
   ignore (Lane.deliver_result ~client_id:firefox.client_id ~id:command.id ~payload:(payload "firefox"));
   answered result "firefox")
+(* A result that arrives after its caller stopped waiting is refused, and the
+   next command's caller gets only its own result: each issue has its own id. *)
+let test_late_result_reaches_no_other_waiter () = with_clients (fun sw connect ->
+  let client = connect Lane.Firefox in
+  let first = Eio.Fiber.fork_promise ~sw (fun () -> Lane.issue_for_actor ~actor:None
+    ~target:(target client.client_id) ~verb:Lane.Tabs_list ~timeout_sec:0.05) in
+  let late = take client in
+  check bool "the first caller stops waiting" true
+    (match Eio.Promise.await first with Ok (Ok Lane.Timed_out) -> true | _ -> false);
+  let second = Eio.Fiber.fork_promise ~sw (fun () -> Lane.issue_for_actor ~actor:None
+    ~target:(target client.client_id) ~verb:Lane.Tabs_list ~timeout_sec:1.) in
+  let current = take client in
+  check bool "the late result is refused" true
+    (Lane.deliver_result ~client_id:client.client_id ~id:late.id ~payload:(payload "late")
+     = Error "request_not_owned_by_client");
+  ignore (Lane.deliver_result ~client_id:client.client_id ~id:current.id ~payload:(payload "second"));
+  answered second "second")
 let test_single_and_stale_selection () = with_clients (fun _ connect ->
   check bool "no connected browser is its own answer" true
     (Lane.resolve_target ~verb:Lane.Tabs_list (Lane.Live_route None) = Error Lane.No_live_client);
@@ -383,6 +400,7 @@ let () = run "browser client routing" ["ownership", [
   test_case "optional document preserves existing work" `Quick test_optional_document_preserves_existing_work;
   test_case "colliding tab IDs and spoofed results" `Quick test_colliding_tabs_are_isolated;
   test_case "duplicate result after lost acknowledgement" `Quick test_duplicate_result_after_lost_ack_is_accepted;
+  test_case "a late result reaches no other waiter" `Quick test_late_result_reaches_no_other_waiter;
   test_case "single selection and stale identity" `Quick test_single_and_stale_selection;
   test_case "resolved target expires before dispatch" `Quick test_expired_resolved_target_is_pre_dispatch;
   test_case "expired queued actions do not execute" `Quick test_timed_out_queue_is_not_executed;

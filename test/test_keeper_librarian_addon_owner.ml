@@ -666,6 +666,56 @@ let test_actual_result_bridge_resumes_original_memory_lane ()=with_fixture (fun 
     check string "a result hint cannot consume another Keeper's pending inputs" unrelated_before
       (io (fun () -> Fs_compat.load_file unrelated_path))))
 
+let test_configuration_wake_completes_before_concurrent_settle () =
+  with_fixture (fun ~sw fixture ->
+  drive_original_terminal fixture;
+  let admission=match observed_originals fixture with
+    | [record,_] -> record
+    | [] | _::_::_ -> fail "expected one original admission" in
+  let scope="wake-settle-fixture" and request_id="another-original" in
+  io (fun () -> Owner.retain ~store:fixture.store ~scope ~request_id
+    ~installation_id:"fixture" ~package_id:"fixture" ~tool:"fixture" ~summary:`Null
+    ~request:(`Assoc ["input",`String "another original"]) |> owned);
+  let record=match io (fun () -> Owner.discover ~store:fixture.store ~scope |> owned) with
+    | [record] -> record | [] | _::_::_ -> fail "expected one other original" in
+  let gate=Stdlib.Mutex.create () and changed=Condition.create () and released=ref false in
+  let release ()=Stdlib.Mutex.protect gate (fun () -> released:=true; Condition.broadcast changed) in
+  let inventoried,inventoried_resolver=Eio.Promise.create () in
+  let scanning,scanning_resolver=Eio.Promise.create () in
+  let moving,moving_resolver=Eio.Promise.create () in
+  let restored=ref [] in
+  Fun.protect ~finally:release (fun () ->
+    Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds (fun () ->
+      Eio.Fiber.fork ~sw (fun () ->
+        let result=Server_librarian_addon_wake.For_testing.discover ~config:fixture.config ~store:fixture.store
+          ~event:Runtime.Configuration_observed
+          ~after_inventory:(fun () ->
+            Eio.Promise.resolve inventoried_resolver ();
+            Stdlib.Mutex.protect gate (fun () ->
+              while not !released do Condition.wait changed gate done))
+          ~on_original:(fun original -> restored:=original.Owner.request_id:: !restored) in
+        Eio.Promise.resolve scanning_resolver result);
+      Eio.Promise.await inventoried;
+      Eio.Fiber.fork ~sw (fun () ->
+        let result=Owner.settle ~store:fixture.store ~date:"2026-10-23" record in
+        Eio.Promise.resolve moving_resolver result);
+      let key=Filename.concat (Unix.realpath (Store.root fixture.store)) "tool-request-settlement-barrier" in
+      let rec await_mover () =
+        if File_lock_eio.For_testing.holders_and_waiters ~lock_path:key=2 then ()
+        else (Eio.Fiber.yield (); await_mover ()) in
+      await_mover ();
+      release ();
+      let keepers,refusals,original_keepers=Eio.Promise.await scanning |> get in
+      check bool "actual admission original enters the wake callback" true
+        (List.mem admission.request_id !restored);
+      check bool "actual nested Parts discovery keeps its Keeper" true (List.mem keeper_name keepers);
+      check (list string) "the original itself supplies its Keeper" [keeper_name] original_keepers;
+      check (list string) "the wake inventory has no refusals" [] refusals;
+      (match Eio.Promise.await moving with
+       | Ok () -> () | Error error -> fail (Owner.settle_error_to_string error));
+      check bool "the other original moves after wake discovery" true
+        (io (fun () -> Owner.settled ~store:fixture.store ~scope ~date:"2026-10-23" ~request_id |> owned)))))
+
 let test_configuration_wake_keeps_queued_keeper_when_global_inventory_is_invalid ()=
   with_fixture (fun ~sw:_ fixture ->
   let queue_path=Queue.path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name in
@@ -1018,7 +1068,31 @@ let test_attach_wakes_persisted_keeper_without_queue_or_original ()=
   check int "availability discovery fabricates no original" 0
     (io (fun () -> Owner.discover_all ~store:fixture.store |> owned |> List.length)))
 
-let ()=run "Actual Addon Librarian explicit-candidate owner" ["production",[
+(* The work under test can block inside a system-thread mutex. An Eio timeout
+   cannot join a truly deadlocked system thread, so run this one scenario in
+   its own process group and kill it if the outer hang guard expires. *)
+let run_guarded_scenario key =
+  let program = "import os,signal,subprocess,sys\n" ^
+    "env=os.environ.copy(); env[sys.argv[2]]='1'\n" ^
+    "child=subprocess.Popen([sys.argv[1]],env=env,start_new_session=True)\n" ^
+    "try: code=child.wait(timeout=180)\n" ^
+    "except subprocess.TimeoutExpired:\n" ^
+    " os.killpg(child.pid,signal.SIGKILL); child.wait(); sys.exit(124)\n" ^
+    "sys.exit(code if code>=0 else 128-code)\n" in
+  let exe = Unix.realpath Sys.executable_name in
+  let pid=Unix.create_process "python3" [|"python3";"-c";program;exe;key|]
+    Unix.stdin Unix.stdout Unix.stderr in
+  match snd (Unix.waitpid [] pid) with
+  | Unix.WEXITED 0 -> ()
+  | Unix.WEXITED 124 -> Alcotest.fail "scenario exceeded the process hang guard"
+  | Unix.WEXITED code -> Alcotest.fail (Printf.sprintf "scenario exited %d" code)
+  | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
+    Alcotest.fail (Printf.sprintf "scenario ended with signal %d" signal)
+
+let () =
+  if Sys.getenv_opt "MASC_TEST_46252_WAKE" = Some "1" then (
+    test_configuration_wake_completes_before_concurrent_settle (); exit 0);
+  run "Actual Addon Librarian explicit-candidate owner" ["production",[
   test_case "actual Memory lane, worker, HTTP, domain validation and receipt-backed ACK" `Quick test_actual_happy_path;
   test_case "unchanged semantic deferral preserves the same original" `Quick test_unchanged_deferred_does_not_remint;
   test_case "new tail rejudges the complete old sparse gap against current Memory" `Quick test_gap_and_new_tail_are_rejudged_together;
@@ -1032,6 +1106,8 @@ let ()=run "Actual Addon Librarian explicit-candidate owner" ["production",[
   test_case "missing epoch cannot hide or replace a dispatched original" `Quick (test_original_epoch_drift_cannot_remint Missing_epoch);
   test_case "replaced epoch cannot hide or replace a dispatched original" `Quick (test_original_epoch_drift_cannot_remint Replaced_epoch);
   test_case "actual result bridge resumes only the original serialized Memory lane" `Quick test_actual_result_bridge_resumes_original_memory_lane;
+  test_case "configuration wake completes its admission discovery before a concurrent settle" `Quick
+    (fun () -> run_guarded_scenario "MASC_TEST_46252_WAKE");
   test_case "configuration wake preserves queued Keepers despite a corrupt global original inventory" `Quick
     test_configuration_wake_keeps_queued_keeper_when_global_inventory_is_invalid;
   test_case "purge joins the actual provider after the Memory unit returned Pending" `Quick test_purge_joins_provider_after_memory_unit_returned;

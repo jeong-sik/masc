@@ -14,3 +14,10 @@ val install : sw:Eio.Switch.t -> config:Workspace.config -> unit
     or dispatch authority. No provider, commit, timer, retry
     policy, second owner or registry is introduced; shutdown fences copied
     callbacks and unsubscribes this exact registration. *)
+module For_testing : sig
+  val discover : config:Workspace.config -> store:Lane_addon_store.t ->
+    after_inventory:(unit -> unit) -> on_original:(Lane_addon_tool_request_owner.retained -> unit) ->
+    event:Lane_addon_runtime.owner_event -> ((string list * string list * string list), string) result
+  (** Run the bridge's discovery with observation hooks at the actual inventory
+      boundary and each restored original. Does not schedule a wake. *)
+end

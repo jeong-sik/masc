@@ -167,7 +167,7 @@ let load_scope ~store ~scope =
       let* original = load_listed ~store record in
       restore (original::found) rest in
   restore [] records
-let fold_all ~store ~init ~f =
+let fold_all_with ~after_inventory ~store ~init ~f =
   let* records_rev =
     Lane_addon_store.fold_tool_request_owner_inventory_all store ~init:[]
       ~f:(fun records ~directory_name ~file_name json ->
@@ -175,12 +175,14 @@ let fold_all ~store ~init ~f =
         Ok (record::records))
     |> unavailable
   in
+  after_inventory ();
   let rec restore acc = function
     | [] -> Ok acc
     | record::rest ->
       let* original = load_listed ~store record in
       restore (f acc original) rest in
   restore init (List.rev records_rev)
+let fold_all ~store ~init ~f = fold_all_with ~after_inventory:(fun () -> ()) ~store ~init ~f
 let discover_all ~store =
   let* records = fold_all ~store ~init:[] ~f:(fun records original -> original::records) in
   Ok (List.rev records)
@@ -257,23 +259,23 @@ let advance_events ~store ~expected ~events =
 let advance ~store ~expected ~event =
   advance_events ~store ~expected ~events:[event]
 module For_testing = struct
+  let fold_all = fold_all_with
   let advance_events = advance_events_with
 end
 type settle_error = Settle_unavailable of string | Settle_changed
 let settle ~store ~date (expected : Record.t) =
   let unavailable detail = Settle_unavailable detail in
-  let* stored = Lane_addon_store.load_tool_request_owner store ~scope:expected.scope ~request_id:expected.request_id
-    |> Result.map_error unavailable in
-  (* An absent record was settled already, or is in neither place, which the
-     store reports. *)
-  let* () = match stored with
-    | None -> Ok ()
+  let check_record = function
+    (* An absent record was settled already, or is in neither place, which the
+       store reports. *)
+    | None -> Ok true
     | Some json ->
-      let* stored = decode ~scope:expected.scope ~request_id:expected.request_id json
-        |> Result.map_error unavailable in
-      if same_listed stored expected then Ok () else Error Settle_changed in
-  Lane_addon_store.settle_tool_request store ~scope:expected.scope ~date ~request_id:expected.request_id
-    ~request_digest:expected.request_digest |> Result.map_error unavailable
+      let* stored = decode ~scope:expected.scope ~request_id:expected.request_id json in
+      Ok (same_listed stored expected) in
+  let* moved = Lane_addon_store.settle_tool_request store ~scope:expected.scope ~date
+      ~request_id:expected.request_id ~request_digest:expected.request_digest ~check_record
+    |> Result.map_error unavailable in
+  if moved then Ok () else Error Settle_changed
 let settled ~store ~scope ~date ~request_id =
   Lane_addon_store.tool_request_settled store ~scope ~date ~request_id
   |> Result.map_error (fun detail -> Store_unavailable detail)

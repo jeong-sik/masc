@@ -430,7 +430,7 @@ let narrow ~config ~request_id =
 type original = {id:Capture.Request_id.t;record:Owner.Record.t;summary:Capture.Summary.t}
 module Ids = Map.Make (String)
 let settle_original_with ~store ~date record =
-  Eio_unix.run_in_systhread (fun () -> Owner.settle ~store ~date record)
+  Owner.settle ~store ~date record
   |> Result.map_error (function
     | Owner.Settle_unavailable detail -> Unavailable detail
     | Owner.Settle_changed as error -> Uncertain (Owner.settle_error_to_string error))

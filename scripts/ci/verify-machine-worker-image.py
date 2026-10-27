@@ -115,6 +115,11 @@ def main():
             direct=worker.rpc('tools/call',{'name':'masc_'+machine+'_load','arguments':{}})
             assert direct.get('isError') is True
             success(worker.call(machine,'load',{'program':'hello.com'} if machine=='dos' else {'cart':MSX_FIXTURE_CART},controlled=machine=='dos'))
+            if machine=='dos':
+                # A call that runs the guest autosaves and marks the autosave as the
+                # running machine's; the worker is then killed with the machine running.
+                stepped=success(worker.call(machine,'step',{'steps':10},holder='fixture',controlled=True))
+                assert stepped['autosave']=={'saved':True}, stepped.get('autosave')
             screen=worker.call(machine,'screen');before=success(screen)
             png=next(c for c in screen['content'] if c['type']=='image')
             assert base64.b64decode(png['data']).startswith(bytes.fromhex('89504e470d0a1a0a'))

@@ -100,8 +100,10 @@ the result still carries what you asked for, plus
 
 After a restart the DOS worker restores `autosave` by itself before the first
 call: the game is where its last autosave left it, nobody holds the
-controller, and whoever moves the machine first takes it. Only `autosave` is
-restored, never `autosave-prev`.
+controller, and whoever moves the machine first takes it. It does this only
+when the machine was still running when the worker stopped. After an eject, a
+program exit, a fault or a failed autosave it starts with no machine. Only
+`autosave` is restored, never `autosave-prev`.
 
 With no machine loaded (after an eject, or after a restart with no
 `autosave`, or with one that would not restore), a call that needs a machine

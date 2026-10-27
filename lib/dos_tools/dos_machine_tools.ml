@@ -167,8 +167,19 @@ let lookup_fields ~key ~slot = function
   | Dos_lane.Autosave_unreadable reason -> [ (key, `Assoc [ ("unreadable", `String reason) ]) ]
 ;;
 
-let autosave_slots_fields { current; previous } =
-  lookup_fields ~key:"autosave" ~slot:Dos_lane.autosave_slot current
+(* [start_failure] is why this worker's start could not restore the autosave,
+   given only while the autosave is still the file it tried. Then the autosave
+   is named with that reason and without the command that resumes it: the
+   command is what just failed. *)
+let autosave_slots_fields ~start_failure { current; previous } =
+  (match start_failure, current with
+   | Some reason, Dos_lane.Autosave s ->
+     [ ( "autosave"
+       , `Assoc (checkpoint_status_fields s @ [ ("restore_failed_at_start", `String reason) ]) )
+     ]
+   | None, (Dos_lane.Autosave _ | Dos_lane.No_autosave | Dos_lane.Autosave_unreadable _)
+   | Some _, (Dos_lane.No_autosave | Dos_lane.Autosave_unreadable _) ->
+     lookup_fields ~key:"autosave" ~slot:Dos_lane.autosave_slot current)
   @ lookup_fields ~key:"previous_autosave" ~slot:Dos_lane.autosave_prev_slot previous
 ;;
 
@@ -213,19 +224,30 @@ type no_machine_guidance =
       { reason : string
       ; discards : Dos_lane.held_autosave option
       }
+  | Restore_failed_at_start of
+      { reason : string
+      ; discards : Dos_lane.held_autosave option
+      }
+      (* the autosave reads, but it is the file this worker could not
+         restore when it started: restoring it again would fail again *)
   | Restore_previous_autosave of Dos_lane.autosave_status
   | Unreadable_previous_autosave of string
   | Load_a_program
 
-let no_machine_guidance { current; previous } =
+(* [start_failure] is why this worker's start did not restore the autosave,
+   given only while the autosave is still the file it tried. *)
+let no_machine_guidance ~start_failure { current; previous } =
   let discards = held_of_lookup previous in
-  match current, previous with
-  | Dos_lane.Autosave autosave, _ -> Restore_autosave { autosave; discards }
-  | Dos_lane.Autosave_unreadable reason, _ -> Unreadable_autosave { reason; discards }
-  | Dos_lane.No_autosave, Dos_lane.Autosave status -> Restore_previous_autosave status
-  | Dos_lane.No_autosave, Dos_lane.Autosave_unreadable reason ->
+  match current, previous, start_failure with
+  | Dos_lane.Autosave _, _, Some reason -> Restore_failed_at_start { reason; discards }
+  | Dos_lane.Autosave autosave, _, None -> Restore_autosave { autosave; discards }
+  | Dos_lane.Autosave_unreadable reason, _, (Some _ | None) ->
+    Unreadable_autosave { reason; discards }
+  | Dos_lane.No_autosave, Dos_lane.Autosave status, (Some _ | None) ->
+    Restore_previous_autosave status
+  | Dos_lane.No_autosave, Dos_lane.Autosave_unreadable reason, (Some _ | None) ->
     Unreadable_previous_autosave reason
-  | Dos_lane.No_autosave, Dos_lane.No_autosave -> Load_a_program
+  | Dos_lane.No_autosave, Dos_lane.No_autosave, (Some _ | None) -> Load_a_program
 ;;
 
 let no_machine_message guidance =
@@ -257,6 +279,18 @@ let no_machine_message guidance =
        save would replace what %s holds (%s), so it needs %s."
       refusal (describe_held (Dos_lane.Held autosave)) current previous previous
       (describe_held held) consent
+  | Restore_failed_at_start { reason; discards = None } ->
+    Printf.sprintf
+      "%s. An autosave is there, but this worker could not restore it when it started: %s. \
+       masc_dos_load starts a program instead; the autosave then moves to %s and stays \
+       there."
+      refusal reason previous
+  | Restore_failed_at_start { reason; discards = Some held } ->
+    Printf.sprintf
+      "%s. An autosave is there, but this worker could not restore it when it started: %s. \
+       masc_dos_load starts a program instead; its first save would replace what %s holds \
+       (%s), so it needs %s."
+      refusal reason previous (describe_held held) consent
   | Unreadable_autosave { reason; discards = None } ->
     Printf.sprintf
       "%s. An autosave file is there but this server cannot read it: %s. masc_dos_load \
@@ -269,16 +303,71 @@ let no_machine_message guidance =
       refusal reason previous (describe_held held) consent
 ;;
 
+(* Which file is at the autosave slot. A write replaces the slot atomically
+   with a new file, so another device, inode, size or time is another
+   autosave. *)
+type file_identity =
+  { device : int
+  ; inode : int
+  ; size : int
+  ; modified : float
+  }
+
+let autosave_identity ~base_path =
+  match Unix.stat (Machine_checkpoint.path ~dir:(checkpoints_dir ~base_path) Dos_lane.autosave_slot) with
+  | st ->
+    Some
+      { device = st.Unix.st_dev
+      ; inode = st.Unix.st_ino
+      ; size = st.Unix.st_size
+      ; modified = st.Unix.st_mtime
+      }
+  | exception Unix.Unix_error _ -> None
+;;
+
+(* Why this worker's start did not restore the autosave, with the file it
+   tried, kept for the worker's lifetime. The worker's container keeps no
+   log, so a caller finds the reason in the no-machine answer. *)
+type start_failure =
+  { reason : string
+  ; tried : file_identity option
+  }
+
+let start_failure : start_failure option Atomic.t = Atomic.make None
+
+(* The start's reason, while the autosave is still the file it tried. *)
+let start_failure_on_current_autosave ~base_path =
+  match Atomic.get start_failure with
+  | None -> None
+  | Some { reason; tried = Some tried } when Some tried = autosave_identity ~base_path ->
+    Some reason
+  | Some { reason = _; tried = (Some _ | None) } -> None
+;;
+
+(* The start's reason once the autosave is another file: kept for the
+   worker's lifetime. While it is the same file, the autosave's own fields
+   carry it ([autosave_slots_fields]). *)
+let earlier_start_failure_fields ~on_current_autosave =
+  match on_current_autosave, Atomic.get start_failure with
+  | Some _, (Some _ | None) | None, None -> []
+  | None, Some { reason; tried = _ } -> [ ("restore_failed_at_start", `String reason) ]
+;;
+
 (* The answer to a call that needs a machine when none is loaded: after an
-   eject, or after a worker start that had no autosave to resume or one that
-   did not restore. It says what the two autosave slots hold and how to
-   resume. Every other refusal is unaffected. *)
+   eject, or after a worker start that had nothing to resume or could not
+   restore it. It says what the two autosave slots hold, how to resume, and
+   why the start did not, when it tried. Every other refusal is unaffected. *)
 let no_machine ~base_path ~tool_name ~start_time =
   let found = lookup_autosave_slots ~base_path in
-  let message = no_machine_message (no_machine_guidance found) in
+  let start_failure = start_failure_on_current_autosave ~base_path in
+  let message = no_machine_message (no_machine_guidance ~start_failure found) in
   Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Workflow_rejection
     ~effect_disposition:Tool_result.Proven_pre_effect
-    ~data:(reject_data_of_fields (autosave_slots_fields found)) message
+    ~data:
+      (reject_data_of_fields
+         (autosave_slots_fields ~start_failure found
+          @ earlier_start_failure_fields ~on_current_autosave:start_failure))
+    message
 ;;
 
 (* [masc_dos_load], or [masc_dos_restore] of a named slot, would start a machine
@@ -789,7 +878,10 @@ let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
     (* No name: the inventory, so the next call can name a program. Named
        here too: this is the first call a caller makes with nothing loaded,
        and an autosave is worth resuming rather than starting over. *)
-    let autosave = autosave_slots_fields (lookup_autosave_slots ~base_path) in
+    let autosave =
+      autosave_slots_fields ~start_failure:(start_failure_on_current_autosave ~base_path)
+        (lookup_autosave_slots ~base_path)
+    in
     (match programs_available ~base_path with
      | Ok names ->
        Tool_result.make_ok ~tool_name ~start_time
@@ -1302,9 +1394,10 @@ let handle_restore ~tool_name ~start_time ~base_path ~agent_name args =
 ;;
 
 (* A worker's first act: the machine the autosave holds, back where the last
-   process left it, with the controller free. The lane puts both outcomes
-   with a file there on its activity feed; the log line is for an operator
-   reading the worker's own output. *)
+   process left it, with the controller free. The lane puts a resume and a
+   failed one on its activity feed; a failure is also kept for the no-machine
+   answer, and the log line is for an operator reading the worker's own
+   output. *)
 let resume_autosave ~base_path =
   let resumed =
     off_domain (fun () ->
@@ -1313,10 +1406,13 @@ let resume_autosave ~base_path =
   in
   (match resumed with
    | Dos_lane.Resumed o ->
+     Atomic.set start_failure None;
      Log.DosLog.info "masc_dos resumed the autosave at %d steps" o.Dos_lane.steps
    | Dos_lane.Not_resumed error ->
-     Log.DosLog.warn "masc_dos the autosave was not resumed: %s" (Dos_lane.error_to_string error)
-   | Dos_lane.Nothing_to_resume | Dos_lane.Machine_loaded -> ());
+     let reason = Dos_lane.error_to_string error in
+     Atomic.set start_failure (Some { reason; tried = autosave_identity ~base_path });
+     Log.DosLog.warn "masc_dos the autosave was not resumed: %s" reason
+   | Dos_lane.Nothing_to_resume | Dos_lane.Machine_loaded -> Atomic.set start_failure None);
   resumed
 ;;
 

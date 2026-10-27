@@ -260,8 +260,14 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
 - 서버를 다시 켜거나 DOS 워커 이미지를 바꾸면, 새 워커는 첫 호출 전에 `autosave` 를 스스로 불러온다
   (`Dos_lane.resume_autosave`). 조종권은 비어 있고, 바로 위 규칙대로 다음에 움직이는 쪽이 가져간다.
   재시작 전에 누가 쥐고 있었는지는 따로 저장하지 않는다.
-  - 불러오는 것은 `autosave` 하나뿐이다. 파일이 없으면 기계 없이 시작한다. 파일이 있는데 불러오지 못하면
-    기계 없이 시작하고, 그 이유를 기계 활동 기록(`recent_activity`)에 남긴다. `autosave-prev` 로 대신 넘어가지 않는다.
+  - 불러오는 것은 `autosave` 하나뿐이다. `autosave-prev` 로 대신 넘어가지 않는다.
+  - 워커가 멈출 때 기계가 돌고 있었을 때만 불러온다. 이 사실은 `autosave` 옆 파일 `autosave.current` 로 남긴다.
+    돌던 기계가 자동 저장에 성공하면 쓰고, 새로 불러오기(load, 다른 슬롯 restore), 프로그램 종료,
+    자동 저장 실패, 오류(fault), eject 때 지운다. 이 파일은 사실의 기록이지 Keeper 를 막는 장치가 아니다.
+    이 파일이 없으면 eject 하거나 종료된 기계가 재시작 때 되살아나고, 종료된 프로그램의 낡은 파일이
+    더 새로운 게임 저장을 덮을 수 있다.
+  - 파일이 없거나 `autosave` 가 없으면 조용히 기계 없이 시작한다. 불러오지 못하면 기계 없이 시작하고,
+    그 이유를 기계 활동 기록(`recent_activity`)과 기계가 없을 때의 답(`restore_failed_at_start`)에 남긴다.
   - 이전 자동 저장을 버려도 되는지(`previous_autosave_consent`) 묻지 않는다. 불러온 기계는 재시작 전 판을
     그대로 이어 가서 `autosave` 만 덮어쓰고 `autosave-prev` 는 건드리지 않는다. 재시작 없이 계속 했을 때와
     같은 파일이 남으니 버려지는 것이 없다. 손으로 하는 `masc_dos_restore slot=autosave` 도 같은 길을 지나서

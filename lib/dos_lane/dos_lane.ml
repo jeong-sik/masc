@@ -219,6 +219,10 @@ type machine = {
          incarnation's own history over the one it was keeping. Every write
          after the first is this incarnation's own history replacing the last
          one, same slot. *)
+  mutable resume_marked : bool;
+      (* Whether this incarnation wrote the resume mark since it last removed
+         it, so a successful autosave writes the mark once, not on every call.
+         See [resume_mark_path]. *)
 }
 
 let state : machine option ref = ref None
@@ -286,6 +290,79 @@ let note_activity ~who action =
 
 let recent_activity () = Atomic.get activity_feed
 
+(* ---------- the resume mark ----------
+
+   A file beside the autosave that records one durable fact: the autosave holds
+   the running machine's latest state. A worker that starts restores the
+   autosave only when the mark is there ([resume_autosave]). It is a record,
+   not a gate on Keepers: nothing a Keeper asks for is refused by it. Without
+   it a restart cannot tell the autosave of a machine that was still running
+   from one a machine left behind when it was ejected, exited or faulted, and
+   would bring that machine back; an exited program's stale mounted file would
+   then overwrite a newer game save in its saves directory, a loss
+   uninterrupted play never has.
+
+   A machine writes the mark after a successful autosave, once until it next
+   removes it. It is removed whenever the autosave stops holding what the
+   machine is: a load or a restore of another slot installs a different
+   machine, the program exits, an autosave fails, a run ends without one (a
+   guest fault, a ledger that will not take a line, an exception), or the
+   machine is ejected. The name has no checkpoint extension, so no listing of
+   the directory shows it as a slot. *)
+let resume_mark_path ~dir = Filename.concat dir "autosave.current"
+
+let write_resume_mark st =
+  if st.resume_marked then Ok ()
+  else
+    match
+      Fs_compat.save_file_atomic (resume_mark_path ~dir:st.checkpoint_dir)
+        "the autosave holds the running machine's latest state\n"
+    with
+    | Ok () ->
+      st.resume_marked <- true;
+      Ok ()
+    | Error message -> Error message
+;;
+
+(* No file, or no directory for it to be in: either way there is no mark. *)
+let remove_resume_mark ~dir =
+  match Unix.unlink (resume_mark_path ~dir) with
+  | () -> Ok ()
+  | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> Ok ()
+  | exception Unix.Unix_error (error, _, path) -> Error (path ^ ": " ^ Unix.error_message error)
+;;
+
+(* [st]'s autosave no longer holds what [st] is. *)
+let forget_resume_mark st =
+  st.resume_marked <- false;
+  remove_resume_mark ~dir:st.checkpoint_dir
+;;
+
+let mark_not_removed message =
+  "the mark that lets a restart resume the autosave could not be removed, so a restart \
+   would bring that autosave back: "
+  ^ message
+;;
+
+(* A load, a restore of another slot, or an eject removes the mark before it
+   changes the machine. If the mark stays, a restart would bring back the
+   machine that call replaced, so the call is refused and nothing changes. *)
+let refused_for_mark ~nothing_was message =
+  Unreadable
+    (Printf.sprintf
+       "the mark that lets a restart resume the autosave could not be removed, so nothing \
+        was %s (a restart would bring back the machine running now): %s"
+       nothing_was message)
+;;
+
+(* [reason] with what removing the mark did, so a removal that fails is
+   reported beside what made it necessary and never dropped. *)
+let reason_and_forget st reason =
+  match forget_resume_mark st with
+  | Ok () -> reason
+  | Error message -> reason ^ "; " ^ mark_not_removed message
+;;
+
 let with_machine f =
   locked (fun () ->
     match !state with
@@ -349,19 +426,28 @@ let with_control ~who f =
         | exception exn ->
           (* Not one of the outcomes [running] types, so nothing says the call
              ran. The caller is about to be told it failed, and must not be
-             left holding the pad for a call it was told did nothing. *)
+             left holding the pad for a call it was told did nothing. The
+             guest may have moved without an autosave, so the mark goes; a
+             removal that fails goes on the activity feed, since the
+             exception is the answer. *)
           let backtrace = Printexc.get_raw_backtrace () in
           st.controller <- before;
+          (match forget_resume_mark st with
+           | Ok () -> ()
+           | Error message -> note_activity ~who (mark_not_removed message));
           Printexc.raise_with_backtrace exn backtrace
       in
-      (match result with
-       | Ok _ | Error (Unreadable _ | Guest_fault _) -> ()
-         (* the call ran: the machine may have moved *)
-       | Error
-           ( Activity_disabled | Activity_unobserved | No_machine | Invalid_request _ | Held_by _ | Unsaveable _ | Checkpoint_refused _
-           | Other_program _ | Would_discard_previous_autosave _ ) ->
-         st.controller <- before);
-      result)
+      match result with
+      | Ok _ -> result
+      (* The call ran and ended without an autosave: the machine may have
+         moved past it, so the autosave no longer holds what it is. *)
+      | Error (Unreadable message) -> Error (Unreadable (reason_and_forget st message))
+      | Error (Guest_fault message) -> Error (Guest_fault (reason_and_forget st message))
+      | Error
+          ( Activity_disabled | Activity_unobserved | No_machine | Invalid_request _ | Held_by _ | Unsaveable _ | Checkpoint_refused _
+          | Other_program _ | Would_discard_previous_autosave _ ) ->
+        st.controller <- before;
+        result)
 ;;
 
 (* ---------- observation ---------- *)
@@ -745,7 +831,11 @@ let keep_previous_autosave ~dir =
    call tries again. Every autosave after the copy is this incarnation's own
    history replacing its own history. *)
 let autosave_after st ~who =
-  if Dos_machine.exited st.m then Not_attempted
+  if Dos_machine.exited st.m then
+    (* Nothing to resume: the autosave is the program before it exited. *)
+    (match forget_resume_mark st with
+     | Ok () -> Not_attempted
+     | Error message -> Autosave_failed ("the program has exited, and " ^ mark_not_removed message))
   else begin
     let kept =
       if st.previous_kept then Ok () else keep_previous_autosave ~dir:st.checkpoint_dir
@@ -753,13 +843,20 @@ let autosave_after st ~who =
     match kept with
     | Error message ->
       Autosave_failed
-        (Printf.sprintf "the previous autosave could not be kept, so nothing was written: %s"
-           message)
+        (reason_and_forget st
+           (Printf.sprintf "the previous autosave could not be kept, so nothing was written: %s"
+              message))
     | Ok () ->
       st.previous_kept <- true;
       (match write_checkpoint st ~who ~dir:st.checkpoint_dir ~slot:autosave_slot with
-       | Ok () -> Autosaved
-       | Error e -> Autosave_failed (error_to_string e))
+       | Error e -> Autosave_failed (reason_and_forget st (error_to_string e))
+       | Ok () ->
+         (match write_resume_mark st with
+          | Ok () -> Autosaved
+          | Error message ->
+            Autosave_failed
+              ("the autosave was written, but the mark that lets a restart resume it was \
+                not, so a restart would start with no machine: " ^ message)))
   end
 ;;
 
@@ -1092,6 +1189,9 @@ let commit_load ~who prepared ~announce =
     else match !(prepared.load_machine) with
     | None -> Error (Invalid_request "DOS load preparation was already consumed")
     | Some (m, kept) ->
+      match remove_resume_mark ~dir:prepared.load_checkpoint_dir with
+      | Error message -> Error (refused_for_mark ~nothing_was:"loaded" message)
+      | Ok () ->
       prepared.load_machine := None;
       let ledger_path = Filename.concat prepared.load_ledger_dir "ledger.jsonl" in
       match
@@ -1102,7 +1202,8 @@ let commit_load ~who prepared ~announce =
       | () ->
         let st = {m; steps=0; program=prepared.load_program; ledger_path; entries=[];
           saves_dir=prepared.load_saves_dir; checkpoint_dir=prepared.load_checkpoint_dir; kept;
-          controller=Some who; incarnation=Random_id.uuid_v7 (); previous_kept=false} in
+          controller=Some who; incarnation=Random_id.uuid_v7 (); previous_kept=false;
+          resume_marked=false} in
         state := Some st;
         mark_change ();
         note_activity ~who (Printf.sprintf "load %s" prepared.load_program);
@@ -1148,11 +1249,16 @@ let eject ~who ~announce () =
       (match refuse_other st ~who with
        | Error e -> Error e
        | Ok () ->
-         state := None;
-         mark_change ();
-         note_activity ~who "eject";
-         announce ();
-         Ok ()))
+         (* An ejected machine stays restorable from its autosave, but a
+            restart does not bring it back. *)
+         (match forget_resume_mark st with
+          | Error message -> Error (refused_for_mark ~nothing_was:"ejected" message)
+          | Ok () ->
+            state := None;
+            mark_change ();
+            note_activity ~who "eject";
+            announce ();
+            Ok ())))
 ;;
 
 let pass ~who ~to_ ~announce =
@@ -1494,6 +1600,16 @@ let previous_kept_on_restore slot =
   | Previous_autosave | Named _ -> false
 ;;
 
+(* What a restore does to the resume mark before it installs the machine. The
+   autosave's own machine continues the history the mark records, so the mark
+   stays as it is. Any other restored machine is not what the autosave holds,
+   so the mark goes, and comes back with that machine's first autosave. *)
+let clear_mark_on_restore ~dir slot =
+  match classify_slot slot with
+  | Current_autosave -> Ok ()
+  | Previous_autosave | Named _ -> remove_resume_mark ~dir
+;;
+
 let prepare_restore ~dir ~slot ~previous_autosave ~ledger_dir ~saves_dir_of =
   let* () = require_activity () in
   let restore_slot_writes, restore_previous_writes =
@@ -1570,13 +1686,17 @@ let commit_admitted ~controller ~by prepared ~announce =
           Error (Invalid_request
             "the previous autosave changed during restore preparation; request the restore again")
         else
+        match clear_mark_on_restore ~dir:owned.restore_checkpoint_dir owned.restore_slot with
+        | Error message -> Error (refused_for_mark ~nothing_was:"restored" message)
+        | Ok () ->
         let meta = owned.restore_meta in
         let st = {m=owned.restore_machine; steps=meta.saved_steps; program=meta.saved_program;
           ledger_path=owned.restore_ledger_path; entries=owned.restore_entries;
           saves_dir=owned.restore_saves_dir;checkpoint_dir=owned.restore_checkpoint_dir;
           kept=owned.restore_kept;controller;
           incarnation=Random_id.uuid_v7 ();
-          previous_kept=previous_kept_on_restore owned.restore_slot} in
+          previous_kept=previous_kept_on_restore owned.restore_slot;
+          resume_marked=false} in
         match Sys.rename owned.restore_staged_ledger owned.restore_ledger_path with
         | exception Sys_error message -> Error (Unreadable message)
         | () ->
@@ -1612,38 +1732,46 @@ type resume =
 let worker_start = "worker start"
 
 (* The restore of the autosave a caller would make, admitted only with no
-   machine loaded: nobody asked, so nobody's machine is replaced. The consent
-   argument is never consulted for this slot ([check_restore_consent]). The
-   restore runs inside the worker before it serves, so an exception from it
-   is reported as the reason and never ends the worker; cancellation goes on
-   unwinding. *)
+   machine loaded: nobody asked, so nobody's machine is replaced. It is tried
+   only when the resume mark says the autosave holds the machine that was
+   running; with no mark, or no file, there is nothing to resume and nothing
+   to say. The consent argument is never consulted for this slot
+   ([check_restore_consent]). The restore runs inside the worker before it
+   serves, so an exception from it is reported as the reason and never ends
+   the worker; cancellation goes on unwinding. *)
 let resume_autosave ~dir ~ledger_dir ~saves_dir_of =
   let attempt () =
-    match
-      prepare_restore ~dir ~slot:autosave_slot ~previous_autosave:Keep_previous_autosave
-        ~ledger_dir ~saves_dir_of
-    with
-    | Error (Checkpoint_refused (Machine_checkpoint.No_slot _)) -> Nothing_to_resume
-    | Error
-        (( Activity_disabled | Activity_unobserved | No_machine | Invalid_request _
-         | Unreadable _ | Held_by _ | Guest_fault _ | Unsaveable _
-         | Checkpoint_refused
-             ( Machine_checkpoint.Unreadable _ | Machine_checkpoint.Other_machine _
-             | Machine_checkpoint.Other_format _ | Machine_checkpoint.Corrupt _ )
-         | Other_program _ | Would_discard_previous_autosave _ ) as error) ->
-      Not_resumed error
-    | Ok prepared ->
-      Fun.protect ~finally:(fun () -> discard_prepared_restore prepared) (fun () ->
-        locked (fun () ->
-          match require_activity () with
-          | Error error -> Not_resumed error
-          | Ok () ->
-            (match !state with
-             | Some _ -> Machine_loaded
-             | None ->
-               (match commit_admitted ~controller:None ~by:worker_start prepared ~announce:ignore with
-                | Ok observation -> Resumed observation
-                | Error error -> Not_resumed error))))
+    if not (Sys.file_exists (resume_mark_path ~dir)) then Nothing_to_resume
+    else if not (Sys.file_exists (Machine_checkpoint.path ~dir autosave_slot)) then
+      Nothing_to_resume
+    else
+      match
+        prepare_restore ~dir ~slot:autosave_slot ~previous_autosave:Keep_previous_autosave
+          ~ledger_dir ~saves_dir_of
+      with
+      | Error (Checkpoint_refused (Machine_checkpoint.No_slot _)) -> Nothing_to_resume
+      | Error
+          (( Activity_disabled | Activity_unobserved | No_machine | Invalid_request _
+           | Unreadable _ | Held_by _ | Guest_fault _ | Unsaveable _
+           | Checkpoint_refused
+               ( Machine_checkpoint.Unreadable _ | Machine_checkpoint.Other_machine _
+               | Machine_checkpoint.Other_format _ | Machine_checkpoint.Corrupt _ )
+           | Other_program _ | Would_discard_previous_autosave _ ) as error) ->
+        Not_resumed error
+      | Ok prepared ->
+        Fun.protect ~finally:(fun () -> discard_prepared_restore prepared) (fun () ->
+          locked (fun () ->
+            match require_activity () with
+            | Error error -> Not_resumed error
+            | Ok () ->
+              (match !state with
+               | Some _ -> Machine_loaded
+               | None ->
+                 (match
+                    commit_admitted ~controller:None ~by:worker_start prepared ~announce:ignore
+                  with
+                  | Ok observation -> Resumed observation
+                  | Error error -> Not_resumed error))))
   in
   let resumed =
     match attempt () with
@@ -1654,9 +1782,10 @@ let resume_autosave ~dir ~ledger_dir ~saves_dir_of =
   in
   (match resumed with
    | Not_resumed error ->
-     note_activity ~who:worker_start
-       ("restore " ^ Machine_checkpoint.slot_to_string autosave_slot ^ " failed: "
-        ^ error_to_string error)
+     locked (fun () ->
+       note_activity ~who:worker_start
+         ("restore " ^ Machine_checkpoint.slot_to_string autosave_slot ^ " failed: "
+          ^ error_to_string error))
    | Nothing_to_resume | Machine_loaded | Resumed _ -> ());
   resumed
 ;;

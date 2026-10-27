@@ -66,10 +66,14 @@ name that already holds a checkpoint replaces it and reports what it held in
 save to either is refused.
 
 A worker that starts restores `autosave` before its first call, with nobody
-holding the controller; whoever moves the machine first takes it. It never
-falls back to `autosave-prev`. With no `autosave`, or with one that does not
-restore, the worker starts with nothing loaded and its activity feed says
-why. `masc_dos_screen` and `masc_dos_load` with no program then say what the
+holding the controller; whoever moves the machine first takes it. It does so
+only when `checkpoints/autosave.current` is there: the running machine writes
+that file after a successful autosave and removes it on a load, a restore of
+another slot, an exit, a failed autosave, a fault and an eject. It never falls
+back to `autosave-prev`. Without the file, or with no `autosave`, the worker
+starts with nothing loaded. With an `autosave` that does not restore it also
+starts empty, and its activity feed and every no-machine answer
+(`restore_failed_at_start`) say why. `masc_dos_screen` and `masc_dos_load` with no program then say what the
 two autosave slots hold, under `autosave` and `previous_autosave`. Resume with
 `masc_dos_restore` and `slot` set to `autosave`, or to `autosave-prev` when the
 autosave is gone.

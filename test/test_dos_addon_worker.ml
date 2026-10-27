@@ -461,6 +461,46 @@ let test_a_handler_exception_does_not_end_the_worker () =
 (* Prints HI, then polls the BIOS key read: a boot settles and autosaves. *)
 let hello_com = "\xb4\x09\xba\x11\x01\xcd\x21\xb4\x00\xcd\x16\x09\xc0\x74\xf8\xcd\x20HI$"
 
+let dos_of ~base_path = Filename.concat (Common.masc_dir_from_base_path ~base_path) "dos"
+let checkpoints_of ~base_path = Filename.concat (dos_of ~base_path) "checkpoints"
+
+(* The worker before a restart, and the files it leaves when its process stops
+   while the machine runs: it booted hello.com, whose boot autosaved and
+   marked the autosave as the running machine's. In one process the machine
+   can only be dropped with an eject, which removes that mark, so the
+   checkpoint files are put back as the eject found them. A failure here must
+   not leave a held machine for the tests after it. *)
+let boot_then_stop_the_process ~base_path =
+  let dos = dos_of ~base_path and checkpoints = checkpoints_of ~base_path in
+  mkdir_p dos;
+  Dos_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
+  Fun.protect ~finally:(fun () -> eject_whoever_holds ~default:"before-restart") (fun () ->
+    let booted, _boot =
+      require
+        (Dos_lane.load ~who:"before-restart" ~ledger_dir:dos
+           ~saves_dir:(Filename.concat (Filename.concat dos "saves") "hello.com")
+           ~checkpoint_dir:checkpoints ~previous_autosave:Dos_lane.Keep_previous_autosave
+           ~program_name:"hello.com" ~program_bytes:hello_com ~files:[] ~announce:ignore)
+    in
+    let files =
+      Sys.readdir checkpoints |> Array.to_list |> List.map (Filename.concat checkpoints)
+      |> List.map (fun path -> (path, In_channel.with_open_bin path In_channel.input_all))
+    in
+    require (Dos_lane.eject ~who:"before-restart" ~announce:ignore ());
+    List.iter (fun (path, contents) -> write_file path contents) files;
+    booted)
+
+let worker_call client =
+  let raw name arguments = unwrap (Client.call_tool client ~name ~arguments ()) in
+  let call ?controller name arguments =
+    raw Lane_addon_call_context.tool_name
+      (Lane_addon_call_context.to_json_with_controller ~companion:None ~controller
+         ~principal:(Lane_addon_call_context.Keeper "fixture") ~tool:name ~arguments) in
+  let snapshot () = member "holder" (raw C.snapshot_tool (`Assoc [])) in
+  call, snapshot
+
+let free = {C.observed_holder=None; release=None; handoff_target=None}
+
 (* A worker that replaces another one, after a server restart or an image
    upgrade, resumes the autosave before its first call. Guests are not left
    with a no_machine refusal only a controller holder could answer: the screen
@@ -468,36 +508,87 @@ let hello_com = "\xb4\x09\xba\x11\x01\xcd\x21\xb4\x00\xcd\x16\x09\xc0\x74\xf8\xc
    move takes it. *)
 let test_a_worker_start_resumes_the_autosave () =
   let base_path = Filename.temp_dir "dos-addon-worker-resume-" "" in
-  let dos = Filename.concat (Common.masc_dir_from_base_path ~base_path) "dos" in
-  mkdir_p dos;
-  Dos_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
-  (* The worker before the restart: it booted a game, and the boot autosaved. *)
-  let booted, _boot =
-    require
-      (Dos_lane.load ~who:"before-restart" ~ledger_dir:dos
-         ~saves_dir:(Filename.concat (Filename.concat dos "saves") "hello.com")
-         ~checkpoint_dir:(Filename.concat dos "checkpoints")
-         ~previous_autosave:Dos_lane.Keep_previous_autosave ~program_name:"hello.com"
-         ~program_bytes:hello_com ~files:[] ~announce:ignore)
-  in
-  require (Dos_lane.eject ~who:"before-restart" ~announce:ignore ());
+  let booted = boot_then_stop_the_process ~base_path in
   with_worker ~base_path (fun client ->
-    let raw name arguments = unwrap (Client.call_tool client ~name ~arguments ()) in
-    let call ?controller name arguments =
-      raw Lane_addon_call_context.tool_name
-        (Lane_addon_call_context.to_json_with_controller ~companion:None ~controller
-           ~principal:(Lane_addon_call_context.Keeper "fixture") ~tool:name ~arguments) in
-    let snapshot () = member "holder" (raw C.snapshot_tool (`Assoc [])) in
+    let call, snapshot = worker_call client in
     let screen = call "masc_dos_screen" (`Assoc ["include_frame", `Bool false]) in
     check bool "the first call finds a machine" false (screen.is_error = Some true);
     check bool "the autosave's program" true (member "saves_name" screen = `String "hello.com");
     check bool "at the autosave's steps" true (member "steps" screen = `Int booted.Dos_lane.steps);
     check bool "with the controller free" true (member "controller" screen = `Null);
-    check bool "the host's controller snapshot agrees" true (snapshot () = `Null);
-    let stepped = call ~controller:{C.observed_holder=None; release=None; handoff_target=None}
-      "masc_dos_step" (`Assoc ["steps", `Int 10]) in
+    check bool "the lane holds the resumed machine" true
+      (match Dos_lane.screen () with
+       | Ok o -> o.Dos_lane.program = Some "hello.com" && o.Dos_lane.steps = booted.Dos_lane.steps
+       | Error _ -> false);
+    check bool "and the host's controller snapshot says nobody holds it" true (snapshot () = `Null);
+    let stepped = call ~controller:free "masc_dos_step" (`Assoc ["steps", `Int 10]) in
     check bool "a host-admitted caller moves it" false (stepped.is_error = Some true);
     check bool "and takes the free controller" true (snapshot () = `String "fixture"))
+
+(* An autosave the core accepts far enough to fail while decoding it: a valid
+   checkpoint and snapshot header, and the payload cut in half with its MD5
+   recomputed, so the checksums pass and only the decoding can refuse it.
+   The snapshot layout is the core's (Dos_snapshot): magic, format version,
+   core digest, payload MD5, payload. *)
+let cut_the_autosave_payload ~checkpoints =
+  let slot = Dos_lane.autosave_slot in
+  match Machine_checkpoint.read ~dir:checkpoints slot ~machine:Machine_checkpoint.Dos
+          ~format:Dos_lane.checkpoint_format with
+  | Error error -> fail (Machine_checkpoint.error_to_string error)
+  | Ok { Machine_checkpoint.header; meta; machine_bytes } ->
+    let digest_at = String.length "OCAML-DOS-SNAPSHOT\000" + 8 + 32 in
+    let payload_at = digest_at + 16 in
+    let payload = String.sub machine_bytes payload_at (String.length machine_bytes - payload_at) in
+    let cut = String.sub payload 0 (String.length payload / 2) in
+    (match Machine_checkpoint.write ~dir:checkpoints slot header ~meta
+             ~machine_bytes:(String.sub machine_bytes 0 digest_at ^ Digest.string cut ^ cut) with
+     | Ok () -> ()
+     | Error message -> fail message)
+
+let text_of result =
+  match result.S.content with
+  | S.TextContent { text; _ } :: _ -> text
+  | _ -> fail "the answer has no text"
+
+let mentions needle haystack =
+  let rec from i =
+    i + String.length needle <= String.length haystack
+    && (String.sub haystack i (String.length needle) = needle || from (i + 1)) in
+  from 0
+
+(* The worker's start must survive an autosave that will not restore: it
+   comes up with no machine, keeps serving, and says why where a caller
+   looks, since its container keeps no log. It does not send the caller back
+   to the restore that just failed. *)
+let test_a_worker_start_survives_an_autosave_that_will_not_restore () =
+  let base_path = Filename.temp_dir "dos-addon-worker-bad-autosave-" "" in
+  ignore (boot_then_stop_the_process ~base_path : Dos_lane.observation);
+  cut_the_autosave_payload ~checkpoints:(checkpoints_of ~base_path);
+  let programs = Filename.concat (dos_of ~base_path) "programs" in
+  mkdir_p programs;
+  write_file (Filename.concat programs "hello.com") hello_com;
+  with_worker ~base_path (fun client ->
+    let call, snapshot = worker_call client in
+    let screen = call "masc_dos_screen" (`Assoc ["include_frame", `Bool false]) in
+    check bool "the worker answers with no machine" true
+      (C.screen_error_of_meta screen._meta = Some C.Screen_no_machine);
+    let autosave = member "autosave" screen in
+    let reason = match Yojson.Safe.Util.member "restore_failed_at_start" autosave with
+      | `String reason -> reason
+      | _ -> fail "the autosave is not named with why the start could not restore it" in
+    (* Which way the decoder refused the file, for whoever reads the log. *)
+    Printf.printf "start-up restore of the cut autosave failed with: %s\n%!" reason;
+    check bool "and not offered back with the command that just failed" true
+      (Yojson.Safe.Util.member "resume" autosave = `Null);
+    check bool "nor in the message" false (mentions "masc_dos_restore slot=autosave" (text_of screen));
+    check bool "the activity feed carries the reason" true
+      (match Dos_lane.recent_activity () with
+       | newest :: _ -> String.ends_with ~suffix:reason newest.Machine_action_feed.action
+       | [] -> false);
+    check bool "nobody holds a controller" true (snapshot () = `Null);
+    let loaded = call ~controller:free "masc_dos_load" (`Assoc ["program", `String "hello.com"]) in
+    check bool "the worker keeps serving: a load goes through" false (loaded.is_error = Some true);
+    check bool "and the loader holds the new machine" true (snapshot () = `String "fixture"))
 
 let () = run "DOS standalone Add-on worker"
   ["stdio", [test_case "host admission, handoff, recovery and PNG" `Quick test_stdio_controller;
@@ -506,7 +597,9 @@ let () = run "DOS standalone Add-on worker"
              test_case "a core exception while booting is a completed load" `Quick
                test_a_core_exception_while_booting_is_a_completed_load;
              test_case "a worker start resumes the autosave" `Quick
-               test_a_worker_start_resumes_the_autosave];
+               test_a_worker_start_resumes_the_autosave;
+             test_case "a worker start survives an autosave that will not restore" `Quick
+               test_a_worker_start_survives_an_autosave_that_will_not_restore];
    "edge", [test_case "contained turns an exception into an error result" `Quick
               test_contained_turns_an_exception_into_an_error_result];
    "lane exceptions", [test_case "a raising call gives the pad back" `Quick

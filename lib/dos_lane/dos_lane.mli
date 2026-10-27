@@ -190,7 +190,8 @@ type autosave =
           resume *)
   | Autosaved  (** the machine is in the {!autosave_slot} checkpoint *)
   | Autosave_failed of string
-      (** the write did not reach disk, with the reason. The call itself
+      (** the write did not reach disk, or {!resume_mark_path} could not be
+          written or removed to match, with the reason. The call itself
           happened: the guest moved either way. *)
 
 type ran = {
@@ -330,8 +331,11 @@ val load :
     back into this module — the lock is not reentrant. *)
 
 val eject : who:string -> announce:(unit -> unit) -> unit -> (unit, error) result
-(** Drops the workspace machine. [announce] runs under the same lock as
-    {!load}'s, with the same restriction. *)
+(** Drops the workspace machine. Its autosave stays restorable with {!restore},
+    but {!resume_mark_path} is removed first, so a restart does not bring it
+    back; a mark that cannot be removed refuses the eject with [Unreadable].
+    [announce] runs under the same lock as {!load}'s, with the same
+    restriction. *)
 val release_left : holder:string -> announce:(unit -> unit) -> (bool, error) result
 (** Frees the controller if [holder] still has it, and says whether it did.
     For a holder whose Keeper stopped and so can never pass: the caller
@@ -598,8 +602,9 @@ val checkpoints : dir:string -> (Machine_checkpoint.listed list, error) result
 
 (** {2 Autosave}
 
-    A fixed slot. A worker resumes it as it starts ({!resume_autosave}); with
-    no machine loaded after that, the tool layer offers it back
+    A fixed slot. A worker resumes it as it starts when {!resume_mark_path}
+    says it holds the machine that was running ({!resume_autosave}); with no
+    machine loaded after that, the tool layer offers it back
     ({!lookup_autosave}). *)
 
 val autosave_slot : Machine_checkpoint.slot
@@ -628,34 +633,52 @@ val lookup_previous_autosave : dir:string -> autosave_lookup
 (** {!lookup_autosave} for {!autosave_prev_slot}. After a restart this can be
     all that is left of a campaign. *)
 
+val resume_mark_path : dir:string -> string
+(** The file beside the autosave in [dir] that records one durable fact: the
+    autosave holds the running machine's latest state. It is a record, not a
+    gate: no call is refused because of it. A machine writes it after a
+    successful autosave. It is removed when the autosave stops holding what
+    the machine is: a {!load}, a {!restore} of any slot but {!autosave_slot},
+    an exited program, a failed autosave, a run that ends without an autosave
+    (a guest fault, a ledger that will not take a line, an exception), and
+    {!eject}. A load, such a restore and an eject that cannot remove it are
+    refused with [Unreadable] and change nothing; the other removals that
+    fail are reported in the call's answer ({!ran.autosave}, the error) or,
+    for an exception, on {!recent_activity}. No checkpoint listing shows it. *)
+
 (** What {!resume_autosave} found and did. *)
 type resume =
-  | Nothing_to_resume  (** no file is at {!autosave_slot}; nothing is loaded *)
+  | Nothing_to_resume
+      (** no {!resume_mark_path}, or no file at {!autosave_slot}: the machine
+          that wrote the autosave was not running when the worker stopped.
+          Nothing is loaded and nothing is reported. *)
   | Machine_loaded  (** a machine is already loaded; it is left as it is *)
   | Resumed of observation  (** the autosave is the workspace machine; the controller is free *)
   | Not_resumed of error
-      (** a file is at {!autosave_slot} and did not restore, with the reason.
-          Nothing is loaded, the file is left as it was, and
-          {!autosave_prev_slot} is not tried. *)
+      (** the mark and the autosave are there, and the restore was refused
+          or raised, with the reason: machine activity is off or unobserved,
+          or the file will not read. Nothing is loaded, both autosave files
+          are left as they were, and {!autosave_prev_slot} is not tried. *)
 
 val resume_autosave :
   dir:string -> ledger_dir:string -> saves_dir_of:(string -> string) -> resume
 (** {!restore} of {!autosave_slot} that nobody asked for: a worker does this
     once as it starts, so a restart does not leave the shared machine
-    unloaded. It is the same preparation and commit, admitted only while no
-    machine is loaded, and the restored machine's controller is free, as
-    after {!pass} with [None]: whoever next moves the machine takes it.
-    [dir], [ledger_dir] and [saves_dir_of] are as in {!restore}.
+    unloaded. It is tried only when {!resume_mark_path} is there. It is the
+    same preparation and commit as {!restore}, admitted only while no machine
+    is loaded, and the restored machine's controller is free, as after
+    {!pass} with [None]: whoever next moves the machine takes it. [dir],
+    [ledger_dir] and [saves_dir_of] are as in {!restore}.
 
     As every restore of the autosave does, the resumed machine continues the
     history whose last save is that file: its autosaves replace
-    {!autosave_slot} and {!autosave_prev_slot} stays as uninterrupted play
-    leaves it, so nothing is asked.
+    {!autosave_slot}, {!autosave_prev_slot} stays as uninterrupted play
+    leaves it, and the mark stays. Nothing is asked.
 
-    A resume, and a file that did not restore with the reason, each put a
-    line on {!recent_activity}. An exception from the restore, other than
-    cancellation, is reported as that reason and does not escape. Nothing is
-    announced. *)
+    A resume, and a restore that was refused or raised with the reason, each
+    put a line on {!recent_activity}. An exception from the restore, other
+    than cancellation, is reported as [Unreadable] with the exception and does
+    not escape. Nothing is announced. *)
 
 val ledger : unit -> entry list
 (** Oldest first. Empty when no machine is loaded. *)

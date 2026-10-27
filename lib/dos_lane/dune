@@ -15,6 +15,7 @@
   masc.machine_live_publication
   masc.machine_configuration
   masc.machine_checkpoint
+  masc.fs_compat
   masc.machine_action_feed)
  (preprocess
   (pps ppx_deriving_yojson)))

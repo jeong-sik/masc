@@ -90,6 +90,8 @@ let named_of name =
 let slot_path fixture name = Machine_checkpoint.path ~dir:fixture.checkpoints (slot_of name)
 let autosave_path fixture = slot_path fixture "autosave"
 let prev_path fixture = slot_path fixture "autosave-prev"
+let mark_path fixture = Dos_lane.resume_mark_path ~dir:fixture.checkpoints
+let marked fixture = Sys.file_exists (mark_path fixture)
 
 let steps_in fixture name =
   match
@@ -238,7 +240,8 @@ let test_a_restore_of_the_autosave_leaves_autosave_prev_as_uninterrupted_play_do
       step ();
       check bool (name ^ ": the call saved") true (steps_in fixture "autosave" > autosaved);
       check string (name ^ ": autosave-prev is the campaign byte for byte") campaign
-        (Digest.file (prev_path fixture)))
+        (Digest.file (prev_path fixture));
+      check bool (name ^ ": the resume mark is there") true (marked fixture))
   in
   run ~name:"uninterrupted" ~between:(fun _fixture _autosaved -> ());
   run ~name:"restored" ~between:(fun fixture autosaved ->
@@ -409,8 +412,8 @@ let test_a_save_leaves_only_the_checkpoint () =
     ignore (play_a_campaign fixture);
     ignore (require (Dos_lane.save ~who ~dir:fixture.checkpoints ~slot:(named_of "kept")));
     let files = List.sort String.compare (Array.to_list (Sys.readdir fixture.checkpoints)) in
-    check (list string) "the slot and the autosave, no stray temp file"
-      [ "autosave.ckpt"; "kept.ckpt" ] files)
+    check (list string) "the slot, the autosave and its resume mark, no stray temp file"
+      [ "autosave.ckpt"; Filename.basename (mark_path fixture); "kept.ckpt" ] files)
 ;;
 
 (* The copy that keeps the previous autosave fails: autosave-prev cannot be
@@ -487,12 +490,7 @@ let test_a_faulted_boot_installs_the_machine_and_keeps_the_autosave () =
     check int "and the campaign is the autosave" campaign_steps (steps_in fixture "autosave"))
 ;;
 
-(* ---------- a worker's start ----------
-
-   A restart leaves the files on disk and no machine. In one process an eject
-   is that: it writes nothing. *)
-
-let restart () = require (Dos_lane.eject ~who ~announce:ignore ())
+(* ---------- a worker's start ---------- *)
 
 let resume fixture =
   Dos_lane.resume_autosave ~dir:fixture.checkpoints ~ledger_dir:fixture.directory
@@ -520,10 +518,57 @@ let loaded () =
 
 let controller () = (require (Dos_lane.screen ())).Dos_lane.controller
 
+let holder () =
+  match controller () with
+  | Some holder -> holder
+  | None -> who
+;;
+
+let nothing_to_resume ~name fixture =
+  (match resume fixture with
+   | Dos_lane.Nothing_to_resume -> ()
+   | (Dos_lane.Machine_loaded | Dos_lane.Resumed _ | Dos_lane.Not_resumed _) as other ->
+     failf "%s: %s" name (describe_resume other));
+  check bool (name ^ ": no machine") false (loaded ())
+;;
+
+(* What a restart finds when the process stopped with the machine running:
+   every file as it was. In one process a machine can only be dropped with an
+   eject, which also removes the mark a running machine keeps, so the
+   checkpoint directory is put back as the eject found it. *)
+let stop_the_process fixture =
+  let files =
+    Sys.readdir fixture.checkpoints
+    |> Array.to_list
+    |> List.map (Filename.concat fixture.checkpoints)
+    |> List.filter (fun path -> not (Sys.is_directory path))
+    |> List.map (fun path -> (path, In_channel.with_open_bin path In_channel.input_all))
+  in
+  require (Dos_lane.eject ~who:(holder ()) ~announce:ignore ());
+  List.iter (fun (path, contents) -> write_file path contents) files
+;;
+
+let load_program fixture ~name program_bytes =
+  Dos_lane.load ~who ~ledger_dir:fixture.directory ~saves_dir:fixture.saves
+    ~checkpoint_dir:fixture.checkpoints ~previous_autosave:Dos_lane.Keep_previous_autosave
+    ~program_name:name ~program_bytes ~files:[] ~announce:ignore
+;;
+
+let press key = require (Dos_lane.press ~who ~keys:[ key ] ~steps:100_000 ~until_ready:true)
+
+(* Reads keys forever, so every press settles, autosaves and is a ledger line.
+   org 0x100: wait: mov ah,0 / int 16h / jmp wait *)
+let keys_forever = "\xb4\x00\xcd\x16\xeb\xfa"
+
+(* Waits for a key, then runs lea ax,ax, which the core does not implement.
+   org 0x100: wait: mov ah,0 / int 16h / or ax,ax / jz wait / lea ax,ax *)
+let faults_after_a_key = "\xb4\x00\xcd\x16\x09\xc0\x74\xf8\x8d\xc0"
+
 let test_a_start_resumes_the_autosave_with_the_controller_free () =
   with_fixture (fun fixture ->
     let campaign_steps = play_a_campaign fixture in
-    restart ();
+    check bool "the running machine's autosave is marked" true (marked fixture);
+    stop_the_process fixture;
     let machine = resumed ~name:"a start over the campaign's autosave" (resume fixture) in
     check int "the machine is where the autosave left it" campaign_steps machine.Dos_lane.steps;
     check (option string) "nobody holds the controller" None machine.Dos_lane.controller;
@@ -533,30 +578,55 @@ let test_a_start_resumes_the_autosave_with_the_controller_free () =
     check (option string) "the first to move takes it" (Some "guest") (controller ()))
 ;;
 
+(* Both autosave files and the ledger are what the stopped process left, byte
+   for byte, and the resumed machine's next save is the one uninterrupted
+   play makes: the autosave changes, autosave-prev and the mark stay. *)
+let test_a_resume_leaves_both_autosaves_and_the_ledger_as_they_were () =
+  with_fixture (fun fixture ->
+    ignore (require (load_program fixture ~name:"keys.com" keys_forever));
+    ignore (press "a");
+    ignore (require (load_program fixture ~name:"keys.com" keys_forever));
+    ignore (press "b");
+    ignore (press "c");
+    let ledger_path = Filename.concat fixture.directory "ledger.jsonl" in
+    let read path = In_channel.with_open_bin path In_channel.input_all in
+    let autosave = Digest.file (autosave_path fixture)
+    and previous = Digest.file (prev_path fixture)
+    and ledger = read ledger_path in
+    stop_the_process fixture;
+    ignore (resumed ~name:"a start after two keys" (resume fixture));
+    check string "the autosave is byte for byte as it was" autosave
+      (Digest.file (autosave_path fixture));
+    check string "autosave-prev is byte for byte as it was" previous
+      (Digest.file (prev_path fixture));
+    check string "the ledger file is byte for byte as it was" ledger (read ledger_path);
+    check (list string) "the machine's ledger is this machine's keys" [ "b"; "c" ]
+      (List.map (fun e -> e.Dos_lane.key_name) (Dos_lane.ledger ()));
+    check bool "the mark stays" true (marked fixture);
+    ignore (press "d");
+    check bool "the next save replaces the autosave" true
+      (Digest.file (autosave_path fixture) <> autosave);
+    check string "and leaves autosave-prev as uninterrupted play does" previous
+      (Digest.file (prev_path fixture));
+    check bool "and the mark stays" true (marked fixture))
+;;
+
 (* No autosave: nothing comes back, and autosave-prev is not a fallback. *)
 let test_a_start_with_no_autosave_stays_unloaded () =
   with_fixture (fun fixture ->
-    (match resume fixture with
-     | Dos_lane.Nothing_to_resume -> ()
-     | (Dos_lane.Machine_loaded | Dos_lane.Resumed _ | Dos_lane.Not_resumed _) as other ->
-       failf "an empty directory: %s" (describe_resume other));
-    check bool "an empty directory loads nothing" false (loaded ());
+    nothing_to_resume ~name:"an empty directory" fixture;
     ignore (play_a_campaign fixture);
-    restart ();
+    stop_the_process fixture;
     Sys.rename (autosave_path fixture) (prev_path fixture);
     let previous = Digest.file (prev_path fixture) in
-    (match resume fixture with
-     | Dos_lane.Nothing_to_resume -> ()
-     | (Dos_lane.Machine_loaded | Dos_lane.Resumed _ | Dos_lane.Not_resumed _) as other ->
-       failf "only autosave-prev on disk: %s" (describe_resume other));
-    check bool "only autosave-prev loads nothing" false (loaded ());
+    nothing_to_resume ~name:"the mark and only autosave-prev" fixture;
     check string "and autosave-prev is untouched" previous (Digest.file (prev_path fixture)))
 ;;
 
 let test_an_unreadable_autosave_is_not_resumed_and_says_why () =
   with_fixture (fun fixture ->
     ignore (play_a_campaign fixture);
-    restart ();
+    stop_the_process fixture;
     (* The campaign is the previous autosave; the autosave is damaged. *)
     Sys.rename (autosave_path fixture) (prev_path fixture);
     write_file (autosave_path fixture) "damaged";
@@ -589,6 +659,113 @@ let test_a_start_leaves_a_loaded_machine_alone () =
        failf "a loaded machine: %s" (describe_resume other));
     check string "the same machine" before (incarnation ());
     check (option string) "and its holder" (Some who) (controller ()))
+;;
+
+(* ---------- the resume mark: machines that were not running stay down ---------- *)
+
+let test_an_ejected_machine_is_not_brought_back () =
+  with_fixture (fun fixture ->
+    ignore (play_a_campaign fixture);
+    require (Dos_lane.eject ~who ~announce:ignore ());
+    check bool "the eject removed the mark" false (marked fixture);
+    nothing_to_resume ~name:"a start after an eject" fixture;
+    match Dos_lane.lookup_autosave ~dir:fixture.checkpoints with
+    | Dos_lane.Autosave _ -> ()
+    | Dos_lane.No_autosave | Dos_lane.Autosave_unreadable _ ->
+      fail "the ejected machine's autosave stays restorable")
+;;
+
+let test_an_exited_program_is_not_brought_back () =
+  with_fixture (fun fixture ->
+    ignore (require (load fixture));
+    check bool "the booted machine is marked" true (marked fixture);
+    let _, ran = press "a" in
+    (match ran.Dos_lane.autosave with
+     | Dos_lane.Not_attempted -> ()
+     | Dos_lane.Autosaved | Dos_lane.Autosave_failed _ -> fail "the program should have exited");
+    check bool "the exit removed the mark" false (marked fixture);
+    stop_the_process fixture;
+    nothing_to_resume ~name:"a start after the program exited" fixture)
+;;
+
+let test_a_machine_whose_autosave_failed_is_not_brought_back () =
+  with_fixture (fun fixture ->
+    ignore (require (load fixture));
+    check bool "the booted machine is marked" true (marked fixture);
+    let autosave = In_channel.with_open_bin (autosave_path fixture) In_channel.input_all in
+    (* A directory where the autosave goes: the next write cannot replace it. *)
+    Sys.remove (autosave_path fixture);
+    Unix.mkdir (autosave_path fixture) 0o755;
+    let _, ran = require (Dos_lane.step ~who ~steps:1_000 ~until_ready:false) in
+    (match ran.Dos_lane.autosave with
+     | Dos_lane.Autosave_failed _ -> ()
+     | Dos_lane.Autosaved | Dos_lane.Not_attempted -> fail "the autosave should have failed");
+    check bool "the failure removed the mark" false (marked fixture);
+    Unix.rmdir (autosave_path fixture);
+    write_file (autosave_path fixture) autosave;
+    stop_the_process fixture;
+    nothing_to_resume ~name:"a start after a failed autosave" fixture)
+;;
+
+let test_a_faulted_machine_is_not_brought_back () =
+  with_fixture (fun fixture ->
+    ignore (require (load_program fixture ~name:"fault.com" faults_after_a_key));
+    check bool "the booted machine is marked" true (marked fixture);
+    (match Dos_lane.press ~who ~keys:[ "a" ] ~steps:100_000 ~until_ready:true with
+     | Error (Dos_lane.Guest_fault _) -> ()
+     | Error error -> fail (Dos_lane.error_to_string error)
+     | Ok _ -> fail "the program should have faulted on lea ax,ax");
+    check bool "the fault removed the mark" false (marked fixture);
+    stop_the_process fixture;
+    nothing_to_resume ~name:"a start after a fault" fixture)
+;;
+
+(* A restore of a named slot, then a restart before the restored machine's
+   first call: the autosave is the machine before the restore, so nothing
+   comes back, and the restored slot is still there to restore again. *)
+let test_a_restore_that_never_saved_is_not_brought_back () =
+  with_fixture (fun fixture ->
+    ignore (play_a_campaign fixture);
+    ignore (require (Dos_lane.save ~who ~dir:fixture.checkpoints ~slot:(named_of "quick")));
+    ignore (require (restore fixture (slot_of "quick")));
+    check bool "the restore removed the mark" false (marked fixture);
+    stop_the_process fixture;
+    nothing_to_resume ~name:"a start after a restore with no call" fixture;
+    check bool "the restored slot is still there" true (Sys.file_exists (slot_path fixture "quick")))
+;;
+
+let test_a_load_whose_boot_faulted_is_not_brought_back () =
+  with_fixture (fun fixture ->
+    ignore (play_a_campaign fixture);
+    (match load_program fixture ~name:"fault.com" faulting_program with
+     | Ok (_, Dos_lane.Boot_faulted _) -> ()
+     | Ok (_, Dos_lane.Booted _) -> fail "the boot should have faulted"
+     | Error error -> fail (Dos_lane.error_to_string error));
+    check bool "the load removed the mark" false (marked fixture);
+    stop_the_process fixture;
+    nothing_to_resume ~name:"a start after a faulted boot" fixture)
+;;
+
+(* A mark that cannot be removed would bring the running machine back after a
+   restart over whatever replaced it, so a load, a restore of another slot and
+   an eject are refused and change nothing. *)
+let test_a_mark_that_cannot_be_removed_refuses_the_change () =
+  with_fixture (fun fixture ->
+    ignore (play_a_campaign fixture);
+    ignore (require (Dos_lane.save ~who ~dir:fixture.checkpoints ~slot:(named_of "quick")));
+    let before = incarnation () in
+    Sys.remove (mark_path fixture);
+    Unix.mkdir (mark_path fixture) 0o755;
+    Fun.protect ~finally:(fun () -> Unix.rmdir (mark_path fixture)) (fun () ->
+      let refused name = function
+        | Error (Dos_lane.Unreadable _) ->
+          check string (name ^ ": the machine is the one from before") before (incarnation ())
+        | Error error -> failf "%s: unexpected %s" name (Dos_lane.error_to_string error)
+        | Ok () -> failf "%s went through with the mark still in place" name
+      in
+      refused "load" (Result.map ignore (load fixture));
+      refused "restore" (Result.map ignore (restore fixture (slot_of "quick")));
+      refused "eject" (Dos_lane.eject ~who ~announce:ignore ())))
 ;;
 
 let () =
@@ -640,12 +817,30 @@ let () =
     ; ( "worker start"
       , [ test_case "a start resumes the autosave with the controller free" `Quick
             test_a_start_resumes_the_autosave_with_the_controller_free
+        ; test_case "a resume leaves both autosaves and the ledger as they were" `Quick
+            test_a_resume_leaves_both_autosaves_and_the_ledger_as_they_were
         ; test_case "a start with no autosave stays unloaded" `Quick
             test_a_start_with_no_autosave_stays_unloaded
         ; test_case "an unreadable autosave is not resumed and says why" `Quick
             test_an_unreadable_autosave_is_not_resumed_and_says_why
         ; test_case "a start leaves a loaded machine alone" `Quick
             test_a_start_leaves_a_loaded_machine_alone
+        ] )
+    ; ( "resume mark"
+      , [ test_case "an ejected machine is not brought back" `Quick
+            test_an_ejected_machine_is_not_brought_back
+        ; test_case "an exited program is not brought back" `Quick
+            test_an_exited_program_is_not_brought_back
+        ; test_case "a machine whose autosave failed is not brought back" `Quick
+            test_a_machine_whose_autosave_failed_is_not_brought_back
+        ; test_case "a faulted machine is not brought back" `Quick
+            test_a_faulted_machine_is_not_brought_back
+        ; test_case "a restore that never saved is not brought back" `Quick
+            test_a_restore_that_never_saved_is_not_brought_back
+        ; test_case "a load whose boot faulted is not brought back" `Quick
+            test_a_load_whose_boot_faulted_is_not_brought_back
+        ; test_case "a mark that cannot be removed refuses the change" `Quick
+            test_a_mark_that_cannot_be_removed_refuses_the_change
         ] )
     ]
 ;;

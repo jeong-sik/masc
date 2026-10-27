@@ -1322,7 +1322,12 @@ const taskSpace = async space => ({
   page: () => ({info: async () => ({url: "https://app.slack.com/"})}),
   handOff: async () => { seen.push("handOff"); },
 });
-const takeOverTaskSpace = async id => { seen.push("takeOver " + id); return {ownership: "agent", userPage: () => %s}; };
+const takeOverTaskSpace = async id => { seen.push("takeOver " + id); return {
+ spaceId:id,name:"MASC login",ownership:"agent",userPage:()=>%s,
+ tabs:async()=>{seen.push("tabs");return [
+  {label:"p2",targetId:"T2",openedBy:"agent",active:false},
+  {label:null,targetId:"TU",openedBy:"unknown",active:false},
+  {label:"p1",targetId:"T1",openedBy:"agent",active:true}];}}; };
 |js} (Yojson.Safe.to_string (str ownership)) user_page
 
 let test_native_space_control_wait () =
@@ -1458,7 +1463,7 @@ const taskSpace=async id=>({spaceId:id,name:'SDK Space',ownership:%s,
   check int "uncertain input never dispatches a lifecycle call" before !native_calls
 
 let test_the_space_goes_to_the_operator_and_back () =
-  let ownership = ref "agent" and user_page = ref {|({label: "p2"})|} and output = ref "" in
+  let ownership = ref "agent" and user_page = ref {|({spaceId:51,label:"p2",targetId:"T2",openedBy:"agent"})|} and output = ref "" in
   let run ~window_s script =
     let sent = sent_of ~window_s script in
     match sent.step with
@@ -1483,12 +1488,25 @@ let test_the_space_goes_to_the_operator_and_back () =
   check string "and nothing in the space is called" "[]" (seen ());
   check bool "a second hand-off is refused the same way, with ego's owner" true
     (contains (before_effect "a second hand-off" (act Lane.Action.Hand_off)) "ego ownership: agentDelegatedToUser");
-  check string "taking it back names the tab that was active" {|{"action":"take_over","activeTabId":1}|}
-    (answer "take-over" (act Lane.Action.Take_over));
-  check string "by ego's takeOverTaskSpace on this space" {|["takeOver 51"]|} (seen ());
-  user_page := "({})";
-  check string "a tab the operator opened is not numbered" {|{"action":"take_over"}|}
-    (answer "take-over onto an operator tab" (act Lane.Action.Take_over));
+  let taken=Yojson.Safe.from_string (answer "take-over" (act Lane.Action.Take_over)) in
+  check int "taking it back names the native boundary Page" 1 (Yojson.Safe.Util.to_int (field "activeTabId" taken));
+  check int "takeover retains original Space" 51 (Yojson.Safe.Util.to_int (field "spaceId" taken));
+  check string "takeover preserves Space name" "MASC login" (text (field "spaceName" taken));
+  check bool "managed boundary provenance survives the Peer" true
+    (field "egoPage" taken=obj ["label",str "p2";"targetId",str "T2";"openedBy",str "agent"]);
+  check string "by ego's takeOverTaskSpace on this space and exact inventory" {|["takeOver 51","tabs"]|} (seen ());
+  user_page := "({spaceId:51,label:null,targetId:'TU',openedBy:'unknown'})";
+  let unmanaged=Yojson.Safe.from_string (answer "take-over onto an operator tab" (act Lane.Action.Take_over)) in
+  check int "an unmanaged boundary is remembered without adoption" 2 (Yojson.Safe.Util.to_int (field "activeTabId" unmanaged));
+  check bool "unmanaged target and origin survive the Peer" true
+    (field "egoPage" unmanaged=obj ["label",`Null;"targetId",str "TU";"openedBy",str "unknown"]);
+  user_page := "undefined";
+  let absent=Yojson.Safe.from_string (answer "take-over without a native boundary Page" (act Lane.Action.Take_over)) in
+  check bool "an absent boundary never selects current active tab" true
+    (field "activeTabId" absent=`Null && field "egoPage" absent=`Null);
+  check string "absent boundary does not enumerate tabs" {|["takeOver 51"]|} (seen ());
+  List.iter (fun invalid->user_page:=invalid;
+    check string "an invalid native Page is uncertain after takeover" "unknown" (failure_kind (act Lane.Action.Take_over))) ["null";"({})"];
   ownership := "agent";
   check bool "with the agent holding the space, a take-over is refused before any effect" true
     (contains (before_effect "a needless take-over" (act Lane.Action.Take_over)) "already holds");
@@ -2450,6 +2468,69 @@ const AsyncFunction=Object.getPrototypeOf(async function(){}).constructor;
         check (list string) "one persistent SDK session executes production wrappers without replay"
           ["space.open";"tabs.list";"page.native_workflow";"page.downloads";"page.downloads"] (List.rev !scripts))))
 
+let test_takeover_receipt_and_native_runner_preserve_pending_input () =
+  let module Takeover=Masc.Browser_ego_takeover in
+  let raw page=obj ["spaceId",`Int 51;"spaceName",str "Renamed Space";"page",page] in
+  let managed=obj ["label",str "p1";"targetId",str "T1";"openedBy",str "agent"] in
+  let unmanaged=obj ["label",`Null;"targetId",str "TU";"openedBy",str "unknown"] in
+  List.iter (fun page->match Takeover.decode ~expected_id:51 (raw page) with
+    | Ok receipt->check string "takeover decoder preserves observed Space name" "Renamed Space" receipt.space.name;
+      check bool "takeover decoder preserves exact boundary identity" true
+        (Option.map Masc.Browser_surface.ego_page_to_json receipt.page=(if page=`Null then None else Some page))
+    | Error detail->fail detail) [`Null;managed;unmanaged];
+  let malformed=[`Null;obj [];obj ["spaceId",`Int 52;"spaceName",str "Space";"page",managed];
+    obj ["spaceId",`Int 51;"spaceName",str " ";"page",managed];
+    obj ["spaceId",`Int 51;"spaceName",str "Space";"page",managed;"page",unmanaged];
+    obj ["spaceId",`Int 51;"spaceName",str "Space";"page",managed;"active",str "p1"];
+    raw (`Bool false);raw (obj []);
+    raw (obj ["label",`Null;"targetId",str " ";"openedBy",str "unknown"]);
+    raw (obj ["label",str "p1";"targetId",str "T1";"openedBy",str "user"]);
+    raw (obj ["label",str "p1";"targetId",str "T1";"openedBy",str "agent";"openedBy",str "unknown"])] in
+  List.iter (fun value->check bool "malformed takeover receipts cannot manufacture a boundary Page" true
+    (Result.is_error (Takeover.decode ~expected_id:51 value))) malformed;
+  let native_calls=ref 0 and bounded_calls=ref 0 and mode=ref `Node in
+  let run ~window_s script =
+    incr bounded_calls;
+    match (sent_of ~window_s script).step with
+    | "space.open"->answered (obj ["spaceId",`Int 51;"name",str "SDK Space";"ownership",str "agent"])
+    | "tabs.list"->answered tabs
+    | step->failf "takeover escaped the native runner into bounded %s" step in
+  let run_native script = match (sent_of ~window_s:0. script).step with
+    | "page.native_workflow"->Error (Peer.Unobserved "lost original holding input")
+    | "space.take_over"->
+      incr native_calls;
+      (match !mode with
+       | `Node->Ok (in_node (control_stand_in ~ownership:"agentDelegatedToUser"
+           ~user_page:"({spaceId:51,targetId:'TU',label:null,openedBy:'unknown'})" ^ script))
+       | `Receipt value->answered value
+       | `Lost->Error (Peer.Unobserved "takeover effect ran but response was lost"))
+    | step->failf "unexpected native step %s" step in
+  let peer=match Peer.open_space ~downloads:no_downloads ~run ~run_native ~now
+      ~space:(Browser_configuration.Named_space "masc") ~version:"fixture" ~capture_directory:(capture_directory ()) with
+    | Ok peer->peer | Error detail->fail detail in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let input=obj ["tabId",`Int 1;"expectedUrl",str "https://app.slack.com/";"maxChars",`Int 100;
+    "steps",`List [obj ["method",str "click";"selector",str "#held"]]] in
+  check string "original holding input becomes uncertain" "unknown"
+    (failure_kind (Peer.dispatch ~command_id:"original-before-takeover" peer ~verb:Live.Page_native_workflow input));
+  let pending=Peer.input_status peer in
+  check bool "original pending input was recorded" true
+    (match pending with Masc.Browser_ego_input.Uncertain value->value.command_id="original-before-takeover"
+      | Ready _->false);
+  let take ()=dispatch peer Live.Page_act (act_args (Lane.Action.Control Lane.Action.Take_over)) in
+  let before= !bounded_calls in
+  let taken=match take () with Ok value->value|Error _->fail "actual Node takeover wrapper failed" in
+  check bool "native wrapper preserves unmanaged provenance" true (field "egoPage" taken=unmanaged);
+  check bool "native takeover does not clear original pending input" true (Peer.input_status peer=pending);
+  List.iter (fun value->mode:=`Receipt value;
+    check string "invalid native DTO is an uncertain effect" "unknown" (failure_kind (take ()));
+    check bool "invalid takeover does not reset input" true (Peer.input_status peer=pending)) malformed;
+  mode:=`Lost;
+  check string "lost native takeover is never replay permission" "unknown" (failure_kind (take ()));
+  check bool "lost takeover retains the original pending generation" true (Peer.input_status peer=pending);
+  check int "each explicit takeover uses the native runner exactly once" (List.length malformed+2) !native_calls;
+  check int "takeover never installs a host deadline runner" before !bounded_calls
+
 let test_native_workflow_pointer_ownership () =
   List.iter (fun (method_,fields) -> List.iter (fun mode ->
     let issued=ref 0 in
@@ -2692,6 +2773,7 @@ let () =
     "ego", [
       test_case "Space status reads native metadata without Page or control effects" `Quick test_native_space_status;
       test_case "production workflow envelope preserves special JSON header keys" `Quick test_native_workflow_json_headers;
+      test_case "takeover receipts and native runner preserve pending input" `Quick test_takeover_receipt_and_native_runner_preserve_pending_input;
       test_case "saved fetch survives snapshot failure and reaches the download broker" `Quick test_saved_fetch_survives_snapshot_failure_and_reaches_download_broker;
       test_case "native drag preserves release and failure boundaries" `Quick test_native_drag_and_release;
       test_case "operator input assertion resumes the same peer without replay" `Quick test_operator_input_recovery;

@@ -21,6 +21,7 @@ let model_id = "direct-goal-wire-fixture"
 
 let prepare config =
   Direct.prepare
+    ~turn_ref:scheduled_admission_fixture_ref
     ~active_goal_summaries:(Prompt.active_goal_summaries ~config ~keeper_name:"direct-goal-wire")
     ~current_task:Keeper_world_observation_inputs.No_current_task
     ~held_task_skills:[] ~task_skill_surfaces:[]
@@ -203,6 +204,7 @@ let test_goal_survives_read_then_task_creation () =
   let goal = create_goal config in
   let measurement = observe config goal in
   let prepared = Direct.prepare
+      ~turn_ref:(Ids.Turn_ref.make ~trace_id:"goal-tool-loop-wire-fixture" ~absolute_turn:1)
       ~active_goal_summaries:(Prompt.active_goal_summaries ~config ~keeper_name:"goal-loop-wire")
       ~current_task:Keeper_world_observation_inputs.No_current_task ~held_task_skills:[]
       ~task_skill_surfaces:[] ~workspace_memory:Workspace_memory_ledger.Missing

@@ -199,11 +199,11 @@ POST·PUT·DELETE 와 `/mcp` 도구 호출은 `Background` 그대로다. 무거�
 | snapshot codec | 1 | 1 |
 | 읽기 풀 | 0 | 2 |
 | 배경 풀 | 14 | 나머지 |
-| agent_core codec 풀 | 14 | L2 측정으로 정한다 |
+| agent_core codec 풀 | 14 | L5 측정으로 정한다 |
 
 - 읽기 풀은 코어가 8개 이상이면 2, 그보다 적으면 1이다. 기다리지 않을 때 읽기 핸들러는 수 ms 안에 끝난다(1.1절 `limit=1` 최소 4 ms).
 - 배경 풀은 `max 1 (recommended - 2 - 읽기 - codec)` 이다. `MASC_EXECUTOR_DOMAIN_COUNT` 는 지금처럼 배경 풀 크기를 정한다. 읽기 풀과 codec 풀 크기는 따로 정한다.
-- agent_core codec 풀은 배경 풀과 합치지 않는다. 지금 `run_cpu` 는 호출자가 취소되면 worker 를 기다리지 않고 `Caller_cancelled`·`Runtime_released` 를 원자 변수로 알린다. masc 의 `Executor_pool_submission.submit` 은 worker 를 취소하고 `Cancel.protect` 아래에서 끝나기를 기다린다. 합치면 이 의미가 바뀌고, Keeper 실행 기록 쓰기(`writer_gate` 를 잡은 채 하는 비교)가 배경 FIFO 뒤에 선다. 크기만 예산 안으로 줄인다. L2 에서 codec 풀의 사용량(`Execution_runtime.stats`)을 `/health` 에 싣고 그 값으로 정한다.
+- agent_core codec 풀은 배경 풀과 합치지 않는다. 지금 `run_cpu` 는 호출자가 취소되면 worker 를 기다리지 않고 `Caller_cancelled`·`Runtime_released` 를 원자 변수로 알린다. masc 의 `Executor_pool_submission.submit` 은 worker 를 취소하고 `Cancel.protect` 아래에서 끝나기를 기다린다. 합치면 이 의미가 바뀌고, Keeper 실행 기록 쓰기(`writer_gate` 를 잡은 채 하는 비교)가 배경 FIFO 뒤에 선다. 크기만 예산 안으로 줄인다. 지금 `Execution_runtime.stats` 는 호출 횟수(`pool_requested`, `reentrant_inline`, `caller_cancelled`)만 세서 크기를 정하기에 모자란다. L5 에서 제출부터 시작까지의 대기와 실행 시간을 재서 `/health` 에 싣고, 그 값으로 정한다.
 - 출처를 모르는 domain 1개는 L3 에서 찾는다.
 
 ### 3.6 풀 대기 시간을 잰다
@@ -263,10 +263,10 @@ goal `goal-read-api-p99-300-keepers-20261027` 의 판정 표다. 행마다 측�
 | 층 | 내용 | 시험 |
 |---|---|---|
 | L1 | 이 RFC 와 측정 기록 | — |
-| L2 | `Pool_lane` 표시(풀 선택은 그대로), `Server_bootstrap_http` 의 GET/HEAD 표시(HTTP/1·HTTP/2), lane 별 풀 대기 히스토그램, codec 풀 사용량을 `/health` 에 싣기 | 5.2 의 표시 시험, 히스토그램 구간 경계 |
+| L2 | `Pool_lane` 표시(풀 선택은 그대로), `Server_bootstrap_http` 의 GET/HEAD 표시(HTTP/1·HTTP/2), lane 별 풀 대기·실행 히스토그램을 `/health` 에 싣기 | 5.2 의 표시 시험, 히스토그램 구간 경계 |
 | L3 | 읽기 풀 생성과 domain 예산, 제출 함수 네 개의 풀 선택, 출처 모를 domain 찾기 | 5.1, 5.2 의 풀 선택 시험 |
 | L4 | `Dashboard_cache` 계산의 lane, 캐시 대기를 풀 job 밖으로 | 5.2 의 캐시 시험 |
-| L5 | codec 풀 크기를 L2 값으로 정하기 | 예산 합이 코어 수 이하 |
+| L5 | codec 풀의 대기·실행 시간을 `/health` 에 싣고 그 값으로 크기 정하기 | 예산 합이 코어 수 이하 |
 | L6 | 수용 측정 기록, status 갱신 | 5.3 |
 
 계측(L2)을 맨 앞에 둔다. 1.1절 수정 후 측정에서 공유 풀은 6초 sample 동안 쉬고 있었고, main domain 의 lock 대기가 더 컸다. L2 로 운영 서버의 풀 대기를 한 시간 재서, 읽기의 풀 대기 p99 가 목표(100 ms)를 넘을 때 L3 이후를 진행한다. 넘지 않으면 L3 이후는 보류하고 main domain 쪽을 먼저 고친다.

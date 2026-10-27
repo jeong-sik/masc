@@ -98,8 +98,9 @@ let async_request ?(ownership = Decode.Async_runtime_owned) phase id : Decode.as
   ; ar_ownership = ownership
   }
 
-let row ?(last_activity_at = Some 0.) ?turn ?waiting ?(waiting_unavailable = false) ?approval ?task
-    ?(open_questions = 0) ?(async_requests = []) ?(paused = false) ?health name : Model.row =
+let row ?(last_activity_at = Some 0.) ?turn ?waiting ?(waiting_unavailable = false) ?approval
+    ?(awaiting_verification = false) ?(open_questions = 0) ?(async_requests = [])
+    ?(paused = false) ?health name : Model.row =
   let liveness = match health with
     | None -> Control.Unobserved
     | Some health -> Control.Present (runtime health name)
@@ -110,7 +111,8 @@ let row ?(last_activity_at = Some 0.) ?turn ?waiting ?(waiting_unavailable = fal
   ; waiting = (if waiting_unavailable then Model.Waiting_unavailable else
       match waiting with Some row -> Model.Waiting_observed row | None -> Model.Waiting_unobserved)
   ; approval
-  ; task
+  ; task = None
+  ; awaiting_verification
   ; open_questions
   ; async_requests
   ; last_activity_at
@@ -140,7 +142,7 @@ let test_priority_orders_attention_activity_waiting_then_inactive () =
     ; row ~last_activity_at:(Some 100.) ~approval:(approval "held") "held"
     ; row ~last_activity_at:(Some 70.) ~turn:Decode.Keeper_turn_idle ~waiting:(waiting ~state:Model.Keeper_waiting_idle "idle") "idle"
     ; row ~last_activity_at:(Some 100.) ~open_questions:1 "question"
-    ; row ~last_activity_at:(Some 80.) ~waiting:(waiting "verify") ~task:(verification_task "verify") "verify"
+    ; row ~last_activity_at:(Some 80.) ~waiting:(waiting "verify") ~awaiting_verification:true "verify"
     ; row ~last_activity_at:(Some 90.)
         ~async_requests:[async_request Decode.Async_running "a"; async_request ~ownership:Decode.Async_ownership_unknown Decode.Async_running "b"] "async"
     ; row ~last_activity_at:(Some 100.) ~health:(health "failing") "failure"
@@ -197,7 +199,7 @@ let test_streaming_keeps_async_and_schedule_badges () =
 
 let test_delegate_and_verification_remain_distinct_badges () =
   let value =
-    row ~task:(verification_task "row")
+    row ~awaiting_verification:true
       ~waiting:(waiting ~items:[waiting_item ~producer:Model.Wake_keeper_delegate ()] "row")
       "row"
   in
@@ -281,7 +283,7 @@ let test_waiting_summary_counts_primary_reasons_and_background_work () =
     ; row
         ~waiting:(waiting ~items:[ waiting_item ~producer:Model.Wake_keeper_delegate () ] "delegate")
         "delegate"
-    ; row ~task:(verification_task "verify") "verify"
+    ; row ~awaiting_verification:true "verify"
     ; row ~turn:streaming
         ~async_requests:[ async_request Decode.Async_running "active-running" ]
         "active"
@@ -292,6 +294,52 @@ let test_waiting_summary_counts_primary_reasons_and_background_work () =
     (summary.tool = 1 && summary.model = 1 && summary.external_wait = 1
      && summary.delegate = 1 && summary.verification = 1);
   Alcotest.(check int) "only waiting rows contribute background async running" 2 summary.background
+
+let task_with_status id status : Decode.task =
+  { id; title = id; status; priority = 3; goal_ids = [] }
+
+let test_a_submitter_is_found_by_assignee () =
+  let tasks =
+    [ verification_task "alpha"
+    ; task_with_status "task-beta" (Masc_domain.InProgress { assignee = "beta"; started_at = "1" })
+    ; task_with_status "task-gamma"
+        (Masc_domain.Done { assignee = "gamma"; completed_at = "2"; notes = None })
+    ; task_with_status "task-open" Masc_domain.Todo
+    ]
+  in
+  Alcotest.(check bool) "the assignee of an awaiting task holds one" true
+    (Model.holds_awaiting_verification ~keeper_name:"alpha" tasks);
+  Alcotest.(check bool) "an assignee whose task is still in progress does not" false
+    (Model.holds_awaiting_verification ~keeper_name:"beta" tasks);
+  Alcotest.(check bool) "an assignee whose task is done does not" false
+    (Model.holds_awaiting_verification ~keeper_name:"gamma" tasks);
+  Alcotest.(check bool) "a Keeper without a task does not" false
+    (Model.holds_awaiting_verification ~keeper_name:"delta" tasks);
+  Alcotest.(check bool) "an empty task list holds none" false
+    (Model.holds_awaiting_verification ~keeper_name:"alpha" [])
+
+let test_a_submitter_without_a_current_task_waits_for_its_verdict () =
+  let submitter =
+    row ~turn:Decode.Keeper_turn_idle
+      ~waiting:(waiting ~state:Model.Keeper_waiting_idle "row")
+      ~awaiting_verification:true "row"
+  in
+  Alcotest.(check bool) "an idle submitter waits for its verdict" true
+    (Model.primary_activity_of_row submitter = Model.Verifying);
+  Alcotest.(check bool) "it sits in the waiting group" true
+    (Model.group_of_row submitter = Model.Waiting);
+  Alcotest.(check bool) "the verification badge shows" true
+    (List.mem Model.Badge_verification (Model.badges_of_row submitter));
+  let working = row ~turn:streaming ~awaiting_verification:true "working" in
+  Alcotest.(check bool) "active work stays primary" true
+    (Model.primary_activity_of_row working = Model.Streaming);
+  Alcotest.(check bool) "the verification badge still shows beside it" true
+    (List.mem Model.Badge_verification (Model.badges_of_row working));
+  let idle =
+    row ~turn:Decode.Keeper_turn_idle ~waiting:(waiting ~state:Model.Keeper_waiting_idle "idle") "idle"
+  in
+  Alcotest.(check bool) "without a submitted task the Keeper stays idle" true
+    (Model.primary_activity_of_row idle = Model.Idle)
 
 let test_group_counts () =
   let rows =
@@ -318,6 +366,9 @@ let () =
         ; Alcotest.test_case "async phases and preparing remain distinct" `Quick test_async_phases_and_preparing_remain_distinct
         ; Alcotest.test_case "waiting summary counts reasons and background work" `Quick
             test_waiting_summary_counts_primary_reasons_and_background_work
+        ; Alcotest.test_case "a submitter is found by assignee" `Quick test_a_submitter_is_found_by_assignee
+        ; Alcotest.test_case "a submitter without a current task waits for its verdict" `Quick
+            test_a_submitter_without_a_current_task_waits_for_its_verdict
         ; Alcotest.test_case "group counts" `Quick test_group_counts
         ] )
     ]

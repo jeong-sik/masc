@@ -82,6 +82,7 @@ type row = {
   waiting : waiting_reading;
   approval : Masc.Tui_decode.keeper_tool_approval option;
   task : Masc.Tui_decode.task option;
+  awaiting_verification : bool;
   open_questions : int;
   async_requests : Masc.Tui_decode.async_request_row list;
   last_activity_at : float option;
@@ -135,12 +136,18 @@ let health_reading row =
   Option.map Masc.Tui_decode.keeper_health_reading
     (Masc_tui_keeper_control.health row.reading)
 
-let has_awaiting_verification row =
-  match row.task with
-  | Some { Masc.Tui_decode.status = Masc_domain.AwaitingVerification _; _ } -> true
-  | Some { status = Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _
-           | Masc_domain.Done _ | Masc_domain.Cancelled _; _ }
-  | None -> false
+(* [row.task] follows the producer's current task, and submitting a task clears
+   it, so it cannot be relied on to find a task that awaits its verdict. The
+   task list keeps that task with the producer as [assignee]. An empty list
+   (backlog unread or failed) gives false. *)
+let holds_awaiting_verification ~keeper_name tasks =
+  List.exists
+    (fun { Masc.Tui_decode.status; _ } ->
+      match status with
+      | Masc_domain.AwaitingVerification { assignee; _ } -> String.equal assignee keeper_name
+      | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _
+      | Masc_domain.Done _ | Masc_domain.Cancelled _ -> false)
+    tasks
 
 let async_counts requests =
   List.fold_left
@@ -186,7 +193,7 @@ let primary_activity_of_row row =
       else if waiting_state row = Some Keeper_waiting_deferred then Deferred
       else if waiting_state row = Some Keeper_waiting_busy then Running
       else if waiting_has_producer Wake_keeper_delegate items then Delegating
-      else if waiting_has_producer Wake_completion_authority items || has_awaiting_verification row then
+      else if waiting_has_producer Wake_completion_authority items || row.awaiting_verification then
         Verifying
       else if queued > 0 || cancelling > 0 then External_waiting
       else if waiting_state row = Some Keeper_waiting_blocked then External_waiting
@@ -205,7 +212,7 @@ let badges_of_row row =
   ; (if queued > 0 then Some (Badge_async_queued queued) else None)
   ; (if cancelling > 0 then Some (Badge_async_cancelling cancelling) else None)
   ; (if waiting_has_producer Wake_keeper_delegate items then Some Badge_delegate else None)
-  ; (if waiting_has_producer Wake_completion_authority items || has_awaiting_verification row then
+  ; (if waiting_has_producer Wake_completion_authority items || row.awaiting_verification then
        Some Badge_verification
      else None)
   ; (if waiting_has_source Waiting_source_schedule_waiting items then Some Badge_schedule else None)

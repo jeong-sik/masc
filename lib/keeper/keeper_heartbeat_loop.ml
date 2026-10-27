@@ -612,11 +612,10 @@ type batch_disposition =
 
 type checkpoint_source_policy =
   | Attention_delivered
-  | Preserve_connector
   | Preserve_and_rotate
 
 let checkpoint_source_policy : Keeper_event_queue.stimulus_payload -> checkpoint_source_policy = function
-  | Keeper_event_queue.Connector_attention _ -> Preserve_connector
+  | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Fusion_completed _ | Keeper_event_queue.Delegate_completed _
   | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Tool_result_ready _
   | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _
@@ -631,20 +630,20 @@ let checkpoint_source_policy : Keeper_event_queue.stimulus_payload -> checkpoint
 let checkpoint_source_may_ack payload =
   match checkpoint_source_policy payload with
   | Attention_delivered -> true
-  | Preserve_connector | Preserve_and_rotate -> false
+  | Preserve_and_rotate -> false
 ;;
 
 (* A checkpoint can lose request-only context on provider/session replacement.
-   Keep original messages/results until a completed turn, and rotate producer
-   outcomes so retained old batches cannot exclude every later ready source.
+   Keep original messages/results until a completed turn, and rotate retained
+   sources so old batches cannot exclude every later ready source. Connector
+   conversations move as a whole to preserve their unadmitted suffix's FIFO.
    A failed rotation still retains the source; it never authorizes an ACK. *)
 let retain_checkpoint_continuations ~base_path ~keeper_name selections =
-  let selections = List.filter_map
+  let selections = List.filter
     (fun (selection : Keeper_event_queue_state.pending_selection) ->
       match checkpoint_source_policy selection.source.payload with
-      | Attention_delivered -> None
-      | Preserve_connector -> Some (selection, Keeper_registry_event_queue.Keep_position)
-      | Preserve_and_rotate -> Some (selection, Keeper_registry_event_queue.Rotate_within_urgency))
+      | Attention_delivered -> false
+      | Preserve_and_rotate -> true)
     selections in
   let retained = match selections with
     | [] -> Ok []

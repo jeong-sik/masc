@@ -341,10 +341,11 @@ module For_testing : sig
     (now:float -> bool)
   (** Revalidate a provider wait against its dispatch and observed path rest. *)
   (** The production checkpoint retention pass. Counts are observations only.
-      Connector sources retain their order. Messages and producer/decision
-      outcomes retain their original payload and execution scope while rotating
-      to the tail of their urgency lane. No source is acknowledged. Failures
-      remain explicit; independent selected sources are still attempted. *)
+      Connector conversations rotate with their entire pending suffix in FIFO
+      order. Messages and producer/decision outcomes retain their original
+      payload and execution scope while rotating to the tail of their urgency
+      lane. No source is acknowledged. Failures remain explicit; independent
+      selected sources are still attempted. *)
   val retain_checkpoint_continuations :
     base_path:string -> keeper_name:string ->
     Keeper_event_queue_state.pending_selection list -> (unit, string) result

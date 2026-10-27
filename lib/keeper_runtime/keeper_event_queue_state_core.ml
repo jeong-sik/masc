@@ -685,6 +685,43 @@ let defer_pending ~(selection : pending_selection) state =
       Ok (with_pending sorted_pending state, next_revision)
 ;;
 
+let defer_pending_batch ~selections state =
+  let rec validate = function
+    | [] -> Ok ()
+    | selection :: rest ->
+      (match validate_pending_selection ~selection state with
+       | Error _ as error -> error
+       | Ok () -> validate rest)
+  in
+  match validate selections with
+  | Error _ as error -> error
+  | Ok () ->
+    match selections with
+    | [] -> Ok (state, state.revision)
+    | _ :: _ when Int64.equal state.revision Int64.max_int ->
+      Error "event queue revision exhausted"
+    | _ :: _ ->
+      let next_revision = Int64.succ state.revision in
+      let channels = List.filter_map (fun (selection : pending_selection) ->
+        Keeper_event_queue.connector_attention_channel selection.source.payload) selections in
+      let moves (entry : pending_selection) =
+        List.mem entry selections
+        || match Keeper_event_queue.connector_attention_channel entry.source.payload with
+           | None -> false
+           | Some channel ->
+             List.exists (Keeper_continuation_channel.same_conversation channel) channels
+      in
+      (* Partition the original queue once. Iterating admitted rows and
+         individually moving them would put an admitted conversation prefix
+         behind its unadmitted suffix, or reverse the prefix itself. *)
+      let deferred, remaining = List.partition moves state.pending_entries in
+      let deferred = List.map (fun entry ->
+        {entry with admitted_revision=next_revision}) deferred in
+      let state = {state with pending_entries=remaining @ deferred} in
+      let sorted_pending = state |> pending |> Keeper_event_queue.sort_by_urgency in
+      Ok (with_pending sorted_pending state, next_revision)
+;;
+
 let ( let* ) = Result.bind
 
 let pending_transition_id = function

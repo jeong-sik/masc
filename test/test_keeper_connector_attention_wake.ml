@@ -420,7 +420,7 @@ let test_late_enqueue_invalidates_subset wake () =
     record_attention ~base_path ~keeper_name "present";
     enqueue_attention ~base_path ~keeper_name "missing";
     let probe, reads = Masc.Keeper_unified_turn.For_testing.autonomous_yield_probe
-        ~wake ~base_path ~keeper_name in
+        ~wake ~sources:Masc.Keeper_heartbeat_source_batch.empty ~base_path ~keeper_name in
     check (option string) "missing does not preempt" None (probe_head probe);
     check (option string) "unchanged negative result is reusable" None (probe_head probe);
     check int "one history scan" 1 (reads ());
@@ -444,6 +444,7 @@ let test_interleaved_turn_caches () =
       enqueue_attention ~base_path ~keeper_name "missing";
       Masc.Keeper_unified_turn.For_testing.autonomous_yield_probe
         ~wake:(Masc.Keeper_registry.Woken [Keeper_event_queue.Bootstrap])
+        ~sources:Masc.Keeper_heartbeat_source_batch.empty
         ~base_path ~keeper_name
     in
     let a, reads_a = make "keeper-a" in
@@ -463,6 +464,7 @@ let test_interleaved_turn_caches () =
       (pending_ids ~base_path ~keeper_name:"keeper-a");
     let a_next, reads_next = Masc.Keeper_unified_turn.For_testing.autonomous_yield_probe
         ~wake:(Masc.Keeper_registry.Woken [Keeper_event_queue.Bootstrap])
+        ~sources:Masc.Keeper_heartbeat_source_batch.empty
         ~base_path ~keeper_name:"keeper-a" in
     check (option string) "next turn sees the same restored body"
       (Some "missing") (probe_head a_next);
@@ -474,7 +476,7 @@ let test_attention_read_failure_stays_open wake () =
     record_attention ~base_path ~keeper_name "seed-not-queued";
     enqueue_attention ~base_path ~keeper_name "missing";
     let probe, reads = Masc.Keeper_unified_turn.For_testing.autonomous_yield_probe
-        ~wake ~base_path ~keeper_name in
+        ~wake ~sources:Masc.Keeper_heartbeat_source_batch.empty ~base_path ~keeper_name in
     check (option string) "initial readable store excludes missing" None (probe_head probe);
     let path = A.attention_path ~base_path ~keeper_name in
     let size = (Unix.stat path).st_size in

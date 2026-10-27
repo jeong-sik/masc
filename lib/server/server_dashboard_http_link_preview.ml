@@ -71,74 +71,6 @@ let is_http_scheme = function
   | Some "http" | Some "https" -> true
   | _ -> false
 
-let is_loopback_or_unspecified_host host =
-  Server_auth.is_loopback_host host || Server_auth.is_unspecified_host host
-
-let ipaddr_is_private_or_reserved = function
-  | Ipaddr.V4 addr ->
-      let octets = Ipaddr.V4.to_octets addr in
-      let byte idx = Char.code octets.[idx] in
-      let b0 = byte 0 and b1 = byte 1 in
-      b0 = 0
-      || b0 = 10
-      || b0 = 127
-      || (b0 = 169 && b1 = 254)
-      || (b0 = 172 && b1 >= 16 && b1 <= 31)
-      || (b0 = 192 && b1 = 168)
-      || (b0 = 100 && b1 >= 64 && b1 <= 127)
-      || (b0 = 192 && b1 = 0)
-      || (b0 = 198 && (b1 = 18 || b1 = 19))
-      || (b0 = 198 && b1 = 51)
-      || (b0 = 203 && b1 = 0)
-      || b0 >= 224
-  | Ipaddr.V6 addr ->
-      let text = Ipaddr.V6.to_string addr |> String.lowercase_ascii in
-      Ipaddr.V6.compare addr Ipaddr.V6.localhost = 0
-      || Ipaddr.V6.compare addr Ipaddr.V6.unspecified = 0
-      || String.starts_with ~prefix:"fc" text
-      || String.starts_with ~prefix:"fd" text
-      || String.starts_with ~prefix:"fe8" text
-      || String.starts_with ~prefix:"fe9" text
-      || String.starts_with ~prefix:"fea" text
-      || String.starts_with ~prefix:"feb" text
-      || String.starts_with ~prefix:"ff" text
-      || String.starts_with ~prefix:"2001:db8" text
-
-let eio_ipaddr_is_private_or_reserved ip =
-  let rendered = Fmt.str "%a" Eio.Net.Ipaddr.pp ip in
-  match Ipaddr.of_string rendered with
-  | Ok parsed -> ipaddr_is_private_or_reserved parsed
-  | Error _ -> true
-
-let validate_resolved_host ~net (uri : Uri.t) =
-  try
-    match Uri.host uri with
-    | None -> Error "missing host"
-    | Some host when is_loopback_or_unspecified_host host ->
-        Error "host is not allowed"
-    | Some host ->
-        let service =
-          match Uri.port uri with
-          | Some port -> Int.to_string port
-          | None ->
-              if Uri.scheme uri = Some "https" then "443" else "80"
-        in
-        let addrs = Eio.Net.getaddrinfo_stream ~service net host in
-        match addrs with
-        | [] -> Error "dns resolution returned no addresses"
-        | items ->
-            let blocked =
-              List.exists
-                (function
-                  | `Tcp (ip, _) -> eio_ipaddr_is_private_or_reserved ip
-                  | `Unix _ -> true)
-                items
-            in
-            if blocked then Error "resolved address is not allowed" else Ok ()
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn -> Error (Printf.sprintf "dns failure: %s" (Printexc.to_string exn))
-
 let normalize_request_url raw =
   let trimmed = String.trim raw in
   if trimmed = "" then Error "url is empty"
@@ -316,7 +248,7 @@ let fetch_preview ~clock ~net url =
   match normalize_request_url url with
   | Error reason -> Error reason
   | Ok normalized_url -> (
-      match validate_resolved_host ~net (Uri.of_string normalized_url) with
+      match Server_outbound_address.validate_resolved_host ~net (Uri.of_string normalized_url) with
       | Error reason -> Error reason
       | Ok () ->
           if infer_image_url normalized_url then

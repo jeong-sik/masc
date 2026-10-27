@@ -2668,6 +2668,160 @@ esac
     guests
 ;;
 
+(* Drive the real boot entrypoint on the process-bound Nerdctl lane while
+   the CLI refuses to release a volume owner. No image, volume or trim
+   operation may start on that uncertainty. *)
+let test_boot_confirms_previous_guests_absent_before_provisioning () =
+  with_eio_fs @@ fun () ->
+  let module Turn = Masc.Keeper_turn_sandbox_runtime in
+  List.iter (fun (previous_mode, removal) ->
+    let context = Eio_context.snapshot_state () in
+    let dir = temp_dir "microvm-volume-owner-" in
+    let cli = Filename.concat dir "nerdctl" in
+    let removed = Filename.concat dir "delete-attempted" in
+    let provisioned = Filename.concat dir "provisioning-attempted" in
+    let config = Masc.Workspace.default_config dir in
+    let meta =
+      { (microvm_meta ~name:"volume-owner") with
+        microvm_backend = Some Backend.Nerdctl_kata } in
+    let guest = Turn.For_testing_microvm.microvm_container_name
+        ~config ~keeper_name:meta.name ~network_mode:previous_mode in
+    let state = match previous_mode with
+      | Profile.Network_none -> "false"
+      | Network_inherit | Network_policy -> "true" in
+    let removal_label = match removal with
+      | `Remains -> "remains" | `Unknown -> "unknown" | `Absent -> "absent" in
+    Out_channel.with_open_bin cli (fun channel ->
+      Printf.fprintf channel {|#!/bin/sh
+guest=%s
+removed=%s
+provisioned=%s
+state=%s
+removal=%s
+case "$1" in
+  stop) exit 0 ;;
+  rm)
+    if [ "$3" = "$guest" ]; then : > "$removed"; fi
+    exit 0 ;;
+  inspect)
+    # nerdctl inspect --mode dockercompat --format {{json .State.Running}} NAME
+    if [ "$6" = "$guest" ]; then
+      if [ -e "$removed" ] && [ "$removal" != remains ]; then exit 1; fi
+      printf '%%s\n' "$state"; exit 0
+    fi
+    exit 1 ;;
+  ps)
+    # The post-delete absence check reads the inventory only after a failed
+    # inspect; nerdctl rows carry no state, so the fixture answers either an
+    # empty listing (absent) or no answer at all (unknown).
+    if [ -e "$removed" ] && [ "$removal" = unknown ]; then exit 2; fi
+    exit 0 ;;
+  image|volume|run) : > "$provisioned"; exit 2 ;;
+  *) exit 99 ;;
+esac
+|} (Filename.quote guest) (Filename.quote removed) (Filename.quote provisioned)
+        (Filename.quote state) (Filename.quote removal_label));
+    Unix.chmod cli 0o755;
+    let previous_path = Sys.getenv "PATH" in
+    Unix.putenv "PATH" (dir ^ ":" ^ previous_path);
+    Fun.protect ~finally:(fun () ->
+      Eio_context.restore_state context;
+      Unix.putenv "PATH" previous_path;
+      Fs_compat.remove_tree dir)
+    @@ fun () ->
+    Eio.Switch.run @@ fun sw ->
+    Eio_context.set_switch sw;
+    let runtime = Turn.For_testing.create_minimal ~config ~meta ~state:Turn.Not_started in
+    (match Turn.microvm_remote_endpoint runtime with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "the fixture cannot boot a guest");
+    Alcotest.(check bool) "the old guest removal was attempted" true
+      (Sys.file_exists removed);
+    Alcotest.(check bool) "only confirmed absence permits provisioning"
+      (removal = `Absent) (Sys.file_exists provisioned))
+    [ Profile.Network_none, `Remains; Profile.Network_none, `Unknown;
+      Profile.Network_none, `Absent; Profile.Network_inherit, `Remains;
+      Profile.Network_inherit, `Unknown; Profile.Network_inherit, `Absent ]
+;;
+
+let test_warm_adoption_does_not_remove_other_network_modes () =
+  with_eio_fs @@ fun () ->
+  let module Turn = Masc.Keeper_turn_sandbox_runtime in
+  let context = Eio_context.snapshot_state () in
+  let dir = temp_dir "microvm-warm-adoption-" in
+  let cli = Filename.concat dir "nerdctl" in
+  let log = Filename.concat dir "calls" in
+  let running = Filename.concat dir "running" in
+  let config = Masc.Workspace.default_config dir in
+  let meta =
+    { (microvm_meta ~name:"warm-adoption") with
+      microvm_backend = Some Backend.Nerdctl_kata } in
+  let guest = Turn.For_testing_microvm.microvm_container_name
+      ~config ~keeper_name:meta.name ~network_mode:Profile.Network_none in
+  initialize_fixture_shim ~base:dir;
+  Out_channel.with_open_bin cli (fun channel ->
+    Printf.fprintf channel {|#!/bin/sh
+guest=%s
+running=%s
+log=%s
+printf '%%s\n' "$1" >> "$log"
+case "$1" in
+  stop) exit 0 ;;
+  rm) [ "$3" != "$guest" ] || rm -f "$running"; exit 0 ;;
+  inspect)
+    # nerdctl inspect --mode dockercompat --format {{json .State.Running}} NAME
+    if [ "$6" = "$guest" ] && [ -e "$running" ]; then
+      printf 'true\n'; exit 0
+    fi
+    exit 1 ;;
+  ps) exit 0 ;;
+  image) printf '[{"Image":{"Name":"fixture:image","Target":{"digest":"sha256:0"}}}]\n' ;;
+  volume)
+    case "$2" in
+      inspect)
+        printf '[{"Name":"%%s","Mountpoint":"/var/lib/nerdctl/volumes/%%s/_data"}]\n' "$3" "$3" ;;
+      *) exit 0 ;;
+    esac ;;
+  run)
+    for argument in "$@"; do
+      if [ "$argument" = -d ]; then : > "$running"; fi
+    done ;;
+  exec) exit 0 ;;
+  *) exit 99 ;;
+esac
+|} (Filename.quote guest) (Filename.quote running) (Filename.quote log));
+  Unix.chmod cli 0o755;
+  let previous_path = Sys.getenv "PATH" in
+  Unix.putenv "PATH" (dir ^ ":" ^ previous_path);
+  Fun.protect ~finally:(fun () ->
+    Eio_context.restore_state context;
+    Unix.putenv "PATH" previous_path;
+    Fs_compat.remove_tree dir)
+  @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.set_switch sw;
+  let endpoint () =
+    (* A fresh turn runtime must adopt the process-owned guest, rather than
+       reusing the first runtime's already-Running shortcut. *)
+    let runtime = Turn.For_testing.create_minimal ~config ~meta ~state:Turn.Not_started in
+    match Turn.microvm_remote_endpoint runtime with
+    | Ok endpoint -> Masc.Keeper_sandbox_remote.name endpoint
+    | Error detail -> Alcotest.failf "fixture guest unavailable: %s" detail
+  in
+  Alcotest.(check string) "first turn booted the guest" guest (endpoint ());
+  Out_channel.with_open_bin log (fun _ -> ());
+  Alcotest.(check string) "next turn adopts the same guest" guest (endpoint ());
+  let calls = In_channel.with_open_bin log In_channel.input_all |> String.split_on_char '\n' in
+  Alcotest.(check bool) "adoption still checks the mounted work volume" true (List.mem "exec" calls);
+  List.iter (fun operation ->
+    Alcotest.(check bool) ("warm adoption does not " ^ operation) false (List.mem operation calls))
+    ["stop"; "rm"; "image"; "volume"; "run"];
+  match Turn.teardown_keeper_sandbox_by_name ~timeout_sec:5. ~config ~keeper_name:meta.name
+      ~backend:Masc.Keeper_sandbox.Micro_vm ~microvm_backend:Backend.Nerdctl_kata () with
+  | Ok () -> ()
+  | Error detail -> Alcotest.fail detail
+;;
+
 (* A refused fresh boot retains a sealed durable identity until a later
    authoritative absence cleanup. A new boot invalidates guest shim readiness. *)
 let test_preboot_refusals_retain_durable_identity_and_recheck_shim () =
@@ -4041,6 +4195,10 @@ let () =
             test_teardown_removes_or_reports_abandoned_trim_helper
         ; Alcotest.test_case "teardown attempts every guest after helper or guest errors" `Quick
             test_teardown_removes_guests_despite_trim_cleanup_error
+        ; Alcotest.test_case "boot confirms previous guests absent before provisioning" `Quick
+            test_boot_confirms_previous_guests_absent_before_provisioning
+        ; Alcotest.test_case "warm adoption does not remove other network modes" `Quick
+            test_warm_adoption_does_not_remove_other_network_modes
         ; Alcotest.test_case "pre-boot refusals retain durable identity and recheck shim bytes" `Quick
             test_preboot_refusals_retain_durable_identity_and_recheck_shim
         ; Alcotest.test_case "shim travels read-only with its config" `Quick

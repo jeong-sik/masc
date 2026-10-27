@@ -1,0 +1,39 @@
+{
+  "verdict": "FAIL",
+  "error_type": "BehaviorFailure",
+  "detail": "sole Write attempt completed successfully",
+  "producer_started": true,
+  "producer_terminal": false,
+  "producer_returncode": null,
+  "owned_pid": 24402,
+  "observation_ended_at_unix": 1793054147.487283,
+  "forced_kills": [],
+  "restart_count": 0,
+  "setup_processes": [
+    {
+      "pid": 24381,
+      "command_verb": "init",
+      "started_at_unix": 1793054106.648502,
+      "returncode": 0,
+      "ended_at_unix": 1793054106.8967419,
+      "forced_kill": false
+    },
+    {
+      "pid": 24382,
+      "command_verb": "sandbox-image",
+      "started_at_unix": 1793054106.901128,
+      "returncode": 0,
+      "ended_at_unix": 1793054107.0339808,
+      "forced_kill": false
+    },
+    {
+      "pid": 24387,
+      "command_verb": "login",
+      "started_at_unix": 1793054107.037868,
+      "returncode": 0,
+      "ended_at_unix": 1793054107.115707,
+      "forced_kill": false
+    }
+  ],
+  "scope": "No automatic retry, cancellation, provider switch, restart or forced kill. Running owned producer remains observable; operator must inspect fresh terminal/idle before normal cleanup."
+}

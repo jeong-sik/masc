@@ -1,0 +1,136 @@
+[
+  {
+    "name": "owned workspace and frozen native source actually served",
+    "passed": true,
+    "detail": {
+      "build": {
+        "release_version": "0.64.0",
+        "binary_version": "0.64.0",
+        "repo_version": "0.64.0",
+        "commit": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+        "commit_source": "embedded",
+        "binary_commit": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+        "binary_commit_source": "embedded",
+        "provenance_source": "self_observed",
+        "executable_sha256": "1622a35d1082da4fe24d9effb05aec11918d9444288441049c8d6d30cedb415c",
+        "binary_commit_unix_ts": 1793046677.0,
+        "binary_commit_age_seconds": 7431,
+        "repo_head_commit": "a3950a189b9",
+        "repo_head_commit_source": "runtime_repo_head",
+        "repo_head_commit_unix_ts": 1793046677.0,
+        "repo_head_commit_age_seconds": 7431,
+        "executable_path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/masc",
+        "executable_dir": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact",
+        "repo_root": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+        "runtime_instance_id": "01a17a5a-6928-7000-8829-8252be646d24",
+        "started_at": "2026-10-26T22:35:07Z",
+        "uptime_seconds": 1
+      },
+      "paths": {
+        "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/file-effect-deepseek-c2-1/workspace",
+        "effective_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/file-effect-deepseek-c2-1/workspace",
+        "effective_masc_root": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/file-effect-deepseek-c2-1/workspace/.masc",
+        "current_task_path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/file-effect-deepseek-c2-1/workspace/.masc/current_task",
+        "current_task_shape": "absent",
+        "effective_has_masc_dir": true,
+        "roots_diverge": false,
+        "strict_mode_requested": false,
+        "startup_rejected": false,
+        "startup_abort_eligible": false,
+        "input_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/file-effect-deepseek-c2-1/workspace",
+        "env_masc_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/file-effect-deepseek-c2-1/workspace",
+        "resolution_source": "explicit_cli"
+      }
+    }
+  },
+  {
+    "name": "explicit owned permissive Gate fixture accepted",
+    "passed": true,
+    "detail": {
+      "recovery_status": "not_requested",
+      "recovery_error": null,
+      "started": 0,
+      "queued": 0,
+      "recovery_failure_count": 0,
+      "recovery_failures": [],
+      "recovery_blockers": [],
+      "ok": true,
+      "previous_mode": "auto_judge",
+      "mode": "always_allow",
+      "actor": "schedule-file-observer",
+      "changed_at": "2026-10-26T22:35:08Z"
+    }
+  },
+  {
+    "name": "explicit owned permissive Keeper approval fixture accepted",
+    "passed": true,
+    "detail": {
+      "keeper": "audit-file-ce44a31266bd45a2b82ba58ce53124d0",
+      "mode": "yolo"
+    }
+  },
+  {
+    "name": "new owned Keeper is idle before sole schedule",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "owned call ledger contains only scoped effect/inspection/discovery tools",
+    "passed": true,
+    "detail": {
+      "tools": []
+    }
+  },
+  {
+    "name": "no extra Write or marker note attempt",
+    "passed": true,
+    "detail": {
+      "write_calls": 0,
+      "note_add_calls": 0
+    }
+  },
+  {
+    "name": "no extra primary note",
+    "passed": true,
+    "detail": []
+  },
+  {
+    "name": "owned call ledger contains only scoped effect/inspection/discovery tools",
+    "passed": true,
+    "detail": {
+      "tools": [
+        "Write"
+      ]
+    }
+  },
+  {
+    "name": "no extra Write or marker note attempt",
+    "passed": true,
+    "detail": {
+      "write_calls": 1,
+      "note_add_calls": 0
+    }
+  },
+  {
+    "name": "no extra primary note",
+    "passed": true,
+    "detail": []
+  },
+  {
+    "name": "sole Write carries exact requested content",
+    "passed": true,
+    "detail": {
+      "file_path": "schedule-file-435677a8cf854257a96bd4e85c80b880.txt",
+      "content": "nonce=cc9a09d397e94d69bcb9f8428158004f\n\uc608\uc57d \ud30c\uc77c \uacb0\uacfc \ud655\uc778 \ud83d\udc19"
+    }
+  },
+  {
+    "name": "sole Write attempt completed successfully",
+    "passed": false,
+    "detail": {
+      "execution_id": "execution-node-56585a983983fc66cb11323b5bde5d36",
+      "wire_outcome": "error",
+      "disposition": "failed"
+    }
+  }
+]

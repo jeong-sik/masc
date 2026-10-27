@@ -1,0 +1,21 @@
+{
+  "workflow": "Test",
+  "run_id": 40409087814,
+  "head": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+  "ref": "ci/schedule-durable-candidate-20261027",
+  "artifact_id": 12692432822,
+  "artifact_name": "suite-runner-log",
+  "zip_bytes": 1465,
+  "zip_sha256": "1e5679636c51b481662f9f4de409afaf457de53758fbb93bdc77d47b2ad20c7f",
+  "members": [
+    {
+      "name": "ci-run-tests.log",
+      "path": "artifacts/schedule-durable-candidate-20261027/test40409087814/member-0.txt",
+      "bytes": 5158,
+      "sha256": "6b454b71058f1821c31abc03f02065dfc2871e07cc9ec6d9e6234f7a337d0498"
+    }
+  ],
+  "conclusion": "success",
+  "focused_suite": "test_tui_loading_notice",
+  "scope": "One explicitly selected existing suite,8cases; no new tests or full CI."
+}

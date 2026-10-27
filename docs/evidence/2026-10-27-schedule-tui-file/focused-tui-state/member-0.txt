@@ -1,0 +1,98 @@
+[targeted] EIO_BACKEND=<unset> timeout=600s per suite
+[targeted] dune build test/test_tui_loading_notice.exe 
+(cd _build/default/lib/sse_event && /home/runner/.opam/ci-5-5-1/bin/atdgen -j -j-std ./sse_event.atd)
+Warning: option "-j-std" is deprecated.
+[targeted] test/test_tui_loading_notice: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_tui_loading_notice: start 2026-10-26T22:05:53Z
+::group::{tui loading notice}
+Testing `tui loading notice'.
+This run has ID `C5K3QY34'.
+
+ASSERT late A cannot replace B's page
+ASSERT late A error is not B's error
+ASSERT offscreen A's request is retired
+ASSERT older generation cannot regress the current page
+ASSERT failed refresh retains the last read
+ASSERT failed refresh is attributed to B
+ASSERT A's identity action cannot mutate B's view
+ASSERT B's identity action can refresh its own view
+ASSERT chat target owns its schedules even while roster selects B
+ASSERT another Keeper cannot replace chat observation
+ASSERT another Keeper cannot set chat read error
+  [OK]          a read in flight          0   schedule responses follow targe...
+ASSERT an explicit reread supersedes the previous response
+ASSERT a superseded response cannot finish the outstanding read
+ASSERT rereading does not reset accumulated elapsed time
+ASSERT an offscreen terminal response still retires the wait
+ASSERT reopening creates a different wait
+ASSERT a late answer from the old poll cannot end the new wait
+ASSERT the new wait has its own elapsed time
+ASSERT only the new wait may finish
+ASSERT duplicate terminal delivery is ignored
+ASSERT an explicit reread supersedes the previous response
+ASSERT a superseded response cannot finish the outstanding read
+ASSERT rereading does not reset accumulated elapsed time
+ASSERT an offscreen terminal response still retires the wait
+ASSERT reopening creates a different wait
+ASSERT a late answer from the old poll cannot end the new wait
+ASSERT the new wait has its own elapsed time
+ASSERT only the new wait may finish
+ASSERT duplicate terminal delivery is ignored
+ASSERT an explicit reread supersedes the previous response
+ASSERT a superseded response cannot finish the outstanding read
+ASSERT rereading does not reset accumulated elapsed time
+ASSERT an offscreen terminal response still retires the wait
+ASSERT reopening creates a different wait
+ASSERT a late answer from the old poll cannot end the new wait
+ASSERT the new wait has its own elapsed time
+ASSERT only the new wait may finish
+ASSERT duplicate terminal delivery is ignored
+ASSERT an explicit reread supersedes the previous response
+ASSERT a superseded response cannot finish the outstanding read
+ASSERT rereading does not reset accumulated elapsed time
+ASSERT an offscreen terminal response still retires the wait
+ASSERT reopening creates a different wait
+ASSERT a late answer from the old poll cannot end the new wait
+ASSERT the new wait has its own elapsed time
+ASSERT only the new wait may finish
+ASSERT duplicate terminal delivery is ignored
+ASSERT an explicit reread supersedes the previous response
+ASSERT a superseded response cannot finish the outstanding read
+ASSERT rereading does not reset accumulated elapsed time
+ASSERT an offscreen terminal response still retires the wait
+ASSERT reopening creates a different wait
+ASSERT a late answer from the old poll cannot end the new wait
+ASSERT the new wait has its own elapsed time
+ASSERT only the new wait may finish
+ASSERT duplicate terminal delivery is ignored
+  [OK]          a read in flight          1   offscreen completion and late p...
+ASSERT matching logs need timed repaints without a status request
+ASSERT another Keeper's logs do not animate this tab
+ASSERT hidden Sandbox logs do not animate Identity
+ASSERT finished logs stop requesting repaints
+  [OK]          a read in flight          2   logs keep repainting after stat...
+ASSERT a read nobody asked for measures nothing
+ASSERT ten seconds since this read began
+ASSERT whole seconds, so a part of one is none of one
+  [OK]          a read in flight          3   the elapsed needs a start.
+ASSERT the tab read has been waiting ninety seconds
+ASSERT and the log read, two
+  [OK]          a read in flight          4   two reads are timed apart.
+ASSERT the tab on screen keeps its own start
+ASSERT and the one that finished behind it keeps its own
+ASSERT a tab nobody asked for measures nothing
+ASSERT asking again keeps the first start
+  [OK]          a read in flight          5   a background read does not rese...
+ASSERT the Keeper on screen keeps its own start
+ASSERT and the one that landed behind it keeps its own
+ASSERT a Keeper nobody read for measures nothing
+  [OK]          a read in flight          6   the same tab for two keepers is...
+ASSERT waiting
+ASSERT the terminal answer retires its wait
+ASSERT answered, so nothing is being waited for
+ASSERT and the next wait starts from the next ask
+  [OK]          a read in flight          7   the wait ends when the answer a...
+
+Test Successful in 0.001s. 8 tests run.
+::endgroup::
+[targeted] test/test_tui_loading_notice: OK in 0s

@@ -1,0 +1,65 @@
+{
+  "source": {
+    "binary": {
+      "path": "/Users/dancer/me/.masc/microvm/shim/masc-exec-shim",
+      "sha256": "04b6db55669ade5bd0a1cb6a05bacbc0950b9442d1028554278a9f3ad8bc78fe",
+      "bytes": 5471544,
+      "mode": "0o755",
+      "regular_file": true,
+      "device": 16777234,
+      "inode": 4370213594
+    },
+    "sidecar": {
+      "path": "/Users/dancer/me/.masc/microvm/shim/masc-exec-shim.sha256",
+      "sha256": "af27b84f3b740b268ad53a92562bcbb2e0e3118dabdd8041237fe6d752763a51",
+      "bytes": 93,
+      "mode": "0o644",
+      "regular_file": true,
+      "device": 16777234,
+      "inode": 4370213600
+    },
+    "elf": {
+      "class": 64,
+      "byte_order": "little",
+      "e_machine": 183,
+      "e_type": 2
+    },
+    "sidecar_first_digest_matches_binary": true,
+    "executable_access": true,
+    "scope": "Local exact-byte input integrity only. No release authenticity, source-commit provenance or actual protocol compatibility established."
+  },
+  "destination": {
+    "binary": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/file-effect-deepseek-c2-2/workspace/.masc/microvm/shim/masc-exec-shim",
+      "sha256": "04b6db55669ade5bd0a1cb6a05bacbc0950b9442d1028554278a9f3ad8bc78fe",
+      "bytes": 5471544,
+      "mode": "0o755",
+      "regular_file": true,
+      "device": 16777234,
+      "inode": 4410089422
+    },
+    "sidecar": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/file-effect-deepseek-c2-2/workspace/.masc/microvm/shim/masc-exec-shim.sha256",
+      "sha256": "af27b84f3b740b268ad53a92562bcbb2e0e3118dabdd8041237fe6d752763a51",
+      "bytes": 93,
+      "mode": "0o644",
+      "regular_file": true,
+      "device": 16777234,
+      "inode": 4410089423
+    },
+    "elf": {
+      "class": 64,
+      "byte_order": "little",
+      "e_machine": 183,
+      "e_type": 2
+    },
+    "sidecar_first_digest_matches_binary": true,
+    "executable_access": true,
+    "scope": "Local exact-byte input integrity only. No release authenticity, source-commit provenance or actual protocol compatibility established."
+  },
+  "binary_bytes_equal": true,
+  "sidecar_bytes_equal": true,
+  "copied_before_server_start": true,
+  "configuration_copied": false,
+  "limit": "Runtime generates the owned shim config. Actual guest protocol compatibility is not established by copying or local verification."
+}

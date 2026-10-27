@@ -1,0 +1,274 @@
+{
+  "schema": "masc.schedule-real-file-effect-preparation.v1",
+  "source_sha": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+  "source_bindings": {
+    "config/runtime.toml": {
+      "bytes": 104331,
+      "sha256": "e26f3faa9e1715c487d52e31f3bd767e0d4431ea5d11ff78693eaccf65c946cf"
+    },
+    "scripts/fixtures/release-evidence/runtime.toml": {
+      "bytes": 3058,
+      "sha256": "ccbe65e399f47a3abddbf4299e15dd0fd55001dd785b2e0d75948ad86acf7cfd"
+    },
+    "config/tools/Write.toml": {
+      "bytes": 722,
+      "sha256": "c5e3d87bbe0180343f5208cdc465ef52f5b454f4c561a06878301bb53da655a7"
+    },
+    "config/tools/Read.toml": {
+      "bytes": 2270,
+      "sha256": "007ea215e6473c9b7daf9228abd213deb8473f49c32dac51ad158e58e5c0c06f"
+    },
+    "lib/keeper/keeper_tool_descriptor.ml": {
+      "bytes": 144103,
+      "sha256": "35a944e04b94472ee3c84fd75fc7d486a592222913858d38ec90506bb248add8"
+    },
+    "lib/keeper/keeper_tool_filesystem_runtime.ml": {
+      "bytes": 129930,
+      "sha256": "694a9c14cf252a62effae1d599bd5ce43aacddb986e489ae4b9fdb3f1fa8bf96"
+    },
+    "lib/keeper/keeper_tool_filesystem_remote_write.ml": {
+      "bytes": 23780,
+      "sha256": "0db849d8ddb3bde497a412b47a946b62ff610c4ca569cbf58c21e2a66ae8811c"
+    },
+    "lib/keeper/keeper_sandbox_read_runner.ml": {
+      "bytes": 4199,
+      "sha256": "95488911943bde29c0b9020d3c6a02083a4b8c26f6b89286eef8e907ad0e5730"
+    },
+    "lib/keeper/keeper_sandbox_read_backend.ml": {
+      "bytes": 30262,
+      "sha256": "94e8c5f1682d4ffca9ca6423f260e66f5f15306164f7f24c22e73aac4c1eb3b6"
+    },
+    "lib/keeper/keeper_remote_path.ml": {
+      "bytes": 10254,
+      "sha256": "7bfdc3f52e90cdb144de4e9179a1d7f06a53f1e571303685a49f136c03dbeb1a"
+    },
+    "lib/keeper/keeper_workspace_namespace.ml": {
+      "bytes": 1649,
+      "sha256": "7dcc9ffbe5360e967ab0f0d233931d53e4d9769edf5e50bf0f1a6ac6ba1e8855"
+    },
+    "lib/keeper/keeper_sandbox.ml": {
+      "bytes": 10490,
+      "sha256": "a21f0137feb338f1683324622412030a389073230f49c6faec9a9416a6b528f1"
+    },
+    "lib/config/keeper_sandbox_config.ml": {
+      "bytes": 4601,
+      "sha256": "80633b393b62415299c3afb8f0d3a043c036205de173c37909a8230bbc5bf25c"
+    },
+    "lib/config/playground_paths.ml": {
+      "bytes": 5279,
+      "sha256": "13d5927af8bb69b6e29899bfd3d165e26c0c76c201ac6375e33bfecdaa67a1a6"
+    },
+    "lib/keeper_tool_call_log.ml": {
+      "bytes": 58598,
+      "sha256": "e823ecc9c36e7fb2226a02544929bd6e0f27ad41177509d98681579cd90018dd"
+    },
+    "lib/keeper_tool_call_log_route_evidence.ml": {
+      "bytes": 5279,
+      "sha256": "99948d0fb56f7db3fc3a4f61fcf9b8bdea487512344c0b920a3b5330ad4086b6"
+    },
+    "lib/keeper/keeper_reaction_ledger.ml": {
+      "bytes": 77170,
+      "sha256": "86cf1d1e79061d30f9f303705944d7cf57578b804ebfb1fe93130c0772b6d740"
+    },
+    "lib/keeper_runtime/keeper_event_queue_state_wire.ml": {
+      "bytes": 30684,
+      "sha256": "53d7c4d57b17a376c8428320a1cf3f89025efbd5a0cedcb570bb03878c2df17b"
+    },
+    "lib/keeper/keeper_unified_prompt.ml": {
+      "bytes": 96880,
+      "sha256": "55f607445980c9f6471410abce9f9572f4ba806e336d9f3cb402d98247985126"
+    },
+    "lib/keeper/keeper_run_prompt.ml": {
+      "bytes": 9267,
+      "sha256": "54229d2bce98cbe1406952f4f6655524e5366e0b9ad1a6c8426071894a8334a0"
+    },
+    "lib/config_dir_resolver/config_dir_resolver.ml": {
+      "bytes": 17936,
+      "sha256": "20d184fd58a59131799096479fb3235f7f4efc568ab58abca6d9a568b87b5ffd"
+    },
+    "lib/keeper/keeper_hooks_agent_core.ml": {
+      "bytes": 54717,
+      "sha256": "26e2b488d0308ed0d8f8a4a65d80f79af1cb08eefd30d04764177d1dc9eb9a41"
+    },
+    "lib/keeper/keeper_sandbox_microvm.ml": {
+      "bytes": 137028,
+      "sha256": "7ac31a2ea288f7685de5a76434339c607a2101238ba6d40f9b7cf819573339c1"
+    },
+    "lib/keeper/keeper_microvm_shim_readiness.ml": {
+      "bytes": 7550,
+      "sha256": "7bbcdfd20218fb903a56abd4c6e435a42a23033df9cabc73e2b7a9b22c5b558e"
+    }
+  },
+  "controller_sha256": "b3a4911710fd67e690a0d9ea2e435eb8dcdf40e027ce7e49678b8430cf29d446",
+  "native_binding_sha256": "89599a1c52c93d774eff7675f216b65d0b208a913c428506dbee2ebf097f3c17",
+  "native_binding": {
+    "schema": "masc.schedule-c2-native-binding.v1",
+    "source_sha": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+    "workflow_name": "Minimal manual checks",
+    "workflow_run": 40396800146,
+    "workflow_sha": "9377c7f3025d68e3856d2afd3762468dabc77813",
+    "workflow_ref": "main",
+    "artifact_id": 12687003191,
+    "server_sha256": "1622a35d1082da4fe24d9effb05aec11918d9444288441049c8d6d30cedb415c",
+    "archive_sha256": "a9e1eff4b3ddc6b43c14fa2fc48b7f468634d902ff487d9337b57bc4f5cb5927",
+    "artifact_receipt": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/receipt.json",
+      "bytes": 1622,
+      "sha256": "db9d24e84c3364d6c87120381121ab70254400db1e036bff3c98dafd2c8b42b1"
+    },
+    "archive": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact.zip",
+      "bytes": 74909557,
+      "sha256": "a9e1eff4b3ddc6b43c14fa2fc48b7f468634d902ff487d9337b57bc4f5cb5927"
+    },
+    "download_verification": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/identity-verification.json",
+      "bytes": 2035,
+      "sha256": "770efa19e25e10e3c52516e624b637ed107b51d23e4409836e95377348abfdce"
+    }
+  },
+  "native_scope": "Staged producer artifact; no install, merge, rebuild or primary replacement.",
+  "binary": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/masc",
+  "binary_sha256": "1622a35d1082da4fe24d9effb05aec11918d9444288441049c8d6d30cedb415c",
+  "archive_sha256": "a9e1eff4b3ddc6b43c14fa2fc48b7f468634d902ff487d9337b57bc4f5cb5927",
+  "image_reference": "masc-sandbox:general",
+  "image_identity_limit": "Existing image reference promoted into owned config; guest image not independently hashed. Explicit shim/sidecar local bytes are pinned, original release/source provenance unknown and protocol compatibility unproven.",
+  "guest_shim_input": {
+    "binary": {
+      "path": "/Users/dancer/me/.masc/microvm/shim/masc-exec-shim",
+      "sha256": "04b6db55669ade5bd0a1cb6a05bacbc0950b9442d1028554278a9f3ad8bc78fe",
+      "bytes": 5471544,
+      "mode": "0o755",
+      "regular_file": true,
+      "device": 16777234,
+      "inode": 4370213594
+    },
+    "sidecar": {
+      "path": "/Users/dancer/me/.masc/microvm/shim/masc-exec-shim.sha256",
+      "sha256": "af27b84f3b740b268ad53a92562bcbb2e0e3118dabdd8041237fe6d752763a51",
+      "bytes": 93,
+      "mode": "0o644",
+      "regular_file": true,
+      "device": 16777234,
+      "inode": 4370213600
+    },
+    "elf": {
+      "class": 64,
+      "byte_order": "little",
+      "e_machine": 183,
+      "e_type": 2
+    },
+    "sidecar_first_digest_matches_binary": true,
+    "executable_access": true,
+    "scope": "Local exact-byte input integrity only. No release authenticity, source-commit provenance or actual protocol compatibility established."
+  },
+  "parent_controller_sha256": "bc450f6d8201956d18026d6aa2e3533534aaed198e6a16a201c54299c1f657d1",
+  "keeper": "audit-file-28426d4ecc244721aed83a6409fa4111",
+  "schedule_id": "audit-file-job-aa049ca7e6ee403a867e202e8df6aacb",
+  "marker": "FILE_EFFECT_VERIFIED_5bf0ca710ed0404183d247f3f891ca15",
+  "relative_file": "schedule-file-209ee68dca31409cbb102b69b596ea96.txt",
+  "logical_target": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/file-effect-deepseek-c2-2/workspace/.masc/playground/audit-file-28426d4ecc244721aed83a6409fa4111/schedule-file-209ee68dca31409cbb102b69b596ea96.txt",
+  "expected_utf8_content": "nonce=606b0a370cf645748af1dadc790119a3\n예약 파일 결과 확인 🐙",
+  "expected_bytes": 71,
+  "expected_sha256": "c795f14537547c7d27061d8e0869e6aff006afbf7dbef882cdd16a28ca41e0aa",
+  "scheduled_message": "Perform this single authorized scheduled job for schedule_id \"audit-file-job-aa049ca7e6ee403a867e202e8df6aacb\". Using the public Write tool exactly once, write the new sandbox-relative file_path \"schedule-file-209ee68dca31409cbb102b69b596ea96.txt\" with exact UTF-8 content represented by this JSON string: \"nonce=606b0a370cf645748af1dadc790119a3\\n예약 파일 결과 확인 🐙\". Decode JSON escapes: the content has exactly one LF, Korean and emoji, exactly 71 UTF-8 bytes and NO final newline. Use Write file_path and content only (the public tool overwrites); do not append or patch. Only after Write succeeds, use the public Read schema on the same file to read its full content (offset defaults to 1; explicit cwd/offset/limit are allowed when they read that same complete file). Compare the complete actual Read content and byte count with this request; do not infer success from your intended content or a final narrative. Only after the complete Read returns exactly those bytes without truncation, call masc_schedule_note_add exactly once on schedule_id \"audit-file-job-aa049ca7e6ee403a867e202e8df6aacb\" with exact body \"FILE_EFFECT_VERIFIED_5bf0ca710ed0404183d247f3f891ca15\". Then finish this job. Do not write any other file or note, retry Write, use Edit/Patch/Execute/shell, create another schedule/chat/task/Board/external message, or ask for confirmation. Tool discovery is allowed. If the effect cannot be verified, report the failure without adding the marker note.",
+  "base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/file-effect-deepseek-c2-2/workspace",
+  "observation_deadline_unix": 1793055647.958587,
+  "authority": "Owned fixture explicitly sets Gate always_allow and Keeper approval yolo; scheduled wake grants no authority. This is not default Gate/Ask behavior proof.",
+  "scope": "One scheduled job, actual MicroVM Write then full backend Read and marker note; no host-file/export/delivery claim.",
+  "not_proven": [
+    "full provider wire bodies or first request body",
+    "external delivery",
+    "host-file export",
+    "two-job DeepSeek scope correctness",
+    "restart",
+    "provider failover",
+    "installation",
+    "multi-account or complete feature correctness"
+  ],
+  "runtime_id": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+  "provider_endpoint": "https://ollama.com/v1",
+  "credential_name": "OLLAMA_CLOUD_API_KEY",
+  "environment_names": [
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "MASC_BASE_PATH",
+    "MASC_CONFIG_DIR",
+    "MASC_KEEPER_AUTONOMOUS_ENABLED",
+    "MASC_SCHEDULE_RUNNER_INTERVAL_SEC",
+    "OLLAMA_CLOUD_API_KEY",
+    "PATH",
+    "TMPDIR",
+    "XDG_CONFIG_HOME"
+  ],
+  "home_unchanged": true,
+  "masc_config_dir": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/file-effect-deepseek-c2-2/workspace/.masc/config",
+  "xdg_config_home": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/file-effect-deepseek-c2-2/workspace/xdg-config",
+  "guest_shim_copy": {
+    "source": {
+      "binary": {
+        "path": "/Users/dancer/me/.masc/microvm/shim/masc-exec-shim",
+        "sha256": "04b6db55669ade5bd0a1cb6a05bacbc0950b9442d1028554278a9f3ad8bc78fe",
+        "bytes": 5471544,
+        "mode": "0o755",
+        "regular_file": true,
+        "device": 16777234,
+        "inode": 4370213594
+      },
+      "sidecar": {
+        "path": "/Users/dancer/me/.masc/microvm/shim/masc-exec-shim.sha256",
+        "sha256": "af27b84f3b740b268ad53a92562bcbb2e0e3118dabdd8041237fe6d752763a51",
+        "bytes": 93,
+        "mode": "0o644",
+        "regular_file": true,
+        "device": 16777234,
+        "inode": 4370213600
+      },
+      "elf": {
+        "class": 64,
+        "byte_order": "little",
+        "e_machine": 183,
+        "e_type": 2
+      },
+      "sidecar_first_digest_matches_binary": true,
+      "executable_access": true,
+      "scope": "Local exact-byte input integrity only. No release authenticity, source-commit provenance or actual protocol compatibility established."
+    },
+    "destination": {
+      "binary": {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/file-effect-deepseek-c2-2/workspace/.masc/microvm/shim/masc-exec-shim",
+        "sha256": "04b6db55669ade5bd0a1cb6a05bacbc0950b9442d1028554278a9f3ad8bc78fe",
+        "bytes": 5471544,
+        "mode": "0o755",
+        "regular_file": true,
+        "device": 16777234,
+        "inode": 4410089422
+      },
+      "sidecar": {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/file-effect-deepseek-c2-2/workspace/.masc/microvm/shim/masc-exec-shim.sha256",
+        "sha256": "af27b84f3b740b268ad53a92562bcbb2e0e3118dabdd8041237fe6d752763a51",
+        "bytes": 93,
+        "mode": "0o644",
+        "regular_file": true,
+        "device": 16777234,
+        "inode": 4410089423
+      },
+      "elf": {
+        "class": 64,
+        "byte_order": "little",
+        "e_machine": 183,
+        "e_type": 2
+      },
+      "sidecar_first_digest_matches_binary": true,
+      "executable_access": true,
+      "scope": "Local exact-byte input integrity only. No release authenticity, source-commit provenance or actual protocol compatibility established."
+    },
+    "binary_bytes_equal": true,
+    "sidecar_bytes_equal": true,
+    "copied_before_server_start": true,
+    "configuration_copied": false,
+    "limit": "Runtime generates the owned shim config. Actual guest protocol compatibility is not established by copying or local verification."
+  },
+  "url": "http://127.0.0.1:59848"
+}

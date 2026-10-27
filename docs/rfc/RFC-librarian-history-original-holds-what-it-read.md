@@ -180,6 +180,8 @@ original 은 Librarian 이 읽은 것의 기록이다. Librarian 은 범위만 �
 
 2026-10-27 하드컷 때 쓴 정지·확인·옮기기·되돌리기 스크립트를 그대로 쓸 수 있다. admission scope 는 이 형식을 쓰지 않으므로 옮기지 않는다(9절).
 
+4번에서 옮기지 않은 기록이 schema 1 로 남아 있으면 새 바이너리가 그 기록을 읽을 때 `Unknown durable capture schema/purpose` 로 거절한다(`lib/keeper/keeper_librarian_durable_capture.ml:530`). request 쪽도 schema 2 만 받는다(`keeper_librarian_durable_request.ml:250`). 거절은 배포 때가 아니라 그 기록을 읽는 때 난다. 그러므로 4번은 `tool-request-owners/` 와 `tool-request-bodies/` 양쪽을 빠짐없이 옮긴다. 줄 번호는 main `de5599529145` 기준이다.
+
 ## 9. 열린 질문과 L3 확인 목록
 
 - **checkpoint 참조의 `turn_count`·`sha256`**: L3 에서 소비처를 찾았다. 복원된 capture 의 checkpoint 참조를 읽는 곳은 `trace_id` 뿐이다(`project_source`, `lock`). Memory 의 출처 표기는 영수증(`durable_range_id`)을 쓰고, 영수증에는 `sha256` 이 없다. 그래서 둘을 뺐다.

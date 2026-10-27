@@ -9,8 +9,8 @@ val issuer : Server_request_authority.authority -> string
 val resource : Server_request_authority.authority -> string
 val protected_resource_metadata_url : Server_request_authority.authority -> string
 val challenge_for_authority : Server_request_authority.authority -> string
-(** OAuth discovery challenge when built-in OAuth is enabled on loopback;
-    otherwise the compatibility challenge [Bearer]. *)
+(** OAuth discovery challenge on a loopback authority, where the built-in
+    authorization server answers; otherwise the plain challenge [Bearer]. *)
 
 val protected_resource_json :
   Server_request_authority.authority -> Yojson.Safe.t

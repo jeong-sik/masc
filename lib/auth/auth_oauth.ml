@@ -19,7 +19,6 @@ let scopes_supported = [ Mcp_tools; Mcp_admin ]
 let scopes_to_string scopes = String.concat " " (List.map scope_to_string scopes)
 
 type error =
-  | OAuth_disabled
   | Invalid_request of string
   | Invalid_client
   | Invalid_grant
@@ -30,7 +29,7 @@ type error =
 [@@deriving show { with_path = false }]
 
 let protocol_error_code = function
-  | OAuth_disabled | Temporarily_unavailable -> "temporarily_unavailable"
+  | Temporarily_unavailable -> "temporarily_unavailable"
   | Invalid_request _ -> "invalid_request"
   | Invalid_client -> "invalid_client"
   | Invalid_grant -> "invalid_grant"
@@ -46,7 +45,6 @@ module Policy = struct
   let max_state_bytes = 1024
 end
 
-let enabled = Env_config_runtime_services.OAuth.enabled
 let code_ttl_sec = Env_config_runtime_services.OAuth.code_ttl_sec
 let access_token_ttl_sec = Env_config_runtime_services.OAuth.access_token_ttl_sec
 let refresh_token_ttl_sec = Env_config_runtime_services.OAuth.refresh_token_ttl_sec
@@ -479,9 +477,7 @@ let cleanup_expired_codes_locked current =
 ;;
 
 let register_client ~base_path ~client_name ~redirect_uris =
-  if not (enabled ())
-  then Error OAuth_disabled
-  else if redirect_uris = [] || List.length redirect_uris > Policy.max_redirect_uris
+  if redirect_uris = [] || List.length redirect_uris > Policy.max_redirect_uris
   then Error (Invalid_request "redirect_uris count is invalid")
   else if
     match client_name with
@@ -632,45 +628,42 @@ let validate_authorization_request
     ~code_challenge
     ~code_challenge_method
   =
-  if not (enabled ())
-  then Error OAuth_disabled
+  let* response_type = require_nonempty "response_type" response_type in
+  let* client_id = require_nonempty "client_id" client_id in
+  let* redirect_uri = require_nonempty "redirect_uri" redirect_uri in
+  let* resource = require_nonempty "resource" resource in
+  let* code_challenge = require_nonempty "code_challenge" code_challenge in
+  let* code_challenge_method =
+    require_nonempty "code_challenge_method" code_challenge_method
+  in
+  if not (String.equal response_type "code")
+  then Error (Invalid_request "response_type must be code")
+  else if not (String.equal code_challenge_method "S256")
+  then Error (Invalid_request "code_challenge_method must be S256")
+  else if not (valid_pkce_value code_challenge)
+  then Error (Invalid_request "code_challenge is invalid")
+  else if not (String.equal resource expected_resource)
+  then Error (Invalid_request "resource does not match the MCP endpoint")
+  else if
+    match state with
+    | Some value -> String.length value > Policy.max_state_bytes
+    | None -> false
+  then Error (Invalid_request "state is too long")
   else
-    let* response_type = require_nonempty "response_type" response_type in
-    let* client_id = require_nonempty "client_id" client_id in
-    let* redirect_uri = require_nonempty "redirect_uri" redirect_uri in
-    let* resource = require_nonempty "resource" resource in
-    let* code_challenge = require_nonempty "code_challenge" code_challenge in
-    let* code_challenge_method =
-      require_nonempty "code_challenge_method" code_challenge_method
+    let* scopes = parse_scopes scope in
+    let* client_name, client_verification =
+      resolve_client ~base_path ~client_document ~client_id ~redirect_uri
     in
-    if not (String.equal response_type "code")
-    then Error (Invalid_request "response_type must be code")
-    else if not (String.equal code_challenge_method "S256")
-    then Error (Invalid_request "code_challenge_method must be S256")
-    else if not (valid_pkce_value code_challenge)
-    then Error (Invalid_request "code_challenge is invalid")
-    else if not (String.equal resource expected_resource)
-    then Error (Invalid_request "resource does not match the MCP endpoint")
-    else if
-      match state with
-      | Some value -> String.length value > Policy.max_state_bytes
-      | None -> false
-    then Error (Invalid_request "state is too long")
-    else
-      let* scopes = parse_scopes scope in
-      let* client_name, client_verification =
-        resolve_client ~base_path ~client_document ~client_id ~redirect_uri
-      in
-      Ok
-        { client_id
-        ; client_name
-        ; redirect_uri
-        ; resource
-        ; scopes
-        ; state
-        ; code_challenge
-        ; client_verification
-        }
+    Ok
+      { client_id
+      ; client_name
+      ; redirect_uri
+      ; resource
+      ; scopes
+      ; state
+      ; code_challenge
+      ; client_verification
+      }
 ;;
 
 let issue_authorization_code
@@ -905,9 +898,7 @@ let exchange_authorization_code
     ~resource
     ~code_verifier
   =
-  if not (enabled ())
-  then Error OAuth_disabled
-  else if not (valid_pkce_value code_verifier)
+  if not (valid_pkce_value code_verifier)
   then Error Invalid_grant
   else
     let hash = token_hash code in
@@ -970,163 +961,156 @@ let rotate_refresh_token
     ~scope
     ~resource
   =
-  if not (enabled ())
-  then Error OAuth_disabled
-  else
-    let refresh_hash = token_hash refresh_token in
-    let* family_id =
-      match refresh_token_family_id refresh_token with
-      | Some family_id -> Ok family_id
-      | None -> Error Invalid_grant
-    in
-    with_store_io ~base_path (fun () ->
-      let* family = load_family base_path family_id in
-      let current = now () in
-      match family with
-      | None -> Error Invalid_grant
-      | Some family
-        when Option.is_some family.revoked_at_unix ->
-        Error Invalid_grant
-      | Some family
-        when not
-               (constant_time_string_equal
-                  family.current_refresh_hash
-                  refresh_hash) ->
+  let refresh_hash = token_hash refresh_token in
+  let* family_id =
+    match refresh_token_family_id refresh_token with
+    | Some family_id -> Ok family_id
+    | None -> Error Invalid_grant
+  in
+  with_store_io ~base_path (fun () ->
+    let* family = load_family base_path family_id in
+    let current = now () in
+    match family with
+    | None -> Error Invalid_grant
+    | Some family
+      when Option.is_some family.revoked_at_unix ->
+      Error Invalid_grant
+    | Some family
+      when not
+             (constant_time_string_equal
+                family.current_refresh_hash
+                refresh_hash) ->
+      let* () = revoke_family_locked ~base_path ~current family in
+      Log.Auth.warn "oauth: refresh token replay revoked token family";
+      Error Invalid_grant
+    | Some family ->
+      let* live_bootstrap =
+        live_bootstrap_allows
+          ~base_path
+          ~agent_name:family.agent_name
+          ~bootstrap_token_hash:family.bootstrap_token_hash
+          ~granted_role:family.role
+      in
+      if not live_bootstrap
+      then (
         let* () = revoke_family_locked ~base_path ~current family in
-        Log.Auth.warn "oauth: refresh token replay revoked token family";
-        Error Invalid_grant
-      | Some family ->
-        let* live_bootstrap =
-          live_bootstrap_allows
+        Log.Auth.warn "oauth: live bootstrap credential revoked token family";
+        Error Invalid_grant)
+      else if
+        family.refresh_expires_at_unix <= current
+        || not (String.equal family.client_id client_id)
+        || not (String.equal family.resource expected_resource)
+        || not
+             (match resource with
+              | None -> true
+              | Some requested -> String.equal family.resource requested)
+      then Error Invalid_grant
+      else (
+        let* scopes =
+          match scope with
+          | None -> Ok family.scopes
+          | Some raw when String.equal (String.trim raw) "" -> Error Invalid_scope
+          | Some raw ->
+            let* requested = parse_scopes (Some raw) in
+            let granted requested_scope =
+              List.exists (equal_scope requested_scope) family.scopes
+            in
+            if List.for_all granted requested then Ok requested else Error Invalid_scope
+        in
+        let* role = effective_role ~bootstrap_role:family.role scopes in
+        let old_access_path = access_path base_path family.current_access_hash in
+        let* pair =
+          mint_pair_locked
             ~base_path
+            ~family_id:family.family_id
+            ~client_id:family.client_id
             ~agent_name:family.agent_name
             ~bootstrap_token_hash:family.bootstrap_token_hash
-            ~granted_role:family.role
+            ~role
+            ~scopes
+            ~resource:family.resource
         in
-        if not live_bootstrap
-        then (
-          let* () = revoke_family_locked ~base_path ~current family in
-          Log.Auth.warn "oauth: live bootstrap credential revoked token family";
-          Error Invalid_grant)
-        else if
-          family.refresh_expires_at_unix <= current
-          || not (String.equal family.client_id client_id)
-          || not (String.equal family.resource expected_resource)
-          || not
-               (match resource with
-                | None -> true
-                | Some requested -> String.equal family.resource requested)
-        then Error Invalid_grant
-        else (
-          let* scopes =
-            match scope with
-            | None -> Ok family.scopes
-            | Some raw when String.equal (String.trim raw) "" -> Error Invalid_scope
-            | Some raw ->
-              let* requested = parse_scopes (Some raw) in
-              let granted requested_scope =
-                List.exists (equal_scope requested_scope) family.scopes
-              in
-              if List.for_all granted requested then Ok requested else Error Invalid_scope
-          in
-          let* role = effective_role ~bootstrap_role:family.role scopes in
-          let old_access_path = access_path base_path family.current_access_hash in
-          let* pair =
-            mint_pair_locked
-              ~base_path
-              ~family_id:family.family_id
-              ~client_id:family.client_id
-              ~agent_name:family.agent_name
-              ~bootstrap_token_hash:family.bootstrap_token_hash
-              ~role
-              ~scopes
-              ~resource:family.resource
-          in
-          (match remove_file_if_exists old_access_path with
-           | () -> ()
-           | exception exn -> (* cancel-guard-ok: remove_file_if_exists is Sys.remove and performs no Eio operation. *)
-             Log.Auth.warn
-               "oauth: superseded access record cleanup failed error=%s"
-               (Printexc.to_string exn));
-          Ok pair))
+        (match remove_file_if_exists old_access_path with
+         | () -> ()
+         | exception exn -> (* cancel-guard-ok: remove_file_if_exists is Sys.remove and performs no Eio operation. *)
+           Log.Auth.warn
+             "oauth: superseded access record cleanup failed error=%s"
+             (Printexc.to_string exn));
+        Ok pair))
 ;;
 
 let find_access_credential ~base_path ~token =
-  if not (enabled ())
-  then Ok None
+  let hash = token_hash token in
+  let path = access_path base_path hash in
+  let* present = Auth_credential_base.credential_path_exists path
+    |> Result.map_error (fun error -> System (System_error.IoError
+      ("OAuth credential store: " ^ masc_error_to_string error))) in
+  if not present then Ok None
   else
-    let hash = token_hash token in
-    let path = access_path base_path hash in
-    let* present = Auth_credential_base.credential_path_exists path
-      |> Result.map_error (fun error -> System (System_error.IoError
-        ("OAuth credential store: " ^ masc_error_to_string error))) in
-    if not present then Ok None
-    else
-      let request_resource = expected_resource () in
-      let result =
-        with_store_io ~base_path (fun () ->
-          let* json = load_json_opt path in
-          match json with
-          | None -> Ok None
-          | Some json ->
-            let* record = access_record_of_yojson json in
-            let* family = load_family base_path record.family_id in
-            (match family with
-             | None -> Error (Store_error "OAuth access token family is missing")
-             | Some family ->
-               let* live_bootstrap =
-                 live_bootstrap_allows
-                   ~base_path
-                   ~agent_name:family.agent_name
-                   ~bootstrap_token_hash:family.bootstrap_token_hash
-                   ~granted_role:family.role
+    let request_resource = expected_resource () in
+    let result =
+      with_store_io ~base_path (fun () ->
+        let* json = load_json_opt path in
+        match json with
+        | None -> Ok None
+        | Some json ->
+          let* record = access_record_of_yojson json in
+          let* family = load_family base_path record.family_id in
+          (match family with
+           | None -> Error (Store_error "OAuth access token family is missing")
+           | Some family ->
+             let* live_bootstrap =
+               live_bootstrap_allows
+                 ~base_path
+                 ~agent_name:family.agent_name
+                 ~bootstrap_token_hash:family.bootstrap_token_hash
+                 ~granted_role:family.role
+             in
+             if not live_bootstrap
+             then
+               let* () =
+                 revoke_family_locked ~base_path ~current:(now ()) family
                in
-               if not live_bootstrap
-               then
-                 let* () =
-                   revoke_family_locked ~base_path ~current:(now ()) family
-                 in
-                 Error Invalid_grant
-               else if
-                 record.expires_at_unix <= now ()
-                 || Option.is_some family.revoked_at_unix
-                 || not
-                      (match request_resource with
-                       | Some expected -> String.equal family.resource expected
-                       | None -> false)
-                 || not (constant_time_string_equal record.token_hash hash)
-                 || not
-                      (constant_time_string_equal family.current_access_hash hash)
-               then Error Invalid_grant
-               else
-                 Ok
-                   (Some
-                      { id = None
-                      ; agent_id = None
-                      ; agent_name = family.agent_name
-                      ; token = record.token_hash
-                      ; role = family.role
-                      ; created_at =
-                          iso8601_of_unix_seconds record.issued_at_unix
-                      ; expires_at =
-                          Some (iso8601_of_unix_seconds record.expires_at_unix)
-                      })))
-      in
-      match result with
-      | Ok value -> Ok value
-      | Error (Store_error detail) ->
-        Error (System (System_error.IoError ("OAuth credential store: " ^ detail)))
-      | Error Temporarily_unavailable ->
-        Error (System (System_error.IoError "OAuth credential store unavailable"))
-      | Error
-          (( OAuth_disabled
-           | Invalid_request _
-           | Invalid_client
-           | Invalid_grant
-           | Invalid_scope
-           | Access_denied ) as error) ->
-        Error
-          (Auth
-             (Auth_error.InvalidToken
-                ("OAuth access token rejected: " ^ protocol_error_code error)))
+               Error Invalid_grant
+             else if
+               record.expires_at_unix <= now ()
+               || Option.is_some family.revoked_at_unix
+               || not
+                    (match request_resource with
+                     | Some expected -> String.equal family.resource expected
+                     | None -> false)
+               || not (constant_time_string_equal record.token_hash hash)
+               || not
+                    (constant_time_string_equal family.current_access_hash hash)
+             then Error Invalid_grant
+             else
+               Ok
+                 (Some
+                    { id = None
+                    ; agent_id = None
+                    ; agent_name = family.agent_name
+                    ; token = record.token_hash
+                    ; role = family.role
+                    ; created_at =
+                        iso8601_of_unix_seconds record.issued_at_unix
+                    ; expires_at =
+                        Some (iso8601_of_unix_seconds record.expires_at_unix)
+                    })))
+    in
+    match result with
+    | Ok value -> Ok value
+    | Error (Store_error detail) ->
+      Error (System (System_error.IoError ("OAuth credential store: " ^ detail)))
+    | Error Temporarily_unavailable ->
+      Error (System (System_error.IoError "OAuth credential store unavailable"))
+    | Error
+        (( Invalid_request _
+         | Invalid_client
+         | Invalid_grant
+         | Invalid_scope
+         | Access_denied ) as error) ->
+      Error
+        (Auth
+           (Auth_error.InvalidToken
+              ("OAuth access token rejected: " ^ protocol_error_code error)))
 ;;

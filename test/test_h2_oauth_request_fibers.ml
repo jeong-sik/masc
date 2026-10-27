@@ -18,7 +18,6 @@ let trust_policy () =
   | Error error -> fail (Server_request_authority.trust_policy_error_to_string error)
 
 let with_gateway run =
-  Masc_test_deps.with_process_env "MASC_OAUTH_ENABLED" (Some "1") @@ fun () ->
   let base_path = Filename.temp_file "masc-h2-oauth-fibers" "" in
   Sys.remove base_path;
   Unix.mkdir base_path 0o700;

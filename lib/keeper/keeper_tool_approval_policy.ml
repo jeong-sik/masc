@@ -212,26 +212,13 @@ and verdict_of_nodes ~composition_plan_index node_tools =
 and verdict_for_undescribed ~identity_tool_index ~composition_plan_index ~tool_name ~input =
   match undescribed_kind ~identity_tool_index ?composition_plan_index tool_name with
   | Control verdict -> verdict
-  | Attached_service (Some true) ->
-    Run { because = "the service says this tool only reads" }
-  (* Writes and silence both belong to the durable Gate now
-     ({!Keeper_identity_gate}): the tool itself defers to the approvals
-     queue on the external-services lane, survives nobody watching, and is
-     resolved from the dashboard or TUI. Asking here too would put two
-     authorities in front of one call, and this stream-bound one loses on
-     the lanes that cannot ask — which is exactly where the 2026-08-27
-     incident ran. *)
-  | Attached_service (Some false) ->
+  (* The stream policy delegates every attached tool to the durable Gate.
+     Provider annotations do not independently authorize an external call. *)
+  | Attached_service (Some true | Some false | None) ->
     Run
       { because =
-          "the durable Gate decides this write; unapproved calls defer to \
+          "the durable Gate decides this external call; unapproved calls defer to \
            the approvals queue"
-      }
-  | Attached_service None ->
-    Run
-      { because =
-          "the service did not say whether this tool only reads; the \
-           durable Gate treats that silence as a write and defers it"
       }
   | Composition node_tools -> verdict_of_nodes ~composition_plan_index node_tools
   | Unknown ->

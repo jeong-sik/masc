@@ -71,11 +71,10 @@ val http_transports : clock:[> float Eio.Time.clock_ty ] Eio.Resource.t -> trans
     {!Keeper_runtime_resolved.provider_call_deadline_sec}, the keeper's
     no-progress threshold: a tools/call is work the model waits on and the
     attempt watchdog does not watch a tool in flight, so this deadline is the
-    only liveness the call has. The bound is per request: a call ends within
-    one threshold of its last completed request, so a server that answers
-    each request inside the threshold runs a call to its end (at most ten
-    MCP requests in one {!run_call}, counting a 401 refresh and retry). The
-    threshold is always set, the operator's or the failsafe floor. Discovery
+    only liveness the call has. The bound is per request, not a cumulative
+    call deadline: a server can keep pagination alive by answering each page
+    within the threshold. The threshold is always set, the operator's or the
+    failsafe floor. Discovery
     and the token endpoint are short JSON round trips of the same class as
     the Slack and Discord REST calls and run under
     {!Masc_http_client.default_request_timeout_sec}; a catalog refresh is an
@@ -106,6 +105,9 @@ type offered_tool = {
           name. A provider is free to call something [search], and so is
           masc; the model would otherwise be handed two tools with one name
           and no way to mean either. *)
+  remote_input_schema : Yojson.Safe.t;
+      (** The provider schema shown when this tool was offered, including
+          routing annotations that must remain bound to an approval. *)
   read_only : bool option;
       (** The provider's own [annotations.readOnlyHint], written down at
           attach time. [None] means the service said nothing, which is not
@@ -132,8 +134,7 @@ val agent_tools : provider:Keeper_oauth_provider.t -> catalog -> offering
     that. This module keeps the catalog and the wire; it holds no
     authorization opinion. *)
 
-(** Which request of a call failed. A call opens a session of its own
-    ([initialize], then the [initialized] notification) and then sends the
+(** Which request of a call failed. A call connects and then sends the
     [tools/call]; a transport error names no step, so the phase does. *)
 type call_phase =
   | Session_open
@@ -166,6 +167,7 @@ val run_call :
   provider:Keeper_oauth_provider.t ->
   remote_name:string ->
   arguments:Yojson.Safe.t ->
+  ?catalog_authority:Mcp_client.catalog_authority ->
   unit ->
   (Mcp_client.tool_result, call_error) result
 (** One call to one attached provider's tool, as this Keeper.
@@ -176,11 +178,9 @@ val run_call :
     spends a granted approval by host replay from the stored input rather
     than waiting for a byte-identical re-emission (#25947).
 
-    A call reads the token and opens a session of its own rather than
-    holding one for the turn. That is three requests where one would do --
-    [initialize], the [initialized] notification, then the call -- measured
-    against the live server on 2026-08-26, which does mint a session id, so
-    the handshake is not free.
+    A call reads the token and connects independently rather than holding a
+    connection for the turn. Bound calls read the current catalog and check
+    its schema and hint against the approval before sending a tool request.
 
     What it buys: a token refreshed mid-turn is picked up, an expired
     session heals by itself, and two concurrent tool calls have no shared
@@ -191,14 +191,11 @@ val run_call :
 
 val effect_disposition_of_call_error : call_error -> Tool_result.failure_effect_disposition
 (** What a failed call proves about the requested effect, in replay's
-    vocabulary. A precondition failure, a session that never came up, a
-    refused token and one of the three JSON-RPC rejections a server sends
-    before running any tool ([Invalid_request], [Method_not_found],
-    [Invalid_params]) prove the effect never began. Every other failure of
-    the [tools/call] -- a transport error (which may be the connection step
-    of that very request), an HTTP status such as 429 or a 5xx, any other
-    JSON-RPC code, an answer that does not parse -- leaves the outcome
-    unknown. A call proves nothing more than these two, which is why the
+    vocabulary. A local precondition failure, failure to open the session,
+    or an explicitly marked pre-send failure proves the effect never began.
+    Once the tool request has been sent, even a remote error response does
+    not independently prove that no effect occurred. A call proves nothing
+    more than these two, which is why the
     proof has two values and not {!Tool_result}'s three. Replay reads this
     as the execution's disposition and {!tool_result_of_call} reads the same
     proof as whether a retry is safe, so the two cannot disagree. *)
@@ -206,20 +203,12 @@ val effect_disposition_of_call_error : call_error -> Tool_result.failure_effect_
 val call_error_to_string : call_error -> string
 
 val tool_result_of_call :
-  read_only:bool option ->
   (Mcp_client.tool_result, call_error) result ->
   Agent_core.Types.tool_result
-(** The model's view of one call: a tool that ran and said no is a
-    recoverable answer, a refused credential is not, and a transport or
-    server failure is recoverable when a second call is safe: the provider
-    said the tool only reads ([read_only = Some true], the offered tool's
-    own word; silence is not that), or the failure proves the effect never
-    began ({!effect_disposition_of_call_error}). A write whose outcome is
-    unknown is not
-    recoverable, and a tool the provider did not mark read-only
-    ([read_only = None]) is held to that too; the message tells the model
-    to read the service's state first. Kept beside {!run_call} so the
-    phases and the model vocabulary cannot drift apart in two files. *)
+(** The model's view of one call. A transport or server failure is
+    recoverable only when the failure proves the effect never began
+    ({!effect_disposition_of_call_error}). An unknown outcome is not
+    recoverable merely because the remote tool claims to be read-only. *)
 
 val for_turn : base_path:string -> keeper_name:string -> offering
 (** Every attached provider's tools, for one turn.

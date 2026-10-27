@@ -19,6 +19,7 @@
 - 인증·인가 코드에는 `(* HIGH-RISK-UNREVIEWED: 이유 *)`를 달고 사람이 검토한다.
 - 한 층에서 다음 층으로 넘어가기 전에 이전 층에 적대적 리뷰어를 붙인다. 자기 변경을 자기가 승인하지 않는다.
 - 각 층의 결과, 범위, 시험, 되돌리는 길은 그 층을 시작할 때 PR 본문에 적는다. 아래 표는 순서와 경계만 정한다.
+- 층의 설계 열에 적힌 절의 의무는 모두 그 층의 범위다. 범위 목록은 구현 때 빠지기 쉬운 것만 적는다. 층 PR 본문의 시험 목록에는 그 절의 의무를 한 줄씩 적는다.
 - `Single_user`에서 달라지는 동작이 있으면 그 층의 PR 본문에 적는다. 지금 알려진 것은 A2의 부팅 검사 하나다.
 - 층을 시작할 때 §2에서 그 층이 기대는 개수와 줄 번호를 다시 세고, §5에서 그 층이 맡은 설계 문구 정리를 다시 읽는다. 병합된 설계 문서를 고치는 변경은 PR 본문에 따로 적는다.
 
@@ -150,6 +151,8 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 **F2 범위**
 
 - 실행은 그 record가 의존하는 모든 record의 `cleared_epoch`가 현재 `transition_epoch`와 같을 때만 허용한다. 과거 epoch의 `Cleared`는 현재 권한이 아니다(§10.1).
+- 변경·누락·판정 불일치가 있는 record만 `Pending`으로 남는다. `Pending`은 Active인 원 owner, 원 승인자, 또는 Service를 이어받도록 Admin이 지정한 principal이 `Owner_revalidated`로 닫는다(§10.1).
+- 창은 manifest 게시와 모든 record·artifact의 분류가 끝나는 시점에 닫는다. `Pending`이 0이라는 뜻이 아니다. 분류 도중 크래시하면 같은 `transition_epoch`와 manifest로 이어서 분류한다(§10.1).
 - 분류할 수 없는 record는 `Denied(unclassifiable)`로 확정한다. credential을 품은 record는 `CredentialUncertain`으로 두고 Quarantined로 보낸다. 창 중 purge로 사라진 항목은 `Purged_during_window`로 센다(§10.1).
 - Block record는 `cause`(`Security_incident` 또는 `Operational`)를 필수로 갖는다. `Security_incident`의 해제는 적격 Admin만 한다. 적격 Admin이 없으면 Local_operator가 `Quarantined(cause=No_eligible_admin)`로 기록한다. 부재가 확인된 owner의 `Pending`은 Local_operator의 `Quarantined`로만 끝낸다(§10.4).
 - 복원·롤백 직후 모든 공유와 실행은 `AuthorizationUncertain`이다. 복원본에서 되살아난 account-home과 credential artifact는 `CredentialUncertain`이고, owner가 provider 재인증과 새 credential generation 검증을 마치기 전에는 mount하지 않는다. 일반 재기동은 generation이 같으면 재인증 없이 검증한다(§10.5).
@@ -158,6 +161,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 - 창 중에는 `Read_only` dispatch도 새로 받지 않는다. 긴급 Block·Disable·Revoke는 창 중에도 거부하지 않는다. 창 중 도착한 효과는 성공한 work로 적용하지 않고 새 record로 현재 epoch 검사를 받는다(§10.2).
 - account-home은 unmount를 확인하기 전까지 `Release_pending`이다(§10.2).
 - 복구 안내 Board 글은 typed `recovery_notice`로 표시한다. Keeper wake는 subscription 후보 생성 필터와 dispatch 진입 검사 양쪽에서 뺀다. 일반 Board 글에 문자열로 wake를 끄는 규칙은 두지 않는다. 작성자는 Local_operator와 manifest 게시 시스템 이벤트뿐이다. 창이 닫히면 `closed`로 바꾸되 wake 제외는 유지한다. Cleared 승인자에게는 wake 대신 Dashboard 배지와 별도 inbox로 자기 항목 수를 보여 준다(§10.2).
+- 그 밖에 §10.1~§10.5가 정한 의무도 이 층의 범위다. 재검증 순서, `Recovery_manifest`의 접근 제한, Disabled·삭제·purged 주체의 durable work를 먼저 `Denied`로 확정하는 것, `Outcome_unknown` lease를 되살리지 않는 것, 창 중 도래한 `Preauthorized_expiry`를 분류 단계에서 다시 유도하는 것이다.
 - 크기가 20k token을 넘으면 분류(§10.1, §10.4, §10.5)와 전이 창 규칙(§10.2)으로 쪼갠다.
 
 **F3 범위**

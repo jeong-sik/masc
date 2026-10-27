@@ -82,6 +82,14 @@ let test_codex_discovery_contract () =
       (Yojson.Safe.Util.member "code_challenge_methods_supported" metadata
        |> Yojson.Safe.Util.to_list
        |> List.map Yojson.Safe.Util.to_string);
+    (match Server_request_authority.of_host_port ~host:"localhost" ~port:9000 with
+     | Ok other ->
+       check
+         string
+         "issuer follows the admitted authority"
+         "http://localhost:9000"
+         (Server_oauth_metadata.issuer other)
+     | Error `Malformed -> fail "localhost authority must be valid");
     let resource_metadata = Server_oauth_metadata.protected_resource_json authority in
     check
       bool

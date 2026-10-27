@@ -70,8 +70,21 @@ let parse_row ~file_path line =
 
 (* Each scoped connector directory is loaded once per process. Without this
    cache every missing live name rescans the append history, and repeated live
-   answers append the same row forever. The mutex also serializes shared
-   connector writers. *)
+   answers append the same row forever. The lock also serializes shared
+   connector writers.
+
+   [remember] holds the lock across the directory creation and the append, and
+   the first use of a file holds it across the read of that file. [Fs_compat]
+   runs both on a worker thread, so the calling fiber suspends with the lock
+   held, and the fibers of a domain share one thread. A [Stdlib.Mutex] held
+   across that suspension raises [Sys_error "Mutex.lock: Resource deadlock
+   avoided"] for the next fiber that locks it instead of making it wait. The
+   cross-context lock makes a fiber wait cooperatively, and system threads and
+   other domains still block on the underlying mutex. [remember] takes the
+   durable variant, because the check of the known name, the append and the
+   table update must not be split by a cancellation: the file would then hold
+   a row the table does not know, and the next [remember] of that name would
+   append it again. *)
 let directories : (string, (string, string) Hashtbl.t) Hashtbl.t =
   Hashtbl.create 8
 ;;
@@ -80,12 +93,7 @@ let sorted_directories : (string, (string * string) list) Hashtbl.t =
   Hashtbl.create 8
 ;;
 
-let directories_mu = Stdlib.Mutex.create ()
-
-let with_directories_lock f =
-  Stdlib.Mutex.lock directories_mu;
-  Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock directories_mu) f
-;;
+let directories_lock = Cross_context_mutex.create ()
 
 let load_directory file_path =
   let directory = Hashtbl.create 32 in
@@ -125,7 +133,7 @@ let remember ~base_dir ~connector ~scope ~(id : string) ~(name : string) () =
   if String.equal id "" || String.equal name ""
   then ()
   else
-    with_directories_lock (fun () ->
+    Cross_context_mutex.with_durable_lock directories_lock (fun () ->
       let file_path = names_path ~base_dir ~connector ~scope in
       let directory = directory_for_path file_path in
       match Hashtbl.find_opt directory id with
@@ -158,13 +166,13 @@ let recall ~base_dir ~connector ~scope ~(id : string) =
   if String.equal id ""
   then None
   else
-    with_directories_lock (fun () ->
+    Cross_context_mutex.with_lock directories_lock (fun () ->
       let file_path = names_path ~base_dir ~connector ~scope in
       directory_for_path file_path |> fun directory -> Hashtbl.find_opt directory id)
 ;;
 
 let entries ~base_dir ~connector ~scope =
-  with_directories_lock (fun () ->
+  Cross_context_mutex.with_lock directories_lock (fun () ->
     let file_path = names_path ~base_dir ~connector ~scope in
     match Hashtbl.find_opt sorted_directories file_path with
     | Some snapshot -> snapshot

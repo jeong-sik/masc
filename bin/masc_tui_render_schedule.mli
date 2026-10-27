@@ -113,6 +113,10 @@ val waiting_group_heading_detail :
   string
 (** Render the suffix selected by [waiting_group_layout]. *)
 
+val keeper_failure_context_for_detail : show_runtime:bool -> string option -> string option
+(** Preserve the existing failure reading for DETAIL only when its runtime cell
+    is hidden. A visible runtime keeps the sole copy and returns [None]. *)
+
 (** {1 Memory fleet columns} *)
 
 type memory_columns = {

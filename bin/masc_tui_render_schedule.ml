@@ -289,6 +289,9 @@ let waiting_group_heading_detail ~available_cells ~group_count summary =
   let layout = waiting_group_layout ~available_cells ~group_count summary in
   waiting_group_detail ~compact:layout.compact summary
 
+let keeper_failure_context_for_detail ~show_runtime failure_context =
+  if show_runtime then None else failure_context
+
 module Table = Masc_tui_table
 
 (* Memory fleet columns.

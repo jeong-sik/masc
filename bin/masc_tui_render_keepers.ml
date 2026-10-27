@@ -217,7 +217,7 @@ let keeper_waiting_detail (row : Keeper_list_model.row) =
   | Keeper_list_model.Waiting_observed { kwr_waiting_on = []; _ }
   | Keeper_list_model.Waiting_unobserved | Keeper_list_model.Waiting_unavailable -> None
 
-let keeper_detail_text (row : Keeper_list_model.row) =
+let keeper_detail_text ?(failure_context = None) (row : Keeper_list_model.row) =
   let approval =
     Option.map
       (fun (approval : Tui_decode.keeper_tool_approval) ->
@@ -235,7 +235,8 @@ let keeper_detail_text (row : Keeper_list_model.row) =
     | "" -> None
     | word -> Some ("health " ^ word)
   in
-  List.map keeper_badge_text (Keeper_list_model.badges_of_row row)
+  Option.to_list failure_context
+  @ List.map keeper_badge_text (Keeper_list_model.badges_of_row row)
   @ List.filter_map Fun.id
       [ approval; questions; keeper_waiting_detail row; keeper_task_detail row; health ]
   |> String.concat " · "
@@ -308,7 +309,15 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
          ^ Ansi.reset
        else "")
     ; " "
-    ; Theme.recede () ^ fit_width (keeper_detail_text row) columns.kcol_task ^ Ansi.reset
+    ; Theme.recede ()
+      ^ fit_width
+          (keeper_detail_text
+             ~failure_context:
+               (Render_schedule.keeper_failure_context_for_detail
+                  ~show_runtime:columns.kcol_show_runtime failure_context)
+             row)
+          columns.kcol_task
+      ^ Ansi.reset
     ]
 
 let keeper_secondary_row_content ~inner (row : Keeper_list_model.row) =

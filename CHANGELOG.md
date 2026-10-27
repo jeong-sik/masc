@@ -78,7 +78,7 @@
 - Restore the exact linked Goal verifier attempt, including its complete original input and staged run identity, before preparing another request. Only a definite typed terminal refusal can create a linked successor; unknown execution cannot. #45654
 - Retain Goal host commit intents and recover lost replies through exact authoritative before/after observations without another model call or independent completion authority. #45654
 - Add transaction-backed startup Admin token preparation that preserves a valid persisted credential pair and refuses invalid occupied state. (#45656)
-- Play native MIDI2 Clip schedules without creating a capture/WAV or reducing UMP precision. Preserve original PPQ and rational setup/sequence clocks until one final absolute-nanosecond rounding. A native2-only owner validates Ready/Start admission and owns notes, pedals and destination resources through pause, seek, stop and failure. (#45659)
+- Play native MIDI2 Clip schedules without creating a capture/WAV or reducing UMP precision. Preserve original PPQ and rational setup/sequence clocks until one final absolute-nanosecond rounding. A native2-only owner validates Ready/Start admission and owns notes, pedals and destination resources through pause, seek, stop and failure. (#45659) Guide: `tools/alphatex/MIDI-CLIP.md`.
 - Audition imported MIDI2 Clips from the terminal through an explicit native MIDI2 output: play/pause/resume, immutable-plan restart, exact event seek, output selection and session-only missing-tempo input. Stop, route changes and close retain ownership through native cleanup. Initial Ready is checked against the admitted source and exact plan clock before Start. (#45660)
 - Connect the actual Goal verifier agent to immutable retained inputs, fixed review runs, complete tool observations and host-owned proof commitment. Recover judgments before lookup/prompt preparation and discover work after the Goal phase has moved. #45671
 - Persist actor-bound explicit retries of definitely settled Goal reviews while keeping unknown dispatch non-replayable and automatic retry subject to typed candidate evidence. #45671
@@ -92,7 +92,7 @@
   The reserved operator port requires an admin credential, preserves the original
   worker owner and keeps OAuth requests/results out of model tools and retained
   observations. Private callbacks clear their URL and are pinned to the original
-  popup, workspace and dashboard credential. #45763
+  popup, workspace and dashboard credential. #45763 Guide: `addons/onepassword/README.md`.
 - Preserve the original callback window or manual return through uncertain
   delivery; clear it only after its private backend receipt matches the original
   connection. Keep explicit retries bound to that same request. (#45763)

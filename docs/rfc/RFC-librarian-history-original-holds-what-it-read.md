@@ -36,6 +36,7 @@ Librarian 이 끝난 턴을 읽는 pass 하나는, 새로 읽을 내용이 한 �
 
 - 2026-10-27 12:2x KST, 가장 큰 gate 기록은 30.7 MB 였다. 그 안의 capture 에서 checkpoint `canonical_bytes` 가 5.0 MB, 같은 checkpoint 의 `messages` 가 4.7 MB, `traces` 가 4.6 MB, `boundaries` 가 1.9 MB 였다. `input_text` 의 `messages` 4.8 MB 는 그 pass 가 읽을 범위였다.
 - #46247 배포(`eff0a3bd28b`, 13:18 KST) 뒤 memprof 할당 상위는 `Keeper_librarian_durable_request.of_json`·`restore`(약 16%)와 `Lane_addon_tool_request_owner.retain`·`load`(약 12%)다. history original 을 다시 읽고 검증하는 경로다.
+- 같은 서버의 live heap(7~9 GB)도 대부분 이 경로다. memprof 를 15초 간격으로 읽어 live 표가 `gc.live_words` 를 거의 덮게 한 뒤 보니, 약 70% 이상이 history original 을 읽는 도중의 데이터였다. 기록 본문 파싱(`request_of_body`) 34~41%, 복원 때 문자열 파싱과 다시 인코딩 19~25%, 원본 바이트 8~12% 다. checkpoint lineage 메모는 2~3% 다(`docs/evidence/2026-10-27-librarian-live-heap/`). 그래서 상주 메모리는 동시에 도는 pass 수와 기록 크기를 곱한 만큼 커진다.
 - Librarian lane 은 Keeper 마다 하나다. 턴이 끝날 때마다 pass 가 돌고, 이 비용이 Keeper 수만큼 겹친다. 운영자가 Keeper 300명을 돌렸을 때 메모리가 약 150 GB 까지 올라 서버가 죽었다고 보고했다. 그 실행의 기록은 없어서 원인을 이것으로 단정하지는 않는다.
 
 ## 2. 지금 original 이 담는 것

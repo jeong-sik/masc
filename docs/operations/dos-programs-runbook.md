@@ -65,27 +65,29 @@ name that already holds a checkpoint replaces it and reports what it held in
 `replaced`. The names `autosave` and `autosave-prev` belong to the lane and a
 save to either is refused.
 
-A worker that starts resumes `autosave` before its first call, with nobody
+A worker that starts restores `autosave` before its first call, with nobody
 holding the controller; whoever moves the machine first takes it. It never
-falls back to `autosave-prev`. The resumed machine goes on writing `autosave`
-the way the machine before the restart did, so `autosave-prev` keeps what it
-held and no consent is asked. With no `autosave`, or with one that does not
+falls back to `autosave-prev`. With no `autosave`, or with one that does not
 restore, the worker starts with nothing loaded and its activity feed says
 why. `masc_dos_screen` and `masc_dos_load` with no program then say what the
 two autosave slots hold, under `autosave` and `previous_autosave`. Resume with
 `masc_dos_restore` and `slot` set to `autosave`, or to `autosave-prev` when the
 autosave is gone.
 
-A machine started by `masc_dos_load` or `masc_dos_restore` copies the
-`autosave` file to `autosave-prev` with its first autosave, and what
-`autosave-prev` held is gone. The start therefore asks for consent exactly
-when both files exist, readable or not. Without consent the call is refused
+A machine started by `masc_dos_load`, or by `masc_dos_restore` of a named
+slot, copies the `autosave` file to `autosave-prev` with its first autosave,
+and what `autosave-prev` held is gone. Such a start therefore asks for consent
+exactly when both files exist, readable or not. Without consent the call is refused
 before anything changes, and the refusal names what `autosave-prev` holds
 (`would_discard`) and the autosave that would move in (`moves_to_previous`).
 To keep the old campaign, restore `autosave-prev` first and save it under a
 name. To discard it, repeat the call with `discard_previous_autosave` set to
 `true`. With no file in `autosave-prev`, or with only `autosave-prev` left, the
-start asks nothing. A restore of `autosave-prev` itself asks nothing either.
+start asks nothing. A restore of `autosave` or `autosave-prev` never asks: the
+machine restored from `autosave` goes on writing `autosave` and leaves
+`autosave-prev` as it is, as a machine that was never stopped does, and the
+machine restored from `autosave-prev` already holds what its first autosave
+replaces.
 
 ## What counts as complete
 

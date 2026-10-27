@@ -1,8 +1,10 @@
-(* Starting a machine -- a load, or a restore -- never discards the previous
-   autosave unless the caller consents. Its first autosave copies the autosave
-   to autosave-prev, so what is at stake is the file in autosave-prev; with no
-   file there the autosave moves in and survives, and nothing is asked. Lane
-   level: the tool arguments and messages are in test_dos_tools. *)
+(* Starting a machine -- a load, or a restore of a named slot -- never discards
+   the previous autosave unless the caller consents. Its first autosave copies
+   the autosave to autosave-prev, so what is at stake is the file in
+   autosave-prev; with no file there the autosave moves in and survives, and
+   nothing is asked. A restore of either autosave slot, and a worker's start,
+   continue that file's history and discard nothing. Lane level: the tool
+   arguments and messages are in test_dos_tools. *)
 
 open Alcotest
 
@@ -220,11 +222,28 @@ let test_a_restore_asks_before_it_would_discard_the_campaign () =
       (steps_in fixture "autosave-prev"))
 ;;
 
-let test_a_restore_of_the_autosave_asks_when_both_files_are_there () =
-  with_fixture (fun fixture ->
-    let campaign_steps, boot_steps = campaign_in_previous fixture in
-    would_discard ~name:"restore of the autosave" ~discarded_steps:campaign_steps
-      ~kept_steps:boot_steps (restore fixture Dos_lane.autosave_slot))
+(* Why a restore of the autosave asks nothing. Two runs from the same start,
+   with the campaign kept in autosave-prev: one plays on without stopping; the
+   other stops at the same point, restores the autosave with no consent and
+   makes the same call. In both, autosave-prev is the campaign byte for byte
+   after that call's save. *)
+let test_a_restore_of_the_autosave_leaves_autosave_prev_as_uninterrupted_play_does () =
+  let run ~name ~between =
+    with_fixture (fun fixture ->
+      ignore (campaign_in_previous fixture);
+      step ();
+      let campaign = Digest.file (prev_path fixture) in
+      let autosaved = steps_in fixture "autosave" in
+      between fixture autosaved;
+      step ();
+      check bool (name ^ ": the call saved") true (steps_in fixture "autosave" > autosaved);
+      check string (name ^ ": autosave-prev is the campaign byte for byte") campaign
+        (Digest.file (prev_path fixture)))
+  in
+  run ~name:"uninterrupted" ~between:(fun _fixture _autosaved -> ());
+  run ~name:"restored" ~between:(fun fixture autosaved ->
+    let restored = require (restore fixture Dos_lane.autosave_slot) in
+    check int "restored: the machine is the autosave" autosaved restored.Dos_lane.steps)
 ;;
 
 (* What would be replaced is already inside the machine that restore builds. *)
@@ -560,28 +579,6 @@ let test_an_unreadable_autosave_is_not_resumed_and_says_why () =
     | [] -> fail "the failed resume left no line on the activity feed")
 ;;
 
-(* The equivalence the resume rests on. An uninterrupted machine's autosaves
-   replace the autosave and leave autosave-prev alone, and so do a resumed
-   machine's. Restoring the autosave instead would move it into autosave-prev
-   on the first save and lose the campaign kept there. *)
-let test_the_first_save_after_a_resume_leaves_autosave_prev_as_play_would () =
-  with_fixture (fun fixture ->
-    ignore (campaign_in_previous fixture);
-    step ();
-    let campaign = Digest.file (prev_path fixture) in
-    step ();
-    check string "uninterrupted play leaves autosave-prev alone" campaign
-      (Digest.file (prev_path fixture));
-    let autosaved = steps_in fixture "autosave" in
-    restart ();
-    let machine = resumed ~name:"a start after the second game" (resume fixture) in
-    check int "the resumed machine is the autosave" autosaved machine.Dos_lane.steps;
-    step ();
-    check bool "its first save replaced the autosave" true (steps_in fixture "autosave" > autosaved);
-    check string "and left autosave-prev as uninterrupted play does" campaign
-      (Digest.file (prev_path fixture)))
-;;
-
 let test_a_start_leaves_a_loaded_machine_alone () =
   with_fixture (fun fixture ->
     ignore (play_a_campaign fixture);
@@ -621,8 +618,9 @@ let () =
     ; ( "restore"
       , [ test_case "a restore asks before it would discard the campaign" `Quick
             test_a_restore_asks_before_it_would_discard_the_campaign
-        ; test_case "a restore of the autosave asks when both files are there" `Quick
-            test_a_restore_of_the_autosave_asks_when_both_files_are_there
+        ; test_case "a restore of the autosave leaves autosave-prev as uninterrupted play does"
+            `Quick
+            test_a_restore_of_the_autosave_leaves_autosave_prev_as_uninterrupted_play_does
         ; test_case "a restore of the previous autosave asks nothing" `Quick
             test_a_restore_of_the_previous_autosave_asks_nothing
         ; test_case "a slot that does not exist is reported, not asked about" `Quick
@@ -646,8 +644,6 @@ let () =
             test_a_start_with_no_autosave_stays_unloaded
         ; test_case "an unreadable autosave is not resumed and says why" `Quick
             test_an_unreadable_autosave_is_not_resumed_and_says_why
-        ; test_case "the first save after a resume leaves autosave-prev as play would" `Quick
-            test_the_first_save_after_a_resume_leaves_autosave_prev_as_play_would
         ; test_case "a start leaves a loaded machine alone" `Quick
             test_a_start_leaves_a_loaded_machine_alone
         ] )

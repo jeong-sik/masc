@@ -200,10 +200,10 @@ let held_of_lookup = function
    lane cannot say: with no machine it holds no checkpoint directory, so the
    slots are looked up here, where [base_path] is known. Restoring is the first
    answer whenever something is saved, because [masc_dos_restore] works with no
-   machine loaded. A start that is not a restore of the previous autosave --
-   a load, or a restore of the autosave -- replaces the previous autosave with
-   its first save, so [discards] says what that would be: [None] when the
-   previous slot is empty, and then no consent is needed. *)
+   machine loaded, and a restore of either autosave slot discards nothing. A
+   load replaces the previous autosave with its first save, so [discards] says
+   what a load would discard: [None] when the previous slot is empty, and then
+   no consent is needed. *)
 type no_machine_guidance =
   | Restore_autosave of
       { autosave : Dos_lane.autosave_status
@@ -252,12 +252,11 @@ let no_machine_message guidance =
       refusal (describe_held (Dos_lane.Held autosave)) current previous
   | Restore_autosave { autosave; discards = Some held } ->
     Printf.sprintf
-      "%s. An autosave is waiting: %s. %s holds %s, which the first save of a resumed or \
-       newly loaded machine replaces. Resume the autosave with masc_dos_restore slot=%s %s, \
-       or look at %s first with masc_dos_restore slot=%s, which asks for nothing. \
-       masc_dos_load needs %s too."
-      refusal (describe_held (Dos_lane.Held autosave)) previous (describe_held held) current
-      consent previous previous consent
+      "%s. An autosave is waiting: %s. Resume it with masc_dos_restore slot=%s, which \
+       leaves %s as it is. masc_dos_load starts a different program instead; its first \
+       save would replace what %s holds (%s), so it needs %s."
+      refusal (describe_held (Dos_lane.Held autosave)) current previous previous
+      (describe_held held) consent
   | Unreadable_autosave { reason; discards = None } ->
     Printf.sprintf
       "%s. An autosave file is there but this server cannot read it: %s. masc_dos_load \
@@ -282,8 +281,9 @@ let no_machine ~base_path ~tool_name ~start_time =
     ~data:(reject_data_of_fields (autosave_slots_fields found)) message
 ;;
 
-(* [masc_dos_load] or [masc_dos_restore] would start a machine whose first save
-   replaces the previous autosave, and the call did not consent. A refusal
+(* [masc_dos_load], or [masc_dos_restore] of a named slot, would start a machine
+   whose first save replaces the previous autosave, and the call did not
+   consent. A refusal
    before anything changed: it names what would be lost, what survives, and
    both ways forward. *)
 let would_discard_previous ~tool_name ~start_time (discard : Dos_lane.discard) =

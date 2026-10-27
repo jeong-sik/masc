@@ -264,7 +264,8 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
     기계 없이 시작하고, 그 이유를 기계 활동 기록(`recent_activity`)에 남긴다. `autosave-prev` 로 대신 넘어가지 않는다.
   - 이전 자동 저장을 버려도 되는지(`previous_autosave_consent`) 묻지 않는다. 불러온 기계는 재시작 전 판을
     그대로 이어 가서 `autosave` 만 덮어쓰고 `autosave-prev` 는 건드리지 않는다. 재시작 없이 계속 했을 때와
-    같은 파일이 남으니 버려지는 것이 없다. 손으로 하는 `masc_dos_restore` 는 새 판으로 시작하므로 지금처럼 묻는다.
+    같은 파일이 남으니 버려지는 것이 없다. 손으로 하는 `masc_dos_restore slot=autosave` 도 같은 길을 지나서
+    묻지 않는다. 이름 붙인 체크포인트를 불러올 때만 새 판으로 시작해서 `autosave-prev` 를 덮으므로 묻는다.
 - "떠난 조종자"(`Keeper_dos_controller.holder_left`)는 다음 움직임 전에 풀린다.
   - 멈춘 keeper.
     - 영구히 지운 keeper(meta 삭제: `remove_meta` 종료, supervisor 정리, purge)는 다음 움직임이 알아보지 못한다.

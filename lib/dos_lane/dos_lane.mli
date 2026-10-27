@@ -93,9 +93,9 @@ type held_autosave =
     that slot held; so starting a machine is the act that discards the
     previous autosave, and this is the consent for it. With no previous
     autosave nothing is discarded: the autosave moves into the slot and
-    survives there, and no consent is asked. {!resume_autosave} asks for none
-    either: the machine it resumes continues the autosave's own play and
-    leaves [autosave_prev_slot] as it is. *)
+    survives there, and no consent is asked. A restore of [autosave_slot] or
+    [autosave_prev_slot] continues that file's history and discards nothing,
+    so it is never asked either. *)
 type previous_autosave_consent =
   | Keep_previous_autosave
       (** Refuse with {!error.Would_discard_previous_autosave} when starting
@@ -575,14 +575,19 @@ val restore :
     save a game wrote after the checkpoint is not overwritten by restoring an
     older one.
 
-    The restored machine's first autosave replaces the previous autosave, as
-    a loaded machine's does, so the same consent is asked: with both the
-    autosave and the previous autosave on disk, restoring any slot but
-    {!autosave_prev_slot} is {!Would_discard_previous_autosave} under
-    {!Keep_previous_autosave}. A restore of {!autosave_prev_slot} is never
-    asked, because the machine it restores already holds what would be
-    replaced. A slot that does not exist is not asked about; the read reports
-    it. A commit refuses when the previous autosave was replaced since
+    A machine restored from a named slot is a new incarnation: its first
+    autosave copies the autosave to {!autosave_prev_slot}, replacing the
+    previous autosave, as a loaded machine's does. So the same consent is
+    asked: with both the autosave and the previous autosave on disk, restoring
+    a named slot is {!Would_discard_previous_autosave} under
+    {!Keep_previous_autosave}. A restore of either lane-owned slot is never
+    asked, because it continues the history whose last save is that file and
+    discards nothing. The machine restored from {!autosave_slot} writes its
+    autosaves there and leaves {!autosave_prev_slot} as it is, as an
+    uninterrupted machine does. The machine restored from
+    {!autosave_prev_slot} already holds what its first autosave replaces. A
+    slot that does not exist is not asked about; the read reports it. A
+    commit refuses when the previous autosave was replaced since
     {!prepare_restore}.
 
     Everything is read and checked first; on any error the current machine,
@@ -604,10 +609,11 @@ val autosave_slot : Machine_checkpoint.slot
 val autosave_prev_slot : Machine_checkpoint.slot
 (** Where an incarnation's first autosave copies whatever {!autosave_slot}
     already held, before writing its own state there. That file is the
-    previous incarnation's own last save -- a fresh {!load} or {!restore}'s
-    first autosave must not erase it silently. The copy replaces what this
-    slot held, which is why starting a machine asks for
-    {!previous_autosave_consent} when both files exist. Listed and restorable
+    previous incarnation's own last save -- a {!load}'s or a named
+    {!restore}'s first autosave must not erase it silently. The copy replaces
+    what this slot held, which is why such a start asks for
+    {!previous_autosave_consent} when both files exist. A machine restored
+    from {!autosave_slot} makes no copy. Listed and restorable
     like any other slot ({!checkpoints}, {!restore}); nothing offers it back
     on its own the way {!lookup_autosave} offers {!autosave_slot}, and
     {!resume_autosave} never falls back to it. *)
@@ -634,23 +640,22 @@ type resume =
 
 val resume_autosave :
   dir:string -> ledger_dir:string -> saves_dir_of:(string -> string) -> resume
-(** Brings back the machine in {!autosave_slot} when none is loaded: a worker
-    does this once as it starts, so a restart does not leave the shared
-    machine unloaded. [dir], [ledger_dir] and [saves_dir_of] are as in
-    {!restore}.
+(** {!restore} of {!autosave_slot} that nobody asked for: a worker does this
+    once as it starts, so a restart does not leave the shared machine
+    unloaded. It is the same preparation and commit, admitted only while no
+    machine is loaded, and the restored machine's controller is free, as
+    after {!pass} with [None]: whoever next moves the machine takes it.
+    [dir], [ledger_dir] and [saves_dir_of] are as in {!restore}.
 
-    The resumed machine continues the play the autosave was written from.
-    Its autosaves replace {!autosave_slot}, as every autosave after the first
-    of an uninterrupted machine does, and {!autosave_prev_slot} stays as it
-    was. Nothing that playing on without the restart would have kept is
-    discarded, so no {!previous_autosave_consent} is asked. A {!restore} of
-    the same slot is different: it starts a new incarnation, whose first
-    autosave copies the autosave into {!autosave_prev_slot}.
+    As every restore of the autosave does, the resumed machine continues the
+    history whose last save is that file: its autosaves replace
+    {!autosave_slot} and {!autosave_prev_slot} stays as uninterrupted play
+    leaves it, so nothing is asked.
 
-    The controller is free, as after {!pass} with [None]: whoever next moves
-    the machine takes it. The resumed machine is a new incarnation and raises
-    the change count. A resume, and a file that did not restore with the
-    reason, each put a line on {!recent_activity}. Nothing is announced. *)
+    A resume, and a file that did not restore with the reason, each put a
+    line on {!recent_activity}. An exception from the restore, other than
+    cancellation, is reported as that reason and does not escape. Nothing is
+    announced. *)
 
 val ledger : unit -> entry list
 (** Oldest first. Empty when no machine is loaded. *)

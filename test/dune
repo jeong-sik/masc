@@ -3237,6 +3237,8 @@
 
 (include stanzas/test_trajectory_atomicity.inc)
 
+(include stanzas/test_trajectory_next_round_concurrent.inc)
+
 (include stanzas/test_transport_bridge_seal.inc)
 
 (include stanzas/test_work_as_heartbeat.inc)

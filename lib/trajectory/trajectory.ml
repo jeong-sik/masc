@@ -309,6 +309,15 @@ let trajectory_path (masc_root : string) (keeper_name : string) (trace_id : stri
 
 let round_counters : (string * string * int, int) Hashtbl.t = Hashtbl.create 64
 let round_high_water : (string * string * int, int) Hashtbl.t = Hashtbl.create 64
+
+(* Guards [round_counters] and [round_high_water] and nothing else. It is never
+   held across disk I/O: hydrating a cold key reads the trajectory file, and
+   that read suspends the calling fiber (it waits for a domain pool job, or
+   stats the file through Eio when no pool is installed). The fibers of one
+   domain share one thread, and a [Stdlib.Mutex] raises
+   [Sys_error "Mutex.lock: Resource deadlock avoided"] when the thread that
+   holds it locks it again. A lock held across the read would therefore make
+   the next [next_round] caller of the domain raise instead of wait. *)
 let round_counters_mu = Stdlib.Mutex.create ()
 
 (* Initial tail window (in lines) read to hydrate a turn's round count from
@@ -459,29 +468,50 @@ let evict_past_turn_keys ~(keeper_name : string) ~(trace_id : string)
 
 (** Get the next round number for a given (keeper_name, trace_id, turn).
     Lazily hydrates from disk on first access, then increments in-memory.
-    This avoids reading the entire JSONL file on every tool call. *)
+    This avoids reading the entire JSONL file on every tool call.
+
+    A cold key is hydrated with no lock held. Callers that ask for the same
+    cold key at once each read the file; the first to finish installs the
+    counter, and the others continue from it and drop what they read. *)
 let next_round ~(masc_root : string) ~(keeper_name : string) ~(trace_id : string) ~(turn : int) : int =
   let key = (keeper_name, trace_id, turn) in
-  Stdlib.Mutex.protect round_counters_mu (fun () ->
-    let current =
-      match Hashtbl.find_opt round_counters key with
-      | Some n -> n
-      | None ->
-        let hydrated =
-          hydrate_round_count ~masc_root ~keeper_name ~trace_id ~turn
-        in
-        let issued =
-          match Hashtbl.find_opt round_high_water key with
-          | Some n -> n
-          | None -> 0
-        in
-        max hydrated issued
-    in
+  (* Caller must hold [round_counters_mu]. *)
+  let issue_after current =
     let next = current + 1 in
     Hashtbl.replace round_counters key next;
     Hashtbl.replace round_high_water key next;
     evict_past_turn_keys ~keeper_name ~trace_id ~turn;
-    next)
+    next
+  in
+  let from_cache =
+    Stdlib.Mutex.protect round_counters_mu (fun () ->
+      match Hashtbl.find_opt round_counters key with
+      | Some current -> Some (issue_after current)
+      | None -> None)
+  in
+  match from_cache with
+  | Some next -> next
+  | None ->
+    let hydrated =
+      hydrate_round_count ~masc_root ~keeper_name ~trace_id ~turn
+    in
+    Stdlib.Mutex.protect round_counters_mu (fun () ->
+      let current =
+        match Hashtbl.find_opt round_counters key with
+        | Some n ->
+          (* Another caller installed the key while this one read the file. The
+             installed counter already counts every round that caller issued,
+             so what was read here is out of date. *)
+          n
+        | None ->
+          let issued =
+            match Hashtbl.find_opt round_high_water key with
+            | Some n -> n
+            | None -> 0
+          in
+          max hydrated issued
+      in
+      issue_after current)
 
 (** Reset round counters for testing. *)
 let reset_round_counters_for_testing () =

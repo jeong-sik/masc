@@ -35,7 +35,7 @@ related: ["0447", "0420"]
 masc restart [--base-path PATH] [--port PORT] [--host HOST] [--agent AGENT] [--log FILE]
 ```
 
-base path·port·host 는 `masc start` 와 같은 방식으로 정한다. 코드는 `bin/masc_cli_restart.ml` 이다. 앞 서버와 새 서버 둘 다 `127.0.0.1` 로 확인하므로, 그 주소로 닿지 않는 `--host`(127.0.0.1·0.0.0.0·localhost 밖)는 아무것도 하기 전에 거절한다.
+base path·port·host 는 `masc start` 와 같은 방식으로 정한다. 코드는 `bin/masc_cli_restart.ml` 이다. 앞 서버와 새 서버 둘 다 `127.0.0.1` 로 확인하므로, 그 주소로 닿지 않는 `--host`(127.0.0.1·0.0.0.0 밖)는 아무것도 하기 전에 거절한다. `localhost` 같은 이름도 IP 주소가 아니라서 새 서버가 bind 할 수 없으므로 같은 자리에서 거절한다.
 
 1. **떠 있는 것을 본다.** `127.0.0.1:<port>/health?full=1` 을 읽는다.
 
@@ -124,5 +124,5 @@ RFC-0447 §2.3·§3·§4·§5 를 이 내용으로 고쳤다.
 ## 6. 남는 한계
 
 - 준비 확인과 종료 요청은 `127.0.0.1` 로만 묻는다. setup 의 stop 도 같다. 그래서 `::1` 이나 다른 주소에 붙는 서버는 restart 로 바꾸지 못하고 거절된다(RFC-0447 PR-3 범위).
-- 읽을 수 없는 `--host` 를 받은 서버가 loopback 에 붙는 버그는 #46352 로 따로 남겼다.
+- 읽을 수 없는 `--host` 를 받은 서버가 loopback 에 붙는 버그(#46352)는 #46376 이 따로 고친다. IPv6 `--host` 로 기동하지 못하는 버그는 #46375 다.
 - 새 서버는 자기 프로세스 그룹에서 돌지만 같은 session 에 남는다. stdin·stdout·stderr 가 터미널이 아니라서 터미널을 닫아도 영향이 없다.

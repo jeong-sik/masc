@@ -1393,10 +1393,11 @@ val decode_keeper_turns_projection :
   Yojson.Safe.t -> (keeper_turns_projection, string) result
 (** Decode turn rows independently of the fleet waiting observation.
     [waiting_errors] contains fleet-scoped failures; its absence on an older
-    server means no reported fleet failure, not an observation error. An absent
-    or null per-Keeper waiting object contributes no observation; it never
-    becomes an idle Keeper. Malformed waiting data becomes
-    [Keeper_waiting_invalid] while valid turn rows remain available. *)
+    server means no reported fleet failure, not an observation error. A present
+    value must be an array. An absent or null per-Keeper waiting object
+    contributes no observation; it never becomes an idle Keeper. Malformed
+    waiting data becomes [Keeper_waiting_invalid] while valid turn rows remain
+    available. *)
 
 type runtime_assignment_source =
   | Default_runtime

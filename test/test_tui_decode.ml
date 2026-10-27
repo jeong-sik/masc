@@ -8772,6 +8772,8 @@ let test_decode_keeper_turns_projection_separates_fleet_errors () =
       ; "since", `Null; "due_at", `Null; "waiting_on", `List [] ] in
   let invalid_rows =
     [ wire `Null (`String "not an array")
+    ; wire `Null `Null
+    ; wire valid_waiting `Null
     ; wire `Null (`List [ replace_error "keeper_name" (`String "echo") ])
     ; wire `Null (`List [ replace_error "source" (`String "event_queue_pending") ])
     ; wire valid_waiting (`List [ error_row ])
@@ -8782,7 +8784,14 @@ let test_decode_keeper_turns_projection_separates_fleet_errors () =
       match Tui_decode.decode_keeper_turns_projection json with
       | Ok { rows; waiting } when List.length rows = 1 && waiting_is_invalid waiting -> ()
       | Ok _ | Error _ -> Alcotest.fail "invalid waiting must preserve the valid turn")
-    invalid_rows
+    invalid_rows;
+  let empty_fleet =
+    `Assoc [ "schema", `String "masc.keeper_turns.v1"; "keepers", `List []
+           ; "waiting_errors", `Null ]
+  in
+  match Tui_decode.decode_keeper_turns_projection empty_fleet with
+  | Ok { rows = []; waiting } when waiting_is_invalid waiting -> ()
+  | Ok _ | Error _ -> Alcotest.fail "invalid fleet waiting must remain visible without Keepers"
 
 (* GET /api/v1/runtime/resolved, the picker's comprehensive shared document. *)
 let picker_default_runtime =

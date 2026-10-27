@@ -2786,6 +2786,7 @@
 (include stanzas/test_dated_jsonl.inc)
 
 (include stanzas/test_telemetry_unified_keeper_fan_in.inc)
+(include stanzas/test_tool_metrics_store_concurrent.inc)
 
 (include stanzas/test_dated_jsonl_mutex_registry_10372.inc)
 

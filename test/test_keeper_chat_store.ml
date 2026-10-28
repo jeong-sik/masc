@@ -3044,6 +3044,47 @@ let test_settled_failure_batch_answers_each_failure_once () =
         (read_file path))
 ;;
 
+(* The batch writes the row the single append writes: same role, redacted
+   content, route and provenance; only the id and time are minted per row. *)
+let test_settled_failure_batch_writes_the_single_append_row () =
+  let base_dir = temp_base_path "keeper-chat-store-settled-failure-parity" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let route =
+        { K.Row_route.surface = Some (Masc.Surface_ref.Dashboard { session_id = Some "session" })
+        ; conversation_id = Some "conversation"
+        }
+      in
+      let delivery_key = operation_delivery_key "kmsg-batch-parity" in
+      let content = "Keeper request failed: parity" in
+      (match
+         K.append_settled_failure_once ~base_dir ~keeper_name:"single-keeper" ~delivery_key
+           ~content ~route:(lazy route) ()
+       with
+       | Ok (K.Appended _) -> ()
+       | Ok (K.Already_present _) | Error _ -> Alcotest.fail "the single append wrote nothing");
+      (match
+         K.append_settled_failures_once ~base_dir ~keeper_name:"batch-keeper"
+           [ (), { K.Settled_failure.delivery_key; content; route = lazy route } ]
+       with
+       | Ok [ (), Ok (K.Appended _) ] -> ()
+       | Ok _ | Error _ -> Alcotest.fail "the batch wrote nothing");
+      let row keeper_name =
+        match K.load ~base_dir ~keeper_name with
+        | [ (row : K.chat_message) ] ->
+          ( row.role, row.content
+          , Option.map Masc.Surface_ref.to_json row.surface, row.conversation_id
+          , Option.map
+              (fun (provenance : Keeper_chat_delivery_identity.delivery_provenance) ->
+                 Keeper_chat_delivery_identity.delivery_provenance_fields provenance)
+              row.delivery_provenance )
+        | rows -> Alcotest.failf "%s holds %d rows" keeper_name (List.length rows)
+      in
+      Alcotest.(check bool) "the batch row equals the single row apart from id and time" true
+        (row "single-keeper" = row "batch-keeper"))
+;;
+
 (* A quarantined key refuses only its own failure; the rest of the batch is
    appended and the quarantined rows stay as they were. *)
 let test_settled_failure_batch_refuses_only_a_quarantined_key () =
@@ -4103,6 +4144,8 @@ let () =
             `Quick test_settled_failure_batch_answers_each_failure_once;
           Alcotest.test_case "settled failure batch refuses only a quarantined key"
             `Quick test_settled_failure_batch_refuses_only_a_quarantined_key;
+          Alcotest.test_case "settled failure batch writes the single append row"
+            `Quick test_settled_failure_batch_writes_the_single_append_row;
           Alcotest.test_case "duplicate tool ordinal poisons its delivery key"
             `Quick test_duplicate_tool_ordinal_poisons_whole_delivery_key;
           Alcotest.test_case "execution id cannot cross delivery keys" `Quick

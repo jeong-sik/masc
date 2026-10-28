@@ -214,15 +214,15 @@ Subject =
   | Workspace of workspace_id
 ```
 
-Intent는 대상 없이 digest만 남기지 않는다. 중단된 회수가 어느 grant·credential·principal·Runtime에 대한 것인지 게이트가 식별할 수 있어야 한다. 모드 사건(§5.1)의 대상은 `Workspace`다.
+Intent는 대상 없이 digest만 남기지 않는다. 중단된 회수가 어느 `Grant`·`Credential`·`Principal`·`Runtime`에 대한 것인지 게이트가 식별할 수 있어야 한다. 모드 사건(§5.1)은 회수가 아니라서 이 목록에 들지 않고, 대상은 `Workspace`다.
 
 ## 5. 인증과 Provider 등록
 
 ### 5.1 모드와 초대
 
-`auth_config.account_mode = Single_user | Multi_account`를 둔다. 파일이나 값이 없으면 `Single_user`이고, 알 수 없는 값이면 부팅을 거부한다. 부팅은 `config.json`에서 `account_mode` 멤버만 읽는다. 파일이 JSON이 아니면 설정은 없는 것으로 읽는다. 지금 동작과 같고(요청 때 503), 아래 표의 다른 두 열이 `Multi_account`의 흔적을 거부하므로 조용한 강등이 되지 않는다. 파일이 JSON이면 다른 필드가 틀려도 `account_mode` 멤버를 읽고, 알 수 없는 값은 `auth_config` 전체가 읽히지 않더라도 부팅을 거부한다. 이 안전은 불변식에 기댄다. multi-owned record를 만드는 모든 길은 먼저 모드 사건을 `authz.jsonl`과 외부 저장소에 남긴다. 값을 써 넣는 설치·업그레이드 단계는 두지 않는다. principal 수나 초대 수로 모드를 추론하지 않는다. 첫 bootstrap 전에도 `Multi_account`를 선택할 수 있다.
+`auth_config.account_mode = Single_user | Multi_account`를 둔다. 파일이나 값이 없으면 `Single_user`이고, 알 수 없는 값이면 부팅을 거부한다. 부팅은 `config.json`을 JSON 파서로 통째로 읽고 최상위 객체의 `account_mode` 멤버만 본다. 문자열이나 정규식으로 멤버를 떼어 내지 않는다. 파일이 JSON이 아니거나 최상위가 객체가 아니면 설정은 없는 것으로 읽는다. 지금 동작과 같고(요청 때 503), 아래 표의 다른 두 열이 `Multi_account`의 흔적을 거부하므로 조용한 강등이 되지 않는다. 파일이 JSON 객체이면 다른 필드가 틀려도 `account_mode` 멤버를 읽는다. 멤버는 정확히 `"Single_user"`나 `"Multi_account"` 문자열이어야 한다. `null`, 숫자, 객체, 다른 대소문자, 두 번 나온 멤버는 알 수 없는 값이고, `auth_config` 디코더가 파일 전체를 거절하더라도 부팅을 거부한다. 이 안전은 불변식에 의존한다. multi-owned record를 만드는 모든 길은 먼저 모드 사건을 `authz.jsonl`과 외부 저장소에 남긴다. 값을 써 넣는 설치·업그레이드 단계는 두지 않는다. principal 수나 초대 수로 모드를 추론하지 않는다. 첫 bootstrap 전에도 `Multi_account`를 선택할 수 있다.
 
-설정 값은 바라는 모드에 대한 요청이다. 부팅 때 설정을 `authz.jsonl`의 마지막 모드 사건이 만든 모드와 외부 고수위(§8.2)에 대조해 모드를 한 번 정한다. 외부 저장소는 backup 밖 append-only 저장소이고, 외부 고수위는 그 저장소에 적힌 값이다. 모드 사건은 셋이다. `Fresh_bootstrap`(§8.4)과 `reactivate`(§10.5)는 `Multi_account`를 만들고 `off`(§10.5)는 `off`를 만든다. 아래 표의 둘째 열은 사건 이름이 아니라 마지막 사건이 만든 모드다. 결과는 표를 따르고, 거부 사유가 여럿이면 모두 돌려준다. 조용한 강등은 읽지 못한 것이나 없는 것을 근거로 `Multi_account` 설치를 `Single_user`로 내리는 것이고, 부팅 판정은 이를 거부한다.
+설정 값은 바라는 모드에 대한 요청이다. 부팅 때 설정을 `authz.jsonl`의 마지막 모드 사건이 만든 모드와 외부 고수위(§8.2)에 대조해 모드를 한 번 정한다. 외부 저장소는 backup 밖 append-only 저장소이고, 외부 고수위는 그 저장소에 적힌 값이다. 모드 사건은 셋이다. `Fresh_bootstrap`(§8.4)과 `reactivate`(§10.5)는 `Multi_account`를 만들고 `off`(§10.5)는 `off`를 만든다. 아래 표의 둘째 열은 사건 이름이 아니라 마지막 모드 사건이 만든 모드다. 결과는 표를 따르고, 거부 사유가 여럿이면 모두 돌려준다. 조용한 강등은 읽지 못한 것이나 없는 것을 근거로 `Multi_account` 설치를 `Single_user`로 내리는 것이고, 부팅 판정은 이를 거부한다.
 
 | 설정 | 마지막 모드 사건이 만든 모드 | 외부 고수위 | 결과 |
 |---|---|---|---|
@@ -238,16 +238,16 @@ Intent는 대상 없이 digest만 남기지 않는다. 중단된 회수가 어�
 | 없음, `Single_user`, `Multi_account` | `off` | 없음, 안 맞음, 읽지 못함 | 부팅 거부. `off` 뒤에 `reactivate`가 있었는데 그 사이 시점으로 복원했을 수 있다. |
 | 알 수 없는 값 | 무엇이든 | 무엇이든 | 부팅 거부. |
 
-외부 고수위 열은 §8.2의 판정 1~5를 먼저 돌린 뒤에 읽는다. 판정은 외부 저장소를 읽어서 내리고, 판정 2의 `Committed` 승격이나 판정 3의 `aborted_intent` 쓰기가 성공했는지는 결과를 바꾸지 않는다(§8.2-2, §8.2-3). 판정 2로 승격되는 `Intent_pending`은 이미 `Committed`로 센다. 값은 넷이다.
+외부 고수위 열은 §8.2의 판정 1~5를 먼저 돌린 뒤에 읽는다. 판정은 외부 저장소를 읽어서 내리고, 판정 2의 `Committed` 승격이나 판정 3의 `aborted_intent` 쓰기가 성공했는지는 결과를 바꾸지 않는다(§8.2-2, §8.2-3). 판정 2로 승격되는 `Intent_pending`은 `Committed`에 포함한다. 값은 넷이다.
 
-- `맞음`: 마지막 `Committed`(승격되는 것을 포함)가 replay에 있고, 남은 `Intent_pending`이 판정 1~5로 풀리고, 외부 고수위와 replay의 epoch 값이 같다. lease 줄은 외부 저장소에 가지 않으므로 늘어도 `맞음`은 깨지지 않는다.
+- `맞음`: 마지막 `Committed`(판정 2로 승격되는 것을 포함)가 replay에 있고, 남은 `Intent_pending`이 판정 1~5로 풀리고, 외부 고수위와 replay의 epoch 값이 같다. lease 줄은 외부 저장소에 가지 않으므로 늘어도 `맞음`은 깨지지 않는다.
 - `안 맞음`: 외부 저장소를 읽을 수 있는데 `맞음`도 `없음`도 아니다. §8.2의 판정 1~5를 통과하지 못한 경우가 여기에 든다.
-- `읽지 못함`: 외부 저장소가 있는데 열지 못하거나 손상됐다(§8.4). 쓰다 죽어서 끝이 잘린 마지막 항목은 손상이 아니다. 잘린 항목에 기대어 나간 응답은 없고, 지워진 `Committed`는 판정 2가, 지워진 `aborted_intent`는 판정 3이 다시 세운다. 부팅은 판정 1~5를 돌리기 전에 그 항목을 잘라 낸다(`authz.jsonl`의 꼬리와 같은 규칙).
-- `없음`: 외부 저장소가 없거나, 있어도 `Committed`가 하나도 없고 남은 `Intent_pending`이 모두 `Fresh_bootstrap`의 것이어서 판정 3이 `aborted_intent`로 정한다(쓰기가 실패해도 판정은 선다). `Fresh_bootstrap`이 `Intent_pending`을 쓴 뒤 `authz.jsonl`에 append하기 전에 죽은 설치가 여기에 든다. 이 설치는 `Fresh_bootstrap`을 다시 실행할 수 있고, 새 `Intent_pending`을 쓰기 전에 남은 것을 판정 3으로 닫는다(§8.2-1). workspace_id는 `Committed`가 된 `Fresh_bootstrap`(승격되는 것을 포함)의 것만 유효하다.
+- `읽지 못함`: 외부 저장소나 설치 기록이 있는데 열지 못하거나 손상됐다(§8.4). 쓰다가 죽어 끝이 잘린 마지막 항목은 손상이 아니다. 마지막 줄바꿈 뒤에 남은 바이트만 끝이 잘린 항목이고, 줄바꿈으로 끝났는데 읽히지 않는 항목은 손상이다. 잘린 항목에 든 `Committed`에 기대어 나간 응답은 없고, 잘라 낸 `Committed`는 판정 2가, 잘라 낸 `aborted_intent`는 판정 3이 다시 세운다. 부팅은 외부 저장소를 열 때(판정 1~5를 돌리기 전에) 그 항목을 잘라 내고, 잘라 낸 바이트 수와 남긴 바이트 수를 경고로 남긴다(`authz.jsonl`에서 끝이 잘린 마지막 줄을 자르는 규칙과 같다).
+- `없음`: 외부 저장소가 없거나, 있어도 `Committed`가 하나도 없고 남은 `Intent_pending`이 모두 `Fresh_bootstrap`의 것이어서 판정 3이 `aborted_intent`로 정한다(쓰기가 실패해도 판정은 선다). `Fresh_bootstrap`이 `Intent_pending`을 쓴 뒤 `authz.jsonl`에 append하기 전에 죽은 설치가 여기에 든다. 이 설치는 `Fresh_bootstrap`을 다시 실행할 수 있고, 새 `Intent_pending`을 쓰기 전에 남은 것을 판정 3으로 닫는다(§8.2-1). workspace_id는 `Committed`가 된 `Fresh_bootstrap`(판정 2로 승격되는 것을 포함)의 것만 유효하다.
 
 `있음`은 `없음`이 아닌 모든 값(`맞음`, `안 맞음`, `읽지 못함`)이다.
 
-`authz.jsonl`이 있는데 열지 못하거나 검증에 실패하면 설정과 상관없이 부팅을 거부한다. 쓰다 죽어서 끝이 잘린 마지막 줄은 실패가 아니다. 열 때 잘라 내고, 줄이 하나도 남지 않으면 파일이 없는 것과 같이 모드 사건이 없는 것이다. 이 파일은 `Fresh_bootstrap`의 append로만 생기므로, 읽지 못한 것을 기록이 없는 것으로 읽으면 조용한 강등이 된다. 외부 고수위는 부팅이 외부 저장소의 위치를 알 때만 `있음`으로 볼 수 있다.
+`authz.jsonl`이 있는데 열지 못하거나 검증에 실패하면 설정과 상관없이 부팅을 거부한다. 쓰다가 죽어 끝이 잘린 마지막 줄은 실패가 아니다. 마지막 줄바꿈 뒤에 남은 바이트만 끝이 잘린 줄이고(`Fs_compat` 복구 읽기와 같은 구분이다), 줄바꿈으로 끝났는데 검증에 실패하는 줄은 실패다. 끝이 잘린 줄은 열 때 잘라 내고, 줄이 하나도 남지 않으면 파일이 없는 것과 같이 마지막 모드 사건이 만든 모드가 없다(표 둘째 열 `없음`). 두 자르기(`authz.jsonl`과 외부 저장소)는 서로 읽지 않아서 어느 쪽을 먼저 해도 결과가 같다. 이 파일은 `Fresh_bootstrap`의 append로만 생기므로, 읽지 못한 것을 기록이 없는 것으로 읽으면 조용한 강등이 된다. 외부 고수위는 부팅이 설치 기록(§8.4)에서 외부 저장소의 위치를 읽을 수 있을 때만 `있음`으로 볼 수 있다.
 
 1. 최초 Admin은 호스트 로컬 bootstrap으로 만들고 원격 선착순 Admin은 없다.
 2. 신규 사용자는 다음 셋 중 하나로만 입장한다. (a) Admin이 등록한 `(iss, sub)` allowlist, (b) 단회 초대 token, (c) 도메인 정책(7번)을 통과한 첫 로그인이 만든 입장 요청을 Admin이 승인하는 것. 어느 경로든 입장은 첫 OIDC 로그인의 `(iss, sub)` 결속으로 끝난다.
@@ -485,9 +485,9 @@ Committed {
 
 ### 8.4 신규 설치와 읽기 실패
 
-이 절은 `Fresh_bootstrap`과 마지막 모드 사건이 있는 설치에 적용한다. 모드 사건이 없는 `Single_user` 설치는 외부 저장소가 없는 것이 정상이고 그대로 시작한다(§5.1 표 첫 행). 외부 저장소가 없을 때(`ENOENT`, 부모 경로 부재) 새로 시작할 수 있는 것은 명시적 `Fresh_bootstrap`뿐이다. §5.1이 `없음`으로 읽는 저장소도 같다. `Fresh_bootstrap`은 **Local_operator가 서명한** 새 workspace_id·새 account_mode(`Multi_account`)·빈 `authz.jsonl`·빈 Recovery_manifest·초기 generation이 같은 bootstrap append로 확인되어야 한다. workspace_id도 외부 저장소와 같은 append에 기록한다. `Fresh_bootstrap`이 확인하는 account_mode는 `Multi_account`뿐이다. `Multi_account`를 거친 적 없는 `Single_user`는 `authz.jsonl`을 쓰지 않는다(§9.2).
+이 절은 `Fresh_bootstrap`을 실행하는 경우와 마지막 모드 사건이 있는 설치에 적용한다. 모드 사건이 없는 `Single_user` 설치는 외부 저장소가 없는 것이 정상이고 그대로 시작한다(§5.1 표 첫 행). 외부 저장소가 없을 때(`ENOENT`, 부모 경로 부재) 새로 시작할 수 있는 것은 명시적 `Fresh_bootstrap`뿐이다. §5.1이 `없음`으로 읽는 저장소도 같다. 외부 저장소의 위치는 설치 기록에서 읽는다. 설치 기록은 `$XDG_CONFIG_HOME/masc/`(없으면 `~/.config/masc/`) 아래에 base path 단위로 두는 파일이고 외부 저장소의 경로를 적는다. `Fresh_bootstrap`은 설치 기록을 먼저 쓰고 외부 저장소를 만든다. 외부 저장소가 있는데 설치 기록이 가리키지 않는 상태를 만들지 않기 위해서다. 설치 기록이 없거나 가리키는 곳에 외부 저장소가 없으면 §5.1은 외부 고수위를 `없음`으로 읽는다. `Fresh_bootstrap`은 **Local_operator가 서명한** 새 workspace_id·새 `account_mode`(`Multi_account`)·빈 `authz.jsonl`·빈 Recovery_manifest·초기 generation이 같은 bootstrap append로 확인되어야 한다. workspace_id도 외부 저장소와 같은 append에 기록한다. `Fresh_bootstrap`이 확인하는 `account_mode`는 `Multi_account`뿐이다. `Multi_account`를 거친 적 없는 `Single_user`는 `authz.jsonl`을 쓰지 않는다(§9.2).
 
-`EACCES`·다른 I/O 오류·손상 JSON(쓰다 죽어서 끝이 잘린 마지막 항목은 제외, §5.1)·디렉터리·심볼릭 링크·workspace_id 불일치는 `AuthorizationUncertain`으로 거부한다. 마지막 모드 사건이 있는데 저장소가 없거나 생성 규칙이 맞지 않으면 실행하지 않는다. 외부 고수위를 생략하고 legacy 경로로 부팅하지 않는다.
+`EACCES`·다른 I/O 오류·손상 JSON(쓰다가 죽어 끝이 잘린 마지막 항목은 제외, §5.1)·디렉터리·심볼릭 링크·workspace_id 불일치는 `AuthorizationUncertain`으로 거부한다. 설치 기록을 읽지 못하거나 손상된 경우도 같다. 마지막 모드 사건이 있는데 외부 저장소가 없거나 생성 규칙이 맞지 않으면 실행하지 않는다. 외부 고수위를 생략하고 legacy 경로로 부팅하지 않는다.
 
 외부 저장소가 복구되지 않으면 창은 닫히지 않는다. `/health`와 `account_busy`에 `Recovery_store_unavailable`과 필요한 운영 조치를 표시하고, stale snapshot으로 Cleared를 만들지 않는다.
 
@@ -576,7 +576,7 @@ Single_user 모드의 현재 동작은 바꾸지 않는다. 계정당 동시 dis
 - 일반 재기동이나 on/off만으로 backup을 되돌린 것은 아니라면, artifact와 외부 generation이 일치하는지 대조해 provider 재인증 없이 기존 credential을 재검증할 수 있다. 평시 재기동에 Recovery_manifest가 없어도 generation을 대조한다.
 - revocation ledger 현재본은 backup과 분리된 append-only 저장소에 유지하고 backup 사본과 합집합으로 대조한다. 고수위 불일치·누락이 있으면 AuthorizationUncertain이며 일치도 실행 승인 근거가 아니다. T 백업 → T+1 revoke R → T+2 복원 후 R 유지·연결 work Denied·유효 lease 0을 확인한다.
 - 최초 활성화 전 initiator가 없는 legacy work는 `Denied(legacy_unattributed)`로 분류하고 Service(system)으로 신원을 세탁하지 않는다. `Single_user_operator` 근거로 기록된 durable work는 initiator가 없는 것으로 보고 `legacy_unattributed`로 분류한다(§6.1). initiator/scope가 없는 record는 **각 transition_epoch 직전의 무귀속 record**로 분류하고 `legacy_unattributed | legacy_scope_missing`으로 둔다. Local_operator author로 총계·Denied·Cleared·미분류를 기록하고 미분류 0을 확인한다. ownerless 자산은 dry-run 후 bootstrap principal에 명시 귀속하고 귀속하지 못하면 Disabled이며 MachineShared로 승격하지 않는다.
-- 다계정 on→off에서는 multi-owned record를 읽기 전용으로 보존하고 legacy 공유 token/admin으로 실행하지 않는다. 진행 중 multi dispatch·session은 종료하고 재활성화 시 동일한 Recovery_manifest·Pending 절차를 거친다. `off` 사건 때 진행 중인 dispatch는 §9-5에 따라 종결하고(효과가 시작된 것은 `Outcome_unknown`, 시작 전에 끝난 것은 §9-5가 정한 종단을 따른다) account-home 점유는 `Release_pending`으로 바꿔 unmount 확인 뒤에만 Released로 한다. off의 기존 단일 사용자 동작 확인은 multi-owned 자산을 legacy로 여는 의미가 아니다. `off`와 `reactivate`는 각각 `authz.jsonl`에 모드 사건으로 남고 외부 저장소에도 남는다(§8.2). §5.1의 부팅 판정은 마지막 모드 사건이 만든 모드를 읽는다. off 상태의 `Single_user`는 남은 `Purge_pending`을 끝내는 쓰기(§8.5-5)만 `authz.jsonl`에 한다.
+- 다계정 on→off에서는 multi-owned record를 읽기 전용으로 보존하고 legacy 공유 token/admin으로 실행하지 않는다. 진행 중 multi dispatch·session은 종료하고 재활성화 시 동일한 Recovery_manifest·Pending 절차를 거친다. `off` 사건 때 진행 중인 dispatch는 §9-5에 따라 종결하고(효과가 시작된 것은 `Outcome_unknown`, 시작 전에 끝난 것은 §9-5가 정한 종단을 따른다) account-home 점유는 `Release_pending`으로 바꿔 unmount 확인 뒤에만 Released로 한다. off의 기존 단일 사용자 동작 확인은 multi-owned 자산을 legacy로 여는 의미가 아니다. `off`와 `reactivate`는 각각 `authz.jsonl`에 모드 사건으로 남고 외부 저장소에도 남는다(§8.2). §5.1의 부팅 판정은 마지막 모드 사건이 만든 모드를 읽는다. `off` 상태의 `Single_user`는 남은 `Purge_pending`을 끝내는 쓰기(§8.5-5)만 `authz.jsonl`에 한다.
 - 로컬 복구는 인증 가능한 Admin이 0명이거나 IdP 복구 불가일 때 `masc auth recovery --base-path <path>`(현재 코드에 없는 새 명령)로 연다. 호스트 관리자와 root 소유 일회용 recovery 파일이 필요하고 실행자·사유·시각·결과·파일 digest·파기 결과를 append-only audit/Board에 남긴다. 원격 break-glass는 없으며 활성화 전 리허설한다. 이 경로에서 Local_operator는 `Admin_assignment`를 새로 발급할 수 있다. 발급받은 principal의 grant와 Cleared에는 관여하지 않고, 감사에 이 사실을 남긴다.
 
 ## 11. MultiAccountReadiness
@@ -585,7 +585,7 @@ Single_user 모드의 현재 동작은 바꾸지 않는다. 계정당 동시 dis
 
 1. readiness에는 route inventory와 각 경로의 실제 Reject/CSRF/credential 단일성 증명, `legacy_workspace_secret_callers=[]`, `agent_credential_callers=[]`, `auth disabled`·`require_token=false` 부팅 거부 증명, Provider 두 계정 호출·제3자 거부, official lane 격리·복구 리허설 결과, `lib/runtime`에서 string만으로 실행 객체를 얻는 경로(`get_runtime_by_id`, `runtime_id_for_keeper`, `get_runtime_ids`, `capability_of_runtime_id`, `keeper_assignments`, `resolve_assignment` 등)의 잔존 0, MCP OAuth 결속 층 전에는 `Mcp_oauth_token`이 Reject라는 시험을 포함한다. `auth disabled` 부팅 거부는 기존 코드에 있다는 의미가 아니라 새로 추가할 요구사항이다.
 2. 각 증명은 build 전체가 아니라 **그 항목이 읽는 표면의 digest**에 결속한다. route 표·credential parser·lane 격리·Provider fixture·복구 리허설이 각각 `evidence_id`와 digest를 가진다. 운영자가 문서나 빈 boolean으로 `ready=true`를 쓰는 경로는 없다. 누락·미검증·digest 불일치·legacy 잔존이 있으면 열지 않는다.
-3. digest 불일치 시 `Multi_account_readiness_stale(surface)`로 **부팅·활성화를 거부**하고 `/health`와 로그에 같은 사유를 표시한다. 재-readiness 없이 Single_user로 자동 강등하거나 legacy 인증으로 돌아가지 않는다. 변경된 표면의 항목만 다시 실행한다.
+3. digest 불일치 시 `Multi_account_readiness_stale(surface)`로 **부팅·활성화를 거부**하고 `/health`와 로그에 같은 사유를 표시한다. 재-readiness 없이 Single_user로 조용히 강등하거나 legacy 인증으로 돌아가지 않는다. 변경된 표면의 항목만 다시 실행한다.
 4. Provider 실계정 증거는 상시 CI가 아니라 후보·Provider 관련 표면이 바뀐 경우에 갱신한다. 실제 계정의 credential 상태도 확인하고, 검증 당시와 다른 계정·credential·Provider 설정이면 그 증거를 사용하지 않는다.
 5. `Fresh_bootstrap`도 readiness 없이 원격 다계정을 열지 않는다. loopback 로컬 복구는 별도 Local_operator 경로로 제한한다.
 6. Single_flight 대기 시간(§12)의 측정값은 readiness의 evidence로 요구한다. 허용 여부는 운영자가 그 값을 보고 내린 명시 결정을 evidence에 기록해서 정하고, 숫자 기준은 문서에 두지 않는다.

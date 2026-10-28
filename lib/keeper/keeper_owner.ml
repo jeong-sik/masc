@@ -463,6 +463,8 @@ type t =
   ; operation_projection : operation_projection Atomic.t
   ; operation_changed : Eio.Condition.t
   ; turn_in_flight : turn_in_flight option Atomic.t
+        (* The Owner's slot stays occupied through child settlement. The
+           drain and external observers read this same publication. *)
   ; shutdown_operation_id : Keeper_shutdown_types.Operation_id.t option Atomic.t
   ; mutable operation_store : Chat_operation_store.t
   ; session_root : string
@@ -473,7 +475,6 @@ type t =
   ; closed_p : unit Eio.Promise.t
   ; metadata_error : metadata_fault option ref
   ; operation_error : operation_fault option ref
-  ; child_active : bool ref
   ; child_cancel : child_cancel option Atomic.t
   ; stopping_waiters : ((unit, error) result Eio.Promise.u) list ref
   ; shutdown_idle_waiters : ((unit, error) result Eio.Promise.u) list ref
@@ -1338,7 +1339,6 @@ let start
     ; closed_p
     ; metadata_error = ref None
     ; operation_error = ref None
-    ; child_active = ref false
     ; child_cancel = Atomic.make None
     ; scheduled_consumer = ref None
     ; scheduled_handoff = ref None
@@ -1691,7 +1691,7 @@ let start
     let rec start_child_if_needed state shutdown_operation_id =
       match operation_runner with
       | None -> ()
-      | Some _ when !(t.child_active) -> ()
+      | Some _ when Option.is_some (Atomic.get t.turn_in_flight) -> ()
       | Some _ when Option.is_some shutdown_operation_id -> ()
       | Some _ when (Keeper_owner_reducer.projection state).stopping -> ()
       | Some _ when not (turn_admission_open state) -> ()
@@ -1708,7 +1708,6 @@ let start
           inventory.has_claimable_queued
           && Option.is_none inventory.running_operation_id
         then (
-          t.child_active := true;
           let interrupt_token = Keeper_interrupt_token.fresh () in
           let observation = Keeper_turn_preview_owner.create_turn_observation () in
           publish_turn_in_flight
@@ -2342,7 +2341,6 @@ let start
             let* pending = match interrupt, target, expected_control_token with
             | Interrupt_not_current, Direct_operation operation_id, Some token
               when String.equal token (chat_control_token t)
-                && not !(t.child_active)
                 && Option.is_none (Atomic.get t.turn_in_flight)
                 && Option.is_none (Atomic.get t.operation_projection).running_operation_id ->
               run_operation_read t ~label:"authorize exact pending admission stop" (fun () ->
@@ -2658,7 +2656,7 @@ let start
           then start_child_if_needed state None;
           loop state next_shutdown_operation_id
         | Command (Await_idle_after_shutdown, resolve) ->
-          if !(t.child_active)
+          if Option.is_some (Atomic.get t.turn_in_flight)
           then (
             t.shutdown_idle_waiters := resolve :: !(t.shutdown_idle_waiters);
             loop state shutdown_operation_id)
@@ -2764,7 +2762,6 @@ let start
                      (* The Owner keeps its slot until the turn settles. A
                         chat starts after a settled tool boundary yields this
                         turn or the turn completes. *)
-                     t.child_active := true;
                      let interrupt_token = Keeper_interrupt_token.fresh () in
                      let observation = Keeper_turn_preview_owner.create_turn_observation () in
                      publish_turn_in_flight
@@ -2925,7 +2922,6 @@ let start
                when Keeper_interrupt_token.equal child.interrupt_token handoff.observed_turn ->
              t.scheduled_handoff := None
            | (true | false), (Some _ | None), (Some _ | None) -> ());
-          t.child_active := false;
           publish_turn_in_flight t None;
           Eio.Promise.resolve resolve result;
           let stopping_waiters = List.rev !(t.stopping_waiters) in
@@ -2949,7 +2945,7 @@ let start
              Eio.Promise.resolve resolve (Error error);
              loop state shutdown_operation_id
            | Ok state ->
-             if !(t.child_active)
+             if Option.is_some (Atomic.get t.turn_in_flight)
              then (
                t.stopping_waiters := resolve :: !(t.stopping_waiters);
                Option.iter

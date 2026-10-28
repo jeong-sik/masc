@@ -25,6 +25,7 @@
     "return-from-files-80x24.txt": "404969288014c2daf207e64dc0943be3d0aa1c7dabe66779aee6cceb86b61b27",
     "return-from-help-80x24.txt": "404969288014c2daf207e64dc0943be3d0aa1c7dabe66779aee6cceb86b61b27",
     "selected-17-80x24.txt": "404969288014c2daf207e64dc0943be3d0aa1c7dabe66779aee6cceb86b61b27",
-    "synthetic-history.export": "474f577ae1ca3bb075cd6e8792919fd1c0d90ce34a0f19c23cd5a5cc1043a787"
-  }
+    "synthetic-history.export.gz": "23419db32741e96081c636e06fec6e89cb6178be6b8ab15d2b67d7a96c9960c8"
+  },
+  "synthetic_history_uncompressed_sha256": "474f577ae1ca3bb075cd6e8792919fd1c0d90ce34a0f19c23cd5a5cc1043a787"
 }

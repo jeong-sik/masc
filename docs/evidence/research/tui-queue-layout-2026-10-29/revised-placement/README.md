@@ -44,4 +44,3 @@ interoperability proof. Both fixtures acknowledge requests without applying
 urgency or executing a Keeper. No production credential, model or runtime was
 used. These observations do not validate later viewport-owner, pointer-tail
 or repaint changes.
-

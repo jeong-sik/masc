@@ -5,7 +5,8 @@ darwin/arm64, with Git 2.50.1. The [manifest](manifest.json) records executable
 and retained-file digests. A private HOME and [config](config.yml) disabled
 fetching, refreshing, updates, tips and the command log. The repository had
 18 fabricated commits, no remote and no private project content.
-[Its exported history](synthetic-history.export) preserves the synthetic objects.
+[Its compressed exported history](synthetic-history.export.gz) preserves the
+synthetic objects. The manifest also records the uncompressed byte digest.
 
 The `lazygit --path <repo> --use-config-file <config> log` entry was observed
 at [80×24](commits-80x24.txt), [120×36](commits-120x36.txt) and
@@ -32,6 +33,5 @@ explicitly disclosed rather than described as universally familiar.
 
 These are actual terminal text captures and [manual notes](actions.jsonl), not
 pixel-readability, task-time, error-rate or physical-IME measurements. To
-reproduce, import the export into a new scratch Git repository, check out
+reproduce, decompress and import the export into a new scratch Git repository, check out
 `main`, and run the recorded Lazygit version with the retained config.
-

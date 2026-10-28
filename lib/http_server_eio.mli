@@ -54,6 +54,10 @@ module Response : sig
       replaces the enclosing scope's list. Other request fibers retain their
       own list. *)
 
+  val scoped_headers : unit -> (string * string) list
+  (** Headers admitted for this request, for streaming responses constructed
+      directly instead of through {!json} or {!bytes}. *)
+
   (** [#28400] Register the dashboard timeout-envelope recognizer (installed
       by [Dashboard_cache] at library init). Once registered, [json_value]
       and [json_value_on_cpu] reclassify a detected envelope as 504

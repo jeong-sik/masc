@@ -334,7 +334,7 @@ let record_stream_end ~keeper_name ~stream_id ~task_id ~status =
         Task_closed_event { keeper; seq; stream_id = Some stream_id; task_id; status; active_count; generated_at });
       wake_subscribers_locked keeper))
 
-let retained_lines_locked keeper =
+let retained_lines_locked ?(include_status = false) keeper =
   match Hashtbl.find_opt logs keeper with
   | None -> []
   | Some log ->
@@ -344,6 +344,18 @@ let retained_lines_locked keeper =
       else (
         match log.slots.(seq mod event_log_capacity) with
         | Line_event { line; _ } -> collect (seq - 1) (line :: acc)
+        | Task_closed_event { seq; stream_id; task_id; status; generated_at; _ }
+          when include_status ->
+          (* Project the retained close into the snapshot. A live subscriber
+             already receives this same numbered close as an event; a new
+             viewer must also see earlier unknown results after a later close. *)
+          let text = Yojson.Safe.to_string status in
+          let text = if String.length text <= max_line_bytes then text else
+              Yojson.Safe.to_string (`Assoc [ "outcome", `String "unknown"
+                                           ; "reason", `String "status_exceeds_display_limit" ]) in
+          let line = { seq; stream_id; task_id; ts_ms = ts_ms_of_unix generated_at
+                     ; stream = "status"; text; ansi = false } in
+          collect (seq - 1) (line :: acc)
         | Task_opened_event _ | Task_closed_event _ -> collect (seq - 1) acc)
     in
     collect (log.next_seq - 1) []
@@ -377,7 +389,7 @@ let snapshot_state keeper_name =
       in
       let first_retained_seq = match Hashtbl.find_opt logs keeper with
         | None -> first_seq | Some log -> oldest_retained_seq log in
-      keeper, entries, retained_lines_locked keeper, last_logged_seq_locked keeper,
+      keeper, entries, retained_lines_locked ~include_status:true keeper, last_logged_seq_locked keeper,
       List.map (fun state -> state.active) (active_streams_locked keeper),
       last_transition_locked keeper, first_retained_seq)
 

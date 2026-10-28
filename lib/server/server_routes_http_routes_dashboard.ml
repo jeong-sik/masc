@@ -174,10 +174,11 @@ let handle_execute_output_stream ~sw ~clock _state req inner_reqd =
          let headers =
            Httpun.Headers.of_list
              ([ "content-type", "text/event-stream"
-              ; "cache-control", "no-cache"
+              ; "cache-control", "private, no-store"
               ; "connection", "keep-alive"
               ; "x-accel-buffering", "no"
               ]
+              @ Http.Response.scoped_headers ()
               @ public_read_cors_headers req)
          in
          let response = Httpun.Response.create ~headers `OK in

@@ -86,7 +86,7 @@ val record_stream_end :
 (** Log a [task_closed] marker and release the open stream binding. *)
 
 val snapshot : keeper_name:string -> snapshot option
-(** Retained Execute lines and the latest observed stream state. A running
+(** Retained Execute lines, retained close statuses, and the latest observed stream state. A running
     invocation is visible even before any Execute has completed. The
     [stdout_since]/[stderr_since] byte fields summarize completed captures;
     [lines] also includes output from the currently open stream. *)

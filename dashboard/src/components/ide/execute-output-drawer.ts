@@ -66,7 +66,55 @@ function splitChunkLines(chunk: string): string[] {
 function outputLineFromExecuteLine(line: ExecuteOutputLine): OutputLine {
   if (line.stream === 'stderr') return { text: line.text, stream: 'stderr' }
   if (line.stream === 'stdout') return { text: line.text, stream: 'stdout' }
+  if (line.stream === 'cmd') return { text: `command summary: ${line.text}`, stream: 'meta' }
+  if (line.stream === 'status') {
+    const status = statusFromLine(line)
+    const description = executionStatusLine({
+      type: 'task_closed', keeper: '', stream_id: line.stream_id, task_id: line.task_id, status,
+    })
+    return { text: description ?? `Execute status: ${line.text}`, stream: 'meta' }
+  }
   return { text: line.text, stream: 'meta' }
+}
+
+function statusObject(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function executionStatus(event: ExecuteOutputStreamEvent): Record<string, unknown> | null {
+  return statusObject(event.status)
+}
+
+function statusFromLine(line: ExecuteOutputLine): Record<string, unknown> | null {
+  if (line.stream !== 'status') return null
+  try {
+    return statusObject(JSON.parse(line.text) as unknown)
+  } catch {
+    return null
+  }
+}
+
+function executionStatusLine(event: ExecuteOutputStreamEvent): string | null {
+  if (event.type !== 'task_closed' && !(event.type === 'snapshot' && event.closed)) return null
+  const status = executionStatus(event)
+  if (!status) return null
+  const phase = status.phase === 'gate_observation' ? 'Gate observation' : 'Execute'
+  let description: string
+  if (status.outcome === 'unknown') description = `${phase} result unknown`
+  else if (status.outcome === 'request_not_sent') description = `${phase} request not sent`
+  else if (status.outcome === 'observation_ended') description = 'Gate observation ended'
+  else if (status.kind === 'exit' && typeof status.code === 'number') description = `Execute exited with code ${status.code}`
+  else if (status.kind === 'signal' && typeof status.signal === 'number') description = `Execute ended by signal ${status.signal}`
+  else if (status.kind === 'stopped' && typeof status.signal === 'number') description = `Execute stopped by signal ${status.signal}`
+  else if (typeof status.rejected === 'string') description = `Execute rejected: ${status.rejected}`
+  else return null
+  const identity = [
+    typeof event.stream_id === 'number' ? `stream ${event.stream_id}` : null,
+    typeof event.task_id === 'string' ? `task ${event.task_id}` : null,
+  ].filter(Boolean).join(', ')
+  return identity ? `${description} (${identity})` : description
 }
 
 // The server sends `gap` only when this viewer fell further behind than the
@@ -103,8 +151,21 @@ export function linesFromExecuteOutputEvent(event: ExecuteOutputStreamEvent): Ou
     usedStructuredLines = true
     for (const line of event.lines) lines.push(outputLineFromExecuteLine(line))
   }
+  if (event.type === 'snapshot' && Array.isArray(event.active_streams)) {
+    const retainedCommands = new Set((Array.isArray(event.lines) ? event.lines : [])
+      .filter(line => line.stream === 'cmd' && typeof line.stream_id === 'number')
+      .map(line => line.stream_id))
+    for (const stream of event.active_streams) {
+      if (stream && typeof stream.command === 'string' && !retainedCommands.has(stream.stream_id)) {
+        lines.push({ text: `command summary: ${stream.command}`, stream: 'meta' })
+      }
+    }
+  }
   if ((event.first_retained_seq ?? 1) > 1) {
     lines.unshift({ text: `earlier output events are no longer retained (before seq ${event.first_retained_seq})`, stream: 'meta' })
+  }
+  if ((event.lines_omitted ?? 0) > 0) {
+    lines.unshift({ text: `${event.lines_omitted} earlier output lines omitted from this view`, stream: 'meta' })
   }
   if (!usedStructuredLines) {
     for (const line of splitChunkLines(event.stdout_since ?? '')) {
@@ -119,7 +180,16 @@ export function linesFromExecuteOutputEvent(event: ExecuteOutputStreamEvent): Ou
   if (dropped > 0) {
     lines.unshift({ text: `dropped ${dropped} older bytes`, stream: 'meta' })
   }
-  if (event.closed && lines.length === 0) {
+  const retainedStatus = event.type === 'snapshot' && Array.isArray(event.lines)
+    ? [...event.lines].reverse().find(line => line.stream === 'status')
+    : undefined
+  const duplicatesRetainedStatus = retainedStatus !== undefined
+    && retainedStatus.task_id === event.task_id
+    && JSON.stringify(statusFromLine(retainedStatus)) === JSON.stringify(executionStatus(event))
+  const statusLine = duplicatesRetainedStatus ? null : executionStatusLine(event)
+  if (statusLine) {
+    lines.push({ text: statusLine, stream: 'meta' })
+  } else if (event.closed && lines.length === 0) {
     lines.push({ text: 'Execute output task closed', stream: 'meta' })
   }
   return lines
@@ -271,6 +341,8 @@ export function ExecuteOutputDrawer({
   const keeper = keeperName.trim()
   const [lines, setLines] = useState<OutputLine[]>([])
   const [status, setStatus] = useState<ExecuteOutputStatus>('idle')
+  const [hasUnconfirmedResult, setHasUnconfirmedResult] = useState(false)
+  const [hasIncompleteHistory, setHasIncompleteHistory] = useState(false)
   const [taskId, setTaskId] = useState<string | null>(null)
   const [expanded, setExpanded] = useState(true)
   const viewportRef = useRef<HTMLDivElement | null>(null)
@@ -294,12 +366,16 @@ export function ExecuteOutputDrawer({
       setLines([{ text: 'waiting for an active Execute output task', stream: 'meta' }])
       setStatus('idle')
       setTaskId(null)
+      setHasUnconfirmedResult(false)
+      setHasIncompleteHistory(false)
       return
     }
     if (!keeper) {
       setLines([{ text: 'no keeper selected', stream: 'meta' }])
       setStatus('idle')
       setTaskId(null)
+      setHasUnconfirmedResult(false)
+      setHasIncompleteHistory(false)
       return
     }
 
@@ -307,8 +383,14 @@ export function ExecuteOutputDrawer({
     setLines([])
     setStatus('streaming')
     setTaskId(null)
+    setHasUnconfirmedResult(false)
+    setHasIncompleteHistory(false)
     // Whether the latest observation says all executions are closed.
     let settled = false
+    // A later execution closing cannot resolve an earlier unknown outcome or
+    // reconstruct lifecycle events lost in a gap.
+    let unknownResult = false
+    let incompleteHistory = false
     // A gap may contain opens or closes; only a snapshot can restore a full
     // inventory after one. IDs are scoped to this server's observation stream.
     let activeStreams: Map<number, string | null> | null = null
@@ -324,11 +406,44 @@ export function ExecuteOutputDrawer({
         if (event.type === 'gap') {
           activeStreams = null
           settled = false
+          incompleteHistory = true
+          setHasIncompleteHistory(true)
           setTaskId(null)
           setStatus('unknown')
           return
         }
-        settled = event.type === 'error' || event.closed === true
+        const snapshotStatuses = event.type === 'snapshot' && Array.isArray(event.lines)
+          ? event.lines.filter(line => line.stream === 'status').map(statusFromLine)
+          : []
+        if (((event.type === 'snapshot' || event.type === 'task_closed')
+              && executionStatus(event)?.outcome === 'unknown')
+            || snapshotStatuses.some(status => status?.outcome === 'unknown')) {
+          unknownResult = true
+          setHasUnconfirmedResult(true)
+        }
+        if (event.type === 'snapshot' && (
+          (event.first_retained_seq ?? 1) > 1 || (event.lines_omitted ?? 0) > 0
+          || snapshotStatuses.some(status => status === null)
+        )) {
+          incompleteHistory = true
+          setHasIncompleteHistory(true)
+        }
+        const contradictsActiveCount = event.closed === true && (
+          (typeof event.active_count === 'number' && event.active_count > 0)
+          || (event.type === 'snapshot' && Array.isArray(event.active_streams) && event.active_streams.length > 0)
+        )
+        if (contradictsActiveCount) {
+          incompleteHistory = true
+          setHasIncompleteHistory(true)
+        }
+        const allClosed = event.closed === true && !contradictsActiveCount
+        // A later successful close does not identify which earlier execution
+        // was unconfirmed. Do not attach that aggregate warning to its task.
+        const unconfirmedResult = unknownResult || incompleteHistory
+        const closedTask = unconfirmedResult && executionStatus(event)?.outcome !== 'unknown'
+          ? null
+          : taskOf(event.task_id)
+        settled = event.type === 'error' || allClosed
         if (event.type === 'snapshot' && Array.isArray(event.active_streams)) {
           activeStreams = event.active_streams.every(stream =>
             stream !== null && typeof stream === 'object' && Number.isInteger(stream.stream_id)
@@ -336,12 +451,12 @@ export function ExecuteOutputDrawer({
             ? new Map(event.active_streams.map(stream => [stream.stream_id, stream.task_id]))
             : null
           if (typeof event.active_count === 'number' && activeStreams?.size !== event.active_count) activeStreams = null
-          setTaskId(event.closed && activeStreams?.size === 0 ? taskOf(event.task_id) : soleActiveTask())
+          setTaskId(allClosed && activeStreams?.size === 0 ? closedTask : soleActiveTask())
         } else if (event.type === 'snapshot' || event.type === 'no_task') {
           // Older servers do not send an inventory. A closed snapshot is a
           // complete empty inventory; an open one cannot establish one.
-          activeStreams = event.closed ? new Map() : null
-          setTaskId(taskOf(event.task_id))
+          activeStreams = allClosed ? new Map() : null
+          setTaskId(allClosed ? closedTask : taskOf(event.task_id))
         } else if (event.type === 'task_opened') {
           if (activeStreams !== null && typeof event.stream_id === 'number') {
             activeStreams.set(event.stream_id, taskOf(event.task_id))
@@ -355,7 +470,7 @@ export function ExecuteOutputDrawer({
           else activeStreams = null
           if (typeof event.active_count === 'number' && activeStreams?.size !== event.active_count) activeStreams = null
           if (event.active_count === 0) activeStreams = new Map()
-          setTaskId(event.closed ? taskOf(event.task_id) : soleActiveTask())
+          setTaskId(allClosed ? closedTask : soleActiveTask())
         } else if (event.type === 'line' && activeStreams === null) {
           // Legacy events lack stream IDs. Do not resurrect a task after a gap.
           setTaskId(null)
@@ -363,7 +478,7 @@ export function ExecuteOutputDrawer({
           setTaskId(null)
         }
         if (event.type === 'error') setStatus('error')
-        else if (event.closed) setStatus('closed')
+        else if (allClosed) setStatus(unconfirmedResult ? 'unknown' : 'closed')
         else setStatus('streaming')
       },
     }).then(() => {
@@ -421,6 +536,12 @@ export function ExecuteOutputDrawer({
           ? html`<span class="truncate text-[var(--color-fg-disabled)]">${taskId}</span>`
           : null}
         <${StatusChip} tone=${statusTone(status)} uppercase=${false} class="font-mono">${status}</${StatusChip}>
+        ${hasUnconfirmedResult && status !== 'unknown'
+          ? html`<${StatusChip} tone="warn" uppercase=${false} class="font-mono">unconfirmed result</${StatusChip}>`
+          : null}
+        ${hasIncompleteHistory
+          ? html`<${StatusChip} tone="warn" uppercase=${false} class="font-mono">history incomplete</${StatusChip}>`
+          : null}
         <${ExecuteOutputContextLinks} links=${routeLinks} />
         ${streamEnabled && onStop ? html`
           <button

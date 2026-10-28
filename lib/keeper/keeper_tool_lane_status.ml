@@ -32,9 +32,11 @@ let action_of_failure = function
      shim. A \
      dispatched effect may have happened; inspect it before running it again."
   | Keeper_sandbox_remote.Shim_refused ->
-    "The shim refused the request itself: a cwd outside its jail, a config it \
-     will not read, or a box it cannot build. A path error is yours to fix; a \
-     config or box error is the operator's."
+    "The shim reported an error instead of a payload result. It can name a \
+     cwd outside its jail, a config it cannot read, a box it could not build, \
+     or an unavailable child acknowledgement. This report alone does not establish the command's effects; \
+     inspect them before retrying. A path error is yours to fix; a config or \
+     box error is the operator's."
   | Keeper_sandbox_remote.Trailer_disagreement ->
     "The transport's exit and the shim's trailer contradict each other. Give the \
      operator the detail; the effects are unknown and must be inspected before \

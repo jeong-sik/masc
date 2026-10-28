@@ -26,6 +26,8 @@ export interface ExecuteOutputStreamEvent {
   task_id?: string | null
   task_count?: number
   lines?: ExecuteOutputLine[]
+  /** Retained lines omitted from this snapshot by the view's line limit. */
+  lines_omitted?: number
   line?: ExecuteOutputLine
   /** Log number of a `line`, `task_opened` or `task_closed` event. */
   seq?: number

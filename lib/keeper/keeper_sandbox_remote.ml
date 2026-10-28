@@ -110,12 +110,19 @@ type probe_observations =
   ; last_boot_change_at : float option
   }
 
+type probe_completion =
+  { result : (Exec_ssh_protocol.major, string) result }
+
 type shared_state =
   { semaphore : Eio.Semaphore.t
   ; probe_lock : Cross_context_mutex.t
     (* A probe must finish before the next probe for this endpoint begins.
        Otherwise a delayed older response can make a boot comparison run
        backwards. The lock is shared with both Eio and non-Eio callers. *)
+  ; probe_completion : probe_completion option Atomic.t
+    (* Each completed probe publishes a fresh object under [probe_lock]. A
+       waiter may reuse only a completion newer than the one it saw when it
+       began waiting. A cancelled probe does not publish a completion. *)
   ; first_dispatch_logged : bool Atomic.t
   ; probe_answer : probe_answer option Atomic.t
     (* What the endpoint's shim answered to [--probe], kept for the life of
@@ -166,6 +173,7 @@ let shared_state ((_, _, _, _, _, max_concurrent_sessions) as identity : endpoin
       let state =
         { semaphore = Eio.Semaphore.make max_concurrent_sessions
         ; probe_lock = Cross_context_mutex.create ()
+        ; probe_completion = Atomic.make None
         ; first_dispatch_logged = Atomic.make false
         ; probe_answer = Atomic.make None
         ; probe_observations = Atomic.make
@@ -724,8 +732,25 @@ let run_probe_locked t =
   outcome
 ;;
 
+let run_probe_coalescing ~force t =
+  let before = Atomic.get t.shared.probe_completion in
+  Cross_context_mutex.with_lock t.shared.probe_lock (fun () ->
+    let after = Atomic.get t.shared.probe_completion in
+    let completed_while_waiting =
+      match before, after with
+      | None, Some completion -> Some completion
+      | Some previous, Some completion when previous != completion -> Some completion
+      | None, None | Some _, None | Some _, Some _ -> None in
+    match force, completed_while_waiting with
+    | false, Some completion -> completion.result
+    | true, (None | Some _) | false, None ->
+      let result = run_probe_locked t in
+      Atomic.set t.shared.probe_completion (Some { result });
+      result)
+;;
+
 let run_probe t =
-  Cross_context_mutex.with_lock t.shared.probe_lock (fun () -> run_probe_locked t)
+  run_probe_coalescing ~force:false t
 ;;
 
 let rec record_dispatch (shared : shared_state) ~keeper_name record =
@@ -1293,8 +1318,8 @@ let available_kib output =
     | _ -> None)
 ;;
 
-let perform_endpoint_preflight t =
-  let* (_ : Exec_ssh_protocol.major) = run_probe t in
+let perform_endpoint_preflight ?(force_probe = false) t =
+  let* (_ : Exec_ssh_protocol.major) = run_probe_coalescing ~force:force_probe t in
   let* _ =
     run_endpoint_preflight_command t ~error_code:(code t "root_missing")
       [ "test"; "-d"; t.remote_root ]
@@ -1369,8 +1394,8 @@ let perform_identity_preflight t =
   Ok ()
 ;;
 
-let perform_preflight t =
-  let* () = perform_endpoint_preflight t in
+let perform_preflight ?(force_probe = false) t =
+  let* () = perform_endpoint_preflight ~force_probe t in
   let* () = perform_workspace_preflight t in
   let* () = perform_payload_tool_preflight t in
   perform_identity_preflight t
@@ -1386,7 +1411,7 @@ let check_preflight ?(force = false) t =
   match if force then None else cached_preflight ~now t with
   | Some result -> result
   | None ->
-    let result = perform_preflight t in
+    let result = perform_preflight ~force_probe:force t in
     store_preflight ~now t result;
     result
 ;;

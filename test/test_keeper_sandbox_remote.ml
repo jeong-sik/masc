@@ -693,7 +693,7 @@ let test_fresh_probe_and_boot_comparison () =
 (* The first shim captures the old boot but cannot answer until released.
    A second Keeper names the same endpoint and would answer the new boot
    immediately if probes were allowed to overlap. *)
-let delayed_probe_fixture ~base_path =
+let delayed_probe_fixture ~base_path ~fail_first ~fail_second =
   let boot_a = "70d55243-7a2b-47bc-95b3-c133f134854e" in
   let boot_b = "8c4c50be-d69a-497a-a5a8-d80e4848b0f3" in
   let path name = Filename.concat base_path name in
@@ -705,19 +705,23 @@ let delayed_probe_fixture ~base_path =
         release = None; boot_id = Some boot_id } in
   save (path "boot-a") (probe boot_a);
   save (path "boot-b") (probe boot_b);
+  let first_response = if fail_first then "echo first-offline >&2; exit 255"
+    else "cat " ^ shell_quote (path "boot-a") in
+  let second_response = if fail_second then "echo second-offline >&2; exit 255"
+    else "cat " ^ shell_quote (path "boot-b") in
   let cli = path "serial-probe-cli" in
   save cli
     (Printf.sprintf
-       "#!/bin/sh\nif mkdir %s 2>/dev/null; then\n  : > %s\n  while [ ! -e %s ]; do sleep 0.02; done\n  cat %s\nelse\n  : > %s\n  cat %s\nfi\n"
+       "#!/bin/sh\nif mkdir %s 2>/dev/null; then\n  : > %s\n  while [ ! -e %s ]; do sleep 0.02; done\n  %s\nelse\n  : > %s\n  %s\nfi\n"
        (shell_quote (path "first-owner")) (shell_quote first_started)
-       (shell_quote release_first) (shell_quote (path "boot-a"))
-       (shell_quote second_started) (shell_quote (path "boot-b")));
+       (shell_quote release_first) first_response
+       (shell_quote second_started) second_response);
   Unix.chmod cli 0o700;
   let state keeper_name =
     Keeper_sandbox_remote.of_container_exec ~base_path ~keeper_name
       ~remote_root ~gh_config_dir ~injected_env:[] ~env_allowlist:[ "LANG" ]
       ~connect_timeout_sec:1 ~max_concurrent_sessions:2 (guest ~cli ()) in
-  state "keeper-a", state "keeper-b", first_started, second_started, release_first, boot_b
+  state "keeper-a", state "keeper-b", first_started, second_started, release_first, boot_a, boot_b
 ;;
 
 let await_fixture_file clock path =
@@ -738,8 +742,8 @@ let assert_new_boot state boot_b =
 let test_concurrent_probes_do_not_reorder_boots () =
   with_eio_env @@ fun env ->
   let base_path = temp_dir () in
-  let first, second, first_started, second_started, release_first, boot_b =
-    delayed_probe_fixture ~base_path in
+  let first, second, first_started, second_started, release_first, boot_a, boot_b =
+    delayed_probe_fixture ~base_path ~fail_first:false ~fail_second:false in
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let first_result, finish_first = Eio.Promise.create () in
@@ -758,14 +762,86 @@ let test_concurrent_probes_do_not_reorder_boots () =
   (match Eio.Promise.await first_result, Eio.Promise.await second_result with
    | Ok _, Ok _ -> ()
    | _ -> fail "a serialized probe failed");
+  check bool "the waiting Keeper reused the first probe" false (Sys.file_exists second_started);
+  (match (Keeper_sandbox_remote.report second).probe with
+   | Probe_answered { boot; _ } ->
+     check (option string) "shared observation is the first boot" (Some boot_a) boot.boot_id;
+     check bool "one shared probe establishes only one baseline" true (boot.change = Boot_first)
+   | Probe_not_asked | Probe_failed _ -> fail "expected the shared probe to answer");
+  (match Keeper_sandbox_remote.For_testing.run_probe second with Ok _ -> () | Error error -> fail error);
   assert_new_boot second boot_b
+;;
+
+let test_concurrent_failed_probes_are_shared () =
+  with_eio_env @@ fun env ->
+  let base_path = temp_dir () in
+  let first, second, first_started, second_started, release_first, _, boot_b =
+    delayed_probe_fixture ~base_path ~fail_first:true ~fail_second:false in
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let first_result, finish_first = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Promise.resolve finish_first (Keeper_sandbox_remote.For_testing.run_probe first));
+  await_fixture_file clock first_started;
+  let waiters = List.init 3 (fun _ ->
+    let entered, enter = Eio.Promise.create () in
+    let result, finish = Eio.Promise.create () in
+    Eio.Fiber.fork ~sw (fun () ->
+      Eio.Promise.resolve enter ();
+      Eio.Promise.resolve finish (Keeper_sandbox_remote.For_testing.run_probe second));
+    entered, result) in
+  List.iter (fun (entered, _) -> Eio.Promise.await entered) waiters;
+  Eio.Time.sleep clock 0.1;
+  check bool "failure waiters did not launch another probe" false (Sys.file_exists second_started);
+  save release_first "release";
+  let first_error = match Eio.Promise.await first_result with
+    | Error error -> error | Ok _ -> fail "the first probe should fail" in
+  List.iter (fun (_, result) -> match Eio.Promise.await result with
+    | Error error -> check string "waiter shares the exact failure" first_error error
+    | Ok _ -> fail "a shared failed probe became success") waiters;
+  check bool "no waiting caller spawned a probe" false (Sys.file_exists second_started);
+  (match Keeper_sandbox_remote.For_testing.run_probe second with Ok _ -> () | Error error -> fail error);
+  (match (Keeper_sandbox_remote.report second).probe with
+   | Probe_answered { boot; _ } ->
+     check (option string) "a later probe observes recovery" (Some boot_b) boot.boot_id;
+     check bool "failure did not create a boot baseline" true (boot.change = Boot_first)
+   | Probe_not_asked | Probe_failed _ -> fail "later recovery was not observed")
+;;
+
+let test_forced_preflight_does_not_reuse_waiting_probe () =
+  with_eio_env @@ fun env ->
+  let base_path = temp_dir () in
+  let first, second, first_started, second_started, release_first, _, _ =
+    delayed_probe_fixture ~base_path ~fail_first:true ~fail_second:true in
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let first_result, finish_first = Eio.Promise.create () in
+  let forced_entered, enter_forced = Eio.Promise.create () in
+  let forced_result, finish_forced = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Promise.resolve finish_first (Keeper_sandbox_remote.For_testing.run_probe first));
+  await_fixture_file clock first_started;
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Promise.resolve enter_forced ();
+    Eio.Promise.resolve finish_forced (Keeper_sandbox_remote.check_preflight ~force:true second));
+  Eio.Promise.await forced_entered;
+  Eio.Time.sleep clock 0.1;
+  check bool "forced probe still waits for the active probe" false (Sys.file_exists second_started);
+  save release_first "release";
+  (match Eio.Promise.await first_result with Error error ->
+     check bool "first failure came from first probe" true (contains "first-offline" error)
+   | Ok _ -> fail "the first probe should fail");
+  (match Eio.Promise.await forced_result with Error error ->
+     check bool "forced preflight observes its own failure" true (contains "second-offline" error)
+   | Ok () -> fail "the forced probe should fail");
+  check bool "force starts a fresh probe" true (Sys.file_exists second_started)
 ;;
 
 let test_cancelled_probe_waiter_releases_ownership () =
   with_eio_env @@ fun env ->
   let base_path = temp_dir () in
-  let first, second, first_started, second_started, release_first, boot_b =
-    delayed_probe_fixture ~base_path in
+  let first, second, first_started, second_started, release_first, _, boot_b =
+    delayed_probe_fixture ~base_path ~fail_first:false ~fail_second:false in
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let first_result, finish_first = Eio.Promise.create () in
@@ -796,7 +872,8 @@ let test_cancelled_probe_waiter_releases_ownership () =
 let test_cancelled_probe_owner_releases_ownership () =
   with_eio_env @@ fun env ->
   let base_path = temp_dir () in
-  let first, second, first_started, _, _, boot_b = delayed_probe_fixture ~base_path in
+  let first, second, first_started, _, _, _, boot_b =
+    delayed_probe_fixture ~base_path ~fail_first:false ~fail_second:false in
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let owner_context, provide_owner_context = Eio.Promise.create () in
@@ -1242,6 +1319,8 @@ let () =
           ; test_case "transport + probe argv" `Quick test_transport_and_probe_argv
           ; test_case "latest probe and boot comparison" `Quick test_fresh_probe_and_boot_comparison
           ; test_case "shared endpoint probes cannot reorder boots" `Quick test_concurrent_probes_do_not_reorder_boots
+          ; test_case "concurrent failed probes share one result" `Quick test_concurrent_failed_probes_are_shared
+          ; test_case "forced preflight starts its own probe" `Quick test_forced_preflight_does_not_reuse_waiting_probe
           ; test_case "cancelled probe waiter leaves lock reusable" `Quick test_cancelled_probe_waiter_releases_ownership
           ; test_case "cancelled probe owner leaves lock reusable" `Quick test_cancelled_probe_owner_releases_ownership
           ; test_case "caller cannot replace runner-owned env" `Quick

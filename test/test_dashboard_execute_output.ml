@@ -76,7 +76,7 @@ let test_snapshot_line_ring_shape () =
   let json = EO.event_json ~keeper_name:"alpha" in
   let open Yojson.Safe.Util in
   let json_lines = json |> member "lines" |> to_list in
-  check int "json line count" 3 (List.length json_lines);
+  check int "json includes the close status" 4 (List.length json_lines);
   check string "json line text" "ok" (List.hd json_lines |> member "text" |> to_string);
   check int "json line ts" 1000000 (List.hd json_lines |> member "ts_ms" |> to_int)
 
@@ -487,7 +487,7 @@ let test_initial_snapshot_starts_live_tail_after_it () =
            check
              (list int)
              "line numbers"
-             [ 1 ]
+             [ 1; 2 ]
              (initial |> member "lines" |> to_list
               |> List.map (fun line -> line |> member "seq" |> to_int));
            EO.append_stream_chunk ~stream_id:1 ~keeper_name:"alpha" ~stream:`Stdout "after snapshot\n";
@@ -544,6 +544,24 @@ let test_closed_stream_without_completed_capture () =
   check bool "closed" true (snapshot |> member "closed" |> to_bool);
   check string "actual terminal status" "path_reject"
     (snapshot |> member "status" |> member "rejected" |> to_string)
+
+let test_snapshot_preserves_earlier_unknown_close () =
+  EO.record_stream_start ~keeper_name:"alpha" ~stream_id:11 ~task_id:(Some "a") ~command:"a";
+  EO.record_stream_start ~keeper_name:"alpha" ~stream_id:12 ~task_id:(Some "b") ~command:"b";
+  EO.record_stream_end ~keeper_name:"alpha" ~stream_id:11 ~task_id:(Some "a")
+    ~status:(`Assoc [ "outcome", `String "unknown" ]);
+  EO.record_stream_end ~keeper_name:"alpha" ~stream_id:12 ~task_id:(Some "b") ~status:status_ok;
+  let open Yojson.Safe.Util in
+  let snapshot = EO.event_json ~keeper_name:"alpha" in
+  let lines = snapshot |> member "lines" |> to_list in
+  let first_close = List.find (fun line ->
+    (line |> member "stream") = `String "status"
+    && (line |> member "stream_id") = `Int 11) lines in
+  let status = first_close |> member "text" |> to_string |> Yojson.Safe.from_string in
+  check string "the earlier stream still reports its unknown effect" "unknown"
+    (status |> member "outcome" |> to_string);
+  check string "the later stream remains the latest status" "exit"
+    (snapshot |> member "status" |> member "kind" |> to_string)
 
 let test_overlapping_streams_keep_identity_and_open_state () =
   EO.record_stream_start ~keeper_name:"alpha" ~stream_id:11 ~task_id:(Some "a") ~command:"echo a";
@@ -692,10 +710,10 @@ let test_route_delivers_open_stream_and_releases_on_disconnect () =
             (* The browser may send an Origin on an EventSource GET. A
                rejected origin must not receive permission to read output,
                even when the loopback server allows unauthenticated reads. *)
-            let stream_headers origin =
+            let stream_headers ?(target = "/api/v1/dashboard/execute-output/alpha") origin =
               let conn = Httpun.Server_connection.create dispatch in
               let request = Printf.sprintf
-                  "GET /api/v1/dashboard/execute-output/alpha HTTP/1.1\r\nHost: 127.0.0.1:8935\r\nOrigin: %s\r\n\r\n" origin in
+                  "GET %s HTTP/1.1\r\nHost: 127.0.0.1:8935\r\nOrigin: %s\r\n\r\n" target origin in
               let bytes = Bigstringaf.of_string ~off:0 ~len:(String.length request) request in
               ignore (Httpun.Server_connection.read conn bytes ~off:0 ~len:(Bigstringaf.length bytes));
               let response = Buffer.create 512 in
@@ -724,6 +742,19 @@ let test_route_delivers_open_stream_and_releases_on_disconnect () =
             check bool "same-origin stream is allowed" true
               (String_util.contains_substring same
                  "access-control-allow-origin: http://127.0.0.1:8935");
+            let encode = Uri.pct_encode ~component:`Query_value in
+            let stream_path = "/api/v1/dashboard/execute-output/alpha" in
+            let matching_stream = stream_headers ~target:(stream_path ^ "?expected_base_path=" ^
+                encode base ^ "&expected_masc_root=" ^ encode root) "http://127.0.0.1:8935"
+              |> String.lowercase_ascii in
+            check bool "matching stream reports workspace admission" true
+              (String_util.contains_substring matching_stream "x-masc-workspace-read: matched-v1");
+            let wrong_stream = stream_headers ~target:(stream_path ^ "?expected_base_path=" ^
+                encode (base ^ "-other") ^ "&expected_masc_root=" ^ encode root) "http://127.0.0.1:8935" in
+            check bool "mismatched stream is refused" true
+              (String_util.contains_substring wrong_stream " 409 ");
+            check bool "mismatched stream does not reveal output" false
+              (String_util.contains_substring wrong_stream "before subscription");
 
             (* The snapshot is the same retained observation and is bound to
                the requesting workspace by the ordinary read precondition. *)
@@ -751,7 +782,6 @@ let test_route_delivers_open_stream_and_releases_on_disconnect () =
                 | `Close _ -> Buffer.contents response in
               drain ()
             in
-            let encode = Uri.pct_encode ~component:`Query_value in
             let query = "?expected_base_path=" ^ encode base ^ "&expected_masc_root=" ^ encode root in
             let status response = match String.split_on_char ' ' response with
               | _version :: code :: _ -> int_of_string code
@@ -774,7 +804,7 @@ let test_route_delivers_open_stream_and_releases_on_disconnect () =
               encode base ^ "&expected_masc_root=" ^ encode root) in
             check int "limited snapshot succeeds" 200 (status limited);
             check bool "projection names omitted retained rows" true
-              (String_util.contains_substring limited "\"lines_omitted\":2");
+              (String_util.contains_substring limited "\"lines_omitted\":5");
             let invalid_limit = wire_response (snapshot_path ^ "?limit=0") in
             check int "invalid row limit is refused" 400 (status invalid_limit);
             let wrong = wire_response (snapshot_path ^ "?expected_base_path=" ^
@@ -863,6 +893,8 @@ let () =
             (with_fresh test_current_stream_supersedes_prior_completion)
         ; test_case "closed stream without completed capture" `Quick
             (with_fresh test_closed_stream_without_completed_capture)
+        ; test_case "snapshot retains earlier unknown close" `Quick
+            (with_fresh test_snapshot_preserves_earlier_unknown_close)
         ; test_case "overlapping streams retain identities" `Quick
             (with_fresh test_overlapping_streams_keep_identity_and_open_state)
         ; test_case "snapshot discloses evicted live history" `Quick

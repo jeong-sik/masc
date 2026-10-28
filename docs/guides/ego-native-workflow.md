@@ -235,6 +235,20 @@ takes nonnegative finite `milliseconds`, including zero. Use `waitForSelector`,
 alone proves no app state. A dialog returned by `info` stops following steps.
 Observation result types are validated before accepting a workflow receipt.
 
+An SDK `EGO_PAGE_EVALUATION_TIMED_OUT` error retains its structured diagnostics
+under the workflow receipt's `failure.nativeError`: `code`, `timeoutMs`,
+`executionStopped`, `mayHaveLateEffects` and `pageResponsive`. The timeout is
+finite and nonnegative; the three observations are booleans. These fields come
+from the [SDK error](https://github.com/citrolabs/ego-lite/blob/v2.1.0/package/ego-browser/src/page-model.ts#L416),
+without interpreting its message. A first-step evaluation failure also returns
+this receipt while its effect outcome remains unknown. An initial URL or other
+read failure retains the same diagnostics with `effectPhase: not_started` when
+no effect step began; this phase is derived from validated workflow progress.
+Stopped execution can still have late effects; the completed prefix and input-release state retain
+their existing meaning. Native error diagnostics do not authorize replay or
+settle held input. Local codec and SDK-stand-in checks cover these boundaries;
+the actual installed Keeper timeout path remains unverified.
+
 For login, 2FA or captcha, hand the same live client to the operator with
 `BrowserAct action=hand_off`. Its receipt names `spaceId` and `spaceName` from
 that TaskSpace before handoff; no Page operation follows the handoff. Use those

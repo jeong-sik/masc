@@ -2,10 +2,12 @@
     browser. Context IDs are owned by BiDi, not extension tab IDs. *)
 (** The live peer contract ({!Browser_live_peer}), under this peer's name. *)
 type partial_failure = Browser_live_peer.partial_failure = { tab_id : int; message : string; receipt : Yojson.Safe.t }
+type disposition = Browser_live_peer.disposition = Not_started | Uncertain
 type failure = Browser_live_peer.failure =
   | Before_effect of string
   | Partial_failure of partial_failure
   | Outcome_unknown of string
+  | Observed_failure of { disposition : disposition; message : string; receipt : Yojson.Safe.t }
 type verb = Browser_live_peer.verb =
   | Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact | Page_act
   | Page_goto | Page_context | Page_snapshot | Page_downloads | Page_native_workflow

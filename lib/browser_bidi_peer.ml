@@ -6,8 +6,10 @@ let obj xs = `Assoc xs
 let str s = `String s
 let required name json = match field name json with Some v -> Ok v | None -> Error ("missing " ^ name)
 type partial_failure = Browser_live_peer.partial_failure = { tab_id : int; message : string; receipt : Yojson.Safe.t }
+type disposition = Browser_live_peer.disposition = Not_started | Uncertain
 type failure = Browser_live_peer.failure =
   | Before_effect of string | Partial_failure of partial_failure | Outcome_unknown of string
+  | Observed_failure of { disposition : disposition; message : string; receipt : Yojson.Safe.t }
 (* The error codes Firefox answers that this host acts on, read once where
    the answer arrives; any other code is kept as Firefox wrote it.
    "session not created": Firefox will not serve a [session.new]. It takes
@@ -408,7 +410,7 @@ let settle_navigation t context id name = function
     (match tab_receipt t context id name with
      | Ok receipt -> Error (Partial_failure {tab_id=id;message;receipt})
      | Error _ -> Error (Outcome_unknown message))
-  | Error (Before_effect _ | Partial_failure _ as failure) -> Error failure
+  | Error (Before_effect _ | Partial_failure _ | Observed_failure _ as failure) -> Error failure
 let tab_action t ~tab_id interaction =
   let ask = ask_on_tab t in
   let* () = match interaction with
@@ -494,7 +496,7 @@ let activate t context id args =
     | Ok after -> Error (Partial_failure {tab_id=id;message;receipt=receipt after})
     | Error _ -> Error (Outcome_unknown message) in
   match ask_on_tab ~before:activation_refusals t "browsingContext.activate" (obj ["context",str context]) with
-  | Error (Before_effect _ | Partial_failure _ as failure) -> Error failure
+  | Error (Before_effect _ | Partial_failure _ | Observed_failure _ as failure) -> Error failure
   | Error (Outcome_unknown message) -> settle message
   | Ok _ ->
     match tab_metadata t context with
@@ -542,7 +544,7 @@ let dispatch ?actor ?request_id t ~verb args =
           let _ = script t context Browser_pointer_feedback.finish_script
             (obj (("phase",Browser_pointer_feedback.outcome_to_json !phase)::metadata)) in ());
         let result = use context id in
-        phase := (match result with Ok _ -> Browser_pointer_feedback.Finished | Error (Before_effect _) -> Browser_pointer_feedback.Refused | Error (Partial_failure _ | Outcome_unknown _) -> Browser_pointer_feedback.Unknown);
+        phase := (match result with Ok _ -> Browser_pointer_feedback.Finished | Error (Before_effect _ | Observed_failure {disposition=Not_started;_}) -> Browser_pointer_feedback.Refused | Error (Partial_failure _ | Outcome_unknown _ | Observed_failure {disposition=Uncertain;_}) -> Browser_pointer_feedback.Unknown);
         result)
     | (Browser_info|Tabs_list|Page_read|Page_elements|Page_capture|Page_scene|Page_act|Page_goto|Page_context|Page_snapshot
       |Page_downloads|Page_native_workflow), (None|Some _)

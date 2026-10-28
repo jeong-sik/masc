@@ -14,8 +14,8 @@ let reply_frame_limit = 8 * 1024 * 1024
 (* Confirmed partial effects keep their connection and stable tab IDs. Only
    an unobserved outcome retires it, preventing replay after uncertain input. *)
 let bidi_connection_can_continue = function
-  | Ok _ | Error (Masc.Browser_bidi_peer.Before_effect _ | Masc.Browser_bidi_peer.Partial_failure _) -> true
-  | Error (Masc.Browser_bidi_peer.Outcome_unknown _) -> false
+  | Ok _ | Error (Masc.Browser_bidi_peer.Before_effect _ | Masc.Browser_bidi_peer.Partial_failure _ | Masc.Browser_bidi_peer.Observed_failure {disposition=Masc.Browser_bidi_peer.Not_started;_}) -> true
+  | Error (Masc.Browser_bidi_peer.Outcome_unknown _ | Masc.Browser_bidi_peer.Observed_failure {disposition=Masc.Browser_bidi_peer.Uncertain;_}) -> false
 
 (* The server's long-poll window is 25 seconds. These transport deadlines
    leave it room to finish and bound a dead extension or HTTP connection. *)
@@ -817,6 +817,12 @@ let run_bidi env config url ~firefox_profile ~stop =
                 "error", `String message; "effectPhase", `String "partial"; "data", receipt] }
         | Error (Masc.Browser_bidi_peer.Outcome_unknown message) ->
             { id; verb; outcome = Record.Unknown; payload = failure id message }
+        | Error (Masc.Browser_bidi_peer.Observed_failure {disposition;message;receipt}) ->
+            let outcome,phase=match disposition with
+              | Masc.Browser_bidi_peer.Not_started -> Record.Not_started,["effectPhase",`String "not_started"]
+              | Masc.Browser_bidi_peer.Uncertain -> Record.Unknown,[] in
+            { id; verb; outcome
+            ; payload = `Assoc (["id",`String id;"ok",`Bool false;"error",`String message;"data",receipt] @ phase) }
       in
       (* A result is sent again for as long as the host is serving. When it
          leaves, an attempt already in flight gets a moment for the server's

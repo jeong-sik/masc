@@ -6,10 +6,19 @@ let script = {js|async function nativeWorkflow(page, args) {
     : '(' + step.source + ')(JSON.parse(' + JSON.stringify(step.argumentJson) + '))';
   let effectStarted = false, completedEffect = false;
   let inputReleased = true;
-  const failure = (index, method, error, extra = {}) => ({
-    completed, effectStarted, completedEffect, inputReleased,
-    failure: {index, method, message: String(error?.message ?? error), ...extra}
-  });
+  const failure = (index, method, error, extra = {}) => {
+    const nativeError = error?.code === 'EGO_PAGE_EVALUATION_TIMED_OUT' ? {
+      code: error.code, timeoutMs: error.timeoutMs,
+      executionStopped: error.executionStopped,
+      mayHaveLateEffects: error.mayHaveLateEffects,
+      pageResponsive: error.pageResponsive
+    } : undefined;
+    return {
+      completed, effectStarted, completedEffect, inputReleased,
+      failure: {index, method, message: String(error?.message ?? error),
+        ...(nativeError === undefined ? {} : {nativeError}), ...extra}
+    };
+  };
   let initialUrl;
   try { initialUrl = await page.url(); }
   catch (error) { return failure(0, 'initialUrl', error); }
@@ -191,11 +200,19 @@ let script = {js|async function nativeWorkflow(page, args) {
   } catch (error) { return failure(args.steps.length, 'snapshot', error); }
 }|js}
 
+type evaluation_timeout = {
+  timeout_ms : float;
+  execution_stopped : bool;
+  may_have_late_effects : bool;
+  page_responsive : bool;
+}
+type native_error = Evaluation_timed_out of evaluation_timeout
 module Release = Browser_ego_release
 type outcome =
   | Completed of { reply : Yojson.Safe.t; input : Release.settled }
   | Stopped of { receipt : Yojson.Safe.t; message : string;
-      effect_started : bool; completed_effect : bool; input : Release.t }
+      effect_started : bool; completed_effect : bool; input : Release.t;
+      native_error : native_error option }
 open Result.Syntax
 let object_fields allowed = function
   | `Assoc fields when List.for_all (fun (key,_) -> List.mem key allowed) fields
@@ -208,6 +225,22 @@ let bool key fields = let* value=get key fields in match value with `Bool value 
   | _ -> Error ("workflow receipt has invalid " ^ key)
 let integer key fields = let* value=get key fields in match value with `Int value when value>=0 -> Ok value
   | _ -> Error ("workflow receipt has invalid " ^ key)
+let native_error fields = match List.assoc_opt "nativeError" fields with
+  | None -> Ok None
+  | Some value ->
+    let* fields=object_fields ["code";"timeoutMs";"executionStopped";"mayHaveLateEffects";"pageResponsive"] value in
+    let* code=text "code" fields in
+    let* ()=match code with "EGO_PAGE_EVALUATION_TIMED_OUT" -> Ok ()
+      | _ -> Error "unsupported native workflow error code" in
+    let* timeout=get "timeoutMs" fields in
+    let* timeout_ms=match timeout with
+      | `Int value when value>=0 -> Ok (float_of_int value)
+      | `Float value when Float.is_finite value && value>=0. -> Ok value
+      | _ -> Error "invalid native evaluation timeout" in
+    let* execution_stopped=bool "executionStopped" fields in
+    let* may_have_late_effects=bool "mayHaveLateEffects" fields in
+    let* page_responsive=bool "pageResponsive" fields in
+    Ok (Some (Evaluation_timed_out {timeout_ms;execution_stopped;may_have_late_effects;page_responsive}))
 let saved_fetch_receipt filename value =
   let* fields=object_fields ["ok";"status";"statusText";"url";"headers";"downloadId";"suggestedFilename";"source"] value in
   let* _=bool "ok" fields in let* _=integer "status" fields in
@@ -283,8 +316,9 @@ let decode (request : Browser_lane.Native_workflow.t) receipt =
     let* ()=if truncated=(chars>request.max_chars) then Ok () else Error "workflow snapshot cut flags disagree" in
     Ok (Completed {reply=receipt; input})
   | `Assoc _ ->
-    let* failed=object_fields ["index";"method";"message";"dialog"] failure in
+    let* failed=object_fields ["index";"method";"message";"dialog";"nativeError"] failure in
     let* index=integer "index" failed in let* method_=text "method" failed in let* message=text "message" failed in
+    let* native_error=native_error failed in
     (* [entered]: when the failed step holds input, what the SDK did not give for it: no answer, or a dialog. *)
     let* expected_started,entered=match method_ with
       | "initialUrl" when index=0 && count=0 -> Ok (false,None)
@@ -322,5 +356,5 @@ let decode (request : Browser_lane.Native_workflow.t) receipt =
       | true,Release.Unconfirmed reason -> Error (receipts_do_not_show reason)
       | false,Release.Unconfirmed _ -> Ok judged
       | false,Release.Settled _ -> Ok (Release.Unconfirmed Release.Held_by_script_report) in
-    Ok (Stopped {receipt;message;effect_started=started;completed_effect;input})
+    Ok (Stopped {receipt;message;effect_started=started;completed_effect;input;native_error})
   | _ -> Error "workflow failure must be null or an object"

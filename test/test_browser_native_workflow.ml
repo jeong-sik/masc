@@ -263,6 +263,52 @@ let fetch_save_receipts () =
      ("downloadId",str id)::fields;
      List.remove_assoc "source" fields;
      List.remove_assoc "headers" fields]
+let evaluation_timeouts () =
+  let expected=request [step "evaluate" ["source",str "window.slow()"];click] in
+  let native=["code",str "EGO_PAGE_EVALUATION_TIMED_OUT";"timeoutMs",`Int 14000;
+    "executionStopped",`Bool true;"mayHaveLateEffects",`Bool true;"pageResponsive",`Bool true] in
+  let replace key value fields=(key,value)::List.remove_assoc key fields in
+  let receipt ?(released=true) method_ native =
+    obj (("inputReleased",`Bool released)::List.remove_assoc "inputReleased"
+      (result ~started:true ~completed_effect:false ~completed:[]
+        ~failure:(obj (["index",`Int 0;"method",str method_;"message",str "native timeout"] @ native)))) in
+  let detail = function Some (R.Evaluation_timed_out value) -> value
+    | None -> fail "native evaluation diagnostics are absent" in
+  List.iter (fun fields ->
+    let value=receipt "evaluate" ["nativeError",obj fields] in
+    match ok (R.decode expected value) with
+    | R.Stopped {receipt=retained;native_error;effect_started;completed_effect;input;_} ->
+      let detail=detail native_error in
+      check bool "evaluation effect started" true effect_started;
+      check bool "failed evaluation is not completed" false completed_effect;
+      check bool "evaluation held no input" true (seen_input input=`No_hold);
+      check bool "original receipt is retained without rewriting native diagnostics" true (retained=value);
+      check (float 0.) "native timeout milliseconds" 14000. detail.timeout_ms;
+      check bool "native execution-stopped observation" (List.assoc "executionStopped" fields=`Bool true) detail.execution_stopped;
+      check bool "native late effects remain possible" true detail.may_have_late_effects;
+      check bool "native responsiveness observation" (List.assoc "pageResponsive" fields=`Bool true) detail.page_responsive
+    | R.Completed _ -> fail "native evaluation timeout was marked complete")
+    [native;replace "executionStopped" (`Bool false) native;
+     native |> replace "executionStopped" (`Bool false) |> replace "pageResponsive" (`Bool false)];
+  (match ok (R.decode expected (receipt "evaluate" ["nativeError",obj (replace "timeoutMs" (`Int 0) native)])) with
+   | R.Stopped {native_error;_} -> check (float 0.) "native zero timeout retained" 0. (detail native_error).timeout_ms
+   | R.Completed _ -> fail "native zero timeout was marked complete");
+  (match ok (R.decode (request [click]) (receipt ~released:false "click" ["nativeError",obj native])) with
+   | R.Stopped {input;native_error;_} ->
+     check bool "native execution stopped" true (detail native_error).execution_stopped;
+     check bool "executionStopped cannot clear held input" true (seen_input input=not_released 0 Rel.Never_returned)
+   | R.Completed _ -> fail "failed held-input step was marked complete");
+  (match ok (R.decode expected (receipt "evaluate" [])) with
+   | R.Stopped {native_error=None;_} -> ()
+   | R.Completed _|R.Stopped _ -> fail "ordinary failure acquired a native timeout");
+  List.iter (fun fields ->
+    check bool "invalid native timeout is an unknown receipt, never a default" true
+      (Result.is_error (R.decode expected (receipt "evaluate" ["nativeError",obj fields]))))
+    [replace "code" (str "other") native;replace "timeoutMs" (`Int (-1)) native;
+     replace "timeoutMs" (`Float nan) native;replace "timeoutMs" (`Float infinity) native;
+     replace "executionStopped" (str "true") native;replace "mayHaveLateEffects" `Null native;
+     List.remove_assoc "pageResponsive" native;("code",str "EGO_PAGE_EVALUATION_TIMED_OUT")::native;
+     ("unexpected",`Bool true)::native]
 let malformed_receipts () =
   let expected=request [click;wait] in
   List.iter (fun value -> check bool "incomplete/mismatched execution is not success" true (Result.is_error (R.decode expected value)))
@@ -470,6 +516,7 @@ let () = if Array.length Sys.argv=3 && Sys.argv.(1)="--proof" then proof Sys.arg
   test_case "native observations retain values and event-drain effects" `Quick observations;
   test_case "fetch save names are safe artifact metadata" `Quick fetch_save_inputs;
   test_case "saved fetch receipts bind exact artifact provenance" `Quick fetch_save_receipts;
+  test_case "native evaluation timeout preserves diagnostics and uncertain effects" `Quick evaluation_timeouts;
   test_case "drag release is separate from effect completion" `Quick pointer_release;
   test_case "a release claim needs receipt evidence" `Quick release_needs_receipt_evidence;
   test_case "a stopped reply cannot report a release its receipts do not show" `Quick release_claim_on_stopped_replies;

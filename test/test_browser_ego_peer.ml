@@ -84,9 +84,9 @@ let page_answer ~label value = answered (obj ["label",str label;"answer",in_page
 
 let dispatch ?actor peer verb args = Peer.dispatch ?actor peer ~verb args
 let before_effect name = function
-  | Error (Live.Before_effect detail) -> detail
+  | Error (Live.Before_effect detail | Live.Observed_failure {disposition=Live.Not_started;message=detail;_}) -> detail
   | Ok _ -> failf "%s was served" name
-  | Error (Live.Partial_failure _ | Live.Outcome_unknown _) -> failf "%s failed after an effect" name
+  | Error (Live.Partial_failure _ | Live.Outcome_unknown _ | Live.Observed_failure {disposition=Live.Uncertain;_}) -> failf "%s failed after an effect" name
 
 let test_space_name_inspection_is_read_only_and_requires_evidence () =
   let row id created ownership = obj ["id",`Int id;"createdBy",str created;"ownership",str ownership] in
@@ -436,9 +436,9 @@ let test_an_answer_past_the_limit_is_refused () =
 let act_args action = Yojson.Safe.Util.member "args" (Lane.verb_json (Lane.Page_act action))
 let failure_kind = function
   | Ok _ -> "served"
-  | Error (Live.Before_effect _) -> "before effect"
+  | Error (Live.Before_effect _ | Live.Observed_failure {disposition=Live.Not_started;_}) -> "before effect"
   | Error (Live.Partial_failure _) -> "partial"
-  | Error (Live.Outcome_unknown _) -> "unknown"
+  | Error (Live.Outcome_unknown _ | Live.Observed_failure {disposition=Live.Uncertain;_}) -> "unknown"
 
 (* Opening, moving and closing act only on pages an agent opened in the
    space; a refusal the script makes before acting is before any effect, and
@@ -474,7 +474,7 @@ let test_effects_answer_what_happened () =
    | other -> failf "a failed load after creation was %s" (failure_kind other));
   reply := (fun _ -> Error Peer.Timed_out);
   (match dispatch peer Live.Page_act (act_args (Lane.Action.Open_tab "https://slack.com/")) with
-   | Error (Live.Outcome_unknown detail) ->
+   | Error (Live.Outcome_unknown detail | Live.Observed_failure {disposition=Live.Uncertain;message=detail;_}) ->
      check bool "says to list tabs first" true (String_util.contains_substring detail "list this connection's tabs")
    | other -> failf "a stopped open was %s" (failure_kind other));
   let before = runs () in
@@ -583,7 +583,7 @@ let test_input_acts_through_the_shared_page_scripts () =
   (* After the input was sent. *)
   by_step ["page.target",(fun _ -> answered resolved);"page.pointer",(fun _ -> input_answer ~error:(str "Target closed") ())];
   (match interact (Lane.Click_node {document_id="d1";node_id="send"}) with
-   | Error (Live.Outcome_unknown detail) -> check bool "says to read the tab" true (String_util.contains_substring detail "read tab 1")
+   | Error (Live.Outcome_unknown detail | Live.Observed_failure {disposition=Live.Uncertain;message=detail;_}) -> check bool "says to read the tab" true (String_util.contains_substring detail "read tab 1")
    | other -> failf "a failed click was %s" (failure_kind other));
   by_step ["page.target",(fun _ -> answered resolved);"page.pointer",(fun _ -> Error Peer.Timed_out)];
   check string "a stopped click" "unknown" (failure_kind (interact (Lane.Click_node {document_id="d1";node_id="send"})));
@@ -1041,7 +1041,7 @@ let test_the_peer_serves_what_the_lane_table_says () =
     (* ego's mouse calls answer void, so a served raw drag always ends unknown. *)
     | Error (Live.Outcome_unknown _), true when capability = Lane.Trusted_drag && !drag_ran -> ()
     | Ok _, false -> failf "the peer served %s, which the lane table says ego does not" name
-    | Error (Live.Before_effect detail), true | Error (Live.Outcome_unknown detail | Live.Partial_failure {message=detail;_}), _ ->
+    | Error (Live.Before_effect detail), true | Error (Live.Outcome_unknown detail | Live.Observed_failure {message=detail;_} | Live.Partial_failure {message=detail;_}), _ ->
       failf "the peer did not serve %s (%s), which the lane table says ego does" name detail)
     (* The raw drag goes last: it cannot confirm the release, so it blocks the input after it. *)
     (List.filter (fun capability -> capability <> Lane.Trusted_drag) Lane.all_of_live_capability @ [Lane.Trusted_drag])
@@ -1395,17 +1395,17 @@ let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
   url := observed_url;
   act := {|throw new Error('Locator text="A" matched 2 elements');|};
   (match click (Lane.Target_text {text="A";exact=true}) with
-   | Error (Live.Outcome_unknown detail) -> check bool "native ambiguity is uncertain" true (contains detail "matched 2 elements")
+   | Error (Live.Outcome_unknown detail | Live.Observed_failure {disposition=Live.Uncertain;message=detail;_}) -> check bool "native ambiguity is uncertain" true (contains detail "matched 2 elements")
    | other -> failf "native ambiguity was %s" (failure_kind other));
   act := {|throw new Error("Target closed");|};
   (match click (Lane.Target_ref 12) with
-   | Error (Live.Outcome_unknown detail) -> check bool "a failed click is unknown and asks for a read" true (contains detail "read tab 1")
+   | Error (Live.Outcome_unknown detail | Live.Observed_failure {disposition=Live.Uncertain;message=detail;_}) -> check bool "a failed click is unknown and asks for a read" true (contains detail "read tab 1")
    | other -> failf "a failed click was %s" (failure_kind other));
   check int "each of them was one run" (runs + 4) (List.length !asked);
   let before = List.length !asked in
   check bool "an operator tab is refused without a run" true
     (match dispatch peer Live.Page_interact (interact_args ~tab_id:2 (Lane.Click_target (Lane.Target_ref 1))) with
-     | Error (Live.Before_effect _) -> true | Ok _ | Error (Live.Partial_failure _ | Live.Outcome_unknown _) -> false);
+     | Error (Live.Before_effect _) -> true | Ok _ | Error (Live.Partial_failure _ | Live.Outcome_unknown _ | Live.Observed_failure _) -> false);
   check int "no script ran for it" before (List.length !asked)
 
 (* A stand-in for ego's hand-off: a space whose owner the case sets, and
@@ -1860,7 +1860,7 @@ let test_dialogs_are_listed_and_answered () =
   check string "none open" "no dialog is open in this tab" (before_effect "an answer with none open" (act Lane.Action.Dismiss_dialog));
   reply := (fun _ -> failed "Target closed");
   (match act Lane.Action.Dismiss_dialog with
-   | Error (Live.Outcome_unknown detail) ->
+   | Error (Live.Outcome_unknown detail | Live.Observed_failure {disposition=Live.Uncertain;message=detail;_}) ->
      check bool "may have been answered" true (String_util.contains_substring detail "may have been answered")
    | other -> failf "a failed answer was %s" (failure_kind other));
   let before = runs () in
@@ -2071,7 +2071,7 @@ let test_downloads_are_listed_and_published_once () =
   let read () = dispatch peer Live.Page_downloads (obj ["tabId",`Int 1]) in
   let listed () = match read () with
     | Ok listing -> listing
-    | Error (Live.Before_effect detail | Live.Outcome_unknown detail | Live.Partial_failure {message=detail;_}) ->
+    | Error (Live.Before_effect detail | Live.Outcome_unknown detail | Live.Observed_failure {message=detail;_} | Live.Partial_failure {message=detail;_}) ->
       failf "the listing failed: %s" detail in
   rows := [row ~id:saved ~state:"completed" ~path:(str saved_path) "report.txt";
            row ~id:pending ~state:"pending" "big.zip";
@@ -2184,7 +2184,7 @@ let test_the_download_wait_runs_in_node () =
   between "close(); await settle();";
   let listing = match dispatch peer Live.Page_downloads (obj ["tabId",`Int 1]) with
     | Ok listing -> listing
-    | Error (Live.Before_effect detail | Live.Outcome_unknown detail | Live.Partial_failure {message=detail;_}) ->
+    | Error (Live.Before_effect detail | Live.Outcome_unknown detail | Live.Observed_failure {message=detail;_} | Live.Partial_failure {message=detail;_}) ->
       failf "the listing failed: %s" detail in
   let seen = match List.find_opt (String.starts_with ~prefix:"seen ") (String.split_on_char '\n' !output) with
     | Some line -> Yojson.Safe.Util.(to_list (Yojson.Safe.from_string (after ~prefix:"seen " line)) |> List.map to_string)
@@ -2304,7 +2304,7 @@ let test_an_upload_through_a_file_chooser_answers_what_it_handed () =
    | other -> failf "an upload that opened a dialog was %s" (failure_kind other));
   reply := (fun _ -> answered (obj ["error",str "the opener opened no file chooser: page.waitForFileChooser timed out after 5000ms";"dialog",`Null;"tab",row]));
   (match choose paths with
-   | Error (Live.Outcome_unknown detail) ->
+   | Error (Live.Outcome_unknown detail | Live.Observed_failure {disposition=Live.Uncertain;message=detail;_}) ->
      check bool "a chooser that did not open is reported after the click" true (String_util.contains_substring detail "opened no file chooser")
    | other -> failf "a click that opened no chooser was %s" (failure_kind other));
   reply := (fun _ -> answered (obj ["error",str "ego did not click the opener: native selector not found";"dialog",`Null;"tab",row]));
@@ -2480,7 +2480,7 @@ let test_the_chooser_script_runs_in_node () =
   let choose ?(opener="#attach") paths = dispatch peer Live.Page_act
       (act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Upload {target=Lane.Action.Chooser_opener opener;paths}})) in
   let unknown label result = match result with
-    | Error (Live.Outcome_unknown detail) -> detail
+    | Error (Live.Outcome_unknown detail | Live.Observed_failure {disposition=Live.Uncertain;message=detail;_}) -> detail
     | other -> failf "%s was %s" label (failure_kind other) in
   (match choose [path] with
    | Ok receipt -> check string "what the chooser was handed" {|[{"name":"note.txt","size":5}]|} (Yojson.Safe.to_string (field "chosen" receipt))
@@ -2557,6 +2557,88 @@ const taskSpace = async () => ({ownership:'agent',
     check bool "special header remains an own data property" true (field "own" receipt = `Bool true);
     check string "header bytes are preserved" "keep-me" (text (field "value" receipt));
     check bool "data never changes the headers prototype" true (field "plain" receipt = `Bool true)
+
+let test_first_evaluation_timeout_preserves_unknown_native_receipt () =
+  let module Wire=Masc.Browser_addon_wire in
+  List.iter (fun (initial_url_fails,execution_stopped) ->
+    let output=ref "" and native_calls=ref 0 and bounded_steps=ref [] in
+    let shim=Printf.sprintf {js|
+const seen = [];
+const page = {
+  url: async () => { seen.push('url');
+    if (%s) throw Object.assign(new Error('native URL evaluation safety limit'), {
+      code:'EGO_PAGE_EVALUATION_TIMED_OUT', timeoutMs:2500,
+      executionStopped:%s, mayHaveLateEffects:true, pageResponsive:true
+    });
+    return 'https://app.slack.com/'; },
+  info: async () => ({dialog:null}),
+  waitForEvent: () => new Promise(() => {}),
+  evaluate: async source => {
+    seen.push('evaluate ' + source);
+    throw Object.assign(new Error('native evaluation safety limit'), {
+      code:'EGO_PAGE_EVALUATION_TIMED_OUT', timeoutMs:2500,
+      executionStopped:%s, mayHaveLateEffects:true, pageResponsive:true
+    });
+  },
+  waitForFunction: async () => { seen.push('unexpected following step'); throw new Error('must not continue'); },
+  snapshot: async () => { seen.push('unexpected snapshot'); throw new Error('must not snapshot'); }
+};
+const taskSpace = async () => ({ownership:'agent',
+  tabs:async () => [{label:'p1',targetId:'T1',openedBy:'agent'}],page:() => page});
+|js} (string_of_bool initial_url_fails) (string_of_bool execution_stopped) (string_of_bool execution_stopped) in
+    let run ~window_s script =
+      let step=(sent_of ~window_s script).step in
+      bounded_steps:=step :: !bounded_steps;
+      match step with
+      | "space.open" -> answered (obj ["spaceId",`Int 51;"name",str "SDK Space";"ownership",str "agent"])
+      | "tabs.list" -> answered tabs
+      | other -> failf "evaluation must use native runner, got %s" other in
+    let run_native script =
+      incr native_calls;
+      check string "one native workflow" "page.native_workflow" (sent_of ~window_s:0. script).step;
+      output:=in_node (shim ^ script ^ "\nconsole.log('evaluation-calls '+JSON.stringify(seen));");
+      Ok !output in
+    let peer=match Peer.open_space ~downloads:no_downloads ~run ~run_native ~now
+        ~space:(Browser_configuration.Named_space "masc") ~version:"fixture" ~capture_directory:(capture_directory ()) with
+      | Ok peer -> peer | Error detail -> fail detail in
+    ignore (dispatch peer Live.Tabs_list (obj []));
+    let args=obj ["tabId",`Int 1;"expectedUrl",str "https://app.slack.com/";"maxChars",`Int 100;
+      "steps",`List [obj ["method",str "evaluate";"source",str "document.title"];
+        obj ["method",str "waitForFunction";"source",str "window.ready"]]] in
+    let result=Peer.dispatch ~command_id:"first-evaluation-timeout" peer ~verb:Live.Page_native_workflow args in
+    let receipt=match result with
+      | Error (Live.Observed_failure {disposition;receipt;_}) ->
+        check bool "disposition follows workflow progress, not native diagnostics" true
+          (disposition=(if initial_url_fails then Live.Not_started else Live.Uncertain)); receipt
+      | Ok _|Error (Live.Before_effect _|Partial_failure _|Outcome_unknown _) ->
+        fail "first evaluation failure lost its validated native receipt or changed disposition" in
+    let diagnostic=field "nativeError" (field "failure" receipt) in
+    check string "native error code is available to the caller" "EGO_PAGE_EVALUATION_TIMED_OUT" (text (field "code" diagnostic));
+    check int "SDK timeout is retained" 2500 (Yojson.Safe.Util.to_int (field "timeoutMs" diagnostic));
+    check bool "executionStopped remains an observation" execution_stopped (Yojson.Safe.Util.to_bool (field "executionStopped" diagnostic));
+    check bool "even stopped execution may have late effects" true (Yojson.Safe.Util.to_bool (field "mayHaveLateEffects" diagnostic));
+    check bool "native Page responsiveness is retained" true (Yojson.Safe.Util.to_bool (field "pageResponsive" diagnostic));
+    check bool "first effect progress is retained" (not initial_url_fails) (Yojson.Safe.Util.to_bool (field "effectStarted" receipt));
+    check bool "no effect completed" true (field "completedEffect" receipt=`Bool false && field "completed" receipt=`List []);
+    let payload=Live.payload result in
+    check bool "diagnostic failure is not successful" true (field "ok" payload=`Bool false);
+    check bool "only initial URL failure is marked not-started" true
+      (field "effectPhase" payload=(if initial_url_fails then str "not_started" else `Null));
+    check bool "model-facing data preserves the entire validated receipt" true (field "data" payload=receipt);
+    let wire=Wire.reply_to_json (Wire.Issue_result (Ok (Lane.Answered payload))) in
+    (match Wire.reply_of_json wire with
+     | Ok (Wire.Issue_result (Ok (Lane.Answered restored))) ->
+       check bool "worker wire preserves diagnostic data and effect disposition" true (restored=payload)
+     | Ok _|Error _ -> fail "worker wire lost the native evaluation diagnostic");
+    let prefix="evaluation-calls " in
+    let calls=match List.filter (String.starts_with ~prefix) (String.split_on_char '\n' !output) with
+      | [line] -> Yojson.Safe.from_string (after ~prefix line)
+      | _ -> fail "missing native SDK stand-in calls" in
+    check bool "failed evaluation executes once, with no following SDK step or snapshot" true
+      (calls=`List (if initial_url_fails then [str "url"] else [str "url";str "evaluate document.title"]));
+    check int "native workflow is never replayed" 1 !native_calls;
+    check (list string) "bounded runner does not wrap native evaluation"
+      ["space.open";"tabs.list"] (List.rev !bounded_steps)) [false,false;false,true;true,false;true,true]
 
 let test_saved_fetch_survives_snapshot_failure_and_reaches_download_broker () =
   let module Broker=Masc.Browser_addon_downloads in
@@ -2649,7 +2731,7 @@ const AsyncFunction=Object.getPrototypeOf(async function(){}).constructor;
         let peer=ok (Peer.open_space ~downloads ~run ~run_native:(run ~window_s:0.) ~now
           ~space:(Browser_configuration.Named_space "masc") ~version:"fixture" ~capture_directory:capture) in
         let served name=function Ok value->value
-          | Error (Live.Before_effect detail|Outcome_unknown detail|Partial_failure {message=detail;_})->failf "%s: %s" name detail in
+          | Error (Live.Before_effect detail|Outcome_unknown detail | Observed_failure {message=detail;_}|Partial_failure {message=detail;_})->failf "%s: %s" name detail in
         ignore (served "actual tabs listing" (dispatch peer Live.Tabs_list (obj [])));
         let arguments=obj ["tabId",`Int 1;"expectedUrl",str "https://fixture.test/start";"maxChars",`Int 100;
           "steps",`List [obj ["method",str "fetch";"url",str "/binary";
@@ -2802,18 +2884,18 @@ let test_native_workflow_pointer_ownership () =
     let first=call [obj (("method",str method_)::fields)] in
     (match mode,first with
      | `Before,Error (Live.Before_effect _)
-     | (`Lost|`Unreleased|`Contradicted|`Unproven),Error (Live.Outcome_unknown _)
+     | (`Lost|`Unreleased|`Contradicted|`Unproven),Error (Live.Outcome_unknown _ | Live.Observed_failure {disposition=Live.Uncertain;_})
      | `Snapshot_failed,Error (Live.Partial_failure _)
      | `Proven,Ok _ -> ()
      | (`Before|`Lost|`Unreleased|`Contradicted|`Unproven|`Proven|`Snapshot_failed),
-       (Ok _|Error (Live.Before_effect _|Live.Partial_failure _|Live.Outcome_unknown _)) ->
+       (Ok _|Error (Live.Before_effect _|Live.Partial_failure _|Live.Outcome_unknown _|Live.Observed_failure {disposition=(Live.Not_started|Live.Uncertain);_})) ->
        fail "workflow input result changed its effect classification");
     (match mode,call [] with
      | (`Proven|`Before|`Snapshot_failed),Ok _ -> check int "a settled or never-started input permits the next original request" 2 !issued
      | (`Lost|`Unreleased|`Contradicted|`Unproven),Error (Live.Before_effect _) ->
        check int "unknown release never dispatches another workflow" 1 !issued
      | (`Lost|`Unreleased|`Contradicted|`Unproven),Ok _|(`Proven|`Before|`Snapshot_failed),Error _
-     | (`Lost|`Unreleased|`Contradicted|`Unproven),Error (Live.Partial_failure _|Live.Outcome_unknown _) ->
+     | (`Lost|`Unreleased|`Contradicted|`Unproven),Error (Live.Partial_failure _|Live.Outcome_unknown _ | Live.Observed_failure {disposition=(Live.Not_started|Live.Uncertain);_}) ->
        fail "native input ownership did not survive the workflow boundary");
     ignore (dispatch peer Live.Tabs_list (obj [])))
       (* keyboard.type returns void in the SDK, so no real success carries a receipt for it. *)
@@ -2918,7 +3000,7 @@ let test_operator_input_recovery () =
    | Error (Live.Partial_failure {receipt; _}) ->
      check string "a partial receipt written while input is pending says so" "release_uncertain"
        Yojson.Safe.Util.(receipt |> member "inputReadiness" |> to_string)
-   | Ok _ | Error (Live.Before_effect _ | Live.Outcome_unknown _) -> fail "the dialog lost its partial receipt");
+   | Ok _ | Error (Live.Before_effect _ | Live.Outcome_unknown _ | Live.Observed_failure _) -> fail "the dialog lost its partial receipt");
   let pending=match Peer.input_status peer with Input.Uncertain pending -> pending
     | Ready _ -> fail "dialog lost its pending input" in
   check string "pending input names original command" "original-input-command" pending.command_id;
@@ -3057,7 +3139,7 @@ let test_explicit_completion_is_terminal_and_never_replayed () =
   check bool "retained native tabs preserve file ownership" true (Result.is_error (Peer.retirement_settlement peer));
   List.iter (fun reply ->
     let peer,first,second=scenario reply [] in
-    check bool "lost or invalid completion is unknown" true (match first with Error (Live.Outcome_unknown _) -> true | _ -> false);
+    check bool "lost or invalid completion is unknown" true (match first with Error (Live.Outcome_unknown _ | Live.Observed_failure {disposition=Live.Uncertain;_}) -> true | _ -> false);
     ignore (before_effect "uncertain completion replay" second);
     check bool "unknown completion preserves files" true (Result.is_error (Peer.retirement_settlement peer)))
     [(fun _ -> Error (Peer.Unobserved "lost completion"));(fun _ -> answered `Null);
@@ -3069,6 +3151,7 @@ let () =
     "ego", [
       test_case "Space status reads native metadata without Page or control effects" `Quick test_native_space_status;
       test_case "production workflow envelope preserves special JSON header keys" `Quick test_native_workflow_json_headers;
+      test_case "first evaluation timeout preserves unknown native receipt" `Quick test_first_evaluation_timeout_preserves_unknown_native_receipt;
       test_case "adopted managed Pages retain origin while using native actions" `Quick test_adopted_managed_page_uses_native_actions_without_changing_origin;
       test_case "takeover receipts and native runner preserve pending input" `Quick test_takeover_receipt_and_native_runner_preserve_pending_input;
       test_case "saved fetch survives snapshot failure and reaches the download broker" `Quick test_saved_fetch_survives_snapshot_failure_and_reaches_download_broker;

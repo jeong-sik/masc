@@ -166,7 +166,7 @@ let ego_reply_policy = function
          | Action.Back | Action.Forward | Action.Close_tab);_}) -> reply_policy (Page_act action))
   | Page_interact {action;_} ->
     (match action with
-     | Click _ | Fill _ | Select_option _ | Click_target _ | Fill_target _
+     | Activate_tab | Click _ | Fill _ | Select_option _ | Click_target _ | Fill_target _
      | Hover_target _ | Double_click_target _ -> Executor_owned
      | Hover (Selector _) | Double_click (Selector _) -> Executor_owned
      | Drag_to {source;destination;via;duration_ms} ->
@@ -176,7 +176,7 @@ let ego_reply_policy = function
            | [] | _::_ -> Reply_window)
         | Scene_node _,(Selector _|Scene_node _) | Selector _,Scene_node _ -> Reply_window)
      | Hover (Scene_node _) | Double_click (Scene_node _)
-     | Activate_tab | Set_zoom _ | Set_viewport _ | Double_click_at _ | Type_text _
+     | Set_zoom _ | Set_viewport _ | Double_click_at _ | Type_text _
      | Press_key _ | Scroll _ | Hover_at _ | Tap_at _ | Swipe _ | Click_at _
      | Scroll_at _ | Drag _ | Follow_link _ | Click_node _ | Fill_node _ -> Reply_window)
   | (Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_console _
@@ -753,9 +753,9 @@ let live_transport_serves transport capability =
                     | Tab_creation | Tab_navigation | Tab_closing | Dom_interaction | Point_click
                     | Point_scroll | Trusted_hover | Trusted_double_click | Trusted_button_click
                     | Trusted_drag | Trusted_keyboard | Tab_history | Accessibility_snapshot | Dialog_answer
-                    | Snapshot_target_input | Native_workflow | Operator_handoff | Page_management | Download_listing | File_upload) -> true
+                    | Snapshot_target_input | Native_workflow | Operator_handoff | Page_management | Download_listing | File_upload | Tab_activation) -> true
   | Ego_task_space, (Document_source | Touch_input | Browser_zoom | Viewport_resize
-                    | Tab_activation | Frame_read) -> false
+                    | Frame_read) -> false
 ;;
 
 let live_transports_serving capability =

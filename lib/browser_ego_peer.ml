@@ -1318,6 +1318,19 @@ let native_input t ~id ~label ~cursor ~expected_url ~locator ~reference ~operati
        | Error detail, _ | _, Error detail -> outcome detail)
     | _ -> outcome "ego answered the input outside its answer frame"
 
+let activate_tab t ~id ~label ~expected_url =
+  let unknown=Printf.sprintf "activation of tab %d is unconfirmed; observe the same Space before another command" id in
+  let* expected_url=Option.to_result ~none:(Live.Before_effect "activate_tab requires expectedUrl") expected_url in
+  match run_native_step t ~step:"page.activate"
+      ~args:(obj ["label",str label;"expectedUrl",str expected_url])
+      (String.concat "\n" ["    const activate = " ^ Browser_ego_activation.script ^ ";";
+        "    const outcome = await activate(task, args);";
+        "    if (outcome.before === true) emit({ok:false, before:true, error:outcome.error});";
+        "    else emit({ok:true, value:outcome});"]) with
+  | Error failure -> Error (effect_failure ~unknown failure)
+  | Ok value -> Browser_ego_activation.receipt ~space_id:t.space.id ~tab_id:id ~label ~expected_url value
+      |> Result.map_error (fun detail -> Live.Outcome_unknown (detail ^ "; " ^ unknown))
+
 let interact ?actor t args =
   let before result = Result.map_error (fun detail -> Live.Before_effect detail) result in
   let* fields = before (match args with `Assoc fields -> Ok fields | _ -> Error "invalid interaction") in
@@ -1389,6 +1402,7 @@ let interact ?actor t args =
   let on_selector selector operation = native_input t ~id ~label ~cursor:cursor_text ~expected_url
       ~locator:selector ~reference:["selector",str selector] ~operation in
   match action with
+  | Browser_lane.Activate_tab -> activate_tab t ~id ~label ~expected_url
   | Browser_lane.Click selector -> on_selector selector Target_click
   | Browser_lane.Fill {selector;text} -> on_selector selector (Target_fill text)
   | Browser_lane.Select_option {selector;selection} -> on_selector selector (Target_select selection)
@@ -1424,7 +1438,7 @@ let interact ?actor t args =
   | Browser_lane.Hover_target target -> on_target ~target Target_hover
   | Browser_lane.Double_click_target target -> on_target ~target Target_double_click
   | Browser_lane.Tap_at _ | Browser_lane.Swipe _
-  | Browser_lane.Set_zoom _ | Browser_lane.Set_viewport _ | Browser_lane.Activate_tab -> refused
+  | Browser_lane.Set_zoom _ | Browser_lane.Set_viewport _ -> refused
 
 (* The whole space goes to the operator for a step only a person can take;
    from then on the frame refuses every step until take_over. A handOff that

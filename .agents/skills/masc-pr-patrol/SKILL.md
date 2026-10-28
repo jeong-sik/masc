@@ -30,16 +30,18 @@ Draft는 작업 중이라는 뜻이다. CI가 없다는 이유로 일반 PR을 D
 ## 여러 관점에서 리뷰
 
 기능과 사용자 흐름, 상태 전이·실패 처리 논리, 코드 청결도를 독립적으로 확인한다.
-P0·P1·P2가 남으면 구체적인 위치·트리거·영향·수정 방향을 기록한다. 남은 문제가 없으면 승인한다.
+P0·P1·P2가 남으면 구체적인 위치·트리거·영향·수정 방향을 기록한다. 최종 판정을 맡은 리뷰어는 필요한 범위·계정 독립성·게시 권한을 확인한 뒤 자신의 판단에 따라 변경 요청이나 승인을 낸다. COMMENT 전담자는 자신의 렌즈 근거를 COMMENT로 남기며 승인이나 변경 요청을 대신하지 않는다.
 P3는 모아서 후속 청소로 처리한다. 자기 변경은 자기가 승인하지 않는다.
 
-일반 스택 판정 첫 줄:
+일반 스택의 공식 최종 판정 첫 줄(COMMENT 전용 서명과는 별개):
 
 ```
 verdict: PASS head: <40-hex SHA> by: <reviewer>
 ```
 
-리뷰 시작 전에 저장소 checkout 에서 인증된 `gh`, Git, Python 3, `jq` 로 head·base·전체 diff 식별자를 캡처한다.
+아래 승인 예제는 독립성과 게시 권한을 확인한 최종 판정자 전용이다. COMMENT 전담자는 이 승인 명령을 실행하지 않고 자신의 서명과 근거를 담은 COMMENT 리뷰를 게시한다.
+
+최종 판정자는 리뷰 시작 전에 저장소 checkout 에서 인증된 `gh`, Git, Python 3, `jq` 로 head·base·전체 diff 식별자를 캡처한다.
 
 ```sh
 # repo 와 pr 을 리뷰할 저장소와 PR 번호로 지정한다.
@@ -87,7 +89,7 @@ bash scripts/review/merge-guard.sh --check --repo jeong-sik/masc --pr <N> --head
 ## Release/Tag 검증
 
 `release/vX.Y.Z`에서 명시적으로 `release-candidate.yml` Full CI Cycle을 실행한다.
-현재 head의 전체 빌드·타입·기능·설치 검증이 완료되어 성공한 run을 판정에 기록한다.
+현재 head·branch의 최신 `release-candidate.yml` run이 완료·성공하고 필수 빌드·타입·기능·설치 검증도 성공해야 PASS할 수 있다. Release 판정에는 현재 head의 완료된 Full CI run을 기록한다. 완료된 run이 아직 없더라도 발견한 결함은 `verdict:` 줄 없이 head와 근거를 담은 변경 요청으로 남기고 run을 지어내지 않는다.
 필수 작업이 실패·대기·skip·미등록이면 릴리스 성공 증거가 아니다. 일반 스택에 이 조건을 확대하지 않는다.
 
 ```

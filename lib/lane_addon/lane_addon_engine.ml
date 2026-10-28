@@ -27,7 +27,7 @@ type held = {
   state_owner : string option;
 }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let digest value = Agent_core_sha256.(to_hex (digest_string value))
 let owned_name runtime instance_id = match runtime with
   | Docker -> "masc-lane-" ^ digest instance_id

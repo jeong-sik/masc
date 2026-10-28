@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 type receipt = { observed_at:float; payload:Yojson.Safe.t; digest:string }
 let fields names = function
   | `Assoc fields when List.sort String.compare (List.map fst fields) =

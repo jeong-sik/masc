@@ -1,7 +1,7 @@
 module S = Mcp_protocol.Sampling
 module Store = Lane_addon_store
 module Types = Lane_addon_types
-let ( let* ) = Result.bind
+open Result.Syntax
 type outcome =
   | Answer of S.create_message_result
   | Host_error of string

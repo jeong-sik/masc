@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 type state = Queued | Running | Confirmed | Failed_before_effect | Outcome_unknown
 type receipt = {
   instance_id : string; incarnation : string; request_id : string; requester : string;

@@ -33,7 +33,7 @@ type t = {
   mutable attachment : attachment;
   mutex : Eio.Mutex.t;
 }
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let companion_public_result (result : Mcp_protocol.Mcp_types.tool_result) =
   let module S = Mcp_protocol.Mcp_types in

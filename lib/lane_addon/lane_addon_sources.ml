@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 type browser_selection = Live of Browser_lane.client_id | Automation
 let browser_selection_lane = function
   | Live _ -> Browser_lane.Lane_name.(to_wire Live)

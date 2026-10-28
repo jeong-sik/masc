@@ -19,7 +19,7 @@ type snapshot = {
 }
 
 type failure = { issue : issue; unreadable : bool }
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let absolute_from ~directory path =
   if Filename.is_relative path then Filename.concat directory path else path

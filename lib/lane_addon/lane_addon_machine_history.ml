@@ -1,6 +1,6 @@
 open Lane_addon_types
 module S = Mcp_protocol.Mcp_types
-let ( let* ) = Result.bind
+open Result.Syntax
 type t = (string, int) Hashtbl.t
 let create () = Hashtbl.create 2
 let exact names = function

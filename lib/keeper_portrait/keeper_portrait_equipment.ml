@@ -12,7 +12,7 @@ let to_json equipment =
        Item.slots)
 
 let of_json (json : Yojson.Safe.t) =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   match json with
   | `Assoc fields ->
     let keys = List.map fst fields |> List.sort String.compare in

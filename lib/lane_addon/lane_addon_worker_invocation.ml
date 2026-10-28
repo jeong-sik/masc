@@ -1,5 +1,5 @@
 open Lane_addon_types
-let ( let* ) = Result.bind
+open Result.Syntax
 let run ~invocation ~companion ~authorize ~principal ~name ~arguments ~call =
   let invoke controller =
     (match invocation, controller,companion with

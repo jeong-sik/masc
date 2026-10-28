@@ -2,7 +2,7 @@ module Store = Lane_addon_store
 module Types = Lane_addon_types
 type subscription = {keeper_name:string;run_id:string;installation_id:string;output_id:string}
 type operation = Inspect | Save | Read | Acknowledge
-let ( let* ) = Result.bind
+open Result.Syntax
 let mutex = Mutex.create ()
 let protect f = try f () with
   | Sys_error error -> Error error

@@ -38,7 +38,7 @@ type t = {
   authorize_params : (string * string) list;
 }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* Every TOML constructor is named once, here. The library's warning 4 asks
    for that at each match; classifying in one place means a new constructor

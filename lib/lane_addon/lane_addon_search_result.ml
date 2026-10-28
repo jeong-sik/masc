@@ -28,7 +28,7 @@ let request_to_json request =
             | Some limit -> [ "limit", `Int limit ]
             | None -> [])
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type result = {
   serving_provider : string option;

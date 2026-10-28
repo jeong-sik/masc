@@ -1,7 +1,7 @@
 open Lane_addon_types
 module Fleet_ledger = Lane_addon_broadcast_delivery
 module Lifecycle = Lane_addon_lifecycle
-let ( let* ) = Result.bind
+open Result.Syntax
 type operation = Attach | Inspect | Observe | Detach | Retain | Slice | Evidence | Act | Action_status
 type error = Request_rejected of string | Runtime_failed of string
 type evidence_destination = Preserve_only | To_keeper of string | To_broadcast

@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type t =
   | Exact_output of Lane_addon_exact.request

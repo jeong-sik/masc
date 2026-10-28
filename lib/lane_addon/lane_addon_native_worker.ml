@@ -31,7 +31,7 @@ type t = {
   request_retirement : unit Eio.Promise.u;
   completion : (release, error) result Eio.Promise.t;
 }
-let ( let* ) = Result.bind
+open Result.Syntax
 let phase t = t.phase
 let process_identity t = t.process_identity
 let request_stop t =

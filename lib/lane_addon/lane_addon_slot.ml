@@ -9,7 +9,7 @@ type port = {
   scoped : unit -> (string list, string) result;
 }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let fault_failure ~recorded = function
   | Lifecycle.Unreachable detail -> Lifecycle.Engine_unreachable detail

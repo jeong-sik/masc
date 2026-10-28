@@ -607,7 +607,7 @@ let ack_pending ~(selection : pending_selection) state =
 ;;
 
 let bind_pending_repetition_scope ~selections ~scope state =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* () = if selections = [] then Error Empty_scope_batch else Ok () in
   let rec validate seen = function
     | [] -> Ok ()
@@ -748,7 +748,7 @@ let defer_pending_batch ~selections state =
       Ok (with_pending sorted_pending state, next_revision)
 ;;
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let pending_transition_id = function
   | Cancel_accepted cancellation ->

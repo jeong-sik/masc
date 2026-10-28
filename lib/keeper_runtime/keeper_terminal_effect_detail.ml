@@ -315,7 +315,7 @@ let to_yojson = function
     `Assoc [ "kind", `String "agent_core_terminal_effect"; "detail", `String detail ]
 ;;
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* Every object this module writes has a closed field set. A field this
    decoder does not know is refused, the same as a missing one. *)

@@ -105,7 +105,7 @@ let validate_exported_tools ~action_tool names =
 
 type phase = Attached | Observing | Failed of string | Detaching | Detached
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let string value = `String value
 let optional f = function None -> `Null | Some value -> f value
 let strings values = `List (List.map string values)

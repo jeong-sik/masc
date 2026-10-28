@@ -38,7 +38,7 @@ let object_fields expected = function
   | `Assoc fields when List.sort String.compare (List.map fst fields)
       = List.sort String.compare expected -> Ok fields
   | _ -> Error "invalid or duplicate Lane call context fields"
-let ( let* ) = Result.bind
+open Result.Syntax
 let of_json json =
   let expected = ["tool";"arguments";"caller"] @ (match json with
     | `Assoc fields -> List.filter (fun key -> List.mem_assoc key fields) ["controller";"companion"]

@@ -39,7 +39,7 @@ let container_name_of_identity ?(runtime = Lane_addon_types.Docker) text =
   | exception Yojson.Json_error detail -> Error ("state owner label is not JSON: " ^ detail)
 
 let label = Lane_addon_engine.state_owner_label
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let inspect ~runtime ~run owner =
   let name = volume_name ~runtime owner in

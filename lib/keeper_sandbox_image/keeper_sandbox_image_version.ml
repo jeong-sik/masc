@@ -100,7 +100,7 @@ let file_present path =
    identity before and after reading, so swapping the original link cannot
    make the opened file escape the root. *)
 let read_inside ~root ~path ~outside =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* target =
     match Unix.realpath path with
     | target ->
@@ -117,7 +117,7 @@ let read_inside ~root ~path ~outside =
              { path; detail = Fs_compat.owned_regular_file_read_error_to_string error })
 
 let load ~source ~name =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* () = if valid_name name then Ok () else Error (Invalid_name name) in
   let* root = source_root source in
   let dir = Filename.concat (Filename.concat root "sandbox-images") name in
@@ -244,7 +244,7 @@ let write_file path contents =
   | exception Sys_error detail -> Error (Context_unwritable { path; detail })
 
 let write_context ~dir recipe =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let dockerfile = Filename.concat dir recipe_file_name in
   let* () = write_file dockerfile recipe.dockerfile in
   let* () =

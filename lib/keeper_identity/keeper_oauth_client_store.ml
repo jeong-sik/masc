@@ -56,7 +56,7 @@ let read_trimmed path =
   | exception Sys_error message -> Error message
 ;;
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* Space separated on disk, as it goes on the wire. A file that is not there
    is no override, which is a different thing from a file holding nothing --

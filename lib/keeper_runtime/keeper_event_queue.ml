@@ -631,7 +631,7 @@ let option_json f = function
   | Some value -> f value
   | None -> `Null
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let board_reaction_change_fields (reaction : board_reaction_change) =
   [ "reaction_target_type", `String (board_reaction_target_type_to_string reaction.target_type)

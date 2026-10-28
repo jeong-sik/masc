@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 type owner = { instance_id : string; authority : Yojson.Safe.t }
 type error = Refused of string | Storage_failed of string
 type retained = {

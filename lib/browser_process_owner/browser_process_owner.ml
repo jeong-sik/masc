@@ -27,7 +27,7 @@ let error_to_string = function
   | Group_unavailable detail -> "browser process group cannot be observed: " ^ detail
   | Child_identity_unavailable -> "original browser child identity cannot be observed"
   | Child_identity_changed -> "browser child incarnation or foreground group changed"
-let ( let* ) = Result.bind
+open Result.Syntax
 let verify_child receipt =
   let* ()=match Posix_spawn_detached.process_start receipt.child_pid with
     | Some started when receipt.child_pid>1 && started=receipt.child_started -> Ok ()

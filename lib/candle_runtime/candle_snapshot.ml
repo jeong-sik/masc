@@ -1,6 +1,6 @@
 (* See candle_snapshot.mli. *)
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* The link registry is read from its primary file only. A registry that cannot
    be read, or whose primary file is gone while a recovery copy remains, refuses

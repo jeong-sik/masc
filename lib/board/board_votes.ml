@@ -1,6 +1,6 @@
 include Board_core
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let vote_direction_to_string = function Up -> "up" | Down -> "down"
 

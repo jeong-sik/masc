@@ -10,7 +10,7 @@ type distribution = {
 
 (* See candle_math.mli. *)
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type error =
   | Negative_total

@@ -92,7 +92,7 @@ let table_fields = function
   | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ -> None
 ;;
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let exact_table context allowed value =
   match table_fields value with

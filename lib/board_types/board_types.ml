@@ -464,7 +464,7 @@ module Comment_page = struct
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
       Error Arguments_not_an_object
     | `Assoc fields ->
-      let ( let* ) = Result.bind in
+      let open Result.Syntax in
       let* offset = integer_argument fields Comment_offset in
       let* limit = integer_argument fields Comment_limit in
       let* tail = integer_argument fields Comment_tail in

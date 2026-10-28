@@ -50,7 +50,7 @@ type t = {
   error : string option;
 }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let assoc_opt key = function
   | `Assoc fields -> List.assoc_opt key fields

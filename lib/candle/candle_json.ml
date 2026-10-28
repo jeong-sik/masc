@@ -1,6 +1,6 @@
 type fields = (string * Yojson.Safe.t) list
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let object_fields ~context = function
   | `Assoc fields -> Ok fields

@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type kind =
   | Money of { amount_milli : int; reason : string }

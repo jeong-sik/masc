@@ -3,7 +3,7 @@ type key = Named of Browser_action.key | Character of Uchar.t
 type t = { modifiers : modifier list; key : key }
 let modifier_name = function Control -> "Control" | Meta -> "Meta" | Alt -> "Alt" | Shift -> "Shift"
 let named = [Browser_action.Enter;Tab;Escape;Backspace;Delete;ArrowUp;ArrowDown;ArrowLeft;ArrowRight;Home;End]
-let ( let* ) = Result.bind
+open Result.Syntax
 let w3c_reserved value = let scalar = Uchar.to_int value in scalar >= 0xe000 && scalar <= 0xe05d
 let validate_text text =
   let rec scan index =

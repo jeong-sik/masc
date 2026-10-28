@@ -135,7 +135,7 @@ let version_error fmt =
 
 let ( >>= ) = Result.bind
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let b64_encode s = Base64.encode_string s
 

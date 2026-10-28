@@ -9,7 +9,7 @@ include Board_core_persist
    the arms that spell that out by hand ([| Error e -> Error e]) are
    [Result.bind] written out. Binding them keeps the happy path at one
    indentation level. *)
-let ( let* ) = Result.bind
+open Result.Syntax
 
 
 let read_post store ~post_id : (post, board_read_error) Result.t =

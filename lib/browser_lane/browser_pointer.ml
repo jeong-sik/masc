@@ -1,7 +1,7 @@
 type point = { x : float; y : float }
 type viewport = { document_id : string; width : float; height : float;
   scroll_x : float; scroll_y : float }
-let ( let* ) = Result.bind
+open Result.Syntax
 let fields allowed = function
   | `Assoc fields when List.length fields = List.length allowed
       && List.sort String.compare (List.map fst fields) = List.sort String.compare allowed -> Ok fields

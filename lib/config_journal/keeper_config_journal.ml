@@ -118,7 +118,7 @@ let record_to_yojson (record : record) =
 
 let record_of_yojson = function
   | `Assoc fields ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let field name =
       match List.assoc_opt name fields with
       | Some value -> Ok value
@@ -282,7 +282,7 @@ module For_testing = struct
 end
 
 let stage ~base_path record =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* () = validate_targets ~base_path record in
   let path = journal_path_for_base_path ~base_path in
   let* existing = load ~journal_path:path in

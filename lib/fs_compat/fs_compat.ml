@@ -601,7 +601,7 @@ let create_capability_directory_exclusive =
 let capability_write_error_to_string = Atomic_write.capability_write_error_to_string
 
 let create_file_exclusive ~fs ~owner ~path ~permissions content =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let path =
     if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path
     else path
@@ -3327,7 +3327,7 @@ let private_jsonl_sync_stable_lock fd =
 ;;
 
 let private_jsonl_initialize_stable_lock ~io ~dir fd =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* () = private_jsonl_sync_stable_lock fd in
   let* () =
     private_jsonl_capture Sync_stable_lock_parent (fun () ->
@@ -3349,7 +3349,7 @@ let private_jsonl_initialize_stable_lock ~io ~dir fd =
 ;;
 
 let private_jsonl_prepare_stable_lock ~io ~dir ~path stable_lock =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* () =
     match stable_lock.creation with
     | Stable_lock_created ->
@@ -3442,7 +3442,7 @@ let with_private_jsonl_stable_lock ~io ~success requested_path f =
                   ~success
                   stable_lock.fd
                   (fun () ->
-                     let ( let* ) = Result.bind in
+                     let open Result.Syntax in
                      let* () =
                        private_jsonl_validate_open_binding
                          ~operation:Inspect_stable_lock
@@ -3512,7 +3512,7 @@ let private_jsonl_open_existing ~close_fd path flags =
 let purge_private_jsonl_durable_locked_with_io ~io path =
   let success cursor = Cursor_succeeded cursor in
   with_private_jsonl_stable_lock ~io ~success path @@ fun ~dir ~path ->
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let sync_removed () =
     let* () =
       private_jsonl_capture Sync_removal_parent (fun () ->
@@ -3599,7 +3599,7 @@ let purge_private_jsonl_durable_locked_at_snapshot_with_io ~io path
     ~(expected : private_jsonl_snapshot) =
   let success cursor = Cursor_succeeded cursor in
   with_private_jsonl_stable_lock ~io ~success path @@ fun ~dir ~path ->
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let capture operation f = private_jsonl_capture operation f
     |> Result.map_error (fun failure -> Private_jsonl_operation_failed failure) in
   let sync_removed () =
@@ -3707,7 +3707,7 @@ let private_jsonl_last_complete_row_length bytes =
    append calls it when no cursor is expected; an append at an expected cursor
    and general readers never truncate. *)
 let private_jsonl_recover_snapshot fd =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let capture operation f =
     private_jsonl_capture operation f
     |> Result.map_error (fun failure -> Private_jsonl_operation_failed failure)
@@ -3898,7 +3898,7 @@ let append_private_jsonl_durable_stable_with_io ?(observe=ignore) ~io path ~expe
      || not (Char.equal suffix.[String.length suffix - 1] '\n')
   then Error Invalid_transaction_suffix
   else
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let check_cursor actual =
       match expected with
       | Some expected when not (Private_jsonl_cursor.equal expected actual) ->
@@ -4630,7 +4630,7 @@ let update_private_file_durable_locked_with_io ?(create=true) ?validate_prefix ?
                 | Recovery_authorized ->
                   if complete_length = String.length existing then Ok (Recovered_prefix prefix)
                   else
-                    let ( let* ) = Result.bind in
+                    let open Result.Syntax in
                     let failure append_failure = {append_failure; rollback_failures=[]} in
                     let* () = run_unix_io ~operation:Incomplete_tail_truncate (fun () ->
                       Unix.ftruncate fd complete_length) |> Result.map_error failure in
@@ -4755,7 +4755,7 @@ let update_existing_private_file_durable_locked_with_io ~io path decide =
                ~close_operation:Close_transaction_data
                ~close_fd:io.close_fd fd
                (fun () ->
-                  let ( let* ) = Result.bind in
+                  let open Result.Syntax in
                   let* () =
                     private_jsonl_capture Read_transaction_data (fun () ->
                       ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);

@@ -1,5 +1,5 @@
 module P = Endpoint_job_protocol
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type protection_refusal =
   | Payload_is_controller | Payload_is_root | Invalid_payload_uid | Invalid_owner | Invalid_root_path

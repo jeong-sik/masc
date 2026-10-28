@@ -5,7 +5,7 @@ type entry = { agent_name : string; reason : reason; outcome : outcome }
 
 let run_admitted ~after_snapshot ~base_path ~now ~mode =
   Auth_credential_base.with_credential_transaction base_path (fun transaction ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* snapshot = Auth_credential_base.credential_prune_snapshot_in_transaction transaction in
     let expired = snapshot.credentials
         |> List.filter (fun (credential, _) ->

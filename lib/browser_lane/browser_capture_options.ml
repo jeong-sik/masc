@@ -1,7 +1,7 @@
 type scale = Css
 type clip = { x : float; y : float; width : float; height : float; scale : float option }
 type t = { full_page : bool option; clip : clip option; scale : scale option; raw : bool option }
-let ( let* ) = Result.bind
+open Result.Syntax
 let fields allowed = function
   | `Assoc fields when List.for_all (fun (key,_) -> List.mem key allowed) fields
       && List.length fields=List.length (List.sort_uniq String.compare (List.map fst fields)) -> Ok fields

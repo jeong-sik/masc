@@ -138,7 +138,7 @@ let error_to_string = function
   | Output_digest_mismatch -> "endpoint job protocol: complete output does not match sealed digest"
   | Response_revision_stale -> "endpoint job protocol: response predates accepted state"
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let invalid field = Error (Invalid_field field)
 
 (* Field names in diagnostics come from this schema, not attacker-controlled

@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 type identity = { goal_id : string; request_id : string; verification_run_id : string }
 type goal = { title : string; metric : string option; target_value : string option }
 type task = { task_id : string; title : string; keeper : string }

@@ -3,7 +3,7 @@ type t =
   | Disabled of { reason : string }
   | Ready of Candle_balance.supply
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let amount_of_json = function
   | `String amount

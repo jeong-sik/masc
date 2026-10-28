@@ -3,7 +3,7 @@
 
 open Masc_domain
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type scope =
   | Mcp_tools

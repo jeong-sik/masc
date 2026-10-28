@@ -137,7 +137,7 @@ let parse_source index fields name =
   if List.length fields <> 2
   then Error (Invalid_entry_fields index)
   else
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* kind = kind_of_json index (List.assoc_opt "kind" fields) in
     match List.assoc_opt "url" fields, List.assoc_opt "sha256" fields with
     | Some (`String url), None when valid_https_url url ->

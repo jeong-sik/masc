@@ -163,7 +163,7 @@ let owned state ~keeper =
   List.filter (fun item -> List.mem item items) Keeper_portrait_item.all
 ;;
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let stamp state ~at =
   match state.through_at with
@@ -359,7 +359,7 @@ let equipment state ~keeper =
     (Keeper_portrait_look.equipment_of_name keeper) (choices state ~keeper)
 
 let equip state ~keeper ~slot ~choice =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* () = match choice with
     | Candle_event.Default -> Ok ()
     | Candle_event.Item item when Keeper_portrait_item.slot item <> slot -> Error (Wrong_equipment_slot item)

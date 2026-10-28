@@ -112,7 +112,7 @@ let create ~base_path () =
     let controlled = match need with
       | Controller.Takes_controller | Controller.Hands_controller -> true
       | Controller.No_controller -> false in
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* actor = match call.principal with
       | Keeper name | Authenticated_agent name | Host_actor name ->
           Validation.Id_shape.parse name |> Result.map (fun _ -> name)
@@ -211,7 +211,7 @@ let create ~base_path () =
     ~description:"Release only the named controller under the owning host's lifecycle authority."
     ~input_schema:Lane_addon_call_context.input_schema
     (fun _context _name arguments -> Eio.Mutex.use_ro mutex (fun () ->
-      let ( let* ) = Result.bind in
+      let open Result.Syntax in
       let* call = Lane_addon_call_context.of_json (Option.value ~default:`Null arguments) in
       let* () = if call.tool = Controller.release_tool && call.arguments = `Assoc [] then Ok ()
         else Error "invalid controller-release envelope" in
@@ -253,7 +253,7 @@ let create ~base_path () =
     ~description:"Execute a machine tool with verified host identity and controller admission."
     ~input_schema:Lane_addon_call_context.input_schema
     (fun _context _name arguments -> Eio.Mutex.use_ro mutex (fun () ->
-      let ( let* ) = Result.bind in
+      let open Result.Syntax in
       let* call = Lane_addon_call_context.of_json (Option.value ~default:`Null arguments) in
       let* tool, schema =
         match Option.bind (Controller.dos_tool_of_name call.tool) (fun tool ->

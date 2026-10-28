@@ -1058,6 +1058,43 @@ let test_status_reports_normalized_options () =
     "disabled context skips the next request forecast"
     (Some true)
     (json_assoc_field "next_request" context_disabled |> json_bool_field "skipped");
+  let fast_context_enabled =
+    status_json_with_args config (`Assoc
+      [ "name", `String name; "fast", `Bool true; "include_context", `Bool true ])
+  in
+  Alcotest.(check (option bool))
+    "fast mode retains the explicit context option"
+    (Some true)
+    (json_assoc_field "status_options" fast_context_enabled |> json_bool_field "include_context");
+  Alcotest.(check (option bool))
+    "fast mode skips forecast even with context enabled"
+    (Some true)
+    (json_assoc_field "next_request" fast_context_enabled |> json_bool_field "skipped");
+  let forecast_calls = ref 0 in
+  let forecast () = incr forecast_calls; Error "forecast sentinel" in
+  List.iter
+    (fun (fast, include_context) ->
+       let projected = Status_detail.For_testing.next_request ~fast ~include_context ~forecast in
+       Alcotest.(check (option bool)) "disabled forecast reports skipped"
+         (Some true) (json_bool_field "skipped" projected))
+    [ true, true; true, false; false, false ];
+  Alcotest.(check int) "skipped forecasts are never called" 0 !forecast_calls;
+  let projected = Status_detail.For_testing.next_request
+      ~fast:false ~include_context:true ~forecast in
+  Alcotest.(check int) "enabled forecast is called once" 1 !forecast_calls;
+  Alcotest.(check (option string)) "forecast failure remains visible"
+    (Some "forecast sentinel") (json_string_field "error" projected);
+  let projected = Status_detail.For_testing.next_request
+      ~fast:false ~include_context:true
+      ~forecast:(fun () -> Ok (`Assoc
+        [ "schema", `String "test"; "checkpoint_messages", `Int 3
+        ; "walk", `Null
+        ; "candidates", `List [ `Assoc
+            [ "runtime_id", `String "r"; "carried", `Int 5; "other", `Int 9 ] ] ])) in
+  Alcotest.(check bool) "forecast projection preserves its supported fields" true
+    (projected = `Assoc
+       [ "schema", `String "test"; "checkpoint_messages", `Int 3; "walk", `Null
+       ; "candidates", `List [ `Assoc [ "runtime_id", `String "r"; "carried", `Int 5 ] ] ]);
   (match Yojson.Safe.Util.member "next_request" context_enabled with
    | `Assoc fields ->
      Alcotest.(check bool)

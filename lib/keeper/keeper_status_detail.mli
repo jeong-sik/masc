@@ -26,3 +26,9 @@ val valid_tail_order_strings : string list
 (** RFC-0182 §3.1 — ctx-free entry point for keeper_dispatch_ref path. *)
 val handle_keeper_status_config :
   config:Workspace.config -> agent_name:string -> Yojson.Safe.t -> tool_result
+
+module For_testing : sig
+  val next_request :
+    fast:bool -> include_context:bool ->
+    forecast:(unit -> (Yojson.Safe.t, string) result) -> Yojson.Safe.t
+end

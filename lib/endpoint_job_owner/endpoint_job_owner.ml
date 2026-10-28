@@ -54,6 +54,8 @@ type request = {
 }
 
 type execution_state = Awaiting_activation | Owned of C.t | Unknown_launch
+type actor_state = Running | Failed of exn | Stopped
+type stop_reason = Actor_failed of exn | Endpoint_stopped
 
 type operation = {
   controller : t;
@@ -65,7 +67,7 @@ type operation = {
   pending_cancellation : request option Atomic.t;
   queue : Eio.Mutex.t;
   changed : Eio.Condition.t;
-  stop_error : error option Atomic.t;
+  actor : actor_state Atomic.t;
 }
 and t = {
   sw : Eio.Switch.t;
@@ -74,6 +76,7 @@ and t = {
   registry : R.t;
   new_id : unit -> P.Id.t;
   resolve_execution : P.spec -> (L.execution,string) result;
+  before_request : unit -> unit;
   operations : (string,operation) Hashtbl.t;
   admissions : (string,admission) Hashtbl.t;
   operations_lock : Eio.Mutex.t;
@@ -89,16 +92,25 @@ exception Actor_stop
 let new_request kind = {kind;completion=completion ()}
 let current_result operation = Atomic.get operation.result
 
-let stop_operation operation error =
-  let error=match Atomic.get operation.stop_error with
-    | Some existing -> existing
-    | None -> Atomic.set operation.stop_error (Some error);error
+let stop_operation operation reason =
+  let state,error=match Atomic.get operation.actor,reason with
+    | Stopped,(Actor_failed _ | Endpoint_stopped)
+    | (Running | Failed _),Endpoint_stopped -> Stopped,Owner_stopped
+    | (Running | Failed _),Actor_failed ex -> Failed ex,Controller_failed ex
   in
+  Atomic.set operation.actor state;
   let finish_request (request : request) = finish request.completion (Error error) in
   Option.iter finish_request (Atomic.get operation.active);
   Option.iter finish_request (Atomic.get operation.pending_activation);
   Option.iter finish_request (Atomic.get operation.pending_cancellation);
-  finish (current_result operation) (Error error);
+  Atomic.set operation.active None;
+  Atomic.set operation.pending_activation None;
+  Atomic.set operation.pending_cancellation None;
+  (* A controller failure is not a native job outcome. The independent lifetime
+     remains responsible for an already owned original and its result. *)
+  (match Atomic.get operation.execution with
+   | Awaiting_activation -> finish (current_result operation) (Error error)
+   | Owned _ | Unknown_launch -> ());
   Eio.Condition.broadcast operation.changed
 
 let mark_launch_unknown operation =
@@ -161,6 +173,8 @@ let cancelled_activation operation current =
   Error (Registry_error R.Launch_cancelled),followup
 
 let bridge_result operation job =
+  (* Observers accepted before activation already hold this cell. Later native
+     observers read the lifetime directly, including after endpoint teardown. *)
   let result_cell=current_result operation in
   let sw=operation.controller.sw in
   Eio.Switch.check sw;
@@ -169,6 +183,7 @@ let bridge_result operation job =
     | value -> finish result_cell (Result.map_error map_lifetime_error value);`Stop_daemon
     | exception (Eio.Cancel.Cancelled _ as ex) ->
         let bt=Printexc.get_raw_backtrace () in
+        finish result_cell (Error Owner_stopped);
         Printexc.raise_with_backtrace ex bt
     | exception ex -> finish result_cell (Error (Controller_failed ex));`Stop_daemon)
 
@@ -268,9 +283,9 @@ let next_request operation =
       | None -> None
     in
     let rec wait () =
-      match Atomic.get operation.stop_error with
-      | Some _ -> raise Actor_stop
-      | None ->
+      match Atomic.get operation.actor with
+      | Failed _ | Stopped -> raise Actor_stop
+      | Running ->
         match promote operation.pending_cancellation with
         | Some request -> request
         | None ->
@@ -282,9 +297,16 @@ let next_request operation =
 
 let rec actor_loop operation =
   let request=next_request operation in
+  operation.controller.before_request ();
   reset_result_for_control operation;
   let result_cell=current_result operation in
-  let outcome,followup=run_request operation request in
+  let outcome,followup=match run_request operation request with
+    | outcome -> outcome
+    | exception (Eio.Cancel.Cancelled _ as ex) ->
+        let bt=Printexc.get_raw_backtrace () in
+        Printexc.raise_with_backtrace ex bt
+    | exception ex -> Error (Controller_failed ex),None
+  in
   complete_active operation request outcome;
   (match outcome,followup with
    | Error error,None ->
@@ -298,10 +320,8 @@ let rec actor_loop operation =
    | None -> ());
   actor_loop operation
 
-let start_operation operation =
+let spawn_actor operation =
   let sw=operation.controller.sw in
-  Eio.Switch.check sw;
-  Eio.Switch.on_release sw (fun () -> stop_operation operation Owner_stopped);
   Eio.Switch.check sw;
   Eio.Fiber.fork_daemon ~sw (fun () ->
     match Eio.Fiber.yield ();actor_loop operation with
@@ -309,18 +329,34 @@ let start_operation operation =
     | exception Actor_stop -> `Stop_daemon
     | exception (Eio.Cancel.Cancelled _ as ex) ->
         let bt=Printexc.get_raw_backtrace () in
-        stop_operation operation Owner_stopped;
+        stop_operation operation Endpoint_stopped;
         Printexc.raise_with_backtrace ex bt
     | exception ex ->
-        stop_operation operation (Controller_failed ex);
+        stop_operation operation (Actor_failed ex);
         `Stop_daemon);
   Eio.Switch.check sw
 
+let start_operation operation =
+  let sw=operation.controller.sw in
+  Eio.Switch.check sw;
+  Eio.Switch.on_release sw (fun () -> stop_operation operation Endpoint_stopped);
+  spawn_actor operation
+
 let enqueue operation kind =
+  (* All control scheduling is in the endpoint's domain. No I/O or yield occurs
+     while inspecting/updating these slots; the actor yields before its work. *)
+  let restart=match Atomic.get operation.actor with
+    | Running | Stopped -> false
+    | Failed _ ->
+        Eio.Switch.check operation.controller.sw;
+        Atomic.set operation.actor Running;
+        true
+  in
   let outcome=Eio.Mutex.use_ro operation.queue (fun () ->
-    match Atomic.get operation.stop_error with
-    | Some error -> `Stopped error
-    | None ->
+    match Atomic.get operation.actor with
+    | Stopped -> `Stopped Owner_stopped
+    | Failed ex -> `Stopped (Controller_failed ex)
+    | Running ->
       let active=match Atomic.get operation.active with
         | Some request when request.kind=kind -> Some request
         | Some _ | None -> None
@@ -337,6 +373,7 @@ let enqueue operation kind =
            | Activation -> Atomic.set operation.pending_activation (Some request)
            | Cancellation -> Atomic.set operation.pending_cancellation (Some request));
           `New request) in
+  if restart then spawn_actor operation;
   match outcome with
   | `Stopped error ->
       let request=new_request kind in
@@ -346,10 +383,13 @@ let enqueue operation kind =
   | `New request -> Eio.Condition.broadcast operation.changed;request
 
 let reconcile_if_cancelled operation =
-  let source=Atomic.get operation.source in
-  match R.cancellation_state source,R.launch_state source with
-  | R.Cancellation_requested,R.Not_requested -> ignore (enqueue operation Cancellation)
-  | R.Cancellation_requested,R.Requested _ | R.No_cancellation,_ -> ()
+  match Atomic.get operation.actor with
+  | Failed _ | Stopped -> ()
+  | Running ->
+    let source=Atomic.get operation.source in
+    match R.cancellation_state source,R.launch_state source with
+    | R.Cancellation_requested,R.Not_requested -> ignore (enqueue operation Cancellation)
+    | R.Cancellation_requested,R.Requested _ | R.No_cancellation,_ -> ()
 
 let make_operation controller record =
   let execution=match R.launch_state record with
@@ -366,7 +406,7 @@ let make_operation controller record =
     pending_cancellation=Atomic.make None;
     queue=Eio.Mutex.create ();
     changed=Eio.Condition.create ();
-    stop_error=Atomic.make None;
+    actor=Atomic.make Running;
   } in
   (match execution with
    | Owned _ | Awaiting_activation -> ()
@@ -429,10 +469,12 @@ let validate_lookup original operation =
   else if R.admission_id source<>original.P.admission_id then Error Admission_mismatch
   else Ok operation
 
-let create ~sw ~fs ~registry ~cgroup_parent_path ~new_id ~resolve_execution =
+let create_with_hook ~before_request ~sw ~fs ~registry ~cgroup_parent_path ~new_id ~resolve_execution =
   Eio.Switch.check sw;
-  {sw;fs;cgroup_parent_path;registry;new_id;resolve_execution;operations=Hashtbl.create 32;
+  {sw;fs;cgroup_parent_path;registry;new_id;resolve_execution;before_request;operations=Hashtbl.create 32;
    admissions=Hashtbl.create 32;operations_lock=Eio.Mutex.create ()}
+
+let create = create_with_hook ~before_request:(fun () -> ())
 
 let admit controller ~binding ~spec =
   let key=admission_key binding in
@@ -477,12 +519,10 @@ let cancel operation = enqueue operation Cancellation
 let await_request (request : request) = Eio.Promise.await request.completion.value
 
 let await_result operation =
-  match Atomic.get operation.stop_error with
-  | Some error -> Error error
-  | None ->
-    match Atomic.get operation.execution with
-    | Unknown_launch -> Error Launch_unknown
-    | Owned _ | Awaiting_activation -> Eio.Promise.await (current_result operation).value
+  match Atomic.get operation.execution with
+  | Unknown_launch -> Error Launch_unknown
+  | Owned job -> C.await_result job |> Result.map_error map_lifetime_error
+  | Awaiting_activation -> Eio.Promise.await (current_result operation).value
 
 let load_result ~sw ~expected_sha256 operation =
   let* expected=match Atomic.get operation.execution with
@@ -496,3 +536,7 @@ let load_result ~sw ~expected_sha256 operation =
   let* storage=R.open_storage ~sw (Atomic.get operation.source)
     |> Result.map_error (fun error -> Registry_error error) in
   D.load ~sw ~storage ~expected_sha256:expected |> Result.map_error (fun error -> Result_error error)
+
+module For_testing = struct
+  let create = create_with_hook
+end

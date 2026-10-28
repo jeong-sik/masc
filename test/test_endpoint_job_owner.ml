@@ -647,6 +647,133 @@ let native_publication_failure_remains_observable_after_revalidation =
      | None -> Alcotest.fail "native publication failure was reset to an unobservable pending future");
     Alcotest.(check string) "native publication failure preserves original evidence" "conflicting original result" (read receipt))
 
+exception Injected_controller_failure
+
+let request_exception_does_not_poison_later_original_controls =
+  with_fixture (fun ~env ~sw ~store fixture ->
+    let resolutions=ref 0 in
+    let controller=controller_with ~sw ~env fixture store ~resolve_execution:(fun _ ->
+      incr resolutions;
+      raise Injected_controller_failure) in
+    let binding,spec=prepare fixture 900 ": > must-not-run" in
+    let operation=Owner.admit controller ~binding ~spec |> owner in
+    (match Owner.await_request (Owner.activate operation) with
+     | Error (Owner.Controller_failed Injected_controller_failure) -> ()
+     | Ok () -> Alcotest.fail "a resolver exception became activation success"
+     | Error error -> Alcotest.fail (Owner.error_to_string error));
+    (match Owner.await_result operation with
+     | Error (Owner.Controller_failed Injected_controller_failure) -> ()
+     | Ok _ -> Alcotest.fail "a resolver exception became a job result"
+     | Error error -> Alcotest.fail (Owner.error_to_string error));
+    let original=Owner.original operation in
+    let digest,loaded=cancel_and_load ~sw operation in
+    assert_no_child digest loaded;
+    check "later cancellation keeps the same captured original" (Owner.original operation=original);
+    check "cancellation never reruns the failed resolver" (!resolutions=1);
+    check "resolver failure never launched the payload"
+      (not (Sys.file_exists (Filename.concat fixture.work "must-not-run")));
+    let other_binding,other_spec=prepare fixture 901 ": > other-must-not-run" in
+    let other=Owner.admit controller ~binding:other_binding ~spec:other_spec |> owner in
+    let digest,loaded=cancel_and_load ~sw other in
+    assert_no_child digest loaded)
+
+let failed_actor_resumes_only_an_explicit_new_control =
+  with_fixture (fun ~env ~sw ~store fixture ->
+    let entered=ref 0 and fail_next=ref true in
+    let controller=Owner.For_testing.create ~sw ~fs:env#fs ~registry:store
+      ~cgroup_parent_path:"/sys/fs/cgroup" ~new_id:(fresh fixture)
+      ~resolve_execution:(fun _ -> Alcotest.fail "cancelled original resolved execution")
+      ~before_request:(fun () ->
+        incr entered;
+        if !fail_next then (fail_next:=false;raise Injected_controller_failure)) in
+    let binding,spec=prepare fixture 902 ": > must-not-run" in
+    let operation=Owner.admit controller ~binding ~spec |> owner in
+    let original=Owner.original operation in
+    let activation=Owner.activate operation in
+    let cancellation=Owner.cancel operation in
+    List.iter (fun request -> match Owner.await_request request with
+      | Error (Owner.Controller_failed Injected_controller_failure) -> ()
+      | Ok () -> Alcotest.fail "actor failure replayed or accepted an unentered control"
+      | Error error -> Alcotest.fail (Owner.error_to_string error)) [activation;cancellation];
+    let looked=Owner.lookup controller original |> owner in
+    check "lookup retains the failed original object" (looked==operation);
+    check "lookup never restarts the failed controls" (!entered=1);
+    let digest,loaded=cancel_and_load ~sw operation in
+    assert_no_child digest loaded;
+    check "only the later explicit control ran" (!entered=2);
+    check "recovery keeps original admission" (Owner.original operation=original);
+    check "old failed tickets retain their outcome"
+      (Owner.await_request activation=Error (Owner.Controller_failed Injected_controller_failure));
+    check "recovery does not launch the cancelled original"
+      (not (Sys.file_exists (Filename.concat fixture.work "must-not-run"))))
+
+let failed_actor_keeps_native_cancellation_and_historical_result =
+  with_fixture (fun ~env ~sw ~store fixture ->
+    let open_fifo name =
+      let path=Filename.concat fixture.work name in
+      Unix.mkfifo path 0o666;
+      Unix.chmod path 0o666;
+      Unix.openfile path [Unix.O_RDWR;Unix.O_NONBLOCK;Unix.O_CLOEXEC] 0
+    in
+    let ready=open_fifo "recovery-ready" and input=open_fifo "recovery-input" in
+    Fun.protect ~finally:(fun () -> List.iter Unix.close [ready;input]) (fun () ->
+      let operation,digest=Eio.Switch.run (fun endpoint ->
+        let fail_next=ref false and resolutions=ref 0 in
+        let controller=Owner.For_testing.create ~sw:endpoint ~fs:env#fs ~registry:store
+          ~cgroup_parent_path:"/sys/fs/cgroup" ~new_id:(fresh fixture)
+          ~resolve_execution:(fun _ -> incr resolutions;Ok fixture.execution)
+          ~before_request:(fun () ->
+            if !fail_next then (fail_next:=false;raise Injected_controller_failure)) in
+        let binding,spec=prepare fixture 903
+          "printf x >> recovery-ran; printf R > recovery-ready; read token < recovery-input; printf unexpected > recovery-past-input" in
+        let operation=Owner.admit controller ~binding ~spec |> owner in
+        let original=Owner.original operation in
+        let result_waiter,result_resolver=Eio.Promise.create () in
+        Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve result_resolver (Owner.await_result operation));
+        Owner.await_request (Owner.activate operation) |> owner;
+        Eio_unix.await_readable ready;
+        fail_next:=true;
+        let failed=Owner.cancel operation in
+        (match Owner.await_request failed with
+         | Error (Owner.Controller_failed Injected_controller_failure) -> ()
+         | Ok () -> Alcotest.fail "the injected actor failure accepted cancellation"
+         | Error error -> Alcotest.fail (Owner.error_to_string error));
+        (match Eio.Promise.peek result_waiter with
+         | None -> ()
+         | Some _ -> Alcotest.fail "controller failure replaced the live native result");
+        let other_binding,other_spec=prepare fixture 904 "printf independent; exit 8" in
+        let other=Owner.admit controller ~binding:other_binding ~spec:other_spec |> owner in
+        Owner.await_request (Owner.activate other) |> owner;
+        let other_digest=Owner.await_result other |> owner in
+        let other_loaded=Owner.load_result ~sw ~expected_sha256:(Some other_digest) other |> owner in
+        let output=D.read_output other_loaded ~stream:P.Stdout ~offset:0L ~max_bytes:64 |> result_read in
+        Alcotest.(check string) "independent job finishes while failed actor's job blocks" "independent" output.data;
+        let cancellation=Owner.cancel operation in
+        check "concurrent recovery cancellation shares one new request"
+          (cancellation==Owner.cancel operation && cancellation!=failed);
+        Owner.await_request cancellation |> owner;
+        let digest=Owner.await_result operation |> owner in
+        check "pre-activation observer receives the same original native result"
+          (Eio.Promise.await result_waiter=Ok digest);
+        let loaded=Owner.load_result ~sw ~expected_sha256:(Some digest) operation |> owner in
+        assert_cancelled_result digest loaded;
+        (match D.process loaded with
+         | D.Child _ -> ()
+         | D.Not_created _ -> Alcotest.fail "recovery erased the original running child");
+        check "recovery retains the original admission" (Owner.original operation=original);
+        check "recovery never resolves another execution" (!resolutions=2);
+        Alcotest.(check string) "recovery never reruns the original payload" "x"
+          (read (Filename.concat fixture.work "recovery-ran"));
+        check "recovery cancels the original before it passes blocked input"
+          (not (Sys.file_exists (Filename.concat fixture.work "recovery-past-input")));
+        operation,digest) in
+      check "endpoint teardown preserves the already published native digest"
+        (Owner.await_result operation=Ok digest);
+      check "endpoint teardown cannot restart cancellation"
+        (Owner.await_request (Owner.cancel operation)=Error Owner.Owner_stopped);
+      let loaded=Owner.load_result ~sw ~expected_sha256:(Some digest) operation |> owner in
+      assert_cancelled_result digest loaded))
+
 let portable_cases=[
   "admission lookup and binding conflicts",admission_lookup_and_binding_conflicts_share_only_exact_originals;
   "duplicate cancel and registration-only result",duplicate_cancel_shares_request_and_registration_only_result;
@@ -658,6 +785,8 @@ let portable_cases=[
   "three hundred logical original operations",three_hundred_registrations_keep_control_slots_bounded;
   "queued cancellation gets a fresh result generation",queued_cancel_after_activation_hold_gets_new_result_generation;
   "conflicting pending admissions do not join",conflicting_pending_admissions_do_not_join_or_contaminate;
+  "request exception leaves original controls serviceable",request_exception_does_not_poison_later_original_controls;
+  "failed actor resumes only an explicit control",failed_actor_resumes_only_an_explicit_new_control;
 ]
 
 let native_cases=[
@@ -668,6 +797,7 @@ let native_cases=[
   "failed native owner leaves another healthy",failed_native_owner_does_not_fail_other_controller_operations;
   "second activation preserves native result",second_activation_during_native_startup_preserves_original_result;
   "native publication failure remains observable",native_publication_failure_remains_observable_after_revalidation;
+  "failed actor retains native cancellation and result",failed_actor_keeps_native_cancellation_and_historical_result;
 ]
 
 let () =

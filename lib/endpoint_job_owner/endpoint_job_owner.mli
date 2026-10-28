@@ -35,9 +35,10 @@ val create :
 
     Every original keeps one table entry, one actor and one release hook until
     this Switch ends, including after its result is final; nothing evicts them
-    earlier (issue #46444). If an actor raises outside a request, that
-    original's controls return [Controller_failed] until this Switch ends, and
-    a later lookup returns the same stopped operation (issue #46445). *)
+    earlier (issue #46444). A failed control is reported to its observers.
+    A later explicit control can resume a failed actor on the same operation,
+    retaining its captured source, native lifetime and result. Failed controls
+    are never replayed. Endpoint shutdown cannot be resumed. *)
 val admit : t -> binding:P.binding -> spec:P.spec -> (operation,error) result
 (** Register complete original bytes without launching. Existing live entries
     refresh their captured source; missing authority never falls back to admit.
@@ -76,3 +77,13 @@ val load_result :
     A live publication binds its known digest; Some host digest must agree.
     Cold discovery with None uses protected storage only, never live ownership.
     Reader resources belong to this observer. No host ACK or cleanup granted. *)
+
+module For_testing : sig
+  val create :
+    before_request:(unit -> unit) ->
+    sw:Eio.Switch.t -> fs:Eio.Fs.dir_ty Eio.Path.t -> registry:R.t ->
+    cgroup_parent_path:string -> new_id:(unit -> P.Id.t) ->
+    resolve_execution:(P.spec -> (L.execution,string) result) -> t
+  (** Inject an exception outside request handling to observe controller failure
+      and explicit recovery. This grants no execution or registry authority. *)
+end

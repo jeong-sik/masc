@@ -13,7 +13,7 @@ let record state request =
   | Recorded (state, receipt) -> state, receipt
   | Replay _ -> Alcotest.fail "expected a newly recorded request"
 
-let test_replay_after_competing_changes () =
+let test_latest_receipt_and_competing_changes () =
   let open Alcotest in
   let initial = Share.initial ~id ~shared:false |> ok in
   let enable = request (operation "000000000001") 0 true in
@@ -25,22 +25,22 @@ let test_replay_after_competing_changes () =
   (match rejected.outcome with
    | Conflict { version = 1; shared = true } -> ()
    | Applied _ | Conflict _ -> fail "stale change did not retain its original conflict");
+  (match Share.apply second stale |> ok with
+   | Replay receipt when receipt = rejected -> ()
+   | Recorded _ | Replay _ -> fail "latest conflict did not replay");
   let third, _ = record second (request (operation "000000000003") 1 false) in
   check bool "a later change revokes sharing" false (Share.snapshot third).shared;
-  (match Share.apply third stale |> ok with
-   | Replay receipt when receipt = rejected -> ()
-   | Recorded _ | Replay _ -> fail "stale operation was not replayed as its original conflict");
-  (match Share.apply third enable |> ok with
+  (match Share.apply first enable |> ok with
    | Replay receipt when receipt = accepted -> ()
-   | Recorded _ | Replay _ -> fail "accepted operation did not retain its original receipt");
-  (match Share.apply third { enable with requested = false } with
+   | Recorded _ | Replay _ -> fail "latest accepted operation did not replay");
+  (match Share.apply first { enable with requested = false } with
    | Error Share.Operation_reused -> ()
    | Error (Share.Invalid _) | Ok _ -> fail "a reused operation id accepted different input");
   check int "two accepted changes survive the ABA sequence" 2 (Share.snapshot third).version;
   let recovered = Share.of_json (Share.to_json third) |> ok in
   check bool "recovered state matches" true (Share.snapshot recovered = Share.snapshot third);
-  check bool "recovered receipts retain their original order" true
-    (Share.receipts recovered = Share.receipts third)
+  check bool "recovered latest receipt is preserved" true
+    (Share.latest recovered = Share.latest third)
 
 let test_noop_and_future_conflict () =
   let open Alcotest in
@@ -50,12 +50,12 @@ let test_noop_and_future_conflict () =
   (match future_receipt.outcome with
    | Conflict { version = 0; shared = false } -> ()
    | Applied _ | Conflict _ -> fail "future expected version did not conflict");
-  let state, _ = record state (request (operation "000000000005") 0 false) in
-  check int "same-value accepted write still advances version" 1 (Share.snapshot state).version;
   (match Share.apply state future |> ok with
    | Replay receipt when receipt = future_receipt -> ()
-   | Recorded _ | Replay _ -> fail "a previously refused future request was applied later");
-  check bool "replayed future request did not publish" false (Share.snapshot state).shared
+   | Recorded _ | Replay _ -> fail "latest future conflict did not replay");
+  let state, _ = record state (request (operation "000000000005") 0 false) in
+  check int "same-value accepted write still advances version" 1 (Share.snapshot state).version;
+  check bool "no-op remains private" false (Share.snapshot state).shared
 
 let test_legacy_and_corruption () =
   let open Alcotest in
@@ -83,6 +83,6 @@ let test_legacy_and_corruption () =
 let () =
   Alcotest.run "artifact external sharing history"
     ["changes", [
-      Alcotest.test_case "replay survives competing ABA changes" `Quick test_replay_after_competing_changes;
+      Alcotest.test_case "latest receipt and competing ABA changes" `Quick test_latest_receipt_and_competing_changes;
       Alcotest.test_case "no-op and future conflict remain bound" `Quick test_noop_and_future_conflict;
       Alcotest.test_case "legacy and corrupt storage" `Quick test_legacy_and_corruption]]

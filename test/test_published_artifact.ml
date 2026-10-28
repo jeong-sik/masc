@@ -110,6 +110,35 @@ let test_share_uncertain_commit () = with_base (fun base_path ->
   Alcotest.(check int) "replay does not advance the version" 1 current.version;
   Alcotest.(check bool) "recovered revocation remains current" false current.shared)
 
+let test_share_archives_and_downgrade () = with_base (fun base_path ->
+  let module Share = Masc.Published_artifact_share in
+  let artifact, _ = publish ~base_path (request "share archive") in
+  let id = artifact.id in
+  let future = share_request "000000000021" 1 true in
+  let refused = S.change_share ~base_path ~id future |> share_ok in
+  (match refused.outcome with
+   | Share.Conflict { version = 0; shared = false } -> ()
+   | Share.Conflict _ | Share.Applied _ -> Alcotest.fail "future request did not conflict");
+  let noop = share_request "000000000022" 0 false in
+  ignore (S.change_share ~base_path ~id noop |> share_ok);
+  let replayed = S.change_share ~base_path ~id future |> share_ok in
+  Alcotest.(check bool) "archived conflict replays after its version becomes current" true (refused = replayed);
+  Alcotest.(check bool) "replay does not enable sharing" false (S.read_share ~base_path ~id |> share_ok).shared;
+  (match S.change_share ~base_path ~id { future with requested = false } with
+   | Error S.Share_operation_reused -> ()
+   | Error error -> Alcotest.fail (S.share_error_message error)
+   | Ok _ -> Alcotest.fail "archived identity accepted a different request");
+  let share_file = Filename.concat (catalog_dir base_path) (id ^ ".share") in
+  Yojson.Safe.to_file share_file (`Assoc ["id", `String id; "shared", `Bool false]);
+  (match S.read_share ~base_path ~id with
+   | Error (S.Share_unavailable _) -> ()
+   | Error error -> Alcotest.fail (S.share_error_message error)
+   | Ok _ -> Alcotest.fail "legacy overwrite reset guarded share history");
+  (match S.change_share ~base_path ~id future with
+   | Error (S.Share_unavailable _) -> ()
+   | Error error -> Alcotest.fail (S.share_error_message error)
+   | Ok _ -> Alcotest.fail "legacy overwrite allowed a previously rejected request"))
+
 let test_create_and_revise () = with_base (fun base_path ->
   let empty = S.list ~base_path |> store_ok in
   Alcotest.(check int) "fresh catalog is empty" 0 (List.length empty.artifacts);
@@ -452,7 +481,8 @@ let () = Eio_main.run (fun _ ->
       Alcotest.test_case "metadata symlink is unavailable" `Quick test_metadata_symlink];
      "external sharing", [
       Alcotest.test_case "concurrent requests and later replay" `Quick test_share_transactions;
-      Alcotest.test_case "uncertain commit and legacy share recovery" `Quick test_share_uncertain_commit];
+      Alcotest.test_case "uncertain commit and legacy share recovery" `Quick test_share_uncertain_commit;
+      Alcotest.test_case "archived conflicts and legacy overwrite" `Quick test_share_archives_and_downgrade];
      "Keeper and HTTP publication", [
       Alcotest.test_case "producer persists exact content, identity and CAS" `Quick test_keeper_publication;
       Alcotest.test_case "model-facing receipt preserves links and durable manifests" `Quick test_keeper_model_publication_receipt;

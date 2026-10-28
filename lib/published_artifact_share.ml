@@ -2,16 +2,7 @@ type snapshot = { version : int; shared : bool }
 type request = { operation_id : string; expected_version : int; requested : bool }
 type outcome = Applied of snapshot | Conflict of snapshot
 type receipt = { request : request; outcome : outcome }
-
-module Operations = Map.Make (String)
-
-type t =
-  { id : string
-  ; initial_shared : bool
-  ; snapshot : snapshot
-  ; receipts_rev : receipt list
-  ; operations : receipt Operations.t
-  }
+type t = { id : string; snapshot : snapshot; latest : receipt option }
 
 type error = Invalid of string | Operation_reused
 type transition = Recorded of t * receipt | Replay of receipt
@@ -27,21 +18,34 @@ let valid_operation_id value =
 
 let initial ~id ~shared =
   if not (Published_artifact.valid_id id) then Error (Invalid "invalid artifact id")
-  else Ok { id; initial_shared = shared; snapshot = { version = 0; shared };
-            receipts_rev = []; operations = Operations.empty }
+  else Ok { id; snapshot = { version = 0; shared }; latest = None }
 
 let id state = state.id
 let snapshot state = state.snapshot
-let receipts state = List.rev state.receipts_rev
-let find state ~operation_id = Operations.find_opt operation_id state.operations
+let latest state = state.latest
+
+let valid_request request =
+  valid_operation_id request.operation_id && valid_version request.expected_version
+
+let receipt_snapshot receipt = match receipt.outcome with
+  | Applied snapshot | Conflict snapshot -> snapshot
+
+let valid_receipt receipt =
+  let request = receipt.request in
+  let snapshot = receipt_snapshot receipt in
+  valid_request request && valid_version snapshot.version &&
+  match receipt.outcome with
+  | Applied _ ->
+    Int64.of_int request.expected_version < max_safe_integer &&
+    snapshot.version = request.expected_version + 1 && snapshot.shared = request.requested
+  | Conflict _ -> snapshot.version <> request.expected_version
 
 let apply state request =
-  if not (valid_operation_id request.operation_id) then Error (Invalid "invalid share operation id")
-  else if not (valid_version request.expected_version) then Error (Invalid "invalid share version")
-  else match find state ~operation_id:request.operation_id with
+  if not (valid_request request) then Error (Invalid "invalid share request")
+  else match state.latest with
     | Some receipt when receipt.request = request -> Ok (Replay receipt)
-    | Some _ -> Error Operation_reused
-    | None ->
+    | Some receipt when String.equal receipt.request.operation_id request.operation_id -> Error Operation_reused
+    | Some _ | None ->
       let previous = state.snapshot in
       if request.expected_version = previous.version && Int64.of_int previous.version = max_safe_integer
       then Error (Invalid "share version exhausted")
@@ -52,8 +56,7 @@ let apply state request =
             let next = { version = previous.version + 1; shared = request.requested } in
             Applied next, next in
         let receipt = { request; outcome } in
-        Ok (Recorded ({ state with snapshot; receipts_rev = receipt :: state.receipts_rev;
-          operations = Operations.add request.operation_id receipt state.operations }, receipt))
+        Ok (Recorded ({ state with snapshot; latest = Some receipt }, receipt))
 
 let snapshot_to_json snapshot =
   `Assoc ["version", `Int snapshot.version; "shared", `Bool snapshot.shared]
@@ -68,10 +71,9 @@ let receipt_to_json receipt =
           "outcome", `String kind; "snapshot", snapshot_to_json snapshot]
 
 let to_json state =
-  `Assoc ["schema", `String "masc.published_artifact_share.v2";
-          "id", `String state.id; "initial_shared", `Bool state.initial_shared;
-          "snapshot", snapshot_to_json state.snapshot;
-          "receipts", `List (List.map receipt_to_json (receipts state))]
+  `Assoc ["schema", `String "masc.published_artifact_share.v3";
+          "id", `String state.id; "snapshot", snapshot_to_json state.snapshot;
+          "latest", Option.fold ~none:`Null ~some:receipt_to_json state.latest]
 
 let fields names = function
   | `Assoc values when List.sort String.compare (List.map fst values) = List.sort String.compare names -> Ok values
@@ -105,34 +107,26 @@ let receipt_of_json json =
     | `String "applied" -> Ok (Applied snapshot)
     | `String "conflict" -> Ok (Conflict snapshot)
     | _ -> Error (Invalid "invalid share outcome") in
-  Ok { request = { operation_id; expected_version; requested }; outcome }
+  let receipt = { request = { operation_id; expected_version; requested }; outcome } in
+  if valid_receipt receipt then Ok receipt else Error (Invalid "invalid share receipt")
 
 let of_json = function
-  | `Assoc values when
-      List.sort String.compare (List.map fst values) = ["id"; "shared"] ->
+  | `Assoc values when List.sort String.compare (List.map fst values) = ["id"; "shared"] ->
     let* id = string "id" values in
     let* shared = boolean "shared" values in
     initial ~id ~shared
   | json ->
-    let* values = fields ["schema"; "id"; "initial_shared"; "snapshot"; "receipts"] json in
+    let* values = fields ["schema"; "id"; "snapshot"; "latest"] json in
     let* () = match List.assoc "schema" values with
-      | `String "masc.published_artifact_share.v2" -> Ok ()
+      | `String "masc.published_artifact_share.v3" -> Ok ()
       | _ -> Error (Invalid "invalid share schema") in
     let* id = string "id" values in
-    let* shared = boolean "initial_shared" values in
-    let* expected_snapshot = snapshot_of_json (List.assoc "snapshot" values) in
-    let* initial = initial ~id ~shared in
-    let* stored_receipts = match List.assoc "receipts" values with
-      | `List values -> Ok values
-      | _ -> Error (Invalid "invalid share receipts") in
-    let rec replay state = function
-      | [] -> Ok state
-      | json :: rest ->
-        let* expected = receipt_of_json json in
-        let* transition = apply state expected.request in
-        (match transition with
-         | Recorded (state, actual) when actual = expected -> replay state rest
-         | Recorded _ | Replay _ -> Error (Invalid "invalid share receipt history")) in
-    let* state = replay initial stored_receipts in
-    if state.snapshot = expected_snapshot then Ok state
-    else Error (Invalid "share snapshot does not match its receipt history")
+    let* snapshot = snapshot_of_json (List.assoc "snapshot" values) in
+    let* _ = initial ~id ~shared:snapshot.shared in
+    let* latest = match List.assoc "latest" values with
+      | `Null -> Ok None
+      | json -> receipt_of_json json |> Result.map Option.some in
+    match latest with
+    | None when snapshot.version = 0 -> Ok { id; snapshot; latest }
+    | Some receipt when receipt_snapshot receipt = snapshot -> Ok { id; snapshot; latest }
+    | Some _ | None -> Error (Invalid "share snapshot does not match its latest receipt")

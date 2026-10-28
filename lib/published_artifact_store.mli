@@ -34,10 +34,13 @@ val find_share_receipt : base_path:string -> id:string -> operation_id:string ->
     that the directory entry survived a crash. *)
 val change_share : base_path:string -> id:string -> Published_artifact_share.request ->
   (Published_artifact_share.receipt, share_error) result
-(** The version check, sharing state and request receipt commit in one file
-    while holding the publication lock. Replaying an identical operation
-    durably rewrites the current history before returning its original receipt.
-    A different request with the same operation ID is refused. *)
+(** The version check, sharing state and latest receipt commit in one file
+    while holding the publication lock. Before replacing that file, the store
+    settles it and archives its receipt durably. Replaying an identical
+    operation settles the current snapshot before returning the original
+    receipt. A different request with the same operation ID is refused.
+    Receipts consume disk space until an explicit retention scheme is added.
+    All writers must use this protocol; older binaries cannot be mixed with it. *)
 
 module For_testing : sig
   val change_share_before_stage : before_stage:(Keeper_fs.durable_write_stage -> unit) ->

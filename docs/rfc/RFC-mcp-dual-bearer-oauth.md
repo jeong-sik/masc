@@ -36,9 +36,9 @@ MASC supports both credential acquisition modes:
 
 1. **Static bearer** remains unchanged. Existing agent credential files and
    `bearer_token_env_var` clients continue to work.
-2. **OAuth 2.1 authorization code with PKCE** is opt-in through
-   `MASC_OAUTH_ENABLED=1`. The local MASC server acts as both authorization
-   server and protected resource server.
+2. **OAuth 2.1 authorization code with PKCE** is served on every loopback
+   authority. The local MASC server acts as both authorization server and
+   protected resource server.
 3. Both tokens resolve through one typed `agent_credential` projection before
    existing permission and tool gates run. OAuth must not introduce a second
    RBAC matrix.
@@ -74,7 +74,7 @@ is never written into OAuth state.
 
 ## 4. Protocol surface
 
-When enabled, MASC exposes:
+On a loopback authority, MASC exposes:
 
 | Method | Path | Contract |
 |---|---|---|
@@ -92,8 +92,8 @@ An unauthenticated `/mcp` response includes:
 WWW-Authenticate: Bearer resource_metadata="http://127.0.0.1:8935/.well-known/oauth-protected-resource", scope="mcp:tools"
 ```
 
-OAuth-disabled servers keep the existing bare `WWW-Authenticate: Bearer`
-challenge and do not expose the OAuth routes.
+A non-loopback authority keeps the bare `WWW-Authenticate: Bearer` challenge
+and does not expose the OAuth routes.
 
 ### 4.1 Client registration
 
@@ -210,7 +210,6 @@ Configuration lives in one typed module and is re-read at request boundaries:
 
 | Environment key | Meaning |
 |---|---|
-| `MASC_OAUTH_ENABLED` | opt-in built-in OAuth server |
 | `MASC_OAUTH_CODE_TTL_SEC` | authorization-code lifetime |
 | `MASC_OAUTH_ACCESS_TOKEN_TTL_SEC` | access-token lifetime |
 | `MASC_OAUTH_REFRESH_TOKEN_TTL_SEC` | refresh-token lifetime |
@@ -256,7 +255,7 @@ redaction.
 
 - Existing static bearer files and their JSON schema are unchanged.
 - `bearer_token_env_var` remains supported.
-- OAuth is off unless explicitly enabled.
+- OAuth is served only on loopback authorities.
 - No agent_core dependency or protocol change is introduced.
 - No dashboard session or cookie becomes an ambient OAuth login authority.
 - MCP authorization changes only token resolution and the 401 challenge header;
@@ -297,7 +296,6 @@ Focused tests must prove:
 The live acceptance test is:
 
 ```bash
-MASC_OAUTH_ENABLED=1 \
 MASC_URL=http://127.0.0.1:8935/mcp \
 MASC_HTTP_BASE_URL=http://127.0.0.1:8935 \
 ./_build/default/bin/main_eio.exe start

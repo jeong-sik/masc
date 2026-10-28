@@ -20,11 +20,6 @@ module OAuth = struct
       default)
   ;;
 
-  (** Enable the OAuth authorization server.
-      @category Security
-      @ops_class operator *)
-  let enabled () = Env_setting.Bool_knob.get Oauth_enabled
-
   (** Authorization-code lifetime in seconds.
       @category Security
       @ops_class operator *)

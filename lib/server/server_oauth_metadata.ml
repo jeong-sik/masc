@@ -73,7 +73,7 @@ let loopback_authority authority =
 ;;
 
 let challenge_for_authority authority =
-  if Auth_oauth.enabled () && loopback_authority authority
+  if loopback_authority authority
   then challenge authority
   else "Bearer"
 ;;

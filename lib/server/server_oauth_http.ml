@@ -45,7 +45,7 @@ let respond_redirect location reqd =
 
 let authority_opt () =
   let authority = Server_request_authority.current_exn () in
-  if Auth_oauth.enabled () && Server_oauth_metadata.loopback_authority authority
+  if Server_oauth_metadata.loopback_authority authority
   then Some authority
   else None
 ;;

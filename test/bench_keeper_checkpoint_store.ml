@@ -6,12 +6,14 @@
     when asked, an image in some tool results the size of a [masc_dos_screen]
     frame (those averaged 80.8 KB of base64). It then:
     - saves the whole history once;
-    - runs tool rounds that each append an assistant tool call and its result
-      and save three times, as the pipeline saves once per stage of a round;
-    - drops what the store keeps and loads the history (a cold read, as the
-      first turn after a restart does);
-    - reads the exact snapshot (read and hash, as Librarian and tail recovery
-      do).
+    - runs tool rounds shaped like the pipeline's: save after the assistant
+      tool call, save after its result, save once more for the context
+      injection stage. Each save carries its own [created_at], so the store
+      keeps and prunes snapshot files as it does live;
+    - reads the exact snapshot while the store still holds what it wrote
+      (Librarian's case during a Keeper's run), and again after dropping it;
+    - drops what the store keeps and loads the history through
+      [load_agent_core_for_save], the first turn after a restart.
 
     Not a test: it prints one row per case. Run by hand from
     _build/default/test, naming each case by its message count or
@@ -79,11 +81,11 @@ let history rng ~messages ~images =
        (List.init cycles (fun index ->
           tool_cycle rng ~index ~with_image:(carries_image ~images ~cycles index)))
 
-let checkpoint ~turn_count messages =
+let checkpoint ~turn_count ~created_at messages =
   Agent_core.Checkpoint.
     { provider_binding = None; version = checkpoint_version; session_id
     ; agent_name = "agent_core-bench-runtime"; model = "bench-model"; system_prompt = None; messages
-    ; usage = Agent_core.Types.empty_usage; turn_count; created_at = 1000.0; tools = []
+    ; usage = Agent_core.Types.empty_usage; turn_count; created_at; tools = []
     ; tool_choice = None; disable_parallel_tool_use = false; temperature = None; top_p = None
     ; top_k = None; min_p = None; reasoning_effort = None; enable_thinking = None
     ; preserve_thinking = None; response_format = Agent_core.Types.Off; cache_system_prompt = false
@@ -96,6 +98,19 @@ let timed f =
   value, (Unix.gettimeofday () -. started) *. 1000.0
 
 let file_bytes path = (Unix.stat path).Unix.st_size
+
+(* What the session directory holds on disk: each inode once, so a snapshot
+   that is a hardlink of the canonical is not counted twice. *)
+let disk_bytes dir =
+  Sys.readdir dir
+  |> Array.fold_left
+       (fun (seen, total) name ->
+          let stat = Unix.lstat (Filename.concat dir name) in
+          if stat.Unix.st_kind <> Unix.S_REG || List.mem stat.Unix.st_ino seen
+          then seen, total
+          else stat.Unix.st_ino :: seen, total + stat.Unix.st_size)
+       ([], 0)
+  |> snd
 let mb bytes = float_of_int bytes /. 1_048_576.0
 
 let median values =
@@ -129,47 +144,60 @@ let run_case ~history_retained spec =
   Unix.mkdir session_dir 0o700;
   let canonical = Store.agent_core_checkpoint_path ~session_dir ~session_id in
   let rng = Random.State.make [| messages; images |] in
+  let saves = ref 0 in
+  (* One second apart, so every save names its own snapshot file. *)
   let save turn_count messages =
+    incr saves;
     Store.save_agent_core_for_keeper ~keeper_name ~session_dir ~history_retained
-      (checkpoint ~turn_count messages)
+      (checkpoint ~turn_count ~created_at:(1000.0 +. float_of_int !saves) messages)
     |> Result.map (fun (_ : Store.save_agent_core_outcome) -> ())
-    |> get "save"
+    |> get "save";
+    file_bytes canonical
   in
   let initial = history rng ~messages ~images in
-  let (), first_save_ms = timed (fun () -> save 1 initial) in
-  let file_after_first = file_bytes canonical in
+  let file_after_first, first_save_ms = timed (fun () -> save 1 initial) in
   let round_ms, round_written =
     List.init rounds Fun.id
     |> List.fold_left
          (fun (held, times, written) round ->
-            let held = held @ tool_cycle rng ~index:(messages + round) ~with_image:false in
-            let turn_count = 2 + round in
-            let (), ms =
-              timed (fun () ->
-                for _ = 1 to saves_per_round do
-                  save turn_count held
-                done)
+            let assistant, result =
+              match tool_cycle rng ~index:(messages + round) ~with_image:(images > 0) with
+              | [ assistant; result ] -> assistant, result
+              | _ -> invalid_arg "a tool cycle is one call and one result"
             in
-            held, ms :: times, written + (saves_per_round * file_bytes canonical))
+            let turn_count = 2 + round in
+            let held = held @ [ assistant ] in
+            let (held, round_bytes), ms =
+              timed (fun () ->
+                let after_assistant = save turn_count held in
+                let held = held @ [ result ] in
+                let after_results = save turn_count held in
+                let after_injection = save turn_count held in
+                held, after_assistant + after_results + after_injection)
+            in
+            held, ms :: times, written + round_bytes)
          (initial, [], 0)
     |> fun (_, times, written) -> times, written / rounds
   in
+  let disk = disk_bytes session_dir in
+  let exact () =
+    Store.load_agent_core_exact_snapshot ~session_dir ~session_id
+    |> Result.map_error Store.checkpoint_ref_load_error_to_string
+    |> get "exact snapshot"
+  in
+  let (_ : Store.exact_checkpoint_snapshot), exact_held_ms = timed exact in
   Store.forget_written_lineages ~session_root:root ~keeper_name;
-  let loaded, cold_load_ms =
+  let (_ : Store.exact_checkpoint_snapshot), exact_cold_ms = timed exact in
+  Store.forget_written_lineages ~session_root:root ~keeper_name;
+  let (_ : Agent_core.Checkpoint.t), cold_load_ms =
     timed (fun () ->
-      Store.load_agent_core ~session_dir ~session_id
+      Store.load_agent_core_for_save ~keeper_name ~session_dir ~session_id
       |> Result.map_error (fun (_ : Store.checkpoint_load_error) -> "cold load failed")
       |> get "load")
   in
-  let (_ : Store.exact_checkpoint_snapshot), exact_read_ms =
-    timed (fun () ->
-      Store.load_agent_core_exact_snapshot ~session_dir ~session_id
-      |> Result.map_error Store.checkpoint_ref_load_error_to_string
-      |> get "exact snapshot")
-  in
-  Printf.printf "%-10s %8d %7d %9.1f %10.1f %10.1f %11.1f %10.1f %10.1f\n%!" spec
-    (List.length loaded.Agent_core.Checkpoint.messages) images (mb file_after_first) first_save_ms
-    (median round_ms) (mb round_written) cold_load_ms exact_read_ms
+  Printf.printf "%-10s %8d %7d %8.1f %9.1f %9.1f %9.1f %8.1f %9.1f %9.1f %8.1f\n%!" spec
+    (List.length initial) images (mb file_after_first) first_save_ms (median round_ms)
+    (mb round_written) (mb disk) exact_held_ms exact_cold_ms cold_load_ms
 
 let () =
   let cases =
@@ -182,6 +210,6 @@ let () =
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let history_retained = Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained in
-  Printf.printf "%-10s %8s %7s %9s %10s %10s %11s %10s %10s\n" "case" "messages" "images" "file_MB"
-    "save_ms" "round_ms" "round_MB" "cold_ms" "exact_ms";
+  Printf.printf "%-10s %8s %7s %8s %9s %9s %9s %8s %9s %9s %8s\n" "case" "messages" "images"
+    "file_MB" "save_ms" "round_ms" "round_MB" "disk_MB" "exact_ms" "exact_cold" "cold_ms";
   List.iter (run_case ~history_retained) cases

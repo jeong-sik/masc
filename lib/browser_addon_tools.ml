@@ -2,7 +2,7 @@ module B = Browser_lane
 module Host = Browser_addon_host
 module C = Browser_capabilities
 module Legacy = Tool_misc_browser_lane
-let ( let* ) = Result.bind
+open Result.Syntax
 type projection = Raw | Inventory | Session | Scene of Browser_scene.request | Screenshot of int * B.Capture.t option
   | Scoped_elements of B.elements_filter
 type prepared = {preference:Browser_selection.preference;verb:B.verb;

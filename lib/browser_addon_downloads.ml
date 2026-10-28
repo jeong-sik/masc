@@ -1,6 +1,6 @@
 module B = Browser_lane
 module Requirement = Resource_requirement
-let ( let* ) = Result.bind
+open Result.Syntax
 type descriptor = {snapshot_id:string;root_device:int;root_inode:int;
   device:int;inode:int;bytes:int;sha256:string}
 type claim = Snapshot of descriptor | Published of Yojson.Safe.t

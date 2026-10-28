@@ -1,7 +1,7 @@
 module B = Browser_lane
 module W = Browser_addon_wire
 module R = Lane_addon_runtime
-let ( let* ) = Result.bind
+open Result.Syntax
 type unavailable =
   | No_addon
   | Ambiguous_addons

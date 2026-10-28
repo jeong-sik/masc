@@ -1,7 +1,7 @@
 module B = Browser_lane
 module W = Browser_addon_wire
 module Requirement = Resource_requirement
-let ( let* ) = Result.bind
+open Result.Syntax
 type error = Identity_changed | Unconfirmed of string
 let protect run = try run () with
   | (Unix.Unix_error _|Sys_error _|Yojson.Json_error _) as exn ->

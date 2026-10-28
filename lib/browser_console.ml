@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 let subscribed_method = "log.entryAdded"
 let entries_per_context = 200
 let text_bytes_limit = 4000

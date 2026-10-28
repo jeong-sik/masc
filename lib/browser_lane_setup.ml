@@ -105,7 +105,7 @@ let default_manifest_directory ~home = function
       [ "Library"; "Application Support"; "Mozilla"; "NativeMessagingHosts" ]
   | Linux -> List.fold_left Filename.concat home [ ".mozilla"; "native-messaging-hosts" ]
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* One place that turns the exceptions of a filesystem step into the step's
    own words, so the sentence the operator reads names what was being done and

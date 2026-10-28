@@ -17,7 +17,7 @@ type t =
   { id : string; source_id : string; author : string; created_at : string
   ; receipt : Tool_output.artifact_ref receipt }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let digest bytes = Agent_core_sha256.(digest_string bytes |> to_hex)
 let valid_id id = String.length id = 38 && String.starts_with ~prefix:"build-" id
   && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) (String.sub id 6 32)

@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 let cookies_limit = 200
 
 let field key = function `Assoc fields -> List.assoc_opt key fields | _ -> None

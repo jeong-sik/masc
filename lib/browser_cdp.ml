@@ -20,7 +20,7 @@ type envelope =
   | Reply of { id : int; result : (Yojson.Safe.t, int * string) result }
   | Event of { method_ : string; session : session_id option; params : Yojson.Safe.t option }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let field key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
 
 let string_field key json =

@@ -4,7 +4,7 @@ type command =
   | Invoke of { operation_id:string; program:string; arguments:Yojson.Safe.t }
   | Release of string
 type error = Not_started | Outcome_unknown
-let ( let* ) = Result.bind
+open Result.Syntax
 let to_json = function
   | Prepare {operation_id;tab_id;extension_id;directory;program;arguments} ->
     `Assoc ["kind",`String "prepare";"operation_id",`String operation_id;"tab_id",`Int tab_id;

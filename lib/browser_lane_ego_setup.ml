@@ -86,7 +86,7 @@ let error_message = function
       table_path
   | Not_written reason -> Printf.sprintf "[%s] was not written to runtime.toml: %s." table_path reason
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let configuration_of_text text =
   match Otoml.Parser.from_string_result text with

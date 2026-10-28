@@ -1,6 +1,6 @@
 module B = Browser_lane
 let command_tool_name = "browser_command"
-let ( let* ) = Result.bind
+open Result.Syntax
 let string value = `String value
 let nullable f = Option.fold ~none:`Null ~some:f
 let exact expected = function

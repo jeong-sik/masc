@@ -1,5 +1,5 @@
 module B = Browser_lane
-let ( let* ) = Result.bind
+open Result.Syntax
 let activity_to_json = function
   | B.Enabled -> `String "enabled" | Disabled -> `String "disabled" | Unobserved -> `String "unobserved"
 let session_to_json = function

@@ -64,7 +64,7 @@ let error_message = function
      again."
   | Not_written reason -> Printf.sprintf "The automation table was not written to runtime.toml: %s." reason
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let configuration_of_text text =
   match Otoml.Parser.from_string_result text with

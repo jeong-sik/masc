@@ -1,7 +1,7 @@
 module B = Browser_lane
 module Lease = B.Upload_lease
 module Requirement = Resource_requirement
-let ( let* ) = Result.bind
+open Result.Syntax
 type grant = {actor:string;route:B.route;verb:B.verb;snapshot:Lease.snapshot}
 type preparation = Staging | Withdrawn
 type state = Preparing of preparation | Pending of grant | Claimed | Releasing

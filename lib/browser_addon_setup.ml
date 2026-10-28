@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type declaration =
   | Created of { path : string }

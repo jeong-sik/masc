@@ -7,7 +7,7 @@ type error =
   | Request_collision
   | Unavailable of string
   | Commit_uncertain of Data.t
-let ( let* ) = Result.bind
+open Result.Syntax
 let error_message = function
   | Invalid message | Unavailable message -> message
   | Artifact_error error -> Artifacts.error_message error

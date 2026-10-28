@@ -1,6 +1,6 @@
 module B = Browser_lane
 module Host = Browser_addon_host
-let ( let* ) = Result.bind
+open Result.Syntax
 let tool_name=Browser_addon_tool.definition.name
 let failure ~class_ ~effect_disposition detail = Tool_result.make_err
   ~tool_name ~start_time:(Tool_timing.start ()) ~class_ ~effect_disposition detail

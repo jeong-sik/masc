@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type session = No_session_left | Session_left | Session_unknown | Session_refused [@@deriving enumerate]
 

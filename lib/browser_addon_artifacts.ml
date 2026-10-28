@@ -1,7 +1,7 @@
 module B = Browser_lane
 module W = Browser_addon_wire
 module S = Mcp_protocol.Mcp_types
-let ( let* ) = Result.bind
+open Result.Syntax
 let field fields name = Option.to_result ~none:("missing browser receipt field: " ^ name)
   (List.assoc_opt name fields)
 let object_ = function `Assoc fields -> Ok fields | _ -> Error "invalid browser artifact receipt"

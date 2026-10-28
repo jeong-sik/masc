@@ -44,7 +44,7 @@ let view ?(outcome=Observed) connection =
 let exact names = function
   | `Assoc fields when List.sort String.compare (List.map fst fields)=List.sort String.compare names -> Ok fields
   | _ -> Error ()
-let ( let* ) = Result.bind
+open Result.Syntax
 type request = View | Assert of {client_id:string;space_id:string;generation:string}
 let parse json =
   let* fields=exact ["action";"arguments"] json in

@@ -4,7 +4,7 @@ type receipt = { id : string; expected_version : int; data_sha256 : string; at :
 type t = { target : target; actor : string; version : int; data : Yojson.Safe.t; receipts : receipt list }
 type error = Invalid of string | Conflict | Request_collision
 module Ids = Set.Make (String)
-let ( let* ) = Result.bind
+open Result.Syntax
 let safe_integer n = n >= 0 && Int64.of_int n <= 9_007_199_254_740_991L
 let text value = String.trim value <> "" && String.is_valid_utf_8 value
 let fields allowed = function

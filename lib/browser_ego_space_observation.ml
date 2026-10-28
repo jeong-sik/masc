@@ -1,5 +1,5 @@
 type t = { space : Browser_lane.ego_space; ownership : string; observed_at : float }
-let ( let* ) = Result.bind
+open Result.Syntax
 let of_sdk ~expected_id ~observed_at = function
   | `Assoc fields when List.sort String.compare (List.map fst fields)=["name";"ownership";"spaceId"] ->
     let get key=Option.to_result ~none:("missing SDK Space " ^ key) (List.assoc_opt key fields) in

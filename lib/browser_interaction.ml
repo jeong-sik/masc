@@ -1,7 +1,7 @@
 (** Closed browser interactions. Caller strings are values, never script source. *)
 type request = { route : Browser_selection.preference; tab_id : int; frame_path : string list;
   expected_url : string option; action : Browser_lane.interaction }
-let ( let* ) = Result.bind
+open Result.Syntax
 let route_names = ["lane"; "clientId"]
 let wire_fields = ["tabId"; "framePath"; "expectedUrl"; "action"; "selector"; "text"; "x"; "y"; "documentId"; "nodeId"; "point"; "from"; "to"; "viewport"; "button"; "source"; "destination"; "via"; "durationMs"; "key"; "modifiers"; "factor"; "width"; "height"; "value"; "values"; "target"]
 let parse = function

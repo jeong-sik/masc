@@ -1,7 +1,7 @@
 module B = Browser_lane
 module W = Browser_addon_wire
 module S = Mcp_protocol.Mcp_types
-let ( let* ) = Result.bind
+open Result.Syntax
 let object_schema ?(open_fields=false) ~required properties = `Assoc [
   "type",`String "object";"properties",`Assoc properties;
   "required",`List (List.map (fun key -> `String key) required);

@@ -56,7 +56,7 @@ Keeper 의 agent-core checkpoint 는 저장할 때마다 history 전체를 다�
 
 ### 2.1 저장
 
-- tool 라운드마다 세 단계에서 checkpoint 전체를 새로 만든다. 위치는 packages/agent_core/lib/pipeline/pipeline.ml:372, :504, :548 이다. 턴 끝에 `finalize` 저장이 한 번 더 있다.
+- tool 라운드마다 세 단계에서 checkpoint 전체를 새로 만든다. 위치는 packages/agent_core/lib/pipeline/pipeline.ml:375, :504, :551 이다. 턴 끝에 `finalize` 저장이 한 번 더 있다.
 - store 는 바뀌지 않은 메시지의 인코딩을 재사용하지만, 파일은 매번 전부 쓴다. `save_encoded_durable_atomic_from` 이 임시 파일에 쓰고 fsync 한 뒤 `<trace>/<trace>.json` 으로 rename 한다(lib/keeper/keeper_fs.ml:603, lib/keeper/keeper_checkpoint_store.ml:16-17).
 - 저장마다 canonical 을 `agent-core-snapshot-<ms>.json` 으로 hardlink 하고 최근 N개만 둔다. N 은 `keeper.checkpoint_history_retained` 이고 기본값 3이다(lib/runtime_settings.ml:250).
 - 모든 저장은 store 의 encoder 세 곳 중 하나를 지난다.
@@ -122,6 +122,9 @@ Keeper 의 agent-core checkpoint 는 저장할 때마다 history 전체를 다�
 ```
 
 - 객체는 `Tool_blob_store.put_durable` 과 같은 방식으로 쓴다. 임시 파일에 쓰고, rename 하고, 디렉터리를 fsync 한다. 읽을 때 digest 를 검사한다. 이미 있는 객체는 다시 쓰지 않는다(`put_durable_reuse`).
+  - 내구성은 그 쓰기 함수가 주는 만큼이다. 프로세스가 죽어도 남는다. macOS 의 `fsync` 는 디스크 캐시까지 비우지 않아서, 전원이 끊길 때도 남는지는 `Fs_compat` 의 `F_FULLFSYNC` 사용 여부를 따른다.
+- 객체 digest 는 codec 이 만든 바이트의 SHA-256 이다. 그래서 인코딩이 결정적이어야 한다. 필드 순서를 고정하고, 실수 표기도 하나로 정한다(`0.0`/`-0.0` 같은 함정은 `prefix_digest` 주석에 이미 적혀 있다). `encode (decode bytes) = bytes` 를 시험으로 고정한다.
+- 묶음은 머리에 메시지마다의 digest 를 순서대로 담는다. head 는 묶음마다 메시지 수와, 묶음이 끝나는 자리의 해시 체인 값을 담는다(§3.5).
 - 턴 경계는 Keeper 턴이다. 턴 마무리(`finalize`) 저장 때 `open` 의 메시지를 묶음 하나로 묶고, 그 digest 를 `turns` 에 붙인다.
 - **head 크기:** 턴은 Keeper 하나에 최대 525개라 `turns` 는 약 37KB 다. `open` 은 진행 중인 턴의 메시지 수를 따른다(중앙값 14개, 최대 3,341개면 약 224KB).
 
@@ -164,7 +167,10 @@ Keeper 의 agent-core checkpoint 는 저장할 때마다 history 전체를 다�
 
 - 메시지 개수(heartbeat, `keeper_status`)는 head 로 답한다. 묶음마다 메시지 수를 head 에 같이 둔다.
 - 대시보드 checkpoint 목록은 보관 head 만 읽는다. 미리보기는 마지막 객체 하나만 읽는다.
-- Librarian 과 continuation 의 앞부분 비교는 묶음 digest 를 비교한다. 진행 중 턴은 메시지 digest 를 비교한다.
+- Librarian 과 continuation 의 앞부분 비교는 해시 체인으로 한다. 지금의 `prefix_digest` 는 덮은 메시지의 JSON 을 이어 붙인 한 덩어리의 SHA-256 이라서(lib/librarian_continuity_snapshot.ml:227), 묶음 digest 로는 만들 수 없다. 턴 중간까지 덮은 경우도 비교할 수 없다.
+  - 정의: `chain(0)` 은 정해 둔 상수이고, `chain(i+1) = SHA-256(chain(i) ‖ digest(message i))` 다.
+  - 앞부분 k 개의 값은 `chain(k)` 다. head 에 있는 "k 바로 앞 묶음의 끝 체인 값"에서 시작해, 그 묶음 머리의 메시지 digest 를 k 까지 이어 계산한다. 메시지를 다시 인코딩하지 않는다.
+  - Librarian continuity snapshot 은 `prefix_sha256` 대신 `chain(k)` 를 저장한다. 옛 snapshot 은 하드컷 때 버려진다(§3.7). 임의의 k 에서 두 방법(전체 history 를 처음부터 잇기, head 와 묶음에서 이어 계산하기)이 같은 값을 내는지 시험으로 고정한다.
 - 턴 하나를 쓰는 history 읽기는 지금처럼 전체를 메모리에 올린다. 다만 media 를 빼면 msx-retro-mania 가 179MB 에서 약 58MB 가 된다. 같은 프로세스 안에서는 메모리 사본을 그대로 쓴다.
 - 기동 tail 복구는 마지막 묶음과 진행 중 턴만 읽어도 되는지 `close_open_tail` 의 규칙을 확인해서 정한다. 이 RFC 에서 약속하지 않는다.
 
@@ -173,8 +179,10 @@ Keeper 의 agent-core checkpoint 는 저장할 때마다 history 전체를 다�
 blob 정리는 L1 과 같은 stack 에 들어간다. `Tool_blob_maintenance` 의 인터페이스도 "참조를 저장하는 변경과 같은 변경에서" 등록하라고 요구한다.
 
 - 정리 경로는 head 와 객체를 JSON 으로 해석해서 `Stored` digest 를 모은다. 파일 내용을 문자열로 훑지 않는다.
-- 정리는 서버가 멈춘 상태에서, BasePath lease 를 잡고만 돈다. 지금 `Tool_blob_maintenance` 가 도는 방식이다(배포 사전 점검). checkpoint 객체 정리도 같은 조건에서만 돈다. 그래서 "이미 있으니 안 쓴다"와 "아무도 안 가리키니 지운다"가 같은 시각에 일어나지 않는다.
+- 정리는 쓰는 쪽이 없을 때, BasePath lease 를 잡고만 돈다. 지금 `Tool_blob_maintenance` 는 배포 사전 점검 때(서버 정지 중) 돈다. checkpoint 객체 정리는 여기에 더해 기동 때 Keeper 가 시작하기 전에도 돈다(아래). 그래서 "이미 있으니 안 쓴다"와 "아무도 안 가리키니 지운다"가 같은 시각에 일어나지 않는다.
 - 저장이 "이미 있다"고 판단할 때는 그 파일의 digest 를 검사한다. 크래시로 잘린 파일을 믿지 않는다.
+- 기동 때 도는 정리는 Keeper 가 시작하기 전이라 쓰는 쪽이 없고, lease 도 서버가 잡고 있다. 그래서 진행 중 턴의 loose 객체는 묶음으로 다시 쓰인 뒤, 다음 기동이나 배포 사전 점검 때 지워진다. 그때까지 쌓이는 양은 서버 한 번 뜬 동안 쓴 메시지 수다. 기동 시간에 더해지는 비용은 L0 에서 잰다.
+- purge 와 Keeper 별 삭제는 "어느 head 에서도 닿지 않게 만드는 것"이다. blob 저장소는 전역이라 서로 다른 Keeper 의 같은 바이트가 한 파일을 함께 쓴다. 그래서 파일은 다음 정리 때 지워진다. purge 를 기록하는 쪽은 "닿지 않게 된 시각"과 "파일이 지워진 시각"을 따로 적는다.
 - 기준점(root)은 다음과 같다.
   - 살아 있는 head
   - 보관 head
@@ -233,9 +241,12 @@ blob 정리는 L1 과 같은 stack 에 들어간다. `Tool_blob_maintenance` 의
 
 ## 7. 위험
 
-- **되돌리기.** v16 을 배포한 뒤 이전 binary 로 되돌리면, 이전 binary 는 v16 파일을 읽지도 쓰지도 못한다. 되돌릴 때는 `traces/` 를 옮겨 두고 새로 시작해야 한다.
+- **되돌리기.** v16 을 배포한 뒤 이전 binary 로 되돌리면, 이전 binary 는 v16 파일을 읽지도 쓰지도 못한다.
+  - 읽으면 `checkpoint version 16 was written by a later binary; this one reads 15` 오류가 난다(keeper_checkpoint_store.ml:848).
+  - 저장은 기존 파일을 읽지 못해 `Existing_checkpoint_unreadable` 로 실패한다고 보고됐다(:2241-2255, 직접 확인하지 않았다).
+  - 되돌릴 때는 `traces/` 를 옮겨 두고 새로 시작해야 한다.
 - **fsync 횟수.** 저장 한 번에 새 객체 1~3개와 head 를 fsync 한다. 작은 파일 여러 번이 179MB 한 번보다 느린지는 L0 bench 로 잰다.
-- **정리 오류.** 기준점이 빠지면 쓰는 blob 을 지운다. 그 이미지가 범위에 들어온 요청은 typed 오류로 실패하고, 범위 시작이 그 뒤로 넘어갈 때까지 계속 실패한다. 그래서 기준점은 §3.6 목록을 시험으로 고정하고, 정리는 서버 정지 중에만 한다.
+- **정리 오류.** 기준점이 빠지면 쓰는 blob 을 지운다. 그 이미지가 범위에 들어온 요청은 typed 오류로 실패하고, 범위 시작이 그 뒤로 넘어갈 때까지 계속 실패한다. 그래서 기준점은 §3.6 목록을 시험으로 고정하고, 정리는 쓰는 쪽이 없을 때만 한다(서버 정지 중, 또는 기동 때 Keeper 시작 전).
 - **다른 프로세스.** 객체를 head 보다 먼저 내구화하므로, CLI 가 읽은 head 가 가리키는 객체는 언제나 있다.
 - **하드컷.** 배포 때 모든 Keeper 의 agent-core history 가 새로 시작한다(D1 에서 받아들였다).
 

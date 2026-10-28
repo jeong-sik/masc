@@ -20096,7 +20096,7 @@ let runtime_authority_rows ~cols (state : state) : string list =
   let ko = state.ui_language = Lang_ko in
   let reading_notes =
     (if server_authority_ready state then []
-     else [if ko then "서버 신원 미확인" else "server identity unconfirmed"])
+     else [if ko then "서버 조회 불가" else "server reads unavailable"])
     @ (if Option.is_some state.runtime_surface_inflight then
          [if ko then "조회 중" else "reading"] else [])
     @ (if Option.is_some state.runtime_surface_error then

@@ -237,7 +237,7 @@ let runtime_routes_detail_lines state ~width =
   | None ->
       runtime_detail_section ~first:true (if ko then "1. 기본 라우트 · 진입 런타임" else "1. Default routes")
       @ optional (text "런타임 조회 경고" "Runtime read warning") state.runtime_surface_error
-      @ field (text "설정" "Resolved") (text "아직 읽지 않음" "Configuration has not been read")
+      @ field (text "설정" "Resolved") (text "관측 없음" "No configuration observation")
       @ notice_and_stale
   | Some snapshot ->
       let resolved = snapshot.Tui_decode.rss_resolved in
@@ -501,7 +501,7 @@ let render_runtime_detail (state : state) target =
   let buf = Buffer.create 4096 in
   let target_label =
     match target with
-    | Runtime_routes -> "routes / status"
+    | Runtime_routes -> if state.ui_language = Lang_ko then "라우트 / 상태" else "routes / status"
     | Runtime_lane_candidate { lane_id; runtime_id } -> lane_id ^ " / " ^ runtime_id
     | Runtime_catalog_entry { runtime_id } -> runtime_id
   in
@@ -526,7 +526,7 @@ let render_runtime_detail (state : state) target =
   let position =
     if total > content_height then
       Some
-        (Printf.sprintf "lines %s"
+        (Printf.sprintf (if state.ui_language = Lang_ko then "행 %s" else "lines %s")
            (Masc_tui_scroll.window_text ~scroll ~height:content_height total))
     else None
   in

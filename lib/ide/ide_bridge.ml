@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 type event_kind = Tool
 let event_kind_to_string = function Tool -> "tool"
 let event_kind_of_string = function "tool" -> Some Tool | _ -> None

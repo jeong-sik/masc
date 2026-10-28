@@ -29,7 +29,7 @@ type update_kind = Message of message | Edited_message of message | Unsupported
 type update = {update_id:int64;kind:update_kind}
 type post = url:string -> body:string -> ((int * string),unit) result
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let invalid field = Error (Invalid_response field)
 let object_fields field = function `Assoc fields -> Ok fields | _ -> invalid field
 let required field decode fields =

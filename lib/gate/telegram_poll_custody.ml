@@ -12,7 +12,7 @@ let pp_error fmt = function
   | Acceptance_refused {update_id;detail} ->
     Format.fprintf fmt "telegram update %Ld acceptance refused: %s" update_id detail
   | Storage_failed detail -> Format.fprintf fmt "telegram cursor storage failed: %s" detail
-let ( let* ) = Result.bind
+open Result.Syntax
 let bot_user_id t = t.bot_user_id
 type observation = Unobserved | Observed of {next_offset:int64 option;observed_at:float}
 type cursor = {generation:int64;observation:observation}

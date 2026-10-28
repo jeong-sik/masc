@@ -515,7 +515,7 @@ let remove_antigravity_panel_root root =
 ;;
 
 let prepare_antigravity_panel_home ~runtime_root ~oauth_source =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* home, cwd = Runtime_antigravity_home.prepare_native
       ~runtime_root ~owner_leaf:"panelist" ~oauth_source
       ~posture:Runtime_native_tools.Native_read
@@ -531,7 +531,7 @@ let prepare_antigravity_panel_home ~runtime_root ~oauth_source =
 ;;
 
 let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runtime_instance.t) ~system_prompt ?timeout_s ?output_schema ~prompt () =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   (* The Codex and Claude adapters take the system prompt as an option and
      treat [None] as "client default"; Antigravity and Muse Code get it
      framed into the input. An empty group prompt is not an instruction, so it becomes [None]
@@ -821,7 +821,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
 ;;
 
 let run_panelist ~base_dir ~runtime_id ~system_prompt ?timeout_s ?output_schema ~prompt () =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* runtime = match Runtime.get_runtime_by_id runtime_id with
     | Some runtime -> Ok runtime
     | None -> Error (provider_error ~runtime_id "runtime is not configured", Fusion_types.zero_usage) in

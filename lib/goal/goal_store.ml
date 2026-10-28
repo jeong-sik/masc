@@ -10,7 +10,7 @@
 
 include Goal_document
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type transition_effects = {
   events : (event_kind * Yojson.Safe.t) list;

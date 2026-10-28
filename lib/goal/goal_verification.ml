@@ -2,7 +2,7 @@
    Mutations use only the primary ledger. Recovery mirrors are read-only evidence.
    The caller holds the Goal lock while binding or committing a current request. *)
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type verdict_outcome =
   | Proven

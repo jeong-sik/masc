@@ -64,7 +64,7 @@ let to_yojson (c : Fusion_policy.t) : Yojson.Safe.t =
 
 (* ── decode ── *)
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let fields ~what = function
   | `Assoc fields -> Ok fields

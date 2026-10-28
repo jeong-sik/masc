@@ -1133,6 +1133,16 @@ let uncertain_cancel_can_reconcile_the_held_original =
       let original=Owner.original operation in
       let looked=Owner.lookup controller original |> owner in
       check "held lookup returns the same original operation" (looked==operation);
+      let expect_uncertain_view () =
+        (match Owner.snapshot looked with
+         | Error (Owner.Registry_error R.Cancel_reconciliation_required) -> ()
+         | Error error -> Alcotest.fail (Owner.error_to_string error)
+         | Ok _ -> Alcotest.fail "held snapshot hid uncertain original authority");
+        (match Owner.read_output ~sw looked ~stream:P.Stdout ~offset:0L ~max_bytes:64 with
+         | Error (Owner.Registry_error R.Cancel_reconciliation_required) -> ()
+         | Error error -> Alcotest.fail (Owner.error_to_string error)
+         | Ok _ -> Alcotest.fail "held output became available or pending without original authority") in
+      expect_uncertain_view ();
       let wrong=P.original ~binding ~admission_id:(id 999994) in
       (match Owner.lookup controller wrong with
        | Error Owner.Admission_mismatch -> ()
@@ -1155,6 +1165,7 @@ let uncertain_cancel_can_reconcile_the_held_original =
        | Some (Error error) -> Alcotest.fail (Owner.error_to_string error)
        | None -> Alcotest.fail "held original lost its native lifetime");
       check "held result remains pending for explicit reconciliation" (Eio.Promise.peek waiting=None);
+      expect_uncertain_view ();
       (match Owner.await_request (Owner.activate looked) with
        | Error (Owner.Registry_error R.Cancel_reconciliation_required) -> ()
        | Error error -> Alcotest.fail (Owner.error_to_string error)
@@ -1174,6 +1185,17 @@ let uncertain_cancel_can_reconcile_the_held_original =
        | Error error -> Alcotest.fail (Owner.error_to_string error)
        | Ok () -> Alcotest.fail "conflicting receipt was reported as successful reconciliation");
       check "failed publication retains the pending original result" (Eio.Promise.peek waiting=None);
+      let observed=Owner.snapshot looked |> owner in
+      (match observed.progress with
+       | Owner.Owned_lifetime (C.No_supervisor (S.Registry_error R.Cancel_reconciliation_required)) -> ()
+       | Owner.Owned_lifetime _ | Owner.Registered | Owner.Activation_pending
+       | Owner.Publication_known _ | Owner.Ownership_unknown ->
+         Alcotest.fail "confirmed cancellation lost its held startup diagnostic");
+      check "confirmed cancellation retains the original launch"
+        (R.launch_state observed.record=R.Requested launch_id
+         && R.cancellation_state observed.record=R.Cancellation_requested);
+      check "held cancellation has no invented output before publication"
+        (Owner.read_output ~sw looked ~stream:P.Stdout ~offset:0L ~max_bytes:64 |> owner = None);
       Unix.unlink receipt;
       Owner.await_request (Owner.cancel looked) |> owner;
       let digest=Owner.await_result operation |> owner in
@@ -1183,6 +1205,17 @@ let uncertain_cancel_can_reconcile_the_held_original =
        | D.Not_created {launch_id=Some actual} -> check "receipt retains the original launch" (actual=launch_id)
        | D.Not_created {launch_id=None} | D.Child _ ->
          Alcotest.fail "reconciled original did not publish its actual no-child receipt");
+      let published=Owner.snapshot looked |> owner in
+      check "reconciled view reports the actual publication digest"
+        (published.progress=Owner.Owned_lifetime (C.Publication_known digest)
+         && R.launch_state published.record=R.Requested launch_id);
+      (match Owner.read_output ~sw looked ~stream:P.Stdout ~offset:0L ~max_bytes:64 |> owner with
+       | Some chunk ->
+         check "reconciled output is the verified empty sealed original"
+           (chunk.data="" && match chunk.extent with
+            | P.Sealed {byte_length=0L;_} -> true
+            | P.Growing _ | P.Sealed _ -> false)
+       | None -> Alcotest.fail "published no-child output remained pending");
       check "reconciliation never runs the payload"
         (not (Sys.file_exists (Filename.concat fixture.work "uncertain-ran")))))
 

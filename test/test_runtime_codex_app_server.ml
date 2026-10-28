@@ -5260,6 +5260,103 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
                       selected.Keeper_turn_driver.run_result))))))
 ;;
 
+type result_confirmation = Confirmed | Missing | Mismatched | Wrong_call | Cancelled | Failed_response
+
+let test_delivered_host_result_settlement ~confirmation ~completed () =
+  let base_path = temp_workspace "codex-delivered-host-result-" in
+  let keeper_name = "delivered-host-result-fixture" in
+  let tool =
+    Agent_core.Tool.create
+      ~name:"masc_probe"
+      ~description:"Return the actual result for the delivery fixture"
+      ~parameters:
+        [ { Agent_core.Types.name = "marker"
+          ; description = "Fixture marker"
+          ; param_type = String
+          ; required = true
+          }
+        ]
+      (fun _ -> match confirmation with
+        | Failed_response ->
+          Error { Agent_core.Types.message = "dynamic tool request failed"; recoverable = true; error_class = None }
+        | Confirmed | Missing | Mismatched | Wrong_call | Cancelled ->
+          Ok { Agent_core.Types.content = "delivered result"; content_blocks = None; _meta = None })
+  in
+  let confirmation_item =
+    let success, status, content = match confirmation with
+      | Confirmed | Missing | Wrong_call -> true, "completed", "delivered result"
+      | Mismatched -> true, "completed", "different result"
+      | Cancelled -> false, "failed", ""
+      | Failed_response -> false, "failed", "dynamic tool request failed" in
+    let content_items = match confirmation with
+      | Cancelled -> []
+      | Confirmed | Missing | Mismatched | Wrong_call | Failed_response ->
+        [`Assoc ["type", `String "inputText"; "text", `String content]] in
+    let call_id = match confirmation with Wrong_call -> "another-call" | _ -> "call-1" in
+    Yojson.Safe.to_string (`Assoc ["method", `String "item/completed";
+      "params", `Assoc ["threadId", `String "thread-1"; "turnId", `String "turn-1";
+        "item", `Assoc ["type", `String "dynamicToolCall"; "id", `String call_id;
+          "tool", `String "masc_probe"; "arguments", `Assoc ["marker", `String "from-codex"];
+          "status", `String status; "success", `Bool success; "contentItems", `List content_items]]])
+  in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    (* The fixture reads the tool response before it emits the terminal frame,
+       so the result was delivered and no tool remains in flight. *)
+    with_fixture
+      ([ init_result; account_chatgpt; thread_result; turn_result; tool_call_request ]
+       @ (match confirmation with Missing -> [] | _ -> [confirmation_item])
+       @ [item_completed; (if completed then turn_completed else turn_failed)])
+      (fun cli_path ->
+        let result = run_keeper_turn ~tools:[tool] ~base_path ~keeper_name
+            ~cli_path ~model:"gpt-fixture" () in
+        (match completed, result with
+         | true, Ok _ | false, Error _ -> ()
+         | true, Error error -> fail (Agent_core.Error.to_string error)
+         | false, Ok _ -> fail "a failed vendor turn was accepted");
+        let pending = match Keeper_client_tool_outbox.load ~base_path ~keeper_name with
+          | Ok snapshot -> Keeper_client_tool_outbox.receipt_ids snapshot
+          | Error detail -> fail detail in
+        check int "only an accepted turn with the exact confirmed result settles it"
+          (if completed && confirmation = Confirmed then 0 else 1) (List.length pending)))
+;;
+
+let test_cancelled_item_before_tool_write_remains_retained () =
+  let base_path = temp_workspace "codex-cancelled-before-write-" in
+  let keeper_name = "cancelled-result-fixture" in
+  let release, resolve = Eio.Promise.create () in
+  let released = ref false in
+  let tool = Agent_core.Tool.create ~name:"masc_probe"
+      ~description:"Wait for the server cancellation fixture"
+      ~parameters:[{ Agent_core.Types.name = "marker"; description = "Fixture marker";
+                     param_type = String; required = true }] (fun _ ->
+        Eio.Promise.await release;
+        Ok { Agent_core.Types.content = "late result"; content_blocks = None; _meta = None }) in
+  let cancelled =
+    {|{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"dynamicToolCall","id":"call-1","tool":"masc_probe","arguments":{"marker":"from-codex"},"status":"failed","success":false,"contentItems":[]}}}|} in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    with_fixture ~await_dynamic_tools:false
+      [init_result; account_chatgpt; thread_result; turn_result; tool_call_request;
+       cancelled; agent_message_delta; item_completed; turn_completed]
+      (fun cli_path ->
+        (* The delta follows the cancellation on stdout. Release the tool only
+           after the consumer has handled it; the fixture then reads the late
+           response before allowing the overall turn to complete. *)
+        before_fixture_terminal cli_path 1;
+        let on_event = function
+          | Agent_core.Types.ContentBlockDelta { delta = Agent_core.Types.TextDelta _; _ } when not !released ->
+            released := true;
+            Eio.Promise.resolve resolve ()
+          | _ -> () in
+        (match run_keeper_turn ~tools:[tool] ~base_path ~keeper_name ~on_event
+            ~cli_path ~model:"gpt-fixture" () with
+         | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+        check bool "the server cancellation was processed before the tool returned" true !released;
+        let pending = match Keeper_client_tool_outbox.load ~base_path ~keeper_name with
+          | Ok snapshot -> Keeper_client_tool_outbox.receipt_ids snapshot
+          | Error detail -> fail detail in
+        check int "the late result is still retained" 1 (List.length pending)))
+;;
+
 let test_tool_outbox_reaches_the_next_keeper_turn ?(refuse_input = false) ~refuse_dispatch () =
   let base_path = temp_workspace "codex-tool-outbox-" in
   let capture_path = Filename.concat base_path "next-client.jsonl" in
@@ -9869,6 +9966,22 @@ let () =
     ; ( "response delivery"
       , [ test_case "ordinary response writes once" `Quick
             (fun () -> test_dynamic_tool_callback ())
+        ; test_case "accepted turn settles its confirmed host result" `Quick
+            (test_delivered_host_result_settlement ~confirmation:Confirmed ~completed:true)
+        ; test_case "unconfirmed host result remains retained" `Quick
+            (test_delivered_host_result_settlement ~confirmation:Missing ~completed:true)
+        ; test_case "different completed item retains the original result" `Quick
+            (test_delivered_host_result_settlement ~confirmation:Mismatched ~completed:true)
+        ; test_case "another call cannot confirm this result" `Quick
+            (test_delivered_host_result_settlement ~confirmation:Wrong_call ~completed:true)
+        ; test_case "cancelled dynamic call retains the original result" `Quick
+            (test_delivered_host_result_settlement ~confirmation:Cancelled ~completed:true)
+        ; test_case "cancellation before response write retains the result" `Quick
+            test_cancelled_item_before_tool_write_remains_retained
+        ; test_case "ambiguous failed response remains retained" `Quick
+            (test_delivered_host_result_settlement ~confirmation:Failed_response ~completed:true)
+        ; test_case "failed turn keeps its confirmed host result" `Quick
+            (test_delivered_host_result_settlement ~confirmation:Confirmed ~completed:false)
         ; test_case "projection substitution is not original delivery" `Quick
             test_response_observer_requires_original_projection
         ; test_case "observer failure does not undo a written response" `Quick

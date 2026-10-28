@@ -165,6 +165,17 @@ let rec close_delivery_frontier producer =
     then snapshot entries else close_delivery_frontier producer
   | Closed entries -> snapshot entries
 
+let retain_confirmed_calls snapshot ~call_ids =
+  let module Calls = Set.Make(String) in
+  let confirmed = List.fold_left (fun set id -> Calls.add id set) Calls.empty call_ids in
+  let is_confirmed entry = match entry.json with
+    | `Assoc fields ->
+      (match List.assoc_opt "host_producer_id" fields, List.assoc_opt "call_id" fields with
+       | Some (`String _), Some (`String id) -> Calls.mem id confirmed
+       | _ -> false)
+    | _ -> false in
+  { snapshot with entries = List.filter is_confirmed snapshot.entries }
+
 let load ~base_path ~keeper_name =
   let* directory = directory ~base_path ~keeper_name in
   let* names =

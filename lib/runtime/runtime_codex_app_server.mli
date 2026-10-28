@@ -508,6 +508,11 @@ val run_turn :
   (* Persist before returning the ended turn. A persistence failure fails the
      attempt; a Keeper must replay the retained receipt into its next input,
      never replay the already executed tool or wait on an old exec cell. *)
+  ?on_tool_response_confirmed:(call_id:string -> unit) ->
+  (* A same-turn dynamicToolCall completed item independently matches the
+     exact successful response written for this unique call. Failed responses
+     are not confirmed because Codex can synthesize indistinguishable failures.
+     This witnesses client receipt, not final model-input consumption. *)
   ?reasoning_effort:Llm_provider.Reasoning_effort.t ->
   ?thread_mode:thread_mode ->
   mgr:_ Eio.Process.mgr ->

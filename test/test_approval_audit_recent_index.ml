@@ -171,6 +171,51 @@ let test_index_answers_as_the_backward_scan () =
   agrees_with_scan ~base_path "unowned row"
 ;;
 
+let append_raw path text =
+  let oc = open_out_gen [ Open_append; Open_creat; Open_wronly ] 0o644 path in
+  Fun.protect ~finally:(fun () -> close_out oc) (fun () -> output_string oc text)
+;;
+
+(* The backward scan reads the bytes after the last newline as one more row:
+   a complete row is returned, a broken one refuses the reads that reach it.
+   The index must answer the same while the row is unfinished and after it
+   ends. *)
+let test_row_without_a_final_newline () =
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  let file = day_path ~base_path ~month:"2026-10" ~day:"01.jsonl" in
+  append_lines file (rows "alpha" 3 @ rows "beta" 1);
+  agrees_with_scan ~base_path "complete rows";
+  append_raw file (row "alpha");
+  agrees_with_scan ~base_path "complete row without a newline";
+  agrees_with_scan ~base_path "complete row without a newline, unchanged";
+  append_raw file "\n";
+  append_lines file (rows "beta" 2);
+  agrees_with_scan ~base_path "that row ended";
+  append_raw file "{\"event\":\"pending\",\"keeper\":";
+  agrees_with_scan ~base_path "broken row without a newline";
+  append_raw file "\"alpha\"}\n";
+  agrees_with_scan ~base_path "the broken row completed"
+;;
+
+(* A day file truncated and rewritten longer on the same inode looks appended
+   to a cursor. The index must not keep rows the rewrite removed. *)
+let test_file_rewritten_in_place_and_grown () =
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  let file = day_path ~base_path ~month:"2026-10" ~day:"01.jsonl" in
+  append_lines file (rows "alpha" 3 @ rows "beta" 2);
+  agrees_with_scan ~base_path "before the rewrite";
+  let inode = (Unix.stat file).Unix.st_ino in
+  let oc = open_out_gen [ Open_wronly; Open_trunc ] 0o644 file in
+  Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+    List.iter (fun line -> output_string oc (line ^ "\n")) (rows "beta" 12));
+  check int "same inode" inode (Unix.stat file).Unix.st_ino;
+  agrees_with_scan ~base_path "rewritten in place and grown";
+  check bool "alpha's removed rows are gone" true
+    (Audit.read_recent ~base_path ~keeper_name:"alpha" ~n:1 () = Ok [])
+;;
+
 let test_bounds () =
   let base_path = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
@@ -192,6 +237,9 @@ let () =
     [ ( "read_recent"
       , [ test_case "answers as the backward scan through store changes" `Quick
             test_index_answers_as_the_backward_scan
+        ; test_case "a row without a final newline" `Quick test_row_without_a_final_newline
+        ; test_case "a file rewritten in place and grown" `Quick
+            test_file_rewritten_in_place_and_grown
         ; test_case "bounds" `Quick test_bounds
         ] )
     ]

@@ -333,6 +333,22 @@ val fold_file_appended_entries_result :
     Appended bytes are read only once. The same append-only contract applies:
     in-place prefix edits combined with growth are outside that contract. *)
 
+type appended_tail =
+  { complete_until : int  (** Byte offset just past the file's last newline. *)
+  ; trailing : recent_entry option
+        (** The bytes after the last newline, decoded as a row, when they hold
+            more than whitespace. *)
+  }
+
+val fold_file_appended_entries_with_tail_result :
+  string -> cursor:append_cursor option -> init:'a ->
+  f:('a -> recent_entry -> 'a) -> (('a * appended_tail) appended_read, read_error) result
+(** {!fold_file_appended_entries_result}, except that bytes after the last
+    newline are not an error. They are decoded as one row, as the backward
+    scan of {!find_latest_entry_result} decodes them, and returned apart from
+    [f]: the cursor stops at the last newline, so the row is folded once it
+    ends. *)
+
 val read_range : t -> since:string -> until:string -> Yojson.Safe.t list
 (** [read_range t ~since ~until] returns entries whose day-file falls
     within [[since, until]] (inclusive, format ["YYYY-MM-DD"]).

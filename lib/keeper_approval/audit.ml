@@ -624,7 +624,34 @@ module Recent_index = struct
     { observed : observation
     ; cursor : Dated_jsonl.append_cursor
     ; rows_read : int
+    ; complete_until : int  (** Bytes folded: up to the file's last newline. *)
+    ; probe : string
+          (** The [rewrite_probe_bytes] bytes ending at [complete_until]. *)
+    ; trailing : (position * Dated_jsonl.recent_entry) option
+          (** Bytes after the last newline, decoded. Not folded into the
+              index: the row may still be growing. A read counts it, as the
+              backward scan does. *)
     }
+
+  (* The store's one writer appends whole rows ([record] through
+     [append_jsonl_durable]) and retention removes whole day files, so a day
+     file only grows. A file rewritten in place on the same inode and grown
+     past its old size would still look appended to the cursor; the bytes
+     just before the old boundary are read again and compared, and a
+     difference starts the index over. *)
+  let rewrite_probe_bytes = 4096
+
+  let read_probe path ~complete_until =
+    let offset = max 0 (complete_until - rewrite_probe_bytes) in
+    match
+      In_channel.with_open_bin path (fun input ->
+        In_channel.seek input (Int64.of_int offset);
+        really_input_string input (complete_until - offset))
+    with
+    | bytes -> Ok (Some bytes)
+    | exception End_of_file -> Ok None
+    | exception Sys_error detail -> Error detail
+  ;;
 
   type t =
     { files : file SMap.t
@@ -739,21 +766,45 @@ module Recent_index = struct
       (match prior with
        | Some prior when equal_observation prior.observed observed -> Unchanged
        | Some _ | None ->
-         let first_row = match prior with Some prior -> prior.rows_read | None -> 0 in
-         (match
-            Dated_jsonl.fold_file_appended_entries_result file.file_path
-              ~cursor:(Option.map (fun prior -> prior.cursor) prior)
-              ~init:(index, first_row)
-              ~f:(fun (index, row) entry ->
-                add_entry index (at row) entry, row + 1)
-          with
-          | Error error -> refused (Dated_jsonl.read_error_to_string error)
-          | Ok Dated_jsonl.Cursor_invalidated -> Invalidated
-          | Ok (Dated_jsonl.Appended ((index, rows_read), cursor)) ->
-            Read
-              { index with
-                files = SMap.add file.file_path { observed; cursor; rows_read } index.files
-              }))
+         let prior_bytes_hold =
+           match prior with
+           | None -> Ok true
+           | Some prior ->
+             read_probe file.file_path ~complete_until:prior.complete_until
+             |> Result.map (function
+               | Some bytes -> String.equal bytes prior.probe
+               | None -> false)
+         in
+         (match prior_bytes_hold with
+          | Error detail -> refused detail
+          | Ok false -> Invalidated
+          | Ok true ->
+            let first_row = match prior with Some prior -> prior.rows_read | None -> 0 in
+            (match
+               Dated_jsonl.fold_file_appended_entries_with_tail_result file.file_path
+                 ~cursor:(Option.map (fun prior -> prior.cursor) prior)
+                 ~init:(index, first_row)
+                 ~f:(fun (index, row) entry ->
+                   add_entry index (at row) entry, row + 1)
+             with
+             | Error error -> refused (Dated_jsonl.read_error_to_string error)
+             | Ok Dated_jsonl.Cursor_invalidated -> Invalidated
+             | Ok (Dated_jsonl.Appended (((index, rows_read), tail), cursor)) ->
+               let complete_until = tail.Dated_jsonl.complete_until in
+               (match read_probe file.file_path ~complete_until with
+                | Error detail -> refused detail
+                | Ok None -> Invalidated
+                | Ok (Some probe) ->
+                  let trailing =
+                    Option.map (fun entry -> at rows_read, entry) tail.Dated_jsonl.trailing
+                  in
+                  Read
+                    { index with
+                      files =
+                        SMap.add file.file_path
+                          { observed; cursor; rows_read; complete_until; probe; trailing }
+                          index.files
+                    }))))
   ;;
 
   (* Advance [index] to the store's current end. [Ok (index, refused)]:
@@ -801,6 +852,14 @@ module Recent_index = struct
   ;;
 
   let select index ~refused ~keeper_name ~n =
+    let index =
+      SMap.fold
+        (fun _ (file : file) index ->
+           match file.trailing with
+           | Some (at, entry) -> add_entry index at entry
+           | None -> index)
+        index.files index
+    in
     let bounded, unowned =
       match keeper_name with
       | Some keeper ->

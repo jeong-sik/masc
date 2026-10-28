@@ -154,6 +154,7 @@ let clamped_scroll_now (state : state) = function
   | Link_modal_scroll _ -> Link_modal_scroll state.link_modal_scroll
   | Play_invite_scroll (card, _) -> Play_invite_scroll (card, state.play_invite_scroll)
   | Queue_panel_presented owner -> Queue_panel_presented owner
+  | Help_presented -> Help_presented
   | Voice_scroll _ -> Voice_scroll state.config_scroll
   | Preset_detail_scroll _ -> Preset_detail_scroll (state.config_scroll, None)
   | Keeper_list_scroll _ -> Keeper_list_scroll state.keeper_list_scroll
@@ -204,7 +205,7 @@ let reader_after_wheel (reader : clamped_scroll)
       Some (Patch_modal_scroll (step vertical, horizontal))
   | Link_modal_scroll value -> Some (Link_modal_scroll (step value))
   | Play_invite_scroll (card, value) -> Some (Play_invite_scroll (card, step value))
-  | Queue_panel_presented _ -> None
+  | Queue_panel_presented _ | Help_presented -> None
   | Voice_scroll value -> Some (Voice_scroll (step value))
   | Preset_detail_scroll (value, _) -> Some (Preset_detail_scroll (step value, None))
   | Context_inspector_scroll value ->

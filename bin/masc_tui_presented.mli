@@ -15,6 +15,14 @@ val decide_unpresented_input :
     independently drawn image or machine surface owns it. Protocol replies
     remain observable. A presented compact frame counts as presented. *)
 
+val decide_help_input :
+  external_surface:bool -> presented_help:bool -> current_help:bool ->
+  input_kind -> input_decision
+(** Help owns input only while it is both the presented and current frame.
+    Paste is not an input to Help. During either transition, operator events
+    are rejected; protocol replies and external surfaces keep their own
+    admission rules. *)
+
 type ('approval, 'presses, 'panes, 'reader) t = private {
   approval : 'approval;
   presses : 'presses;

@@ -18380,6 +18380,7 @@ type clamped_scroll =
   | Link_modal_scroll of int
   | Play_invite_scroll of Masc_tui_play_card.t * int
   | Queue_panel_presented of queue_panel_owner
+  | Help_presented
   (* The voice pane and its wizard lay out lines out of two HTTP reads and the
      probe's answers, so their count exists only once the frame is drawn. Both
      drew every line into a fixed budget with no offset, and whatever fell past
@@ -18411,7 +18412,8 @@ let play_card_of_reader = function
          | Repository_changes_diff_scroll _ | Resource_scroll _ | Metrics_scroll _
          | Approval_detail_scroll _ | Patch_modal_scroll _ | Link_modal_scroll _
          | Voice_scroll _ | Preset_detail_scroll _ | Keeper_list_scroll _
-         | Context_inspector_scroll _ | Context_inspector_response_scroll _ | Queue_panel_presented _)
+         | Context_inspector_scroll _ | Context_inspector_response_scroll _ | Queue_panel_presented _
+         | Help_presented)
   | None -> None
 
 let queue_owner_of_reader = function
@@ -18426,8 +18428,23 @@ let queue_owner_of_reader = function
          | Repository_changes_diff_scroll _ | Resource_scroll _ | Metrics_scroll _
          | Approval_detail_scroll _ | Patch_modal_scroll _ | Link_modal_scroll _
          | Play_invite_scroll _ | Voice_scroll _ | Preset_detail_scroll _ | Keeper_list_scroll _
-         | Context_inspector_scroll _ | Context_inspector_response_scroll _)
+         | Context_inspector_scroll _ | Context_inspector_response_scroll _ | Help_presented)
   | None -> None
+
+let help_is_presented = function
+  | Some Help_presented -> true
+  | Some (Task_detail _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _
+         | Keeper_detail _ | Keeper_calls _ | Keeper_logs_scroll _ | Acting _
+         | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
+         | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _
+         | Fusion_detail_scroll _ | Runtime_detail_scroll _ | Runtime_params_scroll _
+         | System_log_detail_scroll _ | Planning_confirmation_scroll _
+         | Planning_detail_scroll _ | Lane_run_detail_scroll _ | Changes_diff_scroll _
+         | Repository_changes_diff_scroll _ | Resource_scroll _ | Metrics_scroll _
+         | Approval_detail_scroll _ | Patch_modal_scroll _ | Link_modal_scroll _
+         | Play_invite_scroll _ | Voice_scroll _ | Preset_detail_scroll _ | Keeper_list_scroll _
+         | Context_inspector_scroll _ | Context_inspector_response_scroll _ | Queue_panel_presented _)
+  | None -> false
 
 (* What End names on a surface whose rows the drawing counts: a row past any
    real end, so the frame's own clamp reports the last one back. The keypress
@@ -18496,7 +18513,7 @@ let apply_clamped_scroll (state : state) = function
       (match play_card_shown state with
        | Some current when current == card -> state.play_invite_scroll <- value
        | Some _ | None -> ())
-  | Queue_panel_presented _ -> ()
+  | Queue_panel_presented _ | Help_presented -> ()
   | Voice_scroll value -> state.config_scroll <- value
   | Preset_detail_scroll (value, _) -> state.config_scroll <- value
   | Keeper_list_scroll value -> state.keeper_list_scroll <- value

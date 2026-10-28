@@ -14,6 +14,16 @@ let decide_unpresented_input ~frame_presented ~external_surface input =
     | Paste -> Reject_paste
     | Protocol -> Accept_input
 
+let decide_help_input ~external_surface ~presented_help ~current_help input =
+  if external_surface then Accept_input
+  else match presented_help, current_help, input with
+    | true, true, Paste -> Reject_paste
+    | true, true, (Action | Protocol)
+    | false, false, (Action | Paste | Protocol) -> Accept_input
+    | (true, false, Action) | (false, true, Action) -> Reject_action
+    | (true, false, Paste) | (false, true, Paste) -> Reject_paste
+    | (true, false, Protocol) | (false, true, Protocol) -> Accept_input
+
 type ('approval, 'presses, 'panes, 'reader) t = {
   approval : 'approval;
   presses : 'presses;

@@ -16,6 +16,27 @@ let () =
   require (decide ~frame_presented:false ~external_surface:true Action = Accept_input
            && decide ~frame_presented:false ~external_surface:true Paste = Accept_input)
     "independently drawn surfaces retain their input policy";
+  let help = Presented.decide_help_input ~external_surface:false in
+  require (help ~presented_help:true ~current_help:true Action = Accept_input
+           && help ~presented_help:true ~current_help:true Paste = Reject_paste
+           && help ~presented_help:true ~current_help:true Protocol = Accept_input)
+    "presented Help owns keys and rejects paste without rejecting protocol";
+  List.iter (fun (presented_help, current_help) ->
+      require (help ~presented_help ~current_help Action = Reject_action
+               && help ~presented_help ~current_help Paste = Reject_paste
+               && help ~presented_help ~current_help Protocol = Accept_input)
+        "both directions of the Help transition reject operator input")
+    [false, true; true, false];
+  require (help ~presented_help:false ~current_help:false Action = Accept_input
+           && help ~presented_help:false ~current_help:false Paste = Accept_input)
+    "non-Help ownership keeps its existing admission";
+  List.iter (fun (presented_help, current_help) ->
+      let external_decision = Presented.decide_help_input ~external_surface:true
+          ~presented_help ~current_help in
+      require (external_decision Action = Accept_input && external_decision Paste = Accept_input
+               && external_decision Protocol = Accept_input)
+        "image and machine surfaces retain their own admission")
+    [false, false; false, true; true, false; true, true];
   let old = Presented.initial ~approval:"old approval" ~presses:"old zones"
       ~panes:"old panes" ~reader:"old reader" in
   let same = Presented.presented old ~approval:"approval" ~presses:"zones"

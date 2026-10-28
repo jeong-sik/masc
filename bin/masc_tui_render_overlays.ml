@@ -774,7 +774,7 @@ let render_help (state : state) =
     Masc_tui_help.sheet ~header ~cols
       (help_lines ~width:(Masc_tui_help.line_cells ~cols) state)
   in
-  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"help"
+  surface_chrome ~overflow:(Self_scrolled (fun () -> Help_presented)) state ~terminal_rows ~cols ~surface_key:"help"
     ~frame:Chrome_overlay
     (* The title says what state the sheet is in; the keys that change it are
        the footer's, which draws h and Esc on this overlay and never drops Esc.

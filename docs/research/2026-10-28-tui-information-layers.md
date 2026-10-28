@@ -214,7 +214,13 @@ detail, a read-only priority refusal, a rejected paste notice and retained chat
 draft in the synthetic terminal. It does not cover the subsequent separate-row
 change, successful server reordering or physical IME input.
 
-The same candidate also exposed a negative ownership case: a synthetic paste
+In a later [synthetic priority observation of 234b647](../evidence/research/tui-information-layers-2026-10-28/populated-fixture/candidate-234b647-priority/README.md),
+the TUI sent the selected message ID with a null interrupt token for `n`, then
+sent move-to-end for `l`, and displayed the fixture's corresponding orders.
+The fixture itself implements those mutations; this does not prove the actual
+server or the later TUI source performs them.
+
+The ab94e60 candidate also exposed a negative ownership case: a synthetic paste
 sent to Help over chat changed the underlying chat draft, while Help over Queue
 rejected it. The later `234b647` candidate reproduced the Help-over-chat case.
 The captures record the composer summary while Help was open and the retained

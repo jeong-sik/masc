@@ -1,0 +1,30 @@
+ 대시보드  작업  ▸키퍼  사용량  보드  워크스페이스  시스템
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ MASC Queue  fixture                                                                              │
+├──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  Queue read · r refreshes                                                                        │
+│  Server confirmed move-to-end: fixture-b                                                         │
+│  Message priority waits for the current turn                                                     │
+│  Local unsent messages · 0                                                                       │
+│  Queue open · busy · 0 pending                                                                   │
+│  Server queued messages · 3                                                                      │
+│    dashboard thread=keeper:fixture · masc-tui: Synthetic fixture-a                               │
+│    dashboard thread=keeper:fixture · masc-tui: Synthetic fixture-c                               │
+│›   dashboard thread=keeper:fixture · masc-tui: Synthetic fixture-b                               │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+  TUI 234b647 ≠ server fixture (generations differ)  ?:help
+ › to fixture   (i to write)

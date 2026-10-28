@@ -239,12 +239,21 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
         | Ok state -> f (Mcp_server.workspace_config state).base_path
         | Error _ -> h2_respond_oauth_error Auth_oauth.Temporarily_unavailable)
     in
+    let with_h2_oauth_authorize_context f =
+      with_h2_oauth (fun () ->
+        match get_server_state_result () with
+        | Ok state ->
+          f
+            ~base_path:(Mcp_server.workspace_config state).base_path
+            ~fetch_client_metadata:(Server_oauth_client_metadata_fetch.of_server_state state)
+        | Error _ -> h2_respond_oauth_error Auth_oauth.Temporarily_unavailable)
+    in
     let h2_respond_oauth_form ?(status = `OK) ?error authorization_request =
       h2_respond_html
         h2_reqd
         (Server_oauth_service.render_authorization_form ?error authorization_request)
         ~status
-        ~extra_headers:Server_oauth_service.authorization_form_headers
+        ~extra_headers:(Server_oauth_service.authorization_form_headers authorization_request)
     in
     let h2_respond_oauth_redirect location =
       h2_respond_empty
@@ -498,7 +507,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
               h2_respond_oauth_form authorization_request)
 
       | `POST, "/oauth/authorize" ->
-          with_h2_oauth_base_path (fun base_path ->
+          with_h2_oauth_authorize_context (fun ~base_path ~fetch_client_metadata ->
             match
               ensure_same_origin_browser_request
                 ~request_authority
@@ -511,6 +520,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                   Server_oauth_service.authorize_post
                     ~base_path
                     ~authority:request_authority
+                    ~fetch_client_metadata
                     ~body
                 with
                 | Error error -> h2_respond_oauth_error error

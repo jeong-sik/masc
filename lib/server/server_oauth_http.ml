@@ -62,10 +62,21 @@ let with_base_path request reqd handler =
   | None -> respond_oauth_error request reqd Auth_oauth.Temporarily_unavailable
 ;;
 
+(* The approval also needs the server's network: an https client_id names a
+   document that has to be fetched. *)
+let with_authorize_context request reqd handler =
+  match Server_routes_http_common.current_server_state_opt () with
+  | Some state ->
+    handler
+      ~base_path:(Mcp_server.workspace_config state).base_path
+      ~fetch_client_metadata:(Server_oauth_client_metadata_fetch.of_server_state state)
+  | None -> respond_oauth_error request reqd Auth_oauth.Temporarily_unavailable
+;;
+
 let respond_authorization_form ?(status = `OK) ?error authorization_request reqd =
   Http.Response.html
     ~status
-    ~headers:Server_oauth_service.authorization_form_headers
+    ~headers:(Server_oauth_service.authorization_form_headers authorization_request)
     (Server_oauth_service.render_authorization_form ?error authorization_request)
     reqd
 ;;
@@ -93,9 +104,15 @@ let handle_authorize_post request reqd =
     with
     | Error error -> Server_auth.respond_auth_error request reqd error
     | Ok () ->
-      with_base_path request reqd (fun base_path ->
+      with_authorize_context request reqd (fun ~base_path ~fetch_client_metadata ->
         read_oauth_body request reqd (fun body ->
-          match Server_oauth_service.authorize_post ~base_path ~authority ~body with
+          match
+            Server_oauth_service.authorize_post
+              ~base_path
+              ~authority
+              ~fetch_client_metadata
+              ~body
+          with
           | Error error -> respond_oauth_error request reqd error
           | Ok (Server_oauth_service.Authorization_redirect location) ->
             respond_redirect location reqd

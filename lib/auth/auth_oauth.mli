@@ -65,7 +65,18 @@ val register_client :
 val find_client :
   base_path:string -> client_id:string -> (client option, error) result
 
-type authorization_request = {
+type client_verification =
+  | Registered_client
+      (** Stored by Dynamic Client Registration; the redirect_uri equals a
+          registered one. *)
+  | Verified_document
+      (** A Client ID Metadata Document was fetched for this request and lists
+          the redirect_uri. *)
+  | Unverified_document
+      (** A document client on the consent form: nothing was fetched, so no
+          code may be issued from this request. *)
+
+type authorization_request = private {
   client_id : string;
   client_name : string option;
   redirect_uri : string;
@@ -73,11 +84,21 @@ type authorization_request = {
   scopes : scope list;
   state : string option;
   code_challenge : string;
+  client_verification : client_verification;
 }
+
+type client_document_check =
+  | Fetch_and_verify of
+      (Auth_oauth_client_metadata.document_url -> (string, string) result)
+      (** Fetch the document and require it to list the redirect_uri. *)
+  | Show_unverified
+      (** Fetch nothing. For the consent form, which any page can make a
+          browser request, so its URL must not make this server fetch. *)
 
 val validate_authorization_request :
   base_path:string ->
   expected_resource:string ->
+  client_document:client_document_check ->
   response_type:string option ->
   client_id:string option ->
   redirect_uri:string option ->
@@ -87,6 +108,14 @@ val validate_authorization_request :
   code_challenge:string option ->
   code_challenge_method:string option ->
   (authorization_request, error) result
+(** A [client_id] that is an https URL names a Client ID Metadata Document
+    (MCP 2026-07-28). Its [redirect_uri] must be a loopback HTTP URI. With
+    [Fetch_and_verify], once the rest of the request checks out, the
+    document is fetched and read with {!Auth_oauth_client_metadata}, and it
+    must list the [redirect_uri], whatever its port. With [Show_unverified]
+    the result is [Unverified_document] and carries no client name. Any other
+    [client_id] must be one Dynamic Client Registration stored, and its
+    [redirect_uri] must equal a registered one. *)
 
 val issue_authorization_code :
   base_path:string ->
@@ -94,7 +123,8 @@ val issue_authorization_code :
   bootstrap_credential:Masc_domain.agent_credential ->
   (string, error) result
 (** Mint a process-local, one-time authorization code.  The bootstrap raw
-    bearer is not accepted by or retained in this function. *)
+    bearer is not accepted by or retained in this function. An
+    [Unverified_document] request is refused. *)
 
 type token_pair = {
   access_token : string;

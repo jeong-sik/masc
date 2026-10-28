@@ -53,6 +53,7 @@ let authorization_server_json authority =
     ; "code_challenge_methods_supported", `List [ `String "S256" ]
     ; "authorization_response_iss_parameter_supported", `Bool true
     ; "token_endpoint_auth_methods_supported", `List [ `String "none" ]
+    ; "client_id_metadata_document_supported", `Bool true
     ; ( "scopes_supported"
       , `List
           (List.map

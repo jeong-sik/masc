@@ -125,6 +125,9 @@ let () =
     "asynchronous entry into search does not authorize typeahead";
   require (before.context_search = None && search.context_search = Some owner)
     "slash records immutable transition provenance";
+  require (Presented.panel_presentation_changed search ~current_owner:(Some Context)
+           && Presented.panel_presentation_changed search ~current_owner:(Some Context_search))
+    "an unpainted editor transition requires presentation even after empty search or cancel";
   require (decide search (Some Context_search) (Some owner) Action = Accept_input
            && decide search (Some Context_search) (Some owner) Paste = Accept_input)
     "explicit search retains query typeahead and paste";
@@ -144,4 +147,11 @@ let () =
            && decide painted (Some Context_search) (Some owner) Action = Accept_input)
     "presentation after query input drains retires the grant";
   require (decide painted (Some Context) (Some owner) Action = Reject_action)
-    "a second Enter cannot open a result before the post-search frame"
+    "a second Enter cannot open a result before the post-search frame";
+  let returned = Presented.presented search ~approval:() ~presses:() ~panes:() ~reader:()
+      ~panel_owner:(Some Context)
+      ~owner_changed:(Presented.panel_presentation_changed search ~current_owner:(Some Context))
+      ~input_pending:true in
+  require (returned.context_search = None
+           && returned.barrier = Held {rejected_input=false; rejected_paste=false})
+    "a transition back to identical Context still quarantines input arriving during output"

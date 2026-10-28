@@ -24218,7 +24218,7 @@ let main
            ~candidate:(queue_owner_of_reader reader)
       || play_owner_authority_changed ~presented:(play_card_of_reader (!presented).reader)
            ~candidate:(play_card_of_reader reader)
-      || not (Option.equal ( = ) (!presented).panel_owner panel_owner)
+      || Presented.panel_presentation_changed !presented ~current_owner:panel_owner
       || ((damaged || Option.is_none (Frame_presenter.presented_rows frame_presenter))
           && (Option.is_some (!presented).panel_owner
               || owned_reader (!presented).reader || owned_reader reader))
@@ -35887,8 +35887,8 @@ and is loaded on demand through keeper_skill.
         | `Queue _ | `Play_card _ | `Account_login _ | `Palette | `Collab _ | `Lane_addons _
         | `Detail_reading _ | `About | `Context | `Keeper_deletions | `Help
         | `Agenda | `Answering | `Patch | `Link | `Client_detail _ | `Surface -> false in
-      let panel_changed = not (Option.equal ( = ) (!presented).panel_owner
-          (Masc_tui_render.panel_input_owner state ~terminal_rows)) in
+      let panel_changed = Presented.panel_presentation_changed !presented
+          ~current_owner:(Masc_tui_render.panel_input_owner state ~terminal_rows) in
       let defer_owned_frame = transition_input_pending && not compact_recovery
         && (owned_frame || Option.is_some (queue_owner_of_reader (!presented).reader)
             || Option.is_some (play_card_of_reader (!presented).reader)

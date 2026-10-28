@@ -2405,8 +2405,6 @@ let context_bindings ~cols (state : state) =
       tabs @ turns
       @ (if state.context_inspector_tab = Inspector.Exact_input
             && Option.is_some state.context_inspector_reading then [b Search "/" "search"] else [])
-      @ (if state.context_inspector_tab = Inspector.Exact_input && state.search_last <> ""
-            then [b Search "n/N" "next/previous match"] else [])
       @ [b Navigate "j/k" (if split then "select or scroll" else "select")]
       @ (if split then [b Navigate "h/l" "pane"] else [])
       @ [b Act "Enter" "open exact"] @ refresh @ [b Meta "Esc" "close"] @ help

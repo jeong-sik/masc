@@ -52,6 +52,9 @@ let panel_owner_matches snapshot ~current_owner ~context_search_owner =
       && context_search_owner = Some owner
   | None -> snapshot.panel_owner = current_owner
 
+let panel_presentation_changed snapshot ~current_owner =
+  snapshot.panel_owner <> current_owner || Option.is_some snapshot.context_search
+
 let decide_snapshot_input snapshot ~external_surface ~current_owner
     ~context_search_owner input =
   if external_surface then Accept_input

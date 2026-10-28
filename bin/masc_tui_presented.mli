@@ -52,6 +52,12 @@ val panel_owner_matches :
   ('a, 'p, 'n, 'r) t -> current_owner:panel_owner option ->
   context_search_owner:context_search_owner option -> bool
 
+val panel_presentation_changed :
+  ('a, 'p, 'n, 'r) t -> current_owner:panel_owner option -> bool
+(** A pending explicit editor transition needs presentation even if it ends
+    on the original panel with identical pixels. It must retire the grant and
+    quarantine any input arriving during output. *)
+
 val decide_snapshot_input :
   ('a, 'p, 'n, 'r) t -> external_surface:bool ->
   current_owner:panel_owner option ->

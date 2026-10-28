@@ -2,7 +2,10 @@ module Chat = Masc_tui_keeper_chat_projection
 
 type intent =
   | Next
+  | Next_without_auto_priority
+  | Run_next of { automatic : bool }
   | Steer_after_interrupt
+  | Steer_without_priority
 
 type item =
   { request : Chat.request
@@ -20,17 +23,39 @@ let length queue = List.length queue.items
 let waiting queue = queue.items
 let cap = 32
 
+let item_keeper item = item.request.Chat.keeper_name
+
+(* A steer can occupy an earlier local slot than its submission. Once a
+   control supersedes that priority, restore this Keeper's submission order
+   without moving another Keeper's slots. *)
+let order_keeper_by_submission queue ~keeper_name =
+  let belongs item = String.equal (item_keeper item) keeper_name in
+  let ordered = List.filter belongs queue.items
+    |> List.stable_sort (fun left right -> Int.compare left.submission_seq right.submission_seq) in
+  let rec replace ordered = function
+    | [] -> []
+    | item :: rest when belongs item ->
+        (match ordered with
+         | next :: remaining -> next :: replace remaining rest
+         | [] -> item :: replace [] rest)
+    | item :: rest -> item :: replace ordered rest in
+  {queue with items=replace ordered queue.items}
+;;
+
 let restore_unsent queue item =
   if List.exists (fun held ->
       String.equal held.request.Chat.request_id item.request.Chat.request_id) queue.items
   then queue
   else
-    { items = item :: queue.items
-    ; next_submission_seq = max queue.next_submission_seq (item.submission_seq + 1)
-    }
+    let restored =
+      { items = item :: queue.items
+      ; next_submission_seq = max queue.next_submission_seq (item.submission_seq + 1)
+      } in
+    match item.intent with
+    | Next_without_auto_priority | Steer_without_priority ->
+        order_keeper_by_submission restored ~keeper_name:(item_keeper item)
+    | Next | Run_next _ | Steer_after_interrupt -> restored
 ;;
-
-let item_keeper item = item.request.Chat.keeper_name
 
 let waiting_for_keeper queue ~keeper_name =
   List.filter (fun item -> String.equal (item_keeper item) keeper_name) queue.items
@@ -72,7 +97,7 @@ let push_steer queue ~submitted_at ~causal_parent_request_id request =
     List.exists
       (fun item ->
         String.equal (item_keeper item) keeper_name
-        && item.intent = Steer_after_interrupt)
+        && (item.intent = Steer_after_interrupt || item.intent = Steer_without_priority))
       queue.items
   then
     Error (Printf.sprintf "a steer is already waiting for Keeper %s" keeper_name)
@@ -167,15 +192,21 @@ let find queue ~request_id =
 
 type queue_position = Front | End
 
+(* The one answer to "may the operator reorder this item locally". A steer holds
+   its place ahead of the line; every other intent follows the line. *)
+let local_order_editable item = match item.intent with
+  | Next | Next_without_auto_priority | Run_next _ | Steer_without_priority -> true
+  | Steer_after_interrupt -> false
+;;
+
 let move queue ~keeper_name ~request_id position =
   match find queue ~request_id with
   | None -> Error "Local queue changed; refresh and select again"
   | Some item when not (String.equal (item_keeper item) keeper_name) ->
     Error "That message belongs to another Keeper"
+  | Some item when not (local_order_editable item) ->
+    Error "A steer retains its place ahead of ordinary messages"
   | Some item ->
-    (match item.intent with
-    | Steer_after_interrupt -> Error "A steer retains its place ahead of ordinary messages"
-    | Next ->
     let same_keeper = waiting_for_keeper queue ~keeper_name in
     let others = List.filter (fun current ->
       not (String.equal current.request.Chat.request_id request_id)) same_keeper in
@@ -183,7 +214,7 @@ let move queue ~keeper_name ~request_id position =
       | End -> others @ [item]
       | Front ->
         let steers, ordinary = List.partition (fun current ->
-          match current.intent with Steer_after_interrupt -> true | Next -> false) others in
+          not (local_order_editable current)) others in
         steers @ (item :: ordinary) in
     let rec rebuild pending = function
       | [] ->
@@ -195,7 +226,7 @@ let move queue ~keeper_name ~request_id position =
            Result.map (fun tail -> replacement :: tail) (rebuild remaining rest))
       | current :: rest -> Result.map (fun tail -> current :: tail) (rebuild pending rest)
     in
-    Result.map (fun items -> {queue with items}) (rebuild reordered queue.items))
+    Result.map (fun items -> {queue with items}) (rebuild reordered queue.items)
 ;;
 
 let move_to_end queue ~keeper_name ~request_id =
@@ -220,12 +251,72 @@ let replace_request queue ~request_id request =
     replace [] queue.items
 ;;
 
+(* Priority remains on the unsent item, so editing, cancellation, suspension,
+   and a preflight refusal cannot leave a separate pending request behind. *)
+let mark_run_next queue ~request_id =
+  let rec replace reversed = function
+    | [] -> Error "queued request is no longer waiting"
+    | item :: rest when String.equal item.request.Chat.request_id request_id ->
+        let intent = match item.intent with
+          | Next | Next_without_auto_priority | Run_next _ -> Run_next {automatic=false}
+          | Steer_after_interrupt | Steer_without_priority -> Steer_after_interrupt in
+        Ok {queue with items=List.rev_append reversed ({item with intent} :: rest)}
+    | item :: rest -> replace (item :: reversed) rest in
+  replace [] queue.items
+;;
+
+(* A real stop or resume supersedes queued run-next priority as well as the
+   sidecar for already submitted requests. Steer remains its own intent. *)
+let clear_run_next_for_keeper queue ~keeper_name =
+  let superseded item =
+    String.equal (item_keeper item) keeper_name
+    && match item.intent with
+       | Run_next _ | Steer_after_interrupt -> true
+       | Next | Next_without_auto_priority | Steer_without_priority -> false in
+  if not (List.exists superseded queue.items) then queue
+  else
+    let items = List.map (fun item ->
+      if not (superseded item) then item
+      else match item.intent with
+        | Run_next _ -> {item with intent=Next_without_auto_priority}
+        | Steer_after_interrupt -> {item with intent=Steer_without_priority}
+        | Next | Next_without_auto_priority | Steer_without_priority -> item) queue.items in
+    order_keeper_by_submission {queue with items} ~keeper_name
+;;
+
+let prepare_for_admission ~automatic item =
+  match item.intent with
+  | Next when automatic -> {item with intent=Run_next {automatic=true}}
+  | Next | Next_without_auto_priority | Run_next _ | Steer_after_interrupt
+  | Steer_without_priority -> item
+;;
+
+(* A new message joins the newest submitted ordinary item. It joins nothing
+   when that item holds run-next priority, or when a steer or a run-next item
+   waits behind it: joining would send the new input ahead of that priority.
+   A steer ahead of it does not matter. *)
 let join_target queue ~keeper_name =
-  waiting_for_keeper queue ~keeper_name
-  |> List.fold_left (fun newest item ->
-       match item.intent, newest with
-       | Steer_after_interrupt, _ -> newest
-       | Next, None -> Some item
-       | Next, Some current when item.submission_seq > current.submission_seq -> Some item
-       | Next, Some _ -> newest) None
+  let waiting = waiting_for_keeper queue ~keeper_name in
+  let is_steer item = match item.intent with
+    | Steer_after_interrupt | Steer_without_priority -> true
+    | Next | Next_without_auto_priority | Run_next _ -> false in
+  let holds_priority item = match item.intent with
+    | Steer_after_interrupt | Steer_without_priority | Run_next _ -> true
+    | Next | Next_without_auto_priority -> false in
+  let newest = List.fold_left (fun newest item ->
+      if is_steer item then newest
+      else match newest with
+        | Some current when item.submission_seq <= current.submission_seq -> newest
+        | Some _ | None -> Some item) None waiting in
+  let rec priority_behind item = function
+    | [] -> false
+    | current :: rest when String.equal current.request.Chat.request_id item.request.Chat.request_id ->
+        List.exists holds_priority rest
+    | _ :: rest -> priority_behind item rest in
+  match newest with
+  | None -> None
+  | Some {intent = Run_next _; _} -> None
+  | Some ({intent = (Next | Next_without_auto_priority); _} as item) ->
+      if priority_behind item waiting then None else Some item
+  | Some {intent = (Steer_after_interrupt | Steer_without_priority); _} -> None
 ;;

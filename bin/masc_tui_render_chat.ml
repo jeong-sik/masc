@@ -4581,11 +4581,15 @@ let render_keeper_message (state : state) =
        band read as five warnings and none stood out. *)
     (* The keys are fitted first and the detail takes what is left, so a
        long preview status loses its tail rather than the keys after it. *)
-    List.iter
-      (fun (row : Masc_tui_answering.chat_activity_row) ->
+    (* The compact activity projection puts the retained-input row first.
+       Its resume key owns that row; the next activity row still advertises
+       folded details using the existing fitting behavior. *)
+    let first_is_held = keeper_input_retained state keeper_name in
+    List.iteri
+      (fun index (row : Masc_tui_answering.chat_activity_row) ->
         let keys = match state.msg_tool_visibility, status_frame.kmsf_source with
           | (Tools_compact | Tools_results), Message_status (_, status)
-            when status.kmsp_folded_count > 0 ->
+            when status.kmsp_folded_count > 0 && not (first_is_held && index = 0) ->
               row.keys ^ " · " ^ Masc_tui_keys.expand_turn_label
           | (Tools_full | Tools_compact | Tools_results), (No_message_status | Message_status _) -> row.keys in
         let lead_room = max 0 (framed_inner_width chat_cols - 2
@@ -4707,7 +4711,8 @@ let render_keeper_message (state : state) =
            if Masc_tui_message_input.length state.msg_input > 0 then
              (match send_disposition state ~keeper_name with
               | Updates _ -> " · Enter:send update; Ctrl-T:queue"
-              | Sends -> " · Enter:send")
+              | Sends -> " · Enter:send"
+              | Queues_until_resume -> " · Enter:queue; /queue resume")
            else ""
          in
          (* The gate and the prompt describe the same held call. Drawn apart,
@@ -4966,6 +4971,14 @@ let render_keeper_message (state : state) =
       in
       match disposition with
       | Updates _ -> queue_hint ()
+      | Queues_until_resume when target_registered ->
+          let full = "Enter:queue  /queue resume" in
+          if Message_layout.display_width full <= max 0 (framed_inner_width chat_cols)
+          then full else "/queue resume"
+      | Queues_until_resume ->
+          if Option.is_some state.keepers_error then
+            "Enter:disabled (roster unavailable)"
+          else "Enter:disabled (Keeper unavailable)"
       | Sends ->
           if target_registered then "Enter:send"
           else if Option.is_some state.keepers_error then
@@ -5110,7 +5123,12 @@ let render_keeper_message (state : state) =
           | Updates _, None when pending_count > 0 ->
               ["Enter:update"; "^T:queue"; "^K:cancel"; "^P:edit"]
           | Updates _, None -> ["Enter:update"]
-          | Sends, _ -> [] in
+          | Queues_until_resume, _ when target_registered ->
+              let full = "Enter:queue  /queue resume" in
+              if Message_layout.display_width full <= max 0 (framed_inner_width chat_cols)
+              then ["Enter:queue"; "/queue resume"]
+              else ["/queue resume"; "Enter:queue"]
+          | Sends, _ | Queues_until_resume, _ -> [] in
         (match context_hints with
          | [] -> Masc_tui_footer.minimal_chat_hints ~max_cells:(max 0 (framed_inner_width chat_cols))
              ~enter_hint ~escape_hint
@@ -5125,7 +5143,7 @@ let render_keeper_message (state : state) =
               | None ->
                   Printf.sprintf "Enter:send (%d local)  Ctrl-T:queue  Ctrl-K:cancel"
                     pending_count)
-          | Sends -> enter_hint
+          | Sends | Queues_until_resume -> enter_hint
         in
         let compact_scroll_hint =
           if scroll = 0 then "PgUp:history" else "PgDn:newest"

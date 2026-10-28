@@ -680,7 +680,8 @@ let test_stop_ack_releases_only_input_after_that_stop () =
   state.keeper_interactive_waiting <- state.keeper_interactive_waiting @
     ["beta", "other-stopped", Tui_types.Retained_after_stop;
      "alpha", "fresh-input", Tui_types.Awaiting_control {generation=acknowledged;target=None}];
-  Tui_types.release_retained_keeper_input state "alpha";
+  let request_ids = Tui_types.retained_keeper_input_ids state "alpha" in
+  Tui_types.release_retained_keeper_input state "alpha" ~request_ids;
   check bool "explicit resume releases only stopped input for its keeper" true
     (state.keeper_interactive_waiting =
       ["alpha", "after-stop", Tui_types.Awaiting_control {
@@ -917,6 +918,409 @@ let preflight_input ?(submission_seq = 0) () =
   {entry with sent_request=request; phase=Tui_types.Turn_preflight item}, item
 ;;
 
+let test_preflight_recovery_retires_only_the_unsent_owner () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  state.msg_target_keeper_name <- Some "alpha";
+  let entry, item = preflight_input () in
+  let older = inflight_with_log ~keeper_name:"alpha" ~started_at:0.
+      [Live.Accepted {admission=Live.Running; queue_length=0; interactive=None}] in
+  state.msg_inflight <- [entry; older];
+  state.msg_live <- Some entry.log;
+  state.msg_history <- [chat_entry ~request_id:item.request.request_id
+    ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator {surface=None}))
+    ~text:item.request.message ~at:1. ()];
+  check bool "finished preflight is recovered" true
+    (Tui_types.recover_failed_keeper_preflight state item.request);
+  check string "original composer text is restored" item.request.message
+    (Masc_tui_message_input.contents state.msg_input);
+  check bool "attachments and references are restored" true
+    (state.msg_attachments = item.request.attachments
+     && state.msg_references = item.request.references);
+  check bool "older streaming request and its live projection remain" true
+    ((match state.msg_inflight with [found] -> found == older | _ -> false)
+     && Option.exists (fun live -> live == older.log) state.msg_live);
+  check bool "a repeated completion cannot restore twice" false
+    (Tui_types.recover_failed_keeper_preflight state item.request);
+  List.iter (fun phase ->
+    let uncertain = {entry with Tui_types.phase} in
+    state.msg_inflight <- [uncertain];
+    check bool "possibly sent input is never recovered" false
+      (Tui_types.recover_failed_keeper_preflight state item.request);
+    check bool "possibly sent owner remains" true
+      (match state.msg_inflight with [found] -> found == uncertain | _ -> false))
+    [Tui_types.Turn_streaming; Tui_types.Turn_reconciling]
+;;
+
+let test_preflight_recovery_rejects_ambiguous_owners () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let first, item = preflight_input () in
+  let second, _ = preflight_input ~submission_seq:1 () in
+  state.msg_inflight <- [first; second];
+  check bool "another preflight prevents unsafe recovery" false
+    (Tui_types.recover_failed_keeper_preflight state item.request);
+  check bool "both owners remain and no input is invented" true
+    ((match state.msg_inflight with [a; b] -> a == first && b == second | _ -> false)
+     && Masc_tui_keeper_chat_queue.is_empty state.msg_queued
+     && Masc_tui_message_input.contents state.msg_input = "")
+;;
+
+let test_priority_recovery_follows_the_unsent_item () =
+  let module Q = Masc_tui_keeper_chat_queue in
+  List.iter (fun automatic ->
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    state.msg_target_keeper_name <- Some "alpha";
+    let entry, item = preflight_input () in
+    let priority = {item with Q.intent=Q.Run_next {automatic}} in
+    let entry = {entry with Tui_types.phase=Tui_types.Turn_preflight priority} in
+    state.msg_inflight <- [entry];
+    state.keeper_run_next_pending <- [item.request];
+    if automatic then state.keeper_auto_priority_pending <- ["alpha", item.request.request_id];
+    check bool "preflight is retained" true
+      (Tui_types.recover_failed_keeper_preflight state item.request);
+    let restored = Option.get (Q.find state.msg_queued ~request_id:item.request.request_id) in
+    check bool "request, priority type and attachment bytes stay together" true
+      (restored = priority && state.keeper_run_next_pending = []
+       && state.keeper_auto_priority_pending = []);
+    let resume = Tui_types.begin_keeper_chat_control ~preserve_input_holds:true
+        ~preserve_priority_requests:true state "alpha" in
+    let request_ids = Tui_types.retained_keeper_input_ids state "alpha" in
+    check bool "owner reading completes" true
+      (Tui_types.finish_keeper_chat_control state "alpha" ~generation:resume);
+    Tui_types.release_retained_keeper_input state "alpha" ~request_ids;
+    check bool "already-active owner preserves priority on local resume" true
+      ((Option.get (Q.find state.msg_queued ~request_id:item.request.request_id)).intent
+       = Q.Run_next {automatic});
+    Tui_types.clear_keeper_priority_requests state "alpha";
+    let controlled = Option.get (Q.find state.msg_queued ~request_id:item.request.request_id) in
+    check bool "confirmed server control supersedes priority without dropping input" true
+      (controlled.intent = Q.Next_without_auto_priority);
+    check bool "auto-next does not recreate that priority at admission" true
+      ((Q.prepare_for_admission ~automatic:true controlled).intent = Q.Next_without_auto_priority))
+    [false; true]
+;;
+
+let test_resume_cannot_release_a_later_preflight_failure () =
+  let module Q = Masc_tui_keeper_chat_queue in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  state.msg_target_keeper_name <- Some "alpha";
+  Masc_tui_message_input.insert state.msg_input "newer draft";
+  let entry, item = preflight_input () in
+  let _, already_held = preflight_input ~submission_seq:1 () in
+  state.msg_queued <- Q.restore_unsent Q.empty already_held;
+  state.keeper_interactive_waiting <-
+    ["alpha", already_held.request.request_id, Tui_types.Retained_before_dispatch;
+     "beta", "beta-held", Tui_types.Retained_after_stop];
+  state.msg_inflight <- [entry];
+  let resume = Tui_types.begin_keeper_chat_control ~preserve_input_holds:true
+      ~preserve_priority_requests:true state "alpha" in
+  let request_ids = Tui_types.retained_keeper_input_ids state "alpha" in
+  check bool "new failure is retained while resume is pending" true
+    (Tui_types.recover_failed_keeper_preflight state item.request);
+  check bool "resume confirmation is current" true
+    (Tui_types.finish_keeper_chat_control state "alpha" ~generation:resume);
+  Tui_types.release_retained_keeper_input state "alpha" ~request_ids;
+  check bool "later failure still requires explicit resume" true
+    (List.mem ("alpha", item.request.request_id, Tui_types.Retained_before_dispatch)
+       state.keeper_interactive_waiting
+     && Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"));
+  check bool "the older hold alone was released; another Keeper is untouched" true
+    (List.exists (fun (name, id, intervention) ->
+       name = "alpha" && id = already_held.request.request_id
+       && match intervention with Tui_types.Awaiting_control _ -> true
+          | Retained_after_stop | Retained_before_dispatch -> false)
+       state.keeper_interactive_waiting
+     && List.mem ("beta", "beta-held", Tui_types.Retained_after_stop)
+          state.keeper_interactive_waiting)
+;;
+
+let test_preflight_first_post_respects_control_epoch () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let path = Tui_decode.Canonical_path.of_path in
+  state.workspace_identity <- Tui_types.Workspace_identity_match;
+  state.server_identity <- Some
+    { Tui_decode.sid_version="test"; sid_binary_commit="test"; sid_binary_commit_age_s=None;
+      sid_base_path=path "/workspace"; sid_masc_root=path "/workspace/.masc";
+      sid_executable_in_worktree=None; sid_state_ready=Some true; sid_uptime=None;
+      sid_sse_clients=None; sid_gc=None; sid_scheduler=None };
+  let entry, item = preflight_input () in
+  let priority = {item with Masc_tui_keeper_chat_queue.intent=
+    Masc_tui_keeper_chat_queue.Run_next {automatic=false}} in
+  let entry = {entry with Tui_types.phase=Tui_types.Turn_preflight priority} in
+  state.msg_target_keeper_name <- Some "alpha";
+  state.msg_inflight <- [entry];
+  check bool "current preflight can start" true
+    (Tui_types.keeper_preflight_dispatch_allowed state item.request);
+  entry.phase <- Tui_types.Turn_streaming;
+  check bool "an already-started owner cannot receive a second start" false
+    (Tui_types.keeper_preflight_dispatch_allowed state item.request);
+  entry.phase <- Tui_types.Turn_preflight priority;
+  let stop = Tui_types.begin_keeper_chat_control state "alpha" in
+  check bool "a stop revokes a still-pending preflight" false
+    (Tui_types.keeper_preflight_dispatch_allowed state item.request);
+  check bool "stop supersedes a preflight priority" true
+    (match entry.phase with
+     | Tui_types.Turn_preflight item ->
+         item.intent = Masc_tui_keeper_chat_queue.Next_without_auto_priority
+     | Turn_streaming | Turn_reconciling -> false);
+  ignore (Tui_types.finish_keeper_chat_control state "alpha" ~generation:stop : bool);
+  check bool "old preflight cannot start after the stop receipt either" false
+    (Tui_types.keeper_preflight_dispatch_allowed state item.request);
+  check bool "the refused preflight is recovered" true
+    (Tui_types.recover_failed_keeper_preflight state item.request);
+  check string "superseded priority does not escape to an ordinary composer" ""
+    (Masc_tui_message_input.contents state.msg_input);
+  let restored = Option.get (Masc_tui_keeper_chat_queue.find state.msg_queued
+    ~request_id:item.request.request_id) in
+  check bool "the original request cannot be auto-promoted after recovery" true
+    ((Masc_tui_keeper_chat_queue.prepare_for_admission ~automatic:true restored).intent
+     = Masc_tui_keeper_chat_queue.Next_without_auto_priority)
+;;
+
+let test_stop_preserves_steer_origin_without_reviving_priority () =
+  let module Q = Masc_tui_keeper_chat_queue in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  state.msg_target_keeper_name <- Some "alpha";
+  let entry, item = preflight_input () in
+  let steer = {item with Q.intent=Q.Steer_after_interrupt;
+    causal_parent_request_id=Some "parent"} in
+  let entry = {entry with Tui_types.phase=Tui_types.Turn_preflight steer} in
+  state.msg_inflight <- [entry];
+  ignore (Tui_types.begin_keeper_chat_control state "alpha" : int);
+  check bool "finished preflight is retained" true
+    (Tui_types.recover_failed_keeper_preflight state item.request);
+  let restored = Option.get (Q.find state.msg_queued ~request_id:item.request.request_id) in
+  check bool "stop keeps the steer and parent while suppressing server priority" true
+    (restored.intent = Q.Steer_without_priority
+     && restored.causal_parent_request_id = Some "parent"
+     && (Q.prepare_for_admission ~automatic:true restored).intent = Q.Steer_without_priority);
+  check string "the steer is not turned into a new composer message" ""
+    (Masc_tui_message_input.contents state.msg_input)
+;;
+
+let test_late_priority_recovery_stays_behind_a_stopped_input () =
+  let module Q = Masc_tui_keeper_chat_queue in
+  List.iter (fun automatic ->
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    state.msg_target_keeper_name <- Some "alpha";
+    let older = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"older stopped" () in
+    let entry, _ = preflight_input () in
+    let queue = match Q.push Q.empty ~submitted_at:1. older with
+      | Ok (queue, _) -> queue | Error detail -> fail detail in
+    let queue = match Q.push queue ~submitted_at:2. entry.sent_request with
+      | Ok (queue, _) -> queue | Error detail -> fail detail in
+    let promoted, waiting = match Q.take queue ~request_id:entry.sent_request.request_id with
+      | Some pair -> pair | None -> fail "new preflight disappeared" in
+    let promoted = {promoted with Q.intent=Q.Run_next {automatic}} in
+    let entry = {entry with Tui_types.phase=Tui_types.Turn_preflight promoted} in
+    state.msg_queued <- waiting;
+    state.msg_inflight <- [entry];
+    state.keeper_interactive_waiting <- ["alpha", older.request_id, Tui_types.Retained_after_stop];
+    let stop = Tui_types.begin_keeper_chat_control state "alpha" in
+    check bool "failed priority preflight is recovered" true
+      (Tui_types.recover_failed_keeper_preflight state entry.sent_request);
+    check (list string) "control restores the earlier stopped item first"
+      [older.request_id; entry.sent_request.request_id]
+      (List.map (fun (item : Q.item) -> item.request.request_id) (Q.waiting state.msg_queued));
+    ignore (Tui_types.finish_keeper_chat_control state "alpha" ~generation:stop : bool);
+    let resume = Tui_types.begin_keeper_chat_control state "alpha" in
+    let request_ids = Tui_types.retained_keeper_input_ids state "alpha" in
+    ignore (Tui_types.finish_keeper_chat_control state "alpha" ~generation:resume : bool);
+    Tui_types.release_retained_keeper_input state "alpha" ~request_ids;
+    (match Tui_types.next_authorized_keeper_input state "alpha" with
+     | Some (item, _) -> check string "resume starts the older stopped input first"
+         older.request_id item.request.request_id
+     | None -> fail "resume did not release the older stopped input"))
+    [false; true]
+;;
+
+let test_admission_pending_tracks_only_the_target_keeper () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let entry, _ = preflight_input () in
+  state.msg_inflight <- [entry];
+  check bool "preflight has no server admission" true
+    (Tui_types.keeper_admission_pending state "alpha");
+  check bool "another Keeper is not blocked" false
+    (Tui_types.keeper_admission_pending state "beta");
+  entry.phase <- Tui_types.Turn_streaming;
+  check bool "the first POST is not itself an admission" true
+    (Tui_types.keeper_admission_pending state "alpha");
+  Tui_types.turn_log_add ~now:2. entry.log ~seq:None
+    (Live.Accepted {admission=Live.Queued; queue_length=1; interactive=None});
+  check bool "a server acceptance releases the admission boundary" false
+    (Tui_types.keeper_admission_pending state "alpha")
+;;
+
+let test_checkpoint_requires_executed_segment_before_release () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let reply = Live.Reply_details {terminal_stream_scope=None; reply="";
+    turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint; turn_ref="trace#1"} in
+  let pending_for deltas =
+    let entry = inflight_with_log ~keeper_name:"alpha" ~started_at:1. deltas in
+    state.msg_inflight <- [entry];
+    Tui_types.keeper_admission_pending state "alpha" in
+  check bool "reply details alone are not completed execution" true (pending_for [reply]);
+  check bool "finish alone is not a checkpoint" true (pending_for [Live.Run_finished]);
+  check bool "started checkpoint without finish is still pending" true
+    (pending_for [Live.Run_started; reply]);
+  check bool "start, checkpoint and finish establish earlier execution" false
+    (pending_for [Live.Run_started; reply; Live.Run_finished]);
+  check bool "a subsequent started segment is not a completed checkpoint" true
+    (pending_for [Live.Run_started; reply; Live.Run_finished; Live.Run_started])
+;;
+
+let test_retained_input_footer_matches_coalescing_and_order () =
+  let module Q = Masc_tui_keeper_chat_queue in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let _, item = preflight_input () in
+  state.msg_queued <- Q.restore_unsent Q.empty item;
+  List.iter (fun (held, expected) ->
+    state.keeper_interactive_waiting <- ["alpha", item.request.request_id, held];
+    check bool "held input is not a join target" true
+      (Option.is_none (Tui_types.joinable_keeper_input state "alpha"));
+    check bool "footer distinguishes local hold from an explicitly stopped item" true
+      (Tui_types.send_disposition state ~keeper_name:"alpha" = expected))
+    [Tui_types.Retained_before_dispatch, Masc_tui_send_disposition.Queues_until_resume;
+     Tui_types.Retained_after_stop, Masc_tui_send_disposition.Sends];
+  state.keeper_interactive_waiting <- ["alpha", item.request.request_id,
+    Tui_types.Retained_before_dispatch];
+  state.msg_recall_replaces <- Some item;
+  check bool "editing that queued item is described as replacement" true
+    (Tui_types.send_disposition state ~keeper_name:"alpha"
+     = Masc_tui_send_disposition.Updates item.request);
+  state.msg_recall_replaces <- None;
+  let later = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"later" () in
+  (match Q.push state.msg_queued ~submitted_at:2. later with
+   | Ok (queue, _) -> state.msg_queued <- queue | Error detail -> fail detail);
+  state.keeper_interactive_waiting <- ("alpha", later.request_id,
+    Tui_types.Awaiting_control {generation=0;target=None}) :: state.keeper_interactive_waiting;
+  check bool "later Enter remains behind the retained input" true
+    (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"));
+  check bool "the later line remains locally queued" true
+    (Q.holds state.msg_queued ~request_id:later.request_id)
+;;
+
+let test_retained_input_is_visible_in_the_chat_footer () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous = Masc_tui_ansi.get_terminal_size () in
+  let set_size size = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
+      cache ~probe:(fun () -> Some size)) in
+  Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+    state.workspace_identity <- Tui_types.Workspace_identity_match;
+    state.local_keepers <- Tui_types.Local_workspace_read;
+    let keeper : Tui_types.keeper = {k_origin=Tui_decode.Persisted_keeper; k_name="alpha";
+      k_paused=false; k_identity=Ok {k_trace_id="trace"; k_created_at=""; k_updated_at=""};
+      k_activity=None} in
+    state.keepers <- [keeper];
+    state.msg_target_keeper_name <- Some "alpha";
+    let _, item = preflight_input () in
+    state.msg_queued <- Masc_tui_keeper_chat_queue.restore_unsent state.msg_queued item;
+    state.keeper_interactive_waiting <- ["alpha", item.request.request_id,
+      Tui_types.Retained_before_dispatch];
+    state.msg_older_exist <- true;
+    Masc_tui_message_input.insert state.msg_input "new input";
+    state.msg_history <- List.init 80 (fun n ->
+      chat_entry ~request_id:(Printf.sprintf "history-%d" n) ~role:Tui_types.Message_local
+        ~text:(Printf.sprintf "earlier local row %d" n) ~at:(float_of_int n) ());
+    List.iter (fun (cols, origin) ->
+      set_size (40, cols);
+      state.msg_origin_display <- origin;
+      List.iter (fun visibility ->
+        state.msg_tool_visibility <- visibility;
+        List.iter (fun hints_visible ->
+          state.hints_visible <- hints_visible;
+          List.iter (fun scroll ->
+            state.msg_scroll <- scroll;
+            let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+            let screen = String.concat "\n" (List.map Masc_tui_theme.strip_sgr
+              frame.Masc_tui_frame_presenter.lines) in
+            if scroll > 0 then check bool "history actually scrolled" true
+              (Astring.String.is_infix ~affix:"reading back" screen);
+            check bool "the retained status keeps its resume command" true
+              (Astring.String.is_infix ~affix:"/queue resume" screen);
+            check bool "the retained status remains understandable" true
+              (Astring.String.is_infix ~affix:"Held" screen)) [0; 5]) [false; true])
+        [Tui_types.Tools_compact; Tui_types.Tools_full])
+      [Masc_tui_message_layout.chat_min_terminal_cols, Masc_tui_message_layout.Origin_bare;
+       28, Origin_bare; 40, Origin_bare; 80, Origin_bare; 140, Origin_inline];
+    let too_narrow = Masc_tui_message_layout.chat_min_terminal_cols - 1 in
+    set_size (40, too_narrow);
+    let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+    let screen = String.concat "\n" (List.map Masc_tui_theme.strip_sgr
+      frame.Masc_tui_frame_presenter.lines) in
+    check bool "below the chat minimum input is replaced by the resize notice" true
+      (Astring.String.is_infix ~affix:"Keeper chat needs" screen))
+;;
+
+let test_unmarked_input_precedes_a_superseded_steer () =
+  let module Q = Masc_tui_keeper_chat_queue in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let first = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"first" () in
+  let steer = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"later steer" () in
+  let queue = match Q.push Q.empty ~submitted_at:1. first with
+    | Ok (queue, _) -> queue | Error detail -> fail detail in
+  let queue = match Q.push_steer queue ~submitted_at:2. ~causal_parent_request_id:"parent" steer with
+    | Ok (queue, _) -> queue | Error detail -> fail detail in
+  state.msg_queued <- Q.clear_run_next_for_keeper queue ~keeper_name:"alpha";
+  state.msg_target_keeper_name <- Some "alpha";
+  state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+  state.keeper_interactive_waiting <- ["alpha", steer.request_id,
+    Tui_types.Awaiting_control {generation=0;target=None}];
+  (match Tui_types.next_authorized_keeper_input state "alpha" with
+   | Some (item, None) -> check string "unmarked earlier input is selected first"
+       first.request_id item.request.request_id
+   | Some (_, Some _) | None -> fail "later steer passed the earlier input");
+  state.coalesce_queued_input <- true;
+  Masc_tui_message_input.insert state.msg_input "draft still being edited";
+  check bool "the generic composer's hold still applies" true
+    (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"));
+  Masc_tui_message_input.clear state.msg_input;
+  state.keeper_interactive_waiting <- ("alpha", first.request_id,
+    Tui_types.Retained_after_stop) :: state.keeper_interactive_waiting;
+  (match Tui_types.next_authorized_keeper_input state "alpha" with
+   | Some (item, _) -> check string "a stopped input remains bypassable by explicit later input"
+       steer.request_id item.request.request_id
+   | None -> fail "the explicit followup was blocked by an older stop")
+;;
+
+let test_stop_holds_existing_unmarked_input () =
+  let module Q = Masc_tui_keeper_chat_queue in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let old = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"old hold" () in
+  let unmarked = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"waiting before stop" () in
+  let other = Keeper_chat.create_request ~keeper_name:"beta" ~message:"other Keeper" () in
+  List.iter (fun request -> match Q.push state.msg_queued ~submitted_at:1. request with
+    | Ok (queue, _) -> state.msg_queued <- queue | Error detail -> fail detail)
+    [old; unmarked; other];
+  state.keeper_interactive_waiting <- ["alpha", old.request_id, Tui_types.Retained_after_stop];
+  let stop = Tui_types.begin_keeper_chat_control state "alpha" in
+  check bool "stop includes the previously unmarked input" true
+    (List.mem ("alpha", unmarked.request_id, Tui_types.Retained_after_stop)
+       state.keeper_interactive_waiting);
+  check bool "another Keeper's unmarked input is untouched" false
+    (List.exists (fun (name, id, _) -> name = "beta" && id = other.request_id)
+       state.keeper_interactive_waiting);
+  ignore (Tui_types.finish_keeper_chat_control state "alpha" ~generation:stop : bool);
+  check bool "the completed stop cannot dispatch earlier input" true
+    (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"));
+  state.keeper_interactive_waiting <- List.filter (fun (_, id, _) -> id <> unmarked.request_id)
+    state.keeper_interactive_waiting;
+  check bool "an unmarked line cannot pass an existing stop hold" true
+    (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"));
+  let fresh = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"new explicit input" () in
+  (match Q.push state.msg_queued ~submitted_at:2. fresh with
+   | Ok (queue, _) -> state.msg_queued <- queue | Error detail -> fail detail);
+  state.keeper_interactive_waiting <- ("alpha", fresh.request_id,
+    Tui_types.Awaiting_control {generation=Tui_types.keeper_chat_control_generation state "alpha";
+      target=None}) :: state.keeper_interactive_waiting;
+  (match Tui_types.next_authorized_keeper_input state "alpha" with
+   | Some (item, _) -> check string "new explicit input may bypass the stop hold"
+       fresh.request_id item.request.request_id
+   | None -> fail "new explicit input stayed blocked")
+;;
+
 let test_withdrawal_restores_only_input_before_the_first_post () =
   let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
   state.msg_target_keeper_name <- Some "alpha";
@@ -1043,7 +1447,8 @@ let test_preflight_local_resume_keeps_fifo_and_respects_server_stop () =
     (Tui_types.can_resume_preflight_keeper_input state "alpha");
   check bool "a failed owner reading does not release input" true
     (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"));
-  Tui_types.release_retained_keeper_input state "alpha";
+  let request_ids = Tui_types.retained_keeper_input_ids state "alpha" in
+  Tui_types.release_retained_keeper_input state "alpha" ~request_ids;
   (match Tui_types.next_authorized_keeper_input state "alpha" with
    | Some (first, _) -> check string "resume dispatches original input first"
        item.request.request_id first.request.request_id
@@ -4795,8 +5200,14 @@ let test_checkpoint_watcher_allows_new_input () =
      Masc_tui_keeper_chat_live.Reply_details {terminal_stream_scope = None; reply=""; turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint; turn_ref="trace#1"};
      Masc_tui_keeper_chat_live.Run_finished];
   check bool "watcher remains attached" true (Option.is_some (Tui_types.inflight_for_keeper state "alpha"));
+  check bool "a completed checkpoint does not wait for a missing acceptance" false
+    (Tui_types.keeper_admission_pending state "alpha");
   check bool "new operator input can be sent" true
-    (Tui_types.send_disposition state ~keeper_name:"alpha" = Masc_tui_send_disposition.Sends)
+    (Tui_types.send_disposition state ~keeper_name:"alpha" = Masc_tui_send_disposition.Sends);
+  let newer, _ = preflight_input () in
+  state.msg_inflight <- newer :: state.msg_inflight;
+  check bool "a newer preflight still waits even with an older checkpoint" true
+    (Tui_types.keeper_admission_pending state "alpha")
 ;;
 
 let test_old_queued_watcher_does_not_rearm_esc () =
@@ -5540,6 +5951,19 @@ let test_status_details_and_fold_counts_reach_the_frame () =
         (Tui_types.keeper_message_status_projection state entry.log.tl_transcript ~now:3.).kmsp_folded_count;
       check bool "compact summary offers hidden rows and expansion" true
         (has_detail "+2" Masc_tui_keys.expand_turn_label);
+      (match Masc_tui_keeper_chat_queue.push state.msg_queued ~submitted_at:2. unsent with
+       | Error detail -> fail detail | Ok (queue, _) -> state.msg_queued <- queue);
+      state.keeper_interactive_waiting <- ["alpha", unsent.request_id,
+        Tui_types.Retained_before_dispatch];
+      set_size (40, 40);
+      let screen = String.concat "\n" (lines ()) in
+      check bool "narrow held status keeps its resume command" true
+        (Astring.String.is_infix ~affix:"/queue resume" screen);
+      check bool "narrow queued activity still offers folded details" true
+        (Astring.String.is_infix ~affix:Masc_tui_keys.expand_turn_label screen);
+      state.msg_queued <- Masc_tui_keeper_chat_queue.empty;
+      state.keeper_interactive_waiting <- [];
+      set_size (40, 160);
       state.msg_turn_folded <- false;
       check bool "unfolded status does not retain hidden count" false
         (List.exists (Astring.String.is_infix ~affix:"+2") (lines ()));
@@ -6372,7 +6796,20 @@ let () =
             test_scroll_pins_follow_live_and_hold_transient_rows ] )
     ; ( "rejected input", [test_case "refusal preserves original input" `Quick test_verified_rejection_is_visible_without_mutating_original_input] )
     ; ( "status ownership",
-        [ test_case "withdrawal restores only input before the first POST" `Quick test_withdrawal_restores_only_input_before_the_first_post
+        [ test_case "failed preflight retires only the unsent owner" `Quick test_preflight_recovery_retires_only_the_unsent_owner
+        ; test_case "ambiguous preflight owners are not recovered" `Quick test_preflight_recovery_rejects_ambiguous_owners
+        ; test_case "priority recovery follows the unsent item" `Quick test_priority_recovery_follows_the_unsent_item
+        ; test_case "resume cannot release later preflight failure" `Quick test_resume_cannot_release_a_later_preflight_failure
+        ; test_case "first POST respects the control epoch" `Quick test_preflight_first_post_respects_control_epoch
+        ; test_case "stop preserves steer origin without reviving priority" `Quick test_stop_preserves_steer_origin_without_reviving_priority
+        ; test_case "late priority recovery stays behind a stopped input" `Quick test_late_priority_recovery_stays_behind_a_stopped_input
+        ; test_case "admission pending is Keeper scoped" `Quick test_admission_pending_tracks_only_the_target_keeper
+        ; test_case "checkpoint release requires an executed segment" `Quick test_checkpoint_requires_executed_segment_before_release
+        ; test_case "retained footer matches coalescing and order" `Quick test_retained_input_footer_matches_coalescing_and_order
+        ; test_case "retained input is visible in the chat footer" `Quick test_retained_input_is_visible_in_the_chat_footer
+        ; test_case "unmarked input precedes a superseded steer" `Quick test_unmarked_input_precedes_a_superseded_steer
+        ; test_case "stop holds existing unmarked input" `Quick test_stop_holds_existing_unmarked_input
+        ; test_case "withdrawal restores only input before the first POST" `Quick test_withdrawal_restores_only_input_before_the_first_post
         ; test_case "preflight recovery keeps newer input and full queue" `Quick test_preflight_recovery_keeps_newer_input_and_a_full_queue
         ; test_case "preflight recovery preserves order and steer intent" `Quick test_preflight_recovery_preserves_order_and_steer_intent
         ; test_case "preflight resume keeps priority intents until a server resume" `Quick test_preflight_resume_keeps_priority_intents_until_server_resume

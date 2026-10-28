@@ -1021,10 +1021,10 @@ let own_typed_messages (state : state) =
            match
              Chat_queue.find state.msg_queued ~request_id:entry.me_request_id
            with
-           | Some item when item.Chat_queue.intent = Chat_queue.Steer_after_interrupt ->
+           | Some item when item.Chat_queue.intent = Chat_queue.Steer_after_interrupt
+                            || item.intent = Chat_queue.Steer_without_priority ->
                (* A steer is command intent, not ordinary chat text. Ctrl-P
-                  restores it with [/steer]; arrow recall must not turn it into
-                  NEXT merely because both have a user-shaped session row. *)
+                  edits the queued request; arrow recall skips its session row. *)
                false
            | Some _ | None -> true)
   in
@@ -8911,6 +8911,13 @@ let run_next_busy_for state keeper_name =
   List.exists same_keeper state.keeper_run_next_pending
   || List.exists same_keeper state.keeper_run_next_ready
   || List.exists same_keeper state.keeper_run_next_inflight
+  || List.exists (fun (item : Chat_queue.item) ->
+       String.equal item.request.keeper_name keeper_name
+       && match item.intent with
+          | Chat_queue.Run_next _ -> true
+          | Chat_queue.Next | Chat_queue.Next_without_auto_priority
+          | Chat_queue.Steer_after_interrupt | Chat_queue.Steer_without_priority -> false)
+       (Chat_queue.waiting state.msg_queued)
 ;;
 
 let queue_run_next_on_admission ?(automatic = false) state request =
@@ -9416,8 +9423,7 @@ let queue_keeper_message state request =
     then None
     else (
       match
-        Chat_queue.join_target state.msg_queued
-          ~keeper_name:request.Keeper_chat.keeper_name
+        joinable_keeper_input state request.Keeper_chat.keeper_name
       with
       | None -> None
       | Some item ->
@@ -9482,37 +9488,41 @@ let launch_waiting_keeper_input state ~mailbox ~keeper_name =
     (* Every Enter send, including one without a control token, waits for the
        previous server acceptance. Concurrent HTTP fibers may otherwise reach
        the durable queue in the opposite order. *)
-    let admission_pending = List.exists (fun (entry : inflight) ->
-      String.equal entry.sent_request.keeper_name keeper_name
-      && Option.is_none (Keeper_chat_transcript.admission entry.log.tl_transcript))
-      state.msg_inflight in
-    if not admission_pending then
+    if not (keeper_admission_pending state keeper_name) then
       let generation = keeper_chat_control_generation state keeper_name in
       let ready = next_authorized_keeper_input state keeper_name in
       match ready with
       | None -> ()
       | Some (item, target) ->
         let request_id = item.Chat_queue.request.request_id in
+        let explicitly_queued = List.exists (fun (name, id, _) ->
+          String.equal name keeper_name && String.equal id request_id)
+          state.keeper_interactive_waiting in
         state.keeper_interactive_waiting <- List.filter (fun (_, id, _) -> id <> request_id)
           state.keeper_interactive_waiting;
         (match Chat_queue.take state.msg_queued ~request_id with
          | None -> ()
          | Some (_, rest) ->
            state.msg_queued <- rest;
+           let promoted =
+             if explicitly_queued then
+               Chat_queue.prepare_for_admission ~automatic:state.user_input_priority_next item
+             else item in
            let admission_intent =
-             match List.assoc_opt keeper_name state.keeper_chat_control_tokens with
-             | Some control_token -> Keeper_chat.Interactive {control_token;target}
-             | None -> Keeper_chat.Queue_only
+             match explicitly_queued, List.assoc_opt keeper_name state.keeper_chat_control_tokens with
+             | true, Some control_token -> Keeper_chat.Interactive {control_token;target}
+             | (true, None) | (false, _) -> Keeper_chat.Queue_only
            in
            (* Both admission intents enter the durable FIFO queue. Automatic
               priority is a separate request, sent only if admission reports
               Queued; a message that started or settled needs no reordering. *)
-           (match item.intent with
+           (match promoted.intent with
             | Chat_queue.Steer_after_interrupt -> queue_run_next_on_admission state item.request
-            | Chat_queue.Next when state.user_input_priority_next ->
-                queue_run_next_on_admission ~automatic:true state item.request
-            | Chat_queue.Next -> ());
-           launch_keeper_request ~promoted:item ~admission_intent
+            | Chat_queue.Run_next {automatic} ->
+                queue_run_next_on_admission ~automatic state item.request
+            | Chat_queue.Next | Chat_queue.Next_without_auto_priority
+            | Chat_queue.Steer_without_priority -> ());
+           launch_keeper_request ~promoted ~admission_intent
              state ~mailbox item.request;
            let next_generation = keeper_chat_control_generation state keeper_name in
            state.keeper_interactive_waiting <- List.map (fun (name, id, intervention) ->
@@ -9540,6 +9550,12 @@ let start_keeper_steer ?keeper_name state ~base_path ~mailbox text =
       report_action state "error"
         (Printf.sprintf "Cannot steer: Keeper %s is unavailable"
            (Keeper_chat.terminal_safe_text keeper_name))
+  | Some keeper_name when keeper_admission_pending state keeper_name ->
+      report_action state "error"
+        "Cannot steer until the earlier admission is observed · draft retained"
+  | Some keeper_name when List.mem_assoc keeper_name state.keeper_chat_control_pending ->
+      report_action state "error"
+        "Cannot steer until the stop or resume is confirmed · draft retained"
   | Some keeper_name -> (
       match inflight_for state keeper_name, live_for_keeper state keeper_name with
       | None, _ | _, None ->
@@ -9565,7 +9581,7 @@ let start_keeper_steer ?keeper_name state ~base_path ~mailbox text =
                clear_current_message_draft state;
                report_action state "message"
                  (Printf.sprintf
-                    "Steer queued for %s after interrupting %s (%d waiting)"
+                    "Steer staged for %s (related request %s; %d waiting); priority requested if queued"
                     (Keeper_chat.terminal_safe_text keeper_name)
                     active_request.Keeper_chat.request_id waiting);
                if run_next_busy_for state keeper_name then
@@ -9657,9 +9673,15 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
                clear_current_message_draft state;
                report_action state "message"
                  (Printf.sprintf "Updated queued %s for %s"
-                    (match editing.Chat_queue.intent with
-                     | Chat_queue.Next -> "NEXT"
-                     | Chat_queue.Steer_after_interrupt -> "STEER")
+                    (match
+                       Option.value
+                         (Option.map (fun item -> item.Chat_queue.intent)
+                            (Chat_queue.find queue ~request_id:request.request_id))
+                         ~default:editing.Chat_queue.intent
+                     with
+                     | Chat_queue.Next | Chat_queue.Next_without_auto_priority -> "NEXT"
+                     | Chat_queue.Run_next _ -> "RUN-NEXT"
+                     | Chat_queue.Steer_after_interrupt | Chat_queue.Steer_without_priority -> "STEER")
                     (Keeper_chat.terminal_safe_text target));
                (* Enter on a recalled retained line explicitly releases that
                   line, while its place among other sendable lines is kept. *)
@@ -9715,13 +9737,21 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
                 List.filter (fun (_, id, _) -> id <> request_id) state.keeper_interactive_waiting;
               clear_current_message_draft state;
               (match List.assoc_opt target state.keeper_chat_control_tokens with
-               | Some _ -> launch_waiting_keeper_input state ~mailbox ~keeper_name:target
+               | Some _ ->
+                 launch_waiting_keeper_input state ~mailbox ~keeper_name:target;
+                 if Chat_queue.holds state.msg_queued ~request_id then
+                   report_action state "info"
+                     "Input retained locally; waiting for earlier input or control"
                | None when List.mem_assoc target state.keeper_chat_control_pending ->
                  report_action state "info" "Input retained; waiting for the stop or resume acknowledgement";
                  launch_keeper_turns_load state ~mailbox
                | None ->
                  launch_waiting_keeper_input state ~mailbox ~keeper_name:target;
-                 report_action state "info" "Message submitted without interruption; refreshing chat controls";
+                 report_action state "info"
+                   (if Chat_queue.holds state.msg_queued ~request_id then
+                      "Input retained locally; waiting for earlier input or control"
+                    else
+                      "Message queued for dispatch without interruption; refreshing chat controls");
                  launch_keeper_turns_load state ~mailbox))))
 
 ;;
@@ -9742,6 +9772,7 @@ let drain_queued_message state ~base_path ~mailbox =
     match
       Chat_queue.take_first_sendable state.msg_queued ~sendable:(fun keeper_name ->
         keeper_available_for_new_message state keeper_name
+        && not (keeper_admission_pending state keeper_name)
         && Option.is_none (inflight_for state keeper_name)
         && not (List.mem_assoc keeper_name state.keeper_chat_control_pending)
         && not (List.exists (fun (name, _, _) -> String.equal name keeper_name)
@@ -9760,8 +9791,11 @@ let drain_queued_message state ~base_path ~mailbox =
              when the operator pressed Enter, so dispatch neither re-reads the
              staged attachments nor mints a second identity for a line the
              conversation already shows. *)
-          if item.intent = Chat_queue.Steer_after_interrupt then
-            queue_run_next_on_admission state request;
+          (match item.intent with
+           | Chat_queue.Steer_after_interrupt -> queue_run_next_on_admission state request
+           | Chat_queue.Run_next {automatic} -> queue_run_next_on_admission ~automatic state request
+           | Chat_queue.Next | Chat_queue.Next_without_auto_priority
+           | Chat_queue.Steer_without_priority -> ());
           launch_keeper_request ~promoted:item state ~mailbox request;
           next ())
         else
@@ -10181,6 +10215,11 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
     | Inbox.Inspect | Inbox.Inspect_peers _ | Inbox.Cancel _ | Inbox.Move_to_end _ | Inbox.Run_next _ | Inbox.Edit (_, _)
     | Inbox.Cancel_event (_, _, _) | Inbox.Prioritize_event (_, _, _)
     | Inbox.Clear -> None in
+  let resume_input_ids = match action with
+    | Inbox.Resume -> retained_keeper_input_ids state keeper_name
+    | Inbox.Inspect | Inbox.Inspect_peers _ | Inbox.Pause | Inbox.Cancel _
+    | Inbox.Move_to_end _ | Inbox.Run_next _ | Inbox.Edit _ | Inbox.Cancel_event _
+    | Inbox.Prioritize_event _ | Inbox.Clear -> [] in
   (* The lines /queue clear asks the server to cancel. Read here, on the fiber
      that owns [state]; the job below only sends. No other action names any. *)
   let clear_targets = match action with
@@ -10237,7 +10276,9 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
         let confirm confirmation =
           if action = Inbox.Resume then
             Option.iter (fun generation ->
-              enqueue_async mailbox (Keeper_queue_resume_confirmed (keeper_name, generation, confirmation)))
+              enqueue_async mailbox
+                (Keeper_queue_resume_confirmed
+                   (keeper_name, generation, confirmation, resume_input_ids)))
               control_generation in
         if not owner_paused then begin
           confirm Owner_already_active;
@@ -12788,17 +12829,43 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       (match state.msg_target_keeper_name with
        | None -> notice ~kind:Notice_failure "Select a Keeper first"
        | Some name ->
-         if run_next_busy_for state name then
+         if List.mem_assoc name state.keeper_chat_control_pending then
+           notice ~kind:Notice_failure "Wait for the pending stop or resume before run-next"
+         else if not (keeper_available_for_new_message state name) then
+           notice ~kind:Notice_failure "Keeper is unavailable; queued input retained"
+         else if recalling_for_keeper state name then
+           notice ~kind:Notice_failure "Finish or abandon the queued edit before run-next"
+         else if run_next_busy_for state name then
            notice ~kind:Notice_reply "A run-next request is already pending"
          else
          match List.nth_opt (Chat_queue.waiting_for_keeper state.msg_queued ~keeper_name:name) 0 with
+         | Some item when keeper_admission_pending state name ->
+           (* Keep the request in its queue position until the earlier POST
+              has an admission. The priority remains attached to this exact
+              item and cancellation or editing updates that intent too. *)
+           let request_id = item.request.Keeper_chat.request_id in
+           (match Chat_queue.mark_run_next state.msg_queued ~request_id with
+            | Error detail -> notice ~kind:Notice_failure detail
+            | Ok queue ->
+              state.msg_queued <- queue;
+              state.keeper_interactive_waiting <-
+                (name, request_id, Awaiting_control {
+                  generation=keeper_chat_control_generation state name; target=None }) ::
+                List.filter (fun (_, id, _) -> id <> request_id) state.keeper_interactive_waiting;
+              notice ~kind:Notice_reply "Run-next retained; waiting for the earlier admission")
          | Some item ->
            (match Chat_queue.take state.msg_queued ~request_id:item.request.request_id with
             | None -> notice ~kind:Notice_failure "Local queue changed; inspect /queue again"
-            | Some (_, rest) ->
+            | Some (taken, rest) ->
               state.msg_queued <- rest;
-              queue_run_next_on_admission state item.request;
-              launch_keeper_request ~promoted:item state ~mailbox item.request;
+              let promoted = match taken.intent with
+                | Chat_queue.Steer_after_interrupt -> taken
+                | Chat_queue.Steer_without_priority ->
+                    {taken with intent=Chat_queue.Steer_after_interrupt}
+                | Chat_queue.Next | Chat_queue.Next_without_auto_priority | Chat_queue.Run_next _ ->
+                    {taken with intent=Chat_queue.Run_next {automatic=false}} in
+              queue_run_next_on_admission state promoted.request;
+              launch_keeper_request ~promoted state ~mailbox promoted.request;
               notice ~kind:Notice_reply "Submitting queued input; it will be prioritized once the server accepts it")
          | None ->
          match inflight_for state name, live_for_keeper state name with
@@ -18940,7 +19007,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         | Chat_search_finished (_, _, _, _) | Workspace_scoped (_, _, _) | Workspace_operation _
         | Chat_command_read_completed (_, _) | Workspace_identity_unconfirmed _
         | Schedule_form_authority_refused _ | Lane_package_catalog_loaded (_, _, _)
-        | Lane_package_preview_loaded (_, _, _) | Keeper_queue_resume_confirmed (_, _, _)
+        | Lane_package_preview_loaded (_, _, _) | Keeper_queue_resume_confirmed (_, _, _, _)
         | Keeper_queue_action_received _
         | Keeper_queue_loaded (_, _, _, _) | Lane_addons_loaded (_, _, _)
         | Lane_application_loaded (_, _) | Lane_subscriptions_loaded (_, _)
@@ -19067,7 +19134,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         | Some (installer,error) ->
             {view with loading=false;installer=Some installer;
               error=Option.bind error lane_addons_detail_failure;scroll=0})
-  | Keeper_queue_resume_confirmed (keeper_name, generation, confirmation) ->
+  | Keeper_queue_resume_confirmed (keeper_name, generation, confirmation, request_ids) ->
       settle_keeper_priority_control state keeper_name ~generation
         ~outcome:(match confirmation with
           | Owner_resumed -> Priority_superseded
@@ -19082,7 +19149,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
             | Some _ | None ->
               chat_notice state ~keeper_name:(Some keeper_name) ~kind:Notice_reply
                 "Keeper is active; retained input released"));
-        release_retained_keeper_input state keeper_name;
+        release_retained_keeper_input state keeper_name ~request_ids;
         launch_waiting_keeper_input state ~mailbox ~keeper_name;
         dispatch_ready_run_next state ~mailbox keeper_name
       end
@@ -20363,7 +20430,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
        | Runtime_form_save_changed _, _ | Keeper_settings_save_changed _, _
        | Keeper_queue_action_received _, _ -> ()
        | (Goal_confirmation_submitted _, Goal_confirmation.Inspecting _)
-       | ((Approvals_listing_superseded | (Surface_composer_released | (Chat_search_finished (_, _, _, _) | (Workspace_scoped (_, _, _) | (Workspace_operation _ | (Chat_command_read_completed (_, _) | (Workspace_identity_unconfirmed _ | (Schedule_form_authority_refused _ | (Lane_package_catalog_loaded (_, _, _) | (Lane_package_preview_loaded (_, _, _) | (Keeper_queue_resume_confirmed (_, _, _) | (Keeper_queue_loaded (_, _, _, _) | (Lane_addons_loaded (_, _, _) | (Lane_application_loaded (_, _) | (Lane_subscriptions_loaded (_, _) | (Lane_declaration_loaded (_, _, _, _, _) | (Keeper_deletions_loaded (_, _) | (Msx_tick_withdrawn (_, _) | (Keeper_deletion_retry_done (_, _) | (Msx_frame_loaded (_, _) | (Msx_activity_loaded (_, _) | (Msx_live_loaded (_, _) | ( Dos_live_loaded (_, _) | ( Voice_wizard_saved (_, _) | ( Voice_agent_voices_loaded _ | ( Voice_agent_voice_saved _ | ( Voice_wizard_probed (_, _) | ( Voice_wizard_reread (_, _) | ( Voice_config_loaded (_, _, _) | ( Voice_calibrated _ | Voice_level _ | ( Voice_transcribed _ | ( Voice_silent _ | ( Voice_discarded _ | ( Voice_failed _ | ( (Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _ | Http_refresh_done _) | ( Http_refresh_failed (_, _, _) | ( Approvals_summary_loaded (_, _, _, _) | ( Http_scoped_refresh_done (_, _, _) | ( Http_scoped_refresh_failed (_, _, _, _, _, _) | ( Board_post_refresh_done (_, _) | ( Approval_decision_done (_, _, _, _, _) | ( Ask_answer_done (_, _, _) | ( Keeper_chat_dispatch_started (_, _, _) | ( Keeper_chat_done (_, _, _, _) | ( Keeper_chat_stream_deltas (_, _) | ( Keeper_chat_stream_unavailable (_, _) | ( Keeper_run_next_done (_, _) | ( Keeper_observed_interrupt_done (_, _, _, _) | ( Keeper_chat_interrupt_done (_, _, _) | ( (Keeper_chat_history_loaded (_, _, _) | Keeper_chat_first_page_loaded (_, _)) | ( Keeper_chat_copy_loaded (_, _, _) | ( Keeper_chat_operation_loaded _ | ( Keeper_chat_journal_loaded _ | ( Keeper_native_tasks_loaded (_, _) | ( Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _) | ( Context_inspector_part_loaded (_, _) | Context_inspector_loaded (_, _, _) | ( Keeper_chat_older_loaded (_, _, _, _) | ( Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | ( Keeper_logs_loaded _ | Keeper_execute_loaded _) | ( Lanes_loaded (_, _) | ( Lane_inventory_loaded (_, _) | ( Clients_loaded (_, _) | ( Lane_runs_loaded (_, _, _, _) | ( Lane_run_detail_loaded (_, _, _) | ( Measurement_artifact_loaded (_, _, _) | ( Verification_loaded _ | ( Harness_loaded _ | ( Fusion_runs_loaded (_, _) | ( Fusion_detail_loaded (_, _, _) | ( Fusion_historical_detail_loaded (_, _, _) | ( Fusion_launch_options_loaded (_, _) | ( Fusion_launched (_, _) | ( Repositories_loaded _ | ( Workspace_activity_loaded (_, _) | ( Memory_loaded _ | ( Memory_input_loaded (_, _) | ( Memory_facts_loaded (_, _) | ( Repository_changes_loaded (_, _) | ( Repository_changes_diff_loaded (_, _) | ( File_changes_loaded (_, _) | ( Keeper_chat_file_changes_loaded (_, _, _) | ( Git_diff_loaded (_, _) | ( Browser_history_list_loaded (_, _) | ( Browser_history_page_loaded (_, _) | ( Browser_lane_clients_loaded (_, _) | ( Browser_lane_loaded (_, _) | ( Browser_lane_action_done (_, _) | ( Browser_lane_scene_loaded (_, _) | ( Browser_lane_follow_loaded (_, _) | ( Browser_lane_screenshot_ready _ | ( (Connectors_status_loaded (_, _) | Connectors_loaded (_, _)) | ( Connector_unbind_all_done _ | ( Runtime_surface_loaded (_, _) | ( Tools_loaded (_, _, _) | ( Skills_catalog_loaded (_, _) | ( Skill_evidence_loaded (_, _, _) | ( (Tools_async_observation_loaded (_, _) | ((Tools_async_detail_loaded _ | Task_document_prepared _) | Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _)) | ( Runtime_lane_slots_written (_, _, _) | ( Runtime_catalog_loaded (_, _) | ( Runtime_assignment_changed (_, _, _) | ( Keeper_chat_approval_answered (_, _, _, _) | ( Keeper_tool_approvals_loaded (_, _, _) | ( Listen_prepared _ | Sent_image_ready _ | ( Image_render_ready _ | ( Keeper_turns_loaded (_, _) | ( Keeper_chat_control_received (_, _, _) | ( Gate_snapshot_loaded (_, _, _) | ( Gate_approval_resolved (_, _, _, _, _) | ( Gate_auto_judge_retried (_, _, _, _) | ( Gate_mode_set (_, _, _) | ( Surface_tool_approval_answered (_, _, _, _, _) | ( Keeper_gate_settings_loaded _ | ( Keeper_tool_modes_loaded (_, _) | ( Keeper_tool_mode_set (_, _, _, _) | ( Keeper_chat_dispatch_blocked (_, _) | ( Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | ( Board_new_post_done _ | ( (Board_vote_done _ | Artifact_check_changed _) | ( Goal_transition_done _ | ( Goal_confirmation_loaded (_, _) | ( Schedules_loaded (_, _) | ( Schedule_wake_history_loaded (_, _) | ( Keeper_schedules_loaded (_, _) | ( System_logs_loaded _ | ( Schedule_cancel_done (_, _) | ( Verification_verdict_done _ | ( Harness_label_done _ | ( Board_attachment_loaded _ | Board_attachment_prepared _ | Board_attachment_saved _ | Chat_call_loaded _ | Keeper_calls_loaded (_, _, _) | ( Goal_timeline_loaded (_, _) | ( Task_history_loaded (_, _) | ( Task_cancel_done (_, _, _) | ( (Verification_evidence_loaded (_, _) | Verification_evidence_exported _) | ( Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _) | ( Keeper_items_loaded (_, _) | ( Keeper_sandbox_view_loaded (_, _) | ( Keeper_sandbox_logs_loaded (_, _, _) | ( Exact_activity_read (_, _) | ( Exact_activity_saved (_, _) | ( Machine_activity_read (_, _) | ( Machine_activity_saved (_, _) | ( Runtime_config_view_loaded (_, _, _, _, _) | ( Runtime_params_loaded _ | ( Runtime_param_written (_, _) | ( Prompts_loaded (_, _) | ( Keeper_board_quarantines_loaded (_, _) | ( Board_quarantine_requeued (_, _, _) | ( Board_quarantines_bulk_progress (_, _, _, _, _, _) | ( Board_quarantines_bulk_requeued (_, _) | ( Presets_listed (_, _) | ( Preset_detail_loaded (_, _) | ( Preset_contents_shown (_, _) | ( Preset_saved (_, _) | ( Preset_restored (_, _) | ( Preset_deleted (_, _) | ( Play_room_received (_, _) | ( Play_invites_listed (_, _) | ( Play_invite_issued (_, _, _) | ( Play_invite_revoked (_, _, _, _) | ( Librarian_input_loaded (_, _) | ( (Resources_listed _ | Artifact_checks_loaded _) | ( Code_draft_saved _ | Code_catalog_loaded (_, _) | Code_finder_file_loaded (_, _) | Code_entries_loaded (_, _) | ( Code_file_loaded (_, _, _) | ( Code_history_loaded (_, _) | ( Code_diff_loaded (_, _) | ( Acting_pane_changes_loaded (_, _) | ( Code_blame_loaded (_, _) | ( Code_lsp_answered (_, _) | ( Resource_exported _ | Resource_share_changed _ | Resource_share_recovery_loaded _ | Resource_read (_,_, _) | Resource_diagram_ready _ | ( Github_identity_view_loaded (_, _) | ( Identity_providers_loaded (_, _, _) | Identity_disconnected (_, _, _) | ( Identity_switch_set (_, _, _, _) | ( Identity_login_started (_, _) | ( Identity_refreshed (_, _) | ( Identity_app_saved (_, _, _) | ( Account_login_event (_, _, _) | ( Account_login_json (_, _, _, _) | ( Account_login_removal (_, _, _, _, _) | ( Github_login_lines (_, _) | ( Github_login_finished (_, _) | ( Github_token_saved (_, _) | ( Observer_opened _ | ( Observer_received (_, _) | ( Observer_closed _ | Fleet_stream_view _ | Fleet_stream_reader_ended _ | ( Task_dispatch_completed _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))), _) -> ());
+       | ((Approvals_listing_superseded | (Surface_composer_released | (Chat_search_finished (_, _, _, _) | (Workspace_scoped (_, _, _) | (Workspace_operation _ | (Chat_command_read_completed (_, _) | (Workspace_identity_unconfirmed _ | (Schedule_form_authority_refused _ | (Lane_package_catalog_loaded (_, _, _) | (Lane_package_preview_loaded (_, _, _) | (Keeper_queue_resume_confirmed (_,_, _, _) | (Keeper_queue_loaded (_, _, _, _) | (Lane_addons_loaded (_, _, _) | (Lane_application_loaded (_, _) | (Lane_subscriptions_loaded (_, _) | (Lane_declaration_loaded (_, _, _, _, _) | (Keeper_deletions_loaded (_, _) | (Msx_tick_withdrawn (_, _) | (Keeper_deletion_retry_done (_, _) | (Msx_frame_loaded (_, _) | (Msx_activity_loaded (_, _) | (Msx_live_loaded (_, _) | ( Dos_live_loaded (_, _) | ( Voice_wizard_saved (_, _) | ( Voice_agent_voices_loaded _ | ( Voice_agent_voice_saved _ | ( Voice_wizard_probed (_, _) | ( Voice_wizard_reread (_, _) | ( Voice_config_loaded (_, _, _) | ( Voice_calibrated _ | Voice_level _ | ( Voice_transcribed _ | ( Voice_silent _ | ( Voice_discarded _ | ( Voice_failed _ | ( (Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _ | Http_refresh_done _) | ( Http_refresh_failed (_, _, _) | ( Approvals_summary_loaded (_, _, _, _) | ( Http_scoped_refresh_done (_, _, _) | ( Http_scoped_refresh_failed (_, _, _, _, _, _) | ( Board_post_refresh_done (_, _) | ( Approval_decision_done (_, _, _, _, _) | ( Ask_answer_done (_, _, _) | ( Keeper_chat_dispatch_started (_, _, _) | ( Keeper_chat_done (_, _, _, _) | ( Keeper_chat_stream_deltas (_, _) | ( Keeper_chat_stream_unavailable (_, _) | ( Keeper_run_next_done (_, _) | ( Keeper_observed_interrupt_done (_, _, _, _) | ( Keeper_chat_interrupt_done (_, _, _) | ( (Keeper_chat_history_loaded (_, _, _) | Keeper_chat_first_page_loaded (_, _)) | ( Keeper_chat_copy_loaded (_, _, _) | ( Keeper_chat_operation_loaded _ | ( Keeper_chat_journal_loaded _ | ( Keeper_native_tasks_loaded (_, _) | ( Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _) | ( Context_inspector_part_loaded (_, _) | Context_inspector_loaded (_, _, _) | ( Keeper_chat_older_loaded (_, _, _, _) | ( Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | ( Keeper_logs_loaded _ | Keeper_execute_loaded _) | ( Lanes_loaded (_, _) | ( Lane_inventory_loaded (_, _) | ( Clients_loaded (_, _) | ( Lane_runs_loaded (_, _, _, _) | ( Lane_run_detail_loaded (_, _, _) | ( Measurement_artifact_loaded (_, _, _) | ( Verification_loaded _ | ( Harness_loaded _ | ( Fusion_runs_loaded (_, _) | ( Fusion_detail_loaded (_, _, _) | ( Fusion_historical_detail_loaded (_, _, _) | ( Fusion_launch_options_loaded (_, _) | ( Fusion_launched (_, _) | ( Repositories_loaded _ | ( Workspace_activity_loaded (_, _) | ( Memory_loaded _ | ( Memory_input_loaded (_, _) | ( Memory_facts_loaded (_, _) | ( Repository_changes_loaded (_, _) | ( Repository_changes_diff_loaded (_, _) | ( File_changes_loaded (_, _) | ( Keeper_chat_file_changes_loaded (_, _, _) | ( Git_diff_loaded (_, _) | ( Browser_history_list_loaded (_, _) | ( Browser_history_page_loaded (_, _) | ( Browser_lane_clients_loaded (_, _) | ( Browser_lane_loaded (_, _) | ( Browser_lane_action_done (_, _) | ( Browser_lane_scene_loaded (_, _) | ( Browser_lane_follow_loaded (_, _) | ( Browser_lane_screenshot_ready _ | ( (Connectors_status_loaded (_, _) | Connectors_loaded (_, _)) | ( Connector_unbind_all_done _ | ( Runtime_surface_loaded (_, _) | ( Tools_loaded (_, _, _) | ( Skills_catalog_loaded (_, _) | ( Skill_evidence_loaded (_, _, _) | ( (Tools_async_observation_loaded (_, _) | ((Tools_async_detail_loaded _ | Task_document_prepared _) | Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _)) | ( Runtime_lane_slots_written (_, _, _) | ( Runtime_catalog_loaded (_, _) | ( Runtime_assignment_changed (_, _, _) | ( Keeper_chat_approval_answered (_, _, _, _) | ( Keeper_tool_approvals_loaded (_, _, _) | ( Listen_prepared _ | Sent_image_ready _ | ( Image_render_ready _ | ( Keeper_turns_loaded (_, _) | ( Keeper_chat_control_received (_, _, _) | ( Gate_snapshot_loaded (_, _, _) | ( Gate_approval_resolved (_, _, _, _, _) | ( Gate_auto_judge_retried (_, _, _, _) | ( Gate_mode_set (_, _, _) | ( Surface_tool_approval_answered (_, _, _, _, _) | ( Keeper_gate_settings_loaded _ | ( Keeper_tool_modes_loaded (_, _) | ( Keeper_tool_mode_set (_, _, _, _) | ( Keeper_chat_dispatch_blocked (_, _) | ( Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | ( Board_new_post_done _ | ( (Board_vote_done _ | Artifact_check_changed _) | ( Goal_transition_done _ | ( Goal_confirmation_loaded (_, _) | ( Schedules_loaded (_, _) | ( Schedule_wake_history_loaded (_, _) | ( Keeper_schedules_loaded (_, _) | ( System_logs_loaded _ | ( Schedule_cancel_done (_, _) | ( Verification_verdict_done _ | ( Harness_label_done _ | ( Board_attachment_loaded _ | Board_attachment_prepared _ | Board_attachment_saved _ | Chat_call_loaded _ | Keeper_calls_loaded (_, _, _) | ( Goal_timeline_loaded (_, _) | ( Task_history_loaded (_, _) | ( Task_cancel_done (_, _, _) | ( (Verification_evidence_loaded (_, _) | Verification_evidence_exported _) | ( Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _) | ( Keeper_items_loaded (_, _) | ( Keeper_sandbox_view_loaded (_, _) | ( Keeper_sandbox_logs_loaded (_, _, _) | ( Exact_activity_read (_, _) | ( Exact_activity_saved (_, _) | ( Machine_activity_read (_, _) | ( Machine_activity_saved (_, _) | ( Runtime_config_view_loaded (_, _, _, _, _) | ( Runtime_params_loaded _ | ( Runtime_param_written (_, _) | ( Prompts_loaded (_, _) | ( Keeper_board_quarantines_loaded (_, _) | ( Board_quarantine_requeued (_, _, _) | ( Board_quarantines_bulk_progress (_, _, _, _, _, _) | ( Board_quarantines_bulk_requeued (_, _) | ( Presets_listed (_, _) | ( Preset_detail_loaded (_, _) | ( Preset_contents_shown (_, _) | ( Preset_saved (_, _) | ( Preset_restored (_, _) | ( Preset_deleted (_, _) | ( Play_room_received (_, _) | ( Play_invites_listed (_, _) | ( Play_invite_issued (_, _, _) | ( Play_invite_revoked (_, _, _, _) | ( Librarian_input_loaded (_, _) | ( (Resources_listed _ | Artifact_checks_loaded _) | ( Code_draft_saved _ | Code_catalog_loaded (_, _) | Code_finder_file_loaded (_, _) | Code_entries_loaded (_, _) | ( Code_file_loaded (_, _, _) | ( Code_history_loaded (_, _) | ( Code_diff_loaded (_, _) | ( Acting_pane_changes_loaded (_, _) | ( Code_blame_loaded (_, _) | ( Code_lsp_answered (_, _) | ( Resource_exported _ | Resource_share_changed _ | Resource_share_recovery_loaded _ | Resource_read (_,_, _) | Resource_diagram_ready _ | ( Github_identity_view_loaded (_, _) | ( Identity_providers_loaded (_, _, _) | Identity_disconnected (_, _, _) | ( Identity_switch_set (_, _, _, _) | ( Identity_login_started (_, _) | ( Identity_refreshed (_, _) | ( Identity_app_saved (_, _, _) | ( Account_login_event (_, _, _) | ( Account_login_json (_, _, _, _) | ( Account_login_removal (_, _, _, _, _) | ( Github_login_lines (_, _) | ( Github_login_finished (_, _) | ( Github_token_saved (_, _) | ( Observer_opened _ | ( Observer_received (_, _) | ( Observer_closed _ | Fleet_stream_view _ | Fleet_stream_reader_ended _ | ( Task_dispatch_completed _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))), _) -> ());
       match result with
       | Ok message ->
           state.goal_action_pending <- None;
@@ -21596,8 +21663,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
             inflight_entry_by_request_id state request.Keeper_chat.request_id
           with
           | Some entry
-            when server_authority_ready state
-                 && Keeper_chat.same_request_identity entry.sent_request request ->
+            when keeper_preflight_dispatch_allowed state request ->
               (* The first POST may happen once this acknowledgement leaves.
                  A later checkpoint/reconnect must never restore a draft. *)
               entry.phase <- Turn_streaming;
@@ -21618,21 +21684,26 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
               proceed := true
           | Some _ | None -> ())
   | Keeper_chat_done (request, _was_replay, result, acknowledge) ->
-      let terminal =
-        match result with
-        | Ok _ -> true
-        | Error error ->
-            Keeper_chat.error_certainty ~was_unverified:false error
-            <> Keeper_chat.Outcome_unverified
-      in
-      if terminal then
-        settle_live_turn state request
-          ~record:(Keeper_chat.operation_record_of_result result);
       let applied =
         Fun.protect
           ~finally:(fun () -> Eio.Promise.resolve acknowledge ())
           (fun () ->
-            apply_keeper_chat_result state request result)
+            match result with
+            | Error _ when recover_failed_keeper_preflight state request ->
+                report_action state "system"
+                  (Printf.sprintf "Keeper request %s was not sent; input retained"
+                     request.request_id);
+                false
+            | Ok _ | Error _ ->
+                let terminal = match result with
+                  | Ok _ -> true
+                  | Error error ->
+                      Keeper_chat.error_certainty ~was_unverified:false error
+                      <> Keeper_chat.Outcome_unverified in
+                if terminal then
+                  settle_live_turn state request
+                    ~record:(Keeper_chat.operation_record_of_result result);
+                apply_keeper_chat_result state request result)
       in
       if applied then begin
         (* A terminal operation has persisted the user row, reply and tool
@@ -22498,17 +22569,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
       (* The POST never left. Nothing durable was written for it, so there is
          nothing to reconcile: say what happened and let the operator send
          again if they want to. *)
-      (match inflight_entry_by_request_id state request.Keeper_chat.request_id with
-       | Some entry when Keeper_chat.same_request_identity entry.sent_request request ->
-           Masc_tui_types.retain_preflight_inputs state [entry]
-       | Some _ | None -> ());
-      (match inflight_by_request_id state request.Keeper_chat.request_id with
-       | Some current when Keeper_chat.same_request_identity current request ->
-           withdraw_undispatched_request state request;
-           report_action state "error"
-             (Printf.sprintf "Keeper request %s was not dispatched: %s"
-                request.request_id detail)
-       | Some _ | None -> ())
+      if recover_failed_keeper_preflight state request then
+        report_action state "error"
+          (Printf.sprintf "Keeper request %s was not dispatched: %s"
+             request.request_id detail)
   | Context_inspector_loaded (generation, keeper_name, reading) ->
       if
         state.context_inspector_open

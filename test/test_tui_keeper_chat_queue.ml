@@ -337,10 +337,166 @@ let test_reorder_preserves_identity_other_keepers_and_steer () =
      middle.request_id; other_last.request_id; last.request_id] (ids original)
 ;;
 
+let test_unsent_priority_stays_with_the_item () =
+  let queue, _ = push_exn Queue.empty ~keeper_name:"alpha" "older" in
+  let queue, _ = push_exn queue ~keeper_name:"alpha" "priority" in
+  let priority = List.nth (Queue.waiting queue) 1 in
+  let request_id = priority.Queue.request.Chat.request_id in
+  let queue = match Queue.mark_run_next queue ~request_id with
+    | Ok queue -> queue | Error detail -> fail detail in
+  check bool "priority cannot be skipped to join an older line" true
+    (Queue.join_target queue ~keeper_name:"alpha" = None);
+  let edited = {priority.request with Chat.message="edited priority"} in
+  let queue = match Queue.replace_request queue ~request_id edited with
+    | Ok queue -> queue | Error detail -> fail detail in
+  let item = Option.get (Queue.find queue ~request_id) in
+  check bool "edit retains explicit priority and queue position" true
+    (item.intent = Queue.Run_next {automatic=false}
+     && messages queue = ["older"; "edited priority"]);
+  let promoted, remaining = match Queue.take queue ~request_id with
+    | Some pair -> pair | None -> fail "priority item disappeared" in
+  let restored = Queue.restore_unsent remaining promoted in
+  check bool "preflight restoration retains the exact priority" true
+    ((Option.get (Queue.find restored ~request_id)).intent = Queue.Run_next {automatic=false});
+  let unaffected = Queue.clear_run_next_for_keeper restored ~keeper_name:"beta" in
+  check bool "another Keeper's control does not clear it" true
+    ((Option.get (Queue.find unaffected ~request_id)).intent = Queue.Run_next {automatic=false});
+  let refused = {promoted with Queue.intent=Queue.Next_without_auto_priority} in
+  let restored_after_stop = Queue.restore_unsent remaining refused in
+  check (list string) "late refused priority returns behind an older input"
+    ["older"; "edited priority"] (messages restored_after_stop);
+  let superseded = Queue.clear_run_next_for_keeper restored ~keeper_name:"alpha" in
+  check bool "a superseding control clears priority without dropping input" true
+    ((Option.get (Queue.find superseded ~request_id)).intent = Queue.Next_without_auto_priority
+     && messages superseded = ["older"; "edited priority"]);
+  let after_control = Option.get (Queue.find superseded ~request_id) in
+  check bool "auto-next does not revive a superseded priority" true
+    ((Queue.prepare_for_admission ~automatic:true after_control).intent
+     = Queue.Next_without_auto_priority);
+  let older = List.nth (Queue.waiting superseded) 0 in
+  check bool "an unpromoted ordinary item uses the policy at admission" true
+    ((Queue.prepare_for_admission ~automatic:true older).intent = Queue.Run_next {automatic=true}
+     && (Queue.prepare_for_admission ~automatic:false older).intent = Queue.Next);
+  let chosen_again = match Queue.mark_run_next superseded ~request_id with
+    | Ok queue -> queue | Error detail -> fail detail in
+  check bool "a new explicit run-next can restore priority" true
+    ((Option.get (Queue.find chosen_again ~request_id)).intent = Queue.Run_next {automatic=false});
+  let _, cancelled = match Queue.take restored ~request_id with
+    | Some pair -> pair | None -> fail "priority item disappeared before cancellation" in
+  check bool "cancellation leaves no queued priority" true
+    (Queue.find cancelled ~request_id = None)
+;;
+
+let test_a_steer_is_not_replaced_by_run_next_or_coalesced_past () =
+  let queue, _ = push_exn Queue.empty ~keeper_name:"alpha" "earlier" in
+  let earlier = List.hd (Queue.waiting queue) in
+  let _, queue = match Queue.take queue ~request_id:earlier.request.request_id with
+    | Some pair -> pair | None -> fail "earlier input disappeared" in
+  let steer = request ~keeper_name:"alpha" "steer" in
+  let queue = match Queue.push_steer queue ~submitted_at:2.
+      ~causal_parent_request_id:"parent" steer with
+    | Ok (queue, _) -> queue | Error detail -> fail detail in
+  let queue = Queue.restore_unsent queue earlier in
+  let queue = match Queue.mark_run_next queue ~request_id:steer.request_id with
+    | Ok queue -> queue | Error detail -> fail detail in
+  let kept = Option.get (Queue.find queue ~request_id:steer.request_id) in
+  check bool "steer retains its causal parent" true
+    (kept.intent = Queue.Steer_after_interrupt
+     && kept.causal_parent_request_id = Some "parent");
+  check bool "coalescing does not reach past the steer" true
+    (Queue.join_target queue ~keeper_name:"alpha" = None);
+  let controlled = Queue.clear_run_next_for_keeper queue ~keeper_name:"alpha" in
+  let kept = Option.get (Queue.find controlled ~request_id:steer.request_id) in
+  check bool "stop preserves steer origin but cancels its priority" true
+    (kept.intent = Queue.Steer_without_priority
+     && kept.causal_parent_request_id = Some "parent"
+     && (Queue.prepare_for_admission ~automatic:true kept).intent = Queue.Steer_without_priority);
+  check bool "a retained steer still prevents a duplicate" true
+    (Result.is_error (Queue.push_steer controlled ~submitted_at:3.
+      ~causal_parent_request_id:"other-parent" (request ~keeper_name:"alpha" "another")));
+  let selected_again = match Queue.mark_run_next controlled ~request_id:steer.request_id with
+    | Ok queue -> queue | Error detail -> fail detail in
+  let kept = Option.get (Queue.find selected_again ~request_id:steer.request_id) in
+  check bool "a new explicit priority preserves the steer parent" true
+    (kept.intent = Queue.Steer_after_interrupt && kept.causal_parent_request_id = Some "parent")
+;;
+
+let test_superseded_steer_returns_to_submission_order () =
+  let queue, _ = push_exn Queue.empty ~keeper_name:"alpha" "first" in
+  let queue, _ = push_exn queue ~keeper_name:"beta" "other" in
+  let queue, _ = push_exn queue ~keeper_name:"alpha" "second" in
+  let steer = request ~keeper_name:"alpha" "later steer" in
+  let priority = match Queue.push_steer queue ~submitted_at:3.
+      ~causal_parent_request_id:"parent" steer with
+    | Ok (queue, _) -> queue | Error detail -> fail detail in
+  check (list string) "the steer initially owns the earlier alpha slot"
+    ["later steer"; "first"; "other"; "second"] (messages priority);
+  let controlled = Queue.clear_run_next_for_keeper priority ~keeper_name:"alpha" in
+  check (list string) "stop restores alpha order and leaves beta's slot"
+    ["first"; "second"; "other"; "later steer"] (messages controlled);
+  let promoted, waiting = match Queue.take priority ~request_id:steer.request_id with
+    | Some pair -> pair | None -> fail "steer preflight disappeared" in
+  let refused = {promoted with Queue.intent=Queue.Steer_without_priority} in
+  let recovered = Queue.restore_unsent waiting refused in
+  check (list string) "late preflight recovery cannot restore the old priority"
+    ["first"; "second"; "other"; "later steer"] (messages recovered);
+  check (option string) "the original parent survives the reorder" (Some "parent")
+    (Option.get (Queue.find recovered ~request_id:steer.request_id)).causal_parent_request_id
+;;
+
 (* Which waiting line a newly typed one joins. The reader types a thought,
    then its correction: both are meant for one turn, and neither has been sent
    -- dispatch takes a line out of the queue -- so joining them changes what
    one turn receives, not what a turn in flight sees. *)
+(* One item per intent, built the way the product builds them, so a sixth
+   intent cannot be added without deciding here whether it may be moved. *)
+let test_only_a_waiting_steer_is_fixed_in_place () =
+  let ok_or_fail = function Ok queue -> queue | Error detail -> fail detail in
+  let id queue text =
+    (List.find (fun (item : Queue.item) -> String.equal item.request.Chat.message text)
+       (Queue.waiting queue)).request.Chat.request_id in
+  let base () =
+    let queue, _ = push_exn Queue.empty ~keeper_name:"alpha" "target" in
+    let queue, _ = push_exn queue ~keeper_name:"alpha" "other" in
+    queue in
+  let editable_after ~name queue =
+    let target = Option.get (Queue.find queue ~request_id:(id queue "target")) in
+    check bool (name ^ ": predicate agrees with move") (Queue.local_order_editable target)
+      (Result.is_ok (Queue.move_to_end queue ~keeper_name:"alpha" ~request_id:target.request.Chat.request_id));
+    Queue.local_order_editable target in
+  check bool "next" true (editable_after ~name:"next" (base ()));
+  let queue = base () in
+  let queue = ok_or_fail (Queue.mark_run_next queue ~request_id:(id queue "target")) in
+  check bool "run next" true (editable_after ~name:"run next" queue);
+  let cleared = Queue.clear_run_next_for_keeper queue ~keeper_name:"alpha" in
+  check bool "next without auto priority" true (editable_after ~name:"cleared" cleared);
+  let steer = request ~keeper_name:"alpha" "target" in
+  let queue = match Queue.push_steer Queue.empty ~submitted_at:1.
+      ~causal_parent_request_id:"parent" steer with
+    | Ok (queue, _) -> queue | Error detail -> fail detail in
+  let queue, _ = push_exn queue ~keeper_name:"alpha" "other" in
+  check bool "steer after interrupt" false (editable_after ~name:"steer" queue);
+  let queue = Queue.clear_run_next_for_keeper queue ~keeper_name:"alpha" in
+  check bool "steer without priority" true (editable_after ~name:"released steer" queue)
+;;
+
+(* A line typed after a run-next item must not join an older line that the
+   run-next item was moved behind: it would be sent ahead of that priority. *)
+let test_a_line_does_not_join_ahead_of_run_next () =
+  let queue, _ = push_exn Queue.empty ~keeper_name:"alpha" "first" in
+  let queue, _ = push_exn queue ~keeper_name:"alpha" "second" in
+  let id text =
+    (List.find (fun (item : Queue.item) -> String.equal item.request.Chat.message text)
+       (Queue.waiting queue)).request.Chat.request_id in
+  let queue = match Queue.mark_run_next queue ~request_id:(id "first") with
+    | Ok queue -> queue | Error detail -> fail detail in
+  let queue = match Queue.move_to_end queue ~keeper_name:"alpha" ~request_id:(id "first") with
+    | Ok queue -> queue | Error detail -> fail detail in
+  check (list string) "the run-next line now waits last" [ "second"; "first" ] (messages queue);
+  check bool "no line to join: the run-next line waits behind it" true
+    (Queue.join_target queue ~keeper_name:"alpha" = None)
+;;
+
 let join_target_cases =
   [ test_case "nothing waiting -> no target" `Quick (fun () ->
         check bool "none" true
@@ -388,6 +544,16 @@ let () =
             test_take_newest_for_keeper_does_not_touch_another_keeper
         ; test_case "reorder preserves identity, Keeper ownership, and steer" `Quick
             test_reorder_preserves_identity_other_keepers_and_steer
+        ; test_case "unsent priority follows its item" `Quick
+            test_unsent_priority_stays_with_the_item
+        ; test_case "steer intent is preserved across priority and coalescing" `Quick
+            test_a_steer_is_not_replaced_by_run_next_or_coalesced_past
+        ; test_case "superseded steer returns to submission order" `Quick
+            test_superseded_steer_returns_to_submission_order
+        ; test_case "only a waiting steer is fixed in place" `Quick
+            test_only_a_waiting_steer_is_fixed_in_place
+        ; test_case "a line does not join ahead of run-next" `Quick
+            test_a_line_does_not_join_ahead_of_run_next
         ] )
     ; ("join_target", join_target_cases)
     ]

@@ -1,6 +1,7 @@
 type 'request t =
   | Sends
   | Updates of 'request
+  | Queues_until_resume
 
 let of_state ~inflight ~waiting =
   match inflight, waiting with

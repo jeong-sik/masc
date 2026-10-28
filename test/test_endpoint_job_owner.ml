@@ -1221,8 +1221,13 @@ let pending_and_published_output_are_distinct_original_observations =
      | None -> Alcotest.fail "published no-child output became pending");
     let receipt=job_leaf fixture binding R.Terminal_receipt in
     let original_bytes=read receipt in
-    Out_channel.with_open_bin receipt (fun channel -> output_string channel "invalid original receipt");
-    Fun.protect ~finally:(fun () -> Out_channel.with_open_bin receipt (fun channel -> output_string channel original_bytes)) (fun () ->
+    let mutate_receipt bytes =
+      Unix.chmod receipt 0o600;
+      Fun.protect ~finally:(fun () -> Unix.chmod receipt 0o400) (fun () ->
+        Out_channel.with_open_bin receipt (fun channel -> output_string channel bytes))
+    in
+    mutate_receipt "invalid original receipt";
+    Fun.protect ~finally:(fun () -> mutate_receipt original_bytes) (fun () ->
       check "historical publication digest does not claim fresh integrity"
         ((Owner.snapshot operation |> owner).progress=Owner.Publication_known digest);
       match Owner.read_output ~sw operation ~stream:P.Stdout ~offset:0L ~max_bytes:64 with

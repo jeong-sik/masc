@@ -281,7 +281,6 @@ val surface_chrome :
   ?frame:chrome_frame ->
   ?status:Masc_tui_footer.status_item list ->
   ?sidebar:(int * (rows:int -> Buffer.t -> unit)) ->
-  ?recovery_at_bottom:bool ->
   Masc_tui_types.state ->
   terminal_rows:int ->
   cols:int ->
@@ -291,7 +290,8 @@ val surface_chrome :
   body:(budget:int -> chrome_body -> unit) ->
   Frame_presenter.frame * Masc_tui_types.clamped_scroll option
 (** [sidebar] reserves its width from [cols] and draws beside the body,
-    above the full-width footer. The body must wrap for the remaining width. *)
+    above the full-width footer. The body must wrap for the remaining width.
+    A complete recovery notice may use the existing bottom row. *)
 
 val connection_badge : Masc_tui_types.state -> string
 

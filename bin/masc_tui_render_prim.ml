@@ -1415,8 +1415,7 @@ let surface_window_height state ~terminal_rows ~count =
     ~chrome:surface_chrome_rows ~count ~preview_keep:None
     ~overflow_takes_row:true
 
-let surface_chrome ~overflow ?(frame = Chrome_screen) ?status ?sidebar
-    ?(recovery_at_bottom = false) (state : state)
+let surface_chrome ~overflow ?(frame = Chrome_screen) ?status ?sidebar (state : state)
     ~terminal_rows ~cols ~surface_key ~title ~hints
     ~(body : budget:int -> chrome_body -> unit) =
   let setup_started = Masc_tui_frame_timing.start_stage () in
@@ -1424,9 +1423,14 @@ let surface_chrome ~overflow ?(frame = Chrome_screen) ?status ?sidebar
   let full_cols = cols in
   let sidebar_cols = match sidebar with None -> 0 | Some (width, _) -> width in
   let cols = cols - sidebar_cols in
-  let recovery_in_slot = match recovery_at_bottom, frame with
-    | true, Chrome_overlay -> recovery_slot state ~max_cells:(framed_rule_width cols)
-    | false, (Chrome_screen | Chrome_overlay) | true, Chrome_screen -> None in
+  (* Measure the row after the sidebar reservation, using the width actually
+     available to each kind of bottom row. The same choice also controls the
+     footer, so an unfitted notice keeps the existing fallback. *)
+  let recovery_in_slot =
+    let max_cells = match frame with
+      | Chrome_overlay -> framed_rule_width cols
+      | Chrome_screen -> framed_inner_width cols in
+    recovery_slot state ~max_cells in
   let buf = Buffer.create 4096 in
   let top, line, line_styled, line_selected, divider, empty, bottom =
     match frame with
@@ -1517,9 +1521,10 @@ let surface_chrome ~overflow ?(frame = Chrome_screen) ?status ?sidebar
   for _ = !used + 1 to budget do
     empty buf cols
   done;
-  (match recovery_in_slot with
-   | None -> bottom buf cols
-   | Some text ->
+  (match recovery_in_slot, frame with
+   | None, (Chrome_screen | Chrome_overlay) -> bottom buf cols
+   | Some text, Chrome_screen -> box_line_styled buf cols ~style:(Theme.warn ()) text
+   | Some text, Chrome_overlay ->
        let remaining = max 0 (framed_rule_width cols - Message_layout.display_width text) in
        Buffer.add_string buf
          (Ansi.gray ^ Ansi.box_bl ^ Ansi.reset ^ Theme.warn () ^ text ^ Ansi.reset

@@ -6,8 +6,7 @@ type t
 type finalized = {
   index : int;
   media_type : string;
-  source_type : Agent_core.Types.media_source_kind;
-  data : string;
+  source : Agent_core.Types.media_source;
 }
 
 type wire_drop = {
@@ -24,8 +23,8 @@ type metadata_drift = {
   index : int;
   expected_media_type : string;
   received_media_type : string;
-  expected_source_type : Agent_core.Types.media_source_kind;
-  received_source_type : Agent_core.Types.media_source_kind;
+  expected_source : Agent_core.Types.media_source;
+  received_source : Agent_core.Types.media_source;
 }
 
 type pending_media
@@ -56,7 +55,8 @@ val enter_stream_scope : t -> int -> t
 
 val on_event : t -> Agent_core.Types.sse_event -> event_result
 val finalize_media : pending_media -> (finalized, int * wire_drop) result
-(** Concatenate one captured block, or retain its index and wire-cap refusal. *)
+(** Return one captured block's accumulated source, or retain its index and
+    wire-cap refusal. *)
 
 val record_completed : t -> completed -> t
 val close_block : t -> int -> t

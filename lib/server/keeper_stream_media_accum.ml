@@ -45,14 +45,14 @@ let on_event ?(stream_scope = 0) t evt =
   | State.Updated state -> t.state <- state
   | State.Metadata_drift
       { index; expected_media_type; received_media_type;
-        expected_source_type; received_source_type } ->
+        expected_source; received_source } ->
       Log.Keeper.warn
         "generated media metadata drift ignored index=%d expected_media_type=%S received_media_type=%S expected_source_type=%s received_source_type=%s"
         index
         expected_media_type
         received_media_type
-        (Agent_core.Types.media_source_kind_to_string expected_source_type)
-        (Agent_core.Types.media_source_kind_to_string received_source_type)
+        (Agent_core.Types.media_source_wire_tag expected_source)
+        (Agent_core.Types.media_source_wire_tag received_source)
   | State.Wire_rejected (index, dropped) ->
       record_oversize_drop t ~index dropped;
       t.state <- State.reject_block t.state index
@@ -99,12 +99,12 @@ let wire_drop_placeholder_block
     ~size_bytes:(Some encoded_bytes)
 
 let persist_failure_placeholder ~media_type ~encoded_bytes = function
-  | Keeper_chat_media_store.Unsupported_source_type source_type ->
+  | Keeper_chat_media_store.Unsupported_source_type source ->
       unavailable_attachment
         ~name:
           (Printf.sprintf
              "generated media unavailable: unsupported source type %s"
-             (Agent_core.Types.media_source_kind_to_string source_type))
+             (Agent_core.Types.media_source_wire_tag source))
         ~media_type
         ~size:(Some (Printf.sprintf "%d wire-carrier bytes observed" encoded_bytes))
         ~size_bytes:(Some encoded_bytes)
@@ -154,10 +154,10 @@ let persisted_block ~media_type media_ref =
 
 let completed_to_chat_block ~base_dir = function
   | State.Wire_dropped dropped -> wire_drop_placeholder_block dropped
-  | State.Persistable { index; media_type; source_type; data } ->
+  | State.Persistable { index; media_type; source } ->
       (match
          Keeper_chat_media_store.persist_media_source_result ~base_dir
-           ~media_type ~source_type ~data
+           ~media_type ~source
        with
        | Ok (_token, media_ref) -> persisted_block ~media_type media_ref
        | Error err ->
@@ -165,11 +165,11 @@ let completed_to_chat_block ~base_dir = function
              "generated media reload persist failed index=%d media_type=%S source_type=%s: %s"
              index
              media_type
-             (Agent_core.Types.media_source_kind_to_string source_type)
+             (Agent_core.Types.media_source_wire_tag source)
              (Keeper_chat_media_store.persist_error_to_string err);
            persist_failure_placeholder
              ~media_type
-             ~encoded_bytes:(String.length data)
+             ~encoded_bytes:(String.length (Agent_core.Types.media_source_payload source))
              err)
 
 let to_chat_blocks ~base_dir t =

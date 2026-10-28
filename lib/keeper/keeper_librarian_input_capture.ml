@@ -65,11 +65,10 @@ let outcome_of_json json = let* kind=tag json in match kind with
     let* failure_kind=failure_kind_of_json (value "failure_kind" f) in
     let+ error_class=option error_class_of_json (value "error_class" f) in A.Tool_failed {failure_kind;error_class}
   | _ -> Error "Unknown captured tool result outcome"
-let media_json : A.media_source_kind -> Yojson.Safe.t = function
-  | Base64 -> `String "base64" | Url -> `String "url" | File_id -> `String "file_id"
-let media_of_json json = let* kind=text json in match kind with
-  | "base64" -> Ok (A.Base64 : A.media_source_kind) | "url" -> Ok (A.Url : A.media_source_kind)
-  | "file_id" -> Ok (A.File_id : A.media_source_kind)
+(* Encoding shares the wire tag; decoding stays exact (no trim or case folding),
+   as this capture format always read it. *)
+let media_of_json json data = let* kind=text json in match kind with
+  | "base64" -> Ok (A.Base64 data) | "url" -> Ok (A.Url data) | "file_id" -> Ok (A.File_id data)
   | _ -> Error "Unknown captured media source"
 let detail_json (detail:A.reasoning_detail) = `Assoc ["raw",detail.raw;"text",optional (fun s -> `String s) detail.text]
 let detail_of_json json = let* f=fields ["raw";"text"] json in
@@ -90,7 +89,7 @@ let rec content_json : A.content_block -> Yojson.Safe.t = function
   | Audio {media_type;source} -> media_content_json "audio" media_type source
 and media_content_json kind media_type source = `Assoc ["kind",`String kind;
   "media_type",`String media_type;"data",`String (A.media_source_payload source);
-  "source_type",media_json (A.media_source_kind_of_source source)]
+  "source_type",`String (A.media_source_wire_tag source)]
 let rec content_of_json json : (A.content_block,string) result =
   let* kind=tag json in match kind with
   | "text" -> let* f=fields ["kind";"text"] json in let+ s=text (value "text" f) in A.Text s
@@ -114,7 +113,7 @@ let rec content_of_json json : (A.content_block,string) result =
   | _ -> Error "Unknown captured content block"
 and media_content_of_json json = let* f=fields ["kind";"media_type";"data";"source_type"] json in
   let* media_type=text (value "media_type" f) in let* data=text (value "data" f) in
-  let+ source_type=media_of_json (value "source_type" f) in media_type,A.media_source_of_kind source_type data
+  let+ source=media_of_json (value "source_type" f) data in media_type,source
 let role_json : A.role -> Yojson.Safe.t = function
   | System -> `String "system" | User -> `String "user" | Assistant -> `String "assistant" | Tool -> `String "tool"
 let role_of_json json = let* s=text json in match s with

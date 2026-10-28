@@ -1,6 +1,6 @@
 (** Keeper_chat_media_store — content-addressed store for model-generated media.
 
-    RFC-0301: AGENT_CORE streams model-generated media as [MediaDelta { media_type; data }];
+    RFC-0301: AGENT_CORE streams model-generated media as [MediaDelta { media_type; source }];
     the keeper-chat bridge persists it here and surfaces it by URL token instead of
     reducing it to a byte count. Generalizes the voice-clip token/serve pattern
     ([/api/v1/voice/audio/<token>]) to an arbitrary [media_type]. Files live under
@@ -10,7 +10,7 @@
     directory-size caps. *)
 
 type persist_error =
-  | Unsupported_source_type of Agent_core.Types.media_source_kind
+  | Unsupported_source_type of Agent_core.Types.media_source
   | Invalid_base64 of string
   | Media_too_large of { size_bytes : int; max_bytes : int }
   | Write_failed of string
@@ -69,6 +69,5 @@ val persist_error_to_string : persist_error -> string
 val persist_media_source_result :
   base_dir:string ->
   media_type:string ->
-  source_type:Agent_core.Types.media_source_kind ->
-  data:string ->
+  source:Agent_core.Types.media_source ->
   (string * string, persist_error) result

@@ -1,7 +1,7 @@
 (** Keeper_chat_media_store — content-addressed store for model-generated media.
 
     RFC-0301: model-generated media (image / audio / document) streamed by AGENT_CORE as
-    [MediaDelta { media_type; data }] is persisted here and surfaced in keeper chat
+    [MediaDelta { media_type; source }] is persisted here and surfaced in keeper chat
     by URL token, instead of being reduced to a byte count at the bridge. This
     generalizes the voice-clip token/serve pattern (RFC-0235:
     [/api/v1/voice/audio/<token>]) to an arbitrary [media_type].
@@ -15,7 +15,7 @@
 let media_subdir = "media"
 
 type persist_error =
-  | Unsupported_source_type of Agent_core.Types.media_source_kind
+  | Unsupported_source_type of Agent_core.Types.media_source
   | Invalid_base64 of string
   | Media_too_large of { size_bytes : int; max_bytes : int }
   | Write_failed of string
@@ -239,9 +239,9 @@ let persist_result ~base_dir ~media_type ~data =
             (Printf.sprintf "persist generated media: %s" (Printexc.to_string exn))
 
 let persist_error_to_string = function
-  | Unsupported_source_type source_type ->
+  | Unsupported_source_type source ->
       Printf.sprintf "unsupported media source_type: %s"
-        (Agent_core.Types.media_source_kind_to_string source_type)
+        (Agent_core.Types.media_source_wire_tag source)
   | Invalid_base64 msg ->
       "invalid base64 media payload: " ^ msg
   | Media_too_large { size_bytes; max_bytes } ->
@@ -251,17 +251,16 @@ let persist_error_to_string = function
   | Write_failed msg ->
       "failed to persist generated media: " ^ msg
 
-let raw_data_of_source ~source_type ~data =
-  match (source_type : Agent_core.Types.media_source_kind) with
-  | Agent_core.Types.Base64 -> (
+let raw_data_of_source = function
+  | Agent_core.Types.Base64 data -> (
       match Base64.decode data with
       | Ok raw -> Ok raw
       | Error (`Msg msg) -> Error (Invalid_base64 msg))
-  | Agent_core.Types.Url | Agent_core.Types.File_id ->
-      Error (Unsupported_source_type source_type)
+  | (Agent_core.Types.Url _ | Agent_core.Types.File_id _) as source ->
+      Error (Unsupported_source_type source)
 
-let persist_media_source_result ~base_dir ~media_type ~source_type ~data =
-  match raw_data_of_source ~source_type ~data with
+let persist_media_source_result ~base_dir ~media_type ~source =
+  match raw_data_of_source source with
   | Error err -> Error err
   | Ok raw ->
       (match validate_raw_size raw with

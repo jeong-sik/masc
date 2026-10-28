@@ -2,10 +2,7 @@ let schema = "masc.official-client-context-message.v3"
 
 let media_source_to_json ~media_type ~source =
   `Assoc
-    [ ( "type"
-      , `String
-          (Agent_core.Types.media_source_kind_to_string
-             (Agent_core.Types.media_source_kind_of_source source)) )
+    [ "type", `String (Agent_core.Types.media_source_wire_tag source)
     ; "media_type", `String media_type
     ; "data", `String (Agent_core.Types.media_source_payload source)
     ]

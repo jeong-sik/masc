@@ -645,10 +645,10 @@ let document_block_to_agent_core ~attachments media =
    named is passed through, else the generic unknown this module already uses.
    Nothing here fetches the reference — the provider resolves it or visibly
    rejects it. *)
-let image_reference_to_agent_core ~source_type (reference : user_image_reference) =
+let image_reference_to_agent_core (reference : user_image_reference) source =
   Agent_core.Types.image_block
     ~media_type:(Option.value reference.mime_type ~default:"application/octet-stream")
-    ~source:(Agent_core.Types.media_source_of_kind source_type reference.value)
+    ~source
 
 let to_agent_core_blocks ~attachments blocks =
   let rec loop acc = function
@@ -671,15 +671,15 @@ let to_agent_core_blocks ~attachments blocks =
     | User_image (Url_ref reference) :: rest ->
         loop
           (image_reference_to_agent_core
-             ~source_type:Agent_core.Types.Url
              reference
+             (Agent_core.Types.Url reference.value)
            :: acc)
           rest
     | User_image (File_id_ref reference) :: rest ->
         loop
           (image_reference_to_agent_core
-             ~source_type:Agent_core.Types.File_id
              reference
+             (Agent_core.Types.File_id reference.value)
            :: acc)
           rest
     | User_document media :: rest -> (

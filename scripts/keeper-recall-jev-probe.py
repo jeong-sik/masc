@@ -15,7 +15,8 @@ refused single candidate is reported as too large and the run goes on.
 It reports the size of every request, whether Jev accepted it, how long it took,
 the input tokens Jev counted, the model id that answered, and, with
 ``--repeat``, how many candidates got a different label on a repeat of the
-identical input.
+identical input and how often the set of selected candidates (needed or
+maybe_needed) was the same between two runs.
 
 Nothing is sent unless ``--send`` and ``--allow-send-for <keeper>`` are given.
 The facts are real Keeper memory and leave this machine for api.typesafe.ai.
@@ -35,6 +36,7 @@ import argparse
 import concurrent.futures
 import datetime
 import hashlib
+import itertools
 import json
 import os
 import sys
@@ -47,6 +49,7 @@ ENDPOINT = "https://api.typesafe.ai/v1/systemone"
 KEY_ENV = "TYPESAFEAI_API_KEY"
 CAPACITY_ERROR_TYPE = "max_tokens_exceeded"
 LABELS = ("needed", "maybe_needed", "not_needed")
+SELECTED_LABELS = ("needed", "maybe_needed")
 LABEL_MEANINGS = {
     "needed": "The turn is likely to use this memory.",
     "maybe_needed": "The memory may matter but the evidence is unclear.",
@@ -241,6 +244,75 @@ def refuse_unless_allowed(path: str, allowed: str, runtime_toml: str) -> str | N
     return None
 
 
+def mean_text(values: list[float]) -> str:
+    return f"{sum(values) / len(values):.2f}" if values else "-"
+
+
+def probability_text(answer: dict[str, object]) -> str:
+    """The answer's probability of each label, in LABELS order."""
+    probabilities = as_dict(answer.get("probabilities"))
+    return "/".join(f"{as_float(probabilities[label]):.2f}" if label in probabilities else "-" for label in LABELS)
+
+
+def repeat_report(candidates: list[dict[str, object]], runs: list[dict[str, dict[str, object]]]) -> list[str]:
+    """How the answers to identical requests differ between runs. Needs at least two runs."""
+    counts = {label: sum(1 for run in runs for answer in run.values() if answer.get("choice") == label) for label in LABELS}
+    lines = [f"label counts over {len(runs)} runs: {counts}"]
+    labels: dict[str, list[str]] = {}
+    confidences: dict[str, list[float]] = {}
+    probabilities: dict[str, list[str]] = {}
+    for candidate in candidates:
+        question_id = as_str(candidate.get("question_id"))
+        if all(question_id in run for run in runs):
+            labels[question_id] = [as_str(run[question_id].get("choice")) for run in runs]
+            confidences[question_id] = [as_float(run[question_id].get("confidence")) for run in runs]
+            probabilities[question_id] = [probability_text(run[question_id]) for run in runs]
+    if not labels:
+        return lines
+    changed = [question_id for question_id, seen in labels.items() if len(set(seen)) > 1]
+    lines.append(
+        f"of {len(labels)} candidates judged in every run, the label changed between runs for {len(changed)} "
+        f"({100 * len(changed) / len(labels):.1f}%)"
+    )
+    lines.append(f"mean reported confidence {mean_text([value for values in confidences.values() for value in values])}")
+    lines.append(
+        "mean reported confidence of the changed candidates "
+        f"{mean_text([value for question_id in changed for value in confidences[question_id]])}, of the others "
+        f"{mean_text([value for question_id, values in confidences.items() if question_id not in changed for value in values])}"
+    )
+    if changed:
+        means = {question_id: sum(values) / len(values) for question_id, values in confidences.items()}
+        ceiling = max(means[question_id] for question_id in changed)
+        unchanged = [question_id for question_id in labels if question_id not in changed]
+        lines.append(
+            f"unchanged candidates with a mean confidence at or below {ceiling:.2f}, the highest mean among the changed: "
+            f"{sum(1 for question_id in unchanged if means[question_id] <= ceiling)} of {len(unchanged)}"
+        )
+    known = {question_id: seen for question_id, seen in labels.items() if all(label in LABELS for label in seen)}
+    if len(known) < len(labels):
+        lines.append(f"{len(labels) - len(known)} candidates had an answer outside the three labels in some run and are left out below")
+    if known:
+        selected_sets = [
+            frozenset(question_id for question_id, seen in known.items() if seen[index] in SELECTED_LABELS)
+            for index in range(len(runs))
+        ]
+        pairs = list(itertools.combinations(range(len(runs)), 2))
+        same = sum(1 for first, second in pairs if selected_sets[first] == selected_sets[second])
+        always = sum(1 for seen in known.values() if all(label in SELECTED_LABELS for label in seen))
+        ever = sum(1 for seen in known.values() if any(label in SELECTED_LABELS for label in seen))
+        lines.append(f"selected (needed or maybe_needed) in every run: {always}, in at least one run: {ever}")
+        lines.append(
+            f"selected sets: {len(set(selected_sets))} distinct over {len(runs)} runs, "
+            f"identical in {same} of {len(pairs)} run pairs ({100 * same / len(pairs):.1f}%)"
+        )
+    lines.extend(
+        f"  changed: {question_id} labels {labels[question_id]} confidence {[f'{value:.2f}' for value in confidences[question_id]]} "
+        f"probabilities ({'/'.join(LABELS)}) {probabilities[question_id]}"
+        for question_id in changed
+    )
+    return lines
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("memory_current", help="a <keeper>.memory-current.json file")
@@ -288,28 +360,8 @@ def main() -> int:
 
     if len(runs) < 2:
         return 0
-    flips = 0
-    changed: list[str] = []
-    judged_every_run = 0
-    confidences: list[float] = []
-    for candidate in candidates:
-        question_id = as_str(candidate.get("question_id"))
-        if not all(question_id in run for run in runs):
-            continue
-        judged_every_run += 1
-        labels = [as_str(run[question_id].get("choice")) for run in runs]
-        if len(set(labels)) > 1:
-            flips += 1
-            reported = [f"{as_float(run[question_id].get('confidence')):.2f}" for run in runs]
-            changed.append(f"  changed: {question_id} labels {labels} confidence {reported}")
-        confidences.extend(as_float(run[question_id].get("confidence")) for run in runs)
-    counts = {label: sum(1 for run in runs for answer in run.values() if answer.get("choice") == label) for label in LABELS}
-    print(f"label counts over {len(runs)} runs: {counts}")
-    if judged_every_run:
-        print(f"of {judged_every_run} candidates judged in every run, the label changed between runs for {flips} ({100 * flips / judged_every_run:.1f}%)")
-        print(f"mean reported confidence {sum(confidences) / len(confidences):.2f}")
-        for line in changed:
-            print(line)
+    for line in repeat_report(candidates, runs):
+        print(line)
     return 0
 
 

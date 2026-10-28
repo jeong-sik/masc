@@ -612,10 +612,6 @@ let protect_recovered_paste_for_current_keeper state =
 
 (* Put the pasted text back into the draft where its placeholder stands.
 
-   Used when the draft is put away -- a saved draft has to stand on its own,
-   and a placeholder whose text went with the composer would be sent as a
-   sentence about a paste instead of the paste.
-
    The spill is dropped whether or not its line was still there. An operator
    who deleted the placeholder meant to drop the paste, and a spill that
    outlived the draft would attach itself to the next message. *)
@@ -881,13 +877,7 @@ let open_message_for_keeper ?(return_to = Keeper_chat_return_detail)
     keeper_name ~drain_queue =
   retire_keeper_message_search state;
   state.keeper_navigation_open <- false;
-  (* The paste goes back into the draft before the draft is put away. A spill
-     lives with the composer; a saved draft has to stand on its own, and a
-     placeholder without its text would reach the keeper as a sentence about a
-     paste instead of the paste. *)
-  (let materialised = materialise_spilled_paste state (Masc_tui_message_input.contents state.msg_input) in
-   Masc_tui_message_input.clear state.msg_input;
-   Masc_tui_message_input.insert state.msg_input materialised);
+  (* Save the placeholder and its spill together under this draft's owner. *)
   save_message_draft state;
   (* Re-entering the same Keeper is a fresh reading too: another process may
      have written files while this pane was elsewhere. Compact mode still
@@ -906,6 +896,9 @@ let open_message_for_keeper ?(return_to = Keeper_chat_return_detail)
   if state.workspace_identity <> Workspace_identity_unread then
     state.msg_unconfirmed_workspace <- None;
   state.opening_notice <- None;
+  (* Transfer draft ownership before starting the chat-visit effect, which can
+     observe cancellation. The old Keeper's spill must never follow target. *)
+  restore_message_draft state keeper_name;
   (if remember_home_chat then
        (match Keeper_id.Keeper_name.of_string keeper_name with
         | Error reason ->
@@ -919,7 +912,6 @@ let open_message_for_keeper ?(return_to = Keeper_chat_return_detail)
   state.msg_return <- return_to;
   state.keeper_message_focus <- Right_pane;
   select_keeper_name_with state.keepers state keeper_name;
-  restore_message_draft state keeper_name;
   drain_queue ()
 
 (* Leaving puts the draft away, and a line held only for that compose
@@ -14495,7 +14487,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.msg_journal_wanted <- [];
   state.msg_journal_unavailable <- [];
   state.msg_journal_reads_refused <- false;
-  (* Save the captured text before releasing the spill. If an earlier
+  (* Save the captured draft before releasing the spill. If an earlier
      withdrawal effect fails, the original composer still owns the paste. *)
   save_message_draft_snapshot ~workspace:previous state ~text:draft;
   state.msg_spill <- None;
@@ -15068,9 +15060,8 @@ let apply_confirmed_server_identity_reading state ~mailbox reading =
          | None, _ | Some _, Workspace_identity_mismatch _ -> false
     in
     let target = state.msg_target_keeper_name in
-    let draft =
-      inline_spilled_paste state (Masc_tui_message_input.contents state.msg_input)
-    in
+    let draft = Masc_tui_message_input.contents state.msg_input in
+    let spill = message_spill_in_text state draft in
     let attachments = state.msg_attachments and references = state.msg_references in
     let since = state.msg_attachments_since and queue = state.msg_queued in
     let recall_walk = state.msg_recall_walk in
@@ -15127,7 +15118,8 @@ let apply_confirmed_server_identity_reading state ~mailbox reading =
       state.view <- Keepers Keeper_message;
       state.composer_focused <- focused;
       Masc_tui_message_input.clear state.msg_input;
-      Masc_tui_message_input.insert state.msg_input draft;
+      Masc_tui_message_input.insert state.msg_input
+        (expand_message_draft_spill spill draft);
       (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_attachments <- attachments);
       (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_references <- references);
       state.msg_attachments_since <- since;

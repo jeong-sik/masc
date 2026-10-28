@@ -434,14 +434,14 @@ it('toggles per-artifact opt-in external sharing from the authenticated reader',
   fireEvent.click(await reader.findByRole('button', { name: '외부 공유 켜기' }))
   const headers = { 'x-masc-expected-base-path': '/workspace-a', 'x-masc-expected-masc-root': '/workspace-a/.masc' }
   const expected_workspace = { base_path: '/workspace-a', masc_root: '/workspace-a/.masc' }
-  await waitFor(() => expect(post).toHaveBeenCalledWith('/api/v1/published-artifact-shares', expect.objectContaining({ id: firstId, shared: true, expected_version: 0, operation_id: expect.any(String), expected_workspace }), headers))
+  await waitFor(() => expect(post).toHaveBeenCalledWith('/api/v1/published-artifact-shares', expect.objectContaining({ id: firstId, shared: true, expected_version: 0, operation_id: expect.any(String), expected_workspace }), headers, 30_000, undefined, true))
   await waitFor(() => expect(copyToClipboard).toHaveBeenCalledWith(
     `${window.location.origin}/dashboard/#/workspace?section=artifacts&artifact=${firstId}&revision=2`,
     screen.getByRole('dialog'),
   ))
   expect(await reader.findByRole('button', { name: '외부 공유 해제' })).toBeTruthy()
   fireEvent.click(reader.getByRole('button', { name: '외부 공유 해제' }))
-  await waitFor(() => expect(post).toHaveBeenCalledWith('/api/v1/published-artifact-shares', expect.objectContaining({ id: firstId, shared: false, expected_version: 1, operation_id: expect.any(String), expected_workspace }), headers))
+  await waitFor(() => expect(post).toHaveBeenCalledWith('/api/v1/published-artifact-shares', expect.objectContaining({ id: firstId, shared: false, expected_version: 1, operation_id: expect.any(String), expected_workspace }), headers, 30_000, undefined, true))
   expect(await reader.findByRole('button', { name: '외부 공유 켜기' })).toBeTruthy()
 })
 
@@ -669,8 +669,31 @@ it('offers an already retained operation after a new reader is mounted', async (
   fireEvent.click(within(pendingRow).getByRole('button', { name: '같은 요청 확인' }))
   await waitFor(() => expect(post).toHaveBeenCalledWith('/api/v1/published-artifact-shares', expect.objectContaining({
     id: firstId, operation_id: operation.operationId, expected_version: 0, shared: true,
-  }), expect.any(Object)))
+  }), expect.any(Object), 30_000, undefined, true))
   await waitFor(() => expect(Array.from(screen.getByRole('dialog').querySelectorAll('p')).some(item => item.textContent?.includes(firstId) && item.textContent.includes('결과 미확인'))).toBe(false))
+})
+
+it('settles a retained share conflict through the response parser', async () => {
+  const operation = { id: firstId, operationId: '01890e2a-4c8e-7b21-9f3c-000000000098', expectedVersion: 0, shared: true,
+    expectedArtifactRevision: 2, expectedArtifactSha256: first.body._blob.sha256 }
+  const captured = { basePath: '/workspace-a', mascRoot: '/workspace-a/.masc' }
+  retainPendingShare({ operation, workspace: captured, title: first.title, revision: 2 })
+  window.dispatchEvent(new StorageEvent('storage'))
+  const receipt = { id: firstId, receipt: { operation_id: operation.operationId, expected_version: 0,
+    expected_artifact_revision: 2, expected_artifact_sha256: operation.expectedArtifactSha256,
+    publication_matches: false, requested: true, outcome: 'conflict', snapshot: { version: 0, shared: false } },
+    current: { version: 0, shared: false } }
+  const fetchMock = vi.fn(async () => new Response(JSON.stringify(receipt), { status: 409 }))
+  vi.stubGlobal('fetch', fetchMock)
+  const realCore = await vi.importActual<typeof import('../../api/core')>('../../api/core')
+  vi.mocked(post).mockImplementation(realCore.post)
+  select(firstId); render(html`<${ArtifactsSurface} />`)
+  const dialog = await screen.findByRole('dialog')
+  const pendingRow = Array.from(dialog.querySelectorAll('p')).find(item => item.textContent?.includes(firstId) && item.textContent.includes('결과 미확인'))!
+  fireEvent.click(within(pendingRow).getByRole('button', { name: '같은 요청 확인' }))
+  await waitFor(() => expect(Array.from(dialog.querySelectorAll('p')).some(item => item.textContent?.includes(firstId) && item.textContent.includes('결과 미확인'))).toBe(false))
+  expect(fetchMock).toHaveBeenCalledTimes(1)
+  expect(copyToClipboard).not.toHaveBeenCalled()
 })
 
 it('does not send a share change when the server reports a different workspace', async () => {
@@ -717,6 +740,7 @@ it('does not share a newer latest revision that the operator has not opened', as
   expect(post).not.toHaveBeenCalled()
   expect(get).toHaveBeenCalledWith(`/api/v1/published-artifacts/${firstId}`, {
     signal: undefined,
+    consumeWithinTimeout: true,
     extraHeaders: { 'x-masc-expected-base-path': '/workspace-a', 'x-masc-expected-masc-root': '/workspace-a/.masc' },
   })
 })

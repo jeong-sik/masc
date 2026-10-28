@@ -1,5 +1,5 @@
 import { Schema } from 'effect'
-import { get, getPublic, getWithResponse, post } from './core'
+import { DEFAULT_POST_TIMEOUT_MS, get, getPublic, getWithResponse, post } from './core'
 
 const revisionFields = {
   revision: Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(Number.MAX_SAFE_INTEGER)),
@@ -77,7 +77,7 @@ export class ArtifactWorkspaceReadUnattested extends Error {
 }
 
 export async function captureArtifactWorkspace(expectedBasePath: string): Promise<ArtifactWorkspace> {
-  const { paths } = Schema.decodeUnknownSync(ArtifactWorkspaceSchema)(await get<unknown>('/health?full=1'))
+  const { paths } = Schema.decodeUnknownSync(ArtifactWorkspaceSchema)(await get<unknown>('/health?full=1', { consumeWithinTimeout: true }))
   if (paths.effective_base_path !== expectedBasePath) {
     throw new Error('서버의 작업 공간이 원고를 작성한 작업 공간과 다릅니다. 원고를 보관하고 연결을 확인해 주세요.')
   }
@@ -103,7 +103,7 @@ export function requireArtifactWorkspaceRead(headers: Headers): void {
 // readback; a failed response/readback must never trigger an automatic retry.
 export async function publishArtifact(request: ArtifactPublicationRequest, workspace: ArtifactWorkspace): Promise<ArtifactPublication> {
   const result = Schema.decodeUnknownSync(ArtifactPublicationSchema)(
-    await post<unknown>('/api/v1/published-artifacts', { ...request, expected_workspace: artifactWorkspaceBody(workspace) }, artifactWorkspaceHeaders(workspace)),
+    await post<unknown>('/api/v1/published-artifacts', { ...request, expected_workspace: artifactWorkspaceBody(workspace) }, artifactWorkspaceHeaders(workspace), DEFAULT_POST_TIMEOUT_MS, undefined, true),
   )
   if (request.id !== undefined && (result.artifact.id !== request.id
     || result.artifact.revision !== request.expected_revision + 1)) {
@@ -137,7 +137,7 @@ export async function setPublishedArtifactShared(operation: ArtifactShareOperati
       expected_version: operation.expectedVersion,
       expected_artifact_revision: operation.expectedArtifactRevision, expected_artifact_sha256: operation.expectedArtifactSha256,
       expected_workspace: { base_path: workspace.basePath, masc_root: workspace.mascRoot },
-    }, artifactWorkspaceHeaders(workspace))
+    }, artifactWorkspaceHeaders(workspace), DEFAULT_POST_TIMEOUT_MS, undefined, true)
   } catch (error) {
     if (typeof error !== 'object' || error === null || !('status' in error)
       || error.status !== 409 || !('responseData' in error)) throw error
@@ -159,7 +159,8 @@ export async function setPublishedArtifactShared(operation: ArtifactShareOperati
     || (receipt.outcome === 'applied' && (!receipt.publication_matches || receipt.snapshot.version !== operation.expectedVersion + 1
       || receipt.snapshot.shared !== operation.shared))
     || (receipt.outcome === 'conflict' && receipt.publication_matches && receipt.snapshot.version === operation.expectedVersion)
-    || result.current.version < receipt.snapshot.version) {
+    || result.current.version < receipt.snapshot.version
+    || (result.current.version === receipt.snapshot.version && result.current.shared !== receipt.snapshot.shared)) {
     throw new Error('외부 공유 요청 결과가 보낸 작업과 다릅니다. 적용 여부를 확인해 주세요.')
   }
   return result
@@ -185,6 +186,7 @@ function decodeArtifactDocument(id: string, revision: string | undefined, raw: u
 export async function fetchPublishedArtifact(id: string, revision: string | undefined, signal?: AbortSignal, workspace?: ArtifactWorkspace): Promise<ArtifactDocument> {
   const raw = await get<unknown>(artifactRequestPath(id, revision), {
     signal, ...(workspace ? { extraHeaders: artifactWorkspaceHeaders(workspace) } : {}),
+    ...(signal ? { consumeWithinTimeout: true } : {}),
   })
   return decodeArtifactDocument(id, revision, raw)
 }
@@ -196,7 +198,7 @@ export async function fetchWorkspacePublishedArtifact(id: string, revision: stri
   const path = artifactRequestPath(id, revision)
   const query = artifactWorkspaceQuery(workspace)
   const response = await getWithResponse<unknown>(`${path}${revision === undefined ? '?' : '&'}${query}`, {
-    signal, extraHeaders: artifactWorkspaceHeaders(workspace),
+    signal, extraHeaders: artifactWorkspaceHeaders(workspace), consumeWithinTimeout: true,
   })
   const document = decodeArtifactDocument(id, revision, response.data)
   if (response.headers.get('x-masc-workspace-read') !== 'matched-v1') {

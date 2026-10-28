@@ -5,7 +5,7 @@ import { get, getPublic, getWithResponse, post } from './core'
 import { ArtifactPublicationSchema, captureArtifactWorkspace, fetchPublishedArtifact, fetchWorkspacePublishedArtifact, fetchPublicArtifact, fetchPublishedArtifacts, setPublishedArtifactShared } from './published-artifacts'
 import { resolveArtifactCheck, setArtifactCheck } from './published-artifact-checks'
 
-vi.mock('./core', () => ({ get: vi.fn(), getPublic: vi.fn(), getWithResponse: vi.fn(), post: vi.fn() }))
+vi.mock('./core', () => ({ DEFAULT_POST_TIMEOUT_MS: 30_000, get: vi.fn(), getPublic: vi.fn(), getWithResponse: vi.fn(), post: vi.fn() }))
 beforeEach(() => vi.resetAllMocks())
 
 // Captured from the matching native server at cc06814, using owned reports.
@@ -90,7 +90,7 @@ describe('published artifact native wire contract', () => {
     expect((await fetchWorkspacePublishedArtifact(artifact.id, '2', workspace)).artifact.id).toBe(artifact.id)
     expect(getWithResponse).toHaveBeenCalledWith(
       `/api/v1/published-artifacts/${artifact.id}?revision=2&expected_base_path=%2Fworkspace-a&expected_masc_root=%2Fruntime-a`,
-      { signal: undefined, extraHeaders: { 'x-masc-expected-base-path': '/workspace-a', 'x-masc-expected-masc-root': '/runtime-a' } },
+      { signal: undefined, consumeWithinTimeout: true, extraHeaders: { 'x-masc-expected-base-path': '/workspace-a', 'x-masc-expected-masc-root': '/runtime-a' } },
     )
     vi.mocked(getWithResponse).mockResolvedValueOnce({ data, headers: new Headers() })
     await expect(fetchWorkspacePublishedArtifact(artifact.id, '2', workspace)).rejects.toThrow(/작업 공간 확인 응답/)
@@ -110,7 +110,7 @@ describe('published artifact native wire contract', () => {
       id: artifact.id, shared: true, operation_id: operation.operationId, expected_version: 0,
       expected_artifact_revision: operation.expectedArtifactRevision, expected_artifact_sha256: operation.expectedArtifactSha256,
       expected_workspace: { base_path: workspace.basePath, masc_root: workspace.mascRoot },
-    }, { 'x-masc-expected-base-path': workspace.basePath, 'x-masc-expected-masc-root': workspace.mascRoot })
+    }, { 'x-masc-expected-base-path': workspace.basePath, 'x-masc-expected-masc-root': workspace.mascRoot }, 30_000, undefined, true)
   })
 
   it('keeps an old conflict receipt separate from the current sharing state', async () => {

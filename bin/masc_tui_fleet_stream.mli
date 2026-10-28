@@ -4,8 +4,9 @@
     Keepers screen can draw. It has one owner, the job that reads the
     connection, which posts {!view} to the render loop whenever it changes.
 
-    The stream sends a [Snapshot] first on every connection, then one event per
-    revision. A [Snapshot] is always taken, because a restarted server numbers
+    The stream sends a [Snapshot] or [Unavailable_snapshot] first on every
+    connection, then one event per revision. Either snapshot is always taken,
+    because a restarted server numbers
     from 1 again. Any other event must carry the revision after the last one;
     when it does not, an event was lost, and {!feed} asks for a new connection,
     whose [Snapshot] replaces everything. *)
@@ -34,6 +35,12 @@ type failure =
 type view =
   | Awaiting_first_reading
   | Reading of { reading : reading; trouble : trouble option }
+  | Unavailable of
+      { degradation : Masc.Fleet_stream.degradation
+      ; disconnected_since : float option
+      }
+      (** A scan failed before any reading. No fleet counts were observed.
+          A later connection loss is retained separately from the scan failure. *)
   | Cannot_read of failure
       (** No usable reading: the server refused, or speaks a form this build
           does not. It lasts until a connection delivers a [Snapshot]. *)
@@ -43,8 +50,8 @@ type t
 val create : unit -> t
 
 val started : t -> unit
-(** A connection was opened. Its bytes start a new frame; the reading from the
-    connection before stays on screen as [Disconnected] until the [Snapshot]. *)
+(** A connection was opened. Its bytes start a new frame; the last observation
+    and any connection loss remain visible until the new snapshot. *)
 
 type step =
   | Keep_reading
@@ -58,7 +65,7 @@ val refused : t -> status:int -> detail:string -> unit
 
 val lost : t -> now:float -> unit
 (** The connection ended, whatever the reason. The first loss after a
-    [Snapshot] fixes [since]; the losses after it, while no [Snapshot]
+    snapshot fixes [since]; the losses after it, while no new snapshot
     arrived, keep it. *)
 
 val view : t -> view

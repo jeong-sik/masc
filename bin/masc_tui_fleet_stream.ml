@@ -19,6 +19,7 @@ type failure =
 type view =
   | Awaiting_first_reading
   | Reading of { reading : reading; trouble : trouble option }
+  | Unavailable of { degradation : F.degradation; disconnected_since : float option }
   | Cannot_read of failure
 
 type step =
@@ -31,6 +32,7 @@ type step =
 type t =
   { mutable decoder : Sse_wire.decoder
   ; mutable reading : reading option
+  ; mutable unavailable : F.degradation option
   ; mutable following : F.Revision.t option
   ; mutable down_since : float option
   ; mutable failure : failure option
@@ -39,6 +41,7 @@ type t =
 let create () =
   { decoder = Sse_wire.create_decoder ()
   ; reading = None
+  ; unavailable = None
   ; following = None
   ; down_since = None
   ; failure = None
@@ -68,21 +71,31 @@ let lost t ~now =
 
 let take_snapshot t reading =
   t.reading <- Some reading;
+  t.unavailable <- None;
   t.following <- Some reading.revision;
   t.down_since <- None;
   t.failure <- None;
   Keep_reading
 ;;
 
-(* An event that follows the last one extends the reading; any other event is
-   a gap, or an event with no [Snapshot] before it. *)
+let take_unavailable_snapshot t revision degradation =
+  t.reading <- None;
+  t.unavailable <- Some degradation;
+  t.following <- Some revision;
+  t.down_since <- None;
+  t.failure <- None;
+  Keep_reading
+;;
+
+(* A cursor can exist without a reading after an unavailable snapshot. A
+   Changed event then supplies the first reading; a Degraded event without a
+   reading violates the producer's lifecycle and requires a new snapshot. *)
 let take_next t revision update =
-  match t.following, t.reading with
-  | Some last, Some reading when F.Revision.is_next ~after:last revision ->
-    t.reading <- Some (update reading);
+  match t.following with
+  | Some last when F.Revision.is_next ~after:last revision && update () ->
     t.following <- Some revision;
     Keep_reading
-  | Some _, (Some _ | None) | None, (Some _ | None) ->
+  | Some _ | None ->
     t.following <- None;
     Reconnect
 ;;
@@ -90,11 +103,20 @@ let take_next t revision update =
 let apply t = function
   | F.Snapshot { revision; measured_at; fleet; degraded } ->
     take_snapshot t { revision; measured_at; fleet; degraded }
+  | F.Unavailable_snapshot { revision; degradation } ->
+    take_unavailable_snapshot t revision degradation
   | F.Changed { revision; measured_at; fleet } ->
-    take_next t revision (fun _ -> { revision; measured_at; fleet; degraded = None })
+    take_next t revision (fun () ->
+      t.reading <- Some { revision; measured_at; fleet; degraded = None };
+      t.unavailable <- None;
+      true)
   | F.Degraded { revision; degradation } ->
-    take_next t revision (fun reading ->
-      { reading with revision; degraded = Some degradation })
+    take_next t revision (fun () ->
+      match t.reading with
+      | None -> false
+      | Some reading ->
+        t.reading <- Some { reading with revision; degraded = Some degradation };
+        true)
 ;;
 
 let apply_frame t (frame : Sse_wire.frame) =
@@ -125,10 +147,12 @@ let feed t chunk =
 ;;
 
 let view t =
-  match t.failure, t.reading with
-  | Some failure, (Some _ | None) -> Cannot_read failure
-  | None, None -> Awaiting_first_reading
-  | None, Some reading ->
+  match t.failure, t.reading, t.unavailable with
+  | Some failure, (Some _ | None), (Some _ | None) -> Cannot_read failure
+  | None, None, None -> Awaiting_first_reading
+  | None, None, Some degradation ->
+    Unavailable { degradation; disconnected_since = t.down_since }
+  | None, Some reading, (Some _ | None) ->
     let trouble =
       match t.down_since with
       | Some since -> Some (Disconnected { since })

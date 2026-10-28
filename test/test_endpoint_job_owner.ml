@@ -801,6 +801,11 @@ let native_cases=[
 ]
 
 let () =
+  if G.For_testing.linux_build && Unix.geteuid ()<>0 && Sys.getenv_opt "GITHUB_ACTIONS"=Some "true" then (
+    let executable=Unix.realpath Sys.executable_name in
+    Unix.execvp "sudo" (Array.concat
+      [[|"sudo";"-n";"--preserve-env=EIO_BACKEND";"--";executable|];
+       Array.sub Sys.argv 1 (Array.length Sys.argv-1)]));
   let native=if G.For_testing.linux_build && Unix.geteuid ()=0 then native_cases else [] in
   Alcotest.run "Endpoint job owner"
     ["original controller",List.map (fun (name,test) -> Alcotest.test_case name `Quick test) (portable_cases @ native)]

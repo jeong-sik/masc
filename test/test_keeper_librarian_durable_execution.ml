@@ -498,6 +498,28 @@ let test_retained_body_refusal_shows_descent_from_its_receipt () = with_fixture 
          | Baseline_advanced _ | Progress_advanced _ | Official_advanced _) ->
      fail "a retained body refusal must give one report");
   check int "the provider refused once and no later pass called it again" 1 (F.post_count fixture.server))
+let test_a_refusal_the_latest_execution_did_not_end_in_shows_nothing () = with_fixture (fun ~sw:_ fixture ->
+  fixture.set_response (fun _ -> `Request_entity_too_large,
+    {|{"error":{"message":"fixture body too large","type":"invalid_request_error"}}|});
+  let deliveries= !(fixture.deliveries) in
+  assert_pending (run_worker fixture);
+  await_delivery fixture ~after:deliveries;
+  ignore (run_worker fixture);
+  let _,capture=only_original fixture in
+  let evidence final=io (fun () -> Capture.refusal_evidence ~store:fixture.store capture final) |> get in
+  let refused kind=Lane_addon_exact.Call_final (Input_refused kind) in
+  check bool "the final the host actually ended in shows the provider's cause" true
+    ((evidence (refused Request_body_refused)).provider_input_refusals
+     =[Keeper_librarian_input_refusal.Request_body_refused]);
+  (* A retry or a stale report can name a refusal the latest completed
+     execution did not end in. The host's receipt belongs to another final, so
+     it must not stand for this one. *)
+  check bool "a different input refusal shows nothing" true
+    (evidence (refused Input_capacity)=Keeper_exact_walk_failure.empty);
+  check bool "a refusal that names no size shows nothing" true
+    (evidence (refused Invalid_request)=Keeper_exact_walk_failure.empty);
+  check bool "an outcome that is not a refusal shows nothing" true
+    (evidence Lane_addon_exact.Outcome_unknown=Keeper_exact_walk_failure.empty))
 (* The Librarian worker's declared reply frame is 4 MiB; a request whose host
    listing cannot fit is refused by the worker before the host retains it. *)
 let oversized_turn_bytes = 4_500_000
@@ -1242,6 +1264,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_worker_body_refusal_ends_the_original;
   test_case "a retained provider body refusal shows descent from its receipt" `Quick
     test_retained_body_refusal_shows_descent_from_its_receipt;
+  test_case "a refusal the latest execution did not end in shows nothing" `Quick
+    test_a_refusal_the_latest_execution_did_not_end_in_shows_nothing;
   test_case "actual original reaches Memory and source ACK" `Quick test_actual_completed_history_path;
   test_case "a settle stopped before its gate records finishes with the next original" `Quick
     test_stopped_settle_leaves_gates_for_the_next_original;

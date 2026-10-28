@@ -83,6 +83,11 @@ val refusal_evidence : store:Lane_addon_store.t -> t -> Lane_addon_exact.final -
     terminal, the latest completed execution must end in this same final, and
     its receipt supplies the walk's evidence, and only when that evidence is a
     named input refusal with no independent failure mixed in. Anything else, including an open
-    host record, shows nothing. Blocking read; offload it in an Eio caller. *)
+    host record, shows nothing. Blocking read; offload it in an Eio caller.
+
+    Nothing reads less because of this evidence yet: the Add-on durable path runs with
+    [No_message_floor]. The layer that gives that path a floor tests, before it does, that a
+    size-refused original descends exactly once and that [Invalid_request] and an open host
+    record never descend. *)
 val validate_proposal : t -> Yojson.Safe.t ->
   (Keeper_librarian_runtime.durable_proposal, string) result

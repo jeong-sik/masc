@@ -74,7 +74,9 @@ let refusal_report ~store request final : Keeper_librarian_runtime.not_committed
   (* A terminal refusal ends this original ID, not its unread source. It
      reports what the host actually observed about reading less, and grants no
      consumption, capacity or skip authority. An unreadable observation reports
-     none and says so, the same as a refusal that shows nothing. *)
+     none and says so, the same as a refusal that shows nothing. This report
+     alone does not free a Keeper from a range it cannot read (#46398): the
+     same range is chosen again until a floor reads it smaller. *)
   match io (fun () -> Request.refusal_evidence ~store request final) with
   | Ok evidence -> Keeper_librarian_runtime.not_committed_of_failure ~detail evidence
   | Error why ->

@@ -142,6 +142,39 @@ let test_cancellation_closes_partial_body = with_runtime (fun env sw ->
   Alcotest.(check int) "no request remains in flight" 0 (Pool.stats pool).total_inflight;
   Pool.shutdown pool)
 
+let test_stream_callback_rejection_closes_open_response = with_runtime (fun env sw ->
+  let url, completed, requests = start_server ~sw env (fun index flow ->
+    if index = 1 then
+      (* The server does not send the terminating chunk. Only the callback
+         rejection can end this request before the fixture deadline. *)
+      Eio.Flow.copy_string
+        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nfirst\r\n" flow
+    else fixed_response flow payload) in
+  let pool = Pool.create ~sw ~env () in
+  let saw_chunk = ref false in
+  let exception Reject_stream in
+  let rejected =
+    try
+      match Pool.request_streaming pool ~retention:Pool.Keep_body ~clock:env#clock
+          ~idle_timeout_sec:30.0 ~method_:`GET ~url
+          ~on_chunk:(fun _ -> saw_chunk := true; raise Reject_stream) () with
+      | Error _ -> true
+      | Ok _ -> false
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | Eio.Time.Timeout as exn -> raise exn
+    | _ -> true in
+  Alcotest.(check bool) "the callback saw a chunk and stopped the open response" true
+    (!saw_chunk && rejected);
+  Eio.Stream.take completed;
+  Alcotest.(check int) "the rejected client was not parked" 0 (Pool.stats pool).total_idle;
+  Alcotest.(check int) "no rejected request remains in flight" 0 (Pool.stats pool).total_inflight;
+  let response = Pool.request pool ~method_:`GET ~url () |> require_response in
+  Alcotest.(check string) "a replacement connection can read the next response" payload response.body;
+  Alcotest.(check int) "only the explicit requests reached the server" 2 !requests;
+  Pool.shutdown pool;
+  Eio.Stream.take completed)
+
 let () =
   Alcotest.run "Pool response body limit"
     [ "real HTTP", [
@@ -152,4 +185,6 @@ let () =
       ; Alcotest.test_case "exact limit and HTTP failure preserve status/body" `Quick test_complete_and_http_error
       ; Alcotest.test_case "omission adds no default bound" `Quick test_unlimited_default
       ; Alcotest.test_case "cancellation closes partial body" `Quick test_cancellation_closes_partial_body
+      ; Alcotest.test_case "stream callback rejection closes an open response" `Quick
+          test_stream_callback_rejection_closes_open_response
       ] ]

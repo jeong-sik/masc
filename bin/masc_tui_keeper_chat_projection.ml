@@ -1592,6 +1592,16 @@ let decode_data_event ~request state json =
                   { call with ended = true })))
       | unknown -> Error (Unknown_event_type unknown))
 
+(* Acceptance can affect queue and control ownership before the terminal
+   body is decoded. Validate it under the same request identity and initial
+   event contract as the terminal decoder. *)
+let validate_live_acceptance ~request json =
+  let* state = decode_data_event ~request initial_decode_state json in
+  match state.acceptance with
+  | Some _ -> Ok ()
+  | None -> Error Missing_acceptance
+;;
+
 let protocol_failure state stream_error =
   { stream_error
   ; acceptance_observed =

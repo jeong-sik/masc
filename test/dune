@@ -2882,6 +2882,8 @@
 
 (include stanzas/test_fleet_stream_hub.inc)
 
+(include stanzas/test_fleet_stream_pump.inc)
+
 (include stanzas/test_fleet_stream_server_wiring.inc)
 
 (include stanzas/test_fs_atomic_orphan_sweep_10130.inc)

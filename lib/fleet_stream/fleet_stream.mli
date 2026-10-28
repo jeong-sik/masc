@@ -13,6 +13,10 @@ val schema_version : int
     stops with [Schema_mismatch] instead of reading fields whose meaning may
     have changed. *)
 
+val stream_path : string
+(** The path the server answers with Server-Sent Events, one {!event} per
+    frame, and the terminal client connects to. *)
+
 module Revision : sig
   type t
   (** The position of an event in one stream. Starts at 1 and rises by 1 for

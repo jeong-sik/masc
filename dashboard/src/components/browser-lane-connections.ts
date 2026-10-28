@@ -39,6 +39,11 @@ export function BrowserLaneConnections({ row, instances }: {
           <h5 class="font-semibold">${browsers[client.browser]} · ${transports[client.transport]}</h5>
           <p class="break-all">Client ${client.clientId} · browser ${client.version} · engine ${client.engineVersion}</p>
           ${client.space !== null && html`<p>Space ${client.space.id} · ${client.space.name}</p>`}
+          ${client.transport === 'ego_task_space' && (client.spaceObservation === null
+            ? html`<p>No SDK control observation recorded. Window visibility and login are unverified.</p>`
+            : html`<p>Last SDK control observation: ${client.spaceObservation.ownership} ·
+                ${formatLaneTime(client.spaceObservation.observedAt)} · Space ${client.spaceObservation.spaceId} · ${client.spaceObservation.spaceName}.
+                This does not verify current control, window visibility or login.</p>`)}
           <h6>Requests pending at observation</h6>
           ${client.interactions.length === 0 ? html`<p>No pending requests recorded.</p>` : html`<ul>
             ${client.interactions.map(work => html`<li key=${work.requestId}>${work.phase === 'queued' ? 'Queued' : 'Running'} · ${interaction(work)}</li>`)}

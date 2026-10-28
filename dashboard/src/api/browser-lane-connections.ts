@@ -2,6 +2,10 @@ import { Either, Schema } from 'effect'
 
 const text = Schema.NonEmptyString.pipe(Schema.filter(value => value.trim().length > 0))
 const id = Schema.Number.pipe(Schema.filter(value => Number.isSafeInteger(value) && value >= 0))
+const spaceObservation = Schema.Struct({
+  spaceId: id, spaceName: text, ownership: text,
+  observedAt: Schema.Number.pipe(Schema.filter(Number.isFinite)),
+})
 const work = Schema.Struct({
   requestId: text, actor: Schema.NullOr(text), action: text, tabId: Schema.NullOr(id),
   phase: Schema.Literal('queued', 'running'),
@@ -15,8 +19,10 @@ const common = {
   })),
 }
 const client = Schema.Union(
-  Schema.Struct({ ...common, transport: Schema.Literal('ego_task_space'), space: Schema.Struct({ id, name: text }) }),
-  Schema.Struct({ ...common, transport: Schema.Literal('web_extension', 'webdriver_bidi'), space: Schema.Null }),
+  Schema.Struct({ ...common, transport: Schema.Literal('ego_task_space'), space: Schema.Struct({ id, name: text }),
+    spaceObservation: Schema.NullOr(spaceObservation),
+  }).pipe(Schema.filter(client => client.spaceObservation === null || client.spaceObservation.spaceId === client.space.id)),
+  Schema.Struct({ ...common, transport: Schema.Literal('web_extension', 'webdriver_bidi'), space: Schema.Null, spaceObservation: Schema.Null }),
 )
 const connections = Schema.Struct({
   state: Schema.Literal('serving', 'retired'),

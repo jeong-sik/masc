@@ -48,7 +48,11 @@ let with_admission t incarnation run =
     Result.bind (admission t incarnation) (fun () -> run ()))
 let snapshot t = `Assoc [
   "state",`String (match t.phase with Serving -> "serving" | Retired -> "retired");
-  "clients",`List (List.map B.client_json (B.connected_clients ()));
+  "clients",`List (List.map (fun (client : B.client_info) ->
+    let space_observation=match t.ego_input with
+      | Some (client_id,recovery) when client_id=client.client_id -> recovery.space_observation ()
+      | None|Some _ -> None in
+    Browser_addon_observation.publish_client client ~space_observation) (B.connected_clients ()));
   "owned_backends",Browser_addon_inventory.owned_to_json (Browser_addon_inventory.observe ())]
 let models_enabled t = Option.is_some t.models
 let attach_models t models =

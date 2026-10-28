@@ -6,7 +6,7 @@ import { BrowserLaneConnections } from './browser-lane-connections'
 
 const work = { requestId: 'request-1', actor: 'keeper/research', action: 'page.native_workflow', tabId: 0, phase: 'running' }
 const client = { clientId: 'b932c512-51e0-45bc-9fcb-3fde7bd2767b', browser: 'ego_lite',
-  version: '0.6.1.11', engineVersion: 'chromium', transport: 'ego_task_space', space: { id: 32, name: 'Research' },
+  version: '0.6.1.11', engineVersion: 'chromium', transport: 'ego_task_space', space: { id: 32, name: 'Research' }, spaceObservation: null,
   interactions: [work, { ...work, requestId: 'request-2', actor: 'agent/helper', phase: 'queued', tabId: null }],
   lastActivities: [{ work: { ...work, requestId: 'previous', actor: 'operator' }, outcome: 'unknown' }] }
 const instance = { instance_id: 'worker', run_id: 'run', addon_id: 'browser', title: 'Browser connections',
@@ -53,6 +53,26 @@ describe('browser caller observations', () => {
     expect(second.textContent).toContain('<b>keeper/other</b>')
     expect(second.querySelector('img,b')).toBeNull()
   })
+  it('shows opaque native control with its own observation time, without inferring login or authority', () => {
+    const spaceObservation = { spaceId: 32, spaceName: 'Renamed research', ownership: 'agentDelegatedToUser', observedAt: 42 }
+    const view = show({ ...row.fields, clients: [{ ...client, spaceObservation }] })
+    expect(view.getByText(/Last SDK control observation: agentDelegatedToUser/).textContent).toContain('1970-01-01T00:00:42.000Z')
+    expect(view.getByText(/Last SDK control observation/).textContent).toContain('Space 32 · Renamed research')
+    expect(view.getByText(/does not verify current control, window visibility or login/)).toBeTruthy()
+    expect(view.container.querySelector('button')).toBeNull()
+    view.unmount()
+    const future = show({ ...row.fields, clients: [{ ...client,
+      spaceObservation: { ...spaceObservation, ownership: '<b>future-native-owner</b>' } }] }, 'retained')
+    expect(future.getByText(/Last SDK control observation/).textContent).toContain('<b>future-native-owner</b>')
+    expect(future.container.querySelector('b')).toBeNull()
+    expect(future.getByText(/Retained worker observation/)).toBeTruthy()
+  })
+  it('keeps a missing native observation unknown and does not infer it from a pending Keeper request', () => {
+    const view = show()
+    expect(view.getByText(/No SDK control observation recorded/)).toBeTruthy()
+    expect(view.queryByText(/Last SDK control observation/)).toBeNull()
+    expect(view.getByText(/keeper\/research · page.native_workflow · Tab 0/)).toBeTruthy()
+  })
   it('uses recorded phase/outcome and preserves absent caller without inventing Keeper identity', () => {
     const view = show({ ...row.fields, clients: [{ ...client, interactions: [{ ...work, actor: null }],
       lastActivities: ['returned', 'refused', 'partial', 'unknown'].map(outcome => ({
@@ -79,6 +99,15 @@ describe('browser caller observations', () => {
     { ...client, transport: 'webdriver_bidi' }, { ...client, interactions: [{ ...work, phase: 'done' }] },
     { ...client, lastActivities: [{ work, outcome: 'success' }] },
     { ...client, interactions: [{ ...work, tabId: -1 }] },
+    ...[
+      { spaceId: 33, spaceName: 'foreign', ownership: 'agent', observedAt: 42 },
+      { spaceId: 32, spaceName: 'same', ownership: ' ', observedAt: 42 },
+      { spaceId: 32, spaceName: 'same', ownership: 'agent', observedAt: Number.NaN },
+      { spaceId: 32, spaceName: 'same', ownership: 'agent', observedAt: Infinity },
+      { spaceId: 32, spaceName: 'same', ownership: 'agent', observedAt: 42, claim: true },
+    ].map(spaceObservation => ({ ...client, spaceObservation })),
+    { ...client, transport: 'webdriver_bidi', browser: 'firefox', space: null,
+      spaceObservation: { spaceId: 32, spaceName: 'same', ownership: 'agent', observedAt: 42 } },
   ])('refuses a malformed or inconsistent nested connection without hiding raw row data', malformed => {
     const view = show({ ...row.fields, clients: [malformed] })
     expect(view.getByRole('status').textContent).toContain('observation unreadable')

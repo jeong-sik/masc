@@ -109,7 +109,7 @@ export function ArtifactsSurface() {
               authRevision=${authRevision} selectedId=${selectedId} revision=${revision} isCurrent=${ownsSession} />`
           : html`<p role="status">${retiredDrafts.length ? '이전 원고를 처리한 뒤 문서를 읽습니다.' : '현재 작업 공간을 확인한 뒤 아티팩트를 읽습니다.'}</p>`)
       : html`<${ArtifactsObservation} key=${owner.mount} authRevision=${authRevision} isCurrent=${current}
-          workspaceRoot=${authority.workspaceRoot} draftRetention=${draftRetention}
+          workspaceRoot=${authority.workspaceRoot} draftRetention=${draftRetention} allowReader=${retiredDrafts.length === 0}
           onPublication=${(outcome: ArtifactPublicationOutcome) => setPublications(previous => {
             const index = outcome.kind === 'published' ? previous.findIndex(entry => entry.owner === owner
               && entry.outcome.kind === 'published'
@@ -183,11 +183,12 @@ function SharedArtifactObservation({ authRevision, selectedId, revision, isCurre
   return html`<${SharedArtifactReader} doc=${doc.data} revision=${revision} authRevision=${authRevision} isCurrent=${current} />`
 }
 
-function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, isCurrent, onMutation, onPublication }: {
+function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, allowReader, isCurrent, onMutation, onPublication }: {
   authRevision: number; isCurrent: () => boolean; onMutation: (outcome: ArtifactCheckOutcome) => void
   onPublication: (outcome: ArtifactPublicationOutcome) => void
   workspaceRoot: string
   draftRetention: ArtifactDraftRetention
+  allowReader: boolean
 }) {
   const { artifact: selectedId, revision } = route.value.params
   const [refresh, setRefresh] = useState(0)
@@ -211,11 +212,13 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, isC
   const visit = useMemo(() => ({ retired: false }), [documentKey, visitEpoch])
   const activeDocumentKey = useRef(documentKey)
   activeDocumentKey.current = documentKey
+  const readerAllowed = useRef(allowReader)
+  readerAllowed.current = allowReader
   const shareActivity = selectedId ? artifactExternalSharing.activity(selectedId) : 'ready'
   const shareReread = useRef<ShareObservation | null>(null)
   const active = useRef(true)
   const current = () => active.current && isCurrent()
-  const currentDocument = () => current() && !visit.retired && activeDocumentKey.current === documentKey
+  const currentDocument = () => current() && readerAllowed.current && !visit.retired && activeDocumentKey.current === documentKey
     && selectedId !== undefined && selectedArtifact(selectedId, revision)
   useEffect(() => () => { active.current = false }, [])
 
@@ -278,7 +281,7 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, isC
       })
     })
     return () => { controller.abort(); unsubscribeRoute(); unsubscribeWorkspace(); unsubscribeCredential() }
-  }, [authRevision, selectedId, revision, documentKey, visit, refresh])
+  }, [authRevision, selectedId, revision, documentKey, visit, refresh, allowReader])
 
   const list = catalog?.key === catalogKey ? catalog : null
   const doc = document?.key === documentKey ? document : null
@@ -328,7 +331,8 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, isC
       <header class="flex flex-wrap items-center justify-between gap-3">
         <div><h1 class="m-0 text-xl font-semibold">아티팩트</h1>
           <p class="mt-1 text-sm text-[var(--color-fg-secondary)]">Keeper가 작성한 보고서와 결과물을 다시 읽어보세요.</p></div>
-        <div class="flex gap-4"><button type="button" onClick=${() => setImporting(true)}>파일 가져오기</button>
+        <div class="flex gap-4"><button type="button" disabled=${!allowReader}
+          onClick=${() => { if (readerAllowed.current) setImporting(true) }}>파일 가져오기</button>
           <button type="button" onClick=${() => setRefresh(n => n + 1)}>새로고침</button></div>
       </header>
       ${importing ? html`<${ArtifactImport} draftRetention=${draftRetention} workspaceRoot=${workspaceRoot} isCurrent=${current} onMutation=${onPublication} onSaved=${published}
@@ -392,7 +396,8 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, isC
                 </li>`)}
               </ul>`}
         </aside>
-        ${!selectedId ? html`<div class="rounded-lg border border-dashed border-[var(--color-border-default)] p-8 text-sm text-[var(--color-fg-secondary)]">목록에서 문서를 선택하면 본문이 열립니다.</div>`
+        ${!allowReader ? html`<p role="status">이전 원고를 처리한 뒤 문서를 읽습니다.</p>`
+          : !selectedId ? html`<div class="rounded-lg border border-dashed border-[var(--color-border-default)] p-8 text-sm text-[var(--color-fg-secondary)]">목록에서 문서를 선택하면 본문이 열립니다.</div>`
           : doc === null ? html`<p role="status">문서를 불러오고 있습니다.</p>`
           : doc.kind === 'public-loading' ? html`<p role="status">외부 공유 문서를 확인하고 있습니다.</p>`
           : !doc.data ? html`<p role="alert">${doc.kind === 'error' ? doc.message : '문서를 읽지 못했습니다.'}</p>`

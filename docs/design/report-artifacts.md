@@ -132,7 +132,8 @@ that a Keeper is currently viewing or editing a document.
   authority alone is not operator permission: a tokenless reader uses the
   public view, and an initial operator read refused for lack of permission may
   try an anonymous view. A failed refresh retains an existing operator document
-  and draft instead of replacing them with the public view.
+  and draft instead of replacing them with the public view. Retained drafts
+  from an earlier authority stay accessible before a new reader dialog opens.
 - The Dashboard share action requires a known sharing state and rechecks the
   selected revision and sharing state with both captured workspace roots before
   sending a change. A missing state, a failed read, or a changed observation

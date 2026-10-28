@@ -167,7 +167,7 @@ export function ArtifactReader({ doc, fixedRevision, readOnly = false, readError
     <article class="flex h-full min-w-0 flex-col" aria-label="아티팩트 본문">
       <header class="shrink-0 border-b border-[var(--color-border-default)] px-4 py-3 space-y-2">
         ${readError ? html`<p role="alert">문서 재조회 실패: ${readError} 이전에 읽은 문서와 작성 중인 원고를 유지합니다.</p>` : null}
-        ${readOnly ? null : html`<${ExternalShareOutcomes} />`}
+        <${ExternalShareOutcomes} />
         <div class="flex flex-wrap items-center justify-between gap-2">
           ${readOnly
             ? html`<span class="rounded border border-[var(--color-border-default)] px-2 py-0.5 text-xs text-[var(--color-fg-secondary)]">외부 공유 열람</span>`

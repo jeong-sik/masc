@@ -328,7 +328,7 @@ it.each(['credential', 'workspace', 'withdrawal', 'same-root'] as const)('recove
 })
 
 
-it('retains imported source before its first edit and keeps retired owners separate', async () => {
+it('recovers imported source before allowing another import after an authority change', async () => {
   render(html`<${ArtifactsSurface} />`)
   const importFile = async (name: string, content: string) => {
     fireEvent.click(screen.getByRole('button', { name: '파일 가져오기' }))
@@ -339,23 +339,28 @@ it('retains imported source before its first edit and keeps retired owners separ
   }
   await importFile('first.md', '# first\r\n😀')
   await act(() => setStoredToken('credential-b'))
-  await screen.findByRole('region', { name: '이전 접근 상태의 원고' })
-  await importFile('second.html', '<p>second</p>')
-  await act(() => setStoredToken('credential-c'))
-  const recovery = within(await screen.findByRole('region', { name: '이전 접근 상태의 원고' }))
-  expect(recovery.getByText('first.md')).toBeTruthy()
-  expect(recovery.getByText('second.html')).toBeTruthy()
+  const firstRecovery = within(await screen.findByRole('region', { name: '이전 접근 상태의 원고' }))
+  expect(firstRecovery.getByText('first.md')).toBeTruthy()
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(screen.queryByRole('region', { name: '파일 가져오기' })).toBeNull()
+  expect((screen.getByRole('button', { name: '파일 가져오기' }) as HTMLButtonElement).disabled).toBe(true)
   const blobs: Blob[] = []
   vi.spyOn(URL, 'createObjectURL').mockImplementation(blob => { blobs.push(blob as Blob); return 'blob:import' })
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
   vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
-  recovery.getAllByRole('button', { name: '원고 다운로드' }).forEach(button => fireEvent.click(button))
+  fireEvent.click(firstRecovery.getByRole('button', { name: '원고 다운로드' }))
   expect(await blobs[0]!.text()).toBe('# first\r\n😀')
-  expect(await blobs[1]!.text()).toBe('<p>second</p>')
   vi.stubGlobal('confirm', vi.fn(() => true))
-  fireEvent.click(recovery.getAllByRole('button', { name: '원고 폐기' })[0]!)
-  expect(recovery.queryByText('first.md')).toBeNull()
-  expect(recovery.getByText('second.html')).toBeTruthy()
+  fireEvent.click(firstRecovery.getByRole('button', { name: '원고 폐기' }))
+  await waitFor(() => expect(screen.queryByRole('region', { name: '이전 접근 상태의 원고' })).toBeNull())
+  expect((screen.getByRole('button', { name: '파일 가져오기' }) as HTMLButtonElement).disabled).toBe(false)
+  await importFile('second.html', '<p>second</p>')
+  await act(() => setStoredToken('credential-c'))
+  const secondRecovery = within(await screen.findByRole('region', { name: '이전 접근 상태의 원고' }))
+  expect(secondRecovery.getByText('second.html')).toBeTruthy()
+  expect((screen.getByRole('button', { name: '파일 가져오기' }) as HTMLButtonElement).disabled).toBe(true)
+  fireEvent.click(secondRecovery.getByRole('button', { name: '원고 다운로드' }))
+  expect(await blobs[1]!.text()).toBe('<p>second</p>')
   expect(post).not.toHaveBeenCalled()
 })
 

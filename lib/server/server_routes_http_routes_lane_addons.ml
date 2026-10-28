@@ -140,15 +140,14 @@ let decode_inspect_query = function
   | ["instance_id", id] when String.trim id <> "" -> Ok (`Assoc ["instance_id", `String id])
   | _ -> Error "inspect accepts one non-blank instance_id or no parameters"
 
-let get_inspect request reqd =
-  with_read_auth (fun state _request reqd ->
+let get_inspect = (fun state request reqd ->
     match read_context state request with
     | Error Credential_store_unreadable -> respond_unavailable request reqd
     | Error (Bad_request_detail detail) -> respond request reqd (Error detail)
     | Ok (caller, access) ->
       let result = let* args = decode_inspect_query (query_fields request) in
         dispatch ?caller ~access state Runtime.Inspect args in
-      respond request reqd result) request reqd
+      respond request reqd result)
 
 let package_catalog_payload state fields =
   let* directory = match fields with
@@ -208,25 +207,21 @@ let package_preview_payload state fields =
               "execution",execution])
 
 
-let get_package_catalog request reqd =
-  with_read_auth (fun state _request reqd ->
-    respond request reqd (package_catalog_payload state (query_fields request))) request reqd
+let get_package_catalog = (fun state request reqd ->
+    respond request reqd (package_catalog_payload state (query_fields request)))
 
-let get_package_preview request reqd =
-  with_read_auth (fun state _request reqd ->
-    respond request reqd (package_preview_payload state (query_fields request))) request reqd
+let get_package_preview = (fun state request reqd ->
+    respond request reqd (package_preview_payload state (query_fields request)))
 
-let get_slice request reqd =
-  with_read_auth (fun state _request reqd ->
+let get_slice = (fun state request reqd ->
     match read_context state request with
     | Error Credential_store_unreadable -> respond_unavailable request reqd
     | Error (Bad_request_detail detail) -> respond request reqd (Error detail)
     | Ok (caller, access) ->
       let result = let* args = decode_slice_query (query_fields request) in dispatch ?caller ~access state Runtime.Slice args in
-      respond request reqd result) request reqd
+      respond request reqd result)
 
-let get_action request reqd =
-  with_read_auth (fun state _request reqd ->
+let get_action = (fun state request reqd ->
     match read_context state request with
     | Error Credential_store_unreadable -> respond_unavailable request reqd
     | Error (Bad_request_detail detail) -> respond request reqd (Error detail)
@@ -239,7 +234,7 @@ let get_action request reqd =
               Ok (`Assoc ["instance_id", `String instance_id; "request_id", `String request_id])
           | _ -> Error "action status requires exactly instance_id and request_id" in
         dispatch ?caller ~access state Runtime.Action_status args in
-      respond request reqd result) request reqd
+      respond request reqd result)
 
 (* Use the source binding's kind table so a new kind must say whether it has a
    current screen before the live route can decode it. *)
@@ -507,8 +502,7 @@ let respond_live_frame request reqd frame =
       Http.Response.bytes ~headers:(extra_headers @ validator @ encoding)
         ~content_type:Http.Response.json_content_type body reqd
 
-let get_live request reqd =
-  with_permission_auth ~permission:Masc_domain.CanPlayMachine (fun state _request reqd ->
+let get_live = (fun state request reqd ->
     match live_workspace_precondition ~config:(Mcp_server.workspace_config state) (query_fields request) with
     | Error (status, detail) ->
         respond_json_value_with_cors ~status request reqd (error_json detail)
@@ -525,7 +519,6 @@ let get_live request reqd =
                (live_frame key ~blob ~blob_bytes ~screen ~fields ~observation_seq ~refreshing)
          | Error detail -> respond_json_value_with_cors ~status:`Service_unavailable request reqd
              (Server_refusal.json ~code:"machine_observation_unavailable" detail)))
-    request reqd
 
 let post ~operation ~tool_name request reqd =
   with_tool_actor_auth ~tool_name (fun state caller request reqd ->
@@ -802,17 +795,17 @@ let register_delivery ~sw ~clock =
 let add_routes ~sw ~clock router =
   register_delivery ~sw ~clock;
   router
-  |> Http.Router.get "/api/v1/lane-addons/broadcast-principal"
-       (with_tool_actor_auth ~tool_name:"masc_lane_evidence" (fun state caller request reqd ->
+  |> Server_route.get (Server_route.Tool_actor { tool_name = "masc_lane_evidence" }) "/api/v1/lane-addons/broadcast-principal"
+       (fun state caller request reqd ->
          let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
          match broadcast_principal ~base_path request caller with
          | Ok principal -> respond request reqd (Ok (`Assoc ["principal",`String principal]))
          | Error (Bad_request_detail detail) -> respond request reqd (Error detail)
-         | Error Credential_store_unreadable -> respond_unavailable request reqd))
-  |> Http.Router.get "/api/v1/lane-addons/package-catalog" get_package_catalog
-  |> Http.Router.get "/api/v1/lane-addons/package-preview" get_package_preview
-  |> Http.Router.post "/api/v1/lane-addons/subscriptions"
-       (with_tool_actor_auth ~tool_name:"masc_lane_updates" (fun state caller request reqd ->
+         | Error Credential_store_unreadable -> respond_unavailable request reqd)
+  |> Server_route.get Server_route.Read_auth "/api/v1/lane-addons/package-catalog" get_package_catalog
+  |> Server_route.get Server_route.Read_auth "/api/v1/lane-addons/package-preview" get_package_preview
+  |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_lane_updates" }) "/api/v1/lane-addons/subscriptions"
+       (fun state caller request reqd ->
          Http.Request.read_body_async reqd (fun body ->
            match source_access state request caller with
            | Error Source_credential_unreadable -> respond_unavailable request reqd
@@ -820,19 +813,19 @@ let add_routes ~sw ~clock router =
              let result = let* args=decode_body body in
                Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
                  Lane_addon_subscription.handle ~access ~config:(Mcp_server.workspace_config state) ~caller args) in
-             respond request reqd result)))
+             respond request reqd result))
   |> Http.Router.get "/api/v1/lane-addons/declaration" read_declaration
   |> Http.Router.post "/api/v1/lane-addons/declaration" save_declaration
   |> Http.Router.post "/api/v1/lane-addons/operator" operator_control
   |> Http.Router.get "/addons/oauth/callback" operator_callback
-  |> Http.Router.get "/api/v1/lane-addons" get_inspect
-  |> Http.Router.get "/api/v1/lane-addons/slice" get_slice
-  |> Http.Router.get "/api/v1/lane-addons/actions" get_action
-  |> Http.Router.get "/api/v1/lane-addons/live" get_live
-  |> Http.Router.get "/api/v1/lane-addons/asks" (with_read_auth handle_asks)
-  |> Http.Router.post "/api/v1/lane-addons/ask-answer"
-       (with_tool_actor_auth ~tool_name:"lane_addon_ask_answer_route" (fun state actor request reqd ->
-         handle_ask_answer ~actor state request reqd))
+  |> Server_route.get Server_route.Read_auth "/api/v1/lane-addons" get_inspect
+  |> Server_route.get Server_route.Read_auth "/api/v1/lane-addons/slice" get_slice
+  |> Server_route.get Server_route.Read_auth "/api/v1/lane-addons/actions" get_action
+  |> Server_route.get (Server_route.Permission Masc_domain.CanPlayMachine) "/api/v1/lane-addons/live" get_live
+  |> Server_route.get Server_route.Read_auth "/api/v1/lane-addons/asks" handle_asks
+  |> Server_route.post (Server_route.Tool_actor { tool_name = "lane_addon_ask_answer_route" }) "/api/v1/lane-addons/ask-answer"
+       (fun state actor request reqd ->
+         handle_ask_answer ~actor state request reqd)
   |> Http.Router.post "/api/v1/lane-addons/actions" (post ~operation:Runtime.Act ~tool_name:"masc_lane_act")
   |> Http.Router.post "/api/v1/lane-addons/attach" (post ~operation:Runtime.Attach ~tool_name:"masc_lane_attach")
   |> Http.Router.post "/api/v1/lane-addons/observe" (post ~operation:Runtime.Observe ~tool_name:"masc_lane_observe")

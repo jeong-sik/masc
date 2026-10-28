@@ -1101,9 +1101,7 @@ let parse_unified_diff lines =
 
 let add_routes router =
   router
-  |> Http.Router.get "/api/v1/workspace/tree" (fun request reqd ->
-       with_public_read
-         (fun state _req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/workspace/tree" (fun state request reqd ->
            let uri = Uri.of_string request.target in
            let base, source = resolve_workspace_base ~state ~uri in
            let depth =
@@ -1152,11 +1150,8 @@ let add_routes router =
            in
            cached_response_with_source_and_base ~source ~base_path:base request
              reqd payload)
-         request reqd)
 
-  |> Http.Router.get "/api/v1/workspace/files" (fun request reqd ->
-       with_public_read
-         (fun state _req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/workspace/files" (fun state request reqd ->
            let uri = Uri.of_string request.target in
            let base, source = resolve_workspace_base ~state ~uri in
            match source with
@@ -1193,11 +1188,8 @@ let add_routes router =
                          | Catalog_scan_failed detail -> `Internal_server_error, detail
                        in
                        json_response ~status request reqd (json_error message))
-         request reqd)
 
-  |> Http.Router.get "/api/v1/git/status" (fun request reqd ->
-       with_public_read
-         (fun state _req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/git/status" (fun state request reqd ->
            let uri = Uri.of_string request.target in
            let base, source = resolve_workspace_base ~state ~uri in
            let scope =
@@ -1238,17 +1230,14 @@ let add_routes router =
                              , `List (List.map git_status_file_json changes) )
                            ; ("total", `Int (List.length changes))
                            ])))
-         request reqd)
 
-  |> Http.Router.get "/api/v1/workspace/children" (fun request reqd ->
-       (* Lazy tree: return exactly one level of a directory's entries so the
-          IDE can expand deep trees on demand instead of relying on the single
-          bounded /tree snapshot (which, for the [project] workspace source, is
-          root-only). [base] stays the whole workspace base and only [dir] is
-          the subpath, so each node's path/parent/depth stay anchored to the
-          whole tree and merge into the client's flat node array. *)
-       with_public_read
-         (fun state _req reqd ->
+  (* Lazy tree: return exactly one level of a directory's entries so the
+     IDE can expand deep trees on demand instead of relying on the single
+     bounded /tree snapshot (which, for the [project] workspace source, is
+     root-only). [base] stays the whole workspace base and only [dir] is
+     the subpath, so each node's path/parent/depth stay anchored to the
+     whole tree and merge into the client's flat node array. *)
+  |> Server_route.get Server_route.Public_read "/api/v1/workspace/children" (fun state request reqd ->
            let uri = Uri.of_string request.target in
            let base, source = resolve_workspace_base ~state ~uri in
            match Uri.get_query_param uri "path" with
@@ -1305,11 +1294,8 @@ let add_routes router =
                 in
                 cached_response_with_source_and_base ~source ~base_path:base
                   request reqd payload))
-         request reqd)
 
-  |> Http.Router.get "/api/v1/workspace/file" (fun request reqd ->
-       with_public_read
-         (fun state _req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/workspace/file" (fun state request reqd ->
            let uri = Uri.of_string request.target in
            let base, source = resolve_workspace_base ~state ~uri in
            match source with
@@ -1347,11 +1333,8 @@ let add_routes router =
                      ~path:file.lexical_path
                      (Failure msg);
                    json_response ~status:`Internal_server_error request reqd (json_error "Failed to read file"))))
-         request reqd)
 
-  |> Http.Router.post "/api/v1/workspace/file" (fun request reqd ->
-       with_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun state _req reqd ->
+  |> Server_route.post (Server_route.Permission Masc_domain.CanAdmin) "/api/v1/workspace/file" (fun state request reqd ->
            Http.Request.read_body_async reqd (fun body ->
              let refuse status code detail =
                json_response ~status request reqd
@@ -1426,23 +1409,19 @@ let add_routes router =
                                refuse `Internal_server_error "workspace_file_save_uncertain" "File may have been saved; retain the draft and reread before another save")))
                 | _ -> invalid ())
              | _ -> invalid ()))
-         request reqd)
 
-  |> Http.Router.get "/api/v1/lsp/question" (fun request reqd ->
-       (* Ask the language server about a name: definition or hover, at the
-          occurrence-th start of [symbol] on a 1-based line. The same
-          question surface the keeper_code_query tool offers, over the same
-          [Lsp_position] arithmetic, reached through the workspace axes
-          (?keeper= / ?repo_id=) this file already resolves.
+  (* Ask the language server about a name: definition or hover, at the
+     occurrence-th start of [symbol] on a 1-based line. The same
+     question surface the keeper_code_query tool offers, over the same
+     [Lsp_position] arithmetic, reached through the workspace axes
+     (?keeper= / ?repo_id=) this file already resolves.
 
-          Token-gated where the file reads above are public: answering
-          spawns a language server. The pool is request-scoped
-          ([Lsp_turn_pool.with_turn_pool]) for the reason its mli measures —
-          a resident server holds 12-155 MB; a spawn costs tens of
-          milliseconds plus the first question's indexing. *)
-       with_token_permission_auth
-         ~permission:Masc_domain.CanBroadcast
-         (fun state _identity _req reqd ->
+     Token-gated where the file reads above are public: answering
+     spawns a language server. The pool is request-scoped
+     ([Lsp_turn_pool.with_turn_pool]) for the reason its mli measures —
+     a resident server holds 12-155 MB; a spawn costs tens of
+     milliseconds plus the first question's indexing. *)
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanBroadcast) "/api/v1/lsp/question" (fun state _identity request reqd ->
             let uri = Uri.of_string request.target in
             let base, _source = resolve_workspace_base ~state ~uri in
             let param name = Uri.get_query_param uri name in
@@ -1594,11 +1573,8 @@ let add_routes router =
                      in
                      json_response ~status:`OK request reqd
                        (`Assoc [ ("ok", `Bool true); ("data", data) ]))))
-         request reqd)
 
-  |> Http.Router.get "/api/v1/git/blame" (fun request reqd ->
-       with_public_read
-         (fun state _req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/git/blame" (fun state request reqd ->
            let uri = Uri.of_string request.target in
            let base, source = resolve_workspace_base ~state ~uri in
            let file_path =
@@ -1642,11 +1618,8 @@ let add_routes router =
                            `List grouped))
                   in
                   cached_response_with_source ~source request reqd payload)))
-         request reqd)
 
-  |> Http.Router.get "/api/v1/git/log" (fun request reqd ->
-       with_public_read
-         (fun state _req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/git/log" (fun state request reqd ->
            let uri = Uri.of_string request.target in
            let base, source = resolve_workspace_base ~state ~uri in
            let limit =
@@ -1704,11 +1677,8 @@ let add_routes router =
                               ]))
                      in
                      cached_response_with_source ~source request reqd payload)))
-         request reqd)
 
-  |> Http.Router.get "/api/v1/git/diff" (fun request reqd ->
-       with_public_read
-         (fun state _req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/git/diff" (fun state request reqd ->
            let uri = Uri.of_string request.target in
            let base, source = resolve_workspace_base ~state ~uri in
            let file_path =
@@ -1771,4 +1741,3 @@ let add_routes router =
                    json_response ~status:`Bad_request request reqd
                      (json_error "git diff failed")
                  | _ -> cached_response_with_source ~source request reqd payload))))
-         request reqd)

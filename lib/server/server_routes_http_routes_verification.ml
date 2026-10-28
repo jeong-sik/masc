@@ -213,10 +213,8 @@ let commit_operator_cancel_json ~config ~operator_id json =
 
 let add_routes router =
   router
-  |> Http.Router.get "/api/v1/goals/confirmation" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun state _operator_id req reqd ->
-           let config = Mcp_server.workspace_config state in
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/goals/confirmation" (fun state _operator_id req reqd ->
+           let request = req in let config = Mcp_server.workspace_config state in
            let result = match trimmed_query_param req "goal_id" with
              | None -> Error (Confirmation_rejected "goal_id is required")
              | Some goal_id -> Goal_store.transact_goal config ~goal_id (fun goal ->
@@ -229,10 +227,7 @@ let add_routes router =
            match result with
            | Ok result -> respond_json_value_with_cors request reqd result
            | Error error -> respond_confirmation_error request reqd error)
-         request reqd)
-  |> Http.Router.post "/api/v1/goals/confirmation" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun state operator_id _req reqd ->
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/goals/confirmation" (fun state operator_id request reqd ->
            Http.Request.read_body_async reqd (fun body ->
              let parsed = try
                commit_goal_confirmation_json ~config:(Mcp_server.workspace_config state)
@@ -241,10 +236,8 @@ let add_routes router =
              match parsed with
              | Ok result -> respond_json_value_with_cors request reqd result
              | Error error -> respond_confirmation_error request reqd error))
-         request reqd)
-  |> Http.Router.get "/api/v1/verification/requests" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         let task_id = trimmed_query_param req "task_id" in
+  |> Server_route.get Server_route.Public_read "/api/v1/verification/requests" (fun state req reqd ->
+         let request = req in let task_id = trimmed_query_param req "task_id" in
          let limit =
            match trimmed_query_param req "limit" with
            | Some s -> int_of_string_opt s
@@ -321,28 +314,22 @@ let add_routes router =
                 ?task_id ?limit ?offset ~view ()
             in
             Http.Response.json_value ~compress:true ~request:req json reqd)
-       ) request reqd)
-  |> Http.Router.get "/api/v1/verification/summary" (fun request reqd ->
-       with_public_read (fun state req reqd ->
+       )
+  |> Server_route.get Server_route.Public_read "/api/v1/verification/summary" (fun state req reqd ->
          let base_path = (Mcp_server.workspace_config state).base_path in
          let json = Dashboard_verification.summary_json ~base_path () in
          Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
-  |> Http.Router.get "/api/v1/verification/specs" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
+       )
+  |> Server_route.get Server_route.Public_read "/api/v1/verification/specs" (fun _state req reqd ->
          let json = Dashboard_tla_specs.specs_json () in
          Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
-  |> Http.Router.get "/api/v1/verification/tlc-results" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
+       )
+  |> Server_route.get Server_route.Public_read "/api/v1/verification/tlc-results" (fun _state req reqd ->
          let json = Dashboard_tla_specs.tlc_results_json () in
          Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
-  |> Http.Router.get "/api/v1/verification/evidence" (fun request reqd ->
-       with_token_permission_auth
-         ~permission:Masc_domain.CanAdmin
-         (fun state operator_id req reqd ->
-            let config = Mcp_server.workspace_config state in
+       )
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/verification/evidence" (fun state operator_id req reqd ->
+            let request = req in let config = Mcp_server.workspace_config state in
             match Server_utils.query_param req "task_id",Server_utils.query_param req "verification_id" with
             | (None,_) | (_,None) ->
               respond_json_value_with_cors
@@ -370,12 +357,7 @@ let add_routes router =
                    request
                    reqd
                    (error_json message)))
-         request
-         reqd)
-  |> Http.Router.post "/api/v1/dashboard/tasks/cancel" (fun request reqd ->
-       with_token_permission_auth
-         ~permission:Masc_domain.CanAdmin
-         (fun state operator_id _req reqd ->
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/tasks/cancel" (fun state operator_id request reqd ->
            Http.Request.read_body_async reqd (fun body ->
              let result =
                try commit_operator_cancel_json
@@ -395,11 +377,7 @@ let add_routes router =
                  (`Assoc [ "ok", `Bool true
                          ; "message", `String outcome.Workspace.message
                          ; "noop", `Bool outcome.noop ])))
-         request reqd)
-  |> Http.Router.post "/api/v1/verification/verdict" (fun request reqd ->
-       with_token_permission_auth
-         ~permission:Masc_domain.CanAdmin
-         (fun state operator_id _req reqd ->
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/verification/verdict" (fun state operator_id request reqd ->
             Http.Request.read_body_async reqd (fun body ->
               let parsed =
                 try
@@ -438,8 +416,6 @@ let add_routes router =
                        ; "message", `String outcome.Workspace.message
                        ; "noop", `Bool outcome.noop
                        ]))))
-         request
-         reqd)
 
 module For_testing = struct
   let commit_operator_cancel_json = commit_operator_cancel_json

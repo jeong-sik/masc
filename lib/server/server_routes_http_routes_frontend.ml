@@ -160,33 +160,27 @@ let add_routes ?sw ?clock ~port router =
   |> Http.Router.get "/health" health_handler
   |> Http.Router.get Server_health_paths.liveness liveness_handler
   |> Http.Router.get Server_health_paths.readiness readiness_handler
-  |> Http.Router.get "/.well-known/agent.json" (fun request reqd ->
-         with_public_read (fun _state req reqd ->
+  |> Server_route.get Server_route.Public_read "/.well-known/agent.json" (fun _state req reqd ->
          let request_authority = Server_request_authority.current_exn () in
          Http.Response.json_value
            (Runtime.agent_card_json ~request_authority req)
            reqd)
-         request reqd)
-  |> Http.Router.get "/.well-known/agent-card.json" (fun request reqd ->
-         with_public_read (fun _state req reqd ->
+  |> Server_route.get Server_route.Public_read "/.well-known/agent-card.json" (fun _state req reqd ->
          let request_authority = Server_request_authority.current_exn () in
          Http.Response.json_value
            (Runtime.agent_card_json ~request_authority req)
            reqd)
-         request reqd)
   |> Http.Router.ws_get "/ws" (websocket_handler ?sw ?clock)
   (* RFC-0217 S4-2 — Otel_metric_store scrape endpoint removed; metrics now
      export via OTLP push (Otel_metrics observable). *)
   |> Http.Router.get "/ag-ui/events" handle_ag_ui_events
   |> Http.Router.get "/events/presence" handle_presence_events
-  |> Http.Router.get "/favicon.ico" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
+  |> Server_route.get Server_route.Public_read "/favicon.ico" (fun _state req reqd ->
          serve_favicon req reqd
-       ) request reqd)
-  |> Http.Router.get "/favicon.svg" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
+       )
+  |> Server_route.get Server_route.Public_read "/favicon.svg" (fun _state req reqd ->
          serve_favicon req reqd
-       ) request reqd)
+       )
   (* Dashboard SPA: static assets — prefix match for /dashboard/assets/* *)
   |> Http.Router.prefix_get "/dashboard/assets/"
        (fun request reqd ->
@@ -224,8 +218,7 @@ let add_routes ?sw ?clock ~port router =
                  Http.Response.not_found reqd
              ) request reqd)
            request reqd)
-  |> Http.Router.get "/api/v1/openapi.json" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/openapi.json" (fun _state req reqd ->
          let request_authority = Server_request_authority.current_exn () in
          let resolved_host, resolved_port =
            authority_host_port ~default_port:port request_authority
@@ -235,15 +228,14 @@ let add_routes ?sw ?clock ~port router =
              ~host:resolved_host ~port:resolved_port ()
          in
          Http.Response.json_value json reqd
-       ) request reqd)
-  |> Http.Router.get "/api/v1/voice/config" (fun request reqd ->
-       with_public_read (fun _state _req reqd ->
+       )
+  |> Server_route.get Server_route.Public_read "/api/v1/voice/config" (fun _state _req reqd ->
          let status, json = voice_config_payload () in
          let status =
            match status with `OK -> `OK | `Error -> `Internal_server_error
          in
          Http.Response.json_value ~status json reqd
-       ) request reqd)
+       )
   |> Http.Router.get "/" (fun request reqd ->
        let request_authority = Server_request_authority.current_exn () in
        match
@@ -307,6 +299,5 @@ let add_routes ?sw ?clock ~port router =
        ~handler:(handle_delete_mcp ~profile:Server_mcp_transport_http.Operator_remote)
   |> Http.Router.add ~path:"/mcp/play" ~methods:[`DELETE]
        ~handler:(handle_delete_mcp ~profile:Server_mcp_transport_http.Seat)
-  |> Http.Router.add ~path:"/graphql" ~methods:[`GET; `POST]
-       ~handler:(fun request reqd ->
-         with_read_auth (fun _state req reqd -> handle_graphql req reqd) request reqd)
+  |> Server_route.add Server_route.Read_auth ~path:"/graphql" ~methods:[`GET; `POST]
+       (fun _state req reqd -> handle_graphql req reqd)

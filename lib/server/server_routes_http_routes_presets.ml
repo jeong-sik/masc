@@ -101,21 +101,15 @@ let write_snapshot ~save request reqd =
 
 let add_routes router =
   router
-  |> Http.Router.get "/api/v1/presets" (fun request reqd ->
-       with_read_auth
-         (fun state _req reqd ->
+  |> Server_route.get Server_route.Read_auth "/api/v1/presets" (fun state request reqd ->
            respond_json_value_with_cors
              request
              reqd
              (listing_json (Prompt_preset.list ~base_path:(base_path_of state))))
-         request
-         reqd)
   (* A manifest counts what a preset holds; this names it. Deciding whether
      to apply one otherwise means applying it and reading the result, which
      is the decision itself. *)
-  |> Http.Router.get "/api/v1/presets/show" (fun request reqd ->
-       with_read_auth
-         (fun state _req reqd ->
+  |> Server_route.get Server_route.Read_auth "/api/v1/presets/show" (fun state request reqd ->
            match
              Server_mcp_transport_http_session.query_param request "name"
            with
@@ -162,8 +156,6 @@ let add_routes router =
                    request
                    reqd
                    (error_json message)))
-         request
-         reqd)
   |> Http.Router.post "/api/v1/presets"
        (write_snapshot ~save:(fun ~base_path snapshot ->
           Prompt_preset.save ~base_path snapshot
@@ -178,10 +170,7 @@ let add_routes router =
               | Prompt_preset.Failed _ -> `Internal_server_error
             in
             status, Prompt_preset.create_error_to_string error)))
-  |> Http.Router.post "/api/v1/presets/restore" (fun request reqd ->
-       with_permission_auth
-         ~permission:Masc_domain.CanAdmin
-         (fun state _req reqd ->
+  |> Server_route.post (Server_route.Permission Masc_domain.CanAdmin) "/api/v1/presets/restore" (fun state request reqd ->
            Http.Request.read_body_async reqd (fun body ->
              match decode_name_request body with
              | Error message ->
@@ -200,12 +189,7 @@ let add_routes router =
                     request
                     reqd
                     (error_json message))))
-         request
-         reqd)
-  |> Http.Router.post "/api/v1/presets/delete" (fun request reqd ->
-       with_permission_auth
-         ~permission:Masc_domain.CanAdmin
-         (fun state _req reqd ->
+  |> Server_route.post (Server_route.Permission Masc_domain.CanAdmin) "/api/v1/presets/delete" (fun state request reqd ->
            Http.Request.read_body_async reqd (fun body ->
              match decode_name_request body with
              | Error message ->
@@ -225,6 +209,4 @@ let add_routes router =
                       `Internal_server_error
                   in
                   respond_json_value_with_cors ~status request reqd (error_json message))))
-         request
-         reqd)
 ;;

@@ -44,13 +44,11 @@ let perform_bound ~config ~who body =
         |> response ~viewer:who
 let add_routes router =
   router
-  |> Http.Router.get path (fun request reqd ->
-    with_token_permission_auth ~permission:Masc_domain.CanPlayMachine (fun state name request reqd ->
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanPlayMachine) path (fun state name request reqd ->
       let config = Mcp_server.workspace_config state in
-      respond ~viewer:name request reqd (read ~base_path:config.base_path request)) request reqd)
-  |> Http.Router.post path (fun request reqd ->
-    with_token_permission_auth ~permission:Masc_domain.CanPlayMachine (fun state name request reqd ->
+      respond ~viewer:name request reqd (read ~base_path:config.base_path request))
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanPlayMachine) path (fun state name request reqd ->
       let config = Mcp_server.workspace_config state in
       Http.Request.read_body_async reqd (fun body ->
         let status, json = perform_bound ~config ~who:name body in
-        respond_json_value_with_cors ~status request reqd json)) request reqd)
+        respond_json_value_with_cors ~status request reqd json))

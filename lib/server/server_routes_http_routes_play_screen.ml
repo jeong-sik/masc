@@ -50,13 +50,10 @@ let screen_response ~config =
 
 let add_routes router =
   router
-  |> Http.Router.get screen_path (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanPlayMachine
-         (fun state _name request reqd ->
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanPlayMachine) screen_path (fun state _name request reqd ->
            match screen_response ~config:(Mcp_server.workspace_config state) with
            | Ok png ->
              Http.Response.bytes
                ~headers:[ ("cache-control", "no-store"); ("x-content-type-options", "nosniff") ]
                ~content_type:png_content_type png reqd
            | Error (status, json) -> respond_json_value_with_cors ~status request reqd json)
-         request reqd)

@@ -174,9 +174,7 @@ let blob_response ~base_path ~sha256 =
 
 let add_routes router =
   router
-  |> Http.Router.prefix_get "/api/v1/artifacts/" (fun request reqd ->
-       with_token_permission_auth ~permission:artifact_read_permission
-         (fun state _agent_name _req reqd ->
+  |> Server_route.prefix_get (Server_route.Token_permission artifact_read_permission) "/api/v1/artifacts/" (fun state _agent_name request reqd ->
            let base_path = (Mcp_server.workspace_config state).base_path in
            let path = Http.Request.path request in
            match extract_path_param ~prefix:"/api/v1/artifacts/" path with
@@ -203,10 +201,7 @@ let add_routes router =
                         blob_response ~base_path ~sha256:raw)
                     in
                     respond_json_value_with_cors ~status request reqd json))
-         request reqd)
-  |> Http.Router.prefix_get "/api/v1/artifact-bytes/" (fun request reqd ->
-       with_token_permission_auth ~permission:artifact_read_permission
-         (fun state _agent_name _req reqd ->
+  |> Server_route.prefix_get (Server_route.Token_permission artifact_read_permission) "/api/v1/artifact-bytes/" (fun state _agent_name request reqd ->
            let base_path = (Mcp_server.workspace_config state).base_path in
            let path = Http.Request.path request in
            match extract_path_param ~prefix:"/api/v1/artifact-bytes/" path with
@@ -243,10 +238,7 @@ let add_routes router =
                      sha256 (Tool_blob_store.fetch_error_to_string error);
                    respond_json_value_with_cors ~status:`Service_unavailable request reqd
                      (`Assoc [ "error", `String "tool blob read failed" ]))))
-         request reqd)
-  |> Http.Router.post "/api/v1/artifacts" (fun request reqd ->
-       with_token_permission_auth ~permission:artifact_upload_permission
-         (fun state agent_name _req reqd ->
+  |> Server_route.post (Server_route.Token_permission artifact_upload_permission) "/api/v1/artifacts" (fun state agent_name request reqd ->
            let base_path = (Mcp_server.workspace_config state).base_path in
            let declared =
              Option.bind (Http.Request.header request "content-length") int_of_string_opt
@@ -273,4 +265,3 @@ let add_routes router =
                | `Internal exn ->
                  Log.Misc.error "artifact upload failed: %s" (Printexc.to_string exn);
                  refuse Upload_store_failed))
-         request reqd)

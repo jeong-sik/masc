@@ -163,10 +163,8 @@ let provenance_response ~id_str =
 
 let add_routes router =
   router
-  |> Http.Router.prefix_get "/api/v1/multimodal/list"
-       (fun request reqd ->
-         with_public_read
-           (fun _state _req reqd ->
+  |> Server_route.prefix_get Server_route.Public_read "/api/v1/multimodal/list"
+       (fun _state request reqd ->
              let kind_filter =
                Server_utils.query_param request "kind"
              in
@@ -178,11 +176,8 @@ let add_routes router =
                list_response ?kind_filter ?created_by_filter ?query ()
              in
              respond_public_read_json_value ~status:`OK request reqd json)
-           request reqd)
-  |> Http.Router.prefix_get "/api/v1/multimodal/get/"
-       (fun request reqd ->
-         with_public_read
-           (fun _state _req reqd ->
+  |> Server_route.prefix_get Server_route.Public_read "/api/v1/multimodal/get/"
+       (fun _state request reqd ->
              let path = Http.Request.path request in
              match
                extract_path_param
@@ -196,11 +191,8 @@ let add_routes router =
                    artifact_response ~id_str
                  in
                  respond_public_read_json_value ~status request reqd json)
-           request reqd)
-  |> Http.Router.prefix_get "/api/v1/multimodal/provenance/"
-       (fun request reqd ->
-         with_public_read
-           (fun _state _req reqd ->
+  |> Server_route.prefix_get Server_route.Public_read "/api/v1/multimodal/provenance/"
+       (fun _state request reqd ->
              let path = Http.Request.path request in
              match
                extract_path_param
@@ -214,4 +206,3 @@ let add_routes router =
                    provenance_response ~id_str
                  in
                  respond_public_read_json_value ~status request reqd json)
-           request reqd)

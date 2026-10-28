@@ -118,17 +118,11 @@ let press_response ~config ~who ~body =
 
 let add_routes router =
   router
-  |> Http.Router.get pad_path (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanPlayMachine
-         (fun state _name request reqd ->
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanPlayMachine) pad_path (fun state _name request reqd ->
            let status, json = get_response ~config:(Mcp_server.workspace_config state) in
            respond_json_value_with_cors ~status request reqd json)
-         request reqd)
-  |> Http.Router.post pad_path (fun request reqd ->
-       with_tool_actor_auth ~tool_name:"masc_dos_press"
-         (fun state who request reqd ->
+  |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_dos_press" }) pad_path (fun state who request reqd ->
            let config = Mcp_server.workspace_config state in
            Http.Request.read_body_async reqd (fun body ->
              let status, json = press_response ~config ~who ~body in
              respond_json_value_with_cors ~status request reqd json))
-         request reqd)

@@ -18571,7 +18571,7 @@ let keeper_log_rows (state : state) ~cols =
       let header = text_rows Keeper_log_notice ("Execute output · " ^ state_text ^ status) in
       let active = List.concat_map (fun stream ->
         let task = match stream.kes_task with None -> "" | Some id -> " task=" ^ id in
-        text_rows Keeper_log_fact (Printf.sprintf "active [%d%s] %s"
+        text_rows Keeper_log_fact (Printf.sprintf "active [%d%s] command summary: %s"
           stream.kes_id task stream.kes_command)) reading.kes_active in
       let truncated = if reading.kes_first_seq > 1 then
         text_rows Keeper_log_warning (Printf.sprintf
@@ -18585,8 +18585,9 @@ let keeper_log_rows (state : state) ~cols =
       observed @ header @ active @ truncated @ visible_note @ List.concat_map (fun line ->
         let id = match line.kel_stream_id with None -> "?" | Some id -> string_of_int id in
         let task = match line.kel_task_id with None -> "" | Some id -> " task=" ^ id in
+        let stream = if String.equal line.kel_stream "cmd" then "command summary" else line.kel_stream in
         text_rows Keeper_log_fact (Printf.sprintf "#%d [%s %s%s] %s"
-          line.kel_seq id line.kel_stream task line.kel_text)) lines in
+          line.kel_seq id stream task line.kel_text)) lines in
     match keeper_execute_view state with
     | Masc_tui_fetched.Absent -> text_rows Keeper_log_notice "Execute output has not been read."
     | Loading -> text_rows Keeper_log_notice "Reading Execute output…"

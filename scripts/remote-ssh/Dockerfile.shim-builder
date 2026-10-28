@@ -10,4 +10,4 @@ RUN set -eu; \
     opam update default; \
     opam switch create masc-shim "ocaml-base-compiler.$OCAML_COMPILER" -y; \
     test "$(opam exec --switch=masc-shim -- ocamlc -version)" = "$OCAML_COMPILER"; \
-    opam install --switch=masc-shim -y dune yojson base64
+    opam install --switch=masc-shim -y dune yojson base64 uuidm

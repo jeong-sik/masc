@@ -112,6 +112,10 @@ type probe_observations =
 
 type shared_state =
   { semaphore : Eio.Semaphore.t
+  ; probe_lock : Cross_context_mutex.t
+    (* A probe must finish before the next probe for this endpoint begins.
+       Otherwise a delayed older response can make a boot comparison run
+       backwards. The lock is shared with both Eio and non-Eio callers. *)
   ; first_dispatch_logged : bool Atomic.t
   ; probe_answer : probe_answer option Atomic.t
     (* What the endpoint's shim answered to [--probe], kept for the life of
@@ -161,6 +165,7 @@ let shared_state ((_, _, _, _, _, max_concurrent_sessions) as identity : endpoin
     | None ->
       let state =
         { semaphore = Eio.Semaphore.make max_concurrent_sessions
+        ; probe_lock = Cross_context_mutex.create ()
         ; first_dispatch_logged = Atomic.make false
         ; probe_answer = Atomic.make None
         ; probe_observations = Atomic.make
@@ -657,7 +662,7 @@ let record_probe_failure shared ~at ~detail =
   Lockfree_atomic.update shared.probe_observations (fun previous ->
     { previous with latest = Probe_failed { at; detail } })
 
-let run_probe t =
+let run_probe_locked t =
   let response =
     try Ok (Process_eio.run_argv_with_stdin_and_status_split
       ~timeout_sec:(preflight_timeout_sec t)
@@ -717,6 +722,10 @@ let run_probe t =
    | Error detail ->
      record_probe_failure t.shared ~at:(Unix.gettimeofday ()) ~detail);
   outcome
+;;
+
+let run_probe t =
+  Cross_context_mutex.with_lock t.shared.probe_lock (fun () -> run_probe_locked t)
 ;;
 
 let rec record_dispatch (shared : shared_state) ~keeper_name record =

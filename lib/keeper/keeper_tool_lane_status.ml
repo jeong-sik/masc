@@ -17,16 +17,19 @@ let failure_label = function
    decision of which text is the variant's, never the detail string's. *)
 let action_of_failure = function
   | Keeper_sandbox_remote.Local_timeout ->
-    "The local transport timed out before it received a trustworthy result. \
-     The endpoint's power state and the command's effects are unknown; inspect \
-     the endpoint and effects before deciding whether to run it again."
+    "The host timed out without a completed shim reply. Whether the payload \
+     started or produced effects is unknown; an earlier probe does not prove \
+     the lane is currently healthy or establish the endpoint's power state. \
+     Inspect the endpoint and reconcile any effects before retrying."
   | Keeper_sandbox_remote.Remote_timeout ->
-    "The payload ran out of its time budget; the lane itself worked. Shorten the \
-     command or raise timeout_sec. No operator action."
+    "The shim reported that the payload timed out. Partial effects may have \
+     occurred; reconcile them before retrying."
   | Keeper_sandbox_remote.Transport_failed ->
     "The lane could not read the shim's answer. The endpoint, authentication, \
      transport, or protocol may be unavailable; this does not establish that \
-     the machine is powered off. The operator must inspect the endpoint. A \
+     the machine is powered off. The operator must inspect the endpoint; if \
+     the detail names remote_ssh_version_error, the operator has to replace the \
+     shim. A \
      dispatched effect may have happened; inspect it before running it again."
   | Keeper_sandbox_remote.Shim_refused ->
     "The shim refused the request itself: a cwd outside its jail, a config it \
@@ -119,21 +122,18 @@ let json_of_report (r : Keeper_sandbox_remote.lane_report) : Yojson.Safe.t =
           ]
       , Some (action_of_failure failure) )
   in
-  (* Guidance belongs to the newest observation, including a successful
-     observation which clears an older failure. *)
+  (* A later successful probe does not settle an earlier dispatch's effects.
+     An older failed probe, however, no longer describes connectivity if a
+     later dispatch finished. Keep the remaining observations independent. *)
   let operator_action =
-    let probe_at = match r.probe with
-      | Keeper_sandbox_remote.Probe_not_asked -> None
-      | Probe_answered { observed_at; _ } -> Some observed_at
-      | Probe_failed { at; _ } -> Some at in
-    let dispatch_at = match r.last_dispatch with
-      | None -> None
-      | Some (Keeper_sandbox_remote.Payload_finished { at; _ }
-             | Keeper_sandbox_remote.Dispatch_failed { at; _ }) -> Some at in
-    let action = match dispatch_at, probe_at with
-      | Some dispatch_at, Some probe_at when dispatch_at > probe_at -> dispatch_action
-      | _, Some _ -> probe_action
-      | Some _, None -> dispatch_action
+    let probe_action = match r.probe, r.last_dispatch with
+      | Keeper_sandbox_remote.Probe_failed { at = probe_at; _ },
+        Some (Keeper_sandbox_remote.Payload_finished { at = dispatch_at; _ })
+        when dispatch_at > probe_at -> None
+      | _ -> probe_action in
+    let action = match dispatch_action, probe_action with
+      | Some dispatch, Some probe -> Some (dispatch ^ " " ^ probe)
+      | Some action, None | None, Some action -> Some action
       | None, None -> None in
     match action with Some action -> `String action | None -> `Null
   in

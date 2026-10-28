@@ -7,7 +7,7 @@
 # vendor hands out (Debian, Ubuntu, Amazon Linux, RHEL, Alpine, ...).
 #
 # The build runs inside ocaml/opam containers; nothing is installed on the
-# host. The first run per architecture installs the shim's dune/yojson/base64
+# host. The first run per architecture installs the shim's dune/yojson/base64/uuidm
 # closure into the container and caches it by architecture, base image,
 # compiler, dependency manifest and builder recipe so matching runs skip the opam step.
 #

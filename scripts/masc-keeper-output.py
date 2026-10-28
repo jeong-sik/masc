@@ -70,7 +70,7 @@ class Output:
                         present = any(isinstance(line, dict) and line.get("stream") == "cmd"
                                       and line.get("stream_id") == stream.get("stream_id") for line in lines)
                         if not present:
-                            print(f"[{safe_text(keeper)} #{safe_text(stream.get('stream_id', '?'))} active task={safe_text(stream.get('task_id'))}] {safe_text(stream['command'])}", flush=True)
+                            print(f"[{safe_text(keeper)} #{safe_text(stream.get('stream_id', '?'))} active task={safe_text(stream.get('task_id'))} command summary] {safe_text(stream['command'])}", flush=True)
                 for line in lines:
                     if isinstance(line, dict):
                         self._line(keeper, line)
@@ -90,7 +90,9 @@ class Output:
 
     @staticmethod
     def _line(keeper: str, line: dict) -> None:
-        print(f"[{safe_text(keeper)} #{safe_text(line.get('stream_id', '?'))} {safe_text(line.get('stream', '?'))} task={safe_text(line.get('task_id'))}] {safe_text(line.get('text', ''))}", flush=True)
+        stream = line.get("stream", "?")
+        label = "command summary" if stream == "cmd" else safe_text(stream)
+        print(f"[{safe_text(keeper)} #{safe_text(line.get('stream_id', '?'))} {label} task={safe_text(line.get('task_id'))}] {safe_text(line.get('text', ''))}", flush=True)
 
     def close(self) -> None:
         if self.log:

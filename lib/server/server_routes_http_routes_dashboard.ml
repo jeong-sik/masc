@@ -140,7 +140,8 @@ let handle_execute_output_snapshot _state req inner_reqd =
     (match limit with
      | Some limit when limit > 0 && limit <= Dashboard_execute_output.event_log_capacity ->
        Http.Response.json_value ~request:req
-         ~extra_headers:[ "cache-control", "private, no-store" ]
+         ~extra_headers:([ "cache-control", "private, no-store" ]
+                         @ public_read_cors_headers req)
          (Dashboard_execute_output.event_json_limited ~keeper_name ~line_limit:limit)
          inner_reqd
      | Some _ | None ->
@@ -170,7 +171,6 @@ let handle_execute_output_stream ~sw ~clock _state req inner_reqd =
            inner_reqd
            "keeper path parameter is required"
        | Some keeper_name ->
-         let origin = get_origin req in
          let headers =
            Httpun.Headers.of_list
              ([ "content-type", "text/event-stream"
@@ -178,7 +178,7 @@ let handle_execute_output_stream ~sw ~clock _state req inner_reqd =
               ; "connection", "keep-alive"
               ; "x-accel-buffering", "no"
               ]
-              @ cors_headers origin)
+              @ public_read_cors_headers req)
          in
          let response = Httpun.Response.create ~headers `OK in
          let writer = Httpun.Reqd.respond_with_streaming inner_reqd response in

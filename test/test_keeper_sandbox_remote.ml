@@ -185,14 +185,17 @@ let make_stub ~dir ~mode =
   script_path, frame_path
 ;;
 
-let with_eio f =
+let with_eio_env f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Process_eio.init
     ~cwd_default:Eio.Path.(Eio.Stdenv.fs env / Sys.getcwd ())
     ~proc_mgr:(Eio.Stdenv.process_mgr env)
     ~clock:(Eio.Stdenv.clock env);
-  Fun.protect ~finally:Process_eio.reset_for_testing f
+  Fun.protect ~finally:Process_eio.reset_for_testing (fun () -> f env)
+;;
+
+let with_eio f = with_eio_env (fun _ -> f ())
 ;;
 
 let with_env key value f =
@@ -687,6 +690,138 @@ let test_fresh_probe_and_boot_comparison () =
     (observed Boot_unchanged (Some boot_b) = changed_at)
 ;;
 
+(* The first shim captures the old boot but cannot answer until released.
+   A second Keeper names the same endpoint and would answer the new boot
+   immediately if probes were allowed to overlap. *)
+let delayed_probe_fixture ~base_path =
+  let boot_a = "70d55243-7a2b-47bc-95b3-c133f134854e" in
+  let boot_b = "8c4c50be-d69a-497a-a5a8-d80e4848b0f3" in
+  let path name = Filename.concat base_path name in
+  let first_started = path "first-started" in
+  let second_started = path "second-started" in
+  let release_first = path "release-first" in
+  let probe boot_id = Exec_ssh_protocol.render_probe
+      { name = "masc-exec-shim"; version = "3.0.0"; capabilities = [];
+        release = None; boot_id = Some boot_id } in
+  save (path "boot-a") (probe boot_a);
+  save (path "boot-b") (probe boot_b);
+  let cli = path "serial-probe-cli" in
+  save cli
+    (Printf.sprintf
+       "#!/bin/sh\nif mkdir %s 2>/dev/null; then\n  : > %s\n  while [ ! -e %s ]; do sleep 0.02; done\n  cat %s\nelse\n  : > %s\n  cat %s\nfi\n"
+       (shell_quote (path "first-owner")) (shell_quote first_started)
+       (shell_quote release_first) (shell_quote (path "boot-a"))
+       (shell_quote second_started) (shell_quote (path "boot-b")));
+  Unix.chmod cli 0o700;
+  let state keeper_name =
+    Keeper_sandbox_remote.of_container_exec ~base_path ~keeper_name
+      ~remote_root ~gh_config_dir ~injected_env:[] ~env_allowlist:[ "LANG" ]
+      ~connect_timeout_sec:1 ~max_concurrent_sessions:2 (guest ~cli ()) in
+  state "keeper-a", state "keeper-b", first_started, second_started, release_first, boot_b
+;;
+
+let await_fixture_file clock path =
+  Eio.Time.with_timeout_exn clock 3.0 (fun () ->
+    let rec wait () =
+      if not (Sys.file_exists path) then (Eio.Time.sleep clock 0.01; wait ()) in
+    wait ())
+;;
+
+let assert_new_boot state boot_b =
+  match (Keeper_sandbox_remote.report state).probe with
+  | Probe_answered { boot; _ } ->
+    check (option string) "last probe observed the new boot" (Some boot_b) boot.boot_id;
+    check bool "the boot changed after the first answer" true (boot.change = Boot_changed)
+  | Probe_not_asked | Probe_failed _ -> fail "expected the second probe to answer"
+;;
+
+let test_concurrent_probes_do_not_reorder_boots () =
+  with_eio_env @@ fun env ->
+  let base_path = temp_dir () in
+  let first, second, first_started, second_started, release_first, boot_b =
+    delayed_probe_fixture ~base_path in
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let first_result, finish_first = Eio.Promise.create () in
+  let second_entered, enter_second = Eio.Promise.create () in
+  let second_result, finish_second = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Promise.resolve finish_first (Keeper_sandbox_remote.For_testing.run_probe first));
+  await_fixture_file clock first_started;
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Promise.resolve enter_second ();
+    Eio.Promise.resolve finish_second (Keeper_sandbox_remote.For_testing.run_probe second));
+  Eio.Promise.await second_entered;
+  Eio.Time.sleep clock 0.1;
+  check bool "the second endpoint probe waits for the first" false (Sys.file_exists second_started);
+  save release_first "release";
+  (match Eio.Promise.await first_result, Eio.Promise.await second_result with
+   | Ok _, Ok _ -> ()
+   | _ -> fail "a serialized probe failed");
+  assert_new_boot second boot_b
+;;
+
+let test_cancelled_probe_waiter_releases_ownership () =
+  with_eio_env @@ fun env ->
+  let base_path = temp_dir () in
+  let first, second, first_started, second_started, release_first, boot_b =
+    delayed_probe_fixture ~base_path in
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let first_result, finish_first = Eio.Promise.create () in
+  let waiter_context, provide_waiter_context = Eio.Promise.create () in
+  let waiter_result, finish_waiter = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Promise.resolve finish_first (Keeper_sandbox_remote.For_testing.run_probe first));
+  await_fixture_file clock first_started;
+  Eio.Fiber.fork ~sw (fun () ->
+    let result =
+      try Eio.Cancel.sub (fun context ->
+        Eio.Promise.resolve provide_waiter_context context;
+        ignore (Keeper_sandbox_remote.For_testing.run_probe second);
+        `Returned)
+      with Eio.Cancel.Cancelled _ -> `Cancelled in
+    Eio.Promise.resolve finish_waiter result);
+  let context = Eio.Promise.await waiter_context in
+  Eio.Cancel.cancel context Exit;
+  (match Eio.Promise.await waiter_result with
+   | `Cancelled -> () | `Returned -> fail "a cancelled waiter entered the probe");
+  check bool "the cancelled waiter did not start a process" false (Sys.file_exists second_started);
+  save release_first "release";
+  (match Eio.Promise.await first_result with Ok _ -> () | Error error -> fail error);
+  (match Keeper_sandbox_remote.For_testing.run_probe second with Ok _ -> () | Error error -> fail error);
+  assert_new_boot second boot_b
+;;
+
+let test_cancelled_probe_owner_releases_ownership () =
+  with_eio_env @@ fun env ->
+  let base_path = temp_dir () in
+  let first, second, first_started, _, _, boot_b = delayed_probe_fixture ~base_path in
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let owner_context, provide_owner_context = Eio.Promise.create () in
+  let owner_result, finish_owner = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    let result =
+      try Eio.Cancel.sub (fun context ->
+        Eio.Promise.resolve provide_owner_context context;
+        ignore (Keeper_sandbox_remote.For_testing.run_probe first);
+        `Returned)
+      with Eio.Cancel.Cancelled _ -> `Cancelled in
+    Eio.Promise.resolve finish_owner result);
+  let context = Eio.Promise.await owner_context in
+  await_fixture_file clock first_started;
+  Eio.Cancel.cancel context Exit;
+  (match Eio.Promise.await owner_result with
+   | `Cancelled -> () | `Returned -> fail "the owner ignored cancellation");
+  (match Keeper_sandbox_remote.For_testing.run_probe second with Ok _ -> () | Error error -> fail error);
+  (match (Keeper_sandbox_remote.report second).probe with
+   | Probe_answered { boot; _ } ->
+     check (option string) "the next probe observed the new boot" (Some boot_b) boot.boot_id;
+     check bool "a cancelled probe did not establish a baseline" true (boot.change = Boot_first)
+   | Probe_not_asked | Probe_failed _ -> fail "probe did not resume after owner cancellation")
+;;
+
 (* The tool's JSON names the operator action from the failure's class. *)
 (* RFC-0427 B-3. The shim names the release it came from, so the keeper reading
    its own lane sees whether the endpoint runs this server's shim. A shim from
@@ -756,6 +891,8 @@ let test_the_lane_status_names_who_acts () =
     (Yojson.Safe.Util.to_string (field "failure" (field "last_dispatch" version_skew)));
   check bool "transport failure does not prove power state" true
     (contains "does not establish" (Yojson.Safe.Util.to_string (field "operator_action" version_skew)));
+  check bool "the action says who replaces the shim" true
+    (contains "operator has to replace the shim" (Yojson.Safe.Util.to_string (field "operator_action" version_skew)));
   let timeout_action failure =
     report
       (Some (Keeper_sandbox_remote.Dispatch_failed { at; failure; detail = "timeout" }))
@@ -796,7 +933,14 @@ let test_the_lane_status_names_who_acts () =
       (Some (Keeper_sandbox_remote.Payload_finished { at = 1.0; status = Unix.WEXITED 0 }))
       (Keeper_sandbox_remote.Probe_failed { at = 2.0; detail = "new failure" }) in
   check bool "a later failed probe is reported" true
-    (match field "operator_action" failed_again with `String _ -> true | _ -> false)
+    (match field "operator_action" failed_again with `String _ -> true | _ -> false);
+  let reconnected = report
+      (Some (Keeper_sandbox_remote.Dispatch_failed { at = 1.0; failure = Transport_failed; detail = "lost" }))
+      (Keeper_sandbox_remote.Probe_answered
+        { major = Exec_ssh_protocol.V3; capabilities = []; release = Some Build_version.current; observed_at = 2.0
+        ; boot = { boot_id = None; change = Boot_unreported; last_changed_at = None } }) in
+  check bool "a successful probe does not settle an uncertain dispatch" true
+    (contains "effect may have happened" (Yojson.Safe.Util.to_string (field "operator_action" reconnected)))
 ;;
 
 let test_lane_error_codes () =
@@ -1097,6 +1241,9 @@ let () =
               test_interrupted_wire_publishes_unknown_receipt
           ; test_case "transport + probe argv" `Quick test_transport_and_probe_argv
           ; test_case "latest probe and boot comparison" `Quick test_fresh_probe_and_boot_comparison
+          ; test_case "shared endpoint probes cannot reorder boots" `Quick test_concurrent_probes_do_not_reorder_boots
+          ; test_case "cancelled probe waiter leaves lock reusable" `Quick test_cancelled_probe_waiter_releases_ownership
+          ; test_case "cancelled probe owner leaves lock reusable" `Quick test_cancelled_probe_owner_releases_ownership
           ; test_case "caller cannot replace runner-owned env" `Quick
               test_caller_cannot_replace_runner_owned_env
           ; test_case "probe prefers probe_prefix when present" `Quick

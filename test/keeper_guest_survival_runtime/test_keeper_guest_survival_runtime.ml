@@ -150,7 +150,7 @@ let provider root args =
      | [] | [_] -> () | _ -> fail "provider invalid rows")
   | "exec" :: rest ->
     if List.mem "--probe" rest then (
-      print_string (Exec_ssh_protocol.render_probe {name="masc-exec-shim"; version="3.0.0"; capabilities=[]; release=None});
+      print_string (Exec_ssh_protocol.render_probe {name="masc-exec-shim"; version="3.0.0"; capabilities=[]; release=None; boot_id=None});
       flush stdout)
     else if List.mem Microvm.shim_guest_path rest then (
       let header = read_exact Unix.stdin 8 in

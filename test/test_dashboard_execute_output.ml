@@ -637,10 +637,15 @@ let test_route_delivers_open_stream_and_releases_on_disconnect () =
           Eio.Switch.run (fun sw ->
             let routes = Server_routes_http_routes_dashboard.add_routes
                 ~sw ~clock:(Eio.Stdenv.clock env) (Router.create ()) in
+            let authority = match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
+              | Ok authority -> authority
+              | Error `Malformed -> fail "invalid test authority" in
+            let dispatch reqd =
+              Server_request_authority.with_current authority (fun () ->
+                Router.dispatch routes (Httpun.Reqd.request reqd) reqd) in
             EO.inject_for_testing ~keeper_name:"alpha" ~task_id:"first"
               ~stdout:"before subscription\n" ~stderr:"" ~status:status_ok ();
-            let connection = Httpun.Server_connection.create (fun reqd ->
-              Router.dispatch routes (Httpun.Reqd.request reqd) reqd) in
+            let connection = Httpun.Server_connection.create dispatch in
             let request = "GET /api/v1/dashboard/execute-output/alpha HTTP/1.1\r\nHost: localhost\r\n\r\n" in
             let input = Bigstringaf.of_string ~off:0 ~len:(String.length request) request in
             ignore (Httpun.Server_connection.read connection input ~off:0 ~len:(Bigstringaf.length input));
@@ -684,14 +689,50 @@ let test_route_delivers_open_stream_and_releases_on_disconnect () =
             in
             disconnect_when_writable ();
 
+            (* The browser may send an Origin on an EventSource GET. A
+               rejected origin must not receive permission to read output,
+               even when the loopback server allows unauthenticated reads. *)
+            let stream_headers origin =
+              let conn = Httpun.Server_connection.create dispatch in
+              let request = Printf.sprintf
+                  "GET /api/v1/dashboard/execute-output/alpha HTTP/1.1\r\nHost: 127.0.0.1:8935\r\nOrigin: %s\r\n\r\n" origin in
+              let bytes = Bigstringaf.of_string ~off:0 ~len:(String.length request) request in
+              ignore (Httpun.Server_connection.read conn bytes ~off:0 ~len:(Bigstringaf.length bytes));
+              let response = Buffer.create 512 in
+              let rec read () =
+                if String_util.contains_substring (Buffer.contents response) "\r\n\r\n" then
+                  (Httpun.Server_connection.shutdown conn; Buffer.contents response)
+                else match Httpun.Server_connection.next_write_operation conn with
+                  | `Write iovecs ->
+                    let count = List.fold_left (fun count (iov : Bigstringaf.t Httpun.IOVec.t) ->
+                      Buffer.add_string response
+                        (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len);
+                      count + iov.len) 0 iovecs in
+                    Httpun.Server_connection.report_write_result conn (`Ok count);
+                    read ()
+                  | `Yield ->
+                    let ready, resolve = Eio.Promise.create () in
+                    Httpun.Server_connection.yield_writer conn (fun () -> Eio.Promise.resolve resolve ());
+                    Eio.Promise.await ready;
+                    read ()
+                  | `Close _ -> fail "stream closed before response headers" in
+              read () in
+            let evil = String.lowercase_ascii (stream_headers "https://evil.example") in
+            check bool "cross-origin stream does not grant browser read access" false
+              (String_util.contains_substring evil "access-control-allow-origin:");
+            let same = String.lowercase_ascii (stream_headers "http://127.0.0.1:8935") in
+            check bool "same-origin stream is allowed" true
+              (String_util.contains_substring same
+                 "access-control-allow-origin: http://127.0.0.1:8935");
+
             (* The snapshot is the same retained observation and is bound to
                the requesting workspace by the ordinary read precondition. *)
             let snapshot_path = "/api/v1/dashboard/execute-output-snapshot/alpha" in
-            let wire_response target =
+            let wire_response ?origin target =
               let response = Buffer.create 1024 in
-              let conn = Httpun.Server_connection.create (fun reqd ->
-                Router.dispatch routes (Httpun.Reqd.request reqd) reqd) in
-              let request = Printf.sprintf "GET %s HTTP/1.0\r\nHost: localhost\r\n\r\n" target in
+              let conn = Httpun.Server_connection.create dispatch in
+              let origin = match origin with None -> "" | Some origin -> "Origin: " ^ origin ^ "\r\n" in
+              let request = Printf.sprintf "GET %s HTTP/1.0\r\nHost: 127.0.0.1:8935\r\n%s\r\n" target origin in
               let bytes = Bigstringaf.of_string ~off:0 ~len:(String.length request) request in
               ignore (Httpun.Server_connection.read_eof conn bytes ~off:0 ~len:(Bigstringaf.length bytes));
               let rec drain () = match Httpun.Server_connection.next_write_operation conn with
@@ -722,6 +763,13 @@ let test_route_delivers_open_stream_and_releases_on_disconnect () =
                  "x-masc-workspace-read: matched-v1");
             check bool "snapshot contains retained output" true
               (String_util.contains_substring matched "after subscription");
+            let snapshot_cross = String.lowercase_ascii (wire_response ~origin:"https://evil.example" snapshot_path) in
+            check bool "cross-origin snapshot does not grant browser read access" false
+              (String_util.contains_substring snapshot_cross "access-control-allow-origin:");
+            let snapshot_same = String.lowercase_ascii (wire_response ~origin:"http://127.0.0.1:8935" snapshot_path) in
+            check bool "same-origin snapshot is allowed" true
+              (String_util.contains_substring snapshot_same
+                 "access-control-allow-origin: http://127.0.0.1:8935");
             let limited = wire_response (snapshot_path ^ "?limit=1&expected_base_path=" ^
               encode base ^ "&expected_masc_root=" ^ encode root) in
             check int "limited snapshot succeeds" 200 (status limited);

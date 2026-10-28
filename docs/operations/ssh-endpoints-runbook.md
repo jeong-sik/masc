@@ -389,10 +389,12 @@ Four things this costs, none of them obvious from the CLI's help:
 ## Watching Keeper commands and output
 
 In the MASC TUI, select a Keeper and press `l` for its logs. The Execute
-section shows the most recently observed, redacted commands and stdout/stderr;
+section shows the most recently observed, redacted command summaries and stdout/stderr;
 it refreshes with the TUI's normal cadence. Each row carries the stream and
 Task identifiers. A failed read is shown as unavailable, and a missing earlier
 sequence means the in-memory server history has already been truncated.
+The command summary omits shell operators and environment assignments; it is
+an audit aid, not an exact command to copy and rerun.
 
 For a terminal tail of several Keepers, from a MASC checkout use:
 
@@ -409,6 +411,8 @@ in the MASC server process and is bounded; it is not a durable transcript. A
 reconnect reads a new snapshot and may show retained lines again. A disconnect
 or an unknown result is not proof that a remote command did or did not run;
 inspect its effects before deciding whether to execute it again.
+The current output routes use HTTP/1.1; the separate HTTP/2 gateway does not
+serve them. The TUI and terminal client use HTTP/1.1 for these reads.
 
 ## Endpoint observations
 

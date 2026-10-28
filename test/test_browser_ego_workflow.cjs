@@ -64,6 +64,33 @@ test('invalid native URL regex stops before SDK entry and preserves any earlier 
   }
  }
 });
+test('native navigation timeouts preserve committed state and stop without replay',async()=>{
+ for(const waitUntil of ['commit','domcontentloaded','load','networkidle']){
+  for(const committed of [false,true]){
+   const f=fixture();let navigations=0;
+   const native={code:'EGO_NAVIGATION_TIMEOUT',timeoutMs:5000,committed,waitUntil,
+    ...(committed?{url:destination,readyState:'interactive'}:{})};
+   f.page.goto=async()=>{navigations++;throw Object.assign(Error('native navigation timeout'),native);};
+   const result=await run(f.page,request([{method:'fill',selector:'#editor',text:'changed'},
+    {method:'goto',url:destination,options:{waitUntil}},{method:'click',selector:'#never'}]));
+   assert.deepEqual(JSON.parse(JSON.stringify(result.failure.nativeError)),native);
+   assert.equal(navigations,1);assert.equal(result.failure.index,1);assert.equal(result.failure.method,'goto');
+   assert.equal(result.completed.length,1);assert.equal(result.completed[0].method,'fill');
+   assert.equal(result.effectStarted,true);assert.equal(result.completedEffect,true);
+   assert.equal(f.calls.some(call=>call[0]==='click'||call[0]==='snapshot'),false);
+  }
+ }
+});
+test('native navigation commit observations do not settle interrupted input',async()=>{
+ const f=fixture();let clicks=0;
+ f.page.click=async()=>{clicks++;throw Object.assign(Error('native navigation timeout during input'),{
+  code:'EGO_NAVIGATION_TIMEOUT',timeoutMs:0,committed:true,waitUntil:'load',url:destination});};
+ const result=await run(f.page,request([{method:'click',selector:'#first'},{method:'fill',selector:'#never',text:'changed'}]));
+ assert.equal(clicks,1);assert.equal(result.inputReleased,false);
+ assert.equal(result.effectStarted,true);assert.equal(result.completedEffect,false);
+ assert.equal(result.failure.nativeError.committed,true);assert.equal(result.completed.length,0);
+ assert.deepEqual(f.calls,['url']);
+});
 test('native evaluation timeout diagnostics preserve uncertainty and completed prefix',async()=>{
  for(const [executionStopped,pageResponsive] of [[false,true],[true,true],[false,false]]){
   const f=fixture();let evaluations=0;
@@ -92,11 +119,13 @@ test('native stopped-execution diagnostics do not settle held input',async()=>{
  assert.deepEqual(f.calls,['url']);
 });
 test('ordinary error messages never manufacture native timeout diagnostics',async()=>{
+ for(const message of ['EGO_PAGE_EVALUATION_TIMED_OUT executionStopped=true','EGO_NAVIGATION_TIMEOUT committed=true']){
  const f=fixture();
- f.page.evaluate=async()=>{throw Error('EGO_PAGE_EVALUATION_TIMED_OUT executionStopped=true');};
+ f.page.evaluate=async()=>{throw Error(message);};
  const result=await run(f.page,request([{method:'evaluate',source:'window.slow()'}]));
  assert.equal(Object.hasOwn(result.failure,'nativeError'),false);
  assert.equal(result.effectStarted,true);assert.equal(result.completedEffect,false);
+ }
 });
 test('native Page observations, snapshot options and explicit waits retain values',async()=>{
  const f=fixture();let events=[{method:'Page.loadEventFired',params:{timestamp:1}}];

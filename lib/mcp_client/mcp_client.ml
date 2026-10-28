@@ -698,11 +698,12 @@ let tool_of_json ~era json =
            | _ -> None)))
   | Some _ | None -> None
 
-(* A server that keeps returning cursors never ends the listing, and every
-   page still answers inside the per-request deadline, so that deadline never
-   fires. Real catalogs fit in a few pages. A listing that needs this many is
-   refused, not read without end. The cursors stay opaque: this counts pages
-   and never looks at a cursor. *)
+(* WORKAROUND: a server that keeps returning cursors never ends the listing,
+   and every page still answers inside the per-request deadline, so that
+   deadline never fires. This page count stands in for one deadline shared by
+   the whole listing, which RFC #46355 D4 chose for continuation rounds. 1000
+   is not measured against any real server. The cursors stay opaque: this
+   counts pages and never looks at a cursor. Root fix: #46538. *)
 let max_tools_list_pages = 1000
 
 let list_tools ~post t =

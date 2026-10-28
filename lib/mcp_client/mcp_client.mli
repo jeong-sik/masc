@@ -133,7 +133,8 @@ val negotiated_protocol_version : t -> string
 val session_id : t -> string option
 
 val max_tools_list_pages : int
-(** Pages {!list_tools} reads before it refuses a listing that does not end. *)
+(** Pages {!list_tools} reads before it refuses a listing that does not end.
+    A stopgap for one deadline shared by the whole listing (#46538). *)
 
 val list_tools : post:post -> t -> (tool list, error) result
 (** Read every page, treating cursors as opaque, including empty strings. A

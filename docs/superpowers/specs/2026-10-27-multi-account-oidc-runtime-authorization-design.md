@@ -222,15 +222,20 @@ Intent는 대상 없이 digest만 남기지 않는다. 중단된 회수가 어�
 `auth_config.account_mode = Single_user | Multi_account`를 필수로 둔다. 설치·업그레이드 도구는 기존 Single_user에도 값을 명시하고, 값이 없거나 알 수 없으면 부팅을 거부한다. principal 수나 초대 수로 모드를 추론하지 않는다. 첫 bootstrap 전에도 Multi_account를 선택할 수 있다.
 
 1. 최초 Admin은 호스트 로컬 bootstrap으로 만들고 원격 선착순 Admin은 없다.
-2. 신규 사용자는 Admin이 등록한 `(iss, sub)` allowlist 또는 단회 초대 token과 첫 OIDC 로그인의 `(iss, sub)` 결속으로만 입장한다.
+2. 신규 사용자는 다음 셋 중 하나로만 입장한다. (a) Admin이 등록한 `(iss, sub)` allowlist, (b) 단회 초대 token, (c) 도메인 정책(7번)을 통과한 첫 로그인이 만든 입장 요청을 Admin이 승인하는 것. 어느 경로든 입장은 첫 OIDC 로그인의 `(iss, sub)` 결속으로 끝난다.
 3. 초대 소비·sub 결속·User 생성은 writer lock 안의 unique 검사와 한 append로 완료한다. 동시 소비나 sub 재결속은 409다.
 4. 초대 token은 URL fragment에만 두고 폼 POST로 전달한다. QueryString·Referer·로그에 싣지 않는다. email과 handle은 신원 키가 아니다.
 5. 계정 링크·병합은 초기에 금지하고, 마지막 Admin의 삭제·강등·비활성화는 거부한다.
 6. 등록하거나 소비하는 `(iss, sub)`에 삭제된 principal의 `Delete` 사건(§4.1)이 있으면 Admin 화면과 감사 기록에 `previously_deleted`로 보인다. 입장을 막지 않는다. 입장은 Admin의 새 결정이고, 새 principal은 새 ID를 받아 옛 몫을 이어받지 않는다. 이 표시는 `authz.jsonl`을 읽어 만드는 projection이며 principal 레코드에 저장하지 않는다.
+7. **도메인 정책과 입장 요청.** 설정 `oidc.allowed_hosted_domains`(소문자 도메인 목록)가 비어 있지 않으면 도메인 정책이 있다. 비어 있으면 도메인 필터가 없고 입장은 (a), (b)뿐이다.
+   - 정책이 있으면 callback은 ID token의 `hd` claim이 목록에 정확히 같고 `email_verified = true`일 때만 진행한다. `hd`가 없거나(일반 Gmail 등) 다르면 어떤 상태도 만들지 않고 거절한다. email 문자열의 접미사나 부분 일치는 쓰지 않는다.
+   - 정책을 통과했지만 `(iss, sub)`가 (a)나 (b)로 등록되지 않았다면 principal을 만들지 않고 **입장 요청**(`(iss, sub)`, 표시용 email과 이름, 요청 시각)만 기록한다. 입장 요청은 권한도 session도 주지 않는다. Admin 화면에 보이고, Admin이 승인하면 초대 소비와 같은 원자 단계(writer lock 안의 unique 검사와 한 append)로 User를 만든다.
+   - email과 이름은 Admin이 판단하는 표시 자료이고 신원 키가 아니다. 입장 요청의 개수 상한과 만료 시간은 구현 계획 C2에서 정한다.
+   - 정책이 있으면 이미 입장한 principal의 로그인에도 같은 조건(`hd`, `email_verified`)을 매번 적용한다. 정책에서 도메인을 빼거나 Workspace 계정의 도메인이 바뀌면 로그인이 막힌다. 그러나 퇴사나 회수는 도메인 정책이 대신하지 않는다. Admin의 명시적 `Disable`·`Delete`(§4.1)가 그 일을 한다.
 
 ### 5.2 Google OIDC
 
-Authorization Code + PKCE(S256), state, nonce, exact redirect URI를 사용하고 ID Token의 signature/iss/aud/exp/nonce를 검증한다. `hd`는 도메인 정책이 있을 때만 보조 조건이며 개별 허용 목록을 대신하지 않는다.
+Authorization Code + PKCE(S256), state, nonce, exact redirect URI를 사용하고 ID Token의 signature/iss/aud/exp/nonce를 검증한다. 도메인 정책(§5.1-7)이 있으면 `hd`와 `email_verified`는 로그인의 필수 조건이다. 그러나 이 조건만으로 입장하지 않는다. 입장은 §5.1-2의 세 경로뿐이다.
 
 - `__Host-masc_session`: Secure, HttpOnly, host-only, Path=/, SameSite=Strict.
 - `__Host-masc_oidc_txn`: Secure, HttpOnly, host-only, Path=/, SameSite=Lax. state/nonce/PKCE와 서버 transaction에 결속한다.

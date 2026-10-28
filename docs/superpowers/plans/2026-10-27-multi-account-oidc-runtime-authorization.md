@@ -106,7 +106,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 | 층 | 결과 | 설계 | 선행 |
 |---|---|---|---|
 | C1 | OIDC ID token 검증 의존성 결정. `jose`와 `jwto`를 현재 pin(x509 >= 1.0, < 1.2), OCaml 5.5, RS256, `alg=none` 거부, JWKS `kid` 선택으로 비교한 근거를 남기고 하나를 추가한다. 고정한 JWKS와 token 벡터로만 시험하고 네트워크를 쓰지 않는다. | §5.2 | - |
-| C2 | Google OIDC code + PKCE 로그인, `(iss, sub)` 결속, 초대 소비(동시 소비는 409). 삭제된 principal의 `(iss, sub)`로 등록하거나 소비하면 Admin 화면과 감사 기록에 `previously_deleted`를 보인다. 입장을 막지 않는다. 이 표시는 `authz.jsonl`을 읽어 만들고 principal 레코드에는 저장하지 않는다(§5.1-6). | §5.1, §5.2 | B3, C1 |
+| C2 | Google OIDC code + PKCE 로그인, `(iss, sub)` 결속, 초대 소비(동시 소비는 409). 삭제된 principal의 `(iss, sub)`로 등록하거나 소비하면 Admin 화면과 감사 기록에 `previously_deleted`를 보인다. 입장을 막지 않는다. 이 표시는 `authz.jsonl`을 읽어 만들고 principal 레코드에는 저장하지 않는다(§5.1-6). 도메인 정책(`oidc.allowed_hosted_domains`)이 있으면 `hd`·`email_verified` 조건과, 정책을 통과한 미등록 `(iss, sub)`의 입장 요청 기록·Admin 승인(§5.1-2c, §5.1-7)을 함께 낸다. 입장 요청의 개수 상한과 만료 시간을 이 층에서 정한다. | §5.1, §5.2 | B3, C1 |
 | C3 | 다계정에서 `__Host-` 세션·transaction·mcp 쿠키, 세션에 결속한 CSRF 토큰, 출처 검사, cookie와 Bearer가 함께 오면 거부, WS/SSE 결속과 폐기 때 닫기, 원격 query credential 차단. | §5.2, §5.3 | C2 |
 | C4 | scoped PAT와 Service credential 레코드(principal + `Pat_scope`), 새 `Auth_gate.decide`로 HTTP strict와 MCP caller strict 통합, 다계정에서 caller alias 유지·workspace secret(HTTP 복구 grace 포함, `auth.ml:216`)·auth disabled 경로 제거, `agent_credential` 읽기 거부. `Mcp_oauth_token`은 C5 전까지 Reject. | §5.3 | A2, A3, C3 |
 | C5 | MCP OAuth 승인을 OIDC session에 결속한다. OAuth 스택(#46336, #46337, #46340, #46343, #46356, #46379)이 main에 들어간 뒤에만 연다. 결속 전에는 C4의 Reject가 그대로다. | §5.3 | C3, C4, OAuth 스택 병합 |

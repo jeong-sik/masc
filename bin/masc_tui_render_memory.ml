@@ -944,9 +944,9 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
          [ (if ko then Printf.sprintf "기억 %d개" (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts)
             else Masc_tui_message_layout.count_noun
               (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts) "fact")
-         ; Printf.sprintf (text "일반 %d + 원본 %d" "%d ordinary + %d source")
+         ; Printf.sprintf (if ko then "일반 %d + 원본 %d" else "%d ordinary + %d source")
              snapshot.mhs_total_facts snapshot.mhs_total_source_facts
-         ; Printf.sprintf (text "저장 %s" "stored %s")
+         ; Printf.sprintf (if ko then "저장 %s" else "stored %s")
              (stored_amount state.memory_unit
                 (snapshot.mhs_total_snapshot_bytes + snapshot.mhs_total_source_snapshot_bytes))
          ; (if ko then Printf.sprintf "키퍼 %d명" (List.length snapshot.mhs_keepers)
@@ -965,7 +965,7 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
           "1 failures". The unread turns keep "?" when nothing measured
           them, which is not a count and cannot take a noun from one. *)
        labelled (text "일반:" "Ordinary:")
-         [ Printf.sprintf (text "관측 %d / 파생 %d" "%d observed / %d derived")
+         [ Printf.sprintf (if ko then "관측 %d / 파생 %d" else "%d observed / %d derived")
              snapshot.mhs_total_observed_facts snapshot.mhs_total_derived_facts
          ; (if ko then Printf.sprintf "근거 무효화 %d건" snapshot.mhs_total_support_invalidations
             else Masc_tui_message_layout.count_noun

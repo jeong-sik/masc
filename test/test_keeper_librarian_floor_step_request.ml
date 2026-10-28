@@ -100,6 +100,7 @@ let prepare (question : Machine.question) =
     question.input |> ok
 
 let sha_hex character = String.make 64 character
+let transaction_id = "floor-step-test-transaction"
 
 let canonical_installation = Owner.installation_id (Owner.Configuration "floor-step-declaration")
 
@@ -155,11 +156,11 @@ let chain ~owner =
   let machine = machine_over messages in
   let first_question = ask machine in
   let first_step =
-    Step.create ~request_id:(Step.fresh_request_id owner) ~owner ~destination ~range ~previous:None
+    Step.create ~request_id:(Step.fresh_request_id owner) ~owner ~destination ~transaction_id ~range ~previous:None
       ~question:first_question ~step:(prepare first_question) () |> ok in
   let second_question = ask (skip machine messages) in
   let second_step =
-    Step.create ~request_id:(Step.fresh_request_id owner) ~owner ~destination ~range
+    Step.create ~request_id:(Step.fresh_request_id owner) ~owner ~destination ~transaction_id ~range
       ~previous:(Some { Step.request_id = Step.request_id first_step; request_digest = digest_of first_step })
       ~question:second_question ~step:(prepare second_question) () |> ok in
   { range; first_question; first_step; second_question; second_step }
@@ -213,6 +214,8 @@ let test_a_step_restores_from_its_record_alone () =
      = Some { Step.request_id = Step.request_id restored_first; request_digest = first_record.request_digest });
   check bool "both name the range original" true
     (Step.range restored_first = chain.range && Step.range restored_second = chain.range);
+  check bool "and carry the chain's one transaction" true
+    (Step.transaction_id restored_first = transaction_id && Step.transaction_id restored_second = transaction_id);
   let input = (Step.step restored_second).preparation.source_input in
   check bool "the restored step holds its own input: the second message only" true
     (input.messages = [ second_message ]);
@@ -268,6 +271,8 @@ let test_a_tampered_request_is_refused () =
   refused "a prompt digest that names another prompt" ~mentioning:"differs from the one its host request named"
     chain.first_question chain.first_step
     (replace_field "preparation" (replace_field "rendered_prompt_sha256" (fun _ -> `String (sha_hex 'c'))));
+  refused "a blank chain transaction" ~mentioning:"blank" chain.first_question chain.first_step
+    (replace_field "transaction_id" (fun _ -> `String "  "));
   refused "a step of another kind" ~mentioning:"schema or kind" chain.first_question chain.first_step
     (replace_field "kind" (fun _ -> `String "completed-history-execution"));
   refused "an input edited after its prompt was rendered" ~mentioning:"prompt differs" chain.first_question
@@ -297,6 +302,7 @@ let test_a_header_and_an_owner_are_read_without_the_input () =
                                  request_digest = (retain ~store chain.first_step (Step.to_json chain.first_step)).request_digest }
      && header.sources = chain.second_question.sources);
   check bool "and the destination its request names" true (header.destination = Step.destination chain.second_step);
+  check string "and the chain's transaction" transaction_id header.transaction_id;
   let observed =
     Step.observe_record_owner ~base_path:(Durable.base_path owner) ~keepers_dir:(Durable.keepers_dir owner) broken
     |> ok in
@@ -329,7 +335,7 @@ let test_links_and_positions_are_checked_when_a_step_is_made () =
   with_fixture @@ fun ~owner ~other_owner ~fresh_store:_ ->
   let chain = chain ~owner in
   let make ?(destination = destination) ?(request_id = Step.fresh_request_id owner) ~range ~previous question =
-    Step.create ~request_id ~owner ~destination ~range ~previous ~question ~step:(prepare question) () in
+    Step.create ~request_id ~owner ~destination ~transaction_id ~range ~previous ~question ~step:(prepare question) () in
   let link_to request_id = { Step.request_id; request_digest = sha_hex 'd' } in
   let previous_step = Some (link_to (Step.request_id chain.first_step)) in
   expect_error "a previous step before the first message" ~mentioning:"position disagrees"
@@ -366,7 +372,7 @@ let test_links_and_positions_are_checked_when_a_step_is_made () =
                ; unread_messages = chain.first_question.unread_messages }
       wrong_input |> ok in
   expect_error "a preparation of another input" ~mentioning:"input differs from its question"
-    (Step.create ~request_id:(Step.fresh_request_id owner) ~owner ~destination ~range:chain.range
+    (Step.create ~request_id:(Step.fresh_request_id owner) ~owner ~destination ~transaction_id ~range:chain.range
        ~previous:None ~question:chain.first_question ~step:altered ());
   let other_context =
     Runtime.prepare_durable_step ~now:1_000_000.
@@ -374,7 +380,7 @@ let test_links_and_positions_are_checked_when_a_step_is_made () =
                ; unread_messages = chain.first_question.unread_messages }
       chain.first_question.input |> ok in
   expect_error "a preparation with another context" ~mentioning:"context differs from its question"
-    (Step.create ~request_id:(Step.fresh_request_id owner) ~owner ~destination ~range:chain.range
+    (Step.create ~request_id:(Step.fresh_request_id owner) ~owner ~destination ~transaction_id ~range:chain.range
        ~previous:None ~question:chain.first_question ~step:other_context ())
 
 let test_step_and_history_ids_do_not_mix () =

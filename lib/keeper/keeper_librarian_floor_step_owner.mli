@@ -14,9 +14,15 @@ type call = expected:Keeper_librarian_durable_request.destination ->
   (Mcp_protocol.Mcp_types.tool_result, Lane_addon_submit_once.call_error) result
 (** Actual Runtime call edge must recheck the original semantic destination and
     physical owner immediately before RPC. Only failures before RPC are Not_sent. *)
+type answer = {
+  raw : Yojson.Safe.t;
+      (** The model's answer as the host retained it. The absorb gate's journal
+          is prepared from these bytes. *)
+  proposal : Keeper_librarian_runtime.durable_step_proposal;
+}
 type outcome =
   | Pending of wait * Lane_addon_tool_request_owner.retained
-  | Answered of Keeper_librarian_runtime.durable_step_proposal * Lane_addon_tool_request_owner.retained
+  | Answered of answer * Lane_addon_tool_request_owner.retained
   | Refused of Lane_addon_exact.final * Lane_addon_tool_request_owner.retained
 (** [Pending] covers a host terminal [Outcome_unknown] as {!Keeper_librarian_durable_owner}
     does: it is never a refusal and never permits another submission. [Refused]

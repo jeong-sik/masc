@@ -51,11 +51,13 @@ let link_of_json json =
   {request_id;request_digest}
 
 (* [digest] names the canonical bytes of [to_json], as for a history original. *)
-type t = {id:string;owner:Durable.owner;destination:Durable.destination;range:link;previous:link option;
-  position:int;sources:Unread.source list;step:Runtime.durable_step_preparation;digest:string}
+type t = {id:string;owner:Durable.owner;destination:Durable.destination;transaction_id:string;range:link;
+  previous:link option;position:int;sources:Unread.source list;step:Runtime.durable_step_preparation;
+  digest:string}
 let request_id step=step.id
 let physical_owner step=step.owner
 let destination step=step.destination
+let transaction_id step=step.transaction_id
 let range step=step.range
 let previous step=step.previous
 let position step=step.position
@@ -74,7 +76,8 @@ let context_of_json json =
   {Runtime.previous_state;unread_messages}
 let to_json step = `Assoc ["schema",`Int 1;"kind",`String "completed-history-floor-step";
   "request_id",`String step.id;"owner",Durable.owner_to_json step.owner;
-  "destination",Durable.destination_json step.destination;"range",link_json step.range;
+  "destination",Durable.destination_json step.destination;"transaction_id",`String step.transaction_id;
+  "range",link_json step.range;
   "previous",(match step.previous with None -> `Null | Some link -> link_json link);
   "position",`Int step.position;"sources",`List (List.map Unread.source_to_json step.sources);
   "context",context_json step.step.context;"input",Input.to_json step.step.preparation.source_input;
@@ -102,6 +105,7 @@ let source_digest = function
   | Unread.Atom {message_sha256;_} | Unread.Official_turn {message_sha256;_} -> message_sha256
 let validate step =
   let input=step.step.preparation.source_input in
+  let* ()=require (String.trim step.transaction_id<>"") "Original floor step has no chain transaction" in
   let* ()=validate_links ~owner:step.owner ~id:step.id ~range:step.range ~previous:step.previous
     ~position:step.position in
   let* ()=require (Keeper_identity.Keeper_id.to_string input.keeper_id=Durable.keeper_id step.owner)
@@ -126,10 +130,10 @@ let matches_question (question:Machine.question) step =
   equal (Input.to_json step.step.preparation.source_input)
     (Input.to_json (Runtime.durable_step_source_input question.input))
     "Original floor step input differs from its question"
-type header = {request_id:string;destination:Durable.destination;range:link;previous:link option;
-  position:int;sources:Unread.source list}
-let header_fields = ["schema";"kind";"request_id";"owner";"destination";"range";"previous";"position";
-  "sources";"context";"input";"preparation"]
+type header = {request_id:string;destination:Durable.destination;transaction_id:string;range:link;
+  previous:link option;position:int;sources:Unread.source list}
+let header_fields = ["schema";"kind";"request_id";"owner";"destination";"transaction_id";"range";"previous";
+  "position";"sources";"context";"input";"preparation"]
 (* Everything but the context, input and preparation. *)
 let header_of_fields ~owner f =
   let* ()=require (value "schema" f=`Int 1 && value "kind" f=`String "completed-history-floor-step")
@@ -137,6 +141,7 @@ let header_of_fields ~owner f =
   let* request_id=nonblank (value "request_id" f) in
   let* ()=Durable.owner_matches_json owner (value "owner" f) in
   let* destination=Durable.destination_of_json (value "destination" f) in
+  let* transaction_id=nonblank (value "transaction_id" f) in
   let* range=link_of_json (value "range" f) in
   let* previous=match value "previous" f with
     | `Null -> Ok None
@@ -146,24 +151,24 @@ let header_of_fields ~owner f =
     | `List items -> all Unread.source_of_json items
     | _ -> Error "Original floor step sources are not a list" in
   let+ ()=validate_links ~owner ~id:request_id ~range ~previous ~position in
-  {request_id;destination;range;previous;position;sources}
+  {request_id;destination;transaction_id;range;previous;position;sources}
 let decode ~owner ~digest json =
   let* f=fields header_fields json in
-  let* {request_id=id;destination;range;previous;position;sources}=header_of_fields ~owner f in
+  let* {request_id=id;destination;transaction_id;range;previous;position;sources}=header_of_fields ~owner f in
   let* context=context_of_json (value "context" f) in
   let* source_input=Input.of_json (value "input" f) in
   let* {Question.parsing_now;policy;rule_prompt;prompt;output_schema;_} as frozen=Question.of_json (value "preparation" f) in
   let* step=Runtime.restore_durable_step_preparation ~context ~source_input
     ~parsing_now ~policy ~rule_prompt ~prompt ~output_schema in
   let* ()=Question.rendered_matches frozen step.preparation in
-  let draft={id;owner;destination;range;previous;position;sources;step;digest=""} in
+  let draft={id;owner;destination;transaction_id;range;previous;position;sources;step;digest=""} in
   let* ()=validate draft in
   let* ()=equal json (to_json draft) "Original floor step request encoding differs" in
   let+ digest=match digest with Some digest -> Ok digest | None -> Owner.request_digest json in
   {draft with digest}
-let create ~request_id ~owner ~destination ~range ~previous ~(question:Machine.question) ~step () =
+let create ~request_id ~owner ~destination ~transaction_id ~range ~previous ~(question:Machine.question) ~step () =
   let* destination=Durable.destination_of_json (Durable.destination_json destination) in
-  let draft={id=request_id;owner;destination;range;previous;position=question.position;
+  let draft={id=request_id;owner;destination;transaction_id;range;previous;position=question.position;
     sources=question.sources;step;digest=""} in
   let* ()=validate draft in
   let* ()=matches_question question draft in

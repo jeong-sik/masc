@@ -27,13 +27,17 @@ val scope_of_request_id : string -> (string, string) result
 
 type t
 val create : request_id:string -> owner:Keeper_librarian_durable_request.owner ->
-  destination:Keeper_librarian_durable_request.destination -> range:link -> previous:link option ->
+  destination:Keeper_librarian_durable_request.destination -> transaction_id:string -> range:link ->
+  previous:link option ->
   question:Keeper_librarian_message_floor.Machine.question ->
   step:Keeper_librarian_runtime.durable_step_preparation -> unit -> (t, string) result
 (** [range] is a history request of the owner and [previous] a step of the
-    owner other than this one. Only the first question has no [previous]. The
-    step must be the preparation of [question]. The request restores from its
-    own encoding before it is returned. *)
+    owner other than this one. Only the first question has no [previous].
+    [transaction_id] names the chain's one Memory program; every step of a chain
+    carries the same value, and a restarted chain takes it from its first step
+    rather than naming a new one. The step must be the preparation of
+    [question]. The request restores from its own encoding before it is
+    returned. *)
 val restore : owner:Keeper_librarian_durable_request.owner -> Lane_addon_tool_request_owner.retained ->
   (t, string) result
 (** Decode the record's request, render its prompt again from the retained
@@ -43,8 +47,9 @@ val restore : owner:Keeper_librarian_durable_request.owner -> Lane_addon_tool_re
 val matches_question : Keeper_librarian_message_floor.Machine.question -> t -> (unit, string) result
 (** The step is the question the floor asks now: the same position and sources,
     the same carried working state and unread messages, and the same input. *)
-type header = {request_id:string;destination:Keeper_librarian_durable_request.destination;range:link;
-  previous:link option;position:int;sources:Keeper_librarian_unread.source list}
+type header = {request_id:string;destination:Keeper_librarian_durable_request.destination;
+  transaction_id:string;range:link;previous:link option;position:int;
+  sources:Keeper_librarian_unread.source list}
 val header : owner:Keeper_librarian_durable_request.owner -> Lane_addon_tool_request_owner.retained ->
   (header, string) result
 (** What a record of this owner's step scope says about its place in a chain,
@@ -63,6 +68,7 @@ val to_json : t -> Yojson.Safe.t
 val request_id : t -> string
 val physical_owner : t -> Keeper_librarian_durable_request.owner
 val destination : t -> Keeper_librarian_durable_request.destination
+val transaction_id : t -> string
 val range : t -> link
 val previous : t -> link option
 val position : t -> int

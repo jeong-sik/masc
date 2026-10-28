@@ -134,7 +134,11 @@ val commit_launch :
     rendezvous instead of relaunching such a record. *)
 
 type launch_target = private
-  { binding : P.binding; spec : P.spec; admission_id : P.Id.t; launch_id : P.Id.t; payload_uid : int }
+  { binding : P.binding; spec : P.spec; admission_id : P.Id.t; launch_id : P.Id.t; payload_uid : int
+  ; original_record : record }
+(** [original_record] pins the exact registry and committed job/launch state
+    revalidated for this permit. Retain it for later original-owner mutations;
+    matching coordinates in a caller-supplied registry cannot replace it. *)
 
 type 'a launch_outcome =
   | Not_performed of error

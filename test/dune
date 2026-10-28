@@ -6870,3 +6870,5 @@
 (include stanzas/test_authz_install_record.inc)
 
 (include stanzas/test_endpoint_process_gate.inc)
+
+(include stanzas/test_endpoint_job_launch.inc)

@@ -42,6 +42,7 @@ let schema name =
 
 let offered name : Identity_tools.offered_tool =
   { Identity_tools.schema = schema name
+  ; remote_input_schema = `Assoc [ "type", `String "object" ]
   ; read_only = None
   ; provider = provider ()
   ; remote_name = name

@@ -12,34 +12,46 @@
     - one closed opaque operation identity, {!gate_operation} — the Gate
       never parses provider or tool names, and the replay dispatch stays an
       exact match over a closed set;
-    - the complete concrete input, {!gate_input} — provider id, remote tool
-      name, and the arguments verbatim;
+    - the concrete input, {!gate_input} — provider id, a fingerprint of its
+      endpoint and credential declaration, remote tool name, arguments,
+      offered input schema and read-only hint;
     - the inversion, {!replay_of_gate_input} — this producer owns both the
       argument schema and the effect encoding, so it owns the decode.
 
-    Routing is the provider's own written word: a tool whose catalog row
-    says [read_only = Some true] runs unasked; [Some false] and silence both
-    go to the Gate on the external-services lane
-    ({!Keeper_gate.decide_external_service}). *)
+    Every attached call goes through the external-services lane
+    ({!Keeper_gate.decide_external_service}). Provider annotations are
+    retained as catalog data but do not grant authority to bypass the Gate. *)
 
 val gate_operation : string
 
 val gate_input :
-  provider_id:string ->
+  provider:Keeper_oauth_provider.t ->
   remote_name:string ->
   arguments:Yojson.Safe.t ->
+  input_schema:Yojson.Safe.t ->
+  read_only:bool option ->
   Yojson.Safe.t
 
-type replay_call = {
+type replay_call = private {
   input : Yojson.Safe.t;  (** the approved input, kept verbatim *)
   provider_id : string;
+  provider_authority_sha256 : string option;
   remote_name : string;
   arguments : Yojson.Safe.t;
+  input_schema : Yojson.Safe.t option;
+  read_only : bool option;
 }
 
 val replay_of_gate_input : Yojson.Safe.t -> (replay_call, string) result
-(** Strict: every field exactly once, unknown fields rejected, blank ids
-    rejected. An approval that cannot be decoded is repaired, not guessed. *)
+(** Unknown fields, duplicate fields and blank ids are rejected. A recorded
+    approval without a schema or provider fingerprint remains readable but
+    cannot authorize a call. The fingerprint contains no credential value and
+    does not prove that the account behind a credential has stayed the same. *)
+
+val validate_replay_provider :
+  provider:Keeper_oauth_provider.t -> replay_call -> (unit, string) result
+(** Reject a missing or changed provider declaration, or a missing catalog
+    binding, before consuming a grant or contacting the provider. *)
 
 val call_summary : replay_call -> string option
 (** The one line an identity_call approval is about: the provider surface it
@@ -65,8 +77,8 @@ val agent_tool :
   Agent_core.Tool.t
 (** One offered tool, made placeable in a Keeper turn.
 
-    A read-only tool runs as before. Anything else asks the Gate first: a
-    [Deferred] decision comes back to the model as the same deferred payload
+    Every call asks the Gate first: a [Deferred] decision comes back to the
+    model as the same deferred payload
     the built-in tools use — the call did not run, the Keeper keeps living,
     and the host replays the exact call once it is approved. [gate_grant] is
     the cycle's one-shot resolution, threaded so a byte-identical re-emission
@@ -89,6 +101,6 @@ val replay_call_with_outcome :
     The stored input goes back through the same Gate on the same lane, so
     the exact match consumes the durable one-shot grant and a mismatch
     follows the ordinary Gate. Effect disposition is honest about the wire:
-    a session that never came up, a refused token, or a request the server
-    rejected before execution prove no effect; any failure after the call
-    was sent is an unknown outcome, never retried. *)
+    a local precondition or a session that never came up proves no effect;
+    any failure after the tool request was sent has an unknown outcome and
+    is not automatically retried. *)

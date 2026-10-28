@@ -302,6 +302,23 @@ let test_host_invocation_index_validation () =
         (List.length (Outbox.receipt_ids (load base_path)))
     | Ok () -> fail "negative producer invocation index was retained")
 
+(* A Read of a file whose line was cut inside a Korean syllable returns bytes
+   that [Safe_ops.parse_json_safe] repairs to U+FFFD on every later read. *)
+let test_original_that_reads_back_different_creates_no_receipt () = with_workspace (fun base_path ->
+  let producer = get (Outbox.host_producer ~base_path ~keeper_name ~runtime_label:"invalid-utf8" ~turn_count:0) in
+  let retain invocation_index response = Outbox.retain_host_result producer ~invocation_index
+    ~call_id:"call" ~tool_name:"Read" ~arguments:(`Assoc []) ~response in
+  let cut_mid_syllable = "\xEB\xA1\x9C\xEA\xB7\xB8\xEC\x9D" in
+  (match retain 0 (`String cut_mid_syllable) with
+   | Error _ -> ()
+   | Ok () -> fail "a response that changes when read back was retained");
+  check int "the rejected response leaves no receipt and load still succeeds" 0
+    (List.length (Outbox.receipt_ids (load base_path)));
+  get (retain 1 (`String "\xEB\xA1\x9C\xEA\xB7\xB8\xEC\x9D\xB8"));
+  get (retain 2 (`String marker));
+  check int "later valid originals, including Korean text, are retained" 2
+    (List.length (Outbox.receipt_ids (load base_path))))
+
 let () = run "Original official-client host result retention"
   ["durable host stop",[
     test_case "typed stop retains original before transport continuation" `Quick test_stop_retains_before_transport_return;
@@ -313,4 +330,5 @@ let () = run "Original official-client host result retention"
     test_case "retention failure preserves authoritative effect failure" `Quick test_retention_failure_preserves_authoritative_failure;
     test_case "MCP reused string id keeps each physical invocation" `Quick test_mcp_reused_string_id_keeps_physical_invocations;
     test_case "host invocation index schema is strict" `Quick test_host_invocation_index_validation;
+    test_case "original that reads back different creates no receipt" `Quick test_original_that_reads_back_different_creates_no_receipt;
     test_case "source identity deduplicates exact originals across mixed producers" `Quick test_producer_identity_and_vendor_coexistence]]

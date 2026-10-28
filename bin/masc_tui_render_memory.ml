@@ -174,36 +174,38 @@ let clause_rows ?(full = false) ~cols clauses =
     [ indent ^ first; fold ^ last ]
   | rows -> List.map (fun row -> indent ^ row) rows
 
-let memory_input_lines ~cols ~unit reading =
+let memory_input_lines ~ko ~cols ~unit reading =
+  let text korean english = if ko then korean else english in
   let wrap clauses =
     Message_layout.pack_clauses ~max_cells:(max 1 (framed_inner_width cols - 2)) clauses
     |> List.map (fun row -> "  " ^ row)
   in
   let label, format = match unit with
-    | Memory_usage.Tokens -> "Input tok", (fun value -> Message_layout.compact_count (int_of_float (Float.round value)))
-    | Memory_usage.Bytes -> "Request KiB", (fun value -> Printf.sprintf "%.1f" (value /. 1024.))
+    | Memory_usage.Tokens -> text "입력 토큰" "Input tok", (fun value -> Message_layout.compact_count (int_of_float (Float.round value)))
+    | Memory_usage.Bytes -> text "요청 KiB" "Request KiB", (fun value -> Printf.sprintf "%.1f" (value /. 1024.))
   in
   let values (snapshot : Memory_usage.t) =
     let measured = match unit with
       | Memory_usage.Tokens -> snapshot.tokens
       | Memory_usage.Bytes -> snapshot.bytes in
     let avg, maximum, minimum, samples = match measured.distribution with
-      | None -> "unreported", "unreported", "unreported", 0
+      | None -> text "미보고" "unreported", text "미보고" "unreported", text "미보고" "unreported", 0
       | Some d -> format d.mean, format (float d.maximum), format (float d.minimum), d.samples in
-    let last = match measured.last with None -> "unreported" | Some n -> format (float n) in
-    wrap [label; "avg " ^ avg; "max " ^ maximum; "min " ^ minimum; "last " ^ last]
+    let last = match measured.last with None -> text "미보고" "unreported" | Some n -> format (float n) in
+    wrap [label; text "평균 " "avg " ^ avg; text "최대 " "max " ^ maximum; text "최소 " "min " ^ minimum; text "최근 " "last " ^ last]
     @ wrap
-        [ Printf.sprintf "Recent %d recorded turns" snapshot.records
-        ; Printf.sprintf "%d/%d recorded" samples snapshot.records
-        ; (match unit with Memory_usage.Tokens -> "input may include runtime estimates" | Memory_usage.Bytes -> "serialized body")
+        [ Printf.sprintf (if ko then "최근 기록 턴 %d개" else "Recent %d recorded turns") snapshot.records
+        ; Printf.sprintf (if ko then "%d/%d 측정" else "%d/%d recorded") samples snapshot.records
+        ; (match unit with Memory_usage.Tokens -> text "런타임 입력 추정치 포함 가능" "input may include runtime estimates" | Memory_usage.Bytes -> text "직렬화된 본문" "serialized body")
         ]
   in
   match reading with
-  | Masc_tui_fetched.Absent | Loading -> wrap [label ^ ": loading"]
+  | Masc_tui_fetched.Absent -> wrap [label ^ ": " ^ text "관측 없음" "no observation"]
+  | Loading -> wrap [label ^ ": " ^ text "조회 중" "loading"]
   | Failed detail -> wrap [label ^ ": " ^ Terminal_text.single_line detail]
   | Ready snapshot -> values snapshot
   | Stale (snapshot, detail) ->
-      wrap [label ^ ": stale · " ^ Terminal_text.single_line detail] @ values snapshot
+      wrap [label ^ ": " ^ text "이전 관측 · " "stale · " ^ Terminal_text.single_line detail] @ values snapshot
 
 (* #39831: the Librarian clauses the block under the selected keeper draws
    before the operator asks for detail. A clause is an action: a lag or a
@@ -233,8 +235,8 @@ type memory_context_projection =
   ; stalled_row : (int * string) option
   }
 
-let memory_context_lines ?(full = false) ~cols ~detail ~unit ~input (k : Masc.Tui_decode_memory_health.memory_keeper_health) =
-  let input_rows = memory_input_lines ~cols ~unit input in
+let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Masc.Tui_decode_memory_health.memory_keeper_health) =
+  let input_rows = memory_input_lines ~ko ~cols ~unit input in
   let stored_rows =
     match k.mkh_read_error, k.mkh_source_read_error with
     | None, None ->
@@ -969,6 +971,10 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
             else Masc_tui_message_layout.count_noun
               snapshot.mhs_total_support_invalidations "support invalidation")
          ]
+       @ (if snapshot.mhs_total_read_errors = 0 then [] else
+            labelled (text "일반:" "Ordinary:")
+              [Printf.sprintf (if ko then "읽기 실패 키퍼 %d명" else "read errors in %d keepers")
+                 snapshot.mhs_total_read_errors])
        (* The source-bound snapshot is stored and invalidated apart from the
           ordinary facts above, and each Keeper's roster row and detail already
           print their own count (#38446). The count here is the standing set of
@@ -1101,7 +1107,7 @@ let memory_overview_reading ~cols (state : state) =
     | Some keeper ->
         let input = Masc_tui_fetched.view_for ~equal:String.equal state.memory_input
             ~key:keeper.mkh_keeper_id in
-        let context = memory_context_lines ~full:true ~cols ~detail:true ~unit:state.memory_unit ~input keeper in
+        let context = memory_context_lines ~full:true ~ko ~cols ~detail:true ~unit:state.memory_unit ~input keeper in
         [section
            ((if ko then "선택한 키퍼 · " else "Selected Keeper · ") ^ keeper.mkh_keeper_id)
            context.rows]
@@ -1117,29 +1123,38 @@ let memory_overview_reading ~cols (state : state) =
 (* A single row replaces an unfittable fleet header. It leads with any
    actionable read failures, then unmeasured coverage, and always names the
    complete reading rather than displaying a detached continuation line. *)
-let memory_compact_fleet_row (state : state) =
+let memory_compact_fleet_row ~cols (state : state) =
   let ko = state.ui_language = Lang_ko in
   let hint = if ko then "  v:전체 · " else "  v:details · " in
-  let detail = match state.memory_health with
-    | None -> if ko then "메모리 미조회" else "memory not read"
+  let detail, attention_present = match state.memory_health with
+    | None -> (if ko then "메모리 관측 없음" else "no memory observation"), false
     | Some snapshot ->
-        let source_errors = snapshot.mhs_total_source_read_errors in
-        let failures = snapshot.mhs_total_librarian_failures in
-        let unmeasured = snapshot.mhs_total_librarian_continuity_unmeasured in
-        if source_errors > 0 || failures > 0 then
-          Printf.sprintf
-            (if ko then "원본 읽기 실패 %d · Librarian 실패 %d (서버 시작 후)"
-             else "source read failures %d · Librarian failures %d since server start")
-            source_errors failures
-        else if unmeasured > 0 then
-          Printf.sprintf (if ko then "연속성 미측정 %d명" else "continuity not measured for %d keepers") unmeasured
-        else match snapshot.mhs_total_librarian_unread_turns with
-          | None -> if ko then "Librarian 미읽음 미관측" else "Librarian unread turns unobserved"
-          | Some _ ->
-              Printf.sprintf (if ko then "전체 기억 %d개" else "%d total facts")
-                (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts)
+        let attention =
+          (if snapshot.mhs_total_read_errors > 0 then
+             [Printf.sprintf (if ko then "일반 읽기 실패 %d명" else "ordinary read errors: %d keepers") snapshot.mhs_total_read_errors] else [])
+          @ (if snapshot.mhs_total_source_read_errors > 0 then
+               [Printf.sprintf (if ko then "원본 읽기 실패 %d명" else "source read errors: %d keepers") snapshot.mhs_total_source_read_errors] else [])
+          @ (if snapshot.mhs_total_librarian_failures > 0 then
+               [Printf.sprintf (if ko then "서버 시작 후 Librarian 실패 %d건" else "Librarian failures since server start: %d") snapshot.mhs_total_librarian_failures] else [])
+          @ (if snapshot.mhs_total_librarian_continuity_unmeasured > 0 then
+               [Printf.sprintf (if ko then "연속성 미측정 %d명" else "continuity unmeasured: %d keepers") snapshot.mhs_total_librarian_continuity_unmeasured] else [])
+          @ (if snapshot.mhs_total_librarian_continuity_unread_atoms > 0 then
+               [Printf.sprintf (if ko then "연속성 지연 원자 %d개" else "continuity behind: %d atoms") snapshot.mhs_total_librarian_continuity_unread_atoms] else [])
+          @ (match snapshot.mhs_total_librarian_unread_turns with
+             | None -> [if ko then "미읽은 턴 미관측" else "unread turns unobserved"]
+             | Some turns when turns > 0 -> [Printf.sprintf (if ko then "미읽은 턴 %d개" else "%d unread turns") turns]
+             | Some _ -> [])
+        in
+        match attention with
+        | [] -> Printf.sprintf (if ko then "전체 기억 %d개" else "%d total facts")
+                  (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts), false
+        | [one] -> one, true
+        | many -> Printf.sprintf (if ko then "주의 항목 %d종" else "%d attention categories") (List.length many), true
   in
-  hint ^ detail
+  let full = hint ^ detail in
+  if Message_layout.display_width full <= framed_inner_width cols then full
+  else hint ^ (if attention_present then (if ko then "주의 있음" else "attention")
+               else (if ko then "관측 상세" else "see reading"))
 
 type memory_overview_projection =
   { header : string list
@@ -1158,7 +1173,7 @@ let memory_overview_rows ~cols ~budget ?cursor (state : state) =
     match List.nth_opt keepers (max 0 (min cursor (List.length keepers - 1))) with
     | None -> { rows = []; primary_rows = 0; stalled_row = None }
     | Some keeper ->
-      memory_context_lines ~cols ~detail:state.memory_overview_detail
+      memory_context_lines ~ko:(state.ui_language = Lang_ko) ~cols ~detail:state.memory_overview_detail
         ~unit:state.memory_unit
         ~input:(Masc_tui_fetched.view_for ~equal:String.equal state.memory_input ~key:keeper.mkh_keeper_id)
         keeper
@@ -1185,7 +1200,7 @@ let memory_overview_rows ~cols ~budget ?cursor (state : state) =
   let full_header = memory_fleet_header_rows ~cols state in
   let header =
     if List.length full_header <= header_budget then full_header
-    else if header_budget > 0 then [memory_compact_fleet_row state]
+    else if header_budget > 0 then [memory_compact_fleet_row ~cols state]
     else []
   in
   let refused_available =

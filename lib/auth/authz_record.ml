@@ -174,11 +174,38 @@ let hash_of fields : Hash.t =
     (Agent_core_sha256.digest_string (hash_domain ^ Yojson.Safe.to_string (`Assoc fields)))
 ;;
 
-type make_error = Author_not_admitted of { kind : Kind.t; author : Author.t }
+(* The shape of a body belongs to the layer that owns the kind, but every body
+   is read back by tools that disagree on the corners of JSON. A body is plain
+   when it holds only what they agree on: null, booleans, integers that fit an
+   OCaml int, strings that are valid UTF-8, lists, and objects whose member
+   names are valid UTF-8 and unique. A float is out because its text is the
+   printer's choice and nan has none. A repeated member name is out because
+   readers disagree on which value wins (RFC 8259 section 4). *)
+let rec is_plain (json : Yojson.Safe.t) =
+  match json with
+  | `Null | `Bool _ | `Int _ -> true
+  | `String text -> String.is_valid_utf_8 text
+  | `List items -> List.for_all is_plain items
+  | `Assoc members ->
+    let names = List.map fst members in
+    List.for_all String.is_valid_utf_8 names
+    && List.compare_lengths (List.sort_uniq String.compare names) names = 0
+    && List.for_all (fun (_, value) -> is_plain value) members
+  | `Intlit _ | `Float _ -> false
+;;
+
+type make_error =
+  | Author_not_admitted of
+      { kind : Kind.t
+      ; author : Author.t
+      }
+  | Body_not_plain
 
 let make ~head ~at_ms ~author ~kind ~body =
   if not (admits kind author)
   then Error (Author_not_admitted { kind; author })
+  else if not (is_plain body)
+  then Error Body_not_plain
   else (
     let seq = head.next_seq in
     let previous_hash = head.head_hash in
@@ -195,6 +222,7 @@ type decode_error =
   | Seq_mismatch of { expected : int; actual : int }
   | Previous_hash_mismatch
   | Author_not_admitted_to_write of { kind : Kind.t; author : Author.t }
+  | Body_not_plain
   | Hash_mismatch
   | Non_canonical
 
@@ -209,6 +237,7 @@ let decode_error_to_string = function
   | Previous_hash_mismatch -> "previous_hash is not the hash of the line before"
   | Author_not_admitted_to_write { kind; author = _ } ->
     Printf.sprintf "the author may not write %s records" (Kind.to_string kind)
+  | Body_not_plain -> "body is not plain JSON"
   | Hash_mismatch -> "hash does not match the content"
   | Non_canonical -> "valid record, but not the line this module writes for it"
 ;;
@@ -261,6 +290,7 @@ let of_line ~head line =
   let* () =
     if admits kind author then Ok () else Error (Author_not_admitted_to_write { kind; author })
   in
+  let* () = if is_plain body then Ok () else Error Body_not_plain in
   let expected = hash_of (unsigned_fields ~seq ~previous_hash ~at_ms ~author ~kind ~body) in
   let* () = if Hash.equal expected hash then Ok () else Error Hash_mismatch in
   let record = { seq; previous_hash; at_ms; author; kind; body; hash } in

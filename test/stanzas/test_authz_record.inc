@@ -4,4 +4,4 @@
  (name test_authz_record)
  (modules test_authz_record)
  (action (run %{test}))
- (libraries masc_test_deps))
+ (libraries masc_test_deps masc.agent_core.digest))

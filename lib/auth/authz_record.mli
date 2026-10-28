@@ -8,11 +8,20 @@
     A record is one JSON line that carries the hash of the line before it, so
     the log is a chain: changing, dropping, or reordering a line breaks every
     hash after it. A record can only be made through {!make} or {!of_line}, and
-    both refuse a kind that its author may not write (design 6.3). A value of
+    both refuse when the author may not write the kind (design 6.3). A value of
     type {!t} is therefore a record with a valid hash and an admitted author.
 
-    The body is the business of the layer that owns the kind. This module does
-    not read it. *)
+    The shape of the body is the business of the layer that owns the kind. This
+    module reads it only to check that it is plain JSON: null, booleans,
+    integers that fit an OCaml [int], strings that are valid UTF-8, lists, and
+    objects whose member names are valid UTF-8 and unique. A float is refused
+    because its text is the printer's choice and [nan] has none. A repeated
+    member name is refused because readers disagree on which value wins
+    (RFC 8259 section 4).
+
+    The line and the hash are made with [Yojson.Safe.to_string], so the bytes of
+    a line depend on that library. [test_authz_record] pins one line and its
+    hash. *)
 
 open Authz_records
 
@@ -28,9 +37,9 @@ module Hash : sig
   val equal : t -> t -> bool
 end
 
-(** What a record is about. Each kind says which authors may write it, see
+(** What a record is about. Each kind names the authors who may write it; see
     {!admits}. A layer that needs a new kind adds a constructor here, and the
-    compiler stops at {!admits} until it has decided who may write it. *)
+    compiler stops at {!admits} until that layer has decided who may write it. *)
 module Kind : sig
   type t =
     | Runtime_grant
@@ -49,9 +58,11 @@ module Kind : sig
   val of_string : string -> t option
 end
 
-(** Whether [author] may write a record of this kind (design 6.3). The first
-    five kinds need an authenticated principal. Each system author writes only
-    its own evidence, and the local operator writes only recovery records. *)
+(** Whether [author] may write a record of this kind (design 6.3).
+    [Runtime_grant], [Delegate_policy], [Principal],
+    [Internal_service_credential], and [Permission_revocation] need an
+    authenticated principal. Each system author writes only its own records,
+    and the local operator writes only recovery records. *)
 val admits : Kind.t -> Author.t -> bool
 
 (** Where the next record goes: its position and the hash it must carry. *)
@@ -71,10 +82,15 @@ type t = private
   ; hash : Hash.t
   }
 
-(** The head after [t] is appended. *)
+(** The head once the given record has been appended. *)
 val head_after : t -> head
 
-type make_error = Author_not_admitted of { kind : Kind.t; author : Author.t }
+type make_error =
+  | Author_not_admitted of
+      { kind : Kind.t
+      ; author : Author.t
+      }
+  | Body_not_plain  (** The body is not plain JSON, see the top of this file. *)
 
 val make
   :  head:head
@@ -93,6 +109,7 @@ type decode_error =
   | Seq_mismatch of { expected : int; actual : int }
   | Previous_hash_mismatch
   | Author_not_admitted_to_write of { kind : Kind.t; author : Author.t }
+  | Body_not_plain  (** The body is not plain JSON, see the top of this file. *)
   | Hash_mismatch
   | Non_canonical  (** Parses to a valid record but is not the line {!to_line} writes. *)
 
@@ -102,5 +119,7 @@ val decode_error_to_string : decode_error -> string
 val to_line : t -> string
 
 (** Reads a line that is expected at [head]. The line must be the exact bytes
-    {!to_line} would write for the record it names. *)
+    {!to_line} would write for the record it names. The checks run in the order
+    of the constructors of {!decode_error}, and the first failure is the
+    result. *)
 val of_line : head:head -> string -> (t, decode_error) result

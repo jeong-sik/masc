@@ -92,6 +92,7 @@ let make_exn ~head ~at_ms ~author ~kind ~body =
   match R.make ~head ~at_ms ~author ~kind ~body with
   | Ok record -> record
   | Error (R.Author_not_admitted _) -> Alcotest.fail "fixture author not admitted"
+  | Error R.Body_not_plain -> Alcotest.fail "fixture body is not plain JSON"
 ;;
 
 (* Three records chained from genesis, by three different authors. *)
@@ -203,6 +204,7 @@ let make_refuses_an_author_who_may_not_write () =
   with
   | Error (R.Author_not_admitted { kind; author = _ }) ->
     Alcotest.(check string) "kind" "runtime_grant" (R.Kind.to_string kind)
+  | Error R.Body_not_plain -> Alcotest.fail "the body is plain, the author is not admitted"
   | Ok _ -> Alcotest.fail "a cron job wrote a grant"
 ;;
 
@@ -319,6 +321,191 @@ let hash_hex_checks () =
   Alcotest.(check bool) "not hex" true (Option.is_none (R.Hash.of_hex (String.make 64 'g')))
 ;;
 
+(* One record written out by hand. Python rebuilt this line and its hash from
+   the design alone: the field order, the "masc-authz-record-v1\n" prefix, and
+   the escapes of Python's json module. The bytes matched. If Yojson prints
+   differently, or this module changes a field or the hash prefix, a log already
+   on disk stops verifying, and this test fails first. *)
+let golden_body =
+  `Assoc
+    [ "text", `String "quote \" backslash \\ tab \t control \001 caf\u{e9} \u{65e5}\u{672c}"
+    ; "count", `Int (-12345)
+    ; "flag", `Bool true
+    ; "none", `Null
+    ; "items", `List [ `Int 1; `String "two" ]
+    ]
+;;
+
+let golden_hash = "8d1574bce143d9011dcd49a49471526da380e87ad6a066b6fcb374bc86f74a68"
+let golden_line = {|{"seq":1,"previous_hash":"0000000000000000000000000000000000000000000000000000000000000000","at_ms":1793145600000,"author":{"type":"authenticated","principal":{"type":"human","id":"alice"}},"kind":"runtime_grant","body":{"text":"quote \" backslash \\ tab \t control \u0001 café 日本","count":-12345,"flag":true,"none":null,"items":[1,"two"]},"hash":"8d1574bce143d9011dcd49a49471526da380e87ad6a066b6fcb374bc86f74a68"}|}
+
+let a_fixed_line_keeps_its_bytes_and_its_hash () =
+  let record =
+    make_exn
+      ~head:R.genesis
+      ~at_ms:1793145600000
+      ~author:(Author.Authenticated alice)
+      ~kind:R.Kind.Runtime_grant
+      ~body:golden_body
+  in
+  Alcotest.(check string) "line" golden_line (R.to_line record);
+  Alcotest.(check string) "hash" golden_hash (R.Hash.to_hex record.R.hash);
+  match R.of_line ~head:R.genesis golden_line with
+  | Ok back -> Alcotest.(check string) "read back" golden_line (R.to_line back)
+  | Error error ->
+    Alcotest.failf "the fixed line is rejected: %s" (R.decode_error_to_string error)
+;;
+
+let contains ~sub text =
+  let sub_length = String.length sub in
+  let rec from index =
+    index + sub_length <= String.length text
+    && (String.equal (String.sub text index sub_length) sub || from (index + 1))
+  in
+  from 0
+;;
+
+(* The words that name a kind and an author on disk. Renaming one orphans every
+   line already written with it. *)
+let kind_labels_are_the_names_on_disk () =
+  Alcotest.(check (list string))
+    "labels"
+    [ "runtime_grant"
+    ; "delegate_policy"
+    ; "principal"
+    ; "internal_service_credential"
+    ; "permission_revocation"
+    ; "trigger_evidence"
+    ; "lease_terminal_evidence"
+    ; "preauthorized_expiry"
+    ; "migration_diagnostic"
+    ; "local_recovery"
+    ]
+    (List.map R.Kind.to_string R.Kind.all)
+;;
+
+let author_words =
+  [ ( Author.Authenticated alice
+    , R.Kind.Runtime_grant
+    , {|{"type":"authenticated","principal":{"type":"human","id":"alice"}}|} )
+  ; ( Author.Authenticated keeper
+    , R.Kind.Runtime_grant
+    , {|{"type":"authenticated","principal":{"type":"service","id":"keeper-1"}}|} )
+  ; Author.Local_operator, R.Kind.Local_recovery, {|{"type":"local_operator"}|}
+  ; Author.System_cron, R.Kind.Trigger_evidence, {|{"type":"system_cron"}|}
+  ; Author.System_maintenance, R.Kind.Lease_terminal_evidence, {|{"type":"system_maintenance"}|}
+  ; Author.System_migration, R.Kind.Migration_diagnostic, {|{"type":"system_migration"}|}
+  ]
+;;
+
+let author_shapes_are_the_names_on_disk () =
+  List.iter
+    (fun (author, kind, words) ->
+      let line = R.to_line (make_exn ~head:R.genesis ~at_ms:0 ~author ~kind ~body:`Null) in
+      let expected = {|"author":|} ^ words ^ {|,"kind":"|} ^ R.Kind.to_string kind ^ {|"|} in
+      Alcotest.(check bool) expected true (contains ~sub:expected line))
+    author_words
+;;
+
+(* A body is plain JSON: see the top of authz_record.mli. *)
+
+let plain_bodies =
+  [ "null", `Null
+  ; ( "nested objects and lists"
+    , `Assoc [ "a", `Assoc [ "b", `List [ `Int 1; `Null; `Bool false ] ]; "c", `String "text" ] )
+  ; "the same name at different depths", `Assoc [ "x", `Assoc [ "x", `Int 1 ] ]
+  ; "non-ASCII text", `Assoc [ "name", `String "caf\u{e9} \u{65e5}\u{672c}" ]
+  ; "the largest int", `Int max_int
+  ; "an empty object and an empty list", `List [ `Assoc []; `List [] ]
+  ]
+;;
+
+let plain_bodies_are_accepted () =
+  List.iter
+    (fun (label, body) ->
+      match
+        R.make
+          ~head:R.genesis
+          ~at_ms:0
+          ~author:(Author.Authenticated alice)
+          ~kind:R.Kind.Runtime_grant
+          ~body
+      with
+      | Error _ -> Alcotest.failf "%s: refused" label
+      | Ok record ->
+        (match R.of_line ~head:R.genesis (R.to_line record) with
+         | Ok _ -> ()
+         | Error error ->
+           Alcotest.failf "%s: written but not read back: %s" label (R.decode_error_to_string error)))
+    plain_bodies
+;;
+
+let bodies_that_are_not_plain =
+  [ "a float", `Float 1.5
+  ; "a float inside a list", `List [ `Int 1; `Float 2.5 ]
+  ; "nan", `Float Float.nan
+  ; "an integer too large for int", `Intlit "123456789012345678901234567890"
+  ; "a repeated name", `Assoc [ "x", `Int 1; "x", `Int 2 ]
+  ; "a repeated name inside a list", `List [ `Assoc [ "y", `Null; "y", `Null ] ]
+  ; "a repeated name inside an object", `Assoc [ "a", `Assoc [ "y", `Null; "y", `Null ] ]
+  ; "text that is not UTF-8", `String "\xff"
+  ; "a name that is not UTF-8", `Assoc [ "\xc3", `Int 1 ]
+  ; "half of a surrogate pair", `String "\xed\xa0\x80"
+  ]
+;;
+
+let make_refuses_a_body_that_is_not_plain =
+  List.map
+    (fun (label, body) ->
+      Alcotest.test_case label `Quick (fun () ->
+        match
+          R.make
+            ~head:R.genesis
+            ~at_ms:0
+            ~author:(Author.Authenticated alice)
+            ~kind:R.Kind.Runtime_grant
+            ~body
+        with
+        | Error R.Body_not_plain -> ()
+        | Error (R.Author_not_admitted _) -> Alcotest.fail "the author is admitted"
+        | Ok _ -> Alcotest.failf "%s: accepted" label))
+    bodies_that_are_not_plain
+;;
+
+(* [line] with its hash made over what it now says, as a writer would sign it.
+   The prefix is the one the golden line pins. *)
+let resign line =
+  let hash_member_start = {|,"hash":"|} in
+  let hash_member_length = String.length hash_member_start + 64 + String.length {|"}|} in
+  let cut = String.length line - hash_member_length in
+  let unsigned = String.sub line 0 cut ^ "}" in
+  let hash =
+    Agent_core_sha256.to_hex
+      (Agent_core_sha256.digest_string ("masc-authz-record-v1\n" ^ unsigned))
+  in
+  String.sub line 0 cut ^ hash_member_start ^ hash ^ {|"}|}
+;;
+
+let resigning_an_untouched_line_changes_nothing () =
+  Alcotest.(check string) "first line" first_line (resign first_line);
+  Alcotest.(check string) "second line" second_line (resign second_line)
+;;
+
+(* Each line below carries a correct hash, so only the body is wrong. *)
+let not_plain_line_tests =
+  let case name ~by =
+    Alcotest.test_case name `Quick (fun () ->
+      expect_decode_error
+        ~head:R.genesis
+        (resign (replace_once ~line:first_line ~old:{|"x":1|} ~by))
+        R.Body_not_plain)
+  in
+  [ case "a repeated name, signed" ~by:{|"x":1,"x":2|}
+  ; case "a float, signed" ~by:{|"x":1.5|}
+  ; case "text that is not UTF-8, signed" ~by:"\"x\":\"\xff\""
+  ]
+;;
+
 let () =
   Alcotest.run
     "authz_record"
@@ -326,6 +513,8 @@ let () =
     ; ( "kinds"
       , [ Alcotest.test_case "all listed" `Quick kinds_are_all_listed
         ; Alcotest.test_case "labels round trip" `Quick kind_labels_round_trip
+        ; Alcotest.test_case "labels are the names on disk" `Quick kind_labels_are_the_names_on_disk
+        ; Alcotest.test_case "author shapes are the names on disk" `Quick author_shapes_are_the_names_on_disk
         ] )
     ; ( "chain"
       , [ Alcotest.test_case "lines read back in order" `Quick lines_read_back_in_order
@@ -336,7 +525,14 @@ let () =
             "make refuses an author who may not write"
             `Quick
             make_refuses_an_author_who_may_not_write
+        ; Alcotest.test_case "a fixed line keeps its bytes and its hash" `Quick a_fixed_line_keeps_its_bytes_and_its_hash
         ] )
     ; "a line that was changed", tamper_tests
+    ; ( "a body that is plain JSON"
+      , [ Alcotest.test_case "accepted and read back" `Quick plain_bodies_are_accepted
+        ; Alcotest.test_case "resigning changes nothing" `Quick resigning_an_untouched_line_changes_nothing
+        ] )
+    ; "make refuses a body that is not plain", make_refuses_a_body_that_is_not_plain
+    ; "a signed line with a body that is not plain", not_plain_line_tests
     ]
 ;;

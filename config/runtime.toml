@@ -2776,7 +2776,7 @@ reasoning-effort = "high"
 wizard-default = true
 
 [models.openrouter-deepseek-v4-1-flash]
-api-name = "deepseek/deepseek-v4.1-flash"
+api-name = "deepseek/deepseek-v4.1-flash-1017"
 # The DeepSeek V4 model cards (Flash and Pro) recommend temperature 1.0. This host
 # honours temperature, so without this line the keeper default 0.4 is sent.
 temperature = 1.0
@@ -2916,6 +2916,15 @@ streaming = true
 reasoning-effort = "high"
 
 [openrouter.openrouter-free-lfm-2-5-2-6b]
+
+[models.openrouter-free-nemotron-3-5-super-vl]
+api-name = "nvidia/nemotron-3.5-super-vl:free"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-free-nemotron-3-5-super-vl]
 
 [model_sets.codex]
 models = [

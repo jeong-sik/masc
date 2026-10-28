@@ -3783,24 +3783,20 @@ supports_multimodal_inputs = false
 supports_image_input = false
 supports_parallel_tool_calls = true
 
-# DeepSeek v4.1 Flash, probed 2026-09-10 alongside the twelve rows above
-# (evidence/task-openrouter-v4-1-flash/). Same window and output ceiling as
-# deepseek-v4-flash, and it takes image input where that row is text-only --
-# so this row lowers no modality. The list price is the trade: $0.30/$1.20
-# against $0.0886/$0.177 — the gateway also discounts this id to $0.15/$0.60
-# overnight and all weekend, but the row declares the top-level price like
-# every other row — so it is not a cheaper replacement for the v4 flash row
-# and both stay. The disable rung is real here: reasoning_effort "none" answered
-# 200 with 0 reasoning tokens billed, and all seven rungs answered 200.
-# tool_choice required answered with finish_reason tool_calls on the second
-# attempt -- the first was HTTP 429 from the upstream provider, a rate limit
-# rather than a refusal, so the row claims the base's tool_choice support.
+# DeepSeek v4.1 Flash 1017, probed 2026-10-28
+# (evidence/2026-10-28-openrouter-bindings/). Window 1048576, output ceiling
+# 393216 and image input come from the gateway listing. The list price is
+# $0.30/$1.20 against $0.0886/$0.177 for deepseek-v4-flash; the gateway lowers
+# it to $0.15/$0.60 on weekends and on weekdays outside UTC 01:00-04:00 and
+# 06:00-10:00, but the row declares the top-level price like every other row.
+# The disable rung is real: reasoning_effort "none" answered 200 with 0
+# reasoning tokens, and basic and tool_choice required (get_weather) answered 200.
 [[models]]
-model_id = "deepseek/deepseek-v4.1-flash"
+model_id = "deepseek/deepseek-v4.1-flash-1017"
 provider_name = "openrouter"
 base = "openai_chat_extended"
 max_context_tokens = 1048576
-max_output_tokens = 384000
+max_output_tokens = 393216
 input_per_million = 0.3
 output_per_million = 1.2
 reasoning_output_format = "split_reasoning_fields"
@@ -4132,6 +4128,28 @@ supports_seed = true
 supports_parallel_tool_calls = false
 supports_multimodal_inputs = false
 supports_image_input = false
+
+# Probed 2026-10-28 (evidence/2026-10-28-openrouter-bindings/): basic and
+# get_weather answered 200, and effort "none" billed 0 reasoning tokens. The
+# gateway lists image input and no parallel_tool_calls, top_k or min_p, so the
+# row lowers those and keeps the image claim.
+[[models]]
+model_id = "nvidia/nemotron-3.5-super-vl:free"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1000000
+max_output_tokens = 131072
+input_per_million = 0.0
+output_per_million = 0.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_seed = true
+supports_parallel_tool_calls = false
+supports_top_k = false
+supports_min_p = false
 
 # Z.AI coding plan. Window 1M (docs.z.ai). The 131072 output ceiling is the
 # value the endpoint named when it refused an out-of-range max_tokens with

@@ -37,14 +37,22 @@ let answer_of_json = function
   | `Null -> Unreleased Void_answer
   | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Unreleased Undeclared_answer
 let of_unreleased answer = Unreleased answer
+let one_answer_per_step answers =
+  let keep_the_stricter kept later = match kept with
+    | Unreleased _ -> kept
+    | Receipt_without_dialog -> later in
+  List.fold_left (fun folded (index, answer) ->
+    if List.mem_assoc index folded
+    then List.map (fun (step, kept) -> if step = index then (step, keep_the_stricter kept answer) else (step, kept)) folded
+    else folded @ [index, answer]) [] answers
 let judge answers =
   let rec go proven = function
     | [] -> Settled (Released (Released_by_receipts (List.rev proven)))
     | (index, Receipt_without_dialog) :: rest -> go (index :: proven) rest
     | (index, Unreleased answer) :: _ -> Unconfirmed (Step_not_released {index; answer}) in
-  match answers with
+  match one_answer_per_step answers with
   | [] -> Settled No_hold
-  | _ :: _ -> go [] answers
+  | _ :: _ as steps -> go [] steps
 let unreleased_description = function
   | Receipt_with_dialog -> "a dialog that cut it short"
   | Void_answer -> "void"

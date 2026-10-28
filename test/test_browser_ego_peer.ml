@@ -431,7 +431,7 @@ let test_effects_answer_what_happened () =
     "tab",obj ["url",str "https://slack.com/";"title",str "Slack";"active",`Bool true]]) in
   reply := (fun _ -> opened_page "p4");
   (match dispatch peer Live.Page_act (act_args (Lane.Action.Open_tab "https://slack.com/")) with
-   | Ok receipt -> check string "the new tab" {|{"tabId":4,"action":"open_tab","created":true,"url":"https://slack.com/","title":"Slack","active":true}|}
+   | Ok receipt -> check string "the new tab" {|{"inputReadiness":"command_settled","tabId":4,"action":"open_tab","created":true,"url":"https://slack.com/","title":"Slack","active":true}|}
        (Yojson.Safe.to_string receipt)
    | Error _ -> fail "open_tab failed");
   check string "the url reaches the script" "https://slack.com/" (text (field "url" (last ()).args));
@@ -444,7 +444,7 @@ let test_effects_answer_what_happened () =
   (match dispatch peer Live.Page_act (act_args (Lane.Action.Open_tab "https://nowhere.test/")) with
    | Error (Live.Partial_failure {tab_id; receipt; message}) ->
      check int "the created tab" 5 tab_id;
-     check string "its receipt" {|{"tabId":5,"action":"open_tab","created":true}|} (Yojson.Safe.to_string receipt);
+     check string "its receipt" {|{"inputReadiness":"command_settled","tabId":5,"action":"open_tab","created":true}|} (Yojson.Safe.to_string receipt);
      check bool "says not to open another" true (String_util.contains_substring message "Do not open another tab")
    | other -> failf "a failed load after creation was %s" (failure_kind other));
   reply := (fun _ -> Error Peer.Timed_out);
@@ -467,7 +467,7 @@ let test_effects_answer_what_happened () =
     (failure_kind (dispatch peer Live.Page_goto (obj ["tabId",`Int 3;"url",str "https://slack.com/"])));
   reply := (fun _ -> answered (obj ["error",`Null;"tab",obj ["url",str "https://slack.com/c";"title",str "Channel"]]));
   (match dispatch peer Live.Page_goto (obj ["tabId",`Int 1;"url",str "https://slack.com/c"]) with
-   | Ok receipt -> check string "the move" {|{"tabId":1,"action":"goto","url":"https://slack.com/c","title":"Channel"}|}
+   | Ok receipt -> check string "the move" {|{"inputReadiness":"command_settled","tabId":1,"action":"goto","url":"https://slack.com/c","title":"Channel"}|}
        (Yojson.Safe.to_string receipt)
    | Error _ -> fail "goto failed");
   check (float 0.) "goto uses the SDK-owned runner" 0. (last ()).window_s;
@@ -479,7 +479,7 @@ let test_effects_answer_what_happened () =
   (match dispatch peer Live.Page_goto (obj ["tabId",`Int 1;"url",str "http://127.0.0.1:9/"]) with
    | Error (Live.Partial_failure {tab_id; receipt; _}) ->
      check int "the moved tab" 1 tab_id;
-     check string "where it is now" {|{"tabId":1,"action":"goto","url":"http://127.0.0.1:9/","title":"127.0.0.1"}|}
+     check string "where it is now" {|{"inputReadiness":"command_settled","tabId":1,"action":"goto","url":"http://127.0.0.1:9/","title":"127.0.0.1"}|}
        (Yojson.Safe.to_string receipt)
    | other -> failf "a failed load was %s" (failure_kind other));
   reply := (fun _ -> failed "Target closed");
@@ -490,7 +490,7 @@ let test_effects_answer_what_happened () =
     (failure_kind (dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id=3;frame_path=[];interaction=Lane.Action.Close_tab}))));
   reply := (fun _ -> answered (obj ["closed",`Bool true]));
   (match dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id=3;frame_path=[];interaction=Lane.Action.Close_tab})) with
-   | Ok receipt -> check string "the close" {|{"tabId":3,"action":"close_tab","closed":true}|} (Yojson.Safe.to_string receipt)
+   | Ok receipt -> check string "the close" {|{"inputReadiness":"command_settled","tabId":3,"action":"close_tab","closed":true}|} (Yojson.Safe.to_string receipt)
    | Error _ -> fail "close failed");
   let before = runs () in
   check string "a closed tab is gone" "browser tab is no longer present"
@@ -534,7 +534,7 @@ let test_input_acts_through_the_shared_page_scripts () =
   let before = runs () in
   (match interact (Lane.Click_node {document_id="d1";node_id="send"}) with
    | Ok receipt -> check string "the click"
-       {|{"tabId":1,"action":"click","urlBefore":"https://app.slack.com/","url":"https://app.slack.com/","title":"Slack","scrollX":0,"scrollY":0}|}
+       {|{"inputReadiness":"command_settled","tabId":1,"action":"click","urlBefore":"https://app.slack.com/","url":"https://app.slack.com/","title":"Slack","scrollX":0,"scrollY":0}|}
        (Yojson.Safe.to_string receipt)
    | other -> failf "the click was %s" (failure_kind other));
   check (list string) "found, then clicked" ["page.target";"page.pointer"] (steps_since before);
@@ -594,7 +594,7 @@ let test_input_acts_through_the_shared_page_scripts () =
   by_step ["page.input",(fun _ -> dom_answer (obj ["action",str "fill";"url",str observed_url;"title",str "Slack"]))];
   let fill = Lane.Fill_node {target={document_id="d1";node_id="message"};text="hi"} in
   (match interact fill with
-   | Ok receipt -> check string "the fill" {|{"tabId":1,"action":"fill","url":"https://app.slack.com/","title":"Slack"}|}
+   | Ok receipt -> check string "the fill" {|{"inputReadiness":"command_settled","tabId":1,"action":"fill","url":"https://app.slack.com/","title":"Slack"}|}
        (Yojson.Safe.to_string receipt)
    | other -> failf "the fill was %s" (failure_kind other));
   let refusal ~started = dom_answer (obj ["interactionFailure",obj ["message",str "element_not_found";"effectStarted",`Bool started]]) in
@@ -1230,7 +1230,7 @@ let test_a_snapshot_reads_egos_own_tree () =
     | Some line -> Yojson.Safe.to_string (Yojson.Safe.from_string (after ~prefix:"seen " line))
     | None -> fail "the stand-in did not say what it saw" in
   let expected ~scope ~snapshot ~truncated ~chars = Yojson.Safe.to_string (obj (
-    ["tabId",`Int 1;"url",str "https://app.slack.com/";"title",str "Slack"] @ scope
+    ["inputReadiness",str "command_settled";"tabId",`Int 1;"url",str "https://app.slack.com/";"title",str "Slack"] @ scope
     @ ["snapshot",str snapshot;"truncated",`Bool truncated;"chars",`Int chars])) in
   let answer label = function
     | Ok answer -> Yojson.Safe.to_string answer
@@ -1319,7 +1319,7 @@ let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
     | other -> failf "%s was %s" label (failure_kind other) in
   let click target = on (Lane.Click_target target) in
   check string "a ref is clicked by ego once it names one element"
-    (Yojson.Safe.to_string (obj ["tabId",`Int 1;"action",str "click";"target",obj ["ref",`Int 12];
+    (Yojson.Safe.to_string (obj ["inputReadiness",str "command_settled";"tabId",`Int 1;"action",str "click";"target",obj ["ref",`Int 12];
       "urlBefore",str observed_url;"url",str observed_url;"title",str "Slack"]))
     (answer "ref click" (click (Lane.Target_ref 12)));
   check string "the dialog and URL checks come before native input" {|["info","url","click @12"]|} (seen ());
@@ -1444,7 +1444,7 @@ const taskSpace=async id=>({spaceId:id,name:'SDK Space',ownership:%s,
   let options=obj ["interval",`Float 0.5;"timeout",`Float 30000.] in
   (match wait options with
    | Ok value -> check bool "wait observation names the same Space" true
-       (value=obj ["action",str "wait_for_control";"spaceId",`Int 51;"spaceName",str "SDK Space";"controlAvailable",`Bool true])
+       (value=obj ["inputReadiness",str "command_settled";"action",str "wait_for_control";"spaceId",`Int 51;"spaceName",str "SDK Space";"controlAvailable",`Bool true])
    | Error _ -> fail "native control wait failed");
   check bool "options inside the window reach the SDK unchanged" true
     (seen ()=`List [obj ["interval",`Float 0.5;"timeout",`Int 30000]]);
@@ -1685,7 +1685,7 @@ let test_the_space_goes_to_the_operator_and_back () =
     | Ok answer -> Yojson.Safe.to_string answer
     | other -> failf "%s was %s" label (failure_kind other) in
   check string "the hand-off identifies the same space for the operator"
-    {|{"action":"hand_off","spaceId":51,"spaceName":"MASC login"}|}
+    {|{"inputReadiness":"command_settled","action":"hand_off","spaceId":51,"spaceName":"MASC login"}|}
     (answer "hand-off" (act Lane.Action.Hand_off));
   check string "by ego's own handOff" {|["handOff"]|} (seen ());
   ownership := "agentDelegatedToUser";
@@ -1747,7 +1747,7 @@ let test_history_moves_one_entry () =
     | Some line -> Yojson.Safe.Util.(to_list (Yojson.Safe.from_string (after ~prefix:"seen " line)) |> List.map to_string)
     | None -> fail "the stand-in did not say what it saw" in
   (match on_tab Lane.Action.Back with
-   | Ok receipt -> check string "back" {|{"tabId":1,"action":"back","url":"https://a.test/","title":"A"}|} (Yojson.Safe.to_string receipt)
+   | Ok receipt -> check string "back" {|{"inputReadiness":"command_settled","tabId":1,"action":"back","url":"https://a.test/","title":"A"}|} (Yojson.Safe.to_string receipt)
    | other -> failf "back was %s" (failure_kind other));
   check bool "it moved to the entry" true (List.mem "Page.navigateToHistoryEntry" (seen ()));
   check string "and waited for the load once the tab was on it" "load at 0" (List.hd (List.rev (seen ())));
@@ -1758,31 +1758,31 @@ let test_history_moves_one_entry () =
     (before_effect "back from the first entry" (on_tab Lane.Action.Back));
   check (list string) "and nothing moved" ["Page.getNavigationHistory"] (seen ());
   (match on_tab Lane.Action.Forward with
-   | Ok receipt -> check string "forward" {|{"tabId":1,"action":"forward","url":"https://b.test/","title":"B"}|} (Yojson.Safe.to_string receipt)
+   | Ok receipt -> check string "forward" {|{"inputReadiness":"command_settled","tabId":1,"action":"forward","url":"https://b.test/","title":"B"}|} (Yojson.Safe.to_string receipt)
    | other -> failf "forward was %s" (failure_kind other));
   current := 1;
   check string "no later page" "tab 1 has no later page in its history"
     (before_effect "forward from the last entry" (on_tab Lane.Action.Forward));
   (match on_tab Lane.Action.Reload with
-   | Ok receipt -> check string "reload" {|{"tabId":1,"action":"reload","url":"https://b.test/","title":"B"}|} (Yojson.Safe.to_string receipt)
+   | Ok receipt -> check string "reload" {|{"inputReadiness":"command_settled","tabId":1,"action":"reload","url":"https://b.test/","title":"B"}|} (Yojson.Safe.to_string receipt)
    | other -> failf "reload was %s" (failure_kind other));
   check (list string) "a reload is ego's own" ["reload"] (seen ());
   detaches := true;
   (match on_tab Lane.Action.Back with
-   | Ok receipt -> check string "back past a failed read" {|{"tabId":1,"action":"back","url":"https://a.test/","title":"A"}|} (Yojson.Safe.to_string receipt)
+   | Ok receipt -> check string "back past a failed read" {|{"inputReadiness":"command_settled","tabId":1,"action":"back","url":"https://a.test/","title":"A"}|} (Yojson.Safe.to_string receipt)
    | other -> failf "a move with a failed read while waiting was %s" (failure_kind other));
   check bool "a read failed while it waited" true (List.mem "detached" (seen ()));
   detaches := false;
   same_url := true;
   (match on_tab Lane.Action.Back with
-   | Ok receipt -> check string "back to an entry with the same URL" {|{"tabId":1,"action":"back","url":"https://a.test/","title":"A"}|} (Yojson.Safe.to_string receipt)
+   | Ok receipt -> check string "back to an entry with the same URL" {|{"inputReadiness":"command_settled","tabId":1,"action":"back","url":"https://a.test/","title":"A"}|} (Yojson.Safe.to_string receipt)
    | other -> failf "a move to the same URL was %s" (failure_kind other));
   check string "it waited for the entry, not the URL" "load at 0" (List.hd (List.rev (seen ())));
   same_url := false;
   load := {|throw new Error("Timeout 30000ms exceeded");|};
   (match on_tab Lane.Action.Back with
    | Error (Live.Partial_failure {receipt; message; _}) ->
-     check string "a load wait that failed answers where the tab is" {|{"tabId":1,"action":"back","url":"https://a.test/","title":"A"}|} (Yojson.Safe.to_string receipt);
+     check string "a load wait that failed answers where the tab is" {|{"inputReadiness":"command_settled","tabId":1,"action":"back","url":"https://a.test/","title":"A"}|} (Yojson.Safe.to_string receipt);
      check string "and what failed" "Timeout 30000ms exceeded" message
    | other -> failf "a failed load wait was %s" (failure_kind other));
   load := "";
@@ -1790,7 +1790,7 @@ let test_history_moves_one_entry () =
   (match on_tab Lane.Action.Back with
    | Error (Live.Partial_failure {tab_id; receipt; message}) ->
      check int "the tab" 1 tab_id;
-     check string "where it is now" {|{"tabId":1,"action":"back","url":"https://b.test/","title":"B"}|} (Yojson.Safe.to_string receipt);
+     check string "where it is now" {|{"inputReadiness":"command_settled","tabId":1,"action":"back","url":"https://b.test/","title":"B"}|} (Yojson.Safe.to_string receipt);
      check string "what failed" "net::ERR_ABORTED" message
    | other -> failf "a failed move was %s" (failure_kind other));
   let before = List.length !steps in
@@ -1811,7 +1811,7 @@ let test_dialogs_are_listed_and_answered () =
   reply := (fun _ -> answered (obj ["dialog",prompt]));
   (match act (Lane.Action.Accept_dialog (Some "Vincent")) with
    | Ok receipt -> check string "the answer names the dialog"
-       {|{"tabId":1,"action":"accept_dialog","dialog":{"type":"prompt","message":"name?","defaultValue":"def"}}|}
+       {|{"inputReadiness":"command_settled","tabId":1,"action":"accept_dialog","dialog":{"type":"prompt","message":"name?","defaultValue":"def"}}|}
        (Yojson.Safe.to_string receipt)
    | other -> failf "the accept was %s" (failure_kind other));
   check string "on the page's label" "p1" (text (field "label" (last ()).args));
@@ -1824,12 +1824,12 @@ let test_dialogs_are_listed_and_answered () =
   reply := (fun _ -> answered (obj ["dialog",alert]));
   (match act Lane.Action.Dismiss_dialog with
    | Ok receipt -> check string "the dismissal names the dialog"
-       {|{"tabId":1,"action":"dismiss_dialog","dialog":{"type":"alert","message":"saved"}}|} (Yojson.Safe.to_string receipt)
+       {|{"inputReadiness":"command_settled","tabId":1,"action":"dismiss_dialog","dialog":{"type":"alert","message":"saved"}}|} (Yojson.Safe.to_string receipt)
    | other -> failf "the dismissal was %s" (failure_kind other));
   check bool "dismisses" true (field "accept" (last ()).args = `Bool false);
   reply := (fun _ -> answered (obj ["dialog",ego_dialog "modal" "?"]));
   (match act Lane.Action.Dismiss_dialog with
-   | Ok receipt -> check string "a dialog it cannot read is left out" {|{"tabId":1,"action":"dismiss_dialog"}|} (Yojson.Safe.to_string receipt)
+   | Ok receipt -> check string "a dialog it cannot read is left out" {|{"inputReadiness":"command_settled","tabId":1,"action":"dismiss_dialog"}|} (Yojson.Safe.to_string receipt)
    | other -> failf "an answer to an unreadable dialog was %s" (failure_kind other));
   reply := (fun _ -> refused "no dialog is open in this tab");
   check string "none open" "no dialog is open in this tab" (before_effect "an answer with none open" (act Lane.Action.Dismiss_dialog));
@@ -1903,7 +1903,7 @@ let test_an_input_that_opens_a_dialog_answers_with_it () =
     | other -> failf "unexpected step %s" other);
   (match interact (Lane.Click_node {document_id="d1";node_id="send"}) with
    | Ok receipt -> check string "the click and the dialog it opened"
-       {|{"tabId":1,"action":"click","urlBefore":"https://app.slack.com/","url":"https://app.slack.com/","title":"Slack","dialog":{"type":"confirm","message":"sure?"}}|}
+       {|{"inputReadiness":"command_settled","tabId":1,"action":"click","urlBefore":"https://app.slack.com/","url":"https://app.slack.com/","title":"Slack","dialog":{"type":"confirm","message":"sure?"}}|}
        (Yojson.Safe.to_string receipt)
    | other -> failf "a click that opened a dialog was %s" (failure_kind other));
   reply := (fun _ -> answered (obj ["dialog",ego_dialog "alert" "saved";"tab",row]));
@@ -1911,7 +1911,7 @@ let test_an_input_that_opens_a_dialog_answers_with_it () =
    | Error (Live.Partial_failure {tab_id; receipt; message}) ->
      check int "the tab" 1 tab_id;
      check string "where it is and the dialog"
-       {|{"tabId":1,"action":"fill","url":"https://app.slack.com/","title":"Slack","dialog":{"type":"alert","message":"saved"}}|}
+       {|{"inputReadiness":"command_settled","tabId":1,"action":"fill","url":"https://app.slack.com/","title":"Slack","dialog":{"type":"alert","message":"saved"}}|}
        (Yojson.Safe.to_string receipt);
      check bool "says to answer it" true (String_util.contains_substring message "accept_dialog or dismiss_dialog")
    | other -> failf "a fill the dialog stopped was %s" (failure_kind other));
@@ -1989,7 +1989,7 @@ let test_dialog_scripts_in_node () =
    | Error _ -> fail "the listing failed");
   (match act (Lane.Action.Accept_dialog (Some "Vincent")) with
    | Ok receipt -> check string "the answer"
-       {|{"tabId":1,"action":"accept_dialog","dialog":{"type":"prompt","message":"name?","defaultValue":"def"}}|} (Yojson.Safe.to_string receipt)
+       {|{"inputReadiness":"command_settled","tabId":1,"action":"accept_dialog","dialog":{"type":"prompt","message":"name?","defaultValue":"def"}}|} (Yojson.Safe.to_string receipt)
    | other -> failf "the accept was %s" (failure_kind other));
   check (list string) "read, then answered with the text" ["info";"accept Vincent"] (seen ());
   scenario := (`Null, `Null, "");
@@ -1998,14 +1998,14 @@ let test_dialog_scripts_in_node () =
   scenario := (`Null, ego_dialog "confirm" "sure?", "click");
   (match interact (Lane.Click_node {document_id="d1";node_id="send"}) with
    | Ok receipt -> check string "the click and its dialog"
-       {|{"tabId":1,"action":"click","urlBefore":"https://app.slack.com/","url":"https://app.slack.com/","title":"Slack","dialog":{"type":"confirm","message":"sure?"}}|}
+       {|{"inputReadiness":"command_settled","tabId":1,"action":"click","urlBefore":"https://app.slack.com/","url":"https://app.slack.com/","title":"Slack","dialog":{"type":"confirm","message":"sure?"}}|}
        (Yojson.Safe.to_string receipt)
    | other -> failf "a click that opened a dialog was %s" (failure_kind other));
   check (list string) "no page script after the dialog opened, and ego's click carried its label" ["info";"evaluate";"click MASC · agent · click";"info"] (seen ());
   scenario := (`Null, alert, "evaluate");
   (match interact (Lane.Fill_node {target={document_id="d1";node_id="message"};text="hi"}) with
    | Error (Live.Partial_failure {receipt; _}) -> check string "a fill the dialog stopped"
-       {|{"tabId":1,"action":"fill","url":"https://app.slack.com/","title":"Slack","dialog":{"type":"alert","message":"saved"}}|}
+       {|{"inputReadiness":"command_settled","tabId":1,"action":"fill","url":"https://app.slack.com/","title":"Slack","dialog":{"type":"alert","message":"saved"}}|}
        (Yojson.Safe.to_string receipt)
    | other -> failf "a fill the dialog stopped was %s" (failure_kind other));
   check (list string) "read the dialog after the script stopped" ["info";"evaluate";"info"] (seen ());
@@ -2209,7 +2209,7 @@ let test_an_upload_keeps_its_files_until_the_space_ends () =
   reply := (fun _ -> answered (obj ["error",`Null;"dialog",`Null;"tab",row]));
   (match upload paths with
    | Ok receipt -> check string "the staged files handed to the SDK"
-       {|{"tabId":1,"action":"upload","chosen":[{"name":"note.txt","size":5}],"url":"https://app.slack.com/","title":"Slack"}|}
+       {|{"inputReadiness":"command_settled","tabId":1,"action":"upload","chosen":[{"name":"note.txt","size":5}],"url":"https://app.slack.com/","title":"Slack"}|}
        (Yojson.Safe.to_string receipt)
    | other -> failf "the upload was %s" (failure_kind other));
   check (list string) "ego was given the copies" paths
@@ -2220,7 +2220,7 @@ let test_an_upload_keeps_its_files_until_the_space_ends () =
   reply := (fun _ -> answered (obj ["error",`Null;"dialog",ego_dialog "alert" "uploaded";"tab",row]));
   (match upload paths with
    | Ok receipt -> check string "an upload that opened a dialog answers with it"
-       {|{"tabId":1,"action":"upload","chosen":[{"name":"note.txt","size":5}],"url":"https://app.slack.com/","title":"Slack","dialog":{"type":"alert","message":"uploaded"}}|}
+       {|{"inputReadiness":"command_settled","tabId":1,"action":"upload","chosen":[{"name":"note.txt","size":5}],"url":"https://app.slack.com/","title":"Slack","dialog":{"type":"alert","message":"uploaded"}}|}
        (Yojson.Safe.to_string receipt)
    | other -> failf "an upload that opened a dialog was %s" (failure_kind other));
   reply := (fun _ -> answered (obj ["error",str "Target closed";"dialog",`Null;"tab",row]));
@@ -2261,7 +2261,7 @@ let test_an_upload_through_a_file_chooser_answers_what_it_handed () =
   reply := (fun _ -> answered (obj ["error",`Null;"dialog",`Null;"tab",row]));
   (match choose paths with
    | Ok receipt -> check string "the files handed to the chooser"
-       {|{"tabId":1,"action":"upload","chosen":[{"name":"note.txt","size":5}],"url":"https://app.slack.com/","title":"Slack"}|}
+       {|{"inputReadiness":"command_settled","tabId":1,"action":"upload","chosen":[{"name":"note.txt","size":5}],"url":"https://app.slack.com/","title":"Slack"}|}
        (Yojson.Safe.to_string receipt)
    | other -> failf "the upload was %s" (failure_kind other));
   check (list string) "ego was given the copies" paths
@@ -2889,11 +2889,18 @@ let test_operator_input_recovery () =
   let first=Peer.dispatch ~command_id:"original-input-command" peer ~verb:Live.Page_native_workflow
     (args [obj ["method",str "click";"selector",str "#dialog"]]) in
   check string "dialog retains partial effect" "partial" (failure_kind first);
+  (match first with
+   | Error (Live.Partial_failure {receipt; _}) ->
+     check string "a partial receipt written while input is pending says so" "release_uncertain"
+       Yojson.Safe.Util.(receipt |> member "inputReadiness" |> to_string)
+   | Ok _ | Error (Live.Before_effect _ | Live.Outcome_unknown _) -> fail "the dialog lost its partial receipt");
   let pending=match Peer.input_status peer with Input.Uncertain pending -> pending
     | Ready _ -> fail "dialog lost its pending input" in
   check string "pending input names original command" "original-input-command" pending.command_id;
-  ignore (answer "answer dialog" (dispatch peer Live.Page_act (Lane.Action.to_json
-    (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Accept_dialog None}))));
+  let accepted=answer "answer dialog" (dispatch peer Live.Page_act (Lane.Action.to_json
+    (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Accept_dialog None}))) in
+  check string "a result read while input is pending says so" "release_uncertain"
+    Yojson.Safe.Util.(accepted |> member "inputReadiness" |> to_string);
   ignore (before_effect "dialog answer is not input-reset authority" (dispatch peer Live.Page_native_workflow (args [])));
   let connection:Operator.connection={client_id="original-client";space=Peer.space peer;recovery={
     status=(fun () -> Peer.input_status peer);busy=(fun () -> Peer.input_busy peer);
@@ -2927,7 +2934,7 @@ let test_operator_input_recovery () =
       && field "snapshot" continued=str "root\n  button Continue");
   check bool "new input settles instead of retaining the operator assertion as native proof" true
     (Peer.input_status peer=Input.Ready Input.Command_settled && not (Peer.input_busy peer)
-      && field "inputReadiness" continued=`Null);
+      && field "inputReadiness" continued=str "command_settled");
   check (list (pair string string)) "original click is never replayed; the new command clicks once"
     ["original-input-command","#dialog";"continued-input-command","#continue"] (List.rev !input_commands);
   check int "only original, empty observation and new input workflows were issued" 3 !issued

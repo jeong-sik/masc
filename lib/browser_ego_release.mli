@@ -58,11 +58,13 @@ type unconfirmed =
 type t = Settled of settled | Unconfirmed of unconfirmed
 
 val judge : (int * answer) list -> t
-(** [judge answers] takes the input-holding steps in order. It is [Settled
-    No_hold] for none, [Settled (Released _)] when every answer is
-    [Receipt_without_dialog], and otherwise [Unconfirmed] naming the first
-    answer that is not. The caller passes what the SDK returned; a proof is not
-    tied to the call it came from. *)
+(** [judge answers] takes the input-holding steps in order. A step that
+    appears twice counts once and keeps its first answer that releases nothing,
+    so a later clean answer never undoes a dialog, and a proof never lists a
+    step twice. It is [Settled No_hold] for none, [Settled (Released _)] when
+    every answer is [Receipt_without_dialog], and otherwise [Unconfirmed]
+    naming the first answer that is not. The caller passes what the SDK
+    returned; a proof is not tied to the call it came from. *)
 
 val describe : unconfirmed -> string
 (** A short reason for an error message. *)

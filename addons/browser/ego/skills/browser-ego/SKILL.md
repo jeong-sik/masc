@@ -79,9 +79,11 @@ If an Ego result says input release is unconfirmed, keep the original connection
 and do not replay its command. Answer any JavaScript dialog separately. Ask the
 operator to check/reset key and button state in that Space and use this Browser
 installation's private operator controls to confirm completion. The confirmation
-applies only to the pending input generation; `inputReadiness=operator_asserted`
-identifies its source on subsequent receipts. It is not SDK cleanup proof,
-login completion, takeover permission or a model-callable reset action. After a lost
-confirmation reply, inspect the original installation and read its form if the
-same worker is still available. Never apply its old confirmation to a replacement
-connection or replay browser input.
+applies only to the pending input generation. It is not SDK cleanup proof,
+login completion, takeover permission or a model-callable reset action. Every
+Ego result object carries `inputReadiness`: `command_settled`,
+`operator_asserted` after that confirmation, or `release_uncertain` while input
+is still refused. A tab list that comes back as a plain array carries nothing.
+After a lost confirmation reply, inspect the original installation and read its
+form if the same worker is still available. Never apply its old confirmation to
+a replacement connection or replay browser input.

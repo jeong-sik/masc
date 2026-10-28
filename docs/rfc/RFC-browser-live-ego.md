@@ -245,11 +245,14 @@ cannot be exported as a model tool.
 
 After checking and resetting keys/buttons in that same Space, the operator may
 press “입력 상태 확인·초기화 완료”. This sends no SDK input. It records
-`Operator_reset_asserted`, permits a subsequent distinct command, and retains
-`inputReadiness=operator_asserted` on receipts until a new holding operation
-settles. An input preflight refusal restores the prior provenance. A new input
-uncertainty creates a new generation, so an older confirmation cannot unlock it.
-The form refuses active commands, foreign clients/Spaces and stale generations;
+`Operator_reset_asserted`, permits a subsequent distinct command, and shows
+`inputReadiness=operator_asserted` on results until a new holding operation
+settles. Every result that is a JSON object carries `inputReadiness`:
+`command_settled`, `operator_asserted` or `release_uncertain`. A tab list that
+is a plain array carries nothing. An input preflight refusal restores the prior
+provenance. A new input uncertainty creates a new generation, so an older
+confirmation cannot unlock it. The form refuses active commands, foreign
+clients/Spaces and stale generations;
 a duplicate confirmation for the same still-current assertion is idempotent.
 Stale form submissions return a `not_applied` view rather than an MCP error
 that could unnecessarily retire the worker. After a lost reply, inspect the original installation and read its form only

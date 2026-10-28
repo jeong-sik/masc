@@ -125,6 +125,11 @@ BrowserRead 크기 정책을 따른다. 반환된 url·title·snapshot·truncate
 영수증 객체만 해제로 인정하고, `keyboard.type`처럼 값 없이 끝나는 호출은 인정하지 않는다.
 해제가 확인되지 않으면 그 연결의 추가 입력은 거절되며, 운영자가 입력 초기화를 확인해야 풀린다.
 자동 재접속이나 새 Space로 이 경계를 우회하지 않는다.
+모든 Ego 결과 객체에는 `inputReadiness`가 붙어 지금 입력 상태를 알려 준다.
+`command_settled`는 풀리지 않은 입력이 없다는 뜻이다.
+`operator_asserted`는 운영자가 확인했을 뿐 SDK가 확인한 것은 아니라는 뜻이다.
+`release_uncertain`은 해제가 확인되지 않아 추가 입력이 거절되는 중이라는 뜻이다.
+탭 목록이 배열로 오면 이 필드가 없다.
 
 ## scene/regions의 범위와 변경된 페이지
 

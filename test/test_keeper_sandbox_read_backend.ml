@@ -51,6 +51,17 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
+let cleanup_fixture_dir dir =
+  let rec writable path =
+    if Sys.file_exists path then (
+      (try Unix.chmod path 0o700 with Unix.Unix_error _ -> ());
+      if (Unix.lstat path).Unix.st_kind = Unix.S_DIR
+      then Array.iter (fun name -> writable (Filename.concat path name)) (Sys.readdir path))
+  in
+  writable dir;
+  cleanup_dir dir
+;;
+
 let write_file path content =
   let oc = open_out_bin path in
   Fun.protect ~finally:(fun () -> close_out oc) @@ fun () ->
@@ -459,18 +470,87 @@ let test_microvm_without_a_turn_factory_routes_to_the_attached_guest () =
   | Error message ->
     Alcotest.failf "a running guest was reported unreachable: %s" message
 
+let fake_ssh_success_script =
+  Printf.sprintf
+    {|#!/bin/sh
+case "$*" in
+  *--probe*) printf '%%s' '%s'; exit 0 ;;
+esac
+if [ "${1:-}" = list ]; then printf '[]\n'; exit 0; fi
+cat >/dev/null 2>/dev/null &
+printf 'remote-file-content'
+printf '%%s' '%s' >&2
+exit 0
+|}
+    (Exec_ssh_protocol.render_probe
+       { name = "masc-exec-shim"
+       ; version = string_of_int Exec_ssh_protocol.protocol_version ^ ".0.0"
+       ; capabilities = [ Exec_ssh_protocol.observe_capability ]
+       ; release = None
+       })
+    (Exec_ssh_protocol.render_trailer
+       { v = Exec_ssh_protocol.newest
+       ; exit = Some 0
+       ; signal = None
+       ; timed_out = false
+       ; shim_error = None
+       ; observed_syscalls = []
+       })
+
+let initialize_apple_attached_read_fixture
+    ~base ~(config : Workspace.config) ~(meta : Masc.Keeper_meta_contract.keeper_meta) =
+  let shim_dir = Config_dir_resolver.microvm_shim_dir ~base_path:base in
+  Fs_compat.mkdir_p shim_dir;
+  let binary = Filename.concat shim_dir Keeper_sandbox_microvm.shim_binary_name in
+  write_file binary "#!/bin/sh\nexit 0\n";
+  Unix.chmod binary 0o700;
+  (match Masc.Keeper_microvm_shim_readiness.initialize ~base_path:base ~payload_path:"/usr/bin:/bin" with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Masc.Keeper_microvm_shim_readiness.error_message error));
+  let captured =
+    match Masc.Keeper_github_identity.capture_tool_identity ~config ~keeper_name:meta.name with
+    | Ok captured -> captured
+    | Error error -> Alcotest.fail error
+  in
+  let fs = match Fs_compat.get_fs_opt () with Some fs -> fs | None -> Alcotest.fail "fixture needs Eio FS" in
+  let module Lifecycle = Masc.Keeper_microvm_lifecycle in
+  let coordinator = Lifecycle.create () in
+  Lifecycle.with_keeper_scope coordinator ~keeper_name:meta.name (fun scope ->
+    match
+      Masc.Keeper_microvm_github_identity.publish_if_guest_absent
+        ~fs ~coordinator ~scope ~base_path:config.base_path ~keeper_name:meta.name
+        ~backend:Keeper_microvm_backend.Apple_container ~network_mode:meta.network_mode
+        ~timeout_sec:5. captured
+    with
+    | Ok _ -> ()
+    | Error error -> Alcotest.fail (Masc.Keeper_microvm_github_identity.error_message error))
+;;
+
 let test_attached_guest_endpoint_names_the_derived_guest () =
+  let context = Eio_context.snapshot_state () in
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.set_switch sw;
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base, config, docker = setup_config "read-microvm-attach" in
   let microvm =
-    (* A backend, because attaching means building that runtime's exec argv.
-       This fixture predates the field and had been declaring a microvm
-       keeper with no runtime under it, which the endpoint now refuses. *)
     { docker with
       sandbox_profile = Keeper_types_profile_sandbox.Micro_vm
     ; microvm_backend = Some Keeper_microvm_backend.Apple_container
     }
   in
-  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  let bin_dir = temp_dir () in
+  let cli_path = Filename.concat bin_dir "container" in
+  write_file cli_path fake_ssh_success_script;
+  Unix.chmod cli_path 0o755;
+  let path = bin_dir ^ ":" ^ Option.value ~default:"" (Sys.getenv_opt "PATH") in
+  Fun.protect
+    ~finally:(fun () ->
+      Eio_context.restore_state context;
+      cleanup_fixture_dir base;
+      cleanup_dir bin_dir)
+  @@ fun () ->
+  with_env "PATH" path (fun () -> initialize_apple_attached_read_fixture ~base ~config ~meta:microvm);
   match
     Keeper_sandbox_remote_lane.attached_guest_endpoint ~config ~meta:microvm ()
   with
@@ -536,23 +616,6 @@ let test_attached_guest_endpoint_refuses_docker () =
 
    [printf '%%s'] rather than the trailer as a format: the renderer escapes
    what belongs to JSON, not what belongs to printf. *)
-let fake_ssh_success_script =
-  Printf.sprintf
-    {|#!/bin/sh
-cat >/dev/null 2>/dev/null &
-printf 'remote-file-content'
-printf '%%s' '%s' >&2
-exit 0
-|}
-    (Exec_ssh_protocol.render_trailer
-       { v = Exec_ssh_protocol.newest
-       ; exit = Some 0
-       ; signal = None
-       ; timed_out = false
-       ; shim_error = None
-       ; observed_syscalls = []
-       })
-
 let fake_ssh_read_status_script code =
   Printf.sprintf
     {|#!/bin/sh
@@ -1394,6 +1457,43 @@ sandbox_profile = "remote_ssh"
     Alcotest.(check bool) "the tree refusal follows" true
       (contains ~needle:"(the keeper's tree also refused the path: path_outside_sandbox" message)
 
+let test_failed_endpoint_preflight_keeps_original_error_and_tree_refusal () =
+  let base, config, meta = remote_reader_with_allowed_paths ~allowed_paths:(fun _ -> []) in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  let probe =
+    Exec_ssh_protocol.render_probe
+      { name = "masc-exec-shim"
+      ; version = string_of_int Exec_ssh_protocol.protocol_version ^ ".0.0"
+      ; capabilities = []
+      ; release = None
+      }
+  in
+  let script =
+    Printf.sprintf
+      {|#!/bin/sh
+case "$*" in
+  *--probe*) printf '%%s' '%s'; exit 0 ;;
+  *) cat >/dev/null 2>/dev/null & printf 'original-preflight-failure\n' >&2; exit 1 ;;
+esac
+|}
+      probe
+  in
+  with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "true" @@ fun () ->
+  with_fake_ssh script @@ fun () ->
+  match
+    Masc.Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix ~config ~meta
+      ~path:"/app/drift_monitor/windowing.py" ~max_bytes:4096 ()
+  with
+  | Ok _ -> Alcotest.fail "a read continued after the endpoint preflight failed"
+  | Error error ->
+    let message = Keeper_sandbox_read_backend.read_error_to_string error in
+    Alcotest.(check bool) "the original preflight failure survives" true
+      (String_util.contains_substring message "original-preflight-failure");
+    Alcotest.(check bool) "the tree refusal remains attached" true
+      (String_util.contains_substring message
+         "(the keeper's tree also refused the path: path_outside_sandbox")
+;;
+
 (* Exercise the public result producers through real endpoint dispatch, with
    the existing SSH shim fixture and an Apple-container CLI fixture. *)
 let test_read_and_grep_report_the_endpoint_profile () =
@@ -1401,8 +1501,9 @@ let test_read_and_grep_report_the_endpoint_profile () =
     let check tool body_field expected_body (result : Masc.Keeper_tool_execution.t) =
       let json = Yojson.Safe.from_string result.raw_output in
       let open Yojson.Safe.Util in
-      Alcotest.(check bool) (tool ^ " succeeds") true
-        (json |> member "ok" |> to_bool);
+      (match json |> member "ok" with
+       | `Bool true -> ()
+       | _ -> Alcotest.failf "%s did not succeed: %s" tool result.raw_output);
       Alcotest.(check string) (tool ^ " backend") expected
         (json |> member "via" |> to_string);
       Alcotest.(check bool) (tool ^ " endpoint output") true
@@ -1423,7 +1524,7 @@ let test_read_and_grep_report_the_endpoint_profile () =
   in
   with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" @@ fun () ->
   let base, config, meta = remote_reader_with_allowed_paths ~allowed_paths:(fun _ -> []) in
-  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  Fun.protect ~finally:(fun () -> cleanup_fixture_dir base) @@ fun () ->
   with_fake_ssh fake_ssh_success_script (fun () ->
     check_results ~config ~meta ~expected:"remote_ssh");
   let meta =
@@ -1442,7 +1543,14 @@ sandbox_profile = "microvm"
   write_file cli_path fake_ssh_success_script;
   Unix.chmod cli_path 0o755;
   let path = cli_dir ^ ":" ^ Option.value ~default:"" (Sys.getenv_opt "PATH") in
+  let context = Eio_context.snapshot_state () in
+  Fun.protect ~finally:(fun () -> Eio_context.restore_state context) @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.set_switch sw;
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   with_env "PATH" path (fun () ->
+    initialize_apple_attached_read_fixture ~base ~config ~meta;
     check_results ~config ~meta ~expected:"microvm")
 
 let test_read_of_a_declared_path_asks_the_endpoint_for_that_path () =
@@ -3143,6 +3251,8 @@ let run_tests ~clock () =
             test_undeclared_endpoint_root_stays_refused;
           Alcotest.test_case "unresolved endpoint leads and keeps the tree refusal" `Quick
             test_unresolved_endpoint_leads_and_keeps_the_tree_refusal;
+          Alcotest.test_case "failed preflight keeps its error and the tree refusal" `Quick
+            test_failed_endpoint_preflight_keeps_original_error_and_tree_refusal;
           Alcotest.test_case "own tree translates even under a declared root" `Quick
             test_own_tree_translates_even_under_a_declared_root;
           Alcotest.test_case "Read and Grep report the endpoint profile" `Quick

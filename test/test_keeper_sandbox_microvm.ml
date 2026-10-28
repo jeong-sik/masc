@@ -2786,7 +2786,7 @@ case "$1" in
     for argument in "$@"; do
       if [ "$argument" = -d ]; then : > "$running"; fi
     done ;;
-  exec) exit 0 ;;
+  exec) printf 'mounted\n'; exit 0 ;;
   *) exit 99 ;;
 esac
 |} (Filename.quote guest) (Filename.quote running) (Filename.quote log));

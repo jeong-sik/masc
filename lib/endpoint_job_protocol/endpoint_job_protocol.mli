@@ -110,7 +110,19 @@ type request =
 
 type exit_status = Exited of int | Signaled of int
 
-type phase = Queued | Starting | Running | Finished of exit_status
+type non_start = Cancelled_before_activation | Launch_rejected
+(** The protected supervisor must prove that the original payload cannot run:
+    a confirmed cancellation won before activation and the original gate is
+    settled, or preparation/exec was authoritatively rejected. A cancellation
+    request, controller EOF, activation request, missing record or bootstrap
+    exit code alone is insufficient. Uncertain original authority stays Held. *)
+
+type phase = Queued | Starting | Running | Finished of exit_status | Not_started of non_start
+(** Not_started is terminal without inventing a payload exit status. Bootstrap
+    exits are not classified as Finished just from their physical exit code.
+    Not_started carries no payload output; its streams may still await durable
+    empty sealing and result-manifest publication. Cancelled_before_activation
+    requires the corresponding cancellation intent to remain visible. *)
 
 type extent =
   | Growing of int64
@@ -138,7 +150,7 @@ type hold =
 
 type result_availability = Result_pending | Result_ready of Sha256.t
 (** Ready names the protected complete terminal result manifest required by
-    Release. It requires a finished process and both durably sealed streams;
+    Release. It requires a Finished or proven Not_started terminal and both durably sealed streams;
     even that combination may remain pending until manifest publication. *)
 
 type response =
@@ -149,8 +161,8 @@ type response =
   | Released of { binding : binding; revision : int64; result_sha256 : Sha256.t }
   | Refused of { binding : binding; reason : refusal }
   | Held of { binding : binding; reason : hold }
-(** Status is observation, not Task/Goal verification or source ACK. A finished
-    process with Growing streams is not a complete result. Refused/held messages
+(** Status is observation, not Task/Goal verification or source ACK. A terminal
+    operation with Growing streams is not a complete result. Refused/held messages
     contain typed facts, never payload prose interpreted as control. *)
 
 type codec_error =

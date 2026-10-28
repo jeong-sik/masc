@@ -28,7 +28,7 @@ let to_yojson value =
 
 let of_yojson = function
   | `Assoc fields ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let allowed = [ "execution_id"; "actor"; "runtime_id"; "response_id"; "provider_id"; "model_id"; "tool_use_id"; "provider_turn"; "source_tool_use_ordinal" ] in
     let* () =
       if List.length fields = List.length allowed

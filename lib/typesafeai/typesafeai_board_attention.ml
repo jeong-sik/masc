@@ -17,7 +17,7 @@ type judged =
   ; confidence : float
   }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* The explicit uncertainty choice delegates to the full lane. A decided
    answer's confidence goes back to the caller, which sends a decision below

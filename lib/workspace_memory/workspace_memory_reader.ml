@@ -37,7 +37,7 @@ type error =
   | Malformed_json of string
   | Io_error of string
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let error_to_string = function
   | No_pending_delivery ->

@@ -16,7 +16,7 @@ let choices = Types.choice_set
 
 let decision_label = label
 let decode_judgment json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* choices = choices in
   let* answer = Types.answer_of_yojson json in
   Types.decode_choice choices answer

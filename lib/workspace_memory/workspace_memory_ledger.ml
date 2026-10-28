@@ -19,7 +19,7 @@ type pending_fact =
   ; claim : string
   }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let schema = "workspace.memory.ledger.v1"
 let ordinary_store_name = "ordinary"
 let source_bound_store_name = "source_bound"
@@ -523,7 +523,7 @@ let apply t ~selected assignments =
         else if Fact_map.mem fact seen then Error Duplicate_assignment
         else if Fact_map.mem fact current.dispositions then Error Already_disposed
         else
-          let ( let* ) = Result.bind in
+          let open Result.Syntax in
           let* next, disposition =
             match decision with
             | Join_claim id ->

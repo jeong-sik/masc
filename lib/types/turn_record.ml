@@ -289,7 +289,7 @@ let to_json (r : t) : Yojson.Safe.t =
     @ opt_field "turn_output_tokens" (fun v -> `Int v) r.turn_output_tokens
     @ [ ("ts", `Float r.ts) ])
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let member name fields = List.assoc_opt name fields
 

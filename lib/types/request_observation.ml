@@ -11,7 +11,7 @@ type evidence =
   | Read_failed of string
   | Recorded of { call_id : string; requests : provider_request list }
 type t = { runtime_profile : string; attempt : int; evidence : evidence }
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let request_to_json (request : provider_request) =
   `Assoc ["node_id", `String request.node_id; "turn", `Int request.turn;

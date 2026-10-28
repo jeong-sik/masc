@@ -278,7 +278,7 @@ let member name members =
   | Some value -> Ok value
   | None -> Error (Printf.sprintf "missing member %s" name)
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* One [Unix.error] as an object. [kind] is the token above; [EUNKNOWNERR],
    the one constructor whose identity is a number, carries that number as

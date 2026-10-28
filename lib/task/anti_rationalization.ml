@@ -267,7 +267,7 @@ let lookup_section ~(lookup : lookup_surface) ~lookup_root =
       Prompt_names.verification_lookup_producer_namespace
       [ "lookup_tools", tool_names lookup.schemas; "root", root ]
   | Producer_tree root_layout ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* lookup_root_layout = root_layout_lines root_layout in
     render
       Prompt_names.verification_lookup_producer_tree
@@ -345,7 +345,7 @@ let build_prompt
       ~(lookup : lookup_surface)
       ~(lookup_root : lookup_root)
       (req : review_request) : (string, string) result =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* lookup_section = lookup_section ~lookup ~lookup_root in
   let { completion_contract; required_evidence; evidence_posture; few_shot_block } =
     question

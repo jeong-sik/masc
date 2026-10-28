@@ -44,7 +44,7 @@ let error_to_string = function
       (Yojson.Safe.to_string (Ledger.fact_ref_to_json fact)) bytes frame
   | Invalid_size count -> Printf.sprintf "workspace curator batch size must be at least one fact, got %d" count
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 module Fact_map = Map.Make (struct
     type t = Ledger.fact_ref

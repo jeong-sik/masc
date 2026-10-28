@@ -67,7 +67,7 @@ type eval_response =
   ; usage : usage option
   }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let question_to_yojson = function
   | Choice { instructions; criteria } ->

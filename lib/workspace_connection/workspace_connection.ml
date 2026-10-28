@@ -1,6 +1,6 @@
 type port = int
 type error = Invalid_port | Invalid_configuration | Configuration_unavailable | Write_failed
-let ( let* ) = Result.bind
+open Result.Syntax
 let error_message = function
   | Invalid_port -> "The HTTP port must be an integer from 1 through 65535."
   | Invalid_configuration -> "The workspace connection.toml has an invalid server.http_port. Repair it or supply --port."

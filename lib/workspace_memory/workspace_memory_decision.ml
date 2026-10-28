@@ -1,7 +1,7 @@
 module Ledger = Workspace_memory_ledger
 module Request = Workspace_memory_request
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let text_schema = `Assoc ["type", `String "string"; "minLength", `Int 1]
 let output_schema =

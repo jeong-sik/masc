@@ -3,7 +3,7 @@ module Owner = Lane_addon_tool_request_owner
 module Progress = Lane_addon_request_progress
 module Receipt = Lane_addon_request_receipt
 module Exact = Lane_addon_exact
-let ( let* ) = Result.bind
+open Result.Syntax
 type registration = {run_id:string;actor:string;input:Yojson.Safe.t;receipt:Receipt.receipt}
 let same_receipt left right =
   if Yojson.Safe.equal (Receipt.to_json left) (Receipt.to_json right) then Ok ()

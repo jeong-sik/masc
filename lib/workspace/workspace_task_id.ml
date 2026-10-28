@@ -81,7 +81,7 @@ let archive_index config =
   | FileSystem _ -> File_version_cache.load archive_status_cache (archive_path config) ~decode
 
 let read_archived_task_row_r config ~task_id =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* index = archive_index config in
   match Archive_ids.find_opt task_id index.rows with
   | Some Duplicate -> Error "archive contains duplicate requested Task identities"
@@ -95,7 +95,7 @@ let read_archived_task_r config ~task_id =
     | Some row -> task_of_yojson row |> Result.map Option.some)
 
 let read_archived_task_status_r config ~task_id =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* row = read_archived_task_row_r config ~task_id in
   match row with
   | None -> Ok None

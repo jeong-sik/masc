@@ -20058,30 +20058,59 @@ let keeper_assignment_activity keepers =
     Printf.sprintf " (%d turns, %s)" turns (Tui_decode.keeper_cost_summary cost)
   | Some _ -> ""
 
+let runtime_cost_summary ~ko cost =
+  if not ko then Tui_decode.keeper_cost_summary cost
+  else
+    let module Cost = Keeper_cost_coverage in
+    match Cost.knowledge cost with
+    | Cost.No_observations -> "비용 관측 없음"
+    | Cost.Fully_priced -> Printf.sprintf "$%.4f" cost.known_cost_usd
+    | Cost.No_reported_prices -> Printf.sprintf "가격 미보고 (%d건)" cost.unpriced_readings
+    | Cost.Partly_priced ->
+        Printf.sprintf "$%.4f 확인 · 가격 보고 %d / 미보고 %d건"
+          cost.known_cost_usd cost.priced_readings cost.unpriced_readings
+    | Cost.Unresolved ->
+        let history = match cost.history with
+          | Cost.Complete -> "" | Cost.Unobserved -> "이력 미관측 · " in
+        Printf.sprintf "%s$%.4f 확인 · 가격 보고 %d / 미보고 %d / 미해결 %d건 · 시도 미관측 %d건"
+          history cost.known_cost_usd cost.priced_readings cost.unpriced_readings
+          cost.unresolved_readings cost.unobserved_attempts
+
 let runtime_fleet_summary state =
+  let ko = state.ui_language = Lang_ko in
   match state.keepers with
   | [] -> None
   | keepers ->
       let summary = match aggregate_keeper_stats keepers with
-        | None -> "activity not observed"
+        | None -> if ko then "활동 미관측" else "activity not observed"
         | Some (turns, tokens, cost) ->
-            Printf.sprintf "%d turns · %s tok · %s"
-              turns (format_context_tokens tokens) (Tui_decode.keeper_cost_summary cost)
+            Printf.sprintf (if ko then "턴 %d · 토큰 %s · %s" else "%d turns · %s tok · %s")
+              turns (format_context_tokens tokens) (runtime_cost_summary ~ko cost)
       in
-      Some (Printf.sprintf "%d keepers · %s" (List.length keepers) summary)
+      Some (Printf.sprintf (if ko then "키퍼 %d명 · %s" else "%d keepers · %s") (List.length keepers) summary)
 
 (* The list leads with the last probe's outcome and exceptions. Source path,
    fleet totals and the complete probe diagnostics remain in [v] routes/status;
    repeating them above every candidate can leave only one selectable row. *)
 let runtime_authority_rows ~cols (state : state) : string list =
-  let single_line = Masc.Tui_terminal_text.sanitize_terminal_text in
   let ko = state.ui_language = Lang_ko in
+  let reading_notes =
+    (if server_authority_ready state then []
+     else [if ko then "서버 신원 미확인" else "server identity unconfirmed"])
+    @ (if Option.is_some state.runtime_surface_inflight then
+         [if ko then "조회 중" else "reading"] else [])
+    @ (if Option.is_some state.runtime_surface_error then
+         [if ko then "최근 조회 오류" else "recent read error"] else [])
+  in
+  let status = match state.runtime_surface, reading_notes with
+    | None, notes -> (if ko then "관측 없음" else "no observation") :: notes
+    | Some _, [] -> []
+    | Some _, notes -> (if ko then "마지막 관측" else "last observation") :: notes
+  in
+  let detail_hint = if ko then "v:라우트·진단" else "v:routes / status" in
   let clauses =
     match state.runtime_surface with
-    | None ->
-        [ (match state.runtime_surface_error with
-           | None -> if ko then "런타임 설정 읽는 중" else "Reading runtime settings"
-           | Some _ -> if ko then "런타임 설정 읽기 실패" else "Runtime settings read failed") ]
+    | None -> detail_hint :: status
     | Some snapshot ->
         let summary_text =
           match snapshot.Tui_decode.rss_probe with
@@ -20099,20 +20128,21 @@ let runtime_authority_rows ~cols (state : state) : string list =
           match
             snapshot.Tui_decode.rss_probe_error, snapshot.Tui_decode.rss_probe
           with
-          | Some detail, _ -> [ (if ko then "프로브: " else "probe: ") ^ single_line detail ]
+          | Some _, _ -> [ if ko then "프로브 조회 실패" else "probe read failed" ]
           | None, Some probe ->
               (match probe.Masc.Tui_decode_runtime_probe.rps_errors with
-               | detail :: _ -> [ (if ko then "프로브: " else "probe: ") ^ single_line detail ]
+               | _ :: _ as errors ->
+                   [Printf.sprintf (if ko then "프로브 보고 오류 %d건" else "%d probe errors reported")
+                      (List.length errors)]
                | [] -> [])
           | None, None -> []
         in
         let probe_only_note =
           match snapshot.Tui_decode.rss_unassigned_probe_count with
           | 0 -> []
-          | count -> [ Printf.sprintf (if ko then "설정 외 프로브 %d" else "%d probe-only") count ]
+          | count -> [ Printf.sprintf (if ko then "후보 순서 외 프로브 %d" else "%d probes outside candidate orders") count ]
         in
-        [ summary_text ] @ probe_only_note @ probe_note
-        @ [ if ko then "v:라우트·진단" else "v:routes / status" ]
+        [ detail_hint ] @ status @ [ summary_text ] @ probe_only_note @ probe_note
   in
   let indent = "  " in
   let room =

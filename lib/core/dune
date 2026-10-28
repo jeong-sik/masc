@@ -41,7 +41,8 @@
   eval_tool_selector
   heap_roots
   alloc_profile
-  file_version_cache)
+  file_version_cache
+  high_water_marks)
  (libraries
   (re_export masc_string_util)
   shared_types

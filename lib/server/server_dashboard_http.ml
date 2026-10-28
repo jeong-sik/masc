@@ -713,28 +713,33 @@ let dashboard_goals_tree_http_json ~(config : Workspace.config) : Yojson.Safe.t 
    [/api/v1/dashboard/goals] was the second read that timed out most often in
    the TUIs' logs (30 of 126 after 06:00 KST, against their 10 s budget).
 
-   The read now carries the tree it last filled into the new generation's key
+   The read now carries the newest tree it filled into the new generation's key
    as a stale entry: it answers with that tree at once and the new one is
-   computed in the background. The first read after boot still computes. The
-   last filled key is per workspace, so one workspace's tree never answers for
-   another. *)
-let goals_tree_last_filled : (string * string) option Atomic.t = Atomic.make None
+   computed in the background. The first read after boot still computes.
+
+   What it carries from is the highest generation filled per workspace, not the
+   last fill to finish: two computes that finish out of order (generation 2
+   before 1) would otherwise make the next read answer with generation 1's
+   tree after generation 2's had been served. *)
+let goals_tree_filled = High_water_marks.create ()
+
+let goals_tree_key ~base_path generation = Printf.sprintf "goals_tree:%s:%d" base_path generation
 
 let cached_goals_tree_payload ~(config : Workspace.config) =
-  let key =
-    Printf.sprintf "goals_tree:%s:%d" config.base_path (Goal_projection_generation.current ())
-  in
-  (match Atomic.get goals_tree_last_filled with
-   | Some (base_path, previous)
-     when String.equal base_path config.base_path && not (String.equal previous key) ->
-     Dashboard_cache.seed_stale_from_if_missing key ~from:previous
+  let base_path = config.base_path in
+  let generation = Goal_projection_generation.current () in
+  let key = goals_tree_key ~base_path generation in
+  (match High_water_marks.find goals_tree_filled base_path with
+   | Some filled when filled <> generation ->
+     Dashboard_cache.seed_stale_from_if_missing key
+       ~from:(goals_tree_key ~base_path filled)
        ~stale_for:Server_dashboard_http_core_cache.standard_cache_ttl_s
    | Some _ | None -> ());
   Dashboard_cache.get_or_compute_payload key
     ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s
     (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
        let json = dashboard_goals_tree_http_json ~config in
-       Atomic.set goals_tree_last_filled (Some (config.base_path, key));
+       High_water_marks.raise_to goals_tree_filled base_path generation;
        json))
 ;;
 

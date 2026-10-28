@@ -57,8 +57,9 @@ let test_share_transactions () = with_base (fun base_path ->
   let id = artifact.id in
   let left = share_request "000000000011" 0 true in
   let right = share_request "000000000012" 0 true in
-  let save request = Eio_unix.run_in_systhread (fun () -> S.change_share ~base_path ~id request) in
-  let left_receipt, right_receipt = Eio.Fiber.pair (fun () -> save left) (fun () -> save right) in
+  let save path request = Eio_unix.run_in_systhread (fun () -> S.change_share ~base_path:path ~id request) in
+  let alias = Filename.concat base_path "." in
+  let left_receipt, right_receipt = Eio.Fiber.pair (fun () -> save base_path left) (fun () -> save alias right) in
   let left_receipt = share_ok left_receipt and right_receipt = share_ok right_receipt in
   (match left_receipt.outcome, right_receipt.outcome with
    | Share.Applied { version = 1; shared = true }, Share.Conflict { version = 1; shared = true }

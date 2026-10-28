@@ -22,6 +22,12 @@ let root ~base_path =
 let path ~base_path id = Filename.concat (root ~base_path) (id ^ ".json")
 let share_path ~base_path id = Filename.concat (root ~base_path) (id ^ ".share")
 
+(* [lockf] locks belong to a process, so its in-process mutex must use the
+   same key for every spelling of the same directory. The directory is
+   verified before this is called; only the lock key is canonicalized. *)
+let lock_path ~base_path id =
+  Filename.concat (Unix.realpath (root ~base_path)) (id ^ ".lock")
+
 let protect f =
   try f () with
   | Sys_error message -> Error (Unavailable message)
@@ -109,7 +115,7 @@ let publish ~base_path ~author (request : request) =
       | Revise { id; _ } -> id in
     let* () = if valid_id id then Ok () else Error (Invalid "invalid artifact id") in
     match File_lock_eio.with_durable_lock_observed
-      ~lock_path:(Filename.concat dir (id ^ ".lock")) (fun () ->
+      ~lock_path:(lock_path ~base_path id) (fun () ->
         let* previous = match request.update with
           | Create ->
             (match load ~base_path id with
@@ -207,11 +213,10 @@ let find_share_receipt ~base_path ~id ~operation_id = protect_share (fun () ->
 let with_share_lock ~base_path ~id f =
   if not (valid_id id) then Error (Share_invalid "invalid artifact id")
   else protect_share (fun () ->
-    let dir = root ~base_path in
     let* entries = directory_entries ~base_path |> Result.map_error share_artifact_error in
     let* () = match entries with None -> Error Share_missing | Some _ -> Ok () in
     match File_lock_eio.with_durable_lock_observed
-      ~lock_path:(Filename.concat dir (id ^ ".lock")) (fun () ->
+      ~lock_path:(lock_path ~base_path id) (fun () ->
         let* _artifact = load ~base_path id |> Result.map_error share_artifact_error in
         let* state = load_share ~base_path ~id in
         f state) with

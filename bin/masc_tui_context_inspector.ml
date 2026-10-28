@@ -65,11 +65,6 @@ type forecast_lane =
   | Lane_agent_core
   | Lane_not_applicable of string
 
-type forecast_marks =
-  { high_water_tokens : int
-  ; low_water_tokens : int
-  }
-
 type forecast_parts =
   { reserved_measured_on_turn : int
   ; reserved_bytes : int
@@ -126,7 +121,6 @@ type forecast_walk =
 type forecast_candidate =
   { runtime_id : string
   ; lane : forecast_lane
-  ; marks : forecast_marks option
   ; parts : (forecast_parts, string) result
   ; history_atoms : int
   ; carried : forecast_carried option
@@ -785,7 +779,7 @@ let input_map_rows (record : Turn_record.t) (provider_input : provider_input opt
 (* Keep the inspector's token readings on the shared column precision. *)
 let format_tokens = Masc_tui_message_layout.compact_count
 
-let forecast_schema = "masc.keeper.next-request-forecast.v5"
+let forecast_schema = "masc.keeper.next-request-forecast.v6"
 
 let nonnegative_float name = function
   | `Float value when Float.is_finite value && value >= 0. -> Ok value
@@ -921,16 +915,6 @@ let decode_forecast_lane = function
      | Some (`Bool true) -> Ok Lane_agent_core
      | Some _ | None -> Error "lane is neither agent_core nor not_applicable")
   | _ -> Error "lane is not an object"
-
-let decode_forecast_marks = function
-  | `Null -> Ok None
-  | `Assoc fields ->
-    let* high_json = field "high_water_tokens" fields in
-    let* high_water_tokens = nonnegative_int "marks.high_water_tokens" high_json in
-    let* low_json = field "low_water_tokens" fields in
-    let* low_water_tokens = nonnegative_int "marks.low_water_tokens" low_json in
-    Ok (Some { high_water_tokens; low_water_tokens })
-  | _ -> Error "marks is not an object or null"
 
 let decode_forecast_parts = function
   | `Assoc fields when List.mem_assoc "error" fields ->
@@ -1091,8 +1075,6 @@ let decode_forecast_candidate = function
     let* runtime_id = nonempty_string "candidate.runtime_id" id_json in
     let* lane_json = field "lane" fields in
     let* lane = decode_forecast_lane lane_json in
-    let* marks_json = field "marks" fields in
-    let* marks = decode_forecast_marks marks_json in
     let* parts_json = field "parts" fields in
     let* parts = decode_forecast_parts parts_json in
     let* atoms_json = field "history_atoms" fields in
@@ -1103,7 +1085,7 @@ let decode_forecast_candidate = function
     let* assembly = decode_forecast_assembly assembly_json in
     let* place_json = field "place" fields in
     let* place = decode_forecast_place place_json in
-    Ok { runtime_id; lane; marks; parts; history_atoms; carried; assembly; place }
+    Ok { runtime_id; lane; parts; history_atoms; carried; assembly; place }
   | _ -> Error "candidate is not an object"
 
 let decode_forecast = function

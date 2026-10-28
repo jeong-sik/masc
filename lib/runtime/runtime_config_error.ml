@@ -93,11 +93,6 @@ type load_failure =
   | Admission_allowances_disagree of
       Llm_provider.Provider_admission.allowance_disagreement list
   | Exact_slot_body_deadlines_absent of exact_slot_body_deadline_gap list
-  | Context_marks_exceed_max_context of
-      { runtime_id : string
-      ; high_water_tokens : int
-      ; max_context : int
-      }
   | Exact_lane_cli_slot_unservable of exact_lane_cli_slot_unservable
 (* A dangling reference is an operator typo, and unlike every other drop reason
    it is not survivable by ignoring the binding: the runtime the operator
@@ -226,15 +221,6 @@ let to_diagnostic_text ~(config_path : string) : load_failure -> string = functi
       runtime_id
       execution_model
       declared_model
-  | Context_marks_exceed_max_context { runtime_id; high_water_tokens; max_context } ->
-    Printf.sprintf
-      "%s: runtime %S declares context-high-water-tokens = %d above the model's \
-       max-context %d; a request that large is refused before the mark is \
-       reached, so lower the mark or raise max-context"
-      config_path
-      runtime_id
-      high_water_tokens
-      max_context
   | Admission_allowances_disagree disagreements ->
     let allowance_text (allowance : Llm_provider.Provider_admission_state.allowance) =
       match allowance.priority_run_limit with
@@ -323,7 +309,6 @@ let to_operator_text ~(config_path : string) (failure : load_failure) : string =
   | Reference_unresolved _
   | Lane_candidate_unresolved _
   | Max_context_absent _
-  | Context_marks_exceed_max_context _
   | Admission_allowances_disagree _
   | Exact_slot_body_deadlines_absent _
   | Exact_lane_cli_slot_unservable _ -> to_diagnostic_text ~config_path failure

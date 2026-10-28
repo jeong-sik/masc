@@ -171,25 +171,4 @@ let validate_runtime_max_context (runtimes : t list)
          })
 ;;
 
-(* Context marks are checked against the resolved binding/provider/model
-   window, including any genuine provider catalog cap. *)
-let validate_runtime_context_marks (runtimes : t list) : (unit, load_failure) result =
-  match
-    List.find_map
-      (fun (r : t) ->
-         match r.binding.Runtime_schema.context_marks, resolve_max_context_of_runtime r with
-         | Some marks, Some (max_context, _)
-           when marks.Runtime_schema.high_water_tokens > max_context ->
-           Some
-             (Context_marks_exceed_max_context
-                { runtime_id = r.id
-                ; high_water_tokens = marks.Runtime_schema.high_water_tokens
-                ; max_context
-                })
-         | Some _, Some _ | Some _, None | None, (Some _ | None) -> None)
-      runtimes
-  with
-  | None -> Ok ()
-  | Some failure -> Error failure
-;;
 

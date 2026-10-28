@@ -633,7 +633,6 @@ let materialize_config
   let* () =
     if validate_max_context then validate_runtime_max_context runtimes else Ok ()
   in
-  let* () = validate_runtime_context_marks runtimes in
   (* Every runtime on one provider account must declare the account's
      allowance alike: admission keeps one allowance per account. *)
   let* admission_allowances =
@@ -1615,12 +1614,6 @@ let quota_scope_of_runtime_id (id : string) : Runtime_quota_window.scope option 
   match get_runtime_by_id id with
   | Some rt -> Some (quota_scope_of_runtime rt)
   | None -> None
-;;
-
-let context_marks_of_runtime_id (id : string) : Runtime_schema.context_marks option =
-  match get_runtime_by_id id with
-  | None -> None
-  | Some rt -> rt.binding.Runtime_schema.context_marks
 ;;
 
 let default_preserve_thinking_for_model (_rt : t) : bool option =

@@ -281,6 +281,34 @@ TUI 로그(`~/.masc/logs/masc-tui-*.log`)는 시간 초과가 난 요청의 경�
 - 단위: 옮긴 값은 이전 페이지와 같은 JSON·entity tag 로 바로 나가고, 50 ms 걸리는 새 계산은 background 에서 채워진다. 이미 찬 키는 덮지 않고, 원본이 없으면 아무것도 넣지 않는다. mutant(옮긴 값을 fresh 로 넣기)는 background 채움 시험 하나만 실패한다.
 - 운영: 배포 뒤 TUI 로그의 경로별 시간 초과 수를 위 표와 같은 방법으로 센다. `dashboard/goals` 가 줄어야 한다. L4c 의 `by_name` 으로 읽기 lane 에서 오래 도는 나머지 job 을 찾는다.
 
+#### L4d 배포 뒤 (2026-10-28 07:51Z, `3f5585167ee`)
+
+- 50분을 쟀다. 08:48Z 에 다른 배포로 서버가 다시 떠서 마지막 10분은 버렸다.
+- TUI 시간 초과는 17:00~17:39 KST 에 22건이었다. `gate/keepers` 9, `keepers/turns` 6, `dashboard/goals` 2, `operator` 2. 시간대별 기준값이 0~91건이라 건수만으로는 판정하지 않는다.
+- 읽기 lane 의 긴 대기(≥ 100 ms)는 구간마다 80~100%가 두 worker 가 모두 찼을 때 생겼다. 4.8~5.3초 기다린 `gate/keepers`·`keepers/turns` 가 같은 초에 함께 끝났다. TUI 는 그 사이 다른 요청을 정상으로 받았다.
+- 두 worker 를 가장 오래 잡은 것은 goals tree 계산이었다. 부하가 걸리면 30초 계산 예산에 걸려 버려졌다(background 30,006 ms, 읽기 lane 30,256 ms). 그래서 07:58:21Z 에 만든 tree 가 12분 넘게 그대로 나갔다. L4d 는 직전 값을 바로 내주지만, 계산이 끝나지 못하면 직전 값이 바뀌지 않는다.
+
+#### L4e — goals tree 는 goal 이 이름 붙인 Keeper 의 trust 만 읽는다
+
+같은 데이터로 goals tree 의 구간별 시간을 쟀다(서버 밖 일회용 실행 파일, 2026-10-28 08:20Z, load 29~34). tree 는 7.46초였다. 그중 Keeper 40명의 `Keeper_runtime_trust_snapshot.snapshot_json` 이 7.31초였다. 나머지(goal·task·meta·receipt·검증 기록 읽기)는 다 합쳐 0.23초였다.
+
+- `build_forest` 는 모든 Keeper 의 snapshot 을 먼저 계산해 목록으로 들고 있었다.
+- 그런데 tree 가 snapshot 에서 읽는 값은 셋(`turn_id`, `latest_causal_event` 의 `ts`·`ts_unix`)뿐이다. 그것도 goal 의 task 를 맡은 Keeper 몫만 읽는다.
+- 어느 goal 에도 이어지지 않은 21명이 5.27초였다. 이어진 19명은 2.03초였다. 가장 오래 걸린 셋(1.6·1.3·1.3초)은 모두 어느 goal 에도 이어지지 않았다.
+- snapshot 캐시의 TTL 은 0.5초라 tree 한 번 안에서도 거의 맞지 않는다.
+
+설계:
+
+1. `build_context` 는 Keeper 이름으로 trust 를 묻는 함수(`runtime_trust_of`)를 들고 있다. 미리 계산한 목록은 없앤다.
+2. `build_forest` 는 Keeper 마다 처음 물을 때만 snapshot 을 계산하고, 그 build 안에서는 기억한다. 값은 전과 같다.
+3. `build_forest_with_trust_reader ~read_trust` 가 trust 를 읽는 함수를 이름으로 받는다. 같은 파일의 `..._with_pending_reader` 와 같은 모양이다. `build_forest` 는 실제 snapshot 을 넘긴다.
+
+검증:
+
+- 단위(`test_dashboard_goals_trust_reads`): Keeper 둘 가운데 한 명에게 두 goal 의 task 를 맡긴다. trust 는 그 Keeper 에 대해 한 번만 읽고, 다른 Keeper 는 읽지 않는다. 읽은 값이 node 의 `latest_keeper_ref`·`latest_turn_ref` 로 나간다. mutant 둘(모두 미리 읽기, 기억하지 않기)은 모두 실패한다.
+- 실제 데이터: 옛 코드와 새 코드를 같은 데이터에 번갈아 3번씩 돌렸다(load 34~55). 최소 7.65초에서 2.55초로 줄었다. 중앙값(여섯 번 측정)은 약 9.2초에서 약 4.3초다. 시각 필드(`generated_at`, `stagnation_seconds`, `updated_at`)를 빼면 두 JSON 이 같다.
+- 운영: 배포 뒤 `by_name` 에서 `cached_goals_tree_payload` 의 실행 시간과 30초 예산에 걸린 수를 본다. 서버가 내주는 tree 의 `generated_at` 이 TTL(60초) 안팎으로 갱신되는지 본다.
+
 ## 5. 순서
 
 1. L1 — 코드가 작고, A/B 로 효과를 이미 봤다.
@@ -291,6 +319,7 @@ TUI 로그(`~/.masc/logs/masc-tui-*.log`)는 시간 초과가 난 요청의 경�
 6. L4b — 읽기 lane 의 캐시 계산이 일의 종류를 타입으로 선언하게 한다. #46543(갱신 fork 의 lane)은 이것과 따로 먼저 들어간다.
 7. L4c — 풀 job 마다 이름을 붙여 lane·이름별로 잰다. 그 순위로 다음 층을 고른다.
 8. L4d — TUI 로그에서 시간 초과가 난 경로를 세고, 원인으로 확인된 goals tree 의 요청 경로 계산부터 없앤다.
+9. L4e — goals tree 계산 자체를 줄인다. 시간의 97%가 쓰지 않는 Keeper 의 trust snapshot 이었다.
 
 ## 6. 하지 않는 것
 

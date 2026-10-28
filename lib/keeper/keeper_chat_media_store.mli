@@ -10,7 +10,7 @@
     directory-size caps. *)
 
 type persist_error =
-  | Unsupported_source_type of Agent_core.Types.media_source
+  | Unsupported_source_type of Agent_core.Types.media_source_kind
   | Invalid_base64 of string
   | Media_too_large of { size_bytes : int; max_bytes : int }
   | Write_failed of string

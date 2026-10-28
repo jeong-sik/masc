@@ -45,14 +45,14 @@ let on_event ?(stream_scope = 0) t evt =
   | State.Updated state -> t.state <- state
   | State.Metadata_drift
       { index; expected_media_type; received_media_type;
-        expected_source; received_source } ->
+        expected_source_type; received_source_type } ->
       Log.Keeper.warn
         "generated media metadata drift ignored index=%d expected_media_type=%S received_media_type=%S expected_source_type=%s received_source_type=%s"
         index
         expected_media_type
         received_media_type
-        (Agent_core.Types.media_source_wire_tag expected_source)
-        (Agent_core.Types.media_source_wire_tag received_source)
+        (Agent_core.Types.media_source_kind_to_string expected_source_type)
+        (Agent_core.Types.media_source_kind_to_string received_source_type)
   | State.Wire_rejected (index, dropped) ->
       record_oversize_drop t ~index dropped;
       t.state <- State.reject_block t.state index
@@ -99,12 +99,12 @@ let wire_drop_placeholder_block
     ~size_bytes:(Some encoded_bytes)
 
 let persist_failure_placeholder ~media_type ~encoded_bytes = function
-  | Keeper_chat_media_store.Unsupported_source_type source ->
+  | Keeper_chat_media_store.Unsupported_source_type source_type ->
       unavailable_attachment
         ~name:
           (Printf.sprintf
              "generated media unavailable: unsupported source type %s"
-             (Agent_core.Types.media_source_wire_tag source))
+             (Agent_core.Types.media_source_kind_to_string source_type))
         ~media_type
         ~size:(Some (Printf.sprintf "%d wire-carrier bytes observed" encoded_bytes))
         ~size_bytes:(Some encoded_bytes)

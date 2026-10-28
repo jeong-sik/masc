@@ -271,13 +271,10 @@ val media_source_of_wire_tag : string -> (string -> media_source) option
     and for byte accounting. *)
 val media_source_payload : media_source -> string
 
-(** [media_source_append accumulated chunk] appends [chunk]'s payload when both
-    use the same carrier; [None] when the carriers differ. *)
-val media_source_append : media_source -> media_source -> media_source option
-
-(** A carrier without its payload, for a record that keeps which carrier a
+(** A carrier without its payload: for a record that keeps which carrier a
     payload arrived in after the payload itself has gone elsewhere (a
-    generated media file). *)
+    generated media file), and for a diagnostic that names a carrier without
+    repeating its payload. *)
 type media_source_kind =
   | Base64_kind
   | Url_kind
@@ -291,6 +288,24 @@ val media_source_kind_to_string : media_source_kind -> string
 
 (** Same reading as {!media_source_of_wire_tag}. *)
 val media_source_kind_of_string : string -> media_source_kind option
+
+(** The chunks of one streamed media payload. The first chunk fixes the
+    carrier. Adding a chunk copies nothing; {!media_chunks_source} joins them
+    once. *)
+type media_chunks
+
+val media_chunks_start : media_source -> media_chunks
+
+(** [media_chunks_add chunks chunk] keeps [chunk] after the others when it uses
+    the first chunk's carrier; [None] when it uses another. *)
+val media_chunks_add : media_chunks -> media_source -> media_chunks option
+
+(** The carrier the first chunk fixed. *)
+val media_chunks_kind : media_chunks -> media_source_kind
+
+(** The payload of every chunk in arrival order, under the first chunk's
+    carrier. *)
+val media_chunks_source : media_chunks -> media_source
 
 type reasoning_detail =
   { raw : Yojson.Safe.t
@@ -872,7 +887,7 @@ type content_delta =
   (** A chunk of a streamed media (image/document/audio) content block.
             Carries block-level [media_type] and a [source] whose payload is
             this chunk, so no new {!ContentBlockStart} fields are required.
-            Consumers append chunks with {!media_source_append}. *)
+            Consumers collect chunks with {!media_chunks_add}. *)
 
 (** A provider condition an OpenAI-compatible provider declared for an error it
     reported inside a response it had already accepted with [200]: rate limited

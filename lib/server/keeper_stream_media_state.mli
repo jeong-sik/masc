@@ -23,8 +23,8 @@ type metadata_drift = {
   index : int;
   expected_media_type : string;
   received_media_type : string;
-  expected_source : Agent_core.Types.media_source;
-  received_source : Agent_core.Types.media_source;
+  expected_source_type : Agent_core.Types.media_source_kind;
+  received_source_type : Agent_core.Types.media_source_kind;
 }
 
 type pending_media

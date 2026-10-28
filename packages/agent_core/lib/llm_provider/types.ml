@@ -163,14 +163,35 @@ let media_source_payload = function
   | Base64 payload | Url payload | File_id payload -> payload
 ;;
 
-let media_source_append accumulated chunk =
-  match accumulated, chunk with
-  | Base64 head, Base64 tail -> Some (Base64 (head ^ tail))
-  | Url head, Url tail -> Some (Url (head ^ tail))
-  | File_id head, File_id tail -> Some (File_id (head ^ tail))
+(* [first] fixes the carrier; [rest_rev] holds the later payloads, newest
+   first, so adding one is a cons and the join happens once. *)
+type media_chunks =
+  { first : media_source
+  ; rest_rev : string list
+  }
+
+let media_chunks_start first = { first; rest_rev = [] }
+
+let media_chunks_add chunks chunk =
+  match chunks.first, chunk with
+  | Base64 _, Base64 payload | Url _, Url payload | File_id _, File_id payload ->
+    Some { chunks with rest_rev = payload :: chunks.rest_rev }
   | Base64 _, (Url _ | File_id _)
   | Url _, (Base64 _ | File_id _)
   | File_id _, (Base64 _ | Url _) -> None
+;;
+
+let media_chunks_kind chunks = media_source_kind_of_source chunks.first
+
+let media_chunks_source { first; rest_rev } =
+  match rest_rev with
+  | [] -> first
+  | _ :: _ ->
+    let join head = String.concat "" (head :: List.rev rest_rev) in
+    (match first with
+     | Base64 head -> Base64 (join head)
+     | Url head -> Url (join head)
+     | File_id head -> File_id (join head))
 ;;
 
 type reasoning_detail =
@@ -1285,7 +1306,7 @@ type content_delta =
             Carries the block-level [media_type] and a [source] whose payload is
             this chunk, so the SSE layer needs no new {!ContentBlockStart}
             fields; the accumulator records [media_type] (idempotent across
-            chunks) and appends each chunk with {!media_source_append}. *)
+            chunks) and collects each chunk with {!media_chunks_add}. *)
 
 (* See types.mli: a 429 or 5xx an OpenAI-compatible provider declared inside a
    response it had already accepted, and only its error object as the body. *)

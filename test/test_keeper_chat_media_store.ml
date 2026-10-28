@@ -237,7 +237,7 @@ let test_unsupported_source_type_rejected () =
         ~source:(Agent_core.Types.Url "https://example.invalid/image.png")
     with
     | Ok _ -> Alcotest.fail "url source must not be persisted without resolver"
-    | Error (M.Unsupported_source_type (Agent_core.Types.Url _)) -> ()
+    | Error (M.Unsupported_source_type Agent_core.Types.Url_kind) -> ()
     | Error err ->
         Alcotest.failf "unexpected error: %s" (M.persist_error_to_string err))
 

@@ -16,7 +16,7 @@ type completed =
 
 type active_media = {
   media_type : string;
-  source : Agent_core.Types.media_source;  (* the chunks so far, appended under one carrier *)
+  chunks : Agent_core.Types.media_chunks;
   encoded_bytes : int;
 }
 
@@ -50,8 +50,8 @@ type metadata_drift = {
   index : int;
   expected_media_type : string;
   received_media_type : string;
-  expected_source : Agent_core.Types.media_source;
-  received_source : Agent_core.Types.media_source;
+  expected_source_type : Agent_core.Types.media_source_kind;
+  received_source_type : Agent_core.Types.media_source_kind;
 }
 
 type pending_media = {
@@ -115,8 +115,8 @@ let stream_start_is_tool ~index ~content_type ~tool_id ~tool_name =
     (Agent_core.Types.ContentBlockStart
        { index; content_type; tool_id; tool_name })
 
-(* [source] already holds [chunk]; [chunk] counts toward the wire cap. *)
-let add_media_chunk (t : t) ~index ~media_type ~source ~encoded_bytes chunk =
+(* [chunks] already holds [chunk]; [chunk] counts toward the wire cap. *)
+let add_media_chunk (t : t) ~index ~media_type ~chunks ~encoded_bytes chunk =
   let encoded_bytes =
     encoded_bytes + String.length (Agent_core.Types.media_source_payload chunk)
   in
@@ -126,7 +126,7 @@ let add_media_chunk (t : t) ~index ~media_type ~source ~encoded_bytes chunk =
   else
     Updated
       (replace_block t index
-         (Active_media { media_type; source; encoded_bytes }))
+         (Active_media { media_type; chunks; encoded_bytes }))
 
 let capture_media (t : t) index media =
   { index; media; max_wire_bytes = t.max_wire_bytes }
@@ -143,10 +143,10 @@ let capture_open_media t =
        | Invalid_block (Tool_block | Oversize) | Closed_block -> None)
 
 let finalize_media { index; media; max_wire_bytes } =
-  let { media_type; source; encoded_bytes } = media in
+  let { media_type; chunks; encoded_bytes } = media in
   if encoded_bytes > max_wire_bytes
   then Error (index, { media_type; encoded_bytes; max_wire_bytes })
-  else Ok { index; media_type; source }
+  else Ok { index; media_type; source = Agent_core.Types.media_chunks_source chunks }
 
 let discard_current_scope t =
   (* Completed delivery evidence survives later failure or supersession. *)
@@ -165,26 +165,28 @@ let on_event t (evt : Agent_core.Types.sse_event) =
       else
         (match List.assoc_opt index t.blocks_by_index with
          | Some (Active_media active) ->
-             let appended =
+             let added =
                if String.equal active.media_type media_type
-               then Agent_core.Types.media_source_append active.source source
+               then Agent_core.Types.media_chunks_add active.chunks source
                else None
              in
-             (match appended with
-              | Some accumulated ->
-                  add_media_chunk t ~index ~media_type ~source:accumulated
+             (match added with
+              | Some chunks ->
+                  add_media_chunk t ~index ~media_type ~chunks
                     ~encoded_bytes:active.encoded_bytes source
               | None ->
                   Metadata_drift
                     { index;
                       expected_media_type = active.media_type;
                       received_media_type = media_type;
-                      expected_source = active.source;
-                      received_source = source
+                      expected_source_type = Agent_core.Types.media_chunks_kind active.chunks;
+                      received_source_type =
+                        Agent_core.Types.media_source_kind_of_source source
                     })
          | Some (Invalid_block (Tool_block | Oversize) | Closed_block) -> Unchanged
          | None ->
-             add_media_chunk t ~index ~media_type ~source ~encoded_bytes:0 source)
+             add_media_chunk t ~index ~media_type
+               ~chunks:(Agent_core.Types.media_chunks_start source) ~encoded_bytes:0 source)
   | Agent_core.Types.ContentBlockStop { index } ->
       if t.stream_phase = Terminal Message_stop
       then Unchanged

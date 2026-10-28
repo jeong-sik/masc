@@ -279,6 +279,73 @@ let test_metadata_drift_preserves_first_media_block () =
         src
   | _ -> fail "expected metadata drift to preserve the first image media block"
 
+(* Base64 [encoded] split into [width]-byte chunks, in order. *)
+let equal_chunks ~width encoded =
+  List.init (String.length encoded / width) (fun i -> String.sub encoded (i * width) width)
+
+let media_chunk_deltas ~index ~media_type chunks =
+  List.map
+    (fun chunk ->
+      Agent_core.Types.ContentBlockDelta
+        { index; delta = Agent_core.Types.MediaDelta { media_type; source = chunk } })
+    chunks
+
+let test_many_media_chunks_join_in_order () =
+  let open Agent_core.Types in
+  let accum = A.create () in
+  let raw_media = String.init 768 (fun i -> Char.chr (i * 7 mod 256)) in
+  let chunks = equal_chunks ~width:4 (Base64.encode_string raw_media) in
+  check int "the payload arrives in many chunks" 256 (List.length chunks);
+  List.iter (A.on_event accum)
+    (media_chunk_deltas ~index:0 ~media_type:"image/png"
+       (List.map (fun chunk -> Base64 chunk) chunks)
+     @ [ ContentBlockStop { index = 0 } ]);
+  let base_dir = Filename.temp_dir "media_accum_test" "" in
+  match A.to_chat_blocks ~base_dir accum with
+  | [ Blocks.Image { src; cap = None } ] ->
+      check string "the persisted media is every chunk in arrival order"
+        ("/api/v1/media/" ^ expected_token ~media_type:"image/png" raw_media)
+        src
+  | _ -> fail "expected one Image block joined from every chunk"
+
+let test_last_media_chunk_over_the_cap_drops_the_block () =
+  with_env "MASC_KEEPER_GENERATED_MEDIA_MAX_BYTES" "4" (fun () ->
+    let open Agent_core.Types in
+    let accum = A.create () in
+    let cap = Masc.Keeper_chat_media_store.max_wire_bytes () in
+    let width = 8 in
+    (* Chunks that fill the cap exactly, then one more that crosses it. *)
+    let at_cap = List.init (cap / width) (fun _ -> String.make width 'A') in
+    let crossing = String.make (cap mod width + 1) 'A' in
+    let observed = (List.length at_cap * width) + String.length crossing in
+    check int "the last chunk is the one that crosses the cap" (cap + 1) observed;
+    List.iter (A.on_event accum)
+      (media_chunk_deltas ~index:0 ~media_type:"image/png"
+         (List.map (fun chunk -> Base64 chunk) (at_cap @ [ crossing ]))
+       @ [ ContentBlockStop { index = 0 } ]);
+    let base_dir = Filename.temp_dir "media_accum_test" "" in
+    match A.to_chat_blocks ~base_dir accum with
+    | [ Blocks.Attach { src = None; size_bytes; _ } ] ->
+        check (option int) "placeholder counts every chunk up to the crossing one"
+          (Some observed) size_bytes
+    | _ -> fail "expected the block that crossed the cap to become one dropped placeholder")
+
+let test_carrier_change_keeps_first_media_block () =
+  let open Agent_core.Types in
+  let accum = A.create () in
+  let raw_media = "first carrier" in
+  List.iter (A.on_event accum)
+    (media_chunk_deltas ~index:0 ~media_type:"image/png"
+       [ Base64 (Base64.encode_string raw_media); Url "https://example.invalid/drift.png" ]
+     @ [ ContentBlockStop { index = 0 } ]);
+  let base_dir = Filename.temp_dir "media_accum_test" "" in
+  match A.to_chat_blocks ~base_dir accum with
+  | [ Blocks.Image { src; cap = None } ] ->
+      check string "a chunk under another carrier is not joined"
+        ("/api/v1/media/" ^ expected_token ~media_type:"image/png" raw_media)
+        src
+  | _ -> fail "expected a carrier change to keep the first image media block"
+
 let test_oversize_media_surfaces_as_dropped_placeholder () =
   let cap_env = "MASC_KEEPER_GENERATED_MEDIA_MAX_BYTES" in
   with_env cap_env "4" (fun () ->
@@ -548,6 +615,12 @@ let () =
             test_tool_block_media_not_persisted;
           test_case "metadata drift preserves first media block" `Quick
             test_metadata_drift_preserves_first_media_block;
+          test_case "many media chunks join in order" `Quick
+            test_many_media_chunks_join_in_order;
+          test_case "last media chunk over the cap drops the block" `Quick
+            test_last_media_chunk_over_the_cap_drops_the_block;
+          test_case "carrier change keeps first media block" `Quick
+            test_carrier_change_keeps_first_media_block;
           test_case "oversize media surfaces as dropped placeholder" `Quick
             test_oversize_media_surfaces_as_dropped_placeholder;
           test_case "persist failure surfaces as dropped placeholder" `Quick

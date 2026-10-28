@@ -2791,6 +2791,82 @@ let test_keeper_stream_bridge_suppresses_media_after_oversize () =
         check int "block stop index" 0 stop_index
     | _ -> fail "expected oversize media block to remain suppressed until stop")
 
+let bridge_media_deltas ~index chunks =
+  List.map
+    (fun source ->
+      Agent_core.Types.ContentBlockDelta
+        { index
+        ; delta = Agent_core.Types.MediaDelta { media_type = "image/png"; source }
+        })
+    chunks
+
+let bridge_media_refs events =
+  List.filter_map
+    (function
+      | Keeper_chat_events.Agent_core_media_delta { media_ref; _ } -> Some media_ref
+      | _ -> None)
+    events
+
+let persisted_png_ref raw =
+  "/api/v1/media/"
+  ^ Agent_core_sha256.(digest_string ("image/png\000" ^ raw) |> to_hex)
+
+let test_keeper_stream_bridge_joins_many_media_chunks_in_order () =
+  let open Agent_core.Types in
+  let raw_media = String.init 768 (fun i -> Char.chr (i * 7 mod 256)) in
+  let encoded = Base64.encode_string raw_media in
+  let chunks = List.init (String.length encoded / 4) (fun i -> Base64 (String.sub encoded (i * 4) 4)) in
+  let events =
+    translate_agent_core_stream_events
+      (bridge_media_deltas ~index:0 chunks @ [ ContentBlockStop { index = 0 } ])
+  in
+  check (list string) "no protocol error for chunks under one carrier" []
+    (stream_protocol_error_kinds events);
+  check (list string) "the persisted media is every chunk in arrival order"
+    [ persisted_png_ref raw_media ] (bridge_media_refs events)
+
+let test_keeper_stream_bridge_rejects_last_media_chunk_over_the_cap () =
+  with_env "MASC_KEEPER_GENERATED_MEDIA_MAX_BYTES" "4" (fun () ->
+    let open Agent_core.Types in
+    let cap = Keeper_chat_media_store.max_wire_bytes () in
+    let width = 8 in
+    let at_cap = List.init (cap / width) (fun _ -> Base64 (String.make width 'A')) in
+    let crossing = Base64 (String.make (cap mod width + 1) 'A') in
+    let events =
+      translate_agent_core_stream_events
+        (bridge_media_deltas ~index:0 (at_cap @ [ crossing ])
+         @ [ ContentBlockStop { index = 0 } ])
+    in
+    check (list string) "no media ref for the block that crossed the cap" []
+      (bridge_media_refs events);
+    match
+      List.filter_map
+        (function
+          | Keeper_chat_events.Agent_core_stream_protocol_error
+              { kind = Keeper_chat_events.Media_payload_too_large; raw_bytes; _ } ->
+              Some raw_bytes
+          | _ -> None)
+        events
+    with
+    | [ raw_bytes ] ->
+        check (option int) "the error counts every chunk up to the crossing one"
+          (Some (cap + 1)) raw_bytes
+    | _ -> fail "expected one payload-too-large error for the crossing chunk")
+
+let test_keeper_stream_bridge_rejects_media_carrier_change () =
+  let open Agent_core.Types in
+  let raw_media = "first carrier" in
+  let events =
+    translate_agent_core_stream_events
+      (bridge_media_deltas ~index:0
+         [ Base64 (Base64.encode_string raw_media); Url "https://example.invalid/drift.png" ]
+       @ [ ContentBlockStop { index = 0 } ])
+  in
+  check (list string) "a carrier change is a protocol error"
+    [ "media_delta_invalid_block" ] (stream_protocol_error_kinds events);
+  check (list string) "the chunk under another carrier is not joined"
+    [ persisted_png_ref raw_media ] (bridge_media_refs events)
+
 let test_keeper_stream_bridge_rejects_unsupported_media_source () =
   let open Agent_core.Types in
   let events =
@@ -4413,6 +4489,12 @@ let () =
             test_keeper_stream_bridge_rejects_oversize_media_payload;
           test_case "stream bridge suppresses media after oversize" `Quick
             test_keeper_stream_bridge_suppresses_media_after_oversize;
+          test_case "stream bridge joins many media chunks in order" `Quick
+            test_keeper_stream_bridge_joins_many_media_chunks_in_order;
+          test_case "stream bridge rejects last media chunk over the cap" `Quick
+            test_keeper_stream_bridge_rejects_last_media_chunk_over_the_cap;
+          test_case "stream bridge rejects media carrier change" `Quick
+            test_keeper_stream_bridge_rejects_media_carrier_change;
           test_case "stream bridge rejects unsupported media source" `Quick
             test_keeper_stream_bridge_rejects_unsupported_media_source;
           test_case "stream bridge masks media write failure reason" `Quick

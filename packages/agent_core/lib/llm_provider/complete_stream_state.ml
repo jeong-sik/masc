@@ -26,8 +26,7 @@ type block_header =
 
 type media =
   { media_type : string
-  ; source : Types.media_source
-    (** The chunks received so far, appended under one carrier. *)
+  ; chunks : Types.media_chunks
   }
 
 type input_piece =
@@ -742,16 +741,16 @@ let transition_open state = function
          state
      | ( Some { media = Some active; _ }
        , Types.MediaDelta { media_type; source } ) ->
-       let appended =
+       let added =
          if String.equal active.media_type media_type
-         then Types.media_source_append active.source source
+         then Types.media_chunks_add active.chunks source
          else None
        in
-       (match appended with
-        | Some source ->
+       (match added with
+        | Some chunks ->
           update_block
             index
-            (fun block -> { block with media = Some { active with source } })
+            (fun block -> { block with media = Some { active with chunks } })
             state
         | None ->
           capture_failure
@@ -801,8 +800,10 @@ let transition_open state = function
            }
          | Types.MediaDelta { media_type; source } ->
            (* The first chunk of a block. A block that already holds media is
-              appended to (or rejected) by the arm above. *)
-           { block with media = Some { media_type; source } }
+              added to (or rejected) by the arm above. *)
+           { block with
+             media = Some { media_type; chunks = Types.media_chunks_start source }
+           }
          | Types.ThinkingSignatureDelta signature ->
            { block with
              signature_chunks_rev = signature :: block.signature_chunks_rev
@@ -944,14 +945,16 @@ let required_nonblank ~reason = function
 let media_content ~index ~kind ~make block =
   match block.media with
   | None -> Ok None
-  | Some { source; _ } when String.trim (Types.media_source_payload source) = "" ->
-    Ok None
-  | Some { media_type; source } when String.trim media_type <> "" ->
-    Ok (Some (make ~media_type ~source))
-  | Some _ ->
-    stream_parse_failed
-      ~reason:(Printf.sprintf "malformed_media_block:%s:index:%d" kind index)
-      ()
+  | Some { media_type; chunks } ->
+    let source = Types.media_chunks_source chunks in
+    if String.trim (Types.media_source_payload source) = ""
+    then Ok None
+    else if String.trim media_type <> ""
+    then Ok (Some (make ~media_type ~source))
+    else
+      stream_parse_failed
+        ~reason:(Printf.sprintf "malformed_media_block:%s:index:%d" kind index)
+        ()
 ;;
 
 let tool_input ~index ~trace text =

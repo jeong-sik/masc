@@ -6753,6 +6753,8 @@
  (modules bench_keeper_librarian_pass)
  (libraries masc_test_deps masc.server exact_output_fixture mcp_protocol masc.masc_random_id))
 
+(include stanzas/bench_keeper_checkpoint_store.inc)
+
 (test
  (name test_keeper_addon_deferred_runtime)
  (modules test_keeper_addon_deferred_runtime)

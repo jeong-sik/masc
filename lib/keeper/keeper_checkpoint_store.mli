@@ -666,6 +666,20 @@ val find_exact_snapshot_for_retention : session_dir:string -> reference:Keeper_c
 
 
 module For_testing : sig
+  val save_agent_core_for_keeper_measured :
+    keeper_name:string -> session_dir:string -> history_retained:int ->
+    Agent_core.Checkpoint.t -> (save_agent_core_outcome * int option, string) result
+  (** Count payload bytes from completed canonical and fallback archive writes
+      in this save. A stale no-op and a hardlink write no payload bytes. [None]
+      means an archive write may have partially failed, or the count overflowed;
+      callers must not present it as a measured zero. This is a logical payload
+      count, not physical device traffic, metadata, or fsync traffic. New store
+      write paths must report their payload through the same observation. *)
+
+  val retained_payload_bytes : directory:string -> int
+  (** Recursively count logical regular-file bytes once per device/inode,
+      without following symlinks. Intended for a private benchmark directory. *)
+
   val with_before_history_link : (unit -> unit) -> (unit -> 'a) -> 'a
   (** Pause the accepted history-link syscall job. The hook must not perform
       Eio effects; the caller retains its checkpoint transaction until the

@@ -514,6 +514,214 @@ let test_comment_inside_copied_argument () =
     rewritten
 ;;
 
+(* ---- named handlers ---- *)
+
+let named_cases =
+  [ ( "a definition that only registrations use"
+    , {|let get_x request reqd =
+  with_read_auth (fun state _request reqd -> handle state request reqd) request reqd
+
+let routes routes =
+  routes
+  |> Http.Router.get "/api/x" get_x
+|}
+    , {|let get_x = (fun state request reqd -> handle state request reqd)
+
+let routes routes =
+  routes
+  |> Server_route.get Server_route.Read_auth "/api/x" get_x
+|}
+    , 1
+    , 1 )
+  ; ( "one definition behind two registrations"
+    , {|let get_x request reqd =
+  with_read_auth (fun state req reqd -> handle state req reqd) request reqd
+
+let routes routes =
+  routes
+  |> Http.Router.get "/api/x" get_x
+  |> Http.Router.post "/api/x" get_x
+|}
+    , {|let get_x = (fun state req reqd -> handle state req reqd)
+
+let routes routes =
+  routes
+  |> Server_route.get Server_route.Read_auth "/api/x" get_x
+  |> Server_route.post Server_route.Read_auth "/api/x" get_x
+|}
+    , 2
+    , 1 )
+  ; ( "add takes the name as a label"
+    , {|let get_x request reqd =
+  with_read_auth (fun state req reqd -> handle state req reqd) request reqd
+
+let routes routes =
+  routes
+  |> Http.Router.add ~path:"/api/x" ~methods:[`GET] ~handler:get_x
+|}
+    , {|let get_x = (fun state req reqd -> handle state req reqd)
+
+let routes routes =
+  routes
+  |> Server_route.add Server_route.Read_auth ~path:"/api/x" ~methods:[`GET] get_x
+|}
+    , 1
+    , 1 )
+  ; ( "a definition that is the wrapper applied without the function"
+    , {|let get_x = with_read_auth (fun state req reqd -> handle state req reqd)
+
+let routes routes =
+  routes
+  |> Http.Router.get "/api/x" get_x
+|}
+    , {|let get_x = (fun state req reqd -> handle state req reqd)
+
+let routes routes =
+  routes
+  |> Server_route.get Server_route.Read_auth "/api/x" get_x
+|}
+    , 1
+    , 1 )
+  ; ( "a comment in the definition moves above it"
+    , {|let get_x request reqd =
+  (* why this is read only *)
+  with_read_auth (fun state _request reqd -> handle state request reqd) request reqd
+
+let routes routes =
+  routes
+  |> Http.Router.get "/api/x" get_x
+|}
+    , {|(* why this is read only *)
+let get_x = (fun state request reqd -> handle state request reqd)
+
+let routes routes =
+  routes
+  |> Server_route.get Server_route.Read_auth "/api/x" get_x
+|}
+    , 1
+    , 1 )
+  ; ( "a permission carries over to the registration"
+    , {|let drop request reqd =
+  with_permission_auth ~permission:Masc_domain.CanAdmin
+    (fun state req reqd -> handle state req reqd) request reqd
+
+let routes routes =
+  routes
+  |> Http.Router.post "/api/drop" drop
+|}
+    , {|let drop = (fun state req reqd -> handle state req reqd)
+
+let routes routes =
+  routes
+  |> Server_route.post (Server_route.Permission Masc_domain.CanAdmin) "/api/drop" drop
+|}
+    , 1
+    , 1 )
+  ]
+;;
+
+let check_named (name, source, expected, converted, definitions) =
+  Alcotest.test_case name `Quick (fun () ->
+    let rewritten, report = rewrite source in
+    Alcotest.(check string) "text" expected rewritten;
+    Alcotest.(check int) "registrations converted" converted report.converted;
+    Alcotest.(check int) "definitions converted" definitions report.definitions;
+    Alcotest.(check (list (pair string string))) "left alone" [] (sites report);
+    check_parses rewritten;
+    let again, second = rewrite rewritten in
+    Alcotest.(check string) "a second run changes nothing" rewritten again;
+    Alcotest.(check int) "a second run converts nothing" 0 (second.converted + second.definitions))
+;;
+
+(* A name that is used anywhere but as a registration's handler keeps its
+   wrapper, and so do the registrations that use it. *)
+let named_left_alone_cases =
+  [ ( "the name is also called directly"
+    , {|let get_x request reqd =
+  with_read_auth (fun state _request reqd -> handle state request reqd) request reqd
+
+let again request reqd = get_x request reqd
+
+let routes routes =
+  routes
+  |> Http.Router.get "/api/x" get_x
+|}
+    , "/api/x"
+    , "named handler get_x" )
+  ; ( "the name is also a websocket handler"
+    , {|let get_x request reqd =
+  with_read_auth (fun state _request reqd -> handle state request reqd) request reqd
+
+let routes routes =
+  routes
+  |> Http.Router.get "/api/x" get_x
+  |> Http.Router.ws_get "/ws" get_x
+|}
+    , "/api/x"
+    , "named handler get_x" )
+  ; ( "a recursive definition"
+    , {|let rec get_x request reqd =
+  with_read_auth (fun state _request reqd -> handle state request reqd) request reqd
+
+let routes routes =
+  routes
+  |> Http.Router.get "/api/x" get_x
+|}
+    , "/api/x"
+    , "named handler get_x" )
+  ; ( "a definition with a computed argument and no early evaluation"
+    , {|let press request reqd =
+  with_tool_auth ~tool_name:(Msx_tool.name Msx_tool.Press)
+    (fun state _request reqd -> handle state request reqd) request reqd
+
+let routes routes =
+  routes
+  |> Http.Router.post "/api/x" press
+|}
+    , "/api/x"
+    , "named handler press" )
+  ; ( "a definition whose body is not a wrapper call"
+    , {|let get_x request reqd = Http.Response.text ~request "ok" reqd
+
+let routes routes =
+  routes
+  |> Http.Router.get "/api/x" get_x
+|}
+    , "/api/x"
+    , "named handler get_x" )
+  ]
+;;
+
+let test_named_early () =
+  let source =
+    {|let press request reqd =
+  with_tool_auth ~tool_name:(Msx_tool.name Msx_tool.Press)
+    (fun state _request reqd -> handle state request reqd) request reqd
+
+let routes routes =
+  routes
+  |> Http.Router.post "/api/x" press
+|}
+  in
+  let rewritten, report = rewrite ~early:true source in
+  Alcotest.(check string)
+    "text"
+    {|let press = (fun state request reqd -> handle state request reqd)
+
+let routes routes =
+  routes
+  |> Server_route.post (Server_route.Tool { tool_name = (Msx_tool.name Msx_tool.Press) }) "/api/x" press
+|}
+    rewritten;
+  Alcotest.(check int) "registrations" 1 report.converted;
+  Alcotest.(check int) "definitions" 1 report.definitions;
+  Alcotest.(check (list (pair string string)))
+    "the expression is listed under the name of the handler"
+    [ "press", "(Msx_tool.name Msx_tool.Press)" ]
+    (List.map (fun (site : Route_auth_rewrite.site) -> site.path, site.note) report.early);
+  check_parses rewritten
+;;
+
 (* ---- a whole file ---- *)
 
 let mixed_source =
@@ -601,6 +809,10 @@ let () =
     "route_auth_rewrite"
     [ "converted", List.map check_converted converted_cases
     ; "left alone", List.map check_left_alone left_alone_cases
+    ; "named handlers", List.map check_named named_cases
+    ; ( "named handlers left alone"
+      , List.map check_left_alone named_left_alone_cases
+        @ [ Alcotest.test_case "a computed argument converts the definition when allowed" `Quick test_named_early ] )
     ; ( "evaluation at registration"
       , [ Alcotest.test_case "refused unless allowed" `Quick test_early_refused_by_default
         ; Alcotest.test_case "converted and listed when allowed" `Quick test_early_allowed

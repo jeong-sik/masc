@@ -8,6 +8,7 @@ type site =
 
 type report =
   { converted : int
+  ; definitions : int
   ; unhandled : site list
   ; early : site list
   }
@@ -515,45 +516,54 @@ let route_path (args : (Asttypes.arg_label * expression) list) =
 
 let handler_label = "~handler:"
 
+(* The handler argument of a registration. *)
+let handler_expression name (args : (Asttypes.arg_label * expression) list) =
+  if String.equal name "add"
+  then
+    List.find_map
+      (function
+        | Asttypes.Labelled "handler", handler -> Some handler
+        | _ -> None)
+      args
+  else (
+    match List.filter_map (function Asttypes.Nolabel, a -> Some a | _ -> None) args with
+    | _ :: handler :: _ -> Some handler
+    | _ -> None)
+;;
+
 (* The handler argument and the offset where its edit starts. [Router.add] takes
    the handler as [~handler:h]; the edit then starts at the label, because
    [Server_route.add] takes it positionally. *)
-let handler_arg source name (args : (Asttypes.arg_label * expression) list) =
-  if String.equal name "add"
-  then (
-    match
-      List.find_map
-        (function
-          | Asttypes.Labelled "handler", handler -> Some handler
-          | _ -> None)
-        args
-    with
-    | None -> Error "no ~handler argument"
-    | Some handler ->
-      let label_end = skip_blank_back source handler.pexp_loc.loc_start.pos_cnum in
-      let label_start = label_end - String.length handler_label in
-      if label_start >= 0
-         && String.equal
-              (String.sub source label_start (String.length handler_label))
-              handler_label
-      then Ok (handler, label_start)
-      else Error "cannot find the ~handler: label in the source")
-  else (
-    match List.filter_map (function Asttypes.Nolabel, a -> Some a | _ -> None) args with
-    | _ :: handler :: _ -> Ok (handler, handler.pexp_loc.loc_start.pos_cnum)
-    | _ -> Error "no handler argument")
+let handler_arg source name args =
+  match handler_expression name args with
+  | None -> Error (if String.equal name "add" then "no ~handler argument" else "no handler argument")
+  | Some handler when not (String.equal name "add") ->
+    Ok (handler, handler.pexp_loc.loc_start.pos_cnum)
+  | Some handler ->
+    let label_end = skip_blank_back source handler.pexp_loc.loc_start.pos_cnum in
+    let label_start = label_end - String.length handler_label in
+    if label_start >= 0
+       && String.equal
+            (String.sub source label_start (String.length handler_label))
+            handler_label
+    then Ok (handler, label_start)
+    else Error "cannot find the ~handler: label in the source"
 ;;
 
-type conversion =
-  { edits : edit list
+(* What a wrapped handler becomes: the kind that stands for its wrapper, the text
+   of the handler inside the wrapper, the argument that is now evaluated once at
+   registration, and the comments that were inside the text that goes away. *)
+type unwrapped =
+  { kind : string
+  ; inner_text : string
   ; evaluated_once : string option
-      (** The wrapper argument that was evaluated on every request and is now
-          evaluated at registration. *)
+  ; hoisted : (int * string) list
   }
 
-let rewrite_registration ~allow_early source (fn : expression) name args =
+(* [handler] is a wrapped handler. The text from [before] to [after] goes away
+   except the handler inside the wrapper. *)
+let unwrap ~allow_early source (handler : expression) ~before ~after =
   let ( let* ) = Result.bind in
-  let* handler, handler_start = handler_arg source name args in
   let* call, inner, inner_text, outer_params =
     match classify source handler with
     | Other reason -> Error reason
@@ -568,23 +578,21 @@ let rewrite_registration ~allow_early source (fn : expression) name args =
     | Partial { call; inner } -> Ok (call, inner, slice source inner.pexp_loc, None)
   in
   let* kind, evaluated_once = kind_text source call ~outer_params ~allow_early in
-  let handler_stop = handler.pexp_loc.loc_end.pos_cnum in
   let inner_start = inner.pexp_loc.loc_start.pos_cnum in
   let inner_stop = inner.pexp_loc.loc_end.pos_cnum in
   (* The wrapper and its closing parenthesis are dropped. The comments inside
-     them move above the registration. *)
+     them move above the line of the registration. *)
   let unreadable = "the wrapper holds a doc comment, or text the tool cannot read" in
-  let* before =
+  let* comments_before =
     Option.to_result
       ~none:unreadable
-      (comments_between source ~start:handler_start ~stop:inner_start)
+      (comments_between source ~start:before ~stop:inner_start)
   in
-  let* after =
+  let* comments_after =
     Option.to_result
       ~none:unreadable
-      (comments_between source ~start:inner_stop ~stop:handler_stop)
+      (comments_between source ~start:inner_stop ~stop:after)
   in
-  let fn_start = fn.pexp_loc.loc_start.pos_cnum in
   (* A comment inside an argument that is copied into the kind goes along with
      it; moving it as well would write it twice. *)
   let copied (offset, _) =
@@ -594,29 +602,139 @@ let rewrite_registration ~allow_early source (fn : expression) name args =
         && offset < value.pexp_loc.loc_end.pos_cnum)
       call.labeled
   in
-  let comment_edits =
-    match List.filter (fun comment -> not (copied comment)) (before @ after) with
-    | [] -> []
-    | comments ->
-      let line = line_start source fn_start in
-      let indent = leading_blanks source line in
-      [ { start = line
-        ; stop = line
-        ; text = String.concat "" (List.map (hoisted source ~indent) comments)
-        }
-      ]
+  Ok
+    { kind
+    ; inner_text
+    ; evaluated_once
+    ; hoisted = List.filter (fun comment -> not (copied comment)) (comments_before @ comments_after)
+    }
+;;
+
+(* The comments as lines of their own above the line that holds [anchor]. *)
+let comment_edits source ~anchor comments =
+  match comments with
+  | [] -> []
+  | _ :: _ ->
+    let line = line_start source anchor in
+    let indent = leading_blanks source line in
+    [ { start = line
+      ; stop = line
+      ; text = String.concat "" (List.map (hoisted source ~indent) comments)
+      }
+    ]
+;;
+
+type conversion =
+  { edits : edit list
+  ; evaluated_once : string option
+      (** The wrapper argument that was evaluated on every request and is now
+          evaluated at registration. *)
+  }
+
+let rewrite_registration ~allow_early source (fn : expression) name args =
+  let ( let* ) = Result.bind in
+  let* handler, handler_start = handler_arg source name args in
+  let* unwrapped =
+    unwrap
+      ~allow_early
+      source
+      handler
+      ~before:handler_start
+      ~after:handler.pexp_loc.loc_end.pos_cnum
   in
+  let fn_start = fn.pexp_loc.loc_start.pos_cnum in
   Ok
     { edits =
-        comment_edits
+        comment_edits source ~anchor:fn_start unwrapped.hoisted
         @ [ { start = fn_start
             ; stop = fn.pexp_loc.loc_end.pos_cnum
-            ; text = Printf.sprintf "Server_route.%s %s" name kind
+            ; text = Printf.sprintf "Server_route.%s %s" name unwrapped.kind
             }
-          ; { start = handler_start; stop = handler_stop; text = inner_text }
+          ; { start = handler_start
+            ; stop = handler.pexp_loc.loc_end.pos_cnum
+            ; text = unwrapped.inner_text
+            }
           ]
-    ; evaluated_once
+    ; evaluated_once = unwrapped.evaluated_once
     }
+;;
+
+(* ---- named handlers ---- *)
+
+(* A top-level [let name request reqd = wrapper ... request reqd], or
+   [let name = wrapper ...]. The wrapper moves to the registrations that use the
+   name, which takes it as the kind. *)
+type definition =
+  { name : string
+  ; line : int
+  ; unwrapped : unwrapped
+  ; binding_start : int
+  ; name_stop : int
+  ; binding_stop : int
+  }
+
+let definition ~allow_early source (item : structure_item) =
+  match item.pstr_desc with
+  | Pstr_value
+      ( Asttypes.Nonrecursive
+      , [ { pvb_pat = { ppat_desc = Ppat_var { txt = name; _ }; ppat_loc; _ }
+          ; pvb_expr
+          ; pvb_constraint = None
+          ; pvb_attributes = []
+          ; pvb_loc
+          ; _
+          }
+        ] ) ->
+    let name_stop = ppat_loc.loc_end.pos_cnum in
+    let binding_stop = pvb_loc.loc_end.pos_cnum in
+    (match
+       unwrap ~allow_early source pvb_expr ~before:name_stop ~after:binding_stop
+     with
+     | Error _ -> None
+     | Ok unwrapped ->
+       Some
+         { name
+         ; line = ppat_loc.loc_start.pos_lnum
+         ; unwrapped
+         ; binding_start = pvb_loc.loc_start.pos_cnum
+         ; name_stop
+         ; binding_stop
+         })
+  | _ -> None
+;;
+
+let handler_ident (e : expression) =
+  match e.pexp_desc with
+  | Pexp_ident { txt = Longident.Lident name; _ } -> Some name
+  | _ -> None
+;;
+
+(* How many registrations take the bare name [name] as their handler, and how
+   many times the name appears at all. A definition may lose its wrapper only
+   when the two are equal. *)
+let uses_of_name structure name =
+  let registrations = ref 0 in
+  let occurrences = ref 0 in
+  let iterator =
+    { Ast_iterator.default_iterator with
+      expr =
+        (fun self (e : expression) ->
+          (match e.pexp_desc with
+           | Pexp_ident { txt = Longident.Lident n; _ } when String.equal n name ->
+             incr occurrences
+           | Pexp_apply (fn, args) ->
+             Option.iter
+               (fun function_name ->
+                 match Option.bind (handler_expression function_name args) handler_ident with
+                 | Some n when String.equal n name -> incr registrations
+                 | _ -> ())
+               (registration_function fn)
+           | _ -> ());
+          Ast_iterator.default_iterator.expr self e)
+    }
+  in
+  iterator.structure iterator structure;
+  !registrations, !occurrences
 ;;
 
 (* ---- the file ---- *)
@@ -632,8 +750,50 @@ let rewrite ?(early = false) ~file source =
   | structure ->
     let edits = ref [] in
     let converted = ref 0 in
+    let definitions = ref 0 in
     let unhandled = ref [] in
     let evaluated_early = ref [] in
+    let site_of (e : expression) path note =
+      { line = e.pexp_loc.loc_start.pos_lnum; path; note }
+    in
+    (* Named handlers first: a registration that uses one takes its kind. *)
+    let converted_definitions = Hashtbl.create 8 in
+    let candidates = ref [] in
+    let collector =
+      { Ast_iterator.default_iterator with
+        structure_item =
+          (fun self item ->
+            Option.iter
+              (fun candidate -> candidates := candidate :: !candidates)
+              (definition ~allow_early:early source item);
+            Ast_iterator.default_iterator.structure_item self item)
+      }
+    in
+    collector.structure collector structure;
+    List.iter
+      (fun (definition : definition) ->
+        let registrations, occurrences = uses_of_name structure definition.name in
+        (* The name may be used nowhere else: a handler that other code calls
+           with a request and a reqd cannot lose its wrapper. *)
+        if registrations > 0 && registrations = occurrences
+        then (
+          Hashtbl.replace converted_definitions definition.name definition;
+          incr definitions;
+          edits :=
+            comment_edits source ~anchor:definition.binding_start definition.unwrapped.hoisted
+            @ [ { start = definition.name_stop
+                ; stop = definition.binding_stop
+                ; text = " = " ^ definition.unwrapped.inner_text
+                }
+              ]
+            @ !edits;
+          Option.iter
+            (fun text ->
+              evaluated_early
+              := { line = definition.line; path = definition.name; note = text }
+                 :: !evaluated_early)
+            definition.unwrapped.evaluated_once))
+      (List.rev !candidates);
     let iterator =
       { Ast_iterator.default_iterator with
         expr =
@@ -643,17 +803,47 @@ let rewrite ?(early = false) ~file source =
                (match registration_function fn with
                 | None -> ()
                 | Some name ->
-                  let site note =
-                    { line = e.pexp_loc.loc_start.pos_lnum; path = route_path args; note }
+                  let site = site_of e (route_path args) in
+                  let named_definition =
+                    match handler_arg source name args with
+                    | Ok (handler, handler_start) ->
+                      Option.bind (handler_ident handler) (fun handler_name ->
+                        Option.map
+                          (fun definition -> definition, handler_start)
+                          (Hashtbl.find_opt converted_definitions handler_name))
+                    | Error _ -> None
                   in
-                  (match rewrite_registration ~allow_early:early source fn name args with
-                   | Ok conversion ->
+                  (match named_definition with
+                   | Some (definition, handler_start) ->
                      incr converted;
-                     edits := conversion.edits @ !edits;
-                     Option.iter
-                       (fun text -> evaluated_early := site text :: !evaluated_early)
-                       conversion.evaluated_once
-                   | Error reason -> unhandled := site reason :: !unhandled))
+                     let fn_start = fn.pexp_loc.loc_start.pos_cnum in
+                     let label =
+                       (* [~handler:] goes: [Server_route.add] takes the handler
+                          positionally. *)
+                       if String.equal name "add"
+                       then
+                         [ { start = handler_start
+                           ; stop = handler_start + String.length handler_label
+                           ; text = ""
+                           }
+                         ]
+                       else []
+                     in
+                     edits :=
+                       { start = fn_start
+                       ; stop = fn.pexp_loc.loc_end.pos_cnum
+                       ; text = Printf.sprintf "Server_route.%s %s" name definition.unwrapped.kind
+                       }
+                       :: (label @ !edits)
+                   | None ->
+                     (match rewrite_registration ~allow_early:early source fn name args with
+                      | Ok conversion ->
+                        incr converted;
+                        edits := conversion.edits @ !edits;
+                        Option.iter
+                          (fun text -> evaluated_early := site text :: !evaluated_early)
+                          conversion.evaluated_once
+                      | Error reason -> unhandled := site reason :: !unhandled)))
              | _ -> ());
             Ast_iterator.default_iterator.expr self e)
       }
@@ -665,6 +855,7 @@ let rewrite ?(early = false) ~file source =
        Ok
          ( rewritten
          , { converted = !converted
+           ; definitions = !definitions
            ; unhandled = List.rev !unhandled
            ; early = List.rev !evaluated_early
            } ))

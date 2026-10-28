@@ -41,9 +41,10 @@ let process ~write ~early file =
 
 let print_report file (report : Route_auth_rewrite.report) =
   Printf.printf
-    "%s: converted %d, left alone %d, evaluated once %d\n"
+    "%s: converted %d, named handlers %d, left alone %d, evaluated once %d\n"
     file
     report.converted
+    report.definitions
     (List.length report.unhandled)
     (List.length report.early);
   let print_sites label (sites : Route_auth_rewrite.site list) =
@@ -80,11 +81,13 @@ let () =
   let converted = ref 0 in
   let left_alone = ref 0 in
   let evaluated_once = ref 0 in
+  let named = ref 0 in
   List.iter
     (fun file ->
       match process ~write:!write ~early:!early file with
       | Ok report ->
         converted := !converted + report.converted;
+        named := !named + report.definitions;
         left_alone := !left_alone + List.length report.unhandled;
         evaluated_once := !evaluated_once + List.length report.early;
         print_report file report
@@ -93,8 +96,9 @@ let () =
         prerr_endline message)
     files;
   Printf.printf
-    "total: converted %d, left alone %d, evaluated once %d, in %d files\n"
+    "total: converted %d, named handlers %d, left alone %d, evaluated once %d, in %d files\n"
     !converted
+    !named
     !left_alone
     !evaluated_once
     (List.length files);

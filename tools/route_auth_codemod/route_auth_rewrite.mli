@@ -23,7 +23,7 @@
     two parameters, computes nothing before it has them, and hands the same
     [request] and [reqd] on to the handler.
 
-    Three things the plain unwrapping does not cover:
+    Four things the plain unwrapping does not cover:
 
     - The wrapped handler reads the [request] or [reqd] of the function that is
       removed. Those names would be unbound. The parameter of the wrapped handler
@@ -32,6 +32,13 @@
       used. A handler that also binds the name deeper down is left alone.
     - A comment sits between the removed function and the wrapper. It moves,
       verbatim, above the line of the registration.
+    - The handler is a name, and the file defines it as
+      [let name request reqd = wrapper ... request reqd] (or [let name = wrapper
+      ...]). The wrapper moves to the registrations: the definition becomes
+      [let name = <inner handler>] and each registration takes the kind. This
+      is done only when every use of the name in the file is the handler of a
+      registration; a name that other code calls with a request and a reqd is
+      left alone, and so is a use in another file, which the tool cannot see.
     - The wrapper's argument ([~permission], [~tool_name]) is a computation, not a
       constant. A typed route records it at registration, where before it was
       evaluated on every request. The registration is left alone unless
@@ -54,9 +61,12 @@ type site =
   }
 
 type report =
-  { converted : int
+  { converted : int  (** Registrations rewritten. *)
+  ; definitions : int  (** Named handlers that lost their wrapper. *)
   ; unhandled : site list  (** Left as they were; [note] is the reason. *)
-  ; early : site list  (** Converted; [note] is the argument now evaluated once. *)
+  ; early : site list
+        (** Converted; [note] is the argument now evaluated once. For a named
+            handler, [path] is its name. *)
   }
 
 (** [rewrite ~file source] returns the rewritten source and what was done, or the

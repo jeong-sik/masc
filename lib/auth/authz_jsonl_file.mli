@@ -35,7 +35,7 @@
     returns [Stopped], until the process restarts and opens the file again.
     While the file is stopped, the in-memory state is not trusted, and the file
     is the only truth. A refusal that wrote nothing ([Write_locked],
-    [Rejected], [Would_not_read_back]) does not stop the file. *)
+    [Rejected], [Would_not_read_back], [Read_back_changed]) does not stop the file. *)
 
 (** Why a file is stopped. *)
 type stop =
@@ -98,6 +98,10 @@ module type Line_format = sig
 
   (** One line, without the newline. *)
   val to_line : record -> string
+
+  (** Whether two records have the same complete meaning for the caller and
+      for [advance]. The format must compare every field that either uses. *)
+  val equal_record : record -> record -> bool
 
   (** The state once the record has been appended. *)
   val advance : state -> record -> state
@@ -200,6 +204,8 @@ module Make (F : Line_format) : sig
         }
         (** The format refuses the line that it writes for this record. This
             means a bug in the format. Nothing was written. *)
+    | Read_back_changed of { index : int }
+        (** The line reads, but not as the same record. Nothing was written. *)
     | Write_locked of { path : string }
         (** Another process holds the lock. Nothing was written and the file is
             not stopped. The caller may try again later; this module never
@@ -222,8 +228,9 @@ module Make (F : Line_format) : sig
       returns the state after the last one. Each record must pass [F.check_next]
       against the state the records before it leave, the first against the state
       of the zone. A list with a record that fails is refused before any byte is
-      written. Each line is read back with [F.of_line] before it is written, so a
-      line that [F.of_line] would refuse at the next start is never written. The
+      written. Each line is read back with [F.of_line] and compared with the
+      original by [F.equal_record] before it is written. A refused or changed
+      record is never written. The
       fold function of {!open_at_start} is not run here, and a record that it
       refuses stops every later start, so the caller runs the same fold function
       before it appends. An empty list writes nothing.

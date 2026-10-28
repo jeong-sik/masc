@@ -27,7 +27,7 @@
     returns {!Stopped}, until the process restarts and opens the file again.
     While the log is stopped, the in-memory head is not trusted, and the file is
     the only truth. A refusal that wrote nothing ({!Write_locked}, {!Rejected},
-    {!Would_not_read_back}) does not stop the log. *)
+    {!Would_not_read_back}, {!Read_back_changed}) does not stop the log. *)
 
 type t
 
@@ -152,6 +152,7 @@ type append_error =
       { index : int
       ; error : Authz_record.decode_error
       }
+  | Read_back_changed of { index : int }
   | Write_locked of { path : string }
   | Diverged of { path : string }
   | Write_failed of

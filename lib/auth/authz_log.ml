@@ -31,6 +31,7 @@ module Chain_format = struct
   let genesis = Authz_record.genesis
   let of_line head line = Authz_record.of_line ~head line
   let to_line = Authz_record.to_line
+  let equal_record (left : Authz_record.t) right = left = right
   let advance _head record = Authz_record.head_after record
 
   let check_next head (record : Authz_record.t) =
@@ -117,6 +118,7 @@ type append_error = File.append_error =
       { index : int
       ; error : Authz_record.decode_error
       }
+  | Read_back_changed of { index : int }
   | Write_locked of { path : string }
   | Diverged of { path : string }
   | Write_failed of

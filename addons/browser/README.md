@@ -92,6 +92,19 @@ follow a replacement installation. Detach confirms both process settlement and
 socket cleanup before releasing that incarnation. Interrupted startup recovery
 reads the socket allocation intent from the original native reservation.
 
+In Dashboard → Lane Add-ons, browser connection rows show each connection's
+browser, transport and Ego Space ID/name, plus pending requests and the last
+recorded result per caller. Caller labels such as `keeper/<name>` come from the
+host's verified request context. The aggregate worker row can have no actor
+while individual requests have different callers. Missing caller information
+stays unrecorded rather than being assigned to a Keeper.
+
+These readings describe the row's observation time. Retained workers and queued
+or running requests are labelled accordingly; Refresh reads newer observations.
+The readings do not report native Space ownership or window visibility, and a
+returned operation alone does not establish login success. Private operator
+controls and browser handoff remain separate actions.
+
 Authenticated native-host HTTP routes forward polls, results and disconnects to
 this Add-on. They use the served workspace's lane token, even when the process
 environment points elsewhere. A new client can register only when exactly one

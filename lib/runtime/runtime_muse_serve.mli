@@ -169,6 +169,12 @@ type error =
 
 val error_to_string : error -> string
 
+val host_died_error : reason:string -> error
+(** The error for a [turn/completed] the host synthesized because it died
+    mid-turn ({!Runtime_muse_msp.Terminal_host_died}): {!Process_exited}
+    with the turn accepted. [reason] is the host's text, kept for the report
+    only. *)
+
 type call_model =
   | Named of string  (** The host named the model the call ran on. *)
   | Unnamed

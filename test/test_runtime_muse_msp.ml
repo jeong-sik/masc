@@ -435,6 +435,36 @@ let test_wire_refusals () =
   | Error _ -> ()
 ;;
 
+(* The host synthesizes a "failed" terminal with [reason] and no [error] when it
+   died mid-turn (ADR 36635 D2). It is read as that terminal, with the host's
+   text kept as written, not refused as a broken contract. *)
+let test_host_death_terminal () =
+  let terminal_of reason =
+    let fields =
+      [ "sessionId", `String "s"
+      ; "turnId", `String "t"
+      ; "terminal", `String "failed"
+      ; "viewCursor", `String "v"
+      ]
+      @ (match reason with
+         | None -> []
+         | Some reason -> [ "reason", `String reason ])
+    in
+    Msp.parse_notification ~method_:"turn/completed" (`Assoc fields)
+  in
+  List.iter
+    (fun reason ->
+       match terminal_of (Some reason) with
+       | Ok (Msp.Turn_completed { terminal = Msp.Terminal_host_died { reason = kept }; _ })
+         -> check string "the host's reason is kept as written" reason kept
+       | Ok _ -> fail ("a host-death terminal was read as another terminal: " ^ reason)
+       | Error error -> fail (Msp.error_to_string error))
+    [ "crash"; "crash_inferred"; "incomplete"; "a reason this build has never seen" ];
+  (match terminal_of None with
+   | Ok _ -> fail "a failed terminal with neither an error nor a reason must be refused"
+   | Error _ -> ())
+;;
+
 let test_delta_fields () =
   let delta ?field () =
     let fields =
@@ -660,6 +690,7 @@ let () =
         ] )
     ; ( "codec"
       , [ test_case "wire refusals" `Quick test_wire_refusals
+        ; test_case "host death terminal" `Quick test_host_death_terminal
         ; test_case "delta fields" `Quick test_delta_fields
         ; test_case "message phase is decoded" `Quick test_message_phase_is_decoded
         ; test_case "usage read" `Quick test_usage_read

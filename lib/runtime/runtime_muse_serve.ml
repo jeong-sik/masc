@@ -236,6 +236,18 @@ let error_to_string = function
   | Timeout { seconds; _ } -> Printf.sprintf "Muse Code was silent for %.0fs" seconds
 ;;
 
+(* The terminal a host synthesizes for a turn it lost to its own death
+   ([Msp.Terminal_host_died]) is the process ending under an accepted turn, so
+   it takes the error an exited process takes. [reason] is the host's text,
+   carried for the report and never branched on. *)
+let host_died_error ~reason =
+  Process_exited
+    { status = None
+    ; detail = "the host ended the turn as dead (reason: " ^ reason ^ ")"
+    ; turn_accepted = true
+    }
+;;
+
 let ( let* ) = Result.bind
 let protocol_error stage detail = Error (Protocol_error { stage; detail })
 
@@ -1191,6 +1203,7 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
                  | Msp.Launch_error | Msp.Unrecognized_error_kind _ )
              ; _
              } as turn_error) -> Error (Turn_failed turn_error)
+        | Msp.Terminal_host_died { reason } -> Error (host_died_error ~reason)
         | Msp.Terminal_cancelled -> Error Turn_cancelled
         | Msp.Unrecognized_terminal terminal ->
           protocol_error "turn/completed" ("unrecognized terminal " ^ terminal))

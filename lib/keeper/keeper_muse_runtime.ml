@@ -1570,6 +1570,8 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
                        | Msp.Unrecognized_error_kind _ )
                    ; _
                    } as error)) -> terminal_failure (Serve.Turn_failed error)
+            | Some (Msp.Terminal_host_died {reason}) ->
+              terminal_failure (Serve.host_died_error ~reason)
             | Some Msp.Terminal_cancelled -> terminal_failure Serve.Turn_cancelled
             | Some (Msp.Unrecognized_terminal terminal) ->
               terminal_failure (Serve.Protocol_error

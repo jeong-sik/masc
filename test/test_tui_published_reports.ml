@@ -47,17 +47,23 @@ let exact_revision () =
     (Catalog.report_path report);
   let reading = get (Catalog.report_contents report (detail first [second;first] markdown)) in
   check (option bool) "default share field omitted is None" None reading.shared;
+  check (option int) "default share version omitted is None" None reading.share_version;
   let shared_json = match detail first [second;first] markdown with
-    | `Assoc fields -> `Assoc (("shared", `Bool true) :: fields)
+    | `Assoc fields -> `Assoc (("shared", `Bool true) :: ("share_version", `Int 4) :: fields)
     | json -> json
   in
   let shared_reading = get (Catalog.report_contents report shared_json) in
   check (option bool) "explicit shared=true decoded" (Some true) shared_reading.shared;
+  check (option int) "share version belongs to the same read" (Some 4) shared_reading.share_version;
   let invalid_shared_json = match detail first [second;first] markdown with
     | `Assoc fields -> `Assoc (("shared", `String "yes") :: fields)
     | json -> json
   in
   refused (Catalog.report_contents report invalid_shared_json);
+  let invalid_version_json = match detail first [second;first] markdown with
+    | `Assoc fields -> `Assoc (("share_version", `Int (-1)) :: fields)
+    | json -> json in
+  refused (Catalog.report_contents report invalid_version_json);
   let parts = reading.parts in
   (match parts with
    | [{ Masc_tui_mcp.rc_kind = Resource_text raw; _ }] -> check string "UTF8/CRLF exact source" markdown raw

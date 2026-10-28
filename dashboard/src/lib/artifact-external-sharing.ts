@@ -1,4 +1,5 @@
 import { signal } from '@preact/signals'
+import { pendingShares } from './artifact-share-recovery'
 
 type ShareState =
   | { readonly kind: 'ready' }
@@ -18,19 +19,21 @@ export type ShareOutcome = {
   readonly requested: boolean
   readonly workspace: { readonly basePath: string; readonly mascRoot: string }
 } & (
-  | { readonly kind: 'confirmed'; readonly shared: boolean }
+  | { readonly kind: 'confirmed'; readonly outcome: 'applied' | 'conflict'; readonly shared: boolean; readonly current: boolean }
   | { readonly kind: 'unconfirmed'; readonly detail: string }
 )
 
-// A per-tab owner guards reads and writes for an artifact ID even if its
-// reader unmounts or the workspace changes. It cannot settle a request across
-// a page reload or another client; the server needs a durable receipt for that.
+// The per-tab owner guards a visit. The persisted operation guards reloads and
+// is also observed across tabs; the server makes the final version decision.
 export class ArtifactExternalSharing {
   private readonly states = signal<ReadonlyMap<string, ShareState>>(new Map())
   private readonly outcomes = signal<readonly ShareOutcome[]>([])
 
   activity(id: string): ShareState['kind'] {
-    return this.states.value.get(id)?.kind ?? 'ready'
+    const state = this.states.value.get(id)
+    if (state?.kind === 'pending') return 'pending'
+    if (pendingShares().some(record => record.operation.id === id)) return 'unconfirmed'
+    return state?.kind ?? 'ready'
   }
 
   receipts(): readonly ShareOutcome[] {
@@ -39,15 +42,26 @@ export class ArtifactExternalSharing {
 
   observe(id: string): ShareObservation {
     const state = this.states.peek().get(id)
-    return { id, state, admitted: state === undefined || state.kind === 'ready' }
+    return { id, state, admitted: (state === undefined || state.kind === 'ready')
+      && !pendingShares().some(record => record.operation.id === id) }
   }
 
   admits(observation: ShareObservation): boolean {
     return observation.admitted && this.states.peek().get(observation.id) === observation.state
+      && !pendingShares().some(record => record.operation.id === observation.id)
   }
 
   begin(id: string, observation: ShareObservation): object | null {
     if (observation.id !== id || !this.admits(observation)) return null
+    const owner = {}
+    const states = new Map(this.states.peek())
+    states.set(id, { kind: 'pending', owner })
+    this.states.value = states
+    return owner
+  }
+
+  beginRecovery(id: string): object | null {
+    if (this.states.peek().get(id)?.kind === 'pending') return null
     const owner = {}
     const states = new Map(this.states.peek())
     states.set(id, { kind: 'pending', owner })
@@ -65,6 +79,7 @@ export class ArtifactExternalSharing {
     this.states.value = states
     if (outcome !== 'not-sent') this.outcomes.value = [...this.outcomes.peek(), outcome]
   }
+
 }
 
 export const artifactExternalSharing = new ArtifactExternalSharing()

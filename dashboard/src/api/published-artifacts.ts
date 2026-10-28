@@ -27,11 +27,25 @@ const ListSchema = Schema.Struct({
 const DocumentSchema = Schema.Struct({
   artifact: PublishedArtifactSchema, content: Schema.String, revisions: Schema.Array(ArtifactRevisionSchema),
   shared: Schema.optional(Schema.Boolean),
+  share_version: Schema.optional(Schema.Int.pipe(Schema.nonNegative(), Schema.lessThanOrEqualTo(Number.MAX_SAFE_INTEGER))),
+})
+const ShareSnapshotSchema = Schema.Struct({
+  version: Schema.Int.pipe(Schema.nonNegative(), Schema.lessThanOrEqualTo(Number.MAX_SAFE_INTEGER)),
+  shared: Schema.Boolean,
 })
 const ArtifactShareSchema = Schema.Struct({
   id: Schema.String.pipe(Schema.pattern(/^artifact-[0-9a-f]{32}$/)),
-  shared: Schema.Boolean,
+  receipt: Schema.Struct({
+    operation_id: Schema.String.pipe(Schema.pattern(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)),
+    expected_version: Schema.Int.pipe(Schema.nonNegative(), Schema.lessThanOrEqualTo(Number.MAX_SAFE_INTEGER)),
+    requested: Schema.Boolean,
+    outcome: Schema.Literal('applied', 'conflict'),
+    snapshot: ShareSnapshotSchema,
+  }),
+  current: ShareSnapshotSchema,
 })
+export type ArtifactShareOperation = { id: string; operationId: string; expectedVersion: number; shared: boolean }
+export type ArtifactShareResult = typeof ArtifactShareSchema.Type
 export type PublishedArtifact = typeof PublishedArtifactSchema.Type
 export type ArtifactDocument = typeof DocumentSchema.Type
 export type ArtifactList = typeof ListSchema.Type
@@ -90,14 +104,31 @@ export function artifactHref(id: string, revision?: number): string {
   return `/dashboard/#/workspace?${params}`
 }
 
-export async function setPublishedArtifactShared(id: string, shared: boolean, workspace: ArtifactWorkspace): Promise<{ id: string; shared: boolean }> {
-  const result = Schema.decodeUnknownSync(ArtifactShareSchema)(
-    await post<unknown>('/api/v1/published-artifact-shares', {
-      id, shared, expected_workspace: { base_path: workspace.basePath, masc_root: workspace.mascRoot },
-    }, artifactWorkspaceHeaders(workspace)),
-  )
-  if (result.id !== id || result.shared !== shared) {
-    throw new Error('외부 공유 상태 응답이 요청과 다릅니다.')
+export async function setPublishedArtifactShared(operation: ArtifactShareOperation, workspace: ArtifactWorkspace): Promise<ArtifactShareResult> {
+  let raw: unknown
+  let conflicted = false
+  try {
+    raw = await post<unknown>('/api/v1/published-artifact-shares', {
+      id: operation.id, shared: operation.shared, operation_id: operation.operationId,
+      expected_version: operation.expectedVersion,
+      expected_workspace: { base_path: workspace.basePath, masc_root: workspace.mascRoot },
+    }, artifactWorkspaceHeaders(workspace))
+  } catch (error) {
+    if (typeof error !== 'object' || error === null || !('status' in error)
+      || error.status !== 409 || !('responseData' in error)) throw error
+    raw = error.responseData
+    conflicted = true
+  }
+  const result = Schema.decodeUnknownSync(ArtifactShareSchema)(raw)
+  const receipt = result.receipt
+  if (result.id !== operation.id || receipt.operation_id !== operation.operationId
+    || receipt.expected_version !== operation.expectedVersion || receipt.requested !== operation.shared
+    || (receipt.outcome === 'conflict') !== conflicted
+    || (receipt.outcome === 'applied' && (receipt.snapshot.version !== operation.expectedVersion + 1
+      || receipt.snapshot.shared !== operation.shared))
+    || (receipt.outcome === 'conflict' && receipt.snapshot.version === operation.expectedVersion)
+    || result.current.version < receipt.snapshot.version) {
+    throw new Error('외부 공유 요청 결과가 보낸 작업과 다릅니다. 적용 여부를 확인해 주세요.')
   }
   return result
 }

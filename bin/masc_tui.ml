@@ -2084,11 +2084,12 @@ let launch_artifact_check_change state ~mailbox =
           ~host ~port ~request)
 
 let toggle_resource_external_share state ~mailbox =
-  match Masc_tui_resource_document.external_share_change state, state.server_identity with
-  | Error detail, _ -> report_action state "error" detail
-  | Ok _, None ->
-      report_action state "error" "Workspace identity is unavailable"
-  | Ok (report, next_shared), Some expected_workspace ->
+  match Masc_tui_resource_document.external_share_change state, state.server_identity, state.resource_share_version with
+  | Error detail, _, _ -> report_action state "error" detail
+  | Ok _, None, _ -> report_action state "error" "Workspace identity is unavailable"
+  | Ok _, Some _, None -> report_action state "error" "Share version is unavailable; refresh this report"
+  | Ok (report, next_shared), Some expected_workspace, Some expected_version ->
+      let operation_id = Random_id.uuid_v7 () in
       let credential = Masc_tui_http.bind_credential () in
       let host = server_peer_host and port = state.port in
       let id = report.id in
@@ -2102,7 +2103,7 @@ let toggle_resource_external_share state ~mailbox =
            ~deliver:(fun result -> Resource_share_changed (request, result))
            (fun () ->
              Masc_tui_http.post_artifact_share ~credential ~expected_workspace
-               ~host ~port ~id ~shared:next_shared))
+               ~host ~port ~id ~shared:next_shared ~operation_id ~expected_version))
 
 let resource_share_is_owned state request =
   match state.resource_share_pending with
@@ -14299,6 +14300,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.resource_read_owner <- None;
   state.resource_revision_history <- [];
   state.resource_shared <- None;
+  state.resource_share_version <- None;
   state.resource_scroll <- Masc_tui_scroll.Position.first;
   state.resource_search_position <- Masc_tui_resource_reading.first;
   state.resource_image_cursor <- 0;

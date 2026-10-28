@@ -10,7 +10,7 @@ it('retires reads begun before or during a share write, then admits a fresh read
   const owner = shares.begin('a', before)!
   const during = shares.observe('a')
   expect(shares.begin('a', during)).toBeNull()
-  shares.finish('a', owner, { ...receipt('a'), kind: 'confirmed', shared: true })
+  shares.finish('a', owner, { ...receipt('a'), kind: 'confirmed', outcome: 'applied', shared: true, current: true })
   expect(shares.admits(before)).toBe(false)
   expect(shares.admits(during)).toBe(false)
   expect(shares.admits(shares.observe('a'))).toBe(true)

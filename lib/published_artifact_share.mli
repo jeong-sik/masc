@@ -19,11 +19,13 @@ val id : t -> string
 val snapshot : t -> snapshot
 val latest : t -> receipt option
 val valid_operation_id : string -> bool
+val valid_version : int -> bool
 val receipt_snapshot : receipt -> snapshot
 val apply : t -> request -> (transition, error) result
 (** This checks the latest identity only; the store owns earlier receipts. *)
 
 val snapshot_to_json : snapshot -> Yojson.Safe.t
+val snapshot_of_json : Yojson.Safe.t -> (snapshot, error) result
 val receipt_to_json : receipt -> Yojson.Safe.t
 val receipt_of_json : Yojson.Safe.t -> (receipt, error) result
 val to_json : t -> Yojson.Safe.t

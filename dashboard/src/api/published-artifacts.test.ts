@@ -85,10 +85,24 @@ describe('published artifact native wire contract', () => {
   it('toggles per-artifact external sharing via /api/v1/published-artifact-shares', async () => {
     const artifact = nativeInventory.artifacts[0]!
     const workspace = { basePath: '/workspace', mascRoot: '/workspace/.masc' }
-    vi.mocked(post).mockResolvedValueOnce({ id: artifact.id, shared: true })
-    expect(await setPublishedArtifactShared(artifact.id, true, workspace)).toEqual({ id: artifact.id, shared: true })
+    const operation = { id: artifact.id, shared: true, expectedVersion: 0, operationId: '01890e2a-4c8e-7b21-9f3c-000000000031' }
+    const reply = { id: artifact.id, receipt: { operation_id: operation.operationId, expected_version: 0,
+      requested: true, outcome: 'applied', snapshot: { version: 1, shared: true } }, current: { version: 2, shared: false } }
+    vi.mocked(post).mockResolvedValueOnce(reply)
+    expect(await setPublishedArtifactShared(operation, workspace)).toEqual(reply)
     expect(post).toHaveBeenCalledWith('/api/v1/published-artifact-shares', {
-      id: artifact.id, shared: true, expected_workspace: { base_path: workspace.basePath, masc_root: workspace.mascRoot },
+      id: artifact.id, shared: true, operation_id: operation.operationId, expected_version: 0,
+      expected_workspace: { base_path: workspace.basePath, masc_root: workspace.mascRoot },
     }, { 'x-masc-expected-base-path': workspace.basePath, 'x-masc-expected-masc-root': workspace.mascRoot })
+  })
+
+  it('keeps an old conflict receipt separate from the current sharing state', async () => {
+    const id = nativeInventory.artifacts[0]!.id
+    const workspace = { basePath: '/workspace', mascRoot: '/workspace/.masc' }
+    const operation = { id, shared: true, expectedVersion: 0, operationId: '01890e2a-4c8e-7b21-9f3c-000000000032' }
+    const reply = { id, receipt: { operation_id: operation.operationId, expected_version: 0,
+      requested: true, outcome: 'conflict', snapshot: { version: 1, shared: false } }, current: { version: 2, shared: true } }
+    vi.mocked(post).mockRejectedValueOnce(Object.assign(new Error('conflict'), { status: 409, responseData: reply }))
+    expect(await setPublishedArtifactShared(operation, workspace)).toEqual(reply)
   })
 })

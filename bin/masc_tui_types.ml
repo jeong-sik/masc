@@ -9063,6 +9063,7 @@ type state = {
   mutable resource_read_owner: unit ref option;
   mutable resource_revision_history: Masc_tui_resource_catalog.report list;
   mutable resource_shared: bool option;
+  mutable resource_share_version: int option;
   mutable resource_share_pending: resource_share_request option;
   (* An interrupted write may still commit after any later GET. Keep these
      artifact IDs uncertain for this TUI session, across workspace epochs. *)
@@ -12312,7 +12313,8 @@ let retain_resource_read state ~key =
           (Masc_tui_resource_catalog.Report_revision report)) state.resource_revision_history in
   if not (same_resource || known_revision) then begin
     state.resource_revision_history <- [];
-    state.resource_shared <- None
+    state.resource_shared <- None;
+    state.resource_share_version <- None
   end;
   state.resource_pending_key <- Some key;
   if not same_resource then begin
@@ -16916,6 +16918,7 @@ let create_state
   resource_read_owner = None;
   resource_revision_history = [];
   resource_shared = None;
+  resource_share_version = None;
   resource_share_pending = None;
   resource_share_uncertain_ids = [];
   resource_scroll = Masc_tui_scroll.Position.first;

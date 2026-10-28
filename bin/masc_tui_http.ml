@@ -920,21 +920,30 @@ let post_artifact_check ~credential ~expected_workspace ~host ~port ~request =
     ~path:"/api/v1/published-artifact-checks" ~body in
   Masc_tui_artifact_check_action.decode_response request json
 
-let post_artifact_share ~credential ~expected_workspace ~host ~port ~id ~shared =
+let post_artifact_share ~credential ~expected_workspace ~host ~port ~id ~shared ~operation_id ~expected_version =
+  let module Share = Masc.Published_artifact_share in
   let ( let* ) = Result.bind in
   let body =
-    `Assoc [expected_workspace_field expected_workspace; "id", `String id; "shared", `Bool shared]
+    `Assoc [expected_workspace_field expected_workspace; "id", `String id; "shared", `Bool shared;
+      "operation_id", `String operation_id; "expected_version", `Int expected_version]
     |> Yojson.Safe.to_string
   in
   let* json = post_json_bound ~credential ~host ~port
     ~path:"/api/v1/published-artifact-shares" ~body in
   match json with
-  | `Assoc fields -> (
-      match List.assoc_opt "id" fields, List.assoc_opt "shared" fields with
-      | Some (`String returned_id), Some (`Bool returned_shared)
-        when String.equal returned_id id && Bool.equal returned_shared shared ->
-          Ok returned_shared
-      | _ -> Error "Published artifact share response did not match the requested state")
+  | `Assoc fields when List.sort String.compare (List.map fst fields) = ["current"; "id"; "receipt"] ->
+    let* receipt = Share.receipt_of_json (List.assoc "receipt" fields)
+      |> Result.map_error (fun _ -> "Invalid share operation receipt") in
+    let* current = Share.snapshot_of_json (List.assoc "current" fields)
+      |> Result.map_error (fun _ -> "Invalid current share state") in
+    let identity_matches = List.assoc "id" fields = `String id
+      && String.equal receipt.request.operation_id operation_id
+      && receipt.request.expected_version = expected_version
+      && Bool.equal receipt.request.requested shared in
+    if not identity_matches then Error "Published artifact share response did not match the requested operation"
+    else (match receipt.outcome with
+      | Share.Applied applied when current.version >= applied.version -> Ok current.shared
+      | Share.Applied _ | Share.Conflict _ -> Error "Share response did not confirm the requested operation")
   | _ -> Error "Published artifact share response must be a JSON object"
 
 (* Press one or more keys on the shared MSX machine (RFC-0439 §3.3). Returns

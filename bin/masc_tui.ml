@@ -298,14 +298,15 @@ let runtime_config_row_near rows ~direction ~target =
         (fun selected row -> if row <= target then row else selected)
         first rows
 
-let set_runtime_config_cursor_near state ~direction ~target =
+let set_runtime_config_cursor_near ?(keep_scroll = false) state ~direction ~target =
   let rows = runtime_config_assignment_rows state in
   let cursor = runtime_config_row_near rows ~direction ~target in
   state.runtime_config_cursor <- cursor;
-  state.config_scroll <-
-    Masc_tui_scroll.ensure_visible ~cursor
-      ~height:(Masc_tui_render.config_content_height state)
-      state.config_scroll
+  if not keep_scroll then
+    state.config_scroll <-
+      Masc_tui_scroll.ensure_visible ~cursor
+        ~height:(Masc_tui_render.config_content_height state)
+        state.config_scroll
 
 (* The table header a lexed runtime.toml row opens, read by the TOML grammar:
    whitespace, quoted keys and a trailing comment are the parser's to settle,
@@ -338,6 +339,9 @@ let runtime_config_jump_context_rows = 3
    view then. *)
 let apply_runtime_config_jump state =
   match state.runtime_config_jump_section, state.runtime_config_view with
+  | Some _, _ when state.view <> Config || state.config_pane <> Config_runtime ->
+    state.runtime_config_jump_section <- None;
+    None
   | Some path, Some _ ->
     let rows = Masc_tui_types.runtime_config_active_rows state in
     state.runtime_config_jump_section <- None;
@@ -7494,6 +7498,7 @@ let launch_surface_reads state ~mailbox (surface : surface) =
    otherwise read as empty until the next tick. *)
 let goto_surface ?(from_reference = false) state ~mailbox (destination : surface) =
   state.code_hover <- None;
+  state.runtime_config_jump_section <- None;
   if destination <> Tools && state.tools_async_detail_open then close_tools_async_detail state;
   state.keeper_navigation_open <- false;
   state.keeper_message_focus <- Right_pane;
@@ -14877,6 +14882,7 @@ let enter_keeper_detail_tab state ~mailbox tab =
    the press differ only in which pane they name. *)
 let enter_config_pane state ~mailbox pane =
   state.runtime_model_jump <- None;
+  state.runtime_config_jump_section <- None;
   state.config_pane <- pane;
   state.prompts_cursor <- 0;
   state.config_scroll <- 0;
@@ -19707,7 +19713,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
            let next_name = List.nth_opt snapshot.Tui_decode.pss_presets cursor
                |> Option.map (fun row -> row.Tui_decode.pm_name) in
            if not (Option.equal String.equal selected_name next_name) then begin
-             state.config_scroll <- 0;
+             if state.view = Config && state.config_pane = Config_presets then
+               state.config_scroll <- 0;
              state.preset_armed <- None
            end;
            state.presets_snapshot <- Some snapshot;
@@ -20026,7 +20033,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         state.prompts_librarian_input_loading <- false;
         (match state.prompts_librarian_input with
          | Some (key, _) when String.equal key prompt_key -> ()
-         | Some _ | None -> state.config_scroll <- 0);
+         | Some _ | None ->
+           if state.view = Config && state.config_pane = Config_prompts
+              && not state.prompts_show_runtime_assets then
+             state.config_scroll <- 0);
         match result with
         | Ok lines ->
             state.prompts_librarian_input <- Some (prompt_key, lines);
@@ -20055,7 +20065,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
             List.nth_opt rows cursor
             |> Option.map (fun (row : Tui_decode.runtime_param_row) -> row.rpr_key)
           in
-          if not (Option.equal String.equal selected_key next_key)
+          if state.view = Config && state.config_pane = Config_params
+             && not (Option.equal String.equal selected_key next_key)
           then state.config_scroll <- 0;
           state.runtime_params <- Some rows;
           state.runtime_params_cursor <- cursor;
@@ -20161,7 +20172,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
                   report_action state "error" ("Model settings unreadable; edit runtime.toml: " ^ detail)
               | Some _ | None -> ());
              state.runtime_model_jump <- None);
-          set_runtime_config_cursor_near state ~direction:1
+          set_runtime_config_cursor_near
+            ~keep_scroll:(state.view <> Config || state.config_pane <> Config_runtime)
+            state ~direction:1
             ~target:state.runtime_config_cursor;
           (match Masc_tui_types.runtime_config_edit_session state with
            | None -> ()
@@ -32072,7 +32085,10 @@ and is loaded on demand through keeper_skill.
                   close_tools_async_detail state;
                   launch_tools_load ~force:false state ~mailbox:async_messages
                 end else goto_surface state ~mailbox:async_messages Config
-            | Config -> state.runtime_model_jump <- None; state.view <- Overview)
+            | Config ->
+                state.runtime_model_jump <- None;
+                state.runtime_config_jump_section <- None;
+                state.view <- Overview)
        | Some "left" ->
            (* Left is the non-destructive structural back key. Unlike Esc it
               never interrupts a live chat turn; it only closes a detail the

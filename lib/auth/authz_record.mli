@@ -54,6 +54,9 @@ module Kind : sig
     | Preauthorized_expiry
     | Migration_diagnostic
     | Local_recovery
+    | Mode_event
+      (** A change of the mode of the installation (design 5.1). The body is
+          that of {!Authz_mode_event}. *)
 
   val all : t list
   val to_string : t -> string
@@ -64,7 +67,7 @@ end
     [Runtime_grant], [Delegate_policy], [Principal],
     [Internal_service_credential], and [Permission_revocation] need an
     authenticated principal. Each system author writes only its own records,
-    and the local operator writes only recovery records. *)
+    and the local operator writes only recovery records and mode events. *)
 val admits : Kind.t -> Author.t -> bool
 
 (** Where the next record goes: its position and the hash it must carry. *)

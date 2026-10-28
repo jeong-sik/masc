@@ -38,6 +38,7 @@ let writers_of =
     ; Preauthorized_expiry, [ "system maintenance" ]
     ; Migration_diagnostic, [ "system migration" ]
     ; Local_recovery, [ "local operator" ]
+    ; Mode_event, [ "local operator" ]
     ]
 ;;
 
@@ -65,6 +66,7 @@ let ordinal = function
   | R.Kind.Preauthorized_expiry -> 7
   | R.Kind.Migration_diagnostic -> 8
   | R.Kind.Local_recovery -> 9
+  | R.Kind.Mode_event -> 10
 ;;
 
 let kinds_are_all_listed () =
@@ -385,6 +387,7 @@ let kind_labels_are_the_names_on_disk () =
     ; "preauthorized_expiry"
     ; "migration_diagnostic"
     ; "local_recovery"
+    ; "mode_event"
     ]
     (List.map R.Kind.to_string R.Kind.all)
 ;;

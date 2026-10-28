@@ -130,8 +130,8 @@ L3 을 한 PR 로 쓰지 않고 아래로 나눠 L2(#46568) 위에 쌓는다.
 | L3a | 바닥의 규칙을 입출력 없는 상태기계 `Keeper_librarian_message_floor.Machine` 으로 뽑는다. Runtime 바닥(`Floor.infer`)은 이 기계에 답을 넣어 주는 쪽이 된다. 각 답을 기록해 두었다가 다시 넣으면 같은 다음 질문이 나온다 | #46577 |
 | L3b | Runtime 이 durable 단계를 준비·복원·검증하고, 보관된 답과 gate 판정으로 `memory_step` 을 찍는 입구 | #46580 |
 | L3c | 단계 request: 일반 history original 과 다른 scope·ID·kind. 자기 입력(메시지 하나, 그 시점의 facts, 이어받는 상태)을 담아 record 하나로 복원한다. 거절된 범위 original 과 앞 단계를 ID 와 digest 로 가리킨다. 호스트 증명과 질문 코덱은 history 요청과 같은 모듈을 쓴다 | #46587 |
-| L3d | 단계를 worker 로 돌리는 층(#46596: 단계 owner, host 의 Exact 권한 검사와 wake 가 단계를 알아봄)과, 단계 gate 저널(`Keeper_librarian_original_gate.Make`)에 기계에 답을 넣어 주며 단계를 잇는 구동(사슬 찾기·복구) | #46596 + 예정 |
-| L3e | `consume_one` 진입: 거절된 한 턴 범위 + L2 증거 → 사슬. 하강 시험(한 번만 하강, `Invalid_request`·열린 기록은 하강 없음)을 이 층에 둔다 | 예정 |
+| L3d | 단계를 worker 로 돌리고 사슬로 잇는다. 첫 층은 단계 owner(retain·discover·resume)이고, host 의 Exact 권한 검사와 wake 가 단계를 알아본다. 둘째 층은 단계 gate 저널(`Keeper_librarian_original_gate.Make`), gate 만 거친 단계 판정, 사슬 구동(`Keeper_librarian_floor_chain.run`)이다. 구동은 단계를 찾거나 만들고, 답을 판정해 기계에 넣고, 크기로 거절된 메시지는 구멍으로 두고 넘어가고, 그 밖의 거절에서 멈춘다 | #46596, #46607 |
+| L3e~L5 | 5절. 부르는 곳이 없는 두 층(L3e, L4)을 먼저 쌓고, 마지막 층(L5)에서 `consume_one` 에 연결한다 | 예정 |
 
 확정한 것.
 
@@ -140,19 +140,50 @@ L3 을 한 PR 로 쓰지 않고 아래로 나눠 L2(#46568) 위에 쌓는다.
 - **`memory_step` 은 Runtime 이 찍는다.** 이 타입은 `private` 이다(게이트를 통과한 결정만 Runtime 이 만든다는 경계). durable 결과는 `Runtime.durable_memory_step` 입구로만 `memory_step` 이 되고, 그러면 `Memory_plan`·`Memory_program` 의 검증을 그대로 쓴다.
 - **단계가 보는 Memory 는 앞 단계까지 반영한 값이다.** `Machine` 은 단계가 끝날 때마다 그 결정의 결과를 다음 질문의 `current` 로 넘기고, 저장소에는 아무것도 쓰지 않는다. 사슬 전체를 게시할 때 `Program.replay` 가 이 결정들을 잠긴 실제 Memory 에 다시 적용해 본다. 그사이 관련 없는 항목이 더해진 것은 허용하고, 기대한 항목이 없어졌거나 결과가 달라지면 거절한다.
 
-**L3d 복구가 지켜야 할 조건.** 아직 구현이나 저장 형식을 정했다는 뜻은 아니다.
+**L3d 복구가 지켜야 할 조건.** 리뷰에서 나온 조건이다. #46607 이 아래 "맞춘 방법"으로 지킨다.
 
 - 재시작해 사슬을 다시 먹일 때는 처음의 `transaction_id` 와 초기 `Memory_plan` snapshot 을 복원해 같은 기계에서 시작한다. 현재 Memory 를 새 anchor 로 잡거나 새 ID 를 만들면 같은 단계 결과여도 질문이나 program 이 달라질 수 있다. 최초 사슬에서 이 두 값을 어떻게 내구성 있게 보존할지는 아래 `current` 와 함께 L3d 에서 정한다.
 - 크기 거절로 만든 `unreadable` hole 은 처음 만든 동일한 값을 복원해 먹인다. 성공한 단계는 원래 `run_id` 와 gate 판정을 보존해 `durable_memory_step` 에 넘긴다. 복구 시점의 Memory 로 gate 를 다시 판정하거나 새 ID 를 만들지 않는다.
 - 사슬의 각 결과가 현재 기계의 질문에 속하는지 request ID·position 과 질문 내용으로 확인하고, 이미 반영한 결과를 다음 질문에 다시 먹이지 않는다. 같은 position 의 다른 질문도 구분해야 한다. `matches_question` 은 단계 request 를 대조하는 입구이고 결과 재생의 중복 방어 자체는 아니다.
 - 복구 시험에는 초기 anchor 가 바뀐 재시작, hole 값 보존, gate 판정 이후 Memory 가 달라진 재시작, 중복 결과와 다른 position·질문의 결과를 넣는다. 같은 근거로 복구할 때 원래 질문과 program 을 얻고, 맞지 않는 근거는 거절하는지 확인한다.
 
+맞춘 방법(#46607).
+
+- `transaction_id` 는 모든 단계 요청에 저장한다. 시작 facts, 이어받은 working state, 읽지 못한 메시지는 첫 단계의 입력과 컨텍스트에 있다. 단계가 하나라도 있는 사슬은 호출자가 준 시작값을 버리고 첫 단계에서 읽는다.
+- 구멍은 메시지 좌표·해시와 거절 이름뿐이고 시각이나 ID 가 없다. 거절된 단계 기록과 호스트가 보관한 실행 영수증에서 같은 값을 다시 만든다.
+- `run_id` 는 단계 gate 저널의 root 요청 ID 다. 한 번 정해지면 바뀌지 않는다. 끝난 저널은 보관된 평가에서 다시 읽는다. 모델을 다시 부르지 않고, 지금 Memory 로 다시 판정하지 않는다.
+- 위치마다 단계는 하나다. 같은 위치에 둘이 있으면 거절한다. 단계는 기계가 지금 묻는 질문과 맞아야 하고, 기계가 묻지 않은 단계가 남아 있어도 거절한다.
+- 변이 시험이 잡지 못하는 검사가 셋 있다. 구멍 조건의 줄여 읽기 판정(`message_descent`) 확인, 앞 단계 링크 비교, transaction 비교다. 이 검사만 걸리는 입력을 만들려면 다른 검사가 먼저 걸리는 단계가 필요하다.
+
+L3d 에서 정한 것.
+
+- **served slot.** `Machine.answered` 의 `served_by` 는 선택 인자다. 슬롯 이름(`Runtime.served_slot`: API 슬롯 또는 CLI 슬롯, id 공간이 서로 다르다)이 있는 곳은 Runtime 경로뿐이고, 읽는 쪽도 Runtime 경로의 `queue_refresh` 뿐이다. durable 답은 호스트가 보증할 슬롯이 없다. 사슬은 이 값을 넣지 않는다. 지어낸 값을 넣으면 사슬이 거짓 근거를 갖는다(#46607).
+- **시작 `current`.** 사슬의 첫 단계가 시작 facts 를 입력에 담는다. 재시작한 구동은 호출자가 준 값을 버리고 첫 단계에서 읽는다. 처음 사슬을 시작할 때의 값은 범위 original 입력의 `current` 다(L3e). `Memory_plan.create_over` 가 facts 로 시작한다(#46607).
+- **host 가 단계를 알아본다.** 요청 ID 분류를 `Keeper_librarian_request_namespace` 하나로 합쳐서, 새 종류가 두 곳 모두 컴파일 오류로 드러난다. host 의 Exact 권한 검사는 단계 요청을 record 하나로 복원해 답을 도메인 검증한다. wake 는 단계 결과 알림에서 단계의 Keeper 를 찾는다(#46596).
+- **gate 저널은 단계마다 돈다.** 단계 하나는 답 하나와 gate 저널 하나다. 결정은 gate 를 거친 뒤에만 `memory_step` 이 되어 program 에 들어간다. Runtime 바닥도 단계마다 gate 를 거친다(`Runtime.infer_memory_step`). 합친 program 을 gate 에 다시 보내지 않는다(#46607).
+
 열린 것.
 
-- **served slot.** `Machine.answered` 는 단계를 처리한 슬롯(`Runtime.served_slot`: API 슬롯 또는 CLI 슬롯, id 공간이 서로 다르다)을 받는다. `Runtime.durable_memory_step` 은 슬롯을 받지 않는다. durable 답에서 슬롯을 어떻게 얻을지, 사슬에 이 값이 꼭 필요한지를 L3d 에서 정한다. 그 전에는 실제 근거가 없는 슬롯을 만들어 넣지 않는다.
-- **gate 저널이 단계마다 도는 비용.** 단계 하나는 답 하나와 gate 저널 하나다. L4 전에 저널이 단계들의 결정을 합친 program 하나를 받는지 확인한다.
-- **사슬을 다시 세울 때의 시작 `current`.** 단계는 자기 입력을 담으니 단계 하나를 복원하는 데는 시작 Memory 가 필요 없다. 다만 재시작한 구동은 기계에 처음부터 단계 결과를 다시 먹여 다음 질문을 얻는다. 그때 기계의 시작 `current` 는 사슬 안에서 한 값이어야 질문이 단계와 맞는다. 후보는 범위 original 입력의 `current` 다. 기계가 쓰는 `Memory_plan.create` 는 전체 `Current.t` 를 받는데 범위 original 에는 facts 와 revision 만 있으므로, 생성자 인자를 facts 로 바꿔야 한다. 게시 때 `Program.replay` 가 그사이 바뀐 Memory 때문에 거절하면 사슬을 어떻게 이을지는 L4 에서 정한다.
-- **host 가 단계를 알아보지 못한다.** `server_librarian_addon_wake.ml` 과 `server_librarian_addon_validation.ml` 이 요청 ID 를 각자 복사한 `namespace` 함수로 분류하고, 둘 다 단계 ID 를 `Other` 로 본다. host 의 Exact 권한 검사는 단계 요청을 `not_allowed: lacks its original host identity` 로 거절하고, wake 는 단계 결과 알림(`Exact_result_delivered`)을 "no original execution namespace" 로 거절한다. 단계는 입력을 담으니 host 가 record 하나로 복원해 답을 도메인 검증할 수 있다. 분류 함수를 하나로 합쳐 새 종류가 두 곳 모두 컴파일 오류로 드러나게 한다. L3d 에서 한다.
+- **게시 때 Memory 가 달라졌을 때.** `Program.replay` 가 그사이 바뀐 Memory 때문에 거절하면 사슬을 어떻게 할지는 L4 에서 정한다. 3.9 의 6번이 현재 안이다.
+- **단계 gate 저널의 inventory 검증.** history 원본은 consume pass 마다 inventory 로 gate 사슬을 검증한다(`Commit.validate_inventory`). 단계에는 아직 같은 검증이 없고, `judge` 가 저널을 돌릴 때만 확인한다. L5 에서 단계 기록도 inventory 에 넣는다.
+- **켜진 gate 의 모델 호출.** 시험은 gate 를 끈 상태로 돈다(history 시험과 같다). 켜진 gate 가 모델에게 묻는 부분은 단계 경로도 history 경로도 시험이 거치지 않는다.
+
+### 3.9 하강에서 게시까지 정한 것 (2026-10-28)
+
+L3e 이후를 쓰려고 `consume_one`, `Commit`, `Source_lock` 코드를 읽고 정했다. 3.1 의 트리거를 그대로 쓴다. 아직 구현한 것은 없다.
+
+1. **하강 후보.** 아래를 모두 만족하는 원본만 하강한다. 하나라도 아니면 지금처럼 거절로 끝나고 같은 범위를 다시 고른다.
+   - 호스트가 실행 단계의 거절을 보관했다(`Rejected`).
+   - 범위가 한 턴이다. 원본의 `extent` 가 `To_first_cut_point` 이고, 출처가 atom 범위 하나(`Checkpoint_only`)이거나 공식 턴 하나(`Official_only`)다. `consume_one` 은 실패한 다음 pass 에서 가장 오래된 한 턴만 읽는다(`durable_consumer.ml` 의 "A narrowed round reads the oldest turn only"). 처음부터 한 턴이던 범위는 한 pass 늦게 하강한다. 그 한 번은 worker 가 모델을 부르기 전에 내는 frame 거절이거나 provider 의 거절 한 번이다.
+   - 거절 증거가 3.1 의 크기 거절이다(`Request.refusal_evidence` 와 `may_descend_messages`).
+   - 범위에 메시지가 있다.
+   - 범위의 Memory 영수증이 아직 없다(`Commit.receipt_state` 가 거짓).
+2. **후보 원본은 사슬이 끝날 때까지 frontier 다.** 지금은 `Rejected` 원본이 `Settled` 로 분류되어 다음 pass 에 보관소로 옮겨진다. 후보는 옮기지 않는다. 단계가 원본을 ID 와 digest 로 가리키기 때문이다. Memory 영수증이 범위를 증명하면 `Settled` 가 되고 지금 방식대로 옮겨진다. Keeper 의 frontier 는 여전히 하나뿐이다.
+3. **게시 확인은 영수증이 한다.** 거절된 원본에 commit 의도 이벤트를 새로 만들지 않는다. `Rejected` 는 끝난 상태이고, history 경로도 최종 증거는 영수증이다(`Commit.publish_with` 의 "실제 영수증이 결정한다"). 영수증이 있으면 위치 이동과 정리만 이어서 한다. 영수증이 없을 때 같은 program 을 다시 써도 되는지는 L4 에서 코드로 확인한다.
+4. **사슬이 멈추면 멈춘 단계 기록만 정리한다.** 앞 단계의 결과는 남는다. 다음 pass 는 그 위치에 새 단계를 만들어 다시 묻는다. pass 당 모델 호출이 하나라서 지금 history 경로의 재시도 비용과 같다. 횟수 상한이나 대기 시간은 두지 않는다. 크기로 거절되어 구멍이 된 단계는 program 의 일부라서 정리하지 않는다.
+5. **단계 기록의 정리.** 게시가 끝난 사슬의 단계는 그 자리에서 정리한다. 범위 원본이 이미 보관소로 옮겨졌거나 없는 단계는 다음 pass 가 정리한다. 날짜는 단계 ID 가 만들어진 날이다(단계 ID 의 nonce 가 uuid v7 이다).
+6. **게시 때 Memory 가 달라졌으면** `Program.replay` 가 거절할 수 있다. 현재 안은 사슬의 단계를 모두 정리하고 지금 Memory 로 처음부터 다시 돌리는 것이다. 모델 호출이 단계 수만큼 다시 든다. 드물다고 보지만 재 보지는 않았다. L4 에서 확정한다.
+7. **사슬의 입력은 원본에서 읽는다.** 입력과 메시지는 원본 캡처의 `Source.input` 이다. 공식 턴의 `sources` 와 구멍은 이 메시지만으로 만든다. atom 범위는 체크포인트 전체가 있어야 `sources` 에 번호를 붙일 수 있는데, 캡처는 체크포인트의 개수와 digest 만 가진다. 그래서 지금 체크포인트를 읽고 `Capture.confirm_sources` 로 원본과 맞는지 확인한 뒤 만든다. 처음 시작할 때의 값은 이렇다. 시작 facts 는 원본 입력의 `current`, transaction 은 새 ID, 이어받는 상태는 없음(Runtime 바닥과 같다), 읽지 못한 메시지는 누적 원장이다. 재시작하면 첫 단계에서 읽는다.
 
 ## 4. 다른 안
 
@@ -168,16 +199,19 @@ L3 을 한 PR 로 쓰지 않고 아래로 나눠 L2(#46568) 위에 쌓는다.
 |---|---|---|
 | L1 | 이 RFC | — |
 | L2 | durable `refusal_report` 가 3.1 의 크기 거절에만 `Smaller_input_may_help`·`provider_input_refusals` 를 싣는다. host 기록이 없는 frame 거절은 final 만으로, 기록이 있는 거절은 실행 영수증의 소진 증거로 판정한다. 바닥은 아직 없다 | 크기 거절과 다른 거절의 보고 차이, 영수증 증거가 없는 `Input_capacity` 는 근거 없음 |
-| L3 | 3.8 의 L3a~L3e. 3.7 에서 고른 방식의 바닥 단계, 앞 단계 연결, inventory·복구 | 단계 사슬 crash·재개, 같은 단계 재호출 없음, 하강은 한 번 |
-| L4 | program 게시, 구멍 영수증, source lock, settle | 실제 worker 와 실제 4 MiB frame 으로 5 MB 메시지 하나가 든 턴: 구멍 하나와 나머지 메시지의 Memory, 위치 이동. `specs/bug-models/LibrarianRead.tla` 의 `NoAtomPassedUnread` 와 맞는지 |
-| L5 | bench `5:5` 측정, RFC status 갱신 | — |
+| L3 | 3.8 의 L3a~L3d. 바닥의 상태기계, Runtime 입구, 단계 request, 단계 owner, 사슬 구동. 부르는 곳이 없다 | 단계 사슬 crash·재개, 같은 단계 재호출 없음, 구멍 보존 |
+| L3e | 하강 후보 판정과 사슬 입력 읽기(3.9 의 1번, 7번). 부르는 곳이 없다 | 크기 거절은 후보. `Invalid_request`, 열린 host 기록, 여러 턴 범위, 영수증이 있는 범위는 후보가 아님. 체크포인트가 원본 출처와 다르면 거절 |
+| L4 | 게시(3.9 의 3번, 5번, 6번). 끝난 사슬의 program 을 Memory 에 쓰고, 영수증에 구멍을 싣고, 위치를 옮기고, 단계 기록을 정리한다. 부르는 곳이 없다 | 구멍 하나와 나머지 메시지의 Memory, 위치 이동, crash 뒤 재개, 영수증이 있을 때 다시 쓰지 않음. `specs/bug-models/LibrarianRead.tla` 의 `NoAtomPassedUnread` 와 맞는지 |
+| L5 | `consume_one` 에 연결(3.9 의 2번, 4번). 후보 원본을 frontier 로 두고 사슬을 돌린다. 단계 기록을 inventory 에 넣는다. bench `5:5` 를 재고 RFC status 를 고친다 | 실제 worker 와 실제 4 MiB frame 으로 5 MB 메시지 하나가 든 턴: 하강은 한 번, 구멍 하나, 나머지 메시지의 Memory, 위치 이동 |
+
+L3e~L5 를 이렇게 나눈 이유는 연결을 마지막에 두려는 것이다. 게시가 없는 채로 `consume_one` 에 연결하면 사슬이 끝나도 쓸 곳이 없다. L3e 와 L4 는 부르는 곳이 없어서 L5 가 들어갈 때까지 동작이 바뀌지 않는다. 스택은 맨 위 PR 로 한 번에 병합한다.
 
 #46397(L3 하드컷)이 capture 와 request 형식을 바꾸므로 L3 이후 층은 그 위에 쌓는다. 바닥 단계는 새 request kind 라서, 그 자체로 하드컷을 하나 더 만들지 않는다.
 
 ## 6. 열린 질문
 
 - **단계 크기.** 정했다(2026-10-28 운영자): 메시지 하나씩. lifecycle RFC 와 같다. 호출 수가 메시지 수이지만 이 경로는 한 턴의 글이 frame 을 넘을 때만 탄다.
-- **absorb gate.** durable 커밋은 제안마다 absorb gate 를 거친다(`Keeper_librarian_absorb_gate`). Runtime 바닥 단계가 gate 를 어떻게 거치는지 코드로 확인하고 같게 한다.
+- **absorb gate.** 정했다. durable 커밋은 제안마다 absorb gate 를 거친다(`Keeper_librarian_absorb_gate`). Runtime 바닥도 단계마다 거친다(`Runtime.infer_memory_step`). 단계 사슬도 단계마다 거친다(3.8, #46607).
 - **공식 턴.** 공식 턴도 같은 바닥을 쓴다(`official_message_floor` 와 같은 범위). 공식 턴의 출처 확인은 trace 행 digest 로 한다.
 - **우선순위.** 1.2절대로 드문 경우다. #46408 뒤 이 경우의 증상은 "그 턴 뒤로 Memory 가 멈추고 매 pass 거절이 기록된다"이다. 정했다(2026-10-28 운영자): #46408 병합 뒤 바로 한다. #46408 은 막음 1까지만 병합하고, 이 RFC 의 스택이 그 위에 쌓인다.
 

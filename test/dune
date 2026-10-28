@@ -2112,6 +2112,11 @@
  (deps ../dashboard/src/api/fixtures/scheduled-automation-lookup-found.json))
 
 (test
+ (name test_dashboard_goals_trust_reads)
+ (modules test_dashboard_goals_trust_reads)
+ (libraries masc_test_deps))
+
+(test
  (name test_server_runtime_bootstrap)
  (modules test_server_runtime_bootstrap)
  (libraries

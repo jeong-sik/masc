@@ -61,6 +61,18 @@ val build_forest :
     once; a missing or unreadable authoritative link source returns [Error]
     instead of projecting an empty association set. *)
 
+val build_forest_with_trust_reader :
+  read_trust:(config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta -> Yojson.Safe.t) ->
+  config:Workspace.config ->
+  goals:Goal_store.goal list ->
+  tasks:Masc_domain.task list ->
+  pending_approvals:Yojson.Safe.t list ->
+  (tree_node list, string) result
+(** {!build_forest} with the runtime trust reader named. [build_forest] reads
+    each Keeper's {!Keeper_runtime_trust_snapshot.snapshot_json}. [read_trust]
+    runs at most once per Keeper, and only for a Keeper that a goal's task is
+    assigned to. *)
+
 (** {1 Per-node JSON renderer} *)
 
 val unlisted_goal_history_of_rows :

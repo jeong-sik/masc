@@ -34,29 +34,38 @@ let is_clean s =
   && not (String.exists (fun c -> is_disallowed_control (Char.code c)) s)
 ;;
 
+let rewrite ~replace_controls s =
+  let len = String.length s in
+  let buf = Buffer.create len in
+  let i = ref 0 in
+  while !i < len do
+    let dec = String.get_utf_8_uchar s !i in
+    if Uchar.utf_decode_is_valid dec
+    then (
+      let u = Uchar.utf_decode_uchar dec in
+      let code = Uchar.to_int u in
+      if replace_controls && code < 0x80 && is_disallowed_control code
+      then Buffer.add_char buf ' '
+      else Buffer.add_utf_8_uchar buf u)
+    else
+      (* Malformed: the decoder reports a U+FFFD decode spanning the maximal
+          invalid subpart; emit one replacement for it. *)
+      Buffer.add_string buf replacement;
+    i := !i + Uchar.utf_decode_length dec
+  done;
+  Buffer.contents buf
+;;
+
 let sanitize s =
   if is_clean s
   then s (* fast path: no allocation *)
-  else (
-    let len = String.length s in
-    let buf = Buffer.create len in
-    let i = ref 0 in
-    while !i < len do
-      let dec = String.get_utf_8_uchar s !i in
-      if Uchar.utf_decode_is_valid dec
-      then (
-        let u = Uchar.utf_decode_uchar dec in
-        let code = Uchar.to_int u in
-        if code < 0x80 && is_disallowed_control code
-        then Buffer.add_char buf ' '
-        else Buffer.add_utf_8_uchar buf u)
-      else
-        (* Malformed: the decoder reports a U+FFFD decode spanning the maximal
-            invalid subpart; emit one replacement for it. *)
-        Buffer.add_string buf replacement;
-      i := !i + Uchar.utf_decode_length dec
-    done;
-    Buffer.contents buf)
+  else rewrite ~replace_controls:true s
+;;
+
+let repair_invalid_utf8 s =
+  if String.is_valid_utf_8 s
+  then s (* fast path: no allocation *)
+  else rewrite ~replace_controls:false s
 ;;
 
 (* === Inline tests === *)
@@ -164,3 +173,16 @@ let%test "NUL replaced with space" = sanitize "ab\x00cd" = "ab cd"
 let%test "BEL replaced with space" = sanitize "x\x07y" = "x y"
 let%test "DEL replaced with space" = sanitize "a\x7Fb" = "a b"
 let%test "mixed control chars" = sanitize "\x01hello\x00\nworld\x1F" = " hello \nworld "
+
+let%test "repair keeps control characters" =
+  repair_invalid_utf8 "a\x1b[0m\x00b" == "a\x1b[0m\x00b"
+;;
+
+let%test "repair replaces only the malformed bytes" =
+  (* A line cut inside a Korean syllable, then control characters. *)
+  repair_invalid_utf8 "\xEB\xA1\x9C\xEC\x9D\n\x1b" = "\xEB\xA1\x9C" ^ replacement ^ "\n\x1b"
+;;
+
+let%test "repair output is valid utf8" =
+  is_valid (repair_invalid_utf8 "ok\xFF\xE2\x80")
+;;

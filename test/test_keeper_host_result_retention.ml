@@ -104,6 +104,25 @@ let test_ordinary_tool_acknowledges_only_frozen_physical_writes () = with_worksp
   check bool "late originals retain complete returned bytes" true
     (String_util.contains_substring (String.concat "" (Outbox.developer_context pending)) marker))
 
+(* The Read of a file whose line was cut inside a Korean syllable: the tool's
+   bytes are not UTF-8, the receipt is JSON, and [load] repairs on read. *)
+let test_cut_multibyte_result_is_retained_and_sendable () = with_workspace (fun base_path ->
+  let cut = "\xEB\xA1\x9C\xEC\x9D" in
+  let terminal_error = ref None in
+  Eio.Switch.run (fun result_scope ->
+    let tool, _ = project_with_producer ~result_scope:(Some result_scope)
+      ~base_path ~stop:None ~terminal_error (fun _ ->
+        Ok {Agent_core.Types.content=marker ^ cut;
+            content_blocks=Some [Agent_core.Types.Text cut];_meta=None}) in
+    let sent = tool.call ~call_id:"cut-read" (`Assoc []) in
+    check bool "the string sent to the client is valid UTF-8" true
+      (String.is_valid_utf_8 sent.content);
+    check bool "the sent original keeps its physical-write token" true
+      (Option.is_some sent.on_response_sent));
+  check (option string) "retention reports no failure" None !terminal_error;
+  check int "the original is retained and the outbox still loads" 1
+    (List.length (Outbox.receipt_ids (load base_path))))
+
 let test_disconnect_before_write_retains_ordinary_original () = with_workspace (fun base_path ->
   Eio.Switch.run (fun result_scope ->
     let tool, producer = project_with_producer ~result_scope:(Some result_scope)
@@ -323,6 +342,7 @@ let () = run "Original official-client host result retention"
   ["durable host stop",[
     test_case "typed stop retains original before transport continuation" `Quick test_stop_retains_before_transport_return;
     test_case "ordinary completion ACKs only frozen physical writes" `Quick test_ordinary_tool_acknowledges_only_frozen_physical_writes;
+    test_case "cut multibyte result is retained and sendable" `Quick test_cut_multibyte_result_is_retained_and_sendable;
     test_case "disconnect before write preserves ordinary original" `Quick test_disconnect_before_write_retains_ordinary_original;
     test_case "original is retained before later post-hook failure" `Quick test_post_hook_failure_preserves_original_before_substitution;
     test_case "retention failure prevents safe consumption claim" `Quick test_retention_failure_cannot_claim_safe_consumption;

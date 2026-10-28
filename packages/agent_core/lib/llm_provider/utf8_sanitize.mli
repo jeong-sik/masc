@@ -22,3 +22,9 @@
     @since 0.139.0 — UTF-8 validation delegated to the Stdlib decoder *)
 
 val sanitize : string -> string
+
+val repair_invalid_utf8 : string -> string
+(** Replace only invalid UTF-8 bytes with U+FFFD. Valid UTF-8 is returned
+    unchanged, control characters included. Use it where bytes must become
+    JSON-safe text but the caller does not want {!sanitize}'s control
+    character rewrite. *)

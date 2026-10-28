@@ -1,3 +1,14 @@
+(library
+ (name rtev_span_lib)
+ (wrapped false)
+ (modules rtev_span))
+
 (executables
  (names rtev_watch rtev_fibers)
- (libraries runtime_events eio.runtime_events unix))
+ (modules rtev_watch rtev_fibers)
+ (libraries rtev_span_lib runtime_events eio.runtime_events unix))
+
+(test
+ (name test_rtev_span)
+ (modules test_rtev_span)
+ (libraries alcotest rtev_span_lib))

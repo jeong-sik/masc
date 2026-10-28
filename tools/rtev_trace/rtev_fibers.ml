@@ -35,19 +35,16 @@ type dstate = {
 
 let keep_ns = 1_000_000L
 
-(* One traced section ([Eio.Private.Trace.with_span]): masc names every pool
-   job this way (RFC-0474 L4c). [run_ns] is the time the section's fibers ran
-   on their domain, including fibers created inside it; [waits] is the time
-   they spent between suspending and running again, by suspend reason, so a
-   job's wall time splits into running, waiting on something, and waiting for
-   the domain. *)
-type span = {
+(* One traced section; see {!Rtev_span}. [run_ns] and [waits] split a job's
+   wall time into running, waiting on something, and waiting for the domain. *)
+type span = Rtev_span.span = {
   span_name : string;
   span_domain : int;
   enter_ns : int64;
   mutable exit_ns : int64 option;
   mutable run_ns : int64;
   waits : (string, int64) Hashtbl.t;
+  parent : span option;
 }
 
 let counted_gc_phase name =
@@ -118,8 +115,7 @@ let () =
      switches ([both], [with_open_in], [Buf_write.with_flow]) later, so the
      first name is the code and the newest is what the fiber was doing. *)
   let opened_first : (int, string) Hashtbl.t = Hashtbl.create 4096 in
-  let own_spans : (int, span list) Hashtbl.t = Hashtbl.create 1024 in
-  let inherited_span : (int, span) Hashtbl.t = Hashtbl.create 4096 in
+  let book = Rtev_span.create () in
   let suspended_at : (int, string * int64) Hashtbl.t = Hashtbl.create 4096 in
   let finished_spans = ref [] in
   (* Locks: [Try_get] then [Get] when a fiber waits for one, [Get] alone when
@@ -154,17 +150,8 @@ let () =
     let c, t, m = Option.value ~default:(0, 0L, 0L) (Hashtbl.find_opt table key) in
     Hashtbl.replace table key (c + 1, Int64.add t dur, max m dur)
   in
-  let open_span sp = Option.is_none sp.exit_ns in
-  let active_span fiber =
-    match Hashtbl.find_opt own_spans fiber with
-    | Some (sp :: _) -> Some sp
-    | Some [] | None ->
-      (match Hashtbl.find_opt inherited_span fiber with
-       | Some sp when open_span sp -> Some sp
-       | Some _ | None -> None)
-  in
   let span_label fiber =
-    match active_span fiber with Some sp -> sp.span_name | None -> "(no job)"
+    match Rtev_span.active book fiber with Some sp -> sp.span_name | None -> "(no job)"
   in
   let lost = ref 0 in
   let close d ts ended_by =
@@ -174,9 +161,7 @@ let () =
     | Some (fiber, start_ns, resumed_from) ->
       s.cur <- None;
       let dur = Int64.sub ts start_ns in
-      (match active_span fiber with
-       | Some sp -> sp.run_ns <- Int64.add sp.run_ns dur
-       | None -> ());
+      Rtev_span.ran book ~fiber ~dur;
       s.run_count <- s.run_count + 1;
       s.run_total_ns <- Int64.add s.run_total_ns dur;
       if Int64.compare dur s.run_max_ns > 0 then s.run_max_ns <- dur;
@@ -202,11 +187,7 @@ let () =
       (match Hashtbl.find_opt suspended_at id with
        | Some (reason, since) ->
          Hashtbl.remove suspended_at id;
-         (match active_span id with
-          | Some sp ->
-            let prior = Option.value ~default:0L (Hashtbl.find_opt sp.waits reason) in
-            Hashtbl.replace sp.waits reason (Int64.add prior (Int64.sub ts since))
-          | None -> ())
+         Rtev_span.waited book ~fiber:id ~reason ~dur:(Int64.sub ts since)
        | None -> ());
       let resumed_from =
         Option.value ~default:"(first run)" (Hashtbl.find_opt last_reason id)
@@ -237,35 +218,19 @@ let () =
       (match (state d).cur with
        | Some (creator, _, _) ->
          Hashtbl.replace created_by id creator;
-         (match active_span creator with
-          | Some sp -> Hashtbl.replace inherited_span id sp
-          | None -> ())
+         Rtev_span.inherit_from book ~creator ~child:id
        | None -> ())
     | `Enter_span name ->
       (match (state d).cur with
        | Some (fiber, start_ns, _) ->
-         (* The running segment began before the section: count only the part
-            after [ts] by starting below zero; [close] adds the whole segment. *)
-         let sp =
-           { span_name = name; span_domain = d; enter_ns = ts; exit_ns = None;
-             run_ns = Int64.neg (Int64.sub ts start_ns); waits = Hashtbl.create 4 }
-         in
-         let stack = Option.value ~default:[] (Hashtbl.find_opt own_spans fiber) in
-         Hashtbl.replace own_spans fiber (sp :: stack)
+         Rtev_span.enter book ~fiber ~domain:d ~name ~ts ~segment_start:start_ns
        | None -> ())
     | `Exit_span ->
       (match (state d).cur with
        | Some (fiber, start_ns, _) ->
-         (match Hashtbl.find_opt own_spans fiber with
-          | Some (sp :: rest) ->
-            (* The running segment goes on after the section; count its part
-               up to [ts] now, as [close] will not add to a closed section. *)
-            sp.run_ns <- Int64.add sp.run_ns (Int64.sub ts start_ns);
-            sp.exit_ns <- Some ts;
-            finished_spans := sp :: !finished_spans;
-            if rest = [] then Hashtbl.remove own_spans fiber
-            else Hashtbl.replace own_spans fiber rest
-          | Some [] | None -> ())
+         (match Rtev_span.leave book ~fiber ~ts ~segment_start:start_ns with
+          | Some sp -> finished_spans := sp :: !finished_spans
+          | None -> ())
        | None -> ())
     | `Create (id, `Cc ty) ->
       Hashtbl.replace cc_kind id (EE.cc_ty_to_string ty);
@@ -486,7 +451,7 @@ let () =
     |> List.map (fun (reason, ns) -> Printf.sprintf "%s %.0f" reason (ms ns))
     |> String.concat ", "
   in
-  Printf.printf "\ntraced sections (pool jobs) by name: count wall_sum_ms wall_max_ms run_sum_ms run%% top waits_ms\n";
+  Printf.printf "\ntraced sections (pool jobs) by name: count wall_sum_ms wall_max_ms run_sum_ms run_sum/wall%% top waits_ms (sums over fibers; concurrent fibers can pass wall)\n";
   let by_name : (string, int * int64 * int64 * int64 * (string, int64) Hashtbl.t) Hashtbl.t =
     Hashtbl.create 64
   in

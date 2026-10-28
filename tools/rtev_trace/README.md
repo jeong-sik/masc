@@ -48,9 +48,15 @@ scheduler lag for every other fiber on it.
 `Eio.Private.Trace.with_span`; masc opens one per pool job, named after the
 submitting function (RFC-0474 L4c). For each section it counts the time the
 section's fibers ran, including fibers created inside it, and the time they
-spent suspended, by suspend reason, so a job's wall time splits into
-computing and waiting, and into what it waited on. Sections are grouped by
-name and the longest are listed.
+spent suspended, by suspend reason. Sections nest, and an outer section also
+counts the time spent in the sections inside it. Both numbers are sums over
+the section's fibers, not a split of its wall time: a job whose fibers run
+at the same time on several domains, or whose parent waits while a child
+waits on something else, counts the same stretch of wall time more than once,
+so a run or wait can exceed the wall time and `run%` can pass 100. For a job
+that runs one fiber at a time the sums split the wall time into computing
+and waiting, and into what it waited on. Sections are grouped by name and
+the longest are listed.
 
 It also reads the lock events Eio emits (`Try_get`, `Get`, `Put`). Mutexes
 are created at module initialisation, before the tracer attaches, so a lock

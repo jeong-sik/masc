@@ -215,7 +215,7 @@ recall 이 실어 줄 수 있는 기억은 쓰기를 통과한 것뿐이다.
 
 ### 4.6 실패와 기록
 
-- 입력과 응답을 호출 전후에 키퍼별 `memory-recall-evaluations.jsonl` 에 남긴다. `started`, `response_received`, `provider_failed`, `cancelled` 모양은 `memory-selection-evaluations.jsonl` 과 같다. 확률, 확신도, 토큰 사용량, `turn_ref`, 결과 상태와 이유를 적는다. 헌법의 `persist_before_model_call` 이다. 이 파일이 재생 세트가 된다. 요청 전문을 남기면 Keeper 당 하루 약 13MB 다(하루 claim 387MB 를 29명으로 나눈 값). 결정 로그처럼 10MB 에서 회전하게 하고, 층 0 의 재생 세트는 카나리 기간 것을 따로 복사해 둔다. 보존 기간은 층 1b 에서 정한다.
+- 입력과 응답을 호출 전후에 키퍼별 `memory-recall-evaluations.jsonl` 에 남긴다. `started`, `response_received`, `provider_failed`, `cancelled` 모양은 `memory-selection-evaluations.jsonl` 과 같다. 확률, 확신도, 토큰 사용량, `turn_ref`, 결과 상태와 이유를 적는다. 헌법의 `persist_before_model_call` 이다. 이 파일이 재생 세트가 된다. 요청 전문을 남기면 Keeper 당 하루 약 13MB 다(하루 claim 387MB 를 29명으로 나눈 값). 결정 로그처럼 10MB 에서 회전하게 하고, 층 0 의 재생 세트는 카나리 기간 것을 따로 복사해 둔다. 보존 기간은 층 1a 에서 정한다.
 - 턴 기록(`decisions.jsonl` 의 `turn`, `Turn_record`)에는 새 필드를 더하지 않는다. `Turn_record.blocks` 가 블록이 실렸는지를 바이트·digest 와 함께 이미 남긴다(`turn_record.mli`). 평가 기록이 결과와 이유를 갖는다. 둘을 `turn_ref` 로 이어 "기억 없이 판단한 턴"을 센다.
 - 후보 요청이 용량 거절을 받으면 후보를 반으로 나눠 다시 보낸다. 반쪽은 앞쪽부터 차례로 보낸다. 후보 하나짜리 요청이 거절을 받으면 (b)의 결과로 원인을 가른다. (b)가 받아들여졌으면 목적은 한도 안이고 그 claim 이 너무 큰 것이다. 그 후보만 판정하지 못한 것(`too_large`)으로 세고 나머지를 계속 판정한다. (b)도 용량 거절이면 목적이 한도를 넘은 것이라 거기서 멈추고 `unavailable(capacity)` 로 한다. 요청 수는 최악에 2N−1회다. 한도를 넘는 claim 이 없으면 보내기 전에 나눈 조각 수와 같다.
 - Jev 가 일부 후보의 답을 빠뜨리면 그 후보는 판정하지 못한 것으로 센다.
@@ -255,7 +255,7 @@ claim 바이트는 그날 턴을 낸 Keeper 의 현재 사실 바이트를 턴 �
 
 ## 5. 단계
 
-한 층에 PR 하나, 층마다 20k 토큰 이하다.
+한 층에 PR 하나(층 1a 는 둘), 층마다 20k 토큰 이하다.
 
 **층 0 — 측정 하네스와 전제 측정.** 제품 코드를 바꾸지 않는다. `scripts/` 와 시험 디렉터리에 둔다. 실제 Keeper 기억을 밖으로 보내는 측정(1, 3)은 운영자가 이름으로 허용한 Keeper 에만 한다. 허용 목록은 recall 의 `scope = "listed"` 와 같다. `scripts/keeper-recall-jev-probe.py` 는 `--allow-send-for` 로 Keeper 이름을 받고 `excluded_keepers` 에 있는 Keeper 는 거절한다.
 
@@ -277,9 +277,14 @@ claim 바이트는 그날 턴을 낸 Keeper 의 현재 사실 바이트를 턴 �
 7. 연속한 두 턴에서 고른 집합이 같은 비율. 본문 블록을 건너뛸 수 있는 몫이다(§4.4). 같은 입력을 두 번 판정했을 때 집합이 같은 비율을 함께 내서, 판정이 흔들려서 생기는 변화를 따로 본다.
 8. 의견을 요청했지만 답하지 않은 여섯 역할에 다시 묻는다(층 1a 전).
 
-**층 1a — 타입, 스위치, 블록.** 기본 꺼짐이라 동작이 안 바뀐다. 새 블록 id 둘을 더하는 OCaml 자리(`prompt_block_id.ml` 의 타입, `equal`, `to_string`, `of_string`, `all_known`, `cache_rank`, `injected_on_post_tool_round`, `resent_when_held`와 `.mli`, 컨텍스트 조립, 다음 요청 예보, 제출 연결, 공식 클라이언트 전달, TUI 인스펙터)과, 같은 PR 에 넣을 컴파일러 밖 자리(대시보드 `dashboard-turn-records.ts` 의 블록 id 목록과 `memory-inspector.ts`, 손으로 쓴 시험 표 셋)를 함께 바꾼다. `cache_rank` 는 `Temporal_summary` 와 `Operator_note` 를 뒤로 밀어야 한다. 대시보드 화면에서 새 블록이 보이는지 확인한다. 설정 스위치와 닫힌 판정 타입 모듈도 여기에 든다.
+**층 1a — 판정.** 기본 꺼짐이라 동작이 안 바뀐다. 층이 둘이다.
 
-**층 1b — 판정 흐름.** Jev 요청 셋, 실패 규칙, 평가 기록, 지표, 블록 렌더. 운영자가 켜는 기능이라 사용 가이드 1장이 같은 PR 에 들어간다.
+- 1a-1 부품: 닫힌 판정 타입(`decision`, `outcome`, 판정 못 한 이유), 후보 한 줄 만들기, `STATE_BYTES_PER_PIECE` 로 조각 나누기, Jev 요청·응답 코덱(§4.2, §4.3), 결과를 상태 줄 넷으로 줄이는 규칙(§4.4). 순수 함수이고 시험이 같이 간다.
+- 1a-2 흐름: Jev 호출(조각을 동시에 보내기, 거절 뒤 반으로 나누기, 제한 시간, 같은 턴 안 재사용, §4.6), 평가 기록, 지표, `[memory_recall]` 과 `[typesafeai] memory_recall` 스위치, Keeper 별 모드(§4.7).
+
+**층 1b — 싣기.** 새 블록 id 둘과 그 id 를 쓰는 자리 전부, 블록 렌더와 문구, 공식 클라이언트 전달(§4.5), 컨텍스트 조립 연결을 더한다. 블록 id 를 쓰는 OCaml 자리는 `prompt_block_id.ml` 의 타입, `equal`, `to_string`, `of_string`, `all_known`, `cache_rank`, `injected_on_post_tool_round`, `resent_when_held` 와 `.mli`, 컨텍스트 조립, 다음 요청 예보, 제출 연결, 공식 클라이언트 전달, TUI 인스펙터다. 컴파일러 밖 자리는 대시보드 `dashboard-turn-records.ts` 의 블록 id 목록과 `memory-inspector.ts`, 손으로 쓴 시험 표 셋이고 같은 PR 에 넣는다. `cache_rank` 는 `Temporal_summary` 와 `Operator_note` 를 뒤로 밀어야 한다. 대시보드 화면에서 새 블록이 보이는지 확인한다. 운영자가 켜는 기능이라 사용 가이드 1장이 같은 PR 에 들어간다.
+
+층 1a 와 1b 는 한 스택으로 올리고 스택을 통째로 병합한다. 블록 id 는 렌더하는 코드와 같은 층에 넣는다. `lib/types/prompt_block_id.mli` 가 생산자 없는 생성자를 일부러 뺀다고 적기 때문이다. 층 1a 의 호출 흐름을 부르는 곳은 시험과 층 1b 뿐이라서 1a 만 따로 병합하지 않는다.
 
 **층 1c — 카나리.** 런타임이 다른 Keeper 셋(공식 클라이언트 둘 이상, API 하나 이상)에서 켠다. 회사 데이터 Keeper 와 PO 는 뺀다. §7 의 운영 지표를 잰다.
 
@@ -382,7 +387,7 @@ claim 바이트는 그날 턴을 낸 Keeper 의 현재 사실 바이트를 턴 �
 
 1. 이 RFC 와 아래층의 기준선(연구, 증거, 스크립트).
 2. 층 0. 하네스와 전제 측정. 결과를 이 RFC 에 덧붙인다.
-3. 층 1a, 1b, 1c(§5). 사용 가이드 1장은 층 1b 와 같은 PR 에 들어간다(리더가 인용한 규범 `a-dababc7a`). 이 RFC 는 문서 PR 이라 v0.65.0 후보(`940899984fbb`)에 들어가지 않는다.
+3. 층 1a·1b(한 스택), 1c(§5). 사용 가이드 1장은 층 1b 와 같은 PR 에 들어간다(리더가 인용한 규범 `a-dababc7a`). 이 RFC 는 문서 PR 이라 v0.65.0 후보(`940899984fbb`)에 들어가지 않는다.
 4. 층 0 과 1c 의 결과를 이 RFC 에 덧붙인다. 그 값을 보고 층 2 를 정한다.
 
 ## 10. 확신도

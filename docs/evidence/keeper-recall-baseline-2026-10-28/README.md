@@ -1,7 +1,7 @@
 # Keeper memory recall baseline, 2026-10-28
 
 How much Keeper memory recall is used, measured on the live runtime before any
-change. `RFC-keeper-recall-reaches-the-turn`
+change. [RFC-keeper-recall-reaches-the-turn](../../rfc/RFC-keeper-recall-reaches-the-turn.md)
 cites these numbers and re-runs the same script after each layer.
 
 ## What this is

@@ -4,7 +4,7 @@
 - 범위: Keeper 의 기억(Memory OS)이 턴 대화에 닿게 하는 방법. 저장·흡수·교체는 다루지 않는다.
 - 방법: 외부 제품은 공식 문서·공식 저장소·릴리즈 노트를 조사 에이전트가 직접 읽었다. 논문은 arXiv 본문의 표를 확인한 것(본)과 초록만 본 것(초)을 구분했다. 우리 구현은 현재 `origin/main` 의 코드와 라이브 설정·로그를 읽어 셌다. 측정은 [기준선 증거](../evidence/keeper-recall-baseline-2026-10-28/README.md) 에 있다.
 - 확신도: H 는 공식 문서·소스를 직접 읽음, M 은 이슈 보고자 측정이나 간접 근거, L 은 제3자 글이나 추정.
-- 이 문서는 제안이 아니라 조사다. 결정은 `RFC-keeper-recall-reaches-the-turn` 에 있다.
+- 이 문서는 제안이 아니라 조사다. 결정은 [RFC-keeper-recall-reaches-the-turn](../rfc/RFC-keeper-recall-reaches-the-turn.md) 에 있다.
 
 ## 1. 요약
 

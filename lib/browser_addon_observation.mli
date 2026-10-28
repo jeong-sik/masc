@@ -52,7 +52,8 @@ val answers_for : among:Browser_lane.Backend.t list -> Browser_lane.Lane_name.t 
 val lists_usable_clients : among:Browser_lane.Backend.t list -> Browser_lane.Backend.t -> bool
 
 (** What several browser workers published, read as one, with each worker's
-    source: the clients of every worker that {!lists_usable_clients}, and the
+    source: the clients and unavailable backends of every worker that
+    {!lists_usable_clients}, and the
     automation and Stagehand reports of the one worker that serves each, when
     exactly one does and it published; otherwise {!unobserved}. A worker that
     published nothing is [None] and still counts as serving its source. The

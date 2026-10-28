@@ -236,7 +236,7 @@ let scenario mode =
             check bool "retirement exposes no replacement UUID" true (B.connected_clients ()=[]);
             check bool "repeated retirement observes the same receipt" true (dispatch W.Retire=W.Receipt)) in
         let worker () = if mode="ego-conflict" then
-            Ego.run ~env ~owner ~downloads:root {command=ego;space="masc"} work
+            Ego.run ~env ~owner ~downloads:root {command=ego;space=Browser_configuration.Named_space "masc"} work
           else work () in
         let failure=try Live.For_testing.run ~before_command_validation:(fun () ->
           ignore (Eio.Promise.try_resolve validating ())) ~env ~owner ~directory:allocation worker;None with

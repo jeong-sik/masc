@@ -208,16 +208,11 @@ let matching_spaces ~space output =
 (* Do not call taskSpace here: opening by name can create a space or refuse a
    user-owned name. This listing is only evidence for leaving that space alone. *)
 let observe_space_name ~run ~space =
-  let script = String.concat "\n" [
-    "// masc-ego: space.inspect";
-    "const args = " ^ Yojson.Safe.to_string (obj ["name", str space]) ^ ";";
-    "const emit = answer => console.log(" ^ Yojson.Safe.to_string (str result_marker) ^ " + JSON.stringify(answer));";
-    "try {";
+  let script = frame ~step:"space.inspect" ~args:(obj ["name", str space]) [
     "  const spaces = await listTaskSpaces();";
     "  if (!Array.isArray(spaces)) throw new Error('task space listing is not an array');";
     "  const matches = spaces.filter(row => row && row.name === args.name).map(row => ({id: row.id, createdBy: row.createdBy, ownership: row.ownership}));";
-    "  emit({ok: true, value: matches});";
-    "} catch (error) { emit({ok: false, error: String(error && error.message || error)}); }" ] in
+    "  emit({ok: true, value: matches});" ] in
   let inspected = match run ~window_s:read_window_s script with
     | Error failure -> Error (run_failure_message failure)
     | Ok output -> Result.map_error step_failure_message (answer output) in

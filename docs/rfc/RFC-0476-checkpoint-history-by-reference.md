@@ -134,9 +134,15 @@ Keeper 의 agent-core checkpoint 는 저장할 때마다 history 전체를 다�
 
 - 진행 중인 턴의 끝을 고치면 그 메시지 객체만 새로 생긴다(응답 버리기, Text 고치기).
 - 닫힌 턴 중간에 끼우면 그 턴 묶음 하나만 새로 생긴다(`close_open_cycles`).
-- purge 와 history clear 는 고친 턴 묶음만 새로 쓴다.
+- purge 와 history clear 는 고친 턴 묶음만 새로 쓴다. purge 는 내용을 지우려는 운영자 의도라서, 옛 묶음을 가리키는 보관 head 도 함께 지운다.
 
-**참조로 바꾸는 자리.** store 의 encoder 세 곳(§2.1)에서 같은 함수 하나로 한다. 메시지 안의 모든 `Base64` media(`ToolResult.content_blocks` 안 포함)를 blob 으로 옮기고 참조로 바꾼다. 저장 결과(`Saved`)는 바꾼 뒤의 값을 돌려준다. 지금은 바꾸기 전 값을 돌려준다(store.ml:2198).
+**참조로 바꾸는 자리.** media 가 history 에 들어오는 순간 바꾼다. 저장할 때 바꾸면 메모리의 history 는 `Base64`, 다시 읽은 history 는 `Stored` 가 된다. 그러면 같은 대화가 프로세스 안팎에서 다른 모양이 되고, 앞부분 비교가 재시작마다 어긋난다.
+- 들어오는 곳은 다음과 같다. D5 의 큰 모양이면 컴파일러가 나머지를 찾아 준다.
+  - tool 결과(`Tool_projection.to_agent_core_typed_result` 의 `content_blocks`)
+  - 사용자가 첨부한 media(keeper_multimodal_input.ml:625-637, :685-692)
+  - 레인 add-on MCP 의 media(keeper_lane_addon_runtime.ml:15-21)
+  - `keeper_image_read`, 검증 도구의 렌더 페이지
+- store 의 encoder 세 곳(§2.1)은 바꾸지 않는다. `Base64` media 가 오면 typed 오류로 거절한다. 그래서 history 에 `Base64` 가 남아 있으면 저장이 바로 실패해서 드러난다.
 
 **exact ref.** `expected_source_ref` 와 accepted-checkpoints, Gate 의 `canonical_checkpoint_bytes` 는 head 바이트가 된다. head 가 모든 객체 digest 를 담으므로 history 전체를 가리키는 값이다. 비교 비용은 head 크기를 따른다.
 
@@ -164,6 +170,8 @@ Keeper 의 agent-core checkpoint 는 저장할 때마다 history 전체를 다�
 blob 정리는 L1 과 같은 stack 에 들어간다. `Tool_blob_maintenance` 의 인터페이스도 "참조를 저장하는 변경과 같은 변경에서" 등록하라고 요구한다.
 
 - 정리 경로는 head 와 객체를 JSON 으로 해석해서 `Stored` digest 를 모은다. 파일 내용을 문자열로 훑지 않는다.
+- 정리는 서버가 멈춘 상태에서, BasePath lease 를 잡고만 돈다. 지금 `Tool_blob_maintenance` 가 도는 방식이다(배포 사전 점검). checkpoint 객체 정리도 같은 조건에서만 돈다. 그래서 "이미 있으니 안 쓴다"와 "아무도 안 가리키니 지운다"가 같은 시각에 일어나지 않는다.
+- 저장이 "이미 있다"고 판단할 때는 그 파일의 digest 를 검사한다. 크래시로 잘린 파일을 믿지 않는다.
 - 기준점(root)은 다음과 같다.
   - 살아 있는 head
   - 보관 head

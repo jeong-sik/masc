@@ -1673,6 +1673,11 @@
  (libraries alcotest masc.masc_core eio eio_main fmt mtime yojson))
 
 (test
+ (name test_high_water_marks)
+ (modules test_high_water_marks)
+ (libraries alcotest masc.masc_core))
+
+(test
  (name test_executor_pool_ref)
  (modules test_executor_pool_ref)
  (libraries alcotest masc.masc_core eio eio_main))

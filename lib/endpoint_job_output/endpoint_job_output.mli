@@ -4,11 +4,13 @@
     from IDs. EOF is source EOF, never a current regular-file read boundary. *)
 module P = Endpoint_job_protocol
 module L = Endpoint_job_launch
+module R = Endpoint_job_registry
 type t
 type error =
   | Invalid_storage | Storage_unavailable | Source_protocol_error
   | Offset_unavailable | Invalid_range | Interrupted | Capture_failed
   | Codec_error of P.codec_error
+  | Registry_error of R.error
   | Publication_failed of Fs_compat.capability_write_error
   | Recovery_failed of string
 val error_to_string : error -> string
@@ -31,6 +33,18 @@ val start :
 val extent : t -> (P.extent, error) result
 val await_sealed : t -> (seal, error) result
 (** Cancelling this observer does not cancel capture or the child. *)
+val reopen :
+  sw:Eio.Switch.t -> storage:R.storage -> stream:P.stream -> (t, error) result
+(** Reopen only an already sealed original stream through its verified original
+    storage. Strictly validate its private seal, original admission and stream,
+    atomically open no-follow, nonblocking regular seal/spool descriptors,
+    verify the same single-link spool inode, and hash every byte before exposing
+    Sealed. Missing/corrupt data never becomes an empty or growing result.
+    Reads/hash run outside the registry lock; original authority and canonical
+    attachments are revalidated afterward and around subsequent range reads.
+    No capture, process, signal, publication or launch permission is created.
+    [sw] owns this reader's descriptors and must cover result consumption;
+    use a separate reader scope rather than the global registry lifetime. *)
 type chunk = { data : string; extent : P.extent }
 val read : t -> offset:int64 -> max_bytes:int -> (chunk, error) result
 (** Read from the pinned original file descriptor within its observed prefix.
@@ -47,4 +61,11 @@ module For_testing : sig
   (** [after_chunk] runs after each actual file write and before further capture
       or EOF sealing. [on_metadata] observes an actual owner-lock acquisition;
       [Acquired] runs inside that lock before the specified Fs operation. *)
+  val reopen :
+    after_chunk:(unit -> unit) -> after_stat:(leaf:string -> unit) ->
+    sw:Eio.Switch.t -> storage:R.storage ->
+    stream:P.stream -> (t, error) result
+  (** Interleave after hashing an actual original spool chunk, outside any
+      registry lock. [after_stat] runs after the actual initial private leaf
+      stat and before atomic opening. No injected seal, bytes or authority. *)
 end

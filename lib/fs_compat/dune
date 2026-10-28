@@ -47,7 +47,8 @@
   unix
   yojson
   uuidm
-   masc.agent_core.digest))
+   masc.agent_core.digest
+  optint))
 
 (library
  (name fs_compat_test_support)

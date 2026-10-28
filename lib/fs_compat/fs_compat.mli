@@ -287,6 +287,20 @@ val remove_owned_inventory_regular_file
     final ancestor verification; it is not proof that the file remains. The
     enclosing inventory root and this operation are blocking. *)
 
+type owned_reader
+val open_owned_reader :
+  sw:Eio.Switch.t -> parent:Eio.Fs.dir_ty Eio.Path.t -> leaf:string ->
+  (owned_reader, owned_regular_file_read_error) result
+(** Open an existing single-link controller-owned regular leaf using atomic
+    no-follow, nonblocking openat. The canonical owned root is compared with
+    the held parent capability before leaf access and after opening. A newly
+    owned duplicate is registered with [sw] before cancellation can escape;
+    this does not extend any borrowed inventory descriptor's lifetime. *)
+val owned_reader_stat : owned_reader -> Eio.File.Stat.t
+val owned_reader_pread : owned_reader -> offset:int64 -> length:int -> string
+(** Positioned reads of the held descriptor. May return fewer bytes at EOF;
+    I/O/closed-resource errors raise, as for Eio.File. [sw] must cover use. *)
+
 type owned_regular_file_range_digest =
   { content : string
   ; sha256 : string

@@ -1730,6 +1730,69 @@ let remove_owned_inventory_regular_file ~expected root relative =
       end)
 ;;
 
+type owned_reader = Eio_unix.Fd.t
+external owned_reader_pread_unix : Unix.file_descr -> int64 -> int -> string
+  = "caml_masc_owned_reader_pread"
+
+let open_owned_reader ~sw ~parent ~leaf =
+  Eio.Switch.check sw;
+  try
+  let result=Eio.Cancel.protect (fun () ->
+    let unowned=ref None in
+    Fun.protect ~finally:(fun () -> Option.iter Unix.close !unowned) (fun () ->
+      let relative=match owned_relative_path [leaf] with
+        | Ok relative -> relative
+        | Error detail -> invalid_arg detail in
+      let expected=Eio.Path.stat ~follow:false parent in
+      let path=Eio.Path.native_exn parent in
+      let same_root (stat : Unix.stats) = stat.st_kind=Unix.S_DIR
+        && Int64.of_int stat.st_dev=expected.dev && Int64.of_int stat.st_ino=expected.ino
+        && Int64.of_int stat.st_uid=expected.uid && stat.st_perm land 0o7777=expected.perm land 0o7777 in
+      let opened=Eio_unix.run_in_systhread ~label:"owned-reader-open" (fun () ->
+        with_owned_inventory_root path (fun root ->
+          if not (same_root (owned_inventory_root_stat root))
+          then owned_file_error (Filesystem_identity_changed {path})
+          else with_owned_inventory_regular_file ~owner_uid:(Unix.geteuid ()) root relative
+            (fun ~file ~parent:_ ~stat:_ ->
+              let fd=Unix.dup ~cloexec:true file in unowned:=Some fd;fd))) in
+      match opened with
+      | Error _ as error -> error
+      | Ok fd ->
+        let current=Eio.Path.stat ~follow:false parent in
+        if current.kind<>`Directory || current.dev<>expected.dev || current.ino<>expected.ino
+            || current.uid<>expected.uid || current.perm<>expected.perm
+        then owned_file_error (Filesystem_identity_changed {path})
+        else (
+          Eio.Switch.check sw;
+          let reader=Eio_unix.Fd.of_unix ~sw ~blocking:false ~seekable:true ~close_unix:true fd in
+          unowned:=None;
+          Ok reader))) in
+  Eio.Switch.check sw;
+  result
+  with
+  | Eio.Cancel.Cancelled _ as cancellation -> reraise_current cancellation
+  | (Eio.Io _ | Unix.Unix_error _ | Sys_error _ | Invalid_argument _) as cause ->
+    owned_file_operation_error ~path:leaf Read_contents cause
+;;
+
+let owned_reader_stat reader =
+  let stat=Eio_unix.run_in_systhread ~label:"owned-reader-stat" (fun () ->
+    Eio_unix.Fd.use_exn "owned reader stat" reader Unix.LargeFile.fstat) in
+  let kind=match stat.st_kind with
+    | Unix.S_REG -> `Regular_file | S_DIR -> `Directory | S_CHR -> `Character_special
+    | S_BLK -> `Block_device | S_LNK -> `Symbolic_link | S_FIFO -> `Fifo | S_SOCK -> `Socket in
+  { Eio.File.Stat.dev=Int64.of_int stat.st_dev;ino=Int64.of_int stat.st_ino;kind;
+    perm=stat.st_perm;nlink=Int64.of_int stat.st_nlink;uid=Int64.of_int stat.st_uid;
+    gid=Int64.of_int stat.st_gid;rdev=Int64.of_int stat.st_rdev;
+    size=Optint.Int63.of_int64 stat.st_size;atime=stat.st_atime;mtime=stat.st_mtime;ctime=stat.st_ctime }
+;;
+
+let owned_reader_pread reader ~offset ~length =
+  if offset<0L || length<0 || length>Sys.max_string_length then invalid_arg "owned reader range";
+  Eio_unix.run_in_systhread ~label:"owned-reader-pread" (fun () ->
+    Eio_unix.Fd.use_exn "owned reader pread" reader (fun fd -> owned_reader_pread_unix fd offset length))
+;;
+
 let owned_inventory_entry_digest root relative =
   let path = owned_inventory_path root relative in
   with_owned_inventory_entry root path (fun fd stat _parent ->

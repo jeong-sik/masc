@@ -340,8 +340,13 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, all
           publish({ key: documentKey, kind: 'loaded', data: { kind: 'operator', document, workspace, shareObservation }, receivedAt: Date.now() })
         }
       } catch (error) {
-        if (error instanceof ArtifactWorkspaceReadUnattested) publishUnbound(error.document)
-        else if (!boundApplied) readFailed(error)
+        if (error instanceof ArtifactWorkspaceReadUnattested) {
+          const previous = documentRef.current
+          const alreadyBound = previous?.key === documentKey && previous.kind !== 'public-loading'
+            && previous.data?.kind === 'operator' && previous.data.workspace !== undefined
+          if (alreadyBound) readFailed(error)
+          else publishUnbound(error.document)
+        } else if (!boundApplied) readFailed(error)
       }
     }, error => { if (priorBound) readFailed(error) })
     return () => { controller.abort(); notifyShareWaiters(true); unsubscribeRoute(); unsubscribeWorkspace(); unsubscribeCredential() }

@@ -477,6 +477,23 @@ it('keeps the document read-only if the workspace receipt is missing', async () 
   expect(post).not.toHaveBeenCalled()
 })
 
+it('settles a missing workspace receipt on refresh and retains the previous bound document', async () => {
+  const normal = vi.mocked(getWithResponse).getMockImplementation()!
+  let reads = 0
+  vi.mocked(getWithResponse).mockImplementation((path, options) => ++reads === 2
+    ? Promise.resolve({ data: document(first, 'unattested replacement'), headers: new Headers() })
+    : normal(path, options))
+  select(firstId); render(html`<${ArtifactsSurface} />`)
+  const reader = within(await screen.findByRole('dialog'))
+  await reader.findByRole('button', { name: '문서 편집' })
+  fireEvent.click(screen.getByRole('button', { name: '새로고침' }))
+  await waitFor(() => expect(screen.getByRole('dialog').textContent).toContain('문서 조회의 작업 공간 확인 응답이 없어'))
+  expect(reader.getByText('original body')).toBeTruthy()
+  expect(reader.queryByText('unattested replacement')).toBeNull()
+  expect((reader.getByRole('button', { name: '문서 편집' }) as HTMLButtonElement).disabled).toBe(true)
+  expect((reader.getByRole('button', { name: '외부 공유 상태 미확인' }) as HTMLButtonElement).disabled).toBe(true)
+})
+
 it('opens the document read-only while workspace identity is delayed', async () => {
   const health = pending()
   vi.mocked(get).mockImplementation(path => path === '/health?full=1' ? health.promise

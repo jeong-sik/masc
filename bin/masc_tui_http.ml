@@ -1591,7 +1591,9 @@ let fetch_repository_activity ~(host : string) ~(port : int) ~repo_id ~window_ho
            (Yojson.Safe.Util.member "data" json)
        | exception Yojson.Json_error detail -> Error ("repository activity was not JSON: " ^ detail))
 
-let fetch_keeper_file_changes ~(host : string) ~(port : int)
+(* The caller binds the expected workspace before the actual GET. A locally
+   current request epoch alone cannot identify the server that answered. *)
+let read_keeper_file_changes ~send ~(host : string) ~(port : int)
     ~(keeper_name : string) ~(window_hours : float) :
     (Masc.Tui_decode.file_change_snapshot, string) result =
   let path =
@@ -1599,16 +1601,28 @@ let fetch_keeper_file_changes ~(host : string) ~(port : int)
       (percent_encode_path_segment keeper_name)
       (Float.max 0.0 window_hours)
   in
-  match http_get ~host ~port ~path with
-  | Error detail -> Error detail
-  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
+  match Masc_tui_workspace_read.read_bound_response ~send ~host ~port ~path with
+  | Error (Transport_failed detail | Workspace_refused detail) -> Error detail
+  | Ok { status; body; _ } when not (Masc.Tui_decode.is_success_http_status status)
     ->
       Error (named_refusal "file changes" ~status ~body)
-  | Ok (_, body) -> (
+  | Ok { body; _ } -> (
       match Yojson.Safe.from_string body with
-      | json -> Masc.Tui_decode.decode_file_change_snapshot json
+      | json ->
+          Result.bind (Masc.Tui_decode.decode_file_change_snapshot json)
+            (fun snapshot ->
+              if String.equal snapshot.Masc.Tui_decode.fcs_keeper keeper_name
+              then Ok snapshot
+              else Error (Printf.sprintf
+                "file-change response named keeper %s, expected %s"
+                snapshot.fcs_keeper keeper_name))
       | exception Yojson.Json_error detail ->
           Error ("file changes were not JSON: " ^ detail))
+
+let fetch_keeper_file_changes ~(host : string) ~(port : int)
+    ~(keeper_name : string) ~(window_hours : float) =
+  read_keeper_file_changes ~host ~port ~keeper_name ~window_hours
+    ~send:(fun ~path -> http_get_response ~host ~port ~path ~headers:[])
 
 (** Open the MCP session the observer feed is registered under.
 

@@ -24,6 +24,19 @@ val register :
     for a writer: masc_server depends on masc, and the reverse edge would
     point the notification vocabulary at the transport. *)
 
+val register_after_ack :
+  subscription_id:Yojson.Safe.t ->
+  filter:Mcp_transport_protocol.subscription_filter ->
+  send:(Yojson.Safe.t -> bool) ->
+  acknowledge:(unit -> bool) ->
+  token option
+(** Register before acknowledging while serializing delivery for this one
+    subscription. The acknowledgement is first and no event can slip through
+    the gap; a failed acknowledgement leaves no registration. The registry's
+    shared mutex is not held while writing to a transport. A blocked write
+    remains cancellable and cleanup removes the pending entry. Callbacks must
+    not synchronously unregister their own subscription. *)
+
 val unregister : token -> unit
 (** Idempotent: the transport unregisters on close and a failed send retires
     the same entry, and neither needs to know about the other. *)
@@ -56,7 +69,7 @@ val acknowledgement :
   Mcp_transport_protocol.subscription_filter ->
   Yojson.Safe.t
 (** The first message on a subscription, which no notification may precede —
-    so send it before {!register}. *)
+    use it with {!register_after_ack}. *)
 
 val graceful_closure : subscription_id:Yojson.Safe.t -> Yojson.Safe.t
 (** The JSON-RPC response to the long-lived request, marking a clean end. A

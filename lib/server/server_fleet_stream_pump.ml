@@ -1,10 +1,16 @@
 type ending =
   | Client_gone
   | Fell_behind
+  | Stalled
 
 type wake =
   | Event of Fleet_stream.event
   | Ping
+
+(* How one [send] ended: it answered, or the time allowed for it ran out. *)
+type delivery =
+  | Sent of bool
+  | Not_accepted_in_time
 
 let keepalive_frame = ": keepalive\n\n"
 
@@ -13,7 +19,7 @@ let frame event =
   Sse_wire.format_event_yojson ~id:revision (Fleet_stream.encode event)
 ;;
 
-let run ~subscribe ~clock ~ping_interval_s ~max_queued_events ~send =
+let run ~subscribe ~clock ~ping_interval_s ~stalled_after_s ~max_queued_events ~send =
   let queue = Eio.Stream.create max_queued_events in
   let behind = Atomic.make false in
   (* The hub calls this with its lock held and expects it to return at once, so
@@ -24,6 +30,15 @@ let run ~subscribe ~clock ~ping_interval_s ~max_queued_events ~send =
     if Eio.Stream.length queue >= max_queued_events
     then Atomic.set behind true
     else Eio.Stream.add queue event
+  in
+  (* A [send] that answers just as the time runs out has answered:
+     [Watched_work.run] keeps the work's outcome. *)
+  let deliver data =
+    Watched_work.run
+      ~watcher:(fun () ->
+        Eio.Time.sleep clock stalled_after_s;
+        Not_accepted_in_time)
+      (fun () -> Sent (send data))
   in
   let rec serve () =
     if Atomic.get behind
@@ -38,8 +53,12 @@ let run ~subscribe ~clock ~ping_interval_s ~max_queued_events ~send =
             Ping)
           (fun () -> Event (Eio.Stream.take queue))
       with
-      | Event event -> if send (frame event) then serve () else Client_gone
-      | Ping -> if send keepalive_frame then serve () else Client_gone)
+      | Event event -> after_send (deliver (frame event))
+      | Ping -> after_send (deliver keepalive_frame))
+  and after_send = function
+    | Sent true -> serve ()
+    | Sent false -> Client_gone
+    | Not_accepted_in_time -> Stalled
   in
   Eio.Switch.run (fun sw ->
     (* Nothing between subscribing and registering the removal can be

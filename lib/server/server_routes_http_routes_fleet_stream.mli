@@ -19,12 +19,13 @@ val serve :
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   subscribe:(on_event:(Fleet_stream.event -> unit) -> unit -> unit) ->
   ping_interval_s:float ->
+  stalled_after_s:float ->
   max_queued_events:int ->
   Httpun.Reqd.t ->
   unit
 (** Answers one request with the stream: the response head, then what
-    {!Server_fleet_stream_pump.run} sends until the client is gone or falls
-    behind, and the end of the response. Returns once the stream runs in [sw].
+    {!Server_fleet_stream_pump.run} sends until the client is gone, falls
+    behind or stops accepting frames, and the end of the response. Returns once the stream runs in [sw].
     Authorization is the caller's: {!add_routes} puts this behind it, with the
     server's hub and limits. Exposed so tests and the bench drive the code the
     server runs, over a real socket. *)

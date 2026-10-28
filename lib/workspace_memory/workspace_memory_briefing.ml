@@ -19,7 +19,7 @@ type batch =
   }
 type preparation = Unchanged | Cleanup of t | Prepared of batch
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let empty = { published = None; building = None }
 let is_empty t = match t.published, t.building with
   | None, None -> true

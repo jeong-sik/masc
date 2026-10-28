@@ -10,7 +10,7 @@ type t =
   ; identity : string
   }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let rec canonical = function
   | `Assoc fields -> `Assoc (List.map (fun (key, value) -> key, canonical value) fields

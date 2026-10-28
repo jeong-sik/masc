@@ -21,7 +21,7 @@ let validate status =
   if valid then Ok () else Error "Task observation has invalid owner or verification identity"
 
 let of_yojson json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* status = task_status_of_yojson json in
   let metadata = to_yojson status in
   let* () = match json, metadata with

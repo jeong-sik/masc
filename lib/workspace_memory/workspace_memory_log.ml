@@ -38,7 +38,7 @@ type recovery_report = {
   last_committed_seq : seq;
 }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let error_to_string = function
   | Unknown_record_kind kind ->

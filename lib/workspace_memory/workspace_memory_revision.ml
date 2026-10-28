@@ -1,7 +1,7 @@
 module Ledger_state = Workspace_memory_ledger
 module Briefing_state = Workspace_memory_briefing
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type ledger = string
 type briefing = string

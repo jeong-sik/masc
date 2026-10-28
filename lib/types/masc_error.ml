@@ -85,7 +85,7 @@ let rate_limit_config_of_yojson json =
   in
   match json with
   | `Assoc fields ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* per_minute = int_field fields "per_minute" default_rate_limit.per_minute in
     let* burst_allowed =
       int_field fields "burst_allowed" default_rate_limit.burst_allowed

@@ -19,7 +19,7 @@ type snapshot = {
   expected_tool_calls : tool_call list;
 }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let errorf fmt =
   Printf.ksprintf (fun msg -> Error msg) fmt

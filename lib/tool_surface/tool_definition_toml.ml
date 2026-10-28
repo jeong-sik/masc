@@ -1,7 +1,7 @@
 (* See tool_definition_toml.mli. *)
 
 let sprintf = Printf.sprintf
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* ── Closed vocabularies ──────────────────────────────────────────────── *)
 

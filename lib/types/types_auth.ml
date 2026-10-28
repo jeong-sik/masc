@@ -152,7 +152,7 @@ let require_credential_optional_string fields name =
       (Printf.sprintf "agent_credential_of_yojson: missing required field %S" name)
 
 let agent_credential_of_yojson json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* fields = validate_agent_credential_fields json in
   let* id = require_credential_optional_string fields "id" in
   let* agent_id = require_credential_optional_string fields "agent_id" in
@@ -288,7 +288,7 @@ let validate_token_expiry_hours value =
 ;;
 
 let auth_config_of_yojson json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* fields = validate_auth_config_fields json in
   let* enabled = auth_config_bool fields "enabled" ~default:true in
   let* workspace_secret_hash = auth_config_optional_string fields "workspace_secret_hash" in

@@ -8,7 +8,7 @@ let default_evidence_path ~repo_root =
 
 let errorf fmt = Printf.ksprintf (fun s -> Error s) fmt
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let rec map_m f = function
   | [] -> Ok []

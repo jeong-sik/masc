@@ -6,7 +6,7 @@ module Decision = Workspace_memory_decision
 module Owner = Lane_addon_tool_request_owner
 module Progress = Lane_addon_request_progress
 module Exact = Lane_addon_exact
-let ( let* ) = Result.bind
+open Result.Syntax
 module Request_id = struct
   type t = string
   let fresh = Random_id.uuid_v7

@@ -104,7 +104,7 @@ type task_inspection =
   | Task_deletion_recorded of Masc_domain.task_deletion_receipt
 
 let read_task_inspection_r config ~task_id =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let primary () =
     let* backlog=read_backlog_r config in
     match List.filter (fun (task : task) -> task.id=task_id) backlog.tasks with
@@ -131,7 +131,7 @@ let read_task_inspection_r config ~task_id =
            | _ -> Error "backlog contains duplicate requested Task deletion records")
 
 let read_task_status_r config ~task_id =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let primary () =
     let* backlog = read_backlog_r config in
     match List.filter (fun (task : task) -> task.id = task_id) backlog.tasks with

@@ -12,7 +12,7 @@ type context = {
   sw : Eio.Switch.t;
 }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let ok ~tool_name ~start_time data = Tool_result.make_ok ~tool_name ~start_time ~data ()
 

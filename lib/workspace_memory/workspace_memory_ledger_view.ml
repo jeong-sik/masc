@@ -2,7 +2,7 @@ module Ledger = Workspace_memory_ledger
 module Context = Workspace_memory_context
 module String_map = Map.Make (String)
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* Both the full view and the summary must bind their payload to the observed
    descriptor. An atomic writer may replace the file between these reads. *)

@@ -57,7 +57,7 @@ let decode_error_to_string { path; reason } =
   let rendered = String.concat "" (List.map decode_step_to_string path) in
   Printf.sprintf "entry%s: %s" rendered (decode_reason_to_string reason)
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let assoc_opt key fields =
   Option.map snd (List.find_opt (fun (k, _) -> String.equal k key) fields)

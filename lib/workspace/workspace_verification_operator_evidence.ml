@@ -125,7 +125,7 @@ let access_to_yojson ~base_path = function
 let file_to_yojson ~base_path ~index = function
   | Store.Evidence_unavailable _ -> Error "The retained evidence is unavailable"
   | Store.Evidence_available { request; items } ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let text ~name content =
       Ok (name, Base64.encode_string content, String.length content,
         Agent_core_sha256.(to_hex (digest_string content))) in

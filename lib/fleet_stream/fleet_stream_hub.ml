@@ -1,4 +1,9 @@
 type state =
+  | Unavailable of
+      { revision : Fleet_stream.Revision.t
+      ; degradation : Fleet_stream.degradation
+      }
+  | Measured of
   { revision : Fleet_stream.Revision.t
   ; measured_at : float
   ; fleet : Fleet_stream.fleet
@@ -28,7 +33,9 @@ let create ~on_subscriber_error =
 ;;
 
 let snapshot_of_state (state : state) : Fleet_stream.event =
-  Snapshot
+  match state with
+  | Unavailable { revision; degradation } -> Unavailable_snapshot { revision; degradation }
+  | Measured state -> Snapshot
     { revision = state.revision
     ; measured_at = state.measured_at
     ; fleet = state.fleet
@@ -69,30 +76,38 @@ let observe t ~measured_at fleet =
     match t.state with
     | None ->
       let state =
-        { revision = Fleet_stream.Revision.first; measured_at; fleet; degraded = None }
+        Measured { revision = Fleet_stream.Revision.first; measured_at; fleet; degraded = None }
       in
       t.state <- Some state;
       deliver t (snapshot_of_state state)
-    | Some previous ->
+    | Some (Unavailable previous) ->
+      let revision = Fleet_stream.Revision.next previous.revision in
+      t.state <- Some (Measured { revision; measured_at; fleet; degraded = None });
+      deliver t (Changed { revision; measured_at; fleet })
+    | Some (Measured previous) ->
       (match previous.degraded with
        | None when Fleet_stream.equal_fleet previous.fleet fleet ->
-         t.state <- Some { previous with measured_at };
+         t.state <- Some (Measured { previous with measured_at });
          []
        | None | Some _ ->
          let revision = Fleet_stream.Revision.next previous.revision in
-         t.state <- Some { revision; measured_at; fleet; degraded = None };
+         t.state <- Some (Measured { revision; measured_at; fleet; degraded = None });
          deliver t (Changed { revision; measured_at; fleet })))
 ;;
 
 let note_degraded t ~since reason =
   locked t (fun () ->
     match t.state with
-    | None -> []
-    | Some { degraded = Some _; _ } -> []
-    | Some ({ degraded = None; _ } as previous) ->
+    | None ->
+      let revision = Fleet_stream.Revision.first in
+      let degradation = { Fleet_stream.since; reason } in
+      t.state <- Some (Unavailable { revision; degradation });
+      deliver t (Unavailable_snapshot { revision; degradation })
+    | Some (Unavailable _ | Measured { degraded = Some _; _ }) -> []
+    | Some (Measured ({ degraded = None; _ } as previous)) ->
       let revision = Fleet_stream.Revision.next previous.revision in
       let degradation = { Fleet_stream.since; reason } in
-      t.state <- Some { previous with revision; degraded = Some degradation };
+      t.state <- Some (Measured { previous with revision; degraded = Some degradation });
       deliver t (Degraded { revision; degradation }))
 ;;
 

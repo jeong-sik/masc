@@ -83,7 +83,7 @@ let replacing key value pairs =
 
 let is_unreadable = function
   | Error (Section.Unreadable _) -> true
-  | Error (Section.Not_measured _) | Ok _ -> false
+  | Error (Section.Not_measured _ | Section.Scan_failed _) | Ok _ -> false
 ;;
 
 let fleet_t = testable (fun fmt _ -> Format.pp_print_string fmt "<fleet>") F.equal_fleet
@@ -169,22 +169,36 @@ let test_names_come_out_sorted_without_duplicates () =
 ;;
 
 let test_the_placeholder_is_not_a_reading () =
-  let placeholder status extra : (string * Yojson.Safe.t) list =
+  let placeholder ?(timed_out = false) status extra : (string * Yojson.Safe.t) list =
     [ "keeper_fleet_safety"
-    , `Assoc ([ "status", `String status; "component_timed_out", `Bool false ] @ extra)
+    , `Assoc ([ "status", `String status; "component_timed_out", `Bool timed_out ] @ extra)
     ]
   in
   check bool "warming" true
     (match Section.fleet_of_health_fields (placeholder "warming" []) with
      | Error (Section.Not_measured { status }) -> String.equal status "warming"
-     | Error (Section.Unreadable _) | Ok _ -> false);
-  check bool "a refresh that failed is still not a reading" true
+     | Error (Section.Scan_failed _ | Section.Unreadable _) | Ok _ -> false);
+  check bool "section error is a failed scan" true
     (match
        Section.fleet_of_health_fields
          (placeholder "error" [ "error", `String "scan raised" ])
      with
-     | Error (Section.Not_measured { status }) -> String.equal status "error"
-     | Error (Section.Unreadable _) | Ok _ -> false)
+     | Error (Section.Scan_failed F.Scan_failed) -> true
+     | Error (Section.Not_measured _ | Section.Scan_failed _ | Section.Unreadable _) | Ok _ -> false);
+  check bool "timeout flag is preserved" true
+    (match Section.fleet_of_health_fields (placeholder ~timed_out:true "error" []) with
+     | Error (Section.Scan_failed F.Scan_timed_out) -> true
+     | Error (Section.Not_measured _ | Section.Scan_failed _ | Section.Unreadable _) | Ok _ -> false);
+  check bool "timeout status is preserved" true
+    (match Section.fleet_of_health_fields (placeholder "timeout" []) with
+     | Error (Section.Scan_failed F.Scan_timed_out) -> true
+     | Error (Section.Not_measured _ | Section.Scan_failed _ | Section.Unreadable _) | Ok _ -> false);
+  check bool "unavailable is a failed scan" true
+    (match Section.fleet_of_health_fields (placeholder "unavailable" []) with
+     | Error (Section.Scan_failed F.Scan_failed) -> true
+     | Error (Section.Not_measured _ | Section.Scan_failed _ | Section.Unreadable _) | Ok _ -> false);
+  check bool "unknown placeholder status is unreadable" true
+    (is_unreadable (Section.fleet_of_health_fields (placeholder "future" [])))
 ;;
 
 let test_a_section_that_cannot_be_what_it_claims_is_unreadable () =

@@ -12,8 +12,9 @@
 
 type error =
   | Not_measured of { status : string }
-      (** The snapshot holds the placeholder it shows while it warms up or after
-          a refresh failed. It carries no reading. *)
+      (** The snapshot holds a warming placeholder with no reading yet. *)
+  | Scan_failed of Fleet_stream.degraded_reason
+      (** The fleet section itself failed or timed out. *)
   | Unreadable of string
       (** The section says it is a reading and cannot be read as one. This is a
           fault in the server, not a state the fleet is in. *)

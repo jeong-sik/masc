@@ -1,10 +1,13 @@
 type error =
   | Not_measured of { status : string }
+  | Scan_failed of Fleet_stream.degraded_reason
   | Unreadable of string
 
 let error_to_string = function
   | Not_measured { status } ->
     Printf.sprintf "the fleet has not been measured (%s)" status
+  | Scan_failed Fleet_stream.Scan_timed_out -> "the fleet scan timed out"
+  | Scan_failed Fleet_stream.Scan_failed -> "the fleet scan failed"
   | Unreadable detail -> detail
 ;;
 
@@ -186,7 +189,14 @@ let fleet_of_health_fields fields =
           section with neither is not a placeholder, and one that is a reading
           without its schema must not pass for one. *)
        (match member section Key.status, member section Key.component_timed_out with
-        | Some (`String status), Some (`Bool _) -> Error (Not_measured { status })
+        | Some (`String ("warming" as status)), Some (`Bool false) ->
+          Error (Not_measured { status })
+        | Some (`String ("warming" | "error" | "timeout" | "unavailable")),
+          Some (`Bool true) -> Error (Scan_failed Fleet_stream.Scan_timed_out)
+        | Some (`String "timeout"), Some (`Bool false) ->
+          Error (Scan_failed Fleet_stream.Scan_timed_out)
+        | Some (`String ("error" | "unavailable")), Some (`Bool false) ->
+          Error (Scan_failed Fleet_stream.Scan_failed)
         | None, _ | Some _, _ ->
           unreadable "%s has neither a schema nor the fields of the placeholder"
             Key.section))

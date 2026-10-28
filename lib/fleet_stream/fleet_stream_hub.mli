@@ -22,8 +22,8 @@ val create : on_subscriber_error:(exn -> unit) -> t
 val observe : t -> measured_at:float -> Fleet_stream.fleet -> unit
 (** A scan finished at [measured_at] and read this fleet.
 
-    - The first reading makes the state and sends [Snapshot] to every
-      subscriber that was waiting for one.
+    - The first reading sends [Snapshot], or [Changed] if an initial
+      [Unavailable_snapshot] already reported a failure.
     - A reading equal to the current one, while the scans are working, makes no
       event.
     - A different reading makes [Changed].
@@ -33,14 +33,13 @@ val observe : t -> measured_at:float -> Fleet_stream.fleet -> unit
 val note_degraded : t -> since:float -> Fleet_stream.degraded_reason -> unit
 (** The scan failed or ran out of time. The first failure after a reading makes
     [Degraded]; the failures after it make nothing, so [since] stays the time
-    the outage began. Before the first reading there is nothing to degrade and
-    this does nothing. *)
+    the outage began. Before the first reading it sends an
+    [Unavailable_snapshot] with no invented fleet. *)
 
 val subscribe : t -> on_event:(Fleet_stream.event -> unit) -> unit -> unit
 (** [subscribe t ~on_event] registers [on_event] and returns the function that
-    removes it. If the hub has a reading, [on_event] receives its [Snapshot]
-    before this returns and before any later event. If it has none, [on_event]
-    receives [Snapshot] when the first reading arrives. *)
+    removes it. If a state exists, [on_event] receives its [Snapshot] or
+    [Unavailable_snapshot] before this returns and before any later event. *)
 
 val current : t -> Fleet_stream.event option
 (** The [Snapshot] a subscriber that connected now would start with. *)

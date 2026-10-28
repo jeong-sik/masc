@@ -112,8 +112,6 @@ let test_a_different_reading_makes_the_next_revision () =
 
 let test_an_outage_is_told_once_and_ends_with_a_change () =
   let hub, _ = hub_with_error_log () in
-  Hub.note_degraded hub ~since:5.0 F.Scan_failed;
-  check (option event_t) "nothing to degrade before a reading" None (Hub.current hub);
   Hub.observe hub ~measured_at:10.0 (fleet ());
   let on_event, seen = recorder () in
   let (_ : unit -> unit) = Hub.subscribe hub ~on_event in
@@ -146,6 +144,28 @@ let test_an_outage_is_told_once_and_ends_with_a_change () =
     (Hub.current hub)
 ;;
 
+let test_first_failure_is_a_snapshot_and_first_reading_recovers () =
+  let hub, _ = hub_with_error_log () in
+  let on_event, seen = recorder () in
+  let unsubscribe = Hub.subscribe hub ~on_event in
+  Hub.note_degraded hub ~since:5.0 F.Scan_failed;
+  let outage = { F.since = 5.0; reason = F.Scan_failed } in
+  let initial = F.Unavailable_snapshot { revision = revision 1; degradation = outage } in
+  check (list event_t) "waiting subscriber sees first failure" [ initial ] (seen ());
+  Hub.note_degraded hub ~since:6.0 F.Scan_timed_out;
+  check (option event_t) "first failure remains current" (Some initial) (Hub.current hub);
+  unsubscribe ();
+  let on_reconnect, reconnected = recorder () in
+  let (_ : unit -> unit) = Hub.subscribe hub ~on_event:on_reconnect in
+  check (list event_t) "reconnect sees the same failure" [ initial ] (reconnected ());
+  Hub.observe hub ~measured_at:10.0 (fleet ());
+  check (list event_t) "first reading advances revision and recovers"
+    [ initial; F.Changed { revision = revision 2; measured_at = 10.0; fleet = fleet () } ]
+    (reconnected ());
+  check (option event_t) "later subscribers see a measured snapshot"
+    (Some (snapshot ~revision:2 ~measured_at:10.0 (fleet ()))) (Hub.current hub)
+;;
+
 let test_unsubscribing_stops_the_events () =
   let hub, _ = hub_with_error_log () in
   Hub.observe hub ~measured_at:10.0 (fleet ~running:1 ());
@@ -168,7 +188,7 @@ let test_a_subscriber_that_raises_is_removed_and_reported () =
     incr calls;
     match event with
     | F.Snapshot _ -> ()
-    | F.Changed _ | F.Degraded _ -> failwith "full"
+    | F.Unavailable_snapshot _ | F.Changed _ | F.Degraded _ -> failwith "full"
   in
   let healthy, healthy_seen = recorder () in
   let (_ : unit -> unit) = Hub.subscribe hub ~on_event:broken in
@@ -211,7 +231,7 @@ let test_no_watcher_sees_a_gap_under_concurrent_publishers () =
       let on_event event =
         let revision = F.revision_of_event event in
         (match event, !last with
-         | F.Snapshot _, _ -> ()
+         | (F.Snapshot _ | F.Unavailable_snapshot _), _ -> ()
          | (F.Changed _ | F.Degraded _), Some previous ->
            if not (F.Revision.is_next ~after:previous revision) then incr violations
          | (F.Changed _ | F.Degraded _), None -> incr violations);
@@ -249,7 +269,7 @@ let test_no_watcher_sees_a_gap_under_concurrent_publishers () =
   | Some (F.Snapshot { revision; _ }) ->
     check int "every reading made one revision" (1 + (3 * per_publisher))
       (F.Revision.to_int revision)
-  | Some (F.Changed _ | F.Degraded _) | None -> fail "no snapshot"
+  | Some (F.Unavailable_snapshot _ | F.Changed _ | F.Degraded _) | None -> fail "no snapshot"
 ;;
 
 let () =
@@ -265,6 +285,8 @@ let () =
             test_a_different_reading_makes_the_next_revision
         ; test_case "an outage is told once and ends with a change" `Quick
             test_an_outage_is_told_once_and_ends_with_a_change
+        ; test_case "first failure survives reconnect and recovers" `Quick
+            test_first_failure_is_a_snapshot_and_first_reading_recovers
         ] )
     ; ( "subscribers"
       , [ test_case "unsubscribing stops the events" `Quick

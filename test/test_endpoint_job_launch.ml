@@ -7,7 +7,7 @@ let get value = value |> Result.map_error L.error_to_string |> require
 let registry value = value |> Result.map_error R.error_to_string |> require
 let check label value = Alcotest.(check bool) label true value
 let id suffix = P.Id.of_string ("019a0000-0000-7000-8000-0000000000" ^ suffix) |> require
-let digest value = P.Sha256.of_string Digestif.SHA256.(digest_string value |> to_hex) |> require
+let digest value = P.Sha256.of_string Agent_core_sha256.(digest_string value |> to_hex) |> require
 let route : P.route = {backend=Remote_ssh;endpoint_incarnation=id "01";boot_id=id "02"}
 let owner : P.owner = {workspace_id=id "03";keeper_name="original owner"}
 let rec remove path = match Unix.lstat path with

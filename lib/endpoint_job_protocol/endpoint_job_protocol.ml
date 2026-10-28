@@ -108,6 +108,7 @@ type request =
 type exit_status = Exited of int | Signaled of int
 type non_start = Cancelled_before_activation | Launch_rejected
 type phase = Queued | Starting | Running | Finished of exit_status | Not_started of non_start
+  | Termination_observed of exit_status
 type extent = Growing of int64 | Sealed of { byte_length : int64; sha256 : Sha256.t }
 type refusal =
   | Unsupported | Unauthenticated | Owner_mismatch | Request_conflict
@@ -385,6 +386,10 @@ let phase_json = function
   | Not_started reason -> `Assoc ["state",`String "not_started";"reason",`String (non_start_tag reason)]
   | Finished (Exited code) -> `Assoc ["state",`String "exited";"code",count (Int64.of_int code)]
   | Finished (Signaled signal) -> `Assoc ["state",`String "signaled";"signal",count (Int64.of_int signal)]
+  | Termination_observed status -> `Assoc ["state",`String "termination_observed";
+      "physical_status",(match status with
+        | Exited code -> `Assoc ["kind",`String "exited";"code",count (Int64.of_int code)]
+        | Signaled signal -> `Assoc ["kind",`String "signaled";"signal",count (Int64.of_int signal)])]
 let read_phase value =
   let* state = match value with
     | `Assoc fields ->
@@ -407,6 +412,24 @@ let read_phase value =
   | "signaled" ->
     let* f = object_fields "phase" ~required:["state";"signal"] value in
     let* signal = positive_int "phase.signal" (get f "signal") in Ok (Finished (Signaled signal))
+  | "termination_observed" ->
+    let* f=object_fields "phase" ~required:["state";"physical_status"] value in
+    let status=get f "physical_status" in
+    let* kind=match status with
+      | `Assoc fields -> (match List.assoc_opt "kind" fields with
+          | Some value -> text "phase.physical_status.kind" value
+          | None -> Error (Missing_field "phase.physical_status.kind"))
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> invalid "phase.physical_status" in
+    let* status=match kind with
+      | "exited" ->
+        let* fields=object_fields "phase.physical_status" ~required:["kind";"code"] status in
+        let* code=nonnegative "phase.physical_status.code" (get fields "code") in
+        if code<=Int64.of_int max_int then Ok (Exited (Int64.to_int code)) else invalid "phase.physical_status.code"
+      | "signaled" ->
+        let* fields=object_fields "phase.physical_status" ~required:["kind";"signal"] status in
+        let* signal=positive_int "phase.physical_status.signal" (get fields "signal") in Ok (Signaled signal)
+      | _ -> Error (Tag_unsupported "phase.physical_status.kind") in
+    Ok (Termination_observed status)
   | _ -> Error (Tag_unsupported "phase.state")
 
 let refusal_tag = function
@@ -466,14 +489,14 @@ let validate_response = function
       | Result_pending -> Ok ()
       | Result_ready _ -> (match phase with
           | Queued | Starting | Running -> invalid "status.result"
-          | Finished _ | Not_started _ -> match stdout,stderr with
+          | Finished _ | Not_started _ | Termination_observed _ -> match stdout,stderr with
             | Sealed _,Sealed _ -> Ok ()
             | Growing _,(Growing _ | Sealed _) | Sealed _,Growing _ -> invalid "status.result") in
     if revision<=0L then invalid "revision"
     else if extent_bytes stdout<0L || extent_bytes stderr<0L then invalid "status.extent"
     else (match phase with
-      | Finished (Exited code) -> if code>=0 then Ok () else invalid "phase.code"
-      | Finished (Signaled signal) -> if signal>0 then Ok () else invalid "phase.signal"
+      | Finished (Exited code) | Termination_observed (Exited code) -> if code>=0 then Ok () else invalid "phase.code"
+      | Finished (Signaled signal) | Termination_observed (Signaled signal) -> if signal>0 then Ok () else invalid "phase.signal"
       | Starting | Running -> Ok ()
       | Not_started reason ->
           let* () = match reason with

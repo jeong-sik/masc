@@ -49,6 +49,18 @@ let availability t =
     let* _=O.extent out |> Result.map_error (fun cause -> Output_error {stream=P.Stdout;cause}) in
     let* _=O.extent err |> Result.map_error (fun cause -> Output_error {stream=P.Stderr;cause}) in Ok ()
 let await_settled t = Eio.Promise.await t.done_
+type observation = { settled : settled; status : P.response }
+let await_observation t =
+  let* settled=await_settled t in
+  let* record=L.observe_original t.owner |> Result.map_error (fun e -> Launch_error e) in
+  let physical_status=match settled.physical_exit.status with
+    | G.Exited code -> P.Exited code | G.Signaled signal -> P.Signaled signal in
+  let sealed (seal : O.seal)=P.Sealed {byte_length=seal.byte_length;sha256=seal.sha256} in
+  let status=P.Status {original=P.original ~binding:(R.binding record) ~admission_id:(R.admission_id record);
+    revision=R.revision record;phase=P.Termination_observed physical_status;
+    cancel_requested=(R.cancellation_state record=R.Cancellation_requested);
+    result=P.Result_pending;stdout=sealed settled.stdout;stderr=sealed settled.stderr} in
+  Ok {settled;status}
 let cancel t = L.cancel t.owner |> Result.map_error (fun e -> Launch_error e)
 let await_quiescent t = L.await_quiescent t.owner |> Result.map_error (fun e -> Launch_error e)
 let read_output t ~stream ~offset ~max_bytes =

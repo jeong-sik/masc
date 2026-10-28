@@ -1,5 +1,5 @@
 import { Schema } from 'effect'
-import { get, post } from './core'
+import { get, getPublic, post } from './core'
 
 const revisionFields = {
   revision: Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(Number.MAX_SAFE_INTEGER)),
@@ -90,9 +90,11 @@ export function artifactHref(id: string, revision?: number): string {
   return `/dashboard/#/workspace?${params}`
 }
 
-export async function setPublishedArtifactShared(id: string, shared: boolean): Promise<{ id: string; shared: boolean }> {
+export async function setPublishedArtifactShared(id: string, shared: boolean, workspace: ArtifactWorkspace): Promise<{ id: string; shared: boolean }> {
   const result = Schema.decodeUnknownSync(ArtifactShareSchema)(
-    await post<unknown>('/api/v1/published-artifact-shares', { id, shared }),
+    await post<unknown>('/api/v1/published-artifact-shares', {
+      id, shared, expected_workspace: { base_path: workspace.basePath, masc_root: workspace.mascRoot },
+    }, artifactWorkspaceHeaders(workspace)),
   )
   if (result.id !== id || result.shared !== shared) {
     throw new Error('외부 공유 상태 응답이 요청과 다릅니다.')
@@ -104,14 +106,27 @@ export async function fetchPublishedArtifacts(signal?: AbortSignal): Promise<Art
   return Schema.decodeUnknownSync(ListSchema)(await get<unknown>('/api/v1/published-artifacts', { signal }))
 }
 
-export async function fetchPublishedArtifact(id: string, revision: string | undefined, signal?: AbortSignal, workspace?: ArtifactWorkspace): Promise<ArtifactDocument> {
+function artifactRequestPath(id: string, revision: string | undefined): string {
   const query = revision === undefined ? '' : `?revision=${encodeURIComponent(revision)}`
-  const raw = await get<unknown>(`/api/v1/published-artifacts/${encodeURIComponent(id)}${query}`, {
-    signal, ...(workspace ? { extraHeaders: artifactWorkspaceHeaders(workspace) } : {}),
-  })
+  return `/api/v1/published-artifacts/${encodeURIComponent(id)}${query}`
+}
+
+function decodeArtifactDocument(id: string, revision: string | undefined, raw: unknown): ArtifactDocument {
   const doc = Schema.decodeUnknownSync(DocumentSchema)(raw)
   if (doc.artifact.id !== id || (revision !== undefined && String(doc.artifact.revision) !== revision)) {
     throw new Error('요청한 문서와 저장된 문서의 식별자가 다릅니다.')
   }
   return doc
+}
+
+export async function fetchPublishedArtifact(id: string, revision: string | undefined, signal?: AbortSignal, workspace?: ArtifactWorkspace): Promise<ArtifactDocument> {
+  const raw = await get<unknown>(artifactRequestPath(id, revision), {
+    signal, ...(workspace ? { extraHeaders: artifactWorkspaceHeaders(workspace) } : {}),
+  })
+  return decodeArtifactDocument(id, revision, raw)
+}
+
+export async function fetchPublicArtifact(id: string, revision: string | undefined, signal?: AbortSignal): Promise<ArtifactDocument> {
+  const raw = await getPublic<unknown>(artifactRequestPath(id, revision), { signal })
+  return decodeArtifactDocument(id, revision, raw)
 }

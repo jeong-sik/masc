@@ -22,7 +22,7 @@ vi.mock('../../router', async () => {
   return { route, navigate: vi.fn((tab: string, params: Record<string, string>) => { route.value = { tab, params, postId: null } }) }
 })
 vi.mock('../../api/core', () => ({
-  get: vi.fn(), post: vi.fn(), currentStoredTokenRevision: vi.fn(() => 0),
+  get: vi.fn(), getPublic: vi.fn(), post: vi.fn(), currentStoredTokenRevision: vi.fn(() => 0),
   subscribeStoredTokenChanges:vi.fn(()=>()=>{}),
   ApiRequestError: class extends Error { status = 404 },
 }))
@@ -259,9 +259,22 @@ describe('artifact library user flow', () => {
     const view = render(html`<${ArtifactsSurface} />`)
     const dialog = within(await view.findByRole('dialog'))
     fireEvent.click(dialog.getByRole('button', { name: '링크 복사' }))
-    await waitFor(() => expect(dialog.getByRole('status').textContent).toBe('문서 링크를 복사했습니다.'))
-    expect(vi.mocked(copyToClipboard).mock.calls[0]?.[0]).toContain(`artifact=${firstId}&revision=1`)
+    await waitFor(() => expect(dialog.getByRole('status').textContent)
+      .toBe(`현재 접속 주소 ${window.location.origin} 기준으로 문서 링크를 복사했습니다.`))
+    expect(vi.mocked(copyToClipboard).mock.calls[0]?.[0])
+      .toBe(`${window.location.origin}/dashboard/#/workspace?section=artifacts&artifact=${firstId}&revision=1`)
     expect(vi.mocked(copyToClipboard).mock.calls[0]?.[1]).toBe(view.getByRole('dialog'))
+  })
+
+  it('pins the version currently shown when copying from the latest route', async () => {
+    route.value = { tab: 'workspace', params: { section: 'artifacts', artifact: firstId }, postId: null }
+    const view = render(html`<${ArtifactsSurface} />`)
+    const dialog = within(await view.findByRole('dialog'))
+    fireEvent.click(dialog.getByRole('button', { name: '링크 복사' }))
+    await waitFor(() => expect(copyToClipboard).toHaveBeenCalledWith(
+      `${window.location.origin}/dashboard/#/workspace?section=artifacts&artifact=${firstId}&revision=2`,
+      view.getByRole('dialog'),
+    ))
   })
 
   it('shows clipboard failure inside the reader', async () => {

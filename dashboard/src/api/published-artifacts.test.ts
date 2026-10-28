@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Schema } from 'effect'
 import nativeInventory from './fixtures/published-artifacts-native.json'
-import { get, post } from './core'
-import { ArtifactPublicationSchema, captureArtifactWorkspace, fetchPublishedArtifact, fetchPublishedArtifacts, setPublishedArtifactShared } from './published-artifacts'
+import { get, getPublic, post } from './core'
+import { ArtifactPublicationSchema, captureArtifactWorkspace, fetchPublishedArtifact, fetchPublicArtifact, fetchPublishedArtifacts, setPublishedArtifactShared } from './published-artifacts'
 import { resolveArtifactCheck, setArtifactCheck } from './published-artifact-checks'
 
-vi.mock('./core', () => ({ get: vi.fn(), post: vi.fn() }))
+vi.mock('./core', () => ({ get: vi.fn(), getPublic: vi.fn(), post: vi.fn() }))
 beforeEach(() => vi.resetAllMocks())
 
 // Captured from the matching native server at cc06814, using owned reports.
@@ -74,10 +74,21 @@ describe('published artifact native wire contract', () => {
     expect(get).toHaveBeenCalledWith(`/api/v1/published-artifacts/${artifact.id}?revision=2`, {})
   })
 
+  it('uses the explicitly anonymous transport for a public fixed revision', async () => {
+    const artifact = nativeInventory.artifacts[0]!
+    vi.mocked(getPublic).mockResolvedValueOnce({ artifact, content: '# public', revisions: [artifact], shared: true })
+    expect((await fetchPublicArtifact(artifact.id, '2')).artifact.id).toBe(artifact.id)
+    expect(getPublic).toHaveBeenCalledWith(`/api/v1/published-artifacts/${artifact.id}?revision=2`, { signal: undefined })
+    expect(get).not.toHaveBeenCalled()
+  })
+
   it('toggles per-artifact external sharing via /api/v1/published-artifact-shares', async () => {
     const artifact = nativeInventory.artifacts[0]!
+    const workspace = { basePath: '/workspace', mascRoot: '/workspace/.masc' }
     vi.mocked(post).mockResolvedValueOnce({ id: artifact.id, shared: true })
-    expect(await setPublishedArtifactShared(artifact.id, true)).toEqual({ id: artifact.id, shared: true })
-    expect(post).toHaveBeenCalledWith('/api/v1/published-artifact-shares', { id: artifact.id, shared: true })
+    expect(await setPublishedArtifactShared(artifact.id, true, workspace)).toEqual({ id: artifact.id, shared: true })
+    expect(post).toHaveBeenCalledWith('/api/v1/published-artifact-shares', {
+      id: artifact.id, shared: true, expected_workspace: { base_path: workspace.basePath, masc_root: workspace.mascRoot },
+    }, { 'x-masc-expected-base-path': workspace.basePath, 'x-masc-expected-masc-root': workspace.mascRoot })
   })
 })

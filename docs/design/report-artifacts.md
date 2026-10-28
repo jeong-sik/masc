@@ -125,6 +125,22 @@ that a Keeper is currently viewing or editing a document.
   outside the server's control after sharing is revoked, including copies held
   in browser or intermediary caches. In unbound Dashboard asset mode, descendant
   symlinks and multi-link files are refused even when they name ordinary assets.
+- The read-only public Dashboard view sends its artifact request without the
+  browser's stored bearer, actor header or cookies. An expired local credential
+  therefore does not prevent an otherwise permitted anonymous read. Operator
+  views and writes continue to use their captured authentication.
+- The Dashboard share action requires a known sharing state and rechecks the
+  selected revision and sharing state with both captured workspace roots before
+  sending a change. A missing state, a failed read, or a changed observation
+  does not become a private state or trigger a write. An interrupted or
+  otherwise unconfirmed dispatched change prevents another change for that ID
+  in the current browser tab; a later GET does not settle the interrupted write.
+  This guard does not survive a page reload or cover other clients. The share
+  API has no compare-and-set precondition, so changes from separate clients may
+  still race between the reread and the write. Dashboard link copying pins the
+  displayed revision and uses the origin currently open in the browser, which
+  may be a local address; it is not evidence that the link is reachable from
+  elsewhere.
 - `keeper_artifact_publish`: the same store operation using the Keeper's own
   identity. Publication is non-terminal: the Keeper can continue and report its
   durable link. No automatic duplicate Board/chat post is sent by the tool.

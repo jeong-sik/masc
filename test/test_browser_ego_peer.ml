@@ -870,7 +870,7 @@ let test_the_scripts_parse_as_modules () =
     | "page.close" -> answered (obj ["closed",`Bool true])
     | "page.reload" | "page.history" -> answered (obj ["error",`Null;"tab",obj ["url",str "https://example.test/";"title",str "Back"]])
     | "page.snapshot" -> answered (obj ["label",str "p1";"url",str "u";"title",str "T";"snapshot",str "root";"truncated",`Bool false;"chars",`Int 4])
-    | "page.dialog" -> answered (obj ["dialog",ego_dialog ~default:"def" "prompt" "name?"])
+    | "page.dialog" -> answered (obj ["answered",`Bool true;"dialog",ego_dialog ~default:"def" "prompt" "name?"])
     | "page.target_input" -> answered (obj ["urlBefore",str observed_url;"receipt",obj [];"error",`Null;
         "tab",obj ["url",str observed_url;"title",str "Slack"]])
     | "page.downloads" -> answered (obj ["since",`Null;"rows",`List []])
@@ -978,7 +978,7 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | "page.open" -> answered (obj ["label",str "p4";"error",`Null;"tab",obj ["url",str "https://example.test/new";"title",str "New";"active",`Bool true]])
     | "page.goto" | "page.history" -> answered (obj ["error",`Null;"tab",obj ["url",str "https://example.test/next";"title",str "Next"]])
     | "page.close" -> answered (obj ["closed",`Bool true])
-    | "page.dialog" -> answered (obj ["dialog",ego_dialog "alert" "hello"])
+    | "page.dialog" -> answered (obj ["answered",`Bool true;"dialog",ego_dialog "alert" "hello"])
     | "space.hand_off" -> answered (obj ["spaceId",`Int 51;"spaceName",str "masc"])
     | "space.adopt_tab" -> answered (obj ["label",str "adopted";"targetId",str "T9";"openedBy",str "unknown"])
     | "page.downloads" -> answered (obj ["since",`Null;"rows",`List []])
@@ -1833,10 +1833,10 @@ let test_dialogs_are_listed_and_answered () =
   let runs () = List.length !asked and last () = List.hd !asked in
   let act ?(tab_id=1) interaction = dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id;frame_path=[];interaction})) in
   let prompt = ego_dialog ~default:"def" "prompt" "name?" and alert = ego_dialog "alert" "saved" in
-  reply := (fun _ -> answered (obj ["dialog",prompt]));
+  reply := (fun _ -> answered (obj ["answered",`Bool true;"dialog",prompt]));
   (match act (Lane.Action.Accept_dialog (Some "Vincent")) with
    | Ok receipt -> check string "the answer names the dialog"
-       {|{"inputReadiness":"command_settled","tabId":1,"action":"accept_dialog","dialog":{"type":"prompt","message":"name?","defaultValue":"def"}}|}
+       {|{"inputReadiness":"command_settled","tabId":1,"action":"accept_dialog","answered":true,"dialog":{"type":"prompt","message":"name?","defaultValue":"def"}}|}
        (Yojson.Safe.to_string receipt)
    | other -> failf "the accept was %s" (failure_kind other));
   check string "on the page's label" "p1" (text (field "label" (last ()).args));
@@ -1846,16 +1846,23 @@ let test_dialogs_are_listed_and_answered () =
     < Lane.reply_timeout_sec (Lane.Page_act (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Accept_dialog None})));
   ignore (act (Lane.Action.Accept_dialog None));
   check bool "no text is no text" true (field "text" (last ()).args = `Null);
-  reply := (fun _ -> answered (obj ["dialog",alert]));
+  reply := (fun _ -> answered (obj ["answered",`Bool true;"dialog",alert]));
   (match act Lane.Action.Dismiss_dialog with
    | Ok receipt -> check string "the dismissal names the dialog"
-       {|{"inputReadiness":"command_settled","tabId":1,"action":"dismiss_dialog","dialog":{"type":"alert","message":"saved"}}|} (Yojson.Safe.to_string receipt)
+       {|{"inputReadiness":"command_settled","tabId":1,"action":"dismiss_dialog","answered":true,"dialog":{"type":"alert","message":"saved"}}|} (Yojson.Safe.to_string receipt)
    | other -> failf "the dismissal was %s" (failure_kind other));
   check bool "dismisses" true (field "accept" (last ()).args = `Bool false);
-  reply := (fun _ -> answered (obj ["dialog",ego_dialog "modal" "?"]));
+  reply := (fun _ -> answered (obj ["answered",`Bool true;"dialog",ego_dialog "modal" "?"]));
   (match act Lane.Action.Dismiss_dialog with
-   | Ok receipt -> check string "a dialog it cannot read is left out" {|{"inputReadiness":"command_settled","tabId":1,"action":"dismiss_dialog"}|} (Yojson.Safe.to_string receipt)
+   | Ok receipt -> check string "a dialog it cannot read is left out" {|{"inputReadiness":"command_settled","tabId":1,"action":"dismiss_dialog","answered":true}|} (Yojson.Safe.to_string receipt)
    | other -> failf "an answer to an unreadable dialog was %s" (failure_kind other));
+  List.iter (fun malformed ->
+    reply := (fun _ -> answered malformed);
+    match act Lane.Action.Dismiss_dialog with
+    | Error (Live.Outcome_unknown _) -> ()
+    | other -> failf "a missing native true receipt was %s" (failure_kind other))
+    [obj [];obj ["answered",`Null];obj ["answered",`Bool false];
+     obj ["answered",str "true"];obj ["answered",`Int 1]];
   reply := (fun _ -> refused "no dialog is open in this tab");
   check string "none open" "no dialog is open in this tab" (before_effect "an answer with none open" (act Lane.Action.Dismiss_dialog));
   reply := (fun _ -> failed "Target closed");
@@ -1979,7 +1986,7 @@ const taskSpace = async () => ({
 |js} (Yojson.Safe.to_string open_) (Yojson.Safe.to_string opening) opens_on (Yojson.Safe.to_string canned)
 
 let test_dialog_scripts_in_node () =
-  let scenario = ref (`Null, `Null, "") and output = ref "" in
+  let scenario = ref (`Null, `Null, "") and output = ref "" and native_answer = ref None in
   let canned = function
     | "page.target" -> resolved
     | "page.pointer" -> page_summary
@@ -1991,7 +1998,10 @@ let test_dialog_scripts_in_node () =
     | "space.open" -> answered (obj ["spaceId",`Int 51;"name",str "SDK Space";"ownership",str "agent"])
     | step ->
       let open_, opening, opens_on = !scenario in
-      output := in_node (dialog_stand_in ~open_ ~opening ~opens_on ~canned:(canned step) ^ script);
+      let answer = match !native_answer with
+        | None -> ""
+        | Some value -> "page.acceptDialog = page.dismissDialog = async () => " ^ value ^ ";\n" in
+      output := in_node (dialog_stand_in ~open_ ~opening ~opens_on ~canned:(canned step) ^ answer ^ script);
       Ok !output in
   let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "masc") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
@@ -2014,9 +2024,19 @@ let test_dialog_scripts_in_node () =
    | Error _ -> fail "the listing failed");
   (match act (Lane.Action.Accept_dialog (Some "Vincent")) with
    | Ok receipt -> check string "the answer"
-       {|{"inputReadiness":"command_settled","tabId":1,"action":"accept_dialog","dialog":{"type":"prompt","message":"name?","defaultValue":"def"}}|} (Yojson.Safe.to_string receipt)
+       {|{"inputReadiness":"command_settled","tabId":1,"action":"accept_dialog","answered":true,"dialog":{"type":"prompt","message":"name?","defaultValue":"def"}}|} (Yojson.Safe.to_string receipt)
    | other -> failf "the accept was %s" (failure_kind other));
   check (list string) "read, then answered with the text" ["info";"accept Vincent"] (seen ());
+  List.iter (fun value ->
+    native_answer := Some value;
+    match act Lane.Action.Dismiss_dialog with
+    | Error (Live.Outcome_unknown _) -> ()
+    | other -> failf "native non-boolean %s was %s" value (failure_kind other))
+    ["undefined";"null";"1";"\"true\""];
+  native_answer := Some "false";
+  check string "native false refuses without success" "no dialog is open in this tab"
+    (before_effect "a native false dialog answer" (act Lane.Action.Dismiss_dialog));
+  native_answer := None;
   scenario := (`Null, `Null, "");
   check string "none open" "no dialog is open in this tab" (before_effect "a dismissal with none open" (act Lane.Action.Dismiss_dialog));
   check (list string) "and nothing was answered" ["info"] (seen ());
@@ -2963,7 +2983,7 @@ let test_operator_input_recovery () =
     "chars",`Int (String.length snapshot);"truncated",`Bool false]) in
   let peer=opened (fun sent -> incr scripts;match sent.step with
     | "tabs.list" -> answered tabs
-    | "page.dialog" -> answered (obj ["dialog",dialog])
+    | "page.dialog" -> answered (obj ["answered",`Bool true;"dialog",dialog])
     | "page.native_workflow" ->
       incr issued;
       check bool "recovery workflows stay in the original Space/Page" true

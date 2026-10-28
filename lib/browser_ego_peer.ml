@@ -903,16 +903,21 @@ let answer_dialog t id ~accept text =
       "    else {";
       "      const answered = !args.accept ? await page.dismissDialog() : args.text === null ? await page.acceptDialog() : await page.acceptDialog(args.text);";
       "      if (answered === false) emit({ok: false, before: true, error: " ^ Yojson.Safe.to_string (str no_dialog_refused) ^ "});";
-      "      else emit({ok: true, value: {dialog: open}});";
+      "      else if (answered === true) emit({ok: true, value: {answered: true, dialog: open}});";
+      "      else emit({ok: false, error: \"native dialog answer did not return a boolean\"});";
       "    }";
       "  }" ]) with
   | Error failure ->
     Error (effect_failure ~unknown:(Printf.sprintf "the dialog of tab %d may have been answered: list this connection's tabs" id) failure)
   | Ok value ->
-    let answered = match field "dialog" value with
-      | Some dialog -> (match ego_dialog dialog with Ok dialog -> ["dialog",Browser_surface.dialog_json dialog] | Error _ -> [])
-      | None -> [] in
-    Ok (obj (["tabId",`Int id;"action",str action] @ answered))
+    if field "answered" value <> Some (`Bool true) then
+      Error (Live.Outcome_unknown (Printf.sprintf
+        "the dialog of tab %d may have been answered: native boolean receipt is missing or invalid; list this connection's tabs" id))
+    else
+      let dialog = match field "dialog" value with
+        | Some dialog -> (match ego_dialog dialog with Ok dialog -> ["dialog",Browser_surface.dialog_json dialog] | Error _ -> [])
+        | None -> [] in
+      Ok (obj (["tabId",`Int id;"action",str action;"answered",`Bool true] @ dialog))
 
 (* ego shows a mouse step's [label] beside its own cursor highlight. It says
    who acts and what, from the same pieces as the BiDi connection's overlay

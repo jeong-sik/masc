@@ -121,8 +121,20 @@ let unresolvable_base_path () =
   with_dirs (fun dirs ->
     match I.locate ~config_dir:(Some dirs.config) ~base_path:(Filename.concat dirs.root "absent") with
     | Error (I.Base_path_unresolved _) -> ()
-    | Error (I.Base_path_not_utf8 _) -> Alcotest.fail "wrong error"
+    | Error (I.Base_path_not_utf8 _ | I.Config_dir_not_absolute _) -> Alcotest.fail "wrong error"
     | Ok _ -> Alcotest.fail "a base path that is not there was located")
+;;
+
+let relative_config_dir_is_refused () =
+  with_dirs (fun dirs ->
+    List.iter
+      (fun (label, config_dir) ->
+        match I.locate ~config_dir:(Some config_dir) ~base_path:dirs.base with
+        | Error (I.Config_dir_not_absolute _) -> ()
+        | Error (I.Base_path_unresolved _ | I.Base_path_not_utf8 _) ->
+          Alcotest.failf "%s: wrong error" label
+        | Ok _ -> Alcotest.failf "%s: a relative config directory was located" label)
+      [ "name", "masc"; "dot", "./masc"; "empty", "" ])
 ;;
 
 let file_name_follows_the_canonical_base_path () =
@@ -282,6 +294,87 @@ let directory_others_can_write_is_refused () =
     check_read_error "a directory that others can write" "unreadable" located)
 ;;
 
+(* ---- the config directory ---- *)
+
+let group_or_others_can_write mode = mode land 0o022 <> 0
+
+(* Both calls apply one test to the config directory. Whatever the mode, a
+   directory that takes a record is a directory the record is read from, and
+   a directory that refuses a record has nothing written into it. *)
+let config_dir_modes_decide_write_and_read_alike () =
+  List.iter
+    (fun mode ->
+      with_dirs (fun dirs ->
+        let label = Printf.sprintf "mode %04o" mode in
+        mkdir_config dirs;
+        Unix.chmod dirs.config mode;
+        let located = locate_in dirs ~base_path:dirs.base in
+        if group_or_others_can_write mode
+        then (
+          check_write_error label "config_dir_unusable" located ~external_store:"/stores/one";
+          check_read_error label "unreadable" located;
+          Alcotest.(check (list string))
+            (label ^ ": nothing was written")
+            []
+            (Array.to_list (Sys.readdir dirs.config)))
+        else (
+          write_ok located ~external_store:"/stores/one";
+          Alcotest.(check (option string)) label (Some "/stores/one") (read_ok located))))
+    [ 0o700; 0o750; 0o755; 0o705; 0o720; 0o702; 0o770; 0o707; 0o775; 0o757; 0o777 ]
+;;
+
+(* [/] belongs to the superuser. The case is skipped when this process owns it,
+   so that a refused write is all the case can cause. *)
+let config_dir_of_another_user_is_refused () =
+  if (Unix.stat "/").Unix.st_uid = Unix.geteuid () then Alcotest.skip ();
+  with_dirs (fun dirs ->
+    let located = get_located (I.locate ~config_dir:(Some "/") ~base_path:dirs.base) in
+    check_read_error "a directory of another user" "unreadable" located;
+    check_write_error "nothing is written in it" "config_dir_unusable" located
+      ~external_store:"/stores/one")
+;;
+
+let config_dir_under_a_link_that_leads_somewhere_may_be_absent () =
+  with_dirs (fun dirs ->
+    let real = Filename.concat dirs.root "dotfiles" in
+    Unix.mkdir real 0o700;
+    let home = Filename.concat dirs.root "home" in
+    Unix.symlink real home;
+    let located =
+      get_located (I.locate ~config_dir:(Some (Filename.concat home "masc")) ~base_path:dirs.base)
+    in
+    Alcotest.(check (option string)) "no record yet" None (read_ok located);
+    write_ok located ~external_store:"/stores/one";
+    Alcotest.(check (option string)) "read back" (Some "/stores/one") (read_ok located))
+;;
+
+(* A link that leads nowhere is not an absent directory: the record may be
+   behind it. The write side is closed too. *)
+let dangling_config_dir_link_is_unreadable () =
+  with_dirs (fun dirs ->
+    let gone = Filename.concat dirs.root "gone" in
+    Unix.symlink gone dirs.config;
+    let located = locate_in dirs ~base_path:dirs.base in
+    check_read_error "a config directory link that leads nowhere" "unreadable" located;
+    check_write_error "nothing is written behind it" "config_dir_unusable" located
+      ~external_store:"/stores/one";
+    Alcotest.(check bool) "the target was not created" false (Sys.file_exists gone))
+;;
+
+let dangling_ancestor_link_is_unreadable () =
+  with_dirs (fun dirs ->
+    let gone = Filename.concat dirs.root "gone" in
+    let home = Filename.concat dirs.root "home" in
+    Unix.symlink gone home;
+    let located =
+      get_located (I.locate ~config_dir:(Some (Filename.concat home "masc")) ~base_path:dirs.base)
+    in
+    check_read_error "a link on the way that leads nowhere" "unreadable" located;
+    check_write_error "nothing is written behind it" "config_dir_unusable" located
+      ~external_store:"/stores/one";
+    Alcotest.(check bool) "the target was not created" false (Sys.file_exists gone))
+;;
+
 let unreadable_file () =
   skip_for_superuser ();
   with_dirs (fun dirs ->
@@ -412,6 +505,7 @@ let () =
         ; Alcotest.test_case "file name" `Quick file_name_follows_the_canonical_base_path
         ; Alcotest.test_case "two base paths" `Quick two_base_paths_have_two_records
         ; Alcotest.test_case "same directory name" `Quick same_directory_name_under_two_parents
+        ; Alcotest.test_case "relative config directory" `Quick relative_config_dir_is_refused
         ] )
     ; ( "read and write"
       , [ Alcotest.test_case "missing record" `Quick missing_record
@@ -429,6 +523,19 @@ let () =
         ; Alcotest.test_case "config directory is a file" `Quick config_dir_that_is_a_file
         ; Alcotest.test_case "corrupt records" `Quick corrupt_records
         ; Alcotest.test_case "leftover temporary file" `Quick leftover_temporary_file_is_not_a_record
+        ] )
+    ; ( "config directory"
+      , [ Alcotest.test_case "modes" `Quick config_dir_modes_decide_write_and_read_alike
+        ; Alcotest.test_case "another user" `Quick config_dir_of_another_user_is_refused
+        ; Alcotest.test_case
+            "behind a link that leads somewhere"
+            `Quick
+            config_dir_under_a_link_that_leads_somewhere_may_be_absent
+        ; Alcotest.test_case "link that leads nowhere" `Quick dangling_config_dir_link_is_unreadable
+        ; Alcotest.test_case
+            "link on the way that leads nowhere"
+            `Quick
+            dangling_ancestor_link_is_unreadable
         ] )
     ; ( "writes that fail"
       , [ Alcotest.test_case "store path" `Quick store_path_must_be_absolute_utf8

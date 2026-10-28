@@ -6,13 +6,18 @@ let ( let* ) = Result.bind
 
 (* The file name carries the start of the hash of the canonical base path. The
    record repeats the canonical base path, so a collision of the short hash is
-   a [Base_path_differs] and never a silent mix of two base paths. *)
+   a [Base_path_differs] and never a silent mix of two base paths. 16 hex
+   digits are 64 bits: a collision is unlikely, and it is refused when it
+   happens. *)
 let name_hex_length = 16
 let name_prefix = "authz-install-"
 let name_suffix = ".json"
 let base_path_member = "base_path"
 let external_store_member = "external_store"
 let directory_mode = 0o700
+
+(* The permission bits that let the group or others write a directory. *)
+let group_other_write_bits = 0o022
 
 type t =
   { config_dir : string
@@ -30,12 +35,17 @@ type locate_error =
       ; detail : string
       }
   | Base_path_not_utf8 of { canonical : string }
+  | Config_dir_not_absolute of { config_dir : string }
 
 let locate_error_to_string = function
   | Base_path_unresolved { base_path; detail } ->
     Printf.sprintf "the base path %s cannot be resolved: %s" base_path detail
   | Base_path_not_utf8 { canonical } ->
     Printf.sprintf "the canonical base path %S is not valid UTF-8" canonical
+  | Config_dir_not_absolute { config_dir } ->
+    Printf.sprintf
+      "the config directory %S is not an absolute path, so it would name another file for every working directory"
+      config_dir
 ;;
 
 let file_name canonical_base_path =
@@ -48,6 +58,8 @@ let file_name canonical_base_path =
 let locate ~config_dir ~base_path =
   match config_dir with
   | None -> Ok No_config_dir
+  | Some config_dir when Filename.is_relative config_dir ->
+    Error (Config_dir_not_absolute { config_dir })
   | Some config_dir ->
     (match Unix.realpath base_path with
      | exception Unix.Unix_error (error, _, _) ->
@@ -128,29 +140,88 @@ let decode ~path ~canonical_base_path text =
        else Ok (Some external_store))
 ;;
 
+(* Files and directories this process creates belong to its effective uid. *)
+let process_owner_uid () = Unix.geteuid ()
+
+(* The one test that a config directory passes before a record is written into
+   it and before a record is read from it. [dir] has no symbolic link left, so
+   [lstat] sees the directory itself. The owner-checked read of [Fs_compat]
+   applies the same test to the directory of the file: it must belong to the
+   uid of this process and the group and others must not be able to write it.
+   [write] runs this test first, so a record that [write] puts in a directory is
+   a record that [read] accepts there. *)
+let check_config_dir dir =
+  match Unix.lstat dir with
+  | exception Unix.Unix_error (error, _, _) -> Error (Unix.error_message error)
+  | { Unix.st_kind = Unix.S_DIR; st_uid; st_perm; _ } ->
+    if st_uid <> process_owner_uid ()
+    then
+      Error
+        (Printf.sprintf
+           "it is owned by uid %d and this process runs as uid %d"
+           st_uid
+           (process_owner_uid ()))
+    else if st_perm land group_other_write_bits <> 0
+    then Error (Printf.sprintf "its mode %04o lets the group or others write it" st_perm)
+    else Ok ()
+  | { Unix.st_kind = Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK; _ }
+    -> Error "it is not a directory"
+;;
+
+(* [Unix.realpath] fails with ENOENT when nothing is there, and also when a
+   symbolic link on the way leads nowhere. Only the first is an absent record.
+   A link that leads nowhere may hide the record, for instance when the config
+   directory lives on a volume that is not mounted. The walk goes up to the
+   nearest component that [lstat] finds and demands that a link there leads
+   somewhere. *)
+let rec absent_config_dir dir =
+  match Unix.lstat dir with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+    let parent = Filename.dirname dir in
+    if String.equal parent dir then Ok () else absent_config_dir parent
+  | exception Unix.Unix_error (error, _, _) -> Error (Unix.error_message error)
+  | { Unix.st_kind = Unix.S_LNK; _ } ->
+    (match Unix.stat dir with
+     | _ -> Ok ()
+     | exception Unix.Unix_error (error, _, _) ->
+       Error
+         (Printf.sprintf "the symbolic link %s leads nowhere: %s" dir (Unix.error_message error)))
+  | { Unix.st_kind = Unix.S_REG | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK; _ }
+    -> Ok ()
+;;
+
+let read_file t dir =
+  let path = Filename.concat dir (Filename.basename t.file) in
+  match
+    Fs_compat.load_owned_regular_file_with_snapshot
+      ~owner_uid:(process_owner_uid ())
+      ~single_link:true
+      ~ownership_root:dir
+      path
+  with
+  | Ok None -> Ok None
+  | Error error ->
+    Error (Unreadable { path; detail = Fs_compat.owned_regular_file_read_error_to_string error })
+  | Ok (Some contents) ->
+    let ({ Fs_compat.content; _ } : Fs_compat.owned_regular_file_contents) = contents in
+    decode ~path ~canonical_base_path:t.canonical_base_path content
+;;
+
 let read = function
   | No_config_dir -> Ok None
   | Located t ->
+    let unreadable detail = Error (Unreadable { path = t.file; detail }) in
     (match Unix.realpath t.config_dir with
-     | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
-     | exception Unix.Unix_error (error, _, _) ->
-       Error (Unreadable { path = t.file; detail = Unix.error_message error })
+     | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+       (match absent_config_dir t.config_dir with
+        | Ok () -> Ok None
+        | Error detail -> unreadable detail)
+     | exception Unix.Unix_error (error, _, _) -> unreadable (Unix.error_message error)
      | dir ->
-       let path = Filename.concat dir (Filename.basename t.file) in
-       (match
-          Fs_compat.load_owned_regular_file_with_snapshot
-            ~owner_uid:(Unix.getuid ())
-            ~single_link:true
-            ~ownership_root:dir
-            path
-        with
-        | Ok None -> Ok None
-        | Error error ->
-          Error
-            (Unreadable { path; detail = Fs_compat.owned_regular_file_read_error_to_string error })
-        | Ok (Some contents) ->
-          let ({ Fs_compat.content; _ } : Fs_compat.owned_regular_file_contents) = contents in
-          decode ~path ~canonical_base_path:t.canonical_base_path content))
+       (match check_config_dir dir with
+        | Ok () -> read_file t dir
+        | Error reason ->
+          unreadable (Printf.sprintf "the config directory %s cannot be used: %s" dir reason)))
 ;;
 
 type write_error =
@@ -184,9 +255,10 @@ let write_error_to_string = function
     Printf.sprintf "the install record %s was replaced and is not known to be durable: %s" path detail
 ;;
 
-(* Creates the missing directories, parents first, with mode 0700. A directory
-   that is already there is left as it is, a symbolic link to a directory
-   included: the reader refuses a directory that others can write. *)
+(* Creates the missing directories, parents first, with mode 0700, as the XDG
+   Base Directory Specification asks. A directory that is already there is left
+   as it is, a symbolic link to a directory included: [check_config_dir]
+   decides afterwards whether the record may go into it. *)
 let rec ensure_private_directory dir =
   match Sys.is_directory dir with
   | true -> Ok ()
@@ -228,6 +300,7 @@ let write located ~external_store =
         | dir -> Ok dir
         | exception Unix.Unix_error (error, _, _) -> Error (unusable (Unix.error_message error))
       in
+      let* () = Result.map_error unusable (check_config_dir dir) in
       let path = Filename.concat dir (Filename.basename t.file) in
       match
         Fs_compat.save_file_atomic_strict_staged

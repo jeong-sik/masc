@@ -23,16 +23,32 @@
     reader sees no file or a whole one, and never reads a temporary file left
     by a write that died. [Fs_compat] does not call [F_FULLFSYNC], so the file
     survives a restart of the process, not a power cut. Missing directories are
-    created with mode 0700, and the file has mode 0600.
+    created with mode 0700, and the file has mode 0600. A directory that is
+    already there keeps its mode, as the XDG Base Directory Specification asks
+    (it may be readable by others, which only shows the path of the store).
 
-    {b Read.} {!read} gives [None] only when the file is not there. A symbolic
-    link, a directory, a file with a second link, a file that another user
-    owns, a config directory that another user owns or that others can write,
-    and any read error are {!Unreadable}. A file that is there and does not hold
-    exactly the two members is {!Corrupt}. A caller never treats either as an
-    absent record. Both calls are blocking. The file replacement and the read
-    of the file run on a system thread when they are called from an Eio fiber,
-    and the directory calls around them are plain system calls. *)
+    {b Config directory.} {!read} and {!write} apply one test to the config
+    directory: after its symbolic links are resolved it is a directory that
+    belongs to the uid of the process and that neither the group nor others
+    can write. {!write} refuses a directory that fails the test
+    ({!Config_dir_unusable}) before it writes anything, so a record that
+    {!write} has put in a directory is a record that {!read} accepts there.
+
+    {b Read.} {!read} gives [None] only when the file is not there, or when the
+    config directory is not there and no symbolic link on the way to it leads
+    nowhere. A symbolic link that leads nowhere, a symbolic link as the file, a
+    directory, a file with a second link, a file that another user owns, a
+    config directory that fails the test above, and any read error are
+    {!Unreadable}. A file that is there and does not hold exactly the two
+    members is {!Corrupt}. A caller never treats either as an absent record.
+    The file is read with the owner-checked read of [Fs_compat], which checks
+    the file and its directory before and after the read
+    ([Fs_compat.load_owned_regular_file_with_snapshot]).
+
+    {b Blocking.} Both calls are blocking and meant for the boot sequence, not
+    for a request path. The file replacement and the read of the file run on a
+    system thread when they are called from an Eio fiber, and the directory
+    calls around them are plain system calls. *)
 
 (** A record that can exist: the config directory and the canonical base path
     it belongs to. *)
@@ -51,11 +67,18 @@ type locate_error =
       }  (** [Unix.realpath] failed on the base path. *)
   | Base_path_not_utf8 of { canonical : string }
       (** The canonical base path cannot be written into the JSON record. *)
+  | Config_dir_not_absolute of { config_dir : string }
+      (** A relative config directory names another file for every working
+          directory of the process. *)
 
 (** [locate ~config_dir ~base_path] resolves [base_path] to its canonical form
-    and names the file. [config_dir] is the [masc] directory of the config
-    home of the user, or [None] when neither [XDG_CONFIG_HOME] nor [HOME] is
-    known. The module does not read the environment: the caller passes it. *)
+    and names the file. [config_dir] is the absolute path of the [masc]
+    directory of the config home of the user, or [None] when neither
+    [XDG_CONFIG_HOME] nor [HOME] is known. The module does not read the
+    environment: the caller passes it. A caller that reads [XDG_CONFIG_HOME]
+    ignores a relative value and falls back to [HOME], as the XDG Base
+    Directory Specification asks. [locate] refuses a relative [config_dir]
+    instead of reading it as an absent record. *)
 val locate : config_dir:string option -> base_path:string -> (located, locate_error) result
 
 val locate_error_to_string : locate_error -> string
@@ -97,6 +120,9 @@ type write_error =
       { dir : string
       ; detail : string
       }
+      (** The config directory cannot be created, is not a directory, or fails
+          the test of the config directory that {!read} applies too. Nothing
+          was written. *)
   | Not_replaced of
       { path : string
       ; detail : string
@@ -110,7 +136,10 @@ type write_error =
           write as failed and writes again. *)
 
 (** Writes the record for [external_store], an absolute path, over any record
-    the base path has. *)
+    the base path has, whatever that record holds. The caller keeps the rule
+    of the design that a record is replaced only when the store it names is
+    not there: a record that names a store that is there is not written over.
+    The module does not look at the store. *)
 val write : located -> external_store:string -> (unit, write_error) result
 
 val write_error_to_string : write_error -> string

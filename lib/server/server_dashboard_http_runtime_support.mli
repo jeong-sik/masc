@@ -14,8 +14,9 @@ type dashboard_compute_mode =
       (** Run the compute on the caller's switch / budget. *)
   | Offloaded_readonly
       (** Submit the compute to the registered executor pool with
-          weight 1.0. Falls back to inline when no pool is
-          registered or when the submit raises (logged at warn). *)
+          the weight of its declared {!Pool_work.kind}. Falls back to
+          inline when no pool is registered or when the submit raises
+          (logged at warn). *)
 
 type runtime = {
   net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t;
@@ -32,6 +33,7 @@ val run_dashboard_compute :
   sw:Eio.Switch.t ->
   clock:_ Eio.Time.clock ->
   config:Workspace.config ->
+  kind:Pool_work.kind ->
   (config:Workspace.config -> sw:Eio.Switch.t -> 'a) ->
   'a
 (** Dispatch [compute] under the chosen [mode] (defaults to
@@ -39,9 +41,10 @@ val run_dashboard_compute :
 
     [Inline_shared] forwards [sw] / [config] straight to
     [compute]; [Offloaded_readonly] submits the compute through
-    {!Executor_pool_ref.submit_or_inline} with weight 1.0 and runs it under
-    a nested [Eio.Switch.run]. Nested dashboard cache submissions therefore
-    stay on the current worker instead of waiting on the same pool.
+    {!Pool_work.submit} as work of [kind] and runs it under a nested
+    [Eio.Switch.run]. Nested dashboard cache submissions therefore stay on
+    the current worker instead of waiting on the same pool, and the outermost
+    submit's [kind] is the one that counts (RFC-0474 L4b).
 
     [Eio.Cancel.Cancelled] is propagated from either path. Any
     other exception during the offload is logged at

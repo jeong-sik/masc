@@ -156,21 +156,22 @@ let cached_surface_payload cache =
       payload
 
 let cached_surface_or_first_success_payload surface ~cache_key ~ttl ~clock
-    ~timeout_sec compute =
+    ~timeout_sec work =
   if cached_surface_has_success surface then
     cached_surface_payload surface
   else
-    let compute_and_track () =
-      mark_cached_surface_attempt surface;
-      try
-        let json = compute () in
-        mark_cached_surface_success surface json;
-        json
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-          mark_cached_surface_error surface exn;
-          raise exn
+    let compute_and_track =
+      Pool_work.wrap work (fun compute ->
+        mark_cached_surface_attempt surface;
+        try
+          let json = compute () in
+          mark_cached_surface_success surface json;
+          json
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+            mark_cached_surface_error surface exn;
+            raise exn)
     in
     let _ =
       Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl ~clock
@@ -179,6 +180,6 @@ let cached_surface_or_first_success_payload surface ~cache_key ~ttl ~clock
     cached_surface_payload surface
 
 let cached_surface_or_first_success_json surface ~cache_key ~ttl ~clock
-    ~timeout_sec compute =
+    ~timeout_sec work =
   (cached_surface_or_first_success_payload surface ~cache_key ~ttl ~clock
-     ~timeout_sec compute).json
+     ~timeout_sec work).json

@@ -177,7 +177,7 @@ let handle_telemetry request reqd =
         ]))
     in
     let dashboard_telemetry_cache_ttl_sec = 1.0 in
-    let compute () =
+    let compute = Pool_work.cpu @@ fun () ->
       let result =
         Server_timing.measure timing Telemetry_query (fun () ->
           Telemetry_unified.read_unified_result ~masc_root

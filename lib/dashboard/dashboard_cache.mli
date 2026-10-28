@@ -33,34 +33,37 @@ type cached_payload = {
     and weak entity tag. Payload computation prepares all three together before
     publication, so repeat requests do not serialize or hash again. *)
 
-val get_or_compute : string -> ttl:float -> (unit -> Yojson.Safe.t) -> Yojson.Safe.t
-(** [get_or_compute key ~ttl f] returns a cached value if [key] exists and
-    has not expired, otherwise calls [f ()] and stores the result for [ttl]
-    seconds.
+val get_or_compute :
+  string -> ttl:float -> Yojson.Safe.t Pool_work.t -> Yojson.Safe.t
+(** [get_or_compute key ~ttl work] returns a cached value if [key] exists and
+    has not expired, otherwise runs [work] and stores the result for [ttl]
+    seconds. [work] is submitted once, with the weight of the kind it declares
+    ({!Pool_work.submit}); the cache chooses no weight of its own.
 
     If the entry is expired but within the stale grace period ([ttl * 3]),
-    the stale value is returned immediately and [f] runs in a background
+    the stale value is returned immediately and [work] runs in a background
     fiber (requires [Eio_context.set_switch] to have been called).
 
-    Safe to nest: [f] may call [get_or_compute] for a different key without
+    Safe to nest: [work] may call [get_or_compute] for a different key without
     deadlocking.  Concurrent requests for the same key are serialised — only
-    one [f] runs; others wait for the result (stampede protection).
+    one [work] runs; others wait for the result (stampede protection).
     JSON-only fills retain the AST without serializing or hashing it. *)
 
 val get_or_compute_payload :
   ?preparation:payload_preparation ->
-  string -> ttl:float -> (unit -> Yojson.Safe.t) -> cached_payload
-(** [get_or_compute_payload key ~ttl f] returns the {!cached_payload} for [key].
-    Calls [f ()] on cache miss, and memoizes both the JSON AST and the serialized
+  string -> ttl:float -> Yojson.Safe.t Pool_work.t -> cached_payload
+(** [get_or_compute_payload key ~ttl work] returns the {!cached_payload} for
+    [key]. Runs [work] on cache miss, and memoizes both the JSON AST and the serialized
     string + ETag. With an executor pool installed, computation, serialization,
-    and hashing share one worker submission on cold fills and background refresh.
-    Cache hits with prepared bytes do not submit work.
+    and hashing share one worker submission on cold fills and background refresh,
+    at the weight of [work]'s kind: an I/O work serializes and hashes at the
+    I/O weight too. Cache hits with prepared bytes do not submit work.
     [Http_encodings] also prepares gzip/zstd inside that worker before publication.
     Preparation policy must be consistent for all producers of a cache key.
     Seeds and uncached timeout envelopes retain identity bytes only.
     A key first filled by a JSON-only reader retains that identity-only policy:
     its first payload reader prepares bytes once on the executor without rerunning
-    [f]. Concurrent Eio readers share the preparation; raw native threads may
+    [work]. Concurrent Eio readers share the preparation; raw native threads may
     encode concurrently, but every reader adopts the same published payload.
     JSON readers keep accessing the AST. Invalidation cannot republish the
     detached old value. *)
@@ -124,8 +127,8 @@ val is_timeout_envelope : Yojson.Safe.t -> bool
 
 val get_or_compute_with_timeout :
   string -> ttl:float -> clock:_ Eio.Time.clock -> timeout_sec:float ->
-  (unit -> Yojson.Safe.t) -> Yojson.Safe.t
-(** Like [get_or_compute] but wraps the compute function with an Eio timeout.
+  Yojson.Safe.t Pool_work.t -> Yojson.Safe.t
+(** Like [get_or_compute] but runs the work under an Eio timeout.
     On timeout in the stale-while-revalidate path, the stale value is
     preserved (not overwritten by error JSON).  On timeout with no stale
     data, returns a timeout-error JSON without caching it.  Repeated no-stale
@@ -135,7 +138,7 @@ val get_or_compute_with_timeout :
 val get_or_compute_payload_with_timeout :
   ?preparation:payload_preparation ->
   string -> ttl:float -> clock:_ Eio.Time.clock -> timeout_sec:float ->
-  (unit -> Yojson.Safe.t) -> cached_payload
+  Yojson.Safe.t Pool_work.t -> cached_payload
 (** Same timeout and stale-value semantics as {!get_or_compute_with_timeout},
     retaining the memoized bytes and ETag of the returned JSON. Timeout envelopes
     are returned uncached. Preparation completes inside the timed worker compute

@@ -1136,20 +1136,19 @@ let add_routes router =
            let payload =
              Dashboard_cache.get_or_compute_payload cache_key
                ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
-               (fun () ->
-                  Domain_pool_ref.submit_io_or_inline (fun () ->
-                    let nodes =
-                      if not (Sys.file_exists base) then []
-                      else
-                        let diff_by_path =
-                          if include_diff then Some (git_diff_badges ~base)
-                          else None
-                        in
-                        scan_dir ?diff_by_path ~base ~depth:0
-                          ~max_depth:effective_depth
-                          ~max_nodes:effective_max_nodes [] base
-                    in
-                    `List (List.rev nodes)))
+               (Pool_work.io (fun () ->
+                  let nodes =
+                    if not (Sys.file_exists base) then []
+                    else
+                      let diff_by_path =
+                        if include_diff then Some (git_diff_badges ~base)
+                        else None
+                      in
+                      scan_dir ?diff_by_path ~base ~depth:0
+                        ~max_depth:effective_depth
+                        ~max_nodes:effective_max_nodes [] base
+                  in
+                  `List (List.rev nodes)))
            in
            cached_response_with_source_and_base ~source ~base_path:base request
              reqd payload)
@@ -1286,24 +1285,23 @@ let add_routes router =
                 let payload =
                   Dashboard_cache.get_or_compute_payload cache_key
                     ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
-                    (fun () ->
-                       Domain_pool_ref.submit_io_or_inline (fun () ->
-                         let is_dir =
-                           workspace_or_default
-                             ~warn_on_failure:false
-                             ~site:"children_is_directory"
-                             ~path:file.lexical_path
-                             ~default:false
-                             (fun () -> Sys.is_directory file.lexical_path)
+                    (Pool_work.io (fun () ->
+                       let is_dir =
+                         workspace_or_default
+                           ~warn_on_failure:false
+                           ~site:"children_is_directory"
+                           ~path:file.lexical_path
+                           ~default:false
+                           (fun () -> Sys.is_directory file.lexical_path)
+                       in
+                       if not is_dir then `List []
+                       else
+                         let nodes =
+                           scan_dir ~base ~depth:child_depth
+                             ~max_depth:child_depth ~max_nodes []
+                             file.lexical_path
                          in
-                         if not is_dir then `List []
-                         else
-                           let nodes =
-                             scan_dir ~base ~depth:child_depth
-                               ~max_depth:child_depth ~max_nodes []
-                               file.lexical_path
-                           in
-                           `List (List.rev nodes)))
+                         `List (List.rev nodes)))
                 in
                 cached_response_with_source_and_base ~source ~base_path:base
                   request reqd payload))
@@ -1633,16 +1631,15 @@ let add_routes router =
                   let payload =
                     Dashboard_cache.get_or_compute_payload cache_key
                       ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
-                      (fun () ->
-                         Domain_pool_ref.submit_io_or_inline (fun () ->
-                           match git_run_lines ~cwd:repo_root
-                                   ["blame"; "--porcelain"; "--"; rel]
-                           with
-                           | [] -> `List []
-                           | lines ->
-                             let entries = parse_blame_porcelain lines in
-                             let grouped = group_blame_entries rel entries in
-                             `List grouped))
+                      (Pool_work.io (fun () ->
+                         match git_run_lines ~cwd:repo_root
+                                 ["blame"; "--porcelain"; "--"; rel]
+                         with
+                         | [] -> `List []
+                         | lines ->
+                           let entries = parse_blame_porcelain lines in
+                           let grouped = group_blame_entries rel entries in
+                           `List grouped))
                   in
                   cached_response_with_source ~source request reqd payload)))
          request reqd)
@@ -1688,24 +1685,23 @@ let add_routes router =
                      let payload =
                        Dashboard_cache.get_or_compute_payload cache_key
                          ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
-                         (fun () ->
-                            Domain_pool_ref.submit_io_or_inline (fun () ->
-                              let lines =
-                                git_run_lines ~cwd:repo_root
-                                  [ "log"
-                                  ; Printf.sprintf "-n%d" limit
-                                  ; "--pretty=format:%h%x09%at%x09%an%x09%s"
-                                  ; "--"
-                                  ; rel
-                                  ]
-                              in
-                              `Assoc
-                                [ ("ok", `Bool true)
-                                ; ( "commits"
-                                  , `List
-                                      (List.filter_map git_log_row_of_line
-                                         lines) )
-                                ]))
+                         (Pool_work.io (fun () ->
+                            let lines =
+                              git_run_lines ~cwd:repo_root
+                                [ "log"
+                                ; Printf.sprintf "-n%d" limit
+                                ; "--pretty=format:%h%x09%at%x09%an%x09%s"
+                                ; "--"
+                                ; rel
+                                ]
+                            in
+                            `Assoc
+                              [ ("ok", `Bool true)
+                              ; ( "commits"
+                                , `List
+                                    (List.filter_map git_log_row_of_line
+                                       lines) )
+                              ]))
                      in
                      cached_response_with_source ~source request reqd payload)))
          request reqd)
@@ -1755,21 +1751,20 @@ let add_routes router =
                 let payload =
                   Dashboard_cache.get_or_compute_payload cache_key
                     ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
-                    (fun () ->
-                       Domain_pool_ref.submit_io_or_inline (fun () ->
-                         match git_run_lines_or_error ~cwd:repo_root
-                                 ["diff"; base_ref; "--"; rel]
-                         with
-                         | Error _ ->
-                           observe_workspace_route_failure
-                             ~site:"git_run" ~path:rel
-                             (Failure "git diff failed");
-                           `Null
-                         | Ok [] ->
-                           `Assoc [("unified", `List []); ("has_changes", `Bool false)]
-                         | Ok diff_lines ->
-                           let unified = parse_unified_diff diff_lines in
-                           `Assoc [("unified", `List unified); ("has_changes", `Bool true)]))
+                    (Pool_work.io (fun () ->
+                       match git_run_lines_or_error ~cwd:repo_root
+                               ["diff"; base_ref; "--"; rel]
+                       with
+                       | Error _ ->
+                         observe_workspace_route_failure
+                           ~site:"git_run" ~path:rel
+                           (Failure "git diff failed");
+                         `Null
+                       | Ok [] ->
+                         `Assoc [("unified", `List []); ("has_changes", `Bool false)]
+                       | Ok diff_lines ->
+                         let unified = parse_unified_diff diff_lines in
+                         `Assoc [("unified", `List unified); ("has_changes", `Bool true)]))
                 in
                 (match payload.json with
                  | `Null ->

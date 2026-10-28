@@ -8,19 +8,22 @@ type runtime = {
 }
 
 let run_dashboard_compute ?(mode = Offloaded_readonly) ?runtime ~sw ~clock
-    ~(config : Workspace.config) compute =
+    ~(config : Workspace.config) ~(kind : Pool_work.kind) compute =
   let _ = runtime, clock in
   let fallback () = compute ~config ~sw in
-  let run_in_pool pool_sw =
-    `Done (compute ~config ~sw:pool_sw)
+  let run_in_pool () =
+    Eio.Switch.run (fun pool_sw -> `Done (compute ~config ~sw:pool_sw))
   in
   let offloaded () =
     match Executor_pool_ref.get () with
     | None -> fallback ()
     | Some _ ->
-      (match
-         Executor_pool_ref.submit_or_inline (fun () -> Eio.Switch.run run_in_pool)
-       with
+      let work =
+        match kind with
+        | Pool_work.Cpu -> Pool_work.cpu run_in_pool
+        | Pool_work.Io -> Pool_work.io run_in_pool
+      in
+      (match Pool_work.submit work with
        | `Done value -> value)
   in
   match mode with

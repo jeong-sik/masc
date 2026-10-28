@@ -27,7 +27,8 @@ let with_pool ~domain_count f =
 let json = testable (Fmt.of_to_string Yojson.Safe.to_string) Yojson.Safe.equal
 
 let lookup ?(timeout_sec = 5.) ~clock key compute =
-  Dashboard_cache.get_or_compute_with_timeout key ~ttl:60. ~clock ~timeout_sec compute
+  Dashboard_cache.get_or_compute_with_timeout key ~ttl:60. ~clock ~timeout_sec
+    (Pool_work.cpu compute)
 ;;
 
 (* A cached value, read without computing. *)

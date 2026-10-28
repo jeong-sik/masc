@@ -8,6 +8,7 @@ val run_dashboard_compute :
   sw:Eio.Switch.t ->
   clock:_ Eio.Time.clock ->
   config:Workspace.config ->
+  kind:Pool_work.kind ->
   (config:Workspace.config -> sw:Eio.Switch.t -> 'a) ->
   'a
 (** Dispatch dashboard compute through the configured runtime support. *)

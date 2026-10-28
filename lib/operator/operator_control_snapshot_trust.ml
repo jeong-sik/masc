@@ -71,7 +71,7 @@ let compact_keeper_runtime_trust_json
     Dashboard_cache.get_or_compute
       (compact_runtime_trust_cache_key ~config ~meta)
       ~ttl:compact_runtime_trust_cache_ttl_sec
-      (fun () -> Keeper_runtime_trust_snapshot.summary_json ~config ~meta)
+      (Pool_work.cpu (fun () -> Keeper_runtime_trust_snapshot.summary_json ~config ~meta))
   in
   project_compact_runtime_trust runtime_trust
 ;;

@@ -4500,9 +4500,9 @@ let test_keeper_lifecycle_refresh_invalidates_projection_snapshot () =
       Dashboard_projection_cache.get_or_compute_snapshot_json
         ~config
         ~actor:(Some "lifecycle-test")
-        (fun _ ->
+        (fun _ -> Pool_work.cpu (fun () ->
            incr compute_count;
-           `Assoc [ "revision", `Int !compute_count ])
+           `Assoc [ "revision", `Int !compute_count ]))
     in
     let revision =
       Yojson.Safe.Util.(read_snapshot () |> member "revision" |> to_int)

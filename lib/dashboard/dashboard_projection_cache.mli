@@ -32,11 +32,11 @@ val with_current_gate_keeper_observations :
 val get_or_compute_snapshot_json :
   config:Workspace_utils.config ->
   actor:string option ->
-  (string -> Yojson.Safe.t) ->
+  (string -> Yojson.Safe.t Pool_work.t) ->
   Yojson.Safe.t
 (** Cached metadata with fresh authoritative portrait equipment per response.
-    The compute callback receives the normalized actor name produced by
-    {!normalize_actor_name}. *)
+    The callback receives the normalized actor name produced by
+    {!normalize_actor_name} and returns the work the cache submits. *)
 
 val invalidate_snapshot_json : config:Workspace_utils.config -> unit
 (** Drop every actor and HTTP operator-snapshot cache entry and advance the
@@ -62,7 +62,7 @@ val snapshot_invalidation_generation : unit -> int
 val get_or_compute_digest_json :
   config:Workspace_utils.config ->
   actor:string option ->
-  (string -> Yojson.Safe.t) ->
+  (string -> Yojson.Safe.t Pool_work.t) ->
   Yojson.Safe.t
 (** Cached read with TTL [5.0 s] for the heavier digest projection. *)
 

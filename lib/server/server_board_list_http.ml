@@ -55,47 +55,46 @@ let payload ?config ~reaction_actor request
   in
   Dashboard_cache.get_or_compute_payload cache_key
     ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
-    (fun () ->
-       Domain_pool_ref.submit_io_or_inline (fun () ->
-         let posts =
-           Board_dispatch.list_posts ?hearth ~sort_by ~exclude_system
-             ~exclude_automation ?author_filter ~limit:base_fetch ()
-         in
-         let karma_map = Board_dispatch.get_all_karma () in
-         let get_karma author =
-           match List.assoc_opt author karma_map with
-           | Some karma -> karma
-           | None -> 0
-         in
-         let paged = posts |> drop offset |> take limit in
-         let reaction_rows =
-           board_reactions_batch
-             ~targets:
-               (List.map
-                  (fun (p : Board.post) ->
-                     (Board.Reaction_post, Board.Post_id.to_string p.id))
-                  paged)
-             ~voter:reaction_actor
-         in
-         let reactions_for = board_reactions_lookup reaction_rows in
-         let posts_json =
-           List.map
-             (fun (p : Board.post) ->
-                let author = Board.Agent_id.to_string p.author in
-                let post_id = Board.Post_id.to_string p.id in
-                let current_vote = board_current_vote_for_post ~voter ~post_id in
-                let reactions = reactions_for (Board.Reaction_post, post_id) in
-                board_post_dashboard_json
-                  ~reactions
-                  ?current_vote
-                  ~author_karma:(get_karma author) p)
-             paged
-         in
-         `Assoc
-           [ ("posts", `List posts_json)
-           ; ("count", `Int (List.length posts_json))
-           ; ("limit", `Int limit)
-           ; ("offset", `Int offset)
-           ; ("sort_by", `String (board_sort_label sort_by))
-           ]))
+    (Pool_work.io (fun () ->
+       let posts =
+         Board_dispatch.list_posts ?hearth ~sort_by ~exclude_system
+           ~exclude_automation ?author_filter ~limit:base_fetch ()
+       in
+       let karma_map = Board_dispatch.get_all_karma () in
+       let get_karma author =
+         match List.assoc_opt author karma_map with
+         | Some karma -> karma
+         | None -> 0
+       in
+       let paged = posts |> drop offset |> take limit in
+       let reaction_rows =
+         board_reactions_batch
+           ~targets:
+             (List.map
+                (fun (p : Board.post) ->
+                   (Board.Reaction_post, Board.Post_id.to_string p.id))
+                paged)
+           ~voter:reaction_actor
+       in
+       let reactions_for = board_reactions_lookup reaction_rows in
+       let posts_json =
+         List.map
+           (fun (p : Board.post) ->
+              let author = Board.Agent_id.to_string p.author in
+              let post_id = Board.Post_id.to_string p.id in
+              let current_vote = board_current_vote_for_post ~voter ~post_id in
+              let reactions = reactions_for (Board.Reaction_post, post_id) in
+              board_post_dashboard_json
+                ~reactions
+                ?current_vote
+                ~author_karma:(get_karma author) p)
+           paged
+       in
+       `Assoc
+         [ ("posts", `List posts_json)
+         ; ("count", `Int (List.length posts_json))
+         ; ("limit", `Int limit)
+         ; ("offset", `Int offset)
+         ; ("sort_by", `String (board_sort_label sort_by))
+         ]))
 ;;

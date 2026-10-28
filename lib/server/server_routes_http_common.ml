@@ -231,9 +231,9 @@ let handle_presence_events request reqd =
 (* Cached + offloaded dashboard read response.
 
    The repeated dashboard-read pattern is: wrap a compute closure in the SWR
-   cache ([Dashboard_cache.get_or_compute]) and submit it to the shared
-   Executor_pool ([Domain_pool_ref.submit_io_or_inline]). ~20 routes inline
-   this 2-call nesting; ~28 dashboard GET routes still omit it and recompute
+   cache ([Dashboard_cache.get_or_compute]), which submits it to the shared
+   Executor_pool with the kind the route declares ({!Pool_work}). ~20 routes
+   inline this pattern; ~28 dashboard GET routes still omit it and recompute
    uncached on the main HTTP domain per request. The uncached ones (e.g.
    /branches spawning `git branch`, /workspaces querying up to 1000 messages,
    /status) head-of-line-block other requests when a dashboard page fires
@@ -244,7 +244,6 @@ let handle_presence_events request reqd =
    This combinator names the pattern so routes adopt it as a one-liner and
    the uncached migration stops being N-of-M hand-patching. [cache_key]
    stays caller-built so request params (limit, actor, ...) vary the entry. *)
-let respond_cached_read ?(compress = true) ~request ~reqd ~cache_key ~ttl compute =
+let respond_cached_read ?(compress = true) ~request ~reqd ~cache_key ~ttl work =
   Server_cached_read_http.respond ~compress ~request reqd
-    (Dashboard_cache.get_or_compute_payload cache_key ~ttl (fun () ->
-       Domain_pool_ref.submit_io_or_inline compute))
+    (Dashboard_cache.get_or_compute_payload cache_key ~ttl work)

@@ -90,26 +90,25 @@ let agent_activity_http_json ~(config : Workspace.config) ~hours : Yojson.Safe.t
   Dashboard_cache.get_or_compute
     cache_key
     ~ttl:Server_dashboard_http_core_cache.live_cache_ttl_s
-    (fun () ->
-      Domain_pool_ref.submit_io_or_inline (fun () ->
-        let since = Time_compat.now () -. (hours *. Masc_time_constants.hour) in
-        let activities = Telemetry_eio.summarize_agent_activity config ~since in
-        `Assoc
-          [ ("hours", `Float hours);
-            ("agents",
-             `List
-               (List.map
-                  (fun (a : Telemetry_eio.agent_activity) ->
-                     `Assoc
-                       [ ("agent_id", `String a.agent_id);
-                         ("tool_calls", `Int a.tool_calls);
-                         ("success_count", `Int a.success_count);
-                         ("failure_count", `Int a.failure_count);
-                         ("first_seen", `Float a.first_seen);
-                         ("last_seen", `Float a.last_seen);
-                       ])
-                  activities));
-          ]))
+    (Pool_work.io (fun () ->
+      let since = Time_compat.now () -. (hours *. Masc_time_constants.hour) in
+      let activities = Telemetry_eio.summarize_agent_activity config ~since in
+      `Assoc
+        [ ("hours", `Float hours);
+          ("agents",
+           `List
+             (List.map
+                (fun (a : Telemetry_eio.agent_activity) ->
+                   `Assoc
+                     [ ("agent_id", `String a.agent_id);
+                       ("tool_calls", `Int a.tool_calls);
+                       ("success_count", `Int a.success_count);
+                       ("failure_count", `Int a.failure_count);
+                       ("first_seen", `Float a.first_seen);
+                       ("last_seen", `Float a.last_seen);
+                     ])
+                activities));
+        ]))
 ;;
 
 let add_agent_api_routes router =

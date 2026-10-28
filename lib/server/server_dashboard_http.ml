@@ -49,16 +49,15 @@ let dashboard_board_payload
       config_key
       (Option.value ~default:"-" voter)
   in
-  Dashboard_cache.get_or_compute_payload cache_key ~ttl:dashboard_projection_cache_ttl_s (fun () ->
-    (* /api/v1/dashboard/board was measured at 30-44s on hot keeper
-       fleets.  The compute below scans the post store, fetches the
-       karma map, and per-post enriches with vote + contributor
-       quality.  Running this on the Eio main domain blocked every
-       other HTTP fiber for the duration.  Domain_pool_ref offloads
-       to a worker domain; the [Dashboard_cache] above keeps user
-       requests on the cache fast-path so they never wait for this
-       refresh. *)
-    Domain_pool_ref.submit_io_or_inline (fun () ->
+  (* /api/v1/dashboard/board was measured at 30-44s on hot keeper
+     fleets.  The compute below scans the post store, fetches the
+     karma map, and per-post enriches with vote + contributor
+     quality.  Running this on the Eio main domain blocked every
+     other HTTP fiber for the duration.  [Dashboard_cache] submits
+     the work to a worker domain and keeps user requests on the
+     cache fast-path so they never wait for this refresh. *)
+  Dashboard_cache.get_or_compute_payload cache_key ~ttl:dashboard_projection_cache_ttl_s
+    (Pool_work.io (fun () ->
       let base_fetch =
         board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset
       in
@@ -186,8 +185,8 @@ let dashboard_gate_http_json request ~base_path : Yojson.Safe.t =
       window_minutes
       approval_queue_revision
   in
-  let compute () =
-    Domain_pool_ref.submit_io_or_inline (fun () ->
+  let compute =
+    Pool_work.io (fun () ->
       Dashboard_gate.dashboard_json ~base_path ~limit ~window_minutes)
   in
   if force then Dashboard_cache.invalidate cache_key;
@@ -211,9 +210,9 @@ let dashboard_gate_tool_events_http_json request ~base_path : Yojson.Safe.t =
    an uncached computation must not run on the Eio main domain.
 
    Same fix pattern as PR #18991 / #18993 / #18994: wrap in
-   [Dashboard_cache.get_or_compute] for stale-while-revalidate and
-   push the compute through [Domain_pool_ref.submit_io_or_inline]
-   so the main domain keeps serving requests during refresh. *)
+   [Dashboard_cache.get_or_compute] for stale-while-revalidate, which
+   submits the compute to a worker as [Pool_work.io], so the main domain
+   keeps serving requests during refresh. *)
 let dashboard_proof_compute ~config ~limit () : Yojson.Safe.t =
   let base_path = config.Workspace.base_path in
   (* Single disk scan via [proof_compose]; the historical
@@ -287,10 +286,9 @@ let dashboard_scheduled_automation_http_json ~(config : Workspace.config) :
   Dashboard_cache.get_or_compute
     (Server_dashboard_http_core_cache.scheduled_automation_cache_key config)
     ~ttl:Server_dashboard_http_core_cache.live_cache_ttl_s
-    (fun () ->
-      Domain_pool_ref.submit_io_or_inline (fun () ->
-        Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
-          config))
+    (Pool_work.io (fun () ->
+      Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
+        config))
 ;;
 
 let dashboard_scheduled_automation_query_http_json
@@ -325,9 +323,8 @@ let dashboard_proof_http_json ~config request : Yojson.Safe.t =
   let key =
     Printf.sprintf "dashboard.proof:%s;%d" config.Workspace.base_path limit
   in
-  Dashboard_cache.get_or_compute key ~ttl:dashboard_projection_cache_ttl_s (fun () ->
-    Domain_pool_ref.submit_io_or_inline (fun () ->
-      dashboard_proof_compute ~config ~limit ()))
+  Dashboard_cache.get_or_compute key ~ttl:dashboard_projection_cache_ttl_s (Pool_work.io (fun () ->
+    dashboard_proof_compute ~config ~limit ()))
 ;;
 
 type approval_resolve_http_error =
@@ -859,9 +856,8 @@ let dashboard_bootstrap_http_json
         Printf.sprintf "planning:%s" (Mcp_server.workspace_config state).base_path
       in
       (Dashboard_cache.get_or_compute_payload cache_key
-         ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s (fun () ->
-           Domain_pool_ref.submit_io_or_inline (fun () ->
-             dashboard_planning_http_json ~config:(Mcp_server.workspace_config state))))
+         ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s (Pool_work.io (fun () ->
+           dashboard_planning_http_json ~config:(Mcp_server.workspace_config state))))
         .json)
   in
   let namespace_truth =
@@ -906,9 +902,8 @@ let warm_dashboard_surfaces (state : Mcp_server.server_state) =
       (* fire-and-forget: pre-warm planning cache *)
       ignore
         (Dashboard_cache.get_or_compute_payload cache_key
-           ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s (fun () ->
-             Domain_pool_ref.submit_io_or_inline (fun () ->
-               dashboard_planning_http_json ~config)));
+           ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s (Pool_work.io (fun () ->
+             dashboard_planning_http_json ~config)));
       Log.Dashboard.info "planning surface pre-warmed (%.1fms)" ((Time_compat.now () -. t_start) *. 1000.0)
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
@@ -921,7 +916,7 @@ let warm_dashboard_surfaces (state : Mcp_server.server_state) =
       ignore
         (Dashboard_cache.get_or_compute_payload "config_introspect"
            ~ttl:Server_dashboard_http_core_cache.config_cache_ttl_s
-           Env_config_introspect.to_json);
+           (Pool_work.cpu Env_config_introspect.to_json));
       Log.Dashboard.info "config surface pre-warmed (%.1fms)" ((Time_compat.now () -. t_start) *. 1000.0)
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
@@ -934,9 +929,8 @@ let warm_dashboard_surfaces (state : Mcp_server.server_state) =
       (* fire-and-forget: pre-warm keeper-memory-health cache *)
       ignore
         (Dashboard_cache.get_or_compute_payload cache_key
-           ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s (fun () ->
-             Domain_pool_ref.submit_io_or_inline (fun () ->
-               Server_dashboard_http_keeper_memory_health.keeper_memory_health_http_json ~base_path)));
+           ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s (Pool_work.io (fun () ->
+             Server_dashboard_http_keeper_memory_health.keeper_memory_health_http_json ~base_path)));
       Log.Dashboard.info "keeper-memory-health surface pre-warmed (%.1fms)" ((Time_compat.now () -. t_start) *. 1000.0)
     with
     | Eio.Cancel.Cancelled _ as e -> raise e

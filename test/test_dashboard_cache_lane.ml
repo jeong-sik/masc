@@ -65,11 +65,11 @@ let test_a_stale_refresh_forked_by_a_read_is_background_work () =
           (Pool_lane.with_read (fun () ->
              let served =
                Dashboard_cache.get_or_compute_with_timeout key ~ttl:60. ~clock ~timeout_sec:5.
-                 (fun () ->
+                 (Pool_work.cpu (fun () ->
                    Eio.Promise.resolve start ();
                    Eio.Promise.await release;
                    Eio.Promise.resolve finish ();
-                   `String "fresh")
+                   `String "fresh"))
              in
              Eio.Promise.await started;
              served)))
@@ -91,7 +91,7 @@ let test_a_compute_a_read_waits_for_is_a_read () =
     let served =
       Pool_lane.with_read (fun () ->
         Dashboard_cache.get_or_compute_with_timeout "miss-lane" ~ttl:60. ~clock ~timeout_sec:5.
-          (fun () -> `String "computed"))
+          (Pool_work.cpu (fun () -> `String "computed")))
     in
     check json "the read is answered with its compute" (`String "computed") served;
     check lanes "the compute entered the pool as a read" (1, 0) (entered_since before))
@@ -107,7 +107,7 @@ let test_an_inline_refresh_the_read_waits_for_is_a_read () =
     let _served =
       Pool_lane.with_read (fun () ->
         Dashboard_cache.get_or_compute_with_timeout key ~ttl:60. ~clock ~timeout_sec:5.
-          (fun () -> `String "fresh"))
+          (Pool_work.cpu (fun () -> `String "fresh")))
     in
     check lanes "the inline refresh entered the pool as a read" (1, 0) (entered_since before))
 ;;

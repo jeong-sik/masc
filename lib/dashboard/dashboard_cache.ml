@@ -102,9 +102,10 @@ let cached_value_of_json ~preparation ~origin json =
         payload_of_json ~origin json) in
       Json_value { json; origin; prepared; identity }
 
-(* The value a compute publishes, before any pool. *)
-let prepared_value ~preparation compute () =
-  cached_value_of_json ~preparation ~origin:Computed (compute ())
+(* The value a compute publishes, as work of the kind the compute declared. *)
+let prepared_work ~preparation work =
+  Pool_work.wrap work (fun body ->
+    cached_value_of_json ~preparation ~origin:Computed (body ()))
 
 let json_of_cached_value = function
   | Prepared payload -> payload.json
@@ -529,9 +530,9 @@ let get_or_compute_eio ?wait_timeout_sec ?(window = unbounded_window) key ~ttl p
     | Eio.Exn.Multiple exns -> List.exists (fun (exn, _) -> gave_up exn) exns
     | _ -> false
   in
-  (* A pool job unless the caller is already inside one. *)
+  (* A pool job of the work's kind unless the caller is already inside one. *)
   let compute () =
-    window.within (fun () -> Executor_pool_ref.submit_or_inline produce)
+    window.within (fun () -> Pool_work.submit produce)
   in
   let clear_claimed ~token =
     atomic_update table (fun map ->
@@ -571,18 +572,19 @@ let get_or_compute_eio ?wait_timeout_sec ?(window = unbounded_window) key ~ttl p
      claimed gave up and cleared the slot, so the owner looks the key up
      again instead of failing for another request's cancellation. *)
   let own_claimed ~token claim =
-    let job () =
-      if Atomic.compare_and_set claim.holder Unclaimed Owner_job then
-        match run_claimed ~token claim produce with
-        | _entry -> ()
-        | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
-        | exception _ -> ()  (* settled as [Failed]; the owner raises it below *)
+    let job =
+      Pool_work.wrap produce (fun body ->
+        if Atomic.compare_and_set claim.holder Unclaimed Owner_job then
+          match run_claimed ~token claim body with
+          | _entry -> ()
+          | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
+          | exception _ -> ()  (* settled as [Failed]; the owner raises it below *))
     in
     match
       window.within (fun () ->
         Eio.Fiber.first
           (fun () ->
-            Executor_pool_ref.submit_or_inline job;
+            Pool_work.submit job;
             Eio.Promise.await claim.outcome)
           (fun () -> Eio.Promise.await claim.outcome))
     with
@@ -973,8 +975,7 @@ let get_or_compute_entry key ~ttl produce =
   let entry =
     if Eio_guard.is_ready () then get_or_compute_eio key ~ttl produce
     else
-      get_or_compute_simple key ~ttl (fun () ->
-        Executor_pool_ref.submit_or_inline produce)
+      get_or_compute_simple key ~ttl (fun () -> Pool_work.submit produce)
   in
   clear_timeout_circuit key;
   entry
@@ -1024,12 +1025,10 @@ let peek key =
    Safe to offload here because [compute] runs without holding the cache lock
    (see the header note); the pool is the only thing the caller waits on.
 
-   Weight stays at the default 1.0. This compute is CPU-bound and occupying a
-   whole worker is the intent; RFC-0204 rejects *reclassifying* existing I/O
-   submissions to 1.0, which is a different change. Pool size then bounds how
-   many computes run at once, so no separate concurrency gate is added. *)
-let offloaded_value ~preparation compute () =
-  Executor_pool_ref.submit_or_inline (prepared_value ~preparation compute)
+   The weight is the one the caller declared with its {!Pool_work.t}; the
+   cache has none of its own (RFC-0474 L4b). Pool size then bounds how many
+   computes run at once, so no separate concurrency gate is added. *)
+let offloaded_value produce () = Pool_work.submit produce
 
 (* One compute under the caller's window. A compute that finished as the
    window closed is the answer: [Eio.Time.with_timeout] kept whichever arm
@@ -1051,13 +1050,13 @@ let compute_under_timeout ~clock ~timeout_sec ~key f =
 ;;
 
 let get_or_compute_value_with_timeout ~preparation
-    key ~ttl ~clock ~timeout_sec compute =
+    key ~ttl ~clock ~timeout_sec work =
   if Option.is_none (peek key) && timeout_circuit_is_open key then
     Prepared (payload_of_json ~origin:Timeout
       (timeout_envelope_json ~kind:Timeout_circuit_open ~key ~timeout_sec))
   else
-    let produce = prepared_value ~preparation compute in
-    let compute = offloaded_value ~preparation compute in
+    let produce = prepared_work ~preparation work in
+    let compute = offloaded_value produce in
     let with_timeout f = compute_under_timeout ~clock ~timeout_sec ~key f in
     (* One window for every attempt of this lookup: a retry after a released
        claim (RFC-0204 3.4 L4b) gets what is left of it, not a fresh one. *)
@@ -1084,9 +1083,9 @@ let get_or_compute_value_with_timeout ~preparation
              ~kind:(timeout_kind_of_role role) ~key ~timeout_sec))
 
 let get_or_compute_payload_with_timeout ?(preparation = Identity_only)
-    key ~ttl ~clock ~timeout_sec compute =
+    key ~ttl ~clock ~timeout_sec work =
   let value = get_or_compute_value_with_timeout
-    ~preparation:(Cache_http preparation) key ~ttl ~clock ~timeout_sec compute in
+    ~preparation:(Cache_http preparation) key ~ttl ~clock ~timeout_sec work in
   match peek_cached_payload value with
   | Some payload -> payload
   | None ->
@@ -1101,9 +1100,9 @@ let get_or_compute_payload_with_timeout ?(preparation = Identity_only)
                (timeout_envelope_json
                   ~kind:(timeout_kind_of_role role) ~key ~timeout_sec))
 
-let get_or_compute_with_timeout key ~ttl ~clock ~timeout_sec compute =
+let get_or_compute_with_timeout key ~ttl ~clock ~timeout_sec work =
   get_or_compute_value_with_timeout ~preparation:Cache_json
-    key ~ttl ~clock ~timeout_sec compute
+    key ~ttl ~clock ~timeout_sec work
   |> json_of_cached_value
 
 (* RFC-0372 Phase 3 — make the timeout the default rather than the opt-in.
@@ -1137,26 +1136,26 @@ let set_default_clock clock =
    their own [timeout_sec]. *)
 let default_compute_timeout_sec = 30.0
 
-let get_or_compute_unbounded_value ~preparation key ~ttl compute =
-  let entry = get_or_compute_entry key ~ttl (prepared_value ~preparation compute) in
+let get_or_compute_unbounded_value ~preparation key ~ttl work =
+  let entry = get_or_compute_entry key ~ttl (prepared_work ~preparation work) in
   payload_of_entry entry
 
 
-let get_or_compute_payload ?(preparation = Identity_only) key ~ttl compute =
+let get_or_compute_payload ?(preparation = Identity_only) key ~ttl work =
   match Atomic.get default_clock with
   | Some clock ->
     get_or_compute_payload_with_timeout ~preparation key ~ttl ~clock
-      ~timeout_sec:default_compute_timeout_sec compute
+      ~timeout_sec:default_compute_timeout_sec work
   | None ->
-      get_or_compute_unbounded_value ~preparation:(Cache_http preparation) key ~ttl compute
+      get_or_compute_unbounded_value ~preparation:(Cache_http preparation) key ~ttl work
       |> force_cached_payload
 
-let get_or_compute key ~ttl compute =
+let get_or_compute key ~ttl work =
   match Atomic.get default_clock with
   | Some clock -> get_or_compute_with_timeout key ~ttl ~clock
-      ~timeout_sec:default_compute_timeout_sec compute
+      ~timeout_sec:default_compute_timeout_sec work
   | None ->
-      get_or_compute_unbounded_value ~preparation:Cache_json key ~ttl compute
+      get_or_compute_unbounded_value ~preparation:Cache_json key ~ttl work
       |> json_of_cached_value
 ;;
 

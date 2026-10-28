@@ -113,28 +113,30 @@ let build_projection ?actor ~config ~sw ~clock
   let snapshot_compute () =
     Dashboard_projection_cache.get_or_compute_snapshot_json
       ~config ~actor:(Some actor_name) (fun actor_name ->
-        Dashboard_projection_cache.operator_snapshot_json
-          ~actor:actor_name
-          ~view:"summary"
-          ~include_messages:false
-          ~include_keepers:true
-          ~include_summary_fields:false
-          ~lightweight_summary:true
-          ctx)
+        Pool_work.cpu (fun () ->
+          Dashboard_projection_cache.operator_snapshot_json
+            ~actor:actor_name
+            ~view:"summary"
+            ~include_messages:false
+            ~include_keepers:true
+            ~include_summary_fields:false
+            ~lightweight_summary:true
+            ctx))
   in
   let digest_compute () =
     Dashboard_projection_cache.get_or_compute_digest_json
       ~config ~actor:(Some actor_name) (fun actor_name ->
-        match Dashboard_projection_cache.operator_digest_json ~actor:actor_name ctx with
-        | Ok json -> json
-        | Error message ->
-            `Assoc
-              [
-                ("health", `String "warn");
-                ("attention_items", `List []);
-                ("recommended_actions", `List []);
-                ("error", `String message);
-              ])
+        Pool_work.cpu (fun () ->
+          match Dashboard_projection_cache.operator_digest_json ~actor:actor_name ctx with
+          | Ok json -> json
+          | Error message ->
+              `Assoc
+                [
+                  ("health", `String "warn");
+                  ("attention_items", `List []);
+                  ("recommended_actions", `List []);
+                  ("error", `String message);
+                ]))
   in
   let snapshot_json, digest_json =
     Eio.Fiber.pair snapshot_compute digest_compute

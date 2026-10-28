@@ -205,8 +205,9 @@ let cached_file_activity_json ~base_path ~codebase ~repo_id ~file_path ~window_h
       `String (Printf.sprintf "%h" window_hours);
     ])
   in
-  Dashboard_cache.get_or_compute cache_key ~ttl:file_activity_cache_ttl_sec (fun () ->
-    file_activity_json ~codebase ~repo_id ~file_path ~window_hours)
+  Dashboard_cache.get_or_compute cache_key ~ttl:file_activity_cache_ttl_sec
+    (Pool_work.cpu (fun () ->
+       file_activity_json ~codebase ~repo_id ~file_path ~window_hours))
 ;;
 
 let parse_int_query uri name =

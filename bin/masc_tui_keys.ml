@@ -1175,12 +1175,8 @@ let for_surface = function
 
 let group_rank = function Navigate -> 0 | Act -> 1 | Search -> 2 | Meta -> 3
 
-(* Sort by group, then flatten to the footer's "key:label  key:label" form.
-   Both the static per-surface footer and the Fusion detail footer (which
-   appends a live scroll position) render through this one projection. *)
-let hints_of_bindings ?(lang = Lang_en) bindings =
+let hints_in_order ?(lang = Lang_en) bindings =
   bindings
-  |> List.stable_sort (fun a b -> compare (group_rank a.group) (group_rank b.group))
   |> List.map (fun { key; label; label_ko; _ } ->
       let label = match lang with
         | Lang_ko -> Option.value label_ko ~default:label
@@ -1188,6 +1184,14 @@ let hints_of_bindings ?(lang = Lang_en) bindings =
       in
       key ^ ":" ^ label)
   |> String.concat "  "
+
+(* Sort by group, then flatten to the footer's "key:label  key:label" form.
+   Both the static per-surface footer and the Fusion detail footer (which
+   appends a live scroll position) render through this one projection. *)
+let hints_of_bindings ?(lang = Lang_en) bindings =
+  bindings
+  |> List.stable_sort (fun a b -> compare (group_rank a.group) (group_rank b.group))
+  |> hints_in_order ~lang
 
 (* [detail_open] is how a surface that owns a detail says which of its two
    states is on screen. A surface without a detail leaves it out, and then
@@ -2427,12 +2431,15 @@ let queue_bindings state panel =
         | Queue_server_order -> [b Act "n" "run next"; b Act "l" "move last"]
         | Queue_event_urgency -> [b Act "n" "immediate priority"; b Act "l" "low priority"]
         | Queue_no_priority -> [] in
-    [b Navigate "↑/↓ / j/k" "select"; b Navigate "Enter" "read"] @ actions
+    actions @ [b Navigate "↑/↓ / j/k" "select"; b Navigate "Enter" "read"]
     @ [b Navigate "f" "expand/context";
        b Navigate "PgUp/PgDn" "page"; b Navigate "Home/End" "edges";
        b Act "r" "refresh"] @ close
 
-let footer_hints_queue state panel = hints_of_bindings (queue_bindings state panel)
+(* The selected action has higher priority than generic movement. The shared
+   default group sort would put every navigation key ahead of it and cause
+   next/last to disappear first as the footer gives up its tail. *)
+let footer_hints_queue state panel = hints_in_order (queue_bindings state panel)
 
 let help_sections_for_state ~cols (state : state) =
   let active =

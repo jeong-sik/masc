@@ -53,6 +53,10 @@ not user-study ratings or numbers stored in product state.
 The candidate gives the active Queue its own document and keyboard, keeps
 read/result facts ahead of the list, and offers long content through detail.
 The preview provides conversation context without adding editable controls.
+The Queue footer orders the selected action before generic movement hints;
+the global navigation-first grouping would otherwise hide next/last first.
+Critical workspace notices and the common pinned exit/read keys retain their
+existing precedence. Very narrow footers can still require Help.
 This alone does not establish that lower-priority generic explanations occupy
 the right number of rows, or that the layout is best for repeated reorder work.
 

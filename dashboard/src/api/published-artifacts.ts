@@ -49,8 +49,10 @@ const ArtifactWorkspaceSchema = Schema.Struct({ paths: Schema.Struct({
 }) })
 export type ArtifactWorkspace = { readonly basePath: string; readonly mascRoot: string }
 
-export async function captureArtifactWorkspace(expectedBasePath: string): Promise<ArtifactWorkspace> {
-  const { paths } = Schema.decodeUnknownSync(ArtifactWorkspaceSchema)(await get<unknown>('/health?full=1'))
+export async function captureArtifactWorkspace(expectedBasePath: string, signal?: AbortSignal): Promise<ArtifactWorkspace> {
+  const health = signal ? await get<unknown>('/health?full=1', { signal, consumeWithinTimeout: true })
+    : await get<unknown>('/health?full=1')
+  const { paths } = Schema.decodeUnknownSync(ArtifactWorkspaceSchema)(health)
   if (paths.effective_base_path !== expectedBasePath) {
     throw new Error('서버의 작업 공간이 원고를 작성한 작업 공간과 다릅니다. 원고를 보관하고 연결을 확인해 주세요.')
   }
@@ -119,9 +121,11 @@ function decodeArtifactDocument(id: string, revision: string | undefined, raw: u
   return doc
 }
 
-export async function fetchPublishedArtifact(id: string, revision: string | undefined, signal?: AbortSignal, workspace?: ArtifactWorkspace): Promise<ArtifactDocument> {
+export async function fetchPublishedArtifact(id: string, revision: string | undefined, signal?: AbortSignal, workspace?: ArtifactWorkspace,
+  consumeWithinTimeout = false): Promise<ArtifactDocument> {
   const raw = await get<unknown>(artifactRequestPath(id, revision), {
     signal, ...(workspace ? { extraHeaders: artifactWorkspaceHeaders(workspace) } : {}),
+    ...(consumeWithinTimeout ? { consumeWithinTimeout: true } : {}),
   })
   return decodeArtifactDocument(id, revision, raw)
 }

@@ -570,11 +570,12 @@ interface ErrorResponseInfo {
   authoritativeReloadRequired?: boolean
 }
 
-async function errorResponseInfoFromResponse(res: Response): Promise<ErrorResponseInfo> {
+async function errorResponseInfoFromResponse(res: Response, preserveAbort = false): Promise<ErrorResponseInfo> {
   let rawText = ''
   try {
     rawText = (await res.text()).trim()
-  } catch {
+  } catch (error) {
+    if (preserveAbort && isAbortError(error)) throw error
     return {}
   }
   if (!rawText) return {}
@@ -651,8 +652,9 @@ export async function apiRequestErrorFromResponse(
   method: string,
   path: string,
   res: Response,
+  preserveAbort = false,
 ): Promise<ApiRequestError> {
-  const info = await errorResponseInfoFromResponse(res)
+  const info = await errorResponseInfoFromResponse(res, preserveAbort)
   return new ApiRequestError({
     method,
     path,
@@ -673,11 +675,13 @@ async function parseJsonResponse<T>(
   method: string,
   path: string,
   res: Response,
+  preserveAbort = false,
 ): Promise<T> {
   let rawText = ''
   try {
     rawText = await res.text()
-  } catch {
+  } catch (error) {
+    if (preserveAbort && isAbortError(error)) throw error
     throw new ApiRequestError({
       method,
       path,
@@ -840,33 +844,35 @@ export type GetOptions = AbortableRequestOptions & {
   timeoutMs?: number
   includeActorHeader?: boolean
   extraHeaders?: Record<string, string>
+  consumeWithinTimeout?: boolean
 }
 
 async function getRequest<T>(path: string, opts: GetOptions, anonymous: boolean): Promise<T> {
-  const res = await fetchWithTimeout(
-    path,
-    {
-      headers: anonymous ? {} : { ...authHeaders({ includeActor: opts.includeActorHeader }), ...opts.extraHeaders },
-      ...(anonymous ? { credentials: 'omit' as const } : {}),
-      cache: readCacheMode(path),
-      signal: opts.signal,
-    },
-    opts.timeoutMs ?? DEFAULT_GET_TIMEOUT_MS,
-  )
-  if (!res.ok) {
-    const warmPayload = await bootstrapWarmPayload(path, res.clone())
-    if (warmPayload !== null) {
-      return warmPayload as T
+  const consume = async (res: Response): Promise<T> => {
+    if (!res.ok) {
+      const warmPayload = await bootstrapWarmPayload(path, res.clone())
+      if (warmPayload !== null) {
+        return warmPayload as T
+      }
+      throw await apiRequestErrorFromResponse('GET', path, res, opts.consumeWithinTimeout)
     }
-    throw await apiRequestErrorFromResponse('GET', path, res)
+    const data = await parseJsonResponse<T>('GET', path, res, opts.consumeWithinTimeout)
+    // Server may return 200 OK with {"error":"not initialized"} during startup
+    if (DASHBOARD_BOOTSTRAP_WARM_PATHS.has(path) && isNotInitializedEnvelope(data)) {
+      const payload = bootstrapInitializingPayload(path)
+      if (payload !== null) return payload as T
+    }
+    return data
   }
-  const data = await parseJsonResponse<T>('GET', path, res)
-  // Server may return 200 OK with {"error":"not initialized"} during startup
-  if (DASHBOARD_BOOTSTRAP_WARM_PATHS.has(path) && isNotInitializedEnvelope(data)) {
-    const payload = bootstrapInitializingPayload(path)
-    if (payload !== null) return payload as T
+  const init = {
+    headers: anonymous ? {} : { ...authHeaders({ includeActor: opts.includeActorHeader }), ...opts.extraHeaders },
+    ...(anonymous ? { credentials: 'omit' as const } : {}),
+    cache: readCacheMode(path),
+    signal: opts.signal,
   }
-  return data
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_GET_TIMEOUT_MS
+  if (opts.consumeWithinTimeout) return fetchWithTimeout(path, init, timeoutMs, consume)
+  return consume(await fetchWithTimeout(path, init, timeoutMs))
 }
 
 export async function get<T>(path: string, opts: GetOptions = {}): Promise<T> {
@@ -922,19 +928,23 @@ export async function post<T>(
   body: unknown,
   extraHeaders?: Record<string, string>,
   timeoutMs = DEFAULT_POST_TIMEOUT_MS,
+  signal?: AbortSignal,
 ): Promise<T> {
-  const res = await fetchWithTimeout(path, {
+  const init = {
     method: 'POST',
     headers: {
       ...jsonHeaders(),
       ...(extraHeaders ?? {}),
     },
     body: JSON.stringify(body),
-  }, timeoutMs)
-  if (!res.ok) {
-    throw await apiRequestErrorFromResponse('POST', path, res)
+    ...(signal ? { signal } : {}),
   }
-  return parseJsonResponse<T>('POST', path, res)
+  const consume = async (res: Response): Promise<T> => {
+    if (!res.ok) throw await apiRequestErrorFromResponse('POST', path, res, Boolean(signal))
+    return parseJsonResponse<T>('POST', path, res, Boolean(signal))
+  }
+  if (signal) return fetchWithTimeout(path, init, timeoutMs, consume)
+  return consume(await fetchWithTimeout(path, init, timeoutMs))
 }
 
 export async function postControlPlane<T>(

@@ -1,5 +1,5 @@
 import { Schema } from 'effect'
-import { get, post } from './core'
+import { DEFAULT_POST_TIMEOUT_MS, get, post } from './core'
 import { PublishedArtifactSchema, artifactWorkspaceHeaders, type ArtifactPublication, type ArtifactWorkspace } from './published-artifacts'
 import type { ArtifactDiscussionRequest } from './artifact-discussion'
 
@@ -59,16 +59,19 @@ function decode(input: unknown, artifactId: string, target?: ArtifactDraftTarget
 }
 export async function fetchArtifactDraft(artifactId: string, workspace: ArtifactWorkspace, signal?: AbortSignal): Promise<ArtifactDraftView> {
   return decode(await get<unknown>(`${path}/${encodeURIComponent(artifactId)}`, {
-    signal, extraHeaders: artifactWorkspaceHeaders(workspace),
+    signal, extraHeaders: artifactWorkspaceHeaders(workspace), ...(signal ? { consumeWithinTimeout: true } : {}),
   }), artifactId)
 }
-export async function sendArtifactDraftCommand(command: ArtifactDraftCommand, workspace: ArtifactWorkspace): Promise<ArtifactDraftView> {
+export async function sendArtifactDraftCommand(command: ArtifactDraftCommand, workspace: ArtifactWorkspace, signal?: AbortSignal): Promise<ArtifactDraftView> {
   const target = command.action === 'open' ? undefined : (command.action === 'edit' || command.action === 'resolve') ? command.selection.target : command.target
   const artifactId = command.action === 'open' ? command.artifact_id
     : (command.action === 'edit' || command.action === 'resolve') ? command.selection.target.artifact_id : command.target.artifact_id
   // The transport sends once. A caller retains its local CRDT updates and
   // reconciles uncertain responses; it must not blindly repeat Keeper edits.
-  return decode(await post<unknown>(path, command, artifactWorkspaceHeaders(workspace)), artifactId, target)
+  const headers = artifactWorkspaceHeaders(workspace)
+  const response = signal ? await post<unknown>(path, command, headers, DEFAULT_POST_TIMEOUT_MS, signal)
+    : await post<unknown>(path, command, headers)
+  return decode(response, artifactId, target)
 }
 
 const CheckpointRequestSchema = Schema.Struct({

@@ -29,7 +29,7 @@ export function ArtifactDiscussionPanel({ session, state, onPending, onReveal }:
 }) {
   const [composer, setComposer] = useState<Composer | null>(null), composerRef = useRef<Composer | null>(null)
   const [records, setRecords] = useState(() => discussionLocals(session.workspace, state.view.draft.target.artifact_id))
-  const [busy, setBusy] = useState<ReadonlySet<string>>(new Set()), busyRef = useRef(new Set<string>())
+  const [busy, setBusy] = useState<ReadonlySet<string>>(new Set()), busyRef = useRef(new Map<string, AbortController>())
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null)
   const active = useRef(true)
   const transferred = useRef(new Map<string, readonly DiscussionLocalRecord[]>())
@@ -56,8 +56,15 @@ export function ArtifactDiscussionPanel({ session, state, onPending, onReveal }:
   }
   useEffect(() => {
     const storage = () => refresh()
+    const abortFlights = () => {
+      const flights = [...busyRef.current.values()]
+      busyRef.current.clear()
+      flights.forEach(flight => flight.abort())
+    }
+    const pagehide = () => { abortFlights(); if (active.current) setBusy(new Set()) }
     window.addEventListener('storage',storage)
-    return () => { active.current = false; window.removeEventListener('storage',storage); onPending(false) }
+    window.addEventListener('pagehide',pagehide)
+    return () => { active.current = false; abortFlights(); window.removeEventListener('storage',storage); window.removeEventListener('pagehide',pagehide); onPending(false) }
   }, [])
   useEffect(() => { onPending(Boolean(composer && meaningful(composer.input)) || busy.size > 0) }, [composer, busy])
   const begin = (input: DiscussionInput) => {
@@ -72,7 +79,7 @@ export function ArtifactDiscussionPanel({ session, state, onPending, onReveal }:
   const finish = (record: DiscussionLocalRecord, view: typeof state.view) => {
     const receipt = matchArtifactDiscussionReceipt(view, record.target, record.actor, requestOf(record))
     if (!receipt) return false
-    session.acceptServerView(view)
+    if (!session.acceptServerView(view)) return false
     discardDiscussionLocal(record)
     transferred.current.get(record.id)?.forEach(discardDiscussionLocal); transferred.current.delete(record.id); refresh()
     tell('요청 처리 기록을 확인했습니다. 현재 댓글과 원고를 표시합니다.')
@@ -82,16 +89,27 @@ export function ArtifactDiscussionPanel({ session, state, onPending, onReveal }:
     if (record.value.kind !== 'request' || !canUseConnection() || !sameDraftTarget(record.target,target) || busyRef.current.has(record.id)) return
     if (send && actor !== record.actor) { tell('처음 요청을 보낸 편집자로 다시 연결해 주세요. 복구 내용은 다운로드할 수 있습니다.',true); return }
     if (send && session.snapshot.pending && ['comment','accept'].includes(record.value.request.command.kind)) { tell('공유 원고가 저장된 뒤 보내 주세요.',true); return }
-    busyRef.current.add(record.id); setBusy(new Set(busyRef.current))
+    const currentAttempt = session.captureCurrent()
+    const flight = new AbortController()
+    busyRef.current.set(record.id, flight); setBusy(new Set(busyRef.current.keys()))
     try {
-      const view = send ? await sendArtifactDiscussion(record.target,record.value.request,record.workspace)
-        : await fetchArtifactDraft(record.target.artifact_id,record.workspace)
+      const view = send ? await sendArtifactDiscussion(record.target,record.value.request,record.workspace,flight.signal)
+        : await fetchArtifactDraft(record.target.artifact_id,record.workspace,flight.signal)
+      if (!currentAttempt()) return
       if (!finish(record,view)) {
         session.acceptServerView(view)
         tell(send ? '응답에서 처리 기록을 확인하지 못했습니다. 같은 요청을 보존했습니다.' : '아직 이 요청의 처리 기록이 없습니다. 같은 요청으로 다시 보낼 수 있습니다.',true)
       }
-    } catch (error) { tell(`${error instanceof Error ? error.message : '전송 결과를 확인하지 못했습니다.'} 요청을 보존했으니 결과를 확인해 주세요.`,true) }
-    finally { busyRef.current.delete(record.id); if (visible()) { setBusy(new Set(busyRef.current)); refresh() } }
+    } catch (error) {
+      if (currentAttempt()) tell(`${error instanceof Error ? error.message : '전송 결과를 확인하지 못했습니다.'} 요청을 보존했으니 결과를 확인해 주세요.`,true)
+    }
+    finally {
+      if (busyRef.current.get(record.id) === flight) {
+        busyRef.current.delete(record.id)
+        if (active.current) setBusy(new Set(busyRef.current.keys()))
+        if (visible()) refresh()
+      }
+    }
   }
   const submit = () => {
     const current = composerRef.current
@@ -110,9 +128,12 @@ export function ArtifactDiscussionPanel({ session, state, onPending, onReveal }:
   }
   const recover = async (record: DiscussionLocalRecord) => {
     if (record.value.kind !== 'input' || !canUseConnection() || actor !== record.actor || !sameDraftTarget(record.target,target) || busyRef.current.has(record.id)) return
-    busyRef.current.add(record.id); setBusy(new Set(busyRef.current))
+    const currentAttempt = session.captureCurrent()
+    const flight = new AbortController()
+    busyRef.current.set(record.id, flight); setBusy(new Set(busyRef.current.keys()))
     try {
-      const view = await fetchArtifactDraft(record.target.artifact_id,record.workspace)
+      const view = await fetchArtifactDraft(record.target.artifact_id,record.workspace,flight.signal)
+      if (!currentAttempt()) return
       if (finish(record,view)) return
       if (!sameDraftTarget(view.draft.target,record.target)) throw new Error('공유 원고의 세대가 바뀌었습니다. 복구 내용을 다운로드해 주세요.')
       if (!session.acceptServerView(view)) return
@@ -124,8 +145,15 @@ export function ArtifactDiscussionPanel({ session, state, onPending, onReveal }:
       preserve(next)
       if (input.kind === 'comment') session.recover(draftBytes(input.source.state))
       tell('선택 시점의 원고와 입력을 복구했습니다. 확인한 뒤 보내 주세요.')
-    } catch (error) { tell(error instanceof Error ? error.message : '입력을 복구하지 못했습니다.',true) }
-    finally { busyRef.current.delete(record.id); if (visible()) setBusy(new Set(busyRef.current)) }
+    } catch (error) {
+      if (currentAttempt()) tell(error instanceof Error ? error.message : '입력을 복구하지 못했습니다.',true)
+    }
+    finally {
+      if (busyRef.current.get(record.id) === flight) {
+        busyRef.current.delete(record.id)
+        if (active.current) setBusy(new Set(busyRef.current.keys()))
+      }
+    }
   }
   const download = (record: DiscussionLocalRecord) => {
     const url=URL.createObjectURL(new Blob([JSON.stringify(record,null,2)],{type:'application/json;charset=utf-8'}))

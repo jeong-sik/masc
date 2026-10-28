@@ -82,6 +82,17 @@ describe('published artifact native wire contract', () => {
     expect(get).not.toHaveBeenCalled()
   })
 
+  it('keeps the body cancellation contract on the unauthenticated fallback', async () => {
+    const artifact = nativeInventory.artifacts[0]!, signal = new AbortController().signal
+    const payload = { artifact, content: '# 공유 보고서', revisions: [artifact], shared: true }
+    vi.mocked(get)
+      .mockRejectedValueOnce(Object.assign(new Error('Unauthorized'), { status: 401 }))
+      .mockResolvedValueOnce(payload)
+    await fetchPublishedArtifact(artifact.id, '2', signal, undefined, true)
+    expect(get).toHaveBeenNthCalledWith(1, `/api/v1/published-artifacts/${artifact.id}?revision=2`, { signal, consumeWithinTimeout: true })
+    expect(get).toHaveBeenNthCalledWith(2, `/dashboard/assets/published-artifacts/${artifact.id}-r2.json`, { signal, consumeWithinTimeout: true })
+  })
+
   it('toggles per-artifact external sharing via /api/v1/published-artifact-shares', async () => {
     const artifact = nativeInventory.artifacts[0]!
     const workspace = { basePath: '/workspace', mascRoot: '/workspace/.masc' }

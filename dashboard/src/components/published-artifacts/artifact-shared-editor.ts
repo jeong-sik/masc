@@ -6,7 +6,7 @@ import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next'
 import { ApiRequestError } from '../../api/core'
 import { sameDraftTarget } from '../../api/artifact-draft-live'
 import { checkpointArtifactDraft, sendArtifactDraftCommand, type ArtifactDraftTarget } from '../../api/artifact-drafts'
-import { captureArtifactWorkspace, fetchPublishedArtifact, type ArtifactDocument, type ArtifactPublication } from '../../api/published-artifacts'
+import { captureArtifactWorkspace, fetchPublishedArtifact, type ArtifactDocument, type ArtifactPublication, type ArtifactWorkspace } from '../../api/published-artifacts'
 import { artifactDraftRecoveries, discardArtifactDraftRecovery, type ArtifactDraftRecovery } from '../../lib/artifact-draft-recovery'
 import { ArtifactLiveSession, draftBytes, type ArtifactLiveState } from '../../lib/artifact-live-session'
 import { resolveSharedSelection, restoreSharedDocument, sharedSource, type SharedSelection } from '../../lib/artifact-shared-document'
@@ -101,6 +101,13 @@ export function ArtifactSharedEditor({ doc, workspaceRoot, draftRetention, isCur
   const [comparison, setComparison] = useState<PublicationInput | null>(null)
   const [publication, setPublication] = useState<(PublicationInput & { snapshot: ArtifactDraftSnapshot }) | null>(null)
   const mounted = useRef(true)
+  const retired = useRef(false)
+  const pageGeneration = useRef(0)
+  const [, setPageGeneration] = useState(0)
+  const opening = useRef<AbortController | null>(null)
+  const openingWorkspace = useRef<ArtifactWorkspace | null>(null)
+  const [openingState, setOpeningState] = useState(false)
+  const openAgain = useRef<() => void>(() => {})
   const attempted = useRef(new WeakSet<object>())
   const publicationForClose = useRef<ArtifactDraftSnapshot | null>(null)
   const sessionForClose = useRef<ArtifactLiveSession | null>(null)
@@ -117,34 +124,74 @@ export function ArtifactSharedEditor({ doc, workspaceRoot, draftRetention, isCur
         && !window.confirm('이 창에 아직 저장하지 못한 변경이 있습니다. 원고를 닫을까요?')) return { kind: 'keep_open' }
       if (copy) draftRetention.forget(copy.identity)
       publicationForClose.current = null
+      retired.current = true
       mounted.current = false
+      pageGeneration.current++
       return { kind: 'close', publicationDiscarded: copy !== null }
     }
     onCloseRequest(request)
-    const pagehide = () => { mounted.current = false }
+    const pagehide = () => {
+      mounted.current = false
+      pageGeneration.current++
+      const oldOpening = opening.current
+      opening.current = null
+      if (oldOpening) { oldOpening.abort(); setOpeningState(false) }
+      sessionForClose.current?.suspend()
+    }
+    const pageshow = () => {
+      if (retired.current) return
+      mounted.current = true
+      setPageGeneration(pageGeneration.current)
+    }
     window.addEventListener('pagehide', pagehide)
+    window.addEventListener('pageshow', pageshow)
     // Retirement unregisters the close request, preserving the inert snapshot.
-    return () => { mounted.current = false; window.removeEventListener('pagehide', pagehide); onCloseRequest(null) }
+    return () => {
+      retired.current = true; mounted.current = false; pageGeneration.current++
+      window.removeEventListener('pagehide', pagehide); window.removeEventListener('pageshow', pageshow); onCloseRequest(null)
+    }
   }, [])
   useEffect(() => {
     let active = true, opened: ArtifactLiveSession | null = null
-    void (async () => {
-      const workspace = await captureArtifactWorkspace(workspaceRoot)
-      if (!active || !isCurrent()) return
-      const view = await sendArtifactDraftCommand({ action: 'open', artifact_id: doc.artifact.id, revision: doc.artifact.revision }, workspace)
-      if (!active || !isCurrent()) return
-      const base=view.draft.base_revision===doc.artifact.revision?doc
-        :await fetchPublishedArtifact(doc.artifact.id,String(view.draft.base_revision),undefined,workspace)
-      if(!active||!isCurrent())return
-      if(base.artifact.body._blob.sha256!==view.draft.base_sha256)throw new Error('공유 원고의 게시 기준과 원본 문서가 다릅니다.')
-      setSourceFormat(base.artifact.format)
-      opened = new ArtifactLiveSession(view, workspace, value => { if (active) setState(value) }, isCurrent)
-      sessionForClose.current = opened
-      setRecoveries(artifactDraftRecoveries(workspace, doc.artifact.id))
-      setSession(opened); setState(opened.snapshot)
-      void opened.connect()
-    })().catch(reason => { if (active) setError(reason instanceof Error ? reason.message : '공유 원고를 열지 못했습니다.') })
-    return () => { active = false; sessionForClose.current = null; opened?.dispose() }
+    const open = async () => {
+      if (opening.current || !active || !mounted.current || retired.current || !isCurrent()) return
+      const flight = new AbortController()
+      opening.current = flight; setOpeningState(true)
+      const generation = pageGeneration.current
+      const current = () => active && mounted.current && !retired.current && isCurrent() && pageGeneration.current === generation
+      try {
+        const workspace = await captureArtifactWorkspace(workspaceRoot, flight.signal)
+        if (!current()) return
+        if (openingWorkspace.current && (openingWorkspace.current.basePath !== workspace.basePath
+          || openingWorkspace.current.mascRoot !== workspace.mascRoot)) {
+          throw new Error('처음 요청한 작업 공간이 바뀌었습니다. 원고를 다시 열지 않았습니다.')
+        }
+        openingWorkspace.current = workspace
+        const view = await sendArtifactDraftCommand({ action: 'open', artifact_id: doc.artifact.id, revision: doc.artifact.revision }, workspace, flight.signal)
+        if (!current()) return
+        const base=view.draft.base_revision===doc.artifact.revision?doc
+          :await fetchPublishedArtifact(doc.artifact.id,String(view.draft.base_revision),flight.signal,workspace,true)
+        if(!current())return
+        if(base.artifact.body._blob.sha256!==view.draft.base_sha256)throw new Error('공유 원고의 게시 기준과 원본 문서가 다릅니다.')
+        setSourceFormat(base.artifact.format)
+        opened = new ArtifactLiveSession(view, workspace, value => { if (active) setState(value) },
+          () => isCurrent() && mounted.current && !retired.current)
+        sessionForClose.current = opened
+        setRecoveries(artifactDraftRecoveries(workspace, doc.artifact.id))
+        setSession(opened); setState(opened.snapshot); setError('')
+        void opened.connect()
+      } catch (reason) {
+        if (current()) setError(reason instanceof Error ? reason.message : '공유 원고를 열지 못했습니다.')
+      } finally {
+        if (opening.current === flight) {
+          opening.current = null
+          if (active) setOpeningState(false)
+        }
+      }
+    }
+    openAgain.current = () => { void open() }
+    openAgain.current()
+    return () => { active = false; opening.current?.abort(); opening.current = null; openAgain.current = () => {}; sessionForClose.current = null; opened?.dispose() }
   }, [])
   useEffect(() => {
     if(!session)return
@@ -195,15 +242,16 @@ export function ArtifactSharedEditor({ doc, workspaceRoot, draftRetention, isCur
     // shared draft. Capture the target and sequence before any async read.
     const content = session.content
     const target = { ...captured.view.draft.target }, expectedSequence = captured.view.draft.sequence
+    const generation = pageGeneration.current
     setError('')
     try {
       const latest = await fetchPublishedArtifact(doc.artifact.id, undefined, undefined, session.workspace)
-      if (!mounted.current || !session.current || sessionForClose.current !== session) return
+      if (!mounted.current || pageGeneration.current !== generation || !session.current || sessionForClose.current !== session) return
       const input = { base: latest, content, owner: session, target, expectedSequence }
       if (latest.artifact.revision === captured.view.draft.base_revision) preparePublication(input)
       else setComparison(input)
     } catch (reason) {
-      if (mounted.current && session.current) setError(reason instanceof Error ? reason.message : '게시할 원고의 원본 버전을 읽지 못했습니다.')
+      if (mounted.current && pageGeneration.current === generation && session.current) setError(reason instanceof Error ? reason.message : '게시할 원고의 원본 버전을 읽지 못했습니다.')
     }
   }
   return html`<section aria-label="문서 공동 편집" class="flex min-h-0 flex-1 flex-col gap-3 p-4">
@@ -212,7 +260,8 @@ export function ArtifactSharedEditor({ doc, workspaceRoot, draftRetention, isCur
       <span role="status">${visualPending ? '아직 반영하지 않은 문장이 있습니다' : state?.connection === 'connected' ? (state.pending ? '원고 저장 중…' : '공유 원고 저장됨')
         : state?.connection === 'disconnected' ? '연결 끊김 · 이 창의 원고 유지' : '연결 중…'}</span>
       ${session ? html`<button type="button" disabled=${visualPending} onClick=${() => downloadArtifactDraft(draft(session.content))}>원고 다운로드</button>` : null}
-      ${state?.connection === 'disconnected' ? html`<button type="button" onClick=${() => { void session?.connect() }}>다시 연결</button>` : null}
+      ${state?.connection === 'disconnected' ? html`<button type="button" disabled=${state.saving} onClick=${() => { void session?.connect() }}>다시 연결</button>` : null}
+      ${!session && !openingState ? html`<button type="button" onClick=${() => openAgain.current()}>공동 편집 다시 열기</button>` : null}
       <button type="button" disabled=${!state || state.pending || visualPending || state.connection !== 'connected' || publication !== null || comparison !== null} onClick=${publish}>새 버전으로 게시</button>
       <button type="button" onClick=${onClose}>공동 편집 닫기</button>
     </div>
@@ -262,12 +311,14 @@ export function ArtifactSharedEditor({ doc, workspaceRoot, draftRetention, isCur
     </div>` : null}
     ${publication ? html`<${ArtifactComposer} initial=${publication.snapshot.value} base=${publication.base}
       capturedWorkspace=${publication.owner.workspace} workspaceRoot=${workspaceRoot} isCurrent=${isCurrent} onMutation=${onMutation}
+      captureAttempt=${() => { const generation = pageGeneration.current; return () => mounted.current && !retired.current && pageGeneration.current === generation }}
       onDraftChange=${(value: ArtifactDraftSnapshot['value']) => draftRetention.remember({ ...publication.snapshot, value })}
       onSaved=${(value: ArtifactPublication) => {
         if (attempted.current.has(publication.snapshot.identity)) return
         attempted.current.add(publication.snapshot.identity)
+        const generation = pageGeneration.current
         const current = () => mounted.current && isCurrent() && publication.owner.current && sessionForClose.current === publication.owner
-          && sameDraftTarget(publication.target, publication.owner.snapshot.view.draft.target)
+          && pageGeneration.current === generation && sameDraftTarget(publication.target, publication.owner.snapshot.view.draft.target)
         if (!current()) return
         // Start synchronously under the original authority; navigation can
         // retire it immediately after onPublished. Never send a later retry.

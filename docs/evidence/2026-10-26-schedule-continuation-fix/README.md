@@ -7,26 +7,30 @@ source was durably marked completed before its requested note existed. Only the
 second note was produced; both sources ended completed and no turn remained live.
 
 The repair retains scheduled work through checkpoint settlement and admits one
-exact scheduled occurrence per work scope. Intake carries the full original
-pending snapshot separately from admitted work. Existing waiting sources cannot
-preempt their successor as new input; a new incarnation can.
+exact scheduled occurrence per work scope. A schedule that intake already saw,
+including a suspended predecessor, cannot preempt its successor. A schedule
+that reaches the queue after that intake read can, and so can one that was
+withdrawn and reinserted.
 
-## Canonical helper reuse
+## Where the repair lives
 
-[canonical-source-comparison.json](canonical-source-comparison.json) records a
-byte comparison with PR #46125 at `b9e1fee387bb6e1f6eeeb3d42bbb9225ad7ace7f`.
-The existing `keeper_heartbeat_source_batch.ml` implementation and its
-`of_intake ~pending ~admitted` / `pending_at_intake` API are reused in the same
-module. There is no parallel source-batch implementation.
-
-This repair starts from main `6a2d8dd6171e1d732ca15f918fb084e462e4d371`.
-Async stack #46110's observed top was PR #46178 at
-`4db12cb6892eb357a9111c2aa097c2aca69f6f15`; it did not yet contain main's
-scheduled Owner handoff. Taking that entire stack as the repair base would also
-require integrating the newer schedule path. This PR instead brings forward the
-same small canonical helper. Integration must reconcile both stacks' changes to
-heartbeat settlement, intake, unified-turn preemption and Connector tests.
-The async stack is not part of this PR's merge scope.
+- `keeper_heartbeat_loop.ml` `checkpoint_source_policy` maps `Schedule_due` to
+  `Preserve_and_rotate`. At a checkpoint, `retain_checkpoint_continuations`
+  keeps the occurrence pending and moves it to the tail of its urgency lane;
+  `checkpoint_source_may_ack` is false for it, so the checkpoint never ACKs it.
+- `keeper_heartbeat_stimulus_intake.ml` `source_scope` gives each `Schedule_due`
+  its own `Scheduled_work` scope, compared with
+  `Keeper_event_queue_state.same_entry`. One intake therefore admits one
+  scheduled occurrence and no other source with it.
+- `keeper_scheduled_turn_handoff.ml` `successors ~intake` returns the pending
+  scheduled entries for which `Keeper_heartbeat_source_batch.arrived_since_intake`
+  holds. `request ~intake` hands off only those. Retention, deferral and
+  reprioritization keep an entry's arrival; an ACK followed by reinsertion
+  creates a later one.
+- `keeper_unified_turn.ml` `make_autonomous_yield_probe` passes the running
+  turn's intake batch as `~intake`. `keeper_chat_yield_request.ml` passes
+  `Keeper_heartbeat_source_batch.empty`, which has no intake read, so every
+  pending scheduled entry is a candidate there.
 
 ## Validation boundary
 
@@ -75,12 +79,10 @@ log bytes match the original extracted file.
 - Failure-disposition suite: 16 passed. Informational-checkpoint suite: 1 passed.
   These partial results do not make the overall run successful.
 
-The response adds `Chat_operation.t` to the existing unconstrained Owner fixture
-value. Latest inspected main `1e5ae1f81ea68a69b565ebdee2e5000e69587dc9` still had the same missing annotation;
-related open-PR searches found no separate repair. The continuation fixture now
-checks absent cancellation as `Withdrawn`, exact reinsertion as the specific
-incarnation error, and the replacement's unchanged pending selection and valid
-current dispatch authority. No production guard is relaxed.
+The continuation fixture now checks absent cancellation as `Withdrawn`, exact
+reinsertion as the specific incarnation error, and the replacement's unchanged
+pending selection and valid current dispatch authority. No production guard is
+relaxed.
 
 From `94b2df25abcdfe20c658322f4156ad63f5546c34` through the pre-rebase head
 `ccb0007e95ead82676a58d0dcc17d740dfe94f30`, only test sources and evidence
@@ -92,19 +94,6 @@ later integration tree is identical. Both modified `.ml` files passed syntax
 parsing and `git diff --check` at the first correction boundary.
 At that first correction boundary the tests were unexecuted. The caller then
 requested the exact two-suite execution recorded below; its failure is preserved.
-
-The product stack was subsequently rebased with `gh stack rebase` onto main
-`fae95aaf9575fff4c9c7a18cd1dcf1d428d4227a`. This integration tree includes main's
-changes and is not byte-identical to the earlier native artifact. Conflict
-resolution preserves main's `Keeper_event_queue_state.equal_pending_selection`
-as the single comparison authority in successor filtering, exact scheduled
-scope matching, intake priority and the Owner regression. The duplicated
-handoff comparison helper remains removed. F6's intake cohort, exact scheduled
-scope and checkpoint retention remain part of the reviewed integration diff.
-Earlier test results and the separate native proof branch remain bound to their
-recorded source identities; no CI or runtime result is asserted for this rebased
-head by this source-only resolution.
-
 
 ## Second focused CI and faithful Owner continuation fixture
 
@@ -151,3 +140,30 @@ raw-ledger review is separate evidence. Two after-effect arrivals complete
 sequentially and contain no after-effect checkpoint. These examples do not prove
 arbitrary effects exactly once, account/provider failover, crash recovery,
 external delivery or whole-feature PASS. No production executable was installed.
+
+## Integration on main 6d83e98b
+
+The stack is rebased onto main `6d83e98b165706284b28015bcb7e822685904671`. This
+tree is not byte-identical to the earlier native artifact; earlier test results
+and the native proof branch stay bound to their recorded source identities.
+
+Local checks ran at `d0433c4ea61867a8869f135f566bc4eecbf1bd73`. Later commits
+change only `docs/` and `changelog.d/`. `dune build --cache=enabled @lib/check
+@bin/check @packages/check` exited 0. Each test executable ran from `test/` with
+`DUNE_SOURCEROOT` set to the checkout and
+`MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false`:
+
+| Executable | Cases | Failed |
+| --- | --- | --- |
+| `test_keeper_connector_attention_batch` | 39 | 0 |
+| `test_keeper_connector_attention_wake` | 11 | 0 |
+| `test_keeper_failed_selection_disposition` | 16 | 0 |
+| `test_keeper_owner` | 108 | 0 |
+| `test_keeper_board_turn_ack` | 1 | 1 (`continuity` 0) |
+| `test_schedule_consumer_dispatch` | 60 | 1 (`keeper_wake` 21) |
+| `test_keeper_informational_checkpoint_ack` | 1 | 1 (`production cycle` 0) |
+| `test_keeper_codex_current_context` | 31 | 1 (`native requests` 22) |
+
+The four failing cases fail the same way when built and run the same way at
+main `6d83e98b165706284b28015bcb7e822685904671`. These are local results, not
+CI, and not a full `@runtest`.

@@ -1,7 +1,0 @@
-{
-  "canonical_pr": 46125,
-  "canonical_head": "b9e1fee387bb6e1f6eeeb3d42bbb9225ad7ace7f",
-  "file": "lib/keeper/keeper_heartbeat_source_batch.ml",
-  "byte_identical": true,
-  "sha256": "5c1e6c4647c504e4c7592bd900b72bddd91f1ab721534d28cc79fb94597e211e"
-}

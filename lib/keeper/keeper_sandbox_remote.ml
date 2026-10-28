@@ -40,8 +40,8 @@ let lane_prefix = function
    Each arm below is one return branch of [runner]: the class is decided
    where the branch is, never read back out of the message text. The record
    is a projection kept with the endpoint's shared state for the life of
-   this process, so a keeper asking [keeper_lane_status] hears what its own
-   dispatches met; a restart empties it, and empty is reported as empty. *)
+   this process. Dispatches are indexed by Keeper, while the endpoint view
+   can read the most recent dispatch across Keepers. A restart empties it. *)
 type dispatch_failure =
   | Local_timeout
   | Remote_timeout
@@ -80,6 +80,8 @@ type lane_report =
   ; last_dispatch : dispatch_record option
   }
 
+type dispatch_scope = Endpoint_dispatch | Keeper_dispatch of string
+
 (* What one answered [--probe] said, kept whole so that no reader sees a
    protocol major from one probe beside a release from another. [observed_at]
    is when this process got the answer: the answer is kept for the life of the
@@ -109,8 +111,8 @@ type shared_state =
   ; last_probe_failure : (float * string) option Atomic.t
     (* The most recent probe that did not answer, cleared by one that did.
        [None] and no major means no probe has run yet. *)
-  ; last_dispatch : dispatch_record option Atomic.t
-    (* The most recent dispatch that reached the wire, by class. *)
+  ; last_dispatches : (string * dispatch_record) list Atomic.t
+    (* One most recent dispatch per Keeper, newest endpoint dispatch first. *)
   }
 
 (* Runner values are rebuilt per typed dispatch, while the active-request
@@ -145,7 +147,7 @@ let shared_state ((_, _, _, _, _, max_concurrent_sessions) as identity : endpoin
         ; first_dispatch_logged = Atomic.make false
         ; probe_answer = Atomic.make None
         ; last_probe_failure = Atomic.make None
-        ; last_dispatch = Atomic.make None
+        ; last_dispatches = Atomic.make []
         }
       in
       Hashtbl.add shared_states identity state;
@@ -669,7 +671,16 @@ let run_probe t =
   outcome
 ;;
 
-let report_shared ~lane ~endpoint (shared : shared_state) =
+let rec record_dispatch (shared : shared_state) ~keeper_name record =
+  let previous = Atomic.get shared.last_dispatches in
+  let remaining =
+    List.filter (fun (name, _) -> not (String.equal name keeper_name)) previous
+  in
+  if not (Atomic.compare_and_set shared.last_dispatches previous ((keeper_name, record) :: remaining))
+  then record_dispatch shared ~keeper_name record
+;;
+
+let report_shared ~scope ~lane ~endpoint (shared : shared_state) =
   let probe =
     match Atomic.get shared.probe_answer with
     | Some { major; capabilities; release; observed_at } ->
@@ -679,20 +690,31 @@ let report_shared ~lane ~endpoint (shared : shared_state) =
        | Some (at, detail) -> Probe_failed { at; detail }
        | None -> Probe_not_asked)
   in
-  { lane; endpoint; probe; last_dispatch = Atomic.get shared.last_dispatch }
+  let dispatches = Atomic.get shared.last_dispatches in
+  let last_dispatch =
+    match scope with
+    | Endpoint_dispatch ->
+      (match dispatches with [] -> None | (_, record) :: _ -> Some record)
+    | Keeper_dispatch keeper_name ->
+      List.find_opt (fun (name, _) -> String.equal name keeper_name) dispatches
+      |> Option.map snd
+  in
+  { lane; endpoint; probe; last_dispatch }
 ;;
 
 let report t =
-  report_shared ~lane:(lane_prefix t.transport) ~endpoint:t.name t.shared
+  report_shared ~scope:(Keeper_dispatch t.keeper_name)
+    ~lane:(lane_prefix t.transport) ~endpoint:t.name t.shared
 ;;
 
-let report_openssh ~base_path (o : openssh) =
+let report_openssh ~scope ~base_path (o : openssh) =
   let identity = openssh_identity ~base_path o in
   let shared =
     Stdlib.Mutex.protect shared_states_mu (fun () -> Hashtbl.find_opt shared_states identity)
   in
   match shared with
-  | Some shared -> report_shared ~lane:"remote_ssh" ~endpoint:o.endpoint.name shared
+  | Some shared ->
+    report_shared ~scope ~lane:"remote_ssh" ~endpoint:o.endpoint.name shared
   | None ->
     { lane = "remote_ssh"; endpoint = o.endpoint.name
     ; probe = Probe_not_asked; last_dispatch = None }
@@ -881,7 +903,7 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
               | Dispatch_failed
                   { failure = Local_timeout | Transport_failed | Trailer_disagreement; _ }
                 -> ());
-             Atomic.set t.shared.last_dispatch (Some record);
+             record_dispatch t.shared ~keeper_name:t.keeper_name record;
              triple
            in
            let failed failure detail =

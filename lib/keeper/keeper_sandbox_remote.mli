@@ -205,17 +205,24 @@ val outdated_shim_repair : t -> string
     For Docker the server knows only the path it execs in the container, and
     the sentence says no more than that. *)
 
-val report_openssh : base_path:string -> openssh -> lane_report
+type dispatch_scope = Endpoint_dispatch | Keeper_dispatch of string
+
+val report_openssh : scope:dispatch_scope -> base_path:string -> openssh -> lane_report
 (** Read observations bound to this complete endpoint declaration and resolved
     transport configuration without creating a runner,
     cache entry, or remote probe. A changed host, root, credential path, policy
     or transport does not inherit the previous declaration's observations.
+    The probe describes the shared endpoint. [Keeper_dispatch name] returns
+    that Keeper's last dispatch on the endpoint, or [None] if it has not
+    dispatched there in this process. [Endpoint_dispatch] returns the latest
+    dispatch from any Keeper sharing the endpoint.
     File contents replaced at an unchanged credential path are not identified
     by this observation key. Each transport invocation nevertheless opens a
     new connection and authenticates against the current dedicated key and
     pinned hosts file; cached observations never authorize a connection. *)
 
 val report : t -> lane_report
+(** The endpoint's shared probe and this runner's Keeper-specific last dispatch. *)
 
 type receipt_unavailable =
   | Request_not_sent

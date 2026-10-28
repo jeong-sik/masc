@@ -118,7 +118,7 @@ class Store:
         put('.librarian-range-commit.json', json.dumps({'receipts': list(receipts)}))
         def row(entry):
             """A pending row. An entry is a request id, or a (request id, fact.first_seen) pair; None leaves first_seen out."""
-            request_id, first_seen = entry if isinstance(entry, tuple) else (entry, None)
+            request_id, first_seen = entry if isinstance(entry, tuple) else (entry, T0)
             return {'sequence': 9, 'request_id': request_id, 'fact': {} if first_seen is None else {'first_seen': first_seen}}
 
         put('.memory-admission.json', json.dumps({'generation': 'g', 'last_sequence': 9, 'pending': [row(entry) for entry in pending]}))
@@ -523,20 +523,24 @@ class StateTests(unittest.TestCase):
         self.store.keeper('w', pending=[('rid-1', T0 + 100), ('rid-2', T0 + 50), ('rid-3', T0 * 1000), ('rid-4', None), ('rid-5', -T0 * 1_000_000)])
         state = self.store.state('w')
         self.assertEqual((state.waiting_rows, state.oldest_waiting), (5, T0 + 50))
-        self.store.keeper('x', pending=['rid-1'])
+        self.store.keeper('x')
         self.assertIsNone(self.store.state('x').oldest_waiting)
 
-    def test_the_last_commit_and_the_last_failed_pass_are_the_latest_usable_stamps(self):
-        # The latest stamp is not the last row of the file: the Librarian rows are out of order, the failed rows too.
+    def test_queue_rows_without_a_usable_first_seen_are_counted_and_left_out_of_the_age(self):
+        self.store.keeper('w', pending=[('rid-1', T0 + 100), ('rid-3', T0 * 1000), ('rid-4', None), ('rid-5', -T0 * 1_000_000)])
+        skipped = collections.Counter()
+        state = reach.load_state(str(self.store.memory), 'w', skipped)
+        self.assertEqual((state.waiting_rows, state.oldest_waiting), (4, T0 + 100))
+        self.assertEqual(dict(skipped), {'admission queue rows whose fact.first_seen is not a usable time (left out of the oldest age)': 3})
+
+    def test_the_last_commit_is_the_latest_librarian_stamp_whatever_the_order_of_the_rows(self):
+        # The latest stamp is not the last row of the file. A row of another source and a failed row do not count.
         self.store.keeper('lf', journal=[
             commit_row(1, T0 + 50, [OLD]), commit_row(2, T0 + 90, [NEW], source='explicit_write'), commit_row(2, T0 + 10),
-            {'outcome': 'failed', 'recorded_at': T0 + 70}, {'outcome': 'failed', 'recorded_at': T0 + 30}, {'outcome': 'failed', 'recorded_at': T0 * 1000},
+            {'outcome': 'failed', 'recorded_at': T0 + 120},
         ])
-        skipped = collections.Counter()
-        state = reach.load_state(str(self.store.memory), 'lf', skipped)
-        self.assertEqual((state.last_commit(), state.journal.last_failed), (T0 + 50, T0 + 70))
-        self.assertEqual(dict(skipped), {'failed journal rows without a usable recorded_at': 1})
-        self.assertEqual((self.store.state('empty-journal').last_commit(), self.store.state('empty-journal').journal.last_failed), (None, None))
+        self.assertEqual(self.store.state('lf').last_commit(), T0 + 50)
+        self.assertIsNone(self.store.state('empty-journal').last_commit())
 
     def test_a_quarantine_row_restarts_the_revisions_and_is_noted(self):
         quarantine = {'outcome': 'quarantined', 'recorded_at': T0 + 200, 'rejection': 'undecodable', 'rejected_path': 'rejected.json'}
@@ -547,9 +551,9 @@ class StateTests(unittest.TestCase):
         )
         state = self.store.state('qr')
         self.assertEqual(state.journal.revision_times, {1: (T0 + 400,)})
-        self.assertEqual(state.journal.quarantines, 1)
+        self.assertEqual(state.journal.restarts, 1)
         self.assertEqual(state.journal.first_added[mid(OLD)], T0 + 100, 'a fact id is a hash of its claim and stays comparable')
-        self.assertEqual(state.problems, ('qr.memory-journal.jsonl holds 1 quarantine rows; revisions restart after each',))
+        self.assertEqual(state.problems, ('qr.memory-journal.jsonl holds 1 revision restarts (a quarantine row, or a revision that went back); the stamps before each are dropped',))
         self.assertEqual(state.settle_bounds(state.settled['rid-q']), (50.0, 50.0))
 
     def test_a_journal_row_with_another_outcome_is_not_a_commit(self):
@@ -564,6 +568,38 @@ class StateTests(unittest.TestCase):
         self.store.keeper('ql', journal=[commit_row(1, T0 + 100, [OLD]), quarantine])
         state = self.store.state('ql')
         self.assertEqual((state.journal.revision_times, state.last_commit()), ({}, T0 + 100))
+
+    def test_a_revision_that_goes_back_restarts_the_stamps_without_a_quarantine_row(self):
+        # With no snapshot to follow, the numbering begins at 1 again and the quarantine row may be missing.
+        self.store.keeper(
+            'back',
+            receipts=[bound('rid-b', 's', NEW, 1, T0 + 350)],
+            journal=[commit_row(1, T0 + 100, [OLD]), commit_row(2, T0 + 200), commit_row(1, T0 + 400, [NEW])],
+        )
+        state = self.store.state('back')
+        self.assertEqual((state.journal.revision_times, state.journal.restarts), ({1: (T0 + 400,)}, 1))
+        self.assertEqual(
+            state.problems,
+            ('back.memory-journal.jsonl holds 1 revision restarts (a quarantine row, or a revision that went back); the stamps before each are dropped',),
+        )
+        self.assertEqual(state.settle_bounds(state.settled['rid-b']), (50.0, 50.0))
+
+    def test_restarts_are_counted_and_what_the_journal_learned_before_one_stays(self):
+        quarantine = {'outcome': 'quarantined', 'recorded_at': T0 + 150}
+        self.store.keeper('twice', journal=[
+            commit_row(1, T0 + 100, [OLD]), commit_row(2, T0 + 120, [], [OLD]), quarantine,
+            commit_row(1, T0 + 200, [NEW]), commit_row(2, T0 + 220), commit_row(1, T0 + 300, [OLD]),
+        ])
+        journal = self.store.state('twice').journal
+        self.assertEqual(journal.restarts, 2)
+        self.assertEqual(journal.revision_times, {1: (T0 + 300,)})
+        self.assertEqual(journal.removals[mid(OLD)].recorded_at, T0 + 120, 'a fact id is a hash of its claim, so a removal before a restart still stands')
+        self.assertEqual(journal.first_added[mid(OLD)], T0 + 100)
+
+    def test_the_same_revision_twice_is_one_revision_with_two_stamps_not_a_restart(self):
+        self.store.keeper('same', journal=[commit_row(1, T0 + 100, [OLD]), commit_row(1, T0 + 400)])
+        journal = self.store.state('same').journal
+        self.assertEqual((journal.revision_times, journal.restarts), ({1: (T0 + 100, T0 + 400)}, 0))
 
     def test_blank_lines_in_a_file_are_not_input_the_script_cannot_use(self):
         (self.store.memory / 'a.memory-events.jsonl').write_text('\n  \n\n', encoding='utf-8')
@@ -751,12 +787,11 @@ class ReportTests(unittest.TestCase):
             self.line(queued, 'rows in the admission queues'),
             'rows in the admission queues of the 3 Keepers read, whatever their age and whether or not the trace holds their call: 1',
         )
-        # Keeper "a" has one pending row without a write time. Its last Librarian commit is revision 3 at 3000 s, and its latest failed row
-        # is stamped 9999 s; the read is a day after T0.
+        # Keeper "a" has one pending row written at T0. Its last Librarian commit is revision 3 at 3000 s; a failed row and a row of
+        # another source in its journal do not count. The read is a day after T0.
         self.assertEqual(
             self.line(queued, 'a:'),
-            f'a: 1 rows; oldest written unknown; last Librarian commit {reach.iso(T0 + 3000)} (83400 s before the read); '
-            f'last failed pass {reach.iso(T0 + 9999)} (76401 s before the read)',
+            f'a: 1 rows; oldest written {T0_ISO} (86400 s before the read); last Librarian commit {reach.iso(T0 + 3000)} (83400 s before the read)',
         )
 
     def test_the_queue_total_adds_up_every_keeper_read_and_not_only_the_rows_a_call_names(self):
@@ -787,7 +822,7 @@ class ReportTests(unittest.TestCase):
         # A target stamped before the write (8) or added by no row (1) may have existed before the Keeper wrote: 9 of the 11 with a target.
         self.assertEqual(
             self.line(settled, 'targets that may have existed before the write'),
-            'targets that may have existed before the write (stamped before it, or added by no row): 9 of 11 with a target (81.8%); the other 2 are exact',
+            'targets that may have existed before the write (stamped before it, added by no row, or without a usable write time): 9 of 11 with a target (81.8%); the other 2 are exact',
         )
         self.assertEqual(self.line(settled, 'not counted:'), 'not counted: 0 that cannot be placed in the window, 0 written before --since')
         self.assertEqual(self.line(settled, 'receipts that are not a settled candidate'), 'receipts that are not a settled candidate (--since does not apply): 6')
@@ -1072,6 +1107,35 @@ class RemovalTests(unittest.TestCase):
             'removed since the start of the journal: a written reason 1 (33.3%), also added a fact 2 (66.7%)',
         )
 
+    def ends_of_that_kind(self, keeper):
+        lines = [line.strip() for line in self.store.run('--only', keeper)[1].split('\n')]
+        found = [line for line in lines if line.startswith('the ends above that are of that kind:')]
+        self.assertEqual(len(found), 1, found)
+        return found[0]
+
+    def test_the_ends_of_the_same_kind_are_counted_against_all_the_ends(self):
+        # t1, t2 and l3 end on a Librarian row; t4 ends on l4, which no row removed.
+        self.assertEqual(self.ends_of_that_kind('rm'), 'the ends above that are of that kind: 3 of 4')
+
+    def test_a_loop_of_revised_records_ends_on_an_id_outside_the_comparison(self):
+        a, b = self.T1, self.T2
+        self.store.keeper(
+            'loop',
+            receipts=[bound('rc', 's', a, 2, T0 + 60)],
+            journal=[commit_row(1, T0 + 10, [a]), commit_row(2, T0 + 20, [b], [a]), commit_row(3, T0 + 30, [], [b])],
+            revised={a: b, b: a},
+        )
+        self.assertEqual(self.ends_of_that_kind('loop'), 'the ends above that are of that kind: 0 of 1')
+        self.assertIn('for comparison, 0 ids that are not current,', self.comparison(keeper='loop'))
+
+    def test_an_end_removed_by_an_explicit_write_is_outside_the_comparison(self):
+        self.store.keeper(
+            'explicit',
+            receipts=[bound('re', 's', self.T1, 1, T0 + 5)],
+            journal=[commit_row(1, T0 + 10, [self.T1]), commit_row(2, T0 + 20, [], [self.T1], source='explicit_write')],
+        )
+        self.assertEqual(self.ends_of_that_kind('explicit'), 'the ends above that are of that kind: 0 of 1')
+
     def test_an_absorbed_or_retracted_id_is_not_of_the_same_kind(self):
         self.store.keeper(
             'base',
@@ -1242,8 +1306,8 @@ class EdgeInputTests(unittest.TestCase):
         self.assertEqual(
             lines[start + 1:start + 4],
             [
-                f'    many: 3 rows; oldest written {reach.iso(T0 + 50)} (86350 s before the read); last Librarian commit never; last failed pass never',
-                f'    few: 1 rows; oldest written {reach.iso(T0 + 100)} (86300 s before the read); last Librarian commit never; last failed pass never',
+                f'    many: 3 rows; oldest written {reach.iso(T0 + 50)} (86350 s before the read); last Librarian commit none in the journal',
+                f'    few: 1 rows; oldest written {reach.iso(T0 + 100)} (86300 s before the read); last Librarian commit none in the journal',
                 '',
             ],
         )
@@ -1253,13 +1317,47 @@ class EdgeInputTests(unittest.TestCase):
         (self.store.memory / 'stuck.memory-admission.json').write_text(json.dumps({'generation': 'g', 'last_sequence': 5, 'pending': rows}), encoding='utf-8')
         lines = self.lines()
         self.assertIn('  rows in the admission queues of the 1 Keepers read, whatever their age and whether or not the trace holds their call: 5', lines)
-        self.assertIn(f'    stuck: 5 rows; oldest written {T0_ISO} (86400 s before the read); last Librarian commit never; last failed pass never', lines)
+        self.assertIn(f'    stuck: 5 rows; oldest written {T0_ISO} (86400 s before the read); last Librarian commit unknown, no journal file', lines)
         missing = 'missing stuck.librarian-range-commit.json; missing stuck.memory-journal.jsonl; missing stuck.memory-current.json'
         self.assertIn(f'stuck | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | - | {missing}', lines)
 
+    def test_a_keeper_with_only_a_journal_and_current_facts_is_read(self):
+        (self.store.memory / 'ghost.memory-journal.jsonl').write_text(json.dumps(commit_row(1, T0 + 10, [OLD])) + '\n', encoding='utf-8')
+        (self.store.memory / 'ghost.memory-current.json').write_text(json.dumps({'facts': [{'claim': OLD}]}), encoding='utf-8')
+        lines = self.lines()
+        self.assertEqual(sum(line.startswith('ghost | ') for line in lines), 1)
+        self.assertIn('  for comparison, current facts that no committed journal row added: 0 of 1 (0.0%)', lines)
+
+    def test_a_queue_whose_rows_name_no_request_id_still_gets_its_line(self):
+        self.store.keeper('anon', pending=[''])
+        self.assertIn(f'    anon: 1 rows; oldest written {T0_ISO} (86400 s before the read); last Librarian commit none in the journal', self.lines())
+
+    def test_a_journal_with_no_librarian_row_is_told_from_a_missing_journal(self):
+        self.store.keeper('quiet', pending=['rid-1'], journal=[commit_row(1, T0 + 10, [OLD], source='explicit_write')])
+        lines = self.lines()
+        self.assertIn(f'    quiet: 1 rows; oldest written {T0_ISO} (86400 s before the read); last Librarian commit none in the journal', lines)
+
+    def test_since_at_the_epoch_is_a_date_and_not_unset(self):
+        self.store.trace('neg', [finished(-5, queued_text('rid-old'), 'c1'), finished(5, queued_text('rid-new'), 'c2')])
+        self.store.keeper(
+            'neg',
+            # rid-plain has no source fact; its revision is stamped before 1970, so it was settled and written before --since.
+            receipts=[bound('rid-old', 's', OLD, 1, -5), bound('rid-new', 's', OLD, 1, 5), unbound('rid-plain', 2)],
+            journal=[commit_row(1, 10, [OLD]), commit_row(2, -50)],
+        )
+        lines = self.lines('--since', '1970-01-01')
+        self.assertIn('write calls: 1 in 1 Keepers', lines)
+        self.assertIn('  first 1970-01-01T00:00:05Z, last 1970-01-01T00:00:05Z; --since 1970-01-01T00:00:00Z', lines)
+        self.assertIn('  not counted: 0 that cannot be placed in the window, 2 written before --since', lines)
+
+    def test_current_facts_that_no_committed_row_added_are_counted(self):
+        self.store.keeper('un', journal=[commit_row(1, T0 + 10, [OLD])], current=[OLD, NEW])
+        self.assertIn('  for comparison, current facts that no committed journal row added: 1 of 2 (50.0%)', self.lines())
+
     def test_a_keeper_with_only_a_receipt_file_is_read(self):
         self.store.keeper('receipts-only', receipts=[unbound('rid-r', 1)], journal=[commit_row(1, T0 + 10)])
-        (self.store.memory / 'receipts-only.memory-admission.json').unlink()
+        for suffix in ('.memory-admission.json', '.memory-journal.jsonl', '.memory-current.json'):
+            (self.store.memory / f'receipts-only{suffix}').unlink()
         lines = self.lines()
         self.assertIn('  rows in the admission queues of the 1 Keepers read, whatever their age and whether or not the trace holds their call: 0', lines)
         self.assertEqual(sum(line.startswith('receipts-only | ') for line in lines), 1)
@@ -1271,7 +1369,7 @@ class EdgeInputTests(unittest.TestCase):
         unknown = '  settled with a target that no commit row adds, or whose receipt has no usable write time: 1 (100.0%)'
         self.assertEqual(lines.count(unknown), 2, 'once in the queued table and once in the settled table')
         self.assertIn(
-            '  targets that may have existed before the write (stamped before it, or added by no row): 1 of 1 with a target (100.0%); the other 0 are exact',
+            '  targets that may have existed before the write (stamped before it, added by no row, or without a usable write time): 1 of 1 with a target (100.0%); the other 0 are exact',
             lines,
         )
 
@@ -1292,7 +1390,7 @@ class EdgeInputTests(unittest.TestCase):
         )
         out = self.store.run()[1]
         self.assertIn('settled with a target whose revision has more than one Librarian stamp: 0 of 1', out)
-        self.assertIn('qr.memory-journal.jsonl holds 1 quarantine rows; revisions restart after each', out)
+        self.assertIn('qr.memory-journal.jsonl holds 1 revision restarts (a quarantine row, or a revision that went back); the stamps before each are dropped', out)
 
     def test_the_keeper_table_lists_the_most_calls_first_then_by_name(self):
         for keeper, count in (('x', 2), ('y', 5), ('b', 2)):

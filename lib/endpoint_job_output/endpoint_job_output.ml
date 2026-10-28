@@ -102,7 +102,7 @@ let start_with_hook ~after_chunk ~on_metadata ~sw ~fs ~owner ~stream ~source =
     let* ()=io (fun () -> Eio.File.sync file) in
     let* ()=validate_attachment byte_length in
     let* original=P.request_to_json (P.Inspect (L.original owner)) |> Result.map_error (fun e -> Codec_error e) in
-    let hash=cpu (fun () -> Digestif.SHA256.(to_hex (get context))) in
+    let hash=cpu (fun () -> Agent_core_sha256.(to_hex (get context))) in
     let* sha256=P.Sha256.of_string hash |> Result.map_error (fun _ -> Capture_failed) in
     let content=cpu (fun () -> Yojson.Safe.to_string (`Assoc ["version",`Int 1;"original",original;
       "stream",`String (tag stream);"byte_length",`String (Int64.to_string byte_length);
@@ -125,13 +125,13 @@ let start_with_hook ~after_chunk ~on_metadata ~sw ~fs ~owner ~stream ~source =
       Eio.File.pwrite_all file ~file_offset:position [part];
       after_chunk ();
       let bytes=Cstruct.to_string part in
-      let context=cpu (fun () -> Digestif.SHA256.feed_string context bytes) in
+      let context=cpu (fun () -> Agent_core_sha256.feed_string context bytes) in
       Atomic.set t.state (Growing next);
       capture next context
     | exception End_of_file -> seal byte_length context in
   Eio.Switch.check sw;
   Eio.Fiber.fork_daemon ~sw (fun () ->
-    (match io (fun () -> capture 0L Digestif.SHA256.empty) with
+    (match io (fun () -> capture 0L Agent_core_sha256.empty) with
      | Ok value -> finish value
      | Error e -> finish (Error e)
      | exception (Eio.Cancel.Cancelled _ as ex) ->

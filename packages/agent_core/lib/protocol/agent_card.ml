@@ -90,7 +90,7 @@ let validate_object_fields ~path ~known fields =
 ;;
 
 let create_supported_interface_at ~path ~url ~protocol_binding ~protocol_version ~tenant =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* url = validate_non_empty ~field:(path ^ ".url") url in
   let uri = Uri.of_string url in
   let* () =
@@ -243,7 +243,7 @@ let required_field fields ?key field =
 ;;
 
 let required_string fields ?key field =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* value = required_field fields ?key field in
   match value with
   | `String value -> validate_non_empty ~field value
@@ -259,7 +259,7 @@ let optional_string fields ?key field =
 ;;
 
 let required_list fields ?key field =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* value = required_field fields ?key field in
   match value with
   | `List values -> Ok values
@@ -269,7 +269,7 @@ let required_list fields ?key field =
 let rec map_indexed_result index f = function
   | [] -> Ok []
   | value :: rest ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* value = f index value in
     let* rest = map_indexed_result (index + 1) f rest in
     Ok (value :: rest)
@@ -290,7 +290,7 @@ let strings_of_json ~field values =
 
 let supported_interface_of_json index = function
   | `Assoc fields ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let path = Printf.sprintf "supportedInterfaces[%d]" index in
     let* () =
       validate_object_fields
@@ -315,7 +315,7 @@ let supported_interface_of_json index = function
 
 let credential_ref_of_json = function
   | `Assoc fields ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* () =
       validate_object_fields
         ~path:"authentication.credential_ref"
@@ -357,7 +357,7 @@ let authentication_of_json fields =
   match List.assoc_opt "authentication" fields with
   | None | Some `Null -> Ok None
   | Some (`Assoc auth_fields) ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* () =
       validate_object_fields
         ~path:"authentication"
@@ -395,7 +395,7 @@ let authentication_of_json fields =
 
 let skill_of_json index = function
   | `Assoc fields ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let path = Printf.sprintf "skills[%d]" index in
     let* () = validate_object_fields ~path ~known:[ "name"; "description" ] fields in
     let* name = required_string fields ~key:"name" (path ^ ".name") in
@@ -416,7 +416,7 @@ let tool_schema_of_json index json =
 let of_json (json : Yojson.Safe.t) : (agent_card, Error.t) result =
   match json with
   | `Assoc fields ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* () =
       validate_object_fields
         ~path:"agent_card"

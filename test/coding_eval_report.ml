@@ -113,7 +113,7 @@ let row_keys =
 ;;
 
 let row_of_json json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   match json with
   | `Assoc fields ->
     let names = List.map fst fields in
@@ -566,7 +566,7 @@ let build_cohort ~cases ~rows ~k cohort =
 ;;
 
 let build_suite ~(cases : Coding_eval_case.t list) ~(rows : row list) ~k =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let case_ids = List.map (fun (case : Coding_eval_case.t) -> case.id) cases in
   let* groups, _, _ =
     List.fold_left

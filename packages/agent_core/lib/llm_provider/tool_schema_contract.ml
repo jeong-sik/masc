@@ -183,7 +183,7 @@ let tool_param_of_yojson json =
 ;;
 
 let tool_param_of_json (json : Yojson.Safe.t) : (tool_param, string) result =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   match json with
   | `Assoc fields ->
     let scope = tool_param_scope in
@@ -364,7 +364,7 @@ let property_description prop =
    private so no caller can reach the conversion without the key check;
    the two used to disagree on a repeated key (#27841). *)
 let json_schema_to_params_of_checked_schema schema =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* required_list = required_list_of_schema schema in
   match schema with
   | `Assoc fields ->
@@ -735,7 +735,7 @@ let tool_schema_scope = "tool_schema"
    persisted payload lands in [Error] rather than raising [Type_error] out of
    the advertised [result]. *)
 let tool_schema_of_json (json : Yojson.Safe.t) : (tool_schema, string) result =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   match json with
   | (`Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _) as other ->
     Error

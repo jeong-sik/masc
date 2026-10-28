@@ -4,7 +4,7 @@ open Masc
 module R = Lane_addon_runtime
 module B = Browser_lane
 module F = Exact_output_fixture
-let ( let* ) = Result.bind
+open Result.Syntax
 let require = function Ok value -> value | Error message -> failwith message
 (* The package of the owned Gecko source (addons/browser/automation), declared
    under its own id the way masc browser-lane-setup declares it, and the Skill

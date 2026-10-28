@@ -69,7 +69,7 @@ let declared_keys =
 ;;
 
 let of_json json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   match json with
   | `Assoc fields ->
     let unknown =
@@ -179,7 +179,7 @@ let of_json json =
 ;;
 
 let load_case ~dir =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let case_path = Filename.concat dir "case.json" in
   let* json =
     match Yojson.Safe.from_file case_path with

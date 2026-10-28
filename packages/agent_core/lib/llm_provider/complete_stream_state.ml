@@ -1,6 +1,6 @@
 (** Pure stream assembly state machine. *)
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 module Blocks = Map.Make (Int)
 

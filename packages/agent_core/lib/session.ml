@@ -75,7 +75,7 @@ let to_json t =
 ;;
 
 let of_json json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   try
     let open Yojson.Safe.Util in
     let* metadata =

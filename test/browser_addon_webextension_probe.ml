@@ -5,7 +5,7 @@ open Masc
 module R = Lane_addon_runtime
 module B = Browser_lane
 module Http = Http_server_eio
-let ( let* ) = Result.bind
+open Result.Syntax
 let require = function Ok value -> value | Error detail -> failwith detail
 (* The package of the external host source (addons/browser/external), the
    one a native host's polls bind to, declared under its own id the way masc

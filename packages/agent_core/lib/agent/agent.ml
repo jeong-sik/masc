@@ -762,7 +762,7 @@ let resume
       ?config
       ()
   =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* { Agent_checkpoint.state; context = ctx; provider_config; binding_disposition } =
     Agent_checkpoint.build_resume ~checkpoint ~eio_context:true ?config
       ~source_change_policy:options.reasoning_source_change

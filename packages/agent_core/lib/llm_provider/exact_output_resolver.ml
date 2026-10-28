@@ -205,7 +205,7 @@ type target_catalog_admission_error =
   | Target_ref_rejected of target_ref_error
   | Target_not_in_catalog of string
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let sha256 value = Agent_core_sha256.(to_hex (digest_string value))
 
 let hash_parts parts =

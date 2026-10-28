@@ -26,7 +26,7 @@ let file_object_of_yojson (json : Yojson.Safe.t) : (file_object, string) result 
     let string_field name =
       match field name with Some (`String v) -> Ok v | _ -> Error ("missing or non-string " ^ name)
     in
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* id = string_field "id" in
     let* filename = string_field "filename" in
     let* purpose = string_field "purpose" in

@@ -55,7 +55,7 @@ let category_of_string = function
   | value -> Error (Printf.sprintf "unknown boundary-audit category %S" value)
 ;;
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let normalize_resolved_callee value =
   let value =

@@ -132,7 +132,7 @@ type 'callback_error flow_request_error =
   | Flow_request_measurement_terminal_callback_failed of
       Flow_admission.measurement_receipt * 'callback_error
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let rec canonical_json = function
   | `Assoc fields ->

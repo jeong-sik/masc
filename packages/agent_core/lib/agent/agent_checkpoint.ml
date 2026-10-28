@@ -49,7 +49,7 @@ type resume_state =
 let build_resume ~(checkpoint : Checkpoint.t)
     ?(source_change_policy = Llm_provider.Reasoning_history_projection.Reject_incompatible)
     ?(eio_context = false) ?config ?provider_config ?context () =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* () =
     if checkpoint.version = Checkpoint.checkpoint_version then Ok ()
     else Error (Invalid_checkpoint_version

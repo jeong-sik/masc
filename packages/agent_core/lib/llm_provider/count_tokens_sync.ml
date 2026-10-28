@@ -53,7 +53,7 @@ let count_anthropic_staged
         Error
           (Count_failed (Input_token_count.Transport error, Measurement_before_dispatch))
       | Ok body ->
-        let ( let* ) = Result.bind in
+        let open Result.Syntax in
         let* auth_headers = Provider_config.resolve_auth_headers config
           |> Result.map_error (fun reason ->
             Count_failed (Input_token_count.Transport (Http_client.AcceptRejected { reason }), Measurement_before_dispatch)) in

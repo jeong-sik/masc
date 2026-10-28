@@ -11,7 +11,7 @@ type request_artifact = string Request_artifact_internal.t
 
 let request_payload = Request_artifact_internal.payload
 let request_output_token_receipt = Request_artifact_internal.output_token_receipt
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let json_assoc_opt key = function
   | `Assoc fields -> List.assoc_opt key fields

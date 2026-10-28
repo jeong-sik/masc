@@ -600,7 +600,7 @@ let prefix_bound_history ~policy ~tools (config : Provider_config.t) projected_m
 module Message_indices = Set.Make (Int)
 
 let retained_prefix_reasoning_indices ~config ~tools messages =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* projection = project_history ~tools_present:(tools <> []) config messages in
   let* policy = Message_origin_lowering.policy_for_provider_config config
     |> Result.map_error (fun error -> Reasoning_history_projection.Invalid_control_lowering error) in

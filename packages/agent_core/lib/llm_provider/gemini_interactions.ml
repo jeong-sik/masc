@@ -64,7 +64,7 @@ let usage_of_json ~parser json =
   match Yojson.Safe.Util.member "usage" json with
   | `Null -> Ok None
   | `Assoc _ as usage_json ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* input_tokens = optional_int ~parser "total_input_tokens" usage_json in
     let* output_tokens = optional_int ~parser "total_output_tokens" usage_json in
     let* total_tokens = optional_int ~parser "total_tokens" usage_json in
@@ -129,7 +129,7 @@ let model_output_items ~parser ~content_type ~item_of_json json =
 
 let decode_envelope ~parser ~payload_of_json body =
   let decode json =
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* provider_response_id = required_string ~parser "id" json in
     let* status = required_string ~parser "status" json in
     let* () = if String.equal status "completed" then Ok () else status_failure status in

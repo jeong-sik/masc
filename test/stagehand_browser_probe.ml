@@ -15,7 +15,7 @@ module Tools = Browser_addon_tools
 
 let failures = ref []
 let steps = ref []
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* The package of the Stagehand source (addons/browser/stagehand), declared
    under its own id the way masc browser-lane-setup declares it, and the

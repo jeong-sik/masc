@@ -38,7 +38,7 @@ let parse_error_to_string = function
       (Types.stop_reason_to_string stop_reason)
 ;;
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let first_some a b =
   match a with

@@ -1,6 +1,6 @@
 module Sha256 = Agent_core_sha256
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type fingerprint = Fingerprint of string
 

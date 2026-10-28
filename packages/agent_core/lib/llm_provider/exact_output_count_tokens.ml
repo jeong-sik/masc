@@ -105,7 +105,7 @@ let freeze_exact_completion_artifact
         (match count_tokens_body_of_generation_artifact generation_artifact with
          | Error _ as error -> error
          | Ok body ->
-           let ( let* ) = Result.bind in
+           let open Result.Syntax in
            let* auth_headers = Provider_config.resolve_auth_headers config
              |> Result.map_error (fun reason -> Invalid_completion_request reason) in
            let measurement_request =

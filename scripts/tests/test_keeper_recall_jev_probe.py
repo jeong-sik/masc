@@ -244,6 +244,39 @@ class RepeatReportTests(unittest.TestCase):
         first = next(line for line in lines if line.startswith('  changed: c5849f1b038e'))
         self.assertIn("probabilities (needed/maybe_needed/not_needed) ['0.28/0.49/0.23', '0.20/0.40/0.40'", first)
 
+    def detail_runs(self):
+        def answer(choice, needed, maybe, not_needed):
+            return {
+                'choice': choice,
+                'confidence': 0.0,
+                'probabilities': {'needed': needed, 'maybe_needed': maybe, 'not_needed': not_needed},
+            }
+
+        split = answer('not_needed', 0.25, 0.30, 0.45)
+        sure_not = answer('not_needed', 0.10, 0.20, 0.70)
+        return [
+            {'a': split, 'b': answer('needed', 0.50, 0.30, 0.20), 'c': sure_not},
+            {'a': split, 'b': answer('maybe_needed', 0.30, 0.40, 0.30), 'c': sure_not},
+        ]
+
+    def test_detail_counts_candidates_not_selected_although_their_selected_probability_is_over_half(self):
+        lines = probe.repeat_report([candidate(question_id) for question_id in 'abc'], self.detail_runs(), probe.THREE_WAY, detail=True)
+        self.assertIn('mean selected probability above 0.5: 2 candidates, selected in every run: 1, in some runs: 0, in no run: 1', lines)
+        self.assertIn('  a labels 0/0/2 mean probabilities 0.25/0.30/0.45 mean selected 0.55', lines)
+        self.assertIn('  b labels 1/1/0 mean probabilities 0.40/0.35/0.25 mean selected 0.75', lines)
+        self.assertIn('  c labels 0/0/2 mean probabilities 0.10/0.20/0.70 mean selected 0.30', lines)
+
+    def test_detail_is_off_by_default(self):
+        lines = probe.repeat_report([candidate(question_id) for question_id in 'abc'], self.detail_runs(), probe.THREE_WAY)
+        self.assertFalse(any(line.startswith('mean selected probability above') for line in lines))
+        self.assertFalse(any(line.startswith('  a labels') for line in lines))
+
+    def test_detail_says_when_probabilities_are_missing(self):
+        rows = {'a': (['needed', 'not_needed'], [0.5, 0.5])}
+        lines = probe.repeat_report([candidate('a')], runs_of(rows, 2), probe.THREE_WAY, detail=True)
+        self.assertIn('mean selected probability above 0.5: 0 candidates, selected in every run: 0, in some runs: 0, in no run: 0', lines)
+        self.assertIn('  a labels 1/0/1 probabilities missing in some run', lines)
+
     def test_two_way_runs_count_possibly_needed_as_selected(self):
         rows = {
             'a': (['possibly_needed', 'possibly_needed', 'not_needed'], [0.4, 0.5, 0.2]),

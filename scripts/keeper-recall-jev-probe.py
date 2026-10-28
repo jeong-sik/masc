@@ -17,7 +17,10 @@ It reports the size of every request, whether Jev accepted it, how long it took,
 the input tokens Jev counted, the model id that answered, and, with
 ``--repeat``, how many candidates got a different label on a repeat of the
 identical input and how often the set of selected candidates (every label but
-not_needed) was the same between two runs.
+not_needed) was the same between two runs. ``--detail`` adds one line per candidate
+with its label counts and mean probabilities, and counts the candidates whose
+probability of being selected is above one half although the label did not
+always select them.
 
 Nothing is sent unless ``--send`` and ``--allow-send-for <keeper>`` are given.
 The facts are real Keeper memory and leave this machine for api.typesafe.ai.
@@ -92,6 +95,8 @@ SHAPES = {"three": THREE_WAY, "two": TWO_WAY}
 # 80 KB stays under the largest state Jev accepted so far (82.1 KB). A 159.7 KB
 # state was refused.
 DEFAULT_PIECE_KB = 80
+# Only used to describe the answers in --detail; nothing in the probe or the design branches on it.
+HALF = 0.5
 DEFAULT_TURN_INPUT = (
     "A reviewer asks for a verdict on an open pull request. Check the current head, the review list and the "
     "comments, then record a verdict line."
@@ -287,19 +292,63 @@ def probability_text(answer: dict[str, object], shape: Shape) -> str:
     return "/".join(f"{as_float(probabilities[label]):.2f}" if label in probabilities else "-" for label in shape.labels)
 
 
-def repeat_report(candidates: list[dict[str, object]], runs: list[dict[str, dict[str, object]]], shape: Shape) -> list[str]:
+def probability_values(answer: dict[str, object], shape: Shape) -> list[float] | None:
+    """The answer's probability of each label in the order of the shape's labels, or None when one is missing."""
+    probabilities = as_dict(answer.get("probabilities"))
+    if not all(label in probabilities for label in shape.labels):
+        return None
+    return [as_float(probabilities[label]) for label in shape.labels]
+
+
+def detail_lines(shape: Shape, labels: dict[str, list[str]], values: dict[str, list[list[float] | None]]) -> list[str]:
+    """Label counts and mean probabilities of every candidate, after a summary of the selected probability."""
+    selected_at = [shape.labels.index(label) for label in shape.selected]
+    rows: list[str] = []
+    above: list[str] = []
+    for question_id, seen in labels.items():
+        counts = "/".join(str(seen.count(label)) for label in shape.labels)
+        complete = [entry for entry in values[question_id] if entry is not None]
+        if len(complete) < len(seen):
+            rows.append(f"  {question_id} labels {counts} probabilities missing in some run")
+            continue
+        means = [sum(entry[index] for entry in complete) / len(complete) for index in range(len(shape.labels))]
+        mass = sum(means[index] for index in selected_at)
+        if mass > HALF:
+            above.append(question_id)
+        rows.append(
+            f"  {question_id} labels {counts} mean probabilities {'/'.join(f'{mean:.2f}' for mean in means)} "
+            f"mean selected {mass:.2f}"
+        )
+    in_every = sum(1 for question_id in above if all(label in shape.selected for label in labels[question_id]))
+    in_none = sum(1 for question_id in above if not any(label in shape.selected for label in labels[question_id]))
+    return [
+        f"mean selected probability above {HALF}: {len(above)} candidates, selected in every run: {in_every}, "
+        f"in some runs: {len(above) - in_every - in_none}, in no run: {in_none}",
+        f"  per candidate: label counts ({'/'.join(shape.labels)}), mean probabilities, mean selected probability",
+        *rows,
+    ]
+
+
+def repeat_report(
+    candidates: list[dict[str, object]],
+    runs: list[dict[str, dict[str, object]]],
+    shape: Shape,
+    detail: bool = False,
+) -> list[str]:
     """How the answers to identical requests differ between runs. Needs at least two runs."""
     counts = {label: sum(1 for run in runs for answer in run.values() if answer.get("choice") == label) for label in shape.labels}
     lines = [f"label counts over {len(runs)} runs: {counts}"]
     labels: dict[str, list[str]] = {}
     confidences: dict[str, list[float]] = {}
     probabilities: dict[str, list[str]] = {}
+    values: dict[str, list[list[float] | None]] = {}
     for candidate in candidates:
         question_id = as_str(candidate.get("question_id"))
         if all(question_id in run for run in runs):
             labels[question_id] = [as_str(run[question_id].get("choice")) for run in runs]
             confidences[question_id] = [as_float(run[question_id].get("confidence")) for run in runs]
             probabilities[question_id] = [probability_text(run[question_id], shape) for run in runs]
+            values[question_id] = [probability_values(run[question_id], shape) for run in runs]
     if not labels:
         return lines
     changed = [question_id for question_id, seen in labels.items() if len(set(seen)) > 1]
@@ -347,6 +396,8 @@ def repeat_report(candidates: list[dict[str, object]], runs: list[dict[str, dict
         )
         lines.append(f"  always selected: {' '.join(always) or '-'}")
         lines.append(f"  sometimes selected: {' '.join(sometimes) or '-'}")
+    if detail:
+        lines.extend(detail_lines(shape, labels, values))
     lines.extend(
         f"  changed: {question_id} labels {labels[question_id]} confidence {[f'{value:.2f}' for value in confidences[question_id]]} "
         f"probabilities ({'/'.join(shape.labels)}) {probabilities[question_id]}"
@@ -366,6 +417,7 @@ def main() -> int:
     parser.add_argument("--timeout", type=float, default=10.0, help="seconds per request; the server client defaults to 10")
     parser.add_argument("--piece-kb", type=int, default=DEFAULT_PIECE_KB, help="most candidate state per request, in KB")
     parser.add_argument("--shape", choices=sorted(SHAPES), default="three", help="three: needed, maybe_needed, not_needed; two: possibly_needed, not_needed")
+    parser.add_argument("--detail", action="store_true", help="with --repeat, also print every candidate's label counts and mean probabilities")
     parser.add_argument("--max-candidates", type=int, default=0, help="use only the first N facts; 0 uses all")
     parser.add_argument("--turn-input-file", help="a file with the turn input text; default is a synthetic one")
     args = parser.parse_args()
@@ -405,7 +457,7 @@ def main() -> int:
 
     if len(runs) < 2:
         return 0
-    for line in repeat_report(candidates, runs, shape):
+    for line in repeat_report(candidates, runs, shape, args.detail):
         print(line)
     return 0
 

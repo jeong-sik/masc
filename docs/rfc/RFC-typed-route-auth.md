@@ -71,36 +71,49 @@ HTTP/2는 라우터가 아니라 별도 `match`로 경로를 처리하고 `with_
 
 ### 3.1 인증 종류
 
-현재 래퍼와 하나씩 맞아요. 핸들러가 받는 값(서버 상태, 토큰 ID, 호출자)이 종류마다 달라서 GADT로 써요. 이름은 초안이에요.
+현재 래퍼와 하나씩 맞아요. 핸들러가 받는 값(서버 상태, 토큰 ID, 호출자)이 종류마다 달라서 GADT로 써요. 구현(A4a)에서는 두 모듈로 나뉘어요.
+
+- `Route_access.t`(`lib/route_access.ml`): 함수 타입이 없는 데이터예요. `Http_server_eio.Router.route`가 이것을 들고 있어서 핸들러를 실행하지 않고도 경로 표를 읽을 수 있어요.
+- `Server_route.auth`(`lib/server/server_route.ml`): 핸들러 타입을 나르는 GADT예요. 등록 함수가 이것을 받아 `Server_auth` 래퍼를 씌워요.
 
 ```ocaml
-type _ t =
-  | Always_public : handler t                                (* 엄격 설정에서도 열림 *)
-  | Public_read : state_handler t                            (* 기본은 열림, 엄격 설정에서는 read 인증 *)
-  | Read_auth : state_handler t
-  | Permission : Masc_domain.permission -> state_handler t
-  | Token_permission : Masc_domain.permission -> token_handler t
-  | Private_token_permission : Masc_domain.permission -> token_handler t
-  | Tool : { tool_name : string } -> state_handler t
-  | Tool_actor : { tool_name : string } -> actor_handler t
-  | Self_authenticated : self_authenticated_reason -> handler t
+type _ auth =
+  | Always_public : request_handler auth                     (* 엄격 설정에서도 열림 *)
+  | Public_read : state_handler auth                         (* 기본은 열림, 엄격 설정에서는 read 인증 *)
+  | Read_auth : state_handler auth
+  | Permission : Masc_domain.permission -> state_handler auth
+  | Token_permission : Masc_domain.permission -> token_handler auth
+  | Private_token_permission : Masc_domain.permission -> token_handler auth
+  | Tool : { tool_name : string } -> state_handler auth
+  | Tool_actor : { tool_name : string } -> actor_handler auth
+  | Self_authenticated : Route_access.self_authenticated_reason -> request_handler auth
 ```
 
 - `Always_public`은 `is_public_read_path`를 대신해요. 그 목록은 변환이 끝나면 지워요.
-- `Self_authenticated`는 핸들러가 직접 인증하는 경로예요. 위 래퍼 없음 43곳을 보면 사유 후보는 MCP 전송, OAuth 엔드포인트, WebSocket 업그레이드, browser lane, play 페이지예요. 사유는 닫힌 목록으로 두고 변환 도구가 센 뒤에 확정해요.
-- `with_canonical_loopback_host`는 단독으로 쓰이지 않고 `with_public_read`와 함께 `/dashboard` 페이지 3곳에만 나와요. 인증 종류가 아니라 호스트 검사라는 별도 축이라서, 등록 함수의 선택 인자(`?host:Loopback_only`)로 두어요.
+- `Self_authenticated`는 핸들러가 직접 인증하는 경로예요. 사유는 닫힌 목록이고, A4a에서는 A1 기준선과 코드로 확인한 셋(`Mcp_transport`, `Oauth_protocol`, `Websocket_upgrade`)만 있어요. 래퍼 없음 43곳을 결정표로 정하는 A4b에서 근거와 함께 사유를 더해요(후보는 browser lane, play 페이지예요).
+- `with_canonical_loopback_host`는 인증 종류가 아니라 호스트 검사라서 이 타입에 넣지 않아요. 그 래퍼는 `/dashboard` 페이지 3곳에서 `with_public_read`와 함께 쓰이고, `server_routes_http_routes_frontend.ml` 안의 지역 함수예요(`~port`를 받아요). 그 3곳을 어떻게 옮길지는 A4b에서 정하고, 호스트 검사가 인증 래퍼 앞에서 도는 순서가 응답을 바꾸지 않는지 A1 기준선으로 확인해요.
 
 ### 3.2 등록 함수
 
 ```ocaml
-val Server_route.get : 'h Route_auth.t -> string -> 'h -> routes -> routes
+val Server_route.get : 'h auth -> string -> 'h -> Router.t -> Router.t
 ```
 
-등록 함수가 종류에 맞는 `Server_auth` 래퍼를 씌워서 `Http_server_eio.Router`에 넣어요. 라우터의 `route` 레코드에는 핸들러 타입이 없는 사본(`access`)을 더해서 인벤토리가 읽게 해요. 의존 방향은 그대로예요. `access` 데이터는 라우터와 같은 라이브러리에, 래퍼를 잇는 코드는 server 쪽에 둬요.
+`get`, `post`, `add`, `prefix_get`, `prefix_post`, `prefix_put`, `prefix_delete`가 있어요. 코드에서 쓰이는 등록 함수만 만들었어요. 정확한 경로의 `put`, `delete`, `any`는 쓰는 곳이 없어서 없고, 쓰게 되면 그때 더해요. `ws_get`은 업그레이드 핸들러가 직접 인증하므로 종류를 받지 않고 항상 `Self_authenticated Websocket_upgrade`를 기록해요.
+
+등록 함수는 종류에 맞는 `Server_auth` 래퍼를 핸들러에 씌우고, 종류를 같은 호출에서 기록해요. 종류와 핸들러를 따로 받는 함수는 라우터가 공개하지 않아요. 그래서 `Permission`이라 적고 인증 없는 핸들러를 넘기는 등록은 쓸 수 없어요. 등록 함수는 라우터 모듈의 함수자 `Router.Make_typed`가 만들어요. `Server_auth`는 `masc.server`에 있어서 라우터가 직접 부를 수 없으니, 래퍼 일곱 개를 함수자 인자(`Router.Wrappers`)로 받아요. `Server_route`가 이 함수자를 `Server_auth`로 적용하는 유일한 곳이에요. 아무것도 검사하지 않는 래퍼로 함수자를 적용하면 이 보장을 우회할 수 있어요. 그것은 타입이 아니라 리뷰가 막고, 적용이 한 곳뿐인지는 `rg Make_typed`로 보여요. 라우터의 `route` 레코드에는 `access : Route_access.t` 필드가 있고 인벤토리가 이것을 읽어요. 라우터의 옛 등록 함수(`Router.get` 등)는 `Route_access.Unclassified`를 기록하고, 마지막 층(A4d)에서 지워요. 그 뒤에는 모든 경로의 `access`가 이 함수자를 거친 값이에요.
+
+### 3.2.1 경로표는 하나의 상태예요
+
+`Router.routes`는 등록한 줄을 순서대로 모두 돌려주고, `Router.effective_routes`는 디스패치가 실제로 고르는 경로만 돌려줘요. 같은 메서드와 정확한 경로를 두 번 등록하면 나중 것이 이기고, 같은 접두사도 나중 것이 앞서요. 그래서 어느 경로에 어떤 종류가 적용되는지는 `effective_routes`를 읽어요(인벤토리와 C4가 읽는 표). 한 등록이 여러 메서드를 가지면 일부 메서드만 덮어써질 수 있고, 그때는 덮어써지지 않은 메서드만 남아요.
+
+등록 줄과 메서드 인덱스는 같은 공유 상태예요. 등록 함수에 넘긴 옛 라우터 참조로 `routes`, `route_count`, `resolve`를 불러도 같은 표를 봐요.
+
+지금 main에는 같은 경로가 두 번 등록된 곳이 있어요. `make_routes`가 `Server_routes_http_routes_workspace.add_routes`를 두 번 부르고, 9개 경로 10줄이 겹쳐요. 두 번째가 이기고 핸들러가 같아서 응답은 달라지지 않아요.
 
 ### 3.3 HTTP/2
 
-H2 게이트웨이의 갈래도 같은 `Route_auth.t`를 써요. 같은 경로를 HTTP/1과 HTTP/2가 서로 다른 종류로 등록하면 시험이 실패해요. 한쪽에만 있는 경로는 시험 안에 사유와 함께 이름으로 적어요. 그 목록을 고치면 리뷰에서 보여요.
+H2 게이트웨이의 갈래도 같은 `Server_route.auth`를 써요. 같은 경로를 HTTP/1과 HTTP/2가 서로 다른 종류로 등록하면 시험이 실패해요. 한쪽에만 있는 경로는 시험 안에 사유와 함께 이름으로 적어요. 그 목록을 고치면 리뷰에서 보여요.
 
 ### 3.4 하지 않는 것
 
@@ -115,6 +128,8 @@ H2 게이트웨이의 갈래도 같은 `Route_auth.t`를 써요. 같은 경로�
 2. 인벤토리 도구가 경로·메서드·종류를 출력해요. 그 표를 evidence로 남기고, 종류가 바뀐 줄은 PR diff로 리뷰해요.
 3. 변환하는 동안 `Always_public` 경로 집합과 `is_public_read_path`가 양쪽으로 같은지 시험해요. 변환이 끝나면 목록을 지우고 시험도 함께 지워요.
 4. 등록할 때 종류를 안 적으면 컴파일이 실패해요.
+5. 종류와 핸들러를 따로 받는 등록 함수는 `http_server_eio.mli`에 없어요. `Router.Make_typed`를 적용하는 곳이 `server_route.ml` 한 곳인지는 `rg Make_typed`로 확인해요.
+6. 경로표 시험이 같은 경로의 재등록(권한이 다른 경우 포함), 일부 메서드만 덮어쓰는 경우, 정확한 경로와 접두사의 우선순위, 옛 참조로 읽는 목록·개수·조회를 확인해요.
 
 ## 5. 단계
 

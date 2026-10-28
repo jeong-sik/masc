@@ -1004,6 +1004,43 @@ done\n\
 printf 'retry-ok\n'\n\
 exit 0\n"
 
+let test_execute_identity_failure_keeps_message_and_code () =
+  with_fake_docker fake_docker_daemon_unavailable_then_ok_script @@ fun () ->
+  setup_with_sandbox ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path [ "base", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base" } in
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  let raw =
+    Keeper_tool_execute_runtime.handle_tool_execute
+      ~result_projection:Tool_output.default_model_projection
+      ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
+      ~turn_sandbox_factory:(Some factory) ~config ~meta
+      ~args:(tool_execute_typed_exec_args ~cwd:playground "gh" ~argv:[ "auth"; "status" ])
+      ()
+  in
+  let fields =
+    match Yojson.Safe.from_string raw with
+    | `Assoc fields -> fields
+    | _ -> Alcotest.fail "Execute failure is not a JSON object"
+  in
+  Alcotest.(check int) "one error field" 1
+    (List.length (List.filter (fun (name, _) -> String.equal name "error") fields));
+  Alcotest.(check bool) "identity preparation detail is preserved" true
+    (match List.assoc_opt "error" fields with
+     | Some (`String message) ->
+       String_util.contains_substring message "GitHub identity snapshot unavailable"
+     | Some _ | None -> false);
+  Alcotest.(check (option string)) "machine-readable failure code"
+    (Some "github_identity_snapshot_unavailable")
+    (match List.assoc_opt "code" fields with
+     | Some (`String code) -> Some code
+     | Some _ | None -> None)
+;;
+
 let test_docker_run_does_not_retry_generic_timeout () =
   with_fake_docker fake_docker_timeout_then_ok_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -2886,6 +2923,9 @@ let () =
           Alcotest.test_case
             "turn runtime redacts its mounted GitHub snapshot"
             `Quick test_turn_runtime_redacts_the_stable_identity_mount;
+          Alcotest.test_case
+            "Execute identity failure keeps its message and code"
+            `Quick test_execute_identity_failure_keeps_message_and_code;
           Alcotest.test_case
             "docker run does not retry generic timeout"
             `Quick

@@ -41,3 +41,20 @@ This observation covers source `ab94e60`, before any later unbuilt follow-up.
 | [Read-only priority refusal](queue-priority-refused.txt) | `519ca1e14c7923c8b8566f9744d61344694a910fa05bdb28c7b61cbb6928a618` |
 | [Rejected paste notice](queue-paste-refused.txt) | `d401d67213a36afe9d8e0e38647f2342846ec65384df1e222528e4604efc1613` |
 | [Chat draft after Queue closed](chat-draft-return.txt) | `d0ec618aba522c90914b9596873739d3667e8e1fa7e403a78d857d7b91aaa104` |
+
+## Help paste ownership counterexample
+
+In a second isolated fixture run around 22:04–22:06 KST, `?` opened Help
+over a chat with an empty draft. A synthetic bracketed paste,
+`HELP-PASTE-MARKER`, appeared in the composer summary while Help remained
+open and in the chat draft after Esc. No message was sent. After clearing that
+synthetic draft, the same operation with Help above Queue produced
+`Paste lost; retry` and left the composer empty. This is a negative observation
+for source `ab94e60`; it does not prove the behavior of a later fix.
+
+| Capture | SHA-256 |
+| --- | --- |
+| [Help over empty chat before paste](help-chat-before-paste.txt) | `df983a485c5868151f90e27365b73763fa3010106ed1d6a452034409905eb2d0` |
+| [Help after paste changed underlying draft](help-chat-after-paste.txt) | `812baadde815c38eb5ad76f2ad548c16559f4ba418708b182ccd9a2826c1ae17` |
+| [Chat draft after Help closed](chat-after-help-paste.txt) | `6f46ab1dded86c42aeb6dc33c593810fd70468751ac88678ec32dbf529cce6d2` |
+| [Help over Queue rejected paste](help-queue-after-paste.txt) | `1abdad27561e778c9f17b6888dd77a529f34f875d33723def5f2f5e10fc24d62` |

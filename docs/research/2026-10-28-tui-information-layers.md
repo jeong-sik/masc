@@ -156,10 +156,11 @@ and a flush does not prove that a person saw the notice.
 
 The follow-up gives Queue and supported Keeper chat their own notice space in
 an existing border or padding row, leaving the footer and its confirmation
-intact. This later change is source/probe evidence and has not been exercised
-in a terminal. Elsewhere, existing action and form/save feedback keep priority
-so a pending retry or Ctrl-C recovery hint can remain out of view even at a
-normal width. A one-off observation of the actual footer fitter with dependency
+intact. A [manual observation of source 234b647](../evidence/research/tui-information-layers-2026-10-28/populated-fixture/candidate-234b647/README.md)
+showed a rejected paste in each location in an isolated fixture; it is not proof
+of every timing or terminal. Elsewhere, existing action and form/save feedback
+keep priority so a pending retry or Ctrl-C recovery hint can remain out of view
+even at a normal width. A one-off observation of the actual footer fitter with dependency
 stubs found that, at 80 columns, a workspace-unconfirmed warning, Config's
 Enter/Esc keys and a `/hello` search prefix leave no room for either complete
 hint when offered. Unsupported chat, external image/MSX screens and very narrow
@@ -172,6 +173,10 @@ a folded turn, full tool visibility and pending gate effects, the budget omits
 the gate row while the renderer draws it. That can push the footer past the
 frame. This predates the separate-row change and was not reproduced in the
 terminal fixture; it remains outside the evidence for this follow-up.
+
+Another source-only concern predating the Help repair is that an asynchronous
+Lane declaration editor handoff can open over a displayed Play card. It was
+not reproduced in the terminal fixture and is not settled by the Help fix.
 
 Input can still arrive after the post-output observation, and the terminal does
 not report when the person saw the new frame. A late tail after a forced CSI
@@ -202,6 +207,15 @@ confirmed Queue Help and selection restoration, a literal Hangul key in Help,
 detail, a read-only priority refusal, a rejected paste notice and retained chat
 draft in the synthetic terminal. It does not cover the subsequent separate-row
 change, successful server reordering or physical IME input.
+
+The same candidate also exposed a negative ownership case: a synthetic paste
+sent to Help over chat changed the underlying chat draft, while Help over Queue
+rejected it. The later `234b647` candidate reproduced the Help-over-chat case.
+The captures record the composer summary while Help was open and the retained
+draft after Help closed. A subsequent source change gives Help a presented-frame
+owner and rejects paste or transition input before it reaches the covered
+surface; focused state and source-extraction probes passed. These are pre-fix
+terminal observations, not evidence that the later change works in a terminal.
 
 The [static sketches](../evidence/research/tui-information-layers-2026-10-28/prototype/README.md)
 put the same synthetic chat and 18 queue rows into three arrangements. They

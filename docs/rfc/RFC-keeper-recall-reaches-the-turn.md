@@ -12,7 +12,7 @@ related: ["deferred-contextual-memory", "keepers-see-the-wiki-table-of-contents"
 
 # RFC: Keeper 가 기억을 매 턴 받게 한다
 
-- 상태: 초안. 판정 방식(D2)은 운영자가 2026-10-28 에 "LLM 판단 Jev 판단을 적극 사용"으로 정했다. Keeper 17명의 의견은 [증거 문서](../evidence/keeper-recall-board-feedback-2026-10-28/README.md)에 있고 반영은 §2.4 에 적었다. 나머지는 §8 에 열려 있다.
+- 상태: 초안. 판정 방식(D2)은 운영자가 2026-10-28 에 "LLM 판단 Jev 판단을 적극 사용"으로 정했다. Keeper 17명의 의견은 [증거 문서](../evidence/keeper-recall-board-feedback-2026-10-28/README.md)에 있고 반영은 §2.4 에 적었다. 나머지는 §8 에 열려 있다. 진행판은 #46556 이다.
 - 날짜: 한국 시간(KST). Board 와 metrics 의 시각은 UTC 이고 `Z` 를 붙인다.
 - 운영자 요청 (2026-10-28): 모든 Keeper 의 기억 Recall 이 턴 대화에서 쓰여야 한다. 지금은 사실상 쓰이지 않아 Librarian 이 의미를 잃는다. Skill 처럼 기억을 찾게 하고, 위계와 트리로 연결된 기억을 따라가게 하고, 기성 제품과 논문을 보고 빠진 구현을 채우라고 했다.
 - 근거: 측정은 [기준선 증거](../evidence/keeper-recall-baseline-2026-10-28/README.md), 기성 제품과 논문은 [연구 r1](../research/2026-10-28-keeper-recall-prior-art-r1.md)과 [r2](../research/2026-10-28-keeper-recall-prior-art-r2.md). 코드는 이 브랜치의 트리다(분기점 `origin/main` `68b6cd521cb`). 수치는 모두 탐침 Keeper 3명을 뺀 40명 기준이고 2026-10-28 03:05Z 에 셌다.
@@ -79,7 +79,7 @@ Board 글에 Keeper 17명이 댓글 22개로 답했다. 7명은 RFC 원문을 �
 | 세 가지 "없음" | 상태 넷과 "N개 중 M개 판정"(§4.4). 결과는 평가 기록에 `turn_ref` 로 남긴다(§4.6) |
 | Jev 가 놓침 | `maybe_needed`(§4.3). 오프라인 재생에서 놓침을 잰다(§7). 식별자·발동 조건형 사실의 별도 통로는 만들지 않는다(§8-4) |
 | Jev 반복 안정성 | 층 0 전제 측정(§5, §7) |
-| 제외, 속성 기준 | 열린 결정 1. 제외 Keeper 는 층 1 에서 recall 을 받지 않는다(§4.7) |
+| 제외, 속성 기준 | Keeper 별 반출 정책으로 #46555 에서 정한다(§8-1). 그 전까지 recall 은 `scope = "listed"` 테스트 Keeper 에만 켠다(§4.7) |
 | 비용, 읽기 API p99 | §4.8. 카나리 밖으로 넓히기 전 조건 |
 | 월드 프레임과 겹침 | 문항 조건과 R7(§7) |
 | 쓰기 도달, 결과 유실 | §2.6, 층 0 전제 측정. 쓰기 도구는 #46507 |
@@ -338,9 +338,8 @@ claim 바이트는 그날 턴을 낸 Keeper 의 현재 사실 바이트를 턴 �
   - 제외 목록은 `kidsnote-slack-context-collector` 하나이고, `board_attention`·`absorb_gate`·후속 판정이 같은 목록을 읽는다.
   - 이 RFC 의 recall 은 새로 하나가 더 늘어나는 경로이고 양이 다르다. 지금까지 나간 기억 판정 1,623건은 `state` 중앙값이 7.6KB 였다. recall 은 하루 3,793턴에 턴마다 Keeper 의 사실 전체(평균 약 100KB)와 이번 턴 입력을 보낸다(§4.8).
   - in-house 레인도 "레인이면 안전"이 아니다. 라이브 슬롯이 `glm-coding`, `ollama_cloud`, `claude_code` CLI 라서 외부 클라우드로 간다. Keeper 별 레인 설정은 허용된 슬롯의 순서만 바꿀 수 있어서(`keeper_exact_lane_preference.mli`) 제외 Keeper 를 자기 슬롯으로만 보내려면 새 계약이 필요하다.
-  - 정할 것: kidsnote 4종(`kidsnote-incoming-dd-manager`, `kidsnote-job-manager`, `kidsnote-qa-hub-manager`, `kidsnote-slack-reader`)을 제외 목록에 둘지. 이름 나열은 새 Keeper 가 생기면 조용히 새므로 데이터 분류 속성으로 정하는 별도 RFC 를 낼지.
-  - 이 RFC 의 제안: 카나리에서 kidsnote 4종을 빼고, 제외 Keeper 는 층 1 에서 recall 을 받지 않는다(`Off`).
-- **2 — 층 2 의 hard cut.** 안정 id·제목·출처 좌표·연결은 저장 계약을 바꿔서 백업 후 기억을 다시 쓴다.
+  - 운영자 결정(2026-10-28): 이름 몇 개를 목록에 넣는 것보다 넓은 제외 기능이 있어야 한다. Keeper 별 반출 정책으로 #46555 에서 별도 RFC 로 정한다. 그 전까지 recall 은 `scope = "listed"` 로 명시한 테스트 Keeper 에만 켠다. kidsnote 4종(`kidsnote-incoming-dd-manager`, `kidsnote-job-manager`, `kidsnote-qa-hub-manager`, `kidsnote-slack-reader`)은 명시하지 않는다.
+- **2 — 층 2 의 hard cut.** 안정 id·제목·출처 좌표·연결은 저장 계약을 바꿔서 백업 후 기억을 다시 쓴다. 운영자가 하기로 했다(2026-10-28). 실행은 백업을 만든 뒤 한 번 더 확인받는다.
 - **3 — 기본 검색 안의 후속 판정.** 기능별 스위치를 달고 기본값을 정한다(§2.3).
 - **4 — `constraint` 사실이 Jev 를 거치지 않고 항상 고른 것으로 올라가게 할지.** 20%(466개)가 `constraint` 라서 블록이 그만큼 커지고 category 로 가르는 규칙이 하나 생긴다. 제안은 하지 않는 것이다. 오프라인 재생에서 Jev 가 `constraint` 를 `not_needed` 로 보내는 비율을 먼저 센다.
 - **5 — recall 범위.** 이 RFC 는 Memory OS 의 개인 사실만 다룬다. 예약 노트와 연결 Task 문맥을 넣을지. 월드 프레임에 `Scheduled_automation` 층이 있어서 어디까지 이미 닿는지 먼저 확인해야 한다. 확인하지 않았다.

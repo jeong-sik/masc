@@ -11,7 +11,6 @@ type 'a t = {
 
 let cpu body = { kind = Cpu; body }
 let io body = { kind = Io; body }
-let kind w = w.kind
 
 let weight = function
   | Cpu -> Domain_pool.weight_cpu

@@ -26,17 +26,13 @@ val io : (unit -> 'a) -> 'a t
     channel read and its parse) stops every job the worker admitted beside
     it; declare such a compute [cpu]. *)
 
-val kind : 'a t -> kind
-
-val weight : kind -> float
-(** {!Domain_pool.weight_cpu} or {!Domain_pool.weight_io}. *)
-
 val wrap : 'a t -> ((unit -> 'a) -> 'b) -> 'b t
 (** [wrap w f] is work of [w]'s kind whose body is [f] applied to [w]'s body.
     [f] decides whether and when that body runs. Code that adds bookkeeping
     around a compute uses it to keep the caller's declaration. *)
 
 val submit : 'a t -> 'a
-(** {!Executor_pool_ref.submit_or_inline} with [weight (kind w)]: the body
+(** {!Executor_pool_ref.submit_or_inline} with {!Domain_pool.weight_cpu} for
+    {!cpu} work and {!Domain_pool.weight_io} for {!io} work: the body
     runs once, on a worker of the pool the caller's lane selects, or in place
     when there is no pool, outside Eio, or already inside a pool job. *)

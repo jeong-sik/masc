@@ -3849,7 +3849,8 @@ let help_lines ~width (state : state) =
             (fun line -> Message_layout.wrap_words ~max_cells:(max 1 width)
               (Terminal_text.single_line line)) lines @ [ "" ])
   in
-  candle @ (match Masc_tui_keys.help_sections_for_state state with
+  let _, cols = get_terminal_size () in
+  candle @ (match Masc_tui_keys.help_sections_for_state ~cols state with
   | [] -> slash_commands
   | first :: rest ->
       section first @ slash_commands @ List.concat_map section rest)

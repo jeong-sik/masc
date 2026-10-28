@@ -8,6 +8,7 @@ type recovery = No_rejected_recovery | Rejected_recovery
 
 type input_kind = Action | Paste | Protocol
 type input_decision = Accept_input | Reject_action | Reject_paste
+type panel_owner = Help | About | Context | Context_search | Agenda | Answering
 
 val decide_unpresented_input :
   frame_presented:bool -> external_surface:bool -> input_kind -> input_decision
@@ -15,28 +16,33 @@ val decide_unpresented_input :
     independently drawn image or machine surface owns it. Protocol replies
     remain observable. A presented compact frame counts as presented. *)
 
-val decide_help_input :
-  external_surface:bool -> presented_help:bool -> current_help:bool ->
+val decide_panel_input :
+  external_surface:bool -> presented_owner:panel_owner option ->
+  current_owner:panel_owner option ->
   input_kind -> input_decision
-(** Help owns input only while it is both the presented and current frame.
-    Paste is not an input to Help. During either transition, operator events
-    are rejected; protocol replies and external surfaces keep their own
-    admission rules. *)
+(** A panel owns input only while both the presented and current frame name
+    it. Only Context_search accepts paste. Entering, leaving or replacing a
+    panel rejects operator input until presentation; protocol replies and
+    external surfaces retain their own admission rules. None denotes a frame
+    outside these panels, whose existing input policy remains responsible. *)
 
 type ('approval, 'presses, 'panes, 'reader) t = private {
   approval : 'approval;
   presses : 'presses;
   panes : 'panes;
   reader : 'reader;
+  panel_owner : panel_owner option;
   barrier : barrier;
   recovery : recovery;
 }
 
 val initial :
-  approval:'a -> presses:'p -> panes:'n -> reader:'r -> ('a, 'p, 'n, 'r) t
+  approval:'a -> presses:'p -> panes:'n -> reader:'r ->
+  panel_owner:panel_owner option -> ('a, 'p, 'n, 'r) t
 
 val presented :
   ('a, 'p, 'n, 'r) t -> approval:'a -> presses:'p -> panes:'n -> reader:'r ->
+  panel_owner:panel_owner option ->
   owner_changed:bool -> input_pending:bool -> ('a, 'p, 'n, 'r) t
 (** Call only after successful output. A previous hold survives presentation;
     a changed owner starts one when input is already in flight. *)

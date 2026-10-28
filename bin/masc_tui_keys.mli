@@ -336,11 +336,13 @@ val help_surfaces : (string * Masc_tui_types.surface) list
     that way on the sheet. *)
 
 val help_sections_for_state :
-  Masc_tui_types.state -> (string * (string * string) list) list
+  cols:int -> Masc_tui_types.state -> (string * (string * string) list) list
 (** Put the active nested reader's own keys first, ahead of surface reference
     sections. This is the help sheet's state-aware entry point. *)
 
 val footer_hints_patch_review : unit -> string
+val footer_hints_about : unit -> string
+val footer_hints_context : cols:int -> Masc_tui_types.state -> string
 val footer_hints_runtime_detail : ?ko:bool -> ?routes:bool -> unit -> string
 
 val help_sections :

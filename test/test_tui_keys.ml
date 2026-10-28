@@ -1781,7 +1781,7 @@ let test_acting_evidence_footer_hints_and_help_section () =
       { Masc_tui_acting.ae_at = 1.0
       ; ae_event = Masc_tui_observer.Internal_agent_runs_changed
       };
-  match Masc_tui_keys.help_sections_for_state state with
+  match Masc_tui_keys.help_sections_for_state ~cols:120 state with
   | (title, entries) :: _ ->
       Alcotest.(check string) "Event evidence leads the help sheet while open"
         ("Event evidence" ^ Masc_tui_keys.here_marker) title;
@@ -1806,7 +1806,7 @@ let test_runtime_detail_routes_omits_model_settings_hint () =
   let state = create_state ~workspace:"test" ~port:0 ~refresh_interval:2.0 () in
   state.view <- Runtime;
   state.runtime_detail_target <- Some Runtime_routes;
-  match Masc_tui_keys.help_sections_for_state state with
+  match Masc_tui_keys.help_sections_for_state ~cols:120 state with
   | (_, entries) :: _ ->
       Alcotest.(check bool) "Runtime_routes help sheet omits e"
         false (List.exists (fun (k, _) -> String.equal k "e") entries)

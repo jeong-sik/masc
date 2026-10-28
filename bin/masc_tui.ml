@@ -23890,7 +23890,7 @@ let main
   (* All interaction evidence is committed together after terminal output. *)
   let presented = ref (Presented.initial ~approval:None
       ~presses:Masc_tui_hit.no_zones ~panes:Masc_tui_pane_selection.no_panes
-      ~reader:None) in
+      ~reader:None ~panel_owner:None) in
   (* The left button's gesture from press to release. *)
   let pointer_gesture = ref Masc_tui_pane_selection.Idle in
   let terminal_title = Terminal_title.create () in
@@ -24185,6 +24185,8 @@ let main
     | (true | false), (Some _ | None), (Some _ | None) -> None
   in
   let present_frame frame approval presses panes ~input_pending ~write ~flush reader =
+    let panel_owner = Masc_tui_render.panel_input_owner state
+        ~terminal_rows:frame.Frame_presenter.terminal_rows in
     let damaged = Terminal_write_repair.consume_damage () in
     let candidate_rejection = presented_input_rejection
         ~rows:(max 1 frame.Frame_presenter.terminal_rows)
@@ -24200,16 +24202,17 @@ let main
     let owned_reader reader =
       Option.is_some (queue_owner_of_reader reader)
       || Option.is_some (play_card_of_reader reader)
-      || help_is_presented reader in
+      || Option.is_some panel_owner in
     let owner_changed =
       queue_selection_authority_changed ~presented:(!presented).presses ~candidate:presses
       || queue_owner_authority_changed ~presented:(queue_owner_of_reader (!presented).reader)
            ~candidate:(queue_owner_of_reader reader)
       || play_owner_authority_changed ~presented:(play_card_of_reader (!presented).reader)
            ~candidate:(play_card_of_reader reader)
-      || Bool.not (Bool.equal (help_is_presented (!presented).reader) (help_is_presented reader))
+      || not (Option.equal ( = ) (!presented).panel_owner panel_owner)
       || ((damaged || Option.is_none (Frame_presenter.presented_rows frame_presenter))
-          && (owned_reader (!presented).reader || owned_reader reader))
+          && (Option.is_some (!presented).panel_owner
+              || owned_reader (!presented).reader || owned_reader reader))
     in
     let frame =
       match !pointer_gesture with
@@ -24277,7 +24280,7 @@ let main
         if owner_changed then pointer_gesture := Masc_tui_pane_selection.Idle;
         let input_pending = input_pending () in
         presented := Presented.presented !presented ~approval ~presses ~panes ~reader
-            ~owner_changed ~input_pending;
+            ~panel_owner ~owner_changed ~input_pending;
         state.quit_armed <- Option.map (fun arm ->
             let was_visible = Option.exists (fun previous ->
                 Masc_tui_action_notice.same_quit previous arm.qa_confirmation) previous_quit in
@@ -25994,18 +25997,14 @@ and is loaded on demand through keeper_skill.
       let frame_unavailable () =
         not state.image_open && not state.msx_open
         && Option.is_none (Frame_presenter.presented_rows frame_presenter) in
-      let help_is_current () =
+      let panel_owner_current () =
         let terminal_rows, _ = get_terminal_size () in
-        match Masc_tui_render.frame_choice state ~terminal_rows with
-        | `Help -> true
-        | `Too_small _ | `Play_card _ | `Account_login _ | `Palette | `Collab _
-        | `Lane_addons _ | `Detail_reading _ | `About | `Context | `Keeper_deletions
-        | `Queue _ | `Agenda | `Answering | `Patch | `Link | `Client_detail _
-        | `Surface -> false in
+        Masc_tui_render.panel_input_owner state ~terminal_rows in
       let input_not_yet_admissible () =
         input_barrier_held () || frame_unavailable ()
         || (not state.image_open && not state.msx_open
-            && help_is_presented (!presented).reader <> help_is_current ()) in
+            && not (Option.equal ( = ) (!presented).panel_owner
+                      (panel_owner_current ()))) in
       (* A rejected event cancels any signal confirmation above. MIDI
          withdrawal and async results after this point produce newer notices. *)
       let ordinary_before_input = Masc_tui_action_notice.ordinary state.last_action in
@@ -26214,11 +26213,11 @@ and is loaded on demand through keeper_skill.
         | Presented.Reject_action | Presented.Reject_paste ->
             pointer_gesture := Masc_tui_pane_selection.Idle;
             None in
-      (* Help can open over any surface and close before the replacement is
-         painted. Neither transition may send its input to a hidden owner. *)
-      let presented_help = help_is_presented (!presented).reader in
-      let current_help = help_is_current () in
-      let help_decision = match input with
+      (* Panels and their search editors use the actual frame choice. Neither
+         a transition nor nontext paste may reach a covered text owner. *)
+      let presented_panel = (!presented).panel_owner in
+      let current_panel = panel_owner_current () in
+      let panel_decision = match input with
         | None -> Presented.Accept_input
         | Some event ->
             let kind = match event with
@@ -26226,13 +26225,13 @@ and is loaded on demand through keeper_skill.
               | Mouse_wheel _ -> Presented.Action
               | Pasted _ -> Presented.Paste
               | Graphics_reply _ -> Presented.Protocol in
-            Presented.decide_help_input ~external_surface:(state.image_open || state.msx_open)
-              ~presented_help ~current_help kind in
-      (match help_decision with
+            Presented.decide_panel_input ~external_surface:(state.image_open || state.msx_open)
+              ~presented_owner:presented_panel ~current_owner:current_panel kind in
+      (match panel_decision with
        | Presented.Reject_paste when Option.is_some interrupted_paste ->
            presented := Presented.reject_recovery !presented
        | Presented.Accept_input | Presented.Reject_action | Presented.Reject_paste -> ());
-      let input = match help_decision with
+      let input = match panel_decision with
         | Presented.Accept_input -> input
         | Presented.Reject_action | Presented.Reject_paste ->
             pointer_gesture := Masc_tui_pane_selection.Idle;
@@ -26243,9 +26242,14 @@ and is loaded on demand through keeper_skill.
         | Presented.Accept_input -> false
         | Presented.Reject_action | Presented.Reject_paste -> true in
       let rejected_operator_input = rejected || decision_rejected unpresented_decision
-        || decision_rejected help_decision in
-      let help_owns_input = presented_help && current_help
+        || decision_rejected panel_decision in
+      let panel_owns_input = Option.is_some current_panel
+        && presented_panel = current_panel
         && not state.image_open && not state.msx_open in
+      let help_owns_input = panel_owns_input && current_panel = Some Presented.Help in
+      let panel_owns_commands = panel_owns_input && (match current_panel with
+            | Some (Presented.Help | About | Context | Agenda | Answering) -> true
+            | Some Context_search | None -> false) in
       if rejected_operator_input then begin
         Masc_tui_exit_signals.withdraw_interrupt exit_signals;
         (* The read may have consumed its final byte, so neither the pre- nor
@@ -26254,12 +26258,12 @@ and is loaded on demand through keeper_skill.
       end;
       let input = match input with
         | Some (Mouse_wheel (direction, _, _))
-            when not help_owns_input && Option.is_some (current_code_hover state) ->
+            when not panel_owns_input && Option.is_some (current_code_hover state) ->
             Some (Key (match direction with
               | Masc.Tui_mouse_protocol.Wheel_up -> "up"
               | Masc.Tui_mouse_protocol.Wheel_down -> "down"))
         | Some (Mouse_left_press _ | Key ("tab" | "shift-tab" | "\t"))
-            when not help_owns_input && Option.is_some (current_code_hover state) ->
+            when not panel_owns_input && Option.is_some (current_code_hover state) ->
             state.code_hover <- None; input
         | Some (Key _ | Pasted _ | Graphics_reply _ | Mouse_left_press _
                | Mouse_left_drag _ | Mouse_left_release _ | Mouse_wheel _)
@@ -26277,7 +26281,7 @@ and is loaded on demand through keeper_skill.
            state.code_navigation <- None
        | Some (Graphics_reply _) | None -> ());
       let input =
-        if not help_owns_input && recovered_paste_send_locked state then
+        if not panel_owns_input && recovered_paste_send_locked state then
           match input with
           | Some (Key "\007")
             when paste_phase input_reader = No_paste
@@ -26417,7 +26421,7 @@ and is loaded on demand through keeper_skill.
            report_input_rejection state Masc_tui_action_notice.Paste_rejected
              "Screen not yet displayed; paste was not applied, paste it again";
            Render_schedule.request render_schedule Render_schedule.Background);
-      (match help_decision with
+      (match panel_decision with
        | Presented.Accept_input -> ()
        | Presented.Reject_action ->
            report_input_rejection state Masc_tui_action_notice.Input_rejected
@@ -26971,7 +26975,7 @@ and is loaded on demand through keeper_skill.
                 (task_inspection_source reader.tci_original))
             | None -> Option.fold ~none:false ~some:editing (current_detail_reading state) in
       let text_target =
-        if help_owns_input then None
+        if panel_owns_commands then None
         else if not compact_viewport && reading_search_editing then Some Text_row_search
         else text_input_target state ~compact_viewport in
       let play_shown = play_card_shown state in
@@ -27018,7 +27022,7 @@ and is loaded on demand through keeper_skill.
           && (match key with
               | Some name when String.length name > 1 ->
                   let rows, _ = get_terminal_size () in
-                  if help_owns_input || Option.is_some presented_queue_input then true
+                  if panel_owns_commands || Option.is_some presented_queue_input then true
                   else (match Masc_tui_render.frame_choice state ~terminal_rows:rows with
                    | `Queue _ -> true
                    | `Agenda | `Answering | `Help -> not command_reading
@@ -27465,11 +27469,12 @@ and is loaded on demand through keeper_skill.
        | Some (Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _)
        | Some (Mouse_wheel _)
        | None -> ());
-      (* A Help key interrupts a pending confirmation; it cannot confirm an
-         action belonging to the surface the sheet covers. *)
-      let confirmation_key = if help_owns_input then None else key in
+      (* Panel input cannot confirm an action belonging to the covered
+         surface. Global quit keeps its existing, separate key policy. *)
+      let confirmation_key = if panel_owns_input then None else key in
+      let quit_input_key = if help_owns_input then None else key in
       let quit_key =
-        match confirmation_key with
+        match quit_input_key with
         | Some k ->
             (* On a viewport too small to draw them, no field is taking keys:
                the compact fallback further down owns every remaining one, so
@@ -27623,6 +27628,7 @@ and is loaded on demand through keeper_skill.
       then state.acting_pane_cursor <- None;
       let composer_claimed =
         Option.is_none state.account_login && Option.is_none state.lane_addons &&
+        not panel_owns_input &&
         (not compact_viewport)
         && (match queue_play_owner with Wait_for_frame -> false
             | Queue_input _ | Play_input | Other_input -> true)
@@ -27749,6 +27755,10 @@ and is loaded on demand through keeper_skill.
               let count, height = Masc_tui_render.help_viewport state in
               state.help_scroll <- Masc_tui_scroll.maximum ~count ~height
             | _ -> ())
+       | Some "?" when Option.is_some current_panel
+                       && current_panel <> Some Presented.Context_search ->
+           state.help_open <- true;
+           state.help_scroll <- 0
        (* A Play card can arrive after the last Queue frame, or close before
           its replacement frame. The last accepted owner keeps the keys until
           the terminal accepts the next frame. *)
@@ -35856,10 +35866,12 @@ and is loaded on demand through keeper_skill.
         | `Queue _ | `Play_card _ | `Account_login _ | `Palette | `Collab _ | `Lane_addons _
         | `Detail_reading _ | `About | `Context | `Keeper_deletions | `Help
         | `Agenda | `Answering | `Patch | `Link | `Client_detail _ | `Surface -> false in
+      let panel_changed = not (Option.equal ( = ) (!presented).panel_owner
+          (Masc_tui_render.panel_input_owner state ~terminal_rows)) in
       let defer_owned_frame = transition_input_pending && not compact_recovery
         && (owned_frame || Option.is_some (queue_owner_of_reader (!presented).reader)
             || Option.is_some (play_card_of_reader (!presented).reader)
-            || help_is_presented (!presented).reader) in
+            || help_is_presented (!presented).reader || panel_changed) in
       (match
          Render_schedule.take
            ~input_pending:ready_input

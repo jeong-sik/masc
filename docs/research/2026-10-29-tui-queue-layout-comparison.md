@@ -31,7 +31,9 @@ uses the facts currently displayed. Both key handling and rendering use that
 remaining height.
 
 `f` changes the preference between automatic layout and a full reader. Its
-labels are `prefer full` and `allow context`; the title names the preference.
+labels are `prefer full` and `allow context`; the title appends the preference
+after the Keeper name so it does not displace the target. That suffix can be
+clipped; narrow/hints-off footers can require Help to inspect the command.
 Allowing context does not force it into a viewport where both documents do
 not fit. Arrows or `j/k` select, Enter opens detail,
 `?` opens Help and Esc returns. The key table drives both Help and the list and

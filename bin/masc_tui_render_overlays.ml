@@ -901,10 +901,10 @@ let queue_panel_viewport state panel =
 
 let render_queue_panel (state : state) (panel : queue_panel) =
   let terminal_rows, cols = get_terminal_size () in
-  let title label = screen_title (label
+  let title label = screen_title label ^ "  " ^ Terminal_text.single_line panel.qp_keeper
     ^ (if Option.is_some panel.qp_detail then "" else match panel.qp_layout with
        | Masc_tui_queue_layout.Adaptive -> " · automatic"
-       | Expanded -> " · full")) ^ "  " ^ Terminal_text.single_line panel.qp_keeper in
+       | Expanded -> " · full") in
   let owner () = Queue_panel_presented
       (queue_panel_owner state panel ~viewport:(queue_panel_viewport state panel)) in
   if Option.is_some panel.qp_detail then

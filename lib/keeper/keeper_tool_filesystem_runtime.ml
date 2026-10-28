@@ -254,9 +254,16 @@ let read_complete_sandbox_bytes ?read_authority ?turn_sandbox_factory ~config ~m
 ;;
 
 let read_sandbox_raw_prefix ?read_authority ?turn_sandbox_factory ~config ~meta ~path ?cwd ~max_bytes () =
-  let* read_authority = read_authority_for_call ~config ~meta read_authority
-    |> Result.map_error (fun detail -> Keeper_sandbox_read_backend.Read_failed detail) in
   let args = `Assoc (match cwd with None -> [] | Some cwd -> [ "cwd", `String cwd ]) in
+  let* read_authority =
+    match read_authority_for_call ~config ~meta read_authority with
+    | Ok _ as authority -> authority
+    | Error detail ->
+      (match resolve_read_file_target ~read_authority:None ~config ~meta ~args ~raw_path:path with
+       | Error (Read_path_error refusal) ->
+         Error (Keeper_sandbox_read_backend.Read_refused refusal.Keeper_alerting_path.message)
+       | Ok _ -> Error (Keeper_sandbox_read_backend.Read_failed detail))
+  in
   let* read_target =
     resolve_read_file_target ~read_authority ~config ~meta ~args ~raw_path:path
     |> Result.map_error (fun (Read_path_error refusal) ->

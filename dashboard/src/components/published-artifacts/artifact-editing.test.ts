@@ -2,7 +2,7 @@ import { html } from 'htm/preact'
 import type { Signal } from '@preact/signals'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { ApiRequestError, apiRequestErrorFromResponse, clearStoredToken, get, post, setStoredToken } from '../../api/core'
+import { ApiRequestError, apiRequestErrorFromResponse, clearStoredToken, get, getPublic, post, setStoredToken } from '../../api/core'
 import type { ExecutionWorkspaceAuthority } from '../../store'
 import { route } from '../../router'
 import { ArtifactsSurface } from './artifacts-surface'
@@ -18,7 +18,7 @@ vi.mock('../../router', async () => {
   const route = signal({ tab: 'workspace', params: {} as Record<string, string>, postId: null })
   return { route, navigate: vi.fn((tab, params) => { route.value = { tab, params, postId: null } }) }
 })
-vi.mock('../../api/core', async original => ({ ...await original<typeof import('../../api/core')>(), get: vi.fn(), post: vi.fn() }))
+vi.mock('../../api/core', async original => ({ ...await original<typeof import('../../api/core')>(), get: vi.fn(), getPublic: vi.fn(), post: vi.fn() }))
 vi.mock('../common/markdown', () => ({ Markdown: ({ text }: { text: string }) => html`<div>${text}</div>` }))
 
 const id = `artifact-${'a'.repeat(32)}`
@@ -46,7 +46,7 @@ async function edit(waitForWorkspace = true) {
 }
 
 beforeEach(() => {
-  vi.mocked(get).mockReset(); vi.mocked(post).mockReset()
+  vi.mocked(get).mockReset(); vi.mocked(getPublic).mockReset(); vi.mocked(post).mockReset()
   setStoredToken('credential-a')
   workspace.current.value = { epoch: 'fixture', workspaceRoot: '/workspace-a', connectionGeneration: 1 }
   route.value = { tab: 'workspace', params: { section: 'artifacts' }, postId: null }
@@ -238,6 +238,33 @@ it('preserves the open draft through a failed document refresh without presentin
   await reader.findByText(/문서 재조회 실패: refresh unavailable/)
   expect((reader.getByLabelText('문서 본문') as HTMLTextAreaElement).value).toBe('must survive refresh failure')
   expect(post).not.toHaveBeenCalled()
+})
+
+it.each([401, 403])('keeps the same editor and draft on an operator refresh HTTP %i denial', async status => {
+  const reader = await edit()
+  const textarea = reader.getByLabelText('문서 본문') as HTMLTextAreaElement
+  fireEvent.input(textarea, { target: { value: 'draft must survive permission failure' } })
+  const fallback = vi.mocked(get).getMockImplementation()!
+  vi.mocked(get).mockImplementation((path, options) => path === `${list}/${id}`
+    ? Promise.reject(new ApiRequestError({ method: 'GET', path, status, detail: 'access denied' })) : fallback(path, options))
+  fireEvent.click(screen.getByRole('button', { name: '새로고침' }))
+  await reader.findByText(/문서 재조회 실패: .*access denied/)
+  expect(reader.getByLabelText('문서 본문')).toBe(textarea)
+  expect(textarea.value).toBe('draft must survive permission failure')
+  expect(getPublic).not.toHaveBeenCalled()
+  expect(post).not.toHaveBeenCalled()
+})
+
+it('keeps an open draft when the route leaves and returns before the next render', async () => {
+  const reader = await edit()
+  const textarea = reader.getByLabelText('문서 본문') as HTMLTextAreaElement
+  fireEvent.input(textarea, { target: { value: 'draft during batched navigation' } })
+  await act(async () => {
+    route.value = { tab: 'workspace', params: { section: 'artifacts', artifact: `artifact-${'b'.repeat(32)}` }, postId: null }
+    route.value = { tab: 'workspace', params: { section: 'artifacts', artifact: id }, postId: null }
+  })
+  expect(reader.getByLabelText('문서 본문')).toBe(textarea)
+  expect(textarea.value).toBe('draft during batched navigation')
 })
 
 it('reads an explicitly selected UTF-8 HTML file without running it or publishing before confirmation', async () => {

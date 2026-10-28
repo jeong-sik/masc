@@ -128,7 +128,11 @@ that a Keeper is currently viewing or editing a document.
 - The read-only public Dashboard view sends its artifact request without the
   browser's stored bearer, actor header or cookies. An expired local credential
   therefore does not prevent an otherwise permitted anonymous read. Operator
-  views and writes continue to use their captured authentication.
+  views and writes continue to use their captured authentication. Workspace
+  authority alone is not operator permission: a tokenless reader uses the
+  public view, and an initial operator read refused for lack of permission may
+  try an anonymous view. A failed refresh retains an existing operator document
+  and draft instead of replacing them with the public view.
 - The Dashboard share action requires a known sharing state and rechecks the
   selected revision and sharing state with both captured workspace roots before
   sending a change. A missing state, a failed read, or a changed observation

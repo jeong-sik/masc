@@ -2,7 +2,7 @@ import { html } from 'htm/preact'
 import type { Signal } from '@preact/signals'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { get, getPublic, post, clearStoredToken, setStoredToken } from '../../api/core'
+import { ApiRequestError, get, getPublic, post, clearStoredToken, setStoredToken } from '../../api/core'
 import { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from '../../store'
 import { route } from '../../router'
 import { ArtifactsSurface } from './artifacts-surface'
@@ -80,6 +80,197 @@ it('opens a public artifact without forwarding a stored token when workspace aut
   expect(vi.mocked(getPublic).mock.calls.map(([path]) => path)).toEqual([`/api/v1/published-artifacts/${firstId}`])
 })
 
+it.each([401, 403])('opens a shared artifact read-only after the operator read returns %i', async status => {
+  vi.mocked(get).mockImplementation(async path => {
+    throw new ApiRequestError({ method: 'GET', path, status, detail: 'cannot administer artifacts' })
+  })
+  vi.mocked(getPublic).mockResolvedValue({ ...document(first, 'shared body'), shared: true })
+  select(firstId)
+  render(html`<${ArtifactsSurface} />`)
+  await waitFor(() => expect(getPublic).toHaveBeenCalledTimes(1), { timeout: 500 })
+  const reader = within(await screen.findByRole('dialog'))
+  expect(reader.getByText('shared body')).toBeTruthy()
+  expect(reader.getByText('외부 공유 열람')).toBeTruthy()
+  expect(reader.queryByRole('button', { name: '외부 공유 켜기' })).toBeNull()
+  expect(reader.queryByRole('button', { name: '문서 편집' })).toBeNull()
+  expect(getPublic).toHaveBeenCalledWith(`/api/v1/published-artifacts/${firstId}`, { signal: expect.any(AbortSignal) })
+})
+
+it.each(['tokenless', 'worker'])('renders shared HTML read-only for %s without requesting app data', async access => {
+  if (access === 'tokenless') clearStoredToken()
+  else vi.mocked(get).mockImplementation(async path => {
+    throw new ApiRequestError({ method: 'GET', path, status: 403, detail: 'worker cannot administer artifacts' })
+  })
+  vi.mocked(getPublic).mockResolvedValue({ ...document(second, '<h1>shared HTML content</h1>'), shared: true })
+  select(secondId)
+  render(html`<${ArtifactsSurface} />`)
+  const reader = within(await screen.findByRole('dialog'))
+  const iframe = reader.getByTitle(second.title) as HTMLIFrameElement
+  expect(iframe.getAttribute('sandbox')).toBe('allow-scripts')
+  expect(iframe.srcdoc).toContain('shared HTML content')
+  expect(reader.getByText('외부 공유 열람')).toBeTruthy()
+  expect(reader.queryByRole('button', { name: '문서 편집' })).toBeNull()
+  expect(vi.mocked(get).mock.calls.some(([path]) => path.startsWith('/api/v1/artifact-app-data/'))).toBe(false)
+  if (access === 'tokenless') expect(get).not.toHaveBeenCalled()
+})
+
+it('shows the public 401 and never exposes a private artifact after operator denial', async () => {
+  vi.mocked(get).mockImplementation(async path => {
+    if (path === list) return listing()
+    if (path === checks) return { checks: [], diagnostics: [] }
+    throw new ApiRequestError({ method: 'GET', path, status: 403, detail: 'worker denied' })
+  })
+  vi.mocked(getPublic).mockRejectedValue(new ApiRequestError({ method: 'GET', path: `${list}/${firstId}`, status: 401, detail: 'private artifact' }))
+  select(firstId)
+  render(html`<${ArtifactsSurface} />`)
+  expect(await screen.findByText(/private artifact/)).toBeTruthy()
+  expect(getPublic).toHaveBeenCalledTimes(1)
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(screen.queryByText('외부 공유 열람')).toBeNull()
+})
+
+it.each([404, 500])('does not infer public access from an operator HTTP %i failure', async status => {
+  vi.mocked(get).mockImplementation(async path => {
+    if (path === list) return listing()
+    if (path === checks) return { checks: [], diagnostics: [] }
+    throw new ApiRequestError({ method: 'GET', path, status, detail: 'read failed' })
+  })
+  select(firstId)
+  render(html`<${ArtifactsSurface} />`)
+  await screen.findByRole('alert')
+  expect(getPublic).not.toHaveBeenCalled()
+  expect(screen.queryByRole('dialog')).toBeNull()
+})
+
+it('does not infer public access from an operator network failure', async () => {
+  vi.mocked(get).mockImplementation(async path => {
+    if (path === list) return listing()
+    if (path === checks) return { checks: [], diagnostics: [] }
+    throw new Error('network unavailable')
+  })
+  select(firstId)
+  render(html`<${ArtifactsSurface} />`)
+  await screen.findByText('network unavailable')
+  expect(getPublic).not.toHaveBeenCalled()
+})
+
+it('retires a pending public fallback immediately across a batched A to B to A visit', async () => {
+  const delayed = pending()
+  const fallback = vi.mocked(get).getMockImplementation()!
+  let firstReads = 0
+  vi.mocked(get).mockImplementation((path, options) => {
+    if (path === `${list}/${firstId}` && ++firstReads === 1) {
+      return Promise.reject(new ApiRequestError({ method: 'GET', path, status: 403 }))
+    }
+    if (path === `${list}/${firstId}`) return Promise.resolve(document(first, 'fresh visit body'))
+    return fallback(path, options)
+  })
+  vi.mocked(getPublic).mockReturnValue(delayed.promise)
+  select(firstId)
+  render(html`<${ArtifactsSurface} />`)
+  await waitFor(() => expect(getPublic).toHaveBeenCalledTimes(1))
+  const signal = vi.mocked(getPublic).mock.calls[0]![1]!.signal!
+  await act(async () => {
+    select(secondId)
+    select(firstId)
+    delayed.resolve({ ...document(first, 'stale public body'), shared: true })
+  })
+  expect(signal.aborted).toBe(true)
+  const reader = within(await screen.findByRole('dialog'))
+  expect(reader.getByText('fresh visit body')).toBeTruthy()
+  expect(reader.queryByText('stale public body')).toBeNull()
+})
+
+it.each(['workspace', 'tab'] as const)('retires a pending public fallback immediately when %s changes', async changed => {
+  const delayed = pending()
+  const fallback = vi.mocked(get).getMockImplementation()!
+  let firstReads = 0
+  vi.mocked(get).mockImplementation((path, options) => path === `${list}/${firstId}` && ++firstReads === 1
+    ? Promise.reject(new ApiRequestError({ method: 'GET', path, status: 403 }))
+    : fallback(path, options))
+  vi.mocked(getPublic).mockReturnValue(delayed.promise)
+  select(firstId)
+  render(html`<${ArtifactsSurface} />`)
+  await waitFor(() => expect(getPublic).toHaveBeenCalledTimes(1))
+  const signal = vi.mocked(getPublic).mock.calls[0]![1]!.signal!
+  await act(async () => {
+    if (changed === 'workspace') workspace.current.value = authority('/workspace-b')
+    else route.value = { tab: 'monitoring', params: {}, postId: null }
+    delayed.resolve({ ...document(first, 'stale public body'), shared: true })
+  })
+  expect(signal.aborted).toBe(true)
+  expect(screen.queryByText('stale public body')).toBeNull()
+  if (changed === 'workspace') expect(within(await screen.findByRole('dialog')).getByText('original body')).toBeTruthy()
+})
+
+it.each(['workspace', 'tab'] as const)('retires a tokenless public read when %s changes before it resolves', async changed => {
+  const delayed = pending()
+  clearStoredToken()
+  vi.mocked(getPublic).mockReturnValue(delayed.promise)
+  select(firstId)
+  render(html`<${ArtifactsSurface} />`)
+  await waitFor(() => expect(getPublic).toHaveBeenCalledTimes(1))
+  const signal = vi.mocked(getPublic).mock.calls[0]![1]!.signal!
+  await act(async () => {
+    if (changed === 'workspace') {
+      vi.mocked(getPublic).mockResolvedValue({ ...document(first, 'new workspace body'), shared: true })
+      workspace.current.value = authority('/workspace-b')
+    } else route.value = { tab: 'monitoring', params: {}, postId: null }
+    delayed.resolve({ ...document(first, 'stale tokenless body'), shared: true })
+  })
+  expect(signal.aborted).toBe(true)
+  expect(screen.queryByText('stale tokenless body')).toBeNull()
+  if (changed === 'workspace') expect(within(await screen.findByRole('dialog')).getByText('new workspace body')).toBeTruthy()
+})
+
+it('restarts a tokenless read after a batched A to B to A visit', async () => {
+  const delayed = pending()
+  clearStoredToken()
+  vi.mocked(getPublic).mockReturnValueOnce(delayed.promise)
+    .mockResolvedValue({ ...document(first, 'new tokenless visit'), shared: true })
+  select(firstId)
+  render(html`<${ArtifactsSurface} />`)
+  await waitFor(() => expect(getPublic).toHaveBeenCalledTimes(1))
+  const signal = vi.mocked(getPublic).mock.calls[0]![1]!.signal!
+  await act(async () => {
+    select(secondId)
+    select(firstId)
+    delayed.resolve({ ...document(first, 'stale tokenless body'), shared: true })
+  })
+  expect(signal.aborted).toBe(true)
+  const reader = within(await screen.findByRole('dialog'))
+  expect(reader.getByText('new tokenless visit')).toBeTruthy()
+  expect(reader.queryByText('stale tokenless body')).toBeNull()
+})
+
+it.each(['tokenless', 'worker'] as const)('restarts the %s reader after a batched workspace A to B to A change', async access => {
+  const delayed = pending()
+  if (access === 'tokenless') clearStoredToken()
+  else {
+    const fallback = vi.mocked(get).getMockImplementation()!
+    let firstReads = 0
+    vi.mocked(get).mockImplementation((path, options) => path === `${list}/${firstId}` && ++firstReads === 1
+      ? Promise.reject(new ApiRequestError({ method: 'GET', path, status: 403 }))
+      : fallback(path, options))
+  }
+  vi.mocked(getPublic).mockReturnValueOnce(delayed.promise)
+    .mockResolvedValue({ ...document(first, 'fresh public read'), shared: true })
+  select(firstId)
+  render(html`<${ArtifactsSurface} />`)
+  await waitFor(() => expect(getPublic).toHaveBeenCalledTimes(1))
+  const signal = vi.mocked(getPublic).mock.calls[0]![1]!.signal!
+  const originalAuthority = workspace.current.value!
+  await act(async () => {
+    workspace.current.value = authority('/workspace-b')
+    workspace.current.value = originalAuthority
+    delayed.resolve({ ...document(first, 'stale public body'), shared: true })
+  })
+  expect(signal.aborted).toBe(true)
+  const reader = within(await screen.findByRole('dialog'))
+  expect(reader.getByText(access === 'tokenless' ? 'fresh public read' : 'original body')).toBeTruthy()
+  expect(reader.queryByText('stale public body')).toBeNull()
+})
+
 it('opens a fresh public observation after workspace authority and credentials are withdrawn', async () => {
   select(firstId)
   render(html`<${ArtifactsSurface} />`)
@@ -100,6 +291,34 @@ it('keeps a retired draft visible before offering a public reader', async () => 
   await act(async () => { workspace.current.value = null })
   expect(getPublic).not.toHaveBeenCalled()
   expect(screen.getByRole('region', { name: '이전 접근 상태의 원고' })).toBeTruthy()
+})
+
+it('keeps a retired draft visible before offering a tokenless public reader with workspace authority', async () => {
+  vi.mocked(getPublic).mockResolvedValue({ ...document(), shared: true })
+  select(firstId)
+  render(html`<${ArtifactsSurface} />`)
+  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '문서 편집' }))
+  await act(async () => { clearStoredToken() })
+  expect(workspace.current.value).not.toBeNull()
+  expect(getPublic).not.toHaveBeenCalled()
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(screen.getByRole('region', { name: '이전 접근 상태의 원고' })).toBeTruthy()
+})
+
+it('retires a draft even when workspace A to B to A happens before rendering', async () => {
+  select(firstId)
+  render(html`<${ArtifactsSurface} />`)
+  const reader = within(await screen.findByRole('dialog'))
+  fireEvent.click(reader.getByRole('button', { name: '문서 편집' }))
+  fireEvent.input(reader.getByLabelText('문서 본문'), { target: { value: 'retain this draft' } })
+  const originalAuthority = workspace.current.value!
+  await act(async () => {
+    workspace.current.value = authority('/workspace-b')
+    workspace.current.value = originalAuthority
+  })
+  const recovery = screen.getByRole('region', { name: '이전 접근 상태의 원고' })
+  expect(within(recovery).getByText('Original report')).toBeTruthy()
+  expect(within(recovery).getByRole('button', { name: '원고 다운로드' })).toBeTruthy()
 })
 
 it('toggles per-artifact opt-in external sharing from the authenticated reader', async () => {
@@ -210,6 +429,28 @@ it('does not show a refused preflight in a different artifact reader', async () 
   await act(async () => { preflight.resolve(document()) })
   expect(post).not.toHaveBeenCalled()
   expect(within(screen.getByRole('dialog')).queryByText(/요청을 보내지 않았습니다/)).toBeNull()
+})
+
+it('does not send an old share preflight after a batched A to B to A visit', async () => {
+  const preflight = pending()
+  vi.mocked(get).mockImplementation((path, options) => {
+    if (path === '/health?full=1') return Promise.resolve({ paths: { effective_base_path: '/workspace-a', effective_masc_root: '/workspace-a/.masc' } })
+    if (path === list) return Promise.resolve(listing())
+    if (path === checks) return Promise.resolve({ checks: [], diagnostics: [] })
+    if (path.includes(firstId) && options?.extraHeaders) return preflight.promise
+    return Promise.resolve(document(path.includes(secondId) ? second : first))
+  })
+  select(firstId)
+  render(html`<${ArtifactsSurface} />`)
+  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '외부 공유 켜기' }))
+  await waitFor(() => expect(vi.mocked(get).mock.calls.some(([path, options]) => path.includes(firstId) && !!options?.extraHeaders)).toBe(true))
+  await act(async () => {
+    select(secondId)
+    select(firstId)
+    preflight.resolve(document())
+  })
+  expect(post).not.toHaveBeenCalled()
+  expect(within(await screen.findByRole('dialog')).queryByText(/요청을 보내지 않았습니다/)).toBeNull()
 })
 
 it('keeps the operation and link copy through a same-revision refresh while the write is pending', async () => {

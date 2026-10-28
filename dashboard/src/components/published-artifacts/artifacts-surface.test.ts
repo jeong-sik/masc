@@ -22,7 +22,7 @@ vi.mock('../../router', async () => {
   return { route, navigate: vi.fn((tab: string, params: Record<string, string>) => { route.value = { tab, params, postId: null } }) }
 })
 vi.mock('../../api/core', () => ({
-  get: vi.fn(), getPublic: vi.fn(), post: vi.fn(), currentStoredTokenRevision: vi.fn(() => 0),
+  get: vi.fn(), getPublic: vi.fn(), post: vi.fn(), currentStoredTokenRevision: vi.fn(() => 0), getStoredToken: vi.fn(() => 'test-token'),
   subscribeStoredTokenChanges:vi.fn(()=>()=>{}),
   ApiRequestError: class extends Error { status = 404 },
 }))

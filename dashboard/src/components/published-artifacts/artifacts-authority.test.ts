@@ -491,7 +491,7 @@ it('opens the document read-only while workspace identity is delayed', async () 
   expect(await reader.findByRole('button', { name: '문서 편집' })).toBeTruthy()
 })
 
-it('copies a verified public link while the automatic revalidation is still pending', async () => {
+it.each(['shared', 'revoked', 'interrupted'] as const)('waits for a pending refresh before deciding whether to copy a verified public link (%s)', async outcome => {
   const id = `artifact-${'7'.repeat(32)}`, report = { ...first, id }
   const verification = pending(), refresh = pending()
   let shared = false, actionReads = 0, refreshStarted = false
@@ -509,9 +509,23 @@ it('copies a verified public link while the automatic revalidation is still pend
   fireEvent.click(await reader.findByRole('button', { name: '외부 공유 켜기' }))
   await waitFor(() => expect(refreshStarted && actionReads === 2).toBe(true))
   await act(async () => { verification.resolve({ ...document(report), shared: true, share_version: 1 }) })
-  await waitFor(() => expect(copyToClipboard).toHaveBeenCalledWith(
+  await reader.findByText(/진행 중인 공유 상태 확인을 기다리고 있습니다/)
+  expect(copyToClipboard).not.toHaveBeenCalled()
+  if (outcome === 'interrupted') {
+    fireEvent.click(screen.getByRole('button', { name: '새로고침' }))
+    await reader.findByText(/공유 상태 확인이 중단되어 링크를 복사하지 못했습니다/)
+    await act(async () => { refresh.resolve({ ...document(report), shared: true, share_version: 1 }) })
+    expect(copyToClipboard).not.toHaveBeenCalled()
+    return
+  }
+  const stillShared = outcome === 'shared'
+  await act(async () => { refresh.resolve({ ...document(report), shared: stillShared, share_version: stillShared ? 1 : 2 }) })
+  if (stillShared) await waitFor(() => expect(copyToClipboard).toHaveBeenCalledWith(
     `${window.location.origin}/dashboard/#/workspace?section=artifacts&artifact=${id}&revision=2`, screen.getByRole('dialog')))
-  await act(async () => { refresh.resolve({ ...document(report), shared: true, share_version: 1 }) })
+  else {
+    await reader.findByText(/공유 상태가 바뀌었거나 확인되지 않아/)
+    expect(copyToClipboard).not.toHaveBeenCalled()
+  }
 })
 
 it('keeps a delayed unverified HTML document inert until the bound read completes', async () => {

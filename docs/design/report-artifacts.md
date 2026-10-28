@@ -170,7 +170,9 @@ that a Keeper is currently viewing or editing a document.
   another tab can still leave the operation unconfirmed.
   A pending first change may also be settled by a subsequent read or before a
   later publication, even if that publication then conflicts. Dashboard
-  link copying pins the
+  automatic link copying waits for an in-flight document refresh and compares
+  its result to the independent share verification before copying. A failed or
+  indefinitely pending refresh cannot establish a copyable share state. The link pins the
   displayed revision and uses the origin currently open in the browser, which
   may be a local address; it is not evidence that the link is reachable from
   elsewhere.

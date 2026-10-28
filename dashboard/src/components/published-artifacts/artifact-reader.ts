@@ -53,9 +53,9 @@ function downloadSource(doc: ArtifactDocument): void {
   URL.revokeObjectURL(url)
 }
 
-export type ArtifactShareSelection = { doc: ArtifactDocument; fixedRevision: boolean; readError?: string; shareWorkspace?: ArtifactWorkspace }
+export type ArtifactShareSelection = { doc: ArtifactDocument; fixedRevision: boolean; readError?: string; revalidating?: boolean; shareWorkspace?: ArtifactWorkspace }
 
-export function ArtifactReader({ doc, fixedRevision, readOnly = false, readOnlyInteractive = true, readOnlyLabel = '외부 공유 열람', readError, workspaceRoot, shareWorkspace, currentShareSelection, draftRetention, checkState, authRevision, isCurrent, onMutation, onPublication, onPublished, onCheckChanged, shareObservation, onClose }: {
+export function ArtifactReader({ doc, fixedRevision, readOnly = false, readOnlyInteractive = true, readOnlyLabel = '외부 공유 열람', readError, workspaceRoot, shareWorkspace, currentShareSelection, waitForShareSelection, draftRetention, checkState, authRevision, isCurrent, onMutation, onPublication, onPublished, onCheckChanged, shareObservation, onClose }: {
   doc: ArtifactDocument; fixedRevision: boolean; checkState: ArtifactCheckState;
   readOnly?: boolean;
   readOnlyInteractive?: boolean;
@@ -64,6 +64,7 @@ export function ArtifactReader({ doc, fixedRevision, readOnly = false, readOnlyI
   shareObservation?: ShareObservation;
   shareWorkspace?: ArtifactWorkspace;
   currentShareSelection?: () => ArtifactShareSelection | undefined;
+  waitForShareSelection?: () => Promise<ArtifactShareSelection | undefined>;
   workspaceRoot: string;
   draftRetention: ArtifactDraftRetention;
   authRevision: number; isCurrent: () => boolean; onMutation: (outcome: ArtifactCheckOutcome) => void;
@@ -79,7 +80,7 @@ export function ArtifactReader({ doc, fixedRevision, readOnly = false, readOnlyI
   const sharedCloseRequest = useRef<ArtifactSharedCloseRequest | null>(null)
   const appPending=useRef(false)
   const active = useRef(true)
-  const selection = useRef({ doc, fixedRevision, readError, shareWorkspace })
+  const selection = useRef<ArtifactShareSelection>({ doc, fixedRevision, readError, shareWorkspace })
   selection.current = { doc, fixedRevision, readError, shareWorkspace }
   const { artifact, content, revisions } = doc
   const observedLatest = latestArtifactRevision(doc)
@@ -121,7 +122,7 @@ export function ArtifactReader({ doc, fixedRevision, readOnly = false, readOnlyI
     }
     const canDispatch = () => {
       const view = observed()
-      return stillSelected() && view !== undefined && !view.readError
+      return stillSelected() && view !== undefined && !view.readError && !view.revalidating
         && view.doc.shared === sharedState && view.doc.share_version === doc.share_version
         && latestArtifactRevision(view.doc)?.revision === observedLatest?.revision
         && latestArtifactRevision(view.doc)?.body._blob.sha256 === observedLatest?.body._blob.sha256
@@ -210,9 +211,18 @@ export function ArtifactReader({ doc, fixedRevision, readOnly = false, readOnlyI
       try { verified = await fetchWorkspacePublishedArtifact(artifact.id, fixedRevision ? String(artifact.revision) : undefined, workspace) }
       catch { if (stillSelected()) setCopyFeedback('요청은 적용됐지만 현재 공유 상태를 확인하지 못했습니다.'); return }
       if (!stillSelected()) return
+      while (observed()?.revalidating && stillSelected()) {
+        if (!waitForShareSelection) return
+        setCopyFeedback('요청은 적용됐습니다. 진행 중인 공유 상태 확인을 기다리고 있습니다.')
+        if (!await waitForShareSelection()) {
+          if (stillSelected()) setCopyFeedback('공유 상태 확인이 중단되어 링크를 복사하지 못했습니다. 다시 확인해 주세요.')
+          return
+        }
+      }
+      if (!stillSelected()) return
       const latestView = observed()
       const latestKnown = latestView?.doc
-      if (!latestView || !latestKnown || latestView.readError || latestKnown.share_version === undefined || latestKnown.shared === undefined
+      if (!latestView || !latestKnown || latestView.readError || latestView.revalidating || latestKnown.share_version === undefined || latestKnown.shared === undefined
         || !artifactExternalSharing.admits(copyObservation)
         || verified.shared !== true || verified.share_version === undefined || verified.share_version < updated.current.version
         || latestKnown.share_version > verified.share_version
@@ -309,6 +319,8 @@ export function ArtifactReader({ doc, fixedRevision, readOnly = false, readOnlyI
         <${ArtifactPdfExport} key=${JSON.stringify(['pdf',authRevision,workspaceRoot,artifact.id,artifact.revision,artifact.body._blob.sha256])}
           doc=${doc} authRevision=${authRevision} isCurrent=${isCurrent} disabled=${editing!==null||sharing!==null} />
         <p role="status" class="m-0 text-xs">${copyFeedback}</p>
+        ${readOnly && !readOnlyInteractive && artifact.format === 'html' && view === 'rendered'
+          ? html`<p class="m-0 text-xs">작업 공간 확인 전에는 HTML 스크립트를 실행하지 않습니다. 내용이 보이지 않으면 원본을 확인해 주세요.</p>` : null}
         <details class="text-xs text-[var(--color-fg-secondary)]">
           <summary class="cursor-pointer">보고서 정보</summary>
           <p class="my-2">${artifact.summary}</p>

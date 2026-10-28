@@ -214,6 +214,8 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, all
   const [catalog, setCatalog] = useState<Remote<ArtifactList> | null>(null)
   const [document, setDocument] = useState<DocumentRemote | null>(null)
   const documentRef = useRef<DocumentRemote | null>(null)
+  const shareWaiters = useRef(new Set<(cancelled: boolean) => void>())
+  const notifyShareWaiters = (cancelled = false) => { for (const notify of [...shareWaiters.current]) notify(cancelled) }
   documentRef.current = document
   const [checks, setChecks] = useState<Remote<ArtifactCheckList> | null>(null)
   const catalogKey = useMemo(() => ({}), [])
@@ -264,13 +266,14 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, all
           if (active.current) setVisitEpoch(epoch => epoch + 1)
         }
         controller.abort()
+        notifyShareWaiters(true)
       }
     }
     const unsubscribeRoute = route.subscribe(retire)
     const unsubscribeWorkspace = executionWorkspaceAuthority.subscribe(retire)
     const unsubscribeCredential = storedTokenRevision.subscribe(retire)
     const publish = (next: DocumentRemote) => {
-      if (!controller.signal.aborted && currentDocument()) { documentRef.current = next; setDocument(next) }
+      if (!controller.signal.aborted && currentDocument()) { documentRef.current = next; setDocument(next); notifyShareWaiters() }
     }
     let boundApplied = false
     let publicRequested = false
@@ -341,7 +344,7 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, all
         else if (!boundApplied) readFailed(error)
       }
     }, error => { if (priorBound) readFailed(error) })
-    return () => { controller.abort(); unsubscribeRoute(); unsubscribeWorkspace(); unsubscribeCredential() }
+    return () => { controller.abort(); notifyShareWaiters(true); unsubscribeRoute(); unsubscribeWorkspace(); unsubscribeCredential() }
   }, [authRevision, selectedId, revision, documentKey, visit, refresh, allowReader])
 
   const list = catalog?.key === catalogKey ? catalog : null
@@ -353,8 +356,17 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, all
     if (!currentDocument() || !current || current.key !== documentKey || current.kind === 'public-loading'
       || current.data?.kind !== 'operator') return undefined
     return { doc: current.data.document, fixedRevision: revision !== undefined, shareWorkspace: current.data.workspace,
+      ...(current.kind === 'error' && current.revalidating ? { revalidating: true } : {}),
       ...(current.kind === 'error' && !current.revalidating ? { readError: current.message } : {}) }
   }
+  const waitForShareSelection = (): Promise<ArtifactShareSelection | undefined> => new Promise(resolve => {
+    const notify = (cancelled: boolean) => {
+      const current = cancelled ? undefined : currentShareSelection()
+      if (!current?.revalidating) { shareWaiters.current.delete(notify); resolve(current) }
+    }
+    shareWaiters.current.add(notify)
+    notify(false)
+  })
   useEffect(() => {
     const observation = doc && doc.kind !== 'public-loading' && doc.data?.kind === 'operator'
       ? doc.data.shareObservation : undefined
@@ -483,6 +495,7 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, all
               readOnlyInteractive=${!!doc.data.workspace}
               shareWorkspace=${doc.data.workspace}
               currentShareSelection=${currentShareSelection}
+              waitForShareSelection=${waitForShareSelection}
               shareObservation=${doc.data.shareObservation}
               readError=${doc.kind === 'error' ? doc.message : undefined}
               checkState=${checkState(doc.data.document.artifact)} authRevision=${authRevision} isCurrent=${currentDocument} onMutation=${onMutation} onCheckChanged=${checkChanged}

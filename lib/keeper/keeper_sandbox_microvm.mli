@@ -19,14 +19,16 @@ val unsupported_docker_flags : string list
 
 val policy_network_name : keeper_name:string -> string
 (** The host-only network this keeper's [Network_policy] guest is attached
-    to. One per keeper, not one for the fleet.
+    to. One per keeper, not one for the fleet: separate subnets stop a guest
+    from reaching a neighbour's proxy and using its allowlist.
 
-    A shared network let a guest reach a neighbour's proxy port through the
-    common gateway and go out under that keeper's allowlist, recorded as that
-    keeper. Separate networks get separate subnets, and a guest on one cannot
-    reach another's gateway on any port -- measured, not assumed. The network
-    carries no allowlist of its own; it removes every route except this
-    keeper's gateway, and the allowlist is judged by the proxy behind it. *)
+    Every result fits Apple's 63-byte limit and starts and ends with a
+    lowercase alphanumeric character. An original name that is already
+    lowercase, bounded, alphanumeric-ended, and outside the reserved
+    [-<32 lowercase hex>] shape keeps its existing spelling. Other names use
+    a trimmed segment and a 128-bit SHA-256 digest of the original, untrimmed
+    name, preserving identity through case folding, escaping, truncation, and
+    digest-shaped inputs. *)
 
 val policy_network_create_argv_for :
   Keeper_microvm_backend.t -> keeper_name:string -> (string list, string) result

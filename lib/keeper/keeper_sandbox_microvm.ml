@@ -145,29 +145,80 @@ let work_volume_guest_root = "/masc-work"
     host not found". [inherit] therefore means container's NAT, not the
     host's namespace, and the two differ in what the guest can reach on
     localhost. *)
-(* The host-only network every [Network_policy] guest is attached to. One
-   name for the fleet rather than one per keeper: the network carries no
-   allowlist -- it only removes every route except the host gateway -- and
-   the per-keeper judgement happens at the proxy on the other side of that
-   gateway. Creating it is the server's job; a guest is never attached to a
-   network that does not exist, because [container run] fails rather than
-   falling back to the default network. *)
-(* One network per keeper, not one for the fleet.
+(* One host-only network per keeper. Separate subnets keep a guest from
+   reaching a neighbour's proxy and using its allowlist. Apple network names
+   are narrower than guest names: at most 63 bytes, with lowercase
+   alphanumeric first and last characters. *)
+let policy_network_max_length = 63
+let policy_network_digest_hex_length = 32
+let policy_network_prefix = "masc-egress-policy-"
 
-   A shared network plus a listener on every interface let a guest reach any
-   keeper's proxy port through the common gateway: guest A opening
-   gateway:portB went out under B's allowlist and was recorded as B. The port
-   was the only thing saying whose request it was, and nothing stopped a
-   neighbour from picking a different one.
+let policy_network_lower_alnum = function
+  | 'a' .. 'z' | '0' .. '9' -> true
+  | _ -> false
+;;
 
-   Splitting the network closes it at the routing layer. Measured
-   2026-09-05 on container 1.3.1: two [--internal] networks get separate
-   subnets (192.168.128.1 and 192.168.129.1), and a guest on the first
-   cannot reach the second's gateway on any port -- including a listener
-   bound to every interface. So a guest reaches its own keeper's proxy and no
-   other, and the port stops being the only claim of identity. *)
+let policy_network_ends_alnum value =
+  String.length value > 0 && policy_network_lower_alnum value.[String.length value - 1]
+;;
+
+(* Reserve the digest suffix shape so an unhashed name cannot impersonate the
+   bounded form of another keeper's name. *)
+let policy_network_digest_shaped segment =
+  let length = String.length segment in
+  let suffix_at = length - policy_network_digest_hex_length - 1 in
+  let rec hex_from index =
+    index >= length
+    ||
+    (match segment.[index] with
+     | '0' .. '9' | 'a' .. 'f' -> hex_from (index + 1)
+     | _ -> false)
+  in
+  suffix_at >= 0
+  && Char.equal segment.[suffix_at] '-'
+  && hex_from (suffix_at + 1)
+;;
+
+let trim_policy_network_segment value =
+  let rec last_alnum index =
+    if index < 0 then -1
+    else if policy_network_lower_alnum value.[index] then index
+    else last_alnum (index - 1)
+  in
+  match last_alnum (String.length value - 1) with
+  | -1 -> ""
+  | last -> String.sub value 0 (last + 1)
+;;
+
 let policy_network_name ~keeper_name =
-  Printf.sprintf "masc-egress-policy-%s" (Workspace_utils.safe_filename keeper_name)
+  let segment = Workspace_utils.safe_filename keeper_name in
+  let candidate = policy_network_prefix ^ segment in
+  let needs_digest =
+    not (String.equal keeper_name segment)
+    || String.length candidate > policy_network_max_length
+    || not (policy_network_ends_alnum segment)
+    || policy_network_digest_shaped segment
+  in
+  if not needs_digest
+  then candidate
+  else (
+    let digest =
+      String.sub
+        Agent_core_sha256.(digest_string keeper_name |> to_hex)
+        0
+        policy_network_digest_hex_length
+    in
+    let keeper_room =
+      policy_network_max_length
+      - String.length policy_network_prefix
+      - policy_network_digest_hex_length
+      - 1
+    in
+    let kept =
+      String.sub segment 0 (min (String.length segment) keeper_room)
+      |> trim_policy_network_segment
+    in
+    Printf.sprintf "%s%s-%s" policy_network_prefix kept digest)
 ;;
 
 (* The proxy a policy guest is pointed at: the gateway it sees the host at,

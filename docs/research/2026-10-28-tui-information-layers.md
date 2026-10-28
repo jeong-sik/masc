@@ -181,8 +181,18 @@ Source review also found a pre-existing quit-confirmation concern: a `q`
 confirmation can remain armed after its ordinary notice expires, so a later `q`
 can exit without that reminder. A [manual observation of 234b647](../evidence/research/tui-information-layers-2026-10-28/populated-fixture/candidate-234b647-quit/README.md)
 reproduced that sequence in compact mode: a synthetic unsent chat draft was
-absent after the TUI exited and restarted. It is not proof of a later candidate
-and is not fixed by the notice-row changes.
+absent after the TUI exited and restarted. Later source binds `q` and Ctrl-C
+confirmation to a completely presented notice, the retained input state and
+the post-output input drain; changed or hidden evidence requires a new
+confirmation. Focused source-derived probes passed, but this later change has
+not been built or observed in a terminal. The earlier observation is not proof
+of the repair.
+
+While an external image or MSX owns the terminal, the new Ctrl-C check declines
+to use an old frame as confirmation; its reason may not be visible on that
+surface. The operator can return to the ordinary TUI and request confirmation
+there. Automatically closing that surface can have separate machine or room
+effects and was not added by this change.
 
 A separate source review found an existing chat row-budget discrepancy: with
 a folded turn, full tool visibility and pending gate effects, the budget omits

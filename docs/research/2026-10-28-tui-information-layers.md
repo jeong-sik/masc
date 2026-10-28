@@ -120,6 +120,27 @@ selected; it gains none when that guidance is relevant. This is a source-derived
 budget comparison against the parent candidate, not a terminal measurement or
 a demonstrated improvement in comprehension.
 
+### Proposed layer combination
+
+This ordering is a design hypothesis based on the scores above, not a result of
+the static sketches or an operator preference study. A layer may display a
+new fact without automatically taking input from the active editor.
+
+| Layer or event | Proposed treatment | Reason |
+| --- | --- | --- |
+| Terminal recovery or an invalidated viewport | Own input until the display is usable or the operator exits | Hidden controls must not act; recovery instructions must remain visible. |
+| Active text input and an explicitly opened decision | Keep the current input owner; show newly arrived questions or invites as a visible pending action | A high-importance arrival must be discoverable without redirecting a partially entered answer. |
+| Help or item detail opened by the operator | Place above its parent; Esc returns to the same selection and scroll | The parent supplies the context of the explanation. |
+| Queue list | Keep selected item, available action, result and read/identity status together; retain surrounding chat when it fits | These facts jointly explain what an action will affect and whether it worked. |
+| Other waiting items, future schedules and exact identifiers | Show the list first and provide IDs and longer context on demand | Their relevance rises when selected; they need not displace an error or action result. |
+
+For an asynchronously issued invite, a possible alternative to raising a modal
+over active typing is a persistent notice with an explicit action to open the
+retained card. That changes the existing interaction and has not been
+implemented or tested here. It must keep the one-time link available and avoid
+putting it in the notice or history. Likewise, an approval can be urgent without
+making the answer field behind it silently lose typed characters.
+
 ### Unfinished input-ownership boundary
 
 The local follow-up uses the last accepted frame to identify a Queue selection

@@ -828,17 +828,22 @@ let observe_original_change ~config ~original ~judgment ~authority change =
     if Yojson.Safe.equal current_before change.P.before then Ok current_before
     else
       let producer=(Verifier_review_original.review_request original).AR.agent_name in
-      let matched=match verdict,current.task_status with
-        | AR.Approve _,Masc_domain.Done done_ -> done_.assignee=producer && done_.notes=Some notes
+      (* A rejection leaves the Task nonterminal and the producer then edits its
+         handoff, so the handoff cannot prove the commit. The rejection relation
+         the commit wrote to the backlog in the same step names this verification
+         and does not depend on what the producer does afterwards. *)
+      let* matched=match verdict,current.task_status with
+        | AR.Approve _,Masc_domain.Done done_ -> Ok (done_.assignee=producer && done_.notes=Some notes)
         | AR.Reject reason,Masc_domain.InProgress work ->
-          work.assignee=producer && work.started_at=started_at &&
-          (match current.handoff_context with
-           | Some handoff -> handoff.summary=reason && handoff.reason=Some reason
-             && handoff.evidence_refs=[verification_id]
-             && handoff.updated_by=Some (Masc_domain.completion_authority_actor authority)
-           | None -> false)
+          if not (work.assignee=producer && work.started_at=started_at) then Ok false
+          else
+            (match Workspace_task_rejection_outbox.standing config ~task_id ~verification_id
+                     ~producer ~reason ~authority with
+             | Ok Workspace_task_rejection_outbox.Current -> Ok true
+             | Ok Obsolete -> Ok false
+             | Error detail -> Error ("rejection relation unreadable: "^detail))
         | AR.Approve _,(Todo | Claimed _ | InProgress _ | AwaitingVerification _ | Cancelled _)
-        | AR.Reject _,(Todo | Claimed _ | AwaitingVerification _ | Done _ | Cancelled _) -> false in
+        | AR.Reject _,(Todo | Claimed _ | AwaitingVerification _ | Done _ | Cancelled _) -> Ok false in
       if matched then Ok change.after
       else Ok (`Assoc ["conflicting_task",Masc_domain.task_to_yojson current])
   | Task_unobserved -> Error "original commit Task is unobserved"

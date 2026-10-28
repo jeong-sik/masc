@@ -120,6 +120,27 @@ selected; it gains none when that guidance is relevant. This is a source-derived
 budget comparison against the parent candidate, not a terminal measurement or
 a demonstrated improvement in comprehension.
 
+### Unfinished input-ownership boundary
+
+The local follow-up uses the last accepted frame to identify a Queue selection
+and a Play card, but checking input before building that frame is not an atomic
+check against input arriving while the frame is being built or written. The
+follow-up can also hide the recovery notice for an incomplete terminal control
+sequence. It rejects rather than retains a paste it cannot safely attribute.
+
+One possible next design is to group the existing presented approval, hit zones,
+panes and reader into one immutable presented-frame snapshot. A transition
+barrier in that snapshot could distinguish input already waiting at presentation
+from input admitted after the new owner is visible. It would have to be checked
+before paste recovery, mouse gestures, composer and other input side effects,
+and released only when the relevant input or incomplete sequence is settled.
+Whether that design preserves recovery and provides a usable retry path remains
+unverified. Terminal input and output are not an atomic transaction: describe
+the actual observation boundary rather than promising the time a person saw a
+frame. A reproduction must exercise queue close and Enter, a selection change
+and priority action, a Play response arriving during typing, resize with a
+truncated sequence, and incomplete-paste recovery in an isolated workspace.
+
 ### Synthetic comparison and provisional direction
 
 The [static sketches](../evidence/research/tui-information-layers-2026-10-28/prototype/README.md)

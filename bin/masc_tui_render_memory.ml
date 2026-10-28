@@ -1179,7 +1179,7 @@ let memory_compact_fleet_row ~cols (state : state) =
         | [] -> Printf.sprintf (if ko then "전체 기억 %d개" else "%d total facts")
                   (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts), false
         | [one] -> one, true
-        | many -> Printf.sprintf (if ko then "주의 항목 %d종" else "%d attention categories") (List.length many), true
+        | _ :: _ :: _ -> (if ko then "주의 있음" else "attention reported"), true
   in
   let full = hint ^ detail in
   if Message_layout.display_width full <= framed_inner_width cols then full

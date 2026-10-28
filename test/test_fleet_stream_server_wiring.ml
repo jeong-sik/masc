@@ -50,6 +50,11 @@ let health_fields section : (string * Yojson.Safe.t) list =
 
 (* What an event says, without the time the scan finished. *)
 let describe : F.event -> string = function
+  | F.Unavailable_snapshot { revision; degradation } ->
+    Printf.sprintf "unavailable r%d %s" (F.Revision.to_int revision)
+      (match degradation.F.reason with
+       | F.Scan_timed_out -> "timed_out"
+       | F.Scan_failed -> "failed")
   | F.Snapshot { revision; fleet; degraded; _ } ->
     Printf.sprintf "snapshot r%d running=%d degraded=%s" (F.Revision.to_int revision)
       fleet.F.fs_running_count
@@ -80,19 +85,65 @@ let test_the_cached_snapshot_publishes_to_the_hub () =
       let scan fields =
         Refresh.run_full_health_refresh_worker ~sw ~compute:(fun () -> Ok fields)
       in
+      scan (health_fields (`Assoc [ "status", `String "warming"; "component_timed_out", `Bool false ]));
+      check (list string) "warming is not a failure" [] (told ());
+      let initial_error = health_fields
+          (`Assoc [ "status", `String "error"; "component_timed_out", `Bool false ]) in
+      scan initial_error;
+      check (list string) "first section error is visible without a reading"
+        [ "unavailable r1 failed" ] (told ());
+      let initial = Hub.current Server_routes_http_runtime.fleet_stream_hub in
+      scan initial_error;
+      check bool "first outage keeps its original time" true
+        (initial = Hub.current Server_routes_http_runtime.fleet_stream_hub);
+      let late_initial = ref [] in
+      let unsubscribe_initial = Hub.subscribe Server_routes_http_runtime.fleet_stream_hub
+          ~on_event:(fun event -> late_initial := describe event :: !late_initial) in
+      check (list string) "first failure is visible on reconnect" [ "unavailable r1 failed" ] !late_initial;
+      unsubscribe_initial ();
       scan (health_fields (fleet_section ~running:1));
-      check (list string) "the first reading" [ "snapshot r1 running=1 degraded=no" ] (told ());
+      check (list string) "the first reading recovers"
+        [ "unavailable r1 failed"; "changed r2 running=1" ] (told ());
       scan (health_fields (fleet_section ~running:1));
-      check int "the same reading makes no event" 1 (List.length (told ()));
+      check int "the same reading makes no event" 2 (List.length (told ()));
       scan (health_fields (fleet_section ~running:2));
-      check string "a different reading" "changed r2 running=2" (List.nth (told ()) 1);
+      check string "a different reading" "changed r3 running=2" (List.nth (told ()) 2);
       Refresh.mark_full_health_snapshot_failure (Proactive_refresh.Raised (Failure "scan raised"));
-      check string "a failed scan" "degraded r3 failed" (List.nth (told ()) 2);
+      check string "a failed scan" "degraded r4 failed" (List.nth (told ()) 3);
       Refresh.mark_full_health_snapshot_failure (Proactive_refresh.Raised (Failure "again"));
-      check int "a second failure makes no event" 3 (List.length (told ()));
+      check int "a second failure makes no event" 4 (List.length (told ()));
       scan (health_fields (fleet_section ~running:2));
-      check string "the same reading ends the outage" "changed r4 running=2"
-        (List.nth (told ()) 3);
+      check string "the same reading ends the outage" "changed r5 running=2"
+        (List.nth (told ()) 4);
+      let section_error = health_fields
+          (`Assoc [ "status", `String "error"; "component_timed_out", `Bool false ]) in
+      scan section_error;
+      check string "a failed fleet section degrades the last reading"
+        "degraded r6 failed" (List.nth (told ()) 5);
+      let before = Hub.current Server_routes_http_runtime.fleet_stream_hub in
+      scan section_error;
+      check int "repeated section failure does not emit again" 6 (List.length (told ()));
+      check bool "the original failure time remains stable" true
+        (before = Hub.current Server_routes_http_runtime.fleet_stream_hub);
+      let late = ref [] in
+      let unsubscribe = Hub.subscribe Server_routes_http_runtime.fleet_stream_hub
+          ~on_event:(fun event -> late := describe event :: !late) in
+      check (list string) "a new subscriber sees the failed section"
+        [ "snapshot r6 running=2 degraded=failed" ] !late;
+      unsubscribe ();
+      scan (health_fields (fleet_section ~running:2));
+      check string "the same fleet recovers after a section error"
+        "changed r7 running=2" (List.nth (told ()) 6);
+      scan (health_fields (`Assoc [ "status", `String "timeout"; "component_timed_out", `Bool true ]));
+      check string "a timed out section is reported"
+        "degraded r8 timed_out" (List.nth (told ()) 7);
+      scan (health_fields (fleet_section ~running:2));
+      check string "a timed out section recovers" "changed r9 running=2" (List.nth (told ()) 8);
+      scan (health_fields (`Assoc [ "schema", `String Masc.Keeper_fleet_blocker.reading_schema ]));
+      check string "an unreadable section is reported"
+        "degraded r10 failed" (List.nth (told ()) 9);
+      scan (health_fields (fleet_section ~running:2));
+      check string "an unreadable section recovers" "changed r11 running=2" (List.nth (told ()) 10);
       Refresh.mark_full_health_snapshot_failure
         (Proactive_refresh.Timed_out
            { Proactive_refresh.label = "full_health_snapshot"
@@ -100,9 +151,9 @@ let test_the_cached_snapshot_publishes_to_the_hub () =
            ; timeout_s = 30.0
            ; elapsed_s = 31.0
            });
-      check string "a scan that ran out of time" "degraded r5 timed_out"
-        (List.nth (told ()) 4);
-      (* Snapshots with no reading in them tell the hub nothing. *)
+      check string "a scan that ran out of time" "degraded r12 timed_out"
+        (List.nth (told ()) 11);
+      (* No reading does not replace an existing outage. *)
       scan [ "overall_status", `String "ok" ];
       scan
         (health_fields
@@ -110,11 +161,11 @@ let test_the_cached_snapshot_publishes_to_the_hub () =
       scan
         (health_fields
            (`Assoc [ "schema", `String Masc.Keeper_fleet_blocker.reading_schema ]));
-      check int "nothing came of them" 5 (List.length (told ()));
+      check int "nothing came of them" 12 (List.length (told ()));
       match Hub.current Server_routes_http_runtime.fleet_stream_hub with
       | Some state ->
         check string "the state is still the outage"
-          "snapshot r5 running=2 degraded=timed_out" (describe state)
+          "snapshot r12 running=2 degraded=timed_out" (describe state)
       | None -> fail "no state"))
 ;;
 

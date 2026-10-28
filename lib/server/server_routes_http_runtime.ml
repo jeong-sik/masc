@@ -972,8 +972,12 @@ let publish_fleet_stream_reading snapshot =
   | Ok fleet ->
       Fleet_stream_hub.observe fleet_stream_hub ~measured_at:snapshot.computed_at fleet
   | Error (Fleet_stream_health_section.Not_measured _) -> ()
+  | Error (Fleet_stream_health_section.Scan_failed reason) ->
+      Fleet_stream_hub.note_degraded fleet_stream_hub ~since:snapshot.computed_at reason
   | Error (Fleet_stream_health_section.Unreadable detail) ->
-      Log.Dashboard.warn "fleet stream: the fleet section cannot be read: %s" detail
+      Log.Dashboard.warn "fleet stream: the fleet section cannot be read: %s" detail;
+      Fleet_stream_hub.note_degraded fleet_stream_hub ~since:snapshot.computed_at
+        Fleet_stream.Scan_failed
 
 let note_fleet_stream_failure ~since failure =
   let reason =

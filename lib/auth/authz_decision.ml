@@ -243,7 +243,15 @@ let current_grant facts ~runtime ~runtime_id ~not_current principal =
 (* scope_ok, channel_ok, effects_ok. Every source only narrows. [All] is the
    identity of the intersection and never reaches past the grants. *)
 let within_limits ~(request : request) ~policy_scope ~initiator_grant ~executor_grant =
-  let { Execution_context.channel; stored_scope; pat_scope; _ } = request.context in
+  let { Execution_context.initiator = _
+      ; executor = _
+      ; channel
+      ; stored_scope
+      ; pat_scope
+      }
+    =
+    request.context
+  in
   let { Authorization_scope.runtimes; channels; allowed_effects } =
     Authorization_scope.inter
       stored_scope
@@ -295,7 +303,9 @@ let add_distinct equal item items =
 ;;
 
 let evaluate facts (request : request) =
-  let { Execution_context.initiator; executor; channel; pat_scope; _ } = request.context in
+  let { Execution_context.initiator; executor; channel; stored_scope = _; pat_scope } =
+    request.context
+  in
   let same_principal = Principal.equal initiator executor in
   let people =
     (Initiator, initiator) :: (if same_principal then [] else [ Executor, executor ])

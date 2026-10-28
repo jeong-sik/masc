@@ -139,6 +139,32 @@ let test_share_archives_and_downgrade () = with_base (fun base_path ->
    | Error error -> Alcotest.fail (S.share_error_message error)
    | Ok _ -> Alcotest.fail "legacy overwrite allowed a previously rejected request"))
 
+let test_share_interrupted_migration () = with_base (fun base_path ->
+  let module Share = Masc.Published_artifact_share in
+  let artifact, _ = publish ~base_path (request "share interrupted migration") in
+  let id = artifact.id in
+  let share_file = Filename.concat (catalog_dir base_path) (id ^ ".share") in
+  Yojson.Safe.to_file share_file (`Assoc ["id", `String id; "shared", `Bool true]);
+  let request = share_request "000000000023" 0 false in
+  let before_stage = function
+    | Masc.Keeper_fs.Payload_write -> raise (Unix.Unix_error (Unix.EIO, "write", "injected"))
+    | Directory_prepare | Payload_encode | Temp_file_create | Payload_fsync | Temp_file_close
+    | Atomic_rename | Parent_directory_fsync_after_rename | Temp_directory_fsync_after_rename -> () in
+  let uncertain = match S.For_testing.change_share_before_stage ~before_stage ~base_path ~id request with
+    | Error (S.Share_commit_uncertain receipt) -> receipt
+    | Error error -> Alcotest.fail (S.share_error_message error)
+    | Ok _ -> Alcotest.fail "interrupted migration was reported as certain" in
+  (match S.read_share ~base_path ~id with
+   | Error (S.Share_unavailable _) -> ()
+   | Error error -> Alcotest.fail (S.share_error_message error)
+   | Ok _ -> Alcotest.fail "incomplete migration was presented as settled");
+  let settled = S.change_share ~base_path ~id request |> share_ok in
+  Alcotest.(check bool) "retry settles the original operation" true (settled = uncertain);
+  (match settled.outcome with
+   | Share.Applied { version = 1; shared = false } -> ()
+   | Share.Applied _ | Share.Conflict _ -> Alcotest.fail "wrong recovered migration");
+  Alcotest.(check bool) "recovered snapshot is private" false (S.read_share ~base_path ~id |> share_ok).shared)
+
 let test_create_and_revise () = with_base (fun base_path ->
   let empty = S.list ~base_path |> store_ok in
   Alcotest.(check int) "fresh catalog is empty" 0 (List.length empty.artifacts);
@@ -482,7 +508,8 @@ let () = Eio_main.run (fun _ ->
      "external sharing", [
       Alcotest.test_case "concurrent requests and later replay" `Quick test_share_transactions;
       Alcotest.test_case "uncertain commit and legacy share recovery" `Quick test_share_uncertain_commit;
-      Alcotest.test_case "archived conflicts and legacy overwrite" `Quick test_share_archives_and_downgrade];
+      Alcotest.test_case "archived conflicts and legacy overwrite" `Quick test_share_archives_and_downgrade;
+      Alcotest.test_case "pre-rename migration failure recovers" `Quick test_share_interrupted_migration];
      "Keeper and HTTP publication", [
       Alcotest.test_case "producer persists exact content, identity and CAS" `Quick test_keeper_publication;
       Alcotest.test_case "model-facing receipt preserves links and durable manifests" `Quick test_keeper_model_publication_receipt;

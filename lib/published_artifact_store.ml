@@ -193,48 +193,81 @@ let load_share_json ~base_path path =
     | json -> Ok (Some json)
     | exception Yojson.Json_error message -> Error (Share_unavailable message)
 
-let share_guard_json id =
-  `Assoc ["schema", `String "masc.published_artifact_share_guard.v1"; "id", `String id]
+type share_guard =
+  | Guard_absent
+  | Guard_active
+  | Guard_pending of { previous : Yojson.Safe.t option; next : Share.t }
 
-let has_share_guard ~base_path ~id =
+let active_guard_json id =
+  `Assoc ["schema", `String "masc.published_artifact_share_guard.v2";
+          "id", `String id; "phase", `String "active"]
+
+let pending_guard_json ~id ~previous ~next =
+  `Assoc ["schema", `String "masc.published_artifact_share_guard.v2";
+          "id", `String id; "phase", `String "pending";
+          "previous", Option.value ~default:`Null previous; "next", Share.to_json next]
+
+let decode_share_state ~id = function
+  | None -> Share.initial ~id ~shared:false |> Result.map_error (function
+      | Share.Invalid message -> Share_invalid message
+      | Share.Operation_reused -> Share_operation_reused)
+  | Some json ->
+    (match Share.of_json json with
+     | Ok state when String.equal (Share.id state) id -> Ok state
+     | Ok _ -> Error (Share_unavailable "artifact share identity mismatch")
+     | Error (Share.Invalid message) -> Error (Share_unavailable message)
+     | Error Share.Operation_reused -> Error (Share_unavailable "duplicate share operation"))
+
+let is_legacy_share = function
+  | None -> true
+  | Some (`Assoc fields) -> List.sort String.compare (List.map fst fields) = ["id"; "shared"]
+  | Some _ -> false
+
+let read_share_guard ~base_path ~id =
   let* guard = load_share_json ~base_path (share_guard_path ~base_path id) in
   match guard with
-  | None -> Ok false
+  | None -> Ok Guard_absent
   | Some (`Assoc fields) when
       List.sort compare fields =
-      List.sort compare ["schema", `String "masc.published_artifact_share_guard.v1"; "id", `String id] ->
-    Ok true
+      List.sort compare ["schema", `String "masc.published_artifact_share_guard.v2";
+                         "id", `String id; "phase", `String "active"] -> Ok Guard_active
+  | Some (`Assoc fields) when
+      List.sort String.compare (List.map fst fields) = ["id"; "next"; "phase"; "previous"; "schema"] ->
+    (match List.assoc "schema" fields, List.assoc "id" fields, List.assoc "phase" fields with
+     | `String "masc.published_artifact_share_guard.v2", `String stored_id, `String "pending"
+       when String.equal stored_id id ->
+       let previous = match List.assoc "previous" fields with `Null -> None | json -> Some json in
+       let* initial = if is_legacy_share previous then decode_share_state ~id previous
+         else Error (Share_unavailable "invalid share migration baseline") in
+       let* next = decode_share_state ~id (Some (List.assoc "next" fields)) in
+       (match Share.latest next with
+        | Some receipt ->
+          (match Share.apply initial receipt.request with
+           | Ok (Share.Recorded (expected, _)) when Share.to_json expected = Share.to_json next ->
+             Ok (Guard_pending { previous; next })
+           | Ok (Share.Recorded _ | Share.Replay _) | Error _ ->
+             Error (Share_unavailable "invalid share migration transition"))
+        | None -> Error (Share_unavailable "share migration receipt is missing"))
+     | _ -> Error (Share_unavailable "invalid artifact share guard"))
   | Some _ -> Error (Share_unavailable "invalid artifact share guard")
 
 let load_share ~base_path ~id =
   if not (valid_id id) then Error (Share_invalid "invalid artifact id")
   else
-    let* guard = has_share_guard ~base_path ~id in
+    let* guard = read_share_guard ~base_path ~id in
     let* json = load_share_json ~base_path (share_path ~base_path id) in
-    let legacy = match json with
-      | None -> true
-      | Some (`Assoc fields) -> List.sort String.compare (List.map fst fields) = ["id"; "shared"]
-      | Some _ -> false in
+    let legacy = is_legacy_share json in
     let* archive_present =
-      if guard || not legacy then Ok false
+      if guard <> Guard_absent || not legacy then Ok false
       else match Unix.lstat (share_receipt_dir ~base_path id) with
         | _ -> Ok true
         | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false in
-    if (guard && legacy) || (not guard && not legacy) then
-      Error (Share_unavailable "artifact share state requires recovery")
-    else if archive_present then Error (Share_unavailable "artifact share history exists without its guard")
-    else match json with
-    | None ->
-      Share.initial ~id ~shared:false
-      |> Result.map_error (function
-        | Share.Invalid message -> Share_invalid message
-        | Share.Operation_reused -> Share_operation_reused)
-    | Some json ->
-        (match Share.of_json json with
-         | Ok state when String.equal (Share.id state) id -> Ok state
-         | Ok _ -> Error (Share_unavailable "artifact share identity mismatch")
-         | Error (Share.Invalid message) -> Error (Share_unavailable message)
-         | Error Share.Operation_reused -> Error (Share_unavailable "duplicate share operation"))
+    match guard with
+    | Guard_pending _ -> Error (Share_unavailable "artifact share migration requires recovery")
+    | Guard_active when legacy -> Error (Share_unavailable "artifact share state requires recovery")
+    | Guard_absent when not legacy -> Error (Share_unavailable "artifact share state requires recovery")
+    | Guard_absent when archive_present -> Error (Share_unavailable "artifact share history exists without its guard")
+    | Guard_active | Guard_absent -> decode_share_state ~id json
 
 let read_share ~base_path ~id = protect_share (fun () ->
   load_share ~base_path ~id |> Result.map Share.snapshot)
@@ -263,6 +296,25 @@ let find_share_receipt ~base_path ~id ~operation_id = protect_share (fun () ->
   else let* state = load_share ~base_path ~id in
     lookup_receipt ~base_path ~id ~state ~operation_id)
 
+let durable_share_save ~ownership_root path json =
+  Keeper_fs.save_json_durable_atomic ~ownership_root path json
+
+let recover_pending_share ~base_path ~id =
+  let* guard = read_share_guard ~base_path ~id in
+  match guard with
+  | Guard_absent | Guard_active -> Ok ()
+  | Guard_pending { previous; next } ->
+    let* current = load_share_json ~base_path (share_path ~base_path id) in
+    if current <> previous && current <> Some (Share.to_json next) then
+      Error (Share_unavailable "share migration baseline changed")
+    else
+      let save path json =
+        match durable_share_save ~ownership_root:base_path path json with
+        | Ok () -> Ok ()
+        | Error error -> Error (Share_unavailable (Keeper_fs.durable_write_error_to_string error)) in
+      let* () = save (share_path ~base_path id) (Share.to_json next) in
+      save (share_guard_path ~base_path id) (active_guard_json id)
+
 let with_share_lock ~base_path ~id f =
   if not (valid_id id) then Error (Share_invalid "invalid artifact id")
   else protect_share (fun () ->
@@ -271,6 +323,7 @@ let with_share_lock ~base_path ~id f =
     match File_lock_eio.with_durable_lock_observed
       ~lock_path:(lock_path ~base_path id) (fun () ->
         let* _artifact = load ~base_path id |> Result.map_error share_artifact_error in
+        let* () = recover_pending_share ~base_path ~id in
         let* state = load_share ~base_path ~id in
         f state) with
     | File_lock_eio.Lock_not_acquired error ->
@@ -288,16 +341,6 @@ let save_share ~save ~base_path ~id state receipt =
   | Error (error : Keeper_fs.durable_write_error) when error.renamed ->
     Error (Share_commit_uncertain receipt)
   | Error error -> Error (Share_unavailable (Keeper_fs.durable_write_error_to_string error))
-
-let durable_share_save ~ownership_root path json =
-  Keeper_fs.save_json_durable_atomic ~ownership_root path json
-
-let ensure_share_guard ~base_path ~id =
-  let* present = has_share_guard ~base_path ~id in
-  if present then Ok ()
-  else match durable_share_save ~ownership_root:base_path (share_guard_path ~base_path id) (share_guard_json id) with
-    | Ok () -> Ok ()
-    | Error error -> Error (Share_unavailable (Keeper_fs.durable_write_error_to_string error))
 
 let archive_receipt ~base_path ~id ~state receipt =
   let operation_id = receipt.Share.request.operation_id in
@@ -323,19 +366,38 @@ let change_share_with_save ~save ~base_path ~id request =
       | Error (Share.Invalid message) -> Error (Share_invalid message)
       | Error Share.Operation_reused | Ok (Share.Replay _) -> Error Share_operation_reused
       | Ok (Share.Recorded (next, receipt)) ->
-        let* () = ensure_share_guard ~base_path ~id in
-        let* () = match Share.latest state with
-          | None -> Ok ()
-          | Some previous ->
-            (* A visible rename may not yet be durable. Settle it before its
-               receipt can be archived in a different directory. *)
-            let* () = match save_share ~save:durable_share_save ~base_path ~id state previous with
-              | Ok _ -> Ok ()
-              | Error (Share_commit_uncertain _) ->
-                Error (Share_unavailable "previous share state could not be settled")
-              | Error ((Share_invalid _ | Share_missing | Share_operation_reused | Share_unavailable _) as error) -> Error error in
-            archive_receipt ~base_path ~id ~state previous in
-        save_share ~save ~base_path ~id next receipt)
+        let* guard = read_share_guard ~base_path ~id in
+        match guard with
+        | Guard_pending _ -> Error (Share_unavailable "artifact share migration requires recovery")
+        | Guard_absent ->
+          let* previous = load_share_json ~base_path (share_path ~base_path id) in
+          let pending = pending_guard_json ~id ~previous ~next in
+          (match durable_share_save ~ownership_root:base_path (share_guard_path ~base_path id) pending with
+           | Error error when error.renamed -> Error (Share_commit_uncertain receipt)
+           | Error error -> Error (Share_unavailable (Keeper_fs.durable_write_error_to_string error))
+           | Ok () ->
+             (* Once the pending guard is durable, recovery may still apply
+                this request even if writing the snapshot fails before rename. *)
+             (match save_share ~save ~base_path ~id next receipt with
+              | Error _ -> Error (Share_commit_uncertain receipt)
+              | Ok _ ->
+                match durable_share_save ~ownership_root:base_path
+                    (share_guard_path ~base_path id) (active_guard_json id) with
+                | Ok () -> Ok receipt
+                | Error _ -> Error (Share_commit_uncertain receipt)))
+        | Guard_active ->
+          let* () = match Share.latest state with
+            | None -> Ok ()
+            | Some previous ->
+              (* A visible rename may not yet be durable. Settle it before its
+                 receipt can be archived in a different directory. *)
+              let* () = match save_share ~save:durable_share_save ~base_path ~id state previous with
+                | Ok _ -> Ok ()
+                | Error (Share_commit_uncertain _) ->
+                  Error (Share_unavailable "previous share state could not be settled")
+                | Error ((Share_invalid _ | Share_missing | Share_operation_reused | Share_unavailable _) as error) -> Error error in
+              archive_receipt ~base_path ~id ~state previous in
+          save_share ~save ~base_path ~id next receipt)
 
 let change_share ~base_path ~id request =
   change_share_with_save ~save:durable_share_save ~base_path ~id request

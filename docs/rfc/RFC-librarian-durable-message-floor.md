@@ -140,9 +140,16 @@ L3 을 한 PR 로 쓰지 않고 아래로 나눠 L2(#46568) 위에 쌓는다.
 - **`memory_step` 은 Runtime 이 찍는다.** 이 타입은 `private` 이다(게이트를 통과한 결정만 Runtime 이 만든다는 경계). durable 결과는 `Runtime.durable_memory_step` 입구로만 `memory_step` 이 되고, 그러면 `Memory_plan`·`Memory_program` 의 검증을 그대로 쓴다.
 - **단계가 보는 Memory 는 앞 단계까지 반영한 값이다.** `Machine` 은 단계가 끝날 때마다 그 결정의 결과를 다음 질문의 `current` 로 넘기고, 저장소에는 아무것도 쓰지 않는다. 사슬 전체를 게시할 때 `Program.replay` 가 이 결정들을 잠긴 실제 Memory 에 다시 적용해 본다. 그사이 관련 없는 항목이 더해진 것은 허용하고, 기대한 항목이 없어졌거나 결과가 달라지면 거절한다.
 
+**L3d 복구가 지켜야 할 조건.** 아직 구현이나 저장 형식을 정했다는 뜻은 아니다.
+
+- 재시작해 사슬을 다시 먹일 때는 처음의 `transaction_id` 와 초기 `Memory_plan` snapshot 을 복원해 같은 기계에서 시작한다. 현재 Memory 를 새 anchor 로 잡거나 새 ID 를 만들면 같은 단계 결과여도 질문이나 program 이 달라질 수 있다. 최초 사슬에서 이 두 값을 어떻게 내구성 있게 보존할지는 아래 `current` 와 함께 L3d 에서 정한다.
+- 크기 거절로 만든 `unreadable` hole 은 처음 만든 동일한 값을 복원해 먹인다. 성공한 단계는 원래 `run_id` 와 gate 판정을 보존해 `durable_memory_step` 에 넘긴다. 복구 시점의 Memory 로 gate 를 다시 판정하거나 새 ID 를 만들지 않는다.
+- 사슬의 각 결과가 현재 기계의 질문에 속하는지 request ID·position 과 질문 내용으로 확인하고, 이미 반영한 결과를 다음 질문에 다시 먹이지 않는다. 같은 position 의 다른 질문도 구분해야 한다. `matches_question` 은 단계 request 를 대조하는 입구이고 결과 재생의 중복 방어 자체는 아니다.
+- 복구 시험에는 초기 anchor 가 바뀐 재시작, hole 값 보존, gate 판정 이후 Memory 가 달라진 재시작, 중복 결과와 다른 position·질문의 결과를 넣는다. 같은 근거로 복구할 때 원래 질문과 program 을 얻고, 맞지 않는 근거는 거절하는지 확인한다.
+
 열린 것.
 
-- **served slot.** `Machine.answered` 는 단계를 처리한 슬롯(`Runtime.served_slot`: API 슬롯 또는 CLI 슬롯, id 공간이 서로 다르다)을 받는다. `Runtime.durable_memory_step` 은 슬롯을 받지 않는다. durable 답에서 슬롯을 어떻게 얻을지, 사슬에 이 값이 꼭 필요한지를 L3d 에서 정한다.
+- **served slot.** `Machine.answered` 는 단계를 처리한 슬롯(`Runtime.served_slot`: API 슬롯 또는 CLI 슬롯, id 공간이 서로 다르다)을 받는다. `Runtime.durable_memory_step` 은 슬롯을 받지 않는다. durable 답에서 슬롯을 어떻게 얻을지, 사슬에 이 값이 꼭 필요한지를 L3d 에서 정한다. 그 전에는 실제 근거가 없는 슬롯을 만들어 넣지 않는다.
 - **gate 저널이 단계마다 도는 비용.** 단계 하나는 답 하나와 gate 저널 하나다. L4 전에 저널이 단계들의 결정을 합친 program 하나를 받는지 확인한다.
 - **사슬을 다시 세울 때의 시작 `current`.** 단계는 자기 입력을 담으니 단계 하나를 복원하는 데는 시작 Memory 가 필요 없다. 다만 재시작한 구동은 기계에 처음부터 단계 결과를 다시 먹여 다음 질문을 얻는다. 그때 기계의 시작 `current` 는 사슬 안에서 한 값이어야 질문이 단계와 맞는다. 후보는 범위 original 입력의 `current` 다. 기계가 쓰는 `Memory_plan.create` 는 전체 `Current.t` 를 받는데 범위 original 에는 facts 와 revision 만 있으므로, 생성자 인자를 facts 로 바꿔야 한다. 게시 때 `Program.replay` 가 그사이 바뀐 Memory 때문에 거절하면 사슬을 어떻게 이을지는 L4 에서 정한다.
 - **host 가 단계를 알아보지 못한다.** `server_librarian_addon_wake.ml` 과 `server_librarian_addon_validation.ml` 이 요청 ID 를 각자 복사한 `namespace` 함수로 분류하고, 둘 다 단계 ID 를 `Other` 로 본다. host 의 Exact 권한 검사는 단계 요청을 `not_allowed: lacks its original host identity` 로 거절하고, wake 는 단계 결과 알림(`Exact_result_delivered`)을 "no original execution namespace" 로 거절한다. 단계는 입력을 담으니 host 가 record 하나로 복원해 답을 도메인 검증할 수 있다. 분류 함수를 하나로 합쳐 새 종류가 두 곳 모두 컴파일 오류로 드러나게 한다. L3d 에서 한다.

@@ -766,7 +766,9 @@ let rec execute_unlocked t = function
           else ["framePath", `List (List.map (fun selector -> `String selector) frame_path)] in
         Ok (`Assoc (("tabId", `Int tab_id) :: framed @ fields))
       | _ -> Error (Protocol "invalid interaction response"))
-  | Browser_lane.Page_capture { tab_id } ->
+  | Browser_lane.Page_capture {options=Some _;_} ->
+    Error (Protocol "native screenshot options require an Ego connection")
+  | Browser_lane.Page_capture { tab_id; options=None } ->
     let* session = session t in
     with_tab t session (Some tab_id) (fun () ->
       let* before = page_summary t session in

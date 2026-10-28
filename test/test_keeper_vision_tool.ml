@@ -2392,7 +2392,7 @@ let test_browser_screenshot_reaches_vision_reader () =
              | Automation_route -> ()
              | Live_route None|Stagehand_route -> failwith "unexpected screenshot route");
             let data=match verb with
-              | Browser_lane.Page_capture {tab_id=73} -> `Assoc ["tabId",`Int 73;
+              | Browser_lane.Page_capture {tab_id=73;options=None} -> `Assoc ["tabId",`Int 73;
                   "url",`String "https://example.org/form";"title",`String "Form";
                   "mimeType",`String "image/png";"viewport",viewport;"data",`String encoded]
               | Page_elements {tab_id=Some 73;_} -> `Assoc ["tabId",`Int 73;"elements",`List []]
@@ -2505,6 +2505,73 @@ let test_browser_screenshot_reaches_vision_reader () =
                connection's transport is one of them. *)
             assert (assoc_string "transport" data = "web_extension");
             if mode = "screenshot" then verify_pointer_receipt "live" data) ["elements";"screenshot"]))))))
+
+let test_native_browser_screenshot_artifact_scope () =
+  with_env "MASC_CONFIG_DIR" "" (fun () ->
+  with_temp_base (fun base_path ->
+    let config = Masc.Workspace.default_config base_path in
+    let meta = make_meta "native-browser-screenshot" in
+    let encoded = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" in
+    let space : Browser_lane.ego_space = {id=51;name="SDK Space"} in
+    let client_id = Result.get_ok (Browser_lane.client_id_of_string "30000000-0000-4000-8000-000000000051") in
+    let client : Browser_lane.client_info = {client_id;browser=Ego_lite;version="fixture";
+      transport=Ego_task_space;engine_version="155.0.1";space=Some space} in
+    let expected = ref (Result.get_ok (Browser_lane.Capture.of_json (`Assoc []))) in
+    let echo = ref None and extra = ref [] in
+    let respond ~route verb =
+      assert (route=Browser_lane.Live_route (Some client_id));
+      match verb with
+      | Browser_lane.Page_capture {tab_id=73;options=Some options} ->
+        assert (options = !expected);
+        let echoed = match !echo with None -> Browser_lane.Capture.to_json options | Some value -> value in
+        Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",`Assoc ([
+          "tabId",`Int 73;"url",`String "https://example.org/form";"title",`String "Form";
+          "mimeType",`String "image/png";"captureOptions",echoed;
+          "data",`String encoded] @ !extra)])
+      | _ -> failwith "native screenshot request lost its options or target" in
+    Eio_main.run (fun env ->
+      Time_compat.set_clock (Eio.Stdenv.clock env);
+      Browser_addon_fixture.with_worker ~env ~config ~clients:[client] ~respond (fun _ ->
+        let capture options = Masc.Keeper_tool_in_process_runtime.handle_browser_read_with_outcome
+          ~config ~meta ~args:(`Assoc ["lane",`String "live";
+            "clientId",`String (Browser_lane.client_id_to_string client_id);
+            "tabId",`Int 73;"mode",`String "screenshot";"screenshotOptions",options]) in
+        List.iter (fun options ->
+          expected := Result.get_ok (Browser_lane.Capture.of_json options);
+          let result = capture options in
+          assert (result.disposition = Tool_result.Completed ());
+          let data = match result.data with Some data -> data | None -> failwith "no native image metadata" in
+          assert (assoc_string "scope" data = "page");
+          assert (Yojson.Safe.Util.member "captureOptions" data = Browser_lane.Capture.to_json !expected);
+          (match data with `Assoc fields -> assert (not (List.mem_assoc "viewport" fields))
+           | _ -> failwith "native image metadata must be an object");
+          assert (Yojson.Safe.Util.member "browserSpace" data = Browser_lane.ego_space_to_json space);
+          assert (assoc_string "clientId" data = Browser_lane.client_id_to_string client_id);
+          assert (assoc_string "transport" data = "ego_task_space");
+          assert (Yojson.Safe.Util.member "width" data = `Int 1);
+          assert (Yojson.Safe.Util.member "height" data = `Int 1);
+          assert (not (String_util.contains_substring result.raw_output encoded));
+          let handle = assoc_string "artifact" data in
+          let frames_dir = Vt.frames_dir ~base_path ~keeper_name:meta.name () in
+          assert (Store.load ~dir:frames_dir (Store.of_string handle) = Ok (Base64.decode_exn encoded));
+          let native = Masc.Keeper_image_read.handle ~config ~meta
+            ~args:(`Assoc ["artifact",`String handle]) () in
+          assert (native.disposition = Tool_result.Completed ());
+          (match native.content_blocks with
+           | Some [Agent_core.Types.Text _;Agent_core.Types.Image {data;media_type="image/png";_}] ->
+             assert (data=encoded)
+           | _ -> failwith "native capture artifact did not reach the image reader"))
+          [`Assoc [];`Assoc ["fullPage",`Bool true;"scale",`String "css";"raw",`Bool true]];
+        let options = Browser_lane.Capture.to_json !expected in
+        let frames_dir = Vt.frames_dir ~base_path ~keeper_name:meta.name () in
+        let stored = Sys.readdir frames_dir |> Array.to_list |> List.sort String.compare in
+        echo := Some (`Assoc []);
+        assert ((capture options).disposition <> Tool_result.Completed ());
+        echo := None;
+        extra := ["viewport",`Assoc ["documentId",`String "forged-pointer-frame";
+          "width",`Float 800.;"height",`Float 600.;"scrollX",`Float 0.;"scrollY",`Float 0.]];
+        assert ((capture options).disposition <> Tool_result.Completed ());
+        assert ((Sys.readdir frames_dir |> Array.to_list |> List.sort String.compare) = stored)))))
 
 let test_browser_screenshot_preserves_space () =
   with_temp_base (fun base_path ->
@@ -2832,6 +2899,7 @@ let run_all () =
   test_browser_screenshot_reaches_vision_reader ();
   test_browser_screenshot_rejects_bad_pixels ();
   test_browser_screenshot_preserves_space ();
+  test_native_browser_screenshot_artifact_scope ();
   test_vision_output_tokens_default_and_env ();
   test_truncated_structured_response_reads_as_truncation ();
   test_max_tokens_failover_preserves_image_and_candidate_wire_limits ();
@@ -2898,6 +2966,7 @@ let () =
   | [_; "--browser-screenshot"] ->
       test_browser_screenshot_reaches_vision_reader ();
       test_browser_screenshot_preserves_space ();
+      test_native_browser_screenshot_artifact_scope ();
       print_endline "test_keeper_vision_tool: browser screenshot scenario passed"
   | [_; "--candidate-standing"] ->
       run_candidate_standing ();

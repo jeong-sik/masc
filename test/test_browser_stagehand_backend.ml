@@ -974,7 +974,7 @@ let test_companion_loss_cancels_and_joins_active_page ~capture =
     let session = private_ok (Backend.capture_private_session h.backend) in
     armed := true;
     let reading = Eio.Fiber.fork_promise ~sw (fun () ->
-      let verb = if capture then Lane.Page_capture {tab_id=0}
+      let verb = if capture then Lane.Page_capture {tab_id=0;options=None}
         else Lane.Page_read {tab_id=Some 0; max_chars=None} in
       Backend.execute h.backend verb) in
     (* Promise resolution cannot suspend: an assertion failure must still let
@@ -1035,7 +1035,7 @@ let test_companion_loss_discards_synchronous_capture ~during_screenshot =
     let session = private_ok (Backend.capture_private_session h.backend) in
     notify_loss := (fun () -> Backend.fence_private_session h.backend ~session);
     armed := true;
-    private_page_discarded (Backend.execute h.backend (Lane.Page_capture {tab_id=0}));
+    private_page_discarded (Backend.execute h.backend (Lane.Page_capture {tab_id=0;options=None}));
     check int "a synchronous fence prevents all capture follow-up observations" 1 !observations;
     check int "loss during the initial observation prevents screenshot dispatch"
       (if during_screenshot then 1 else 0) !screenshots;

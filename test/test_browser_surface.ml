@@ -209,6 +209,38 @@ let test_capture_identity () =
   check bool "non-image payload refused" true
     (Result.is_error (capture ~payload:(Base64.encode_string "not PNG") ()))
 
+let test_native_capture_coordinate_scope () =
+  let options=match Browser_lane.Capture.of_json (`Assoc ["fullPage",`Bool true;"scale",`String "css"]) with
+    | Ok options -> options | Error detail -> fail detail in
+  let viewport=`Assoc ["documentId",`String "fixture";"width",`Int 800;"height",`Int 600;
+    "scrollX",`Int 0;"scrollY",`Int 0] in
+  let payload=["tabId",`Int 7;"url",`String "https://example.org";"title",`String "Fixture";
+    "mimeType",`String "image/png";"data",`String (Base64.encode_string "\137PNG\r\n\026\nfixture")] in
+  let echo=["captureOptions",Browser_lane.Capture.to_json options] in
+  let native fields=Surface.native_capture_from ~binding:owned ~tab_id:7 ~started:0L ~options (`Assoc fields) in
+  (match native (payload@echo) with
+   | Ok json -> check bool "page image carries options without viewport geometry" true
+       (Yojson.Safe.Util.member "scope" json=`String "page"
+        && Yojson.Safe.Util.member "captureOptions" json=Browser_lane.Capture.to_json options
+        && Yojson.Safe.Util.member "viewport" json=`Null)
+   | Error detail -> fail detail);
+  List.iter (fun fields -> check bool "unbound or mixed-scope native image refused" true
+      (Result.is_error (native fields)))
+    [payload;payload@["captureOptions",`Assoc []];payload@echo@["viewport",viewport];
+     ("tabId",`Int 8)::List.remove_assoc "tabId" (payload@echo);payload@echo@echo];
+  check bool "native image cannot become a pointer frame" true
+    (Result.is_error (Surface.capture_from ~binding:owned ~tab_id:7 ~started:0L
+      (`Assoc (payload@echo@["viewport",viewport]))));
+  check bool "HTTP capture retains typed native options" true
+    (match Surface.parse_screenshot_request (`Assoc ["lane",`String "automation";"tabId",`Int 7;
+      "screenshotOptions",Browser_lane.Capture.to_json options]) with
+     | Ok (_,Some actual) -> actual=options | Ok (_,None)|Error _ -> false);
+  List.iter (fun json -> check bool "HTTP capture rejects invalid native request" true
+      (Result.is_error (Surface.parse_screenshot_request json)))
+    [`Assoc ["tabId",`Int 7;"screenshotOptions",`Null];
+     `Assoc ["tabId",`Int 7;"screenshotOptions",`Assoc ["path",`String "/tmp/caller.png"]];
+     `Assoc ["tabId",`Int 7;"screenshotOptions",`Assoc [];"screenshotOptions",`Assoc []]]
+
 let test_scoped_scene_acknowledgement () =
   let scene ?(url="https://example.org") ~view ~scope () = `Assoc ["tabId",`Int 7;
     "schema",`String "masc.browser.scene.v1";"documentId",`String "fixture";"url",`String url;
@@ -365,6 +397,7 @@ let test_screenshot_reaches_the_addon_with_or_without_a_keeper () =
 
 let () = run "browser surface" ["behavior",[
   test_case "a screenshot reaches the Add-on with or without a Keeper" `Quick test_screenshot_reaches_the_addon_with_or_without_a_keeper;
+  test_case "native screenshot images cannot address a viewport" `Quick test_native_capture_coordinate_scope;
   test_case "malformed tool arguments reach no browser" `Quick test_malformed_arguments_reach_no_browser;
   test_case "a snapshot read is checked before any browser" `Quick test_a_snapshot_read_is_checked_before_any_browser;
   test_case "a snapshot target is checked before any browser" `Quick test_a_snapshot_target_is_checked_before_any_browser;

@@ -1,5 +1,5 @@
 let ( let* ) = Result.bind
-let persist ~base_path ~keeper_name json =
+let persist ?native_options ~base_path ~keeper_name json =
   let string key = match json with
     | `Assoc fields -> (match List.assoc_opt key fields with
         | Some (`String value) -> Ok value | _ -> Error ("screenshot missing " ^ key))
@@ -15,6 +15,17 @@ let persist ~base_path ~keeper_name json =
     (* Direct pixel persistence may omit routing metadata. Never invent an identity. *)
     | `Assoc fields -> Browser_lane.connection_fields_of_json fields
     | _ -> Error "screenshot must be an object" in
+  let* capture_fields=match native_options,json with
+    | None,`Assoc fields when not (List.mem_assoc "captureOptions" fields)
+        && (match List.assoc_opt "scope" fields with None|Some (`String "viewport") -> true | Some _ -> false) ->
+        Ok ["scope",`String "viewport"]
+    | Some expected,`Assoc fields when not (List.mem_assoc "viewport" fields)
+        && List.assoc_opt "scope" fields=Some (`String "page") ->
+        let* observed=Browser_lane.Capture.of_optional_json (List.assoc_opt "captureOptions" fields) in
+        if observed=Some expected then Ok ["scope",`String "page";
+          "captureOptions",Browser_lane.Capture.to_json expected]
+        else Error "native screenshot options do not match the original request"
+    | (Some _|None),_ -> Error "screenshot scope does not match the original request" in
   let* observation_fields = match json with
     | `Assoc fields ->
       let* viewport_fields = match List.assoc_opt "viewport" fields with
@@ -44,7 +55,7 @@ let persist ~base_path ~keeper_name json =
         | Some (width,height) when width > 0 && height > 0 -> Ok (width,height)
         | _ -> Error "invalid screenshot dimensions" in
       let* handle = Keeper_vision_tool.store_frame ~base_path ~keeper_name bytes in
-      Ok (`Assoc (connection_fields @ observation_fields @ ["artifact", `String (Multimodal.Vision_artifact_store.to_string handle);
+      Ok (`Assoc (connection_fields @ observation_fields @ capture_fields @ ["artifact", `String (Multimodal.Vision_artifact_store.to_string handle);
         "media_type", `String mime; "tabId", `Int tab_id; "url", `String url;
         "title", `String title; "width", `Int width; "height", `Int height;
-        "bytes", `Int (String.length bytes); "scope", `String "viewport"]))
+        "bytes", `Int (String.length bytes)]))

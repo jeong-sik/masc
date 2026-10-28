@@ -61,7 +61,7 @@ Neither means fully supported.
 | `Page.goto` | `page.goto`, native workflow goto with referer/timeout/waitUntil | Installed MASC/Keeper route unverified |
 | `Page.reload` | `page.act` reload, native workflow reload with timeout/waitUntil | Installed MASC/Keeper route unverified |
 | `Page.snapshot` | BrowserRead and final workflow snapshot; step snapshot preserves native scope/root and action-mark/stable-locator options | New step options require real SDK and installed-route proof |
-| `Page.screenshot` | `page.capture` with brokered image data | Full-page, clip, scale/raw choices |
+| `Page.screenshot` | `BrowserRead` screenshot / `page.capture` forwards native fullPage, clip (including clip scale), scale="css" and raw; broker owns the output path and Vision size limit. Explicit options produce a page image artifact without pointer-frame geometry | Real SDK options execution and installed MASC/Keeper route unverified |
 | `Page.url` | Native workflow url returns the SDK value as a step receipt | Installed MASC/Keeper route unverified |
 | `Page.waitForURL` | Native workflow waitForURL | String/glob supported; RegExp and function matchers not exposed |
 | `Page.waitForEvent` | Internal download watch | General event waits and typed handle lifecycle |

@@ -82,7 +82,11 @@ let verb_of_json ~route value =
   | "page.console" -> one_tab (fun tab_id -> B.Page_console {tab_id})
   | "page.network" -> one_tab (fun tab_id -> B.Page_network {tab_id})
   | "page.cookies" -> one_tab (fun tab_id -> B.Page_cookies {tab_id})
-  | "page.capture" -> one_tab (fun tab_id -> B.Page_capture {tab_id})
+  | "page.capture" ->
+      let* fields=fields ["tabId";"options"] in
+      let* value=required fields "tabId" in let* tab_id=tab value in
+      let* options=B.Capture.of_optional_json (List.assoc_opt "options" fields) in
+      Ok (B.Page_capture {tab_id;options})
   | "page.elements" ->
       let* fields = fields ["tabId";"within";"selector"] in let* tab_id = optional_tab fields in
       let* filter = Browser_page_script.elements_filter_of_json (fun key -> List.assoc_opt key fields) in

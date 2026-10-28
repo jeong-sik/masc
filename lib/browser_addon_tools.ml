@@ -3,7 +3,7 @@ module Host = Browser_addon_host
 module C = Browser_capabilities
 module Legacy = Tool_misc_browser_lane
 let ( let* ) = Result.bind
-type projection = Raw | Inventory | Session | Scene of Browser_scene.request | Screenshot of int
+type projection = Raw | Inventory | Session | Scene of Browser_scene.request | Screenshot of int * B.Capture.t option
   | Scoped_elements of B.elements_filter
 type prepared = {preference:Browser_selection.preference;verb:B.verb;
   required_actions:C.operation list;projection:projection}
@@ -33,11 +33,15 @@ let absolute_url = function
   | None|Some _ -> Error "url is required"
 let prepare_read json =
   let* fields=fields ["lane";"clientId";"tabId";"maxChars";"mode";"framePath";
-    "scope";"expectedUrl";"navigationSource";"within";"selector";"snapshotScope";"root"] json in
+    "scope";"expectedUrl";"navigationSource";"within";"selector";"snapshotScope";"root";"screenshotOptions"] json in
   let* request=surface fields in
   let* ()=bound request in
   let* frame_path=B.Action.parse_frame_path json in
   let* mode=Legacy.read_mode_of_args json in
+  let* options=B.Capture.of_optional_json (List.assoc_opt "screenshotOptions" fields) in
+  let* ()=match mode,options with
+    | `Screenshot,_ | _,None -> Ok ()
+    | _,Some _ -> Error "screenshotOptions apply only to mode screenshot" in
   let* cap=optional_int "maxChars" fields in
   let* max_chars=Browser_page_script.text_cap cap in
   let* filter=Browser_page_script.elements_filter_of_json (fun key -> List.assoc_opt key fields) in
@@ -92,7 +96,7 @@ let prepare_read json =
         | Some _,_ | _,Some _ -> Error "snapshotScope and root are text" in
       let* tab_id=tab request in prepared request Raw (B.Page_snapshot {tab_id;max_chars;scope})
   | `Screenshot ->
-      let* tab_id=tab request in prepared request (Screenshot tab_id) (B.Page_capture {tab_id})
+      let* tab_id=tab request in prepared request (Screenshot (tab_id,options)) (B.Page_capture {tab_id;options})
   | `Downloads ->
       (* A live connection that does not list downloads refuses at selection
          (Browser_lane.live_transport_serves). *)
@@ -270,10 +274,12 @@ let project ~base_path ~keeper_name ~started request (receipt:Host.receipt) =
   | Scene scene -> data (Browser_scene.project scene ~binding:receipt.binding ~started receipt.data)
   | Scoped_elements filter ->
       data (Result.map annotate (Browser_page_script.check_scoped_elements ~filter receipt.data))
-  | Screenshot tab_id ->
-      let* capture=Browser_surface.capture_from ~binding:receipt.binding ~tab_id ~started receipt.data in
+  | Screenshot (tab_id,options) ->
+      let* capture=match options with
+        | None -> Browser_surface.capture_from ~binding:receipt.binding ~tab_id ~started receipt.data
+        | Some options -> Browser_surface.native_capture_from ~binding:receipt.binding ~tab_id ~started ~options receipt.data in
       match keeper_name,capture with
-      | Some keeper_name,_ -> data (Browser_screenshot.persist ~base_path ~keeper_name capture)
+      | Some keeper_name,_ -> data (Browser_screenshot.persist ?native_options:options ~base_path ~keeper_name capture)
       (* A caller with no Keeper workspace gets the checked PNG back as an image
          block of this result, and the observation fields without its bytes.
          The content repeats the observation as text before the image, so a

@@ -10,7 +10,8 @@ let roundtrips () =
   let native=ok (B.Native_workflow.of_json (`Assoc ["tabId",`Int 7;"expectedUrl",`String "https://example.org";
     "steps",`List [`Assoc ["method",`String "waitForSelector";"selector",`String "@12";"state",`String "visible"]];"maxChars",`Int 1000])) in
   let verbs = [B.Page_native_workflow native;B.Tabs_list; Page_read {tab_id=None;max_chars=None};Page_document {tab_id=7};
-    Page_downloads {tab_id=7};Page_capture {tab_id=7};
+    Page_downloads {tab_id=7};Page_capture {tab_id=7;options=None};
+    Page_capture {tab_id=7;options=Some (ok (B.Capture.of_json (`Assoc ["fullPage",`Bool true;"raw",`Bool false])))};
     Page_scene {tab_id=7;max_chars=1000;view=B.Regions;scope=Some {document_id="doc";node_id="region"}};
     Page_snapshot {tab_id=7;max_chars=1000;scope=B.Snapshot_viewport};
     Page_snapshot {tab_id=7;max_chars=1000;scope=B.Snapshot_full_page};
@@ -52,6 +53,10 @@ let a_native_host_cannot_poll_as_ego () =
   check bool "a BiDi host still polls" true (Result.is_ok (poll B.Webdriver_bidi))
 
 let rejections () =
+  check bool "caller cannot choose a screenshot path" true
+    (Result.is_error (decode "page.capture" ["tabId",`Int 7;"options",`Assoc ["path",`String "/tmp/caller.png"]]));
+  check bool "native screenshot options cannot be null" true
+    (Result.is_error (decode "page.capture" ["tabId",`Int 7;"options",`Null]));
   check bool "unknown lifecycle fields stay closed" true
     (Result.is_error (decode "page.act" ["action",`String "adopt_tab";"tabId",`Int 7;"force",`Bool true]));
   check bool "duplicate lifecycle options stay closed" true

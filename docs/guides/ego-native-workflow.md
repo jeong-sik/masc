@@ -1,5 +1,32 @@
 # Native Ego workflow
 
+For a native PNG, send `BrowserRead` with `mode: "screenshot"`, the observed
+`lane: "live"`, Ego `clientId`, `tabId`, and optional `screenshotOptions`:
+
+```json
+{"lane":"live","clientId":"<observed Ego clientId>","tabId":7,"mode":"screenshot",
+ "screenshotOptions":{"fullPage":true,"scale":"css","raw":false}}
+```
+
+The options use the SDK contract: `fullPage` and `raw` are booleans; `scale`
+accepts `"css"`; `clip` requires finite CSS-pixel `x`/`y`, positive finite
+`width`/`height`, and optional positive finite `scale`. Omitted options keep
+native defaults, including explicit false values when supplied. The SDK owns
+the capture wait. MASC supplies the output path, reads only an owned regular
+file up to the existing Vision image limit, and removes the temporary file
+after a capture response, including a failed response. If execution is cancelled
+before returning, worker retirement sweeps the owned capture directory.
+
+Omit `screenshotOptions` for a viewport PNG with viewport observation metadata.
+An explicit object, including `{}`, returns an artifact with `scope: "page"`,
+the requested `captureOptions` and measured PNG dimensions, without `viewport`.
+Use `keeper_image_read` to inspect its pixels. A full-page, clipped or scaled
+image cannot supply viewport coordinates for pointer input. Native options
+require Ego; other browser transports refuse them before capture.
+The HTTP capture endpoint accepts the same `screenshotOptions`; the worker
+wire command calls that object `options`. Real SDK capture with these options
+and the installed Keeper route remain unverified.
+
 Choose the observed live Ego `clientId` and `tabId`, read the page, then send
 `BrowserInteract` with `action: "workflow"`, its observed `expectedUrl`, and
 the planned `steps`. The entire sequence ends with one native snapshot. A

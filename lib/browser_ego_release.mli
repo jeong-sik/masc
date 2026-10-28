@@ -6,7 +6,16 @@
     driver, so an object receipt without it means the whole action ran. Raw
     calls such as [keyboard.type] and [mouse.up] swallow that error into void,
     so a void answer declares nothing. [Page.info()] and the Page's event buffer
-    are samples of the page, not answers of the SDK, and are never evidence. *)
+    are samples of the page, not answers of the SDK, and are never evidence.
+
+    This premise was read at [citrolabs/ego-lite@aecc5831fc5a] in
+    [package/ego-browser/src/page-model.ts]: the receipt type at lines
+    411-414, where [dialog] is filled at 2777-2784, and the raw calls at
+    512-568 and 2674-2687; and in [src/browser-runtime.ts], where
+    [PageDialogOpenedError] always carries an object [dialog] (115-146).
+    When the Ego Lite version the Add-on supports changes, read those places
+    again before trusting this module. [docs/guides/ego-native-workflow.md]
+    keeps the permalinks. *)
 
 (** The answers that release nothing. Anyone may build them. *)
 type unreleased =

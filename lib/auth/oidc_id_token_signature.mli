@@ -14,7 +14,7 @@
     HMAC family, and every other algorithm are refused before any key is
     looked up. The key must be an RSA key of 2048 bits or more (RFC 7518
     section 3.3) whose [alg] is RS256 and whose [use] is [sig]. The library
-    fills in either one from the other when only one is given. A symmetric
+    fills in the missing one when only one is given. A symmetric
     key, an encryption key, or a key that names another algorithm, listed
     under the same [kid], never verifies a token. The signature always uses
     SHA-256. The token must be in the canonical compact form: three unpadded
@@ -73,9 +73,9 @@ type error =
           fewer than 2048 bits. *)
   | Invalid_signature
   | Invalid_expiry
-      (** [exp] is missing, not an integer (a whole number too large for an
-          OCaml [int] counts), or out of range, or the payload is not a JSON
-          object. *)
+      (** [exp] is missing, is not an integer, or is out of range, or the
+          payload is not a JSON object. A whole number too large for an OCaml
+          [int] counts as not an integer. *)
   | Expired  (** [exp] is not later than [now]. *)
 
 val error_to_string : error -> string

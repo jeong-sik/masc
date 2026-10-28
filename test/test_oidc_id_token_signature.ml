@@ -122,6 +122,12 @@ let key_choice =
     , V.jwks_key_declared_rs256_for_encryption
     , V.token_valid_key_1
     , "key_not_rs256" )
+  ; (* [use] is a string RFC 7517 section 4.2 does not define. The library keeps it
+       as unsupported, and only [sig] is accepted. *)
+    ( "a key that says RS256 and names another use"
+    , V.jwks_key_declared_rs256_with_another_use
+    , V.token_valid_key_1
+    , "key_not_rs256" )
   ; ( "a key that says RS384 and a SHA-384 signature"
     , V.jwks_key_declared_rs384
     , V.token_signed_with_sha384

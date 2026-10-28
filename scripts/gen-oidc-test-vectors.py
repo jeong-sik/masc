@@ -327,6 +327,7 @@ def main() -> None:
             "jwks_key_without_alg_and_use": jwks(without(jwk1, "alg", "use")),
             "jwks_key_for_encryption": jwks({**without(jwk1, "alg"), "use": "enc"}),
             "jwks_key_declared_rs256_for_encryption": jwks({**jwk1, "use": "enc"}),
+            "jwks_key_declared_rs256_with_another_use": jwks({**jwk1, "use": "other"}),
             "jwks_key_declared_rs384": jwks({**jwk1, "alg": "RS384"}),
             "jwks_with_an_ec_key_off_the_curve": jwks(jwk1, off_curve),
             "jwks_key_2047_bits": jwks(short_jwk),

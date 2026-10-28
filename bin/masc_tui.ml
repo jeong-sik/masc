@@ -7591,7 +7591,7 @@ let goto_surface ?(from_reference = false) state ~mailbox (destination : surface
   state.keeper_message_focus <- Right_pane;
   state.runtime_model_jump <- None;
   close_chat_call_reader state;
-  state.detail_reading <- None;
+  close_detail_reading state;
   state.detail_focus_recovery <- None;
   (* The browser reader owns Connectors; refocusing it keeps the reader.
      The transport-list palette hides it explicitly before arriving here.
@@ -9917,22 +9917,37 @@ let settle_retired_queue_inspections state =
          keeper_name)) retired
 
 let launch_keeper_queue state ~mailbox ~keeper_name action =
+  let module Inbox = Masc_tui_queue_inspection in
+  let report ~kind detail =
+    match action with
+    | Inbox.Inspect_peers token ->
+        ignore (finish_keeper_peer_reading state ~keeper_name ~token (Error detail))
+    | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Edit _
+    | Cancel_event _ | Prioritize_event _ ->
+        chat_notice state ~keeper_name:(Some keeper_name) ~kind detail in
   if not (server_authority_ready state) then
-    chat_notice state ~keeper_name:(Some keeper_name) ~kind:Notice_failure
+    report ~kind:Notice_failure
       "/queue request was not sent while workspace identity is unconfirmed; retry after reconnecting"
   else begin
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
+  let reading = state.workspace_read_authority in
   let check_authority () =
-    if authority = state.workspace_authority && server_authority_ready state then Ok ()
+    if authority = state.workspace_authority && server_authority_ready state
+       && (match action with
+           | Inbox.Inspect_peers token -> reading == state.workspace_read_authority
+               && keeper_peer_read_current state ~keeper_name ~token
+           | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Edit _
+           | Cancel_event _ | Prioritize_event _ -> true) then Ok ()
     else Error "Workspace changed; the remaining queue requests were not sent" in
   let get_json ~host ~port ~path =
     Result.bind (check_authority ()) (fun () -> Masc_tui_http.get_json ~host ~port ~path) in
   let post_json ~host ~port ~path ~body =
     Result.bind (check_authority ()) (fun () -> Masc_tui_http.post_json ~host ~port ~path ~body) in
-  let module Inbox = Masc_tui_queue_inspection in
-  if List.mem keeper_name state.keeper_queue_inflight then
-    chat_notice state ~keeper_name:(Some keeper_name) ~kind:Notice_reply
+  if (match action with Inbox.Inspect_peers _ -> false
+      | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Edit _
+      | Cancel_event _ | Prioritize_event _ -> List.mem keeper_name state.keeper_queue_inflight) then
+    report ~kind:Notice_reply
       "A queue request is pending; wait for its result before the next change"
   else begin
   let local_resume = action = Inbox.Resume
@@ -9940,18 +9955,22 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
     && keeper_available_for_new_message state keeper_name
     && can_resume_preflight_keeper_input state keeper_name in
   let expected_workspace = state.server_identity in
-  state.keeper_queue_inflight <- keeper_name :: state.keeper_queue_inflight;
-  if action = Inbox.Inspect then begin
-    state.keeper_queue_readings <- keeper_name :: state.keeper_queue_readings;
-    state.keeper_queue_inspections <-
-      (keeper_name, state.workspace_read_authority)
-      :: List.filter (fun (keeper, _) -> keeper <> keeper_name) state.keeper_queue_inspections
-  end;
+  (match action with
+   | Inbox.Inspect ->
+       state.keeper_queue_inflight <- keeper_name :: state.keeper_queue_inflight;
+       state.keeper_queue_readings <- keeper_name :: state.keeper_queue_readings;
+       state.keeper_queue_inspections <-
+         (keeper_name, state.workspace_read_authority)
+         :: List.filter (fun (keeper, _) -> keeper <> keeper_name) state.keeper_queue_inspections
+   | Inspect_peers _ -> ()
+   | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Edit _
+   | Cancel_event _ | Prioritize_event _ ->
+       state.keeper_queue_inflight <- keeper_name :: state.keeper_queue_inflight);
   let control_generation = match action with
     | Inbox.Pause | Inbox.Resume ->
         Some (begin_keeper_chat_control ~preserve_input_holds:local_resume
                 ~preserve_priority_requests:local_resume state keeper_name)
-    | Inbox.Inspect | Inbox.Cancel _ | Inbox.Move_to_end _ | Inbox.Edit (_, _)
+    | Inbox.Inspect | Inbox.Inspect_peers _ | Inbox.Cancel _ | Inbox.Move_to_end _ | Inbox.Edit (_, _)
     | Inbox.Cancel_event (_, _, _) | Inbox.Prioritize_event (_, _, _)
     | Inbox.Clear -> None in
   (* The lines /queue clear asks the server to cancel. Read here, on the fiber
@@ -9963,7 +9982,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
         | Cancel_on_server -> Some request
         | Drop_from_local_queue | Withdraw_before_post | Leave_waiting -> None)
         (keeper_message_waiting_positions state ~keeper_name)
-    | Inbox.Inspect | Inbox.Pause | Inbox.Resume | Inbox.Cancel _ | Inbox.Move_to_end _
+    | Inbox.Inspect | Inbox.Inspect_peers _ | Inbox.Pause | Inbox.Resume | Inbox.Cancel _ | Inbox.Move_to_end _
     | Inbox.Edit _ | Inbox.Cancel_event _ | Inbox.Prioritize_event _ -> [] in
   let check_control () =
     Result.bind (check_authority ()) (fun () ->
@@ -9989,7 +10008,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
     let open Result.Syntax in
     let* () = check_control () in
     let* receipt = match action with
-      | Inbox.Inspect -> Ok []
+      | Inbox.Inspect | Inbox.Inspect_peers _ -> Ok []
       | Inbox.Pause | Inbox.Resume ->
         let verb = if action = Inbox.Pause then "pause" else "resume" in
         let* expected_workspace = match expected_workspace with
@@ -10037,7 +10056,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
             :: ("operator_operation_id", `String operator_operation_id) :: fields
           | Inbox.Prioritize_event (_, _, urgency) ->
             ("action", `String "reprioritize") :: ("urgency", `String (Keeper_event_queue.urgency_to_string urgency)) :: fields
-          | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Edit _ -> assert false in
+          | Inspect | Inspect_peers _ | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Edit _ -> assert false in
         let* _ = post_json ~host ~port ~path:(root ^ "/events/operator")
           ~body:(Yojson.Safe.to_string (`Assoc fields)) in
         Ok ["Server confirmed event update: " ^ reference]
@@ -10067,13 +10086,17 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
             let* operation = get_json ~host ~port ~path in
             let* input = Inbox.edited_input ~message operation in
             Ok ("edit", `Assoc ["input", input])
-          | Inbox.Inspect | Inbox.Pause | Inbox.Resume | Inbox.Clear | Inbox.Cancel_event _ | Inbox.Prioritize_event _ -> assert false in
+          | Inbox.Inspect | Inbox.Inspect_peers _ | Inbox.Pause | Inbox.Resume | Inbox.Clear | Inbox.Cancel_event _ | Inbox.Prioritize_event _ -> assert false in
         let* _ = post_json ~host ~port ~path:(path ^ "/" ^ suffix)
           ~body:(Yojson.Safe.to_string body) in
         Ok ["Server confirmed " ^ suffix ^ ": " ^ id] in
     (* Keep each failed read visible beside any successful mutation receipt. *)
-    let waiting = get_json ~host ~port ~path:(root ^ "/waiting-inventory")
-      |> fun result -> Result.bind result (Inbox.waiting_lines ~now:(Unix.gettimeofday ())) in
+    let waiting = match action with
+      | Inbox.Inspect_peers _ -> Ok []
+      | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Edit _
+      | Cancel_event _ | Prioritize_event _ ->
+          get_json ~host ~port ~path:(root ^ "/waiting-inventory")
+          |> fun result -> Result.bind result (Inbox.waiting_lines ~now:(Unix.gettimeofday ())) in
     let rec read_messages after_sequence reversed_pages =
       let suffix = Option.fold ~none:"" ~some:(fun value -> "&after_sequence=" ^ value) after_sequence in
       let* page = get_json ~host ~port ~path:(root ^ "/chat/operations?state=queued" ^ suffix) in
@@ -10087,11 +10110,24 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
           | `Assoc fields -> (match List.assoc_opt "operations" fields with Some (`List values) -> values | _ -> [])
           | _ -> []) (List.rev reversed_pages) in
         Inbox.operation_lines (`Assoc ["operations", `List operations]) in
-    let operations = read_messages None [] in
+    let operations = match action with
+      | Inbox.Inspect_peers _ ->
+          Inbox.read_peer_page ~keeper_name ~read_page:(fun () ->
+            get_json ~host ~port ~path:(root ^ "/chat/operations?state=queued"))
+          |> Result.map Inbox.peer_lines
+      | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Edit _
+      | Cancel_event _ | Prioritize_event _ -> read_messages None [] in
     let lines = function Ok lines -> lines | Error detail -> ["Read unavailable: " ^ detail] in
-    Ok (receipt, Ok (lines waiting @ lines operations)) in
+    (match action with
+     | Inbox.Inspect_peers _ -> Ok (receipt, operations)
+     | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Edit _
+     | Cancel_event _ | Prioritize_event _ -> Ok (receipt, Ok (lines waiting @ lines operations))) in
+  let read = match action with
+    | Inbox.Inspect_peers _ -> capture_workspace_json_read state perform
+    | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Edit _
+    | Cancel_event _ | Prioritize_event _ -> perform in
   let run () =
-    let result = try perform () with
+    let result = try read () with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn) in
     enqueue_async mailbox (Keeper_queue_loaded (keeper_name, control_generation, action, result)) in
@@ -10102,8 +10138,12 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
     | [] -> []
     | _ :: _ ->
       [Printf.sprintf "Cancelling %d in the server queue…" (List.length clear_targets)] in
-  chat_notice state ~keeper_name:(Some keeper_name) ~kind:Notice_reply
-    (String.concat "\n" (local_lines () @ cancelling @ ["Reading server queue…"]));
+  (match action with
+   | Inbox.Inspect_peers _ -> ()
+   | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Edit _
+   | Cancel_event _ | Prioritize_event _ ->
+       chat_notice state ~keeper_name:(Some keeper_name) ~kind:Notice_reply
+         (String.concat "\n" (local_lines () @ cancelling @ ["Reading server queue…"])));
   match Eio_context.get_switch_opt () with
   | Some sw -> fork_workspace_job state ~sw run
   | None -> enqueue_async mailbox (Keeper_queue_loaded (keeper_name, control_generation, action, Error "Eio switch is unavailable"))
@@ -12313,6 +12353,8 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       (match state.msg_target_keeper_name, Masc_tui_queue_inspection.parse input with
        | None, _ -> notice ~kind:Notice_failure "Select a Keeper first"
        | _, Error detail -> notice ~kind:Notice_failure detail
+       | _, Ok (Masc_tui_queue_inspection.Inspect_peers _) ->
+         assert false (* [parse] never creates a roster read. *)
        | Some keeper_name, Ok Masc_tui_queue_inspection.Clear ->
          (* The part that needs no server. A line that exists only in this
             client is withdrawn here, so it is gone even when the queue request
@@ -12351,7 +12393,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
              | Move_to_end _ | Edit _ | Cancel_event _ | Prioritize_event _) as action) ->
          let local_id = match action with
            | Masc_tui_queue_inspection.Cancel id | Move_to_end id | Edit (id, _) -> Some id
-           | Inspect | Pause | Resume | Clear | Cancel_event _ | Prioritize_event _ -> None in
+           | Inspect | Inspect_peers _ | Pause | Resume | Clear | Cancel_event _ | Prioritize_event _ -> None in
          match Option.bind local_id (fun id -> Chat_queue.find state.msg_queued ~request_id:id) with
          | Some item when item.request.keeper_name <> keeper_name ->
            notice ~kind:Notice_failure "That message belongs to another Keeper"
@@ -12370,7 +12412,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
                | Ok queue -> state.msg_queued <- queue; update_queued_history_text state request;
                    notice ~kind:Notice_reply ("Updated unsent message " ^ id))
             | Move_to_end _ -> notice ~kind:Notice_failure "Local input is already joined in submission order"
-            | Inspect | Pause | Resume | Clear | Cancel_event _ | Prioritize_event _ -> assert false)
+            | Inspect | Inspect_peers _ | Pause | Resume | Clear | Cancel_event _ | Prioritize_event _ -> assert false)
          | None -> launch_keeper_queue state ~mailbox ~keeper_name action)
   | Masc_tui_command.Run_next
     when state.workspace_identity <> Workspace_identity_match ->
@@ -13712,7 +13754,7 @@ let apply_http_dataset state = function
    and Sandbox logs have their own monotonic request generations. *)
 let revoke_detail_readings state =
   close_chat_call_reader state;
-  state.detail_reading <- None;
+  close_detail_reading state;
   state.detail_reads <- [];
   state.detail_read_authority <- ref ();
   state.keeper_board_quarantines <- Masc_tui_fetched.clear state.keeper_board_quarantines;
@@ -18504,32 +18546,40 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         release_retained_keeper_input state keeper_name;
         launch_waiting_keeper_input state ~mailbox ~keeper_name
       end
-  | Keeper_queue_loaded (keeper_name, control_generation, _, result) ->
-      Option.iter (fun generation -> settle_keeper_priority_control state keeper_name
-        ~generation ~outcome:(match result with
-          | Ok _ -> Priority_superseded | Error _ -> Priority_unconfirmed)) control_generation;
-      Option.iter (fun generation ->
-        ignore (finish_keeper_chat_control state keeper_name ~generation : bool))
-        control_generation;
-      state.keeper_queue_inflight <- List.filter ((<>) keeper_name) state.keeper_queue_inflight;
-      state.keeper_queue_readings <- List.filter ((<>) keeper_name) state.keeper_queue_readings;
-      state.keeper_queue_inspections <- List.filter
-        (fun (keeper, _) -> keeper <> keeper_name) state.keeper_queue_inspections;
-      launch_keeper_turns_load state ~mailbox;
-      let kind, lines = match result with
-        | Error detail -> Notice_failure, [detail]
-        | Ok (receipt, observation) ->
-            let lines = match observation with
-              | Ok lines -> receipt @ lines
-              | Error detail -> receipt @ ["Read unavailable: " ^ detail] in
-            Notice_reply,
-            ("Queue snapshot (refresh with /queue)" :: lines @
-             [Masc_tui_command.usage Masc_tui_command.queue_help;
-              "Events: /queue cancel-event REF INCARNATION reason · /queue priority-event REF INCARNATION immediate|normal|low";
-              "Enter queues your line in arrival order; Esc stops the current turn and pauses queue consumption."])
-      in
-      chat_notice state ~keeper_name:(Some keeper_name) ~kind (String.concat "\n" lines);
-      drain_queued_message state ~base_path ~mailbox
+  | Keeper_queue_loaded (keeper_name, control_generation, action, result) ->
+      (match action with
+       | Masc_tui_queue_inspection.Inspect_peers token ->
+           let observation = match result with
+             | Error reason -> Error reason
+             | Ok (_, observation) -> observation in
+           ignore (finish_keeper_peer_reading state ~keeper_name ~token observation)
+       | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Edit _
+       | Cancel_event _ | Prioritize_event _ ->
+           Option.iter (fun generation -> settle_keeper_priority_control state keeper_name
+             ~generation ~outcome:(match result with
+               | Ok _ -> Priority_superseded | Error _ -> Priority_unconfirmed)) control_generation;
+           Option.iter (fun generation ->
+             ignore (finish_keeper_chat_control state keeper_name ~generation : bool))
+             control_generation;
+           state.keeper_queue_inflight <- List.filter ((<>) keeper_name) state.keeper_queue_inflight;
+           state.keeper_queue_readings <- List.filter ((<>) keeper_name) state.keeper_queue_readings;
+           state.keeper_queue_inspections <- List.filter
+             (fun (keeper, _) -> keeper <> keeper_name) state.keeper_queue_inspections;
+           launch_keeper_turns_load state ~mailbox;
+           let kind, lines = match result with
+             | Error detail -> Notice_failure, [detail]
+             | Ok (receipt, observation) ->
+                 let lines = match observation with
+                   | Ok lines -> receipt @ lines
+                   | Error detail -> receipt @ ["Read unavailable: " ^ detail] in
+                 Notice_reply,
+                 ("Queue snapshot (refresh with /queue)" :: lines @
+                  [Masc_tui_command.usage Masc_tui_command.queue_help;
+                   "Events: /queue cancel-event REF INCARNATION reason · /queue priority-event REF INCARNATION immediate|normal|low";
+                   "Enter queues your line in arrival order; Esc stops the current turn and pauses queue consumption."])
+           in
+           chat_notice state ~keeper_name:(Some keeper_name) ~kind (String.concat "\n" lines);
+           drain_queued_message state ~base_path ~mailbox)
   | Lane_application_loaded (ticket,result) ->
       map_lane_addons state (fun view ->
         Masc_tui_lane_addons.finish_application_read view ticket result)
@@ -26320,7 +26370,7 @@ and is loaded on demand through keeper_skill.
        | Some (Pasted paste) when Option.is_some (current_detail_reading state) ->
            Option.iter (fun reading ->
              insert_reading_search reading
-               (fun ~width ~height ~text -> open_detail_reading state
+               (fun ~width ~height ~text -> update_detail_reading state
                  (Masc_tui_detail_reading.search_insert ~width ~height ~text reading)) paste.Masc_tui_paste.text)
              (current_detail_reading state)
        | Some (Pasted _) when state.msx_open -> ()
@@ -28273,9 +28323,9 @@ and is loaded on demand through keeper_skill.
                 let _,cols=get_terminal_size () in
                 match Masc_tui_detail_reading.search_key
                   ~width:(Masc_tui_render_overlays.detail_reading_width cols) ~height ~key:k reading with
-                | Some reading -> open_detail_reading state reading
+                | Some reading -> update_detail_reading state reading
                 | None ->
-                  if k="esc" || k="v" then state.detail_reading <- None
+                  if k="esc" || k="v" then close_detail_reading state
                   else
                   let movement = match k with
                     | "j" | "down" | "wheel-down" -> Some (Masc_tui_detail_reading.By 1)
@@ -28286,7 +28336,7 @@ and is loaded on demand through keeper_skill.
                     | "end" | "G" -> Some Masc_tui_detail_reading.Last
                     | _ -> None in
                   Option.iter (fun movement ->
-                    open_detail_reading state
+                    update_detail_reading state
                       (Masc_tui_detail_reading.move ~count ~height movement reading)) movement)
        | Some "S"
          when state.view=Board && not state.composer_focused
@@ -31556,6 +31606,13 @@ and is loaded on demand through keeper_skill.
             | Some keeper ->
                 state.detail_tab <- Detail_automation;
                 open_keeper_detail state ~mailbox:async_messages keeper)
+       | Some "K" when state.view = Keepers Keeper_list ->
+           (match selected_keeper state with
+            | None -> report_action state "error" "Select a Keeper to inspect its queued relationships"
+            | Some keeper ->
+                let token = begin_keeper_peer_reading state ~keeper_name:keeper.k_name in
+                launch_keeper_queue state ~mailbox:async_messages ~keeper_name:keeper.k_name
+                  (Masc_tui_queue_inspection.Inspect_peers token))
        | Some "v" when state.view = Keepers Keeper_detail && state.detail_tab = Detail_items ->
            cycle_item_browser state
        | Some " " when state.view = Keepers Keeper_detail && state.detail_tab = Detail_items ->

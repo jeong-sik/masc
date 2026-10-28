@@ -75,6 +75,7 @@ The command palette is `:`.
 | `v` | cycle compact / detailed / grouped |
 | `o` | cycle priority / recent / oldest / activity / name |
 | `J` | open the selected Keeper's schedules |
+| `K` | read the first page of Keeper-origin requests queued for the selected Keeper |
 | `Right / Enter` | keeper detail |
 | `c` | chat with the keeper |
 | `l` | logs |

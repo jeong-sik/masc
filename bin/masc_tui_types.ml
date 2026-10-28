@@ -8650,6 +8650,8 @@ type queue_panel_owner = {
   qo_viewport : queue_panel_viewport;
 }
 
+type resource_share_outcome = Resource_share_applied of bool | Resource_share_conflict of bool
+
 type state = {
   observation_instance : Masc_tui_observation_origin.instance;
   mutable ui_language : ui_language;

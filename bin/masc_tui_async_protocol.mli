@@ -716,7 +716,7 @@ type async_msg =
       Masc_tui_types.code_lsp_query Masc_tui_fetched.request
       * (Masc.Tui_decode.lsp_answer, string) result
   | Resource_exported of string * (string, string) result
-  | Resource_share_changed of Masc_tui_types.resource_share_request * (bool, string) result
+  | Resource_share_changed of Masc_tui_types.resource_share_request * (Masc_tui_types.resource_share_outcome, string) result
   | Resource_read of
       Masc_tui_resource_catalog.read_request * (Masc_tui_resource_catalog.reading, string) result
   | Github_identity_view_loaded of Masc_tui_types.detail_read_request * (string list, string) result

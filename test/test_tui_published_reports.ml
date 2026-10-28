@@ -382,7 +382,27 @@ let superseded_catalog () =
   check (option int) "withdrawal cannot certify count" None (count ());
   check bool "suspension preserves current rows" true (state.resources_list=Some [fresh])
 
+let share_receipt_consistency () =
+  let module Share = Masc.Published_artifact_share in
+  let operation_id = "01890e2a-4c8e-7b21-9f3c-000000000031" in
+  let sha256 = String.make 64 'a' in
+  let request : Share.request = { operation_id; expected_version = 0; requested = true;
+    expected_artifact_revision = 1; expected_artifact_sha256 = sha256 } in
+  let snapshot : Share.snapshot = { version = 1; shared = true } in
+  let receipt : Share.receipt = { request; outcome = Share.Applied snapshot; publication_matches = true } in
+  let decode current = Masc_tui_http.decode_artifact_share_response ~id ~shared:true ~operation_id
+    ~expected_version:0 ~expected_artifact_revision:1 ~expected_artifact_sha256:sha256 ~status:200
+    (`Assoc ["id", `String id; "receipt", Share.receipt_to_json receipt; "current", Share.snapshot_to_json current]) in
+  (match decode snapshot with
+   | Ok (Masc_tui_http.Artifact_share_applied true) -> ()
+   | Ok (Artifact_share_applied false | Artifact_share_conflict _) | Error _ -> fail "valid receipt refused");
+  refused (decode { version = 1; shared = false });
+  (match decode { version = 2; shared = false } with
+   | Ok (Masc_tui_http.Artifact_share_applied false) -> ()
+   | Ok (Artifact_share_applied true | Artifact_share_conflict _) | Error _ -> fail "later state refused")
+
 let () = run "published report resources" ["report reading",[
+  test_case "share receipt and current snapshot agree at equal versions" `Quick share_receipt_consistency;
   test_case "pinned revision and body integrity" `Quick exact_revision;
   test_case "HTML original admission" `Quick html_source;
   test_case "malformed inventory refused" `Quick invalid_catalog;

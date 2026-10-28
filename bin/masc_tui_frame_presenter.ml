@@ -257,7 +257,7 @@ let lines_equal_to_screen (lines : string list) (screen : string array) ~termina
   in
   loop 0 lines
 
-let present presenter ~invalidate_before ~write ~flush (frame : frame) =
+let present presenter ?(force_present = false) ~invalidate_before ~write ~flush (frame : frame) =
   if invalidate_before then invalidate presenter;
   let terminal_rows = max 1 frame.terminal_rows in
   let terminal_cols = max 1 frame.terminal_cols in
@@ -281,9 +281,10 @@ let present presenter ~invalidate_before ~write ~flush (frame : frame) =
             lines_equal_to_screen frame.lines previous.screen ~terminal_rows
         | None -> false)
   in
-  if unchanged then
+  if unchanged && not force_present then
     Unchanged
   else begin
+    let full_redraw = full_redraw || unchanged in
     let screen = screen_of_frame frame in
     let prev_screen =
       match presenter.previous with

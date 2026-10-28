@@ -133,6 +133,12 @@ type file_row = {
 (** What is known about the selected keeper's changes right now. The four
     states are the fetch helper's four, named here so the pane answers each
     without knowing the helper. *)
+type changes_authority =
+  | Changes_current
+  | Changes_workspace_unconfirmed
+  | Changes_revalidating
+  | Changes_needs_revalidation
+
 type changes =
   | Changes_absent  (** no keeper selected, or never asked *)
   | Changes_loading
@@ -145,6 +151,8 @@ type changes =
       calls : int;  (** tool calls the window held, changes or not *)
       over_budget : int;  (** changes the log kept no text for *)
       malformed : int;
+      authority : changes_authority;
+        (** Whether these retained rows can open a file in the current workspace. *)
       refresh_failed : string option;
         (** Why the refresh after this answer failed: the files are the last
             good read, and the status row says so above them. *)
@@ -280,6 +288,18 @@ type rendering = {
 val reconcile_context_cursor : previous_rows:int -> current_rows:int -> int option -> int option
 (** A context entering or leaving shifts Activity targets. Keep keyboard
     focus in the pane and move it to its stable tab header. *)
+
+(** Input authority produced by one draw. The source is the original data
+    used by that draw; it is not a lookup into the next asynchronous read. *)
+type 'source frame = {
+  frame_columns : int;
+  frame_targets : row_target list;
+  frame_scroll_max : int;
+  frame_source : 'source option;
+}
+
+val empty_frame : 'source frame
+val target_at : 'source frame -> line:int -> row_target
 
 val next_target_row : targets:row_target array -> row:int -> step:int -> int option
 (** The row a keyboard cursor rests on next: from [row], stepping [step]

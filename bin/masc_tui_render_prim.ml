@@ -89,13 +89,9 @@ let runtime_assignment_targets = Masc_tui_types.runtime_assignment_targets
 let acting_pane_reserved_cols = ref 0
 
 
-(* What each drawn pane row acts on, and how far the pane can scroll, as of
-   the last frame. A press or a wheel notch between frames is answered from
-   what was on screen, which is these, not from what the next frame would
-   draw. Empty when no pane was drawn, so a stale row cannot answer. *)
-let acting_pane_row_targets : Masc_tui_acting_pane.row_target array ref = ref [||]
-
-let acting_pane_scroll_max = ref 0
+(* A synchronous draw constructs one candidate. Only the main loop can
+   publish it after the terminal accepts its frame. *)
+let frame_acting_pane = ref Masc_tui_acting_pane.empty_frame
 
 (* Context insertion changes the screen row for every Activity target below
    it. Keep focus inside the pane on its stable header when that happens. *)
@@ -1062,12 +1058,13 @@ let file_change_evidence_label = function
 (* The selected keeper's file changes as the pane's Changes tab draws
    them: the fetch helper's four states named one by one, each change
    read to the address, the kind, whether it landed, and its range. *)
-let acting_pane_changes (state : state) : Masc_tui_acting_pane.changes =
+let acting_pane_changes_and_source (state : state) =
   let module Pane = Masc_tui_acting_pane in
   match selected_keeper state with
-  | None -> Pane.Changes_absent
+  | None -> Pane.Changes_absent, None
   | Some (keeper : keeper) -> (
-      let ready_changes (snapshot : Masc.Tui_decode.file_change_snapshot) ~refresh_failed =
+      let ready_changes (reading : acting_pane_read) ~refresh_failed =
+        let snapshot = reading.apr_snapshot in
         let file (change : Masc.Tui_decode.file_change) =
           { Pane.file_path = change_row_address change
           ; file_kind =
@@ -1081,7 +1078,7 @@ let acting_pane_changes (state : state) : Masc_tui_acting_pane.changes =
           ; file_where = file_change_evidence_label change.fc_line_evidence
           }
         in
-        Pane.Changes_ready
+        let changes = Pane.Changes_ready
           { keeper = snapshot.fcs_keeper
           ; files = List.map file snapshot.fcs_changes
           ; fetched_at =
@@ -1093,22 +1090,36 @@ let acting_pane_changes (state : state) : Masc_tui_acting_pane.changes =
           ; calls = snapshot.fcs_calls_in_window
           ; over_budget = snapshot.fcs_over_budget
           ; malformed = snapshot.fcs_malformed
+          ; authority =
+              (if not (server_authority_ready state) then Pane.Changes_workspace_unconfirmed
+               else if same_acting_pane_scope reading.apr_scope
+                   (state.workspace_authority, state.workspace_read_authority)
+               then Pane.Changes_current
+               else if Masc_tui_fetched.in_flight state.acting_pane_changes
+               then Pane.Changes_revalidating
+               else Pane.Changes_needs_revalidation)
           ; refresh_failed
           }
+        in
+        let source =
+          { aps_keeper = keeper.k_name
+          ; aps_read = reading
+          }
+        in
+        changes, Some source
       in
       match
-        Masc_tui_fetched.view_for ~equal:String.equal state.acting_pane_changes
-          ~key:keeper.k_name
+        Masc_tui_fetched.view_for ~equal:same_acting_pane_keeper state.acting_pane_changes
+          ~key:{apk_keeper=keeper.k_name; apk_scope=state.workspace_authority, state.workspace_read_authority}
       with
-      | Masc_tui_fetched.Absent -> Pane.Changes_absent
-      | Masc_tui_fetched.Loading -> Pane.Changes_loading
-      | Masc_tui_fetched.Failed detail -> Pane.Changes_failed detail
+      | Masc_tui_fetched.Absent -> Pane.Changes_absent, None
+      | Masc_tui_fetched.Loading -> Pane.Changes_loading, None
+      | Masc_tui_fetched.Failed detail -> Pane.Changes_failed detail, None
       | Masc_tui_fetched.Ready snapshot -> ready_changes snapshot ~refresh_failed:None
       (* The files already read stay listed; the status row says the refresh
          after them failed. *)
       | Masc_tui_fetched.Stale (snapshot, detail) ->
           ready_changes snapshot ~refresh_failed:(Some detail))
-
 
 let recent_chunk_projection (state : state) =
   let trace_reading = Tui_decode.keeper_trace_projection state.keepers in
@@ -1117,7 +1128,7 @@ let recent_chunk_projection (state : state) =
     ~previous:state.acting_chunk_projection ~traces state.acting
 
 
-let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
+let acting_pane_input (state : state) =
   let module Pane = Masc_tui_acting_pane in
   let selected = selected_keeper state in
   let pane_keeper (keeper : keeper) : Pane.keeper =
@@ -1192,7 +1203,12 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
       | Lanes | Clients | Board | Approvals | Planning | Schedules | Verification
       | Harness | Fusion | Repositories | Code | Changes | Connectors | Runtime
       | Config | Resources | Tools | System_logs), (Some _ | None) -> None in
-  { Pane.now = Unix.gettimeofday ()
+  let changes, source =
+    match state.acting_pane_tab with
+    | Pane.Tab_changes -> acting_pane_changes_and_source state
+    | Pane.Tab_fleet -> Pane.Changes_absent, None
+  in
+  ({ Pane.now = Unix.gettimeofday ()
   ; tab = state.acting_pane_tab
   ; scope =
       (match state.view with
@@ -1227,10 +1243,10 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
               })
         (Masc_tui_approvals_model.approval_items state)
   ; chunks
-  ; changes = acting_pane_changes state
+  ; changes
   ; call_order = state.acting_pane_call_order
   ; expanded = state.acting_pane_expanded
-  }
+  }, source)
 
 
 (* A pane tone is a reading; the theme answers with the colour. *)
@@ -1283,16 +1299,22 @@ let add_rows_beside_acting_pane (state : state) framed ~cols ~pane_rows lines =
          Buffer.add_string left (Message_layout.fit_width line cols);
          Buffer.add_char left '\n')
       lines;
+    let input, source = acting_pane_input state in
     let rendering =
       Masc_tui_acting_pane.lines ~rows:pane_rows ~cols:pane_cols
-        ~scroll:state.acting_pane_scroll (acting_pane_input state)
+        ~scroll:state.acting_pane_scroll input
     in
     state.acting_pane_cursor <- Masc_tui_acting_pane.reconcile_context_cursor
       ~previous_rows:!acting_pane_context_rows
       ~current_rows:rendering.Masc_tui_acting_pane.context_rows state.acting_pane_cursor;
     acting_pane_context_rows := rendering.Masc_tui_acting_pane.context_rows;
-    acting_pane_row_targets := Array.of_list rendering.Masc_tui_acting_pane.targets;
-    acting_pane_scroll_max := rendering.Masc_tui_acting_pane.scroll_max;
+    frame_acting_pane :=
+      { Masc_tui_acting_pane.frame_columns = pane_cols
+      ; frame_targets = rendering.Masc_tui_acting_pane.targets
+      ; frame_scroll_max = rendering.Masc_tui_acting_pane.scroll_max
+      ; frame_source = Some { aps_scope = state.workspace_authority, state.workspace_read_authority
+                      ; aps_file_source = source }
+      };
     let ground = Theme.side_pane_background () in
     let right = Buffer.create 4096 in
     let cursor = Option.value state.acting_pane_cursor ~default:(-1) in
@@ -1305,8 +1327,6 @@ let add_rows_beside_acting_pane (state : state) framed ~cols ~pane_rows lines =
     write_two_panes framed ~left_cols:cols ~left ~right
   end
   else begin
-    acting_pane_row_targets := [||];
-    acting_pane_scroll_max := 0;
     acting_pane_context_rows := 0;
     List.iter
       (fun line ->

@@ -78,9 +78,10 @@ type diff_surface =
 
 val acting_pane_reserved_cols : int ref
 
-val acting_pane_row_targets : Masc_tui_acting_pane.row_target array ref
-
-val acting_pane_scroll_max : int ref
+val frame_acting_pane :
+  Masc_tui_types.acting_pane_source Masc_tui_acting_pane.frame ref
+(** The candidate for the synchronous draw. Input must use the copy accepted
+    by the terminal, not this temporary construction cell. *)
 
 val frame_panes : Masc_tui_pane_selection.layout ref
 (** Where each pane of the frame being drawn sits, set by the surface ends
@@ -182,9 +183,6 @@ val change_row_address : Masc.Tui_decode.file_change -> string
 
 val file_change_evidence_label :
   Masc.Keeper_file_change_evidence.t option -> string option
-
-val acting_pane_changes :
-  Masc_tui_types.state -> Masc_tui_acting_pane.changes
 
 val recent_chunk_projection :
   Masc_tui_types.state -> Masc_tui_acting.chunk_projection

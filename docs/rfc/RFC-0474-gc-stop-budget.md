@@ -309,6 +309,34 @@ TUI 로그(`~/.masc/logs/masc-tui-*.log`)는 시간 초과가 난 요청의 경�
 - 실제 데이터: 옛 코드와 새 코드를 같은 데이터에 번갈아 3번씩 돌렸다(load 34~55). 최소 7.65초에서 2.55초로 줄었다. 중앙값(여섯 번 측정)은 약 9.2초에서 약 4.3초다. 시각 필드(`generated_at`, `stagnation_seconds`, `updated_at`)를 빼면 두 JSON 이 같다.
 - 운영: 배포 뒤 `by_name` 에서 `cached_goals_tree_payload` 의 실행 시간과 30초 예산에 걸린 수를 본다. 서버가 내주는 tree 의 `generated_at` 이 TTL(60초) 안팎으로 갱신되는지 본다.
 
+#### L4f — 승인 기록은 한 번만 읽는다
+
+L4e 뒤로도 trust snapshot 은 Keeper 하나에 0.2~1.6초였다. snapshot 이 읽는 것을 하나씩 같은 데이터로 쟀다(2026-10-28 13:02Z, load 29~41). Keeper 40명 합으로 snapshot 이 6.85초였고, 그중 6.73초가 `Keeper_approval.Audit.read_recent ~keeper_name ~n:8` 이었다. 나머지(decision log·tool call·receipt·transition·대기 승인·blocker)는 다 합쳐 0.1초 아래였다.
+
+- 승인 audit 저장소는 하루 파일 24개, 278,731줄, 131 MB 다.
+- `read_recent` 는 최신 파일부터 거꾸로 모든 줄을 해석하며, 그 Keeper 의 줄 n개를 모을 때까지 읽는다.
+- 오늘 기록이 없는 Keeper(`gayo-yoga-leader`, `hole-finder`, `rust-hwp-guy` 등)는 하루 6~10 MB 인 지난 파일을 여러 개 읽는다. 1~1.6초는 여기서 나온다.
+- trust snapshot 은 goals tree, 운영자 trust 화면, goal detail 이 쓴다. 이 중 운영자 trust 계산(`compact_keeper_runtime_trust_json`)은 L4d 배포 뒤 40분 동안 background lane 실행 시간의 22.6%(884초)였다.
+
+설계:
+
+1. `Audit.Recent_index` 가 저장소의 줄을 한 번씩만 읽는다. 읽기마다 먼저 지난 읽기 뒤에 붙은 바이트만큼 앞으로 나아간다(`Dated_jsonl.fold_file_appended_entries_result` 의 append cursor). 그래서 답은 그 읽기 시점의 저장소 내용이다. 파일마다 `lstat` 결과를 기억해, 달라지지 않은 파일은 열지 않는다.
+2. Keeper 마다, 그리고 저장소 전체로, 가장 새 줄 `read_recent_max_rows`(128, 지금 호출하는 곳 가운데 가장 큰 n)개를 위치와 함께 들고 있다. n 이 그보다 크면 거절한다.
+3. 거꾸로 읽기가 거절하던 것을 위치로 기억한다. 깨진 JSON 줄과 Keeper 를 정확히 하나 이름 붙이지 않은 줄은 각각 가장 새 위치 하나다. 이번 읽기에서 못 읽은 월 목록이나 하루 파일도 그 위치로 기억한다. 읽기는 그 위치가 n번째로 고른 줄보다 새로우면(또는 n개를 못 채우면) 거절한다. 거꾸로 읽기가 그 줄에 닿는 경우와 정확히 같다.
+4. 하루 파일이 사라지거나 바뀌어 다시 쓰이면 처음부터 다시 만든다. 128개를 넘어 버린 줄이 무엇이었는지 알 수 없기 때문이다.
+5. `Dated_jsonl` 은 거꾸로 읽기가 쓰던 월·하루 파일 목록(같은 검증)과 하루 파일 이름의 순서를 공개한다.
+
+검증:
+
+- 단위(`test_approval_audit_recent_index`): 시험 안에 옛 거꾸로 읽기를 그대로 두고 기준으로 삼는다. 한 저장소를 다음 순서로 바꾸며 단계마다 Keeper 다섯(없는 Keeper, 범위 없는 읽기 포함)과 n 다섯을 모두 맞댄다.
+  - 최신 파일에 붙이기, 옛 파일에 늦게 붙이기, 새 하루 파일
+  - 가장 오래된 파일 지우기, 파일 다시 쓰기
+  - 깨진 줄, Keeper 이름이 없는 줄
+  
+  mutant 다섯(거절 무시, 크기 무시, 위치 무시, 삭제 무시, Keeper 이름 없는 줄 무시)은 모두 실패한다.
+- 실제 데이터: 옛 코드와 새 코드를 번갈아 3번씩 돌렸다(load 55~72). Keeper 40명의 snapshot 합은 7.4~19.3초에서, index 가 있는 상태에서 8.9~364 ms 가 됐다. index 를 처음 만드는 데는 프로세스마다 한 번, 2.3~6.1초가 든다.
+- 운영: 배포 뒤 `by_name` 에서 `compact_keeper_runtime_trust_json`·`compute_execution_trust_json`·`cached_goals_tree_payload` 의 실행 합과 `Keeper_approval__Audit.read_recent` 의 실행 시간을 본다.
+
 ## 5. 순서
 
 1. L1 — 코드가 작고, A/B 로 효과를 이미 봤다.
@@ -320,6 +348,7 @@ TUI 로그(`~/.masc/logs/masc-tui-*.log`)는 시간 초과가 난 요청의 경�
 7. L4c — 풀 job 마다 이름을 붙여 lane·이름별로 잰다. 그 순위로 다음 층을 고른다.
 8. L4d — TUI 로그에서 시간 초과가 난 경로를 세고, 원인으로 확인된 goals tree 의 요청 경로 계산부터 없앤다.
 9. L4e — goals tree 계산 자체를 줄인다. 시간의 97%가 쓰지 않는 Keeper 의 trust snapshot 이었다.
+10. L4f — trust snapshot 시간의 98%였던 승인 기록 읽기를 한 번 읽는 index 로 바꾼다.
 
 ## 6. 하지 않는 것
 

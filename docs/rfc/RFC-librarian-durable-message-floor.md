@@ -57,7 +57,7 @@ worker 의 frame 거절은 이 조건에 맞는다. 어느 슬롯이 실행하�
 
 durable pass 가 첫 턴 하나(`To_first_cut_point`)의 범위에서 typed 크기 거절로 끝나면, 다음 pass 는 그 범위를 바닥 단계로 읽는다.
 
-- typed 크기 거절은 `Input_refused Request_body_refused`(worker frame), `Input_refused Input_capacity`, `Input_refused Context_overflow` 다. 앞의 것은 슬롯과 무관하다. 뒤의 둘은 host Exact 가 모든 슬롯을 거친 소진 증거(`exhausted_input_refusals`)가 있을 때만 크기 거절로 본다.
+- typed 크기 거절은 `Input_refused Request_body_refused`(worker frame), `Input_refused Input_capacity`, `Input_refused Context_overflow` 다. 앞의 것은 두 곳에서 올 수 있다. worker 가 host 에 닿기 전에 낸 frame 거절은 host 기록이 없고 슬롯과 무관하다(`Lane_addon_exact.refused_before_host`, #46408). provider 가 본문을 거절한 것은 host 기록이 있다. host 기록이 있는 거절(`Request_body_refused` 포함)과 `Input_capacity`, `Context_overflow` 는 host Exact 가 모든 슬롯을 거친 소진 증거(실행 영수증의 `Keeper_exact_walk_failure`)가 있을 때만 크기 거절로 본다. admission 의 `check_size` 가 같은 증거를 요구한다.
 - `Invalid_request`, `Invalid_output`, `Output_limit_reached`, `Outcome_unknown` 같은 다른 거절은 지금처럼 바닥으로 가지 않는다.
 - durable `refusal_report` 는 위 조건일 때만 `message_descent=Smaller_input_may_help` 와 `provider_input_refusals` 를 싣는다.
 
@@ -97,14 +97,14 @@ durable pass 가 첫 턴 하나(`To_first_cut_point`)의 범위에서 typed 크�
 - **큰 메시지 내용을 잘라 보내기.** 고르지 않는다. 문턱으로 내용을 줄이는 안이고, 잘린 것이 기록되지 않는다. lifecycle RFC 는 판정 근거를 문턱이 아니라 typed 거절로 정했다.
 - **`max_reply_bytes` 올리기.** 고르지 않는다. 벽이 옮겨갈 뿐이다. worker 메모리 상한(128 MiB)과 목록 응답 크기도 함께 커진다.
 - **durable 경로에서 Runtime 바닥을 직접 부르기.** 고르지 않는다. 모델 호출 전에 original 을 붙잡는 durable 경로의 규칙을 벗어난다. crash 뒤에 같은 메시지를 다시 부를 수 있다.
-- **메시지 하나가 아니라 frame 에 맞게 여러 메시지를 묶어 단계로 보내기.** 열어 둔다(6절). 모델 호출이 줄지만, 묶음 경계를 정하는 규칙이 하나 더 생긴다.
+- **메시지 하나가 아니라 frame 에 맞게 여러 메시지를 묶어 단계로 보내기.** 고르지 않는다(2026-10-28 운영자 결정, 6절). 모델 호출이 줄지만, 묶음 경계를 정하는 규칙이 하나 더 생긴다.
 
 ## 5. 층
 
 | 층 | 내용 | 시험 |
 |---|---|---|
 | L1 | 이 RFC | — |
-| L2 | durable `refusal_report` 가 3.1 의 크기 거절에만 `Smaller_input_may_help`·`provider_input_refusals` 를 싣는다. 바닥은 아직 없다 | 크기 거절과 다른 거절의 보고 차이 |
+| L2 | durable `refusal_report` 가 3.1 의 크기 거절에만 `Smaller_input_may_help`·`provider_input_refusals` 를 싣는다. host 기록이 없는 frame 거절은 final 만으로, 기록이 있는 거절은 실행 영수증의 소진 증거로 판정한다. 바닥은 아직 없다 | 크기 거절과 다른 거절의 보고 차이, 영수증 증거가 없는 `Input_capacity` 는 근거 없음 |
 | L3 | 바닥 단계 request kind, 앞 단계 digest 연결, inventory·복구 | 단계 사슬 crash·재개, 같은 단계 재호출 없음 |
 | L4 | program 게시, 구멍 영수증, source lock, settle | 실제 worker 와 실제 4 MiB frame 으로 5 MB 메시지 하나가 든 턴: 구멍 하나와 나머지 메시지의 Memory, 위치 이동. `specs/bug-models/LibrarianRead.tla` 의 `NoAtomPassedUnread` 와 맞는지 |
 | L5 | bench `5:5` 측정, RFC status 갱신 | — |
@@ -113,10 +113,10 @@ durable pass 가 첫 턴 하나(`To_first_cut_point`)의 범위에서 typed 크�
 
 ## 6. 열린 질문
 
-- **단계 크기.** Runtime 바닥처럼 메시지 하나인가, frame 에 맞게 묶은 창인가. 메시지 하나는 lifecycle RFC 와 같고 단순하지만 호출 수가 메시지 수다.
+- **단계 크기.** 정했다(2026-10-28 운영자): 메시지 하나씩. lifecycle RFC 와 같다. 호출 수가 메시지 수이지만 이 경로는 한 턴의 글이 frame 을 넘을 때만 탄다.
 - **absorb gate.** durable 커밋은 제안마다 absorb gate 를 거친다(`Keeper_librarian_absorb_gate`). Runtime 바닥 단계가 gate 를 어떻게 거치는지 코드로 확인하고 같게 한다.
 - **공식 턴.** 공식 턴도 같은 바닥을 쓴다(`official_message_floor` 와 같은 범위). 공식 턴의 출처 확인은 trace 행 digest 로 한다.
-- **우선순위.** 1.2절대로 드문 경우다. #46408 뒤 이 경우의 증상은 "그 턴 뒤로 Memory 가 멈추고 매 pass 거절이 기록된다"이다. 이 RFC 를 #46397 배포 직후에 할지, 실제로 생긴 뒤에 할지는 운영자가 정한다.
+- **우선순위.** 1.2절대로 드문 경우다. #46408 뒤 이 경우의 증상은 "그 턴 뒤로 Memory 가 멈추고 매 pass 거절이 기록된다"이다. 정했다(2026-10-28 운영자): #46408 병합 뒤 바로 한다. #46408 은 막음 1까지만 병합하고, 이 RFC 의 스택이 그 위에 쌓인다.
 
 ## 7. 확신도
 

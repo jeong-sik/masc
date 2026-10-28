@@ -211,13 +211,17 @@ let unavailable_boundaries () =
      Effect,P.Isolated_job isolated,None]
 
 let output value = value |> Result.map_error O.error_to_string |> require
-let pipe_launch ?input ?after_chunk ~sw ~env fixture permit =
+let pipe_launch ?input ?after_chunk ?after_prefix ~sw ~env fixture permit =
   let source,writer=Eio_unix.pipe sw in
   let owner=Eio_unix.Fd.use_exn "original stdout" (Eio_unix.Resource.fd writer)
     (fun fd -> start ?input ~output:fd ~sw ~env fixture permit) in
   Eio.Flow.close writer;
-  let capture=match after_chunk with None -> O.start | Some after_chunk ->
-    O.For_testing.start ~after_chunk ~on_metadata:(fun _ _ -> ()) in
+  let capture=match after_chunk,after_prefix with
+    | None,None -> O.start
+    | (Some _,(Some _ | None)) | None,Some _ ->
+      let after_chunk=match after_chunk with Some hook -> hook | None -> (fun () -> ()) in
+      let after_prefix=match after_prefix with Some hook -> hook | None -> (fun () -> ()) in
+      O.For_testing.start ~after_chunk ~after_prefix ~on_metadata:(fun _ _ -> ()) in
   let captured=capture ~sw ~fs:env#fs ~owner ~stream:P.Stdout ~source |> output in
   owner,captured
 let all_output captured (seal : O.seal) =
@@ -267,7 +271,7 @@ let output_metadata_waits_only_for_its_original_owner = fixture (fun ~env ~sw:_ 
     let entered,signal=Eio.Promise.create () and resume,release=Eio.Promise.create () in
     let unblock ()=if Eio.Promise.peek resume=None then Eio.Promise.resolve release () in
     Fun.protect ~finally:unblock (fun () ->
-      let captured=O.For_testing.start ~sw ~fs:env#fs ~owner ~stream:P.Stdout ~source:stdout
+      let captured=O.For_testing.start ~after_prefix:(fun () -> ()) ~sw ~fs:env#fs ~owner ~stream:P.Stdout ~source:stdout
         ~after_chunk:(fun () -> ()) ~on_metadata:(fun operation stage ->
           match operation,stage with
           | O.For_testing.Publish "stdout.seal.json",O.For_testing.Acquired ->
@@ -278,7 +282,7 @@ let output_metadata_waits_only_for_its_original_owner = fixture (fun ~env ~sw:_ 
       let waiting,arrived=Eio.Promise.create () in
       (match Eio.Switch.run (fun waiter_sw ->
         Eio.Fiber.fork ~sw:waiter_sw (fun () ->
-          ignore (O.For_testing.start ~sw:waiter_sw ~fs:env#fs ~owner ~stream:P.Stderr ~source:stderr
+          ignore (O.For_testing.start ~after_prefix:(fun () -> ()) ~sw:waiter_sw ~fs:env#fs ~owner ~stream:P.Stderr ~source:stderr
             ~after_chunk:(fun () -> ()) ~on_metadata:(fun operation stage ->
               match operation,stage with
               | O.For_testing.Open_recovery,O.For_testing.Waiting -> Eio.Promise.resolve arrived ()
@@ -290,7 +294,7 @@ let output_metadata_waits_only_for_its_original_owner = fixture (fun ~env ~sw:_ 
       let waiting,arrived=Eio.Promise.create () and errors,finished=Eio.Promise.create () in
       let acquired=ref false in
       Eio.Fiber.fork ~sw (fun () ->
-        let errors=O.For_testing.start ~sw ~fs:env#fs ~owner ~stream:P.Stderr ~source:stderr
+        let errors=O.For_testing.start ~after_prefix:(fun () -> ()) ~sw ~fs:env#fs ~owner ~stream:P.Stderr ~source:stderr
           ~after_chunk:(fun () -> ()) ~on_metadata:(fun operation stage ->
             match operation,stage with
             | O.For_testing.Open_recovery,O.For_testing.Waiting -> Eio.Promise.resolve arrived ()
@@ -339,6 +343,152 @@ let output_observer_cancel_preserves_capture_and_child = fixture (fun ~env ~sw:_
       exit 0 (L.await_quiescent owner |> get);
       Alcotest.(check string) "cancelled observer lost neither original capture nor later bytes"
         ("prefix" ^ bytes) (all_output captured seal))))
+
+(* The real child writes the initial prefix and then waits for its original
+   stdin. The capture hook pauses after pwrite, before publishing that extent. *)
+let with_growing_capture ~after_next_chunk f = fixture (fun ~env ~sw:_ ~store fixture ->
+  let input,writer=Unix.pipe ~cloexec:true () in
+  let writer_open=ref true in
+  Fun.protect ~finally:(fun () -> Unix.close input;if !writer_open then Unix.close writer) (fun () ->
+    Eio.Switch.run (fun sw ->
+      let entered,signal=Eio.Promise.create () and resume,release=Eio.Promise.create () in
+      let initial=ref true in
+      let published,signal_published=Eio.Promise.create () in
+      let published_once=Atomic.make false in
+      let unblock ()=if Eio.Promise.peek resume=None then Eio.Promise.resolve release () in
+      let binding,permit=prepare store fixture "05" "printf prefix; exec /bin/cat" in
+      let owner,captured=pipe_launch ~input ~sw ~env fixture permit
+        ~after_prefix:(fun () -> if Atomic.compare_and_set published_once false true then Eio.Promise.resolve signal_published ())
+        ~after_chunk:(fun () ->
+        if !initial then (initial:=false;Eio.Promise.resolve signal ();Eio.Promise.await resume)
+        else after_next_chunk ()) in
+      Fun.protect ~finally:unblock (fun () ->
+        Eio.Promise.await entered;
+        Alcotest.(check string) "real pwrite precedes the published prefix" "prefix"
+          (read (leaf fixture binding "stdout.bin"));
+        unblock ();
+        Eio.Promise.await published;
+        check "captured original is still growing, without EOF or a seal"
+          (O.extent captured=Ok (P.Growing 6L));
+        let close_input ()=if !writer_open then (Unix.close writer;writer_open:=false) in
+        f ~env ~sw ~store fixture ~binding ~owner ~captured ~writer ~close_input))))
+
+type live_read_change = Missing_claim | Rebound_claim | Replaced_spool
+
+let is_original_registry_refusal : O.error -> bool = function
+  | O.Registry_error _ -> true
+  | Invalid_storage | Storage_unavailable | Source_protocol_error | Offset_unavailable
+  | Invalid_range | Interrupted | Capture_failed | Codec_error _ | Publication_failed _
+  | Recovery_failed _ -> false
+
+let growing_range_read_revalidates_original when_changed change =
+  with_growing_capture ~after_next_chunk:(fun () -> ())
+    (fun ~env ~sw ~store fixture ~binding ~owner ~captured ~writer:_ ~close_input ->
+      let claim=Filename.concat fixture.registry_path (P.Id.to_string binding.P.operation_id ^ ".claim.json") in
+      let spool=leaf fixture binding "stdout.bin" in
+      let saved_claim=claim ^ ".evidence" and saved_spool=spool ^ ".evidence" in
+      let claim_bytes=read claim in
+      let changed=ref false in
+      let mutate () =
+        changed:=true;
+        match change with
+        | Missing_claim -> Unix.rename claim saved_claim
+        | Rebound_claim ->
+          let fields=match Yojson.Safe.from_string claim_bytes with
+            | `Assoc fields -> fields
+            | _ -> Alcotest.fail "original claim object missing" in
+          let json=`Assoc (List.map (fun (name,value) ->
+            name,(if name="launch_id" then `String (P.Id.to_string (id "09")) else value)) fields) in
+          Out_channel.with_open_bin claim (fun channel -> output_string channel (Yojson.Safe.to_string json));
+          let rebound=R.load store ~binding |> registry in
+          check "replacement claim remains valid to a fresh binding-only load" (R.launch_state rebound=R.Requested (id "09"))
+        | Replaced_spool ->
+          Unix.rename spool saved_spool;
+          Out_channel.with_open_bin spool (fun channel -> output_string channel "forged");Unix.chmod spool 0o600;
+          check "detached original still has one link" ((Unix.lstat saved_spool).st_nlink=1)
+      in
+      let restore () = if !changed then (
+        changed:=false;
+        match change with
+        | Missing_claim -> Unix.rename saved_claim claim
+        | Rebound_claim -> Out_channel.with_open_bin claim (fun channel -> output_string channel claim_bytes)
+        | Replaced_spool -> Unix.unlink spool;Unix.rename saved_spool spool) in
+      Fun.protect ~finally:restore (fun () ->
+        let chunk=match when_changed with
+          | `Before -> mutate ();O.read captured ~offset:0L ~max_bytes:6
+          | `After -> O.For_testing.read captured ~offset:0L ~max_bytes:6 ~after_read:mutate in
+        (match chunk with
+         | Error error ->
+           let refused=match change with
+             | Missing_claim | Rebound_claim -> is_original_registry_refusal error
+             | Replaced_spool -> error=O.Invalid_storage in
+           check ("read returns its typed source/attachment refusal: " ^ O.error_to_string error) refused
+         | Ok _ -> Alcotest.fail "captured read returned bytes through changed original authority");
+        check "refused read neither seals nor poisons the growing capture" (O.extent captured=Ok (P.Growing 6L));
+        Alcotest.(check string) "read refusal preserves original held-file evidence" "prefix"
+          (read (if change=Replaced_spool then saved_spool else spool));
+        let _,next=prepare store fixture "07" "exit 9" in
+        exit 9 (Eio.Switch.run (fun next_sw -> start ~sw:next_sw ~env fixture next |> L.await_quiescent |> get));
+        restore ());
+      let recovered=O.read captured ~offset:0L ~max_bytes:6 |> output in
+      Alcotest.(check string) "restored exact source still reads the original prefix" "prefix" recovered.data;
+      check "captured prefix never grants full reopened seal authority" (O.revalidate_sealed captured=Error O.Invalid_storage);
+      close_input ();
+      let seal=O.await_sealed captured |> output in
+      exit 0 (L.await_quiescent owner |> get);
+      check "even a captured cached seal does not grant full reopened validation" (O.revalidate_sealed captured=Error O.Invalid_storage);
+      Alcotest.(check string) "restored original seals without recapture" "prefix" (all_output captured seal))
+
+type captured_read_observer = Append_ahead_of_extent | Cancel_read_observer | Capture_fails_during_read
+
+let growing_range_read_observer_keeps_original_capture mode () =
+  let appended,signal_append=Eio.Promise.create () and resume,release=Eio.Promise.create () in
+  let unblock ()=if Eio.Promise.peek resume=None then Eio.Promise.resolve release () in
+  let appended_once=Atomic.make false in
+  with_growing_capture ~after_next_chunk:(fun () ->
+    if Atomic.compare_and_set appended_once false true then (
+      Eio.Promise.resolve signal_append ();Eio.Promise.await resume))
+    (fun ~env:_ ~sw:_ ~store:_ fixture ~binding ~owner ~captured ~writer ~close_input ->
+      Fun.protect ~finally:unblock (fun () ->
+        (match mode with
+         | Append_ahead_of_extent -> ()
+         | Cancel_read_observer ->
+           let entered,signal=Eio.Promise.create () in
+           let cancelled=ref false in
+           Eio.Fiber.first
+             (fun () ->
+               match O.For_testing.read captured ~offset:0L ~max_bytes:6 ~after_read:(fun () ->
+                 Eio.Promise.resolve signal ();Eio.Fiber.await_cancel ()) with
+               | Ok _ | Error _ -> Alcotest.fail "cancelled read observer unexpectedly returned"
+               | exception (Eio.Cancel.Cancelled _ as error) -> cancelled:=true;raise error)
+             (fun () -> Eio.Promise.await entered);
+           check "read observer receives cancellation" !cancelled
+         | Capture_fails_during_read ->
+           let manifest=leaf fixture binding "stdout.seal.json" in
+           Out_channel.with_open_bin manifest (fun channel -> output_string channel "conflicting seal");
+           Unix.chmod manifest 0o400;
+           let result=O.For_testing.read captured ~offset:0L ~max_bytes:6 ~after_read:(fun () ->
+             close_input ();
+             check "real EOF publication failure remains observable" (Result.is_error (O.await_sealed captured))) in
+           check "post-read unavailable capture never returns earlier bytes" (Result.is_error result));
+        match mode with
+        | Capture_fails_during_read -> exit 0 (L.await_quiescent owner |> get)
+        | Append_ahead_of_extent | Cancel_read_observer ->
+          let bytes="-appended" in
+          let sent=Eio_unix.run_in_systhread (fun () -> Unix.write_substring writer bytes 0 (String.length bytes)) in
+          check "original child accepts subsequent input" (sent=String.length bytes);
+          Eio.Promise.await appended;
+          let prefix=O.read captured ~offset:0L ~max_bytes:max_int |> output in
+          check "write ahead of extent is accepted as the previous growing prefix"
+            (prefix.extent=P.Growing 6L && prefix.data="prefix");
+          Alcotest.(check string) "actual spool contains the unadvertised append" ("prefix" ^ bytes)
+            (read (leaf fixture binding "stdout.bin"));
+          unblock ();
+          close_input ();
+          let seal=O.await_sealed captured |> output in
+          exit 0 (L.await_quiescent owner |> get);
+          Alcotest.(check string) "read observer does not cancel or replay the original capture"
+            ("prefix" ^ bytes) (all_output captured seal))) ()
 
 let failed_seal_is_not_completion_and_does_not_block_other_job = fixture (fun ~env ~sw:_ ~store fixture ->
   Eio.Switch.run (fun sw ->
@@ -418,7 +568,7 @@ let output_owner_teardown_finishes_entered_metadata = fixture (fun ~env ~sw ~sto
         let owner=Eio_unix.Fd.use_exn "original stdout" (Eio_unix.Resource.fd writer)
           (fun fd -> start ~output:fd ~sw:job_sw ~env fixture permit) in
         Eio.Flow.close writer;
-        let captured=O.For_testing.start ~sw:job_sw ~fs:env#fs ~owner ~stream:P.Stdout ~source
+        let captured=O.For_testing.start ~after_prefix:(fun () -> ()) ~sw:job_sw ~fs:env#fs ~owner ~stream:P.Stdout ~source
           ~after_chunk:(fun () -> ()) ~on_metadata:(fun operation stage ->
             match operation,stage with
             | O.For_testing.Publish "stdout.seal.json",O.For_testing.Acquired ->
@@ -1878,6 +2028,15 @@ let () =
       "complete binary output is durably sealed and not overwritten",complete_binary_output_is_durably_sealed;
       "output metadata queues by actual owner and survives waiter cancellation",output_metadata_waits_only_for_its_original_owner;
       "output observer cancellation preserves later original bytes",output_observer_cancel_preserves_capture_and_child;
+      "growing read rejects missing claim before read",growing_range_read_revalidates_original `Before Missing_claim;
+      "growing read rejects missing claim after read",growing_range_read_revalidates_original `After Missing_claim;
+      "growing read rejects rebound known launch before read",growing_range_read_revalidates_original `Before Rebound_claim;
+      "growing read rejects rebound known launch after read",growing_range_read_revalidates_original `After Rebound_claim;
+      "growing read rejects canonical spool replacement before read",growing_range_read_revalidates_original `Before Replaced_spool;
+      "growing read rejects canonical spool replacement after read",growing_range_read_revalidates_original `After Replaced_spool;
+      "growing read accepts an append ahead of its extent",growing_range_read_observer_keeps_original_capture Append_ahead_of_extent;
+      "growing read observer cancellation leaves the original alive",growing_range_read_observer_keeps_original_capture Cancel_read_observer;
+      "growing read refuses capture failure during the read",growing_range_read_observer_keeps_original_capture Capture_fails_during_read;
       "failed seal stays unavailable while another job progresses",failed_seal_is_not_completion_and_does_not_block_other_job;
       "moved and replaced original spool never seals",output_attachment_change_never_seals `Move_and_replace;
       "symlink to detached original spool never seals",output_attachment_change_never_seals `Symlink_to_original;

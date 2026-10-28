@@ -26268,16 +26268,16 @@ and is loaded on demand through keeper_skill.
         | Presented.Reject_action | Presented.Reject_paste ->
             pointer_gesture := Masc_tui_pane_selection.Idle;
             None in
-      (* A rejected press may be followed by a release after the replacement
+      (* A rejected press may be followed by motion/release after the replacement
          frame. Without an accepted press there is no gesture to complete;
          that tail must not acknowledge the displayed rejection either. *)
-      let orphan_pointer_release =
+      let orphan_pointer_tail =
         not state.image_open && not state.msx_open
         && (match input, !pointer_gesture with
-            | Some (Mouse_left_release _), Masc_tui_pane_selection.Idle -> true
+            | Some (Mouse_left_drag _ | Mouse_left_release _), Masc_tui_pane_selection.Idle -> true
             | (Some _ | None), (Masc_tui_pane_selection.Idle | Pressed _
                 | Selecting _ | Drag_without_pane) -> false) in
-      let input = if orphan_pointer_release then None else input in
+      let input = if orphan_pointer_tail then None else input in
       (* A rejected gesture has no target, but it still interrupts any armed
          confirmation. Never send its key or payload to another surface. *)
       let decision_rejected = function
@@ -26285,7 +26285,7 @@ and is loaded on demand through keeper_skill.
         | Presented.Reject_action | Presented.Reject_paste -> true in
       let rejected_operator_input = rejected || decision_rejected unpresented_decision
         || decision_rejected panel_decision || decision_rejected queue_viewport_decision
-        || orphan_pointer_release in
+        || orphan_pointer_tail in
       let panel_owns_input = Option.is_some current_panel
         && panel_owner_matches current_panel
         && not state.image_open && not state.msx_open in

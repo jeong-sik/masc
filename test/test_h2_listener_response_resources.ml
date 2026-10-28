@@ -357,7 +357,7 @@ let test_modern_requests_ignore_legacy_session_state () =
       Session.remember_protocol_version legacy_id "2025-11-25";
       Session.remember_mcp_profile legacy_id Server_mcp_transport_http_types.Seat;
       let profiles_before = Session.For_testing.profile_count () in
-      let identities_before = Client_registry_eio.total_count () in
+      let identities_before = Masc.Client_registry_eio.total_count () in
       let client = connect () in
       let meta = `Assoc
         [ Protocol.protocol_version_meta_key, `String "2026-07-28"
@@ -395,7 +395,7 @@ let test_modern_requests_ignore_legacy_session_state () =
       check int "modern requests do not register synthetic profiles" profiles_before
         (Session.For_testing.profile_count ());
       check int "modern calls do not register synthetic client identities" identities_before
-        (Client_registry_eio.total_count ())))
+        (Masc.Client_registry_eio.total_count ())))
 
 let test_actual_subscription_route () =
   let capacity=65536 in

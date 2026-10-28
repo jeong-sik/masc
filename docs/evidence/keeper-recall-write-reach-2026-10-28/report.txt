@@ -1,10 +1,10 @@
-write calls: 422 in 24 Keepers
-  first 2026-10-05T09:24:22Z, last 2026-10-28T05:56:16Z; --since 2026-10-02T00:00:00Z
-  receipt, ok: 343 (81.3%)
-    persisted_pending_admission: 227
+write calls: 425 in 24 Keepers
+  first 2026-10-05T09:24:22Z, last 2026-10-28T07:23:02Z; --since 2026-10-02T00:00:00Z
+  receipt, ok: 346 (81.4%)
+    persisted_pending_admission: 230
     persisted_current_snapshot: 81
     persisted_source_bound_current: 35
-  receipt, rejected: 52 (12.3%)
+  receipt, rejected: 52 (12.2%)
     supersedes_invalid: 11
     supersedes_not_authored: 9
     source_read_failed: 9
@@ -17,28 +17,29 @@ write calls: 422 in 24 Keepers
     board_ref_invalid: 1
     board_comment_without_post: 1
     supersedes_premise_of_successor: 1
-  tool error without a receipt: 15 (3.6%)
+  tool error without a receipt: 15 (3.5%)
   result is not a receipt: 0 (0.0%)
   result not in the trace (native call of an official client): 12 (2.8%)
 started calls without a finished record: 0; finished records seen twice: 0
 
-queued writes (persisted_pending_admission): 227
-  settled with a target first added after the write: 171 (75.3%)
-  settled with a target added before the write: 11 (4.8%)
+queued writes (persisted_pending_admission): 230
+  settled with a target first added by a row stamped at or after the write: 171 (74.3%)
+  settled with a target added by a row stamped before the write: 11 (4.8%)
   settled with a target that no commit row adds: 1 (0.4%)
-  settled without a target: 38 (16.7%)
-  still waiting in the admission queue: 1 (0.4%)
+  settled without a target: 38 (16.5%)
+  still waiting in the admission queue: 4 (1.7%)
   no record, written before the oldest receipt of the Keeper: 3 (1.3%)
   no record, written after the oldest receipt of the Keeper: 0 (0.0%)
   no record, the Keeper has no dated receipt: 2 (0.9%)
 
-candidates the Librarian settled, first journal row of the receipt's revision at or after --since: 734 in 33 Keepers (read at 2026-10-28T07:04:23Z)
-  those journal rows run from 2026-10-19T06:14:06Z to 2026-10-28T05:37:31Z
-  settled with a target first added after the write: 455 (62.0%)
-  settled with a target added before the write: 29 (4.0%)
+candidates the Librarian settled, in the --since window: 734 in 33 Keepers (read at 2026-10-28T07:39:55Z)
+  window: written at or after --since; a receipt without a source fact is placed by the last Librarian stamp of its revision
+  receipts with a source fact were written from 2026-10-19T02:30:29Z to 2026-10-28T05:21:04Z
+  settled with a target first added by a row stamped at or after the write: 455 (62.0%)
+  settled with a target added by a row stamped before the write: 29 (4.0%)
   settled with a target that no commit row adds: 1 (0.1%)
   settled without a target: 249 (33.9%)
-  not counted: 0 with no journal row at the revision the receipt names, 0 before --since
+  not counted: 0 that cannot be placed in the window, 0 written before --since
   receipts that are not a settled candidate (--since does not apply): 103
     state is not committed: 0
     a Librarian read range (range_id): 66
@@ -55,51 +56,66 @@ settled with a target: 485
   target now, not current, no revised, absorbed or retracted record; a committed journal row removed it: 53 (10.9%)
   target now, not current and no file mentions it: 0 (0.0%)
 the target is a current fact now or the records lead to one: 356 of 485 with a target (73.4%), 356 of 734 settled (48.5%)
-  settled with a target whose revision has more than one journal row: 175 of 485
-seconds from the write to the settlement (485 of 485 receipts have a source fact and a journal row at or after the write):
+targets whose records end without a current fact or a retraction: 123
+  the id where the records end was removed by a committed row with a written reason: 45 (36.6%)
+  the id where the records end was removed by a committed row with no written reason: 78 (63.4%)
+  the id where the records end was removed by no committed row: 0 (0.0%)
+  the removing commit also added a fact: 90 of 123
+  settled with a target whose revision has more than one Librarian stamp: 175 of 485
+seconds from the write to the journal stamp of the settling pass (485 of 485 receipts have a source fact and a Librarian stamp at or after the write; the stamp is when the pass read the queue):
   earliest possible: p50 434, p90 50430, max 230984
   latest possible: p50 1343, p90 56889, max 232138
 
-Keeper | write calls | rejected | queued | target added after the write | target added before or unknown | without a target | waiting | no record | settled candidates in the window | files missing or unreadable
-rust-hwp-guy | 60 | 18 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | missing rust-hwp-guy.memory-admission.json
-gayo-yoga-leader | 53 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | missing gayo-yoga-leader.memory-admission.json
-masc-productor-owner | 49 | 3 | 46 | 35 | 1 | 10 | 0 | 0 | 143 | -
-glossary-maniac | 48 | 9 | 31 | 23 | 2 | 3 | 0 | 3 | 28 | -
-msx-retro-mania | 40 | 1 | 28 | 20 | 6 | 1 | 1 | 0 | 128 | -
-jazz-developer | 37 | 3 | 31 | 21 | 0 | 10 | 0 | 0 | 35 | -
-kidsnote-job-manager | 27 | 5 | 19 | 17 | 1 | 1 | 0 | 0 | 21 | -
-judas-priest | 14 | 4 | 9 | 7 | 0 | 2 | 0 | 0 | 13 | -
-wkbl-growth | 12 | 0 | 10 | 10 | 0 | 0 | 0 | 0 | 29 | -
-goo-yang-bong | 11 | 1 | 9 | 9 | 0 | 0 | 0 | 0 | 40 | -
-indie-geek-blue | 11 | 0 | 6 | 4 | 1 | 1 | 0 | 0 | 6 | -
-kidsnote-incoming-dd-manager | 10 | 0 | 5 | 3 | 0 | 2 | 0 | 0 | 17 | -
-music-sensei | 9 | 1 | 1 | 1 | 0 | 0 | 0 | 0 | 14 | -
-wkbl-web-leader | 8 | 2 | 4 | 3 | 0 | 1 | 0 | 0 | 19 | -
-rondo | 6 | 1 | 5 | 4 | 1 | 0 | 0 | 0 | 8 | -
-code-reviewer-mother | 5 | 1 | 4 | 2 | 0 | 2 | 0 | 0 | 4 | -
-kidsnote-qa-hub-manager | 5 | 1 | 3 | 3 | 0 | 0 | 0 | 0 | 3 | -
-won-chik | 5 | 0 | 5 | 0 | 0 | 5 | 0 | 0 | 7 | -
-hole-finder | 3 | 1 | 2 | 0 | 0 | 0 | 0 | 2 | 0 | -
-kidsnote-slack-reader | 3 | 0 | 3 | 3 | 0 | 0 | 0 | 0 | 5 | -
-code-reviewer-father | 2 | 0 | 2 | 2 | 0 | 0 | 0 | 0 | 4 | -
-geek-scout | 2 | 0 | 2 | 2 | 0 | 0 | 0 | 0 | 2 | -
-masc-pro-builder | 1 | 0 | 1 | 1 | 0 | 0 | 0 | 0 | 9 | -
-wkbl-data | 1 | 0 | 1 | 1 | 0 | 0 | 0 | 0 | 6 | -
-code-reviewer | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 6 | -
-code-reviewer-brother | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | -
-code-reviewer-sister | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | missing code-reviewer-sister.memory-admission.json
-code-reviewer-uncle | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | missing code-reviewer-uncle.memory-admission.json
-context-reviewer | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 70 | -
-e-masc-the-leader | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 6 | -
-mad-scientist | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 2 | -
-ocaml-agent-ic | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | missing ocaml-agent-ic.memory-admission.json
-ocaml-refactor-woman | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | -
-polisher | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | -
-pr-updater | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 9 | -
-sangsu | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | missing sangsu.memory-admission.json
-simplifyer | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | -
-tui-developer | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 7 | -
-wkbl-front | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 87 | -
-you-never-change | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 2 | -
+coverage of the call table: raw traces keep only the most recent turns of a Keeper
+  raw trace files per Keeper: min 38, median 193, max 202 (40 Keepers)
+  candidates with a source fact: 485
+    with a matching write call: 183 (37.7%)
+    without one: 302 (62.3%)
+      written before the oldest raw trace of the Keeper: 295
+      written inside the raw traces: 7
+      the Keeper has no raw trace with a turn start: 0
+  candidates without a source fact (the write time is not known): 249, with a matching write call: 38
+
+Keeper | write calls | rejected | queued | target first added at or after the write | target added before it or unknown | without a target | waiting | no record | settled candidates in the window | raw trace files | oldest raw trace | files missing or unreadable
+rust-hwp-guy | 60 | 18 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 92 | 2026-10-07T05:08:12Z | missing rust-hwp-guy.memory-admission.json
+gayo-yoga-leader | 53 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 88 | 2026-10-05T08:52:16Z | missing gayo-yoga-leader.memory-admission.json
+masc-productor-owner | 49 | 3 | 46 | 35 | 1 | 10 | 0 | 0 | 143 | 157 | 2026-10-25T09:02:54Z | -
+glossary-maniac | 48 | 9 | 31 | 23 | 2 | 3 | 0 | 3 | 28 | 202 | 2026-10-17T13:49:08Z | -
+msx-retro-mania | 43 | 1 | 31 | 20 | 6 | 1 | 4 | 0 | 128 | 201 | 2026-10-26T15:19:58Z | -
+jazz-developer | 37 | 3 | 31 | 21 | 0 | 10 | 0 | 0 | 35 | 201 | 2026-10-20T14:14:21Z | -
+kidsnote-job-manager | 27 | 5 | 19 | 17 | 1 | 1 | 0 | 0 | 21 | 164 | 2026-10-25T08:59:53Z | -
+judas-priest | 14 | 4 | 9 | 7 | 0 | 2 | 0 | 0 | 13 | 200 | 2026-10-20T22:24:26Z | -
+wkbl-growth | 12 | 0 | 10 | 10 | 0 | 0 | 0 | 0 | 29 | 126 | 2026-10-25T09:17:10Z | -
+goo-yang-bong | 11 | 1 | 9 | 9 | 0 | 0 | 0 | 0 | 40 | 85 | 2026-10-25T14:38:42Z | -
+indie-geek-blue | 11 | 0 | 6 | 4 | 1 | 1 | 0 | 0 | 6 | 201 | 2026-10-18T08:11:22Z | -
+kidsnote-incoming-dd-manager | 10 | 0 | 5 | 3 | 0 | 2 | 0 | 0 | 17 | 188 | 2026-10-25T08:59:53Z | -
+music-sensei | 9 | 1 | 1 | 1 | 0 | 0 | 0 | 0 | 14 | 154 | 2026-10-25T09:03:00Z | -
+wkbl-web-leader | 8 | 2 | 4 | 3 | 0 | 1 | 0 | 0 | 19 | 130 | 2026-10-25T09:17:10Z | -
+rondo | 6 | 1 | 5 | 4 | 1 | 0 | 0 | 0 | 8 | 201 | 2026-10-20T03:49:50Z | -
+code-reviewer-mother | 5 | 1 | 4 | 2 | 0 | 2 | 0 | 0 | 4 | 197 | 2026-10-26T16:36:09Z | -
+kidsnote-qa-hub-manager | 5 | 1 | 3 | 3 | 0 | 0 | 0 | 0 | 3 | 136 | 2026-10-25T08:59:53Z | -
+won-chik | 5 | 0 | 5 | 0 | 0 | 5 | 0 | 0 | 7 | 200 | 2026-10-22T06:30:25Z | -
+hole-finder | 3 | 1 | 2 | 0 | 0 | 0 | 0 | 2 | 0 | 44 | 2026-10-10T08:00:23Z | -
+kidsnote-slack-reader | 3 | 0 | 3 | 3 | 0 | 0 | 0 | 0 | 5 | 153 | 2026-10-26T02:21:21Z | -
+code-reviewer-father | 2 | 0 | 2 | 2 | 0 | 0 | 0 | 0 | 4 | 62 | 2026-10-26T14:48:04Z | -
+geek-scout | 2 | 0 | 2 | 2 | 0 | 0 | 0 | 0 | 2 | 200 | 2026-10-21T07:55:42Z | -
+masc-pro-builder | 1 | 0 | 1 | 1 | 0 | 0 | 0 | 0 | 9 | 165 | 2026-10-25T09:02:56Z | -
+wkbl-data | 1 | 0 | 1 | 1 | 0 | 0 | 0 | 0 | 6 | 196 | 2026-10-25T09:17:10Z | -
+code-reviewer | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 6 | 191 | 2026-10-27T23:12:10Z | -
+code-reviewer-brother | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 185 | 2026-10-27T13:12:15Z | -
+code-reviewer-sister | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 200 | 2026-10-27T04:21:54Z | missing code-reviewer-sister.memory-admission.json
+code-reviewer-uncle | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 62 | 2026-10-26T16:36:28Z | missing code-reviewer-uncle.memory-admission.json
+context-reviewer | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 70 | 200 | 2026-10-27T22:51:07Z | -
+e-masc-the-leader | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 6 | 193 | 2026-10-27T08:59:51Z | -
+mad-scientist | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 2 | 182 | 2026-10-26T01:50:27Z | -
+ocaml-agent-ic | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 201 | 2026-10-27T07:58:04Z | missing ocaml-agent-ic.memory-admission.json
+ocaml-refactor-woman | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 201 | 2026-10-27T06:33:18Z | -
+polisher | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 200 | 2026-10-26T10:43:08Z | -
+pr-updater | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 9 | 200 | 2026-10-27T22:21:03Z | -
+sangsu | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 200 | 2026-10-26T09:00:50Z | missing sangsu.memory-admission.json
+simplifyer | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 168 | 2026-10-25T09:00:00Z | -
+tui-developer | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 7 | 38 | 2026-10-25T08:59:59Z | -
+wkbl-front | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 87 | 200 | 2026-10-25T16:33:55Z | -
+you-never-change | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 2 | 200 | 2026-10-27T07:58:06Z | -
 
 skipped input: none

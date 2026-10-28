@@ -286,7 +286,7 @@ let create_keeper ~expected_config_revision (ctx : _ context)
              Progress.Tracker.step tracker ~message:"Saving initial checkpoint" ();
              let checkpoint_result =
                try
-                 let ( let* ) = Result.bind in
+                 let open Result.Syntax in
                  let* initial_session = Keeper_input_birth.reserve_session
                    ~base_path:ctx.config.base_path ~intake_token creation
                    |> Result.map_error Keeper_input_birth.error_to_string in

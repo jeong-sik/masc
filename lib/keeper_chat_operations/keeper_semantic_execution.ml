@@ -1,6 +1,6 @@
 module Snapshot = Keeper_repetition_snapshot
 module Scope_id = Keeper_execution_scope_id
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type source_member =
   { post_id : string

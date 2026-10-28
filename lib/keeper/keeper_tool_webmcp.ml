@@ -78,7 +78,7 @@ let result_of_bridge ~tool_name ~start_time outcome =
        dependency_unavailable ~tool_name ~start_time message)
 ;;
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let run_list ~args =
   let tool_name = list_tool_name in

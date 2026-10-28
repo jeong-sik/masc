@@ -612,7 +612,7 @@ let resolved_audit_fields =
    neither, so both are optional; when present they must decode, because a
    history row that claims a route we cannot read is not evidence of one. *)
 let validate_optional_provenance ~surface fields =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let check key decode =
     match List.assoc_opt key fields with
     | None | Some `Null -> Ok ()
@@ -672,7 +672,7 @@ let required_finite_timestamp ~surface key fields =
 ;;
 
 let resolved_approval_json_of_audit_event json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let surface = "resolved_approval_audit" in
   match json with
   | `Assoc fields ->

@@ -6,7 +6,7 @@ let resolve ~(config : Workspace.config)
     Ok (Keeper_sandbox.container_root meta.name)
   | Micro_vm -> Ok (Keeper_sandbox.host_root_abs_of_meta ~config meta)
   | Remote_ssh ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* name =
       match profile_defaults.remote_endpoint with
       | Some name when String.trim name <> "" -> Ok (String.trim name)

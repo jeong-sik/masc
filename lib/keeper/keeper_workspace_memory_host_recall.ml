@@ -1,7 +1,7 @@
 module Selection = Keeper_workspace_memory_selection
 module View = Workspace_memory_ledger_view
 module IO = Keeper_workspace_memory_selection_io
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let decode_summary ~is_excluded json =
   let open Yojson.Safe.Util in

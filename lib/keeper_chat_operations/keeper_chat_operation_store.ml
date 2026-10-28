@@ -259,7 +259,7 @@ let expect_done db stmt ~operation =
   else Error (Store_unavailable (sqlite_error db operation rc))
 ;;
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let bind_text db stmt ~operation index value =
   bind db stmt ~operation index (Sqlite3.Data.TEXT value)

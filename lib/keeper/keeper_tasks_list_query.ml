@@ -11,7 +11,7 @@ type lifecycle_filter =
   | All_statuses
   | Exact_status of Masc_domain.Task_status_tag.t
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let nonblank field value =
   match value with

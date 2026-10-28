@@ -1,5 +1,5 @@
 module Blocks = Keeper_chat_blocks
-let ( let* ) = Result.bind
+open Result.Syntax
 let escape text =
   let buf = Buffer.create (String.length text) in
   String.iter (function

@@ -2,7 +2,7 @@
 
 module AR = Task.Anti_rationalization
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let schema = "verifier_review_original/v3"
 

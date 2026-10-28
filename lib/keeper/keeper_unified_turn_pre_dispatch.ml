@@ -69,7 +69,7 @@ let build_runtime_execution
   if String.equal runtime_id "" then
     Error (Agent_core.Error.Internal "runtime_id must be non-empty")
   else
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* assignment =
     match Runtime.resolve_assignment runtime_id with
     | `Unavailable missing ->

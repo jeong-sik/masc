@@ -3,7 +3,7 @@
 module V = Verifier_review_original
 module Owner = Lane_addon_tool_request_owner
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type store = Lane_addon_store.t
 

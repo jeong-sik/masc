@@ -101,7 +101,7 @@ let sample_to_json sample =
     ]
 ;;
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let exact_fields expected fields =
   let names = List.map fst fields in

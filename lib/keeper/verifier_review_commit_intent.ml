@@ -3,7 +3,7 @@ module O = Verifier_review_owner
 module V = Verifier_review_original
 module P = Lane_addon_request_progress
 module AR = Task.Anti_rationalization
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let before_status ~original before =
   let request=V.review_request original in

@@ -133,7 +133,7 @@ let required_string_list ~path fields key =
    call names one form. Stating it here is what makes [source] a sum rather
    than two optional fields a validator has to reconcile. *)
 let source_of_fields ~path fields =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let named key =
     match member fields key with
     | None | Some `Null -> false
@@ -175,7 +175,7 @@ let source_of_fields ~path fields =
 ;;
 
 let of_json (json : Yojson.Safe.t) =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* fields = assoc_fields ~path:"$" json in
   let* () =
     reject_unknown_fields
@@ -220,7 +220,7 @@ let check_cwd = function
 let directory_change_program = "cd"
 
 let check_exec ~argv ~cwd =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   match argv with
   | [] -> Error Empty_argv
   | program :: _ when String.equal program "" -> Error Empty_program
@@ -232,7 +232,7 @@ let check_exec ~argv ~cwd =
 ;;
 
 let validate { source; cwd; timeout_sec = _; intent = _ } =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* () = check_cwd cwd in
   match source with
   | Command _ -> Ok ()
@@ -248,7 +248,7 @@ let shell_bin = function
 ;;
 
 let shell_simple ?(sandbox = Masc_exec.Sandbox_target.host ()) ?cwd argv =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* bin, arguments = shell_bin argv in
   Ok
     (Keeper_tooling.Execute_shell_ir.simple_bin
@@ -332,7 +332,7 @@ let to_shell_ir_unvalidated
 ;;
 
 let to_shell_ir ?sandbox input =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* () = validate input in
   to_shell_ir_unvalidated ?sandbox input
 ;;

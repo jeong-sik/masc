@@ -361,7 +361,7 @@ let preparation_to_json preparation =
 ;;
 
 let preparation_of_json json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* fields = match json with
     | `Assoc fields when List.sort String.compare (List.map fst fields) =
         List.sort String.compare ["phase";"turn_ref";"started_at_unix";"state";"finished_at_unix";"elapsed_ns"] ->
@@ -416,7 +416,7 @@ let preparation_timeline_to_json timeline =
 ;;
 
 let preparation_timeline_of_json json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let scope_id = function
     | `Int value when value >= 0 -> Ok value
     | _ -> Error "preparation scope ID must be a nonnegative integer" in

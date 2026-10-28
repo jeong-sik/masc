@@ -99,7 +99,7 @@ let requested_tool_execute_cwd ~config ~meta ~write_enabled ~args =
    ([Keeper_remote_path.host_to_remote]), and the endpoint's shim chdirs
    into it inside its own jail and answers ENOENT itself. *)
 let resolve_tool_execute_cwd_typed ~remote_workspace_root ~config ~meta ~write_enabled ~args =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let caller_cwd = Safe_ops.json_string ~default:"" "cwd" args |> String.trim in
   let raw_path =
     requested_tool_execute_cwd ~config ~meta ~write_enabled ~args

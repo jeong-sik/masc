@@ -4,7 +4,7 @@
 module W = Keeper_memory_os_types
 module H = Keeper_context_core_history
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type observed_message =
   { turn_ref : Ids.Turn_ref.t

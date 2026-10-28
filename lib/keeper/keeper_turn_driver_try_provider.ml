@@ -1480,7 +1480,7 @@ let request_view
   | None -> candidate
   | Some arguments ->
     let retained_reasoning view =
-      let ( let* ) = Result.bind in
+      let open Result.Syntax in
       let* retained =
         Agent_core.Llm_provider.Complete_common.retained_prefix_reasoning_indices
           ~config:provider_config ~tools view.carried
@@ -1758,7 +1758,7 @@ let bounded_model_input_projection
       tools
       |> List.map Agent_core.Tool.schema_to_json
     in
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* () = match (input_continuity ctx.request_input) with
       | None -> Ok ()
       | Some continuity -> offload_model_input_cpu (fun () -> validate_continuity ~messages continuity)

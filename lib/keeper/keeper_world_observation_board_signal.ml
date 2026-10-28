@@ -180,7 +180,7 @@ let board_observation_of_board_stimulus
       (bs : Keeper_event_queue.board_stimulus)
   : (board_observation, board_unavailable) result
   =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let parse_comment_id raw =
     Board.Comment_id.of_string_for_read raw
     |> Result.map_error (fun error ->

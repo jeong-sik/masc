@@ -4,7 +4,7 @@
 module W = Keeper_memory_os_types
 module Window = Runtime_model_input_tail_window
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let path_for_keepers_dir ~keepers_dir ~keeper_id =
   Filename.concat (Filename.concat keepers_dir keeper_id) "turn-boundaries.jsonl"
 ;;

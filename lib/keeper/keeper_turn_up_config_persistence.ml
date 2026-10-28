@@ -100,7 +100,7 @@ let config_revision_to_yojson (revision : config_revision) =
 
 let config_revision_of_yojson = function
   | `Assoc fields when List.length fields = 2 ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* manifest =
       match List.assoc_opt "manifest" fields with
       | Some value -> revision_of_yojson value
@@ -279,12 +279,12 @@ let runtime_lock_warning = function
 ;;
 
 let with_current_config_revision ~config ~keeper_name project =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* () = validate_keeper_name keeper_name in
   let path = manifest_path ~config ~keeper_name in
   match
     with_manifest_lock path (fun () ->
-      let ( let* ) = Result.bind in
+      let open Result.Syntax in
       let* manifest = revision_of_path_unlocked path in
       let runtime_config_path =
         Config_dir_resolver.runtime_toml_path_for_base_path
@@ -459,7 +459,7 @@ let persist_with_publication_using ?write_manifest ~with_lock ~restore_snapshot 
              ~base_path:config.base_path)
         ~keeper_name:meta.name
         (fun runtime_transaction ->
-      let ( let* ) = Result.bind in
+      let open Result.Syntax in
       let* () = instructions_result |> Result.map_error (fun error -> Io_error error) in
       let* snapshot =
         read_snapshot_unlocked path |> Result.map_error (fun error -> Io_error error)

@@ -9,7 +9,7 @@ type t =
 
 let field = "spend_observation"
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let sample_opt_to_json = function
   | Some sample -> Keeper_usage_resolution.sample_to_json sample

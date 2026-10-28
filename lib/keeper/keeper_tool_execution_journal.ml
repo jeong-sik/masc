@@ -6,7 +6,7 @@ module Async = Keeper_msg_async
 module Dependency = Keeper_composition_dependency
 module Nodes = Map.Make (String)
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type nested_origin =
   { parent_run_id : Plan.Composition_run_id.t

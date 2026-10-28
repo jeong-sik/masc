@@ -160,7 +160,7 @@ let tail_order_to_string = Keeper_status_options_defaults.tail_order_to_string
 let valid_tail_order_strings = Keeper_status_options_defaults.valid_tail_order_strings
 
 let status_options_of_fields fields =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* fast =
     optional_bool_argument
       fields
@@ -253,7 +253,7 @@ let keeper_exists_config ~(config : Workspace.config) raw_name =
   loop candidates
 
 let resolve_status_target_config ~(config : Workspace.config) ~(agent_name : string) fields =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* requested_name = effective_status_name_config ~agent_name fields in
   let candidates =
     status_name_lookup_candidates requested_name |> List.filter validate_name
@@ -706,7 +706,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            ]);
            (let sandbox = Keeper_sandbox.of_meta ~config:config ~meta:m in
            let keeper_visible_abs =
-             let ( let* ) = Result.bind in
+             let open Result.Syntax in
              let* profile_defaults =
                Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
                  ~base_path:config.base_path m.name

@@ -58,7 +58,7 @@ type t =
   }
 
 let context_key = "keeper_outstanding_tool_loads"
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let exact_fields expected = function
   | `Assoc fields as json ->

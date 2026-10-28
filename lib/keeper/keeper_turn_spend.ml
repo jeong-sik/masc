@@ -258,7 +258,7 @@ let resolve_turn ~cursor ~observed_at attempts =
 ;;
 let cost_coverage ~(resolved : resolved list) attempts =
   let module Cost = Keeper_cost_coverage in
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* readings =
     List.fold_left
       (fun state (reading : resolved) ->

@@ -666,7 +666,7 @@ let handle
   (* Cost coverage consumes only actual readings, once, after token updates.
      The synthetic winner usage resolution is not a provider reading. *)
   let updated_meta =
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let cost =
       let* delta = Keeper_turn_spend.cost_coverage
         ~resolved:(turn_spend.other_readings @ Option.to_list turn_spend.turn_reading) spend in

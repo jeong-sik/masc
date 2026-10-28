@@ -39,7 +39,7 @@ let empty =
   ; history = Complete
   }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let valid_cost amount = Float.is_finite amount && amount >= 0.
 

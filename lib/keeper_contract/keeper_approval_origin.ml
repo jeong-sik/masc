@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type admitted_source =
   { snapshot_ref : string

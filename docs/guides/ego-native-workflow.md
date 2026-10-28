@@ -146,8 +146,20 @@ For login, 2FA or captcha, hand the same live client to the operator with
 `BrowserAct action=hand_off`. Its receipt names `spaceId` and `spaceName` from
 that TaskSpace before handoff; no Page operation follows the handoff. Use those
 values in `masc_ask` with the required human step, original Task/Goal binding and
-browser/tab context. Await explicit completion before `take_over`, then list
-tabs and observe the page to verify login. A question or an invisible-window
+browser/tab context. Await explicit completion before `take_over`. Native
+takeover returns the same numeric Space and the Page Ego captured at that user
+boundary as `activeTabId`/`egoPage`, including an unmanaged tab with `label:null`.
+This is the boundary Page, not proof of current focus or login. The handle's
+Space/target/label/origin must still match that Space's native inventory; a
+missing or changed target is uncertain, never replaced by the current active
+tab. An absent native boundary Page returns no active ID.
+
+For an unmanaged boundary Page, explicitly `adopt_tab` that observed ID before
+reading it; takeover itself neither adopts nor reads a document. Existing
+mutation paths still require agent-created Pages. List tabs and observe the
+intended managed Page to verify login. SDK takeover runs without a host reply
+clock; a lost result is never replayed or treated as input-reset confirmation.
+A question or an invisible-window
 report is not completion. See the [Keeper procedure](../../skills/browser-lanes/references/connection.md#로그인인증-인계).
 These tools are composed by the Keeper; handoff does not automatically create
 an Ask, show a window, or verify credentials. The identity receipt and guidance

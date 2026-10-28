@@ -1471,24 +1471,25 @@ let hand_off t =
        Error (Live.Outcome_unknown ("ego answered the hand-off without this space's identity; " ^ unknown)))
   | Ok _ -> Error (Live.Outcome_unknown ("ego answered the hand-off without this space's identity; " ^ unknown))
 
-(* The Keeper takes the space back on the operator's word, which neither ego
-   nor masc checks. ego names the tab that was active then; a tab the
-   operator opened has no label, so it is listed later and not adopted. *)
+(* Take back the original Space on the operator's explicit completion. The
+   native boundary can identify a managed or unmanaged Page; neither is read
+   or adopted here. A later active tab is never a replacement for that Page. *)
 let take_over t =
   t.space_observation <- None;
-  let unknown = "list this connection's tabs before another step" in
-  match asked t.run ~window_s:(window_s (Browser_lane.Page_act (Browser_lane.Action.Control Browser_lane.Action.Take_over)))
-          ~step:"space.take_over" ~space:(`Int t.space.id) ~holder:Operator_holds ~args:`Null (String.concat "\n" [
-      "    const back = await takeOverTaskSpace(task.spaceId);";
-      "    const active = back.userPage();";
-      "    emit({ok: true, value: {active: active ? (active.label ?? null) : null}});" ]) with
+  let unknown = Printf.sprintf "control of original ego Space #%d is unconfirmed; confirm operator control and inspect that same Space; never automatically repeat take_over or select a replacement" t.space.id in
+  match run_native_script t (script ~step:"space.take_over" ~space:(`Int t.space.id)
+      ~holder:Operator_holds ~args:(obj ["spaceId",`Int t.space.id]) Browser_ego_takeover.script) with
   | Error failure -> Error (effect_failure ~unknown failure)
   | Ok value ->
-    match field "active" value with
-    | Some (`String label) when label <> "" ->
-      Ok (obj ["action",str "take_over";"activeTabId",`Int (remember t (Managed label))])
-    | Some `Null -> Ok (obj ["action",str "take_over"])
-    | Some _ | None -> Error (Live.Outcome_unknown ("ego answered the take over outside its answer frame; " ^ unknown))
+    let* receipt=Browser_ego_takeover.decode ~expected_id:t.space.id value
+      |> Result.map_error (fun detail -> Live.Outcome_unknown (detail ^ "; " ^ unknown)) in
+    let fields=["action",str "take_over";"spaceId",`Int receipt.space.id;"spaceName",str receipt.space.name] in
+    (match receipt.page with
+     | None -> Ok (obj fields)
+     | Some page ->
+         let identity=match page.label with Some label -> Managed label | None -> Unmanaged page.target_id in
+         Ok (obj (fields @ ["activeTabId",`Int (remember t identity);
+           "egoPage",Browser_surface.ego_page_to_json page])))
 
 (* SDK-owned polling of this agent-owned Space only. It does not change the
    owner or settle an earlier uncertain input, including after a dialog. *)

@@ -114,7 +114,12 @@ val assert_input_reset : t -> generation:string -> (unit, string) result
     handing it to the operator. This identifies the space for a human request;
     it does not prove that its window is visible or that login succeeded.
     After handing off, ask the operator what is needed and await their explicit
-    completion before [take_over]. The peer does not create an Ask or verify an
+    completion before [take_over]. Native takeover retains the same Space and
+    returns [activeTabId]/[egoPage] for the Page active at its user boundary,
+    including an unmanaged Page. This is not current focus, adoption, input
+    authority or login proof. An absent boundary Page stays absent. SDK waits
+    are not wrapped in a host reply clock; a lost result is never replayed.
+    The peer does not create an Ask or verify an
     operator answer itself. Reads fail
     before any effect. [open_tab], [goto], [back], [forward], [reload] and
     [close_tab] act only on pages an agent opened in the space, and so does

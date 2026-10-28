@@ -27,9 +27,16 @@ microvm_backend = "apple_container"   # | "microsandbox" | "nerdctl_kata"
 
 | 값 | 부팅 결과 | 작업 볼륨·격리 동작 |
 |---|---|---|
-| `apple_container` | 뜬다 | 게스트 전용 sparse ext4 디스크(`masc-keeper-work-<keeper>`)와 부팅마다 새로 만드는 빌드 볼륨(`masc-keeper-build-<keeper>`)을 붙인다. Keeper 해산(dissolve) 시 두 볼륨을 함께 삭제한다 |
+| `apple_container` | 뜬다 | sparse ext4 작업 볼륨(`masc-keeper-work-<keeper>`)과 부팅마다 새로 만드는 빌드 볼륨(`masc-keeper-build-<keeper>`)을 붙인다. Keeper 해산 시 소유권을 확인할 수 없으면 볼륨 자동 삭제를 건너뛴다 |
 | `nerdctl_kata` | 뜬다 (`network_mode = "none"` 또는 `"inherit"`) | `nerdctl volume create` + `inspect` 로 호스트 관리형 디렉터리 볼륨을 확인해 붙인다 (`capacity_enforced=false; host filesystem capacity applies`). `network_mode = "policy"` 는 지원하지 않는다 |
 | `microsandbox` | `microvm_constraint_unexpressible` | 작업 볼륨(`msb volume create --kind dir`)은 준비되지만, `msb 0.6.16` 에 `--cap-drop` 과 `--read-only` 가 없어 프로필이 요구하는 격리 플래그를 줄 수 없으므로 부팅을 거절한다 |
+
+현재 볼륨 이름에는 작업 공간이 포함되지 않는다. 같은 런타임 저장소에서 서로
+다른 작업 공간의 Keeper가 같은 이름을 쓰면 같은 작업 볼륨을 재사용할 수 있다.
+Apple 빌드 볼륨은 새 게스트 부팅 때 재생성되므로 같은 이름을 공유하는 구성을
+피해야 한다. 실행 중인 게스트 목록이 비어 있어도 중지된 Keeper의 소유권을 알 수
+없다. Apple 볼륨 자동 정리는 소유권 확인 기능이 생길 때까지 건너뛰며, 남은 볼륨은
+디스크를 차지할 수 있다.
 
 이 표는 **이미지가 그 런타임 저장소에 있을 때** 나오는 답이다. 부팅은
 이미지 확인 → 작업 볼륨 → 부팅 argv 순서로 가기 때문에, 이미지가 없으면 위
@@ -209,9 +216,8 @@ container exec --user $U:20 masc-keeper-vm-<keeper>-<hash> \
 
 # 4. 서버 재시작. 게스트는 공유 마운트 없이 다시 뜬다.
 
-# 5. 이제 쓰이지 않는 빌드 볼륨 삭제
-container volume list --format json | jq -r '.[].id' | grep masc-keeper-build- \
-  | xargs -n1 container volume delete
+# 5. 기존 빌드 볼륨은 자동으로 일괄 삭제하지 않는다.
+#    같은 이름의 Keeper가 다른 작업 공간에서 쓰고 있을 수 있다.
 ```
 
 호스트의 `.masc/playground/microvm/<keeper>/` 는 더 이상 읽히지 않는다.

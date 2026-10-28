@@ -185,7 +185,7 @@ let position reader =
         | None -> Fine
         | Some (Client.Scans_failing _) -> Scans_failing
         | Some (Client.Disconnected _) -> Disconnected )
-  | Client.Awaiting_first_reading | Client.Cannot_read _ -> None
+  | Client.Awaiting_first_reading | Client.Unavailable _ | Client.Cannot_read _ -> None
 ;;
 
 let position_t =
@@ -236,6 +236,31 @@ let test_a_client_that_connects_before_the_first_reading_waits_for_it () =
       Hub.observe hub ~measured_at:10.0 (fleet ~running:4 ());
       wait_until env "the first reading" (fun () -> position reader = Some (1, 4, Fine));
       server.stop ()))
+;;
+
+let test_first_scan_failure_survives_reconnect_and_recovers_over_http () =
+  with_env (fun env ->
+    Eio.Switch.run (fun sw ->
+      let hub = new_hub () in
+      let outage = { F.since = 10.0; reason = F.Scan_failed } in
+      Hub.note_degraded hub ~since:outage.since outage.reason;
+      let first = start_server ~sw env hub in
+      let reader = Client.create () in
+      follow ~sw env ~port:first.port reader;
+      wait_until env "first failure snapshot" (fun () ->
+        Client.view reader = Client.Unavailable { degradation = outage; disconnected_since = None });
+      first.stop ();
+      wait_until env "failure and disconnected stream" (fun () ->
+        match Client.view reader with
+        | Client.Unavailable { degradation; disconnected_since = Some _ } -> degradation = outage
+        | Client.Unavailable { disconnected_since = None; _ }
+        | Client.Awaiting_first_reading | Client.Reading _ | Client.Cannot_read _ -> false);
+      let second = start_server ~sw env ~port:first.port hub in
+      wait_until env "same failure on the new connection" (fun () ->
+        Client.view reader = Client.Unavailable { degradation = outage; disconnected_since = None });
+      Hub.observe hub ~measured_at:20.0 (fleet ~running:4 ());
+      wait_until env "first actual reading" (fun () -> position reader = Some (2, 4, Fine));
+      second.stop ()))
 ;;
 
 let contains ~needle text =
@@ -349,6 +374,8 @@ let () =
       , [ test_case "a reader follows the hub" `Quick test_a_reader_follows_the_hub_over_http
         ; test_case "a client that connects first waits for the reading" `Quick
             test_a_client_that_connects_before_the_first_reading_waits_for_it
+        ; test_case "first scan failure survives reconnect and recovers" `Quick
+            test_first_scan_failure_survives_reconnect_and_recovers_over_http
         ; test_case "a keepalive is not an event" `Quick
             test_a_keepalive_crosses_http_without_becoming_an_event
         ; test_case "a reader recovers from a server restart" `Quick

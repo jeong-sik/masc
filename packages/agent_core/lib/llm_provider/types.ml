@@ -175,7 +175,11 @@ let media_chunks_start first = { first; rest_rev = [] }
 let media_chunks_add chunks chunk =
   match chunks.first, chunk with
   | Base64 _, Base64 payload | Url _, Url payload | File_id _, File_id payload ->
-    Some { chunks with rest_rev = payload :: chunks.rest_rev }
+    (* Empty deltas add no bytes, so a byte cap cannot bound their count.
+       Retain the first carrier without keeping a list node for each one. *)
+    if String.length payload = 0
+    then Some chunks
+    else Some { chunks with rest_rev = payload :: chunks.rest_rev }
   | Base64 _, (Url _ | File_id _)
   | Url _, (Base64 _ | File_id _)
   | File_id _, (Base64 _ | Url _) -> None

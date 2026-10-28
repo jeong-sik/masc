@@ -1157,6 +1157,31 @@ let test_media_chunks_join_under_the_first_carrier () =
     ]
 ;;
 
+let test_media_chunks_do_not_retain_empty_deltas () =
+  List.iter
+    (fun (first, empty, other, next, expected) ->
+       let initial = media_chunks_start first in
+       let current = ref initial in
+       for _ = 1 to 10_000 do
+         match media_chunks_add !current empty with
+         | Some chunks -> current := chunks
+         | None -> Alcotest.fail "same carrier was rejected"
+       done;
+       Alcotest.(check bool) "empty deltas retain no accumulated state" true
+         (!current == initial);
+       (match media_chunks_add !current other with
+        | None -> ()
+        | Some _ -> Alcotest.fail "empty delta changed the carrier");
+       match media_chunks_add !current next with
+       | Some chunks -> Alcotest.check media_source "later payload preserved" expected
+                          (media_chunks_source chunks)
+       | None -> Alcotest.fail "same carrier payload was rejected")
+    [ Base64 "", Base64 "", Url "", Base64 "abc", Base64 "abc"
+    ; Url "", Url "", File_id "", Url "https://x", Url "https://x"
+    ; File_id "", File_id "", Base64 "", File_id "file-1", File_id "file-1"
+    ]
+;;
+
 let test_finalize_tool_use_invalid_json () =
   let acc = Streaming.create_stream_acc () in
   acc_events
@@ -1618,6 +1643,10 @@ let () =
             "media chunks join under the first carrier"
             `Quick
             test_media_chunks_join_under_the_first_carrier
+        ; Alcotest.test_case
+            "empty media deltas do not accumulate"
+            `Quick
+            test_media_chunks_do_not_retain_empty_deltas
         ; Alcotest.test_case
             "tool_use invalid json"
             `Quick

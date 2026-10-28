@@ -297,7 +297,8 @@ type media_chunks
 val media_chunks_start : media_source -> media_chunks
 
 (** [media_chunks_add chunks chunk] keeps [chunk] after the others when it uses
-    the first chunk's carrier; [None] when it uses another. *)
+    the first chunk's carrier; [None] when it uses another. An empty chunk of
+    the same carrier keeps the existing accumulator. *)
 val media_chunks_add : media_chunks -> media_source -> media_chunks option
 
 (** The carrier the first chunk fixed. *)

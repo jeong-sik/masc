@@ -187,6 +187,65 @@ let test_a_cancelled_queued_submission_is_abandoned () =
     check int "one abandoned submission" 1 (abandoned_after - abandoned_before))
 ;;
 
+(* RFC-0474 L4a. *)
+let in_flight_wait_counts lane_name =
+  member [ lane_name; "wait_by_in_flight_workers" ] (Pool_wait.to_json ())
+  |> Yojson.Safe.Util.to_list
+  |> List.map (fun h -> Yojson.Safe.Util.to_int (member [ "count" ] h))
+;;
+
+let in_flight_workers lane_name =
+  member [ lane_name; "in_flight_workers" ] (Pool_wait.to_json ()) |> Yojson.Safe.Util.to_number
+;;
+
+(* A read holds the only worker at the 1.0 default; the next read is
+   submitted while it waits and is counted at one worker's weight in flight.
+   The holder is released only after the next submission is queued. *)
+let test_a_wait_is_counted_by_the_weight_in_flight () =
+  with_pool (fun _env sw _pool ->
+    let before = in_flight_wait_counts "read" in
+    let started, start = Eio.Promise.create () in
+    let release, release_holder = Eio.Promise.create () in
+    let holder =
+      Eio.Fiber.fork_promise ~sw (fun () ->
+        Pool_lane.with_read (fun () ->
+          Executor_pool_ref.submit_or_inline (fun () ->
+            Eio.Promise.resolve start ();
+            Eio.Promise.await release)))
+    in
+    Eio.Promise.await started;
+    check (float 0.) "one worker's weight in flight" 1.0 (in_flight_workers "read");
+    Eio.Fiber.both
+      (fun () -> Pool_lane.with_read (fun () -> Executor_pool_ref.submit_or_inline ignore))
+      (fun () -> Eio.Promise.resolve release_holder ());
+    Eio.Promise.await_exn holder;
+    check (list int) "the holder at 0 workers in flight, the next at 1" [ 1; 1; 0; 0 ]
+      (diff (in_flight_wait_counts "read") before);
+    check (float 0.) "nothing in flight after both returned" 0.0 (in_flight_workers "read"))
+;;
+
+let test_a_run_is_counted_by_the_weight_it_declared () =
+  with_pool (fun _env _sw _pool ->
+    let io_before, _ = counts "read" "run_declared_io" in
+    let cpu_before, _ = counts "read" "run_declared_cpu" in
+    Pool_lane.with_read (fun () ->
+      Executor_pool_ref.submit_or_inline ~weight:0.05 ignore;
+      Executor_pool_ref.submit_or_inline ignore);
+    let io_after, _ = counts "read" "run_declared_io" in
+    let cpu_after, _ = counts "read" "run_declared_cpu" in
+    check int "the 0.05 job" 1 (io_after - io_before);
+    check int "the job at the 1.0 default" 1 (cpu_after - cpu_before))
+;;
+
+let test_a_job_that_raises_leaves_no_weight_in_flight () =
+  with_pool (fun _env _sw _pool ->
+    let before = in_flight_workers "read" in
+    (match Pool_lane.with_read (fun () -> Executor_pool_ref.submit_or_inline (fun () -> failwith "job failed")) with
+     | () -> fail "the job's exception did not reach the caller"
+     | exception Failure _ -> ());
+    check (float 0.) "the weight left with the job" before (in_flight_workers "read"))
+;;
+
 (* Bucket [i] holds spans at most its bound and above the previous one. *)
 let test_a_span_on_a_bound_belongs_to_that_bucket () =
   let ms n = Mtime.Span.of_uint64_ns (Int64.of_float (n *. 1e6)) in
@@ -231,6 +290,12 @@ let () =
             test_a_cancelled_queued_submission_is_abandoned
         ; test_case "a span on a bound belongs to that bucket" `Quick
             test_a_span_on_a_bound_belongs_to_that_bucket
+        ; test_case "a wait is counted by the weight in flight" `Quick
+            test_a_wait_is_counted_by_the_weight_in_flight
+        ; test_case "a run is counted by the weight it declared" `Quick
+            test_a_run_is_counted_by_the_weight_it_declared
+        ; test_case "a job that raises leaves no weight in flight" `Quick
+            test_a_job_that_raises_leaves_no_weight_in_flight
         ] )
     ]
 ;;

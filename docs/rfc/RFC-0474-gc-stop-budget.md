@@ -178,6 +178,18 @@ memprof(`/api/v1/diagnostics/memprof`, 부팅 뒤 10분). 할당 757 GB, major 4
   2. 그 뒤에도 I/O 만 기다리는 job 에 남은 블로킹 읽기·`fsync`·인라인 SQLite 는 systhread 로 옮긴다. 이 job 들만 weight 0.05 가 맞다.
 - 읽기 풀(RFC-0204 L3)이 먼저 들어간다. 그 뒤에는 공유 풀의 weight 가 배경 작업끼리의 대기에만 영향을 준다. 그래서 L4 의 성공 기준은 `pool_wait.background` 로 잰다.
 
+#### L4a — 읽기 풀이 차서 생긴 대기를 먼저 잰다
+
+읽기 풀을 배포한 뒤(2026-10-27 17:20Z, `95e4e1d`) 읽기 대기 p99 는 1~2초 구간에서 200~500 ms 구간으로 내려왔다. RFC-0204 의 목표(100 ms)보다는 아직 높다.
+
+- 같은 60초 창(18:37Z)에서 읽기 175건이 돈 시간의 합은 12.25초였다. 같은 창에서 읽기 풀 domain 둘이 fiber 를 돌린 시간은 2.16초였다. 읽기 worker 는 거의 놀았는데 읽기가 기다렸다.
+- 가설: 읽기 계산은 대부분 `Executor_pool_ref.submit_or_inline` 의 기본 weight 1.0 으로 들어간다(`Dashboard_cache`, `run_dashboard_compute`). Eio worker 는 받아 둔 job 의 weight 합이 1.0 이 되면, 그 job 이 기다리고 있어도 새 job 을 받지 않는다. 그래서 1.0 읽기 두 개가 I/O 를 기다리면 domain 이 놀아도 다음 읽기가 줄을 선다.
+- 가설만으로 weight 를 바꾸지 않는다. 독립 리뷰(#46483)가 짚었듯 0.18 은 읽기 lane 전체(0.05 로 들어가는 `submit_io_or_inline` 35곳 포함)를 잰 값이다. 기본값이 바뀌는 job 은 `dashboard_snapshot.ml` 이 "CPU-heavy" 라 부르는 계산이다. 낮은 weight 를 주면 위에 적은 대로 멈춘 job 의 domain 에 job 이 더 쌓인다. 같은 domain 의 systhread 가 쓴 CPU 는 fiber 시간에 잡히지 않는다.
+- 그래서 먼저 잰다. `Pool_wait` 가 lane 마다 진행 중인 job 의 weight 합(Eio 와 같은 백만분의 1 단위)을 들고, 제출 순간의 값으로 대기를 0·1·2·3 이상 worker 몫으로 나눠 센다. 실행 시간은 선언한 weight 가 0.5 미만(0.05 I/O job)인지 이상(CPU job 과 1.0 기본값)인지로 나눠 센다.
+- 판정: 배포 뒤 한 시간 동안 읽기 풀(worker 2)의 대기를 본다.
+  - 2 worker 이상 진행 중일 때 들어온 읽기가 긴 대기의 대부분이면 가설이 맞다. 그때는 1.0 job 의 실행 시간과 읽기 domain 의 fiber 시간을 같은 창에서 비교해 weight 를 정한다.
+  - 자리가 있을 때 들어온 읽기도 길게 기다리면 capacity 가 아닌 다른 원인이다(STW, domain 깨우기, systhread 가 잡은 domain lock).
+
 ## 5. 순서
 
 1. L1 — 코드가 작고, A/B 로 효과를 이미 봤다.

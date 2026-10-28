@@ -5,11 +5,25 @@
     Recording measures only. Nothing reads these values to decide where or
     whether work runs. *)
 
-val record_wait : Pool_lane.lane -> Mtime.span -> unit
-(** From the submit call to the worker entering the job. *)
+val in_flight : Pool_lane.lane -> int
+(** The weight, in millionths as Eio's executor counts it, of the lane's jobs
+    that entered a worker and have not returned. RFC-0474 L4a. *)
 
-val record_run : Pool_lane.lane -> Mtime.span -> unit
-(** From the worker entering the job to the job returning or raising. *)
+val enter : Pool_lane.lane -> weight:float -> unit
+(** A job of [weight] entered a worker. *)
+
+val leave : Pool_lane.lane -> weight:float -> unit
+(** That job returned or raised. *)
+
+val record_wait : Pool_lane.lane -> in_flight:int -> Mtime.span -> unit
+(** From the submit call to the worker entering the job; [in_flight] is
+    {!in_flight} read at the submit call. The wait is also counted by the
+    workers' worth of weight that was in flight: 0, 1, 2, and 3 or more. *)
+
+val record_run : Pool_lane.lane -> weight:float -> Mtime.span -> unit
+(** From the worker entering the job to the job returning or raising, also
+    counted by the weight the job declared: below 0.5 (the pools' I/O jobs
+    take 0.05) or 0.5 and above (CPU jobs and the 1.0 default). *)
 
 val record_abandoned : Pool_lane.lane -> Mtime.span -> unit
 (** From the submit call to the caller's cancellation, for a submission no
@@ -17,8 +31,10 @@ val record_abandoned : Pool_lane.lane -> Mtime.span -> unit
     client that gave up ended them, so they are often the longest. *)
 
 val to_json : unit -> Yojson.Safe.t
-(** [{"bucket_upper_ms": [...], "read": {"wait": h, "run": h, "abandoned": h},
-    "background": {...}}], where [h] is
+(** [{"bucket_upper_ms": [...], "read": {"wait": h, "run": h, "abandoned": h,
+    "wait_by_in_flight_workers": [h0; h1; h2; h3], "run_declared_io": h,
+    "run_declared_cpu": h, "in_flight_workers": w}, "background": {...}}],
+    where [w] is {!in_flight} in workers and [h] is
     [{"count", "sum_ms", "max_ms", "buckets": [n0; ...; n_overflow]}]:
     bucket [i] counts spans at most [bucket_upper_ms.(i)] and above the bound
     before it; the last bucket counts spans above every bound.

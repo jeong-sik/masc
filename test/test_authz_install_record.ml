@@ -145,6 +145,23 @@ let file_name_follows_the_canonical_base_path () =
       (I.file_path through_link))
 ;;
 
+let same_directory_name_under_two_parents () =
+  with_dirs (fun dirs ->
+    let under parent =
+      let dir = Filename.concat dirs.root parent in
+      Unix.mkdir dir 0o700;
+      let base = Filename.concat dir "workspace" in
+      Unix.mkdir base 0o700;
+      locate_in dirs ~base_path:base
+    in
+    let first = under "one"
+    and second = under "two" in
+    Alcotest.(check bool) "different files" false
+      (String.equal (I.file_path (record_of first)) (I.file_path (record_of second)));
+    write_ok first ~external_store:"/stores/one";
+    Alcotest.(check (option string)) "the other has no record" None (read_ok second))
+;;
+
 let two_base_paths_have_two_records () =
   with_dirs (fun dirs ->
     let other = Filename.concat dirs.root "other" in
@@ -394,6 +411,7 @@ let () =
         ; Alcotest.test_case "base path that is not there" `Quick unresolvable_base_path
         ; Alcotest.test_case "file name" `Quick file_name_follows_the_canonical_base_path
         ; Alcotest.test_case "two base paths" `Quick two_base_paths_have_two_records
+        ; Alcotest.test_case "same directory name" `Quick same_directory_name_under_two_parents
         ] )
     ; ( "read and write"
       , [ Alcotest.test_case "missing record" `Quick missing_record

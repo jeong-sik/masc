@@ -619,14 +619,18 @@ let protect_recovered_paste_for_current_keeper state =
    The spill is dropped whether or not its line was still there. An operator
    who deleted the placeholder meant to drop the paste, and a spill that
    outlived the draft would attach itself to the next message. *)
-let materialise_spilled_paste state text =
+let inline_spilled_paste state text =
   match state.msg_spill with
   | None -> text
   | Some spill ->
-      state.msg_spill <- None;
       Option.value ~default:text
         (Masc_tui_paste_spill.substituted spill
            ~replacement:spill.Masc_tui_paste_spill.text text)
+
+let materialise_spilled_paste state text =
+  let text = inline_spilled_paste state text in
+  state.msg_spill <- None;
+  text
 
 (* Where this process stages a spilled paste for the keeper.
 
@@ -659,6 +663,7 @@ let keeper_staging_dir ~base_path ~keeper_name =
      [Sys.is_directory] raises on a path that went away between the two
      calls. Neither is a reason to lose the paste -- the caller falls back to
      sending the text. *)
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception _ -> None
   | profile -> (
       let dir =
@@ -715,65 +720,95 @@ let write_file path contents =
    Every failure falls back to sending the text itself. A paste that reached
    the keeper as a large message is worse than one it can read off disk; a
    paste that reached it as neither is the thing this must not do. *)
-let place_spilled_paste state ~base_path ~keeper_name text =
+let place_spilled_paste state ~keeper_name ~staging_dir spill text =
+  let inline () =
+    Option.value ~default:text
+      (Masc_tui_paste_spill.substituted spill
+         ~replacement:spill.Masc_tui_paste_spill.text text)
+  in
+  match Masc_tui_paste_spill.substituted spill
+          ~replacement:(Masc_tui_paste_spill.message_line spill) text
+  with
+  | None ->
+    (* The placeholder is gone: the operator deleted it, and there is
+       nothing to hand the keeper. *)
+    text
+  | Some pointed -> (
+    match staging_dir with
+    | None ->
+        report_action state "system"
+          (Printf.sprintf
+             "%s has no workspace on disk; sending the pasted text in \
+              the message instead"
+             (Keeper_chat.terminal_safe_text keeper_name));
+        inline ()
+    | Some (dir, profile) -> (
+        let path =
+          Filename.concat dir spill.Masc_tui_paste_spill.file_name
+        in
+        match write_file path spill.Masc_tui_paste_spill.text with
+        | Error detail ->
+            report_action state "error"
+              (Printf.sprintf
+                 "Could not write the pasted text for %s (%s); sending \
+                  it in the message instead"
+                 (Keeper_chat.terminal_safe_text keeper_name) detail);
+            inline ()
+        | Ok () ->
+            (match profile with
+             | Keeper_sandbox_config.Docker ->
+                 (* The staged directory is the bind-mounted workspace
+                    itself: written is delivered. *)
+                 report_action state "system"
+                   (Printf.sprintf
+                      "Wrote %s (%d bytes) into %s's workspace"
+                      spill.Masc_tui_paste_spill.file_name
+                      spill.Masc_tui_paste_spill.bytes
+                      (Keeper_chat.terminal_safe_text keeper_name))
+             | Keeper_sandbox_config.Micro_vm
+             | Keeper_sandbox_config.Remote_ssh ->
+                 report_action state "system"
+                   (Printf.sprintf
+                      "Staged %s (%d bytes) for %s; it lands in the \
+                       workspace when the next turn starts"
+                      spill.Masc_tui_paste_spill.file_name
+                      spill.Masc_tui_paste_spill.bytes
+                      (Keeper_chat.terminal_safe_text keeper_name)));
+            pointed))
+
+type prepared_spill = {
+  ps_spill : Masc_tui_paste_spill.t;
+  ps_directory : (string * Keeper_sandbox_config.sandbox_profile) option;
+}
+
+(* Resolving a Keeper's sandbox may yield. Keep the composer and queue intact
+   until the original owner and edit are still current after that read. *)
+let prepare_spilled_paste state ~base_path ~keeper_name ~still_allowed text =
   match state.msg_spill with
-  | None -> text
-  | Some spill -> (
-      state.msg_spill <- None;
-      let inline () =
-        Option.value ~default:text
-          (Masc_tui_paste_spill.substituted spill
-             ~replacement:spill.Masc_tui_paste_spill.text text)
+  | None -> Ok None
+  | Some spill ->
+      let authority = state.workspace_authority in
+      let workspace = chat_input_workspace state in
+      let target = state.msg_target_keeper_name in
+      let revision = Masc_tui_message_input.revision state.msg_input in
+      let edit = current_recall_edit state in
+      let control = keeper_chat_control_generation state keeper_name in
+      let directory =
+        match Masc_tui_paste_spill.substituted spill
+                ~replacement:(Masc_tui_paste_spill.message_line spill) text with
+        | None -> None
+        | Some _ -> keeper_staging_dir ~base_path ~keeper_name
       in
-      match Masc_tui_paste_spill.substituted spill
-              ~replacement:(Masc_tui_paste_spill.message_line spill) text
-      with
-      | None ->
-          (* The placeholder is gone: the operator deleted it, and there is
-             nothing to hand the keeper. *)
-          text
-      | Some pointed -> (
-          match keeper_staging_dir ~base_path ~keeper_name with
-          | None ->
-              report_action state "system"
-                (Printf.sprintf
-                   "%s has no workspace on disk; sending the pasted text in \
-                    the message instead"
-                   (Keeper_chat.terminal_safe_text keeper_name));
-              inline ()
-          | Some (dir, profile) -> (
-              let path =
-                Filename.concat dir spill.Masc_tui_paste_spill.file_name
-              in
-              match write_file path spill.Masc_tui_paste_spill.text with
-              | Error detail ->
-                  report_action state "error"
-                    (Printf.sprintf
-                       "Could not write the pasted text for %s (%s); sending \
-                        it in the message instead"
-                       (Keeper_chat.terminal_safe_text keeper_name) detail);
-                  inline ()
-              | Ok () ->
-                  (match profile with
-                   | Keeper_sandbox_config.Docker ->
-                       (* The staged directory is the bind-mounted workspace
-                          itself: written is delivered. *)
-                       report_action state "system"
-                         (Printf.sprintf
-                            "Wrote %s (%d bytes) into %s's workspace"
-                            spill.Masc_tui_paste_spill.file_name
-                            spill.Masc_tui_paste_spill.bytes
-                            (Keeper_chat.terminal_safe_text keeper_name))
-                   | Keeper_sandbox_config.Micro_vm
-                   | Keeper_sandbox_config.Remote_ssh ->
-                       report_action state "system"
-                         (Printf.sprintf
-                            "Staged %s (%d bytes) for %s; it lands in the \
-                             workspace when the next turn starts"
-                            spill.Masc_tui_paste_spill.file_name
-                            spill.Masc_tui_paste_spill.bytes
-                            (Keeper_chat.terminal_safe_text keeper_name)));
-                  pointed)))
+      if state.workspace_authority <> authority
+         || chat_input_workspace state <> workspace
+         || state.msg_target_keeper_name <> target
+         || not (Masc_tui_message_input.has_revision state.msg_input revision)
+         || not (Option.exists (fun current -> current == spill) state.msg_spill)
+         || current_recall_edit state <> edit
+         || keeper_chat_control_generation state keeper_name <> control
+         || not (still_allowed ()) then
+        Error "Input changed while preparing the paste; current draft retained"
+      else Ok (Some {ps_spill = spill; ps_directory = directory})
 
 let reset_message_file_changes state keeper_name =
   (* A late alpha response must not populate alpha after alpha -> beta ->
@@ -9423,6 +9458,9 @@ let update_queued_history_text state (request : Keeper_chat.request) =
         else entry)
       state.msg_history
 
+type queued_message_origin = New_input of float | Joined_input of string
+type queued_message_receipt = { qmr_id : string; qmr_origin : queued_message_origin }
+
 let queue_keeper_message state request =
   let submitted_at = Unix.gettimeofday () in
   let joined =
@@ -9453,26 +9491,18 @@ let queue_keeper_message state request =
              ~request_id:merged.Keeper_chat.request_id merged
          with
          | Error _ -> None
-         | Ok queue -> Some (queue, merged)))
+         | Ok queue -> Some (queue, merged, waiting_request.message)))
   in
   match joined with
-  | Some (queue, merged) ->
+  | Some (queue, merged, prefix) ->
       state.msg_queued <- queue;
-      update_queued_history_text state merged;
-      Ok
-        (Chat_queue.length_for_keeper queue
-           ~keeper_name:merged.Keeper_chat.keeper_name)
+      Ok {qmr_id = merged.Keeper_chat.request_id; qmr_origin = Joined_input prefix}
   | None ->
       (match Chat_queue.push state.msg_queued ~submitted_at request with
        | Error _ as error -> error
-       | Ok (queue, waiting) ->
+       | Ok (queue, _) ->
            state.msg_queued <- queue;
-           (* Keep one request-owned session row for recall and the later
-              active turn, but causal projection withholds it from the
-              transcript while the queue owns it. NEXT renders the queue item
-              itself. *)
-           append_user_history_once ~submitted_at state request;
-           Ok waiting)
+           Ok {qmr_id = request.Keeper_chat.request_id; qmr_origin = New_input submitted_at})
 ;;
 
 let queue_keeper_steer state ~causal_parent_request_id request =
@@ -9484,8 +9514,36 @@ let queue_keeper_steer state ~causal_parent_request_id request =
   | Error _ as error -> error
   | Ok (queue, waiting) ->
       state.msg_queued <- queue;
-      append_user_history_once ~submitted_at state request;
-      Ok waiting
+      Ok (waiting, submitted_at)
+;;
+
+(* Publish the request-owned row only after any spill has its final payload. *)
+let publish_queued_message_history state receipt request =
+  match receipt.qmr_origin with
+  | New_input submitted_at -> append_user_history_once ~submitted_at state request
+  | Joined_input _ -> update_queued_history_text state request
+
+(* The queue owns the inline bytes before a file can become visible. Once a
+   file is published, replace only that exact accepted payload; independent
+   queue priority changes are preserved by [replace_recalled_request]. *)
+let stage_accepted_spill state ~keeper_name ~source_text ~prefix ~prepared
+    (accepted : Chat_queue.item) =
+  match prepared with
+  | None -> Ok accepted
+  | Some {ps_spill = spill; ps_directory = staging_dir} ->
+      state.msg_spill <- None;
+      let staged = place_spilled_paste state ~keeper_name ~staging_dir spill source_text in
+      let message = match prefix with None -> staged | Some prior -> prior ^ "\n" ^ staged in
+      let request = {accepted.request with Keeper_chat.message} in
+      (match Chat_queue.replace_recalled_request state.msg_queued ~original:accepted request with
+       | Error detail ->
+           state.msg_spill <- Some spill;
+           Error detail
+       | Ok queue ->
+           state.msg_queued <- queue;
+           match Chat_queue.find queue ~request_id:request.request_id with
+           | Some item -> Ok item
+           | None -> Error "accepted input disappeared while staging the paste")
 ;;
 
 let launch_waiting_keeper_input state ~mailbox ~keeper_name =
@@ -9569,9 +9627,18 @@ let start_keeper_steer ?keeper_name state ~base_path ~mailbox text =
           report_action state "error"
             "/steer needs a turn currently streaming for this Keeper"
       | Some active_request, Some _live ->
-          let text =
-            place_spilled_paste state ~base_path ~keeper_name text
-          in
+          let source_text = text in
+          (match prepare_spilled_paste state ~base_path ~keeper_name
+              ~still_allowed:(fun () ->
+                state.workspace_identity = Workspace_identity_match
+                && keeper_available_for_new_message state keeper_name
+                && not (keeper_admission_pending state keeper_name)
+                && not (List.mem_assoc keeper_name state.keeper_chat_control_pending)
+                && Option.exists (( = ) active_request) (inflight_for state keeper_name)
+                && Option.is_some (live_for_keeper state keeper_name)) source_text with
+           | Error detail -> report_action state "error" detail
+           | Ok prepared ->
+          let text = inline_spilled_paste state text in
           let request =
             let attachments, references = pending_attachments state in
             Keeper_chat.create_request ~attachments ~references
@@ -9583,7 +9650,22 @@ let start_keeper_steer ?keeper_name state ~base_path ~mailbox text =
                request
            with
            | Error detail -> report_action state "error" detail
-           | Ok waiting ->
+           | Ok (waiting, submitted_at) ->
+             (match Chat_queue.find state.msg_queued ~request_id:request.request_id with
+              | None -> report_action state "error" "Accepted steer is no longer in the local queue"
+              | Some accepted ->
+               match stage_accepted_spill state ~keeper_name ~source_text
+                   ~prefix:None ~prepared accepted with
+               | Error detail ->
+                   (match Chat_queue.find state.msg_queued ~request_id:accepted.request.request_id with
+                    | Some current when current.request = accepted.request ->
+                        append_user_history_once ~submitted_at state current.request
+                    | Some _ | None -> ());
+                   protect_recovered_paste_for_current_keeper state;
+                   report_action state "error"
+                     ("Steer was accepted but changed while staging; inspect the queue before retrying: " ^ detail)
+               | Ok staged ->
+               append_user_history_once ~submitted_at state staged.request;
                clear_staged_attachments state;
                clear_current_message_draft state;
                report_action state "message"
@@ -9594,12 +9676,12 @@ let start_keeper_steer ?keeper_name state ~base_path ~mailbox text =
                if run_next_busy_for state keeper_name then
                  report_action state "info" "A run-next request is pending; this steer remains queued"
                else
-                 match Chat_queue.take state.msg_queued ~request_id:request.request_id with
+                 match Chat_queue.take state.msg_queued ~request_id:staged.request.request_id with
                  | None -> report_action state "error" "Steer queue changed before submission"
                  | Some (item, rest) ->
                    state.msg_queued <- rest;
-                   queue_run_next_on_admission state request;
-                   launch_keeper_request ~promoted:item state ~mailbox request))
+                   queue_run_next_on_admission state item.request;
+                   launch_keeper_request ~promoted:item state ~mailbox item.request))))
 ;;
 (* Send one line to one keeper.
 
@@ -9629,11 +9711,16 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
         (Printf.sprintf "Cannot send: Keeper %s is no longer registered"
            (Keeper_chat.terminal_safe_text target))
   | Some target -> (
-      (* Now that the keeper is known, a spilled paste can be written where
-         that keeper can read it. Above this point there is no answer to
-         "whose workspace", and a file in the wrong one is a message pointing
-         at nothing. *)
-      let text = place_spilled_paste state ~base_path ~keeper_name:target text in
+      (* Admission borrows the whole paste inline. Its file is staged only
+         after this Keeper's queue accepts the request. *)
+      let source_text = text in
+      match prepare_spilled_paste state ~base_path ~keeper_name:target
+          ~still_allowed:(fun () ->
+            state.workspace_identity = Workspace_identity_match
+            && keeper_available_for_new_message state target) source_text with
+      | Error detail -> report_action state "error" detail
+      | Ok prepared ->
+      let text = inline_spilled_paste state text in
       match current_recall_edit state with
       | Some editing
         when String.equal editing.Chat_queue.request.Keeper_chat.keeper_name
@@ -9653,8 +9740,24 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
            with
            | Error detail -> report_action state "error" detail
            | Ok queue ->
-               clear_staged_attachments state;
                state.msg_queued <- queue;
+               (match Chat_queue.find queue ~request_id:request.request_id with
+                | None -> report_action state "error" "Accepted edit is no longer in the local queue"
+                | Some accepted ->
+                 match stage_accepted_spill state ~keeper_name:target
+                     ~source_text ~prefix:None ~prepared accepted with
+                 | Error detail ->
+                     (match Chat_queue.find state.msg_queued ~request_id:accepted.request.request_id with
+                      | Some current when current.request = accepted.request ->
+                          update_queued_history_text state current.request
+                      | Some _ | None -> ());
+                     protect_recovered_paste_for_current_keeper state;
+                     report_action state "error"
+                       ("Edit was accepted but changed while staging; inspect the queue before retrying: " ^ detail)
+                 | Ok staged ->
+               let request = staged.Chat_queue.request in
+               let text = request.Keeper_chat.message in
+               clear_staged_attachments state;
                clear_current_recall_edit state;
                let safe_text =
                  Keeper_chat.terminal_safe_text ~preserve_newlines:true text
@@ -9680,12 +9783,7 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
                clear_current_message_draft state;
                report_action state "message"
                  (Printf.sprintf "Updated queued %s for %s"
-                    (match
-                       Option.value
-                         (Option.map (fun item -> item.Chat_queue.intent)
-                            (Chat_queue.find queue ~request_id:request.request_id))
-                         ~default:editing.Chat_queue.intent
-                     with
+                    (match staged.Chat_queue.intent with
                      | Chat_queue.Next | Chat_queue.Next_without_auto_priority -> "NEXT"
                      | Chat_queue.Run_next _ -> "RUN-NEXT"
                      | Chat_queue.Steer_after_interrupt | Chat_queue.Steer_without_priority -> "STEER")
@@ -9703,7 +9801,7 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
                    state.keeper_interactive_waiting;
                (* Editing keeps the item's queue position. A newer recalled
                   line cannot pass an older one while its admission is held. *)
-               launch_waiting_keeper_input state ~mailbox ~keeper_name:target)
+               launch_waiting_keeper_input state ~mailbox ~keeper_name:target))
       | Some _ ->
           report_action state "error"
             "Queued edit belongs to another Keeper; switch back or press Ctrl-U"
@@ -9728,14 +9826,25 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
            pending admission while retaining the queued message itself. *)
         (match queue_keeper_message state request with
          | Error detail -> report_action state "error" detail
-         | Ok _ ->
-           clear_staged_attachments state;
-           let queued = match Chat_queue.find state.msg_queued ~request_id:request.request_id with
-             | Some _ as item -> item
-             | None -> Chat_queue.join_target state.msg_queued ~keeper_name:target in
-           (match queued with
+         | Ok receipt ->
+           let prefix = match receipt.qmr_origin with
+             | New_input _ -> None | Joined_input prefix -> Some prefix in
+           (match Chat_queue.find state.msg_queued ~request_id:receipt.qmr_id with
             | None -> report_action state "error" "Message staging changed before submission"
-            | Some item ->
+            | Some accepted ->
+             match stage_accepted_spill state ~keeper_name:target
+                 ~source_text ~prefix ~prepared accepted with
+             | Error detail ->
+                 (match Chat_queue.find state.msg_queued ~request_id:accepted.request.request_id with
+                  | Some current when current.request = accepted.request ->
+                      publish_queued_message_history state receipt current.request
+                  | Some _ | None -> ());
+                 protect_recovered_paste_for_current_keeper state;
+                 report_action state "error"
+                   ("Input was accepted but changed while staging; inspect the queue before retrying: " ^ detail)
+             | Ok item ->
+              publish_queued_message_history state receipt item.request;
+              clear_staged_attachments state;
               state.keeper_observed_interrupts <- List.filter (fun observed -> observed.oi_keeper <> target)
                 state.keeper_observed_interrupts;
               let request_id = item.Chat_queue.request.request_id in

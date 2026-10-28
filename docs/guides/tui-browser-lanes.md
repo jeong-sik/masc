@@ -52,6 +52,24 @@ replacement, and `BrowserSession action=goal_status` reads the stored binding
 without a running browser worker. Automatic per-Goal Space allocation is not
 implemented.
 
+The connection list reads metadata sequentially from every visible browser worker.
+Keeper callers can request the same inventory with `BrowserTabs {"mode":"connections"}`
+alone, then retain an observed `clientId` for ordinary tab discovery and actions.
+This mode accepts no lane, client, tab or required-action options and sends no
+browser command. It does not read Page documents, create a Space or reclaim control.
+The HTTP connection list continues to expose Shared installations only.
+
+`inventoryIssues` reports unavailable, unreadable and unready workers. Valid
+clients from other workers remain available for a manual choice; a client UUID
+reported by different workers is omitted from those choices and reported as a
+duplicate. Any issue refuses automatic selection, rather than reporting that no
+browser exists. With multiple complete workers, browse can recommend a concrete
+live UUID; owned work routes require a worker scope and are not recommended.
+Observations grant no authority: a later explicit request revalidates the worker.
+The TUI keeps the current Page and pending read while updating inventory issues.
+An unreadable issue report preserves validated client rows and refuses automatic
+fallback. `inventoryComplete` is the server's derived summary of its issue list.
+
 The picker keeps **Automatic**, **Work browser**, and connected browser identities
 in the primary choices. Work browser uses the server's work decision, with a
 separate login session. Merely selecting it does not launch a new window; `o`

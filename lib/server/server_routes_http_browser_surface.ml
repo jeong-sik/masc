@@ -45,8 +45,7 @@ let clients_listing ~config =
   let bidi_host=Browser_bidi_host_status.observe ~access:view_access
     ~base_path:config.Workspace.base_path
     ~configuration:(Runtime.browser_configuration ()) in
-  view ~config ~principal:Lane_addon_call_context.Operator
-    (fun host _ -> Browser_addon_view.clients ~bidi_host host) `Null
+  Browser_addon_view.connection_inventory ~config ~access:view_access ~bidi_host
 let reply_view request reqd result = match result with
   | Tool_result.Completed _ -> respond_json_value_with_cors request reqd
       (`Assoc ["ok",`Bool true;"data",Tool_result.data result])

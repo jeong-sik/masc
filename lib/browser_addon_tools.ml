@@ -207,11 +207,16 @@ let prepare ~upload_paths tool json =
             Error "live navigation needs the tabId of a tab this connection opened with open_tab"
         | (Automatic|Exact (B.Live_route _|Automation_route|Stagehand_route)),(None|Some _) -> Ok () in
       prepared request Raw (B.Page_goto {url;tab_id=request.tab_id})
-type metadata_request = Bind_goal of {goal_id:string;client_id:B.client_id} | Goal_status of string
+type metadata_request = Connections | Bind_goal of {goal_id:string;client_id:B.client_id} | Goal_status of string
 type request = Browser of prepared | Metadata of metadata_request
 let prepare_request ~upload_paths tool json =
   let* _=Lane_addon_action.canonical json in
   match tool,json with
+  | C.Tabs,`Assoc supplied when List.mem_assoc "mode" supplied ->
+      let* fields=fields ["mode"] json in
+      (match List.assoc_opt "mode" fields with
+       | Some (`String "connections") -> Ok (Metadata Connections)
+       | None|Some _ -> Error "BrowserTabs mode must be connections; omit mode for tab discovery")
   | C.Session,`Assoc supplied when List.mem (List.assoc_opt "action" supplied)
       [Some (`String "bind_goal");Some (`String "goal_status")] ->
       let* goal_id=match List.assoc_opt "goalId" supplied with
@@ -304,6 +309,17 @@ let handle ?initial_goal_ids ?upload_paths ~config ~access ~principal ~reserved 
             | Error error -> Host.error_result ~start_time error
             | Ok host -> run host in
           match request with
+          | Metadata Connections ->
+              (match principal with
+               | Lane_addon_call_context.Anonymous -> refuse "browser calls require verified host authority"
+               | Keeper _|Authenticated_agent _|Host_actor _|Operator ->
+                 match Host.connection_inventory ~config ~access with
+                 | Error (Host.Snapshot_unavailable detail) -> Tool_result.make_err ~tool_name ~start_time
+                     ~class_:Tool_result.Dependency_unavailable ~effect_disposition:Tool_result.Proven_pre_effect detail
+                 | Error (Host.Snapshot_unreadable detail) -> Tool_result.make_err ~tool_name ~start_time
+                     ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect detail
+                 | Ok inventory -> Tool_result.make_ok ~tool_name ~start_time
+                     ~data:(Browser_connection_inventory.to_json inventory) ())
           | Metadata (Bind_goal {goal_id;client_id}) -> with_host (fun host ->
               (match Host.bind_goal_space host ~goal_id ~client_id with
                | Error error -> refuse (Browser_goal_space.error_message error)

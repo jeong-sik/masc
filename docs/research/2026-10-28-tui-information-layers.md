@@ -158,21 +158,29 @@ The follow-up gives Queue and supported Keeper chat their own notice space in
 an existing border or padding row, leaving the footer and its confirmation
 intact. A [manual observation of source 234b647](../evidence/research/tui-information-layers-2026-10-28/populated-fixture/candidate-234b647/README.md)
 showed a rejected paste in each location in an isolated fixture; it is not proof
-of every timing or terminal. A later source change uses the existing bottom row
-for the same notice on screens and overlays drawn through `surface_chrome`,
-including Help and Play. That extension has been checked with a source-derived
-probe and source review, but has not been built or observed in a terminal.
+of every timing or terminal. Later source changes use existing bottom rows on
+screens and overlays drawn through `surface_chrome` and on the manual Config
+renderers. Compact mode can use a third row for recovery and a fourth for a
+rejection while a control sequence is pending. Those extensions have been
+checked with source-derived probes and source review, but have not been built
+or observed in a terminal.
 
-Custom-rendered screens, including several Config tabs, unsupported chat,
-compact mode, external image/MSX screens and widths too narrow for the whole
+Other custom-rendered screens, unsupported chat, external image/MSX screens,
+compact frames with insufficient rows, and widths too narrow for a complete
 notice remain outside that separate-row coverage. Existing action and form/save
 feedback keep priority there, so a retry or Ctrl-C recovery hint can remain out
-of view even at a normal width. A one-off calculation of the actual footer fitter
-with dependency stubs found that, at 80 columns, a workspace-unconfirmed
+of view even at a normal width. A one-off calculation of the actual footer
+fitter with dependency stubs found that, at 80 columns, a workspace-unconfirmed
 warning, Config's Enter/Esc keys and a `/hello` search prefix leave no room for
-either complete hint when offered. If a displayed notice is hidden immediately
-before its timeout but the next observation is after it, the state transition
-cannot determine which event happened first.
+either complete hint when offered. That calculation predates the Config-row
+change. If a displayed notice is hidden immediately before its timeout but the
+next observation is after it, the state transition cannot determine which event
+happened first.
+
+Source review also found a pre-existing quit-confirmation concern: a `q`
+confirmation can remain armed after its ordinary notice expires, so a later `q`
+can exit without that reminder. Unsent input or drafts could be lost. This was
+not reproduced in the fixture and is not fixed by the notice-row changes.
 
 A separate source review found an existing chat row-budget discrepancy: with
 a folded turn, full tool visibility and pending gate effects, the budget omits

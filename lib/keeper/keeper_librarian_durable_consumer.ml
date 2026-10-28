@@ -510,7 +510,7 @@ let tool_observations = Capture.tool_observations
 
 let current_memory ~keepers_dir ~keeper_name =
   match
-    Domain_pool_ref.submit_io_or_inline (fun () ->
+    Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
       Keeper_memory_os_current.read_classified ~keepers_dir ~keeper_id:keeper_name)
   with
   | Io_unreadable { detail } -> Error (Memory_snapshot_unreadable detail)
@@ -535,7 +535,7 @@ let current_memory ~keepers_dir ~keeper_name =
 
 let write_progress ~write ~keepers_dir ~keeper_name progress outcome =
   match
-    Domain_pool_ref.submit_io_or_inline (fun () ->
+    Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
       write ~keepers_dir ~keeper_id:keeper_name progress)
   with
   | Ok () -> Ok (outcome progress)
@@ -590,7 +590,7 @@ let read_fragments ~config (official : R.official_line list) =
   let session_dir trace_id = Filename.concat (Keeper_fs.session_store_path config) trace_id in
   let read_file ~trace_id file =
     let* lines =
-      Domain_pool_ref.submit_io_or_inline (fun () ->
+      Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
         Keeper_turn_fragments.read ~session_dir:(session_dir trace_id) file)
       |> Result.map_error (fun detail -> Fragment_store_unreadable { trace_id; file; detail })
     in
@@ -644,7 +644,7 @@ let checkpoint_message_floor ?cli_runner ~config ~keeper_name ~lines ~progress ~
                && range.start_atom <= atom && atom < range.end_atom ->
         Unread.for_atom ~trace_id ~history_start_boundary_line ~atom ~message_in_atom ~messages ~reasons
       | Unread.Atom _ | Unread.Official_turn _ -> Error "message is outside the selected checkpoint range" in
-    let* unread_messages = Domain_pool_ref.submit_io_or_inline (fun () ->
+    let* unread_messages = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
       Current.read_unread_messages ~keepers_dir ~keeper_id:keeper_name)
       |> Result.map_error (fun detail -> detail,[]) in
     Floor.infer ?cli_runner ~base_path:config.Workspace.base_path ~keepers_dir ~keeper_name
@@ -657,7 +657,7 @@ let checkpoint_message_floor ?cli_runner ~config ~keeper_name ~lines ~progress ~
     let source = Current.Atom_program_source {range;checkpoint=messages} in
     let committed = ref false in
     let publication = Eio.Cancel.protect (fun () ->
-      Domain_pool_ref.submit_io_or_inline (fun () ->
+      Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
         (* The selected trace may already be retired. Lock its actual source,
            not the current Keeper metadata trace, and do not reenter its loader. *)
         let session_dir = Filename.concat (Keeper_fs.session_store_path config) range.trace_id in
@@ -732,7 +732,7 @@ let official_message_floor ?cli_runner ~config ~keeper_name ~lines ~progress ~of
   let failure detail extra = Memory_refused (reports @ extra @ [floor_refusal detail]) in
   let inferred =
     let open Result.Syntax in
-    let* unread_messages = Domain_pool_ref.submit_io_or_inline (fun () ->
+    let* unread_messages = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
       Current.read_unread_messages ~keepers_dir ~keeper_id:keeper_name)
       |> Result.map_error (fun detail -> detail,[]) in
     Floor.infer ?cli_runner ~base_path:config.Workspace.base_path ~keepers_dir ~keeper_name
@@ -745,7 +745,7 @@ let official_message_floor ?cli_runner ~config ~keeper_name ~lines ~progress ~of
     let source = Current.Official_program_source {range;selected_turns} in
     let committed = ref false in
     let publication = Eio.Cancel.protect (fun () ->
-      Domain_pool_ref.submit_io_or_inline (fun () ->
+      Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
         let session_dir = Filename.concat (Keeper_fs.session_store_path config) trace_id in
         Keeper_checkpoint_store.with_session_lock ~session_dir (fun _ ->
           (* The same session lock excludes both real history writers. Keep
@@ -880,7 +880,7 @@ let recover_official_progress
       then Error Committed_official_range_mismatch
       else
         let official = { O.boundary_line = end_line } in
-        match Domain_pool_ref.submit_io_or_inline (fun () ->
+        match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
           write ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name official)
         with
         | Error error -> Error (Official_progress_write_failed error)
@@ -905,19 +905,19 @@ let read_positions ~config ~keeper_name =
     Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path
   in
   let* lines =
-    Domain_pool_ref.submit_io_or_inline (fun () ->
+    Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
       Keeper_turn_boundaries.read
         ~keepers_dir:runtime_keepers_dir
         ~keeper_id:keeper_name)
     |> Result.map_error (fun detail -> Boundary_log_unreadable detail)
   in
   let* progress =
-    Domain_pool_ref.submit_io_or_inline (fun () ->
+    Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
       P.read ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name)
     |> Result.map_error (fun error -> Progress_unreadable error)
   in
   let* official_cursor =
-    Domain_pool_ref.submit_io_or_inline (fun () ->
+    Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
       Keeper_librarian_official_progress.read
         ~keepers_dir:runtime_keepers_dir
         ~keeper_id:keeper_name)
@@ -929,7 +929,7 @@ let read_positions ~config ~keeper_name =
 (* The Keeper identity comes from the same read that refuses a blank name,
    so a pass that has its metadata also has the id the Librarian is told. *)
 let read_meta ~config ~keeper_name =
-  match Domain_pool_ref.submit_io_or_inline (fun () ->
+  match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
     Keeper_meta_store.read_effective_meta_presence_named config keeper_name) with
   | Ok (keeper_id, Keeper_meta_store.Meta_present meta) -> Ok (keeper_id, meta)
   | Ok (_, Keeper_meta_store.Meta_absent) -> Error Keeper_meta_absent
@@ -950,7 +950,7 @@ let read_meta ~config ~keeper_name =
    cannot read instead of walking past turns it could have read. *)
 let load_current_checkpoint ~config ~trace_id =
   let session_dir = Filename.concat (Keeper_fs.session_store_path config) trace_id in
-  Domain_pool_ref.submit_io_or_inline (fun () ->
+  Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
     Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id:trace_id
     |> Keeper_checkpoint_store.saved_history)
 ;;
@@ -963,7 +963,7 @@ type captured_checkpoint =
 let load_captured_checkpoint ~config ~trace_id =
   let module C = Keeper_checkpoint_store in
   let session_dir = Filename.concat (Keeper_fs.session_store_path config) trace_id in
-  match Domain_pool_ref.submit_io_or_inline (fun () ->
+  match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
     C.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_id |> C.saved_history_of_ref) with
   | Ok (History.Read snapshot) -> Ok (Captured_checkpoint snapshot)
   | Ok (History.Superseded _) -> Ok Superseded_checkpoint
@@ -1048,11 +1048,11 @@ let consume_one_with_extent
   in
   let cursor_error detail = Counterpart_observations_unreadable
     (Keeper_librarian_input_sources.External_cursor_failed detail) in
-  let* _ = Domain_pool_ref.submit_io_or_inline (fun () ->
+  let* _ = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
     Keeper_memory_os_current.committed_unread_messages ~keepers_dir:memory_keepers_dir
       ~keeper_id:keeper_name)
     |> Result.map_error (fun detail -> Memory_snapshot_unreadable detail) in
-  let* external_cursor = Domain_pool_ref.submit_io_or_inline (fun () ->
+  let* external_cursor = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
     Keeper_external_read_cursor.read ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name)
     |> Result.map_error cursor_error in
   let* recovered =
@@ -1445,7 +1445,7 @@ let consume_one_with_extent
            | None -> Ok Nothing_to_read)
         | Some official ->
           (match
-             Domain_pool_ref.submit_io_or_inline (fun () ->
+             Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
                write_official_progress_store
                  ~keepers_dir:runtime_keepers_dir
                  ~keeper_id:keeper_name
@@ -1500,14 +1500,14 @@ let consume_one_with_extent
             | Some official_bound -> official_bound <= ended_at)
       in
       let* counterparts =
-        Domain_pool_ref.submit_io_or_inline (fun () ->
+        Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
           Keeper_librarian_input_sources.capture_counterparts
             ~external_after:(Keeper_external_read_cursor.offset external_cursor)
             ~base_dir:config.Workspace.base_path ~keeper_name ~after ~before:ended_at)
         |> Result.map_error (fun error -> Counterpart_observations_unreadable error) in
       let counterpart_observations = Keeper_librarian_input_sources.counterpart_observations counterparts in
       let external_through = Keeper_librarian_input_sources.external_through counterparts in
-      let* external_before = Domain_pool_ref.submit_io_or_inline (fun () ->
+      let* external_before = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
         Keeper_external_read_cursor.observe ~runtime_keepers_dir ~keeper_name)
         |> Result.map_error cursor_error in
       let* () =
@@ -1517,11 +1517,11 @@ let consume_one_with_extent
           Error (Counterpart_interval_non_monotone { after; before = ended_at })
         | None | Some _ -> Ok ()
       in
-      let* () = Domain_pool_ref.submit_io_or_inline (fun () ->
+      let* () = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
         Keeper_external_read_cursor.prepare ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name external_cursor
           ~through:external_through ~atom:atom_next ~official:official_range_id)
         |> Result.map_error cursor_error in
-      let* external_prepared = Domain_pool_ref.submit_io_or_inline (fun () ->
+      let* external_prepared = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
         Keeper_external_read_cursor.observe ~runtime_keepers_dir ~keeper_name)
         |> Result.map_error cursor_error in
       let input : Keeper_librarian.input =
@@ -1534,7 +1534,7 @@ let consume_one_with_extent
         ; keeper_instructions = meta.instructions
         ; current
         ; working_context =
-            Domain_pool_ref.submit_io_or_inline (fun () ->
+            Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
               Keeper_librarian_context_io.capture
                 ~base_path:config.Workspace.base_path
                 ~keepers_dir:memory_keepers_dir
@@ -1567,11 +1567,11 @@ let consume_one_with_extent
       | Memory_pending -> Ok Pending
       | Memory_refused reports -> Ok (Memory_not_committed reports)
       | Memory_committed ->
-        let* _ = Domain_pool_ref.submit_io_or_inline (fun () ->
+        let* _ = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
           Keeper_memory_os_current.committed_unread_messages
             ~keepers_dir:memory_keepers_dir ~keeper_id:keeper_name)
           |> Result.map_error (fun detail -> Memory_snapshot_unreadable detail) in
-        let* () = Domain_pool_ref.submit_io_or_inline (fun () ->
+        let* () = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
           Keeper_external_read_cursor.acknowledge ~runtime_keepers_dir ~keeper_name)
           |> Result.map_error cursor_error in
         advance ())

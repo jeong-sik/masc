@@ -81,7 +81,7 @@ let boundary path f =
   | Unix.Unix_error (cause,operation,_) ->
     error (Io_failed {path;detail=operation ^ ": " ^ Unix.error_message cause})
   | Sys_error detail | Sqlite3.Error detail | Sqlite3.SqliteError detail -> error (Io_failed {path;detail})
-let blocking f = Domain_pool_ref.submit_io_or_inline f
+let blocking f = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ f
 
 let workspace base_path =
   let base_path = Unix.realpath base_path in

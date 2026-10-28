@@ -79,7 +79,7 @@ let rec store_samples ~masc_root () =
   then cached
   else (
     let samples =
-      Domain_pool_ref.submit_io_or_inline (fun () ->
+      Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
         List.concat_map
           (fun store ->
             let dir = Filename.concat masc_root store in

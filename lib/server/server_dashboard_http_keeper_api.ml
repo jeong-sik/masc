@@ -93,7 +93,7 @@ let keeper_metrics_response ~config ~keeper_name req =
     else
       let reading =
         Eio_guard.with_named_switch "keeper-metrics-tail" (fun () ->
-          Domain_pool_ref.submit_io_or_inline (fun () ->
+          Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
             try
               let store = Keeper_types_support.keeper_metrics_store config keeper_name in
               Dated_jsonl.read_recent_result store limit
@@ -188,7 +188,7 @@ let keeper_turn_record_lookup_response ~config ~keeper_name req =
   let lookup turn_ref =
     let reading =
       Eio_guard.with_named_switch "keeper-exact-turn-record" (fun () ->
-        Domain_pool_ref.submit_io_or_inline (fun () ->
+        Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
           let location =
             Dated_jsonl.Store.keeper (Workspace.dated_store_root config)
               ~keeper:keeper_name Dated_jsonl.Store.Keeper.Turn_records
@@ -245,7 +245,7 @@ let keeper_turn_transcript_lookup_response ~(config : Workspace.config) ~keeper_
        | None -> error `Bad_request "invalid Turn_ref"
        | Some turn_ref ->
            let reading = Eio_guard.with_named_switch "keeper-exact-turn-transcript" (fun () ->
-             Domain_pool_ref.submit_io_or_inline (fun () ->
+             Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
                Keeper_chat_store.load_turn_transcript_result
                  ~base_dir:config.base_path ~keeper_name ~turn_ref)) in
            (match reading with
@@ -432,9 +432,9 @@ let cached_keeper_runtime_trace_json config name ?trace_id ?turn_id ~limit () =
     keeper_runtime_trace_cache_key config name ?trace_id ?turn_id ~limit ()
   in
   let cached =
-    Dashboard_cache.get_or_compute cache_key ~ttl:keeper_hot_path_cache_ttl_s @@ Pool_work.cpu (fun () ->
+    Dashboard_cache.get_or_compute cache_key ~ttl:keeper_hot_path_cache_ttl_s @@ Pool_work.cpu ~name:__FUNCTION__ (fun () ->
       let status, body =
-        Domain_pool_ref.submit_io_or_inline (fun () ->
+        Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
           keeper_runtime_trace_json config name ?trace_id ?turn_id ~limit ())
       in
       `Assoc
@@ -463,7 +463,7 @@ let cached_keeper_config_json config name =
      A TTL cache could hand an editor a superseded token after masc_keeper_up
      or another in-process writer commits, so this authority-bearing endpoint
      always reads the current bytes. *)
-  Domain_pool_ref.submit_io_or_inline (fun () ->
+  Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
     Dashboard_http_keeper.keeper_config_json config name)
 ;;
 
@@ -830,9 +830,9 @@ let keeper_composite_status_of_string_opt = function
 let cached_keeper_composite_json config name =
   let cache_key = keeper_composite_cache_key config name in
   let cached =
-    Dashboard_cache.get_or_compute cache_key ~ttl:keeper_composite_cache_ttl_s @@ Pool_work.cpu (fun () ->
+    Dashboard_cache.get_or_compute cache_key ~ttl:keeper_composite_cache_ttl_s @@ Pool_work.cpu ~name:__FUNCTION__ (fun () ->
       let status, body =
-        Domain_pool_ref.submit_io_or_inline (fun () ->
+        Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
           match Keeper_registry.get ~base_path:config.base_path name with
           | Some entry ->
             `OK, Server_dashboard_http.dashboard_keeper_composite_json ~config entry
@@ -897,7 +897,7 @@ let handle_provider_input_get state req reqd ~name ~surface ~read =
               | json -> json
             in
             (match
-               Domain_pool_ref.submit_cpu_or_inline (fun () ->
+               Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
                  Result.map with_surface (job ()))
              with
              | Ok json ->
@@ -1028,7 +1028,7 @@ let handle_keeper_get_subroutes state req request reqd =
       | Ok cursor, limit_raw ->
         let max_total = Option.bind limit_raw (fun raw -> int_of_string_opt (String.trim raw)) in
         let config = Mcp_server.workspace_config state in
-        let page = Domain_pool_ref.submit_io_or_inline (fun () ->
+        let page = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
           keeper_chat_history_page_json ?max_total config name ~cursor) in
         (match page with
          | Ok page -> Server_auth.respond_json_value_with_cors ~status:`OK request reqd page
@@ -1142,7 +1142,7 @@ let handle_keeper_get_subroutes state req request reqd =
         Dashboard_cache.get_or_compute_payload
           cache_key
           ~ttl:keeper_file_changes_cache_ttl_s
-          (Pool_work.cpu (fun () ->
+          (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
             (* Folds what the store gained since the last call rather than reading
                the window again: this route answered 1.8-8.8s per call on
                2026-09-06 and was the profile's top allocator. *)
@@ -1243,7 +1243,7 @@ let handle_keeper_get_subroutes state req request reqd =
         Printf.sprintf "keeper:tool-stats:%s:%s:%d" masc_root name window_hours
       in
       let payload =
-        Dashboard_cache.get_or_compute_payload cache_key ~ttl:standard_cache_ttl_s (Pool_work.cpu (fun () ->
+        Dashboard_cache.get_or_compute_payload cache_key ~ttl:standard_cache_ttl_s (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
           let since =
             Time_compat.now ()
             -. (float_of_int window_hours *. Masc_time_constants.hour)
@@ -1320,7 +1320,7 @@ let handle_keeper_get_subroutes state req request reqd =
       Server_cached_read_http.respond ~request:req reqd payload
   else if ends_with "/tool-result" then
     let keeper = extract_name "/tool-result" in
-    let status,json = Domain_pool_ref.submit_io_or_inline (fun () ->
+    let status,json = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
       Server_keeper_tool_result.response ~config:(Mcp_server.workspace_config state) ~keeper req) in
     Http.Response.json_value ~status:(status :> Httpun.Status.t)
       ~compress:true ~request:req json reqd
@@ -1335,7 +1335,7 @@ let handle_keeper_get_subroutes state req request reqd =
         reqd
     else
       match
-        Domain_pool_ref.submit_io_or_inline (fun () ->
+        Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
           keeper_tool_call_lookup_response
             ~config:(Mcp_server.workspace_config state) ~keeper_name:name req)
       with
@@ -1353,7 +1353,7 @@ let handle_keeper_get_subroutes state req request reqd =
          Keep ledger/index I/O off the request domain and preserve chronological
          order and row annotation from the existing response contract. *)
       let status, json =
-        Domain_pool_ref.submit_io_or_inline (fun () ->
+        Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
               match tool_call_entries ~keeper_name:name ~limit with
               | Error (Keeper_tool_call_log.Index_unavailable detail) ->
                 `Service_unavailable,
@@ -1437,7 +1437,7 @@ let handle_keeper_get_subroutes state req request reqd =
     else
       let config = Mcp_server.workspace_config state in
       let json =
-        Domain_pool_ref.submit_io_or_inline (fun () ->
+        Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
           Server_keeper_waiting_inventory.dashboard_json_for_keeper
             config
             ~keeper_name:name)
@@ -2105,7 +2105,7 @@ let handle_keeper_get_subroutes state req request reqd =
              tail_scan_lines
          in
          let payload =
-           Dashboard_cache.get_or_compute_payload cache_key ~ttl:keeper_hot_path_cache_ttl_s (Pool_work.cpu (fun () ->
+           Dashboard_cache.get_or_compute_payload cache_key ~ttl:keeper_hot_path_cache_ttl_s (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
              let masc_root = Workspace.masc_dir config in
              let trajectory_lines =
                Trajectory.read_recent_lines ~masc_root ~keeper_name:m.name

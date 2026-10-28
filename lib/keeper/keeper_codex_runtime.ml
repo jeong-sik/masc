@@ -124,7 +124,7 @@ let record_next_shrink_capacity
     ~capacity_bytes
     ~observed_next_shrink_capacity_bytes
     windowed =
-  Domain_pool_ref.submit_cpu_or_inline (fun () ->
+  Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
     let full_bytes =
       List.fold_left
         (fun total message ->
@@ -1041,7 +1041,7 @@ let run_without_lifecycle ~result_scope ~official_task_reference ~composed_conte
        scheduler. Vendor-session frontier provenance needs only its message
        count, not an encoding or digest of the canonical conversation. *)
     let* history, context_frontier, composed_developer_instructions =
-      Domain_pool_ref.submit_cpu_or_inline (fun () ->
+      Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
         let* developer_messages, history =
           project_messages ~assembly:composed_context
             (match thread_mode with
@@ -1533,7 +1533,7 @@ let run_without_lifecycle ~result_scope ~official_task_reference ~composed_conte
                ~session_id:thread_id
                ~updated_at:(Time_compat.now ())))
          ~on_context_submission:(fun observation ->
-           let logical_context_bindings = Domain_pool_ref.submit_cpu_or_inline (fun () ->
+           let logical_context_bindings = Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
              match observation.Runtime_codex_app_server.method_ with
              | Thread_start | Thread_resume -> Keeper_context_submission_link.binding_to_json
                  ~slot:Developer_instructions composed_developer_instructions observation.write

@@ -310,7 +310,7 @@ let scan_present_directory base_path ~load =
    projects every request file, and that must not hold the domain that asked,
    which in the server is the one serving requests. *)
 let list_projected listing base_path =
-  Domain_pool_ref.submit_cpu_or_inline (fun () ->
+  Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
     scan_present_directory base_path ~load:(fun id ->
       File_version_cache.load listing.projections (request_path base_path id)
         ~decode:(fun () -> Result.bind (load_request base_path id) listing.project)))

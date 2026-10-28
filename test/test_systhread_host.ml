@@ -63,7 +63,7 @@ let test_pool_work_keeps_its_own_domain () =
       Fun.protect ~finally:Domain_pool_ref.clear_for_tests (fun () ->
         let job, thread =
           bounded env 10.0 "the pool job" (fun () ->
-            Domain_pool_ref.submit_cpu_or_inline (fun () ->
+            Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
               domain (), Systhread_host.run domain))
         in
         check int "the thread is the job's domain's" job thread)))

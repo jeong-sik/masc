@@ -154,7 +154,7 @@ let read_backlog_with_source_r config =
          §8.8). The stats stay on the fiber: they order the cache
          registration against a concurrent commit, not the decode. *)
       match
-        Domain_pool_ref.submit_cpu_or_inline (fun () ->
+        Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
           Result.map (Option.map (decode_backlog ~path)) (read_json_doc config path))
       with
       | Ok None -> recover (Printf.sprintf "no backlog at %s" path)
@@ -278,7 +278,7 @@ let write_backlog_result ?after_commit config backlog =
      worker, so the stamp is taken next to the primary write rather than
      when the job was queued. *)
   let encoded =
-    Domain_pool_ref.submit_cpu_or_inline (fun () ->
+    Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
       encode_json_pretty
         (backlog_to_yojson
            { backlog with version = committed_revision; last_updated = now_iso () }))
@@ -404,7 +404,7 @@ let repair_backlog_copies_result config backlog =
   let primary_path = backlog_path config in
   let recovery_path = backlog_recovery_path config in
   let encoded =
-    Domain_pool_ref.submit_cpu_or_inline (fun () ->
+    Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
       encode_json_pretty (backlog_to_yojson backlog))
   in
   let write path = match write_encoded_json_commit_result config path encoded with

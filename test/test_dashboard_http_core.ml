@@ -1191,7 +1191,7 @@ let test_run_dashboard_compute_without_pool_stays_in_current_domain () =
       ~sw
       ~clock:(Eio.Stdenv.clock env)
       ~config
-      ~kind:Pool_work.Cpu
+      ~kind:Pool_work.Cpu ~name:__FUNCTION__
       (fun ~config:_ ~sw:_ -> Domain.self ())
   in
   check bool "no pool keeps compute on caller domain" true
@@ -1213,7 +1213,7 @@ let test_run_dashboard_compute_with_pool_uses_executor_domain () =
       ~sw
       ~clock:(Eio.Stdenv.clock env)
       ~config
-      ~kind:Pool_work.Cpu
+      ~kind:Pool_work.Cpu ~name:__FUNCTION__
       (fun ~config:_ ~sw:_ -> Domain.self ())
   in
   check bool "non-PG backend offloads to executor pool domain" true
@@ -1232,14 +1232,14 @@ let test_run_dashboard_compute_nested_cache_does_not_starve () =
       ~sw
       ~clock
       ~config
-      ~kind:Pool_work.Cpu
+      ~kind:Pool_work.Cpu ~name:__FUNCTION__
       (fun ~config:_ ~sw:_ ->
          Dashboard_cache.get_or_compute_with_timeout
            "dashboard-runtime-nested-cache"
            ~ttl:60.0
            ~clock
            ~timeout_sec:0.05
-           (Pool_work.cpu (fun () -> `String "ok")))
+           (Pool_work.cpu ~name:__FUNCTION__ (fun () -> `String "ok")))
   in
   check string "nested cache compute completes on the current worker"
     "ok"
@@ -1658,7 +1658,7 @@ let test_refreshed_operator_snapshot_encodes_on_the_pool_and_hands_on_a_newer_on
     let occupied, occupied_u = Eio.Promise.create () in
     let release, release_u = Eio.Promise.create () in
     Eio.Fiber.fork ~sw (fun () ->
-      Domain_pool_ref.submit_cpu_or_inline (fun () ->
+      Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
         Eio.Promise.resolve occupied_u ();
         Eio.Promise.await release));
     Eio.Promise.await occupied;
@@ -2039,7 +2039,7 @@ let test_dashboard_shell_timeout_fallback_reports_timing_context () =
         Server_dashboard_http_core.dashboard_shell_cache_key config
       in
       ignore
-        (Dashboard_cache.get_or_compute cache_key ~ttl:15.0 (Pool_work.cpu (fun () ->
+        (Dashboard_cache.get_or_compute cache_key ~ttl:15.0 (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
              `Assoc
                [
                  ("error", `String "computation_timeout");
@@ -2073,7 +2073,7 @@ let test_dashboard_shell_timeout_fallback_reports_timing_context () =
 let cache_sentinel key = `Assoc [ ("sentinel", `String key) ]
 
 let seed_cache key =
-  ignore (Dashboard_cache.get_or_compute key ~ttl:60.0 (Pool_work.cpu (fun () -> cache_sentinel key)))
+  ignore (Dashboard_cache.get_or_compute key ~ttl:60.0 (Pool_work.cpu ~name:__FUNCTION__ (fun () -> cache_sentinel key)))
 
 let test_scheduled_automation_reads_its_cache_key () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
@@ -4085,7 +4085,7 @@ let test_execution_parameterized_timeout_keeps_request_metadata () =
   for _attempt = 1 to 3 do
     let timeout = Dashboard_cache.get_or_compute_with_timeout key
         ~ttl:120.0 ~clock ~timeout_sec:0.01
-        (Pool_work.cpu (fun () ->
+        (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
           raise (Dashboard_cache.Compute_timeout { key; role = Dashboard_cache.Compute_owner }))) in
     check bool "timeout does not publish a successful payload" true
       (Dashboard_cache.is_timeout_envelope timeout)
@@ -4678,7 +4678,7 @@ let test_tools_worker_promotes_seed_before_component_ttl () =
         (* Keep the inventory fill pending while the real Tools producer and
            snapshot component run on another worker. No HTTP request warms it. *)
         let returned_seed = Dashboard_cache.get_or_compute_payload_with_timeout key
-          ~ttl:60. ~clock ~timeout_sec:2. (Pool_work.cpu (fun () ->
+          ~ttl:60. ~clock ~timeout_sec:2. (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
             Eio.Promise.resolve started_u ();
             Eio.Promise.await release;
             ready_json)) in
@@ -4688,7 +4688,7 @@ let test_tools_worker_promotes_seed_before_component_ttl () =
         let producer_calls = Atomic.make 0 in
         let owner_domain = (Domain.self () :> int) in
         let refresh () = Eio.Time.with_timeout_exn clock 2. (fun () ->
-          Executor_pool_ref.submit_or_inline (fun () ->
+          Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
             Dashboard_snapshot.For_testing.refresh_tools
               ~now:(fun () -> !now_value) ~ttl:60. ~cache ~config (fun () ->
                 check bool "tools producer remains on a worker" true
@@ -5092,7 +5092,7 @@ let test_tools_routes_serve_prepared_http_representations () =
     Dashboard_snapshot.publish_for_test snapshot;
     (* Keep exact-Keeper fallback cheap while still resolving its live fields. *)
     ignore (Dashboard_cache.get_or_compute ("tools:" ^ config.base_path) ~ttl:60.
-      (Pool_work.cpu (fun () -> `Assoc [ "tool_inventory", `List [] ])));
+      (Pool_work.cpu ~name:__FUNCTION__ (fun () -> `Assoc [ "tool_inventory", `List [] ])));
     let router = Server_routes_http_routes_dashboard.add_routes ~sw
       ~clock:(Eio.Stdenv.clock env) (Lib.Http_server_eio.Router.create ()) in
     let trust_policy = match Server_request_authority.make_trust_policy
@@ -5558,7 +5558,7 @@ let test_respond_cached_read_sends_a_builder_timeout_as_504 () =
       Lib.Http_server_eio.Router.create ()
       |> Lib.Http_server_eio.Router.get "/cached-read" (fun request reqd ->
         Server_routes_http_common.respond_cached_read ~request ~reqd
-          ~cache_key:"test:cached-read-builder-timeout" ~ttl:60.0 (Pool_work.cpu (fun () ->
+          ~cache_key:"test:cached-read-builder-timeout" ~ttl:60.0 (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
             `Assoc
               [ "error", `String Dashboard_cache.timeout_error_code
               ; "key", `String (String.make 9000 'k')

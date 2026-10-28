@@ -1083,7 +1083,7 @@ let assemble_hooks
                    its in-process reader is on this surface. *)
                 let working_context_recall = if not post_tool_round
                  then
-                   Domain_pool_ref.submit_io_or_inline (fun () ->
+                   Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
                      Keeper_librarian_context_recall.render ~base_path:config.base_path
                        ~artifact_reader_available:
                          (recall_tool_available Keeper_runtime_schemas_toml.artifact_read.name)
@@ -1105,7 +1105,7 @@ let assemble_hooks
                         file-locked and has no module-level mutable state, so
                         concurrent first-round assemblies serialize at that
                         file instead of starving the main Eio domain. *)
-                     Domain_pool_ref.submit_io_or_inline (fun () ->
+                     Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
                        Keeper_memory_os_recall.render_if_enabled
                          ~memory_select_route:(Keeper_request_tool_access.route personal_recall_access
                            ~name:"keeper_memory_select")

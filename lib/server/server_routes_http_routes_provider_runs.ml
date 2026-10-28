@@ -106,7 +106,7 @@ let cached_dashboard_json_result ~now:clock ~sync_first ~sw ~cache ~key ~placeho
          with a [Get_context] handler), so [use_rw] resolves normally; when no
          pool is set [submit_or_inline] runs inline in the calling fiber, which
          also carries an Eio context. *)
-      try Executor_pool_ref.submit_or_inline compute with
+      try Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ compute with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn -> Error (Printexc.to_string exn)
     in

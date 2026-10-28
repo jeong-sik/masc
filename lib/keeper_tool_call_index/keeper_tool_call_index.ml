@@ -98,7 +98,7 @@ let blocking f =
   match Fs_compat.execution_context () with
   | Fs_compat.Non_eio -> f ()
   | Fs_compat.Eio_fiber ->
-    Domain_pool_ref.submit_cpu_or_inline (fun () ->
+    Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
       Eio_unix.run_in_systhread ~label:"keeper tool-call read index" f)
 ;;
 

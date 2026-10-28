@@ -10,7 +10,7 @@ module Commit = Keeper_librarian_durable_commit
 module Submit = Lane_addon_submit_once
 module Exact = Lane_addon_exact
 open Result.Syntax
-let io = Domain_pool_ref.submit_io_or_inline
+let io f = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ f
 let require condition detail = if condition then Ok () else Error detail
 let equal_json left right detail =
   let* left=Lane_addon_action.canonical left in

@@ -1163,7 +1163,7 @@ let test_search_executor_owns_frozen_source () = at_sizes (fun origin ->
     let completed,completed_resolver=Eio.Promise.create () in
     let owner=Domain.self () in
     Eio.Fiber.fork ~sw (fun () ->
-      let result=Domain_pool.submit_cpu pool (fun () ->
+      let result=Domain_pool.submit_cpu ~name:__FUNCTION__ pool (fun () ->
         Eio.Promise.resolve started_resolver (Domain.self () <> owner);
         Eio.Promise.await release;
         Render.run_keeper_message_search work) in
@@ -1220,7 +1220,7 @@ let test_search_executor_owns_frozen_source () = at_sizes (fun origin ->
     let older=Render.prepare_keeper_message_search state ~keeper_name:"alpha"
       ~needle:"MATCH" ~older_than:(Some cursor) in
     let repeated=Render.complete_keeper_message_search older
-      (Domain_pool.submit_cpu pool (fun () -> Render.run_keeper_message_search older)) in
+      (Domain_pool.submit_cpu ~name:__FUNCTION__ pool (fun () -> Render.run_keeper_message_search older)) in
     let _,earlier=Option.get repeated.match_result in
     check bool "executor result keeps repeat source ordering" true
       (Masc_tui_chat_search.compare_position earlier.matched_position cursor.matched_position < 0))))

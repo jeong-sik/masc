@@ -421,7 +421,7 @@ let shared_turn_inputs_keep_private_sources_and_original_owner () =
            state=Preparation_finished {outcome=Prepared;_};_};_} -> Ids.Turn_ref.equal actual original
        | Some _ | None -> false);
     check bool "shared-input preparation remains usable inside a single existing worker" true
-      (Domain_pool.submit_io pool (fun () -> read ()) = reference);
+      (Domain_pool.submit_io ~name:__FUNCTION__ pool (fun () -> read ()) = reference);
     let foreign = Keeper_turn_shared_inputs.observe ~config ~keeper_name:"foreign" () in
     check bool "parallel discovery never adopts another Keeper's private subscription" true
       (foreign.lane_updates = Ok (`List []));

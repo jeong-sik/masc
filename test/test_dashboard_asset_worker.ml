@@ -54,7 +54,7 @@ let with_occupied_pool f =
     if not (Eio.Promise.is_resolved released) then Eio.Promise.resolve release_worker () in
   Fun.protect ~finally:release (fun () ->
     Eio.Fiber.fork ~sw (fun () ->
-      Domain_pool.submit_cpu pool (fun () ->
+      Domain_pool.submit_cpu ~name:__FUNCTION__ pool (fun () ->
         Eio.Promise.resolve occupy ();
         Eio.Promise.await released));
     Eio.Promise.await occupied;

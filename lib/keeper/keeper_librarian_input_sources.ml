@@ -189,7 +189,7 @@ let counterpart_observations_from ~external_after ~base_dir ~keeper_name ~after 
 ;;
 
 let counterpart_observations_between_offloaded ~base_dir ~keeper_name ~after ~before =
-  Domain_pool_ref.submit_io_or_inline (fun () ->
+  Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
     counterpart_observations_between ~base_dir ~keeper_name ~after ~before)
 ;;
 

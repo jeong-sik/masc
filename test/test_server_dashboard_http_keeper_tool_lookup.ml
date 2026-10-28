@@ -283,7 +283,7 @@ let test_chat_history_body_is_encoded_on_the_cpu_executor () =
       let occupied, occupied_u = Eio.Promise.create () in
       let release, release_u = Eio.Promise.create () in
       Eio.Fiber.fork ~sw (fun () ->
-        Executor_pool_ref.submit_or_inline (fun () ->
+        Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
           Eio.Promise.resolve occupied_u ();
           Eio.Promise.await release));
       Eio.Promise.await occupied;

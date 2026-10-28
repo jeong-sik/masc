@@ -87,7 +87,7 @@ let test_update_progress_with_shared_owner_waiter () =
               (fun () ->
                 Eio.Promise.await owner_held;
                 let worker_domain, loaded =
-                  Domain_pool.submit_cpu shared (fun () ->
+                  Domain_pool.submit_cpu ~name:__FUNCTION__ shared (fun () ->
                     Eio.Promise.resolve resolve_reader_started ();
                     let loaded = Persistence.load_state_result ~base_path ~keeper_name in
                     Domain.self (), loaded)

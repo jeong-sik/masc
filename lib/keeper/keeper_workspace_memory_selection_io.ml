@@ -34,7 +34,7 @@ let append_unprotected t row =
       (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
 
 let append t row =
-  try Domain_pool_ref.submit_io_or_inline (fun () -> append_unprotected t row) with
+  try Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () -> append_unprotected t row) with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | Sys_error detail -> Error detail
   | Unix.Unix_error (code,operation,path) ->

@@ -369,7 +369,7 @@ let refresh_loop
           it is cross-domain safe; the publish ([Atomic.set slot]) stays on
           this fiber.  If the whole compute path fails (an exception escapes a
           [safe] wrapper), keep the previous snapshot live. *)
-       try Some (Domain_pool_ref.submit_cpu_or_inline compute) with
+       try Some (Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ compute) with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
          log_failure "compute" exn;

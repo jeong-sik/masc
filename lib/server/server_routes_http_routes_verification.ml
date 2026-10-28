@@ -356,7 +356,7 @@ let add_routes router =
                 | Some raw -> (match int_of_string_opt raw with
                     | Some index when index >= 0 -> Ok (Some index)
                     | Some _ | None -> Error "item_index must be a non-negative integer") in
-              (match Domain_pool_ref.submit_io_or_inline (fun () ->
+              (match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
                  Result.bind item_index (fun item_index ->
                    operator_evidence_projection ~item_index ~config ~operator_id ~task_id ~verification_id)) with
                | Ok json ->

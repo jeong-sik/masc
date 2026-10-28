@@ -86,6 +86,14 @@ val decision_audit : root -> keeper_dirname:string -> location
 
 val dir : location -> string
 
+val of_location : location -> t
+(** The store the location was made for. *)
+
+val pool_job_name : t -> string
+(** The store's path below [<base>/.masc], with the keeper's directory
+    written as [keeper/]: one name per store, whichever keeper it is. A pool
+    job that reads the store carries it (RFC-0474 L4c). *)
+
 (** How long a store's day files are kept. The prune pass reads it from
     here; a handle carries no retention of its own. *)
 type retention =

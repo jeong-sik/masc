@@ -525,7 +525,7 @@ let owner_absent_rejection keeper_name =
    a typed deferral rather than declaring the owner absent. *)
 let read_owner_meta config keeper_name =
   match
-    Executor_pool_ref.submit_strict (fun () ->
+    Executor_pool_ref.submit_strict ~name:__FUNCTION__ (fun () ->
       Keeper_meta_store.read_effective_meta_presence config keeper_name)
   with
   | Error (Executor_pool_ref.Work_failed failure) ->

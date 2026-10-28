@@ -55,7 +55,7 @@ let payload ?config ~reaction_actor request
   in
   Dashboard_cache.get_or_compute_payload cache_key
     ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
-    (Pool_work.cpu (fun () ->
+    (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
        let posts =
          Board_dispatch.list_posts ?hearth ~sort_by ~exclude_system
            ~exclude_automation ?author_filter ~limit:base_fetch ()

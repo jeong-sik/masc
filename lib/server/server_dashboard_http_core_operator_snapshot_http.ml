@@ -63,7 +63,7 @@ let operator_snapshot_http_json ~state ~sw ~clock ~broadcast_snapshot request =
       ~sw
       ~clock
       ~config
-      ~kind:Pool_work.Cpu
+      ~kind:Pool_work.Cpu ~name:__FUNCTION__
       (fun ~config ~sw ->
          let ctx : _ Operator_control.context =
            { config
@@ -171,7 +171,7 @@ let operator_snapshot_http_json ~state ~sw ~clock ~broadcast_snapshot request =
                ~sw
                ~clock
                ~config
-               ~kind:Pool_work.Cpu
+               ~kind:Pool_work.Cpu ~name:__FUNCTION__
                (fun ~config ~sw ->
                   let ctx : _ Operator_control.context =
                     { config

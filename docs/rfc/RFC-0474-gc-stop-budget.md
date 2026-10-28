@@ -227,6 +227,31 @@ memprof(`/api/v1/diagnostics/memprof`, 부팅 뒤 10분). 할당 757 GB, major 4
 - 단위: 캐시가 선언대로 제출하는지 본다. `Io` 계산 둘이 하나뿐인 worker 에 같이 들어가고, `Cpu` 계산 둘은 줄을 서는지 `Pool_wait` 의 진행 중 weight 로 확인한다.
 - 운영: 배포 뒤 한 시간 동안 읽기 lane 의 `wait_by_in_flight_workers` 를 L4a 와 같은 방법으로 본다. 2 worker 이상에서 들어온 긴 대기가 줄어야 한다. load 가 L4a 창과 비슷한 창끼리만 비교한다.
 
+#### L4b 구현(#46573)에서 안 것
+
+분류 규칙대로 하면 `Io` 는 git subprocess 를 기다리는 route 3곳뿐이고 나머지는 모두 `Cpu` 다. 그래서 L4b 는 구조를 바로잡지만 대기는 거의 줄이지 않는다. 대기를 줄일 일을 고르려면 어떤 job 이 worker 를 오래 잡는지 알아야 하는데, 지금은 그것을 알 수 없다.
+
+- 2026-10-28 05:00Z 운영 서버(`2532ad1`, load 25)에서 60초 rtev fiber trace 를 떴다. 배경 worker domain 마다 `fstat` 뒤에 1~4.8초씩 쉬지 않고 CPU 를 쓰는 fiber run 이 있었다. 그중 약 30% 는 GC 다. 이 job 들은 label 이 없어(`cc#N(?)`) 어느 제출인지 모른다.
+- 같은 서버에서 80분 동안 배경 lane 에 74,469건이 들어왔다. 그중 28,648건이 worker 3개 몫 이상 진행 중일 때 들어왔고, 그때 대기는 평균 170 ms, 최대 18초였다.
+- macOS `sample` 로도 찾지 못했다. JSON lexing(20초에 약 3.7초)의 호출자가 `caml_callback_exn` 에서 끊긴다.
+- `Pool_wait` 는 lane 단위로만 센다.
+
+#### L4c — 풀 job 마다 이름
+
+1. 풀에 제출하는 함수는 모두 `~name` 을 필수로 받는다: `Executor_pool_submission.submit`, `Domain_pool.submit*`, `Domain_pool_ref.submit_*_or_inline`, `Executor_pool_ref.submit_or_inline`·`submit_strict`, `Pool_work.cpu`·`io`, `run_dashboard_compute`. 빠뜨리면 컴파일이 실패한다.
+2. 호출부는 `__FUNCTION__` 을 넘긴다. 이름을 새로 짓지 않으므로 이름과 코드가 어긋나지 않는다. 남의 계산을 받아 제출하는 helper(`run_dashboard_compute`)는 이름도 받아서 넘긴다.
+3. `Dated_jsonl` 의 읽기는 여러 곳이 같이 쓰므로 함수 이름 대신 저장소로 부른다. `Dated_jsonl_store.location` 이 자기 저장소(닫힌 variant)를 들고, `pool_job_name` 이 `root/events`, `keeper/metrics` 같은 이름을 낸다. 키퍼 이름은 넣지 않는다. 키퍼 40명의 같은 저장소는 이름 하나다.
+4. `Pool_wait` 는 lane·이름별로 들어간 수, 대기 합·최대, 실행 합·최대, 포기 수를 센다. 이름 표는 `Atomic` 안의 불변 `Map` 이다. 처음 보는 이름만 compare-and-set 으로 넣고, 그 뒤로는 읽기만 한다.
+5. `/health` 의 `pool_wait.<lane>.by_name` 은 실행 합이 큰 20개를 보여 준다. TUI 마다 `/health` 를 자주 읽는데, 2026-10-28 에 13 KB 였고 한 줄이 약 180 바이트라 모든 이름을 싣지 않는다.
+6. job 본문은 `Eio.Private.Trace.with_span name` 안에서 돈다. 그래서 rtev fiber trace 에도 이름이 label 로 나온다.
+
+weight 와 어느 풀로 가는지는 바꾸지 않는다. 재는 것만 늘어난다.
+
+검증:
+
+- 단위: 이름 둘을 같은 lane 에 넣으면 따로 세고, 실행 합이 큰 쪽이 먼저 나온다. 포기한 제출은 그 이름의 포기 수만 올린다. 저장소 이름은 모두 다르고 키퍼 이름을 담지 않는다. mutant(이름별 실행 기록 제거)는 실행 시간 시험 하나만 실패한다.
+- 운영: 배포 뒤 한 시간 `by_name` 을 앞뒤로 떠서 이름별 실행 합 순위를 낸다. 같은 창의 rtev trace 에서 긴 fiber run 의 label 을 본다. 그 순위로 다음 층(읽기와 파싱 나누기, 다시 읽지 않기, 배경 lane 으로 옮기기)의 대상을 고른다.
+
 ## 5. 순서
 
 1. L1 — 코드가 작고, A/B 로 효과를 이미 봤다.
@@ -235,6 +260,7 @@ memprof(`/api/v1/diagnostics/memprof`, 부팅 뒤 10분). 할당 757 GB, major 4
 4. RFC-0204 L3(#46374) — 읽기 풀. L1 예산 위에 쌓는다. 2026-10-27 운영 서버 2분 창에서 읽기 대기 p99 가 1초를 넘어 RFC-0204 §6 의 조건(100 ms)을 넘었다.
 5. L4 — 읽기 풀 뒤에 배경 풀의 대기를 다시 재고, 맨 바깥 제출부터 고친다.
 6. L4b — 읽기 lane 의 캐시 계산이 일의 종류를 타입으로 선언하게 한다. #46543(갱신 fork 의 lane)은 이것과 따로 먼저 들어간다.
+7. L4c — 풀 job 마다 이름을 붙여 lane·이름별로 잰다. 그 순위로 다음 층을 고른다.
 
 ## 6. 하지 않는 것
 

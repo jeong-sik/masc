@@ -26,6 +26,7 @@ val run_dashboard_compute :
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   config:Workspace.config ->
   kind:Pool_work.kind ->
+  name:string ->
   (config:Workspace.config -> sw:Eio.Switch.t -> 'a) ->
   'a
 

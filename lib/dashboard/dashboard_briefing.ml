@@ -113,7 +113,7 @@ let build_projection ?actor ~config ~sw ~clock
   let snapshot_compute () =
     Dashboard_projection_cache.get_or_compute_snapshot_json
       ~config ~actor:(Some actor_name) (fun actor_name ->
-        Pool_work.cpu (fun () ->
+        Pool_work.cpu ~name:__FUNCTION__ (fun () ->
           Dashboard_projection_cache.operator_snapshot_json
             ~actor:actor_name
             ~view:"summary"
@@ -126,7 +126,7 @@ let build_projection ?actor ~config ~sw ~clock
   let digest_compute () =
     Dashboard_projection_cache.get_or_compute_digest_json
       ~config ~actor:(Some actor_name) (fun actor_name ->
-        Pool_work.cpu (fun () ->
+        Pool_work.cpu ~name:__FUNCTION__ (fun () ->
           match Dashboard_projection_cache.operator_digest_json ~actor:actor_name ctx with
           | Ok json -> json
           | Error message ->

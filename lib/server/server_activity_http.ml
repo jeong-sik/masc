@@ -98,7 +98,7 @@ let events_http_json ~deps ~state request =
        per-key Dashboard_cache entry has marginal hit-rate value.
        Offload via Domain_pool_ref still protects the HTTP main
        domain from JSONL-scan stall. *)
-    Domain_pool_ref.submit_io_or_inline (fun () ->
+    Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
       Activity_graph.json_response (Mcp_server.workspace_config state) ~kinds
         ~after_seq ~limit ())
 
@@ -150,7 +150,7 @@ let graph_http_json ~deps ~state request =
   | Some json -> json
   | None ->
     (* RFC-0201 Step 5 — cache wrap retired (see events_http_json). *)
-    Domain_pool_ref.submit_io_or_inline (fun () ->
+    Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
       let since_ms =
         match parse_since_ms since_raw with
         | Some delta_ms ->
@@ -185,7 +185,7 @@ let swimlane_http_json ~deps ~state request =
   | Some json -> json
   | None ->
     (* RFC-0201 Step 5 — cache wrap retired (see events_http_json). *)
-    Domain_pool_ref.submit_io_or_inline (fun () ->
+    Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
       let since_ms =
         match parse_since_ms since_raw with
         | Some delta_ms ->

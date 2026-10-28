@@ -31,7 +31,7 @@ let run_with ~execute ~base_path ~keeper_name =
     let config = Workspace.default_config base_path in
     let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
     let key = keepers_dir, keeper_name in
-    let read () = Domain_pool_ref.submit_io_or_inline (fun () ->
+    let read () = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
       Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name) in
     match read () with
     | Error detail -> Unavailable detail
@@ -40,7 +40,7 @@ let run_with ~execute ~base_path ~keeper_name =
       let limits = Limits.current snapshot.facts in
       if not (Limits.exceeded limits) then Within_limits
       else
-        match Domain_pool_ref.submit_io_or_inline (fun () ->
+        match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
           Keeper_meta_store.read_effective_meta_presence_named config keeper_name) with
         | Error detail | Ok (_, Keeper_meta_store.Meta_not_current detail) -> Unavailable detail
         | Ok (_, Keeper_meta_store.Meta_absent) -> Unavailable "Keeper metadata is absent"
@@ -53,7 +53,7 @@ let run_with ~execute ~base_path ~keeper_name =
               ; keeper_instructions = meta.instructions
               ; current = Some { facts = snapshot.facts }
               ; historical_task_contexts = []
-              ; goal_context = Domain_pool_ref.submit_io_or_inline (fun () ->
+              ; goal_context = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
                   Keeper_librarian_input_sources.goal_context_for_task
                     ~config meta.current_task_id)
               ; working_context = Keeper_librarian_context.empty

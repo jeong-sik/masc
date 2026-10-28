@@ -4500,7 +4500,7 @@ let test_keeper_lifecycle_refresh_invalidates_projection_snapshot () =
       Dashboard_projection_cache.get_or_compute_snapshot_json
         ~config
         ~actor:(Some "lifecycle-test")
-        (fun _ -> Pool_work.cpu (fun () ->
+        (fun _ -> Pool_work.cpu ~name:__FUNCTION__ (fun () ->
            incr compute_count;
            `Assoc [ "revision", `Int !compute_count ]))
     in

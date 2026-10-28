@@ -469,7 +469,7 @@ let purge_current_unlocked config ~keeper_name ~apply =
            Keeper_checkpoint_store.exact_snapshot_canonical_bytes snapshot
          in
          let purge_result =
-           Domain_pool_ref.submit_cpu_or_inline (fun () ->
+           Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
              match Agent_core.Checkpoint.of_string source_bytes with
              | Error error ->
                Error

@@ -989,7 +989,7 @@ let run_keeper_cycle
                let { Keeper_unified_prompt.world_state; user_message; _ } = prompt_parts in
                let dynamic_context_for_tools = Some (fun access ->
                  let tools = Keeper_request_tool_access.offered access in
-                 Domain_pool_ref.submit_io_or_inline (fun () ->
+                 Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
                    let own_recent_actions = match meta.input_policy, observation.own_recent_actions with
                      | Keeper_input_policy.Small, Ok turns ->
                        let own_recent_actions = Keeper_own_recent_actions.externalize_failures

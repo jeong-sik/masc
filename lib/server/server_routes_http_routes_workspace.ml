@@ -1136,7 +1136,7 @@ let add_routes router =
            let payload =
              Dashboard_cache.get_or_compute_payload cache_key
                ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
-               (Pool_work.cpu (fun () ->
+               (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
                   let nodes =
                     if not (Sys.file_exists base) then []
                     else
@@ -1171,7 +1171,7 @@ let add_routes router =
                      (json_error "Missing path parameter")
                | Some path ->
                    let result =
-                     Domain_pool_ref.submit_io_or_inline (fun () ->
+                     Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
                        workspace_file_catalog ~base ~path)
                    in
                    match result with
@@ -1285,7 +1285,7 @@ let add_routes router =
                 let payload =
                   Dashboard_cache.get_or_compute_payload cache_key
                     ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
-                    (Pool_work.cpu (fun () ->
+                    (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
                        let is_dir =
                          workspace_or_default
                            ~warn_on_failure:false
@@ -1330,7 +1330,7 @@ let add_routes router =
               | Ok file ->
                 (match load_workspace_file_content file with
                  | Ok content ->
-                   let revision = Domain_pool_ref.submit_io_or_inline (fun () ->
+                   let revision = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
                      workspace_file_revision ~base file content) in
                    let json = `Assoc [("ok", `Bool true); ("content", `String content);
                      ("revision", `String revision)] in
@@ -1631,7 +1631,7 @@ let add_routes router =
                   let payload =
                     Dashboard_cache.get_or_compute_payload cache_key
                       ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
-                      (Pool_work.io (fun () ->
+                      (Pool_work.io ~name:__FUNCTION__ (fun () ->
                          match git_run_lines ~cwd:repo_root
                                  ["blame"; "--porcelain"; "--"; rel]
                          with
@@ -1685,7 +1685,7 @@ let add_routes router =
                      let payload =
                        Dashboard_cache.get_or_compute_payload cache_key
                          ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
-                         (Pool_work.io (fun () ->
+                         (Pool_work.io ~name:__FUNCTION__ (fun () ->
                             let lines =
                               git_run_lines ~cwd:repo_root
                                 [ "log"
@@ -1751,7 +1751,7 @@ let add_routes router =
                 let payload =
                   Dashboard_cache.get_or_compute_payload cache_key
                     ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
-                    (Pool_work.io (fun () ->
+                    (Pool_work.io ~name:__FUNCTION__ (fun () ->
                        match git_run_lines_or_error ~cwd:repo_root
                                ["diff"; base_ref; "--"; rel]
                        with

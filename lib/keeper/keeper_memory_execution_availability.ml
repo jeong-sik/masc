@@ -76,7 +76,7 @@ let observe ~setting ~(declarations : Lane_addon_config.snapshot) ~route ~mode =
 
 let snapshot ~config ~mode =
   let directory = Runtime.configuration_directory config in
-  let declarations = Domain_pool_ref.submit_io_or_inline (fun () -> Lane_addon_config.load ~directory) in
+  let declarations = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () -> Lane_addon_config.load ~directory) in
   let registry = Registry.current () in
   let route lane = match registry with
     | Error error -> Error (Exact.Lane_registry_unavailable {detail=Registry.publication_error_to_string error})

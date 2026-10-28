@@ -68,7 +68,7 @@ let test_submit_cpu_returns_value () =
     Eio.Switch.run (fun sw ->
       let dm = Eio.Stdenv.domain_mgr env in
       let pool = D.create ~sw ~domain_count:1 dm in
-      let result = D.submit_cpu pool (fun () -> 1 + 2) in
+      let result = D.submit_cpu ~name:__FUNCTION__ pool (fun () -> 1 + 2) in
       check int "blocking cpu submit returns value" 3 result))
 
 let test_submit_io_returns_value () =
@@ -76,7 +76,7 @@ let test_submit_io_returns_value () =
     Eio.Switch.run (fun sw ->
       let dm = Eio.Stdenv.domain_mgr env in
       let pool = D.create ~sw ~domain_count:1 dm in
-      let result = D.submit_io pool (fun () -> "hello") in
+      let result = D.submit_io ~name:__FUNCTION__ pool (fun () -> "hello") in
       check string "blocking io submit returns value" "hello" result))
 
 let test_submit_cpu_propagates_exception () =
@@ -86,7 +86,7 @@ let test_submit_cpu_propagates_exception () =
       let pool = D.create ~sw ~domain_count:1 dm in
       check_raises "cpu submit re-raises handler exception"
         (Failure "boom")
-        (fun () -> D.submit_cpu pool (fun () -> failwith "boom"))))
+        (fun () -> D.submit_cpu ~name:__FUNCTION__ pool (fun () -> failwith "boom"))))
 
 (* ── async submit ──────────────────────────────────────── *)
 
@@ -95,7 +95,7 @@ let test_submit_cpu_async_resolves () =
     Eio.Switch.run (fun sw ->
       let dm = Eio.Stdenv.domain_mgr env in
       let pool = D.create ~sw ~domain_count:1 dm in
-      let promise = D.submit_cpu_async ~sw pool (fun () -> 42) in
+      let promise = D.submit_cpu_async ~name:__FUNCTION__ ~sw pool (fun () -> 42) in
       check int "async cpu promise resolves" 42
         (Eio.Promise.await_exn promise)))
 
@@ -104,7 +104,7 @@ let test_submit_io_async_resolves () =
     Eio.Switch.run (fun sw ->
       let dm = Eio.Stdenv.domain_mgr env in
       let pool = D.create ~sw ~domain_count:1 dm in
-      let promise = D.submit_io_async ~sw pool (fun () -> "ok") in
+      let promise = D.submit_io_async ~name:__FUNCTION__ ~sw pool (fun () -> "ok") in
       check string "async io promise resolves" "ok"
         (Eio.Promise.await_exn promise)))
 
@@ -113,7 +113,7 @@ let test_submit_async_propagates_exception () =
     Eio.Switch.run (fun sw ->
       let dm = Eio.Stdenv.domain_mgr env in
       let pool = D.create ~sw ~domain_count:1 dm in
-      let promise = D.submit_cpu_async ~sw pool (fun () -> failwith "boom") in
+      let promise = D.submit_cpu_async ~name:__FUNCTION__ ~sw pool (fun () -> failwith "boom") in
       check_raises "async submit propagates exception"
         (Failure "boom")
         (fun () -> ignore (Eio.Promise.await_exn promise))))
@@ -132,7 +132,7 @@ let test_pool_work_runs_on_the_tuned_minor_heap () =
       let pool = D.create ~sw ~domain_count:2 dm in
       let main_domain = (Domain.self () :> int) in
       let where, words =
-        D.submit_cpu pool (fun () ->
+        D.submit_cpu ~name:__FUNCTION__ pool (fun () ->
           (Domain.self () :> int), (Gc.get ()).Gc.minor_heap_size)
       in
       check bool "the job did run off the main domain" true (where <> main_domain);
@@ -153,7 +153,7 @@ let test_jobs_run_on_worker_domains () =
       let pool = D.create ~sw ~domain_count:2 dm in
       let main_domain = (Domain.self () :> int) in
       let worker_domain =
-        D.submit_cpu pool (fun () -> (Domain.self () :> int))
+        D.submit_cpu ~name:__FUNCTION__ pool (fun () -> (Domain.self () :> int))
       in
       check bool "worker job runs off main domain" true
         (worker_domain <> main_domain)))
@@ -176,7 +176,7 @@ let test_executor_pool_accessor () =
 let test_ref_runs_inline_when_absent () =
   R.clear_for_tests ();
   let main_domain = (Domain.self () :> int) in
-  let observed = R.submit_cpu_or_inline (fun () -> (Domain.self () :> int)) in
+  let observed = R.submit_cpu_or_inline ~name:__FUNCTION__ (fun () -> (Domain.self () :> int)) in
   check int "absent pool runs inline" main_domain observed
 
 let test_ref_submits_to_shared_pool () =
@@ -189,7 +189,7 @@ let test_ref_submits_to_shared_pool () =
       check (option int) "domain count exposed" (Some 1) (R.domain_count_opt ());
       let main_domain = (Domain.self () :> int) in
       let worker_domain =
-        R.submit_cpu_or_inline (fun () -> (Domain.self () :> int))
+        R.submit_cpu_or_inline ~name:__FUNCTION__ (fun () -> (Domain.self () :> int))
       in
       check bool "ref submit runs off main domain" true
         (worker_domain <> main_domain);
@@ -235,13 +235,13 @@ let test_a_job_that_submits_again_runs_the_inner_work_on_its_worker () =
         in
         let nested () =
           let outer = (Domain.self () :> int) in
-          outer, R.submit_cpu_or_inline (fun () -> (Domain.self () :> int))
+          outer, R.submit_cpu_or_inline ~name:__FUNCTION__ (fun () -> (Domain.self () :> int))
         in
-        let outer, inner = within_deadline (fun () -> D.submit_cpu pool nested) in
+        let outer, inner = within_deadline (fun () -> D.submit_cpu ~name:__FUNCTION__ pool nested) in
         check int "a cpu job's inner submit runs on its worker" outer inner;
         let outer, inner =
           within_deadline (fun () ->
-            Eio.Promise.await_exn (D.submit_io_async ~sw pool nested))
+            Eio.Promise.await_exn (D.submit_io_async ~name:__FUNCTION__ ~sw pool nested))
         in
         check int "an async io job's inner submit runs on its worker" outer inner)))
 
@@ -262,13 +262,13 @@ let test_a_job_still_running_after_another_ends_is_pool_work () =
         let b_started, b_started_u = Eio.Promise.create () in
         let b_check, b_check_u = Eio.Promise.create () in
         let a =
-          D.submit_io_async ~sw pool (fun () ->
+          D.submit_io_async ~name:__FUNCTION__ ~sw pool (fun () ->
             Eio.Promise.resolve a_started_u ();
             Eio.Promise.await a_release)
         in
         Eio.Promise.await a_started;
         let b =
-          D.submit_io_async ~sw pool (fun () ->
+          D.submit_io_async ~name:__FUNCTION__ ~sw pool (fun () ->
             Eio.Promise.resolve b_started_u ();
             Eio.Promise.await b_check;
             Executor_pool_ref.in_worker_context ())
@@ -294,7 +294,7 @@ let test_ref_inline_from_raw_domain_with_pool () =
         Domain.spawn (fun () ->
           let self = (Domain.self () :> int) in
           let observed =
-            R.submit_cpu_or_inline (fun () -> (Domain.self () :> int))
+            R.submit_cpu_or_inline ~name:__FUNCTION__ (fun () -> (Domain.self () :> int))
           in
           (self, observed))
       in
@@ -315,13 +315,13 @@ let submission_name = function
   | Shared_executor -> "shared executor" | Strict_executor -> "strict executor"
 
 let run_unit_submission shape ~sw pool operation = match shape with
-  | Blocking_io -> D.submit_io pool operation
-  | Blocking_cpu -> D.submit_cpu pool operation
-  | Async_io -> Eio.Promise.await_exn (D.submit_io_async ~sw pool operation)
-  | Async_cpu -> Eio.Promise.await_exn (D.submit_cpu_async ~sw pool operation)
-  | Shared_executor -> Executor_pool_ref.submit_or_inline operation
+  | Blocking_io -> D.submit_io ~name:__FUNCTION__ pool operation
+  | Blocking_cpu -> D.submit_cpu ~name:__FUNCTION__ pool operation
+  | Async_io -> Eio.Promise.await_exn (D.submit_io_async ~name:__FUNCTION__ ~sw pool operation)
+  | Async_cpu -> Eio.Promise.await_exn (D.submit_cpu_async ~name:__FUNCTION__ ~sw pool operation)
+  | Shared_executor -> Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ operation
   | Strict_executor ->
-    (match Executor_pool_ref.submit_strict operation with
+    (match Executor_pool_ref.submit_strict ~name:__FUNCTION__ operation with
      | Ok () -> ()
      | Error (Executor_pool_ref.Work_failed (error,backtrace)) ->
        Printexc.raise_with_backtrace error backtrace
@@ -348,7 +348,7 @@ let test_cancelled_submission_joins_worker_cleanup shape () =
       ignore (Eio.Promise.try_resolve cleanup_release_u ())) (fun () ->
       (* Admit the sibling before a full-weight CPU invocation. It must keep
          running even while the other invocation's cleanup is held. *)
-      let sibling = D.submit_io_async ~sw pool (fun () ->
+      let sibling = D.submit_io_async ~name:__FUNCTION__ ~sw pool (fun () ->
         Eio.Promise.resolve sibling_started_u ();
         Eio.Promise.await sibling_release;
         "independent sibling") in
@@ -384,7 +384,7 @@ let test_cancelled_submission_joins_worker_cleanup shape () =
       Eio.Promise.await_exn owner;
       check bool "worker cleanup finished before cancellation settled" true (Atomic.get cleaned);
       check int "user work was invoked once" 1 (Atomic.get entered);
-      check int "the same pool accepts later work" 42 (D.submit_cpu pool (fun () -> 42))))
+      check int "the same pool accepts later work" 42 (D.submit_cpu ~name:__FUNCTION__ pool (fun () -> 42))))
 
 let test_cancellation_before_admission_does_not_run_user_work shape () =
   with_submission_pool (fun ~sw pool ->
@@ -394,7 +394,7 @@ let test_cancellation_before_admission_does_not_run_user_work shape () =
     let owner_switch,owner_switch_u = Eio.Promise.create () in
     let entered = Atomic.make 0 in
     Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve release_u ())) (fun () ->
-      let occupant = D.submit_cpu_async ~sw pool (fun () ->
+      let occupant = D.submit_cpu_async ~name:__FUNCTION__ ~sw pool (fun () ->
         Eio.Promise.resolve occupied_u ();
         Eio.Promise.await release) in
       Eio.Promise.await occupied;
@@ -412,7 +412,7 @@ let test_cancellation_before_admission_does_not_run_user_work shape () =
       Eio.Promise.await_exn owner;
       Eio.Promise.resolve release_u ();
       Eio.Promise.await_exn occupant;
-      ignore (D.submit_cpu pool (fun () -> ()));
+      ignore (D.submit_cpu ~name:__FUNCTION__ pool (fun () -> ()));
       check int "cancelled work never enters after pool capacity becomes free" 0 (Atomic.get entered)))
 
 let test_worker_failure_preserves_exception_and_does_not_replay shape () =
@@ -426,7 +426,7 @@ let test_worker_failure_preserves_exception_and_does_not_replay shape () =
      | exception actual -> check bool "the original worker exception is preserved" true (actual == original));
     check int "failed effectful work is never retried inline" 1 (Atomic.get applied);
     check string "failure does not close the pool" "next invocation"
-      (D.submit_io pool (fun () -> "next invocation")))
+      (D.submit_io ~name:__FUNCTION__ pool (fun () -> "next invocation")))
 
 let test_async_observer_does_not_cancel_owned_submission submit () =
   with_submission_pool (fun ~sw pool ->
@@ -451,11 +451,11 @@ let test_invalid_executor_weight_never_invokes_user_work () =
   with_submission_pool (fun ~sw:_ _pool ->
     let applied = ref 0 in
     let operation () = incr applied in
-    (match Executor_pool_ref.submit_or_inline ~weight:Float.nan operation with
+    (match Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ ~weight:Float.nan operation with
      | () -> fail "invalid executor admission ran user work inline"
      | exception Invalid_argument _ -> ());
     check int "invalid admission did not run the effect" 0 !applied;
-    (match Executor_pool_ref.submit_strict ~weight:Float.nan operation with
+    (match Executor_pool_ref.submit_strict ~name:__FUNCTION__ ~weight:Float.nan operation with
      | Error (Executor_pool_ref.Submission_failed (Invalid_argument _,_)) -> ()
      | Error (Pool_unavailable | Caller_not_in_eio | Work_failed _ | Submission_failed _)
      | Ok () -> fail "strict executor lost the infrastructure failure boundary");
@@ -467,9 +467,9 @@ let () =
   Alcotest.run "Domain_pool" [
     "submission ownership", [
       test_case "async IO observer does not own worker cancellation" `Quick
-        (test_async_observer_does_not_cancel_owned_submission D.submit_io_async);
+        (test_async_observer_does_not_cancel_owned_submission (D.submit_io_async ~name:__FUNCTION__));
       test_case "async CPU observer does not own worker cancellation" `Quick
-        (test_async_observer_does_not_cancel_owned_submission D.submit_cpu_async);
+        (test_async_observer_does_not_cancel_owned_submission (D.submit_cpu_async ~name:__FUNCTION__));
       test_case "invalid executor admission never runs user work" `Quick
         test_invalid_executor_weight_never_invokes_user_work;
     ];

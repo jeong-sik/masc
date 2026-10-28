@@ -265,7 +265,7 @@ let capture_request_projection_change ~masc_root ~keeper_name ~turn_id
     let turn_label = string_of_int turn_id in
     let seen = Keeper_projection_change.snapshot_digest_memo memo in
     match
-      Domain_pool_ref.submit_cpu_or_inline (fun () ->
+      Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
         let current, fresh =
           Keeper_projection_change.digest_request ~seen ~tools ~messages
         in

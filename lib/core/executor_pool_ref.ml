@@ -92,13 +92,13 @@ let strict_submit_error_to_string = function
       (Printexc.raw_backtrace_to_string backtrace)
 ;;
 
-let submit_strict ?(weight = 1.0) f =
+let submit_strict ?(weight = 1.0) ~name f =
   match selected (), Eio_guard.execution_context () with
   | None, _ -> Error Pool_unavailable
   | Some _, Eio_guard.Non_eio -> Error Caller_not_in_eio
   | Some p, Eio_guard.Eio_fiber ->
     (try
-       Executor_pool_submission.submit p ~weight (fun () ->
+       Executor_pool_submission.submit p ~weight ~name (fun () ->
          with_worker_context (fun () ->
            Eio.Switch.run (fun _sw ->
              try Ok (f ()) with
@@ -120,11 +120,11 @@ let submit_strict ?(weight = 1.0) f =
 (** Submit [f] to the executor pool if available, or run inline.
     Inline fallback ensures callers work in tests and before server init.
     Re-raises [Eio.Cancel.Cancelled] to preserve structured concurrency. *)
-let submit_or_inline ?(weight = 1.0) f =
+let submit_or_inline ?(weight = 1.0) ~name f =
   match selected (), Eio_guard.execution_context () with
   | Some _, _ when in_worker_context () -> f ()
   | Some p, Eio_guard.Eio_fiber ->
-      Executor_pool_submission.submit p ~weight (fun () ->
+      Executor_pool_submission.submit p ~weight ~name (fun () ->
         with_worker_context (fun () -> Eio.Switch.run (fun _sw -> f ())))
   | (Some _ | None), Eio_guard.Non_eio
   | None, Eio_guard.Eio_fiber -> f ()

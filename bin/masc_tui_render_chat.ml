@@ -4293,7 +4293,7 @@ let launch_keeper_message_search (state : state) plan ~deliver =
                (* The generation is an Atomic, so the CPU domain can read it
                   while the UI domain retires the search. *)
                let live () = Atomic.get state.msg_search_generation = plan.search_generation in
-               Ok (Some (work, Domain_pool.submit_cpu pool
+               Ok (Some (work, Domain_pool.submit_cpu ~name:__FUNCTION__ pool
                  (fun () -> run_keeper_message_search ~live work)))))
 
 let keeper_message_find_scroll ?preview_lookup state ~keeper_name ~needle ~(older_than : Masc_tui_types.chat_search_cursor option) =

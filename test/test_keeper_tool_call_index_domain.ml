@@ -45,7 +45,7 @@ let test_a_pool_job_keeps_the_work_in_its_domain () =
   Eio_main.run (fun env ->
     with_pool env (fun () ->
       let job_domain, work_domain =
-        Domain_pool_ref.submit_cpu_or_inline (fun () ->
+        Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
           domain_id (), Index.blocking domain_id)
       in
       Alcotest.(check int) "the job's domain" job_domain work_domain))

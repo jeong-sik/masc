@@ -80,7 +80,7 @@ let with_pool f =
 let test_pool_job_does_not_inherit_the_lane () =
   with_pool (fun _env _sw _pool ->
     let in_job =
-      Pool_lane.with_read (fun () -> Executor_pool_ref.submit_or_inline Pool_lane.current)
+      Pool_lane.with_read (fun () -> Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ Pool_lane.current)
     in
     check lane "a pool job submitted during a read" Pool_lane.Background in_job)
 ;;
@@ -107,12 +107,12 @@ let test_wait_is_recorded_under_the_submitting_lane () =
   with_pool (fun _env _sw _pool ->
     let read_before, _ = wait_counts "read" in
     let background_before, _ = wait_counts "background" in
-    Pool_lane.with_read (fun () -> Executor_pool_ref.submit_or_inline ignore);
+    Pool_lane.with_read (fun () -> Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ ignore);
     let read_after, _ = wait_counts "read" in
     let background_after, _ = wait_counts "background" in
     check int "one read submission" 1 (read_after - read_before);
     check int "no background submission" 0 (background_after - background_before);
-    Executor_pool_ref.submit_or_inline ignore;
+    Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ ignore;
     let background_last, _ = wait_counts "background" in
     check int "one background submission" 1 (background_last - background_after))
 ;;
@@ -145,7 +145,7 @@ let test_a_queued_wait_lands_above_its_lower_buckets () =
     let release = occupy_the_only_worker sw pool in
     let _, before = counts "read" "wait" in
     Eio.Fiber.both
-      (fun () -> Pool_lane.with_read (fun () -> Executor_pool_ref.submit_or_inline ignore))
+      (fun () -> Pool_lane.with_read (fun () -> Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ ignore))
       (fun () ->
         Eio.Time.sleep (Eio.Stdenv.clock env) 0.03;
         release ());
@@ -164,7 +164,7 @@ let test_a_queued_wait_lands_above_its_lower_buckets () =
 let test_run_is_recorded_under_the_submitting_lane () =
   with_pool (fun _env _sw _pool ->
     let before, _ = counts "read" "run" in
-    Pool_lane.with_read (fun () -> Executor_pool_ref.submit_or_inline ignore);
+    Pool_lane.with_read (fun () -> Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ ignore);
     let after, _ = counts "read" "run" in
     check int "one read run" 1 (after - before))
 ;;
@@ -177,7 +177,7 @@ let test_a_cancelled_queued_submission_is_abandoned () =
     let abandoned_before, _ = counts "read" "abandoned" in
     let ran = ref false in
     Eio.Fiber.first
-      (fun () -> Pool_lane.with_read (fun () -> Executor_pool_ref.submit_or_inline (fun () -> ran := true)))
+      (fun () -> Pool_lane.with_read (fun () -> Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () -> ran := true)))
       (fun () -> Eio.Time.sleep (Eio.Stdenv.clock env) 0.03);
     release ();
     let waits_after, _ = counts "read" "wait" in
@@ -209,14 +209,14 @@ let test_a_wait_is_counted_by_the_weight_in_flight () =
     let holder =
       Eio.Fiber.fork_promise ~sw (fun () ->
         Pool_lane.with_read (fun () ->
-          Executor_pool_ref.submit_or_inline (fun () ->
+          Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
             Eio.Promise.resolve start ();
             Eio.Promise.await release)))
     in
     Eio.Promise.await started;
     check (float 0.) "one worker's weight in flight" 1.0 (in_flight_workers "read");
     Eio.Fiber.both
-      (fun () -> Pool_lane.with_read (fun () -> Executor_pool_ref.submit_or_inline ignore))
+      (fun () -> Pool_lane.with_read (fun () -> Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ ignore))
       (fun () -> Eio.Promise.resolve release_holder ());
     Eio.Promise.await_exn holder;
     check (list int) "the holder at 0 workers in flight, the next at 1" [ 1; 1; 0; 0 ]
@@ -229,8 +229,8 @@ let test_a_run_is_counted_by_the_weight_it_declared () =
     let io_before, _ = counts "read" "run_declared_io" in
     let cpu_before, _ = counts "read" "run_declared_cpu" in
     Pool_lane.with_read (fun () ->
-      Executor_pool_ref.submit_or_inline ~weight:0.05 ignore;
-      Executor_pool_ref.submit_or_inline ignore);
+      Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ ~weight:0.05 ignore;
+      Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ ignore);
     let io_after, _ = counts "read" "run_declared_io" in
     let cpu_after, _ = counts "read" "run_declared_cpu" in
     check int "the 0.05 job" 1 (io_after - io_before);
@@ -240,10 +240,69 @@ let test_a_run_is_counted_by_the_weight_it_declared () =
 let test_a_job_that_raises_leaves_no_weight_in_flight () =
   with_pool (fun _env _sw _pool ->
     let before = in_flight_workers "read" in
-    (match Pool_lane.with_read (fun () -> Executor_pool_ref.submit_or_inline (fun () -> failwith "job failed")) with
+    (match Pool_lane.with_read (fun () -> Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () -> failwith "job failed")) with
      | () -> fail "the job's exception did not reach the caller"
      | exception Failure _ -> ());
     check (float 0.) "the weight left with the job" before (in_flight_workers "read"))
+;;
+
+(* RFC-0474 L4c. *)
+let named lane_name name =
+  member [ lane_name; "by_name" ] (Pool_wait.to_json ())
+  |> Yojson.Safe.Util.to_list
+  |> List.find_opt (fun row -> member [ "name" ] row = `String name)
+;;
+
+let named_int lane_name name field =
+  match named lane_name name with
+  | Some row -> Yojson.Safe.Util.to_int (member [ field ] row)
+  | None -> fail (Printf.sprintf "%s: no %s row in %s.by_name" field name lane_name)
+;;
+
+let named_ms lane_name name field =
+  match named lane_name name with
+  | Some row -> Yojson.Safe.Util.to_number (member [ field ] row)
+  | None -> fail (Printf.sprintf "%s: no %s row in %s.by_name" field name lane_name)
+;;
+
+(* Two names on one lane are counted apart, and the one that ran longer in
+   all is listed first. The long job sleeps on the worker for 20 ms, so its
+   run time is at least that by construction. *)
+let test_a_job_is_counted_under_its_name () =
+  with_pool (fun env _sw _pool ->
+    let clock = Eio.Stdenv.clock env in
+    let short = "l4c test short job" in
+    let long = "l4c test long job" in
+    Pool_lane.with_read (fun () ->
+      Executor_pool_ref.submit_or_inline ~name:short ignore;
+      Executor_pool_ref.submit_or_inline ~name:short ignore;
+      Executor_pool_ref.submit_or_inline ~name:long (fun () -> Eio.Time.sleep clock 0.02));
+    check int "the short name's jobs" 2 (named_int "read" short "count");
+    check int "the long name's job" 1 (named_int "read" long "count");
+    check bool "the long job ran at least 20 ms" true (named_ms "read" long "run_sum_ms" >= 20.);
+    check bool "neither name reached the background lane" true
+      (Option.is_none (named "background" short) && Option.is_none (named "background" long));
+    let order =
+      member [ "read"; "by_name" ] (Pool_wait.to_json ())
+      |> Yojson.Safe.Util.to_list
+      |> List.filter_map (fun row ->
+        match member [ "name" ] row with
+        | `String n when n = short || n = long -> Some n
+        | _ -> None)
+    in
+    check (list string) "longest run time first" [ long; short ] order)
+;;
+
+let test_an_abandoned_job_is_counted_under_its_name () =
+  with_pool (fun env sw pool ->
+    let release = occupy_the_only_worker sw pool in
+    let name = "l4c test abandoned job" in
+    Eio.Fiber.first
+      (fun () -> Pool_lane.with_read (fun () -> Executor_pool_ref.submit_or_inline ~name ignore))
+      (fun () -> Eio.Time.sleep (Eio.Stdenv.clock env) 0.03);
+    release ();
+    check int "one abandoned submission" 1 (named_int "read" name "abandoned");
+    check int "no job entered a worker" 0 (named_int "read" name "count"))
 ;;
 
 (* Bucket [i] holds spans at most its bound and above the previous one. *)
@@ -251,7 +310,7 @@ let test_a_span_on_a_bound_belongs_to_that_bucket () =
   let ms n = Mtime.Span.of_uint64_ns (Int64.of_float (n *. 1e6)) in
   let place span =
     let _, before = counts "background" "abandoned" in
-    Pool_wait.record_abandoned Pool_lane.Background span;
+    Pool_wait.record_abandoned Pool_lane.Background ~name:__FUNCTION__ span;
     let _, after = counts "background" "abandoned" in
     let rec index i = function
       | [] -> fail "no bucket changed"
@@ -296,6 +355,10 @@ let () =
             test_a_run_is_counted_by_the_weight_it_declared
         ; test_case "a job that raises leaves no weight in flight" `Quick
             test_a_job_that_raises_leaves_no_weight_in_flight
+        ; test_case "a job is counted under its name" `Quick
+            test_a_job_is_counted_under_its_name
+        ; test_case "an abandoned job is counted under its name" `Quick
+            test_an_abandoned_job_is_counted_under_its_name
         ] )
     ]
 ;;

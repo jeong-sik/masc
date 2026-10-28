@@ -376,7 +376,7 @@ let materialize ~store ~addresses ~pending messages =
       (match Hashtbl.fold (fun _ entry acc -> entry :: acc) queued [] with
        | [] -> []
        | _ :: _ as to_address ->
-         Domain_pool_ref.submit_cpu_or_inline (fun () ->
+         Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
            List.map
              (fun (entry : pending) ->
                 entry.occurrence,

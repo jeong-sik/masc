@@ -113,7 +113,7 @@ let verified_stored_answer ~base_path ~tool_name ~output_text =
       (match reader handler with Whole_output -> None | Reads_answer read -> Some read) in
   match declared_reader with
   | None -> None
-  | Some read -> Domain_pool_ref.submit_io_or_inline (fun () ->
+  | Some read -> Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
   match Tool_output.decode_from_agent_core output_text with
   | Tool_output.Decoded {sha256; bytes; mime; answer_fingerprint = Some declared; _} ->
     (match Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256 with

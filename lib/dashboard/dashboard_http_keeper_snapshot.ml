@@ -249,9 +249,9 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
             | Ok rows -> rows
             | Error _ -> []
           in
-          let workspace_memory = Domain_pool_ref.submit_io_or_inline (fun () ->
+          let workspace_memory = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
             Workspace_memory_ledger.observe ~base_path:config.base_path) in
-          let wiki_contents = Domain_pool_ref.submit_io_or_inline (fun () ->
+          let wiki_contents = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
             Keeper_wiki_contents.observe ~base_path:config.base_path) in
           let recent_work = Keeper_recent_work.collect ~config ~meta:m
             |> Keeper_recent_work.preview ~base_path:config.base_path in

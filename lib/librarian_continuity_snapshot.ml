@@ -229,7 +229,7 @@ let prefix_digest ?prefix messages (range : R.range) =
       false, Hash.feed_string ctx encoded)
       (List.is_empty digest.fed, digest.open_array) added in
     { digest_end_atom = range.end_atom; fed = digest.fed @ added; open_array } in
-  Domain_pool_ref.submit_cpu_or_inline (fun () ->
+  Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
     (* One private buffer per job avoids growing a fresh buffer for every
        message. Yojson clears it between encodings; no bytes or mutable
        buffer are shared across jobs. *)

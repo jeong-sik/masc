@@ -1008,7 +1008,7 @@ let run_spawned ?home_dir ?before_spawn ?on_spawned ?on_prompt_sent ?on_context_
          off the scheduler domain. *)
       Option.iter (fun observer ->
         Runtime_official_client_write.report ~label:"Antigravity stdin prompt" observer
-          (Domain_pool_ref.submit_cpu_or_inline (fun () ->
+          (Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
              Runtime_official_client_write.raw prompt)))
         on_context_submission;
       Option.iter (fun callback -> callback ()) on_prompt_sent);

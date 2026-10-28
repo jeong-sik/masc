@@ -24,7 +24,7 @@ let test_running_job () =
         Eio.Fiber.first
           (fun () -> Eio.Promise.await started)
           (fun () ->
-            Executor_pool_ref.submit_or_inline (fun () ->
+            Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
               Atomic.incr calls;
               Fun.protect ~finally:(fun () -> Eio.Promise.resolve finish ())
                 (fun () ->
@@ -73,24 +73,24 @@ let test_waiting_job () =
           (fun () -> Eio.Promise.await submitting)
           (fun () ->
             Eio.Promise.resolve submit ();
-            Executor_pool_ref.submit_or_inline (fun () -> Atomic.incr calls));
+            Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () -> Atomic.incr calls));
         release_once ();
         Eio.Promise.await_exn blocker;
-        Executor_pool_ref.submit_or_inline (fun () -> ());
+        Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () -> ());
         check int "cancelled waiting compute never starts" 0 (Atomic.get calls)))
 
 let test_success_and_nested () =
   with_pool (fun _env _sw _pool ->
     let value =
-      Executor_pool_ref.submit_or_inline (fun () ->
+      Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
         check bool "worker context survives the cancellation boundary" true
           (Executor_pool_ref.in_worker_context ());
-        Executor_pool_ref.submit_or_inline (fun () -> 42))
+        Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () -> 42))
     in
     check int "normal and nested calls complete" 42 value;
     Executor_pool_ref.For_testing.with_pool_option None (fun () ->
       check int "no-pool fallback completes" 7
-        (Executor_pool_ref.submit_or_inline (fun () -> 7))))
+        (Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () -> 7))))
 
 let () =
   run "Executor pool cancellation"

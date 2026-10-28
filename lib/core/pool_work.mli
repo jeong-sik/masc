@@ -17,17 +17,19 @@ type kind =
 
 type 'a t
 
-val cpu : (unit -> 'a) -> 'a t
-(** Work that holds a whole worker while it runs. *)
+val cpu : name:string -> (unit -> 'a) -> 'a t
+(** Work that holds a whole worker while it runs. [name] names it in
+    {!Pool_wait} and the trace; callers pass [__FUNCTION__] (RFC-0474 L4c). *)
 
-val io : (unit -> 'a) -> 'a t
+val io : name:string -> (unit -> 'a) -> 'a t
 (** Work that shares a worker with other I/O jobs while it waits on an Eio
     effect. Work that blocks the domain for long without one (a large Stdlib
     channel read and its parse) stops every job the worker admitted beside
     it; declare such a compute [cpu]. *)
 
 val wrap : 'a t -> ((unit -> 'a) -> 'b) -> 'b t
-(** [wrap w f] is work of [w]'s kind whose body is [f] applied to [w]'s body.
+(** [wrap w f] is work of [w]'s kind and name whose body is [f] applied to
+    [w]'s body.
     [f] decides whether and when that body runs. Code that adds bookkeeping
     around a compute uses it to keep the caller's declaration. *)
 

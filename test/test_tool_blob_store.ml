@@ -520,7 +520,7 @@ let test_cancel_queued_cold_range_read_leaves_cache_empty () =
     let occupied, signal_occupied = Eio.Promise.create () in
     let released, release_worker = Eio.Promise.create () in
     Eio.Fiber.fork ~sw (fun () ->
-      Domain_pool.submit_cpu pool (fun () ->
+      Domain_pool.submit_cpu ~name:__FUNCTION__ pool (fun () ->
         Eio.Promise.resolve signal_occupied ();
         Eio.Promise.await released));
     Eio.Promise.await occupied;
@@ -544,7 +544,7 @@ let test_cancel_queued_cold_range_read_leaves_cache_empty () =
     Alcotest.(check bool) "queued read propagates cancellation" true
       (Eio.Promise.await_exn cancelled);
     Eio.Promise.resolve release_worker ();
-    Domain_pool.submit_cpu pool (fun () -> ());
+    Domain_pool.submit_cpu ~name:__FUNCTION__ pool (fun () -> ());
     Alcotest.(check bool) "cancelled read did not admit a cache entry" true
       (Option.is_none (B.For_testing.validated_snapshot store ~sha256:reference.sha256));
     match B.fetch_range store ~sha256:reference.sha256 ~offset:0 ~max_bytes:64 with

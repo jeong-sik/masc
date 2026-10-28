@@ -166,7 +166,7 @@ let rank_many_with ~queries ~texts ~max_results =
        caller's fiber cannot yield inside it. The workspace curator ranks the
        whole workspace ledger: on domain 0 that held the server's HTTP answers
        and logs for tens of seconds (2026-10-07). *)
-    Domain_pool_ref.submit_cpu_or_inline @@ fun () ->
+    Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ @@ fun () ->
     (try
        with_database (Sqlite3.db_open ":memory:") (fun db ->
          let* () = create_table db texts in
@@ -217,7 +217,7 @@ let with_excluding_owners ~texts ~max_results f =
     | Some db -> Ok db
     | None ->
       let* db =
-        Domain_pool_ref.submit_cpu_or_inline (fun () ->
+        Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
           match Sqlite3.db_open ":memory:" with
           | exception Sqlite3.Error detail -> Error (Index_unavailable detail)
           | db ->
@@ -239,7 +239,7 @@ let with_excluding_owners ~texts ~max_results f =
     else
       let* db = table () in
       let* results, executed =
-        Domain_pool_ref.submit_cpu_or_inline (fun () ->
+        Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
           let rec search_all results executed = function
             | [] -> Ok (List.rev results, executed)
             | (_, None) :: rest -> search_all ([] :: results) executed rest

@@ -21,6 +21,6 @@ let message_texts_as_joined messages =
   | _ :: _ ->
     (* Message text extraction and hashing are pure. Keep both off the main
        domain; only the completed digest returns to the manifest/capture writer. *)
-    Executor_pool_ref.submit_or_inline (fun () ->
+    Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
       compute_message_texts_as_joined messages)
 ;;

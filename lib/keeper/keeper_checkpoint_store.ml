@@ -46,7 +46,7 @@ let is_agent_core_history_file ~(session_dir : string) (filename : string) : boo
 let list_agent_core_history_files ~(session_dir : string) : string list =
   if not (Fs_compat.file_exists session_dir) then []
   else
-    Domain_pool_ref.submit_io_or_inline (fun () ->
+    Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
       Sys.readdir session_dir
       |> Array.to_list
       |> List.filter (is_agent_core_history_file ~session_dir)
@@ -102,7 +102,7 @@ let leaf_is_real_segment leaf =
    Domains (see the stale-guard "raw Domain saves through Unix context"
    test). *)
 let offload_checkpoint_cpu (f : unit -> 'a) : 'a =
-  Domain_pool_ref.submit_cpu_or_inline f
+  Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ f
 
 let decode_checkpoint_off_scheduler (content : string) :
     (Agent_core.Checkpoint.t, Agent_core.Error.t) result =

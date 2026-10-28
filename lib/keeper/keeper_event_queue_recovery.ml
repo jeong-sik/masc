@@ -335,7 +335,7 @@ let project_owner_result_inline ~base_path ~keeper_name =
 
 let project_owner_result ~base_path ~keeper_name =
   match
-    Executor_pool_ref.submit_strict (fun () ->
+    Executor_pool_ref.submit_strict ~name:__FUNCTION__ (fun () ->
       project_owner_result_inline ~base_path ~keeper_name)
   with
   | Ok outcome -> outcome
@@ -444,7 +444,7 @@ let project_discovery_inline
 
 let project_discovered_bounded ~base_path ~budget ~cursor =
   match
-    Executor_pool_ref.submit_strict (fun () ->
+    Executor_pool_ref.submit_strict ~name:__FUNCTION__ (fun () ->
       let discovery =
         Keeper_event_queue_persistence.discover_keeper_names_with_durable_state
           ~base_path

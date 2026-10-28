@@ -21,6 +21,7 @@ let run_dashboard_compute
       ~clock
       ~(config : Workspace.config)
       ~kind
+      ~name
       compute
   =
   let runtime = dashboard_runtime ?net ?mono_clock () in
@@ -31,6 +32,7 @@ let run_dashboard_compute
     ~clock
     ~config
     ~kind
+    ~name
     compute
 ;;
 

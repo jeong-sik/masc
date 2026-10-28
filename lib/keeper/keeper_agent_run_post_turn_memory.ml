@@ -66,7 +66,7 @@ let counterpart_observations_before ~base_dir ~keeper_name ~before =
 
 
 let counterpart_observations_before_offloaded ~base_dir ~keeper_name ~before =
-  Domain_pool_ref.submit_io_or_inline (fun () ->
+  Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
     counterpart_observations_before ~base_dir ~keeper_name ~before)
 ;;
 

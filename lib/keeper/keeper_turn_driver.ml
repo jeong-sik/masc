@@ -1824,7 +1824,7 @@ let run_named
       let turn_boundary = Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
         match session_id with
         | Some trace_id ->
-          Domain_pool_ref.submit_io_or_inline (fun () ->
+          Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
             Keeper_turn_driver_try_provider.turn_start
               ~config:(Workspace.default_config base_path) ~keeper_name ~trace_id
               ~messages:initial_messages)
@@ -1836,7 +1836,7 @@ let run_named
         match input_source with
         | Keeper_request_source.Completion_review -> Keeper_turn_driver_try_provider.Completion_review
         | Keeper_request_source.Keeper_history { trace_id } ->
-          Domain_pool_ref.submit_io_or_inline (fun () ->
+          Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
             let continuity, notes =
               Keeper_turn_driver_try_provider.read_keeper_continuity
                 ~config:(Workspace.default_config base_path)
@@ -1897,7 +1897,7 @@ let run_named
 	    | Keeper_turn_driver_try_provider.Completion_review ->
 	      Ok Keeper_turn_driver_try_provider.no_librarian_position
 	    | Keeper_turn_driver_try_provider.Keeper_history { continuity = chosen; _ } ->
-	      Domain_pool_ref.submit_cpu_or_inline (fun () ->
+	      Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
 	        Keeper_turn_driver_try_provider.librarian_position
 	          ~messages
 	          (Keeper_turn_driver_try_provider.continuity_for_attempt

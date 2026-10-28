@@ -477,7 +477,7 @@ let handle_keeper_turns_list state request reqd =
          ])
   | Ok keeper_names ->
     let waiting_snapshot =
-      Domain_pool_ref.submit_io_or_inline (fun () ->
+      Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
         Server_keeper_waiting_inventory.keeper_json_by_name config)
     in
     let waiting_by_name, waiting_errors =

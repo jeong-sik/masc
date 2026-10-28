@@ -116,7 +116,7 @@ let verify_files ~base =
     match Unix.access (Filename.concat dir Shim.shim_binary_name) [Unix.X_OK] with
     | () -> Ok ()
     | exception Unix.Unix_error (error, _, _) -> Error (Verification_failed (Guest_shim_missing error))) in
-  let* provenance = Executor_pool_ref.submit_or_inline (fun () ->
+  let* provenance = Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
     Eio_guard.run_in_systhread ~label:"microvm-shim-sidecar" (fun () -> Shim.verify_shim_sidecar ~dir))
     |> Result.map_error (fun detail -> Verification_failed (Sidecar_rejected detail)) in
   (match provenance with

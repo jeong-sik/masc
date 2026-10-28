@@ -206,7 +206,7 @@ let dispatch ?ask_source_turn_ref ?dos_admission ?(lane_access = Lane_addon_sour
             Tool_result.make_err ~tool_name:name ~start_time:start ~class_
               ~data:(Lane_addon_declaration.error_to_json error) error.message)
   | Some Tool_schemas_misc.Misc_lane_updates ->
-      Some (match Domain_pool_ref.submit_io_or_inline (fun () ->
+      Some (match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
         Lane_addon_subscription.handle ~access:lane_access ~config:ctx.config ~caller:lane_caller args) with
         | Ok data -> Tool_result.make_ok ~tool_name:name ~start_time:start ~data ()
         | Error message -> Tool_result.make_err ~tool_name:name ~start_time:start
@@ -248,7 +248,7 @@ let dispatch ?ask_source_turn_ref ?dos_admission ?(lane_access = Lane_addon_sour
       Some (match Lane_addon_runtime.dispatch ~caller:lane_caller ~access:lane_access ~config:ctx.config ~operation:Lane_addon_runtime.Evidence args with
         | Ok data ->
             let result = Tool_result.make_ok ~tool_name:name ~start_time:start ~data () in
-            (match Domain_pool_ref.submit_io_or_inline (fun () ->
+            (match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
               Tool_projection.attach_artifact_manifest
                 ~projection:Tool_output.Inline_with_reference
                 ~base_path:ctx.config.base_path result) with

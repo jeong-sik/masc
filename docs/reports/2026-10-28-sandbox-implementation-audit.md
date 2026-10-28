@@ -166,7 +166,14 @@ not mark unrelated open defects as resolved.
   The new preflight diagnostic passed; `read_backend` ran 81 tests with this
   one failure. `microvm` 114/114, Dashboard output 17/17, remote sandbox 22/22,
   and stream close 9/9 passed. The fixture now uses the same Eio, shim and
-  identity preparation as the attached-read test; a final run is required.
+  identity preparation as the attached-read test.
+- **Focused GREEN:** run `40700857707`, head
+  `202539abb1e7ef3382d2ceaae832b0613813bd45`: completed/success.
+  `test_keeper_sandbox_read_backend` 81/81, `test_keeper_sandbox_microvm`
+  114/114, `test_dashboard_execute_output` 17/17, `test_keeper_sandbox_remote`
+  22/22, and `test_keeper_tool_execute_stream_close` 9/9 passed (243/243).
+  This verifies the focused code paths, not the whole repository or a live
+  fleet.
 - **Real-time output:** run `40692203058`, head
   `6de3f330662f2f35e939bbd04a3e7d5c8e2a64d7`: completed/success.
   `test_dashboard_execute_output` 17/17, `test_keeper_sandbox_remote` 22/22,

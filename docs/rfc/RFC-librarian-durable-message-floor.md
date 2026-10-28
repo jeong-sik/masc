@@ -121,6 +121,30 @@ B 의 성립을 정하던 두 가지를 코드로 확인했다.
 
 **A 로 간다.** 단계 결과는 단계 original 이 쥐고, 끝의 Memory 커밋 하나가 범위 영수증과 `unread_messages` 를 함께 싣는다. 아직 확인하지 못한 것은 하나다: gate journal 이 단계들의 결정을 합친 program 하나를 받는지. L3 은 단계 original 과 그 결과 보존까지만 하고, 이 질문은 L4(게시) 전에 코드로 확인한다.
 
+### 3.8 L3 를 나눈 모양과 확정한 것 (2026-10-28)
+
+L3 을 한 PR 로 쓰지 않고 아래로 나눠 L2(#46568) 위에 쌓는다.
+
+| 층 | 내용 | PR |
+|---|---|---|
+| L3a | 바닥의 규칙을 입출력 없는 상태기계 `Keeper_librarian_message_floor.Machine` 으로 뽑는다. Runtime 바닥(`Floor.infer`)도 이 기계의 구동기가 된다. 결과를 기록해 두었다가 먹이면 같은 다음 질문이 나온다 | #46577 |
+| L3b | Runtime 이 durable 단계를 준비·복원·검증하고, 보관된 답과 gate 판정으로 `memory_step` 을 찍는 입구 | #46580 |
+| L3c | 단계 request: 일반 history original 과 다른 scope·kind, 부모(거절된 범위 original)와 앞 단계를 digest 로 가리킴 | 예정 |
+| L3d | 단계 gate 저널(`Keeper_librarian_original_gate.Make`)과 구동기: 사슬 발견·검증·복구, `Submit.resume` 로 실행 | 예정 |
+| L3e | `consume_one` 진입: 거절된 한 턴 범위 + L2 증거 → 사슬. 하강 시험(한 번만 하강, `Invalid_request`·열린 기록은 하강 없음)을 이 층에 둔다 | 예정 |
+
+확정한 것.
+
+- **Add-on 을 바꾸지 않는다.** `durable` 출력은 요청마다 스키마를 싣는 정책(`Consumer_request_schema`)이다. 단계는 같은 `durable` 출력에 연속성 스키마(working state 필수)를 싣는다.
+- **단계는 Runtime 바닥과 같은 질문이다.** 프롬프트의 continuity 칸에 앞 단계의 working state 와 읽지 못한 메시지를 싣는다. 이유는 프로그램 계약이다. `Keeper_memory_os_program.create` 가 결정마다 비지 않은 `working_state` 를 요구하므로, 단계가 모델에게서 실제 working state 를 받아야 한다. 빈 값으로 채우면 조용한 허용이 된다.
+- **`memory_step` 은 Runtime 이 찍는다.** 이 타입은 `private` 이다(게이트를 통과한 결정만 Runtime 이 만든다는 경계). durable 결과는 `Runtime.durable_memory_step` 입구로만 `memory_step` 이 되고, 그러면 `Memory_plan`·`Memory_program` 의 검증을 그대로 쓴다.
+- **단계의 `current` 는 plan 이 쌓은 가상 Memory 다.** durable 단계의 첫 `current` 는 거절된 범위 original 이 잡아 둔 `current` 이고, 게시 때 `Program.replay` 가 잠긴 실제 Memory 와 대조한다.
+
+열린 것.
+
+- **served slot.** `Machine.answered` 는 단계를 처리한 슬롯(`Runtime.served_slot`)을 받는다. durable 의 보관된 답에는 슬롯 id 문자열만 있고 API 인지 CLI 인지는 없다. 이 값을 어떻게 다룰지 L3d 에서 정한다.
+- **gate 저널이 단계마다 도는 비용.** 단계 하나는 답 하나와 gate 저널 하나다. L4 전에 저널이 단계들의 결정을 합친 program 하나를 받는지 확인한다.
+
 ## 4. 다른 안
 
 - **턴 전체를 구멍으로 기록하고 지나가기.** 고르지 않는다. 읽을 수 있는 메시지까지 잃는다. lifecycle RFC 는 지나가는 자리를 바닥의 메시지 하나로 좁혔다.
@@ -135,7 +159,7 @@ B 의 성립을 정하던 두 가지를 코드로 확인했다.
 |---|---|---|
 | L1 | 이 RFC | — |
 | L2 | durable `refusal_report` 가 3.1 의 크기 거절에만 `Smaller_input_may_help`·`provider_input_refusals` 를 싣는다. host 기록이 없는 frame 거절은 final 만으로, 기록이 있는 거절은 실행 영수증의 소진 증거로 판정한다. 바닥은 아직 없다 | 크기 거절과 다른 거절의 보고 차이, 영수증 증거가 없는 `Input_capacity` 는 근거 없음 |
-| L3 | 3.7 에서 고른 방식의 바닥 단계, 앞 단계 연결, inventory·복구. 메시지로 좁힌 capture 포함 | 단계 사슬 crash·재개, 같은 단계 재호출 없음 |
+| L3 | 3.8 의 L3a~L3e. 3.7 에서 고른 방식의 바닥 단계, 앞 단계 연결, inventory·복구 | 단계 사슬 crash·재개, 같은 단계 재호출 없음, 하강은 한 번 |
 | L4 | program 게시, 구멍 영수증, source lock, settle | 실제 worker 와 실제 4 MiB frame 으로 5 MB 메시지 하나가 든 턴: 구멍 하나와 나머지 메시지의 Memory, 위치 이동. `specs/bug-models/LibrarianRead.tla` 의 `NoAtomPassedUnread` 와 맞는지 |
 | L5 | bench `5:5` 측정, RFC status 갱신 | — |
 

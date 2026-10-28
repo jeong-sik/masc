@@ -99,7 +99,7 @@ let next_subscriber_id = ref 0
 
 (* Open stream tracking so that live chunks carry the same task_id as the
    execution that produced them. *)
-type open_stream_state = { task_id : string option }
+type open_stream_state = { task_id : string option; started_at : float }
 let open_streams : (string, open_stream_state) Hashtbl.t = Hashtbl.create 16
 
 let normalize_keeper keeper_name =
@@ -269,7 +269,7 @@ let record_stream_start ~keeper_name ~task_id =
   else (
     let generated_at = now_unix () in
     with_lock (fun () ->
-      Hashtbl.replace open_streams keeper { task_id };
+      Hashtbl.replace open_streams keeper { task_id; started_at = generated_at };
       append_logged_locked ~keeper (fun seq ->
         Task_opened_event { keeper; seq; task_id; generated_at });
       wake_subscribers_locked keeper))
@@ -321,10 +321,26 @@ let retained_lines_locked keeper =
     in
     collect (log.next_seq - 1) []
 
+(* A close is recorded before its completed-output entry, and failures may
+   never have such an entry. The marker is the actual observed lifecycle
+   fact during that interval; an older completed entry must not replace it. *)
+let last_transition_locked keeper =
+  match Hashtbl.find_opt logs keeper with
+  | None -> None
+  | Some log ->
+    let rec find seq =
+      if seq < oldest_retained_seq log then None
+      else
+        match log.slots.(seq mod event_log_capacity) with
+        | (Task_opened_event _ | Task_closed_event _) as event -> Some event
+        | Line_event _ -> find (seq - 1)
+    in
+    find (log.next_seq - 1)
+
 let snapshot_state keeper_name =
   let keeper = normalize_keeper keeper_name in
   if keeper = ""
-  then "", [], [], first_seq - 1
+  then "", [], [], first_seq - 1, None, None
   else
     with_lock (fun () ->
       let entries =
@@ -332,7 +348,8 @@ let snapshot_state keeper_name =
         | None -> []
         | Some q -> queue_to_list q
       in
-      keeper, entries, retained_lines_locked keeper, last_logged_seq_locked keeper)
+      keeper, entries, retained_lines_locked keeper, last_logged_seq_locked keeper,
+      Hashtbl.find_opt open_streams keeper, last_transition_locked keeper)
 
 let add_stream_chunks entries select =
   let buffer =
@@ -351,10 +368,23 @@ let add_stream_chunks entries select =
   , Exec_buffer.bytes_dropped buffer + (String.length ring_tail - String.length tail) )
 
 let snapshot ~keeper_name =
-  let keeper, entries, lines, last_seq = snapshot_state keeper_name in
-  match List.rev entries with
-  | [] -> None
-  | latest :: _ ->
+  let keeper, entries, lines, last_seq, open_stream, transition =
+    snapshot_state keeper_name
+  in
+  let latest = match List.rev entries with [] -> None | entry :: _ -> Some entry in
+  let lifecycle =
+    match open_stream, transition, latest with
+    | Some open_stream, _, _ ->
+      Some (open_stream.task_id, false, None, open_stream.started_at)
+    | None, Some (Task_closed_event { task_id; status; generated_at; _ }), _ ->
+      Some (task_id, true, Some status, generated_at)
+    | None, (Some (Task_opened_event _ | Line_event _) | None), Some entry ->
+      Some (entry.task_id, true, Some entry.status, entry.generated_at)
+    | None, (Some (Task_opened_event _ | Line_event _) | None), None -> None
+  in
+  match lifecycle with
+  | None -> None
+  | Some (task_id, closed, status, generated_at) ->
     let stdout_since, since_stdout, bytes_dropped_stdout =
       add_stream_chunks entries (fun entry -> entry.stdout)
     in
@@ -363,7 +393,7 @@ let snapshot ~keeper_name =
     in
     Some
       { keeper
-      ; task_id = latest.task_id
+      ; task_id
       ; task_count = List.length entries
       ; lines
       ; last_seq
@@ -373,9 +403,9 @@ let snapshot ~keeper_name =
       ; since_stderr
       ; bytes_dropped_stdout
       ; bytes_dropped_stderr
-      ; closed = true
-      ; status = Some latest.status
-      ; generated_at = latest.generated_at
+      ; closed
+      ; status
+      ; generated_at
       }
 
 let option_json f = function

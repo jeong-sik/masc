@@ -75,7 +75,10 @@ val record_stream_end :
 (** Log a [task_closed] marker and release the open stream binding. *)
 
 val snapshot : keeper_name:string -> snapshot option
-(** Latest retained Execute output for [keeper_name], if any. *)
+(** Retained Execute lines and the latest observed stream state. A running
+    invocation is visible even before any Execute has completed. The
+    [stdout_since]/[stderr_since] byte fields summarize completed captures;
+    [lines] also includes output from the currently open stream. *)
 
 val event_json : keeper_name:string -> Yojson.Safe.t
 (** Build the SSE payload. Returns a [no_task] event when the keeper has no

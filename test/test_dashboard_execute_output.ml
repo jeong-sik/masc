@@ -498,6 +498,53 @@ let test_initial_snapshot_starts_live_tail_after_it () =
            check string "next is new line" "after snapshot" (line_text next);
            check int "next number" 3 (json_seq next)))
 
+(* A viewer opening an already-running first Execute must see its retained
+   output and open state, then continue after the snapshot without replay. *)
+let test_subscribe_during_first_execution () =
+  Eio_main.run (fun env ->
+    EO.record_stream_start ~keeper_name:"alpha" ~task_id:(Some "task-live");
+    EO.append_stream_chunk ~keeper_name:"alpha" ~stream:`Stdout "already running\n";
+    match EO.subscribe ~keeper_name:"alpha" with
+    | None -> fail "expected subscriber"
+    | Some subscriber ->
+      Fun.protect ~finally:(fun () -> EO.unsubscribe subscriber) (fun () ->
+        let initial = EO.initial_event_json subscriber in
+        let open Yojson.Safe.Util in
+        check string "snapshot" "snapshot" (json_type initial);
+        check bool "running" false (initial |> member "closed" |> to_bool);
+        check string "active task" "task-live" (initial |> member "task_id" |> to_string);
+        check (list string) "retained output" [ "already running" ]
+          (initial |> member "lines" |> to_list
+           |> List.map (fun line -> line |> member "text" |> to_string));
+        EO.append_stream_chunk ~keeper_name:"alpha" ~stream:`Stderr "later\n";
+        let next =
+          Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 1.0 (fun () ->
+            EO.take_event subscriber |> EO.stream_event_json)
+        in
+        check string "new output" "later" (line_text next);
+        check int "next sequence" 3 (json_seq next)))
+
+let test_current_stream_supersedes_prior_completion () =
+  EO.inject_for_testing ~keeper_name:"alpha" ~task_id:"old"
+    ~stdout:"old output\n" ~stderr:"" ~status:status_ok ();
+  EO.record_stream_start ~keeper_name:"alpha" ~task_id:(Some "new");
+  let open Yojson.Safe.Util in
+  let snapshot = EO.event_json ~keeper_name:"alpha" in
+  check bool "current stream is open" false (snapshot |> member "closed" |> to_bool);
+  check string "current task" "new" (snapshot |> member "task_id" |> to_string);
+  check bool "prior status is not current" true (snapshot |> member "status" = `Null)
+
+let test_closed_stream_without_completed_capture () =
+  EO.record_stream_start ~keeper_name:"alpha" ~task_id:(Some "failed");
+  EO.record_stream_end ~keeper_name:"alpha" ~task_id:(Some "failed")
+    ~status:(`Assoc [ "rejected", `String "path_reject" ]);
+  let open Yojson.Safe.Util in
+  let snapshot = EO.event_json ~keeper_name:"alpha" in
+  check string "snapshot exists" "snapshot" (json_type snapshot);
+  check bool "closed" true (snapshot |> member "closed" |> to_bool);
+  check string "actual terminal status" "path_reject"
+    (snapshot |> member "status" |> member "rejected" |> to_string)
+
 let test_sse_frame () =
   let frame = EO.sse_frame (`Assoc [ "type", `String "snapshot" ]) in
   check bool "event header" true (String.starts_with ~prefix:"event: output\n" frame);
@@ -572,6 +619,12 @@ let () =
             "initial snapshot starts live tail after it"
             `Quick
             (with_fresh test_initial_snapshot_starts_live_tail_after_it)
+        ; test_case "subscribe during first execution" `Quick
+            (with_fresh test_subscribe_during_first_execution)
+        ; test_case "current stream supersedes prior completion" `Quick
+            (with_fresh test_current_stream_supersedes_prior_completion)
+        ; test_case "closed stream without completed capture" `Quick
+            (with_fresh test_closed_stream_without_completed_capture)
         ; test_case "sse frame" `Quick test_sse_frame
         ; test_case "routes match keeper path" `Quick test_dashboard_routes_match_keeper_path
         ] )

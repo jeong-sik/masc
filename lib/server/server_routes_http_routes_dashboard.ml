@@ -170,6 +170,7 @@ let handle_execute_output_stream ~sw ~clock _state req inner_reqd =
            else (
              try
                Httpun.Body.Writer.write_string writer data;
+               Httpun.Body.Writer.flush writer (fun _ -> ());
                true
              with
              | Eio.Cancel.Cancelled _ as e -> raise e

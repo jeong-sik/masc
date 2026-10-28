@@ -238,6 +238,11 @@ val compare_day_file_names : string -> string -> int
 (** The order of two day file names within one month, oldest first: the order
     {!day_file_paths_newest_first_result} lists them in, reversed. *)
 
+val entry_of_physical_line : path:string -> string -> recent_entry option
+(** One physical line of a day file of [path], without its newline, as
+    {!find_latest_entry_result} reads it: [None] when it holds only whitespace,
+    which no reader counts as a row, and the decoded row otherwise. *)
+
 val find_latest_entry_in_file_result :
   string -> (recent_entry -> 'a option) -> ('a option, read_error) result
 (** Single-file reverse scan using the same chunked reader as
@@ -332,22 +337,6 @@ val fold_file_appended_entries_result :
     an error; rotation, shrinkage and same-size edits invalidate the cursor.
     Appended bytes are read only once. The same append-only contract applies:
     in-place prefix edits combined with growth are outside that contract. *)
-
-type appended_tail =
-  { complete_until : int  (** Byte offset just past the file's last newline. *)
-  ; trailing : recent_entry option
-        (** The bytes after the last newline, decoded as a row, when they hold
-            more than whitespace. *)
-  }
-
-val fold_file_appended_entries_with_tail_result :
-  string -> cursor:append_cursor option -> init:'a ->
-  f:('a -> recent_entry -> 'a) -> (('a * appended_tail) appended_read, read_error) result
-(** {!fold_file_appended_entries_result}, except that bytes after the last
-    newline are not an error. They are decoded as one row, as the backward
-    scan of {!find_latest_entry_result} decodes them, and returned apart from
-    [f]: the cursor stops at the last newline, so the row is folded once it
-    ends. *)
 
 val read_range : t -> since:string -> until:string -> Yojson.Safe.t list
 (** [read_range t ~since ~until] returns entries whose day-file falls

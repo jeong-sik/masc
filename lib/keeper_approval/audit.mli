@@ -115,8 +115,10 @@ val read_recent_max_rows : int
 
 (** Newest [n] rows in physical append order (newest first). A Keeper-scoped
     read counts matching rows; unrelated traffic cannot truncate the result.
-    Each read first advances an in-process index over the bytes appended since
-    the previous read, so the answer is the store's content at that read. The
+    Each read first advances an in-process index over the day files written
+    since an earlier read, so the answer is the store's content at that read;
+    a file rewritten in place is read again from its first byte. Reads that
+    arrive together share one such advance and wait for it on a promise. The
     index keeps the newest {!read_recent_max_rows} rows of each Keeper and of
     the whole store; a larger [n] is refused.
     Failures are the ones a backward scan that stops at the [n]-th match would

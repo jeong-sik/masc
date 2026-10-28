@@ -8,7 +8,9 @@
     older file, a new day file, a removed day file, a rewritten day file, a
     malformed row and an unowned row. After each step every Keeper, the
     unscoped read and several [n] are compared. The index is process state,
-    so the steps share it as the server's reads do. *)
+    so the steps share it as the server's reads do. Other cases: a row without
+    a final newline, files rewritten in place on the same inode, and many
+    reads at once on several domains. *)
 
 module Audit = Keeper_approval.Audit
 open Alcotest
@@ -216,6 +218,219 @@ let test_file_rewritten_in_place_and_grown () =
     (Audit.read_recent ~base_path ~keeper_name:"alpha" ~n:1 () = Ok [])
 ;;
 
+(* Retention removes the oldest day files, and the index drops their rows
+   instead of starting over. alpha has more rows than a window keeps, so a
+   window that dropped too many or too few rows shows. The oldest file also
+   holds a malformed and an unowned row, which refuse reads until it goes. A
+   middle file removed leaves older rows the window displaced, so the index
+   must start over. *)
+let test_removed_day_files () =
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  let path day = day_path ~base_path ~month:"2026-10" ~day in
+  let oct01 = path "01.jsonl" and oct02 = path "02.jsonl" in
+  let oct03 = path "03.jsonl" and oct04 = path "04.jsonl" in
+  append_lines oct01
+    (rows "alpha" 150
+     @ [ "{\"event\": \"pending\", \"keeper\": "; "{\"event\":\"pending\",\"id\":\"x\"}" ]
+     @ rows "gamma" 2);
+  append_lines oct02 (rows "alpha" 100 @ rows "beta" 3);
+  append_lines oct03 (rows "alpha" 90 @ rows "beta" 1);
+  append_lines oct04 (rows "alpha" 60);
+  agrees_with_scan ~base_path "four day files";
+  Sys.remove oct01;
+  agrees_with_scan ~base_path "the oldest file removed";
+  Sys.remove oct03;
+  agrees_with_scan ~base_path "a middle file removed";
+  Sys.remove oct02;
+  Sys.remove oct04;
+  agrees_with_scan ~base_path "every file removed";
+  append_lines oct04 (rows "beta" 2);
+  agrees_with_scan ~base_path "a file written again"
+;;
+
+(* A row about 1 KB long, so a test file passes a 1 MiB digest block with
+   few rows. *)
+let padded_row keeper =
+  incr serial;
+  Yojson.Safe.to_string
+    (`Assoc
+        [ "ts", `Float (float_of_int !serial)
+        ; "event", `String "pending"
+        ; "id", `String (Printf.sprintf "approval-%d" !serial)
+        ; "keeper", `String keeper
+        ; "note", `String (String.make 900 'x')
+        ])
+;;
+
+let replace_once text ~sub ~by =
+  let rec find from =
+    if from + String.length sub > String.length text
+    then failf "%S not in %S" sub text
+    else if String.equal (String.sub text from (String.length sub)) sub
+    then from
+    else find (from + 1)
+  in
+  let at = find 0 in
+  String.sub text 0 at ^ by
+  ^ String.sub text (at + String.length sub) (String.length text - at - String.length sub)
+;;
+
+(* Write [lines] over [file] from its first byte, on the same inode, without
+   truncating it. *)
+let overwrite_in_place file lines =
+  let text = String.concat "" (List.map (fun line -> line ^ "\n") lines) in
+  let descriptor = Unix.openfile file [ Unix.O_WRONLY ] 0 in
+  Fun.protect ~finally:(fun () -> Unix.close descriptor) (fun () ->
+    check int "every byte written" (String.length text)
+      (Unix.write_substring descriptor text 0 (String.length text)))
+;;
+
+(* A rewrite that keeps the bytes just before the last read's boundary and
+   grows the file. One row changes owner from alpha to gamma, and the rows
+   after it stay as they were: in the first 1 MiB block, and in the last,
+   partial block more than 4 KiB before the boundary. The index must read the
+   changed row as the scan does. *)
+let test_rewrite_that_keeps_the_bytes_before_the_boundary () =
+  let row_count = 1600 in
+  List.iter
+    (fun (label, changed_line) ->
+       let base_path = temp_dir () in
+       Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+       let file = day_path ~base_path ~month:"2026-10" ~day:"01.jsonl" in
+       let lines = List.init row_count (fun _ -> padded_row "alpha") in
+       append_lines file lines;
+       check bool (label ^ ": the file passes one digest block") true
+         ((Unix.stat file).Unix.st_size > 1_048_576);
+       agrees_with_scan ~base_path (label ^ ": before the rewrite");
+       let inode = (Unix.stat file).Unix.st_ino in
+       let changed =
+         List.mapi
+           (fun index line ->
+              if index = changed_line
+              then replace_once line ~sub:"\"keeper\":\"alpha\"" ~by:"\"keeper\":\"gamma\""
+              else line)
+           lines
+       in
+       overwrite_in_place file (changed @ List.init 3 (fun _ -> padded_row "beta"));
+       check int (label ^ ": same inode") inode (Unix.stat file).Unix.st_ino;
+       agrees_with_scan ~base_path (label ^ ": rewritten and grown");
+       check int (label ^ ": gamma's row is read") 1
+         (match Audit.read_recent ~base_path ~keeper_name:"gamma" ~n:1 () with
+          | Ok rows -> List.length rows
+          | Error error -> failf "gamma refused: %s" (Audit.read_error_to_string error)))
+    [ "first block", 0; "last block", row_count - 20 ]
+;;
+
+(* Reads that arrive together share one advance. Several fibers on each of
+   several domains read at once, through the first build, appends, an
+   in-place rewrite and a new day file. The store does not change during a
+   round, so every read must give the scan's answer. Mismatches are collected
+   and checked after the domains join. *)
+let test_concurrent_reads_agree_with_the_scan () =
+  let domains = 4 in
+  let fibers_per_domain = 10 in
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  let oct01 = day_path ~base_path ~month:"2026-10" ~day:"01.jsonl" in
+  let oct02 = day_path ~base_path ~month:"2026-10" ~day:"02.jsonl" in
+  append_lines oct01 (rows "alpha" 40 @ rows "gamma" 3 @ rows "beta" 30);
+  append_lines oct02 (rows "alpha" 10);
+  Eio_main.run @@ fun env ->
+  let domain_mgr = Eio.Stdenv.domain_mgr env in
+  let round step =
+    let expected =
+      List.map (fun keeper_name -> keeper_name, scan ~base_path ?keeper_name ~n:20 ()) readers
+    in
+    let mismatches = Atomic.make [] in
+    let rec note mismatch =
+      let seen = Atomic.get mismatches in
+      if not (Atomic.compare_and_set mismatches seen (mismatch :: seen)) then note mismatch
+    in
+    let read_once index () =
+      let keeper_name = List.nth readers (index mod List.length readers) in
+      let label = Option.value ~default:"*" keeper_name in
+      match Audit.read_recent ~base_path ?keeper_name ~n:20 (), List.assoc keeper_name expected with
+      | Ok index_rows, Ok scanned
+        when List.length index_rows = List.length scanned
+             && List.for_all2 Yojson.Safe.equal index_rows scanned -> ()
+      | Error _, Error _ -> ()
+      | Ok _, Ok _ -> note (label ^ ": other rows")
+      | Ok _, Error _ -> note (label ^ ": index answered, scan refused")
+      | Error error, Ok _ ->
+        note (label ^ ": index refused: " ^ Audit.read_error_to_string error)
+    in
+    Eio.Fiber.all
+      (List.init domains (fun _ () ->
+         Eio.Domain_manager.run domain_mgr (fun () ->
+           Eio.Fiber.all (List.init fibers_per_domain read_once))));
+    check (list string) (step ^ ": every read agrees with the scan") [] (Atomic.get mismatches)
+  in
+  round "first build";
+  round "unchanged";
+  append_lines oct02 (rows "beta" 5 @ rows "gamma" 1);
+  round "appended";
+  overwrite_in_place oct01 (rows "gamma" 60 @ rows "beta" 20);
+  round "rewritten in place";
+  append_lines (day_path ~base_path ~month:"2026-10" ~day:"03.jsonl") (rows "alpha" 2);
+  round "new day file"
+;;
+
+(* A read must see every row appended before it began, even when it arrives
+   while another read's advance is running: that advance may have listed the
+   file before the row landed. One domain appends alpha rows one by one and
+   publishes each row's serial once its append returns; readers on other
+   domains note the published serial, read alpha's newest row, and that row's
+   serial must be at least the noted one. A refused read (a reader can see a
+   row half written) is counted apart and proves nothing. *)
+let test_a_read_sees_rows_appended_before_it () =
+  let appends = 300 in
+  let reader_domains = 3 in
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  let file = day_path ~base_path ~month:"2026-10" ~day:"01.jsonl" in
+  append_lines file (rows "beta" 50);
+  let serial_of = function
+    | `Assoc fields ->
+      (match List.assoc_opt "id" fields with
+       | Some (`String id) -> Scanf.sscanf_opt id "approval-%d%!" Fun.id
+       | Some _ | None -> None)
+    | _ -> None
+  in
+  let published = Atomic.make 0 in
+  let writing = Atomic.make true in
+  let stale = Atomic.make 0 in
+  let answered = Atomic.make 0 in
+  Eio_main.run @@ fun env ->
+  let domain_mgr = Eio.Stdenv.domain_mgr env in
+  let write () =
+    for _ = 1 to appends do
+      append_lines file [ row "alpha" ];
+      Atomic.set published !serial
+    done;
+    Atomic.set writing false
+  in
+  let read () =
+    while Atomic.get writing do
+      let before = Atomic.get published in
+      match Audit.read_recent ~base_path ~keeper_name:"alpha" ~n:1 () with
+      | Ok [ newest ] ->
+        Atomic.incr answered;
+        (match serial_of newest with
+         | Some serial when serial >= before -> ()
+         | Some _ | None -> Atomic.incr stale)
+      | Ok [] -> if before > 0 then Atomic.incr stale
+      | Ok (_ :: _ :: _) -> Atomic.incr stale
+      | Error _ -> ()
+    done
+  in
+  Eio.Fiber.all
+    ((fun () -> Eio.Domain_manager.run domain_mgr write)
+     :: List.init reader_domains (fun _ () -> Eio.Domain_manager.run domain_mgr read));
+  check int "reads older than a row appended before them" 0 (Atomic.get stale);
+  check bool "some reads answered while rows were appended" true (Atomic.get answered > 0)
+;;
+
 let test_bounds () =
   let base_path = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
@@ -238,8 +453,15 @@ let () =
       , [ test_case "answers as the backward scan through store changes" `Quick
             test_index_answers_as_the_backward_scan
         ; test_case "a row without a final newline" `Quick test_row_without_a_final_newline
+        ; test_case "removed day files" `Quick test_removed_day_files
         ; test_case "a file rewritten in place and grown" `Quick
             test_file_rewritten_in_place_and_grown
+        ; test_case "a rewrite that keeps the bytes before the boundary" `Quick
+            test_rewrite_that_keeps_the_bytes_before_the_boundary
+        ; test_case "concurrent reads agree with the scan" `Quick
+            test_concurrent_reads_agree_with_the_scan
+        ; test_case "a read sees rows appended before it" `Quick
+            test_a_read_sees_rows_appended_before_it
         ; test_case "bounds" `Quick test_bounds
         ] )
     ]

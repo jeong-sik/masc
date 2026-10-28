@@ -632,6 +632,10 @@ let recent_entry_of_line ~path ?line_number line =
     Malformed_json { path; line_number; detail }
 ;;
 
+let entry_of_physical_line ~path line =
+  if line_is_non_empty line then Some (recent_entry_of_line ~path line) else None
+;;
+
 (* One step of a backwards scan: read the bytes that end at [scan_position]
    and return the lines they close, decoded, newest first, with the state for
    the next step. Each step is one job on the domain pool through
@@ -1795,11 +1799,7 @@ let fold_range_appended_result t ~since ~until ~cursor ~init ~f =
     else Error (appended_read_changed t.base_dir)
 ;;
 
-(* Shared by the strict fold and the one that keeps a trailing fragment:
-   fold the complete rows after [cursor], then let [settle] decide what the
-   bytes after the last newline mean. The cursor stops at the last newline,
-   so an unfinished row is read again, whole, once it ends. *)
-let fold_file_appended_entries_settled_result path ~cursor ~init ~f ~settle =
+let fold_file_appended_entries_result path ~cursor ~init ~f =
   let open Result.Syntax in
   let* captured = inspect_path_result path in
   let* () = match non_regular_file_kind_of_stats captured with
@@ -1821,42 +1821,12 @@ let fold_file_appended_entries_settled_result path ~cursor ~init ~f ~settle =
         let from = match previous with [] -> 0 | (_,_,offset) :: _ -> offset in
         let* value, boundary = fold_captured_entries_result channel ~path ~from
           ~until:captured.Unix.st_size ~init ~f in
-        let* settled = settle ~channel ~boundary ~size:captured.Unix.st_size value in
+        let* () = if boundary = captured.Unix.st_size then Ok ()
+          else Error (Io_error {operation=Read_file;path;detail="incomplete trailing JSONL row"}) in
         let* after = inspect_path_result path in
         if append_only_successor captured after then
-          Ok (Appended (settled, [(path,captured,boundary)]))
+          Ok (Appended (value, [(path,captured,boundary)]))
         else Error (appended_read_changed path))
-;;
-
-let fold_file_appended_entries_result path ~cursor ~init ~f =
-  fold_file_appended_entries_settled_result path ~cursor ~init ~f
-    ~settle:(fun ~channel:_ ~boundary ~size value ->
-      if boundary = size then Ok value
-      else Error (Io_error {operation=Read_file;path;detail="incomplete trailing JSONL row"}))
-;;
-
-type appended_tail =
-  { complete_until : int
-  ; trailing : recent_entry option
-  }
-
-let fold_file_appended_entries_with_tail_result path ~cursor ~init ~f =
-  fold_file_appended_entries_settled_result path ~cursor ~init ~f
-    ~settle:(fun ~channel ~boundary ~size value ->
-      if boundary = size then Ok (value, { complete_until = boundary; trailing = None })
-      else
-        match
-          seek_in channel boundary;
-          really_input_string channel (size - boundary)
-        with
-        | exception (Sys_error detail) ->
-          Error (Io_error { operation = Read_file; path; detail })
-        | exception End_of_file -> Error (appended_read_changed path)
-        | tail ->
-          let trailing =
-            if String.trim tail = "" then None else Some (recent_entry_of_line ~path tail)
-          in
-          Ok (value, { complete_until = boundary; trailing }))
 ;;
 
 (* Like [read_range] but bounded to the [n] most recent entries within

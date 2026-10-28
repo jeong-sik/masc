@@ -1804,7 +1804,10 @@ let start
                  (Operation_child_finished
                     { claimed_operation_id = !claimed_operation_id; execution; ended }))
           ))
-    and loop state shutdown_operation_id =
+    and loop state =
+        (* The drain is the only writer; decisions and external observers
+           read the same published shutdown reservation. *)
+        let shutdown_operation_id = Atomic.get t.shutdown_operation_id in
         let exact_interrupt target =
           (* Both names are compared against Owner state only. The token is the
              one minted with the slot, so it lives exactly as long as the child
@@ -1883,7 +1886,7 @@ let start
         match Eio.Stream.take t.mailbox with
         | Command (Exact_projection, resolve) ->
           Eio.Promise.resolve resolve (Ok (Keeper_owner_reducer.projection state));
-          loop state shutdown_operation_id
+          loop state
         | Command (Apply_meta (command,initial_input), resolve) ->
           (match !(t.metadata_error) with
            | Some fault ->
@@ -1892,7 +1895,7 @@ let start
                 metadata commit. *)
              Eio.Promise.resolve resolve
                (Error (Store_unavailable (metadata_fault_detail fault)));
-             loop state shutdown_operation_id
+             loop state
            | None ->
           let operation_store_ready =
             match initial_input with
@@ -1928,7 +1931,7 @@ let start
           (match operation_store_ready with
            | Error error ->
              Eio.Promise.resolve resolve (Error error);
-             loop state shutdown_operation_id
+             loop state
            | Ok () ->
              (* A fenced operation store must not block a metadata commit; try
                 to reopen it opportunistically so a chat child can start after
@@ -1938,25 +1941,25 @@ let start
              (match Keeper_owner_reducer.apply_meta state command with
               | Error error ->
                 Eio.Promise.resolve resolve (Error (Reducer_rejected error));
-                loop state shutdown_operation_id
+                loop state
               | Ok transition ->
                 (match apply_transition t store state transition with
                  | Error (state, error) ->
                    Eio.Promise.resolve resolve (Error error);
-                   loop state shutdown_operation_id
+                   loop state
                  | Ok state ->
                    Eio.Promise.resolve
                      resolve
                    (Ok (Keeper_owner_reducer.projection state).meta);
                    start_child_if_needed state shutdown_operation_id;
-                   loop state shutdown_operation_id))))
+                   loop state))))
         | Command (Exact_operation operation_id, resolve) ->
           let response =
             run_operation_read t ~label:"lookup Keeper chat operation" (fun () ->
               Chat_operation_store.get t.operation_store operation_id)
           in
           Eio.Promise.resolve resolve response;
-          loop state shutdown_operation_id
+          loop state
         | Command (Has_queued_handoff_recipient operation_id, resolve) ->
           let response =
             run_operation_read t ~label:"read next Keeper handoff recipient" (fun () ->
@@ -1964,17 +1967,17 @@ let start
                 t.operation_store ~now:(t.now ()) ~operation_id)
           in
           Eio.Promise.resolve resolve response;
-          loop state shutdown_operation_id
+          loop state
         | Command (Direct_checkpoint operation_id, resolve) ->
           let response = run_operation_read t ~label:"read direct cooperative checkpoint" (fun () ->
             Chat_operation_store.direct_checkpoint t.operation_store ~operation_id) in
           Eio.Promise.resolve resolve response;
-          loop state shutdown_operation_id
+          loop state
         | Command (Direct_native_call operation_id, resolve) ->
           let response = run_operation_read t ~label:"read direct native execution" (fun () ->
             Chat_operation_store.direct_native_call t.operation_store ~operation_id) in
           Eio.Promise.resolve resolve response;
-          loop state shutdown_operation_id
+          loop state
         | Command (Current_input_checkpoint, resolve) ->
           let response = match (Keeper_owner_reducer.projection state).meta with
             | None -> Error (Operation_rejected (Chat_operation_store.Invalid_input
@@ -1985,12 +1988,12 @@ let start
               |> Result.map (fun observation -> {trace_id=meta.runtime.trace_id;
                    session_root=t.session_root;observation}) in
           Eio.Promise.resolve resolve response;
-          loop state shutdown_operation_id
+          loop state
         | Command (Input_checkpoint trace_id, resolve) ->
           let response = run_operation_read t ~label:"read input checkpoint owner" (fun () ->
             Chat_operation_store.input_checkpoint t.operation_store ~trace_id) in
           Eio.Promise.resolve resolve response;
-          loop state shutdown_operation_id
+          loop state
         | Command (Begin_history_clear caller, resolve) ->
           let response = reject_if_stopping state (fun () ->
             reject_if_shutdown shutdown_operation_id (fun () ->
@@ -2007,7 +2010,7 @@ let start
                 Error (Operation_rejected (Chat_operation_store.Invalid_input
                   "history clear admission requires the original maintenance child")))) in
           Eio.Promise.resolve resolve response;
-          loop state shutdown_operation_id
+          loop state
         | Command (Commit_history_clear (writer,receipt), resolve) ->
           let authority=writer.clear_authority in
           let response = match (Keeper_owner_reducer.projection state).meta,
@@ -2031,7 +2034,7 @@ let start
               Error (Operation_rejected (Chat_operation_store.Invalid_input
                 "history clear receipt no longer belongs to its original maintenance child and trace")) in
           Eio.Promise.resolve resolve response;
-          loop state shutdown_operation_id
+          loop state
         | Command (Begin_input_checkpoint (trace_id, caller), resolve) ->
           let response = reject_if_stopping state (fun () ->
             reject_if_shutdown shutdown_operation_id (fun () ->
@@ -2055,7 +2058,7 @@ let start
                 Error (Operation_rejected (Chat_operation_store.Invalid_input
                   "input writer requires the current executing child and trace")))) in
           Eio.Promise.resolve resolve response;
-          loop state shutdown_operation_id
+          loop state
         | Command (Advance_input_checkpoint (writer, change), resolve) ->
           let checkpoint, lane = match change with
             | Autonomous_input {checkpoint;_} -> checkpoint, Autonomous
@@ -2086,7 +2089,7 @@ let start
               Error (Operation_rejected (Chat_operation_store.Invalid_input
                 "input checkpoint writer no longer owns this executing child and trace")) in
           Eio.Promise.resolve resolve response;
-          loop state shutdown_operation_id
+          loop state
         | Command (Bind_retired_input_cut (writer,{operation_id;execution_digest;observed;call;cut}), resolve) ->
           let checkpoint=Keeper_input_history_cut.checkpoint cut in
           let response=reject_if_stopping state (fun () ->
@@ -2115,7 +2118,7 @@ let start
                 Error (Operation_rejected (Chat_operation_store.Invalid_input
                   "input history cut requires its original direct child and trace")))) in
           Eio.Promise.resolve resolve response;
-          loop state shutdown_operation_id
+          loop state
         | Command (Update_direct_native_call {operation_id; execution_digest; change}, resolve) ->
           let persist () = run_operation_command t ~label:"persist direct native execution" (fun () ->
             Chat_operation_store.update_direct_native_call t.operation_store ~now:(t.now ())
@@ -2128,7 +2131,7 @@ let start
             | Keeper_native_call.Bind _ -> reject_if_stopping state persist
             | Keeper_native_call.Checkpoint _ | Keeper_native_call.Terminal _ -> persist () in
           Eio.Promise.resolve resolve response;
-          loop state shutdown_operation_id
+          loop state
         | Command (Begin_direct_input_response {operation_id;observed;child}, resolve) ->
           let response = reject_if_stopping state (fun () ->
             reject_if_shutdown shutdown_operation_id (fun () ->
@@ -2159,7 +2162,7 @@ let start
                 Error (Operation_rejected (Chat_operation_store.Invalid_input
                   "response admission requires its unpaused original maintenance child and trace")))) in
           Eio.Promise.resolve resolve response;
-          loop state shutdown_operation_id
+          loop state
         | Command (Prepare_direct_input_response (writer,plan), resolve) ->
           let observed=Keeper_input_wait_response.waiting writer.response_authority in
           let response=reject_if_stopping state (fun () ->
@@ -2178,7 +2181,7 @@ let start
                 Error (Operation_rejected (Chat_operation_store.Invalid_input
                   "response intent lost its original unpaused maintenance child and trace")))) in
           Eio.Promise.resolve resolve response;
-          loop state shutdown_operation_id
+          loop state
         | Command (Commit_direct_input_response (writer,receipt), resolve) ->
           let observed=Keeper_input_wait_response.waiting writer.response_authority in
           let response = match (Keeper_owner_reducer.projection state).meta,
@@ -2201,12 +2204,12 @@ let start
               Error (Operation_rejected (Chat_operation_store.Invalid_input
                 "response receipt lost its original unpaused maintenance child and trace")) in
           Eio.Promise.resolve resolve response;
-          loop state shutdown_operation_id
+          loop state
         | Command (Direct_input_wait operation_id, resolve) ->
           let response = run_operation_read t ~label:"read original direct input wait" (fun () ->
             Chat_operation_store.direct_input_wait t.operation_store ~operation_id) in
           Eio.Promise.resolve resolve response;
-          loop state shutdown_operation_id
+          loop state
         | Command (Defer_direct_input_wait {operation_id;child;request}, resolve) ->
           let response = match (Keeper_owner_reducer.projection state).meta,
               Atomic.get t.turn_in_flight, Atomic.get t.child_cancel,
@@ -2227,24 +2230,24 @@ let start
               Error (Operation_rejected (Chat_operation_store.Invalid_input
                 "input waiting requires its original executing direct child")) in
           Eio.Promise.resolve resolve response;
-          loop state shutdown_operation_id
+          loop state
         | Command (Defer_direct_checkpoint {operation_id; execution_digest; checkpoint}, resolve) ->
           let response = run_operation_command t ~label:"defer direct cooperative checkpoint" (fun () ->
             Chat_operation_store.defer_direct_checkpoint t.operation_store ~now:(t.now ())
               ~operation_id ~execution_digest ~checkpoint) |> Result.map fst in
           Eio.Promise.resolve resolve response;
-          loop state shutdown_operation_id
+          loop state
         | Command (Resume_direct_checkpoint {operation_id; observed}, resolve) ->
           let response = run_operation_command t ~label:"resume direct cooperative checkpoint" (fun () ->
             Chat_operation_store.resume_direct_checkpoint t.operation_store ~now:(t.now ())
               ~operation_id ~observed) |> Result.map fst in
           Eio.Promise.resolve resolve response;
-          loop state shutdown_operation_id
+          loop state
         | Command (Direct_runtime_retry operation_id, resolve) ->
           let response = run_operation_read t ~label:"read direct runtime continuation" (fun () ->
             Chat_operation_store.direct_runtime_retry t.operation_store ~operation_id) in
           Eio.Promise.resolve resolve response;
-          loop state shutdown_operation_id
+          loop state
         | Command (Defer_direct_runtime_retry {operation_id; execution_digest; continuation; retry_wait}, resolve) ->
           let response = run_operation_command t ~label:"defer direct runtime continuation" (fun () ->
             Chat_operation_store.defer_direct_runtime_retry t.operation_store ~now:(t.now ())
@@ -2271,69 +2274,69 @@ let start
            | Ok _ | Error _ -> ());
           rearm_cooling_retry_wake ();
           Eio.Promise.resolve resolve response;
-          loop state shutdown_operation_id
+          loop state
         | Command (Resume_direct_runtime_retry {operation_id; observed}, resolve) ->
           let response = run_operation_command t ~label:"resume direct runtime continuation" (fun () ->
             Chat_operation_store.resume_direct_runtime_retry t.operation_store ~now:(t.now ())
               ~operation_id ~observed) |> Result.map fst in
           Eio.Promise.resolve resolve response;
-          loop state shutdown_operation_id
+          loop state
         | Command (Direct_gate_bindings, resolve) ->
           let response = run_operation_read t ~label:"read unresolved direct Gate sources" (fun () ->
             Chat_operation_store.direct_gate_bindings t.operation_store) in
-          Eio.Promise.resolve resolve response; loop state shutdown_operation_id
+          Eio.Promise.resolve resolve response; loop state
         | Command (Reconcile_direct_gate_binding {operation_id; binding; waiting}, resolve) ->
           let response = run_operation_command t ~label:"confirm original direct Gate source" (fun () ->
             Chat_operation_store.reconcile_direct_gate_binding t.operation_store ~now:(t.now ())
               ~operation_id ~binding ~waiting) |> Result.map fst in
-          Eio.Promise.resolve resolve response; loop state shutdown_operation_id
+          Eio.Promise.resolve resolve response; loop state
         | Command (Direct_gate_waits, resolve) ->
           let response = run_operation_read t ~label:"read waiting direct Gate operations" (fun () ->
             Chat_operation_store.direct_gate_waits t.operation_store) in
-          Eio.Promise.resolve resolve response; loop state shutdown_operation_id
+          Eio.Promise.resolve resolve response; loop state
         | Command (Discharge_direct_gate {operation_id; obligation}, resolve) ->
           let response = run_operation_command t ~label:"record admitted Gate evidence" (fun () ->
             Chat_operation_store.discharge_direct_gate t.operation_store ~now:(t.now ()) ~operation_id ~obligation)
             |> Result.map fst in
-          Eio.Promise.resolve resolve response; loop state shutdown_operation_id
+          Eio.Promise.resolve resolve response; loop state
         | Command (Direct_gate_state operation_id, resolve) ->
           let response = run_operation_read t ~label:"read direct Gate wait" (fun () ->
             Chat_operation_store.direct_gate_state t.operation_store ~operation_id) in
-          Eio.Promise.resolve resolve response; loop state shutdown_operation_id
+          Eio.Promise.resolve resolve response; loop state
         | Command (Direct_gate_binding operation_id, resolve) ->
           let response = run_operation_read t ~label:"read unresolved Gate binding" (fun () ->
             Chat_operation_store.direct_gate_binding t.operation_store ~operation_id) in
-          Eio.Promise.resolve resolve response; loop state shutdown_operation_id
+          Eio.Promise.resolve resolve response; loop state
         | Command (Direct_gate_obligations operation_id, resolve) ->
           let response = run_operation_read t ~label:"read direct Gate obligations" (fun () ->
             Chat_operation_store.direct_gate_obligations t.operation_store ~operation_id) in
-          Eio.Promise.resolve resolve response; loop state shutdown_operation_id
+          Eio.Promise.resolve resolve response; loop state
         | Command (Defer_direct_gate_reconciliation {operation_id; execution_digest; binding; diagnostic}, resolve) ->
           let response = run_operation_command t ~label:"retain direct Gate reconciliation" (fun () ->
             Chat_operation_store.defer_direct_gate_reconciliation t.operation_store ~now:(t.now ())
               ~operation_id ~execution_digest ~binding ~diagnostic) |> Result.map fst in
-          Eio.Promise.resolve resolve response; loop state shutdown_operation_id
+          Eio.Promise.resolve resolve response; loop state
         | Command (Defer_direct_gate {operation_id; execution_digest; waiting}, resolve) ->
           let response = run_operation_command t ~label:"suspend direct Gate operation" (fun () ->
             Chat_operation_store.defer_direct_gate t.operation_store ~now:(t.now ())
               ~operation_id ~execution_digest ~waiting) |> Result.map fst in
-          Eio.Promise.resolve resolve response; loop state shutdown_operation_id
+          Eio.Promise.resolve resolve response; loop state
         | Command (Resolve_direct_gate {operation_id; resolution}, resolve) ->
           let response = run_operation_command t ~label:"resolve direct Gate obligation" (fun () ->
             Chat_operation_store.resolve_direct_gate t.operation_store ~now:(t.now ())
               ~operation_id ~resolution) |> Result.map fst in
           Eio.Promise.resolve resolve response;
           start_child_if_needed state shutdown_operation_id;
-          loop state shutdown_operation_id
+          loop state
         | Command (Resume_direct_gate {operation_id; waiting; resolution}, resolve) ->
           let response = run_operation_command t ~label:"resume direct Gate operation" (fun () ->
             Chat_operation_store.resume_direct_gate t.operation_store ~now:(t.now ())
               ~operation_id ~waiting ~resolution) |> Result.map fst in
-          Eio.Promise.resolve resolve response; loop state shutdown_operation_id
+          Eio.Promise.resolve resolve response; loop state
         | Command (Pause_and_interrupt {target; expected_control_token}, resolve) ->
           if Option.is_some shutdown_operation_id || (Keeper_owner_reducer.projection state).stopping then (
             Eio.Promise.resolve resolve (Error Owner_stopping);
-            loop state shutdown_operation_id)
+            loop state)
           else
           let authorization =
             let open Result.Syntax in
@@ -2353,11 +2356,11 @@ let start
               (Observed_turn _ | Direct_operation _), (Some _ | None) -> Ok false in
             Ok (interrupt, pending) in
           (match authorization with
-           | Error error -> Eio.Promise.resolve resolve (Error error); loop state shutdown_operation_id
+           | Error error -> Eio.Promise.resolve resolve (Error error); loop state
            | Ok (Interrupt_not_current, false) ->
              Eio.Promise.resolve resolve (Ok
                (Interrupt_result (Operation_not_current { running_operation_id = (Atomic.get t.operation_projection).running_operation_id }), chat_control_token t));
-             loop state shutdown_operation_id
+             loop state
            | Ok
                ( ( Interrupt_now _ | Interrupt_settling
                  | Interrupt_maintenance_running | Interrupt_held_by_autonomous_turn
@@ -2376,11 +2379,11 @@ let start
                     | Eio.Cancel.Cancelled _ as exn -> raise exn
                     | exn -> Operation_interrupt_failed (Printexc.to_string exn)) in
              Eio.Promise.resolve resolve (Ok (result, chat_control_token t));
-             loop state shutdown_operation_id)
+             loop state)
         | Command (Run_next_operation { operation_id; observed; priority_predecessors }, resolve) ->
           if not (turn_admission_open state) then (
             Eio.Promise.resolve resolve (Ok Run_next_paused);
-            loop state shutdown_operation_id)
+            loop state)
           else
           let prioritized = reject_if_shutdown shutdown_operation_id (fun () ->
             reject_if_stopping state (fun () ->
@@ -2392,12 +2395,12 @@ let start
                     t.operation_store ~now:(t.now ()) ~operation_id ~predecessors)
                 |> Result.map (fun _ -> ()))) in
           (match prioritized with
-           | Error error -> Eio.Promise.resolve resolve (Error error); loop state shutdown_operation_id
+           | Error error -> Eio.Promise.resolve resolve (Error error); loop state
            | Ok () ->
              let signalled, interrupt_error = signal_exact observed in
              Eio.Promise.resolve resolve (Ok (Run_next_applied { signalled; interrupt_error }));
              start_child_if_needed state shutdown_operation_id;
-             loop state shutdown_operation_id)
+             loop state)
         | Command (Interrupt_running_operation expected, resolve) ->
           let response = match exact_interrupt (Direct_operation expected) with
             | Error _ as error -> error
@@ -2412,7 +2415,7 @@ let start
                 | Eio.Cancel.Cancelled _ as exn -> raise exn
                 | exn -> Operation_interrupt_failed (Printexc.to_string exn)) in
           Eio.Promise.resolve resolve response;
-          loop state shutdown_operation_id
+          loop state
         | Command (Submit_operation { operation_id; source; input }, resolve) ->
           let response =
             reject_if_shutdown shutdown_operation_id (fun () ->
@@ -2437,7 +2440,7 @@ let start
           in
           Eio.Promise.resolve resolve response;
           start_child_if_needed state shutdown_operation_id;
-          loop state shutdown_operation_id
+          loop state
         | Command (Submit_interactive_operation {operation_id; source; input; intent}, resolve) ->
           let current = String.equal intent.control_token (chat_control_token t) in
           let permitted = current && turn_admission_open state in
@@ -2447,7 +2450,7 @@ let start
                 Chat_operation_store.submit
                   t.operation_store ~now:(t.now ()) ~operation_id ~source ~input))) in
           (match result with
-           | Error error -> Eio.Promise.resolve resolve (Error error); loop state shutdown_operation_id
+           | Error error -> Eio.Promise.resolve resolve (Error error); loop state
            | Ok (admission, projection) ->
              let operation, existing = match admission with
                | Chat_operation_store.Accepted operation -> operation, false
@@ -2459,7 +2462,7 @@ let start
              let receipt = {outcome; chat_control_token = chat_control_token t; signalled; resumed = false; interrupt_error} in
              Eio.Promise.resolve resolve (Ok (acceptance, receipt));
              start_child_if_needed state shutdown_operation_id;
-             loop state shutdown_operation_id)
+             loop state)
         | Command (List_queued_operations { after_sequence; limit }, resolve) ->
           let response =
             run_operation_read t ~label:"list queued Keeper chat operations" (fun () ->
@@ -2469,7 +2472,7 @@ let start
                 ~limit)
           in
           Eio.Promise.resolve resolve response;
-          loop state shutdown_operation_id
+          loop state
         | Command (Edit_queued_operation { operation_id; input }, resolve) ->
           let response =
             reject_if_stopping state (fun () ->
@@ -2481,14 +2484,14 @@ let start
               |> Result.map fst)
           in
           Eio.Promise.resolve resolve response;
-          loop state shutdown_operation_id
+          loop state
         | Command (Move_queued_operation_to_front operation_id, resolve) ->
           let response = reject_if_stopping state (fun () ->
             run_operation_command t ~label:"prioritize queued Keeper chat operation" (fun () ->
               Chat_operation_store.move_queued_to_front t.operation_store ~now:(t.now ()) ~operation_id)
             |> Result.map fst) in
           Eio.Promise.resolve resolve response;
-          loop state shutdown_operation_id
+          loop state
         | Command (Move_queued_operation_to_end operation_id, resolve) ->
           let response =
             reject_if_stopping state (fun () ->
@@ -2502,7 +2505,7 @@ let start
               |> Result.map fst)
           in
           Eio.Promise.resolve resolve response;
-          loop state shutdown_operation_id
+          loop state
         | Command (Cancel_queued_operation operation_id, resolve) ->
           let response =
             reject_if_stopping state (fun () ->
@@ -2514,12 +2517,12 @@ let start
               |> Result.map fst)
           in
           Eio.Promise.resolve resolve response;
-          loop state shutdown_operation_id
+          loop state
         | Command (Batch_operations operation_id, resolve) ->
           let response = run_operation_read t ~label:"read shared chat execution" (fun () ->
             Chat_operation_store.batch_operations t.operation_store ~operation_id) in
           Eio.Promise.resolve resolve response;
-          loop state shutdown_operation_id
+          loop state
         | Command (Claim_next_operation, resolve) ->
           let response =
             reject_if_shutdown shutdown_operation_id (fun () ->
@@ -2538,7 +2541,7 @@ let start
                   |> Result.map fst))
           in
           Eio.Promise.resolve resolve response;
-          loop state shutdown_operation_id
+          loop state
         | Command (Succeed_running_operation { operation_id; outcome_ref }, resolve) ->
           let response =
             run_operation_command t ~label:"succeed running Keeper chat operation" (fun () ->
@@ -2550,7 +2553,7 @@ let start
             |> Result.map fst
           in
           Eio.Promise.resolve resolve response;
-          loop state shutdown_operation_id
+          loop state
         | Command (Observe_runtime_retry_waits, resolve) ->
           let response =
             let open Result.Syntax in
@@ -2568,7 +2571,7 @@ let start
              if changed || due || projection.has_claimable_queued then notify t Wake_operation_drain
              else rearm_cooling_retry_wake ());
           Eio.Promise.resolve resolve (Result.map (fun _ -> ()) response);
-          loop state shutdown_operation_id
+          loop state
         | Command (Wake_operation_drain, resolve) ->
           (* Retry deadlines change readiness without a store mutation. Publish
              before attempting a claim, even while an autonomous turn owns the
@@ -2589,7 +2592,7 @@ let start
           (match response with
            | Ok () -> rearm_cooling_retry_wake ()
            | Error _ -> retry_cooling_observation ());
-          loop state shutdown_operation_id
+          loop state
         | Command (Begin_shutdown { operation_id }, resolve) ->
           (match shutdown_operation_id with
            | None ->
@@ -2597,41 +2600,41 @@ let start
              Eio.Promise.resolve
                resolve
                (Ok (Shutdown_reserved (shutdown_reservation t operation_id)));
-             loop state (Some operation_id)
+             loop state
            | Some existing ->
              Eio.Promise.resolve
                resolve
                (Ok
                   (Shutdown_already_reserved
                      (shutdown_reservation t existing)));
-             loop state shutdown_operation_id)
+             loop state)
         | Command (Rollback_shutdown { operation_id }, resolve) ->
           (match shutdown_operation_id with
            | None ->
              Eio.Promise.resolve resolve (Ok Shutdown_not_reserved);
-             loop state shutdown_operation_id
+             loop state
            | Some existing
              when Keeper_shutdown_types.Operation_id.equal existing operation_id ->
              publish_shutdown_operation_id t None;
              Eio.Promise.resolve resolve (Ok Shutdown_rolled_back);
              start_child_if_needed state None;
-             loop state None
+             loop state
            | Some existing ->
              Eio.Promise.resolve resolve (Ok (Shutdown_reserved_by_other existing));
-             loop state shutdown_operation_id)
+             loop state)
         | Command (Restore_shutdown { operation_id }, resolve) ->
           (match shutdown_operation_id with
            | None ->
              publish_shutdown_operation_id t (Some operation_id);
              Eio.Promise.resolve resolve (Ok Shutdown_restored);
-             loop state (Some operation_id)
+             loop state
            | Some existing
              when Keeper_shutdown_types.Operation_id.equal existing operation_id ->
              Eio.Promise.resolve resolve (Ok Shutdown_already_restored);
-             loop state shutdown_operation_id
+             loop state
            | Some existing ->
              Eio.Promise.resolve resolve (Ok (Shutdown_restore_conflict existing));
-             loop state shutdown_operation_id)
+             loop state)
         | Command
             ( Transition_shutdown { from_operation_id; to_operation_id }
             , resolve ) ->
@@ -2654,22 +2657,22 @@ let start
           Eio.Promise.resolve resolve (Ok result);
           if Option.is_none next_shutdown_operation_id
           then start_child_if_needed state None;
-          loop state next_shutdown_operation_id
+          loop state
         | Command (Await_idle_after_shutdown, resolve) ->
           if Option.is_some (Atomic.get t.turn_in_flight)
           then (
             t.shutdown_idle_waiters := resolve :: !(t.shutdown_idle_waiters);
-            loop state shutdown_operation_id)
+            loop state)
           else (
             Eio.Promise.resolve resolve (Ok ());
-            loop state shutdown_operation_id)
+            loop state)
         | Command (Begin_scheduled_turn_consumer, resolve) ->
           let consumer = Scheduled_turn_consumer (Keeper_interrupt_token.fresh ()) in
           t.scheduled_consumer := Some consumer;
           t.scheduled_handoff := None;
           Eio.Promise.resolve resolve (Ok consumer);
           start_child_if_needed state shutdown_operation_id;
-          loop state shutdown_operation_id
+          loop state
         | Command (End_scheduled_turn_consumer consumer, resolve) ->
           (match !(t.scheduled_consumer) with
            | Some active when same_scheduled_consumer active consumer ->
@@ -2678,7 +2681,7 @@ let start
            | Some _ | None -> ());
           Eio.Promise.resolve resolve (Ok ());
           start_child_if_needed state shutdown_operation_id;
-          loop state shutdown_operation_id
+          loop state
         | Command (Observe_scheduled_turn sources, resolve) ->
           (* A Direct child releases a safe slot at its natural terminal.
              Observe while it is busy so queued chat cannot take that next slot
@@ -2690,15 +2693,15 @@ let start
                ~observed:interrupt_token sources)
            | Some { lane = Autonomous | Maintenance; _ } | None -> ());
           Eio.Promise.resolve resolve (Ok !(t.scheduled_handoff));
-          loop state shutdown_operation_id
+          loop state
         | Command (Scheduled_turn_handoff, resolve) ->
           Eio.Promise.resolve resolve (Ok !(t.scheduled_handoff));
-          loop state shutdown_operation_id
+          loop state
         | Command (Release_scheduled_turn handoff, resolve) ->
           t.scheduled_handoff := remove_handoff_sources !(t.scheduled_handoff) handoff;
           Eio.Promise.resolve resolve (Ok ());
           start_child_if_needed state shutdown_operation_id;
-          loop state shutdown_operation_id
+          loop state
         | Command (Run_if_idle { lane; defer_to_chat; scheduled_sources; run }, resolve) ->
           let priority_sources, admitted_handoff = match scheduled_sources, !(t.scheduled_handoff) with
             | Some (Some captured, observation), Some current
@@ -2855,7 +2858,7 @@ let start
                             (Ok (Autonomous_busy (Turn_busy (Some chat))))
                         | Some { lane = Autonomous | Maintenance; _ } | None ->
                           run_admitted_turn ())))));
-          loop state shutdown_operation_id
+          loop state
         | Command (Child_finished completion, resolve) ->
           let result =
             match completion with
@@ -2937,13 +2940,13 @@ let start
           (* A failing release listener relinquishes its exact handoff above.
              Reconsider chat here instead of leaving an idle slot reserved. *)
           start_child_if_needed state shutdown_operation_id;
-          loop state shutdown_operation_id
+          loop state
         | Command (Begin_stopping, resolve) ->
           let transition = Keeper_owner_reducer.begin_stopping state in
           (match apply_transition t store state transition with
            | Error (state, error) ->
              Eio.Promise.resolve resolve (Error error);
-             loop state shutdown_operation_id
+             loop state
            | Ok state ->
              if Option.is_some (Atomic.get t.turn_in_flight)
              then (
@@ -2954,7 +2957,7 @@ let start
                     | Invalid_argument _ -> ())
                  (Atomic.get t.child_cancel))
              else Eio.Promise.resolve resolve (Ok ());
-             loop state shutdown_operation_id)
+             loop state)
     in
     (* What the restart settlement released. The registry holds its pool lock
        while [start] runs, so the removal belongs to this fiber rather than to
@@ -2964,7 +2967,7 @@ let start
     (* Cancellation reaches the drain at its [Stream.take]. Whatever the
        reason, the loop is the owner's only reader, so leaving it means no
        queued or future command will be answered. *)
-    match loop initial_state None with
+    match loop initial_state with
     | value ->
       mark_no_longer_answering ();
       value

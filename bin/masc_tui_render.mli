@@ -171,6 +171,10 @@ val frame_choice :
   | `Client_detail of Masc.Tui_decode.client_row | `Surface ]
 (** The visible surface or overlay, also used before preparing Home focus. *)
 
+val queue_below_play : Masc_tui_types.state -> terminal_rows:int -> Masc_tui_types.queue_panel option
+(** The Queue that would own input with Play omitted, respecting the same
+    compact and overlay priority as [frame_choice]. *)
+
 val render :
   home:Masc_tui_home.prepared Lazy.t ->
   Masc_tui_types.state ->

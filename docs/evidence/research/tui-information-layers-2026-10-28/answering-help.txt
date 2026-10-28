@@ -1,0 +1,24 @@
+ ▸대시보드  작업  키퍼  사용량  보드  워크스페이스  시스템
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ MASC Cheat Sheet  hints off                                                                      │
+├──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  MASC · Multi-Agent Shared Context                                                               │
+│                                                                                                  │
+│Candle details                                   ◆ Dashboard                                      │
+│Candle unavailable: Workspace identity changed     Left             open the Keeper list; Enter   │
+│or unavailable during surface collection;                           opens a chat; Right or Esc    │
+│bundle discarded                                                    returns                       │
+│                                                   j/k              move between decision links   │
+│                                                                    and conversations             │
+│                                                   Enter            open the selected             │
+│                                                                    destination; never approve    │
+│                                                   p                approvals and questions       │
+│                                                   ;                held calls, questions, Goal   │
+│                                                                    confirmations and tasks       │
+│                                                                    waiting on you                │
+│                                                   m                account windows and Keeper    │
+│                                                                    usage                         │
+│  [lines 1-16/1074]                                                                               │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+  ?:help
+ Server workspace not observed · i:choose

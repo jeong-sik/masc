@@ -30,3 +30,8 @@ val latin_keys : string -> string list option
     anything else -- Latin already, a control character, a named key, a
     string that is not one character -- and the caller reads it as it
     stands. *)
+
+val single_latin_key : string -> string option
+(** Read back one two-set key without replaying a composed syllable or a
+    compound letter as several commands. [None] leaves the original input
+    unchanged. Intended for command-only panels with action shortcuts. *)

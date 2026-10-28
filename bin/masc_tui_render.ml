@@ -647,12 +647,8 @@ type drawn = Surface_drawn | Overlay_drawn
 
 (* One pure frame choice owns overlay priority for both drawing and the
    application's preparation of state tied to an actually visible surface. *)
-let frame_choice (state : state) ~terminal_rows =
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  if Render_schedule.Viewport.requires_compact_frame ~rows then `Too_small rows
-  else match play_card_shown state with
-  | Some card -> `Play_card card
-  | None -> match state.account_login with
+let frame_choice_after_play (state : state) =
+  match state.account_login with
   | Some view -> `Account_login view
   | None when state.palette_open -> `Palette
   | None -> match state.collab with
@@ -682,6 +678,22 @@ let frame_choice (state : state) ~terminal_rows =
         else match state.client_detail with
           | Some client -> `Client_detail client
           | None -> `Surface
+
+let frame_choice (state : state) ~terminal_rows =
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  if Render_schedule.Viewport.requires_compact_frame ~rows then `Too_small rows
+  else match play_card_shown state with
+  | Some card -> `Play_card card
+  | None -> frame_choice_after_play state
+
+let queue_below_play state ~terminal_rows =
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  if Render_schedule.Viewport.requires_compact_frame ~rows then None
+  else match frame_choice_after_play state with
+    | `Queue panel -> Some panel
+    | `Account_login _ | `Palette | `Collab _ | `Lane_addons _ | `Detail_reading _
+    | `About | `Context | `Keeper_deletions | `Help | `Agenda | `Answering
+    | `Patch | `Link | `Client_detail _ | `Surface -> None
 
 let render ~home (state : state) =
   (* Marks number the targets of this frame alone. *)

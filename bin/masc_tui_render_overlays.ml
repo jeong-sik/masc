@@ -691,7 +691,7 @@ let render_play_card (state : state) card =
   let window_rows, window_cols = Masc_tui_ansi.get_terminal_size () in
   surface_chrome
     ~overflow:(Scrolled { scroll = state.play_invite_scroll;
-                          report = (fun scroll -> Play_invite_scroll scroll) })
+                          report = (fun scroll -> Play_invite_scroll (card, scroll)) })
     state ~terminal_rows ~cols ~surface_key:"play-invite"
     ~frame:Chrome_overlay
     ~title:(screen_title " MASC Play invite")
@@ -859,23 +859,25 @@ let answering_selected_target (state : state) ~lines =
     | Some line -> line.Masc_tui_answering.target
     | None -> None
 
+let queue_panel_item_identity = function
+  | Masc_tui_queue_inspection.Local_message id -> "Local message: " ^ id
+  | Server_message id -> "Queued message: " ^ id
+  | Running_message id -> "Running message: " ^ id
+  | Event (reference, revision) ->
+    Printf.sprintf "Event: %s · incarnation %Ld" reference revision
+  | Schedule (id, instance) -> "Schedule: " ^ id ^ " · instance " ^ instance
+
 let queue_panel_detail_lines state (panel : queue_panel) ~cols =
-  let module Inbox = Masc_tui_queue_inspection in
-  let selected = Option.bind panel.qp_selected (fun id ->
-    List.find_opt (fun (item : Inbox.item) -> item.id = Some id)
-      (queue_panel_items state panel)) in
-  let content = match panel.qp_selected, selected with
-    | Some id, Some item ->
-      let identity = match id with
-        | Inbox.Local_message id -> "Local message: " ^ id
-        | Server_message id -> "Queued message: " ^ id
-        | Running_message id -> "Running message: " ^ id
-        | Event (reference, revision) ->
-          Printf.sprintf "Event: %s · incarnation %Ld" reference revision
-        | Schedule (id, instance) -> "Schedule: " ^ id ^ " · instance " ^ instance in
-      identity ^ "\n\n" ^ item.text
-    | Some _, None -> "The selected item is no longer in this snapshot. Return to the list and refresh."
-    | None, _ -> "No item is selected." in
+  let reading = queue_panel_detail_reading ~items:(queue_panel_items state panel) panel in
+  let content = match reading with
+    | Queue_detail_ready (id, item) ->
+      queue_panel_item_identity id ^ "\n\n" ^ item.text
+    | Queue_detail_loading -> "Queue request in progress. The current server item is unavailable until it finishes."
+    | Queue_detail_unavailable reason ->
+      "This server item is unavailable in the current queue observation. Return to the list and refresh."
+      ^ Option.fold ~none:"" ~some:(fun detail -> "\n\n" ^ detail) reason
+    | Queue_detail_missing -> "This item is no longer in the current queue. Return to the list and refresh."
+    | Queue_detail_none -> "No item is selected." in
   Message_layout.wrap_body ~max_cells:(max 1 (framed_inner_width cols - 2))
     ~sanitize:Terminal_text.single_line content
 
@@ -888,12 +890,14 @@ let queue_panel_detail_viewport state panel =
 
 let render_queue_panel (state : state) (panel : queue_panel) =
   let terminal_rows, cols = get_terminal_size () in
-  if panel.qp_detail then
+  let title label = screen_title label ^ "  " ^ Terminal_text.single_line panel.qp_keeper in
+  let owner () = Queue_panel_presented (queue_panel_owner state panel) in
+  if Option.is_some panel.qp_detail then
     let lines = queue_panel_detail_lines state panel ~cols in
-    surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols
+    surface_chrome ~overflow:(Self_scrolled owner) state ~terminal_rows ~cols
       ~surface_key:"keeper-queue-detail" ~frame:Chrome_overlay
-      ~title:(screen_title " MASC Queue item" ^ "  " ^ Terminal_text.single_line panel.qp_keeper)
-      ~hints:"↑/↓:scroll  PgUp/PgDn:page  Esc:return"
+      ~title:(title " MASC Queue item")
+      ~hints:"↑/↓:scroll  PgUp/PgDn:page  Esc:return  ?:help"
       ~body:(fun ~budget c ->
         let count = List.length lines in
         let height = if count > budget then max 0 (budget - 1) else budget in
@@ -903,9 +907,6 @@ let render_queue_panel (state : state) (panel : queue_panel) =
         Option.iter c.push (overlay_window_row ~scroll ~height count))
   else
   let items = queue_panel_items state panel in
-  let selected_index =
-    List.find_index (fun (item : Masc_tui_queue_inspection.item) ->
-      Option.is_some item.id && item.id = panel.qp_selected) items in
   let status = if not (server_authority_ready state) then
     "Workspace unconfirmed; any receipt is from the previous observation"
   else match panel.qp_reading, panel.qp_notice with
@@ -919,7 +920,7 @@ let render_queue_panel (state : state) (panel : queue_panel) =
        | Some {waiting=Error _; operations=Error _} -> "Both server reads unavailable · r retries"
        | None -> "Queue observation unavailable · r retries")
     | Queue_unavailable, None -> "Snapshot unavailable · r retries" in
-  let hints = match panel.qp_selected with
+  let hints = match queue_panel_selected_id ~items panel with
     | Some (Masc_tui_queue_inspection.Local_message _) ->
       "↑/↓:select  Enter:read  n:first locally  l:last locally  r:refresh  Esc:close"
     | Some (Masc_tui_queue_inspection.Server_message _) ->
@@ -928,35 +929,46 @@ let render_queue_panel (state : state) (panel : queue_panel) =
       "↑/↓:select  Enter:read  n:immediate priority  l:low priority  r:refresh  Esc:close"
     | Some (Masc_tui_queue_inspection.Running_message _ | Schedule _) | None ->
       "↑/↓:select  Enter:read  PgUp/PgDn:page  r:refresh  Esc:close" in
-  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols
+  surface_chrome ~overflow:(Self_scrolled owner) state ~terminal_rows ~cols
     ~surface_key:"keeper-queue" ~frame:Chrome_overlay
-    ~title:(screen_title " MASC Queue" ^ "  " ^ Terminal_text.single_line panel.qp_keeper)
-    ~hints
+    ~title:(title " MASC Queue")
+    ~hints:(hints ^ "  ?:help")
     ~body:(fun ~budget c ->
       if budget > 0 then c.push ("  " ^ status);
-      if budget > 1 then c.push "  Message priority waits for the current turn; event urgency is not exact ordering.";
       (match panel.qp_receipt with
-       | Some (Queue_action_receipt (Queue_info text) | Queue_read_receipt text) when budget > 2 ->
+       | Some (Queue_action_receipt (Queue_info text) | Queue_read_receipt text) when budget > 1 ->
          c.push ("  " ^ Terminal_text.single_line text)
-       | Some (Queue_action_receipt (Queue_error text)) when budget > 2 ->
+       | Some (Queue_action_receipt (Queue_error text)) when budget > 1 ->
          c.push ("  " ^ Theme.warn () ^ Terminal_text.single_line text ^ Ansi.reset)
        | Some (Queue_action_receipt (Queue_info _ | Queue_error _) | Queue_read_receipt _)
        | None -> ());
-      let height = max 0 (budget - queue_panel_fixed_rows panel) in
-      let count = List.length items in
-      let scroll = Masc_tui_scroll.normalize ~count ~height panel.qp_scroll in
-      let scroll = match selected_index with
-        | Some cursor when height > 0 -> Masc_tui_scroll.ensure_visible ~cursor ~height scroll
-        | Some _ | None -> scroll in
+      let note_row = 1 + (match panel.qp_receipt with Some _ -> 1 | None -> 0) in
+      (match queue_panel_selection_note ~items panel with
+       | Some note when budget > note_row -> c.push ("  " ^ note)
+       | Some _ | None -> ());
+      let height = max 0 (budget - queue_panel_fixed_rows ~items panel) in
+      let scroll = queue_panel_scroll ~items ~height panel in
+      let selected_index = queue_panel_selected_index ~items panel in
       List.iteri (fun index (item : Masc_tui_queue_inspection.item) ->
         if index >= scroll && index < scroll + height then begin
-          let selected = item.id <> None && item.id = panel.qp_selected in
+          let selected = selected_index = Some index in
           let marker = if selected then "› " else "  " in
           let text = match String.index_opt item.text '\n' with
             | None -> item.text
             | Some index -> String.sub item.text 0 index in
           let text = Terminal_text.single_line text in
-          c.push (marker ^ (if selected then Theme.info () else "") ^ text ^ Ansi.reset)
+          let text = if Message_layout.display_width (String.trim text) = 0 then
+              Option.fold ~none:text ~some:(fun id ->
+                Terminal_text.single_line (queue_panel_item_identity id)) item.id
+            else text in
+          let row = marker ^ (if selected then Theme.info () else "") ^ text ^ Ansi.reset in
+          let row = if selected && queue_selection_visible
+              ~inner_width:(framed_inner_width cols) ~marker ~text then
+              match queue_selection_for_item state panel item with
+              | Some authority -> pressable (Press_queue_selected authority) row
+              | None -> row
+            else row in
+          c.push row
         end) items)
 
 (* The answering overlay, through the overlay contract. Drawn by hand, a short
@@ -1094,7 +1106,7 @@ let render_agenda (state : state) =
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"agenda"
     ~frame:Chrome_overlay
     ~title:(screen_title " MASC Agenda")
-    ~hints
+    ~hints:(hints ^ "  ?:help")
     (* [agenda_viewport] rather than the budget it is derived from: the
        keypress bounds the cursor against that pair. *)
     ~body:(fun ~budget:_ c ->

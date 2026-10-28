@@ -1800,10 +1800,17 @@ on the way forward past the newest.
 leaving the chat and draft in place. Use Up/Down to select an item, Enter to
 read its identity and available detail (including queued message text and
 attachment information), Page Up/Down to browse
-the list, `r` to refresh, and Esc to return. A selected local message can be
+the list, `r` to refresh, `?` for help, and Esc to return. Closing help returns
+to the same queue panel and selection. A selected local message can be
 moved first or last among that Keeper's unsent messages with `n` or `l`;
 existing edit, admission and retained-input holds still apply. Moving it first
 does not claim it is ahead of messages already accepted by the server.
+Enter and queue changes use the selected item the terminal last displayed.
+Changes also require a current queue read and server authority. The selection mark and
+some item text must fit; if the terminal is too narrow, enlarge it before
+opening detail or changing the queue. If the selection or its content changes
+before the next frame, review the updated row before retrying. A partially
+shortened row can still be used.
 
 For an accepted server message, `n` requests the next position and `l` moves it
 to the end. The server authorizes changes to the operator's own messages. A
@@ -1815,6 +1822,13 @@ inspected, but this panel cannot run a future job before its due time.
 Server message pages can change while they are being read; duplicate identities
 are reported as an unavailable read, and an undetected concurrent move can
 still make the displayed order incomplete. Refresh before acting when in doubt.
+An open server detail reports loading or source failure instead of presenting
+an older body as current; local detail remains independent of server reads.
+
+When a command-only queue panel is visible over chat, an individual two-set
+Hangul key can also activate its corresponding Latin shortcut. A composed
+syllable is not replayed as multiple queue actions; chat and text fields keep
+their original input.
 
 The panel reads the selected Keeper's server inventory. Its counts separate
 pending inputs, running work, future schedules, due schedules and unavailable
@@ -3106,7 +3120,8 @@ existing name and preserves the declaration; a reconfiguration response is
 reported as reconfiguration rather than opening a first-assignment composer.
 
 `p` opens requests, `;`
-opens Agenda, and `m` opens Usage. Work retains Goal observations, task lists,
+opens Agenda, and `m` opens Usage. `?` opens Help over Agenda; Esc returns to
+Agenda. Work retains Goal observations, task lists,
 and verification evidence; Usage retains quota and telemetry detail. Home shows
 only a brief task-flow reading, with no duplicated tables or quota graphs.
 

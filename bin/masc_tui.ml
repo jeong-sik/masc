@@ -10227,7 +10227,7 @@ let open_keeper_queue_panel state ~mailbox ~keeper_name =
   state.queue_panel <- Some
     { qp_keeper=keeper_name; qp_reading=Queue_unavailable;
       qp_observation=None; qp_notice=None; qp_receipt=None; qp_selected=None; qp_scroll=0;
-      qp_detail=false; qp_detail_scroll=0; qp_refresh_after_priority=false };
+      qp_detail=None; qp_detail_scroll=0; qp_refresh_after_priority=false };
   launch_keeper_queue state ~mailbox ~keeper_name Masc_tui_queue_inspection.Inspect
 ;;
 
@@ -10244,40 +10244,28 @@ let refresh_queue_after_priority state ~mailbox ~keeper_name =
   | Some _ | None -> ()
 ;;
 
-let handle_queue_panel_key state ~base_path ~mailbox (panel : queue_panel) key =
+let handle_queue_panel_key state ~base_path ~mailbox ~presented_presses (panel : queue_panel) key =
   let module Inbox = Masc_tui_queue_inspection in
   let update f = update_queue_panel state ~keeper_name:panel.qp_keeper f in
   let notice ?(failure=false) text = update (fun panel ->
     {panel with qp_notice=Some (if failure then Queue_error text else Queue_info text)}) in
   let items () = queue_panel_items state panel in
   let move direction =
-    let choices = items () |> List.mapi (fun index (item : Inbox.item) -> index, item.id)
-      |> List.filter_map (fun (index, id) -> Option.map (fun id -> index, id) id) in
-    let current = List.find_index (fun (_, id) -> Some id = panel.qp_selected) choices in
-    let index = match current, direction with
-      | None, `Down -> 0
-      | None, `Up -> List.length choices - 1
-      | Some index, `Down -> min (List.length choices - 1) (index + 1)
-      | Some index, `Up -> max 0 (index - 1) in
-    match if index < 0 then None else List.nth_opt choices index with
-    | None -> update (fun panel -> {panel with qp_selected=None})
-    | Some (row, id) ->
-      let terminal_rows, _ = get_terminal_size () in
-      let height = max 0 (Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows - queue_panel_fixed_rows panel) in
-      update (fun panel -> {panel with qp_selected=Some id;
-        qp_scroll=(if height > 0 then Masc_tui_scroll.ensure_visible ~cursor:row ~height panel.qp_scroll
-                   else panel.qp_scroll)}) in
-  let selected () =
-    Option.bind panel.qp_selected (fun id ->
-      List.find_map (fun (item : Inbox.item) -> if item.id = Some id then Some id else None) (items ())) in
+    let rows = items () in
+    let terminal_rows, _ = get_terminal_size () in
+    let budget = Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows in
+    update (queue_panel_move ~items:rows ~budget ~direction) in
+  let selected () = queue_panel_selected_id ~items:(items ()) panel in
   let act command =
     let terminal_rows, _ = get_terminal_size () in
-    if Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows <= queue_panel_fixed_rows panel then ()
+    if Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows <= queue_panel_fixed_rows ~items:(items ()) panel then ()
     else if panel.qp_reading = Queue_loading then notice "Wait for the current queue request"
     else if panel.qp_reading <> Queue_current || not (server_authority_ready state) then
       notice ~failure:true "Queue observation is unavailable; refresh before changing it"
-    else match selected () with
-    | None -> notice "Select a waiting item with ↑/↓"
+    else if Option.is_none (selected ()) then notice "Select a waiting item with ↑/↓"
+    else match Option.bind (presented_queue_selection presented_presses)
+        (resolve_queue_selection ~require_action_ready:true ~state ~panel ~items:(items ())) with
+    | None -> notice ~failure:true "Queue selection changed or has not been shown; review the selected row and retry"
     | Some (Inbox.Local_message id) ->
       if List.exists (fun (name, _, intervention) ->
         String.equal name panel.qp_keeper && match intervention with
@@ -10307,10 +10295,13 @@ let handle_queue_panel_key state ~base_path ~mailbox (panel : queue_panel) key =
         (Inbox.Prioritize_event (reference, incarnation, urgency))
     | Some (Inbox.Running_message _) -> notice "This message is already running"
     | Some (Inbox.Schedule _) -> notice "A scheduled job runs at its due time; this queue cannot run it early" in
-  if panel.qp_detail then
+  if key = "?" then begin
+    state.help_open <- true;
+    state.help_scroll <- 0
+  end else if Option.is_some panel.qp_detail then
     let count, height = Masc_tui_render_overlays.queue_panel_detail_viewport state panel in
     (match key with
-     | "esc" | "\r" | "\n" | "enter" -> update (fun panel -> {panel with qp_detail=false})
+     | "esc" | "\r" | "\n" | "enter" -> update (fun panel -> {panel with qp_detail=None})
      | "j" | "down" -> update (fun panel -> {panel with qp_detail_scroll=
          Masc_tui_scroll.down ~count ~height panel.qp_detail_scroll})
      | "k" | "up" -> update (fun panel -> {panel with qp_detail_scroll=
@@ -10329,18 +10320,32 @@ let handle_queue_panel_key state ~base_path ~mailbox (panel : queue_panel) key =
   | "\r" | "\n" | "enter" ->
     (match selected () with
      | None -> notice "Select an item with ↑/↓"
-     | Some _ -> update (fun panel -> {panel with qp_detail=true; qp_detail_scroll=0}))
+     | Some _ ->
+       (match Option.bind (presented_queue_selection presented_presses)
+                (resolve_queue_selection ~require_action_ready:false ~state ~panel ~items:(items ())) with
+        | Some id -> update (fun panel -> {panel with qp_detail=Some id; qp_detail_scroll=0})
+        | None -> notice ~failure:true "Queue selection changed or has not been shown; review the selected row and retry"))
   | "pageup" | "pagedown" | "home" | "end" ->
     let terminal_rows, _ = get_terminal_size () in
-    let height = max 1 (Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows - queue_panel_fixed_rows panel) in
-    let count = List.length (items ()) in
-    let scroll = (match key with
-      | "pageup" -> Masc_tui_scroll.page_up ~count ~height panel.qp_scroll
-      | "pagedown" -> Masc_tui_scroll.page_down ~count ~height panel.qp_scroll
-      | "home" -> 0
-      | "end" -> Masc_tui_scroll.maximum ~count ~height
-      | _ -> panel.qp_scroll) in
-    update (fun panel -> {panel with qp_selected=None; qp_scroll=scroll})
+    let budget = Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows in
+    let rows = items () in
+    let count = List.length rows in
+    update (fun panel ->
+      let old_height = max 0 (budget - queue_panel_fixed_rows ~items:rows panel) in
+      let old_scroll = queue_panel_scroll ~items:rows ~height:old_height panel in
+      let panel = {panel with qp_selected=None} in
+      let height = max 1 (budget - queue_panel_fixed_rows ~items:rows panel) in
+      let scroll = (match key with
+        | "pageup" ->
+          Masc_tui_scroll.page_up ~count ~height:(max 1 old_height) old_scroll
+          |> Masc_tui_scroll.normalize ~count ~height
+        | "pagedown" ->
+          Masc_tui_scroll.page_down ~count ~height:(max 1 old_height) old_scroll
+          |> Masc_tui_scroll.normalize ~count ~height
+        | "home" -> 0
+        | "end" -> Masc_tui_scroll.maximum ~count ~height
+        | _ -> old_scroll) in
+      {panel with qp_scroll=scroll})
   | "r" -> launch_keeper_queue state ~mailbox ~keeper_name:panel.qp_keeper Inbox.Inspect
   | "n" -> act `Next
   | "l" -> act `Last
@@ -15630,6 +15635,23 @@ let press_marked_target state ~base_path ~mailbox (target : press_target) =
   | Press_context_tab tab ->
       if tab <> state.context_inspector_tab then
         enter_context_inspector_tab state tab
+  | Press_queue_selected presented ->
+      let terminal_rows, _ = get_terminal_size () in
+      let panel = match Masc_tui_render.frame_choice state ~terminal_rows with
+       | `Queue panel -> Some panel
+       | `Play_card _ -> Masc_tui_render.queue_below_play state ~terminal_rows
+       | `Surface | `Too_small _ | `Account_login _ | `Palette
+       | `Collab _ | `Lane_addons _ | `Detail_reading _ | `About | `Context
+       | `Keeper_deletions | `Help | `Agenda | `Answering | `Patch | `Link
+       | `Client_detail _ -> None in
+      (match panel with
+       | Some panel ->
+         (match resolve_queue_selection ~require_action_ready:false ~state ~panel
+                  ~items:(queue_panel_items state panel) presented with
+          | Some id -> update_queue_panel state ~keeper_name:panel.qp_keeper (fun panel ->
+              {panel with qp_detail=Some id; qp_detail_scroll=0})
+          | None -> ())
+       | None -> ())
   (* The row is found by name in the roster as it is now. A first press
      chooses it and a press on the chosen row opens it, as Enter does; a
      Keeper that left the roster after the frame was drawn is not pressed. *)
@@ -18921,11 +18943,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
        | Some panel when String.equal panel.qp_keeper keeper_name ->
          let panel = (match result with
           | Error detail ->
+            let panel = withdraw_queue_panel_server_selection panel in
             if action = Masc_tui_queue_inspection.Inspect then
               {panel with qp_reading=Queue_unavailable; qp_notice=Some (Queue_error detail)}
             else {panel with qp_reading=Queue_unavailable; qp_notice=None;
               qp_receipt=Some (Queue_action_receipt (Queue_error detail))}
           | Ok (receipt, Error detail) ->
+            let panel = withdraw_queue_panel_server_selection panel in
             let receipt = if action = Masc_tui_queue_inspection.Inspect || receipt = [] then panel.qp_receipt
               else Some (Queue_action_receipt (Queue_info (String.concat " · " receipt))) in
             {panel with qp_reading=Queue_unavailable; qp_notice=Some (Queue_error ("Read unavailable: " ^ detail));
@@ -18933,12 +18957,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
           | Ok (receipt, Ok observation) ->
             let receipt = if action = Masc_tui_queue_inspection.Inspect || receipt = [] then panel.qp_receipt
               else Some (Queue_action_receipt (Queue_info (String.concat " · " receipt))) in
-            {panel with qp_observation=Some observation;
+            let panel = {panel with qp_observation=Some observation;
               qp_reading=(if panel.qp_refresh_after_priority then Queue_unavailable else Queue_current);
               qp_notice=(if panel.qp_refresh_after_priority then
                   Some (Queue_info "Priority changed while reading; refreshing after it settles")
                 else None);
-              qp_receipt=receipt}) in
+              qp_receipt=receipt} in
+            reconcile_queue_panel_selection ~items:(queue_panel_items state panel) panel) in
          state.queue_panel <- Some panel
        | Some _ | None ->
          if action <> Masc_tui_queue_inspection.Inspect then begin
@@ -24130,11 +24155,17 @@ let main
       | Masc_tui_pane_selection.Idle | Masc_tui_pane_selection.Pressed _
       | Masc_tui_pane_selection.Drag_without_pane -> frame
     in
-    let damaged = Terminal_write_repair.consume_damage () in
-    let authority_changed =
-      Approval_authority.authority_changed
-        ~presented:!presented_approval ~candidate:approval
+    let queue_or_play_changed =
+      queue_selection_authority_changed ~presented:!presented_presses ~candidate:presses
+      || queue_owner_authority_changed ~presented:(queue_owner_of_reader !presented_reader)
+           ~candidate:(queue_owner_of_reader reader)
+      || play_owner_authority_changed ~presented:(play_card_of_reader !presented_reader)
+           ~candidate:(play_card_of_reader reader)
     in
+    let damaged = Terminal_write_repair.consume_damage () in
+    let authority_changed = queue_or_play_changed ||
+      Approval_authority.authority_changed
+        ~presented:!presented_approval ~candidate:approval in
     let preset_confirmation_changed = match reader with
       | Some (Preset_detail_scroll (_, Some confirmation)) ->
         preset_confirmation_needs_present state confirmation
@@ -24148,11 +24179,10 @@ let main
         | Resource_scroll _ | Metrics_scroll _ | Approval_detail_scroll _ | Patch_modal_scroll _
         | Link_modal_scroll _ | Play_invite_scroll _ | Voice_scroll _
         | Preset_detail_scroll (_, None) | Keeper_list_scroll _ | Context_inspector_scroll _
-        | Context_inspector_response_scroll _) -> false in
-    (* A selected row's hidden token/call id can change while its clipped
-       terminal text stays byte-identical. Only that authority transition
-       forces a full presentation; ordinary async row updates stay
-       differential. *)
+        | Context_inspector_response_scroll _ | Queue_panel_presented _) -> false in
+    (* Approval identity, Queue ownership or selection, and the Play card can
+       change while clipped terminal text stays byte-identical. Those changes
+       force presentation; ordinary async updates stay differential. *)
     match
       Frame_presenter.present frame_presenter
         ~invalidate_before:(damaged || authority_changed || preset_confirmation_changed)
@@ -24182,7 +24212,7 @@ let main
          | Some (Patch_modal_scroll (_, _)) | Some (Link_modal_scroll _)
          | Some (Play_invite_scroll _) | Some (Voice_scroll _) | Some (Preset_detail_scroll _)
          | Some (Keeper_list_scroll _) | Some (Context_inspector_scroll _)
-         | Some (Context_inspector_response_scroll _) -> ());
+         | Some (Context_inspector_response_scroll _) | Some (Queue_panel_presented _) -> ());
         commit_presented_approval approval;
         presented_presses := presses;
         presented_panes := panes;
@@ -26041,8 +26071,12 @@ and is loaded on demand through keeper_skill.
        | Some (Graphics_reply _) | None -> ());
       Option.iter
         (fun _ ->
-          report_action state "system"
-            "Incomplete paste restored; wait for marker or Ctrl-C, then Ctrl-G enables Enter")
+          if Option.is_none state.queue_panel && Option.is_none (play_card_shown state)
+             && Option.is_none (queue_owner_of_reader !presented_reader)
+             && Option.is_none (play_card_of_reader !presented_reader)
+             && not (Frame_presenter.last_frame_is_compact frame_presenter) then
+            report_action state "system"
+              "Incomplete paste restored; wait for marker or Ctrl-C, then Ctrl-G enables Enter")
         interrupted_paste;
       if guarding_before_read && paste_phase input_reader = No_paste then begin
         report_action state "system" "Paste tail ended; review the draft before sending";
@@ -26588,6 +26622,12 @@ and is loaded on demand through keeper_skill.
                        "line"))
            | None -> ())
        | Masc_tui_pane_selection.Click _ | Masc_tui_pane_selection.Nothing -> ());
+      let presented_play = play_card_of_reader !presented_reader in
+      let presented_queue = queue_owner_of_reader !presented_reader in
+      let play_was_presented = Option.is_some presented_play in
+      let play_wheel_available =
+        if not play_was_presented then true
+        else play_card_matches ~presented:presented_play ~current:(play_card_shown state) in
       (* Where a notch leaves the reader on screen, when it is the reader's:
          not over the Activity pane, which keeps the wheel it had. The frame
          names the reader; the notch moves it from where it is now. *)
@@ -26598,6 +26638,7 @@ and is loaded on demand through keeper_skill.
                && (not state.image_open) && (not state.msx_open)
                && Option.is_none msx_key
                && (not compact_viewport)
+               && play_wheel_available
                && acting_pane_hit state ~row ~column = Pane_miss ->
             Option.bind !presented_reader (fun reader ->
                 reader_after_wheel (clamped_scroll_now state reader) direction)
@@ -26616,7 +26657,8 @@ and is loaded on demand through keeper_skill.
           | Lane_run_detail_scroll _ | Changes_diff_scroll _ | Repository_changes_diff_scroll _
           | Resource_scroll _ | Metrics_scroll _ | Approval_detail_scroll _ | Patch_modal_scroll _
           | Link_modal_scroll _ | Play_invite_scroll _ | Voice_scroll _ | Keeper_list_scroll _
-          | Context_inspector_scroll _ | Context_inspector_response_scroll _) -> false in
+          | Context_inspector_scroll _ | Context_inspector_response_scroll _
+          | Queue_panel_presented _) -> false in
       let key =
         if dismissed_image || Option.is_some msx_key || gesture_cancelled then None
         else
@@ -26659,6 +26701,14 @@ and is loaded on demand through keeper_skill.
       let text_target =
         if not compact_viewport && reading_search_editing then Some Text_row_search
         else text_input_target state ~compact_viewport in
+      let play_shown = play_card_shown state in
+      let rows, _ = get_terminal_size () in
+      let beneath = Masc_tui_render.queue_below_play state ~terminal_rows:rows in
+      let queue_play_owner = queue_play_input_owner ~play_presented:presented_play
+          ~play_shown ~compact:compact_viewport ~state ~beneath ~presented_queue in
+      let presented_queue_input = match queue_play_owner with
+        | Queue_input panel -> Some panel
+        | Play_input | Wait_for_frame | Other_input -> None in
       let key =
         (* The terminal hands this loop the character an input method produced,
            not the key the operator pressed. In Korean mode a [j] arrives as
@@ -26687,14 +26737,35 @@ and is loaded on demand through keeper_skill.
                (fun view -> not (Masc_tui_lane_addons.text_entry_open view))
                state.lane_addons
         in
-        match key with
-        | Some name when command_reading -> (
+        (* These panels own the visible keys even when a chat composer is
+           underneath them. Translate only a single two-set key here: replaying
+           a composed syllable could submit several queue priority changes. *)
+        let single_panel_command =
+          Option.is_none text_target && not compact_viewport
+          && (match key with
+              | Some name when String.length name > 1 ->
+                  let rows, _ = get_terminal_size () in
+                  if Option.is_some presented_queue_input then true
+                  else (match Masc_tui_render.frame_choice state ~terminal_rows:rows with
+                   | `Queue _ -> true
+                   | `Agenda | `Answering | `Help -> not command_reading
+                   | `Too_small _ | `Play_card _ | `Account_login _ | `Palette
+                   | `Collab _ | `Lane_addons _ | `Detail_reading _ | `About
+                   | `Context | `Keeper_deletions | `Patch | `Link
+                   | `Client_detail _ | `Surface -> false)
+              | Some _ | None -> false)
+        in
+        match queue_play_owner, key with
+        | Wait_for_frame, _ -> key
+        | (Queue_input _ | Play_input | Other_input), Some name when single_panel_command ->
+            Some (Option.value ~default:name (Masc_tui_key_ime.single_latin_key name))
+        | (Queue_input _ | Play_input | Other_input), Some name when command_reading -> (
             match Masc_tui_key_ime.latin_keys name with
             | Some (first :: rest) ->
                 List.iter (fun latin_key -> Queue.add latin_key hangul_latin_queue) rest;
                 Some first
             | Some [] | None -> Some name)
-        | Some _ | None -> key
+        | (Queue_input _ | Play_input | Other_input), (Some _ | None) -> key
       in
       let insert_reading_search document insert text =
         if not compact_viewport then begin
@@ -26745,10 +26816,22 @@ and is loaded on demand through keeper_skill.
         | None -> None
       in
       (match input with
-       (* The invite card owns every key, and a paste is keys. One that reached
-          the composer under the card would put the link [y] just copied into a
-          draft that goes to a Keeper on the next Enter. It is first, above the
-          overlays the card is drawn over. *)
+       (* A paste belongs to the frame the terminal actually accepted. The
+          invite response can arrive before that card is painted: in that
+          interval a visible reader must keep its input. Once the card was
+          presented, its scroll report identifies it above the reader. *)
+       | Some (Pasted _) when play_was_presented || Option.is_some presented_queue ->
+           if recovered_paste then report_action state "error"
+             "Recovered paste was not applied; paste it again after the screen transition"
+           else state.last_action <- Some ("Paste was not applied on this screen; retry in a text field", Unix.gettimeofday ())
+       | Some (Pasted _) when compact_viewport ->
+           if recovered_paste then report_action state "error"
+             "Recovered paste was not applied; paste it again after the screen transition"
+       | Some (Pasted _) when Option.is_some beneath && Option.is_none presented_queue
+           && queue_play_owner = Wait_for_frame ->
+           if recovered_paste then report_action state "error"
+             "Recovered paste was not applied; paste it again after the screen transition"
+           else state.last_action <- Some ("Screen transition: input was not applied; review and retry", Unix.gettimeofday ())
        | Some (Pasted paste) when Option.is_some (current_board_reader state) ->
            let reader=state.board_reader in
            insert_reading_search (Masc_tui_board_reader.document reader)
@@ -26776,7 +26859,6 @@ and is loaded on demand through keeper_skill.
                  (Masc_tui_detail_reading.search_insert ~width ~height ~text reading)) paste.Masc_tui_paste.text)
              (current_detail_reading state)
        | Some (Pasted _) when state.msx_open -> ()
-       | Some (Pasted _) when Option.is_some (Masc_tui_types.play_card_shown state) -> ()
        | Some (Pasted paste) when Option.is_some state.collab ->
            (* The whole Collab overlay owns paste. Only its visible form may
               receive text; browsing, confirmation and compact frames never
@@ -26967,7 +27049,10 @@ and is loaded on demand through keeper_skill.
               editor, so text and dropped images cannot change the draft
               behind it. *)
            ()
-       | Some (Pasted _) when Option.is_some state.queue_panel -> ()
+       | Some (Pasted _) when Option.is_some state.queue_panel ->
+           if recovered_paste then report_action state "error"
+             "Recovered paste was not applied; paste it again after the screen transition"
+           else state.last_action <- Some ("Paste was not applied on this screen; retry in a text field", Unix.gettimeofday ())
        | Some (Pasted _)
          when state.view = Keepers Keeper_message
               && not (keeper_message_input_supported state) ->
@@ -26998,12 +27083,17 @@ and is loaded on demand through keeper_skill.
             | Some _ | None ->
                 handle_paste ~protect_recovered:recovered_paste state
                   ~base_path ~mailbox:async_messages ~paste)
+       | Some (Mouse_left_release _) when (play_was_presented || Option.is_some presented_queue)
+           && queue_play_owner = Wait_for_frame -> ()
+       | Some (Mouse_left_release _) when Option.is_some presented_queue ->
+           Option.iter (press_marked_target state ~base_path ~mailbox:async_messages) pressed
        | Some (Mouse_left_release _) when Option.is_some pressed ->
            Option.iter
              (press_marked_target state ~base_path ~mailbox:async_messages)
              pressed
        | Some (Mouse_wheel _) when Option.is_some wheel_reader ->
            Option.iter (apply_clamped_scroll state) wheel_reader
+       | Some (Mouse_wheel _) when queue_play_owner = Wait_for_frame -> ()
        (* The wheel over the Activity pane scrolls the pane. The pane is drawn
           under no modal (render reserves it no columns while one is up), so
           the hit test alone says whether the notch is the pane's. *)
@@ -27105,14 +27195,22 @@ and is loaded on demand through keeper_skill.
                the compact fallback further down owns every remaining one, so
                yielding there would leave the operator on a terminal they
                cannot read with no way out but Ctrl-C. *)
-            (not state.about_open)
-            && Option.is_none state.collab
+            (compact_viewport || not state.about_open)
+            && (compact_viewport || Option.is_none state.collab)
             && (compact_viewport || Option.is_none state.queue_panel)
             && (compact_viewport
                || quit_key_allowed_for text_target)
             && Render_schedule.Input_shortcut.is_quit ~message_mode k
         | None -> false
       in
+      let handle_quit_key () =
+        if state.quit_armed then begin
+          note_exit_reason Masc_tui_exit_reason.Quit_key;
+          raise Break
+        end else begin
+          state.quit_armed <- true;
+          report_action state "system" (session_quit_notice state ~key:"q")
+        end in
       (* Exit confirmation belongs only to two consecutive quit keys. A paste,
          a mouse report, or any other key means the operator stayed. *)
       if Option.is_some input && not quit_key then state.quit_armed <- false;
@@ -27234,6 +27332,8 @@ and is loaded on demand through keeper_skill.
       let composer_claimed =
         Option.is_none state.account_login && Option.is_none state.lane_addons &&
         (not compact_viewport)
+        && (match queue_play_owner with Wait_for_frame -> false
+            | Queue_input _ | Play_input | Other_input -> true)
         (* Surface inspection and Dashboard Keeper selection precede an
            unfocused composer's entry key. A focused composer still owns
            every typed character, including i. *)
@@ -27314,6 +27414,20 @@ and is loaded on demand through keeper_skill.
            (* Handed to the terminal, the button's release never comes here. *)
            pointer_gesture := Masc_tui_pane_selection.Idle;
            Render_schedule.request render_schedule Render_schedule.Force
+       (* The compact fallback, including after invalidation, owns keys before
+          every hidden modal. Its advertised quit key remains available. *)
+       | Some _ when compact_viewport ->
+           if quit_key && Option.is_some (Frame_presenter.presented_rows frame_presenter)
+           then handle_quit_key ()
+       (* A Play card can arrive after the last Queue frame, or close before
+          its replacement frame. The last accepted owner keeps the keys until
+          the terminal accepts the next frame. *)
+       | Some _ when queue_play_owner = Wait_for_frame ->
+           state.last_action <- Some ("Screen transition: input was not applied; review and retry", Unix.gettimeofday ())
+       | Some k when Option.is_some presented_queue_input ->
+           Option.iter (fun panel ->
+             handle_queue_panel_key state ~base_path ~mailbox:async_messages
+               ~presented_presses:!presented_presses panel k) presented_queue_input
        (* The invite card holds the only copy of a link, so it takes every key and
           closes on the operator's own: Esc or q, after which /play link brings
           it back. Enter does not close it, so a second Enter, pressed while
@@ -27323,7 +27437,7 @@ and is loaded on demand through keeper_skill.
           only the mouse to copy the link with, and this is a screen worth
           copying from. *)
        | Some k
-         when Option.is_some (Masc_tui_types.play_card_shown state)
+         when not compact_viewport && Option.is_some (Masc_tui_types.play_card_shown state)
               && not (String.equal k toggle_mouse_tracking_key) ->
            (match k, Masc_tui_types.play_card_shown state with
             | ("esc" | "q" | "Q"), Some _ ->
@@ -28197,15 +28311,7 @@ and is loaded on demand through keeper_skill.
           viewport override them, which is how a [q] typed into a narrow
           screen's row search armed the exit. *)
        | Some _ when quit_key ->
-           if state.quit_armed then begin
-             note_exit_reason Masc_tui_exit_reason.Quit_key;
-             raise Break
-           end
-           else begin
-             state.quit_armed <- true;
-             report_action state "system"
-               (session_quit_notice state ~key:"q")
-           end
+           handle_quit_key ()
        (* Also above the modals: the roster is chrome around whatever is
           showing, and reclaiming its columns should not depend on which
           surface is up. *)
@@ -28232,15 +28338,12 @@ and is loaded on demand through keeper_skill.
            (match toggle_acting_pane state with
             | Error reason -> report_action state "system" reason
             | Ok _ -> Render_schedule.request render_schedule Render_schedule.Force)
-       (* The compact fallback owns every remaining key. Put this before every
-          modal and surface branch: those states are hidden, and a question,
-          search cursor, or draft must not move behind the fallback. *)
-       | Some _ when compact_viewport -> ()
        | Some k when (let terminal_rows, _ = get_terminal_size () in
              match Masc_tui_render.frame_choice state ~terminal_rows with
              | `Queue _ -> true | _ -> false) ->
            Option.iter (fun panel ->
-             handle_queue_panel_key state ~base_path ~mailbox:async_messages panel k) state.queue_panel
+             handle_queue_panel_key state ~base_path ~mailbox:async_messages
+               ~presented_presses:!presented_presses panel k) state.queue_panel
        (* The Activity pane holds these keys while its cursor is up. Above
           the surfaces on purpose: a [j] here must not also move the list
           beside the pane. Any other key reaches the surface unchanged. *)
@@ -28894,6 +28997,9 @@ and is loaded on demand through keeper_skill.
            let close () = close_agenda state in
            (match k with
             | ";" | "esc" -> close ()
+            | "?" ->
+                state.help_open <- true;
+                state.help_scroll <- 0
             | "pageup" | "pagedown" | "home" | "end" | "g" | "G" ->
                 let count, height = Masc_tui_render.agenda_viewport state in
                 let scroll = Masc_tui_render.agenda_scroll_position state in
@@ -35430,9 +35536,29 @@ and is loaded on demand through keeper_skill.
         Render_schedule.request render_schedule Render_schedule.Background
       end;
 
+      let ready_input = input_reader_has_ready_input input_reader || not (Queue.is_empty hangul_latin_queue) in
+      let transition_input_pending = ready_input || Option.is_some interrupted_paste
+        || (match paste_phase input_reader with
+            | No_paste -> input_reader_has_started_input input_reader
+            | Pasting _ | Draining_tail _ -> false) in
+      let terminal_rows, _ = get_terminal_size () in
+      let frame_choice = Masc_tui_render.frame_choice state ~terminal_rows in
+      let queue_or_play_frame = match frame_choice with
+        | `Queue _ | `Play_card _ -> true
+        | `Too_small _ | `Account_login _ | `Palette | `Collab _ | `Lane_addons _
+        | `Detail_reading _ | `About | `Context | `Keeper_deletions | `Help
+        | `Agenda | `Answering | `Patch | `Link | `Client_detail _ | `Surface -> false in
+      let compact_recovery = match frame_choice with
+        | `Too_small _ -> not ready_input
+        | `Queue _ | `Play_card _ | `Account_login _ | `Palette | `Collab _ | `Lane_addons _
+        | `Detail_reading _ | `About | `Context | `Keeper_deletions | `Help
+        | `Agenda | `Answering | `Patch | `Link | `Client_detail _ | `Surface -> false in
+      let defer_queue_or_play = transition_input_pending && not compact_recovery
+        && (queue_or_play_frame || Option.is_some (queue_owner_of_reader !presented_reader)
+            || Option.is_some (play_card_of_reader !presented_reader)) in
       (match
          Render_schedule.take
-           ~input_pending:(input_reader_has_ready_input input_reader)
+           ~input_pending:ready_input
            render_schedule
            ~now_ns:(Mtime_clock.elapsed_ns ())
        with
@@ -35448,6 +35574,8 @@ and is loaded on demand through keeper_skill.
            Masc_tui_portrait_view.begin_frame ();
            Masc_tui_message_layout.begin_frame ();
            Masc_tui_portrait_view.flush Frame_presenter.Unchanged ~write:write_to_terminal
+       | Render_schedule.Render when defer_queue_or_play ->
+           Render_schedule.request render_schedule Render_schedule.Background
        | Render_schedule.Render ->
            (* Keys and async updates can change the pane reservation after
               the interaction snapshot. Store the focus the next frame shows. *)

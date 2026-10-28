@@ -8607,9 +8607,16 @@ type queue_panel = {
   qp_receipt : queue_panel_receipt option;
   qp_selected : Masc_tui_queue_inspection.item_id option;
   qp_scroll : int;
-  qp_detail : bool;
+  qp_detail : Masc_tui_queue_inspection.item_id option;
   qp_detail_scroll : int;
   qp_refresh_after_priority : bool;
+}
+
+type queue_panel_owner = {
+  qo_workspace : workspace_authority;
+  qo_read_authority : unit ref;
+  qo_keeper : string;
+  qo_detail : Masc_tui_queue_inspection.item_id option;
 }
 
 type state = {
@@ -10463,14 +10470,124 @@ let queue_panel_items (state : state) (panel : queue_panel) =
     | None, _ -> item in
   local_header :: local_items @ List.map with_schedule_name observed
 
+let queue_panel_owner state panel =
+  {qo_workspace=state.workspace_authority; qo_read_authority=state.workspace_read_authority;
+   qo_keeper=panel.qp_keeper; qo_detail=panel.qp_detail}
+
+let same_queue_panel_owner left right =
+  left.qo_workspace = right.qo_workspace
+  && left.qo_read_authority == right.qo_read_authority
+  && String.equal left.qo_keeper right.qo_keeper
+  && left.qo_detail = right.qo_detail
+
+type queue_panel_detail_reading =
+  | Queue_detail_none
+  | Queue_detail_loading
+  | Queue_detail_unavailable of string option
+  | Queue_detail_missing
+  | Queue_detail_ready of Masc_tui_queue_inspection.item_id * Masc_tui_queue_inspection.item
+
+let queue_panel_detail_reading ~items (panel : queue_panel) =
+  let module Inbox = Masc_tui_queue_inspection in
+  let find id =
+    match List.find_opt (fun (item : Inbox.item) -> item.id = Some id) items with
+    | Some item -> Queue_detail_ready (id, item)
+    | None -> Queue_detail_missing in
+  let from_source id source =
+    match panel.qp_reading with
+     | Queue_loading -> Queue_detail_loading
+     | Queue_unavailable ->
+       let reason = match panel.qp_notice with
+         | Some (Queue_info detail | Queue_error detail) -> Some detail
+         | None -> None in
+       Queue_detail_unavailable reason
+     | Queue_current ->
+       (match panel.qp_observation with
+        | None -> Queue_detail_unavailable None
+        | Some observation ->
+          (match source observation with
+           | Ok _ -> find id
+           | Error detail -> Queue_detail_unavailable (Some detail))) in
+  match panel.qp_detail with
+  | None -> Queue_detail_none
+  | Some (Local_message _ as id) -> find id
+  | Some (Server_message _ as id) ->
+    from_source id (fun (observation : Inbox.observation) -> observation.operations)
+  | Some (Running_message _ | Event _ | Schedule _ as id) ->
+    from_source id (fun (observation : Inbox.observation) -> observation.waiting)
+
 let update_queue_panel (state : state) ~keeper_name update =
   match state.queue_panel with
   | Some panel when String.equal panel.qp_keeper keeper_name ->
     state.queue_panel <- Some (update panel)
   | Some _ | None -> ()
 
-let queue_panel_fixed_rows panel =
-  2 + (match panel.qp_receipt with Some _ -> 1 | None -> 0)
+let queue_panel_selected_index ~items panel =
+  Option.bind panel.qp_selected (fun id ->
+    List.find_index (fun (item : Masc_tui_queue_inspection.item) -> item.id = Some id) items)
+
+let queue_panel_selected_id ~items panel =
+  match queue_panel_selected_index ~items panel with
+  | Some _ -> panel.qp_selected
+  | None -> None
+
+let reconcile_queue_panel_selection ~items panel =
+  {panel with qp_selected=queue_panel_selected_id ~items panel}
+
+let withdraw_queue_panel_server_selection panel =
+  match panel.qp_selected with
+  | Some (Masc_tui_queue_inspection.Local_message _) | None -> panel
+  | Some (Masc_tui_queue_inspection.Server_message _ | Running_message _ | Event _ | Schedule _) ->
+    {panel with qp_selected=None}
+
+let queue_panel_selection_note ~items panel =
+  match queue_panel_selected_id ~items panel with
+  | Some (Masc_tui_queue_inspection.Server_message _) ->
+      Some "Message priority waits for the current turn"
+  | Some (Masc_tui_queue_inspection.Event _) ->
+      Some "Event urgency is not exact ordering"
+  | Some (Masc_tui_queue_inspection.Local_message _ | Running_message _ | Schedule _)
+  | None -> None
+
+let queue_panel_fixed_rows ~items panel =
+  1 + (match panel.qp_receipt with Some _ -> 1 | None -> 0)
+    + (match queue_panel_selection_note ~items panel with Some _ -> 1 | None -> 0)
+
+let queue_panel_scroll ~items ~height panel =
+  let count = List.length items in
+  let scroll = Masc_tui_scroll.normalize ~count ~height panel.qp_scroll in
+  match queue_panel_selected_index ~items panel with
+  | Some cursor when height > 0 -> Masc_tui_scroll.ensure_visible ~cursor ~height scroll
+  | Some _ | None -> scroll
+
+let queue_panel_move ~items ~budget ~direction panel =
+  let height = max 0 (budget - queue_panel_fixed_rows ~items panel) in
+  if height = 0 then panel
+  else
+    let count = List.length items in
+    let scroll = queue_panel_scroll ~items ~height panel in
+    let choices = items |> List.mapi (fun index (item : Masc_tui_queue_inspection.item) ->
+      Option.map (fun id -> index, id) item.id) |> List.filter_map Fun.id in
+    let ordered = match direction with `Down -> choices | `Up -> List.rev choices in
+    let selected = queue_panel_selected_index ~items panel in
+    let target = match selected with
+      | Some cursor ->
+        List.find_opt (fun (index, _) ->
+          match direction with `Down -> index > cursor | `Up -> index < cursor) ordered
+      | None ->
+        List.find_opt (fun (index, _) -> index >= scroll && index - scroll < height) ordered in
+    match target, selected with
+    | Some (_, id), _ ->
+      let next = {panel with qp_selected=Some id; qp_scroll=scroll} in
+      let next_height = max 0 (budget - queue_panel_fixed_rows ~items next) in
+      if next_height = 0 then {panel with qp_scroll=scroll}
+      else {next with qp_scroll=queue_panel_scroll ~items ~height:next_height next}
+    | None, Some _ -> {panel with qp_scroll=scroll}
+    | None, None ->
+      let next_scroll = match direction with
+        | `Down -> Masc_tui_scroll.down ~count ~height scroll
+        | `Up -> Masc_tui_scroll.up ~count ~height scroll in
+      {panel with qp_selected=None; qp_scroll=next_scroll}
 
 (* A local draft survives peer reconfirmation but never a workspace/draft
    replacement. Peer images retain the exact reading that acquired them.
@@ -12911,7 +13028,7 @@ let suspend_workspace_readings state =
   state.workspace_read_authority <- ref ();
   state.queue_panel <- Option.map (fun panel ->
     {panel with qp_reading=Queue_unavailable; qp_observation=None;
-      qp_selected=None; qp_detail=false; qp_detail_scroll=0; qp_scroll=0;
+      qp_selected=None; qp_detail=None; qp_detail_scroll=0; qp_scroll=0;
       qp_receipt=(match panel.qp_receipt with
         | Some (Queue_action_receipt _) as receipt -> receipt
         | Some (Queue_read_receipt _) | None -> None);
@@ -18258,7 +18375,8 @@ type clamped_scroll =
      the drawing instead, which is the one thing the renderer must not do. *)
   | Patch_modal_scroll of int * int
   | Link_modal_scroll of int
-  | Play_invite_scroll of int
+  | Play_invite_scroll of Masc_tui_play_card.t * int
+  | Queue_panel_presented of queue_panel_owner
   (* The voice pane and its wizard lay out lines out of two HTTP reads and the
      probe's answers, so their count exists only once the frame is drawn. Both
      drew every line into a fixed budget with no offset, and whatever fell past
@@ -18277,6 +18395,36 @@ type clamped_scroll =
      the stored value past it until the frame says where it drew from. *)
   | Context_inspector_scroll of int
   | Context_inspector_response_scroll of int
+
+let play_card_of_reader = function
+  | Some (Play_invite_scroll (card, _)) -> Some card
+  | Some (Task_detail _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _
+         | Keeper_detail _ | Keeper_calls _ | Keeper_logs_scroll _ | Acting _
+         | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
+         | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _
+         | Fusion_detail_scroll _ | Runtime_detail_scroll _ | Runtime_params_scroll _
+         | System_log_detail_scroll _ | Planning_confirmation_scroll _
+         | Planning_detail_scroll _ | Lane_run_detail_scroll _ | Changes_diff_scroll _
+         | Repository_changes_diff_scroll _ | Resource_scroll _ | Metrics_scroll _
+         | Approval_detail_scroll _ | Patch_modal_scroll _ | Link_modal_scroll _
+         | Voice_scroll _ | Preset_detail_scroll _ | Keeper_list_scroll _
+         | Context_inspector_scroll _ | Context_inspector_response_scroll _ | Queue_panel_presented _)
+  | None -> None
+
+let queue_owner_of_reader = function
+  | Some (Queue_panel_presented owner) -> Some owner
+  | Some (Task_detail _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _
+         | Keeper_detail _ | Keeper_calls _ | Keeper_logs_scroll _ | Acting _
+         | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
+         | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _
+         | Fusion_detail_scroll _ | Runtime_detail_scroll _ | Runtime_params_scroll _
+         | System_log_detail_scroll _ | Planning_confirmation_scroll _
+         | Planning_detail_scroll _ | Lane_run_detail_scroll _ | Changes_diff_scroll _
+         | Repository_changes_diff_scroll _ | Resource_scroll _ | Metrics_scroll _
+         | Approval_detail_scroll _ | Patch_modal_scroll _ | Link_modal_scroll _
+         | Play_invite_scroll _ | Voice_scroll _ | Preset_detail_scroll _ | Keeper_list_scroll _
+         | Context_inspector_scroll _ | Context_inspector_response_scroll _)
+  | None -> None
 
 (* What End names on a surface whose rows the drawing counts: a row past any
    real end, so the frame's own clamp reports the last one back. The keypress
@@ -18341,7 +18489,11 @@ let apply_clamped_scroll (state : state) = function
       state.patch_modal_scroll <- vertical;
       state.patch_modal_hscroll <- horizontal
   | Link_modal_scroll value -> state.link_modal_scroll <- value
-  | Play_invite_scroll value -> state.play_invite_scroll <- value
+  | Play_invite_scroll (card, value) ->
+      (match play_card_shown state with
+       | Some current when current == card -> state.play_invite_scroll <- value
+       | Some _ | None -> ())
+  | Queue_panel_presented _ -> ()
   | Voice_scroll value -> state.config_scroll <- value
   | Preset_detail_scroll (value, _) -> state.config_scroll <- value
   | Keeper_list_scroll value -> state.keeper_list_scroll <- value

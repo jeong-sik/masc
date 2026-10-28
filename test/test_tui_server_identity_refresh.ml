@@ -528,7 +528,7 @@ let test_uncertain_identity_retires_reads_not_admitted_operations () =
   state.keeper_queue_inspections <- ["reading", state.workspace_read_authority];
   state.queue_panel <- Some {qp_keeper="writing"; qp_reading=Queue_current;
     qp_observation=None; qp_notice=None; qp_receipt=Some (Queue_action_receipt (Queue_info "change accepted"));
-    qp_selected=None; qp_scroll=0; qp_detail=false; qp_detail_scroll=0;
+    qp_selected=None; qp_scroll=0; qp_detail=None; qp_detail_scroll=0;
     qp_refresh_after_priority=false};
   state.workspace_identity <- next_workspace_identity ~previous:state.workspace_identity
       ~local_paths:state.local_workspace_paths (Error "health failed");
@@ -4881,6 +4881,212 @@ let test_empty_fleet_failure_requires_explicit_recovery () =
   Alcotest.(check bool) "an explicitly healthy empty fleet clears the failure" true
     (state.keeper_waiting_failure = None)
 
+let test_queue_play_input_authority () =
+  let open Masc_tui_types in
+  let module Inbox = Masc_tui_queue_inspection in
+  let module Press = Masc_tui_press in
+  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
+      ~port:0 ~refresh_interval:0. () in
+  let panel = {qp_keeper="keeper"; qp_reading=Queue_current; qp_observation=None;
+    qp_notice=None; qp_receipt=None; qp_selected=None; qp_scroll=0; qp_detail=None;
+    qp_detail_scroll=0; qp_refresh_after_priority=false} in
+  let queue_owner panel = Some (queue_panel_owner state panel) in
+  let make_card () = match Masc_tui_play_card.make ~project:(fun _ -> None)
+      ~name:"same-name" ~expires_at:"fixture" ~link:"https://example.test/fixture" with
+    | Ok card -> card
+    | Error _ -> Alcotest.fail "could not create invite fixture" in
+  let card_a, card_b = make_card (), make_card () in
+  let shown_queue = queue_owner panel and shown_play = Some card_a in
+  let decide ~play_presented ~play_shown ~compact ~beneath ~presented_queue =
+    Press.queue_play_input_owner ~play_presented ~play_shown ~compact ~state ~beneath ~presented_queue in
+  let check_wait name value =
+    Alcotest.(check bool) name true (match value with
+      | Press.Wait_for_frame -> true | Queue_input _ | Play_input | Other_input -> false) in
+  let check_queue name expected value =
+    Alcotest.(check bool) name true (match value with
+      | Press.Queue_input actual -> actual.qp_keeper = expected.qp_keeper && actual.qp_detail = expected.qp_detail
+      | Wait_for_frame | Play_input | Other_input -> false) in
+  let queue_decision ?(compact=false) ?(beneath=Some panel) presented_queue =
+    decide ~play_presented:None ~play_shown:(Some card_a) ~compact ~beneath ~presented_queue in
+  check_queue "empty Queue owns input before Play is presented" panel (queue_decision shown_queue);
+  let detail = {panel with qp_detail=Some (Inbox.Local_message "item")} in
+  check_queue "pinned Queue detail owns input" detail
+    (queue_decision ~beneath:(Some detail) (queue_owner detail));
+  check_wait "list owner does not authorize a detail" (queue_decision ~beneath:(Some detail) shown_queue);
+  check_wait "a higher overlay prevents Queue input" (queue_decision ~beneath:None shown_queue);
+  check_wait "unpresented Queue does not own input" (queue_decision None);
+  check_wait "closed Queue does not expose its underlying surface"
+    (decide ~play_presented:None ~play_shown:None ~compact:false ~beneath:None ~presented_queue:shown_queue);
+  check_wait "new Queue is not actionable before its first frame"
+    (decide ~play_presented:None ~play_shown:None ~compact:false ~beneath:(Some panel) ~presented_queue:None);
+  Alcotest.(check bool) "compact frame keeps global input" true
+    (match queue_decision ~compact:true shown_queue with
+     | Press.Other_input -> true | Queue_input _ | Play_input | Wait_for_frame -> false);
+  let reading = state.workspace_read_authority in
+  state.workspace_read_authority <- ref ();
+  check_wait "read authority change retires Queue owner" (queue_decision shown_queue);
+  state.workspace_read_authority <- reading;
+  let decide_play current =
+    decide ~play_presented:shown_play ~play_shown:current ~compact:false
+      ~beneath:None ~presented_queue:None in
+  Alcotest.(check bool) "same painted Play card owns input" true
+    (match decide_play (Some card_a) with
+     | Press.Play_input -> true | Queue_input _ | Wait_for_frame | Other_input -> false);
+  check_wait "same-name replacement card waits for presentation" (decide_play (Some card_b));
+  check_wait "closed Play card waits for replacement frame" (decide_play None);
+  Alcotest.(check bool) "wheel accepts exact card" true
+    (Press.play_card_matches ~presented:shown_play ~current:(Some card_a));
+  Alcotest.(check bool) "wheel rejects replacement card" false
+    (Press.play_card_matches ~presented:shown_play ~current:(Some card_b));
+  Alcotest.(check bool) "wheel rejects closed card" false
+    (Press.play_card_matches ~presented:shown_play ~current:None);
+  Alcotest.(check bool) "replacement card requires presentation" true
+    (Press.play_owner_authority_changed ~presented:shown_play ~candidate:(Some card_b));
+  Alcotest.(check bool) "same card needs no authority repaint" false
+    (Press.play_owner_authority_changed ~presented:shown_play ~candidate:(Some card_a));
+  Alcotest.(check bool) "visible owner withdrawal requires presentation" true
+    (Press.queue_owner_authority_changed ~presented:shown_queue ~candidate:None);
+  Alcotest.(check bool) "reader retains Queue owner without any marked cells" true
+    (match shown_queue with
+     | Some owner -> Option.exists (same_queue_panel_owner owner)
+         (queue_owner_of_reader (Some (Queue_panel_presented owner)))
+     | None -> false);
+  Alcotest.(check bool) "reader retains exact Play card" true
+    (Option.exists (fun card -> card == card_a) (play_card_of_reader (Some (Play_invite_scroll (card_a, 0)))));
+  state.play_invite <- play_invite_store state.play_invite card_a;
+  apply_clamped_scroll state (Play_invite_scroll (card_a, 3));
+  Alcotest.(check int) "current card may scroll" 3 state.play_invite_scroll;
+  state.play_invite <- play_invite_store state.play_invite card_b;
+  apply_clamped_scroll state (Play_invite_scroll (card_a, 8));
+  Alcotest.(check int) "old card cannot scroll replacement" 3 state.play_invite_scroll
+
+let test_queue_selection_requires_visible_source () =
+  let visible = Masc_tui_press.queue_selection_visible in
+  Alcotest.(check bool) "ellipsis alone grants no authority" false
+    (visible ~inner_width:1 ~marker:">" ~text:"message");
+  Alcotest.(check bool) "marker without body grants no authority" false
+    (visible ~inner_width:2 ~marker:">" ~text:"message");
+  Alcotest.(check bool) "nonblank prefix may authorize a shortened row" true
+    (visible ~inner_width:3 ~marker:">" ~text:"message");
+  Alcotest.(check bool) "only leading blanks do not authorize" false
+    (visible ~inner_width:4 ~marker:">" ~text:"  message");
+  Alcotest.(check bool) "no content grants no authority" false
+    (visible ~inner_width:20 ~marker:">" ~text:"   ");
+  Alcotest.(check bool) "zero-width content grants no authority" false
+    (visible ~inner_width:20 ~marker:"› " ~text:"\u{200b}");
+  Alcotest.(check bool) "cut wide grapheme grants no authority" false
+    (visible ~inner_width:4 ~marker:"› " ~text:"가나다");
+  Alcotest.(check bool) "a visible wide grapheme grants authority" true
+    (visible ~inner_width:5 ~marker:"› " ~text:"가나다")
+
+let test_queue_presented_selection_authority () =
+  let open Masc_tui_types in
+  let module Inbox = Masc_tui_queue_inspection in
+  let module Press = Masc_tui_press in
+  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
+      ~port:0 ~refresh_interval:0. () in
+  state.server_identity <- Some (identity "/workspace/a");
+  state.workspace_identity <- Workspace_identity_match;
+  let id = Inbox.Server_message "message-a" in
+  let row = {Inbox.id=Some id; text="visible prefix\noriginal content"} in
+  let observation = {Inbox.waiting=Ok []; operations=Ok [row]} in
+  let panel = {qp_keeper="keeper-a"; qp_reading=Queue_current;
+    qp_observation=Some observation; qp_notice=None; qp_receipt=None;
+    qp_selected=Some id; qp_scroll=0; qp_detail=None; qp_detail_scroll=0;
+    qp_refresh_after_priority=false} in
+  let capture panel item = match Press.queue_selection_for_item state panel item with
+    | Some value -> value
+    | None -> Alcotest.fail "selected item has no authority" in
+  let painted = capture panel row in
+  let resolve ?(action=true) panel items =
+    Press.resolve_queue_selection ~require_action_ready:action ~state ~panel ~items painted in
+  let check_none name value = Alcotest.(check bool) name true (Option.is_none value) in
+  Alcotest.(check bool) "painted row resolves" true (resolve panel [row] = Some id);
+  let changed = {row with text="visible prefix\nchanged content"} in
+  check_none "changed hidden content refuses" (resolve panel [changed]);
+  check_none "removed item refuses" (resolve panel []);
+  check_none "cleared selection refuses" (resolve {panel with qp_selected=None} [row]);
+  check_none "detail view cannot use list authority" (resolve {panel with qp_detail=Some id} [row]);
+  check_none "other Keeper refuses" (resolve {panel with qp_keeper="keeper-b"} [row]);
+  let other = Inbox.Local_message "message-a" in
+  let other_row = {Inbox.id=Some other; text=row.text} in
+  check_none "same spelling but different typed identity refuses"
+    (resolve {panel with qp_selected=Some other} [other_row]);
+  check_none "loading refuses" (resolve {panel with qp_reading=Queue_loading} [row]);
+  let workspace = state.workspace_authority in
+  let (Workspace_authority generation) = workspace in
+  state.workspace_authority <- Workspace_authority (generation + 1);
+  check_none "new workspace authority refuses" (resolve panel [row]);
+  state.workspace_authority <- workspace;
+  let reading = state.workspace_read_authority in
+  state.workspace_read_authority <- ref ();
+  check_none "new physical read authority refuses" (resolve panel [row]);
+  state.workspace_read_authority <- reading;
+  state.workspace_identity <- Workspace_identity_match_unconfirmed "read failed";
+  check_none "server authority unavailable refuses" (resolve panel [row]);
+  state.workspace_identity <- Workspace_identity_match;
+  let loading_panel = {panel with qp_reading=Queue_loading} in
+  let loading = capture loading_panel row in
+  check_none "painted while loading cannot authorize an action"
+    (Press.resolve_queue_selection ~require_action_ready:true ~state ~panel:loading_panel
+       ~items:[row] loading);
+  Alcotest.(check bool) "painted while loading may open its detail" true
+    (Press.resolve_queue_selection ~require_action_ready:false ~state ~panel:loading_panel
+       ~items:[row] loading = Some id);
+  let zones selection =
+    let registry = Masc_tui_hit.registry () in
+    let marked = Masc_tui_hit.mark registry (Press.Press_queue_selected selection) "x" in
+    let _, zones = Masc_tui_hit.extract registry [marked] in
+    Masc_tui_hit.filter (fun target -> not (Press.press_changes_the_surface target)) zones in
+  let shown = zones painted in
+  let authority_changed candidate = Press.queue_selection_authority_changed
+      ~presented:shown ~candidate in
+  Alcotest.(check bool) "same selection keeps authority" false
+    (authority_changed (zones (capture panel row)));
+  Alcotest.(check bool) "hidden content change requires presentation" true
+    (authority_changed (zones (capture panel changed)));
+  Alcotest.(check bool) "loading change requires presentation" true
+    (authority_changed (zones loading));
+  state.workspace_read_authority <- ref ();
+  Alcotest.(check bool) "physical read change requires presentation" true
+    (authority_changed (zones (capture panel row)));
+  Alcotest.(check bool) "withdrawn selection requires presentation" true
+    (authority_changed Masc_tui_hit.no_zones)
+
+let test_queue_detail_respects_source_reading () =
+  let open Masc_tui_types in
+  let module Inbox = Masc_tui_queue_inspection in
+  let local = Inbox.Local_message "local" in
+  let server = Inbox.Server_message "server" in
+  let event = Inbox.Event ("event", 1L) in
+  let local_row = {Inbox.id=Some local; text="current local"} in
+  let server_row = {Inbox.id=Some server; text="previous server"} in
+  let event_row = {Inbox.id=Some event; text="current event"} in
+  let items = [local_row; server_row; event_row] in
+  let observation = {Inbox.waiting=Ok [event_row]; operations=Ok [server_row]} in
+  let receipt = Some (Queue_action_receipt (Queue_info "action accepted")) in
+  let panel = {qp_keeper="keeper"; qp_reading=Queue_unavailable;
+    qp_observation=Some observation; qp_notice=Some (Queue_error "read failed");
+    qp_receipt=receipt; qp_selected=None; qp_scroll=0; qp_detail=Some server;
+    qp_detail_scroll=0; qp_refresh_after_priority=false} in
+  let check name expected panel =
+    Alcotest.(check bool) name true (queue_panel_detail_reading ~items panel = expected);
+    Alcotest.(check bool) "receipt preserved" true (panel.qp_receipt = receipt) in
+  check "failed read withdraws stale server text" (Queue_detail_unavailable (Some "read failed")) panel;
+  check "loading withdraws stale server text" Queue_detail_loading {panel with qp_reading=Queue_loading};
+  check "local detail is independent of server failure" (Queue_detail_ready (local, local_row))
+    {panel with qp_detail=Some local};
+  let partial = {observation with operations=Error "operations failed"} in
+  let current = {panel with qp_reading=Queue_current; qp_observation=Some partial} in
+  check "failed source refuses stale text" (Queue_detail_unavailable (Some "operations failed")) current;
+  check "successful inventory remains available" (Queue_detail_ready (event, event_row))
+    {current with qp_detail=Some event};
+  let partial = {observation with waiting=Error "inventory failed"} in
+  let current = {panel with qp_reading=Queue_current; qp_observation=Some partial} in
+  check "failed inventory refuses text" (Queue_detail_unavailable (Some "inventory failed"))
+    {current with qp_detail=Some event};
+  check "successful server messages remain available" (Queue_detail_ready (server, server_row)) current
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
@@ -5118,6 +5324,14 @@ let () =
             test_local_rows_are_unread_until_the_workspace_is_read
         ; Alcotest.test_case "an unread after a match keeps it unconfirmed" `Quick
             test_unread_after_a_match_keeps_it_unconfirmed
+        ; Alcotest.test_case "Queue and Play input follow the presented owner" `Quick
+            test_queue_play_input_authority
+        ; Alcotest.test_case "Queue selection needs visible source content" `Quick
+            test_queue_selection_requires_visible_source
+        ; Alcotest.test_case "Queue action uses its presented selection authority" `Quick
+            test_queue_presented_selection_authority
+        ; Alcotest.test_case "Queue detail follows each source reading" `Quick
+            test_queue_detail_respects_source_reading
         ; Alcotest.test_case "writes wait for a confirmed identity" `Quick
             test_writes_wait_for_a_confirmed_identity
         ; Alcotest.test_case "a missing path does not hide a mismatch" `Quick

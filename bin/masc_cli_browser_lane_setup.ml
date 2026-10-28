@@ -259,10 +259,13 @@ let print_ego ~runtime_config_path plan =
      before keeps its old settings until it is detached; the server attaches its declaration \
      again on the next maintenance pass. The Add-on then opens the task space and lists it as \
      ego lite among the live connections. Detaching ends the space.";
+  let reference=match space with
+    | Browser_configuration.Named_space name -> Printf.sprintf "named %S" name
+    | Existing_space id -> Printf.sprintf "with ID %d" id in
   Printf.printf
-    "  If ego lite holds a task space named %s that you opened yourself, the Add-on does not \
+    "  If ego lite holds a task space %s that you opened yourself, the Add-on does not \
      start; name another with --ego-space.\n"
-    space;
+    reference;
   print_endline
     "Keepers act only on the pages the space opens, with the cookies of your ego lite \
      profile: they can read and post as you on the sites you are logged in to there."

@@ -39,10 +39,20 @@ type receipt = {binding:Browser_binding.t;data:Yojson.Safe.t;
   raw_result:Mcp_protocol.Mcp_types.tool_result}
 (** The original successful MCP receipt remains available if a caller's
     observation projection or persistence fails after command completion. *)
-val issue : ?upload_paths:string list -> ?required_actions:Browser_capabilities.operation list ->
+val goal_space : t -> goal_id:string -> (Browser_goal_space.t option, Browser_goal_space.error) result
+val bind_goal_space : t -> goal_id:string -> client_id:Browser_lane.client_id ->
+  (Browser_goal_space.commit, Browser_goal_space.error) result
+(** Bind only the Space metadata of an observed Ego connection on this exact
+    installation. No browser command, claim, takeover or Page read is issued. *)
+val issue : ?goal_space:Browser_goal_space.t -> ?upload_paths:string list -> ?required_actions:Browser_capabilities.operation list ->
   t -> preference:Browser_selection.preference -> Browser_lane.verb ->
   (receipt, Tool_result.result) result
-(** Choose the browser from the services' snapshots, invoke the advertised
+(** [goal_space] applies only to initial automatic discovery/open. Its original
+    installation and numeric Space ID must resolve in the dispatch snapshot;
+    a missing connection never falls back. It cannot redirect an explicit route
+    or a bound Page command.
+
+    Choose the browser from the services' snapshots, invoke the advertised
     tool of the service that serves it once on that route, and decode its
     success receipt. Only the services the preference can reach are asked
     for a snapshot. A client that two services list is refused, and so is a

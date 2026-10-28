@@ -139,6 +139,30 @@ let served_for t gathered = function
        | _::_::_ -> Error "more than one attached browser Add-on lists that browser client, so it is not used")
 type receipt = {binding:Browser_binding.t;data:Yojson.Safe.t;
   raw_result:Mcp_protocol.Mcp_types.tool_result}
+let goal_space t ~goal_id = Browser_goal_space.find t.config ~goal_id
+(* The binding names the installation whose service lists the connection, so
+   a Space is bound only through the one service that serves it. *)
+let bind_goal_space t ~goal_id ~client_id =
+  let* gathered = gather t ~reach:(fun _ -> true) |> Result.map_error (function
+    | Snapshot_unavailable detail -> Browser_goal_space.Unavailable detail
+    | Snapshot_unreadable detail -> Browser_goal_space.Invalid detail) in
+  let id=Browser_lane.client_id_to_string client_id in
+  let holders=List.filter_map (fun (holder,(served:served)) ->
+    if String.equal holder id then Some served else None) gathered.holders in
+  match List.find_opt (fun (client:Browser_lane.client_info) -> client.client_id=client_id) gathered.published.clients with
+  | None -> Error (Browser_goal_space.Unavailable "clientId is not an observed browser connection")
+  | Some {transport=Ego_task_space;space=None;_}
+  | Some {transport=(Web_extension|Webdriver_bidi);_} ->
+      Error (Browser_goal_space.Invalid "Goal Space binding requires an observed Ego Space connection")
+  | Some {transport=Browser_lane.Ego_task_space;space=Some space;_} ->
+    if List.mem id gathered.doubled then
+      Error (Browser_goal_space.Conflict "the live source of that browser is served by more than one attached browser Add-on, so it is not used until one is detached")
+    else match holders with
+      | [served] ->
+          Browser_goal_space.bind t.config ~goal_id ~addon_instance_id:served.service.instance_id
+            ~space ~actor:(Lane_addon_call_context.actor_label t.principal)
+      | [] -> Error (Browser_goal_space.Unavailable "no attached browser Add-on lists that browser client")
+      | _::_::_ -> Error (Browser_goal_space.Conflict "more than one attached browser Add-on lists that browser client, so it is not used")
 let route_arguments = function
   | Browser_lane.Live_route client -> ["lane",`String "live"] @
       (match client with None -> []|Some id -> ["clientId",`String (Browser_lane.client_id_to_string id)])
@@ -158,7 +182,7 @@ let selection_detail ~clients error = `Assoc ["error",Browser_selection.error_to
 (* Choose from the worker's snapshot, then run the command once on the chosen
    route. A refusal after the snapshot is returned as the worker gave it; the
    host never sends the command to another browser. *)
-let resolve ~required_actions t ~preference verb ~start_time =
+let resolve ?goal_space ~required_actions t ~preference verb ~start_time =
   let fail ?metadata ?(data=`Null) ~class_ ~effect_disposition message =
     Error (Tool_result.make_err ~tool_name:Browser_addon_tool.definition.name ~start_time
       ?metadata ~data ~class_ ~effect_disposition message) in
@@ -213,6 +237,27 @@ let resolve ~required_actions t ~preference verb ~start_time =
             ~effect_disposition:Tool_result.Proven_pre_effect
             ("browser snapshot is unreadable; no browser command was dispatched: " ^ detail) in
       let published=gathered.published and snapshot=gathered.selection in
+      (* A Goal Space resolves only among the connections the service of its
+         own installation lists; the chosen client then meets the same
+         doubled-source refusal as an explicit one. *)
+      let* preference=match goal_space with
+        | None -> Ok preference
+        | Some (binding:Browser_goal_space.t) ->
+          let owner=List.find_opt (fun (served:served) ->
+            String.equal served.service.instance_id binding.addon_instance_id) t.services in
+          let listed=List.filter (fun (client:Browser_lane.client_info) ->
+            let id=Browser_lane.client_id_to_string client.client_id in
+            List.exists (fun (holder,(served:served)) -> String.equal holder id
+              && String.equal served.service.instance_id binding.addon_instance_id) gathered.holders) published.clients in
+          (match owner with
+           | None -> Error (Browser_goal_space.Unavailable
+               "the browser Add-on that published the Goal's Ego Space is not attached; no browser command was dispatched")
+           | Some (served:served) -> Browser_goal_space.resolve binding ~addon_instance_id:served.service.instance_id listed)
+          |> Result.map (fun client_id -> Browser_selection.Exact (Browser_lane.Live_route (Some client_id)))
+          |> Result.map_error (fun error -> Tool_result.make_err
+              ~tool_name:Browser_addon_tool.definition.name ~start_time
+              ~class_:Tool_result.Workflow_rejection ~effect_disposition:Tool_result.Proven_pre_effect
+              (Browser_goal_space.error_message error)) in
       let* ()=match preference with
         | Exact (Browser_lane.Live_route (Some id))
           when List.mem (Browser_lane.client_id_to_string id) gathered.doubled ->
@@ -271,11 +316,24 @@ let command t ~arguments =
       ~class_:Tool_result.Workflow_rejection ~effect_disposition:Tool_result.Proven_pre_effect detail)
   | Ok (preference,verb,required_actions,upload_id) ->
       dispatch ?upload_id ~required_actions t ~preference verb ~start_time |> Result.map snd
-let issue ?upload_paths ?(required_actions=[]) t ~preference verb =
+let issue ?goal_space ?upload_paths ?(required_actions=[]) t ~preference verb =
   let start_time=Tool_timing.start () in
   let fail ?metadata ?(data=`Null) ~class_ ~effect_disposition message =
     Error (Tool_result.make_err ~tool_name:Browser_addon_tool.definition.name ~start_time
       ?metadata ~data ~class_ ~effect_disposition message) in
+  let initial=match preference,verb with
+    | Browser_selection.Automatic,(Browser_lane.Tabs_list|Session_open _) -> true
+    | (Automatic|Exact (Live_route _|Automation_route|Stagehand_route)),
+      (Tabs_list|Session_open _|Session_close|Session_status|Page_read _|Page_document _|Page_downloads _
+      |Page_console _|Page_network _|Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _
+      |Page_native_workflow _|Page_interact _|Page_goto _|Page_elements _|Page_act _|Page_context _
+      |Page_instruct _|Page_locate _|Page_extract _) -> false in
+  let* ()=match goal_space with
+    | None -> Ok ()
+    | Some _ when initial -> Ok ()
+    | Some _ -> fail ~class_:Tool_result.Workflow_rejection
+        ~effect_disposition:Tool_result.Proven_pre_effect
+        "Goal Space defaults apply only to initial automatic discovery or open" in
   let upload=match verb with
     | Browser_lane.Page_act (Browser_lane.Action.On_tab {interaction=Upload {paths;_};_}) -> Some paths
     | Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _
@@ -296,7 +354,7 @@ let issue ?upload_paths ?(required_actions=[]) t ~preference verb =
         ~effect_disposition:Tool_result.Proven_pre_effect detail in
   (* The browser is chosen first, so the grant is staged on, and discarded
      from, the service the command then goes to. *)
-  let* binding,served=resolve ~required_actions t ~preference verb ~start_time in
+  let* binding,served=resolve ?goal_space ~required_actions t ~preference verb ~start_time in
   let discard ()=Option.iter (fun (id,_) -> Eio.Cancel.protect (fun () ->
     ignore (R.call_browser_service ~config:t.config ~access:t.access ~service:served.service
       ~command:(Browser_addon_wire.Upload_discard id)))) upload_id in

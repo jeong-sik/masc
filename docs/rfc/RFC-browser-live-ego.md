@@ -204,3 +204,31 @@ execution. The complete usage guides were byte-identical: the new guide
 exposed no additional Page method replacing a MASC adapter. Separately, the
 [.20 download observation](../evidence/ego-native-session-gap/#download-lifetime-is-not-inferred-from-the-guide)
 does not support claiming every SDK round exit deletes its download temp files.
+
+### Explicit shared Goal Space binding
+
+After `masc_browser_tabs` reports an Ego connection, bind that observed Space
+with `masc_browser_session` arguments
+`{"action":"bind_goal","goalId":"<existing-goal-id>","lane":"live","clientId":"<observed-client-uuid>"}`.
+This stores the Add-on installation and numeric Space ID with the verified host
+actor. It does not read Pages, claim a Space, take over, or finish it. Repeating
+the same assignment is idempotent; changing the assignment or assigning the same
+Space to a different Goal is refused. Names are observations, not identity.
+`{"action":"goal_status","goalId":"<existing-goal-id>"}` reads the stored
+binding only; it does not establish that the Space is connected or visible.
+
+For a Keeper's initial automatic tab discovery or session open, the host reads
+its authoritative current Task and Goal links. One linked Goal with a binding
+pins selection to that installation and numeric Space ID, resolving the current
+client UUID from the worker's dispatch snapshot. A missing connection or different
+installation refuses the request before browser dispatch. Multiple linked Goals
+require an explicit browser selection. Goalless Tasks and Goals without a
+binding retain ordinary selection. Explicit lane/clientId and bound Page calls
+never consult this default or gain authority from it.
+
+An Ego Space is already open: discover its Pages with BrowserTabs. A Goal pin
+does not turn BrowserSession open into a native Space-creation operation. This
+binding does not yet create missing Spaces, manage several simultaneous Goal
+Spaces in one worker, reassign/delete bindings, or finish them on Goal completion.
+User-held and delegated Spaces retain their existing admission rules; the stored
+binding is no takeover authorization or proof of visible UI/login completion.

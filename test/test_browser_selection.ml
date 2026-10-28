@@ -207,7 +207,55 @@ let test_space_binding () =
        (List.length (List.filter (fun (key,_) -> key="browserSpace") fields))
    | _ -> fail "expected object")
 
+let test_goal_space_default () =
+  let module G=Masc.Browser_goal_space in
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir=Filename.temp_dir "browser-goal-space-" "" in
+  let rec remove path =
+    if Sys.is_directory path then (
+      Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path);
+      Unix.rmdir path)
+    else Sys.remove path in
+  Fun.protect ~finally:(fun () -> remove dir) (fun () ->
+    let config=Masc.Workspace.default_config dir in
+    ignore (Masc.Workspace.init config ~agent_name:(Some "fixture"));
+    let goal title=match Goal_store.upsert_goal config ~title ~metric:"verified" ~target_value:"1" () with
+      | Ok (goal,_) -> goal.id
+      | Error error -> fail (Goal_store.write_error_to_string error) in
+    let first=goal "first" and second=goal "second" in
+    let ok=function Ok value -> value | Error e -> fail (G.error_message e) in
+    let space : Lane.ego_space={id=51;name="observed Space"} in
+    let bind goal_id space=G.bind config ~goal_id ~addon_instance_id:"addon-one" ~space ~actor:"keeper:test" in
+    check bool "existing Goal starts unbound" true (ok (G.find config ~goal_id:first)=None);
+    let committed=ok (bind first space) in
+    check bool "first assignment committed" true committed.created;
+    check bool "same assignment is idempotent" false (ok (bind first {space with name="renamed"})).created;
+    check bool "another Space never replaces a Goal pin" true (Result.is_error (bind first {space with id=52}));
+    check bool "distinct Goals never silently share one Space" true (Result.is_error (bind second space));
+    let readback=Option.get (ok (G.find config ~goal_id:first)) in
+    let original={(client "1" Lane.Ego_task_space) with space=Some space} in
+    let reconnected={original with client_id=(client "2" Lane.Ego_task_space).client_id} in
+    check bool "reconnect resumes numeric Space through fresh UUID" true
+      (ok (G.resolve readback ~addon_instance_id:"addon-one" [reconnected])=reconnected.client_id);
+    check bool "missing Space does not choose unrelated browser" true
+      (Result.is_error (G.resolve readback ~addon_instance_id:"addon-one" [client "3" Lane.Webdriver_bidi]));
+    check bool "different installation cannot borrow pin" true
+      (Result.is_error (G.resolve readback ~addon_instance_id:"addon-two" [original]));
+    check bool "ambiguous same Space connections require choice" true
+      (Result.is_error (G.resolve readback ~addon_instance_id:"addon-one" [original;reconnected]));
+    let store=Filename.concat (Masc.Workspace.masc_dir config) "browser_goal_spaces.json" in
+    let before=Masc.Workspace.read_json_doc config store in
+    check bool "missing Goal cannot create a pin" true (Result.is_error (bind "missing" {space with id=52}));
+    check bool "missing Goal left committed bytes unchanged" true (before=Masc.Workspace.read_json_doc config store);
+    let corrupt=`Assoc ["bindings",`List [G.to_json readback;G.to_json readback]] in
+    Masc.Workspace.write_json config store corrupt;
+    check bool "duplicate store is rejected on read" true (Result.is_error (G.find config ~goal_id:first));
+    check bool "corrupt store never licenses a new assignment" true (Result.is_error (bind second {space with id=52}));
+    check bool "corrupt evidence remains" true (Masc.Workspace.read_json_doc config store=Ok (Some corrupt)))
+
 let () = run "browser selection" ["policy",[
+  test_case "Goal Space assignment and reconnect preserve browser identity" `Quick test_goal_space_default;
   test_case "connected login and actual owned sessions" `Quick test_connections_and_sessions;
   test_case "exact browser binding" `Quick test_explicit_binding;
   test_case "native workflow retains its original browser" `Quick test_native_workflow_binding;

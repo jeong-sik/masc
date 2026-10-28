@@ -64,6 +64,39 @@ let test_initialize_does_not_negotiate_a_stateless_version () =
     (Mcp_transport_protocol.protocol_version_from_body
        {|{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2026-07-28"}}|})
 
+let test_legacy_default_keeps_a_legacy_latest () =
+  check (result string string) "a legacy latest is the counter-offer"
+    (Ok "2025-11-25")
+    (Mcp_transport_protocol.legacy_default_protocol_version_of
+       ~latest:"2025-11-25"
+       ~supported:[ "2026-07-28"; "DRAFT-2026-v1"; "2024-11-05"; "2025-11-25" ])
+
+let test_legacy_default_skips_a_stateless_latest () =
+  check (result string string) "a stateless latest falls back to the newest legacy"
+    (Ok "2025-11-25")
+    (Mcp_transport_protocol.legacy_default_protocol_version_of
+       ~latest:"2026-07-28"
+       ~supported:[ "2026-07-28"; "DRAFT-2026-v1"; "2024-11-05"; "2025-11-25" ])
+
+let test_legacy_default_needs_a_legacy_version () =
+  check bool "no legacy version is an error" true
+    (Result.is_error
+       (Mcp_transport_protocol.legacy_default_protocol_version_of
+          ~latest:"2026-07-28" ~supported:[ "2026-07-28"; "DRAFT-2026-v1" ]))
+
+(* The fallback takes the last legacy entry as the newest, so the SDK has to
+   list legacy versions oldest first. A reordered SDK list fails here. *)
+let test_legacy_default_matches_the_sdk () =
+  check string "legacy counter-offer today" "2025-11-25"
+    Mcp_transport_protocol.legacy_default_protocol_version;
+  let legacy =
+    List.filter
+      (fun version -> not (Mcp_transport_protocol.is_stateless_protocol_version version))
+      Mcp_transport_protocol.supported_protocol_versions
+  in
+  check (list string) "legacy versions are listed oldest first"
+    (List.sort String.compare legacy) legacy
+
 let test_protocol_version_from_body_non_initialize () =
   check (option string) "non-initialize ignored" None
     (Mcp_transport_protocol.protocol_version_from_body
@@ -701,6 +734,14 @@ let () =
         test_protocol_version_from_body_invalid_normalizes;
       test_case "initialize only negotiates legacy" `Quick
         test_initialize_does_not_negotiate_a_stateless_version;
+      test_case "legacy default keeps a legacy latest" `Quick
+        test_legacy_default_keeps_a_legacy_latest;
+      test_case "legacy default skips a stateless latest" `Quick
+        test_legacy_default_skips_a_stateless_latest;
+      test_case "legacy default needs a legacy version" `Quick
+        test_legacy_default_needs_a_legacy_version;
+      test_case "legacy default matches the sdk" `Quick
+        test_legacy_default_matches_the_sdk;
       test_case "from_body non_initialize" `Quick
         test_protocol_version_from_body_non_initialize;
       test_case "from_body missing jsonrpc" `Quick

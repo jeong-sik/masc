@@ -575,6 +575,11 @@ let supported_protocol_versions =
      :: protocol_version_draft_2026_v1
      :: Mcp_protocol.Version.supported_versions)
 
+(* The ordinary default: it answers a request that names no version, or an
+   unsupported one, outside [initialize]. It follows the SDK's latest on
+   purpose. The [initialize] counter-offer must stay legacy even if the SDK's
+   latest becomes a stateless revision, so it uses
+   [legacy_default_protocol_version] below. *)
 let default_protocol_version = Mcp_protocol.Version.latest
 
 let is_supported_protocol_version version =
@@ -583,6 +588,33 @@ let is_supported_protocol_version version =
 let is_stateless_protocol_version version =
   String.equal version protocol_version_2026_07_28
   || String.equal version protocol_version_draft_2026_v1
+
+(* [supported] lists legacy versions oldest first (the SDK's order), so the
+   last legacy entry is the newest one. *)
+let legacy_default_protocol_version_of ~latest ~supported =
+  if not (is_stateless_protocol_version latest) then Ok latest
+  else
+    match
+      List.fold_left
+        (fun newest version ->
+          if is_stateless_protocol_version version then newest
+          else Some version)
+        None supported
+    with
+    | Some version -> Ok version
+    | None -> Error "no legacy protocol version is supported"
+
+(* A supported set without any legacy version can only come from moving the SDK
+   pin to stateless-only revisions. Fail when the module loads, where every
+   test binary sees it, instead of answering [initialize] with a stateless
+   version. *)
+let legacy_default_protocol_version =
+  match
+    legacy_default_protocol_version_of ~latest:Mcp_protocol.Version.latest
+      ~supported:supported_protocol_versions
+  with
+  | Ok version -> version
+  | Error message -> invalid_arg ("Mcp_transport_protocol: " ^ message)
 
 let validate_protocol_version version =
   if is_supported_protocol_version version then
@@ -601,7 +633,7 @@ let negotiate_legacy_protocol_version version =
   if is_supported_protocol_version version
      && not (is_stateless_protocol_version version)
   then version
-  else default_protocol_version
+  else legacy_default_protocol_version
 
 let protocol_version_from_params = function
   | Some (`Assoc fields) -> (

@@ -237,9 +237,23 @@ val validate_protocol_version : string -> (string, string) result
 val normalize_protocol_version : string -> string
 (** Returns the input if supported, else {!default_protocol_version}. *)
 
+val legacy_default_protocol_version_of :
+  latest:string -> supported:string list -> (string, string) result
+(** The version an [initialize] counter-offer falls back to: [latest] when it
+    is not stateless, otherwise the newest legacy entry of [supported]
+    (oldest first, as the SDK lists them). [Error] when [supported] has no
+    legacy entry. Exposed so each branch can be tested without moving the SDK
+    pin. *)
+
+val legacy_default_protocol_version : string
+(** {!legacy_default_protocol_version_of} applied to the SDK's latest and
+    {!supported_protocol_versions}. Raises [Invalid_argument] when the module
+    loads if no legacy version is supported. *)
+
 val negotiate_legacy_protocol_version : string -> string
 (** The [initialize] handshake negotiates only legacy versions. An unknown or
-    stateless proposal receives the latest supported legacy counter-offer. *)
+    stateless proposal receives {!legacy_default_protocol_version}, the latest
+    supported legacy counter-offer. *)
 
 val protocol_version_from_params : Yojson.Safe.t option -> string
 (** Extract [protocolVersion] from a JSON-RPC [params] object,

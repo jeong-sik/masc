@@ -437,6 +437,78 @@ let with_gateway ?(prepare_workspace=Fun.id) f =
           in
           f ~base_path ~clock:(Eio.Stdenv.clock env) handler))
 
+(* Exercise the actual H2 MCP admission path, including OAuth and session
+   validation, so a response from an earlier refusal cannot satisfy the test. *)
+let test_oauth_scope_refusal_preserves_request_ids () =
+  Mirage_crypto_rng_unix.use_default ();
+  with_gateway @@ fun ~base_path ~clock handler ->
+  let bootstrap =
+    match Auth.create_token base_path ~agent_name:"h2-step-up" ~role:Masc_domain.Worker with
+    | Ok (token, _) -> token
+    | Error error -> fail (Masc_domain.masc_error_to_string error)
+  in
+  let redirect_uri = "http://127.0.0.1:43123/callback" in
+  let resource = "http://localhost:8935/mcp" in
+  let verifier = String.make 43 'v' in
+  let client = Auth_oauth.register_client ~base_path ~client_name:(Some "h2-step-up")
+      ~redirect_uris:[redirect_uri] |> Result.get_ok in
+  let oauth_authority =
+    match Server_request_authority.of_host_port ~host:listener_host ~port:listener_port with
+    | Ok value -> value
+    | Error `Malformed -> fail "fixture authority is invalid" in
+  let form = Uri.encoded_of_query
+    [ "response_type", ["code"]; "client_id", [client.client_id]
+    ; "redirect_uri", [redirect_uri]; "resource", [resource]
+    ; "scope", ["mcp:tools"]; "code_challenge", [Auth_oauth.pkce_s256 verifier]
+    ; "code_challenge_method", ["S256"]; "bootstrap_token", [bootstrap]
+    ; "decision", ["authorize"] ] in
+  let location =
+    match Server_oauth_service.authorize_post ~base_path ~authority:oauth_authority
+        ~fetch_client_metadata:(fun _ -> Error "unexpected client document") ~body:form with
+    | Ok (Server_oauth_service.Authorization_redirect location) -> location
+    | Ok (Server_oauth_service.Authorization_form_error {message; _}) -> fail message
+    | Error error -> fail (Auth_oauth.show_error error) in
+  let code = match Uri.get_query_param (Uri.of_string location) "code" with
+    | Some code -> code | None -> fail "authorization returned no code" in
+  let oauth =
+    match Auth_oauth.exchange_authorization_code ~base_path ~expected_resource:resource
+        ~code ~client_id:client.client_id ~redirect_uri ~resource:(Some resource)
+        ~code_verifier:verifier with
+    | Ok pair -> pair.access_token
+    | Error error -> fail (Auth_oauth.show_error error) in
+  let protocol = Mcp_transport_protocol.default_protocol_version in
+  let headers =
+    [ "authorization", "Bearer " ^ oauth; "content-type", "application/json"
+    ; "accept", "application/json, text/event-stream"; "mcp-protocol-version", protocol ] in
+  let session = create_session ~clock ~handler () in
+  let session_id = ref None in
+  let writer, reply = open_request session ~headers
+      ~on_response_headers:(fun response ->
+        session_id := H2.Headers.get response.headers "mcp-session-id") "/mcp" in
+  let initialize = Yojson.Safe.to_string
+    (`Assoc ["jsonrpc", `String "2.0"; "id", `String "init";
+      "method", `String "initialize"; "params", `Assoc [
+        "protocolVersion", `String protocol; "capabilities", `Assoc [];
+        "clientInfo", `Assoc ["name", `String "h2-step-up"; "version", `String "0"]]]) in
+  send_whole initialize writer;
+  check int "initialize succeeds" 200 (await_reply session reply).status;
+  let session_id = match !session_id with
+    | Some value -> value | None -> fail "initialize returned no session id" in
+  List.iter (fun id ->
+    let request = Yojson.Safe.to_string
+      (`Assoc ["jsonrpc", `String "2.0"; "id", id; "method", `String "tools/call";
+        "params", `Assoc ["name", `String "masc_keeper_down"; "arguments", `Assoc []]]) in
+    let reply = exchange_on session ~headers:(("mcp-session-id", session_id) :: headers)
+        ~send:(send_whole request) "/mcp" in
+    check int "insufficient scope is HTTP 403" 403 reply.status;
+    let response = Yojson.Safe.from_string reply.body in
+    check string "error echoes the request id" (Yojson.Safe.to_string id)
+      (Yojson.Safe.to_string (Yojson.Safe.Util.member "id" response));
+    check int "error is insufficient scope"
+      (Mcp_error_code.to_wire_code Mcp_error_code.Insufficient_scope)
+      Yojson.Safe.Util.(response |> member "error" |> member "code" |> to_int))
+    [`Int 17; `String "call-한글"]
+
 (* The client starts the body and never ends it. With the gate ahead of the
    read the refusal arrives anyway; a gateway that read the body first would
    wait for its end, and the exchange would fail as stalled. *)
@@ -666,7 +738,10 @@ let with_request_scope test () =
 
 let () =
   run "H2 request body admission"
-    [ ("package catalog", [
+    [ ("OAuth step-up", [
+        test_case "scope refusal echoes numeric and string request ids" `Quick
+          test_oauth_scope_refusal_preserves_request_ids])
+    ; ("package catalog", [
         test_case "H2 read auth and payload parity" `Quick test_package_h2_read_auth_and_payloads;
         test_case "active linked worktree controls discovery and preview" `Quick test_package_active_worktree_payloads])
     ; ( "body ceiling"

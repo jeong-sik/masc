@@ -784,8 +784,12 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                                   with
                                   | Some scope ->
                                       let body =
-                                        json_rpc_error Mcp_error_code.Insufficient_scope
-                                          (Printf.sprintf
+                                        Mcp_error_code.jsonrpc_error_body_with_id
+                                          Mcp_error_code.Insufficient_scope
+                                          ~id:(Option.value
+                                            ~default:`Null
+                                            (Server_mcp_transport_http.body_jsonrpc_id body_str))
+                                          ~message:(Printf.sprintf
                                              "This tool needs the OAuth scope %s."
                                              (Auth_oauth.scope_to_string scope))
                                       in

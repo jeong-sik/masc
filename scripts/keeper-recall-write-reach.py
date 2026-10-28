@@ -46,7 +46,10 @@ text, no reason text and no memory id.
      the write is an upper bound, because a pass that started before the write
      can commit after it. The receipt does not say which pass added a target,
      so several candidates can share one, and a target that left and came back
-     is dated by its first addition.
+     is dated by its first addition. A target that no row adds, or whose
+     receipt has no usable write time, is counted with the upper bound: a fact
+     can exist without an adding row, and the report counts how many current
+     facts do.
    * Whether the target has the memory id of the Keeper's own sentence. A
      memory id is the SHA-256 of a claim, so a sentence the Librarian reworded
      has another id.
@@ -57,8 +60,12 @@ text, no reason text and no memory id.
      without records. A claim that was retracted and added again is current.
      For a target whose records end without a current fact or a retraction, the
      id where they end is looked up in the committed rows that removed it: whether
-     the row's ``dropped`` list gives a reason (the reason text is not read out)
-     and whether the same row also added a fact.
+     the row's ``dropped`` list gives a reason (the reason text is not read out),
+     whether the same row also added a fact and whether it is a Librarian pass.
+     The same two shares are counted over a population of the same kind: ids
+     that are not current, that no revised, absorbed or retracted record leads
+     out of, and that a Librarian pass removed since the first write of the
+     window. They are the shares the ends above are read against.
    * The time from the write to the journal stamp of the settling pass, as a
      range: the earliest is the first Librarian stamp of the revision at or after
      the write, the latest is the last stamp of the revision. Neither includes
@@ -68,6 +75,11 @@ text, no reason text and no memory id.
    trace of its Keeper has no call to match. The table says how many candidates
    have a matching call and where the rest were written. The age of a trace
    comes from its file name (``turn-<milliseconds>-...``).
+4. The admission queues: every row of every queue file, and for each Keeper
+   that holds any, the age of its oldest row (``fact.first_seen``). A row is
+   counted whether or not a trace call names it. The queue says how many rows
+   wait now, not how long a write waits before the Librarian settles it; the
+   second is the range of seconds above.
 
 Receipts the Librarian wrote for its own reads (``range_id``,
 ``official_range_id``) are not candidates and are counted apart.
@@ -75,13 +87,17 @@ Receipts the Librarian wrote for its own reads (``range_id``,
 Read-only. Both directories are arguments; nothing is assumed about where
 ``<base-path>/.masc`` lives. ``--since`` bounds the write calls by their time and
 the candidates by the time they were written; a receipt without a source fact is
-placed by the Librarian stamps of its revision: all before ``--since`` is older,
-all at or after it is inside, and stamps on both sides cannot be placed. A missing
-events or absorbed file is an empty list, because a Keeper that never revised or
-absorbed a fact has none; a missing receipts, queue, journal or current file is
-named in the Keeper table. Input the script cannot use (a line that is not JSON,
-a row without a time, a time past the calendar such as an epoch in milliseconds)
-is counted in the last line.
+dated by its settlement, the Librarian stamps of its revision: all before
+``--since`` is older, all at or after it is inside (it may have been written
+before ``--since`` and settled after it), and stamps on both sides cannot be
+placed. A Keeper is read when it made a write call or has a receipt file or a
+queue file. A missing events or absorbed file is an empty list, because a Keeper
+that never revised or absorbed a fact has none; a missing receipts, queue, journal
+or current file is named in the Keeper table, with a note for a journal that holds
+quarantine rows (revisions restart after each, so the stamps before it are
+dropped). Input the script cannot use (a line that is not JSON, a row without a
+time, a time past the calendar such as an epoch in milliseconds) is counted in
+the last line.
 
 Usage:
     python3 -I scripts/keeper-recall-write-reach.py <base-path>/.masc/keepers \\
@@ -112,6 +128,8 @@ RECORD_FINISHED = ("tool_execution_finished", "native_tool_finished")
 NATIVE_FINISHED = "native_tool_finished"
 PENDING_OUTCOME = "persisted_pending_admission"
 RECEIPT_COMMITTED = "committed"
+QUARANTINED = "quarantined"
+FAILED = "failed"
 LIBRARIAN_SOURCE = "librarian"
 MEMORY_ID_PREFIX = "sha256:"
 # Raw trace files are named turn-<epoch milliseconds>-<hash>-<sequence>.jsonl.
@@ -283,7 +301,7 @@ class TraceScan:
     windows: dict[str, TraceWindow]
 
 
-def scan_traces(keepers_dir: str, only: set[str], excluded: set[str], since: float, skipped: Skipped) -> TraceScan:
+def scan_traces(keepers_dir: str, only: set[str], excluded: set[str], since: float | None, skipped: Skipped) -> TraceScan:
     calls: list[WriteCall] = []
     started: set[tuple[str, str, str]] = set()
     finished: set[tuple[str, str, str]] = set()
@@ -307,7 +325,7 @@ def scan_traces(keepers_dir: str, only: set[str], excluded: set[str], since: flo
             if ts is None:
                 skipped["write records whose ts is not a usable time"] += 1
                 continue
-            if ts < since:
+            if since is not None and ts < since:
                 continue
             record_type = record.get("record_type")
             key = call_key(keeper, record)
@@ -358,8 +376,8 @@ def settlement_of(receipt: dict[str, Json], skipped: Skipped) -> tuple[str, Sett
             return Skip.OTHER_SHAPE
         source = as_dict(binding.get("source_fact"))
         first_seen = moment_of(source.get("first_seen"))
-        if first_seen is None and source.get("first_seen") is not None:
-            skipped["settled receipts whose first_seen is not a usable time (read as having no write time)"] += 1
+        if first_seen is None:
+            skipped["settled receipts whose source fact has no usable first_seen (read as having no write time)"] += 1
         own = memory_id_of(as_str(source.get("claim"))) == target
         return request_id, Settled(revision, target, first_seen, own)
     request_id = as_str(as_dict(receipt.get("explicit_candidate_id")).get("request_id"))
@@ -378,6 +396,8 @@ class Removal:
 
     reasoned: bool  # the row's dropped list names the fact with a written reason
     replaced: bool  # the same row also added a fact
+    recorded_at: float  # the stamp of the row
+    librarian: bool  # the row is a Librarian pass (source.kind is librarian)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -385,21 +405,42 @@ class Journal:
     revision_times: dict[int, tuple[float, ...]]  # revision -> distinct stamps of its Librarian rows, ascending
     first_added: dict[str, float]  # memory id -> the earliest committed row (any source) that added it
     removals: dict[str, Removal]  # memory id -> the last committed row that removed it
+    quarantines: int  # rows that moved an undecodable snapshot aside; revisions restart after each
+    last_failed: float | None  # the stamp of the latest failed pass
+    last_librarian: float | None  # the stamp of the latest committed Librarian row, also before a quarantine
 
 
 def read_journal(path: str, skipped: Skipped) -> Journal:
     stamps: dict[int, set[float]] = collections.defaultdict(set)
     first_added: dict[str, float] = {}
     removals: dict[str, Removal] = {}
+    quarantines = 0
+    last_failed: float | None = None
+    last_librarian: float | None = None
     for row in read_jsonl(path, skipped, "journal"):
+        if row.get("outcome") == FAILED:
+            failed_at = moment_of(row.get("recorded_at"))
+            if failed_at is None:
+                skipped["failed journal rows without a usable recorded_at"] += 1
+            else:
+                last_failed = failed_at if last_failed is None else max(last_failed, failed_at)
+            continue
+        if row.get("outcome") == QUARANTINED:
+            # Revisions restart after a quarantine (lib/keeper/keeper_memory_os_current.ml:1671), so the stamps before
+            # it name other snapshots. A fact id is a hash of its claim and stays comparable across the restart.
+            stamps.clear()
+            quarantines += 1
+            continue
         if row.get("outcome") != RECEIPT_COMMITTED:
             continue
         revision, recorded_at = int_of(row.get("revision")), moment_of(row.get("recorded_at"))
         if revision is None or recorded_at is None:
             skipped["committed journal rows without a revision or a usable recorded_at"] += 1
             continue
-        if as_str(as_dict(row.get("source")).get("kind")) == LIBRARIAN_SOURCE:
+        librarian = as_str(as_dict(row.get("source")).get("kind")) == LIBRARIAN_SOURCE
+        if librarian:
             stamps[revision].add(recorded_at)
+            last_librarian = recorded_at if last_librarian is None else max(last_librarian, recorded_at)
         change = as_dict(row.get("change"))
         added = as_list(change.get("added"))
         for fact in added:
@@ -412,8 +453,8 @@ def read_journal(path: str, skipped: Skipped) -> Journal:
         }
         for fact in as_list(change.get("removed")):
             memory_id = memory_id_of(as_str(as_dict(fact).get("claim")))
-            removals[memory_id] = Removal(memory_id in reasoned, bool(added))
-    return Journal({revision: tuple(sorted(rows)) for revision, rows in stamps.items()}, first_added, removals)
+            removals[memory_id] = Removal(memory_id in reasoned, bool(added), recorded_at, librarian)
+    return Journal({revision: tuple(sorted(rows)) for revision, rows in stamps.items()}, first_added, removals, quarantines, last_failed, last_librarian)
 
 
 class Standing(enum.Enum):
@@ -482,7 +523,7 @@ class Origin(enum.Enum):
 
     AFTER = "first added by a row stamped at or after the write"
     BEFORE = "added by a row stamped before the write"
-    UNKNOWN = "that no commit row adds"
+    UNKNOWN = "that no commit row adds, or whose receipt has no usable write time"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -490,6 +531,7 @@ class KeeperState:
     settled: dict[str, Settled]  # request id -> settlement
     waiting: frozenset[str]  # request ids still in the admission queue
     waiting_rows: int  # every row in the admission queue, whether or not it names a request id
+    oldest_waiting: float | None  # the earliest usable fact.first_seen among those rows
     journal: Journal
     lineage: Lineage
     not_candidates: collections.Counter[Skip]
@@ -500,16 +542,19 @@ class KeeperState:
         times = self.journal.revision_times.get(settled.revision)
         return times[0] if times else None
 
+    def last_commit(self) -> float | None:
+        """The latest Librarian stamp of the journal: the last pass that committed."""
+        return self.journal.last_librarian
+
     def oldest_receipt(self) -> float | None:
         times = [when for when in map(self.revision_time, self.settled.values()) if when is not None]
         return min(times) if times else None
 
-    def origin_of(self, settled: Settled, write_time: float | None) -> Origin:
+    def origin_of(self, settled: Settled) -> Origin:
         added = self.journal.first_added.get(settled.target)
-        written = settled.first_seen if settled.first_seen is not None else write_time
-        if added is None or written is None:
+        if added is None or settled.first_seen is None:
             return Origin.UNKNOWN
-        return Origin.AFTER if added >= written else Origin.BEFORE
+        return Origin.AFTER if added >= settled.first_seen else Origin.BEFORE
 
     def settle_bounds(self, settled: Settled) -> tuple[float, float] | None:
         """Seconds from the write to the earliest and to the latest Librarian stamp that could belong to the settling pass."""
@@ -556,10 +601,13 @@ def load_state(memory_dir: str, keeper: str, skipped: Skipped) -> KeeperState:
         problems.append(problem)
     pending = [as_dict(row) for row in as_list(as_dict(queue).get("pending"))]
     waiting = frozenset(request_id for request_id in (as_str(row.get("request_id")) for row in pending) if request_id)
+    written = [when for when in (moment_of(as_dict(row.get("fact")).get("first_seen")) for row in pending) if when is not None]
 
     if not os.path.exists(path(".memory-journal.jsonl")):
         problems.append(f"missing {keeper}.memory-journal.jsonl")
     journal = read_journal(path(".memory-journal.jsonl"), skipped)
+    if journal.quarantines:
+        problems.append(f"{keeper}.memory-journal.jsonl holds {journal.quarantines} quarantine rows; revisions restart after each")
 
     snapshot, problem = load_json(path(".memory-current.json"))
     if problem:
@@ -576,7 +624,7 @@ def load_state(memory_dir: str, keeper: str, skipped: Skipped) -> KeeperState:
         as_str(row.get("memory_id")): as_str(row.get("into")) for row in read_jsonl(path(".memory-absorbed.jsonl"), skipped, "absorbed")
     }
     lineage = Lineage(current, revised, absorbed, frozenset(retracted))
-    return KeeperState(settled, waiting, len(pending), journal, lineage, not_candidates, tuple(problems))
+    return KeeperState(settled, waiting, len(pending), min(written) if written else None, journal, lineage, not_candidates, tuple(problems))
 
 
 class Fate(enum.Enum):
@@ -599,7 +647,7 @@ def fate_of(call: WriteCall, state: KeeperState) -> Fate:
     # A receipt is the authority for consumption; a row may still sit in the queue until it is acknowledged.
     settled = state.settled.get(call.request_id)
     if settled is not None:
-        return TARGET_FATES[state.origin_of(settled, call.ts)] if settled.target else Fate.WITHOUT_TARGET
+        return TARGET_FATES[state.origin_of(settled)] if settled.target else Fate.WITHOUT_TARGET
     if call.request_id in state.waiting:
         return Fate.WAITING
     oldest = state.oldest_receipt()
@@ -610,7 +658,7 @@ def fate_of(call: WriteCall, state: KeeperState) -> Fate:
 
 @dataclasses.dataclass(frozen=True)
 class Window:
-    """The settled candidates written at or after --since."""
+    """The settled candidates written at or after --since. A receipt without a write time is dated by its settlement."""
 
     counted: dict[str, list[tuple[str, Settled]]]  # Keeper -> (request id, candidate)
     unplaced: int  # no source fact, and its revision has no Librarian stamp or has stamps on both sides of --since
@@ -619,21 +667,23 @@ class Window:
     last_written: float | None
 
 
-def window_of(states: dict[str, KeeperState], since: float) -> Window:
+def window_of(states: dict[str, KeeperState], since: float | None) -> Window:
     counted: dict[str, list[tuple[str, Settled]]] = {}
     unplaced = older = 0
     written: list[float] = []
     for keeper, state in states.items():
         for request_id, settled in state.settled.items():
             if settled.first_seen is not None:
-                if settled.first_seen < since:
+                if since is not None and settled.first_seen < since:
                     older += 1
                     continue
                 written.append(settled.first_seen)
-            elif since > 0:
+            elif since is not None:
                 # No write time: the settlement cannot be older than the write, so a revision whose last Librarian
                 # stamp is before --since was written before it. A revision without any stamp, and one with stamps
-                # on both sides of --since (the receipt does not say which pass settled it), cannot be placed.
+                # on both sides of --since (the receipt does not say which pass settled it), cannot be placed. A
+                # revision whose stamps all lie at or after --since counts as inside, although the write may have
+                # come before --since and the settlement after it.
                 stamps = state.journal.revision_times.get(settled.revision)
                 if not stamps:
                     unplaced += 1
@@ -648,11 +698,11 @@ def window_of(states: dict[str, KeeperState], since: float) -> Window:
     return Window(counted, unplaced, older, min(written) if written else None, max(written) if written else None)
 
 
-def table_calls(scan: TraceScan, since: float) -> None:
+def table_calls(scan: TraceScan, since: float | None) -> None:
     calls = scan.calls
     print(f"write calls: {len(calls)} in {len({call.keeper for call in calls})} Keepers")
     if calls:
-        print(f"  first {iso(min(call.ts for call in calls))}, last {iso(max(call.ts for call in calls))}; --since {iso(since) if since else 'not set'}")
+        print(f"  first {iso(min(call.ts for call in calls))}, last {iso(max(call.ts for call in calls))}; --since {iso(since) if since is not None else 'not set'}")
     by_kind = collections.Counter(call.kind for call in calls)
     for kind in Kind:
         print(f"  {kind.value}: {by_kind[kind]} ({percent(by_kind[kind], len(calls))})")
@@ -665,37 +715,51 @@ def table_calls(scan: TraceScan, since: float) -> None:
     print(f"started calls without a finished record: {scan.started_without_finished}; finished records seen twice: {scan.finished_twice}")
 
 
-def table_queued(fates: list[tuple[WriteCall, Fate]], states: dict[str, KeeperState]) -> None:
+def moment_ago(stamp: float | None, now: float, absent: str) -> str:
+    return f"{iso(stamp)} ({now - stamp:.0f} s before the read)" if stamp is not None else absent
+
+
+def table_queued(fates: list[tuple[WriteCall, Fate]], states: dict[str, KeeperState], now: float) -> None:
     print(f"\nqueued writes ({PENDING_OUTCOME}): {len(fates)}")
     counts = collections.Counter(fate for _, fate in fates)
     for fate in Fate:
         print(f"  {fate.value}: {counts[fate]} ({percent(counts[fate], len(fates))})")
     rows = sum(state.waiting_rows for state in states.values())
     print(f"  rows in the admission queues of the {len(states)} Keepers read, whatever their age and whether or not the trace holds their call: {rows}")
+    holding = sorted((name for name, state in states.items() if state.waiting_rows), key=lambda name: (-states[name].waiting_rows, name))
+    for keeper in holding:
+        state = states[keeper]
+        print(
+            f"    {keeper}: {state.waiting_rows} rows; oldest written {moment_ago(state.oldest_waiting, now, 'unknown')}; "
+            f"last Librarian commit {moment_ago(state.last_commit(), now, 'never')}; last failed pass {moment_ago(state.journal.last_failed, now, 'never')}"
+        )
 
 
-def table_settled(states: dict[str, KeeperState], window: Window, now: float) -> None:
+def table_settled(states: dict[str, KeeperState], window: Window, now: float, since: float | None) -> None:
     candidates = [(states[keeper], settled) for keeper, rows in window.counted.items() for _, settled in rows]
     total = len(candidates)
     print(f"\ncandidates the Librarian settled, in the --since window: {total} in {len(window.counted)} Keepers (read at {iso(now)})")
     print(
-        "  window: written at or after --since; a receipt without a source fact is placed by the Librarian stamps of its revision "
+        "  window: written at or after --since; a receipt without a source fact is dated by its settlement, the Librarian stamps of its revision "
         "(all before --since: older, all at or after it: inside, on both sides: not placed)"
     )
     if window.first_written is not None and window.last_written is not None:
         print(f"  receipts with a source fact were written from {iso(window.first_written)} to {iso(window.last_written)}")
     with_target = [(state, settled) for state, settled in candidates if settled.target]
-    origins = collections.Counter(state.origin_of(settled, None) for state, settled in with_target)
+    origins = collections.Counter(state.origin_of(settled) for state, settled in with_target)
     for origin in Origin:
         print(f"  settled with a target {origin.value}: {origins[origin]} ({percent(origins[origin], total)})")
     print(f"  settled without a target: {total - len(with_target)} ({percent(total - len(with_target), total)})")
-    # A target no commit row adds may predate the journal, and a journal append that fails only warns, so it can also have
-    # existed before the write. The two counts together bound the targets that were there before the Keeper wrote.
+    # A target that no commit row adds is counted with the ones stamped before the write: a fact can exist without an adding
+    # row (the line after this one counts them among the current facts), so it may have been there before the Keeper wrote.
     already = origins[Origin.BEFORE] + origins[Origin.UNKNOWN]
     print(
         f"  targets that may have existed before the write (stamped before it, or added by no row): {already} of {len(with_target)} "
         f"with a target ({percent(already, len(with_target))}); the other {origins[Origin.AFTER]} are exact"
     )
+    current_facts = sum(len(state.lineage.current) for state in states.values())
+    unadded = sum(1 for state in states.values() for memory_id in state.lineage.current if memory_id not in state.journal.first_added)
+    print(f"  for comparison, current facts that no committed journal row added: {unadded} of {current_facts} ({percent(unadded, current_facts)})")
     reasons: collections.Counter[Skip] = collections.Counter()
     for state in states.values():
         reasons.update(state.not_candidates)
@@ -723,14 +787,30 @@ def table_settled(states: dict[str, KeeperState], window: Window, now: float) ->
     print(f"  the id where the records end was removed by a committed row with no written reason: {unreasoned} ({percent(unreasoned, len(ends))})")
     print(f"  the id where the records end was removed by no committed row: {unremoved} ({percent(unremoved, len(ends))})")
     print(f"  the removing commit also added a fact: {replaced} of {reasoned + unreasoned}")
-    # The same two counts over every id any committed row removed, as the base rate the shares above are read against.
-    every_removal = [removal for state in states.values() for removal in state.journal.removals.values()]
-    every_reasoned = sum(1 for removal in every_removal if removal.reasoned)
-    every_replaced = sum(1 for removal in every_removal if removal.replaced)
+    librarian_ends = sum(1 for removal in removals if removal is not None and removal.librarian)
+    print(f"  the removing commit was a Librarian pass: {librarian_ends} of {reasoned + unreasoned}")
+    # The same two counts over a population of the same kind, to read the shares above against: the ids that no revised,
+    # absorbed or retracted record leads out of, that are not current, and whose last removing row is a Librarian pass
+    # stamped no earlier than the first write of the window. The ends above are such ids by construction.
+    lower = window.first_written if window.first_written is not None else since
+    similar = [
+        removal
+        for state in states.values()
+        for memory_id, removal in state.journal.removals.items()
+        if removal.librarian
+        and (lower is None or removal.recorded_at >= lower)
+        and memory_id not in state.lineage.current
+        and memory_id not in state.lineage.revised
+        and memory_id not in state.lineage.absorbed
+        and memory_id not in state.lineage.retracted
+    ]
+    similar_reasoned = sum(1 for removal in similar if removal.reasoned)
+    similar_replaced = sum(1 for removal in similar if removal.replaced)
     print(
-        f"  for comparison, the last committed row to remove each of {len(every_removal)} ids in the {len(states)} Keepers read: "
-        f"a written reason {every_reasoned} ({percent(every_reasoned, len(every_removal))}), "
-        f"also added a fact {every_replaced} ({percent(every_replaced, len(every_removal))})"
+        f"  for comparison, {len(similar)} ids that are not current, that no revised, absorbed or retracted record leads out of "
+        f"and that a Librarian commit removed since {iso(lower) if lower is not None else 'the start of the journal'}: "
+        f"a written reason {similar_reasoned} ({percent(similar_reasoned, len(similar))}), "
+        f"also added a fact {similar_replaced} ({percent(similar_replaced, len(similar))})"
     )
     several = sum(1 for state, settled in with_target if len(state.journal.revision_times.get(settled.revision, ())) > 1)
     print(f"  settled with a target whose revision has more than one Librarian stamp: {several} of {len(with_target)}")
@@ -815,7 +895,7 @@ def table_keepers(
         "\nKeeper | write calls | rejected | result not in the trace | queued | target first added at or after the write | "
         "target added before it or unknown | without a target | waiting | no record | settled candidates in the window | "
         "of those, with a source fact, written inside the raw traces, no matching call | raw trace files | oldest raw trace | "
-        "files missing or unreadable"
+        "files missing or unreadable, notes"
     )
     for keeper in sorted(states, key=lambda name: (-per_keeper_calls[name], name)):
         counts = queued[keeper]
@@ -831,6 +911,11 @@ def table_keepers(
             f"{counts[Fate.TARGET_AFTER]} | {before} | {counts[Fate.WITHOUT_TARGET]} | {counts[Fate.WAITING]} | {no_record} | "
             f"{len(window.counted.get(keeper, []))} | {inside} | {trace_files} | {oldest} | {problems or '-'}"
         )
+
+
+def keepers_with(memory_dir: str, suffix: str) -> set[str]:
+    """The Keepers that have a file named ``<keeper><suffix>`` in the memory directory."""
+    return {os.path.basename(path)[: -len(suffix)] for path in glob.glob(os.path.join(memory_dir, "*" + suffix))}
 
 
 def parse_utc_date(text: str) -> float:
@@ -856,19 +941,20 @@ def main(argv: list[str] | None = None) -> int:
             print(f"not a directory: {directory}", file=sys.stderr)
             return 2
     try:
-        since = parse_utc_date(args.since) if args.since else 0.0
+        since = parse_utc_date(args.since) if args.since else None
         now = parse_utc_time(args.now) if args.now else time.time()
     except ValueError as error:
         parser.error(str(error))
+    # --since is a date from year 1 to 9999, which the calendar prints; --now can leave it through its offset.
+    if moment_of(now) is None:
+        parser.error("--now is outside the calendar")
     only, excluded = set(args.only), set(args.exclude)
 
     skipped: Skipped = collections.Counter()
     scan = scan_traces(args.keepers_dir, only, excluded, since, skipped)
-    receipt_keepers = {
-        os.path.basename(path).split(".librarian-range-commit")[0]
-        for path in glob.glob(os.path.join(args.memory_dir, "*.librarian-range-commit.json"))
-    }
-    keepers = {call.keeper for call in scan.calls} | {keeper for keeper in receipt_keepers if keeper not in excluded and (not only or keeper in only)}
+    # A Keeper is read when it made a write call, has a receipt file (what the Librarian settled) or has a queue file (what waits).
+    named = keepers_with(args.memory_dir, ".librarian-range-commit.json") | keepers_with(args.memory_dir, ".memory-admission.json")
+    keepers = {call.keeper for call in scan.calls} | {keeper for keeper in named if keeper not in excluded and (not only or keeper in only)}
     states = {keeper: load_state(args.memory_dir, keeper, skipped) for keeper in sorted(keepers)}
     queued = [call for call in scan.calls if call.kind is Kind.RECEIPT_OK and call.outcome == PENDING_OUTCOME]
     fates = [(call, fate_of(call, states[call.keeper])) for call in queued]
@@ -879,8 +965,8 @@ def main(argv: list[str] | None = None) -> int:
     covers = coverage_of(scan, window, calls_by_keeper)
 
     table_calls(scan, since)
-    table_queued(fates, states)
-    table_settled(states, window, now)
+    table_queued(fates, states, now)
+    table_settled(states, window, now, since)
     table_coverage(scan, covers)
     table_keepers(scan.calls, fates, states, window, scan, covers)
     print("\nskipped input: " + ("; ".join(f"{label} {count}" for label, count in sorted(skipped.items())) or "none"))

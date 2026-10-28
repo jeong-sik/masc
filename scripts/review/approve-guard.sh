@@ -33,13 +33,13 @@ done
 # Source receipts are read-only authority for selecting checks, not merge
 # permission. Reject publication/release inputs rather than silently ignoring them.
 [ "$source_receipt" -eq 0 ] || { [ -z "$body" ] && [ -z "$run" ] && [ -z "$replace_cr" ] && [ -z "$review_base" ] && [ -z "$review_diff" ] && [ "$receipt_json" -eq 0 ]; } || exit 2
-# Read-only helper mode: print the exact footer tail a reviewer should append,
-# computed from the PR's live base/head. Mutually exclusive with every mode.
+# Read-only helper mode: print the exact footer tail for inspection, computed
+# from the PR's live base/head. Publication appends it; keep it out of --body.
 [ "$print_footer" -eq 0 ] || { [ "$check_only" -eq 0 ] && [ "$merge_check" -eq 0 ] && [ -z "$body" ] && [ -z "$run" ] && [ -z "$replace_cr" ] && [ -z "$review_base" ] && [ -z "$review_diff" ]; } || exit 2
 source "$here/ci-checks.sh"
 source "$here/review-verdict.sh"
-# Read-only helper: print the exact footer line a reviewer should append,
-# computed from the PR's live base/head. Posts nothing and approves nothing.
+# Read-only helper: print the exact footer line, computed from the PR's live
+# base/head. Posts nothing and approves nothing.
 if [ "$print_footer" -eq 1 ]; then
   read_current_pr || exit $?
   current_diff=$(python3 "$here/review-diff.py" --repo "$repo" --base "$pr_base_sha" --head "$head") || exit 1
@@ -232,6 +232,17 @@ fi
 if [ "$check_only" -eq 0 ] || [ -n "$body" ]; then
   [ -s "$body" ] || refuse "review body missing or empty"
   review_body=$(cat "$body")
+  # These lines belong to the guard. Duplicating the scope produces a review
+  # that the source-receipt consumer cannot admit, even with a valid verdict.
+  # Match the consumer's splitlines() boundaries, including standalone CR and
+  # Unicode separators, before any review is posted.
+  if ! printf '%s' "$review_body" | python3 -c '
+import sys
+lines = sys.stdin.read().splitlines()
+sys.exit(any(line.startswith(("review-scope:", "approve-guard:")) for line in lines))
+'; then
+    refuse "remove review-scope and approve-guard lines from --body; the guard adds them"
+  fi
   vline=${review_body%%$'\n'*}
   vline=${vline//$'\r'/}
   if [ "$review_policy" = source ]; then
@@ -281,10 +292,31 @@ fi
 [ -z "$release_run" ] || footer="$footer · release run $release_run"
 [ -z "$replaced" ] || footer="$footer · replaces own CHANGES_REQUESTED $replaced"
 footer="$footer$(printf ' · reviewed base `%s` · diff sha256 `%s`' "$review_base" "$review_diff")"
-response=$( { printf '%s' "$review_body"; printf '%s' "$footer"; } | "$GH" api -X POST "repos/$repo/pulls/$pr/reviews" -f event=APPROVE -f "commit_id=$head" -F body=@- --jq '[(.id|tostring), .state, .commit_id] | @tsv')
+if ! response=$( { printf '%s' "$review_body"; printf '%s' "$footer"; } | "$GH" api -X POST "repos/$repo/pulls/$pr/reviews" -f event=APPROVE -f "commit_id=$head" -F body=@- --jq '[(.id|tostring), .state, .commit_id] | @tsv'); then
+  echo "approval submission outcome is unknown; inspect reviews before retry" >&2
+  exit 1
+fi
 IFS=$'\t' read -r rid state commit <<<"$response"
-back_json=$(ci_gh_object "repos/$repo/pulls/$pr/reviews/$rid" '.')
-admit_review "$back_json" >/dev/null || { echo "approval readback is not admitted for this head" >&2; exit 1; }
+if ! [[ "$rid" =~ ^[1-9][0-9]*$ ]] || [ "$state" != APPROVED ] || [ "$commit" != "$head" ]; then
+  echo "approval submission returned an unexpected response; inspect reviews before retry" >&2
+  exit 1
+fi
+back_json=$(ci_gh_object "repos/$repo/pulls/$pr/reviews/$rid" '.') || {
+  echo "approval review $rid was posted but readback failed; inspect it before retry" >&2; exit 1;
+}
+back_author=$(printf '%s' "$back_json" | jq -r '.user.login // ""')
+[ "$back_author" = "$me" ] || {
+  echo "approval review $rid was posted by ${back_author:-unknown}, expected $me; inspect it before retry" >&2; exit 1;
+}
+read_current_pr || {
+  echo "approval review $rid was posted but the PR identity could not be verified; inspect it before retry" >&2; exit 1;
+}
+admit_review "$back_json" >/dev/null || {
+  echo "approval review $rid was posted but readback is not admitted for this head; inspect it before retry" >&2; exit 1;
+}
+check_review_scope "$back_json" || {
+  echo "approval review $rid was posted but its scope readback is not admitted; inspect it before retry" >&2; exit 1;
+}
 back=$(printf '%s' "$back_json" | python3 -c 'import json,sys; r=json.load(sys.stdin); print(r["state"]+"\t"+r["commit_id"])')
 [ "$back" = "$(printf 'APPROVED\t%s' "$head")" ] || { echo "approval readback differs from submitted head" >&2; exit 1; }
 echo "APPROVED #$pr head $head review $rid"

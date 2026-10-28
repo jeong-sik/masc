@@ -68,14 +68,16 @@ let candidate ~store ~record ~request =
 
 (* A pass selects its range afresh and captures it as an original of its own. The
    candidate's chain is the pass's when both name the same range: the same read
-   extent and the same receipt identities. An atom range also carries the count
-   of boundary lines its pass saw, which grows with the log after the original's
-   pass. It says when the range was read, not which range it is, so it is left
-   out. *)
+   extent and the same receipt identities. An atom range also carries two line
+   numbers of the boundary log that move with the log after the original's pass:
+   the count of lines its pass saw, which grows, and the line that witnesses the
+   range's end, which is a later line when a later line states the same
+   position. They say where the log put the range, not which range it is, so
+   they are left out. *)
 let covers t selected =
   let own = Request.source t.request in
   let atoms (range : Current.durable_range_id) =
-    Current.durable_range_id_to_json {range with boundary_lines_seen = 0} in
+    Current.durable_range_id_to_json {range with boundary_lines_seen = 0; end_boundary_line = 0} in
   let same encode left right = match left, right with
     | None, None -> true
     | Some left, Some right -> Yojson.Safe.equal (encode left) (encode right)

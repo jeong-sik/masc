@@ -29,10 +29,17 @@ let settle_gates ~store ~inventory ~date ~execution_id =
     let* () = settle_record ~store ~date gate in
     Ok (moved + 1)) (Ok 0) (Gate.Inventory.execution_records inventory ~execution_id)
 
+(* A chain resumes from the steps at positions 0 to k and refuses any other
+   leftover, so the highest position settles first and a stop part way leaves
+   such a prefix. The store lists steps by the digest of their IDs, which says
+   nothing of position. *)
+let highest_position_first steps =
+  List.sort (fun (_, (a : Step.header)) (_, (b : Step.header)) -> Int.compare b.position a.position) steps
+
 (* The step first, then the gate records of its judgment, as a history chain
    settles. A stop between the two leaves gate records of an archived step,
    which [settle_orphan_gates] reaches. *)
-let settle_steps ~store ~owner steps =
+let settle_steps_with ~settle ~store ~owner steps =
   match steps with
   | [] -> Ok 0
   | _ :: _ ->
@@ -40,9 +47,10 @@ let settle_steps ~store ~owner steps =
     List.fold_left (fun moved ((record : Retained.retained), _) ->
       let* moved = moved in
       let* date = Step.minted_on record.request_id in
-      let* () = settle_record ~store ~date record in
+      let* () = settle ~store ~date record in
       let* gates = settle_gates ~store ~inventory ~date ~execution_id:record.request_id in
-      Ok (moved + 1 + gates)) (Ok 0) steps
+      Ok (moved + 1 + gates)) (Ok 0) (highest_position_first steps)
+let settle_steps = settle_steps_with ~settle:settle_record
 
 (* Gate records of an archived step no longer change any validation. *)
 let settle_orphan_gates ~store ~owner ~steps =
@@ -72,5 +80,11 @@ let settle_chain ~store ~owner candidate =
 
 let settle_step ~store ~owner candidate ~position =
   let* steps = discover ~store ~owner in
-  settle_steps ~store ~owner (List.filter (fun (_, (header : Step.header)) ->
-    owns candidate header && header.position = position) steps)
+  match List.filter (fun (_, (header : Step.header)) ->
+    owns candidate header && header.position = position) steps with
+  | [] -> Error (Printf.sprintf "Floor chain has no retained step at position %d to settle" position)
+  | stopped -> settle_steps ~store ~owner stopped
+
+module For_testing = struct
+  let settle_steps_with = settle_steps_with
+end

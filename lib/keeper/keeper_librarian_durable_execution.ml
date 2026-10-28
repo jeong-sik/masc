@@ -300,7 +300,8 @@ let settle_orphan_gates ~store ~inventory ~scope originals =
     let* gates=settle_gates ~store ~inventory ~date ~execution_id in
     Ok (moved+gates)) (Ok 0) (Keeper_librarian_durable_gate.Inventory.executions inventory)
 (* Settled originals the durable message floor can still read (RFC
-   librarian-durable-message-floor 3.9), oldest first. A candidate is not
+   librarian-durable-message-floor 3.9), in the order the store lists them,
+   which is the digest of their IDs and says nothing of age. A candidate is not
    archived with the finished history: it stays, with the steps that name it,
    until its range is published or the read positions move on. *)
 let floor_candidates ~store settled =

@@ -1269,6 +1269,7 @@ let test_changed_memory_rebases_original_source_without_unknown_retry ?(lose_chi
    what the chain reads from them. *)
 module Descent = Keeper_librarian_floor_descent
 module Chain = Keeper_librarian_floor_chain
+module Cleanup = Keeper_librarian_floor_cleanup
 module Step_owner = Keeper_librarian_floor_step_owner
 module Program = Keeper_memory_os_program
 let contains haystack needle = Astring.String.is_infix ~affix:needle haystack
@@ -1769,8 +1770,13 @@ let provider_refuses_the_read_twice fixture response =
   provider_refuses_the_read fixture
 let positions_of steps =
   List.map (fun (_,(header:Keeper_librarian_floor_step_request.header)) -> header.position) steps
+(* The gate records of the steps' judgments: one for each step the chain asked. *)
+let step_gate_record_count fixture request =
+  Keeper_librarian_floor_step_gate.Inventory.read ~store:fixture.store ~owner:(Capture.physical_owner request)
+  |> get |> Keeper_librarian_floor_step_gate.Inventory.record_count
 let nothing_left fixture request =
   check int "no retained step is left" 0 (List.length (steps_of fixture request));
+  check int "and no gate record of a step" 0 (step_gate_record_count fixture request);
   check int "and no original" 0 (List.length (observed_originals fixture))
 let test_the_pass_reads_a_refused_turn_message_by_message kind tags () = with_fixture ~history_kind:kind (fun ~sw:_ fixture ->
   provider_refuses_the_read_twice fixture size_refusal;
@@ -1813,10 +1819,8 @@ let append_a_later_turn fixture =
   save_checkpoint fixture.config ~trace_id later 3;
   io (fun () -> append_boundary fixture.config ~turn:3 ~time:(Time_compat.now ())
     ~history_at_start:(Boundary.history_at_start_of_messages selected_messages) later)
-let test_a_candidate_covers_its_range_after_the_log_grew () = with_fixture (fun ~sw:_ fixture ->
-  provider_refuses_the_read_twice fixture size_refusal;
-  let candidate,narrowed=candidate_and_request fixture in
-  append_a_later_turn fixture;
+(* The range the next pass selects, without committing it. *)
+let next_selected_range fixture =
   let selected=ref None in
   (match memory_action fixture (fun () ->
      Consumer.consume_one ~config:fixture.config ~keeper_name ~commit:(fun source ->
@@ -1826,13 +1830,32 @@ let test_a_candidate_covers_its_range_after_the_log_grew () = with_fixture (fun 
      fail "the pass must stop at the commit that asked to wait"
    | Error error -> fail (Consumer.error_to_string error));
   match !selected with
+  | Some source -> source
   | None -> fail "the pass selected no range"
-  | Some source ->
-    let seen source = match Source.range_id source with
-      | Some range -> range.Current.boundary_lines_seen
-      | None -> fail "the range is not an atom range" in
-    check bool "the log grew since the original's pass" true (seen source>seen (Capture.source narrowed));
-    check bool "yet the candidate covers the range the pass selected" true (Descent.covers candidate source))
+let atom_range source = match Source.range_id source with
+  | Some range -> range
+  | None -> fail "the range is not an atom range"
+let test_a_candidate_covers_its_range_after_the_log_grew () = with_fixture (fun ~sw:_ fixture ->
+  provider_refuses_the_read_twice fixture size_refusal;
+  let candidate,narrowed=candidate_and_request fixture in
+  append_a_later_turn fixture;
+  let source=next_selected_range fixture in
+  check bool "the log grew since the original's pass" true
+    ((atom_range source).Current.boundary_lines_seen>(atom_range (Capture.source narrowed)).Current.boundary_lines_seen);
+  check bool "yet the candidate covers the range the pass selected" true (Descent.covers candidate source))
+(* A later line that states the same position moves the line that witnesses the
+   range's end. It is the same range: the atoms and their digest did not change.
+   The test writes that line itself; a real turn that restates an atom position
+   was not shown to exist. *)
+let test_a_candidate_covers_its_range_when_a_later_turn_end_states_the_same_position () = with_fixture (fun ~sw:_ fixture ->
+  provider_refuses_the_read_twice fixture size_refusal;
+  let candidate,narrowed=candidate_and_request fixture in
+  io (fun () -> append_boundary fixture.config ~turn:3 ~time:(Time_compat.now ())
+    ~history_at_start:(Boundary.history_at_start_of_messages selected_messages) selected_messages);
+  let source=next_selected_range fixture in
+  check bool "the witness line of the range's end moved to the later turn end" true
+    ((atom_range source).Current.end_boundary_line>(atom_range (Capture.source narrowed)).Current.end_boundary_line);
+  check bool "yet the candidate covers the range the pass selected" true (Descent.covers candidate source))
 let test_a_turn_that_ended_after_the_original_does_not_stop_the_pass () = with_fixture (fun ~sw:_ fixture ->
   provider_refuses_the_read_twice fixture size_refusal;
   append_a_later_turn fixture;
@@ -1949,6 +1972,68 @@ let test_the_steps_of_a_published_range_are_settled_by_the_next_pass () = with_f
   check (list string) "and writes nothing more" ["claim number 1";"claim number 2"]
     (io (fun () -> claims fixture.keepers_dir));
   nothing_left fixture request)
+(* The chain resumes from the steps at positions 0 to k and refuses any other
+   leftover, so a settle that stops part way must leave such a prefix. *)
+let four_messages=[message "Third question";reply "Third answer";message "Fourth question";reply "Fourth answer"]
+let four_tags=["Third question";"Third answer";"Fourth question";"Fourth answer"]
+let lowest_position_first steps =
+  List.sort (fun (_,(a:Keeper_librarian_floor_step_request.header)) (_,(b:Keeper_librarian_floor_step_request.header)) ->
+    Int.compare a.position b.position) steps
+let sorted_positions fixture request = List.sort Int.compare (positions_of (steps_of fixture request))
+(* The move of a step record, which stops the settle after [moves] of them. *)
+let settle_stopping_after ~moves =
+  let moved=ref [] in
+  let settle ~store ~date (record:Owner.retained) =
+    if List.length !moved>=moves then Error "injected stop" else begin
+      moved:=record.request_id :: !moved;
+      Owner.settle ~store ~date (Owner.listed record) |> Result.map_error Owner.settle_error_to_string
+    end in
+  settle,(fun () -> List.rev !moved)
+let test_a_settle_that_stops_part_way_leaves_the_steps_the_chain_resumes_from () = with_fixture (fun ~sw:_ fixture ->
+  add_unread_turn fixture four_messages;
+  provider_refuses_one_turn fixture size_refusal;
+  let candidate,request=candidate_and_request fixture in
+  fixture.set_step_response (answering_steps four_tags);
+  ignore (finished (descend fixture candidate));
+  let owner=Capture.physical_owner request in
+  let given=lowest_position_first (steps_of fixture request) in
+  check (list int) "the chain has four steps" [0;1;2;3] (positions_of given);
+  check int "and a gate record of each step's judgment" 4 (step_gate_record_count fixture request);
+  let position_of_id=List.map (fun ((record:Owner.retained),(header:Keeper_librarian_floor_step_request.header)) ->
+    record.request_id,header.position) given in
+  let settle,moved=settle_stopping_after ~moves:2 in
+  (match Cleanup.For_testing.settle_steps_with ~settle ~store:fixture.store ~owner given with
+   | Error _ -> ()
+   | Ok _ -> fail "the injected stop must end the settle");
+  check (list int) "the settle took the highest positions first, though it was given the lowest first" [3;2]
+    (List.map (fun id -> List.assoc id position_of_id) (moved ()));
+  check (list int) "so the steps left are the first two" [0;1] (sorted_positions fixture request);
+  let posts=F.post_count fixture.server in
+  let resumed=finished (descend fixture candidate) in
+  check (list string) "the chain resumes from them and decides every message"
+    ["claim number 1";"claim number 2";"claim number 3";"claim number 4"] (program_claims resumed.program);
+  check int "asking the provider only for the two messages it lost" 2 (F.post_count fixture.server-posts);
+  check (list int) "and has four steps again" [0;1;2;3] (sorted_positions fixture request);
+  (* The order matters because of what the chain does with any other leftover:
+     without its first step it starts again, and the steps after it name a step
+     it never asked. *)
+  (match Cleanup.settle_step ~store:fixture.store ~owner candidate ~position:0 with
+   | Ok 2 -> ()
+   | Ok moved -> failf "the first step and its gate record are two records, not %d" moved
+   | Error detail -> fail detail);
+  check int "the gate record of the settled step moved with it" 3 (step_gate_record_count fixture request);
+  match descend fixture candidate with
+  | Error _ -> ()
+  | Ok _ -> fail "steps that skip the first position must be refused")
+let test_settling_a_position_no_step_holds_is_an_error () = with_fixture (fun ~sw:_ fixture ->
+  provider_refuses_one_turn fixture size_refusal;
+  let candidate,request=candidate_and_request fixture in
+  fixture.set_step_response (answering_steps ["Original question to retain";"Original completed answer"]);
+  ignore (finished (descend fixture candidate));
+  (match Cleanup.settle_step ~store:fixture.store ~owner:(Capture.physical_owner request) candidate ~position:5 with
+   | Error detail -> check bool "the error names the position" true (contains detail "position 5")
+   | Ok moved -> failf "%d records settled for a position no step holds" moved);
+  check (list int) "and no step moved" [0;1] (sorted_positions fixture request))
 
 let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured completed-history",[
   test_case "missing attachment is reported without consuming source" `Quick test_unattached_reports_without_consuming;
@@ -2049,4 +2134,10 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_a_candidate_covers_its_range_after_the_log_grew;
   test_case "a turn that ended after the original does not stop the pass" `Quick
     test_a_turn_that_ended_after_the_original_does_not_stop_the_pass;
+  test_case "a candidate covers its range when a later turn end states the same position" `Quick
+    test_a_candidate_covers_its_range_when_a_later_turn_end_states_the_same_position;
+  test_case "a settle that stops part way leaves the steps the chain resumes from" `Quick
+    test_a_settle_that_stops_part_way_leaves_the_steps_the_chain_resumes_from;
+  test_case "settling a position no step holds is an error" `Quick
+    test_settling_a_position_no_step_holds_is_an_error;
 ]]

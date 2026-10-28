@@ -10,6 +10,7 @@ module Mcp_eio = Masc.Mcp_server_eio
 module Mcp = Masc.Mcp_server
 module Mcp_server = Masc.Mcp_server
 module Config = Masc.Config
+module Client_registry_eio = Masc.Client_registry_eio
 module Tool_result = Tool_result
 module Keeper_types = Keeper_types
 module Keeper_identity = Masc.Keeper_identity
@@ -543,7 +544,7 @@ let test_handle_request_initialize () =
 
   cleanup_dir base_path
 
-let test_handle_request_initialize_rejects_unsupported_protocol_version () =
+let test_handle_request_initialize_counteroffers_legacy_version () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
@@ -566,10 +567,28 @@ let test_handle_request_initialize_rejects_unsupported_protocol_version () =
     ]);
   ]) in
 
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
-  Alcotest.(check int) "invalid params code" (-32602) (error_code_exn response);
-  Alcotest.(check bool) "unsupported protocol message" true
-    (String_util.contains_substring (error_message_exn response) "Unsupported protocolVersion");
+  let expect_legacy response =
+    Alcotest.(check (option string)) "counter-offers latest legacy version"
+      (Some "2025-11-25")
+      (match List.assoc_opt "protocolVersion" (result_fields_exn response) with
+       | Some (`String version) -> Some version
+       | Some _ | None -> None)
+  in
+  expect_legacy (Mcp_eio.handle_request ~clock ~sw state request);
+  let modern_request =
+    Yojson.Safe.from_string request
+    |> (function
+        | `Assoc fields ->
+          `Assoc (List.map (function
+            | "params", `Assoc params ->
+              "params", `Assoc (List.map (function
+                | "protocolVersion", _ -> "protocolVersion", `String "2026-07-28"
+                | field -> field) params)
+            | field -> field) fields)
+        | json -> json)
+    |> Yojson.Safe.to_string
+  in
+  expect_legacy (Mcp_eio.handle_request ~clock ~sw state modern_request);
 
   cleanup_dir base_path
 
@@ -630,6 +649,977 @@ let test_handle_request_server_discover_2026 () =
   Alcotest.(check bool) "has capabilities" true
     (List.mem_assoc "capabilities" result);
   cleanup_dir base_path
+
+let stdio_modern_params ?(version = "2026-07-28") () =
+  `Assoc [ "_meta", `Assoc
+    [ Mcp_transport_protocol.protocol_version_meta_key, `String version
+    ; Mcp_transport_protocol.client_capabilities_meta_key, `Assoc [] ] ]
+
+let stdio_listen_params () =
+  match stdio_modern_params () with
+  | `Assoc fields -> `Assoc (("notifications", `Assoc []) :: fields)
+  | other -> other
+
+let stdio_request ?id ?params method_ =
+  `Assoc
+    ([ "jsonrpc", `String "2.0"; "method", `String method_ ]
+     @ (match id with Some value -> [ "id", value ] | None -> [])
+     @ (match params with Some value -> [ "params", value ] | None -> []))
+
+let run_stdio_messages ?(on_handled = fun _ _ _ -> ()) ~clock ~sw state messages =
+  let was_ready = Eio_guard.is_ready () in
+  Eio_guard.enable ();
+  let input, input_writer = Eio_unix.pipe sw in
+  let output, output_writer = Eio_unix.pipe sw in
+  let env = object
+    method clock = clock
+    method stdin = input
+    method stdout = output_writer
+  end in
+  let handle_request ~clock ~sw ~mcp_session_id state request =
+    let response = Mcp_eio.handle_request ~clock ~sw ?mcp_session_id state request in
+    on_handled mcp_session_id request response;
+    response
+  in
+  let finished, finish = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Fun.protect
+      ~finally:(fun () -> Eio.Flow.close output_writer; Eio.Promise.resolve finish ())
+      (fun () -> Masc.Mcp_server_eio_protocol.run_stdio ~handle_request ~sw ~env state));
+  let reader = Eio.Buf_read.of_flow output ~max_size:(1024 * 1024) in
+  let input_open = ref true in
+  let close_input () =
+    if !input_open then (input_open := false; Eio.Flow.close input_writer) in
+  let expects_response = function
+    | `Assoc fields ->
+      List.assoc_opt "jsonrpc" fields <> Some (`String "2.0")
+      || List.mem_assoc "id" fields
+    | _ -> true in
+  Fun.protect
+    ~finally:(fun () -> close_input (); if not was_ready then Eio_guard.disable ())
+    (fun () ->
+      let responses = List.filter_map (fun message ->
+        Eio.Flow.copy_string (Yojson.Safe.to_string message ^ "\n") input_writer;
+        if expects_response message then
+          Some (Eio.Time.with_timeout_exn clock 5. (fun () ->
+            Yojson.Safe.from_string (Eio.Buf_read.line reader)))
+        else None) messages in
+      close_input ();
+      Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await finished);
+      (match Eio.Buf_read.line reader with
+       | exception End_of_file -> ()
+       | _ -> Alcotest.fail "unexpected trailing stdio response");
+      responses)
+
+let test_stdio_admission_and_subscription_cancellation () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+    let state = Mcp_eio.For_testing.create_state ~base_path () in
+    let modern = stdio_modern_params () in
+    let listen = stdio_listen_params () in
+    let cancelled = `Assoc [ "requestId", `Int 3 ] in
+    let malformed_cancel = `Assoc
+      [ "jsonrpc", `String "1.0"; "method", `String "notifications/cancelled"
+      ; "params", cancelled ] in
+    let initialize = `Assoc
+      [ "protocolVersion", `String "2026-07-28"; "capabilities", `Assoc []
+      ; "clientInfo", `Assoc [ "name", `String "test"; "version", `String "1" ] ] in
+    let responses = run_stdio_messages ~clock ~sw state
+      [ stdio_request ~id:(`Int 1) "server/discover"
+      ; stdio_request ~id:(`Int 2) ~params:(stdio_modern_params ~version:"2099-01-01" ()) "server/discover"
+      ; stdio_request ~params:listen "subscriptions/listen"
+      ; stdio_request ~id:`Null ~params:listen "subscriptions/listen"
+      ; stdio_request ~id:(`Bool true) ~params:listen "subscriptions/listen"
+      ; stdio_request ~id:(`Int 3) ~params:listen "subscriptions/listen"
+      ; malformed_cancel
+      ; stdio_request ~params:(`Assoc [ "requestId", `Int 3; "reason", `Int 42 ]) "notifications/cancelled"
+      ; stdio_request ~params:(`Assoc [ "requestId", `Int 3; "requestId", `Int 3 ]) "notifications/cancelled"
+      ; stdio_request ~id:(`Int 3) ~params:modern "server/discover"
+      ; stdio_request ~params:cancelled "notifications/cancelled"
+      ; stdio_request ~id:(`Int 3) ~params:modern "server/discover"
+      ; stdio_request ~id:(`Int 4) ~params:initialize "initialize"
+      ; stdio_request "notifications/initialized"
+      ; stdio_request ~id:(`Int 5) "unknown/method"
+      ; stdio_request ~id:(`Int 6) ~params:modern "resources/subscribe"
+      ] in
+    let nth = List.nth responses in
+    Alcotest.(check int) "only requests and acknowledgement produce messages" 11
+      (List.length responses);
+    Alcotest.(check int) "missing modern metadata" (-32602) (error_code_exn (nth 0));
+    Alcotest.(check int) "unsupported modern version" (-32022) (error_code_exn (nth 1));
+    Alcotest.(check bool) "unsupported version echoes request ID" true
+      (Yojson.Safe.Util.member "id" (nth 1) = `Int 2);
+    Alcotest.(check int) "null request ID is not a notification" (-32600) (error_code_exn (nth 2));
+    Alcotest.(check int) "invalid request ID" (-32600) (error_code_exn (nth 3));
+    Alcotest.(check bool) "subscription acknowledged" true
+      (Yojson.Safe.Util.member "method" (nth 4) = `String "notifications/subscriptions/acknowledged");
+    Alcotest.(check int) "malformed cancellation rejected" (-32600) (error_code_exn (nth 5));
+    Alcotest.(check int) "active subscription ID is not reused" (-32600) (error_code_exn (nth 6));
+    Alcotest.(check bool) "duplicate error cannot end active subscription" true
+      (Yojson.Safe.Util.member "id" (nth 6) = `Null);
+    Alcotest.(check bool) "cancel frees ID without sending a response" true
+      (Yojson.Safe.Util.member "id" (nth 7) = `Int 3
+       && Yojson.Safe.Util.member "result" (nth 7) <> `Null);
+    Alcotest.(check bool) "initialize counter-offers legacy" true
+      (Yojson.Safe.Util.(member "protocolVersion" (member "result" (nth 8))) = `String "2025-11-25");
+    Alcotest.(check int) "legacy request reaches dispatcher" (-32601) (error_code_exn (nth 9));
+    Alcotest.(check int) "removed 2026 method rejected" (-32601) (error_code_exn (nth 10));
+    Alcotest.(check int) "no subscription remains after EOF" 0 (Mcp_subscriptions.count ()))
+
+(* A stdio server whose tools/call parks until [release] resolves; every other
+   request takes the real handler. [run_stdio_messages] sends one message and
+   reads its answer before the next, so it cannot show a ping answered while a
+   call is in flight. [with_concurrent_stdio] writes without waiting. *)
+let parked_tool_call ~release ~on_enter ~on_cancel ~clock ~sw ~mcp_session_id state request =
+  let json = Yojson.Safe.from_string request in
+  match Yojson.Safe.Util.member "method" json with
+  | `String "tools/call" ->
+    on_enter ();
+    (try Eio.Promise.await release
+     with Eio.Cancel.Cancelled _ as exn -> on_cancel (); raise exn);
+    `Assoc
+      [ "jsonrpc", `String "2.0"
+      ; "id", Yojson.Safe.Util.member "id" json
+      ; "result", `Assoc [] ]
+  | _ -> Mcp_eio.handle_request ~clock ~sw ?mcp_session_id state request
+
+(* A legacy session, so a legacy [ping] (no [_meta]) is admitted and answers
+   with a result. *)
+let stdio_legacy_initialize_params =
+  `Assoc
+    [ "protocolVersion", `String "2025-11-25"
+    ; "capabilities", `Assoc []
+    ; "clientInfo", `Assoc [ "name", `String "test"; "version", `String "1" ] ]
+
+let with_concurrent_stdio ~clock ~sw ~handle_request state f =
+  let was_ready = Eio_guard.is_ready () in
+  Eio_guard.enable ();
+  let input, input_writer = Eio_unix.pipe sw in
+  let output, output_writer = Eio_unix.pipe sw in
+  let env = object
+    method clock = clock
+    method stdin = input
+    method stdout = output_writer
+  end in
+  let finished, finish = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Fun.protect
+      ~finally:(fun () -> Eio.Flow.close output_writer; Eio.Promise.resolve finish ())
+      (fun () -> Masc.Mcp_server_eio_protocol.run_stdio ~handle_request ~sw ~env state));
+  let reader = Eio.Buf_read.of_flow output ~max_size:(1024 * 1024) in
+  let input_open = ref true in
+  let close_input () =
+    if !input_open then (input_open := false; Eio.Flow.close input_writer) in
+  let send message =
+    Eio.Flow.copy_string (Yojson.Safe.to_string message ^ "\n") input_writer in
+  let read_response () =
+    Eio.Time.with_timeout_exn clock 5. (fun () ->
+      Yojson.Safe.from_string (Eio.Buf_read.line reader)) in
+  Fun.protect
+    ~finally:(fun () -> close_input (); if not was_ready then Eio_guard.disable ())
+    (fun () ->
+      f ~send ~read_response;
+      close_input ();
+      Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await finished);
+      (match Eio.Buf_read.line reader with
+       | exception End_of_file -> ()
+       | _ -> Alcotest.fail "unexpected trailing stdio response"))
+
+let test_stdio_ping_is_answered_during_a_long_tool_call () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+    let state = Mcp_eio.For_testing.create_state ~base_path () in
+    Auth.disable_auth base_path;
+    let modern = stdio_modern_params () in
+    let release, resolve_release = Eio.Promise.create () in
+    let entered, resolve_entered = Eio.Promise.create () in
+    let handle_request =
+      parked_tool_call ~release
+        ~on_enter:(fun () -> Eio.Promise.resolve resolve_entered ())
+        ~on_cancel:(fun () -> ()) in
+    with_concurrent_stdio ~clock ~sw ~handle_request state (fun ~send ~read_response ->
+      send (stdio_request ~id:(`Int 10) ~params:stdio_legacy_initialize_params "initialize");
+      let opened = read_response () in
+      Alcotest.(check bool) "the legacy session opens" true
+        (Yojson.Safe.Util.member "id" opened = `Int 10
+         && Yojson.Safe.Util.member "error" opened = `Null);
+      send (stdio_request ~id:(`Int 1) ~params:modern "tools/call");
+      Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await entered);
+      send (stdio_request ~id:(`Int 2) "ping");
+      let ping = read_response () in
+      Alcotest.(check bool) "ping is answered with its result while the call is parked" true
+        (Yojson.Safe.Util.member "id" ping = `Int 2
+         && Yojson.Safe.Util.member "result" ping = `Assoc []);
+      Eio.Promise.resolve resolve_release ();
+      let call = read_response () in
+      Alcotest.(check bool) "the call answers once released" true
+        (Yojson.Safe.Util.member "id" call = `Int 1)))
+
+let test_stdio_cancellation_stops_a_running_tool_call () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+    let state = Mcp_eio.For_testing.create_state ~base_path () in
+    Auth.disable_auth base_path;
+    let modern = stdio_modern_params () in
+    let release, _ = Eio.Promise.create () in
+    let entered, resolve_entered = Eio.Promise.create () in
+    let cancelled, resolve_cancelled = Eio.Promise.create () in
+    let handle_request =
+      parked_tool_call ~release
+        ~on_enter:(fun () -> Eio.Promise.resolve resolve_entered ())
+        ~on_cancel:(fun () -> Eio.Promise.resolve resolve_cancelled ()) in
+    with_concurrent_stdio ~clock ~sw ~handle_request state (fun ~send ~read_response ->
+      send (stdio_request ~id:(`Int 10) ~params:stdio_legacy_initialize_params "initialize");
+      let opened = read_response () in
+      Alcotest.(check bool) "the legacy session opens" true
+        (Yojson.Safe.Util.member "id" opened = `Int 10
+         && Yojson.Safe.Util.member "error" opened = `Null);
+      send (stdio_request ~id:(`Int 1) ~params:modern "tools/call");
+      Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await entered);
+      send (stdio_request ~params:(`Assoc [ "requestId", `Int 1 ]) "notifications/cancelled");
+      Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await cancelled);
+      send (stdio_request ~id:(`Int 2) "ping");
+      let next = read_response () in
+      Alcotest.(check bool) "the cancelled call wrote nothing and the loop still answers" true
+        (Yojson.Safe.Util.member "id" next = `Int 2
+         && Yojson.Safe.Util.member "result" next = `Assoc [])))
+
+(* A sink that pauses either before or after its first byte. In both cases the
+   response has committed under the output lock; the second response is still
+   waiting for that lock. No wall-clock delay decides the ordering. *)
+module Stdio_partial_sink = struct
+  type t =
+    { output : Buffer.t
+    ; first_byte : unit Eio.Promise.u
+    ; release : unit Eio.Promise.t
+    ; write_first_byte : bool
+    ; mutable began : bool
+    }
+
+  let single_write t bufs =
+    let bytes = String.concat "" (List.map Cstruct.to_string bufs) in
+    if not t.began then (
+      t.began <- true;
+      Eio.Promise.resolve t.first_byte ();
+      if t.write_first_byte then (Buffer.add_char t.output bytes.[0]; 1)
+      else (
+        Eio.Promise.await t.release;
+        Buffer.add_string t.output bytes;
+        String.length bytes))
+    else (
+      Eio.Promise.await t.release;
+      Buffer.add_string t.output bytes;
+      String.length bytes)
+
+  let copy t ~src = Eio.Flow.Pi.simple_copy ~single_write t ~src
+end
+
+let test_stdio_requires_enabled_guard () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let was_ready = Eio_guard.is_ready () in
+  Fun.protect
+    ~finally:(fun () ->
+      if was_ready then Eio_guard.enable () else Eio_guard.disable ();
+      cleanup_dir base_path)
+    (fun () ->
+      let state = Mcp_eio.For_testing.create_state ~base_path () in
+      Eio_guard.disable ();
+      let handle_request ~clock:_ ~sw:_ ~mcp_session_id:_ _ _ =
+        Alcotest.fail "request handler must not run" in
+      Alcotest.check_raises "guard checked before reading stdin"
+        (Invalid_argument "run_stdio requires Eio_guard.enable () for its entire lifetime")
+        (fun () -> Masc.Mcp_server_eio_protocol.run_stdio
+          ~handle_request ~sw ~env state))
+
+let test_stdio_eof_drains_committed_response () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+    let state = Mcp_eio.For_testing.create_state ~base_path () in
+    Auth.disable_auth base_path;
+    let was_ready = Eio_guard.is_ready () in
+    Fun.protect ~finally:(fun () -> if was_ready then Eio_guard.enable () else Eio_guard.disable ()) (fun () ->
+      Eio_guard.enable ();
+        List.iter (fun (framed, write_first_byte) ->
+        let input, input_writer = Eio_unix.pipe sw in
+        let first_byte, signal_first = Eio.Promise.create () in
+        let release, signal_release = Eio.Promise.create () in
+        let parked, signal_parked = Eio.Promise.create () in
+        let waiting_output, signal_waiting_output = Eio.Promise.create () in
+        let cancelled, signal_cancelled = Eio.Promise.create () in
+        let finished, signal_finished = Eio.Promise.create () in
+        let output = Buffer.create 128 in
+        let sink_state : Stdio_partial_sink.t =
+          { output; first_byte = signal_first; release; write_first_byte; began = false } in
+        let stdout = Eio.Resource.T (sink_state, Eio.Flow.Pi.sink (module Stdio_partial_sink)) in
+        let stdio_env = object
+          method clock = clock
+          method stdin = input
+          method stdout = stdout
+        end in
+        let response = `Assoc
+          [ "jsonrpc", `String "2.0"; "id", `Int 1; "result", `Assoc [] ] in
+        let handle_request ~clock:_ ~sw:_ ~mcp_session_id:_ _state request =
+          let id = Yojson.Safe.Util.member "id" (Yojson.Safe.from_string request) in
+          match id with
+          | `Int 1 -> response
+          | `Int 3 ->
+            Eio.Promise.resolve signal_waiting_output ();
+            `Assoc [ "jsonrpc", `String "2.0"; "id", `Int 3; "result", `Assoc [] ]
+          | `Int 2 ->
+            Eio.Promise.resolve signal_parked ();
+            (try Eio.Promise.await (fst (Eio.Promise.create ())) with
+             | Eio.Cancel.Cancelled _ as exn ->
+               Eio.Promise.resolve signal_cancelled ();
+               raise exn)
+          | _ -> Alcotest.fail "unexpected test request" in
+        Eio.Fiber.fork ~sw (fun () ->
+          Fun.protect ~finally:(fun () -> Eio.Promise.resolve signal_finished ())
+            (fun () -> Masc.Mcp_server_eio_protocol.run_stdio
+              ~handle_request ~sw ~env:stdio_env state));
+        let send id =
+          let request = stdio_request ~id:(`Int id) ~params:(stdio_modern_params ()) "tools/call"
+            |> Yojson.Safe.to_string in
+          let message = if framed then
+              Printf.sprintf "Content-Length: %d\r\n\r\n%s" (String.length request) request
+            else request ^ "\n" in
+          Eio.Flow.copy_string message input_writer in
+        send 1;
+        Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await first_byte);
+        (* This handler is done, but its response is waiting for the first
+           writer's output lock and has not committed. *)
+        send 3;
+        Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await waiting_output);
+        send 2;
+        Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await parked);
+        Eio.Flow.close input_writer;
+        Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await cancelled);
+        Alcotest.(check bool) "committed output keeps shutdown pending" false
+          (Eio.Promise.is_resolved finished);
+        Eio.Promise.resolve signal_release ();
+        Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await finished);
+        let body = Yojson.Safe.to_string response in
+        let expected = if framed then
+            Printf.sprintf "Content-Length: %d\r\n\r\n%s" (String.length body) body
+          else body ^ "\n" in
+        Alcotest.(check string) "committed response is whole; parked call emits nothing"
+          expected (Buffer.contents output))
+        [ false, false; false, true; true, false; true, true ]))
+
+(* A sink that fails once after accepting one byte, but would accept later
+   writes. This detects attempts to append a second frame after corruption. *)
+module Stdio_failing_sink = struct
+  type t =
+    { output : Buffer.t
+    ; first_byte : unit Eio.Promise.u
+    ; fail_now : unit Eio.Promise.t
+    ; mutable writes : int
+    }
+
+  let single_write t bufs =
+    let bytes = String.concat "" (List.map Cstruct.to_string bufs) in
+    t.writes <- t.writes + 1;
+    match t.writes with
+    | 1 ->
+      Buffer.add_char t.output bytes.[0];
+      Eio.Promise.resolve t.first_byte ();
+      1
+    | 2 -> Eio.Promise.await t.fail_now; failwith "injected stdout failure"
+    | _ -> Buffer.add_string t.output bytes; String.length bytes
+
+  let copy t ~src = Eio.Flow.Pi.simple_copy ~single_write t ~src
+end
+
+let test_stdio_write_failure_never_appends_another_frame () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+    let state = Mcp_eio.For_testing.create_state ~base_path () in
+    Auth.disable_auth base_path;
+    let was_ready = Eio_guard.is_ready () in
+    Eio_guard.enable ();
+    Fun.protect ~finally:(fun () -> if not was_ready then Eio_guard.disable ()) (fun () ->
+      List.iter (fun (framed, synchronous) ->
+        let input, input_writer = Eio_unix.pipe sw in
+        let started, signal_started = Eio.Promise.create () in
+        let fail_now, signal_failure = Eio.Promise.create () in
+        let second, signal_second = Eio.Promise.create () in
+        let finished, signal_finished = Eio.Promise.create () in
+        let output = Buffer.create 128 in
+        let sink_state : Stdio_failing_sink.t =
+          { output; first_byte = signal_started; fail_now; writes = 0 } in
+        let stdout = Eio.Resource.T (sink_state, Eio.Flow.Pi.sink (module Stdio_failing_sink)) in
+        let stdio_env = object
+          method clock = clock
+          method stdin = input
+          method stdout = stdout
+        end in
+        let handle_request ~clock:_ ~sw:_ ~mcp_session_id:_ _state request =
+          let id = Yojson.Safe.Util.member "id" (Yojson.Safe.from_string request) in
+          if id = `Int 2 then Eio.Promise.resolve signal_second ();
+          `Assoc [ "jsonrpc", `String "2.0"; "id", id; "result", `Assoc [] ] in
+        Eio.Fiber.fork ~sw (fun () ->
+          let error =
+            try Masc.Mcp_server_eio_protocol.run_stdio ~handle_request ~sw ~env:stdio_env state; None
+            with Eio.Cancel.Cancelled _ as exn -> raise exn | exn -> Some exn in
+          Eio.Promise.resolve signal_finished error);
+        let send id =
+          let method_ = if synchronous then "server/discover" else "tools/call" in
+          let request = stdio_request ~id:(`Int id) ~params:(stdio_modern_params ()) method_
+            |> Yojson.Safe.to_string in
+          let message = if framed then
+              Printf.sprintf "Content-Length: %d\r\n\r\n%s" (String.length request) request
+            else request ^ "\n" in
+          Eio.Flow.copy_string message input_writer in
+        send 1;
+        Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await started);
+        if not synchronous then (
+          send 2;
+          Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await second));
+        Eio.Promise.resolve signal_failure ();
+        let error = Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await finished) in
+        Eio.Flow.close input_writer;
+        let rec contains_sink_failure = function
+          | Failure message -> String.equal message "injected stdout failure"
+          | Eio.Exn.Multiple failures -> List.exists (fun (exn, _) -> contains_sink_failure exn) failures
+          | _ -> false in
+        Alcotest.(check bool) "transport retains the original sink failure" true
+          (Option.fold ~none:false ~some:contains_sink_failure error);
+        Alcotest.(check int) "no later sink write was attempted" 2 sink_state.writes;
+        Alcotest.(check int) "no second frame was appended" 1 (Buffer.length output))
+        [ false, false; false, true; true, false; true, true ]))
+
+(* The acknowledgement goes through first. Once armed, a notification writes
+   one byte and blocks, modelling a publisher owned by another request fiber. *)
+module Stdio_subscription_sink = struct
+  type t =
+    { output : Buffer.t
+    ; acknowledged : unit Eio.Promise.u
+    ; notification_started : unit Eio.Promise.u
+    ; release : unit Eio.Promise.t
+    ; fail_after_release : bool
+    ; armed : bool Atomic.t
+    ; mutable began : bool
+    }
+
+  let single_write t bufs =
+    let bytes = String.concat "" (List.map Cstruct.to_string bufs) in
+    if not (Atomic.get t.armed) then (
+      Buffer.add_string t.output bytes;
+      if String.contains bytes '\n' then ignore (Eio.Promise.try_resolve t.acknowledged ());
+      String.length bytes)
+    else if not t.began then (
+      t.began <- true;
+      Buffer.add_char t.output bytes.[0];
+      Eio.Promise.resolve t.notification_started ();
+      1)
+    else (
+      Eio.Promise.await t.release;
+      if t.fail_after_release then failwith "injected subscription stdout failure";
+      Buffer.add_string t.output bytes;
+      String.length bytes)
+
+  let copy t ~src = Eio.Flow.Pi.simple_copy ~single_write t ~src
+end
+
+exception Test_stdio_parent_cancel
+
+let test_stdio_parent_cancel_drains_external_subscription_send () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+    let state = Mcp_eio.For_testing.create_state ~base_path () in
+    Auth.disable_auth base_path;
+    let was_ready = Eio_guard.is_ready () in
+    Fun.protect ~finally:(fun () -> if was_ready then Eio_guard.enable () else Eio_guard.disable ()) (fun () ->
+      Eio_guard.enable ();
+      let other_deliveries = Atomic.make 0 in
+      let filter = { Mcp_transport_protocol.empty_subscription_filter with tools_list_changed = true } in
+      let other = Mcp_subscriptions.register ~subscription_id:(`Int 43) ~filter
+          ~send:(fun _ -> ignore (Atomic.fetch_and_add other_deliveries 1); true) in
+      Fun.protect ~finally:(fun () -> Mcp_subscriptions.unregister other) (fun () ->
+      let before = Mcp_subscriptions.count () in
+      let input, input_writer = Eio_unix.pipe sw in
+      let ack, signal_ack = Eio.Promise.create () in
+      let started, signal_started = Eio.Promise.create () in
+      let never_release, _ = Eio.Promise.create () in
+      let owner, signal_owner = Eio.Promise.create () in
+      let stopped, signal_stopped = Eio.Promise.create () in
+      let published, signal_published = Eio.Promise.create () in
+      let sink_state : Stdio_subscription_sink.t =
+        { output = Buffer.create 128; acknowledged = signal_ack;
+          notification_started = signal_started; release = never_release;
+          fail_after_release = false; armed = Atomic.make false; began = false } in
+      let stdout = Eio.Resource.T (sink_state, Eio.Flow.Pi.sink (module Stdio_subscription_sink)) in
+      let stdio_env = object
+        method clock = clock
+        method stdin = input
+        method stdout = stdout
+      end in
+      let handle_request ~clock ~sw ~mcp_session_id state request =
+        Mcp_eio.handle_request ~clock ~sw ?mcp_session_id state request in
+      Eio.Fiber.fork ~sw (fun () ->
+        let cancelled =
+          try Eio.Cancel.sub (fun context ->
+            Eio.Promise.resolve signal_owner context;
+            Masc.Mcp_server_eio_protocol.run_stdio ~handle_request ~sw ~env:stdio_env state);
+            false
+          with Eio.Cancel.Cancelled Test_stdio_parent_cancel -> true in
+        Eio.Promise.resolve signal_stopped cancelled);
+      let params = match stdio_modern_params () with
+        | `Assoc fields -> `Assoc (("notifications", `Assoc [ "toolsListChanged", `Bool true ]) :: fields)
+        | _ -> assert false in
+      let request = stdio_request ~id:(`Int 42) ~params "subscriptions/listen" in
+      Eio.Flow.copy_string (Yojson.Safe.to_string request ^ "\n") input_writer;
+      Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await ack);
+      Atomic.set sink_state.armed true;
+      let owner_domain = Domain.self () in
+      Eio.Fiber.fork ~sw (fun () ->
+        let ran_elsewhere = Eio.Domain_manager.run (Eio.Stdenv.domain_mgr env) (fun () ->
+          let ran_elsewhere = Domain.self () <> owner_domain in
+          Mcp_subscriptions.notify_tools_list_changed (`Assoc []);
+          ran_elsewhere) in
+        Eio.Promise.resolve signal_published ran_elsewhere);
+      Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await started);
+      Eio.Flow.close input_writer;
+      let rec wait_until_retired () =
+        if Mcp_subscriptions.count () <> before then (Eio.Fiber.yield (); wait_until_retired ()) in
+      Eio.Time.with_timeout_exn clock 5. wait_until_retired;
+      Alcotest.(check bool) "EOF waits for the committed external send" false
+        (Eio.Promise.is_resolved stopped);
+      Eio.Cancel.cancel (Eio.Promise.await owner) Test_stdio_parent_cancel;
+      let cancelled = Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await stopped) in
+      Alcotest.(check bool) "original parent cancellation propagates" true cancelled;
+      let ran_elsewhere = Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await published) in
+      Alcotest.(check bool) "publisher ran on another domain" true ran_elsewhere;
+      Alcotest.(check int) "other subscribers still receive the event" 1 (Atomic.get other_deliveries);
+      Alcotest.(check int) "the subscriber is retired and drained" before (Mcp_subscriptions.count ())))
+      )
+
+exception Test_stdio_earlier_cancel
+
+module Stdio_early_failure_source = struct
+  type t =
+    { request : string
+    ; fail_now : unit Eio.Promise.t
+    ; waiting : unit Eio.Promise.u
+    ; mutable offset : int
+    }
+
+  let read_methods = []
+  let single_read t target =
+    let remaining = String.length t.request - t.offset in
+    if remaining > 0 then (
+      let n = min remaining (Cstruct.length target) in
+      Cstruct.blit_from_string t.request t.offset target 0 n;
+      t.offset <- t.offset + n;
+      n)
+    else (
+      ignore (Eio.Promise.try_resolve t.waiting ());
+      Eio.Promise.await t.fail_now;
+      raise (Eio.Cancel.Cancelled Test_stdio_earlier_cancel))
+end
+
+let test_stdio_prior_failure_precedes_drain_cancellation () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+    let state = Mcp_eio.For_testing.create_state ~base_path () in
+    Auth.disable_auth base_path;
+    let was_ready = Eio_guard.is_ready () in
+    Eio_guard.enable ();
+    Fun.protect ~finally:(fun () -> if not was_ready then Eio_guard.disable ()) (fun () ->
+      let before = Mcp_subscriptions.count () in
+      let params = match stdio_modern_params () with
+        | `Assoc fields -> `Assoc (("notifications", `Assoc [ "toolsListChanged", `Bool true ]) :: fields)
+        | _ -> assert false in
+      let request = stdio_request ~id:(`Int 42) ~params "subscriptions/listen"
+        |> Yojson.Safe.to_string in
+      let fail_now, signal_failure = Eio.Promise.create () in
+      let waiting, signal_waiting = Eio.Promise.create () in
+      let source : Stdio_early_failure_source.t =
+        { request = request ^ "\n"; fail_now; waiting = signal_waiting; offset = 0 } in
+      let stdin = Eio.Resource.T (source, Eio.Flow.Pi.source (module Stdio_early_failure_source)) in
+      let ack, signal_ack = Eio.Promise.create () in
+      let started, signal_started = Eio.Promise.create () in
+      let never_release, _ = Eio.Promise.create () in
+      let owner, signal_owner = Eio.Promise.create () in
+      let finished, signal_finished = Eio.Promise.create () in
+      let published, signal_published = Eio.Promise.create () in
+      let sink : Stdio_subscription_sink.t =
+        { output = Buffer.create 128; acknowledged = signal_ack;
+          notification_started = signal_started; release = never_release;
+          fail_after_release = false; armed = Atomic.make false; began = false } in
+      let stdout = Eio.Resource.T (sink, Eio.Flow.Pi.sink (module Stdio_subscription_sink)) in
+      let stdio_env = object
+        method clock = clock
+        method stdin = stdin
+        method stdout = stdout
+      end in
+      let handle_request ~clock ~sw ~mcp_session_id state request =
+        Mcp_eio.handle_request ~clock ~sw ?mcp_session_id state request in
+      Eio.Fiber.fork ~sw (fun () ->
+        let error =
+          try Eio.Cancel.sub (fun context ->
+            Eio.Promise.resolve signal_owner context;
+            Masc.Mcp_server_eio_protocol.run_stdio ~handle_request ~sw ~env:stdio_env state); None
+          with exn -> Some exn in
+        Eio.Promise.resolve signal_finished error);
+      Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await ack);
+      Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await waiting);
+      Atomic.set sink.armed true;
+      Eio.Fiber.fork ~sw (fun () ->
+        Mcp_subscriptions.notify_tools_list_changed (`Assoc []);
+        Eio.Promise.resolve signal_published ());
+      Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await started);
+      Eio.Promise.resolve signal_failure ();
+      let rec wait_until_retired () =
+        if Mcp_subscriptions.count () <> before then (Eio.Fiber.yield (); wait_until_retired ()) in
+      Eio.Time.with_timeout_exn clock 5. wait_until_retired;
+      Eio.Cancel.cancel (Eio.Promise.await owner) Test_stdio_parent_cancel;
+      let error = Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await finished) in
+      Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await published);
+      Alcotest.(check bool) "earlier failure takes precedence over drain cancellation" true
+        (match error with Some (Eio.Cancel.Cancelled Test_stdio_earlier_cancel) -> true
+         | Some _ | None -> false)))
+
+let test_stdio_eof_reports_external_send_failure () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+    let state = Mcp_eio.For_testing.create_state ~base_path () in
+    Auth.disable_auth base_path;
+    let was_ready = Eio_guard.is_ready () in
+    Eio_guard.enable ();
+    Fun.protect ~finally:(fun () -> if not was_ready then Eio_guard.disable ()) (fun () ->
+      let before = Mcp_subscriptions.count () in
+      let input, input_writer = Eio_unix.pipe sw in
+      let ack, signal_ack = Eio.Promise.create () in
+      let started, signal_started = Eio.Promise.create () in
+      let release, signal_release = Eio.Promise.create () in
+      let finished, signal_finished = Eio.Promise.create () in
+      let published, signal_published = Eio.Promise.create () in
+      let sink_state : Stdio_subscription_sink.t =
+        { output = Buffer.create 128; acknowledged = signal_ack;
+          notification_started = signal_started; release;
+          fail_after_release = true; armed = Atomic.make false; began = false } in
+      let stdout = Eio.Resource.T (sink_state, Eio.Flow.Pi.sink (module Stdio_subscription_sink)) in
+      let stdio_env = object
+        method clock = clock
+        method stdin = input
+        method stdout = stdout
+      end in
+      let handle_request ~clock ~sw ~mcp_session_id state request =
+        Mcp_eio.handle_request ~clock ~sw ?mcp_session_id state request in
+      Eio.Fiber.fork ~sw (fun () ->
+        let error =
+          try Masc.Mcp_server_eio_protocol.run_stdio ~handle_request ~sw ~env:stdio_env state; None
+          with Eio.Cancel.Cancelled _ as exn -> raise exn | exn -> Some exn in
+        Eio.Promise.resolve signal_finished error);
+      let params = match stdio_modern_params () with
+        | `Assoc fields -> `Assoc (("notifications", `Assoc [ "toolsListChanged", `Bool true ]) :: fields)
+        | _ -> assert false in
+      let request = stdio_request ~id:(`Int 42) ~params "subscriptions/listen" in
+      Eio.Flow.copy_string (Yojson.Safe.to_string request ^ "\n") input_writer;
+      Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await ack);
+      Atomic.set sink_state.armed true;
+      Eio.Fiber.fork ~sw (fun () ->
+        Mcp_subscriptions.notify_tools_list_changed (`Assoc []);
+        Eio.Promise.resolve signal_published ());
+      Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await started);
+      Eio.Flow.close input_writer;
+      let rec wait_until_retired () =
+        if Mcp_subscriptions.count () <> before then (Eio.Fiber.yield (); wait_until_retired ()) in
+      Eio.Time.with_timeout_exn clock 5. wait_until_retired;
+      Eio.Promise.resolve signal_release ();
+      let error = Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await finished) in
+      Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await published);
+      Alcotest.(check bool) "owner retains the original sink failure after EOF" true
+        (match error with Some (Failure message) ->
+           String.equal message "injected subscription stdout failure"
+         | Some _ | None -> false)))
+
+let test_subscription_retirement_keeps_drain_authority () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let was_ready = Eio_guard.is_ready () in
+  Eio_guard.enable ();
+  Fun.protect ~finally:(fun () -> if not was_ready then Eio_guard.disable ()) (fun () ->
+    let before = Mcp_subscriptions.count () in
+    let started, signal_started = Eio.Promise.create () in
+    let release, signal_release = Eio.Promise.create () in
+    let removed, signal_removed = Eio.Promise.create () in
+    let owner_drained, signal_owner_drained = Eio.Promise.create () in
+    let published, signal_published = Eio.Promise.create () in
+    let filter = { Mcp_transport_protocol.empty_subscription_filter with tools_list_changed = true } in
+    let token = Mcp_subscriptions.register ~subscription_id:(`Int 44) ~filter
+        ~send:(fun _ -> Eio.Promise.resolve signal_started (); Eio.Promise.await release; true) in
+    Eio.Fiber.fork ~sw (fun () ->
+      Mcp_subscriptions.notify_tools_list_changed (`Assoc []);
+      Eio.Promise.resolve signal_published ());
+    Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await started);
+    Eio.Fiber.fork ~sw (fun () ->
+      Mcp_subscriptions.unregister token;
+      Eio.Promise.resolve signal_removed ());
+    let rec wait_until_removed () =
+      if Mcp_subscriptions.count () <> before then (Eio.Fiber.yield (); wait_until_removed ()) in
+    Eio.Time.with_timeout_exn clock 5. wait_until_removed;
+    (* Another publisher already removed the registry entry. The owner token
+       must still name the same send lock and not falsely report a drain. *)
+    let retired = Mcp_subscriptions.retire token in
+    Eio.Fiber.fork ~sw (fun () ->
+      Mcp_subscriptions.await_retired retired;
+      Eio.Promise.resolve signal_owner_drained ());
+    Alcotest.(check bool) "owner drain waits for the removed entry" false
+      (Eio.Promise.is_resolved owner_drained);
+    Alcotest.(check bool) "other unregister also waits" false (Eio.Promise.is_resolved removed);
+    Eio.Promise.resolve signal_release ();
+    Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await owner_drained);
+    Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await removed);
+    Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await published);
+    Alcotest.(check int) "entry remains absent" before (Mcp_subscriptions.count ()))
+
+let test_stdio_subscription_requires_auth () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+    let state = Mcp_eio.For_testing.create_state ~base_path () in
+    ignore (Auth.enable_auth base_path ~require_token:true ~agent_name:"test-admin");
+    let messages = run_stdio_messages ~clock ~sw state
+      [ stdio_request ~id:(`Int 7) ~params:(stdio_listen_params ()) "subscriptions/listen" ] in
+    match messages with
+    | [ response ] ->
+      Alcotest.(check int) "authentication rejection" (-32001) (error_code_exn response);
+      Alcotest.(check bool) "no subscription acknowledgement" true
+        (Yojson.Safe.Util.member "method" response = `Null)
+    | _ -> Alcotest.fail "expected only an authentication error")
+
+let test_stdio_legacy_ping_and_modern_removal () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+    let state = Mcp_eio.For_testing.create_state ~base_path () in
+    Auth.disable_auth base_path;
+    let initialize = `Assoc
+      [ "protocolVersion", `String "2025-11-25"; "capabilities", `Assoc []
+      ; "clientInfo", `Assoc [ "name", `String "test"; "version", `String "1" ] ] in
+    let responses = run_stdio_messages ~clock ~sw state
+      [ stdio_request ~id:(`Int 21) ~params:initialize "initialize"
+      ; stdio_request ~id:(`Int 22) "ping"
+      ; stdio_request "notifications/initialized"
+      ; stdio_request ~id:(`Int 23) "ping"
+      ; stdio_request ~id:(`Int 24) ~params:(stdio_modern_params ()) "ping"
+      ; stdio_request ~id:(`Int 25) ~params:`Null "ping"
+      ; stdio_request ~id:(`Int 26) ~params:(`List []) "ping"
+      ; stdio_request ~id:(`Int 27) ~params:(`Bool true) "ping"
+      ; stdio_request ~id:(`Int 28) ~params:(`Assoc [ "_meta", `Null ]) "ping"
+      ; stdio_request ~id:(`Int 29) ~params:(`Assoc [ "_meta", `Assoc [ "progressToken", `Bool true ] ]) "ping"
+      ; stdio_request ~id:(`Int 30) ~params:(`Assoc [ "_meta", `Assoc [ "progressToken", `String "p" ]; "extra", `Int 1 ]) "ping" ] in
+    match responses with
+    | [ _; before_ready; after_ready; modern; null_params; list_params; bool_params;
+        bad_meta; bad_token; valid_meta ] ->
+      List.iter2 (fun id response ->
+        Alcotest.(check bool) "legacy ping returns an empty result with its ID" true
+          (Yojson.Safe.Util.member "id" response = `Int id
+           && Yojson.Safe.Util.member "result" response = `Assoc []))
+        [ 22; 23 ] [ before_ready; after_ready ];
+      Alcotest.(check int) "modern ping was removed" (-32601) (error_code_exn modern);
+      Alcotest.(check bool) "modern error preserves ID" true
+        (Yojson.Safe.Util.member "id" modern = `Int 24);
+      List.iter2 (fun id response ->
+        Alcotest.(check int) "invalid ping params rejected" (-32602) (error_code_exn response);
+        Alcotest.(check bool) "ping error preserves ID" true
+          (Yojson.Safe.Util.member "id" response = `Int id))
+        [ 25; 26; 27; 28; 29 ] [ null_params; list_params; bool_params; bad_meta; bad_token ];
+      Alcotest.(check bool) "legacy metadata and extensions are accepted" true
+        (Yojson.Safe.Util.member "id" valid_meta = `Int 30
+         && Yojson.Safe.Util.member "result" valid_meta = `Assoc [])
+    | _ -> Alcotest.fail "expected initialize and nine ping responses")
+
+let test_stdio_rejects_unissued_modern_continuations () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+    let state = Mcp_eio.For_testing.create_state ~base_path () in
+    Auth.disable_auth base_path;
+    let params field name continuation =
+      match stdio_modern_params () with
+      | `Assoc fields -> `Assoc ((field, `String name) :: continuation :: fields)
+      | _ -> assert false in
+    let cases =
+      [ 31, "tools/call", "name", "masc_status", ("requestState", `String "opaque")
+      ; 32, "tools/call", "name", "masc_status", ("inputResponses", `Assoc [])
+      ; 33, "resources/read", "uri", "masc://status", ("requestState", `String "opaque")
+      ; 34, "resources/read", "uri", "masc://status", ("inputResponses", `Assoc [])
+      ; 35, "prompts/get", "name", "tool_help", ("requestState", `String "opaque")
+      ; 36, "prompts/get", "name", "tool_help", ("inputResponses", `Assoc []) ] in
+    let messages = List.map (fun (id, method_, field, name, continuation) ->
+      stdio_request ~id:(`Int id) ~params:(params field name continuation) method_) cases in
+    let responses = run_stdio_messages ~clock ~sw state messages in
+    Alcotest.(check int) "one error per request" (List.length cases) (List.length responses);
+    List.iter2 (fun (id, _, _, _, _) response ->
+      Alcotest.(check int) "unissued continuation is invalid" (-32602) (error_code_exn response);
+      Alcotest.(check bool) "original ID is preserved" true
+        (Yojson.Safe.Util.member "id" response = `Int id)) cases responses)
+
+let test_stdio_modern_calls_do_not_reuse_legacy_identity () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+    let state = Mcp_eio.For_testing.create_state ~base_path () in
+    ignore (Masc.Workspace.init (Masc.Mcp_server.workspace_config state) ~agent_name:None);
+    let before = Client_registry_eio.total_count () in
+    let observed = ref [] in
+    let on_handled session request _response =
+      let method_ = Yojson.Safe.from_string request |> Yojson.Safe.Util.member "method" in
+      let subscribed = match session with
+        | None -> false
+        | Some session_id ->
+          Masc.Mcp_server_eio_protocol.For_testing.resource_is_subscribed
+            ~session_id ~uri:"masc://status" in
+      observed := (method_, session, Client_registry_eio.total_count (), subscribed) :: !observed
+    in
+    let modern_call arguments =
+      match stdio_modern_params () with
+      | `Assoc fields -> `Assoc (("name", `String "masc_status") :: ("arguments", arguments) :: fields)
+      | _ -> assert false
+    in
+    let initialize = `Assoc
+      [ "protocolVersion", `String "2025-11-25"; "capabilities", `Assoc []
+      ; "clientInfo", `Assoc [ "name", `String "test"; "version", `String "1" ] ] in
+    let uri = `Assoc [ "uri", `String "masc://status" ] in
+    let responses = run_stdio_messages ~on_handled ~clock ~sw state
+      [ stdio_request ~id:(`Int 1) ~params:(modern_call (`Assoc [ "_agent_name", `String "alice" ])) "tools/call"
+      ; stdio_request ~id:(`Int 2) ~params:(modern_call (`Assoc [])) "tools/call"
+      ; stdio_request ~id:(`Int 3) ~params:initialize "initialize"
+      ; stdio_request "notifications/initialized"
+      ; stdio_request ~id:(`Int 6) ~params:(`Assoc
+          [ "name", `String "masc_status"; "arguments", `Assoc [ "_agent_name", `String "legacy-alice" ] ]) "tools/call"
+      ; stdio_request ~id:(`Int 4) ~params:uri "resources/subscribe"
+      ; stdio_request ~id:(`Int 5) ~params:uri "resources/unsubscribe"
+      ; stdio_request ~id:(`Int 7) ~params:uri "resources/subscribe" ] in
+    let seen = List.rev !observed in
+    (match seen with
+     | [ (`String "tools/call", None, count1, _); (`String "tools/call", None, count2, _)
+       ; (`String "initialize", Some session1, _, _); (`String "notifications/initialized", Some session2, _, _)
+       ; (`String "tools/call", Some session3, legacy_count, _)
+       ; (`String "resources/subscribe", Some session4, _, true)
+       ; (`String "resources/unsubscribe", Some session5, _, false)
+       ; (`String "resources/subscribe", Some session6, _, true) ] ->
+       Alcotest.(check int) "first modern call does not cache its caller" before count1;
+       Alcotest.(check int) "second modern call has no prior caller cache" before count2;
+       Alcotest.(check int) "legacy call registered an identity" (before + 1) legacy_count;
+       Alcotest.(check bool) "legacy lifecycle keeps one connection session" true
+         (String.equal session1 session2 && String.equal session2 session3 && String.equal session3 session4
+          && String.equal session4 session5 && String.equal session5 session6);
+       Alcotest.(check bool) "stdio EOF removes the remaining legacy subscription" false
+         (Masc.Mcp_server_eio_protocol.For_testing.resource_is_subscribed
+            ~session_id:session1 ~uri:"masc://status")
+     | _ -> Alcotest.fail "unexpected modern or legacy session admission");
+    Alcotest.(check int) "all requests returned one response" 7 (List.length responses);
+    List.iter (fun response ->
+      Alcotest.(check bool) "tool and legacy subscription requests reached their handler" true
+        (Yojson.Safe.Util.member "result" response <> `Null)) responses;
+    Alcotest.(check int) "stdio EOF removed legacy identity" before (Client_registry_eio.total_count ()))
+
+let test_stdio_forwards_external_credential () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let was_ready = Eio_guard.is_ready () in
+  Eio_guard.enable ();
+  Fun.protect ~finally:(fun () ->
+    if not was_ready then Eio_guard.disable ();
+    cleanup_dir base_path) (fun () ->
+    let state = Mcp_eio.For_testing.create_state ~base_path () in
+    ignore (Auth.enable_auth base_path ~require_token:true ~agent_name:"test-admin");
+    let token = match Auth.create_token base_path ~agent_name:"stdio-client" ~role:Masc_domain.Worker with
+      | Ok (token, _) -> token
+      | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error) in
+    let player = match Auth.create_token base_path ~agent_name:"stdio-player" ~role:Masc_domain.Player with
+      | Ok (token, _) -> token
+      | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error) in
+    let execute ?auth_token () =
+      let input, input_writer = Eio_unix.pipe sw in
+      let output, output_writer = Eio_unix.pipe sw in
+      let stdio_env : Eio_unix.Stdenv.base = object
+        method stdin = input
+        method stdout = output_writer
+        method stderr = env#stderr
+        method net = env#net
+        method domain_mgr = env#domain_mgr
+        method process_mgr = env#process_mgr
+        method clock = env#clock
+        method mono_clock = env#mono_clock
+        method fs = env#fs
+        method cwd = env#cwd
+        method secure_random = env#secure_random
+        method debug = env#debug
+        method backend_id = env#backend_id
+      end in
+      let finished, finish = Eio.Promise.create () in
+      Eio.Fiber.fork ~sw (fun () ->
+        Fun.protect
+          ~finally:(fun () -> Eio.Flow.close output_writer; Eio.Promise.resolve finish ())
+          (fun () -> Mcp_eio.run_stdio ?auth_token ~sw ~env:stdio_env state));
+      let request = stdio_request ~id:(`Int 10) ~params:(stdio_modern_params ()) "resources/list" in
+      Eio.Flow.copy_string (Yojson.Safe.to_string request ^ "\n") input_writer;
+      Eio.Flow.close input_writer;
+      let response = Eio.Buf_read.of_flow output ~max_size:(1024 * 1024) |> Eio.Buf_read.line in
+      Eio.Promise.await finished;
+      Yojson.Safe.from_string response
+    in
+    Alcotest.(check int) "missing credential rejected" (-32001) (error_code_exn (execute ()));
+    Alcotest.(check int) "invalid credential rejected" (-32001)
+      (error_code_exn (execute ~auth_token:"invalid" ()));
+    Alcotest.(check int) "player cannot read full workspace resources" (-32001)
+      (error_code_exn (execute ~auth_token:player ()));
+    Alcotest.(check bool) "explicit caller credential admitted" true
+      (Yojson.Safe.Util.member "result" (execute ~auth_token:token ()) <> `Null))
 
 let test_handle_request_tools_list () =
   Eio_main.run @@ fun env ->
@@ -3203,10 +4193,39 @@ let response_tests = [
 
 let eio_tests = [
   "handle initialize", `Quick, test_handle_request_initialize;
-  "handle initialize rejects unsupported protocol version", `Quick,
-    test_handle_request_initialize_rejects_unsupported_protocol_version;
+  "handle initialize counteroffers a legacy version", `Quick,
+    test_handle_request_initialize_counteroffers_legacy_version;
   "handle server/discover advertises 2026", `Quick,
     test_handle_request_server_discover_2026;
+  "stdio admission and subscription cancellation", `Quick,
+    test_stdio_admission_and_subscription_cancellation;
+  "stdio ping is answered during a long tool call", `Quick,
+    test_stdio_ping_is_answered_during_a_long_tool_call;
+  "stdio cancellation stops a running tool call", `Quick,
+    test_stdio_cancellation_stops_a_running_tool_call;
+  "stdio requires enabled guard", `Quick, test_stdio_requires_enabled_guard;
+  "stdio EOF drains committed response", `Quick,
+    test_stdio_eof_drains_committed_response;
+  "stdio parent cancel drains external subscription send", `Quick,
+    test_stdio_parent_cancel_drains_external_subscription_send;
+  "stdio write failure never appends another frame", `Quick,
+    test_stdio_write_failure_never_appends_another_frame;
+  "subscription retirement keeps drain authority", `Quick,
+    test_subscription_retirement_keeps_drain_authority;
+  "stdio EOF reports external send failure", `Quick,
+    test_stdio_eof_reports_external_send_failure;
+  "stdio prior failure precedes drain cancellation", `Quick,
+    test_stdio_prior_failure_precedes_drain_cancellation;
+  "stdio subscription requires authentication", `Quick,
+    test_stdio_subscription_requires_auth;
+  "stdio legacy ping and modern removal", `Quick,
+    test_stdio_legacy_ping_and_modern_removal;
+  "stdio rejects unissued modern continuations", `Quick,
+    test_stdio_rejects_unissued_modern_continuations;
+  "stdio modern identity and legacy session isolation", `Quick,
+    test_stdio_modern_calls_do_not_reuse_legacy_identity;
+  "stdio forwards external credential", `Quick,
+    test_stdio_forwards_external_credential;
   "handle initialize operator profile", `Quick,
     test_handle_request_initialize_operator_profile;
   "handle tools/list", `Quick, test_handle_request_tools_list;

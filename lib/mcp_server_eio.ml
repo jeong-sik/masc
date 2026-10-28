@@ -158,9 +158,49 @@ let handle_request
     request_str
 ;;
 
-let run_stdio ~sw ~env state =
+let run_stdio ?auth_token ~sw ~env state =
   let handle_request ~clock ~sw ~mcp_session_id state request_str =
-    handle_request ~clock ~sw ~mcp_session_id state request_str
+    let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
+    let authorization =
+      try
+        let config = Auth.load_auth_config base_path in
+        if not config.Masc_domain.enabled then Ok ()
+        else
+          match auth_token with
+          | None when not config.require_token -> Ok ()
+          | None -> Error (Mcp_error_code.Auth_error, "Unauthorized: bearer token required")
+          | Some token ->
+            (match Auth_credential_token.find_credential_by_token base_path ~token with
+             | Ok (credential : Masc_domain.agent_credential)
+               when Masc_domain.has_permission credential.role Masc_domain.CanReadState -> Ok ()
+             | Ok _ ->
+               Error (Mcp_error_code.Auth_error, "Forbidden: this stdio endpoint requires CanReadState")
+             | Error _ -> Error (Mcp_error_code.Auth_error, "Unauthorized: invalid or expired bearer token"))
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | _ -> Error (Mcp_error_code.Internal_error, "Authentication configuration unavailable")
+    in
+    let rejection =
+      match authorization with
+      | Ok () -> None
+      | Error (code, message) ->
+        match Yojson.Safe.from_string request_str with
+        | json when Mcp_transport_protocol.is_jsonrpc_v2 json
+                    && Mcp_transport_protocol.has_unique_jsonrpc_fields json ->
+          (match Mcp_transport_protocol.jsonrpc_request_of_yojson json with
+           | Ok request when Mcp_transport_protocol.is_notification request -> Some `Null
+           | Ok request ->
+             let id = Mcp_transport_protocol.get_id request in
+             if Mcp_transport_protocol.is_valid_request_id id then
+               Some (Mcp_transport_protocol.make_error ~id
+                 (Mcp_error_code.to_wire_code code) message)
+             else None
+           | Error _ -> None)
+        | _ | exception Yojson.Json_error _ -> None
+    in
+    match rejection with
+    | Some response -> response
+    | None -> handle_request ~clock ~sw ?mcp_session_id ?auth_token state request_str
   in
   Mcp_server_eio_protocol.run_stdio ~handle_request ~sw ~env state
 ;;

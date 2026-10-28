@@ -6,11 +6,28 @@
 
     Every delivery is filtered before it is sent: the specification says a
     server {b MUST NOT} send a notification type the client did not request,
-    so the filter is consulted here rather than at each emitter. *)
+    so the filter is consulted here rather than at each emitter.
+
+    Concurrent registry operations require [Eio_guard] to remain enabled and
+    callers to run in Eio fibers. Before enablement, operations bypass locks
+    and are safe only when there is no concurrent access, such as serial
+    initialization. *)
 
 type token
 (** Handle for one open stream. The transport keeps it and returns it on
     close. *)
+
+type retired
+(** A removed stream whose already-started delivery may still be finishing. *)
+
+val retire : token -> retired
+(** Remove a stream from discovery immediately. A delivery that acquired its
+    send lock before retirement may still be in flight; [await_retired] drains
+    it. The token retains its entry even if another publisher already removed
+    it; repeated retirement is safe and returns the same drain authority. *)
+
+val await_retired : retired -> unit
+(** Wait until the retired stream's in-flight delivery has left its send lock. *)
 
 val register :
   subscription_id:Yojson.Safe.t ->
@@ -39,7 +56,8 @@ val register_after_ack :
 
 val unregister : token -> unit
 (** Idempotent: the transport unregisters on close and a failed send retires
-    the same entry, and neither needs to know about the other. *)
+    the same entry, and neither needs to know about the other. Waits for any
+    in-flight delivery even if another caller already retired the entry. *)
 
 val count : unit -> int
 (** Open streams. For operator surfaces and tests. *)

@@ -112,27 +112,6 @@ let response_format_to_json = function
 
 (** {1 Content Types} *)
 
-(** Closed set of supported media source carriers. *)
-type media_source_kind =
-  | Base64
-  | Url
-  | File_id
-[@@deriving show]
-
-let media_source_kind_to_string : media_source_kind -> string = function
-  | Base64 -> "base64"
-  | Url -> "url"
-  | File_id -> "file_id"
-;;
-
-let media_source_kind_of_string raw : media_source_kind option =
-  match String.lowercase_ascii (String.trim raw) with
-  | "base64" -> Some Base64
-  | "url" -> Some Url
-  | "file_id" -> Some File_id
-  | _ -> None
-;;
-
 (** A media block's source: the carrier and its payload together. *)
 type media_source =
   | Base64 of string (** Base64-encoded bytes. *)
@@ -140,21 +119,58 @@ type media_source =
   | File_id of string
 [@@deriving show]
 
-let media_source_kind_of_source : media_source -> media_source_kind = function
-  | Base64 _ -> Base64
-  | Url _ -> Url
-  | File_id _ -> File_id
+(** A carrier without its payload, for records that keep the carrier after the
+    payload has gone elsewhere. *)
+type media_source_kind =
+  | Base64_kind
+  | Url_kind
+  | File_id_kind
+[@@deriving show]
+
+let media_source_kind_to_string = function
+  | Base64_kind -> "base64"
+  | Url_kind -> "url"
+  | File_id_kind -> "file_id"
 ;;
 
-let media_source_of_kind (kind : media_source_kind) payload : media_source =
-  match kind with
-  | Base64 -> Base64 payload
-  | Url -> Url payload
-  | File_id -> File_id payload
+let media_source_kind_of_string raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "base64" -> Some Base64_kind
+  | "url" -> Some Url_kind
+  | "file_id" -> Some File_id_kind
+  | _ -> None
 ;;
 
-let media_source_payload : media_source -> string = function
+let media_source_kind_of_source = function
+  | Base64 _ -> Base64_kind
+  | Url _ -> Url_kind
+  | File_id _ -> File_id_kind
+;;
+
+let media_source_wire_tag source =
+  media_source_kind_to_string (media_source_kind_of_source source)
+;;
+
+let media_source_of_wire_tag raw : (string -> media_source) option =
+  match media_source_kind_of_string raw with
+  | Some Base64_kind -> Some (fun payload -> Base64 payload)
+  | Some Url_kind -> Some (fun payload -> Url payload)
+  | Some File_id_kind -> Some (fun payload -> File_id payload)
+  | None -> None
+;;
+
+let media_source_payload = function
   | Base64 payload | Url payload | File_id payload -> payload
+;;
+
+let media_source_append accumulated chunk =
+  match accumulated, chunk with
+  | Base64 head, Base64 tail -> Some (Base64 (head ^ tail))
+  | Url head, Url tail -> Some (Url (head ^ tail))
+  | File_id head, File_id tail -> Some (File_id (head ^ tail))
+  | Base64 _, (Url _ | File_id _)
+  | Url _, (Base64 _ | File_id _)
+  | File_id _, (Base64 _ | Url _) -> None
 ;;
 
 type reasoning_detail =
@@ -1263,14 +1279,13 @@ type content_delta =
           [{"limit":10}{"limit":10}]). *)
   | MediaDelta of
       { media_type : string
-      ; source_type : media_source_kind
-      ; data : string
+      ; source : media_source
       }
   (** A chunk of a streamed media (image/document/audio) content block.
-            Carries the block-level [media_type] and [source_type] alongside the
-            [data] payload so the SSE layer needs no new {!ContentBlockStart}
-            fields; the accumulator records the metadata (idempotent across
-            chunks) and concatenates [data]. *)
+            Carries the block-level [media_type] and a [source] whose payload is
+            this chunk, so the SSE layer needs no new {!ContentBlockStart}
+            fields; the accumulator records [media_type] (idempotent across
+            chunks) and appends each chunk with {!media_source_append}. *)
 
 (* See types.mli: a 429 or 5xx an OpenAI-compatible provider declared inside a
    response it had already accepted, and only its error object as the body. *)

@@ -93,27 +93,21 @@ let content_block_to_json = function
       [ "type", `String "image"
       ; "media_type", `String media_type
       ; "data", `String (Types.media_source_payload source)
-      ; ( "source_type"
-        , `String (Types.media_source_kind_to_string (Types.media_source_kind_of_source source))
-        )
+      ; "source_type", `String (Types.media_source_wire_tag source)
       ]
   | Document { media_type; source } ->
     `Assoc
       [ "type", `String "document"
       ; "media_type", `String media_type
       ; "data", `String (Types.media_source_payload source)
-      ; ( "source_type"
-        , `String (Types.media_source_kind_to_string (Types.media_source_kind_of_source source))
-        )
+      ; "source_type", `String (Types.media_source_wire_tag source)
       ]
   | Audio { media_type; source } ->
     `Assoc
       [ "type", `String "audio"
       ; "media_type", `String media_type
       ; "data", `String (Types.media_source_payload source)
-      ; ( "source_type"
-        , `String (Types.media_source_kind_to_string (Types.media_source_kind_of_source source))
-        )
+      ; "source_type", `String (Types.media_source_wire_tag source)
       ]
 ;;
 

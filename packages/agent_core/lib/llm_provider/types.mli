@@ -247,38 +247,50 @@ val response_format_to_json : response_format -> Yojson.Safe.t
 
 (** {1 Content Types} *)
 
-(** Closed set of supported media source carriers, without a payload: the tag
-    a streamed [MediaDelta] chunk carries and a wire [source.type] names.
-    Unsupported provider/source combinations must fail closed instead of
-    reinterpreting the payload as base64. *)
-type media_source_kind =
-  | Base64
-  | Url
-  | File_id
-[@@deriving show]
-
-val media_source_kind_to_string : media_source_kind -> string
-val media_source_kind_of_string : string -> media_source_kind option
-
 (** A media block's source: the carrier and its payload together, so the
-    meaning of the payload string is fixed by the constructor. *)
+    meaning of the payload string is fixed by the constructor. Unsupported
+    provider/source combinations must fail closed instead of reinterpreting
+    the payload as base64. *)
 type media_source =
   | Base64 of string (** Base64-encoded bytes. *)
   | Url of string
   | File_id of string
 [@@deriving show]
 
-(** The carrier of a source, as written in a wire [source.type] field or a
-    streamed [MediaDelta]. *)
-val media_source_kind_of_source : media_source -> media_source_kind
+(** The wire [source.type] value of a source: ["base64"], ["url"] or
+    ["file_id"]. *)
+val media_source_wire_tag : media_source -> string
 
-(** Pair a decoded carrier with its payload string. *)
-val media_source_of_kind : media_source_kind -> string -> media_source
+(** Read a wire [source.type] value (trimmed, any case). [Some make] names the
+    constructor that carries the payload read next to it; [None] for a value
+    outside the three carriers. *)
+val media_source_of_wire_tag : string -> (string -> media_source) option
 
 (** The payload string of a source, whatever its carrier: base64 bytes, a URL,
-    or a file id. For wire codecs that write {!media_source_kind_of_source}
-    beside it and for byte accounting. *)
+    or a file id. For wire codecs that write {!media_source_wire_tag} beside it
+    and for byte accounting. *)
 val media_source_payload : media_source -> string
+
+(** [media_source_append accumulated chunk] appends [chunk]'s payload when both
+    use the same carrier; [None] when the carriers differ. *)
+val media_source_append : media_source -> media_source -> media_source option
+
+(** A carrier without its payload, for a record that keeps which carrier a
+    payload arrived in after the payload itself has gone elsewhere (a
+    generated media file). *)
+type media_source_kind =
+  | Base64_kind
+  | Url_kind
+  | File_id_kind
+[@@deriving show]
+
+val media_source_kind_of_source : media_source -> media_source_kind
+
+(** Same strings as {!media_source_wire_tag}. *)
+val media_source_kind_to_string : media_source_kind -> string
+
+(** Same reading as {!media_source_of_wire_tag}. *)
+val media_source_kind_of_string : string -> media_source_kind option
 
 type reasoning_detail =
   { raw : Yojson.Safe.t
@@ -855,12 +867,12 @@ type content_delta =
           does not concatenate it into invalid JSON. *)
   | MediaDelta of
       { media_type : string
-      ; source_type : media_source_kind
-      ; data : string
+      ; source : media_source
       }
   (** A chunk of a streamed media (image/document/audio) content block.
-            Carries block-level [media_type] and [source_type] with the [data]
-            payload so no new {!ContentBlockStart} fields are required. *)
+            Carries block-level [media_type] and a [source] whose payload is
+            this chunk, so no new {!ContentBlockStart} fields are required.
+            Consumers append chunks with {!media_source_append}. *)
 
 (** A provider condition an OpenAI-compatible provider declared for an error it
     reported inside a response it had already accepted with [200]: rate limited

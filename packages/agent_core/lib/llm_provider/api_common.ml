@@ -84,7 +84,7 @@ let unsupported_media_source ~backend ~block source =
        "%s does not support %s media source kind %s"
        backend
        block
-       (Types.media_source_kind_to_string (Types.media_source_kind_of_source source)))
+       (Types.media_source_wire_tag source))
 ;;
 
 let base64_media_data_url ~backend ~block ~media_type = function
@@ -419,7 +419,7 @@ let rec content_block_to_json_with
       [ "type", `String "image"
       ; ( "source"
         , `Assoc
-            [ "type", `String (media_source_kind_to_string (media_source_kind_of_source source))
+            [ "type", `String (media_source_wire_tag source)
             ; "media_type", `String media_type
             ; "data", `String (media_source_payload source)
             ] )
@@ -429,7 +429,7 @@ let rec content_block_to_json_with
       [ "type", `String "document"
       ; ( "source"
         , `Assoc
-            [ "type", `String (media_source_kind_to_string (media_source_kind_of_source source))
+            [ "type", `String (media_source_wire_tag source)
             ; "media_type", `String media_type
             ; "data", `String (media_source_payload source)
             ] )
@@ -439,7 +439,7 @@ let rec content_block_to_json_with
       [ "type", `String "audio"
       ; ( "source"
         , `Assoc
-            [ "type", `String (media_source_kind_to_string (media_source_kind_of_source source))
+            [ "type", `String (media_source_wire_tag source)
             ; "media_type", `String media_type
             ; "data", `String (media_source_payload source)
             ] )
@@ -554,14 +554,14 @@ let parse_media_block ~block_type ~make json =
   match source |> member "type" |> to_string_option with
   | None -> Error (Missing_content_block_field { block_type; field = "source.type" })
   | Some raw_source_type ->
-    (match media_source_kind_of_string raw_source_type with
+    (match media_source_of_wire_tag raw_source_type with
      | None ->
        Error (Unsupported_media_source_kind { block_type; source_type = raw_source_type })
-     | Some source_type ->
+     | Some source_of_payload ->
        let open Result.Syntax in
        let* media_type = required_string_field ~block_type ~field:"media_type" source in
        let* data = required_string_field ~block_type ~field:"data" source in
-       Ok (make ~media_type ~source:(media_source_of_kind source_type data)))
+       Ok (make ~media_type ~source:(source_of_payload data)))
 ;;
 
 let rec content_block_of_json_result ?(parse_tool_result_json = true) json =

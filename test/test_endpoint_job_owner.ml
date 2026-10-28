@@ -725,13 +725,17 @@ let failed_actor_keeps_native_cancellation_and_historical_result =
           ~before_request:(fun () ->
             if !fail_next then (fail_next:=false;raise Injected_controller_failure)) in
         let binding,spec=prepare fixture 903
-          "printf x >> recovery-ran; printf R > recovery-ready; read token < recovery-input; printf unexpected > recovery-past-input" in
+          "printf x >> recovery-ran; printf R > recovery-ready; read token < recovery-input; printf L > recovery-ready; read token < recovery-input; printf unexpected > recovery-past-input" in
         let operation=Owner.admit controller ~binding ~spec |> owner in
         let original=Owner.original operation in
         let result_waiter,result_resolver=Eio.Promise.create () in
         Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve result_resolver (Owner.await_result operation));
         Owner.await_request (Owner.activate operation) |> owner;
         Eio_unix.await_readable ready;
+        let ready_byte=Bytes.create 1 in
+        let count=Eio_unix.run_in_systhread (fun () -> Unix.read ready ready_byte 0 1) in
+        check "original native child is blocked on its first input"
+          (count=1 && Bytes.to_string ready_byte="R");
         fail_next:=true;
         let failed=Owner.cancel operation in
         (match Owner.await_request failed with
@@ -741,6 +745,25 @@ let failed_actor_keeps_native_cancellation_and_historical_result =
         (match Eio.Promise.peek result_waiter with
          | None -> ()
          | Some _ -> Alcotest.fail "controller failure replaced the live native result");
+        let claim=claim_path fixture binding in
+        let job=Filename.concat fixture.registry_path (P.Id.to_string binding.operation_id ^ ".job") in
+        let saved_claim=claim ^ ".saved" and saved_job=job ^ ".saved" in
+        Unix.rename claim saved_claim;
+        Unix.rename job saved_job;
+        Fun.protect ~finally:(fun () -> Unix.rename saved_claim claim;Unix.rename saved_job job) (fun () ->
+          (match Owner.await_request (Owner.cancel operation) with
+           | Error (Owner.Registry_error _) -> ()
+           | Ok () -> Alcotest.fail "recovered cancellation accepted missing original authority"
+           | Error error -> Alcotest.fail (Owner.error_to_string error));
+          let token=Bytes.of_string "x\n" in
+          let count=Eio_unix.run_in_systhread (fun () -> Unix.write input token 0 2) in
+          check "original child input accepts the liveness probe" (count=2);
+          Eio_unix.await_readable ready;
+          let count=Eio_unix.run_in_systhread (fun () -> Unix.read ready ready_byte 0 1) in
+          check "missing authority sent no signal to the original child"
+            (count=1 && Bytes.to_string ready_byte="L");
+          check "missing authority created no replacement original"
+            (not (Sys.file_exists claim) && not (Sys.file_exists job)));
         let other_binding,other_spec=prepare fixture 904 "printf independent; exit 8" in
         let other=Owner.admit controller ~binding:other_binding ~spec:other_spec |> owner in
         Owner.await_request (Owner.activate other) |> owner;

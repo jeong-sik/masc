@@ -2,6 +2,10 @@
     Keeper tool. HTTP authentication and host caller admission precede decoding;
     an incarnation binds every request to one live worker. No decoder dispatches
     a browser operation or supplies a fallback route. *)
+val command_tool_name : string
+(** Fixed browser-worker command tool name, shared by the advertisement and the
+    host's match of each browser service to its own export. Callers cannot
+    select another export on that worker. *)
 type command =
   | Snapshot
   | Retire

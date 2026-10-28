@@ -60,7 +60,7 @@ type selection = { first : string; rest : string list }
 
 let coverage_judged { judged; total = _ } = judged
 let coverage_total { judged = _; total } = total
-let is_partial { judged; total } = judged < total
+let is_partial { judged; total } = 0 < judged && judged < total
 let widen_coverage (coverage : judged_coverage) : coverage = coverage
 let selection_ids { first; rest } = first :: rest
 

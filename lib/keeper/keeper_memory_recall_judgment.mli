@@ -53,7 +53,10 @@ type time_mark =
 (** Why a candidate has no decision. [Capacity]: a request holding it was
     refused for size and no smaller request was left to try. [Too_large]: a
     request holding only this candidate was refused while question (b) was
-    accepted. [Provider_failed] covers every other failure of the request,
+    accepted. [Rate_limited]: every destination the request went to answered
+    HTTP 429; a 429 mixed with another failure is [Provider_failed], the way
+    the client takes a refusal for capacity only when every destination says
+    so. [Provider_failed] covers every other failure of the request,
     a timeout among them: the client reports a timeout as text, so the reason
     cannot tell it from another transport failure. [Invalid_answer] covers a
     response that does not decode, and an answer that does not decode, is
@@ -96,7 +99,9 @@ type judged_coverage
 val coverage_judged : coverage -> int
 val coverage_total : coverage -> int
 val is_partial : coverage -> bool
-(** [judged < total]. The status line adds "M of N judged" when true. *)
+(** [0 < judged && judged < total]: some candidates got a decision and some did
+    not. The status line adds "M of N judged" when true. A coverage with no
+    judged candidate is not partial: its status shows the reason and no count. *)
 
 val widen_coverage : judged_coverage -> coverage
 
@@ -109,8 +114,9 @@ val selection_ids : selection -> string list
     decision, so nothing was looked at; [reason] is the one of the first
     undecided candidate in candidate order, whatever question (b) said, and
     [total] counts the candidates. [Turn_unanswered]: candidates were judged,
-    none was carried and question (b) produced no answer. *)
-type unavailable =
+    none was carried and question (b) produced no answer. Only {!reduce}
+    builds one, so [total] is always the number of candidates. *)
+type unavailable = private
   | Nothing_judged of { reason : unjudged_reason; total : int }
   | Turn_unanswered of judged_coverage
 
@@ -119,7 +125,9 @@ val unavailable_reason_token : unavailable -> string
     [provider_failed], [invalid_answer] or [turn_question]. [Too_large] shows
     as [capacity]. *)
 
-type status =
+(** Only {!reduce} builds a status, so the selection, the counts and the
+    reason always describe the same candidates. *)
+type status = private
   | Selected of
       { selection : selection
       ; coverage : judged_coverage

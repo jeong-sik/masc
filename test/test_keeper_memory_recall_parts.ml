@@ -70,16 +70,29 @@ let test_nothing_carried_follows_the_turn_question () =
     J.Turn_question_failed
 
 let test_partial_coverage_is_counted () =
-  let candidates = [left_out "a"; undecided "b" J.Provider_failed; left_out "c"] in
-  check_reduced "partial" "none_found 2/3" candidates (J.Turn_answered J.Needs_knowledge);
-  match J.reduce ~candidates ~turn:(J.Turn_answered J.Needs_knowledge) with
+  check_reduced "partial" "none_found 2/3"
+    [left_out "a"; undecided "b" J.Provider_failed; left_out "c"]
+    (J.Turn_answered J.Needs_knowledge)
+
+let partial candidates turn =
+  match J.reduce ~candidates ~turn with
   | None -> Alcotest.fail "expected a status"
-  | Some status ->
-    Alcotest.(check bool) "partial" true (J.is_partial (J.status_coverage status));
-    (match J.reduce ~candidates:[left_out "a"] ~turn:(J.Turn_answered J.Unsure) with
-     | None -> Alcotest.fail "expected a status"
-     | Some full ->
-       Alcotest.(check bool) "full" false (J.is_partial (J.status_coverage full)))
+  | Some status -> J.is_partial (J.status_coverage status)
+
+(* "M of N judged" is added only when some, not all, of the candidates got a
+   decision. With none judged the status shows its reason and no count. *)
+let test_partial_means_some_but_not_all_got_a_decision () =
+  let turn = J.Turn_answered J.Unsure in
+  Alcotest.(check bool) "two of three" true
+    (partial [left_out "a"; undecided "b" J.Provider_failed; left_out "c"] turn);
+  Alcotest.(check bool) "one of two" true
+    (partial [undecided "a" J.Rate_limited; carried "b"] turn);
+  Alcotest.(check bool) "one of one" false (partial [left_out "a"] turn);
+  Alcotest.(check bool) "two of two" false (partial [carried "a"; left_out "b"] turn);
+  Alcotest.(check bool) "none of two" false
+    (partial [undecided "a" J.Rate_limited; undecided "b" J.Provider_failed] turn);
+  Alcotest.(check bool) "one judged and the turn question failed" true
+    (partial [left_out "a"; undecided "b" J.Capacity] J.Turn_question_failed)
 
 let test_nothing_decided_reports_the_first_reason_whatever_the_turn_said () =
   List.iter (fun turn ->
@@ -101,15 +114,43 @@ let test_contradiction_needs_a_carried_candidate () =
   | Some (J.Selected _ | J.None_found _ | J.Unavailable _) ->
     Alcotest.fail "nothing carried is none_needed, with no contradiction to note"
 
-let test_a_hundred_thousand_candidates_keep_order () =
-  let ids = List.init 100_000 string_of_int in
+let many = 100_000
+
+let test_a_hundred_thousand_candidates_keep_order_and_counts () =
+  let ids = List.init many string_of_int in
   match J.reduce ~candidates:(List.map carried ids)
           ~turn:(J.Turn_answered J.Needs_knowledge) with
   | None -> Alcotest.fail "expected a status"
-  | Some (J.Selected { selection; coverage = _; turn_question_contradicted = _ }) ->
-    Alcotest.(check (list string)) "ids" ids (J.selection_ids selection)
-  | Some (J.None_found _ | J.None_needed _ | J.Unavailable _) ->
-    Alcotest.fail "expected a selection"
+  | Some status ->
+    (match status with
+     | J.Selected { selection; coverage = _; turn_question_contradicted = _ } ->
+       Alcotest.(check (list string)) "ids" ids (J.selection_ids selection)
+     | J.None_found _ | J.None_needed _ | J.Unavailable _ ->
+       Alcotest.fail "expected a selection");
+    let coverage = J.status_coverage status in
+    Alcotest.(check (pair int int)) "judged and total" (many, many)
+      (J.coverage_judged coverage, J.coverage_total coverage)
+
+(* The exhaustive test below stops at four results. A Keeper holds tens to
+   hundreds of candidates, so the counts and the order are also read at 100. *)
+let test_counts_hold_far_past_the_exhaustive_range () =
+  let pairs = 50 in
+  let total = pairs + pairs in
+  let alternating =
+    List.concat (List.init pairs (fun pair ->
+      [ carried (Printf.sprintf "c%d" pair)
+      ; undecided (Printf.sprintf "u%d" pair) J.Provider_failed
+      ])) in
+  let carried_ids = List.init pairs (Printf.sprintf "c%d") in
+  check_reduced "half judged"
+    (Printf.sprintf "selected %d/%d [%s]" pairs total (String.concat "," carried_ids))
+    alternating (J.Turn_answered J.Needs_knowledge);
+  check_reduced "all left out" (Printf.sprintf "none_found %d/%d" total total)
+    (List.init total (fun index -> left_out (string_of_int index)))
+    (J.Turn_answered J.Needs_knowledge);
+  check_reduced "none judged" (Printf.sprintf "unavailable 0/%d rate_limited" total)
+    (List.init total (fun index -> undecided (string_of_int index) J.Rate_limited))
+    J.Turn_question_failed
 
 let test_tokens () =
   Alcotest.(check (list string)) "question (a) labels"
@@ -123,11 +164,11 @@ let test_tokens () =
     ["capacity"; "too_large"; "rate_limited"; "provider_failed"; "invalid_answer"]
     (List.map J.unjudged_reason_token J.all_of_unjudged_reason)
 
-(* Every list of up to three results over every kind of result, against every
+(* Every list of up to four results over every kind of result, against every
    answer to question (b), read against a second statement of the rule that
    shares nothing with [J.reduce]: the status line it must produce, written as
-   text. 7 results per position (carried, left out, five reasons) give 400
-   lists, so 1600 cases. *)
+   text. 7 results per position (carried, left out, five reasons) give 2801
+   lists, so 11204 cases. *)
 let result_kinds =
   `Carried :: `Left_out :: List.map (fun reason -> `Undecided reason) J.all_of_unjudged_reason
 
@@ -172,8 +213,8 @@ let status_line_by_rule kinds turn =
   | _ :: _, _ :: _, [], _, J.Turn_question_failed -> Some ("unavailable " ^ counts ^ " turn_question")
 
 let test_reduce_agrees_with_the_rule_on_every_short_list () =
-  let lists = lists_up_to 3 in
-  Alcotest.(check int) "lists" 400 (List.length lists);
+  let lists = lists_up_to 4 in
+  Alcotest.(check int) "lists" 2801 (List.length lists);
   List.iter (fun kinds ->
     List.iter (fun turn ->
       Alcotest.(check (option string)) "status line"
@@ -240,7 +281,10 @@ let test_dates_are_utc_days () =
   Alcotest.(check json) "last second of the day" (`String "2023-11-14") (day before "first_seen");
   Alcotest.(check json) "first second of the next day" (`String "2023-11-15") (day before "last_seen");
   Alcotest.(check json) "before 1970" (`String "1969-12-31")
-    (day (C.of_fact (fact ~first_seen:(-86_400.0) "x")) "first_seen")
+    (day (C.of_fact (fact ~first_seen:(-86_400.0) "x")) "first_seen");
+  (* 0999-12-31T12:00:00Z *)
+  Alcotest.(check json) "a year below 1000 keeps four digits" (`String "0999-12-31")
+    (day (C.of_fact (fact ~first_seen:(-30_610_267_200.0) "x")) "first_seen")
 
 let test_dates_ignore_the_fraction_of_a_second () =
   let day seconds name = line_field (C.of_fact (fact ~first_seen:seconds ~last_seen:seconds "x")) name in
@@ -284,11 +328,14 @@ let cut ~budget sizes =
 let check_cut label expected ~budget sizes =
   Alcotest.(check (list (list int))) label expected (cut ~budget sizes)
 
+(* Larger than a piece, so a cap on the claim at the piece size or at 64 KB would show. *)
+let long_claim_bytes = 300_000
+
 let test_a_long_claim_is_kept_whole () =
-  let claim = String.make 50_000 'x' in
+  let claim = String.make long_claim_bytes 'x' in
   let candidate = C.of_fact (fact claim) in
   Alcotest.(check json) "claim" (`String claim) (line_field candidate "claim");
-  Alcotest.(check int) "line bytes" (line_overhead + 50_000) (C.line_bytes candidate)
+  Alcotest.(check int) "line bytes" (line_overhead + long_claim_bytes) (C.line_bytes candidate)
 
 let test_split_boundary_is_inclusive () =
   check_cut "fits exactly" [[500; 500]; [300]] ~budget:1000 [500; 500; 300];
@@ -545,14 +592,17 @@ let test_candidate_question_is_the_measured_wording () =
     ]
     (meanings "candidate" question)
 
-(* Questions (b) and (c) have not been run against Jev. What is fixed here is
-   what must not drift unnoticed: the guard against instructions in the data,
-   the pointer to the field to read, and which meaning belongs to which label. *)
-let test_turn_and_time_questions_keep_their_guard_and_meanings () =
+(* Questions (b) and (c) have not been run against Jev, so their wording will
+   change once layer 1a-2 reads the first answers. It is fixed in full here all
+   the same: what an unclear turn answers and what counts as time-bound are
+   meanings, and a change to either has to show in this test. *)
+let test_turn_and_time_questions_are_fixed_wording () =
   let _, turn = one_question "turn" (ok_request "turn" (Codec.turn_request ~purpose)) in
-  let turn_instructions, _ = choice_parts "turn" turn in
-  Alcotest.(check bool) "turn guard" true (contains turn_instructions guard);
-  Alcotest.(check bool) "turn names the purpose" true (contains turn_instructions "state.purpose");
+  Alcotest.(check string) "turn instructions"
+    ("Does the turn in state.purpose need stored knowledge, such as a lesson, a procedure, a \
+      constraint or an earlier decision? " ^ guard
+     ^ " Answer unsure when the turn input does not tell.")
+    (fst (choice_parts "turn" turn));
   Alcotest.(check (list (pair string (option string)))) "turn meanings"
     [ "yes", Some "The turn is likely to rely on stored knowledge."
     ; "no", Some "The turn can be handled from its own input; stored knowledge would not matter."
@@ -561,12 +611,13 @@ let test_turn_and_time_questions_keep_their_guard_and_meanings () =
     (meanings "turn" turn);
   let time_request = ok_request "time" (Codec.time_request (piece_of two_facts)) in
   List.iter (fun (id, question) ->
-    let instructions, _ = choice_parts "time" question in
-    Alcotest.(check bool) "time guard" true (contains instructions guard);
-    Alcotest.(check bool) "time names its entry" true
-      (contains instructions ("whose question_id is " ^ id ^ ". Does that memory hold a value tied to a moment?"));
-    Alcotest.(check bool) "time rule" true
-      (contains instructions "Choose time_bound when it records a number, a commit SHA");
+    Alcotest.(check string) "time instructions"
+      ("Read state.candidates and find the entry whose question_id is " ^ id
+       ^ ". Does that memory hold a value tied to a moment? " ^ guard
+       ^ " Choose time_bound when it records a number, a commit SHA, a branch head, a \
+          verdict or a progress state that may have changed since it was recorded; choose \
+          standing for a lasting rule, preference or method.")
+      (fst (choice_parts "time" question));
     Alcotest.(check (list (pair string (option string)))) "time meanings"
       [ "standing", Some "The memory stays true until someone changes it."
       ; "time_bound", Some "The memory holds a value that may have changed since it was recorded."
@@ -648,14 +699,18 @@ let () =
             test_nothing_carried_follows_the_turn_question
         ; Alcotest.test_case "partial coverage is counted" `Quick
             test_partial_coverage_is_counted
+        ; Alcotest.test_case "partial means some but not all got a decision" `Quick
+            test_partial_means_some_but_not_all_got_a_decision
         ; Alcotest.test_case "nothing decided reports the first reason" `Quick
             test_nothing_decided_reports_the_first_reason_whatever_the_turn_said
         ; Alcotest.test_case "too large shows as capacity" `Quick
             test_too_large_shows_as_capacity
         ; Alcotest.test_case "a contradiction needs a carried candidate" `Quick
             test_contradiction_needs_a_carried_candidate
-        ; Alcotest.test_case "a hundred thousand candidates keep order" `Quick
-            test_a_hundred_thousand_candidates_keep_order
+        ; Alcotest.test_case "a hundred thousand candidates keep order and counts" `Quick
+            test_a_hundred_thousand_candidates_keep_order_and_counts
+        ; Alcotest.test_case "counts hold far past the exhaustive range" `Quick
+            test_counts_hold_far_past_the_exhaustive_range
         ; Alcotest.test_case "reduce agrees with the rule on every short list" `Quick
             test_reduce_agrees_with_the_rule_on_every_short_list
         ; Alcotest.test_case "tokens" `Quick test_tokens
@@ -713,8 +768,8 @@ let () =
         ; Alcotest.test_case "turn answers" `Quick test_turn_answers
         ; Alcotest.test_case "candidate question is the measured wording" `Quick
             test_candidate_question_is_the_measured_wording
-        ; Alcotest.test_case "turn and time questions keep their guard and meanings" `Quick
-            test_turn_and_time_questions_keep_their_guard_and_meanings
+        ; Alcotest.test_case "turn and time questions are fixed wording" `Quick
+            test_turn_and_time_questions_are_fixed_wording
         ; Alcotest.test_case "states hold the data and never a rule" `Quick
             test_states_hold_the_data_and_never_a_rule
         ; Alcotest.test_case "time answers follow the candidate reading rules" `Quick

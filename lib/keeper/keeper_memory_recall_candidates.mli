@@ -19,7 +19,8 @@ val line : t -> Yojson.Safe.t
     its kind only, never a trace id. *)
 
 val line_bytes : t -> int
-(** Bytes of the compact UTF-8 serialization of {!line}. *)
+(** Bytes of the compact serialization of {!line}, as the JSON writer emits
+    it: UTF-8 whenever the claim is. *)
 
 val state_bytes_per_piece : int
 (** Most bytes of candidate lines in one request. Jev refused a 159.7 KB

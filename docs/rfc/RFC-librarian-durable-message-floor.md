@@ -91,6 +91,29 @@ durable pass 가 첫 턴 하나(`To_first_cut_point`)의 범위에서 typed 크�
 
 바닥 단계 수는 그 턴의 메시지 수다. 이 경로는 한 턴의 글이 frame 을 넘을 때만 탄다. 도구 결과가 크기에 들어가지 않으므로 드물다고 본다(1.2절). 드물기 때문에, 이 경로의 비용보다 그 Keeper 의 Memory 가 영영 멈추는 것을 막는 쪽이 이 RFC 의 이유다.
 
+### 3.6 L3 착수 전에 코드로 확인한 것 (2026-10-28)
+
+3.2~3.4 는 "gate 요청과 같은 방식"으로 단계 사슬을 쓴다고 했다. L3 을 쓰려고 코드를 읽어 보니 그대로 되지 않는 곳이 있다. 아래는 읽은 사실이고, 구현 방식은 3.7 에서 고른다.
+
+1. **후속 original 장치는 이미 있다.** `Lane_addon_request_progress` 는 `Rejected` → `Subdividing(거절, 후속)` → `Subdivided` 와 `Successor_intended/observed` 를 가진다. 실행 거절된 original 이 더 좁은 후속을 잇는 일반 장치이고 admission 이 쓴다. 반면 history 의 `predecessor`(`Keeper_librarian_durable_execution.validate_lineage`)는 기준이 낡은(`is_superseded`) 원본의 후속만 허용한다. 단계 사슬은 앞의 것 위에 올릴 수 있고 뒤의 것으로는 안 된다.
+2. **한 메시지짜리 original 을 표현할 수 없다.** `Keeper_librarian_durable_capture.create` 는 `source` 가 범위를 고르고 `input` 으로 투영되는지 확인한다. 그 `source` 는 턴 범위 전체의 길이와 digest 를 쥔다. 메시지 하나만 담은 `input` 은 이 확인을 통과하지 못한다. 메시지로 좁힌 capture 형태가 새로 필요하다.
+3. **게시는 한 덩어리다.** `Keeper_librarian_durable_commit.publish` 는 gate journal(root, retries, leaf), 영수증 검증, `settle_positions`(atom·official·external cursor)를 한꺼번에 한다. "Memory 만 게시하고 위치는 나중에 옮기기" 모드는 없다.
+4. **위치 단위는 턴이다.** atom 과 official 위치는 턴 단위로 움직이고 메시지 단위가 아니다. 한 턴 안의 중간 단계가 위치를 옮길 수는 없다.
+5. **Runtime 바닥의 단계는 휘발성 계약을 가진다.** `Keeper_librarian_message_floor.infer` 는 매니페스트를 모든 메시지에 먼저 묶고, Memory 를 한 번 캡처하고, 앞 단계의 staged facts 와 working state 를 다음 단계에 넘기고, 도구·상대 관찰은 한 Memory 단계가 받을 때까지 보존한다. 관찰만 남으면 관찰 단독 단계를 요구한다. durable 단계는 이 계약을 durable 하게 옮겨야 한다.
+6. **durable 제안은 입력 하나에 대한 완결된 Memory 답이다.** `durable_proposal` 은 `absorption`(facts, new_claims, superseding, absorbed)을 싣고, 한 입력의 현재 Memory 기준 위에서 검증된다. 앞 단계 결과 위에서 다음 단계를 검증하는 형태는 없다.
+
+### 3.7 구현 방식 두 가지
+
+| | A. 3.2~3.3 그대로: 단계 original + 끝의 program | B. 단계마다 일반 durable 게시, 위치는 마지막에 |
+|---|---|---|
+| 단계 | 메시지 하나짜리 새 request kind. 결과(결정, working state)를 original 에 쥔다 | 메시지로 좁힌 source 를 가진 일반 original. 단계마다 정상 게시 |
+| 게시 | 끝에 단계들의 결정과 구멍으로 program 하나. gate 와 source lock 을 합친 program 에 맞게 다시 쓴다 | 기존 `publish` 의 gate journal·검증·복구를 그대로 쓴다. `settle_positions` 를 마지막 단계까지 미루는 모드를 더한다 |
+| 새로 만드는 것 | 메시지 capture, 단계 결과 보존, program 조립, 합친 gate 와 복구, 구멍 영수증 | 메시지 capture, 위치 미루기 모드, 구멍 영수증, "이번 턴의 다음 메시지" 판정 |
+| 위험 | 3.3·3.4 의 게시와 복구를 새로 짠다. 휘발성 계약(3.6의 5)을 그대로 옮겨야 한다 | 중간 단계 Memory 가 위치보다 앞서 보인다. crash 뒤 "이 턴의 어디까지 했나"를 기존 original 들의 목록에서 도출해야 한다. 관찰 합류 규칙이 단계마다 달라질 수 있다 |
+| 확인 못 한 것 | gate 가 program 한 개를 받는지 | 구멍이 Memory 에 어떻게 들어가는지(`committed_unread_messages` 와 영수증), 위치 미루기가 `receipt_state` 의 전제를 깨는지 |
+
+판단은 아직 없다. 새로 만드는 양은 B 가 작아 보이지만, 위의 확인 못 한 두 가지(구멍의 저장 경로, `receipt_state` 전제)가 B 의 성립을 정한다. L3 구현 전에 이 둘을 코드로 확인하고 고른다.
+
 ## 4. 다른 안
 
 - **턴 전체를 구멍으로 기록하고 지나가기.** 고르지 않는다. 읽을 수 있는 메시지까지 잃는다. lifecycle RFC 는 지나가는 자리를 바닥의 메시지 하나로 좁혔다.
@@ -105,7 +128,7 @@ durable pass 가 첫 턴 하나(`To_first_cut_point`)의 범위에서 typed 크�
 |---|---|---|
 | L1 | 이 RFC | — |
 | L2 | durable `refusal_report` 가 3.1 의 크기 거절에만 `Smaller_input_may_help`·`provider_input_refusals` 를 싣는다. host 기록이 없는 frame 거절은 final 만으로, 기록이 있는 거절은 실행 영수증의 소진 증거로 판정한다. 바닥은 아직 없다 | 크기 거절과 다른 거절의 보고 차이, 영수증 증거가 없는 `Input_capacity` 는 근거 없음 |
-| L3 | 바닥 단계 request kind, 앞 단계 digest 연결, inventory·복구 | 단계 사슬 crash·재개, 같은 단계 재호출 없음 |
+| L3 | 3.7 에서 고른 방식의 바닥 단계, 앞 단계 연결, inventory·복구. 메시지로 좁힌 capture 포함 | 단계 사슬 crash·재개, 같은 단계 재호출 없음 |
 | L4 | program 게시, 구멍 영수증, source lock, settle | 실제 worker 와 실제 4 MiB frame 으로 5 MB 메시지 하나가 든 턴: 구멍 하나와 나머지 메시지의 Memory, 위치 이동. `specs/bug-models/LibrarianRead.tla` 의 `NoAtomPassedUnread` 와 맞는지 |
 | L5 | bench `5:5` 측정, RFC status 갱신 | — |
 

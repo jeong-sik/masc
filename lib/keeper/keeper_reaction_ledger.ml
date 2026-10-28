@@ -159,7 +159,7 @@ let save_schedule_occurrence_receipt ~base_path ~keeper_name
   | Keeper_event_queue.Schedule_due _ ->
     let occurrence_id = source.post_id in
     let path = schedule_occurrence_receipt_path ~base_path ~keeper_name ~occurrence_id in
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* previous =
       schedule_occurrence_receipt_result ~base_path ~keeper_name ~occurrence_id
     in
@@ -529,7 +529,7 @@ let project_event_queue_transition_outbox_result
       ~keeper_name
       ~expected_transition_id
   =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   Keeper_event_queue_persistence.project_transition_outbox_result
     ~retain_previous:(transition_prior_receipt_has_standing_asker
                        ~base_path
@@ -1187,7 +1187,7 @@ let read_delivery_evidence_file ~keeper_name path =
 ;;
 
 let read_delivery_evidence_cached ~keeper_name store ~not_before =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* paths =
     Dated_jsonl.range_day_file_paths_result store
       ~since:(Jsonl_writer.day_key ~ts:not_before) ~until:"9999-12-31"

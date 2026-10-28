@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 
 module Store = Keeper_chat_operation_store
 module String_set = Set.Make (String)

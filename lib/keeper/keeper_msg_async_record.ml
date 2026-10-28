@@ -1,6 +1,6 @@
 open Keeper_msg_async_types
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let record_schema_version = 6
 
 let persistence_target_to_string = function

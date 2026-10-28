@@ -1,6 +1,6 @@
 module Journal = Keeper_native_task_journal
 module Task = Runtime_native_tasks
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type error_code =
   | Store_missing | Invalid_scope | Cursor_store_mismatch | Cursor_ahead

@@ -970,7 +970,7 @@ let operation_projection_of_inventory ~has_claimable_queued ~next_runtime_retry_
 
 let read_operation_projection operation_store ~now =
   run_operation_store ~label:"keeper chat operation projection" (fun () ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* inventory = Chat_operation_store.inventory operation_store in
     let* has_claimable_queued =
       if inventory.Chat_operation_store.queued_count = 0 then Ok false
@@ -1082,7 +1082,7 @@ let recover_operation_availability t =
        command: only authoritative queued/terminal rows determine the next
        action. *)
     let recovered = run_operation_store ~label:"recover Keeper operation store" (fun () ->
-      let ( let* ) = Result.bind in
+      let open Result.Syntax in
       let path = Chat_operation_store.path t.operation_store in
       let* () = Chat_operation_store.close t.operation_store in
       Chat_operation_store.open_existing ~path)
@@ -1193,7 +1193,7 @@ let run_operation_read t ~label f =
 ;;
 
 let prepare_direct_input_wait t ~trace_id ~operation_id ~request =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let invalid detail = Error (Chat_operation_store.Invalid_input detail) in
   let* operation = Chat_operation_store.get t.operation_store operation_id in
   let* operation = match operation with
@@ -1379,7 +1379,7 @@ let start
       match pending with
       | [] -> Ok !changed_any
       | ((operation_id, observed, revalidate) as witness) :: rest ->
-        let ( let* ) = Result.bind in
+        let open Result.Syntax in
         let* current = run_operation_read t ~label:"read direct retry wait witness"
           (fun () -> Chat_operation_store.direct_runtime_retry t.operation_store ~operation_id) in
         (match current with
@@ -1548,7 +1548,7 @@ let start
        attempt is unsettled. *)
     let settle_native_call ~operation_id ~policy =
       run_operation_command t ~label:"close active native call" (fun () ->
-        let ( let* ) = Result.bind in
+        let open Result.Syntax in
         let* native_call =
           Chat_operation_store.direct_native_call t.operation_store ~operation_id
         in
@@ -1901,7 +1901,7 @@ let start
             | Some seed ->
               reject_if_stopping state (fun () ->
                 reject_if_shutdown shutdown_operation_id (fun () ->
-                  let ( let* ) = Result.bind in
+                  let open Result.Syntax in
                   let* meta = match command, (Keeper_owner_reducer.projection state).meta,
                       Atomic.get t.turn_in_flight with
                     | Keeper_owner_reducer.Create meta,None,None -> Ok meta
@@ -2140,7 +2140,7 @@ let start
                   when not meta.paused && Keeper_interrupt_token.equal child interrupt_token
                     && Keeper_id.Trace_id.equal meta.runtime.trace_id observed.checkpoint.trace_id ->
                 run_operation_read t ~label:"capture original direct input response" (fun () ->
-                  let ( let* ) = Result.bind in
+                  let open Result.Syntax in
                   let* operation = Chat_operation_store.get t.operation_store operation_id in
                   let* operation = match operation with
                     | Some ({Chat_operation.state=Queued;_} as operation) -> Ok operation
@@ -2190,7 +2190,7 @@ let start
                   && Keeper_id.Trace_id.equal meta.runtime.trace_id observed.checkpoint.trace_id
                   && Keeper_input_wait_response.belongs_to receipt writer.response_authority ->
               run_operation_command t ~label:"accept original direct input response" (fun () ->
-                let ( let* ) = Result.bind in
+                let open Result.Syntax in
                 let* recorded=Chat_operation_store.direct_input_response_intent t.operation_store ~operation_id:writer.response_operation in
                 let* () = match recorded with
                   | Some intent when Keeper_semantic_execution.equal_input_response_intent intent
@@ -2338,7 +2338,7 @@ let start
             loop state shutdown_operation_id)
           else
           let authorization =
-            let ( let* ) = Result.bind in
+            let open Result.Syntax in
             let* interrupt = exact_interrupt target in
             let* pending = match interrupt, target, expected_control_token with
             | Interrupt_not_current, Direct_operation operation_id, Some token
@@ -2556,7 +2556,7 @@ let start
           loop state shutdown_operation_id
         | Command (Observe_runtime_retry_waits, resolve) ->
           let response =
-            let ( let* ) = Result.bind in
+            let open Result.Syntax in
             let* () = recover_operation_availability t in
             revalidate_retry_waits () in
           (match response with
@@ -2577,7 +2577,7 @@ let start
              before attempting a claim, even while an autonomous turn owns the
              slot, so its next safe boundary can see the ready successor. *)
           let response =
-            let ( let* ) = Result.bind in
+            let open Result.Syntax in
             let* () = recover_operation_availability t in
             let* _ = revalidate_retry_waits () in
             run_operation_command t ~label:"refresh Keeper operation readiness"
@@ -3178,7 +3178,7 @@ let run_maintenance_if_idle ?(defer_to_chat = false) t run =
 let respond_direct_input_wait t ~net ~operation_id ~observed ~response =
   let invalid detail = Error (Response_owner_error (Operation_rejected (Chat_operation_store.Invalid_input detail))) in
   let run () =
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* child = match Keeper_turn_preview_owner.current () with
       | Some child -> Ok child | None -> invalid "response has no inherited maintenance child" in
     let* writer = request t (Begin_direct_input_response {operation_id;observed;child})

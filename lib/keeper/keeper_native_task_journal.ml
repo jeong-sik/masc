@@ -1,5 +1,5 @@
 module Task = Runtime_native_tasks
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type source = Operation of Keeper_chat_operation.Operation_id.t | Autonomous_turn of Ids.Turn_ref.t
 type error =

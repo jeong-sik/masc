@@ -190,7 +190,7 @@ type claim_error =
   | Active_unsettled
   | Turn_already_inflight
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let schema = "masc.keeper.official-client-session.v2"
 let filename = "session.json"
 let state_dirname = "official-client-runtime"
@@ -1911,7 +1911,7 @@ let reconcile_process_restart ~base_path ~keeper_name ~expected
 
 let resolve_recovery ~base_path ~keeper_name ~expected ~recovery_id ~resolution
     ~resolved_by ~resolved_at =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* () =
     match non_empty "resolved_by" resolved_by with
     | Ok () -> Ok ()

@@ -1,7 +1,7 @@
 module Store = Keeper_owned_job_store
 module Backend = Keeper_owned_job_backend
 module Invocation = Keeper_owned_job_invocation
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let save (record : Store.record) ~phase ~cancel_requested ~outputs ~detail =
   if phase = record.phase && cancel_requested = record.cancel_requested

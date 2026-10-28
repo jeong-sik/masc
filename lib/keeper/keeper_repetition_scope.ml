@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 module Snapshot = Keeper_repetition_snapshot
 module Id = Keeper_execution_scope_id
 

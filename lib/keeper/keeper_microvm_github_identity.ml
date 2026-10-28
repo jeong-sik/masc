@@ -47,7 +47,7 @@ let rec error_message = function
   | Removal_failed detail -> "guest identity removal unconfirmed: " ^ detail
   | Filesystem_operation_failed _ -> "guest identity filesystem operation failed"
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let guest_name ~base_path ~keeper_name ~network_mode =
   Keeper_sandbox_container_name.make

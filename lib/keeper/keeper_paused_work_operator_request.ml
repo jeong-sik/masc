@@ -15,7 +15,7 @@ type t =
       }
   | Ack_source_terminal of Source_terminal.request
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let schema = "masc.keeper.paused-work.operator-request.v4"
 
 let sorted fields =

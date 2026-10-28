@@ -1,5 +1,5 @@
 (* Peer binary handoff uses the workspace blob store, never peer host paths. *)
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let reference = Keeper_peer_artifact_ref.of_json
 

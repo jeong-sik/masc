@@ -14,7 +14,7 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 include Keeper_msg_async_types
 open Keeper_msg_async_record

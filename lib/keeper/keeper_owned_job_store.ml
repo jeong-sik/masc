@@ -1,6 +1,6 @@
 module Backend = Keeper_owned_job_backend
 module Cleanup = Keeper_owned_job_cleanup_state
-let ( let* ) = Result.bind
+open Result.Syntax
 
 module Job_id = Keeper_owned_job_identity.Job_id
 

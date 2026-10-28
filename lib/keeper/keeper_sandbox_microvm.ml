@@ -580,7 +580,7 @@ type nerdctl_native_image =
   }
 
 let parse_nerdctl_native_images raw =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let field key = function
     | `Assoc fields ->
       (match List.filter (fun (name, _) -> String.equal name key) fields with
@@ -861,7 +861,7 @@ type apple_boot_failure =
 let apple_turn_start_argv ~container_name ~(plan : Keeper_microvm_boot_plan.t)
       ~lifecycle_labels ~dns ~policy_proxy =
   let module Plan = Keeper_microvm_boot_plan in
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let execution_environment = match plan.network with
     | Plan.Network_none | Plan.Network_inherit -> []
     | Plan.Network_policy _ ->
@@ -1064,7 +1064,7 @@ let policy_network_inspect_argv_for backend ~keeper_name =
    compiled-in 192.168.128.1 would be right until someone had a network
    already on it. *)
 let policy_network_gateway ~inspect =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let fields name = function
     | `Assoc fields ->
       let keys = List.map fst fields in
@@ -1398,7 +1398,7 @@ let reclaim_apple_work_volume ~run ~on_cleanup_error ~timeout_sec ~remove_timeou
       Eio.Switch.on_release sw (fun () ->
         released := cleanup ();
         match !released with Ok () -> () | Error detail -> on_cleanup_error detail);
-      let ( let* ) = Result.bind in
+      let open Result.Syntax in
       let* () = cleanup () in
       let status, stdout, stderr = run ~timeout_sec
           (apple_work_volume_trim_argv ~keeper_name ~volume_name ~image) in
@@ -2306,7 +2306,7 @@ let running_of_nerdctl_state_json raw =
 ;;
 
 let running_of_apple_inspect_json raw =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let fields name = function
     | `Assoc fields ->
       let keys = List.map fst fields in
@@ -2337,7 +2337,7 @@ let running_of_apple_inspect_json raw =
    every identity/isolation field below is mandatory and duplicate-free. *)
 let apple_guest_facts ~container_name raw =
   let module Plan = Keeper_microvm_boot_plan in
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let ( >>= ) = Result.bind in
   let invalid field = Error ("container inspect: invalid or missing " ^ field) in
   let object_fields field = function
@@ -2684,7 +2684,7 @@ type nerdctl_inventory_entry =
   }
 
 let nerdctl_inventory_of_json_lines raw =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let object_fields = function
     | `Assoc fields ->
       let names = List.map fst fields in
@@ -2958,7 +2958,7 @@ let list_live_containers_for backend ~base_path ~keeper_name ~timeout_sec =
      | Unix.WEXITED 0, stdout, _ ->
        (match listing with
         | Nerdctl_labelled_json_lines _ ->
-          let ( let* ) = Result.bind in
+          let open Result.Syntax in
           let* containers = nerdctl_live_containers_of_json_lines ~base_path ~keeper_name stdout in
           (* ps Status is display prose. Ask the existing typed bool inspect
              for each scoped guest so status does not misreport unknown as idle. *)

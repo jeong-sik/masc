@@ -39,7 +39,7 @@ let tool_uses (message : Agent_core.Types.message) =
 ;;
 
 let bind_completed_arguments ~completed_before ~seed ~replay_prefix messages =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   (* A cycle can span more than one atom when ordinary Assistant messages
      occur between its ToolUse and final ToolResult. Restrict the source
      before partitioning: an opener below the boundary is insufficient. *)

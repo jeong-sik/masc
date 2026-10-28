@@ -25,7 +25,7 @@ let container_path_of_host_impl ~read_authority ~(config : Workspace.config) ~(m
     : (string, string) result =
   match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
   | Endpoint_owned ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* remote_workspace_root =
       (match read_authority with
        | None -> Keeper_sandbox_remote_lane.workspace_root ~config ~meta
@@ -193,7 +193,7 @@ let run_endpoint_command_with_status
     ~timeout_sec
     ()
   =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let host_root = host_playground_root ~config ~meta in
   let* endpoint = acquire_endpoint ~cwd:host_root in
   let* cwd =
@@ -425,7 +425,7 @@ let run_command_with_capture ?read_authority ?turn_sandbox_factory
                      | Process_output_capture.Incomplete_file _ -> Error "Binary stdout did not reach authoritative EOF"
                      | Process_output_capture.Capture_failed {message; _} -> Error message))
           in
-          let ( let* ) = Result.bind in
+          let open Result.Syntax in
           let* st, out = captured in
           (match st with
            | Unix.WEXITED code
@@ -595,7 +595,7 @@ let read_file ?read_authority ?turn_sandbox_factory ?(start_line = 1) ~config ~(
                 operation argument (Unix.error_message error)))
 
 let read_complete_file ?read_authority ?turn_sandbox_factory ~config ~(meta : keeper_meta) ~host_path ~timeout_sec () =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* path = container_path_of_host_impl ~read_authority ~config ~meta ~host_path in
   let* _, bytes = run_command_with_capture ?read_authority ?turn_sandbox_factory ~config ~meta
       ~command_argv:["cat"; path] ~max_bytes:None ~timeout_sec () in

@@ -264,7 +264,7 @@ let prepare_agent_setup
       ()
   : (Keeper_run_tools_hooks.agent_setup, Agent_core.Error.t) result
   =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let runtime_id_string = runtime_id in
   let active_checkpoint_owner = ref None in
   let active_tool_result_inline_ceiling_bytes = ref Common.max_tool_result_wire_bytes in

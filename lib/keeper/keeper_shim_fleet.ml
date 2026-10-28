@@ -9,7 +9,7 @@ let error_detail = function
 ;;
 
 let row ~config keeper : (Yojson.Safe.t, error) result =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let unread detail = Keeper_meta_unread { keeper; detail } in
   (* Status reads must not create the store or repair a metadata snapshot. *)
   let path =

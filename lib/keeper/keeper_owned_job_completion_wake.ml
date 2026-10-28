@@ -1,5 +1,5 @@
 module Store = Keeper_owned_job_store
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type report =
   { inspected : int; waiting : int; delivered : int; retired : int

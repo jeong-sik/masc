@@ -73,7 +73,7 @@ let parse_error_to_string = function
   | Host_name_without_build { name } ->
     Printf.sprintf "host image %S has no build; names belong in the shipped catalog" name
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* A catalog name is a recipe directory name under sandbox-images/, so the
    rule is the recipe loader's own: a buildable name is always promotable. *)

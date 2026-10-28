@@ -36,7 +36,7 @@ type save_result =
   | Created
   | Existing of t
 
-let ( let* ) = Result.bind
+open Result.Syntax
 (* The receipt shape and the store that holds it move together. [of_yojson] is
    an exhaustive match over the sorted field list, so a field removed from the
    shape makes every stored receipt unreadable, and [save_if_absent] reads

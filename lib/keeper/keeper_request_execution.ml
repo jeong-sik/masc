@@ -1,5 +1,5 @@
 module Agent = Agent_core.Agent
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type t =
   { runtime : Agent.execution_runtime

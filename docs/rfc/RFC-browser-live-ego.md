@@ -261,7 +261,10 @@ across worker replacement, and never applies an old assertion to a replacement.
 Dialog answers, handoff, takeover and generic “go” do not create this assertion.
 It does not establish original SDK cleanup, visible UI or successful login. The
 existing native producer settlement contract is not strengthened by this local
-admission state: in particular, the known workflow path inferring release from
-Page.info after a void keyboard method remains a separate SDK/evidence gap.
+admission state. Native workflows stop on a receipt-less holding step without
+using Page.info to infer release or counting that uncertain step as completed.
+The current SDK's keyboard.type returns void even after ordinary typing, so
+this requires explicit operator recovery there as well. It does not supply the
+missing SDK settlement contract or establish non-workflow input cleanup.
 Real operator recovery and current installed Keeper/UI acceptance still require
 execution evidence.

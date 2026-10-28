@@ -82,9 +82,20 @@ An exception after entering their SDK method cannot be classified as definitely
 before input. A dialog receipt can interrupt a button/key sequence, and
 `acceptDialog()` plus `info()` does not confirm its release: `info()` has no
 held-button or held-key state. Automatic continuation after such an interruption
-remains unsupported by this integration. Safe continuation requires the SDK to
-preserve the original input's release progress and acknowledge its cleanup;
-the current receipt contains only popup and dialog information. See the
+remains unsupported by this integration. In particular, the installed SDK's
+`keyboard.type()` returns void after normal typing and can also return void
+after swallowing a dialog interruption. Even if a dialog closes before the
+subsequent `info()` read, that read cannot distinguish the two outcomes.
+The workflow therefore stops at a receipt-less holding step, leaves it outside
+the completed prefix and retains `inputReleased=false`; no later step or final
+snapshot runs. This also requires explicit recovery after ordinary void-returning
+typing. Keep the original command and inspect the page rather than typing it
+again. The original installation's private operator input-reset confirmation
+permits a new distinct command after the operator has checked/reset that Space;
+it does not prove SDK cleanup. Automatic, fully settled `keyboard.type` workflows
+require an SDK contract that distinguishes the original input's completion from
+interruption. Observed action receipts still report immediate popup/dialog data,
+and do not verify application success. See the
 [SDK input boundary](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/src/page-model.ts#L2674),
 [pointer implementation](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/src/driver/page-actions.ts#L1183)
 and [keyboard implementation](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/src/driver/page-keyboard.ts#L115).

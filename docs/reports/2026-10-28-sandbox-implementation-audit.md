@@ -67,7 +67,8 @@ is open (`dashboard/src/api/execute-output.ts:66-116`,
 Dashboard IDE, opening **Terminal** for a Keeper enables this subscription
 (`dashboard/src/components/ide/ide-shell.ts:935-968,1208-1215`). The endpoint
 requires control-plane authentication: an unauthenticated read-only local probe
-returned `missing_token`, so no authenticated live event or paint was observed.
+returned `missing_token`, and the actual Dashboard also presented `Login
+required`. No authenticated live event or paint was observed.
 
 This is a real-time **web Dashboard terminal**, not a separate interactive PTY
 or a native-TUI stream viewer. The native TUI has no consumer for this endpoint
@@ -158,8 +159,14 @@ not mark unrelated open defects as resolved.
 - **First final-stack run:** run `40697855534`, head
   `be25646e1d31475d755bd0f5faf652b073873f4c`: completed/failure during OCaml
   compilation (warning 16: the new optional resolver argument needed a final
-  `()`). No behavioral result was inferred. That application is now complete;
-  a new five-suite run is required at the resulting stack head.
+  `()`). No behavioral result was inferred. That application is now complete.
+- **Second final-stack run:** run `40699506153`, head
+  `f72a51bb47d0911b062a3468bbb7d6087b1c9139`: completed/failure with only the
+  microVM endpoint-profile fixture reporting a missing Eio execution context.
+  The new preflight diagnostic passed; `read_backend` ran 81 tests with this
+  one failure. `microvm` 114/114, Dashboard output 17/17, remote sandbox 22/22,
+  and stream close 9/9 passed. The fixture now uses the same Eio, shim and
+  identity preparation as the attached-read test; a final run is required.
 - **Real-time output:** run `40692203058`, head
   `6de3f330662f2f35e939bbd04a3e7d5c8e2a64d7`: completed/success.
   `test_dashboard_execute_output` 17/17, `test_keeper_sandbox_remote` 22/22,

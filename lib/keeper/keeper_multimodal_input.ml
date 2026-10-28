@@ -634,21 +634,21 @@ let document_block_to_agent_core ~attachments media =
              ~media_type
              data
        | Preserve_document ->
-           Ok (Agent_core.Types.document_block ~media_type ~data ()))
+           Ok
+             (Agent_core.Types.document_block ~media_type
+                ~source:(Agent_core.Types.Base64 data)))
 
-(* A reference image crosses as the native carrier form: [data] holds the URL
-   or file id verbatim and [source_type] tells the serializers which wire shape
-   to emit (#33669). [media_type] is required by the block record but carries
+(* A reference image crosses as the native carrier form: the source's [Url] or
+   [File_id] constructor holds the URL or file id verbatim and tells the
+   serializers which wire shape to emit (#33669). [media_type] is required by the block record but carries
    nothing for a reference on the chat surface; the advisory value the request
    named is passed through, else the generic unknown this module already uses.
    Nothing here fetches the reference — the provider resolves it or visibly
    rejects it. *)
 let image_reference_to_agent_core ~source_type (reference : user_image_reference) =
   Agent_core.Types.image_block
-    ~source_type
     ~media_type:(Option.value reference.mime_type ~default:"application/octet-stream")
-    ~data:reference.value
-    ()
+    ~source:(Agent_core.Types.media_source_of_kind source_type reference.value)
 
 let to_agent_core_blocks ~attachments blocks =
   let rec loop acc = function
@@ -662,7 +662,8 @@ let to_agent_core_blocks ~attachments blocks =
         match
           media_block_to_agent_core ~attachments "image"
             (fun ~media_type ~data () ->
-               Agent_core.Types.image_block ~media_type ~data ())
+               Agent_core.Types.image_block ~media_type
+                 ~source:(Agent_core.Types.Base64 data))
             media
         with
         | Ok block -> loop (block :: acc) rest
@@ -689,7 +690,8 @@ let to_agent_core_blocks ~attachments blocks =
         match
           media_block_to_agent_core ~attachments "audio"
             (fun ~media_type ~data () ->
-               Agent_core.Types.audio_block ~media_type ~data ())
+               Agent_core.Types.audio_block ~media_type
+                 ~source:(Agent_core.Types.Base64 data))
             media
         with
         | Ok block -> loop (block :: acc) rest

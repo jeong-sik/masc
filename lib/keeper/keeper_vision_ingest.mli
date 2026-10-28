@@ -54,7 +54,7 @@ val evict_blocks
 (** Site 1. Evict every [Image] in the list when [delegate]; return the list
     unchanged otherwise. Images are fail-closed before store on
     base64 payload, size, and media type. An [Image] whose source is a
-    {!Agent_core.Types.media_source_kind} [Url] or [File_id] is a reference,
+    {!Agent_core.Types.media_source} [Url] or [File_id] is a reference,
     not a payload: it passes through unchanged (counted [ok] under reason
     [reference_passthrough]), because the serializers put the reference on the
     wire natively and there are no inline pixels to trade for a handle.

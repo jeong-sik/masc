@@ -1017,8 +1017,7 @@ let run_review
     |> List.map (fun img ->
            Agent_core.Types.image_block
              ~media_type:img.image_media_type
-             ~data:img.image_body_base64
-           ())
+             ~source:(Agent_core.Types.Base64 img.image_body_base64))
   in
   let lookup_for_judge = lookup_with_evidence_observation lookup in
   run_with_execution_policy ~execution_policy

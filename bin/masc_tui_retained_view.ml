@@ -30,12 +30,18 @@ let rec block_sections (block : Types.content_block) : section list =
         match json with Some payload -> [ Json (Yojson.Safe.pretty_to_string payload) ] | None -> []
       in
       Marker marker :: structured @ payload
-  | Types.Image { media_type; data; _ } ->
-      [ Marker (Printf.sprintf "image %s, %d bytes" media_type (String.length data)) ]
-  | Types.Document { media_type; data; _ } ->
-      [ Marker (Printf.sprintf "document %s, %d bytes" media_type (String.length data)) ]
-  | Types.Audio { media_type; data; _ } ->
-      [ Marker (Printf.sprintf "audio %s, %d bytes" media_type (String.length data)) ]
+  | Types.Image { media_type; source } ->
+      [ Marker
+          (Printf.sprintf "image %s, %d bytes" media_type
+             (String.length (Types.media_source_payload source))) ]
+  | Types.Document { media_type; source } ->
+      [ Marker
+          (Printf.sprintf "document %s, %d bytes" media_type
+             (String.length (Types.media_source_payload source))) ]
+  | Types.Audio { media_type; source } ->
+      [ Marker
+          (Printf.sprintf "audio %s, %d bytes" media_type
+             (String.length (Types.media_source_payload source))) ]
 
 let sections ~text =
   let parsed =

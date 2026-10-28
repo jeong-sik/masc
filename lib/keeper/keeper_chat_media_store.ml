@@ -252,7 +252,7 @@ let persist_error_to_string = function
       "failed to persist generated media: " ^ msg
 
 let raw_data_of_source ~source_type ~data =
-  match source_type with
+  match (source_type : Agent_core.Types.media_source_kind) with
   | Agent_core.Types.Base64 -> (
       match Base64.decode data with
       | Ok raw -> Ok raw

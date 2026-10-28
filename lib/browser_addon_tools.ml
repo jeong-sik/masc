@@ -299,7 +299,7 @@ let project ~base_path ~keeper_name ~started request (receipt:Host.receipt) =
                let observed=`Assoc (List.filter (fun (key,_) -> key<>"data") fields) in
                Ok (observed,
                  Some [Llm_provider.Types.Text (Yojson.Safe.to_string observed);
-                   Llm_provider.Types.Image {media_type="image/png";data=image;source_type=Llm_provider.Types.Base64}])
+                   Llm_provider.Types.Image {media_type="image/png";source=Llm_provider.Types.Base64 image}])
            | Some _|None -> Error "screenshot lacks its image")
       | None,_ -> Error "screenshot must be an object"
 let handle ?initial_goal_ids ?upload_paths ~config ~access ~principal ~reserved ~keeper_name ~tool ~tool_name ~start_time json =

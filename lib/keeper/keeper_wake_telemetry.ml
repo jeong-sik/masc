@@ -50,9 +50,10 @@ let bytes_of_content_block (block : Agent_core.Types.content_block) : int =
       | Agent_core.Types.ToolUse _ ->
         invalid_arg
           "keeper_wake_telemetry: AGENT_CORE canonical tool-call projection unavailable"
-      | Agent_core.Types.Image { data; _ }
-      | Agent_core.Types.Document { data; _ }
-      | Agent_core.Types.Audio { data; _ } -> String.length data))
+      | Agent_core.Types.Image { source; _ }
+      | Agent_core.Types.Document { source; _ }
+      | Agent_core.Types.Audio { source; _ } ->
+        String.length (Agent_core.Types.media_source_payload source)))
 
 let bytes_of_message_content (m : Agent_core.Types.message) : int =
   List.fold_left

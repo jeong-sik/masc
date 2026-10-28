@@ -83,7 +83,7 @@ let native_messages (params : S.create_message_params) =
     let content = match message.content with
       | S.Text {text;type_=_} -> L.Text text
       | S.Image {data;mime_type;type_=_} ->
-          L.Image {media_type=mime_type;data;source_type=L.Base64} in
+          L.Image {media_type=mime_type;source=L.Base64 data} in
     { origin = Llm_provider.Types.Conversation; L.role=role;content=[content];name=None;tool_call_id=None;metadata=[]}) params.messages
 
 let sampling_stop_reason = function
@@ -104,13 +104,13 @@ let response_content (response : L.api_response) =
       | L.Image _ | L.Audio _ | L.Document _ | L.ToolUse _ | L.ToolResult _ -> true)
       response.content in
     match content with
-    | [L.Image {media_type;data;source_type=L.Base64}] ->
+    | [L.Image {media_type;source=L.Base64 data}] ->
         (match Base64.decode data with
          | Ok bytes when bytes <> "" -> Ok (S.Image {type_="image";data;mime_type=media_type})
          | Ok _ | Error _ -> Error (Invalid_response "MCP sampling image must contain valid nonempty base64"))
-    | [L.Image {source_type=(L.Url | L.File_id);_}] -> Error (Invalid_response "MCP sampling requires a base64 image response")
+    | [L.Image {source=(L.Url _ | L.File_id _);_}] -> Error (Invalid_response "MCP sampling requires a base64 image response")
     | (L.Text _)::_ | (L.Thinking _)::_ | (L.ReasoningDetails _)::_ | (L.RedactedThinking _)::_
-    | (L.ToolUse _)::_ | (L.ToolResult _)::_ | (L.Image {source_type=(L.Base64 | L.Url | L.File_id);_})::_ | (L.Document _)::_ | (L.Audio _)::_ -> Error (Invalid_response "MCP sampling cannot carry multiple or unsupported content blocks")
+    | (L.ToolUse _)::_ | (L.ToolResult _)::_ | (L.Image {source=(L.Base64 _ | L.Url _ | L.File_id _);_})::_ | (L.Document _)::_ | (L.Audio _)::_ -> Error (Invalid_response "MCP sampling cannot carry multiple or unsupported content blocks")
     | [] -> Error (Provider_error (Llm_provider.Http_client.empty_completion_error
         ~stop_reason:response.stop_reason))
 

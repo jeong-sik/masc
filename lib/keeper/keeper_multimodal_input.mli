@@ -73,8 +73,8 @@ val to_agent_core_blocks :
     blocks resolve their payload through [attachments] by [attachment_id].
     Data URLs are normalized to raw base64 payloads before crossing into AGENT_CORE,
     and declared MIME types must match any MIME embedded in a data URL.
-    An image reference crosses as the native carrier form ([data] = the URL
-    or file id, [source_type] = [Url]/[File_id]) so the serializers emit it
+    An image reference crosses as the native carrier form (a [Url] or
+    [File_id] source holding the URL or file id) so the serializers emit it
     as-is; nothing is fetched here.
 
     Dashboard-supported text documents are base64-decoded and validated as

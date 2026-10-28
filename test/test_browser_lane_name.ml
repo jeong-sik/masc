@@ -45,22 +45,25 @@ let sorted lanes = List.sort compare lanes
    tools it serves declare it. *)
 let serving verbs = List.filter (fun lane -> List.for_all (Browser_lane.verb_allowed lane) verbs) Lane_name.all
 
+(* The last field names lanes a tool takes for metadata no verb covers:
+   BrowserSession action=bind_goal binds an observed Ego Space and requires
+   lane=live, while live serves none of the session verbs. *)
 let tool_verbs = Browser_lane.[
-  "masc_browser_tabs", Tool_schemas_misc_toml.browser_tabs, [ Tabs_list ];
-  "masc_browser_read", Tool_schemas_misc_toml.browser_read, [ Page_read { tab_id = None; max_chars = None } ];
+  "masc_browser_tabs", Tool_schemas_misc_toml.browser_tabs, [ Tabs_list ], [];
+  "masc_browser_read", Tool_schemas_misc_toml.browser_read, [ Page_read { tab_id = None; max_chars = None } ], [];
   "masc_browser_interact", Tool_schemas_misc_toml.browser_interact,
-    [ Page_interact { frame_path = []; tab_id = 1; expected_url = None; action = Scroll { x = 0; y = 1 } } ];
+    [ Page_interact { frame_path = []; tab_id = 1; expected_url = None; action = Scroll { x = 0; y = 1 } } ], [];
   "masc_browser_session", Tool_schemas_misc_toml.browser_session,
-    [ Session_open { headless = None }; Session_close; Session_status ];
+    [ Session_open { headless = None }; Session_close; Session_status ], [ Lane_name.Live ];
   "masc_browser_goto", Tool_schemas_misc_toml.browser_goto,
-    [ Page_goto { url = "https://example.org/"; tab_id = None } ];
+    [ Page_goto { url = "https://example.org/"; tab_id = None } ], [];
 ]
 
 (* Omission now selects from observed browser state. Schemas must leave it
    absent so callers do not accidentally pin a backend before discovery. *)
 let test_tool_enums () =
-  List.iter (fun (tool, schema, verbs) ->
-    check (list lane) (tool ^ " offers the lanes that serve it") (sorted (serving verbs))
+  List.iter (fun (tool, schema, verbs, metadata) ->
+    check (list lane) (tool ^ " offers the lanes that serve it") (sorted (serving verbs @ metadata))
       (sorted (decode_all tool (lane_enum schema)));
     check bool (tool ^ " leaves automatic selection available") true (lane_default schema = `Null))
     tool_verbs;

@@ -83,7 +83,6 @@ and t = {
 }
 and admission = {
   binding : P.binding;
-  spec : P.spec;
   completion : (operation,error) result completion;
 }
 
@@ -120,16 +119,22 @@ let mark_launch_unknown operation =
       Atomic.set operation.execution Unknown_launch;
       finish (current_result operation) (Error Launch_unknown)
 
-let update_source operation record =
-  Atomic.set operation.source record;
-  match R.launch_state record with
-  | R.Not_requested -> ()
-  | R.Requested _ -> mark_launch_unknown operation
+let update_source operation ~previous record =
+  if not (Atomic.compare_and_set operation.source previous record) then
+    Error (Registry_error R.Stale_record)
+  else (
+    (match R.launch_state record with
+     | R.Not_requested -> ()
+     | R.Requested _ -> mark_launch_unknown operation);
+    Ok record)
 
-let refresh operation =
-  let* record=R.refresh (Atomic.get operation.source) |> Result.map_error (fun error -> Registry_error error) in
-  update_source operation record;
-  Ok record
+let refresh_with_hook ~after_refresh operation =
+  let previous=Atomic.get operation.source in
+  let* record=R.refresh previous |> Result.map_error (fun error -> Registry_error error) in
+  after_refresh ();
+  update_source operation ~previous record
+
+let refresh operation = refresh_with_hook ~after_refresh:(fun () -> ()) operation
 
 let reset_result_for_control operation =
   match Atomic.get operation.execution with
@@ -244,20 +249,26 @@ let run_activate operation =
 let run_cancel operation =
   match Atomic.get operation.execution with
   | Owned job ->
+    let previous=Atomic.get operation.source in
     (match C.cancel job |> Result.map_error map_lifetime_error with
      | Error error -> Error error,None
-     | Ok current -> update_source operation current;Ok (),None)
+     | Ok current ->
+         (match update_source operation ~previous current with
+          | Ok _ -> Ok (),None
+          | Error error -> Error error,None))
   | Unknown_launch | Awaiting_activation ->
     let source=Atomic.get operation.source in
     (match R.request_cancel source ~confirmed_admission_id:(R.admission_id source) with
      | Error error -> Error (Registry_error error),None
      | Ok current ->
-       update_source operation current;
-       (match R.launch_state current with
-        | R.Requested _ -> Ok (),None
-        | R.Not_requested ->
-          if result_ready operation then Ok (),None
-          else Ok (),Some (publish_unlaunched operation current)))
+       (match update_source operation ~previous:source current with
+        | Error error -> Error error,None
+        | Ok current ->
+          (match R.launch_state current with
+           | R.Requested _ -> Ok (),None
+           | R.Not_requested ->
+             if result_ready operation then Ok (),None
+             else Ok (),Some (publish_unlaunched operation current))))
 
 let run_request operation request =
   match request.kind with
@@ -426,9 +437,12 @@ let bind_record controller record =
   let original=Atomic.get operation.source in
   if R.binding original<>binding then Error Binding_mismatch
   else if R.admission_id original<>R.admission_id record then Error Admission_mismatch
+  else if is_new then (
+    start_operation operation;
+    reconcile_if_cancelled operation;
+    Ok operation)
   else (
-    update_source operation record;
-    if is_new then start_operation operation;
+    let* _=refresh operation in
     reconcile_if_cancelled operation;
     Ok operation)
 
@@ -445,10 +459,9 @@ let finish_admission controller key pending outcome =
   finish pending.completion outcome;
   remove_admission controller key pending
 
-let run_admission controller key pending =
+let run_admission controller key pending work =
   let work () =
-    let* record=R.admit controller.registry ~new_admission_id:(controller.new_id ())
-      ~binding:pending.binding ~spec:pending.spec |> Result.map_error (fun error -> Registry_error error) in
+    let* record=work () in
     bind_record controller record
   in
   match work () with
@@ -476,38 +489,56 @@ let create_with_hook ~before_request ~sw ~fs ~registry ~cgroup_parent_path ~new_
 
 let create = create_with_hook ~before_request:(fun () -> ())
 
-let admit controller ~binding ~spec =
+(* This lock protects only table reservations. Registry I/O and observer waits
+   run outside it. Cold reads share admission's slot, so no binding-only read
+   can race a newly published admission into an existing captured operation. *)
+let reserve_original controller binding =
   let key=admission_key binding in
   let reserved=Eio.Mutex.use_rw ~protect:false controller.operations_lock (fun () ->
-    match Hashtbl.find_opt controller.admissions key with
-    | Some pending when pending.binding=binding && pending.spec=spec -> `Join pending.completion
-    | Some _ -> `Conflict
+    match Hashtbl.find_opt controller.operations key with
+    | Some operation -> `Existing operation
     | None ->
-        let pending={binding;spec;completion=completion ()} in
-        Hashtbl.add controller.admissions key pending;
-        `Run pending) in
+      match Hashtbl.find_opt controller.admissions key with
+      | Some pending when pending.binding=binding -> `Join pending.completion
+      | Some _ -> `Conflict
+      | None ->
+          let pending={binding;completion=completion ()} in
+          Hashtbl.add controller.admissions key pending;
+          `Run pending) in
+  key,reserved
+
+let admit controller ~binding ~spec =
+  let key,reserved=reserve_original controller binding in
   let* operation=match reserved with
+    | `Existing operation ->
+        let* operation=validate_admission binding spec operation in
+        let* _=refresh operation in
+        Ok operation
     | `Conflict -> Error Binding_mismatch
     | `Join pending -> Eio.Promise.await pending.value
-    | `Run pending -> run_admission controller key pending
+    | `Run pending -> run_admission controller key pending (fun () ->
+        R.admit controller.registry ~new_admission_id:(controller.new_id ())
+          ~binding ~spec |> Result.map_error (fun error -> Registry_error error))
   in
   validate_admission binding spec operation
 
 let lookup controller original =
   let binding=original.P.binding in
-  let key=admission_key binding in
-  let pending=Eio.Mutex.use_ro controller.operations_lock (fun () ->
-    Hashtbl.find_opt controller.admissions key) in
-  match pending with
-  | Some pending when pending.binding<>binding -> Error Binding_mismatch
-  | Some pending ->
-      let* operation=Eio.Promise.await pending.completion.value in
-      validate_lookup original operation
-  | None ->
-      let* record=R.load controller.registry ~binding |> Result.map_error (fun error -> Registry_error error) in
-      if R.binding record<>binding then Error Binding_mismatch
-      else if R.admission_id record<>original.P.admission_id then Error Admission_mismatch
-      else bind_record controller record
+  let key,reserved=reserve_original controller binding in
+  let* operation=match reserved with
+    | `Existing operation ->
+        let* operation=validate_lookup original operation in
+        let* _=refresh operation in
+        Ok operation
+    | `Conflict -> Error Binding_mismatch
+    | `Join pending -> Eio.Promise.await pending.value
+    | `Run pending -> run_admission controller key pending (fun () ->
+        let* record=R.load controller.registry ~binding |> Result.map_error (fun error -> Registry_error error) in
+        if R.binding record<>binding then Error Binding_mismatch
+        else if R.admission_id record<>original.P.admission_id then Error Admission_mismatch
+        else Ok record)
+  in
+  validate_lookup original operation
 
 let original operation =
   let source=Atomic.get operation.source in
@@ -539,4 +570,5 @@ let load_result ~sw ~expected_sha256 operation =
 
 module For_testing = struct
   let create = create_with_hook
+  let inspect_original = refresh_with_hook
 end

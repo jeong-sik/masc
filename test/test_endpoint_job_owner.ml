@@ -797,7 +797,183 @@ let failed_actor_keeps_native_cancellation_and_historical_result =
       let loaded=Owner.load_result ~sw ~expected_sha256:(Some digest) operation |> owner in
       assert_cancelled_result digest loaded))
 
+
+type replacement = Missing_original | Replaced_job | Replaced_launch
+
+let captured_original_survives_missing_or_replaced_files ~owned replacement =
+  with_fixture (fun ~env ~sw ~store fixture ->
+    let ready_path=Filename.concat fixture.work "authority-ready" in
+    let wait_path=Filename.concat fixture.work "authority-wait" in
+    List.iter (fun path -> Unix.mkfifo path 0o666;Unix.chmod path 0o666) [ready_path;wait_path];
+    let ready=Unix.openfile ready_path [Unix.O_RDWR;Unix.O_NONBLOCK;Unix.O_CLOEXEC] 0 in
+    let wait=Unix.openfile wait_path [Unix.O_RDWR;Unix.O_NONBLOCK;Unix.O_CLOEXEC] 0 in
+    Fun.protect ~finally:(fun () -> Unix.close ready;Unix.close wait) (fun () ->
+      let controller=controller ~sw ~env fixture store in
+      let binding,spec=prepare fixture 890
+        "printf x >> authority-ran; printf R > authority-ready; read token < authority-wait; printf unexpected > authority-past-wait" in
+      let operation=Owner.admit controller ~binding ~spec |> owner in
+      if owned then (
+        Owner.await_request (Owner.activate operation) |> owner;
+        Eio_unix.await_readable ready;
+        let byte=Bytes.create 1 in
+        let length=Eio_unix.run_in_systhread (fun () -> Unix.read ready byte 0 1) in
+        check "original native owner reached its actual blocking input" (length=1 && Bytes.to_string byte="R"));
+      let captured=Owner.inspect_original operation |> owner in
+      let original=Owner.original operation in
+      let claim=claim_path fixture binding in
+      let job=Filename.dirname (job_leaf fixture binding R.Terminal_receipt) in
+      let saved_claim=claim ^ ".captured" and saved_job=job ^ ".captured" in
+      let original_bytes=read claim and original_stat=Unix.lstat job in
+      Unix.rename claim saved_claim;
+      Unix.rename job saved_job;
+      let restore () =
+        if Sys.file_exists saved_claim then (
+          if Sys.file_exists claim then remove claim;
+          if Sys.file_exists job then remove job;
+          Unix.rename saved_job job;
+          Unix.rename saved_claim claim)
+      in
+      Fun.protect ~finally:restore (fun () ->
+        (match replacement with
+         | Missing_original -> ()
+         | Replaced_job | Replaced_launch ->
+           let rebound=R.admit store ~new_admission_id:original.admission_id ~binding ~spec |> registry in
+           (match replacement with
+            | Missing_original | Replaced_job -> ()
+            | Replaced_launch ->
+              ignore (R.commit_launch rebound ~confirmed_admission_id:original.admission_id
+                ~launch_id:(id 999990) |> registry)));
+        let replacement_claim=if Sys.file_exists claim then Some (read claim) else None in
+        let job_identity () =
+          if Sys.file_exists job then let stat=Unix.lstat job in Some (stat.st_dev,stat.st_ino)
+          else None
+        in
+        let replacement_job=job_identity () in
+        let next_id= !(fixture.next_id) in
+        let expect_refused = function
+          | Error (Owner.Registry_error _) -> ()
+          | Ok _ -> Alcotest.fail "matching coordinates replaced captured physical authority"
+          | Error error -> Alcotest.fail (Owner.error_to_string error)
+        in
+        expect_refused (Owner.lookup controller original);
+        expect_refused (Owner.admit controller ~binding ~spec);
+        expect_refused (Owner.inspect_original operation);
+        check "known original refusal generates no admission or launch ID" (next_id= !(fixture.next_id));
+        check "refusal leaves replacement claim bytes or absence untouched"
+          ((if Sys.file_exists claim then Some (read claim) else None)=replacement_claim);
+        check "refusal leaves replacement job identity or absence untouched"
+          (job_identity ()=replacement_job);
+        check "captured original bytes and directory survive failed controls"
+          (read saved_claim=original_bytes &&
+           let saved=Unix.lstat saved_job in saved.st_dev=original_stat.st_dev && saved.st_ino=original_stat.st_ino);
+        let other_binding,other_spec=prepare fixture 891 ": > independent-must-not-run" in
+        let other=Owner.admit controller ~binding:other_binding ~spec:other_spec |> owner in
+        let digest,loaded=cancel_and_load ~sw other in
+        assert_no_child digest loaded;
+        restore ());
+      check "restored lookup retains the same original operation and native owner"
+        ((Owner.lookup controller original |> owner)==operation);
+      check "restored admission retains the same original operation"
+        ((Owner.admit controller ~binding ~spec |> owner)==operation);
+      let restored=Owner.inspect_original operation |> owner in
+      check "restoration preserves captured known launch" (R.launch_state restored=R.launch_state captured);
+      let digest,loaded=cancel_and_load ~sw operation in
+      if owned then (
+        assert_cancelled_result digest loaded;
+        (match D.process loaded with
+         | D.Child _ -> ()
+         | D.Not_created _ -> Alcotest.fail "restored native owner lost its physical original");
+        Alcotest.(check string) "retained native owner never replays" "x"
+          (read (Filename.concat fixture.work "authority-ran")))
+      else assert_no_child digest loaded;
+      check "original cancellation never passes blocked payload input"
+        (not (Sys.file_exists (Filename.concat fixture.work "authority-past-wait")))))
+
+let delayed_refresh_cannot_erase_known_launch =
+  with_fixture (fun ~env ~sw ~store fixture ->
+    let controller=controller ~sw ~env fixture store in
+    let binding,spec=prepare fixture 892 ": > must-not-run" in
+    let operation=Owner.admit controller ~binding ~spec |> owner in
+    let source=Owner.inspect_original operation |> owner in
+    let entered,signal=Eio.Promise.create () and resume,release=Eio.Promise.create () in
+    let unblock ()=if Eio.Promise.peek resume=None then Eio.Promise.resolve release () in
+    let delayed,resolve=Eio.Promise.create () in
+    Eio.Fiber.fork ~sw (fun () ->
+      Eio.Promise.resolve resolve (Owner.For_testing.inspect_original operation ~after_refresh:(fun () ->
+        Eio.Promise.resolve signal ();Eio.Promise.await resume)));
+    Eio.Promise.await entered;
+    Fun.protect ~finally:unblock (fun () ->
+      let launch_id=id 999991 in
+      ignore (R.commit_launch source ~confirmed_admission_id:(R.admission_id source) ~launch_id |> registry);
+      let advanced=Owner.inspect_original operation |> owner in
+      check "actual committed launch is captured while the old read is delayed"
+        (R.launch_state advanced=R.Requested launch_id);
+      unblock ();
+      (match Eio.Promise.await delayed with
+       | Error (Owner.Registry_error error) -> check "stale read is explicit" (error=R.Stale_record)
+       | Ok _ -> Alcotest.fail "delayed old read overwrote the known launch"
+       | Error error -> Alcotest.fail (Owner.error_to_string error));
+      let claim=claim_path fixture binding in
+      let bytes=read claim in
+      let original=Owner.original operation in
+      let json=Yojson.Safe.from_string bytes in
+      let fields=match json with `Assoc fields -> fields | _ -> Alcotest.fail "claim object missing" in
+      let changed=`Assoc (List.map (fun (name,value) ->
+        name,(if name="launch_id" then `String (P.Id.to_string (id 999992)) else value)) fields) in
+      Out_channel.with_open_bin claim (fun channel -> output_string channel (Yojson.Safe.to_string changed));
+      Fun.protect ~finally:(fun () -> Out_channel.with_open_bin claim (fun channel -> output_string channel bytes)) (fun () ->
+        let valid_rebound=R.load store ~binding |> registry in
+        check "rebound claim is independently valid for a binding-only reader"
+          (R.launch_state valid_rebound=R.Requested (id 999992));
+        let expect_stale = function
+          | Error (Owner.Registry_error error) -> check "known launch refuses rebound" (error=R.Stale_record)
+          | Ok _ -> Alcotest.fail "known launch pin was discarded by a delayed refresh"
+          | Error error -> Alcotest.fail (Owner.error_to_string error)
+        in
+        expect_stale (Owner.lookup controller original);
+        expect_stale (Owner.admit controller ~binding ~spec)));
+    check "restored source still pins the actual original launch"
+      (R.launch_state (Owner.inspect_original operation |> owner)=R.Requested (id 999991)))
+
+let pending_original_admission_joins_exact_lookup_without_republication =
+  with_fixture (fun ~env ~sw ~store fixture ->
+    let controller=controller ~sw ~env fixture store in
+    let other_binding,other_spec=prepare fixture 893 ": > other" in
+    let other=Owner.admit controller ~binding:other_binding ~spec:other_spec |> owner in
+    let binding,spec=prepare fixture 894 ": > must-not-run" in
+    let original_next_id= !(fixture.next_id) in
+    let admission_id=id original_next_id in
+    let entered,signal=Eio.Promise.create () and resume,release=Eio.Promise.create () in
+    let unblock ()=if Eio.Promise.peek resume=None then Eio.Promise.resolve release () in
+    let once=Atomic.make true in
+    let fault=Recovery_test.before_parent_sync_dispatch ~before_sync:(fun () ->
+      if Atomic.compare_and_set once true false then (Eio.Promise.resolve signal ();Eio.Promise.await resume)) in
+    let initial,resolve=Eio.Promise.create () in
+    Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve resolve
+      (Recovery_test.with_replace_dispatch_fault fault (fun () -> Owner.admit controller ~binding ~spec)));
+    Eio.Promise.await entered;
+    Fun.protect ~finally:unblock (fun () ->
+      let duplicate,resolve_duplicate=Eio.Promise.create () and lookup,resolve_lookup=Eio.Promise.create () in
+      Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve resolve_duplicate (Owner.admit controller ~binding ~spec));
+      Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve resolve_lookup
+        (Owner.lookup controller (P.original ~binding ~admission_id)));
+      Eio.Fiber.yield ();
+      check "exact duplicate and lookup wait for the captured admission"
+        (Eio.Promise.peek duplicate=None && Eio.Promise.peek lookup=None);
+      check "pending admission consumes only its original fresh ID" (!(fixture.next_id)=original_next_id+1);
+      ignore (Owner.inspect_original other |> owner);
+      unblock ();
+      let operation=Eio.Promise.await initial |> owner in
+      let second=Eio.Promise.await duplicate |> owner and looked=Eio.Promise.await lookup |> owner in
+      check "all pending observers share the same captured operation" (operation==second && operation==looked);
+      check "joining never generates another admission ID" (!(fixture.next_id)=original_next_id+1)))
+
 let portable_cases=[
+  "missing original never readmits",(fun () -> captured_original_survives_missing_or_replaced_files ~owned:false Missing_original ());
+  "replacement job never rebinds",(fun () -> captured_original_survives_missing_or_replaced_files ~owned:false Replaced_job ());
+  "replacement launch never rebinds",(fun () -> captured_original_survives_missing_or_replaced_files ~owned:false Replaced_launch ());
+  "delayed source refresh preserves known launch",delayed_refresh_cannot_erase_known_launch;
+  "exact pending admission and lookup share original",pending_original_admission_joins_exact_lookup_without_republication;
   "admission lookup and binding conflicts",admission_lookup_and_binding_conflicts_share_only_exact_originals;
   "duplicate cancel and registration-only result",duplicate_cancel_shares_request_and_registration_only_result;
   "pending cancellation precedes activation",pending_cancellation_precedes_activation_and_publishes_no_child;
@@ -813,6 +989,9 @@ let portable_cases=[
 ]
 
 let native_cases=[
+  "missing live original never readmits",(fun () -> captured_original_survives_missing_or_replaced_files ~owned:true Missing_original ());
+  "replacement live job never rebinds",(fun () -> captured_original_survives_missing_or_replaced_files ~owned:true Replaced_job ());
+  "replacement live launch never rebinds",(fun () -> captured_original_survives_missing_or_replaced_files ~owned:true Replaced_launch ());
   "duplicate activation runs one original",duplicate_activation_runs_one_original_and_shares_exact_result;
   "blocked original does not block another",blocked_original_does_not_head_of_line_block_another;
   "startup cancellation preserves original launch",cancel_during_original_startup_never_replays_or_signals_a_replacement;

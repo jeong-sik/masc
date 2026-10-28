@@ -46,11 +46,14 @@ val admit : t -> binding:P.binding -> spec:P.spec -> (operation,error) result
 val lookup : t -> P.original -> (operation,error) result
 (** Bind the complete lookup/admission to this controller's original protected
     registry. Cold known launches remain unknown live ownership; this function
-    creates neither a new admission nor a recovered kernel handle. *)
+    creates neither a new admission nor a recovered kernel handle. Existing entries
+    validate their captured physical original; a newly loaded matching binding
+    never replaces it. Concurrent cold lookup/admission share one reservation. *)
 val original : operation -> P.original
 val inspect_original : operation -> (R.record,error) result
 (** Current source only, without waiting for startup, process exit or output.
-    This is not an execution or complete-result projection. *)
+    This is not an execution or complete-result projection. A concurrent source
+    advance returns [Registry_error R.Stale_record] instead of rolling it back. *)
 val activate : operation -> request
 val cancel : operation -> request
 (** Reserve an endpoint-owned control and return before its I/O. Concurrent
@@ -86,4 +89,7 @@ module For_testing : sig
     resolve_execution:(P.spec -> (L.execution,string) result) -> t
   (** Inject an exception outside request handling to observe controller failure
       and explicit recovery. This grants no execution or registry authority. *)
+  val inspect_original : after_refresh:(unit -> unit) -> operation -> (R.record,error) result
+  (** Interleave after the actual captured-source refresh and before adopting its
+      result. A concurrently advanced source remains pinned; no retry occurs. *)
 end

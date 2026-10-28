@@ -179,7 +179,9 @@ let cached_dashboard_json_result ~now:clock ~sync_first ~sw ~cache ~key ~placeho
         | Error _, _ -> response
       else (
         Eio.Fiber.fork ~sw (fun () ->
-          (* fire-and-forget: stale-while-revalidate background refresh. *)
+          (* Stale-while-revalidate: no request waits on this refresh, so it
+             runs as background work instead of taking the read pool. *)
+          Pool_lane.with_background @@ fun () ->
           ignore (run_compute_and_store entry : (Yojson.Safe.t, string) result * float));
         response)
     else

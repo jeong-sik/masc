@@ -248,6 +248,14 @@ val invalidate_full_health_snapshot : unit -> unit
     does not interrupt it, and a caller outside Eio invalidates without waking
     the refresh loop, which then refreshes at its next interval. *)
 
+val fleet_stream_hub : Fleet_stream_hub.t
+(** The fleet events the Keepers screen reads in place of polling
+    [/health?full=1] (RFC-0477). Every scan that stores a measured snapshot
+    tells it the fleet reading, and every failed or timed-out scan tells it the
+    failure, through the same two functions that publish the cached snapshot. A
+    subscriber that connects through {!Fleet_stream_hub.subscribe} sees the
+    state the cached snapshot would have shown, then each change. *)
+
 val start_full_health_snapshot_refresh_loop :
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->

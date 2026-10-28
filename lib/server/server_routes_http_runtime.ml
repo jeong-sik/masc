@@ -955,12 +955,41 @@ let compute_full_health_snapshot ?(listener = "http/1.1") ~request_authority
         section_timings = List.rev !section_timings_ref;
       }
 
+(* The events the Keepers screen reads in place of polling [/health?full=1]
+   (RFC-0477). The hub takes its own lock and calls only subscribers that
+   return at once, and nothing it calls takes [full_health_snapshot_mu], so it
+   is safe to call with that lock held. *)
+let fleet_stream_hub =
+  Fleet_stream_hub.create ~on_subscriber_error:(fun exn ->
+    Log.Dashboard.warn "fleet stream subscriber failed and was removed: %s"
+      (Printexc.to_string exn))
+
+(* A scan that produced a reading tells the hub. A fleet section that cannot be
+   read is a fault in the server: it is logged, and the hub keeps the last
+   reading it has. *)
+let publish_fleet_stream_reading snapshot =
+  match Fleet_stream_health_section.fleet_of_health_fields snapshot.fields with
+  | Ok fleet ->
+      Fleet_stream_hub.observe fleet_stream_hub ~measured_at:snapshot.computed_at fleet
+  | Error (Fleet_stream_health_section.Not_measured _) -> ()
+  | Error (Fleet_stream_health_section.Unreadable detail) ->
+      Log.Dashboard.warn "fleet stream: the fleet section cannot be read: %s" detail
+
+let note_fleet_stream_failure ~since failure =
+  let reason =
+    match failure with
+    | Proactive_refresh.Timed_out _ -> Fleet_stream.Scan_timed_out
+    | Proactive_refresh.Raised _ -> Fleet_stream.Scan_failed
+  in
+  Fleet_stream_hub.note_degraded fleet_stream_hub ~since reason
+
 let store_successful_full_health_snapshot_locked snapshot ~refresh_requested =
   full_health_snapshot := Some snapshot;
   full_health_refresh_in_flight := false;
   full_health_refresh_started_at := None;
   full_health_refresh_requested := refresh_requested;
-  full_health_consecutive_failures := 0
+  full_health_consecutive_failures := 0;
+  publish_fleet_stream_reading snapshot
 
 let mark_full_health_snapshot_failure_locked ~worker_active failure =
   let now = Unix.gettimeofday () in
@@ -1040,6 +1069,7 @@ let mark_full_health_snapshot_failure_locked ~worker_active failure =
          failures past the threshold do not re-emit — operators
          get one structural alert per outage, not a noisy stream
          scaling with the failure count. *)
+      note_fleet_stream_failure ~since:now failure;
       incr full_health_consecutive_failures;
       if !full_health_consecutive_failures
          = full_health_critical_failure_threshold

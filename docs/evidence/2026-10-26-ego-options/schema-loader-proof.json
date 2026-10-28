@@ -1,0 +1,24 @@
+{
+  "scope": "Actual production tool_definition_toml loader unchanged, only domain record container supplied; no full server boot",
+  "loader_sha256": "838bd74c885847d3fd0d975b61236106f6258e297f3b928339e749acee106c0d",
+  "results": [
+    {
+      "version": "before",
+      "exit": 2,
+      "diagnostic": "tool definition masc_browser_interact: params[29] (steps).items.params[13] (options).params[0] (timeout).minimum must be a float, got an integer",
+      "toml_sha256": "5eb2630a22b5fd6b4c0bbc9eb6707ccae4e2353290283b3527e1e60ed693660a"
+    },
+    {
+      "version": "after",
+      "exit": 0,
+      "diagnostic": "",
+      "toml_sha256": "9f86ff12f9c344586ee454a3af99055750e3cf3570d36f20713de2fcf6d77d44",
+      "bounds": {
+        "timeout": 0.0,
+        "delay": 0.0,
+        "idleMs": 0.0,
+        "polling": 0.0
+      }
+    }
+  ]
+}

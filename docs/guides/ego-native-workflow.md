@@ -68,8 +68,8 @@ classify an exception from that actual press as pre-effect. A dialog can be
 reported before release: answering it alone does not prove that every original
 key or pointer button was released. An unconfirmed release prevents further
 input on that connection. The result reports `inputReleased` independently of completed
-effects; a guard does not make the failed action successful. Manual held-button and held-key workflows
-are not exposed.
+effects; a guard does not make the failed action successful.
+Manual held-button and held-key workflows are not exposed.
 
 `keyboard.type`, `keyboard.press` and `keyboard.paste` have no selector preflight.
 An exception after entering their SDK method cannot be classified as definitely
@@ -93,7 +93,9 @@ its normal credentials policy and CORS checks.
 `saveAs` requires a brokered download path and is not exposed here.
 
 These options are integrated in source with standalone codec and forwarding
-checks. The updated real-browser probe could not run because verification
-Space 27 disappeared before its first page operation. Installed MASC, Keeper
-dispatch and visible UI behavior for this extension remain unverified. See
+checks. An owned real Ego fixture in replacement Space 32 executed 22 option
+and selection steps plus five mouse/state-wait steps. Its
+[receipts](../evidence/2026-10-26-ego-options/README.md) are SDK evidence with
+explicit routing and UI limits. Installed MASC, Keeper dispatch and visible UI
+behavior for this extension remain unverified. See
 [the SDK inventory](ego-sdk-coverage.md) for evidence and remaining capabilities.

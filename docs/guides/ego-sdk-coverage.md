@@ -127,16 +127,30 @@ visible MASC TUI proof.
 The first probe Space (24) was absent on a later SDK read. After explicit user approval,
 the same ongoing Goal resumed validation in replacement Space **27**. No existing
 operator or Keeper Space was adopted. Space 27 subsequently also returned
-`task space not found` and was absent from `listTaskSpaces`. The user reports
-not closing it. The probes do not call `finish` or close their Space, but the
-deletion actor and cause have not been established. No third verification Space
-has been created. Existing captured receipts remain historical SDK evidence;
-they do not establish that either Space is still available for UI inspection.
+`task space not found` and was absent from `listTaskSpaces`. The probes do not
+call `finish` or close their Space. The user initially reported not closing it,
+and later reported one termination without identifying which loss it explains.
+The local deletion cause remains unproven. After the user authorized recreating
+missing Spaces, validation continued in Space **32**. That Space was handed to
+the user after the operator reported that its page was absent from the Ego UI.
+SDK existence and a rendered Page screenshot do not establish visible UI access.
 
 The options/selection workflow source has standalone codec and Node forwarding
-checks. Its updated real-browser probe stopped before page operations because
-Space 27 was absent. These new options have no claimed real SDK, installed
-MASC or visible UI result yet.
+checks. After the first attempt stopped because Space 27 was absent, Space 32
+executed 22 option/selection steps and five mouse/state-wait steps. See the
+[captured SDK receipts and explicit limits](../evidence/2026-10-26-ego-options/README.md).
+This is primitive SDK evidence; installed MASC/Keeper and visible UI results
+remain unverified. It does not cover every SDK option combination.
+
+The [public Space guide](https://lite.ego.app/document/en/docs/space) describes
+the default model as a Space inside the same UI browser process, while
+[Quick start](https://lite.ego.app/document/en/docs/quick-start#watch-and-take-over)
+instructs the user to select a Space through the top-right management panel.
+An [official-repository lifetime reply](https://github.com/citrolabs/ego-lite/issues/496#issuecomment-6291041032)
+documents 30-minute idle auto-close for agent-created, unpinned, still-agent-owned
+Spaces. Pinned/user-created/handed-off/completed Spaces have different policies;
+listing alone is not a keepalive. Do not infer visible UI, indefinite persistence
+or local deletion cause from the SDK handle alone.
 
 MASC source now tracks reads, waits within workflows and navigation alongside
 input, and retains caller-specific last results. Native Ego cursor labels cover

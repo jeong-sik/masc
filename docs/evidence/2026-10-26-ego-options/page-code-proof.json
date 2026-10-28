@@ -1,0 +1,190 @@
+{
+  "spaceId": 32,
+  "page": "p1",
+  "finished": false,
+  "request": {
+    "tabId": 1,
+    "expectedUrl": "http://localhost:62672/start",
+    "steps": [
+      {
+        "method": "evaluate",
+        "source": "value => { document.querySelector(\"#state\").textContent=value.text;setTimeout(()=>window.fixtureReady=true,25);return {text:value.text,host:typeof process,dialog:\"application data\"};}",
+        "argumentJson": "{\"text\":\"한글 😀 \\\" ) ; globalThis.escape = true;//\"}"
+      },
+      {
+        "method": "waitForFunction",
+        "source": "value => window.fixtureReady === value",
+        "argumentJson": "true",
+        "options": {
+          "polling": 1,
+          "timeout": 3000
+        }
+      },
+      {
+        "method": "fetch",
+        "url": "/api",
+        "options": {
+          "method": "POST",
+          "headers": {
+            "Content-Type": "text/plain",
+            "X-Fixture": "native-page-fetch"
+          },
+          "body": "한글 😀",
+          "credentials": "same-origin",
+          "cache": "no-store",
+          "mode": "cors",
+          "redirect": "error",
+          "keepalive": false,
+          "referrerPolicy": "no-referrer",
+          "timeout": 3000
+        }
+      },
+      {
+        "method": "evaluate",
+        "source": "({text:document.querySelector(\"#state\").textContent,escaped:typeof escape,ready:window.fixtureReady})"
+      },
+      {
+        "method": "evaluate",
+        "source": "value => ({own:Object.hasOwn(value,\"__proto__\"),plain:Object.getPrototypeOf(value)===Object.prototype,data:value.__proto__.polluted})",
+        "argumentJson": "{\"__proto__\":{\"polluted\":true}}"
+      }
+    ],
+    "snapshotScope": "full_page",
+    "maxChars": 10000
+  },
+  "result": {
+    "completed": [
+      {
+        "index": 0,
+        "method": "evaluate",
+        "receipt": {
+          "text": "한글 😀 \" ) ; globalThis.escape = true;//",
+          "host": "undefined",
+          "dialog": "application data"
+        }
+      },
+      {
+        "index": 1,
+        "method": "waitForFunction",
+        "receipt": true
+      },
+      {
+        "index": 2,
+        "method": "fetch",
+        "receipt": {
+          "ok": true,
+          "status": 201,
+          "statusText": "Created",
+          "url": "http://localhost:62672/api",
+          "headers": {
+            "connection": "keep-alive",
+            "content-type": "application/json",
+            "date": "Mon, 26 Oct 2026 10:55:21 GMT",
+            "keep-alive": "timeout=5",
+            "transfer-encoding": "chunked"
+          },
+          "body": "{\"accepted\":true,\"body\":\"한글 😀\"}"
+        }
+      },
+      {
+        "index": 3,
+        "method": "evaluate",
+        "receipt": {
+          "text": "한글 😀 \" ) ; globalThis.escape = true;//",
+          "escaped": "function",
+          "ready": true
+        }
+      },
+      {
+        "index": 4,
+        "method": "evaluate",
+        "receipt": {
+          "own": true,
+          "plain": true,
+          "data": true
+        }
+      }
+    ],
+    "effectStarted": true,
+    "completedEffect": true,
+    "inputReleased": true,
+    "failure": null,
+    "urlBefore": "http://localhost:62672/start",
+    "url": "http://localhost:62672/start",
+    "title": "Ego Page SDK fixture",
+    "snapshot": "[p1 \"Ego Page SDK fixture\" | space \"MASC Ego native full support 20261026\"(32): 1 managed, 0 untracked — p1* \"Ego Page SDK fixture\"]\nroot\n  heading\n    text \"Page SDK workflow\"\n  paragraph\n    text \"한글 😀 \" ) ; globalThis.escape = true;//\"\n",
+    "truncated": false,
+    "chars": 240
+  },
+  "blockedRequest": {
+    "tabId": 1,
+    "expectedUrl": "http://localhost:62672/start",
+    "steps": [
+      {
+        "method": "fetch",
+        "url": "http://127.0.0.1:62673/blocked",
+        "options": {
+          "timeout": 3000
+        }
+      },
+      {
+        "method": "evaluate",
+        "source": "window.shouldNotRun = true"
+      }
+    ],
+    "snapshotScope": "full_page",
+    "maxChars": 10000
+  },
+  "blocked": {
+    "completed": [],
+    "effectStarted": true,
+    "completedEffect": false,
+    "inputReleased": true,
+    "failure": {
+      "index": 0,
+      "method": "fetch",
+      "message": "page.fetch uses window.fetch and obeys browser CORS. Request \"http://127.0.0.1:62673/blocked\" from \"http://localhost:62672\" failed: TypeError: Failed to fetch"
+    }
+  },
+  "timeoutRequest": {
+    "tabId": 1,
+    "expectedUrl": "http://localhost:62672/start",
+    "steps": [
+      {
+        "method": "waitForFunction",
+        "source": "(() => {window.predicateVisits=(window.predicateVisits||0)+1;return false})()",
+        "options": {
+          "timeout": 1,
+          "polling": 1
+        }
+      },
+      {
+        "method": "evaluate",
+        "source": "window.shouldNotRun = true"
+      }
+    ],
+    "snapshotScope": "full_page",
+    "maxChars": 10000
+  },
+  "timedOut": {
+    "completed": [],
+    "effectStarted": true,
+    "completedEffect": false,
+    "inputReleased": true,
+    "failure": {
+      "index": 0,
+      "method": "waitForFunction",
+      "message": "page.waitForFunction timed out after 1ms on page p1; last URL was \"http://localhost:62672/start\"; last title was \"Ego Page SDK fixture\"."
+    }
+  },
+  "received": [
+    {
+      "method": "POST",
+      "body": "한글 😀",
+      "header": "native-page-fetch"
+    }
+  ],
+  "corsReads": 1,
+  "script_sha256": "788d22efc9cfab3d84faea133f7c6a0becde9097f768b1dbeaca17091c89f6b6",
+  "scope": "Production workflow JS on installed Ego and owned local fixtures. Not full OCaml host/installed MASC/Keeper/UI proof."
+}

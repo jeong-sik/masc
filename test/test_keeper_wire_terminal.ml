@@ -866,6 +866,74 @@ let test_operation_settlement_retries_and_replays_past_a_live_cursor () =
       ; Events.Event_error {message}, ["operation_settlement",metadata;"operation_settlement",metadata]
       ; Events.Text_delta {text="not terminal"; response=Unobserved_scope (None)}, ["operation_settlement",metadata] ])
 
+(* Boot settles every retained failure again, and most journals already end
+   with that settlement's terminal. The answer then comes from the last row
+   alone: the journal is longer than the tail window, the row before the
+   terminal is not JSON, and the call still reports the terminal and writes
+   nothing. A full read would refuse the corrupt row. *)
+let journal_past_the_tail_window = 256 * 1024 (* the tail reads 64 KiB *)
+
+let test_operation_settlement_reads_its_terminal_from_the_journal_tail () =
+  with_workspace @@ fun base_path ->
+  let keeper_name = "terminal-tail" and operation_id = "op-terminal-tail" in
+  let id = match Keeper_chat_operation.Operation_id.of_string operation_id with
+    | Ok id -> id | Error detail -> fail detail in
+  let settlement : Journal.operation_settlement = {operation_id=id;completed_at=3.} in
+  let journal = Journal.open_journal ~base_dir:base_path ~keeper_name ~operation_id () in
+  let append seq event =
+    match Journal.append_result journal ~seq ~ts:1.0 event with
+    | Ok () -> ()
+    | Error detail -> fail detail in
+  append 0 (Events.Run_started { run_id = "run-tail"; thread_id = "keeper:terminal-tail" });
+  let delta = String.make 200 'x' in
+  let deltas = 1 + (journal_past_the_tail_window / String.length delta) in
+  for seq = 1 to deltas do
+    append seq (Events.Text_delta {text=delta; response=Unobserved_scope (None)})
+  done;
+  let message = "cut by restart" in
+  (match Journal.record_terminal_error ~segment:(Operation_settlement settlement) journal ~ts:3. ~message with
+   | Ok (Recorded_terminal_error {seq;_}) -> check int "terminal after the deltas" (deltas + 1) seq
+   | Ok (Existing_terminal_error _) | Error _ -> fail "the first settlement must append");
+  let path = Journal.journal_path ~base_dir:base_path ~keeper_name ~operation_id in
+  let rows = In_channel.with_open_bin path In_channel.input_all
+    |> String.split_on_char '\n' |> List.filter (fun line -> line <> "") in
+  let terminal = List.nth rows (List.length rows - 1) in
+  let before_terminal = List.filteri (fun index _ -> index < List.length rows - 1) rows in
+  let corrupted = String.concat "\n" (before_terminal @ ["not json"; terminal]) ^ "\n" in
+  Out_channel.with_open_gen [ Open_wronly; Open_trunc; Open_binary ] 0o600 path
+    (fun oc -> Out_channel.output_string oc corrupted);
+  check bool "the journal is longer than the tail window" true
+    (String.length corrupted > journal_past_the_tail_window);
+  (match Journal.record_terminal_error ~segment:(Operation_settlement settlement) journal ~ts:99. ~message with
+   | Ok (Existing_terminal_error {seq;ts;message=recorded}) ->
+     check int "the recorded terminal is reported" (deltas + 1) seq;
+     check (float 0.) "at its own time" 3. ts;
+     check string "with its cause" message recorded
+   | Ok (Recorded_terminal_error _) -> fail "a second terminal was appended"
+   | Error detail -> fail ("the tail did not answer: " ^ detail));
+  check string "nothing was written" corrupted (In_channel.with_open_bin path In_channel.input_all)
+
+(* A last row that is another settlement of the same operation does not stand
+   in for this one: the tail gives no answer and the full read appends. *)
+let test_operation_settlement_tail_of_another_settlement_still_appends () =
+  with_workspace @@ fun base_path ->
+  let keeper_name = "terminal-tail-other" and operation_id = "op-terminal-tail-other" in
+  let id = match Keeper_chat_operation.Operation_id.of_string operation_id with
+    | Ok id -> id | Error detail -> fail detail in
+  let journal = Journal.open_journal ~base_dir:base_path ~keeper_name ~operation_id () in
+  let settle completed_at =
+    Journal.record_terminal_error ~segment:(Operation_settlement {operation_id=id;completed_at})
+      journal ~ts:completed_at ~message:"cut by restart" in
+  (match settle 3. with
+   | Ok (Recorded_terminal_error {seq=0;_}) -> ()
+   | Ok _ | Error _ -> fail "the first settlement must append");
+  (match settle 4. with
+   | Ok (Recorded_terminal_error {seq=1;_}) -> ()
+   | Ok (Existing_terminal_error _) -> fail "an earlier settlement stood in for this one"
+   | Ok (Recorded_terminal_error _) | Error _ -> fail "the second settlement must append after the first");
+  check int "two terminals" 2
+    (List.length (error_entries (read_journal ~base_path ~keeper_name ~operation_id)))
+
 let () =
   Alcotest.run "keeper_wire_terminal"
     [ ( "wire-terminal"
@@ -913,5 +981,9 @@ let () =
             test_record_terminal_error_creates_a_missing_journal
         ; test_case "durable restart settlement retries and survives a newer live cursor" `Quick
             test_operation_settlement_retries_and_replays_past_a_live_cursor
+        ; test_case "settlement terminal is read from the journal tail" `Quick
+            test_operation_settlement_reads_its_terminal_from_the_journal_tail
+        ; test_case "tail of another settlement still appends" `Quick
+            test_operation_settlement_tail_of_another_settlement_still_appends
         ] )
     ]

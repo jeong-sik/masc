@@ -188,9 +188,12 @@ val record_terminal_error :
     A fragment after the last newline (an append the crash cut) is not a row:
     the terminal takes the sequence after the last complete row and the append
     cuts the fragment, so a crashed append does not leave the journal without
-    its terminal. [Error] names a journal that could not be read or appended; the caller
-    decides whether that blocks anything. [ts] is the caller's clock, as for
-    {!append}. *)
+    its terminal. An [Operation_settlement] whose terminal is already the last
+    row is answered from a bounded tail of the journal; the rest of the journal
+    is then neither read nor validated, since nothing is written. Every other
+    case reads the whole journal. [Error] names a journal that could not be
+    read or appended; the caller decides whether that blocks anything. [ts] is
+    the caller's clock, as for {!append}. *)
 
 (** {1 Replay position} *)
 

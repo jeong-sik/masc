@@ -1275,7 +1275,44 @@ let find_operation_terminal journal ~settlement =
   | Error (Journal_unsupported_version version) -> Error (version_mismatch_to_string version)
 ;;
 
-let record_terminal_error ?(segment = Existing_segment) journal ~ts ~message =
+(* A terminal row holds one error message. A final row longer than this
+   window falls back to the full read. *)
+let terminal_tail_bytes = 64 * 1024
+
+(* [existing_operation_terminal] reads only the journal's last row, so a
+   bounded tail answers it without reading the whole journal. Anything the
+   tail cannot settle (a missing or unreadable store, no complete row in the
+   window, a row that does not decode, or a last row that is not this
+   settlement's terminal) falls back to the full read, which reports its own
+   read failures. A descriptor cleanup failure is logged as the full reader
+   logs it. *)
+let operation_terminal_from_tail settlement journal =
+  let of_tail = function
+    | Fs_compat.Private_jsonl_tail.Tail_missing -> None
+    | Fs_compat.Private_jsonl_tail.Tail_present { rows; _ } ->
+      let last =
+        String.split_on_char '\n' rows
+        |> List.filter (fun line -> not (String.equal (String.trim line) ""))
+        |> List.rev in
+      (match last with
+       | [] -> None
+       | line :: _ ->
+         (match journaled_envelope_of_json (Yojson.Safe.from_string line) with
+          | Ok envelope -> existing_operation_terminal settlement [envelope]
+          | Error (Unsupported_version _ | Malformed _) -> None
+          | exception Yojson.Json_error _ -> None)) in
+  match Fs_compat.read_private_jsonl_tail_locked_result journal.path ~max_bytes:terminal_tail_bytes with
+  | Fs_compat.Private_file_succeeded tail -> of_tail tail
+  | Fs_compat.Private_file_succeeded_with_cleanup_failure { value; cleanup_failure } ->
+    log_settlement_failure ~path:journal.path cleanup_failure;
+    of_tail value
+  | Fs_compat.Private_file_failed _ -> None
+  | Fs_compat.Private_file_failed_with_cleanup_failure { cleanup_failure; _ } ->
+    log_settlement_failure ~path:journal.path cleanup_failure;
+    None
+;;
+
+let record_terminal_error_from_journal ~segment journal ~ts ~message =
   let ( let* ) = Result.bind in
   let read_error = function
     | Journal_missing -> "operation journal disappeared during settlement"
@@ -1345,6 +1382,15 @@ let record_terminal_error ?(segment = Existing_segment) journal ~ts ~message =
       :: _ ) ->
     let* () = append_result journal ~seq ~ts (Event_error {message}) in
     Ok (Recorded_terminal_error {seq;ts})
+;;
+
+let record_terminal_error ?(segment = Existing_segment) journal ~ts ~message =
+  match segment with
+  | Operation_settlement settlement ->
+    (match operation_terminal_from_tail settlement journal with
+     | Some receipt -> Ok receipt
+     | None -> record_terminal_error_from_journal ~segment journal ~ts ~message)
+  | Existing_segment -> record_terminal_error_from_journal ~segment journal ~ts ~message
 ;;
 
 (** {1 Replay position} *)

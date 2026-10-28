@@ -9,7 +9,8 @@
 (** Why a route authenticates the request itself instead of using one of the
     other kinds. Each reason is a route family whose handler answers a missing
     credential on its own; the A1 baseline
-    (docs/evidence/2026-10-28-auth-route-baseline/) measured all three. *)
+    (docs/evidence/2026-10-28-auth-route-baseline/) measured how these families
+    answer without one. *)
 type self_authenticated_reason =
   | Mcp_transport
       (** [/mcp] and its profiles, and the observer streams [/ag-ui/events] and
@@ -20,14 +21,18 @@ type self_authenticated_reason =
           callback pages, which run before the caller has a credential. *)
   | Websocket_upgrade
       (** An upgrade route ([/ws], the IDE LSP proxy): the handler checks the
-          credential before it upgrades. *)
+          credential before it upgrades. [/ws] checks it for an upgrade only: a
+          [GET /ws] that does not ask to upgrade gets the discovery document
+          without one. The IDE LSP proxy checks every request. *)
   | Browser_lane
       (** The browser lane add-on's endpoints: the handler checks the lane token
           and answers 403 without it. *)
   | Loopback_dev_token
       (** [/api/v1/dashboard/dev-token]: the handler answers 404 unless the bind
-          is loopback and strict auth is off, and then hands out the dashboard
-          token without a credential (#46560). *)
+          is loopback and strict auth is off. Past that it runs [with_public_read]
+          itself (503 before the server is ready, 400 or 409 for a workspace
+          precondition that fails) and hands out the dashboard token without a
+          credential (#46560). *)
   | Subpath_dispatch
       (** A prefix route whose handler picks the authentication by the part of
           the path after the prefix ([/api/v1/keepers/]). The kinds of its

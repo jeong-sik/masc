@@ -685,9 +685,9 @@ let test_step_up_names_the_scope_an_oauth_token_lacks () =
     let admin_oauth =
       oauth_access_token ~base_path ~bootstrap_token:admin_bearer ~scope:"mcp:admin"
     in
-    let required ?(token = None) body =
+    let required ?(token = None) ?(allowed_tool = fun _ -> true) body =
       Auth_oauth.with_expected_resource "http://127.0.0.1:8935/mcp" (fun () ->
-        Server_oauth_step_up.required_scope ~base_path ~auth_token:token ~body)
+        Server_oauth_step_up.required_scope ~base_path ~auth_token:token ~allowed_tool ~body)
     in
     let scope_option = option (testable Auth_oauth.pp_scope Auth_oauth.equal_scope) in
     check scope_option "a mcp:tools token is told to ask for mcp:admin"
@@ -699,6 +699,11 @@ let test_step_up_names_the_scope_an_oauth_token_lacks () =
       (required ~token:(Some admin_oauth) (tools_call admin_tool));
     check scope_option "a static bearer has no scope to widen" None
       (required ~token:(Some worker_bearer) (tools_call admin_tool));
+    check bool "the audit fixture is a registered non-public admin tool" true
+      (permission "masc_keeper_clear" = Some Masc_domain.CanAdmin
+       && not (Tool_catalog.is_public_mcp "masc_keeper_clear"));
+    check scope_option "a non-public tool keeps the ordinary audited path" None
+      (required ~token:(Some worker_oauth) (tools_call "masc_keeper_clear"));
     check scope_option "no token is not a scope question" None
       (required (tools_call admin_tool));
     check scope_option "an unregistered tool keeps its tool-level refusal" None
@@ -708,6 +713,111 @@ let test_step_up_names_the_scope_an_oauth_token_lacks () =
          {|{"jsonrpc":"2.0","id":1,"method":"tools/list"}|});
     check scope_option "a body that is not JSON is left to the ordinary path" None
       (required ~token:(Some worker_oauth) "not json");
+    let call
+        ?(jsonrpc = `String "2.0")
+        ?(id = Some (`Int 1))
+        ?(method_ = `String "tools/call")
+        ?(params = Some (`Assoc [ "name", `String admin_tool; "arguments", `Assoc [] ]))
+        ?(extra = [])
+        ()
+      =
+      Yojson.Safe.to_string
+        (`Assoc
+          ([ "jsonrpc", jsonrpc ]
+           @ (match id with Some id -> [ "id", id ] | None -> [])
+           @ [ "method", method_ ]
+           @ (match params with Some params -> [ "params", params ] | None -> [])
+           @ extra))
+    in
+    let modern_meta =
+      `Assoc
+        [ "io.modelcontextprotocol/protocolVersion", `String "2026-07-28"
+        ; "io.modelcontextprotocol/clientCapabilities", `Assoc []
+        ]
+    in
+    let params extra =
+      `Assoc ([ "name", `String admin_tool; "arguments", `Assoc [] ] @ extra)
+    in
+    let modern_params extra = params (("_meta", modern_meta) :: extra) in
+    let worker body = required ~token:(Some worker_oauth) body in
+    List.iter
+      (fun (label, body) ->
+        check scope_option label (Some Auth_oauth.Mcp_admin) (worker body))
+      [ "string ID", call ~id:(Some (`String "call-한글")) ()
+      ; "large integer ID", call ~id:(Some (`Intlit "9223372036854775808")) ()
+      ; "omitted arguments default to an empty object"
+      , call ~params:(Some (`Assoc [ "name", `String admin_tool ])) ()
+      ; "valid modern request", call ~params:(Some (modern_params [])) ()
+      ; "legacy continuation fields retain legacy behavior"
+      , call ~params:(Some (params [ "requestState", `String "opaque" ])) ()
+      ];
+    List.iter
+      (fun (label, body) -> check scope_option label None (worker body))
+      [ "notification", call ~id:None ()
+      ; "null ID", call ~id:(Some `Null) ()
+      ; "boolean ID", call ~id:(Some (`Bool true)) ()
+      ; "floating ID", call ~id:(Some (`Float 1.0)) ()
+      ; "object ID", call ~id:(Some (`Assoc [])) ()
+      ; "array ID", call ~id:(Some (`List [])) ()
+      ; "wrong JSON-RPC version", call ~jsonrpc:(`String "1.0") ()
+      ; "missing JSON-RPC version"
+      , {|{"id":1,"method":"tools/call","params":{"name":"masc_keeper_down"}}|}
+      ; "duplicate version", call ~extra:[ "jsonrpc", `String "2.0" ] ()
+      ; "duplicate ID", call ~extra:[ "id", `Int 2 ] ()
+      ; "duplicate method", call ~extra:[ "method", `String "tools/call" ] ()
+      ; "duplicate params", call ~extra:[ "params", params [] ] ()
+      ; "missing params", call ~params:None ()
+      ; "null params", call ~params:(Some `Null) ()
+      ; "array params", call ~params:(Some (`List [])) ()
+      ; "missing name", call ~params:(Some (`Assoc [ "arguments", `Assoc [] ])) ()
+      ; "empty name", call ~params:(Some (`Assoc [ "name", `String "" ])) ()
+      ; "non-string name", call ~params:(Some (`Assoc [ "name", `Int 1 ])) ()
+      ; "noncanonical name"
+      , call ~params:(Some (`Assoc [ "name", `String (" " ^ admin_tool) ])) ()
+      ; "duplicate name"
+      , call ~params:(Some (params [ "name", `String admin_tool ])) ()
+      ; "null arguments"
+      , call ~params:(Some (`Assoc [ "name", `String admin_tool; "arguments", `Null ])) ()
+      ; "array arguments"
+      , call ~params:(Some (`Assoc [ "name", `String admin_tool; "arguments", `List [] ])) ()
+      ; "duplicate arguments", call ~params:(Some (params [ "arguments", `Assoc [] ])) ()
+      ; "modern continuation state"
+      , call ~params:(Some (modern_params [ "requestState", `String "opaque" ])) ()
+      ; "modern continuation inputs"
+      , call ~params:(Some (modern_params [ "inputResponses", `Assoc [] ])) ()
+      ; "modern metadata without capabilities"
+      , call ~params:(Some (params
+          [ "_meta", `Assoc [ "io.modelcontextprotocol/protocolVersion", `String "2026-07-28" ] ])) ()
+      ; "unsupported modern version"
+      , call ~params:(Some (params
+          [ "_meta", `Assoc
+              [ "io.modelcontextprotocol/protocolVersion", `String "2099-01-01"
+              ; "io.modelcontextprotocol/clientCapabilities", `Assoc [] ] ])) ()
+      ; "duplicate modern metadata"
+      , call ~params:(Some (modern_params [ "_meta", modern_meta ])) ()
+      ];
+    let seen = ref [] in
+    let deny_tool name = seen := name :: !seen; false in
+    check scope_option "unavailable tool has no challenge" None
+      (required ~token:(Some worker_oauth) ~allowed_tool:deny_tool (tools_call admin_tool));
+    check (list string) "availability is checked for the requested tool" [ admin_tool ] !seen;
+    check scope_option "a token is bound to its expected resource" None
+      (Auth_oauth.with_expected_resource "http://127.0.0.1:8935/other" (fun () ->
+         Server_oauth_step_up.required_scope ~base_path ~auth_token:(Some worker_oauth)
+           ~allowed_tool:(fun _ -> true) ~body:(tools_call admin_tool)));
+    let _ = Auth.enable_auth base_path ~require_token:false ~agent_name:"" in
+    check scope_option "optional auth still constrains a presented OAuth token"
+      (Some Auth_oauth.Mcp_admin) (worker (tools_call admin_tool));
+    check scope_option "optional auth without a token has no scope challenge" None
+      (required (tools_call admin_tool));
+    Auth.disable_auth base_path;
+    check bool "the disabled-auth fixture retains the live OAuth token" true
+      (Auth_oauth.with_expected_resource "http://127.0.0.1:8935/mcp" (fun () ->
+         match Auth_oauth.find_access_credential ~base_path ~token:worker_oauth with
+         | Ok (Some _) -> true
+         | Ok None | Error _ -> false));
+    check scope_option "disabled auth does not challenge a previously issued OAuth token" None
+      (worker (tools_call admin_tool));
     check string "the challenge names the scope and the resource metadata"
       {|Bearer error="insufficient_scope", scope="mcp:admin", resource_metadata="http://127.0.0.1:8935/.well-known/oauth-protected-resource"|}
       (Server_oauth_metadata.insufficient_scope_challenge (authority ()) Auth_oauth.Mcp_admin))

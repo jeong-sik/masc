@@ -18,6 +18,7 @@ type runtime = {
   base_path : string;
   sw : Eio.Switch.t;
   clock : float Eio.Time.clock_ty Eio.Resource.t;
+  tool_allowed_in_profile : tool_profile -> string -> bool;
   handle_request :
     ?profile:tool_profile ->
     ?mcp_session_id:string ->

@@ -138,6 +138,8 @@ let mcp_transport_http_deps () : Server_mcp_transport_http.deps =
                     base_path = (Mcp_server.workspace_config state).base_path;
                     sw;
                     clock;
+                    tool_allowed_in_profile =
+                      Server_mcp_transport_http.tool_allowed_in_profile state;
                     handle_request =
                       (fun ?(profile = Server_mcp_transport_http.Full)
                            ?mcp_session_id

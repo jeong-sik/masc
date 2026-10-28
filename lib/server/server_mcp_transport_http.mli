@@ -8,6 +8,7 @@ type runtime = Server_mcp_transport_http_types.runtime = {
   base_path : string;
   sw : Eio.Switch.t;
   clock : float Eio.Time.clock_ty Eio.Resource.t;
+  tool_allowed_in_profile : tool_profile -> string -> bool;
   handle_request :
     ?profile:tool_profile ->
     ?mcp_session_id:string ->
@@ -19,6 +20,16 @@ type runtime = Server_mcp_transport_http_types.runtime = {
     Yojson.Safe.t;
   clear_resource_subscriptions_for_session : string -> unit;
 }
+
+val scope_challenge_cors_headers :
+  request_authority:Server_request_authority.authority ->
+  Httpun.Request.t -> (string * string) list
+(** CORS headers for a scope challenge, exposing the challenge only to an
+    admitted origin. *)
+
+val tool_allowed_in_profile :
+  Mcp_server.server_state -> tool_profile -> string -> bool
+(** Apply the dispatcher's current profile policy to a transport profile. *)
 
 type auth_failure = Server_mcp_transport_http_types.auth_failure =
   { message : string

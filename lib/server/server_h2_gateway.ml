@@ -775,14 +775,24 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                                    in
                                    remember_mcp_profile ~otel_transport_context
                                      session_id profile);
+                                 with_server_state h2_reqd (fun state ->
                                  (match
-                                    Auth_oauth.with_expected_resource
-                                      (Server_oauth_metadata.resource request_authority)
-                                      (fun () ->
-                                        Server_oauth_step_up.required_scope ~base_path
-                                          ~auth_token ~body:body_str)
+                                    if Server_oauth_metadata.loopback_authority request_authority then
+                                      Auth_oauth.with_expected_resource
+                                        (Server_oauth_metadata.resource request_authority)
+                                        (fun () ->
+                                          Server_oauth_step_up.required_scope ~base_path
+                                            ~auth_token ~body:body_str
+                                            ~allowed_tool:
+                                              (Server_mcp_transport_http.tool_allowed_in_profile
+                                                 state profile))
+                                    else None
                                   with
                                   | Some scope ->
+                                      let auth_cors =
+                                        Server_mcp_transport_http.scope_challenge_cors_headers
+                                          ~request_authority httpun_request
+                                      in
                                       let body =
                                         Mcp_error_code.jsonrpc_error_body_with_id
                                           Mcp_error_code.Insufficient_scope
@@ -799,10 +809,9 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                                            , Server_oauth_metadata
                                              .insufficient_scope_challenge
                                                request_authority scope )
-                                          :: (cors
+                                          :: (auth_cors
                                              @ mcp_headers session_id protocol_version))
                                   | None ->
-                                 with_server_state h2_reqd (fun state ->
                                    let serves_listen =
                                      Server_mcp_transport_http
                                      .serves_subscriptions_listen ~profile

@@ -15,6 +15,12 @@
     - drops what the store keeps and loads the history through
       [load_agent_core_for_save], the first turn after a restart.
 
+    [write_B] counts the average successful logical payload bytes written by the
+    current canonical and history paths, not metadata, fsync or device traffic.
+    An uncertain archive write stops the case instead of reporting a number.
+    [disk_MiB] recursively counts retained regular files once per device/inode.
+    New checkpoint object writers must join the same observation boundary.
+
     Not a test: it prints one row per case. Run by hand from
     _build/default/test, naming each case by its message count or
     [messages:images]:
@@ -99,19 +105,10 @@ let timed f =
 
 let file_bytes path = (Unix.stat path).Unix.st_size
 
-(* What the session directory holds on disk: each inode once, so a snapshot
-   that is a hardlink of the canonical is not counted twice. *)
-let disk_bytes dir =
-  Sys.readdir dir
-  |> Array.fold_left
-       (fun (seen, total) name ->
-          let stat = Unix.lstat (Filename.concat dir name) in
-          if stat.Unix.st_kind <> Unix.S_REG || List.mem stat.Unix.st_ino seen
-          then seen, total
-          else stat.Unix.st_ino :: seen, total + stat.Unix.st_size)
-       ([], 0)
-  |> snd
 let mb bytes = float_of_int bytes /. 1_048_576.0
+let add_bytes left right =
+  if right > max_int - left then failwith "round payload byte count overflow";
+  left + right
 
 let median values =
   let sorted = List.sort Float.compare values in
@@ -148,14 +145,17 @@ let run_case ~history_retained spec =
   (* One second apart, so every save names its own snapshot file. *)
   let save turn_count messages =
     incr saves;
-    Store.save_agent_core_for_keeper ~keeper_name ~session_dir ~history_retained
+    let _, written = Store.For_testing.save_agent_core_for_keeper_measured
+      ~keeper_name ~session_dir ~history_retained
       (checkpoint ~turn_count ~created_at:(1000.0 +. float_of_int !saves) messages)
-    |> Result.map (fun (_ : Store.save_agent_core_outcome) -> ())
-    |> get "save";
-    file_bytes canonical
+    |> get "save" in
+    let written = match written with
+      | Some bytes -> bytes
+      | None -> failwith "save payload byte count is unknown" in
+    file_bytes canonical, written
   in
   let initial = history rng ~messages ~images in
-  let file_after_first, first_save_ms = timed (fun () -> save 1 initial) in
+  let (file_after_first, _), first_save_ms = timed (fun () -> save 1 initial) in
   let round_ms, round_written =
     List.init rounds Fun.id
     |> List.fold_left
@@ -169,17 +169,17 @@ let run_case ~history_retained spec =
             let held = held @ [ assistant ] in
             let (held, round_bytes), ms =
               timed (fun () ->
-                let after_assistant = save turn_count held in
+                let _, after_assistant = save turn_count held in
                 let held = held @ [ result ] in
-                let after_results = save turn_count held in
-                let after_injection = save turn_count held in
-                held, after_assistant + after_results + after_injection)
+                let _, after_results = save turn_count held in
+                let _, after_injection = save turn_count held in
+                held, add_bytes (add_bytes after_assistant after_results) after_injection)
             in
-            held, ms :: times, written + round_bytes)
+            held, ms :: times, add_bytes written round_bytes)
          (initial, [], 0)
-    |> fun (_, times, written) -> times, written / rounds
+    |> fun (_, times, written) -> times, written
   in
-  let disk = disk_bytes session_dir in
+  let disk = Store.For_testing.retained_payload_bytes ~directory:session_dir in
   let exact () =
     Store.load_agent_core_exact_snapshot ~session_dir ~session_id
     |> Result.map_error Store.checkpoint_ref_load_error_to_string
@@ -195,9 +195,9 @@ let run_case ~history_retained spec =
       |> Result.map_error (fun (_ : Store.checkpoint_load_error) -> "cold load failed")
       |> get "load")
   in
-  Printf.printf "%-10s %8d %7d %8.1f %9.1f %9.1f %9.1f %8.1f %9.1f %9.1f %8.1f\n%!" spec
+  Printf.printf "%-10s %8d %7d %8.1f %9.1f %9.1f %14.1f %8.1f %9.1f %9.1f %8.1f\n%!" spec
     (List.length initial) images (mb file_after_first) first_save_ms (median round_ms)
-    (mb round_written) (mb disk) exact_held_ms exact_cold_ms cold_load_ms
+    (float_of_int round_written /. float_of_int rounds) (mb disk) exact_held_ms exact_cold_ms cold_load_ms
 
 let () =
   let cases =
@@ -210,6 +210,6 @@ let () =
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let history_retained = Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained in
-  Printf.printf "%-10s %8s %7s %8s %9s %9s %9s %8s %9s %9s %8s\n" "case" "messages" "images"
-    "file_MB" "save_ms" "round_ms" "round_MB" "disk_MB" "exact_ms" "exact_cold" "cold_ms";
+  Printf.printf "%-10s %8s %7s %8s %9s %9s %14s %8s %9s %9s %8s\n" "case" "messages" "images"
+    "file_MiB" "save_ms" "round_ms" "write_B" "disk_MiB" "exact_ms" "exact_cold" "cold_ms";
   List.iter (run_case ~history_retained) cases

@@ -1011,6 +1011,26 @@ let routes routes = routes |> Http.Router.get "/x" h
     (sites report_a)
 ;;
 
+let test_local_opens_cannot_change_named_permission () =
+  List.iter (fun route ->
+    let source =
+      "module Other = struct let permission = Masc_domain.CanRead end\n"
+      ^ "let permission = Masc_domain.CanAdmin\n"
+      ^ "let h request reqd = with_permission_auth ~permission "
+      ^ "(fun state req reqd -> handle state req reqd) request reqd\n"
+      ^ "let routes routes = " ^ route ^ "\n" in
+    let rewritten, report = rewrite ~allow_named:true source in
+    Alcotest.(check string) "local open retains definition and route" source rewritten;
+    Alcotest.(check int) "no definition converted" 0 report.definitions;
+    Alcotest.(check int) "no route converted" 0 report.converted;
+    Alcotest.(check (list (pair string string))) "local open is reported"
+      [ "/admin", "named handler or wrapper argument may resolve differently at registration" ]
+      (sites report))
+    [ "let open Other in routes |> Http.Router.get \"/admin\" h"
+    ; "let open! Other in routes |> Http.Router.get \"/admin\" h"
+    ; "Other.(routes |> Http.Router.get \"/admin\" h)" ]
+;;
+
 let test_qualified_named_use_in_same_file_is_left_alone () =
   List.iter (fun use ->
     let source =
@@ -1183,6 +1203,7 @@ let () =
           ; Alcotest.test_case "early argument cannot change modules" `Quick test_named_early_shadowed_module ] )
     ; ( "external and partial evaluation safety"
       , [ Alcotest.test_case "external reference is not changed by default" `Quick test_external_named_use_is_left_alone
+        ; Alcotest.test_case "local opens cannot change named permission" `Quick test_local_opens_cannot_change_named_permission
         ; Alcotest.test_case "qualified same-file use keeps a named wrapper" `Quick test_qualified_named_use_in_same_file_is_left_alone
         ; Alcotest.test_case "computed partial is never moved" `Quick test_computed_named_partial_is_never_moved
         ; Alcotest.test_case "partial registration effect order" `Quick test_partial_evaluation_order ] )

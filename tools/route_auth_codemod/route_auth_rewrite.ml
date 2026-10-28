@@ -922,6 +922,11 @@ let scope_safe_arguments structure (definition : definition) ~last_registration 
           (fun self (e : expression) ->
             (match e.pexp_desc with
              | Pexp_extension _ when after e.pexp_loc -> changed := true
+             (* [M.(...)] is a local open too, but its synthetic [Pstr_open]
+                has a ghost location with pos_cnum = -1. Use the enclosing
+                expression's real location rather than that synthetic item. *)
+             | Pexp_struct_item ({ pstr_desc = Pstr_open _; _ }, _)
+               when after e.pexp_loc -> changed := true
              | _ -> ());
             Ast_iterator.default_iterator.expr self e)
       }

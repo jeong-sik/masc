@@ -8426,6 +8426,13 @@ type resource_save_prompt = {
   rsp_read_authority : unit ref;
 }
 
+type resource_share_request = {
+  share_owner : unit ref;
+  share_workspace : workspace_authority;
+  share_report : Masc_tui_resource_catalog.report;
+  share_target : bool;
+}
+
 type state = {
   observation_instance : Masc_tui_observation_origin.instance;
   mutable ui_language : ui_language;
@@ -8832,6 +8839,10 @@ type state = {
   mutable resource_read_owner: unit ref option;
   mutable resource_revision_history: Masc_tui_resource_catalog.report list;
   mutable resource_shared: bool option;
+  mutable resource_share_pending: resource_share_request option;
+  (* An interrupted write may still commit after any later GET. Keep these
+     artifact IDs uncertain for this TUI session, across workspace epochs. *)
+  mutable resource_share_uncertain_ids: string list;
   mutable resource_scroll: Masc_tui_scroll.Position.t;
   (* Logical search match is independent of last-page scroll clamping. *)
   mutable resource_search_position: Masc_tui_resource_reading.search_position;
@@ -11073,6 +11084,9 @@ let server_authority_ready state =
       && not (Canonical_path.is_empty identity.sid_base_path)
       && not (Canonical_path.is_empty identity.sid_masc_root)
   | None -> false
+
+let resource_share_uncertain state (report : Masc_tui_resource_catalog.report) =
+  List.exists (String.equal report.id) state.resource_share_uncertain_ids
 
 let code_draft_address state =
   match state.server_identity, Masc_tui_fetched.current_key state.code_file with
@@ -16098,6 +16112,8 @@ let create_state
   resource_read_owner = None;
   resource_revision_history = [];
   resource_shared = None;
+  resource_share_pending = None;
+  resource_share_uncertain_ids = [];
   resource_scroll = Masc_tui_scroll.Position.first;
   resource_search_position = Masc_tui_resource_reading.first;
   resource_focus = Left_pane;

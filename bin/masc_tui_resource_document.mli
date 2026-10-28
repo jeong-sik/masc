@@ -14,6 +14,13 @@ val copy_source : Masc_tui_types.state -> ((string * string), string) result
     delivery; success does not establish terminal acknowledgement. *)
 val export_source : Masc_tui_types.state -> (Masc_tui_resource_export.t, string) result
 (** Only a ready, focused, admitted report with one original text body. *)
+val copy_public_url : Masc_tui_types.state -> (string, string) result
+(** The selected fixed-revision link, only after the current admitted reading
+    observed sharing enabled. The configured origin is not reachability proof. *)
+val external_share_change : Masc_tui_types.state ->
+  ((Masc_tui_resource_catalog.report * bool), string) result
+(** Decide a toggle from a known share state. Enabling requires an admitted
+    original body; revoking remains possible if that body's later read fails. *)
 val rows : cols:int -> t -> string list
 (** [cols] is the actual document pane width, after Activity and optional
     Resources split. Both drawing and search use this projection.

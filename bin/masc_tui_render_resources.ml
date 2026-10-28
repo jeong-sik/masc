@@ -160,7 +160,7 @@ let render_resources (state : state) =
       match shown_resource with
       | Some resource ->
           let share_badge =
-            match resource, state.resource_shared with
+            match resource, Option.bind reading (fun r -> r.Masc_tui_resource_reading.shared) with
             | Catalog.Report _, Some true -> " · [외부 공유중]"
             | Catalog.Report _, Some false -> " · [비공개]"
             | Catalog.Report _, None | Catalog.Mcp _, _ -> ""

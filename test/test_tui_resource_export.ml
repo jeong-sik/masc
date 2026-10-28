@@ -36,6 +36,24 @@ let exact_source_and_link () =
   check (option string) "original artifact" (Some id) (Uri.get_query_param fragment "artifact");
   check (option string) "explicit historical revision" (Some "3") (Uri.get_query_param fragment "revision")
 
+let public_link_origin () =
+  let report, _ = document source in
+  let url = get (Export.public_url ~base_url:(Some "https://reports.example:8443/") ~report) in
+  let parsed = Uri.of_string url in
+  check (option string) "configured scheme" (Some "https") (Uri.scheme parsed);
+  check (option string) "configured host" (Some "reports.example") (Uri.host parsed);
+  check (option int) "configured port" (Some 8443) (Uri.port parsed);
+  let fragment = Uri.of_string (Option.get (Uri.fragment parsed)) in
+  check (option string) "selected artifact" (Some id) (Uri.get_query_param fragment "artifact");
+  check (option string) "selected revision" (Some "3") (Uri.get_query_param fragment "revision");
+  List.iter (fun base_url -> refused (Export.public_url ~base_url ~report))
+    [None; Some "http://127.0.0.1:8935"; Some "http://localhost:8935";
+     Some "http://127.1"; Some "http://2130706433"; Some "http://0x7f000001";
+     Some "http://0x"; Some "http://000000000000000000000000001";
+     Some "http://localhost."; Some "http://0.0.0.0:8935"; Some "https://user:secret@reports.example";
+     Some "https://reports.example/prefix"; Some "https://reports.example?token=secret";
+     Some "file:///tmp/report"]
+
 (* Health observes identity without an admin receipt; the following report
    inventory still needs its original workspace receipt. Exercise the shared
    transport and real catalog decoder, including a foreign identity reading. *)
@@ -128,5 +146,6 @@ let exclusive_save () =
 
 let () = run "original report export" ["source and filesystem", [
   test_case "integrity and pinned deep link" `Quick exact_source_and_link;
+  test_case "public link origin and selected revision" `Quick public_link_origin;
   test_case "exclusive private exact-byte save" `Quick exclusive_save;
   test_case "health observation restores report admission" `Quick nested_health_preserves_report_admission]]

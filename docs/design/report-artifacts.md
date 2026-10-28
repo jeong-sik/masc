@@ -182,6 +182,23 @@ the local publication day captured at the keypress; the displayed date stays
 fixed across midnight until toggled again. A refresh applies that same filter to
 new metadata. Today means published or revised, not human-confirmed.
 
+In an open report, `P` enables or revokes external sharing for the entire
+artifact, including every revision. After an enabled state has been read back,
+the detail shows its fixed-revision public link and `Y` sends that link through
+OSC 52. The link uses the TUI's explicitly configured `MASC_HTTP_BASE_URL`;
+an absent or invalid origin, local or wildcard literal, and noncanonical
+numeric host are reported instead. A
+configured origin is not proof of external reachability, and terminal support
+for OSC 52 is not confirmed. `o` still opens the local Dashboard, and `y`
+copies the report's source rather than its link.
+Each share change retires the previous observation and any in-flight report
+read. After a confirmed response, a fresh read checks the sharing state; `R`
+rereads the exact open revision. If a change returns an error, the server may
+still apply it: `P` and `Y` stay disabled for that artifact ID for the rest of
+the TUI session, even after a reread. This session-local guard cannot prove the
+request has settled across a restart or another client. A failed body read does
+not prevent revoking a previously observed shared report.
+
 List selection, search, cursor navigation and read requests all use the same
 filtered inventory. Filtering out an open or pending document retires its read
 owner; a late reply cannot restore it. The retained inventory still contains all

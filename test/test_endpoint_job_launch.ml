@@ -208,14 +208,23 @@ let refusal = fixture (fun ~env ~sw ~store fixture ->
   | R.Performed {value=Error (L.Group_error G.Group.Unsupported);release_error=None}
   | R.Performed {value=Error (L.Group_error (G.Group.Refused G.Group.Controller_not_root));release_error=None} -> ()
   | R.Not_performed _ | R.Performed _ -> Alcotest.fail "unsupported platform or controller must refuse")
+let digest_package_matches_known_sha256 () =
+  let hex value=Agent_core_sha256.(digest_string value |> to_hex) in
+  (* Expected values are SHA-256 from an independent implementation. *)
+  Alcotest.(check string) "empty input" "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" (hex "");
+  Alcotest.(check string) "short ASCII" "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" (hex "abc");
+  Alcotest.(check string) "4 KiB of every byte value" "c8f5d0341d54d951a71b136e6e2afcb14d11ed8489a7ae126a8fee0df6ecf193"
+    (hex (String.init 4096 (fun i -> Char.chr (i land 0xff))))
 let () =
   if G.For_testing.linux_build && Unix.geteuid ()<>0 && Sys.getenv_opt "GITHUB_ACTIONS"=Some "true" then (
     let executable=Unix.realpath Sys.executable_name in
     Unix.execvp "sudo" (Array.concat [[|"sudo";"-n";"--";executable|];Array.sub Sys.argv 1 (Array.length Sys.argv-1)]));
   let cases=if not G.For_testing.linux_build || Unix.geteuid ()<>0 then
       ["platform/controller refusal (kernel integration not run)",refusal;
+       "digest package matches known SHA-256 values",digest_package_matches_known_sha256;
        "unavailable boundaries never fall back to workspace execution",unavailable_boundaries]
-    else ["durable original rendezvous before activation",durable_before_activation;
+    else ["digest package matches known SHA-256 values",digest_package_matches_known_sha256;
+      "durable original rendezvous before activation",durable_before_activation;
       "publication failure preserves paused owner without replay",publication_failure_retains_paused_owner;
       "busy original startup leaves another actual job executable",busy_startup_leaves_other_job_executable;
       "wait cancellation and original authority before tree kill",wait_and_cancel_require_original_authority;

@@ -256,9 +256,14 @@ let unobserved_after_confirmed id action why =
 let confirmed_observation t context id action body =
   match script_typed t context body (obj []) with
   | Ok data -> Ok data
-  | Error (Rpc_failed Deadline_before_send) -> Error (unobserved_after_confirmed id action Request_expired)
-  | Error (Rpc_failed Interrupted_before_send) -> Error (unobserved_after_confirmed id action Request_interrupted)
-  | Error failure -> Error (Outcome_unknown (evaluation_failure_message failure))
+  | Error (Rpc_failed reason) ->
+    (match reason with
+     | Deadline_before_send -> Error (unobserved_after_confirmed id action Request_expired)
+     | Interrupted_before_send -> Error (unobserved_after_confirmed id action Request_interrupted)
+     | Rejected _ | Unsent _ | Unanswered _ ->
+       Error (Outcome_unknown (evaluation_failure_message (Rpc_failed reason))))
+  | Error (Page_failed _ as failure) ->
+    Error (Outcome_unknown (evaluation_failure_message failure))
 (* Capture guards need document identity and geometry, never page text. Read
    the URL and viewport in the same script on each side of the screenshot. *)
 let capture_state t context = script t context Browser_page_script.capture_state (obj [])
@@ -851,7 +856,7 @@ let with_connection_with_hook ~after_serialize ~env ~timeout ~url use =
           else (match exchange ~window:timeout ~deadline ~interruptions ~authority:Request_window ~on_send method_ params with
            | Ok (Error (Unanswered detail) as reply) ->
              disconnect ("BiDi response was unreadable: " ^ detail); reply
-           | Ok reply->reply
+           | Ok ((Ok _ | Error (Rejected _ | Unsent _ | Deadline_before_send | Interrupted_before_send)) as reply) -> reply
            | Error `Interrupted_before_send -> Error Interrupted_before_send
            | Error `Expired_before_send -> Error Deadline_before_send
            | Error `Closed_before_send -> Error (Unsent "BiDi socket closed before send")
@@ -874,7 +879,7 @@ let with_connection_with_hook ~after_serialize ~env ~timeout ~url use =
                           ~authority:Cleanup ~on_send:(fun () -> ()) method_ params with
             | Ok (Error (Unanswered detail) as reply) ->
               disconnect ("BiDi input release response was unreadable: " ^ detail); reply
-            | Ok reply -> reply
+            | Ok ((Ok _ | Error (Rejected _ | Unsent _ | Deadline_before_send | Interrupted_before_send)) as reply) -> reply
             | Error `Interrupted_before_send -> Error (Unsent "BiDi input release was interrupted before send")
             | Error `Expired_before_send -> Error (Unsent "BiDi input release deadline exceeded before send")
             | Error `Closed_before_send -> Error (Unsent "BiDi socket closed before input release")

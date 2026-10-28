@@ -157,7 +157,7 @@ let test_waiter_interruption_is_not_reply_timeout ?(held=false) () = with_client
   if held then check bool "the worker holds the BiDi client" true (Lane.hold_client ~client_id:client.client_id = Ok ());
   let connected () = List.exists (fun (info : Lane.client_info) -> info.client_id = client.client_id) (Lane.connected_clients ()) in
   let selected = target client.client_id in
-  let interruption command = match Lane.live_request_window ~client_id:client.client_id ~id:command.Lane.id with
+  let interruption (command : Lane.issued) = match Lane.live_request_window ~client_id:client.client_id ~id:command.id with
     | Lane.Live_waiting_until (_,signal) | Lane.Live_executor_owned signal -> signal
     | Lane.No_live_waiter -> fail "the issued request has no waiter" in
   let cancel_now, cancel = Eio.Promise.create () in

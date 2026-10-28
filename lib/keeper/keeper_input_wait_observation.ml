@@ -1,5 +1,5 @@
 module Store = Keeper_checkpoint_store
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type t =
   | Unobserved of Keeper_id.Trace_id.t

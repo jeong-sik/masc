@@ -1,6 +1,6 @@
 include Keeper_gate_types
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* Public Gate calls share the resolver's workspace identity before looking
    up a mode, pending row, worker claim, exact rule or audit destination. *)

@@ -1,5 +1,5 @@
 module M = Keeper_memory_os_current
-let ( let* ) = Result.bind
+open Result.Syntax
 type token = Offset of int
 type pending =
   { through : int; atom : M.durable_range_id option; official : M.official_range_id option }

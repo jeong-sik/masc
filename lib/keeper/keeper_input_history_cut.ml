@@ -1,5 +1,5 @@
 module Checkpoint = Keeper_checkpoint_store
-let ( let* ) = Result.bind
+open Result.Syntax
 type t = {source_bytes:string; cut_bytes:string; source_ref:Keeper_checkpoint_ref.t;
           cut_ref:Keeper_checkpoint_ref.t}
 type binding = {source:Keeper_checkpoint_ref.t; cut:Keeper_checkpoint_ref.t;

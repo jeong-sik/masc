@@ -1,7 +1,7 @@
 (** Per-keeper Librarian execution lane. See keeper_memory_lane.mli (RFC-0257). *)
 
 let lane_label = "librarian"
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type librarian_drain =
   { mutable latest : (unit -> unit) option

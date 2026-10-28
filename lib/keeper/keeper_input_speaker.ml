@@ -82,7 +82,7 @@ let to_json = function
       [ "kind", `String "host_prompt"; "host_prompt", `String "official_client_resume" ]
 ;;
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* Exact field sets: a field this module does not write is a broken writer. *)
 let fields_exactly expected = function

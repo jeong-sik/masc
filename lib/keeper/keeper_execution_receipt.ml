@@ -598,7 +598,7 @@ type runtime_lane_observation =
   | Runtime_lane_unreadable of { turn : receipt_turn option; field : string }
 
 let runtime_lane_observation_of_receipt_json json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let member path key = function
     | `Assoc fields ->
       (match List.filter (fun (name, _) -> String.equal name key) fields with
@@ -660,7 +660,7 @@ let runtime_lane_observation_to_yojson observation =
 ;;
 
 let runtime_lane_observation_of_yojson json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let fields expected = function
     | `Assoc values when List.equal String.equal (List.sort String.compare expected)
         (List.sort String.compare (List.map fst values)) -> Ok values

@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* Same resolver SSOT the SSH lane uses (RFC-0121): runtime.toml lives under
    .masc/config/, and a hand-built path under the base has never named it. *)

@@ -1,5 +1,5 @@
 module Store = Keeper_checkpoint_store
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type authority = { trace_id : Keeper_id.Trace_id.t; observed : Keeper_checkpoint_ref.t option; session_dir : string }
 type canonical = Present of Store.exact_checkpoint_snapshot | Absent | Superseded | Undecodable

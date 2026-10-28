@@ -1,6 +1,6 @@
 module Store = Keeper_checkpoint_store
 module Registry = Keeper_owner_registry
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type t =
   { base_path : string; keeper_name : string; session_dir : string

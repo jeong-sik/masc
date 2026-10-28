@@ -18,7 +18,7 @@ let prepare ~net ~expected_source_ref ~source ~pending ~response =
   then Error (Source_changed source_ref)
   else
     let checkpoint = Keeper_checkpoint_store.exact_snapshot_checkpoint source in
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* agent = Agent_core.Agent.resume ~net ~checkpoint ()
       |> Result.map_error (fun error -> Resume_refused error) in
     Fun.protect ~finally:(fun () -> Agent_core.Agent.close agent) (fun () ->
@@ -37,7 +37,7 @@ let prepare ~net ~expected_source_ref ~source ~pending ~response =
 
 module Store = Keeper_checkpoint_store
 module Semantic = Keeper_semantic_execution
-let ( let* ) = Result.bind
+open Result.Syntax
 type authority = { session_dir:string; operation_id:Keeper_chat_operation.Operation_id.t;
   waiting:Semantic.input_wait; destination:Semantic.input_response_destination;
   recorded:Semantic.input_response_intent option }

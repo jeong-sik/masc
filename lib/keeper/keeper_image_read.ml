@@ -2,7 +2,7 @@ module Store = Multimodal.Vision_artifact_store
 
 type source = Path of string | Artifact of Store.handle
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let source_of_args = function
   | `Assoc [ ("path", `String path) ] when String.trim path <> "" -> Ok (Path path)

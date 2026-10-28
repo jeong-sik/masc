@@ -11,7 +11,7 @@ module Cursor = Keeper_external_read_cursor
 module Atom = Keeper_librarian_progress
 module Official = Keeper_librarian_official_progress
 module Publication = Keeper_librarian_durable_owner
-let ( let* ) = Result.bind
+open Result.Syntax
 let io = Domain_pool_ref.submit_io_or_inline
 let require condition detail = if condition then Ok () else Error detail
 let same left right =

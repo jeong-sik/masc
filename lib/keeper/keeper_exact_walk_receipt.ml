@@ -1,6 +1,6 @@
 module Exact = Agent_core.Exact_output
 module Failure = Keeper_exact_walk_failure
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type binding = { candidate_id:string; catalog_generation:string; catalog_evidence:string; target:string }
 [@@deriving yojson]

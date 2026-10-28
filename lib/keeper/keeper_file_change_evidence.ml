@@ -110,7 +110,7 @@ let required_int fields name =
 
 let line_range_of_yojson = function
   | `Assoc fields ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* start_line = required_int fields "start_line" in
     let* end_line = required_int fields "end_line" in
     if start_line < 1
@@ -129,7 +129,7 @@ let optional_line_range_of_yojson = function
 
 let occurrence_of_yojson = function
   | `Assoc fields ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* old_range =
       match List.assoc_opt "old_range" fields with
       | Some value -> line_range_of_yojson value
@@ -168,7 +168,7 @@ let of_yojson = function
   | `Assoc fields ->
     (match List.assoc_opt "kind" fields with
      | Some (`String "edit") ->
-       let ( let* ) = Result.bind in
+       let open Result.Syntax in
        let* occurrence_count = required_int fields "occurrence_count" in
        if occurrence_count < 1
        then Error "edit occurrence_count must be positive"

@@ -3,7 +3,7 @@ module Owner = Lane_addon_tool_request_owner
 module Exact = Lane_addon_exact
 module Runtime = Lane_addon_runtime
 module Submit = Lane_addon_submit_once
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type error = Submit.error = Unavailable of string | Rejected of string | Uncertain of string
 let error_to_string = Submit.error_to_string

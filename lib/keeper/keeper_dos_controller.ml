@@ -23,7 +23,7 @@ let set_participation ~config ~who ~token participation =
   let unavailable detail = Participation_unavailable detail in
   let events = Machine_addon_host.dos_event_batch ~author:who in
   let result = Auth.with_credential_transaction config.Workspace.base_path (fun transaction ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* current = Auth.current_credential_in_transaction transaction who
       |> Result.map_error (fun error -> unavailable (Masc_domain.masc_error_to_string error)) in
     let* credential = match current with

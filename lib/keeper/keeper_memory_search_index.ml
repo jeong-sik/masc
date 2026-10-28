@@ -6,7 +6,7 @@ type error = Index_unavailable of string
 type batch_stats = { index_builds : int; indexed_rows : int; queries_executed : int }
 
 let error_to_string (Index_unavailable detail) = detail
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let sqlite_error db operation =
   Index_unavailable

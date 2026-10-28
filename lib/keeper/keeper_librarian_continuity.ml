@@ -4,7 +4,7 @@ module B = Keeper_turn_boundaries
 module C = Keeper_checkpoint_store
 module H = Keeper_checkpoint_store.Saved_history
 module W = Runtime_model_input_tail_window
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* What the continuity file holds. The snapshot is derived from the
    checkpoint and the boundary log, so one that cannot be decoded -- in

@@ -6,7 +6,7 @@ module Boundaries = Keeper_turn_boundaries
 module Progress = Keeper_librarian_progress
 module Official = Keeper_librarian_official_progress
 module Cursor = Keeper_external_read_cursor
-let ( let* ) = Result.bind
+open Result.Syntax
 let require condition detail = if condition then Ok () else Error detail
 let parts = function
   | Capture.Held.Checkpoint_only checkpoint -> Some checkpoint,[]

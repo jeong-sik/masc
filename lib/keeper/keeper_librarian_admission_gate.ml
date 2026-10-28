@@ -1,6 +1,6 @@
 module Capture = Keeper_librarian_admission_capture
 module Queue = Keeper_memory_admission_queue
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let inputs capture proposal : (Keeper_librarian_original_gate.inputs, string) result =
   let* accepted = Capture.validate_proposal capture proposal in

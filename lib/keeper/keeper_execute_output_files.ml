@@ -28,7 +28,7 @@ let complete_path stream = function
   | Process_output_capture.Capture_failed { message; path = _ } ->
     Error (Capture_failed message)
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* All file I/O and redaction below runs in the same blocking job. *)
 let copy_chunks ?expected_bytes path emit =

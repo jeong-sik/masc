@@ -2,7 +2,7 @@ module Agent = Agent_core.Agent
 module Native = Keeper_native_call
 module Owner = Keeper_owner_registry
 module Checkpoint = Keeper_checkpoint_store
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type binding =
   { base_path : string

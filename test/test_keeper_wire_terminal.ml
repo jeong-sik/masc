@@ -661,6 +661,58 @@ let test_transcript_failure_preserves_journal_and_live_terminal () =
     (Yojson.Safe.equal (Keeper_chat_operation.to_json operation)
        (Keeper_chat_operation.to_json persisted))
 
+(* Startup projects every retained Failed operation with one transcript read:
+   an operation projected earlier is found, a missing one is written once, and
+   a second pass writes nothing. *)
+let test_persist_all_projects_each_failure_once () =
+  with_workspace @@ fun base_path ->
+  let module Store = Keeper_chat_operation_store in
+  let module Projection = Keeper_chat_failure_projection in
+  let module Identity = Keeper_chat_delivery_identity in
+  let keeper_name = "persist-all" in
+  let store_ok = function Ok value -> value | Error error -> fail (Store.error_to_string error) in
+  let store = store_ok (Store.open_or_create ~path:(Filename.concat base_path "persist-all.sqlite3")) in
+  Fun.protect ~finally:(fun () -> ignore (Store.close store)) @@ fun () ->
+  let failed operation_id now =
+    let id = Keeper_chat_operation.Operation_id.of_string operation_id |> Result.get_ok in
+    ignore (store_ok (Store.submit store ~now ~operation_id:id
+      ~source:(operation_source keeper_name) ~input:(`Assoc ["message", `String operation_id])));
+    ignore (store_ok (Store.claim_next store ~now:(now +. 1.)));
+    store_ok (Store.fail_running store ~now:(now +. 2.) ~operation_id:id
+      ~kind:Keeper_chat_operation.Turn_cancelled ~detail:"owner shutdown" ~outcome_ref:None) in
+  let earlier = failed "op-persist-earlier" 10. in
+  let later = failed "op-persist-later" 20. in
+  (match Projection.persist ~base_path ~keeper_name earlier with
+   | Ok (Projection.Projected {transcript=Ok (); journal=Ok _}) -> ()
+   | _ -> fail "the earlier failure was not projected");
+  let projected () =
+    Projection.persist_all ~base_path ~keeper_name [earlier; later]
+    |> List.map (fun ((operation : Keeper_chat_operation.t), outcome) ->
+      match outcome with
+      | Ok (Projection.Projected {transcript=Ok (); journal=Ok _}) ->
+        Keeper_chat_operation.Operation_id.to_string operation.operation_id
+      | Ok Projection.Not_failed -> fail "a Failed operation read as not failed"
+      | Ok (Projection.Projected _) -> fail "a projection was refused"
+      | Error error -> fail (Projection.error_to_string error)) in
+  check (list string) "every failure is answered in order"
+    ["op-persist-earlier"; "op-persist-later"] (projected ());
+  let rows operation_id =
+    let key = Identity.Operation (Identity.Request_id.of_string operation_id |> Result.get_ok) in
+    Keeper_chat_store.load ~base_dir:base_path ~keeper_name
+    |> List.filter (fun (row : Keeper_chat_store.chat_message) -> match row.delivery_provenance with
+      | Some provenance -> Identity.delivery_key_equal provenance.delivery_key key
+          && Identity.transcript_slot_equal provenance.transcript_slot Identity.Settled_failure
+      | None -> false)
+    |> List.length in
+  check int "the earlier failure keeps one row" 1 (rows "op-persist-earlier");
+  check int "the later failure gets one row" 1 (rows "op-persist-later");
+  let path = Keeper_chat_store.chat_path ~base_dir:base_path ~keeper_name in
+  let before = In_channel.with_open_bin path In_channel.input_all in
+  ignore (projected ());
+  check string "a second pass writes nothing" before (In_channel.with_open_bin path In_channel.input_all);
+  check int "each journal keeps one terminal" 1
+    (List.length (read_journal ~base_path ~keeper_name ~operation_id:"op-persist-later"))
+
 (* Every settlement path without a live stream ends the journal through
    [record_terminal_error], so the helper itself carries the guarantees: one
    terminal per failure, never a second one, and a finished earlier segment
@@ -817,6 +869,8 @@ let () =
             test_journal_failure_skips_live_broadcast
         ; test_case "transcript failure preserves durable and live terminal" `Quick
             test_transcript_failure_preserves_journal_and_live_terminal
+        ; test_case "persist_all projects each failure once" `Quick
+            test_persist_all_projects_each_failure_once
         ; test_case "record_terminal_error writes once" `Quick
             test_record_terminal_error_writes_once
         ; test_case "record_terminal_error cuts a torn tail" `Quick

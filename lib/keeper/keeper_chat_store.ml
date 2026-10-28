@@ -1596,6 +1596,119 @@ let append_settled_failure_once ~base_dir ~keeper_name ~delivery_key ~content ~r
     ~terminal:(Settled_failure content) ~route ()
 ;;
 
+module Settled_failure = struct
+  type t =
+    { delivery_key : Keeper_chat_delivery_identity.delivery_key
+    ; content : string
+    ; route : Row_route.t Lazy.t
+    }
+end
+
+(* The transcript is read and indexed once for every failure, under one lock;
+   each failure is then checked against that index as
+   [append_settled_failure_once] checks it, and the missing rows are appended
+   in one durable write. A key this batch has already added answers with that
+   row. *)
+let append_settled_failures_once ~base_dir ~keeper_name failures =
+  match failures with
+  | [] -> Ok []
+  | _ :: _ ->
+    (try
+       ensure_dir_once ~base_dir;
+       let redaction = redaction_for ~base_dir ~keeper_name in
+       let path = chat_path ~base_dir ~keeper_name in
+       let ts = Time_compat.now () in
+       let transcript_slot = Keeper_chat_delivery_identity.Settled_failure in
+       let candidates =
+         List.map
+           (fun (tag, { Settled_failure.delivery_key; content; route }) ->
+              let content = Keeper_secret_redaction.redact_text redaction content in
+              let row_id = mint_message_id ~ts in
+              let line =
+                lazy
+                  (let { Row_route.surface; conversation_id } = Lazy.force route in
+                   encode_line
+                     ~role:Role.Request_failure
+                     ~content
+                     ~ts
+                     ~message_id:row_id
+                     ?surface
+                     ?conversation_id
+                     ~provenance:
+                       { Keeper_chat_delivery_identity.delivery_key; transcript_slot }
+                     ())
+              in
+              tag, delivery_key, ({ transcript_slot; row_id; line } : append_once_line))
+           failures
+       in
+       let inspect index =
+         let rec loop added results additions = function
+           | [] -> List.rev results, List.rev additions
+           | (tag, delivery_key, ({ row_id; _ } as candidate : append_once_line)) :: rest ->
+             let earlier (key, _) = Keeper_chat_delivery_identity.delivery_key_equal key delivery_key in
+             (match List.find_opt earlier added with
+              | Some (_, row_id) ->
+                loop added ((tag, Ok (Already_present { row_id })) :: results) additions rest
+              | None ->
+                (match
+                   find_indexed_provenance
+                     index
+                     ~provenance:{ Keeper_chat_delivery_identity.delivery_key; transcript_slot }
+                 with
+                 | Error detail -> loop added ((tag, Error detail) :: results) additions rest
+                 | Ok (Some row_id) ->
+                   loop added ((tag, Ok (Already_present { row_id })) :: results) additions rest
+                 | Ok None ->
+                   loop
+                     ((delivery_key, row_id) :: added)
+                     ((tag, Ok (Appended { row_id })) :: results)
+                     (candidate :: additions)
+                     rest))
+         in
+         loop [] [] [] candidates
+       in
+       match
+         Fs_compat.update_private_file_durable_locked_result path (fun existing ->
+           match provenance_index_of_existing existing with
+           | Error detail -> None, Error detail
+           | Ok index ->
+             let results, additions = inspect index in
+             let payload =
+               additions
+               |> List.map (fun (candidate : append_once_line) -> Lazy.force candidate.line ^ "\n")
+               |> String.concat ""
+             in
+             (if additions = [] then None else Some payload), Ok results)
+       with
+       | Private_file_succeeded result -> result
+       | Private_file_succeeded_with_cleanup_failure { value = result; cleanup_failure } ->
+         Log.Keeper.error
+           "keeper_chat_store: settled failure batch succeeded with descriptor settlement failure path=%s: %s"
+           path
+           (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
+         result
+       | Private_file_failed error -> Error (Fs_compat.durable_append_error_to_string error)
+       | Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+         Error
+           (Printf.sprintf
+              "%s; descriptor settlement failed: %s"
+              (Fs_compat.durable_append_error_to_string error)
+              (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string ChatStoreFailures)
+         ~labels:[ "operation", Keeper_chat_store_operation.(to_label Append) ]
+         ();
+       let detail = Printexc.to_string exn in
+       Log.Keeper.warn
+         "keeper_chat_store: settled failure batch failed for %s: %s"
+         (sanitize_name keeper_name)
+         detail;
+       Error detail)
+;;
+
 (* Unit wrapper: existing callers keep the prior swallow-and-count behavior (the
    failure is already counted + logged inside the [_result] variant). New callers
    that must surface the failure call [append_assistant_message_result] directly. *)

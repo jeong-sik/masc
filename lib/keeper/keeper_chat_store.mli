@@ -449,6 +449,25 @@ val append_settled_failure_once :
     not replace an earlier assistant result: a host rejection after output
     was delivered is a distinct fact, and cannot reuse that result's slot. *)
 
+module Settled_failure : sig
+  type t =
+    { delivery_key : Keeper_chat_delivery_identity.delivery_key
+    ; content : string
+    ; route : Row_route.t Lazy.t
+    }
+end
+
+val append_settled_failures_once :
+  base_dir:string -> keeper_name:string -> ('tag * Settled_failure.t) list ->
+  (('tag * (append_once_result, string) result) list, string) result
+(** {!append_settled_failure_once} for each failure, in order, against one
+    read of the transcript under one lock, with every missing row appended in
+    one durable write. Each failure is answered beside its caller's tag, so a
+    quarantined key refuses only that failure. A key that appears twice answers
+    the second time with the row the first added. The outer [Error] is a
+    transcript that could not be read, indexed or written; then nothing was
+    appended. *)
+
 (** Idempotently append the ordered tool-call rows for a durable request that
     has no assistant message. This is the only valid representation of a
     tool-only continuation; callers must not write an empty assistant row.

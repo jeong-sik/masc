@@ -488,7 +488,6 @@ let perf_cache_ttl_s = 30.0
 
 let dashboard_perf_http_json (config : Workspace.config) : Yojson.Safe.t =
   let cache_key = Printf.sprintf "perf:%s" config.Workspace.base_path in
-  Dashboard_cache.get_or_compute cache_key ~ttl:perf_cache_ttl_s (fun () ->
-    Domain_pool_ref.submit_io_or_inline (fun () ->
-      dashboard_perf_compute config))
+  Dashboard_cache.get_or_compute cache_key ~ttl:perf_cache_ttl_s
+    (Pool_work.cpu (fun () -> dashboard_perf_compute config))
 ;;

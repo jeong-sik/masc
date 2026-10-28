@@ -227,11 +227,11 @@ module For_test = struct
   let with_current_keeper_observations = with_current_keeper_observations_using
 end
 
-let get_or_compute_snapshot_json ~config ~actor compute =
+let get_or_compute_snapshot_json ~config ~actor work =
   let actor_name = normalize_actor_name actor in
   Dashboard_cache.get_or_compute
     (actor_cache_key config "snapshot" actor_name)
-    ~ttl:snapshot_cache_ttl_s (fun () -> compute actor_name)
+    ~ttl:snapshot_cache_ttl_s (work actor_name)
   |> with_current_keeper_observations ~config
 
 let invalidate_snapshot_json ~config =
@@ -258,11 +258,11 @@ let invalidate_snapshot_json ~config =
          (Printexc.to_string exn))
 ;;
 
-let get_or_compute_digest_json ~config ~actor compute =
+let get_or_compute_digest_json ~config ~actor work =
   let actor_name = normalize_actor_name actor in
   Dashboard_cache.get_or_compute
     (actor_cache_key config "digest" actor_name)
-    ~ttl:digest_cache_ttl_s (fun () -> compute actor_name)
+    ~ttl:digest_cache_ttl_s (work actor_name)
 
 type operator_snapshot_fn = {
   snapshot : 'a.

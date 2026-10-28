@@ -432,7 +432,7 @@ let cached_keeper_runtime_trace_json config name ?trace_id ?turn_id ~limit () =
     keeper_runtime_trace_cache_key config name ?trace_id ?turn_id ~limit ()
   in
   let cached =
-    Dashboard_cache.get_or_compute cache_key ~ttl:keeper_hot_path_cache_ttl_s (fun () ->
+    Dashboard_cache.get_or_compute cache_key ~ttl:keeper_hot_path_cache_ttl_s @@ Pool_work.cpu (fun () ->
       let status, body =
         Domain_pool_ref.submit_io_or_inline (fun () ->
           keeper_runtime_trace_json config name ?trace_id ?turn_id ~limit ())
@@ -830,7 +830,7 @@ let keeper_composite_status_of_string_opt = function
 let cached_keeper_composite_json config name =
   let cache_key = keeper_composite_cache_key config name in
   let cached =
-    Dashboard_cache.get_or_compute cache_key ~ttl:keeper_composite_cache_ttl_s (fun () ->
+    Dashboard_cache.get_or_compute cache_key ~ttl:keeper_composite_cache_ttl_s @@ Pool_work.cpu (fun () ->
       let status, body =
         Domain_pool_ref.submit_io_or_inline (fun () ->
           match Keeper_registry.get ~base_path:config.base_path name with
@@ -1142,41 +1142,40 @@ let handle_keeper_get_subroutes state req request reqd =
         Dashboard_cache.get_or_compute_payload
           cache_key
           ~ttl:keeper_file_changes_cache_ttl_s
-          (fun () ->
-            Domain_pool_ref.submit_io_or_inline (fun () ->
-              (* Folds what the store gained since the last call rather than reading
-                 the window again: this route answered 1.8-8.8s per call on
-                 2026-09-06 and was the profile's top allocator. *)
-              let tally =
-                Keeper_tool_call_log.file_change_tally
-                  ~keeper_name:name
-                  ~window_hours
-                  ()
-              in
-              `Assoc
-                [ ("keeper", `String name)
-                  (* The window this answer covers, and how many of the keeper's
-                     calls fell inside it. Both are stated because the changes alone
-                     do not say what was looked at: no changes in an hour and no
-                     calls in an hour are different facts. *)
-                ; ("window_hours", `Float window_hours)
-                  (* From the tally, not the row list: the three outcomes partition
-                     what was read, and a caller that folds rows as it reads them
-                     does not keep the list to measure. *)
-                ; ( "calls_in_window"
-                  , `Int (Keeper_tool_call_file_change.rows_counted tally) )
-                ; ( "changes"
-                  , `List
-                      (List.map
-                         Keeper_tool_call_file_change.to_json
-                         tally.Keeper_tool_call_file_change.changes) )
-                  (* Both counts ride the answer rather than a log line. A reader
-                     drawing changes has to be able to say that a turn wrote more
-                     than it can show: over_budget rows are changes whose text the
-                     log did not keep. *)
-                ; ("over_budget", `Int tally.Keeper_tool_call_file_change.over_budget)
-                ; ("malformed", `Int tally.Keeper_tool_call_file_change.malformed)
-                ]))
+          (Pool_work.cpu (fun () ->
+            (* Folds what the store gained since the last call rather than reading
+               the window again: this route answered 1.8-8.8s per call on
+               2026-09-06 and was the profile's top allocator. *)
+            let tally =
+              Keeper_tool_call_log.file_change_tally
+                ~keeper_name:name
+                ~window_hours
+                ()
+            in
+            `Assoc
+              [ ("keeper", `String name)
+                (* The window this answer covers, and how many of the keeper's
+                   calls fell inside it. Both are stated because the changes alone
+                   do not say what was looked at: no changes in an hour and no
+                   calls in an hour are different facts. *)
+              ; ("window_hours", `Float window_hours)
+                (* From the tally, not the row list: the three outcomes partition
+                   what was read, and a caller that folds rows as it reads them
+                   does not keep the list to measure. *)
+              ; ( "calls_in_window"
+                , `Int (Keeper_tool_call_file_change.rows_counted tally) )
+              ; ( "changes"
+                , `List
+                    (List.map
+                       Keeper_tool_call_file_change.to_json
+                       tally.Keeper_tool_call_file_change.changes) )
+                (* Both counts ride the answer rather than a log line. A reader
+                   drawing changes has to be able to say that a turn wrote more
+                   than it can show: over_budget rows are changes whose text the
+                   log did not keep. *)
+              ; ("over_budget", `Int tally.Keeper_tool_call_file_change.over_budget)
+              ; ("malformed", `Int tally.Keeper_tool_call_file_change.malformed)
+              ]))
       in
       Server_cached_read_http.respond ~request:req reqd payload
   else if ends_with keeper_suffix_paused_work then
@@ -1244,80 +1243,79 @@ let handle_keeper_get_subroutes state req request reqd =
         Printf.sprintf "keeper:tool-stats:%s:%s:%d" masc_root name window_hours
       in
       let payload =
-        Dashboard_cache.get_or_compute_payload cache_key ~ttl:standard_cache_ttl_s (fun () ->
-          Domain_pool_ref.submit_io_or_inline (fun () ->
-            let since =
-              Time_compat.now ()
-              -. (float_of_int window_hours *. Masc_time_constants.hour)
-            in
-            let entries =
-              Trajectory.read_entries_since ~masc_root ~keeper_name:name ~since
-            in
-            let tools = Trajectory.aggregate_tool_stats entries in
-            let timeline = Trajectory.hourly_timeline entries in
-            let latest_ts =
-              List.fold_left
-                (fun acc (entry : Trajectory.tool_call_entry) ->
-                  match acc with
-                  | Some ts when ts >= entry.ts -> acc
-                  | _ -> Some entry.ts)
-                None entries
-            in
-            let latest_age_s =
+        Dashboard_cache.get_or_compute_payload cache_key ~ttl:standard_cache_ttl_s (Pool_work.cpu (fun () ->
+          let since =
+            Time_compat.now ()
+            -. (float_of_int window_hours *. Masc_time_constants.hour)
+          in
+          let entries =
+            Trajectory.read_entries_since ~masc_root ~keeper_name:name ~since
+          in
+          let tools = Trajectory.aggregate_tool_stats entries in
+          let timeline = Trajectory.hourly_timeline entries in
+          let latest_ts =
+            List.fold_left
+              (fun acc (entry : Trajectory.tool_call_entry) ->
+                match acc with
+                | Some ts when ts >= entry.ts -> acc
+                | _ -> Some entry.ts)
+              None entries
+          in
+          let latest_age_s =
+            match latest_ts with
+            | Some ts -> Some (max 0.0 (Time_compat.now () -. ts))
+            | None -> None
+          in
+          let dashboard_surface = "/api/v1/keepers/:name/tool-stats" in
+          let coverage_gaps =
+            Telemetry_coverage_gap.read_recent ~masc_root ~n:32
+            |> List.filter (fun gap ->
+                 String.equal
+                   (Safe_ops.json_string ~default:"" "dashboard_surface" gap)
+                   dashboard_surface
+                 &&
+                 match Safe_ops.json_string_opt "keeper_name" gap with
+                 | Some keeper_name -> String.equal keeper_name name
+                 | None -> true)
+          in
+          let latest_gap =
+            List.rev coverage_gaps |> List.find_opt (fun _ -> true)
+          in
+          let health, stale_reason =
+            Keeper_status_runtime.keeper_tool_call_source_health
+              ~gap:
+                (Option.map
+                   (fun gap ->
+                      ( Safe_ops.json_float_opt "ts" gap,
+                        Safe_ops.json_string ~default:"coverage_gap"
+                          "stale_reason" gap ))
+                   latest_gap)
+              ~latest_ts ~latest_age_s ~freshness_slo_s
+          in
+          `Assoc [
+            ("keeper", `String name);
+            ("window_hours", `Int window_hours);
+            ("total_entries", `Int (List.length entries));
+            ("source", `String "trajectory_tool_call");
+            ( "producer",
+              `String
+                "keeper_hooks_agent_core.post_tool_use|mcp_server_eio_call_tool.runtime_mcp" );
+            ("durable_store", `String (Trajectory.trajectories_dir masc_root name));
+            ("dashboard_surface", `String dashboard_surface);
+            ("freshness_slo_s", `Float freshness_slo_s);
+            ("latest_ts_unix", Json_util.float_opt_to_json latest_ts);
+            ( "latest_ts_iso",
               match latest_ts with
-              | Some ts -> Some (max 0.0 (Time_compat.now () -. ts))
-              | None -> None
-            in
-            let dashboard_surface = "/api/v1/keepers/:name/tool-stats" in
-            let coverage_gaps =
-              Telemetry_coverage_gap.read_recent ~masc_root ~n:32
-              |> List.filter (fun gap ->
-                   String.equal
-                     (Safe_ops.json_string ~default:"" "dashboard_surface" gap)
-                     dashboard_surface
-                   &&
-                   match Safe_ops.json_string_opt "keeper_name" gap with
-                   | Some keeper_name -> String.equal keeper_name name
-                   | None -> true)
-            in
-            let latest_gap =
-              List.rev coverage_gaps |> List.find_opt (fun _ -> true)
-            in
-            let health, stale_reason =
-              Keeper_status_runtime.keeper_tool_call_source_health
-                ~gap:
-                  (Option.map
-                     (fun gap ->
-                        ( Safe_ops.json_float_opt "ts" gap,
-                          Safe_ops.json_string ~default:"coverage_gap"
-                            "stale_reason" gap ))
-                     latest_gap)
-                ~latest_ts ~latest_age_s ~freshness_slo_s
-            in
-            `Assoc [
-              ("keeper", `String name);
-              ("window_hours", `Int window_hours);
-              ("total_entries", `Int (List.length entries));
-              ("source", `String "trajectory_tool_call");
-              ( "producer",
-                `String
-                  "keeper_hooks_agent_core.post_tool_use|mcp_server_eio_call_tool.runtime_mcp" );
-              ("durable_store", `String (Trajectory.trajectories_dir masc_root name));
-              ("dashboard_surface", `String dashboard_surface);
-              ("freshness_slo_s", `Float freshness_slo_s);
-              ("latest_ts_unix", Json_util.float_opt_to_json latest_ts);
-              ( "latest_ts_iso",
-                match latest_ts with
-                | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts)
-                | None -> `Null );
-              ("latest_age_s", Json_util.float_opt_to_json latest_age_s);
-              ("health", `String health);
-              ( "stale_reason",
-                if stale_reason = "" then `Null else `String stale_reason );
-              ("coverage_gaps", `List coverage_gaps);
-              ("tools", `List (List.map Trajectory.tool_stat_to_json tools));
-              ("timeline", `List (List.map Trajectory.hourly_bucket_to_json timeline));
-            ]))
+              | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts)
+              | None -> `Null );
+            ("latest_age_s", Json_util.float_opt_to_json latest_age_s);
+            ("health", `String health);
+            ( "stale_reason",
+              if stale_reason = "" then `Null else `String stale_reason );
+            ("coverage_gaps", `List coverage_gaps);
+            ("tools", `List (List.map Trajectory.tool_stat_to_json tools));
+            ("timeline", `List (List.map Trajectory.hourly_bucket_to_json timeline));
+          ]))
       in
       Server_cached_read_http.respond ~request:req reqd payload
   else if ends_with "/tool-result" then
@@ -2107,37 +2105,36 @@ let handle_keeper_get_subroutes state req request reqd =
              tail_scan_lines
          in
          let payload =
-           Dashboard_cache.get_or_compute_payload cache_key ~ttl:keeper_hot_path_cache_ttl_s (fun () ->
-             Domain_pool_ref.submit_io_or_inline (fun () ->
-               let masc_root = Workspace.masc_dir config in
-               let trajectory_lines =
-                 Trajectory.read_recent_lines ~masc_root ~keeper_name:m.name
-                   ~trace_id ~max_lines:tail_scan_lines
-               in
-               (* Reasoning evidence comes only from the metadata-only
-                  trajectory producer. Internal assistant history is never
-                  reclassified into this surface. *)
-               let lines =
-                 if include_thinking then trajectory_lines
-                 else List.filter (function
-                   | Trajectory.Tool_call _ -> true
-                   | Trajectory.Withheld_thinking _ -> false) trajectory_lines
-               in
-               let total = List.length lines in
-               let recent =
-                 if total <= limit then lines
-                 else
-                   let drop = total - limit in
-                   List.filteri (fun i _e -> i >= drop) lines
-               in
-               `Assoc [
-                 ("keeper", `String name);
-                 ("trace_id", `String trace_id);
-                 ("total_entries", `Int total);
-                 ("showing", `Int (List.length recent));
-                 ("entries", `List (List.map
-                   (Trajectory.trajectory_line_to_json ~result_max_len) recent));
-               ]))
+           Dashboard_cache.get_or_compute_payload cache_key ~ttl:keeper_hot_path_cache_ttl_s (Pool_work.cpu (fun () ->
+             let masc_root = Workspace.masc_dir config in
+             let trajectory_lines =
+               Trajectory.read_recent_lines ~masc_root ~keeper_name:m.name
+                 ~trace_id ~max_lines:tail_scan_lines
+             in
+             (* Reasoning evidence comes only from the metadata-only
+                trajectory producer. Internal assistant history is never
+                reclassified into this surface. *)
+             let lines =
+               if include_thinking then trajectory_lines
+               else List.filter (function
+                 | Trajectory.Tool_call _ -> true
+                 | Trajectory.Withheld_thinking _ -> false) trajectory_lines
+             in
+             let total = List.length lines in
+             let recent =
+               if total <= limit then lines
+               else
+                 let drop = total - limit in
+                 List.filteri (fun i _e -> i >= drop) lines
+             in
+             `Assoc [
+               ("keeper", `String name);
+               ("trace_id", `String trace_id);
+               ("total_entries", `Int total);
+               ("showing", `Int (List.length recent));
+               ("entries", `List (List.map
+                 (Trajectory.trajectory_line_to_json ~result_max_len) recent));
+             ]))
          in
          Server_cached_read_http.respond ~request:req reqd payload)
   else if ends_with "/transitions" then

@@ -778,9 +778,9 @@ let test_workspace_message_mutation_invalidates_workspace_and_health () =
   let unrelated_projection = ref 0 in
   let full_health_invalidations = ref 0 in
   let read key counter =
-    Dashboard_cache.get_or_compute key ~ttl:120.0 (fun () ->
+    Dashboard_cache.get_or_compute key ~ttl:120.0 (Pool_work.cpu (fun () ->
       incr counter;
-      `Int !counter)
+      `Int !counter))
   in
   let dashboard_key =
     Printf.sprintf "dashboard.workspace:%s;probe" config.Workspace.base_path

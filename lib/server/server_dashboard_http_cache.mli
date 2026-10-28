@@ -117,12 +117,12 @@ val cached_surface_or_first_success_json :
   ttl:float ->
   clock:_ Eio.Time.clock ->
   timeout_sec:float ->
-  (unit -> Yojson.Safe.t) ->
+  Yojson.Safe.t Pool_work.t ->
   Yojson.Safe.t
 (** [cached_surface_or_first_success_json s ~cache_key ~ttl ~clock
-    ~timeout_sec compute] returns the cached JSON when the surface
+    ~timeout_sec work] returns the cached JSON when the surface
     has at least one successful refresh, otherwise drives
-    [compute] through {!Dashboard_cache.get_or_compute_with_timeout}
+    [work] through {!Dashboard_cache.get_or_compute_with_timeout}
     with the surface's attempt/success/error tracking bound around
     the call.
 

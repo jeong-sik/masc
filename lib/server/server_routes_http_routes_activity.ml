@@ -976,17 +976,16 @@ let add_routes ~sw ~clock router =
            Dashboard_cache.get_or_compute_payload
              cache_key
              ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s
-             (fun () ->
-                Domain_pool_ref.submit_io_or_inline (fun () ->
-                  let hearths =
-                    Board_dispatch.list_hearths
-                      ~exclude_system ~exclude_automation ()
-                  in
-                  `Assoc [
-                    ("hearths", `List (List.map (fun (name, count) ->
-                      `Assoc [("name", `String name); ("count", `Int count)]
-                    ) hearths));
-                  ]))
+             (Pool_work.cpu (fun () ->
+                let hearths =
+                  Board_dispatch.list_hearths
+                    ~exclude_system ~exclude_automation ()
+                in
+                `Assoc [
+                  ("hearths", `List (List.map (fun (name, count) ->
+                    `Assoc [("name", `String name); ("count", `Int count)]
+                  ) hearths));
+                ]))
          in
          Server_cached_read_http.respond ~request:req reqd payload
        ) request reqd)

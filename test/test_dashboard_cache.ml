@@ -86,9 +86,9 @@ let test_compute_timeout_not_logged_as_error ~clock () =
   let before_seq = latest_log_seq () in
   let result =
     Dashboard_cache.get_or_compute_with_timeout "timeout-no-error" ~ttl:0.1
-      ~clock ~timeout_sec:0.01 (fun () ->
+      ~clock ~timeout_sec:0.01 (Pool_work.cpu (fun () ->
         Eio.Time.sleep clock 0.1;
-        `String "never")
+        `String "never"))
   in
   Alcotest.(check string) "timeout kind" "owner" (timeout_kind result);
   let cache_revalidation_errors =
@@ -107,12 +107,12 @@ let test_compute_timeout_not_logged_as_error ~clock () =
 let test_nested_no_deadlock () =
   Dashboard_cache.invalidate_all ();
   let result =
-    Dashboard_cache.get_or_compute "outer" ~ttl:5.0 (fun () ->
+    Dashboard_cache.get_or_compute "outer" ~ttl:5.0 (Pool_work.cpu (fun () ->
       let inner =
-        Dashboard_cache.get_or_compute "inner" ~ttl:5.0 (fun () ->
-          `String "inner_ok")
+        Dashboard_cache.get_or_compute "inner" ~ttl:5.0 (Pool_work.cpu (fun () ->
+          `String "inner_ok"))
       in
-      `Assoc [("inner", inner)])
+      `Assoc [("inner", inner)]))
   in
   check_json "nested no deadlock"
     (`Assoc [("inner", `String "inner_ok")])
@@ -123,16 +123,16 @@ let test_nested_no_deadlock () =
 let test_triple_nesting () =
   Dashboard_cache.invalidate_all ();
   let result =
-    Dashboard_cache.get_or_compute "level1" ~ttl:5.0 (fun () ->
+    Dashboard_cache.get_or_compute "level1" ~ttl:5.0 (Pool_work.cpu (fun () ->
       let l2 =
-        Dashboard_cache.get_or_compute "level2" ~ttl:5.0 (fun () ->
+        Dashboard_cache.get_or_compute "level2" ~ttl:5.0 (Pool_work.cpu (fun () ->
           let l3 =
-            Dashboard_cache.get_or_compute "level3" ~ttl:5.0 (fun () ->
-              `String "deep")
+            Dashboard_cache.get_or_compute "level3" ~ttl:5.0 (Pool_work.cpu (fun () ->
+              `String "deep"))
           in
-          `Assoc [("l3", l3)])
+          `Assoc [("l3", l3)]))
       in
-      `Assoc [("l2", l2)])
+      `Assoc [("l2", l2)]))
   in
   check_json "triple nesting"
     (`Assoc [("l2", `Assoc [("l3", `String "deep")])])
@@ -144,16 +144,16 @@ let test_cache_hit () =
   Dashboard_cache.invalidate_all ();
   let counter = ref 0 in
   let compute () = incr counter; `Int !counter in
-  let v1 = Dashboard_cache.get_or_compute "hit" ~ttl:5.0 compute in
-  let v2 = Dashboard_cache.get_or_compute "hit" ~ttl:5.0 compute in
+  let v1 = Dashboard_cache.get_or_compute "hit" ~ttl:5.0 (Pool_work.cpu compute) in
+  let v2 = Dashboard_cache.get_or_compute "hit" ~ttl:5.0 (Pool_work.cpu compute) in
   check_json "same value" v1 v2;
   Alcotest.(check int) "compute once" 1 !counter
 
 let test_peek_returns_cached_value () =
   Dashboard_cache.invalidate_all ();
   let seeded =
-    Dashboard_cache.get_or_compute "peek-hit" ~ttl:5.0 (fun () ->
-        `String "cached")
+    Dashboard_cache.get_or_compute "peek-hit" ~ttl:5.0 (Pool_work.cpu (fun () ->
+        `String "cached"))
   in
   let peeked = Dashboard_cache.peek "peek-hit" in
   Alcotest.(check bool) "peek returns some" true (Option.is_some peeked);
@@ -164,13 +164,13 @@ let test_get_or_compute_payload () =
   Dashboard_cache.invalidate_all ();
   let counter = ref 0 in
   let compute () = incr counter; `Assoc [ ("count", `Int !counter) ] in
-  let p1 = Dashboard_cache.get_or_compute_payload "payload-hit" ~ttl:5.0 compute in
+  let p1 = Dashboard_cache.get_or_compute_payload "payload-hit" ~ttl:5.0 (Pool_work.cpu compute) in
   Alcotest.(check int) "compute once" 1 !counter;
   check_json "payload json" (`Assoc [ ("count", `Int 1) ]) p1.json;
   Alcotest.(check string) "raw json string" "{\"count\":1}" p1.raw_json;
   Alcotest.(check bool) "etag is non-empty" true (String.length p1.etag > 0);
   Alcotest.(check bool) "etag is weak" true (String.starts_with ~prefix:"W/\"" p1.etag);
-  let p2 = Dashboard_cache.get_or_compute_payload "payload-hit" ~ttl:5.0 compute in
+  let p2 = Dashboard_cache.get_or_compute_payload "payload-hit" ~ttl:5.0 (Pool_work.cpu compute) in
   Alcotest.(check int) "still computed once" 1 !counter;
   Alcotest.(check string) "same raw_json" p1.raw_json p2.raw_json;
   Alcotest.(check string) "same etag" p1.etag p2.etag
@@ -180,8 +180,8 @@ let test_peek_payload () =
   Alcotest.(check bool) "peek missing is none" true
     (Option.is_none (Dashboard_cache.peek_payload "missing"));
   let p =
-    Dashboard_cache.get_or_compute_payload "peek-p" ~ttl:5.0 (fun () ->
-        `String "cached_payload")
+    Dashboard_cache.get_or_compute_payload "peek-p" ~ttl:5.0 (Pool_work.cpu (fun () ->
+        `String "cached_payload"))
   in
   match Dashboard_cache.peek_payload "peek-p" with
   | None -> Alcotest.fail "expected peek_payload to return Some"
@@ -205,16 +205,16 @@ let test_seed_stale_if_missing_refreshes_in_background ~clock () =
   Dashboard_cache.seed_stale_if_missing "seeded" ~stale_for:30.0
     (`String "fallback");
   let immediate =
-    Dashboard_cache.get_or_compute "seeded" ~ttl:1.0 (fun () ->
+    Dashboard_cache.get_or_compute "seeded" ~ttl:1.0 (Pool_work.cpu (fun () ->
         Eio.Time.sleep clock 0.05;
-        `String "fresh")
+        `String "fresh"))
   in
   check_json "seeded cache returns fallback immediately"
     (`String "fallback") immediate;
   Eio.Time.sleep clock 0.1;
   let refreshed =
-    Dashboard_cache.get_or_compute "seeded" ~ttl:1.0 (fun () ->
-        `String "unexpected_recompute")
+    Dashboard_cache.get_or_compute "seeded" ~ttl:1.0 (Pool_work.cpu (fun () ->
+        `String "unexpected_recompute"))
   in
   check_json "background refresh stores fresh value"
     (`String "fresh") refreshed
@@ -224,8 +224,9 @@ let test_projection_snapshot_cache_reuses_actor_key () =
   let config = Workspace.default_config "/tmp/projection-cache-workspace" in
   let counter = ref 0 in
   let compute actor_name =
-    incr counter;
-    `Assoc [("actor", `String actor_name); ("count", `Int !counter)]
+    Pool_work.cpu (fun () ->
+      incr counter;
+      `Assoc [("actor", `String actor_name); ("count", `Int !counter)])
   in
   let v1 =
     Dashboard_projection_cache.get_or_compute_snapshot_json
@@ -243,8 +244,9 @@ let test_projection_digest_cache_separates_actors () =
   let config = Workspace.default_config "/tmp/projection-cache-workspace-actors" in
   let counter = ref 0 in
   let compute actor_name =
-    incr counter;
-    `Assoc [("actor", `String actor_name); ("count", `Int !counter)]
+    Pool_work.cpu (fun () ->
+      incr counter;
+      `Assoc [("actor", `String actor_name); ("count", `Int !counter)])
   in
   ignore
     (Dashboard_projection_cache.get_or_compute_digest_json
@@ -260,9 +262,9 @@ let test_invalidate () =
   Dashboard_cache.invalidate_all ();
   let counter = ref 0 in
   let compute () = incr counter; `Int !counter in
-  ignore (Dashboard_cache.get_or_compute "inv" ~ttl:5.0 compute);
+  ignore (Dashboard_cache.get_or_compute "inv" ~ttl:5.0 (Pool_work.cpu compute));
   Dashboard_cache.invalidate "inv";
-  let v = Dashboard_cache.get_or_compute "inv" ~ttl:5.0 compute in
+  let v = Dashboard_cache.get_or_compute "inv" ~ttl:5.0 (Pool_work.cpu compute) in
   Alcotest.(check int) "recompute after invalidate" 2 !counter;
   check_json "new value" (`Int 2) v
 
@@ -272,35 +274,35 @@ let test_invalidate_prefix () =
   let mission_counter = ref 0 in
   ignore
     (Dashboard_cache.get_or_compute "proof:workspace-a:default:one" ~ttl:5.0
-       (fun () ->
+       (Pool_work.cpu (fun () ->
          incr proof_counter;
-         `Int !proof_counter));
+         `Int !proof_counter)));
   ignore
     (Dashboard_cache.get_or_compute "proof:workspace-a:default:two" ~ttl:5.0
-       (fun () ->
+       (Pool_work.cpu (fun () ->
          incr proof_counter;
-         `Int !proof_counter));
+         `Int !proof_counter)));
   ignore
     (Dashboard_cache.get_or_compute "mission:workspace-a:default:one" ~ttl:5.0
-       (fun () ->
+       (Pool_work.cpu (fun () ->
          incr mission_counter;
-         `Int !mission_counter));
+         `Int !mission_counter)));
   Dashboard_cache.invalidate_prefix "proof:workspace-a:default:";
   ignore
     (Dashboard_cache.get_or_compute "proof:workspace-a:default:one" ~ttl:5.0
-       (fun () ->
+       (Pool_work.cpu (fun () ->
          incr proof_counter;
-         `Int !proof_counter));
+         `Int !proof_counter)));
   ignore
     (Dashboard_cache.get_or_compute "proof:workspace-a:default:two" ~ttl:5.0
-       (fun () ->
+       (Pool_work.cpu (fun () ->
          incr proof_counter;
-         `Int !proof_counter));
+         `Int !proof_counter)));
   ignore
     (Dashboard_cache.get_or_compute "mission:workspace-a:default:one" ~ttl:5.0
-       (fun () ->
+       (Pool_work.cpu (fun () ->
          incr mission_counter;
-         `Int !mission_counter));
+         `Int !mission_counter)));
   Alcotest.(check int) "proof entries recomputed" 4 !proof_counter;
   Alcotest.(check int) "non-matching prefix preserved" 1 !mission_counter
 
@@ -315,9 +317,9 @@ let test_board_write_invalidates_every_board_projection () =
   let hearths_counter = ref 0 in
   let unrelated_counter = ref 0 in
   let read key counter =
-    Dashboard_cache.get_or_compute key ~ttl:120.0 (fun () ->
+    Dashboard_cache.get_or_compute key ~ttl:120.0 (Pool_work.cpu (fun () ->
       incr counter;
-      `Int !counter)
+      `Int !counter))
   in
   ignore (read "board:memory:-;-;recent;true;false;50;0;ws;-;true" memory_counter);
   ignore (read "board:list:ws:-:-:true:false:recent:50:0:-:-:true:false" list_counter);
@@ -340,9 +342,9 @@ let test_task_mutation_hook_invalidates_all_execution_variants () =
   let full_counter = ref 0 in
   let unrelated_counter = ref 0 in
   let read key counter =
-    Dashboard_cache.get_or_compute key ~ttl:120.0 (fun () ->
+    Dashboard_cache.get_or_compute key ~ttl:120.0 (Pool_work.cpu (fun () ->
       incr counter;
-      `Int !counter)
+      `Int !counter))
   in
   ignore (read "execution:default:light" default_counter);
   ignore (read "execution:operator::full" full_counter);
@@ -617,8 +619,8 @@ let test_execution_preparation_failure_wakes_waiter () =
 
 let test_stats () =
   Dashboard_cache.invalidate_all ();
-  ignore (Dashboard_cache.get_or_compute "s1" ~ttl:10.0 (fun () -> `Null));
-  ignore (Dashboard_cache.get_or_compute "s2" ~ttl:10.0 (fun () -> `Null));
+  ignore (Dashboard_cache.get_or_compute "s1" ~ttl:10.0 (Pool_work.cpu (fun () -> `Null)));
+  ignore (Dashboard_cache.get_or_compute "s2" ~ttl:10.0 (Pool_work.cpu (fun () -> `Null)));
   let stats = Dashboard_cache.stats () in
   let fresh = Yojson.Safe.Util.(member "ready_fresh" stats |> to_int) in
   Alcotest.(check int) "2 fresh entries" 2 fresh
@@ -633,7 +635,7 @@ let test_fresh_versions_stay_within_cache_limit () =
       (Dashboard_cache.get_or_compute
          (Printf.sprintf "goal-version:%04d" i)
          ~ttl:(600.0 +. float_of_int i)
-         (fun () -> `Null))
+         (Pool_work.cpu (fun () -> `Null)))
   done;
   let entries = Yojson.Safe.Util.(member "entries" (Dashboard_cache.stats ()) |> to_int) in
   Alcotest.(check bool) "fresh versions respect max_entries" true (entries <= max_entries);
@@ -655,10 +657,10 @@ let test_fresh_versions_stay_within_cache_limit () =
 let test_stats_detail_surface () =
   Dashboard_cache.invalidate_all ();
   (* Two misses (cold compute), then two hits on same keys. *)
-  ignore (Dashboard_cache.get_or_compute "d1" ~ttl:10.0 (fun () -> `Int 1));
-  ignore (Dashboard_cache.get_or_compute "d2" ~ttl:10.0 (fun () -> `Int 2));
-  ignore (Dashboard_cache.get_or_compute "d1" ~ttl:10.0 (fun () -> `Int 99));
-  ignore (Dashboard_cache.get_or_compute "d2" ~ttl:10.0 (fun () -> `Int 99));
+  ignore (Dashboard_cache.get_or_compute "d1" ~ttl:10.0 (Pool_work.cpu (fun () -> `Int 1)));
+  ignore (Dashboard_cache.get_or_compute "d2" ~ttl:10.0 (Pool_work.cpu (fun () -> `Int 2)));
+  ignore (Dashboard_cache.get_or_compute "d1" ~ttl:10.0 (Pool_work.cpu (fun () -> `Int 99)));
+  ignore (Dashboard_cache.get_or_compute "d2" ~ttl:10.0 (Pool_work.cpu (fun () -> `Int 99)));
   let stats = Dashboard_cache.stats () in
   let open Yojson.Safe.Util in
   let hits = member "hits_total" stats |> to_int in
@@ -710,9 +712,9 @@ let test_stampede () =
     `String "computed"
   in
   Eio.Fiber.all [
-    (fun () -> ignore (Dashboard_cache.get_or_compute "stmp" ~ttl:5.0 slow_compute));
-    (fun () -> ignore (Dashboard_cache.get_or_compute "stmp" ~ttl:5.0 slow_compute));
-    (fun () -> ignore (Dashboard_cache.get_or_compute "stmp" ~ttl:5.0 slow_compute));
+    (fun () -> ignore (Dashboard_cache.get_or_compute "stmp" ~ttl:5.0 (Pool_work.cpu slow_compute)));
+    (fun () -> ignore (Dashboard_cache.get_or_compute "stmp" ~ttl:5.0 (Pool_work.cpu slow_compute)));
+    (fun () -> ignore (Dashboard_cache.get_or_compute "stmp" ~ttl:5.0 (Pool_work.cpu slow_compute)));
   ];
   Alcotest.(check int) "stampede: compute once" 1 (Atomic.get compute_count)
 
@@ -723,16 +725,16 @@ let test_exception_recovery () =
   let raised =
     (try
        ignore
-         (Dashboard_cache.get_or_compute "fail" ~ttl:5.0 (fun () ->
-            failwith "boom"));
+         (Dashboard_cache.get_or_compute "fail" ~ttl:5.0 (Pool_work.cpu (fun () ->
+            failwith "boom")));
        false
      with Failure _ -> true)
   in
   Alcotest.(check bool) "exception propagated" true raised;
   (* Key should be removed -- next call recomputes *)
   let v =
-    Dashboard_cache.get_or_compute "fail" ~ttl:5.0 (fun () ->
-      `String "recovered")
+    Dashboard_cache.get_or_compute "fail" ~ttl:5.0 (Pool_work.cpu (fun () ->
+      `String "recovered"))
   in
   check_json "recovered after exception" (`String "recovered") v
 
@@ -745,10 +747,10 @@ let test_invalidate_all_wakes_waiters () =
     (fun () ->
        (* This fiber will block waiting for "blocking" to be computed *)
        let v =
-         Dashboard_cache.get_or_compute "blocking" ~ttl:5.0 (fun () ->
+         Dashboard_cache.get_or_compute "blocking" ~ttl:5.0 (Pool_work.cpu (fun () ->
            (* Signal that compute started, then yield to let waiter attach *)
            Eio.Fiber.yield ();
-           `String "first")
+           `String "first"))
        in
        check_json "first compute" (`String "first") v)
     (fun () ->
@@ -774,7 +776,7 @@ let test_stale_preserved_on_timeout ~clock ~sw () =
   let original = `String "original_data" in
   (* 1. Seed the cache with a short-lived entry (TTL 0.1s, stale grace 0.3s) *)
   let v0 =
-    Dashboard_cache.get_or_compute "stale_timeout" ~ttl:0.1 (fun () -> original)
+    Dashboard_cache.get_or_compute "stale_timeout" ~ttl:0.1 (Pool_work.cpu (fun () -> original))
   in
   check_json "seed" original v0;
   (* 2. Wait for expiry but stay within stale grace *)
@@ -783,10 +785,10 @@ let test_stale_preserved_on_timeout ~clock ~sw () =
      The function should return the stale value immediately. *)
   let result =
     Dashboard_cache.get_or_compute_with_timeout "stale_timeout" ~ttl:0.1
-      ~clock ~timeout_sec:0.05 (fun () ->
+      ~clock ~timeout_sec:0.05 (Pool_work.cpu (fun () ->
         (* Simulate slow computation that exceeds timeout *)
         Eio.Time.sleep clock 1.0;
-        `String "never_reached")
+        `String "never_reached"))
   in
   check_json "stale value returned on timeout" original result;
   (* 4. Let the background fiber finish (it will timeout + restore stale) *)
@@ -794,8 +796,8 @@ let test_stale_preserved_on_timeout ~clock ~sw () =
   Eio.Time.sleep clock 0.1;
   (* 5. Subsequent lookup: must get stale data or recompute, NOT timeout JSON *)
   let after =
-    Dashboard_cache.get_or_compute "stale_timeout" ~ttl:0.1 (fun () ->
-      `String "fresh_recompute")
+    Dashboard_cache.get_or_compute "stale_timeout" ~ttl:0.1 (Pool_work.cpu (fun () ->
+      `String "fresh_recompute"))
   in
   let is_timeout_error = Dashboard_cache.is_timeout_envelope after in
   Alcotest.(check bool) "no timeout error cached" false is_timeout_error
@@ -806,21 +808,21 @@ let test_expired_stale_restored_on_timeout ~clock () =
   Dashboard_cache.invalidate_all ();
   let original = `String "expired_but_last_good" in
   let seeded =
-    Dashboard_cache.get_or_compute "expired_stale_timeout" ~ttl:0.05 (fun () ->
-      original)
+    Dashboard_cache.get_or_compute "expired_stale_timeout" ~ttl:0.05 (Pool_work.cpu (fun () ->
+      original))
   in
   check_json "seed expired-stale value" original seeded;
   Eio.Time.sleep clock 0.25;
   let result =
     Dashboard_cache.get_or_compute_with_timeout "expired_stale_timeout" ~ttl:0.05
-      ~clock ~timeout_sec:0.05 (fun () ->
+      ~clock ~timeout_sec:0.05 (Pool_work.cpu (fun () ->
         Eio.Time.sleep clock 1.0;
-        `String "never_reached")
+        `String "never_reached"))
   in
   check_json "expired stale restored on timeout" original result;
   let after =
-    Dashboard_cache.get_or_compute "expired_stale_timeout" ~ttl:0.05 (fun () ->
-      `String "fresh_after_restore")
+    Dashboard_cache.get_or_compute "expired_stale_timeout" ~ttl:0.05 (Pool_work.cpu (fun () ->
+      `String "fresh_after_restore"))
   in
   let is_timeout_error = Dashboard_cache.is_timeout_envelope after in
   Alcotest.(check bool) "expired stale restore avoids timeout poison" false
@@ -835,17 +837,17 @@ let test_timeout_no_stale_returns_error ~clock () =
   Dashboard_cache.invalidate_all ();
   let result =
     Dashboard_cache.get_or_compute_with_timeout "no_stale_timeout" ~ttl:1.0
-      ~clock ~timeout_sec:0.05 (fun () ->
+      ~clock ~timeout_sec:0.05 (Pool_work.cpu (fun () ->
         Eio.Time.sleep clock 1.0;
-        `String "never_reached")
+        `String "never_reached"))
   in
   (* Should get timeout error JSON *)
   let is_timeout_error = Dashboard_cache.is_timeout_envelope result in
   Alcotest.(check bool) "timeout error returned" true is_timeout_error;
   (* Next call should recompute, not return cached error *)
   let v2 =
-    Dashboard_cache.get_or_compute "no_stale_timeout" ~ttl:1.0 (fun () ->
-      `String "recovered")
+    Dashboard_cache.get_or_compute "no_stale_timeout" ~ttl:1.0 (Pool_work.cpu (fun () ->
+      `String "recovered"))
   in
   check_json "recompute after timeout" (`String "recovered") v2
 
@@ -865,14 +867,14 @@ let test_repeated_no_stale_timeout_opens_circuit ~clock () =
   for _ = 1 to 3 do
     let result =
       Dashboard_cache.get_or_compute_with_timeout "circuit_timeout" ~ttl:1.0
-        ~clock ~timeout_sec:0.05 slow_compute
+        ~clock ~timeout_sec:0.05 (Pool_work.cpu slow_compute)
     in
     Alcotest.(check string) "owner timeout kind" "owner"
       (timeout_kind result)
   done;
   let fail_fast =
     Dashboard_cache.get_or_compute_with_timeout "circuit_timeout" ~ttl:1.0
-      ~clock ~timeout_sec:0.05 slow_compute
+      ~clock ~timeout_sec:0.05 (Pool_work.cpu slow_compute)
   in
   Alcotest.(check string) "circuit timeout kind" "circuit_open"
     (timeout_kind fail_fast);
@@ -881,9 +883,9 @@ let test_repeated_no_stale_timeout_opens_circuit ~clock () =
   Dashboard_cache.invalidate "circuit_timeout";
   let recovered =
     Dashboard_cache.get_or_compute_with_timeout "circuit_timeout" ~ttl:1.0
-      ~clock ~timeout_sec:0.5 (fun () ->
+      ~clock ~timeout_sec:0.5 (Pool_work.cpu (fun () ->
         Atomic.incr computes;
-        `String "recovered")
+        `String "recovered"))
   in
   check_json "invalidate clears timeout circuit" (`String "recovered")
     recovered;
@@ -904,23 +906,23 @@ let test_waiter_timeout_returns_error_not_cached ~clock () =
   Eio.Fiber.fork ~sw (fun () ->
     ignore
       (Dashboard_cache.get_or_compute_with_timeout "waiter_timeout" ~ttl:1.0
-         ~clock ~timeout_sec:1.0 (fun () ->
+         ~clock ~timeout_sec:1.0 (Pool_work.cpu (fun () ->
            Eio.Time.sleep clock 0.4;
-           `String "owner_done"));
+           `String "owner_done")));
     Eio.Promise.resolve resolve_owner_finished ());
   Eio.Time.sleep clock 0.05;
   waiter_result :=
     Dashboard_cache.get_or_compute_with_timeout "waiter_timeout" ~ttl:1.0
-      ~clock ~timeout_sec:0.15 (fun () ->
-        `String "waiter_should_not_compute");
+      ~clock ~timeout_sec:0.15 (Pool_work.cpu (fun () ->
+        `String "waiter_should_not_compute"));
   Eio.Promise.await owner_finished;
   let timeout_kind =
     Yojson.Safe.Util.(member "timeout_kind" !waiter_result |> to_string)
   in
   Alcotest.(check string) "waiter timeout is classified" "waiter" timeout_kind;
   let final =
-    Dashboard_cache.get_or_compute "waiter_timeout" ~ttl:1.0 (fun () ->
-      `String "unexpected_recompute")
+    Dashboard_cache.get_or_compute "waiter_timeout" ~ttl:1.0 (Pool_work.cpu (fun () ->
+      `String "unexpected_recompute"))
   in
   check_json "owner result survives waiter timeout" (`String "owner_done") final
 
@@ -1084,7 +1086,7 @@ let test_compute_leaves_caller_domain ~clock ~sw ~dm () =
     observed := None;
     ignore
       (Dashboard_cache.get_or_compute_with_timeout key ~ttl:60.0 ~clock
-         ~timeout_sec:30.0 compute);
+         ~timeout_sec:30.0 (Pool_work.cpu compute));
     !observed
   in
   Executor_pool_ref.For_testing.with_pool_option None (fun () ->
@@ -1123,8 +1125,8 @@ let test_nested_shared_pool_submission_does_not_starve ~clock ~sw ~dm () =
           ~ttl:60.0
           ~clock
           ~timeout_sec:0.2
-          (fun () ->
-            Domain_pool_ref.submit_io_or_inline (fun () -> `String "ok"))
+          (Pool_work.cpu (fun () ->
+            Domain_pool_ref.submit_io_or_inline (fun () -> `String "ok")))
       in
       check_json "nested shared-pool submit completes" (`String "ok") result)
 
@@ -1154,16 +1156,16 @@ let test_json_cache_materialization_and_invalidation ~clock () =
           if not (Eio.Promise.is_resolved entered) then Eio.Promise.resolve enter ();
           Eio.Promise.await release))
       (fun () ->
-        let value = Dashboard_cache.get_or_compute key ~ttl:60. (fun () -> original) in
+        let value = Dashboard_cache.get_or_compute key ~ttl:60. (Pool_work.cpu (fun () -> original)) in
         check_json "JSON fill retains the AST" original value;
         ignore (Dashboard_cache.get_or_compute_with_timeout key ~ttl:60. ~clock
-          ~timeout_sec:2. (fun () -> Alcotest.fail "JSON hit recomputed"));
+          ~timeout_sec:2. (Pool_work.cpu (fun () -> Alcotest.fail "JSON hit recomputed")));
         Alcotest.(check int) "JSON fill and hit perform no serialization" 0
           (Atomic.get preparations);
         Alcotest.(check bool) "payload peek does not force bytes" true
           (Option.is_none (Dashboard_cache.peek_payload key));
         let read () = Dashboard_cache.get_or_compute_payload key ~ttl:60.
-          (fun () -> Alcotest.fail "payload reader recomputed JSON") in
+          (Pool_work.cpu (fun () -> Alcotest.fail "payload reader recomputed JSON")) in
         Atomic.set pause_materialization true;
         Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve first_u (read ()));
         Eio.Time.with_timeout_exn clock 2. (fun () -> Eio.Promise.await entered);
@@ -1174,7 +1176,7 @@ let test_json_cache_materialization_and_invalidation ~clock () =
           (Option.is_none (Dashboard_cache.peek_payload key));
         Dashboard_cache.invalidate key;
         let replacement = `String "replacement" in
-        ignore (Dashboard_cache.get_or_compute key ~ttl:60. (fun () -> replacement));
+        ignore (Dashboard_cache.get_or_compute key ~ttl:60. (Pool_work.cpu (fun () -> replacement)));
         Eio.Promise.resolve release_u ();
         let a, b = Eio.Time.with_timeout_exn clock 2. (fun () ->
           Eio.Promise.await first, Eio.Promise.await second) in
@@ -1190,7 +1192,7 @@ let test_json_cache_materialization_and_invalidation ~clock () =
 let test_json_cache_nested_materialization ~clock ~dm () =
   Dashboard_cache.invalidate_all ();
   let key = "json-nested-materialization" in
-  ignore (Dashboard_cache.get_or_compute key ~ttl:60. (fun () -> `String "shared"));
+  ignore (Dashboard_cache.get_or_compute key ~ttl:60. (Pool_work.cpu (fun () -> `String "shared")));
   Eio.Time.with_timeout_exn clock 2. (fun () ->
     Eio.Switch.run @@ fun sw ->
     let pool = Eio.Executor_pool.create ~sw ~domain_count:1 dm in
@@ -1200,7 +1202,7 @@ let test_json_cache_nested_materialization ~clock ~dm () =
       let nested, nested_u = Eio.Promise.create () in
       let queued, queued_u = Eio.Promise.create () in
       let read () = Dashboard_cache.get_or_compute_payload key ~ttl:60.
-        (fun () -> Alcotest.fail "shared AST recomputed") in
+        (Pool_work.cpu (fun () -> Alcotest.fail "shared AST recomputed")) in
       Eio.Fiber.fork ~sw (fun () ->
         let payload = Executor_pool_ref.submit_or_inline (fun () ->
           Eio.Promise.resolve occupied_u ();
@@ -1224,13 +1226,13 @@ let test_json_materialization_timeout_and_cancel ~clock ~sw ~dm () =
     Dashboard_cache.invalidate_all ();
     let key = "json-materialization-cancel" in
     let value = `String "preserved" in
-    ignore (Dashboard_cache.get_or_compute key ~ttl:60. (fun () -> value));
+    ignore (Dashboard_cache.get_or_compute key ~ttl:60. (Pool_work.cpu (fun () -> value)));
     Dashboard_cache.For_testing.with_payload_prepared_hook
       (fun payload -> if payload.Dashboard_cache.json = value then Eio.Time.sleep clock 1.)
       (fun () ->
         let read () = Dashboard_cache.get_or_compute_payload_with_timeout key ~ttl:60.
           ~clock ~timeout_sec:(if cancel_caller then 2. else 0.01)
-          (fun () -> Alcotest.fail "materialization recomputed AST") in
+          (Pool_work.cpu (fun () -> Alcotest.fail "materialization recomputed AST")) in
         if cancel_caller then (
           match Eio.Time.with_timeout clock 0.01 (fun () -> Ok (read ())) with
           | Error `Timeout -> ()
@@ -1242,7 +1244,7 @@ let test_json_materialization_timeout_and_cancel ~clock ~sw ~dm () =
     Alcotest.(check bool) "interrupted await publishes no bytes" true
       (Option.is_none (Dashboard_cache.peek_payload key));
     let recovered = Dashboard_cache.get_or_compute_payload_with_timeout key ~ttl:60.
-      ~clock ~timeout_sec:2. (fun () -> Alcotest.fail "retry recomputed AST") in
+      ~clock ~timeout_sec:2. (Pool_work.cpu (fun () -> Alcotest.fail "retry recomputed AST")) in
     check_json "later reader retries materialization" value recovered.json;
     check_payload_consistent recovered) [false; true]
   in
@@ -1253,7 +1255,7 @@ let test_json_materialization_timeout_and_cancel ~clock ~sw ~dm () =
 let test_json_materialization_from_native_domains ~clock () =
   Dashboard_cache.invalidate_all ();
   let key = "json-native-materialization" in
-  ignore (Dashboard_cache.get_or_compute key ~ttl:60. (fun () -> `String "native"));
+  ignore (Dashboard_cache.get_or_compute key ~ttl:60. (Pool_work.cpu (fun () -> `String "native")));
   let mu = Mutex.create () and ready = Condition.create () in
   let arrived = ref 0 and finished = ref 0 in
   Dashboard_cache.For_testing.with_default_clock clock (fun () ->
@@ -1273,7 +1275,7 @@ let test_json_materialization_from_native_domains ~clock () =
             Mutex.unlock mu)
           (fun () ->
             try Ok (Dashboard_cache.get_or_compute_payload key ~ttl:60.
-              (fun () -> Alcotest.fail "native reader recomputed AST"))
+              (Pool_work.cpu (fun () -> Alcotest.fail "native reader recomputed AST")))
             with exn -> Error exn)
         in
         let a = Domain.spawn read in
@@ -1318,13 +1320,13 @@ let test_payload_prepared_before_publication ~clock ~sw ~dm () =
       (fun () ->
         let first = Dashboard_cache.get_or_compute_payload_with_timeout key
           ~preparation:Dashboard_cache.Http_encodings
-          ~ttl:60. ~clock ~timeout_sec:2. (fun () -> `String (String.make 8192 'a')) in
+          ~ttl:60. ~clock ~timeout_sec:2. (Pool_work.cpu (fun () -> `String (String.make 8192 'a'))) in
         Alcotest.(check bool) "serialization and hash complete on worker" true
           (Option.fold ~none:false ~some:((<>) caller) (Atomic.get observed));
         Executor_pool_ref.For_testing.with_pool_option None (fun () ->
           let hit = Dashboard_cache.get_or_compute_payload key ~ttl:60.
             ~preparation:Dashboard_cache.Http_encodings
-            (fun () -> Alcotest.fail "hit recomputed") in
+            (Pool_work.cpu (fun () -> Alcotest.fail "hit recomputed")) in
           let peeked = Option.get (Dashboard_cache.peek_payload key) in
           Alcotest.(check bool) "hit reuses prepared bytes without a pool" true
             (first.raw_json == hit.raw_json && hit.raw_json == peeked.raw_json);
@@ -1366,7 +1368,7 @@ let test_seed_payload_is_prepared_before_publication ~clock ~sw ~dm () =
       (fun payload ->
         if payload.Dashboard_cache.json = `String "seed" then
           ignore (Dashboard_cache.get_or_compute_payload_with_timeout key
-            ~ttl:60. ~clock ~timeout_sec:2. (fun () -> `String "real-fill")))
+            ~ttl:60. ~clock ~timeout_sec:2. (Pool_work.cpu (fun () -> `String "real-fill"))))
       (fun () ->
         Dashboard_cache.seed_stale_if_missing key ~stale_for:60. (`String "seed"));
     check_json "real fill arriving during seed preparation wins"
@@ -1394,7 +1396,7 @@ let test_payload_swr_publishes_prepared_bytes ~clock ~sw ~dm () =
         (fun () ->
           let immediate = Dashboard_cache.get_or_compute_payload_with_timeout key
             ~preparation:Dashboard_cache.Http_encodings
-            ~ttl:60. ~clock ~timeout_sec:2. (fun () -> `String "new") in
+            ~ttl:60. ~clock ~timeout_sec:2. (Pool_work.cpu (fun () -> `String "new")) in
           Alcotest.(check bool) "SWR returns existing bytes immediately" true
             (immediate.raw_json == old.raw_json);
           let next, domain = Eio.Time.with_timeout_exn clock 2.
@@ -1445,11 +1447,11 @@ let test_worker_seed_refresh_survives_reader_switch ~clock ~sw ~dm () =
                 Eio.Switch.run (fun reader_sw ->
                   Eio_context.with_turn_switch reader_sw (fun () ->
                     Dashboard_cache.get_or_compute_payload_with_timeout key
-                      ~ttl:60. ~clock ~timeout_sec:2. (fun () ->
+                      ~ttl:60. ~clock ~timeout_sec:2. (Pool_work.cpu (fun () ->
                         Atomic.incr calls;
                         Eio.Promise.resolve started_u (Domain.self () :> int);
                         Eio.Promise.await release;
-                        `String "ready"))))) in
+                        `String "ready")))))) in
             Alcotest.(check bool) "worker returns warming bytes before refresh finishes" true
               (stale.raw_json == seeded.raw_json);
             let compute_domain = Eio.Time.with_timeout_exn clock 2.
@@ -1458,7 +1460,7 @@ let test_worker_seed_refresh_survives_reader_switch ~clock ~sw ~dm () =
               (compute_domain <> root_domain);
             let concurrent = Dashboard_cache.get_or_compute_payload_with_timeout key
               ~ttl:60. ~clock ~timeout_sec:2.
-              (fun () -> Alcotest.fail "in-flight refresh was duplicated") in
+              (Pool_work.cpu (fun () -> Alcotest.fail "in-flight refresh was duplicated")) in
             Alcotest.(check bool) "other readers retain the same stale bytes" true
               (concurrent.raw_json == seeded.raw_json);
             Eio.Promise.resolve release_u ();
@@ -1512,11 +1514,11 @@ let test_registered_refresh_survives_reader_cancellation ~clock ~sw ~dm () =
                 Eio.Fiber.first
                   (fun () ->
                     ignore (Dashboard_cache.get_or_compute_payload_with_timeout key
-                      ~ttl:60. ~clock ~timeout_sec:2. (fun () ->
+                      ~ttl:60. ~clock ~timeout_sec:2. (Pool_work.cpu (fun () ->
                         Atomic.incr calls;
                         Eio.Promise.resolve compute_started_u ();
                         Eio.Promise.await release_compute;
-                        `String "ready")))
+                        `String "ready"))))
                   (fun () -> Eio.Promise.await cancel_reader));
               Eio.Promise.resolve reader_done_u ());
             (* The root has forked the refresh, but its acknowledgement is
@@ -1530,7 +1532,7 @@ let test_registered_refresh_survives_reader_cancellation ~clock ~sw ~dm () =
               Yojson.Safe.Util.(Dashboard_cache.stats () |> member "computing" |> to_int);
             let stale = Dashboard_cache.get_or_compute_payload_with_timeout key
               ~ttl:60. ~clock ~timeout_sec:2.
-              (fun () -> Alcotest.fail "cancelled reader started a duplicate refresh") in
+              (Pool_work.cpu (fun () -> Alcotest.fail "cancelled reader started a duplicate refresh")) in
             check_json "other readers still receive warming while refresh runs"
               (`String "warming") stale.json;
             Alcotest.(check int) "no duplicate root registration" 1
@@ -1562,7 +1564,7 @@ let test_payload_preparation_replacement_token ~clock () =
                 Dashboard_cache.seed_stale_if_missing key ~stale_for:60. replacement;
                 if fail_preparation then failwith "preparation failed"))
             (fun () -> Dashboard_cache.get_or_compute_payload_with_timeout key
-              ~ttl:60. ~clock ~timeout_sec:2. (fun () -> `String "old-owner")))
+              ~ttl:60. ~clock ~timeout_sec:2. (Pool_work.cpu (fun () -> `String "old-owner"))))
         with Failure message -> Error message
       in
       (match result, fail_preparation with
@@ -1585,7 +1587,7 @@ let test_payload_preparation_timeout_and_cancel ~clock ~sw ~dm () =
       Dashboard_cache.For_testing.with_payload_prepared_hook prepare (fun () ->
         let call () = Dashboard_cache.get_or_compute_payload_with_timeout key
           ~ttl:60. ~clock ~timeout_sec:(if cancel_caller then 2. else 0.01)
-          (fun () -> `String "not-published") in
+          (Pool_work.cpu (fun () -> `String "not-published")) in
         if cancel_caller then (
           let result = Eio.Time.with_timeout clock 0.01 (fun () -> Ok (call ())) in
           match result with
@@ -1598,7 +1600,7 @@ let test_payload_preparation_timeout_and_cancel ~clock ~sw ~dm () =
       Alcotest.(check bool) "interrupted preparation publishes no AST" true
         (Option.is_none (Dashboard_cache.peek key));
       let recovered = Dashboard_cache.get_or_compute_payload key ~ttl:60.
-        (fun () -> `String "recovered") in
+        (Pool_work.cpu (fun () -> `String "recovered")) in
       check_json "cancelled owner releases its slot" (`String "recovered") recovered.json;
       check_payload_consistent recovered) [false; true]
   in
@@ -1631,7 +1633,7 @@ let test_seed_payload_returns_while_worker_is_occupied ~clock ~sw ~dm () =
           Dashboard_cache.seed_stale_if_missing key ~stale_for:60. (`String "warming");
           let seeded = Option.get (Dashboard_cache.peek_payload key) in
           let result = Dashboard_cache.get_or_compute_payload_with_timeout key ~ttl:60.
-            ~clock ~timeout_sec:2. (fun () -> `String "refreshed") in
+            ~clock ~timeout_sec:2. (Pool_work.cpu (fun () -> `String "refreshed")) in
           check_json "warming response returns before worker capacity is released"
             (`String "warming") result.json;
           Alcotest.(check bool) "warming response reuses already prepared bytes" true
@@ -1646,14 +1648,14 @@ let test_payload_preparation_timeout_retains_stale_bytes ~clock () =
     let key = "prepared-stale-timeout" in
     let old = Dashboard_cache.get_or_compute_payload key ~ttl:(-1.)
       ~preparation:Dashboard_cache.Http_encodings
-      (fun () -> `String "last-good") in
+      (Pool_work.cpu (fun () -> `String "last-good")) in
     Alcotest.(check bool) "last-good payload includes prepared HTTP representations" true
       (Option.is_some old.encoded);
     let result = Dashboard_cache.For_testing.with_payload_prepared_hook
       (fun _ -> Eio.Time.sleep clock 1.)
       (fun () -> Dashboard_cache.get_or_compute_payload_with_timeout key
         ~preparation:Dashboard_cache.Http_encodings
-        ~ttl:60. ~clock ~timeout_sec:0.01 (fun () -> `String "too-late")) in
+        ~ttl:60. ~clock ~timeout_sec:0.01 (Pool_work.cpu (fun () -> `String "too-late"))) in
     Alcotest.(check bool) "preparation timeout returns last-good byte identity" true
       (old.raw_json == result.raw_json);
     Alcotest.(check bool) "preparation timeout returns last-good encoding identity" true
@@ -1677,13 +1679,13 @@ let test_nested_dashboard_cache_compute_does_not_starve ~clock ~sw ~dm () =
       ~ttl:60.0
       ~clock
       ~timeout_sec:0.2
-      (fun () ->
+      (Pool_work.cpu (fun () ->
          Dashboard_cache.get_or_compute_with_timeout
            "nested-dashboard-cache-inner"
            ~ttl:60.0
            ~clock
            ~timeout_sec:0.05
-           (fun () -> `String "ok"))
+           (Pool_work.cpu (fun () -> `String "ok"))))
   in
   check_json "nested dashboard cache compute completes" (`String "ok") result
 
@@ -1711,7 +1713,7 @@ let test_timeout_envelope_recognizer ~clock () =
   in
   let timed_out () =
     let payload = Dashboard_cache.get_or_compute_payload_with_timeout
-      "envelope_paths" ~ttl:1.0 ~clock ~timeout_sec:0.05 slow in
+      "envelope_paths" ~ttl:1.0 ~clock ~timeout_sec:0.05 (Pool_work.cpu slow) in
     Alcotest.(check bool) "timeout and circuit envelopes carry timeout provenance" true
       (payload.origin = Dashboard_cache.Timeout);
     payload.json
@@ -1729,8 +1731,8 @@ let test_timeout_envelope_recognizer ~clock () =
     (Dashboard_cache.is_timeout_envelope circuit);
   Dashboard_cache.invalidate_all ();
   let computed =
-    Dashboard_cache.get_or_compute_payload "envelope_control" ~ttl:1.0 (fun () ->
-      `Assoc [ ("error", `String "not_a_timeout"); ("rows", `List []) ])
+    Dashboard_cache.get_or_compute_payload "envelope_control" ~ttl:1.0 (Pool_work.cpu (fun () ->
+      `Assoc [ ("error", `String "not_a_timeout"); ("rows", `List []) ]))
   in
   Alcotest.(check bool) "computed error fields do not change producer provenance" true
     (computed.origin = Dashboard_cache.Computed);

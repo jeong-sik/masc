@@ -230,6 +230,6 @@ let json ~config ?me ~limit () =
       (Option.value ~default:"-" me)
       limit
   in
-  Dashboard_cache.get_or_compute key ~ttl:cache_ttl_sec (fun () ->
-    Domain_pool_ref.submit_io_or_inline (fun () -> compute_json ~config ?me ~limit ()))
+  Dashboard_cache.get_or_compute key ~ttl:cache_ttl_sec
+    (Pool_work.cpu (fun () -> compute_json ~config ?me ~limit ()))
 ;;

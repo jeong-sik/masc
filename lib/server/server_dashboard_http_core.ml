@@ -98,6 +98,7 @@ let start_mission_refresh_loop ~state ~sw ~clock =
         ~sw
         ~clock
         ~config:workspace_config
+        ~kind:Pool_work.Cpu
       |> fun run_compute ->
       let result =
         run_compute (fun ~config ~sw ->
@@ -144,6 +145,7 @@ let dashboard_briefing_http_json ~state ~sw ~clock request =
       ~sw
       ~clock
       ~config:(Mcp_server.workspace_config state)
+      ~kind:Pool_work.Cpu
       (fun ~config ~sw ->
          Dashboard_briefing.json
            ?actor
@@ -168,7 +170,7 @@ let dashboard_briefing_http_json ~state ~sw ~clock request =
         ~ttl:deep_surface_cache_ttl_s
         ~clock
         ~timeout_sec:dashboard_briefing_timeout_s
-        (fun () -> compute ())
+        (Pool_work.cpu (fun () -> compute ()))
     | Some _ ->
       (* Actor-parameterized: on-demand with SWR cache. *)
       let cache_key =
@@ -182,7 +184,7 @@ let dashboard_briefing_http_json ~state ~sw ~clock request =
         ~ttl:deep_surface_cache_ttl_s
         ~clock
         ~timeout_sec:dashboard_briefing_timeout_s
-        (compute ?actor)
+        (Pool_work.cpu (compute ?actor))
   in
   Dashboard_projection_cache.with_current_keeper_observations
     ~config:(Mcp_server.workspace_config state) full_json
@@ -217,7 +219,7 @@ let dashboard_briefing_sections_http_json ~state ~sw ~clock request =
       ~ttl:deep_surface_cache_ttl_s
       ~clock
       ~timeout_sec:dashboard_briefing_timeout_s
-      compute)
+      (Pool_work.cpu compute))
 ;;
 
 let dashboard_shell_status_json =
@@ -641,7 +643,7 @@ let dashboard_shell_http_json
   : Yojson.Safe.t
   =
   let cache_key = dashboard_shell_cache_key ~light config in
-  let compute () =
+  let compute =
     (* Shell endpoint is read-only; use config directly without isolation
        since state is not available in this context.
 
@@ -653,10 +655,10 @@ let dashboard_shell_http_json
        PRs #18991 / #18993 / #18994 / #19007 / #19015 / #19023 / #19024 /
        #19025 / #19031 fixed for the other dashboard projections.
 
-       [Domain_pool_ref.submit_io_or_inline] runs the compute on a
+       [Dashboard_cache] runs this [Pool_work.cpu] compute on a
        worker domain when the pool is wired, so the main HTTP domain
        keeps serving requests during the cold-shell refresh. *)
-    Domain_pool_ref.submit_io_or_inline (fun () ->
+    Pool_work.cpu (fun () ->
       dashboard_shell_payload_json ?timing ~light config)
   in
   let clock_opt =

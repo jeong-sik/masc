@@ -27,6 +27,7 @@
   domain_budget
   domain_pool
   domain_pool_ref
+  pool_work
   systhread_host
   scheduler_lag
   masc_runtime_events

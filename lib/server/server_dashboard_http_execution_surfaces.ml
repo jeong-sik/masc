@@ -32,8 +32,9 @@ let warm_shell_cache (state : Mcp_server.server_state) =
          let cache_key =
            dashboard_shell_cache_key ~light (Mcp_server.workspace_config state)
          in
-         let compute () =
-           dashboard_shell_payload_json ~light (Mcp_server.workspace_config state)
+         let compute =
+           Pool_work.cpu (fun () ->
+             dashboard_shell_payload_json ~light (Mcp_server.workspace_config state))
          in
          match state.Mcp_server.clock with
          | Some clock ->
@@ -834,7 +835,7 @@ type execution_read =
   | Published_snapshot of Server_dashboard_http_cache.surface_snapshot * Yojson.Safe.t
   | Unpublished_response of Yojson.Safe.t
 
-let cached_execution_or_first_success ~clock ~timeout_sec compute =
+let cached_execution_or_first_success ~clock ~timeout_sec work =
   let cached_success () =
     with_execution_publication_lock (fun () ->
       if execution_surface_has_fresh_success_unlocked ()
@@ -846,17 +847,18 @@ let cached_execution_or_first_success ~clock ~timeout_sec compute =
   match cached_success () with
   | Some json -> json
   | None ->
-    let compute_and_track () =
-      let attempt = begin_execution_attempt () in
-      try
-        let json = compute () in
-        let (_ : bool) = publish_execution_attempt_success attempt json in
-        json
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn ->
-        let (_ : bool) = publish_execution_attempt_failure attempt exn in
-        raise exn
+    let compute_and_track =
+      Pool_work.wrap work (fun compute ->
+        let attempt = begin_execution_attempt () in
+        try
+          let json = compute () in
+          let (_ : bool) = publish_execution_attempt_success attempt json in
+          json
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn ->
+          let (_ : bool) = publish_execution_attempt_failure attempt exn in
+          raise exn)
     in
     let json =
       Dashboard_cache.get_or_compute_with_timeout
@@ -1345,6 +1347,7 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
           ~net
           ~mono_clock
           ~config:workspace_config
+          ~kind:Pool_work.Cpu
           (fun ~config ~sw ->
              Dashboard_execution.json ~light:true ~config ~sw ~clock ~proc_mgr ()
              |> (match Dashboard_execution_helpers.execution_fixture_name () with
@@ -1539,6 +1542,7 @@ let compute_execution_trust_json ~state ~sw ~clock =
     ~sw
     ~clock
     ~config:(Mcp_server.workspace_config state)
+    ~kind:Pool_work.Cpu
     (fun ~config ~sw:_ ->
        Dashboard_http_keeper.execution_trust_dashboard_json config
        |> Server_dashboard_http_core_cache.with_projection_diagnostics
@@ -1606,6 +1610,7 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
       ~sw
       ~clock
       ~config
+      ~kind:Pool_work.Cpu
       (fun ~config ~sw ->
          Dashboard_execution.json
            ?actor
@@ -1691,7 +1696,7 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
       cached_execution_or_first_success
         ~clock
         ~timeout_sec:Env_config_runtime.Dashboard.execution_timeout_sec
-        (compute ~light:true)
+        (Pool_work.cpu (compute ~light:true))
     in
     let json = match selected with
       | Published_snapshot (_, json) | Unpublished_response json -> json
@@ -1727,7 +1732,7 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
                `String (Workspace.masc_dir config);
                `Int generation; query ])
     in
-    let compute_with_generation () =
+    let compute_with_generation = Pool_work.cpu @@ fun () ->
       compute ?actor ~light ()
       (* The request wrapper below re-projects every non-fixture response and
          serves the cached payload's bytes only when that changes nothing, so
@@ -1807,7 +1812,7 @@ let dashboard_execution_trust_http_json ~state ~sw ~clock _request =
         ~ttl:shell_surface_cache_ttl_s
         ~clock
         ~timeout_sec:Env_config_runtime.Dashboard.execution_trust_timeout_sec
-        (fun () -> compute_execution_trust_json ~state ~sw ~clock)
+        (Pool_work.cpu (fun () -> compute_execution_trust_json ~state ~sw ~clock))
   in
   attach_surface_envelope json
 ;;

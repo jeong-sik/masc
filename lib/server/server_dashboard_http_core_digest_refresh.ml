@@ -53,6 +53,7 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock ~broadcast_digest =
         ~sw
         ~clock
         ~config
+        ~kind:Pool_work.Cpu
         (fun ~config ~sw ->
            let ctx : _ Operator_control.context =
              { config

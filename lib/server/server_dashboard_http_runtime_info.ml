@@ -2313,7 +2313,7 @@ let dashboard_tools_http_result ?keeper ?timing (config : Workspace.config) =
   Dashboard_cache.seed_stale_if_missing cache_key
     ~stale_for:dashboard_tools_cache_ttl_sec
     (dashboard_tools_warming_json ());
-  let compute () =
+  let compute = Pool_work.cpu @@ fun () ->
     let config_resolution =
       run Projection_config_resolution (fun () ->
         Config_dir_resolver.(resolve () |> to_json))

@@ -172,11 +172,12 @@ val handle_presence_events :
 
 val mcp_transport_http_deps :
   unit -> Server_mcp_transport_http.deps
-(** [respond_cached_read ~request ~reqd ~cache_key ~ttl compute] wraps a
-    dashboard read [compute] in the SWR cache and the shared Executor_pool,
-    then writes the JSON response. Collapses parallel read bursts to one
-    compute per [ttl] and runs heavy compute (subprocess / store query /
-    large JSON) off the main HTTP domain so it does not head-of-line-block
+(** [respond_cached_read ~request ~reqd ~cache_key ~ttl work] wraps a
+    dashboard read [work] in the SWR cache and the shared Executor_pool, which
+    runs it with the kind it declares, then writes the JSON response.
+    Collapses parallel read bursts to one compute per [ttl] and runs heavy
+    compute (subprocess / store query / large JSON) off the main HTTP domain
+    so it does not head-of-line-block
     other requests. The response is {!Server_cached_read_http.respond}: the
     bytes the cache serialized with the entry, and 504 for a timeout
     envelope. [compress] defaults to [true]. *)
@@ -186,5 +187,5 @@ val respond_cached_read :
   reqd:Httpun.Reqd.t ->
   cache_key:string ->
   ttl:float ->
-  (unit -> Yojson.Safe.t) ->
+  Yojson.Safe.t Pool_work.t ->
   unit

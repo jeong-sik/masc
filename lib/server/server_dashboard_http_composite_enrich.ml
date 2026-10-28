@@ -89,26 +89,25 @@ let dashboard_fleet_composite_json ~(config : Workspace.config) () : Yojson.Safe
   in
   Dashboard_cache.get_or_compute cache_key
     ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s
-    (fun () ->
-      Domain_pool_ref.submit_io_or_inline (fun () ->
-        let entries = Keeper_registry.all ~base_path:config.base_path () in
-        (* One tool-call window for the whole envelope. Every keeper's claim
-           lookup used to read this same fleet-wide tail for itself, so the
-           store was read and parsed once per keeper to produce N answers that
-           one read produces. *)
-        let claim_window = read_claim_window () in
-        let snapshots =
-          List.map (composite_snapshot_json ~config ~claim_window) entries
-        in
-        `Assoc
-          (* generated_at is a unix-second number (not ISO8601 string) to match the
-             sibling timestamps in this same envelope (snapshots[].started_at /
-             last_progress_at / ended_at are all `Float) and the dashboard's
-             runtime-attention staleness arithmetic (fleet-fsm-matrix.ts:558 computes
-             `generatedAt - latest`, which requires a number). The dashboard valibot
-             schema FleetCompositeSnapshotSchema declares generated_at: number(). *)
-          [ "generated_at", `Float (Unix.gettimeofday ())  (* NDT-OK: compute-time wall-clock; envelope SWR-cached per-TTL; HTTP/WS response surface, not replayable *)
-          ; "count", `Int (List.length snapshots)
-          ; "snapshots", `List snapshots
-          ]))
+    (Pool_work.cpu (fun () ->
+      let entries = Keeper_registry.all ~base_path:config.base_path () in
+      (* One tool-call window for the whole envelope. Every keeper's claim
+         lookup used to read this same fleet-wide tail for itself, so the
+         store was read and parsed once per keeper to produce N answers that
+         one read produces. *)
+      let claim_window = read_claim_window () in
+      let snapshots =
+        List.map (composite_snapshot_json ~config ~claim_window) entries
+      in
+      `Assoc
+        (* generated_at is a unix-second number (not ISO8601 string) to match the
+           sibling timestamps in this same envelope (snapshots[].started_at /
+           last_progress_at / ended_at are all `Float) and the dashboard's
+           runtime-attention staleness arithmetic (fleet-fsm-matrix.ts:558 computes
+           `generatedAt - latest`, which requires a number). The dashboard valibot
+           schema FleetCompositeSnapshotSchema declares generated_at: number(). *)
+        [ "generated_at", `Float (Unix.gettimeofday ())  (* NDT-OK: compute-time wall-clock; envelope SWR-cached per-TTL; HTTP/WS response surface, not replayable *)
+        ; "count", `Int (List.length snapshots)
+        ; "snapshots", `List snapshots
+        ]))
 ;;

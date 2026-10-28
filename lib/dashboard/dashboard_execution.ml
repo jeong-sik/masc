@@ -748,14 +748,15 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
         ~config
         ~actor:(Some effective_actor)
         (fun actor_name ->
-           Dashboard_projection_cache.operator_snapshot_json
-             ~actor:actor_name
-             ~view:"summary"
-             ~include_messages:false
-             ~include_keepers:true
-             ~include_summary_fields:false
-             ~lightweight_summary:true
-             ctx)
+           Pool_work.cpu (fun () ->
+             Dashboard_projection_cache.operator_snapshot_json
+               ~actor:actor_name
+               ~view:"summary"
+               ~include_messages:false
+               ~include_keepers:true
+               ~include_summary_fields:false
+               ~lightweight_summary:true
+               ctx))
     in
     t_after_snapshot := Some (Time_compat.now ());
     Eio.Fiber.yield ();

@@ -38,7 +38,7 @@ let cached_tool_audit_json
   (* 10.0s TTL keeps tool audit projection fresh while reliably reusing
      cache across 5-7s dashboard refresh cycles, avoiding dated jsonl disk scans. *)
   let ttl = 10.0 in
-  Dashboard_cache.get_or_compute cache_key ~ttl (fun () ->
+  Dashboard_cache.get_or_compute cache_key ~ttl @@ Pool_work.cpu (fun () ->
     let ( recent_tool_names
         , latest_tool_names
         , latest_tool_call_count

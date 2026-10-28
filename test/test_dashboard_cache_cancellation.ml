@@ -18,7 +18,7 @@ let test_request_timeout_stops_worker ~clock ~sw ~dm ~materialize () =
       let key = if materialize then "cancel-lazy-worker" else "cancel-fill-worker" in
       let value = `String "worker-value" in
       if materialize then
-        ignore (Dashboard_cache.get_or_compute key ~ttl:60. (fun () -> value));
+        ignore (Dashboard_cache.get_or_compute key ~ttl:60. (Pool_work.cpu (fun () -> value)));
       let release, release_worker = Eio.Promise.create () in
       let finished, finish_worker = Eio.Promise.create () in
       let calls = Atomic.make 0 and cancelled = Atomic.make false in
@@ -42,7 +42,7 @@ let test_request_timeout_stops_worker ~clock ~sw ~dm ~materialize () =
             (fun () ->
               let result = Dashboard_cache.get_or_compute_payload_with_timeout key
                 ~ttl:60. ~clock ~timeout_sec:0.03
-                (fun () -> if not materialize then suspend (); value) in
+                (Pool_work.cpu (fun () -> if not materialize then suspend (); value)) in
               Alcotest.(check bool) "request returns a timeout envelope" true
                 (Dashboard_cache.is_timeout_envelope result.json);
               let stopped =
@@ -66,7 +66,7 @@ let test_request_timeout_stops_worker ~clock ~sw ~dm ~materialize () =
             Alcotest.(check bool) "timed out fill is not cached" true
               (Option.is_none (Dashboard_cache.peek key));
           let recovered = Dashboard_cache.get_or_compute_payload_with_timeout key
-            ~ttl:60. ~clock ~timeout_sec:2. (fun () -> value) in
+            ~ttl:60. ~clock ~timeout_sec:2. (Pool_work.cpu (fun () -> value)) in
           check_json "later request recovers" value recovered.json;
           check_payload_consistent recovered))
 

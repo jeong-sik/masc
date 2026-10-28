@@ -46,9 +46,9 @@ let test_confirm_rejects_expired_token () =
       let projection_computes = ref 0 in
       let projection () =
         Dashboard_projection_cache.get_or_compute_snapshot_json ~config
-          ~actor:(Some "operator") (fun _ ->
+          ~actor:(Some "operator") (fun _ -> Pool_work.cpu (fun () ->
             incr projection_computes;
-            `Int !projection_computes)
+            `Int !projection_computes))
       in
       ignore (projection ());
       match

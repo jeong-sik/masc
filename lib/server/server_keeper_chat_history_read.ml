@@ -120,7 +120,7 @@ let cached_json ~config ~keeper_name ~ttl ~render =
      | Some _ -> Dashboard_cache.invalidate key
      | None -> ());
     (try
-       let cached = Dashboard_cache.get_or_compute key ~ttl (fun () ->
+       let cached = Dashboard_cache.get_or_compute key ~ttl @@ Pool_work.cpu (fun () ->
          match Domain_pool_ref.submit_io_or_inline (fun () ->
              read_source_json ~config ~keeper_name ~render source) with
          | Ok body ->

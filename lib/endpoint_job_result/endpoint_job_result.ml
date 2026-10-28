@@ -118,7 +118,7 @@ let decode_payload json =
   | P.Admitted _ | Output _ | Released _ | Refused _ | Held _ -> invalid ()
 let payload_digest payload =
   let content="masc_endpoint_terminal_result_v1\000" ^ Yojson.Safe.to_string payload in
-  Digestif.SHA256.(to_hex (digest_string content))
+  Agent_core_sha256.(to_hex (digest_string content))
 let decode content =
   let json=try Ok (Yojson.Safe.from_string content) with Yojson.Json_error _ -> invalid () in
   let* json=json in
@@ -220,7 +220,7 @@ let load_with_hook ~after_receipt_read ~before_ready ~sw ~storage ~expected_sha2
   after_receipt_read ();
   let* frozen=cpu (fun () -> decode content) in
   let* ()=source frozen record in
-  let* digest=cpu (fun () -> P.Sha256.of_string Digestif.SHA256.(to_hex (digest_string content)))
+  let* digest=cpu (fun () -> P.Sha256.of_string Agent_core_sha256.(to_hex (digest_string content)))
     |> Result.map_error (fun _ -> Invalid_receipt) in
   let* ()=match expected_sha256 with
     | None -> Ok () | Some expected -> if expected=digest then Ok () else invalid () in

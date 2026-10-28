@@ -941,7 +941,7 @@ let terminal_result_strictly_rejects_corrupt_records () =
        from original/schema validation, not only accidental byte corruption. *)
     let fields=if change=`Checksum then fields else
       let payload=List.assoc "payload" fields in
-      let checksum=Digestif.SHA256.(to_hex (digest_string ("masc_endpoint_terminal_result_v1\000" ^ Yojson.Safe.to_string payload))) in
+      let checksum=Agent_core_sha256.(to_hex (digest_string ("masc_endpoint_terminal_result_v1\000" ^ Yojson.Safe.to_string payload))) in
       update "payload_sha256" (fun _ -> `String checksum) fields in
     let fields=if change=`Missing_version then List.remove_assoc "version" fields else fields in
     Unix.chmod path 0o600;Yojson.Safe.to_file path (`Assoc fields);Unix.chmod path 0o400;

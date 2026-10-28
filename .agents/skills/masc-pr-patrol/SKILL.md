@@ -89,7 +89,7 @@ bash scripts/review/merge-guard.sh --check --repo jeong-sik/masc --pr <N> --head
 ## Release/Tag 검증
 
 `release/vX.Y.Z`에서 명시적으로 `release-candidate.yml` Full CI Cycle을 실행한다.
-현재 head의 전체 빌드·타입·기능·설치 검증이 완료되어 성공한 run을 판정에 기록한다.
+현재 head·branch의 최신 `release-candidate.yml` run이 완료·성공하고 필수 빌드·타입·기능·설치 검증도 성공해야 PASS할 수 있다. Release 판정에는 현재 head의 완료된 Full CI run을 기록한다. 완료된 run이 아직 없더라도 발견한 결함은 `verdict:` 줄 없이 head와 근거를 담은 변경 요청으로 남기고 run을 지어내지 않는다.
 필수 작업이 실패·대기·skip·미등록이면 릴리스 성공 증거가 아니다. 일반 스택에 이 조건을 확대하지 않는다.
 
 ```

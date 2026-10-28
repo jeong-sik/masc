@@ -43,4 +43,6 @@ val with_workers :
     [received] is told of every command a worker receives, before the worker
     checks that it lists the client; [respond] answers only those whose
     client it lists. Every worker that attached is detached and settled when
-    [run] returns or a later attach fails. *)
+    [run] returns or a later attach fails. Readiness waits only while startup
+    is pending; an observed failed or stopping worker fails the fixture before
+    invoking [run], retaining its native failure detail. *)

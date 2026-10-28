@@ -450,8 +450,10 @@ let output_owner_teardown_finishes_entered_metadata = fixture (fun ~env ~sw ~sto
 
 let supervise value = value |> Result.map_error S.error_to_string |> require
 let supervised ?(after_spawn=fun _ -> ()) ?(before_result_publish=fun () -> ())
-    ?(after_result_publish=fun () -> ()) ~sw ~env fixture permit =
-  match S.For_testing.launch_effect_workspace ~after_spawn ~before_result_publish ~after_result_publish ~sw ~fs:env#fs
+    ?(after_result_publish=fun () -> ()) ?(before_result_read=fun _ -> ())
+    ?(on_result_read_busy=fun _ -> ()) ~sw ~env fixture permit =
+  match S.For_testing.launch_effect_workspace ~before_result_read ~on_result_read_busy
+      ~after_spawn ~before_result_publish ~after_result_publish ~sw ~fs:env#fs
       ~cgroup_parent_path:"/sys/fs/cgroup" ~execution:fixture.execution permit with
   | S.Not_performed {error;_} -> Alcotest.fail (S.error_to_string error)
   | S.Performed {value;registry_release_error=None;pipe_cleanup_errors=[]} -> supervise value
@@ -576,6 +578,123 @@ let result_publication_failure_preserves_raw_settlement = fixture (fun ~env ~sw:
     (match result.status with
      | P.Status {phase=P.Termination_observed (P.Exited 8);result=P.Result_ready _;_} -> ()
      | P.Admitted _ | Status _ | Output _ | Released _ | Refused _ | Held _ -> Alcotest.fail "another original result could not publish")))
+
+let result_waits_for_original_cancel stage ~after_publication ~change_stdout = fixture (fun ~env ~sw:_ ~store fixture ->
+  Eio.Switch.run (fun sw ->
+    let entered,signal_entered=Eio.Promise.create () and resume,signal_resume=Eio.Promise.create () in
+    let locked,signal_locked=Eio.Promise.create () and unlock,signal_unlock=Eio.Promise.create () in
+    let busy,signal_busy=Eio.Promise.create () and finished,signal_finished=Eio.Promise.create () in
+    let cancel_done,signal_cancel_done=Eio.Promise.create () in
+    let reached=ref false and published=ref false and publish_attempts=ref 0 and commits=ref 0 in
+    let release promise resolver = if Eio.Promise.peek promise=None then Eio.Promise.resolve resolver () in
+    Fun.protect ~finally:(fun () -> release resume signal_resume;release unlock signal_unlock) (fun () ->
+      let binding,permit=prepare store fixture "05" "printf original; exit 7" in
+      let path=leaf fixture binding S.result_leaf in
+      let original=supervised ~sw ~env fixture permit
+        ~before_result_publish:(fun () -> incr publish_attempts)
+        ~after_result_publish:(fun () -> published:=true;incr commits)
+        ~before_result_read:(fun current ->
+          if current=stage && (not after_publication || !published) && not !reached then (
+            reached:=true;Eio.Promise.resolve signal_entered ();Eio.Promise.await resume))
+        ~on_result_read_busy:(fun current ->
+          if current=stage then release busy signal_busy) in
+      Eio.Promise.await entered;
+      let before=if !published then Some (read path,Unix.stat path) else None in
+      let record=R.load store ~binding |> registry in
+      Eio.Fiber.fork ~sw (fun () ->
+        let cancelled=R.For_testing.request_cancel ~after_publication:(fun () ->
+          Eio.Promise.resolve signal_locked ();Eio.Promise.await unlock)
+          record ~confirmed_admission_id:(id "04") in
+        Eio.Promise.resolve signal_cancel_done cancelled);
+      Eio.Promise.await locked;
+      check "real original cancellation holds the registry lease" (R.load store ~binding=Error R.Busy);
+      Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve signal_finished (S.await_result original));
+      release resume signal_resume;
+      Eio.Promise.await busy;
+      check "a busy original read leaves the result observer pending" (Eio.Promise.peek finished=None);
+      let _,next=prepare store fixture "07" "printf independent; exit 8" in
+      let other=Eio.Switch.run (fun next_sw -> supervised ~sw:next_sw ~env fixture next |> S.await_result |> supervise) in
+      (match other.status with
+       | P.Status {phase;result;_} ->
+         check "different job published its own result"
+           (phase=P.Termination_observed (P.Exited 8) && result=P.Result_ready other.sha256)
+       | P.Admitted _ | Output _ | Released _ | Refused _ | Held _ ->
+         Alcotest.fail "contended original blocked a different job");
+      if change_stdout then Out_channel.with_open_bin (leaf fixture binding "stdout.bin") (fun oc -> output_string oc "tampered");
+      release unlock signal_unlock;
+      let cancelled=Eio.Promise.await cancel_done |> registry in
+      let result=Eio.Promise.await finished in
+      if change_stdout then
+        check "stdout changed while stderr waited and readiness was refused"
+          (result=Error (S.Output_error {stream=P.Stdout;cause=O.Invalid_storage}))
+      else (
+        let receipt=result |> supervise in
+        (match receipt.status with
+         | P.Status {revision;cancel_requested;result;_} ->
+           check "ready status includes the original cancellation"
+             (revision=R.revision cancelled && cancel_requested && result=P.Result_ready receipt.sha256)
+         | P.Admitted _ | Output _ | Released _ | Refused _ | Held _ ->
+           Alcotest.fail "result did not retain cancellation progress");
+        check "repeated observers share the same result" (S.await_result original=Ok receipt);
+        Alcotest.(check string) "returned receipt is the original durable file" receipt.content (read path));
+      Alcotest.(check int) "result publication section was entered once" 1 !publish_attempts;
+      Alcotest.(check int) "exclusive result publication committed once" 1 !commits;
+      (match before with
+       | None -> ()
+       | Some (content,stat) ->
+         let after=Unix.stat path in
+         Alcotest.(check string) "waiting after publication preserves receipt bytes" content (read path);
+         check "waiting after publication preserves receipt inode" (stat.Unix.st_dev=after.st_dev && stat.st_ino=after.st_ino)))))
+
+let result_busy_observer_and_owner_cancellation = fixture (fun ~env ~sw ~store fixture ->
+  let exception Cancel_waiter in
+  let entered,signal_entered=Eio.Promise.create () and resume,signal_resume=Eio.Promise.create () in
+  let locked,signal_locked=Eio.Promise.create () and unlock,signal_unlock=Eio.Promise.create () in
+  let busy,signal_busy=Eio.Promise.create () and created,signal_created=Eio.Promise.create () in
+  let closed,signal_closed=Eio.Promise.create () and cancel_done,signal_cancel_done=Eio.Promise.create () in
+  let release promise resolver = if Eio.Promise.peek promise=None then Eio.Promise.resolve resolver () in
+  Fun.protect ~finally:(fun () -> release resume signal_resume;release unlock signal_unlock) (fun () ->
+    let binding,permit=prepare store fixture "05" "printf original; exit 7" in
+    Eio.Fiber.fork ~sw (fun () ->
+      (match Eio.Switch.run (fun job_sw ->
+        let original=supervised ~sw:job_sw ~env fixture permit
+          ~before_result_read:(function
+            | S.For_testing.Observe_original -> Eio.Promise.resolve signal_entered ();Eio.Promise.await resume
+            | Open_storage | Reopen_stdout | Reopen_stderr | Validate_stdout | Validate_stderr | Refresh_after_publication -> ())
+          ~on_result_read_busy:(function
+            | S.For_testing.Observe_original -> release busy signal_busy
+            | Open_storage | Reopen_stdout | Reopen_stderr | Validate_stdout | Validate_stderr | Refresh_after_publication -> ()) in
+        Eio.Promise.resolve signal_created (original,job_sw);
+        Eio.Fiber.await_cancel ()) with
+       | () -> Alcotest.fail "job owner unexpectedly survived teardown"
+       | exception Cancel_waiter -> Eio.Promise.resolve signal_closed ()));
+    let original,job_sw=Eio.Promise.await created in
+    Eio.Promise.await entered;
+    let record=R.load store ~binding |> registry in
+    Eio.Fiber.fork ~sw (fun () ->
+      let cancelled=R.For_testing.request_cancel ~after_publication:(fun () ->
+        Eio.Promise.resolve signal_locked ();Eio.Promise.await unlock)
+        record ~confirmed_admission_id:(id "04") in
+      Eio.Promise.resolve signal_cancel_done cancelled);
+    Eio.Promise.await locked;
+    release resume signal_resume;
+    Eio.Promise.await busy;
+    let waiting,signal_waiting=Eio.Promise.create () in
+    let observer_cancelled=ref false in
+    Eio.Fiber.first
+      (fun () ->
+        try Eio.Promise.resolve signal_waiting ();ignore (S.await_result original);
+          Alcotest.fail "busy publisher unexpectedly completed"
+        with Eio.Cancel.Cancelled _ as ex -> observer_cancelled:=true;raise ex)
+      (fun () -> Eio.Promise.await waiting);
+    check "observer cancellation leaves the publisher running" !observer_cancelled;
+    Eio.Switch.fail job_sw Cancel_waiter;
+    Eio.Promise.await closed;
+    check "owner teardown interrupts the busy result"
+      (S.await_result original=Error S.Interrupted);
+    check "teardown did not acquire the competing cancellation lease" (R.load store ~binding=Error R.Busy);
+    release unlock signal_unlock;
+    ignore (Eio.Promise.await cancel_done |> registry)))
 
 let result_observer_cancel_and_source_progress_preserve_publication = fixture (fun ~env ~sw:_ ~store fixture ->
   Eio.Switch.run (fun sw ->
@@ -934,6 +1053,15 @@ let () =
       "spool atomic open rejects post-stat FIFO without a writer",sealed_output_atomic_open_rejects_raced_special_leaf `Spool `Fifo;
       "spool atomic open rejects post-stat symlink",sealed_output_atomic_open_rejects_raced_special_leaf `Spool `Symlink;
       "failed result publication preserves raw settlement and other progress",result_publication_failure_preserves_raw_settlement;
+      "result waits for cancellation during original observation",result_waits_for_original_cancel S.For_testing.Observe_original ~after_publication:false ~change_stdout:false;
+      "result waits for cancellation during storage open",result_waits_for_original_cancel S.For_testing.Open_storage ~after_publication:false ~change_stdout:false;
+      "result waits for cancellation during stdout reopen",result_waits_for_original_cancel S.For_testing.Reopen_stdout ~after_publication:false ~change_stdout:false;
+      "result waits for cancellation during stderr reopen",result_waits_for_original_cancel S.For_testing.Reopen_stderr ~after_publication:false ~change_stdout:false;
+      "result waits for cancellation during stdout validation",result_waits_for_original_cancel S.For_testing.Validate_stdout ~after_publication:false ~change_stdout:false;
+      "result waits for cancellation during stderr validation after publication",result_waits_for_original_cancel S.For_testing.Validate_stderr ~after_publication:true ~change_stdout:false;
+      "result waits for cancellation during post-publication refresh",result_waits_for_original_cancel S.For_testing.Refresh_after_publication ~after_publication:true ~change_stdout:false;
+      "result rechecks stdout after stderr contention",result_waits_for_original_cancel S.For_testing.Validate_stderr ~after_publication:true ~change_stdout:true;
+      "busy result observer cancellation and owner teardown",result_busy_observer_and_owner_cancellation;
       "result observer cancellation preserves frozen receipt and source progress",result_observer_cancel_and_source_progress_preserve_publication;
       "owner teardown settles external terminal result observers",result_owner_teardown_settles_external_observers;
       "pre-publish moved spool refuses readiness",result_readiness_requires_current_original_files `Before `Move_spool;

@@ -180,13 +180,17 @@ let release_entry entry =
 
 let run_blocking_lock_op f = Eio_guard.run_in_systhread ~label:"file-lock-op" f
 
+(* Keep contention pacing shared with the existing lock retry helpers. *)
+let retry_sleep_sec = 0.01
+let wait_after_contention () = Eio_unix.sleep retry_sleep_sec
+
 (** Acquire a non-blocking Unix file lock (F_TLOCK) with retry.
     This is the blocking variant for callers that already run in a systhread
     (for example backend and Hebbian file I/O paths). On success, returns the
     open file descriptor with the lock held. On timeout, closes the fd and
     raises [Flock_timeout]. *)
 let acquire_flock_retry ?clock:(_clock = None) ~lock_path ~mode ~perm
-    ?(max_attempts = 200) ?(sleep_sec = 0.01) ~caller () =
+    ?(max_attempts = 200) ?(sleep_sec = retry_sleep_sec) ~caller () =
   let fd = Unix.openfile lock_path mode perm in
   let started_at = Time_compat.now () in
   let rec acquire attempts =
@@ -226,7 +230,7 @@ let acquire_flock_retry ?clock:(_clock = None) ~lock_path ~mode ~perm
     to the Eio scheduler when a clock is available and otherwise sleeps in a
     systhread so the calling fiber does not block the domain. *)
 let acquire_flock_retry_cooperative ?clock ~lock_path ~mode ~perm
-    ?(max_attempts = 200) ?(sleep_sec = 0.01) ~caller () =
+    ?(max_attempts = 200) ?(sleep_sec = retry_sleep_sec) ~caller () =
   let fd = run_blocking_lock_op (fun () -> Unix.openfile lock_path mode perm) in
   let started_at = Time_compat.now () in
   let rec acquire attempts =

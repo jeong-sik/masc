@@ -138,12 +138,44 @@ let verify_receipt ~sw ~storage ~root_stat ~content ~sha256 =
   let* ()=validate () in
   Ok validate
 
-let publish_result ~before_result_publish ~after_result_publish ~sw ~fs t settled =
-  let* observation,record=observe_settled t settled in
+type result_read =
+  | Observe_original | Open_storage | Reopen_stdout | Reopen_stderr
+  | Validate_stdout | Validate_stderr | Refresh_after_publication
+
+let validation_stage = function P.Stdout -> Validate_stdout | P.Stderr -> Validate_stderr
+let busy_stage ~default = function
+  | Registry_error error -> if error=R.Busy then Some default else None
+  | Launch_error error -> if error=L.Registry_error R.Busy then Some default else None
+  | Output_error {stream;cause} ->
+    if cause=O.Registry_error R.Busy then Some (validation_stage stream) else None
+  | Pipe_unavailable | Pipe_cleanup_failed _ | Registry_cleanup_failed _ | Interrupted
+  | Supervisor_failed | Codec_error _ | Publication_failed _ | Recovery_failed _
+  | Receipt_storage_unavailable -> None
+
+(* These are non-effecting, per-original reads. A competing mutation holds the
+   same lease only temporarily; do not settle the job-owned result on Busy.
+   Retrying each read separately also avoids replaying the exclusive receipt
+   publication when the final refresh is contended. Pace retries with the
+   existing file-lock interval and no timeout, while preserving cancellation. *)
+let await_result_read ~before_result_read ~on_result_read_busy stage f =
+  before_result_read stage;
+  let rec await () =
+    match f () with
+    | Ok value -> Ok value
+    | Error error -> (match busy_stage ~default:stage error with
+      | None -> Error error
+      | Some current -> on_result_read_busy current;File_lock_eio.wait_after_contention ();await ()) in
+  await ()
+
+let publish_result ~before_result_read ~on_result_read_busy
+    ~before_result_publish ~after_result_publish ~sw ~fs t settled =
+  let read stage f=await_result_read ~before_result_read ~on_result_read_busy stage f in
+  let* observation,record=read Observe_original (fun () -> observe_settled t settled) in
   let* launch_id=match R.launch_state record with
     | R.Requested launch_id -> Ok launch_id
     | R.Not_requested -> Error (Registry_error R.Stale_record) in
-  let* opened=R.open_storage ~sw record |> Result.map_error (fun e -> Registry_error e) in
+  let* opened=read Open_storage (fun () ->
+    R.open_storage ~sw record |> Result.map_error (fun e -> Registry_error e)) in
   let storage=R.storage_path opened in
   let* root_stat=receipt_io (fun () -> Eio.Path.stat ~follow:true storage) in
   let* root_path=receipt_io (fun () -> Eio.Path.native_exn storage) in
@@ -155,19 +187,45 @@ let publish_result ~before_result_publish ~after_result_publish ~sw ~fs t settle
       ~parent_components:[] ~target_leaf:result_leaf ~permissions:0o400
     |> Result.map_error (fun e -> Recovery_failed (Fs_compat.capability_publication_target_error_to_string e)) in
   before_result_publish ();
-  Eio.Switch.run (fun read_sw ->
-  let reopen stream expected =
-    let* reader=O.reopen ~sw:read_sw ~storage:opened ~stream
-      |> Result.map_error (fun cause -> Output_error {stream;cause}) in
+  let validate_once stream reader expected =
     let* actual=O.revalidate_sealed reader |> Result.map_error (fun cause -> Output_error {stream;cause}) in
-    if actual=expected then Ok reader else Error (Output_error {stream;cause=O.Invalid_storage}) in
-  let* stdout=reopen P.Stdout settled.stdout in
-  let* stderr=reopen P.Stderr settled.stderr in
+    if actual=expected then Ok () else Error (Output_error {stream;cause=O.Invalid_storage}) in
+  let validate stream reader expected =
+    read (validation_stage stream) (fun () -> validate_once stream reader expected) in
+  let with_reopened stream expected use =
+    let stage=match stream with P.Stdout -> Reopen_stdout | P.Stderr -> Reopen_stderr in
+    before_result_read stage;
+    let rec attempt () =
+      (* A failed reopen can already own descriptors. Close that attempt's
+         switch before retrying; a successful reader stays alive through [use].
+         In particular, never retry [use] after it has published the result. *)
+      match Eio.Switch.run (fun reader_sw ->
+        match O.reopen ~sw:reader_sw ~storage:opened ~stream with
+        | Error cause -> if cause=O.Registry_error R.Busy then `Busy
+          else `Done (Error (Output_error {stream;cause}))
+        | Ok reader -> `Done (let* ()=validate stream reader expected in use reader)) with
+      | `Busy -> on_result_read_busy stage;File_lock_eio.wait_after_contention ();attempt ()
+      | `Done result -> result in
+    attempt () in
+  with_reopened P.Stdout settled.stdout (fun stdout ->
+  with_reopened P.Stderr settled.stderr (fun stderr ->
+  Eio.Switch.run (fun read_sw ->
+  let validate_now stream reader expected =
+    before_result_read (validation_stage stream);
+    validate_once stream reader expected in
+  let validate_outputs_once () =
+    let* ()=validate_now P.Stdout stdout settled.stdout in
+    validate_now P.Stderr stderr settled.stderr in
   let validate_outputs () =
-    let validate stream reader expected =
-      let* actual=O.revalidate_sealed reader |> Result.map_error (fun cause -> Output_error {stream;cause}) in
-      if actual=expected then Ok () else Error (Output_error {stream;cause=O.Invalid_storage}) in
-    let* ()=validate P.Stdout stdout settled.stdout in validate P.Stderr stderr settled.stderr in
+    let rec attempt () =
+      match validate_outputs_once () with
+      | Ok () -> Ok ()
+      | Error error -> (match busy_stage ~default:Refresh_after_publication error with
+        | None -> Error error
+        | Some stage ->
+          (* If stderr waited, stdout must be checked again after that wait. *)
+          on_result_read_busy stage;File_lock_eio.wait_after_contention ();attempt ()) in
+    attempt () in
   let* ()=validate_outputs () in
   let* ()=L.with_storage_publication t.owner (fun () ->
     let* recovery=Fs_compat.Publication_recovery.open_registry ~sw ~fs ~registry_root:storage
@@ -183,10 +241,21 @@ let publish_result ~before_result_publish ~after_result_publish ~sw ~fs t settle
       Error (Recovery_failed (match value with Ok () -> detail | Error e -> error_to_string e ^ "; " ^ detail))) in
   after_result_publish ();
   let* validate_receipt=verify_receipt ~sw:read_sw ~storage ~root_stat ~content ~sha256 in
-  let* current=R.refresh record |> Result.map_error (fun e -> Registry_error e) in
-  let* ()=validate_outputs () in
-  let* ()=validate_receipt () in
-  Ok {sha256;status=status current settled (P.Result_ready sha256);content})
+  let rec readiness () =
+    let result=
+      before_result_read Refresh_after_publication;
+      let* current=R.refresh record |> Result.map_error (fun e -> Registry_error e) in
+      let* ()=validate_outputs_once () in
+      let* ()=validate_receipt () in
+      Ok {sha256;status=status current settled (P.Result_ready sha256);content} in
+    match result with
+    | Ok receipt -> Ok receipt
+    | Error error -> (match busy_stage ~default:Refresh_after_publication error with
+      | None -> Error error
+      | Some stage ->
+        (* Re-read cancellation and both streams after any contested validation. *)
+        on_result_read_busy stage;File_lock_eio.wait_after_contention ();readiness ()) in
+  readiness ())))
 let cancel t = L.cancel t.owner |> Result.map_error (fun e -> Launch_error e)
 let await_quiescent t = L.await_quiescent t.owner |> Result.map_error (fun e -> Launch_error e)
 let read_output t ~stream ~offset ~max_bytes =
@@ -264,7 +333,8 @@ let start_input ~sw pipes data =
     `Stop_daemon);
   done_
 
-let supervise ~before_result_publish ~after_result_publish ~sw ~fs pipes owner ~registry_release_error ~pipe_cleanup_errors =
+let supervise ~before_result_read ~on_result_read_busy ~before_result_publish ~after_result_publish
+    ~sw ~fs pipes owner ~registry_release_error ~pipe_cleanup_errors =
   let capture stream source=O.start ~sw ~fs ~owner ~stream ~source
     |> Result.map_error (fun cause -> Output_error {stream;cause}) in
   let stdout=capture P.Stdout pipes.stdout_source in
@@ -311,7 +381,8 @@ let supervise ~before_result_publish ~after_result_publish ~sw ~fs pipes owner ~
        finish settled;
        match settled with
        | Error _ -> ()
-       | Ok settled -> finish_result (publish_result ~before_result_publish ~after_result_publish ~sw ~fs t settled));
+       | Ok settled -> finish_result (publish_result ~before_result_read ~on_result_read_busy
+           ~before_result_publish ~after_result_publish ~sw ~fs t settled));
      let watch stream capture=daemon (fun () ->
        match capture with
        | Error e -> finish (Error e)
@@ -321,7 +392,8 @@ let supervise ~before_result_publish ~after_result_publish ~sw ~fs pipes owner ~
      daemon (fun () -> match Eio.Promise.await input with Ok _ -> () | Error e -> finish (Error e)));
   t
 
-let launch_with_hook ~after_spawn ~before_result_publish ~after_result_publish ~sw ~fs ~cgroup_parent_path ~execution intent =
+let launch_with_hook ~before_result_read ~on_result_read_busy ~after_spawn ~before_result_publish
+    ~after_result_publish ~sw ~fs ~cgroup_parent_path ~execution intent =
   Eio.Switch.check sw;
   match pipes ~sw with
   | Error error -> Not_performed {error;pipe_cleanup_errors=[]}
@@ -334,12 +406,20 @@ let launch_with_hook ~after_spawn ~before_result_publish ~after_result_publish ~
         | Error e -> Error (Launch_error e)
         | Ok owner ->
           after_spawn owner;
-          Ok (supervise ~before_result_publish ~after_result_publish ~sw ~fs pipes owner ~registry_release_error ~pipe_cleanup_errors) in
+          Ok (supervise ~before_result_read ~on_result_read_busy ~before_result_publish
+            ~after_result_publish ~sw ~fs pipes owner ~registry_release_error ~pipe_cleanup_errors) in
       Performed {value;registry_release_error;pipe_cleanup_errors}
 
 let launch_effect_workspace ~sw ~fs ~cgroup_parent_path ~execution intent =
   launch_with_hook ~after_spawn:(fun _ -> ()) ~before_result_publish:(fun () -> ())
-    ~after_result_publish:(fun () -> ()) ~sw ~fs ~cgroup_parent_path ~execution intent
+    ~after_result_publish:(fun () -> ()) ~before_result_read:(fun _ -> ())
+    ~on_result_read_busy:(fun _ -> ()) ~sw ~fs ~cgroup_parent_path ~execution intent
 module For_testing = struct
-  let launch_effect_workspace = launch_with_hook
+  type nonrec result_read = result_read =
+    | Observe_original | Open_storage | Reopen_stdout | Reopen_stderr
+    | Validate_stdout | Validate_stderr | Refresh_after_publication
+  let launch_effect_workspace ?(before_result_read=fun _ -> ()) ?(on_result_read_busy=fun _ -> ())
+      ~after_spawn ~before_result_publish ~after_result_publish ~sw ~fs ~cgroup_parent_path ~execution intent =
+    launch_with_hook ~before_result_read ~on_result_read_busy ~after_spawn ~before_result_publish
+      ~after_result_publish ~sw ~fs ~cgroup_parent_path ~execution intent
 end

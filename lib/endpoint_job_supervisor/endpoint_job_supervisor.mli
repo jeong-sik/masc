@@ -91,7 +91,10 @@ val await_result : t -> (result_receipt,error) result
     The result remains an
     uncertain-execution observation, never payload or Task/Goal success.
 
-    Observer cancellation leaves publication and the original job alive.
+    Transient contention on the original registry read lock leaves the
+    job-owned publisher pending; it retries only that read, including after
+    exclusive receipt publication. Observer cancellation leaves publication
+    and the original job alive.
     Publication/capture failure or owner teardown settles this observer with an
     error; it never grants a new launch or overwrites an existing receipt.
     Repeated observers share the same original immutable receipt. Restart
@@ -103,7 +106,12 @@ val await_quiescent : t -> (G.exit_observation,error) result
 (** Original-owner durable cancellation and raw physical/tree settlement remain
     available even when output initialization or capture is unavailable. *)
 module For_testing : sig
+  type result_read =
+    | Observe_original | Open_storage | Reopen_stdout | Reopen_stderr
+    | Validate_stdout | Validate_stderr | Refresh_after_publication
   val launch_effect_workspace :
+    ?before_result_read:(result_read -> unit) ->
+    ?on_result_read_busy:(result_read -> unit) ->
     after_spawn:(L.t -> unit) -> before_result_publish:(unit -> unit) ->
     after_result_publish:(unit -> unit) ->
     sw:Eio.Switch.t -> fs:Eio.Fs.dir_ty Eio.Path.t ->
@@ -113,5 +121,7 @@ module For_testing : sig
       physical/tree/input/output settlement exists, before result publication
       and outside the owner metadata lock. [after_result_publish] runs after the
       actual durable exclusive commit, before attachment readback/readiness.
-      Both publication hooks run outside the owner metadata lock. *)
+      Both publication hooks run outside the owner metadata lock.
+      [before_result_read] runs before a job-owned read or validation attempt;
+      [on_result_read_busy] runs after that read observed real contention. *)
 end

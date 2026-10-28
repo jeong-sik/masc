@@ -2581,6 +2581,7 @@
   masc_tui_hit
   masc_tui_pane_selection
   masc_tui_press
+  masc_tui_presented
   masc_tui_pick_list
   masc_tui_usage_trend
    masc.agent_core.digest
@@ -3099,6 +3100,11 @@
   masc_tui_code_lexer
   masc_tui_memo
   masc_tui_message_layout))
+
+(library
+ (name masc_tui_presented)
+ (wrapped false)
+ (modules masc_tui_presented))
 
 (library
  (name masc_tui_input_reader)

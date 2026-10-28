@@ -4,13 +4,13 @@ Status: investigation in progress. This document separates observed terminal
 behavior, source-level findings and design hypotheses. It does not establish a
 best layout or a measured improvement in comprehension.
 
-The follow-up candidate discussed below is local work in progress and is not in
-the published draft head. Source review found an unresolved input race between
-checking for pending input and presenting a new frame, and a missing-tail CSI
-sequence can prevent the recovery notice from being displayed. Some inputs and
-paste payloads can be rejected during a transition rather than preserved. These
-are not terminal reproductions; the follow-up needs further design, review and
-candidate-terminal verification before it can be treated as finished.
+The follow-up candidate discussed below has been source-reviewed but has not
+been built or observed in a terminal. It uses a post-presentation input barrier
+to address a discovered transition race and presents recovery guidance for a
+missing-tail control sequence. Some input and paste payloads can be rejected
+during a transition rather than preserved. Terminal input and output remain
+non-atomic, and the follow-up needs candidate-terminal verification before its
+behavior can be treated as established.
 
 ## Observed baseline
 
@@ -36,7 +36,9 @@ The Queue panel in PR #46617 was not present in that binary. Source inspection
 of the earlier parent commit `a3c351925b09341d5051b0dc3a0a35d3508fa1c8`
 found that `?` was ignored in its list and detail modes, and Hangul-to-command
 admission still tested the underlying chat surface. Those are source findings
-for that commit, not observations of the later candidate in a terminal.
+for that commit. A subsequent [isolated candidate observation](../evidence/research/tui-information-layers-2026-10-28/populated-fixture/candidate-2732143/README.md)
+of `2732143dfeac5d8a33de2e7e4ac6b9042b328ff6` confirmed that `?` did not change
+the selected Queue frame; it did not measure the later local follow-up.
 
 Another source-level layer mismatch was found for paste: an asynchronously
 issued Play invite card is drawn above an existing reader, but reader paste
@@ -143,26 +145,29 @@ making the answer field behind it silently lose typed characters.
 
 ### Unfinished input-ownership boundary
 
-The local follow-up uses the last accepted frame to identify a Queue selection
-and a Play card, but checking input before building that frame is not an atomic
-check against input arriving while the frame is being built or written. The
-follow-up can also hide the recovery notice for an incomplete terminal control
-sequence. It rejects rather than retains a paste it cannot safely attribute.
+The follow-up groups the previously separate presented approval, hit zones,
+panes and reader into one immutable snapshot. It rechecks input after output and
+holds input already observed at that boundary before dispatching the next
+owner's handlers. Source review found no additional confirmed P0–P2 after the
+reported fixes, but the barrier and recovery behavior have not run in the
+candidate terminal. A rejected paste is not retained; the user is told to retry.
 
-One possible next design is to group the existing presented approval, hit zones,
-panes and reader into one immutable presented-frame snapshot. A transition
-barrier in that snapshot could distinguish input already waiting at presentation
-from input admitted after the new owner is visible. It would have to be checked
-before paste recovery, mouse gestures, composer and other input side effects,
-and released only when the relevant input or incomplete sequence is settled.
-Whether that design preserves recovery and provides a usable retry path remains
-unverified. Terminal input and output are not an atomic transaction: describe
-the actual observation boundary rather than promising the time a person saw a
-frame. A reproduction must exercise queue close and Enter, a selection change
-and priority action, a Play response arriving during typing, resize with a
-truncated sequence, and incomplete-paste recovery in an isolated workspace.
+Input can still arrive after the post-output observation, and the terminal does
+not report when the person saw the new frame. A late tail after a forced CSI
+cancel also cannot be identified with certainty. These limits are distinct
+from the source-level race the barrier addresses. Manual verification should
+exercise queue close and Enter, selection and priority, a Play response during
+typing, resize with a truncated sequence, and incomplete-paste recovery in an
+isolated workspace.
 
 ### Synthetic comparison and provisional direction
+
+The full-screen candidate was also measured against the populated fixture:
+at 80×24, 10 of 18 waiting events were visible and all ten event lines were
+truncated; at 120×36 and 160×40 all 18 were visible without event-line
+truncation. The frame replaced the chat body at every measured size. These
+observations use the real candidate binary, while the side and bottom
+comparisons below are static sketches and do not have the same renderer.
 
 The [static sketches](../evidence/research/tui-information-layers-2026-10-28/prototype/README.md)
 put the same synthetic chat and 18 queue rows into three arrangements. They

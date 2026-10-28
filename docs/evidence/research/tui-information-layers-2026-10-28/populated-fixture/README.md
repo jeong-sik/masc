@@ -14,8 +14,9 @@ in the [parent record](../README.md) displayed the [synthetic chat](baseline-cha
 at 100×24 in tmux. The two saved HTTP responses are the fixture's
 [waiting inventory](waiting-inventory.json) and [queued operations](queued-operations.json).
 The baseline predates the Queue panel, so this observation does not establish
-that the candidate can decode or display these queue rows. A matching candidate
-binary and interactive comparison are still required.
+that the candidate can decode or display these queue rows. A later
+[candidate observation](candidate-2732143/README.md) used the same fixture;
+it does not establish real-server behavior or the later follow-up's behavior.
 
 | File | SHA-256 |
 | --- | --- |

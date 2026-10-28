@@ -92,6 +92,7 @@ val render_agenda :
 
 val render_terminal_too_small :
   Masc_tui_types.state ->
+  recovery_notice:string option ->
   rows:int ->
   cols:int ->
   Masc_tui_frame_presenter.frame * Masc_tui_types.clamped_scroll option

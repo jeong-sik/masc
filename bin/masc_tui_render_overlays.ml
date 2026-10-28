@@ -1126,7 +1126,7 @@ let render_agenda (state : state) =
       Option.iter c.push (overlay_window_row ~scroll ~height count))
 ;;
 
-let render_terminal_too_small state ~rows ~cols =
+let render_terminal_too_small state ~recovery_notice ~rows ~cols =
   (* The hint names physical terminal rows, whereas the guard receives the
      body after navigation, agenda, and composer allocation. At the minimum
      body size the composer can be absent; evaluate its policy at the proposed
@@ -1139,13 +1139,25 @@ let render_terminal_too_small state ~rows ~cols =
     navigation_rows + surface_rows
     + Masc_tui_composer.rows_for ~terminal_rows:surface_rows
   in
+  let notice = match recovery_notice, state.last_action with
+    | Some text, _ -> Some text
+    | None, Some (text, at)
+      when Unix.gettimeofday () -. at <= Masc_tui_types.last_action_window_s -> Some text
+    | None, (Some _ | None) -> None in
+  let resize_hint =
+    Printf.sprintf "terminal too small -- resize to at least %d rows; q: quit"
+      minimum_terminal_rows in
   let buf = Buffer.create 64 in
-  Buffer.add_string buf
-    (fit_width
-       (Printf.sprintf "terminal too small -- resize to at least %d rows; q: quit"
-          minimum_terminal_rows)
-       cols);
+  let first = match notice with
+    | Some text when rows <= 1 -> Terminal_text.single_line text
+    | Some _ | None -> resize_hint in
+  Buffer.add_string buf (fit_width first cols);
   Buffer.add_char buf '\n';
+  (match notice with
+   | Some text when rows > 1 ->
+       Buffer.add_string buf (fit_width (Terminal_text.single_line text) cols);
+       Buffer.add_char buf '\n'
+   | Some _ | None -> ());
   finish_terminal_too_small_frame ~cursor:Frame_presenter.Hidden ~rows ~cols
     buf
 

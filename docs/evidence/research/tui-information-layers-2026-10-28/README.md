@@ -72,8 +72,9 @@ This is an additional observed inconsistency; no About repair is claimed.
 
 The separately generated [synthetic layer sketches](prototype/README.md)
 compare row visibility and truncation; they are not captures of this binary.
-The [populated fixture](populated-fixture/README.md) was prepared for a later
-candidate comparison and observed only with the baseline executable so far.
+The [populated fixture](populated-fixture/README.md) was also used for a later
+[candidate observation](populated-fixture/candidate-2732143/README.md), with
+the candidate's source and binary identities recorded separately.
 
 ## Parent candidate build failure
 

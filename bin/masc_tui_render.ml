@@ -695,7 +695,7 @@ let queue_below_play state ~terminal_rows =
     | `About | `Context | `Keeper_deletions | `Help | `Agenda | `Answering
     | `Patch | `Link | `Client_detail _ | `Surface -> None
 
-let render ~home (state : state) =
+let render ~home ~compact_recovery_notice (state : state) =
   (* Marks number the targets of this frame alone. *)
   Masc_tui_hit.reset press_marks;
   (* So do the panes: a frame that ends without recording any, the
@@ -716,8 +716,9 @@ let render ~home (state : state) =
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)
   match frame_choice state ~terminal_rows with
-  | `Too_small rows ->
-    let frame, clamped = render_terminal_too_small state ~rows ~cols in
+  | `Too_small _ ->
+    let frame, clamped = render_terminal_too_small state
+        ~recovery_notice:compact_recovery_notice ~rows:terminal_rows ~cols in
     (frame, clamped, None, Overlay_drawn)
   | `Play_card card ->
     let frame, clamped = render_play_card state card in

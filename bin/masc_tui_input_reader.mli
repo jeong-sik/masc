@@ -43,6 +43,9 @@ val input_reader_has_started_input : input_reader -> bool
     pastes, recovered tails and incomplete terminal/UTF-8 sequences held by
     either the normal decoder or the original startup probe. Does not
     consume input. A terminal handoff must preserve this input's owner. *)
+val input_reader_has_unsettled_input : input_reader -> bool
+(** As above, also treating the startup probe's pending ownership of stdin as
+    unsettled until its decoder and replay have been installed. *)
 val input_holds_incomplete_sequence : input_reader -> bool
 val cancel_incomplete_sequence : input_reader -> unit
 val input_byte_ready : input_reader -> bool

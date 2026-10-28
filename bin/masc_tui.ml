@@ -41,6 +41,7 @@ module Board_detail = Masc_tui_board_detail
 module Board_hearth = Masc_tui_board_hearth
 module Board_composer = Masc_tui_board_composer
 module Frame_presenter = Masc_tui_frame_presenter
+module Presented = Masc_tui_presented
 module Approval_authority = Masc_tui_approval_authority
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Keeper_chat_history = Masc_tui_keeper_chat_history
@@ -23855,23 +23856,12 @@ let main
         (Terminal_profile.synchronized_output terminal_profile)
       ()
   in
-  (* An approval effect belongs to the row the terminal last accepted, not to
-     the mutable list that an async refresh may install before the next key.
-     This is committed only after [Frame_presenter.present] reports output. *)
-  let presented_approval = ref None in
-  (* Where each pressable text sits on the frame the terminal last accepted.
-     A press is read against this, never against a frame still being drawn:
-     the same rule the approval row above follows. *)
-  let presented_presses = ref Masc_tui_hit.no_zones in
-  (* Where each pane of that frame sits. A press is placed in one of these,
-     and a drag after it selects only inside it. *)
-  let presented_panes = ref Masc_tui_pane_selection.no_panes in
-  (* The left button's gesture from its press to its release. While it
-     selects, every frame is drawn with the selection over it. *)
+  (* All interaction evidence is committed together after terminal output. *)
+  let presented = ref (Presented.initial ~approval:None
+      ~presses:Masc_tui_hit.no_zones ~panes:Masc_tui_pane_selection.no_panes
+      ~reader:None) in
+  (* The left button's gesture from press to release. *)
   let pointer_gesture = ref Masc_tui_pane_selection.Idle in
-  (* Which reader that frame drew, as it reported it. A wheel notch not over
-     the Activity pane moves this reader. *)
-  let presented_reader = ref None in
   let terminal_title = Terminal_title.create () in
   let resize_requested = Atomic.make false in
 
@@ -24062,7 +24052,7 @@ let main
   let last_loop_at_ns = ref (Mtime_clock.elapsed_ns ()) in
   let presented_surface_reference () =
     match state.view with
-    | Approvals -> Option.bind !presented_approval approval_row_reference
+    | Approvals -> Option.bind (!presented).approval approval_row_reference
     | Overview | Acting | Metrics | Keepers _ | Lanes | Clients | Board | Planning
     | Schedules
     | Memory | Verification | Harness | Fusion | Repositories | Changes | Connectors
@@ -24122,7 +24112,7 @@ let main
   in
   let answer_presented_approval decision =
     match
-      Approval_authority.resolve ~presented:!presented_approval
+      Approval_authority.resolve ~presented:(!presented).approval
         ~current:(Masc_tui_approvals_model.approval_items state) decision
     with
     | Some { Approval_authority.row = Masc_tui_approvals_model.Operator_row approval; decision } ->
@@ -24142,30 +24132,32 @@ let main
         report_action state "system"
           "Approval list changed; review the updated row before deciding"
   in
-  let commit_presented_approval approval =
-    presented_approval := approval
-  in
-  let present_frame frame approval presses panes ~write ~flush reader =
+  let present_frame frame approval presses panes ~input_pending ~write ~flush reader =
+    let damaged = Terminal_write_repair.consume_damage () in
+    let queue_or_play_reader reader =
+      Option.is_some (queue_owner_of_reader reader)
+      || Option.is_some (play_card_of_reader reader) in
+    let queue_or_play_changed =
+      queue_selection_authority_changed ~presented:(!presented).presses ~candidate:presses
+      || queue_owner_authority_changed ~presented:(queue_owner_of_reader (!presented).reader)
+           ~candidate:(queue_owner_of_reader reader)
+      || play_owner_authority_changed ~presented:(play_card_of_reader (!presented).reader)
+           ~candidate:(play_card_of_reader reader)
+      || ((damaged || Option.is_none (Frame_presenter.presented_rows frame_presenter))
+          && (queue_or_play_reader (!presented).reader || queue_or_play_reader reader))
+    in
     let frame =
       match !pointer_gesture with
-      | Masc_tui_pane_selection.Selecting selection ->
+      | Masc_tui_pane_selection.Selecting selection when not queue_or_play_changed ->
           { frame with
             Frame_presenter.lines =
               Masc_tui_pane_selection.highlight selection frame.Frame_presenter.lines }
-      | Masc_tui_pane_selection.Idle | Masc_tui_pane_selection.Pressed _
-      | Masc_tui_pane_selection.Drag_without_pane -> frame
+      | Masc_tui_pane_selection.Selecting _ | Masc_tui_pane_selection.Idle
+      | Masc_tui_pane_selection.Pressed _ | Masc_tui_pane_selection.Drag_without_pane -> frame
     in
-    let queue_or_play_changed =
-      queue_selection_authority_changed ~presented:!presented_presses ~candidate:presses
-      || queue_owner_authority_changed ~presented:(queue_owner_of_reader !presented_reader)
-           ~candidate:(queue_owner_of_reader reader)
-      || play_owner_authority_changed ~presented:(play_card_of_reader !presented_reader)
-           ~candidate:(play_card_of_reader reader)
-    in
-    let damaged = Terminal_write_repair.consume_damage () in
     let authority_changed = queue_or_play_changed ||
       Approval_authority.authority_changed
-        ~presented:!presented_approval ~candidate:approval in
+        ~presented:(!presented).approval ~candidate:approval in
     let preset_confirmation_changed = match reader with
       | Some (Preset_detail_scroll (_, Some confirmation)) ->
         preset_confirmation_needs_present state confirmation
@@ -24188,7 +24180,7 @@ let main
         ~invalidate_before:(damaged || authority_changed || preset_confirmation_changed)
         ~write ~flush frame
     with
-    | Frame_presenter.Presented _ as presented ->
+    | Frame_presenter.Presented _ as frame_result ->
         state.frames_presented <- state.frames_presented + 1;
         (match reader with
          | Some (Planning_confirmation_scroll (_, Some confirmation)) ->
@@ -24213,15 +24205,11 @@ let main
          | Some (Play_invite_scroll _) | Some (Voice_scroll _) | Some (Preset_detail_scroll _)
          | Some (Keeper_list_scroll _) | Some (Context_inspector_scroll _)
          | Some (Context_inspector_response_scroll _) | Some (Queue_panel_presented _) -> ());
-        commit_presented_approval approval;
-        presented_presses := presses;
-        presented_panes := panes;
-        presented_reader := reader;
-        (* The frame's pictures go over it once it is on the terminal: sent
-           again after a full redraw, whose clear took them, and put back
-           from the pixels the terminal holds over a row the frame erased
-           and wrote. *)
-        Masc_tui_portrait_view.flush presented ~write:write_to_terminal
+        (* Include picture writes in the post-output input observation. *)
+        Masc_tui_portrait_view.flush frame_result ~write:write_to_terminal;
+        if queue_or_play_changed then pointer_gesture := Masc_tui_pane_selection.Idle;
+        presented := Presented.presented !presented ~approval ~presses ~panes ~reader
+            ~owner_changed:queue_or_play_changed ~input_pending:(input_pending ())
     | Frame_presenter.Unchanged as unchanged ->
         (* Same text, but a picture may have moved on a step. *)
         Masc_tui_portrait_view.flush unchanged ~write:write_to_terminal
@@ -24284,6 +24272,10 @@ let main
      loop turn, so the sequence reaches the dispatch in the order it was
      typed. *)
   let hangul_latin_queue : string Queue.t = Queue.create () in
+  let input_unsettled () =
+    not (Queue.is_empty hangul_latin_queue)
+    || input_reader_has_unsettled_input input_reader
+  in
   (* Palette and graphics share one bounded startup probe because both replies
      arrive on the key stream. The probe removes only replies to these exact
      questions and puts every other consumed byte back into this same reader.
@@ -25825,11 +25817,16 @@ and is loaded on demand through keeper_skill.
                    from the operator's Ctrl-G. This is a force unlock for a
                    stream the operator has observed stop, not an automatic
                    declaration that all paste bytes have arrived. *)
+                let recovery_was_rejected =
+                  (!presented).recovery = Presented.Rejected_recovery in
                 abandon_draining input_reader;
+                presented := Presented.clear_recovery !presented;
                 Masc_tui_exit_signals.withdraw_interrupt exit_signals;
                 skip_input_after_interrupt := true;
                 report_action state "system"
-                  "Paste input unlocked; confirm only after the terminal stops";
+                  (if recovery_was_rejected then
+                     "Paste input unlocked; recovered paste was not applied"
+                   else "Paste input unlocked; confirm only after the terminal stops");
                 Render_schedule.request render_schedule Render_schedule.Background;
                 None
             | Pasting paste, _ when not (cancel_armed paste) ->
@@ -25885,8 +25882,15 @@ and is loaded on demand through keeper_skill.
       let drain_deadline_ns =
         Int64.add (Mtime_clock.elapsed_ns ()) async_drain_budget_ns
       in
+      (* An event held across a presentation cannot cancel an operation or
+         start an editor before it is rejected below. *)
+      if not (input_unsettled ()) && Option.is_none interrupted_paste then
+        presented := Presented.after_input !presented ~input_pending:false;
+      let input_barrier_held () = match (!presented).barrier with
+        | Presented.Open -> false | Presented.Held _ -> true in
       let retire_music_editor_for_input () =
-        if Option.is_some interrupted_paste || input_reader_has_started_input input_reader then
+        if not (input_barrier_held ()) &&
+           (Option.is_some interrupted_paste || input_reader_has_started_input input_reader) then
           withdraw_pending_music_editor state
       in
       retire_music_editor_for_input ();
@@ -25900,15 +25904,15 @@ and is loaded on demand through keeper_skill.
       prepare_resource_diagrams state ~mailbox:async_messages;
       prepare_inspected_frame state ~mailbox:async_messages;
       (match state.lane_addons with
-       | Some view when view.editor_ready -> handle_lane_document_editor ()
+       | Some view when view.editor_ready && not (input_barrier_held ()) -> handle_lane_document_editor ()
        | Some _ | None -> ());
       continue_keeper_settings_editor ~input_pending:(
-        Option.is_some interrupted_paste
+        input_barrier_held () || Option.is_some interrupted_paste
         || input_reader_has_ready_input input_reader
         || input_holds_incomplete_sequence input_reader
         || match paste_phase input_reader with No_paste -> false | Pasting _ | Draining_tail _ -> true);
       let code_navigation_input_pending =
-        Option.is_some interrupted_paste
+        input_barrier_held () || Option.is_some interrupted_paste
         || input_reader_has_ready_input input_reader
         || input_holds_incomplete_sequence input_reader
         || match paste_phase input_reader with No_paste -> false | Pasting _ | Draining_tail _ -> true
@@ -25998,6 +26002,7 @@ and is loaded on demand through keeper_skill.
         | Draining_tail _ -> true
         | No_paste | Pasting _ -> false
       in
+      let barrier_before_read = (!presented).barrier in
       let input =
         match interrupted_paste with
         | Some paste -> Some (Pasted paste)
@@ -26014,6 +26019,32 @@ and is loaded on demand through keeper_skill.
             Option.iter (observe_input_received input_reader) input;
             input)
       in
+      (* Decide from the hold captured before reading: the final event is
+         rejected even when reading it emptied the last input buffer. *)
+      let rejected, rejected_paste, was_reported, paste_was_reported =
+        match barrier_before_read, input with
+        | Presented.Held flags, Some event when is_operator_input event ->
+            let paste = match event with
+              | Pasted _ -> true
+              | Key _ | Graphics_reply _ | Mouse_left_press _ | Mouse_left_drag _
+              | Mouse_left_release _ | Mouse_wheel _ -> false in
+            true, paste, flags.rejected_input, flags.rejected_paste
+        | (Presented.Open | Presented.Held _), (Some _ | None) -> false, false, false, false
+      in
+      if rejected then begin
+        presented := Presented.reject !presented ~paste:rejected_paste;
+        if rejected_paste && Option.is_some interrupted_paste then
+          presented := Presented.reject_recovery !presented;
+        if rejected_paste && not paste_was_reported then
+          report_action state "error"
+            "Paste was not applied during the screen transition; paste it again"
+        else if not was_reported then
+          report_action state "error"
+            "Input was not applied during the screen transition; review and retry";
+        Render_schedule.request render_schedule Render_schedule.Background
+      end;
+      let input = if rejected then None else input in
+      presented := Presented.after_input !presented ~input_pending:(input_unsettled ());
       let input = match input with
         | Some (Mouse_wheel (direction, _, _))
             when Option.is_some (current_code_hover state) ->
@@ -26071,15 +26102,20 @@ and is loaded on demand through keeper_skill.
        | Some (Graphics_reply _) | None -> ());
       Option.iter
         (fun _ ->
-          if Option.is_none state.queue_panel && Option.is_none (play_card_shown state)
-             && Option.is_none (queue_owner_of_reader !presented_reader)
-             && Option.is_none (play_card_of_reader !presented_reader)
+          if not rejected && Option.is_none state.queue_panel && Option.is_none (play_card_shown state)
+             && Option.is_none (queue_owner_of_reader (!presented).reader)
+             && Option.is_none (play_card_of_reader (!presented).reader)
              && not (Frame_presenter.last_frame_is_compact frame_presenter) then
             report_action state "system"
-              "Incomplete paste restored; wait for marker or Ctrl-C, then Ctrl-G enables Enter")
+              "Recovered paste received; check its destination and wait for marker or Ctrl-C")
         interrupted_paste;
       if guarding_before_read && paste_phase input_reader = No_paste then begin
-        report_action state "system" "Paste tail ended; review the draft before sending";
+        let recovery_was_rejected =
+          (!presented).recovery = Presented.Rejected_recovery in
+        presented := Presented.clear_recovery !presented;
+        report_action state "system"
+          (if recovery_was_rejected then "Paste tail ended; the recovered paste was not applied"
+           else "Paste tail ended; check its destination before continuing");
         (* The tail's end marker is swallowed and returns no input, so no
            [Input] request draws this; ask for the frame as the other
            recovery notices do. *)
@@ -26089,7 +26125,9 @@ and is loaded on demand through keeper_skill.
        | Pasting _ when not !paste_pause_notified ->
            paste_pause_notified := true;
            report_action state "system"
-             "Paste in progress; Ctrl-C twice restores, third unlocks if stuck";
+             (if input_barrier_held () then
+                "Paste in progress during a screen transition; Ctrl-C can cancel if stuck"
+              else "Paste in progress; Ctrl-C twice recovers, third unlocks if stuck");
            Render_schedule.request render_schedule Render_schedule.Background
        | Pasting _ -> ()
        | No_paste | Draining_tail _ -> paste_pause_notified := false);
@@ -26099,7 +26137,9 @@ and is loaded on demand through keeper_skill.
                      && not !paste_quiet_notified ->
            paste_quiet_notified := true;
            report_action state "system"
-             "Paste quiet; Ctrl-C again restores the draft if the end marker was lost";
+             (if input_barrier_held () then
+                "Paste quiet; Ctrl-C again recovers it, but it will not be applied on this screen"
+              else "Paste quiet; Ctrl-C again recovers it if the end marker was lost");
            Render_schedule.request render_schedule Render_schedule.Background
        | Pasting paste when not (paste_can_recover input_reader paste) ->
            paste_quiet_notified := false
@@ -26568,7 +26608,7 @@ and is loaded on demand through keeper_skill.
         match input with
         | Some (Mouse_left_press (row, column)) when pointer_on_frame ->
             pointer_gesture :=
-              Masc_tui_pane_selection.press !presented_panes ~row ~column;
+              Masc_tui_pane_selection.press (!presented).panes ~row ~column;
             Masc_tui_pane_selection.Nothing
         | Some (Mouse_left_drag (row, column)) when pointer_on_frame ->
             pointer_gesture :=
@@ -26622,8 +26662,8 @@ and is loaded on demand through keeper_skill.
                        "line"))
            | None -> ())
        | Masc_tui_pane_selection.Click _ | Masc_tui_pane_selection.Nothing -> ());
-      let presented_play = play_card_of_reader !presented_reader in
-      let presented_queue = queue_owner_of_reader !presented_reader in
+      let presented_play = play_card_of_reader (!presented).reader in
+      let presented_queue = queue_owner_of_reader (!presented).reader in
       let play_was_presented = Option.is_some presented_play in
       let play_wheel_available =
         if not play_was_presented then true
@@ -26640,7 +26680,7 @@ and is loaded on demand through keeper_skill.
                && (not compact_viewport)
                && play_wheel_available
                && acting_pane_hit state ~row ~column = Pane_miss ->
-            Option.bind !presented_reader (fun reader ->
+            Option.bind (!presented).reader (fun reader ->
                 reader_after_wheel (clamped_scroll_now state reader) direction)
         | Some (Key _ | Pasted _ | Graphics_reply _ | Mouse_left_press _
                | Mouse_left_drag _ | Mouse_left_release _ | Mouse_wheel _)
@@ -26803,7 +26843,7 @@ and is loaded on demand through keeper_skill.
       let pressed =
         match click with
         | Some (row, column) when Option.is_none text_target ->
-            Masc_tui_hit.target_at !presented_presses ~row ~column
+            Masc_tui_hit.target_at (!presented).presses ~row ~column
         | Some _ | None -> None
       in
       (* The Activity pane row a click landed on. *)
@@ -26815,22 +26855,25 @@ and is loaded on demand through keeper_skill.
             | Pane_miss -> None)
         | None -> None
       in
+      let reject_recovered_paste () =
+        presented := Presented.reject_recovery !presented;
+        report_action state "error"
+          "Recovered paste was not applied; paste it again after the screen transition"
+      in
       (match input with
        (* A paste belongs to the frame the terminal actually accepted. The
           invite response can arrive before that card is painted: in that
           interval a visible reader must keep its input. Once the card was
           presented, its scroll report identifies it above the reader. *)
        | Some (Pasted _) when play_was_presented || Option.is_some presented_queue ->
-           if recovered_paste then report_action state "error"
-             "Recovered paste was not applied; paste it again after the screen transition"
+           if recovered_paste then reject_recovered_paste ()
            else state.last_action <- Some ("Paste was not applied on this screen; retry in a text field", Unix.gettimeofday ())
        | Some (Pasted _) when compact_viewport ->
-           if recovered_paste then report_action state "error"
-             "Recovered paste was not applied; paste it again after the screen transition"
+           if recovered_paste then reject_recovered_paste ()
+           else state.last_action <- Some ("Paste was not applied on this screen; retry in a text field", Unix.gettimeofday ())
        | Some (Pasted _) when Option.is_some beneath && Option.is_none presented_queue
            && queue_play_owner = Wait_for_frame ->
-           if recovered_paste then report_action state "error"
-             "Recovered paste was not applied; paste it again after the screen transition"
+           if recovered_paste then reject_recovered_paste ()
            else state.last_action <- Some ("Screen transition: input was not applied; review and retry", Unix.gettimeofday ())
        | Some (Pasted paste) when Option.is_some (current_board_reader state) ->
            let reader=state.board_reader in
@@ -27050,8 +27093,7 @@ and is loaded on demand through keeper_skill.
               behind it. *)
            ()
        | Some (Pasted _) when Option.is_some state.queue_panel ->
-           if recovered_paste then report_action state "error"
-             "Recovered paste was not applied; paste it again after the screen transition"
+           if recovered_paste then reject_recovered_paste ()
            else state.last_action <- Some ("Paste was not applied on this screen; retry in a text field", Unix.gettimeofday ())
        | Some (Pasted _)
          when state.view = Keepers Keeper_message
@@ -27427,7 +27469,7 @@ and is loaded on demand through keeper_skill.
        | Some k when Option.is_some presented_queue_input ->
            Option.iter (fun panel ->
              handle_queue_panel_key state ~base_path ~mailbox:async_messages
-               ~presented_presses:!presented_presses panel k) presented_queue_input
+               ~presented_presses:(!presented).presses panel k) presented_queue_input
        (* The invite card holds the only copy of a link, so it takes every key and
           closes on the operator's own: Esc or q, after which /play link brings
           it back. Enter does not close it, so a second Enter, pressed while
@@ -28343,7 +28385,7 @@ and is loaded on demand through keeper_skill.
              | `Queue _ -> true | _ -> false) ->
            Option.iter (fun panel ->
              handle_queue_panel_key state ~base_path ~mailbox:async_messages
-               ~presented_presses:!presented_presses panel k) state.queue_panel
+               ~presented_presses:(!presented).presses panel k) state.queue_panel
        (* The Activity pane holds these keys while its cursor is up. Above
           the surfaces on purpose: a [j] here must not also move the list
           beside the pane. Any other key reaches the surface unchanged. *)
@@ -31080,7 +31122,7 @@ and is loaded on demand through keeper_skill.
            Render_schedule.request render_schedule Render_schedule.Force
        | Some "R" when state.view = Approvals ->
            (match
-              Approval_authority.resolve ~presented:!presented_approval
+              Approval_authority.resolve ~presented:(!presented).approval
                 ~current:(Masc_tui_approvals_model.approval_items state) Confirm
             with
             | Some { Approval_authority.row = Masc_tui_approvals_model.Gate_row pending; _ } ->
@@ -35537,10 +35579,9 @@ and is loaded on demand through keeper_skill.
       end;
 
       let ready_input = input_reader_has_ready_input input_reader || not (Queue.is_empty hangul_latin_queue) in
-      let transition_input_pending = ready_input || Option.is_some interrupted_paste
-        || (match paste_phase input_reader with
-            | No_paste -> input_reader_has_started_input input_reader
-            | Pasting _ | Draining_tail _ -> false) in
+      (* An incomplete sequence with no ready bytes must not starve recovery
+         frames. A post-presentation hold keeps its eventual tail quarantined. *)
+      let transition_input_pending = ready_input || Option.is_some interrupted_paste in
       let terminal_rows, _ = get_terminal_size () in
       let frame_choice = Masc_tui_render.frame_choice state ~terminal_rows in
       let queue_or_play_frame = match frame_choice with
@@ -35554,8 +35595,8 @@ and is loaded on demand through keeper_skill.
         | `Detail_reading _ | `About | `Context | `Keeper_deletions | `Help
         | `Agenda | `Answering | `Patch | `Link | `Client_detail _ | `Surface -> false in
       let defer_queue_or_play = transition_input_pending && not compact_recovery
-        && (queue_or_play_frame || Option.is_some (queue_owner_of_reader !presented_reader)
-            || Option.is_some (play_card_of_reader !presented_reader)) in
+        && (queue_or_play_frame || Option.is_some (queue_owner_of_reader (!presented).reader)
+            || Option.is_some (play_card_of_reader (!presented).reader)) in
       (match
          Render_schedule.take
            ~input_pending:ready_input
@@ -35628,7 +35669,11 @@ and is loaded on demand through keeper_skill.
                   | Overview, `Detail_reading _ -> ()
                   | (Overview, (`Palette | (`Link | (`Help | (`About | (`Play_card _ | (`Client_detail _ | (`Account_login _ | (`Keeper_deletions | (`Agenda | (`Too_small _ | (`Collab _ | (`Context | (`Lane_addons _ | (`Answering | (`Queue _ | `Patch))))))))))))))))
                   | ((Acting | (Metrics | (Memory | (Lanes | (Clients | (Board | (Approvals | (Planning | (Schedules | (Verification | (Harness | (Fusion | (Repositories | (Code | (Changes | (Connectors | (Runtime | (Config | (Resources | (Tools | (System_logs | Keepers _))))))))))))))))))))), _) -> ());
-                 render ~home state)
+                 let compact_recovery_notice =
+                   if input_holds_incomplete_sequence input_reader then
+                     Some "Terminal sequence incomplete; Ctrl-C cancels it"
+                   else None in
+                 render ~home ~compact_recovery_notice state)
            in
            (* The frame is what the operator will act on next, so the scroll it
               had to clamp is the scroll the next keypress moves from. Applied
@@ -35643,7 +35688,7 @@ and is loaded on demand through keeper_skill.
            Masc_tui_frame_timing.time_present
              ~tag:frame.Frame_presenter.surface_key
              ~write:(output_string stdout) ~flush:(fun () -> flush stdout)
-             (present_frame frame approval presses panes clamped)
+             (present_frame frame approval presses panes ~input_pending:input_unsettled clamped)
        | Render_schedule.Idle | Render_schedule.Wait_until _ -> ())
     done
   in

@@ -4919,6 +4919,11 @@
 (include stanzas/test_tui_link_preview.inc)
 
 (test
+ (name test_tui_presented)
+ (modules test_tui_presented)
+ (libraries masc_tui_presented))
+
+(test
  (name test_tui_terminal_probe)
  (modules test_tui_terminal_probe)
  (libraries

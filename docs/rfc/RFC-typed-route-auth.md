@@ -89,9 +89,20 @@ type _ auth =
   | Self_authenticated : Route_access.self_authenticated_reason -> request_handler auth
 ```
 
-- `Always_public`은 `is_public_read_path`를 대신해요. 그 목록은 변환이 끝나면 지워요.
-- `Self_authenticated`는 핸들러가 직접 인증하는 경로예요. 사유는 닫힌 목록이고, A4a에서는 A1 기준선과 코드로 확인한 셋(`Mcp_transport`, `Oauth_protocol`, `Websocket_upgrade`)만 있어요. 래퍼 없음 43곳을 결정표로 정하는 A4b에서 근거와 함께 사유를 더해요(후보는 browser lane, play 페이지예요).
-- `with_canonical_loopback_host`는 인증 종류가 아니라 호스트 검사라서 이 타입에 넣지 않아요. 그 래퍼는 `/dashboard` 페이지 3곳에서 `with_public_read`와 함께 쓰이고, `server_routes_http_routes_frontend.ml` 안의 지역 함수예요(`~port`를 받아요). 그 3곳을 어떻게 옮길지는 A4b에서 정하고, 호스트 검사가 인증 래퍼 앞에서 도는 순서가 응답을 바꾸지 않는지 A1 기준선으로 확인해요.
+- `Always_public`은 `is_public_read_path`를 대신해요. 그 목록은 변환이 끝나면 지워요. 래퍼가 없고 누구에게나 같은 답을 주는 경로(health 3개, 정적 파일, graphiql, `/`, `/dashboard/assets/`, play 페이지와 agent guide)와 `GET /api/v1/board/flairs`가 여기에 들어가요. flairs는 공개 목록에도 없어서 엄격 설정에서 닫히지 않는 경로예요([#46569](https://github.com/jeong-sik/masc/issues/46569)). 종류를 적는다고 이 동작이 바뀌지는 않아요.
+- `Self_authenticated`는 핸들러가 직접 인증하는 경로예요. 사유는 닫힌 목록이고 A4b에서 여섯이 됐어요. 근거는 A1 기준선과 핸들러 코드예요.
+
+  | 사유 | 경로 | 근거 |
+  |---|---|---|
+  | `Mcp_transport` | `/mcp`와 프로필 경로의 GET·POST·DELETE, `/`(POST), `/ag-ui/events`, `/events/presence` | 전송이 토큰을 직접 확인하고 `WWW-Authenticate`와 함께 401을 줘요 |
+  | `Oauth_protocol` | OAuth 엔드포인트와 discovery 문서 8개, 콜백 페이지 2개 | 호출자가 자격을 얻기 전에 도는 경로예요 |
+  | `Websocket_upgrade` | `/ws`, IDE LSP 프록시 | 핸들러가 업그레이드 전에 자격을 확인해요 |
+  | `Browser_lane` | `/browser-lane/{poll,result,ping,disconnect}` | `with_lane`이 lane 토큰을 확인하고 없으면 403을 줘요 |
+  | `Loopback_dev_token` | `/api/v1/dashboard/dev-token` | loopback이고 엄격 설정이 꺼져 있으면 자격 없이 dashboard 토큰을 줘요([#46560](https://github.com/jeong-sik/masc/issues/46560)) |
+  | `Subpath_dispatch` | `/api/v1/keepers/` prefix의 GET·POST | 핸들러가 하위 경로에 따라 래퍼를 골라요. 하위 경로별 종류는 경로표에 없어요 |
+
+  `Subpath_dispatch`는 "종류가 없다"를 이름으로 적은 것이에요. 이 두 등록을 하위 경로마다 나누는 일은 따로 해요.
+- `with_canonical_loopback_host`는 인증 종류가 아니라 호스트 검사라서 이 타입에 넣지 않아요. `/dashboard` 페이지 3곳은 `Public_read`로 등록하고 호스트 검사를 핸들러 안에서 해요. 전에는 호스트 검사가 `with_public_read` 앞에서 돌았어요. 정규 호스트로 오는 요청은 응답이 같고, 다른 호스트로 오는 요청은 서버가 준비되기 전이면 리다이렉트 대신 503을, workspace precondition이 잘못됐으면 리다이렉트 대신 400을 받아요.
 
 ### 3.2 등록 함수
 

@@ -87,20 +87,21 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 
 **A2 범위**
 
-- 판정은 설정, `authz.jsonl`의 마지막 모드 사건이 만든 모드, 외부 고수위(B2)를 모두 읽는 전체 함수이고 거부 사유를 모두 돌려준다. 결과와 마지막 모드 사건은 닫힌 변형이다. 모드 사건은 종류 `Mode_event`(B2가 더한다)의 레코드다. 이 층이 읽는 사건은 `Fresh_bootstrap` 하나이고, F3이 `off`와 `reactivate`를 더하면 컴파일이 이 판정에서 멈춘다.
-- 판정 결과가 '활성화 전 요청'(설계 §5.1 표의 `Multi_account`, 사건 없음, 외부 고수위 없음)이면 부팅 코드가 `Multi_account_not_activatable`로 거부한다. 호스트 로컬 bootstrap이 아직 없기 때문이다. B3이 이 거부를 거둔다(B3 범위).
-- `config.json`이 있는데 읽지 못하면 설정은 없는 것으로 읽는다. 지금 동작과 같고(요청 때 503), `Multi_account`의 흔적은 표의 다른 두 열이 거부한다.
+- 판정은 설정, `authz.jsonl`의 마지막 모드 사건이 만든 모드, 외부 고수위(B2)를 모두 읽는 전체 함수이고 거부 사유를 모두 돌려준다. 결과와 마지막으로 만든 모드는 닫힌 변형이다. 모드 사건은 종류 `Mode_event`(B2가 더한다)의 레코드다. 이 층이 읽는 만든 모드는 `Multi_account` 하나이고(`Fresh_bootstrap`이 만든다), F3이 `off`와 `reactivate`를 더하면 컴파일이 이 판정에서 멈춘다.
+- 판정 결과가 활성화 전 요청(설계 §5.1 표의 `Multi_account`, 없음, 없음)이면 부팅 코드가 `Multi_account_not_activatable`로 거부한다. 호스트 로컬 bootstrap이 아직 없기 때문이다. B3이 이 거부를 거둔다(B3 범위).
+- 부팅은 `config.json`에서 `account_mode` 멤버만 읽는 얇은 읽기를 둔다. 파일이 JSON이 아니면 설정은 없는 것으로 읽고 경고 한 줄을 남긴다(지금 동작과 같고 요청 때 503이다). JSON이면 다른 필드가 틀려도 `account_mode` 멤버를 읽고, 알 수 없는 값은 `auth_config` 디코더가 파일 전체를 거절하더라도 부팅을 거부한다. `Multi_account`의 흔적은 표의 다른 두 열이 거부한다.
 - 설정의 `account_mode`를 읽는 곳은 이 부팅 판정 하나다. 다른 층은 판정 결과를 받고, 설정 파일을 다시 읽어 모드를 정하지 않는다.
-- `authz.jsonl`이 없는 것과 있는데 읽지 못하는 것을 구분한다. 외부 저장소도 같다. `Fresh_bootstrap`이 도중에 죽어 `Intent_pending`만 남은 외부 저장소는 `없음`이다(설계 §5.1).
+- `authz.jsonl`이 없는 것과 있는데 읽지 못하는 것을 구분한다. 외부 저장소도 같다. 끝이 잘린 마지막 줄(`authz.jsonl`)과 마지막 항목(외부 저장소)은 열 때 잘라 내고(B1b, B2), 남은 줄이 없으면 모드 사건이 없는 것이다. `Fresh_bootstrap`이 도중에 죽어 `Intent_pending`만 남은 외부 저장소의 외부 고수위는 `없음`이다(설계 §5.1).
+- 부팅 코드가 `Authz_log.open_at_start`를 부르는 것은 BasePath lease를 쥔 뒤다. B1b는 lease 증거를 인자로 받지 않으므로 이 순서는 문장이 지킨다.
 - 외부 고수위는 부팅이 외부 저장소의 위치를 알 때만 `있음`으로 볼 수 있다. 위치를 받는 방식은 §6의 결정 2가 정하고 B2 전에 정해지므로, A2는 이미 정해진 방식을 쓴다. 위치를 기록한 곳을 잃은 설치의 구멍은 §7의 위험 2에 적었다.
-- 시험은 네 가지를 본다. 설계 §5.1 표의 행마다 한 건, 거부 사유가 둘 이상일 때 모두 돌려주는지, 필드가 든 `config.json`을 `enable_auth`·`disable_auth`·`prepare_login_auth`가 다시 써도 필드가 남는지를 확인한다. 넷째는 잘린 `config.json`과 마지막 모드 사건 `Multi_account`를 짝지어 부팅 거부를 확인하는 것이다.
+- 시험은 A2가 `off`가 없는 행(1~3, 5~8, 11)을 하나씩 보고, `off`가 있는 행(4, 9, 10)은 F3이 본다. 5행은 B3 전까지 `Multi_account_not_activatable`로 나온다. 그 밖에 네 가지를 본다. 거부 사유가 둘 이상일 때 모두 돌려주는지, 필드가 든 `config.json`을 `enable_auth`·`disable_auth`·`prepare_login_auth`가 다시 써도 필드가 남는지, 잘린 `config.json`과 마지막으로 만든 모드 `Multi_account`를 짝지어 3행 거부가 나오는지, `account_mode`가 알 수 없는 값인 `config.json`이 다른 필드가 틀려도 부팅을 거부하는지다.
 
 ### B. 권한 저장소
 
 | 층 | 결과 | 설계 | 선행 |
 |---|---|---|---|
 | B1 | `authz.jsonl`을 파일에 쌓는 저장소다. B1a는 한 줄의 형식과 author 짝 검사, B1b는 파일이다. 세부는 표 아래 B1 범위다. lease 계열 group commit은 E1에서 붙인다. | §6.3, §8.1 | A3 |
-| B2 | backup 밖 append-only 저장소(설계의 외부 고수위·revocation ledger)와 `Intent_pending`/`Committed`. 저장소는 객체의 scoped epoch 최고값, artifact별 `credential_generation`, Intent 상태를 기록한다. Intent의 subject는 grant·credential·principal·Runtime·Workspace(모드 사건) 중 하나다(§4.5). 같은 writer lock 구역, 판정 갈래 1~5, `AuthorizationUncertain`, `Revocation_pending` 게이트, `Fresh_bootstrap`. 모드 사건용 레코드 종류 `Mode_event`를 `Authz_record.Kind`에 더하고 작성자는 `Local_operator`로 정한다(`admits`가 컴파일을 멈춘다). `Fresh_bootstrap`이 `Intent_pending`을 쓴 뒤 죽은 설치는 판정 3으로 닫고 `Fresh_bootstrap`을 다시 허용한다(설계 §5.1의 `없음`). 갈래마다 고장 주입 시험을 두고, `Intent_pending`만 남긴 고장 주입 한 건을 더한다. 저장소의 위치를 받는 방식을 먼저 정한다(§6의 결정 2). | §4.5, §8.2~8.4 | B1 |
+| B2 | backup 밖 append-only 저장소(설계의 외부 저장소·revocation ledger)와 `Intent_pending`/`Committed`. 저장소는 객체의 scoped epoch 최고값, artifact별 `credential_generation`, Intent 상태를 기록한다. Intent의 subject는 grant·credential·principal·Runtime·`Workspace`(모드 사건) 중 하나다(§4.5). 같은 writer lock 구역, 판정 갈래 1~5, `AuthorizationUncertain`, `Revocation_pending` 게이트, `Fresh_bootstrap`. 모드 사건용 레코드 종류 `Mode_event`를 `Authz_record.Kind`에 더하고 작성자는 `Local_operator`로 정한다(`admits`가 컴파일을 멈춘다). `Fresh_bootstrap`이 `Intent_pending`을 쓴 뒤 죽은 설치는 판정 3으로 닫고 `Fresh_bootstrap`을 다시 허용한다(설계 §5.1의 `없음`). 외부 저장소의 끝이 잘린 마지막 항목은 읽을 때 잘라 낸다(`authz.jsonl`의 꼬리와 같은 규칙). `Authz_log`가 멈추면(`Authz_log.stopped`) 새 쓰기를 거절하고 `AuthorizationUncertain`으로 다룬다. 갈래마다 고장 주입 시험을 두고, `Intent_pending`만 남긴 것과 마지막 항목이 잘린 것을 한 건씩 더한다. 저장소의 위치를 받는 방식을 먼저 정한다(§6의 결정 2). | §4.5, §8.2~8.4 | B1 |
 | B3 | Principal·Admin_assignment·WorkspaceMembership·초대 저장소, 마지막 Admin 보호, 호스트 로컬 bootstrap(`Fresh_bootstrap`을 부르고 A2의 `Multi_account_not_activatable` 거부를 거둔다), ID 발급 규칙, principal 삭제 사건. 세부는 표 아래 B3 범위다. | §4.1, §5.1 | B1, B2, A2 |
 | B4 | `Purge_pending`, `Purged`, `Purge_failed` 사건과 현재 상태 판정(target의 마지막 사건이 현재 상태, target 단위 멱등), `Purge_pending` 대상의 읽기 거부, 재기동 때 남은 `Purge_pending` 목록. `Purge_pending` 지정은 §8.2의 scoped epoch 사건이라 `Intent_pending`/`Committed` 규칙을 따른다(initiator 삭제이면 `Delete` 사건). 삭제는 하지 않는다. 삭제 실행기는 F1이다. | §8.5 | B2, B3 |
 
@@ -117,10 +118,10 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 **B3 범위**
 
 - ID 발급(§4.1): Human `user_id`는 OS CSPRNG가 만든 128비트 이상의 값이고 `(iss, sub)`나 email에서 유도하지 않는다. 발급은 writer lock 안에서 현재 principal과 ledger의 `Delete` 기록을 대조한다. `user_id`가 겹치면 다시 뽑고, `service_id`가 겹치면 등록을 거부하고, ledger를 읽지 못하면 발급하지 않는다.
-- 호스트 로컬 bootstrap이 `Fresh_bootstrap`(B2)을 부른다. 이 층이 A2의 `Multi_account_not_activatable` 거부를 거둔다. 부팅 코드의 거부 한 줄을 지우고, '활성화 전 요청'일 때 호스트 로컬 경로만 연다. 외부 저장소의 위치(§6의 결정 2)는 B2 전에 정해지므로 이 층이 열릴 때 이미 있다. 서버 밖 프로세스가 `Fresh_bootstrap`을 실행할 때 BasePath lease를 쥐는지는 이 층이 정한다.
+- 호스트 로컬 bootstrap이 `Fresh_bootstrap`(B2)을 부른다. 이 층이 A2의 `Multi_account_not_activatable` 거부를 거둔다. 부팅 코드의 거부 한 줄을 지우고, 활성화 전 요청일 때 호스트 로컬 bootstrap만 연다. 외부 저장소의 위치(§6의 결정 2)는 B2 전에 정해지므로 이 층이 열릴 때 이미 있다. 서버 밖 프로세스가 `Fresh_bootstrap`을 실행할 때 BasePath lease를 쥐는지는 이 층이 정한다.
 - 삭제 사건(§4.1): `(iss, sub)`는 `authz.jsonl`의 사건에만 싣고 ledger의 `Delete` 기록에는 ID만 둔다.
 - 표시가 붙은 상태는 D6에서 처음 생긴다. D6 전에는 삭제가 올릴 `Purge_pending` 대상이 없다.
-- 접힌 상태 `Authz_state.t`는 층별 하위 상태를 필드로 가진 레코드다. replay의 판정 `step`은 `Kind.t`를 빠짐없이 match해 하위 모듈로 보낸다. 층마다 필드 한 줄과 갈래 한 줄이 는다. 이 타입은 저장소(B1b)가 아니라 `Authz_state` 모듈이 붙인다.
+- 접힌 상태 `Authz_state.t`는 층별 하위 상태를 필드로 가진 레코드다. replay의 적용 함수 `step`은 `Kind.t`를 빠짐없이 match해 하위 모듈로 보낸다. 층마다 필드 한 줄과 갈래 한 줄이 는다. 이 타입은 저장소(B1b)가 아니라 `Authz_state` 모듈이 붙인다.
 - `step`은 replay가 줄마다 부르는 적용 함수다. append 전에 같은 `step`을 돌려 보면, 쓴 줄이 replay에서 거절되는 일이 없다. 바뀔 수 있는 정책은 판정(decide)에만 둔다. `step`을 엄격하게 바꾸면 hard cut이다.
 - 모든 projection은 같은 head에서 읽는다. 상태 보관자가 `Authz_state.t` 하나를 불변 값으로 한 번에 발행한다. head가 다른 두 projection을 짝지으면 어느 head에도 없던 조합이 나온다. 예를 들어 Bob 비활성(100번 줄), grant G 회수(101번 줄), Bob 재활성(102번 줄)일 때 grant를 100에서, principal을 102에서 읽으면 "Bob 활성 + G 유효"가 된다.
 
@@ -189,13 +190,13 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 
 **F3 범위**
 
-- `off`와 `reactivate`는 모드 사건(종류 `Mode_event`)으로 `authz.jsonl`과 외부 고수위에 남는다. 두 사건의 작성자는 이 층이 정한다. A2의 부팅 판정이 마지막 모드 사건이 만든 모드를 읽는다. `off` 뒤 설정이 `Single_user`이면 multi-owned record를 읽기 전용으로 둔 `Single_user`로 부팅하고, 설정이 `Multi_account`이면 `reactivate` 요청이다. `reactivate`는 §10.5의 `Recovery_manifest`와 `Pending` 절차가 있어야 하고, 그 절차가 없으면 `Reactivation_not_ready`로 거부한다. 절차를 마치면 `reactivate`를 남긴다.
+- `off`와 `reactivate`는 모드 사건(종류 `Mode_event`)으로 `authz.jsonl`과 외부 저장소에 남는다. 두 사건의 작성자는 이 층이 정한다. 작성자 검사는 레코드 종류 단위라서, `Local_operator`가 아닌 작성자가 필요하면 이 층이 종류를 더한다(`Authz_record.admits`가 컴파일을 멈춘다). A2의 부팅 판정이 마지막 모드 사건이 만든 모드를 읽는다. `off` 뒤 설정이 `Single_user`이면 multi-owned record를 읽기 전용으로 둔 `Single_user`로 부팅하고, 설정이 `Multi_account`이면 `reactivate` 요청이다. `reactivate`는 §10.5의 `Recovery_manifest`와 `Pending` 절차가 있어야 하고, 그 절차가 없으면 `Reactivation_not_ready`로 거부한다. 절차를 마치면 `reactivate`를 남긴다.
 - on→off 전환은 multi-owned record를 읽기 전용으로 보존하고 legacy 공유 token·admin으로 실행하지 않는다. 진행 중인 multi dispatch는 §9-5에 따라 종결하고 session은 닫는다. account-home 점유는 `Release_pending`으로 바꿔 unmount를 확인한 뒤에만 Released로 한다. 다시 켜면 같은 `Recovery_manifest`와 `Pending` 절차를 거친다.
 - `masc auth recovery --base-path <path>`는 인증 가능한 Admin이 0명이거나 IdP를 쓸 수 없을 때 연다. 호스트 관리자와 root 소유 일회용 recovery 파일이 필요하다. 실행자·사유·시각·결과·파일 digest·파기 결과를 append-only audit와 Board에 남긴다. 원격 break-glass는 없고 활성화 전에 리허설한다. 이 경로에서 Local_operator는 `Admin_assignment`를 새로 발급할 수 있고, 발급받은 principal의 grant와 `Cleared`에는 관여하지 않는다.
 
 ## 4. 순서와 첫 마일스톤
 
-- A2와 B3을 뺀 A, B, C1은 서로 거의 독립이라 병렬 스택으로 쌓을 수 있다. 나머지 순서는 층 표의 선행 열을 따른다.
+- A2, B3, B4를 뺀 A, B, C1은 서로 거의 독립이라 병렬 스택으로 쌓을 수 있다. 나머지 순서는 층 표의 선행 열을 따른다.
 - D2와 D3은 `Single_user`에서 동작을 바꾸지 않도록 `Runtime.authorize`가 모드에 따라 근거를 달리 발급해야 한다. 설계 §6.1이 이 점을 정한다. 이 근거가 없으면 D2는 시작하지 않는다.
 - 설계 §11의 readiness가 복구 리허설과 official lane 격리 증거를 요구하고, 설계 §10.5가 최초 활성화 때 미분류 0을 요구한다. 그래서 F1~F4와 E3 없이는 원격 다계정을 열 수 없다. 그 앞까지의 층은 다계정을 켜지 않은 채 main에 들어갈 수 있다.
 - 첫 마일스톤은 A~D3이다(2026-10-27 사용자 결정). `Single_user` 동작은 그대로이고 타입과 저장소와 로그인 경로만 들어간다. C5는 OAuth 스택이 병합된 뒤에만 열리므로 병합 시점에 따라 이 마일스톤 안이나 밖에 놓인다. D4~D6, E, F는 이 마일스톤이 병합된 뒤에 연다.
@@ -242,13 +243,14 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 ## 7. 위험과 미확인
 
 1. 경로 표가 셋(HTTP/1 Router, H2 match, `/mcp` 사전 처리)이다. 하나로 합치지 않으면 인증 처리를 한 곳에서 셀 수 없다.
-2. `account_mode`는 선택 필드라 기존 설치를 막지 않는다. 남는 위험이 셋이다. 첫째, 필드를 모르는 옛 바이너리가 필드가 든 `config.json`을 읽으면 `Auth_config_error`가 난다. 되돌릴 때 필드를 지워야 하고, 이 오류를 키퍼 컨트롤러 권한 확인이 "검사 안 함"으로 받는 갈래는 #46540이 따로 추적한다. 둘째, 설정과 `authz.jsonl`이 어긋나면 부팅을 거부하므로 설정을 잃은 `Multi_account` 설치는 설정 한 줄을 복구해야 부팅된다. 셋째, 외부 저장소의 위치를 기록한 곳을 잃은 설치다. 이 설치는 부팅이 외부 고수위를 볼 수 없어서, `Multi_account`의 흔적이 없으면 `Single_user`로 부팅하고, `Multi_account` 설정이면 '활성화 전 요청'으로 보여 호스트 로컬 `Fresh_bootstrap`이 열린다. 후자는 Local_operator의 명시 결정이 있어야 열린다(설계 §8.4). 위치를 `config.json`에 두면 이 구멍이 열리고 설치 기록에 두면 닫힌다. 위치를 어디에 둘지는 §6의 결정 2가 B2 전에 정하고, `Fresh_bootstrap`을 여는 B3은 B2 다음에 쌓으므로 결정이 난 뒤에만 열린다.
+2. `account_mode`는 선택 필드라 기존 설치를 막지 않는다. 남는 위험이 셋이다. 첫째, 필드를 모르는 옛 바이너리가 필드가 든 `config.json`을 읽으면 `Auth_config_error`가 난다. 되돌릴 때 필드를 지워야 하고, 이 오류를 키퍼 컨트롤러 권한 확인이 "검사 안 함"으로 받는 갈래는 #46540이 따로 추적한다. 둘째, 설정과 `authz.jsonl`이 어긋나면 부팅을 거부하므로 설정을 잃은 `Multi_account` 설치는 설정 한 줄을 복구해야 부팅된다. 셋째, 외부 저장소의 위치를 기록한 곳을 잃은 설치다. 이 설치는 부팅이 외부 고수위를 볼 수 없어서, `Multi_account`의 흔적이 없으면 `Single_user`로 부팅하고, `Multi_account` 설정이고 로그에 모드 사건이 없으면 활성화 전 요청으로 보여 호스트 로컬 bootstrap(`Fresh_bootstrap`)이 열린다. 후자는 Local_operator의 명시 결정이 있어야 열린다(설계 §8.4). 위치를 `config.json`에 두면 이 구멍이 열리고 설치 기록에 두면 닫힌다. 위치를 어디에 둘지는 §6의 결정 2가 B2 전에 정하고, `Fresh_bootstrap`을 여는 B3은 B2 다음에 쌓으므로 결정이 난 뒤에만 열린다.
 3. API provider 실행 경로를 조사하지 않았다. D2가 Codex와 Claude Code의 `run_turn`만 막으면 다른 경로로 우회할 수 있다. D3과 D4 전에는 `Multi_account`를 열지 않는다.
 4. JOSE 후보를 현재 pin과 함께 풀어 보지 않았다. `jose`는 x509 >= 0.13.0을 요구하고 lock은 1.0.6이라 하한은 맞다. 상한과 다른 의존성은 opam 해결기로 확인하지 않았다.
 5. A1의 실제 요청은 열려 있는 변경 경로를 실행할 수 있다. 격리한 base path, Keeper 없음, loopback만 쓴다. 경로 인자는 형식이 맞는 존재하지 않는 값을 쓴다.
 6. 이 조사는 코드를 읽은 것이다. 빌드와 실행은 하지 않았다. 줄 번호는 `d595f10978db` 기준이라 main이 움직이면 어긋난다.
 7. `Fs_compat`에는 Darwin `F_FULLFSYNC`를 부르는 곳이 없다(`fs_compat.mli:451-454`). `authz.jsonl`의 fsync는 프로세스가 재시작해도 남는 수준이고, 정전 뒤까지 남는다는 보장은 아니다.
 8. 서버 밖 프로세스가 같은 파일을 `Fs_compat`의 cursor 계열로 읽는 동안 서버의 append는 `Locked`가 된다. 이 파일을 읽는 도구는 B1b 뒤에 정한다.
+9. `Single_user`의 lease record가 어디에 쓰이는지 설계가 말하지 않는다. 설계 §6.1은 근거 값 `Single_user_operator`를 lease와 durable work record에 남긴다고 하고, §8.2는 lease 계열을 `authz.jsonl`에만 쓴다고 하고, §8.4는 `Multi_account`를 거친 적 없는 `Single_user`가 `authz.jsonl`을 쓰지 않는다고 한다. 셋이 함께 서려면 `Single_user`의 lease record가 다른 저장소에 있어야 한다. 아니면 `Single_user` 설치의 로그가 비어 있지 않아서 `Fresh_bootstrap`의 빈 `authz.jsonl` 조건이 서지 않는다. E1이 lease 저장소를 정할 때 함께 정한다.
 
 ## 8. MASC 등록
 

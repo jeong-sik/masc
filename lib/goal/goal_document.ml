@@ -1,6 +1,6 @@
 (* Canonical Goal documents; source classification and publication stay in the store. *)
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let clamp_priority p =
   max 1 (min 5 p)

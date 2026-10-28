@@ -1,5 +1,5 @@
 (** Exact work context observed before a Fusion request starts. *)
-let ( let* ) = Result.bind
+open Result.Syntax
 type task = { id:string; title:string; description:string; status:string; contract:Masc_domain.task_contract option }
 type goal = { id:string; criterion:Goal_store.criterion }
 type t = { keeper:string; turn_ref:Ids.Turn_ref.t option; task:task option; goals:goal list;

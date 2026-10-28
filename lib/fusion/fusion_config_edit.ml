@@ -9,7 +9,7 @@ type operation =
       ; target : string
       }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let object_fields = function
   | `Assoc fields -> Ok fields

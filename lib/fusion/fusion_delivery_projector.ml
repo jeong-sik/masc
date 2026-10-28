@@ -24,7 +24,7 @@ let projection_error_to_string = function
 ;;
 
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let request_id_of_entry (entry : Keeper_msg_async.entry) =
   Keeper_chat_delivery_identity.Request_id.of_string entry.request_id

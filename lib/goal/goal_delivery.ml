@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type backend = {
   snapshot : config:Workspace_utils.config -> (string list, string) result;

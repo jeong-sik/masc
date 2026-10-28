@@ -1,5 +1,5 @@
 (** Keeper decisions are task-history events, distinct from Fusion judge advice. *)
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type disposition = Adopted | Rejected | Modified
 let disposition_to_string = function Adopted -> "adopted" | Rejected -> "rejected" | Modified -> "modified"

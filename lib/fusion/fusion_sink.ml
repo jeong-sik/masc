@@ -571,7 +571,7 @@ let emit ~source_context ~registry ~base_dir ~keeper ~run_id ~channel ~question 
       ~judge_usage ~(tool_trace : Fusion_types.tool_trace)
       ~(seat_routes : Fusion_types.seat_route list) :
     (unit, string) result =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* delivery_key = delivery_key_of_run_id run_id in
   (* The projector registers the run as running before the orchestrator
      reaches this point, and running entries are never trimmed, so the
@@ -811,7 +811,7 @@ let emit ~source_context ~registry ~base_dir ~keeper ~run_id ~channel ~question 
   | exn -> Error (Printexc.to_string exn)
 
 let emit_failure ~registry ~base_dir ~keeper ~run_id ~channel ~failure =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* delivery_key = delivery_key_of_run_id run_id in
   let failure_code = delivery_failure_code failure in
   let detail = delivery_failure_detail failure in

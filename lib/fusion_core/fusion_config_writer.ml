@@ -2,7 +2,7 @@
 
 module E = Toml_line_editor
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type error =
   | Preset_absent of string

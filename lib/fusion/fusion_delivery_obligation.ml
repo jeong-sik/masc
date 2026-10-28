@@ -58,7 +58,7 @@ type inventory =
 let schema_version = 1
 let active_directory_name = "fusion_delivery_obligations_v1"
 let staging_directory_name = ".fusion_delivery_obligations_staging_v1"
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let publication_to_string = function
   | Not_published -> "not_published"

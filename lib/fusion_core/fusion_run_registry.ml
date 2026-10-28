@@ -108,7 +108,7 @@ module Payload = struct
   ;;
 
   let registration_of_yojson json =
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* fields = Run_registry_core.Json.object_fields json in
     (* [exact_fields] 라 topology 없는 예전 레코드는 여기서 Error 가 되고 replay 가
        그 줄만 스킵한다(경고 1줄). 레거시 폴백을 두지 않는 이유는 registry 가 캐시성
@@ -150,7 +150,7 @@ module Payload = struct
   ;;
 
   let outcome_of_yojson json =
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* fields = Run_registry_core.Json.object_fields json in
     let* label = Run_registry_core.Json.string_field "outcome" fields in
     match label with
@@ -189,7 +189,7 @@ module Payload = struct
             "finished_at", `Float completion.finished_at]
 
   let completion_of_yojson json =
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* fields = Run_registry_core.Json.object_fields json in
     let* () = Run_registry_core.Json.exact_fields ~required:["result"; "finished_at"] fields in
     let* finished_at = Run_registry_core.Json.float_field "finished_at" fields in

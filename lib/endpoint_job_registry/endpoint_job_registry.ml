@@ -13,7 +13,8 @@ type error =
   | Lock_failed of File_lock_eio.durable_lock_error
   | Commit_unconfirmed of string
   | Busy | Binding_mismatch | Invalid_request of P.codec_error | Execution_identity_changed
-  | Endpoint_replaced | Missing_original | Admission_incomplete | Corrupt_original of string
+  | Endpoint_replaced | Missing_original | Admission_incomplete
+  | Unsupported_version of { expected : int; actual : int } | Corrupt_original of string
   | Launch_already_requested | Launch_cancelled | Launch_intent_spent | Stale_record
   | Cleanup_failed of { primary : error option; cause : File_lock_eio.durable_lock_error }
 
@@ -39,6 +40,8 @@ let rec error_to_string = function
   | Endpoint_replaced -> "endpoint original boot was replaced"
   | Missing_original -> "endpoint original claim or job data is missing"
   | Admission_incomplete -> "endpoint original admission is still preparing"
+  | Unsupported_version {expected;actual} ->
+    Printf.sprintf "endpoint original claim has unsupported version %d (expected %d)" actual expected
   | Corrupt_original detail -> "endpoint original record is corrupt: " ^ detail
   | Launch_already_requested -> "endpoint launch is already requested; reconcile original handle"
   | Launch_cancelled -> "endpoint original launch was cancelled"
@@ -175,13 +178,13 @@ let parse content = cpu (fun () -> try Ok (Yojson.Safe.from_string content)
 let count n = `String (Int64.to_string n)
 
 let claim_json (claim : claim) =
-  let* original=P.request_to_json (P.Inspect claim.binding) |> Result.map_error (fun e -> Invalid_request e) in
+  let* original=P.request_to_json (P.Reconcile_admission claim.binding) |> Result.map_error (fun e -> Invalid_request e) in
   let state,job,launch_id=match claim.state with
     | Preparing -> "preparing",None,None | Ready job -> "ready",Some job,None
     | Launch_requested {job;launch_id} -> "launch_requested",Some job,Some launch_id
     | Cancel_requested {job;launch_id} -> "cancel_requested",Some job,launch_id in
   let coordinate f=match job with None -> `Null | Some job -> count (f job) in
-  Ok (`Assoc ["version",`Int 1;"original",original;"admission_id",`String (P.Id.to_string claim.admission_id);
+  Ok (`Assoc ["version",`Int 2;"original",original;"admission_id",`String (P.Id.to_string claim.admission_id);
     "controller_uid",count (Int64.of_int claim.controller_uid);"payload_uid",count (Int64.of_int claim.payload_uid);
     "root_device",count claim.root.device;"root_inode",count claim.root.inode;
     "revision",count claim.revision;"state",`String state;
@@ -191,10 +194,13 @@ let claim_json (claim : claim) =
 let claim_of_json value =
   let* f=fields ["version";"original";"admission_id";"controller_uid";"payload_uid";
     "root_device";"root_inode";"revision";"state";"job_device";"job_inode";"launch_id"] value in
-  let* ()=if member f "version"=`Int 1 then Ok () else corrupt "unsupported version" in
+  let* ()=match member f "version" with
+    | `Int 2 -> Ok ()
+    | `Int actual -> Error (Unsupported_version {expected=2;actual})
+    | `Null | `Bool _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _ -> corrupt "claim version" in
   let* original=P.request_of_json (member f "original") |> Result.map_error (fun _ -> Corrupt_original "original binding") in
-  let* binding=match original with P.Inspect b -> Ok b
-    | P.Start _ | P.Read_output _ | P.Cancel _ | P.Release _ -> corrupt "original binding kind" in
+  let* binding=match original with P.Reconcile_admission b -> Ok b
+    | P.Start _ | P.Activate _ | P.Inspect _ | P.Read_output _ | P.Cancel _ | P.Release _ -> corrupt "original binding kind" in
   let* admission_id=identifier "admission ID" (member f "admission_id") in
   let* controller_uid=uid "controller UID" (member f "controller_uid") in
   let* payload_uid=uid "payload UID" (member f "payload_uid") in
@@ -269,7 +275,7 @@ let read_record (registry : t) (binding : P.binding) =
   let* request=cpu (fun () -> P.request_of_json original) |> Result.map_error (fun _ -> Corrupt_original "original Start") in
   let* spec=match request with
     | P.Start {binding=original;spec} when original=binding -> Ok spec
-    | P.Start _ | P.Inspect _ | P.Read_output _ | P.Cancel _ | P.Release _ -> corrupt "original Start binding" in
+    | P.Start _ | P.Reconcile_admission _ | P.Activate _ | P.Inspect _ | P.Read_output _ | P.Cancel _ | P.Release _ -> corrupt "original Start binding" in
   let* after=inspect_job registry binding in
   let* ()=if observed=after then validate_root registry else Error (Protection_refused Root_identity_changed) in
   Ok {registry;claim;spec}
@@ -325,7 +331,7 @@ let already_exists ?(directory=false) = function
   | Protection_refused _ | Authority_unavailable _ | Recovery_unavailable _
   | Lock_failed _ | Commit_unconfirmed _ | Busy | Binding_mismatch | Invalid_request _
   | Execution_identity_changed | Endpoint_replaced | Missing_original | Admission_incomplete
-  | Corrupt_original _ | Launch_already_requested | Launch_cancelled | Launch_intent_spent | Stale_record | Cleanup_failed _ -> false
+  | Unsupported_version _ | Corrupt_original _ | Launch_already_requested | Launch_cancelled | Launch_intent_spent | Stale_record | Cleanup_failed _ -> false
 
 let create_job (registry : t) (claim : claim) =
   let* ()=validate_root registry in

@@ -93,12 +93,17 @@ let binding ~route ~owner ~operation_id ~invocation_sha256 ~spec_sha256 =
     Error "keeper_name must be nonempty and contain no NUL"
   else Ok {route;owner;operation_id;invocation_sha256;spec_sha256}
 
+type original = { binding : binding; admission_id : Id.t }
+let original ~binding ~admission_id = {binding;admission_id}
+
 type request =
   | Start of { binding : binding; spec : spec }
-  | Inspect of binding
-  | Read_output of { binding : binding; stream : stream; offset : int64; max_bytes : int }
-  | Cancel of binding
-  | Release of { binding : binding; result_sha256 : Sha256.t }
+  | Reconcile_admission of binding
+  | Activate of original
+  | Inspect of original
+  | Read_output of { original : original; stream : stream; offset : int64; max_bytes : int }
+  | Cancel of original
+  | Release of { original : original; result_sha256 : Sha256.t }
 
 type exit_status = Exited of int | Signaled of int
 type non_start = Cancelled_before_activation | Launch_rejected
@@ -112,16 +117,17 @@ type hold = Registry_unavailable | Supervisor_unavailable | Operation_not_found 
 type result_availability = Result_pending | Result_ready of Sha256.t
 
 type response =
-  | Status of { binding : binding; revision : int64; phase : phase; cancel_requested : bool; result : result_availability; stdout : extent; stderr : extent }
-  | Output of { binding : binding; revision : int64; stream : stream; offset : int64; data : string; extent : extent }
-  | Released of { binding : binding; revision : int64; result_sha256 : Sha256.t }
+  | Admitted of { original : original; revision : int64 }
+  | Status of { original : original; revision : int64; phase : phase; cancel_requested : bool; result : result_availability; stdout : extent; stderr : extent }
+  | Output of { original : original; revision : int64; stream : stream; offset : int64; data : string; extent : extent }
+  | Released of { original : original; revision : int64; result_sha256 : Sha256.t }
   | Refused of { binding : binding; reason : refusal }
   | Held of { binding : binding; reason : hold }
 
 type codec_error =
   | Missing_field of string | Duplicate_field of string | Unexpected_field of string
   | Invalid_field of string | Version_unsupported | Tag_unsupported of string
-  | Spec_digest_mismatch | Binding_mismatch | Response_kind_mismatch | Output_range_mismatch
+  | Spec_digest_mismatch | Binding_mismatch | Original_admission_mismatch | Response_kind_mismatch | Output_range_mismatch
   | Output_digest_mismatch
   | Response_revision_stale
 
@@ -133,6 +139,7 @@ let error_to_string = function
   | Version_unsupported -> "endpoint job protocol: unsupported version"
   | Tag_unsupported field -> "endpoint job protocol: unsupported tag in " ^ field
   | Spec_digest_mismatch -> "endpoint job protocol: launch specification digest mismatch"
+  | Original_admission_mismatch -> "endpoint job protocol: original admission mismatch"
   | Binding_mismatch -> "endpoint job protocol: response operation/route/owner binding mismatch"
   | Response_kind_mismatch -> "endpoint job protocol: response kind does not match request"
   | Output_range_mismatch -> "endpoint job protocol: output does not match requested range"
@@ -291,34 +298,50 @@ let operation_fields value extra = object_fields "envelope"
   ~required:(["protocol";"version";"operation";"binding"] @ extra) value
 let count n = `String (Int64.to_string n)
 
+let original_envelope tag original extra =
+  envelope tag original.binding
+    (("admission_id",`String (Id.to_string original.admission_id)) :: extra)
+let read_original binding fields =
+  let* admission_id = identifier "admission_id" (get fields "admission_id") in
+  Ok {binding;admission_id}
+
 let validate_request = function
   | Start {binding;spec} -> if binding.spec_sha256=spec_sha256 spec then Ok () else Error Spec_digest_mismatch
   | Read_output {offset;max_bytes;_} -> if offset>=0L && max_bytes>0 then Ok () else Error Output_range_mismatch
-  | Inspect _ | Cancel _ | Release _ -> Ok ()
+  | Reconcile_admission _ | Activate _ | Inspect _ | Cancel _ | Release _ -> Ok ()
 
 let request_to_json request =
   let* () = validate_request request in
   Ok (match request with
     | Start {binding;spec} -> envelope "start" binding ["spec",spec_json spec]
-    | Inspect binding -> envelope "inspect" binding []
-    | Read_output {binding;stream;offset;max_bytes} -> envelope "read_output" binding
+    | Reconcile_admission binding -> envelope "reconcile_admission" binding []
+    | Activate original -> original_envelope "activate" original []
+    | Inspect original -> original_envelope "inspect" original []
+    | Read_output {original;stream;offset;max_bytes} -> original_envelope "read_output" original
         ["stream",`String (stream_tag stream);"offset",count offset;"max_bytes",count (Int64.of_int max_bytes)]
-    | Cancel binding -> envelope "cancel" binding []
-    | Release {binding;result_sha256} -> envelope "release" binding ["result_sha256",`String (Sha256.to_string result_sha256)])
+    | Cancel original -> original_envelope "cancel" original []
+    | Release {original;result_sha256} -> original_envelope "release" original ["result_sha256",`String (Sha256.to_string result_sha256)])
 
 let request_of_json value =
   let* tag,binding = read_envelope value in
   let* request = match tag with
     | "start" -> let* f = operation_fields value ["spec"] in
       let* spec = read_spec (get f "spec") in Ok (Start {binding;spec})
-    | "inspect" -> let* _ = operation_fields value [] in Ok (Inspect binding)
-    | "cancel" -> let* _ = operation_fields value [] in Ok (Cancel binding)
-    | "read_output" -> let* f = operation_fields value ["stream";"offset";"max_bytes"] in
+    | "reconcile_admission" -> let* _ = operation_fields value [] in Ok (Reconcile_admission binding)
+    | "activate" -> let* f = operation_fields value ["admission_id"] in
+      let* original = read_original binding f in Ok (Activate original)
+    | "inspect" -> let* f = operation_fields value ["admission_id"] in
+      let* original = read_original binding f in Ok (Inspect original)
+    | "cancel" -> let* f = operation_fields value ["admission_id"] in
+      let* original = read_original binding f in Ok (Cancel original)
+    | "read_output" -> let* f = operation_fields value ["admission_id";"stream";"offset";"max_bytes"] in
+      let* original = read_original binding f in
       let* stream = read_stream (get f "stream") in
       let* offset = nonnegative "offset" (get f "offset") in
-      let* max_bytes = positive_int "max_bytes" (get f "max_bytes") in Ok (Read_output {binding;stream;offset;max_bytes})
-    | "release" -> let* f = operation_fields value ["result_sha256"] in
-      let* result_sha256 = digest "result_sha256" (get f "result_sha256") in Ok (Release {binding;result_sha256})
+      let* max_bytes = positive_int "max_bytes" (get f "max_bytes") in Ok (Read_output {original;stream;offset;max_bytes})
+    | "release" -> let* f = operation_fields value ["admission_id";"result_sha256"] in
+      let* original = read_original binding f in
+      let* result_sha256 = digest "result_sha256" (get f "result_sha256") in Ok (Release {original;result_sha256})
     | _ -> Error (Tag_unsupported "operation") in
   let* () = validate_request request in Ok request
 
@@ -437,6 +460,7 @@ let validate_empty_extent = function
     if byte_length=0L && sha256=hash "" then Ok () else invalid "status.not_started_output"
 
 let validate_response = function
+  | Admitted {revision;_} -> if revision>0L then Ok () else invalid "revision"
   | Status {revision;phase;cancel_requested;result;stdout;stderr;_} ->
     let* () = match result with
       | Result_pending -> Ok ()
@@ -445,7 +469,7 @@ let validate_response = function
           | Finished _ | Not_started _ -> match stdout,stderr with
             | Sealed _,Sealed _ -> Ok ()
             | Growing _,(Growing _ | Sealed _) | Sealed _,Growing _ -> invalid "status.result") in
-    if revision<0L then invalid "revision"
+    if revision<=0L then invalid "revision"
     else if extent_bytes stdout<0L || extent_bytes stderr<0L then invalid "status.extent"
     else (match phase with
       | Finished (Exited code) -> if code>=0 then Ok () else invalid "phase.code"
@@ -461,46 +485,53 @@ let validate_response = function
           | (Growing _ | Sealed _),(Growing _ | Sealed _) -> invalid "status.queued_output"))
   | Output {revision;offset;data;extent;_} ->
     let size = extent_bytes extent and length = Int64.of_int (String.length data) in
-    if revision<0L then invalid "revision"
+    if revision<=0L then invalid "revision"
     else if offset<0L || size<0L || offset>size || length>Int64.sub size offset then Error Output_range_mismatch
     else (match extent with
       | Sealed {byte_length;sha256} when offset=0L && length=byte_length ->
         if hash data=sha256 then Ok () else Error Output_digest_mismatch
       | Sealed _ | Growing _ -> Ok ())
-  | Released {revision;_} -> if revision<0L then invalid "revision" else Ok ()
+  | Released {revision;_} -> if revision<=0L then invalid "revision" else Ok ()
   | Refused _ | Held _ -> Ok ()
 
 let response_to_json response =
   let* () = validate_response response in
   Ok (match response with
-    | Status {binding;revision;phase;cancel_requested;result;stdout;stderr} -> envelope "status" binding
+    | Admitted {original;revision} -> original_envelope "admitted" original ["revision",count revision]
+    | Status {original;revision;phase;cancel_requested;result;stdout;stderr} -> original_envelope "status" original
         ["revision",count revision;"phase",phase_json phase;"cancel_requested",`Bool cancel_requested;"result",result_json result;
          "stdout",extent_json stdout;"stderr",extent_json stderr]
-    | Output {binding;revision;stream;offset;data;extent} -> envelope "output" binding
+    | Output {original;revision;stream;offset;data;extent} -> original_envelope "output" original
         ["revision",count revision;"stream",`String (stream_tag stream);"offset",count offset;"data",b64 data;"extent",extent_json extent]
-    | Released {binding;revision;result_sha256} -> envelope "released" binding ["revision",count revision;"result_sha256",`String (Sha256.to_string result_sha256)]
+    | Released {original;revision;result_sha256} -> original_envelope "released" original ["revision",count revision;"result_sha256",`String (Sha256.to_string result_sha256)]
     | Refused {binding;reason} -> envelope "refused" binding ["reason",`String (refusal_tag reason)]
     | Held {binding;reason} -> envelope "held" binding ["reason",hold_json reason])
 
 let response_of_json value =
   let* tag,binding = read_envelope value in
   let* response = match tag with
-    | "status" -> let* f = operation_fields value ["revision";"phase";"cancel_requested";"result";"stdout";"stderr"] in
+    | "admitted" -> let* f = operation_fields value ["admission_id";"revision"] in
+      let* original = read_original binding f in
+      let* revision = nonnegative "revision" (get f "revision") in Ok (Admitted {original;revision})
+    | "status" -> let* f = operation_fields value ["admission_id";"revision";"phase";"cancel_requested";"result";"stdout";"stderr"] in
+      let* original = read_original binding f in
       let* revision = nonnegative "revision" (get f "revision") in
       let* phase = read_phase (get f "phase") in
       let* cancel_requested = boolean "cancel_requested" (get f "cancel_requested") in
       let* result = read_result (get f "result") in
       let* stdout = read_extent (get f "stdout") in
-      let* stderr = read_extent (get f "stderr") in Ok (Status {binding;revision;phase;cancel_requested;result;stdout;stderr})
-    | "output" -> let* f = operation_fields value ["revision";"stream";"offset";"data";"extent"] in
+      let* stderr = read_extent (get f "stderr") in Ok (Status {original;revision;phase;cancel_requested;result;stdout;stderr})
+    | "output" -> let* f = operation_fields value ["admission_id";"revision";"stream";"offset";"data";"extent"] in
+      let* original = read_original binding f in
       let* revision = nonnegative "revision" (get f "revision") in
       let* stream = read_stream (get f "stream") in
       let* offset = nonnegative "offset" (get f "offset") in
       let* data = bytes "data" (get f "data") in
-      let* extent = read_extent (get f "extent") in Ok (Output {binding;revision;stream;offset;data;extent})
-    | "released" -> let* f = operation_fields value ["revision";"result_sha256"] in
+      let* extent = read_extent (get f "extent") in Ok (Output {original;revision;stream;offset;data;extent})
+    | "released" -> let* f = operation_fields value ["admission_id";"revision";"result_sha256"] in
+      let* original = read_original binding f in
       let* revision = nonnegative "revision" (get f "revision") in
-      let* result_sha256 = digest "result_sha256" (get f "result_sha256") in Ok (Released {binding;revision;result_sha256})
+      let* result_sha256 = digest "result_sha256" (get f "result_sha256") in Ok (Released {original;revision;result_sha256})
     | "refused" -> let* f = operation_fields value ["reason"] in
       let* reason = read_refusal (get f "reason") in Ok (Refused {binding;reason})
     | "held" -> let* f = operation_fields value ["reason"] in
@@ -509,31 +540,46 @@ let response_of_json value =
   let* () = validate_response response in Ok response
 
 let request_binding = function
-  | Start {binding;_} | Read_output {binding;_} | Release {binding;_}
-  | Inspect binding | Cancel binding -> binding
+  | Start {binding;_} | Reconcile_admission binding -> binding
+  | Activate original | Inspect original | Cancel original
+  | Read_output {original;_} | Release {original;_} -> original.binding
 let response_binding = function
-  | Status {binding;_} | Output {binding;_} | Released {binding;_}
+  | Admitted {original;_} | Status {original;_} | Output {original;_} | Released {original;_} -> original.binding
   | Refused {binding;_} | Held {binding;_} -> binding
+let request_original = function
+  | Start _ | Reconcile_admission _ -> None
+  | Activate original | Inspect original | Cancel original
+  | Read_output {original;_} | Release {original;_} -> Some original
+let response_original = function
+  | Admitted {original;_} | Status {original;_} | Output {original;_} | Released {original;_} -> Some original
+  | Refused _ | Held _ -> None
 
 let check_response ~minimum_revision ~request response =
   let* () = if minimum_revision>=0L then Ok () else invalid "minimum_revision" in
   let* () = validate_request request in
   let* () = validate_response response in
   let* () = if request_binding request=response_binding response then Ok () else Error Binding_mismatch in
+  let* () = match request_original request,response_original response with
+    | Some expected,Some observed ->
+        if expected.admission_id=observed.admission_id then Ok () else Error Original_admission_mismatch
+    | None,(None | Some _) | Some _,None -> Ok () in
   let* () = match response with
-    | Status {revision;_} | Output {revision;_} | Released {revision;_} ->
+    | Admitted {revision;_} | Status {revision;_} | Output {revision;_} | Released {revision;_} ->
       if revision>=minimum_revision then Ok () else Error Response_revision_stale
     | Refused _ | Held _ -> Ok () in
   match response with
     | Refused _ | Held _ -> Ok ()
+    | Admitted _ -> (match request with
+        | Start _ | Reconcile_admission _ -> Ok ()
+        | Activate _ | Inspect _ | Cancel _ | Read_output _ | Release _ -> Error Response_kind_mismatch)
     | Status _ -> (match request with
-        | Start _ | Inspect _ | Cancel _ -> Ok ()
-        | Read_output _ | Release _ -> Error Response_kind_mismatch)
+        | Activate _ | Inspect _ | Cancel _ -> Ok ()
+        | Start _ | Reconcile_admission _ | Read_output _ | Release _ -> Error Response_kind_mismatch)
     | Output output -> (match request with
         | Read_output read ->
           if output.stream=read.stream && output.offset=read.offset && String.length output.data<=read.max_bytes then Ok ()
           else Error Output_range_mismatch
-        | Start _ | Inspect _ | Cancel _ | Release _ -> Error Response_kind_mismatch)
+        | Start _ | Reconcile_admission _ | Activate _ | Inspect _ | Cancel _ | Release _ -> Error Response_kind_mismatch)
     | Released released -> (match request with
         | Release release -> if released.result_sha256=release.result_sha256 then Ok () else Error Binding_mismatch
-        | Start _ | Inspect _ | Read_output _ | Cancel _ -> Error Response_kind_mismatch)
+        | Start _ | Reconcile_admission _ | Activate _ | Inspect _ | Read_output _ | Cancel _ -> Error Response_kind_mismatch)

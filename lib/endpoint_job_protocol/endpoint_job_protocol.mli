@@ -95,18 +95,31 @@ val binding :
 
 type stream = Stdout | Stderr
 
+type original = private { binding : binding; admission_id : Id.t }
+val original : binding:binding -> admission_id:Id.t -> original
+(** A confirmed protected admission coordinate, not a peer credential or launch
+    permission. The service still loads/verifies the immutable original record. *)
+
 type request =
   | Start of { binding : binding; spec : spec }
-  | Inspect of binding
-  | Read_output of { binding : binding; stream : stream; offset : int64; max_bytes : int }
-  | Cancel of binding
-  | Release of { binding : binding; result_sha256 : Sha256.t }
-(** The original protected record must exist before a child can run. Duplicate
-    Start reconciles that exact record; changed source/spec is a conflict.
-    Cancel commits intent before signalling and resolves an original protected
-    process/cgroup handle. An operation ID or PID alone never authorizes kill.
-    Release requires durable host result delivery/consumption authority and the
-    exact terminal result digest; it is not a generic deletion request. *)
+  | Reconcile_admission of binding
+  | Activate of original
+  | Inspect of original
+  | Read_output of { original : original; stream : stream; offset : int64; max_bytes : int }
+  | Cancel of original
+  | Release of { original : original; result_sha256 : Sha256.t }
+(** Start only registers original bytes; it never activates a child. A lost
+    registration reply may reconcile that binding before activation intent.
+    Admitted must be durably recorded on the host before Activate. Once the
+    host has confirmed an admission, every subsequent control carries that
+    same admission ID; missing original authority never permits a fresh Start.
+    Duplicate Activate reconciles its original launch rendezvous, never mints
+    another launch permit. These are controller-internal steps, not user asks.
+
+    Cancel commits intent before signalling and resolves only the confirmed
+    original protected process/cgroup handle. An operation ID or PID alone
+    never authorizes kill. Release requires durable host result consumption
+    and the exact terminal result digest, not a generic deletion request. *)
 
 type exit_status = Exited of int | Signaled of int
 
@@ -154,14 +167,18 @@ type result_availability = Result_pending | Result_ready of Sha256.t
     even that combination may remain pending until manifest publication. *)
 
 type response =
+  | Admitted of { original : original; revision : int64 }
   | Status of
-      { binding : binding; revision : int64; phase : phase; cancel_requested : bool; result : result_availability
+      { original : original; revision : int64; phase : phase; cancel_requested : bool; result : result_availability
       ; stdout : extent; stderr : extent }
-  | Output of { binding : binding; revision : int64; stream : stream; offset : int64; data : string; extent : extent }
-  | Released of { binding : binding; revision : int64; result_sha256 : Sha256.t }
+  | Output of { original : original; revision : int64; stream : stream; offset : int64; data : string; extent : extent }
+  | Released of { original : original; revision : int64; result_sha256 : Sha256.t }
   | Refused of { binding : binding; reason : refusal }
   | Held of { binding : binding; reason : hold }
-(** Status is observation, not Task/Goal verification or source ACK. A terminal
+(** Admitted identifies a complete durable original registration, not process
+    activation or execution. Positive controls/results carry that same original
+    admission. Refused/Held carry no state and cannot advance it.
+    Status is observation, not Task/Goal verification or source ACK. A terminal
     operation with Growing streams is not a complete result. Refused/held messages
     contain typed facts, never payload prose interpreted as control. *)
 
@@ -174,6 +191,7 @@ type codec_error =
   | Tag_unsupported of string
   | Spec_digest_mismatch
   | Binding_mismatch
+  | Original_admission_mismatch
   | Response_kind_mismatch
   | Output_range_mismatch
   | Output_digest_mismatch
@@ -192,7 +210,10 @@ val response_of_json : Yojson.Safe.t -> (response, codec_error) result
     to preserve int64 identity through JSON implementations. No silent defaults. *)
 
 val check_response : minimum_revision:int64 -> request:request -> response -> (unit, codec_error) result
-(** Bind a decoded response to the complete original request/route/owner/call.
+(** Bind a decoded response to the complete original request/route/owner/call
+    and, after registration, the exact confirmed admission ID. Start and
+    Reconcile_admission accept only Admitted (or a typed refusal/hold);
+    Activate/Inspect/Cancel accept only Status for the confirmed admission.
     Output additionally matches the exact stream/offset and requested capacity;
     release matches the original terminal result digest. Revisions never go
     below the host's last accepted protected snapshot; holds/refusals carry no

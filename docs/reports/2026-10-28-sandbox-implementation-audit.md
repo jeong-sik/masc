@@ -141,9 +141,12 @@ not mark unrelated open defects as resolved.
   the same 3 failures; `microvm` had one existing warm-adoption fixture failure
   (114 tests, 1 failure). This run is not called a green suite.
 - **Fixture-only run:** run `40693424021`, head
-  `2d83d5e34d4cb961ea7a67456ef84355b7f94760`, same two suites. Result pending
-  at the time of this draft; it must be replaced with the final observation
-  before publication.
+  `2d83d5e34d4cb961ea7a67456ef84355b7f94760`: completed/failure during OCaml
+  compilation because the fixture was referenced before its definition. This
+  was not a behavioral test result. The ordering was repaired and a
+  valid-declaration/failing-preflight regression was added as `59de2f991df`.
+  Run `40696542466` targets that test-only head; its result is pending. The
+  final production head still needs its own focused run.
 - **Real-time output:** run `40692203058`, head
   `6de3f330662f2f35e939bbd04a3e7d5c8e2a64d7`: completed/success.
   `test_dashboard_execute_output` 17/17, `test_keeper_sandbox_remote` 22/22,

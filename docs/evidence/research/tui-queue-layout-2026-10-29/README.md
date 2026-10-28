@@ -93,7 +93,7 @@ readability, human completion time and the final revised executable remain
 unmeasured.
 
 Follow-up bundles independently retain an
-[installed Lazygit observation](lazygit/README.md) and
-[revised-placement/footer-condition observation](revised-placement/README.md)
-on `c2bdd3c`. Their manifests do not extend the 38b6 captures above to the
+[installed Lazygit 0.59.0 observation](lazygit/README.md) and a
+[MASC c2bdd3c placement/footer observation](revised-placement/README.md).
+Their manifests do not extend the 38b6 captures above to the
 final viewport-input repair.

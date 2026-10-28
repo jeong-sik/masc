@@ -787,6 +787,14 @@ let parked_tool_call ~release ~on_enter ~on_cancel ~clock ~sw ~mcp_session_id st
       ; "result", `Assoc [] ]
   | _ -> Mcp_eio.handle_request ~clock ~sw ?mcp_session_id state request
 
+(* A legacy session, so a legacy [ping] (no [_meta]) is admitted and answers
+   with a result. *)
+let stdio_legacy_initialize_params =
+  `Assoc
+    [ "protocolVersion", `String "2025-11-25"
+    ; "capabilities", `Assoc []
+    ; "clientInfo", `Assoc [ "name", `String "test"; "version", `String "1" ] ]
+
 let with_concurrent_stdio ~clock ~sw ~handle_request state f =
   let was_ready = Eio_guard.is_ready () in
   Eio_guard.enable ();
@@ -829,6 +837,7 @@ let test_stdio_ping_is_answered_during_a_long_tool_call () =
   let base_path = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
     let state = Mcp_eio.For_testing.create_state ~base_path () in
+    Auth.disable_auth base_path;
     let modern = stdio_modern_params () in
     let release, resolve_release = Eio.Promise.create () in
     let entered, resolve_entered = Eio.Promise.create () in
@@ -837,14 +846,18 @@ let test_stdio_ping_is_answered_during_a_long_tool_call () =
         ~on_enter:(fun () -> Eio.Promise.resolve resolve_entered ())
         ~on_cancel:(fun () -> ()) in
     with_concurrent_stdio ~clock ~sw ~handle_request state (fun ~send ~read_response ->
+      send (stdio_request ~id:(`Int 10) ~params:stdio_legacy_initialize_params "initialize");
+      let opened = read_response () in
+      Alcotest.(check bool) "the legacy session opens" true
+        (Yojson.Safe.Util.member "id" opened = `Int 10
+         && Yojson.Safe.Util.member "error" opened = `Null);
       send (stdio_request ~id:(`Int 1) ~params:modern "tools/call");
       Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await entered);
-      send (stdio_request ~id:(`Int 2) ~params:modern "ping");
+      send (stdio_request ~id:(`Int 2) "ping");
       let ping = read_response () in
-      Alcotest.(check bool) "ping is answered while the call is parked" true
-        (Yojson.Safe.Util.member "id" ping = `Int 2);
-      Alcotest.(check bool) "the parked call has not been released" false
-        (Eio.Promise.is_resolved release);
+      Alcotest.(check bool) "ping is answered with its result while the call is parked" true
+        (Yojson.Safe.Util.member "id" ping = `Int 2
+         && Yojson.Safe.Util.member "result" ping = `Assoc []);
       Eio.Promise.resolve resolve_release ();
       let call = read_response () in
       Alcotest.(check bool) "the call answers once released" true
@@ -858,6 +871,7 @@ let test_stdio_cancellation_stops_a_running_tool_call () =
   let base_path = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
     let state = Mcp_eio.For_testing.create_state ~base_path () in
+    Auth.disable_auth base_path;
     let modern = stdio_modern_params () in
     let release, _ = Eio.Promise.create () in
     let entered, resolve_entered = Eio.Promise.create () in
@@ -867,16 +881,20 @@ let test_stdio_cancellation_stops_a_running_tool_call () =
         ~on_enter:(fun () -> Eio.Promise.resolve resolve_entered ())
         ~on_cancel:(fun () -> Eio.Promise.resolve resolve_cancelled ()) in
     with_concurrent_stdio ~clock ~sw ~handle_request state (fun ~send ~read_response ->
+      send (stdio_request ~id:(`Int 10) ~params:stdio_legacy_initialize_params "initialize");
+      let opened = read_response () in
+      Alcotest.(check bool) "the legacy session opens" true
+        (Yojson.Safe.Util.member "id" opened = `Int 10
+         && Yojson.Safe.Util.member "error" opened = `Null);
       send (stdio_request ~id:(`Int 1) ~params:modern "tools/call");
       Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await entered);
       send (stdio_request ~params:(`Assoc [ "requestId", `Int 1 ]) "notifications/cancelled");
       Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await cancelled);
-      send (stdio_request ~id:(`Int 2) ~params:modern "ping");
+      send (stdio_request ~id:(`Int 2) "ping");
       let next = read_response () in
       Alcotest.(check bool) "the cancelled call wrote nothing and the loop still answers" true
-        (Yojson.Safe.Util.member "id" next = `Int 2);
-      Alcotest.(check bool) "the call ended by cancellation, not by release" false
-        (Eio.Promise.is_resolved release)))
+        (Yojson.Safe.Util.member "id" next = `Int 2
+         && Yojson.Safe.Util.member "result" next = `Assoc [])))
 
 let test_stdio_subscription_requires_auth () =
   Eio_main.run @@ fun env ->

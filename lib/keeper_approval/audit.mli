@@ -110,15 +110,22 @@ val recent_resolved_default_window_minutes : int
 val recent_resolved_min_window_minutes : int
 val recent_resolved_max_window_minutes : int
 
+val read_recent_max_rows : int
+(** The largest [n] {!read_recent} answers. *)
+
 (** Newest [n] rows in physical append order (newest first). A Keeper-scoped
-    read counts matching rows, scanning backward until [n] matches or EOF;
-    unrelated traffic cannot truncate the result. No row window or cached view
-    determines membership. A sparse query may scan the full store.
-    Visited malformed JSON, layout and I/O failures return [Read_recent] errors.
-    For a scoped read each visited JSON row must name exactly one string Keeper;
-    ambiguous or missing ownership is an error, never an omitted row.
-    Row corruption older than a complete selected suffix is unvisited; directory
-    layout validation can still reject older invalid entries.
+    read counts matching rows; unrelated traffic cannot truncate the result.
+    Each read first advances an in-process index over the bytes appended since
+    the previous read, so the answer is the store's content at that read. The
+    index keeps the newest {!read_recent_max_rows} rows of each Keeper and of
+    the whole store; a larger [n] is refused.
+    Failures are the ones a backward scan that stops at the [n]-th match would
+    meet: malformed JSON, an unreadable month listing or day file newer than the
+    [n]-th selected row, or anywhere when fewer than [n] rows match, return
+    [Read_recent] errors. For a scoped read a JSON row that does not name
+    exactly one string Keeper is such a failure, never an omitted row.
+    Corruption older than a complete selected suffix is not an error. The
+    store's month directories are validated on every read.
     [n <= 0] returns [Ok []] without opening the store. *)
 val read_recent :
   base_path:string ->

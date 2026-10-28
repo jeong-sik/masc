@@ -78,18 +78,22 @@ type resolved_history =
       (* the row cap stopped the scan before it reached the window start *)
   }
 
+let malformed_row_detail ~path ~line_number ~detail =
+  let location =
+    match line_number with
+    | Some line -> Printf.sprintf "%s:%d" path line
+    | None -> path
+  in
+  Printf.sprintf "%s: %s" location detail
+;;
+
 let parsed_rows ~stage entries =
   let rec collect acc = function
     | [] -> Ok (List.rev acc)
     | Dated_jsonl.Parsed row :: rest -> collect (row :: acc) rest
     | Dated_jsonl.Malformed_json { path; line_number; detail } :: _ ->
-      let location =
-        match line_number with
-        | Some line -> Printf.sprintf "%s:%d" path line
-        | None -> path
-      in
       Error
-        ({ stage; detail = Printf.sprintf "%s: %s" location detail }
+        ({ stage; detail = malformed_row_detail ~path ~line_number ~detail }
           : read_error)
   in
   collect [] entries
@@ -521,59 +525,332 @@ let record_rule_deleted ~base_path ~deleted_by (rule : approval_rule) =
   record_rule ~base_path ~event_type:Rule_deleted ~actor:deleted_by rule
 ;;
 
+(* RFC-0474 L4f. A Keeper-scoped [read_recent] scanned the store backwards,
+   decoding every row, until it held [n] of that Keeper's rows. A Keeper with
+   no rows in the newest day files read all of them: on 2026-10-28 the store
+   held 278,731 rows in 24 files (131 MB), and the runtime trust snapshots of
+   40 Keepers spent 6.7 s of their 6.9 s here, every time.
+
+   [Recent_index] reads each row once. Every read first advances it over the
+   bytes appended since the previous read, so what a read returns is the
+   store's content at that read. It keeps the newest [read_recent_max_rows]
+   rows of each Keeper and of the whole store, and where the newest row the
+   backward scan refuses lies. A read is refused exactly when the backward
+   scan would have reached that row, or an unreadable listing or file, before
+   it had [n] rows. *)
+let read_recent_max_rows = 128
+
+module Recent_index = struct
+  module SMap = Map.Make (String)
+
+  (* Physical position in the store: month directory, then day file in the
+     store's own order, then the row's ordinal within that file. [Whole_month]
+     stands for an unreadable month listing, which lies beyond every day of
+     its month. *)
+  type day_slot =
+    | Day of string
+    | Whole_month
+
+  type position =
+    { month : string
+    ; day : day_slot
+    ; row : int
+    }
+
+  let compare_position left right =
+    match String.compare left.month right.month with
+    | 0 ->
+      (match left.day, right.day with
+       | Day left_day, Day right_day ->
+         (match Dated_jsonl.compare_day_file_names left_day right_day with
+          | 0 -> Int.compare left.row right.row
+          | order -> order)
+       | Day _, Whole_month -> -1
+       | Whole_month, Day _ -> 1
+       | Whole_month, Whole_month -> Int.compare left.row right.row)
+    | order -> order
+  ;;
+
+  type refusal =
+    { at : position
+    ; detail : string
+    }
+
+  let newest left right =
+    match left, right with
+    | None, refusal | refusal, None -> refusal
+    | Some l, Some r -> if compare_position l.at r.at >= 0 then left else right
+  ;;
+
+  (* Newest first, at most [read_recent_max_rows]. *)
+  type bounded =
+    { rows : (position * Yojson.Safe.t) list
+    ; length : int
+    }
+
+  let empty_bounded = { rows = []; length = 0 }
+
+  let insert bounded ((at, _) as entry) =
+    let rec place = function
+      | ((other, _) as head) :: rest when compare_position other at > 0 ->
+        head :: place rest
+      | rows -> entry :: rows
+    in
+    let rows = place bounded.rows in
+    if bounded.length < read_recent_max_rows
+    then { rows; length = bounded.length + 1 }
+    else { rows = List.take read_recent_max_rows rows; length = read_recent_max_rows }
+  ;;
+
+  (* What [Unix.lstat] says about a day file when it was last read. An equal
+     observation means nothing was appended, and the file is not opened. *)
+  type observation =
+    { size : int
+    ; mtime : float
+    ; ctime : float
+    ; inode : int
+    ; device : int
+    }
+
+  let equal_observation left right =
+    Int.equal left.size right.size
+    && Float.equal left.mtime right.mtime
+    && Float.equal left.ctime right.ctime
+    && Int.equal left.inode right.inode
+    && Int.equal left.device right.device
+  ;;
+
+  type file =
+    { observed : observation
+    ; cursor : Dated_jsonl.append_cursor
+    ; rows_read : int
+    }
+
+  type t =
+    { files : file SMap.t
+    ; by_keeper : bounded SMap.t
+    ; all_rows : bounded
+    ; malformed : refusal option  (** The newest row that is not JSON. *)
+    ; unowned : refusal option
+          (** The newest JSON row that does not name exactly one string
+              Keeper. Only a Keeper-scoped read refuses it. *)
+    }
+
+  let empty =
+    { files = SMap.empty
+    ; by_keeper = SMap.empty
+    ; all_rows = empty_bounded
+    ; malformed = None
+    ; unowned = None
+    }
+  ;;
+
+  let unowned_row_detail = "audit row must contain exactly one string keeper"
+
+  let owner = function
+    | `Assoc fields ->
+      (match List.filter (fun (key, _) -> String.equal key "keeper") fields with
+       | [ (_, `String owner) ] -> Some owner
+       | _ -> None)
+    | _ -> None
+  ;;
+
+  let add_entry index at = function
+    | Dated_jsonl.Malformed_json { path; line_number; detail } ->
+      let detail = malformed_row_detail ~path ~line_number ~detail in
+      { index with malformed = newest index.malformed (Some { at; detail }) }
+    | Dated_jsonl.Parsed row ->
+      let index = { index with all_rows = insert index.all_rows (at, row) } in
+      (match owner row with
+       | Some keeper ->
+         let rows =
+           Option.value ~default:empty_bounded (SMap.find_opt keeper index.by_keeper)
+         in
+         { index with by_keeper = SMap.add keeper (insert rows (at, row)) index.by_keeper }
+       | None ->
+         { index with
+           unowned = newest index.unowned (Some { at; detail = unowned_row_detail })
+         })
+  ;;
+
+  let observe path =
+    match Unix.lstat path with
+    | stats ->
+      Ok
+        { size = stats.Unix.st_size
+        ; mtime = stats.Unix.st_mtime
+        ; ctime = stats.Unix.st_ctime
+        ; inode = stats.Unix.st_ino
+        ; device = stats.Unix.st_dev
+        }
+    | exception Unix.Unix_error (error, _, _) ->
+      Error (Printf.sprintf "%s: %s" path (Unix.error_message error))
+  ;;
+
+  type day_file =
+    { file_path : string
+    ; file_month : string
+    ; file_day : string
+    }
+
+  (* Day files newest first, as the backward scan visits them, and the
+     unreadable month listing that would stop that scan, if any. *)
+  let list_store store =
+    match Dated_jsonl.month_dir_paths_newest_first_result store with
+    | Error error -> Error (Dated_jsonl.read_error_to_string error)
+    | Ok months ->
+      let rec walk acc = function
+        | [] -> Ok (List.rev acc, None)
+        | month_path :: rest ->
+          let month = Filename.basename month_path in
+          (match Dated_jsonl.day_file_paths_newest_first_result month_path with
+           | Error error ->
+             Ok
+               ( List.rev acc
+               , Some
+                   { at = { month; day = Whole_month; row = max_int }
+                   ; detail = Dated_jsonl.read_error_to_string error
+                   } )
+           | Ok paths ->
+             let days =
+               List.map
+                 (fun file_path ->
+                    { file_path; file_month = month; file_day = Filename.basename file_path })
+                 paths
+             in
+             walk (List.rev_append days acc) rest)
+      in
+      walk [] months
+  ;;
+
+  type file_read =
+    | Unchanged
+    | Read of t
+    | Refused of refusal
+    | Invalidated
+
+  let read_file index (file : day_file) =
+    let at row = { month = file.file_month; day = Day file.file_day; row } in
+    let refused detail = Refused { at = at max_int; detail } in
+    match observe file.file_path with
+    | Error detail -> refused detail
+    | Ok observed ->
+      let prior = SMap.find_opt file.file_path index.files in
+      (match prior with
+       | Some prior when equal_observation prior.observed observed -> Unchanged
+       | Some _ | None ->
+         let first_row = match prior with Some prior -> prior.rows_read | None -> 0 in
+         (match
+            Dated_jsonl.fold_file_appended_entries_result file.file_path
+              ~cursor:(Option.map (fun prior -> prior.cursor) prior)
+              ~init:(index, first_row)
+              ~f:(fun (index, row) entry ->
+                add_entry index (at row) entry, row + 1)
+          with
+          | Error error -> refused (Dated_jsonl.read_error_to_string error)
+          | Ok Dated_jsonl.Cursor_invalidated -> Invalidated
+          | Ok (Dated_jsonl.Appended ((index, rows_read), cursor)) ->
+            Read
+              { index with
+                files = SMap.add file.file_path { observed; cursor; rows_read } index.files
+              }))
+  ;;
+
+  (* Advance [index] to the store's current end. [Ok (index, refused)]:
+     [refused] is the newest listing or file this read could not see; rows at
+     or behind it are out of reach for this read only. A day file that was
+     removed, replaced or rewritten makes the index start over, since rows it
+     kept no longer say which older rows it dropped. *)
+  let advance store index =
+    match list_store store with
+    | Error detail -> Error detail
+    | Ok (newest_first, listing_refused) ->
+      let rec read_all index refused = function
+        | [] -> `Done (index, refused)
+        | file :: rest ->
+          (match read_file index file with
+           | Unchanged -> read_all index refused rest
+           | Read index -> read_all index refused rest
+           | Refused refusal -> read_all index (newest refused (Some refusal)) rest
+           | Invalidated -> `Start_over)
+      in
+      let removed index =
+        Option.is_none listing_refused
+        && SMap.exists
+             (fun path _ ->
+                not
+                  (List.exists
+                     (fun (file : day_file) -> String.equal file.file_path path)
+                     newest_first))
+             index.files
+      in
+      (* Oldest first, so each row lands at the head of its list. *)
+      let oldest_first = List.rev newest_first in
+      let from_scratch () =
+        match read_all empty listing_refused oldest_first with
+        | `Done result -> Ok result
+        | `Start_over ->
+          Error "approval audit day file changed while it was read from its start"
+      in
+      if removed index
+      then from_scratch ()
+      else (
+        match read_all index listing_refused oldest_first with
+        | `Done result -> Ok result
+        | `Start_over -> from_scratch ())
+  ;;
+
+  let select index ~refused ~keeper_name ~n =
+    let bounded, unowned =
+      match keeper_name with
+      | Some keeper ->
+        Option.value ~default:empty_bounded (SMap.find_opt keeper index.by_keeper), index.unowned
+      | None -> index.all_rows, None
+    in
+    let selected = List.take n bounded.rows in
+    match newest refused (newest index.malformed unowned) with
+    | None -> Ok (List.map snd selected)
+    | Some { at; detail } ->
+      (match List.rev selected with
+       | (oldest, _) :: _
+         when List.length selected = n && compare_position at oldest < 0 ->
+         Ok (List.map snd selected)
+       | [] | _ :: _ -> Error detail)
+  ;;
+end
+
+let recent_indexes : (string, Recent_index.t) Hashtbl.t = Hashtbl.create 4
+let recent_index_mutex = Cross_context_mutex.create ()
+
 let read_recent ~base_path ?keeper_name ?(n = 20) ()
   : (Yojson.Safe.t list, read_error) result
   =
   if n <= 0
   then Ok []
+  else if n > read_recent_max_rows
+  then
+    Error
+      ({ stage = Read_recent
+       ; detail =
+           Printf.sprintf "n=%d is above the %d newest rows read_recent keeps" n
+             read_recent_max_rows
+       } : read_error)
   else (
     match get_audit_store ~base_path () with
     | Error detail -> Error ({ stage = Read_recent; detail } : read_error)
     | Ok store ->
-      Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-        let rows = ref [] in
-        let count = ref 0 in
-        let select = function
-          | Dated_jsonl.Malformed_json _ as entry ->
-            (* Reuse the strict reader's location-bearing error. *)
-            (match parsed_rows ~stage:Read_recent [ entry ] with
-             | Error error -> Some (Error error)
-             | Ok _ -> None)
-          | Dated_jsonl.Parsed row ->
-            let matches =
-              match keeper_name with
-              | None -> Ok true
-              | Some name ->
-                let owners =
-                  match row with
-                  | `Assoc fields ->
-                    List.filter (fun (key, _) -> String.equal key "keeper") fields
-                  | _ -> []
-                in
-                (match owners with
-                 | [ (_, `String owner) ] -> Ok (String.equal name owner)
-                 | _ ->
-                   Error
-                     ({ stage = Read_recent
-                      ; detail = "audit row must contain exactly one string keeper"
-                      } : read_error))
-            in
-            (match matches with
-             | Error error -> Some (Error error)
-             | Ok false -> None
-             | Ok true ->
-               rows := row :: !rows;
-               incr count;
-               if !count = n then Some (Ok (List.rev !rows)) else None)
-        in
-        match Dated_jsonl.find_latest_entry_result store select with
-        | Error error ->
-          Error
-            ({ stage = Read_recent
-             ; detail = Dated_jsonl.read_error_to_string error
-             } : read_error)
-        | Ok (Some result) -> result
-        | Ok None -> Ok (List.rev !rows)))
+      Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+        Cross_context_mutex.with_lock recent_index_mutex (fun () ->
+          let index =
+            Option.value ~default:Recent_index.empty
+              (Hashtbl.find_opt recent_indexes base_path)
+          in
+          match Recent_index.advance store index with
+          | Error detail -> Error ({ stage = Read_recent; detail } : read_error)
+          | Ok (index, refused) ->
+            Hashtbl.replace recent_indexes base_path index;
+            Recent_index.select index ~refused ~keeper_name ~n
+            |> Result.map_error (fun detail -> ({ stage = Read_recent; detail } : read_error)))))
 ;;
 
 let resolved_history_event json =

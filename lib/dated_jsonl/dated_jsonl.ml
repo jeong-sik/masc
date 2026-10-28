@@ -294,6 +294,18 @@ let list_day_files_result month_path =
   |> Result.map (List.sort (fun left right -> compare_day_files right left))
 ;;
 
+let month_dir_paths_newest_first_result t =
+  list_month_dirs_result t.base_dir
+  |> Result.map (List.map (Filename.concat t.base_dir))
+;;
+
+let day_file_paths_newest_first_result month_path =
+  list_day_files_result month_path
+  |> Result.map (List.map (Filename.concat month_path))
+;;
+
+let compare_day_file_names = compare_day_files
+
 (* ── Lines from a single file ─────────────────────────── *)
 
 (* Keep the physical-row predicate identical to [String.trim]'s OCaml 5.4

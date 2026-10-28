@@ -26273,10 +26273,13 @@ and is loaded on demand through keeper_skill.
          that tail must not acknowledge the displayed rejection either. *)
       let orphan_pointer_tail =
         not state.image_open && not state.msx_open
-        && (match input, !pointer_gesture with
-            | Some (Mouse_left_drag _ | Mouse_left_release _), Masc_tui_pane_selection.Idle -> true
-            | (Some _ | None), (Masc_tui_pane_selection.Idle | Pressed _
-                | Selecting _ | Drag_without_pane) -> false) in
+        && (match !pointer_gesture with
+            | Masc_tui_pane_selection.Idle ->
+                (match input with
+                 | Some (Mouse_left_drag _ | Mouse_left_release _) -> true
+                 | Some (Key _ | Pasted _ | Graphics_reply _ | Mouse_left_press _
+                     | Mouse_wheel _) | None -> false)
+            | Pressed _ | Selecting _ | Drag_without_pane -> false) in
       let input = if orphan_pointer_tail then None else input in
       if orphan_pointer_tail then
         Render_schedule.request render_schedule Render_schedule.Background;

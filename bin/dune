@@ -1212,6 +1212,12 @@
  (libraries masc masc_tui_ansi masc_tui_message_layout))
 
 (library
+ (name masc_tui_fleet_stream)
+ (wrapped false)
+ (modules masc_tui_fleet_stream)
+ (libraries masc masc.sse_wire yojson))
+
+(library
  (name masc_tui_table)
  (wrapped false)
  ; masc_tui_message_layout so a cell is fitted in display cells rather than

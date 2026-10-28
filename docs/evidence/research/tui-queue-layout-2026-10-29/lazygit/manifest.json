@@ -1,0 +1,30 @@
+{
+  "version": "commit=, build date=, build source=Homebrew, version=0.59.0, os=darwin, arch=arm64, git version=2.50.1 (Apple Git-155)",
+  "binary_sha256": "ba146702a15336dead3c8344dbe37e4302fd0b9b55e6b41a0fe71317a6e40429",
+  "repo": "/Users/dancer/me/workspace/yousleepwhen/masc-tui-queue-layout-20261029/artifacts/queue-layout-observation-20261029/lazygit/repo",
+  "home": "/Users/dancer/me/workspace/yousleepwhen/masc-tui-queue-layout-20261029/artifacts/queue-layout-observation-20261029/lazygit/home",
+  "scope": "Installed Lazygit0.59.0 in private HOME/config with18synthetic commits; not a queue task benchmark",
+  "config_sha256": "b2b8efa9a5e00be869b6fdb9c9f6e2f347ed833bbe3557473f0a8069ab19f2d3",
+  "session": "lazygit-study",
+  "viewport": "80x24",
+  "tmux_socket": "masc-queue-layout-20261029",
+  "settings": "private HOME/config; no remotes; auto-fetch/refresh and update disabled; tips/log pane off",
+  "retained_at": "2026-10-28T17:41:39.481155+00:00",
+  "git_head": "30a71062c4cf3b8836bd6319c938800fd278bc3e",
+  "commit_count": 18,
+  "capture_sha256": {
+    "actions.jsonl": "a7f1fc5c60fb156ca4250b17c4bf39baedd17af2b952ff6cb20cc120c8082941",
+    "after-tab-80x24.txt": "d42f2c55b78b515f5b4bea613264f04dc8d6431f1b745d155384a583ce431065",
+    "commit-files-80x24.txt": "30420c09b546b64853382c539c5111ad014e06a8a0f8f24664aa254d2869c3d7",
+    "commits-120x36.txt": "201fba0b443475bb9a67b22f95fb5302689f08684081be8cceb5fc9db74480ba",
+    "commits-160x40.txt": "3759c418161cf8d5acec17a1b87d109099e950bf8a1f6717a5b06cf6ddecf3d6",
+    "commits-80x24.txt": "677b3d3331d6a7bf5fd2a49cf2e8a2e00f311c6e823ef2e6de3a2d46a104c7f0",
+    "commits-full-80x24.txt": "f79a54a996f4c8f322dbae1262b709d7795a96f78b023d7ca9657ca432731c5d",
+    "config.yml": "b2b8efa9a5e00be869b6fdb9c9f6e2f347ed833bbe3557473f0a8069ab19f2d3",
+    "help-80x24.txt": "7e68bf0fe6ff7a537aac5f63c034d922239cad5e90237577f3c1d8519d16403d",
+    "return-from-files-80x24.txt": "404969288014c2daf207e64dc0943be3d0aa1c7dabe66779aee6cceb86b61b27",
+    "return-from-help-80x24.txt": "404969288014c2daf207e64dc0943be3d0aa1c7dabe66779aee6cceb86b61b27",
+    "selected-17-80x24.txt": "404969288014c2daf207e64dc0943be3d0aa1c7dabe66779aee6cceb86b61b27",
+    "synthetic-history.export": "474f577ae1ca3bb075cd6e8792919fd1c0d90ce34a0f19c23cd5a5cc1043a787"
+  }
+}

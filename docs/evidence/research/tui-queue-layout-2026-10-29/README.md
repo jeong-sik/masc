@@ -91,3 +91,9 @@ marker reached the covered draft. It does not establish every timing or input
 destination. Physical Korean IME, physical mouse/chords, browser pixel
 readability, human completion time and the final revised executable remain
 unmeasured.
+
+Follow-up bundles independently retain an
+[installed Lazygit observation](lazygit/README.md) and
+[revised-placement/footer-condition observation](revised-placement/README.md)
+on `c2bdd3c`. Their manifests do not extend the 38b6 captures above to the
+final viewport-input repair.

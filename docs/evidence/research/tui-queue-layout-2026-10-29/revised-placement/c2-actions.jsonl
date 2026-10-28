@@ -1,0 +1,3 @@
+{"at": "2026-10-28T17:37:47.854515+00:00", "action": "Ctrl-T, count1 at80x24", "source": "c2bdd3cc4b4106e83b3ea2b68413e902dd61143d"}
+{"at": "2026-10-28T17:38:32.435468+00:00", "action": "Down Down selects first event in count1 Bottom", "source": "c2bdd3cc4b4106e83b3ea2b68413e902dd61143d"}
+{"at": "2026-10-28T17:38:32.861921+00:00", "action": "Fixture control count18 then r; no input injected between refresh and capture", "source": "c2bdd3cc4b4106e83b3ea2b68413e902dd61143d"}

@@ -95,6 +95,15 @@ The useful inference here is a retained Queue parent, explicit Help/detail
 children, and a conversation preview with no editable controls. Copying another
 application's numeric layer order would not establish input ownership.
 
+An [installed Lazygit 0.59.0 observation](../evidence/research/tui-queue-layout-2026-10-29/lazygit/README.md)
+subsequently exercised these relationships in a private synthetic repository.
+`j` updated Patch; Enter/Esc and Help/Esc retained the parent commit. At 80
+columns, a side pane retained all 18 commit rows but metadata truncated their
+subjects; full mode exposed subjects and covered Patch. Keeping rows is
+different from preserving the information needed for the current task. Tab
+moved to another application panel; it does not establish that a display-only
+Queue preview needs focus. No human speed or preference comparison was made.
+
 ## Same-data comparison
 
 Observe adaptive and expanded views on one exact executable, with the same
@@ -146,10 +155,19 @@ This supports Side as the wide default for the observed work, and Full for a
 narrow overflowing queue. The revised source therefore allows Bottom only if
 the entire Queue document, including reserved status/receipt/action-note rows,
 still fits. It retains Bottom where it consumes spare space rather than list
-capacity. This revision, viewport input admission and the later footer-order change are newer than the
-observed binary and still need native confirmation. A small preview may still
+capacity. Placement was subsequently observed on c2 as recorded below; final
+viewport-input revisions still need native confirmation. A small preview may still
 show only diagnostics; the partial caption and Esc to full chat make that limit
 explicit rather than selecting content by guessed importance.
+
+A [later c2bdd3c executable](../evidence/research/tui-queue-layout-2026-10-29/revised-placement/README.md)
+confirmed the revised narrow policy: at 80×24, a one-event queue with running
+and scheduled rows retained Bottom; refreshing to 18 events switched to Full
+with ten pending events visible. Its layout module is unchanged through d84,
+but its execution does not validate subsequent input-ownership changes. A
+separate synthetic health condition showed n/l hints at 80 columns when the
+fixture generation warning was absent. Warning and ordinary footer conditions
+must remain distinct.
 
 Help and item detail opened above Queue and returned to it. After Help, detail,
 layout and size changes, `n` then `l` sent `immediate` and `low` for the same

@@ -1,0 +1,24 @@
+╭─[4]─Commits - Reflog─────────────────╮╭─[0]─Patch────────────────────────────╮
+│30a71062 2:38AM Queue Study       ◯ (H││commit                                ▐
+│╭─Keybindings─────────────────────────────────────────────────────────────────╮
+││         --- Local ---                                                       ▐
+││   <c-o> Copy commit hash to clipboard                                       ▐
+││   <c-r> Reset copied (cherry-picked) commits selection                      ▐
+││       b View bisect options...                                              │
+││       s Squash                                                              │
+││       f Fixup                                                               │
+││       c Set fixup message                                                   │
+││       r Reword...                                                           │
+││       R Reword with editor                                                  │
+││       d Drop                                                                │
+││       e Edit (start interactive rebase)                                     │
+││       i Start interactive rebase                                            │
+││       p Pick                                                                │
+││       F Create fixup commit                                                 │
+││       S Apply fixup commits...                                              │
+│╰─────────────────────────────────────────────────────────────────────1 of 72─╯
+│                                      ││ - Request 14: 변경 사항과 리뷰 내용을│
+│                                      ││확인                                  │
+│                                      ││ - Request 15: 변경 사항과 리뷰 내용을│
+╰──────────────────────────────2 of 18─╯╰──────────────────────────────────────╯
+Execute: <enter> | Close/Cancel: <esc>                Donate Ask Question 0.59.0

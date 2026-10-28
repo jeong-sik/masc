@@ -119,6 +119,10 @@ remains unsupported by this integration. In particular, the installed SDK's
 `keyboard.type()` returns void after normal typing and can also return void
 after swallowing a dialog interruption. Even if a dialog closes before the
 subsequent `info()` read, that read cannot distinguish the two outcomes.
+`keyboard.press` and `keyboard.paste` are observed actions: the SDK returns a receipt
+for them (`{}`, `{popups}`, or `{dialog}` when a dialog interrupts the action;
+[source](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/src/page-model.ts#L620-L639)),
+so only `keyboard.type` is receipt-less here.
 The workflow therefore stops at a receipt-less holding step, leaves it outside
 the completed prefix and retains `inputReleased=false`; no later step or final
 snapshot runs. This also requires explicit recovery after ordinary void-returning
@@ -194,10 +198,20 @@ release acknowledgement, and a receipt does not prove that every key or button
 came up.
 
 This rests on the SDK implementation at the pinned commit, not on a documented
-guarantee. The receipt's `dialog` is `pendingDialog(sessionId) || actionError.dialog`;
-if both were empty the field would be `undefined`, JSON would drop it, and the host
-could not tell that receipt from a clean one. Whether `isPageDialogOpenedError`
-always carries `error.dialog` is decided in the SDK runtime, which was not read. The SDK's own usage text says a dialog may appear as `receipt.dialog`
+guarantee. The receipt's `dialog` is `pendingDialog(sessionId) || actionError.dialog`.
+If both were empty the field would be `undefined`, JSON would drop it, and the host
+could not tell that receipt from a clean one. At the pinned commit that cannot happen
+through the SDK's own error class: `PageDialogOpenedError` takes `dialog` as a
+required argument and keeps a copy, and every place that builds it passes an object
+([class](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/src/browser-runtime.ts#L115-L146),
+[dialog opening event](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/src/browser-runtime.ts#L1503)).
+An empty `dialog: {}` is still an object and does not release. The SDK's own
+real-browser case checks that `page.click` reports the dialog type and message in its
+receipt
+([page-dialogs.mjs](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/scripts/real-browser-e2e/cases/page-dialogs.mjs#L123-L128)).
+An object receipt with an open dialog would need an error that carries the SDK's
+error code without being built by that class; the code string appears only in the
+runtime and in tests. The SDK's own usage text says a dialog may appear as `receipt.dialog`
 or in `page.info()`, and that a receipt describes only the dispatched action
 ([usage text](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/skill-body/SKILL.md#L410-L422)).
 A newer SDK that adds a receipt member makes the receipt undeclared, so the input

@@ -243,7 +243,7 @@ let decode (request : Browser_lane.Native_workflow.t) receipt =
   let* input_released=bool "inputReleased" fields in
   let* ()=if input_released || (started && List.exists (fun (step : Browser_lane.Native_workflow.step) ->
       Browser_lane.Native_workflow.holds_input step.action) request.steps) then Ok ()
-    else Error "workflow claims a held input without a input-holding effect" in
+    else Error "workflow claims a held input without an input-holding effect" in
   let* raw=get "completed" fields in
   let* completed=match raw with `List values -> Ok values | _ -> Error "workflow completed is not an array" in
   let methods=List.map (fun (step : Browser_lane.Native_workflow.step) ->

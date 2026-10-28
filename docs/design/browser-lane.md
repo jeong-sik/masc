@@ -235,7 +235,9 @@ which answers a receipt, and only an object receipt without `dialog` lets the ne
 input run. If the run loses its answer, this peer also refuses further input.
 Reads and ending the task space remain available; end that space before
 opening a fresh connection. This is a per-peer failure state, not a durable
-cross-process recovery record. A pointer receipt does not establish application
+cross-process recovery record. The state lives in memory and ends with the
+connection: a restarted server starts a new connection with no pending input, so
+check the Space before replaying the original command. A pointer receipt does not establish application
 drop acceptance or general HTML5 DataTransfer support.
 
 A request its connection does not serve is a selection failure: the server

@@ -5,17 +5,17 @@
 
 (** The file of the authorization log, [authz.jsonl] (design 6.3, 8.1).
 
-    The file machinery is that of {!Authz_jsonl_file}: reading the file at
-    process start, cutting a last line that never ended, the zone, appending at
-    the end of the file, and the stop after a failure. This module fixes the
-    format of the lines. Each line is an {!Authz_record.t} that carries the hash
-    of the line before it, so the file is a chain, and the state of the file is
-    the head of the chain ({!Authz_record.head}). The module knows the file and
-    nothing about what a record means. What state the records add up to, which
-    events may follow which, and what a pointer into the external high-water
-    mark means belong to the layers above.
+    The file machinery is that of {!Authz_jsonl_file}: the recovery read at
+    process start, the cut of a last line that never ended, the zone, the append
+    at the cursor, and the stop after a failure. This module fixes the format of
+    the lines. Each line is an {!Authz_record.t} that carries the hash of the
+    line before it, so the file is a chain, and the state of the file is the
+    head of the chain ({!Authz_record.head}). The module knows the file and
+    nothing about what a record means. What the records add up to (the value
+    that the caller folds them into), which events may follow which, and what a
+    pointer into the external high-water mark means belong to the layers above.
 
-    {b The file.} [<base path>/.masc/auth/authz.jsonl], next to [config.json]
+    {b The log.} [<base path>/.masc/auth/authz.jsonl], next to [config.json]
     ({!path_of_base_path}). Open the log once per process and path.
 
     {b Who writes, and after a failure.} The rules are those of
@@ -47,14 +47,15 @@ val stopped : t -> stop option
 (** [<base path>/.masc/auth/authz.jsonl]. *)
 val path_of_base_path : base_path:string -> string
 
-(** What the file was when it was opened, and how it ended. These are the types
-    of {!Authz_jsonl_file}, with their constructors listed so that a caller
-    matches on them here. *)
+(** What the file was when it was opened. This is the type of
+    {!Authz_jsonl_file}, with its constructors listed so that a caller matches
+    on them here. *)
 type contents = Authz_jsonl_file.contents =
   | Missing
   | Empty
   | Lines of int
 
+(** How the file ended when it was opened. Same re-export as {!contents}. *)
 type tail = Authz_jsonl_file.tail =
   | Complete
   | Cut of
@@ -62,6 +63,8 @@ type tail = Authz_jsonl_file.tail =
       ; discarded_bytes : int
       }
 
+(** What opening found: the {!contents} after the cut, if there was one, and the
+    {!tail}. Same re-export as {!contents}. *)
 type recovered = Authz_jsonl_file.recovered =
   { contents : contents
   ; tail : tail
@@ -188,6 +191,6 @@ val append_error_to_string : append_error -> string
     the exception was raised before the file work began, because the module
     cannot tell the two cases apart. An exception raised while the records are
     checked comes before any byte is written and does not stop the log. The
-    caller does not append the same records again: the next start shows what
+    caller must not append the same records again: the next start shows what
     the file holds. *)
 val append : writer -> Authz_record.t list -> (Authz_record.head, append_error) result

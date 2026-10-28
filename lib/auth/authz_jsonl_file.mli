@@ -23,7 +23,7 @@
 
     {b Who writes.} Inside the process, one zone per [t]: an [Eio.Mutex] held
     while a function runs ([with_writer]). Between processes, this module relies
-    on two things it does not check. Only one server runs on a base path, and a
+    on two things it does not check. Only one server runs on a path, and a
     tool that reads the file takes the lock of [Fs_compat] for the length of one
     read. While a tool holds that lock an append returns [Write_locked]. A
     second writer on the same file shows up as [Diverged].
@@ -92,8 +92,9 @@ module type Line_format = sig
   (** The state before the first line. *)
   val genesis : state
 
-  (** Reads one line, without its newline, that is expected after [state]. The
-      line must be exactly the bytes {!to_line} writes for the record it names. *)
+  (** Reads one line, without its newline, that is expected after the given
+      state. The line must be exactly the bytes {!to_line} writes for the record
+      it decodes to. *)
   val of_line : state -> string -> (record, line_error) result
 
   (** One line, without the newline. *)
@@ -102,11 +103,12 @@ module type Line_format = sig
   (** The state once the record has been appended. *)
   val advance : state -> record -> state
 
-  (** Whether the record may follow [state]. [append] asks before it writes a
-      byte, so a record that fails here is never written. *)
+  (** Checks whether the record may follow the given state. [append] asks
+      before it writes a byte, so a record that fails here is never written. *)
   val check_next : state -> record -> (unit, reject) result
 
-  (** A few words about the state, for the warning that a cut tail leaves. *)
+  (** A few words about the state, for the warning logged when the tail is
+      cut. *)
   val describe_state : state -> string
 
   val line_error_to_string : line_error -> string
@@ -207,7 +209,7 @@ module Make (F : Line_format) : sig
     | Diverged of { path : string }
         (** The end of the file is not where this process left it: another writer
             appended, or the file was cut. The file is identified by device,
-            inode, and size, so a file of the same size that took the old inode
+            inode, and size, so a file of the same size that reused the old inode
             number is not noticed. The file is stopped. *)
     | Write_failed of
         { path : string
@@ -243,7 +245,7 @@ module Make (F : Line_format) : sig
       when the exception was raised before the file work began, because the
       module cannot tell the two cases apart. An exception raised while the
       records are checked comes before any byte is written and does not stop the
-      file. The caller does not append the same records again: the next start
+      file. The caller must not append the same records again: the next start
       shows what the file holds. *)
   val append : writer -> F.record list -> (F.state, append_error) result
 end

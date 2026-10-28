@@ -1,0 +1,74 @@
+write calls: 422 in 24 Keepers
+  first 2026-10-05T09:24:22Z, last 2026-10-28T05:56:16Z; --since 2026-10-02T00:00:00Z
+  receipt, ok: 343 (81.3%)
+    persisted_pending_admission: 227
+    persisted_current_snapshot: 81
+    persisted_source_bound_current: 35
+  receipt, rejected: 52 (12.3%)
+    supersedes_invalid: 11
+    supersedes_not_authored: 9
+    source_read_failed: 9
+    supersedes_with_source_path_unsupported: 7
+    derivation_invalid: 3
+    supersedes_not_current: 3
+    derived_source_path_unsupported: 3
+    unsupported_derivation: 2
+    board_ref_with_source_path_unsupported: 2
+    board_ref_invalid: 1
+    board_comment_without_post: 1
+    supersedes_premise_of_successor: 1
+  tool error without a receipt: 15 (3.6%)
+  result is not a receipt: 0 (0.0%)
+  result not in the trace (native call of an official client): 12 (2.8%)
+started calls without a finished record: 0; finished records seen twice: 0
+
+queued writes (persisted_pending_admission): 227
+  settled with a target the commit added: 86 (37.9%)
+  settled with a target that already existed: 97 (42.7%)
+  settled with a target, its commit row is not in the journal: 0 (0.0%)
+  settled without a target: 38 (16.7%)
+  still waiting in the admission queue: 1 (0.4%)
+  no record, written before the oldest receipt of the Keeper: 3 (1.3%)
+  no record, written after the oldest receipt of the Keeper: 0 (0.0%)
+  no record, the Keeper has no receipt at all: 2 (0.9%)
+
+candidates the Librarian settled, commit at or after --since: 734 in 40 Keepers (read at 2026-10-28T06:06:31Z)
+  settled with a target that already existed: 189 (25.7%)
+  settled with a target the commit added: 296 (40.3%)
+  settled without a target: 249 (33.9%)
+  not counted: 0 settled with a target whose commit row is not in the journal, 103 receipts that are not a committed candidate
+settled with a target: 485
+  the target has the memory id of the Keeper's own sentence: 12 (2.5%)
+  target now, a current fact: 172 (35.5%)
+  target now, left by a revised event: 118 (24.3%)
+  target now, retracted: 6 (1.2%)
+  target now, absorbed into another fact: 136 (28.0%)
+  target now, gone, no revised, retracted or absorbed record: 53 (10.9%)
+settled and the target is a current fact now: 172 of 734 (23.4%)
+seconds from the write to the commit (485 receipts with a source fact): p50 1343, p90 56889, max 232138
+
+Keeper | write calls | rejected | queued | with a target | without a target | waiting | no record | files missing or unreadable
+rust-hwp-guy | 60 | 18 | 0 | 0 | 0 | 0 | 0 | missing rust-hwp-guy.memory-admission.json
+gayo-yoga-leader | 53 | 1 | 0 | 0 | 0 | 0 | 0 | missing gayo-yoga-leader.memory-admission.json
+masc-productor-owner | 49 | 3 | 46 | 36 | 10 | 0 | 0 | -
+glossary-maniac | 48 | 9 | 31 | 25 | 3 | 0 | 3 | -
+msx-retro-mania | 40 | 1 | 28 | 26 | 1 | 1 | 0 | -
+jazz-developer | 37 | 3 | 31 | 21 | 10 | 0 | 0 | -
+kidsnote-job-manager | 27 | 5 | 19 | 18 | 1 | 0 | 0 | -
+judas-priest | 14 | 4 | 9 | 7 | 2 | 0 | 0 | -
+wkbl-growth | 12 | 0 | 10 | 10 | 0 | 0 | 0 | -
+goo-yang-bong | 11 | 1 | 9 | 9 | 0 | 0 | 0 | -
+indie-geek-blue | 11 | 0 | 6 | 5 | 1 | 0 | 0 | -
+kidsnote-incoming-dd-manager | 10 | 0 | 5 | 3 | 2 | 0 | 0 | -
+music-sensei | 9 | 1 | 1 | 1 | 0 | 0 | 0 | -
+wkbl-web-leader | 8 | 2 | 4 | 3 | 1 | 0 | 0 | -
+rondo | 6 | 1 | 5 | 5 | 0 | 0 | 0 | -
+code-reviewer-mother | 5 | 1 | 4 | 2 | 2 | 0 | 0 | -
+kidsnote-qa-hub-manager | 5 | 1 | 3 | 3 | 0 | 0 | 0 | -
+won-chik | 5 | 0 | 5 | 0 | 5 | 0 | 0 | -
+hole-finder | 3 | 1 | 2 | 0 | 0 | 0 | 2 | -
+kidsnote-slack-reader | 3 | 0 | 3 | 3 | 0 | 0 | 0 | -
+code-reviewer-father | 2 | 0 | 2 | 2 | 0 | 0 | 0 | -
+geek-scout | 2 | 0 | 2 | 2 | 0 | 0 | 0 | -
+masc-pro-builder | 1 | 0 | 1 | 1 | 0 | 0 | 0 | -
+wkbl-data | 1 | 0 | 1 | 1 | 0 | 0 | 0 | -

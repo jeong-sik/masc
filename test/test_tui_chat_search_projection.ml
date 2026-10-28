@@ -1421,8 +1421,129 @@ let test_first_scroll_holds_the_painted_preview () = at_sizes (fun origin ->
        = painted.text_position.start_byte) held))
 
 
+let test_file_changes_title_marks_retained_reading () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous = Masc_tui_ansi.get_terminal_size () in
+  let reserved = !(Masc_tui_render_prim.acting_pane_reserved_cols) in
+  let size value = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
+      cache ~probe:(fun () -> Some value)) in
+  Fun.protect ~finally:(fun () ->
+      size previous; Masc_tui_render_prim.acting_pane_reserved_cols := reserved) (fun () ->
+    size (26, 140);
+    Masc_tui_render_prim.acting_pane_reserved_cols := 0;
+    let state = state Layout.Origin_bare in
+    let json = `Assoc ["paths", `Assoc ["effective_base_path", `String "/workspace/a";
+      "effective_masc_root", `String "/workspace/a/.masc"];
+      "startup", `Assoc ["state_ready", `Bool true]] in
+    state.server_identity <- Some (match Masc.Tui_decode.decode_server_identity json with
+      | Ok identity -> identity | Error detail -> fail detail);
+    state.workspace_identity <- T.Workspace_identity_match;
+    state.local_keepers <- T.Local_workspace_read;
+    state.keepers <- [Masc.Tui_decode.{k_origin=Persisted_keeper; k_name="alpha";
+      k_paused=false; k_identity=Error "not observed"; k_activity=None}];
+    state.msg_reasoning_visibility <- T.Reasoning_hidden;
+    state.msg_tool_visibility <- T.Tools_full;
+    state.msg_file_changes_keeper <- Some "alpha";
+    let change : Masc.Tui_decode.file_change =
+      { fc_at=1.; fc_keeper="alpha"; fc_turn=None; fc_task_id=None;
+        fc_execution_id=None; fc_line_evidence=None;
+        fc_location=Fc_in_repo {repo_id="repo";relative_path="one.ml"};
+        fc_kind=Fc_written {content=""}; fc_succeeded=true } in
+    let duplicate = {change with fc_execution_id=Some "duplicate"} in
+    let snapshot : Masc.Tui_decode.file_change_snapshot =
+      { fcs_keeper="alpha"; fcs_window_hours=24.; fcs_calls_in_window=3;
+        fcs_changes=[change;duplicate;duplicate]; fcs_over_budget=1; fcs_malformed=2 } in
+    let complete = {snapshot with fcs_changes=[]; fcs_over_budget=0; fcs_malformed=0} in
+    let observe snapshot = T.keeper_chat_file_changes
+        ~scope:(state.workspace_authority, state.workspace_read_authority) snapshot in
+    let has text = Astring.String.is_infix ~affix:text (screen state) in
+    size (32, 25);
+    check bool "pending reading retains the Keeper and tool mode at minimum width" true
+      (has "Keeper: alpha" && has "tools:full" && has "diffs pending");
+    state.msg_file_changes <- Some (observe complete);
+    check bool "complete reading retains the Keeper, modes and window at minimum width" true
+      (has "Keeper: alpha" && has "reasoning:hidden" && has "tools:full" && has "diffs 24h");
+    size (14, 80);
+    check bool "a complete wide reading keeps short terminals usable" true
+      (has "diffs 24h" && not (has "Keeper chat needs a larger terminal"));
+    size (32, 25);
+    state.msg_target_keeper_name <- Some "verylongkeeperprefixsuffix";
+    state.msg_file_changes_keeper <- Some "verylongkeeperprefixsuffix";
+    check bool "a long Keeper name is wrapped rather than silently cut" true
+      (has "verylongkeeperprefixs" && has "uffix");
+    state.msg_target_keeper_name <- Some "alpha";
+    state.msg_file_changes_keeper <- Some "alpha";
+    size (32, 140);
+    state.msg_file_changes <- Some (observe snapshot);
+    check bool "partial file reading is shown without stale" true
+      (has "diffs partial" && not (has "diffs stale"));
+    size (32, 50);
+    check bool "the selected Keeper and partial reading remain visible" true
+      (has "Keeper: alpha" && has "diffs partial");
+    state.msg_file_changes_loading <- true;
+    check bool "refreshing keeps the Keeper and file state visible" true
+      (has "Keeper: alpha" && has "diffs loading" && has "diffs partial");
+    size (32, 40);
+    check bool "refreshing stays visible before partial detail" true
+      (has "Keeper: alpha" && has "diffs loading" && has "diffs partial");
+    state.msg_file_changes_loading <- false;
+    size (32, 140);
+    state.workspace_identity <- T.Workspace_identity_match_unconfirmed "health unavailable";
+    T.suspend_workspace_readings state;
+    check bool "retained file reading is labeled stale" true (has "diffs stale");
+    size (32, 40);
+    check bool "stale and the Keeper remain visible in a narrow chat" true
+      (has "Keeper: alpha" && has "diffs stale");
+    size (32, 140);
+    state.workspace_identity <- T.Workspace_identity_match;
+    state.msg_file_changes_loading <- true;
+    check bool "old reading remains stale while refresh is running" true
+      (has "diffs stale loading");
+    let calls = `Assoc ["keeper", `String "alpha"; "count", `Int 1; "health", `String "ok";
+      "entries", `List [`Assoc ["ts", `Float 101.; "keeper", `String "alpha";
+        "tool", `String "Read"; "input", `String "{}"; "output", `String "retained result";
+        "wire_outcome", `String "ok"; "execution_id", `String "memo-exec"]]] in
+    state.keeper_calls_keeper <- Some "alpha";
+    state.keeper_calls <- Some (match Masc.Tui_decode.decode_keeper_calls_snapshot
+        ~requested_keeper:"alpha" calls with Ok snapshot -> snapshot | Error detail -> fail detail);
+    state.keeper_calls_error <- Some "HTTP 503";
+    let occurrence = { Live.stream_scope=0; block_index=0;
+      provider_message_id=None; tool_call_id=Some "memo-call" } in
+    ignore (log state ~id:"memo-turn" ~at:1.
+      [Live.Run_started; Live.Tool_started {occurrence; tool_name="Read"};
+       Live.Tool_ended {occurrence}; Live.Tool_result {occurrence; execution_id="memo-exec"};
+       reply "done"; Live.Run_finished]);
+    size (40, 140);
+    check bool "retained call output and its stale warning are shown together" true
+      (has "retained result" && has "results stale/failed");
+    size (32, 25);
+    check bool "Keeper, modes and all evidence warnings remain visible at minimum width" true
+      (has "Keeper: alpha" && has "reasoning:hidden" && has "tools:full"
+       && has "diffs stale loading" && has "diffs partial" && has "oversized: 1"
+       && has "malformed: 2" && has "no exec id: 1" && has "duplicate ids: 1"
+       && has "results stale/failed");
+    size (32, 140);
+    state.msg_file_changes <- Some (observe snapshot);
+    state.msg_file_changes_loading <- false;
+    check bool "successful refresh removes stale" true
+      (has "diffs partial" && not (has "diffs stale"));
+    state.keeper_calls_error <- None;
+    state.msg_file_changes <- Some (observe complete);
+    state.msg_loaded <- [row ~id:"warning-pin" ~request_id:"warning-pin" ~role:user
+      ~text:(String.concat "\n" (List.init 70 (fun n ->
+        if n = 5 then "PINNED_WARNING_TARGET" else Printf.sprintf "line %d" n))) 1.];
+    size (30, 80);
+    ignore (find state "PINNED_WARNING_TARGET");
+    check bool "the search pin is visible before a warning" true (has "PINNED_WARNING_TARGET");
+    state.msg_file_changes_loading <- true;
+    check bool "adding warning rows preserves the pinned conversation" true (has "PINNED_WARNING_TARGET");
+    state.msg_file_changes_loading <- false;
+    check bool "removing warning rows preserves the pinned conversation" true (has "PINNED_WARNING_TARGET"))
+
 let () = run "chat search projection" [
   "rendered conversation", [
+    test_case "retained file reading is labeled stale" `Quick
+      test_file_changes_title_marks_retained_reading;
     test_case "navigation retires a running search" `Quick test_navigation_retires_a_running_search;
     test_case "retired matcher stops before its next candidate" `Quick
       test_retired_matcher_stops_before_next_candidate;

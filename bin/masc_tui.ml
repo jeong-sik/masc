@@ -416,7 +416,11 @@ let identity_pane_columns (state : state) =
    measured, and the step key and the jump keys were working that out
    differently -- the step recomputed, the landing did not. *)
 let surface_body_height_at (state : state) ~cursor scrolled =
-  if state.view = Repositories && not state.repository_changes_open then
+  if state.repository_changes_open && Option.is_none state.repository_changes_diff_path then
+    let _, cols = get_terminal_size () in
+    Masc_tui_render_repositories.repository_changes_content_height state
+      ~cols ~budget:(max 1 (surface_rows state - Masc_tui_frame.chrome_rows)) ~cursor
+  else if state.view = Repositories && not state.repository_changes_open then
     let _, cols = get_terminal_size () in
     Masc_tui_render.repository_studio_content_height state ~cols
       ~budget:(max 1 (surface_rows state - Masc_tui_frame.chrome_rows)) ~cursor
@@ -822,7 +826,6 @@ let reset_message_file_changes state keeper_name =
   state.msg_file_changes_generation <- state.msg_file_changes_generation + 1;
   state.msg_file_changes <- None;
   state.msg_file_changes_keeper <- keeper_name;
-  state.msg_file_change_index <- Masc_tui_keeper_chat_diff.empty;
   state.msg_file_changes_loading <- false;
   state.msg_file_changes_refresh_pending <- false;
   state.msg_file_changes_error <- None
@@ -966,12 +969,13 @@ let clear_current_message_draft state =
    so the jump is a screenful on every window; a page smaller than the pane
    would leave rows the reader has to catch with the arrow keys anyway. *)
 let keeper_message_page_rows state =
-  let rows, _ = get_terminal_size () in
+  let rows, cols = get_terminal_size () in
   (* The pane's fixed chrome is shared with [render_keeper_message];
      composer growth is already inside [keeper_message_status_rows]. Adding
      composer_max_rows here counted it twice, and every PgUp jumped four
      rows short of the screenful the comment promises. *)
-  let status_frame = keeper_message_frame_for_viewport state ~now:(Unix.gettimeofday ()) ~terminal_rows:rows in
+  let status_frame = keeper_message_frame_for_viewport state ~now:(Unix.gettimeofday ())
+      ~terminal_rows:rows ~terminal_cols:cols in
   let status_rows = keeper_message_status_rows ~status_frame state in
   (* PgUp creates the reading-back notice and PgDn removes it. Reserve that
      possible row on both sides of the transition: using only the rows drawn
@@ -1273,10 +1277,12 @@ let submit_chat_draft (state : state) ~(submit_message : string -> unit)
 
 let keeper_message_input_supported state =
   let rows, cols = get_terminal_size () in
-  let status_frame = keeper_message_frame_for_viewport state ~now:(Unix.gettimeofday ()) ~terminal_rows:rows in
+  let status_frame = keeper_message_frame_for_viewport state ~now:(Unix.gettimeofday ())
+      ~terminal_rows:rows ~terminal_cols:cols in
   let status_rows = keeper_message_status_rows ~status_frame state in
   Masc_tui_message_layout.message_viewport_supported ~terminal_rows:rows
-    ~terminal_cols:cols
+    ~terminal_cols:(Masc_tui_roster_pane.content_cols
+      ~hidden:(roster_pane_hidden state) ~cols)
     ~status_rows:(keeper_message_support_status_rows state ~status_rows)
 
 let handle_message_key (state : state) ~(submit_message : string -> unit)
@@ -23260,10 +23266,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         (match result with
          | Ok snapshot
            when String.equal snapshot.Masc.Tui_decode.fcs_keeper keeper_name ->
-             state.msg_file_changes <- Some snapshot;
-             state.msg_file_change_index <-
-               Masc_tui_keeper_chat_diff.index
-                 snapshot.Masc.Tui_decode.fcs_changes;
+             state.msg_file_changes <- Some (keeper_chat_file_changes
+               ~scope:(state.workspace_authority, state.workspace_read_authority) snapshot);
              state.msg_file_changes_error <- None
          | Ok snapshot ->
              store_error
@@ -24286,6 +24290,19 @@ let main
       (workspace_authority * unit ref) Masc_tui_chat_row_actions.t ref =
     ref Masc_tui_chat_row_actions.empty
   in
+  let presented_change_authority = ref None in
+  let repository_change_context_visible state =
+    let terminal_rows, cols = get_terminal_size () in
+    let surface_key = match state.repository_changes_diff_path with
+      | None -> "repository-changes"
+      | Some _ -> "repository-changes-diff" in
+    let current = Masc_tui_render_repositories.repository_changes_authority state
+        ~surface_key ~terminal_rows ~cols in
+    Option.is_some (Frame_presenter.presented_rows frame_presenter)
+    && Option.is_some current
+    && Option.equal Masc_tui_render_repositories.same_repository_change_authority
+         !presented_change_authority current
+  in
   (* The left button's gesture from press to release. *)
   let pointer_gesture = ref Masc_tui_pane_selection.Idle in
   let terminal_title = Terminal_title.create () in
@@ -24601,7 +24618,7 @@ let main
     Presented.panel_owner_matches !presented ~current_owner
       ~context_search_owner:(context_search_owner ())
   in
-  let present_frame frame approval presses panes acting_pane chat_row_actions
+  let present_frame frame approval presses panes acting_pane chat_row_actions change_authority
       ~input_pending ~write ~flush reader =
     let panel_owner = Masc_tui_render.panel_input_owner state
         ~terminal_rows:frame.Frame_presenter.terminal_rows in
@@ -24672,15 +24689,18 @@ let main
       not (Masc_tui_chat_row_actions.equal ~same_scope:same_acting_pane_scope
              !presented_chat_row_actions chat_row_actions)
     in
+    let change_authority_changed =
+      not (Option.equal Masc_tui_render_repositories.same_repository_change_authority
+        !presented_change_authority change_authority) in
     (* Approval identity, Help ownership, Queue ownership or selection, and the Play card can
        change while clipped terminal text stays byte-identical. Those changes
-       force presentation. Activity and chat row action changes force a full
+       force presentation. Activity, chat row action and repository change authority changes force a full
        presentation only if a differential draw would otherwise do nothing;
        ordinary async updates stay differential. *)
     match
       Frame_presenter.present frame_presenter
         ~invalidate_before:(damaged || authority_changed || preset_confirmation_changed)
-        ~force_present:(activity_authority_changed || chat_actions_changed)
+        ~force_present:(activity_authority_changed || chat_actions_changed || change_authority_changed)
         ~write ~flush frame
     with
     | Frame_presenter.Presented _ as frame_result ->
@@ -24739,6 +24759,7 @@ let main
             ~panel_owner ~owner_changed ~input_pending;
         state.acting_pane_presented <- acting_pane;
         presented_chat_row_actions := chat_row_actions;
+        presented_change_authority := change_authority;
         state.quit_armed <- Option.map (fun arm ->
             let was_visible = Option.exists (fun previous ->
                 Masc_tui_action_notice.same_quit previous arm.qa_confirmation) previous_quit in
@@ -30429,6 +30450,10 @@ and is loaded on demand through keeper_skill.
               let change_ctx =
                 Masc_tui_render_prim.resolve_change_context state ~path_opt
               in
+              if Option.is_some change_ctx.Masc_tui_render_prim.ctx_goal_id
+                 && not (repository_change_context_visible state) then
+                report_action state "error" "Wait for the related record or resize before opening its Goal"
+              else begin
               goto_surface state ~mailbox:async_messages Planning;
               state.planning_mode <- Planning_list;
               (match change_ctx.Masc_tui_render_prim.ctx_goal_id with
@@ -30455,6 +30480,7 @@ and is loaded on demand through keeper_skill.
                    clamp_planning_cursor state
                | None ->
                    state.planning_cursor <- 0)
+              end
 
             | "d" -> (
               match state.repository_changes_diff_path with
@@ -30488,6 +30514,10 @@ and is loaded on demand through keeper_skill.
               let change_ctx =
                 Masc_tui_render_prim.resolve_change_context state ~path_opt
               in
+              if Option.is_some change_ctx.Masc_tui_render_prim.ctx_task_id
+                 && not (repository_change_context_visible state) then
+                report_action state "error" "Wait for the related record or resize before opening its Task"
+              else begin
               goto_surface state ~mailbox:async_messages Planning;
               state.planning_mode <- Planning_list;
               (match change_ctx.Masc_tui_render_prim.ctx_task_id with
@@ -30503,6 +30533,7 @@ and is loaded on demand through keeper_skill.
                    state.task_detail_scroll <- 0;
                    state.task_focus <-
                      Masc_tui_overview_tasks.focus_list state.tasks)
+              end
 
             | "v" -> (
               match state.repository_changes, state.repository_changes_scope with
@@ -30541,39 +30572,15 @@ and is loaded on demand through keeper_skill.
               let change_ctx =
                 Masc_tui_render_prim.resolve_change_context state ~path_opt
               in
-              (* Only the scope's own repository names a remote. A project-wide
-                 scope spans every registered repository, and picking the first
-                 one opened a PR-N token in whichever repo happened to be
-                 registered first. *)
-              let scope_remote =
-                match state.repository_changes_scope with
-                | Some (Tui_decode.Repository_change_repository repo_id) -> (
-                    match state.repositories with
-                    | Some snapshot ->
-                        Option.map
-                          (fun (r : Masc.Tui_decode.repository) -> r.rp_url)
-                          (List.find_opt
-                             (fun (r : Masc.Tui_decode.repository) ->
-                               String.equal r.rp_id repo_id)
-                             snapshot.rs_repositories)
-                    | None -> None)
-                | Some Tui_decode.Repository_change_project | None -> None
-              in
               (match change_ctx.Masc_tui_render_prim.ctx_pr with
                | None ->
                    report_action state "git"
                      "no PR to open: this change names no github.com/…/pull/N link or PR-N token"
+               | Some _ when not (repository_change_context_visible state) ->
+                   report_action state "error" "Wait for the related record or resize before opening its PR"
                | Some reference -> (
                    let number = Masc_tui_pr_ref.number reference in
-                   (* A pull link says which repository; a token leaves that to
-                      the scope. *)
-                   let slug =
-                     match reference with
-                     | Masc_tui_pr_ref.Pull_url { slug; _ } -> Some slug
-                     | Masc_tui_pr_ref.Pr_token _ ->
-                         Option.bind scope_remote Masc_tui_pr_ref.github_slug_of_remote
-                   in
-                   match slug with
+                   match change_ctx.Masc_tui_render_prim.ctx_pr_slug with
                    | None ->
                        report_action state "error"
                          (Printf.sprintf
@@ -30612,10 +30619,31 @@ and is loaded on demand through keeper_skill.
                                   (Printf.sprintf "gh pr view %d -R %s stopped by signal %d"
                                      number slug signal)))))
 
+            | ("home" | "end") as key ->
+              (match state.repository_changes_diff_path with
+               | Some _ ->
+                   state.repository_changes_diff_scroll <-
+                     if String.equal key "home" then 0 else clamped_scroll_end
+               | None ->
+                   (match row_list state with
+                    | Some list when list.rl_count > 0 ->
+                        list.rl_place (if String.equal key "home" then 0 else list.rl_count - 1)
+                    | Some _ | None -> ()))
+
             | ("pageup" | "pagedown") as page_key ->
               (* A surface page at a time, as the shared page arm moved the
                  overlay before its keys were gathered here. *)
-              let page = surface_page_rows state in
+              let page =
+                match state.repository_changes_diff_path with
+                | Some path ->
+                    let terminal_rows, cols = get_terminal_size () in
+                    Masc_tui_render_prim.repository_changes_diff_page_rows state
+                      ~terminal_rows ~cols ~path
+                | None ->
+                    let _, cols = get_terminal_size () in
+                    max 1 (Masc_tui_render_repositories.repository_changes_content_height state
+                      ~cols ~budget:(max 1 (surface_rows state - Masc_tui_frame.chrome_rows))
+                      ~cursor:state.repository_changes_cursor - 1) in
               let direction = if String.equal page_key "pagedown" then 1 else -1 in
               (match state.repository_changes_diff_path with
                | Some _ ->
@@ -36634,6 +36662,9 @@ and is loaded on demand through keeper_skill.
                    else None in
                  render ~home ~compact_recovery_notice state)
            in
+           let terminal_rows, cols = get_terminal_size () in
+           let change_authority = Masc_tui_render_repositories.repository_changes_authority state
+               ~surface_key:frame.Frame_presenter.surface_key ~terminal_rows ~cols in
            (* The frame is what the operator will act on next, so the scroll it
               had to clamp is the scroll the next keypress moves from. Applied
               here rather than inside the drawing: a surface whose row count
@@ -36647,7 +36678,7 @@ and is loaded on demand through keeper_skill.
            Masc_tui_frame_timing.time_present
              ~tag:frame.Frame_presenter.surface_key
              ~write:(output_string stdout) ~flush:(fun () -> flush stdout)
-             (present_frame frame approval presses panes acting_pane chat_row_actions ~input_pending:input_unsettled clamped)
+             (present_frame frame approval presses panes acting_pane chat_row_actions change_authority ~input_pending:input_unsettled clamped)
        | Render_schedule.Idle | Render_schedule.Wait_until _ -> ())
     done
   in

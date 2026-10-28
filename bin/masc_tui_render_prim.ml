@@ -3100,17 +3100,19 @@ type change_context = {
   ctx_turn : int option;
   ctx_comment : string option;
   ctx_pr : Masc_tui_pr_ref.t option;
-      (** An explicit PR reference -- a pull link or a PR-N token -- found in
-          the task title, then its description, then the chat note. A bare
+  ctx_pr_slug : string option;
+      (** An explicit PR reference from the task title or description. A bare
           [#n] is a list item as often as a PR and is not read as one. *)
 }
 
-let file_change_matches_path (path : string) (fc : Masc.Tui_decode.file_change) =
-  match fc.Masc.Tui_decode.fc_location with
-  | Masc.Tui_decode.Fc_in_repo { relative_path; _ } -> String.equal relative_path path
-  | Masc.Tui_decode.Fc_in_bundle { bundle_path } -> String.equal bundle_path path
-  | Masc.Tui_decode.Fc_at_absolute_path { path = p } ->
-      String.equal p path || String.equal (Filename.basename p) (Filename.basename path)
+let file_change_matches_path ~scope (path : string) (fc : Masc.Tui_decode.file_change) =
+  match scope, fc.Masc.Tui_decode.fc_location with
+  | Some (Tui_decode.Repository_change_repository selected),
+    Masc.Tui_decode.Fc_in_repo { repo_id; relative_path } ->
+      String.equal selected repo_id && String.equal relative_path path
+  | Some (Tui_decode.Repository_change_repository _),
+    (Masc.Tui_decode.Fc_in_bundle _ | Masc.Tui_decode.Fc_at_absolute_path _)
+  | (None | Some Tui_decode.Repository_change_project), _ -> false
 
 
 let first_line_summary ?(max_len = 34) (s : string) : string =
@@ -3127,34 +3129,22 @@ let first_line_summary ?(max_len = 34) (s : string) : string =
 
 let resolve_change_context (state : state) ~(path_opt : string option) : change_context =
   let matched_change =
-    match path_opt, state.msg_file_changes with
+    match path_opt, current_keeper_chat_file_changes state with
     | Some path, Some snapshot ->
         List.find_opt
-          (file_change_matches_path path)
+          (file_change_matches_path ~scope:state.repository_changes_scope path)
           snapshot.Masc.Tui_decode.fcs_changes
     | _ -> None
   in
   let keeper =
     match matched_change with
     | Some fc -> Some fc.Masc.Tui_decode.fc_keeper
-    | None -> state.msg_target_keeper_name
-  in
-  let keeper_record =
-    match keeper with
-    | Some name ->
-        List.find_opt
-          (fun (k : Masc.Tui_decode.keeper) -> String.equal k.Masc.Tui_decode.k_name name)
-          state.keepers
     | None -> None
   in
   let task_id =
     match matched_change with
-    | Some fc when Option.is_some fc.Masc.Tui_decode.fc_task_id -> fc.Masc.Tui_decode.fc_task_id
-    | _ ->
-        (match keeper_record with
-         | Some k -> Option.bind k.Masc.Tui_decode.k_activity
-             (fun activity -> activity.Masc.Tui_decode.k_current_task_id)
-         | None -> None)
+    | Some fc -> fc.Masc.Tui_decode.fc_task_id
+    | None -> None
   in
   let turn =
     match matched_change with
@@ -3208,31 +3198,24 @@ let resolve_change_context (state : state) ~(path_opt : string option) : change_
          | None -> None)
     | _ -> None
   in
-  let comment =
-    match turn with
-    | Some turn_seq ->
-        let rec find_msg = function
-          | [] -> None
-          | (me : msg_entry) :: rest ->
-              if me.me_turn_sequence = Some turn_seq
-                 && not (String.equal (String.trim me.me_text) "") then
-                Some me.me_text
-              else
-                find_msg rest
-        in
-        find_msg (List.rev state.msg_history)
-    | None -> None
-  in
-  let effective_comment =
-    match comment with
-    | Some c -> Some c
-    | None -> task_description
-  in
   let pr =
     List.find_map
       (fun text -> Option.bind text Masc_tui_pr_ref.find)
-      [ task_title; task_description; comment ]
+      [ task_title; task_description ]
   in
+  let pr_slug =
+    match pr with
+    | Some (Masc_tui_pr_ref.Pull_url {slug; _}) -> Some slug
+    | Some (Masc_tui_pr_ref.Pr_token _) ->
+        (match state.repository_changes_scope, state.repositories with
+         | Some (Tui_decode.Repository_change_repository id), Some snapshot ->
+             Option.bind
+               (List.find_opt (fun (repo : Tui_decode.repository) -> String.equal repo.rp_id id)
+                  snapshot.rs_repositories)
+               (fun repo -> Masc_tui_pr_ref.github_slug_of_remote repo.rp_url)
+         | (Some Tui_decode.Repository_change_project | None), (Some _ | None)
+         | Some (Tui_decode.Repository_change_repository _), None -> None)
+    | None -> None in
   { ctx_keeper = keeper
   ; ctx_task_id = task_id
   ; ctx_task_title = task_title
@@ -3240,63 +3223,40 @@ let resolve_change_context (state : state) ~(path_opt : string option) : change_
   ; ctx_goal_id = goal_id
   ; ctx_goal_title = goal_title
   ; ctx_turn = turn
-  ; ctx_comment = effective_comment
+  ; ctx_comment = task_description
   ; ctx_pr = pr
+  ; ctx_pr_slug = pr_slug
   }
 
 
-let build_change_context_lines (change_ctx : change_context) : string list =
-  let line1_items = [] in
-  let line1_items =
-    match change_ctx.ctx_goal_id, change_ctx.ctx_goal_title with
-    | Some gid, Some title ->
-        Printf.sprintf "Goal: %s (%s)" gid (Message_layout.truncate_middle 24 title) :: line1_items
-    | Some gid, None -> ("Goal: " ^ gid) :: line1_items
-    | None, _ -> line1_items
-  in
-  let line1_items =
-    match change_ctx.ctx_task_id, change_ctx.ctx_task_title with
-    | Some tid, Some title ->
-        Printf.sprintf "Task: %s (%s)" tid (Message_layout.truncate_middle 26 title) :: line1_items
-    | Some tid, None -> ("Task: " ^ tid) :: line1_items
-    | None, _ -> line1_items
-  in
-  let line1_items =
-    match change_ctx.ctx_keeper with
-    | Some k -> ("Keeper: " ^ k) :: line1_items
-    | None -> line1_items
-  in
-  let line2_items = [] in
-  let line2_items =
-    match change_ctx.ctx_pr with
-    | Some pr ->
-        Printf.sprintf "PR: #%d" (Masc_tui_pr_ref.number pr) :: line2_items
-    | None -> line2_items
-  in
-  let line2_items =
-    match change_ctx.ctx_turn with
-    | Some turn -> Printf.sprintf "Turn #%d" turn :: line2_items
-    | None -> line2_items
-  in
-  let line2_items =
-    match change_ctx.ctx_comment with
-    | Some c when String.trim c <> "" ->
-        ("Note: " ^ first_line_summary ~max_len:34 c) :: line2_items
-    | _ -> line2_items
-  in
-  let l1_opt =
-    if line1_items = [] then None
-    else Some ("  " ^ String.concat "  |  " (List.rev line1_items))
-  in
-  let l2_opt =
-    if line2_items = [] then None
-    else Some ("  " ^ String.concat "  |  " (List.rev line2_items))
-  in
-  match l1_opt, l2_opt with
-  | Some l1, Some l2 -> [ l1; l2 ]
-  | Some l1, None -> [ l1 ]
-  | None, Some l2 -> [ l2 ]
-  | None, None -> []
+let build_change_context_lines ~cols (change_ctx : change_context) : string list =
+  let items =
+    [ Option.map (fun keeper -> "Record: Keeper: " ^ keeper) change_ctx.ctx_keeper
+    ; (match change_ctx.ctx_task_id, change_ctx.ctx_task_title with
+       | Some id, Some title -> Some (Printf.sprintf "Task: %s (%s)" id
+           (Message_layout.truncate_middle 26 title))
+       | Some id, None -> Some ("Task: " ^ id)
+       | None, (Some _ | None) -> None)
+    ; (match change_ctx.ctx_goal_id, change_ctx.ctx_goal_title with
+       | Some id, Some title -> Some (Printf.sprintf "Goal: %s (%s)" id
+           (Message_layout.truncate_middle 24 title))
+       | Some id, None -> Some ("Goal: " ^ id)
+       | None, (Some _ | None) -> None)
+    ; Option.map (fun _ -> "Checkout unverified") change_ctx.ctx_keeper
+    ; Option.map (fun turn -> Printf.sprintf "Turn #%d" turn) change_ctx.ctx_turn
+    ; (match change_ctx.ctx_pr, change_ctx.ctx_pr_slug with
+       | Some pr, Some slug -> Some (Printf.sprintf "PR: %s#%d" slug (Masc_tui_pr_ref.number pr))
+       | Some pr, None -> Some (Printf.sprintf "PR: #%d (repository unknown)" (Masc_tui_pr_ref.number pr))
+       | None, (Some _ | None) -> None)
+    ; (match change_ctx.ctx_comment with
+       | Some text when String.trim text <> "" -> Some ("Note: " ^ first_line_summary ~max_len:34 text)
+       | Some _ | None -> None)
+    ] |> List.filter_map Fun.id in
+  let width = max 1 (framed_inner_width cols - 2) in
+  items
+  |> List.concat_map (fun item -> Message_layout.wrap_words ~max_cells:width
+      (Keeper_chat.terminal_safe_text item))
+  |> List.map (fun line -> "  " ^ line)
 
 
 let tree_diff_gutter (row : Masc.Tui_decode.git_diff_row) =
@@ -3355,14 +3315,34 @@ type diff_surface =
   ; ds_clamped : int -> clamped_scroll
   }
 
-(* Rows the frame spends outside the diff body: top border, header, its
-   divider, the column caption, its divider, the status line, bottom border.
-   A context line and the error line each add themselves plus a divider. *)
-let diff_surface_fixed_chrome_rows = 7
+(* Top, title, divider, caption, divider, status, bottom and footer. *)
+let diff_surface_fixed_chrome_rows = 8
 
 let diff_surface_rows_per_context_line = 2
 
-let diff_surface_error_rows = 2
+let diff_surface_minimum_rows = diff_surface_fixed_chrome_rows + 1
+
+type diff_surface_geometry =
+  { dsg_context_lines : string list
+  ; dsg_error_rows : int
+  ; dsg_content_height : int
+  }
+
+let diff_surface_geometry ~rows ~context_lines ~has_error =
+  let error_rows =
+    if not has_error then 0
+    else if rows >= diff_surface_minimum_rows + 2 then 2
+    else if rows >= diff_surface_minimum_rows + 1 then 1
+    else 0 in
+  let context_lines =
+    if rows >= diff_surface_minimum_rows
+       && (List.length context_lines * diff_surface_rows_per_context_line)
+          <= rows - diff_surface_minimum_rows - error_rows
+    then context_lines else [] in
+  let content_height = max 1 (rows - diff_surface_fixed_chrome_rows - error_rows
+      - (List.length context_lines * diff_surface_rows_per_context_line)) in
+  { dsg_context_lines = context_lines; dsg_error_rows = error_rows;
+    dsg_content_height = content_height }
 
 
 let render_diff_surface (state : state) (ds : diff_surface) =
@@ -3379,6 +3359,14 @@ let render_diff_surface (state : state) (ds : diff_surface) =
     detail_heading ~cols ~lead:(Lead_text (screen_title ds.ds_title ^ " "))
       ~id:ds.ds_address ~after:"  vs HEAD" ~tail:(connection_badge state)
   in
+  if rows < diff_surface_minimum_rows then begin
+    Buffer.add_string buf (Message_layout.fit_width
+      " Git diff needs a larger terminal; resize to inspect (Esc:back)"
+      (max 1 (cols - 1)));
+    finish_surface state ~surface_key:ds.ds_surface_key ~rows:terminal_rows ~cols buf
+  end else begin
+  let geometry = diff_surface_geometry ~rows ~context_lines:ds.ds_context_lines
+      ~has_error:(Option.is_some ds.ds_error) in
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
@@ -3386,29 +3374,24 @@ let render_diff_surface (state : state) (ds : diff_surface) =
     (fun ctx_line ->
       box_line buf cols ctx_line;
       box_divider buf cols)
-    ds.ds_context_lines;
+    geometry.dsg_context_lines;
   box_line_styled buf cols ~style:(Theme.recede ())
     (Printf.sprintf "  col %d · old / new · working tree vs HEAD" (ds.ds_hscroll + 1));
   box_divider buf cols;
-  (match ds.ds_error with
-   | None -> ()
-   | Some detail ->
+  (match ds.ds_error, geometry.dsg_error_rows with
+   | None, _ -> ()
+   | Some detail, count when count > 0 ->
        box_line_styled buf cols ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text detail);
-       box_divider buf cols);
-  let chrome_rows =
-    diff_surface_fixed_chrome_rows
-    + (List.length ds.ds_context_lines * diff_surface_rows_per_context_line)
-    + if Option.is_some ds.ds_error then diff_surface_error_rows else 0
-  in
-  let content_height =
-    Masc_tui_scroll.content_height ~rows ~chrome:chrome_rows ~count:total
-      ~preview_keep:None ~overflow_takes_row:false
-  in
+       if count = 2 then box_divider buf cols
+   | Some _, _ -> ());
+  let content_height = geometry.dsg_content_height in
   let max_scroll = max 0 (total - content_height) in
   let scroll = max 0 (min ds.ds_scroll max_scroll) in
   let diff_rows_window = Rows.of_list ~first:scroll ~height:content_height diff_rows in
-  if total = 0 then begin
+  if Option.is_some ds.ds_error && geometry.dsg_error_rows = 0 then
+    box_line_styled buf cols ~style:(Theme.bad ()) page_failed_note
+  else if total = 0 then begin
     (* Three different facts, and none of them is the others: not read yet, a
        failed read, and a file that matches its last commit. *)
     let empty =
@@ -3443,14 +3426,30 @@ let render_diff_surface (state : state) (ds : diff_surface) =
     (footer_line state ~max_cells:cols ~hints:ds.ds_footer_hints);
   finish_surface state ~clamped:(ds.ds_clamped scroll)
     ~surface_key:ds.ds_surface_key ~rows:terminal_rows ~cols buf
+  end
 
+
+let repository_changes_diff_geometry state ~terminal_rows ~cols ~path =
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let context = build_change_context_lines ~cols
+      (resolve_change_context state ~path_opt:(Some path)) in
+  diff_surface_geometry ~rows ~context_lines:context
+    ~has_error:(Option.is_some state.repository_changes_diff_error)
+
+let repository_changes_diff_context_visible state ~terminal_rows ~cols ~path =
+  (repository_changes_diff_geometry state ~terminal_rows ~cols ~path).dsg_context_lines <> []
+
+let repository_changes_diff_page_rows state ~terminal_rows ~cols ~path =
+  let geometry = repository_changes_diff_geometry state ~terminal_rows ~cols ~path in
+  Masc_tui_scroll.page_step ~height:geometry.dsg_content_height
 
 let render_repository_changes_diff (state : state) ~path =
+  let _, cols = get_terminal_size () in
   let change_ctx = resolve_change_context state ~path_opt:(Some path) in
   render_diff_surface state
     { ds_title = " MASC Git Diff"
     ; ds_address = Terminal_text.single_line path
-    ; ds_context_lines = build_change_context_lines change_ctx
+    ; ds_context_lines = build_change_context_lines ~cols change_ctx
     ; ds_diff =
         (* A diff held for another path is not this file's reading. *)
         (match state.repository_changes_diff with

@@ -1275,7 +1275,7 @@ let keeper_message_tool_rows (state : state) ~keeper_name ~chat_cols projection 
   in
   let file_change_index =
     if Option.equal String.equal state.msg_file_changes_keeper (Some keeper_name)
-    then state.msg_file_change_index
+    then (keeper_chat_file_changes_index state)
     else Keeper_chat_diff.empty
   in
   let mode = tool_projection_mode state in
@@ -2195,7 +2195,7 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
     && memo.lem_tools = state.msg_tool_visibility
     && Option.equal String.equal memo.lem_file_changes_keeper
          state.msg_file_changes_keeper
-    && memo.lem_file_change_index == state.msg_file_change_index
+    && memo.lem_file_change_index == (keeper_chat_file_changes_index state)
     && Option.equal String.equal memo.lem_calls_keeper
          state.keeper_calls_keeper
     && Bool.equal memo.lem_calls_loading state.keeper_calls_loading
@@ -2294,7 +2294,7 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
             lem_origin = state.msg_origin_display;
             lem_tools = state.msg_tool_visibility;
             lem_file_changes_keeper = state.msg_file_changes_keeper;
-            lem_file_change_index = state.msg_file_change_index;
+            lem_file_change_index = (keeper_chat_file_changes_index state);
             lem_calls_keeper = state.keeper_calls_keeper;
             lem_calls_loading = state.keeper_calls_loading;
             lem_calls_error = state.keeper_calls_error;
@@ -3032,7 +3032,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
            && memo.sbm_calls_error = state.keeper_calls_error
            && memo.sbm_calls == state.keeper_calls
            && memo.sbm_file_changes_keeper = state.msg_file_changes_keeper
-           && memo.sbm_file_change_index == state.msg_file_change_index
+           && memo.sbm_file_change_index == (keeper_chat_file_changes_index state)
            && memo.sbm_palette_generation = palette_generation
            && memo.sbm_chat_cols = chat_cols ->
         if memo.sbm_block.lb_insertion = insertion then memo.sbm_block
@@ -3062,7 +3062,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
             sbm_calls_error = state.keeper_calls_error;
             sbm_calls = state.keeper_calls;
             sbm_file_changes_keeper = state.msg_file_changes_keeper;
-            sbm_file_change_index = state.msg_file_change_index;
+            sbm_file_change_index = (keeper_chat_file_changes_index state);
             sbm_palette_generation = palette_generation;
             sbm_chat_cols = chat_cols;
             sbm_block = block;
@@ -4360,7 +4360,8 @@ let render_keeper_message (state : state) =
        precedes its first paint, the pin already restores a reading position
        although the stored scroll is still zero. Reserve and draw its chrome
        from that same requested position, before measuring the history. *)
-    let status_frame = keeper_message_frame_for_viewport ~scroll:requested state ~now:(Unix.gettimeofday ()) ~terminal_rows:rows in
+    let status_frame = keeper_message_frame_for_viewport ~scroll:requested state
+        ~now:(Unix.gettimeofday ()) ~terminal_rows:rows ~terminal_cols:cols in
     let command_window = keeper_message_command_window ~status_frame ~scroll:requested state
       ~terminal_rows:rows ~terminal_cols:cols in
     let command_rows = match command_window with None -> 0 | Some (_, entries) -> 2 + List.length entries in
@@ -4373,73 +4374,7 @@ let render_keeper_message (state : state) =
          (#30401) while this branch was open. Neither is dropped, but only a
          mode away from its default is spelled -- see
          [Tui_types.chat_visibility_summary] for why. *)
-      let modes =
-        chat_visibility_summary ~memory:state.msg_memory_visibility
-          ~origin:state.msg_origin_display
-          ~reasoning:state.msg_reasoning_visibility
-          ~tools:state.msg_tool_visibility
-      in
-      let diff_status =
-        let snapshot_status ~stale snapshot =
-          let missing_ids =
-            Keeper_chat_diff.missing_execution_ids
-              state.msg_file_change_index
-          in
-          let ambiguous_ids =
-            Keeper_chat_diff.ambiguous_execution_ids
-              state.msg_file_change_index
-          in
-          let gaps =
-            [ ( snapshot.Masc.Tui_decode.fcs_over_budget
-              , "oversized" )
-            ; (snapshot.Masc.Tui_decode.fcs_malformed, "malformed")
-            ; (missing_ids, "no execution id")
-            ; (ambiguous_ids, "duplicate execution ids")
-            ]
-            |> List.filter_map (fun (count, label) ->
-              if count = 0 then None
-              else Some (Printf.sprintf "%d %s" count label))
-          in
-          Printf.sprintf "diffs %.0fh%s%s"
-            snapshot.Masc.Tui_decode.fcs_window_hours
-            (if stale then " stale" else "")
-            (match gaps with
-             | [] -> ""
-             | gaps -> " partial · " ^ String.concat " · " gaps)
-        in
-        match state.msg_tool_visibility with
-        | Tools_compact | Tools_results -> ""
-        | Tools_full ->
-            if
-              not
-                (Option.equal String.equal state.msg_file_changes_keeper
-                   (Some keeper_name))
-            then "diffs pending"
-            else if state.msg_file_changes_loading
-                    && Option.is_none state.msg_file_changes
-            then "diffs loading"
-            else
-              match state.msg_file_changes_error, state.msg_file_changes with
-              | Some _, Some snapshot -> snapshot_status ~stale:true snapshot
-              | Some _, None -> "diffs unavailable"
-              | None, Some snapshot -> snapshot_status ~stale:false snapshot
-              | None, None -> "diffs pending"
-      in
-      let call_status =
-        match state.msg_tool_visibility, state.keeper_calls_error with
-        | (Tools_results | Tools_full), Some _
-          when state.keeper_calls_keeper = Some keeper_name ->
-            (match state.keeper_calls with
-             | Some snapshot when String.equal snapshot.kcs_keeper keeper_name ->
-                 "results stale · refresh failed"
-             | Some _ | None -> "results unavailable")
-        | (Tools_compact | Tools_results | Tools_full), _ -> ""
-      in
-      let modes =
-        [ modes; diff_status; call_status ]
-        |> List.filter (fun item -> not (String.equal item ""))
-        |> String.concat " · "
-      in
+      let modes = status_frame.kmsf_title_suffix in
       let title =
         Printf.sprintf "%s Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 chat%s"
           (Theme.recede ()) display_keeper_name Ansi.reset
@@ -4551,6 +4486,9 @@ let render_keeper_message (state : state) =
     box_top chat_buf chat_cols;
     box_line chat_buf chat_cols title_row;
     box_divider chat_buf chat_cols;
+    List.iter (fun line ->
+      box_line_styled chat_buf chat_cols ~style:(Theme.warn ()) ("  " ^ line))
+      status_frame.kmsf_evidence_rows;
 
     (* Message history. The fixed chrome is 8 rows — box top, navigation row,
        its divider, the input divider, composer's first line, box bottom,

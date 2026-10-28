@@ -114,8 +114,9 @@ Document (MCP 2026-07-28). Nothing is stored for it:
 - the URL must be plain URL text with a path and no userinfo, query, fragment
   or dot segment;
 - the consent form fetches nothing; the same-origin approval fetches the
-  document after the MASC bearer is accepted, and a denial fetches it before
-  redirecting;
+  document after the MASC bearer is accepted, and a denial fetches nothing: it
+  redirects to the loopback callback with `error=access_denied` and sends no
+  code;
 - the fetch resolves only to public addresses, follows no redirect, reads at
   most 5 KiB and accepts only HTTP 200;
 - the document's `client_id` must equal the URL, and its `redirect_uris` must

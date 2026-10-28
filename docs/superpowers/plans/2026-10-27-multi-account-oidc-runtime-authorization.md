@@ -77,7 +77,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 
 ### A. 측정과 기반
 
-이 그룹의 층은 `Single_user` 동작을 바꾸지 않는다. A2는 B2 다음, `account_mode`를 읽는 첫 층 앞에 쌓는다. 지금 계획에서 모드를 읽는다고 적은 층은 C4와 D2(`Runtime.authorize`)다. C2나 C3이 모드에 따라 갈래를 나누면 그 층의 선행에 A2를 더한다.
+이 그룹의 층은 `Single_user` 동작을 바꾸지 않는다. A2는 B2 다음에 쌓고, `account_mode`를 읽는 층(C2, C3, C4, D2)보다 앞에 둔다. C2는 OIDC 경로를 `Multi_account`에서만 열고, C3은 설계 §5.2가 모드로 갈라 놓았다. C4와 D2도 모드를 읽는다.
 
 | 층 | 결과 | 설계 | 선행 |
 |---|---|---|---|
@@ -87,7 +87,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 
 **A2 범위**
 
-- 판정은 설정, `authz.jsonl`의 마지막 모드 사건, 외부 고수위(B2)를 모두 읽는 전체 함수이고 거부 사유를 모두 돌려준다. 결과와 마지막 모드 사건은 닫힌 변형이다. F3이 off 사건을 더하면 컴파일이 이 판정에서 멈춘다.
+- 판정은 설정, `authz.jsonl`의 마지막 모드 사건, 외부 고수위(B2)를 모두 읽는 전체 함수이고 거부 사유를 모두 돌려준다. 결과와 마지막 모드 사건은 닫힌 변형이다. 이 층의 모드 사건은 `Multi_account`뿐이고, F3이 off와 재활성화 사건을 더하면 컴파일이 이 판정에서 멈춘다.
 - bootstrap을 할 수 있는 층이 생기기 전에는 기록이 없는 `Multi_account` 설정을 `Multi_account_not_activatable`로 거부한다.
 - 설정의 `account_mode`를 읽는 곳은 이 부팅 판정 하나다. 다른 층은 판정 결과를 받고, 설정 파일을 다시 읽어 모드를 정하지 않는다.
 - `authz.jsonl`이 없는 것과 있는데 읽지 못하는 것을 구분한다. 외부 저장소도 같다.
@@ -98,10 +98,20 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 
 | 층 | 결과 | 설계 | 선행 |
 |---|---|---|---|
-| B1 | `authz.jsonl`을 파일에 쌓는 저장소. B1a는 한 줄의 형식이다. 앞 줄의 해시를 품은 체인, 평범한 JSON 본문 타입, 줄의 바이트를 이 모듈이 직접 쓰는 것, record 종류와 author 종류의 짝 검사(§6.3)다. `RuntimeGrant`, `DelegatePolicy`, `Principal`, `InternalServiceCredential`, 명시적 permission revocation은 인증된 author가 필요하고, `System_cron`, `System_maintenance`, `System_migration`이 쓸 수 있는 record는 정해져 있다. B1b는 파일이다. 기동 때 줄을 모두 검증하면서 호출자가 넘긴 접기 함수(줄을 하나씩 받아 상태를 만드는 함수)로 접고(replay), 끝이 잘린 마지막 줄(꼬리)을 보고한다. 꼬리를 자르는 것은 기동 때만 한다. 프로세스 배타 writer 구역 하나 안에서만 잇고, 다른 프로세스가 쥐고 있으면 기다리지 않고 `Locked`를 돌려준다. 한 구역에서 여러 줄을 한 번의 fsync로 잇는다. 구역 안에서 파일 끝이 예상과 다르면 재시도 없이 `Diverged`다. blocking 파일 작업은 `Systhread_host.run`으로 보낸다. 접힌 상태를 불변 값으로 발행하는 일(snapshot)은 B3이 정한다. lease 계열 group commit은 E1에서 붙인다. | §6.3, §8.1 | A3 |
+| B1 | `authz.jsonl`을 파일에 쌓는 저장소. B1a는 한 줄의 형식과 author 짝 검사, B1b는 파일이다. 세부는 표 아래 B1 범위다. lease 계열 group commit은 E1에서 붙인다. | §6.3, §8.1 | A3 |
 | B2 | backup 밖 append-only 저장소(설계의 외부 고수위·revocation ledger)와 `Intent_pending`/`Committed`. 저장소는 객체의 scoped epoch 최고값, artifact별 `credential_generation`, Intent 상태를 기록한다. Intent의 subject는 grant·credential·principal·Runtime 중 하나다(§4.5). 같은 writer lock 구역, 판정 갈래 1~5, `AuthorizationUncertain`, `Revocation_pending` 게이트, `Fresh_bootstrap`. 갈래마다 고장 주입 시험을 둔다. 저장소의 위치를 받는 방식을 먼저 정한다(§6의 결정 2). | §4.5, §8.2~8.4 | B1 |
 | B3 | Principal·Admin_assignment·WorkspaceMembership·초대 저장소, 마지막 Admin 보호, 호스트 로컬 bootstrap, ID 발급 규칙, principal 삭제 사건. 세부는 표 아래 B3 범위다. | §4.1, §5.1 | B1, B2 |
 | B4 | `Purge_pending`, `Purged`, `Purge_failed` 사건과 현재 상태 판정(target의 마지막 사건이 현재 상태, target 단위 멱등), `Purge_pending` 대상의 읽기 거부, 재기동 때 남은 `Purge_pending` 목록. `Purge_pending` 지정은 §8.2의 scoped epoch 사건이라 `Intent_pending`/`Committed` 규칙을 따른다(initiator 삭제이면 `Delete` 사건). 삭제는 하지 않는다. 삭제 실행기는 F1이다. | §8.5 | B2, B3 |
+
+**B1 범위**
+
+- B1a(줄 형식): 앞 줄의 해시를 품은 체인, 평범한 JSON 본문 타입, 줄의 바이트를 이 모듈이 직접 쓰는 것, record 종류와 author 종류의 짝 검사(§6.3). `RuntimeGrant`, `DelegatePolicy`, `Principal`, `InternalServiceCredential`, 명시적 permission revocation은 인증된 author가 필요하고, `System_cron`, `System_maintenance`, `System_migration`이 쓸 수 있는 record는 정해져 있다.
+- B1b(파일): 파일은 `<base>/.masc/auth/authz.jsonl`이고 권한은 0600이다. `config.json`과 같은 디렉터리다(`auth_credential_base.ml:38`).
+- 프로세스 사이의 배타는 서버를 base path마다 하나만 뜨게 하는 BasePath lease가 맡는다. 이 lease는 `lib/server/server_startup_takeover.ml`에 있고 `masc.server`가 `masc.auth`에 기대므로, `masc.auth`가 부르지 못한다. 프로세스 안은 `Eio.Mutex` 하나가 맡는다. `Fs_compat`의 cursor 계열 잠금은 작업 하나 동안만 건다.
+- 기동 때 줄을 모두 검증하면서 호출자가 넘긴 접기 함수(줄을 하나씩 받아 상태를 만드는 함수)로 접는다(replay). 결과는 파일 없음, 빈 파일, 줄 있음, 열지 못함을 구분한다. A2의 판정이 이 구분에 기댄다. 끝이 잘린 마지막 줄(꼬리)은 보고하고, 자르는 것은 기동 때만 한다.
+- 잇는 일은 writer 구역 하나 안에서만 한다. 다른 프로세스가 쥐고 있으면 기다리지 않고 `Locked`를 돌려준다. 한 구역에서 여러 줄을 한 번의 fsync로 잇는다. 잇는 목록은 구역의 head에서 이어져야 하고, 아니면 쓰기 전에 거절한다.
+- 구역 안에서 파일 끝이 예상과 다르면 재시도 없이 `Diverged`다. `Diverged` 뒤와, 쓰기가 어디까지 됐는지 확인하지 못한 실패 뒤에는 재기동 전까지 이후 append를 거절한다.
+- blocking 파일 작업은 `Systhread_host.run`으로 보낸다. 접힌 상태를 불변 값으로 발행하는 일(snapshot)은 B3이 정한다.
 
 **B3 범위**
 
@@ -117,8 +127,8 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 | 층 | 결과 | 설계 | 선행 |
 |---|---|---|---|
 | C1 | OIDC ID token 검증 의존성 결정. `jose`와 `jwto`를 현재 pin(x509 >= 1.0, < 1.2), OCaml 5.5, RS256, `alg=none` 거부, JWKS `kid` 선택으로 비교한 근거를 남기고 하나를 추가한다. 고정한 JWKS와 token 벡터로만 시험하고 네트워크를 쓰지 않는다. | §5.2 | - |
-| C2 | Google OIDC code + PKCE 로그인, `(iss, sub)` 결속, 초대 소비(동시 소비는 409). 삭제된 principal의 `(iss, sub)`로 등록하거나 소비하면 Admin 화면과 감사 기록에 `previously_deleted`를 보인다. 입장을 막지 않는다. 이 표시는 `authz.jsonl`을 읽어 만들고 principal 레코드에는 저장하지 않는다(§5.1-6). 도메인 정책(`oidc.admission_request_domains`)이 있으면 미등록 `(iss, sub)`의 입장 요청 조건(`hd`·`email_verified`)과 입장 요청 기록·Admin 승인(§5.1-2c, §5.1-7)을 함께 낸다. 입장 요청의 개수 상한과 상한을 넘었을 때의 동작, 만료 시간, 종단 요청의 보존 기간을 이 층에서 정한다. 입장 요청까지 담으면 층이 크므로, 20k token을 넘으면 입장 요청을 C2b로 쪼갠다(§3 머리말 규칙). 시험 벡터에 `hd` 없음, `hd` 불일치, `email_verified=false`, 정책 아래에서 (a)나 (b)로 들어오는 `hd` 없는 사용자의 로그인 허용, `hd` 대소문자(`A.com`), 승인 때 요청의 도메인이 정책에 없거나 정책이 비어 있는 경우(승인 거부), `Pending` 중 재로그인(새 요청 없음), 두 Admin의 동시 승인(409)과 승인·거절이 겹친 경우(User가 생긴 쪽이 이김), (a)나 (b)로 User가 생긴 뒤 같은 `(iss, sub)`의 `Pending`이 `Superseded`로 읽히고 승인 대기 목록에 나오지 않는 경우, 거절 뒤 재로그인(새 요청 없음)과 (a)로의 입장, 만료된 요청의 승인 거부와 새 요청 허용, 시계가 되감겨 `Expired`가 `Pending`으로 돌아와도 승인 검사가 같은 시계를 쓰는 경우, 이미 입장한 요청에 거절을 누르면 409, 승인된 요청의 User 삭제 뒤 승인 대기 목록에 되살아나지 않는 경우와 새 요청 허용, `Superseded`였던 요청의 User 삭제 뒤 `previously_deleted`와 함께 `Pending`으로 보이는 경우, 복원으로 요청 저장소가 뒤처져 `Pending`이 남은 경우(User가 있으면 승인 대기 목록에 나오지 않는다), `previously_deleted` 표지가 있는 `(iss, sub)`의 입장 요청 화면, `Disabled` 등록 사용자의 로그인(정책 면제가 §4.1 Disabled 규칙을 덮지 않는다), 만료됐거나 취소된 초대 token을 넣는다. | §5.1, §5.2 | B3, C1 |
-| C3 | 다계정에서 `__Host-` 세션·transaction·mcp 쿠키, 세션에 결속한 CSRF 토큰, 출처 검사, cookie와 Bearer가 함께 오면 거부, WS/SSE 결속과 폐기 때 닫기, 원격 query credential 차단. | §5.2, §5.3 | C2 |
+| C2 | Google OIDC code + PKCE 로그인, `(iss, sub)` 결속, 초대 소비(동시 소비는 409). 삭제된 principal의 `(iss, sub)`로 등록하거나 소비하면 Admin 화면과 감사 기록에 `previously_deleted`를 보인다. 입장을 막지 않는다. 이 표시는 `authz.jsonl`을 읽어 만들고 principal 레코드에는 저장하지 않는다(§5.1-6). 도메인 정책(`oidc.admission_request_domains`)이 있으면 미등록 `(iss, sub)`의 입장 요청 조건(`hd`·`email_verified`)과 입장 요청 기록·Admin 승인(§5.1-2c, §5.1-7)을 함께 낸다. 입장 요청의 개수 상한과 상한을 넘었을 때의 동작, 만료 시간, 종단 요청의 보존 기간을 이 층에서 정한다. 입장 요청까지 담으면 층이 크므로, 20k token을 넘으면 입장 요청을 C2b로 쪼갠다(§3 머리말 규칙). 시험 벡터에 `hd` 없음, `hd` 불일치, `email_verified=false`, 정책 아래에서 (a)나 (b)로 들어오는 `hd` 없는 사용자의 로그인 허용, `hd` 대소문자(`A.com`), 승인 때 요청의 도메인이 정책에 없거나 정책이 비어 있는 경우(승인 거부), `Pending` 중 재로그인(새 요청 없음), 두 Admin의 동시 승인(409)과 승인·거절이 겹친 경우(User가 생긴 쪽이 이김), (a)나 (b)로 User가 생긴 뒤 같은 `(iss, sub)`의 `Pending`이 `Superseded`로 읽히고 승인 대기 목록에 나오지 않는 경우, 거절 뒤 재로그인(새 요청 없음)과 (a)로의 입장, 만료된 요청의 승인 거부와 새 요청 허용, 시계가 되감겨 `Expired`가 `Pending`으로 돌아와도 승인 검사가 같은 시계를 쓰는 경우, 이미 입장한 요청에 거절을 누르면 409, 승인된 요청의 User 삭제 뒤 승인 대기 목록에 되살아나지 않는 경우와 새 요청 허용, `Superseded`였던 요청의 User 삭제 뒤 `previously_deleted`와 함께 `Pending`으로 보이는 경우, 복원으로 요청 저장소가 뒤처져 `Pending`이 남은 경우(User가 있으면 승인 대기 목록에 나오지 않는다), `previously_deleted` 표지가 있는 `(iss, sub)`의 입장 요청 화면, `Disabled` 등록 사용자의 로그인(정책 면제가 §4.1 Disabled 규칙을 덮지 않는다), 만료됐거나 취소된 초대 token을 넣는다. | §5.1, §5.2 | A2, B3, C1 |
+| C3 | 다계정에서 `__Host-` 세션·transaction·mcp 쿠키, 세션에 결속한 CSRF 토큰, 출처 검사, cookie와 Bearer가 함께 오면 거부, WS/SSE 결속과 폐기 때 닫기, 원격 query credential 차단. | §5.2, §5.3 | A2, C2 |
 | C4 | scoped PAT와 Service credential 레코드(principal + `Pat_scope`), 새 `Auth_gate.decide`로 HTTP strict와 MCP caller strict 통합, 다계정에서 caller alias 유지·workspace secret(HTTP 복구 grace 포함, `auth.ml:216`)·auth disabled 경로 제거, `agent_credential` 읽기 거부. `Mcp_oauth_token`은 C5 전까지 Reject. | §5.3 | A2, A3, C3 |
 | C5 | MCP OAuth 승인을 OIDC session에 결속한다. OAuth 스택(#46336, #46337, #46340, #46343, #46356, #46379)이 main에 들어간 뒤에만 연다. 결속 전에는 C4의 Reject가 그대로다. | §5.3 | C3, C4, OAuth 스택 병합 |
 
@@ -177,13 +187,13 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 
 **F3 범위**
 
-- off 전환은 `authz.jsonl`에 모드 사건(off)을 남기고, A2의 부팅 판정이 이 사건을 마지막 모드 사건으로 읽는다. 이 사건 뒤 설정이 `Single_user`이면 multi-owned record를 읽기 전용으로 둔 `Single_user`로 부팅하고, 설정이 `Multi_account`이면 재활성화 요청이다. 재활성화는 §10.5의 `Recovery_manifest`와 `Pending` 절차가 있어야 하고, 그 절차가 없으면 별도 사유로 거부한다.
+- off 전환과 재활성화는 `authz.jsonl`과 외부 고수위에 모드 사건을 남기고, A2의 부팅 판정이 마지막 모드 사건을 읽는다. 이 사건 뒤 설정이 `Single_user`이면 multi-owned record를 읽기 전용으로 둔 `Single_user`로 부팅하고, 설정이 `Multi_account`이면 재활성화 요청이다. 재활성화는 §10.5의 `Recovery_manifest`와 `Pending` 절차가 있어야 하고, 그 절차가 없으면 별도 사유로 거부한다. 절차를 마치면 모드 사건(`Multi_account`)을 남긴다.
 - on→off 전환은 multi-owned record를 읽기 전용으로 보존하고 legacy 공유 token·admin으로 실행하지 않는다. 진행 중인 multi dispatch는 §9-5에 따라 종결하고 session은 닫는다. account-home 점유는 `Release_pending`으로 바꿔 unmount를 확인한 뒤에만 Released로 한다. 다시 켜면 같은 `Recovery_manifest`와 `Pending` 절차를 거친다.
 - `masc auth recovery --base-path <path>`는 인증 가능한 Admin이 0명이거나 IdP를 쓸 수 없을 때 연다. 호스트 관리자와 root 소유 일회용 recovery 파일이 필요하다. 실행자·사유·시각·결과·파일 digest·파기 결과를 append-only audit와 Board에 남긴다. 원격 break-glass는 없고 활성화 전에 리허설한다. 이 경로에서 Local_operator는 `Admin_assignment`를 새로 발급할 수 있고, 발급받은 principal의 grant와 `Cleared`에는 관여하지 않는다.
 
 ## 4. 순서와 첫 마일스톤
 
-- A, B, C1은 서로 거의 독립이라 병렬 스택으로 쌓을 수 있다. 나머지 순서는 층 표의 선행 열을 따른다.
+- A2를 뺀 A, B, C1은 서로 거의 독립이라 병렬 스택으로 쌓을 수 있다. 나머지 순서는 층 표의 선행 열을 따른다.
 - D2와 D3은 `Single_user`에서 동작을 바꾸지 않도록 `Runtime.authorize`가 모드에 따라 근거를 달리 발급해야 한다. 설계 §6.1이 이 점을 정한다. 이 근거가 없으면 D2는 시작하지 않는다.
 - 설계 §11의 readiness가 복구 리허설과 official lane 격리 증거를 요구하고, 설계 §10.5가 최초 활성화 때 미분류 0을 요구한다. 그래서 F1~F4와 E3 없이는 원격 다계정을 열 수 없다. 그 앞까지의 층은 다계정을 켜지 않은 채 main에 들어갈 수 있다.
 - 첫 마일스톤은 A~D3이다(2026-10-27 사용자 결정). `Single_user` 동작은 그대로이고 타입과 저장소와 로그인 경로만 들어간다. C5는 OAuth 스택이 병합된 뒤에만 열리므로 병합 시점에 따라 이 마일스톤 안이나 밖에 놓인다. D4~D6, E, F는 이 마일스톤이 병합된 뒤에 연다.
@@ -235,6 +245,8 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 4. JOSE 후보를 현재 pin과 함께 풀어 보지 않았다. `jose`는 x509 >= 0.13.0을 요구하고 lock은 1.0.6이라 하한은 맞다. 상한과 다른 의존성은 opam 해결기로 확인하지 않았다.
 5. A1의 실제 요청은 열려 있는 변경 경로를 실행할 수 있다. 격리한 base path, Keeper 없음, loopback만 쓴다. 경로 인자는 형식이 맞는 존재하지 않는 값을 쓴다.
 6. 이 조사는 코드를 읽은 것이다. 빌드와 실행은 하지 않았다. 줄 번호는 `d595f10978db` 기준이라 main이 움직이면 어긋난다.
+7. `Fs_compat`에는 Darwin `F_FULLFSYNC`를 부르는 곳이 없다(`fs_compat.mli:451-454`). `authz.jsonl`의 fsync는 프로세스가 재시작해도 남는 수준이고, 정전 뒤까지 남는다는 보장은 아니다.
+8. 서버 밖 프로세스가 같은 파일을 `Fs_compat`의 cursor 계열로 읽는 동안 서버의 append는 `Locked`가 된다. 이 파일을 읽는 도구는 B1b 뒤에 정한다.
 
 ## 8. MASC 등록
 

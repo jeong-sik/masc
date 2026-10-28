@@ -621,9 +621,9 @@ let checkpoint_source_policy : Keeper_event_queue.stimulus_payload -> checkpoint
   | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _
   | Keeper_event_queue.Workspace_message _ | Keeper_event_queue.Ask_answered _
   | Keeper_event_queue.Completion_authority_rejected _ | Keeper_event_queue.Task_cancelled _
-  | Keeper_event_queue.Task_outcome _ -> Preserve_and_rotate
+  | Keeper_event_queue.Task_outcome _ | Keeper_event_queue.Schedule_due _ -> Preserve_and_rotate
   | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
-  | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Schedule_due _
+  | Keeper_event_queue.Board_attention _
   | Keeper_event_queue.Hitl_resolved _ -> Attention_delivered
 ;;
 
@@ -718,9 +718,11 @@ let batch_disposition_of_cycle_outcome
        reached the model (edgar.a.poe, 2026-09-02, eight turns on one
        Execute; docs/audits/keeper-fleet-waiting-audit-20260902.md §13.4 in
        #32479). The ACK below still requires the HITL continuation receipt,
-       so an unconsumed grant is retained. Connector attention, messages and
-       producer/decision outcomes remain pending until a completed turn;
-       transiently observing an answer is not a durable consumer handoff. *)
+       so an unconsumed grant is retained. Connector attention, messages,
+       producer/decision outcomes and scheduled work remain pending until a
+       completed turn; transiently observing an answer is not a durable
+       consumer handoff. A scheduled occurrence is work, not an attention
+       delivery: its checkpoint cannot certify completion. *)
     Batch_ack_attention_only
   | Some
       ( Cycle.Failed _

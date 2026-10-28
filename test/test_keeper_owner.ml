@@ -6011,6 +6011,12 @@ let test_scheduled_source_handoff case () =
   let signal_settled () =
     if not !settled_sent then (settled_sent := true; Eio.Promise.resolve resolve_settled ()) in
   let attempts = ref 0 and wakes = ref 0 and order = ref [] in
+  let deferred_checkpoint : Keeper_semantic_execution.gate_checkpoint option ref = ref None in
+  let check_original_checkpoint owner label =
+    let observed = Owner.direct_checkpoint owner ~operation_id:first |> owner_ok in
+    check bool label true
+      (Option.equal Keeper_semantic_execution.equal_gate_checkpoint !deferred_checkpoint observed)
+  in
   let record text = order := !order @ [text] in
   let execute ~sw:_ ~keeper_name:_ ~claim =
     let owner = Eio.Promise.await owner_p in
@@ -6034,23 +6040,42 @@ let test_scheduled_source_handoff case () =
             ~trace_id:(Option.get (Owner.projection owner).meta).runtime.trace_id
             ~turn_count:1 ~canonical_checkpoint_bytes:"settled original chat boundary"
             |> Result.get_ok in
+          let checkpoint = Keeper_semantic_execution.Agent_core checkpoint in
           Owner.defer_direct_checkpoint owner ~operation_id:first
             ~execution_digest:operation.execution_digest
-            ~checkpoint:(Keeper_semantic_execution.Agent_core checkpoint)
+            ~checkpoint
           |> owner_ok |> ignore;
+          deferred_checkpoint := Some checkpoint;
+          check_original_checkpoint owner "deferral retains the exact original checkpoint";
           Owner.Operation_deferred)
       else (
-        let observed =
-          owner_ok (Owner.direct_checkpoint owner ~operation_id:operation.operation_id)
-          |> Option.get
-        in
-        Owner.resume_direct_checkpoint owner ~operation_id:operation.operation_id ~observed
+        check_original_checkpoint owner "reclaimed original still owns its exact checkpoint";
+        let checkpoint = match !deferred_checkpoint with
+          | Some checkpoint -> checkpoint
+          | None -> fail "original continuation has no confirmed checkpoint" in
+        (* The production runner consumes its admitted exact checkpoint before
+           executing the continuation (Keeper_direct_checkpoint_continuation).
+           Claiming the operation row alone leaves semantic execution suspended. *)
+        Owner.resume_direct_checkpoint owner ~operation_id:first ~observed:checkpoint
         |> owner_ok;
+        check bool "only the original checkpoint was consumed" true
+          (Option.is_none (Owner.direct_checkpoint owner ~operation_id:first |> owner_ok));
+        check bool "resumption preserves the running operation identity" true
+          (match Owner.exact_operation owner first |> owner_ok with
+           | Some current -> Chat_operation.Operation_id.equal current.operation_id operation.operation_id
+               && String.equal current.execution_digest operation.execution_digest
+               && (match current.state with
+                   | Chat_operation.Running _ -> true
+                   | Queued | Succeeded _ | Failed _ | Cancelled _ -> false)
+           | None -> false);
         record "resumed";
         Owner.Operation_succeeded { outcome_ref = "resumed" }))
     else (
       check bool "fresh chat retains its original identity" true
         (Chat_operation.Operation_id.equal operation.Chat_operation.operation_id next);
+      check_original_checkpoint owner "fresh chat preserves the original checkpoint scope";
+      check bool "fresh chat does not inherit the original checkpoint" true
+        (Option.is_none (Owner.direct_checkpoint owner ~operation_id:next |> owner_ok));
       record "fresh";
       Owner.Operation_succeeded { outcome_ref = "fresh" })
   in
@@ -6140,6 +6165,7 @@ let test_scheduled_source_handoff case () =
          (if case = Replaced_consumer_handoff then 2 else 1) (List.length sources);
        check bool "exact cohort is preserved despite additions" true
          (Keeper_event_queue_state.same_entry expected (List.hd sources));
+       check_original_checkpoint owner "scheduled source cannot consume the direct checkpoint";
        record "source") with
      | Ok (`Ran ()) -> () | _ -> fail "the source did not receive the next slot");
     ignore (await_terminal owner next 1_000);

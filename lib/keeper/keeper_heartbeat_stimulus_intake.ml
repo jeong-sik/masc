@@ -813,16 +813,23 @@ let reconcile_spent_selection
 type intake_source_scope =
   | General_sources
   | Addon_invocation of Keeper_event_queue.addon_operation_change
+  | Scheduled_work of Keeper_event_queue_state.pending_selection
 
-let source_scope = function
+let source_scope (selection : Keeper_event_queue_state.pending_selection) =
+  match selection.source.payload with
+  | Keeper_event_queue.Schedule_due _ -> Scheduled_work selection
   | Keeper_event_queue.Addon_operation_changed change -> Addon_invocation change
   | Keeper_event_queue.Board_signal _ | Board_attention _ | Bootstrap
-  | Fusion_completed _ | Schedule_due _ | Connector_attention _ | Hitl_resolved _
+  | Fusion_completed _ | Connector_attention _ | Hitl_resolved _
   | Ask_answered _ | Completion_authority_rejected _ | Task_cancelled _
   | Workspace_message _ | Delegate_completed _ | Composition_completed _
   | Tool_result_ready _ | Owned_job_completed _ | Task_outcome _ -> General_sources
 
 let same_source_scope left right = match left,right with
+  | Scheduled_work left, Scheduled_work right ->
+      Keeper_event_queue_state.same_entry left right
+  | Scheduled_work _, (General_sources | Addon_invocation _)
+  | (General_sources | Addon_invocation _), Scheduled_work _ -> false
   | General_sources,General_sources -> true
   | General_sources,Addon_invocation _ | Addon_invocation _,General_sources -> false
   | Addon_invocation left,Addon_invocation right ->
@@ -988,7 +995,7 @@ let heartbeat_event_intake_with_priority
       | _, (selection : Keeper_event_queue_state.pending_selection) :: rest
         when (match !admitted_scope with
           | None -> false
-          | Some scope -> not (same_source_scope scope (source_scope selection.source.payload))) ->
+          | Some scope -> not (same_source_scope scope (source_scope selection))) ->
         (* Another invocation/conversation, or a channel-less general source,
            stays durable for its own turn. Skipping does not ACK it or spend
            this batch's existing admission allowance. *)
@@ -1199,7 +1206,7 @@ let heartbeat_event_intake_with_priority
               (* Choose only after canonical consumption succeeds. An unread
                  Add-on must not anchor the batch and starve independent work. *)
               (match !admitted_scope with
-               | None -> admitted_scope:=Some (source_scope selection.source.payload)
+               | None -> admitted_scope:=Some (source_scope selection)
                | Some _ -> ());
               loop
                 (remaining - 1)

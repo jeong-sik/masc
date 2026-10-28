@@ -212,9 +212,10 @@ val batch_disposition_of_cycle_outcome :
     text in canonical history: OpenAI-compatible context is request-only, and
     official-client session replacement may lose its prior context. Delivery
     ACK does not certify model-level answer continuity. Connector attention,
-    messages and producer/decision outcomes stay pending until a turn completes.
-    Checkpointed messages/outcomes rotate within their original urgency lane so
-    later sources remain admissible. A HITL resolution
+    messages, producer/decision outcomes and scheduled work stay pending until
+    a turn completes. Checkpointed messages/outcomes and scheduled occurrences
+    rotate within their original urgency lane so later sources remain
+    admissible. A HITL resolution
     stays pending until its continuation receipt is recorded. Every failed,
     cancelled, input-required, or skipped outcome leaves the whole batch
     pending. Provider/runtime failure is not authority to discard input. *)
@@ -342,10 +343,10 @@ module For_testing : sig
   (** Revalidate a provider wait against its dispatch and observed path rest. *)
   (** The production checkpoint retention pass. Counts are observations only.
       Connector conversations rotate with their entire pending suffix in FIFO
-      order. Messages and producer/decision outcomes retain their original
-      payload and execution scope while rotating to the tail of their urgency
-      lane. No source is acknowledged. Failures remain explicit; independent
-      selected sources are still attempted. *)
+      order. Messages, producer/decision outcomes and scheduled occurrences
+      retain their original payload and execution scope while rotating to the
+      tail of their urgency lane. No source is acknowledged. Failures remain
+      explicit; independent selected sources are still attempted. *)
   val retain_checkpoint_continuations :
     base_path:string -> keeper_name:string ->
     Keeper_event_queue_state.pending_selection list -> (unit, string) result

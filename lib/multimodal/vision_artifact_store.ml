@@ -1,5 +1,5 @@
 type handle = string
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let to_string h = h
 let of_string s = s

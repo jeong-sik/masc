@@ -39,7 +39,7 @@ let error_to_string = function
   | Unreadable message | Effect_unknown message | Dependency_unavailable message -> message
 ;;
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let activity_observer : (unit -> Machine_configuration.activity) option Atomic.t = Atomic.make None
 let install_activity_observer observer = Atomic.set activity_observer observer
 let activity () = match Atomic.get activity_observer with
@@ -1205,7 +1205,7 @@ let checkpoint_info ~path =
         match json with
         | `Assoc fields -> Ok fields
         | _ -> invalid "the envelope must be a JSON object" in
-      let ( let* ) = Result.bind in
+      let open Result.Syntax in
       let* fields = fields in
       let find name = List.assoc_opt name fields in
       let required_int name =

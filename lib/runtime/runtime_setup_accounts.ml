@@ -5,7 +5,7 @@ let error_message = function
   | Private_storage_unavailable -> "Private account storage could not be read or prepared."
   | Import_failed -> "Sign in to the selected CLI on this computer, then import that account again."
   | Scope_mismatch -> "This account reference belongs to another workspace or CLI. Import the account explicitly here."
-let ( let* ) = Result.bind
+open Result.Syntax
 let reference_to_string (Reference value) = value
 let reference_of_string value = if Auth.is_generated_token_shape value then Ok (Reference value) else Error Invalid_reference
 type imported = { credential_file:string; timeout_s:float; catalog:Yojson.Safe.t }

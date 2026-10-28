@@ -67,7 +67,7 @@ let source_to_string = function
   | Muse_subscription_usage -> "muse.subscription_usage"
 ;;
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let fields_at ~path = function
   | `Assoc fields -> Ok fields

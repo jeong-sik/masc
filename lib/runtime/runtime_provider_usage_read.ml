@@ -202,7 +202,7 @@ let api_key_of_credential : Llm_provider.Provider_config.credential_source * _ -
 ;;
 
 let usage_report ?(api_key_of = api_key_of_credential) ~fetch { credential; usage_read } =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* api_key = api_key_of credential in
   let* () =
     if Llm_provider.Secret.is_empty api_key then Error Credential_unavailable else Ok ()
@@ -218,7 +218,7 @@ let shape_label (http : http_read) =
 ;;
 
 let read_http ~fetch ~scope http =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* (report : Runtime_provider_usage_window.report) = usage_report ~fetch http in
   (match report.windows with
    | [] ->
@@ -578,7 +578,7 @@ let rest_on_account_refusal_read ~scope ~observed_at read =
 ;;
 
 let read_after_account_refusal ~fetch ~scope http =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* (report : Runtime_provider_usage_window.report) =
     usage_report ~api_key_of:materialized_api_key ~fetch http
   in

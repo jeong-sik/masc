@@ -195,7 +195,7 @@ let sync_directory path =
 ;;
 
 let ensure_private_child_with_sync ~sync_parent parent leaf =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let path = Filename.concat parent leaf in
   let created =
     try
@@ -323,7 +323,7 @@ let inspect_managed_oauth path =
     | None -> `Missing)
 ;;
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let security_tool = "/usr/bin/security"
 
@@ -502,7 +502,7 @@ let prepared_count_below ~runtime_root =
 let create_login_keychain ~home_dir path =
   let library = Filename.concat home_dir "Library" in
   let keychains = Filename.concat library "Keychains" in
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* () = mkdir_if_absent library in
   let* () = verify_owned_directory library in
   let* () = mkdir_if_absent keychains in

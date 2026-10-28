@@ -192,7 +192,7 @@ let parse_timestamp ~surface ~field value =
 
 let pending_confirm_of_yojson = function
   | `Assoc fields ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let surface = "pending_confirm" in
     let* () =
       Json_util.reject_unknown_fields
@@ -366,7 +366,7 @@ let read_pending_confirms config : pending_confirm list =
 
 let upsert_pending_confirm config entry =
   with_store_lock config (fun () ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* target = target_of_entry entry in
     let* target_gate =
       match Atomic.get target_gate_callback with

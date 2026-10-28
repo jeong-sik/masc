@@ -15,7 +15,7 @@ let publish t ~incarnation ~entry_count ~newest_first =
   t.snapshot <- Some {incarnation;count=entry_count;entries=newest_first;
     cursor=entry_count;remaining=newest_first};
   `Assoc ["incarnation",`String incarnation;"entry_count",`Int entry_count]
-let ( let* ) = Result.bind
+open Result.Syntax
 let read t ~arguments =
   let* fields = match arguments with
     | `Assoc fields when List.sort String.compare (List.map fst fields)

@@ -86,7 +86,7 @@ let parse_version printed =
   | _ -> None
 ;;
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let run ~phase ~env ~cwd argv =
   match

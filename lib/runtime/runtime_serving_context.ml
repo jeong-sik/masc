@@ -1,7 +1,7 @@
 module Discovery = Runtime_model_discovery
 type source = Running_model | Configured_model | Serving_endpoint | Not_reported
 type observation = { model : string; context : int option; source : source; tools : bool option }
-let ( let* ) = Result.bind
+open Result.Syntax
 let fields_of_object = function
   | `Assoc fields when not (List.mem_assoc "error" fields) ->
     let names = List.map fst fields in

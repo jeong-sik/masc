@@ -248,7 +248,7 @@ let host_died_error ~reason =
     }
 ;;
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let protocol_error stage detail = Error (Protocol_error { stage; detail })
 
 let lift result =

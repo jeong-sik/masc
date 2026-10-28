@@ -2,7 +2,7 @@ type model = { id : string; display_name : string }
 type page = { models : model list; next_page_token : string option }
 
 let parse_page body =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let model = function
     | `Assoc fields ->
       (match List.assoc_opt "name" fields with
@@ -34,7 +34,7 @@ let parse_page body =
   with Yojson.Json_error _ -> Error "Vertex returned invalid JSON"
 
 let discover_with ~get ~base_url =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* _ = Llm_provider.Vertex_endpoint.parse_base_url base_url in
   let root = Uri.of_string base_url |> fun uri ->
     Uri.with_path uri "/v1beta1/publishers/google/models" in
@@ -56,7 +56,7 @@ let auth_headers ~credential_source =
 let discover ~sw ~net ~base_url =
   let credential_source = Runtime_google_adc.credential_source () in
   let get ~url =
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* headers = auth_headers ~credential_source in
     match Llm_provider.Http_client.get_sync ~sw ~net ~url ~headers () with
     | Error _ -> Error "Vertex model discovery request failed"

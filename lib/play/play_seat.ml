@@ -26,7 +26,7 @@ let eligible_credentials ~keepers ~now credentials =
   List.filter eligible credentials
 
 let connected_credentials ~transaction ~base_path credentials =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let rec collect found departed = function
     | [] -> Ok (List.rev found, departed)
     | credential :: rest ->
@@ -38,7 +38,7 @@ let connected_credentials ~transaction ~base_path credentials =
   collect [] [] credentials
 
 let participants_in_transaction ~transaction ~base_path ~keepers ~now =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* credentials = Auth.list_current_credentials_in_transaction transaction in
   let credentials = eligible_credentials ~keepers ~now credentials in
   let* credentials, departed = connected_credentials ~transaction ~base_path credentials in

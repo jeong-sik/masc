@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 let invalid = "Codex returned invalid model context metadata."
 let fields = function
   | `Assoc fields when List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields)) -> Ok fields

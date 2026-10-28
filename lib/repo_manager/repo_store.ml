@@ -1,6 +1,6 @@
 open Repo_manager_types
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let repos_toml_path base_path =
   (* RFC-0121: layout SSOT via [Config_dir_resolver]. Byte-equal to the

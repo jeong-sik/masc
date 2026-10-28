@@ -1,6 +1,6 @@
 open Repo_manager_types
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type advance_outcome =
   | Advanced of { behind : int }

@@ -47,7 +47,7 @@ let fault_to_string = function
   | Unterminated_quoted_string at ->
     Printf.sprintf "byte %d: the quoted string opened here never closes" at
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* ── character classes, each one rule of the grammar ─────────────────── *)
 

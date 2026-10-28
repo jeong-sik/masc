@@ -24,7 +24,7 @@
    requires. Symlinks surface through the same abort path, so a store that
    cannot be scanned fully is never swept. *)
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 module Handle_set = Set.Make (String)
 module String_map = Map.Make (String)

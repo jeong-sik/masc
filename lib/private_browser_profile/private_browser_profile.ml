@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let failure_text = function
   | Unix.Unix_error (error, call, argument) ->

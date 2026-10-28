@@ -64,7 +64,7 @@ type t = {
 let negotiated_protocol_version t = t.protocol_version
 let session_id t = t.session
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* One header name compared without regard to case, because HTTP says so and
    the two servers this has been pointed at disagree about capitalisation. *)

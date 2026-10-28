@@ -36,7 +36,7 @@ let missing_to_wire = function
   | Invalid_email -> "invalid_email"
   | Environment_credential -> "environment_credential"
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let parse bytes =
   try Ok (Yojson.Safe.from_string bytes) with Yojson.Json_error _ -> Error Source_unrecognized

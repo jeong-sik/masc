@@ -33,7 +33,7 @@ let physical_home t = t.physical_home
 let config_home t = t.config_home
 let private_tmpdir t = Filename.concat t.config_home "tmp"
 let account_revision t = t.account_revision
-let ( let* ) = Result.bind
+open Result.Syntax
 let unavailable detail = Error (State_unavailable detail)
 let digest text = Agent_core_sha256.(to_hex (digest_string text))
 

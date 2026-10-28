@@ -175,7 +175,7 @@ let update_status_summary summary line =
 ;;
 
 let status_summary_of_porcelain_lines lines =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   List.fold_left
     (fun result line ->
        let* summary = result in
@@ -216,7 +216,7 @@ let clone ~repository =
    A later unrelated fetch can change its mtime or append old lines, so readers
    use the atomic receipt instead of treating FETCH_HEAD as a clock. *)
 let record_target_fetch ~repository =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let cwd = repository.local_path in
   let first args =
     match run_git ~cwd args with
@@ -509,7 +509,7 @@ let status_files_of_porcelain_z output =
     | "" :: rest -> List.rev rest
     | _ -> records
   in
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   List.fold_left
     (fun result record ->
       let* files = result in

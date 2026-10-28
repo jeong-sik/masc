@@ -13,7 +13,7 @@ let error_message = function
   | Http_error status -> Printf.sprintf "The model-list endpoint returned HTTP %d. Check account access and API credit." status
   | Invalid_response -> "The model-list endpoint returned an unsupported response."
   | Repeated_page -> "The model-list endpoint repeated its pagination cursor."
-let ( let* ) = Result.bind
+open Result.Syntax
 let safe_text value = value <> "" && value = String.trim value
   && not (String.exists (function '\000' .. '\031' | '\127' -> true | _ -> false) value)
 let string fields key = match List.assoc_opt key fields with

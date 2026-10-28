@@ -21,7 +21,7 @@ let error_to_string = function
   | Termination_refused error -> "kernel-bound native termination was not confirmed: " ^ owner_error_to_string error
 let instance_id (t : t) = t.instance_id
 let directories (t : t) = t.directories
-let ( let* ) = Result.bind
+open Result.Syntax
 external open_directory_descriptor : string -> Unix.file_descr = "masc_native_lease_directory"
 external open_file_descriptor : Unix.file_descr -> string -> bool -> Unix.file_descr = "masc_native_lease_file"
 external holder : Unix.file_descr -> int = "masc_native_lease_holder"

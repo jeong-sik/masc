@@ -4,7 +4,7 @@ type t =
   | Native of { client : native; account_home : string }
   | Antigravity_home of { home : Runtime_antigravity_setup.t; timeout_s : float }
 type observation = Authenticated | Login_completed | Credential_captured
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let filesystem action =
   try Eio_guard.run_in_systhread ~label:"setup-login-account-storage" action with

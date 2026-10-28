@@ -32,7 +32,7 @@ let write ~transaction:(_ : Auth.credential_transaction) ~base_path credential s
     with (Unix.Unix_error _ | Sys_error _ | Eio.Io _) as exn -> Error (Printexc.to_string exn))
 
 let current ~transaction ~base_path ~name =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* credential = Auth.current_credential_in_transaction transaction name
     |> Result.map_error Masc_domain.masc_error_to_string in
   match credential with

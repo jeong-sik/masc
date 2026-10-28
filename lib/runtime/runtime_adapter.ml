@@ -335,7 +335,7 @@ let refuse_unread_wire_kind ~reason (provider : Runtime_schema.provider) =
 
 let provider_kind_for_http_provider ?registry_entry (provider : Runtime_schema.provider)
     : (Llm_provider.Provider_config.provider_kind, string) result =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* () =
     match provider.api_format, registry_provider_kind registry_entry with
     | ( Codex_app_server_runtime
@@ -849,14 +849,14 @@ let provider_config_from_declared_provider ?binding_max_context ?keep_alive ?num
     | Some _ -> provider.admission_priority_run_limit
     | None -> None
   in
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* () = validate_parallel_tool_policy provider ~model_id:spec.id
       ~disable_parallel_tool_use in
   let registry_entry = find_registry_entry provider.id in
   match provider.transport with
   | Http base_url ->
     let base_url = Masc_network_defaults.normalize_loopback_base_url base_url in
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* auth_scheme, credential_source =
       match provider.api_format with
       | Vertex_gemini_api ->
@@ -1230,7 +1230,7 @@ let muse_serve_execution (provider : Runtime_schema.provider)
              is-non-interactive = true"
             provider.id)
      | None ->
-       let ( let* ) = Result.bind in
+       let open Result.Syntax in
        let* account_home = match provider.account_home with
          | None -> Error (Printf.sprintf
              "provider %S uses muse-serve and requires an explicit account-home" provider.id)
@@ -1280,7 +1280,7 @@ let binding_to_execution (cfg : Runtime_schema.config) (binding : Runtime_schema
     (match Runtime_schema.provider_of_id cfg binding.provider_id with
      | None -> Error (Printf.sprintf "provider not found: %s" binding.provider_id)
      | Some provider ->
-       let ( let* ) = Result.bind in
+       let open Result.Syntax in
        let* () = validate_parallel_tool_policy provider ~model_id:binding.model_id
            ~disable_parallel_tool_use:binding.disable_parallel_tool_use in
        let* () = refuse_anthropic_thinking_control_on_official_client provider spec in

@@ -15,7 +15,7 @@ type readiness =
   | Partly_checked of { limited : usage_limited list; not_rechecked : string list }
 type receipt = { runtime_id:string; runtime_ids:string list; models:string list;
                  readiness:readiness; commit:Runtime.config_commit_receipt }
-let ( let* ) = Result.bind
+open Result.Syntax
 let exit_text status = match Process_eio.exit_reason_of_status status with
   | Process_eio.Completed code -> Printf.sprintf "exit %d" code
   | Process_eio.Timed_out -> "timed out"

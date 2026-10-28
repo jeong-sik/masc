@@ -20,7 +20,7 @@ module Bindings = Set.Make (struct
   let compare = Stdlib.compare
 end)
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let map_result f values =
   let rec loop acc = function

@@ -710,6 +710,7 @@ let render ~home ~compact_recovery_notice (state : state) =
      too-small notice, has none to select from. *)
   frame_panes := Masc_tui_pane_selection.no_panes;
   frame_acting_pane := Masc_tui_acting_pane.empty_frame;
+  reset_chat_row_actions ();
   (* And the candle, and any placed picture, is on this frame only if this
      frame draws it. *)
   Masc_tui_emblem_screen.begin_frame ();
@@ -792,4 +793,4 @@ let render ~home ~compact_recovery_notice (state : state) =
           presses
   in
   ({ frame with Frame_presenter.lines }, clamped, approval, presses, !frame_panes,
-   !frame_acting_pane)
+   !frame_acting_pane, chat_row_actions ())

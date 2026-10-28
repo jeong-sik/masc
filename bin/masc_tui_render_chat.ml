@@ -12,15 +12,6 @@ open Masc_tui_ansi
 open Masc_tui_render_prim
 
 
-(* The chat history as the last frame drew it: which terminal row its first
-   line landed on, and what a press on each line opens. Same reason as the
-   Activity pane above -- a press between frames answers what was on screen.
-
-   The row is absolute because the two-pane split places the chat buffer
-   beside the roster rather than below it, so a line's vertical position is
-   the buffer's own whether or not the roster is showing. Zero means no chat
-   history was drawn, which is what keeps a stale row from answering. *)
-
 module Frame_presenter = Masc_tui_frame_presenter
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Keeper_chat_diff = Masc_tui_keeper_chat_diff
@@ -36,20 +27,14 @@ module Call_evidence = Masc_tui_keeper_call_evidence
 open Call_evidence
 
 
-let chat_history_first_row = ref 0
+(* The synchronous renderer builds a candidate; the input loop owns only a
+   candidate whose frame the terminal accepted. *)
+let frame_chat_row_actions = ref Masc_tui_chat_row_actions.empty
 
-let chat_history_actions : Message_layout.row_action array ref = ref [||]
+let reset_chat_row_actions () =
+  frame_chat_row_actions := Masc_tui_chat_row_actions.empty
 
-
-(* The input layer reads the last frame's pane through these, never the
-   cells themselves: what it needs is the answer, and the cells stay this
-   module's to set once per frame. *)
-let chat_row_action_at ~row =
-  let first = !chat_history_first_row in
-  let actions = !chat_history_actions in
-  let line = row - first in
-  if first > 0 && line >= 0 && line < Array.length actions then actions.(line)
-  else Message_layout.Action_none
+let chat_row_actions () = !frame_chat_row_actions
 
 
 let chat_markdown ~context ~width body =
@@ -4325,6 +4310,7 @@ let queue_context_lines (state : state) ~keeper_name ~cols ~height =
       |> fun text -> Message_layout.take_cells text cols) rows
 
 let render_keeper_message (state : state) =
+  reset_chat_row_actions ();
   (* The chat draws its own composer and footer instead of taking the shared
      composer row. Its columns are every surface's: the terminal less the
      Activity pane, which [finish_frame_beside_acting_pane] draws beside it. *)
@@ -4595,12 +4581,22 @@ let render_keeper_message (state : state) =
     (* The chat buffer starts below the one-row tab strip, which is added by
        [finish_frame_beside_acting_pane]. Mouse reports count from the terminal's
        first row, so include that strip and the one-based row conversion. *)
-    chat_history_first_row := count_frame_lines chat_buf + 2;
-    chat_history_actions :=
-      Array.of_list
-        (List.map
-           (fun (row : Message_layout.row) -> row.Message_layout.action)
-           visible_rows);
+    let first_row = count_frame_lines chat_buf + 2 in
+    let rec actionable_rows row_number rows found =
+      match rows with
+      | [] -> List.rev found
+      | (row : Message_layout.row) :: rest ->
+          let found =
+            match row.action with
+            | Message_layout.Action_none -> found
+            | Message_layout.Action_unfold_argument -> row_number :: found
+          in
+          actionable_rows (row_number + 1) rest found
+    in
+    frame_chat_row_actions :=
+      Masc_tui_chat_row_actions.of_rows
+        ~scope:(state.workspace_authority, state.workspace_read_authority)
+        ~keeper:keeper_name (actionable_rows first_row visible_rows []);
     if visible_rows = [] then begin
       if history_height > 0 then
         box_line_styled chat_buf chat_cols ~style:(Theme.recede ())

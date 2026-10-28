@@ -12062,15 +12062,6 @@ let acting_pane_hit (state : state) ~row ~column =
     then Pane_row (row - first_row)
     else Pane_miss
 
-let keeper_chat_click_in_body state ~column =
-  let _, cols = get_terminal_size () in
-  let roster_cols =
-    if keeper_roster_pane_shown state ~cols
-    then Masc_tui_roster_pane.pane_cols
-    else 0
-  in
-  column > roster_cols && column <= cols
-
 let scroll_acting_pane (state : state) ~delta =
   state.acting_pane_scroll
   <- max 0
@@ -24290,6 +24281,10 @@ let main
   let presented = ref (Presented.initial ~approval:None
       ~presses:Masc_tui_hit.no_zones ~panes:Masc_tui_pane_selection.no_panes
       ~reader:None ~panel_owner:None) in
+  let presented_chat_row_actions :
+      (workspace_authority * unit ref) Masc_tui_chat_row_actions.t ref =
+    ref Masc_tui_chat_row_actions.empty
+  in
   (* The left button's gesture from press to release. *)
   let pointer_gesture = ref Masc_tui_pane_selection.Idle in
   let terminal_title = Terminal_title.create () in
@@ -24605,7 +24600,8 @@ let main
     Presented.panel_owner_matches !presented ~current_owner
       ~context_search_owner:(context_search_owner ())
   in
-  let present_frame frame approval presses panes acting_pane ~input_pending ~write ~flush reader =
+  let present_frame frame approval presses panes acting_pane chat_row_actions
+      ~input_pending ~write ~flush reader =
     let panel_owner = Masc_tui_render.panel_input_owner state
         ~terminal_rows:frame.Frame_presenter.terminal_rows in
     let damaged = Terminal_write_repair.consume_damage () in
@@ -24671,15 +24667,19 @@ let main
     let activity_authority_changed =
       not (same_acting_pane_authority state.acting_pane_presented acting_pane)
     in
+    let chat_actions_changed =
+      not (Masc_tui_chat_row_actions.equal ~same_scope:same_acting_pane_scope
+             !presented_chat_row_actions chat_row_actions)
+    in
     (* Approval identity, Help ownership, Queue ownership or selection, and the Play card can
        change while clipped terminal text stays byte-identical. Those changes
-       force presentation. Activity row authority changes force a full
+       force presentation. Activity and chat row action changes force a full
        presentation only if a differential draw would otherwise do nothing;
        ordinary async updates stay differential. *)
     match
       Frame_presenter.present frame_presenter
         ~invalidate_before:(damaged || authority_changed || preset_confirmation_changed)
-        ~force_present:activity_authority_changed
+        ~force_present:(activity_authority_changed || chat_actions_changed)
         ~write ~flush frame
     with
     | Frame_presenter.Presented _ as frame_result ->
@@ -24737,6 +24737,7 @@ let main
         presented := Presented.presented !presented ~approval ~presses ~panes ~reader
             ~panel_owner ~owner_changed ~input_pending;
         state.acting_pane_presented <- acting_pane;
+        presented_chat_row_actions := chat_row_actions;
         state.quit_armed <- Option.map (fun arm ->
             let was_visible = Option.exists (fun previous ->
                 Masc_tui_action_notice.same_quit previous arm.qa_confirmation) previous_quit in
@@ -28022,9 +28023,15 @@ and is loaded on demand through keeper_skill.
               && Option.is_none state.search
               && (match click with
                   | Some (row, column) ->
-                      keeper_chat_click_in_body state ~column
-                      && chat_row_action_at ~row
-                         = Masc_tui_message_layout.Action_unfold_argument
+                      (match Masc_tui_pane_selection.pane_at (!presented).panes ~row ~column with
+                       | Some { kind = Masc_tui_pane_selection.Main; _ } -> true
+                       | Some { kind = Masc_tui_pane_selection.Roster
+                                     | Masc_tui_pane_selection.Activity; _ }
+                       | None -> false)
+                      && Masc_tui_chat_row_actions.contains
+                           ~same_scope:same_acting_pane_scope
+                           ~scope:(state.workspace_authority, state.workspace_read_authority)
+                           ~keeper:state.msg_target_keeper_name ~row !presented_chat_row_actions
                   | None -> false) ->
            state.msg_tool_visibility <- Tools_full;
            Option.iter
@@ -36572,9 +36579,9 @@ and is loaded on demand through keeper_skill.
            (* Keys and async updates can change the pane reservation after
               the interaction snapshot. Store the focus the next frame shows. *)
            reconcile_chat_focus ();
-           let frame, clamped, approval, presses, panes, acting_pane =
+           let frame, clamped, approval, presses, panes, acting_pane, chat_row_actions =
              Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Build
-               ~tag:(fun (frame, _, _, _, _, _) -> frame.Frame_presenter.surface_key)
+               ~tag:(fun (frame, _, _, _, _, _, _) -> frame.Frame_presenter.surface_key)
                (fun () ->
                  Masc_tui_message_layout.begin_frame ();
                  (* Event folding is frame preparation, so its cost belongs
@@ -36639,7 +36646,7 @@ and is loaded on demand through keeper_skill.
            Masc_tui_frame_timing.time_present
              ~tag:frame.Frame_presenter.surface_key
              ~write:(output_string stdout) ~flush:(fun () -> flush stdout)
-             (present_frame frame approval presses panes acting_pane ~input_pending:input_unsettled clamped)
+             (present_frame frame approval presses panes acting_pane chat_row_actions ~input_pending:input_unsettled clamped)
        | Render_schedule.Idle | Render_schedule.Wait_until _ -> ())
     done
   in

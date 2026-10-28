@@ -844,6 +844,22 @@ let test_repeated_cursor_is_still_opaque () =
   | Ok _ -> Alcotest.fail "the last page was not returned"
   | Error error -> Alcotest.failf "cursor was interpreted: %s" (Mcp_client.error_to_string error)
 
+let test_a_listing_that_never_ends_is_refused () =
+  let post, _, answer = recording () in
+  let client = connect_or_fail post answer in
+  let count = ref 0 in
+  answer := (fun body ->
+      incr count;
+      response (Printf.sprintf {|{"jsonrpc":"2.0","id":%d,"result":{"tools":[],"nextCursor":"page-%d"}}|} (request_id body) !count));
+  (match Mcp_client.list_tools ~post client with
+   | Error (Mcp_client.Malformed detail) ->
+     check str "the refusal says why"
+       (Printf.sprintf "tools/list did not end within %d pages" Mcp_client.max_tools_list_pages)
+       detail
+   | Error error -> Alcotest.failf "wrong error: %s" (Mcp_client.error_to_string error)
+   | Ok _ -> Alcotest.fail "an endless listing was read to its end");
+  check Alcotest.int "it stopped at the bound" Mcp_client.max_tools_list_pages !count
+
 let test_structured_only_tool_result_is_preserved () =
   let post, _, answer = recording () in
   let client = connect_or_fail post answer in
@@ -925,6 +941,8 @@ let () =
             test_all_tool_pages_are_read_with_opaque_cursors;
           Alcotest.test_case "repeated cursor remains opaque" `Quick
             test_repeated_cursor_is_still_opaque;
+          Alcotest.test_case "a listing that never ends is refused" `Quick
+            test_a_listing_that_never_ends_is_refused;
           Alcotest.test_case "an event stream answer is read" `Quick
             test_an_event_stream_answer_is_read;
           Alcotest.test_case "a stream ignores what came before the answer"

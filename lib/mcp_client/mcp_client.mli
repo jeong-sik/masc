@@ -132,8 +132,13 @@ val negotiated_protocol_version : t -> string
 
 val session_id : t -> string option
 
+val max_tools_list_pages : int
+(** Pages {!list_tools} reads before it refuses a listing that does not end. *)
+
 val list_tools : post:post -> t -> (tool list, error) result
-(** Read every page, treating cursors as opaque, including empty strings. *)
+(** Read every page, treating cursors as opaque, including empty strings. A
+    listing that still returns a cursor after {!max_tools_list_pages} pages is
+    refused with [Malformed]. *)
 
 val call_tool :
   post:post ->

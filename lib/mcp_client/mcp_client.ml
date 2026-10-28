@@ -698,8 +698,21 @@ let tool_of_json ~era json =
            | _ -> None)))
   | Some _ | None -> None
 
+(* A server that keeps returning cursors never ends the listing, and every
+   page still answers inside the per-request deadline, so that deadline never
+   fires. Real catalogs fit in a few pages. A listing that needs this many is
+   refused, not read without end. The cursors stay opaque: this counts pages
+   and never looks at a cursor. *)
+let max_tools_list_pages = 1000
+
 let list_tools ~post t =
-  let rec pages cursor acc =
+  let rec pages fetched cursor acc =
+    if fetched >= max_tools_list_pages then
+      Error
+        (Malformed
+           (Printf.sprintf "tools/list did not end within %d pages"
+              max_tools_list_pages))
+    else
     let params =
       match cursor with
       | None -> `Assoc []
@@ -726,10 +739,10 @@ let list_tools ~post t =
     match member "nextCursor" result with
     | None | Some `Null -> Ok (List.rev acc)
     | Some (`String next) ->
-      pages (Some next) acc
+      pages (fetched + 1) (Some next) acc
     | Some _ -> Error (Malformed "tools/list returned a non-string cursor")
   in
-  let* tools = pages None [] in
+  let* tools = pages 0 None [] in
   Atomic.set t.tools (Some tools);
   Ok tools
 

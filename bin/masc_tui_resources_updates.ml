@@ -150,7 +150,9 @@ let share_changed state request ~result =
       | Some { entry = Catalog.Report report; _ }
         when share_matches_key request (Catalog.Report_revision report) ->
         Some (Catalog.Report_revision report)
-      | Some _ | None -> None in
+      | Some { entry = Catalog.Mcp _; _ }
+      | Some { entry = Catalog.Report _; _ }
+      | None -> None in
     (match result with
      | Error _ when not (resource_share_uncertain state request.share_report) ->
        state.resource_share_uncertain_ids <- request.share_report.id :: state.resource_share_uncertain_ids

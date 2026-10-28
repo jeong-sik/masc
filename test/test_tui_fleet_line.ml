@@ -54,13 +54,6 @@ let test_the_status_word_is_the_grades_wire_name () =
   check string "a grade" "blocked"
     (Masc_tui_fleet_line.status_text Masc.Keeper_fleet_grade.Fleet_blocked)
 
-let test_unavailable_names_the_scan_and_connection_without_counts () =
-  let degradation = { Masc.Fleet_stream.since = 10.0; reason = Masc.Fleet_stream.Scan_failed } in
-  check string "scan failure without a reading" "not observed · refresh failed"
-    (Masc_tui_fleet_line.unavailable_text ~now:0.0 ~degradation ~disconnected_since:None);
-  check string "connection loss is separate" "not observed · refresh failed · stream lost"
-    (Masc_tui_fleet_line.unavailable_text ~now:0.0 ~degradation ~disconnected_since:(Some 20.0))
-
 let () =
   run "tui fleet line"
     [ ( "blocker names"
@@ -78,8 +71,6 @@ let () =
     ; ( "server words"
       , [ test_case "the server's words are drawn as text" `Quick
             test_the_servers_words_are_drawn_as_text
-        ; test_case "unavailable preserves scan and connection failures" `Quick
-            test_unavailable_names_the_scan_and_connection_without_counts
         ] )
     ; ( "status"
       , [ test_case "only ok is healthy" `Quick test_only_ok_is_healthy

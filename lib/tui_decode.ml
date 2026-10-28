@@ -1630,6 +1630,7 @@ type runtime_context_source =
   | Runtime_context_binding_override
   | Runtime_context_provider_clamped
   | Runtime_context_binding_clamped
+[@@deriving enumerate]
 
 type exact_slot_group = Exact_http_slots | Exact_cli_slots | Exact_output_unsupported
 
@@ -1848,15 +1849,10 @@ let runtime_context_source_label = function
 
 let runtime_reasoning_effort_label = Llm_provider.Reasoning_effort.to_string
 
-let decode_runtime_context_source = function
-  | "override" -> Ok Runtime_context_override
-  | "capability" -> Ok Runtime_context_capability
-  | "override_clamped_by_capability" -> Ok Runtime_context_clamped
-  | "provider_override" -> Ok Runtime_context_provider_override
-  | "binding_override" -> Ok Runtime_context_binding_override
-  | "provider_override_clamped_by_capability" -> Ok Runtime_context_provider_clamped
-  | "binding_override_clamped_by_capability" -> Ok Runtime_context_binding_clamped
-  | value -> Error (Printf.sprintf "unknown runtime max_context_source %S" value)
+let decode_runtime_context_source value =
+  match List.find_opt (fun v -> String.equal (runtime_context_source_label v) value) all_of_runtime_context_source with
+  | Some v -> Ok v
+  | None -> Error (Printf.sprintf "unknown runtime max_context_source %S" value)
 
 let decode_runtime_option ~usage ~default_id json =
   let* ro_id = required_string_field json "id" in

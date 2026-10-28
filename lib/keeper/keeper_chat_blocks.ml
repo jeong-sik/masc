@@ -96,6 +96,7 @@ type fusion_block = {
 type status_kind =
   | Continuation_checkpoint
   | Awaiting_gate_approval
+[@@deriving enumerate]
 
 type status_block = { kind : status_kind }
 
@@ -133,6 +134,7 @@ type trace_tool_status =
   | Trace_tool_pending
   | Trace_tool_ok
   | Trace_tool_err
+[@@deriving enumerate]
 
 type trace_step =
   | Trace_think of {
@@ -307,17 +309,10 @@ let status_kind_to_label = function
   | Awaiting_gate_approval -> "external_effect_pending"
 ;;
 
-let status_kind_of_label = function
-  | "continuation_checkpoint" -> Some Continuation_checkpoint
-  | "external_effect_pending" -> Some Awaiting_gate_approval
-  | _ -> None
+let status_kind_of_label s = List.find_opt (fun v -> String.equal (status_kind_to_label v) s) all_of_status_kind
 ;;
 
-let trace_tool_status_of_label = function
-  | "pending" -> Some Trace_tool_pending
-  | "ok" -> Some Trace_tool_ok
-  | "err" -> Some Trace_tool_err
-  | _ -> None
+let trace_tool_status_of_label s = List.find_opt (fun v -> String.equal (trace_tool_status_to_label v) s) all_of_trace_tool_status
 ;;
 
 let trace_status_to_yojson = function

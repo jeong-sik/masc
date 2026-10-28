@@ -2,6 +2,7 @@ module Lane = Browser_lane
 type preference = Automatic | Exact of Lane.route
 type reason = Explicit_browser | Existing_login | Existing_work_session
   | Preferred_work_browser | Compatible_work_browser | Available_connected_browser
+[@@deriving enumerate]
 type selected = { route : Lane.route; reason : reason }
 type error = Binding_required | No_available_browser | Ambiguous_browsers of Lane.route list
   | Required_actions_unavailable of { required : Browser_capabilities.operation list;
@@ -15,11 +16,7 @@ let reason_to_wire = function
   | Explicit_browser -> "explicit_browser" | Existing_login -> "existing_login"
   | Existing_work_session -> "existing_work_session" | Preferred_work_browser -> "preferred_work_browser"
   | Compatible_work_browser -> "compatible_work_browser" | Available_connected_browser -> "available_connected_browser"
-let reason_of_wire = function
-  | "explicit_browser" -> Some Explicit_browser | "existing_login" -> Some Existing_login
-  | "existing_work_session" -> Some Existing_work_session | "preferred_work_browser" -> Some Preferred_work_browser
-  | "compatible_work_browser" -> Some Compatible_work_browser | "available_connected_browser" -> Some Available_connected_browser
-  | _ -> None
+let reason_of_wire s = List.find_opt (fun v -> String.equal (reason_to_wire v) s) all_of_reason
 let route_fields = function
   | Lane.Live_route client -> ["lane",`String "live";"clientId",(match client with
       | Some id -> `String (Lane.client_id_to_string id) | None -> `Null)]

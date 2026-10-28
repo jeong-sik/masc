@@ -45,6 +45,7 @@ type claim_status =
   | Claim_error
   | Observed
   | Unknown
+[@@deriving enumerate]
 
 let claim_status_to_wire = function
   | Claim_not_observed -> "not_observed"
@@ -57,16 +58,7 @@ let claim_status_to_wire = function
   | Unknown -> "unknown"
 ;;
 
-let claim_status_of_wire = function
-  | "not_observed" -> Some Claim_not_observed
-  | "tool_log_unavailable" -> Some Claim_log_unavailable
-  | "claimed" -> Some Claimed
-  | "no_eligible" -> Some No_eligible
-  | "no_unclaimed" -> Some No_unclaimed
-  | "error" -> Some Claim_error
-  | "observed" -> Some Observed
-  | "unknown" -> Some Unknown
-  | _ -> None
+let claim_status_of_wire s = List.find_opt (fun v -> String.equal (claim_status_to_wire v) s) all_of_claim_status
 ;;
 
 let claimed_task_of_output output =

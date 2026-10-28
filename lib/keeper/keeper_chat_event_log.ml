@@ -1438,11 +1438,7 @@ let cursor_refusal_to_wire = function
   | Cursor_pair_mismatch -> "cursor_mismatch"
 ;;
 
-let cursor_refusal_of_wire = function
-  | "since_offset_past_rows" -> Some Offset_past_rows
-  | "since_offset_inside_row" -> Some Offset_inside_row
-  | "cursor_mismatch" -> Some Cursor_pair_mismatch
-  | _ -> None
+let cursor_refusal_of_wire s = List.find_opt (fun v -> String.equal (cursor_refusal_to_wire v) s) all_of_cursor_refusal
 ;;
 
 type cursor_mismatch =

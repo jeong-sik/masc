@@ -2,6 +2,7 @@ type target_type =
   | Workspace
   | Keeper
   | Goal
+[@@deriving enumerate]
 
 let target_type_to_string = function
   | Workspace -> "workspace"
@@ -9,11 +10,7 @@ let target_type_to_string = function
   | Goal -> "goal"
 ;;
 
-let target_type_of_string = function
-  | "workspace" -> Some Workspace
-  | "keeper" -> Some Keeper
-  | "goal" -> Some Goal
-  | _ -> None
+let target_type_of_string s = List.find_opt (fun v -> String.equal (target_type_to_string v) s) all_of_target_type
 ;;
 
 let all_target_types = [ Workspace; Keeper; Goal ]

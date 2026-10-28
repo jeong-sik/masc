@@ -9,6 +9,7 @@ type error_code =
   | Store_missing | Invalid_scope | Invalid_observation | Cursor_store_mismatch | Cursor_ahead
   | Store_corrupt | Conflicting_observation | Sequence_exhausted | Io_failed
   | Directory_prepare_failed | Store_unavailable | Commit_unconfirmed | Invalid_query | Invalid_keeper
+[@@deriving enumerate]
 type coverage = Unavailable
 type record = { seq : int; recorded_at : float; observation : Child.view }
 type storage = Audited of cursor | Failed of error_code
@@ -52,15 +53,10 @@ let code_to_string = function
   | Io_failed -> "io_failed" | Directory_prepare_failed -> "directory_prepare_failed"
   | Store_unavailable -> "store_unavailable" | Commit_unconfirmed -> "commit_unconfirmed"
   | Invalid_query -> "invalid_query" | Invalid_keeper -> "invalid_keeper"
-let code_of_string = function
-  | "store_missing" -> Ok Store_missing | "invalid_scope" -> Ok Invalid_scope
-  | "invalid_observation" -> Ok Invalid_observation | "cursor_store_mismatch" -> Ok Cursor_store_mismatch
-  | "cursor_ahead" -> Ok Cursor_ahead | "store_corrupt" -> Ok Store_corrupt
-  | "conflicting_observation" -> Ok Conflicting_observation | "sequence_exhausted" -> Ok Sequence_exhausted
-  | "io_failed" -> Ok Io_failed | "directory_prepare_failed" -> Ok Directory_prepare_failed
-  | "store_unavailable" -> Ok Store_unavailable | "commit_unconfirmed" -> Ok Commit_unconfirmed
-  | "invalid_query" -> Ok Invalid_query | "invalid_keeper" -> Ok Invalid_keeper
-  | _ -> Error (Invalid_shape "unknown error code")
+let code_of_string s =
+  match List.find_opt (fun v -> String.equal (code_to_string v) s) all_of_error_code with
+  | Some v -> Ok v
+  | None -> Error (Invalid_shape "unknown error code")
 let failure error = Failure {error;coverage=Unavailable}
 let cleanup_of_journal failures =
   List.map (fun (failure:Journal.cleanup_failure) -> failure.operation) failures

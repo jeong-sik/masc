@@ -36,6 +36,7 @@ type judgment =
 type delivery =
   | Enqueued_to_keeper_lane
   | Not_relevant
+[@@deriving enumerate]
 
 (* v7 persists the current typed Board signal only. Historical post/comment
    snapshots are neither identity nor judgment input, so retaining them would
@@ -71,6 +72,7 @@ type quarantine_failure_category =
   | Unexpected_worker_failure
   | Exact_execution_quarantined
   | Exact_execution_interrupted
+[@@deriving enumerate]
 
 type attempt_provenance =
   { slot_id : string
@@ -155,20 +157,7 @@ let quarantine_failure_category_to_string = function
   | Exact_execution_interrupted -> "exact_execution_interrupted"
 ;;
 
-let quarantine_failure_category_of_string = function
-  | "candidate_membership_conflict" -> Some Candidate_membership_conflict
-  | "durable_partition_invariant" -> Some Durable_partition_invariant
-  | "exact_setup_unavailable" -> Some Exact_setup_unavailable
-  | "exact_flow_replayed" -> Some Exact_flow_replayed
-  | "exact_lane_exhausted" -> Some Exact_lane_exhausted
-  | "exact_flow_bookkeeping_failed" -> Some Exact_flow_bookkeeping_failed
-  | "exact_completion_failed" -> Some Exact_completion_failed
-  | "domain_output_invalid" -> Some Domain_output_invalid
-  | "execution_provenance_mismatch" -> Some Execution_provenance_mismatch
-  | "unexpected_worker_failure" -> Some Unexpected_worker_failure
-  | "exact_execution_quarantined" -> Some Exact_execution_quarantined
-  | "exact_execution_interrupted" -> Some Exact_execution_interrupted
-  | _ -> None
+let quarantine_failure_category_of_string s = List.find_opt (fun v -> String.equal (quarantine_failure_category_to_string v) s) all_of_quarantine_failure_category
 ;;
 
 let status_view = function
@@ -201,10 +190,7 @@ let delivery_to_string = function
   | Not_relevant -> "not_relevant"
 ;;
 
-let delivery_of_string = function
-  | "enqueued_to_keeper_lane" -> Some Enqueued_to_keeper_lane
-  | "not_relevant" -> Some Not_relevant
-  | _ -> None
+let delivery_of_string s = List.find_opt (fun v -> String.equal (delivery_to_string v) s) all_of_delivery
 ;;
 
 let queue_reaction_to_yojson (reaction : Board_dispatch.board_reaction_change) =

@@ -12,10 +12,5 @@ let to_string = function
   | Usage_scope_unavailable -> "unavailable"
 ;;
 
-let of_string = function
-  | "per_request" -> Some Per_request
-  | "turn_total" -> Some Turn_total
-  | "conversation_cumulative" -> Some Conversation_cumulative
-  | "unavailable" -> Some Usage_scope_unavailable
-  | _ -> None
+let of_string s = List.find_opt (fun v -> String.equal (to_string v) s) all
 ;;

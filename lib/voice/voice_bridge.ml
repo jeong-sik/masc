@@ -419,6 +419,7 @@ type capture_status =
   | Transcribed
   | No_audio
   | Discarded
+[@@deriving enumerate]
 
 let capture_status_to_string = function
   | Transcribed -> "transcribed"
@@ -426,11 +427,7 @@ let capture_status_to_string = function
   | Discarded -> "discarded"
 ;;
 
-let capture_status_of_string = function
-  | "transcribed" -> Some Transcribed
-  | "no_audio" -> Some No_audio
-  | "discarded" -> Some Discarded
-  | _ -> None
+let capture_status_of_string s = List.find_opt (fun v -> String.equal (capture_status_to_string v) s) all_of_capture_status
 ;;
 
 let transcribe_audio ~audio_file ?language_code ?deadline () =
@@ -869,6 +866,7 @@ type agent_speak_completion =
   | Spoken
   | Synthesized
   | Dedup_skipped
+[@@deriving enumerate]
 
 (* The [status] a speak result carries, and the reading of it back. One pair so
    the value written for a local endpoint and the value decoded from a Voice
@@ -878,11 +876,7 @@ let agent_speak_completion_to_string = function
   | Synthesized -> "synthesized"
   | Dedup_skipped -> "dedup_skipped"
 
-let agent_speak_completion_of_string = function
-  | "spoken" -> Some Spoken
-  | "synthesized" -> Some Synthesized
-  | "dedup_skipped" -> Some Dedup_skipped
-  | _ -> None
+let agent_speak_completion_of_string s = List.find_opt (fun v -> String.equal (agent_speak_completion_to_string v) s) all_of_agent_speak_completion
 
 type agent_speak_result =
   { completion : agent_speak_completion

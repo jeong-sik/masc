@@ -274,6 +274,7 @@ type record_kind =
   | Tool_call
   | Composition_run
   | Lifecycle_event
+[@@deriving enumerate]
 
 type committed_call =
   { record_kind : record_kind
@@ -321,11 +322,7 @@ let record_kind_to_string = function
   | Lifecycle_event -> "lifecycle_event"
 ;;
 
-let record_kind_of_string = function
-  | "tool_call" -> Some Tool_call
-  | "composition_run" -> Some Composition_run
-  | "lifecycle_event" -> Some Lifecycle_event
-  | _ -> None
+let record_kind_of_string s = List.find_opt (fun v -> String.equal (record_kind_to_string v) s) all_of_record_kind
 ;;
 
 type append_entry =

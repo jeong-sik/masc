@@ -1,5 +1,6 @@
 type t = Resources_retained | Container_removal_requested | Container_removed
   | Data_removal_requested | Resources_removed
+[@@deriving enumerate]
 
 let to_string = function
   | Resources_retained -> "resources_retained"
@@ -7,13 +8,7 @@ let to_string = function
   | Container_removed -> "container_removed"
   | Data_removal_requested -> "data_removal_requested"
   | Resources_removed -> "resources_removed"
-let of_string = function
-  | "resources_retained" -> Some Resources_retained
-  | "container_removal_requested" -> Some Container_removal_requested
-  | "container_removed" -> Some Container_removed
-  | "data_removal_requested" -> Some Data_removal_requested
-  | "resources_removed" -> Some Resources_removed
-  | _ -> None
+let of_string s = List.find_opt (fun v -> String.equal (to_string v) s) all
 let can_transition before after =
   if before=after then true else match before,after with
   | Resources_retained, Container_removal_requested

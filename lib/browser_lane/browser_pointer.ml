@@ -32,18 +32,14 @@ let viewport_to_json viewport = `Assoc ["documentId",`String viewport.document_i
 let viewport_pixels viewport point =
   int_of_float (point.x *. viewport.width), int_of_float (point.y *. viewport.height)
 
-type button = Primary | Middle | Secondary
+type button = Primary | Middle | Secondary [@@deriving enumerate]
 
 let button_to_string = function
   | Primary -> "primary"
   | Middle -> "middle"
   | Secondary -> "secondary"
 
-let button_of_string = function
-  | "primary" -> Some Primary
-  | "middle" -> Some Middle
-  | "secondary" -> Some Secondary
-  | _ -> None
+let button_of_string s = List.find_opt (fun v -> String.equal (button_to_string v) s) all_of_button
 
 (* The WebDriver pointer button numbers: 0 left, 1 middle, 2 right. *)
 let button_number = function

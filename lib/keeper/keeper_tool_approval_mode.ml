@@ -1,15 +1,13 @@
 type mode =
   | Auto
   | Yolo
+[@@deriving enumerate]
 
 let mode_to_string = function
   | Auto -> "auto"
   | Yolo -> "yolo"
 
-let mode_of_string = function
-  | "auto" -> Some Auto
-  | "yolo" -> Some Yolo
-  | _ -> None
+let mode_of_string s = List.find_opt (fun v -> String.equal (mode_to_string v) s) all_of_mode
 
 (* Overrides only, oldest set first. An operator watches a handful of
    keepers, so a linear list is the whole cost — the same sizing argument as

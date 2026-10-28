@@ -19,6 +19,7 @@ type stimulus_kind =
   | Owned_job_completed
   | Tool_result_ready
   | Addon_operation_changed
+[@@deriving enumerate]
 
 type reaction_kind =
   | Turn_started
@@ -56,24 +57,7 @@ let stimulus_kind_to_string = function
    [None]. 소비자([note_stimulus_kind])가 파싱된 variant를 exhaustive match하므로 새
    variant 추가 시 컴파일러가 분류 누락을 강제한다 — RFC-0266에서 [Fusion_completed]가
    문자열 화이트리스트에 누락돼 정상 wake가 unsupported로 오집계된 회귀를 차단한다. *)
-let stimulus_kind_of_string = function
-  | "board_signal" -> Some Board_signal
-  | "bootstrap" -> Some Bootstrap
-  | "fusion_completed" -> Some Fusion_completed
-  | "schedule_due" -> Some Schedule_due
-  | "connector_attention" -> Some Connector_attention
-  | "hitl_resolved" -> Some Hitl_resolved
-  | "ask_answered" -> Some Ask_answered
-  | "completion_authority_rejected" -> Some Completion_authority_rejected
-  | "task_outcome" -> Some Task_outcome
-  | "task_cancelled" -> Some Task_cancelled
-  | "workspace_message" -> Some Workspace_message
-  | "keeper_delegate_completed" -> Some Delegate_completed
-  | "keeper_composition_completed" -> Some Composition_completed
-  | "owned_job_completed" -> Some Owned_job_completed
-  | "tool_result_ready" -> Some Tool_result_ready
-  | "addon_operation_changed" -> Some Addon_operation_changed
-  | _ -> None
+let stimulus_kind_of_string s = List.find_opt (fun v -> String.equal (stimulus_kind_to_string v) s) all_of_stimulus_kind
 ;;
 
 let reaction_kind_to_string = function

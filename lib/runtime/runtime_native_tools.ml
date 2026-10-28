@@ -2,6 +2,7 @@ type posture =
   | Native_none
   | Native_read
   | Native_full
+[@@deriving enumerate]
 
 type posture_source =
   | Declared_on_disk
@@ -236,11 +237,7 @@ let to_string = function
   | Native_full -> "full"
 ;;
 
-let of_string = function
-  | "none" -> Some Native_none
-  | "read" -> Some Native_read
-  | "full" -> Some Native_full
-  | _ -> None
+let of_string s = List.find_opt (fun v -> String.equal (to_string v) s) all_of_posture
 ;;
 
 let valid_posture_strings = [ "none"; "read"; "full" ]

@@ -29,6 +29,7 @@ type runtime_provider_status =
   | Runtime_provider_skipped_native_auth
   | Runtime_provider_invalid_endpoint
   | Runtime_provider_invalid_execution_transport
+[@@deriving enumerate]
 
 type runtime_probe_transport =
   | Runtime_probe_http
@@ -140,21 +141,10 @@ let runtime_probe_status_of_string = function
   | "warming_up" -> Ok Runtime_probe_warming
   | value -> Error (Printf.sprintf "unknown runtime probe status %S" value)
 
-let runtime_provider_status_of_string = function
-  | "reachable" -> Ok Runtime_provider_reachable
-  | "missing_auth" -> Ok Runtime_provider_missing_auth
-  | "auth_failed" -> Ok Runtime_provider_auth_failed
-  | "network_error" -> Ok Runtime_provider_network_error
-  | "server_error" -> Ok Runtime_provider_server_error
-  | "endpoint_not_found" -> Ok Runtime_provider_endpoint_not_found
-  | "http_error" -> Ok Runtime_provider_http_error
-  | "unknown_http_status" -> Ok Runtime_provider_unknown_http_status
-  | "skipped_cli" -> Ok Runtime_provider_skipped_cli
-  | "skipped_native_auth" -> Ok Runtime_provider_skipped_native_auth
-  | "invalid_endpoint" -> Ok Runtime_provider_invalid_endpoint
-  | "invalid_execution_transport" ->
-      Ok Runtime_provider_invalid_execution_transport
-  | value -> Error (Printf.sprintf "unknown runtime provider status %S" value)
+let runtime_provider_status_of_string value =
+  match List.find_opt (fun v -> String.equal (runtime_provider_status_to_string v) value) all_of_runtime_provider_status with
+  | Some v -> Ok v
+  | None -> Error (Printf.sprintf "unknown runtime provider status %S" value)
 
 let runtime_probe_transport_of_string = function
   | "http" -> Ok Runtime_probe_http

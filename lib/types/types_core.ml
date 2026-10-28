@@ -32,7 +32,7 @@ type agent_status =
   | Busy
   | Listening
   | Inactive
-[@@deriving show { with_path = false }]
+[@@deriving show { with_path = false }, enumerate]
 
 let agent_status_to_string = function
   | Active -> "active"
@@ -64,12 +64,7 @@ let agent_status_rank = function
   | Listening -> 2
   | Inactive -> 1
 
-let agent_status_of_string_opt = function
-  | "active" -> Some Active
-  | "busy" -> Some Busy
-  | "listening" -> Some Listening
-  | "inactive" -> Some Inactive
-  | _ -> None
+let agent_status_of_string_opt s = List.find_opt (fun v -> String.equal (agent_status_to_string v) s) all_of_agent_status
 
 (** [agent_status_of_string_r s] — explicit-failure parser.  Prefer this
     over {!agent_status_of_string} (which silently maps unknown input to

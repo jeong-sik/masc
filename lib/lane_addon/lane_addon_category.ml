@@ -5,6 +5,7 @@ type t =
   | Voice_and_media
   | Execution_environment
   | Analysis
+[@@deriving enumerate]
 
 let to_string = function
   | Memory_and_judgment -> "memory_judgment"
@@ -14,14 +15,10 @@ let to_string = function
   | Execution_environment -> "execution_environment"
   | Analysis -> "analysis"
 
-let of_string = function
-  | "memory_judgment" -> Ok Memory_and_judgment
-  | "browser" -> Ok Browser
-  | "external_communications" -> Ok External_communications
-  | "voice_media" -> Ok Voice_and_media
-  | "execution_environment" -> Ok Execution_environment
-  | "analysis" -> Ok Analysis
-  | _ -> Error "unknown Add-on UI category"
+let of_string s =
+  match List.find_opt (fun v -> String.equal (to_string v) s) all with
+  | Some v -> Ok v
+  | None -> Error "unknown Add-on UI category"
 
 let to_json category = `String (to_string category)
 let of_json = function

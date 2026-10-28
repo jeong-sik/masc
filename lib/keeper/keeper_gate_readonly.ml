@@ -9,7 +9,7 @@
     This bounded Git correction retains the established policy for other
     commands; it is not a complete effect proof for every Unix/Git option. *)
 
-type git_command = Status | Diff | Log | Show | Grep | Reflog | Whatchanged | Blame | Annotate
+type git_command = Status | Diff | Log | Show | Grep | Reflog | Whatchanged | Blame | Annotate [@@deriving enumerate]
 
 type observation_reason =
   | Git_configuration_override
@@ -91,17 +91,7 @@ let git_read_subcommands =
    repository-configured effects absent.
    Sources: git-scm.com/docs/{git-config,git-diff,git-log,git-grep,git-reflog,git-whatchanged};
    github.com/git/git/blob/v2.50.1/builtin/blame.c (allow_textconv). *)
-let git_command_requiring_execution = function
-  | "status" -> Some Status
-  | "diff" -> Some Diff
-  | "log" -> Some Log
-  | "show" -> Some Show
-  | "grep" -> Some Grep
-  | "reflog" -> Some Reflog
-  | "whatchanged" -> Some Whatchanged
-  | "blame" -> Some Blame
-  | "annotate" -> Some Annotate
-  | _ -> None
+let git_command_requiring_execution s = List.find_opt (fun v -> String.equal (git_command_name v) s) all_of_git_command
 ;;
 
 (* gh subcommands that only read, keyed by their family. A family is listed

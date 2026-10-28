@@ -10,6 +10,7 @@ type stream_production =
   | Streaming_substrate
   | Streaming_done
   | Streaming_unknown
+[@@deriving enumerate]
 
 let stream_production_label = function
   | Streaming_answer -> "streaming_answer"
@@ -21,15 +22,7 @@ let stream_production_label = function
   | Streaming_unknown -> "streaming_unknown"
 ;;
 
-let stream_production_of_label = function
-  | "streaming_answer" -> Some Streaming_answer
-  | "streaming_thinking" -> Some Streaming_thinking
-  | "streaming_tool_call" -> Some Streaming_tool_call
-  | "streaming_heartbeat" -> Some Streaming_heartbeat
-  | "streaming_substrate" -> Some Streaming_substrate
-  | "streaming_done" -> Some Streaming_done
-  | "streaming_unknown" -> Some Streaming_unknown
-  | _ -> None
+let stream_production_of_label s = List.find_opt (fun v -> String.equal (stream_production_label v) s) all_of_stream_production
 ;;
 
 type timeout_phase =

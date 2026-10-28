@@ -235,6 +235,7 @@ type reasoning_effort =
   | Effort_xhigh
   | Effort_max
   | Effort_ultra
+[@@deriving enumerate]
 
 let reasoning_effort_to_string = function
   | Effort_none -> "none"
@@ -247,16 +248,7 @@ let reasoning_effort_to_string = function
   | Effort_ultra -> "ultra"
 ;;
 
-let reasoning_effort_of_string = function
-  | "none" -> Some Effort_none
-  | "minimal" -> Some Effort_minimal
-  | "low" -> Some Effort_low
-  | "medium" -> Some Effort_medium
-  | "high" -> Some Effort_high
-  | "xhigh" -> Some Effort_xhigh
-  | "max" -> Some Effort_max
-  | "ultra" -> Some Effort_ultra
-  | _ -> None
+let reasoning_effort_of_string s = List.find_opt (fun v -> String.equal (reasoning_effort_to_string v) s) all_of_reasoning_effort
 ;;
 
 type model_catalog_source =

@@ -16,28 +16,24 @@ module StringMap = Set_util.StringMap
 type record_type =
   | Verdict_record
   | Label_record
+[@@deriving enumerate]
 
 type label_verdict =
   | Approve_label
   | Reject_label
+[@@deriving enumerate]
 
 let record_type_to_string = function
   | Verdict_record -> "verdict"
   | Label_record -> "label"
 
-let record_type_of_string = function
-  | "verdict" -> Some Verdict_record
-  | "label" -> Some Label_record
-  | _ -> None
+let record_type_of_string s = List.find_opt (fun v -> String.equal (record_type_to_string v) s) all_of_record_type
 
 let label_verdict_to_string = function
   | Approve_label -> "approve"
   | Reject_label -> "reject"
 
-let label_verdict_of_string = function
-  | "approve" -> Some Approve_label
-  | "reject" -> Some Reject_label
-  | _ -> None
+let label_verdict_of_string s = List.find_opt (fun v -> String.equal (label_verdict_to_string v) s) all_of_label_verdict
 
 let verdict_to_string = function
   | Task.Anti_rationalization.Approve "" -> "approve"

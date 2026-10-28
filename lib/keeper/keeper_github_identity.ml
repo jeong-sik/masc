@@ -34,6 +34,7 @@ type login_scope =
   | Read_packages
   | Project
   | Write_repo_hook
+[@@deriving enumerate]
 
 let login_scope_to_string = function
   | Workflow -> "workflow"
@@ -43,13 +44,7 @@ let login_scope_to_string = function
   | Write_repo_hook -> "write:repo_hook"
 ;;
 
-let login_scope_of_string = function
-  | "workflow" -> Some Workflow
-  | "write:packages" -> Some Write_packages
-  | "read:packages" -> Some Read_packages
-  | "project" -> Some Project
-  | "write:repo_hook" -> Some Write_repo_hook
-  | _ -> None
+let login_scope_of_string s = List.find_opt (fun v -> String.equal (login_scope_to_string v) s) all_of_login_scope
 ;;
 
 let all_login_scopes =

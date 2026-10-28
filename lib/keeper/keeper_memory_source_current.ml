@@ -30,6 +30,7 @@ type fact =
 type invalidation_reason =
   | Source_changed
   | Source_unavailable
+[@@deriving enumerate]
 
 type invalidation =
   { source_path : string
@@ -106,10 +107,7 @@ let invalidation_reason_to_string = function
   | Source_unavailable -> "source_unavailable"
 ;;
 
-let invalidation_reason_of_string = function
-  | "source_changed" -> Some Source_changed
-  | "source_unavailable" -> Some Source_unavailable
-  | _ -> None
+let invalidation_reason_of_string s = List.find_opt (fun v -> String.equal (invalidation_reason_to_string v) s) all_of_invalidation_reason
 ;;
 
 let exact_object_fields required fields =

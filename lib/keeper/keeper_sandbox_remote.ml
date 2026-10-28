@@ -871,7 +871,9 @@ let completed_execution_observation record raw_stderr =
        | _ when
            (match record with
             | Dispatch_failed { failure = Shim_refused; _ } -> true
-            | Payload_finished _ | Dispatch_failed _ -> false) ->
+            | Payload_finished _
+            | Dispatch_failed
+                { failure = Local_timeout | Remote_timeout | Transport_failed | Trailer_disagreement; _ } -> false) ->
          Execution_unavailable Shim_refused_without_receipt
        | Ok _, Ok None -> Execution_unavailable Peer_receipt_missing
        | Error detail, _ | _, Error detail -> Execution_unavailable (Invalid_receipt detail))

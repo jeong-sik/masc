@@ -128,11 +128,13 @@ let json_of_report (r : Keeper_sandbox_remote.lane_report) : Yojson.Safe.t =
      An older failed probe, however, no longer describes connectivity if a
      later dispatch finished. Keep the remaining observations independent. *)
   let operator_action =
-    let probe_action = match r.probe, r.last_dispatch with
-      | Keeper_sandbox_remote.Probe_failed { at = probe_at; _ },
-        Some (Keeper_sandbox_remote.Payload_finished { at = dispatch_at; _ })
-        when dispatch_at > probe_at -> None
-      | _ -> probe_action in
+    let probe_action = match r.probe with
+      | Keeper_sandbox_remote.Probe_not_asked | Probe_answered _ -> probe_action
+      | Probe_failed { at = probe_at; _ } ->
+        (match r.last_dispatch with
+         | Some (Keeper_sandbox_remote.Payload_finished { at = dispatch_at; _ })
+           when dispatch_at > probe_at -> None
+         | Some (Payload_finished _) | Some (Dispatch_failed _) | None -> probe_action) in
     let action = match dispatch_action, probe_action with
       | Some dispatch, Some probe -> Some (dispatch ^ " " ^ probe)
       | Some action, None | None, Some action -> Some action

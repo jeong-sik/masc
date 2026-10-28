@@ -14921,7 +14921,8 @@ let reconcile_keeper_logs state ~mailbox =
        | Some request when request.ker_reading == state.workspace_read_authority
            && keeper_log_equal_key key (Masc_tui_fetched.request_key request.ker_request) -> false
        | Some _ | None -> launch_keeper_execute_read state ~mailbox ~intent:Snapshot_read.Poll keeper)
-    | _ ->
+    | (Some _ | None), (Workspace_identity_match | Workspace_identity_unread
+      | Workspace_identity_mismatch _ | Workspace_identity_match_unconfirmed _) ->
       let held = Option.is_some state.keeper_execute_read in
       if held then begin
         state.keeper_execute_output <- Masc_tui_fetched.suspend state.keeper_execute_output;

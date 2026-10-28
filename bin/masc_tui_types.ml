@@ -11075,14 +11075,17 @@ let take_keeper_log_read state request result =
 let keeper_execute_target state =
   match state.view with
   | Keepers Keeper_logs -> List.nth_opt state.keepers state.keeper_cursor
-  | _ -> None
+  | Keepers (Keeper_detail | Keeper_list | Keeper_calls | Keeper_message | Keeper_runtime_pick)
+  | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals
+  | Planning | Schedules | Verification | Harness | Fusion | Repositories | Code
+  | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> None
 
 let finish_keeper_execute_read state request =
   match state.keeper_execute_cancel with
   | Some (owner, _) when owner == request.ker_owner -> state.keeper_execute_cancel <- None
   | Some _ | None -> ()
 
-let begin_keeper_execute_read state ~intent ~limit keeper =
+let begin_keeper_execute_read state ~intent ~limit (keeper : keeper) =
   match state.workspace_identity, keeper_execute_target state with
   | Workspace_identity_match, Some selected when String.equal selected.k_name keeper.k_name ->
     let key = keeper_log_key state ~limit keeper in
@@ -11099,7 +11102,8 @@ let begin_keeper_execute_read state ~intent ~limit keeper =
                        ker_owner = ref () } in
        state.keeper_execute_read <- Some request;
        Some request)
-  | _ -> None
+  | (Workspace_identity_match | Workspace_identity_unread | Workspace_identity_mismatch _
+    | Workspace_identity_match_unconfirmed _), (Some _ | None) -> None
 
 let take_keeper_execute_read state request result =
   if request.ker_reading != state.workspace_read_authority
@@ -11113,7 +11117,8 @@ let take_keeper_execute_read state request result =
         state.keeper_execute_output <- Masc_tui_fetched.complete ~equal:keeper_log_equal_key
             state.keeper_execute_output request.ker_request result;
         true
-    | _ -> false
+    | (Workspace_identity_match | Workspace_identity_unread | Workspace_identity_mismatch _
+      | Workspace_identity_match_unconfirmed _), (Some _ | None) -> false
 
 let keeper_execute_view state =
   match state.workspace_identity, keeper_execute_target state with
@@ -11122,9 +11127,9 @@ let keeper_execute_view state =
      | Some key when keeper_log_equal_key key (keeper_log_key state ~limit:key.klk_limit keeper) ->
        Masc_tui_fetched.view_for ~equal:keeper_log_equal_key state.keeper_execute_output ~key
      | Some _ | None -> Masc_tui_fetched.Absent)
-  | Workspace_identity_match_unconfirmed _, _ ->
+  | Workspace_identity_match_unconfirmed _, (Some _ | None) ->
     Masc_tui_fetched.Failed "Workspace identity is unconfirmed"
-  | Workspace_identity_mismatch _, _ | Workspace_identity_unread, _ ->
+  | (Workspace_identity_mismatch _ | Workspace_identity_unread), (Some _ | None) ->
     Masc_tui_fetched.Failed "Workspace identity is unavailable"
   | Workspace_identity_match, None -> Masc_tui_fetched.Absent
 

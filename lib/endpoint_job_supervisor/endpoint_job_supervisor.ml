@@ -93,14 +93,20 @@ let result_content (observation : observation) launch_id =
       `Assoc ["state",`String "rejected";"diagnostic_b64",`String (Base64.encode_string detail)] in
   let decision=match boundary.decision with
     | G.Undecided -> "undecided" | Activate_requested -> "activate_requested" | Abort_requested -> "abort_requested" in
-  let control=match boundary.control with G.Open -> "open" | Ended -> "ended" in
+  let control=match boundary.control with
+    | G.Open -> `Assoc ["state",`String "open"]
+    | G.Ended -> `Assoc ["state",`String "ended"]
+    | G.Failed failure ->
+      (* Display evidence only, like a rejection diagnostic. *)
+      let detail=G.error_to_string (G.control_failure_error failure) in
+      `Assoc ["state",`String "failed";"diagnostic_b64",`String (Base64.encode_string detail)] in
   let stdin=match observation.settled.stdin with
     | Written count -> `Assoc ["state",`String "written";"byte_length",`String (Int64.to_string count)]
     | Write_failed {confirmed_prefix} ->
       `Assoc ["state",`String "write_failed";"confirmed_prefix",`String (Int64.to_string confirmed_prefix)] in
   Ok (Yojson.Safe.to_string (`Assoc ["version",`Int 1;"status",status;
     "launch_id",`String (P.Id.to_string launch_id);"stdin",stdin;
-    "gate",`Assoc ["preparation",preparation;"decision",`String decision;"control",`String control]]))
+    "gate",`Assoc ["preparation",preparation;"decision",`String decision;"control",control]]))
 
 let verify_receipt ~sw ~storage ~root_stat ~content ~sha256 =
   let* opened=receipt_io (fun () -> Fs_compat.open_owned_reader ~sw ~parent:storage ~leaf:result_leaf) in

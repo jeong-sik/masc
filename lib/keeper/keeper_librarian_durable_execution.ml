@@ -9,6 +9,10 @@ module Current = Keeper_memory_os_current
 module Commit = Keeper_librarian_durable_commit
 module Submit = Lane_addon_submit_once
 module Exact = Lane_addon_exact
+module Descent = Keeper_librarian_floor_descent
+module Floor_chain = Keeper_librarian_floor_chain
+module Floor_cleanup = Keeper_librarian_floor_cleanup
+module Floor_publish = Keeper_librarian_floor_publish
 open Result.Syntax
 let io f = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ f
 let require condition detail = if condition then Ok () else Error detail
@@ -295,6 +299,16 @@ let settle_orphan_gates ~store ~inventory ~scope originals =
     if not archived then Ok moved else
     let* gates=settle_gates ~store ~inventory ~date ~execution_id in
     Ok (moved+gates)) (Ok 0) (Keeper_librarian_durable_gate.Inventory.executions inventory)
+(* Settled originals the durable message floor can still read (RFC
+   librarian-durable-message-floor 3.9), oldest first. A candidate is not
+   archived with the finished history: it stays, with the steps that name it,
+   until its range is published or the read positions move on. *)
+let floor_candidates ~store settled =
+  let* found=List.fold_left (fun found (record,request) ->
+    let* found=found in
+    let* candidate=Descent.candidate ~store ~record ~request in
+    Ok (Option.fold ~none:found ~some:(fun candidate -> candidate::found) candidate)) (Ok []) (List.rev settled) in
+  Ok (List.rev found)
 let rec consume_one ~config ~keeper_name ~wake =
   let base_path=config.Workspace.base_path in
   let keepers_dir=Config_dir_resolver.keepers_dir_for_base_path ~base_path in
@@ -306,7 +320,12 @@ let rec consume_one ~config ~keeper_name ~wake =
     | Error detail -> error detail
     | Ok (Owner.Finished _) -> Ok (completed_outcome request)
     | Ok (Pending _ | Publication_waiting _ | Basis_superseded _) -> Ok Consumer.Pending
-    | Ok (Refused (final,_)) -> Ok (Consumer.Memory_not_committed [refusal_report ~store request final]) in
+    | Ok (Refused (final,_)) ->
+      (* The host's refusal reached this pass, not the Consumer's commit, so
+         the Consumer did not narrow the next read as it does after a failed
+         commit. Without the mark the same wide range is read again. *)
+      Consumer.mark_range_failed ~config ~keeper_name;
+      Ok (Consumer.Memory_not_committed [refusal_report ~store request final]) in
   (* Discovery does not initialize an epoch or create a replacement request.
      Any malformed old original fails the full inventory before fresh selection. *)
   let inventory_started=Mtime_clock.now () in
@@ -332,7 +351,7 @@ let rec consume_one ~config ~keeper_name ~wake =
           match frontier with
           | Commit.Unfinished -> Ok (original::unfinished,settled)
           | Commit.Settled -> Ok (unfinished,original::settled)) (Ok ([],[])) originals in
-        Ok (unfinished,Some (first.scope,inventory,settled)) in
+        Ok (unfinished,Some (first.scope,Request.physical_owner request,inventory,settled)) in
     match validated with
     | Error detail -> error detail
     | Ok (unfinished,observed) ->
@@ -342,25 +361,38 @@ let rec consume_one ~config ~keeper_name ~wake =
     Log.Keeper.info ~keeper_name
       "durable Librarian inventory validated: originals=%d unfinished=%d gate_records=%d elapsed_ms=%.1f"
       (List.length originals) (List.length unfinished)
-      (Option.fold ~none:0 ~some:(fun (_,inventory,_) ->
+      (Option.fold ~none:0 ~some:(fun (_,_,inventory,_) ->
          Keeper_librarian_durable_gate.Inventory.record_count inventory) observed)
       (Int64.to_float (Mtime.Span.to_uint64_ns (Mtime.span inventory_started (Mtime_clock.now ())))
        /. 1_000_000.);
     match validate_lineage originals with
     | Error detail -> error detail
     | Ok superseded ->
+    let candidates=match observed with
+      | None -> Ok []
+      | Some (_,_,_,settled) -> floor_candidates ~store settled in
+    match candidates with
+    | Error detail -> error ("Original history floor candidates did not resolve: " ^ detail)
+    | Ok candidates ->
+    let is_candidate ((record:Retained.retained),_) =
+      List.exists (fun candidate -> (Descent.record candidate).request_id=record.request_id) candidates in
     let moved=match observed with
-      | None -> Ok (0,0)
-      | Some (scope,inventory,settled) ->
+      | None -> Ok (0,0,0)
+      | Some (scope,owner,inventory,settled) ->
+        (* The steps go before the originals that name them, so a stop between
+           the two never leaves a step without its original. *)
+        let* steps=Floor_cleanup.cleanup ~store ~owner ~candidates in
         let* orphans=settle_orphan_gates ~store ~inventory ~scope originals in
+        let settled=List.filter (fun original -> not (is_candidate original)) settled in
         let* chains=settle_chains ~store ~inventory (finished_chains ~settled ~superseded originals) in
-        Ok (chains,orphans) in
+        Ok (chains,orphans,steps) in
     match moved with
     | Error detail -> error ("Original history settle did not finish: " ^ detail)
-    | Ok (chain_records,orphan_gates) ->
-    if chain_records+orphan_gates>0 then
-      Log.Keeper.info ~keeper_name "durable Librarian settled finished history: chain_records=%d orphan_gates=%d"
-        chain_records orphan_gates;
+    | Ok (chain_records,orphan_gates,floor_records) ->
+    if chain_records+orphan_gates+floor_records>0 then
+      Log.Keeper.info ~keeper_name
+        "durable Librarian settled finished history: chain_records=%d orphan_gates=%d floor_records=%d"
+        chain_records orphan_gates floor_records;
     let recoveries=List.filter (fun ((record:Retained.retained),_) ->
       match Progress.replacement record.progress with
       | Some (Preparation_pending _) -> true
@@ -403,14 +435,51 @@ let rec consume_one ~config ~keeper_name ~wake =
       | Ok None -> error "Original history Addon is not attached; source remains unconsumed"
       | Ok (Some _) ->
         let failure=ref None in
-        let commit source =
+        let stop detail=failure:=Some detail;Consumer.Memory_pending in
+        let new_original source =
           match capture ~store ~config ~reserved ~keeper_name source with
-          | Error detail -> failure:=Some detail;Consumer.Memory_pending
+          | Error detail -> stop detail
           | Ok original ->
             match resume ~store ~config ~reserved ~wake original with
-            | Error detail -> failure:=Some detail;Consumer.Memory_pending
+            | Error detail -> stop detail
             | Ok (Owner.Finished _) -> Consumer.Memory_committed
             | Ok (Pending _ | Publication_waiting _ | Basis_superseded _) -> Consumer.Memory_pending
             | Ok (Refused (final,_)) -> Consumer.Memory_refused [refusal_report ~store (snd original) final] in
+        (* A refused one-turn original covers the range this pass selected. The
+           pass reads that range message by message under the original, not as
+           an original of its own: the host already refused it as one request. *)
+        let floor candidate =
+          let owner=Request.physical_owner (Descent.request candidate) in
+          match Descent.descend ~store ~config ~reserved candidate with
+          | Error detail -> stop detail
+          | Ok (Floor_chain.Pending detail) ->
+            Log.Keeper.info ~keeper_name "durable Librarian message floor waits: %s" detail;
+            Consumer.Memory_pending
+          | Ok (Floor_chain.Stopped {position;report}) ->
+            (* The host ended this step's ID. The steps before it stay, and the
+               next pass asks the same position under a new ID. *)
+            (match Floor_cleanup.settle_step ~store ~owner candidate ~position with
+             | Error detail -> stop detail
+             | Ok _ -> Consumer.Memory_refused [report])
+          | Ok (Floor_chain.Finished finished) ->
+            (match Floor_publish.publish ~candidate ~finished with
+             | Error detail -> stop detail
+             | Ok Floor_publish.Published -> Consumer.Memory_committed
+             | Ok Floor_publish.Superseded ->
+               (* Memory changed under the chain, so its decisions do not apply.
+                  The next pass starts the chain again from the Memory then. *)
+               (match Floor_cleanup.settle_chain ~store ~owner candidate with
+                | Error detail -> stop detail
+                | Ok _ -> wake ();Consumer.Memory_pending)) in
+        let commit source =
+          match List.find_opt (fun candidate -> Descent.covers candidate source) candidates with
+          | Some candidate -> floor candidate
+          | None -> new_original source in
+        (* A candidate proves the range too wide for one request. The Consumer
+           keeps its narrowing mark in the process only, so say it again here:
+           a restart would otherwise read the wide range once more. *)
+        (match candidates with
+         | [] -> ()
+         | _::_ -> Consumer.mark_range_failed ~config ~keeper_name);
         let result=Consumer.consume_one ~config ~keeper_name ~commit in
         match !failure with Some detail -> error detail | None -> result)

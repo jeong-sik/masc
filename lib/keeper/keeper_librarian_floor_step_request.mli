@@ -24,6 +24,8 @@ val scope : Keeper_librarian_durable_request.owner -> string
 val fresh_request_id : Keeper_librarian_durable_request.owner -> string
 val scope_of_request_id : string -> (string, string) result
 (** A history request ID is not a step ID, and a step ID is not a history ID. *)
+val minted_on : string -> (string, string) result
+(** The UTC day a step ID was minted, which is the day its records settle under. *)
 
 type t
 val create : request_id:string -> owner:Keeper_librarian_durable_request.owner ->

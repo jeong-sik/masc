@@ -561,6 +561,10 @@ let clear_failed key =
   Stdlib.Mutex.protect failed_ranges_mu (fun () -> Hashtbl.remove failed_ranges key)
 ;;
 
+let mark_range_failed ~config ~keeper_name =
+  mark_failed (range_key ~runtime_keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_name)
+;;
+
 (* One step of a round's reading, placed by its line in the turn-boundary
    log. Atom cut points and official-client end lines are two kinds of line
    of one log, so their order is the log's order. *)

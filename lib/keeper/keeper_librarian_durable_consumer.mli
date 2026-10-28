@@ -129,6 +129,12 @@ type unread =
 
 val unread_turns : config:Workspace.config -> keeper_name:string -> (unread, error) result
 
+val mark_range_failed : config:Workspace.config -> keeper_name:string -> unit
+(** Narrow the next fresh read of this Keeper to one turn, as a failed commit
+    does. A refusal the host returns after the pass that sent the request ended
+    reaches its owner, not {!consume_one}, so the owner marks the range itself.
+    The mark is process-local, like the one {!consume_one} keeps. *)
+
 val consume_one
   :  config:Workspace.config
   -> keeper_name:string

@@ -154,16 +154,27 @@ let test_share_interrupted_migration () = with_base (fun base_path ->
     | Error (S.Share_commit_uncertain receipt) -> receipt
     | Error error -> Alcotest.fail (S.share_error_message error)
     | Ok _ -> Alcotest.fail "interrupted migration was reported as certain" in
-  (match S.read_share ~base_path ~id with
-   | Error (S.Share_unavailable _) -> ()
-   | Error error -> Alcotest.fail (S.share_error_message error)
-   | Ok _ -> Alcotest.fail "incomplete migration was presented as settled");
+  let observed = S.read_share ~base_path ~id |> share_ok in
+  Alcotest.(check int) "read settles the pending migration" 1 observed.version;
+  Alcotest.(check bool) "settled migration revokes sharing" false observed.shared;
   let settled = S.change_share ~base_path ~id request |> share_ok in
   Alcotest.(check bool) "retry settles the original operation" true (settled = uncertain);
   (match settled.outcome with
    | Share.Applied { version = 1; shared = false } -> ()
    | Share.Applied _ | Share.Conflict _ -> Alcotest.fail "wrong recovered migration");
-  Alcotest.(check bool) "recovered snapshot is private" false (S.read_share ~base_path ~id |> share_ok).shared)
+  Alcotest.(check bool) "recovered snapshot is private" false (S.read_share ~base_path ~id |> share_ok).shared;
+  let other, _ = publish ~base_path (request "changed migration baseline") in
+  let other_file = Filename.concat (catalog_dir base_path) (other.id ^ ".share") in
+  Yojson.Safe.to_file other_file (`Assoc ["id", `String other.id; "shared", `Bool true]);
+  (match S.For_testing.change_share_before_stage ~before_stage ~base_path ~id:other.id request with
+   | Error (S.Share_commit_uncertain _) -> ()
+   | Error error -> Alcotest.fail (S.share_error_message error)
+   | Ok _ -> Alcotest.fail "injected migration unexpectedly completed");
+  Yojson.Safe.to_file other_file (`Assoc ["id", `String other.id; "shared", `Bool false]);
+  (match S.read_share ~base_path ~id:other.id with
+   | Error (S.Share_unavailable _) -> ()
+   | Error error -> Alcotest.fail (S.share_error_message error)
+   | Ok _ -> Alcotest.fail "changed migration baseline was silently overwritten"))
 
 let test_create_and_revise () = with_base (fun base_path ->
   let empty = S.list ~base_path |> store_ok in

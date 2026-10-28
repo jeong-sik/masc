@@ -269,9 +269,6 @@ let load_share ~base_path ~id =
     | Guard_absent when archive_present -> Error (Share_unavailable "artifact share history exists without its guard")
     | Guard_active | Guard_absent -> decode_share_state ~id json
 
-let read_share ~base_path ~id = protect_share (fun () ->
-  load_share ~base_path ~id |> Result.map Share.snapshot)
-
 let load_archived_receipt ~base_path ~id ~state ~operation_id =
   let* json = load_share_json ~base_path (share_receipt_path ~base_path id operation_id) in
   match json with
@@ -290,11 +287,6 @@ let lookup_receipt ~base_path ~id ~state ~operation_id =
   match Share.latest state with
   | Some receipt when String.equal receipt.request.operation_id operation_id -> Ok (Some receipt)
   | Some _ | None -> load_archived_receipt ~base_path ~id ~state ~operation_id
-
-let find_share_receipt ~base_path ~id ~operation_id = protect_share (fun () ->
-  if not (Share.valid_operation_id operation_id) then Error (Share_invalid "invalid share operation id")
-  else let* state = load_share ~base_path ~id in
-    lookup_receipt ~base_path ~id ~state ~operation_id)
 
 let durable_share_save ~ownership_root path json =
   Keeper_fs.save_json_durable_atomic ~ownership_root path json
@@ -333,6 +325,23 @@ let with_share_lock ~base_path ~id f =
       Log.Misc.error "artifact share lock release: %s"
         (File_lock_eio.durable_lock_error_to_string error);
       value)
+
+let observe_share ~base_path ~id f = protect_share (fun () ->
+  if not (valid_id id) then Error (Share_invalid "invalid artifact id")
+  else
+    let* guard = read_share_guard ~base_path ~id in
+    match guard with
+    | Guard_pending _ -> with_share_lock ~base_path ~id f
+    | Guard_absent | Guard_active ->
+      let* state = load_share ~base_path ~id in
+      f state)
+
+let read_share ~base_path ~id =
+  observe_share ~base_path ~id (fun state -> Ok (Share.snapshot state))
+
+let find_share_receipt ~base_path ~id ~operation_id =
+  if not (Share.valid_operation_id operation_id) then Error (Share_invalid "invalid share operation id")
+  else observe_share ~base_path ~id (fun state -> lookup_receipt ~base_path ~id ~state ~operation_id)
 
 let save_share ~save ~base_path ~id state receipt =
   match save ~ownership_root:base_path

@@ -27,6 +27,9 @@ type share_error =
 
 val share_error_message : share_error -> string
 val read_share : base_path:string -> id:string -> (Published_artifact_share.snapshot, share_error) result
+(** An interrupted first change may be settled under the publication lock
+    before its snapshot can be read. A reported uncertain change can therefore
+    take effect during a subsequent read. *)
 val find_share_receipt : base_path:string -> id:string -> operation_id:string ->
   (Published_artifact_share.receipt option, share_error) result
 (** [None] is not proof that an in-flight request will never apply. A visible
@@ -39,8 +42,11 @@ val change_share : base_path:string -> id:string -> Published_artifact_share.req
     settles it and archives its receipt durably. Replaying an identical
     operation settles the current snapshot before returning the original
     receipt. A different request with the same operation ID is refused.
-    Receipts consume disk space until an explicit retention scheme is added.
-    All writers must use this protocol; older binaries cannot be mixed with it. *)
+    Receipts consume disk space until an explicit retention scheme is added;
+    backups and restores must preserve the snapshot, guard and receipt tree
+    together. Missing historical receipt files cannot be distinguished from
+    unused IDs. All writers must use this protocol; older binaries cannot be
+    mixed with it. *)
 
 module For_testing : sig
   val change_share_before_stage : before_stage:(Keeper_fs.durable_write_stage -> unit) ->

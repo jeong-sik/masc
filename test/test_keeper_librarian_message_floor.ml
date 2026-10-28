@@ -1,8 +1,8 @@
 open Alcotest
 
 (* The Runtime message floor reads one message at a time. These cases pin the
-   rules its fold applies, through the production inference path: only the HTTP
-   provider is a fixture. A request body names the message it carries, so a
+   rules its machine applies, through the production inference path: only the
+   HTTP provider is a fixture. A request body names the message it carries, so a
    fixture reply can refuse or accept one message without counting calls. *)
 
 module Librarian = Masc.Keeper_librarian
@@ -10,6 +10,9 @@ module Floor = Masc.Keeper_librarian_message_floor
 module Unread = Masc.Keeper_librarian_unread
 module Program = Masc.Keeper_memory_os_program
 module Refusal = Masc.Keeper_librarian_input_refusal
+module Runtime = Masc.Keeper_librarian_runtime
+module Plan = Masc.Keeper_librarian_memory_plan
+module Machine = Floor.Machine
 module Fixture = Exact_output_fixture
 
 let () = Masc.Prompt_defaults.init ()
@@ -259,6 +262,131 @@ let test_a_source_manifest_that_disagrees_is_refused_before_any_call () =
      check bool "an empty manifest is refused" true (contains error.detail "nonempty"));
   check int "still no provider call" 0 (Fixture.post_count server)
 
+let ok = function Ok value -> value | Error detail -> fail detail
+
+type outcome =
+  | Answered of Runtime.served_slot * Runtime.memory_step
+  | Unreadable of Refusal.t list * Unread.t
+
+let machine_of ?(tools = []) messages =
+  let source = input ~tools messages in
+  let read =
+    Machine.read ~keeper_name:keeper ~sources:(sources_of messages) ~unread_messages:[]
+      ~previous_state:None source |> ok in
+  let plan =
+    Plan.create ~keeper_id:source.keeper_id ~turn_ref:source.turn_ref ~snapshot:None
+    |> Result.map_error Plan.error_to_string |> ok in
+  Machine.start ~transaction_id:"floor-machine-test" ~plan read |> ok
+
+let ask machine = match Machine.next machine |> ok with
+  | Machine.Ask question -> question
+  | Machine.Finished _ -> fail "the machine finished where a question was expected"
+
+let finished machine = match Machine.next machine |> ok with
+  | Machine.Finished finished -> finished
+  | Machine.Ask _ -> fail "the machine asked where it should have finished"
+
+(* Drive a machine with real Runtime calls and keep what it asked and what it
+   was told, in order. *)
+let drive_recording ~base_path ~keepers_dir messages machine =
+  let rec go machine questions outcomes =
+    match Machine.next machine |> ok with
+    | Machine.Finished _ -> machine, List.rev questions, List.rev outcomes
+    | Machine.Ask question ->
+      (match Runtime.infer_memory_step ~base_path ~keepers_dir ~keeper_id:keeper
+         ~previous_state:question.previous_state ~unread_messages:question.unread_messages
+         question.input with
+       | Runtime.Memory_inferred { step; served_by } ->
+         go (Machine.answered machine ~served_by step |> ok) (question :: questions)
+           (Answered (served_by, step) :: outcomes)
+       | Runtime.Memory_not_inferred { exhausted_input_refusals = Some (_ :: _ as reasons); _ } ->
+         let source = List.hd question.sources in
+         let hole = unread_message messages source ~reasons |> ok in
+         go (Machine.unreadable machine ~reasons ~hole |> ok) (question :: questions)
+           (Unreadable (reasons, hole) :: outcomes)
+       | Runtime.Memory_not_inferred _ -> fail "a recorded run needs every message answered or exhausted")
+  in
+  go machine [] []
+
+let apply machine = function
+  | Answered (served_by, step) -> Machine.answered machine ~served_by step |> ok
+  | Unreadable (reasons, hole) -> Machine.unreadable machine ~reasons ~hole |> ok
+
+let test_a_machine_rebuilt_from_its_outcomes_asks_the_same_questions () =
+  with_floor ~refuse:[ "oversized message" ] @@ fun ~base_path ~keepers_dir ~server:_ ->
+  let messages = [ message "first message"; message "oversized message"; message "third message" ] in
+  let done_machine, questions, outcomes =
+    drive_recording ~base_path ~keepers_dir messages (machine_of ~tools:[ tool "tool-once" ] messages)
+  in
+  check int "three questions, three outcomes" 3 (List.length outcomes);
+  check bool "asking twice without an outcome gives the same question" true
+    (let fresh = machine_of messages in ask fresh = ask fresh);
+  (* A restart keeps only the outcomes. Replay them on a machine built from
+     nothing else and require it to ask what the first machine asked. *)
+  let replayed =
+    List.fold_left2
+      (fun machine question outcome ->
+         check bool "the rebuilt machine asks the question the first one asked" true
+           (ask machine = question);
+         apply machine outcome)
+      (machine_of ~tools:[ tool "tool-once" ] messages) questions outcomes
+  in
+  let original = finished done_machine and rebuilt = finished replayed in
+  check bool "and finishes the same program" true
+    (Yojson.Safe.equal (Program.to_json original.program) (Program.to_json rebuilt.program));
+  check (option string) "with the same working state" original.working_state rebuilt.working_state;
+  check int "the refused message stays unread" 1 (List.length rebuilt.program.unread)
+
+let test_an_outcome_that_does_not_fit_the_question_is_refused () =
+  with_floor ~refuse:[ "oversized message" ] @@ fun ~base_path ~keepers_dir ~server:_ ->
+  let messages = [ message "oversized message"; message "second message" ] in
+  let sources = sources_of messages in
+  let machine = machine_of messages in
+  let reasons = [ Refusal.Request_body_refused ] in
+  let hole_for index ~reasons =
+    unread_message messages (List.nth sources index) ~reasons |> ok in
+  let refused label = function
+    | Ok _ -> failf "%s was accepted" label
+    | Error (_ : string) -> () in
+  refused "a hole for another message"
+    (Machine.unreadable machine ~reasons ~hole:(hole_for 1 ~reasons));
+  refused "a hole naming other causes than the refusal"
+    (Machine.unreadable machine ~reasons ~hole:(hole_for 0 ~reasons:[ Refusal.Input_capacity ]));
+  (* Run to the end, then the machine has no question left to answer. *)
+  let final_machine, _, outcomes = drive_recording ~base_path ~keepers_dir messages machine in
+  let step = List.find_map (function Answered (served_by, step) -> Some (served_by, step) | Unreadable _ -> None)
+    outcomes |> Option.get in
+  refused "an answer after the last question"
+    (Machine.answered final_machine ~served_by:(fst step) (snd step));
+  refused "a hole after the last question"
+    (Machine.unreadable final_machine ~reasons ~hole:(hole_for 0 ~reasons));
+  (* Host observations asked alone cannot be unread. *)
+  let alone = machine_of ~tools:[ tool "tool-with-no-message-left" ] [ message "oversized message" ] in
+  let after_hole =
+    Machine.unreadable alone ~reasons
+      ~hole:(unread_message [ message "oversized message" ] (List.hd (sources_of [ message "oversized message" ]))
+               ~reasons |> ok)
+    |> ok in
+  let question = ask after_hole in
+  check bool "the observations are asked alone" true (question.sources = []);
+  refused "a hole for the observation-only question"
+    (Machine.unreadable after_hole ~reasons
+       ~hole:(hole_for 0 ~reasons));
+  (* A plan that already staged a decision cannot start a floor. *)
+  let staged_plan =
+    let source = input [ message "second message" ] in
+    let plan = Plan.create ~keeper_id:source.keeper_id ~turn_ref:source.turn_ref ~snapshot:None |> Result.map_error Plan.error_to_string |> ok in
+    let _, _, outcomes = drive_recording ~base_path ~keepers_dir [ message "second message" ]
+      (machine_of [ message "second message" ]) in
+    match outcomes with
+    | [ Answered (_, step) ] -> Plan.append plan step |> Result.map_error Plan.error_to_string |> ok
+    | _ -> fail "expected one answered step" in
+  let read =
+    Machine.read ~keeper_name:keeper ~sources:(sources_of messages) ~unread_messages:[]
+      ~previous_state:None (input messages) |> ok in
+  refused "a floor started from a staged plan"
+    (Machine.start ~transaction_id:"floor-machine-test" ~plan:staged_plan read)
+
 let () =
   run "keeper_librarian_message_floor"
     [ ( "message floor"
@@ -274,5 +402,11 @@ let () =
             test_observations_without_a_message_get_their_own_step
         ; test_case "a source manifest that disagrees is refused before any call" `Quick
             test_a_source_manifest_that_disagrees_is_refused_before_any_call
+        ] )
+    ; ( "machine"
+      , [ test_case "a machine rebuilt from its outcomes asks the same questions" `Quick
+            test_a_machine_rebuilt_from_its_outcomes_asks_the_same_questions
+        ; test_case "an outcome that does not fit the pending question is refused" `Quick
+            test_an_outcome_that_does_not_fit_the_question_is_refused
         ] )
     ]

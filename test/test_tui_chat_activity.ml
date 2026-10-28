@@ -375,7 +375,7 @@ let test_queue_clear_treats_a_message_by_where_it_stands () =
   let before_first_post (entry : Tui.inflight) =
     { entry with
       phase = Tui.Turn_preflight
-        { Queue.request = entry.sent_request; submitted_at = 2.; submission_seq = 0
+        { Queue.request = entry.sent_request; source = Queue.Request_message; submitted_at = 2.; submission_seq = 0
         ; intent = Queue.Next; causal_parent_request_id = None } } in
   let reading_again (entry : Tui.inflight) = { entry with phase = Tui.Turn_reconciling } in
   (* A failure heard in the stream with the owner still held. The server ends
@@ -442,7 +442,7 @@ let test_withdrawing_an_undispatched_request_leaves_no_owner () =
   let handed_over =
     { entry with
       phase = Tui.Turn_preflight
-        { Queue.request = entry.sent_request; submitted_at = 2.; submission_seq = 0
+        { Queue.request = entry.sent_request; source = Queue.Request_message; submitted_at = 2.; submission_seq = 0
         ; intent = Queue.Next; causal_parent_request_id = None } } in
   let posting = inflight ~request_id:"posting" ~at:3. () in
   state.msg_inflight <- [posting; handed_over];

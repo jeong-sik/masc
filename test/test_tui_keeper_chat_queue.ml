@@ -67,6 +67,46 @@ let test_recall_replacement_checks_the_original_payload () =
     (Result.is_error (Queue.replace_recalled_request Queue.empty ~original:item edited))
 ;;
 
+let test_staged_source_follows_the_pending_item () =
+  let original = request ~keeper_name:"alpha" "before paste\noriginal bytes" in
+  let queue, _ = match Queue.push Queue.empty ~submitted_at:42. original with
+    | Ok pair -> pair | Error detail -> fail detail in
+  let accepted = Option.get (Queue.find queue ~request_id:original.request_id) in
+  let staged = {original with Chat.message="before paste\n[file reference]"} in
+  let source = Queue.source_for_staging accepted ~message:staged.message in
+  let queue = match Queue.replace_recalled_request ~source
+      queue ~original:accepted staged with
+    | Ok queue -> queue | Error detail -> fail detail in
+  let staged_item = Option.get (Queue.find queue ~request_id:original.request_id) in
+  check string "the wire payload names the file" staged.message staged_item.request.message;
+  check string "the accepted source stays with the queue item" original.message (Queue.source_text staged_item);
+  let promoted = Queue.prepare_for_admission ~automatic:true staged_item in
+  let restored = Queue.restore_unsent Queue.empty promoted in
+  let restored_item = Option.get (Queue.find restored ~request_id:original.request_id) in
+  check bool "preflight promotion and restoration retain both payloads" true
+    (restored_item.request = staged && Queue.source_text restored_item = original.message);
+  let changed_source = match Queue.replace_request ~source:(Queue.Staged_fragments ["changed source"])
+      queue ~request_id:original.request_id staged with
+    | Ok queue -> queue | Error detail -> fail detail in
+  check bool "an editor cannot overwrite a source-only change" true
+    (Result.is_error (Queue.replace_recalled_request changed_source ~original:staged_item staged));
+  let edited = {staged with Chat.message="new input"} in
+  let edited_queue = match Queue.replace_recalled_request queue ~original:staged_item edited with
+    | Ok queue -> queue | Error detail -> fail detail in
+  let edited_item = Option.get (Queue.find edited_queue ~request_id:original.request_id) in
+  check string "an ordinary edit becomes the new source" edited.message (Queue.source_text edited_item);
+  let later = "later input" in
+  let merged = {staged with Chat.message=staged.message ^ "\n" ^ later} in
+  let source = Queue.source_for_join staged_item ~message:later in
+  let joined = match Queue.replace_request ~source queue ~request_id:original.request_id merged with
+    | Ok queue -> queue | Error detail -> fail detail in
+  let joined_item = Option.get (Queue.find joined ~request_id:original.request_id) in
+  check string "joined staged source retains original bytes and input order"
+    (original.message ^ "\n" ^ later) (Queue.source_text joined_item);
+  check bool "an unchanged wire edit preserves the staged source" true
+    (Queue.source_for_edit joined_item ~message:joined_item.request.message = joined_item.source)
+;;
+
 (* The operator can switch keepers while a turn runs. A queued line must reach
    the keeper it was written to, not whoever is selected when it finally goes. *)
 let test_a_line_keeps_the_keeper_it_was_written_to () =
@@ -550,6 +590,8 @@ let () =
             test_lines_wait_in_the_order_they_were_written
         ; test_case "recall replacement checks its original payload" `Quick
             test_recall_replacement_checks_the_original_payload
+        ; test_case "staged source follows the pending item" `Quick
+            test_staged_source_follows_the_pending_item
         ; test_case "a line keeps the keeper it was written to" `Quick
             test_a_line_keeps_the_keeper_it_was_written_to
         ; test_case "the cap refuses rather than forgetting" `Quick

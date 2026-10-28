@@ -7,8 +7,13 @@ type intent =
   | Steer_after_interrupt
   | Steer_without_priority
 
+type source =
+  | Request_message
+  | Staged_fragments of string list
+
 type item =
   { request : Chat.request
+  ; source : source
   ; submitted_at : float
   ; submission_seq : int
   ; intent : intent
@@ -22,6 +27,29 @@ let is_empty queue = queue.items = []
 let length queue = List.length queue.items
 let waiting queue = queue.items
 let cap = 32
+
+let source_text item =
+  match item.source with
+  | Request_message -> item.request.Chat.message
+  | Staged_fragments reversed -> String.concat "\n" (List.rev reversed)
+;;
+
+let source_for_edit item ~message =
+  if String.equal item.request.Chat.message message then item.source else Request_message
+;;
+
+let source_for_join item ~message =
+  match item.source with
+  | Request_message -> Request_message
+  | Staged_fragments reversed -> Staged_fragments (message :: reversed)
+;;
+
+let source_for_staging item ~message =
+  match item.source with
+  | Request_message when not (String.equal item.request.Chat.message message) ->
+      Staged_fragments [item.request.Chat.message]
+  | Request_message | Staged_fragments _ -> item.source
+;;
 
 let item_keeper item = item.request.Chat.keeper_name
 
@@ -79,6 +107,7 @@ let push queue ~submitted_at request =
   else (
     let item =
       { request
+      ; source = Request_message
       ; submitted_at
       ; submission_seq = queue.next_submission_seq
       ; intent = Next
@@ -104,6 +133,7 @@ let push_steer queue ~submitted_at ~causal_parent_request_id request =
   else
     let steer =
       { request
+      ; source = Request_message
       ; submitted_at
       ; submission_seq = queue.next_submission_seq
       ; intent = Steer_after_interrupt
@@ -237,7 +267,7 @@ let move_to_front queue ~keeper_name ~request_id =
   move queue ~keeper_name ~request_id Front
 ;;
 
-let replace_request queue ~request_id request =
+let replace_request ?(source = Request_message) queue ~request_id request =
   if not (String.equal request.Chat.request_id request_id)
   then Error "queue replacement must preserve request_id"
   else
@@ -245,7 +275,7 @@ let replace_request queue ~request_id request =
       | [] -> Error "queued request is no longer waiting"
       | item :: rest
         when String.equal item.request.Chat.request_id request_id ->
-          Ok { queue with items = List.rev_append reversed ({ item with request } :: rest) }
+          Ok { queue with items = List.rev_append reversed ({ item with request; source } :: rest) }
       | item :: rest -> replace (item :: reversed) rest
     in
     replace [] queue.items
@@ -254,13 +284,14 @@ let replace_request queue ~request_id request =
 (* An editor owns the payload it recalled, not just an ID that another local
    action may have reused or changed. Preserve later priority changes on the
    queue item while refusing to overwrite a different request payload. *)
-let replace_recalled_request queue ~original request =
+let replace_recalled_request ?source queue ~original request =
   let request_id = original.request.Chat.request_id in
   match find queue ~request_id with
   | None -> Error "queued request is no longer waiting"
-  | Some current when current.request <> original.request ->
+  | Some current when current.request <> original.request
+                      || current.source <> original.source ->
       Error "queued request changed while it was being edited"
-  | Some _ -> replace_request queue ~request_id request
+  | Some _ -> replace_request ?source queue ~request_id request
 ;;
 
 (* Priority remains on the unsent item, so editing, cancellation, suspension,

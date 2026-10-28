@@ -913,7 +913,7 @@ let preflight_input ?(submission_seq = 0) () =
       mime_type="image/png"; size=3; data="YWJj"}];
     references = [Keeper_chat.Ref_file_id "file-1"]} in
   let item : Masc_tui_keeper_chat_queue.item =
-    {request; submitted_at=1.; submission_seq;
+    {request; source=Masc_tui_keeper_chat_queue.Request_message; submitted_at=1.; submission_seq;
      intent=Masc_tui_keeper_chat_queue.Next; causal_parent_request_id=None} in
   {entry with sent_request=request; phase=Tui_types.Turn_preflight item}, item
 ;;
@@ -1344,6 +1344,27 @@ let test_withdrawal_restores_only_input_before_the_first_post () =
     check bool "possibly sent input is never queued" true
       (Masc_tui_keeper_chat_queue.is_empty state.msg_queued))
     [Tui_types.Turn_streaming; Tui_types.Turn_reconciling]
+;;
+
+let test_withdrawal_retains_staged_source_and_wire_together () =
+  let module Q = Masc_tui_keeper_chat_queue in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  state.msg_target_keeper_name <- Some "alpha";
+  let entry, item = preflight_input () in
+  let staged = {item with Q.request={item.request with Keeper_chat.message="[file reference]"};
+    source=Q.Staged_fragments ["original pasted bytes"]} in
+  let entry = {entry with Tui_types.sent_request=staged.request;
+    phase=Tui_types.Turn_preflight staged} in
+  Tui_types.retain_preflight_inputs state [entry];
+  check string "the composer is not expanded with staged bytes" ""
+    (Masc_tui_message_input.contents state.msg_input);
+  let retained = Option.get (Q.find state.msg_queued ~request_id:staged.request.request_id) in
+  check bool "the retained item owns source, wire, attachments and references" true
+    (retained = staged && retained.request.attachments = item.request.attachments
+     && retained.request.references = item.request.references);
+  check bool "the retained item requires explicit resume" true
+    (List.mem ("alpha", staged.request.request_id, Tui_types.Retained_before_dispatch)
+       state.keeper_interactive_waiting)
 ;;
 
 let test_preflight_recovery_keeps_newer_input_and_a_full_queue () =
@@ -6992,6 +7013,7 @@ let () =
         ; test_case "unmarked input precedes a superseded steer" `Quick test_unmarked_input_precedes_a_superseded_steer
         ; test_case "stop holds existing unmarked input" `Quick test_stop_holds_existing_unmarked_input
         ; test_case "withdrawal restores only input before the first POST" `Quick test_withdrawal_restores_only_input_before_the_first_post
+        ; test_case "withdrawal retains staged source and wire together" `Quick test_withdrawal_retains_staged_source_and_wire_together
         ; test_case "preflight recovery keeps newer input and full queue" `Quick test_preflight_recovery_keeps_newer_input_and_a_full_queue
         ; test_case "preflight recovery preserves order and steer intent" `Quick test_preflight_recovery_preserves_order_and_steer_intent
         ; test_case "preflight resume keeps priority intents until a server resume" `Quick test_preflight_resume_keeps_priority_intents_until_server_resume

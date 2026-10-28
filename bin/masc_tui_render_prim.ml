@@ -2549,16 +2549,16 @@ let planning_backlog_clauses (backlog : planning_backlog) =
        else item)
     (List.combine items bands)
 
-let planning_change_clauses ~(baseline : planning_snapshot option)
+let planning_change_clauses ?(ko = false) ~(baseline : planning_snapshot option)
     (current : planning_snapshot) =
   match baseline with
-  | None -> [ "Change: waiting for the first successful snapshot" ]
+  | None -> [ if ko then "첫 성공 스냅샷 대기" else "Change: waiting for the first successful snapshot" ]
   | Some first ->
-      [ Printf.sprintf "Change from baseline: Goals done %+d"
+      [ Printf.sprintf (if ko then "완료 단계 목표 %+d" else "Change from baseline: Goals in completed phase %+d")
           (current.pl_rollup.pr_done - first.pl_rollup.pr_done)
-      ; Printf.sprintf "Tasks done %+d"
+      ; Printf.sprintf (if ko then "완료 Task %+d" else "Tasks done %+d")
           (current.pl_backlog.pb_done - first.pl_backlog.pb_done)
-      ; Printf.sprintf "Goal reviews pending %+d"
+      ; Printf.sprintf (if ko then "검증 단계 목표 %+d" else "Goals in verifying phase %+d")
           (current.pl_rollup.pr_verifying - first.pl_rollup.pr_verifying)
       ]
 

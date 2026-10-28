@@ -510,6 +510,15 @@ let planning_stale_notice_rows (state : state) ~cols =
          | Some detail -> [data_unreliable_row ~cols detail])
   | None, (None | Some _) | Some _, None -> []
 
+let planning_phase_korean = function
+  | Goal_phase.Kind.Executing -> "진행"
+  | Goal_phase.Kind.Verifying -> "검증 중"
+  | Goal_phase.Kind.Awaiting_confirmation -> "확인 대기"
+  | Goal_phase.Kind.Completed -> "완료"
+  | Goal_phase.Kind.Dropped -> "포기"
+  | Goal_phase.Kind.Paused -> "일시정지"
+  | Goal_phase.Kind.Blocked -> "막힘"
+
 let planning_summary_reading ~cols (state : state) =
   let ko = state.ui_language = Lang_ko in
   let text korean english = if ko then korean else english in
@@ -544,7 +553,12 @@ let planning_summary_reading ~cols (state : state) =
                    let name = Option.value row.pgh_title ~default:row.pgh_goal_id |> Terminal_text.single_line in
                    let phase = match row.pgh_final_phase with
                      | None -> text "단계 미기록" "phase not recorded"
-                     | Some phase -> text "마지막 단계 " "last phase " ^ Terminal_text.single_line phase in
+                     | Some phase ->
+                         let shown = if ko then
+                             Option.fold ~none:(Terminal_text.single_line phase)
+                               ~some:planning_phase_korean (Goal_phase.Kind.parse phase)
+                           else Terminal_text.single_line phase in
+                         text "마지막 단계 " "last phase " ^ shown in
                    let outcome = if Option.is_some row.pgh_closed_at
                      then text "종결 시각 기록됨" "close time recorded"
                      else text "종결 결과 미기록" "terminal outcome not recorded" in
@@ -561,26 +575,19 @@ let planning_summary_reading ~cols (state : state) =
           + rollup.pr_done + rollup.pr_paused + rollup.pr_blocked + rollup.pr_dropped in
         let goal_rows = if not ko then planning_rollup_rows ~cols rollup else
           [ Printf.sprintf "전체 %d · 진행 %d · 검증 %d · 확인 대기 %d" total_goals rollup.pr_active rollup.pr_verifying rollup.pr_awaiting_confirmation
-          ; Printf.sprintf "완료 단계 %d · 일시정지 %d · 막힘 %d · 중단 %d" rollup.pr_done rollup.pr_paused rollup.pr_blocked rollup.pr_dropped ] in
+          ; Printf.sprintf "완료 단계 %d · 일시정지 %d · 막힘 %d · 포기 %d" rollup.pr_done rollup.pr_paused rollup.pr_blocked rollup.pr_dropped ] in
         let backlog_rows = if not ko then pack_planning_summary_rows ~cols (planning_backlog_clauses backlog) else
           [ Printf.sprintf "할 일 %d · 담당 %d · 진행 %d" backlog.pb_todo backlog.pb_claimed backlog.pb_running
           ; Printf.sprintf "검증 대기 %d · 완료 %d · 취소 %d" backlog.pb_awaiting_verification backlog.pb_done backlog.pb_cancelled ] in
-        let change_rows = if not ko then
-            pack_planning_summary_rows ~cols (planning_change_clauses ~baseline:state.planning_baseline p)
-          else match state.planning_baseline with
-            | None -> ["첫 성공 스냅샷 대기"]
-            | Some first ->
-                [Printf.sprintf "완료 단계 목표 %+d · 완료 Task %+d · 검증 대기 목표 %+d"
-                   (rollup.pr_done - first.pl_rollup.pr_done)
-                   (backlog.pb_done - first.pl_backlog.pb_done)
-                   (rollup.pr_verifying - first.pl_rollup.pr_verifying)] in
+        let change_rows = pack_planning_summary_rows ~cols
+            (planning_change_clauses ~ko ~baseline:state.planning_baseline p) in
         [section (text "관측과 기준" "Observation and baseline") (warning @ stamps);
          section (text "목표 상태" "Goal states") goal_rows;
          section (text "전체 Task 현황" "Global Task backlog") backlog_rows;
          section (text "기준 대비 변화" "Change from baseline") change_rows;
          section (text "목록 밖 목표 이력" "Unlisted Goal history") history]
   in
-  Masc_tui_detail_reading.create ~title:(text "작업 요약" "Work summary") sections
+  Masc_tui_detail_reading.create ~ko ~title:(text "작업 요약" "Work summary") sections
 
 (* The list owns the first row of the summary; its complete counts and the
    two server timestamps stay in the captured reading at [b]. *)
@@ -590,23 +597,32 @@ let planning_compact_summary ~cols (state : state) (p : planning_snapshot) =
   let total = r.pr_active + r.pr_verifying + r.pr_awaiting_confirmation
     + r.pr_done + r.pr_dropped + r.pr_paused + r.pr_blocked in
   let clauses =
-    [ if ko then "b:전체 요약" else "b:full summary"
-    ; Printf.sprintf (if ko then "목표 %d" else "%d goals") total
+    [ if ko then "b:요약" else "b:summary"
     ]
     @ (if r.pr_awaiting_confirmation = 0 then [] else
-         [Printf.sprintf (if ko then "확인 대기 %d" else "%d awaiting confirmation") r.pr_awaiting_confirmation])
+         [Printf.sprintf (if ko then "확인 대기 %d" else "confirm %d") r.pr_awaiting_confirmation])
     @ (if r.pr_blocked = 0 then [] else
          [Printf.sprintf (if ko then "막힘 %d" else "%d blocked") r.pr_blocked])
     @ (if r.pr_verifying = 0 then [] else
          [Printf.sprintf (if ko then "검증 중 %d" else "%d verifying") r.pr_verifying])
+    @ [Printf.sprintf (if ko then "목표 %d" else "%d goals") total]
     @ [Printf.sprintf (if ko then "완료 단계 %d" else "%d in completed phase") r.pr_done]
     @ (if p.pl_goal_history = [] then [] else
          [Printf.sprintf (if ko then "목록 밖 %d" else "%d no longer listed") (List.length p.pl_goal_history)])
   in
   let fits line = Message_layout.display_width line <= framed_inner_width cols in
-  List.fold_left (fun line clause ->
-      let next = if line = "" then "  " ^ clause else line ^ " · " ^ clause in
-      if fits next then next else line) "" clauses
+  let omitted line =
+    let with_mark = if line = "" then "  b…" else line ^ " · …" in
+    if fits with_mark then with_mark else "  b…"
+  in
+  let rec pack line = function
+    | [] -> line
+    | clause :: rest ->
+        let next = if line = "" then "  " ^ clause else line ^ " · " ^ clause in
+        if fits next && (rest = [] || fits (next ^ " · …")) then pack next rest
+        else omitted line
+  in
+  pack "" clauses
 
 let render_planning_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -631,7 +647,7 @@ let render_planning_list (state : state) =
         | Planning_sort_due -> "기한" in
       let filter = match state.planning_filter with
         | Planning_filter_all -> "전체" | Planning_filter_active -> "미종결"
-        | Planning_filter_completed -> "완료" | Planning_filter_dropped -> "중단" in
+        | Planning_filter_completed -> "완료" | Planning_filter_dropped -> "포기" in
       Printf.sprintf "정렬:%s  필터:%s" sort filter
     else Printf.sprintf "sort:%s  filter:%s"
       (planning_sort_label state.planning_sort)
@@ -801,15 +817,8 @@ let render_planning_list (state : state) =
            | Some g -> begin
              let is_selected = idx = state.planning_cursor in
              let status_color = planning_phase_color g.pg_phase in
-             let status_label = if not ko then planning_phase_label g.pg_phase else
-               match g.pg_phase with
-               | Goal_phase.Executing -> "진행"
-               | Goal_phase.Verifying -> "검증 중"
-               | Goal_phase.Awaiting_confirmation -> "확인 대기"
-               | Goal_phase.Completed -> "완료"
-               | Goal_phase.Dropped -> "중단"
-               | Goal_phase.Paused _ -> "일시정지"
-               | Goal_phase.Blocked _ -> "막힘" in
+             let status_label = if ko then planning_phase_korean (Goal_phase.kind g.pg_phase)
+               else planning_phase_label g.pg_phase in
             (* The gap belonged to the reading before; the columns space
                themselves now, and an absent date leaves its cell empty rather
                than moving the one beside it. *)

@@ -49,7 +49,7 @@ let inspect_from_run root arguments =
   let add key v = Hashtbl.replace repeated key (v :: Option.value ~default:[] (Hashtbl.find_opt repeated key)) in
   let rec flags = function
     | ("-d" | "--read-only" | "--rm" | "--no-dns") as key :: rest -> Hashtbl.replace one key "true"; flags rest
-    | ("--name" | "--user" | "--memory" | "--cpus" | "--workdir" | "--network" | "--dns") as key :: v :: rest ->
+    | ("--name" | "--user" | "--memory" | "--cpus" | "--workdir" | "--network" | "--dns" | "--entrypoint") as key :: v :: rest ->
       Hashtbl.replace one key v; flags rest
     | ("--label" | "--env" | "-e" | "-v" | "--volume" | "--tmpfs" | "--cap-drop" | "--cap-add") as key :: v :: rest ->
       add key v; flags rest
@@ -57,9 +57,13 @@ let inspect_from_run root arguments =
     | [] -> fail "provider did not receive an image"
   in
   let image, explicit_command = flags arguments in
-  (* This is the provider's OCI execution behavior, independently observed
-     from its own image config, rather than the product's expected command. *)
-  let command = image_entrypoint root @ explicit_command in
+  (* Apple's entrypoint option replaces the image entrypoint; the arguments
+     after the image replace its Cmd. Without an override, use the image's
+     entrypoint as the prefix. *)
+  let command =
+    match Hashtbl.find_opt one "--entrypoint" with
+    | Some executable -> executable :: explicit_command
+    | None -> image_entrypoint root @ explicit_command in
   let all key = Option.value ~default:[] (Hashtbl.find_opt repeated key) |> List.rev in
   let get key = Hashtbl.find one key in
   let mount kind source destination options = `Assoc
@@ -262,9 +266,9 @@ let test_wrapped_image_adopts_without_relabelling_or_boot_effects () = with_fixt
   boot root;
   let original = read (Filename.concat root "guest.json") in
   let init = field "configuration" (Yojson.Safe.from_string original) |> field "initProcess" in
-  check string "provider applies its actual image entrypoint" "opam" (text (field "executable" init));
-  check (list string) "image Cmd is replaced by explicit Keeper argv"
-    ["exec"; "--"; "tail"; "-f"; "/dev/null"]
+  check string "explicit entrypoint replaces the image entrypoint" "tail" (text (field "executable" init));
+  check (list string) "explicit Keeper arguments replace image Cmd"
+    ["-f"; "/dev/null"]
     (match field "arguments" init with `List values -> List.map text values | _ -> fail "missing init argv");
   let inode = (Unix.lstat (snapshot_path root)).st_ino in
   let before = List.length (calls root) in
@@ -310,9 +314,9 @@ let test_image_prefix_does_not_permit_command_tampering () =
     save_json (Filename.concat root "inspect-override") (`List [modified]);
     let inode = (Unix.lstat (snapshot_path root)).st_ino in
     assert_wrapped_refusals_preserve_guest root original inode (List.length (calls root))))
-    [(fun init -> replace "arguments" (strings ["exec"; "--"; "tail"; "-f"; "/foreign/file"]) init)
-    ; (fun init -> replace "executable" (`String "tail")
-        (replace "arguments" (strings ["-f"; "/dev/null"]) init))]
+    [(fun init -> replace "arguments" (strings ["-f"; "/foreign/file"]) init)
+    ; (fun init -> replace "executable" (`String "opam")
+        (replace "arguments" (strings ["exec"; "--"; "tail"; "-f"; "/dev/null"]) init))]
 
 let test_unavailable_image_metadata_preserves_wrapped_guest () =
   List.iter (fun unavailable -> with_fixture (fun root ->

@@ -1106,23 +1106,51 @@ let test_receipts_are_owned_by_each_transport_call () =
 ;;
 
 let test_interrupted_wire_publishes_unknown_receipt () =
-  with_eio @@ fun () ->
+  with_eio_env @@ fun env ->
   let base_path = temp_dir () in
   let cli, _ = make_stub ~dir:base_path ~mode:"exit3" in
   let observations = ref [] in
   let runner = Keeper_sandbox_remote.runner
       ~on_receipt:(fun receipt -> observations := receipt :: !observations)
       ~timeout_sec:2.0 (make_state ~base_path ~cli) in
-  let interrupted =
-    try
-      ignore (runner ~on_stdout_chunk:(Some (fun _ -> raise (Eio.Cancel.Cancelled Exit)))
-        ~on_stderr_chunk:None ~stdin_content:None ~argv:["/bin/true"] ~env:[||] ~cwd:None);
-      false
-    with Eio.Cancel.Cancelled Exit -> true in
-  check bool "original cancellation propagates" true interrupted;
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let cancel_context, provide_context = Eio.Promise.create () in
+  let received_output, signal_output = Eio.Promise.create () in
+  let wait_for_cancel, release_callback = Eio.Promise.create () in
+  let result, finish = Eio.Promise.create () in
+  Fun.protect ~finally:(fun () -> Eio.Promise.resolve release_callback ()) @@ fun () ->
+  Eio.Fiber.fork ~sw (fun () ->
+    let outcome =
+      try Eio.Cancel.sub (fun context ->
+        Eio.Promise.resolve provide_context context;
+        ignore (runner
+          ~on_stdout_chunk:(Some (fun _ ->
+            Eio.Promise.resolve signal_output ();
+            Eio.Promise.await wait_for_cancel))
+          ~on_stderr_chunk:None ~stdin_content:None ~argv:["/bin/true"] ~env:[||] ~cwd:None);
+        `Returned)
+      with Eio.Cancel.Cancelled cause -> `Cancelled cause in
+    Eio.Promise.resolve finish outcome);
+  let context = Eio.Promise.await cancel_context in
+  Eio.Time.with_timeout_exn clock 5.0 (fun () -> Eio.Promise.await received_output);
+  Eio.Cancel.cancel context Exit;
+  let rec cancellation_cause_is_exit = function
+    | Exit -> true
+    | Eio.Cancel.Cancelled cause -> cancellation_cause_is_exit cause
+    | _ -> false in
+  (match Eio.Time.with_timeout_exn clock 10.0 (fun () -> Eio.Promise.await result) with
+   | `Cancelled cause ->
+     check bool "cancellation keeps the requested cause" true (cancellation_cause_is_exit cause)
+   | `Returned -> fail "the runner swallowed cancellation");
+  let open Keeper_sandbox_remote in
   match !observations with
-  | [Keeper_sandbox_remote.Execution_unavailable Transport_unavailable] -> ()
-  | _ -> fail "an interrupted wire did not publish its uncertain effect"
+  | [Execution_unavailable Transport_unavailable] -> ()
+  | [] | _ :: _ :: _
+  | [Execution_observed _]
+  | [Execution_unavailable
+       (Request_not_sent | Peer_receipt_missing | Invalid_receipt _ | Shim_refused_without_receipt)] ->
+    fail "an interrupted wire did not publish its uncertain effect"
 ;;
 
 let test_trusted_remote_timeout_retains_receipt () =

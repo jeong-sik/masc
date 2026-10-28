@@ -31,7 +31,7 @@ enum stage {
   ST_CHILD_DUP, ST_CHILD_CLOSE, ST_CHILD_SESSION, ST_CHILD_CWD,
   ST_CHILD_CREDENTIALS, ST_CHILD_CAPS, ST_CHILD_SIGNALS,
   ST_CHILD_READY, ST_CHILD_GATE, ST_CHILD_EXEC,
-  ST_CONTROL, ST_SIGNAL, ST_WAIT, ST_CLOSE, ST_WATCH
+  ST_CONTROL, ST_SIGNAL, ST_WAIT, ST_CLOSE, ST_WATCH, ST_DUP_GROUP
 };
 struct handle { int pidfd; int control; };
 static void finalize_handle(value raw) {
@@ -151,12 +151,15 @@ CAMLprim value masc_endpoint_gate_spawn(value input) {
   struct handle initial={-1,-1};memcpy(Data_custom_val(raw),&initial,sizeof(initial));
   int stage=0,error=0,pidfd=-1,parent_control=-1;
 #ifdef __linux__
-  int sources[3]={-1,-1,-1},directory=-1,child_control=-1,pair[2]={-1,-1};
+  int sources[3]={-1,-1,-1},directory=-1,child_control=-1,pair[2]={-1,-1},group=-1;
   char *program=copy_string(Field(input,0)),*cwd=copy_string(Field(input,3));
   char **argv=copy_vector(Field(input,1)),**env=copy_vector(Field(input,2));
   intnat uid_value=Long_val(Field(input,4)),gid_value=Long_val(Field(input,5));
   uid_t uid=(uid_t)uid_value;gid_t gid=(gid_t)gid_value;
   int original[3];for(int i=0;i<3;i++) original[i]=Int_val(Field(Field(input,6),i));
+  value group_option=Field(input,7);
+  int has_group=Is_block(group_option);
+  int original_group=has_group?Int_val(Field(group_option,0)):-1;
   if (!program || !cwd || !argv || !env) {stage=ST_ALLOC;error=ENOMEM;}
   else if (geteuid()!=0 || uid_value<=0 || uid==(uid_t)-1 || gid_value<0 || gid==(gid_t)-1
       || (uintmax_t)uid!=(uintmax_t)uid_value || (uintmax_t)gid!=(uintmax_t)gid_value) {
@@ -167,6 +170,10 @@ CAMLprim value masc_endpoint_gate_spawn(value input) {
     for(int i=0;i<3 && !error;i++) {
       sources[i]=fcntl(original[i],F_DUPFD_CLOEXEC,FIRST_SOURCE_FD);
       if(sources[i]<0){stage=ST_DUP;error=errno;}
+    }
+    if(!error && has_group) {
+      group=fcntl(original_group,F_DUPFD_CLOEXEC,FIRST_SOURCE_FD);
+      if(group<0){stage=ST_DUP_GROUP;error=errno;}
     }
     if (!error) {
       int fd=open(cwd,O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW);
@@ -187,6 +194,7 @@ CAMLprim value masc_endpoint_gate_spawn(value input) {
     if(!error) {
       struct clone_args options;memset(&options,0,sizeof(options));
       options.flags=CLONE_PIDFD;options.pidfd=(uintptr_t)&pidfd;options.exit_signal=SIGCHLD;
+      if(group>=0){options.flags|=CLONE_INTO_CGROUP;options.cgroup=(uint64_t)group;}
       long child=syscall(SYS_clone3,&options,sizeof(options));
       if(child==0) child_exec(program,argv,env,uid,gid,sources[0],sources[1],sources[2],child_control,directory);
       if(child<0){stage=ST_CLONE;error=errno;}
@@ -197,6 +205,7 @@ CAMLprim value masc_endpoint_gate_spawn(value input) {
     }
     for(int i=0;i<3;i++) if(sources[i]>=0) close(sources[i]);
     if(directory>=0) close(directory);
+    if(group>=0) close(group);
     if(child_control>=0) close(child_control);
     if(pair[0]>=0) close(pair[0]);
     if(pair[1]>=0) close(pair[1]);

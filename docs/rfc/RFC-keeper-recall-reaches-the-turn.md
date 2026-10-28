@@ -1,6 +1,6 @@
 ---
 rfc: "keeper-recall-reaches-the-turn"
-title: "Keeper 기억이 턴에 닿게 한다 — 호스트가 이번 입력에 맞는 기억을 골라 싣는다"
+title: "Keeper 가 기억을 매 턴 받게 한다 — 호스트가 이번 입력에 맞는 기억을 골라 프롬프트에 넣는다"
 status: Draft
 created: 2026-10-28
 updated: 2026-10-28
@@ -10,315 +10,311 @@ superseded_by: null
 related: ["deferred-contextual-memory", "keepers-see-the-wiki-table-of-contents", "memory-search-beyond-substring", "0418", "0247"]
 ---
 
-# RFC: Keeper 기억이 턴에 닿게 한다
+# RFC: Keeper 가 기억을 매 턴 받게 한다
 
-- 상태: 초안. 판정 방식(D2)은 운영자가 2026-10-28 에 "LLM 판단 Jev 판단을 적극 사용"으로 정했다. Keeper 열여섯 명이 Board 에 낸 의견은 §2.4 에 모아 설계에 반영했다. 나머지는 §8 에 열려 있다.
-- 날짜: 한국 시간(KST). Board 와 metrics 의 시각은 UTC 로 적고 `Z` 를 붙인다.
+- 상태: 초안. 판정 방식(D2)은 운영자가 2026-10-28 에 "LLM 판단 Jev 판단을 적극 사용"으로 정했다. Keeper 17명의 의견은 [증거 문서](../evidence/keeper-recall-board-feedback-2026-10-28/README.md)에 있고 반영은 §2.4 에 적었다. 나머지는 §8 에 열려 있다.
+- 날짜: 한국 시간(KST). Board 와 metrics 의 시각은 UTC 이고 `Z` 를 붙인다.
 - 운영자 요청 (2026-10-28): 모든 Keeper 의 기억 Recall 이 턴 대화에서 쓰여야 한다. 지금은 사실상 쓰이지 않아 Librarian 이 의미를 잃는다. Skill 처럼 기억을 찾게 하고, 위계와 트리로 연결된 기억을 따라가게 하고, 기성 제품과 논문을 보고 빠진 구현을 채우라고 했다.
-- 근거: 측정은 [기준선 증거](../evidence/keeper-recall-baseline-2026-10-28/README.md), 기성 제품·논문 대조는 [연구 r1](../research/2026-10-28-keeper-recall-prior-art-r1.md). 코드는 2026-10-28 `origin/main` `de5599529145`.
+- 근거: 측정은 [기준선 증거](../evidence/keeper-recall-baseline-2026-10-28/README.md), 기성 제품과 논문은 [연구 r1](../research/2026-10-28-keeper-recall-prior-art-r1.md)과 [r2](../research/2026-10-28-keeper-recall-prior-art-r2.md). 코드는 이 브랜치의 트리다(분기점 `origin/main` `68b6cd521cb`). 수치는 모두 탐침 Keeper 3명을 뺀 40명 기준이고 2026-10-28 03:05Z 에 셌다.
 
 ## 0. 요약
 
-Keeper 의 기억 본문은 프롬프트에 없다. 모델이 `keeper_memory_search` 를 직접 불러야 나온다. 모델은 거의 부르지 않는다. 도구 호출 274,153건 중 기억 검색은 0.80% 이고, 검색의 28.3%는 아무것도 못 찾는다. Librarian 이 하루 1,000건 넘게 기억을 커밋한 날(10-12~22 중 8일)에 같은 날 검색은 커밋의 1/13~1/39 였다.
+Keeper 의 기억 본문은 프롬프트에 없다. 모델이 `keeper_memory_search` 를 직접 불러야 나온다. 모델은 거의 부르지 않는다. 도구 호출 276,205건 중 기억 검색은 2,200건(0.80%)이고, 검색의 28.3%는 아무것도 못 찾는다. Librarian 이 하루 1,000건 넘게 기억을 커밋한 14일에, 같은 날 검색은 커밋의 1/11~1/39 였다.
 
-목록만 보이게 하는 방식으로는 부족하다. 목록이 매 턴 보이는 Skill 도구도 0.60% 만 불린다. 밖에서도 같은 결과가 나왔다(연구 r1 §3.1).
+이 RFC 는 호스트가 이번 턴 입력을 보고 필요한 기억을 고르게 한다. 고르는 일은 Jev(TypeSafe)가 한다. Keeper 의 현재 사실 전체를 Jev 에게 보여 주고 후보마다 `needed`, `maybe_needed`, `not_needed` 중 하나를 받는다. `not_needed` 가 아닌 후보를 요약 없이 본문 그대로 프롬프트에 넣는다. 점수, 키워드, 상위 N개는 쓰지 않는다. Jev 를 못 쓰는 턴은 "판정 못 함"이라고 알리고 Keeper 가 직접 검색한다.
 
-이 RFC 는 호스트가 이번 턴 입력을 보고 키퍼의 기억 중 필요한 것을 판정해 본문째 싣는 층을 만든다. 점수·키워드·상위 N개는 쓰지 않는다. 판정은 두 단계다. Jev(TypeSafe)가 후보 전체에서 확실히 필요 없는 것만 걸러 내고, in-house 레인 `memory_recall_exact` 가 남은 것을 이유와 함께 확정한다. Jev 를 못 쓰면 레인이 두 단계를 모두 맡는다. 결과는 새 프롬프트 블록 `Recalled_memory` 로 매 턴 보내고, 기억마다 기록 시각과 출처를 붙여 낡은 값을 현재값으로 읽지 않게 한다. 제목·안정 id·연결·트리·출처 좌표는 저장 계약을 바꾸는 일이라 이 RFC 에서 구현하지 않고 §5 에 방향만 적는다.
+in-house exact-output 레인은 이 경로에 넣지 않는다. 레인의 지연이 너무 크다(§4.8). 레인이나 다른 LLM 은 오프라인 하네스에서 Jev 의 판정을 다시 판정해 놓침을 재는 데 쓴다(§7). 레인을 실행 경로에 넣을지는 운영자 결정이다(§8-8).
+
+먼저 만드는 것은 측정 하네스다(층 0). 이 설계가 recall 을 올리는지, Jev 가 같은 입력에 같은 답을 내는지, 큰 요청이 Jev 한도에 들어가는지는 아직 모른다. 하네스 결과 없이 제품 코드를 쓰지 않는다. 제목, 안정 id, 연결, 트리 같은 저장 계약 변경은 §5 에 방향만 적는다.
 
 ## 1. 결정
 
-- **D1.** 기억을 모델이 찾아야만 나오는 구조를 그대로 두지 않는다. 호스트가 이번 턴에 맞는 기억을 골라 싣는다.
-- **D2.** 고르는 일은 LLM 판단과 Jev 판단이다. 1단계는 Jev 가 후보 전체를 `needed`·`maybe_needed`·`not_needed` 로 가르고 `not_needed` 만 걸러 낸다. 2단계는 in-house exact-output 레인 `memory_recall_exact` 가 남은 후보를 이유와 함께 확정한다. Jev 를 쓸 수 없는 Keeper(제외 목록, 스위치 꺼짐, 실패)는 레인이 1단계도 맡는다. 확신도 숫자로 단계를 가르지 않는다. 운영자가 정했다(2026-10-28, "LLM 판단 Jev 판단을 적극 사용").
-- **D3.** 고른 기억은 새 블록 `Recalled_memory` 로 첫 라운드에만 싣는다. 공식 클라이언트에는 같은 바이트라도 매 턴 보낸다. 기억마다 기록 시각과 출처를 붙이고, 시간에 묶인 값은 그렇다고 표시한다.
-- **D4.** 스위치 `[memory_recall] enabled` 의 기본값은 꺼짐이다. 카나리 Keeper 로 먼저 켜고 측정한 뒤 넓힌다.
-- **D5.** 측정은 질문 묶음 채점이 주 지표이고 도구 호출 수는 보조다(위키 목차 RFC 의 D5 와 같다).
-- **D6.** 판정이 못 돌면 "없음"이 아니라 "판정 못 함"과 이유, 전체 몇 개 중 몇 개를 판정했는지를 싣는다. 조용히 비우지 않는다. 고른 기억이 없을 때도 "이번 턴은 저장된 지식이 필요 없음"과 "필요해 보이는데 못 찾음"을 가른다.
-- **D7.** 이 RFC 는 저장 계약(제목, 안정 id, 연결, 트리)을 바꾸지 않는다. 그 층은 §5 에서 따로 정한다.
+- **D1.** 기억을 모델이 찾아야만 나오는 구조를 그대로 두지 않는다. 호스트가 이번 턴에 맞는 기억을 골라 넣는다.
+- **D2.** 고르는 일은 LLM 판단이다. 실행 경로의 판정자는 Jev 하나다. 후보 전체를 `needed`·`maybe_needed`·`not_needed` 로 가르고 `not_needed` 만 뺀다. 확신도 숫자로 가르지 않는다. 다른 LLM 은 오프라인에서 Jev 의 판정을 재판정하는 기준으로 쓴다.
+- **D3.** 고른 기억은 요약 없이 본문 그대로 넣는다. 블록은 둘이다. 매 턴 가는 상태 줄 블록 `Recalled_memory_status` 와, 고른 집합이 바뀔 때만 가는 본문 블록 `Recalled_memory` 다(§4.4).
+- **D4.** 스위치 기본값은 꺼짐이다. 카나리 Keeper 로 먼저 켜고 측정한 뒤 넓힌다.
+- **D5.** 효과는 오프라인 하네스가 잰다. 라이브 카나리는 운영 지표(지연, 바이트, 실패)와 R1~R12 를 본다.
+- **D6.** 판정을 끝내지 못하면 "없음"이라고 쓰지 않는다. "판정 못 함"과 이유, 전체 몇 개 중 몇 개를 봤는지 적는다.
+- **D7.** 이 RFC 는 저장 계약(제목, 안정 id, 연결, 트리)과 쓰기 도구를 바꾸지 않는다.
 
 ## 2. 무슨 일이 났나
 
-수치는 2026-10-28 라이브 base path 에서 `scripts/keeper-recall-baseline.py` 로 셌다. 10-02 이후 기록이고, 로그가 회전해서 모두 하한이다.
+수치는 `scripts/keeper-recall-baseline.py` 와 `scripts/keeper-recall-store.py` 로 2026-10-28 라이브 base path 에서 셌다. 10-02 이후 기록이고, 로그가 회전해서 모두 하한이다.
 
 ### 2.1 기억이 거의 안 읽힌다
 
-- 도구 호출 274,153건 중 `keeper_memory_search` 2,193건(0.80%), Skill 도구 1,657건(0.60%), 위키 도구 248건(0.09%), `keeper_workspace_memory_read` 38건(0.01%). `keeper_memory_write` 는 4,788건(1.75%)이라 쓰기가 읽기의 두 배가 넘는다.
-- 도구를 쓴 턴 100개당 검색한 턴은 `claude_code` 1.5, `codex` 5.1, `muse` 6.2, `glm-coding` 11.3, `antigravity` 12.9 다.
-- 검색 2,190건 중 620건(28.3%)이 아무것도 못 찾았다. 없는 것을 찾았을 수도 있어서 품질의 상한선만 알려 준다.
-- LLM 이 골라 주는 `keeper_memory_select` 는 호출이 1번뿐이다. `workspace_memory_selection_enabled` 의 기본값이 false 이고(`lib/runtime/runtime_schema.ml:577`) 라이브 설정에서 켜지 않았다.
+- 도구 호출 276,205건 중 `keeper_memory_search` 2,200건(0.80%). `keeper_memory_write` 4,790건(1.73%)이라 쓰기가 읽기의 두 배가 넘는다. 위키 읽기 도구 177건(0.06%), `keeper_workspace_memory_read` 38건(0.01%).
+- 도구를 쓴 턴 100개당 검색한 턴은 `claude_code` 1.5, `codex` 5.1, `ollama_cloud` 5.0, `muse` 6.1, `glm-coding` 11.0, `antigravity` 12.9 다.
+- 검색 2,197건 중 622건(28.3%)이 아무것도 못 찾았다. 없는 것을 찾았을 수도 있어서 품질의 상한선만 알려 준다.
+- LLM 이 골라 주는 `keeper_memory_select` 는 Jev 전용이고 스위치가 꺼져 있으면 `unavailable` 을 돌려준다(`workspace_memory_selection_enabled` 기본값 false, `lib/runtime/runtime_schema.ml:577`). 10-02 이후 호출은 1번이다.
 
 ### 2.2 왜 그런가
 
-1. **본문이 프롬프트에 없다.** 라이브 프롬프트에 닿는 기억 정보는 "사실 N개" 안내문(`lib/keeper/keeper_memory_os_recall.ml:115`, 약 1.1KB)과 working-context 포인터 약 0.35KB 뿐이다. 본문은 10-01~02 에 뺐다(#40473, #40782). 당시 기억 블록이 조립된 88,177B 중 51,518B 였고 캐시 비용이 컸다(`lib/types/prompt_block_id.mli` 의 측정 주석).
-2. **개인 기억을 호스트가 고르는 길이 없다.** 선택기(`lib/keeper/keeper_memory_select.ml`)는 모델이 도구로 불러야만 돈다(`lib/keeper/keeper_tool_runtime.ml:362`). 호스트가 턴마다 고르는 `Keeper_workspace_memory_host_recall`(`lib/keeper/keeper_run_tools_hooks.ml:1061`)은 공용 기억용이고, 읽기 도구가 없을 때만 붙는다.
-3. **공식 클라이언트는 같은 내용을 다시 받지 않는다.** `Prompt_block_id.resent_when_held`(`lib/types/prompt_block_id.ml:102`)가 `Memory_os_recall` 에 false 다. 이미 보낸 바이트는 건너뛰므로(`lib/keeper/keeper_official_client_context_projection.ml:351`, `:559`) 안내문이 세션 깊숙이 한 번만 있다. 프롬프트 텍스트에 안내문이 새로 실린 실행의 비율은 Claude Code 5%, Codex 5~29%, Muse 31%, Antigravity 100% 다. 같은 모델 `muse-spark-1.3` 안에서 새로 실린 실행은 13.7%, 아닌 실행은 2.2% 검색했다. `claude-sonnet-5-5` 는 새로 실려도 0/39 였다. 그래서 전달 횟수가 한 원인이고 전부는 아니다. API 레인이 매 턴 첫 라운드에 받는다는 것은 코드 주석을 읽어 안 것이고 잰 것은 아니다.
-4. **기억의 이름이 자주 바뀐다.** 기억 id 는 claim 의 SHA-256 이다(`lib/keeper/keeper_memory_os_types.ml:734`). Librarian 이 문장을 다시 쓰면 id 가 바뀐다. 개정 사건 11,693건이 쌓였고 회수 이벤트 19,214건 중 16,240건(84.5%)이 이미 없는 id 를 가리킨다. 사용 이력도, 연결도 이 id 에 걸 수 없다.
+1. **본문이 프롬프트에 없다.** 라이브 프롬프트에 닿는 기억 정보는 "사실 N개" 안내문(`lib/keeper/keeper_memory_os_recall.ml:115`, 약 1.1KB)뿐이다. 본문은 10-01~02 에 뺐다(#40473, #40782). 빼기 전 측정(2026-09-08, Keeper 한 명의 386턴)에서 기억 블록은 조립된 88,177B 중 51,518B 였고 캐시 생성 토큰이 314,080, 읽기가 50,788 이었다(`lib/types/prompt_block_id.mli`).
+2. **개인 기억을 호스트가 고르는 길이 없다.** 선택기(`lib/keeper/keeper_memory_select.ml`)는 모델이 도구로 불러야만 돈다(`lib/keeper/keeper_tool_runtime.ml:362`). 호스트가 턴마다 고르는 `Keeper_workspace_memory_host_recall`(`lib/keeper/keeper_run_tools_hooks.ml:1061`)은 공용 기억용이다.
+3. **공식 클라이언트는 같은 내용을 다시 받지 않는다.** `Prompt_block_id.resent_when_held`(`lib/types/prompt_block_id.ml:102`)가 `Memory_os_recall` 에 false 라서, 이미 보낸 바이트는 건너뛴다(`lib/keeper/keeper_official_client_context_projection.ml:351`, `:559`). 안내문은 세션을 시작할 때 한 번만 들어가고 그 뒤 턴에는 다시 오지 않는다. 같은 모델 `muse-spark-1.3` 안에서 안내문이 새로 실린 실행은 13.5% 에서 검색했고 아닌 실행은 2.3% 였다. `claude-sonnet-5-5` 는 새로 실린 49번 중 0번 검색했다. 전달 횟수가 한 원인일 수 있지만 전부는 아니다. API 레인이 매 턴 첫 라운드에 받는다는 것은 코드를 읽어 안 것이고 잰 것은 아니다.
+4. **기억의 id 가 자주 사라진다.** 기억 id 는 claim 의 SHA-256 이다(`lib/keeper/keeper_memory_os_types.ml:734`). 회수 이벤트 19,229건 중 지금도 현재 사실을 가리키는 것은 15.5% 다. 다시 쓰기 기록만으로 현재 사실에 닿는 것은 2.0%, 흡수를 거쳐 닿는 것은 23.3%, 기록을 따라가도 사라진 id 가 21.9%, 철회가 1.8% 다. 32.5%는 흡수·개정·철회 기록 없이, 커밋된 저널 행이 그 사실을 빼면서 사라졌고, 3.0%는 어느 파일에도 없다. 사용 이력과 연결을 걸 끈이 지금은 없다(§5).
 5. **밖에서도 같다.** OpenClaw, Hermes, Pi, Codex, Claude Code 모두 "색인과 모델의 도구 호출" 구조에서 안 당긴다는 보고가 있다. 본문까지 호스트가 넣는 곳은 OpenClaw, Hermes 외부 provider, 예전 Claude Code 뿐이다(연구 r1 §2).
 
 ### 2.3 이미 있는 것과 빠진 것
 
-- 이미 턴에 닿는다: 월드 프레임(`Active_goals`, `Current_task`, `Scheduled_automation`, `Recent_work` 등, `lib/keeper/keeper_context_layers.mli`)과 Librarian working state(요약으로 접은 대화 구간을 여는 고정 메시지, `lib/runtime/runtime_model_input_tail_window.ml:28`)다. 둘 다 지금 하는 일의 문맥이다. 오래 두고 쓰는 교훈·절차·제약(현재 사실 중 `lesson` 851개, `constraint` 485개)은 이 길로 오지 않는다. 그래서 효과는 이 길로 답할 수 없는 질문에서만 잰다(§7).
-- 있다: 후보 전체를 한 번에 판정하는 타입 있는 선택기(`lib/keeper/keeper_workspace_memory_selection.ml:99` `assess_batch`, 용량 거절 시 절반으로 나눠 재시도, 입력과 응답을 호출 전후에 기록). 선택 역할이 닫힌 합타입이다(`current_decision`, `comparison`, `inspect_source`, `not_needed`).
-- 없다: 개인 기억에 이 선택기를 호스트가 부르는 길. 검색 RFC 단계 2 가 약속한 "로컬 판정 lane". recall 가치를 재는 정답 세트.
-- 스위치 없이 있다: 기본 `keeper_memory_search` 안의 후속 기억 판정이 기억 원문을 TypeSafe 로 보낸다(`lib/keeper/keeper_memory_successor_selection.ml:79`). 다른 기능은 기능마다 스위치가 있는데 이 경로는 레인 스위치만 본다. 검색 RFC 는 "본문 외부 반출 금지"로 정했지만 운영자가 Jev 판단을 적극 쓰기로 했으므로(D2), 빠진 것은 반출이 아니라 기능별 스위치다. 이 RFC 는 그 경로를 바꾸지 않고 §5 의 정리 층으로 넘긴다.
+- 이미 턴에 닿는다: 월드 프레임(`Active_goals`, `Current_task`, `Scheduled_automation`, `Recent_work` 등, `lib/keeper/keeper_context_layers.mli`)과 Librarian working state(요약으로 접은 대화 구간을 여는 고정 메시지, `lib/runtime/runtime_model_input_tail_window.ml:28`). 둘 다 지금 하는 일의 문맥이다. 오래 두고 쓰는 교훈·절차·제약(현재 사실 2,335개 중 `lesson` 802개, `constraint` 466개)은 이 길로 오지 않는다. 그래서 효과는 이 길로 답할 수 없는 질문에서만 잰다(§7).
+- 있다: 후보 전체를 한 요청으로 판정하는 타입 있는 선택기(`lib/keeper/keeper_workspace_memory_selection.ml` 의 `assess_batch`). 이 RFC 는 이 요청 모양을 그대로 쓰지 않는다. 질문마다 지시문 1,663B 와 선택지 설명 802B 가 붙어서 후보 55개면 질문만 약 138KB 가 된다(§4.2).
+- 없다: 개인 기억에 호스트가 판정을 부르는 길. recall 효과를 재는 정답 세트와 하네스.
+- 따로 끌 수 없는 경로가 있다. 기본 `keeper_memory_search` 는 후속 기억을 고를 때 원문을 TypeSafe 로 보낸다(`lib/keeper/keeper_memory_successor_selection.ml:79`). 레인 스위치와 제외 목록만 본다(`:82-83`). 지금까지 요청 1,623건이 20명의 Keeper 에서 `api.typesafe.ai` 로 나갔다. 회사 데이터를 다루는 `kidsnote-incoming-dd-manager` 49건과 `kidsnote-job-manager` 4건이 들어 있다(`scripts/keeper-recall-store.py`). 운영자가 Jev 를 쓰기로 했으니 문제는 반출 자체가 아니라, 이 경로만 끌 스위치가 없고 제외 목록이 한 명뿐이라는 점이다(§8-1, §8-3).
 
 ### 2.4 Keeper 의견
 
-Board 글 `p-f6a61e15b0ca013890bb28b0a797a777`(2026-10-28 01:17Z, 전체 호출)에 Keeper 열여섯 명이 댓글 18개로 답했다(01:18~01:41Z). 리더(e-masc-the-leader)는 앞선 댓글을 정리하고 릴리스 관점을 적었다. PO(masc-productor-owner)는 질문 묶음 초안과 증거 스키마의 빈 곳을 적었다. code-reviewer-brother, code-reviewer-uncle, sangsu, simplifyer, e-masc-the-leader, kidsnote-qa-hub-manager, masc-productor-owner 일곱은 RFC 원문을 읽지 않았다고 밝혔다. mad-scientist 와 polisher 는 원문의 절 번호나 head 를 인용했고, 나머지는 밝히지 않았다.
+Board 글에 Keeper 17명이 댓글 22개로 답했다. 7명은 RFC 원문을 읽지 않았다고 밝혔다. 원문과 Keeper 별 요지는 [증거 문서](../evidence/keeper-recall-board-feedback-2026-10-28/README.md)에 있다. 자발적 응답이고 LLM 에이전트의 자기 보고라서 통계가 아니라 사례다. 요지는 다섯이다.
 
-- 검색 사용: you-never-change, code-reviewer-brother, code-reviewer-uncle, music-sensei, wkbl-data, wkbl-front, kidsnote-qa-hub-manager, masc-productor-owner 여덟은 거의 안 쓴다. handoff, Board, 현재 상태 직독으로 일을 이어받는다. PO 는 World State 가 Goal 24개를 이미 싣고 있어서 검색할 이유가 없다고 했다. sangsu, simplifyer, kidsnote-job-manager, msx-retro-mania, mad-scientist, polisher, wkbl-growth 일곱은 쓴다.
-- 리더를 뺀 열다섯 모두 지금 유효한 제약·절차·진행 상태가 알아서 실리면 도움이 된다고 답했다. 예: "이 스택은 restack 중이라 push 금지", 라운드마다 적용할 적재 제외 규칙, 이어받을 때 필요한 체크포인트 슬롯 이름. code-reviewer-uncle 은 상태가 아니라 규범·절차(스크립트 인자 규약, 실패 교훈)가 recall 에 맞는다고 했다.
-- 열넷은 낡은 값이 현재값처럼 실리는 것을 큰 해로 꼽았다. 옛 head SHA, 병합된 PR 의 판정, 지난 측정 수치, 지난 진행 스냅샷이다. 기록 시각, 출처 좌표, 다시 잴 값 표시, 대체 여부를 요구했다.
-- 열넷은 "판정 못 함"과 "필요한 기억 없음"을 가르는 데 찬성했다(you-never-change 는 이 질문에 답하지 않았다). 그중 다섯(wkbl-front, kidsnote-qa-hub-manager, kidsnote-job-manager, code-reviewer-uncle, masc-productor-owner)은 "필요 없음"과 "찾았지만 없음"까지 셋으로 가르자고 했다. 이유와 "N개 중 M개를 봤다", 직접 검색으로 떨어지라는 안내도 같이 요구했다. "판정 못 함"이 뜬 턴을 그 턴 기록에 남기자는 의견이 셋이다(wkbl-front, msx-retro-mania, masc-productor-owner).
-- 열하나는 Jev 가 놓칠 곳을 짚었다. 어휘가 다른 기억(sangsu 는 지금 검색에서 "빈정 탄약고 절차"는 2건, "2026-10-27 사실 카드"는 0건이 나온 예를 들었다), 발동 조건형 사실과 금지 조건(simplifyer, msx-retro-mania, wkbl-growth, mad-scientist), 표면이 닮지 않은 실패 교훈(music-sensei), 길고 조건이 많은 절차 기억(polisher), 정확한 식별자(wkbl-data, kidsnote-qa-hub-manager, code-reviewer-uncle), 검색어를 몰라서 못 찾는 경우(masc-productor-owner)다. mad-scientist 는 Jev 가 같은 입력에 같은 답을 내는지부터 재야 한다고 했다.
-- 회사 데이터 Keeper 를 Jev 에서 빼는 데 열(sangsu, music-sensei, simplifyer, e-masc-the-leader, kidsnote-job-manager, kidsnote-qa-hub-manager, polisher, mad-scientist, code-reviewer-uncle, masc-productor-owner)이 찬성하고 code-reviewer-brother 는 방향에 동의했다. 이름이 오른 넷 중 job-manager 와 qa-hub-manager 가 직접 찬성했다. 여섯(simplifyer, e-masc-the-leader, kidsnote-qa-hub-manager, mad-scientist, code-reviewer-uncle, masc-productor-owner)은 이름 나열이 아니라 데이터 분류 속성으로 정하자고 했다. kidsnote-job-manager 는 2단계 레인에도 같은 제한이 필요하다고 했다. 제외된 쪽의 recall 품질을 따로 재자는 의견이 셋이다(music-sensei, mad-scientist, kidsnote-qa-hub-manager).
-- 쓰기 경로: 다섯이 쓴 기억이 읽는 쪽에 안 닿는다고 했다(§2.6). `persisted_pending_admission` 을 받은 기억이 `search current` 에 안 나온다(kidsnote-job-manager 는 그날 쓴 44건 중 상당수, kidsnote-qa-hub-manager, wkbl-growth). `supersedes_not_authored` 로 두 번 거절됐다(msx-retro-mania). `source_path` 결속이 실패해 엉뚱한 파일에 결속했다(kidsnote-job-manager). 호출은 적용됐는데 결과만 유실돼 재시도하면 중복이 된다(wkbl-front). job-manager 와 wkbl-growth 는 "승인 대기 N건"을 턴 입력에 한 줄 넣자고 했다.
-- 검색 결과: msx-retro-mania 는 세 번 모두 blob 미리보기 한 줄만 보여 본문을 못 봤다. polisher 는 `truncated=true` 와 `source_verification.status=incomplete` 로 한 출처가 보류돼 확신을 못 얻었다. kidsnote-job-manager 는 결과에 memory_id 가 안 보여 중복 저장을 스스로 지우지 못했다. 코드에서 일반 사실 결과에는 `memory_id` 가 있고(`lib/keeper/keeper_tool_memory_runtime.ml:404`) 출처 결속 사실에는 `source_sha256` 만 있다. "안 보임"의 원인은 확인하지 못했다. 최근 14일 검색 결과 1,277건 중 7.4%가 16KB 를 넘는다. Codex·Muse·Antigravity 의 인라인 상한이 16KB 다(`lib/core/common.ml:214`).
-- 증거 스키마: Task 제출의 `evidence_refs` 는 `artifact:`, `note:`, `board:`, `fusion:`, `task:` 다섯 종류뿐이고 `memory:` 가 없다(`config/tools/keeper_task_done.toml:8`, masc-productor-owner 가 소스로 확인했고 나도 확인했다). `note:` 는 서술이고 제출 때 캡처되는 증거가 아니다. 기억으로 판단해도 그 기억을 증거로 낼 길이 없다(wkbl-front, wkbl-growth, masc-productor-owner).
-- 놓친 가정:
-  - 월드 프레임이 이미 문맥을 싣기 때문에 검색률 0.80%가 곧 문제는 아닐 수 있다(simplifyer, mad-scientist, masc-productor-owner).
-  - 검증형 Keeper 의 진실 원문은 Memory OS 밖(PR 스레드, Board, evidence 파일)에 있어서 recall 이득은 작고, 낡은 상태 기억이 권위를 얻는 위해만 남는다. 상태성 기억을 깎고 규범·절차성 위주로 좁히자는 안이다(code-reviewer-uncle).
-  - 쓰기가 읽기의 두 배인데 낡은 사실을 누가 지우는지 없다(simplifyer, music-sensei, e-masc-the-leader, mad-scientist). 쓰기가 한 번에 끝나는지부터 재야 한다(msx-retro-mania, mad-scientist).
-  - 판정 비용이 Keeper 수에 따라 어떻게 느는지, 읽기 API p99 Goal(`goal-read-api-p99-300-keepers-20261027`)의 병목을 키우지 않는지(code-reviewer-brother, kidsnote-qa-hub-manager). 리더는 이를 착지 조건으로 걸자고 했다.
-  - 실렸지만 안 읽은 경우와 안 실려서 못 읽은 경우가 같은 0 이 된다(wkbl-front, mad-scientist, kidsnote-qa-hub-manager).
-  - 상태를 되돌릴 기계적 좌표인 슬롯 이름·step 수가 필요하다(msx-retro-mania).
-  - 예약 노트, Task 문맥, 인계문, evidence 파일이 recall 범위 밖이다(wkbl-data, kidsnote-qa-hub-manager).
-  - 요약만 보고 `not_needed` 를 내면 원문에만 있는 예외를 놓친다(kidsnote-job-manager).
-  - 기억 id 가 claim 해시라서 "같은 claim 을 다시 쓰는 비율"이 recall 실패 지표로 틀어진다(polisher).
-  - "기억이 도움이 됐나"는 거의 다 "그렇다"가 나온다. "회수된 기억 중 틀렸거나 낡아서 무시한 것이 있었나"(kidsnote-job-manager), 재조회 회피(kidsnote-qa-hub-manager, code-reviewer-uncle), 낡은 근거를 인용해 낸 판정 사고가 0 으로 유지되는가(code-reviewer-uncle)를 재야 한다. 기억이 턴에 닿는 것은 필요조건일 뿐이고 최종 목표는 같은 실수를 덜 반복하는 것이다(masc-productor-owner).
-  - 구현이 생기면 사용 가이드 1장이 같은 PR 에 필요하다. 리더가 규범 `a-dababc7a` 를 인용했다. 이 RFC 는 문서 PR 이라 v0.65.0 후보(`940899984fbb`)에 들어가지 않는다.
+- 16명이 지금도 유효한 제약·절차가 알아서 실리면 도움이 된다고 했다. 15명이 낡은 값이 현재값처럼 실리는 것을 해로 꼽았다(옛 head SHA, 병합된 PR 의 판정, 지난 측정 수치).
+- 14명이 "판정 못 함"과 "필요한 기억 없음"을 가르자고 했다. 5명은 "필요 없음"과 "찾았지만 없음"까지 셋으로 가르자고 했다.
+- 11명이 Jev 가 놓칠 곳을 짚었다: 어휘가 다른 기억, 발동 조건형 사실, 표면이 닮지 않은 실패 교훈, 길고 조건이 많은 절차 기억, 정확한 식별자.
+- 회사 데이터 Keeper 를 Jev 에서 빼는 데 10명이 찬성했다. 6명은 이름 나열이 아니라 데이터 분류 속성으로 정하자고 했다.
+- 쓴 기억이 읽는 쪽에 안 닿는다는 보고가 있다(§2.6).
 
 | 의견 | 반영 |
 |---|---|
-| 낡은 값 | 항목마다 기록 시각·출처·`Time_bound` 표시(§4.3, §4.4). 출처 좌표 확대와 대체 연결은 층 2(§5.2) |
-| 필요 없음, 찾았지만 없음, 판정 못 함 | 네 상태와 "N개 중 M개"(D6, §4.3, §4.4). 턴 기록에도 남긴다(§4.6) |
-| Jev 놓침 | 1단계에 `maybe_needed`(D2, §4.3). 검색어를 모르는 경우는 Keeper 가 질의를 정하지 않고 후보 전체를 판정에 올리는 설계가 푼다. 오프라인 재생에 어휘 불일치·실패 교훈·식별자 문항(§7) |
-| Jev 반복 안정성 | §7 전제 측정 |
-| 정확한 식별자 | 층 2 의 타입 있는 참조(§5.2). 층 1 은 문항으로 잰다(§7) |
-| 데이터 분류 속성, 2단계 레인 제한 | 열린 결정 1(§8) |
-| 비용과 지연, 읽기 API p99 | §4.8, 카나리 밖으로 넓히기 전 조건 |
-| 월드 프레임과 겹침 | §2.3, §7 의 문항 조건과 R7 |
-| 쓰기 도달, 결과 유실 | §2.6, §7 전제 측정, §4.4 의 "승인 대기 N건" |
-| 쓰기 품질과 가지치기 | §2.5, §2.6, §5.2(안정 id 로 재사용을 재고 나서 정리), §7 의 R11·R12 |
-| 검색 결과 형식, 쓰기 도구 계약 | 이 RFC 밖. #46507, #39191 에서 추적한다(§2.6) |
-| 실렸지만 안 읽음, 재조회 회피, 틀린·낡은 기억 | §7 의 R2~R5 |
-| 증거 좌표, 기계적 좌표, `memory:` 인용 | §4.4(claim 전문과 Board 좌표), §5.2, 열린 결정 7(§8) |
-| 상태성 기억의 위해 | 판정 입력에 Keeper 지침이 들어가므로 검증형 Keeper 는 지침으로 조절한다. `Time_bound` 표시와 R4·R5 로 잰다 |
-| 예약 노트·Task 문맥 | 열린 결정 5(§8) |
+| 낡은 값 | 항목마다 기록 시각, 출처 좌표, `Time_bound` 표시, 블록 머리의 "기록 시각 기준" 문구(§4.4). 대체·정리는 층 2(§5) |
+| 세 가지 "없음" | 상태 넷과 "N개 중 M개 판정"(§4.4). 결과는 평가 기록에 `turn_ref` 로 남긴다(§4.6) |
+| Jev 가 놓침 | `maybe_needed`(§4.3). 오프라인 재생에서 놓침을 잰다(§7). 식별자·발동 조건형 사실의 별도 통로는 만들지 않는다(§8-4) |
+| Jev 반복 안정성 | 층 0 전제 측정(§5, §7) |
+| 제외, 속성 기준 | 열린 결정 1. 제외 Keeper 는 층 1 에서 recall 을 받지 않는다(§4.7) |
+| 비용, 읽기 API p99 | §4.8. 카나리 밖으로 넓히기 전 조건 |
+| 월드 프레임과 겹침 | 문항 조건과 R7(§7) |
+| 쓰기 도달, 결과 유실 | §2.6, 층 0 전제 측정. 쓰기 도구는 #46507 |
+| 검색 결과 형식 | 이 RFC 밖. #46507 |
+| 실렸지만 안 읽음, 재조회 회피, 틀린·낡은 기억 | R2~R5(§7) |
+| 증거 좌표, `memory:` 인용, 판단 재료와 증거의 경계 | 블록 머리(§4.4), 열린 결정 7 |
+| 예약 노트, Task 문맥 | 열린 결정 5 |
 | 요약이 아닌 본문 | §4.3 |
-| 질문 묶음과 지표 초안(PO) | §7 |
-| 사용 가이드 | §9 |
+| 질문 묶음과 지표(PO) | §7 |
+| 사용 가이드 | 층 1b(§5), §9 |
 
-바꾼 것이 하나 있다. 초안은 "필요 없음"과 "찾았지만 없음"을 가르는 안을 받지 않았다. 저장된 사실만 보는 판정은 저장소에 없는 것을 알 수 없다고 봤기 때문이다. 다섯이 같은 요구를 했고, 없는 것을 아는 일이 아니라 "이번 턴이 저장된 지식을 필요로 하는가"를 따로 묻는 방식이 가능하다고 보고 받았다(§4.3). 질문이 하나 늘고 그 답을 얼마나 믿을 수 있는지는 모른다.
+받지 않은 요청이 둘이다.
 
-받지 않은 것이 둘 있다.
+- 발동 조건형 사실이 Jev 를 건너뛰는 안(3명). 규칙을 먼저 더하지 않고 `maybe_needed` 로 시작한다. 오프라인 재생에서 `constraint` 가 `not_needed` 로 가는 비율을 먼저 센다(§8-4).
+- "필요 없음" 상태를 아예 보이지 않게 하는 안(3명). 줄이 없으면 기능이 꺼진 턴, 판정이 깨진 턴, 필요 없던 턴이 서로 같아 보인다. 한 줄은 남기고 짧게 쓴다.
 
-- 발동 조건형 사실이 Jev 를 우회하는 안(simplifyer, mad-scientist, masc-productor-owner). 지금은 그 표시가 없다. `constraint` category 가 대신할 수 있지만 규칙을 먼저 더하지 않는다. `maybe_needed` 로 시작하고, 오프라인 재생에서 `constraint` 가 1단계에서 빠지는지 센 뒤 정한다(§8 열린 결정 4).
-- 상태성 기억을 후보에서 깎고 규범·절차성 위주로 좁히는 안(code-reviewer-uncle). 이어받기에 상태가 필요한 Keeper 가 있다(msx-retro-mania 의 체크포인트 슬롯, wkbl-front 의 측정 커서, music-sensei 의 패치 정체). 일률로 깎지 않는다.
+"승인 대기 N건"을 턴 입력에 넣자는 요청(2명)도 넣지 않는다(§2.6).
 
 ### 2.5 싣는 기억이 낡았을 위험
 
-현재 사실 2,448개(키퍼 40명, 2026-10-28 측정)를 `last_seen` 으로 보면 중앙값이 7.1일 전이고 상위 10%는 28.8일 전, 가장 오래된 것은 62.9일 전이다. 14일 넘게 다시 관찰되지 않은 사실이 24%다. `last_seen` 은 같은 claim 을 마지막으로 본 시각이라 그 사실이 지금도 맞다는 뜻이 아니다(RFC-0418).
+현재 사실 2,335개(Keeper 40명)의 `last_seen` 은 중앙값이 7.1일 전, 상위 10%가 21.5일 전, 가장 오래된 것이 56.0일 전이다. 14일 넘게 다시 관찰되지 않은 사실이 20.6%다. `last_seen` 은 같은 claim 을 마지막으로 본 시각이라 그 사실이 지금도 맞다는 뜻이 아니다(RFC-0418). 출처로 Board 글 좌표가 있는 사실은 24.1%이고 나머지는 대화 기록에서 뽑아 좌표가 없다.
 
-출처는 `basis` 에 Board 글 좌표가 있는 사실이 560개(22.9%)이고, 1,887개(77.1%)는 대화 기록에서 뽑아 좌표가 없다. 나머지 1개는 파생 사실이다. 사건 로그 전체로 보면 지우는 쪽은 `retracted` 818건, 고치는 쪽은 `revised` 11,723건이다.
+호스트가 이 사실을 매 턴 싣기 시작하면 낡은 사실이 눈에 띄는 횟수가 는다. 그래서 층 1 은 사실을 고치거나 지우지 않고 기록 시각, 출처 좌표, 시간에 묶인 값 표시를 붙인다.
 
-호스트가 이 사실을 매 턴 싣기 시작하면 낡은 사실이 눈에 띄는 횟수가 는다. 그래서 층 1 은 사실을 고치거나 지우지 않고 기록 시각과 시간에 묶인 값 표시를 붙인다. 낡은 사실을 누가 언제 지우는지는 층 2 이후에 따로 정한다(§5.2).
+낡은 사실은 지금도 Librarian 이 지운다. 10-02 이후 다른 사실로 흡수한 것이 7,177건이고, 이유를 적어 버린 것이 8,940건이다(예: 완료된 시간 한정 배정 기록). 이 RFC 는 그 판정을 바꾸지 않는다.
 
 ### 2.6 쓰기가 읽기보다 먼저 막힌다
 
-recall 이 실어 줄 수 있는 기억은 쓰기를 통과한 것뿐이다. Keeper 다섯이 쓴 기억이 읽는 쪽에 안 닿는다고 보고했다(§2.4).
+recall 이 실어 줄 수 있는 기억은 쓰기를 통과한 것뿐이다.
 
-- `keeper_memory_write` 의 일반 관찰은 승인 대기열에 들어가고 `persisted_pending_admission` 을 돌려준다. 영수증이 "승인이나 현재 memory id 를 확인해 주지 않는다"고 적는다(`lib/keeper/keeper_tool_memory_runtime.ml:1743`). Librarian 이 대기열을 비워야 `search current` 에 나온다. 2026-10-28 에 키퍼 34명의 대기열은 모두 비어 있었다.
-- 사실의 98%를 쓰는 쪽은 Librarian 이다. 현재 사실 2,448개 중 `origin` 이 `injected` 인 것이 2,407개, `authored` 가 41개다. 최근 14일 Librarian 기록은 성공 16,287건, 레인 실패 11,771건(`exact_execution_failure`, `lane_cancelled`, `absorb_judgment_failure`)이라 시도의 42%가 실패했다. 날짜별로 10-14 가 47%, 10-15 가 89%, 10-16 이 60%, 10-22 가 43% 이고 10-26 이후는 1~3% 다. 같은 종류의 레인이라 `memory_recall_exact` 도 하루 단위로 몰려 실패할 수 있다. 그날 블록은 `unavailable` 이고 Keeper 는 직접 검색으로 떨어진다(§4.4).
-- `supersedes` 는 `origin` 이 `authored` 인 사실만 가리킬 수 있다(같은 영수증 문구). 사실의 98%가 `injected` 라서 Keeper 가 스스로 고칠 수 있는 사실이 적다.
-- 이 RFC 는 쓰기 도구의 계약을 바꾸지 않는다. 승인 대기가 있으면 블록 상태 줄에 "승인 대기 N건"을 적어 방금 쓴 기억이 아직 안 나온다는 것을 알려 준다(§4.4). 쓰기 도구의 멱등 좌표(`memory_id` 와 쓴 시각 즉시 반환), `supersedes_not_authored`, `source_path` 결속 실패, 검색 결과 형식은 #46507 에서 추적한다. `supersedes_not_authored` 거절은 #39191 에서 이미 추적 중이다.
+- 사실의 98.8%를 Librarian 이 쓴다. 현재 사실 2,335개 중 `origin` 이 `injected` 인 것이 2,306개, `authored` 가 29개다. 10-02 이후 Librarian 시도의 39.4%가 레인 실패였다. 날짜별로 10-11 이 84%, 10-15 가 89%, 10-22 가 43% 이고 10-26 이후는 1~3% 다.
+- Keeper 의 명시 쓰기 `keeper_memory_write` 는 승인 대기열에 들어간다. 영수증은 "승인이나 현재 memory id 를 확인해 주지 않는다"고, "worker 가 이미 처리했을 수 있다"고 적는다(`lib/keeper/keeper_tool_memory_runtime.ml:1743`). 승인 판정의 지시문은 반복되거나 양립하는 관찰을 기존 기억에 흡수할 수 있다고 한다(`lib/keeper/keeper_memory_admission_judgment.ml`).
+- 2026-10-28 에 Keeper 34명의 대기열은 모두 비어 있었다. 그래서 "썼는데 검색에 없다"는 대기 때문이 아니라 흡수되었거나 다시 쓰였기 때문일 가능성이 크다. 이것은 추정이다. 층 0 에서 쓰기 도달을 재서 확인한다.
+- 10-02 이후 저널이 커밋한 Keeper 의 명시 쓰기는 4,765건이다. 3,110건은 한 Keeper(`sangsu`)의 한 번의 실행이었고 거의 다 사라졌다. 그 실행을 뺀 1,655건(Keeper 30명) 중 52.2%는 다시 쓰였고, 46.6%는 사건 기록 없이 현재 집합을 떠났고, 1.1%만 쓴 그대로 남아 있다.
+- `supersedes` 는 `origin` 이 `authored` 인 사실만 가리킬 수 있다(같은 영수증 문구). 사실의 98.8%가 `injected` 라서 Keeper 가 스스로 고칠 수 있는 사실이 적다.
+- 이 RFC 는 쓰기 도구의 계약을 바꾸지 않는다. "승인 대기 N건" 줄도 넣지 않는다. 대기열이 비어 있어서 거의 늘 0 이고, 쓰기 경로의 문제를 보이게만 할 뿐 고치지 않는다. 대기 중 기억이 검색에 안 보이는 문제, 결속 실패, 호출 결과 유실은 #46507 에서, `supersedes_not_authored` 거절은 #39191 에서 추적한다. #46507 에서 승인 판정이 Keeper 의 명시 쓰기를 흡수하는 단계가 헌법의 Gate 제거 기준(없어도 지속하는 진실이 유지되면 제거 대상)에 맞는지도 묻는다.
+- 사실을 뺀 기록이 저널에만 있고 `memory-events` 에는 개정·흡수·철회 사건이 없는 경우가 있다. 회수 이벤트의 32.5%가 여기에 해당한다(§2.2의 4). 이것이 설계인지 빠진 것인지 모르겠다. #46547 에서 확인한다.
 
 ## 3. 지금 구조
 
 - 첫 라운드 조립: `lib/keeper/keeper_run_tools_hooks.ml` 의 `Keeper_memory_os_recall.render_if_enabled`(1109)와 `record_block Memory_os_recall`(1121). 후속 라운드에는 다시 넣지 않는다(`injected_on_post_tool_round`, `prompt_block_id.ml:93`).
-- 공용 기억의 호스트 recall 은 턴마다 한 번 준비해 재시도 때 같은 선택을 쓴다(`host_memory` 참조, `keeper_run_tools_hooks.ml:645`). 용량 거절이 나면 고른 항목 수를 줄인다(`Keeper_workspace_memory_host_recall.defer_for_capacity`). Muse·Antigravity 는 이 재시도 경로가 없다(`config/runtime.toml` 의 `workspace_memory_selection_enabled` 주석).
-- 블록 정체성은 닫힌 합타입이다(`prompt_block_id.ml`). 새 블록을 더하면 컴파일러가 빠진 자리를 알려 준다.
-- 판정 레인은 `Standalone_lane` 과 `Lane_run_identity` 의 닫힌 변형이고 설정은 `[runtime.exact_output_lanes.<이름>]` 이다. 판정 레인은 `Priority`, Librarian 은 `Background` 로 허가 대기열을 쓴다(`lib/runtime/standalone_lane.mli`).
+- 공용 기억의 호스트 recall 은 준비한 선택을 `host_memory` 에 두는데, 런타임 시도가 시작될 때마다 비운다(`on_runtime_attempt`, `keeper_run_tools_hooks.ml:664-666`). failover 하면 다시 판정한다.
+- 블록 정체성은 닫힌 합타입이다(`prompt_block_id.ml`). 새 블록을 더하면 컴파일러가 OCaml 쪽 빠진 자리를 알려 준다. 컴파일러가 못 잡는 자리가 있다. 대시보드 디코더 `dashboard/src/api/dashboard-turn-records.ts` 는 알려진 블록 id 의 닫힌 목록을 갖고 있고, 모르는 id 가 하나라도 있으면 그 턴 기록의 블록 배열 전체를 `null` 로 버린다. 손으로 쓴 시험 표(`test_turn_record.ml`, `test_keeper_prompt_capture.ml`, `test_keeper_next_request_forecast.ml`)는 실행해야 틀린 줄을 알 수 있다.
+- `cache_rank` 는 `Dynamic_context` 7, `Temporal_summary` 8, `Operator_note` 9 이고 사이에 정수가 없다(`prompt_block_id.ml`). 순위는 정렬에만 쓰인다.
+- 공식 클라이언트로 보내는 전달 규칙은 블록마다 다르다. `resent_when_held` 가 true 이면 세션이 같은 바이트를 가졌어도 다시 보내고, false 이면 건너뛴다. 세션은 보낸 프롬프트를 대화 기록으로 쌓으므로 true 인 블록은 턴마다 한 사본씩 세션을 키운다(`prompt_block_id.mli`). Claude Code 는 압축 경계가 보고되면 받은 목록을 비운다(`lib/keeper/keeper_claude_code_runtime.mli`). Antigravity 는 가진 목록을 항상 비워서 매번 전부 다시 보낸다(`keeper_antigravity_runtime.ml:665-668`).
+- Jev 클라이언트는 질문 여러 개와 임의의 닫힌 선택지를 지원하고(`lib/typesafeai/typesafeai_types.mli`), 용량 거절을 HTTP 400 `max_tokens_exceeded` 로만 인정한다(`typesafeai_client.mli`). 요청별 제한 시간의 기본값은 10초다(`lib/masc_http_client/masc_http_client.ml:37`).
 
 ## 4. 설계
 
 ### 4.1 흐름
 
 ```text
-턴 입력 + 월드 프레임 ──┐
-키퍼의 현재 사실 전체 ──┴─> 1단계 Jev (배치 1회)
-                              │  후보마다 needed / maybe_needed / not_needed
-                              │  턴 질문 yes / no / unsure
-                              v  (not_needed 는 여기서 빠진다)
-                         2단계 memory_recall_exact (배치 1회)
-                              │  후보마다 닫힌 선택 + 이유 + Standing/Time_bound
-                              v
-          Selected / None_found / None_needed / Unavailable(이유)
-                              v
-            Recalled_memory 블록 (첫 라운드, 매 턴 전달)
+턴 입력 + Keeper 지침 + 턴 참조 ─┬─> (a) 후보 판정   Jev, 후보 전체
+키퍼의 현재 사실 전체 ────────────┘                 후보마다 needed / maybe_needed / not_needed
+                                  ├─> (b) 턴 질문    Jev, 후보 없이
+                                  │                 이번 턴이 저장된 지식을 필요로 하는가 yes / no / unsure
+                                  └─> (c) 시간 표시  Jev, (a)가 고른 후보만
+                                                    Standing / Time_bound
+                                       v
+        selected / none_found / none_needed / unavailable(이유)   (일부만 판정하면 "N개 중 M개")
+                                       v
+        Recalled_memory_status (첫 라운드, 매 턴)  +  Recalled_memory (첫 라운드, 고른 집합이 바뀔 때)
 ```
 
-### 4.2 후보와 입력
+(a)와 (b)는 동시에 보낸다. (c)는 (a) 뒤에 보내고, 실패해도 (a)의 결과는 그대로 쓴다.
 
-- 후보는 키퍼의 현재 일반 사실과 검증된 출처 결속 사실 전체다. 미리 걸러 내지 않는다. 낱말 겹침이나 점수로 줄이는 것은 헌법의 `string_matching`·`magic_number` 에 걸린다.
-- 후보 한 줄: id, category, claim, first_seen, last_seen, origin. 내용 단서가 claim 문장뿐이라 입력이 크다. 키퍼 40개의 claim 바이트는 중앙값 약 65KB, 상위 10% 약 149KB, 최대 약 181KB 다. 층 2 의 제목이 이 크기를 줄인다(§5.2).
-- 목적(purpose)은 공용 기억의 호스트 recall 과 같은 모양이다: 이번 턴 입력, 이번 요청의 문맥(월드 프레임), 키퍼 지침, 턴 참조. 자율 턴에서는 입력 자리에 자율 턴 프롬프트가 들어가고 문맥에 목표와 과업이 있다.
-- 안정 부분(지침, 후보)을 앞에, 턴마다 바뀌는 목적을 뒤에 둔다. 제공자의 프롬프트 캐시를 쓰기 위해서다.
+### 4.2 후보와 요청
+
+- 후보는 Keeper 의 현재 사실 전체다. 일반 사실과 출처 결속 사실을 가리지 않고, 미리 걸러 내지 않는다. 낱말 겹침이나 점수로 줄이는 것은 헌법의 `string_matching`·`magic_number` 에 걸린다. 출처 파일의 본문은 읽지 않는다.
+- 후보 한 줄: id, category, claim 전문, first_seen, last_seen, origin. 요약이 아니라 전문을 본다. 요약만 보고 `not_needed` 를 내면 원문에만 있는 예외를 놓친다는 지적이 있었다.
+- 목적(purpose)은 이번 턴 입력, Keeper 지침, 턴 참조로 시작한다. 월드 프레임(`dynamic_context`)을 넣을지는 층 0 에서 판정 품질과 요청 크기를 같이 보고 정한다. 프레임을 넣으면 요청이 커지고 회사 데이터가 더 나간다(§8-1).
+- 요청 모양을 `assess_batch` 와 다르게 한다. 지시문은 `state` 에 한 번만 두고, 질문은 `question_id` 와 닫힌 선택지의 짧은 설명만 갖는다. `assess_batch` 는 질문마다 지시문과 선택지 설명을 붙여서 질문당 약 2.5KB 다. 이 요청 모양(질문 수십~백여 개와 큰 `state`)은 라이브에서 보낸 적이 없다. 지금까지 Jev 로 나간 기억 판정 1,623건은 모두 질문이 하나였다. 라이브에서 질문을 여러 개 보낸 선례는 Board attention 뿐이고 `state` 가 작다.
+- 크기를 가늠한다. 후보 claim 만으로 Keeper 당 중앙값 66KB, 상위 10% 148KB, 최대 182KB 다. 이미 보낸 요청에서 입력 한 토큰이 중앙값 2.04바이트였으므로(최소 1.56) 중앙값 Keeper 의 claim 은 약 32k 토큰, 상위 10% Keeper 는 약 73k 토큰이다. Jev 문서의 한도는 요청당 64k 토큰, 질문당 32k 토큰이다(docs.typesafe.ai/models, 2026-10-28 확인). 질문당 한도에 `state` 가 포함되는지는 모른다. 포함되면 중앙값 Keeper 도 한도에 걸린다. 그래서 요청이 거절되어 반으로 나누는 일이 예외가 아니라 보통 경로일 수 있다. 이 값들은 층 0 의 첫 측정이다(§5).
 
 ### 4.3 판정
 
-- 2단계의 선택 역할은 기존 선택기의 닫힌 선택을 그대로 쓴다. 이번 결정에 직접 쓰이는 기억(`current_decision`), 다른 사건·환경이지만 비교에 쓰이는 기억(`comparison`), 출처를 더 봐야 하는 기억(`inspect_source`), 필요 없음(`not_needed`)이다.
-- **1단계, Jev.** 후보마다 질문 하나를 한 요청에 담아 보낸다(`assess_batch` 와 같고, 용량 거절이면 절반으로 나눠 다시 보낸다). 답은 `needed`·`maybe_needed`·`not_needed` 중 하나다. 확실히 필요 없는 것만 `not_needed` 로 답하고 애매하면 `maybe_needed` 로 답하게 묻는다. 어휘가 다르거나 표면이 닮지 않은 기억(발동 조건형 사실, 실패 교훈)을 Jev 가 확신하지 못할 때 남길 길이다. 숫자 바닥값이 아니라 모델이 스스로 고르는 닫힌 선택이다. 빠르고 싸다(평균 0.66초, 호출당 약 $0.00006, [TypeSafe Jev 연구](../research/2026-09-18-typesafe-jev-masc-applicability-r1.md) §4). 이유 문장은 못 낸다. 입력이 큰 경우의 지연은 아직 못 쟀다(§4.8). 같은 요청에 턴 단위 질문을 하나 더한다. 이번 턴이 저장된 지식(교훈, 절차, 제약, 이전 결정)을 필요로 하는가, 답은 `yes`·`no`·`unsure` 다. 이 답은 고른 기억이 없을 때 "필요 없음"과 "찾았지만 없음"을 가른다(§4.4). 답이 없거나 잘못되면 `unsure` 로 대신하지 않고 `unavailable` 로 둔다.
-- **2단계, in-house 레인.** Jev 가 `not_needed` 가 아닌 것으로 답한 후보(`needed`, `maybe_needed`)만 받는다. 후보마다 닫힌 선택과 이유 문장 하나를 낸다. 그리고 그 기억이 시간에 묶인 값(수치, SHA, head, 판정, 진행 상태)을 담았는지 `Standing` 과 `Time_bound` 중 하나로 표시한다. 이 표시도 모델의 판단이고 낱말 일치로 정하지 않는다. 출처 결속 사실의 파일 검증은 이 단계에서 고른 것에만 붙인다. 모든 사실을 매 턴 재검증하지 않는다. 1단계가 넓게 고르고 2단계가 줄이므로 2단계가 후보를 더하는 일은 없다. 이유는 감사 기록이 된다.
-- **Jev 를 못 쓸 때.** 그 Keeper 가 `[typesafeai] excluded_keepers` 에 있거나, `[typesafeai] memory_recall` 스위치가 꺼져 있거나, Jev 요청이 실패하면 레인이 후보 전체와 턴 단위 질문을 1단계로 받는다. 레인도 못 쓰면 `unavailable`(§4.4)이다.
-- **Jev 로 가는 것.** 이번 턴 입력, 이번 요청의 문맥(월드 프레임), Keeper 지침, 후보의 id·category·claim·시각. 회사 데이터를 다루는 Keeper 를 제외할지는 운영자가 정한다(§8).
-- **확신도는 기록하고, 단계를 가르는 데 쓰지 않는다.** Jev 응답의 확률과 확신도는 평가 기록에 남긴다. 응답 해석(`decode_choice`)도 확신도를 수락 임계값으로 쓰지 않는다고 적는다(`lib/typesafeai/typesafeai_types.mli`). Board attention 은 측정으로 정한 바닥값을 쓰지만(`board_attention_confidence_floor`) 여기에는 같은 측정이 없다. 기록이 쌓인 뒤 바닥값이 필요한지 §7 에서 다시 본다.
-- **1단계가 놓친 후보는 2단계가 살리지 못한다.** 이 위험은 오프라인으로 잰다(§7).
-- **본문을 본다.** 판정은 claim 전문을 본다. 요약이 아니다(kidsnote-job-manager 의견). 출처 파일의 본문은 보지 않는다. `inspect_source` 는 호스트가 원문을 읽었다는 뜻이 아니라 Keeper 가 출처를 열어 봐야 한다는 표시다.
-- **정확한 식별자.** 예약 id, task id, 파일 경로는 요청에 실리는 턴 참조와 claim 에 같은 글자로 있어서 Jev 와 레인이 둘 다 볼 수 있다. 식별자만 따로 맞추는 길은 사실에 타입 있는 참조가 생긴 뒤(층 2)에 둔다. 지금 claim 에서 글자를 찾아 맞추는 일은 헌법의 `string_matching` 에 걸린다.
-- 판정 타입(`decision`, `outcome`, `deferred`)은 TypeSafe 타입에 기대지 않는 모듈로 옮기고, 평가 함수는 Jev 와 in-house 레인이 같은 모양으로 구현한다. 1단계 답(`needed`·`maybe_needed`·`not_needed`)과 `Standing`/`Time_bound` 도 같은 모듈의 닫힌 합타입이다.
+- **(a) 후보 판정.** 후보마다 질문 하나. 답은 `needed`, `maybe_needed`, `not_needed` 다. 확실히 필요 없을 때만 `not_needed` 를 고르고 애매하면 `maybe_needed` 를 고르게 묻는다. 이번 입력과 쓰는 말이 다른 기억이 있다. 조건이 맞을 때만 쓰는 규칙이나 실패에서 얻은 교훈이 그렇다. Jev 가 이런 기억을 확신하지 못하면 `maybe_needed` 로 남긴다. `needed` 와 `maybe_needed` 를 고른 것으로 본다. 개수 상한은 두지 않는다. 숫자 바닥값이 아니라 모델이 스스로 고르는 닫힌 선택이다.
+- **(b) 턴 질문.** 이번 턴이 저장된 지식(교훈, 절차, 제약, 이전 결정)을 필요로 하는가. 답은 `yes`, `no`, `unsure` 다. 고른 기억이 없을 때 "필요 없음"과 "찾았지만 없음"을 가른다. 후보 요청과 따로, 후보 없이 보낸다. 후보 요청이 반으로 나뉘어도 한 번만 묻는다.
+- **(c) 시간 표시.** 고른 후보만 보내서 시간에 묶인 값(수치, SHA, head, 판정, 진행 상태)을 담았는지 `Standing` 과 `Time_bound` 중 하나로 받는다. 이 표시도 모델의 판단이고 낱말 일치로 정하지 않는다. 요청이 실패하면 표시 없이(`Unjudged`) 싣는다.
+- 개인 사실에는 공용 기억 선택기의 역할 구분(`current_decision`, `comparison`, `inspect_source`)을 쓰지 않는다. 개인 사실의 75.9%는 출처 좌표가 없어서 `inspect_source` 에 답할 근거가 없고, 선택지 설명이 질문마다 붙어 요청이 커진다. 역할 구분이 필요한지는 층 0 에서 본다.
+- **Jev 로 가는 것.** 이번 턴 입력, Keeper 지침, 턴 참조, 후보의 id·category·claim 전문·시각·origin. 회사 데이터를 다루는 Keeper 는 §8-1 에서 정한다.
+- **모델 버전.** `[typesafeai] model` 에 버전 id 를 적는다(`Custom of string`을 이미 받는다). 별칭 `jev-latest` 는 새 릴리스로 옮겨 가서 코드를 안 바꿔도 답이 바뀐다고 문서가 적는다. Jev 1.14 가 2026-10-14 에 나왔다. 지금 라이브 설정에는 `model` 줄이 없어 기본값 `jev-latest` 다(`lib/runtime/runtime_schema.ml:551`). 하네스에서 안정성을 잰 버전을 카나리에도 쓴다.
+- **확신도는 기록하고 선택에는 쓰지 않는다.** Jev 응답의 확률과 확신도는 평가 기록에 남긴다. 응답 해석(`decode_choice`)도 확신도를 수락 임계값으로 쓰지 않는다고 적는다(`lib/typesafeai/typesafeai_types.mli`). 기록이 쌓인 뒤 바닥값이 필요한지 §7 에서 다시 본다.
+- **`not_needed` 는 그 턴에 최종이다.** 다른 판정자가 다시 보지 않는다. 비슷한 질문의 기준값이 있다. Board attention 에서 Jev 의 "관련 없음" 답 36,807건을 LLM 레인이 다시 판정해 1,304건(3.5%)을 뒤집었다(2026-09-23~30, `lib/runtime/runtime_schema.ml` 의 주석). 확신도 0.3 미만 답은 7.3%였는데 뒤집힌 것의 41%가 거기서 나왔다. 질문이 다르므로 예측이 아니라 비교 기준이다. 같은 비율이면 `not_needed` 로 간 후보의 약 3.5%를 기준 판정자가 다시 고른다. 기준 판정자가 맞는지는 정답 세트로 따로 본다. 오프라인 재생이 이 값을 우리 질문에서 잰다(§7).
+- 판정 타입(`decision`, `outcome`)은 TypeSafe 타입에 기대지 않는 모듈에 둔다. 오프라인 하네스의 기준 판정자가 같은 타입으로 답한다.
 
 ### 4.4 싣기
 
-새 블록 `Prompt_block_id.Recalled_memory` 를 더한다.
+블록이 둘이다. 하나는 매 턴 가는 짧은 상태 줄이고 하나는 고른 기억의 본문이다. 본문을 매 턴 다시 보내면 공식 클라이언트 세션이 턴마다 그만큼 커진다(§3). 본문은 고른 집합이 바뀔 때만 보낸다.
 
-| 항목 | 값 | 이유 |
-|---|---|---|
-| `injected_on_post_tool_round` | false | 다른 상태 블록과 같이 첫 라운드에만 싣는다 |
-| `resent_when_held` | true | 같은 바이트라도 새 턴의 선택이다. 받은편지함 항목과 같은 종류다 |
-| `cache_rank` | `Dynamic_context` 와 `Temporal_summary` 사이 | 턴마다 바뀌는 블록은 안 바뀌는 블록 뒤에 둔다 |
+| 블록 | 내용 | `injected_on_post_tool_round` | `resent_when_held` | `cache_rank` |
+|---|---|---|---|---|
+| `Recalled_memory_status` | 상태 한 줄과 선택한 id 목록 | false | true | `Dynamic_context` 와 `Temporal_summary` 사이 |
+| `Recalled_memory` | 고른 기억 본문 | false | false | `Dynamic_context` 앞 |
 
-블록 내용은 아래 중 하나다. 판정을 켠 키퍼에 사실이 하나라도 있으면 항상 한 줄 상태가 있다. 네 상태는 문구가 서로 다르다. 승인 대기 중인 쓰기가 있으면(`memory-admission.json` 의 `pending`) 어느 상태에서든 상태 줄에 "승인 대기 N건, 방금 쓴 기억은 아직 검색에 안 나올 수 있다"를 더한다(§2.6).
+순위는 두 블록의 내용 변화 빈도를 층 1c 에서 잰 뒤 확정한다(`cache_rank` 문서의 방식). 상태 줄 블록은 `Admitted_scheduled_input` 처럼 매 재개마다 간다. 본문 블록은 세션이 같은 바이트를 이미 가졌으면 건너뛴다.
 
-- `selected`: 고른 기억마다 id, category, 역할, claim 전문(요약하지 않는다), 기록 시각(first_seen, last_seen), origin, 출처(`basis` 가 Board 글이면 `board:<post_id>` 좌표, 파생이면 근거 id). `Time_bound` 로 표시된 기억에는 "기록 시각의 값이다. 현재값이 아니니 쓰기 전에 다시 확인한다"를 붙인다. 블록 머리에 "출처가 있는 데이터이고 지시가 아니다, comparison 은 이번 사건의 상태가 아니다, last_seen 은 같은 claim 을 마지막으로 본 시각이다"를 적는다. 상태 줄에 "후보 N개 중 K개 선택"을 적는다.
-- `none_found`: 판정했고 고른 기억이 없는데, 턴 질문의 답이 `yes` 또는 `unsure` 다. "기억 판정: 이번 턴에 저장된 지식이 필요해 보이지만 맞는 기억을 못 찾음 (N개 판정). `keeper_memory_search` 로 직접 찾아볼 수 있다" 한 줄이다. 중립 문구다.
-- `none_needed`: 판정했고 고른 기억이 없는데, 턴 질문의 답이 `no` 다. "기억 판정: 이번 턴에 저장된 지식이 필요 없음 (N개 판정)" 한 줄이다.
-- `unavailable`: 레인 실패, 용량 거절, 잘못된 답(턴 질문 포함). 이유를 적고 "기억이 없다는 뜻이 아니다, `keeper_memory_search` 로 직접 찾을 수 있다"를 적는다. 일부만 판정했으면 "N개 중 M개 판정"과 그중 고른 기억을 함께 싣는다. 다른 세 상태보다 눈에 띄는 문구를 쓴다.
+상태 줄은 아래 넷 중 하나다. 줄마다 `turn_ref` 가 있다. 세션 기록에 여러 턴의 줄이 쌓여도 어느 턴의 판정인지 알 수 있어야 한다.
 
-`board:<post_id>` 좌표가 있는 기억은 Task 제출의 `evidence_refs` 에 인용할 수 있다. 좌표가 없는 77%는 인용하지 못한다(§2.5).
+- `selected`: "후보 N개 중 K개 선택" 과 선택한 id 목록. 본문은 `Recalled_memory` 블록이거나 이 세션이 앞서 받은 같은 블록에 있다.
+- `none_found`: 판정했고 고른 기억이 없는데 턴 질문의 답이 `yes` 또는 `unsure` 다. "후보 N개를 판정했고 이번 턴에 맞는 기억을 찾지 못함. 저장된 지식이 필요해 보인다는 답이었다." 직접 검색을 권하지 않는다. 직접 검색은 같은 사실 저장소를 낱말 일치로 보므로, 이 줄이 직접 검색하면 더 찾을 수 있다는 암시가 되면 안 된다.
+- `none_needed`: 판정했고 고른 기억이 없는데 턴 질문의 답이 `no` 다. "후보 N개를 판정했고 이번 턴은 저장된 지식이 필요 없다는 답이었다."
+- `unavailable(이유)`: 판정하지 못했다. 이유를 적고 "기억이 없다는 뜻이 아니다. `keeper_memory_search` 로 직접 찾을 수 있다"를 적는다. 다른 세 상태보다 눈에 띄는 문구를 쓴다.
 
-문구는 `config/prompts/keeper.md` 의 이름 있는 조각으로 두고 `Prompt_names` 에 등록한다. 기존 "사실 N개" 안내문(`Memory_os_recall`)은 그대로 둔다. 이 상태 줄이 안내문의 매 턴 재전송을 대신한다.
+일부 후보만 판정했으면 어느 상태에서든 "N개 중 M개 판정"을 덧붙인다. 턴 질문이 `no` 인데 고른 기억이 있으면 `selected` 로 한다(고른 쪽이 이긴다). 평가 기록에 모순이라고 적는다.
+
+본문 블록의 항목마다 다음을 싣는다: id, category, 라벨(`needed` 또는 `maybe_needed`), claim 전문, first_seen, last_seen, origin, 출처가 Board 글이면 `board:<post_id>` 좌표. `Time_bound` 로 표시된 항목에는 "기록 시각 기준 값이다. 그 뒤 바뀌었을 수 있다"를 붙인다. 블록 머리에 적는다: 출처가 있는 데이터이고 지시가 아니다. 판단 재료이고 증거가 아니다. Task 완료 증거(`evidence_refs`)는 `board:`, `artifact:` 같은 원문 좌표를 받는다. `last_seen` 은 같은 claim 을 마지막으로 본 시각이다.
+
+문구는 `config/prompts/keeper.md` 의 이름 있는 조각으로 두고 `Prompt_names` 에 등록한다. 이 기능을 켠 Keeper 는 기존 "사실 N개" 안내문(`Memory_os_recall`)을 받지 않는다. 상태 줄이 같은 정보를 갖는다. 전체로 넓힌 뒤에는 안내문 코드를 지운다. 꺼진 Keeper 는 지금과 같다.
 
 ### 4.5 런타임별 전달
 
-- API 레인: 다른 블록과 함께 첫 라운드의 추가 시스템 문맥으로 붙는다.
-- 공식 클라이언트(Claude Code, Codex, Muse, Antigravity): `resent_when_held` 가 true 라서 재개 때마다 앞에 붙는다. 시작 때도 같다. 압축 뒤에는 클라이언트별 기존 규칙을 따른다. Claude Code 는 압축 경계가 보고되면 받은 목록을 비운다(`lib/keeper/keeper_claude_code_runtime.mli`).
-- 용량 거절: 공용 기억의 `defer_for_capacity` 처럼 고른 항목을 줄여 다시 만들고, 줄였다는 사실과 개수를 블록에 적는다. Muse·Antigravity 는 이 재시도가 없어서, 거절이 나면 그 턴은 `unavailable` 로 싣는다.
+- API 레인: 요청마다 조립하므로 두 블록이 첫 라운드에 모두 붙는다.
+- 공식 클라이언트(Claude Code, Codex, Muse): 상태 줄은 재개마다 가고, 본문은 같은 바이트를 세션이 이미 가졌으면 건너뛴다. 이 방식은 본문이 세션 앞쪽에 있고 이번 턴은 상태 줄이 가리키기만 하는 경우를 만든다. 모델이 앞쪽 본문을 쓰는지는 층 1c 에서 본문이 처음 실린 뒤 몇 턴째에 인용되는지로 잰다. Claude Code 는 압축 뒤에 본문을 다시 받는다. 턴당 늘어나는 바이트와 압축 빈도도 잰다.
+- Antigravity: 가진 목록을 항상 비워서 두 블록이 매번 전부 간다.
+- 블록 때문에 Keeper 자신의 요청이 용량 거절을 받을 수 있다. 재시도 경로가 있는 런타임(Agent Core, Codex, Claude Code)은 공용 기억의 `defer_for_capacity` 처럼 고른 항목을 줄여 다시 만든다. Muse·Antigravity 에는 이 경로가 없다고 설정 주석이 적는다(`config/runtime.toml` 의 `workspace_memory_selection_enabled` 주석). 이 둘에서는 거절이 나면 그 턴이 실패한다. 층 1c 에서 블록 바이트 분포와 거절 수를 본다. 거절은 평가 기록에 남기고 다음 턴 상태 줄에 알린다.
 
-### 4.6 기록과 실패
+### 4.6 실패와 기록
 
-- 입력과 응답을 호출 전후에 키퍼별 `memory-recall-evaluations.jsonl` 에 남긴다. `started`, `response_received`, `provider_failed`, `cancelled` 모양은 `memory-selection-evaluations.jsonl` 과 같고, 두 단계의 요청과 응답(Jev 의 확률·확신도·토큰 사용량 포함)을 따로 적는다. 헌법의 `persist_before_model_call` 이다. 이 파일이 재생 세트가 된다.
-- 평가 기록에 턴 식별자와 `unavailable` 의 이유를 적는다. 턴 기록(`decisions.jsonl` 의 `turn`)에도 결과(`selected`, `none_found`, `none_needed`, `unavailable` 과 이유)를 한 필드로 적는다. 평가 기록을 따로 읽지 않아도 "기억 없이 판단한 턴"을 턴 기록만으로 센다(wkbl-front, msx-retro-mania, masc-productor-owner 의견).
-- 판정이 같은 턴 안에서 되풀이되면(재시도) 처음 준비한 선택을 쓴다. 턴 사이에 결과를 재사용하지 않는다. 같은 입력이 반복돼도 사실이 바뀌었을 수 있기 때문이다.
-- 타임아웃을 새로 만들지 않는다. 레인의 기존 실패 처리와 역압이 `unavailable` 의 이유가 된다.
-- 지표: `masc_keeper_memory_recall_total{outcome}`(selected, none_found, none_needed, unavailable), 판정 입력 바이트, 고른 개수, 호출 지연. 기존 `Keeper_metrics` 방식이다.
+- 입력과 응답을 호출 전후에 키퍼별 `memory-recall-evaluations.jsonl` 에 남긴다. `started`, `response_received`, `provider_failed`, `cancelled` 모양은 `memory-selection-evaluations.jsonl` 과 같다. 확률, 확신도, 토큰 사용량, `turn_ref`, 결과 상태와 이유를 적는다. 헌법의 `persist_before_model_call` 이다. 이 파일이 재생 세트가 된다.
+- 턴 기록(`decisions.jsonl` 의 `turn`, `Turn_record`)에는 새 필드를 더하지 않는다. `Turn_record.blocks` 가 블록이 실렸는지를 바이트·digest 와 함께 이미 남긴다(`turn_record.mli`). 평가 기록이 결과와 이유를 갖는다. 둘을 `turn_ref` 로 이어 "기억 없이 판단한 턴"을 센다.
+- 후보 요청이 용량 거절을 받으면 후보를 반으로 나눠 다시 보낸다. 반쪽은 앞쪽부터 차례로 보낸다. 후보 하나짜리 요청이 거절을 받으면 거기서 멈추고 `unavailable(capacity)` 로 한다. 남은 반쪽을 더 보내지 않는다. 고정 부분(목적과 지시문)이 한도를 넘으면 반으로 나눠도 소용없기 때문이다. 이 경우 요청 수는 후보 수 N 의 log2(N)+1 번에서 멈춘다. 앞서 판정된 후보는 "N개 중 M개 판정"으로 남는다.
+- Jev 가 일부 후보의 답을 빠뜨리면 그 후보는 판정하지 못한 것으로 센다.
+- 턴 질문의 답이 없거나 잘못되면 `unsure` 로 대신하지 않는다. 고른 기억이 있으면 `selected` 이고, 없으면 `unavailable(turn_question)` 이다.
+- 429, 제공자 실패, 취소는 `unavailable(이유)` 다. 같은 턴의 재시도에서 다시 판정한다.
+- 성공한 판정은 `turn_ref` 를 키로 같은 턴 안에서 다시 쓴다. failover 로 Jev 를 또 부르지 않는다. 턴 사이에는 재사용하지 않는다. 같은 입력이 반복돼도 사실이 바뀌었을 수 있다.
+- 제한 시간은 Jev 클라이언트의 요청별 제한(기본 10초)을 쓰고 새로 만들지 않는다. 큰 요청이 10초 안에 끝나는지는 층 0 에서 잰다.
+- 지표: `masc_keeper_memory_recall_total{outcome}`(selected, none_found, none_needed, unavailable), 판정 입력 바이트, 호출 수, 고른 개수, 호출 지연, 블록 바이트.
 
-### 4.7 스위치와 레인
+### 4.7 스위치
 
-- `config/runtime.toml` 에 `[memory_recall]` 을 더한다. `enabled = false` 가 기본이다. `keepers = []` 가 비어 있으면 켜졌을 때 모든 키퍼이고, 이름을 적으면 그 키퍼만이다. 설정 레지스트리에 행을 더한다(위키 목차의 `wiki_contents` 와 같은 방식).
-- `[typesafeai]` 에 `memory_recall = false` 를 더한다. 데이터를 TypeSafe 로 보내는 기능마다 스위치를 따로 두는 기존 방식이다(`absorb_gate`, `skill_applicability`, `workspace_memory_selection_enabled`). 꺼져 있으면 1단계도 레인이 맡아서 아무것도 TypeSafe 로 가지 않는다. 그래서 카나리는 레인만으로 먼저 켜고, Jev 는 따로 켤 수 있다.
-- `[runtime.exact_output_lanes.memory_recall_exact]` 에 `slots`·`cli_slots` 를 둔다. 레인은 `Optional` 이라 슬롯이 없어도 서버는 뜨고 블록이 `unavailable` 이 된다. 허가 대기열은 `Priority` 다.
-- 레인이 쓰는 슬롯은 키퍼들이 이미 쓰는 제공자의 슬롯이다. 2단계에는 Jev 가 거르지 않은 후보만 간다.
+- `config/runtime.toml` 에 `[memory_recall]` 을 더한다. `enabled = false` 가 기본이다. 범위는 둘 중 하나를 명시한다. `scope = "all"` 이거나 `scope = "listed"` 와 비어 있지 않은 `keepers = [...]` 다. 목록이 비어 있다고 전원이 켜지는 일은 없다. 모르는 이름은 부팅 때 알린다(`typesafeai_config.ml` 의 제외 목록 검사와 같다). 설정 레지스트리에 행을 더한다.
+- `[typesafeai]` 에 `memory_recall = false` 를 더한다. 데이터를 TypeSafe 로 보내는 기능마다 스위치를 따로 두는 기존 방식이다(`absorb_gate`, `skill_applicability`, `workspace_memory_selection_enabled`). 스위치 키는 여러 곳에서 읽는다(`runtime_schema`, `runtime_toml`, `typesafeai_config`, `board_attention`·`absorb_gate` 의 디코더). `absorb_gate` 쪽 디코더는 문자열이라 컴파일러가 못 잡는다.
+- Keeper 별 모드는 `Off` 와 `Judged` 둘이다. 스위치가 꺼져 있거나, 범위 밖이거나, `[typesafeai] excluded_keepers` 에 있으면 `Off` 다. `Off` Keeper 는 판정도 상태 줄도 없고 기존 안내문을 그대로 받는다.
 - 라이브 설정은 이 RFC 의 PR 이 바꾸지 않는다. 카나리를 켤 때 운영자가 정한다.
 
 ### 4.8 비용과 지연
 
-판정은 턴마다 한 번이라 호출 수가 턴 수와 같다. 아래는 모든 키퍼를 켰다고 가정한 값이다. 후보 바이트는 그날 턴을 낸 키퍼의 현재 사실 claim 바이트를 턴 수만큼 더했다. 과거 날의 실제 사실 수와는 다를 수 있다.
+판정은 턴마다 한다. 호출 수는 (a) 1회 이상, (b) 1회, (c) 고른 기억이 있으면 1회다. (a)는 요청이 거절되면 반으로 나뉜다.
 
-| 날짜(UTC) | 턴 | 후보 바이트 합 | 호출당 평균 |
+| 날짜(UTC) | 턴 | 턴을 낸 Keeper | 턴당 claim 평균 |
 |---|---|---|---|
-| 10-20 (가장 적은 날) | 1,596 | 115MB | 72KB |
-| 10-26 (가장 많은 날) | 4,253 | 408MB | 96KB |
-| 10-27 (어제) | 3,793 | 387MB | 102KB |
+| 10-24 | 1,501 | 32 | 101KB |
+| 10-26 | 4,253 | 30 | 96KB |
+| 10-27 | 3,793 | 29 | 102KB |
 
-- 어제 기준 하루 약 3,800회, 가장 많은 날은 약 4,300회다. 키퍼가 300명이 되고 턴 빈도와 키퍼당 사실 수가 같으면 하루 약 28,000회(평균 초당 0.33회), 후보 약 2.9GB 다. 키퍼당 사실 수에 상한이 없어서(중앙값 54.5개, 최대 121개) 호출당 바이트는 사실이 쌓이면 는다.
-- Jev 의 지연과 비용은 입력이 작은 Board attention 에서만 쟀다(평균 0.66초, 호출당 약 $0.00006). 호출당 약 100KB 에서의 값은 모른다. 카나리에서 잰다. 이 입력이 용량 거절을 부르면 `assess_batch` 가 절반으로 나눠 호출 수가 는다.
-- 사실 파일 읽기는 지금도 턴마다 IO 풀에서 한다(`Memory_os_recall` 렌더, `lib/keeper/keeper_run_tools_hooks.ml:1108`). 판정은 그 렌더가 읽은 사실 목록을 다시 쓰고 파일을 한 번 더 읽지 않는다. 레인 호출이 IO 풀을 잡는지는 층 1b 에서 코드로 확인한다.
-- [RFC-0474](RFC-0474-gc-stop-budget.md)는 2026-10-27 의 `Pool.request: timeout` 을 GC 정지에서 찾았고, 큰 문자열이 major heap 에 쌓이면 모든 domain 이 기다린다고 적는다. 판정 입력은 턴당 약 100KB 한 번이라 원본을 다시 검증하는 일보다 작아 보이지만 재 보지 않았다. 카나리 전후로 그 RFC §8 의 계기를 같이 보고, 카나리는 §7 의 키퍼 셋으로 시작해 넓히기 전에 그 계기를 다시 본다.
-- 카나리 밖으로 넓히기 전 조건(e-masc-the-leader 의견): 카나리에서 판정 지연의 p50·p99 와 읽기 API p99(Goal `goal-read-api-p99-300-keepers-20261027`)를 전후로 재고, 300명 환산 값을 이 절에 덧붙인다. 이 값이 없으면 넓히지 않는다. 호출 수와 바이트는 위 표로 계산한다. 지연과 읽기 API 에 주는 영향은 지금 모른다.
+claim 바이트는 그날 턴을 낸 Keeper 의 현재 사실 바이트를 턴 수만큼 더했다. 과거 날의 실제 사실 수와 다를 수 있다.
 
-## 5. 다음 단계 (이 RFC 에서 구현하지 않는다)
+- 어제(10-27) 기준 하루 3,793턴이고 Keeper 당 약 131턴이다. 300명이 되고 Keeper 당 턴 수와 사실 수가 같으면 하루 약 39,200턴이고 claim 만 약 4.0GB 다. 호출은 턴당 2회 이상이라 하루 78,000회 이상이다.
+- 비용은 입력만 든다. Jev 는 입력 100만 토큰에 $0.042 이고 출력은 무료다(docs.typesafe.ai/models, 2026-10-28 확인). 바이트당 토큰은 이미 보낸 요청에서 잰 입력 한 토큰 2.04바이트(최소 1.56)를 쓴다. 어제 claim 387MB 는 약 1.9억 토큰이고 하루 약 $8 이다. 300명이면 약 $80 이다. 목적과 지시문이 나뉜 요청마다 반복되는 분은 빠져 있다.
+- 지연은 큰 요청에서 모른다. 이미 보낸 기억 판정은 `state` 중앙값 7.6KB(최대 43.0KB)에서 중앙값 0.24초, 상위 10% 0.48초, 최대 14.51초였고 1,623건 중 6건이 실패했다. 우리 요청은 중앙값 Keeper 에서 약 9배, 상위 10% Keeper 에서 약 20배 크다(claim 만 비교). 호출당 제한 시간 기본값이 10초라서 이 안에 끝나는지가 첫 측정이다. 조직별 요청 한도를 넘으면 429 가 오는데 한도 값은 확인하지 못했다.
+- in-house 레인은 실행 경로에 넣을 수 없다. `board_attention_exact` 는 입력 2KB 에 걸린 시간이 중앙값 166.7초, 상위 10% 377.1초다. 입력이 이렇게 작으니 대부분 허가 대기다. `librarian_exact` 는 입력 중앙값 33KB 에 중앙값 10.8초, 상위 10% 30.8초, 상위 1% 350.8초다. 첫 요청을 보내기 전에 레인이 끝나야 하는데 레인의 역압은 실패가 아니라 대기라서, 레인이 느리면 턴이 시작하지 못한다. `Priority` 대기열은 `admission-priority-run-limit` 을 선언한 계정에서만 순서를 바꾸는데(`lib/runtime/standalone_lane.mli`) 라이브 `runtime.toml` 에는 이 선언이 없다. 새 레인의 슬롯은 운영자가 정하는데, 지금 레인들은 `glm-coding`, `ollama_cloud`, `claude_code` CLI 슬롯을 쓴다.
+- 사실 파일 읽기는 지금도 턴마다 IO 풀에서 한다(`Memory_os_recall` 렌더, `keeper_run_tools_hooks.ml:1108`). 판정은 그 렌더가 읽은 사실 목록을 다시 쓰고 파일을 한 번 더 읽지 않는다.
+- [RFC-0474](RFC-0474-gc-stop-budget.md)는 2026-10-27 의 `Pool.request: timeout` 을 GC 정지에서 찾았고, 큰 문자열이 major heap 에 쌓이면 모든 domain 이 기다린다고 적는다. 판정 입력은 턴당 수십~수백 KB 의 문자열이라 원본을 다시 검증할 때보다 작을 것으로 보지만 아직 측정하지 않았다. 카나리 전후로 그 RFC §8 의 계기를 같이 본다.
+- 카나리 밖으로 넓히기 전 조건: 카나리에서 판정 지연의 p50·p99, 호출 수, 429 와 읽기 API p99(Goal `goal-read-api-p99-300-keepers-20261027`)를 전후로 재고, 300명 환산 값을 이 절에 덧붙인다. 이 값이 없으면 넓히지 않는다.
 
-### 5.1 층 1 이후 순서
+## 5. 단계
 
-- 층 1a: 블록, 설정 스위치, 닫힌 판정 타입, 레인 변형. 기본 꺼짐이라 동작이 안 바뀐다.
-- 층 1b: 판정 흐름, 기록, 지표, 블록 렌더. 단위 테스트(요청과 결정).
-- 층 1c: 카나리 Keeper 에서 켜고 §7 을 잰다.
+한 층에 PR 하나, 층마다 20k 토큰 이하다.
 
-### 5.2 층 2 — 이름, 제목, 연결
+**층 0 — 측정 하네스와 전제 측정.** 제품 코드를 바꾸지 않는다. `scripts/` 와 시험 디렉터리에 둔다.
 
-측정 뒤에 정한다. 방향만 적는다.
+1. Jev 용량: 실제 Keeper 의 사실 66KB 안팎으로 요청을 보내 받아들이는지, 질문당 한도에 `state` 가 들어가는지, 지연이 제한 시간 안인지 본다. 중앙값과 상위 10% 크기 Keeper 로 각각 한다.
+2. Jev 반복 일치율: 같은 입력을 N번 보내 라벨이 바뀐 비율(label-flip rate)을 센다. mad-scientist 의 동결 실험(`p-2025afbfe12116ac9ac73199f9400080`)의 지표 A 와 같은 측정이다. 먼저 나오는 결과를 서로 쓴다.
+3. 놓침 재생: 기록된 요청을 기준 판정자(운영자가 정한 LLM 하나)로 다시 판정해 Jev 가 `not_needed` 로 보냈는데 기준이 고르는 후보를 센다. 정답 질문 세트에서는 필요한 후보를 `not_needed` 로 보낸 수를 센다.
+4. 쓰기 도달: 카나리 Keeper 의 `keeper_memory_write` 가 현재 사실이 되는 비율과 걸리는 시간, 거절 사유별 건수.
+5. 호출 결과 유실: 쓰기·검색 호출이 적용됐는데 결과를 못 받은 턴 수와 그 뒤 재시도로 중복 효과가 난 건수.
+6. 팔 A~D 의 점수(§7). 코드 경로가 없는 팔(A 안내 없음은 환경 변수 `MASC_KEEPER_MEMORY_OS_RECALL` 과 재시작이 필요하고, D 전체 노출은 코드 경로가 없다)은 하네스가 프롬프트를 직접 조립한다.
 
-- **안정 id.** 처음 넣을 때 정한 `fact_id` 가 다시 써도 유지된다. 지금의 `memory_id`(claim 해시)는 내용 확인용으로 남긴다. 이력과 연결을 걸 끈이 먼저 있어야 한다. 끈이 있어야 "어떤 쓰기가 실제로 재사용됐는가"를 재고, 그 값으로 낡은 사실을 지우는 기준을 세울 수 있다(simplifyer, music-sensei 의견). 지금은 id 가 바뀌어 재사용 이력이 끊긴다(§2.2).
-- **출처 좌표.** 대화 기록에서 뽑은 사실(지금 77.1%)에는 좌표가 없다. 뽑을 때 turn 참조를 같이 남기면 `evidence_refs` 로 인용할 수 있다. 지금 `evidence_refs` 는 `artifact:`, `note:`, `board:`, `fusion:`, `task:` 다섯 종류뿐이다(§2.4). `memory:<fact_id>` 참조는 안정 id 가 생긴 뒤에 더한다. 지금 id 는 claim 이 바뀌면 달라진다. 더할 때는 basis 좌표를 함께 적게 하고, basis 없는 인용은 거절한다(masc-productor-owner 의견). 기억은 Keeper 자신이 쓴 것이라 `memory:<id>` 만으로는 자기 참조다. 이 일은 Task 완료 증거 스키마를 바꾸므로 이 RFC 밖이다(§8 열린 결정 7).
-- **타입 있는 참조.** 사실에 task id, PR 번호, 예약 id, 파일 경로를 타입 있는 값으로 같이 쓴다. 턴 참조와 같은 값이면 글자 찾기가 아니라 타입 일치라서, 1단계를 거치지 않고 2단계 후보로 올릴 수 있다. 정확한 식별자를 키로 쓰는 Keeper(wkbl-data)에게 필요하다.
-- **제목과 "언제 꺼낼지".** Librarian 과 `keeper_memory_write` 가 쓸 때 같이 쓴다. 지금 `title` 은 도구 인자로 받아 claim 앞에 `**title**` 로 접힌다(`lib/keeper/keeper_tool_memory_validation.ml:466`). 판정 후보를 짧게 만들고 색인 줄이 된다. 한 줄은 "무엇이 들었고 언제 필요한지"다(Codex v2 요약, 예전 Claude Code `description`). `Standing`/`Time_bound` 도 쓸 때 같이 적으면 2단계가 매번 판단하지 않아도 된다.
-- **타입 있는 연결.** 근거(`Derived`), 교체(`Supersedes`), 흡수(`Absorbs`), 관련(`Related`, 이유 포함)을 닫힌 합타입으로 둔다. 점수는 두지 않는다. 연결 후보는 임베딩 검색이 아니라 새 사실마다 키퍼의 기존 사실 전체를 판정에 올려 정한다(A-MEM 이 링크 판단을 LLM 에 맡기는 것과 같다). Jev 가 후보를 가려내고 `Related` 의 이유는 레인이 쓴다. 지금 Derived 는 2,434개 중 1개이고 흡수 계보의 88.6%가 끊겼다(감사 측정).
-- **트리.** category(사용자 정의 포함) 아래 사실. 깊이는 3단 이내. 넘치면 설명만 접고 항목은 지운다. 조용히 자르지 않는다(Hermes 방식, Codex #48679 와 반대).
-- **고구마줄기.** 판정이 고른 사실의 이웃을 후보로 다시 판정에 올리고, 모델도 `id` 로 이웃을 열 수 있게 한다. 링크를 따라가는 쪽이 링크 없는 전체 목록보다 낫다는 비교 연구가 없다. §7 의 대조군으로 직접 잰다.
-- 저장 계약이 바뀐다. 백업을 확인한 뒤 hard cut 한다. 운영자 승인이 필요하다(§8).
+**층 1a — 타입, 스위치, 블록.** 기본 꺼짐이라 동작이 안 바뀐다. 새 블록 id 둘을 더하는 OCaml 자리(`prompt_block_id.ml` 의 타입, `equal`, `to_string`, `of_string`, `all_known`, `cache_rank`, `injected_on_post_tool_round`, `resent_when_held`와 `.mli`, 컨텍스트 조립, 다음 요청 예보, 제출 연결, 공식 클라이언트 전달, TUI 인스펙터)과, 같은 PR 에 넣을 컴파일러 밖 자리(대시보드 `dashboard-turn-records.ts` 의 블록 id 목록과 `memory-inspector.ts`, 손으로 쓴 시험 표 셋)를 함께 바꾼다. `cache_rank` 는 `Temporal_summary` 와 `Operator_note` 를 뒤로 밀어야 한다. 대시보드 화면에서 새 블록이 보이는지 확인한다. 설정 스위치와 닫힌 판정 타입 모듈도 여기에 든다.
 
-### 5.3 층 3 — 정리
+**층 1b — 판정 흐름.** Jev 요청 셋, 실패 규칙, 평가 기록, 지표, 블록 렌더. 운영자가 켜는 기능이라 사용 가이드 1장이 같은 PR 에 들어간다.
 
-- `RFC-memory-os-recall-selection`(61KB, 구현 0, 전제 소멸)과 `RFC-0247` §2(연상·수면 통합·TTL, 코드 없음)를 지운다. 죽은 개념은 지운다.
-- 기본 검색 안의 TypeSafe 후속 판정에 스위치를 달고 기본값을 정한다.
-- 검색 RFC 단계 2 를 이 RFC 로 대체한 것으로 닫는다.
+**층 1c — 카나리.** 런타임이 다른 Keeper 셋(공식 클라이언트 둘 이상, API 하나 이상)에서 켠다. 회사 데이터 Keeper 와 PO 는 뺀다. §7 의 운영 지표를 잰다.
+
+**층 1d — 레인(선택).** §8-8 의 결정이 나면 `Standalone_lane` 에 `Memory_recall` 을 더한다. 레인 변형은 약 16개 파일(`Exact_lane_run_registry.lane` 이 따로 닫힌 타입이다)에 걸친다.
+
+**층 2 — 이름, 제목, 연결.** 층 0 과 1c 의 결과를 본 뒤에 정한다. 방향만 적는다.
+
+- **안정 id.** 처음 넣을 때 정한 `fact_id` 가 다시 써도, 다른 사실에 흡수돼도 이어진다. 지금의 `memory_id`(claim 해시)는 내용 확인용으로 남긴다. 이력과 연결을 걸 끈이 먼저 있어야 "어떤 쓰기가 실제로 재사용됐는가"를 재고, 그 값으로 정리 기준을 세울 수 있다. 지금은 회수 이벤트의 84.5%가 가리키는 id 가 현재 사실이 아니다(§2.2의 4).
+- **출처 좌표.** 대화 기록에서 뽑은 사실(75.9%)에는 좌표가 없다. 뽑을 때 turn 참조를 같이 남기면 `evidence_refs` 로 인용할 수 있다. `memory:<fact_id>` 종류는 안정 id 가 생긴 뒤에 더하고, basis 좌표를 같이 적게 하고 basis 없는 인용은 거절한다. Task 완료 증거 스키마를 바꾸므로 이 RFC 밖이다(§8-7).
+- **타입 있는 참조.** 사실에 task id, PR 번호, 예약 id, 파일 경로를 타입 있는 값으로 같이 쓴다. 턴 참조와 같은 값이면 글자 찾기가 아니라 타입 일치라서 후보를 판정 없이 올릴 수 있다. 정확한 식별자를 키로 쓰는 Keeper 에게 필요하다.
+- **제목과 "언제 꺼낼지".** 쓸 때 같이 쓴다. 판정 후보가 짧아지고 `Standing`/`Time_bound` 표시도 쓸 때 한 번 적으면 된다. 지금 `title` 은 도구 인자로 받아 claim 앞에 `**title**` 로 접힌다(`lib/keeper/keeper_tool_memory_validation.ml:466`).
+- **타입 있는 연결.** 근거(`Derived`), 교체(`Supersedes`), 흡수(`Absorbs`), 관련(`Related`, 이유 포함)을 닫힌 합타입으로 둔다. 점수는 두지 않는다. 지금 `Derived` 는 현재 사실 2,335개 중 1개다.
+- **이웃 따라가기.** 판정이 고른 사실의 이웃을 후보로 다시 판정에 올리고, 모델도 `id` 로 이웃을 열 수 있게 한다. 링크를 따라가는 쪽이 링크 없는 전체 목록보다 낫다는 비교 연구가 없다. 하네스의 대조군으로 직접 잰다.
+- 저장 계약이 바뀐다. 백업을 확인한 뒤 hard cut 한다. 운영자 승인이 필요하다(§8-2).
+
+**층 3 — 정리.** 전제가 사라진 `RFC-memory-os-recall-selection`(61KB, 구현 0)과 `RFC-0247` §2(연상·수면 통합·TTL, 코드 없음)를 지운다. 기본 검색 안의 후속 판정에 스위치를 달고 기본값을 정한다(§8-3). 전체로 넓힌 뒤 `Memory_os_recall` 안내문 코드를 지운다.
 
 ## 6. 대안과 버린 이유
 
 | 대안 | 버린 이유 |
 |---|---|
-| 목록만 보이게(Skill 식) | 목록이 매 턴 보이는 Skill 도구가 0.60% 만 불린다. "찾아볼까"를 모델에게 맡기는 점이 같다 |
-| 안내문만 매 턴 재전송 | 효과가 Muse 에서만 뚜렷했다. 안내문 재전송은 `Memory_os_recall` 의 "이미 받았으면 건너뜀" 규칙을 바꾸는데, 이 블록의 이름을 쓰는 테스트 파일이 13개이고 Codex·Claude Code·Muse·Antigravity 런타임과 세션 저장소의 재전송 테스트가 그 안에 있다. `Recalled_memory` 의 상태 줄이 같은 역할을 한다 |
-| 사실 전체를 항상 싣기 | 10-01 이전 설계다. 키퍼당 claim 이 최대 약 181KB 라 관련 없는 기억이 주의를 흩고 도구 인자를 흔들 수 있다(Memory-Induced Tool-Drift). 단 작은 저장소에서는 전체 노출이 기준선이라는 논문 표가 여럿 있어서 §7 에서 대조군으로 같이 잰다 |
+| 도구와 안내문만 두기(지금) | 기억 검색 도구와 "사실 N개" 안내문이 이미 있고 호출은 0.80% 다. 안내문이 새로 실린 49번 중 `claude-sonnet-5-5` 는 한 번도 검색하지 않았다 |
+| 안내문만 매 턴 재전송 | 효과가 Muse 에서만 뚜렷했다. `Memory_os_recall` 의 "이미 받았으면 건너뜀" 규칙을 바꾸는데 이 블록 이름을 쓰는 테스트 파일이 13개다. 하네스의 B′ 팔이 이 대안을 직접 잰다 |
+| 사실 전체를 항상 싣기 | 10-01 이전 설계다. Keeper 당 claim 이 최대 182KB 라 관련 없는 기억이 주의를 흩고 도구 인자를 흔들 수 있다(Memory-Induced Tool-Drift). 작은 저장소에서는 전체 노출이 기준선이라는 논문 표가 여럿 있어서 하네스의 D 팔로 같이 잰다 |
 | 점수·키워드·상위 N개로 고르기 | 헌법의 `magic_number`·`string_matching`. OpenClaw 의 회상 패턴은 독일어에서 안 켜졌다(#151766) |
-| Jev 를 유일한 판정자로 | 빠르고 싸지만(평균 0.66초) 이유를 못 내고, early-access 단독 벤더라 SLA 가 없고 한 모델이며 능력이 고르지 않다([TypeSafe Jev 연구](../research/2026-09-18-typesafe-jev-masc-applicability-r1.md) §3.2, §5). 그래서 Jev 를 1단계로 쓰고 이유와 확정, 그리고 Jev 를 못 쓸 때의 대체는 레인이 맡는다 |
-| 확신도 바닥값으로 두 단계를 가르기(Board attention 방식) | Board attention 은 측정으로 바닥값(0.3)을 정했다. 여기에는 그 측정이 없고 헌법의 `magic_number` 에 걸린다. 기록을 쌓은 뒤 다시 본다 |
-| in-house 레인만 | 후보 목록이 키퍼당 최대 약 181KB 라 매 턴 레인에 통째로 보내면 지연과 구독 용량 부담이 크다. Jev 로 먼저 좁히면 레인은 Jev 가 거르지 않은 후보만 본다. 레인만으로 켜는 구성은 카나리의 첫 단계로 남긴다 |
+| in-house 레인을 실행 경로에 두기(Jev 뒤 2단계든, Jev 와 나란히든) | 첫 요청 전에 레인이 끝나야 한다. 실측 지연이 중앙값 10.8초~166.7초이고 대기가 대부분이라 턴이 시작하지 못한다(§4.8). 레인 변형이 약 16개 파일이다. 열린 결정 8 |
+| 본문을 매 턴 다시 보내기 | 공식 클라이언트 세션이 턴마다 한 사본씩 커진다(`prompt_block_id.mli`). 본문 블록은 바뀔 때만 보내고, 앞쪽 본문을 모델이 쓰는지는 카나리에서 잰다 |
+| 확신도 바닥값으로 가르기(Board attention 방식) | Board attention 은 측정으로 바닥값(0.3)을 정했다. 여기에는 그 측정이 없고 헌법의 `magic_number` 에 걸린다. 기록을 쌓은 뒤 다시 본다 |
 | Librarian 레인 재사용 | `Background` 대기열이라 턴 지연을 부른다. 정체성도 다르다 |
 
 ## 7. 검증
 
-단위 테스트는 보낸 요청과 결정만 본다. 문구는 보지 않는다.
+단위 테스트는 렌더 전의 타입 값과 보낸 요청만 본다. 문구는 보지 않는다.
 
-- 스위치가 꺼져 있으면 판정 호출도 블록도 없다. 사실이 없으면 호출이 없다.
-- 후보는 키퍼의 현재 사실 전체이고, 판정 요청에 그 id 가 모두 있다.
-- 선택된 항목만 블록에 실리고, 역할이 요청한 선택과 같다.
-- 고른 기억이 없을 때 턴 질문이 `no` 면 `none_needed`, `yes`·`unsure` 면 `none_found` 다. 턴 질문의 답이 없거나 잘못되면 `unavailable` 이다.
-- 레인 실패·용량 거절·잘못된 답이 `unavailable` 의 서로 다른 이유가 된다. 빈 블록이 되지 않는다.
-- 공식 클라이언트 재개에서 같은 바이트의 `Recalled_memory` 가 다시 실린다. 같은 조건에서 `Skill_compositions` 는 계속 건너뛴다.
-- 후속 라운드에는 실리지 않는다.
-- 입력과 응답이 호출 전후에 기록된다.
-- 제외 목록의 Keeper 와 `[typesafeai] memory_recall` 이 꺼진 설정에서는 Jev 요청이 없고 레인이 후보 전체를 받는다.
-- Jev 요청이 실패하면 레인이 1단계를 맡는다. 둘 다 실패하면 이유가 다른 `unavailable` 이다.
-- 2단계 요청에는 Jev 가 `not_needed` 로 답한 후보가 없고 `maybe_needed` 후보가 있다. 2단계 답마다 이유가 있다.
-- `Time_bound` 로 표시된 기억에만 "기록 시각의 값" 문구가 붙는다. 기록 시각과 출처 좌표가 항목마다 있다.
-- 일부만 판정하면 블록에 "N개 중 M개"가 있다. 평가 기록에 턴 식별자가 있다.
-- 승인 대기가 있으면 네 상태 모두 상태 줄에 "승인 대기 N건"이 있고, 없으면 그 줄이 없다.
-- 후보 목록의 id 를 판정 요청과 블록이 같은 사실 목록에서 만든다. 사실 파일을 두 번 읽지 않는다.
+- `Off` 이면 판정 호출도 블록도 없다. 사실이 0개여도 호출이 없다.
+- 판정 요청의 후보 id 집합과 상태 블록의 사실 목록이 같은 사실 목록에서 나온다.
+- (선택 집합, 턴 질문, 판정 개수)에서 상태가 정해진다. 고른 것이 있으면 `selected`, 없고 턴 질문이 `no` 면 `none_needed`, `yes`·`unsure` 면 `none_found`, 턴 질문이 `no` 인데 고른 것이 있으면 `selected`와 모순 표시, 턴 질문의 답이 없으면 `unavailable`.
+- 용량 거절: 후보 하나짜리 요청이 거절되면 요청 수가 log2(후보 수)+1 이하에서 멈추고 `unavailable(capacity)` 이거나 일부 판정(`judged < total`)이다.
+- 429, 제공자 실패, 취소, 잘못된 답이 서로 다른 이유의 `unavailable` 이 된다. 빈 상태가 되지 않는다.
+- 제외 목록 Keeper 와 `[typesafeai] memory_recall` 이 꺼진 설정에서는 Jev 요청이 없고 모드가 `Off` 다.
+- `Time_bound` 로 표시된 항목의 타입 값이 `Time_bound` 이고, (c)가 실패한 항목은 `Unjudged` 다.
+- 항목마다 first_seen, last_seen, origin, 출처 좌표 필드가 채워진다.
+- Claude Code·Codex·Muse 재개에서 `Recalled_memory_status` 는 항상 가고 `Recalled_memory` 는 같은 바이트면 건너뛴다. Antigravity 는 둘 다 다시 간다. 후속 라운드에는 실리지 않는다.
+- 입력과 응답이 호출 전후에 기록되고 평가 기록과 `Turn_record.blocks` 가 `turn_ref` 로 이어진다.
+- 성공한 판정이 같은 턴의 failover 에서 다시 쓰인다.
+- 대시보드 디코더(TypeScript 시험)가 새 블록 id 를 받는다.
 
-배포 전후를 잰다. 질문 묶음과 정답은 PO(masc-productor-owner)가 고정하고 채점한다. 방식은 위키 목차 RFC §7 을 따른다.
+효과는 층 0 의 오프라인 하네스가 잰다. 질문 묶음과 정답은 PO(masc-productor-owner)가 고정한다.
 
-- 전제 측정: 팔 C 를 재기 전에 아래 셋을 먼저 잰다(mad-scientist, msx-retro-mania 의견). 하나라도 나쁘면 recall 효과가 이 값에 섞여 해석할 수 없다.
-  - 쓰기 도달: 카나리 Keeper 의 `keeper_memory_write` 가 현재 사실이 되는 비율과 걸리는 시간, 거절 사유별 건수.
-  - Jev 반복 일치율: 같은 입력을 N번 보냈을 때 같은 답이 나오는 비율. 낮으면 아래 놓침 수치가 일화가 된다.
-  - 호출 결과 유실: 쓰기·검색 호출이 적용됐는데 결과를 못 받은 턴 수, 그 뒤 재시도로 중복 효과가 난 건수(wkbl-front).
-- 질문 묶음: 카나리 Keeper 한 명의 현재 사실에서 나이와 category 가 고르게 되도록 사실을 골라, 그 사실이 있어야 답할 수 있는 질문을 만든다(정답이 구성상 보장된다). 같은 수의 대조군 질문은 기억이 필요 없다. 기억이 필요한 질문은 월드 프레임과 Librarian working state 로 답할 수 없어야 한다(PO 가 확인한다). 다음 종류를 각각 넣는다: 어휘가 다른 질문, 발동 조건형 사실을 묻는 질문, 실패 교훈을 묻는 질문, 정확한 식별자 질문, 낡은 수치 함정(기억 속 수치와 새 측정값이 다를 때 다시 재는지). 문항당 정답 2점, 부분 1점, 오답 0점이고 "모른다"는 따로 표시한다.
-- 채점은 "실렸고 읽었다 / 실렸지만 안 읽었다 / 안 실렸다"를 나눈다. 실렸는지는 평가 기록으로, 읽었는지는 답이 그 기억을 인용했는지로 PO 가 본다. 실렸지만 안 읽은 경우는 판정이 아니라 모델이 쓰는 문제라서 recall 점수에서 따로 센다.
-- 회사 데이터 Keeper(레인만 쓰는 쪽)와 Jev 를 쓰는 쪽의 점수를 따로 낸다. 레인만으로 충분한지 본다.
-- 팔 넷: (A) 기억 안내 없음, (B) 지금(안내문만), (C) 이 RFC(호스트 판정), (D) 사실 전체 노출. 같은 Keeper 에 같은 문장, 세 번씩 반복한다. 런타임이 다른 카나리 셋(공식 클라이언트 둘, API 하나 이상)에서 한다.
-- 가설: (1) C 가 B 보다 "기억이 필요한 질문"의 점수가 오른다. (2) 대조군 점수와 도구 호출 정확도는 떨어지지 않는다. (3) 판정이 대조군 질문에서 `none_needed` 로 답한다. (4) D 와 C 의 차이를 본다. D 가 C 이상이면 작은 저장소는 전체 노출이 낫다는 뜻이고 이 RFC 의 크기 기준을 다시 정한다.
-- 합격선 숫자는 미리 정하지 않는다. 팔 A~D 를 잰 뒤 운영자가 값을 보고 정한다.
-- 채점 보조: 정답지와 답을 Jev(점수 질문)와 in-house LLM 두 판정자가 따로 매기고, 둘이 갈린 문항과 무작위 표본을 PO 가 본다. 최종 점수는 PO 가 정한다. LLM 판정자의 순위가 F1 순위와 갈린다는 보고가 있어서(Anatomy of Agentic Memory, arXiv 2602.19320 표3, 조사 에이전트가 본문에서 확인) 판정자만으로 점수를 확정하지 않는다.
-- Jev 가 놓치는 정도: 평가 기록의 후보 전체를 레인이 1단계로 다시 판정해, Jev 가 `not_needed` 로 보냈는데 레인이 고르는 후보를 센다. 숫자 합격선은 두지 않고 목록을 PO 가 읽는다. 놓침이 보이면 Jev 의 질문 문구를 고치거나 1단계를 레인으로 돌린다.
-- 확신도 기록으로 바닥값이 필요한지 본다. Jev 의 확신도 분포와 Jev·레인의 불일치가 겹치는 구간이 있는지 확인하고, 겹칠 때만 Board attention 처럼 측정으로 정한 값을 RFC 로 따로 제안한다.
-- 보조 지표: `scripts/keeper-recall-baseline.py` 를 같은 조건으로 다시 돌려 검색 비율, 0건 비율, 도구 호출 비중을 비교한다. 판정 호출 수, 입력 바이트, 지연, 레인 거절 수, `none_needed`·`none_found`·`unavailable` 비율. 턴 질문의 답이 맞는지는 PO 가 표본을 읽고 센다. 얼마나 믿을 수 있는지 모른다. 재조회 회피(같은 턴의 Board·`gh api` 재직독 횟수, kidsnote-qa-hub-manager 의견)와, PO 가 카나리 턴의 실린 기억을 읽고 센 "틀렸거나 낡아서 무시된 기억"(kidsnote-job-manager 의견)도 본다. 같은 claim 을 다시 쓰는 비율(`explicit_write`)은 id 가 claim 해시라서 고쳐 쓴 경우를 놓치므로 안정 id(§5.2) 전에는 신호로 쓰지 않는다(polisher 의견).
-- 한계: 키퍼와 문항이 적고 회차당 한 번이다. 통계가 아니라 사례다. 전후 차이에는 그사이 다른 변화가 섞인다.
+- **팔.** (A) 기억 안내 없음, (B) 지금(안내문만), (B′) 안내문을 매 턴 보냄(본문 없음), (C1) 이 RFC(Jev 가 고른 본문), (C2) 기준 판정자가 고른 본문, (D) 사실 전체. 팔마다 새 세션에서, 같은 Keeper 에 같은 문장으로, 세 번 반복하고 순서는 무작위로 한다. 하네스는 카나리 Keeper 의 사실을 고정한 읽기 전용 복제본으로 돌려서 측정 중 Librarian 이 사실을 바꾸지 않게 한다.
+- **질문 묶음은 Keeper 마다 따로 만든다.** 그 Keeper 의 현재 사실에서 나이와 category 가 고르게 되도록 사실을 골라, 그 사실이 있어야 답할 수 있는 질문을 만든다. 정답이 구성상 보장된다. 같은 수의 대조군 질문은 기억이 필요 없다. 기억이 필요한 질문은 월드 프레임과 Librarian working state 로 답할 수 없어야 한다. 다음 종류를 각각 넣는다: 어휘가 다른 질문, 발동 조건형 사실, 실패 교훈, 정확한 식별자, 낡은 수치 함정(기억 속 수치와 새 측정값이 다를 때 다시 재는지). 모든 지표를 턴 종류(사용자 채팅 턴, 자율 턴)별로 나눠 낸다.
+- **먼저 정하는 판정 규칙(측정 전에 못박는다).** 모든 카나리 런타임에서 (C1)의 "기억이 필요한 질문" 평균이 (B)보다 높고, 대조군 점수와 도구 호출 정확도가 (B)보다 낮지 않고, 층 0 의 Jev 용량·반복 일치 전제가 통과하면 효과가 있다고 본다. 하나라도 아니면 층 2 를 시작하지 않고 설계를 다시 본다. 점수 차이의 크기에는 합격선을 두지 않고 측정값을 그대로 보고한다.
+- **채점.** 정답지와 답을 PO 와 두 번째 판정자가 따로 매기고, 갈린 문항과 무작위 표본을 운영자가 읽는다. PO 는 LLM Keeper 라서 판정자만으로 점수를 확정하지 않는다. PO 는 카나리 Keeper 가 아니어야 한다. 채점은 "실렸고 읽었다 / 실렸지만 안 읽었다 / 안 실렸다"를 나눈다. 실렸는지는 평가 기록으로, 읽었는지는 답이 그 기억을 인용했는지로 본다.
+- **Jev 가 놓치는 정도.** 정답 세트에서 필요한 후보를 `not_needed` 로 보낸 수와, 기준 판정자와 Jev 가 갈리는 후보 목록(PO 가 읽는다)을 센다. 비교 기준은 Board attention 의 3.5%(§4.3)다.
+- **확신도 기록으로 바닥값이 필요한지** 본다. Jev 의 확신도 분포와 Jev·기준 판정자의 불일치가 겹치는 구간이 있을 때만 측정으로 정한 값을 RFC 로 따로 제안한다.
+- **제외한 Keeper 의 대조.** 회사 데이터 Keeper 는 recall 없이 일하는 대조군으로 같은 질문 묶음을 푼다. recall 이 없어서 잃는 점수를 본다.
+- 한계: Keeper 와 문항이 적고 회차당 한 번이라 통계가 아니라 사례다. 하네스는 깊은 세션에서 본문이 앞쪽에 묻히는 효과를 못 본다. 그 효과는 카나리에서 잰다.
 
-PO(masc-productor-owner)의 지표 초안 열둘을 보조 지표로 받는다. PO 가 낸 의견이고 판정이 아니다. 원칙 셋이 같이 왔다. 자기 채점을 하지 않는다(채점자는 다른 Keeper 나 호스트 로그). "모름"을 0 으로 뭉치지 않는다. 대리 지표(기억이 턴에 닿는가)를 최종 지표(같은 실수를 덜 반복하는가)라고 부르지 않는다.
+라이브 카나리(층 1c)는 운영 지표를 본다: 판정 호출 수, 입력 바이트, 지연, 429, 상태 비율, 블록 바이트와 세션 증가, 압축 빈도, 거절 수. 거기에 PO 의 지표를 더한다. PO 의 원칙 셋이 같이 왔다. 자기 채점을 하지 않는다. "모름"을 0 으로 뭉치지 않는다. 대리 지표(기억이 턴에 닿는가)를 최종 지표(같은 실수를 덜 반복하는가)라고 부르지 않는다.
 
 | ID | 재는 것 | 기대 |
 |---|---|---|
-| R1 | 이 턴 입력에 `Recalled_memory` 블록이 있었나 | 스위치가 꺼진 턴은 분모에서 뺀다 |
+| R1 | 이 턴 입력에 상태 줄 블록이 있었나 | 스위치가 꺼진 턴은 분모에서 뺀다 |
 | R2 | 실린 기억 중 그 턴에 인용·사용된 수와 근거 좌표 | 실렸는데 안 읽음을 직접 잰다 |
 | R3 | 안 실렸으면 했을 재조회가 줄었나 | 유일한 긍정 지표 |
 | R4 | 낡은 판정이나 대체된 기억을 인용해 낸 판정 사고 | 0 |
@@ -329,37 +325,49 @@ PO(masc-productor-owner)의 지표 초안 열둘을 보조 지표로 받는다. 
 | R9 | 300명 환산 판정 호출 수와 p99 지연 | §4.8 의 넓히기 전 조건 |
 | R10 | Jev 가 "안 고른" 수와 "못 고른" 수 | 둘을 따로 센다 |
 | R11 | 쓰기가 읽기의 두 배인 비율의 추이 | recall 뒤에도 그대로인지 |
-| R12 | 그 주에 retract·supersede 가 실제로 돈 횟수 | 가지치기 주체 확인 |
+| R12 | 그 주에 Keeper 의 retract·supersede 횟수, Librarian 이 버리거나 흡수한 사실 수 | 정리 주체를 따로 센다 |
 
-`evidence_refs` 에 인용된 기억의 수는 R2(판단에 썼나)와 따로 센다. 인용이 0 이면 이득이 상류에서만 생기고 증거 단계에서 다시 샌다.
+`evidence_refs` 에 인용된 기억의 수는 R2 와 따로 센다. 인용이 0 이면 기억은 판단에만 쓰였고, 증거를 낼 때 Keeper 가 원문을 다시 읽었다는 뜻이다. 같은 claim 을 다시 쓰는 비율(`explicit_write`)은 id 가 claim 해시라서 고쳐 쓴 경우를 놓치므로 안정 id(§5) 전에는 신호로 쓰지 않는다.
 
 ## 8. 운영자 결정
 
-- 결정됨 (2026-10-28): 판정은 LLM 판단과 Jev 판단을 적극 쓴다(D2). 처음 제안한 "in-house 레인만"을 이 결정으로 바꿨다.
-- 열려 있음 1 — Jev 로 가는 범위. 이번 턴 입력, 월드 프레임, Keeper 지침, 후보 전체가 간다. 회사 데이터를 다루는 Keeper(`kidsnote-incoming-dd-manager`, `kidsnote-job-manager`, `kidsnote-qa-hub-manager`, `kidsnote-slack-reader`)를 `[typesafeai] excluded_keepers` 에 둘지. 지금 제외 목록에는 `kidsnote-slack-context-collector` 하나만 있다. 제안은 이 넷도 두는 것이다. 그러면 이 Keeper 들은 레인만으로 판정한다. 이름 나열은 새 Keeper 가 생기면 조용히 샌다(simplifyer). Keeper 설정에 데이터 분류 속성을 두고 거기서 제외를 정하는 편이 낫다. 그런데 `board_attention` 과 `absorb_gate` 도 같은 목록을 읽어서 이 RFC 에서 바꾸지 않는다. 이 RFC 는 지금 목록을 쓰고, 속성 기반 제외는 따로 RFC 로 낸다. 2단계 레인에도 같은 제한을 둘지도 정해야 한다(kidsnote-job-manager 의견). 레인 슬롯은 모든 키퍼가 같이 쓰는 제공자라서(§4.7) 제외 Keeper 의 기억이 다른 Keeper 와 같은 슬롯으로 간다. 제안은 제외 Keeper 의 2단계를 그 Keeper 자신의 턴과 같은 제공자 슬롯으로만 보내는 것이다. 이 라우팅이 가능한지는 확인하지 않았다.
-- 열려 있음 2 — 층 2 의 hard cut. 안정 id·제목·출처 좌표·연결은 저장 계약을 바꿔서 백업 후 기억을 다시 쓴다.
-- 열려 있음 3 — 기본 검색 안의 TypeSafe 후속 판정(§2.3). 기능별 스위치를 달고 기본값을 정한다.
-- 열려 있음 4 — `constraint` category 사실을 Jev 를 거치지 않고 항상 2단계 후보로 올릴지(§2.4). 20%(485개)가 `constraint` 라서 2단계 입력이 그만큼 늘고, category 로 가르는 규칙이 하나 생긴다. 제안은 하지 않는 것이다. 오프라인 재생에서 1단계가 `constraint` 를 놓치는 것이 보이면 그때 정한다.
-- 열려 있음 5 — recall 범위. 이 RFC 는 Memory OS 의 개인 사실만 다룬다. 예약 노트와 연결 Task 문맥(wkbl-data 의견)을 넣을지. 월드 프레임에 `Scheduled_automation` 층이 있어서 어디까지 이미 닿는지 먼저 확인해야 한다. 확인하지 않았다.
-- 열려 있음 6 — MASC Goal·Task. 만들면 모든 Keeper 프롬프트의 `active_goals` 에 들어간다. 만들기 전에 묻는다.
-- 열려 있음 7 — `evidence_refs` 에 `memory:` 종류를 열지(§5.2). Task 완료 증거 스키마를 바꾸는 일이라 이 RFC 밖이다. 열 때는 basis 좌표를 같이 적게 하고 basis 없는 인용을 거절하자는 의견이 있다(masc-productor-owner). 안정 id 가 생긴 뒤에 정한다.
+- 결정됨 (2026-10-28): 판정은 LLM 판단과 Jev 판단을 적극 쓴다(D2).
+- **1 — Jev 로 가는 범위.** 이미 나가는 경로부터 정해야 한다.
+  - 확인된 경로는 기본 검색의 후속 판정이다. 요청 1,623건이 20명의 Keeper 에서 나갔고 `kidsnote-incoming-dd-manager` 49건과 `kidsnote-job-manager` 4건이 들어 있다.
+  - 켜져 있는데 전송 기록을 못 찾은 경로가 둘이다. 라이브 `[typesafeai]` 에서 `absorb_gate = true`, `librarian_preflight = true` 이고, 설정 주석은 absorb gate 가 기억을 밖으로 보낸다고 적는다(`runtime_schema.ml`).
+  - 제외 목록은 `kidsnote-slack-context-collector` 하나이고, `board_attention`·`absorb_gate`·후속 판정이 같은 목록을 읽는다.
+  - 이 RFC 의 recall 은 새로 하나가 더 늘어나는 경로이고 양이 다르다. 지금까지 나간 기억 판정 1,623건은 `state` 중앙값이 7.6KB 였다. recall 은 하루 3,793턴에 턴마다 Keeper 의 사실 전체(평균 약 100KB)와 이번 턴 입력을 보낸다(§4.8).
+  - in-house 레인도 "레인이면 안전"이 아니다. 라이브 슬롯이 `glm-coding`, `ollama_cloud`, `claude_code` CLI 라서 외부 클라우드로 간다. Keeper 별 레인 설정은 허용된 슬롯의 순서만 바꿀 수 있어서(`keeper_exact_lane_preference.mli`) 제외 Keeper 를 자기 슬롯으로만 보내려면 새 계약이 필요하다.
+  - 정할 것: kidsnote 4종(`kidsnote-incoming-dd-manager`, `kidsnote-job-manager`, `kidsnote-qa-hub-manager`, `kidsnote-slack-reader`)을 제외 목록에 둘지. 이름 나열은 새 Keeper 가 생기면 조용히 새므로 데이터 분류 속성으로 정하는 별도 RFC 를 낼지.
+  - 이 RFC 의 제안: 카나리에서 kidsnote 4종을 빼고, 제외 Keeper 는 층 1 에서 recall 을 받지 않는다(`Off`).
+- **2 — 층 2 의 hard cut.** 안정 id·제목·출처 좌표·연결은 저장 계약을 바꿔서 백업 후 기억을 다시 쓴다.
+- **3 — 기본 검색 안의 후속 판정.** 기능별 스위치를 달고 기본값을 정한다(§2.3).
+- **4 — `constraint` 사실이 Jev 를 거치지 않고 항상 고른 것으로 올라가게 할지.** 20%(466개)가 `constraint` 라서 블록이 그만큼 커지고 category 로 가르는 규칙이 하나 생긴다. 제안은 하지 않는 것이다. 오프라인 재생에서 Jev 가 `constraint` 를 `not_needed` 로 보내는 비율을 먼저 센다.
+- **5 — recall 범위.** 이 RFC 는 Memory OS 의 개인 사실만 다룬다. 예약 노트와 연결 Task 문맥을 넣을지. 월드 프레임에 `Scheduled_automation` 층이 있어서 어디까지 이미 닿는지 먼저 확인해야 한다. 확인하지 않았다.
+- **6 — MASC Goal·Task.** 만들면 모든 Keeper 프롬프트의 `active_goals` 에 들어간다. 만들기 전에 묻는다.
+- **7 — `evidence_refs` 에 `memory:` 종류를 열지.** 지금은 `artifact`, `note`, `board`, `fusion`, `task` 다섯뿐이다(`config/tools/keeper_task_done.toml:8`). 열면 basis 좌표를 같이 적게 하고 basis 없는 인용은 거절하자는 의견이 있다. 안정 id 가 생긴 뒤에 정한다.
+- **8 — in-house 레인을 실행 경로에 넣을지.** 지금 제안은 넣지 않는 것이다. 근거는 레인 지연의 실측(§4.8)이다. 넣는다면 선택지는 셋이다. (가) 전용 슬롯을 만들고 그 슬롯의 지연 분포를 잰 뒤 Jev 를 쓸 수 없는 Keeper 의 대체로 둔다. (나) 비동기로 돌려 평가 기록에만 남긴다. (다) Jev 와 직렬 또는 나란히 둔다. 결정에 필요한 값은 전용 슬롯에서의 p50·p99 지연이다. 레인 변형이 약 16개 파일이라 층 1d 가 된다.
 
 ## 9. 구현 순서
 
 1. 이 RFC 와 아래층의 기준선(연구, 증거, 스크립트).
-2. 층 1a, 1b, 1c(§5.1). 한 층에 PR 하나, 층마다 20k 토큰 이하. 운영자가 켜는 기능이라 사용 가이드 1장이 층 1b 와 같은 PR 에 들어간다(리더가 인용한 규범 `a-dababc7a`).
-3. 층 1c 의 결과를 이 RFC 에 덧붙인다. 그 값을 보고 층 2 를 정한다.
+2. 층 0. 하네스와 전제 측정. 결과를 이 RFC 에 덧붙인다.
+3. 층 1a, 1b, 1c(§5). 사용 가이드 1장은 층 1b 와 같은 PR 에 들어간다(리더가 인용한 규범 `a-dababc7a`). 이 RFC 는 문서 PR 이라 v0.65.0 후보(`940899984fbb`)에 들어가지 않는다.
+4. 층 0 과 1c 의 결과를 이 RFC 에 덧붙인다. 그 값을 보고 층 2 를 정한다.
 
 ## 10. 확신도
 
 - 문제(§2.1, §2.2의 1~4): 높음. 라이브 로그와 코드를 직접 읽고 셌다.
-- "전달 횟수가 한 원인이다"(§2.2의 3): 중간. 같은 모델 안의 비교는 Muse 에서만 뚜렷하고 Claude Code 는 0/39 다.
-- "호스트 판정이 recall 을 올린다": 중간 이하. 벤더 블로그 2건과 단독 저자 프리프린트 1건이 근거이고 우리 키퍼에서는 아직 안 쟀다. §7 이 그 측정이다.
-- "Jev 1단계가 필요한 후보를 놓치지 않는다": 모름. Board attention 에서 기존 judge 와 맞았다는 연구는 있지만(17/17, 대조군 10/10) 후보가 사실 수십~백여 개이고 질문 모양이 다르다. 오프라인 재생(§7)으로 잰다.
-- "`maybe_needed` 가 Jev 의 놓침을 줄인다": 모름. Jev 가 세 선택 질문에서 애매함을 이 선택으로 고르는지 아직 못 봤다. 오프라인 재생(§7)으로 잰다.
-- "낡은 값이 가장 큰 위험이다": 높음. Keeper 여섯이 따로 같은 위험을 짚었고 현재 사실의 24%가 14일 넘게 다시 관찰되지 않았다(§2.5). `Time_bound` 표시가 오독을 줄이는지는 모름이고 §7 의 낡은 수치 문항으로 잰다.
+- "전달 횟수가 한 원인이다"(§2.2의 3): 중간 이하. 같은 모델 안의 비교는 Muse 에서만 뚜렷하고 Claude Code 는 0/49 다.
+- "호스트 판정이 recall 을 올린다": 모름. 호스트가 고르는 방식과 모델이 도구로 당기는 방식을 맞붙여 잰 자료를 못 찾았다(연구 r2 §1). 우리 Keeper 에서도 아직 안 쟀다. 층 0 이 그 측정이다. 벤더 글(LambdaDB)은 참고만 한다(연구 r2 §3.7).
+- "Jev 가 필요한 후보를 놓치지 않는다": 모름. 비슷한 질문(Board attention)의 기준값은 3.5%이고 우리 질문과 크기가 다르다.
+- "큰 요청이 Jev 한도와 제한 시간에 들어간다": 모름. 요청 모양이 라이브에서 쓰인 적이 없고 바이트당 토큰은 이미 보낸 요청에서만 잰 값이다.
+- "Jev 가 같은 입력에 같은 답을 낸다": 모름. 벤더가 한 예/아니오 작업에서 500개 중 498개가 5번 반복에 일치했다고 적었지만 우리 질문 모양에서는 모른다.
+- "`maybe_needed` 가 Jev 의 놓침을 줄인다": 모름. Jev 가 세 선택 질문에서 애매함을 이 선택으로 고르는지 아직 못 봤다.
+- "낡은 값이 가장 큰 위험이다": 높음. Keeper 15명이 따로 같은 위험을 짚었고 현재 사실의 20.6%가 14일 넘게 다시 관찰되지 않았다. `Time_bound` 표시가 오독을 줄이는지는 모른다.
 - "연결을 따라가는 탐색이 낫다": 낮음. 제품과 논문 어디에도 비교가 없다.
-- 판정 지연과 레인 부하: 모름. 입력이 최대 약 181KB 라 측정 전에는 말할 수 없다. 호출 수와 바이트는 §4.8 에 있다.
-- 쓰기가 막힌다(§2.6): 중간. Keeper 다섯의 보고와 코드의 영수증 문구가 맞는다. 쓰기 도달률은 아직 안 쟀고 §7 의 전제 측정이 그 값이다. Librarian 레인의 실패율은 직접 셌지만(높음) `memory_recall_exact` 가 같은 비율로 실패할지는 모른다.
-- 턴 질문(`yes`·`no`·`unsure`)이 "필요 없음"과 "찾았지만 없음"을 제대로 가르는가: 모름. Jev 든 레인이든 이 질문을 얼마나 맞히는지 아직 못 봤다. §7 에서 PO 표본으로 잰다. 틀려도 Keeper 는 직접 검색으로 떨어질 수 있어서 위험은 작다.
-- Keeper 의견(§2.4): 열여섯 명의 답이고 일곱 명은 RFC 원문을 읽지 않았다고 밝혔다. 통계가 아니라 사례다. 답한 Keeper 는 스스로 나선 쪽이라 치우쳤을 수 있다. 다른 Keeper 의 답이 더 오면 §2.4 를 고친다.
+- 레인 지연: 실측은 높음(`board_attention_exact`, `librarian_exact`). 새 레인도 같은 만큼 걸린다는 것은 중간이다. 프롬프트와 대기열이 다를 수 있다.
+- 쓰기가 막히는 원인(§2.6): 중간 이하. 대기열이 비어 있어서 흡수·재작성이 원인이라는 것은 추정이다. 층 0 의 쓰기 도달 측정이 그 값이다.
+- 턴 질문이 "필요 없음"과 "찾았지만 없음"을 제대로 가르는가: 모름. 틀려도 Keeper 는 직접 검색할 수 있어서 위험은 작다.
+- 하네스를 어떻게 돌릴지: 모름. 실제 Keeper 런타임을 새 세션으로 불러 팔마다 다른 프롬프트를 넣는 길이 있는지 확인하지 않았다. 없으면 도구를 흉내 낸 약식 하네스가 되고, 그 한계를 결과와 함께 적는다.
+- Keeper 의견(§2.4): 17명의 자발적 답이고 7명은 원문을 읽지 않았다. 통계가 아니라 사례다.

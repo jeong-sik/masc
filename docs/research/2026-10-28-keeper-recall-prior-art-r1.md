@@ -11,7 +11,7 @@
 - 색인만 싣고 본문은 모델이 도구로 당기게 한 제품 대부분에서 "모델이 안 당긴다"는 보고가 있다. 우리 측정도 같은 방향이다.
 - 본문까지 호스트가 골라 싣는 곳은 OpenClaw, Hermes 의 외부 provider, 예전 Claude Code 뿐이다. 이 중 점수와 임계값으로 고르는 방식은 우리 헌법과 충돌해서 가져올 수 없다.
 - "하나를 당기면 이웃이 딸려 오는" 탐색은 어느 제품 코어에도 없다. 플러그인에 있는 것도 효과를 잰 자료가 없다.
-- 공개 벤치마크는 대화 내용을 맞히는지를 잰다. "필요할 때 기억 도구를 불렀나"를 재는 것은 없다.
+- 공개 벤치마크는 대부분 대화 내용을 맞히는지를 잰다. 도구를 쓰는 과제에서 기억 활용을 재는 것은 있다(Mem2ActBench, [r2](2026-10-28-keeper-recall-prior-art-r2.md)의 MERIT). 기억이 필요하다는 것을 스스로 알아차려 도구를 불렀는지를 따로 재는 것은 못 찾았다.
 - 우리 쪽에는 약속만 있고 코드가 없는 층이 있다. 호스트가 고르는 판정 층, recall 평가 하네스, 사실 사이의 연결이다.
 
 ## 2. 기성 제품
@@ -54,7 +54,7 @@
 | Alibaba Cloud, 2026-08-05 (블로그) | 모델이 먼저 기억 도구를 부르는 일이 드물다. 별도 Recall Agent(LLM)가 고르게 하니 오프라인 평가 회상 성공이 40%에서 77%로 올랐다 | M |
 | Letta, Anthropic memory tool | pull 이 잘 된 사례에도 첫 호출 강제가 붙어 있다 | H |
 
-우리 측정과 같은 방향이다. 목록이 항상 보이는 Skill 도구 호출이 0.60%, 기억 검색이 0.80% 였다.
+우리 측정과 같은 방향이다. 기억 검색은 도구 호출의 0.80% 였다. Skill 목록이 쓰이는지는 이 로그로 알 수 없다. 쓰는 도구(`keeper_skill`)는 호출이 0건이었고, 처음에 세었던 0.60%(1,657건)는 만드는 도구(`keeper_skill_validate`, `keeper_skill_publish`)였다.
 
 ### 3.2 계층·트리·그래프 기억
 
@@ -77,7 +77,7 @@
 - MemoryAgentBench (2507.05257, 본), Mem2ActBench (2601.19935, 초): 능동 활용은 전반적으로 약하다.
 - 편향된 기억이 도구 인자를 흔든다(Memory-Induced Tool-Drift, 2605.24941, 초). 무조건 주입하면 해가 될 수 있어서 싣기 전에 판정이 필요하다.
 
-공개 벤치마크는 "필요할 때 도구를 불렀나"를 재지 않는다. 우리가 직접 재야 한다. Claude Code 는 `claude plugin eval` 의 `tool_used: Skill` 채점기로 호출 여부를 재는데, 같은 모양을 기억 검색에 옮길 수 있다.
+공개 벤치마크는 "필요할 때 도구를 불렀나"를 따로 재지 않는다. 우리가 직접 재야 한다. Claude Code 는 `claude plugin eval` 의 `tool_used: Skill` 채점기로 호출 여부를 재는데, 같은 모양을 기억 검색에 옮길 수 있다.
 
 ## 4. 우리 구현과 대조
 
@@ -85,11 +85,11 @@
 
 | 약속 | 출처 | 상태 | 빠진 것 |
 |---|---|---|---|
-| 호스트가 턴 입력으로 기억을 고른다 | [RFC-memory-search-beyond-substring](../rfc/RFC-memory-search-beyond-substring.md) 단계 2 | 코드 없음 | 로컬 판정 lane. 대신 RFC 없이 TypeSafe 판정이 기본 검색 안에 들어갔다 |
+| 호스트가 턴 입력으로 기억을 고른다 | [RFC-memory-search-beyond-substring](../rfc/RFC-memory-search-beyond-substring.md) 단계 2 | 코드 없음 | 호스트가 고르는 판정 층. 대신 RFC 없이 TypeSafe 후속 판정이 기본 검색 안에 들어갔다 |
 | 입력 연관 recall | [RFC-memory-os-recall-selection](../rfc/RFC-memory-os-recall-selection.md) (61KB, Draft) | 타입이 하나도 없음 | 전제였던 전량 주입이 10-01~02 에 사라졌다 |
 | recall 가치를 judge 로 잰다 | [RFC-0247](../rfc/RFC-0247-memory-os-associative-graph-forgetting-brain.md) §-1 | 수식 파일과 수동 스크립트뿐 | 정답 세트와 기준선. "Value never measured"는 지금도 맞다 |
 | 회수·개정 사건을 기록한다 | [RFC-0418](../rfc/RFC-0418-memory-is-reinforced-when-it-is-retrieved-not-reobserved.md) | 기록한다. 읽는 결정 경로는 없다 | 설계상 gate 가 아니라서 맞지만, 쓸 곳이 없다 |
-| 근거 사실로 파생 결론을 잇는다 | [Memory support retraction](2026-09-01-memory-support-retraction-design-r1.md) | `keeper_memory_write` 만 쓸 수 있다 | live 에서 전체 Keeper 사실 2,434개 중 1개. 읽는 곳은 철회 계산뿐 |
+| 근거 사실로 파생 결론을 잇는다 | [Memory support retraction](2026-09-01-memory-support-retraction-design-r1.md) | `keeper_memory_write` 만 쓸 수 있다 | live 에서 현재 사실 2,334개 중 1개. 읽는 곳은 철회 계산뿐 |
 | 개인 기억에 위키 목차 같은 색인 | [RFC-keepers-see-the-wiki-table-of-contents](../rfc/RFC-keepers-see-the-wiki-table-of-contents.md) | 위키에만 있음 | 개인 기억용 색인은 어느 RFC 에도 없다 |
 | 사실 사이의 연결, 안정 id | 적대 감사 G4 ([보고서](../reports/MASC-LIBRARIAN-MEMORY-OS-ADVERSARIAL-AUDIT-2026-07-30.md)) | 없음 | 기억 id 가 claim 의 해시라 다시 쓸 때마다 바뀐다 |
 
@@ -97,7 +97,7 @@
 
 - 프롬프트에 닿는 것은 "사실 N개" 안내문(약 1.1KB)과 working-context 포인터(약 0.35KB)뿐이다.
 - 개인 기억을 호스트가 고르는 길이 없다. `Keeper_memory_select` 는 모델이 부르는 도구뿐이고 `workspace_memory_selection_enabled` 기본값은 false 다. `Keeper_workspace_memory_host_recall` 은 공용 기억용이다.
-- 기본 `keeper_memory_search` 안의 후속 기억 판정이 기억 원문을 TypeSafe(`jev-latest`)로 보낸다. 별도 스위치가 없고 레인 스위치만 본다. 검색 RFC 단계 2 의 "본문 외부 반출 금지"와 반대다. 이 방향은 [TypeSafe Jev 적용 연구](2026-09-18-typesafe-jev-masc-applicability-r1.md) §5 의 데이터 반출 위험에 해당한다.
+- 기본 `keeper_memory_search` 안의 후속 기억 판정이 기억 원문을 TypeSafe(`jev-latest`)로 보낸다. 별도 스위치가 없고 레인 스위치만 본다. [TypeSafe Jev 적용 연구](2026-09-18-typesafe-jev-masc-applicability-r1.md) §5 의 데이터 반출 위험에 해당한다.
 - 공식 클라이언트는 같은 바이트의 블록을 다시 보내지 않는다(`Prompt_block_id.resent_when_held`). 안내문이 새로 전송되는 비율이 클라이언트마다 다르다.
 
 ## 5. 확인하지 못한 것

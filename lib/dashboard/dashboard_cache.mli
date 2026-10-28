@@ -164,6 +164,16 @@ val seed_stale_if_missing :
     prepared synchronously before publication, without using the executor pool.
     An existing slot skips preparation; a slot installed concurrently wins. *)
 
+val seed_stale_from_if_missing : string -> from:string -> stale_for:float -> unit
+(** [seed_stale_from_if_missing key ~from ~stale_for] puts [from]'s current
+    value under [key] as an immediately-stale entry, only when [key] is absent
+    and [from] still holds a value that may be served. The next read of [key]
+    returns that value at once and computes [key] in the background, as for
+    {!seed_stale_if_missing}. The value keeps [from]'s prepared bytes and
+    entity tag. A key that names a version of its data (a generation) uses it
+    so that the read after a write serves the previous version instead of
+    computing the new one in the read (RFC-0474 L4d). *)
+
 val invalidate : string -> unit
 (** Remove a single cache entry.  If the key is currently being computed,
     waiting fibers are woken and will recompute. *)

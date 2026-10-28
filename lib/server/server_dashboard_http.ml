@@ -707,6 +707,37 @@ let dashboard_goals_tree_http_json ~(config : Workspace.config) : Yojson.Safe.t 
   Dashboard_goals.dashboard_goals_tree_json ~config
 ;;
 
+(* RFC-0474 L4d. The tree's key names the goal projection generation, so the
+   read after any goal or measurement write found no entry and computed the
+   tree in the read. On 2026-10-28 one such read took 9.3 s, and
+   [/api/v1/dashboard/goals] was the second read that timed out most often in
+   the TUIs' logs (30 of 126 after 06:00 KST, against their 10 s budget).
+
+   The read now carries the tree it last filled into the new generation's key
+   as a stale entry: it answers with that tree at once and the new one is
+   computed in the background. The first read after boot still computes. The
+   last filled key is per workspace, so one workspace's tree never answers for
+   another. *)
+let goals_tree_last_filled : (string * string) option Atomic.t = Atomic.make None
+
+let cached_goals_tree_payload ~(config : Workspace.config) =
+  let key =
+    Printf.sprintf "goals_tree:%s:%d" config.base_path (Goal_projection_generation.current ())
+  in
+  (match Atomic.get goals_tree_last_filled with
+   | Some (base_path, previous)
+     when String.equal base_path config.base_path && not (String.equal previous key) ->
+     Dashboard_cache.seed_stale_from_if_missing key ~from:previous
+       ~stale_for:Server_dashboard_http_core_cache.standard_cache_ttl_s
+   | Some _ | None -> ());
+  Dashboard_cache.get_or_compute_payload key
+    ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s
+    (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+       let json = dashboard_goals_tree_http_json ~config in
+       Atomic.set goals_tree_last_filled (Some (config.base_path, key));
+       json))
+;;
+
 (* Composite keeper JSON, goal collect_* helpers, and error taxonomy are
    extracted to [Server_dashboard_http_composite] (godfile decomp). *)
 include Server_dashboard_http_composite

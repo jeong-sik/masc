@@ -7,6 +7,7 @@ let str value = `String value
 type run_failure = Exited of { code : int; output : string } | Signaled of int | Timed_out | Output_exceeded
   | Unobserved of string | Unstarted of string
 type runner = window_s:float -> string -> (string, run_failure) result
+type space_name_observation = No_user_owned_match | User_owned_matches of int list | Space_names_unavailable of string
 
 (* The server waits Browser_lane.reply_timeout_sec for a command's answer,
    counted from when it was issued. A runner gets that less this margin for
@@ -203,6 +204,34 @@ let matching_spaces ~space output =
       Ok (match named with Some named -> named :: spaces | None -> spaces)) spaces (Ok [])
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ ->
     Error (Spaces_malformed "ego answered the task spaces without a list")
+
+(* Do not call taskSpace here: opening by name can create a space or refuse a
+   user-owned name. This listing is only evidence for leaving that space alone. *)
+let observe_space_name ~run ~space =
+  let script = frame ~step:"space.inspect" ~args:(obj ["name", str space]) [
+    "  const spaces = await listTaskSpaces();";
+    "  if (!Array.isArray(spaces)) throw new Error('task space listing is not an array');";
+    "  const matches = spaces.filter(row => row && row.name === args.name).map(row => ({id: row.id, createdBy: row.createdBy, ownership: row.ownership}));";
+    "  emit({ok: true, value: matches});" ] in
+  let inspected = match run ~window_s:read_window_s script with
+    | Error failure -> Error (run_failure_message failure)
+    | Ok output -> Result.map_error step_failure_message (answer output) in
+  let rec matches ids unreadable = function
+    | [] ->
+      (match List.rev ids, unreadable with
+       | _ :: _ as ids, _ -> User_owned_matches ids
+       | [], true -> Space_names_unavailable "ego listed a matching task space without a recognized id and owner"
+       | [], false -> No_user_owned_match)
+    | row :: rest ->
+      (match field "id" row, field "createdBy" row, field "ownership" row with
+       | Some (`Int id), _, Some (`String "user") when id > 0 -> matches (id :: ids) unreadable rest
+       | Some (`Int id), Some (`String ("agent" | "user")),
+         Some (`String ("agent" | "user" | "agentDelegatedToUser")) when id > 0 -> matches ids unreadable rest
+       | _ -> matches ids true rest) in
+  match inspected with
+  | Error detail -> Space_names_unavailable detail
+  | Ok (`List rows) -> matches [] false rows
+  | Ok _ -> Space_names_unavailable "ego did not list task spaces as an array"
 
 let asked run ~window_s ~step ~space ~holder ~args body = match run ~window_s (script ~step ~space ~holder ~args body) with
   | Error failure -> Error (Unanswered failure)

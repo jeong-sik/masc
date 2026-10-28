@@ -303,6 +303,7 @@ let remove_capture_directory directory = Eio_unix.run_in_systhread (fun () ->
 (* The ego connection's downloads sit beside the owned Gecko's, in the
    worker's download folder the broker publishes from. *)
 let downloads_folder = "ego"
+type connection_end = Connected | User_owned_name of { space : string; observed_at : float }
 
 let run ~env ~owner ~downloads (configuration : Browser_configuration.live_ego) work =
   let command = configuration.command in
@@ -313,7 +314,20 @@ let run ~env ~owner ~downloads (configuration : Browser_configuration.live_ego) 
   let serve_space directory ~version ~engine_version = Eio.Switch.run (fun sw ->
     let session = session ~sw ~env ~command ~directory in
     let ended outcome = Eio.Cancel.protect (fun () -> end_session session); outcome in
-    ended @@
+    (* Only opening by name can meet a user-owned space of that name; an
+       existing Space ID is attached exactly or refused by open_space. *)
+    let observation = match configuration.space with
+      | Browser_configuration.Named_space space ->
+        Some (space, Peer.observe_space_name ~run:(runner session) ~space)
+      | Existing_space _ -> None in
+    (match observation with
+     | Some (space, Peer.Space_names_unavailable detail) ->
+       Log.Server.warn "browser Add-on could not inspect ego task space %S: %s" space detail
+     | Some (_, (Peer.No_user_owned_match | Peer.User_owned_matches _)) | None -> ());
+    ended @@ match observation with
+    | Some (space, Peer.User_owned_matches _) ->
+      Ok (User_owned_name {space; observed_at=Eio.Time.now (Eio.Stdenv.clock env)})
+    | Some (_, (Peer.No_user_owned_match | Peer.Space_names_unavailable _)) | None ->
     let* peer = Peer.open_space ~space:configuration.space ~version ~capture_directory:directory ~downloads
         ~now:(fun () -> Eio.Time.now (Eio.Stdenv.clock env))
         ~run:(runner session) ~run_native:(native_runner session) in
@@ -334,7 +348,7 @@ let run ~env ~owner ~downloads (configuration : Browser_configuration.live_ego) 
     let served = match attached with
       | Error detail -> Error detail
       | Ok () ->
-        ignore (Eio.Promise.try_resolve started (Ok ()));
+        ignore (Eio.Promise.try_resolve started (Ok Connected));
         let rec serve () =
           let* command = poll B.default_timeout_sec in
           let* () = match command with
@@ -354,7 +368,7 @@ let run ~env ~owner ~downloads (configuration : Browser_configuration.live_ego) 
           if Browser_addon_owner.is_retired owner then Ok () else serve () in
         Eio.Fiber.first serve (fun () -> Eio.Promise.await stopping; Ok ()) in
     Browser_addon_owner.disconnect_live owner client_id;
-    served) in
+    Result.map (fun () -> Connected) served) in
   let connect () =
     let* version, engine_version = version ~env ~command in
     let* directory = capture_directory () in
@@ -367,8 +381,8 @@ let run ~env ~owner ~downloads (configuration : Browser_configuration.live_ego) 
     | served ->
       match served, removed () with
       | Error detail, Error removal -> Error (detail ^ "; " ^ removal)
-      | Error detail, Ok () | Ok (), Error detail -> Error detail
-      | Ok (), Ok () -> Ok () in
+      | Error detail, Ok () | Ok _, Error detail -> Error detail
+      | Ok outcome, Ok () -> Ok outcome in
   Eio.Switch.run (fun lifetime ->
     Eio.Fiber.fork ~sw:lifetime (fun () ->
       let outcome = match connect () with
@@ -381,12 +395,23 @@ let run ~env ~owner ~downloads (configuration : Browser_configuration.live_ego) 
           raise exn
         | exception exn -> Error (Printexc.to_string exn) in
       Eio.Cancel.protect (fun () ->
-        (match outcome with Ok () -> () | Error _ -> Browser_addon_owner.revoke owner);
+        let outcome = match outcome with
+          | Ok (User_owned_name {space; observed_at} as unavailable) ->
+            (match Browser_addon_owner.mark_ego_user_owned_name owner ~space ~observed_at with
+             | Error detail -> Error detail
+             | Ok () ->
+               Log.Server.warn "browser Add-on ego unavailable: task space %S is user-owned; resolve the conflict and restart the worker to recheck"
+                 space;
+               Ok unavailable)
+          | Ok Connected -> Ok Connected
+          | Error detail -> Error detail in
+        (match outcome with Ok _ -> () | Error _ -> Browser_addon_owner.revoke owner);
         ignore (Eio.Promise.try_resolve started outcome);
-        ignore (Eio.Promise.try_resolve finish outcome)));
+        ignore (Eio.Promise.try_resolve finish (Result.map (fun _ -> ()) outcome))));
     match Eio.Promise.await startup with
     | Error detail -> invalid_arg ("ego connection: " ^ detail)
-    | Ok () -> Eio.Switch.run (fun scope ->
+    | Ok (User_owned_name _) -> work ()
+    | Ok Connected -> Eio.Switch.run (fun scope ->
       Eio.Switch.on_release scope (fun () ->
         Browser_addon_owner.revoke owner;
         ignore (Eio.Promise.try_resolve stop ());

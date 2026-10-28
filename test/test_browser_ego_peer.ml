@@ -88,6 +88,31 @@ let before_effect name = function
   | Ok _ -> failf "%s was served" name
   | Error (Live.Partial_failure _ | Live.Outcome_unknown _) -> failf "%s failed after an effect" name
 
+let test_space_name_inspection_is_read_only_and_requires_evidence () =
+  let row id created ownership = obj ["id",`Int id;"createdBy",str created;"ownership",str ownership] in
+  let observe result = Peer.observe_space_name ~space:"masc" ~run:(fun ~window_s:_ script ->
+    check bool "lists without opening, claiming or finishing" true
+      (contains script "await listTaskSpaces()" && not (contains script "taskSpace(") &&
+       not (contains script ".claim(") && not (contains script ".finish("));
+    result) in
+  check bool "an agent space is not a user-owned conflict" true
+    (observe (answered (`List [row 51 "agent" "agent"])) = Peer.No_user_owned_match);
+  check bool "all matching user-owned ids survive duplicate names" true
+    (observe (answered (`List [row 51 "agent" "agent";row 36 "user" "user";row 37 "agent" "user"]))
+     = Peer.User_owned_matches [36;37]);
+  check bool "another malformed or inactive namesake cannot erase a confirmed user space" true
+    (observe (answered (`List [row 36 "user" "user";obj ["id",`Int 37];row 38 "agent" "inactive"]))
+     = Peer.User_owned_matches [36]);
+  check bool "a malformed matching row alone makes the listing inconclusive" true
+    (match observe (answered (`List [obj ["id",`Int 37]])) with
+     | Peer.Space_names_unavailable _ -> true | Peer.No_user_owned_match | Peer.User_owned_matches _ -> false);
+  check bool "an SDK failure is inconclusive" true
+    (match observe (failed "listing unavailable") with
+     | Peer.Space_names_unavailable _ -> true | Peer.No_user_owned_match | Peer.User_owned_matches _ -> false);
+  check bool "a timeout is inconclusive" true
+    (match observe (Error Peer.Timed_out) with
+     | Peer.Space_names_unavailable _ -> true | Peer.No_user_owned_match | Peer.User_owned_matches _ -> false)
+
 let test_the_space_opens_by_name_and_is_held_by_number () =
   let spaces = ref [] in
   let run ~window_s script = let sent = sent_of ~window_s script in
@@ -3060,6 +3085,7 @@ let () =
       test_case "the listing script runs under node" `Quick test_the_listing_script_runs_under_node;
       test_case "numeric Space references never create replacements" `Quick test_exact_numeric_space_resume;
       test_case "Page provenance survives document projection" `Quick test_page_provenance_survives_document_projection;
+      test_case "space inspection preserves user ownership and uncertain listings" `Quick test_space_name_inspection_is_read_only_and_requires_evidence;
       test_case "tabs are numbered by page label" `Quick test_tabs_are_numbered_by_label;
       test_case "a tab that left the listing loses its number" `Quick test_a_tab_that_left_the_listing_loses_its_number;
       test_case "an ego error is cut" `Quick test_an_ego_error_is_cut;

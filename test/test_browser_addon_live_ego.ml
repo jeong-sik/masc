@@ -250,8 +250,12 @@ def run(script,answer):
     step=lines[0].removeprefix('// masc-ego: ')
     args=json.loads(json.loads(next(l for l in lines if l.startswith('const args = JSON.parse(')).removeprefix('const args = JSON.parse(').removesuffix(');')))
     with open(root/'steps','a') as log:log.write(step+'\n')
-    if step=='space.open':
-        if mode=='in-use':answer(error='EGO_TASK_SPACE_NAME_IN_USE: masc')
+    if step=='space.inspect':
+        if mode=='inspect-fails-in-use':answer(error='listing unavailable')
+        elif mode=='user-owned':answer([{'id':36,'createdBy':'user','ownership':'user'}])
+        else:answer([])
+    elif step=='space.open':
+        if mode in ['in-use','inspect-fails-in-use']:answer(error='EGO_TASK_SPACE_NAME_IN_USE: masc')
         else:answer({'spaceId':51,'name':'SDK Space','ownership':'agent'})
     elif step=='tabs.list':
         answer([{'label':'p1','targetId':'T1','openedBy':'agent','title':'Fixture','url':'https://fixture.test/','active':True,'dialog':None,'dialogUnread':None}])
@@ -359,6 +363,17 @@ let scenario mode =
       let dispatch command = Owner.dispatch owner {W.incarnation=Owner.incarnation owner;command} in
       let work () =
         entered := true;
+        if mode = "user-owned" then (
+          check bool "the worker keeps serving" false (Owner.is_retired owner);
+          check bool "the exact unavailability is published" true
+            (match (ok (Masc.Browser_addon_observation.decode_snapshot (Owner.snapshot owner))).unavailable with
+             | [Masc.Browser_addon_observation.Ego_user_owned_name {space="masc";observed_at}] -> observed_at > 0.
+             | [] | _::_ -> false);
+          check bool "the SDK child has exited before serving" true
+            (List.for_all (fun text -> not (running (int_of_string text))) (lines (Filename.concat root "processes")));
+          check (array string) "its temporary directory is gone before serving" [||] (Sys.readdir temporary);
+          check bool "the remaining worker retires normally" true (dispatch W.Retire = W.Receipt))
+        else (
         let client = match B.connected_clients () with [client] -> client | _ -> fail "expected one ego client" in
         check string "browser" "ego_lite" (B.browser_name client.browser);
         check string "transport" "ego_task_space" (B.live_transport_to_string client.transport);
@@ -536,15 +551,15 @@ let scenario mode =
             Yojson.Safe.Util.(completed |> member "data" |> member "nativeReceipt" |> member "closedSpace" |> to_bool);
           check bool "explicit completion ran" true (finished ());
           check bool "retirement cleans a confirmed closed Space" true (dispatch W.Retire = W.Receipt));
-        check bool "no client is left" true (B.connected_clients () = [])) in
+        check bool "no client is left" true (B.connected_clients () = []))) in
       let failure = try Ego.run ~env ~owner ~downloads:(Broker.downloads_directory ~directory:root) {command; space=Browser_configuration.Named_space "masc"} work; None with
         | Invalid_argument detail | Sys_error detail -> Some detail in
       (match mode, failure with
-       | ("normal" | "retained" | "late" | "retire" | "recovery"), None -> ()
-       | ("normal" | "retained" | "late" | "retire" | "recovery"), Some detail -> failf "the connection failed: %s" detail
-       | ("no-version" | "in-use"), Some detail ->
+       | ("normal" | "retained" | "late" | "retire" | "recovery" | "user-owned"), None -> ()
+       | ("normal" | "retained" | "late" | "retire" | "recovery" | "user-owned"), Some detail -> failf "the connection failed: %s" detail
+       | ("no-version" | "in-use" | "inspect-fails-in-use"), Some detail ->
          check bool "says why" true
-           (String_util.contains_substring detail (if mode = "in-use" then "EGO_TASK_SPACE_NAME_IN_USE" else "not signed in"))
+           (String_util.contains_substring detail (if mode = "no-version" then "not signed in" else "EGO_TASK_SPACE_NAME_IN_USE"))
        | _, None -> failf "%s started" mode
        | _, Some detail -> failf "%s: %s" mode detail);
       check bool "owner input is fenced at the end" true (Owner.is_retired owner));
@@ -575,19 +590,23 @@ let scenario mode =
         (Sys.file_exists (read (Filename.concat root "captures")))
     | "late" ->
       check bool "caller work ran" true !entered;
-      check (list string) "steps" ["space.open"; "tabs.list"; "page.read"; "tabs.list"] steps;
+      check (list string) "steps" ["space.inspect"; "space.open"; "tabs.list"; "page.read"; "tabs.list"] steps;
       check int "a late answer keeps the process" 1 processes
     | "retire" ->
       check bool "caller work ran" true !entered;
-      check (list string) "steps" ["space.open"; "tabs.list"; "page.read"] steps;
+      check (list string) "steps" ["space.inspect"; "space.open"; "tabs.list"; "page.read"] steps;
       check int "no process restarts merely to finish" 1 processes
     | "no-version" ->
       check bool "caller work never ran" false !entered;
       check (list string) "no script ran" [] steps;
       check int "no session process started" 0 processes
+    | "user-owned" ->
+      check bool "caller work ran" true !entered;
+      check (list string) "only the read-only inspection ran" ["space.inspect"] steps;
+      check int "one inspected SDK process was joined" 1 processes
     | _ ->
       check bool "caller work never ran" false !entered;
-      check (list string) "only the open ran" ["space.open"] steps)
+      check (list string) "an inconclusive or stale listing preserves the open refusal" ["space.inspect";"space.open"] steps)
 
 (* An earlier case's process manager leaves a SIGCHLD handler that interrupts this wait. *)
 let rec reaped pid = match Unix.waitpid [] pid with
@@ -613,4 +632,6 @@ let () =
       test_case "a result delivered after the caller stopped waiting does not end the connection" `Quick (child "late");
       test_case "retirement stops a running command and preserves the Space" `Quick (child "retire");
       test_case "an ego that names no version fails the start" `Quick (child "no-version");
-      test_case "a space the operator holds fails the start" `Quick (child "in-use") ] ]
+      test_case "a user-owned name leaves the owner serving after SDK cleanup" `Quick (child "user-owned");
+      test_case "a stale listing preserves the SDK refusal" `Quick (child "in-use");
+      test_case "an unreadable listing preserves the SDK refusal" `Quick (child "inspect-fails-in-use") ] ]

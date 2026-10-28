@@ -5908,6 +5908,10 @@ module Browser_lane_view = struct
     | Host_not_reported
     | Host_reported of Masc.Browser_bidi_host_status.report
     | Host_report_unreadable of { detail : string; message : string option }
+  type backend_unavailability =
+    | Backends_not_reported
+    | Backends_unavailable of Masc.Browser_addon_observation.unavailable list
+    | Backends_unreadable of string
   (* A pointer gesture that was not sent, because the connection the
      screenshot came from does not serve it. [serving_listed] is whether a
      listed connection does, and [host] what was known of the BiDi host then:
@@ -5938,7 +5942,8 @@ module Browser_lane_view = struct
     | Inventory_reported of Masc.Browser_connection_inventory.issue list
     | Inventory_report_unreadable of string
   type discovered = { listed : client list; bidi_host : bidi_host;
-    inventory_report : inventory_report; automatic : automatic option }
+    inventory_report : inventory_report; automatic : automatic option;
+    unavailable : backend_unavailability }
   (* [clients] is what the last discovery answered, and [None] until one has:
      a discovery that failed leaves no list rather than an empty one, so the
      picker cannot tell an operator there is no browser when it could not ask.
@@ -5960,6 +5965,7 @@ module Browser_lane_view = struct
     unserved_gesture : unserved_gesture option;
     bidi_host : bidi_host;
     inventory_report : inventory_report;
+    unavailable : backend_unavailability;
     automatic : automatic option; selection : selection; pending_open : bool; advanced_choices : bool;
   }
 
@@ -5983,13 +5989,29 @@ module Browser_lane_view = struct
       scene_guard = None; scene_delta = None; read_view = Text_view; refresh_pending = None;
       read_continuation = No_read_continuation; unserved_gesture = None;
       bidi_host = Host_not_reported; inventory_report = Inventory_not_reported;
-      automatic = None; selection = Unbound;
+      unavailable = Backends_not_reported; automatic = None; selection = Unbound;
       pending_open = false; advanced_choices = false }
-  let switch_source source _t = { (create ()) with source;
+  let switch_source source t = { (create ()) with source; unavailable=t.unavailable;
     selection = (match source with Live -> Live_unbound | Automation | Stagehand -> Bound_explicit) }
-  let choose_automatic () = create ()
+  let choose_automatic t = { (create ()) with unavailable=t.unavailable }
   let choose_work t = { (create ()) with clients = t.clients; bidi_host = t.bidi_host;
-    inventory_report = t.inventory_report; automatic = t.automatic; selection = Work_unbound }
+    inventory_report = t.inventory_report; unavailable = t.unavailable; automatic = t.automatic; selection = Work_unbound }
+  type list_reload = Wait_until_idle | Reload_picker | Close_url_draft_then_open | Open_browser_list
+  let list_reload t = match t.load, t.client_picker, t.url_draft with
+    | Loading _, _, _ -> Wait_until_idle
+    | (Idle | No_browser | Failed _), Some _, _ -> Reload_picker
+    | (Idle | No_browser | Failed _), None, Some _ -> Close_url_draft_then_open
+    | (Idle | No_browser | Failed _), None, None -> Open_browser_list
+  let unavailable_notice t = match t.unavailable with
+    | Backends_not_reported | Backends_unavailable [] -> None
+    | Backends_unreadable _ -> Some "Browser backend status unreadable; refresh the connection list"
+    | Backends_unavailable (Masc.Browser_addon_observation.Ego_user_owned_name _ :: _) ->
+        let reload = match list_reload t with
+          | Wait_until_idle -> "When ready"
+          | Reload_picker -> "r:list"
+          | Close_url_draft_then_open -> "Esc→b:list"
+          | Open_browser_list -> "b:list" in
+        Some (reload ^ " · Ego user-owned at startup (last list); fix, Off→Inactive→On")
   let prepare_open t =
     match t.selection, t.source with
     | (Bound_automatic | Bound_explicit), (Automation | Stagehand) -> t, Open_session
@@ -6665,7 +6687,7 @@ module Browser_lane_view = struct
     | (Stagehand_browser | Automation_browser) when browser_choice_selected t choice ->
         { t with client_picker=None; selection=Bound_explicit; pending_open=false }
     | Work_browser -> choose_work t
-    | Automatic_browser -> choose_automatic ()
+    | Automatic_browser -> choose_automatic t
     | Connected_browser client -> choose_client client t
     | Stagehand_browser -> switch_source Stagehand t
     | Automation_browser -> switch_source Automation t
@@ -6676,7 +6698,7 @@ module Browser_lane_view = struct
     | Bound_automatic | Bound_explicit ->
         if browser_choice_selected before choice then None else Some Read
   let withdraw_discovery t = { t with clients = None; bidi_host = Host_not_reported;
-    inventory_report = Inventory_not_reported; automatic = None }
+    inventory_report = Inventory_not_reported; unavailable = Backends_not_reported; automatic = None }
   let bind_recommendation recommendation t =
     match recommendation.lane, recommendation.client_id with
     | Live, Some id ->
@@ -6713,14 +6735,14 @@ module Browser_lane_view = struct
         (match result with
          | Error detail ->
              { t with clients = None; bidi_host = Host_not_reported;
-               inventory_report = Inventory_not_reported; automatic = None;
+               inventory_report = Inventory_not_reported; unavailable = Backends_not_reported; automatic = None;
                client_picker = Some 0; pending_open = false; load = Failed detail }, false
-         | Ok { listed = clients; bidi_host; inventory_report; automatic } ->
+         | Ok { listed = clients; bidi_host; inventory_report; automatic; unavailable } ->
              let selected_client = Option.map (fun selected ->
                match List.find_opt (same_client selected) clients with
                | Some current -> current
                | None -> selected) t.selected_client in
-             let next = { t with clients = Some clients; selected_client; bidi_host; inventory_report; automatic;
+             let next = { t with clients = Some clients; selected_client; bidi_host; inventory_report; automatic; unavailable;
                activity_error=None;load = Idle } in
              if purpose = Choose_client then { next with client_picker = Some 0 }, false
              else match t.selection with
@@ -6911,14 +6933,25 @@ module Browser_lane_view = struct
              Inventory_report_unreadable "incomplete browser inventory has no issue details")
     | [_,_] -> Inventory_report_unreadable "invalid inventoryComplete field"
     | _::_::_ -> Inventory_report_unreadable "duplicate inventoryComplete field"
+  let decode_unavailable = function
+    | None -> Backends_not_reported
+    | Some (`List rows) ->
+        let rec read acc = function
+          | [] -> Backends_unavailable (List.rev acc)
+          | row :: rest ->
+              (match Masc.Browser_addon_observation.unavailable_of_json row with
+               | Ok item -> read (item :: acc) rest
+               | Error detail -> Backends_unreadable detail) in
+        read [] rows
+    | Some _ -> Backends_unreadable "invalid unavailable browser backends"
   let decode_discovery json =
     let* listed = decode_clients json in
     (* The same [data] the connections were read from. A server from before
        the report has no such field. *)
     let* data = field "data" json in
-    let* reported,inventory_report =
+    let* reported,inventory_report,unavailable =
       match data with
-      | `Assoc fields -> Ok (List.assoc_opt "bidiHost" fields,decode_inventory_report fields)
+      | `Assoc fields -> Ok (List.assoc_opt "bidiHost" fields,decode_inventory_report fields,List.assoc_opt "unavailable" fields)
       | _ -> Error "expected object"
     in
     (* Invalid automatic policy refuses automatic work without hiding the
@@ -6936,7 +6969,8 @@ module Browser_lane_view = struct
       | Inventory_reported (_::_),(Some {browse=(Ok _|Error _);work=(Ok _|Error _)}|None) ->
           invalid_automatic "Browser inventory is incomplete; choose an observed browser explicitly"
       | (Inventory_not_reported|Inventory_reported []),(Some {browse=(Ok _|Error _);work=(Ok _|Error _)}|None) -> automatic in
-    Ok { listed; bidi_host = decode_bidi_host reported; inventory_report; automatic }
+    Ok { listed; bidi_host = decode_bidi_host reported; inventory_report; automatic;
+      unavailable=decode_unavailable unavailable }
   let parse_client_id source json =
     let* value = field "clientId" json in
     match source, value with

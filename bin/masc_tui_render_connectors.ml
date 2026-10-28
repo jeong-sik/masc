@@ -23,8 +23,9 @@ let browser_lane_source_hint view =
        | (Located _ | Invalid _) as source ->
            Some (Masc.Browser_source_context.label source))
 
-(* Project the selected connection's current metadata and activity together, so
-   drawing and available-room calculations consume the same ephemeral rows. *)
+(* Project a backend that could not start, then the selected connection's
+   current metadata and activity, together, so drawing and available-room
+   calculations consume the same ephemeral rows. *)
 let browser_lane_connection_rows (view : Browser_lane_view.t) =
   let selected = match view.selected_client with
     | None -> []
@@ -59,7 +60,9 @@ let browser_lane_connection_rows (view : Browser_lane_view.t) =
         "  " ^ Terminal_text.single_line (Masc.Browser_connection_inventory.issue_message issue)) issues
     | Inventory_report_unreadable detail -> [Theme.warn (),
         "  Inventory report unreadable · " ^ Terminal_text.single_line detail] in
-  selected @ Option.to_list (Option.map (fun detail -> Theme.warn (),
+  let unavailable = Option.to_list (Option.map (fun message -> Theme.warn (),
+    "  " ^ Terminal_text.single_line message) (Browser_lane_view.unavailable_notice view)) in
+  unavailable @ selected @ Option.to_list (Option.map (fun detail -> Theme.warn (),
     "  Activity refresh failed · " ^ Terminal_text.single_line detail) view.activity_error) @ inventory
 
 let browser_lane_fixed_rows ~connection_rows view =

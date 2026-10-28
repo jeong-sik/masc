@@ -15,6 +15,7 @@ type t = {
   (* The live connections this worker runs, one per transport. *)
   mutable live : (B.live_transport * cleanup) list;
   mutable ego_input : (B.client_id * Browser_ego_operator.recovery) option;
+  mutable unavailable : Browser_addon_observation.unavailable list;
   mutable models : Browser_addon_models.t option;
   mutable uploads : Browser_addon_uploads.t option;
   mutable downloads : Browser_addon_downloads.t option;
@@ -32,7 +33,7 @@ let create ~incarnation =
       Error "a browser owner already exists in this process"
     else
       let retired, retire = Eio.Promise.create () in
-      let t = {incarnation;gate=Eio.Mutex.create ();phase=Serving;clients=[];automation=None;stagehand=None;extensions=None;live=[];ego_input=None;models=None;uploads=None;downloads=None;retired;retire} in
+      let t = {incarnation;gate=Eio.Mutex.create ();phase=Serving;clients=[];automation=None;stagehand=None;extensions=None;live=[];ego_input=None;unavailable=[];models=None;uploads=None;downloads=None;retired;retire} in
       B.install_activity_observer (Some (fun lane -> match t.phase,lane with
         | Serving,B.Lane_name.Live -> B.Enabled
         | Serving,B.Lane_name.Automation -> if Option.is_some t.automation then B.Enabled else B.Disabled
@@ -46,7 +47,7 @@ let admission t incarnation =
 let with_admission t incarnation run =
   Eio.Mutex.use_rw ~protect:true t.gate (fun () ->
     Result.bind (admission t incarnation) (fun () -> run ()))
-let snapshot t = `Assoc [
+let snapshot t = `Assoc ([
   "state",`String (match t.phase with Serving -> "serving" | Retired -> "retired");
   "clients",`List (List.map (fun (client : B.client_info) ->
     let space_observation=match t.ego_input with
@@ -54,6 +55,14 @@ let snapshot t = `Assoc [
       | None|Some _ -> None in
     Browser_addon_observation.publish_client client ~space_observation) (B.connected_clients ()));
   "owned_backends",Browser_addon_inventory.owned_to_json (Browser_addon_inventory.observe ())]
+  @ (match t.unavailable with [] -> [] | items ->
+      ["unavailable",`List (List.map Browser_addon_observation.unavailable_to_json items)]))
+let mark_ego_user_owned_name t ~space ~observed_at =
+  Eio.Mutex.use_rw ~protect:true t.gate (fun () -> match t.phase, t.unavailable with
+    | Retired,_ -> Error "browser owner is retired"
+    | Serving,_ when space = "" || not (Float.is_finite observed_at) || observed_at < 0. -> Error "invalid ego user-owned space observation"
+    | Serving,[] -> t.unavailable <- [Browser_addon_observation.Ego_user_owned_name {space; observed_at}]; Ok ()
+    | Serving,_ :: _ -> Error "ego unavailability is already published")
 let models_enabled t = Option.is_some t.models
 let attach_models t models =
   Eio.Mutex.use_rw ~protect:true t.gate (fun () ->

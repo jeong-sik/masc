@@ -99,6 +99,29 @@ let publisher_binds_original_client_space () = Eio_main.run (fun _ ->
     (published {base with space=Some {id=33;name="Another"}} (Some native)=`Null);
   check bool "non-Ego client cannot borrow the cache" true
     (published {base with browser=Firefox;transport=Web_extension;space=None} (Some native)=`Null))
+let unavailable_reads_back () =
+  let unavailable = Observation.Ego_user_owned_name {space="masc";observed_at=42.} in
+  let snapshot = match serving [] with
+    | `Assoc fields -> `Assoc (("unavailable",`List [Observation.unavailable_to_json unavailable]) :: fields)
+    | _ -> assert false in
+  let published = ok (Observation.read (ok (Observation.of_snapshot ~observed_at:1. snapshot))) in
+  check bool "the unavailable backend and exact reason survive publication" true (published.unavailable=[unavailable]);
+  let malformed = match snapshot with
+    | `Assoc fields -> `Assoc (("unavailable",`List [`Assoc ["backend",`String "ego"]]) :: List.remove_assoc "unavailable" fields)
+    | _ -> assert false in
+  check bool "an incomplete unavailable reason is not accepted" true (Result.is_error (Observation.decode_snapshot malformed))
+(* Per-source workers (#46395): the Ego worker that answers for the live lane
+   brings its unavailability; a doubled source answers for nothing. *)
+let merge_keeps_the_live_workers_unavailability () =
+  let unavailable = Observation.Ego_user_owned_name {space="masc";observed_at=42.} in
+  let published unavailable =
+    { (ok (Observation.read (ok (Observation.of_snapshot ~observed_at:1. (serving []))))) with unavailable } in
+  let ego = published [unavailable] and firefox = published [] in
+  let module B = Browser_lane.Backend in
+  let merged = Observation.merge ~among:[B.Ego; B.Owned_firefox] [B.Ego, Some ego; B.Owned_firefox, Some firefox] in
+  check bool "the live Ego worker's unavailability survives the merge" true (merged.unavailable=[unavailable]);
+  let doubled = Observation.merge ~among:[B.Ego; B.Ego] [B.Ego, Some ego] in
+  check bool "a doubled live source publishes no unavailability" true (doubled.unavailable=[])
 let ()=run "browser addon observation" ["publication",[
   test_case "native Space metadata reaches cached host observations" `Quick published_space_observation;
   test_case "publisher binds cache to original Space" `Quick publisher_binds_original_client_space;
@@ -106,6 +129,8 @@ let ()=run "browser addon observation" ["publication",[
   test_case "namespaced row reads back" `Quick namespaced_row_reads_back;
   test_case "retired worker is not connected" `Quick retired_is_not_connected;
   test_case "duplicate client refused" `Quick duplicate_client;
+  test_case "unavailable backend reads back" `Quick unavailable_reads_back;
+  test_case "merge keeps the live worker's unavailability" `Quick merge_keeps_the_live_workers_unavailability;
   test_case "live and retained observations agree" `Quick roundtrip;
   test_case "duplicate snapshot fields" `Quick duplicate;
   test_case "invalid time" `Quick invalid_time;

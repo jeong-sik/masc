@@ -160,8 +160,9 @@ val tool_request_archive_record_path : scope:string -> date:string -> request_id
 val tool_request_archive_body_path : scope:string -> date:string -> request_digest:string -> string
 (** Where a settled original's record and body live, relative to {!root}:
     [tool-request-owners-settled/<scope digest>/<date>/records|bodies/]. Startup
-    cleanup inventories the records but does not read archive body contents;
-    no other pass lists or reads this namespace. *)
+    cleanup inventories the records, only when a live body is not protected by a
+    live record, and does not read archive body contents; no other pass lists or
+    reads this namespace. *)
 val with_tool_request_settlement_barrier : t -> (unit -> 'a) -> ('a, string) result
 (** Serialize a read-only whole-store sweep with the record and body moves of
     cooperating settles in this process. [work] may re-enter individual scope

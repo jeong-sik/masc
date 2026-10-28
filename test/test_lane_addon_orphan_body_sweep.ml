@@ -97,6 +97,7 @@ let test_protected_live_bodies_leave_the_archive_unread () = with_store (fun roo
   let report = run store in
   Alcotest.(check int) "nothing is removed" 0 report.removed;
   Alcotest.(check bool) "the archive is not read" true (report.archive = Sweep.Archive_not_needed);
+  Alcotest.(check int) "only the live record's digest is counted" 1 report.protected_digests;
   Alcotest.(check bool) "the active original still loads" true
     ((load store ~scope:"active" ~id:"active-id").request = active))
 

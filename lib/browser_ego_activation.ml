@@ -1,7 +1,10 @@
 let script = {js|async function activateNativeTab(task, args) {
   const states = ['normal', 'minimized', 'maximized', 'fullscreen'];
+  // CDP Browser.Bounds.windowState is optional and documented as "Default to
+  // normal"; only an absent field reads as normal.
+  const stateOf = value => value.bounds.windowState === undefined ? 'normal' : value.bounds.windowState;
   const validWindow = value => value && Number.isSafeInteger(value.windowId) && value.windowId >= 0
-    && value.bounds && states.includes(value.bounds.windowState);
+    && value.bounds && states.includes(stateOf(value));
   let tab, before, origin;
   try {
     tab = (await task.tabs()).find(item => item.label === args.label);
@@ -32,23 +35,26 @@ let script = {js|async function activateNativeTab(task, args) {
   } catch (error) {
     return {before:true, error:String(error && error.message || error)};
   }
-  const restored = before.bounds.windowState === 'minimized';
+  const restored = stateOf(before) === 'minimized';
   if (restored) await task.cdp('Browser.setWindowBounds', {
     windowId:before.windowId, bounds:{windowState:'normal'}});
   await task.cdp('Target.activateTarget', {targetId:tab.targetId});
   const after = await task.cdp('Browser.getWindowForTarget', {targetId:tab.targetId});
   const active = (await task.tabs()).find(item => item.targetId === tab.targetId);
   if (!validWindow(after) || after.windowId !== before.windowId
-      || after.bounds.windowState === 'minimized' || !active || active.active !== true
+      || stateOf(after) === 'minimized' || !active || active.active !== true
       || active.label !== args.label || active.openedBy !== origin || active.url !== args.expectedUrl)
     throw new Error('native tab activation is unconfirmed; observe the same Space before another command');
   return {spaceId:task.spaceId, label:active.label, targetId:active.targetId,
     urlBefore:tab.url, url:active.url, title:active.title, active:true,
-    window:{windowId:after.windowId, stateBefore:before.bounds.windowState,
-      stateAfter:after.bounds.windowState, restored}};
+    window:{windowId:after.windowId, stateBefore:stateOf(before),
+      stateAfter:stateOf(after), restored}};
 }|js}
 
 let ( let* ) = Result.bind
+(* JavaScript's Number.MAX_SAFE_INTEGER, the bound the script's
+   Number.isSafeInteger check applies to the window id. *)
+let max_safe_integer = 9007199254740991L
 let exact names = function
   | `Assoc fields when List.sort String.compare (List.map fst fields) = List.sort String.compare names -> Ok fields
   | _ -> Error "invalid native activation observation fields"
@@ -63,7 +69,7 @@ let receipt ~space_id ~tab_id ~label ~expected_url value =
   let* title=match field "title" with `String title -> Ok title | _ -> Error "activation lacks page title" in
   let* window=exact ["windowId";"stateBefore";"stateAfter";"restored"] (field "window") in
   let* ()=match List.assoc "windowId" window with
-    | `Int id when id>=0 && Int64.of_int id<=9007199254740991L -> Ok ()
+    | `Int id when id>=0 && Int64.of_int id<=max_safe_integer -> Ok ()
     | _ -> Error "activation lacks native window identity" in
   let state = function
     | `String "normal" -> Ok `Normal | `String "minimized" -> Ok `Minimized

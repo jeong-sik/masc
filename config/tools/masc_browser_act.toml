@@ -147,7 +147,7 @@ description = "block_requests: exact lowercase host names or IPv4 addresses such
 name = "controlOptions"
 type = "object"
 additional_properties = false
-description = "wait_for_control only: native SDK interval and timeout in positive finite milliseconds; omit to retain SDK defaults. Requires an agent-owned Ego Space and exact clientId. Never takes over user control, completes a login handoff or clears uncertain input release."
+description = "wait_for_control only: native SDK interval and timeout in positive finite milliseconds. The timeout must fit the action's reply window: a longer one is refused before the wait starts, and an omitted one waits for that window; an omitted interval keeps the SDK default. Requires an agent-owned Ego Space and exact clientId. Never takes over user control, completes a login handoff or clears uncertain input release."
 
 [[params.params]]
 name = "interval"

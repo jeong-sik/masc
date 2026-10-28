@@ -43,8 +43,9 @@ const task={spaceId:51,
   if(method==='Browser.getWindowForTarget'){
    if(params.targetId!=='T1')throw Error('foreign target');
    lookups++;
+   const windowState=lookups>1 && config.changeDuringLookup==='invalidWindow' ? 'future-state' : state;
    return {windowId:(activated && config.foreignWindow) || (lookups>1 && config.changeDuringLookup==='window') ? 8 : 7,
-    bounds:{windowState:lookups>1 && config.changeDuringLookup==='invalidWindow' ? 'future-state' : state}};
+    bounds:config.omitWindowState && windowState==='normal' ? {} : {windowState}};
   }
   if(method==='Browser.setWindowBounds'){
    if(params.windowId!==7 || params.bounds.windowState!=='normal')throw Error('foreign restore');
@@ -82,6 +83,12 @@ let test_native_activation () =
       (List.length (List.filter ((=) (str "Target.activateTarget")) (methods result))))
     (List.concat_map (fun origin -> List.map (fun state -> origin,state)
       ["normal";"minimized";"maximized";"fullscreen"]) ["agent";"unknown"]);
+  List.iter (fun state ->
+    let result=execute (obj ["origin",str "agent";"state",str state;"omitWindowState",`Bool true]) in
+    let window=field "window" (ok (receipt (field "value" result))) in
+    check bool "a CDP window without the optional windowState is a normal window" true
+      (field "stateBefore" window=str state && field "stateAfter" window=str "normal"))
+    ["normal";"minimized"];
   List.iter (fun config ->
     let result=execute config in
     check bool "wrong Page/URL refuses before native commands" true

@@ -43,7 +43,9 @@ type interaction =
     captcha; [Take_over] takes it back, once the operator has said they are
     done. Nothing checks that they said so. *)
 type control_wait = { interval_ms : float option; timeout_ms : float option }
-(** Positive finite SDK milliseconds. Missing values keep SDK defaults. *)
+(** Positive finite SDK milliseconds. A missing timeout becomes the action's
+    reply window at the Ego peer, which refuses a longer one; a missing
+    interval keeps the SDK default. *)
 val control_wait_to_json : control_wait -> Yojson.Safe.t
 type control = Hand_off | Take_over | Space_status | Finish_space of string list | Wait_for_control of control_wait
   | Adopt_tab of { tab_id : int; label : string option }

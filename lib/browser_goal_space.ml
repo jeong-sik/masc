@@ -78,6 +78,21 @@ let bind config ~goal_id ~addon_instance_id ~space ~actor =
           Ok {binding;created=true;mirror_error=committed.mirror_error}) with
     | Ok result -> result
     | Error error -> Error (Unavailable (Masc_domain.masc_error_to_string error)))
+type unbinding = { removed : t option; mirror_error : string option }
+let unbind config ~goal_id =
+  with_goal config ~goal_id (fun () ->
+    match Workspace.with_file_lock_r config (path config) (fun () ->
+      let* bindings = read config in
+      match List.partition (fun binding -> binding.goal_id = goal_id) bindings with
+      | [], _ -> Ok {removed=None;mirror_error=None}
+      | [existing], rest ->
+        let* committed = Workspace.write_json_commit_result config (path config)
+          (`Assoc ["bindings",`List (List.map to_json rest)])
+          |> Result.map_error (fun error -> Unavailable error) in
+        Ok {removed=Some existing;mirror_error=committed.mirror_error}
+      | _ :: _ :: _, _ -> Error (Invalid "duplicate Goal in binding store")) with
+    | Ok result -> result
+    | Error error -> Error (Unavailable (Masc_domain.masc_error_to_string error)))
 let resolve binding ~addon_instance_id clients =
   if addon_instance_id <> binding.addon_instance_id then
     Error (Conflict "Goal Space belongs to a different browser Add-on; no browser command was dispatched")

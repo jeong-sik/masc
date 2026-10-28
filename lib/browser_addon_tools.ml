@@ -208,6 +208,7 @@ let prepare ~upload_paths tool json =
         | (Automatic|Exact (B.Live_route _|Automation_route|Stagehand_route)),(None|Some _) -> Ok () in
       prepared request Raw (B.Page_goto {url;tab_id=request.tab_id})
 type metadata_request = Connections | Bind_goal of {goal_id:string;client_id:B.client_id} | Goal_status of string
+  | Unbind_goal of string
 type request = Browser of prepared | Metadata of metadata_request
 let prepare_request ~upload_paths tool json =
   let* _=Lane_addon_action.canonical json in
@@ -218,7 +219,7 @@ let prepare_request ~upload_paths tool json =
        | Some (`String "connections") -> Ok (Metadata Connections)
        | None|Some _ -> Error "BrowserTabs mode must be connections; omit mode for tab discovery")
   | C.Session,`Assoc supplied when List.mem (List.assoc_opt "action" supplied)
-      [Some (`String "bind_goal");Some (`String "goal_status")] ->
+      [Some (`String "bind_goal");Some (`String "goal_status");Some (`String "unbind_goal")] ->
       let* goal_id=match List.assoc_opt "goalId" supplied with
         | Some (`String value) when String.trim value<>"" -> Ok value
         | None|Some _ -> Error "goalId must be nonblank text" in
@@ -237,6 +238,9 @@ let prepare_request ~upload_paths tool json =
        | Some (`String "goal_status") ->
          let* _=fields ["action";"goalId"] json in
          Ok (Metadata (Goal_status goal_id))
+       | Some (`String "unbind_goal") ->
+         let* _=fields ["action";"goalId"] json in
+         Ok (Metadata (Unbind_goal goal_id))
        | None|Some _ -> Error "unknown Goal Space operation")
   | (C.Session|Tabs|Read|Interact|Act|Instruct|Goto),_ ->
       prepare ~upload_paths tool json |> Result.map (fun value -> Browser value)
@@ -336,6 +340,18 @@ let handle ?initial_goal_ids ?upload_paths ~config ~access ~principal ~reserved 
                | Ok binding -> Tool_result.make_ok ~tool_name ~start_time ~data:(`Assoc [
                    "goalId",`String goal_id;"browserGoal",(match binding with None -> `Null
                      | Some value -> Browser_goal_space.to_json value);"observation",`String "stored_binding"]) ())
+          | Metadata (Unbind_goal goal_id) ->
+              (match principal with
+               | Lane_addon_call_context.Anonymous -> refuse "browser calls require verified host authority"
+               | Keeper _|Authenticated_agent _|Host_actor _|Operator ->
+              match Browser_goal_space.unbind config ~goal_id with
+               | Error error -> refuse (Browser_goal_space.error_message error)
+               | Ok unbound -> Tool_result.make_ok ~tool_name ~start_time ~data:(`Assoc [
+                   "goalId",`String goal_id;
+                   "removed",(match unbound.removed with None -> `Null
+                     | Some value -> Browser_goal_space.to_json value);
+                   "actor",`String (Lane_addon_call_context.actor_label principal);
+                   "mirrorError",(match unbound.mirror_error with None -> `Null|Some e -> `String e)]) ())
           | Browser request ->
             match initial_goal_space initial_goal_ids config request with
             | Error error -> refuse error

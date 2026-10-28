@@ -1517,10 +1517,23 @@ let take_over t =
            "egoPage",Browser_surface.ego_page_to_json page])))
 
 (* SDK-owned polling of this agent-owned Space only. It does not change the
-   owner or settle an earlier uncertain input, including after a dialog. *)
-let wait_for_control t options =
+   owner or settle an earlier uncertain input, including after a dialog.
+   The native runner has no reply window of its own, and the Keeper stops
+   waiting once this action's window ends. The SDK timeout therefore stays
+   inside that window: a longer request is refused before the wait starts,
+   and an omitted one becomes the window, since the SDK's own default is
+   not declared. *)
+let wait_for_control t (options : Browser_lane.Action.control_wait) =
+  let limit_ms = window_s (Browser_lane.Page_act (Browser_lane.Action.Control
+    (Browser_lane.Action.Wait_for_control options))) *. 1000. in
+  match options.timeout_ms with
+  | Some requested when requested > limit_ms ->
+    Error (Live.Before_effect (Printf.sprintf
+      "controlOptions.timeout %.0f ms exceeds this action's %.0f ms reply window" requested limit_ms))
+  | Some _ | None ->
+  let bounded = {options with timeout_ms = Some (Option.value options.timeout_ms ~default:limit_ms)} in
   t.space_observation <- None;
-  let args=obj ["controlOptions",Browser_lane.Action.control_wait_to_json options] in
+  let args=obj ["controlOptions",Browser_lane.Action.control_wait_to_json bounded] in
   match run_native_step t ~step:"space.wait_for_control" ~args (String.concat "\n" [
     "    await task.waitForControl(args.controlOptions);";
     "    emit({ok: true, value: {spaceId: task.spaceId, spaceName: task.name, controlAvailable: true}});" ]) with

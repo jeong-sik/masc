@@ -68,7 +68,8 @@ let terminal_phase record (settled : settled) =
   if settled.stdout.byte_length<>0L || settled.stderr.byte_length<>0L then observed else
   let boundary=settled.physical_exit.boundary in
   match boundary.control with
-  | G.Open -> observed
+  (* A failed channel may have cut the gate evidence short; only EOF backs a non-start. *)
+  | G.Open | G.Failed _ -> observed
   | G.Ended -> (match boundary.preparation with
       | G.Rejected _ -> P.Not_started P.Launch_rejected
       | G.Pending | Ready -> (match boundary.decision with

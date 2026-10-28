@@ -112,15 +112,17 @@ let read_physical value =
 let terminal gate phase physical_exit =
   match phase with
   | P.Termination_observed actual when actual=physical_exit -> Ok (Observed actual)
-  | P.Not_started P.Launch_rejected when gate.control=G.Ended ->
-    (match gate.preparation with Rejected _ -> Ok (Never_started P.Launch_rejected)
-     | Pending | Ready -> invalid ())
-  | P.Not_started P.Cancelled_before_activation when gate.control=G.Ended ->
-    (match gate.decision with
-     | G.Undecided | Abort_requested -> Ok (Never_started P.Cancelled_before_activation)
-     | Activate_requested -> invalid ())
-  | P.Queued | Starting | Running | Finished _ | Termination_observed _
-  | Not_started (Cancelled_before_activation | Launch_rejected) -> invalid ()
+  (* Only EOF on the private gate channel backs a non-start. *)
+  | P.Not_started P.Launch_rejected ->
+    (match gate.control, gate.preparation with
+     | Ended, Rejected _ -> Ok (Never_started P.Launch_rejected)
+     | Ended, (Pending | Ready) | (Open | Failed _), (Pending | Ready | Rejected _) -> invalid ())
+  | P.Not_started P.Cancelled_before_activation ->
+    (match gate.control, gate.decision with
+     | Ended, (G.Undecided | Abort_requested) -> Ok (Never_started P.Cancelled_before_activation)
+     | Ended, Activate_requested
+     | (Open | Failed _), (G.Undecided | Activate_requested | Abort_requested) -> invalid ())
+  | P.Queued | Starting | Running | Finished _ | Termination_observed _ -> invalid ()
 let decode_payload json =
   let* values=fields ["status";"physical_status";"launch_id";"stdin";"gate"] json in
   let* status=P.response_of_json (List.assoc "status" values) |> Result.map_error (fun e -> Codec_error e) in

@@ -27375,6 +27375,9 @@ and is loaded on demand through keeper_skill.
        | Some (Mouse_wheel _) when Option.is_some wheel_reader ->
            Option.iter (apply_clamped_scroll state) wheel_reader
        | Some (Mouse_wheel _) when queue_play_owner = Wait_for_frame -> ()
+       (* Marked panel controls and its reader wheel were handled above.
+          Unmarked gestures cannot use stale geometry from a covered view. *)
+       | Some (Mouse_left_release _ | Mouse_wheel _) when panel_owns_input -> ()
        (* The wheel over the Activity pane scrolls the pane. The pane is drawn
           under no modal (render reserves it no columns while one is up), so
           the hit test alone says whether the notch is the pane's. *)

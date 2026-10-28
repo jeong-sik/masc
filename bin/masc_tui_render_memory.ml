@@ -1014,6 +1014,14 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
             else Masc_tui_message_layout.count_noun snapshot.mhs_total_librarian_failures "failure"
               ^ " since server start")
          ]
+       @ (if snapshot.mhs_warn_alerts + snapshot.mhs_error_alerts = 0
+              && snapshot.mhs_total_vision_ingest_errors = 0 then []
+          else labelled (text "알림:" "Alerts:")
+            [ Printf.sprintf (if ko then "보고된 경고 %d / 오류 %d (이력 포함 가능)" else "reported warnings %d / errors %d (may include history)")
+                snapshot.mhs_warn_alerts snapshot.mhs_error_alerts
+            ; Printf.sprintf (if ko then "보고된 이미지 수집 오류 %d건" else "reported image ingestion errors %d")
+                snapshot.mhs_total_vision_ingest_errors
+            ])
   in
   total @ readings
 
@@ -1112,12 +1120,29 @@ let memory_overview_reading ~cols (state : state) =
            ((if ko then "선택한 키퍼 · " else "Selected Keeper · ") ^ keeper.mkh_keeper_id)
            context.rows]
   in
+  let fleet_alerts = match state.memory_health with
+    | None -> []
+    | Some snapshot ->
+        List.concat_map (fun keeper ->
+          List.map (fun alert ->
+            let history = if Masc.Tui_decode_memory_health.memory_alert_is_history alert.ma_code
+              then (if ko then "이력 " else "history ") else "" in
+            let severity = match Masc.Tui_decode_memory_health.memory_alert_severity alert.ma_code with
+              | `Warn -> if ko then "경고" else "warning"
+              | `Error -> if ko then "오류" else "error" in
+            Printf.sprintf "%s · %s%s · %s — %s"
+              (Terminal_text.single_line keeper.mkh_keeper_id) history severity
+              (Terminal_text.single_line alert.ma_label) (Terminal_text.single_line alert.ma_message))
+            keeper.mkh_alerts) snapshot.mhs_keepers
+  in
   Masc_tui_detail_reading.create
     ~title:(if ko then "메모리 관측 상세" else "Memory observation details")
     ([section (if ko then "전체 메모리" else "Fleet memory")
         (observed @ memory_fleet_header_rows ~cols state)]
      @ (if warnings = [] then [] else
           [section (if ko then "조회 경고" else "Read warnings") warnings])
+     @ (if fleet_alerts = [] then [] else
+          [section (if ko then "전체 키퍼 알림" else "Fleet Keeper alerts") fleet_alerts])
      @ keeper_section)
 
 (* A single row replaces an unfittable fleet header. It leads with any
@@ -1136,6 +1161,11 @@ let memory_compact_fleet_row ~cols (state : state) =
                [Printf.sprintf (if ko then "원본 읽기 실패 %d명" else "source read errors: %d keepers") snapshot.mhs_total_source_read_errors] else [])
           @ (if snapshot.mhs_total_librarian_failures > 0 then
                [Printf.sprintf (if ko then "서버 시작 후 Librarian 실패 %d건" else "Librarian failures since server start: %d") snapshot.mhs_total_librarian_failures] else [])
+          @ (if snapshot.mhs_warn_alerts + snapshot.mhs_error_alerts > 0 then
+               [Printf.sprintf (if ko then "보고된 알림 %d건 (이력 포함 가능)" else "%d reported alerts (may include history)")
+                  (snapshot.mhs_warn_alerts + snapshot.mhs_error_alerts)] else [])
+          @ (if snapshot.mhs_total_vision_ingest_errors > 0 then
+               [Printf.sprintf (if ko then "이미지 수집 오류 %d건" else "%d image ingestion errors") snapshot.mhs_total_vision_ingest_errors] else [])
           @ (if snapshot.mhs_total_librarian_continuity_unmeasured > 0 then
                [Printf.sprintf (if ko then "연속성 미측정 %d명" else "continuity unmeasured: %d keepers") snapshot.mhs_total_librarian_continuity_unmeasured] else [])
           @ (if snapshot.mhs_total_librarian_continuity_unread_atoms > 0 then
@@ -1153,8 +1183,11 @@ let memory_compact_fleet_row ~cols (state : state) =
   in
   let full = hint ^ detail in
   if Message_layout.display_width full <= framed_inner_width cols then full
-  else hint ^ (if attention_present then (if ko then "주의 있음" else "attention")
-               else (if ko then "관측 상세" else "see reading"))
+  else
+    let fallback = hint ^ (if attention_present then (if ko then "주의 있음" else "attention")
+                            else (if ko then "관측 상세" else "see reading")) in
+    if Message_layout.display_width fallback <= framed_inner_width cols then fallback
+    else if attention_present then "  !v" else "  v"
 
 type memory_overview_projection =
   { header : string list

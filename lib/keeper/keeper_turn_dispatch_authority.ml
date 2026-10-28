@@ -1,11 +1,13 @@
-type token =
-  { mutable active : bool
-  ; mutable validator : (unit -> (unit, string) result) option
-  }
+type state =
+  | Awaiting_validator
+  | Active of (unit -> (unit, string) result)
+  | Closed
+
+type token = state Atomic.t
 
 let run f =
-  let token = { active = true; validator = None } in
-  let invalidate () = token.active <- false in
+  let token = Atomic.make Awaiting_validator in
+  let invalidate () = Atomic.set token Closed in
   match f token with
   | value ->
     invalidate ();
@@ -15,22 +17,19 @@ let run f =
     raise exn
 ;;
 
-let install token validator =
-  if not token.active
-  then Error "keeper turn dispatch authority is no longer active"
-  else
-    match token.validator with
-    | Some _ -> Error "keeper turn dispatch authority is already installed"
-    | None ->
-      token.validator <- Some validator;
-      Ok ()
+let rec install token validator =
+  match Atomic.get token with
+  | Closed -> Error "keeper turn dispatch authority is no longer active"
+  | Active _ -> Error "keeper turn dispatch authority is already installed"
+  | Awaiting_validator ->
+    if Atomic.compare_and_set token Awaiting_validator (Active validator)
+    then Ok ()
+    else install token validator
 ;;
 
 let validate token =
-  if not token.active
-  then Error "keeper turn dispatch authority is no longer active"
-  else
-    match token.validator with
-    | None -> Error "keeper turn dispatch authority is not installed"
-    | Some validator -> validator ()
+  match Atomic.get token with
+  | Closed -> Error "keeper turn dispatch authority is no longer active"
+  | Awaiting_validator -> Error "keeper turn dispatch authority is not installed"
+  | Active validator -> validator ()
 ;;

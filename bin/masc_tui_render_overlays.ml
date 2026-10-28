@@ -859,6 +859,105 @@ let answering_selected_target (state : state) ~lines =
     | Some line -> line.Masc_tui_answering.target
     | None -> None
 
+let queue_panel_detail_lines state (panel : queue_panel) ~cols =
+  let module Inbox = Masc_tui_queue_inspection in
+  let selected = Option.bind panel.qp_selected (fun id ->
+    List.find_opt (fun (item : Inbox.item) -> item.id = Some id)
+      (queue_panel_items state panel)) in
+  let content = match panel.qp_selected, selected with
+    | Some id, Some item ->
+      let identity = match id with
+        | Inbox.Local_message id -> "Local message: " ^ id
+        | Server_message id -> "Queued message: " ^ id
+        | Running_message id -> "Running message: " ^ id
+        | Event (reference, revision) ->
+          Printf.sprintf "Event: %s · incarnation %Ld" reference revision
+        | Schedule (id, instance) -> "Schedule: " ^ id ^ " · instance " ^ instance in
+      identity ^ "\n\n" ^ item.text
+    | Some _, None -> "The selected item is no longer in this snapshot. Return to the list and refresh."
+    | None, _ -> "No item is selected." in
+  Message_layout.wrap_body ~max_cells:(max 1 (framed_inner_width cols - 2))
+    ~sanitize:Terminal_text.single_line content
+
+let queue_panel_detail_viewport state panel =
+  let terminal_rows, cols = get_terminal_size () in
+  let count = List.length (queue_panel_detail_lines state panel ~cols) in
+  let budget = surface_chrome_budget state ~terminal_rows in
+  let height = if count > budget then max 0 (budget - 1) else budget in
+  count, height
+
+let render_queue_panel (state : state) (panel : queue_panel) =
+  let terminal_rows, cols = get_terminal_size () in
+  if panel.qp_detail then
+    let lines = queue_panel_detail_lines state panel ~cols in
+    surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols
+      ~surface_key:"keeper-queue-detail" ~frame:Chrome_overlay
+      ~title:(screen_title " MASC Queue item" ^ "  " ^ Terminal_text.single_line panel.qp_keeper)
+      ~hints:"↑/↓:scroll  PgUp/PgDn:page  Esc:return"
+      ~body:(fun ~budget c ->
+        let count = List.length lines in
+        let height = if count > budget then max 0 (budget - 1) else budget in
+        let scroll = Masc_tui_scroll.normalize ~count ~height panel.qp_detail_scroll in
+        List.iteri (fun index line ->
+          if index >= scroll && index < scroll + height then c.push ("  " ^ line)) lines;
+        Option.iter c.push (overlay_window_row ~scroll ~height count))
+  else
+  let items = queue_panel_items state panel in
+  let selected_index =
+    List.find_index (fun (item : Masc_tui_queue_inspection.item) ->
+      Option.is_some item.id && item.id = panel.qp_selected) items in
+  let status = if not (server_authority_ready state) then
+    "Workspace unconfirmed; any receipt is from the previous observation"
+  else match panel.qp_reading, panel.qp_notice with
+    | Queue_loading, _ -> "Reading or sending…"
+    | (Queue_current | Queue_unavailable), Some (Queue_info text | Queue_error text) -> Terminal_text.single_line text
+    | Queue_current, None ->
+      (match panel.qp_observation with
+       | Some {waiting=Ok _; operations=Ok _} -> "Queue read · r refreshes"
+       | Some {waiting=Ok _; operations=Error _} -> "Inventory read · server messages unavailable"
+       | Some {waiting=Error _; operations=Ok _} -> "Server messages read · inventory unavailable"
+       | Some {waiting=Error _; operations=Error _} -> "Both server reads unavailable · r retries"
+       | None -> "Queue observation unavailable · r retries")
+    | Queue_unavailable, None -> "Snapshot unavailable · r retries" in
+  let hints = match panel.qp_selected with
+    | Some (Masc_tui_queue_inspection.Local_message _) ->
+      "↑/↓:select  Enter:read  n:first locally  l:last locally  r:refresh  Esc:close"
+    | Some (Masc_tui_queue_inspection.Server_message _) ->
+      "↑/↓:select  Enter:read  n:run next  l:move last  r:refresh  Esc:close"
+    | Some (Masc_tui_queue_inspection.Event _) ->
+      "↑/↓:select  Enter:read  n:immediate priority  l:low priority  r:refresh  Esc:close"
+    | Some (Masc_tui_queue_inspection.Running_message _ | Schedule _) | None ->
+      "↑/↓:select  Enter:read  PgUp/PgDn:page  r:refresh  Esc:close" in
+  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols
+    ~surface_key:"keeper-queue" ~frame:Chrome_overlay
+    ~title:(screen_title " MASC Queue" ^ "  " ^ Terminal_text.single_line panel.qp_keeper)
+    ~hints
+    ~body:(fun ~budget c ->
+      if budget > 0 then c.push ("  " ^ status);
+      if budget > 1 then c.push "  Message priority waits for the current turn; event urgency is not exact ordering.";
+      (match panel.qp_receipt with
+       | Some (Queue_action_receipt (Queue_info text) | Queue_read_receipt text) when budget > 2 ->
+         c.push ("  " ^ Terminal_text.single_line text)
+       | Some (Queue_action_receipt (Queue_error text)) when budget > 2 ->
+         c.push ("  " ^ Theme.warn () ^ Terminal_text.single_line text ^ Ansi.reset)
+       | Some _ | None -> ());
+      let height = max 0 (budget - queue_panel_fixed_rows panel) in
+      let count = List.length items in
+      let scroll = Masc_tui_scroll.normalize ~count ~height panel.qp_scroll in
+      let scroll = match selected_index with
+        | Some cursor when height > 0 -> Masc_tui_scroll.ensure_visible ~cursor ~height scroll
+        | Some _ | None -> scroll in
+      List.iteri (fun index (item : Masc_tui_queue_inspection.item) ->
+        if index >= scroll && index < scroll + height then begin
+          let selected = item.id <> None && item.id = panel.qp_selected in
+          let marker = if selected then "› " else "  " in
+          let text = match String.index_opt item.text '\n' with
+            | None -> item.text
+            | Some index -> String.sub item.text 0 index in
+          let text = Terminal_text.single_line text in
+          c.push (marker ^ (if selected then Theme.info () else "") ^ text ^ Ansi.reset)
+        end) items)
+
 (* The answering overlay, through the overlay contract. Drawn by hand, a short
    list closed the box right under the preview panel, so the footer stood on
    row 10 of a 26-row terminal. The list now fills its height, the preview

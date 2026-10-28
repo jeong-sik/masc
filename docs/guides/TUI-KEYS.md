@@ -413,7 +413,7 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `Ctrl-U` | clear the draft |
 | `Ctrl-K / Ctrl-P` | cancel / edit the last queued line |
 | `F9` | fold or expand this Keeper's scheduled Jobs, pending occurrences, holds and latest result |
-| `Ctrl-T` | inspect and manage waiting turns |
+| `Ctrl-T` / `/queue` | open the Keeper queue panel; select with Up/Down, read with Enter, change supported priorities with `n`/`l` |
 | `PgUp/PgDn` | scroll history by a page |
 | `Ctrl-R` | cycle reasoning hidden / folded / full |
 | `Ctrl-D` | cycle compact / results / full tool detail |

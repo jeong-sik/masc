@@ -672,13 +672,16 @@ let frame_choice (state : state) ~terminal_rows =
       else if state.context_inspector_open then `Context
       else if state.keeper_deletions_open then `Keeper_deletions
       else if state.help_open then `Help
-      else if state.agenda_open then `Agenda
-      else if state.answering_open then `Answering
-      else if state.patch_modal_open then `Patch
-      else if state.link_modal_open then `Link
-      else match state.client_detail with
-        | Some client -> `Client_detail client
-        | None -> `Surface
+      else match state.queue_panel with
+      | Some panel -> `Queue panel
+      | None ->
+        if state.agenda_open then `Agenda
+        else if state.answering_open then `Answering
+        else if state.patch_modal_open then `Patch
+        else if state.link_modal_open then `Link
+        else match state.client_detail with
+          | Some client -> `Client_detail client
+          | None -> `Surface
 
 let render ~home (state : state) =
   (* Marks number the targets of this frame alone. *)
@@ -729,6 +732,9 @@ let render ~home (state : state) =
     let frame, clamped = render_agenda state in (frame, clamped, None, Overlay_drawn)
   | `Answering ->
     let frame, clamped = render_answering state in (frame, clamped, None, Overlay_drawn)
+  | `Queue panel ->
+    let frame, clamped = Masc_tui_render_overlays.render_queue_panel state panel in
+    (frame, clamped, None, Overlay_drawn)
   | `Patch ->
     let frame, clamped = render_patch_modal state in (frame, clamped, None, Overlay_drawn)
   | `Link ->

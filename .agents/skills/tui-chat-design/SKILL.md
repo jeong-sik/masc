@@ -49,6 +49,7 @@ Keeper 는 `keeper_skill` 을 같은 `identity` 에 `file = "references/<파일>
 | Ctrl-D | compact → results → full → compact | `Tools_compact` |
 | Ctrl-R | folded → full → hidden → folded | `Reasoning_folded` |
 | Ctrl-S | 턴 상세 접기/펼치기 | 기존 상태 유지 |
+| Ctrl-T / `/queue` | 현재 Keeper 큐 화면 열기 | 대화와 초안 보존 |
 | F9 | 현재 Keeper 예약 Job 상태 요약/목록 | 대기·보류·최근 결과 한 줄 |
 
 기본 설정을 알리는 `metadata:off`, `journal:off` 배지를 붙이지 않는다.
@@ -82,6 +83,13 @@ Keeper 는 `keeper_skill` 을 같은 `identity` 에 `file = "references/<파일>
 ## 입력 주변
 
 입력창 주변의 진행·질문·조회 규칙은 세 파일로 나눠 둔다. 위 표의 `입력 주변:` 행을 본다.
+
+큐 화면은 독립 조회의 실패와 변경 영수증을 분리해 표시한다. 선택은 실제 메시지 ID,
+이벤트 원본과 incarnation, 또는 예약 ID와 instance에 결속한다. 로컬 이동은 기존
+전송·편집·보류 권한을 유지한다. 서버 메시지의 다음 순서는 현재 턴을 중단하지 않고,
+이벤트의 immediate/low는 정확한 실행 순서가 아닌 긴급도다. 미래 예약은 예정 시각을
+앞당기는 기능 없이 읽기 전용으로 표시한다. 그룹의 모든 정확한 주소가 확인된 경우에만
+개별 회차를 선택한다. Enter 상세는 본문과 첨부 정보를 보여 주며, Esc는 초안을 보존한다.
 
 ## 검증
 

@@ -1796,7 +1796,27 @@ hands back the line that is waiting rather than stepping over it into what was
 already delivered. The draft is put aside on the first step back and returned
 on the way forward past the newest.
 
-`/queue` reads the selected Keeper's server inventory. Its counts separate
+`Ctrl-T` or `/queue` opens the selected Keeper's queue in a separate panel,
+leaving the chat and draft in place. Use Up/Down to select an item, Enter to
+read its identity and available detail (including queued message text and
+attachment information), Page Up/Down to browse
+the list, `r` to refresh, and Esc to return. A selected local message can be
+moved first or last among that Keeper's unsent messages with `n` or `l`;
+existing edit, admission and retained-input holds still apply. Moving it first
+does not claim it is ahead of messages already accepted by the server.
+
+For an accepted server message, `n` requests the next position and `l` moves it
+to the end. The server authorizes changes to the operator's own messages. A
+next request does not interrupt the current turn. For a pending event, `n` and
+`l` set immediate and low urgency respectively; urgency is not an exact queue
+position. A grouped event exposes individual occurrences only when every exact
+member address is available. Running work and future scheduled jobs can be
+inspected, but this panel cannot run a future job before its due time.
+Server message pages can change while they are being read; duplicate identities
+are reported as an unavailable read, and an undetected concurrent move can
+still make the displayed order incomplete. Refresh before acting when in doubt.
+
+The panel reads the selected Keeper's server inventory. Its counts separate
 pending inputs, running work, future schedules, due schedules and unavailable
 sources. An aggregated chat row counts every queued request. Future schedules
 show their due instant instead of treating their creation age as waiting time.

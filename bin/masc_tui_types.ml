@@ -8593,6 +8593,25 @@ type resource_share_request = {
   share_target : bool;
 }
 
+type queue_panel_notice = Queue_info of string | Queue_error of string
+type queue_panel_receipt =
+  | Queue_action_receipt of queue_panel_notice
+  | Queue_read_receipt of string
+type queue_panel_reading = Queue_loading | Queue_current | Queue_unavailable
+
+type queue_panel = {
+  qp_keeper : string;
+  qp_reading : queue_panel_reading;
+  qp_observation : Masc_tui_queue_inspection.observation option;
+  qp_notice : queue_panel_notice option;
+  qp_receipt : queue_panel_receipt option;
+  qp_selected : Masc_tui_queue_inspection.item_id option;
+  qp_scroll : int;
+  qp_detail : bool;
+  qp_detail_scroll : int;
+  qp_refresh_after_priority : bool;
+}
+
 type state = {
   observation_instance : Masc_tui_observation_origin.instance;
   mutable ui_language : ui_language;
@@ -8699,6 +8718,7 @@ type state = {
   mutable keeper_queue_inflight : string list;
   mutable keeper_queue_readings : string list;
   mutable keeper_queue_inspections : (string * unit ref) list;
+  mutable queue_panel : queue_panel option;
   (* Exact requests awaiting admission and accepted requests awaiting their
      ordered run-next call. No priority intent is inferred from queue text. *)
   mutable keeper_run_next_pending : Masc_tui_keeper_chat_projection.request list;
@@ -10394,6 +10414,63 @@ let dismiss_latest_preset_save_receipt (state : state) =
     | receipt :: rest -> receipt :: hide rest
   in
   state.preset_save_receipts <- hide state.preset_save_receipts
+
+let queue_panel_items (state : state) (panel : queue_panel) =
+  let module Inbox = Masc_tui_queue_inspection in
+  let local = Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued
+      ~keeper_name:panel.qp_keeper in
+  let local_items = List.map (fun (item : Masc_tui_keeper_chat_queue.item) ->
+    let request = item.request in
+    let attachments = match request.attachments with
+      | [] -> ""
+      | values -> "\n\nAttachments:\n" ^ String.concat "\n" (List.map
+          (fun (attachment : Masc_tui_keeper_chat_projection.attachment) ->
+            Printf.sprintf "%s · %s · %d bytes · id %s"
+              (Masc.Tui_terminal_text.sanitize_terminal_text attachment.name)
+              (Masc.Tui_terminal_text.sanitize_terminal_text attachment.mime_type)
+              attachment.size (Masc.Tui_terminal_text.sanitize_terminal_text attachment.attachment_id)) values) in
+    let references = match request.references with
+      | [] -> ""
+      | values -> "\n\nImage references:\n" ^ String.concat "\n" (List.map (function
+          | Masc_tui_keeper_chat_projection.Ref_url value ->
+            "URL: " ^ Masc.Tui_terminal_text.sanitize_terminal_text value
+          | Ref_file_id value -> "File: " ^ Masc.Tui_terminal_text.sanitize_terminal_text value) values) in
+    {Inbox.id=Some (Local_message item.request.request_id);
+     text="  " ^ Masc.Tui_terminal_text.sanitize_terminal_lines request.message ^ attachments ^ references}) local in
+  let local_header = {Inbox.id=None; text=Printf.sprintf "Local unsent messages · %d" (List.length local)} in
+  let source label = function
+    | Ok items -> items
+    | Error detail -> [{Inbox.id=None; text=label ^ " unavailable: " ^ detail}] in
+  let observed = match panel.qp_observation with
+    | None -> []
+    | Some observation -> source "Inventory" observation.waiting
+      @ source "Server queue" observation.operations in
+  let with_schedule_name (item : Inbox.item) =
+    match item.id, state.keeper_schedules with
+    | Some (Schedule (id, instance)), Some (keeper, snapshot)
+      when String.equal keeper panel.qp_keeper && Option.is_none snapshot.scs_read_error ->
+      (match List.find_opt (fun (row : schedule_row) ->
+         String.equal row.sch_schedule_id id && String.equal row.sch_schedule_instance_id instance)
+         snapshot.scs_rows with
+       | Some row ->
+         (match row.sch_payload_summary with
+          | Some title ->
+            {item with text=Masc.Tui_terminal_text.sanitize_terminal_text title ^ " · " ^ item.text
+              ^ "\nName observed at " ^ Masc.Tui_terminal_text.sanitize_terminal_text snapshot.scs_observed_at_iso}
+          | None -> item)
+       | None -> item)
+    | Some (Local_message _ | Server_message _ | Running_message _ | Event _ | Schedule _), _
+    | None, _ -> item in
+  local_header :: local_items @ List.map with_schedule_name observed
+
+let update_queue_panel (state : state) ~keeper_name update =
+  match state.queue_panel with
+  | Some panel when String.equal panel.qp_keeper keeper_name ->
+    state.queue_panel <- Some (update panel)
+  | Some _ | None -> ()
+
+let queue_panel_fixed_rows panel =
+  2 + (match panel.qp_receipt with Some _ -> 1 | None -> 0)
 
 (* A local draft survives peer reconfirmation but never a workspace/draft
    replacement. Peer images retain the exact reading that acquired them.
@@ -12832,6 +12909,14 @@ let suspend_workspace_readings state =
   state.board_list_reported_error <- None;
   retire_keeper_message_search state;
   state.workspace_read_authority <- ref ();
+  state.queue_panel <- Option.map (fun panel ->
+    {panel with qp_reading=Queue_unavailable; qp_observation=None;
+      qp_selected=None; qp_detail=false; qp_detail_scroll=0; qp_scroll=0;
+      qp_receipt=(match panel.qp_receipt with
+        | Some (Queue_action_receipt _) as receipt -> receipt
+        | Some (Queue_read_receipt _) | None -> None);
+      qp_notice=Some (Queue_info "Workspace unconfirmed; any receipt is from the previous observation")})
+      state.queue_panel;
   (* Retired completions cannot release these slots. Keep observations and
      explicit audit intent for a confirmed read in the successor epoch. *)
   List.iter (fun (keeper_name, mode) ->
@@ -12859,9 +12944,16 @@ let suspend_workspace_readings state =
   state.detail_reads <- [];
   suspend_keeper_deletions_read state;
   suspend_voice_wizard_read state;
-  state.keeper_queue_inflight <- List.filter
-    (fun keeper -> not (List.mem keeper state.keeper_queue_readings)) state.keeper_queue_inflight;
-  state.keeper_queue_readings <- [];
+  (* A pure inspection is retired with this read authority. A mutation whose
+     receipt already arrived still owns its follow-up observation until its
+     completion arrives; releasing its slot here would let that late result
+     clear a newer request for the same Keeper. Its reading phase does not
+     block a separate run-next mutation. *)
+  let inspection keeper = List.mem_assoc keeper state.keeper_queue_inspections in
+  state.keeper_queue_inflight <- List.filter (fun keeper -> not (inspection keeper))
+      state.keeper_queue_inflight;
+  state.keeper_queue_readings <- List.filter (fun keeper -> not (inspection keeper))
+      state.keeper_queue_readings;
   List.iter (fun ((view : Masc_tui_account_login.t), generation, action) ->
     if view.generation = generation then begin
       state.account_login_read_resume <- (view, generation, action)
@@ -13663,6 +13755,7 @@ let text_input_target (state : state) ~compact_viewport =
      | Some _ | None -> None)
   else if Option.is_some state.account_login && not compact_viewport then Some Text_account_login
   else if state.keeper_deletions_open then None
+  else if Option.is_some state.queue_panel then None
   else if state.view = Resources && Option.is_some state.resource_save_prompt then Some Text_resource_save
   (* A drop reason takes every key on the goal detail it was opened on, so
      its letters never reach the lifecycle keys under it. *)
@@ -14747,6 +14840,7 @@ let withdraw_keeper_chat_requests (state : state) =
   state.keeper_queue_inflight <- [];
   state.keeper_queue_readings <- [];
   state.keeper_queue_inspections <- [];
+  state.queue_panel <- None;
   state.keeper_run_next_pending <- [];
   state.keeper_run_next_ready <- [];
   state.keeper_run_next_inflight <- [];
@@ -14930,8 +15024,8 @@ let send_disposition state ~keeper_name : send_disposition =
          (fun entry -> entry.sent_request)
          (blocking_inflight_for_keeper state keeper_name))
     ~waiting:
-      (* The line a new one for this keeper would join (last waiting [Next], never
-         a steer). Present it as "the keeper is spoken for" so Enter queues onto
+      (* The most recently submitted waiting [Next], never a steer, is the
+         line a new one for this keeper would join. Present it as "the keeper is spoken for" so Enter queues onto
          it instead of dispatching past a line the operator has not finished. *)
       (Option.map
          (fun (item : Masc_tui_keeper_chat_queue.item) ->
@@ -16255,6 +16349,7 @@ let modal_owns_keys (state : state) =
   || Option.is_some (current_chat_call_reader state)
   || Option.is_some (current_detail_reading state)
   || state.help_open || state.keeper_deletions_open || state.agenda_open
+  || Option.is_some state.queue_panel
   || state.context_inspector_open || state.about_open
   || state.repository_changes_open
   || (state.view = Lanes && Option.is_some state.exact_activity_open)
@@ -16342,6 +16437,7 @@ let close_key_modals (state : state) =
   state.chat_call_reader <- None;
   state.help_open <- false;
   state.help_scroll <- 0;
+  state.queue_panel <- None;
   close_detail_reading state;
   state.about_open <- false;
   state.keeper_deletions_open <- false;
@@ -16464,6 +16560,7 @@ let create_state
   keeper_queue_inflight = [];
   keeper_queue_readings = [];
   keeper_queue_inspections = [];
+  queue_panel = None;
   keeper_run_next_pending = [];
   keeper_run_next_ready = [];
   keeper_priority_controls = [];

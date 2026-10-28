@@ -280,6 +280,63 @@ let test_take_newest_for_keeper_does_not_touch_another_keeper () =
         (messages rest)
 ;;
 
+let test_reorder_preserves_identity_other_keepers_and_steer () =
+  let first = request ~keeper_name:"alpha" "alpha first" in
+  let middle = request ~keeper_name:"alpha" "alpha middle" in
+  let last = request ~keeper_name:"alpha" "alpha last" in
+  let other_first = request ~keeper_name:"beta" "beta first" in
+  let other_last = request ~keeper_name:"beta" "beta last" in
+  let steer = request ~keeper_name:"alpha" "steer" in
+  let original =
+    List.fold_left (fun queue request ->
+      match Queue.push queue ~submitted_at:42. request with
+      | Ok (queue, _) -> queue | Error detail -> fail detail)
+      Queue.empty [first; other_first; middle; other_last; last] in
+  let original = match Queue.push_steer original ~submitted_at:99.
+    ~causal_parent_request_id:"active-alpha" steer with
+    | Ok (queue, _) -> queue | Error detail -> fail detail in
+  let before = match Queue.find original ~request_id:last.request_id with
+    | Some item -> item | None -> fail "the selected request is missing" in
+  let ids queue = Queue.waiting queue |> List.map (fun (item : Queue.item) -> item.request.request_id) in
+  let moved = match Queue.move_to_front original ~keeper_name:"alpha" ~request_id:last.request_id with
+    | Ok queue -> queue | Error detail -> fail detail in
+  check (list string) "move to front preserves the steer and other Keeper slots"
+    [steer.request_id; last.request_id; other_first.request_id;
+     first.request_id; other_last.request_id; middle.request_id] (ids moved);
+  (match Queue.find moved ~request_id:last.request_id with
+   | Some after -> check bool "the whole queued item is retained" true (after == before)
+   | None -> fail "reorder lost the selected request");
+  (match Queue.take_first_sendable moved ~sendable:(String.equal "alpha") with
+   | Some (item, _) ->
+     check string "the existing steer remains the next alpha request" steer.request_id item.request.request_id;
+     check (option string) "steer retains its causal parent" (Some "active-alpha") item.causal_parent_request_id
+   | None -> fail "alpha input was lost");
+  let restored = match Queue.move_to_end moved ~keeper_name:"alpha" ~request_id:last.request_id with
+    | Ok queue -> queue | Error detail -> fail detail in
+  check (list string) "move to end preserves each Keeper's slots"
+    (ids original) (ids restored);
+  let older_last = match Queue.move_to_end original ~keeper_name:"alpha" ~request_id:first.request_id with
+    | Ok queue -> queue | Error detail -> fail detail in
+  (match Queue.join_target older_last ~keeper_name:"alpha" with
+   | Some item -> check string "coalescing still targets the newest submitted ordinary message"
+       last.request_id item.request.request_id
+   | None -> fail "the newest ordinary message was lost");
+  (match Queue.take_newest_for_keeper restored ~keeper_name:"alpha" with
+   | Some (item, _) -> check string "newest still means submission identity" steer.request_id item.request.request_id
+   | None -> fail "alpha input was lost");
+  List.iter (fun move ->
+    check bool "a different Keeper cannot move this request" true
+      (Result.is_error (move original ~keeper_name:"beta" ~request_id:last.request_id));
+    check bool "a missing request cannot be moved" true
+      (Result.is_error (move original ~keeper_name:"alpha" ~request_id:"missing"));
+    check bool "a steer cannot be displaced" true
+      (Result.is_error (move original ~keeper_name:"alpha" ~request_id:steer.request_id)))
+    [Queue.move_to_front; Queue.move_to_end];
+  check (list string) "refused changes preserve the original queue"
+    [steer.request_id; first.request_id; other_first.request_id;
+     middle.request_id; other_last.request_id; last.request_id] (ids original)
+;;
+
 (* Which waiting line a newly typed one joins. The reader types a thought,
    then its correction: both are meant for one turn, and neither has been sent
    -- dispatch takes a line out of the queue -- so joining them changes what
@@ -329,6 +386,8 @@ let () =
             test_steer_precedes_next_for_its_keeper
         ; test_case "take newest is scoped to one Keeper" `Quick
             test_take_newest_for_keeper_does_not_touch_another_keeper
+        ; test_case "reorder preserves identity, Keeper ownership, and steer" `Quick
+            test_reorder_preserves_identity_other_keepers_and_steer
         ] )
     ; ("join_target", join_target_cases)
     ]

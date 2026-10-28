@@ -523,8 +523,13 @@ let test_uncertain_identity_retires_reads_not_admitted_operations () =
   state.keeper_turns_inflight <- true;
   let browser = Browser_lane_view.create () in
   state.browser_lane <- Some {browser with load=Browser_lane_view.Loading (1, Read)};
-  state.keeper_queue_inflight <- ["reading"; "writing"];
-  state.keeper_queue_readings <- ["reading"];
+  state.keeper_queue_inflight <- ["reading"; "writing"; "mutation-observation"];
+  state.keeper_queue_readings <- ["reading"; "mutation-observation"];
+  state.keeper_queue_inspections <- ["reading", state.workspace_read_authority];
+  state.queue_panel <- Some {qp_keeper="writing"; qp_reading=Queue_current;
+    qp_observation=None; qp_notice=None; qp_receipt=Some (Queue_action_receipt (Queue_info "change accepted"));
+    qp_selected=None; qp_scroll=0; qp_detail=false; qp_detail_scroll=0;
+    qp_refresh_after_priority=false};
   state.workspace_identity <- next_workspace_identity ~previous:state.workspace_identity
       ~local_paths:state.local_workspace_paths (Error "health failed");
   suspend_workspace_readings state;
@@ -539,13 +544,28 @@ let test_uncertain_identity_retires_reads_not_admitted_operations () =
     (Masc_tui_message_input.contents state.msg_input);
   Alcotest.(check (list string)) "retained mode rows are preserved" ["A-keeper"] state.keeper_yolo_names;
 
-  Alcotest.(check (list string)) "queue observation releases only its own slot" ["writing"]
+  Alcotest.(check (list string)) "queue observation releases only its own slot" ["writing"; "mutation-observation"]
     state.keeper_queue_inflight;
+  Alcotest.(check (list string)) "mutation observation keeps its receipt owner"
+    ["mutation-observation"] state.keeper_queue_readings;
+  (match state.queue_panel with
+   | Some panel ->
+     Alcotest.(check bool) "read withdrawal retains the mutation receipt" true
+       (panel.qp_receipt = Some (Queue_action_receipt (Queue_info "change accepted")));
+     Alcotest.(check bool) "read withdrawal disables stale controls" true
+       (panel.qp_reading = Queue_unavailable)
+   | None -> Alcotest.fail "workspace reconfirmation discarded the queue receipt");
   (match state.browser_lane with
    | Some {load=Browser_lane_view.Idle; _} -> ()
    | _ -> Alcotest.fail "browser read stayed pending");
+  state.queue_panel <- Option.map (fun panel ->
+    {panel with qp_receipt=Some (Queue_read_receipt "Keeper is active")}) state.queue_panel;
   state.browser_lane <- Some {browser with load=Browser_lane_view.Loading (2, Goto "https://example.test")};
   suspend_workspace_readings state;
+  (match state.queue_panel with
+   | Some panel -> Alcotest.(check bool) "withdrawal retires the read-only queue observation" true
+       (panel.qp_receipt = None)
+   | None -> Alcotest.fail "queue panel was discarded");
   (match state.browser_lane with
    | Some {load=Browser_lane_view.Loading (2, Goto _); _} -> ()
    | _ -> Alcotest.fail "admitted browser navigation lost its receipt owner");

@@ -167,6 +167,7 @@ val frame_choice :
   | `Detail_reading of Masc_tui_detail_reading.t
   | `About | `Palette | `Context | `Keeper_deletions | `Help
   | `Agenda | `Answering | `Patch | `Link
+  | `Queue of Masc_tui_types.queue_panel
   | `Client_detail of Masc.Tui_decode.client_row | `Surface ]
 (** The visible surface or overlay, also used before preparing Home focus. *)
 

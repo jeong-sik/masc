@@ -225,7 +225,8 @@ type async_msg =
   | Lane_package_catalog_loaded of int * string option * (Yojson.Safe.t, string) result
   | Lane_package_preview_loaded of int * string * (Yojson.Safe.t, string) result
   | Keeper_queue_resume_confirmed of string * int * resume_confirmation
-  | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list * (string list, string) result, string) result
+  | Keeper_queue_action_received of string * string list
+  | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list * (Masc_tui_queue_inspection.observation, string) result, string) result
   | Lane_addons_loaded of int * Masc_tui_lane_addons.read_target * (lane_addons_reply, lane_addons_failure) result
   | Lane_application_loaded of Masc_tui_lane_application.ticket
       * (Masc_tui_lane_addons.configuration, string) result

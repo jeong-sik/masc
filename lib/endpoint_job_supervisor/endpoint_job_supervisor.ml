@@ -142,7 +142,7 @@ let busy_stage ~default = function
   | Output_error {stream;cause} ->
     if cause=O.Registry_error R.Busy then Some (validation_stage stream) else None
   | Pipe_unavailable | Pipe_cleanup_failed _ | Registry_cleanup_failed _ | Interrupted
-  | Supervisor_failed | Codec_error _ | Publication_failed _ | Recovery_failed _
+  | Supervisor_failed | Result_encoding_failed _ | Publication_failed _ | Recovery_failed _
   | Receipt_storage_unavailable -> None
 
 (* These are non-effecting, per-original reads. A competing mutation holds the

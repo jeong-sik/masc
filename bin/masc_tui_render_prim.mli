@@ -157,6 +157,7 @@ type recovery_row = {
 }
 
 val footer_line :
+  ?help_door:bool ->
   ?status:Masc_tui_footer.status_item list ->
   ?position:string ->
   ?recovery_in_slot:recovery_row option ->
@@ -288,6 +289,7 @@ val surface_window_height :
 
 val surface_chrome :
   overflow:overflow ->
+  ?help_door:bool ->
   ?frame:chrome_frame ->
   ?status:Masc_tui_footer.status_item list ->
   ?sidebar:(int * (rows:int -> Buffer.t -> unit)) ->

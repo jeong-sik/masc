@@ -113,3 +113,35 @@ let () =
     "Context search and the covered composer are distinct input owners";
   require (decide ~presented_owner:edit ~current_owner:(Some Context) Action = Reject_action)
     "closing Context search cannot apply a queued key to the inspector"
+
+let () =
+  let owner = Presented.{workspace=3; inspector=8; keeper="fixture"} in
+  let before = Presented.initial ~approval:() ~presses:() ~panes:() ~reader:()
+      ~panel_owner:(Some Presented.Context) in
+  let search = Presented.begin_context_search before owner in
+  let decide snapshot current owner = Presented.decide_snapshot_input snapshot
+      ~external_surface:false ~current_owner:current ~context_search_owner:owner in
+  require (decide before (Some Context_search) (Some owner) Action = Reject_action)
+    "asynchronous entry into search does not authorize typeahead";
+  require (before.context_search = None && search.context_search = Some owner)
+    "slash records immutable transition provenance";
+  require (decide search (Some Context_search) (Some owner) Action = Accept_input
+           && decide search (Some Context_search) (Some owner) Paste = Accept_input)
+    "explicit search retains query typeahead and paste";
+  List.iter (fun changed ->
+    require (decide search (Some Context_search) (Some changed) Action = Reject_action)
+      "search cannot borrow a different workspace or inspector")
+    [{owner with workspace=4}; {owner with inspector=9}; {owner with keeper="other"}];
+  List.iter (fun current ->
+    require (decide search current (Some owner) Action = Reject_action
+             && decide search current (Some owner) Paste = Reject_paste
+             && decide search current (Some owner) Protocol = Accept_input)
+      "ending search or changing panels waits for presentation")
+    [Some Context; Some Help; None];
+  let painted = Presented.presented search ~approval:() ~presses:() ~panes:() ~reader:()
+      ~panel_owner:(Some Context_search) ~owner_changed:true ~input_pending:false in
+  require (painted.context_search = None && painted.barrier = Open
+           && decide painted (Some Context_search) (Some owner) Action = Accept_input)
+    "presentation after query input drains retires the grant";
+  require (decide painted (Some Context) (Some owner) Action = Reject_action)
+    "a second Enter cannot open a result before the post-search frame"

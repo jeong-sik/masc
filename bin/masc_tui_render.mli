@@ -44,6 +44,10 @@ val json_assoc_member_opt : string -> Yojson.Safe.t -> Yojson.Safe.t option
 
 val set_table_frame : bool -> unit
 
+val panel_input_owner :
+  Masc_tui_types.state -> terminal_rows:int -> Masc_tui_presented.panel_owner option
+(** The command panel or its search editor selected by the actual frame. *)
+
 (** The Activity pane as the last frame drew it, for the input layer: how
     many columns it held on the right (zero when none was drawn), what a
     press on one of its rows acts on, and how far its list can scroll. A

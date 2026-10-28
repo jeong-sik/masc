@@ -28,6 +28,7 @@ let render_about (state : state) =
         Masc_tui_emblem_screen.Keepers_read (List.length state.keepers)
   in
   surface_chrome ~overflow:Fits ~frame:Chrome_overlay state ~terminal_rows ~cols
+    ~help_door:true
     ~surface_key:"about" ~title:(screen_title " MASC")
     ~hints:(Masc_tui_keys.footer_hints_about ())
     ~body:(fun ~budget c ->
@@ -187,6 +188,7 @@ let render_context_inspector state =
   in
   surface_chrome ~overflow state ~terminal_rows ~cols
     ~surface_key:"context-inspector"
+    ~help_door:(Option.is_none state.search)
     ~frame:Chrome_overlay
     ~title:
       (screen_title " MASC Context" ^ "  " ^ keeper ^ refreshing ^ "  " ^ tabs

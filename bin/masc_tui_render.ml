@@ -703,9 +703,8 @@ let panel_input_owner (state : state) ~terminal_rows =
   | `Help -> Some Presented.Help
   | `About -> Some Presented.About
   | `Context ->
-      (match text_input_target state ~compact_viewport:false with
-       | Some Text_row_search -> Some Presented.Context_search
-       | Some _ | None -> Some Presented.Context)
+      Some (if Option.is_some state.search then Presented.Context_search
+            else Presented.Context)
   | `Agenda -> Some Presented.Agenda
   | `Answering -> Some Presented.Answering
   | `Too_small _ | `Play_card _ | `Account_login _ | `Palette | `Collab _

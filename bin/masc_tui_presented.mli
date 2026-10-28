@@ -10,6 +10,12 @@ type input_kind = Action | Paste | Protocol
 type input_decision = Accept_input | Reject_action | Reject_paste
 type panel_owner = Help | About | Context | Context_search | Agenda | Answering
 
+type context_search_owner = {
+  workspace : int;
+  inspector : int;
+  keeper : string;
+}
+
 val decide_unpresented_input :
   frame_presented:bool -> external_surface:bool -> input_kind -> input_decision
 (** When a frame has not been presented, reject operator input unless an
@@ -32,9 +38,27 @@ type ('approval, 'presses, 'panes, 'reader) t = private {
   panes : 'panes;
   reader : 'reader;
   panel_owner : panel_owner option;
+  context_search : context_search_owner option;
   barrier : barrier;
   recovery : recovery;
 }
+
+val begin_context_search :
+  ('a, 'p, 'n, 'r) t -> context_search_owner -> ('a, 'p, 'n, 'r) t
+(** Called only by the slash action of the presented Context panel. This
+    permits its query typeahead, without claiming that an editor was painted. *)
+
+val panel_owner_matches :
+  ('a, 'p, 'n, 'r) t -> current_owner:panel_owner option ->
+  context_search_owner:context_search_owner option -> bool
+
+val decide_snapshot_input :
+  ('a, 'p, 'n, 'r) t -> external_surface:bool ->
+  current_owner:panel_owner option ->
+  context_search_owner:context_search_owner option -> input_kind -> input_decision
+(** An explicitly opened query accepts typeahead only in the same workspace,
+    inspector generation and Keeper. Ending it requires a new frame before
+    another action. Every successfully presented frame retires this grant. *)
 
 val initial :
   approval:'a -> presses:'p -> panes:'n -> reader:'r ->

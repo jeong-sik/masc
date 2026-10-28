@@ -2386,22 +2386,29 @@ let about_bindings =
 
 let context_bindings ~cols (state : state) =
   let module Inspector = Masc_tui_context_inspector in
+  let split = cols >= Masc_tui_roster_pane.threshold_cols in
   let tabs = [b Navigate "1/2/3/4 or Tab" "switch"] in
   let turns = match state.context_inspector_target with
     | Inspector.Recent _ -> [b Navigate "[ / ]" "turn"]
     | Inspector.Pinned _ -> [] in
   let refresh = [b Meta "r" "refresh"] in
   let help = [b Meta "?" "help"] in
-  match state.context_inspector_tab, state.context_inspector_exact with
+  if Option.is_some state.search then
+    [b Search "type" "query"; b Act "Enter" "keep search"; b Meta "Esc" "cancel search"]
+  else match state.context_inspector_tab, state.context_inspector_exact with
   | Inspector.Response, _ ->
       tabs @ turns @ [b Navigate "j/k" "scroll"; b Navigate "PgUp/PgDn" "page";
         b Navigate "Home/End" "top/bottom"] @ refresh @ [b Meta "Esc" "return"] @ help
   | (Inspector.Composition | Inspector.Exact_input | Inspector.Input_map), Some _ ->
       [b Navigate "4" "response"; b Navigate "j/k" "scroll"; b Meta "Esc" "list"] @ help
   | (Inspector.Exact_input | Inspector.Input_map), None ->
-      tabs @ turns @ [b Search "/" "search";
-        b Navigate "j/k" (if cols >= keeper_split_threshold_cols then "select or scroll" else "select")]
-      @ (if cols >= keeper_split_threshold_cols then [b Navigate "h/l" "pane"] else [])
+      tabs @ turns
+      @ (if state.context_inspector_tab = Inspector.Exact_input
+            && Option.is_some state.context_inspector_reading then [b Search "/" "search"] else [])
+      @ (if state.context_inspector_tab = Inspector.Exact_input && state.search_last <> ""
+            then [b Search "n/N" "next/previous match"] else [])
+      @ [b Navigate "j/k" (if split then "select or scroll" else "select")]
+      @ (if split then [b Navigate "h/l" "pane"] else [])
       @ [b Act "Enter" "open exact"] @ refresh @ [b Meta "Esc" "close"] @ help
   | Inspector.Composition, None ->
       tabs @ turns @ [b Navigate "j/k" "scroll"] @ refresh @ [b Meta "Esc" "close"] @ help

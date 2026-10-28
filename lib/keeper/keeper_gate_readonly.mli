@@ -6,6 +6,14 @@
 
 type git_command = Status | Diff | Log | Show | Grep | Reflog | Whatchanged | Blame | Annotate
 
+type prior_judgment_command =
+  | File
+  | Uniq
+  | Git_ls_remote
+  | Git_cat_file
+  | Git_rev_list
+  | Git_shortlog
+
 type observation_reason =
   | Git_configuration_override
   | Git_command_requires_execution of git_command
@@ -14,10 +22,11 @@ type observation_reason =
 type classification =
   | Static_observation
   | Needs_observation of observation_reason
+  | Needs_judgment of prior_judgment_command
 
 val classification_to_yojson : classification -> Yojson.Safe.t
 (** Canonical classification and reason tags for the execution record.
-    Includes a closed Git command name when known, never raw arguments. *)
+    Includes a closed command name when known, never raw arguments. *)
 
 val classify_request
   :  operation:string
@@ -36,15 +45,21 @@ val classify_request
     DNS lookup or output-location inference. *)
 
 val classify_script : string -> classification
-(** Classifies every pipeline/sequence stage through the dispatcher's parser.
-    The first stage without a static observation proof supplies the reason.
-    A dynamic or unsupported shell construct remains [Unproven_request]. *)
+(** Classifies pipeline, sequence and substitution stages through the
+    dispatcher's parser. A recognized [Needs_judgment] command takes priority
+    over an earlier [Needs_observation] stage. Otherwise the first missing
+    static proof supplies the reason. Dynamic or unsupported shell constructs
+    that hide the command remain [Unproven_request]. *)
 
 val classify_argv : string list -> classification
-(** Git global configuration overrides and commands whose effects depend on
-    repository configuration, helper programs or output options need actual
-    execution evidence. Other command handling retains the existing policy;
-    this is not a complete effect proof for every Git/Unix option. *)
+(** Git global configuration overrides and some commands whose effects depend
+    on repository configuration or options need execution evidence. Recognized
+    [file], [uniq], and four Git subcommands instead require the existing Judge
+    path before an observation run when Auto Judge reaches this classifier.
+    Even harmless recognized forms take that path. Unsupported global options
+    and dynamic shell constructs can remain unproven and use the existing
+    observation path. Other commands retain the existing policy; this is not
+    a complete effect proof for every Git/Unix option. *)
 
 val observation_network_capabilities : string list
 val observation_commands : string list

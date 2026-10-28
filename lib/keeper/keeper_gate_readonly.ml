@@ -11,6 +11,14 @@
 
 type git_command = Status | Diff | Log | Show | Grep | Reflog | Whatchanged | Blame | Annotate [@@deriving enumerate]
 
+type prior_judgment_command =
+  | File
+  | Uniq
+  | Git_ls_remote
+  | Git_cat_file
+  | Git_rev_list
+  | Git_shortlog
+
 type observation_reason =
   | Git_configuration_override
   | Git_command_requires_execution of git_command
@@ -19,6 +27,7 @@ type observation_reason =
 type classification =
   | Static_observation
   | Needs_observation of observation_reason
+  | Needs_judgment of prior_judgment_command
 
 let git_command_name = function
   | Status -> "status"
@@ -32,8 +41,24 @@ let git_command_name = function
   | Annotate -> "annotate"
 ;;
 
+let prior_judgment_command_name = function
+  | File -> "file"
+  | Uniq -> "uniq"
+  | Git_ls_remote -> "git ls-remote"
+  | Git_cat_file -> "git cat-file"
+  | Git_rev_list -> "git rev-list"
+  | Git_shortlog -> "git shortlog"
+;;
+
 let classification_to_yojson = function
   | Static_observation -> `Assoc [ "kind", `String "static_observation" ]
+  | Needs_judgment command ->
+    `Assoc
+      [ "kind", `String "needs_judgment"
+      ; "reason", `Assoc
+          [ "kind", `String "effect_capable_command"
+          ; "command", `String (prior_judgment_command_name command) ]
+      ]
   | Needs_observation reason ->
     let reason_fields =
       match reason with
@@ -64,7 +89,7 @@ let static_if proven =
    matches no entry and falls through. *)
 let observation_commands =
   [ "ls"; "cat"; "head"; "tail"; "wc"; "pwd"; "echo"; "printf"; "date"
-  ; "file"; "stat"; "du"; "df"; "whoami"; "uname"; "printenv"
+  ; "stat"; "du"; "df"; "whoami"; "uname"; "printenv"
   ; "which"; "basename"; "dirname"; "realpath"; "readlink"
   ; "md5sum"; "sha1sum"; "sha256sum"; "sha512sum"
   ; "cmp"; "column"; "nl"; "tac"; "cut"; "tr"; "grep"
@@ -79,16 +104,19 @@ let observation_commands =
    helper-capable and reflog commands are handled separately below, never
    admitted by this table merely because their command name sounds like a read. *)
 let git_read_subcommands =
-  [ "describe"; "shortlog"; "rev-parse"; "rev-list"; "merge-base"; "cherry"
-  ; "ls-files"; "ls-remote"; "ls-tree"; "cat-file"; "name-rev"
+  [ "describe"; "rev-parse"; "merge-base"; "cherry"
+  ; "ls-files"; "ls-tree"; "name-rev"
   ]
 
 (* git-status may execute the repository-configured core.fsmonitor hook.
    git-diff/git-log document --output and external helpers. git-grep may
    invoke a pager; reflog includes write/delete/expire actions. Whatchanged
    shares log's machinery, and builtin/blame.c enables textconv for both
-   blame and annotate. Absence of a flag on this argv proves none of those
-   repository-configured effects absent.
+   blame and annotate. git-ls-remote can invoke an upload-pack program supplied
+   by argv or repository configuration, and git-cat-file --filters can invoke
+   a repository-configured smudge filter. git-rev-list and git-shortlog accept
+   --output and can write a file. Absence of a flag on this argv proves none
+   of the repository-configured effects absent.
    Sources: git-scm.com/docs/{git-config,git-diff,git-log,git-grep,git-reflog,git-whatchanged};
    github.com/git/git/blob/v2.50.1/builtin/blame.c (allow_textconv). *)
 let git_command_requiring_execution s = List.find_opt (fun v -> String.equal (git_command_name v) s) all_of_git_command
@@ -100,10 +128,9 @@ let git_command_requiring_execution s = List.find_opt (fun v -> String.equal (gi
    clone] write the working tree, [pr merge]/[create]/[comment] write on
    GitHub, and [auth login] writes credentials, so none of them appear.
 
-   The network read itself is not what the judge is for: [git ls-remote] and
-   the web_fetch capability are already admitted here, and they carry the same
-   identity to the same kind of endpoint. What the judge answers is whether an
-   effect lands, and a listed verb lands none. *)
+   The network read itself is not what the judge is for: the [web_fetch]
+   capability is admitted here. What the judge answers is whether an effect
+   lands. This correction does not change the existing gh policy. *)
 (** The gh verbs that only read, keyed by family. Closed on purpose: a verb
     that is not listed goes to the judge, and admitting one is a reviewed
     change here rather than a configuration knob. *)
@@ -258,6 +285,30 @@ let option_name token =
   | Some index -> String.sub token 0 index
 ;;
 
+(* Only a known literal subcommand is enough to require prior judgment. Walk
+   the supported global options without interpreting their values as verbs. *)
+let rec git_prior_judgment_command = function
+  | "-c" :: _value :: rest -> git_prior_judgment_command rest
+  | "--config-env" :: _value :: rest -> git_prior_judgment_command rest
+  | flag :: rest when String.equal (option_name flag) "--config-env" ->
+    git_prior_judgment_command rest
+  | flag :: rest
+    when List.mem (option_name flag) [ "--git-dir"; "--work-tree"; "--namespace"; "--exec-path" ]
+         && not (String.equal flag (option_name flag)) ->
+    git_prior_judgment_command rest
+  | flag :: _value :: rest when List.mem flag git_global_flag_with_value ->
+    git_prior_judgment_command rest
+  | flag :: rest when List.mem flag git_global_standalone ->
+    git_prior_judgment_command rest
+  | ("--bare" | "--no-lazy-fetch" | "--no-advice" | "--paginate" | "-p" | "-P") :: rest ->
+    git_prior_judgment_command rest
+  | "ls-remote" :: _ -> Some Git_ls_remote
+  | "cat-file" :: _ -> Some Git_cat_file
+  | "rev-list" :: _ -> Some Git_rev_list
+  | "shortlog" :: _ -> Some Git_shortlog
+  | [] | _ :: _ -> None
+;;
+
 let classify_git_argv argv =
   let rec globals = function
     | "-c" :: _ -> Needs_observation Git_configuration_override
@@ -284,13 +335,19 @@ let classify_git_argv argv =
   globals argv
 ;;
 
-(* rg and sort use the ordinary execution-observation path. Their option
-   languages may execute helpers or write files; the enforced box, rather
-   than an incomplete local option parser, owns that boundary. *)
+(* rg and sort keep the ordinary execution-observation path. The commands
+   below require judgment before observation: an applied Observe box can
+   return a nonzero payload result without proof of a denied effect, so it
+   cannot safely be replayed after judgment. *)
 let classify_argv argv =
   match argv with
   | [] | "" :: _ -> Needs_observation Unproven_request
-  | "git" :: rest -> classify_git_argv rest
+  | "file" :: _ -> Needs_judgment File
+  | "uniq" :: _ -> Needs_judgment Uniq
+  | "git" :: rest ->
+    (match git_prior_judgment_command rest with
+     | Some command -> Needs_judgment command
+     | None -> classify_git_argv rest)
   | command :: rest ->
     let rejected predicate = List.exists predicate rest in
     static_if
@@ -300,9 +357,6 @@ let classify_argv argv =
        | "diff" -> not (rejected writes_to_file)
        | "date" -> not (rejected sets_system_time)
        | "hostname" -> List.for_all (fun flag -> String.length flag > 1 && String.sub flag 0 1 = "-") rest
-       (* uniq writes its second operand to a file; one operand is a read. *)
-       | "uniq" ->
-         List.length (List.filter (fun arg -> String.length arg = 0 || String.sub arg 0 1 <> "-") rest) <= 1
        | "gh" -> gh_argv_is_read rest
        | command -> List.mem command observation_commands)
 ;;
@@ -353,6 +407,14 @@ let rec literals_of_args = function
     (match literal_of_arg arg, literals_of_args rest with
      | Some text, Some texts -> Some (text :: texts)
      | None, _ | _, None -> None)
+;;
+
+let rec literal_prefix_of_args = function
+  | [] -> []
+  | arg :: rest ->
+    (match literal_of_arg arg with
+     | Some text -> text :: literal_prefix_of_args rest
+     | None -> [])
 ;;
 
 (* A redirect is observation when nothing lands on a file: an fd joined to
@@ -431,49 +493,55 @@ let env_assignments_inert (env : (string * Ir.arg) list) : bool =
     env
 ;;
 
-(* Every stage must have a static proof; the first missing proof supplies
-   the execution reason instead of collapsing it to a boolean. A
-   substitution's child stages are stages of the same script: they classify
-   first, and a child that needs observation supplies the reason. Children
-   that all classify static still leave the parent's argv unproven — the
-   substituted text is not on the line. *)
+(* Prior judgment takes priority over an earlier unproven stage because the
+   whole script is admitted and dispatched as one request. Otherwise retain
+   the first missing static proof in the original stage order. *)
+let choose_classification classifications =
+  let rec choose first_unproven = function
+    | [] -> Option.value first_unproven ~default:Static_observation
+    | (Needs_judgment _ as classification) :: _ -> classification
+    | (Needs_observation _ as classification) :: rest ->
+      let first_unproven = match first_unproven with
+        | Some _ -> first_unproven
+        | None -> Some classification
+      in
+      choose first_unproven rest
+    | Static_observation :: rest -> choose first_unproven rest
+  in
+  choose None classifications
+;;
+
 let rec classify_simple (simple : Ir.simple) =
   let children =
     List.concat_map Ir.subst_children_of_arg
       (simple.Ir.args @ List.map snd simple.Ir.env)
   in
-  match
-    List.find_map
-      (function
-        | Needs_observation _ as classification -> Some classification
-        | Static_observation -> None)
-      (List.map classify_ir children)
-  with
-  | Some classification -> classification
-  | None when children <> [] -> Needs_observation Unproven_request
-  | None ->
-    if not (env_assignments_inert simple.Ir.env)
-       || not (List.for_all redirect_is_observation simple.Ir.redirects)
-    then Needs_observation Unproven_request
-    else
-      match literals_of_args simple.Ir.args with
-      | None -> Needs_observation Unproven_request
-      | Some args ->
-        let bin = Masc_exec.Exec_program.to_string simple.Ir.bin in
-        if String.equal bin shell_directory_step then Static_observation
-        else classify_argv (bin :: args)
+  let bin = Masc_exec.Exec_program.to_string simple.Ir.bin in
+  let prefix_classification = classify_argv (bin :: literal_prefix_of_args simple.Ir.args) in
+  let self =
+    match prefix_classification with
+    | Needs_judgment _ as classification -> classification
+    | Static_observation | Needs_observation _ ->
+      if children <> []
+         || not (env_assignments_inert simple.Ir.env)
+         || not (List.for_all redirect_is_observation simple.Ir.redirects)
+      then Needs_observation Unproven_request
+      else
+        match literals_of_args simple.Ir.args with
+        | None -> Needs_observation Unproven_request
+        | Some args ->
+          if String.equal bin shell_directory_step then Static_observation
+          else classify_argv (bin :: args)
+  in
+  choose_classification (List.map classify_ir children @ [ self ])
 
 and classify_ir = function
   | Ir.Simple simple -> classify_simple simple
   | Ir.Pipeline [] -> Needs_observation Unproven_request
   | Ir.Pipeline stages -> classify_stages stages
   | Ir.Sequence { head; tail } -> classify_stages (head :: List.map snd tail)
-and classify_stages = function
-  | [] -> Static_observation
-  | stage :: rest ->
-    (match classify_ir stage with
-     | Static_observation -> classify_stages rest
-     | Needs_observation _ as classification -> classification)
+and classify_stages stages =
+  choose_classification (List.map classify_ir stages)
 ;;
 
 (* The dispatcher's own syntax policy: pipes and redirects are representable,
@@ -568,7 +636,7 @@ let classify_request ~operation ~sandbox_profile ~input =
   match operation with
   | "tool_execute" ->
     (match classify_command input with
-     | Needs_observation _ as classification -> classification
+     | (Needs_observation _ | Needs_judgment _) as classification -> classification
      | Static_observation ->
        static_if
          (match sandbox_profile with

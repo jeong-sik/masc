@@ -162,6 +162,12 @@ other paths, or establish isolation of the shared volume. `Write` and `Edit`
 inside the Keeper tree can also use the remote write path without a separate
 Gate decision.
 
+In Auto Judge mode, recognized `file`, `uniq`, `git ls-remote`, `git cat-file`,
+`git rev-list`, and `git shortlog` requests go to the judge before an
+observation run. Even read-only forms can wait for a decision. An existing
+grant or Always Allow policy can apply earlier, and this is not a complete
+classifier for dynamic commands.
+
 Three facts about it keep diagnoses honest:
 
 - **It may be empty.** An empty new work tree is not necessarily a broken

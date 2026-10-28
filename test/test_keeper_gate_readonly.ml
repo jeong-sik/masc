@@ -9,7 +9,7 @@ module Readonly = Keeper_gate_readonly
 
 let is_static = function
   | Readonly.Static_observation -> true
-  | Readonly.Needs_observation _ -> false
+  | Readonly.Needs_observation _ | Readonly.Needs_judgment _ -> false
 ;;
 
 let observation_only_request ~operation ~sandbox_profile ~input =
@@ -58,7 +58,7 @@ let test_observation_table_is_fully_read () =
   passes "printf" [ "printf"; "%s"; "x" ];
   requires_observation "git status through -C" [ "git"; "-C"; "repos/masc"; "status"; "--short"; "--branch" ];
   passes "git branch listing" [ "git"; "branch"; "-a" ];
-  passes "git rev-list count against upstream"
+  requires_observation "git rev-list count against upstream"
     [ "git"; "-C"; "clone-probe"; "rev-list"; "--count"; "HEAD..origin/main" ];
   passes "git merge-base" [ "git"; "merge-base"; "origin/main"; "HEAD" ];
   passes "git cherry" [ "git"; "cherry"; "-v"; "origin/main" ];
@@ -73,7 +73,8 @@ let test_observation_table_is_fully_read () =
   requires_observation "sed needs execution evidence (script can write/exec)"
     [ "sed"; "-n"; "1,5p"; "f" ];
   requires_observation "sort read" [ "sort"; "-u"; "f" ];
-  passes "uniq one operand" [ "uniq"; "f" ];
+  requires_observation "uniq one operand" [ "uniq"; "f" ];
+  requires_observation "file read" [ "file"; "f" ];
   passes "date read" [ "date"; "-u" ];
   passes "hostname flag" [ "hostname"; "-f" ];
   passes "env bare" [ "env" ];
@@ -172,6 +173,9 @@ let test_write_shapes_require_observation () =
   requires_observation "date --set sets clock" [ "date"; "--set=2026-01-01" ];
   requires_observation "hostname sets name" [ "hostname"; "evil.example" ];
   requires_observation "uniq second operand writes" [ "uniq"; "a"; "b" ];
+  requires_observation "uniq operands after -- can start with a dash"
+    [ "uniq"; "--"; "-input"; "-output" ];
+  requires_observation "file compiles a magic database" [ "file"; "-C"; "-m"; "probe.magic" ];
   requires_observation "git push" [ "git"; "push"; "origin"; "main" ];
   requires_observation "git config writes" [ "git"; "config"; "user.name"; "x" ];
   requires_observation "git checkout mutates" [ "git"; "checkout"; "-b"; "feature" ];
@@ -789,7 +793,7 @@ let test_git_observation_returns_without_judge_queueing () =
     git_execution_cases
 ;;
 
-let test_rg_and_sort_use_execution_evidence_without_option_guessing () =
+let test_option_sensitive_commands_use_execution_evidence () =
   with_auto_judge @@ fun base_path ->
   let cases =
     [ [ "rg"; "needle"; "." ]
@@ -818,12 +822,67 @@ let test_rg_and_sort_use_execution_evidence_without_option_guessing () =
       (match decision with
        | Keeper_gate.Allow { source = Keeper_gate.Observed_in_box { result; _ }; _ } ->
            check bool "the exact restricted result is retained" true (result = expected)
-       | _ -> fail "rg/sort bypassed observation or unnecessarily queued a Judge");
+       | _ -> fail "option-sensitive command bypassed observation or unnecessarily queued a Judge");
       check int "one execution observation" 1 !observations;
       check int "no Judge request for a completed restricted result" 0 (pending_count base_path))
       [ 0; 1 ]) cases;
   passes "ls remains statically observational" [ "ls"; "-la" ];
   passes "grep remains statically observational" [ "grep"; "needle"; "source" ]
+;;
+
+let test_effect_capable_commands_need_prior_judgment () =
+  List.iter (fun (command, argv, script) ->
+    let expected = Readonly.Needs_judgment command in
+    List.iter (fun input ->
+      List.iter (fun sandbox_profile ->
+        check classification "all request shapes retain prior judgment"
+          expected (Readonly.classify_request ~operation:"tool_execute" ~sandbox_profile ~input))
+        [ docker; microvm; remote_ssh ])
+      [ gate_input argv; command_gate_input script; gate_input [ "sh"; "-c"; script ] ];
+    with_auto_judge @@ fun base_path ->
+    let observed = ref 0 in
+    let decision = Keeper_gate.decide ~keeper_always_allow:false
+      ~observe:(fun () -> incr observed; Keeper_gate.Observation_unavailable "no_box")
+      (gate_request ~sandbox_profile:microvm base_path argv) in
+    deferred_to_the_judge "the command waits for judgment" decision;
+    check int "no observation ran before judgment" 0 !observed;
+    check int "the approval request was recorded" 1 (pending_count base_path))
+    [ Readonly.File, [ "file"; "-C"; "-m"; "probe.magic" ], "file -C -m probe.magic"
+    ; Readonly.Uniq, [ "uniq"; "--"; "-input"; "-output" ], "uniq -- -input -output"
+    ; Readonly.Git_ls_remote, [ "git"; "ls-remote"; "--upload-pack=helper"; "repository" ],
+      "git ls-remote --upload-pack=helper repository"
+    ; Readonly.Git_cat_file, [ "git"; "cat-file"; "--filters"; "HEAD:sample.txt" ],
+      "git cat-file --filters HEAD:sample.txt"
+    ; Readonly.Git_rev_list, [ "git"; "rev-list"; "--output=commits.txt"; "HEAD" ],
+      "git rev-list --output=commits.txt HEAD"
+    ; Readonly.Git_shortlog, [ "git"; "shortlog"; "--output=authors.txt"; "HEAD" ],
+      "git shortlog --output=authors.txt HEAD" ]
+;;
+
+let test_prior_judgment_survives_shell_composition () =
+  let expect command script =
+    check classification "recognized command retains prior judgment"
+      (Readonly.Needs_judgment command) (Readonly.classify_script script)
+  in
+  expect Git_ls_remote "sort source && git ls-remote origin";
+  expect Git_ls_remote "git ls-remote origin | sort";
+  expect Git_ls_remote "echo $(git status) $(git ls-remote origin)";
+  expect Git_ls_remote "git ls-remote $(printf origin)";
+  expect File "FOO=1 file -C -m $(cat magic-name) > output";
+  expect Uniq "sort source && uniq -- -input -output";
+  List.iter (fun argv ->
+    check classification "Git globals do not hide the subcommand"
+      (Readonly.Needs_judgment Git_ls_remote) (Readonly.classify_argv argv))
+    [ [ "git"; "-c"; "core.fsmonitor=helper"; "ls-remote"; "origin" ]
+    ; [ "git"; "--config-env=core.fsmonitor=MONITOR"; "ls-remote"; "origin" ]
+    ; [ "git"; "--git-dir=/repo/.git"; "ls-remote"; "origin" ]
+    ; [ "git"; "--work-tree=/repo"; "ls-remote"; "origin" ]
+    ; [ "git"; "--namespace=fixture"; "ls-remote"; "origin" ]
+    ; [ "git"; "--bare"; "ls-remote"; "origin" ] ];
+  expect Git_ls_remote "git --git-dir=/repo/.git ls-remote origin > output";
+  check classification "unsupported parameter expansion remains unproven"
+    (Readonly.Needs_observation Unproven_request)
+    (Readonly.classify_script "git ls-remote \"$remote\"")
 ;;
 
 let test_git_without_a_box_uses_the_configured_judge () =
@@ -1129,9 +1188,17 @@ let () =
             `Quick
             test_git_observation_returns_without_judge_queueing
         ; test_case
-            "rg and sort use execution evidence without option guessing"
+            "option-sensitive commands use execution evidence"
             `Quick
-            test_rg_and_sort_use_execution_evidence_without_option_guessing
+            test_option_sensitive_commands_use_execution_evidence
+        ; test_case
+            "effect-capable commands need prior judgment"
+            `Quick
+            test_effect_capable_commands_need_prior_judgment
+        ; test_case
+            "prior judgment survives shell composition"
+            `Quick
+            test_prior_judgment_survives_shell_composition
         ; test_case
             "Git without a box uses the configured Judge"
             `Quick

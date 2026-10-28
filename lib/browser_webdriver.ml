@@ -382,7 +382,7 @@ let execute_action t action =
     phase := Started;
     call t session method_ path body in
   let result = match action with
-  | Browser_lane.Action.Control (Browser_lane.Action.Hand_off | Browser_lane.Action.Take_over | Browser_lane.Action.Wait_for_control _ | Browser_lane.Action.Adopt_tab _ | Browser_lane.Action.Release_tab _) ->
+  | Browser_lane.Action.Control (Browser_lane.Action.Hand_off | Browser_lane.Action.Take_over | Browser_lane.Action.Space_status | Browser_lane.Action.Wait_for_control _ | Browser_lane.Action.Adopt_tab _ | Browser_lane.Action.Release_tab _) ->
     Error (Protocol Browser_lane.handoff_refused)
   | (Browser_lane.Action.Open_tab url | Browser_lane.Action.Open_window url) as opening ->
     let kind = match opening with

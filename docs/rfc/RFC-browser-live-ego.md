@@ -268,3 +268,20 @@ this requires explicit operator recovery there as well. It does not supply the
 missing SDK settlement contract or establish non-workflow input cleanup.
 Real operator recovery and current installed Keeper/UI acceptance still require
 execution evidence.
+
+
+### Read the bound Space's native status
+
+`page.act` action `space_status` requires the observed live client ID and reads
+only that peer's bound numeric Space from the SDK's `listTaskSpaces` inventory.
+It does not construct a TaskSpace handle or initialise background Page discovery. It returns `spaceId`,
+`spaceName`, verbatim native `ownership` and `observedAt`, without Page calls,
+claim, takeover or input settlement. Delegation does not block this metadata
+query; missing or foreign IDs never fall back to a name or create a Space.
+It does not establish visible UI, user completion or permission for later input.
+
+The private operator view shows the last cached SDK observation without browser
+I/O. Hand-off, takeover, control waits and failed metadata refreshes invalidate
+that cache. Ordinary connection identity remains the attachment name and fixed
+ID; refreshed native names are separate observations. General connection/TUI
+ownership rendering and actual installed Keeper/UI proof remain follow-up work.

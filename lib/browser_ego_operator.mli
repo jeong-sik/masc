@@ -5,6 +5,7 @@ type recovery = {
   status : unit -> Browser_ego_input.status;
   busy : unit -> bool;
   assert_reset : generation:string -> (unit, string) result;
+  space_observation : unit -> Browser_ego_space_observation.t option;
 }
 type connection = { client_id:string; space:Browser_lane.ego_space; recovery:recovery }
 val schema : Yojson.Safe.t

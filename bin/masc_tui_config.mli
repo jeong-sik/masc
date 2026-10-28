@@ -1,4 +1,4 @@
-(* TUI settings read from the [tui] table of runtime.toml. See the .ml. *)
+(* TUI settings from runtime.toml and local Keeper list preferences. *)
 
 type opening = Overview | Last of Keeper_id.Keeper_name.t option | Keeper of Keeper_id.Keeper_name.t
 
@@ -13,6 +13,9 @@ type t = private {
       (ui_language_of_string); an unknown stored value is reported,
       never forced into a default. *)
   board_sort : string option;
+  keeper_list_sort : string option;
+  keeper_list_layout : string option;
+  keeper_list_error : string option;
   candle : string option;
   reduce_motion : bool option;
   lift_colours : bool option;
@@ -51,8 +54,8 @@ val record_chat_visit :
     target untouched. A visible commit retains its durability distinction. *)
 
 val load : base_path:string -> t
-(** Resolve and parse runtime.toml once, then extract an immutable snapshot of
-    all TUI settings. A later call reads current disk state; no process cache.
+(** Resolve and parse runtime.toml and the Keeper preference file into an
+    immutable snapshot. A later call reads current disk state; no process cache.
     Missing, unreadable or unparseable files leave optional settings [None]
     and [opening] at [Ok Overview]. [last_chat_keeper] retains read/parse errors
     so unread history is not presented as missing. Explicit [false] stays
@@ -193,6 +196,44 @@ val audio_input_device_of_doc : Keeper_toml_loader.toml_doc -> string option
     file read stays separate from the extraction. *)
 
 val set_board_sort : base_path:string -> string -> (unit, string) result
+
+val set_keeper_list_sort : base_path:string -> string -> (unit, string) result
+val set_keeper_list_layout : base_path:string -> string -> (unit, string) result
+(** Update one preference in the resolved config directory's
+    [tui-keepers.toml], under its own read-modify-write lock. A held lock is
+    reported without waiting. Symbolic links and special files are refused.
+    An error can mean a post-rename durability failure, so the stored value is
+    unconfirmed. *)
+
+type keeper_preference = Keeper_order of string | Keeper_view of string
+type keeper_preference_outcome =
+  | Preference_saved
+  | Preference_unconfirmed of string
+  | Preference_not_started of string
+type keeper_preference_completion = {
+  request_id : int;
+  preference : keeper_preference;
+  outcome : keeper_preference_outcome;
+}
+type keeper_preference_writer
+val create_keeper_preference_writer : unit -> keeper_preference_writer
+val submit_keeper_preference :
+  keeper_preference_writer -> on_request_id:(int -> unit) ->
+  sw:Eio.Switch.t option -> base_path:string ->
+  keeper_preference -> int
+(** Queue one immutable choice. A session writer commits choices in order on
+    a blocking worker; submission does not wait for the file lock. Before the
+    request is queued or its worker launched, [on_request_id] receives its
+    ID, which orders submissions including requests that cannot be started.
+    The callback must not yield; if it raises, no request is queued and its
+    exception propagates. Cancellation during submission also propagates, so
+    callers must register the ID in the callback to handle its completion. *)
+val drain_keeper_preferences :
+  keeper_preference_writer -> can_take:(unit -> bool) ->
+  apply:(keeper_preference_completion -> unit) -> unit
+val close_keeper_preference_writer : keeper_preference_writer -> unit
+(** Await submitted effects on graceful exit. A blocked filesystem or lock can
+    delay exit; closing does not manufacture a result for an active write. *)
 
 val set_audio_input_device :
   base_path:string -> string option -> (unit, string) result

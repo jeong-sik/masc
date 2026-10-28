@@ -1,13 +1,13 @@
 (test
  (name test_tui_keys)
  (modules test_tui_keys)
- (libraries masc_tui_system_logs masc.keeper_cost_coverage masc_tui_fusion_model masc_tui_surface_search masc_tui_approvals_model masc_tui_surface_navigation alcotest yojson masc masc.masc_goal masc.repo_manager
+ (libraries masc_tui_system_logs masc.keeper_cost_coverage masc_tui_fusion_model masc_tui_surface_search masc_tui_approvals_model masc_tui_surface_navigation alcotest eio eio_main yojson masc masc.masc_goal masc.repo_manager
   ;; The modify gate is checked against the schedule contract's own status
   ;; vocabulary, so the test reads that list instead of keeping a copy.
   masc.masc_schedule
   ;; [Standalone_lane.t] is what the lane rows and lane views carry.
   masc.runtime
-  masc_tui_mcp masc_tui_resource_catalog masc_tui_types masc_tui_keeper_list_model masc_tui_operator_projection masc_tui_lane_inventory
+  masc_tui_mcp masc_tui_resource_catalog masc_tui_types masc_tui_keeper_list_model masc_tui_config masc_tui_operator_projection masc_tui_lane_inventory
   masc_tui_keys masc_tui_keeper_mark masc_tui_memory_mark masc_tui_footer
   masc_tui_config_mark
   ;; The global quit test, so a detail tab key is checked against the one

@@ -159,7 +159,7 @@ let keeper_activity_word (activity : Keeper_list_model.activity) =
   | Deferred -> "deferred"
   | Tool_waiting -> "tool wait"
   | Model_waiting -> "model wait"
-  | Delegating -> "delegating"
+  | Delegate_result -> "result in"
   | Verifying -> "verify"
   | External_waiting -> "external"
   | Idle -> "idle"
@@ -174,7 +174,7 @@ let keeper_activity_style (activity : Keeper_list_model.activity) =
   | Preparing | Streaming | Running | Async_working _ | Deferred -> Theme.info ()
   | Tool_waiting -> Theme.warn ()
   | Model_waiting -> Theme.info ()
-  | Delegating -> Theme.category Theme.Slot_2
+  | Delegate_result -> Theme.category Theme.Slot_2
   | Verifying -> Theme.category Theme.Slot_1
   | External_waiting | Idle | Paused | Unknown -> Theme.recede ()
 
@@ -188,7 +188,7 @@ let keeper_badge_text (badge : Keeper_list_model.badge) =
         (if ownership_unknown > 0 then Printf.sprintf " (%d owner?)" ownership_unknown else "")
   | Badge_async_queued count -> Printf.sprintf "%s queued %d" glyph count
   | Badge_async_cancelling count -> Printf.sprintf "%s cancelling %d" glyph count
-  | Badge_delegate -> glyph ^ " delegate"
+  | Badge_delegate -> glyph ^ " delegate result"
   | Badge_verification -> glyph ^ " verify"
   | Badge_schedule -> glyph ^ " schedule"
 
@@ -206,7 +206,16 @@ let keeper_task_detail (row : Keeper_list_model.row) =
 
 let keeper_waiting_detail (row : Keeper_list_model.row) =
   match row.waiting with
-  | Keeper_list_model.Waiting_observed { Tui_decode.kwr_waiting_on = item :: rest; _ } ->
+  | Keeper_list_model.Waiting_observed { Tui_decode.kwr_waiting_on = (first :: rest as items); _ } ->
+      (* A delegate result's operator sentence includes the other Keeper and
+         its outcome. Do not hide that behind an earlier scheduled wake. *)
+      let item =
+        match List.find_opt
+            (fun item -> item.Tui_decode.kwi_wake_producer = Tui_decode.Wake_keeper_delegate)
+            items with
+        | Some result -> result
+        | None -> first
+      in
       let detail =
         if not (String.equal (String.trim item.Tui_decode.kwi_what) "") then item.kwi_what
         else if not (String.equal (String.trim item.kwi_next_action) "") then item.kwi_next_action
@@ -267,7 +276,7 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
     match activity with
     | Preparing | Running -> Masc_tui_answering.running_glyph ~frame
     | Held_call | Question | Confirmation | Failure | Streaming | Async_working _
-    | Deferred | Tool_waiting | Model_waiting | Delegating | Verifying | External_waiting
+    | Deferred | Tool_waiting | Model_waiting | Delegate_result | Verifying | External_waiting
     | Idle | Paused | Offline | Unknown -> Masc_tui_keeper_mark.activity_glyph activity
   in
   let name =
@@ -477,8 +486,8 @@ let keeper_display_entries rows layout =
   | Keeper_list_model.Compact | Keeper_list_model.Detailed ->
       List.map (fun (position, row) -> Keeper_display_row (position, row)) entries
   | Keeper_list_model.Grouped ->
-      let needs_you, active, waiting, inactive, unobserved = Keeper_list_model.group_counts rows in
-      [ Keeper_list_model.Needs_you, needs_you
+      let attention, active, waiting, inactive, unobserved = Keeper_list_model.group_counts rows in
+      [ Keeper_list_model.Attention, attention
       ; Keeper_list_model.Active, active
       ; Keeper_list_model.Waiting, waiting
       ; Keeper_list_model.Inactive, inactive
@@ -497,7 +506,7 @@ let keeper_display_entries rows layout =
 let keeper_group_heading_text ~available_cells rows group count =
   let glyph, label =
     match group with
-    | Keeper_list_model.Needs_you -> "!", "NEEDS YOU"
+    | Keeper_list_model.Attention -> "!", "ATTENTION"
     | Keeper_list_model.Active -> "\xe2\x96\xb6", "ACTIVE" (* ▶ *)
     | Keeper_list_model.Waiting -> "\xe2\x97\x8c", "WAITING" (* ◌ *)
     | Keeper_list_model.Inactive -> "\xe2\x97\x8b", "INACTIVE" (* ○ *)
@@ -508,25 +517,26 @@ let keeper_group_heading_text ~available_cells rows group count =
     | Keeper_list_model.Waiting ->
         Render_schedule.waiting_group_heading_detail ~available_cells ~group_count:count
           (Keeper_list_model.waiting_summary rows)
-    | Keeper_list_model.Needs_you | Keeper_list_model.Active
+    | Keeper_list_model.Attention | Keeper_list_model.Active
     | Keeper_list_model.Inactive | Keeper_list_model.Unobserved -> ""
   in
   Printf.sprintf "%s %s %d%s" glyph label count detail
 
 let keeper_group_heading_style = function
-  | Keeper_list_model.Needs_you -> Theme.bad ()
-  | Keeper_list_model.Active -> Theme.info ()
-  | Keeper_list_model.Waiting | Keeper_list_model.Inactive
-  | Keeper_list_model.Unobserved -> Theme.recede ()
+  | Keeper_list_model.Attention -> Theme.bad ()
+  | Keeper_list_model.Active -> Theme.ok ()
+  | Keeper_list_model.Waiting -> Theme.info ()
+  | Keeper_list_model.Inactive -> Theme.recede ()
+  | Keeper_list_model.Unobserved -> Theme.warn ()
 
 let keeper_view_summary rows layout sort =
   let mode = Keeper_list_model.layout_label layout ^ " · " ^ Keeper_list_model.sort_label sort in
   match layout with
   | Keeper_list_model.Grouped -> "  " ^ mode
   | Keeper_list_model.Compact | Keeper_list_model.Detailed ->
-      let needs_you, active, waiting, inactive, unobserved = Keeper_list_model.group_counts rows in
-      Printf.sprintf "  %s   ! %d needs you   \xe2\x96\xb6 %d active   \xe2\x97\x8c %d waiting   \xe2\x97\x8b %d inactive   ? %d unknown"
-        mode needs_you active waiting inactive unobserved
+      let attention, active, waiting, inactive, unobserved = Keeper_list_model.group_counts rows in
+      Printf.sprintf "  %s   ! %d attention   \xe2\x96\xb6 %d active   \xe2\x97\x8c %d waiting   \xe2\x97\x8b %d inactive   ? %d unknown"
+        mode attention active waiting inactive unobserved
 
 let render_keeper_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -573,6 +583,10 @@ let render_keeper_list (state : state) =
     (Theme.recede ()
      ^ keeper_view_summary model_rows state.keeper_list_layout state.keeper_list_sort
      ^ Ansi.reset);
+  Option.iter
+    (fun message -> box_line buf cols
+      (Theme.warn () ^ "  preferences: " ^ Terminal_text.single_line message ^ Ansi.reset))
+    state.keeper_list_preference_notice;
 
   (match (state.fleet_safety, state.fleet_safety_error) with
    | _, Some err ->
@@ -822,7 +836,7 @@ let render_keeper_list (state : state) =
     (function
       | Keeper_group_heading (group, count) ->
           box_line buf cols
-            (keeper_group_heading_style group ^ "  "
+            (keeper_group_heading_style group ^ Ansi.bold ^ "  "
              ^ keeper_group_heading_text ~available_cells:(inner - 2) model_rows group count
              ^ Ansi.reset)
       | Keeper_display_row (position, row) ->

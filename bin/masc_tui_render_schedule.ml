@@ -246,8 +246,8 @@ let waiting_group_parts ~compact (summary : Masc_tui_keeper_list_model.waiting_s
   ; part Masc_tui_keeper_list_model.Model_waiting "model" summary.model
   ; part Masc_tui_keeper_list_model.External_waiting
       (if compact then "ext" else "external") summary.external_wait
-  ; part Masc_tui_keeper_list_model.Delegating
-      (if compact then "deleg" else "delegate") summary.delegate
+  ; part Masc_tui_keeper_list_model.Delegate_result
+      (if compact then "result" else "delegate result") summary.delegate
   ; part Masc_tui_keeper_list_model.Verifying "verify" summary.verification
   ; (if summary.background = 0 then None
      else

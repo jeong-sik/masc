@@ -2823,6 +2823,19 @@ identity cancels that preparation. Repeated `e` shares the pending read; queued
 keys and paste are processed before its editor handoff. Preparation status stays
 in the footer. The later external editor and save are separate operations.
 
+On the Keepers surface, `v` cycles compact, detailed and grouped views; `o`
+cycles priority, recent activity, oldest activity, activity kind and name.
+Grouped view keeps the selected order within each status group. Both choices
+are stored in `tui-keepers.toml` in the resolved config directory and restored
+on the next start; a failed or unconfirmed save is reported. `J` opens the
+selected Keeper's Automation tab and its own schedule list. A schedule mark in
+the roster is an observed waiting-inventory item, not a complete schedule count.
+A delegate-result mark represents a queued terminal result; its sentence may
+name the other Keeper and outcome, but it is not an inventory of active delegations.
+The recent and oldest orders use the observed turn or waiting-inventory time;
+they are not measures of how long a Keeper has been blocked. The attention group
+includes failures that may be retrying as well as questions and held calls.
+
 ## Navigation
 
 ```

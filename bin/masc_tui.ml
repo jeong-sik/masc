@@ -874,6 +874,15 @@ let drain_chat_visit_completions state ~can_take =
       changed := !changed || applied);
   !changed
 
+let drain_keeper_preference_completions state ~can_take =
+  let changed = ref false in
+  Masc_tui_config.drain_keeper_preferences state.keeper_preference_writer ~can_take
+    ~apply:(fun completion ->
+      changed := true;
+      Option.iter (report_action state "error")
+        (apply_keeper_preference_completion state completion));
+  !changed
+
 let open_message_for_keeper ?(return_to = Keeper_chat_return_detail)
     ?(remember_home_chat = true) state
     keeper_name ~drain_queue =
@@ -11752,32 +11761,22 @@ let handle_acting_pane_click (state : state) ~base_path ~mailbox ~line =
          the way [t] opens it from the roster: the cursor lands on that
          keeper so the surface names the right one, and the snapshot is asked
          for afresh. *)
-      match
-        List.find_index
-          (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
-          state.keepers
-      with
-      | None -> ()
-      | Some index ->
-          state.keeper_cursor <- index;
+      match select_activity_keeper state keeper_name with
+      | Activity_keeper_missing -> ()
+      | Activity_keeper_selected | Activity_keeper_already_selected ->
           state.keeper_calls <- None;
           state.keeper_calls_error <- None;
           state.keeper_calls_scroll <- 0;
           launch_keeper_calls_load state ~mailbox keeper_name;
           transition_keeper_view state (Keepers Keeper_calls))
   | Masc_tui_acting_pane.Target_keeper keeper_name -> (
-      match
-        List.find_index
-          (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
-          state.keepers
-      with
-      | None -> ()
-      | Some index when state.keeper_cursor = index ->
+      match select_activity_keeper state keeper_name with
+      | Activity_keeper_missing | Activity_keeper_selected -> ()
+      | Activity_keeper_already_selected ->
           open_message_for_keeper ~return_to:state.msg_return state keeper_name
             ~drain_queue:(fun () -> drain_queued_message state ~base_path ~mailbox);
           launch_keeper_history_load state ~mailbox ~keeper_name;
-          state.view <- Keepers Keeper_message
-      | Some index -> state.keeper_cursor <- index)
+          state.view <- Keepers Keeper_message)
 
 (* Keyboard focus on the Activity pane (#37672): Ctrl-W puts a cursor on the
    first row a press acts on, [j]/[k] walk those rows and past the frame's
@@ -22899,6 +22898,8 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) state ~
   in
   let chat_changed = drain_chat_visit_completions state
       ~can_take:(fun () -> not (over_budget ()) && not (input_pending ())) in
+  let keeper_preferences_changed = drain_keeper_preference_completions state
+      ~can_take:(fun () -> not (over_budget ()) && not (input_pending ())) in
   let credential_changed =
     if over_budget () then false else
     let module Preparation = Masc_tui_credential_preparation in
@@ -22969,7 +22970,7 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) state ~
           Render_schedule.request render_schedule Render_schedule.Force);
         loop true
   in
-  loop (progress_changed || chat_changed || credential_changed)
+  loop (progress_changed || chat_changed || keeper_preferences_changed || credential_changed)
 
 (* What a size change costs, wherever it was noticed: the presenter's cached
    screen describes the old geometry, and the next frame has to be drawn
@@ -23218,6 +23219,23 @@ let apply_startup_settings state (tui_settings : Masc_tui_config.t) =
        (match board_sort_of_string value with
         | Some sort -> state.board_sort <- sort
         | None -> add_event state "error" ("Unknown saved Board sort: " ^ value)));
+  let note_keeper_preference_error message =
+    note_keeper_preference_startup_error state message;
+    add_event state "error" message in
+  (match tui_settings.keeper_list_sort with
+   | None -> ()
+   | Some value ->
+       (match Masc_tui_keeper_list_model.sort_of_string value with
+        | Some sort -> state.keeper_list_sort <- sort
+        | None -> note_keeper_preference_error ("Unknown saved Keeper order: " ^ value)));
+  (match tui_settings.keeper_list_layout with
+   | None -> ()
+   | Some value ->
+       (match Masc_tui_keeper_list_model.layout_of_string value with
+        | Some layout -> state.keeper_list_layout <- layout
+        | None -> note_keeper_preference_error ("Unknown saved Keeper view: " ^ value)));
+  Option.iter (fun reason -> note_keeper_preference_error ("Keeper view preferences unavailable: " ^ reason))
+    tui_settings.keeper_list_error;
   (match tui_settings.theme with
    | Some name when Masc_tui_theme_choice.apply name ->
        state.theme_choice <- Some name
@@ -23407,6 +23425,7 @@ let main
   in
 
   (* Cleanup on exit *)
+  let keeper_preference_exit_warnings = ref [] in
   let cleanup_started = Atomic.make false in
   let cleanup () =
     if Atomic.compare_and_set cleanup_started false true then begin
@@ -23415,6 +23434,9 @@ let main
          labelled argument as an identifier, so the exit writer is a named
          function rather than an inline closure. *)
       let finish () =
+        List.iter
+          (fun warning -> print_endline ("[masc-tui] " ^ Masc_tui_ansi.Terminal_text.single_line warning))
+          (List.rev !keeper_preference_exit_warnings);
         print_endline "Goodbye!";
         (* Tracking off after Goodbye: a terminal left in report mode keeps
            swallowing the wheel after this process is gone, and the farewell
@@ -31515,9 +31537,25 @@ and is loaded on demand through keeper_skill.
               launch_keeper_sandbox_logs state ~mailbox:async_messages
                 keeper.k_name)
        | Some "v" when state.view = Keepers Keeper_list ->
-           cycle_keeper_list_layout state
+           cycle_keeper_list_layout state;
+           let preference =
+             Masc_tui_config.Keeper_view (Masc_tui_keeper_list_model.layout_label state.keeper_list_layout) in
+           ignore (Masc_tui_config.submit_keeper_preference state.keeper_preference_writer
+             ~on_request_id:(fun request_id -> note_keeper_preference_submission state ~request_id preference)
+             ~sw:(Eio_context.get_switch_opt ()) ~base_path preference)
        | Some "o" when state.view = Keepers Keeper_list ->
-           cycle_keeper_list_sort state
+           cycle_keeper_list_sort state;
+           let preference =
+             Masc_tui_config.Keeper_order (Masc_tui_keeper_list_model.sort_label state.keeper_list_sort) in
+           ignore (Masc_tui_config.submit_keeper_preference state.keeper_preference_writer
+             ~on_request_id:(fun request_id -> note_keeper_preference_submission state ~request_id preference)
+             ~sw:(Eio_context.get_switch_opt ()) ~base_path preference)
+       | Some "J" when state.view = Keepers Keeper_list ->
+           (match selected_keeper state with
+            | None -> ()
+            | Some keeper ->
+                state.detail_tab <- Detail_automation;
+                open_keeper_detail state ~mailbox:async_messages keeper)
        | Some "v" when state.view = Keepers Keeper_detail && state.detail_tab = Detail_items ->
            cycle_item_browser state
        | Some " " when state.view = Keepers Keeper_detail && state.detail_tab = Detail_items ->
@@ -35001,6 +35039,12 @@ and is loaded on demand through keeper_skill.
     done
   in
   Fun.protect ~finally:(fun () ->
+    restore_terminal ();
+    Masc_tui_config.close_keeper_preference_writer state.keeper_preference_writer;
+    Masc_tui_config.drain_keeper_preferences state.keeper_preference_writer
+      ~can_take:(fun () -> true)
+      ~apply:(fun completion -> ignore (apply_keeper_preference_completion state completion));
+    keeper_preference_exit_warnings := List.rev (keeper_preference_unresolved_warnings state);
     Masc_tui_chat_visit.close state.home_chat_writer;
     ignore (drain_chat_visit_completions state ~can_take:(fun () -> true))) run_loop
 

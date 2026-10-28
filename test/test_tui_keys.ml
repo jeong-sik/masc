@@ -932,6 +932,182 @@ let test_keeper_list_detail_transition_preserves_selected_name () =
   transition_keeper_view state (Keepers Keeper_list);
   Alcotest.(check (option string)) "files return keeps the name" (Some "beta") (selected_roster_name state)
 
+let test_activity_keeper_selection_uses_the_current_roster () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.view <- Keepers Keeper_list;
+  state.keepers <- List.map roster_keeper ["alpha"; "beta"];
+  state.keeper_turns <- [roster_turn "beta"];
+  state.keeper_list_layout <- Masc_tui_keeper_list_model.Grouped;
+  state.keeper_list_sort <- Masc_tui_keeper_list_model.Name;
+  keeper_list_select_name state "alpha";
+  Alcotest.(check bool) "first activity selection switches to beta" true
+    (select_activity_keeper state "beta" = Activity_keeper_selected);
+  Alcotest.(check (option string)) "selection names the clicked Keeper" (Some "beta")
+    (selected_roster_name state);
+  Alcotest.(check bool) "second activity selection can open beta" true
+    (select_activity_keeper state "beta" = Activity_keeper_already_selected);
+  Alcotest.(check bool) "an unknown target is refused" true
+    (select_activity_keeper state "gone" = Activity_keeper_missing);
+  Alcotest.(check (option string)) "a missing target leaves beta selected" (Some "beta")
+    (selected_roster_name state);
+  transition_keeper_view state (Keepers Keeper_calls);
+  Alcotest.(check (option string)) "calls opens for beta" (Some "beta")
+    (selected_roster_name state);
+  Alcotest.(check bool) "the unsorted calls roster can select alpha" true
+    (select_activity_keeper state "alpha" = Activity_keeper_selected);
+  Alcotest.(check (option string)) "calls selection names alpha" (Some "alpha")
+    (selected_roster_name state)
+
+let test_keeper_preference_failures_are_retained_by_kind () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let next_id = ref 0 in
+  let submit preference =
+    incr next_id;
+    note_keeper_preference_submission state ~request_id:!next_id preference;
+    !next_id in
+  let complete request_id preference outcome =
+    let completion : Masc_tui_config.keeper_preference_completion = { request_id; preference; outcome } in
+    ignore (apply_keeper_preference_completion state completion)
+  in
+  let order_old = Masc_tui_config.Keeper_order "recent" in
+  let view = Masc_tui_config.Keeper_view "grouped" in
+  let old_id = submit order_old in
+  complete old_id order_old (Masc_tui_config.Preference_unconfirmed "write failed");
+  Alcotest.(check bool) "order failure retained" true
+    (Option.is_some state.keeper_list_order_save_error);
+  state.last_action <- None;
+  let view_id = submit view in
+  complete view_id view Masc_tui_config.Preference_saved;
+  Alcotest.(check bool) "unrelated view success and new input keep the order warning" true
+    (Option.is_some state.keeper_list_order_save_error
+     && Option.is_some state.keeper_list_preference_notice);
+  Alcotest.(check int) "the unresolved warning remains available at exit" 1
+    (List.length (keeper_preference_unresolved_warnings state));
+  let earlier = Masc_tui_config.Keeper_order "oldest" in
+  let latest = Masc_tui_config.Keeper_order "activity" in
+  let earlier_id = submit earlier in
+  let latest_id = submit latest in
+  complete earlier_id earlier Masc_tui_config.Preference_saved;
+  Alcotest.(check bool) "an older success cannot clear the warning while a newer order is pending" true
+    (Option.is_some state.keeper_list_order_save_error);
+  complete latest_id latest Masc_tui_config.Preference_saved;
+  Alcotest.(check bool) "the latest order success clears its warning" true
+    (Option.is_none state.keeper_list_order_save_error);
+  let view_id = submit view in
+  complete view_id view (Masc_tui_config.Preference_not_started "writer unavailable");
+  let order_id = submit latest in
+  complete order_id latest Masc_tui_config.Preference_saved;
+  Alcotest.(check bool) "order success does not clear a view failure" true
+    (Option.is_some state.keeper_list_view_save_error);
+  let view_id = submit view in
+  complete view_id view Masc_tui_config.Preference_saved;
+  Alcotest.(check bool) "the view success clears its own failure" true
+    (Option.is_none state.keeper_list_preference_notice
+     && keeper_preference_unresolved_warnings state = []);
+  note_keeper_preference_startup_error state "saved preference unreadable";
+  let order_id = submit latest in
+  complete order_id latest Masc_tui_config.Preference_saved;
+  Alcotest.(check bool) "a later save keeps the distinct startup observation" true
+    (Option.is_some state.keeper_list_preference_startup_error
+     && Option.is_some state.keeper_list_preference_notice);
+  let earlier_id = submit latest in
+  let latest_id = submit latest in
+  complete latest_id latest (Masc_tui_config.Preference_not_started "writer unavailable");
+  complete earlier_id latest Masc_tui_config.Preference_saved;
+  Alcotest.(check bool) "an older success cannot clear a later unstarted identical choice" true
+    (Option.is_some state.keeper_list_order_save_error);
+  let retry_id = submit latest in
+  complete retry_id latest Masc_tui_config.Preference_saved;
+  Alcotest.(check bool) "a later successful retry clears that failure" true
+    (Option.is_none state.keeper_list_order_save_error
+     && Option.is_some state.keeper_list_preference_startup_error)
+
+let test_keeper_preference_exit_keeps_drained_and_pending_failures () =
+  Eio_main.run (fun _ ->
+    let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+    let writer = state.keeper_preference_writer in
+    let submit preference =
+      ignore (Masc_tui_config.submit_keeper_preference writer
+        ~on_request_id:(fun request_id -> note_keeper_preference_submission state ~request_id preference)
+        ~sw:None ~base_path:"" preference) in
+    let drain () =
+      Masc_tui_config.drain_keeper_preferences writer ~can_take:(fun () -> true)
+        ~apply:(fun completion -> ignore (apply_keeper_preference_completion state completion)) in
+    submit (Masc_tui_config.Keeper_order "recent");
+    drain ();
+    submit (Masc_tui_config.Keeper_view "grouped");
+    Masc_tui_config.close_keeper_preference_writer writer;
+    drain ();
+    Alcotest.(check bool) "exit keeps the previously applied order failure" true
+      (Option.is_some state.keeper_list_order_save_error);
+    Alcotest.(check bool) "exit applies the view failure still waiting in the writer" true
+      (Option.is_some state.keeper_list_view_save_error);
+    Alcotest.(check int) "both failures are available to the exit reporter" 2
+      (List.length (keeper_preference_unresolved_warnings state)))
+
+let test_keeper_preference_cancelled_submission_and_exit () =
+  Eio_main.run (fun _ ->
+    let cancelled_state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+    let pending_state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+    let order = Masc_tui_config.Keeper_order "recent" in
+    let view = Masc_tui_config.Keeper_view "grouped" in
+    let previous : Masc_tui_config.keeper_preference_completion =
+      { request_id = -1; preference = order;
+        outcome = Masc_tui_config.Preference_unconfirmed "previous failure" } in
+    note_keeper_preference_submission cancelled_state ~request_id:(-1) order;
+    ignore (apply_keeper_preference_completion cancelled_state previous);
+    let previous_error = cancelled_state.keeper_list_order_save_error in
+    let cancellation_propagated = ref false in
+    let previous_retained = ref false in
+    let cleanup_completed = ref false in
+    let cancelled_receipts = ref [] in
+    let pending_receipts = ref [] in
+    let submit state sw preference =
+      Masc_tui_config.submit_keeper_preference state.keeper_preference_writer
+        ~on_request_id:(fun request_id -> note_keeper_preference_submission state ~request_id preference)
+        ~sw:(Some sw) ~base_path:"" preference in
+    let finish state receipts =
+      Masc_tui_config.close_keeper_preference_writer state.keeper_preference_writer;
+      Masc_tui_config.drain_keeper_preferences state.keeper_preference_writer
+        ~can_take:(fun () -> true) ~apply:(fun completion ->
+          receipts := completion :: !receipts;
+          ignore (apply_keeper_preference_completion state completion)) in
+    let switch_failure_propagated =
+      try
+        Eio.Switch.run (fun sw ->
+          (* The writer yields before touching the filesystem; cancelling now
+             leaves its pending choice to be settled during protected close. *)
+          ignore (submit pending_state sw view);
+          Eio.Switch.fail sw Exit;
+          (try ignore (submit cancelled_state sw order)
+           with Eio.Cancel.Cancelled Exit -> cancellation_propagated := true);
+          previous_retained := cancelled_state.keeper_list_order_save_error = previous_error;
+          (* Both closes and drains run in the cancelled context, as on exit. *)
+          finish cancelled_state cancelled_receipts;
+          finish pending_state pending_receipts;
+          cleanup_completed := true);
+        false
+      with Exit -> true in
+    Alcotest.(check bool) "submission propagates cancellation" true !cancellation_propagated;
+    Alcotest.(check bool) "the switch retains its original failure" true switch_failure_propagated;
+    Alcotest.(check bool) "submitting does not clear an earlier failure" true !previous_retained;
+    Alcotest.(check bool) "cancelled cleanup finishes" true !cleanup_completed;
+    Alcotest.(check bool) "the cancelled submission registered its receipt ID" true
+      (match !cancelled_receipts with
+       | [{ request_id; preference = Keeper_order "recent"; outcome = Preference_not_started _ }] ->
+           cancelled_state.keeper_list_order_save_request = Some request_id
+       | _ -> false);
+    Alcotest.(check bool) "the cancelled submission is reported at exit" true
+      (Option.is_some cancelled_state.keeper_list_order_save_error
+       && cancelled_state.keeper_list_order_save_error <> previous_error
+       && List.length (keeper_preference_unresolved_warnings cancelled_state) = 1);
+    Alcotest.(check bool) "protected close settles the earlier pending request" true
+      (match !pending_receipts with
+       | [{ request_id; preference = Keeper_view "grouped"; outcome = Preference_not_started _ }] ->
+           pending_state.keeper_list_view_save_request = Some request_id
+           && Option.is_some pending_state.keeper_list_view_save_error
+       | _ -> false))
+
 let test_keeper_list_search_and_mouse_share_order () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   state.view <- Keepers Keeper_list;
@@ -1746,6 +1922,14 @@ let () =
             test_keeper_list_cycles_preserve_selected_name
         ; Alcotest.test_case "Keepers detail transition preserves the selected name" `Quick
             test_keeper_list_detail_transition_preserves_selected_name
+        ; Alcotest.test_case "Activity keeps the requested Keeper through roster selection" `Quick
+            test_activity_keeper_selection_uses_the_current_roster
+        ; Alcotest.test_case "Keeper preference failures remain until the same kind succeeds" `Quick
+            test_keeper_preference_failures_are_retained_by_kind
+        ; Alcotest.test_case "Keeper preference exit keeps drained and pending failures" `Quick
+            test_keeper_preference_exit_keeps_drained_and_pending_failures
+        ; Alcotest.test_case "Keeper preference cancellation retains its exit warning" `Quick
+            test_keeper_preference_cancelled_submission_and_exit
         ; Alcotest.test_case "Keepers search and mouse share the ordered projection" `Quick
             test_keeper_list_search_and_mouse_share_order
         ; Alcotest.test_case "Keepers observation updates preserve the selected name" `Quick

@@ -92,9 +92,16 @@ let with_temp_base f =
   let config = Filename.concat masc "config" in
   Unix.mkdir masc 0o755;
   Unix.mkdir config 0o755;
+  (* A configured environment takes precedence over base_path. Never let a
+     fixture's writes escape to the operator's actual config directory. *)
+  let previous_config_dir = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  Unix.putenv "MASC_CONFIG_DIR" config;
   Fun.protect
     ~finally:(fun () ->
+      Unix.putenv "MASC_CONFIG_DIR" (Option.value previous_config_dir ~default:"");
       (try Sys.remove (Filename.concat config "runtime.toml") with _ -> ());
+      (try Sys.remove (Filename.concat config "tui-keepers.toml") with _ -> ());
+      (try Sys.remove (Filename.concat config "tui-keepers.toml.lock") with _ -> ());
       (try Unix.rmdir config with _ -> ());
       (try Unix.rmdir masc with _ -> ());
       try Unix.rmdir base with _ -> ())
@@ -495,6 +502,124 @@ let board_sort_cases =
            | Ok () -> () | Error message -> Alcotest.fail message);
           check_opt "changed back" (Some "painted") (Config.load ~base_path).candle)) ]
 
+let keeper_list_preferences_cases =
+  [ Alcotest.test_case "list preferences survive a new read and independent edits" `Quick
+      (fun () ->
+        with_storable_base (fun ~base_path ->
+          (match Config.set_keeper_list_sort ~base_path "oldest" with
+           | Ok () -> () | Error message -> Alcotest.fail message);
+          (match Config.set_keeper_list_layout ~base_path "grouped" with
+           | Ok () -> () | Error message -> Alcotest.fail message);
+          store_or_fail ~base_path (Some "gruvbox-dark");
+          let read = Config.load ~base_path in
+          check_opt "stored order" (Some "oldest") read.keeper_list_sort;
+          check_opt "stored view" (Some "grouped") read.keeper_list_layout;
+          (match Config.set_keeper_list_sort ~base_path "activity" with
+           | Ok () -> () | Error message -> Alcotest.fail message);
+          let read = Config.load ~base_path in
+          check_opt "changed order" (Some "activity") read.keeper_list_sort;
+          check_opt "view preserved" (Some "grouped") read.keeper_list_layout))
+  ; Alcotest.test_case "first preference does not need runtime.toml" `Quick (fun () ->
+        with_temp_base (fun ~base ~config:_ ->
+          (match Config.set_keeper_list_sort ~base_path:base "name" with
+           | Ok () -> () | Error message -> Alcotest.fail message);
+          let read = Config.load ~base_path:base in
+          check_opt "order stored" (Some "name") read.keeper_list_sort;
+          check_opt "no read error" None read.keeper_list_error))
+  ; Alcotest.test_case "a failed edit preserves the original preferences" `Quick (fun () ->
+        with_temp_base (fun ~base ~config ->
+          let path = Filename.concat config "tui-keepers.toml" in
+          let original = "keepers = { sort = \"name\", layout = \"grouped\" }\n" in
+          write path original;
+          Alcotest.(check bool) "unsupported table shape is reported" true
+            (Option.is_some (Config.load ~base_path:base).keeper_list_error);
+          Alcotest.(check bool) "unsafe inline-table edit refused" true
+            (Result.is_error (Config.set_keeper_list_sort ~base_path:base "recent"));
+          Alcotest.(check string) "original bytes remain" original (read_file path)))
+  ; Alcotest.test_case "wrong preference type is reported" `Quick (fun () ->
+        with_temp_base (fun ~base ~config ->
+          write (Filename.concat config "tui-keepers.toml")
+            "[keepers]\nsort = 42\nlayout = \"grouped\"\n";
+          let read = Config.load ~base_path:base in
+          check_opt "invalid order is absent" None read.keeper_list_sort;
+          check_opt "valid view is retained" (Some "grouped") read.keeper_list_layout;
+          Alcotest.(check bool) "invalid order is reported" true (Option.is_some read.keeper_list_error)))
+  ; Alcotest.test_case "a FIFO is refused without opening it" `Quick (fun () ->
+        with_temp_base (fun ~base ~config ->
+          Unix.mkfifo (Filename.concat config "tui-keepers.toml") 0o600;
+          let read = Config.load ~base_path:base in
+          Alcotest.(check bool) "special file is reported" true (Option.is_some read.keeper_list_error);
+          Alcotest.(check bool) "special file is not replaced" true
+            (Result.is_error (Config.set_keeper_list_sort ~base_path:base "name"))))
+  ; Alcotest.test_case "symbolic links, including dangling links, are preserved" `Quick (fun () ->
+        with_temp_base (fun ~base ~config ->
+          let path = Filename.concat config "tui-keepers.toml" in
+          let target = Filename.concat base "preferences-target.toml" in
+          let original = "[keepers]\nsort = \"oldest\"\n" in
+          Fun.protect ~finally:(fun () -> try Sys.remove target with _ -> ()) (fun () ->
+            write target original;
+            Unix.symlink target path;
+            List.iter (fun target_exists ->
+              if not target_exists then Sys.remove target;
+              Alcotest.(check bool) "link is reported on read" true
+                (Option.is_some (Config.load ~base_path:base).keeper_list_error);
+              Alcotest.(check bool) "link write is refused" true
+                (Result.is_error (Config.set_keeper_list_sort ~base_path:base "name"));
+              Alcotest.(check bool) "link remains a link" true
+                ((Unix.lstat path).Unix.st_kind = Unix.S_LNK);
+              Alcotest.(check string) "link target remains unchanged" target (Unix.readlink path);
+              if target_exists then Alcotest.(check string) "target bytes remain" original (read_file target)
+            ) [true; false])))
+  ; Alcotest.test_case "queued choices save in submission order" `Quick (fun () ->
+        with_temp_base (fun ~base ~config:_ ->
+          Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
+            let writer = Config.create_keeper_preference_writer () in
+            let registered = ref [] in
+            let submit preference = Config.submit_keeper_preference writer
+              ~on_request_id:(fun request_id -> registered := request_id :: !registered)
+              ~sw:(Some sw) ~base_path:base preference in
+            let first = submit (Config.Keeper_order "recent") in
+            let second = submit (Config.Keeper_view "grouped") in
+            let third = submit (Config.Keeper_order "oldest") in
+            let submitted = [first; second; third] in
+            Alcotest.(check (list int)) "registered IDs match returned IDs" submitted (List.rev !registered);
+            Config.close_keeper_preference_writer writer;
+            let results = ref [] in
+            Config.drain_keeper_preferences writer ~can_take:(fun () -> true)
+              ~apply:(fun result -> results := result :: !results);
+            Alcotest.(check int) "every request settled" 3 (List.length !results);
+            Alcotest.(check (list int)) "completion IDs follow submission order"
+              submitted (List.rev_map (fun (result : Config.keeper_preference_completion) -> result.request_id) !results);
+            Alcotest.(check bool) "every save succeeded" true
+              (List.for_all (fun (result : Config.keeper_preference_completion) ->
+                result.outcome = Config.Preference_saved) !results);
+            let read = Config.load ~base_path:base in
+            check_opt "latest order" (Some "oldest") read.keeper_list_sort;
+            check_opt "view survives" (Some "grouped") read.keeper_list_layout))))
+  ; Alcotest.test_case "an unstarted later choice keeps its submission identity" `Quick (fun () ->
+        with_temp_base (fun ~base ~config:_ ->
+          Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
+            let writer = Config.create_keeper_preference_writer () in
+            let registered = ref [] in
+            let submit ~sw preference = Config.submit_keeper_preference writer
+              ~on_request_id:(fun request_id -> registered := request_id :: !registered)
+              ~sw ~base_path:base preference in
+            let first = submit ~sw:(Some sw) (Config.Keeper_order "recent") in
+            let second = submit ~sw:None (Config.Keeper_order "oldest") in
+            Alcotest.(check (list int)) "registered IDs include the unstarted choice"
+              [first; second] (List.rev !registered);
+            Config.close_keeper_preference_writer writer;
+            let results = ref [] in
+            Config.drain_keeper_preferences writer ~can_take:(fun () -> true)
+              ~apply:(fun result -> results := result :: !results);
+            let results = List.rev !results in
+            Alcotest.(check bool) "later request can finish before the earlier write" true
+              (match results with
+               | [{ request_id = later; outcome = Config.Preference_not_started _; _ };
+                  { request_id = earlier; outcome = Config.Preference_saved; _ }] ->
+                   later = second && earlier = first && earlier < later
+               | _ -> false))))) ]
+
 let opening_cases =
   let parsed text = Config.opening_of_doc (doc_of text) in
   let name = Keeper_id.Keeper_name.to_string in
@@ -842,6 +967,7 @@ let language_mapping_cases =
 let () =
   Alcotest.run "tui_config"
     [ ("board_sort", board_sort_cases)
+    ; ("keeper_list_preferences", keeper_list_preferences_cases)
     ; ("opening", opening_cases)
     ; ("theme_of_doc", cases)
     ; ("audio_input_device_of_doc", device_cases)

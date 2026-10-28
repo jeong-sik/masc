@@ -1,8 +1,8 @@
 (** Pure activity, grouping, and ordering decisions for the Keepers list. *)
 
 type layout = Compact | Detailed | Grouped
-type sort = Priority | Recent | Name
-type attention = Needs_you | Active | Waiting | Inactive | Unobserved
+type sort = Priority | Recent | Oldest | Activity | Name
+type attention = Attention | Active | Waiting | Inactive | Unobserved
 
 type keeper_waiting_state = Masc.Tui_decode.keeper_waiting_state =
   | Keeper_waiting_idle
@@ -54,7 +54,9 @@ type activity =
   | Deferred
   | Tool_waiting
   | Model_waiting
-  | Delegating
+  | Delegate_result
+      (** A delegated operation's terminal result is queued for this Keeper;
+          this is not an observation of an in-progress delegation. *)
   | Verifying
   | External_waiting
   | Idle
@@ -105,6 +107,8 @@ val next_layout : layout -> layout
 val next_sort : sort -> sort
 val layout_label : layout -> string
 val sort_label : sort -> string
+val layout_of_string : string -> layout option
+val sort_of_string : string -> sort option
 val holds_awaiting_verification : keeper_name:string -> Masc.Tui_decode.task list -> bool
 (** Whether [keeper_name] is the assignee of a task that awaits its verdict.
     The row's current task cannot be relied on for this, since submission
@@ -113,9 +117,11 @@ val holds_awaiting_verification : keeper_name:string -> Masc.Tui_decode.task lis
 val primary_activity_of_row : row -> activity
 val badges_of_row : row -> badge list
 val group_of_row : row -> attention
-val order_rows : sort:sort -> row list -> row list
+val order_rows : layout:layout -> sort:sort -> row list -> row list
+(** Grouped layout orders groups first and applies [sort] within each group.
+    The same order is used for drawing, navigation, and search. *)
 val group_counts : row list -> int * int * int * int * int
-(** Counts in [Needs_you, Active, Waiting, Inactive, Unobserved] order. *)
+(** Counts in [Attention, Active, Waiting, Inactive, Unobserved] order. *)
 val waiting_summary : row list -> waiting_summary
 (** Count each primary waiting reason and, only for those rows, async running.
     Queued and cancelling async work, and async running on Active rows, does not

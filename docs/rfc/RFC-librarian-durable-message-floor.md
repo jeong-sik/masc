@@ -129,7 +129,7 @@ L3 을 한 PR 로 쓰지 않고 아래로 나눠 L2(#46568) 위에 쌓는다.
 |---|---|---|
 | L3a | 바닥의 규칙을 입출력 없는 상태기계 `Keeper_librarian_message_floor.Machine` 으로 뽑는다. Runtime 바닥(`Floor.infer`)은 이 기계에 답을 넣어 주는 쪽이 된다. 각 답을 기록해 두었다가 다시 넣으면 같은 다음 질문이 나온다 | #46577 |
 | L3b | Runtime 이 durable 단계를 준비·복원·검증하고, 보관된 답과 gate 판정으로 `memory_step` 을 찍는 입구 | #46580 |
-| L3c | 단계 request: 일반 history original 과 다른 scope·kind, 부모(거절된 범위 original)와 앞 단계를 digest 로 가리킴 | 예정 |
+| L3c | 단계 request: 일반 history original 과 다른 scope·ID·kind. 출처를 담지 않고 바닥의 기계가 다시 만든 질문을 받아 복원한다. 거절된 범위 original 과 앞 단계를 ID 와 digest 로 가리킨다. 호스트 증명과 질문 코덱은 history 요청과 같은 모듈을 쓴다 | #46587 |
 | L3d | 단계 gate 저널(`Keeper_librarian_original_gate.Make`)과, 기계에 답을 넣어 주는 쪽: 사슬 찾기·검증·복구, `Submit.resume` 로 실행 | 예정 |
 | L3e | `consume_one` 진입: 거절된 한 턴 범위 + L2 증거 → 사슬. 하강 시험(한 번만 하강, `Invalid_request`·열린 기록은 하강 없음)을 이 층에 둔다 | 예정 |
 
@@ -144,6 +144,8 @@ L3 을 한 PR 로 쓰지 않고 아래로 나눠 L2(#46568) 위에 쌓는다.
 
 - **served slot.** `Machine.answered` 는 단계를 처리한 슬롯(`Runtime.served_slot`: API 슬롯 또는 CLI 슬롯, id 공간이 서로 다르다)을 받는다. `Runtime.durable_memory_step` 은 슬롯을 받지 않는다. durable 답에서 슬롯을 어떻게 얻을지, 사슬에 이 값이 꼭 필요한지를 L3d 에서 정한다.
 - **gate 저널이 단계마다 도는 비용.** 단계 하나는 답 하나와 gate 저널 하나다. L4 전에 저널이 단계들의 결정을 합친 program 하나를 받는지 확인한다.
+- **첫 질문의 `current`.** 단계의 프롬프트 digest 가 `current` 를 묶는다. 그래서 사슬 안에서 한 값으로 고정돼야 복원이 같은 질문을 만든다. 단계는 출처를 담지 않으니 이 값이 어디서 오는지 정해야 한다. 후보는 범위 original 입력의 `current` 다. 게시 때 `Program.replay` 가 그사이 바뀐 Memory 때문에 거절하면 사슬을 어떻게 이을지는 L4 에서 정한다.
+- **결과 알림이 Keeper 를 깨우지 못한다.** `server_librarian_addon_wake.ml` 의 `namespace` 는 단계 ID 를 `Other` 로 분류한다. 단계 결과가 돌아오면(`Exact_result_delivered`) "no original execution namespace" 로 거절한다. 단계를 wake 에 더하려면 질문 없이 record 의 owner 와 destination 만 읽는 길이 필요하다. L3d 에서 한다.
 
 ## 4. 다른 안
 

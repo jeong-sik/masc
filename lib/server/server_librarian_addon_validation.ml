@@ -4,7 +4,7 @@ module Gate = Keeper_librarian_admission_gate
 module Owner = Lane_addon_tool_request_owner
 module Exact = Lane_addon_exact
 module History = Keeper_librarian_durable_request
-let ( let* ) = Result.bind
+open Result.Syntax
 let io work = Systhread_host.run work
 let undecided detail = Exact.Undecided {detail}
 let load_original ~store ~scope ~request_id =

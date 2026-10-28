@@ -17,7 +17,7 @@
 module State = Channel_gate_slack_state
 module Gw = Slack_gateway_state
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let ingress_refusal detail = Error (Gw.Retryable_refusal detail)
 
 type original_route = Triggered_route | Ambient_route

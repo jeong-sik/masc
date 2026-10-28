@@ -588,7 +588,7 @@ let keeper_runtime_trace_json (config : Workspace.config) (name : string)
 
 (* Wire parsing ends here; Owner commands use closed response constructors. *)
 let decode_direct_input_response args =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let fields expected = function
     | `Assoc fields when List.sort String.compare (List.map fst fields)=List.sort String.compare expected -> Ok fields
     | _ -> Error "input response must contain exactly its declared fields" in

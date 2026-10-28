@@ -11,7 +11,7 @@ type error = Invalid_binding of string | Binding_conflict | Store_unavailable of
 let error_to_string = function
   | Invalid_binding message | Store_unavailable message -> message
   | Binding_conflict -> "checkpoint operation identity was already bound to another action or slot"
-let ( let* ) = Result.bind
+open Result.Syntax
 let action_name = function Save -> "save" | Restore -> "restore"
 let schema =
   "CREATE TABLE receipts (operation_id TEXT PRIMARY KEY, action TEXT NOT NULL CHECK(action IN ('save','restore')), slot TEXT NOT NULL, epoch TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('pending','committed','refused','unknown')), detail TEXT, incarnation TEXT, change_count INTEGER, checkpoint_sha256 TEXT, CHECK((state='pending' AND detail IS NULL AND incarnation IS NULL AND change_count IS NULL AND checkpoint_sha256 IS NULL) OR (state='committed' AND detail IS NULL AND incarnation IS NOT NULL AND change_count IS NOT NULL AND change_count>=0 AND checkpoint_sha256 IS NOT NULL) OR (state IN ('refused','unknown') AND detail IS NOT NULL AND incarnation IS NULL AND change_count IS NULL AND checkpoint_sha256 IS NULL))) STRICT"

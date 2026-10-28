@@ -44,7 +44,7 @@ let refuse_check request reqd error =
   let json, status = check_error_response error in respond ~status request reqd json
 
 let decode_check_request ~config ~body =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* json = match Yojson.Safe.from_string body with
     | json -> Ok json
     | exception Yojson.Json_error _ ->
@@ -62,7 +62,7 @@ let decode_check_request ~config ~body =
     (Published_artifact_check.request_of_json json)
 
 let decode_share_request ~config ~body =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* json = match Yojson.Safe.from_string body with
     | json -> Ok json
     | exception Yojson.Json_error _ ->
@@ -131,7 +131,7 @@ let add_routes router =
     | Some _, Error error -> refuse request reqd error
     | Some id, Ok revision ->
       match Eio_unix.run_in_systhread (fun () ->
-        let ( let* ) = Result.bind in
+        let open Result.Syntax in
         let* shared = Store.is_shared ~base_path ~id in
         match actor, shared with
         | None, false -> Ok `Unauthorized_private_artifact

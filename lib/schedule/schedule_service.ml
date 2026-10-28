@@ -7,7 +7,7 @@ type service_error =
       ; now : float
       }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let service_error_to_string = function
   | Invalid_request msg -> "invalid request: " ^ msg

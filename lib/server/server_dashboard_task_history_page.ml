@@ -1,7 +1,7 @@
 type status = [ `OK | `Bad_request | `Conflict | `Service_unavailable ]
 let read ~config ~task_id ~limit ~cursor : status * Yojson.Safe.t =
   let module History = Task.History_page in
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let result =
     let* task_id=match task_id with
       | Some id when id<>"" && id=String.trim id -> Ok id

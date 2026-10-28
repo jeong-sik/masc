@@ -3,7 +3,7 @@ module Reconciliation = Keeper_shutdown_reconciliation
 module Store = Keeper_shutdown_store
 module Operation = Keeper_shutdown_types
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let permission = Masc_domain.CanAdmin
 let request_schema = "masc.keeper_shutdown.absence_acknowledgement.request.v1"
 let prefix = "/api/v1/keepers/"

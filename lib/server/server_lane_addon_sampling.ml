@@ -1,6 +1,6 @@
 module S = Mcp_protocol.Sampling
 module L = Llm_provider.Types
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type control = Output_limit | Stop_sequences | Sampling_tools | Temperature
 type failure =

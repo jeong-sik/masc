@@ -2,7 +2,7 @@ module Http = Http_server_eio
 module Session = Runtime_setup_login_session
 module Client = Runtime_setup_login_client
 module Receipt = Runtime_setup_login_receipt
-let ( let* ) = Result.bind
+open Result.Syntax
 let prefix = "/api/v1/setup/accounts/login/"
 
 let respond ~status ~request reqd message =

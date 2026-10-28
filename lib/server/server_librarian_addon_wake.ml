@@ -5,7 +5,7 @@ module Owner = Lane_addon_tool_request_owner
 module Store = Lane_addon_store
 module Runtime = Lane_addon_runtime
 module History = Keeper_librarian_durable_request
-let ( let* ) = Result.bind
+open Result.Syntax
 type namespace = Admission of string | History of string | Other
 let namespace id = match Capture.scope_of_request_id id with
   | Ok scope -> Admission scope

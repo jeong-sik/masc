@@ -5,7 +5,7 @@ module Session = Keeper_oauth_session
 module Store = Keeper_oauth_client_store
 module Declarations = Keeper_oauth_declarations
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* Attach-time hops -- discovery, client registration, the code exchange --
    are short JSON round trips of the same class as the Slack and Discord REST

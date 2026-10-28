@@ -728,7 +728,7 @@ let keeper_chat_history_json config name =
    regression or among rows stamped at the same instant. *)
 let keeper_chat_history_page_json ?max_total config name ~cursor =
   let base_dir = (config : Workspace.config).base_path in
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* { Keeper_chat_store.history_messages; next_cursor } =
     Keeper_chat_store.load_history_page_result ~base_dir ~keeper_name:name
       ?cursor ?max_total ()

@@ -8,7 +8,7 @@ let keeper_event_queue_label = "keeper_event_queue"
 let reaction_ledger_recorded_label = "recorded"
 let reaction_ledger_record_failed_label = "record_failed"
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let terminal_dispatch_result result =
   Result.map_error

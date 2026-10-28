@@ -167,7 +167,7 @@ let add_agent_api_routes router =
              reqd
          else
            let params =
-             let ( let* ) = Result.bind in
+             let open Result.Syntax in
              let* since_hours =
                positive_float_param
                  ~name:"since_hours"

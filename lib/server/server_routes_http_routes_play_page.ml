@@ -1517,7 +1517,7 @@ let seat_response ~config ~name =
   | Ok observation ->
     let snapshot = Auth.with_credential_transaction config.Workspace.base_path (fun transaction ->
       let now = Time_compat.now () in
-      let ( let* ) = Result.bind in
+      let open Result.Syntax in
       let* participation = Play_participation.current ~transaction ~base_path:config.base_path ~name in
       Ok (participation, controller_json ~transaction ~config ~now observation))
       |> Result.map_error Masc_domain.masc_error_to_string |> Result.join in

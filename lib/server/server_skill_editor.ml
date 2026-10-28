@@ -161,7 +161,7 @@ type target =
   ; access : access
   }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let access_to_string = function
   | Read_only -> "read_only"

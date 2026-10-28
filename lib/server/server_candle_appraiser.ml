@@ -2,7 +2,7 @@ module A = Candle_appraisal
 module Intent = Candle_appraisal_intent
 module Exact = Lane_addon_exact
 module Runs = Exact_lane_run_registry
-let ( let* ) = Result.bind
+open Result.Syntax
 let tool_name = "candle_appraise"
 let reserved_names () =
   List.map (fun (schema : Masc_domain.tool_schema) -> schema.name) Config.raw_all_tool_schemas

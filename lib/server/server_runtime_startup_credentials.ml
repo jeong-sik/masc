@@ -5,7 +5,7 @@
 
 let sync_admin_token_env (state : Mcp_server.server_state) =
   let base_path = (Mcp_server.workspace_config state).base_path in
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* raw_token, credential, source =
     Auth.prepare_startup_admin_token base_path
       ~raw_token:(Env_config_core.admin_token_opt ()) in

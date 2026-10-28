@@ -323,7 +323,7 @@ type events_request =
   }
 
 let parse_events_request request =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* er_operation_id = parse_operation_id_query request in
   let* er_since_seq = parse_since_seq request in
   let* er_start = parse_since_offset request in
@@ -360,7 +360,7 @@ let events_page_of_rows ~path ~redact_text query rows =
 let handle_get state request reqd = function
   | Turn_events { keeper_name; raw_turn_ref } ->
     let query =
-      let ( let* ) = Result.bind in
+      let open Result.Syntax in
       let* turn_ref = match Ids.Turn_ref.of_string raw_turn_ref with
         | Some turn_ref -> Ok turn_ref
         | None -> Error (invalid_input "turn_ref must identify a durable Keeper turn") in

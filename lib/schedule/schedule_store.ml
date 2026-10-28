@@ -130,7 +130,7 @@ exception
     ; recovery_err : string option
     }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* [primary_err] states why the primary yielded no state (unparseable, or
    absent while a mirror file remains). [recovery_err] is [None] when no

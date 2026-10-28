@@ -1,7 +1,7 @@
 open Masc
 module Source = Keeper_tool_result_source
 module Page = Keeper_tool_result_page
-let ( let* ) = Result.bind
+open Result.Syntax
 let error status detail = status, `Assoc ["error",`String detail]
 
 type request = {execution_id:string;offset:int;max_bytes:int;source_id:string option}

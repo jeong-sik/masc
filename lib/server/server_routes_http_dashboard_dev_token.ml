@@ -5,7 +5,7 @@
     -> journal removal. A failure after the journal write leaves the exact raw
     token available for an idempotent retry. *)
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let dashboard_dev_actor_name = "dashboard"
 

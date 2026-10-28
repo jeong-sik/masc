@@ -883,6 +883,24 @@ let scope_safe_arguments structure (definition : definition) ~last_registration 
       let position = loc.Location.loc_start.pos_cnum in
       position >= definition.binding_stop && position <= last_registration in
     let named name loc = if after loc && List.mem name !names then changed := true in
+    let contains_registration body =
+      let found = ref false in
+      let iterator =
+        { Ast_iterator.default_iterator with
+          expr = (fun self (e : expression) ->
+            (match e.pexp_desc with
+             | Pexp_apply (fn, args) ->
+               Option.iter (fun function_name ->
+                 match Option.bind (handler_expression function_name args) handler_ident with
+                 | Some name when String.equal name definition.name -> found := true
+                 | Some _ | None -> ()) (registration_function fn)
+             | _ -> ());
+            Ast_iterator.default_iterator.expr self e)
+        }
+      in
+      iterator.expr iterator body;
+      !found
+    in
     let iterator =
       { Ast_iterator.default_iterator with
         pat =
@@ -922,11 +940,13 @@ let scope_safe_arguments structure (definition : definition) ~last_registration 
           (fun self (e : expression) ->
             (match e.pexp_desc with
              | Pexp_extension _ when after e.pexp_loc -> changed := true
-             (* [M.(...)] is a local open too, but its synthetic [Pstr_open]
-                has a ghost location with pos_cnum = -1. Use the enclosing
-                expression's real location rather than that synthetic item. *)
-             | Pexp_struct_item ({ pstr_desc = Pstr_open _; _ }, _)
-               when after e.pexp_loc -> changed := true
+             (* [M.(...)] has a synthetic [Pstr_open] with pos_cnum = -1.
+                Its scope is only the body: use the enclosing expression's
+                location and check whether that body contains a registration
+                of this handler, rather than rejecting unrelated local opens. *)
+             | Pexp_struct_item ({ pstr_desc = Pstr_open _; pstr_loc; _ }, body)
+               when pstr_loc.loc_ghost && after e.pexp_loc && contains_registration body ->
+               changed := true
              | _ -> ());
             Ast_iterator.default_iterator.expr self e)
       }

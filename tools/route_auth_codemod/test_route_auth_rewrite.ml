@@ -1031,6 +1031,28 @@ let test_local_opens_cannot_change_named_permission () =
     ; "Other.(routes |> Http.Router.get \"/admin\" h)" ]
 ;;
 
+let test_unrelated_local_open_keeps_named_conversion () =
+  let source =
+    {|let permission = Masc_domain.CanAdmin
+let h request reqd = with_permission_auth ~permission
+  (fun state req reqd -> handle state req reqd) request reqd
+let other = Other.(42)
+let routes routes = routes |> Http.Router.get "/admin" h
+|} in
+  let expected =
+    {|let permission = Masc_domain.CanAdmin
+let h = (fun state req reqd -> handle state req reqd)
+let other = Other.(42)
+let routes routes = routes |> Server_route.get (Server_route.Permission permission) "/admin" h
+|} in
+  let rewritten, report = rewrite ~allow_named:true source in
+  Alcotest.(check string) "unrelated local open preserves conversion" expected rewritten;
+  Alcotest.(check int) "definition converted" 1 report.definitions;
+  Alcotest.(check int) "route converted" 1 report.converted;
+  Alcotest.(check int) "no route left alone" 0 (List.length report.unhandled);
+  check_parses rewritten
+;;
+
 let test_qualified_named_use_in_same_file_is_left_alone () =
   List.iter (fun use ->
     let source =
@@ -1204,6 +1226,7 @@ let () =
     ; ( "external and partial evaluation safety"
       , [ Alcotest.test_case "external reference is not changed by default" `Quick test_external_named_use_is_left_alone
         ; Alcotest.test_case "local opens cannot change named permission" `Quick test_local_opens_cannot_change_named_permission
+        ; Alcotest.test_case "unrelated local open preserves named conversion" `Quick test_unrelated_local_open_keeps_named_conversion
         ; Alcotest.test_case "qualified same-file use keeps a named wrapper" `Quick test_qualified_named_use_in_same_file_is_left_alone
         ; Alcotest.test_case "computed partial is never moved" `Quick test_computed_named_partial_is_never_moved
         ; Alcotest.test_case "partial registration effect order" `Quick test_partial_evaluation_order ] )

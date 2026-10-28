@@ -250,6 +250,29 @@ let test_runtime_attempt_discards_unfinished_text_and_keeps_tool_trail () =
       check bool "prior tool evidence is retained" true (contains content "Read")
   | posts -> failf "expected one final POST, got %d" (List.length posts)
 
+let test_streamed_response_owner_survives_retry () =
+  let edits = ref [] in
+  let response generation scope =
+    Masc.Keeper_chat_events.Observed_response
+      {response_generation=generation; response_scope=scope} in
+  let outcomes =
+    run_adapter ~now:(fun () -> 0.)
+      [ Masc.Keeper_chat_events.Run_started {run_id="run-owner";thread_id="thread-owner"}
+      ; Masc.Keeper_chat_events.Text_delta {text="old ";response=response 1 1}
+      ; Masc.Keeper_chat_events.Text_delta {text="newer ";response=response 1 2}
+      ; Masc.Keeper_chat_events.Agent_core_runtime_attempt_started
+          {runtime_id=Some "next-runtime";attempt_index=Some 1}
+      ; Masc.Keeper_chat_events.Text_delta {text="late ";response=response 1 2}
+      ; Masc.Keeper_chat_events.Text_delta {text="fresh";response=response 2 0}
+      ; Masc.Keeper_chat_events.Run_finished {run_id="run-owner"}
+      ]
+      ~post_message:(fun ~content:_ -> Ok "stream-message")
+      ~edit_message:(fun ~message_id:_ ~content -> edits := content :: !edits; Ok ())
+      ~send_message:(fun ~content:_ -> fail "the streamed message must be edited") in
+  check_single_ok "response ownership terminal result" outcomes;
+  check (list string) "retired response bytes do not return after retry" ["fresh"]
+    (List.rev !edits)
+
 let test_a_settled_adapter_delivers_nothing_the_turn_publishes_after_it () =
   let sends = ref [] in
   let outcomes =
@@ -683,6 +706,8 @@ let () =
             test_terminal_callback_once_for_fallback_post
         ; test_case "runtime retry drops stale text and keeps tool evidence" `Quick
             test_runtime_attempt_discards_unfinished_text_and_keeps_tool_trail
+        ; test_case "streamed response ownership survives retry" `Quick
+            test_streamed_response_owner_survives_retry
         ; test_case "empty terminal is local-only" `Quick
             test_adapter_empty_terminal_is_local_error
         ; test_case "completed effect sends no duplicate reply" `Quick

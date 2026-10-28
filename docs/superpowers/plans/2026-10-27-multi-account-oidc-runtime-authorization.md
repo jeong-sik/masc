@@ -156,6 +156,17 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 - 이 층이 하지 않는 것: 같은 writer lock 구역 안에서 `Intent_pending` 쓰기, 레코드 append, `Committed` 갱신을 잇는 순서(§8.2-1)와, 구역에 들어올 때마다 남은 intent를 다시 판정하는 일. 구역 안에서 판정에 쓸 사실(뒤 레코드, head)을 어디서 얻는지는 접힌 상태(`Authz_state.t`)가 생기는 B3가 사건을 처음 쓰면서 정한다. 이 층의 `Probe`는 열 때의 재생에 쓴다. 한 묶음의 append(설계 §10.1)에서 intent가 어느 레코드를 적는지도 묶음을 쓰는 층이 정한다. 이 층은 `previous_record_hash` 뒤 첫 레코드를 본다.
 - 시험은 저장소 상태와 로그의 조합마다 값과 닫는 일을 고정한다(없음, 맞음, 안 맞음의 갈래마다 한 건). 마지막 `Committed`가 로그에 없는데 intent가 닫히는 경우, head가 앞서 간 경우, 이미 포기한 intent를 다시 판정하지 않는 것, 사유가 둘인 경우의 순서도 본다. 닫는 항목을 저장소가 받아 intent가 비는 것과, 진짜 `authz.jsonl`을 `Authz_log.open_at_start`로 열어 먹인 결과가 목록으로 먹인 결과와 같은 것(끝이 잘린 마지막 줄 포함)도 본다.
 
+**B2d 범위** (`Fresh_bootstrap`)
+
+- B2d-1은 모드 사건 레코드다(#46686). 레코드 종류 `Mode_event`와 본문 `Authz_mode_event`를 더했고 병합됐다.
+- B2d-2는 `Authz_bootstrap.fresh_bootstrap`이다. 새 설치를 세우는 함수 하나이고 파일만 안다. 서버가 떠 있는지, 누가 부를 수 있는지, workspace id를 어디서 받는지는 모른다. 부르는 쪽(B3)이 정해서 인자로 넘긴다. 설정 디렉터리도 환경 변수를 읽지 않고 인자로 받는다.
+- 쓰기 전에 확인하고, 하나라도 어긋나면 아무것도 쓰지 않는다. (1) 외부 저장소 경로가 절대 경로이고 설정 디렉터리를 안다. (2) 설치 기록이 없거나 온전하다. (3) 새 저장소 경로에 파일, 디렉터리, 링크가 있으면 기록이 그 경로를 가리킬 때만 연다(설계 §8.4). (4) `authz.jsonl`에 레코드가 없다(위 B2 범위의 빈 로그 확인). (5) 기록이 가리키는 저장소가 있으면 `없음`으로 읽힌다. 로그가 빈 채로 `Committed`가 있는 저장소는 `Commit_not_in_log`라서 되감긴 설치로 보고 거절한다(§5.1 표의 `Multi_account | 없음 | 있음`).
+- 쓰는 순서는 설치 기록, 저장소 만들기, 남은 intent 포기, `Intent_pending`, 로그 레코드, `Committed`다. 기록은 가리키는 곳이 다를 때만 쓴다. 저장소는 `O_EXCL`로 0600을 주고 만든다. `Committed`는 로그에 붙이고 돌려받은 head의 해시로 만들어서 레코드보다 먼저 쓸 수 없다. 저장소 구역 안에 로그 구역을 둔다.
+- 죽는 자리마다 다시 부르면 이어지는지 본다. 기록만 쓴 것, 빈 저장소만 만든 것, `Intent_pending`만 쓴 것(로그에 레코드가 없다)은 다시 부르면 이어진다. 남은 intent는 판정 3으로 `Aborted_intent`를 써서 닫고 새 intent를 쓴다. 남은 intent가 다른 workspace를 적었어도 같다(§5.1: `Committed`가 된 것의 workspace만 유효하다). 레코드가 로그에 들어갔는데 `Committed`가 없으면 다시 부를 때 `Log_not_empty`로 거절하고, 다음 부팅이 판정 2로 승격한다.
+- 이 층이 하지 않는 것: BasePath lease 확인(로그 파일의 잠금은 작업 하나 동안만 걸려서 서버가 떠 있어도 열린다. 서버의 다음 append가 `Diverged`로 멈춘다), 저장소가 백업 밖인지 확인(백업 범위를 알 수 없다), 빈 Recovery_manifest와 초기 generation(없는 층의 것), A2의 `Multi_account_not_activatable` 거부를 거두는 일(B3).
+- 접기 함수가 아직 없어서 로그를 열 때 접기는 아무것도 하지 않는다. B3가 접기 함수를 만들 때 이 레코드를 거절하지 않는지 시험하고, `fresh_bootstrap`이 append 전에 같은 접기 함수를 돌리게 한다(`Authz_log.append`는 접기 함수를 돌리지 않는다).
+- 시험은 첫 실행이 남긴 것(설치 기록, 저장소 줄의 바이트와 0600, 로그 줄의 바이트, 값 `맞음`), 거절마다 파일이 그대로인 것, 죽은 상태마다 다시 불렀을 때의 결과(기록만, 빈 저장소, 남은 intent, 잘린 intent 줄, 잘린 레코드 줄, 다른 저장소를 가리키는 기록), 만들 수 없는 저장소와 쓸 수 없는 기록의 고장, 되감긴 로그의 거절(잃은 `Committed`의 해시)을 본다. 로그에 붙일 때만 실패하는 경우는 시험하지 않는다. 로그를 열 때 상위 디렉터리를 만들기 때문에, 열기는 되고 붙이기만 실패하는 파일 상태를 파일로 만들 수 없다.
+
 **B3 범위**
 
 - ID 발급(§4.1): Human `user_id`는 OS CSPRNG가 만든 128비트 이상의 값이고 `(iss, sub)`나 email에서 유도하지 않는다. 발급은 writer lock 안에서 현재 principal과 ledger의 `Delete` 기록을 대조한다. `user_id`가 겹치면 다시 뽑고, `service_id`가 겹치면 등록을 거부하고, ledger를 읽지 못하면 발급하지 않는다.

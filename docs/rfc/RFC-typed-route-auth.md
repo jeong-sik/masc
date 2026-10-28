@@ -103,6 +103,14 @@ val Server_route.get : 'h auth -> string -> 'h -> Router.t -> Router.t
 
 등록 함수는 종류에 맞는 `Server_auth` 래퍼를 핸들러에 씌우고, 종류를 같은 호출에서 기록해요. 종류와 핸들러를 따로 받는 함수는 라우터가 공개하지 않아요. 그래서 `Permission`이라 적고 인증 없는 핸들러를 넘기는 등록은 쓸 수 없어요. 등록 함수는 라우터 모듈의 함수자 `Router.Make_typed`가 만들어요. `Server_auth`는 `masc.server`에 있어서 라우터가 직접 부를 수 없으니, 래퍼 일곱 개를 함수자 인자(`Router.Wrappers`)로 받아요. `Server_route`가 이 함수자를 `Server_auth`로 적용하는 유일한 곳이에요. 아무것도 검사하지 않는 래퍼로 함수자를 적용하면 이 보장을 우회할 수 있어요. 그것은 타입이 아니라 리뷰가 막고, 적용이 한 곳뿐인지는 `rg Make_typed`로 보여요. 라우터의 `route` 레코드에는 `access : Route_access.t` 필드가 있고 인벤토리가 이것을 읽어요. 라우터의 옛 등록 함수(`Router.get` 등)는 `Route_access.Unclassified`를 기록하고, 마지막 층(A4d)에서 지워요. 그 뒤에는 모든 경로의 `access`가 이 함수자를 거친 값이에요.
 
+### 3.2.1 경로표는 하나의 상태예요
+
+`Router.routes`는 등록한 줄을 순서대로 모두 돌려주고, `Router.effective_routes`는 디스패치가 실제로 고르는 경로만 돌려줘요. 같은 메서드와 정확한 경로를 두 번 등록하면 나중 것이 이기고, 같은 접두사도 나중 것이 앞서요. 그래서 어느 경로에 어떤 종류가 적용되는지는 `effective_routes`를 읽어요(인벤토리와 C4가 읽는 표). 한 등록이 여러 메서드를 가지면 일부 메서드만 덮어써질 수 있고, 그때는 덮어써지지 않은 메서드만 남아요.
+
+등록 줄과 메서드 인덱스는 같은 공유 상태예요. 등록 함수에 넘긴 옛 라우터 참조로 `routes`, `route_count`, `resolve`를 불러도 같은 표를 봐요.
+
+지금 main에는 같은 경로가 두 번 등록된 곳이 있어요. `make_routes`가 `Server_routes_http_routes_workspace.add_routes`를 두 번 부르고, 9개 경로 10줄이 겹쳐요. 두 번째가 이기고 핸들러가 같아서 응답은 달라지지 않아요.
+
 ### 3.3 HTTP/2
 
 H2 게이트웨이의 갈래도 같은 `Server_route.auth`를 써요. 같은 경로를 HTTP/1과 HTTP/2가 서로 다른 종류로 등록하면 시험이 실패해요. 한쪽에만 있는 경로는 시험 안에 사유와 함께 이름으로 적어요. 그 목록을 고치면 리뷰에서 보여요.
@@ -121,6 +129,7 @@ H2 게이트웨이의 갈래도 같은 `Server_route.auth`를 써요. 같은 경
 3. 변환하는 동안 `Always_public` 경로 집합과 `is_public_read_path`가 양쪽으로 같은지 시험해요. 변환이 끝나면 목록을 지우고 시험도 함께 지워요.
 4. 등록할 때 종류를 안 적으면 컴파일이 실패해요.
 5. 종류와 핸들러를 따로 받는 등록 함수는 `http_server_eio.mli`에 없어요. `Router.Make_typed`를 적용하는 곳이 `server_route.ml` 한 곳인지는 `rg Make_typed`로 확인해요.
+6. 경로표 시험이 같은 경로의 재등록(권한이 다른 경우 포함), 일부 메서드만 덮어쓰는 경우, 정확한 경로와 접두사의 우선순위, 옛 참조로 읽는 목록·개수·조회를 확인해요.
 
 ## 5. 단계
 

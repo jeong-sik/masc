@@ -419,7 +419,20 @@ module Router : sig
 
   val create : unit -> t
   val route_count : t -> int
+
+  (** Every registration, in the order it was made. The router is one shared
+      table: a registration function adds to the router it is given, so an older
+      reference to that router sees the registration in [routes], [route_count]
+      and {!resolve} alike. A path registered twice has two rows here. *)
   val routes : t -> route list
+
+  (** The routes that dispatch can reach, in registration order. Dispatch uses
+      the route registered last for a method and an exact path, and the newest
+      route among equal prefixes, so a row that a later one replaced is left out,
+      and a route replaced for some of its methods keeps the others. A method the
+      router does not index is dropped. Read this, not {!routes}, to learn which
+      access applies to a request. *)
+  val effective_routes : t -> route list
 
   (** Generic add; prefer the typed wrappers below. *)
   val add

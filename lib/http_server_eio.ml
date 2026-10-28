@@ -662,6 +662,15 @@ module Router = struct
     prefix_root: prefix_node;
   }
 
+  (* Every registration, newest first. It is shared state like the method
+     index and the prefix trie, so a router that was passed to a registration
+     function and is used afterwards describes the same table in [routes] and
+     in [resolve]. *)
+  type route_log = {
+    mutable entries: route list;
+    mutable count: int;
+  }
+
   type t = {
     get: method_routes;
     post: method_routes;
@@ -669,8 +678,7 @@ module Router = struct
     delete: method_routes;
     options: method_routes;
     exact_paths: (string, unit) Hashtbl.t;
-    routes: route list;
-    route_count: int;
+    log: route_log;
   }
 
   let create_prefix_node () =
@@ -691,13 +699,12 @@ module Router = struct
       delete = create_method_routes ();
       options = create_method_routes ();
       exact_paths = Hashtbl.create 128;
-      routes = [];
-      route_count = 0;
+      log = { entries = []; count = 0 };
     }
 
-  let route_count router = router.route_count
+  let route_count router = router.log.count
 
-  let routes router = List.rev router.routes
+  let routes router = List.rev router.log.entries
 
   let insert_prefix_route route routes =
     let route_len = String.length route.path in
@@ -764,14 +771,35 @@ module Router = struct
               | Some routes -> add_to_method_routes Prefix route routes
               | None -> ())
            methods);
-    (* [add_kind] already returns the router and every caller threads it
-       (`router |> get ... |> post ...`), so the two fields the router owns
-       can come back on a new record. The method index and the prefix trie
-       stay in-place containers carried by [{ router with ... }]. *)
-    { router with
-      routes = route :: router.routes
-    ; route_count = router.route_count + 1
-    }
+    router.log.entries <- route :: router.log.entries;
+    router.log.count <- router.log.count + 1;
+    router
+
+  (* Dispatch gives a method and a path to the route registered last:
+     [Hashtbl.replace] for an exact path, and the newest route first among equal
+     prefixes. A registration that a later one replaced is still in [routes]. *)
+  let effective_routes router =
+    let seen = Hashtbl.create 256 in
+    let reachable method_ = Option.is_some (method_routes router method_) in
+    let replaced route method_ =
+      let key = route.kind, route.path, Httpun.Method.to_string method_ in
+      if Hashtbl.mem seen key
+      then true
+      else (
+        Hashtbl.add seen key ();
+        false)
+    in
+    List.filter_map
+      (fun route ->
+         match
+           List.filter
+             (fun method_ -> reachable method_ && not (replaced route method_))
+             route.methods
+         with
+         | [] -> None
+         | methods -> Some { route with methods })
+      router.log.entries
+    |> List.rev
 
   (* The functions below record [Route_access.Unclassified]. They stay until the
      last layer of the typed-route-auth stack moves every registration to

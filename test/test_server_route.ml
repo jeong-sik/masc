@@ -534,6 +534,124 @@ let test_typed_routes_answer_like_the_wrapper_by_hand ~strict () =
     dispatch_kinds
 ;;
 
+(* ---- one table: the log, the index and the effective routes ---- *)
+
+let resolved_access routes method_ path =
+  match Router.resolve routes (Httpun.Request.create method_ path) with
+  | `Matched route -> access_json route.Router.access
+  | `Method_not_allowed -> "method_not_allowed"
+  | `Not_found -> "not_found"
+;;
+
+let effective_rows routes =
+  List.map
+    (fun (route : Router.route) ->
+       route.path, List.map Httpun.Method.to_string route.methods, access_json route.access)
+    (Router.effective_routes routes)
+;;
+
+let rows_t = list (triple string (list string) string)
+let public_read = access_json Route_access.Public_read
+let read_auth = access_json Route_access.Read_auth
+let admin = access_json (Route_access.Permission Masc_domain.CanAdmin)
+
+(* A router that was passed to a registration function and is used afterwards
+   describes the same table in the list, the count and the lookup. *)
+let test_older_reference_sees_the_table () =
+  let first =
+    Server_route.get Server_route.Always_public "/a" plain_handler (Router.create ())
+  in
+  let second = Server_route.get Server_route.Read_auth "/b" state_handler first in
+  check int "count" 2 (Router.route_count first);
+  check int "list" 2 (List.length (Router.routes first));
+  check string "lookup" read_auth (resolved_access first `GET "/b");
+  check int "the newer reference agrees" (Router.route_count second) (Router.route_count first)
+;;
+
+let test_the_later_registration_wins () =
+  let routes =
+    Router.create ()
+    |> Server_route.get (Server_route.Permission Masc_domain.CanAdmin) "/p" state_handler
+    |> Server_route.get Server_route.Public_read "/p" state_handler
+  in
+  check int "both registrations are logged" 2 (List.length (Router.routes routes));
+  check rows_t "one row is effective, the later one" [ "/p", [ "GET" ], public_read ] (effective_rows routes);
+  check string "dispatch agrees" public_read (resolved_access routes `GET "/p")
+;;
+
+let test_replaced_for_some_methods_only () =
+  let routes =
+    Router.create ()
+    |> Server_route.add Server_route.Read_auth ~path:"/m" ~methods:[ `GET; `POST ] state_handler
+    |> Server_route.get Server_route.Public_read "/m" state_handler
+  in
+  check
+    rows_t
+    "the earlier route keeps the method it still serves"
+    [ "/m", [ "POST" ], read_auth; "/m", [ "GET" ], public_read ]
+    (effective_rows routes);
+  check string "GET goes to the later route" public_read (resolved_access routes `GET "/m");
+  check string "POST goes to the earlier route" read_auth (resolved_access routes `POST "/m")
+;;
+
+let test_exact_and_prefix_both_apply () =
+  let routes =
+    Router.create ()
+    |> Server_route.prefix_get Server_route.Read_auth "/a/" state_handler
+    |> Server_route.get Server_route.Public_read "/a/b" state_handler
+  in
+  check
+    rows_t
+    "both are effective"
+    [ "/a/", [ "GET" ], read_auth; "/a/b", [ "GET" ], public_read ]
+    (effective_rows routes);
+  check string "the exact path beats the prefix" public_read (resolved_access routes `GET "/a/b");
+  check string "another path under the prefix" read_auth (resolved_access routes `GET "/a/c");
+  (* The same string registered as an exact path and as a prefix is two routes. *)
+  let both =
+    Router.create ()
+    |> Server_route.prefix_get Server_route.Read_auth "/s" state_handler
+    |> Server_route.get Server_route.Public_read "/s" state_handler
+  in
+  check int "same string, exact and prefix" 2 (List.length (Router.effective_routes both))
+;;
+
+let test_prefix_precedence () =
+  let same_prefix =
+    Router.create ()
+    |> Server_route.prefix_get Server_route.Read_auth "/a/" state_handler
+    |> Server_route.prefix_get Server_route.Public_read "/a/" state_handler
+  in
+  check rows_t "equal prefixes: the newest" [ "/a/", [ "GET" ], public_read ] (effective_rows same_prefix);
+  check string "equal prefixes: dispatch agrees" public_read (resolved_access same_prefix `GET "/a/x");
+  let longest_first =
+    Router.create ()
+    |> Server_route.prefix_get Server_route.Public_read "/a/b/" state_handler
+    |> Server_route.prefix_get Server_route.Read_auth "/a/" state_handler
+  in
+  let longest_last =
+    Router.create ()
+    |> Server_route.prefix_get Server_route.Read_auth "/a/" state_handler
+    |> Server_route.prefix_get Server_route.Public_read "/a/b/" state_handler
+  in
+  List.iter
+    (fun (name, routes) ->
+       check int (name ^ ": both prefixes are effective") 2 (List.length (Router.effective_routes routes));
+       check string (name ^ ": the longest prefix wins") public_read (resolved_access routes `GET "/a/b/x");
+       check string (name ^ ": the shorter prefix elsewhere") read_auth (resolved_access routes `GET "/a/z"))
+    [ "longest registered first", longest_first; "longest registered last", longest_last ]
+;;
+
+let test_unindexed_method_is_not_effective () =
+  let routes =
+    Router.create ()
+    |> Server_route.add Server_route.Always_public ~path:"/h" ~methods:[ `HEAD ] plain_handler
+  in
+  check int "logged" 1 (List.length (Router.routes routes));
+  check rows_t "no method of it is reachable" [] (effective_rows routes);
+  check string "dispatch agrees" "method_not_allowed" (resolved_access routes `HEAD "/h")
+;;
+
 let () =
   run
     "server_route"
@@ -553,6 +671,14 @@ let () =
             `Quick
             test_ws_get_records_the_upgrade_reason
         ; test_case "inventory json" `Quick test_json_shape
+        ] )
+    ; ( "one table"
+      , [ test_case "an older reference sees the same table" `Quick test_older_reference_sees_the_table
+        ; test_case "the later registration of a path wins" `Quick test_the_later_registration_wins
+        ; test_case "a route replaced for some methods keeps the others" `Quick test_replaced_for_some_methods_only
+        ; test_case "an exact path and a prefix both apply" `Quick test_exact_and_prefix_both_apply
+        ; test_case "equal prefixes and the longest prefix" `Quick test_prefix_precedence
+        ; test_case "a method the router does not index" `Quick test_unindexed_method_is_not_effective
         ] )
     ; ( "dispatch"
       , [ test_case

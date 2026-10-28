@@ -1,7 +1,9 @@
-(* Prints every route of the HTTP/1 [Router] as JSON: kind, path, methods,
-   whether the handler upgrades to WebSocket, and the access the registration
-   recorded ([Route_access]). The auth baseline probe reads it so that the list
-   of probed paths comes from the router, not from a copy. *)
+(* Prints the routes of the HTTP/1 [Router] that dispatch can reach as JSON: kind,
+   path, methods, whether the handler upgrades to WebSocket, and the access the
+   registration recorded ([Route_access]). A registration that a later one
+   replaced is not listed; [registrations] counts every row that was registered.
+   The auth baseline probe reads it so that the list of probed paths comes from
+   the router, not from a copy. *)
 
 module Http = Masc.Http_server_eio
 
@@ -35,11 +37,12 @@ let () =
           ~sw
           ~clock:(Eio.Stdenv.clock env)
       in
-      let routes = Http.Router.routes router in
+      let routes = Http.Router.effective_routes router in
       print_endline
         (Yojson.Safe.pretty_to_string
            (`Assoc
-             [ "route_count", `Int (Http.Router.route_count router)
+             [ "route_count", `Int (List.length routes)
+             ; "registrations", `Int (Http.Router.route_count router)
              ; "routes", `List (List.map route_to_json routes)
              ]))))
 ;;

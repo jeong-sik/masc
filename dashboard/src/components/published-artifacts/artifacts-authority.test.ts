@@ -75,20 +75,19 @@ it('opens a public artifact without forwarding a stored token when workspace aut
   expect(reader.queryByRole('button', { name: '외부 공유 켜기' })).toBeNull()
   expect(reader.queryByRole('button', { name: '편집' })).toBeNull()
   expect(reader.queryByRole('button', { name: '목록으로' })).toBeNull()
+  expect(reader.getByRole('button', { name: '닫기' })).toBeTruthy()
   expect(reader.queryByRole('button', { name: '○ 미확인' })).toBeNull()
   expect(get).not.toHaveBeenCalled()
   expect(vi.mocked(getPublic).mock.calls.map(([path]) => path)).toEqual([`/api/v1/published-artifacts/${firstId}`])
-  const cancel = new Event('cancel', { cancelable: true })
-  fireEvent(screen.getByRole('dialog'), cancel)
-  expect(cancel.defaultPrevented).toBe(true)
-  expect(route.value.params.artifact).toBe(firstId)
 })
 
 it.each([
+  ['unverified', 'button'], ['unverified', 'escape'],
   ['tokenless', 'button'], ['tokenless', 'escape'],
   ['worker', 'button'], ['worker', 'escape'],
 ] as const)('returns to the workspace from a %s public reader using %s', async (access, action) => {
-  if (access === 'tokenless') clearStoredToken()
+  if (access === 'unverified') workspace.current.value = null
+  else if (access === 'tokenless') clearStoredToken()
   else vi.mocked(get).mockImplementation(async path => {
     throw new ApiRequestError({ method: 'GET', path, status: 403, detail: 'worker cannot administer artifacts' })
   })
@@ -97,7 +96,8 @@ it.each([
   render(html`<${ArtifactsSurface} />`)
   const dialog = await screen.findByRole('dialog')
   expect(within(dialog).getByText('외부 공유 열람')).toBeTruthy()
-  if (action === 'button') fireEvent.click(within(dialog).getByRole('button', { name: '목록으로' }))
+  if (access === 'unverified' || access === 'tokenless') expect(get).not.toHaveBeenCalled()
+  if (action === 'button') fireEvent.click(within(dialog).getByRole('button', { name: '닫기' }))
   else {
     const cancel = new Event('cancel', { cancelable: true })
     fireEvent(dialog, cancel)

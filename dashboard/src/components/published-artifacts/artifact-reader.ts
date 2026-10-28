@@ -59,7 +59,7 @@ export function ArtifactReader({ doc, fixedRevision, readOnly = false, readError
   draftRetention: ArtifactDraftRetention;
   authRevision: number; isCurrent: () => boolean; onMutation: (outcome: ArtifactCheckOutcome) => void;
   onPublication: (outcome: ArtifactPublicationOutcome) => void; onPublished: (publication: ArtifactPublication) => void;
-  onCheckChanged: () => void; onClose?: () => void
+  onCheckChanged: () => void; onClose: () => void
 }) {
   const dialog = useRef<HTMLDialogElement>(null)
   const [view, setView] = useState<'rendered' | 'source'>('rendered')
@@ -154,7 +154,7 @@ export function ArtifactReader({ doc, fixedRevision, readOnly = false, readError
     if (sharing && sharedCloseRequest.current?.().kind !== 'close') return
     if (appPending.current && !window.confirm('아직 저장하지 못한 앱 입력이 있습니다. 문서를 닫을까요?'))return
     if (editing) draftRetention.forget(editing.snapshot.identity)
-    onClose?.()
+    onClose()
   }
   return html`
     <dialog ref=${dialog} aria-labelledby="artifact-reader-title"
@@ -163,13 +163,15 @@ export function ArtifactReader({ doc, fixedRevision, readOnly = false, readError
         // Let the native dialog handle Escape before the shell's chat shortcut.
         if (event.key === 'Escape') event.stopPropagation()
       }}
-      onCancel=${(event: Event) => { event.preventDefault(); if (onClose) close() }}>
+      onCancel=${(event: Event) => { event.preventDefault(); close() }}>
     <article class="flex h-full min-w-0 flex-col" aria-label="아티팩트 본문">
       <header class="shrink-0 border-b border-[var(--color-border-default)] px-4 py-3 space-y-2">
         ${readError ? html`<p role="alert">문서 재조회 실패: ${readError} 이전에 읽은 문서와 작성 중인 원고를 유지합니다.</p>` : null}
         <${ExternalShareOutcomes} />
         <div class="flex flex-wrap items-center justify-between gap-2">
-          ${onClose ? html`<button type="button" aria-label="목록으로" onClick=${close}>← <span class="hidden sm:inline">목록으로</span></button>` : null}
+          ${readOnly
+            ? html`<button type="button" onClick=${close}>닫기</button>`
+            : html`<button type="button" aria-label="목록으로" onClick=${close}>← <span class="hidden sm:inline">목록으로</span></button>`}
           ${readOnly ? html`<span class="rounded border border-[var(--color-border-default)] px-2 py-0.5 text-xs text-[var(--color-fg-secondary)]">외부 공유 열람</span>` : null}
           <h2 id="artifact-reader-title" class="m-0 min-w-0 flex-1 truncate text-base font-semibold">${artifact.title}</h2>
           <div class="flex flex-wrap gap-3 text-xs">

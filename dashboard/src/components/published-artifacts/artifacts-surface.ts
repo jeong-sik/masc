@@ -106,8 +106,7 @@ export function ArtifactsSurface() {
     ${authority === null || publicSelection
       ? (retiredDrafts.length === 0 && selectedId
           ? html`<${SharedArtifactObservation} key=${`${owner.mount}:${selectedId}:${revision ?? ''}`}
-              authRevision=${authRevision} selectedId=${selectedId} revision=${revision} isCurrent=${ownsSession}
-              canClose=${authority !== null} />`
+              authRevision=${authRevision} selectedId=${selectedId} revision=${revision} isCurrent=${ownsSession} />`
           : html`<p role="status">${retiredDrafts.length ? '이전 원고를 처리한 뒤 문서를 읽습니다.' : '현재 작업 공간을 확인한 뒤 아티팩트를 읽습니다.'}</p>`)
       : html`<${ArtifactsObservation} key=${owner.mount} authRevision=${authRevision} isCurrent=${current}
           workspaceRoot=${authority.workspaceRoot} draftRetention=${draftRetention} allowReader=${retiredDrafts.length === 0}
@@ -135,19 +134,19 @@ const selectedArtifact = (id: string, revision: string | undefined) => {
     && selected.params.artifact === id && selected.params.revision === revision
 }
 
-function SharedArtifactReader({ doc, revision, authRevision, isCurrent, canClose }: {
-  doc: ArtifactDocument; revision: string | undefined; authRevision: number; isCurrent: () => boolean; canClose: boolean
+function SharedArtifactReader({ doc, revision, authRevision, isCurrent }: {
+  doc: ArtifactDocument; revision: string | undefined; authRevision: number; isCurrent: () => boolean
 }) {
   return html`<${ArtifactReader} doc=${doc} fixedRevision=${revision !== undefined} readOnly=${true}
     draftRetention=${noopDraftRetention} workspaceRoot=""
     checkState=${{ kind: 'unknown', message: '외부 공유 열람' }} authRevision=${authRevision}
     isCurrent=${isCurrent} onMutation=${() => {}} onCheckChanged=${() => {}}
     onPublication=${() => {}} onPublished=${() => {}}
-    onClose=${canClose ? () => navigate('workspace', { section: 'artifacts' }) : undefined} />`
+    onClose=${() => navigate('workspace', { section: 'artifacts' })} />`
 }
 
-function SharedArtifactObservation({ authRevision, selectedId, revision, isCurrent, canClose }: {
-  authRevision: number; selectedId: string; revision: string | undefined; isCurrent: () => boolean; canClose: boolean
+function SharedArtifactObservation({ authRevision, selectedId, revision, isCurrent }: {
+  authRevision: number; selectedId: string; revision: string | undefined; isCurrent: () => boolean
 }) {
   const [document, setDocument] = useState<Remote<ArtifactDocument> | null>(null)
   const [visitEpoch, setVisitEpoch] = useState(0)
@@ -181,7 +180,7 @@ function SharedArtifactObservation({ authRevision, selectedId, revision, isCurre
   const doc = document?.key === documentKey ? document : null
   if (doc === null) return html`<p role="status">문서를 불러오고 있습니다.</p>`
   if (!doc.data) return html`<p role="alert">${doc.kind === 'error' ? doc.message : '문서를 읽지 못했습니다.'}</p>`
-  return html`<${SharedArtifactReader} doc=${doc.data} revision=${revision} authRevision=${authRevision} isCurrent=${current} canClose=${canClose} />`
+  return html`<${SharedArtifactReader} doc=${doc.data} revision=${revision} authRevision=${authRevision} isCurrent=${current} />`
 }
 
 function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, allowReader, isCurrent, onMutation, onPublication }: {
@@ -404,7 +403,7 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, all
           : !doc.data ? html`<p role="alert">${doc.kind === 'error' ? doc.message : '문서를 읽지 못했습니다.'}</p>`
           : doc.data.kind === 'public' ? html`<${SharedArtifactReader} key=${`public-${documentKey.visit}`}
               doc=${doc.data.document} revision=${revision} authRevision=${authRevision}
-              isCurrent=${currentDocument} canClose=${true} />`
+              isCurrent=${currentDocument} />`
           : html`<${ArtifactReader} key=${documentKey.visit} doc=${doc.data.document} fixedRevision=${revision !== undefined}
               draftRetention=${draftRetention} workspaceRoot=${workspaceRoot}
               shareObservation=${doc.data.shareObservation}

@@ -18,7 +18,9 @@
     depend on the version of any library. A line holds [seq], [previous_hash],
     [at_ms], [author], [kind], [body], and [hash], in that order and with no
     spaces. [seq] and [at_ms] are decimal digits and are not range-checked:
-    [seq] comes from the head, and [at_ms] from the caller's clock. The hash is
+    [seq] comes from the head, and [at_ms] from the caller's clock, so [at_ms]
+    may be zero or negative, and a tool that reads numbers as doubles reads it
+    exactly only up to 2^53 - 1. The hash is
     the SHA-256 of ["masc-authz-record-v1\n"] followed by the line with its
     [hash] member cut out, closing brace kept. [test_authz_record] pins one line
     and its hash. *)

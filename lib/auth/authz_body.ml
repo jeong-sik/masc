@@ -25,7 +25,8 @@ let error_to_string = function
 
 let ( let* ) = Result.bind
 
-(* 2^53 - 1: with every integer below it, the largest a double holds exactly
+(* 2^53 - 1: the upper end of the range [-(2^53) + 1, 2^53 - 1], in which
+   implementations that read numbers as doubles agree on every integer
    (RFC 8259 section 6). *)
 let max_interoperable_int = (1 lsl 53) - 1
 
@@ -61,6 +62,8 @@ let object_ members =
     | None -> Ok (Object members))
 ;;
 
+(* Not tail recursive: the stack grows with the length of the list. A bound on
+   the size of a body belongs to the layer that accepts one. *)
 let rec all convert = function
   | [] -> Ok []
   | first :: rest ->

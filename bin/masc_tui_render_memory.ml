@@ -157,7 +157,7 @@ let maximum_rows_for_a_reading = 2
    commonest terminal, the Librarian row still ended "failed N". The fold
    draws exactly two rows, so it holds for any [maximum_rows_for_a_reading]
    of two or more. *)
-let clause_rows ~cols clauses =
+let clause_rows ?(full = false) ~cols clauses =
   let indent = "  " in
   let fold = Message_layout.cut_mark ^ " " in
   let lead_cells =
@@ -169,7 +169,7 @@ let clause_rows ~cols clauses =
       clauses
   in
   match rows with
-  | first :: rest when List.length rows > maximum_rows_for_a_reading ->
+  | first :: rest when not full && List.length rows > maximum_rows_for_a_reading ->
     let last = List.fold_left (fun _ row -> row) first rest in
     [ indent ^ first; fold ^ last ]
   | rows -> List.map (fun row -> indent ^ row) rows
@@ -233,15 +233,15 @@ type memory_context_projection =
   ; stalled_row : (int * string) option
   }
 
-let memory_context_lines ~cols ~detail ~unit ~input (k : Masc.Tui_decode_memory_health.memory_keeper_health) =
+let memory_context_lines ?(full = false) ~cols ~detail ~unit ~input (k : Masc.Tui_decode_memory_health.memory_keeper_health) =
   let input_rows = memory_input_lines ~cols ~unit input in
   let stored_rows =
     match k.mkh_read_error, k.mkh_source_read_error with
     | None, None ->
-      clause_rows ~cols
+      clause_rows ~full ~cols
         [ "Stored " ^ stored_amount unit (k.mkh_snapshot_bytes + k.mkh_source_snapshot_bytes)
         ; (match unit with Memory_usage.Tokens -> "estimated knowledge size" | Memory_usage.Bytes -> "rendered knowledge") ]
-    | Some _, _ | _, Some _ -> clause_rows ~cols ["Stored: unreadable"]
+    | Some _, _ | _, Some _ -> clause_rows ~full ~cols ["Stored: unreadable"]
   in
   let current_line =
     Printf.sprintf "  %s · %s · snapshot r%d · stored %s · updated %s"
@@ -459,7 +459,7 @@ let memory_context_lines ~cols ~detail ~unit ~input (k : Masc.Tui_decode_memory_
      breaking every row would double the block at the widths a terminal is
      likely to have. *)
   let alert_rows =
-    List.concat_map (fun sentence -> clause_rows ~cols [ sentence ]) alert_lines
+    List.concat_map (fun sentence -> clause_rows ~full ~cols [ sentence ]) alert_lines
   in
   let rows =
     if detail
@@ -468,7 +468,7 @@ let memory_context_lines ~cols ~detail ~unit ~input (k : Masc.Tui_decode_memory_
       @ input_rows
       @ [ facts_line; source_line;
           "  Recall block detail: open Keeper chat /context." ]
-      @ clause_rows ~cols librarian_clauses
+      @ clause_rows ~full ~cols librarian_clauses
       @ librarian_stalled_lines
       @ librarian_cause_lines @ context_lines
       @ (vision_line :: read_error_lines)
@@ -491,7 +491,7 @@ let memory_context_lines ~cols ~detail ~unit ~input (k : Masc.Tui_decode_memory_
               [ last_failure; failed ]
         with
         | [] -> []
-        | clauses -> clause_rows ~cols ("Librarian" :: clauses)
+        | clauses -> clause_rows ~full ~cols ("Librarian" :: clauses)
       in
       [ status_row ]
       @ stored_rows
@@ -1101,7 +1101,7 @@ let memory_overview_reading ~cols (state : state) =
     | Some keeper ->
         let input = Masc_tui_fetched.view_for ~equal:String.equal state.memory_input
             ~key:keeper.mkh_keeper_id in
-        let context = memory_context_lines ~cols ~detail:true ~unit:state.memory_unit ~input keeper in
+        let context = memory_context_lines ~full:true ~cols ~detail:true ~unit:state.memory_unit ~input keeper in
         [section
            ((if ko then "선택한 키퍼 · " else "Selected Keeper · ") ^ keeper.mkh_keeper_id)
            context.rows]

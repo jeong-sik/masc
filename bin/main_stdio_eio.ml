@@ -78,8 +78,9 @@ let run_cmd cli_base_path =
       Log.Server.warn "[Startup] original request body sweep stopped: %s"
         (Masc.Lane_addon_orphan_body_sweep.error_to_string error)
     | Ok report ->
-      Log.Server.info "[Startup] original request body sweep: removed=%d protected_digests=%d"
-        report.removed report.protected_digests);
+      Log.Server.info "[Startup] original request body sweep: removed=%d protected_digests=%d archive=%s"
+        report.removed report.protected_digests
+        (Masc.Lane_addon_orphan_body_sweep.archive_to_string report.archive));
   Server_startup_state.reset ();
   Server_startup_state.mark_blocking ();
   let initialized =

@@ -797,8 +797,9 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
      Log.Server.warn "[Startup] original request body sweep stopped: %s"
        (Masc.Lane_addon_orphan_body_sweep.error_to_string error)
    | Ok report ->
-     Log.Server.info "[Startup] original request body sweep: removed=%d protected_digests=%d"
-       report.removed report.protected_digests);
+     Log.Server.info "[Startup] original request body sweep: removed=%d protected_digests=%d archive=%s"
+       report.removed report.protected_digests
+       (Masc.Lane_addon_orphan_body_sweep.archive_to_string report.archive));
   (* Only the server samples. Sampling starts before [Eio_main.run] so the
      executor pool, which the main domain spawns while sampling, shares the
      profile and the boot-time loads are in the tables. The rate is a tenth

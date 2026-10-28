@@ -5,11 +5,16 @@ module Digests = Set.Make (String)
 module Body_keys = Set.Make (struct type t = string * string let compare = Stdlib.compare end)
 let ( let* ) = Result.bind
 
-type report = { protected_digests : int; removed : int }
+type archive = Archive_not_needed | Archive_read
+type report = { protected_digests : int; removed : int; archive : archive }
 type marks = { digests : Digests.t; active_bodies : Body_keys.t }
 type error =
   | Inventory_unavailable of string
   | Removal_incomplete of { removed : int; detail : string }
+
+let archive_to_string = function
+  | Archive_not_needed -> "not_needed"
+  | Archive_read -> "read"
 
 let error_to_string = function
   | Inventory_unavailable detail -> "original request inventory unavailable: " ^ detail
@@ -48,18 +53,25 @@ let run_with ~before_remove ~store =
     ~f:(fun marked ~directory_name ~file_name json ->
       let* record = Owner.decode_published ~directory_name ~file_name json in
       protect_record ~active:true marked record) |> Result.map_error unavailable in
-  let* marked = Store.fold_archived_tool_request_owners store ~init:marked
-    ~f:(fun marked ~directory_name ~file_name json ->
-      let* record = Owner.decode_published ~directory_name ~file_name json in
-      protect_record ~active:false marked record) |> Result.map_error unavailable in
   let* bodies = Store.tool_request_body_inventory_all store
     |> Result.map_error unavailable in
   let present = List.fold_left (fun present (entry : Store.tool_request_body_entry) ->
     Body_keys.add (entry.scope_directory,entry.request_digest) present) Body_keys.empty bodies in
   let* () = if Body_keys.subset marked.active_bodies present then Ok ()
     else Error (Inventory_unavailable "an active original request body is missing") in
+  (* Archived records only add protection, so they matter only for a live body
+     the live records leave unprotected. The archive holds every settled record
+     ever kept, so it is read only then. *)
+  let unprotected = List.exists (fun (entry : Store.tool_request_body_entry) ->
+    not (Digests.mem entry.request_digest marked.digests)) bodies in
+  let* marked,archive = if not unprotected then Ok (marked,Archive_not_needed) else
+    let* marked = Store.fold_archived_tool_request_owners store ~init:marked
+      ~f:(fun marked ~directory_name ~file_name json ->
+        let* record = Owner.decode_published ~directory_name ~file_name json in
+        protect_record ~active:false marked record) |> Result.map_error unavailable in
+    Ok (marked,Archive_read) in
   let rec remove removed = function
-    | [] -> Ok {protected_digests=Digests.cardinal marked.digests;removed}
+    | [] -> Ok {protected_digests=Digests.cardinal marked.digests;removed;archive}
     | (entry : Store.tool_request_body_entry) :: rest ->
       if Digests.mem entry.request_digest marked.digests then remove removed rest
       else begin
@@ -75,7 +87,8 @@ let run ~store = run_with ~before_remove:(fun _ -> ()) ~store
 let run_at_startup ~base_path =
   let runtime_root = Common.masc_dir_from_base_path ~base_path in
   match Unix.lstat runtime_root with
-  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok {protected_digests=0;removed=0}
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+    Ok {protected_digests=0;removed=0;archive=Archive_not_needed}
   | exception Unix.Unix_error (error, operation, _) ->
     Error (Inventory_unavailable (operation ^ ": " ^ Unix.error_message error))
   | stat when stat.Unix.st_kind = Unix.S_DIR ->

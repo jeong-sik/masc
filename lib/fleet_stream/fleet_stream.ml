@@ -1,4 +1,5 @@
 let schema_version = 1
+let stream_path = "/api/v1/stream/fleet"
 
 module Revision = struct
   type t = int

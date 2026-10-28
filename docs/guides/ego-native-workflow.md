@@ -225,6 +225,28 @@ explicit routing and UI limits. Installed MASC, Keeper dispatch and visible UI
 behavior for this extension remain unverified. See
 [the SDK inventory](ego-sdk-coverage.md) for evidence and remaining capabilities.
 
+## Goal-bound Space
+
+After `masc_browser_tabs` reports a live Ego connection, bind its observed
+client to an existing shared Goal with `masc_browser_session`:
+
+```json
+{"action":"bind_goal","goalId":"<existing-goal-id>","lane":"live","clientId":"<observed-client-uuid>"}
+```
+
+This records the original installation and numeric Space without taking control
+or creating a replacement. Repeating the same binding is idempotent; a different
+assignment or sharing the Space across Goals is refused. There is no unbind
+action on this tool. To read the stored binding, call:
+
+```json
+{"action":"goal_status","goalId":"<existing-goal-id>"}
+```
+
+The status is stored metadata and does not prove that the browser is connected.
+If the bound connection is unavailable, initial Goal discovery refuses instead
+of selecting another browser.
+
 ## Space control wait
 
 `masc_browser_act` with `action: "wait_for_control"`, the observed live

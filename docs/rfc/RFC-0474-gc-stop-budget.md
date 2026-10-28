@@ -190,6 +190,43 @@ memprof(`/api/v1/diagnostics/memprof`, 부팅 뒤 10분). 할당 757 GB, major 4
   - 2 worker 이상 진행 중일 때 들어온 읽기가 긴 대기의 대부분이면 가설이 맞다. 그때는 1.0 job 의 실행 시간과 읽기 domain 의 fiber 시간을 같은 창에서 비교해 weight 를 정한다.
   - 자리가 있을 때 들어온 읽기도 길게 기다리면 capacity 가 아닌 다른 원인이다(STW, domain 깨우기, systhread 가 잡은 domain lock).
 
+#### L4a 결과 (2026-10-28 01:26~02:27Z, `448409b`)
+
+읽기 2,406건을, 제출 순간 진행 중이던 weight 로 나눴다.
+
+| 진행 중이던 몫 | 건수 | 평균 대기 | 100 ms 넘는 대기 |
+|---|---|---|---|
+| 0 worker | 1,551 | 0.8 ms | 4 |
+| 1 worker | 717 | 17 ms | 17 |
+| 2 worker 이상 | 138 | 2,221 ms | 80 |
+
+- 100 ms 넘는 대기 101건 가운데 80건(79%)이 읽기 풀(worker 2)이 다 찼을 때 들어왔다. 가설이 맞다.
+- 선언 weight 0.5 이상인 읽기 job 1,663건의 실행 시간 평균은 260 ms 다. 0.5 미만 743건은 65 ms 다.
+- 이 창의 load 는 18~66 이었다. 다른 PR 의 빌드가 겹쳤다. 장벽 대기(minor_leave 19.0 s, stw_api 11.1 s / 60 s)와 TUI timeout 29건은 이 load 때문에 부풀었으므로, 전후 비교에 쓰지 않는다.
+- eio_posix 는 경로를 여는 `openat` 과 경로를 묻는 `fstatat` 을 systhread 로 보낸다(`lib_eio_posix/low_level.ml` 23·361·467행). 그동안 job 은 promise 를 기다리며 weight 를 쥐고 있다. 2026-10-27 의 rtev_fibers 창에서도 읽기 domain 의 fiber 는 `Promise.await` 에서 멈췄다.
+
+#### L4b — 읽기 lane 에서 weight 를 정하는 곳을 하나로
+
+읽기 lane 에 들어가는 제출을 모두 따라가 봤다(2026-10-28, main `6d83e98`).
+
+- `Dashboard_cache` 는 miss 와 만료된 항목의 계산을 `Executor_pool_ref.submit_or_inline` 으로 넣는다(`dashboard_cache.ml` 534·585행). weight 는 기본값 1.0 이다. 이런 계산 약 30곳이 GET 에서 읽기 lane 을 탄다. 대부분 파일 I/O 를 한다.
+- 계산 쪽은 대개 안에서 `Domain_pool_ref.submit_io_or_inline`(0.05)을 부른다. `lib/dashboard`·`lib/server` 에 76곳이다. 예: `/dashboard/gate`(`server_dashboard_http.ml` 189~191행).
+- 바깥 job 안의 제출은 그 자리에서 돈다(`executor_pool_ref.ml` 125행). 그래서 계산 쪽의 0.05 선언은 아무 말 없이 무시되고 1.0 이 남는다. weight 를 고르는 곳이 두 층인데, 바깥 층은 계산이 무엇을 하는지 모른다.
+- 그 밖에 GET 에서 1.0 으로 직접 넣는 무거운 읽기가 있다. 79~231 MB 저장소를 거꾸로 훑는 provider-input(`keeper_api` 900행), job 전체가 systhread 호출 하나인 `/ide/events`(`keeper_tool_call_index.ml` 102행), verification 목록, backlog 읽기다.
+- 기다리는 요청이 없는 갱신 fork 하나가 읽기 lane 으로 갔다(`server_routes_http_routes_provider_runs.ml` 181행). 같은 모양의 다른 fork 여섯 곳은 `Pool_lane.with_background` 를 쓴다. #46543 이 고친다.
+
+설계:
+
+1. weight 는 일을 아는 쪽이 한 번만 정한다. `Dashboard_cache.get_or_compute*` 와 `run_dashboard_compute` 는 계산을 받을 때 그 일이 무엇인지 닫힌 타입으로 같이 받는다. 예를 들어 `type work = Cpu of (unit -> 'a) | Io of (unit -> 'a)` 같은 모양이다. 캐시는 그 선언대로 한 번 제출한다.
+2. 계산 안의 중복 제출(위 76곳 가운데 캐시 계산 안에 있는 것)은 지운다. 선언이 한 곳에만 남는다. 호출부가 선언을 빠뜨리면 컴파일이 실패한다. 계산 쪽 숫자 weight 를 남겨 두는 대안은 두 층이 다시 어긋날 수 있어 받지 않는다.
+3. 무엇을 `Io` 로 선언할지는 L4 의 경고를 따른다. 0.05 job 안에서 Stdlib 채널로 크게 읽고 파싱하면, 그 domain 에 받아 둔 job 이 모두 멈춘다. 그래서 큰 읽기와 파싱이 섞인 계산(provider-input, verification 목록, backlog)은 `Cpu` 로 선언하거나, 읽기와 파싱을 나눈다. 나누는 쪽은 그다음 단계다.
+4. 숫자 weight(0.2 같은 값)는 쓰지 않는다. L4a 의 판정대로, 읽기 job 이 무엇을 하는지 선언하게 하는 것이 먼저다.
+
+검증:
+
+- 단위: 캐시가 선언대로 제출하는지 본다. `Io` 계산 둘이 하나뿐인 worker 에 같이 들어가고, `Cpu` 계산 둘은 줄을 서는지 `Pool_wait` 의 진행 중 weight 로 확인한다.
+- 운영: 배포 뒤 한 시간 동안 읽기 lane 의 `wait_by_in_flight_workers` 를 L4a 와 같은 방법으로 본다. 2 worker 이상에서 들어온 긴 대기가 줄어야 한다. load 가 L4a 창과 비슷한 창끼리만 비교한다.
+
 ## 5. 순서
 
 1. L1 — 코드가 작고, A/B 로 효과를 이미 봤다.
@@ -197,6 +234,7 @@ memprof(`/api/v1/diagnostics/memprof`, 부팅 뒤 10분). 할당 757 GB, major 4
 3. L3 — #46394·#46397 배포 뒤 다시 재고, 남은 경로만 고친다.
 4. RFC-0204 L3(#46374) — 읽기 풀. L1 예산 위에 쌓는다. 2026-10-27 운영 서버 2분 창에서 읽기 대기 p99 가 1초를 넘어 RFC-0204 §6 의 조건(100 ms)을 넘었다.
 5. L4 — 읽기 풀 뒤에 배경 풀의 대기를 다시 재고, 맨 바깥 제출부터 고친다.
+6. L4b — 읽기 lane 의 캐시 계산이 일의 종류를 타입으로 선언하게 한다. #46543(갱신 fork 의 lane)은 이것과 따로 먼저 들어간다.
 
 ## 6. 하지 않는 것
 

@@ -28,6 +28,11 @@
     (design 8.4): until one is committed, the only intent that comes is a
     [Fresh_bootstrap]. Once one is committed, a second [Fresh_bootstrap] is
     refused, and an [Off] or [Reactivate] names the workspace that it set up.
+    The file keeps that workspace and not the mode. The design does not say
+    which mode event may follow which, so an [Off] or a [Reactivate] may repeat
+    or come in any order, and an authorization change may follow an [Off]. The
+    layers that write them decide the order, and a rule added here later would
+    refuse files that are taken today.
     A line that breaks a rule is refused when it is appended ({!Rejected}) and
     when the file is opened ({!Line_rejected}). *)
 
@@ -256,7 +261,10 @@ val append_error_to_string : append_error -> string
 
     A missing file and its directory are created by the first append, and the
     rules let only a [Fresh_bootstrap] intent be the first entry. The creation
-    is not exclusive: it does not fail when the path already holds a file. The
-    exclusive creation that design 8.4 asks of a fresh bootstrap belongs to the
-    layer that sets the store up. It creates the file before the first append. *)
+    is not exclusive: it does not fail when the path already holds a file. Two
+    writers that both start from a missing file do not both write: the one that
+    appends second finds the file where the first left it, gets [Diverged], and
+    writes nothing. The exclusive creation that design 8.4 asks of a fresh
+    bootstrap belongs to the layer that sets the store up. It creates the file
+    before the first append. *)
 val append : writer -> entry list -> (State.t, append_error) result

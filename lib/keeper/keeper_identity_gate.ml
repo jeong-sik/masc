@@ -33,7 +33,7 @@ let provider_authority_sha256 (provider : Provider.t) =
          |> List.sort compare
          |> List.map (fun (key, value) -> `List [ `String key; `String value ]))
     ] in
-  Digestif.SHA256.(authority |> Yojson.Safe.to_string |> digest_string |> to_hex)
+  Agent_core_sha256.(authority |> Yojson.Safe.to_string |> digest_string |> to_hex)
 ;;
 
 let gate_input ~provider ~remote_name ~arguments ~input_schema ~read_only =

@@ -57,7 +57,6 @@ type http_dataset =
   | Dataset_board_hearths of ((string * int) list, string) result
   | Dataset_planning of (planning_snapshot, string) result
   | Dataset_system_logs of (system_log_snapshot, string) result
-  | Dataset_fleet_safety of (Masc.Tui_decode.fleet_safety_reading, string) result
   | Dataset_runtime_quota of
       (Masc.Tui_decode.runtime_option list, string) result
       * (Masc.Tui_decode_usage.provider_usage_windows, string) result
@@ -81,7 +80,6 @@ let http_dataset_key = function
   | Dataset_board_hearths _ -> Surface_read_order.Board_hearths
   | Dataset_planning _ -> Surface_read_order.Planning_data
   | Dataset_system_logs _ -> Surface_read_order.System_logs_data
-  | Dataset_fleet_safety _ -> Surface_read_order.Fleet_safety_data
   | Dataset_runtime_quota _ -> Surface_read_order.Runtime_quota_data
   | Dataset_keeper_usage _ -> Surface_read_order.Keeper_usage_data
   | Dataset_provider_history _ -> Surface_read_order.Provider_history_data
@@ -94,7 +92,6 @@ let http_dataset_received = function
   | Dataset_board_hearths result -> Result.is_ok result
   | Dataset_planning result -> Result.is_ok result
   | Dataset_system_logs result -> Result.is_ok result
-  | Dataset_fleet_safety result -> Result.is_ok result
   | Dataset_runtime_quota (runtimes, quota) -> Result.is_ok runtimes && Result.is_ok quota
   | Dataset_keeper_usage result -> Result.is_ok result
   | Dataset_provider_history (_, result) -> Result.is_ok result
@@ -122,7 +119,6 @@ type 'identity http_scoped_surface_readings = {
   http_board_hearths: ((string * int) list, string) result option;
   http_planning: (planning_snapshot, string) result option;
   http_system_logs: (system_log_snapshot, string) result option;
-  http_fleet_safety: (Masc.Tui_decode.fleet_safety_reading, string) result option;
   (* [None] on surfaces that do not read the roster or its Candle summary;
      leaving it out keeps the observation until a relevant refresh. *)
   http_keeper_roster: keeper_roster_observation option;
@@ -762,6 +758,8 @@ type async_msg =
     }
   | Observer_received of string option * Masc_tui_observer.delivery list
   | Observer_closed of (unit, Masc_tui_http.observer_error) result
+  | Fleet_stream_view of Masc_tui_fleet_stream.view
+  | Fleet_stream_reader_ended of string
   | Original_task_read_done of Masc_tui_types.task_inspection_request
       * (Masc_tui_original_task_read.task_snapshot, Masc_tui_original_task_read.error) result
   | Original_task_history_done of Masc_tui_types.task_inspection_request
@@ -1013,6 +1011,8 @@ let rec workspace_message_is_read = function
   | Observer_opened _
   | Observer_received _
   | Observer_closed _
+  | Fleet_stream_view _
+  | Fleet_stream_reader_ended _
   | Keeper_chat_dispatch_started _
     -> true
   | Voice_wizard_saved _
@@ -1217,6 +1217,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Account_login_removal (_, _, _, _, _) | Github_login_lines (_, _)
     | Github_login_finished (_, _) | Github_token_saved (_, _)
     | Observer_opened _ | Observer_received (_, _) | Observer_closed _
+    | Fleet_stream_view _ | Fleet_stream_reader_ended _
     | Task_dispatch_completed _ -> None in
   if workspace_reply_admitted state ~authority ~reading ~kind:Workspace_observation
   then None else inspect message
@@ -1352,4 +1353,5 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Account_login_event (_, _, _) | Account_login_json (_, _, _, _)
   | Account_login_removal (_, _, _, _, _) | Github_login_lines (_, _)
   | Github_login_finished (_, _) | Github_token_saved (_, _) | Observer_opened _
-  | Observer_received (_, _) | Observer_closed _ | Task_dispatch_completed _ -> message
+  | Observer_received (_, _) | Observer_closed _ | Fleet_stream_view _
+  | Fleet_stream_reader_ended _ | Task_dispatch_completed _ -> message

@@ -1636,17 +1636,6 @@ let delete_preset ~(host : string) ~(port : int) ~(name : string) : (string, str
       ("preset delete unanswered — the preset may be gone; \
         check the preset list before retrying: " ^ detail)
 
-(* The fleet reading answers what the keeper list cannot: a keeper that never
-   started has no row, so the roster shows nine keepers whether the tenth is
-   absent by design or blocked. *)
-let load_fleet_safety ~(host : string) ~(port : int) :
-    (Tui_decode.fleet_safety_reading, string) result =
-  match fetch_fleet_safety ~host ~port with
-  | Error err -> Error ("fleet safety load failed: " ^ err)
-  | Ok json ->
-      Masc_tui_response_decode.run ~name:"fleet.safety.decode_wait" (fun () ->
-        Tui_decode.decode_fleet_safety json)
-
 (** Load the live keeper roster. Truncation is carried into the typed roster
     rather than dropped: a clamped list cannot answer whether a keeper the TUI
     knows from disk has a running fiber, and the lifecycle actions depend on

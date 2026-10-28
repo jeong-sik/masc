@@ -1463,94 +1463,6 @@ val decode_runtime_resolved :
 (** Decode the shared resolved-runtime document once, then project its runtime
     catalogue and keeper assignments for the picker, both in server order. *)
 
-(** The fleet scan's [blocker], read as the reason it names. A name this
-    build does not know is kept by name: a newer server's reason is still a
-    reason, and is drawn as the server wrote it rather than dropped. *)
-type fleet_blocker =
-  | Blocker of Keeper_fleet_blocker.t
-  | Unrecognised_blocker of string
-
-(** How the fleet scan graded the fleet ({!Keeper_fleet_grade}).
-    [Unrecognised_fleet_status] keeps a word this build does not know as the
-    server wrote it. *)
-type fleet_status =
-  | Fleet_grade of Keeper_fleet_grade.t
-  | Unrecognised_fleet_status of string
-
-type fleet_safety = {
-  fs_status : fleet_status;
-  fs_blocker : fleet_blocker option;
-  fs_operator_action_required : bool;
-  fs_bootable_count : int;
-  fs_running_count : int;
-  fs_executable_count : int;
-  fs_failing_count : int;
-  fs_recovering_count : int;
-  fs_turn_configuration_error_count : int;
-  fs_official_client_recovery_required_count : int;
-  fs_paused_count : int;
-  fs_target_reaction_capacity : int;
-  fs_reaction_capacity_shortfall : int;
-  fs_bootable_names : string list;
-  fs_running_names : string list;
-  fs_executable_names : string list;
-  fs_turn_configuration_error_names : string list;
-  fs_official_client_recovery_required_names : string list;
-  fs_active_task_owner_without_fiber_count : int;
-  fs_completion_authority_pending_count : int;
-  fs_active_task_owner_scan_error_count : int;
-      (** Sources the task-owner scan could not read, so the count above is
-          short by whatever they held. *)
-}
-(** The operator reading of the keeper fleet, as [/health?full=1] reports it.
-
-    Every count here answers "how many keepers are not doing what the fleet
-    intends", which is the question the keeper list cannot answer: that list
-    holds one row per running keeper, so a keeper that failed to start is
-    absent rather than shown as failed.
-
-    The three name lists are carried raw, and they answer three different
-    questions, so a reader that wants one has to name which. Keepers that
-    never started are [bootable] minus [running]. Keepers that are running
-    but cannot take a turn are [running] minus [executable] — a fiber is
-    alive, its durable demand is not admissible. Collapsing the two reads a
-    live fleet as a stopped one. *)
-
-type fleet_reading_freshness =
-  | Fleet_current
-      (** The health snapshot is [ready]: the latest refresh measured it, and
-          within the snapshot's time to live. *)
-  | Fleet_last_good of { measured_at_unix : float; stale_reason : string }
-      (** The snapshot is [stale]: its observation was invalidated, a refresh
-          timed out or raised, or no refresh ran within the time to live.
-          A successful scan invalidated while running may supply the measured
-          reading without certifying the current generation. [measured_at_unix]
-          is when that observation completed (unix seconds on the server's
-          clock); [stale_reason] is the server's word for why ([invalidated],
-          [last_good_refresh_timeout], [last_good_refresh_error], [ttl_expired]).
-          The reason is retained as a string, including unrecognised values. *)
-  | Unrecognised_snapshot_status of string
-      (** A snapshot status this build has no reading for, beside a fleet
-          reading, kept as the server spelled it. The server's other words
-          ([warming], [timeout], [error]) do not arrive here: it writes them
-          only when it holds no last good snapshot, and then the fleet
-          section is the placeholder, not a reading
-          ([Server_routes_http_runtime.full_health_snapshot_metadata]). *)
-(** How current a fleet reading is. The fleet section does not say: the
-    [full_health_snapshot] beside it in the same body does. *)
-
-type fleet_safety_reading =
-  | Fleet_measured of
-      { fleet : fleet_safety
-      ; freshness : fleet_reading_freshness
-      }
-  | Fleet_not_measured of { status : string }
-      (** The health snapshot has no fleet reading and nothing failed: it is
-          being rebuilt, at boot and again after a change invalidates it.
-          [status] is the placeholder's word (["warming"]). Kept apart from a
-          reading: zero counts would draw an idle fleet the server never
-          measured. *)
-
 type server_gc_health = {
   sgc_heap_words : int;
   sgc_live_words : int;
@@ -2259,22 +2171,6 @@ val decode_overview_goals :
     server order. Goals of every phase are returned; which ones a surface
     draws is the surface's decision. *)
 
-val decode_fleet_safety :
-  Yojson.Safe.t -> (fleet_safety_reading, string) result
-(** Reads the [keeper_fleet_safety] section out of a [/health?full=1] body.
-    A body without the section is an error rather than an empty reading: an
-    absent section and a healthy fleet are different facts, and rendering the
-    second for the first is how a blocked keeper stays invisible.
-
-    A section carrying [schema = Keeper_fleet_blocker.reading_schema] is a
-    reading, and every field of {!fleet_safety} is required: a missing count
-    is an error, not zero. A reading also takes its {!fleet_reading_freshness}
-    from the body's [full_health_snapshot], which is required: a stale
-    snapshot serves a past reading as it was, and without the snapshot's
-    word the TUI would draw it as the present. A section without [schema] is
-    the health snapshot's placeholder: {!Fleet_not_measured} when it carries
-    no [error], and an error with the server's reason when it does (the
-    refresh timed out or the scan raised). *)
 val parse_log_entry : string -> (log_entry, string) result
 val decode_log_entry : Yojson.Safe.t -> (log_entry, string) result
 val decode_context_observation :

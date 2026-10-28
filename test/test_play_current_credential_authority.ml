@@ -19,49 +19,48 @@ let controller () = (dos_ok (Dos_lane.screen ())).Dos_lane.controller
 
 let with_workspace f =
   let base_path = Filename.temp_dir "play-current-authority-" "" in
-  Masc_test_deps.with_process_env "MASC_OAUTH_ENABLED" (Some "0") (fun () ->
-    Eio_main.run @@ fun env ->
-    Masc_test_deps.init_eio_clock env;
-    Fs_compat.set_fs (Eio.Stdenv.fs env);
-    let clock = Eio_mock.Clock.make () in
-    Eio_mock.Clock.set_time clock 1893455900.;
-    Time_compat.set_clock (clock :> float Eio.Time.clock_ty Eio.Resource.t);
-    Eio.Switch.run @@ fun sw ->
-    Eio.Switch.on_release sw (fun () ->
-      Dos_lane.install_activity_observer None;
-      (match Dos_lane.screen () with
-       | Ok { controller; _ } ->
-         (match Dos_lane.eject ~who:(Option.value controller ~default:"cleanup") ~announce:ignore () with
-          | Ok () | Error _ -> ())
-       | Error _ -> ());
-      Time_compat.clear_clock ();
-      Fs_compat.remove_tree base_path;
-      Fs_compat.clear_fs ());
-    Dos_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
-    Auth.save_auth_config base_path { D.default_auth_config with enabled = true; require_token = true };
-    let operator, _ = auth_ok (Auth.create_token_without_expiry base_path ~agent_name:"operator" ~role:D.Admin) in
-    let state = Masc.Mcp_server.For_testing.create_state ~base_path in
-    let _screen = dos_ok (Dos_lane.load ~who:"operator"
-      ~ledger_dir:(Filename.concat base_path "ledger") ~saves_dir:(Filename.concat base_path "saves")
-      ~checkpoint_dir:(Filename.concat base_path "checkpoints") ~previous_autosave:Dos_lane.Keep_previous_autosave ~program_name:"spin.com"
-      ~program_bytes:"\xeb\xfe" ~files:[] ~announce:ignore) in
-    (* #42001: machine actions on the HTTP surface go through an attached
-       worker. Attach one for the success paths; the pre-attach 503 refusal
-       assertions keep covering the unattached surface. The real clock drives
-       the fixture's readiness polling; the product mock clock stays in
-       Time_compat for timestamp determinism. The root switch comes from
-       Eio_context.with_test_env, which the attach dispatch needs as the
-       server background owner (lane_addon_runtime Attach). *)
-    Eio_context.with_test_env ~sw ~net:(Eio.Stdenv.net env)
-      ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env)
-      (fun () ->
-        (* The attach dispatch needs a loaded runtime state, and machine
-           tools refuse calls while machines.dos is off. Seed the same minimal
-           runtime.toml the seat fixture loads, then restore the prior state
-           so other suites are unaffected. *)
-        Masc.Lane_addon_runtime.For_testing.reset ();
-        let runtime_path = Filename.concat base_path "runtime.toml" in
-        Out_channel.with_open_bin runtime_path (fun channel -> output_string channel {|[providers.local]
+  Eio_main.run @@ fun env ->
+  Masc_test_deps.init_eio_clock env;
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio_mock.Clock.make () in
+  Eio_mock.Clock.set_time clock 1893455900.;
+  Time_compat.set_clock (clock :> float Eio.Time.clock_ty Eio.Resource.t);
+  Eio.Switch.run @@ fun sw ->
+  Eio.Switch.on_release sw (fun () ->
+    Dos_lane.install_activity_observer None;
+    (match Dos_lane.screen () with
+     | Ok { controller; _ } ->
+       (match Dos_lane.eject ~who:(Option.value controller ~default:"cleanup") ~announce:ignore () with
+        | Ok () | Error _ -> ())
+     | Error _ -> ());
+    Time_compat.clear_clock ();
+    Fs_compat.remove_tree base_path;
+    Fs_compat.clear_fs ());
+  Dos_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
+  Auth.save_auth_config base_path { D.default_auth_config with enabled = true; require_token = true };
+  let operator, _ = auth_ok (Auth.create_token_without_expiry base_path ~agent_name:"operator" ~role:D.Admin) in
+  let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+  let _screen = dos_ok (Dos_lane.load ~who:"operator"
+    ~ledger_dir:(Filename.concat base_path "ledger") ~saves_dir:(Filename.concat base_path "saves")
+    ~checkpoint_dir:(Filename.concat base_path "checkpoints") ~previous_autosave:Dos_lane.Keep_previous_autosave ~program_name:"spin.com"
+    ~program_bytes:"\xeb\xfe" ~files:[] ~announce:ignore) in
+  (* #42001: machine actions on the HTTP surface go through an attached
+     worker. Attach one for the success paths; the pre-attach 503 refusal
+     assertions keep covering the unattached surface. The real clock drives
+     the fixture's readiness polling; the product mock clock stays in
+     Time_compat for timestamp determinism. The root switch comes from
+     Eio_context.with_test_env, which the attach dispatch needs as the
+     server background owner (lane_addon_runtime Attach). *)
+  Eio_context.with_test_env ~sw ~net:(Eio.Stdenv.net env)
+    ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env)
+    (fun () ->
+      (* The attach dispatch needs a loaded runtime state, and machine
+         tools refuse calls while machines.dos is off. Seed the same minimal
+         runtime.toml the seat fixture loads, then restore the prior state
+         so other suites are unaffected. *)
+      Masc.Lane_addon_runtime.For_testing.reset ();
+      let runtime_path = Filename.concat base_path "runtime.toml" in
+      Out_channel.with_open_bin runtime_path (fun channel -> output_string channel {|[providers.local]
 protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:1/v1"
 [models.sample]
@@ -75,12 +74,12 @@ enabled = true
 [machines.msx]
 enabled = true
 |});
-        (match Runtime.init_default ~config_path:runtime_path with
-         | Ok () -> () | Error detail -> fail detail);
-        Machine_worker_fixture.with_dos ~clock:(Eio.Stdenv.clock env) ~sw ~base_path
-          (fun ~invoke:_ ~detach ->
-            f base_path state operator;
-            detach ())))
+      (match Runtime.init_default ~config_path:runtime_path with
+       | Ok () -> () | Error detail -> fail detail);
+      Machine_worker_fixture.with_dos ~clock:(Eio.Stdenv.clock env) ~sw ~base_path
+        (fun ~invoke:_ ~detach ->
+          f base_path state operator;
+          detach ()))
 
 let dispatch ~state ~token ~meth ~target ~body =
   let authority = match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with

@@ -16,14 +16,6 @@ type row =
   ; description : string
   }
 
-module Bool_knob : sig
-  type t = Oauth_enabled [@@deriving enumerate]
-
-  val env_name : t -> string
-  val default : t -> bool
-  val get : t -> bool
-end
-
 module Int_knob : sig
   type t =
     | Oauth_code_ttl_sec

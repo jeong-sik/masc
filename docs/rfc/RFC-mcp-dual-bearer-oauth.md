@@ -36,9 +36,9 @@ MASC supports both credential acquisition modes:
 
 1. **Static bearer** remains unchanged. Existing agent credential files and
    `bearer_token_env_var` clients continue to work.
-2. **OAuth 2.1 authorization code with PKCE** is opt-in through
-   `MASC_OAUTH_ENABLED=1`. The local MASC server acts as both authorization
-   server and protected resource server.
+2. **OAuth 2.1 authorization code with PKCE** is served on every loopback
+   authority. The local MASC server acts as both authorization server and
+   protected resource server.
 3. Both tokens resolve through one typed `agent_credential` projection before
    existing permission and tool gates run. OAuth must not introduce a second
    RBAC matrix.
@@ -74,16 +74,16 @@ is never written into OAuth state.
 
 ## 4. Protocol surface
 
-When enabled, MASC exposes:
+On a loopback authority, MASC exposes:
 
 | Method | Path | Contract |
 |---|---|---|
 | GET | `/.well-known/oauth-protected-resource` | RFC 9728 protected resource metadata |
 | GET | `/.well-known/oauth-protected-resource/mcp` | resource-specific RFC 9728 alias |
 | GET | `/.well-known/oauth-authorization-server` | RFC 8414 authorization server metadata |
-| POST | `/oauth/register` | RFC 7591 public-client dynamic registration |
-| GET | `/oauth/authorize` | authorization request validation and local approval form |
-| POST | `/oauth/authorize` | bearer bootstrap and one-time code issuance |
+| POST | `/oauth/register` | RFC 7591 public-client dynamic registration (deprecated by MCP 2026-07-28; kept for older clients) |
+| GET | `/oauth/authorize` | authorization request validation and local approval form; never fetches |
+| POST | `/oauth/authorize` | bearer bootstrap, Client ID Metadata Document fetch, and one-time code issuance |
 | POST | `/oauth/token` | authorization-code exchange and refresh-token rotation |
 
 An unauthenticated `/mcp` response includes:
@@ -92,8 +92,8 @@ An unauthenticated `/mcp` response includes:
 WWW-Authenticate: Bearer resource_metadata="http://127.0.0.1:8935/.well-known/oauth-protected-resource", scope="mcp:tools"
 ```
 
-OAuth-disabled servers keep the existing bare `WWW-Authenticate: Bearer`
-challenge and do not expose the OAuth routes.
+A non-loopback authority keeps the bare `WWW-Authenticate: Bearer` challenge
+and does not expose the OAuth routes.
 
 ### 4.1 Client registration
 
@@ -108,6 +108,20 @@ Dynamic registration accepts public clients only:
 Client metadata is stored below `.masc/auth/oauth/clients/`. No client secret is
 created because a secret embedded in a CLI client would not be confidential.
 
+A client may instead use an https `client_id` that names a Client ID Metadata
+Document (MCP 2026-07-28). Nothing is stored for it:
+
+- the URL must be plain URL text with a path and no userinfo, query, fragment
+  or dot segment;
+- the consent form fetches nothing; the same-origin approval fetches the
+  document after the MASC bearer is accepted, and a denial fetches nothing: it
+  redirects to the loopback callback with `error=access_denied` and sends no
+  code;
+- the fetch resolves only to public addresses, follows no redirect, reads at
+  most 5 KiB and accepts only HTTP 200;
+- the document's `client_id` must equal the URL, and its `redirect_uris` must
+  list the requested loopback HTTP URI, whatever its port (RFC 8252 7.3).
+
 ### 4.2 Authorization request
 
 Only these values are accepted:
@@ -115,7 +129,8 @@ Only these values are accepted:
 - `response_type=code`;
 - `code_challenge_method=S256`;
 - a 43–128 character RFC 7636 code challenge;
-- an exact registered `client_id` and `redirect_uri`;
+- an exact registered `client_id` and `redirect_uri`, or a metadata
+  document URL whose document lists the loopback `redirect_uri` (any port);
 - `resource` exactly equal to the advertised `/mcp` URL;
 - supported scopes only.
 
@@ -195,7 +210,6 @@ Configuration lives in one typed module and is re-read at request boundaries:
 
 | Environment key | Meaning |
 |---|---|
-| `MASC_OAUTH_ENABLED` | opt-in built-in OAuth server |
 | `MASC_OAUTH_CODE_TTL_SEC` | authorization-code lifetime |
 | `MASC_OAUTH_ACCESS_TOKEN_TTL_SEC` | access-token lifetime |
 | `MASC_OAUTH_REFRESH_TOKEN_TTL_SEC` | refresh-token lifetime |
@@ -216,7 +230,9 @@ commit.
 | Threat | Required invariant |
 |---|---|
 | authorization-code interception | S256 PKCE is mandatory; `plain` is rejected |
-| redirect theft | redirect URI is exact-match registered and loopback-only |
+| redirect theft | redirect URI is loopback-only and either exact-match registered or listed by the client's metadata document (port ignored) |
+| server-side request forgery | the consent GET never fetches; the approval fetches only after a valid MASC bearer on a same-origin request, only to public addresses, without redirects, at most 5 KiB |
+| consent impersonation | the form names the document's host and warns that any local program can claim a loopback client |
 | code replay | a validated exchange attempt consumes one code before minting; store failure does not restore it |
 | refresh replay | replay of a known old refresh token revokes the entire token family atomically |
 | bootstrap revocation | deleting, rotating, expiring, or demoting the bound static credential revokes the derived OAuth family |
@@ -239,7 +255,7 @@ redaction.
 
 - Existing static bearer files and their JSON schema are unchanged.
 - `bearer_token_env_var` remains supported.
-- OAuth is off unless explicitly enabled.
+- OAuth is served only on loopback authorities.
 - No agent_core dependency or protocol change is introduced.
 - No dashboard session or cookie becomes an ambient OAuth login authority.
 - MCP authorization changes only token resolution and the 401 challenge header;
@@ -280,7 +296,6 @@ Focused tests must prove:
 The live acceptance test is:
 
 ```bash
-MASC_OAUTH_ENABLED=1 \
 MASC_URL=http://127.0.0.1:8935/mcp \
 MASC_HTTP_BASE_URL=http://127.0.0.1:8935 \
 ./_build/default/bin/main_eio.exe start

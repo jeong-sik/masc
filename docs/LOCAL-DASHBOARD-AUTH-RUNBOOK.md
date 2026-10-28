@@ -112,13 +112,13 @@ an operator bearer rather than relying on an unset server variable.
 
 MASC supports two MCP authentication modes on the same loopback server:
 
-- static bearer remains the default and uses `bearer_token_env_var`;
-- OAuth 2.1 authorization code + PKCE is opt-in with
-  `MASC_OAUTH_ENABLED=1`.
+- static bearer, through `bearer_token_env_var`;
+- OAuth 2.1 authorization code + PKCE.
 
-OAuth discovery, dynamic client registration, browser authorization, and token
-refresh are exposed only when OAuth is enabled and the admitted request
-authority is loopback. The browser approval form asks for an existing MASC
+OAuth discovery, client registration (Client ID Metadata Documents, and
+Dynamic Client Registration for older clients), browser authorization, and
+token refresh are exposed only when the admitted request authority is
+loopback. The browser approval form asks for an existing MASC
 bearer once to bind the OAuth grant to that bearer’s agent identity. The
 bootstrap bearer is not stored in OAuth state.
 
@@ -174,7 +174,6 @@ named by Agent-Code. `login --json` does not inspect Agent-Code's config.
 Start MASC with an exact public MCP resource identity:
 
 ```bash
-export MASC_OAUTH_ENABLED=1
 export MASC_HTTP_BASE_URL=http://127.0.0.1:8935
 export MASC_URL=http://127.0.0.1:8935/mcp
 ./_build/default/bin/main_eio.exe start --host 127.0.0.1 --port 8935 \

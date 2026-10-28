@@ -47,7 +47,6 @@ let oauth_error_description = function
   | Auth_oauth.Invalid_grant -> "authorization grant is invalid or expired"
   | Auth_oauth.Invalid_scope -> "requested scope is invalid"
   | Auth_oauth.Access_denied -> "authorization was denied"
-  | Auth_oauth.OAuth_disabled -> "OAuth is disabled"
   | Auth_oauth.Temporarily_unavailable ->
     "authorization server is temporarily unavailable"
   | Auth_oauth.Store_error _ -> "authorization server state is unavailable"
@@ -55,7 +54,7 @@ let oauth_error_description = function
 
 let oauth_error_status = function
   | Auth_oauth.Invalid_client -> `Unauthorized
-  | Auth_oauth.OAuth_disabled | Auth_oauth.Temporarily_unavailable ->
+  | Auth_oauth.Temporarily_unavailable ->
     `Service_unavailable
   | Auth_oauth.Store_error _ -> `Internal_server_error
   | Auth_oauth.Invalid_request _
@@ -108,6 +107,24 @@ let render_authorization_form ?error (request : Auth_oauth.authorization_request
         (html_escape request.client_id)
     | None -> Printf.sprintf {|<code>%s</code>|} (html_escape request.client_id)
   in
+  (* MCP 2026-07-28 asks for a warning when a document client returns only to
+     this computer: the document proves which site published the name, not
+     which local program is asking. *)
+  let document_host () =
+    html_escape (Option.value ~default:"" (Uri.host (Uri.of_string request.client_id)))
+  in
+  let document_client_warning =
+    match request.client_verification with
+    | Auth_oauth.Registered_client -> ""
+    | Auth_oauth.Unverified_document ->
+      Printf.sprintf
+        {|<p class="warning">This client is named by a document at <code>%s</code>. MASC reads it when you answer and refuses the sign-in unless it lists the callback above. The callback goes to a program on this computer, and any program here can claim this client. Authorize only a sign-in you started just now.</p>|}
+        (document_host ())
+    | Auth_oauth.Verified_document ->
+      Printf.sprintf
+        {|<p class="warning">The name comes from a document published at <code>%s</code>. The callback goes to a program on this computer, and any program here can use that name. Authorize only a sign-in you started just now.</p>|}
+        (document_host ())
+  in
   let scopes = Auth_oauth.scopes_to_string request.scopes |> html_escape in
   let admin_confirmation =
     if admin_scope_requested request.scopes
@@ -136,6 +153,7 @@ let render_authorization_form ?error (request : Auth_oauth.authorization_request
         scopes
         (Auth_oauth.access_token_ttl_sec ())
         (Auth_oauth.refresh_token_ttl_sec ())
+    ; document_client_warning
     ; {|<p>Enter an existing MASC bearer once to bind this OAuth session to its agent identity.</p>|}
     ; error_html
     ; {|<form method="post" action="/oauth/authorize">|}
@@ -155,18 +173,42 @@ let render_authorization_form ?error (request : Auth_oauth.authorization_request
     ]
 ;;
 
-let authorization_form_headers =
+(* The approval answers with a redirect to the client's loopback callback, a
+   different origin from this page. Chromium applies form-action to that
+   redirect as well, so a policy of 'self' alone stopped every sign-in in the
+   browser. The callback's origin is added for this one request. *)
+let callback_origin redirect_uri =
+  let uri = Uri.of_string redirect_uri in
+  match Uri.scheme uri, Uri.host uri with
+  | Some scheme, Some host ->
+    let host = if String.contains host ':' then "[" ^ host ^ "]" else host in
+    Some
+      (match Uri.port uri with
+       | Some port -> Printf.sprintf "%s://%s:%d" scheme host port
+       | None -> Printf.sprintf "%s://%s" scheme host)
+  | Some _, None | None, (Some _ | None) -> None
+;;
+
+let authorization_form_headers (request : Auth_oauth.authorization_request) =
+  let form_action =
+    match callback_origin request.redirect_uri with
+    | Some origin -> "form-action 'self' " ^ origin
+    | None -> "form-action 'self'"
+  in
   [ "cache-control", "no-store"
   ; ( "content-security-policy"
-    , "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'" )
+    , "default-src 'none'; style-src 'unsafe-inline'; "
+      ^ form_action
+      ^ "; frame-ancestors 'none'" )
   ; "x-frame-options", "DENY"
   ]
 ;;
 
-let authorization_request_of_params ~base_path ~authority params =
+let authorization_request_of_params ~base_path ~authority ~client_document params =
   Auth_oauth.validate_authorization_request
     ~base_path
     ~expected_resource:(Server_oauth_metadata.resource authority)
+    ~client_document
     ~response_type:(param params "response_type")
     ~client_id:(param params "client_id")
     ~redirect_uri:(param params "redirect_uri")
@@ -177,33 +219,42 @@ let authorization_request_of_params ~base_path ~authority params =
     ~code_challenge_method:(param params "code_challenge_method")
 ;;
 
+(* Any page can send the operator's browser here, so the consent form never
+   makes this server fetch a document; the approval below does. *)
 let authorize_get ~base_path ~authority ~target =
   let* params = query_params target in
-  authorization_request_of_params ~base_path ~authority params
+  authorization_request_of_params
+    ~base_path
+    ~authority
+    ~client_document:Auth_oauth.Show_unverified
+    params
 ;;
 
-let redirect_with_code authorization_request code =
-  let params =
-    ("code", code)
-    :: (match authorization_request.Auth_oauth.state with
-        | None -> []
-        | Some state -> [ "state", state ])
+(* RFC 9207 section 2: every authorization response redirected to the client,
+   errors included, names the issuer so the client can reject a response that
+   a different authorization server produced (mix-up attack). Errors raised
+   after validation by [Auth_oauth.issue_authorization_code] are still
+   answered as JSON, not redirected. *)
+let authorization_response_uri ~issuer authorization_request params =
+  let state =
+    match authorization_request.Auth_oauth.state with
+    | None -> []
+    | Some state -> [ "state", state ]
   in
   Uri.of_string authorization_request.redirect_uri
-  |> fun uri -> Uri.add_query_params' uri params
+  |> fun uri -> Uri.add_query_params' uri (params @ state @ [ "iss", issuer ])
   |> Uri.to_string
 ;;
 
-let redirect_with_error authorization_request error =
-  let params =
-    ("error", Auth_oauth.protocol_error_code error)
-    :: (match authorization_request.Auth_oauth.state with
-        | None -> []
-        | Some state -> [ "state", state ])
-  in
-  Uri.of_string authorization_request.redirect_uri
-  |> fun uri -> Uri.add_query_params' uri params
-  |> Uri.to_string
+let redirect_with_code ~issuer authorization_request code =
+  authorization_response_uri ~issuer authorization_request [ "code", code ]
+;;
+
+let redirect_with_error ~issuer authorization_request error =
+  authorization_response_uri
+    ~issuer
+    authorization_request
+    [ "error", Auth_oauth.protocol_error_code error ]
 ;;
 
 type authorization_post_outcome =
@@ -214,47 +265,63 @@ type authorization_post_outcome =
       ; request : Auth_oauth.authorization_request
       }
 
-let authorize_post ~base_path ~authority ~body =
+(* Only an approval fetches the client_id URL, and only after the request and
+   the MASC bearer check out, so a request without a valid bearer never makes
+   this server fetch. A denial answers from the checked request alone: it
+   redirects to the loopback callback with [error=access_denied], [state] and
+   [iss], and sends no code, so the document is not needed. *)
+let authorize_post ~base_path ~authority ~fetch_client_metadata ~body =
   let* params = parse_form body in
-  let* request = authorization_request_of_params ~base_path ~authority params in
+  let validate client_document =
+    authorization_request_of_params ~base_path ~authority ~client_document params
+  in
+  let verified () = validate (Auth_oauth.Fetch_and_verify fetch_client_metadata) in
+  let issuer = Server_oauth_metadata.issuer authority in
   if Option.equal String.equal (param params "decision") (Some "deny")
-  then Ok (Authorization_redirect (redirect_with_error request Auth_oauth.Access_denied))
-  else if
-    admin_scope_requested request.scopes
-    && not (Option.equal String.equal (param params "confirm_admin") (Some "yes"))
   then
+    let* request = validate Auth_oauth.Show_unverified in
     Ok
-      (Authorization_form_error
-         { status = `Bad_request
-         ; message = "Administrative access requires explicit confirmation."
-         ; request
-         })
+      (Authorization_redirect
+         (redirect_with_error ~issuer request Auth_oauth.Access_denied))
   else
-    match param params "bootstrap_token" with
-    | None ->
+    let* shown = validate Auth_oauth.Show_unverified in
+    if
+      admin_scope_requested shown.scopes
+      && not (Option.equal String.equal (param params "confirm_admin") (Some "yes"))
+    then
       Ok
         (Authorization_form_error
-           { status = `Unauthorized
-           ; message = "A MASC bearer is required."
-           ; request
+           { status = `Bad_request
+           ; message = "Administrative access requires explicit confirmation."
+           ; request = shown
            })
-    | Some bootstrap_token ->
-      (match Auth.find_static_credential_by_token base_path ~token:bootstrap_token with
-       | Error _ ->
-         Ok
-           (Authorization_form_error
-              { status = `Unauthorized
-              ; message = "The MASC bearer was not accepted."
-              ; request
-              })
-       | Ok bootstrap_credential ->
-         let* code =
-           Auth_oauth.issue_authorization_code
-             ~base_path
-             ~request
-             ~bootstrap_credential
-         in
-         Ok (Authorization_redirect (redirect_with_code request code)))
+    else
+      match param params "bootstrap_token" with
+      | None ->
+        Ok
+          (Authorization_form_error
+             { status = `Unauthorized
+             ; message = "A MASC bearer is required."
+             ; request = shown
+             })
+      | Some bootstrap_token ->
+        (match Auth.find_static_credential_by_token base_path ~token:bootstrap_token with
+         | Error _ ->
+           Ok
+             (Authorization_form_error
+                { status = `Unauthorized
+                ; message = "The MASC bearer was not accepted."
+                ; request = shown
+                })
+         | Ok bootstrap_credential ->
+           let* request = verified () in
+           let* code =
+             Auth_oauth.issue_authorization_code
+               ~base_path
+               ~request
+               ~bootstrap_credential
+           in
+           Ok (Authorization_redirect (redirect_with_code ~issuer request code)))
 ;;
 
 let string_field fields name =

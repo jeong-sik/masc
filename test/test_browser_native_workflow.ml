@@ -50,6 +50,11 @@ let roundtrip () =
     step "mouse.click" ["x",`Float 0.5;"y",`Int 42;"options",obj ["button",str "left";"delay",`Int 0]];
     step "mouse.move" ["x",`Int 3;"y",`Int 4;"options",obj ["steps",`Int 2;"label",str "Point at editor"]];
     step "mouse.wheel" ["x",`Int 0;"y",`Int 120;"options",obj ["label",str "Read next rows"]]]
+    @ [step "url" [];step "title" [];step "info" [];step "events" [];
+      step "waitForTimeout" ["milliseconds",`Float 0.5];
+      step "snapshot" [];
+      step "snapshot" ["options",obj ["includeActionMarks",`Bool false;"includeStableLocator",`Bool true]];
+      step "snapshot" ["options",obj ["scope",str "subtree";"root",str "@21"]]]
     @ List.map (fun selection -> step "selectOption" ["selector",str "#select";"selectionJson",str selection])
       ["null";"\"B\"";"{\"label\":\"B\"}";"{\"index\":0}";"[{\"value\":\"b\"},\"a\",\"a\"]"] in
   let parsed=request calls in
@@ -86,6 +91,18 @@ let strict_inputs () =
      obj (base [step "click" ["selector",str "@1";"options",obj ["position",obj ["x",`Float Float.nan;"y",`Int 0]]]]);
      obj (base [step "keyboard.type" ["text",str "x";"options",obj ["label",str "not an SDK option"]]]);
      obj (base [step "keyboard.insertText" ["text",str "x";"options",obj []]]);
+     obj (base [step "url" ["options",obj []]]);
+     obj (base [step "title" ["source",str "document.title"]]);
+     obj (base [step "events" ["options",obj ["timeout",`Int 1]]]);
+     obj (base [step "waitForTimeout" ["milliseconds",`Int (-1)]]);
+     obj (base [step "waitForTimeout" ["milliseconds",`Float Float.infinity]]);
+     obj (base [step "waitForTimeout" ["milliseconds",`Int 0;"options",obj []]]);
+     obj (base [step "snapshot" ["options",obj ["scope",str "viewport"]]]);
+     obj (base [step "snapshot" ["options",obj ["scope",str "subtree"]]]);
+     obj (base [step "snapshot" ["options",obj ["root",str "@21"]]]);
+     obj (base [step "snapshot" ["options",obj ["scope",str "full_page";"root",str "@21"]]]);
+     obj (base [step "snapshot" ["options",obj ["scope",str "subtree";"root",str " "]]]);
+     obj (base [step "snapshot" ["options",obj ["includeStableLocator",`Int 1]]]);
      obj (base [step "selectOption" ["selector",str "#x";"selectionJson",str "{}"]]);
      obj (base [step "selectOption" ["selector",str "#x";"selectionJson",str "[1]"]]);
      obj (base [step "selectOption" ["selector",str "#x";"selectionJson",str "{\"index\":-1}"]])]
@@ -124,10 +141,32 @@ let progress_and_uncertainty () =
       ~started:true ~completed_effect:false)
     ["evaluate",["source",str "document.title"];
      "waitForFunction",["source",str "false"];
-     "fetch",["url",str "https://example.test/"]];
+     "fetch",["url",str "https://example.test/"];
+     "events",[]];
   assert_stopped (request [step "keyboard.insertText" ["text",str "x"];click])
     (result ~started:true ~completed_effect:true ~completed:[entry 0 "keyboard.insertText"] ~failure:(failure 1 "observation"))
     ~started:true ~completed_effect:true
+let observations () =
+  let methods=["url",[],str "https://example.test/start";
+    "title",[],str "Title";"info",[],obj ["url",str "https://example.test/start"];
+    "snapshot",["options",obj ["scope",str "subtree";"root",str "@21"]],str "subtree";
+    "events",[],`List [obj ["method",str "Page.loadEventFired"]];
+    "waitForTimeout",["milliseconds",`Int 0],`Null] in
+  List.iter (fun (method_,arguments,receipt) ->
+    let expected=request [step method_ arguments] in
+    check bool "an observation cannot claim a press selector preflight" true
+      (Result.is_error (R.decode expected (obj (result ~started:false ~completed_effect:false
+        ~completed:[] ~failure:(failure 0 "inputPreflight")))));
+    let consumes_events=method_="events" in
+    let row=obj ["index",`Int 0;"method",str method_;"receipt",receipt] in
+    (match ok (R.decode expected (obj (snapshot @ result ~started:consumes_events ~completed_effect:consumes_events
+       ~completed:[row] ~failure:`Null))) with
+     | R.Completed _ -> () | R.Stopped _ -> fail "native observation was stopped");
+    let bad=if receipt=`Null then str "not void" else `Null in
+    let row=obj ["index",`Int 0;"method",str method_;"receipt",bad] in
+    check bool "native observation receipt shape is checked" true
+      (Result.is_error (R.decode expected (obj (snapshot @ result ~started:consumes_events ~completed_effect:consumes_events
+        ~completed:[row] ~failure:`Null))))) methods
 let malformed_receipts () =
   let expected=request [click;wait] in
   List.iter (fun value -> check bool "incomplete/mismatched execution is not success" true (Result.is_error (R.decode expected value)))
@@ -173,5 +212,6 @@ let () = if Array.length Sys.argv=3 && Sys.argv.(1)="--proof" then proof Sys.arg
   test_case "invalid methods and fields are refused" `Quick strict_inputs;
   test_case "snapshot completes the exact requested sequence" `Quick complete;
   test_case "failed waits and uncertain effects retain progress" `Quick progress_and_uncertainty;
+  test_case "native observations retain values and event-drain effects" `Quick observations;
   test_case "drag release is separate from effect completion" `Quick pointer_release;
   test_case "malformed execution never proves success" `Quick malformed_receipts]]

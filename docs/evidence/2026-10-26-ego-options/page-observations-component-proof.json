@@ -1,0 +1,31 @@
+{
+  "recorded_at": "2026-10-26T11:59:56.094558+00:00",
+  "scope": "actual production workflow codec/emitter/receipt decoder and actual OCaml suite, standalone with namespace aliases only; actual emitted JS in Node fixtures; actual current production TOML schema loader with external schema record supplied",
+  "source_files": {
+    "lib/browser_lane/browser_native_workflow.mli": "8d3b01daae0c670819b816fedb212f1f71110246f690bc373f642ccbe3b3ab48",
+    "lib/browser_lane/browser_native_workflow.ml": "fedae98e4231eefe8063e11a57f183a9315b81a4beaf16fa6416fedda4b5aa45",
+    "lib/browser_ego_workflow.mli": "e08cb069fb1baadaa9d80ba98b1b7cc265b1342a78c4c27440db9c0258a2bbc0",
+    "lib/browser_ego_workflow.ml": "2872356f6740ab161f5550438b216bf29e55225a1e8ec241822c8b862090cf9c",
+    "test/test_browser_native_workflow.ml": "01a7b8223c588d8e29876ff6fbcec2a8c941cdd3fb891832f72c7de271a26373",
+    "test/test_browser_ego_workflow.cjs": "91db80bd29e787fae51409fe3687ce57fdc8f02109437fe38874013eb07374ff",
+    "config/tools/masc_browser_interact.toml": "95112091c4ff454d910072fac09e675977ad571dc53fb0d08c361ce9149283c6"
+  },
+  "ocaml": {
+    "tests": 7,
+    "exit_code": 0,
+    "strict_warnings": true,
+    "full_masc_build": false
+  },
+  "node": {
+    "tests": 30,
+    "exit_code": 0,
+    "real_sdk": false
+  },
+  "schema_loader": {
+    "exit_code": 0,
+    "schema_bytes": 15355
+  },
+  "real_browser_execution": false,
+  "installed_keeper_execution": false,
+  "ui_visibility": false
+}

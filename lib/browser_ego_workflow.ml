@@ -84,6 +84,30 @@ let script = {js|async function nativeWorkflow(page, args) {
         case 'fetch':
           effect = effectStarted = pageResult = true;
           receipt = await page.fetch(step.url, options); break;
+        case 'url':
+          receipt = await page.url();
+          if (typeof receipt !== 'string') throw new Error('ego returned a non-text URL');
+          break;
+        case 'title':
+          receipt = await page.title();
+          if (typeof receipt !== 'string') throw new Error('ego returned a non-text title');
+          break;
+        case 'info':
+          receipt = await page.info();
+          if (receipt === null || typeof receipt !== 'object' || Array.isArray(receipt))
+            throw new Error('ego returned non-object Page info');
+          break;
+        case 'snapshot':
+          receipt = await page.snapshot(options);
+          if (typeof receipt !== 'string') throw new Error('ego returned a non-text snapshot');
+          break;
+        case 'waitForTimeout': await page.waitForTimeout(step.milliseconds); break;
+        case 'events':
+          // Draining consumes observations even though it does not change the site.
+          effect = effectStarted = pageResult = true;
+          receipt = await page.events();
+          if (!Array.isArray(receipt)) throw new Error('ego returned a non-array event buffer');
+          break;
         default: return failure(index, step.method, 'unsupported native Page method');
       }
     } catch (error) {
@@ -133,6 +157,18 @@ let bool key fields = let* value=get key fields in match value with `Bool value 
   | _ -> Error ("workflow receipt has invalid " ^ key)
 let integer key fields = let* value=get key fields in match value with `Int value when value>=0 -> Ok value
   | _ -> Error ("workflow receipt has invalid " ^ key)
+let observation_receipt action value =
+  let module W = Browser_lane.Native_workflow in
+  let valid=match action with
+    | W.Url|Title|Snapshot -> (match value with `String _ -> true | _ -> false)
+    | Info -> (match value with `Assoc _ -> true | _ -> false)
+    | Events -> (match value with `List _ -> true | _ -> false)
+    | Wait_for_timeout _ -> value=`Null
+    | Click _|Double_click _|Hover _|Drag_and_drop _|Mouse_click _|Mouse_move _|Mouse_wheel _
+    | Fill _|Press _|Focus _|Reload|Keyboard_type _|Keyboard_insert_text _|Keyboard_paste _|Keyboard_press _
+    | Select_option _|Goto _|Wait_for_url _|Wait_for_selector _|Wait_for_load_state _
+    | Evaluate _|Wait_for_function _|Fetch _ -> true in
+  if valid then Ok () else Error ("invalid native " ^ W.method_name action ^ " observation receipt")
 let decode (request : Browser_lane.Native_workflow.t) receipt =
   let* fields=object_fields ["completed";"effectStarted";"completedEffect";"inputReleased";"failure";"urlBefore";"url";"title";"snapshot";"truncated";"chars"] receipt in
   let* started=bool "effectStarted" fields in let* completed_effect=bool "completedEffect" fields in
@@ -149,12 +185,14 @@ let decode (request : Browser_lane.Native_workflow.t) receipt =
     | [] -> Ok (index,has_effect,steps)
     | value::rest ->
       let* row=object_fields ["index";"method";"receipt"] value in
-      let* observed=integer "index" row in let* method_=text "method" row in let* _=get "receipt" row in
+      let* observed=integer "index" row in let* method_=text "method" row in let* receipt=get "receipt" row in
       let* expected=method_at index in
       if observed<>index || method_<>expected then Error "workflow completed steps do not match the request"
       else match steps with
         | [] -> Error "workflow completed more steps than requested"
-        | (step : Browser_lane.Native_workflow.step)::steps -> progress (index+1) (has_effect || Browser_lane.Native_workflow.is_effect step.action) steps rest in
+        | (step : Browser_lane.Native_workflow.step)::steps ->
+          let* ()=observation_receipt step.action receipt in
+          progress (index+1) (has_effect || Browser_lane.Native_workflow.is_effect step.action) steps rest in
   let* count,has_effect,remaining=progress 0 false request.steps completed in
   let* ()=if completed_effect=has_effect && (not has_effect || started) then Ok ()
     else Error "workflow effect flags do not match completed steps" in
@@ -183,7 +221,8 @@ let decode (request : Browser_lane.Native_workflow.t) receipt =
            | Mouse_move _ | Mouse_wheel _ | Fill _ | Focus _ | Reload
            | Keyboard_type _ | Keyboard_insert_text _ | Keyboard_paste _ | Keyboard_press _
            | Select_option _ | Goto _ | Wait_for_url _ | Wait_for_selector _
-           | Wait_for_load_state _ | Evaluate _ | Wait_for_function _ | Fetch _ ->
+           | Wait_for_load_state _ | Evaluate _ | Wait_for_function _ | Fetch _
+           | Url | Title | Info | Snapshot | Events | Wait_for_timeout _ ->
              Error "workflow input preflight does not match a pending press")
       | "observation" when index=count && count>0 -> Ok has_effect
       | "snapshot" when index=count && remaining=[] -> Ok has_effect

@@ -67,6 +67,10 @@ type degradation =
   }
 
 type event =
+  | Unavailable_snapshot of
+      { revision : Revision.t
+      ; degradation : degradation
+      }
   | Snapshot of
       { revision : Revision.t
       ; measured_at : float
@@ -86,7 +90,8 @@ type event =
 let equal_fleet (left : fleet) (right : fleet) = left = right
 
 let revision_of_event = function
-  | Snapshot { revision; _ } | Changed { revision; _ } | Degraded { revision; _ } ->
+  | Unavailable_snapshot { revision; _ } | Snapshot { revision; _ }
+  | Changed { revision; _ } | Degraded { revision; _ } ->
     revision
 ;;
 
@@ -167,6 +172,7 @@ end
 
 module Event_name = struct
   let snapshot = "snapshot"
+  let unavailable_snapshot = "unavailable_snapshot"
   let changed = "changed"
   let degraded = "degraded"
 end
@@ -228,6 +234,12 @@ let degradation_fields { since; reason } : (string * Yojson.Safe.t) list =
 ;;
 
 let encode : event -> Yojson.Safe.t = function
+  | Unavailable_snapshot { revision; degradation } ->
+    `Assoc
+      ([ Key.event, `String Event_name.unavailable_snapshot
+       ; Key.schema, `Int schema_version
+       ; Key.revision, `Int (Revision.to_int revision)
+       ] @ degradation_fields degradation)
   | Snapshot { revision; measured_at; fleet; degraded } ->
     `Assoc
       [ Key.event, `String Event_name.snapshot
@@ -481,7 +493,17 @@ let degradation_of_fields fields : (degradation, decode_error) result =
 let decode json =
   let* fields = Fields.of_json ~at:Key.event json in
   let* name = Fields.string fields Key.event in
-  if String.equal name Event_name.snapshot
+  if String.equal name Event_name.unavailable_snapshot
+  then (
+    let* received = Fields.int fields Key.schema in
+    if not (Int.equal received schema_version)
+    then Error (Schema_mismatch { expected = schema_version; received })
+    else (
+      let* revision = Fields.revision fields Key.revision in
+      let* degradation = degradation_of_fields fields in
+      let* () = Fields.finish fields in
+      Ok (Unavailable_snapshot { revision; degradation })))
+  else if String.equal name Event_name.snapshot
   then (
     let* received = Fields.int fields Key.schema in
     if not (Int.equal received schema_version)

@@ -80,6 +80,13 @@ let degraded =
     }
 ;;
 
+let unavailable =
+  F.Unavailable_snapshot
+    { revision = revision 1
+    ; degradation = { F.since = 1793162400.0; reason = F.Scan_failed }
+    }
+;;
+
 let error_t =
   testable
     (fun fmt error -> Format.pp_print_string fmt (F.decode_error_to_string error))
@@ -126,7 +133,8 @@ let test_every_event_survives_the_wire () =
          Yojson.Safe.from_string (Yojson.Safe.to_string (F.encode event))
        in
        check decoded "through JSON text" (Ok event) (F.decode through_text))
-    [ snapshot
+    [ unavailable
+    ; snapshot
     ; degraded_snapshot
     ; changed
     ; degraded
@@ -142,13 +150,16 @@ let test_a_decoded_event_encodes_to_the_same_json () =
        | Ok again ->
          check bool "same JSON" true
            (Yojson.Safe.equal (F.encode event) (F.encode again)))
-    [ snapshot; degraded_snapshot; changed; degraded ]
+    [ unavailable; snapshot; degraded_snapshot; changed; degraded ]
 ;;
 
 (* The wire names are the contract with anything that is not this build. A
    rename that touched encode and decode together would pass the round trip, so
    the names are fixed here. *)
 let test_the_wire_names_are_fixed () =
+  check string "unavailable snapshot"
+    {|{"event":"unavailable_snapshot","schema":1,"revision":1,"since":1793162400.0,"reason":"scan_failed"}|}
+    (Yojson.Safe.to_string (F.encode unavailable));
   check string "degraded"
     {|{"event":"degraded","revision":9,"since":1793162400.0,"reason":"scan_timed_out"}|}
     (Yojson.Safe.to_string (F.encode degraded));
@@ -386,6 +397,9 @@ let test_names_are_canonical_by_construction () =
 
 let test_the_schema_is_checked_before_anything_else () =
   let json = F.encode snapshot in
+  reject "unavailable snapshot requires a matching schema"
+    (map_member "schema" (fun _ -> `Int 99) (F.encode unavailable))
+    (F.Schema_mismatch { expected = F.schema_version; received = 99 });
   reject "another schema"
     (map_member "schema" (fun _ -> `Int (F.schema_version + 1)) json)
     (F.Schema_mismatch { expected = F.schema_version; received = F.schema_version + 1 });

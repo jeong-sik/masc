@@ -9,7 +9,7 @@
     read, so two readings of the same fleet would never compare equal. *)
 
 val schema_version : int
-(** The [schema] every [Snapshot] carries. A client that reads another value
+(** The [schema] every initial snapshot carries. A client that reads another value
     stops with [Schema_mismatch] instead of reading fields whose meaning may
     have changed. *)
 
@@ -87,6 +87,11 @@ type degradation =
   }
 
 type event =
+  | Unavailable_snapshot of
+      { revision : Revision.t
+      ; degradation : degradation
+      }
+      (** The first scan failed before any reading was available. *)
   | Snapshot of
       { revision : Revision.t
       ; measured_at : float

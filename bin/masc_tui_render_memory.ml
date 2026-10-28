@@ -1142,7 +1142,7 @@ let memory_overview_reading ~cols (state : state) =
      @ (if warnings = [] then [] else
           [section (if ko then "조회 경고" else "Read warnings") warnings])
      @ (if fleet_alerts = [] then [] else
-          [section (if ko then "전체 키퍼 알림" else "Fleet Keeper alerts") fleet_alerts])
+          [section (if ko then "읽은 키퍼의 알림" else "Alerts from decoded Keepers") fleet_alerts])
      @ keeper_section)
 
 (* A single row replaces an unfittable fleet header. It leads with any
@@ -1230,14 +1230,20 @@ let memory_overview_rows ~cols ~budget ?cursor (state : state) =
     else 3 + (if Option.is_some context.stalled_row then 1 else 0)
   in
   let header_budget = max 0 (budget - fixed_rows - list_rows - refused_min - context_reserve) in
+  (* On a very short frame the full list and selected detail must yield before
+     a fleet warning does. Leave one row for the selected Keeper or empty
+     state and one for a rejected-row notice when present. *)
+  let compact_header_room = max 0 (budget - fixed_rows - 1 - refused_min) in
   let full_header = memory_fleet_header_rows ~cols state in
   let header =
     if List.length full_header <= header_budget then full_header
-    else if header_budget > 0 then [memory_compact_fleet_row ~cols state]
+    else if compact_header_room > 0 then [memory_compact_fleet_row ~cols state]
     else []
   in
   let refused_available =
-    max 0 (budget - fixed_rows - list_rows - List.length header - context_reserve)
+    let desired = max 0 (budget - fixed_rows - list_rows - List.length header - context_reserve) in
+    if all_refused <> [] && budget - fixed_rows - List.length header >= 2
+    then max 1 desired else desired
   in
   let refused =
     fold_memory_rows ~subject:"rejected Keeper"

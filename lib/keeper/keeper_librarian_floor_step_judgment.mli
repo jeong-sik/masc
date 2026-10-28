@@ -21,4 +21,5 @@ val judge : store:Lane_addon_store.t -> step:Keeper_librarian_floor_step_request
     evaluations the host retained: a restart never asks the model again and never
     judges again with the Memory of the moment. [fresh_authority] checks the
     owner and the configured destination before anything is created or sent.
-    Blocking store reads and writes; offload the whole call in an Eio caller. *)
+    An Eio entry point: offload no part of it; its blocking store reads and
+    writes offload themselves. *)

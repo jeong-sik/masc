@@ -48,5 +48,6 @@ val run :
     the hole of a message from its source and the refusal causes. An error is a
     chain that disagrees with itself or its range: two steps at one position, a
     step the floor never asked about, a step that is not the question the machine
-    asks, or a step whose previous link or transaction differs. Blocking store
-    access; offload the whole call in an Eio caller. *)
+    asks, or a step whose previous link or transaction differs. An Eio entry
+    point: offload no part of it; its blocking store accesses offload
+    themselves. *)

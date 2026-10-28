@@ -26242,13 +26242,39 @@ and is loaded on demand through keeper_skill.
         | Presented.Reject_action | Presented.Reject_paste ->
             pointer_gesture := Masc_tui_pane_selection.Idle;
             None in
+      (* A Queue refresh can change its placement or page boundary before
+         the replacement frame. Refuse that input before it can acknowledge
+         an earlier rejection or begin a gesture against changing content. *)
+      let queue_viewport_decision =
+        let terminal_rows, _ = get_terminal_size () in
+        match input, queue_owner_of_reader (!presented).reader,
+              Masc_tui_render.queue_below_play state ~terminal_rows with
+        | Some event, Some owner, Some panel
+          when not state.image_open && not state.msx_open
+               && not (queue_owner_matches state panel
+                 ~viewport:(Masc_tui_render_overlays.queue_panel_viewport state panel) owner) ->
+            (match event with
+             | Pasted _ -> Presented.Reject_paste
+             | Graphics_reply _ -> Presented.Accept_input
+             | Key _ | Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _
+             | Mouse_wheel _ -> Presented.Reject_action)
+        | (Some _ | None), (Some _ | None), (Some _ | None) -> Presented.Accept_input in
+      (match queue_viewport_decision with
+       | Presented.Reject_paste when Option.is_some interrupted_paste ->
+           presented := Presented.reject_recovery !presented
+       | Presented.Accept_input | Presented.Reject_action | Presented.Reject_paste -> ());
+      let input = match queue_viewport_decision with
+        | Presented.Accept_input -> input
+        | Presented.Reject_action | Presented.Reject_paste ->
+            pointer_gesture := Masc_tui_pane_selection.Idle;
+            None in
       (* A rejected gesture has no target, but it still interrupts any armed
          confirmation. Never send its key or payload to another surface. *)
       let decision_rejected = function
         | Presented.Accept_input -> false
         | Presented.Reject_action | Presented.Reject_paste -> true in
       let rejected_operator_input = rejected || decision_rejected unpresented_decision
-        || decision_rejected panel_decision in
+        || decision_rejected panel_decision || decision_rejected queue_viewport_decision in
       let panel_owns_input = Option.is_some current_panel
         && panel_owner_matches current_panel
         && not state.image_open && not state.msx_open in
@@ -26436,6 +26462,16 @@ and is loaded on demand through keeper_skill.
        | Presented.Reject_paste ->
            report_input_rejection state Masc_tui_action_notice.Paste_rejected
              "Paste was not applied on this screen; retry in a text field";
+           Render_schedule.request render_schedule Render_schedule.Background);
+      (match queue_viewport_decision with
+       | Presented.Accept_input -> ()
+       | Presented.Reject_action ->
+           report_input_rejection state Masc_tui_action_notice.Input_rejected
+             "Queue changed: input was not applied; review the new frame and retry";
+           Render_schedule.request render_schedule Render_schedule.Background
+       | Presented.Reject_paste ->
+           report_input_rejection state Masc_tui_action_notice.Paste_rejected
+             "Queue changed: paste was not applied; retry in a text field";
            Render_schedule.request render_schedule Render_schedule.Background);
       reconcile_chat_focus ();
       (* Any deliberate input withdraws a standing Ctrl-C. Without this the

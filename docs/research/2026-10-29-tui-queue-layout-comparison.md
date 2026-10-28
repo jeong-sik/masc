@@ -53,8 +53,12 @@ and document length. Navigation waits for a replacement frame if an async
 read or receipt changes these values. Fast queued navigation can therefore
 be rejected with the common transition feedback. This does not freeze item
 order or prove that all input/output is atomic. Exact selected-row authority
-continues to guard changes, and copying the still-presented frame remains a
-separate operation.
+continues to guard changes. A Queue placement, content-height or document-count
+change also cancels an in-progress copy gesture, including a drag in the
+conversation pane whose coordinates did not change. This is a conservative
+shared-frame policy; the operator must repeat the gesture after redraw.
+Rejection happens before notice acknowledgement, so rejected navigation or
+clicks cannot dismiss a previously displayed paste-loss notice.
 
 ## What the importance scores mean here
 
@@ -122,7 +126,9 @@ the earlier hints-off baseline is not a controlled before/after experiment.
 ## Observation and resulting decision
 
 The actual macOS executable for `38b6edd82eaac14cf7141fb83988108b7883f1dd`
-was run with hints enabled and synthetic data. Each adaptive/expanded pair uses
+was run with hints enabled and synthetic data; the
+[retained observation bundle](../evidence/research/tui-queue-layout-2026-10-29/README.md)
+contains capture bytes, provenance and request records. Each adaptive/expanded pair uses
 the same executable, fixture, selected item and receipt state. At 120×36, both
 showed 18 pending events; Side also retained the eight authored conversation
 messages, while truncating event text sooner. Detail exposed the complete

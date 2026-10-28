@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """Pair the output of `scan_args old` with `scan_args new` and print the
-registrations whose wrappers differ.
+registrations whose with_* chains differ.
 
 usage: compare_args.py OLD.tsv NEW.tsv
 
-Rows are paired by file, function and path text, not by position: the two scans
-list the files in different orders. Registrations with a variable path can share a
-key, so the wrappers of one key are compared as sorted lists.
+A chain is the helpers that enclose one another, outermost first, so a change of
+order or of how often a helper runs shows as a difference. Rows are paired by file,
+function and path text, not by position: the two scans list the files in different
+orders. Registrations with a variable path can share a key, so the chains of one key
+are compared as sorted lists.
 
-Exits 1 when a key exists on one side only. A wrapper that differs is printed and
-does not change the exit code: each one needs a reason, which the README gives.
+Exits 1 when a key exists on one side only. A chain that differs is printed and does
+not change the exit code: each one needs a reason, which the README gives.
 """
 
 from __future__ import annotations
@@ -49,7 +51,7 @@ def main() -> int:
             continue
         differ += len(before)
         print(f"{key[0]} {key[1]} {key[2]}\n    old: {before}\n    new: {after}")
-    print(f"{same} registrations with the same wrappers, {differ} with different ones")
+    print(f"{same} registrations with the same chains, {differ} with different ones")
     return 1 if unpaired else 0
 
 

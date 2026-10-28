@@ -1,22 +1,30 @@
-(* Per registration: the Server_auth wrappers (and their ~permission / ~tool_name
-   argument text) the route runs.
+(* Per registration: every with_* helper the route runs, as the chain of helpers that
+   enclose it (outermost first), with the ~permission / ~tool_name argument text of
+   the seven Server_auth wrappers.
 
-   old files: Http.Router.<fn> path handler   -> wrappers found by following the
+   A chain keeps the order the helpers run in: [with_a (fun ... -> with_b ...)] is
+   "with_a>with_b", [with_b (fun ... -> with_a ...)] is "with_b>with_a". The chains of
+   one registration are sorted but not deduplicated, so a helper that runs twice
+   shows twice.
+
+   old files: Http.Router.<fn> path handler   -> chains found by following the
               handler into same-file definitions (depth 3)
-   new files: Server_route.<fn> KIND path handler -> the wrapper KIND stands for,
-              plus any wrapper still inside the handler
+   new files: Server_route.<fn> KIND path handler -> the helpers KIND stands for
+              (one for most kinds, two for Public_read_on_canonical_host) are the
+              outermost links of every chain of the handler, and are chains themselves
 
-   A handler defined in another file is not followed, so a wrapper that lives
-   there shows up on the old side as "no wrapper" (see the telemetry row in the
-   README of this directory).
+   A handler defined in another file is not followed, so a helper that lives there
+   shows up on the old side as "no helper" (see the telemetry row in the README of
+   this directory).
 
    usage: scan_args (old|new) FILE...
-   output: one line per registration: file, fn, path text, wrappers (tab separated)
+   output: one line per registration: file, fn, path text, chains (tab separated;
+           chains separated by ';')
 
    build: ocamlfind ocamlopt -package compiler-libs.common -linkpkg scan_args.ml -o scan_args *)
 open Parsetree
 
-let wrapper_names =
+let auth_wrappers =
   [ "with_public_read"; "with_read_auth"; "with_permission_auth"
   ; "with_token_permission_auth"; "with_private_token_permission_auth"
   ; "with_tool_auth"; "with_tool_actor_auth" ]
@@ -26,6 +34,8 @@ let registration_fns =
 
 let flatten lid = try Longident.flatten lid with _ -> []
 let last l = match List.rev l with x :: _ -> x | [] -> ""
+
+let is_with_helper name = String.length name > 5 && String.sub name 0 5 = "with_"
 
 let normalize s =
   let b = Buffer.create (String.length s) in
@@ -58,53 +68,56 @@ let defs_of_structure str =
   it.structure it str;
   tbl
 
-(* Every wrapper applied anywhere inside [e], following identifiers into
-   same-file definitions. *)
-let wrappers_in source defs (e : expression) =
-  let found = ref [] in
-  let rec visit depth (e : expression) =
-    let it =
-      { Ast_iterator.default_iterator with
-        expr =
-          (fun self (x : expression) ->
-            (match x.pexp_desc with
-             | Pexp_apply ({ pexp_desc = Pexp_ident { txt; _ }; _ }, args)
-               when List.mem (last (flatten txt)) wrapper_names ->
-               let name = last (flatten txt) in
-               let arg label =
-                 List.find_map
-                   (function
-                     | Asttypes.Labelled l, (a : expression) when l = label -> Some (slice source a.pexp_loc)
-                     | _ -> None)
-                   args
-               in
-               let text =
-                 match name with
-                 | "with_permission_auth" | "with_token_permission_auth"
-                 | "with_private_token_permission_auth" ->
-                   "permission=" ^ Option.value (arg "permission") ~default:"?"
-                 | "with_tool_auth" | "with_tool_actor_auth" ->
-                   "tool_name=" ^ Option.value (arg "tool_name") ~default:"?"
-                 | _ -> ""
-               in
-               found := (name ^ "(" ^ text ^ ")") :: !found
-             | Pexp_ident { txt = Longident.Lident n; _ } when depth < 3 ->
-               List.iter (fun d -> visit (depth + 1) d) (Hashtbl.find_all defs n)
-             | _ -> ());
-            Ast_iterator.default_iterator.expr self x) }
-    in
-    it.expr it e
+(* The text a chain link carries: the name, and for the seven auth wrappers the
+   argument that decides who is let in. *)
+let link_label source name args =
+  let arg label =
+    List.find_map
+      (function
+        | Asttypes.Labelled l, (a : expression) when l = label -> Some (slice source a.pexp_loc)
+        | _ -> None)
+      args
   in
-  visit 0 e;
-  List.sort_uniq compare !found
+  match name with
+  | "with_permission_auth" | "with_token_permission_auth" | "with_private_token_permission_auth" ->
+    name ^ "(permission=" ^ Option.value (arg "permission") ~default:"?" ^ ")"
+  | "with_tool_auth" | "with_tool_actor_auth" ->
+    name ^ "(tool_name=" ^ Option.value (arg "tool_name") ~default:"?" ^ ")"
+  | _ -> name
 
-let kind_wrapper source (kind : expression) =
+(* Every application of a with_* helper inside [e], as the chain of with_* applications
+   that enclose it, starting from [prefix]. Identifiers are followed into same-file
+   definitions, up to three levels. *)
+let chains_in source defs ~prefix (e : expression) =
+  let found = ref [] in
+  let rec visit depth stack (e : expression) =
+    let it : Ast_iterator.iterator = iterator depth stack in
+    it.Ast_iterator.expr it e
+  and iterator depth stack : Ast_iterator.iterator =
+    { Ast_iterator.default_iterator with
+      expr =
+        (fun self (x : expression) ->
+          match x.pexp_desc with
+          | Pexp_apply ({ pexp_desc = Pexp_ident { txt; _ }; _ }, args)
+            when is_with_helper (last (flatten txt)) ->
+            let chain = stack @ [ link_label source (last (flatten txt)) args ] in
+            found := String.concat ">" chain :: !found;
+            List.iter (fun (_, a) -> visit depth chain a) args
+          | Pexp_ident { txt = Longident.Lident n; _ } when depth < 3 ->
+            List.iter (fun d -> visit (depth + 1) stack d) (Hashtbl.find_all defs n)
+          | _ -> Ast_iterator.default_iterator.expr self x) }
+  in
+  visit 0 prefix e;
+  List.sort compare !found
+
+(* The helpers the kind stands for, outermost first. *)
+let kind_links source (kind : expression) =
   let arg_text (a : expression) = slice source a.pexp_loc in
   match kind.pexp_desc with
   | Pexp_construct ({ txt; _ }, None) ->
     (match last (flatten txt) with
-     | "Public_read" -> [ "with_public_read()" ]
-     | "Read_auth" -> [ "with_read_auth()" ]
+     | "Public_read" -> [ "with_public_read" ]
+     | "Read_auth" -> [ "with_read_auth" ]
      | "Always_public" | "Self_authenticated" -> []
      | other -> [ "?kind:" ^ other ])
   | Pexp_construct ({ txt; _ }, Some arg) ->
@@ -117,9 +130,22 @@ let kind_wrapper source (kind : expression) =
      | ("Tool" | "Tool_actor"), Pexp_record ([ (_, v) ], None) ->
        [ (if name = "Tool" then "with_tool_auth" else "with_tool_actor_auth")
          ^ "(tool_name=" ^ arg_text v ^ ")" ]
+     | "Public_read_on_canonical_host", _ ->
+       [ "with_canonical_loopback_host"; "with_public_read" ]
      | "Self_authenticated", _ -> []
      | _ -> [ "?kind:" ^ name ])
   | _ -> [ "?kind-not-a-constructor" ]
+
+(* The chain of each prefix of [links]: the helpers a kind stands for enclose one
+   another, so each one is a chain of its own and the next one is inside it. *)
+let own_chains links =
+  let rec go acc prefix = function
+    | [] -> List.rev acc
+    | link :: rest ->
+      let chain = prefix @ [ link ] in
+      go (String.concat ">" chain :: acc) chain rest
+  in
+  go [] [] links
 
 let () =
   let mode = Sys.argv.(1) in
@@ -159,12 +185,11 @@ let () =
                     in
                     (match path, handler with
                      | Some p, Some h ->
-                       let own = match kind with Some k -> kind_wrapper source k | None -> [] in
-                       let inner = wrappers_in source defs h in
-                       let all = List.sort compare (own @ inner) in
-                       let path_text = slice source p.pexp_loc in
-                       let fn_name = if fn = "ws_get" then "ws_get" else fn in
-                       Printf.printf "%s\t%s\t%s\t%s\n" base fn_name path_text (String.concat ";" all)
+                       let links = Option.fold ~none:[] ~some:(kind_links source) kind in
+                       let inner = chains_in source defs ~prefix:links h in
+                       let all = List.sort compare (own_chains links @ inner) in
+                       Printf.printf "%s\t%s\t%s\t%s\n" base fn (slice source p.pexp_loc)
+                         (String.concat ";" all)
                      | _ -> Printf.printf "%s\t%s\t?\t?UNPARSED\n" base fn)
                   | _ -> ())
                | _ -> ());

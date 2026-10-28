@@ -35,8 +35,9 @@ type dstate = {
 
 let keep_ns = 1_000_000L
 
-(* One traced section; see {!Rtev_span}. [run_ns] and [waits] split a job's
-   wall time into running, waiting on something, and waiting for the domain. *)
+(* One traced section; see {!Rtev_span}. [run_ns] and [waits] sum, over the
+   section's fibers, the time they ran, waited on something, and waited for
+   the domain. They split the wall time only when one fiber runs at a time. *)
 type span = Rtev_span.span = {
   span_name : string;
   span_domain : int;

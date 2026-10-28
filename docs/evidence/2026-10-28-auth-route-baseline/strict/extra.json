@@ -497,6 +497,14 @@
    "body_head": ""
   },
   {
+   "case": "GET /ws upgrade",
+   "protocol": "http1",
+   "credential": "bad_query",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
    "case": "GET /api/v1/ide/lsp upgrade",
    "protocol": "http1",
    "credential": "none",
@@ -616,5 +624,19 @@
    "www_authenticate": null,
    "body_head": ""
   }
- ]
+ ],
+ "dev_token": {
+  "http1": {
+   "status": 404,
+   "json": true,
+   "keys": [
+    "error"
+   ],
+   "values": {}
+  },
+  "h2": {
+   "status": 404,
+   "json": false
+  }
+ }
 }

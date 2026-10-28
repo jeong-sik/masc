@@ -170,7 +170,9 @@ let test_share_interrupted_migration () = with_base (fun base_path ->
    | Error (S.Share_commit_uncertain _) -> ()
    | Error error -> Alcotest.fail (S.share_error_message error)
    | Ok _ -> Alcotest.fail "injected migration unexpectedly completed");
-  Yojson.Safe.to_file other_file (`Assoc ["id", `String other.id; "shared", `Bool false]);
+  let channel = open_out_bin other_file in
+  output_string channel (Printf.sprintf "{ \"id\": \"%s\", \"shared\": true }" other.id);
+  close_out channel;
   (match S.read_share ~base_path ~id:other.id with
    | Error (S.Share_unavailable _) -> ()
    | Error error -> Alcotest.fail (S.share_error_message error)

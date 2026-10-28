@@ -181,22 +181,30 @@ let share_artifact_error = function
   | (Conflict _ | Unavailable _ | Commit_uncertain _) as error ->
     Share_unavailable (error_message error)
 
-let load_share_json ~base_path path =
+let load_share_text ~base_path path =
   match Fs_compat.load_owned_regular_file_with_snapshot ~owner_uid:(Unix.geteuid ())
       ~single_link:true ~ownership_root:base_path path with
   | Error _ -> Error (Share_unavailable "share metadata could not be read")
   | Ok None -> Ok None
   | Ok (Some { content; _ }) when not (String.is_valid_utf_8 content) ->
     Error (Share_unavailable "share metadata is not valid UTF-8")
-  | Ok (Some { content; _ }) ->
+  | Ok (Some { content; _ }) -> Ok (Some content)
+
+let parse_share_json = function
+  | None -> Ok None
+  | Some content ->
     match Yojson.Safe.from_string content with
     | json -> Ok (Some json)
     | exception Yojson.Json_error message -> Error (Share_unavailable message)
 
+let load_share_json ~base_path path =
+  let* text = load_share_text ~base_path path in
+  parse_share_json text
+
 type share_guard =
   | Guard_absent
   | Guard_active
-  | Guard_pending of { previous : Yojson.Safe.t option; next : Share.t }
+  | Guard_pending of { previous : string option; next : Share.t }
 
 let active_guard_json id =
   `Assoc ["schema", `String "masc.published_artifact_share_guard.v2";
@@ -205,7 +213,8 @@ let active_guard_json id =
 let pending_guard_json ~id ~previous ~next =
   `Assoc ["schema", `String "masc.published_artifact_share_guard.v2";
           "id", `String id; "phase", `String "pending";
-          "previous", Option.value ~default:`Null previous; "next", Share.to_json next]
+          "previous", Option.fold ~none:`Null ~some:(fun text -> `String text) previous;
+          "next", Share.to_json next]
 
 let decode_share_state ~id = function
   | None -> Share.initial ~id ~shared:false |> Result.map_error (function
@@ -236,8 +245,12 @@ let read_share_guard ~base_path ~id =
     (match List.assoc "schema" fields, List.assoc "id" fields, List.assoc "phase" fields with
      | `String "masc.published_artifact_share_guard.v2", `String stored_id, `String "pending"
        when String.equal stored_id id ->
-       let previous = match List.assoc "previous" fields with `Null -> None | json -> Some json in
-       let* initial = if is_legacy_share previous then decode_share_state ~id previous
+       let* previous = match List.assoc "previous" fields with
+         | `Null -> Ok None
+         | `String text when String.is_valid_utf_8 text -> Ok (Some text)
+         | _ -> Error (Share_unavailable "invalid share migration baseline") in
+       let* previous_json = parse_share_json previous in
+       let* initial = if is_legacy_share previous_json then decode_share_state ~id previous_json
          else Error (Share_unavailable "invalid share migration baseline") in
        let* next = decode_share_state ~id (Some (List.assoc "next" fields)) in
        (match Share.latest next with
@@ -296,8 +309,9 @@ let recover_pending_share ~base_path ~id =
   match guard with
   | Guard_absent | Guard_active -> Ok ()
   | Guard_pending { previous; next } ->
-    let* current = load_share_json ~base_path (share_path ~base_path id) in
-    if current <> previous && current <> Some (Share.to_json next) then
+    let* current = load_share_text ~base_path (share_path ~base_path id) in
+    let* current_json = parse_share_json current in
+    if current <> previous && current_json <> Some (Share.to_json next) then
       Error (Share_unavailable "share migration baseline changed")
     else
       let save path json =
@@ -379,7 +393,7 @@ let change_share_with_save ~save ~base_path ~id request =
         match guard with
         | Guard_pending _ -> Error (Share_unavailable "artifact share migration requires recovery")
         | Guard_absent ->
-          let* previous = load_share_json ~base_path (share_path ~base_path id) in
+          let* previous = load_share_text ~base_path (share_path ~base_path id) in
           let pending = pending_guard_json ~id ~previous ~next in
           (match durable_share_save ~ownership_root:base_path (share_guard_path ~base_path id) pending with
            | Error error when error.renamed -> Error (Share_commit_uncertain receipt)

@@ -178,10 +178,11 @@ L3e 이후를 쓰려고 `consume_one`, `Commit`, `Source_lock` 코드를 읽고 
    - 거절 증거가 3.1 의 크기 거절이다(`Request.refusal_evidence` 와 `may_descend_messages`).
    - 범위에 메시지가 있다.
    - 범위의 Memory 영수증이 아직 없다(`Commit.receipt_state` 가 거짓).
-2. **후보 원본은 사슬이 끝날 때까지 frontier 다.** 지금은 `Rejected` 원본이 `Settled` 로 분류되어 다음 pass 에 보관소로 옮겨진다. 후보는 옮기지 않는다. 단계가 원본을 ID 와 digest 로 가리키기 때문이다. Memory 영수증이 범위를 증명하면 `Settled` 가 되고 지금 방식대로 옮겨진다. Keeper 의 frontier 는 여전히 하나뿐이다.
-3. **게시 확인은 영수증이 한다.** 거절된 원본에 commit 의도 이벤트를 새로 만들지 않는다. `Rejected` 는 끝난 상태이고, history 경로도 최종 증거는 영수증이다(`Commit.publish_with` 의 "실제 영수증이 결정한다"). 영수증이 있으면 위치 이동과 정리만 이어서 한다. 영수증이 없을 때 같은 program 을 다시 써도 되는지는 L4 에서 코드로 확인한다.
+   - 원본을 만든 뒤 읽기 위치(atom 과 공식)가 움직이지 않았다. 움직였다면 다음 pass 가 고르는 범위는 원본의 범위가 아니다.
+2. **후보 원본은 사슬이 끝날 때까지 보관소로 옮기지 않는다.** 지금은 `Rejected` 원본이 `Settled` 로 분류되어 다음 pass 에 보관소로 옮겨진다. 후보는 옮기지 않는다. 단계가 원본을 ID 와 digest 로 가리키기 때문이다. 후보는 frontier 로 세지 않는다. 다음 pass 의 새 선택(`Consumer.consume_one`)이 후보와 같은 범위를 고르면 `commit` 은 새 원본을 만들지 않고 후보의 사슬을 이어 간다. 범위가 다르면(표시가 사라진 재시작 뒤 등) 지금처럼 새 원본을 만든다. 후보의 영수증이 생기거나 읽기 위치가 움직이면 후보가 아니게 되어 `Settled` 가 되고 지금 방식대로 옮겨진다.
+3. **게시는 `commit` 안에서 하고, 꼬리는 Consumer 가 한다.** 사슬이 끝난 pass 에서 `commit` 이 출처 잠금 아래 외부 커서를 후보가 읽은 `through` 와 구멍이 든 범위로 다시 준비하고 `Current.apply_program` 을 부른다. 그다음 영수증 확인, 외부 커서 ack, 위치 이동은 Consumer 의 기존 꼬리가 한다. Runtime 바닥이 쓰는 꼬리와 같다. 게시 도중에 죽으면 Consumer 의 "이미 저장된 범위는 모델 호출 없이 위치만 옮긴다" 경로(`is_committed_prefix`)가 이어 받는다. 이 경로는 구멍이 든 영수증을 이미 검증한다. 거절된 원본에 commit 의도 이벤트를 새로 만들지 않는다. `Rejected` 는 끝난 상태이고 최종 증거는 영수증이다.
 4. **사슬이 멈추면 멈춘 단계 기록만 정리한다.** 앞 단계의 결과는 남는다. 다음 pass 는 그 위치에 새 단계를 만들어 다시 묻는다. pass 당 모델 호출이 하나라서 지금 history 경로의 재시도 비용과 같다. 횟수 상한이나 대기 시간은 두지 않는다. 크기로 거절되어 구멍이 된 단계는 program 의 일부라서 정리하지 않는다.
-5. **단계 기록의 정리.** 게시가 끝난 사슬의 단계는 그 자리에서 정리한다. 범위 원본이 이미 보관소로 옮겨졌거나 없는 단계는 다음 pass 가 정리한다. 날짜는 단계 ID 가 만들어진 날이다(단계 ID 의 nonce 가 uuid v7 이다).
+5. **단계 기록의 정리.** 영수증이 생긴 사슬의 단계는 다음 pass 가 정리한다. 범위 원본이 보관소로 옮겨졌거나 없는 단계, 읽기 위치가 움직여 후보가 아니게 된 원본의 단계도 같다. 날짜는 단계 ID 가 만들어진 날이다(단계 ID 의 nonce 가 uuid v7 이다).
 6. **게시 때 Memory 가 달라졌으면** `Program.replay` 가 거절할 수 있다. 현재 안은 사슬의 단계를 모두 정리하고 지금 Memory 로 처음부터 다시 돌리는 것이다. 모델 호출이 단계 수만큼 다시 든다. 드물다고 보지만 재 보지는 않았다. L4 에서 확정한다.
 7. **사슬의 입력은 원본에서 읽는다.** 입력과 메시지는 원본 캡처의 `Source.input` 이다. 공식 턴의 `sources` 와 구멍은 이 메시지만으로 만든다. atom 범위는 체크포인트 전체가 있어야 `sources` 에 번호를 붙일 수 있는데, 캡처는 체크포인트의 개수와 digest 만 가진다. 그래서 지금 체크포인트를 읽고 `Capture.confirm_sources` 로 원본과 맞는지 확인한 뒤 만든다. 처음 시작할 때의 값은 Runtime 바닥과 같다. 시작 facts 는 그때의 Memory, transaction 은 새 ID, 이어받는 상태는 없음, 읽지 못한 메시지는 누적 원장이다. 원본 입력의 `current` 는 쓰지 않는다. 원본을 만든 뒤 Memory 가 달라졌을 수 있고, 사슬이 짧을수록 게시 때 달라질 틈이 줄기 때문이다. 재시작하면 첫 단계에서 읽는다.
 8. **provider 가 나중에 하는 크기 거절은 범위를 좁히지 않는다.** 한 턴으로 좁혀 읽는 표시(`failed_ranges`)는 `Consumer.consume_one` 이 동기 거절(`Memory_refused`)을 받을 때만 켜진다. provider 거절은 worker 가 나중에 돌려주고 `Execution.consume_one` 의 `resume_original` 로 들어와서 표시가 켜지지 않는다. 그대로 두면 worker frame 거절(동기)은 두 pass 뒤 후보가 되지만 provider 의 크기 거절은 후보가 되지 못한다. `resume_original` 이 거절을 받을 때 같은 표시를 켠다(L5).
@@ -202,7 +203,7 @@ L3e 이후를 쓰려고 `consume_one`, `Commit`, `Source_lock` 코드를 읽고 
 | L1 | 이 RFC | — |
 | L2 | durable `refusal_report` 가 3.1 의 크기 거절에만 `Smaller_input_may_help`·`provider_input_refusals` 를 싣는다. host 기록이 없는 frame 거절은 final 만으로, 기록이 있는 거절은 실행 영수증의 소진 증거로 판정한다. 바닥은 아직 없다 | 크기 거절과 다른 거절의 보고 차이, 영수증 증거가 없는 `Input_capacity` 는 근거 없음 |
 | L3 | 3.8 의 L3a~L3d. 바닥의 상태기계, Runtime 입구, 단계 request, 단계 owner, 사슬 구동. 부르는 곳이 없다 | 단계 사슬 crash·재개, 같은 단계 재호출 없음, 구멍 보존 |
-| L3e | 하강 후보 판정과 사슬 입력 읽기(3.9 의 1번, 7번). 부르는 곳이 없다 | 크기 거절은 후보. `Invalid_request`, 열린 host 기록, 여러 턴 범위, 영수증이 있는 범위는 후보가 아님. 체크포인트가 원본 출처와 다르면 거절 |
+| L3e | 하강 후보 판정과 사슬 입력 읽기(3.9 의 1번, 7번). 부르는 곳이 없다 | 크기 거절은 후보. `Invalid_request`, 열린 host 기록, 여러 턴 범위, 영수증이 있는 범위, 읽기 위치가 움직인 원본은 후보가 아님. 체크포인트가 원본 출처와 다르면 거절. 외부 커서가 움직여도 읽는다 |
 | L4 | 게시(3.9 의 3번, 5번, 6번, 9번). 끝난 사슬의 program 을 Memory 에 쓰고, 영수증에 구멍을 싣고, 위치를 옮기고, 단계 기록을 정리한다. 부르는 곳이 없다 | 구멍 하나와 나머지 메시지의 Memory, 위치 이동, crash 뒤 재개, 영수증이 있을 때 다시 쓰지 않음. `specs/bug-models/LibrarianRead.tla` 의 `NoAtomPassedUnread` 와 맞는지 |
 | L5 | `consume_one` 에 연결(3.9 의 2번, 4번, 8번). 후보 원본을 frontier 로 두고 사슬을 돌린다. 단계 기록을 inventory 에 넣는다. bench `5:5` 를 재고 RFC status 를 고친다 | 실제 worker 와 실제 4 MiB frame 으로 5 MB 메시지 하나가 든 턴: 하강은 한 번, 구멍 하나, 나머지 메시지의 Memory, 위치 이동 |
 

@@ -18,4 +18,5 @@ val queue_rows : body_rows:int -> placement -> int
 
 val panes :
   placement -> cols:int -> first_row:int -> body_rows:int -> Masc_tui_pane_selection.layout
-(** Separate copy rectangles for the conversation preview and the active queue. *)
+(** Separate copy rectangles for the conversation preview and the active queue,
+    including the shared chrome's three leading and two trailing rows. *)

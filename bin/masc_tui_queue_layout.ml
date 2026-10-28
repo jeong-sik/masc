@@ -32,10 +32,13 @@ let panes placement ~cols ~first_row ~body_rows =
     if bottom < top || right < left then []
     else [Pane.{kind=Main; rect={top; bottom; left; right}}] in
   match placement with
-  | Full -> pane ~top:first_row ~bottom ~left:1 ~right:cols
+  | Full -> pane ~top:(first_row-3) ~bottom:(bottom+2) ~left:1 ~right:cols
   | Side {context_cols; queue_cols=_} ->
-      pane ~top:first_row ~bottom ~left:1 ~right:context_cols
-      @ pane ~top:first_row ~bottom ~left:(context_cols+1) ~right:cols
+      pane ~top:(first_row-3) ~bottom:(bottom+1) ~left:1 ~right:context_cols
+      @ pane ~top:(first_row-3) ~bottom:(bottom+1) ~left:(context_cols+1) ~right:cols
+      @ pane ~top:(bottom+2) ~bottom:(bottom+2) ~left:1 ~right:cols
   | Bottom {context_rows; queue_rows=_} ->
-      pane ~top:first_row ~bottom:(first_row+context_rows-1) ~left:1 ~right:cols
-      @ pane ~top:(first_row+context_rows+1) ~bottom ~left:1 ~right:cols
+      pane ~top:(first_row-3) ~bottom:(first_row-1) ~left:1 ~right:cols
+      @ pane ~top:first_row ~bottom:(first_row+context_rows-1) ~left:1 ~right:cols
+      @ pane ~top:(first_row+context_rows) ~bottom:(first_row+context_rows) ~left:1 ~right:cols
+      @ pane ~top:(first_row+context_rows+1) ~bottom:(bottom+2) ~left:1 ~right:cols

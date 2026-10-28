@@ -253,9 +253,10 @@ let capture_response ~base_path ~keeper_name ~turn_id ~agent_core_turn
 
 (* The [request] row above is taken before model-input projection, so it
    cannot say what the provider received. This row is taken at the pre-dispatch
-   serialization boundary, once per provider request, from the messages of that
-   request after projection, without the extra-system-context carrier AGENT_CORE
-   appends last. It holds positions, roles, byte counts and digest comparisons,
+   serialization boundary, once per provider request, from the inner conversation
+   projection without the current extra-system-context carrier. It precedes the
+   final unread replacement and retained-result addition. It holds positions,
+   roles, byte counts and digest comparisons,
    and no message or schema text, so it is written without the secret redaction
    the text rows need. *)
 let capture_request_projection_change ~masc_root ~keeper_name ~turn_id
@@ -291,6 +292,7 @@ let capture_request_projection_change ~masc_root ~keeper_name ~turn_id
               ; ("trace_id", `String (Keeper_id.Trace_id.to_string trace_id))
               ; ("agent_core_turn", `Int agent_core_turn)
               ; ("runtime_profile", `String runtime_profile)
+              ; ("message_scope", `String "inner_projection_without_current_system_context")
               ; ( "message_count"
                 , `Int (Keeper_projection_change.message_count current) )
               ; ("tool_count", `Int (List.length tools))

@@ -117,10 +117,11 @@ val capture_request_projection_change :
   tools:Agent_core.Tool.t list ->
   messages:Agent_core.Types.message list ->
   Keeper_projection_change.previous_request
-(** Called once per provider request with the values that request carries:
-    its tool schemas, and its messages after projection without the
-    extra-system-context carrier AGENT_CORE appends last, so [message_count]
-    is one less than the provider received when a carrier was sent.
+(** Called once per provider request with tool schemas and the inner
+    conversation projection, excluding the current extra-system-context
+    carrier. The final unread replacement and retained-result carrier are
+    applied later, so [message_count] and [change] do not describe the whole
+    serializer input. The row names this scope explicitly.
     Snapshots [memo] on the caller fiber, digests [tools] and [messages] on the
     CPU domain pool without shared mutation, then merges fresh digests on the
     caller fiber only after the await succeeds. It compares the result with

@@ -1322,6 +1322,29 @@ let run_turn
     let request_wire_evidence_ref : request_wire_evidence option ref =
       ref None
     in
+    let input_segments_cache = ref None in
+    let compute_input_segments (attribution : request_attribution) input_messages =
+      match !input_segments_cache with
+      | Some (previous, segments) when previous == attribution -> segments
+      | Some _ | None ->
+      let build () =
+        Agent_core.Base.Schema_observation.with_site Final_attribution_bytes
+          (fun () -> Keeper_agent_prompt_metrics.build_ctx_segments
+            ~prompt_blocks:attribution.prompt_blocks
+            ~tools:attribution.tools
+            ~input_messages)
+      in
+      (* Final input can contain a large retained-result carrier. *)
+      let submit () =
+        let work = Agent_core.Base.Schema_observation.capture build in
+        Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ work
+      in
+      let segments = match attribution.schema_observation_scope with
+        | None -> submit ()
+        | Some scope -> Agent_core.Base.Schema_observation.with_scope scope submit in
+      input_segments_cache := Some (attribution, segments);
+      segments
+    in
     (* What the next provider request of this keeper turn is compared against.
        Not cleared per runtime attempt: each row names its runtime profile, so
        a lane switch between two requests stays visible in the rows. *)
@@ -1352,7 +1375,6 @@ let run_turn
       =
       ref None
     in
-    let current_request_projected_messages_ref = ref None in
     let source_model_input_projection =
       s.Keeper_run_tools.model_input_projection
     in
@@ -1368,10 +1390,8 @@ let run_turn
       match source_model_input_projection messages with
       | Error _ as error ->
         current_request_provider_content_ref := None;
-        current_request_projected_messages_ref := None;
         error
       | Ok projected_messages as result ->
-        current_request_projected_messages_ref := Some projected_messages;
         let prompt_context_present =
           Option.is_some acc.Keeper_run_tools.extra_system_context_size
         in
@@ -1718,13 +1738,13 @@ let run_turn
                               finally answered, and the metrics row credits
                               one lane's bytes to another.
 
-                              All four attempt-local cells, not just the two the record is
+                              All attempt-local cells, not just those the record is
                               built from: the Agent Core wire handler reads
-                              the provider-content and projected-message cells
-                              to assemble its attribution, so leaving them set
+                              the provider-content cell to assemble its
+                              attribution, so leaving it set
                               makes the clear true of the record and false of
                               the inputs it is assembled from. That the Agent
-                              Core lane happens to overwrite both on every
+                              Core lane happens to overwrite it on every
                               request is a property of that lane, not of this
                               invariant. The window and response-observed cells
                               are turn-local: selecting a later candidate must
@@ -1733,7 +1753,6 @@ let run_turn
                            request_attribution_ref := None;
                            request_wire_evidence_ref := None;
                            current_request_provider_content_ref := None;
-                           current_request_projected_messages_ref := None;
                            s.Keeper_run_tools.on_runtime_attempt attempt)
                       ~on_runtime_attempt_error:
                         (fun ~runtime_id ~attempt ~dispatch error ->
@@ -1798,7 +1817,18 @@ let run_turn
                              ~tools
                              ~transmitted)
                       ~on_request_wire_observation:
-                        (fun ~runtime_id ~body_bytes ~serialized ->
+                        (fun ~runtime_id ~body_bytes ~serialized ~projected_messages ->
+                           let final_provider_content =
+                             match !current_request_provider_content_ref,
+                                   projected_messages with
+                             | Some (Ok _), Some messages ->
+                               Some (Keeper_agent_prompt_metrics.provider_content_of_transmitted
+                                 ~prompt_context_present:
+                                   (Option.is_some acc.Keeper_run_tools.extra_system_context_size)
+                                 ~messages)
+                             | Some (Error _ as failure), _ -> Some failure
+                             | None, _ | Some (Ok _), None -> None
+                           in
                            (match !current_request_provider_content_ref with
                             | Some (Ok provider_content) ->
                               s.Keeper_run_tools.stage_skill_delivery_on_wire
@@ -1815,7 +1845,7 @@ let run_turn
                                ~agent_cell:agent_ref
                                ~built:built_tools
                            in
-                           (match !current_request_provider_content_ref with
+                           (match final_provider_content with
                             | None -> ()
                             | Some provider_content ->
                               let provider_content =
@@ -1841,8 +1871,7 @@ let run_turn
                                  }
                              ; wire_schema_observation_scope = Agent_core.Base.Schema_observation.current_scope ()
                              ; serialized_observation = serialized
-                             ; wire_projected_messages =
-                                 !current_request_projected_messages_ref
+                             ; wire_projected_messages = projected_messages
                              ; wire_system_prompt = Option.bind acc.extra_system_context_assembly
                                  (fun assembly -> Option.map (fun (issued : Keeper_context_assembly.system_prompt) ->
                                      issued.text) assembly.Keeper_context_assembly.system_prompt)
@@ -1850,13 +1879,10 @@ let run_turn
                              }
                            in
                            request_wire_evidence_ref := Some wire_evidence;
-                           (* The provider content, not the projected list:
-                              AGENT_CORE appends the extra-system-context
-                              carrier after the history of every request, so
-                              when a request only extends the history, the
-                              previous request's carrier sits where the new
-                              history starts and every comparison would report
-                              a divergence at that position. *)
+                           (* Compare the inner conversation view. Per-request
+                              context and retained-result carriers can sit at
+                              the tail before later history is appended; using
+                              the final list would report a false divergence. *)
                            previous_request_projection_ref
                            := (if not (Keeper_wire_capture.enabled ())
                                then Keeper_projection_change.Request_not_digested
@@ -2029,11 +2055,7 @@ let run_turn
                         | Ok input_messages ->
                           Keeper_agent_prompt_metrics.Attributed
                             { runtime_profile = attribution.runtime_profile
-                            ; segments =
-                                Keeper_agent_prompt_metrics.build_ctx_segments
-                                  ~prompt_blocks:attribution.prompt_blocks
-                                  ~tools:attribution.tools
-                                  ~input_messages
+                            ; segments = compute_input_segments attribution input_messages
                             })
                    in
                    { Keeper_agent_prompt_metrics.actual_input_tokens
@@ -2409,18 +2431,7 @@ let run_turn
             (match attribution.provider_content with
              | Error _ -> None
              | Ok input_messages ->
-               let segments =
-                 let build () =
-                   Agent_core.Base.Schema_observation.with_site Final_attribution_bytes
-                     (fun () -> Keeper_agent_prompt_metrics.build_ctx_segments
-                       ~prompt_blocks:attribution.prompt_blocks
-                       ~tools:attribution.tools
-                       ~input_messages)
-                 in
-                 match attribution.schema_observation_scope with
-                 | None -> build ()
-                 | Some scope -> Agent_core.Base.Schema_observation.with_scope scope build
-               in
+               let segments = compute_input_segments attribution input_messages in
                Some
                  (List.map
                     (fun
@@ -2471,6 +2482,7 @@ let run_turn
              ; wire_system_prompt = Some system_prompt
              ; wire_tools = tools
              ; wire_schema_observation_scope
+             ; wire_observation = { runtime_profile = wire_runtime_profile; _ }
              ; _
              } ->
            let write () = Keeper_provider_input_snapshot.write_best_effort
@@ -2478,7 +2490,7 @@ let run_turn
              ~keeper:meta.name
              ~trace_id
              ~absolute_turn:manifest_keeper_turn_id
-             ~runtime_profile:settled_runtime_id
+             ~runtime_profile:wire_runtime_profile
              ~wire
              ~system_prompt
              ~messages

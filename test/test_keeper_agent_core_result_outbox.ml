@@ -43,7 +43,7 @@ let run_case ?(host=false) scenario () =
   let snapshot () = get (Outbox.load ~base_path ~keeper_name) in
   retain "original-turn";
   let original_ids = Outbox.receipt_ids (snapshot ()) in
-  let requests = ref [] and effects = ref 0 in
+  let requests = ref [] and projections = ref [] and effects = ref 0 in
   let answer = {|{"id":"consumer-completed","model":"result-consumer-fixture","choices":[{"index":0,"message":{"role":"assistant","content":"Used the original returned result."},"finish_reason":"stop"}],"usage":{"prompt_tokens":8,"completion_tokens":3,"total_tokens":11}}|} in
   let tool_response = {|{"id":"independent-tool","model":"result-consumer-fixture","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"independent-call","type":"function","function":{"name":"independent_work","arguments":"{}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":8,"completion_tokens":3,"total_tokens":11}}|} in
   let server = Exact_output_fixture.start_server ~sw ~net:env#net ~clock:env#clock
@@ -135,6 +135,8 @@ streaming = false
         | Stale_save | Noop_sink | No_sink -> Keeper_history {trace_id=session_id})
       ~system_prompt:"Use returned results as data. Do not repeat completed effects."
       ~agent_core_tools:[tool] ~model_input_projection:project
+      ~on_request_wire_observation:(fun ~runtime_id:_ ~body_bytes:_ ~serialized:_ ~projected_messages ->
+        Option.iter (fun messages -> projections := !projections @ [messages]) projected_messages)
       ~accept:(fun _ -> match scenario with Rejected -> false
         | Completed | Deferred | Projection_failed | Provider_failed | Save_failed
         | Stale_save | Noop_sink | No_sink | Review -> true)
@@ -199,7 +201,9 @@ streaming = false
      check (list string) "absence of durable consumption keeps the original" original_ids
        (Outbox.receipt_ids (snapshot ())));
   (match scenario with
-   | Projection_failed -> check int "failed projection sends no provider request" 0 (List.length !requests)
+   | Projection_failed ->
+     check int "failed projection sends no provider request" 0 (List.length !requests);
+     check int "failed projection has no final input" 0 (List.length !projections)
    | Completed | Deferred | Provider_failed | Rejected | Save_failed
    | Stale_save | Noop_sink | No_sink | Review ->
      let expected = match scenario with Review -> false
@@ -209,6 +213,17 @@ streaming = false
        check bool "actual HTTP bytes carry original result data" expected (contains marker body);
        check bool "actual HTTP bytes carry original producer provenance" expected
          (contains (if host then "source-client-fixture" else "original-vendor-session") body)) !requests;
+     check int "each request has its own final projection" (List.length !requests)
+       (List.length !projections);
+     List.iter2 (fun messages body ->
+       let retained = List.filter Outbox.is_context_message messages in
+       check int "final projection retains the same result as the HTTP request"
+         (if expected then 1 else 0) (List.length retained);
+       List.iter (fun message ->
+         let payload = Keeper_provider_input_snapshot.message_payload message in
+         check bool "final projection contains the result observed on the wire" true
+           (contains marker payload.payload_bytes && contains marker body)) retained)
+       !projections !requests;
      check int "one HTTP response per expected boundary"
        (match scenario with Deferred -> 2
         | Completed | Projection_failed | Provider_failed | Rejected | Save_failed

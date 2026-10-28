@@ -229,7 +229,7 @@ let run_arm ~sw ~net ~root ~runtime_id ~data ~task arm =
       ~system_prompt ~goal:(question task) ~initial_messages:data.messages
       ~tools ~agent_core_tools:tools ~checkpoint_sink ~sw ~net
       ~model_input_projection:(fun messages -> inputs := messages :: !inputs; Ok messages)
-      ~on_request_wire_observation:(fun ~runtime_id:_ ~body_bytes:_ ~serialized ->
+      ~on_request_wire_observation:(fun ~runtime_id:_ ~body_bytes:_ ~serialized ~projected_messages:_ ->
         Option.iter (fun observation ->
           wire := observation :: !wire;
           wire_inputs := (match !inputs with [] -> [] | latest::_ -> latest) :: !wire_inputs) serialized) ()) in

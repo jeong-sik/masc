@@ -100,6 +100,7 @@ Codex의 host-stop은 마지막 응답의 usage 프레임보다 먼저 끝날 �
 - 3,850개의 **per_request** usage 행: input 449,851,313, cache read 431,922,974, non-cached input 17,928,339 tokens. 이 집합의 약 96%가 cache read다. 별도 `turn_total`, `conversation_cumulative`, scope 없는 행을 더하면 중복 집계할 수 있어 합산하지 않았다. 큰 총 입력을 전부 재과금·낭비라고 판정하지 않는다.
 - 4,515개의 **전송 전 request capture**에서 tool schema 중앙값 75,327 B, system prompt 21,199 B; extra context가 있는 1,442행의 중앙값은 25,894 B였다. 공식 클라이언트의 제공 도구 목록은 deferred schema도 포함하므로 실제 모델에 모두 실렸다는 증거가 아니다.
 - 같은 capture의 history 중앙값 12,812개는 canonical checkpoint 크기다. 이 값은 provider input 크기가 아니다. `keeper_wire_capture.ml:274`와 `keeper_agent_run.ml:1931`의 **request_projection_change**가 전송 직전 투영을 관측한다.
+- 정정(2026-10-28): 현재 `request_projection_change`는 현재 system-context를 제외한 내부 대화 투영을 비교하며, 마지막 unread 교체와 보존된 도구 결과 추가는 범위 밖이다. 아래 과거 표본에 이 추가 맥락이 있었는지는 확인하지 못했으므로 전체 요청 메시지 수로 해석하지 않는다.
 - 실제 GLM 투영 기록의 한 Keeper 연속 다섯 턴에서 각 턴 요청의 투영 메시지 개수 최솟값–최댓값은 `223–257 → 37–79 → 45–93 → 51–63 → 2–26`이었다. 이는 원문 위치 범위가 아니며, 전송 전 투영의 메시지 개수 변화만 보여 준다. 해당 다섯 턴의 canonical history 개수와 checkpoint 식별자를 보존하지 않아 원문 누적 여부나 history reset 여부는 판정할 수 없다. 별도 extra-system-context carrier를 포함한 전체 provider 입력량으로 해석하지 않는다. 이것은 기억의 의미 보존, 모든 Keeper, 다른 provider, 재시작 후 N+M 성공을 증명하지 않는다.
 - 공유 기억 digest는 1,146개 주장 중 ID 순서 34개, 8,061 B였다. 이는 범위가 좁고 선정 순서가 임의적이라는 증거다. 공유 정보 전달 자체가 낭비라는 증거는 아니다. 토큰 환산이나 판단 정확도 향상을 수치로 지어내지 않는다.
 - Continuity 입력의 표본 수·크기 중앙값·공통 prefix 변화는 집계 artifact와 원본 로그가 없어 이번 감사의 검증 근거에서 제외한다. #41533의 prompt 순서 변경은 소스 검토 범위로만 기록하며, 실제 cache hit 개선률은 미측정이다.

@@ -60,6 +60,22 @@ let outage_reason_text = function
   | F.Scan_timed_out -> "refresh timed out"
   | F.Scan_failed -> "refresh failed"
 
+let unavailable_text ~now ~(degradation : F.degradation) ~disconnected_since =
+  let reason = outage_reason_text degradation.reason in
+  let scan =
+    match Masc_tui_message_layout.age_text ~now ~since:degradation.since with
+    | Some age -> Printf.sprintf "not observed · %s for %s" reason age
+    | None -> "not observed · " ^ reason
+  in
+  match disconnected_since with
+  | None -> scan
+  | Some since ->
+    let loss = match Masc_tui_message_layout.age_text ~now ~since with
+      | Some age -> "stream lost " ^ age ^ " ago"
+      | None -> "stream lost"
+    in
+    scan ^ " · " ^ loss
+
 (* While the scans fail or the stream is down, the counts beside this are the
    last reading (#38499). The age is taken from [now] at draw time, so it keeps
    growing between events instead of freezing at the age the event had. A

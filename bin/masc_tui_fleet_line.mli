@@ -18,6 +18,11 @@ val failing_text : Masc.Fleet_stream.fleet -> string option
 val failure_text : Masc_tui_fleet_stream.failure -> string
 (** Why there is no fleet reading to draw, on one line. *)
 
+val unavailable_text :
+  now:float -> degradation:Masc.Fleet_stream.degradation ->
+  disconnected_since:float option -> string
+(** A failed first scan and, if present, the separate connection loss. *)
+
 val trouble_text : now:float -> Masc_tui_fleet_stream.trouble -> string
 (** What is wrong with the reading drawn beside it: [stale · scans failing for
     <age> (<reason>)] while the server's scans fail, [stale · stream lost <age>

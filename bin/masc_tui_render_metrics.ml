@@ -547,6 +547,9 @@ let render_section_resources ~cols (state : state) =
     | Masc_tui_fleet_stream.Cannot_read failure ->
       [ "    Execution readiness: " ^ Masc_tui_fleet_line.failure_text failure ]
     | Masc_tui_fleet_stream.Awaiting_first_reading -> [ "    Execution readiness not observed" ]
+    | Masc_tui_fleet_stream.Unavailable { degradation; disconnected_since } ->
+      [ "    Execution readiness: "
+        ^ Masc_tui_fleet_line.unavailable_text ~now ~degradation ~disconnected_since ]
     | Masc_tui_fleet_stream.Reading { reading = { fleet = safety; _ }; trouble } ->
       Printf.sprintf "    Executable %d / target %d · shortfall %d · failing %d · paused %d"
         safety.fs_executable_count safety.fs_target_reaction_capacity

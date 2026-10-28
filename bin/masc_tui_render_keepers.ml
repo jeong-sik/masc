@@ -583,6 +583,11 @@ let render_keeper_list (state : state) =
        box_line buf cols
          ((Theme.bad ()) ^ "  fleet: " ^ Masc_tui_fleet_line.failure_text failure
           ^ Ansi.reset)
+   | Masc_tui_fleet_stream.Unavailable { degradation; disconnected_since } ->
+       box_line buf cols
+         ((Theme.warn ()) ^ "  fleet: "
+          ^ Masc_tui_fleet_line.unavailable_text ~now:now_unix ~degradation ~disconnected_since
+          ^ Ansi.reset)
    | Masc_tui_fleet_stream.Reading { reading = { fleet; _ }; trouble } ->
        let tone =
          if fleet.fs_operator_action_required then (Theme.bad ())

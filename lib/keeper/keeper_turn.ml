@@ -456,7 +456,7 @@ let run_keeper_invocation_turn_admitted_inner
       let session_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
       let session_dir = Filename.concat base_dir session_id in
       let native_admission =
-        let ( let* ) = Result.bind in
+        let open Result.Syntax in
         let* operation = Keeper_owner_registry.exact_operation
             ~base_path:ctx.config.base_path ~keeper_name:meta.name operation_id
           |> Result.map_error Keeper_owner_registry.command_error_to_string in
@@ -1025,7 +1025,7 @@ let run_keeper_invocation_turn_admitted_inner
                   Keeper_turn_outcome.Continuation_checkpoint in
               let retained = match result.stop_reason with
                 | Runtime_agent.InputRequired {request;_} ->
-                  let ( let* ) = Result.bind in
+                  let open Result.Syntax in
                   let owner result = Result.map_error Keeper_owner_registry.command_error_to_string result in
                   let* _ = Keeper_owner_registry.defer_direct_input_wait
                       ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id ~request |> owner in

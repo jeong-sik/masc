@@ -4,7 +4,7 @@ module O = Verifier_review_owner
 module V = Verifier_review_original
 module Authority = Verification_authority_tools
 module Progress = Lane_addon_request_progress
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type error =
   | Original_not_found

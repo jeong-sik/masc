@@ -36,7 +36,7 @@ let string_member key = function
          (Yojson.Safe.to_string other))
 
 let of_json json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* name = string_member "name" json in
   let* word = string_member "reason" json in
   let* detail = string_member "detail" json in

@@ -4,7 +4,7 @@ module P = Lane_addon_request_progress
 module Receipt = Lane_addon_request_receipt
 module R = Verification_run_registry
 module AR = Task.Anti_rationalization
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let authority = Masc_domain.System_llm_agent {
   agent_run_id=Standalone_lane.to_id Standalone_lane.Verifier}

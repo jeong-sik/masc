@@ -455,7 +455,7 @@ let validate_closed_scope t ~stream_scope ~streamed_block_indices =
 ;;
 
 let recovered_tool_names t ~stream_scope ~sources admitted_tool_sources =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   List.fold_left
     (fun result (source : Agent_core.Hooks.admitted_tool_use_source) ->
       let* recovered = result in
@@ -546,7 +546,7 @@ let seal_turn t ~turn ~(tool_source_map : Agent_core.Hooks.admitted_tool_source_
     let sources_result =
       List.fold_left
         (fun result (planned_index, source_tool_use_ordinal) ->
-           let ( let* ) = Result.bind in
+           let open Result.Syntax in
            let* sources = result in
            match List.nth_opt streamed_block_indices source_tool_use_ordinal with
            | None ->
@@ -566,7 +566,7 @@ let seal_turn t ~turn ~(tool_source_map : Agent_core.Hooks.admitted_tool_source_
         source_pairs
       |> Result.map List.rev
     in
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* sources = sources_result in
     let* recovered = recovered_tool_names t ~stream_scope ~sources admitted_tool_sources in
     let name_resolutions = List.map
@@ -654,7 +654,7 @@ let occurrence_equal
 ;;
 
 let record_occurrence_execution_id t ~stream_scope ~block_index ~tool_call_id ~execution_id =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   if List.mem (stream_scope, block_index) t.quarantined
   then Error "tool result names a quarantined streamed occurrence"
   else
@@ -753,7 +753,7 @@ let record_occurrence_execution_id t ~stream_scope ~block_index ~tool_call_id ~e
            (List.length finalized_matches))
 
 let record_execution_id t ~tool_call_id ~turn ~planned_index ~execution_id =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* binding =
     match List.assoc_opt turn t.turns with
     | Some binding -> Ok binding
@@ -775,7 +775,7 @@ let record_execution_id t ~tool_call_id ~turn ~planned_index ~execution_id =
 ;;
 
 let record_official_execution_id t ~block_index ~tool_call_id ~execution_id =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   if current_scope_is_invalid t || List.mem t.current_stream_scope t.failed_scopes
   then Error "official tool result arrived in an invalid or failed scope"
   else

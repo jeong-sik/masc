@@ -5,7 +5,7 @@
    not declare. *)
 let tool_name = (Tool_schemas_code_query.schema : Masc_domain.tool_schema).name
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let ok ~start_time data = Tool_result.make_ok ~tool_name:tool_name ~start_time ~data ()
 
 let refusal ~start_time message =

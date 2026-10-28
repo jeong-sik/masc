@@ -435,7 +435,7 @@ let observed_refusal_kind_of_yojson = function
 
 let observed_refusal_of_yojson = function
   | `Assoc fields ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* observed_refusal_kind =
       observed_refusal_kind_of_yojson (List.assoc_opt "refusal_kind" fields)
     in
@@ -616,7 +616,7 @@ let required_string_list = Json_util.require_field_string_list
 let summary_attempt_disposition_of_yojson_with_error json =
   match json with
   | `Assoc fields ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let surface = "summary_attempt_disposition" in
     let* code = required_string ~surface "code" fields in
     (match code with
@@ -731,7 +731,7 @@ let is_lowercase_sha256 value =
 let exact_attempt_state_of_yojson_with_error json =
   match json with
   | `Assoc fields ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let surface = "exact_attempt" in
     let* state = required_string ~surface "state" fields in
     (match state with
@@ -823,7 +823,7 @@ let exact_attempt_state_of_yojson_with_error json =
 let hitl_context_summary_of_yojson_with_error json =
   match json with
   | `Assoc fields ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let surface = "hitl_context_summary" in
     let* () =
       reject_unknown_fields
@@ -880,7 +880,7 @@ let hitl_context_summary_of_yojson_with_error json =
 ;;
 
 let summary_status_of_yojson_with_error json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   match json with
   | `String "not_requested" -> Ok Summary_not_requested
   | `String "pending" -> Ok Summary_pending
@@ -915,7 +915,7 @@ let summary_status_of_yojson_with_error json =
 let approval_rule_of_yojson_with_error json =
   match json with
   | `Assoc fields ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* () =
       match
         reject_unknown_fields

@@ -33,7 +33,7 @@ let commit ~config ~keeper_turn_id ~(before : Keeper_meta_contract.keeper_meta) 
       attempt_spend
   in
   let after = Keeper_unified_metrics.with_attempt_spend after ~resolved ~usage_cursor in
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* cost = Keeper_turn_spend.cost_coverage ~resolved attempt_spend
     |> Result.map_error (fun error -> Cost_observation_rejected error) in
   let* total_cost_usd = Keeper_cost_coverage.add after.runtime.usage.total_cost_usd cost

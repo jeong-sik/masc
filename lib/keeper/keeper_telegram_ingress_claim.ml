@@ -3,7 +3,7 @@ let error_to_string = function
   | Invalid_claim -> "Telegram prepared claim is malformed"
   | Conflicting_claim -> "Telegram update already belongs to a different prepared request"
   | Storage_failed detail -> "Telegram prepared claim storage failed: " ^ detail
-let ( let* ) = Result.bind
+open Result.Syntax
 let path ~root ~operation_id =
   Filename.concat root (Agent_core_sha256.(to_hex (digest_string operation_id)) ^ ".json")
 let with_claim ~root ~operation_id body =

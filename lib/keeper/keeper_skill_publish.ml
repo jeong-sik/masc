@@ -1,6 +1,6 @@
 module Publish = Workspace_skill_publish
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type request_error =
   | Malformed of string

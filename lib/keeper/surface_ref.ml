@@ -40,7 +40,7 @@ let lane_label = function
 
 (* ── JSON codec ── *)
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let to_json = function
   | Dashboard { session_id } ->

@@ -5,7 +5,7 @@ type identity = {
   is_error : bool;
 }
 type response = Pending | Unavailable of string | Page of identity * Keeper_artifact_read.page
-let ( let* ) = Result.bind
+open Result.Syntax
 let page_envelope ~keeper ~execution_id identity page =
   `Assoc ["keeper",`String keeper;"execution_id",`String execution_id;
     "state",`String "page";"source_id",`String identity.source_id;

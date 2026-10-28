@@ -638,7 +638,7 @@ let parse_node ~path value =
 ;;
 
 let plan_of_fields ~descriptors ~path ~name fields nodes =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* raw_policy = optional_string ~path "branch_failure_policy" fields in
   let* branch_failure_policy =
     match raw_policy with
@@ -678,7 +678,7 @@ let plan_of_fields ~descriptors ~path ~name fields nodes =
 ;;
 
 let plan_json_of_fields ~path fields =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* encoded = optional_string ~path "plan_json" fields in
   match encoded with
   | Some _ ->
@@ -691,7 +691,7 @@ let plan_json_of_fields ~path fields =
 ;;
 
 let parse_plan ~descriptors ~path ~name ~encoded fields =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   match encoded with
   | Some source ->
     let* json = match Yojson.Safe.from_string source with
@@ -710,7 +710,7 @@ let parse_plan ~descriptors ~path ~name ~encoded fields =
 ;;
 
 let parse_composition ~descriptors ~index value =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let path = [ "compositions"; string_of_int index ] in
   let* fields = table_fields ~path ~field:"composition" value in
   let* () = validate_fields ~path

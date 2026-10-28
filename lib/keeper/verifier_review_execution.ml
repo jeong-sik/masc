@@ -2,7 +2,7 @@ module AR = Task.Anti_rationalization
 module V = Verifier_review_original
 module P = Lane_addon_request_progress
 module Agent = Agent_core.Agent
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type reference = {keeper_name:string; runtime_id:string; execution:Types_core.verifier_execution_reference}
 let schema = "verifier_review_execution/v1"

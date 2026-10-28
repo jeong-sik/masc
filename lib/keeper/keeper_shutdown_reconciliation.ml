@@ -1,6 +1,6 @@
 open Keeper_shutdown_types
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type error =
   | Invalid_request of string

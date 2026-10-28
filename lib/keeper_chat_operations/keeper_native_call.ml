@@ -1,6 +1,6 @@
 module Ref = Keeper_checkpoint_ref
 module Agent = Agent_core.Agent
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type api = New_input of { seed_message_count : int } | Continue_from_checkpoint
 type t =

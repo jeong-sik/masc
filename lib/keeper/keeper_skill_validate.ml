@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type source = Artifact of Keeper_peer_artifact_ref.t | Draft of string
 

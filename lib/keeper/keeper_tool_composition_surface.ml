@@ -5,7 +5,7 @@ module Plan = Keeper_tool_plan
 module Activation_ledger = Keeper_skill_activation_ledger
 open Keeper_tool_composition_projection
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type owner_metadata_refusal =
   | Owner_metadata_missing

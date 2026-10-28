@@ -1086,7 +1086,7 @@ let active_goal_summaries ~(config : Workspace.config) ~(keeper_name : string) =
            goals
        in
        let served_goal_ids () =
-         let ( let* ) = Result.bind in
+         let open Result.Syntax in
          let* backlog = Workspace_backlog.read_backlog_r config in
          match
            Workspace_task.active_owned_task_ids_for_agent

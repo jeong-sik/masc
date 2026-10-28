@@ -1,6 +1,6 @@
 module Reason = Agent_observation.Unattributed
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let root_prefix root = if String.equal root "/" then root else root ^ "/"
 

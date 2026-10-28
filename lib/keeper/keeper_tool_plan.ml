@@ -1537,7 +1537,7 @@ let child_binding_error_to_string = function
 ;;
 
 let bind_child_plan ~input (child : async_child) =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* args = Tool_input_validation.validate ~schema:child.input_schema ~name:child.tool_name ~args:input ()
     |> Result.map_error (fun error -> Child_arguments_rejected error) in
   let* () = match Json_template.dependencies child.input with

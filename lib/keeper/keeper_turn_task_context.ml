@@ -15,7 +15,7 @@ let capture ~config = function
   | Error detail -> Task_source_unavailable detail
   | Ok None -> No_task
   | Ok (Some task_id) ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let goals =
       let* links = Workspace_goal_index.read_goal_task_links_authoritative_r config
         |> Result.map_error (fun detail -> Goal_links_unavailable detail) in
@@ -52,7 +52,7 @@ let to_json = function
     `Assoc ["kind", `String "task"; "task_id", `String (Keeper_id.Task_id.to_string task_id); "goals", goals]
 
 module W = Keeper_memory_os_types
-let ( let* ) = Result.bind
+open Result.Syntax
 let fields = function `Assoc fields -> Ok fields | _ -> W.wire_here W.Expected_object
 let exact = W.exact_field_names_result
 let value key fields = W.wire_json_field key fields

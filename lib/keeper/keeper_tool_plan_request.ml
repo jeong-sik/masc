@@ -276,7 +276,7 @@ let composable_tool_names ~descriptors =
   |> List.sort_uniq String.compare
 ;;
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let rec template_to_yojson_with_params ~allow_params = function
   | Plan.Json_template.Literal value ->

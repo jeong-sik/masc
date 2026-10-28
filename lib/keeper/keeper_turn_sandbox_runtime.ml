@@ -1416,7 +1416,7 @@ let microvm_start_failure_message failure =
    policy route discovery belong to the Boot execution. *)
 let requested_apple_plan (t : t) ~image ~guest_size ~identity_host_dir ~environment
     ~config_mount ~stable_labels =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let volume_name result = Result.map_error (fun detail -> Guest_provisions_unavailable detail) result in
   let* work_volume_name = volume_name (Keeper_sandbox_microvm.work_volume_name ~keeper_name:t.meta.name) in
   let* build_volume_name = volume_name (Keeper_sandbox_microvm.build_volume_name ~keeper_name:t.meta.name) in
@@ -1900,7 +1900,7 @@ let build_microvm_endpoint
       ~container_name
       ~identity_environment
   =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* () = microvm_profile_check meta in
     let gh_config_dir =
       Keeper_github_identity.container_config_dir
@@ -2002,7 +2002,7 @@ let read_apple_image_command ~timeout_sec ~(plan : Keeper_microvm_boot_plan.t) r
 (* A guest's environment is observed data, never the expected route. Read
    the current policy network without creating or repairing it at adoption. *)
 let apple_policy_environment ~timeout_sec (t : t) =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   match t.network_mode with
   | Keeper_types_profile_sandbox.Network_none | Keeper_types_profile_sandbox.Network_inherit -> Ok []
   | Keeper_types_profile_sandbox.Network_policy ->
@@ -2031,7 +2031,7 @@ let with_apple_lifecycle_scope ~keeper_name ~unavailable callback =
   | Fs_compat.Non_eio, _ | Fs_compat.Eio_fiber, None -> Error unavailable
 
 let prepare_apple_first_handoff ~timeout_sec (t : t) snapshot ~container_name =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let backend = Keeper_microvm_backend.Apple_container in
   let* () = Keeper_microvm_shim_readiness.verify ~base_path:t.config.base_path
       ~backend ~guest_name:container_name
@@ -2071,7 +2071,7 @@ let prepare_apple_first_handoff ~timeout_sec (t : t) snapshot ~container_name =
   Ok ()
 
 let start_apple_microvm_container ~fs ~scope ~timeout_sec (t : t) =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let module Store = Keeper_microvm_github_identity in
   let module Plan = Keeper_microvm_boot_plan in
   let backend = Keeper_microvm_backend.Apple_container in
@@ -2746,7 +2746,7 @@ let ensure_started ?(validate_running = false) ?timeout_sec (t : t) =
 let microvm_remote_endpoint_of_running_fields
       ~(config : Workspace.config) ~(meta : keeper_meta) ~network_mode ~container_root
       ~uid ~gid ~container_name =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* () = microvm_profile_check meta in
   let* backend = microvm_backend_of_meta meta in
   let container_config_dir = Keeper_github_identity.container_config_dir

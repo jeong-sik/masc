@@ -59,7 +59,7 @@ type delivery_provenance =
   ; transcript_slot : transcript_slot
   }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let assoc_field name fields =
   match List.assoc_opt name fields with

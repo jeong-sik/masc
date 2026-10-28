@@ -210,7 +210,7 @@ let make
       ~composition_execution
       ~result
       ~executor_settlements =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let raw_run_id =
     Keeper_tool_plan.Composition_run_id.to_string composition_run_id
   in
@@ -275,7 +275,7 @@ let to_yojson value =
 ;;
 
 let of_yojson json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let fields =
     match json with
     | `Assoc fields -> Ok (List.sort (fun (a, _) (b, _) -> String.compare a b) fields)
@@ -383,7 +383,7 @@ let load_file config expected_reference path =
     (match Yojson.Safe.from_string bytes with
      | exception Yojson.Json_error detail -> Error (Invalid_record detail)
      | json ->
-       let ( let* ) = Result.bind in
+       let open Result.Syntax in
        let* value = of_yojson json in
        if Skill_reference.equal expected_reference value.reference
        then Ok (Some value)
@@ -401,7 +401,7 @@ let scan_runs config reference =
   | Error error -> Error (Read_failed error)
   | Ok None -> Ok []
   | Ok (Some names) ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     names
     |> List.sort String.compare
     |> List.filter (fun name -> Filename.check_suffix name ".json")
@@ -480,7 +480,7 @@ let statistics_to_yojson stats =
 ;;
 
 let load_observation config reference =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* runs = scan_runs config reference in
   let* legacy = load_file config reference (legacy_path config reference) in
   (* Append records supersede a duplicate legacy run, including timestamp ties. *)
@@ -507,7 +507,7 @@ let prepare_store_directory config =
 ;;
 
 let save_latest config value =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* _lease = prepare_store_directory config in
   let* _reference_lease =
     Keeper_fs_durable_directory.ensure

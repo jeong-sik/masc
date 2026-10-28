@@ -16,7 +16,7 @@ let error_to_string = function
   | Invalid_occurrence detail -> "Invalid original tool occurrence: " ^ detail
   | Result_missing -> "No complete original tool result is retained"
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type invocation = {
   keeper : string;

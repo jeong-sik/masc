@@ -171,7 +171,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   let strs key = Keeper_toml_loader.toml_string_list doc (k key) in
   let has key = List.mem_assoc (k key) doc in
   let agent_core_env = extract_agent_core_env_from_doc doc in
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   (* A key whose value comes from a closed vocabulary is read once. The parsed
      value is what the cross-field checks below compare and what the record
      holds, so a spelling is not accepted in one place and read again in

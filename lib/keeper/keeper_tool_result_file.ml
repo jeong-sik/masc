@@ -3,7 +3,7 @@ type reading = {
   source_id : string;
   sha256 : string;
 }
-let ( let* ) = Result.bind
+open Result.Syntax
 let digest text = Agent_core_sha256.(to_hex (digest_string text))
 (* Same transfer buffer as Fs_compat's streaming owned SHA reader. This is
    not a file, record, result or history limit. *)

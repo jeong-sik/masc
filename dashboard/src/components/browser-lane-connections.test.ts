@@ -16,7 +16,8 @@ const instance = { instance_id: 'worker', run_id: 'run', addon_id: 'browser', ti
   package: { binding_schema: null, presentation: { description: null, readings: [] }, outputs: {} } }
 const row: LaneAddonRow = { id: 'worker/1/browser', lane_id: 'worker/browser/connections', kind: 'value',
   title: 'Browser worker', observed_at: 1793037600, subject_id: 'browser', actor: null, clock: null,
-  fields: { state: 'serving', clients: [client], owned_backends: {} }, evidence: [], related_ids: [] }
+  fields: { state: 'serving', clients: [client], owned_backends: { automation: { activity: 'disabled', registered: false, session: 'closed', locate: false },
+        stagehand: { activity: 'unobserved', registered: false, session: 'unknown', locate: false } } }, evidence: [], related_ids: [] }
 function show(fields = row.fields, runtime_presence = 'live') {
   const snapshot = parseLaneAddonSnapshot({ configuration: null, rows: [{ ...row, fields }],
     instances: [{ ...instance, runtime_presence }], coverage: [] })
@@ -25,6 +26,43 @@ function show(fields = row.fields, runtime_presence = 'live') {
 afterEach(cleanup)
 
 describe('browser caller observations', () => {
+  it('shows owned browser sessions beside personal browser callers without inventing login or caller identity', () => {
+    const view = show({ ...row.fields, owned_backends: {
+      automation: { activity: 'enabled', registered: true, session: 'open', locate: true },
+      stagehand: { activity: 'enabled', registered: true, session: 'changing', locate: false },
+    } }, 'retained')
+    const automation = view.getByLabelText('Automation browser session')
+    const stagehand = view.getByLabelText('Stagehand browser session')
+    expect(automation.textContent).toContain('Browser session at observation: open')
+    expect(stagehand.textContent).toContain('Browser session at observation: changing')
+    expect(automation.textContent).toContain('Executor registered: yes')
+    expect(automation.textContent).not.toContain('keeper/research')
+    expect(view.getByLabelText(`Browser client ${client.clientId}`)).toBeTruthy()
+    expect(view.getByText(/do not identify a current caller or verify login/)).toBeTruthy()
+    expect(view.getByText(/Retained worker observation/)).toBeTruthy()
+    expect(view.container.querySelector('button')).toBeNull()
+  })
+  it('preserves unknown and closed session states independently of registration', () => {
+    const view = show({ ...row.fields, clients: [], owned_backends: {
+      automation: { activity: 'enabled', registered: true, session: 'closed', locate: false },
+      stagehand: { activity: 'unobserved', registered: false, session: 'unknown', locate: false },
+    } })
+    expect(view.getByLabelText('Automation browser session').textContent).toContain('Browser session at observation: closed')
+    expect(view.getByLabelText('Stagehand browser session').textContent).toContain('Browser session at observation: unknown')
+    expect(view.getByLabelText('Stagehand browser session').textContent).toContain('Availability at observation: unobserved')
+  })
+  it.each([
+    null, {}, { automation: {} },
+    { automation: { activity: 'enabled', registered: true, session: 'ready', locate: true },
+      stagehand: { activity: 'disabled', registered: false, session: 'closed', locate: false } },
+    { automation: { activity: 'enabled', registered: 'yes', session: 'open', locate: true },
+      stagehand: { activity: 'disabled', registered: false, session: 'closed', locate: false } },
+    { automation: { activity: 'enabled', registered: true, session: 'open', locate: true, caller: 'fake' },
+      stagehand: { activity: 'disabled', registered: false, session: 'closed', locate: false } },
+  ])('refuses malformed owned browser observations', owned_backends => {
+    expect(show({ ...row.fields, owned_backends }).getByRole('status').textContent).toContain('observation unreadable')
+  })
+
   it('preserves healthy clients alongside a dated Ego connection refusal', () => {
     const firefox = { ...client, clientId: 'firefox', browser: 'firefox', transport: 'webdriver_bidi',
       space: null, interactions: [], lastActivities: [] }

@@ -446,3 +446,14 @@ This display is not proof of current control, a visible browser window or
 login completion, and never authorizes input or takeover. Source/component
 checks cover decoding and refresh ownership; installed and rendered TUI
 behavior remain unverified.
+
+The Dashboard's Browser callers and Spaces view also displays the same worker's
+server-owned Automation and Stagehand session observations. These are separate
+from connected personal browsers. Availability, executor registration and session
+state retain their published values; registration does not mean the session is
+open, and an unknown session is not shown as closed. Retained worker observations
+remain dated. This inventory does not identify the backend's current caller or
+prove login. Unknown fields or malformed backend observations keep the structured
+view unreadable while the original row remains available. Component and normal
+panel integration checks cover this display; real browser rendering remains
+unverified.

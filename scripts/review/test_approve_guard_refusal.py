@@ -402,7 +402,8 @@ class SourceReceiptCase(GuardHarness):
         self.review(footer_line())
         r = self.run_guard("--source-receipt")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(json.loads(r.stdout), {"pr": 41487, "head": HEAD, "approval_ids": [77]})
+        self.assertEqual(json.loads(r.stdout), {"pr": 41487, "head": HEAD, "approval_ids": [77],
+                         "scope": {"base_ref": "main", "base_sha": BASE, "stack": None}, "policy": "source"})
         calls = (self.data / "calls.log").read_text().splitlines()
         self.assertNotIn("user", calls)
         self.assertFalse(any("/status" in path for path in calls))

@@ -9,6 +9,7 @@ type site =
 type report =
   { converted : int
   ; definitions : int
+  ; named : site list
   ; unhandled : site list
   ; early : site list
   }
@@ -573,6 +574,7 @@ type unwrapped =
   ; evaluated_once : string option
   ; hoisted : (int * string) list
   ; scope_arguments : expression list
+  ; partial : bool
   }
 
 (* [handler] is a wrapped handler. The text from [before] to [after] goes away
@@ -623,6 +625,7 @@ let unwrap ~allow_early source (handler : expression) ~before ~after =
     ; evaluated_once
     ; hoisted = List.filter (fun comment -> not (copied comment)) (comments_before @ comments_after)
     ; scope_arguments = List.map snd call.labeled
+    ; partial = Option.is_none outer_params
     }
 ;;
 
@@ -868,7 +871,7 @@ let scope_safe_arguments structure (definition : definition) ~last_registration 
 
 (* ---- the file ---- *)
 
-let rewrite ?(early = false) ~file source =
+let rewrite ?(early = false) ?(allow_named = false) ~file source =
   match
     let lexbuf = Lexing.from_string source in
     Location.init lexbuf file;
@@ -880,6 +883,7 @@ let rewrite ?(early = false) ~file source =
     let edits = ref [] in
     let converted = ref 0 in
     let definitions = ref 0 in
+    let named = ref [] in
     let unhandled = ref [] in
     let evaluated_early = ref [] in
     let site_of (e : expression) path note =
@@ -918,10 +922,17 @@ let rewrite ?(early = false) ~file source =
         else if registrations > 0
                 && not (scope_safe_arguments structure definition ~last_registration:latest_registration)
         then Hashtbl.replace unsafe_definitions definition.name "named handler or wrapper argument may resolve differently at registration"
+        else if registrations > 0 && definition.unwrapped.partial
+                && List.exists (fun argument -> not (is_constant argument)) definition.unwrapped.scope_arguments
+        then Hashtbl.replace unsafe_definitions definition.name "named partial wrapper argument would move from the definition to each registration"
+        else if registrations > 0 && registrations = occurrences && bindings = 1 && not allow_named
+        then Hashtbl.replace unsafe_definitions definition.name "named handler may be used outside this file; external-use review is required"
         else if registrations > 0 && registrations = occurrences && bindings = 1
         then (
           Hashtbl.replace converted_definitions definition.name definition;
           incr definitions;
+          named := { line = definition.line; path = definition.name;
+                     note = "external-use review required" } :: !named;
           edits :=
             comment_edits source ~anchor:definition.binding_start definition.unwrapped.hoisted
             @ [ { start = definition.name_stop
@@ -1004,6 +1015,7 @@ let rewrite ?(early = false) ~file source =
          ( rewritten
          , { converted = !converted
            ; definitions = !definitions
+           ; named = List.rev !named
            ; unhandled = List.rev !unhandled
            ; early = List.rev !evaluated_early
            } ))

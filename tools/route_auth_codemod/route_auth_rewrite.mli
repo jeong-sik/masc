@@ -42,8 +42,13 @@
       source-only check conservatively
       skips later shadowing, opens, includes, extensions and unsupported argument
       forms. A name that other code calls with a request and a reqd is left
-      alone. The caller must separately check for uses in other files, which
-      this file-local analysis cannot see.
+      alone. By default all named definitions remain unchanged because this
+      analysis cannot see callers in other files. [allow_named:true] is an
+      explicit assertion by the caller that every affected definition's external
+      uses and exposure were checked; it is not a proof supplied by this tool.
+      Every definition converted under this assertion is listed in [report.named].
+      A computed argument in a named partial application is never moved: it was
+      evaluated once at the definition and could run again at each registration.
     - The wrapper's argument ([~permission], [~tool_name]) is a computation, not a
       constant. A typed route records it at registration, where before it was
       evaluated on every request. The registration is left alone unless
@@ -68,6 +73,7 @@ type site =
 type report =
   { converted : int  (** Registrations rewritten. *)
   ; definitions : int  (** Named handlers that lost their wrapper. *)
+  ; named : site list  (** Converted named definitions requiring external-use review. *)
   ; unhandled : site list  (** Left as they were; [note] is the reason. *)
   ; early : site list
         (** Converted; [note] is the argument now evaluated once. For a named
@@ -77,4 +83,4 @@ type report =
 (** [rewrite ~file source] returns the rewritten source and what was done, or the
     parse error. [file] is only used in that error. Running [rewrite] on its own
     output converts nothing. *)
-val rewrite : ?early:bool -> file:string -> string -> (string * report, string) result
+val rewrite : ?early:bool -> ?allow_named:bool -> file:string -> string -> (string * report, string) result

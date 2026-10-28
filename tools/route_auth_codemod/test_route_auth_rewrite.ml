@@ -1,5 +1,5 @@
-let rewrite ?early source =
-  match Route_auth_rewrite.rewrite ?early ~file:"test.ml" source with
+let rewrite ?early ?allow_named source =
+  match Route_auth_rewrite.rewrite ?early ?allow_named ~file:"test.ml" source with
   | Ok result -> result
   | Error message -> Alcotest.failf "rewrite failed: %s" message
 ;;
@@ -20,7 +20,14 @@ let sites (report : Route_auth_rewrite.report) =
 (* ---- registrations the tool converts ---- *)
 
 let converted_cases =
-  [ ( "public read, and the Router qualification is kept apart from the kind"
+  [ ( "inline partial with a constant permission remains convertible"
+    , {|let routes routes =
+  routes |> Http.Router.get "/api/x" (with_permission_auth ~permission:Masc_domain.CanAdmin handler)
+|}
+    , {|let routes routes =
+  routes |> Server_route.get (Server_route.Permission Masc_domain.CanAdmin) "/api/x" handler
+|} )
+  ; ( "public read, and the Router qualification is kept apart from the kind"
     , {|let routes routes =
   routes
   |> Http.Router.get "/api/x" (fun request reqd ->
@@ -681,10 +688,11 @@ end
 
 let check_named (name, source, expected, converted, definitions) =
   Alcotest.test_case name `Quick (fun () ->
-    let rewritten, report = rewrite source in
+    let rewritten, report = rewrite ~allow_named:true source in
     Alcotest.(check string) "text" expected rewritten;
     Alcotest.(check int) "registrations converted" converted report.converted;
     Alcotest.(check int) "definitions converted" definitions report.definitions;
+    Alcotest.(check int) "every converted name is reported" definitions (List.length report.named);
     Alcotest.(check (list (pair string string))) "left alone" [] (sites report);
     check_parses rewritten;
     let again, second = rewrite rewritten in
@@ -910,7 +918,7 @@ let routes routes =
   |> Http.Router.post "/api/x" press
 |}
   in
-  let rewritten, report = rewrite ~early:true source in
+  let rewritten, report = rewrite ~early:true ~allow_named:true source in
   Alcotest.(check string)
     "text"
     {|let press = (fun state request reqd -> handle state request reqd)
@@ -927,6 +935,48 @@ let routes routes =
     [ "press", "(Msx_tool.name Msx_tool.Press)" ]
     (List.map (fun (site : Route_auth_rewrite.site) -> site.path, site.note) report.early);
   check_parses rewritten
+;;
+
+let test_external_named_use_is_left_alone () =
+  let file_a =
+    {|let h request reqd = with_read_auth (fun state req reqd -> handle state req reqd) request reqd
+let routes routes = routes |> Http.Router.get "/x" h
+|} in
+  let file_b = {|let outside request reqd = A.h request reqd
+|} in
+  let rewritten_a, report_a = Route_auth_rewrite.rewrite ~file:"a.ml" file_a |> Result.get_ok in
+  let rewritten_b, report_b = Route_auth_rewrite.rewrite ~file:"b.ml" file_b |> Result.get_ok in
+  Alcotest.(check string) "exported wrapper remains" file_a rewritten_a;
+  Alcotest.(check string) "external call remains" file_b rewritten_b;
+  Alcotest.(check int) "no named definition converted" 0 report_a.definitions;
+  Alcotest.(check int) "no change to external file" 0 report_b.converted;
+  Alcotest.(check (list (pair string string))) "the route requires external review"
+    [ "/x", "named handler may be used outside this file; external-use review is required" ]
+    (sites report_a)
+;;
+
+let test_computed_named_partial_is_never_moved () =
+  List.iter (fun registrations ->
+    let source =
+      "let permission_calls = ref 0\n"
+      ^ "let permission () = incr permission_calls; Masc_domain.CanAdmin\n"
+      ^ "let h = with_permission_auth ~permission:(permission ()) handler\n"
+      ^ "let routes routes = routes\n"
+      ^ registrations in
+    List.iter (fun (early,allow_named) ->
+      let rewritten, report = rewrite ~early ~allow_named source in
+      Alcotest.(check string) "definition and registrations remain" source rewritten;
+      Alcotest.(check int) "no registration converted" 0 report.converted;
+      Alcotest.(check int) "no definition converted" 0 report.definitions;
+      Alcotest.(check int) "no expression evaluated early" 0 (List.length report.early);
+      Alcotest.(check bool) "every registration reports moved evaluation" true
+        (List.for_all (fun (site : Route_auth_rewrite.site) ->
+          String.equal site.note "named partial wrapper argument would move from the definition to each registration") report.unhandled);
+      Alcotest.(check int) "every registration reported"
+        (if String.contains registrations '2' then 2 else 1) (List.length report.unhandled))
+      [false,false; false,true; true,false; true,true])
+    [ " |> Http.Router.get \"/1\" h\n"
+    ; " |> Http.Router.get \"/1\" h\n |> Http.Router.post \"/2\" h\n" ]
 ;;
 
 (* ---- a whole file ---- *)
@@ -1023,6 +1073,9 @@ let () =
           ; Alcotest.test_case "shadowed named definitions stay unchanged" `Quick test_shadowed_named_definitions
           ; Alcotest.test_case "same named definitions in modules stay unchanged" `Quick test_shadowed_named_module_definitions
           ; Alcotest.test_case "early argument cannot change modules" `Quick test_named_early_shadowed_module ] )
+    ; ( "external and partial evaluation safety"
+      , [ Alcotest.test_case "external reference is not changed by default" `Quick test_external_named_use_is_left_alone
+        ; Alcotest.test_case "computed partial is never moved" `Quick test_computed_named_partial_is_never_moved ] )
     ; ( "evaluation at registration"
       , [ Alcotest.test_case "refused unless allowed" `Quick test_early_refused_by_default
         ; Alcotest.test_case "converted and listed when allowed" `Quick test_early_allowed

@@ -252,6 +252,35 @@ weight 와 어느 풀로 가는지는 바꾸지 않는다. 재는 것만 늘어�
 - 단위: 이름 둘을 같은 lane 에 넣으면 따로 세고, 실행 합이 큰 쪽이 먼저 나온다. 포기한 제출은 그 이름의 포기 수만 올린다. 저장소 이름은 모두 다르고 키퍼 이름을 담지 않는다. mutant(이름별 실행 기록 제거)는 실행 시간 시험 하나만 실패한다.
 - 운영: 배포 뒤 한 시간 `by_name` 을 앞뒤로 떠서 이름별 실행 합 순위를 낸다. 같은 창의 rtev trace 에서 긴 fiber run 의 label 을 본다. 그 순위로 다음 층(읽기와 파싱 나누기, 다시 읽지 않기, 배경 lane 으로 옮기기)의 대상을 고른다.
 
+#### L4d — 시간 초과가 실제로 난 읽기부터
+
+TUI 로그(`~/.masc/logs/masc-tui-*.log`)는 시간 초과가 난 요청의 경로를 남긴다(`http GET <path> took 10001 ms elapsed … Pool.request: timeout after 10.0s`). 2026-10-27~28 이틀에 1,750건, 28일 06:00 KST 이후에 126건이었다. 126건의 경로별 수:
+
+| 경로 | 건수 | 혼자 재 본 응답(06:09Z, load 9) |
+|---|---|---|
+| `/api/v1/gate/keepers` | 35 | 0.11 s, 이어서 10 ms |
+| `/api/v1/dashboard/goals` | 30 | 처음 9.3 s, 이어서 1 ms |
+| `/api/v1/keepers/turns` | 25 | 0.09 s, 이어서 10 ms |
+| `/api/v1/operator` | 11 | 0.2 s, 이어서 16 ms |
+
+- 앞의 셋은 TUI 가 2초마다(`bin/masc_tui.ml` 의 `refresh` 기본값) 부르는 경로다. `gate/keepers`·`keepers/turns`·`operator` 는 혼자 재면 0.2초 안에 답한다. 이 셋은 원인이라기보다, 읽기 풀이 긴 job 에 막혔을 때 가장 자주 그 뒤에 서는 쪽으로 본다.
+- `dashboard/goals` 는 다르다. 캐시 키가 goal projection generation 을 담는다(`goals_tree:<base>:<generation>`). goal 이나 측정 기록이 바뀌면 다음 읽기의 키가 비어 있고, 그 읽기가 읽기 lane 에서 tree 를 처음부터 계산한다. 그 한 번이 9.3초였다. TUI 제한은 10초다. 옛 generation 의 값은 다른 키라서 stale 로도 쓰이지 못한다.
+
+설계:
+
+1. `Dashboard_cache.seed_stale_from_if_missing key ~from ~stale_for` 를 둔다. `key` 가 비어 있고 `from` 에 내줄 수 있는 값이 있으면, 그 값을 `key` 아래 바로 stale 인 항목으로 넣는다. 다음 읽기는 그 값을 바로 받고, `key` 는 background 에서 채워진다. 준비된 바이트와 entity tag 를 그대로 옮기므로 다시 직렬화하거나 해시하지 않는다.
+2. goals tree 는 `Server_dashboard_http.cached_goals_tree_payload` 한 곳에서 읽는다. 마지막으로 채운 키를 workspace 마다 기억하고, 새 generation 키가 비어 있으면 그 값을 넣어 둔다. HTTP/1 route 와 HTTP/2 gateway 가 모두 이 함수를 쓴다. HTTP/2 쪽은 그동안 캐시 없이 요청 fiber 에서 계산했다.
+3. 쓰기 직후의 읽기는 직전 tree 를 받는다. 새 tree 는 계산이 끝난 뒤의 다음 읽기(TUI 로는 다음 2초 갱신)부터 보인다. 전에는 그 읽기가 계산이 끝날 때까지 기다리거나 시간 초과가 났다.
+
+받지 않은 것:
+
+- `gate/keepers`·`keepers/turns` 를 2초 캐시로 감싸는 안. 둘 다 혼자서는 빠르다. 그리고 `gate/keepers` 의 운영자 목록은 요청마다 현재 Candle revision 과 gate 관찰값을 붙인다는 계약이 있다(`test_keeper_portrait_http` "Gate operator revisions bypass shared metadata cache"). 캐시로 감싸면 그 시험이 실패했다. `keepers/turns` 는 대기 원천이 회복되면 다음 읽기에서 오류가 사라져야 한다(`test_keeper_turns_route`).
+
+검증:
+
+- 단위: 옮긴 값은 이전 페이지와 같은 JSON·entity tag 로 바로 나가고, 50 ms 걸리는 새 계산은 background 에서 채워진다. 이미 찬 키는 덮지 않고, 원본이 없으면 아무것도 넣지 않는다. mutant(옮긴 값을 fresh 로 넣기)는 background 채움 시험 하나만 실패한다.
+- 운영: 배포 뒤 TUI 로그의 경로별 시간 초과 수를 위 표와 같은 방법으로 센다. `dashboard/goals` 가 줄어야 한다. L4c 의 `by_name` 으로 읽기 lane 에서 오래 도는 나머지 job 을 찾는다.
+
 ## 5. 순서
 
 1. L1 — 코드가 작고, A/B 로 효과를 이미 봤다.
@@ -261,6 +290,7 @@ weight 와 어느 풀로 가는지는 바꾸지 않는다. 재는 것만 늘어�
 5. L4 — 읽기 풀 뒤에 배경 풀의 대기를 다시 재고, 맨 바깥 제출부터 고친다.
 6. L4b — 읽기 lane 의 캐시 계산이 일의 종류를 타입으로 선언하게 한다. #46543(갱신 fork 의 lane)은 이것과 따로 먼저 들어간다.
 7. L4c — 풀 job 마다 이름을 붙여 lane·이름별로 잰다. 그 순위로 다음 층을 고른다.
+8. L4d — TUI 로그에서 시간 초과가 난 경로를 세고, 원인으로 확인된 goals tree 의 요청 경로 계산부터 없앤다.
 
 ## 6. 하지 않는 것
 

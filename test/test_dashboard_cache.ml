@@ -219,6 +219,51 @@ let test_seed_stale_if_missing_refreshes_in_background ~clock () =
   check_json "background refresh stores fresh value"
     (`String "fresh") refreshed
 
+(* RFC-0474 L4d. A key that names a generation of its data: the read after a
+   write finds the new generation's key empty. Seeded from the previous
+   generation, it answers with that page at once (same bytes, same entity
+   tag) and fills the new generation in the background. The new compute
+   sleeps 50 ms, so a read that waited for it would not see the old page. *)
+let test_seed_stale_from_carries_the_previous_page ~clock () =
+  Dashboard_cache.invalidate_all ();
+  let previous =
+    Dashboard_cache.get_or_compute_payload "generation:1" ~ttl:60.0
+      (Pool_work.cpu ~name:__FUNCTION__ (fun () -> `String "tree at 1"))
+  in
+  Dashboard_cache.seed_stale_from_if_missing "generation:2" ~from:"generation:1"
+    ~stale_for:30.0;
+  let immediate =
+    Dashboard_cache.get_or_compute_payload "generation:2" ~ttl:60.0
+      (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+         Eio.Time.sleep clock 0.05;
+         `String "tree at 2"))
+  in
+  check_json "the new generation answers with the previous page at once"
+    (`String "tree at 1") immediate.json;
+  Alcotest.(check string) "with the previous page's entity tag" previous.etag immediate.etag;
+  Eio.Time.sleep clock 0.1;
+  let refreshed =
+    Dashboard_cache.get_or_compute "generation:2" ~ttl:60.0
+      (Pool_work.cpu ~name:__FUNCTION__ (fun () -> `String "unexpected recompute"))
+  in
+  check_json "the new generation was filled in the background" (`String "tree at 2") refreshed
+
+let test_seed_stale_from_needs_an_empty_key_and_a_source () =
+  Dashboard_cache.invalidate_all ();
+  let fill key value =
+    ignore
+      (Dashboard_cache.get_or_compute key ~ttl:60.0
+         (Pool_work.cpu ~name:__FUNCTION__ (fun () -> value)))
+  in
+  fill "seed-source" (`String "source");
+  fill "seed-filled" (`String "filled");
+  Dashboard_cache.seed_stale_from_if_missing "seed-filled" ~from:"seed-source" ~stale_for:30.0;
+  Alcotest.(check (option string)) "a filled key keeps its value" (Some {|"filled"|})
+    (Option.map Yojson.Safe.to_string (Dashboard_cache.peek "seed-filled"));
+  Dashboard_cache.seed_stale_from_if_missing "seed-empty" ~from:"seed-missing" ~stale_for:30.0;
+  Alcotest.(check bool) "no source seeds nothing" true
+    (Option.is_none (Dashboard_cache.peek "seed-empty"))
+
 let test_projection_snapshot_cache_reuses_actor_key () =
   Dashboard_cache.invalidate_all ();
   let config = Workspace.default_config "/tmp/projection-cache-workspace" in
@@ -1807,6 +1852,10 @@ let () =
           test_case "cache hit" `Quick test_cache_hit;
           test_case "seed stale if missing refreshes in background" `Quick
             (test_seed_stale_if_missing_refreshes_in_background ~clock);
+          test_case "seed stale from carries the previous page" `Quick
+            (test_seed_stale_from_carries_the_previous_page ~clock);
+          test_case "seed stale from needs an empty key and a source" `Quick
+            test_seed_stale_from_needs_an_empty_key_and_a_source;
           test_case "peek returns cached value" `Quick
             test_peek_returns_cached_value;
           test_case "get_or_compute_payload returns payload with raw_json and etag" `Quick

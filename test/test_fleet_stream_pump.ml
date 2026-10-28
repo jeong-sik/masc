@@ -179,6 +179,33 @@ let test_events_follow_in_order_numbered_by_revision () =
       check int "the subscription is removed" 0 !live))
 ;;
 
+let test_initial_failure_frame_and_first_reading_are_ordered () =
+  Eio_mock.Backend.run (fun () ->
+    let clock = Eio_mock.Clock.make () in
+    let hub = new_hub () in
+    let live = ref 0 in
+    Hub.note_degraded hub ~since:5.0 F.Scan_failed;
+    Eio.Switch.run (fun sw ->
+      let served = serve ~sw ~clock ~live ~stop_after:2 hub in
+      let first_bytes = Eio.Stream.take served.frames in
+      (match Sse_wire.feed (Sse_wire.create_decoder ()) first_bytes with
+       | [ frame ] ->
+         let json = Yojson.Safe.from_string frame.Sse_wire.data in
+         check (option int) "first state carries the wire schema"
+           (Some F.schema_version)
+           (match Yojson.Safe.Util.member "schema" json with `Int n -> Some n | _ -> None)
+       | _ -> fail "first send must contain one SSE frame");
+      Hub.observe hub ~measured_at:10.0 (fleet ());
+      let second_bytes = Eio.Stream.take served.frames in
+      check (list frame_t) "unavailable snapshot then first reading with consecutive ids"
+        [ Some "1", F.Unavailable_snapshot
+            { revision = revision 1; degradation = { F.since = 5.0; reason = F.Scan_failed } }
+        ; Some "2", changed ~revision:2 ~measured_at:10.0 (fleet ()) ]
+        (read_frames (first_bytes ^ second_bytes));
+      check ending_t "the client left" Pump.Client_gone (Eio.Promise.await served.ending);
+      check int "the subscription is removed" 0 !live))
+;;
+
 let test_a_client_that_connects_before_the_first_reading_gets_it_as_the_snapshot () =
   Eio_mock.Backend.run (fun () ->
     let clock = Eio_mock.Clock.make () in
@@ -349,6 +376,8 @@ let () =
             test_the_first_frame_is_the_snapshot_the_hub_holds
         ; test_case "events follow in order, numbered by revision" `Quick
             test_events_follow_in_order_numbered_by_revision
+        ; test_case "initial failure and first reading are ordered" `Quick
+            test_initial_failure_frame_and_first_reading_are_ordered
         ; test_case "a client that connects before the first reading gets it" `Quick
             test_a_client_that_connects_before_the_first_reading_gets_it_as_the_snapshot
         ] )

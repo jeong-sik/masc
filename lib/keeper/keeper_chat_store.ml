@@ -1617,11 +1617,14 @@ let append_settled_failures_once ~base_dir ~keeper_name failures =
        ensure_dir_once ~base_dir;
        let redaction = redaction_for ~base_dir ~keeper_name in
        let path = chat_path ~base_dir ~keeper_name in
-       let ts = Time_compat.now () in
        let transcript_slot = Keeper_chat_delivery_identity.Settled_failure in
        let candidates =
          List.map
            (fun (tag, { Settled_failure.delivery_key; content; route }) ->
+              (* Each row takes its own time, as the single append does: the
+                 history pages by [ts], so rows sharing one could fall on
+                 both sides of a page boundary. *)
+              let ts = Time_compat.now () in
               let content = Keeper_secret_redaction.redact_text redaction content in
               let row_id = mint_message_id ~ts in
               let line =

@@ -32,7 +32,7 @@ let rows ~width reading = match reading.prepared with
   in
   let note = match reading.kind with
     | Captured ko -> List.map (fun line -> Note line)
-        (wrap (if ko then "고정된 관측 · 닫고 다시 열어 새 관측 확인 · 필요하면 닫은 뒤 r로 새로고침"
+        (wrap (if ko then "고정된 관측 · 닫고 다시 열어 현재 관측 확인 · 필요하면 닫은 뒤 r로 새로고침"
                else "Captured reading · close and reopen after refreshing to read updates."))
     | Observation -> [] in
   note @ List.concat_map (fun section ->

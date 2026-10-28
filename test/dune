@@ -2876,6 +2876,8 @@
 
 (include stanzas/test_event_kind.inc)
 
+(include stanzas/test_fleet_stream.inc)
+
 (include stanzas/test_fs_atomic_orphan_sweep_10130.inc)
 
 (include stanzas/test_fs_compat_append_jsonl_atomicity.inc)

@@ -21,7 +21,7 @@ module Change = struct
     | Policy_revoke
     | Credential_replace
 
-  type mode_event =
+  type mode_event = Authz_mode_event.event =
     | Fresh_bootstrap
     | Off
     | Reactivate
@@ -37,14 +37,15 @@ module Change = struct
         }
 
   (* The label functions below name every constructor, so the compiler stops at
-     a new one. These two lists are what a label is read back through: a
-     constructor that is missing here is written, read back as
-     [Invalid_change], and refused by [append] with nothing written. *)
+     a new one. This list is what a label is read back through: a constructor
+     that is missing here is written, read back as [Invalid_change], and refused
+     by [append] with nothing written. The mode events, and their labels, are
+     those of the body of the record that the same change becomes in the log. *)
   let authz_events =
     [ Grant; Revoke; Disable; Delete; Block; Purge; Policy_revoke; Credential_replace ]
   ;;
 
-  let mode_events = [ Fresh_bootstrap; Off; Reactivate ]
+  let mode_events = Authz_mode_event.events
 
   let authz_event_label = function
     | Grant -> "grant"
@@ -57,19 +58,13 @@ module Change = struct
     | Credential_replace -> "credential_replace"
   ;;
 
-  let mode_event_label = function
-    | Fresh_bootstrap -> "fresh_bootstrap"
-    | Off -> "off"
-    | Reactivate -> "reactivate"
-  ;;
+  let mode_event_label = Authz_mode_event.event_label
 
   let authz_event_of_label label =
     List.find_opt (fun event -> String.equal (authz_event_label event) label) authz_events
   ;;
 
-  let mode_event_of_label label =
-    List.find_opt (fun event -> String.equal (mode_event_label event) label) mode_events
-  ;;
+  let mode_event_of_label = Authz_mode_event.event_of_label
 
   let equal a b =
     match a, b with

@@ -63,7 +63,7 @@ let tool_cycle rng ~index ~with_image =
       Some
         [ T.Text (body index)
         ; T.Image
-            { media_type = "image/png"; data = image_data rng; source_type = Llm_provider.Types.Base64 }
+            { media_type = "image/png"; source = Llm_provider.Types.Base64 (image_data rng) }
         ]
     else None
   in

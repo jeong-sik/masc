@@ -322,7 +322,7 @@ let seal_unlaunched ~sw ~proof ~stream =
   let* ()=if stat.kind=`Regular_file && stat.nlink=1L && stat.uid=Int64.of_int (Unix.geteuid ())
       && stat.perm land 0o7777=0o600 && Optint.Int63.to_int64 stat.size=0L
     then Ok () else Error Invalid_storage in
-  let* sha256=P.Sha256.of_string Digestif.SHA256.(to_hex (digest_string ""))
+  let* sha256=P.Sha256.of_string Agent_core_sha256.(to_hex (digest_string ""))
     |> Result.map_error (fun _ -> Invalid_storage) in
   let original=P.original ~binding:(R.binding record) ~admission_id:(R.admission_id record) in
   let* content=encode_seal ~original ~stream {byte_length=0L;sha256} ~device:stat.dev ~inode:stat.ino in

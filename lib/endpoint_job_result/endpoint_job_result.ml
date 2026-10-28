@@ -320,7 +320,7 @@ let publish_unlaunched_with_hook ~on_stage ~sw ~proof =
   let* ()=R.publish_unlaunched ~sw proof ~evidence:R.Terminal_receipt ~content
     |> Result.map_error (fun e -> Registry_error e) in
   on_stage Receipt_committed;
-  let* expected=cpu (fun () -> P.Sha256.of_string Digestif.SHA256.(to_hex (digest_string content)))
+  let* expected=cpu (fun () -> P.Sha256.of_string Agent_core_sha256.(to_hex (digest_string content)))
     |> Result.map_error (fun _ -> Invalid_receipt) in
   Ok expected) in
   load ~sw ~storage ~expected_sha256:(Some expected)

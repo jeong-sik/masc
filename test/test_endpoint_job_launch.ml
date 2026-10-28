@@ -1267,7 +1267,7 @@ let no_child_receipt_rejects_invented_process_facts () =
           `Assoc ["state",`String "termination_observed";"physical_status",`Assoc ["kind",`String "exited";"code",`String "0"]]) (object_ value))) payload
       | `Physical | `Gate | `Input | `Missing_launch | `Wrong_launch | `Duplicate_state | `Unknown -> payload in
     let payload=`Assoc payload in
-    let checksum=Digestif.SHA256.(to_hex (digest_string ("masc_endpoint_terminal_result_v1\000" ^ Yojson.Safe.to_string payload))) in
+    let checksum=Agent_core_sha256.(to_hex (digest_string ("masc_endpoint_terminal_result_v1\000" ^ Yojson.Safe.to_string payload))) in
     let fields=update "payload" (fun _ -> payload) fields |> update "payload_sha256" (fun _ -> `String checksum) in
     Unix.chmod path 0o600;Yojson.Safe.to_file path (`Assoc fields);Unix.chmod path 0o400;
     let malformed=read path in

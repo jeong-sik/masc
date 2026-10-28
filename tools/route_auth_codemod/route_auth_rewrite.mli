@@ -49,6 +49,11 @@
       Every definition converted under this assertion is listed in [report.named].
       A computed argument in a named partial application is never moved: it was
       evaluated once at the definition and could run again at each registration.
+      For an inline partial application, moving a computed wrapper argument past
+      other effectful registration arguments or handler creation changes their
+      relative order. The rewrite leaves it alone unless those other expressions
+      are syntactic values; function values with nested attributes or extension
+      nodes are left for manual review. [~early:true] does not bypass this check.
     - The wrapper's argument ([~permission], [~tool_name]) is a computation, not a
       constant. A typed route records it at registration, where before it was
       evaluated on every request. The registration is left alone unless

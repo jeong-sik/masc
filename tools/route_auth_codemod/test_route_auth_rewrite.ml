@@ -272,18 +272,6 @@ let converted_cases =
   |> Server_route.get Server_route.Read_auth "/api/x" (fun _state req reqd -> handle req reqd)
 |}
     )
-  ; ( "a wrapper applied directly keeps a computed argument and a computed handler"
-    , {|let routes routes =
-  routes
-  |> Http.Router.post "/api/x"
-       (with_permission_auth ~permission:(permission_of_env ()) (read Browser_addon_view.read))
-|}
-    , {|let routes routes =
-  routes
-  |> Server_route.post (Server_route.Permission (permission_of_env ())) "/api/x"
-       (read Browser_addon_view.read)
-|}
-    )
   ; ( "other names for the outer parameters"
     , {|let routes routes =
   routes
@@ -367,6 +355,14 @@ let left_alone_cases =
 |}
     , "/api/x"
     , "~permission of with_permission_auth reads the request of the outer function" )
+  ; ( "a computed partial argument and computed handler may reorder"
+    , {|let routes routes =
+  routes
+  |> Http.Router.post "/api/x"
+       (with_permission_auth ~permission:(permission_of_env ()) (read Browser_addon_view.read))
+|}
+    , "/api/x"
+    , "a computed partial wrapper argument may be reordered with other registration effects" )
   ; ( "a doc comment inside the wrapper"
     , {|let routes routes =
   routes
@@ -1039,6 +1035,38 @@ let test_computed_named_partial_is_never_moved () =
     ; " |> Http.Router.get \"/1\" h\n |> Http.Router.post \"/2\" h\n" ]
 ;;
 
+let test_partial_evaluation_order () =
+  let sources =
+    [ {|let r = Router.get (path ()) (with_permission_auth ~permission:(permission ()) handler)
+|}
+    ; {|let r = Router.get "/x" (with_permission_auth ~permission:(permission ()) (make_handler ()))
+|}
+    ; {|let r = Router.add ~path:"/x" ~methods:(methods ()) ~handler:(with_permission_auth ~permission:(permission ()) handler)
+|}
+    ; {|let r = Router.get "/x" (with_permission_auth ~permission:(permission ()) handler) (routes ())
+|}
+    ; {|let r = Router.get "/x" (with_permission_auth ~permission:(permission ()) (fun (state [@expand]) req reqd -> handle state req reqd))
+|}
+    ; {|let r = Router.get "/x" (with_permission_auth ~permission:(permission ()) (fun state req reqd -> [%expand]))
+|} ] in
+  List.iter (fun source ->
+    List.iter (fun early ->
+      let output, report = rewrite ~early source in
+      Alcotest.(check string) "effectful argument preserves original source" source output;
+      Alcotest.(check int) "no conversion" 0 report.converted;
+      Alcotest.(check int) "reported" 1 (List.length report.unhandled);
+      Alcotest.(check bool) "reports ordering" true
+        (List.for_all (fun (site : Route_auth_rewrite.site) ->
+          String.equal site.note "a computed partial wrapper argument may be reordered with other registration effects")
+          report.unhandled)) [false; true]) sources;
+  let safe = {|let r = Router.add ~path:"/x" ~methods:[`GET] ~handler:(with_permission_auth ~permission:(permission ()) (fun state req reqd -> handle state req reqd))
+|} in
+  let output, report = rewrite safe in
+  Alcotest.(check int) "value-only registration keeps computed partial support" 1 report.converted;
+  Alcotest.(check int) "no manual decisions" 0 (List.length report.unhandled);
+  check_parses output
+;;
+
 (* ---- a whole file ---- *)
 
 let mixed_source =
@@ -1137,7 +1165,8 @@ let () =
           ; Alcotest.test_case "early argument cannot change modules" `Quick test_named_early_shadowed_module ] )
     ; ( "external and partial evaluation safety"
       , [ Alcotest.test_case "external reference is not changed by default" `Quick test_external_named_use_is_left_alone
-        ; Alcotest.test_case "computed partial is never moved" `Quick test_computed_named_partial_is_never_moved ] )
+        ; Alcotest.test_case "computed partial is never moved" `Quick test_computed_named_partial_is_never_moved
+        ; Alcotest.test_case "partial registration effect order" `Quick test_partial_evaluation_order ] )
     ; ( "evaluation at registration"
       , [ Alcotest.test_case "refused unless allowed" `Quick test_early_refused_by_default
         ; Alcotest.test_case "converted and listed when allowed" `Quick test_early_allowed

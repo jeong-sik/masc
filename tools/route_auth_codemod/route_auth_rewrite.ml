@@ -236,10 +236,11 @@ let mentions (e : expression) name =
 
 (* A value that is the same whenever it is evaluated. *)
 let rec is_constant (e : expression) =
-  match e.pexp_desc with
-  | Pexp_constant _ | Pexp_ident _ | Pexp_construct (_, None) -> true
-  | Pexp_construct (_, Some argument) -> is_constant argument
-  | _ -> false
+  if has_attributes e then false
+  else match e.pexp_desc with
+    | Pexp_constant _ | Pexp_ident _ | Pexp_construct (_, None) -> true
+    | Pexp_construct (_, Some argument) -> is_constant argument
+    | _ -> false
 ;;
 
 (* The handler a wrapper wraps. A call such as [make_handler config] inside the
@@ -581,6 +582,7 @@ let handler_arg source name args =
    registration, and the comments that were inside the text that goes away. *)
 type unwrapped =
   { kind : string
+  ; inner : expression
   ; inner_text : string
   ; evaluated_once : string option
   ; hoisted : (int * string) list
@@ -632,6 +634,7 @@ let unwrap ~allow_early source (handler : expression) ~before ~after =
   in
   Ok
     { kind
+    ; inner
     ; inner_text
     ; evaluated_once
     ; hoisted = List.filter (fun comment -> not (copied comment)) (comments_before @ comments_after)
@@ -661,6 +664,35 @@ type conversion =
           evaluated at registration. *)
   }
 
+(* The kind is inserted as a separate registration argument. If it contains a
+   computation, moving it from the partial wrapper application can reorder it
+   relative to the other arguments and handler creation. Keep the supported
+   effectful expression only when those other expressions are syntactic values. *)
+let has_attribute_or_extension (e : expression) =
+  let found = ref false in
+  let iterator =
+    { Ast_iterator.default_iterator with
+      attribute = (fun _ _ -> found := true)
+    ; extension = (fun _ _ -> found := true)
+    }
+  in
+  iterator.expr iterator e;
+  !found
+;;
+
+let rec syntactic_value (e : expression) =
+  if has_attributes e then false
+  else
+    match e.pexp_desc with
+    | Pexp_constant _ -> true
+    | Pexp_function _ -> not (has_attribute_or_extension e)
+    | Pexp_ident { txt; _ } -> flatten txt <> []
+    | Pexp_construct (_, argument) -> Option.fold ~none:true ~some:syntactic_value argument
+    | Pexp_variant (_, argument) -> Option.fold ~none:true ~some:syntactic_value argument
+    | Pexp_tuple elements -> List.for_all (fun (_, e) -> syntactic_value e) elements
+    | _ -> false
+;;
+
 let rewrite_registration ~allow_early source (fn : expression) name args =
   let ( let* ) = Result.bind in
   let* handler, handler_start = handler_arg source name args in
@@ -671,6 +703,14 @@ let rewrite_registration ~allow_early source (fn : expression) name args =
       handler
       ~before:handler_start
       ~after:handler.pexp_loc.loc_end.pos_cnum
+  in
+  let* () =
+    if unwrapped.partial
+       && List.exists (fun argument -> not (is_constant argument)) unwrapped.scope_arguments
+       && (not (syntactic_value unwrapped.inner)
+           || List.exists (fun (_, arg) -> arg != handler && not (syntactic_value arg)) args)
+    then Error "a computed partial wrapper argument may be reordered with other registration effects"
+    else Ok ()
   in
   let fn_start = fn.pexp_loc.loc_start.pos_cnum in
   Ok

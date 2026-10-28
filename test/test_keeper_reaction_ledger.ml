@@ -237,7 +237,27 @@ let test_turn_finished_closes_the_interval_the_start_opened () =
     "and its own event identity"
     "board:finish-post:reaction:turn_finished"
     "event_id"
-    finished_row
+    finished_row;
+  let evidence =
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
+      ~base_path ~keeper_name ~stimulus_id:"board:finish-post"
+    |> require_complete_evidence "turn interval evidence"
+  in
+  let check_observed label seen recorded_at row =
+    check bool (label ^ " was observed") true seen;
+    check (option (float 0.)) (label ^ " keeps its recorded time")
+      (Some (row |> member "recorded_at_unix" |> to_float)) recorded_at
+  in
+  check_observed "stimulus" evidence.stimulus_seen evidence.stimulus_recorded_at
+    (List.nth rows 0);
+  check_observed "turn start" evidence.turn_started_seen evidence.turn_started_recorded_at
+    (List.nth rows 1);
+  check_observed "turn finish" evidence.turn_finished_seen evidence.turn_finished_recorded_at
+    finished_row;
+  check bool "no queue acknowledgement was observed" false evidence.event_queue_ack_seen;
+  check (option (float 0.)) "no queue acknowledgement time" None evidence.event_queue_ack_recorded_at;
+  check bool "no queue cancellation was observed" false evidence.event_queue_cancelled_seen;
+  check (option (float 0.)) "no queue cancellation time" None evidence.event_queue_cancelled_recorded_at
 ;;
 
 let test_direct_append_state_change_observer_contract () =
@@ -1261,7 +1281,15 @@ let test_full_observation_keeps_unprojected_schedule_terminal () =
     ~base_path ~keeper_name ~expected_transition_id:receipt.transition_id
     |> require_ok "project actual scheduled ACK";
   check int "later observation sees outbox retirement" 0
-    (Keeper_event_queue_state.transition_outbox (observe ()) |> List.length)
+    (Keeper_event_queue_state.transition_outbox (observe ()) |> List.length);
+  let projected =
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
+      ~base_path ~keeper_name ~stimulus_id:source.post_id
+    |> require_complete_evidence "projected scheduled ACK"
+  in
+  check bool "projected ACK is observed" true projected.event_queue_ack_seen;
+  check bool "projected ACK has its recorded time" true
+    (Option.is_some projected.event_queue_ack_recorded_at)
 ;;
 
 let consume_delivery_source ~base_path ~keeper_name source =

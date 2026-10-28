@@ -1735,10 +1735,7 @@ let dispatch ?command_id ?actor t ~verb args =
   let command_id=match command_id with Some id -> id
     | None -> Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())) in
   let annotate = function
-    | `Assoc fields as value -> (match Input.status t.input with
-        | Input.Ready (Operator_reset_asserted _) ->
-            `Assoc (("inputReadiness",str (Input.provenance t.input)) :: List.remove_assoc "inputReadiness" fields)
-        | Ready Command_settled|Uncertain _ -> value)
+    | `Assoc fields -> `Assoc (("inputReadiness",str (Input.provenance t.input)) :: List.remove_assoc "inputReadiness" fields)
     | value -> value in
   match Input.within_command t.input ~command_id (fun () -> let* ()=admit_after_finish t ~verb args in dispatch_raw ?actor t ~verb args) with
   | Error detail -> Error (Live.Before_effect detail)

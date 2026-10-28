@@ -461,11 +461,11 @@ let scenario mode =
         let shot = answered (issue (B.Page_capture {tab_id=1;options=None})) in
         check string "the screenshot" (Base64.encode_string "\137PNG\r\n\026\nfixture")
           Yojson.Safe.Util.(shot |> member "data" |> member "data" |> to_string);
-        check string "a new tab" {|{"ok":true,"data":{"tabId":2,"action":"open_tab","created":true,"url":"https://fixture.test/channel","title":"Opened","active":true}}|}
+        check string "a new tab" {|{"ok":true,"data":{"inputReadiness":"command_settled","tabId":2,"action":"open_tab","created":true,"url":"https://fixture.test/channel","title":"Opened","active":true}}|}
           (Yojson.Safe.to_string (answered (issue (B.Page_act (B.Action.Open_tab "https://fixture.test/channel")))));
-        check string "a move on it" {|{"ok":true,"data":{"tabId":2,"action":"goto","url":"https://fixture.test/next","title":"Moved"}}|}
+        check string "a move on it" {|{"ok":true,"data":{"inputReadiness":"command_settled","tabId":2,"action":"goto","url":"https://fixture.test/next","title":"Moved"}}|}
           (Yojson.Safe.to_string (answered (issue (B.Page_goto {url="https://fixture.test/next";tab_id=Some 2}))));
-        check string "a click" {|{"ok":true,"data":{"tabId":1,"action":"click","selector":"#send","urlBefore":"https://fixture.test/","url":"https://fixture.test/","title":"Fixture"}}|}
+        check string "a click" {|{"ok":true,"data":{"inputReadiness":"command_settled","tabId":1,"action":"click","selector":"#send","urlBefore":"https://fixture.test/","url":"https://fixture.test/","title":"Fixture"}}|}
           (Yojson.Safe.to_string (answered (issue (B.Page_interact {tab_id=1;expected_url=Some "https://fixture.test/";frame_path=[];action=B.Click "#send"}))));
         check string "where ego clicked, and the label beside its cursor names the actor"
           {|["#send", "MASC \u00b7 keeper/live-fixture \u00b7 click"]|} (read (Filename.concat root "clicked"));

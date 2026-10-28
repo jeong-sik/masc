@@ -176,6 +176,10 @@ val assert_input_reset : t -> generation:string -> (unit, string) result
     check/reset assertion for this pending input generation and resume the
     same peer. This remains [operator_asserted], not native release proof.
     Answering a dialog, handing off or taking over alone does not reset it.
+    Every result that is a JSON object, and every partial-failure receipt that
+    is one, carries [inputReadiness]: [command_settled], [operator_asserted] or
+    [release_uncertain]. The tab list is a JSON array when every tab was read,
+    and then carries nothing.
     Frames are read
     through the snapshot. Snapshot-target click, fill, hover and double-click
     use ego's native element resolver, including iframe refs; expectedUrl still

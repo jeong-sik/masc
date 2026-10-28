@@ -40,7 +40,7 @@ let launch_login state ~host ~deliver ~fork ~check keeper_name =
       in
       let result =
         try
-          let ( let* ) = Result.bind in
+          let open Result.Syntax in
           let* () = check () in
           Masc_tui_http.post_keeper_github_login_streaming
             ~clock
@@ -66,7 +66,7 @@ let launch_token_save state ~host ~deliver ~fork ~check keeper_name token =
   let run () =
     let result =
       try
-        let ( let* ) = Result.bind in
+        let open Result.Syntax in
         let* () = check () in
         Masc_tui_http.post_keeper_github_token ~host ~port ~keeper_name ~token ()
       with

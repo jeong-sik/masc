@@ -103,7 +103,7 @@ let observe_operation_state t state =
 ;;
 
 let decode_operation_state ~operation_id (json : Yojson.Safe.t) =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let open Keeper_chat_operation in
   match json with
   | `Assoc fields ->
@@ -396,7 +396,7 @@ type events_page =
 let events_schema = "masc.keeper_chat_events.v2"
 
 let decode_events_page (json : Yojson.Safe.t) =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   match json with
   | `Assoc fields ->
     let* source =

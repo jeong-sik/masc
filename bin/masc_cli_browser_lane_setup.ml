@@ -35,7 +35,7 @@ let refuse message = refuse_with 1 message
    from a refusal. *)
 let no_config_root_status = 3
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let observation ~base_path = Launcher.observe ~base_path ~server:Launcher.Not_serving
 

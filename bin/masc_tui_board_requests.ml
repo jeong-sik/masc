@@ -42,7 +42,7 @@ let start_board_post state ~host ~launch ~report ~(title : string) ~(body : stri
   launch
     ~deliver:(fun result -> Board_new_post_done { reply_to = None; sent_draft; sent_attachments; result })
     (fun () ->
-      let ( let* ) = Result.bind in
+      let open Result.Syntax in
       let* expected_workspace = match expected_workspace with
         | Some identity -> Ok identity
         | None -> Error "Board workspace identity is unavailable" in
@@ -83,7 +83,7 @@ let start_board_comment state ~host ~launch ~report ~(post_id : string)
   launch
     ~deliver:(fun result -> Board_new_post_done { reply_to = Some post_id; sent_draft; sent_attachments = []; result })
     (fun () ->
-      let ( let* ) = Result.bind in
+      let open Result.Syntax in
       let* expected_workspace = match expected_workspace with
         | Some identity -> Ok identity
         | None -> Error "Board workspace identity is unavailable" in
@@ -109,7 +109,7 @@ let start_vote state ~launch ~report ~target ~(up : bool) ~send =
   launch
     ~deliver:(fun result -> Board_vote_done (target, result))
     (fun () ->
-      let ( let* ) = Result.bind in
+      let open Result.Syntax in
       let* expected_workspace = match expected_workspace with
         | Some identity -> Ok identity
         | None -> Error "Board workspace identity is unavailable" in

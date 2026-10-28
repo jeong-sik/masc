@@ -344,7 +344,7 @@ let start_lsp_question
 ;;
 
 let save_draft state ~host ~deliver =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* request, draft = Masc_tui_code_results.begin_draft_save state in
   let authority = state.workspace_authority in
   let reading = state.workspace_read_authority in

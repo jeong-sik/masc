@@ -241,7 +241,7 @@ type part_key =
   ; part_item : exact_input_item
   }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let decode_entry = function
   | `Assoc fields ->

@@ -367,7 +367,7 @@ type deletion_inventory = { operations : deletion_row list; errors : string list
 
 let decode_deletion_inventory json =
   let open Yojson.Safe.Util in
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let rec decode_rows acc = function
     | [] -> Ok (List.rev acc)
     | row :: rest ->

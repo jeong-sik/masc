@@ -1,6 +1,6 @@
 module Setup = Runtime_antigravity_setup
 type account_action = Import_current | Sign_in | Use_reference of string
-let ( let* ) = Result.bind
+open Result.Syntax
 let report = function
   | Ok json -> print_endline (Yojson.Safe.to_string json); 0
   | Error error ->

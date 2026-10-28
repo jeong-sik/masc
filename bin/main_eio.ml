@@ -1172,7 +1172,7 @@ let token_list_cmd_exit base_path =
 let token_revoke_cmd_exit base_path agent =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
   let retired = Auth.with_credential_transaction base_path (fun transaction ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* present = Auth.credential_exists_in_transaction transaction agent in
     if not present then Ok false
     else Auth.delete_credential_in_transaction transaction agent |> Result.map (fun () -> true))
@@ -3695,7 +3695,7 @@ let sandbox_image_build ~builder ~recipe ~tag ~labels =
       ~labels ~recipe
 
 let sandbox_image_cmd_exit print_only tag runtime recipe_name source =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let run =
     let* recipe = sandbox_image_recipe ~recipe_name ~source in
     if print_only
@@ -3790,7 +3790,7 @@ let sandbox_image_config_root base_path =
 (* Load this host's catalog (or the shipped one it starts from), apply one
    change, and write it back. *)
 let sandbox_image_change_catalog ~base_path change =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let config_root = sandbox_image_config_root base_path in
   let* shipped =
     match Embedded_config.read Keeper_sandbox_image_catalog.shipped_file_name with
@@ -3825,7 +3825,7 @@ let sandbox_image_exit_of = function
    build into it. The store stays free to drop the image after the answer;
    the start gate asks again before a Keeper runs. *)
 let sandbox_image_promote ~base_path ~command ~store ~name ~reference =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let store_name = Keeper_sandbox_image_catalog.store_to_string store in
   let store_holds_reference () =
     match sandbox_image_tag_presence ~command ~tag:reference with
@@ -3858,7 +3858,7 @@ let sandbox_image_promote ~base_path ~command ~store ~name ~reference =
   Ok (Printf.sprintf "%s on %s is now %s, recorded in %s." name store_name reference path)
 
 let sandbox_image_promote_exit base_path runtime name reference =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   sandbox_image_exit_of
     (let* () =
        if Keeper_sandbox_image_catalog.is_reference reference then Ok ()
@@ -3881,7 +3881,7 @@ let sandbox_image_promote_exit base_path runtime name reference =
    catalog this binary ships, so [base] is always one; a host that has not
    promoted anything yet has no builds, which is the first case. *)
 let sandbox_image_ensure_exit ~base_path runtime =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let recipe = Keeper_sandbox_image_version.base_embedded in
   let name = recipe.Keeper_sandbox_image_version.name in
   let store = sandbox_image_store runtime in

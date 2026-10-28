@@ -1015,7 +1015,7 @@ let decode_skill_action = function
 
 let decode_skill_activation = function
   | `Assoc fields ->
-      let ( let* ) = Result.bind in
+      let open Result.Syntax in
       let* identity =
         match assoc_opt "identity" fields with
         | Some (`Assoc identity) -> Ok identity
@@ -1107,7 +1107,7 @@ let skill_projection_of_fields fields =
              (match assoc_opt "activations" projection with
               | Some (`List activations) ->
                   let decoded = List.map (fun json ->
-                    let ( let* ) = Result.bind in
+                    let open Result.Syntax in
                     let* activity = decode_skill_activation json in
                     if activity.Transcript.turn_ref = explicit_turn_id_of_fields fields then Ok activity
                     else Error "Skill activation belongs to another exact turn") activations in
@@ -1829,7 +1829,7 @@ let page_of_json (payload : Yojson.Safe.t) =
          | `String value when String.trim value <> "" -> Ok (Some value)
          | _ -> Error "keeper chat page has an invalid cursor"
        in
-       let ( let* ) = Result.bind in
+       let open Result.Syntax in
        let* next_cursor = cursor in
        if has_more <> Option.is_some next_cursor
        then Error "keeper chat page cursor disagrees with has_more"

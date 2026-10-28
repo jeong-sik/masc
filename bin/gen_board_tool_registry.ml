@@ -4,7 +4,7 @@
     files explicitly, so this action does not depend on a sandbox working
     directory.  A missing, extra, or malformed Board declaration is an error.
 *)
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let board_prefix = "masc_board_"
 let toml_suffix = ".toml"

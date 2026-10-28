@@ -45,7 +45,7 @@ let inspect ~base_path ~port =
   emit (`Assoc (["schema", `String "masc.setup_server.v1"; "read_only", `Bool true;
     "installed_version", `String Runtime_build_version.current] @ fields @ alternative)); 0
 let with_selected_owner ~sw ~clock ~base_path ~port ~agent ~expected_version ~login use =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* () = match Masc_http_client.get_sync ~clock ~headers:[]
     ~url:(Printf.sprintf "http://127.0.0.1:%d/health?full=1" port) () with
     | Ok (200, body) -> Upgrade.authorize_initial ~base_path ~expected_version ~body
@@ -65,7 +65,7 @@ let stop ~base_path ~port ~agent ~expected_version ~login =
   let result = try
     let base_path = Unix.realpath (Env_config.normalize_masc_base_path_input base_path) in
     with_http (fun sw clock ->
-      let ( let* ) = Result.bind in
+      let open Result.Syntax in
       let run_dir = (Host_config.host ()).base_path_lease_dir in
       with_selected_owner ~sw ~clock ~base_path ~port ~agent ~expected_version ~login (fun owner ->
         match Upgrade.request_termination_and_observe owner ~observe:(fun () ->

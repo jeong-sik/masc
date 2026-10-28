@@ -536,7 +536,7 @@ let sounding_note ~held written on_string =
    never holds more notes than the tuning has strings. A tied member holds a
    note from an earlier beat, never one of its own chord. *)
 let chord_notes ~strings ~held inner =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let limit = String.length inner in
   let rec members found index =
     if index >= limit then Ok (List.rev found)
@@ -702,7 +702,7 @@ let span_with_effect make_dur markup unit =
 (* [d] or [dd] rides the latest beat; a tuplet does too, when it can. Either
    way the default is unchanged: the length after the beat is what it was. *)
 let apply_effect_to_latest state ~make_dur ~markup =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let unit_of_sound sounding =
     match sounding.s_dur with
     | Plain unit -> Some unit
@@ -804,7 +804,7 @@ let fretted_instrument name =
           | None -> false)
 
 let track_properties text =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* tokens = tokenize text in
   match tokens with
   | [] -> Ok false
@@ -815,7 +815,7 @@ let track_properties text =
       Error (Unsupported_track_properties text)
 
 let staff_properties text =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* tokens = tokenize text in
   match tokens with
   | [] | [ Tk_word "tabs" ]
@@ -868,7 +868,7 @@ let collect_tuning tokens =
   in
   match tokens with
   | Tk_chord (inner, None) :: rest ->
-      let ( let* ) = Result.bind in
+      let open Result.Syntax in
       let* members = tokenize inner in
       (match collect [] members with
        | names, [] -> Ok (names, rest)
@@ -962,7 +962,7 @@ let held_note state on_string =
          List.find_opt (fun (note : note) -> note.on_string = on_string) sounding.s_notes)
 
 let beat_of_word state word =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let limit = String.length word in
   if limit = 0 then Error (Not_a_note word)
   else
@@ -1034,7 +1034,7 @@ let place_beats marks soundings =
   }
 
 let read source =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* tokens = tokenize source in
   let rec step state tokens =
     match tokens with

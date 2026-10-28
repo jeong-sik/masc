@@ -27,7 +27,7 @@ type event =
   | Submitted of t * request
   | Closed
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* The field names are the endpoint's body keys, so the submitted value is
    the body once the topology is read back into its sum. *)

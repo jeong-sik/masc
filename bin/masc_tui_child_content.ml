@@ -1,5 +1,5 @@
 module Read = Masc.Keeper_child_content_read
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type error = Transport of string | Http_refused of int | Invalid_json of string
   | Invalid_response of Read.decode_error | Service of Read.failure

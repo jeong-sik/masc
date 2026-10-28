@@ -612,7 +612,7 @@ let prepare_draft state =
         Error "The current file has no editable source revision"
 
 let edit_draft state draft text =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* () = match code_draft_address state with
     | Some address when Draft.equal_address address (Draft.address draft)
         && server_authority_ready state -> Ok ()
@@ -636,7 +636,7 @@ let adopt_draft_revision state = match
   | Some draft -> Result.map (put_code_draft state) (Draft.adopt_current draft)
 
 let begin_draft_save state =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* () = match write_authority_refusal state state.workspace_authority with
     | None when code_edit_focus state -> Ok ()
     | None -> Error "Focus the file or its draft before saving"

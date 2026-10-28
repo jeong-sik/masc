@@ -223,7 +223,7 @@ type runtime_assignment_write =
   | Assignment_unchanged of runtime_assignment_unchanged
 
 let decode_unchanged_runtime_assignment_response json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   match json with
   | `Assoc fields when exact_keys ["ok";"applied";"assignment_revision";"warnings"] fields ->
       (match List.assoc_opt "ok" fields, List.assoc_opt "applied" fields,
@@ -453,7 +453,7 @@ let remote_endpoint_names snapshot =
         | Some (`List endpoints) ->
           List.fold_left
             (fun result endpoint ->
-               let ( let* ) = Result.bind in
+               let open Result.Syntax in
                let* names = result in
                match member "name" endpoint with
                | Some (`String name) when String.trim name <> "" && not (List.mem name names) ->
@@ -466,7 +466,7 @@ let remote_endpoint_names snapshot =
   | Some _ | None -> Error "endpoint registry was not observed; refresh Keeper settings"
 
 let sandbox_patch ~profile snapshot =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* revision = expected_config_revision snapshot in
   let* current = match member "sandbox_profile" snapshot with
     | Some (`String value) ->
@@ -513,7 +513,7 @@ let sandbox_patch ~profile snapshot =
   | _ :: _ -> Ok (Some (`Assoc (("expected_config_revision",revision) :: changes)))
 
 let reopen_edit_on_current ~before ~edited ~current =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* after = match Yojson.Safe.from_string edited with
     | json -> Ok json
     | exception Yojson.Json_error detail -> Error (Fix_in_editor detail) in

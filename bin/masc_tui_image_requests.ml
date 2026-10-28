@@ -45,7 +45,7 @@ let load ~host ~port ~cache_dir ~diagram_width ~diagram_height ~diagram_font_siz
     Result.bind (peer ("/api/v1/artifacts/" ^ reference.Tool_output.sha256))
       (fun (status_code, body) ->
         Eio_guard.run_in_systhread ~label:"tui-sent-image-decode" (fun () ->
-          let ( let* ) = Result.bind in
+          let open Result.Syntax in
           let* response = Masc_tui_http.decode_json ~allow_empty:false ~status_code ~body in
           let* bytes = Masc_tui_image_preview.decode_artifact reference response in
           prepare_declared format bytes))

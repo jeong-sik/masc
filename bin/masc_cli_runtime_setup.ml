@@ -1,5 +1,5 @@
 module Batch = Runtime_setup_batch
-let ( let* ) = Result.bind
+open Result.Syntax
 let report = function
   | Ok json -> print_endline (Yojson.Safe.to_string json); 0
   | Error error ->

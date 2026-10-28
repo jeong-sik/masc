@@ -389,17 +389,27 @@ let share_receipt_consistency () =
   let request : Share.request = { operation_id; expected_version = 0; requested = true;
     expected_artifact_revision = 1; expected_artifact_sha256 = sha256 } in
   let snapshot : Share.snapshot = { version = 1; shared = true } in
-  let receipt : Share.receipt = { request; outcome = Share.Applied snapshot; publication_matches = true } in
-  let decode current = Masc_tui_http.decode_artifact_share_response ~id ~shared:true ~operation_id
-    ~expected_version:0 ~expected_artifact_revision:1 ~expected_artifact_sha256:sha256 ~status:200
+  let applied : Share.receipt = { request; outcome = Share.Applied snapshot; publication_matches = true } in
+  let conflict : Share.receipt = { request; outcome = Share.Conflict snapshot; publication_matches = true } in
+  let decode ~status ~receipt current = Masc_tui_http.decode_artifact_share_response ~id ~shared:true ~operation_id
+    ~expected_version:0 ~expected_artifact_revision:1 ~expected_artifact_sha256:sha256 ~status
     (`Assoc ["id", `String id; "receipt", Share.receipt_to_json receipt; "current", Share.snapshot_to_json current]) in
-  (match decode snapshot with
+  (match decode ~status:200 ~receipt:applied snapshot with
    | Ok (Masc_tui_http.Artifact_share_applied true) -> ()
    | Ok (Artifact_share_applied false | Artifact_share_conflict _) | Error _ -> fail "valid receipt refused");
-  refused (decode { version = 1; shared = false });
-  (match decode { version = 2; shared = false } with
+  refused (decode ~status:200 ~receipt:applied { version = 1; shared = false });
+  (match decode ~status:200 ~receipt:applied { version = 2; shared = false } with
    | Ok (Masc_tui_http.Artifact_share_applied false) -> ()
-   | Ok (Artifact_share_applied true | Artifact_share_conflict _) | Error _ -> fail "later state refused")
+   | Ok (Artifact_share_applied true | Artifact_share_conflict _) | Error _ -> fail "later state refused");
+  (match decode ~status:409 ~receipt:conflict snapshot with
+   | Ok (Masc_tui_http.Artifact_share_conflict true) -> ()
+   | Ok (Artifact_share_applied _ | Artifact_share_conflict false) | Error _ -> fail "valid conflict refused");
+  refused (decode ~status:409 ~receipt:conflict { version = 1; shared = false });
+  (match decode ~status:409 ~receipt:conflict { version = 2; shared = false } with
+   | Ok (Masc_tui_http.Artifact_share_conflict false) -> ()
+   | Ok (Artifact_share_applied _ | Artifact_share_conflict true) | Error _ -> fail "later conflict state refused");
+  refused (decode ~status:409 ~receipt:applied snapshot);
+  refused (decode ~status:200 ~receipt:conflict snapshot)
 
 let () = run "published report resources" ["report reading",[
   test_case "share receipt and current snapshot agree at equal versions" `Quick share_receipt_consistency;

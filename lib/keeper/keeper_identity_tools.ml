@@ -9,7 +9,7 @@ type catalog = {
   tools : Mcp_client.tool list;
 }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type transports = {
   mcp_post : Mcp_client.post;

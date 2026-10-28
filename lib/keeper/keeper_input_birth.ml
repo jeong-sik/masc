@@ -1,5 +1,5 @@
 module Checkpoint = Keeper_checkpoint_store
-let ( let* ) = Result.bind
+open Result.Syntax
 type creation =
   { keeper_name : string; trace_id : Keeper_id.Trace_id.t; keeper_uid : Keeper_id.Uid.t }
 type session =

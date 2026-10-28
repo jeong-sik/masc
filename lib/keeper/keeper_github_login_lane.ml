@@ -13,7 +13,7 @@
     endpoint's identity preflight ([remote_github_identity_missing]) while the
     operator looks at a successful login on this screen. *)
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* Each shaping step is one short remote command. The login itself is the long
    one and carries its own budget. *)

@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type auth_result =
   { authenticated : bool
@@ -712,7 +712,7 @@ let capture_identity_contents ~hosts ~config =
 ;;
 
 let capture_tool_identity ~config ~keeper_name =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* source = existing_config_dir ~config ~keeper_name in
   match source with
   | None -> capture_identity_contents ~hosts:None ~config:None
@@ -730,7 +730,7 @@ let capture_tool_identity ~config ~keeper_name =
 ;;
 
 let captured_tool_identity_of_files files =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let rec validate_names seen = function
     | [] -> Ok ()
     | (name, _) :: rest ->
@@ -902,7 +902,7 @@ let refresh_git_credential_config ~config ~keeper_name =
 ;;
 
 let docker_args_for_tool ~config ~keeper_name ~container_masc_dir =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* captured = capture_tool_identity ~config ~keeper_name in
   let* identity_state = match captured.kind with
     | Captured_unconfigured -> Ok Unconfigured

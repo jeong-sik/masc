@@ -3,7 +3,7 @@
 open Keeper_meta_contract
 module Provider = Keeper_oauth_provider
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let gate_operation = Keeper_gate.identity_call_gate_operation
 

@@ -6,7 +6,7 @@ module Gate_journal = Keeper_librarian_admission_gate
 module Current = Keeper_memory_os_current
 module Queue = Keeper_memory_admission_queue
 module Exact = Lane_addon_exact
-let ( let* ) = Result.bind
+open Result.Syntax
 let io = Domain_pool_ref.submit_io_or_inline
 let owned result = Result.map_error Owner.error_to_string result
 let require value detail = if value then Ok () else Error detail

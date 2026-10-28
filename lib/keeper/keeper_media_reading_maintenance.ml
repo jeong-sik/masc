@@ -3,7 +3,7 @@
    follows Multimodal.Vision_kept_maintenance on purpose: same snapshot
    contract, same abort-before-delete on anything unreadable. *)
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 module Name_set = Set.Make (String)
 module String_map = Map.Make (String)

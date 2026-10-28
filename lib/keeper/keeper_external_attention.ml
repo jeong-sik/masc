@@ -124,7 +124,7 @@ let required_object key = function
       | _ -> Error (Printf.sprintf "missing object field %s" key))
   | _ -> Error "expected object"
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let surface_ref_to_json = Surface_ref.to_json
 
@@ -374,7 +374,7 @@ let events_of_rows ~path rows =
   |> String.split_on_char '\n'
   |> List.fold_left
        (fun state line ->
-          let ( let* ) = Result.bind in
+          let open Result.Syntax in
           let* events_rev, line_no = state in
           let line_no = line_no + 1 in
           let line = String.trim line in
@@ -442,7 +442,7 @@ let load_events_snapshot ~base_path ~keeper_name =
 
 let load_events_result ~base_path ~keeper_name =
   let path = attention_path ~base_path ~keeper_name in
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* loaded = load_events_snapshot ~base_path ~keeper_name in
   match loaded.incomplete_tail with
   | None -> Ok loaded.events
@@ -480,7 +480,7 @@ let recorded_item_by_event_id events event_id =
    [Recorded] occurrence per id wins, matching [recorded_item_by_event_id]
    exactly), so the whole batch costs one file read regardless of size. *)
 let recorded_items_by_event_ids ~base_path ~keeper_name ~event_ids =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* events = load_events_result ~base_path ~keeper_name in
   let wanted : (string, unit) Hashtbl.t = Hashtbl.create (List.length event_ids) in
   List.iter (fun event_id -> Hashtbl.replace wanted event_id ()) event_ids;

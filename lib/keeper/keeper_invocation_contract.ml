@@ -28,7 +28,7 @@ type request_error =
       ; expected : string
       }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* [expected] is read by a model deciding what to send next, so it is written
    in the vocabulary [Agent_core.Tool_input_validation] already uses on the

@@ -353,7 +353,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
   let runtime_keepers_dir = Workspace.keepers_runtime_dir config in
   let external_capture = ref None in
   let memory_input (base : Keeper_librarian.input) unit =
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let input = source_input ~include_observations:true base unit in
     let* counterpart_observations = match P.turn_window unit with
       | None -> external_capture := None; Ok []
@@ -439,7 +439,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
   and attempt ~keeper_id meta prepared =
     select prepared;
     let inputs = Domain_pool_ref.submit_io_or_inline (fun () ->
-      let ( let* ) = Result.bind in
+      let open Result.Syntax in
       let* current = Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name in
       let input : Keeper_librarian.input =
         { turn_ref = P.turn_ref prepared; historical_task_contexts = []; goal_context = Keeper_librarian.No_task;
@@ -610,7 +610,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
     let module Current = Keeper_memory_os_current in
     let module Floor = Keeper_librarian_message_floor in
     let module Unread = Keeper_librarian_unread in
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let refusal_detail reports = String.concat "; " (List.map
       (fun (outcome : Runtime.not_committed) -> Printf.sprintf "%s; provider_input_refusals=[%s]"
         outcome.detail (String.concat "," (List.map Keeper_librarian_input_refusal.to_string
@@ -674,7 +674,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
   and message_floor ~selected ~(input : Keeper_librarian.input) =
     let module H = Keeper_librarian_task_context in
     let module Unread = Keeper_librarian_unread in
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let refusal_detail position (failure : Runtime.inference_failure) =
       let detail = match failure.reports with
         | [] -> "no classified provider outcome"

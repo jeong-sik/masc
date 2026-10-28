@@ -586,7 +586,7 @@ let step_end = function
 (* The history files of every trace the official lines name, read once each.
    A refused line past the first named one stops the round (row 2c). *)
 let read_fragments ~config (official : R.official_line list) =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let session_dir trace_id = Filename.concat (Keeper_fs.session_store_path config) trace_id in
   let read_file ~trace_id file =
     let* lines =
@@ -633,7 +633,7 @@ let checkpoint_message_floor ?cli_runner ~config ~keeper_name ~lines ~progress ~
   let runtime_keepers_dir = Workspace.keepers_runtime_dir config in
   let failure detail extra = Memory_refused (reports @ extra @ [floor_refusal detail]) in
   let inferred =
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* sources = Unread.sources_for_atom_range ~trace_id:range.trace_id
       ~history_start_boundary_line:range.history_start_boundary_line
       ~start_atom:range.start_atom ~end_atom:range.end_atom ~messages
@@ -662,7 +662,7 @@ let checkpoint_message_floor ?cli_runner ~config ~keeper_name ~lines ~progress ~
            not the current Keeper metadata trace, and do not reenter its loader. *)
         let session_dir = Filename.concat (Keeper_fs.session_store_path config) range.trace_id in
         C.with_agent_core_exact_snapshot ~session_dir ~session_id:range.trace_id (fun snapshot ->
-          let ( let* ) = Result.bind in
+          let open Result.Syntax in
           let current_messages = C.exact_snapshot_messages snapshot in
           let* current_lines = B.read ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name in
           let prefix = List.filter (fun (line,_) -> line <= range.end_boundary_line) in
@@ -731,7 +731,7 @@ let official_message_floor ?cli_runner ~config ~keeper_name ~lines ~progress ~of
     | Unread.Atom _ | Unread.Official_turn _ -> Error "message is outside the selected official turn" in
   let failure detail extra = Memory_refused (reports @ extra @ [floor_refusal detail]) in
   let inferred =
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* unread_messages = Domain_pool_ref.submit_io_or_inline (fun () ->
       Current.read_unread_messages ~keepers_dir ~keeper_id:keeper_name)
       |> Result.map_error (fun detail -> detail,[]) in
@@ -750,7 +750,7 @@ let official_message_floor ?cli_runner ~config ~keeper_name ~lines ~progress ~of
         Keeper_checkpoint_store.with_session_lock ~session_dir (fun _ ->
           (* The same session lock excludes both real history writers. Keep
              it through Memory durability; no inference runs under this lock. *)
-          let ( let* ) = Result.bind in
+          let open Result.Syntax in
           let* current_lines = B.read ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name in
           let prefix = List.filter (fun (line,_) -> line <= selected.line) in
           let* () = if prefix current_lines=prefix lines then Ok ()
@@ -821,7 +821,7 @@ let official_cursor_recorded_at ~lines (cursor : Keeper_librarian_official_progr
 let recover_official_progress
       ~config ~write ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name ~lines ~cursor
   =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   if not (R.may_have_unread_official ~lines ~cursor)
   then Ok None
   else
@@ -899,7 +899,7 @@ type positions =
   }
 
 let read_positions ~config ~keeper_name =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let runtime_keepers_dir = Workspace.keepers_runtime_dir config in
   let memory_keepers_dir =
     Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path
@@ -983,7 +983,7 @@ type unread =
    AGENT_CORE has no checkpoint, so its atoms are nothing to count and its
    official lines are counted alone. *)
 let unread_turns ~config ~keeper_name =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* positions = read_positions ~config ~keeper_name in
   let* _keeper_id, meta = read_meta ~config ~keeper_name in
   let current_trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
@@ -1036,7 +1036,7 @@ let consume_one_with_extent
       ~keeper_name
       ~commit
   =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* { runtime_keepers_dir
        ; memory_keepers_dir
        ; lines

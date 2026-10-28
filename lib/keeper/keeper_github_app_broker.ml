@@ -21,7 +21,7 @@ type credentials =
   ; private_key_pem : string
   }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let credentials_dir ~config ~keeper_name =
   Filename.concat

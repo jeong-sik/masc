@@ -1,5 +1,5 @@
 module H = Keeper_librarian_unread
-let ( let* ) = Result.bind
+open Result.Syntax
 let path ~keepers_dir ~keeper_id =
   Filename.concat keepers_dir (keeper_id ^ ".librarian-unread.json")
 

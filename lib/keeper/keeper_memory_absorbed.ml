@@ -2,7 +2,7 @@
 
 module W = Keeper_memory_os_types
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let suffix = ".memory-absorbed.jsonl"
 
 let path_for_keepers_dir ~keepers_dir ~keeper_id =

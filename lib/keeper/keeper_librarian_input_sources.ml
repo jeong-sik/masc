@@ -13,7 +13,7 @@ let read_error_to_string = function
     ^ Keeper_external_attention.read_error_to_string error
 ;;
 
-let ( let* ) = Result.bind
+open Result.Syntax
 module Chat = Keeper_chat_store
 module Attention = Keeper_external_attention
 
@@ -197,7 +197,7 @@ let goal_context_for_task ~config = function
   | None -> Keeper_librarian.No_task
   | Some task ->
     let task_id = Keeper_id.Task_id.to_string task in
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let criteria =
       let* links = Workspace_goal_index.read_goal_task_links_authoritative_r config in
       let ids = List.filter_map (fun (goal_id, tasks) ->

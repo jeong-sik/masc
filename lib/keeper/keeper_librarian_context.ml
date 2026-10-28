@@ -23,7 +23,7 @@ let current_references (snapshot : snapshot) =
   List.concat_map (fun (p : pocket) -> match p.completeness with
     | Current -> p.sources | Needs_reconsideration -> []) snapshot.pockets
 let empty = { sources = []; previous = None; unavailable = []; execution_basis = None }
-let ( let* ) = Result.bind
+open Result.Syntax
 let digest bytes = Agent_core_sha256.(digest_string bytes |> to_hex)
 let strings xs = `List (List.map (fun x -> `String x) xs)
 (* A source can leave an existing context while another source continues that

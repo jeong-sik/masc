@@ -595,7 +595,7 @@ let reconcile_spent_selection
   =
   match selection.source.Keeper_event_queue.payload with
   | Tool_result_ready receipt_id ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let base_path = config.Workspace_utils.base_path in
     let retire_hint () =
       let* () = Keeper_registry_event_queue.ack_pending_result ~base_path keeper_name ~selection in

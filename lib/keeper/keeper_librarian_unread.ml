@@ -1,6 +1,6 @@
 module Refusal = Keeper_librarian_input_refusal
 module Window = Runtime_model_input_tail_window
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type source =
   | Atom of

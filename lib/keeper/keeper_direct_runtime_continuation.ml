@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 module Owner = Keeper_owner_registry
 module Semantic = Keeper_semantic_execution
 module Checkpoint = Keeper_checkpoint_store

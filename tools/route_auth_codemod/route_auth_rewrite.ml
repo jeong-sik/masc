@@ -818,7 +818,12 @@ let uses_of_name source structure (definition : definition) =
       expr =
         (fun self (e : expression) ->
           (match e.pexp_desc with
-           | Pexp_ident { txt = Longident.Lident n; _ } when String.equal n name ->
+           (* A qualified use [M.h] in the same file can still refer to this
+              binding, even though registrations are required to use bare [h].
+              Count any matching final component conservatively: source-only
+              analysis cannot prove which module a qualified name resolves to. *)
+           | Pexp_ident { txt = (Longident.Lident n | Longident.Ldot (_, { txt = n; _ })); _ }
+             when String.equal n name ->
              incr occurrences
            | Pexp_apply (fn, args) ->
              Option.iter

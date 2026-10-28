@@ -1011,6 +1011,24 @@ let routes routes = routes |> Http.Router.get "/x" h
     (sites report_a)
 ;;
 
+let test_qualified_named_use_in_same_file_is_left_alone () =
+  List.iter (fun use ->
+    let source =
+      "module M = struct\n"
+      ^ "  let h request reqd = with_permission_auth ~permission:Masc_domain.CanAdmin "
+      ^ "(fun state req reqd -> handle state req reqd) request reqd\n"
+      ^ "  let routes routes = routes |> Http.Router.get \"/admin\" h\n"
+      ^ "end\n"
+      ^ "let direct request reqd = " ^ use ^ " request reqd\n" in
+    let rewritten, report = rewrite ~allow_named:true source in
+    Alcotest.(check string) "qualified use keeps the definition and route" source rewritten;
+    Alcotest.(check int) "no definition is converted" 0 report.definitions;
+    Alcotest.(check int) "no route is converted" 0 report.converted;
+    Alcotest.(check (list (pair string string))) "the route is reported"
+      [ "/admin", "named handler h" ] (sites report))
+    [ "M.h"; "Other.N.h" ]
+;;
+
 let test_computed_named_partial_is_never_moved () =
   List.iter (fun registrations ->
     let source =
@@ -1165,6 +1183,7 @@ let () =
           ; Alcotest.test_case "early argument cannot change modules" `Quick test_named_early_shadowed_module ] )
     ; ( "external and partial evaluation safety"
       , [ Alcotest.test_case "external reference is not changed by default" `Quick test_external_named_use_is_left_alone
+        ; Alcotest.test_case "qualified same-file use keeps a named wrapper" `Quick test_qualified_named_use_in_same_file_is_left_alone
         ; Alcotest.test_case "computed partial is never moved" `Quick test_computed_named_partial_is_never_moved
         ; Alcotest.test_case "partial registration effect order" `Quick test_partial_evaluation_order ] )
     ; ( "evaluation at registration"

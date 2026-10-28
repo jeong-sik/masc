@@ -46,6 +46,8 @@
       analysis cannot see callers in other files. [allow_named:true] is an
       explicit assertion by the caller that every affected definition's external
       uses and exposure were checked; it is not a proof supplied by this tool.
+      A qualified occurrence of the same final name in this file is treated as
+      a possible use and prevents conversion, even when it names another module.
       Every definition converted under this assertion is listed in [report.named].
       A computed argument in a named partial application is never moved: it was
       evaluated once at the definition and could run again at each registration.

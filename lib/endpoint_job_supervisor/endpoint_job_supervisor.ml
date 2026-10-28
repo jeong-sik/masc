@@ -1,0 +1,196 @@
+module P = Endpoint_job_protocol
+module R = Endpoint_job_registry
+module L = Endpoint_job_launch
+module O = Endpoint_job_output
+module G = Endpoint_process_gate
+let ( let* ) = Result.bind
+type pipe_end = Child_stdin | Child_stdout | Child_stderr | Input_writer
+type error =
+  | Registry_error of R.error | Launch_error of L.error
+  | Output_error of { stream : P.stream; cause : O.error }
+  | Pipe_unavailable | Pipe_cleanup_failed of pipe_end list
+  | Registry_cleanup_failed of File_lock_eio.durable_lock_error
+  | Interrupted | Supervisor_failed
+let pipe_tag = function
+  | Child_stdin -> "child stdin" | Child_stdout -> "child stdout"
+  | Child_stderr -> "child stderr" | Input_writer -> "stdin writer"
+let error_to_string = function
+  | Registry_error e -> R.error_to_string e | Launch_error e -> L.error_to_string e
+  | Output_error {stream;cause} ->
+    (match stream with P.Stdout -> "stdout: " | P.Stderr -> "stderr: ") ^ O.error_to_string cause
+  | Pipe_unavailable -> "original stdio unavailable"
+  | Pipe_cleanup_failed ends -> "original stdio cleanup failed: " ^ String.concat ", " (List.map pipe_tag ends)
+  | Registry_cleanup_failed e -> File_lock_eio.durable_lock_error_to_string e
+  | Interrupted -> "original job supervision interrupted"
+  | Supervisor_failed -> "original job supervision failed"
+exception Cleanup_failed of pipe_end list
+type input_delivery = Written of int64 | Write_failed of { confirmed_prefix : int64 }
+type settled = { physical_exit : G.exit_observation; stdin : input_delivery; stdout : O.seal; stderr : O.seal }
+type t = {
+  owner : L.t;
+  stdout : (O.t,error) result;
+  stderr : (O.t,error) result;
+  availability : (unit,error) result;
+  done_ : (settled,error) result Eio.Promise.t;
+}
+type launch_outcome =
+  | Not_performed of { error : error; pipe_cleanup_errors : pipe_end list }
+  | Performed of { value : (t,error) result; registry_release_error : File_lock_eio.durable_lock_error option;
+      pipe_cleanup_errors : pipe_end list }
+let io f = try Ok (f ()) with
+  | Eio.Io _ | Unix.Unix_error _ | Sys_error _ | Invalid_argument _ -> Error Pipe_unavailable
+let original t = L.original t.owner
+let availability t =
+  let* ()=t.availability in
+  match Eio.Promise.peek t.done_ with
+  | Some (Error e) -> Error e
+  | None | Some (Ok _) ->
+    let* out=t.stdout in let* err=t.stderr in
+    let* _=O.extent out |> Result.map_error (fun cause -> Output_error {stream=P.Stdout;cause}) in
+    let* _=O.extent err |> Result.map_error (fun cause -> Output_error {stream=P.Stderr;cause}) in Ok ()
+let await_settled t = Eio.Promise.await t.done_
+let cancel t = L.cancel t.owner |> Result.map_error (fun e -> Launch_error e)
+let await_quiescent t = L.await_quiescent t.owner |> Result.map_error (fun e -> Launch_error e)
+let read_output t ~stream ~offset ~max_bytes =
+  let* capture=match stream with P.Stdout -> t.stdout | P.Stderr -> t.stderr in
+  O.read capture ~offset ~max_bytes |> Result.map_error (fun cause -> Output_error {stream;cause})
+
+type pipes = {
+  child_input : Eio_unix.source_ty Eio.Resource.t;
+  input_writer : Eio_unix.sink_ty Eio.Resource.t;
+  stdout_source : Eio_unix.source_ty Eio.Resource.t;
+  child_output : Eio_unix.sink_ty Eio.Resource.t;
+  stderr_source : Eio_unix.source_ty Eio.Resource.t;
+  child_error : Eio_unix.sink_ty Eio.Resource.t;
+}
+let pipes ~sw = io (fun () ->
+  let child_input,input_writer=Eio_unix.pipe sw in
+  let stdout_source,child_output=Eio_unix.pipe sw in
+  let stderr_source,child_error=Eio_unix.pipe sw in
+  {child_input;input_writer;stdout_source;child_output;stderr_source;child_error})
+let close_parent_ends pipes =
+  let close name resource = match io (fun () -> Eio_unix.Fd.close (Eio_unix.Resource.fd resource)) with
+    | Ok () -> None | Error _ -> Some name in
+  (* Perform every independent close, even after an earlier close failed. *)
+  let stdin=close Child_stdin pipes.child_input in
+  let stdout=close Child_stdout pipes.child_output in
+  let stderr=close Child_stderr pipes.child_error in
+  List.filter_map Fun.id [stdin;stdout;stderr]
+let reraised_after_close pipes ex bt =
+  match close_parent_ends pipes with
+  | [] -> Printexc.raise_with_backtrace ex bt
+  | failures ->
+    let ex,bt=Eio.Exn.combine (ex,bt) (Cleanup_failed failures,Printexc.get_callstack 16) in
+    Printexc.raise_with_backtrace ex bt
+let spawn ~sw ~fs ~cgroup_parent_path ~execution pipes intent =
+  let call () =
+    (* These ends are dedicated to the child; the controller only borrows and
+       closes them. POSIX Eio pipes can be nonblocking, while ordinary programs
+       need blocking stdio. Opposite controller ends have separate descriptions
+       and retain their own Eio flags. No borrowed external FD is changed. *)
+    Eio_unix.Fd.use_exn "child stdin mode" (Eio_unix.Resource.fd pipes.child_input) Unix.clear_nonblock;
+    Eio_unix.Fd.use_exn "child stdout mode" (Eio_unix.Resource.fd pipes.child_output) Unix.clear_nonblock;
+    Eio_unix.Fd.use_exn "child stderr mode" (Eio_unix.Resource.fd pipes.child_error) Unix.clear_nonblock;
+    Eio_unix.Fd.use_exn "original stdin" (Eio_unix.Resource.fd pipes.child_input) (fun stdin ->
+      Eio_unix.Fd.use_exn "original stdout" (Eio_unix.Resource.fd pipes.child_output) (fun stdout ->
+        Eio_unix.Fd.use_exn "original stderr" (Eio_unix.Resource.fd pipes.child_error) (fun stderr ->
+          L.launch_effect_workspace ~sw ~fs ~cgroup_parent_path ~execution ~stdin ~stdout ~stderr intent))) in
+  match call () with
+  | value -> value,close_parent_ends pipes
+  | exception (Eio.Cancel.Cancelled _ as ex) -> reraised_after_close pipes ex (Printexc.get_raw_backtrace ())
+  | exception ex -> reraised_after_close pipes ex (Printexc.get_raw_backtrace ())
+
+let start_input ~sw pipes data =
+  let done_,resolve=Eio.Promise.create () in
+  let finish value=Eio.Promise.resolve resolve value in
+  let rec send offset =
+    if offset=String.length data then Written (Int64.of_int offset) else
+    let chunk=Cstruct.of_string (String.sub data offset (min 65536 (String.length data-offset))) in
+    let rec write consumed =
+      let left=Cstruct.length chunk-consumed in
+      if left=0 then send (offset+consumed) else
+      match io (fun () -> Eio.Flow.single_write pipes.input_writer [Cstruct.sub chunk consumed left]) with
+      | Ok n when n>0 && n<=left -> write (consumed+n)
+      | Ok _ | Error _ -> Write_failed {confirmed_prefix=Int64.of_int (offset+consumed)} in
+    write 0 in
+  Eio.Switch.check sw;
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    (match send 0 with
+     | delivery ->
+       let close=io (fun () -> Eio_unix.Fd.close (Eio_unix.Resource.fd pipes.input_writer)) in
+       finish (match close with Ok () -> Ok delivery | Error _ -> Error (Pipe_cleanup_failed [Input_writer]))
+     | exception (Eio.Cancel.Cancelled _ as ex) ->
+       let bt=Printexc.get_raw_backtrace () in finish (Error Interrupted);Printexc.raise_with_backtrace ex bt
+     | exception ex ->
+       let bt=Printexc.get_raw_backtrace () in finish (Error Supervisor_failed);Printexc.raise_with_backtrace ex bt);
+    `Stop_daemon);
+  done_
+
+let supervise ~sw ~fs pipes owner ~registry_release_error ~pipe_cleanup_errors =
+  let capture stream source=O.start ~sw ~fs ~owner ~stream ~source
+    |> Result.map_error (fun cause -> Output_error {stream;cause}) in
+  let stdout=capture P.Stdout pipes.stdout_source in
+  let stderr=capture P.Stderr pipes.stderr_source in
+  let input=start_input ~sw pipes (L.specification owner).stdin in
+  let availability=
+    let* ()=match L.activation owner with L.Requested -> Ok () | L.Held e -> Error (Launch_error e) in
+    let* ()=match pipe_cleanup_errors with [] -> Ok () | ends -> Error (Pipe_cleanup_failed ends) in
+    let* ()=match registry_release_error with None -> Ok () | Some e -> Error (Registry_cleanup_failed e) in
+    let* _=stdout in let* _=stderr in Ok () in
+  let done_,resolve=Eio.Promise.create () in
+  let finished=Atomic.make false in
+  let finish value=if Atomic.compare_and_set finished false true then Eio.Promise.resolve resolve value in
+  let t={owner;stdout;stderr;availability;done_} in
+  let daemon f =
+    Eio.Switch.check sw;
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+      (match f () with
+       | () -> ()
+       | exception (Eio.Cancel.Cancelled _ as ex) ->
+         let bt=Printexc.get_raw_backtrace () in finish (Error Interrupted);
+         Printexc.raise_with_backtrace ex bt
+       | exception ex ->
+         let bt=Printexc.get_raw_backtrace () in finish (Error Supervisor_failed);
+         Printexc.raise_with_backtrace ex bt);
+      `Stop_daemon) in
+  (match availability with
+   | Error e -> finish (Error e)
+   | Ok () ->
+     let settle () =
+       let* physical_exit=await_quiescent t in
+       let* stdin=Eio.Promise.await input in
+       let* out=stdout in let* err=stderr in
+       let* stdout=O.await_sealed out |> Result.map_error (fun cause -> Output_error {stream=P.Stdout;cause}) in
+       let* stderr=O.await_sealed err |> Result.map_error (fun cause -> Output_error {stream=P.Stderr;cause}) in
+       Ok {physical_exit;stdin;stdout;stderr} in
+     daemon (fun () -> finish (settle ()));
+     let watch stream capture=daemon (fun () ->
+       match capture with
+       | Error e -> finish (Error e)
+       | Ok captured -> (match O.await_sealed captured with
+         | Ok _ -> () | Error cause -> finish (Error (Output_error {stream;cause})))) in
+     watch P.Stdout stdout;watch P.Stderr stderr;
+     daemon (fun () -> match Eio.Promise.await input with Ok _ -> () | Error e -> finish (Error e)));
+  t
+
+let launch_with_hook ~after_spawn ~sw ~fs ~cgroup_parent_path ~execution intent =
+  Eio.Switch.check sw;
+  match pipes ~sw with
+  | Error error -> Not_performed {error;pipe_cleanup_errors=[]}
+  | Ok pipes ->
+    let result,pipe_cleanup_errors=spawn ~sw ~fs ~cgroup_parent_path ~execution pipes intent in
+    match result with
+    | R.Not_performed e -> Not_performed {error=Registry_error e;pipe_cleanup_errors}
+    | R.Performed {value;release_error=registry_release_error} ->
+      let value=match value with
+        | Error e -> Error (Launch_error e)
+        | Ok owner ->
+          after_spawn owner;
+          Ok (supervise ~sw ~fs pipes owner ~registry_release_error ~pipe_cleanup_errors) in
+      Performed {value;registry_release_error;pipe_cleanup_errors}
+
+let launch_effect_workspace ~sw ~fs ~cgroup_parent_path ~execution intent =
+  launch_with_hook ~after_spawn:(fun _ -> ()) ~sw ~fs ~cgroup_parent_path ~execution intent
+module For_testing = struct
+  let launch_effect_workspace = launch_with_hook
+end

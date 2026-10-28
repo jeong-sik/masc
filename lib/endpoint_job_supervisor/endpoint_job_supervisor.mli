@@ -1,0 +1,77 @@
+(** Per-job endpoint supervision with owned stdio.
+    Every child descriptor and capture source is created here for the same
+    original launch. Stdin comes from that immutable committed specification.
+    This core still needs an authenticated daemon/host adapter and durable
+    terminal-result publication before protocol result readiness or Release. *)
+module P = Endpoint_job_protocol
+module R = Endpoint_job_registry
+module L = Endpoint_job_launch
+module O = Endpoint_job_output
+module G = Endpoint_process_gate
+type t
+type pipe_end = Child_stdin | Child_stdout | Child_stderr | Input_writer
+type error =
+  | Registry_error of R.error
+  | Launch_error of L.error
+  | Output_error of { stream : P.stream; cause : O.error }
+  | Pipe_unavailable
+  | Pipe_cleanup_failed of pipe_end list
+  | Registry_cleanup_failed of File_lock_eio.durable_lock_error
+  | Interrupted
+  | Supervisor_failed
+val error_to_string : error -> string
+type input_delivery =
+  | Written of int64
+  | Write_failed of { confirmed_prefix : int64 }
+(** Bytes accepted by the pipe, never proof that the program consumed them.
+    Write_failed preserves the known prefix without replaying any input. *)
+type settled =
+  { physical_exit : G.exit_observation
+  ; stdin : input_delivery
+  ; stdout : O.seal
+  ; stderr : O.seal
+  }
+(** Raw original physical observation, actual recursive emptiness and both
+    durably sealed streams. A bootstrap exit remains bootstrap evidence;
+    this value alone never creates a protocol terminal result or source ACK. *)
+type launch_outcome =
+  | Not_performed of { error : error; pipe_cleanup_errors : pipe_end list }
+  | Performed of
+      { value : (t,error) result
+      ; registry_release_error : File_lock_eio.durable_lock_error option
+      ; pipe_cleanup_errors : pipe_end list
+      }
+val launch_effect_workspace :
+  sw:Eio.Switch.t -> fs:Eio.Fs.dir_ty Eio.Path.t ->
+  cgroup_parent_path:string -> execution:L.execution -> R.launch_intent -> launch_outcome
+(** Run inside the independent endpoint job's Switch, never a request/turn
+    lifetime. Allocation before callback entry may fail; Not_performed never
+    grants a new admission/launch permit or proves a prior attempt absent.
+    Original resources stay Switch-owned if an exception/cancellation escapes.
+
+    Close parent copies after the actual spawn, stream only original stdin,
+    and capture that same spawn's stdout/stderr. Typed post-child startup or
+    cleanup failure retains [Ok owner] with unavailable settlement and exact
+    cancellation authority. Background fibers are daemons so owner teardown
+    does not wait on a child before releasing its kernel resources. *)
+val original : t -> P.original
+val availability : t -> (unit,error) result
+(** Current known startup/capture failure; Ok does not certify completion. *)
+val await_settled : t -> (settled,error) result
+(** Observer cancellation leaves the job and collectors running. Capture or
+    stdin-close failure becomes observable without waiting for a child that
+    may now be blocked on that failed stream. An error is not termination;
+    the owner can still durably cancel and observe physical quiescence. *)
+val read_output : t -> stream:P.stream -> offset:int64 -> max_bytes:int -> (O.chunk,error) result
+val cancel : t -> (R.record,error) result
+val await_quiescent : t -> (G.exit_observation,error) result
+(** Original-owner durable cancellation and raw physical/tree settlement remain
+    available even when output initialization or capture is unavailable. *)
+module For_testing : sig
+  val launch_effect_workspace :
+    after_spawn:(L.t -> unit) ->
+    sw:Eio.Switch.t -> fs:Eio.Fs.dir_ty Eio.Path.t ->
+    cgroup_parent_path:string -> execution:L.execution -> R.launch_intent -> launch_outcome
+  (** Original owner exists and parent child-ends are closed; input/capture
+      workers have not started. No alternate spawn or storage path. *)
+end

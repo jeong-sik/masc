@@ -3,6 +3,7 @@ module P = Endpoint_job_protocol
 module R = Endpoint_job_registry
 module G = Endpoint_process_gate
 module O = Endpoint_job_output
+module S = Endpoint_job_supervisor
 let require = function Ok value -> value | Error e -> Alcotest.fail e
 let get value = value |> Result.map_error L.error_to_string |> require
 let registry value = value |> Result.map_error R.error_to_string |> require
@@ -38,10 +39,10 @@ let fixture f () =
         let execution : L.execution = {executable="/bin/sh";env=["PATH=/usr/bin:/bin";"EXPLICIT=original"];
           cwd=work;payload_gid=gid} in
         f ~env ~sw ~store {root;work;registry_path;input;output;output_path;execution;uid}))))
-let prepare ?(mode=Exec_ssh_protocol.Effect) ?(domain=P.Workspace_process)
+let prepare ?(stdin="") ?(mode=Exec_ssh_protocol.Effect) ?(domain=P.Workspace_process)
     ?(network_policy_sha256=None) store fixture suffix script =
   let spec=P.spec ~domain ~argv:["/bin/sh";"-c";script] ~env:["EXPLICIT","original"]
-    ~cwd:fixture.work ~remote_root:fixture.work ~stdin:"" ~mode
+    ~cwd:fixture.work ~remote_root:fixture.work ~stdin ~mode
     ~network_policy_sha256 |> require in
   let binding=P.binding ~route ~owner ~operation_id:(id suffix)
     ~invocation_sha256:(digest suffix) ~spec_sha256:(P.spec_sha256 spec) |> require in
@@ -401,6 +402,128 @@ let output_owner_teardown_settles_external_observers = fixture (fun ~env ~sw:_ ~
      | Error _ | Ok _ -> Alcotest.fail "owner teardown left a waiting observer or fabricated a seal");
     check "interrupted capture remains unavailable" (O.extent captured=Error O.Interrupted)))
 
+let output_owner_teardown_finishes_entered_metadata = fixture (fun ~env ~sw ~store fixture ->
+  let entered,signal=Eio.Promise.create () and resume,release=Eio.Promise.create () in
+  let teardown,begin_teardown=Eio.Promise.create () and cancelled,notice_cancel=Eio.Promise.create () in
+  let created,provide_capture=Eio.Promise.create () and drained,finish_scope=Eio.Promise.create () in
+  let unblock ()=if Eio.Promise.peek resume=None then Eio.Promise.resolve release () in
+  Fun.protect ~finally:unblock (fun () ->
+    Eio.Fiber.fork ~sw (fun () ->
+      let captured=Eio.Switch.run (fun job_sw ->
+        let binding,permit=prepare store fixture "05" "printf original" in
+        let source,writer=Eio_unix.pipe job_sw in
+        let owner=Eio_unix.Fd.use_exn "original stdout" (Eio_unix.Resource.fd writer)
+          (fun fd -> start ~output:fd ~sw:job_sw ~env fixture permit) in
+        Eio.Flow.close writer;
+        let captured=O.For_testing.start ~sw:job_sw ~fs:env#fs ~owner ~stream:P.Stdout ~source
+          ~after_chunk:(fun () -> ()) ~on_metadata:(fun operation stage ->
+            match operation,stage with
+            | O.For_testing.Publish "stdout.seal.json",O.For_testing.Acquired ->
+              Eio.Promise.resolve signal ();Eio.Promise.await resume
+            | Open_recovery,Waiting | Open_recovery,Acquired | Publish _,Waiting | Publish _,Acquired -> ()) |> output in
+        Eio.Fiber.fork_daemon ~sw:job_sw (fun () ->
+          try Eio.Fiber.await_cancel () with Eio.Cancel.Cancelled _ as ex ->
+            let bt=Printexc.get_raw_backtrace () in
+            Eio.Promise.resolve notice_cancel ();Printexc.raise_with_backtrace ex bt);
+        Eio.Promise.resolve provide_capture (binding,captured);
+        Eio.Promise.await teardown;
+        captured) in
+      Eio.Promise.resolve finish_scope captured);
+    Eio.Promise.await entered;
+    let binding,captured=Eio.Promise.await created in
+    let manifest=leaf fixture binding "stdout.seal.json" in
+    check "actual seal publication is entered before its manifest exists" (not (Sys.file_exists manifest));
+    Eio.Promise.resolve begin_teardown ();
+    Eio.Promise.await cancelled;
+    check "normal owner teardown waits for its already entered metadata transaction" (Eio.Promise.peek drained=None);
+    unblock ();
+    ignore (Eio.Promise.await drained);
+    (match O.await_sealed captured with
+     | Error O.Interrupted -> ()
+     | Error _ | Ok _ -> Alcotest.fail "owner cancellation was lost after completing the entered publication");
+    check "external output observer retains the original interruption" (O.extent captured=Error O.Interrupted);
+    let json=Yojson.Safe.from_string (read manifest) in
+    Alcotest.(check string) "entered publication finished its actual manifest before scope resource release"
+      (P.Sha256.to_string (digest "original")) Yojson.Safe.Util.(json |> member "sha256" |> to_string);
+    Alcotest.(check string) "normal teardown preserves original spool evidence" "original"
+      (read (leaf fixture binding "stdout.bin"))))
+
+let supervise value = value |> Result.map_error S.error_to_string |> require
+let supervised ?(after_spawn=fun _ -> ()) ~sw ~env fixture permit =
+  match S.For_testing.launch_effect_workspace ~after_spawn ~sw ~fs:env#fs
+      ~cgroup_parent_path:"/sys/fs/cgroup" ~execution:fixture.execution permit with
+  | S.Not_performed {error;_} -> Alcotest.fail (S.error_to_string error)
+  | S.Performed {value;registry_release_error=None;pipe_cleanup_errors=[]} -> supervise value
+  | S.Performed _ -> Alcotest.fail "original owner cleanup was not confirmed"
+let supervised_output owner stream (seal : O.seal) =
+  let buffer=Buffer.create 128 in
+  let rec read offset =
+    if offset=seal.byte_length then Buffer.contents buffer else (
+      let part=S.read_output owner ~stream ~offset ~max_bytes:max_int |> supervise in
+      check "supervisor range read advances through original bytes" (String.length part.data>0);
+      Buffer.add_string buffer part.data;read (Int64.add offset (Int64.of_int (String.length part.data)))) in
+  read 0L
+
+let supervisor_owns_original_input_and_both_outputs = fixture (fun ~env ~sw:_ ~store fixture ->
+  Eio.Switch.run (fun sw ->
+    let data=String.init (256*1027) (fun i -> Char.chr (i mod 256)) in
+    let binding,permit=prepare ~stdin:data store fixture "05" "/bin/cat; printf error >&2; exit 7" in
+    let owner=supervised ~sw ~env fixture permit in
+    check "same original admission reaches complete stdio supervision"
+      ((S.original owner).binding=binding && (S.original owner).admission_id=id "04");
+    let settled=S.await_settled owner |> supervise in
+    exit 7 settled.physical_exit;
+    (match settled.stdin with
+     | S.Written n -> Alcotest.(check int64) "only the committed binary stdin was supplied" (Int64.of_int (String.length data)) n
+     | S.Write_failed _ -> Alcotest.fail "cat lost its committed input");
+    check "stdout digest covers all original input bytes" (settled.stdout.sha256=digest data);
+    Alcotest.(check string) "owned stdin/stdout pair preserves binary bytes" data (supervised_output owner P.Stdout settled.stdout);
+    Alcotest.(check string) "stderr belongs to the same original process" "error" (supervised_output owner P.Stderr settled.stderr)))
+
+let supervisor_early_exit_does_not_wait_on_stdin = fixture (fun ~env ~sw:_ ~store fixture ->
+  Eio.Switch.run (fun sw ->
+    let _,permit=prepare ~stdin:(String.make (2*1024*1024) 'x') store fixture "05" "exit 0" in
+    let owner=supervised ~sw ~env fixture permit ~after_spawn:(fun original ->
+      exit 0 (L.await_quiescent original |> get)) in
+    let settled=S.await_settled owner |> supervise in
+    exit 0 settled.physical_exit;
+    (match settled.stdin with
+     | S.Write_failed {confirmed_prefix} -> Alcotest.(check int64) "reaped child accepted no synthetic replacement input" 0L confirmed_prefix
+     | S.Written _ -> Alcotest.fail "closed original stdin was reported fully written");
+    Alcotest.(check int64) "complete stdout is actually empty" 0L settled.stdout.byte_length;
+    Alcotest.(check int64) "complete stderr is actually empty" 0L settled.stderr.byte_length))
+
+let supervisor_reports_capture_failure_before_blocked_child_exit = fixture (fun ~env ~sw:_ ~store fixture ->
+  Eio.Switch.run (fun sw ->
+    let fifo=Filename.concat fixture.work "control" in
+    Unix.mkfifo fifo 0o600;Unix.chown fifo fixture.uid fixture.execution.payload_gid;
+    let binding,permit=prepare store fixture "05" "printf original; exec 1>&-; exec /bin/cat control >/dev/null" in
+    let owner=supervised ~sw ~env fixture permit ~after_spawn:(fun _ ->
+      let path=leaf fixture binding "stdout.seal.json" in
+      Out_channel.with_open_bin path (fun oc -> output_string oc "preserved conflicting receipt");Unix.chmod path 0o400) in
+    (match S.await_settled owner with
+     | Error (S.Output_error {stream=P.Stdout;cause=O.Publication_failed _}) -> ()
+     | Error _ | Ok _ -> Alcotest.fail "unavailable stdout waited on or completed a FIFO-blocked child");
+    let _,next=prepare store fixture "07" "exit 8" in
+    let other=Eio.Switch.run (fun next_sw ->
+      supervised ~sw:next_sw ~env fixture next |> S.await_settled |> supervise) in
+    exit 8 other.physical_exit;
+    ignore (S.cancel owner |> supervise);
+    let stopped=S.await_quiescent owner |> supervise in
+    check "original was still alive until its own durable cancel" (stopped.status=G.Signaled 9);
+    let current=R.load store ~binding |> registry in
+    check "output failure never substitutes another cancellation owner" (R.cancellation_state current=R.Cancellation_requested)))
+
+let supervisor_teardown_settles_external_observers = fixture (fun ~env ~sw:_ ~store fixture ->
+  let fifo=Filename.concat fixture.work "control" in
+  Unix.mkfifo fifo 0o600;Unix.chown fifo fixture.uid fixture.execution.payload_gid;
+  let owner=Eio.Switch.run (fun sw ->
+    let _,permit=prepare store fixture "05" "exec /bin/cat control" in
+    supervised ~sw ~env fixture permit) in
+  match S.await_settled owner with
+  | Error S.Interrupted | Error (S.Output_error {cause=O.Interrupted;_}) -> ()
+  | Error _ | Ok _ -> Alcotest.fail "supervisor teardown left an observer waiting or invented a complete result")
+
 let refusal = fixture (fun ~env ~sw ~store fixture ->
   let _,permit=prepare store fixture "05" ": > activated" in
   match L.launch_effect_workspace ~sw ~fs:env#fs ~cgroup_parent_path:"/sys/fs/cgroup"
@@ -438,6 +561,11 @@ let () =
       "multiply linked original spool never seals",output_attachment_change_never_seals `Extra_link;
       "changed original spool mode never seals",output_attachment_change_never_seals `Changed_file_mode;
       "changed original storage mode never seals",output_attachment_change_never_seals `Changed_storage_mode;
-      "owner teardown settles external output observers",output_owner_teardown_settles_external_observers] in
+      "owner teardown settles external output observers",output_owner_teardown_settles_external_observers;
+      "supervisor owns exact original stdin and both output sources",supervisor_owns_original_input_and_both_outputs;
+      "supervisor settles input when the original child already exited",supervisor_early_exit_does_not_wait_on_stdin;
+      "supervisor reports failed output before a blocked child exits",supervisor_reports_capture_failure_before_blocked_child_exit;
+      "supervisor teardown settles external observers",supervisor_teardown_settles_external_observers;
+      "owner teardown finishes entered metadata then preserves cancellation",output_owner_teardown_finishes_entered_metadata] in
   Alcotest.run "Endpoint job launch" ["original supervisor",List.map
     (fun (name,test) -> Alcotest.test_case name `Quick test) cases]

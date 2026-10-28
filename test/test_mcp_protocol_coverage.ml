@@ -64,12 +64,31 @@ let test_initialize_does_not_negotiate_a_stateless_version () =
     (Mcp_transport_protocol.protocol_version_from_body
        {|{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2026-07-28"}}|})
 
+(* The latest differs from the newest legacy entry, so the result tells a kept
+   latest from the fallback. *)
 let test_legacy_default_keeps_a_legacy_latest () =
   check (result string string) "a legacy latest is the counter-offer"
-    (Ok "2025-11-25")
+    (Ok "2025-06-18")
     (Mcp_transport_protocol.legacy_default_protocol_version_of
-       ~latest:"2025-11-25"
-       ~supported:[ "2026-07-28"; "DRAFT-2026-v1"; "2024-11-05"; "2025-11-25" ])
+       ~latest:"2025-06-18"
+       ~supported:
+         [ "2026-07-28"; "DRAFT-2026-v1"; "2024-11-05"; "2025-06-18"; "2025-11-25" ])
+
+(* The counter-offer given differs from the SDK's latest, so a fallback that
+   reads the SDK's default instead fails here. *)
+let test_negotiate_legacy_uses_the_given_counter_offer () =
+  let negotiate =
+    Mcp_transport_protocol.negotiate_legacy_protocol_version_with
+      ~legacy_default:"2025-06-18"
+  in
+  check string "a legacy proposal is kept" "2024-11-05" (negotiate "2024-11-05");
+  check string "a stateless proposal gets the counter-offer" "2025-06-18"
+    (negotiate "2026-07-28");
+  check string "an unknown proposal gets the counter-offer" "2025-06-18"
+    (negotiate "1999-01-01");
+  check string "the exported function counters with the legacy default"
+    Mcp_transport_protocol.legacy_default_protocol_version
+    (Mcp_transport_protocol.negotiate_legacy_protocol_version "2026-07-28")
 
 let test_legacy_default_skips_a_stateless_latest () =
   check (result string string) "a stateless latest falls back to the newest legacy"
@@ -736,6 +755,8 @@ let () =
         test_initialize_does_not_negotiate_a_stateless_version;
       test_case "legacy default keeps a legacy latest" `Quick
         test_legacy_default_keeps_a_legacy_latest;
+      test_case "negotiate legacy uses the given counter-offer" `Quick
+        test_negotiate_legacy_uses_the_given_counter_offer;
       test_case "legacy default skips a stateless latest" `Quick
         test_legacy_default_skips_a_stateless_latest;
       test_case "legacy default needs a legacy version" `Quick

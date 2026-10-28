@@ -250,6 +250,10 @@ val legacy_default_protocol_version : string
     {!supported_protocol_versions}. Raises [Invalid_argument] when the module
     loads if no legacy version is supported. *)
 
+val negotiate_legacy_protocol_version_with : legacy_default:string -> string -> string
+(** {!negotiate_legacy_protocol_version} with the counter-offer given, so a
+    test can use one that differs from the SDK's latest. *)
+
 val negotiate_legacy_protocol_version : string -> string
 (** The [initialize] handshake negotiates only legacy versions. An unknown or
     stateless proposal receives {!legacy_default_protocol_version}, the latest

@@ -629,11 +629,15 @@ let normalize_protocol_version version =
   if is_supported_protocol_version version then version
   else default_protocol_version
 
-let negotiate_legacy_protocol_version version =
+let negotiate_legacy_protocol_version_with ~legacy_default version =
   if is_supported_protocol_version version
      && not (is_stateless_protocol_version version)
   then version
-  else legacy_default_protocol_version
+  else legacy_default
+
+let negotiate_legacy_protocol_version =
+  negotiate_legacy_protocol_version_with
+    ~legacy_default:legacy_default_protocol_version
 
 let protocol_version_from_params = function
   | Some (`Assoc fields) -> (

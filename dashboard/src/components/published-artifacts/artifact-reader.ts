@@ -1,6 +1,8 @@
 import { html } from 'htm/preact'
 import { useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { artifactHref, setPublishedArtifactShared, type ArtifactDocument, type ArtifactPublication } from '../../api/published-artifacts'
+import { artifactHref, captureArtifactWorkspace, fetchPublishedArtifact, setPublishedArtifactShared, type ArtifactDocument, type ArtifactPublication, type ArtifactWorkspace } from '../../api/published-artifacts'
+import { artifactExternalSharing, type ShareObservation } from '../../lib/artifact-external-sharing'
+import { ExternalShareOutcomes } from './external-share-outcomes'
 import { Markdown } from '../common/markdown'
 import { navigate } from '../../router'
 import { copyToClipboard } from '../common/copyable-code'
@@ -48,10 +50,11 @@ function downloadSource(doc: ArtifactDocument): void {
   URL.revokeObjectURL(url)
 }
 
-export function ArtifactReader({ doc, fixedRevision, readOnly = false, readError, workspaceRoot, draftRetention, checkState, authRevision, isCurrent, onMutation, onPublication, onPublished, onCheckChanged, onClose }: {
+export function ArtifactReader({ doc, fixedRevision, readOnly = false, readError, workspaceRoot, draftRetention, checkState, authRevision, isCurrent, onMutation, onPublication, onPublished, onCheckChanged, shareObservation, onClose }: {
   doc: ArtifactDocument; fixedRevision: boolean; checkState: ArtifactCheckState;
   readOnly?: boolean;
   readError?: string;
+  shareObservation?: ShareObservation;
   workspaceRoot: string;
   draftRetention: ArtifactDraftRetention;
   authRevision: number; isCurrent: () => boolean; onMutation: (outcome: ArtifactCheckOutcome) => void;
@@ -62,16 +65,20 @@ export function ArtifactReader({ doc, fixedRevision, readOnly = false, readError
   const [view, setView] = useState<'rendered' | 'source'>('rendered')
   const [width, setWidth] = useState<'wide' | 'reading'>('wide')
   const [copyFeedback, setCopyFeedback] = useState('')
-  const [sharedState, setSharedState] = useState(Boolean(doc.shared))
-  const [sharePending, setSharePending] = useState(false)
   const [editing, setEditing] = useState<{ document: ArtifactDocument; snapshot: ArtifactDraftSnapshot } | null>(null)
   const [sharing, setSharing] = useState<ArtifactDocument | null>(null)
   const sharedCloseRequest = useRef<ArtifactSharedCloseRequest | null>(null)
   const appPending=useRef(false)
+  const active = useRef(true)
+  const selection = useRef({ doc, fixedRevision, readError })
+  selection.current = { doc, fixedRevision, readError }
   const { artifact, content, revisions } = doc
-  useLayoutEffect(() => {
-    setSharedState(Boolean(doc.shared))
-  }, [doc.artifact.id, doc.shared])
+  const shareActivity = artifactExternalSharing.activity(artifact.id)
+  const sharedState = shareObservation && !readError && shareActivity === 'ready'
+    && shareObservation.id === artifact.id
+    && artifactExternalSharing.admits(shareObservation) ? doc.shared : undefined
+  const current = () => active.current && isCurrent()
+  useLayoutEffect(() => () => { active.current = false }, [])
   useLayoutEffect(() => {
     const element = dialog.current!
     element.showModal()
@@ -83,29 +90,62 @@ export function ArtifactReader({ doc, fixedRevision, readOnly = false, readError
     ...(revision === 'latest' ? {} : { revision }),
   }))
   const copyLink = async () => {
-    const href = artifactHref(artifact.id, fixedRevision ? artifact.revision : undefined)
+    const href = artifactHref(artifact.id, artifact.revision)
     const success = await copyToClipboard(new URL(href, window.location.href).href, dialog.current ?? undefined)
-    setCopyFeedback(success ? '문서 링크를 복사했습니다.' : '링크를 복사하지 못했습니다.')
+    setCopyFeedback(success ? `현재 접속 주소 ${window.location.origin} 기준으로 문서 링크를 복사했습니다.` : '링크를 복사하지 못했습니다.')
   }
   const toggleExternalShare = async () => {
+    if (!current() || !shareObservation || sharedState === undefined) return
+    const sameVisit = () => current() && selection.current.fixedRevision === fixedRevision
+      && selection.current.doc.artifact.id === artifact.id
+    const stillSelected = () => sameVisit()
+      && selection.current.doc.artifact.revision === artifact.revision
+      && selection.current.doc.artifact.body._blob.sha256 === artifact.body._blob.sha256
+    const canDispatch = () => stillSelected() && !selection.current.readError
+      && selection.current.doc.shared === sharedState
     const nextShared = !sharedState
-    setSharePending(true)
+    const owner = artifactExternalSharing.begin(artifact.id, shareObservation)
+    if (!owner) return
+    setCopyFeedback('')
+    const notSent = (message: string) => {
+      if (sameVisit()) setCopyFeedback(message)
+      artifactExternalSharing.finish(artifact.id, owner, 'not-sent')
+    }
+    const changed = '문서 또는 공유 상태가 달라졌거나 확인할 수 없어 요청을 보내지 않았습니다. 다시 확인해 주세요.'
+    let workspace: ArtifactWorkspace
     try {
-      const updated = await setPublishedArtifactShared(artifact.id, nextShared)
-      if (!isCurrent()) return
-      setSharedState(updated.shared)
-      if (updated.shared) {
-        const href = artifactHref(artifact.id, fixedRevision ? artifact.revision : undefined)
-        const copied = await copyToClipboard(new URL(href, window.location.href).href, dialog.current ?? undefined)
-        setCopyFeedback(copied ? '외부 공유를 켜고 링크를 복사했습니다.' : '외부 공유를 켰습니다.')
-      } else {
-        setCopyFeedback('외부 공유를 해제했습니다.')
+      workspace = await captureArtifactWorkspace(workspaceRoot)
+      if (!canDispatch()) { notSent(changed); return }
+      const fresh = await fetchPublishedArtifact(artifact.id, fixedRevision ? String(artifact.revision) : undefined, undefined, workspace)
+      if (!canDispatch()) { notSent(changed); return }
+      if (fresh.artifact.revision !== artifact.revision || fresh.shared !== sharedState
+        || fresh.artifact.body._blob.sha256 !== artifact.body._blob.sha256) {
+        notSent(changed)
+        return
       }
     } catch (error) {
-      if (!isCurrent()) return
-      setCopyFeedback(error instanceof Error ? `외부 공유 변경 실패: ${error.message}` : '외부 공유 설정을 변경하지 못했습니다.')
-    } finally {
-      if (isCurrent()) setSharePending(false)
+      notSent(error instanceof Error ? `공유 상태를 확인하지 못해 요청을 보내지 않았습니다: ${error.message}` : '공유 상태를 확인하지 못해 요청을 보내지 않았습니다.')
+      return
+    }
+    let updated: { id: string; shared: boolean }
+    const receipt = { id: artifact.id, title: artifact.title, revision: artifact.revision, requested: nextShared, workspace }
+    try {
+      updated = await setPublishedArtifactShared(artifact.id, nextShared, workspace)
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : '외부 공유 변경 결과를 확인하지 못했습니다.'
+      artifactExternalSharing.finish(artifact.id, owner, { ...receipt, kind: 'unconfirmed', detail })
+      if (!stillSelected()) return
+      setCopyFeedback(`외부 공유 변경 결과 미확인: ${detail}`)
+      return
+    }
+    artifactExternalSharing.finish(artifact.id, owner, { ...receipt, kind: 'confirmed', shared: updated.shared })
+    if (!stillSelected()) return
+    if (updated.shared) {
+      const href = artifactHref(artifact.id, artifact.revision)
+      const copied = await copyToClipboard(new URL(href, window.location.href).href, dialog.current ?? undefined)
+      if (stillSelected()) setCopyFeedback(copied ? `외부 공유를 켜고 현재 접속 주소 ${window.location.origin} 기준 링크를 복사했습니다.` : '외부 공유를 켰습니다.')
+    } else {
+      setCopyFeedback('외부 공유를 해제했습니다.')
     }
   }
   const discardDraft = () => window.confirm('작성 중인 원고를 닫을까요? 저장하지 않은 내용은 사라집니다.')
@@ -123,22 +163,28 @@ export function ArtifactReader({ doc, fixedRevision, readOnly = false, readError
         // Let the native dialog handle Escape before the shell's chat shortcut.
         if (event.key === 'Escape') event.stopPropagation()
       }}
-      onCancel=${(event: Event) => { event.preventDefault(); if (!readOnly) close() }}>
+      onCancel=${(event: Event) => { event.preventDefault(); close() }}>
     <article class="flex h-full min-w-0 flex-col" aria-label="아티팩트 본문">
       <header class="shrink-0 border-b border-[var(--color-border-default)] px-4 py-3 space-y-2">
         ${readError ? html`<p role="alert">문서 재조회 실패: ${readError} 이전에 읽은 문서와 작성 중인 원고를 유지합니다.</p>` : null}
+        <${ExternalShareOutcomes} />
         <div class="flex flex-wrap items-center justify-between gap-2">
           ${readOnly
-            ? html`<span class="rounded border border-[var(--color-border-default)] px-2 py-0.5 text-xs text-[var(--color-fg-secondary)]">외부 공유 열람</span>`
+            ? html`<button type="button" onClick=${close}>닫기</button>`
             : html`<button type="button" aria-label="목록으로" onClick=${close}>← <span class="hidden sm:inline">목록으로</span></button>`}
+          ${readOnly ? html`<span class="rounded border border-[var(--color-border-default)] px-2 py-0.5 text-xs text-[var(--color-fg-secondary)]">외부 공유 열람</span>` : null}
           <h2 id="artifact-reader-title" class="m-0 min-w-0 flex-1 truncate text-base font-semibold">${artifact.title}</h2>
           <div class="flex flex-wrap gap-3 text-xs">
             <button type="button" aria-label="링크 복사" onClick=${copyLink}><span class="sm:hidden">복사</span><span class="hidden sm:inline">링크 복사</span></button>
             <button type="button" aria-label="원본 다운로드" onClick=${() => downloadSource(doc)}><span class="sm:hidden">저장</span><span class="hidden sm:inline">원본 다운로드</span></button>
             ${readOnly ? null : html`
-              <button type="button" aria-label=${sharedState ? '외부 공유 해제' : '외부 공유 켜기'} aria-pressed=${sharedState}
-                disabled=${sharePending || editing !== null || sharing !== null}
-                onClick=${toggleExternalShare}>${sharedState ? '외부 공유 중' : '외부 공유 켜기'}</button>
+              <button type="button" aria-label=${sharedState === undefined ? '외부 공유 상태 미확인' : sharedState ? '외부 공유 해제' : '외부 공유 켜기'}
+                aria-pressed=${sharedState} disabled=${sharedState === undefined || editing !== null || sharing !== null}
+                onClick=${toggleExternalShare}>${shareActivity === 'pending' ? '외부 공유 변경 중…'
+                  : shareActivity === 'unconfirmed' ? '외부 공유 결과 미확인'
+                  : sharedState === undefined ? '외부 공유 상태 미확인' : sharedState ? '외부 공유 중' : '외부 공유 켜기'}</button>
+              <span>외부 공유는 이 문서의 모든 버전에 적용됩니다.</span>
+              ${shareActivity === 'unconfirmed' ? html`<span>요청이 나중에 적용될 수 있어 이 탭에서는 공유 상태를 다시 변경할 수 없습니다.</span>` : null}
               <button type="button" aria-label="문서 편집" disabled=${editing !== null || sharing !== null} onClick=${() => leaveApp(() => {
                 const snapshot: ArtifactDraftSnapshot = { identity: {}, base: { id: artifact.id, revision: artifact.revision }, value: {
                   title: artifact.title, summary: artifact.summary, format: artifact.format,

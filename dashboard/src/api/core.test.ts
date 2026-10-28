@@ -11,6 +11,7 @@ import {
   defaultBoardVoter,
   extractApiError,
   get,
+  getPublic,
   getStoredToken,
   getStoredTokenMeta,
   post,
@@ -489,6 +490,18 @@ describe('typed API errors', () => {
 })
 
 describe('get bootstrap warm-up mapping', () => {
+  it('omits stored credentials and cookies for an explicit public read', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    setStoredToken('expired-token', { source: 'manual' })
+    await getPublic('/api/v1/published-artifacts/example')
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit
+    expect(new Headers(init.headers).has('Authorization')).toBe(false)
+    expect(new Headers(init.headers).has('X-MASC-Agent')).toBe(false)
+    expect(init.credentials).toBe('omit')
+    expect(getStoredToken()).toBe('expired-token')
+  })
+
   it('forwards captured workspace preconditions without dropping current authentication', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)

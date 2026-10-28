@@ -842,11 +842,12 @@ export type GetOptions = AbortableRequestOptions & {
   extraHeaders?: Record<string, string>
 }
 
-export async function get<T>(path: string, opts: GetOptions = {}): Promise<T> {
+async function getRequest<T>(path: string, opts: GetOptions, anonymous: boolean): Promise<T> {
   const res = await fetchWithTimeout(
     path,
     {
-      headers: { ...authHeaders({ includeActor: opts.includeActorHeader }), ...opts.extraHeaders },
+      headers: anonymous ? {} : { ...authHeaders({ includeActor: opts.includeActorHeader }), ...opts.extraHeaders },
+      ...(anonymous ? { credentials: 'omit' as const } : {}),
       cache: readCacheMode(path),
       signal: opts.signal,
     },
@@ -866,6 +867,15 @@ export async function get<T>(path: string, opts: GetOptions = {}): Promise<T> {
     if (payload !== null) return payload as T
   }
   return data
+}
+
+export async function get<T>(path: string, opts: GetOptions = {}): Promise<T> {
+  return getRequest<T>(path, opts, false)
+}
+
+// Public capability reads must not inherit a stored token, actor or cookies.
+export async function getPublic<T>(path: string, opts: AbortableRequestOptions = {}): Promise<T> {
+  return getRequest<T>(path, opts, true)
 }
 
 // Same wire shape as [get<T>] but exposes selected response headers

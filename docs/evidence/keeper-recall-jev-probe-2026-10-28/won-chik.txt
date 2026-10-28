@@ -1,0 +1,14 @@
+candidates 56; in one request: body 104.1 KB (state 75.0 KB, questions 29.1 KB)
+pieces of at most 60 KB of candidates: 2 ([42, 14] candidates)
+run 1: judged 56 of 56 in 0.48 s wall time
+  42 candidates, body 81.4 KB (state 59.5 KB, questions 21.8 KB): HTTP 200, 0.46 s, input tokens 27451, answered by jev-1.14.0
+  14 candidates, body 23.1 KB (state 15.8 KB, questions 7.3 KB): HTTP 200, 0.24 s, input tokens 7937, answered by jev-1.14.0
+run 2: judged 56 of 56 in 0.53 s wall time
+  42 candidates, body 81.4 KB (state 59.5 KB, questions 21.8 KB): HTTP 200, 0.52 s, input tokens 27451, answered by jev-1.14.0
+  14 candidates, body 23.1 KB (state 15.8 KB, questions 7.3 KB): HTTP 200, 0.31 s, input tokens 7937, answered by jev-1.14.0
+run 3: judged 56 of 56 in 0.34 s wall time
+  42 candidates, body 81.4 KB (state 59.5 KB, questions 21.8 KB): HTTP 200, 0.34 s, input tokens 27451, answered by jev-1.14.0
+  14 candidates, body 23.1 KB (state 15.8 KB, questions 7.3 KB): HTTP 200, 0.24 s, input tokens 7937, answered by jev-1.14.0
+label counts over 3 runs: {'needed': 17, 'maybe_needed': 18, 'not_needed': 133}
+of 56 candidates judged in every run, the label changed between runs for 2 (3.6%)
+mean reported confidence 0.56

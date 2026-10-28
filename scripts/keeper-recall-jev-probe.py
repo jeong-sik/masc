@@ -53,8 +53,10 @@ LABEL_MEANINGS = {
     "not_needed": "The memory is clearly unrelated to this turn.",
 }
 # Jev counts the state plus any one question against 32k tokens. Input tokens
-# were a median 2.04 bytes each in the requests already sent, so 32k tokens is
-# about 65 KB; this leaves room for the purpose and one question.
+# were a median 2.04 bytes each in the small requests already sent and 2.97 in a
+# recall-sized request (evidence/keeper-recall-jev-probe-2026-10-28), so 32k
+# tokens is between 65 KB and 95 KB. 60 KB is the cautious end until more
+# Keepers have been measured.
 DEFAULT_PIECE_KB = 60
 DEFAULT_TURN_INPUT = (
     "A reviewer asks for a verdict on an open pull request. Check the current head, the review list and the "
@@ -286,6 +288,7 @@ def main() -> int:
     if len(runs) < 2:
         return 0
     flips = 0
+    changed: list[str] = []
     judged_every_run = 0
     confidences: list[float] = []
     for candidate in candidates:
@@ -293,13 +296,19 @@ def main() -> int:
         if not all(question_id in run for run in runs):
             continue
         judged_every_run += 1
-        flips += int(len({as_str(run[question_id].get("choice")) for run in runs}) > 1)
+        labels = [as_str(run[question_id].get("choice")) for run in runs]
+        if len(set(labels)) > 1:
+            flips += 1
+            reported = [f"{as_float(run[question_id].get('confidence')):.2f}" for run in runs]
+            changed.append(f"  changed: {question_id} labels {labels} confidence {reported}")
         confidences.extend(as_float(run[question_id].get("confidence")) for run in runs)
     counts = {label: sum(1 for run in runs for answer in run.values() if answer.get("choice") == label) for label in LABELS}
     print(f"label counts over {len(runs)} runs: {counts}")
     if judged_every_run:
         print(f"of {judged_every_run} candidates judged in every run, the label changed between runs for {flips} ({100 * flips / judged_every_run:.1f}%)")
         print(f"mean reported confidence {sum(confidences) / len(confidences):.2f}")
+        for line in changed:
+            print(line)
     return 0
 
 

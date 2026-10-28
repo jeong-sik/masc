@@ -10,9 +10,10 @@ type target_error =
     [Boxed] carries a target whose runner asks the endpoint's shim for the
     observe box; [No_box] says why there is none, in the operator's words —
     an endpoint may have no shim, a shim may advertise no box, the endpoint
-    may not be reachable. Resolved lazily: the microvm route acquires the
-    guest, which may boot it, and that is spent only when the gate has
-    declined every cheaper authority and would otherwise pay the judge. *)
+    may not be reachable. Resolved lazily: the microvm Observe route acquires
+    the guest, which may boot it, only when the gate has declined every
+    cheaper authority and would otherwise pay the judge. Guest_local is
+    refused before the route acquires a guest. *)
 type observe_route =
   | Boxed of
       { target : Masc_exec.Sandbox_target.t
@@ -34,7 +35,10 @@ val observe_route_for_endpoint :
   Keeper_sandbox_remote.t ->
   observe_route
 (** Resolve actual shim capability on a provisioned endpoint. Docker accepts
-    Observe only: its host mounts cannot use Guest_local. *)
+    Observe only because its host mounts can write through. MicroVM rejects
+    Guest_local while volume ownership is unverified. OpenSSH Guest_local
+    requires the endpoint's [private_home] declaration. A refusal is [No_box]
+    and does not itself establish isolation of the underlying workspace. *)
 
 type guest_dispatch =
   { target : Masc_exec.Sandbox_target.t
@@ -63,8 +67,9 @@ val profile_contract_mismatch
 
 (** Build the Shell IR target from the factory's immutable runtime binding.
     A Docker guest runs stages by [docker exec] into its mounted tree; a
-    microvm guest runs them over the remote lane into the tree it owns on
-    its work volume (RFC-0400), with no pipeline runner. Neither starts its
+    microvm guest runs them over the remote lane into the tree on its work
+    volume (RFC-0400), with no pipeline runner. The volume name alone does
+    not establish exclusive workspace ownership. Neither starts its
     container here: the first stage does, and each runtime owns its
     creation-time image check. A caller meta that disagrees with the factory
     fails before dispatch. *)

@@ -263,7 +263,7 @@ let execute_through_gate
       ?(prepare_secret_files = fun () -> Ok [])
       ?(sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh)
       ?(intent = Masc.Keeper_tool_execute_typed_input.Auto)
-      ?base_host_env ?cycle_grant
+      ?base_host_env ?cycle_grant ?route
       ~run ~argv base_path =
   let dispatch_count = ref 0 in
   let dispatch target =
@@ -286,7 +286,8 @@ let execute_through_gate
       ~workdir:base_path ~sandbox:target ?base_host_env ir
   in
   let target = Masc_exec.Sandbox_target.host () in
-  let stage = create_stage ~route:(fun () -> Target.Boxed { target; run }) ~dispatch in
+  let route = Option.value route ~default:(fun () -> Target.Boxed { target; run }) in
+  let stage = create_stage ~route ~dispatch in
   let request : Gate.request =
     { keeper_name = "settlement"
     ; operation = "tool_execute"
@@ -386,6 +387,47 @@ let test_explicit_effect_request_enters_gate_without_observe_or_write () =
   check int "durable permission request" 1 pending;
   check bool "no fabricated result" true (result = None && chunks = []);
   match decision with Gate.Deferred _ -> () | _ -> fail "effect intent authorized itself"
+;;
+
+let test_unverified_microvm_guest_local_reaches_the_judge_without_running () =
+  with_execution_workspace @@ fun base_path ->
+  let probe_script = Filename.concat base_path "capable-shim" in
+  let probe = Exec_ssh_protocol.render_probe
+    { name = "masc-exec-shim"
+    ; version = string_of_int Exec_ssh_protocol.protocol_version ^ ".0.0"
+    ; capabilities = [ Exec_ssh_protocol.observe_capability ]
+    ; release = None }
+  in
+  let oc = open_out probe_script in
+  output_string oc (Printf.sprintf "#!/bin/sh\nprintf '%%s' %s\n" (Filename.quote probe));
+  close_out oc;
+  Unix.chmod probe_script 0o755;
+  let transport : Masc.Keeper_sandbox_remote.container_exec =
+    { prefix = [ probe_script ]; probe_prefix = None
+    ; container_name = "unverified"; shim_path = "/shim" }
+  in
+  let endpoint = Masc.Keeper_sandbox_remote.of_container_exec
+    ~base_path ~keeper_name:"settlement" ~remote_root:"/masc-work"
+    ~gh_config_dir:"/identity" ~injected_env:[] ~env_allowlist:[]
+    ~connect_timeout_sec:1 ~max_concurrent_sessions:1 transport
+  in
+  let route () =
+    Target.observe_route_for_endpoint ~run:Keeper_types_profile_sandbox.Guest_local
+      ~timeout_sec:2.0 ~target_of_runner:(fun _ -> Masc_exec.Sandbox_target.host ()) endpoint
+  in
+  let decision, result, count, pending, chunks = execute_through_gate
+    ~sandbox_profile:Keeper_types_profile_sandbox.Micro_vm
+    ~route ~run:Keeper_types_profile_sandbox.Guest_local
+    ~argv:[ "sh"; "-c"; "printf changed > unverified-guest-local.txt" ] base_path
+  in
+  check int "the command has not run" 0 count;
+  check bool "no work-volume write before a decision" false
+    (Sys.file_exists (Filename.concat base_path "unverified-guest-local.txt"));
+  check int "the request reaches the approval queue" 1 pending;
+  check bool "no result was fabricated" true (result = None && chunks = []);
+  match decision with
+  | Gate.Deferred _ -> ()
+  | Gate.Allow _ | Gate.Unavailable _ -> fail "unverified guest-local execution did not defer"
 ;;
 
 let test_approved_effect_replay_consumes_one_exact_grant () =
@@ -734,6 +776,8 @@ let () =
             test_observed_capture_is_returned_without_second_child
         ; test_case "effect request waits for permission before any execution" `Quick
             test_explicit_effect_request_enters_gate_without_observe_or_write
+        ; test_case "unverified microVM guest_local reaches the judge without running" `Quick
+            test_unverified_microvm_guest_local_reaches_the_judge_without_running
         ; test_case "approved effect replay consumes one exact grant" `Quick
             test_approved_effect_replay_consumes_one_exact_grant
         ; test_case "git diff keeps changed and unchanged exit statuses" `Quick

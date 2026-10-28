@@ -36,6 +36,10 @@ let lane_prefix = function
   | Docker_exec _ -> "docker_observe"
 ;;
 
+let microvm_guest_local_unavailable_reason =
+  "microvm_guest_local_ownership_unverified: the work volume may be shared across workspaces; guest_local is unavailable"
+;;
+
 (* ── What the lane last did (RFC-0427 D-1) ──────────────────────────────
    Each arm below is one return branch of [runner]: the class is decided
    where the branch is, never read back out of the message text. The record
@@ -925,8 +929,12 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
     match (match t.transport, mode with
       | Docker_exec _, (Exec_ssh_protocol.Effect | Exec_ssh_protocol.Guest_local) ->
         Error "docker_observe_mode_required: Docker host mounts require the filesystem and network Observe box"
+      | Container_exec _, Exec_ssh_protocol.Guest_local ->
+        Error microvm_guest_local_unavailable_reason
       | Docker_exec _, Exec_ssh_protocol.Observe
-      | (Openssh _ | Container_exec _), _ -> wire_env t env) with
+      | Container_exec _, (Exec_ssh_protocol.Effect | Exec_ssh_protocol.Observe)
+      | Openssh _, (Exec_ssh_protocol.Effect | Exec_ssh_protocol.Observe | Exec_ssh_protocol.Guest_local) ->
+        wire_env t env) with
     | Error error -> transport_failed ~failure:Transport_failed error
     | Ok env ->
       let injected = injected_env t in

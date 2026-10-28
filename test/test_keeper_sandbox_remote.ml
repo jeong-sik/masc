@@ -819,12 +819,17 @@ let test_forced_preflights_share_only_a_new_probe () =
   Eio.Fiber.fork ~sw (fun () ->
     Eio.Promise.resolve finish_first (Keeper_sandbox_remote.For_testing.run_probe first));
   await_fixture_file clock first_started;
-  let forced = List.init 4 (fun _ ->
+  let forced = List.init 4 (fun index ->
+    let target = Keeper_sandbox_remote.of_container_exec ~base_path
+        ~keeper_name:(Printf.sprintf "keeper-force-%d" index)
+        ~remote_root ~gh_config_dir ~injected_env:[] ~env_allowlist:[ "LANG" ]
+        ~connect_timeout_sec:1 ~max_concurrent_sessions:2
+        (guest ~cli:(Filename.concat base_path "serial-probe-cli") ()) in
     let entered, enter = Eio.Promise.create () in
     let result, finish = Eio.Promise.create () in
     Eio.Fiber.fork ~sw (fun () ->
       Eio.Promise.resolve enter ();
-      Eio.Promise.resolve finish (Keeper_sandbox_remote.check_preflight ~force:true second));
+      Eio.Promise.resolve finish (Keeper_sandbox_remote.check_preflight ~force:true target));
     entered, result) in
   List.iter (fun (entered, _) -> Eio.Promise.await entered) forced;
   Eio.Time.sleep clock 0.1;

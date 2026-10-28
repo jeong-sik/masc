@@ -2418,7 +2418,7 @@ let queue_bindings state panel =
   let close = [b Meta "Esc" "back"; b Meta "?" "help"] in
   if Option.is_some panel.qp_detail then
     [b Navigate "j/k" "scroll"; b Navigate "PgUp/PgDn" "page";
-     b Navigate "Home/End" "edges"] @ close
+     b Navigate "Home/End" "edges"; b Meta "Enter / Esc" "list"; b Meta "?" "help"]
   else
     let actions =
       if panel.qp_reading <> Queue_current || not (server_authority_ready state) then []

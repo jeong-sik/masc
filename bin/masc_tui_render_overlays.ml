@@ -897,7 +897,7 @@ let render_queue_panel (state : state) (panel : queue_panel) =
     surface_chrome ~overflow:(Self_scrolled owner) state ~terminal_rows ~cols
       ~surface_key:"keeper-queue-detail" ~frame:Chrome_overlay
       ~title:(title " MASC Queue item")
-      ~hints:"↑/↓:scroll  PgUp/PgDn:page  Esc:return  ?:help"
+      ~hints:(Masc_tui_keys.footer_hints_queue state panel)
       ~body:(fun ~budget c ->
         let count = List.length lines in
         let height = if count > budget then max 0 (budget - 1) else budget in

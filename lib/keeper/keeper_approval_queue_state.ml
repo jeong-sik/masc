@@ -140,7 +140,7 @@ let validate_exact_attempt_candidate
     then Error (Exact_attempt_rejected (Exact_attempt_invalid_identity field))
     else Ok ()
   in
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* () = invalid "approval_id" id in
   let* () = invalid "input_hash" input_hash in
   let* () =

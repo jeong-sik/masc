@@ -45,7 +45,7 @@ type report =
   ; wake : Wake.wake_result
   }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let sorted_unique values =
   values |> List.sort_uniq String.compare

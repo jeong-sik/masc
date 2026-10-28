@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let route_can_consume (meta : Keeper_meta_contract.keeper_meta) =
   let route = Keeper_meta_contract.runtime_id_of_meta meta in

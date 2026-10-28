@@ -2,7 +2,7 @@ module Candidate = Keeper_board_attention_candidate
 module Partition = Keeper_board_attention_partition
 module Jev = Typesafeai_board_attention
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let report candidate detail =
   Log.Keeper.warn ~keeper_name:candidate.Candidate.keeper_name

@@ -203,7 +203,7 @@ let source_to_json ~submitted_by ~thread_id ~continuation_channel ~surface
       ~extra_mentions
       ~sender_keeper
       ~user_row_origin =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* () =
     if String.trim submitted_by = ""
     then Error "Keeper chat operation source submitted_by must not be blank"
@@ -255,7 +255,7 @@ let source_to_json ~submitted_by ~thread_id ~continuation_channel ~surface
 ;;
 
 let source_of_json json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let context = "Keeper chat operation source" in
   let* fields =
     strict_fields ~context
@@ -375,7 +375,7 @@ let source_of_json json =
 ;;
 
 let input_of_json json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let context = "Keeper chat operation input" in
   let* fields =
     strict_fields ~context

@@ -33,7 +33,7 @@ type error =
 
 let prepare_tool_name = Catalog.prepare_tool_name
 let run_tool_name = Catalog.run_tool_name
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let plan draft = draft.plan
 let nested_calls draft = Nested.calls draft.compiled

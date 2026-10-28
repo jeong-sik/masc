@@ -373,7 +373,7 @@ let run_key (run_ref : Turn_record.raw_trace_run_ref) =
 
 let turn_of_record ~config ~keeper_name ~execution_rows ~previous ~used
     (record : Turn_record.t) =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   match record.turn_kind, record.raw_trace_run_ref with
   | Turn_record.Direct, _ -> Ok None
   | Turn_record.Autonomous, None -> Ok None
@@ -559,7 +559,7 @@ let snapshot_has_records snapshot = match snapshot.records with [] -> false | _ 
 let snapshot_fingerprint snapshot = snapshot.fingerprint
 
 let read_snapshot_result ~config ~keeper_name ?(limit = default_limit) () =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* entries = Dated_jsonl.read_recent_result (read_store config keeper_name) (max 1 limit)
     |> Result.map_error Dated_jsonl.read_error_to_string in
   let* records_rev, json_rev = List.fold_left (fun state entry ->

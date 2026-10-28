@@ -618,7 +618,7 @@ let provenance_of_line ~line_number line =
   try
     match Yojson.Safe.from_string line with
     | `Assoc fields ->
-      let ( let* ) = Result.bind in
+      let open Result.Syntax in
       let* () = match validate_row_fields fields with Ok () -> Ok () | Error detail -> fail detail in
       (match
          Keeper_chat_delivery_identity.delivery_provenance_of_fields fields
@@ -822,7 +822,7 @@ let provenance_index_of_existing existing =
   |> List.mapi (fun offset line -> offset + 1, line)
   |> List.fold_left
        (fun result (line_number, line) ->
-          let ( let* ) = Result.bind in
+          let open Result.Syntax in
           let* () = result in
           if String.equal line ""
           then Ok ()
@@ -887,7 +887,7 @@ let find_indexed_provenance index ~provenance =
       | Keeper_chat_delivery_identity.Approval_replay_correction
       | Keeper_chat_delivery_identity.Approval_continuation -> Ok ()
     in
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* () = execution_identity_available in
     let ordinal =
       match provenance.Keeper_chat_delivery_identity.transcript_slot with
@@ -928,7 +928,7 @@ let find_indexed_provenance index ~provenance =
 ;;
 
 let find_provenance existing ~provenance =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* index = provenance_index_of_existing existing in
   find_indexed_provenance index ~provenance
 ;;
@@ -1293,7 +1293,7 @@ let validate_append_once_lines lines =
   let rec loop seen_slots seen_ordinals seen_executions = function
     | [] -> Ok ()
     | { transcript_slot; _ } :: rest ->
-      let ( let* ) = Result.bind in
+      let open Result.Syntax in
       let* () =
         if
           List.exists
@@ -2568,7 +2568,7 @@ let captured_row_of_json = function
               | `Unreadable error -> Error (strict_decode_error_to_string error))
            | _ -> Error "invalid or duplicate captured chat row fields"
          with Yojson.Json_error detail -> Error detail in
-       let ( let* ) = Result.bind in
+       let open Result.Syntax in
        let* raw_fields, _ = decode raw_line in
        let* projected_fields, captured_message = decode projected_line in
        let immutable fields = List.filter (fun (key, _) -> not (List.mem key redacted_row_fields)) fields in
@@ -2585,7 +2585,7 @@ let parse_transcript_captures_result ~select ~path ~redaction rows =
   |> String.split_on_char '\n'
   |> List.fold_left
        (fun state line ->
-          let ( let* ) = Result.bind in
+          let open Result.Syntax in
           let* messages_rev, line_no = state in
           let line_no = line_no + 1 in
           match parse_transcript_row_strict ~path ~redaction ~position:(Line_number line_no) line with
@@ -2611,7 +2611,7 @@ let parse_transcript_captures_result ~select ~path ~redaction rows =
 let parse_transcript_rows_result ~path ~redaction rows =
   rows |> String.split_on_char '\n'
   |> List.fold_left (fun state line ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* messages_rev, line_no = state in
     let line_no = line_no + 1 in
     match parse_transcript_row_strict ~path ~redaction ~position:(Line_number line_no) line with
@@ -2750,7 +2750,7 @@ type history_page =
   }
 
 let load_result ~base_dir ~keeper_name =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let path = chat_path ~base_dir ~keeper_name in
   (* All complete rows inside the existing byte window participate in the
      role-based selection. Taking only 400 physical rows would let a tool-heavy
@@ -2774,7 +2774,7 @@ let load_result ~base_dir ~keeper_name =
 
 let load_history_page_result ~base_dir ~keeper_name ?cursor
       ?(max_total = max_total_lines) () =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let path = chat_path ~base_dir ~keeper_name in
   let* page = Keeper_chat_history_page.read ~path ~owner:keeper_name ?cursor
     ~max_rows:(max 1 (min max_total max_total_lines)) () in
@@ -3184,7 +3184,7 @@ let turn_transcript_to_json = Keeper_chat_projection.turn_transcript_to_json
 
 
 let exact_transcript_row_identity line =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   match Yojson.Safe.from_string line with
   | `Assoc fields ->
       let keys = List.map fst fields in
@@ -3208,7 +3208,7 @@ let exact_transcript_row_identity line =
   | exception Yojson.Json_error detail -> Error detail
 
 let load_turn_transcript_result ~base_dir ~keeper_name ~turn_ref =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let path = chat_path ~base_dir ~keeper_name in
   let redaction = redaction_for ~base_dir ~keeper_name in
   let read_page ?cursor () =

@@ -74,7 +74,7 @@ type tool_actions = {
 }
 
 let observe_tool_actions ~base_path ~keeper_name ~source_id =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   match Keeper_tool_call_log.configured_masc_root (), Keeper_tool_call_log.store () with
   | Some root, Some store when String.equal root (Common.masc_dir_from_base_path ~base_path) ->
       let* summary, _ = Keeper_tool_call_index.fold_by_answer_source ~store ~keeper_name ~source_id
@@ -183,7 +183,7 @@ type followup_source =
   | Linked_task of linked_task
 
 let observe_followup ?on_started ?on_source ~base_path ~keeper_name ~ask ~resolution () =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* stimulus = answered_stimulus ~keeper_name ask resolution
       |> Result.map_error error_to_string in
   let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
@@ -284,7 +284,7 @@ let followup_to_json (followup : followup) =
     "linked_task", linked_task_to_json followup.linked_task])
 
 let deliver_row ~base_path ~keeper_name ~already_delivered ask resolution =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* stimulus = answered_stimulus ~keeper_name ask resolution in
   let* consumed = already_delivered stimulus in
   if consumed then Ok Already_delivered
@@ -312,7 +312,7 @@ let deliver_row ~base_path ~keeper_name ~already_delivered ask resolution =
           Ok Already_pending)
 
 let deliver ~base_path ~keeper_name ~ask_id =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* snapshot = Keeper_ask_store.rows_result ~base_path ~keeper_name
       |> Result.map_error (fun error -> Ask_store_unavailable error) in
   let rows = match snapshot with Keeper_ask_store.Missing_log -> [] | Stored_rows rows -> rows in
@@ -357,7 +357,7 @@ let empty_report =
     already_pending=0; already_delivered=0; failures=[] }
 
 let reconcile_rows ~base_path ~keeper_name report rows =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let answered, demands = List.fold_left (fun (answered, demands) row ->
     let _, (_, resolution) = row in
     match resolution with
@@ -413,7 +413,7 @@ let reconcile_rows ~base_path ~keeper_name report rows =
       report.evidence_window_reads + !window_reads }
 
 let reconcile ~base_path =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* logs = Keeper_ask_store.discover_rows_result ~base_path in
   let report = List.fold_left (fun report log ->
       match log with
@@ -472,7 +472,7 @@ let create ~base_path ?(on_report=log_report ~base_path) ?(on_discovery=log_disc
   {base_path;on_report;on_discovery;active=Set_util.StringSet.empty;discovery_active=false}
 
 let discover_and_schedule ~sw supervisor =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   Eio.Switch.check sw;
   let* logs = Keeper_ask_store.discover_rows_result ~base_path:supervisor.base_path in
   List.iter (function

@@ -1,6 +1,6 @@
 module Journal = Keeper_child_content_journal
 module Child = Keeper_child_content
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type receiver = { receiver_generation : string; session_id : string; client_uuid : string }
 type scope = { keeper_name : string; receiver : receiver }

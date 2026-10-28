@@ -1,6 +1,6 @@
 module Journal = Keeper_tool_execution_journal
 module Snapshot = Skill_catalog_snapshot_service
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type error =
   | Profile_unavailable of Keeper_types_profile.keeper_toml_load_error

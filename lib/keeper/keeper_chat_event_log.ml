@@ -70,7 +70,7 @@ let optional_identity ~label name fields =
 ;;
 
 let occurrence_of_fields ~scope ~index ~provider json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let label = "tool_stream_occurrence" in
   let* fields = object_fields ~label ~allowed:[scope; index; provider] json in
   let nonnegative name =
@@ -382,7 +382,7 @@ let keeper_chat_event_to_json event =
 
 let keeper_chat_event_of_json json =
   let open Yojson.Safe.Util in
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   (* The members every native tool row carries, plus the one its kind adds. *)
   let native_tool ~extra =
     let* fields = object_fields ~label:"native_tool"
@@ -747,7 +747,7 @@ let operation_settlement_to_json settlement =
 
 let operation_settlement_of_json = function
   | `Assoc fields when List.sort String.compare (List.map fst fields) = ["completed_at";"operation_id"] ->
-      let ( let* ) = Result.bind in
+      let open Result.Syntax in
       let* operation_id = match List.assoc "operation_id" fields with
         | `String id -> Keeper_chat_operation.Operation_id.of_string id
         | _ -> Error "operation settlement operation_id is not a string" in
@@ -770,7 +770,7 @@ let journaled_event_to_json { seq; ts; event } =
 
 let journaled_event_payload_of_json json =
   let open Yojson.Safe.Util in
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   try
     let* _ = object_fields ~label:"journaled_event" ~allowed:["v"; "seq"; "ts"; "event"; "operation_settlement"] json in
     let* seq = Runtime_json_integer.of_json (json |> member "seq") in
@@ -785,7 +785,7 @@ let journaled_event_payload_of_json json =
 ;;
 
 let current_journaled_envelope_of_json json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* entry = journaled_event_payload_of_json json in
   let* settlement = match json with
     | `Assoc fields ->
@@ -1333,7 +1333,7 @@ let operation_terminal_from_tail settlement journal =
 ;;
 
 let record_terminal_error_from_journal ~segment journal ~ts ~message =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let read_error = function
     | Journal_missing -> "operation journal disappeared during settlement"
     | Journal_unreadable detail | Journal_corrupt detail -> detail

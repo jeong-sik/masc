@@ -335,7 +335,7 @@ let recover_owner pending =
 
 let discover_and_schedule ~sw supervisor =
   Eio.Switch.check sw;
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* discovery = Outbox.discover ~base_path:supervisor.base_path in
   List.iter (fun (identity,error) ->
     Log.Server.warn "composition completion discovery retained pending_record=%s error=%s base_path=%S"

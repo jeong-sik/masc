@@ -24,7 +24,7 @@ type t =
   }
 
 let empty = { rules = []; applications = [] }
-let ( let* ) = Result.bind
+open Result.Syntax
 module Approval_ids = Set.Make (String)
 module Resolution_sequences = Set.Make (Int)
 

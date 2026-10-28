@@ -19,7 +19,7 @@ module Worker_epoch = struct
 
 end
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type ready_confirmation =
   Keeper_board_attention_partition_wire.ready_confirmation =

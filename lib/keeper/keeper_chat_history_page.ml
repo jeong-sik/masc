@@ -143,7 +143,7 @@ let inspect_source ~path =
     Error (Io_error (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error)))
 
 let read ~path ~owner ?cursor ~max_rows () =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   try
     let fd = Unix.openfile path [Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC] 0 in
     let channel = Unix.in_channel_of_descr fd in

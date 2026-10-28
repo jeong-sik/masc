@@ -1,6 +1,6 @@
 module Exact_output = Agent_core.Exact_output
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let lane_id = "board_attention_exact"
 
 type setup_error =

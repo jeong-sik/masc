@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* Binary transfers are buffered in memory before browser effects. This is a
    resource bound per file, not a Keeper runtime budget. One extra byte proves

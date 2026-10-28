@@ -63,8 +63,9 @@ let opened ?(capture_directory=capture_directory ()) ?(downloads=no_downloads) r
 
 (* A row as the listing script writes it: [dialog] is what page.info()
    named on a managed page, [dialogUnread] why it could not be read. *)
-let tab_row ?(dialog=`Null) ?(unread=`Null) ~label ~target ~title ~url ~active () =
-  obj ["label",label;"targetId",str target;"title",str title;"url",str url;"active",`Bool active;
+let tab_row ?(dialog=`Null) ?(unread=`Null) ?origin ~label ~target ~title ~url ~active () =
+  let origin=match origin,label with Some value,_ -> value | None,`Null -> "unknown" | None,_ -> "agent" in
+  obj ["label",label;"targetId",str target;"openedBy",str origin;"title",str title;"url",str url;"active",`Bool active;
     "dialog",dialog;"dialogUnread",unread]
 let tabs = `List [
   tab_row ~label:(str "p1") ~target:"T1" ~title:"Slack" ~url:"https://app.slack.com/" ~active:true ();
@@ -230,12 +231,48 @@ let test_tabs_are_numbered_by_label () =
   let listed () = match dispatch peer Live.Tabs_list (obj []) with
     | Ok rows -> rows | Error _ -> fail "tabs were not listed" in
   let first = listed () in
-  check string "rows" ({|[{"id":1,"index":0,"url":"https://app.slack.com/","title":"Slack","active":true},|}
-    ^ {|{"id":2,"index":1,"url":"https://mail.example/","title":"Mail","active":false},|}
-    ^ {|{"id":3,"index":2,"url":"about:blank","title":"","active":false}]|}) (Yojson.Safe.to_string first);
+  let rows=Yojson.Safe.Util.to_list first in
+  check (list int) "rows retain numbered ownership" [1;2;3]
+    (List.map (fun row -> Yojson.Safe.Util.(row |> member "id" |> to_int)) rows);
+  check bool "native Page labels and origins reach the tab inventory" true
+    (List.map (fun row -> field "egoPage" row) rows = List.map (fun (label,target,origin) ->
+      obj ["label",label;"targetId",str target;"openedBy",str origin])
+      [str "p1","T1","agent";`Null,"T9","unknown";str "p2","T2","agent"]);
   check string "the same pages keep their numbers" (Yojson.Safe.to_string first) (Yojson.Safe.to_string (listed ()));
   let unreadable = opened (fun _ -> answered (`List [obj ["label",`Null;"title",str "x";"url",str "y";"active",`Bool true]])) in
   ignore (before_effect "a tab without a label or target" (dispatch unreadable Live.Tabs_list (obj [])))
+
+let test_page_provenance_survives_document_projection () =
+  let module Surface=Masc.Browser_surface in
+  let peer=opened (fun sent -> match sent.step with
+    | "tabs.list" -> answered tabs | other -> failf "unexpected step %s" other) in
+  let rows=match dispatch peer Live.Tabs_list (obj []) with Ok rows -> rows | Error _ -> fail "no tabs" in
+  let space=Peer.space peer in
+  let client_id=Result.get_ok (Lane.client_id_of_string "10000000-0000-4000-8000-000000000021") in
+  let selected : Masc.Browser_selection.selected = {route=Lane.Live_route (Some client_id);reason=Explicit_browser} in
+  let info : Lane.client_info = {client_id;browser=Ego_lite;version="fixture";engine_version="fixture";
+    transport=Ego_task_space;space=Some space} in
+  let binding=Masc.Browser_binding.of_browser selected (Masc.Browser_selection.Connected info) in
+  let plan=Result.get_ok (Surface.prepare_read ~tab_id:(Some 1) rows) in
+  let page=obj ["url",str "https://app.slack.com/";"title",str "Slack";"text",str "observed";
+    "chars",`Int 8;"truncated",`Bool false] in
+  let result=match Surface.project_read plan ~binding ~started:0L ~page:(Some page) with
+    | Ok value -> value | Error detail -> fail detail in
+  check bool "read projection retains every observed Page context" true
+    (List.map (field "egoPage") (Yojson.Safe.Util.to_list (field "tabs" result))
+      =List.map (field "egoPage") (Yojson.Safe.Util.to_list rows));
+  check bool "document read retains its Space binding" true
+    (field "browserSpace" result=Lane.ego_space_to_json space);
+  let info={info with transport=Lane.Webdriver_bidi;space=None} in
+  let other=Masc.Browser_binding.of_browser selected (Masc.Browser_selection.Connected info) in
+  check bool "Page provenance cannot masquerade as another transport" true
+    (Result.is_error (Surface.project_read plan ~binding:other ~started:0L ~page:(Some page)));
+  List.iter (fun context ->
+    check bool "malformed Page context is refused" true (Result.is_error (Surface.ego_page_of_json context)))
+    [obj ["label",str "p1";"targetId",str "T1";"openedBy",str "user"];
+     obj ["label",str "p1";"targetId",str "T1";"openedBy",str "agent";"openedBy",str "unknown"];
+     obj ["label",str "p1";"targetId",str "T1"]];
+  ignore (before_effect "unmanaged tab stays protected" (dispatch peer Live.Page_read (obj ["tabId",`Int 2])))
 
 let test_reads_run_the_shared_page_scripts () =
   let asked = ref [] in
@@ -282,7 +319,7 @@ let test_refusals_run_no_script () =
   ignore (dispatch peer Live.Tabs_list (obj []));
   ran := [];
   let operator = before_effect "the operator's tab" (dispatch peer Live.Page_read (obj ["tabId",`Int 2])) in
-  check bool "says whose tab it is" true (String_util.contains_substring operator "opened by the operator");
+  check bool "reports unmanaged status without attributing origin" true (String_util.contains_substring operator "is unmanaged");
   check string "an unknown tab" "browser tab is no longer present"
     (before_effect "an unknown tab" (dispatch peer Live.Page_capture (obj ["tabId",`Int 40])));
   ignore (before_effect "the document source" (dispatch peer Live.Page_read (obj ["tabId",`Int 1;"includeHtml",`Bool true])));
@@ -903,7 +940,7 @@ const page = {
 };
 const taskSpace = async () => ({
   ownership: "agent",
-  tabs: async () => [{label: "p1", openedBy: "agent", url: entries[current].url, title: entries[current].title}],
+  tabs: async () => [{label: "p1", targetId: "T1", openedBy: "agent", url: entries[current].url, title: entries[current].title}],
   page: () => page,
 });
 |js} (if same_url then "https://a.test/" else "https://b.test/") current navigation detaches load
@@ -990,7 +1027,7 @@ let test_a_snapshot_reads_egos_own_tree () =
     | Error (Live.Before_effect detail) -> detail
     | other -> failf "%s was %s" label (failure_kind other) in
   check bool "an operator tab is refused" true
-    (contains (refused "operator tab" (snapshot ~tab_id:2 Lane.Snapshot_viewport)) "opened by the operator");
+    (contains (refused "operator tab" (snapshot ~tab_id:2 Lane.Snapshot_viewport)) "is unmanaged");
   ignore (refused "no tab" (dispatch peer Live.Page_snapshot (obj ["maxChars",`Int 10;"scope",str "viewport"])));
   check bool "a root that is not a ref is refused" true
     (contains (refused "root" (dispatch peer Live.Page_snapshot
@@ -1017,7 +1054,7 @@ const page = {
 };
 const taskSpace = async () => ({
   ownership: "agent",
-  tabs: async () => [{label: "p1", openedBy: "agent", url: currentUrl, title: "Slack"}],
+  tabs: async () => [{label: "p1", targetId: "T1", openedBy: "agent", url: currentUrl, title: "Slack"}],
   page: () => page,
 });
 |js} (Yojson.Safe.to_string (`String url)) blocked act act act act
@@ -1121,7 +1158,7 @@ const taskSpace = async space => ({
   spaceId: space,
   name: "MASC login",
   ownership: %s,
-  tabs: async () => { seen.push("tabs"); return [{label: "p1", openedBy: "agent", url: "https://app.slack.com/", title: "Slack", active: true}]; },
+  tabs: async () => { seen.push("tabs"); return [{label: "p1", targetId: "T1", openedBy: "agent", url: "https://app.slack.com/", title: "Slack", active: true}]; },
   page: () => ({info: async () => ({url: "https://app.slack.com/"})}),
   handOff: async () => { seen.push("handOff"); },
 });
@@ -1294,11 +1331,10 @@ let test_dialogs_are_listed_and_answered () =
     tab_row ~label:`Null ~target:"T9" ~title:"Mail" ~url:"https://mail.example/" ~active:false ();
     tab_row ~dialog:alert ~label:(str "p2") ~target:"T2" ~title:"" ~url:"about:blank" ~active:false ()];
   (match dispatch peer Live.Tabs_list (obj []) with
-   | Ok rows -> check string "each managed page names the dialog blocking it"
-       ({|[{"id":1,"index":0,"url":"https://app.slack.com/","title":"Slack","active":true,"dialog":{"type":"prompt","message":"name?","defaultValue":"def"}},|}
-        ^ {|{"id":2,"index":1,"url":"https://mail.example/","title":"Mail","active":false},|}
-        ^ {|{"id":3,"index":2,"url":"about:blank","title":"","active":false,"dialog":{"type":"alert","message":"saved"}}]|})
-       (Yojson.Safe.to_string rows)
+   | Ok rows -> check bool "each managed page names the dialog blocking it" true
+       (List.map (field "dialog") (Yojson.Safe.Util.to_list rows)
+        = [obj ["type",str "prompt";"message",str "name?";"defaultValue",str "def"];`Null;
+           obj ["type",str "alert";"message",str "saved"]])
    | Error _ -> fail "the listing failed");
   (* A page whose dialog state ego could not read, or named in a shape this
      connection cannot read, is listed as BiDi lists a tab it could not read. *)
@@ -1307,13 +1343,34 @@ let test_dialogs_are_listed_and_answered () =
     tab_row ~unread:(str "Not attached to an active page") ~label:(str "p2") ~target:"T2" ~title:"" ~url:"about:blank" ~active:false ();
     tab_row ~dialog:(ego_dialog "modal" "?") ~label:(str "p3") ~target:"T3" ~title:"X" ~url:"https://x.test/" ~active:false ()];
   (match dispatch peer Live.Tabs_list (obj []) with
-   | Ok rows -> check string "an unread dialog state is not a page without a dialog"
-       ({|{"tabs":[{"id":1,"index":0,"url":"https://app.slack.com/","title":"Slack","active":true}],"complete":false,"unavailableTabs":[|}
-        ^ {|{"id":3,"index":1,"error":"ego did not read whether a dialog blocks this page: Not attached to an active page","url":"about:blank"},|}
-        ^ {|{"id":4,"index":2,"error":"ego reported a JavaScript dialog of unknown type \"modal\"","url":"https://x.test/"}]}|})
-       (Yojson.Safe.to_string rows)
+   | Ok rows ->
+     check bool "an unread dialog state makes the inventory partial" false
+       (Yojson.Safe.Util.to_bool (field "complete" rows));
+     let unavailable=Yojson.Safe.Util.to_list (field "unavailableTabs" rows) in
+     check (list int) "unread tabs retain their numbers" [3;4]
+       (List.map (fun row -> Yojson.Safe.Util.to_int (field "id" row)) unavailable);
+     check (list string) "unread tabs retain their reason"
+       ["ego did not read whether a dialog blocks this page: Not attached to an active page";
+        "ego reported a JavaScript dialog of unknown type \"modal\""]
+       (List.map (fun row -> text (field "error" row)) unavailable);
+     check bool "unread tabs retain their native Page context" true
+       (List.map (field "egoPage") unavailable = List.map (fun (label,target) ->
+          obj ["label",str label;"targetId",str target;"openedBy",str "agent"])
+          ["p2","T2";"p3","T3"]);
+     let module Surface=Masc.Browser_surface in
+     let plan=Result.get_ok (Surface.prepare_read ~tab_id:None rows) in
+     let client_id=Result.get_ok (Lane.client_id_of_string "10000000-0000-4000-8000-000000000021") in
+     let selected : Masc.Browser_selection.selected = {route=Lane.Live_route (Some client_id);reason=Explicit_browser} in
+     let info : Lane.client_info = {client_id;browser=Ego_lite;version="fixture";engine_version="fixture";
+       transport=Ego_task_space;space=Some (Peer.space peer)} in
+     let binding=Masc.Browser_binding.of_browser selected (Masc.Browser_selection.Connected info) in
+     let page=obj ["url",str "https://app.slack.com/";"title",str "Slack";"text",str "observed";
+       "chars",`Int 8;"truncated",`Bool false] in
+     let projected=Result.get_ok (Surface.project_read plan ~binding ~started:0L ~page:(Some page)) in
+     check bool "document projection keeps unavailable Page contexts" true
+       (field "unavailableTabs" projected=field "unavailableTabs" rows)
    | Error _ -> fail "the partial listing failed");
-  listing := `List [obj ["label",str "p1";"targetId",str "T1";"title",str "Slack";"url",str "https://app.slack.com/";"active",`Bool true]];
+  listing := `List [obj ["label",str "p1";"targetId",str "T1";"openedBy",str "agent";"title",str "Slack";"url",str "https://app.slack.com/";"active",`Bool true]];
   check bool "a row without its dialog state is refused" true (Result.is_error (dispatch peer Live.Tabs_list (obj [])))
 
 (* An input whose page opened a dialog answers with it; a page already
@@ -2011,6 +2068,7 @@ let () =
       test_case "the space opens by name and is held by number" `Quick test_the_space_opens_by_name_and_is_held_by_number;
       test_case "the spaces of a name are listed without opening one" `Quick test_the_spaces_of_a_name_are_listed_without_opening_one;
       test_case "the listing script runs under node" `Quick test_the_listing_script_runs_under_node;
+      test_case "Page provenance survives document projection" `Quick test_page_provenance_survives_document_projection;
       test_case "tabs are numbered by page label" `Quick test_tabs_are_numbered_by_label;
       test_case "a tab that left the listing loses its number" `Quick test_a_tab_that_left_the_listing_loses_its_number;
       test_case "an ego error is cut" `Quick test_an_ego_error_is_cut;

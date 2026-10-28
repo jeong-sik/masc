@@ -63,6 +63,11 @@ The current browser is marked; choosing it again retains the current tab and
 scroll. Switching to another browser clears old page and screenshot references.
 Coordinator connectivity and workspace warnings are labeled separately.
 Reads show latency, tab count, selected title, URL, character count and truncation.
+For Ego tabs, the selected-tab row also shows the SDK Page label (or unmanaged)
+and the observed agent-created or unknown origin. Unknown origin does not identify
+a user-created tab. These details do not grant control or adoption permission;
+unmanaged tabs still refuse document reads and input. The read result retains
+`egoPage` context and the bound `browserSpace`, including unavailable tab rows.
 A failed or pending refresh retains content labeled as a previous read. Switching
 source clears that content; generation-stamped replies reject earlier requests.
 Reads happen on entry, source or tab selection, navigation, and explicit refresh.

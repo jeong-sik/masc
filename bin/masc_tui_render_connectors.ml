@@ -292,9 +292,13 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       c.push_styled ~style:(Theme.info ())
         (match selected with
          | None -> "  No open tabs • Open a page in the selected browser connection"
-         | Some tab -> Printf.sprintf "  [%d/%d] %s%s  [ / ]:select tab · 1-9:jump"
+         | Some tab -> Printf.sprintf "  [%d/%d] %s%s%s  [ / ]:select tab · 1-9:jump"
              (index + 1) tab_count (Terminal_text.single_line tab.title)
-             (if tab.active then " (active)" else ""));
+             (if tab.active then " (active)" else "")
+             (match tab.ego_page with None -> "" | Some page ->
+               " · " ^ (match page.label with None -> "unmanaged" | Some label -> Terminal_text.single_line label)
+               ^ " · " ^ (match page.opened_by with Masc.Browser_surface.Agent_created -> "agent-created"
+                   | Unknown_origin -> "unknown origin")));
       c.push_styled ~style:(Theme.recede ())
         (match view.scene, page with
          | Some scene, _ ->

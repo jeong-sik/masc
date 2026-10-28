@@ -5796,7 +5796,8 @@ module Browser_lane_view = struct
     interactions : Browser_lane.interaction_activity list;
     last_activities : Browser_lane.settled_activity list }
   type discovery = Read_after_discovery | Choose_client
-  type tab = { id : int; title : string; url : string; active : bool }
+  type tab = { id : int; title : string; url : string; active : bool;
+    ego_page : Masc.Browser_surface.ego_page option }
   type page = {
     tab_id : int; title : string; url : string; text : string;
     chars : int; truncated : bool;
@@ -6873,11 +6874,18 @@ module Browser_lane_view = struct
     | (Automation | Stagehand), `Null -> Ok None
     | Live, _ | Automation, _ | Stagehand, _ -> Error "browser client ID does not match source"
   let parse_tab json =
+    let* ()=match json with
+      | `Assoc fields when List.length fields=List.length (List.sort_uniq String.compare (List.map fst fields)) -> Ok ()
+      | _ -> Error "invalid or duplicate tab fields" in
     let* id = get integer "id" json in
     let* title = get string "title" json in
     let* url = get string "url" json in
     let* active = get boolean "active" json in
-    Ok { id; title; url; active }
+    let* ego_page=match json with
+      | `Assoc fields -> (match List.assoc_opt "egoPage" fields with None -> Ok None
+          | Some value -> Result.map Option.some (Masc.Browser_surface.ego_page_of_json value))
+      | _ -> Error "invalid tab fields" in
+    Ok { id; title; url; active; ego_page }
   let parse_page = function
     | `Null -> Ok None
     | json ->

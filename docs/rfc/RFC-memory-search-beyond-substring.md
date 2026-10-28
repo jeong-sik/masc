@@ -3,11 +3,11 @@ rfc: "memory-search-beyond-substring"
 title: "Memory search: from substring containment to ranked candidates and judged recall"
 status: Draft
 created: 2026-09-24
-updated: 2026-09-24
+updated: 2026-10-28
 author: claude (requested by fsy)
 supersedes: []
 superseded_by: null
-related: ["0247", "0418", "0456", "0463", "librarian-absorb-gate"]
+related: ["0247", "0418", "0456", "0463", "librarian-absorb-gate", "keeper-recall-reaches-the-turn"]
 ---
 
 # Memory 검색을 substring 너머로 — 현황, absorb gate 상수, 개선 방향
@@ -153,22 +153,22 @@ lexical 은 "다른 말로 쓴 같은 뜻"을 원리적으로 못 찾는다. 임
   (조용히 빈 결과로 떨어지지 않게, `failure_keeps_evidence`).
 - 호출 모드: `no_match` 이거나 후보가 `limit` 을 넘을 때만 판정을 부르는 안과, 항상 부르는 안이 있다.
   비용은 constitution 상 문제가 아니지만 **지연**은 턴 안에서 쌓인다. Keeper 는 한 턴에 검색을 여러 번 부를 수
-  있고 로컬 모델 판정은 초 단위일 수 있다. 그래서 단계 0 이 턴당 검색 횟수를 재고(결정 로그의 `turn_ref`),
+  있고 모델 판정은 초 단위일 수 있다. 그래서 단계 0 이 턴당 검색 횟수를 재고(결정 로그의 `turn_ref`),
   그 분포와 판정 한 번의 지연을 곱해서 항상/조건부를 고른다.
 
 #### 3.2.1 구체안 (2026-09-27, 제안)
 
-§5 결정(2a 선택형, 로컬 모델) 위에서 코드가 이미 가진 것에 맞춘 모양이다. 아래 "고를 것"은 fsy 가 정한다.
+§5 결정(2a 선택형) 위에서 코드가 이미 가진 것에 맞춘 모양이다. 아래 "고를 것"은 fsy 가 정한다.
 
-**lane.** TypeSafe AI lane(`[typesafeai]`, absorb gate 가 쓰는 것)은 쓰지 않는다. 그 destination 은 TypeSafe 서버나
-OpenRouter 같은 외부 System One 서버라서 "기억 본문을 밖으로 내보내지 않는다"는 결정과 맞지 않는다. 대신
-`Standalone_lane.t`(`lib/runtime/standalone_lane.mli`)에 `Memory_recall` 을 더하고, 다른 standalone lane 처럼
+**lane.** `Standalone_lane.t`(`lib/runtime/standalone_lane.mli`)에 `Memory_recall` 을 더하고, 다른 standalone lane 처럼
 `[runtime.exact_output_lanes.memory_recall]` 로 slot 을 정한다. 닫힌 합이라 새 constructor 를 빠뜨린 match 는
-컴파일이 막는다. lane 이 선언되지 않으면 단계 2 는 꺼져 있고 단계 1 결과가 그대로 나간다.
+컴파일이 막는다. lane 이 선언되지 않으면 단계 2 는 꺼져 있고 단계 1 결과가 그대로 나간다. 이 lane 을
+[RFC-keeper-recall-reaches-the-turn](RFC-keeper-recall-reaches-the-turn.md) 의 턴마다 하는 판정에도 쓸지는
+그 RFC 의 열린 결정 8 이다.
 
 **범위.** 판정은 `source=current` 와 `source=all` 의 현재 기억 부분에만 쓴다. `source=absorbed` 와
 `source=history` 는 판정을 부르지 않는다. 호출자가 고른 범위 밖의 사실을 돌려주면 안 되기 때문이다. `source=all`
-에서 absorbed 와 history 는 단계 1 결과 그대로 나간다(고를 것 3).
+에서 absorbed 와 history 는 단계 1 결과 그대로 나간다(고를 것 2).
 
 **`source=all` 합성.** `source=all` 의 호출 조건(고를 것 1)은 현재 기억 부분의 단계 1 결과로 본다. 판정을 부르면
 합칠 목록은 "판정이 고른 현재 기억(판정 순서)" 뒤에 "absorbed 와 history 후보를 지금처럼 `answering` 으로
@@ -219,31 +219,10 @@ lexical 결과가 보이지도 않았는데 강화된다.
    지연은 0건일 때만 늘고, 단계 0 의 miss 비율이 판정이 얼마나 자주 불릴지를 그대로 알려 준다. 단계 0 은
    2026-09-26 에 들어가서 아직 운영 데이터가 거의 없다. 며칠 모은 뒤 `scripts/memory-search-miss-report.py` 로
    miss 비율과 턴당 검색 수를 보고 (b)/(c) 로 넓힐지 정한다.
-2. "로컬"을 어떻게 보장할지. 코드의 provider 종류는 로컬을 구분하지 못한다(llama.cpp 도 `OpenAI_compat`).
-   §5 의 "기억 본문을 외부로 내보내지 않는다"가 어느 경계인지부터 정해야 한다.
-   (a) 운영자 신뢰: 코드는 검사하지 않고, 운영자가 slot 을 로컬 runtime 으로만 선언한다고 믿는다.
-   어느 선택이든 (a) 가 아니면 `Memory_recall` lane 은 `cli_slot_ids` 를 가질 수 없다. official-client CLI
-   transport 는 endpoint 검사를 거치지 않고 외부 vendor 로 prompt 를 보낼 수 있기 때문이다. 이 제한은
-   이 제안의 로컬 기억 경계에서 나온다. workspace curator 는 #39622 이후 CLI tail 을 허용한다.
-   (b) 호스트 로컬: 기억이 이 호스트를 떠나지 않는다. slot endpoint 의 host 는 loopback **IP 리터럴**
-   (`127.0.0.0/8`, `::1`)이어야 하고, 이름(`localhost` 포함)은 lane 을 읽을 때 거부한다. 이름을 허용하면 검사한 DNS
-   응답과 연결이 쓴 DNS 응답이 다를 수 있어서(DNS rebinding) 따로 검사하고 다시 연결하는 설계로는 경계를 증명하지
-   못한다. 리터럴이면 해석이 없으니 검사한 주소가 곧 연결 주소다. 이 lane 의 요청은 `HTTPS_PROXY` 같은 프록시를
-   타지 않고 HTTP 리다이렉트를 따르지 않는다(3xx 는 lane 실패).
-   (c) 신뢰 네트워크 로컬: 운영자가 설정에 **명시한** CIDR 목록(예: `memory_recall.allowed_cidrs`) 안의 주소만
-   허용한다. 사설 주소(RFC 1918, ULA)라는 분류만으로는 허용하지 않는다. 사설 주소는 공인 라우팅이 안 된다는
-   뜻일 뿐 운영자가 믿는 망과 같은 말이 아니기 때문이다. 목록이 비어 있으면 lane 을 읽을 때 거부한다. 연결 경계는
-   (b) 와 같은 규칙으로 묶는다: slot endpoint 의 host 는 IP 리터럴이어야 하고(이름은 거부, 같은 DNS rebinding
-   이유), 그 리터럴이 목록 안에 있어야 하며, 요청은 `HTTPS_PROXY` 같은 프록시를 타지 않고 HTTP 리다이렉트를 따르지
-   않는다(3xx 는 lane 실패). 그래야 검사한 주소가 곧 실제 연결 주소이고, private endpoint 가 공인 URL 로
-   redirect 하거나 프록시를 타서 본문이 망 밖으로 나가는 경로가 없다. 그래도 이 선택은 "호스트를 떠나지 않는다"가
-   아니라 "운영자가 목록에 적은 네트워크를 떠나지 않는다"만 보장한다고 문서와 설정 설명에 적는다.
-   권장은 (b) 다. 로컬 모델을 다른 기계(GPU 서버)에 둔다면 (c) 이고, 그때 보장이 약해진다는 것을 받아들이는
-   결정이 된다. 어느 쪽이든 주소 분류는 `Ipaddr` 로 하는 typed 검사라서 문자열 휴리스틱이 아니다.
-3. absorbed 와 history 도 판정에 넣을지. 권장은 **현재 기억만**이다. history 는 원문 메시지라 크고, absorbed 는
+2. absorbed 와 history 도 판정에 넣을지. 권장은 **현재 기억만**이다. history 는 원문 메시지라 크고, absorbed 는
    단계 1 이 이미 `answered_by` 로 현재 기억과 묶는다.
 
-**PR 순서.** (i) `Memory_recall` lane 과 설정 검증(고를 것 2), (ii) 판정 호출·검증·기록(판정 lane 없으면 지금과
+**PR 순서.** (i) `Memory_recall` lane 과 설정 검증, (ii) 판정 호출·검증·기록(판정 lane 없으면 지금과
 같음), (iii) 호출 조건을 넓히는 일은 운영 데이터를 본 뒤 따로.
 
 ### 3.3 단계 3 — 연상 (선택)
@@ -280,7 +259,6 @@ RFC-0247 의 그래프 한 홉(구조적 provenance, `Revised` 사슬, 같은 tr
 ## 5. 결정 (2026-09-24, fsy)
 
 - 단계 2 는 **2a 선택형**으로 간다.
-- 단계 2 판정 lane 은 **로컬 모델**을 쓴다(기억 본문을 외부로 내보내지 않는다).
 - 임베딩 거부(RFC-0247 §3)는 유지한다.
 - 순서는 §4 표대로 단계 0 부터 진행한다.
 

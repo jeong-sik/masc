@@ -13,12 +13,18 @@ directory and prints three tables:
    already holds, so the two groups differ for those clients. API lanes carry
    the notice outside ``run_started.prompt``; their rows are not comparable.
 3. How many ``keeper_memory_search`` events found nothing.
-4. The share of all tool calls that were memory, Skill, wiki or artifact reads.
-5. With ``--memory-dir``: how many Retrieved events point at a memory id that
-   is no longer a current fact (a memory id is the hash of its claim, so a
-   rewritten claim gets a new id).
+4. The share of all tool calls by group: memory search, memory select, memory write, shared
+   memory read, artifact read, wiki read, wiki maintenance, Skill use and Skill
+   authoring. A group with no call is printed with 0.
+5. With ``--memory-dir``: for every Retrieved event, whether its memory id is
+   still a current fact. If not, where the revised and absorbed records lead:
+   to a current fact, to an id that is gone, or nowhere; or whether it was
+   retracted. An id with no record at all is split by whether a committed
+   journal row removed that fact.
 6. With ``--memory-dir``: memory commits per UTC day against
    ``keeper_memory_search`` calls per UTC day.
+7. With ``--memory-dir``: turns per UTC day, the Keepers that took them, and
+   the claim bytes a judgment of every current fact would read per turn.
 
 Both logs rotate, so each Keeper's window differs; ``--since`` bounds the
 earliest record read. A search that returns nothing may be a correct answer
@@ -46,6 +52,17 @@ import sys
 from collections.abc import Iterator
 
 SEARCH_TOOL = "keeper_memory_search"
+TOOL_GROUPS = (
+    "keeper_memory_search",
+    "keeper_memory_select",
+    "keeper_memory_write",
+    "keeper_workspace_memory_read",
+    "keeper_artifact_read",
+    "wiki read tools",
+    "wiki maintenance tools",
+    "skill use tools",
+    "skill authoring tools",
+)
 NOTICE_MARKER = "Memory OS Recall"
 # The values of Keeper_semantic_execution.official_client_kind, as they prefix
 # a runtime id such as "claude_code_ac22c1f2.claude-sonnet-5-5_...".
@@ -178,15 +195,21 @@ def tool_group(tool: str) -> str:
         return "keeper_memory_search"
     if tool.endswith("keeper_workspace_memory_read"):
         return "keeper_workspace_memory_read"
+    if tool.endswith("keeper_memory_select"):
+        return "keeper_memory_select"
     if tool.endswith("keeper_memory_write"):
         return "keeper_memory_write"
     if tool.endswith("keeper_artifact_read"):
         return "keeper_artifact_read"
     lowered = tool.lower()
     if "wiki" in lowered:
-        return "wiki tools"
-    if "skill" in lowered or lowered.startswith("keeper_compose"):
-        return "skill tools"
+        if lowered.endswith(("_read", "_search", "_list")):
+            return "wiki read tools"
+        return "wiki maintenance tools"
+    if lowered.endswith(("keeper_skill_validate", "keeper_skill_publish")):
+        return "skill authoring tools"
+    if lowered.endswith("keeper_skill") or lowered.startswith("keeper_compose"):
+        return "skill use tools"
     return ""
 
 
@@ -202,8 +225,10 @@ def table_tool_share(paths: list[str], since: float) -> None:
             if group:
                 groups[group] += 1
     print(f"\ntool_exec events: {total}")
-    for group, count in groups.most_common():
-        print(f"{group}: {count} ({100 * count / total:.2f}%)")
+    for group in TOOL_GROUPS:
+        count = groups[group]
+        share = 100 * count / total if total else 0.0
+        print(f"{group}: {count} ({share:.2f}%)")
 
 
 def memory_id_of(claim: str) -> str:
@@ -211,17 +236,72 @@ def memory_id_of(claim: str) -> str:
     return "sha256:" + hashlib.sha256(claim.encode("utf-8")).hexdigest()
 
 
-def table_orphaned_retrievals(memory_dir: str, excluded: set[str]) -> None:
-    """Retrieved events whose memory id is no longer a current fact.
+def lineage_outcome(
+    memory_id: str,
+    current: set[str],
+    revised: dict[str, str],
+    absorbed: dict[str, str],
+    retracted: set[str],
+) -> str:
+    """Follow one memory id through its revised and absorbed records.
 
-    A memory id is the hash of its claim, so rewriting a claim gives the fact a
-    new id and leaves its earlier retrieval history pointing at an id that no
-    longer exists.
+    Returns ``current`` when the id is a current fact, ``no_record`` when it is
+    not and has no record at all, ``retracted``, ``to_current_by_rewrite`` when
+    revised records alone lead to a current fact, ``to_current_by_absorption``
+    when the path crosses at least one absorbed record, and ``dead_end`` when
+    the records lead to an id that is neither current nor recorded.
+    """
+    seen: set[str] = set()
+    followed = False
+    absorbed_hop = False
+    node = memory_id
+    while True:
+        if node in current:
+            if not followed:
+                return "current"
+            return "to_current_by_absorption" if absorbed_hop else "to_current_by_rewrite"
+        if node in seen:
+            return "dead_end"
+        seen.add(node)
+        if node in revised:
+            node = revised[node]
+        elif node in absorbed:
+            node = absorbed[node]
+            absorbed_hop = True
+        elif node in retracted:
+            return "retracted"
+        else:
+            return "dead_end" if followed else "no_record"
+        followed = True
+
+
+def journal_removed_ids(path: str) -> set[str]:
+    """Memory ids of the facts that committed journal rows took out of the current set."""
+    removed: set[str] = set()
+    for row in read_jsonl(path):
+        change = row.get("change")
+        if row.get("outcome") != "committed" or not isinstance(change, dict):
+            continue
+        facts = change.get("removed")
+        for fact in facts if isinstance(facts, list) else []:
+            if isinstance(fact, dict):
+                removed.add(memory_id_of(as_str(fact.get("claim"))))
+    return removed
+
+
+def table_orphaned_retrievals(memory_dir: str, excluded: set[str]) -> None:
+    """Retrieved events whose memory id is no longer a current fact, and why.
+
+    A memory id is the hash of its claim. A fact leaves the current set when
+    its claim is rewritten (a ``revised`` event), merged into another fact (an
+    entry in ``memory-absorbed.jsonl``) or retracted. The table follows those
+    records from each retrieved id. A fact can also leave in a committed
+    journal row (``change.removed``) with none of those records; such ids are
+    counted apart from ids that no file mentions.
     """
     facts = 0
-    retrieved = 0
-    orphaned = 0
-    revised = 0
+    revised_events = 0
+    outcomes: collections.Counter[str] = collections.Counter()
     for current_path in sorted(glob.glob(os.path.join(memory_dir, "*.memory-current.json"))):
         keeper = os.path.basename(current_path).split(".memory-current")[0]
         if keeper in excluded:
@@ -238,17 +318,43 @@ def table_orphaned_retrievals(memory_dir: str, excluded: set[str]) -> None:
             if isinstance(row, dict)
         }
         facts += len(current)
-        events_path = os.path.join(memory_dir, f"{keeper}.memory-events.jsonl")
-        for event in read_jsonl(events_path):
+        revised: dict[str, str] = {}
+        retracted: set[str] = set()
+        retrieved: list[str] = []
+        for event in read_jsonl(os.path.join(memory_dir, f"{keeper}.memory-events.jsonl")):
             kind = event.get("kind")
             if kind == "retrieved":
-                retrieved += 1
-                orphaned += int(as_str(event.get("memory_id")) not in current)
+                retrieved.append(as_str(event.get("memory_id")))
             elif kind == "revised":
-                revised += 1
-    share = 100 * orphaned / retrieved if retrieved else 0.0
-    print(f"\ncurrent facts: {facts}, revised events: {revised}")
-    print(f"retrieved events: {retrieved}, pointing at an id that is no longer current: {orphaned} ({share:.1f}%)")
+                revised_events += 1
+                revised[as_str(event.get("memory_id"))] = as_str(event.get("superseded_by"))
+            elif kind == "retracted":
+                retracted.add(as_str(event.get("memory_id")))
+        absorbed = {
+            as_str(row.get("memory_id")): as_str(row.get("into"))
+            for row in read_jsonl(os.path.join(memory_dir, f"{keeper}.memory-absorbed.jsonl"))
+        }
+        removed = journal_removed_ids(os.path.join(memory_dir, f"{keeper}.memory-journal.jsonl"))
+        for memory_id in retrieved:
+            outcome = lineage_outcome(memory_id, current, revised, absorbed, retracted)
+            if outcome == "no_record" and memory_id in removed:
+                outcome = "removed_by_commit"
+            outcomes[outcome] += 1
+    total = sum(outcomes.values())
+    print(f"\ncurrent facts: {facts}, revised events: {revised_events}")
+    print(f"retrieved events: {total}")
+    labels = (
+        ("current", "the id is a current fact"),
+        ("to_current_by_rewrite", "not current; revised records alone lead to a current fact"),
+        ("to_current_by_absorption", "not current; the records cross an absorption and lead to a current fact"),
+        ("dead_end", "not current; the records lead to an id that is gone"),
+        ("retracted", "retracted"),
+        ("removed_by_commit", "not current, no revised/absorbed/retracted record; a committed journal row removed it"),
+        ("no_record", "not current and no file mentions it"),
+    )
+    for key, label in labels:
+        share = 100 * outcomes[key] / total if total else 0.0
+        print(f"  {label}: {outcomes[key]} ({share:.1f}%)")
 
 
 def utc_day(epoch: float) -> str:
@@ -281,6 +387,47 @@ def table_daily_production(memory_dir: str, logs: list[str], excluded: set[str],
         print(f"{day} | {commits[day + ' librarian']} | {commits[day + ' explicit_write']} | {searches[day]}")
 
 
+def table_daily_turns(memory_dir: str, logs: list[str], excluded: set[str], since: float) -> None:
+    """Turns per UTC day and the claim bytes a per-turn judgment of all current facts would read.
+
+    The bytes use each Keeper's current facts for every day, so a past day is
+    only as accurate as the Keeper's fact count was stable.
+    """
+    claim_bytes: dict[str, int] = {}
+    for path in sorted(glob.glob(os.path.join(memory_dir, "*.memory-current.json"))):
+        keeper = os.path.basename(path).split(".memory-current")[0]
+        if keeper in excluded:
+            continue
+        try:
+            with open(path, encoding="utf-8") as handle:
+                snapshot = json.load(handle)
+        except (OSError, ValueError):
+            continue
+        rows = snapshot.get("facts") if isinstance(snapshot, dict) else None
+        claim_bytes[keeper] = sum(
+            len(as_str(row.get("claim")).encode("utf-8"))
+            for row in (rows if isinstance(rows, list) else [])
+            if isinstance(row, dict)
+        )
+    turns: collections.Counter[str] = collections.Counter()
+    keepers: dict[str, set[str]] = collections.defaultdict(set)
+    read_bytes: collections.Counter[str] = collections.Counter()
+    for path in logs:
+        keeper = keeper_of(path)
+        for record in read_jsonl(path):
+            stamp = as_float(record.get("ts_unix"))
+            if record.get("event") != "turn" or stamp < since:
+                continue
+            day = utc_day(stamp)
+            turns[day] += 1
+            keepers[day].add(keeper)
+            read_bytes[day] += claim_bytes.get(keeper, 0)
+    print("\nUTC day | turns | Keepers with a turn | claim MB over all turns | KB per turn")
+    for day in sorted(turns):
+        per_turn = read_bytes[day] / turns[day] / 1e3
+        print(f"{day} | {turns[day]} | {len(keepers[day])} | {read_bytes[day] / 1e6:.0f} | {per_turn:.0f}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("keepers_dir", help="the <base-path>/.masc/keepers directory")
@@ -303,6 +450,7 @@ def main() -> int:
     if args.memory_dir:
         table_orphaned_retrievals(args.memory_dir, excluded)
         table_daily_production(args.memory_dir, logs, excluded, since)
+        table_daily_turns(args.memory_dir, logs, excluded, since)
     return 0
 
 

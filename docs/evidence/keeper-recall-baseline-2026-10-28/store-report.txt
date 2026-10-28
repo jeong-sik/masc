@@ -1,0 +1,80 @@
+as of 2026-10-28T04:01:08+00:00
+
+current facts: 2338 in 40 Keepers
+origin: {'injected': 2309, 'authored': 29}
+category: [('lesson', 803), ('constraint', 466), ('fact', 397), ('validated_approach', 374), ('architecture_decision', 79), ('code_change', 72), ('goal', 38), ('preference', 28)]
+source coordinate: board 562 (24.0%), derived 1, other 1775
+age since last_seen, days: p10 1.0, p50 7.2, p90 21.5, max 56.1; older than 7 days 52.5%, older than 14 days 20.7%
+facts per Keeper: median 55.0, max 121
+claim bytes per Keeper, KB: median 66, p90 148, max 182
+
+source-bound claims (separate store, not in the facts above): 148 claims, 185 KB, in 24 Keepers
+
+admission queues: 34 Keepers, 0 with a pending write
+
+facts that Keepers wrote and the journal committed (explicit_write): 4765
+category: {'fact': 4765}; commits that also dropped an older fact: 729
+commits per UTC day: 10-02 152, 10-03 15, 10-04 13, 10-05 3182, 10-06 554, 10-07 287, 10-08 193, 10-09 117, 10-10 20, 10-11 212, 10-12 10, 10-13 1, 10-14 2, 10-16 2, 10-17 2, 10-18 1, 10-20 1, 10-25 1
+largest single run (trace trace-1788310783624-00004): 3110 facts, written by {'sangsu': 3110}
+  all: 4765 facts in 31 Keepers
+    gone from the current set, no revised, retracted or absorbed record: 3376 (70.8%)
+    rewritten (a revised event): 889 (18.7%)
+    retracted: 344 (7.2%)
+    absorbed into another fact: 137 (2.9%)
+    still current, origin authored: 19 (0.4%)
+  without the largest run: 1655 facts in 30 Keepers
+    rewritten (a revised event): 864 (52.2%)
+    gone from the current set, no revised, retracted or absorbed record: 637 (38.5%)
+    absorbed into another fact: 134 (8.1%)
+    still current, origin authored: 19 (1.1%)
+    retracted: 1 (0.1%)
+
+Librarian commits 33789, lane failures 21967 (39.4% of attempts): {'lane_cancelled': 1474, 'exact_execution_failure': 16793, 'absorb_judgment_failure': 900, 'domain_output_invalid': 21, 'exact_setup_failure': 2777, 'unhandled_exception': 2}
+UTC day | commits | failures | failure share
+10-02 | 785 | 1053 | 57%
+10-03 | 649 | 43 | 6%
+10-04 | 342 | 99 | 22%
+10-05 | 1660 | 1492 | 47%
+10-06 | 1905 | 1178 | 38%
+10-07 | 2394 | 816 | 25%
+10-08 | 2671 | 493 | 16%
+10-09 | 1872 | 36 | 2%
+10-10 | 341 | 897 | 72%
+10-11 | 632 | 3387 | 84%
+10-12 | 1453 | 388 | 21%
+10-13 | 2583 | 287 | 10%
+10-14 | 3032 | 2586 | 46%
+10-15 | 411 | 3432 | 89%
+10-16 | 2133 | 3146 | 60%
+10-17 | 731 | 325 | 31%
+10-18 | 576 | 156 | 21%
+10-19 | 1265 | 460 | 27%
+10-20 | 2257 | 401 | 15%
+10-21 | 2486 | 182 | 7%
+10-22 | 1119 | 831 | 43%
+10-23 | 654 | 240 | 27%
+10-24 | 69 | 7 | 9%
+10-25 | 28 | 3 | 10%
+10-26 | 623 | 16 | 3%
+10-27 | 1004 | 10 | 1%
+10-28 | 114 | 3 | 3%
+
+how facts left the current set since the start date (committed journal rows only)
+  absorbed into another fact: 7178
+  event retracted: 361
+  event revised: 3353
+  journal change.removed facts: 19572
+  journal dropped, other reason: 8940
+  journal dropped, superseded_by: 729
+
+Jev memory judgment requests: 1623 sent, 1617 answered, 6 provider_failed
+  Keepers with requests: 20; destinations {'api.typesafe.ai': 1623}; purposes {'successor_memory_recall': 1623}
+  requests per Keeper: {'msx-retro-mania': 1184, 'wkbl-front': 113, 'glossary-maniac': 57, 'kidsnote-incoming-dd-manager': 49, 'goo-yang-bong': 36, 'masc-productor-owner': 34, 'music-sensei': 26, 'wkbl-growth': 25, 'wkbl-web-leader': 24, 'wkbl-data': 21, 'tui-developer': 15, 'rondo': 14, 'mad-scientist': 7, 'pr-updater': 5, 'kidsnote-job-manager': 4, 'jazz-developer': 3, 'code-reviewer-mother': 2, 'won-chik': 2, 'context-reviewer': 1, 'e-masc-the-leader': 1}
+  latency s: p50 0.24, p90 0.48, max 14.51
+  state KB: p50 7.6, max 43.0; question KB: p50 1.3
+  input tokens: p50 4658, max 17979; bytes per input token: p50 2.04, min 1.56
+
+exact-output lane runs (elapsed time includes any wait for a permit)
+board_attention_exact: elapsed s p50 169.0, p90 379.0, p99 581.8; input KB p50 2, p90 4; outcomes {'succeeded': 1778, 'failed': 300}
+librarian_exact: elapsed s p50 10.8, p90 32.1, p99 368.4; input KB p50 33, p90 215; outcomes {'succeeded': 1998, 'cancelled': 11}
+workspace_curator_exact: no successful run; outcomes {'failed': 183, 'succeeded': 165, 'no_completion': 1}

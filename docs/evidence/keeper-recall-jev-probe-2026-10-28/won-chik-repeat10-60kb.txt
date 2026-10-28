@@ -1,0 +1,43 @@
+candidates 56; in one request: body 104.1 KB (state 75.0 KB, questions 29.1 KB)
+pieces of at most 60 KB of candidates: 2 ([42, 14] candidates)
+run 1: judged 56 of 56 in 0.50 s wall time
+  42 candidates, body 81.4 KB (state 59.5 KB, questions 21.8 KB): HTTP 200, 0.48 s, input tokens 27451, answered by jev-1.14.0
+  14 candidates, body 23.1 KB (state 15.8 KB, questions 7.3 KB): HTTP 200, 0.33 s, input tokens 7937, answered by jev-1.14.0
+run 2: judged 56 of 56 in 0.43 s wall time
+  42 candidates, body 81.4 KB (state 59.5 KB, questions 21.8 KB): HTTP 200, 0.43 s, input tokens 27451, answered by jev-1.14.0
+  14 candidates, body 23.1 KB (state 15.8 KB, questions 7.3 KB): HTTP 200, 0.27 s, input tokens 7937, answered by jev-1.14.0
+run 3: judged 56 of 56 in 0.60 s wall time
+  42 candidates, body 81.4 KB (state 59.5 KB, questions 21.8 KB): HTTP 200, 0.60 s, input tokens 27451, answered by jev-1.14.0
+  14 candidates, body 23.1 KB (state 15.8 KB, questions 7.3 KB): HTTP 200, 0.47 s, input tokens 7937, answered by jev-1.14.0
+run 4: judged 56 of 56 in 0.48 s wall time
+  42 candidates, body 81.4 KB (state 59.5 KB, questions 21.8 KB): HTTP 200, 0.47 s, input tokens 27451, answered by jev-1.14.0
+  14 candidates, body 23.1 KB (state 15.8 KB, questions 7.3 KB): HTTP 200, 0.38 s, input tokens 7937, answered by jev-1.14.0
+run 5: judged 56 of 56 in 0.97 s wall time
+  42 candidates, body 81.4 KB (state 59.5 KB, questions 21.8 KB): HTTP 200, 0.97 s, input tokens 27451, answered by jev-1.14.0
+  14 candidates, body 23.1 KB (state 15.8 KB, questions 7.3 KB): HTTP 200, 0.57 s, input tokens 7937, answered by jev-1.14.0
+run 6: judged 56 of 56 in 0.71 s wall time
+  42 candidates, body 81.4 KB (state 59.5 KB, questions 21.8 KB): HTTP 200, 0.71 s, input tokens 27451, answered by jev-1.14.0
+  14 candidates, body 23.1 KB (state 15.8 KB, questions 7.3 KB): HTTP 200, 0.38 s, input tokens 7937, answered by jev-1.14.0
+run 7: judged 56 of 56 in 0.40 s wall time
+  42 candidates, body 81.4 KB (state 59.5 KB, questions 21.8 KB): HTTP 200, 0.39 s, input tokens 27451, answered by jev-1.14.0
+  14 candidates, body 23.1 KB (state 15.8 KB, questions 7.3 KB): HTTP 200, 0.33 s, input tokens 7937, answered by jev-1.14.0
+run 8: judged 56 of 56 in 0.49 s wall time
+  42 candidates, body 81.4 KB (state 59.5 KB, questions 21.8 KB): HTTP 200, 0.48 s, input tokens 27451, answered by jev-1.14.0
+  14 candidates, body 23.1 KB (state 15.8 KB, questions 7.3 KB): HTTP 200, 0.47 s, input tokens 7937, answered by jev-1.14.0
+run 9: judged 56 of 56 in 0.38 s wall time
+  42 candidates, body 81.4 KB (state 59.5 KB, questions 21.8 KB): HTTP 200, 0.37 s, input tokens 27451, answered by jev-1.14.0
+  14 candidates, body 23.1 KB (state 15.8 KB, questions 7.3 KB): HTTP 200, 0.26 s, input tokens 7937, answered by jev-1.14.0
+run 10: judged 56 of 56 in 0.54 s wall time
+  42 candidates, body 81.4 KB (state 59.5 KB, questions 21.8 KB): HTTP 200, 0.54 s, input tokens 27451, answered by jev-1.14.0
+  14 candidates, body 23.1 KB (state 15.8 KB, questions 7.3 KB): HTTP 200, 0.44 s, input tokens 7937, answered by jev-1.14.0
+label counts over 10 runs: {'needed': 59, 'maybe_needed': 48, 'not_needed': 453}
+of 56 candidates judged in every run, the label changed between runs for 4 (7.1%)
+mean reported confidence 0.56
+mean reported confidence of the changed candidates 0.13, of the others 0.60
+unchanged candidates with a mean confidence at or below 0.17, the highest mean among the changed: 1 of 52
+selected (needed or maybe_needed) in every run: 9, in at least one run: 12
+selected sets: 5 distinct over 10 runs, identical in 6 of 45 run pairs (13.3%)
+  changed: c5849f1b038e labels ['maybe_needed', 'maybe_needed', 'maybe_needed', 'maybe_needed', 'not_needed', 'maybe_needed', 'not_needed', 'maybe_needed', 'maybe_needed', 'maybe_needed'] confidence ['0.23', '0.10', '0.16', '0.14', '0.11', '0.22', '0.10', '0.16', '0.14', '0.11'] probabilities (needed/maybe_needed/not_needed) ['0.28/0.49/0.23', '0.20/0.40/0.40', '0.17/0.44/0.39', '0.19/0.43/0.38', '0.20/0.39/0.41', '0.17/0.48/0.35', '0.20/0.40/0.40', '0.14/0.44/0.42', '0.19/0.43/0.38', '0.19/0.41/0.40']
+  changed: 96223d39f66d labels ['not_needed', 'maybe_needed', 'not_needed', 'not_needed', 'not_needed', 'maybe_needed', 'not_needed', 'not_needed', 'maybe_needed', 'maybe_needed'] confidence ['0.06', '0.09', '0.10', '0.11', '0.16', '0.07', '0.11', '0.11', '0.10', '0.13'] probabilities (needed/maybe_needed/not_needed) ['0.26/0.37/0.37', '0.26/0.39/0.35', '0.21/0.39/0.40', '0.23/0.36/0.41', '0.20/0.36/0.44', '0.25/0.38/0.37', '0.20/0.39/0.41', '0.22/0.37/0.41', '0.25/0.40/0.35', '0.25/0.42/0.33']
+  changed: 5315ec544f84 labels ['needed', 'needed', 'maybe_needed', 'needed', 'needed', 'needed', 'needed', 'needed', 'needed', 'needed'] confidence ['0.22', '0.18', '0.10', '0.18', '0.16', '0.14', '0.13', '0.19', '0.22', '0.16'] probabilities (needed/maybe_needed/not_needed) ['0.48/0.35/0.17', '0.45/0.37/0.18', '0.39/0.40/0.21', '0.45/0.37/0.18', '0.44/0.37/0.19', '0.43/0.39/0.18', '0.42/0.41/0.17', '0.46/0.39/0.15', '0.48/0.39/0.13', '0.44/0.38/0.18']
+  changed: 08f97c4c06b7 labels ['maybe_needed', 'maybe_needed', 'maybe_needed', 'not_needed', 'not_needed', 'not_needed', 'not_needed', 'maybe_needed', 'maybe_needed', 'not_needed'] confidence ['0.10', '0.13', '0.11', '0.10', '0.10', '0.13', '0.09', '0.14', '0.10', '0.11'] probabilities (needed/maybe_needed/not_needed) ['0.21/0.39/0.40', '0.20/0.42/0.38', '0.19/0.41/0.40', '0.20/0.40/0.40', '0.22/0.38/0.40', '0.18/0.40/0.42', '0.23/0.38/0.39', '0.23/0.43/0.34', '0.25/0.40/0.35', '0.20/0.39/0.41']

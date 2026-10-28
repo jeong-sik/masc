@@ -2,7 +2,7 @@ import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { ApiRequestError } from '../../api/core'
 import {
-  publishArtifact, readPublishedDraft, fetchPublishedArtifact, artifactHref, captureArtifactWorkspace,
+  publishArtifact, readPublishedDraft, fetchWorkspacePublishedArtifact, artifactHref, captureArtifactWorkspace,
   type ArtifactDocument, type ArtifactDraft, type ArtifactPublication, type ArtifactPublicationRequest, type ArtifactWorkspace,
 } from '../../api/published-artifacts'
 
@@ -123,7 +123,7 @@ export function ArtifactComposer({ initial, base, workspaceRoot, isCurrent, onDr
     setLatestError('')
     try {
       if (workspace.kind !== 'ready') return
-      const latest = await fetchPublishedArtifact(base.artifact.id, undefined, undefined, workspace.value)
+      const latest = await fetchWorkspacePublishedArtifact(base.artifact.id, undefined, workspace.value)
       if (current()) setState({ kind: 'conflict', message: '최신 버전과 작성 중인 원고를 비교해 주세요. 원고는 자동으로 바뀌지 않습니다.', latest })
     } catch (error) {
       if (current()) setLatestError(error instanceof Error ? error.message : '최신 버전을 읽지 못했습니다.')

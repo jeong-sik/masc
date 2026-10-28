@@ -87,12 +87,23 @@ export async function captureArtifactWorkspace(expectedBasePath: string): Promis
 export function artifactWorkspaceHeaders(workspace: ArtifactWorkspace): Record<string, string> {
   return { 'x-masc-expected-base-path': workspace.basePath, 'x-masc-expected-masc-root': workspace.mascRoot }
 }
+export function artifactWorkspaceBody(workspace: ArtifactWorkspace) {
+  return { base_path: workspace.basePath, masc_root: workspace.mascRoot }
+}
+export function artifactWorkspaceQuery(workspace: ArtifactWorkspace): URLSearchParams {
+  return new URLSearchParams({ expected_base_path: workspace.basePath, expected_masc_root: workspace.mascRoot })
+}
+export function requireArtifactWorkspaceRead(headers: Headers): void {
+  if (headers.get('x-masc-workspace-read') !== 'matched-v1') {
+    throw new Error('작업 공간 확인 응답이 없어 원본을 사용할 수 없습니다.')
+  }
+}
 
 // A publication is sent once. Callers retain the returned identity before
 // readback; a failed response/readback must never trigger an automatic retry.
 export async function publishArtifact(request: ArtifactPublicationRequest, workspace: ArtifactWorkspace): Promise<ArtifactPublication> {
   const result = Schema.decodeUnknownSync(ArtifactPublicationSchema)(
-    await post<unknown>('/api/v1/published-artifacts', request, artifactWorkspaceHeaders(workspace)),
+    await post<unknown>('/api/v1/published-artifacts', { ...request, expected_workspace: artifactWorkspaceBody(workspace) }, artifactWorkspaceHeaders(workspace)),
   )
   if (request.id !== undefined && (result.artifact.id !== request.id
     || result.artifact.revision !== request.expected_revision + 1)) {
@@ -102,7 +113,7 @@ export async function publishArtifact(request: ArtifactPublicationRequest, works
 }
 
 export async function readPublishedDraft(publication: ArtifactPublication, sent: ArtifactDraft, workspace: ArtifactWorkspace): Promise<ArtifactDocument> {
-  const doc = await fetchPublishedArtifact(publication.artifact.id, String(publication.artifact.revision), undefined, workspace)
+  const doc = await fetchWorkspacePublishedArtifact(publication.artifact.id, String(publication.artifact.revision), workspace)
   if (doc.content !== sent.content || doc.artifact.title !== sent.title
     || doc.artifact.summary !== sent.summary || doc.artifact.format !== sent.format
     || doc.artifact.body._blob.sha256 !== publication.artifact.body._blob.sha256) {
@@ -183,7 +194,7 @@ export async function fetchPublishedArtifact(id: string, revision: string | unde
 // the ingress headers; ordinary document viewing can still use the unbound API.
 export async function fetchWorkspacePublishedArtifact(id: string, revision: string | undefined, workspace: ArtifactWorkspace, signal?: AbortSignal): Promise<ArtifactDocument> {
   const path = artifactRequestPath(id, revision)
-  const query = new URLSearchParams({ expected_base_path: workspace.basePath, expected_masc_root: workspace.mascRoot })
+  const query = artifactWorkspaceQuery(workspace)
   const response = await getWithResponse<unknown>(`${path}${revision === undefined ? '?' : '&'}${query}`, {
     signal, extraHeaders: artifactWorkspaceHeaders(workspace),
   })

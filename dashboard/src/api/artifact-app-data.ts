@@ -1,7 +1,7 @@
 import { Schema } from 'effect'
 import { v7, validate, version } from 'uuid'
-import { get, post } from './core'
-import { artifactWorkspaceHeaders, PublishedArtifactSchema, type ArtifactWorkspace } from './published-artifacts'
+import { getWithResponse, post } from './core'
+import { artifactWorkspaceBody, artifactWorkspaceHeaders, artifactWorkspaceQuery, requireArtifactWorkspaceRead, PublishedArtifactSchema, type ArtifactWorkspace } from './published-artifacts'
 
 export type Json = null | boolean | number | string | readonly Json[] | { readonly [key: string]: Json }
 export type JsonObject = { readonly [key: string]: Json }
@@ -54,10 +54,13 @@ export function appRequestApplied(state:AppState,request:AppRequest):boolean {
 }
 const path='/api/v1/artifact-app-data'
 export async function readAppState(target:AppTarget,workspace:ArtifactWorkspace,actor?:string):Promise<AppState> {
-  return decodeAppState(await get<unknown>(`${path}/${encodeURIComponent(target.artifact_id)}?revision=${target.revision}`,{extraHeaders:artifactWorkspaceHeaders(workspace)}),target,actor)
+  const query=artifactWorkspaceQuery(workspace);query.set('revision',String(target.revision))
+  const response=await getWithResponse<unknown>(`${path}/${encodeURIComponent(target.artifact_id)}?${query}`,{extraHeaders:artifactWorkspaceHeaders(workspace)})
+  requireArtifactWorkspaceRead(response.headers)
+  return decodeAppState(response.data,target,actor)
 }
 export async function writeAppState(request:AppRequest,workspace:ArtifactWorkspace,actor:string):Promise<AppState> {
-  const state=decodeAppState(await post<unknown>(path,request,artifactWorkspaceHeaders(workspace)),request.target,actor)
+  const state=decodeAppState(await post<unknown>(path,{...request,expected_workspace:artifactWorkspaceBody(workspace)},artifactWorkspaceHeaders(workspace)),request.target,actor)
   if(!appRequestApplied(state,request))throw new Error('앱 입력 저장 응답이 보낸 요청과 다릅니다. 저장 상태를 확인해 주세요.')
   return state
 }

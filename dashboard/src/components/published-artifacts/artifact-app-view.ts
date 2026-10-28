@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
 import { useLayoutEffect,useMemo,useRef,useState } from 'preact/hooks'
 import { currentStoredTokenRevision,subscribeStoredTokenChanges } from '../../api/core'
-import { captureArtifactWorkspace,type ArtifactDocument } from '../../api/published-artifacts'
+import { type ArtifactDocument,type ArtifactWorkspace } from '../../api/published-artifacts'
 import { readAppState } from '../../api/artifact-app-data'
 import { artifactAppFrame,appFrameMessage,frameInputs } from '../../lib/artifact-app-frame'
 import { ArtifactAppSession,type AppSessionSnapshot } from '../../lib/artifact-app-session'
@@ -12,7 +12,7 @@ function download(copy:AppRecovery):void {
   const url=URL.createObjectURL(new Blob([JSON.stringify(copy,null,2)],{type:'application/json;charset=utf-8'}))
   const link=document.createElement('a');link.href=url;link.download=`${copy.target.artifact_id}-v${copy.target.revision}-inputs.json`;link.click();URL.revokeObjectURL(url)
 }
-export function ArtifactAppView({doc,workspaceRoot,authRevision,isCurrent,onPending}:{doc:ArtifactDocument;workspaceRoot:string;authRevision:number;isCurrent:()=>boolean;onPending:(pending:boolean)=>void}) {
+export function ArtifactAppView({doc,capturedWorkspace,authRevision,isCurrent,onPending}:{doc:ArtifactDocument;capturedWorkspace:ArtifactWorkspace;authRevision:number;isCurrent:()=>boolean;onPending:(pending:boolean)=>void}) {
   const iframe=useRef<HTMLIFrameElement>(null),session=useRef<ArtifactAppSession|null>(null)
   const [state,setState]=useState<AppSessionSnapshot|null>(null),[error,setError]=useState(false),[attempt,setAttempt]=useState(0),[visibleToken,setVisibleToken]=useState<string|null>(null)
   const origins=JSON.stringify(state?resourceOrigins(state.server.data):[])
@@ -52,7 +52,7 @@ export function ArtifactAppView({doc,workspaceRoot,authRevision,isCurrent,onPend
     const unsubscribe=subscribeStoredTokenChanges(()=>{if(!current()){created?.stop();setVisibleToken(null)}})
     void (async()=>{
       try{
-        const workspace=await captureArtifactWorkspace(workspaceRoot)
+        const workspace=capturedWorkspace
         if(!current())return
         const initial=await readAppState({artifact_id:doc.artifact.id,revision:doc.artifact.revision},workspace)
         if(!current())return
@@ -63,7 +63,7 @@ export function ArtifactAppView({doc,workspaceRoot,authRevision,isCurrent,onPend
       }catch{if(current())setError(true)}
     })()
     return ()=>{active=false;created?.stop();if(session.current===created)session.current=null;unsubscribe();window.removeEventListener('message',receive);window.removeEventListener('storage',storage);onPending(false)}
-  },[doc.content,authRevision,workspaceRoot,doc.artifact.id,doc.artifact.revision,attempt])
+  },[doc.content,authRevision,capturedWorkspace.basePath,capturedWorkspace.mascRoot,doc.artifact.id,doc.artifact.revision,attempt])
   if(error&&!state)return html`<div class="p-4" role="alert">저장된 입력을 불러오지 못했습니다. 원본 탭에서 문서를 볼 수 있습니다. <button type="button" onClick=${()=>{setError(false);setAttempt(value=>value+1)}}>다시 불러오기</button></div>`
   if(!state)return html`<p role="status" class="p-4">저장된 입력을 불러오고 있습니다.</p>`
   const busy=state.mode==='saving'||state.mode==='checking'

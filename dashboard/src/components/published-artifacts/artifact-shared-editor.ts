@@ -5,7 +5,7 @@ import { Decoration, EditorView, WidgetType, keymap, lineNumbers, type Decoratio
 import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next'
 import { sameDraftTarget } from '../../api/artifact-draft-live'
 import { sendArtifactDraftCommand } from '../../api/artifact-drafts'
-import { captureArtifactWorkspace, fetchPublishedArtifact, type ArtifactDocument, type ArtifactPublication } from '../../api/published-artifacts'
+import { fetchWorkspacePublishedArtifact, type ArtifactDocument, type ArtifactPublication, type ArtifactWorkspace } from '../../api/published-artifacts'
 import { artifactDraftRecoveries, discardArtifactDraftRecovery, type ArtifactDraftRecovery } from '../../lib/artifact-draft-recovery'
 import { ArtifactLiveSession, draftBytes, type ArtifactLiveState } from '../../lib/artifact-live-session'
 import { resolveSharedSelection, restoreSharedDocument, sharedSource, type SharedSelection } from '../../lib/artifact-shared-document'
@@ -81,8 +81,8 @@ function SharedCodeEditor({ session, state, reveal }: { session: ArtifactLiveSes
   return html`<div class="min-h-0 flex-1 border border-[var(--color-border-default)]" ref=${host} />`
 }
 
-export function ArtifactSharedEditor({ doc, workspaceRoot, draftRetention, isCurrent, onCloseRequest, onMutation, onPublished, onClose }: {
-  doc: ArtifactDocument; workspaceRoot: string; draftRetention: ArtifactDraftRetention; isCurrent: () => boolean; onCloseRequest: (request: ArtifactSharedCloseRequest | null) => void;
+export function ArtifactSharedEditor({ doc, workspaceRoot, capturedWorkspace, draftRetention, isCurrent, onCloseRequest, onMutation, onPublished, onClose }: {
+  doc: ArtifactDocument; workspaceRoot: string; capturedWorkspace: ArtifactWorkspace; draftRetention: ArtifactDraftRetention; isCurrent: () => boolean; onCloseRequest: (request: ArtifactSharedCloseRequest | null) => void;
   onMutation: (outcome: ArtifactPublicationOutcome) => void; onPublished: (publication: ArtifactPublication) => void; onClose: () => void;
 }) {
   const [session, setSession] = useState<ArtifactLiveSession | null>(null)
@@ -121,12 +121,12 @@ export function ArtifactSharedEditor({ doc, workspaceRoot, draftRetention, isCur
   useEffect(() => {
     let active = true, opened: ArtifactLiveSession | null = null
     void (async () => {
-      const workspace = await captureArtifactWorkspace(workspaceRoot)
+      const workspace = capturedWorkspace
       if (!active || !isCurrent()) return
       const view = await sendArtifactDraftCommand({ action: 'open', artifact_id: doc.artifact.id, revision: doc.artifact.revision }, workspace)
       if (!active || !isCurrent()) return
       const base=view.draft.base_revision===doc.artifact.revision?doc
-        :await fetchPublishedArtifact(doc.artifact.id,String(view.draft.base_revision),undefined,workspace)
+        :await fetchWorkspacePublishedArtifact(doc.artifact.id,String(view.draft.base_revision),workspace)
       if(!active||!isCurrent())return
       if(base.artifact.body._blob.sha256!==view.draft.base_sha256)throw new Error('공유 원고의 게시 기준과 원본 문서가 다릅니다.')
       setSourceFormat(base.artifact.format)
@@ -185,7 +185,7 @@ export function ArtifactSharedEditor({ doc, workspaceRoot, draftRetention, isCur
     // shared draft. Capture the latest publication for comparison and CAS.
     const content = session.content
     try {
-      const latest = await fetchPublishedArtifact(doc.artifact.id, undefined, undefined, session.workspace)
+      const latest = await fetchWorkspacePublishedArtifact(doc.artifact.id, undefined, session.workspace)
       if (!isCurrent()) return
       if (latest.artifact.revision === state.view.draft.base_revision) preparePublication({ base: latest, content })
       else setComparison({ base: latest, content })

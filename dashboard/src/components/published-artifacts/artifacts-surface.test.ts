@@ -224,8 +224,8 @@ describe('artifact library user flow', () => {
   it('opens HTML in an opaque sandbox with a restrictive resource policy', async () => {
     route.value = { tab: 'workspace', params: { section: 'artifacts', artifact: secondId }, postId: null }
     const view = render(html`<${ArtifactsSurface} />`)
-    const frame = await view.findByTitle(second.title)
-    expect(frame.getAttribute('sandbox')).toBe('allow-scripts')
+    await waitFor(() => expect(view.getByTitle(second.title).getAttribute('sandbox')).toBe('allow-scripts'))
+    const frame = view.getByTitle(second.title)
     expect(frame.getAttribute('srcdoc')).toContain("connect-src 'none'")
     expect(frame.getAttribute('srcdoc')).toContain('<button onclick=')
     expect(frame.getAttribute('referrerpolicy')).toBe('no-referrer')

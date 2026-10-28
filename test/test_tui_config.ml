@@ -620,6 +620,110 @@ let keeper_list_preferences_cases =
                    later = second && earlier = first && earlier < later
                | _ -> false))))) ]
 
+(* The Home setting belongs to the local workspace, even when the same TUI
+   can navigate a remote roster. An already admitted local visit still owns
+   its completion while remote or unconfirmed visits are declined. *)
+let test_home_visit_stays_with_local_workspace () =
+  with_storable_base (fun ~base_path ->
+    let module State = Masc_tui_types in
+    let module Visits = Masc_tui_chat_visit in
+    let module Decode = Masc.Tui_decode in
+    let canonical = Decode.Canonical_path.of_path in
+    let identity base : Decode.server_identity =
+      { sid_version = "test"; sid_binary_commit = "test";
+        sid_binary_commit_age_s = None; sid_base_path = canonical base;
+        sid_masc_root = canonical (Filename.concat base ".masc");
+        sid_executable_in_worktree = None; sid_state_ready = Some true;
+        sid_uptime = None; sid_sse_clients = None; sid_gc = None;
+        sid_scheduler = None } in
+    let keeper name = match Keeper_id.Keeper_name.of_string name with
+      | Ok keeper -> keeper | Error reason -> Alcotest.fail reason in
+    let alpha = keeper "alpha" and beta = keeper "beta" in
+    let path = Filename.concat base_path ".masc/config/runtime.toml" in
+    write path (storable_runtime ^ "\n[tui]\nopening = \"last\"\n");
+    let previous_pool = Domain_pool_ref.get () in
+    let previous_ready = Eio_guard.is_ready () in
+    Fun.protect ~finally:(fun () ->
+      (match previous_pool with
+       | Some pool -> Domain_pool_ref.set pool
+       | None -> Domain_pool_ref.clear_for_tests ());
+      if not previous_ready then Eio_guard.disable ()) (fun () ->
+      Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+        Eio_guard.enable ();
+        Domain_pool_ref.set (Domain_pool.create ~sw ~domain_count:1
+            (Eio.Stdenv.domain_mgr env));
+        let state = State.create_state ~workspace:"visits" ~local_base_path:base_path
+            ~port:0 ~refresh_interval:0. () in
+        let admit keeper = State.remember_local_chat_visit state ~sw:(Some sw) keeper in
+        Alcotest.(check bool) "unread workspace admits no visit" false (admit beta);
+        let local = identity base_path in
+        state.server_identity <- Some local;
+        state.workspace_identity <- Workspace_identity_match;
+        Alcotest.(check bool) "verified local visit is admitted" true (admit alpha);
+        let pending = match state.home_chat_visit with
+          | Some request -> request | None -> Alcotest.fail "missing local visit" in
+        let declined label =
+          Alcotest.(check bool) label false (admit beta);
+          Alcotest.(check bool) "earlier local request remains owned" true
+            (Option.exists (Visits.same_request pending) state.home_chat_visit);
+          match state.home_last_chat with
+          | Saving_chat name when Keeper_id.Keeper_name.equal name alpha -> ()
+          | No_chat_receipt | Saving_chat _ | Recorded_chat _ | Session_chat _
+          | Unconfirmed_chat _ | Unobserved_chat _ | Unreadable_chat_receipt _ ->
+              Alcotest.fail "foreign visit changed the local receipt" in
+        let remote = identity (base_path ^ "-remote") in
+        state.server_identity <- Some remote;
+        state.workspace_identity <- Workspace_identity_mismatch
+          { local_base_path=base_path; server_base_path=base_path ^ "-remote" };
+        declined "remote Keeper cannot update local Home";
+        (* A stale match flag alone is not enough: both canonical paths and
+           readiness must still be present in the current server reading. *)
+        state.workspace_identity <- Workspace_identity_match;
+        declined "a foreign reading cannot borrow a stale match";
+        state.server_identity <- Some {local with sid_masc_root = remote.sid_masc_root};
+        declined "a different MASC root is a different workspace";
+        state.server_identity <- Some {local with sid_state_ready = Some false};
+        declined "a starting server cannot authorize the write";
+        state.server_identity <- Some local;
+        state.workspace_identity <- Workspace_identity_match_unconfirmed "health failed";
+        declined "an unconfirmed local identity cannot authorize the write";
+        state.server_identity <- None;
+        state.workspace_identity <- Workspace_identity_unread;
+        declined "a lost remote identity cannot authorize the write";
+        (* A's submitted write may finish while B is on screen. Its receipt
+           still belongs to local Home, and B must not displace it. *)
+        state.server_identity <- Some remote;
+        state.workspace_identity <- Workspace_identity_mismatch
+          { local_base_path=base_path; server_base_path=base_path ^ "-remote" };
+        Visits.close state.home_chat_writer;
+        let completions = ref [] in
+        Visits.drain_completed state.home_chat_writer ~can_take:(fun () -> true)
+          ~apply:(fun completion ->
+            completions := completion :: !completions;
+            ignore (State.accept_chat_visit state completion));
+        Alcotest.(check int) "only A was admitted" 1 (List.length !completions);
+        (match state.home_last_chat with
+         | Recorded_chat name | Unconfirmed_chat {keeper=name;_}
+           when Keeper_id.Keeper_name.equal name alpha -> ()
+         | No_chat_receipt | Saving_chat _ | Recorded_chat _ | Session_chat _
+         | Unconfirmed_chat _ | Unobserved_chat _ | Unreadable_chat_receipt _ ->
+             Alcotest.fail "local visit did not settle for alpha while B was visible");
+        state.server_identity <- Some local;
+        state.workspace_identity <- Workspace_identity_match;
+        Visits.drain_completed state.home_chat_writer ~can_take:(fun () -> true)
+          ~apply:(fun completion -> completions := completion :: !completions);
+        Alcotest.(check int) "returning to A did not replay B" 1 (List.length !completions);
+        let read = Config.load ~base_path in
+        let opened = match read.opening with
+          | Ok (Config.Last (Some keeper)) -> Some (Keeper_id.Keeper_name.to_string keeper)
+          | Ok (Config.Overview | Config.Last None | Config.Keeper _) | Error _ -> None in
+        let stored = Result.to_option read.last_chat_keeper |> Option.join
+          |> Option.map Keeper_id.Keeper_name.to_string in
+        Alcotest.(check (option string)) "last opening is A" (Some "alpha") opened;
+        Alcotest.(check (option string)) "last chat is A" (Some "alpha") stored
+      )))
+  )
+
 let opening_cases =
   let parsed text = Config.opening_of_doc (doc_of text) in
   let name = Keeper_id.Keeper_name.to_string in
@@ -627,6 +731,8 @@ let opening_cases =
         match parsed "" with
         | Ok Config.Overview -> ()
         | _ -> Alcotest.fail "absent opening did not select Overview")
+  ; Alcotest.test_case "Home visits stay in their verified local workspace" `Quick
+      test_home_visit_stays_with_local_workspace
   ; Alcotest.test_case "overview ignores an unrelated Keeper name" `Quick (fun () ->
         match parsed "[tui]\nopening = \"overview\"\nopening_keeper = \"last\"\n" with
         | Ok Config.Overview -> ()

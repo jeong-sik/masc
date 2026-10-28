@@ -922,10 +922,10 @@ let open_message_for_keeper ?(return_to = Keeper_chat_return_detail)
         | Error reason ->
             add_event state "error" ("Could not remember chat target: " ^ reason)
         | Ok target ->
-            let request = Masc_tui_chat_visit.submit state.home_chat_writer
-                ~sw:(Eio_context.get_switch_opt ()) ~base_path:state.local_base_path target in
-            state.home_chat_visit <- Some request;
-            state.home_last_chat <- Saving_chat target));
+            if not (remember_local_chat_visit state
+                ~sw:(Eio_context.get_switch_opt ()) target) then
+              report_action state "system"
+                "Chat visit not saved to local Home: workspace is different or unverified"));
   state.msg_live <- live_for_keeper state keeper_name;
   state.msg_return <- return_to;
   state.keeper_message_focus <- Right_pane;

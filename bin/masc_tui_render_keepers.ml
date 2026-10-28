@@ -713,7 +713,11 @@ let render_keeper_list (state : state) =
   in
   let columns =
     Render_schedule.allocate_keeper_columns
-      ~runtime_visible:(state.keeper_list_layout <> Keeper_list_model.Grouped)
+      (* Compact and grouped views give the available row to the current
+         work. The detailed view keeps the explicit runtime column. *)
+      ~runtime_visible:(match state.keeper_list_layout with
+        | Keeper_list_model.Detailed -> true
+        | Keeper_list_model.Compact | Keeper_list_model.Grouped -> false)
       ~prioritize_runtime:has_failing_keeper ~inner_width:inner ~widest_runtime ()
   in
   box_line_styled buf cols ~style:(Theme.recede ()) (keeper_column_header columns);

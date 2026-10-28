@@ -97,6 +97,10 @@ let acting_pane_row_targets : Masc_tui_acting_pane.row_target array ref = ref [|
 
 let acting_pane_scroll_max = ref 0
 
+(* Context insertion changes the screen row for every Activity target below
+   it. Keep focus inside the pane on its stable header when that happens. *)
+let acting_pane_context_rows = ref 0
+
 (* Where each pane of the frame being drawn sits on the terminal. The surface
    ends set it, the render hands it out beside the frame, and the loop reads
    a drag against the copy the terminal accepted, never this one. *)
@@ -1033,6 +1037,7 @@ let recent_chunk_projection (state : state) =
 
 let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
   let module Pane = Masc_tui_acting_pane in
+  let selected = selected_keeper state in
   let pane_keeper (keeper : keeper) : Pane.keeper =
     let reading = keeper_reading state keeper in
     let health = Keeper_control.health reading in
@@ -1076,6 +1081,35 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
          still get current chunks on a miss, without changing their state. *)
       Masc_tui_acting.projection_chunks (recent_chunk_projection state)
   in
+  let keeper_context = match state.view, selected with
+    | Keepers Keeper_list, Some keeper ->
+        let workspace_ready =
+          state.workspace_identity = Workspace_identity_match
+          && server_authority_ready state in
+        let waiting =
+          if not workspace_ready then
+            Masc_tui_keeper_list_model.Waiting_unavailable
+          else match state.keeper_waiting_failure with
+            | Some _ -> Masc_tui_keeper_list_model.Waiting_unavailable
+            | None ->
+                (match List.find_opt (fun (row : Tui_decode.keeper_waiting_row) ->
+                  String.equal row.kwr_keeper_name keeper.k_name) state.keeper_waiting with
+                 | Some row -> Masc_tui_keeper_list_model.Waiting_observed row
+                 | None -> Masc_tui_keeper_list_model.Waiting_unobserved) in
+        let task_source = match state.local_keepers with
+          | Local_workspace_unread -> Pane.Task_source_unread
+          | Local_workspace_read -> Pane.Task_source_read
+          | Local_workspace_failed _ -> Pane.Task_source_failed in
+        let task = Pane.summarize_keeper_task ~workspace_ready ~source:task_source
+          ~metadata_failed:(Option.is_some state.keepers_error)
+          ~task_id:(Option.bind keeper.k_activity (fun activity -> activity.k_current_task_id)) in
+        Some Pane.{ keeper_name = keeper.k_name; task;
+          waiting; waiting_stale = Option.is_some state.keeper_turns_error }
+    | (Keepers Keeper_list | Keepers (Keeper_detail | Keeper_logs | Keeper_calls
+        | Keeper_message | Keeper_runtime_pick) | Overview | Acting | Metrics | Memory
+      | Lanes | Clients | Board | Approvals | Planning | Schedules | Verification
+      | Harness | Fusion | Repositories | Code | Changes | Connectors | Runtime
+      | Config | Resources | Tools | System_logs), (Some _ | None) -> None in
   { Pane.now = Unix.gettimeofday ()
   ; tab = state.acting_pane_tab
   ; scope =
@@ -1091,8 +1125,8 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
   ; keepers
   ; trace_unavailable = (Tui_decode.keeper_trace_projection state.keepers).unavailable
   ; keepers_error = state.keepers_error
-  ; selected =
-      Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state)
+  ; selected = Option.map (fun (keeper : keeper) -> keeper.k_name) selected
+  ; keeper_context
   ; approvals =
       (* Every kind of pending approval the Approvals surface lists, read to
          the two facts the pane states: whose, and for which tool. *)
@@ -1171,6 +1205,10 @@ let add_rows_beside_acting_pane (state : state) framed ~cols ~pane_rows lines =
       Masc_tui_acting_pane.lines ~rows:pane_rows ~cols:pane_cols
         ~scroll:state.acting_pane_scroll (acting_pane_input state)
     in
+    state.acting_pane_cursor <- Masc_tui_acting_pane.reconcile_context_cursor
+      ~previous_rows:!acting_pane_context_rows
+      ~current_rows:rendering.Masc_tui_acting_pane.context_rows state.acting_pane_cursor;
+    acting_pane_context_rows := rendering.Masc_tui_acting_pane.context_rows;
     acting_pane_row_targets := Array.of_list rendering.Masc_tui_acting_pane.targets;
     acting_pane_scroll_max := rendering.Masc_tui_acting_pane.scroll_max;
     let ground = Theme.side_pane_background () in
@@ -1187,6 +1225,7 @@ let add_rows_beside_acting_pane (state : state) framed ~cols ~pane_rows lines =
   else begin
     acting_pane_row_targets := [||];
     acting_pane_scroll_max := 0;
+    acting_pane_context_rows := 0;
     List.iter
       (fun line ->
          Buffer.add_string framed line;

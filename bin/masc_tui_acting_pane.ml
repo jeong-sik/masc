@@ -191,6 +191,61 @@ let next_call_order = function
   | Longest_first -> By_tool
   | By_tool -> Newest_first
 
+type task_source = Task_source_unread | Task_source_read | Task_source_failed
+type keeper_task =
+  | Task_unavailable
+  | Task_not_observed
+  | Task_refresh_failed
+  | Task_observed of { id : string; refresh_failed : bool }
+
+let summarize_keeper_task ~workspace_ready ~source ~metadata_failed ~task_id =
+  match workspace_ready, source, task_id with
+  | false, _, _ | true, Task_source_unread, _ -> Task_unavailable
+  | true, (Task_source_read | Task_source_failed), Some id ->
+      Task_observed { id; refresh_failed = metadata_failed || source = Task_source_failed }
+  | true, Task_source_failed, None -> Task_refresh_failed
+  | true, Task_source_read, None ->
+      if metadata_failed then Task_refresh_failed else Task_not_observed
+
+type keeper_context = {
+  keeper_name : string;
+  task : keeper_task;
+  waiting : Masc_tui_keeper_list_model.waiting_reading;
+  waiting_stale : bool;
+}
+
+type keeper_waiting_summary =
+  | Waiting_not_observed
+  | Waiting_read_unavailable
+  | Waiting_items of {
+      schedules : Reading.waiting_item list;
+      delegate_result_waiting : bool;
+      read_error : bool;
+    }
+
+let summarize_keeper_waiting context =
+  match context.waiting with
+  | Masc_tui_keeper_list_model.Waiting_unobserved when context.waiting_stale ->
+      Waiting_read_unavailable
+  | Masc_tui_keeper_list_model.Waiting_unobserved -> Waiting_not_observed
+  | Waiting_unavailable -> Waiting_read_unavailable
+  | Waiting_observed row when not (String.equal row.kwr_keeper_name context.keeper_name) ->
+      Waiting_read_unavailable
+  | Waiting_observed row ->
+      let schedules = List.filter
+        (fun (item : Reading.waiting_item) ->
+          item.kwi_source = Reading.Waiting_source_schedule_waiting)
+        row.kwr_waiting_on in
+      let delegate_result_waiting = List.exists
+        (fun (item : Reading.waiting_item) ->
+          item.kwi_wake_producer = Reading.Wake_keeper_delegate)
+        row.kwr_waiting_on in
+      let read_error = List.exists
+        (fun (item : Reading.waiting_item) ->
+          item.kwi_source = Reading.Waiting_source_read_error)
+        row.kwr_waiting_on in
+      Waiting_items { schedules; delegate_result_waiting; read_error }
+
 type input = {
   now : float;
   tab : tab;
@@ -200,6 +255,7 @@ type input = {
   trace_unavailable : (string * string) list;
   keepers_error : string option;
   selected : string option;
+  keeper_context : keeper_context option;
   approvals : approval list;
   chunks : Acting.chunk list;
   changes : changes;
@@ -228,7 +284,11 @@ type rendering = {
   rows : line list;
   targets : row_target list;
   scroll_max : int;
+  context_rows : int;
 }
+
+let reconcile_context_cursor ~previous_rows ~current_rows cursor =
+  if previous_rows = current_rows then cursor else Option.map (fun _ -> 0) cursor
 
 (* ── Text ──────────────────────────────────────────────────────────────── *)
 
@@ -1645,9 +1705,62 @@ let next_target_row ~(targets : row_target array) ~row ~step =
   in
   if step = 0 then None else walk (row + step)
 
+(* These are the roster's already observed waiting items, not a schedule
+   census. The two actions below open the selected Keeper's actual pages. *)
+let keeper_context_lines ~cols input =
+  let one tone text =
+    (fit_line ~cols (with_border [{ text; tone }]), Target_none) in
+  match input.scope, input.selected, input.keeper_context with
+  | Selected_only, Some selected, Some context
+    when String.equal selected context.keeper_name ->
+    let task = match context.task with
+      | Task_unavailable -> "task · unavailable"
+      | Task_not_observed -> "task · not observed"
+      | Task_refresh_failed -> "task refresh failed · not observed"
+      | Task_observed { id; refresh_failed = true } ->
+          "task refresh failed · last observed · " ^ Terminal_text.single_line id
+      | Task_observed { id; refresh_failed = false } ->
+          "task observed · " ^ Terminal_text.single_line id in
+    let schedule, detail, delegate = match summarize_keeper_waiting context with
+      | Waiting_not_observed ->
+          (one Dim "◷ waiting inventory not observed", one Dim "  —",
+           one Dim "↩ delegate result · not observed")
+      | Waiting_read_unavailable ->
+          (one Warn "◷ waiting inventory unavailable", one Dim "  —",
+           one Dim "↩ delegate result · unavailable")
+      | Waiting_items { schedules; delegate_result_waiting; read_error } ->
+          (* Partial inventory refreshes can retain a row from an older read. *)
+          (* The decision comes first so it survives the narrow pane; these
+             qualifiers remain after it without claiming current knowledge. *)
+          let suffix = (if context.waiting_stale then " · stale · read err" else " · last seen")
+            ^ (if read_error then " · partial" else "") in
+          let schedule, detail = match schedules with
+            | [] -> (one Dim ("◷ schedule unseen" ^ suffix), one Dim "  —")
+            | item :: _ ->
+                let clock = match item.kwi_due_at with
+                  | None -> "time unobserved"
+                  | Some due ->
+                      (match Layout.elapsed_text (abs_float (due -. input.now)) with
+                       | None -> "time unavailable"
+                       | Some span ->
+                           if due >= input.now then "due in " ^ span
+                           else "due " ^ span ^ " ago") in
+                ( one Info (Printf.sprintf "◷ %d schedule%s waiting%s"
+                    (List.length schedules) (if List.length schedules = 1 then "" else "s") suffix)
+                , one Plain ("  one item · " ^ clock ^ " · " ^ Terminal_text.single_line item.kwi_what) ) in
+          let delegate =
+            if delegate_result_waiting then one Info ("↩ delegate result waiting" ^ suffix)
+            else one Dim ("↩ delegate result unseen" ^ suffix) in
+          schedule, detail, delegate in
+    (* Keep a fixed-height context across refreshes, so an Activity target
+       does not move under the keyboard cursor as waiting items change. *)
+    [one Accent (Terminal_text.single_line selected ^ " · selected"); one Dim task]
+    @ [schedule; detail; delegate; one Dim "J schedules · K queued peers"]
+  | (Selected_only | Whole_fleet), (Some _ | None), (Some _ | None) -> []
+
 let lines ~rows ~cols ~scroll input =
   let rows = max 0 rows in
-  if rows = 0 then { rows = []; targets = []; scroll_max = 0 }
+  if rows = 0 then { rows = []; targets = []; scroll_max = 0; context_rows = 0 }
   else
     let header = (header_line ~cols input, Target_next_tab) in
     let fleet = match input.tab with
@@ -1660,7 +1773,11 @@ let lines ~rows ~cols ~scroll input =
         [ header; (fit_line ~cols (with_border [ { text = legend ~cols; tone = Dim } ]), Target_none) ]
       | Some _ | None -> [ header ]
     in
-    let below = rows - List.length headers in
+    let context = keeper_context_lines ~cols input in
+    (* The original Activity reading keeps room when the terminal is short. *)
+    let context = if rows - List.length headers - List.length context >= 3
+      then context else [] in
+    let below = rows - List.length headers - List.length context in
     let visible, scroll_max =
       if below <= 0 then [], 0
       else
@@ -1668,9 +1785,14 @@ let lines ~rows ~cols ~scroll input =
         | Some fleet -> fleet_lines ~below ~scroll fleet
         | None -> changes_lines ~cols ~below ~scroll input
     in
-    let drawn = headers @ List.map (materialize_row ~cols input) visible in
+    (* The table legend describes the Activity rows below, not the context. *)
+    let headings = match headers with
+      | header :: rest -> header :: (context @ rest)
+      | [] -> context in
+    let drawn = headings @ List.map (materialize_row ~cols input) visible in
     let padding =
       List.init (max 0 (rows - List.length drawn)) (fun _ -> (blank_line ~cols, Target_none))
     in
     let drawn = List.filteri (fun index _ -> index < rows) (drawn @ padding) in
-    { rows = List.map fst drawn; targets = List.map snd drawn; scroll_max }
+    { rows = List.map fst drawn; targets = List.map snd drawn; scroll_max;
+      context_rows = List.length context }

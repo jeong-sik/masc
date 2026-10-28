@@ -173,6 +173,42 @@ type call_order =
 val call_order_label : call_order -> string
 val next_call_order : call_order -> call_order
 
+type task_source = Task_source_unread | Task_source_read | Task_source_failed
+type keeper_task =
+  | Task_unavailable
+  | Task_not_observed
+  | Task_refresh_failed
+  | Task_observed of { id : string; refresh_failed : bool }
+
+val summarize_keeper_task :
+  workspace_ready:bool -> source:task_source -> metadata_failed:bool ->
+  task_id:string option -> keeper_task
+(** A failed refresh may retain an older task; unread or foreign workspace
+    metadata must not be described as an observed task. *)
+
+type keeper_context = {
+  keeper_name : string;
+  task : keeper_task;
+  waiting : Masc_tui_keeper_list_model.waiting_reading;
+  waiting_stale : bool;
+}
+(** Facts already held by the roster for its selected Keeper. A waiting
+    inventory is not a complete schedule or active delegation inventory. *)
+
+type keeper_waiting_summary =
+  | Waiting_not_observed
+  | Waiting_read_unavailable
+  | Waiting_items of {
+      schedules : Masc.Tui_decode.waiting_item list;
+      delegate_result_waiting : bool;
+      read_error : bool;
+    }
+
+val summarize_keeper_waiting : keeper_context -> keeper_waiting_summary
+(** Classify the exact Keeper's typed waiting inventory. A different Keeper's
+    row or a failed read is unavailable, not a known empty observation.
+    [read_error] says at least one source of that inventory was incomplete. *)
+
 type input = {
   now : float;
   tab : tab;
@@ -190,6 +226,8 @@ type input = {
   selected : string option;
       (** the keeper the cursor is on; on the Recent tab the most recently
           observed keeper stands in when there is none *)
+  keeper_context : keeper_context option;
+      (** Present beside the roster for the selected Keeper only. *)
   approvals : approval list;  (** pending, any keeper *)
   chunks : Masc_tui_acting.chunk list;
       (** Event-derived projection, newest first; all presentation inputs above
@@ -234,9 +272,14 @@ type rendering = {
   rows : line list;
   targets : row_target list;  (** one per row, in the same order *)
   scroll_max : int;
+  context_rows : int;
       (** the largest [scroll] that still shows content: zero when everything
           fits, so a wheel over a short pane moves nothing *)
 }
+
+val reconcile_context_cursor : previous_rows:int -> current_rows:int -> int option -> int option
+(** A context entering or leaving shifts Activity targets. Keep keyboard
+    focus in the pane and move it to its stable tab header. *)
 
 val next_target_row : targets:row_target array -> row:int -> step:int -> int option
 (** The row a keyboard cursor rests on next: from [row], stepping [step]

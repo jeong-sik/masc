@@ -398,6 +398,11 @@ module Router : sig
     ; path : string
     ; methods : Httpun.Method.t list
     ; handler : route_target
+    ; access : Route_access.t
+        (** What the registration says about who may call the route. The
+            registration functions in this module record
+            [Route_access.Unclassified]; [Server_route] records the kind it was
+            given. *)
     }
 
   type resolution =
@@ -415,6 +420,18 @@ module Router : sig
   val create : unit -> t
   val route_count : t -> int
   val routes : t -> route list
+
+  (** [register ~access ~kind ~path ~methods ~handler routes] adds a route and
+      records [access] on it. [Server_route] is the caller; it applies the
+      authentication wrapper that goes with [access] to [handler] first. *)
+  val register
+    :  access:Route_access.t
+    -> kind:route_kind
+    -> path:string
+    -> methods:Httpun.Method.t list
+    -> handler:route_target
+    -> t
+    -> t
 
   (** Generic add; prefer the typed wrappers below. *)
   val add

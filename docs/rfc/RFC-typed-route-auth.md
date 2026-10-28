@@ -71,36 +71,41 @@ HTTP/2는 라우터가 아니라 별도 `match`로 경로를 처리하고 `with_
 
 ### 3.1 인증 종류
 
-현재 래퍼와 하나씩 맞아요. 핸들러가 받는 값(서버 상태, 토큰 ID, 호출자)이 종류마다 달라서 GADT로 써요. 이름은 초안이에요.
+현재 래퍼와 하나씩 맞아요. 핸들러가 받는 값(서버 상태, 토큰 ID, 호출자)이 종류마다 달라서 GADT로 써요. 구현(A4a)에서는 두 모듈로 나뉘어요.
+
+- `Route_access.t`(`lib/route_access.ml`): 함수 타입이 없는 데이터예요. `Http_server_eio.Router.route`가 이것을 들고 있어서 핸들러를 실행하지 않고도 경로 표를 읽을 수 있어요.
+- `Server_route.auth`(`lib/server/server_route.ml`): 핸들러 타입을 나르는 GADT예요. 등록 함수가 이것을 받아 `Server_auth` 래퍼를 씌워요.
 
 ```ocaml
-type _ t =
-  | Always_public : handler t                                (* 엄격 설정에서도 열림 *)
-  | Public_read : state_handler t                            (* 기본은 열림, 엄격 설정에서는 read 인증 *)
-  | Read_auth : state_handler t
-  | Permission : Masc_domain.permission -> state_handler t
-  | Token_permission : Masc_domain.permission -> token_handler t
-  | Private_token_permission : Masc_domain.permission -> token_handler t
-  | Tool : { tool_name : string } -> state_handler t
-  | Tool_actor : { tool_name : string } -> actor_handler t
-  | Self_authenticated : self_authenticated_reason -> handler t
+type _ auth =
+  | Always_public : request_handler auth                     (* 엄격 설정에서도 열림 *)
+  | Public_read : state_handler auth                         (* 기본은 열림, 엄격 설정에서는 read 인증 *)
+  | Read_auth : state_handler auth
+  | Permission : Masc_domain.permission -> state_handler auth
+  | Token_permission : Masc_domain.permission -> token_handler auth
+  | Private_token_permission : Masc_domain.permission -> token_handler auth
+  | Tool : { tool_name : string } -> state_handler auth
+  | Tool_actor : { tool_name : string } -> actor_handler auth
+  | Self_authenticated : Route_access.self_authenticated_reason -> request_handler auth
 ```
 
 - `Always_public`은 `is_public_read_path`를 대신해요. 그 목록은 변환이 끝나면 지워요.
-- `Self_authenticated`는 핸들러가 직접 인증하는 경로예요. 위 래퍼 없음 43곳을 보면 사유 후보는 MCP 전송, OAuth 엔드포인트, WebSocket 업그레이드, browser lane, play 페이지예요. 사유는 닫힌 목록으로 두고 변환 도구가 센 뒤에 확정해요.
-- `with_canonical_loopback_host`는 단독으로 쓰이지 않고 `with_public_read`와 함께 `/dashboard` 페이지 3곳에만 나와요. 인증 종류가 아니라 호스트 검사라는 별도 축이라서, 등록 함수의 선택 인자(`?host:Loopback_only`)로 두어요.
+- `Self_authenticated`는 핸들러가 직접 인증하는 경로예요. 사유는 닫힌 목록이고, A4a에서는 A1 기준선과 코드로 확인한 셋(`Mcp_transport`, `Oauth_protocol`, `Websocket_upgrade`)만 있어요. 래퍼 없음 43곳을 결정표로 정하는 A4b에서 근거와 함께 사유를 더해요(후보는 browser lane, play 페이지예요).
+- `with_canonical_loopback_host`는 인증 종류가 아니라 호스트 검사라서 이 타입에 넣지 않아요. 그 래퍼는 `/dashboard` 페이지 3곳에서 `with_public_read`와 함께 쓰이고, `server_routes_http_routes_frontend.ml` 안의 지역 함수예요(`~port`를 받아요). 그 3곳을 어떻게 옮길지는 A4b에서 정하고, 호스트 검사가 인증 래퍼 앞에서 도는 순서가 응답을 바꾸지 않는지 A1 기준선으로 확인해요.
 
 ### 3.2 등록 함수
 
 ```ocaml
-val Server_route.get : 'h Route_auth.t -> string -> 'h -> routes -> routes
+val Server_route.get : 'h auth -> string -> 'h -> Router.t -> Router.t
 ```
 
-등록 함수가 종류에 맞는 `Server_auth` 래퍼를 씌워서 `Http_server_eio.Router`에 넣어요. 라우터의 `route` 레코드에는 핸들러 타입이 없는 사본(`access`)을 더해서 인벤토리가 읽게 해요. 의존 방향은 그대로예요. `access` 데이터는 라우터와 같은 라이브러리에, 래퍼를 잇는 코드는 server 쪽에 둬요.
+`get`, `post`, `add`, `prefix_get`, `prefix_post`, `prefix_put`, `prefix_delete`가 있어요. 코드에서 쓰이는 등록 함수만 만들었어요. 정확한 경로의 `put`, `delete`, `any`는 쓰는 곳이 없어서 없고, 쓰게 되면 그때 더해요. `ws_get`은 업그레이드 핸들러가 직접 인증하므로 종류를 받지 않고 항상 `Self_authenticated Websocket_upgrade`를 기록해요.
+
+등록 함수가 종류에 맞는 `Server_auth` 래퍼를 씌워서 `Http_server_eio.Router.register ~access`에 넣어요. 라우터의 `route` 레코드에는 `access : Route_access.t` 필드가 있고 인벤토리가 이것을 읽어요. 의존 방향은 그대로예요. `Route_access`는 라우터와 같은 라이브러리(`masc`)에, 래퍼를 잇는 `Server_route`는 `masc.server`에 있어요. 라우터의 옛 등록 함수(`Router.get` 등)는 `Route_access.Unclassified`를 기록하고, 마지막 층(A4d)에서 지워요.
 
 ### 3.3 HTTP/2
 
-H2 게이트웨이의 갈래도 같은 `Route_auth.t`를 써요. 같은 경로를 HTTP/1과 HTTP/2가 서로 다른 종류로 등록하면 시험이 실패해요. 한쪽에만 있는 경로는 시험 안에 사유와 함께 이름으로 적어요. 그 목록을 고치면 리뷰에서 보여요.
+H2 게이트웨이의 갈래도 같은 `Server_route.auth`를 써요. 같은 경로를 HTTP/1과 HTTP/2가 서로 다른 종류로 등록하면 시험이 실패해요. 한쪽에만 있는 경로는 시험 안에 사유와 함께 이름으로 적어요. 그 목록을 고치면 리뷰에서 보여요.
 
 ### 3.4 하지 않는 것
 

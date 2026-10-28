@@ -1,6 +1,7 @@
-(* Prints every route of the HTTP/1 [Router] as JSON: kind, path, methods and
-   whether the handler upgrades to WebSocket. The auth baseline probe reads it
-   so that the list of probed paths comes from the router, not from a copy. *)
+(* Prints every route of the HTTP/1 [Router] as JSON: kind, path, methods,
+   whether the handler upgrades to WebSocket, and the access the registration
+   recorded ([Route_access]). The auth baseline probe reads it so that the list
+   of probed paths comes from the router, not from a copy. *)
 
 module Http = Masc.Http_server_eio
 
@@ -20,6 +21,7 @@ let route_to_json (route : Http.Router.route) =
     ; "path", `String route.path
     ; "methods", `List (List.map (fun m -> `String (Httpun.Method.to_string m)) route.methods)
     ; "target", `String (target_to_string route.handler)
+    ; "access", Masc.Route_access.to_json route.access
     ]
 ;;
 

@@ -643,6 +643,7 @@ module Router = struct
     path: string;
     methods: Httpun.Method.t list;
     handler: route_target;
+    access: Route_access.t;
   }
 
   type resolution =
@@ -745,8 +746,8 @@ module Router = struct
           insert_prefix_route route method_routes.prefix_routes;
         insert_prefix_trie route method_routes.prefix_root
 
-  let add_kind kind ~path ~methods ~handler router =
-    let route = { kind; path; methods; handler } in
+  let add_kind kind ~access ~path ~methods ~handler router =
+    let route = { kind; path; methods; handler; access } in
     (match kind with
      | Exact ->
          Hashtbl.replace router.exact_paths path ();
@@ -772,8 +773,15 @@ module Router = struct
     ; route_count = router.route_count + 1
     }
 
+  (* The functions below record [Route_access.Unclassified]. They stay until the
+     last layer of the typed-route-auth stack moves every registration to
+     [Server_route] and deletes them (docs/rfc/RFC-typed-route-auth.md). *)
+  let register ~access ~kind ~path ~methods ~handler router =
+    add_kind kind ~access ~path ~methods ~handler router
+
   let add ~path ~methods ~handler router =
-    add_kind Exact ~path ~methods ~handler:(Plain handler) router
+    add_kind Exact ~access:Route_access.Unclassified ~path ~methods
+      ~handler:(Plain handler) router
 
   let get path handler routes =
     add ~path ~methods:[`GET] ~handler routes
@@ -788,21 +796,26 @@ module Router = struct
       receives the Gluten [upgrade] capability so it can drive the
       post-101 connection.  RFC-0281. *)
   let ws_get path handler router =
-    add_kind Exact ~path ~methods:[`GET] ~handler:(Ws handler) router
+    add_kind Exact ~access:Route_access.Unclassified ~path ~methods:[`GET]
+      ~handler:(Ws handler) router
 
   (** Match by prefix: path field is treated as a prefix, not exact match.
       The suffix (path after the prefix) is available via [Request.path]. *)
   let prefix_get prefix handler routes =
-    add_kind Prefix ~path:prefix ~methods:[`GET] ~handler:(Plain handler) routes
+    add_kind Prefix ~access:Route_access.Unclassified ~path:prefix
+      ~methods:[`GET] ~handler:(Plain handler) routes
 
   let prefix_post prefix handler routes =
-    add_kind Prefix ~path:prefix ~methods:[`POST] ~handler:(Plain handler) routes
+    add_kind Prefix ~access:Route_access.Unclassified ~path:prefix
+      ~methods:[`POST] ~handler:(Plain handler) routes
 
   let prefix_delete prefix handler routes =
-    add_kind Prefix ~path:prefix ~methods:[`DELETE] ~handler:(Plain handler) routes
+    add_kind Prefix ~access:Route_access.Unclassified ~path:prefix
+      ~methods:[`DELETE] ~handler:(Plain handler) routes
 
   let prefix_put prefix handler routes =
-    add_kind Prefix ~path:prefix ~methods:[`PUT] ~handler:(Plain handler) routes
+    add_kind Prefix ~access:Route_access.Unclassified ~path:prefix
+      ~methods:[`PUT] ~handler:(Plain handler) routes
 
   let resolve_prefix routes req_path =
     let path_len = String.length req_path in

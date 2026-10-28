@@ -261,7 +261,7 @@ let test_multi_worker_inventory () =
   let observation instance_id clients : I.observation =
     {instance_id;published={Masc.Browser_addon_observation.clients;
       client_rows=List.map (fun client -> Masc.Browser_addon_observation.publish_client client ~space_observation:None) clients;
-      automation=off;stagehand=off}} in
+      automation=off;stagehand=off;unavailable=[]}} in
   let ego={(client "1" Lane.Ego_task_space) with browser=Lane.Ego_lite} and firefox=client "2" Lane.Webdriver_bidi in
   let first=observation "first" [ego] and second=observation "second" [firefox] in
   let report ?(issues=[]) observations=I.to_json (I.build ~observations ~issues) in

@@ -110,9 +110,16 @@ durable pass 가 첫 턴 하나(`To_first_cut_point`)의 범위에서 typed 크�
 | 게시 | 끝에 단계들의 결정과 구멍으로 program 하나. gate 와 source lock 을 합친 program 에 맞게 다시 쓴다 | 기존 `publish` 의 gate journal·검증·복구를 그대로 쓴다. `settle_positions` 를 마지막 단계까지 미루는 모드를 더한다 |
 | 새로 만드는 것 | 메시지 capture, 단계 결과 보존, program 조립, 합친 gate 와 복구, 구멍 영수증 | 메시지 capture, 위치 미루기 모드, 구멍 영수증, "이번 턴의 다음 메시지" 판정 |
 | 위험 | 3.3·3.4 의 게시와 복구를 새로 짠다. 휘발성 계약(3.6의 5)을 그대로 옮겨야 한다 | 중간 단계 Memory 가 위치보다 앞서 보인다. crash 뒤 "이 턴의 어디까지 했나"를 기존 original 들의 목록에서 도출해야 한다. 관찰 합류 규칙이 단계마다 달라질 수 있다 |
-| 확인 못 한 것 | gate 가 program 한 개를 받는지 | 구멍이 Memory 에 어떻게 들어가는지(`committed_unread_messages` 와 영수증), 위치 미루기가 `receipt_state` 의 전제를 깨는지 |
+| 확인 못 한 것 | gate 가 program 한 개를 받는지 | (확인함) 구멍은 범위 영수증 필드라 마지막 커밋에만 실린다. 중간 단계의 정상 게시는 `receipt_state` 가 범위 전체 소비로 읽는 영수증을 남긴다 |
 
-판단은 아직 없다. 새로 만드는 양은 B 가 작아 보이지만, 위의 확인 못 한 두 가지(구멍의 저장 경로, `receipt_state` 전제)가 B 의 성립을 정한다. L3 구현 전에 이 둘을 코드로 확인하고 고른다.
+B 의 성립을 정하던 두 가지를 코드로 확인했다.
+
+- **구멍의 저장 경로.** `unread_messages` 는 `Keeper_memory_os_current.durable_range_id`·`official_range_id` 의 필드다. 이 둘은 "한 Memory 커밋이 소비한 범위"의 영수증이다. 구멍은 그 범위를 소비하는 커밋 한 번에만 실을 수 있다.
+- **`receipt_state` 전제.** `Keeper_librarian_durable_commit.receipt_state` 는 이 범위 영수증이 있으면 범위 전체가 Memory 에 반영됐다고 증명한다.
+
+그래서 B 의 중간 단계가 정상 게시를 하면 첫 단계가 범위 전체를 소비했다는 영수증을 남긴다. 영수증 의미가 깨지고, 영수증 없이 Memory 만 쓰는 새 커밋 종류가 따로 필요하다. 이 새 커밋 종류가 `settle_positions` 미루기보다 크다. B 는 A 보다 작지 않다.
+
+**A 로 간다.** 단계 결과는 단계 original 이 쥐고, 끝의 Memory 커밋 하나가 범위 영수증과 `unread_messages` 를 함께 싣는다. 아직 확인하지 못한 것은 하나다: gate journal 이 단계들의 결정을 합친 program 하나를 받는지. L3 은 단계 original 과 그 결과 보존까지만 하고, 이 질문은 L4(게시) 전에 코드로 확인한다.
 
 ## 4. 다른 안
 

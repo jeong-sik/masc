@@ -613,6 +613,12 @@ let is_safe_asset_relative_path rel =
       && seg <> "..")
     segments
 
+let is_public_asset_relative_path rel =
+  is_safe_asset_relative_path rel
+  && match String.split_on_char '/' rel with
+     | "published-artifacts" :: _ -> false
+     | _ :: _ | [] -> true
+
 module For_testing = struct
   let surface_status_json = surface_status_json_for_selection
   let select_installed_authority = select_installed_authority

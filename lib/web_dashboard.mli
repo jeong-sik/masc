@@ -32,6 +32,10 @@ val etag : unit -> string
     Rejects absolute paths, parent traversal, and empty segments. *)
 val is_safe_asset_relative_path : string -> bool
 
+(** Validate a public dashboard asset path. Published report snapshots are not
+    static assets: their access is decided by the live artifact API. *)
+val is_public_asset_relative_path : string -> bool
+
 type asset_load_error =
   | Asset_binding_invalid of Build_identity.dashboard_asset_invalid_reason
   | Asset_installed_invalid of Installed_dashboard.error

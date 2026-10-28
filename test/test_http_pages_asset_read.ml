@@ -280,6 +280,27 @@ let test_dashboard_static_read_error_statuses () =
       [ "HTTP/1", h1_body; "HTTP/2", h2_body ])
 ;;
 
+let test_report_snapshots_are_not_public_assets () =
+  with_dashboard_asset_tree (fun asset_dir ->
+    let snapshots = Filename.concat asset_dir "published-artifacts" in
+    Unix.mkdir snapshots 0o755;
+    let name = "artifact-0123456789abcdef0123456789abcdef-r1.json" in
+    Out_channel.with_open_bin (Filename.concat snapshots name)
+      (fun oc -> Out_channel.output_string oc "private snapshot");
+    Out_channel.with_open_bin (Filename.concat asset_dir "bundle.js")
+      (fun oc -> Out_channel.output_string oc "dashboard asset");
+    let snapshot_path = "/dashboard/assets/published-artifacts/" ^ name in
+    List.iter (fun (protocol, request) ->
+      let status, body = request snapshot_path in
+      check int (protocol ^ " refuses report snapshot") 404 status;
+      check bool (protocol ^ " does not return snapshot bytes") false
+        (String_util.contains_substring body "private snapshot");
+      let status, body = request "/dashboard/assets/bundle.js" in
+      check int (protocol ^ " still serves regular assets") 200 status;
+      check string (protocol ^ " returns the asset") "dashboard asset" body)
+      [ "HTTP/1", http1_dashboard_asset_response; "HTTP/2", http2_dashboard_asset_response ])
+;;
+
 let test_with_env_restores_missing_env_as_unset () =
   let name = "MASC_HTTP_PAGES_TEST_RESTORE_ENV" in
   unsetenv name;
@@ -304,6 +325,10 @@ let () =
             "H1/H2 static asset read error -> 503"
             `Quick
             test_dashboard_static_read_error_statuses
+        ; test_case
+            "H1/H2 refuse static report snapshots"
+            `Quick
+            test_report_snapshots_are_not_public_assets
         ] )
     ; ( "dashboard_etag"
       , [ test_case "body content hash" `Quick test_dashboard_etag_of_body_content_hash

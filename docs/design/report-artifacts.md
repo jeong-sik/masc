@@ -119,6 +119,10 @@ that a Keeper is currently viewing or editing a document.
   read-only sharing only when external sharing is enabled for that artifact via
   `POST /api/v1/published-artifact-shares` (`{"id": "<id>", "shared": true|false}`),
   while still validating any presented token. Responses are private and uncached.
+  The Dashboard does not substitute a static report snapshot when the live API
+  refuses a read; the static asset route also rejects its report-snapshot
+  namespace. Previously downloaded or independently copied content remains
+  outside the server's control after sharing is revoked.
 - `keeper_artifact_publish`: the same store operation using the Keeper's own
   identity. Publication is non-terminal: the Keeper can continue and report its
   durable link. No automatic duplicate Board/chat post is sent by the tool.

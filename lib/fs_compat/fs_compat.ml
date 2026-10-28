@@ -1539,25 +1539,32 @@ let load_owned_regular_file_range_with_sha256_blocking
 external open_owned_inventory_entry : Unix.file_descr -> string -> Unix.file_descr
   = "caml_masc_owned_entry_open"
 
-let with_owned_inventory_entry ?owner_uid ?(single_link = false) ?(may_remove = false) root path fn =
+let with_owned_inventory_entry ?owner_uid ?(single_link = false) ?(may_remove = false)
+    ?excluded_stat root path fn =
   let ownership_root = root.inventory_path in
   match owned_directory_paths ~ownership_root (Filename.dirname path) with
   | Error rejection -> owned_file_error (Ownership_boundary_rejected {path; rejection})
   | Ok descendants ->
     let descriptors = ref [] in
     let opened = ref [] in
-    let check_owner path (stat : Unix.stats) = match owner_uid with
-      | None -> ()
-      | Some expected_uid ->
-        if stat.st_uid <> expected_uid then
-          raise (Owned_directory_read_rejected (Owned_path_owner_mismatch
-            {path;expected_uid;actual_uid=stat.st_uid}));
-        if stat.st_perm land 0o022 <> 0 then
-          raise (Owned_directory_read_rejected (Owned_path_writable_by_others
-            {path;permissions=stat.st_perm land 0o7777}));
-        if single_link && stat.st_kind = Unix.S_REG && stat.st_nlink <> 1 then
-          raise (Owned_directory_read_rejected (Owned_file_operation_failed
-            {path;operation=Inspect_descriptor;cause=Sys_error "owned record has multiple hard links"})) in
+    let check_owner path (stat : Unix.stats) =
+      (match owner_uid with
+       | None -> ()
+       | Some expected_uid ->
+         if stat.st_uid <> expected_uid then
+           raise (Owned_directory_read_rejected (Owned_path_owner_mismatch
+             {path;expected_uid;actual_uid=stat.st_uid}));
+         if stat.st_perm land 0o022 <> 0 then
+           raise (Owned_directory_read_rejected (Owned_path_writable_by_others
+             {path;permissions=stat.st_perm land 0o7777})));
+      if single_link && stat.st_kind = Unix.S_REG && stat.st_nlink <> 1 then
+        raise (Owned_directory_read_rejected (Owned_file_operation_failed
+          {path;operation=Inspect_descriptor;cause=Sys_error "owned record has multiple hard links"})) in
+    let check_excluded path stat = match excluded_stat with
+      | Some excluded when same_file_identity excluded stat ->
+        raise (Owned_directory_read_rejected (Owned_file_operation_failed
+          {path;operation=Inspect_descriptor;cause=Sys_error "excluded directory"}))
+      | Some _ | None -> () in
     let current_entry path fd initial =
       let observed = Unix.lstat path in
       check_owner path observed;
@@ -1580,17 +1587,20 @@ let with_owned_inventory_entry ?owner_uid ?(single_link = false) ?(may_remove = 
         then owned_file_error (Filesystem_identity_changed {path})
         else begin
           check_owner ownership_root (Unix.fstat root.inventory_fd);
+          check_excluded ownership_root root.inventory_stat;
           let parent = List.fold_left (fun parent directory ->
             let fd = open_owned_directory_child parent (Filename.basename directory) in
             descriptors := fd :: !descriptors;
             let stat = Unix.fstat fd in
             check_owner directory stat;
+            check_excluded directory stat;
             opened := (directory, fd, stat) :: !opened;
             fd) root.inventory_fd descendants in
           let fd = open_owned_inventory_entry parent (Filename.basename path) in
           descriptors := fd :: !descriptors;
           let stat = Unix.fstat fd in
           check_owner path stat;
+          check_excluded path stat;
           let ancestors_current () = inventory_root_current root
             && current_entry ownership_root root.inventory_fd root.inventory_stat
             && List.for_all (fun (directory, fd, stat) -> current_entry directory fd stat) !opened in
@@ -1634,6 +1644,61 @@ let owned_inventory_path root relative = List.fold_left Filename.concat root.inv
 let owned_inventory_entry_kind root relative =
   with_owned_inventory_entry root (owned_inventory_path root relative)
     (fun _fd stat _parent -> Ok stat.Unix.st_kind)
+;;
+
+let load_single_link_regular_file_beneath ~root ?excluded_directory relative =
+  let missing error = match error.close_failure with
+    | Some _ -> false
+    | None ->
+      (match error.failure with
+       | Owned_file_operation_failed {cause;_} ->
+         (match cause with Unix.Unix_error (code, _, _) -> code = Unix.ENOENT | _ -> false)
+       | Ownership_boundary_rejected _ | Path_is_not_regular_file _
+       | Filesystem_identity_changed _ | Owned_path_owner_mismatch _
+       | Owned_path_writable_by_others _ -> false) in
+  let read () =
+    with_owned_inventory_root root (fun inventory_root ->
+      let path = owned_inventory_path inventory_root relative in
+      let read_entry ?excluded_stat () =
+        match with_owned_inventory_entry ~single_link:true ?excluded_stat inventory_root path
+          (fun fd stat _parent ->
+            if stat.Unix.st_kind <> Unix.S_REG then
+              owned_file_error (Path_is_not_regular_file {path;kind=stat.st_kind})
+            else Result.map Option.some (read_exact_file_descriptor ~path fd stat.st_size)) with
+        | Error error when missing error -> Ok None
+        | Error error -> Error error
+        | Ok body -> Ok body in
+      match excluded_directory with
+      | None -> read_entry ()
+      | Some excluded ->
+        let excluded_path = owned_inventory_path inventory_root excluded in
+        let bound = ref false in
+        (match with_owned_inventory_entry inventory_root excluded_path
+          (fun _fd stat _parent ->
+            bound := true;
+            if stat.Unix.st_kind <> Unix.S_DIR then
+              owned_file_operation_error ~path:excluded_path Inspect_descriptor
+                (Sys_error "excluded path is not a directory")
+            else read_entry ~excluded_stat:stat ()) with
+         | Error error when not !bound && missing error ->
+           let result = read_entry () in
+           (match result with
+            | Error _ -> result
+            | Ok _ ->
+              (match with_owned_inventory_entry inventory_root excluded_path
+                (fun _fd _stat _parent -> Ok ()) with
+               | Error error when missing error -> result
+               | Error error -> Error error
+               | Ok () -> owned_file_error (Filesystem_identity_changed {path=excluded_path})))
+         | Error error -> Error error
+         | Ok body -> Ok body))
+  in
+  match execution_context (), get_fs_opt () with
+  | Non_eio, (Some _ | None) | Eio_fiber, None -> read ()
+  | Eio_fiber, Some _ ->
+    let result = Eio_unix.run_in_systhread ~label:"fs-compat-read-beneath" read in
+    Eio.Fiber.check ();
+    result
 ;;
 
 let with_owned_inventory_regular_file ~owner_uid root relative fn =

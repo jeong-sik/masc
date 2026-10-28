@@ -65,17 +65,13 @@ describe('published artifact native wire contract', () => {
     await expect(fetchPublishedArtifacts()).rejects.toThrow()
   })
 
-  it('falls back to the static published artifact snapshot when unauthenticated shared read returns 401', async () => {
+  it('does not bypass a refused artifact read with a static snapshot', async () => {
     const artifact = nativeInventory.artifacts[0]!
-    const payload = { artifact, content: '# 공유 보고서', revisions: [artifact], shared: true }
-    vi.mocked(get)
-      .mockRejectedValueOnce(Object.assign(new Error('Unauthorized'), { status: 401 }))
-      .mockResolvedValueOnce(payload)
-    const document = await fetchPublishedArtifact(artifact.id, '2')
-    expect(document.content).toBe('# 공유 보고서')
-    expect(document.shared).toBe(true)
-    expect(get).toHaveBeenNthCalledWith(1, `/api/v1/published-artifacts/${artifact.id}?revision=2`, {})
-    expect(get).toHaveBeenNthCalledWith(2, `/dashboard/assets/published-artifacts/${artifact.id}-r2.json`, {})
+    const refused = Object.assign(new Error('Unauthorized'), { status: 401 })
+    vi.mocked(get).mockRejectedValueOnce(refused)
+    await expect(fetchPublishedArtifact(artifact.id, '2')).rejects.toBe(refused)
+    expect(get).toHaveBeenCalledTimes(1)
+    expect(get).toHaveBeenCalledWith(`/api/v1/published-artifacts/${artifact.id}?revision=2`, {})
   })
 
   it('toggles per-artifact external sharing via /api/v1/published-artifact-shares', async () => {

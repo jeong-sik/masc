@@ -193,7 +193,7 @@ let add_routes ?sw ?clock ~port router =
          let req_path = Http.Request.path request in
          let prefix_len = String.length "/dashboard/assets/" in
          let filename = String.sub req_path prefix_len (String.length req_path - prefix_len) in
-         if Web_dashboard.is_safe_asset_relative_path filename then
+         if Web_dashboard.is_public_asset_relative_path filename then
            serve_dashboard_static ("assets/" ^ filename) request reqd
          else
            Http.Response.not_found reqd)

@@ -252,6 +252,19 @@ val owned_inventory_entry_kind
   : owned_inventory_root -> owned_relative_path
   -> (Unix.file_kind, owned_regular_file_read_error) result
 
+val load_single_link_regular_file_beneath
+  : root:string -> ?excluded_directory:owned_relative_path -> owned_relative_path
+  -> (string option, owned_regular_file_read_error) result
+(** Read a regular file through held, no-follow directory and file descriptors
+    below [root]. Every leaf must have exactly one hard link. When supplied,
+    [excluded_directory] names a directory beneath the root whose descriptor
+    identity no component of the requested path may match; an absent excluded
+    directory is allowed. An invalid or unreadable excluded directory fails
+    closed. Unlike owned mutation helpers, this read does not require files
+    to belong to the process UID. [None] means the entry was absent or vanished
+    during the read; other failures remain explicit. When the Eio filesystem is
+    active in a fiber, the whole blocking scope runs in a system thread. *)
+
 val with_owned_inventory_regular_file
   : owner_uid:int -> owned_inventory_root -> owned_relative_path
   -> (file:Unix.file_descr -> parent:Unix.file_descr -> stat:Unix.stats -> 'a)

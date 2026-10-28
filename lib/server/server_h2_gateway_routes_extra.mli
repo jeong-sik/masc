@@ -74,7 +74,7 @@ val dispatch :
       (application/javascript).
     - [GET /dashboard/assets/<filename>] — dashboard SPA assets.
       Path-traversal guard via
-      {!Web_dashboard.is_safe_asset_relative_path} (rejects
+      {!Web_dashboard.is_public_asset_relative_path} (rejects
       filenames with [..] / leading slash / etc).  zstd and gzip
       compression negotiated for [.js] / [.css] / [.svg] runs on the
       CPU pool, with response writes remaining on the request fiber.

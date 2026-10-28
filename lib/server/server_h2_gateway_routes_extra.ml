@@ -240,7 +240,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
     when String.starts_with ~prefix:"/dashboard/assets/" p
          && String.length p > 18 ->
       let filename = String.sub p 18 (String.length p - 18) in
-      if not (Web_dashboard.is_safe_asset_relative_path filename) then begin
+      if not (Web_dashboard.is_public_asset_relative_path filename) then begin
         h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found;
         true
       end

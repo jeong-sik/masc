@@ -217,13 +217,18 @@ let load_dashboard_asset_for_selection installed relative_path =
     (match assets_root () with
      | None -> Error (Asset_exact_read_failed "dashboard asset root unavailable")
      | Some root ->
-       let path = Filename.concat (Filename.concat root "dashboard") relative_path in
-       if not (Sys.file_exists path)
+       if String.contains relative_path '\\' || String.contains relative_path '\000'
        then Error Asset_not_manifested
-       else
-         (try Ok (Fs_compat.load_file path) with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn -> Error (Asset_exact_read_failed (Printexc.to_string exn))))
+       else match Fs_compat.owned_relative_path (String.split_on_char '/' relative_path),
+                  Fs_compat.owned_relative_path ["assets"; "published-artifacts"] with
+       | Error _, (Ok _ | Error _) | Ok _, Error _ -> Error Asset_not_manifested
+       | Ok relative, Ok excluded_directory ->
+         (match Fs_compat.load_single_link_regular_file_beneath
+             ~root:(Filename.concat root "dashboard") ~excluded_directory relative with
+          | Ok (Some body) -> Ok body
+          | Ok None -> Error Asset_not_manifested
+          | Error error ->
+            Error (Asset_exact_read_failed (Fs_compat.owned_regular_file_read_error_to_string error))))
   | Build_identity.Dashboard_assets_invalid reason ->
     Error (Asset_binding_invalid reason)
   | Build_identity.Dashboard_assets_unavailable ->
@@ -612,6 +617,29 @@ let is_safe_asset_relative_path rel =
       && seg <> "."
       && seg <> "..")
     segments
+
+let public_asset_component component =
+  let folded = Buffer.create (String.length component) in
+  let rec add offset =
+    if offset = String.length component then
+      not (String.equal (Buffer.contents folded) "published-artifacts")
+    else
+      let decoded = String.get_utf_8_uchar component offset in
+      if not (Uchar.utf_decode_is_valid decoded) then false
+      else begin
+        let scalar = Uchar.utf_decode_uchar decoded in
+        (match Uucp.Case.Nfkc_fold.fold scalar with
+         | `Self -> Buffer.add_utf_8_uchar folded scalar
+         | `Uchars scalars -> List.iter (Buffer.add_utf_8_uchar folded) scalars);
+        add (offset + Uchar.utf_decode_length decoded)
+      end in
+  add 0
+
+let is_public_asset_relative_path rel =
+  is_safe_asset_relative_path rel
+  && match String.split_on_char '/' rel with
+     | first :: _ -> public_asset_component first
+     | [] -> false
 
 module For_testing = struct
   let surface_status_json = surface_status_json_for_selection

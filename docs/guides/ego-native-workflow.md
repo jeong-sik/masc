@@ -171,3 +171,22 @@ handoff, reclaim a user-held Space, or clear uncertain input release. A handed-o
 Space is refused before the wait; the existing explicit operator-confirmation
 and same-Space `take_over` flow still applies. Subsequent commands recheck normal
 ownership and input state. Keeper activity names the Space wait separately.
+
+## Dated Space metadata in MASC
+
+`BrowserAct` with `action: "space_status"`, `lane: "live"` and the exact
+observed `clientId` refreshes native metadata for the original numeric Space.
+It uses `listTaskSpaces`, without constructing a TaskSpace, navigating a Page
+or taking control. A missing Space is an error; no replacement is created.
+
+The TUI Browser Lane selection and selected connection show the last SDK Space
+name, raw ownership value and SDK observation time. This is separate from the
+attachment name and caller activity. Rendering reads the published cache and
+does not refresh Ego. A null publication is explicitly unobserved; failed
+connection refreshes retain the dated value alongside the failure. A value
+bound to a different numeric Space is rejected.
+
+This display is not proof of current control, a visible browser window or
+login completion, and never authorizes input or takeover. Source/component
+checks cover decoding and refresh ownership; installed and rendered TUI
+behavior remain unverified.

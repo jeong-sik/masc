@@ -23,24 +23,61 @@ let browser_lane_source_hint view =
        | (Located _ | Invalid _) as source ->
            Some (Masc.Browser_source_context.label source))
 
-let browser_lane_fixed_rows view =
+(* Project the selected connection's current metadata and activity together, so
+   drawing and available-room calculations consume the same ephemeral rows. *)
+let browser_lane_connection_rows (view : Browser_lane_view.t) =
+  let selected = match view.selected_client with
+    | None -> []
+    | Some (client : Browser_lane_view.client) ->
+        let metadata = Option.to_list (Option.map (fun row -> Theme.recede (), "  " ^ row)
+          (Browser_lane_view.space_observation_row client)) in
+        let pending = List.map (fun (work : Browser_lane.interaction_activity) ->
+          let phase = match work.phase with
+            | Browser_lane.Interaction_queued -> "queued"
+            | Browser_lane.Interaction_running -> "working" in
+          Theme.info (), "  Agent "
+            ^ Terminal_text.single_line (Option.value work.actor ~default:"MASC") ^ " · " ^ phase
+            ^ " · " ^ Terminal_text.single_line work.action
+            ^ (match work.tab_id with Some id -> " · tab " ^ string_of_int id | None -> " · space")
+            ^ " (at last connection read)") client.interactions in
+        let settled = List.map (fun (settled : Browser_lane.settled_activity) ->
+          let work=settled.work in
+          let outcome,style=match settled.outcome with
+            | Browser_lane.Activity_returned -> "returned",Theme.recede ()
+            | Activity_refused -> "not performed",Theme.warn ()
+            | Activity_partial -> "partly performed",Theme.warn ()
+            | Activity_unknown -> "outcome unknown",Theme.warn () in
+          style, "  Last · "
+            ^ Terminal_text.single_line (Option.value work.actor ~default:"MASC")
+            ^ " · " ^ Terminal_text.single_line work.action ^ " · " ^ outcome
+            ^ (match work.tab_id with Some id -> " · tab " ^ string_of_int id | None -> " · space"))
+          client.last_activities in
+        metadata @ pending @ settled in
+  selected @ Option.to_list (Option.map (fun detail -> Theme.warn (),
+    "  Activity refresh failed · " ^ Terminal_text.single_line detail) view.activity_error)
+
+let browser_lane_fixed_rows ~connection_rows view =
   (* Status, selection, tab, URL, divider and text position are always drawn.
      A source hint contributes a row only when the selected node has one, and
-     a refused gesture its rows until the next input. *)
+     a refused gesture its rows until the next input. Connection observations,
+     pending/settled activities and refresh failures take their projected rows. *)
   6 + (if Option.is_some (browser_lane_source_hint view) then 1 else 0)
   + List.length (Browser_lane_view.unserved_rows view)
+  + List.length connection_rows
 
 (* The picker's rows besides its choices and what an empty connection list
    says: the status row, the heading and the divider above the choices, and
-   the detail row for the highlighted choice below them. *)
-let browser_picker_frame_rows = 4
+   the detail row for the highlighted choice below them, plus the same
+   connection rows drawn before the picker. *)
+let browser_picker_frame_rows connection_rows = 4 + List.length connection_rows
 
 (* The cells a BiDi host row has behind the surface's two-cell indent. *)
 let browser_host_row_cells ~cols = max 1 (framed_inner_width cols - 2)
 
 let browser_lane_visible_rows (state : state) ~terminal_rows view =
   let body_rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  max 0 (framed_content_height ~rows:body_rows - browser_lane_fixed_rows view)
+  let connection_rows = browser_lane_connection_rows view in
+  max 0 (framed_content_height ~rows:body_rows - browser_lane_fixed_rows ~connection_rows view)
 
 let browser_lane_scroll_limit state ~terminal_rows ~cols view =
   let room = browser_lane_visible_rows state ~terminal_rows view in
@@ -61,6 +98,9 @@ let browser_lane_selection_scroll state ~terminal_rows ~cols view =
 let render_browser_lane (state : state) (view : Browser_lane_view.t) =
   let open Browser_lane_view in
   let terminal_rows, cols = get_terminal_size () in
+  let connection_rows = browser_lane_connection_rows view in
+  let fixed_rows = browser_lane_fixed_rows ~connection_rows view in
+  let picker_frame_rows = browser_picker_frame_rows connection_rows in
   let read_status = Browser_lane_view.read_status view in
   let read_style = match read_status with
     | Read_ok -> Theme.ok ()
@@ -165,30 +205,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       (* The global coordinator status is not the result of the browser HTTP
          request. Keep it labeled, including the existing workspace warning. *)
       c.push (coordinator_status_row state ~style status);
-      Option.iter (fun (client : Browser_lane_view.client) ->
-        List.iter (fun (work : Browser_lane.interaction_activity) ->
-          let phase = match work.phase with
-            | Browser_lane.Interaction_queued -> "queued"
-            | Browser_lane.Interaction_running -> "working" in
-          c.push_styled ~style:(Theme.info ()) ("  Agent "
-            ^ Terminal_text.single_line (Option.value work.actor ~default:"MASC") ^ " · " ^ phase
-            ^ " · " ^ Terminal_text.single_line work.action
-            ^ (match work.tab_id with Some id -> " · tab " ^ string_of_int id | None -> " · space")
-            ^ " (at last connection read)")) client.interactions;
-        List.iter (fun (settled : Browser_lane.settled_activity) ->
-          let work=settled.work in
-          let outcome,style=match settled.outcome with
-            | Browser_lane.Activity_returned -> "returned",Theme.recede ()
-            | Activity_refused -> "not performed",Theme.warn ()
-            | Activity_partial -> "partly performed",Theme.warn ()
-            | Activity_unknown -> "outcome unknown",Theme.warn () in
-          c.push_styled ~style ("  Last · "
-            ^ Terminal_text.single_line (Option.value work.actor ~default:"MASC")
-            ^ " · " ^ Terminal_text.single_line work.action ^ " · " ^ outcome
-            ^ (match work.tab_id with Some id -> " · tab " ^ string_of_int id | None -> " · space")))
-          client.last_activities) view.selected_client;
-      Option.iter (fun detail -> c.push_styled ~style:(Theme.warn ())
-        ("  Activity refresh failed · " ^ Terminal_text.single_line detail)) view.activity_error;
+      List.iter (fun (style, row) -> c.push_styled ~style row) connection_rows;
       match view.client_picker with
       | Some cursor ->
           c.push_styled ~style:(Theme.info ()) "  Choose browser · separate sessions do not share login";
@@ -213,7 +230,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
           let reports_a_host = Browser_lane_view.host_rows_report_a_host view in
           let room =
             Browser_lane_view.picker_choice_rows
-              ~rows:(budget - browser_picker_frame_rows - List.length (Option.to_list empty_line))
+              ~rows:(budget - picker_frame_rows - List.length (Option.to_list empty_line))
               ~choices:(List.length choices)
               ~below:(if reports_a_host
                       then List.length host_rows + List.length extension_rows else 0) in
@@ -226,10 +243,11 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
               else c.push_styled ~style:Ansi.reset line);
           (* One row whatever the choice, so the rows below do not move with
              the cursor. *)
-          c.push_styled ~style:(Theme.recede ())
-            ("  " ^ Option.value ~default:""
-               (if view.advanced_choices then Option.bind (List.nth_opt choices cursor) browser_choice_detail
-                else None));
+          let choice = List.nth_opt choices cursor in
+          let details = List.filter_map Fun.id
+            [Option.bind choice browser_choice_observation;
+             (if view.advanced_choices then Option.bind choice browser_choice_detail else None)] in
+          c.push_styled ~style:(Theme.recede ()) ("  " ^ String.concat " · " details);
           Option.iter (c.push_styled ~style:(Theme.recede ())) empty_line;
           (* A terminal too short for everything loses rows from the end.
              With no host yet, the host's rows only say how one is started:
@@ -244,7 +262,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
           let draw_extension () =
             List.iter (fun (style, row) -> c.push_styled ~style row) extension_rows in
           let above =
-            browser_picker_frame_rows + min room (List.length choices)
+            picker_frame_rows + min room (List.length choices)
             + List.length (Option.to_list empty_line) in
           let extension = List.length extension_rows in
           if not reports_a_host then (
@@ -328,7 +346,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       c.push_divider ();
       let lines = browser_lane_rows ~cols view in
       let total = Browser_lane_layout.count lines in
-      let room = max 0 (budget - browser_lane_fixed_rows view) in
+      let room = max 0 (budget - fixed_rows) in
       let max_scroll = max 0 (total - room) in
       let scroll = min max_scroll view.scroll in
       (* Read the window out of the retained array. [List.filteri] walked every
